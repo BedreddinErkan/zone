@@ -1,0 +1,53 @@
+{
+  "summary": "Task: add patch endpoint for updating treatment timeline entry\nMode: preview\nIntent action: update\nIntent resource kind: nested_resource\nIntent scope: single_item\nParent resource: treatment\nNested resource: timeline\nRelevant files found: 4\nConfidence score: 73/100\nDecision: preview_only",
+  "intent": {
+    "rawTask": "add patch endpoint for updating treatment timeline entry",
+    "operation": "update",
+    "target": "treatment",
+    "scope": "single_item",
+    "nestedTarget": "timeline",
+    "confidence": "high"
+  },
+  "schema": {
+    "summary": "Intent action: update Intent resource kind: nested_resource Intent scope: single_item Parent resource: treatment Nested resource: timeline No schema snapshot available. Detected DB client: unknown Detected response shape: unknown Detected storage kind: unknown Storage evidence: Could not confidently determine storage type.",
+    "entities": [
+      "treatment",
+      "timeline"
+    ],
+    "relations": [],
+    "confidence": "medium"
+  },
+  "storage": {
+    "primaryStorage": "unknown",
+    "detectedClients": [],
+    "confidence": "low",
+    "reasoning": [
+      "Could not confidently determine storage type.",
+      "Detected resource storage kind: unknown"
+    ]
+  },
+  "validation": {
+    "patch": [],
+    "schema": [
+      {
+        "code": "SCHEMA_VALIDATION_WARNING",
+        "message": "No schema snapshot loaded. Schema-level patch validation skipped.",
+        "severity": "warning"
+      }
+    ]
+  },
+  "decision": {
+    "mode": "preview",
+    "confidence": 73,
+    "reason": "Warnings detected. Manual review is recommended before apply."
+  },
+  "notes": {
+    "execution": [],
+    "assumptions": [
+      "Storage detection was inferred with limited confidence."
+    ],
+    "followUps": [
+      "Review the patch preview before applying changes."
+    ]
+  }
+}
