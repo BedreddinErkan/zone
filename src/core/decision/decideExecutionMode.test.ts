@@ -1,180 +1,275 @@
 import { describe, expect, it } from "vitest";
-import { decideExecutionMode } from "../runFeatureAgent";
-import type { ConfidenceBreakdown, ValidationIssue, ValidatedSuggestedFile } from "../../types/agent";
-
-function makeConfidence(finalScore: number): ConfidenceBreakdown {
-  return {
-    intentClarity: 80,
-    schemaCertainty: 80,
-    storageCertainty: 80,
-    patchValidationHealth: 80,
-    finalScore
-  };
-}
-
-function makeIssue(severity: "info" | "warning" | "error"): ValidationIssue {
-  return {
-    code: `TEST_${severity.toUpperCase()}`,
-    message: `test ${severity}`,
-    severity
-  };
-}
-
-function makeValidatedFile(status: "verified" | "corrected" | "missing"): ValidatedSuggestedFile {
-  return {
-    originalPath: "src/example.ts",
-    resolvedPath: status === "missing" ? null : "src/example.ts",
-    action: "modify",
-    reason: "test",
-    status
-  };
-}
+import { decideExecutionMode } from "./decideExecutionMode.js";
 
 describe("decideExecutionMode", () => {
-  it("patch validation error varsa blocked donmeli", () => {
+  it("returns blocked when patch validation errors exist", () => {
     const result = decideExecutionMode({
-      confidence: makeConfidence(95),
-      patchValidationIssues: [makeIssue("error")],
-      schemaPatchWarnings: [],
-      patchRiskWarnings: [],
+      schemaConfidence: 90,
+      storageConfidence: 90,
       architectureWarnings: [],
-      validatedSuggestedFiles: [makeValidatedFile("verified")],
-      schemaConfidence: "high",
-      storageConfidence: "high"
+      patchRiskWarnings: [],
+      patchValidationIssues: [
+        {
+          level: "error",
+          code: "PATH_OUTSIDE_REPO",
+          message: "Patch target resolves outside the repository root.",
+          filePath: "../secret.txt",
+        },
+      ],
+      schemaValidationIssues: [],
+      hasValidatedFiles: true,
     });
 
     expect(result.mode).toBe("blocked");
-    expect(result.confidenceScore).toBe(95);
-    expect(result.reason).toBe("Blocking validation errors were detected.");
+    expect(result.confidenceScore).toBe(0);
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "PATCH_VALIDATION_ERROR",
+          severity: "critical",
+        }),
+      ])
+    );
   });
 
-  it("schema validation error varsa blocked donmeli", () => {
+  it("returns blocked when schema validation errors exist", () => {
     const result = decideExecutionMode({
-      confidence: makeConfidence(92),
-      patchValidationIssues: [],
-      schemaPatchWarnings: [makeIssue("error")],
-      patchRiskWarnings: [],
+      schemaConfidence: 90,
+      storageConfidence: 90,
       architectureWarnings: [],
-      validatedSuggestedFiles: [makeValidatedFile("verified")],
-      schemaConfidence: "high",
-      storageConfidence: "high"
+      patchRiskWarnings: [],
+      patchValidationIssues: [],
+      schemaValidationIssues: [
+        {
+          level: "error",
+          code: "SCHEMA_FIELD_MISMATCH",
+          message: "Schema mismatch detected.",
+          filePath: "src/test.ts",
+        },
+      ],
+      hasValidatedFiles: true,
     });
 
     expect(result.mode).toBe("blocked");
-    expect(result.confidenceScore).toBe(92);
-    expect(result.reason).toBe("Blocking validation errors were detected.");
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "SCHEMA_VALIDATION_ERROR",
+          severity: "critical",
+        }),
+      ])
+    );
   });
 
-  it("missing validated file varsa preview_only donmeli", () => {
+  it("returns preview_only when patch validation warnings exist", () => {
     const result = decideExecutionMode({
-      confidence: makeConfidence(96),
-      patchValidationIssues: [],
-      schemaPatchWarnings: [],
-      patchRiskWarnings: [],
+      schemaConfidence: 90,
+      storageConfidence: 90,
       architectureWarnings: [],
-      validatedSuggestedFiles: [makeValidatedFile("missing")],
-      schemaConfidence: "high",
-      storageConfidence: "high"
+      patchRiskWarnings: [],
+      patchValidationIssues: [
+        {
+          level: "warning",
+          code: "TARGETS_NODE_MODULES",
+          message: "Patch targets node_modules.",
+          filePath: "node_modules/pkg/index.js",
+        },
+      ],
+      schemaValidationIssues: [],
+      hasValidatedFiles: true,
     });
 
     expect(result.mode).toBe("preview_only");
-    expect(result.reason).toBe("Some suggested files could not be validated confidently.");
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "PATCH_VALIDATION_WARNING",
+          severity: "warning",
+        }),
+      ])
+    );
   });
 
-  it("schema confidence low ise preview_only donmeli", () => {
+  it("returns preview_only when schema validation warnings exist", () => {
     const result = decideExecutionMode({
-      confidence: makeConfidence(96),
-      patchValidationIssues: [],
-      schemaPatchWarnings: [],
-      patchRiskWarnings: [],
+      schemaConfidence: 90,
+      storageConfidence: 90,
       architectureWarnings: [],
-      validatedSuggestedFiles: [makeValidatedFile("verified")],
-      schemaConfidence: "low",
-      storageConfidence: "high"
+      patchRiskWarnings: [],
+      patchValidationIssues: [],
+      schemaValidationIssues: [
+        {
+          level: "warning",
+          code: "SCHEMA_SNAPSHOT_MISSING",
+          message: "No schema snapshot loaded.",
+        },
+      ],
+      hasValidatedFiles: true,
     });
 
     expect(result.mode).toBe("preview_only");
-    expect(result.reason).toBe("Schema or storage certainty is too low for automatic apply.");
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "SCHEMA_VALIDATION_WARNING",
+          severity: "warning",
+        }),
+      ])
+    );
   });
 
-  it("storage confidence low ise preview_only donmeli", () => {
+  it("returns preview_only when validated files are missing", () => {
     const result = decideExecutionMode({
-      confidence: makeConfidence(96),
-      patchValidationIssues: [],
-      schemaPatchWarnings: [],
-      patchRiskWarnings: [],
+      schemaConfidence: 90,
+      storageConfidence: 90,
       architectureWarnings: [],
-      validatedSuggestedFiles: [makeValidatedFile("verified")],
-      schemaConfidence: "high",
-      storageConfidence: "low"
+      patchRiskWarnings: [],
+      patchValidationIssues: [],
+      schemaValidationIssues: [],
+      hasValidatedFiles: false,
     });
 
     expect(result.mode).toBe("preview_only");
-    expect(result.reason).toBe("Schema or storage certainty is too low for automatic apply.");
+    expect(result.confidenceScore).toBe(80);
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "MISSING_VALIDATED_FILES",
+        }),
+      ])
+    );
   });
 
-  it("patch risk warning varsa preview_only donmeli", () => {
+  it("returns preview_only when schema confidence is low", () => {
     const result = decideExecutionMode({
-      confidence: makeConfidence(96),
-      patchValidationIssues: [],
-      schemaPatchWarnings: [],
-      patchRiskWarnings: ["unsafe write"],
+      schemaConfidence: 55,
+      storageConfidence: 90,
       architectureWarnings: [],
-      validatedSuggestedFiles: [makeValidatedFile("verified")],
-      schemaConfidence: "high",
-      storageConfidence: "high"
+      patchRiskWarnings: [],
+      patchValidationIssues: [],
+      schemaValidationIssues: [],
+      hasValidatedFiles: true,
     });
 
     expect(result.mode).toBe("preview_only");
-    expect(result.reason).toBe("Risk or architecture warnings require manual review.");
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "LOW_SCHEMA_CONFIDENCE",
+        }),
+      ])
+    );
   });
 
-  it("architecture warning varsa preview_only donmeli", () => {
+  it("returns preview_only when storage confidence is low", () => {
     const result = decideExecutionMode({
-      confidence: makeConfidence(96),
-      patchValidationIssues: [],
-      schemaPatchWarnings: [],
+      schemaConfidence: 90,
+      storageConfidence: 50,
+      architectureWarnings: [],
       patchRiskWarnings: [],
-      architectureWarnings: ["layer mismatch"],
-      validatedSuggestedFiles: [makeValidatedFile("verified")],
-      schemaConfidence: "high",
-      storageConfidence: "high"
+      patchValidationIssues: [],
+      schemaValidationIssues: [],
+      hasValidatedFiles: true,
     });
 
     expect(result.mode).toBe("preview_only");
-    expect(result.reason).toBe("Risk or architecture warnings require manual review.");
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "LOW_STORAGE_CONFIDENCE",
+        }),
+      ])
+    );
   });
 
-  it("non-blocking warning varsa preview_only donmeli", () => {
+  it("returns preview_only when patch risk warnings exist", () => {
     const result = decideExecutionMode({
-      confidence: makeConfidence(96),
-      patchValidationIssues: [makeIssue("warning")],
-      schemaPatchWarnings: [],
-      patchRiskWarnings: [],
+      schemaConfidence: 90,
+      storageConfidence: 90,
       architectureWarnings: [],
-      validatedSuggestedFiles: [makeValidatedFile("verified")],
-      schemaConfidence: "high",
-      storageConfidence: "high"
+      patchRiskWarnings: ["wide replacement detected"],
+      patchValidationIssues: [],
+      schemaValidationIssues: [],
+      hasValidatedFiles: true,
     });
 
     expect(result.mode).toBe("preview_only");
-    expect(result.reason).toBe("Non-blocking warnings detected. Manual review is required.");
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "PATCH_RISK_WARNING",
+        }),
+      ])
+    );
   });
 
-  it("temiz ve yuksek confidence varsa safe_to_apply donmeli", () => {
+  it("returns preview_only when architecture warnings exist", () => {
     const result = decideExecutionMode({
-      confidence: makeConfidence(100),
-      patchValidationIssues: [],
-      schemaPatchWarnings: [],
+      schemaConfidence: 90,
+      storageConfidence: 90,
+      architectureWarnings: ["controller and service pattern mismatch"],
       patchRiskWarnings: [],
+      patchValidationIssues: [],
+      schemaValidationIssues: [],
+      hasValidatedFiles: true,
+    });
+
+    expect(result.mode).toBe("preview_only");
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "ARCHITECTURE_WARNING",
+        }),
+      ])
+    );
+  });
+
+  it("returns safe_to_apply when no risks are detected", () => {
+    const result = decideExecutionMode({
+      schemaConfidence: 92,
+      storageConfidence: 90,
       architectureWarnings: [],
-      validatedSuggestedFiles: [makeValidatedFile("verified")],
-      schemaConfidence: "high",
-      storageConfidence: "high"
+      patchRiskWarnings: [],
+      patchValidationIssues: [],
+      schemaValidationIssues: [],
+      hasValidatedFiles: true,
     });
 
     expect(result.mode).toBe("safe_to_apply");
     expect(result.confidenceScore).toBe(100);
-    expect(result.reason).toBe("Validation passed cleanly with high confidence.");
+    expect(result.reasons).toEqual([
+      expect.objectContaining({
+        code: "SAFE_TO_APPLY",
+        severity: "info",
+      }),
+    ]);
+  });
+
+  it("keeps blocked precedence over preview_only signals", () => {
+    const result = decideExecutionMode({
+      schemaConfidence: 35,
+      storageConfidence: 40,
+      architectureWarnings: ["pattern mismatch"],
+      patchRiskWarnings: ["wide patch"],
+      patchValidationIssues: [
+        {
+          level: "error",
+          code: "TARGETS_PROTECTED_FILE",
+          message: "Patch targets a protected file.",
+          filePath: ".env",
+        },
+      ],
+      schemaValidationIssues: [],
+      hasValidatedFiles: false,
+    });
+
+    expect(result.mode).toBe("blocked");
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "PATCH_VALIDATION_ERROR",
+        }),
+      ])
+    );
   });
 });

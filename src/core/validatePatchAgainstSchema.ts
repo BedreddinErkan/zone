@@ -45,6 +45,25 @@ function extractUpdateColumns(content: string): string[] {
   return columns;
 }
 
+function buildSchemaIssue(input: {
+  level: "warning" | "error";
+  code:
+    | "SCHEMA_SNAPSHOT_MISSING"
+    | "SCHEMA_PATH_NOT_FOUND"
+    | "SCHEMA_FIELD_MISMATCH";
+  message: string;
+  filePath?: string;
+  details?: string[];
+}): PatchValidationIssue {
+  return {
+    level: input.level,
+    code: input.code,
+    message: input.message,
+    filePath: input.filePath,
+    details: input.details,
+  };
+}
+
 export function validatePatchAgainstSchema(
   patchItems: PatchPreviewItem[],
   schema: SchemaSnapshot | null
@@ -52,10 +71,13 @@ export function validatePatchAgainstSchema(
   const issues: PatchValidationIssue[] = [];
 
   if (!schema) {
-    issues.push({
-      level: "warning",
-      message: "No schema snapshot loaded. Schema-level patch validation skipped."
-    });
+    issues.push(
+      buildSchemaIssue({
+        level: "warning",
+        code: "SCHEMA_SNAPSHOT_MISSING",
+        message: "No schema snapshot loaded. Schema-level patch validation skipped.",
+      })
+    );
     return issues;
   }
 
@@ -75,11 +97,14 @@ export function validatePatchAgainstSchema(
 
     for (const tableName of referencedTables) {
       if (!knownTables.has(tableName)) {
-        issues.push({
-          level: "warning",
-          message: `Referenced table '${tableName}' not found in schema snapshot.`,
-          filePath: item.path
-        });
+        issues.push(
+          buildSchemaIssue({
+            level: "warning",
+            code: "SCHEMA_PATH_NOT_FOUND",
+            message: `Referenced table '${tableName}' not found in schema snapshot.`,
+            filePath: item.path,
+          })
+        );
       }
     }
 
@@ -97,16 +122,19 @@ export function validatePatchAgainstSchema(
     const referencedColumns = [
       ...extractEqColumns(content),
       ...extractSelectColumns(content),
-      ...extractUpdateColumns(content)
+      ...extractUpdateColumns(content),
     ];
 
     for (const columnName of referencedColumns) {
       if (!knownColumns.has(columnName)) {
-        issues.push({
-          level: "warning",
-          message: `Referenced column '${activeTable}.${columnName}' not found in schema snapshot.`,
-          filePath: item.path
-        });
+        issues.push(
+          buildSchemaIssue({
+            level: "warning",
+            code: "SCHEMA_FIELD_MISMATCH",
+            message: `Referenced column '${activeTable}.${columnName}' not found in schema snapshot.`,
+            filePath: item.path,
+          })
+        );
       }
     }
   }
