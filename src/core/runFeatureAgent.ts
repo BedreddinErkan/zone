@@ -424,7 +424,7 @@ function buildConfidenceDetails(input: {
   };
 }
 
-function computeConfidenceBreakdown(input: {
+export function computeConfidenceBreakdown(input: {
   intent: FeatureAgentResult["intent"];
   schemaConfidence: ConfidenceLevel;
   storageConfidence: ConfidenceLevel;
@@ -481,7 +481,7 @@ function computeConfidenceBreakdown(input: {
   };
 }
 
-function decideExecutionMode(input: {
+export function decideExecutionMode(input: {
   confidence: ConfidenceBreakdown;
   patchValidationIssues: ValidationIssue[];
   schemaPatchWarnings: ValidationIssue[];
