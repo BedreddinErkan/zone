@@ -102,8 +102,16 @@ export function renderSavedAgentResultSummary(
     lines.push("");
     lines.push("Top Risks:");
     for (const risk of result.issues.topRisks.slice(0, 5)) {
+      const meta =
+        risk.category && risk.relatedCode
+          ? ` (${risk.category} / ${risk.relatedCode})`
+          : risk.category
+            ? ` (${risk.category})`
+            : risk.relatedCode
+              ? ` (${risk.relatedCode})`
+              : "";
       lines.push(
-        `- [${formatRiskSeverity(risk.severity)} | score=${risk.score}] ${risk.title}`
+        `- [${formatRiskSeverity(risk.severity)} | score=${risk.score}] ${risk.title}${meta}`
       );
     }
   }

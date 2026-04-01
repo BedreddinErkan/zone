@@ -32,7 +32,11 @@ function normalizeCategory(issue: ValidationIssue): ScoredRisk["category"] {
     return "schema";
   }
 
-  if (issue.code.startsWith("ARCH_") || issue.code.startsWith("arch_")) {
+  if (
+    issue.code.startsWith("ARCH_") ||
+    issue.code.startsWith("arch_") ||
+    issue.code === "ARCHITECTURE_WARNING"
+  ) {
     return "architecture";
   }
 
@@ -48,6 +52,12 @@ function normalizeCategory(issue: ValidationIssue): ScoredRisk["category"] {
   ) {
     return "patch";
   }
+
+  // Fallback: issue.source alanını kullan (özellikle custom kod'lar için)
+  if (issue.source === "schema") return "schema";
+  if (issue.source === "architecture") return "architecture";
+  if (issue.source === "confidence") return "confidence";
+  if (issue.source === "patch") return "patch";
 
   return "validation";
 }

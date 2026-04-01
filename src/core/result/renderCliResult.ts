@@ -1,5 +1,5 @@
 import type { CliOutputFormat } from "../../types/agent.js";
-import type { CliViewModel } from "./buildCliViewModel.js";
+import type { CliRiskItem, CliViewModel } from "./buildCliViewModel.js";
 
 function renderSummary(view: CliViewModel): string {
   const lines: string[] = [];
@@ -9,12 +9,50 @@ function renderSummary(view: CliViewModel): string {
   lines.push(`Confidence: ${view.confidenceScore}`);
   lines.push(`Issues: ${view.errorCount} error, ${view.warningCount} warning`);
 
-  if (view.topRisks.length > 0) {
-    const firstRisk = view.topRisks[0];
-    if (firstRisk) {
-      lines.push(
-        `Top Risk: ${firstRisk.severity} (score: ${firstRisk.score}) - ${firstRisk.title}`
-      );
+  const firstRisk = view.topRisks[0];
+  if (firstRisk) {
+    lines.push(
+      `Top Risk: ${firstRisk.severity} (score: ${firstRisk.score}) - ${firstRisk.title}`
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function renderTopRisks(topRisks: CliRiskItem[]): string {
+  if (topRisks.length === 0) {
+    return "Top Risks: none";
+  }
+
+  const lines: string[] = ["Top Risks (prioritized)"];
+
+  for (let i = 0; i < topRisks.length; i++) {
+    const risk = topRisks[i];
+    if (!risk) continue;
+    lines.push(
+      `${i + 1}. [${risk.severity}] score=${risk.score} | ${risk.title} (${risk.category})`
+    );
+    lines.push(`   ${risk.description}`);
+  }
+
+  return lines.join("\n");
+}
+
+function renderExecution(view: CliViewModel): string | null {
+  const exec = view.rawResult.execution;
+  if (!exec) return null;
+
+  const lines: string[] = [];
+  lines.push("Execution");
+  lines.push(`- Trace ID: ${exec.traceId}`);
+  lines.push(`- Started: ${exec.startedAt}`);
+  lines.push(`- Finished: ${exec.finishedAt}`);
+  lines.push(`- Duration: ${exec.durationMs} ms`);
+
+  if (exec.phases.length > 0) {
+    lines.push("Phases");
+    for (const p of exec.phases) {
+      lines.push(`- ${p.name}: ${p.durationMs} ms`);
     }
   }
 
@@ -29,40 +67,15 @@ function renderDetailed(view: CliViewModel): string {
   sections.push(`Confidence: ${view.confidenceScore}`);
   sections.push(`Issue Summary: ${view.errorCount} error, ${view.warningCount} warning`);
 
-  if (view.topRisks.length > 0) {
-    sections.push(
-      [
-        "Top Risks",
-        ...view.topRisks.map(
-          (risk) => `- ${risk.severity} (score: ${risk.score}) - ${risk.title}`
-        )
-      ].join("\n")
-    );
-  }
+  sections.push(renderTopRisks(view.topRisks));
 
   if (view.notes.length > 0) {
-    sections.push(
-      ["Notes", ...view.notes.map((note) => `- ${note}`)].join("\n")
-    );
+    sections.push(["Notes", ...view.notes.map((note) => `- ${note}`)].join("\n"));
   }
 
-  if (view.rawResult.execution) {
-    const exec = view.rawResult.execution;
-    const lines: string[] = [];
-    lines.push("Execution");
-    lines.push(`- Trace ID: ${exec.traceId}`);
-    lines.push(`- Started: ${exec.startedAt}`);
-    lines.push(`- Finished: ${exec.finishedAt}`);
-    lines.push(`- Duration: ${exec.durationMs} ms`);
-
-    if (exec.phases.length > 0) {
-      lines.push("Phases");
-      for (const p of exec.phases) {
-        lines.push(`- ${p.name}: ${p.durationMs} ms`);
-      }
-    }
-
-    sections.push(lines.join("\n"));
+  const execSection = renderExecution(view);
+  if (execSection) {
+    sections.push(execSection);
   }
 
   if (view.groupedIssues.length > 0) {
@@ -70,11 +83,13 @@ function renderDetailed(view: CliViewModel): string {
       .map((group) => {
         const lines: string[] = [];
         lines.push(`${group.label} (${group.errors} error, ${group.warnings} warning)`);
+
         for (const issue of group.issues) {
           lines.push(
             `- [${issue.severity.toUpperCase()}] ${issue.code}: ${issue.message}`
           );
         }
+
         return lines.join("\n");
       })
       .join("\n\n");

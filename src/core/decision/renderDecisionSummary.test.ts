@@ -127,7 +127,10 @@ describe("renderSavedAgentResultSummary", () => {
     expect(output).toContain("Confidence: 64/100 (medium)");
     expect(output).toContain("Recommendation:");
     expect(output).toContain("Top Risks:");
-expect(output).toContain("Schema mismatch riski");
+    expect(output).toContain("Schema mismatch riski");
+    // İş 2: relatedCode ve category yeni format
+    expect(output).toContain("(schema / SCHEMA_INVALID)");
+    expect(output).toContain("(patch / PATCH_WARNING)");
     expect(output).toContain("Issue Groups:");
     expect(output).toContain("Schema validation: 1 error, 0 warning");
     expect(output).toContain("Summary:");

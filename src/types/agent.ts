@@ -61,8 +61,9 @@ export interface ValidationIssue {
   code: string;
   message: string;
   severity: ValidationSeverity;
+  source?: "schema" | "confidence" | "decision" | "architecture" | "patch";
+  details?: string | string[];
   file?: string;
-  details?: string;
 }
 
 export interface SchemaAwareSummary {

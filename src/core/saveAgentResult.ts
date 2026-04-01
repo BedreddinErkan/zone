@@ -101,18 +101,20 @@ function buildIssueGroups(result: FeatureAgentResult) {
   ].filter((group) => group.total > 0);
 }
 
-function buildTopRisks(result: FeatureAgentResult): ScoredRisk[] {
+export function buildTopRisks(result: FeatureAgentResult): ScoredRisk[] {
   const allIssues: ValidationIssue[] = [
     ...result.patchValidationIssues,
     ...result.schemaPatchWarnings,
     ...result.patchRiskWarnings.map((message) => ({
       code: "PATCH_RISK_WARNING",
       severity: "warning" as const,
+      source: "patch" as const,
       message
     })),
     ...result.architectureWarnings.map((message) => ({
       code: "ARCHITECTURE_WARNING",
       severity: "warning" as const,
+      source: "architecture" as const,
       message
     }))
   ];

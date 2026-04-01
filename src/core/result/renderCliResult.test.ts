@@ -155,6 +155,17 @@ expect(output).toContain("Top Risk: MEDIUM (score: 60) - Belirsiz dosya hedefi")
     expect(output).toContain("SCHEMA_WARNING");
   });
 
+  it("detailed formatinda risk description ve category gosterir", () => {
+    const view = buildCliViewModel(sampleResult);
+    const output = renderCliResult(view, "detailed");
+
+    // renderTopRisks'in description ve category'yi render ettigini dogrula
+    expect(output).toContain("Belirsiz dosya hedefi");
+    expect(output).toContain("validation"); // category
+    expect(output).toContain("Değişikliğin uygulanacağı gerçek dosya net değil"); // description
+    expect(output).toContain("score=60");
+  });
+
   it("json formatinda parse edilebilir json verir", () => {
     const view = buildCliViewModel(sampleResult);
     const output = renderCliResult(view, "json");
