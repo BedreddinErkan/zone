@@ -10,6 +10,10 @@ import type {
 } from "../types/agent.js";
 import { scoreTopRisks } from "./result/scoreTopRisks.js";
 import { ensureDir, writeTextFile } from "../utils/files.js";
+import {
+  normalizePatchRiskWarnings,
+  normalizeArchitectureWarnings
+} from "./normalizeIssues.js";
 
 function mapDecisionMode(mode: AgentDecisionMode): SavedDecisionMode {
   if (mode === "safe_to_apply") return "apply";
@@ -80,11 +84,7 @@ function buildIssueGroups(result: FeatureAgentResult) {
       total: result.patchRiskWarnings.length,
       errors: 0,
       warnings: result.patchRiskWarnings.length,
-      issues: result.patchRiskWarnings.map((message) => ({
-        code: "PATCH_RISK_WARNING",
-        severity: "warning" as const,
-        message
-      }))
+      issues: normalizePatchRiskWarnings(result.patchRiskWarnings)
     },
     {
       key: "architecture",
@@ -92,11 +92,7 @@ function buildIssueGroups(result: FeatureAgentResult) {
       total: result.architectureWarnings.length,
       errors: 0,
       warnings: result.architectureWarnings.length,
-      issues: result.architectureWarnings.map((message) => ({
-        code: "ARCHITECTURE_WARNING",
-        severity: "warning" as const,
-        message
-      }))
+      issues: normalizeArchitectureWarnings(result.architectureWarnings)
     }
   ].filter((group) => group.total > 0);
 }
@@ -105,18 +101,8 @@ export function buildTopRisks(result: FeatureAgentResult): ScoredRisk[] {
   const allIssues: ValidationIssue[] = [
     ...result.patchValidationIssues,
     ...result.schemaPatchWarnings,
-    ...result.patchRiskWarnings.map((message) => ({
-      code: "PATCH_RISK_WARNING",
-      severity: "warning" as const,
-      source: "patch" as const,
-      message
-    })),
-    ...result.architectureWarnings.map((message) => ({
-      code: "ARCHITECTURE_WARNING",
-      severity: "warning" as const,
-      source: "architecture" as const,
-      message
-    }))
+    ...normalizePatchRiskWarnings(result.patchRiskWarnings),
+    ...normalizeArchitectureWarnings(result.architectureWarnings)
   ];
 
   return scoreTopRisks({
@@ -172,16 +158,8 @@ function toSavedAgentResult(result: FeatureAgentResult): SavedAgentResult {
       : countIssues([
           ...result.patchValidationIssues,
           ...result.schemaPatchWarnings,
-          ...result.patchRiskWarnings.map((message) => ({
-            code: "PATCH_RISK_WARNING",
-            severity: "warning" as const,
-            message
-          })),
-          ...result.architectureWarnings.map((message) => ({
-            code: "ARCHITECTURE_WARNING",
-            severity: "warning" as const,
-            message
-          }))
+          ...normalizePatchRiskWarnings(result.patchRiskWarnings),
+          ...normalizeArchitectureWarnings(result.architectureWarnings)
         ]);
 
   return {

@@ -36,6 +36,12 @@ import { buildSchemaAwareContext } from "./buildSchemaAwareContext.js";
 import { validatePatchAgainstSchema } from "./validatePatchAgainstSchema.js";
 import { validatePatchPlan } from "../patch/validatePatchPlan.js";
 import { logInfo, logSuccess, logWarn } from "../utils/logger.js";
+import {
+  normalizePatchValidationIssues,
+  normalizeSchemaValidationIssues,
+  normalizePatchRiskWarnings,
+  normalizeArchitectureWarnings
+} from "./normalizeIssues.js";
 
 const CONFIDENCE_WEIGHTS = {
   intentClarity: 0.24,
@@ -187,42 +193,6 @@ function buildSchemaAwareSummaryFromContext(input: {
     relations: [],
     confidence
   };
-}
-
-function normalizePatchValidationIssues(
-  issues: Array<{
-    level: "warning" | "error";
-    message: string;
-    filePath?: string;
-  }>
-): ValidationIssue[] {
-  return issues.map((issue) => ({
-    code:
-      issue.level === "error"
-        ? "PATCH_VALIDATION_ERROR"
-        : "PATCH_VALIDATION_WARNING",
-    message: issue.message,
-    severity: issue.level,
-    file: issue.filePath
-  }));
-}
-
-function normalizeSchemaValidationIssues(
-  issues: Array<{
-    level: "warning" | "error";
-    message: string;
-    filePath?: string;
-  }>
-): ValidationIssue[] {
-  return issues.map((issue) => ({
-    code:
-      issue.level === "error"
-        ? "SCHEMA_VALIDATION_ERROR"
-        : "SCHEMA_VALIDATION_WARNING",
-    message: issue.message,
-    severity: issue.level,
-    file: issue.filePath
-  }));
 }
 
 function scoreIntentClarity(intent: FeatureAgentResult["intent"]): number {
