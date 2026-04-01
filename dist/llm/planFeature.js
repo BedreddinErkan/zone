@@ -2,8 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.planFeatureWithLlm = planFeatureWithLlm;
 const openaiClient_js_1 = require("./openaiClient.js");
-const prompts_js_1 = require("./prompts.js");
 const schemas_js_1 = require("./schemas.js");
+const planFeaturePrompt_js_1 = require("../prompts/planFeaturePrompt.js");
 function extractJson(rawText) {
     const trimmed = rawText.trim();
     if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
@@ -19,7 +19,23 @@ function extractJson(rawText) {
 async function planFeatureWithLlm(input) {
     const client = (0, openaiClient_js_1.createOpenAIClient)();
     const model = (0, openaiClient_js_1.getModelName)();
-    const prompt = (0, prompts_js_1.buildFeaturePlanningPrompt)(input);
+    const relevantFilesSummary = input.relevantFiles
+        .map((file) => `- ${file.path} [${file.category}]`)
+        .join("\n");
+    const repoSummary = [input.projectSummary, ...input.projectNotes]
+        .filter(Boolean)
+        .join("\n");
+    const schemaAwareSummary = (input.schemaAwareSummary ?? [])
+        .filter(Boolean)
+        .map((line) => `- ${line}`)
+        .join("\n");
+    const prompt = (0, planFeaturePrompt_js_1.buildPlanFeaturePrompt)({
+        task: input.task,
+        intent: input.intent,
+        repoSummary,
+        relevantFilesSummary,
+        schemaAwareSummary
+    });
     const response = await client.responses.create({
         model,
         input: prompt

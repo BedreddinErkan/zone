@@ -1,98 +1,93 @@
+export type { ScoredRisk } from "../../types/agent.js";
+import type { ScoredRisk } from "../../types/agent.js";
 export type AgentDecisionMode = "blocked" | "preview_only" | "safe_to_apply";
 
-export type ConfidencePenalty = {
-  code: string;
-  reason: string;
-  points: number;
-};
-
-export type ConfidenceBreakdown = {
-  baseScore: number;
-  finalScore: number;
-  penalties: ConfidencePenalty[];
-};
-
-export type SuggestedFileAction = "create" | "modify" | "inspect" | "delete";
-
-export type SuggestedFile = {
-  path: string;
-  action: SuggestedFileAction;
-  reason: string;
-  exists?: boolean;
-  verified?: boolean;
-};
-
-export type PatchOperation = "create" | "update" | "delete";
-
-export type PatchPreviewItem = {
-  path: string;
-  operation: PatchOperation;
-  summary?: string;
-  diffPreview?: string;
-};
-
-export type ValidationIssueLevel = "info" | "warning" | "error";
-
-export type ValidationIssue = {
+export type ReasonSeverity = "info" | "warning" | "error";
+// YENİ HAL
+export interface ValidationIssue {
   code: string;
   message: string;
-  level: ValidationIssueLevel;
-  path?: string;
-};
+  severity: "info" | "warning" | "error";
+  source?: "schema" | "confidence" | "decision" | "architecture" | "patch"; // ← bu satırı ekle
+}
+export interface DecisionReason {
+  code: string;
+  severity: ReasonSeverity;
+  message: string;
+  details?: string[];
+}
 
-export type RiskLevel = "low" | "medium" | "high";
+export interface ConfidenceFactor {
+  key: string;
+  label: string;
+  impact: number;
+  reason?: string;
+}
 
-export type PatchRiskSummary = {
-  overallRisk: RiskLevel;
-  reasons: string[];
-};
+export interface ConfidenceBreakdown {
+  score: number;
+  factors: ConfidenceFactor[];
+  summary?: string;
+}
 
-export type AgentExecutionMeta = {
-  task: string;
-  repoPath: string;
-  ci: boolean;
-  verbose: boolean;
-  diffAware: boolean;
-  startedAt: string;
-  completedAt: string;
-  durationMs: number;
-};
+export interface PatchTargetSummary {
+  path: string;
+  operation: "create" | "update" | "delete";
+}
 
-export type AgentResult = {
-  decisionMode: AgentDecisionMode;
+export interface ResultIssueGroup {
+  key: "validation" | "schema" | "confidence" | "decision" | "architecture" | "other";
+  label: string;
+  total: number;
+  errors: number;
+  warnings: number;
+  issues: ValidationIssue[];
+}
 
-  confidenceScore: number;
-  confidence: ConfidenceBreakdown;
+export interface AgentExecutionResult {
+  version: 2;
+  generatedAt: string;
+  runId: string;
 
-  implementationSummary?: string;
-  steps?: string[];
-
-  suggestedFiles?: SuggestedFile[];
-  validatedSuggestedFiles?: SuggestedFile[];
-
-  patchPreview?: PatchPreviewItem[];
-
-  architectureValidation?: {
-    passed: boolean;
-    issues: ValidationIssue[];
+  task: {
+    raw: string;
+    normalized?: string;
   };
 
-  patchRisk?: PatchRiskSummary;
-
-  patchValidation?: {
-    passed: boolean;
-    issues: ValidationIssue[];
+  project: {
+    targetPath: string;
+    diffAware?: boolean;
+    mode: "preview" | "dry-run" | "apply";
+    ci: boolean;
   };
 
-  ciEvaluation?: {
-    status: "pass" | "warn" | "fail";
-    shouldFail: boolean;
-    statusLine: string;
-    summaryLine: string;
+  decision: {
+    mode: AgentDecisionMode;
+    recommendation: string;
+    reasons: DecisionReason[];
   };
 
-  warnings?: string[];
-  errors?: string[];
+  confidence: {
+    score: number;
+    breakdown: ConfidenceBreakdown;
+  };
 
-  meta: AgentExecutionMeta;
-};
+  issues: {
+    total: number;
+    errors: number;
+    warnings: number;
+    items: ValidationIssue[];
+    groups: ResultIssueGroup[];
+    topRisks: ScoredRisk[];
+  };
+
+  patch?: {
+    totalTargets: number;
+    targets: PatchTargetSummary[];
+  };
+
+  debug?: {
+    suggestedFiles?: string[];
+    notes?: string[];
+  };
+}

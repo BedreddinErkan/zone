@@ -26,7 +26,17 @@ async function scanRepo(targetPath) {
         cwd: targetPath,
         onlyFiles: true,
         dot: false,
-        ignore: ["node_modules/**", "dist/**", ".git/**"]
+        ignore: [
+            "**/node_modules/**",
+            "**/dist/**",
+            "**/build/**",
+            "**/.git/**",
+            "**/.next/**",
+            "**/coverage/**",
+            "**/.agent-cache/**",
+            "**/.agent-patches/**",
+            "**/.agent-backups/**"
+        ]
     });
     return entries.map((entry) => {
         const extension = node_path_1.default.extname(entry).replace(".", "").toLowerCase();

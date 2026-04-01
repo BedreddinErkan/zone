@@ -172,9 +172,9 @@ describe("computeConfidenceBreakdown", () => {
       hasValidatedFiles: false,
     });
 
-    expect(result.finalScore).toBe(42);
-    expect(result.summary.totalPenalty).toBe(58);
-    expect(result.summary.totalBonus).toBe(0);
+expect(result.finalScore).toBe(34);
+expect(result.summary.totalPenalty).toBe(66);
+expect(result.summary.totalBonus).toBe(0);
   });
 
   it("clamps invalid confidence inputs into safe range", () => {

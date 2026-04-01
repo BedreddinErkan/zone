@@ -1,6 +1,6 @@
 import type { ProjectStructure, RepoFile } from "./project.js";
 import type { TaskIntent } from "../core/taskIntentParser.js";
-
+export type CliOutputFormat = "summary" | "detailed" | "json";
 export interface FeatureAgentInput {
   task: string;
   targetPath: string;
@@ -153,9 +153,49 @@ export interface FeatureAgentResult {
 
   applyResults?: ApplyResultItem[];
 }
+export type RiskSeverity = "high" | "medium" | "low";
 
+export type RiskCategory =
+  | "schema"
+  | "patch"
+  | "architecture"
+  | "confidence"
+  | "validation"
+  | "repository"
+  | "other";
+
+export interface ScoredRisk {
+  id: string;
+  title: string;
+  description: string;
+  severity: RiskSeverity;
+  score: number;
+  category: RiskCategory;
+  source: "validation_issue" | "penalty" | "warning" | "decision" | "derived";
+  relatedCode?: string;
+}
 export interface SavedAgentResult {
+  version?: number;
+  generatedAt?: string;
   summary: string;
+  statusLine?: string;
+execution?: {
+  traceId: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  phases: Array<{
+    name: string;
+    durationMs: number;
+  }>;
+};
+  meta?: {
+    task: string;
+    targetPath: string;
+    relevantFileCount: number;
+    suggestedFileCount: number;
+    patchCount: number;
+  };
 
   intent: {
     rawTask: string;
@@ -164,10 +204,11 @@ export interface SavedAgentResult {
     scope?: string;
     nestedTarget?: string | null;
     confidence?: ConfidenceLevel;
+    warnings?: string[];
   };
 
   schema: {
-    summary?: string;
+    summary: string;
     entities: string[];
     relations: string[];
     confidence?: ConfidenceLevel;
@@ -178,6 +219,7 @@ export interface SavedAgentResult {
     detectedClients: string[];
     confidence?: ConfidenceLevel;
     reasoning: string[];
+    resourceStorageKind?: string;
   };
 
   validation: {
@@ -185,10 +227,38 @@ export interface SavedAgentResult {
     schema: ValidationIssue[];
   };
 
+  issues?: {
+    summary: {
+      total: number;
+      errors: number;
+      warnings: number;
+    };
+    grouped: Array<{
+      key: string;
+      label: string;
+      total: number;
+      errors: number;
+      warnings: number;
+      issues: ValidationIssue[];
+    }>;
+topRisks?: ScoredRisk[];  };
+
   decision: {
     mode: SavedDecisionMode;
     confidence: number;
     reason: string;
+    recommendation?: string;
+  };
+
+  confidenceBreakdown?: {
+    finalScore: number;
+    level: ConfidenceLevel;
+    factors: {
+      intentClarity: number;
+      schemaCertainty: number;
+      storageCertainty: number;
+      patchValidationHealth: number;
+    };
   };
 
   confidenceDetails: {
@@ -203,9 +273,19 @@ export interface SavedAgentResult {
     followUps: string[];
   };
 
-  statusLine: string;
+  debug?: {
+    patchTargets: Array<{
+      path: string;
+      operation: string;
+    }>;
+    suggestedFiles: Array<{
+      originalPath: string;
+      resolvedPath: string | null;
+      status: string;
+      action: string;
+    }>;
+  };
 }
-
 export type CiOutcome = "pass" | "warn" | "fail";
 
 export interface CiEvaluationResult {

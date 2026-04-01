@@ -7,8 +7,14 @@ import { promises as fs } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { ExecutionTracker } from "../utils/executionTracker.js";
+import { generateTraceId } from "../utils/trace.js";
 import { runFeatureAgent } from "../core/runFeatureAgent.js";
+import { loadSavedAgentResult } from "../core/loadSavedAgentResult.js";
 import { evaluateCiResult } from "../ci/evaluateCiResult.js";
+import type { SavedAgentResult, CliOutputFormat } from "../types/agent.js";
+import { buildCliViewModel } from "../core/result/buildCliViewModel.js";
+import { renderCliResult } from "../core/result/renderCliResult.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -19,6 +25,7 @@ type CliOptions = {
   verbose?: boolean;
   diffAware?: boolean;
   output?: string;
+  format?: string;
   mode?: "preview" | "dry-run" | "apply";
 };
 
@@ -96,6 +103,17 @@ function resolveMode(options: CliOptions): "preview" | "dry-run" | "apply" {
   return options.mode ?? "preview";
 }
 
+function resolveFormat(options: CliOptions): CliOutputFormat {
+  switch (options.format) {
+    case "summary":
+    case "detailed":
+    case "json":
+      return options.format;
+    default:
+      return "summary";
+  }
+}
+
 async function getChangedFiles(repoPath: string): Promise<string[]> {
   try {
     const baseSha = process.env.SMILE_AGENT_BASE_SHA?.trim();
@@ -130,65 +148,142 @@ async function getChangedFiles(repoPath: string): Promise<string[]> {
   }
 }
 
-function buildErrorResult(task: string, repoPath: string, message: string) {
+function buildErrorResult(
+  task: string,
+  repoPath: string,
+  message: string
+): SavedAgentResult {
   return {
-    task,
-    targetPath: repoPath,
+    version: 2,
+    generatedAt: new Date().toISOString(),
     summary: `Run failed: ${message}`,
-    decision: {
-      mode: "blocked" as const,
-      confidenceScore: 0,
-      reason: message
+    statusLine:
+      "STATUS: BLOCKED | confidence=0 | warnings=1 | penalties=1 | patches=0 | relevant=0 | suggested=0",
+    meta: {
+      task,
+      targetPath: repoPath,
+      relevantFileCount: 0,
+      suggestedFileCount: 0,
+      patchCount: 0
     },
-    confidence: {
-      finalScore: 0
+    intent: {
+      rawTask: task,
+      operation: "unknown",
+      target: "unknown",
+      scope: "unknown",
+      nestedTarget: null,
+      confidence: "low",
+      warnings: ["Runtime failure prevented normal execution."]
     },
-    confidenceDetails: {
-      penalties: [
+    schema: {
+      summary: "Schema analysis unavailable due to runtime failure.",
+      entities: [],
+      relations: [],
+      confidence: "low"
+    },
+    storage: {
+      primaryStorage: "unknown",
+      detectedClients: [],
+      confidence: "low",
+      reasoning: ["Runtime failure prevented storage analysis."],
+      resourceStorageKind: "unknown"
+    },
+    validation: {
+      patch: [],
+      schema: []
+    },
+    issues: {
+      summary: {
+        total: 1,
+        errors: 1,
+        warnings: 0
+      },
+      grouped: [
         {
-          label: "Runtime failure"
+          key: "runtime",
+          label: "Runtime failure",
+          total: 1,
+          errors: 1,
+          warnings: 0,
+          issues: [
+            {
+              code: "RUNTIME_FAILURE",
+              severity: "error",
+              message
+            }
+          ]
+        }
+      ],
+         topRisks: [
+        {
+          id: "issue:runtime_failure",
+          title: "Runtime failure",
+          description: message,
+          severity: "high",
+          score: 100,
+          category: "validation",
+          source: "derived",
+          relatedCode: "RUNTIME_FAILURE"
         }
       ]
     },
-    error: {
-      message,
-      generatedAt: new Date().toISOString()
+    decision: {
+      mode: "blocked",
+      confidence: 0,
+      reason: message,
+      recommendation: "Do not apply automatically. Resolve the runtime failure first."
+    },
+    confidenceBreakdown: {
+      finalScore: 0,
+      level: "low",
+      factors: {
+        intentClarity: 0,
+        schemaCertainty: 0,
+        storageCertainty: 0,
+        patchValidationHealth: 0
+      }
+    },
+    confidenceDetails: {
+      baseWeightedScore: 0,
+      totalPenalty: 100,
+      penalties: [
+        {
+          code: "RUNTIME_FAILURE",
+          label: "Runtime failure",
+          appliedPenalty: 100
+        }
+      ]
+    },
+    notes: {
+      execution: [message],
+      assumptions: [],
+      followUps: ["Fix the runtime failure and rerun the agent."]
+    },
+    debug: {
+      patchTargets: [],
+      suggestedFiles: []
     }
   };
 }
 
-async function run(): Promise<void> {
-  const program = new Command();
+export async function runCliWithOptions(options: CliOptions): Promise<number> {
+  const tracker = new ExecutionTracker();
+  const traceId = generateTraceId();
 
-  program
-    .name("smile-agent")
-    .description("AI-powered code agent for practical repository change planning and patch generation.")
-    .requiredOption("--task <text>", "Task or change request to analyze")
-    .option("--repo <path>", "Target repository path", process.cwd())
-    .option("--ci", "Enable CI mode")
-    .option("--verbose", "Enable verbose logs")
-    .option("--diff-aware", "Boost ranking using git diff context")
-    .option("--mode <mode>", "Execution mode: preview | dry-run | apply", "preview")
-    .option(
-      "--output <path>",
-      "Path for structured JSON result output",
-      DEFAULT_RESULT_PATH
-    )
-    .allowExcessArguments(false)
-    .parse(process.argv);
-
-  const options = program.opts<CliOptions>();
+  tracker.startPhase("total");
 
   const task = resolveTask(options);
   const repoPath = resolveRepoPath(options);
   const resultPath = resolveResultPath(options);
   const mode = resolveMode(options);
+  const format = resolveFormat(options);
   const ciMode = Boolean(options.ci);
   const verbose = Boolean(options.verbose);
   const diffAware = Boolean(options.diffAware);
 
   printHeader();
   console.log(`Mode: ${ciMode ? "CI" : "standard"}`);
+  console.log(`Format: ${format}`);
 
   printVerbose("cli.options", options, verbose);
   printVerbose("repoPath", repoPath, verbose);
@@ -201,17 +296,44 @@ async function run(): Promise<void> {
       printVerbose("changedFiles", changedFiles, verbose);
     }
 
-    const result = await runFeatureAgent({
+    tracker.startPhase("run_agent");
+    await runFeatureAgent({
       task,
       targetPath: repoPath,
       mode,
       changedFiles
     });
+    tracker.endPhase("run_agent");
 
-    await writeJsonFile(resultPath, result);
+    tracker.startPhase("load_result");
+    const savedResult = await loadSavedAgentResult(repoPath);
+    tracker.endPhase("load_result");
+
+    if (!savedResult) {
+      throw new Error("Saved agent result could not be loaded after execution.");
+    }
+
+    tracker.startPhase("build_cli_view");
+    tracker.endPhase("build_cli_view");
+
+    tracker.endPhase("total");
+
+    savedResult.execution = {
+      traceId,
+      ...tracker.build()
+    };
+
+    const cliView = buildCliViewModel(savedResult);
+
+    await writeJsonFile(resultPath, savedResult);
+
+    console.log("");
+    console.log(renderCliResult(cliView, format));
+    console.log("");
+    console.log(`Result saved: ${resultPath}`);
 
     if (ciMode) {
-      const ciEvaluation = evaluateCiResult(result);
+      const ciEvaluation = evaluateCiResult(savedResult);
 
       printStatusLine(ciEvaluation.statusLine);
       printSummaryLine(ciEvaluation.summaryLine);
@@ -220,19 +342,20 @@ async function run(): Promise<void> {
         printVerbose("ciEvaluation", ciEvaluation, true);
       }
 
-      process.exit(ciEvaluation.shouldFail ? 1 : 0);
-      return;
+      return ciEvaluation.shouldFail ? 1 : 0;
     }
 
-    console.log(`Decision: ${result.decision.mode}`);
-    console.log(`Confidence: ${result.decision.confidenceScore}`);
-    console.log(`Reason: ${result.decision.reason}`);
-    console.log(`Result saved: ${resultPath}`);
-
-    process.exit(0);
+    return 0;
   } catch (error) {
     const message = formatErrorMessage(error);
     const errorResult = buildErrorResult(task, repoPath, message);
+
+    tracker.endPhase("total");
+
+    errorResult.execution = {
+      traceId,
+      ...tracker.build()
+    };
 
     await writeJsonFile(resultPath, errorResult);
 
@@ -240,13 +363,46 @@ async function run(): Promise<void> {
       const ciEvaluation = evaluateCiResult(errorResult);
       printStatusLine(ciEvaluation.statusLine);
       printSummaryLine(ciEvaluation.summaryLine);
-      process.exit(1);
-      return;
+      return 1;
     }
 
-    console.error(`Error: ${message}`);
-    process.exit(1);
+    const cliView = buildCliViewModel(errorResult);
+
+    console.error("");
+    console.error(renderCliResult(cliView, format));
+    console.error("");
+    console.error(`Result saved: ${resultPath}`);
+
+    return 1;
   }
 }
 
-void run();
+export async function run(): Promise<void> {
+  const program = new Command();
+
+  program
+    .name("smile-agent")
+    .description("AI-powered code agent for practical repository change planning and patch generation.")
+    .requiredOption("--task <text>", "Task or change request to analyze")
+    .option("--repo <path>", "Target repository path", process.cwd())
+    .option("--ci", "Enable CI mode")
+    .option("--verbose", "Enable verbose logs")
+    .option("--diff-aware", "Boost ranking using git diff context")
+    .option("--mode <mode>", "Execution mode: preview | dry-run | apply", "preview")
+    .option("--format <mode>", "CLI output format: summary | detailed | json", "summary")
+    .option(
+      "--output <path>",
+      "Path for structured JSON result output",
+      DEFAULT_RESULT_PATH
+    )
+    .allowExcessArguments(false)
+    .parse(process.argv);
+
+  const options = program.opts<CliOptions>();
+  const exitCode = await runCliWithOptions(options);
+  process.exit(exitCode);
+}
+
+if (process.env.VITEST !== "true") {
+  void run();
+}

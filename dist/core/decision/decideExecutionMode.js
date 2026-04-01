@@ -1,0 +1,125 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.decideExecutionMode = decideExecutionMode;
+const computeConfidenceBreakdown_js_1 = require("../scoring/computeConfidenceBreakdown.js");
+function mapPatchIssueToDecisionReason(issue, mode) {
+    return {
+        code: mode === "error" ? "PATCH_VALIDATION_ERROR" : "PATCH_VALIDATION_WARNING",
+        severity: mode === "error" ? "critical" : "warning",
+        message: issue.message,
+        details: [
+            issue.code,
+            ...(issue.filePath ? [issue.filePath] : []),
+            ...(issue.details ?? []),
+        ],
+    };
+}
+function mapSchemaIssueToDecisionReason(issue, mode) {
+    return {
+        code: mode === "error" ? "SCHEMA_VALIDATION_ERROR" : "SCHEMA_VALIDATION_WARNING",
+        severity: mode === "error" ? "critical" : "warning",
+        message: issue.message,
+        details: [
+            issue.code,
+            ...(issue.filePath ? [issue.filePath] : []),
+            ...(issue.details ?? []),
+        ],
+    };
+}
+function mapConfidenceFactorToReason(factor) {
+    switch (factor.key) {
+        case "schema_confidence":
+            return {
+                code: "LOW_SCHEMA_CONFIDENCE",
+                severity: factor.severity,
+                message: factor.reason,
+            };
+        case "storage_confidence":
+            return {
+                code: "LOW_STORAGE_CONFIDENCE",
+                severity: factor.severity,
+                message: factor.reason,
+            };
+        case "missing_validated_files":
+            return {
+                code: "MISSING_VALIDATED_FILES",
+                severity: factor.severity,
+                message: factor.reason,
+            };
+        case "patch_risk_warnings":
+            return {
+                code: "PATCH_RISK_WARNING",
+                severity: factor.severity,
+                message: factor.label,
+                details: [factor.reason],
+            };
+        case "architecture_warnings":
+            return {
+                code: "ARCHITECTURE_WARNING",
+                severity: factor.severity,
+                message: factor.label,
+                details: [factor.reason],
+            };
+        case "validation_errors":
+            return {
+                code: "CRITICAL_CONFIDENCE_RISK",
+                severity: "critical",
+                message: factor.reason,
+            };
+        default:
+            return null;
+    }
+}
+function decideExecutionMode(input) {
+    const patchValidationIssues = input.patchValidationIssues ?? [];
+    const schemaValidationIssues = input.schemaValidationIssues ?? [];
+    const patchErrors = patchValidationIssues.filter((issue) => issue.level === "error");
+    const patchWarnings = patchValidationIssues.filter((issue) => issue.level === "warning");
+    const schemaErrors = schemaValidationIssues.filter((issue) => issue.level === "error");
+    const schemaWarnings = schemaValidationIssues.filter((issue) => issue.level === "warning");
+    const blockedReasons = [
+        ...patchErrors.map((issue) => mapPatchIssueToDecisionReason(issue, "error")),
+        ...schemaErrors.map((issue) => mapSchemaIssueToDecisionReason(issue, "error")),
+    ];
+    if (blockedReasons.length > 0) {
+        return {
+            mode: "blocked",
+            confidenceScore: 0,
+            reasons: blockedReasons,
+        };
+    }
+    const breakdown = (0, computeConfidenceBreakdown_js_1.computeConfidenceBreakdown)({
+        schemaConfidence: input.schemaConfidence,
+        storageConfidence: input.storageConfidence,
+        architectureWarnings: input.architectureWarnings ?? [],
+        patchRiskWarnings: input.patchRiskWarnings ?? [],
+        validationErrors: [],
+        hasValidatedFiles: input.hasValidatedFiles,
+    });
+    const previewReasons = [
+        ...patchWarnings.map((issue) => mapPatchIssueToDecisionReason(issue, "warning")),
+        ...schemaWarnings.map((issue) => mapSchemaIssueToDecisionReason(issue, "warning")),
+        ...breakdown.factors
+            .map(mapConfidenceFactorToReason)
+            .filter((reason) => reason !== null),
+    ];
+    if (previewReasons.length > 0) {
+        return {
+            mode: "preview_only",
+            confidenceScore: breakdown.finalScore,
+            reasons: previewReasons,
+        };
+    }
+    return {
+        mode: "safe_to_apply",
+        confidenceScore: breakdown.finalScore,
+        reasons: [
+            {
+                code: "SAFE_TO_APPLY",
+                severity: "info",
+                message: "No blocking or warning-level execution risks were detected.",
+            },
+        ],
+    };
+}
+//# sourceMappingURL=decideExecutionMode.js.map

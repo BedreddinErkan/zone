@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.rankRelevantFiles = rankRelevantFiles;
+const intentAwareScore_js_1 = require("../core/intentAwareScore.js");
 function scoreFile(file, task) {
     const normalizedTask = task.toLowerCase();
     const filePath = file.path.toLowerCase();
@@ -46,15 +47,19 @@ function scoreFile(file, task) {
     }
     return score;
 }
-function rankRelevantFiles(files, task) {
-    return [...files]
-        .map((file) => ({
-        file,
-        score: scoreFile(file, task)
-    }))
-        .filter((item) => item.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 12)
-        .map((item) => item.file);
+function rankRelevantFiles(args) {
+    const { task, files, intent } = args;
+    return files
+        .map((file) => {
+        const baseScore = scoreFile(file, task);
+        const boost = intent
+            ? (0, intentAwareScore_js_1.getIntentAwareScoreBoost)(file.path, "", intent)
+            : 0;
+        return {
+            ...file,
+            score: baseScore + boost
+        };
+    })
+        .sort((a, b) => b.score - a.score);
 }
 //# sourceMappingURL=rankRelevantFiles.js.map

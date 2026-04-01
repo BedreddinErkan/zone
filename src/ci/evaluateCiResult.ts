@@ -4,22 +4,44 @@ export type CiPenaltyLike = {
   label?: string;
 };
 
+export type CiIssueSummaryLike = {
+  errors?: number;
+  warnings?: number;
+  total?: number;
+};
+
 export type CiResultLike = {
   decision?: {
-    mode?: "blocked" | "preview_only" | "safe_to_apply" | string;
+    mode?: "blocked" | "preview_only" | "safe_to_apply" | "preview" | "apply" | string;
     confidenceScore?: number;
+    confidence?: number;
     reason?: string;
+    recommendation?: string;
   };
   confidence?: {
     finalScore?: number;
   };
+  confidenceBreakdown?: {
+    finalScore?: number;
+    level?: string;
+  };
   confidenceDetails?: {
     penalties?: CiPenaltyLike[];
   };
+  issues?: {
+    summary?: CiIssueSummaryLike;
+  };
+  statusLine?: string;
 };
 
 export interface CiEvaluation {
-  decisionMode: "blocked" | "preview_only" | "safe_to_apply" | "unknown";
+  decisionMode:
+    | "blocked"
+    | "preview_only"
+    | "safe_to_apply"
+    | "preview"
+    | "apply"
+    | "unknown";
   ciStatus: CiStatus;
   shouldFail: boolean;
   confidenceScore: number | null;
@@ -36,7 +58,9 @@ function normalizeDecisionMode(
   if (
     mode === "blocked" ||
     mode === "preview_only" ||
-    mode === "safe_to_apply"
+    mode === "safe_to_apply" ||
+    mode === "preview" ||
+    mode === "apply"
   ) {
     return mode;
   }
@@ -49,8 +73,16 @@ function normalizeConfidenceScore(result: CiResultLike): number | null {
     return result.decision.confidenceScore;
   }
 
+  if (typeof result?.decision?.confidence === "number") {
+    return result.decision.confidence;
+  }
+
   if (typeof result?.confidence?.finalScore === "number") {
     return result.confidence.finalScore;
+  }
+
+  if (typeof result?.confidenceBreakdown?.finalScore === "number") {
+    return result.confidenceBreakdown.finalScore;
   }
 
   return null;
@@ -73,8 +105,10 @@ function buildStatusLine(
     case "blocked":
       return "STATUS: BLOCKED";
     case "preview_only":
+    case "preview":
       return "STATUS: PREVIEW ONLY";
     case "safe_to_apply":
+    case "apply":
       return "STATUS: SAFE TO APPLY";
     default:
       return "STATUS: UNKNOWN";
@@ -99,6 +133,17 @@ function buildSummaryLine(input: {
     parts.push(`reason=${input.result.decision.reason}`);
   }
 
+  const errorCount = input.result?.issues?.summary?.errors;
+  const warningCount = input.result?.issues?.summary?.warnings;
+
+  if (typeof errorCount === "number") {
+    parts.push(`errors=${errorCount}`);
+  }
+
+  if (typeof warningCount === "number") {
+    parts.push(`warnings=${warningCount}`);
+  }
+
   if (input.penaltyReasons.length > 0) {
     parts.push(`penalties=${input.penaltyReasons.slice(0, 4).join(" | ")}`);
   } else {
@@ -113,15 +158,20 @@ export function evaluateCiResult(result: CiResultLike): CiEvaluation {
   const confidenceScore = normalizeConfidenceScore(result);
   const penaltyReasons = normalizePenaltyReasons(result);
 
+  const errorCount = result?.issues?.summary?.errors ?? 0;
+
   let ciStatus: CiStatus = "warn";
   let shouldFail = false;
 
   if (decisionMode === "blocked") {
     ciStatus = "fail";
     shouldFail = true;
-  } else if (decisionMode === "preview_only") {
+  } else if (errorCount > 0) {
+    ciStatus = "fail";
+    shouldFail = true;
+  } else if (decisionMode === "preview_only" || decisionMode === "preview") {
     ciStatus = "warn";
-  } else if (decisionMode === "safe_to_apply") {
+  } else if (decisionMode === "safe_to_apply" || decisionMode === "apply") {
     ciStatus = "pass";
   }
 
@@ -130,7 +180,7 @@ export function evaluateCiResult(result: CiResultLike): CiEvaluation {
     ciStatus,
     shouldFail,
     confidenceScore,
-    statusLine: buildStatusLine(decisionMode),
+    statusLine: result.statusLine || buildStatusLine(decisionMode),
     summaryLine: buildSummaryLine({
       result,
       decisionMode,
