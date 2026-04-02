@@ -536,8 +536,15 @@ describe("runCliWithOptions", () => {
       "json",
       { showTrace: false, verbose: false }
     );
-    expect(mockLog).toHaveBeenCalledWith('{"task":"drop users table","decision":{"mode":"blocked"}}');
-  });
+const printedOutput = mockLog.mock.calls
+  .flat()
+  .filter((value) => typeof value === "string")
+  .join("\n");
+
+expect(printedOutput).toContain('{"task":"drop users table","decision":{"mode":"blocked"}}');
+expect(printedOutput).toContain("=== GENERATED PATCH PLAN ===");
+expect(printedOutput).toContain("Allowed: no");
+expect(printedOutput).toContain("Strategy: blocked");  });
 
   it("task-only modda geçersiz --format değeri 1 döner ve hata basar", async () => {
     const runAgentResult = {
@@ -634,8 +641,16 @@ describe("runCliWithOptions", () => {
       "text",
       { showTrace: false, verbose: false }
     );
-    expect(mockLog).toHaveBeenCalledWith("=== SMILE AGENT TEXT OUTPUT ===");
-  });
+const printedOutput = mockLog.mock.calls
+  .flat()
+  .filter((value) => typeof value === "string")
+  .join("\n");
+
+expect(printedOutput).toContain("=== SMILE AGENT TEXT OUTPUT ===");
+expect(printedOutput).toContain("=== GENERATED PATCH PLAN ===");
+expect(printedOutput).toContain("Allowed: yes");
+expect(printedOutput).toContain("Strategy: safe");
+expect(printedOutput).toContain("Intent: rename_symbol");  });
 
   it("task-only modda verbose açıkken execution bilgisini basar", async () => {
     const runAgentResult = {
@@ -1111,5 +1126,67 @@ describe("runCliWithOptions", () => {
 
     expect(exitCode).toBe(1);
     expect(renderApplyResultMock).toHaveBeenCalledWith(applyResult);
+  });
+  it("renders generated patch plan preview after the decision output", async () => {
+    const runAgentResult = {
+      task: "rename helper",
+      decision: {
+        mode: "safe_to_apply",
+        confidenceScore: 90
+      },
+      risk: {
+        score: 5,
+        breakdown: {
+          destructive: 0,
+          schema: 0,
+          critical: 0,
+          lowRisk: -10,
+          massScope: 0
+        }
+      },
+      confidence: {
+        score: 100,
+        breakdown: {
+          base: 100,
+          destructivePenalty: 0,
+          schemaPenalty: 0,
+          criticalPenalty: 0,
+          massScopePenalty: 0,
+          lowRiskBonus: 10
+        }
+      },
+      explanation: "SAFE TO APPLY",
+      recommendation: "Apply safely.",
+      topRisks: [],
+      reasonCodes: ["SAFE_LOW_RISK", "SAFE_HIGH_CONFIDENCE"]
+    };
+
+    runAgentMock.mockResolvedValue(runAgentResult);
+    formatOutputMock.mockReturnValue("=== TASK ONLY RESULT ===");
+
+    const { runCliWithOptions } = await import("./index.js");
+
+    const exitCode = await runCliWithOptions({
+      task: "rename helper",
+      taskOnly: true
+    });
+
+    expect(exitCode).toBe(0);
+
+    const printedOutput = mockLog.mock.calls
+      .flat()
+      .filter((value) => typeof value === "string")
+      .join("\n");
+
+    expect(printedOutput).toContain("=== TASK ONLY RESULT ===");
+    expect(printedOutput).toContain("=== GENERATED PATCH PLAN ===");
+    expect(printedOutput).toContain("Allowed: yes");
+    expect(printedOutput).toContain("Strategy: safe");
+    expect(printedOutput).toContain("Intent: rename_symbol");
+    expect(printedOutput).toContain("Operations:");
+    expect(printedOutput).toContain("Reason:");
+    expect(printedOutput).toContain("Derived From:");
+    expect(printedOutput).toContain("- SAFE_LOW_RISK");
+    expect(printedOutput).toContain("- SAFE_HIGH_CONFIDENCE");
   });
 });

@@ -32,6 +32,13 @@ import { renderAuditDiff } from "../audit/renderAuditDiff.js";
 import { loadPatchPlan } from "./loadPatchPlan.js";
 import { runApplyFlow } from "../apply/runApplyFlow.js";
 import { renderApplyResult } from "../apply/renderApplyResult.js";
+import { buildGeneratedPatchPlanPreview } from "./buildGeneratedPatchPlanPreview.js";
+import { buildGeneratedPatchPlan } from "../patch-generation/buildGeneratedPatchPlan.js";
+import { canConvertGeneratedPlanToPatchPlan } from "../patch/conversion/canConvertGeneratedPlanToPatchPlan.js";
+import {
+  convertGeneratedPlanToPatchPlan,
+  type PatchPlan,
+} from "../patch/conversion/convertGeneratedPlanToPatchPlan.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -53,6 +60,7 @@ type CliOptions = {
   apply?: boolean;
   confirmApply?: boolean;
   patchPlan?: string;
+  useGeneratedPatchPlan?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -386,6 +394,7 @@ async function runTaskOnlyFlow(options: {
   apply: boolean;
   confirmApply: boolean;
   patchPlanPath: string | null;
+  useGeneratedPatchPlan: boolean;
 }): Promise<number> {
   const {
     task,
@@ -399,6 +408,7 @@ async function runTaskOnlyFlow(options: {
     apply,
     confirmApply,
     patchPlanPath,
+    useGeneratedPatchPlan,
   } = options;
 
   tracker.startPhase("run_agent");
@@ -409,8 +419,31 @@ async function runTaskOnlyFlow(options: {
 
   printVerbose("runAgent.result", result, verbose);
 
+  const renderedDecisionOutput = formatOutput(result, outputFormat, {
+    showTrace,
+    verbose,
+  });
+
+  const generatedPlan = buildGeneratedPatchPlan({
+    task: result.task,
+    decision: result.decision,
+    reasonCodes: result.reasonCodes,
+  });
+
+  const generatedPatchPlanPreview = buildGeneratedPatchPlanPreview({
+    task: result.task,
+    decision: result.decision,
+    reasonCodes: result.reasonCodes,
+  });
+
+  const finalOutput = [
+    renderedDecisionOutput,
+    "",
+    generatedPatchPlanPreview,
+  ].join("\n");
+
   console.log("");
-  console.log(formatOutput(result, outputFormat, { showTrace, verbose }));
+  console.log(finalOutput);
   console.log("");
 
   if (apply) {
@@ -434,23 +467,59 @@ async function runTaskOnlyFlow(options: {
       return 0;
     }
 
-    if (!patchPlanPath) {
-      throw new Error(
-        'Apply requested but no patch plan was provided. Use --patch-plan <file>.'
-      );
-    }
+    let patchPlan: PatchPlan | unknown;
 
-    tracker.startPhase("load_patch_plan");
-    const patchPlan = loadPatchPlan(patchPlanPath);
-    tracker.endPhase("load_patch_plan");
+    if (useGeneratedPatchPlan) {
+      tracker.startPhase("validate_generated_patch_plan");
+      const conversionCheck = canConvertGeneratedPlanToPatchPlan(generatedPlan);
+      tracker.endPhase("validate_generated_patch_plan");
+
+      if (!conversionCheck.canConvert) {
+        console.log("Status: blocked");
+        console.log("Reason: Generated patch plan conversion failed.");
+        console.log(`Code: ${conversionCheck.code}`);
+        console.log(`Details: ${conversionCheck.reason}`);
+        console.log("");
+
+        printVerbose("generatedPlan", generatedPlan, verbose);
+        printVerbose("generatedPlan.conversionCheck", conversionCheck, verbose);
+        printVerbose(
+          "execution",
+          {
+            traceId,
+            ...tracker.build(),
+          },
+          verbose
+        );
+
+        return 1;
+      }
+
+      tracker.startPhase("convert_generated_patch_plan");
+      patchPlan = convertGeneratedPlanToPatchPlan(generatedPlan);
+      tracker.endPhase("convert_generated_patch_plan");
+
+      printVerbose("generatedPlan", generatedPlan, verbose);
+      printVerbose("generatedPlan.patchPlan", patchPlan, verbose);
+    } else {
+      if (!patchPlanPath) {
+        throw new Error(
+          "Apply requested but no patch plan was provided. Use --patch-plan <file>."
+        );
+      }
+
+      tracker.startPhase("load_patch_plan");
+      patchPlan = loadPatchPlan(patchPlanPath);
+      tracker.endPhase("load_patch_plan");
+    }
 
     tracker.startPhase("run_apply_flow");
     const applyResult = await runApplyFlow({
       result,
-      plan: patchPlan,
+      plan: patchPlan as never,
       request: {
-        confirm: true
-      }
+        confirm: true,
+      },
     });
     tracker.endPhase("run_apply_flow");
 
@@ -593,6 +662,7 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
         apply: Boolean(options.apply),
         confirmApply: Boolean(options.confirmApply),
         patchPlanPath: resolvePatchPlanPath(options),
+        useGeneratedPatchPlan: Boolean(options.useGeneratedPatchPlan),
       });
     }
 
@@ -743,6 +813,10 @@ export async function run(): Promise<void> {
       "Explicit confirmation required before apply"
     )
     .option("--patch-plan <path>", "Path to PatchPlan JSON file")
+    .option(
+      "--use-generated-patch-plan",
+      "Generate a deterministic patch plan from the decision result and use it for apply if safely convertible"
+    )
     .option(
       "--audit",
       "Print full audit snapshot as JSON to stdout (additive, no side effects)"
