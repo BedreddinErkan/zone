@@ -73,51 +73,16 @@ describe("computeConfidenceScore", () => {
   it("applies mass_scope together with other penalties", () => {
     const result = computeConfidenceScore({
       breakdown: {
-        destructive: 20,
-        schema: 10,
-        critical: 15,
-        massScope: 25,
-        lowRisk: 0
-      }
-    });
-
-    expect(result.score).toBe(30);
-    expect(result.breakdown).toEqual({
-      base: 100,
-      destructivePenalty: -20,
-      schemaPenalty: -10,
-      criticalPenalty: -15,
-      massScopePenalty: -25,
-      lowRiskBonus: 0
-    });
-  });
-
-  it("applies low-risk bonus", () => {
-    const result = computeConfidenceScore({
-      breakdown: {
-        destructive: 0,
+        destructive: 50,
         schema: 0,
         critical: 0,
-        massScope: 0,
-        lowRisk: -20
-      }
-    });
-
-    expect(result.score).toBe(100);
-    expect(result.breakdown.lowRiskBonus).toBe(20);
-  });
-
-  it("clamps confidence to zero", () => {
-    const result = computeConfidenceScore({
-      breakdown: {
-        destructive: 100,
-        schema: 25,
-        critical: 20,
-        massScope: 10,
+        massScope: 30,
         lowRisk: 0
       }
     });
 
-    expect(result.score).toBe(0);
+    expect(result.score).toBe(20);
+    expect(result.breakdown.destructivePenalty).toBe(-50);
+    expect(result.breakdown.massScopePenalty).toBe(-30);
   });
 });

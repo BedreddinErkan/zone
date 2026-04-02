@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { buildDecisionExplanation } from "./buildDecisionExplanation.js";
 import { renderDecisionSummary } from "./renderDecisionSummary.js";
+import type { DecideExecutionModeResult } from "./decideExecutionMode.js";
+
+function buildBlockedExplanationResult(): DecideExecutionModeResult {
+  return {
+    mode: "blocked",
+    confidenceScore: 25,
+    reasons: [
+      {
+        code: "PATCH_VALIDATION_ERROR",
+        severity: "critical",
+        message: "Patch validation failed."
+      }
+    ]
+  };
+}
+
 describe("buildDecisionExplanation", () => {
   it("explains blocked mode with critical reasons", () => {
     const output = buildDecisionExplanation({
@@ -127,5 +143,110 @@ describe("buildDecisionExplanation", () => {
     expect(output).toContain(
       "Automatic apply is not recommended until review is completed."
     );
+  });
+
+  it("includes metadata-driven why line when reasonCodes are provided", () => {
+    const output = buildDecisionExplanation(
+      {
+        mode: "blocked",
+        confidenceScore: 25,
+        reasons: [
+          {
+            code: "PATCH_VALIDATION_ERROR",
+            message: "Patch validation failed",
+            severity: "critical"
+          }
+        ],
+        topRisks: [
+  {
+    id: "risk-1",
+    title: "Potentially destructive change",
+    description: "May cause irreversible loss",
+    severity: "high",
+    score: 91,
+    category: "patch",
+    source: "warning"
+  }
+]
+      },
+      {
+        reasonCodes: [
+          "BLOCKED_DESTRUCTIVE_OPERATION",
+          "BLOCKED_HIGH_RISK_SCORE"
+        ]
+      }
+    );
+
+    expect(output).toContain(
+      "Decision was set to BLOCKED because blocking validation signals were detected."
+    );
+    expect(output).toContain(
+      "Why: Task includes destructive intent and should not be auto-applied; Overall risk score exceeded the blocked threshold for auto-apply."
+    );
+    expect(output).toContain(
+      "Automatic apply is not recommended until blocking issues are resolved."
+    );
+  });
+
+  it("does not include why line when reasonCodes are omitted", () => {
+    const output = buildDecisionExplanation({
+      mode: "preview_only",
+      confidenceScore: 55,
+      reasons: [
+        {
+      code: "PATCH_VALIDATION_WARNING",
+message: "Confidence is too low",
+severity: "warning"
+        }
+      ],
+      topRisks: []
+    });
+
+    expect(output).not.toContain("Why:");
+    expect(output).toContain(
+      "Decision was set to PREVIEW ONLY because manual review is still required."
+    );
+  });
+
+  it("keeps existing summary lines and closing line intact", () => {
+    const output = buildDecisionExplanation(
+      {
+        mode: "safe_to_apply",
+        confidenceScore: 92,
+        reasons: [
+          {
+        code: "SAFE_TO_APPLY",
+message: "Low risk",
+severity: "info"
+          }
+        ],
+        topRisks: []
+      },
+      {
+        reasonCodes: ["SAFE_LOW_RISK_LOCALIZED", "SAFE_HIGH_CONFIDENCE"]
+      }
+    );
+
+    expect(output).toContain(
+      "Why: Task appears narrowly scoped and low risk for automatic application; Confidence score is strong enough to support safe auto-apply."
+    );
+    expect(output).toContain(
+      "- 1 informational confirmation reason(s) were recorded"
+    );
+    expect(output).toContain(
+      "Automatic apply can proceed under the current safeguards."
+    );
+  });
+});
+
+describe("buildDecisionExplanation + renderDecisionSummary parity", () => {
+  it("keeps explanation mode wording aligned with rendered summary for blocked", () => {
+    const result = buildBlockedExplanationResult();
+
+    const explanation = buildDecisionExplanation(result);
+    const summary = renderDecisionSummary(result);
+
+    expect(explanation).toContain("Decision was set to BLOCKED");
+    expect(summary).toContain("blocked");
   });
 });

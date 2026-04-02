@@ -1,5 +1,9 @@
 import type { ScoredRisk } from "../../types/agent.js";
 import type { DecideExecutionModeResult } from "./decideExecutionMode.js";
+import {
+  type DecisionReasonCode
+} from "./decisionReasonCodeMeta.js";
+import { buildReasonSummaryLine } from "./buildReasonSummaryLine.js";
 
 function countReasonsBySeverity(
   reasons: DecideExecutionModeResult["reasons"]
@@ -76,11 +80,19 @@ function buildClosingLine(result: DecideExecutionModeResult): string {
 }
 
 export function buildDecisionExplanation(
-  result: DecideExecutionModeResult
+  result: DecideExecutionModeResult,
+  options: {
+    reasonCodes?: readonly DecisionReasonCode[];
+  } = {}
 ): string {
   const lines: string[] = [];
 
   lines.push(buildModeLead(result));
+
+  if (options.reasonCodes && options.reasonCodes.length > 0) {
+    lines.push("");
+    lines.push(buildReasonSummaryLine(options.reasonCodes));
+  }
 
   const summaryLines = buildReasonSummary(result);
   if (summaryLines.length > 0) {

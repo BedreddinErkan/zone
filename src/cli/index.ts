@@ -16,7 +16,6 @@ import { evaluateCiResult } from "../ci/evaluateCiResult.js";
 import type { SavedAgentResult, CliOutputFormat } from "../types/agent.js";
 import { buildCliViewModel } from "../core/result/buildCliViewModel.js";
 import { renderCliResult } from "../core/result/renderCliResult.js";
-import { renderRunAgentResult } from "../core/renderRunAgentResult.js";
 import { formatOutput, type OutputFormat } from "../core/formatOutput.js";
 const execFileAsync = promisify(execFile);
 
@@ -25,6 +24,7 @@ type CliOptions = {
   repo?: string;
   ci?: boolean;
   verbose?: boolean;
+  trace?: boolean;
   diffAware?: boolean;
   output?: string;
   format?: string;
@@ -282,11 +282,12 @@ function buildErrorResult(
 async function runTaskOnlyFlow(options: {
   task: string;
   verbose: boolean;
+  showTrace: boolean;
   traceId: string;
   tracker: ExecutionTracker;
   outputFormat: OutputFormat;
 }): Promise<number> {
-  const { task, verbose, traceId, tracker, outputFormat } = options;
+  const { task, verbose, showTrace, traceId, tracker, outputFormat } = options;
 
   tracker.startPhase("run_agent");
   const result = await runAgent({ task });
@@ -297,7 +298,7 @@ async function runTaskOnlyFlow(options: {
   printVerbose("runAgent.result", result, verbose);
 
   console.log("");
-  console.log(formatOutput(result, outputFormat));
+  console.log(formatOutput(result, outputFormat, { showTrace, verbose }));
   console.log("");
 
   printVerbose(
@@ -325,6 +326,7 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
   const format = resolveFormat(options);
   const ciMode = Boolean(options.ci);
   const verbose = Boolean(options.verbose);
+  const showTrace = Boolean(options.trace) || verbose;
   const diffAware = Boolean(options.diffAware);
   const taskOnly = Boolean(options.taskOnly);
 
@@ -343,6 +345,7 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
       return await runTaskOnlyFlow({
         task,
         verbose,
+        showTrace,
         traceId,
         tracker,
         outputFormat
@@ -463,6 +466,7 @@ export async function run(): Promise<void> {
     .option("--repo <path>", "Target repository path", process.cwd())
     .option("--ci", "Enable CI mode")
     .option("--verbose", "Enable verbose logs")
+    .option("--trace", "Show decision trace in output")
     .option("--diff-aware", "Boost ranking using git diff context")
     .option("--task-only", "Run Sprint 7 task-only orchestration flow")
     .option("--mode <mode>", "Execution mode: preview | dry-run | apply", "preview")

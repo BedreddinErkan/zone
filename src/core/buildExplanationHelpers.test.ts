@@ -58,6 +58,7 @@ describe("buildConfidenceImpactLine", () => {
       schemaPenalty: -25,
       criticalPenalty: 0,
       lowRiskBonus: 0,
+      massScopePenalty: 0,
     };
     expect(buildConfidenceImpactLine(breakdown)).toBe("schema penalty: -25");
   });
@@ -69,6 +70,7 @@ describe("buildConfidenceImpactLine", () => {
       schemaPenalty: -25,
       criticalPenalty: 0,
       lowRiskBonus: 0,
+      massScopePenalty: 0,
     };
     expect(buildConfidenceImpactLine(breakdown)).toBe(
       "destructive penalty: -50, schema penalty: -25"
@@ -82,6 +84,7 @@ describe("buildConfidenceImpactLine", () => {
       schemaPenalty: 0,
       criticalPenalty: -15,
       lowRiskBonus: 0,
+      massScopePenalty: 0,
     };
     expect(buildConfidenceImpactLine(breakdown)).toBe("critical penalty: -15");
   });
@@ -93,6 +96,7 @@ describe("buildConfidenceImpactLine", () => {
       schemaPenalty: 0,
       criticalPenalty: 0,
       lowRiskBonus: 10,
+      massScopePenalty: 0,
     };
     expect(buildConfidenceImpactLine(breakdown)).toBe("low-risk bonus: +10");
   });
@@ -104,6 +108,7 @@ describe("buildConfidenceImpactLine", () => {
       schemaPenalty: 0,
       criticalPenalty: 0,
       lowRiskBonus: 0,
+      massScopePenalty: 0,
     };
     expect(buildConfidenceImpactLine(breakdown)).toBeNull();
   });
@@ -115,6 +120,7 @@ describe("buildConfidenceImpactLine", () => {
       schemaPenalty: -25,
       criticalPenalty: -15,
       lowRiskBonus: 5,
+      massScopePenalty: 0,
     };
     expect(buildConfidenceImpactLine(breakdown)).toBe(
       "destructive penalty: -50, schema penalty: -25, critical penalty: -15, low-risk bonus: +5"
