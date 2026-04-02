@@ -1,4 +1,5 @@
 import { computeRiskScore } from "./computeRiskScore.js";
+import { normalizeSignals } from "./normalizeSignals.js";
 import { computeConfidenceScore } from "./scoring/computeConfidenceScore.js";
 
 type RunAgentInput = {
@@ -30,6 +31,7 @@ export type RunAgentResult = {
       destructivePenalty: number;
       schemaPenalty: number;
       criticalPenalty: number;
+      massScopePenalty: number;
       lowRiskBonus: number;
     };
   };
@@ -96,25 +98,34 @@ type ConfidenceBreakdownSnapshot = {
   destructivePenalty: number;
   schemaPenalty: number;
   criticalPenalty: number;
+  massScopePenalty?: number;
   lowRiskBonus: number;
 };
-
 export function buildConfidenceImpactLine(
   breakdown: ConfidenceBreakdownSnapshot
 ): string | null {
+  const destructivePenalty = breakdown.destructivePenalty ?? 0;
+  const schemaPenalty = breakdown.schemaPenalty ?? 0;
+  const criticalPenalty = breakdown.criticalPenalty ?? 0;
+  const massScopePenalty = breakdown.massScopePenalty ?? 0;
+  const lowRiskBonus = breakdown.lowRiskBonus ?? 0;
+
   const parts: string[] = [];
 
-  if (breakdown.destructivePenalty !== 0) {
-    parts.push(`destructive penalty: ${breakdown.destructivePenalty}`);
+  if (destructivePenalty !== 0) {
+    parts.push(`destructive penalty: ${destructivePenalty}`);
   }
-  if (breakdown.schemaPenalty !== 0) {
-    parts.push(`schema penalty: ${breakdown.schemaPenalty}`);
+  if (schemaPenalty !== 0) {
+    parts.push(`schema penalty: ${schemaPenalty}`);
   }
-  if (breakdown.criticalPenalty !== 0) {
-    parts.push(`critical penalty: ${breakdown.criticalPenalty}`);
+  if (criticalPenalty !== 0) {
+    parts.push(`critical penalty: ${criticalPenalty}`);
   }
-  if (breakdown.lowRiskBonus !== 0) {
-    parts.push(`low-risk bonus: +${breakdown.lowRiskBonus}`);
+  if (massScopePenalty !== 0) {
+    parts.push(`mass-scope penalty: ${massScopePenalty}`);
+  }
+  if (lowRiskBonus !== 0) {
+    parts.push(`low-risk bonus: +${lowRiskBonus}`);
   }
 
   if (parts.length === 0) return null;
@@ -181,42 +192,50 @@ export function buildTopRisks(
   severity: "low" | "medium" | "high";
   reason: string;
 }> {
+  const normalized = normalizeSignals(signals);
+
   const risks: Array<{
     title: string;
     severity: "low" | "medium" | "high";
     reason: string;
   }> = [];
 
-  if (signals.includes("destructive")) {
-    risks.push({
-      title: "Potentially destructive change",
-      severity: "high",
-      reason: "Task contains destructive keywords that may cause irreversible data loss."
-    });
-  }
+  for (const signal of normalized) {
+    if (signal.type === "destructive") {
+      risks.push({
+        title: signal.label,
+        severity: signal.severity,
+        reason:
+          "Task contains destructive keywords that may cause irreversible data loss."
+      });
+    }
 
-  if (signals.includes("schema")) {
-    risks.push({
-      title: "Schema-sensitive change",
-      severity: "medium",
-      reason: "Schema modifications can break existing data contracts or migrations."
-    });
-  }
+    if (signal.type === "schema") {
+      risks.push({
+        title: signal.label,
+        severity: signal.severity,
+        reason:
+          "Schema modifications can break existing data contracts or migrations."
+      });
+    }
 
-  if (signals.includes("critical_domain")) {
-    risks.push({
-      title: "Critical domain surface",
-      severity: "medium",
-      reason: "Touches auth, billing, or production — elevated impact if change is incorrect."
-    });
-  }
+    if (signal.type === "critical_domain") {
+      risks.push({
+        title: signal.label,
+        severity: signal.severity,
+        reason:
+          "Touches auth, billing, or production — elevated impact if change is incorrect."
+      });
+    }
 
-  if (signals.includes("mass_scope")) {
-    risks.push({
-      title: "Mass-scope operation",
-      severity: "high",
-      reason: "Task targets all records or the entire dataset — bulk operations are irreversible."
-    });
+    if (signal.type === "mass_scope") {
+      risks.push({
+        title: signal.label,
+        severity: signal.severity,
+        reason:
+          "Task targets all records or the entire dataset — bulk operations are irreversible."
+      });
+    }
   }
 
   return risks;

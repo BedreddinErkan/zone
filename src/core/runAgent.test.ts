@@ -169,16 +169,26 @@ expect(result.confidence.breakdown).toEqual({
 
 it("includes confidence breakdown for destructive database tasks", async () => {
   const result = await runAgent({
-    task: "delete user table from database"
+    task: "delete database schema"
   });
 
   expect(result.confidence.score).toBe(25);
-expect(result.confidence.breakdown).toEqual({
-  base: 100,
-  destructivePenalty: -50,
-  schemaPenalty: -25,
-  criticalPenalty: 0,
-  massScopePenalty: 0,
-  lowRiskBonus: 0
+  expect(result.confidence.breakdown).toEqual({
+    base: 100,
+    destructivePenalty: -50,
+    schemaPenalty: -25,
+    criticalPenalty: 0,
+    massScopePenalty: 0,
+    lowRiskBonus: 0
+  });
 });
+
+it("includes massScopePenalty in confidence breakdown for mass-scope tasks", async () => {
+  const result = await runAgent({
+    task: "purge all cache"
+  });
+
+  expect(result.confidence.breakdown).toMatchObject({
+    massScopePenalty: -25
+  });
 });
