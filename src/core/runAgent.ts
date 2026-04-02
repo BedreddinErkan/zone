@@ -86,9 +86,9 @@ export function buildPrimaryCause(signals: string[]): string {
   if (signals.includes("destructive")) return "destructive operation";
   if (signals.includes("schema")) return "schema-sensitive change";
   if (signals.includes("critical_domain")) return "critical domain access";
+  if (signals.includes("mass_scope")) return "mass-scope operation";
   return "general task";
 }
-
 // ---------------------------------------------------------------------------
 // buildConfidenceImpactLine — exported for unit testing
 // ---------------------------------------------------------------------------

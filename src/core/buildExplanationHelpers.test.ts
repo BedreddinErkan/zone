@@ -21,12 +21,20 @@ describe("buildPrimaryCause", () => {
     expect(buildPrimaryCause(["critical_domain"])).toBe("critical domain access");
   });
 
+  it("returns 'mass-scope operation' for mass_scope signal", () => {
+    expect(buildPrimaryCause(["mass_scope"])).toBe("mass-scope operation");
+  });
+
   it("prefers destructive over schema when both are present (priority order)", () => {
     expect(buildPrimaryCause(["destructive", "schema"])).toBe("destructive operation");
   });
 
   it("prefers schema over critical_domain when both are present", () => {
     expect(buildPrimaryCause(["schema", "critical_domain"])).toBe("schema-sensitive change");
+  });
+
+  it("prefers critical_domain over mass_scope when both are present", () => {
+    expect(buildPrimaryCause(["critical_domain", "mass_scope"])).toBe("critical domain access");
   });
 
   it("returns 'general task' for low_risk-only signal", () => {
