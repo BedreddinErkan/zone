@@ -229,4 +229,203 @@ describe("evaluateCiResult", () => {
     expect(evaluation.statusLine).toBe("STATUS: UNKNOWN");
     expect(evaluation.summaryLine).toContain("decision=unknown");
   });
-});
+});  it("fails CI when topRisks contains a high severity risk even if summary errors are zero", () => {
+    const result: CiResultLike = {
+      decision: {
+        mode: "preview_only",
+        confidenceScore: 74,
+        reason: "Review requested because of risk scoring."
+      },
+      issues: {
+        summary: {
+          total: 1,
+          errors: 0,
+          warnings: 1
+        },
+        topRisks: [
+          {
+            id: "risk-1",
+            title: "Dangerous patch target",
+            severity: "high",
+            source: "warning"
+          }
+        ]
+      }
+    };
+
+    const evaluation = evaluateCiResult(result);
+
+    expect(evaluation.decisionMode).toBe("preview_only");
+    expect(evaluation.ciStatus).toBe("fail");
+    expect(evaluation.shouldFail).toBe(true);
+    expect(evaluation.summaryLine).toContain("topRisks=high:Dangerous patch target");
+  });
+
+  it("keeps preview_only as warn when topRisks are not high severity", () => {
+    const result: CiResultLike = {
+      decision: {
+        mode: "preview_only",
+        confidenceScore: 72,
+        reason: "Manual review still required."
+      },
+      issues: {
+        summary: {
+          total: 2,
+          errors: 0,
+          warnings: 2
+        },
+        topRisks: [
+          {
+            id: "risk-1",
+            title: "Architecture mismatch",
+            severity: "medium",
+            source: "warning"
+          },
+          {
+            id: "risk-2",
+            title: "Confidence gap",
+            severity: "low",
+            source: "derived"
+          }
+        ]
+      }
+    };
+
+    const evaluation = evaluateCiResult(result);
+
+    expect(evaluation.ciStatus).toBe("warn");
+    expect(evaluation.shouldFail).toBe(false);
+    expect(evaluation.summaryLine).toContain("topRisks=medium:Architecture mismatch");
+  });
+
+  it("includes grouped ValidationIssue sources in summaryLine when present", () => {
+    const result: CiResultLike = {
+      decision: {
+        mode: "apply",
+        confidenceScore: 89,
+        reason: "Ready for CI summary rendering."
+      },
+      issues: {
+        summary: {
+          total: 2,
+          errors: 0,
+          warnings: 2
+        },
+        grouped: [
+          {
+            issues: [
+              { source: "patch" },
+              { source: "schema" },
+              { source: "patch" }
+            ]
+          }
+        ]
+      }
+    };
+
+    const evaluation = evaluateCiResult(result);
+
+    expect(evaluation.ciStatus).toBe("pass");
+    expect(evaluation.shouldFail).toBe(false);
+    expect(evaluation.summaryLine).toContain("sources=patch | schema");
+  });
+    it("fails CI when topRisks contains a high severity risk even if summary errors are zero", () => {
+    const result: CiResultLike = {
+      decision: {
+        mode: "preview_only",
+        confidenceScore: 74,
+        reason: "Review requested because of risk scoring."
+      },
+      issues: {
+        summary: {
+          total: 1,
+          errors: 0,
+          warnings: 1
+        },
+        topRisks: [
+          {
+            id: "risk-1",
+            title: "Dangerous patch target",
+            severity: "high",
+            source: "warning"
+          }
+        ]
+      }
+    };
+
+    const evaluation = evaluateCiResult(result);
+
+    expect(evaluation.decisionMode).toBe("preview_only");
+    expect(evaluation.ciStatus).toBe("fail");
+    expect(evaluation.shouldFail).toBe(true);
+    expect(evaluation.summaryLine).toContain("topRisks=high:Dangerous patch target");
+  });
+
+  it("keeps preview_only as warn when topRisks are not high severity", () => {
+    const result: CiResultLike = {
+      decision: {
+        mode: "preview_only",
+        confidenceScore: 72,
+        reason: "Manual review still required."
+      },
+      issues: {
+        summary: {
+          total: 2,
+          errors: 0,
+          warnings: 2
+        },
+        topRisks: [
+          {
+            id: "risk-1",
+            title: "Architecture mismatch",
+            severity: "medium",
+            source: "warning"
+          },
+          {
+            id: "risk-2",
+            title: "Confidence gap",
+            severity: "low",
+            source: "derived"
+          }
+        ]
+      }
+    };
+
+    const evaluation = evaluateCiResult(result);
+
+    expect(evaluation.ciStatus).toBe("warn");
+    expect(evaluation.shouldFail).toBe(false);
+    expect(evaluation.summaryLine).toContain("topRisks=medium:Architecture mismatch");
+  });
+
+  it("includes grouped ValidationIssue sources in summaryLine when present", () => {
+    const result: CiResultLike = {
+      decision: {
+        mode: "apply",
+        confidenceScore: 89,
+        reason: "Ready for CI summary rendering."
+      },
+      issues: {
+        summary: {
+          total: 2,
+          errors: 0,
+          warnings: 2
+        },
+        grouped: [
+          {
+            issues: [
+              { source: "patch" },
+              { source: "schema" },
+              { source: "patch" }
+            ]
+          }
+        ]
+      }
+    };
+
+    const evaluation = evaluateCiResult(result);
+
+    expect(evaluation.ciStatus).toBe("pass");
+    expect(evaluation.shouldFail).toBe(false);
+    expect(evaluation.summaryLine).toContain("sources=patch | schema");
+  });

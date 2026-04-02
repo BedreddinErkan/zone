@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderSavedAgentResultSummary } from "./renderDecisionSummary.js";
+import {renderDecisionSummary, renderSavedAgentResultSummary} from "./renderDecisionSummary.js";
 import type { SavedAgentResult } from "../../types/agent.js";
 describe("renderSavedAgentResultSummary", () => {
   it("renders saved agent result with recommendation, top risks and groups", () => {
@@ -135,4 +135,73 @@ describe("renderSavedAgentResultSummary", () => {
     expect(output).toContain("Schema validation: 1 error, 0 warning");
     expect(output).toContain("Summary:");
   });
+});
+it("renders top risks when present", () => {
+  const output = renderDecisionSummary({
+    mode: "preview_only",
+    confidenceScore: 72,
+    reasons: [],
+    topRisks: [
+      {
+        id: "risk-1",
+        title: "Dangerous patch target",
+        description: "Patch may touch risky file",
+        severity: "high",
+        score: 95,
+        category: "patch",
+        source: "warning"
+      },
+      {
+        id: "risk-2",
+        title: "Schema mismatch",
+        description: "Schema confidence is limited",
+        severity: "medium",
+        score: 66,
+        category: "schema",
+        source: "derived"
+      }
+    ]
+  });
+
+  expect(output).toContain("Top Risks:");
+  expect(output).toContain("- [HIGH] Dangerous patch target");
+  expect(output).toContain("- [MEDIUM] Schema mismatch");
+});
+it("does not render top risks section when no top risks exist", () => {
+  const output = renderDecisionSummary({
+    mode: "safe_to_apply",
+    confidenceScore: 91,
+    reasons: []
+  });
+
+  expect(output).not.toContain("Top Risks:");
+});
+it("renders explanation section in decision summary", () => {
+  const output = renderDecisionSummary({
+    mode: "preview_only",
+    confidenceScore: 72,
+    reasons: [
+      {
+        code: "PATCH_VALIDATION_WARNING",
+        severity: "warning",
+        message: "Patch should be reviewed."
+      }
+    ],
+    topRisks: [
+      {
+        id: "risk-1",
+        title: "Dangerous patch target",
+        description: "Patch may touch risky file",
+        severity: "high",
+        score: 95,
+        category: "patch",
+        source: "warning"
+      }
+    ]
+  });
+
+  expect(output).toContain("Explanation:");
+  expect(output).toContain("Decision was set to PREVIEW ONLY");
+  expect(output).toContain("1 warning-level reason(s) affected the decision");
+  expect(output).toContain("1 medium/high top risk(s) remain visible in the result");
 });

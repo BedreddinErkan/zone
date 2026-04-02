@@ -1,5 +1,4 @@
 import type {
-  CliOutputFormat,
   SavedAgentResult,
   SavedDecisionMode,
   ValidationIssue
@@ -33,6 +32,7 @@ export interface CliViewModel {
   confidenceScore: number;
   errorCount: number;
   warningCount: number;
+  recommendation: string;
   notes: string[];
   topRisks: CliRiskItem[];
   groupedIssues: CliIssueGroup[];
@@ -69,6 +69,7 @@ function normalizeIssue(issue: ValidationIssue): CliIssueItem | null {
 
   return null;
 }
+
 function toCliRiskSeverity(
   severity: "high" | "medium" | "low"
 ): "HIGH" | "MEDIUM" | "LOW" {
@@ -81,6 +82,7 @@ function toCliRiskSeverity(
       return "LOW";
   }
 }
+
 export function buildCliViewModel(result: SavedAgentResult): CliViewModel {
   const groupedIssues: CliIssueGroup[] = (result.issues?.grouped ?? []).map((group) => {
     const issues = group.issues
@@ -110,8 +112,9 @@ export function buildCliViewModel(result: SavedAgentResult): CliViewModel {
     confidenceScore: result.confidenceBreakdown?.finalScore ?? result.decision.confidence,
     errorCount: result.issues?.summary.errors ?? 0,
     warningCount: result.issues?.summary.warnings ?? 0,
+    recommendation: result.decision.recommendation ?? result.decision.reason,
     notes,
-      topRisks: (result.issues?.topRisks ?? []).map((risk) => ({
+    topRisks: (result.issues?.topRisks ?? []).map((risk) => ({
       title: risk.title,
       severity: toCliRiskSeverity(risk.severity),
       score: risk.score,

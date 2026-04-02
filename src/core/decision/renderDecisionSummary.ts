@@ -2,7 +2,14 @@ import type {
   DecideExecutionModeResult,
   DecisionReason,
 } from "./decideExecutionMode.js";
-import type { SavedAgentResult, ValidationIssue } from "../../types/agent.js";
+import type {
+  SavedAgentResult,
+  ScoredRisk,
+  ValidationIssue
+} from "../../types/agent.js";
+import { buildDecisionExplanation } from "./buildDecisionExplanation.js";
+import { buildSavedRecommendation } from "../result/buildSavedRecommendation.js";
+import { buildRecommendation } from "./buildRecommendation.js";
 function formatReason(reason: DecisionReason): string {
   const detailSuffix =
     reason.details && reason.details.length > 0
@@ -19,18 +26,28 @@ function formatReason(reason: DecisionReason): string {
   return `- [${severityLabel}] ${reason.code}: ${reason.message}${detailSuffix}`;
 }
 
-function buildRecommendation(result: DecideExecutionModeResult): string {
-  switch (result.mode) {
-    case "blocked":
-      return "Do not apply automatically. Fix blocking validation issues first.";
-    case "preview_only":
-      return "Preview the patch and review warnings before any apply step.";
-    case "safe_to_apply":
-      return "Patch can be applied automatically under current safeguards.";
-    default:
-      return "Review the result before continuing.";
-  }
+function formatRiskSeverity(severity: "high" | "medium" | "low"): string {
+  if (severity === "high") return "HIGH";
+  if (severity === "medium") return "MEDIUM";
+  return "LOW";
 }
+
+function renderTopRisks(topRisks?: ScoredRisk[], limit = 3): string[] {
+  if (!topRisks || topRisks.length === 0) {
+    return [];
+  }
+
+  const lines: string[] = [];
+  lines.push("");
+  lines.push("Top Risks:");
+
+  for (const risk of topRisks.slice(0, limit)) {
+    lines.push(`- [${formatRiskSeverity(risk.severity)}] ${risk.title}`);
+  }
+
+  return lines;
+}
+
 
 export function renderDecisionSummary(
   result: DecideExecutionModeResult
@@ -51,6 +68,12 @@ export function renderDecisionSummary(
     }
   }
 
+  lines.push(...renderTopRisks(result.topRisks));
+
+  lines.push("");
+  lines.push("Explanation:");
+  lines.push(buildDecisionExplanation(result));
+
   lines.push("");
   lines.push("Recommendation:");
   lines.push(buildRecommendation(result));
@@ -64,22 +87,6 @@ function formatIssueSeverity(severity: ValidationIssue["severity"]): string {
   return "INFO";
 }
 
-function formatSavedRecommendation(result: SavedAgentResult): string {
-  if (result.decision.recommendation) {
-    return result.decision.recommendation;
-  }
-
-  switch (result.decision.mode) {
-    case "blocked":
-      return "Do not apply automatically. Fix blocking validation issues first.";
-    case "preview":
-      return "Preview the patch and review warnings before any apply step.";
-    case "apply":
-      return "Patch can be applied automatically under current safeguards.";
-    default:
-      return "Review the result before continuing.";
-  }
-}
 
 export function renderSavedAgentResultSummary(
   result: SavedAgentResult
@@ -96,8 +103,7 @@ export function renderSavedAgentResultSummary(
 
   lines.push("");
   lines.push("Recommendation:");
-  lines.push(formatSavedRecommendation(result));
-
+lines.push(buildSavedRecommendation(result));
   if (result.issues?.topRisks?.length) {
     lines.push("");
     lines.push("Top Risks:");
@@ -129,15 +135,9 @@ export function renderSavedAgentResultSummary(
   if (result.issues?.summary) {
     lines.push("");
     lines.push("Summary:");
-    lines.push(
-      `- Total: ${result.issues.summary.total} issue(s)`
-    );
-    lines.push(
-      `- Errors: ${result.issues.summary.errors}`
-    );
-    lines.push(
-      `- Warnings: ${result.issues.summary.warnings}`
-    );
+    lines.push(`- Total: ${result.issues.summary.total} issue(s)`);
+    lines.push(`- Errors: ${result.issues.summary.errors}`);
+    lines.push(`- Warnings: ${result.issues.summary.warnings}`);
   }
 
   if (result.statusLine) {
@@ -147,9 +147,4 @@ export function renderSavedAgentResultSummary(
   }
 
   return lines.join("\n");
-}
-function formatRiskSeverity(severity: "high" | "medium" | "low"): string {
-  if (severity === "high") return "HIGH";
-  if (severity === "medium") return "MEDIUM";
-  return "LOW";
 }

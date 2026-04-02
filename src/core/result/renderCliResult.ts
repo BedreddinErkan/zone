@@ -1,6 +1,6 @@
 import type { CliOutputFormat } from "../../types/agent.js";
 import type { CliRiskItem, CliViewModel } from "./buildCliViewModel.js";
-
+import { buildSavedDecisionExplanation } from "./buildSavedDecisionExplanation.js";
 function renderSummary(view: CliViewModel): string {
   const lines: string[] = [];
 
@@ -8,6 +8,7 @@ function renderSummary(view: CliViewModel): string {
   lines.push(view.statusLine);
   lines.push(`Confidence: ${view.confidenceScore}`);
   lines.push(`Issues: ${view.errorCount} error, ${view.warningCount} warning`);
+  lines.push(`Recommendation: ${view.recommendation}`);
 
   const firstRisk = view.topRisks[0];
   if (firstRisk) {
@@ -66,6 +67,8 @@ function renderDetailed(view: CliViewModel): string {
   sections.push(`Status: ${view.statusLine}`);
   sections.push(`Confidence: ${view.confidenceScore}`);
   sections.push(`Issue Summary: ${view.errorCount} error, ${view.warningCount} warning`);
+  sections.push(`Recommendation\n${view.recommendation}`);
+  sections.push(`Explanation\n${buildSavedDecisionExplanation(view.rawResult)}`);
 
   sections.push(renderTopRisks(view.topRisks));
 
@@ -99,7 +102,6 @@ function renderDetailed(view: CliViewModel): string {
 
   return sections.join("\n\n");
 }
-
 export function renderCliResult(
   view: CliViewModel,
   format: CliOutputFormat

@@ -10,12 +10,13 @@ import { promisify } from "node:util";
 import { ExecutionTracker } from "../utils/executionTracker.js";
 import { generateTraceId } from "../utils/trace.js";
 import { runFeatureAgent } from "../core/runFeatureAgent.js";
+import { runAgent } from "../core/runAgent.js";
 import { loadSavedAgentResult } from "../core/loadSavedAgentResult.js";
 import { evaluateCiResult } from "../ci/evaluateCiResult.js";
 import type { SavedAgentResult, CliOutputFormat } from "../types/agent.js";
 import { buildCliViewModel } from "../core/result/buildCliViewModel.js";
 import { renderCliResult } from "../core/result/renderCliResult.js";
-
+import { renderRunAgentResult } from "../core/renderRunAgentResult.js";
 const execFileAsync = promisify(execFile);
 
 type CliOptions = {
@@ -26,6 +27,7 @@ type CliOptions = {
   diffAware?: boolean;
   output?: string;
   format?: string;
+  taskOnly?: boolean;
   mode?: "preview" | "dry-run" | "apply";
 };
 
@@ -214,7 +216,7 @@ function buildErrorResult(
           ]
         }
       ],
-         topRisks: [
+      topRisks: [
         {
           id: "issue:runtime_failure",
           title: "Runtime failure",
@@ -266,6 +268,38 @@ function buildErrorResult(
   };
 }
 
+async function runTaskOnlyFlow(options: {
+  task: string;
+  verbose: boolean;
+  traceId: string;
+  tracker: ExecutionTracker;
+}): Promise<number> {
+  const { task, verbose, traceId, tracker } = options;
+
+  tracker.startPhase("run_agent");
+  const result = await runAgent({ task });
+  tracker.endPhase("run_agent");
+
+  tracker.endPhase("total");
+
+  printVerbose("runAgent.result", result, verbose);
+
+  console.log("");
+  console.log(renderRunAgentResult(result));
+  console.log("");
+
+  printVerbose(
+    "execution",
+    {
+      traceId,
+      ...tracker.build()
+    },
+    verbose
+  );
+
+  return 0;
+}
+
 export async function runCliWithOptions(options: CliOptions): Promise<number> {
   const tracker = new ExecutionTracker();
   const traceId = generateTraceId();
@@ -280,16 +314,27 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
   const ciMode = Boolean(options.ci);
   const verbose = Boolean(options.verbose);
   const diffAware = Boolean(options.diffAware);
+  const taskOnly = Boolean(options.taskOnly);
 
   printHeader();
   console.log(`Mode: ${ciMode ? "CI" : "standard"}`);
   console.log(`Format: ${format}`);
+  console.log(`Flow: ${taskOnly ? "task-only" : "legacy"}`);
 
   printVerbose("cli.options", options, verbose);
   printVerbose("repoPath", repoPath, verbose);
   printVerbose("resultPath", resultPath, verbose);
 
   try {
+    if (taskOnly) {
+      return await runTaskOnlyFlow({
+        task,
+        verbose,
+        traceId,
+        tracker
+      });
+    }
+
     const changedFiles = diffAware ? await getChangedFiles(repoPath) : [];
 
     if (diffAware) {
@@ -314,6 +359,7 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
     }
 
     tracker.startPhase("build_cli_view");
+    const cliView = buildCliViewModel(savedResult);
     tracker.endPhase("build_cli_view");
 
     tracker.endPhase("total");
@@ -322,8 +368,6 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
       traceId,
       ...tracker.build()
     };
-
-    const cliView = buildCliViewModel(savedResult);
 
     await writeJsonFile(resultPath, savedResult);
 
@@ -348,9 +392,27 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
     return 0;
   } catch (error) {
     const message = formatErrorMessage(error);
-    const errorResult = buildErrorResult(task, repoPath, message);
 
     tracker.endPhase("total");
+
+    if (taskOnly) {
+      console.error("");
+      console.error(`Task-only flow failed: ${message}`);
+      console.error("");
+
+      printVerbose(
+        "execution",
+        {
+          traceId,
+          ...tracker.build()
+        },
+        verbose
+      );
+
+      return 1;
+    }
+
+    const errorResult = buildErrorResult(task, repoPath, message);
 
     errorResult.execution = {
       traceId,
@@ -388,6 +450,7 @@ export async function run(): Promise<void> {
     .option("--ci", "Enable CI mode")
     .option("--verbose", "Enable verbose logs")
     .option("--diff-aware", "Boost ranking using git diff context")
+    .option("--task-only", "Run Sprint 7 task-only orchestration flow")
     .option("--mode <mode>", "Execution mode: preview | dry-run | apply", "preview")
     .option("--format <mode>", "CLI output format: summary | detailed | json", "summary")
     .option(

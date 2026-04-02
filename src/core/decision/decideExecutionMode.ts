@@ -3,7 +3,7 @@ import type { ConfidenceFactor } from "../scoring/confidenceRules.js";
 import type { PatchValidationIssue } from "../../types/patch.js";
 
 export type DecisionMode = "blocked" | "preview_only" | "safe_to_apply";
-
+import type { ScoredRisk } from "../../types/agent.js";
 export type DecisionReasonCode =
   | "PATCH_VALIDATION_ERROR"
   | "PATCH_VALIDATION_WARNING"
@@ -38,6 +38,7 @@ export interface DecideExecutionModeResult {
   mode: DecisionMode;
   confidenceScore: number;
   reasons: DecisionReason[];
+  topRisks?: ScoredRisk[];
 }
 
 function mapPatchIssueToDecisionReason(

@@ -4,10 +4,29 @@ export type CiPenaltyLike = {
   label?: string;
 };
 
+export type CiIssueLike = {
+  source?: "schema" | "confidence" | "decision" | "architecture" | "patch" | string;
+};
+
+export type CiIssueGroupLike = {
+  issues?: CiIssueLike[];
+};
+
 export type CiIssueSummaryLike = {
   errors?: number;
   warnings?: number;
   total?: number;
+};
+
+export type CiTopRiskLike = {
+  id?: string;
+  title?: string;
+  description?: string;
+  severity?: "high" | "medium" | "low" | string;
+  score?: number;
+  category?: string;
+  source?: "validation_issue" | "penalty" | "warning" | "decision" | "derived" | string;
+  relatedCode?: string;
 };
 
 export type CiResultLike = {
@@ -30,6 +49,8 @@ export type CiResultLike = {
   };
   issues?: {
     summary?: CiIssueSummaryLike;
+    grouped?: CiIssueGroupLike[];
+    topRisks?: CiTopRiskLike[];
   };
   statusLine?: string;
 };
@@ -98,6 +119,25 @@ function normalizePenaltyReasons(result: CiResultLike): string[] {
   return [...new Set(reasons)];
 }
 
+function normalizeIssueSources(result: CiResultLike): string[] {
+  const grouped = result?.issues?.grouped ?? [];
+
+  const sources = grouped
+    .flatMap((group) => group.issues ?? [])
+    .map((issue) => issue.source?.trim())
+    .filter((value): value is string => Boolean(value));
+
+  return [...new Set(sources)];
+}
+
+function normalizeTopRisks(result: CiResultLike): CiTopRiskLike[] {
+  return result?.issues?.topRisks ?? [];
+}
+
+function hasHighSeverityRisk(result: CiResultLike): boolean {
+  return normalizeTopRisks(result).some((risk) => risk.severity === "high");
+}
+
 function buildStatusLine(
   decisionMode: CiEvaluation["decisionMode"]
 ): string {
@@ -144,6 +184,21 @@ function buildSummaryLine(input: {
     parts.push(`warnings=${warningCount}`);
   }
 
+  const issueSources = normalizeIssueSources(input.result);
+  if (issueSources.length > 0) {
+    parts.push(`sources=${issueSources.join(" | ")}`);
+  }
+
+  const topRisks = normalizeTopRisks(input.result);
+  if (topRisks.length > 0) {
+    parts.push(
+      `topRisks=${topRisks
+        .slice(0, 3)
+        .map((risk) => `${risk.severity ?? "unknown"}:${risk.title ?? risk.id ?? "risk"}`)
+        .join(" | ")}`
+    );
+  }
+
   if (input.penaltyReasons.length > 0) {
     parts.push(`penalties=${input.penaltyReasons.slice(0, 4).join(" | ")}`);
   } else {
@@ -159,6 +214,7 @@ export function evaluateCiResult(result: CiResultLike): CiEvaluation {
   const penaltyReasons = normalizePenaltyReasons(result);
 
   const errorCount = result?.issues?.summary?.errors ?? 0;
+  const containsHighSeverityRisk = hasHighSeverityRisk(result);
 
   let ciStatus: CiStatus = "warn";
   let shouldFail = false;
@@ -167,6 +223,9 @@ export function evaluateCiResult(result: CiResultLike): CiEvaluation {
     ciStatus = "fail";
     shouldFail = true;
   } else if (errorCount > 0) {
+    ciStatus = "fail";
+    shouldFail = true;
+  } else if (containsHighSeverityRisk) {
     ciStatus = "fail";
     shouldFail = true;
   } else if (decisionMode === "preview_only" || decisionMode === "preview") {

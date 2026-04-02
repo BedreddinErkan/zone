@@ -71,16 +71,16 @@ const sampleResult: SavedAgentResult = {
       }
     ],
     topRisks: [
-   {
-  id: "issue:ambiguous_target",
-  title: "Belirsiz dosya hedefi",
-  description: "Değişikliğin uygulanacağı gerçek dosya net değil.",
-  severity: "medium",
-  score: 60,
-  category: "validation",
-  source: "validation_issue",
-  relatedCode: "AMBIGUOUS_TARGET"
-}
+      {
+        id: "issue:ambiguous_target",
+        title: "Belirsiz dosya hedefi",
+        description: "Değişikliğin uygulanacağı gerçek dosya net değil.",
+        severity: "medium",
+        score: 60,
+        category: "validation",
+        source: "validation_issue",
+        relatedCode: "AMBIGUOUS_TARGET"
+      }
     ]
   },
   decision: {
@@ -141,10 +141,11 @@ describe("renderCliResult", () => {
     expect(output).toContain("Decision: PREVIEW ONLY");
     expect(output).toContain("Confidence: 74");
     expect(output).toContain("Issues: 0 error, 1 warning");
-expect(output).toContain("Top Risk: MEDIUM (score: 60) - Belirsiz dosya hedefi");
+    expect(output).toContain("Top Risk: MEDIUM (score: 60) - Belirsiz dosya hedefi");
+    expect(output).toContain("Recommendation: Review before apply.");
   });
 
-  it("detailed formatinda risk note ve issue bolumlerini yazar", () => {
+  it("detailed formatinda risk note issue explanation ve recommendation bolumlerini yazar", () => {
     const view = buildCliViewModel(sampleResult);
     const output = renderCliResult(view, "detailed");
 
@@ -153,16 +154,20 @@ expect(output).toContain("Top Risk: MEDIUM (score: 60) - Belirsiz dosya hedefi")
     expect(output).toContain("Issues");
     expect(output).toContain("Schema");
     expect(output).toContain("SCHEMA_WARNING");
+    expect(output).toContain("Recommendation");
+    expect(output).toContain("Review before apply.");
+    expect(output).toContain("Explanation");
+    expect(output).toContain("Decision was saved as PREVIEW ONLY");
+    expect(output).toContain("1 warning-level issue(s) remain in the saved result");
   });
 
   it("detailed formatinda risk description ve category gosterir", () => {
     const view = buildCliViewModel(sampleResult);
     const output = renderCliResult(view, "detailed");
 
-    // renderTopRisks'in description ve category'yi render ettigini dogrula
     expect(output).toContain("Belirsiz dosya hedefi");
-    expect(output).toContain("validation"); // category
-    expect(output).toContain("Değişikliğin uygulanacağı gerçek dosya net değil"); // description
+    expect(output).toContain("validation");
+    expect(output).toContain("Değişikliğin uygulanacağı gerçek dosya net değil");
     expect(output).toContain("score=60");
   });
 
@@ -174,27 +179,27 @@ expect(output).toContain("Top Risk: MEDIUM (score: 60) - Belirsiz dosya hedefi")
     expect(parsed.decision.mode).toBe("preview");
     expect(parsed.confidenceBreakdown?.finalScore).toBe(74);
   });
-});
 
-it("detailed modda execution bilgilerini gosterir", () => {
-  const resultWithExec = {
-    ...sampleResult,
-    execution: {
-      traceId: "trace_test_123",
-      startedAt: "2026-04-01T10:00:00.000Z",
-      finishedAt: "2026-04-01T10:00:01.000Z",
-      durationMs: 1000,
-      phases: [
-        { name: "run_agent", durationMs: 800 },
-        { name: "load_result", durationMs: 50 }
-      ]
-    }
-  };
+  it("detailed modda execution bilgilerini gosterir", () => {
+    const resultWithExec = {
+      ...sampleResult,
+      execution: {
+        traceId: "trace_test_123",
+        startedAt: "2026-04-01T10:00:00.000Z",
+        finishedAt: "2026-04-01T10:00:01.000Z",
+        durationMs: 1000,
+        phases: [
+          { name: "run_agent", durationMs: 800 },
+          { name: "load_result", durationMs: 50 }
+        ]
+      }
+    };
 
-  const view = buildCliViewModel(resultWithExec as any);
-  const output = renderCliResult(view, "detailed");
+    const view = buildCliViewModel(resultWithExec as SavedAgentResult);
+    const output = renderCliResult(view, "detailed");
 
-  expect(output).toContain("Execution");
-  expect(output).toContain("trace_test_123");
-  expect(output).toContain("run_agent");
+    expect(output).toContain("Execution");
+    expect(output).toContain("trace_test_123");
+    expect(output).toContain("run_agent");
+  });
 });
