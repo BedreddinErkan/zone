@@ -31,6 +31,55 @@ describe("computeRiskScore", () => {
     expect(result.signals).toContain("schema");
   });
 
+  // -----------------------------------------------------------------------
+  // mass_scope signal
+  // -----------------------------------------------------------------------
+
+  it("returns mass_scope signal for 'delete all users'", () => {
+    const result = computeRiskScore("delete all users");
+
+    expect(result.signals).toContain("mass_scope");
+    expect(result.breakdown.massScope).toBe(25);
+  });
+
+  it("returns mass_scope signal for 'truncate sessions'", () => {
+    const result = computeRiskScore("truncate sessions");
+
+    expect(result.signals).toContain("mass_scope");
+    expect(result.breakdown.massScope).toBe(25);
+  });
+
+  it("does NOT return mass_scope signal for singular 'delete user'", () => {
+    const result = computeRiskScore("delete user");
+
+    expect(result.signals).not.toContain("mass_scope");
+    expect(result.breakdown.massScope).toBe(0);
+  });
+
+  it("returns mass_scope signal for 'wipe all data'", () => {
+    const result = computeRiskScore("wipe all data");
+
+    expect(result.signals).toContain("mass_scope");
+    expect(result.breakdown.massScope).toBe(25);
+  });
+
+  it("returns mass_scope signal for 'purge all cache'", () => {
+    const result = computeRiskScore("purge all cache");
+
+    expect(result.signals).toContain("mass_scope");
+    expect(result.breakdown.massScope).toBe(25);
+  });
+
+  it("stacks destructive + mass_scope for 'delete all user sessions' → score 75", () => {
+    const result = computeRiskScore("delete all user sessions");
+
+    expect(result.signals).toContain("destructive");
+    expect(result.signals).toContain("mass_scope");
+    expect(result.breakdown.destructive).toBe(50);
+    expect(result.breakdown.massScope).toBe(25);
+    expect(result.score).toBe(75);
+  });
+
   it("clamps score to 100", () => {
     const result = computeRiskScore(
       "delete remove drop reset overwrite database schema migration payment auth production password token"

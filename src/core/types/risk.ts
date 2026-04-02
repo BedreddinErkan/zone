@@ -3,6 +3,7 @@ export type RiskBreakdown = {
   schema: number;
   critical: number;
   lowRisk: number;
+  massScope: number;
 };
 
 export type RiskScoreDetails = {

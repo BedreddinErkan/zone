@@ -5,9 +5,9 @@ type RunAgentInput = {
   task: string;
 };
 
-type RunAgentMode = "blocked" | "preview_only" | "safe_to_apply";
+export type RunAgentMode = "blocked" | "preview_only" | "safe_to_apply";
 
-type RunAgentResult = {
+export type RunAgentResult = {
   task: string;
   decision: {
     mode: RunAgentMode;
@@ -20,6 +20,7 @@ type RunAgentResult = {
       schema: number;
       critical: number;
       lowRisk: number;
+      massScope: number;
     };
   };
   confidence: {
@@ -49,7 +50,8 @@ function mapScoreToMode(score: number, signals: string[]): RunAgentMode {
   if (
     score >= 31 ||
     signals.includes("schema") ||
-    signals.includes("critical_domain")
+    signals.includes("critical_domain") ||
+    signals.includes("mass_scope")
   ) {
     return "preview_only";
   }
@@ -67,6 +69,8 @@ function formatSignal(signal: string): string {
       return "low-risk";
     case "destructive":
       return "destructive";
+    case "mass_scope":
+      return "mass-scope";
     default:
       return signal;
   }
@@ -207,6 +211,14 @@ export function buildTopRisks(
     });
   }
 
+  if (signals.includes("mass_scope")) {
+    risks.push({
+      title: "Mass-scope operation",
+      severity: "high",
+      reason: "Task targets all records or the entire dataset — bulk operations are irreversible."
+    });
+  }
+
   return risks;
 }
 
@@ -224,7 +236,13 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     },
     risk: {
       score,
-      breakdown
+      breakdown: {
+        destructive: breakdown.destructive,
+        schema: breakdown.schema,
+        critical: breakdown.critical,
+        lowRisk: breakdown.lowRisk,
+        massScope: breakdown.massScope
+      }
     },
     confidence,
     explanation: buildExplanation(mode, score, signals, confidence.breakdown),

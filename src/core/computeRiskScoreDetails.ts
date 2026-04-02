@@ -67,18 +67,32 @@ export function computeRiskScoreDetails(
     "readme"
   ]);
 
+  const hasMassScopeSignal = includesAny(normalizedTask, [
+    "delete all",
+    "drop all",
+    "remove all",
+    "truncate",
+    "wipe",
+    "purge",
+    "flush",
+    "delete everything",
+    "delete every"
+  ]);
+
   const riskBreakdown: RiskBreakdown = {
     destructive: hasDestructiveSignal ? 50 : 0,
     schema: hasSchemaSignal ? 25 : 0,
     critical: hasCriticalSignal ? 20 : 0,
-    lowRisk: hasLowRiskSignal ? -20 : 0
+    lowRisk: hasLowRiskSignal ? -20 : 0,
+    massScope: hasMassScopeSignal ? 25 : 0
   };
 
   const rawScore =
     riskBreakdown.destructive +
     riskBreakdown.schema +
     riskBreakdown.critical +
-    riskBreakdown.lowRisk;
+    riskBreakdown.lowRisk +
+    riskBreakdown.massScope;
 
   const riskScore = clampScore(rawScore);
 
@@ -98,6 +112,10 @@ export function computeRiskScoreDetails(
 
   if (hasLowRiskSignal) {
     detectedSignals.push("low_risk");
+  }
+
+  if (hasMassScopeSignal) {
+    detectedSignals.push("mass_scope");
   }
 
   return {

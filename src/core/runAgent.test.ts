@@ -66,6 +66,51 @@ describe("runAgent", () => {
   });
 });
 // ---------------------------------------------------------------------------
+// mass_scope signal — integration
+// ---------------------------------------------------------------------------
+
+it("'delete all user sessions' → blocked (destructive + mass_scope = 75)", async () => {
+  const result = await runAgent({ task: "delete all user sessions" });
+
+  expect(result.decision.mode).toBe("blocked");
+  expect(result.risk.breakdown.destructive).toBe(50);
+  expect(result.risk.breakdown.massScope).toBe(25);
+  expect(result.risk.score).toBe(75);
+  expect(result.topRisks.some((r) => r.title === "Mass-scope operation")).toBe(true);
+});
+
+it("'purge all cache' → preview_only (mass_scope only = 25)", async () => {
+  const result = await runAgent({ task: "purge all cache" });
+
+  expect(result.decision.mode).toBe("preview_only");
+  expect(result.risk.breakdown.massScope).toBe(25);
+  expect(result.risk.breakdown.destructive).toBe(0);
+});
+
+it("'delete user session' (tekil) → preview_only, mass_scope yok", async () => {
+  const result = await runAgent({ task: "delete user session" });
+
+  expect(result.decision.mode).toBe("preview_only");
+  expect(result.risk.breakdown.massScope).toBe(0);
+  expect(result.topRisks.every((r) => r.title !== "Mass-scope operation")).toBe(true);
+});
+
+it("mass_scope topRisk reason içeriği doğru", async () => {
+  const result = await runAgent({ task: "wipe all data" });
+
+  const massRisk = result.topRisks.find((r) => r.title === "Mass-scope operation");
+  expect(massRisk).toBeDefined();
+  expect(massRisk?.severity).toBe("high");
+  expect(massRisk?.reason).toContain("irreversible");
+});
+
+it("explanation mass-scope sinyalini içeriyor", async () => {
+  const result = await runAgent({ task: "purge all records" });
+
+  expect(result.explanation).toContain("mass-scope");
+});
+
+// ---------------------------------------------------------------------------
 // buildExplanation v2 — multi-line integration
 // ---------------------------------------------------------------------------
 

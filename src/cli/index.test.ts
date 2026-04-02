@@ -472,6 +472,140 @@ it("taskOnly false iken legacy flow korunur", async () => {
     expect(mockError).toHaveBeenCalledWith("Task-only flow failed: heuristic failed");
   });
 
+  it("task-only modda --format json geçince JSON output basar", async () => {
+    const runAgentResult = {
+      task: "drop users table",
+      decision: { mode: "blocked", confidenceScore: 25 },
+      risk: {
+        score: 75,
+        breakdown: { destructive: 50, schema: 25, critical: 0, lowRisk: 0 }
+      },
+      confidence: {
+        score: 25,
+        breakdown: {
+          base: 100,
+          destructivePenalty: -50,
+          schemaPenalty: -25,
+          criticalPenalty: 0,
+          lowRiskBonus: 0
+        }
+      },
+      explanation: "BLOCKED: Risk score 75/100",
+      recommendation: "Do not auto-apply.",
+      topRisks: []
+    };
+
+    runAgentMock.mockResolvedValue(runAgentResult);
+
+    const { runCliWithOptions } = await import("./index.js");
+
+    const exitCode = await runCliWithOptions({
+      task: "drop users table",
+      taskOnly: true,
+      format: "json"
+    });
+
+    expect(exitCode).toBe(0);
+
+    // JSON.stringify ile oluşturulan çıktı console.log'a gitmiş olmalı
+    const allLogArgs: string[] = mockLog.mock.calls.map(
+      (args: unknown[]) => String(args[0] ?? "")
+    );
+    const jsonOutput = allLogArgs.find((arg) => {
+      try {
+        JSON.parse(arg);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
+    expect(jsonOutput).toBeDefined();
+    const parsed = JSON.parse(jsonOutput!);
+    expect(parsed.task).toBe("drop users table");
+    expect(parsed.decision.mode).toBe("blocked");
+    expect(parsed.topRisks).toEqual([]);
+  });
+
+  it("task-only modda geçersiz --format değeri 1 döner ve hata basar", async () => {
+    const runAgentResult = {
+      task: "rename helper",
+      decision: { mode: "safe_to_apply", confidenceScore: 90 },
+      risk: {
+        score: 5,
+        breakdown: { destructive: 0, schema: 0, critical: 0, lowRisk: -10 }
+      },
+      confidence: {
+        score: 100,
+        breakdown: {
+          base: 100,
+          destructivePenalty: 0,
+          schemaPenalty: 0,
+          criticalPenalty: 0,
+          lowRiskBonus: 10
+        }
+      },
+      explanation: "SAFE TO APPLY: Risk score 5/100",
+      recommendation: "Apply safely.",
+      topRisks: []
+    };
+
+    runAgentMock.mockResolvedValue(runAgentResult);
+
+    const { runCliWithOptions } = await import("./index.js");
+
+    const exitCode = await runCliWithOptions({
+      task: "rename helper",
+      taskOnly: true,
+      format: "xml"
+    });
+
+    expect(exitCode).toBe(1);
+    expect(mockError).toHaveBeenCalledWith(
+      expect.stringContaining("Invalid --format")
+    );
+  });
+
+  it("task-only modda --format belirtilmezse text (default) kullanılır", async () => {
+    const runAgentResult = {
+      task: "rename helper",
+      decision: { mode: "safe_to_apply", confidenceScore: 90 },
+      risk: {
+        score: 5,
+        breakdown: { destructive: 0, schema: 0, critical: 0, lowRisk: -10 }
+      },
+      confidence: {
+        score: 100,
+        breakdown: {
+          base: 100,
+          destructivePenalty: 0,
+          schemaPenalty: 0,
+          criticalPenalty: 0,
+          lowRiskBonus: 10
+        }
+      },
+      explanation: "SAFE TO APPLY: Risk score 5/100",
+      recommendation: "Apply safely.",
+      topRisks: []
+    };
+
+    runAgentMock.mockResolvedValue(runAgentResult);
+    renderRunAgentResultMock.mockReturnValue("=== SMILE AGENT TEXT OUTPUT ===");
+
+    const { runCliWithOptions } = await import("./index.js");
+
+    const exitCode = await runCliWithOptions({
+      task: "rename helper",
+      taskOnly: true
+      // format belirtilmedi → "text" default
+    });
+
+    expect(exitCode).toBe(0);
+    // text modunda renderRunAgentResult çağrılmış olmalı
+    expect(renderRunAgentResultMock).toHaveBeenCalledTimes(1);
+    expect(mockLog).toHaveBeenCalledWith("=== SMILE AGENT TEXT OUTPUT ===");
+  });
+
   it("task-only modda verbose açıkken execution bilgisini basar", async () => {
     const runAgentResult = {
       task: "rename helper",

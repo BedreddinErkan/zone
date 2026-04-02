@@ -17,6 +17,7 @@ import type { SavedAgentResult, CliOutputFormat } from "../types/agent.js";
 import { buildCliViewModel } from "../core/result/buildCliViewModel.js";
 import { renderCliResult } from "../core/result/renderCliResult.js";
 import { renderRunAgentResult } from "../core/renderRunAgentResult.js";
+import { formatOutput, type OutputFormat } from "../core/formatOutput.js";
 const execFileAsync = promisify(execFile);
 
 type CliOptions = {
@@ -114,6 +115,16 @@ function resolveFormat(options: CliOptions): CliOutputFormat {
     default:
       return "summary";
   }
+}
+
+// resolveOutputFormat — task-only flow için "text" | "json"
+// Geçersiz değer throw eder (caller'da catch edilir → exit 1)
+function resolveOutputFormat(rawFormat: string | undefined): OutputFormat {
+  if (!rawFormat || rawFormat === "text") return "text";
+  if (rawFormat === "json") return "json";
+  throw new Error(
+    `Invalid --format value: "${rawFormat}". Valid values for task-only mode are: text, json`
+  );
 }
 
 async function getChangedFiles(repoPath: string): Promise<string[]> {
@@ -273,8 +284,9 @@ async function runTaskOnlyFlow(options: {
   verbose: boolean;
   traceId: string;
   tracker: ExecutionTracker;
+  outputFormat: OutputFormat;
 }): Promise<number> {
-  const { task, verbose, traceId, tracker } = options;
+  const { task, verbose, traceId, tracker, outputFormat } = options;
 
   tracker.startPhase("run_agent");
   const result = await runAgent({ task });
@@ -285,7 +297,7 @@ async function runTaskOnlyFlow(options: {
   printVerbose("runAgent.result", result, verbose);
 
   console.log("");
-  console.log(renderRunAgentResult(result));
+  console.log(formatOutput(result, outputFormat));
   console.log("");
 
   printVerbose(
@@ -327,11 +339,13 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
 
   try {
     if (taskOnly) {
+      const outputFormat = resolveOutputFormat(options.format);
       return await runTaskOnlyFlow({
         task,
         verbose,
         traceId,
-        tracker
+        tracker,
+        outputFormat
       });
     }
 

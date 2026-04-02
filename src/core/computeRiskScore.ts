@@ -4,7 +4,8 @@ export type RiskSignal =
   | "destructive"
   | "schema"
   | "critical_domain"
-  | "low_risk";
+  | "low_risk"
+  | "mass_scope";
 
 export type ComputeRiskScoreResult = {
   score: number;
@@ -14,6 +15,7 @@ export type ComputeRiskScoreResult = {
     schema: number;
     critical: number;
     lowRisk: number;
+    massScope: number;
   };
 };
 
@@ -46,6 +48,10 @@ export function computeRiskScore(
     signals.push("low_risk");
   }
 
+  if (details.riskBreakdown.massScope > 0) {
+    signals.push("mass_scope");
+  }
+
   return {
     score: details.riskScore,
     signals,
@@ -53,7 +59,8 @@ export function computeRiskScore(
       destructive: details.riskBreakdown.destructive,
       schema: details.riskBreakdown.schema,
       critical: details.riskBreakdown.critical,
-      lowRisk: details.riskBreakdown.lowRisk
+      lowRisk: details.riskBreakdown.lowRisk,
+      massScope: details.riskBreakdown.massScope
     }
   };
 }
