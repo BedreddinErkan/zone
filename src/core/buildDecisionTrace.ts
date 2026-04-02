@@ -10,22 +10,42 @@ type ConfidenceBreakdownSnapshot = {
   lowRiskBonus: number;
 };
 
+type BuildDecisionTraceReasonMapping = {
+  code: string;
+  severity: "info" | "warning" | "critical";
+  category: string;
+  message: string;
+};
+
+type BuildDecisionTraceInput = {
+  signals: string[];
+  riskScore: number;
+  confidenceScore: number;
+  confidenceBreakdown: ConfidenceBreakdownSnapshot;
+  mode: RunAgentMode;
+  reasonDetails?: BuildDecisionTraceReasonMapping[];
+};
+
 function buildAppliedPenalties(
   breakdown: ConfidenceBreakdownSnapshot
 ): RunAgentTrace["appliedPenalties"] {
   const penalties: RunAgentTrace["appliedPenalties"] = [];
 
-  if (breakdown.destructivePenalty !== 0)
+  if (breakdown.destructivePenalty !== 0) {
     penalties.push({ type: "destructive", impact: breakdown.destructivePenalty });
+  }
 
-  if (breakdown.schemaPenalty !== 0)
+  if (breakdown.schemaPenalty !== 0) {
     penalties.push({ type: "schema", impact: breakdown.schemaPenalty });
+  }
 
-  if (breakdown.criticalPenalty !== 0)
+  if (breakdown.criticalPenalty !== 0) {
     penalties.push({ type: "critical_domain", impact: breakdown.criticalPenalty });
+  }
 
-  if (breakdown.massScopePenalty !== 0)
+  if (breakdown.massScopePenalty !== 0) {
     penalties.push({ type: "mass_scope", impact: breakdown.massScopePenalty });
+  }
 
   return penalties;
 }
@@ -38,25 +58,22 @@ function buildDecisionPath(input: {
 }): string[] {
   const path: string[] = [];
 
-  // 1. Detected signals
   for (const signal of input.signals) {
     path.push(`Detected ${signal} signal`);
   }
 
-  // 2. Applied penalties
   for (const penalty of input.appliedPenalties) {
     path.push(`Applied ${penalty.type} penalty: ${penalty.impact}`);
   }
 
-  // 3. Total risk score
   path.push(`Total risk score: ${input.riskScore}`);
 
-  // 4. Mode mapping
   const modeLabel: Record<RunAgentMode, string> = {
     blocked: "BLOCKED",
     preview_only: "PREVIEW_ONLY",
     safe_to_apply: "SAFE_TO_APPLY"
   };
+
   path.push(`Mapped to ${modeLabel[input.mode]} mode`);
 
   return path;
@@ -67,9 +84,9 @@ function buildConfidenceFormula(breakdown: ConfidenceBreakdownSnapshot): string 
 
   const penalties: Array<{ value: number; label: string }> = [
     { value: breakdown.destructivePenalty, label: "destructive" },
-    { value: breakdown.schemaPenalty,      label: "schema" },
-    { value: breakdown.criticalPenalty,    label: "critical" },
-    { value: breakdown.massScopePenalty,   label: "mass-scope" }
+    { value: breakdown.schemaPenalty, label: "schema" },
+    { value: breakdown.criticalPenalty, label: "critical" },
+    { value: breakdown.massScopePenalty, label: "mass-scope" }
   ];
 
   for (const { value, label } of penalties) {
@@ -107,11 +124,12 @@ function buildDecisionFactors(input: {
   };
 
   let triggeredBy: string[];
+
   if (input.riskScore >= 71) {
     triggeredBy = ["riskScore"];
   } else if (input.mode === "preview_only") {
-    triggeredBy = input.signals.filter((s) =>
-      ["schema", "critical_domain", "mass_scope"].includes(s)
+    triggeredBy = input.signals.filter((signal) =>
+      ["schema", "critical_domain", "mass_scope"].includes(signal)
     );
   } else {
     triggeredBy = [];
@@ -123,13 +141,9 @@ function buildDecisionFactors(input: {
   };
 }
 
-export function buildDecisionTrace(input: {
-  signals: string[];
-  riskScore: number;
-  confidenceScore: number;
-  confidenceBreakdown: ConfidenceBreakdownSnapshot;
-  mode: RunAgentMode; // ← YENİ
-}): RunAgentTrace {
+export function buildDecisionTrace(
+  input: BuildDecisionTraceInput
+): RunAgentTrace {
   const normalizedSignals = normalizeSignals(input.signals);
   const appliedPenalties = buildAppliedPenalties(input.confidenceBreakdown);
 
@@ -155,6 +169,7 @@ export function buildDecisionTrace(input: {
       riskScore: input.riskScore,
       signals: input.signals
     }),
-    confidenceFormula: buildConfidenceFormula(input.confidenceBreakdown)
+    confidenceFormula: buildConfidenceFormula(input.confidenceBreakdown),
+    reasonMapping: input.reasonDetails ?? []
   };
 }

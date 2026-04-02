@@ -458,7 +458,8 @@ it("renders audit summary in verbose mode when auditSnapshot is provided", () =>
         riskThreshold: 71,
         triggeredBy: ["riskScore"]
       },
-      confidenceFormula: "100 - 50 (destructive) - 25 (schema) = 25"
+      confidenceFormula: "100 - 50 (destructive) - 25 (schema) = 25",
+      reasonMapping: []
     }
   });
 
@@ -557,7 +558,8 @@ it("does not render audit summary when verbose is false", () => {
         riskThreshold: 71,
         triggeredBy: ["riskScore"]
       },
-      confidenceFormula: "100 - 50 (destructive) = 50"
+      confidenceFormula: "100 - 50 (destructive) = 50",
+      reasonMapping: []
     }
   });
 

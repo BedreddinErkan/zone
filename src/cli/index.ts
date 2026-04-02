@@ -13,10 +13,26 @@ import { runFeatureAgent } from "../core/runFeatureAgent.js";
 import { runAgent } from "../core/runAgent.js";
 import { loadSavedAgentResult } from "../core/loadSavedAgentResult.js";
 import { evaluateCiResult } from "../ci/evaluateCiResult.js";
-import type { SavedAgentResult, CliOutputFormat } from "../types/agent.js";
+import type {
+  SavedAgentResult,
+  CliOutputFormat,
+  SavedDecisionMode,
+} from "../types/agent.js";
 import { buildCliViewModel } from "../core/result/buildCliViewModel.js";
 import { renderCliResult } from "../core/result/renderCliResult.js";
 import { formatOutput, type OutputFormat } from "../core/formatOutput.js";
+import { runDecisionEngine } from "../engine/decisionEngine.js";
+import type { ExecutionMode } from "../engine/contradictionDetector.js";
+import { buildAuditSnapshot } from "../audit/auditSnapshot.js";
+import { printAuditSnapshot } from "./output.js";
+import { writeAuditSnapshot } from "../audit/snapshotWriter.js";
+import { readAuditSnapshot } from "../audit/snapshotReader.js";
+import { diffAuditSnapshots } from "../audit/snapshotDiff.js";
+import { renderAuditDiff } from "../audit/renderAuditDiff.js";
+import { loadPatchPlan } from "./loadPatchPlan.js";
+import { runApplyFlow } from "../apply/runApplyFlow.js";
+import { renderApplyResult } from "../apply/renderApplyResult.js";
+
 const execFileAsync = promisify(execFile);
 
 type CliOptions = {
@@ -30,7 +46,85 @@ type CliOptions = {
   format?: string;
   taskOnly?: boolean;
   mode?: "preview" | "dry-run" | "apply";
+  audit?: boolean;
+  auditOut?: string;
+  auditReplay?: string;
+  auditDiff?: string;
+  apply?: boolean;
+  confirmApply?: boolean;
+  patchPlan?: string;
 };
+
+// ---------------------------------------------------------------------------
+// Audit helpers
+// ---------------------------------------------------------------------------
+
+export function resolveAuditFlag(argv: string[]): boolean {
+  return argv.includes("--audit");
+}
+
+function mapSavedModeToExecutionMode(mode: SavedDecisionMode): ExecutionMode {
+  switch (mode) {
+    case "apply":
+      return "safe_to_apply";
+    case "preview":
+      return "preview_only";
+    case "blocked":
+      return "blocked";
+  }
+}
+
+function resolveAuditReplayPath(options: CliOptions): string | null {
+  const value = options.auditReplay?.trim();
+  return value ? value : null;
+}
+
+function resolveAuditDiffPaths(
+  options: CliOptions
+): { leftPath: string; rightPath: string } | null {
+  const raw = options.auditDiff?.trim();
+
+  if (!raw) {
+    return null;
+  }
+
+  const [leftPath, rightPath] = raw.split(",").map((part) => part.trim());
+
+  if (!leftPath || !rightPath) {
+    return null;
+  }
+
+  return { leftPath, rightPath };
+}
+
+function resolvePatchPlanPath(options: CliOptions): string | null {
+  const value = options.patchPlan?.trim();
+  return value ? path.resolve(value) : null;
+}
+
+function runAuditReplayFlow(filePath: string): number {
+  const snapshot = readAuditSnapshot(filePath);
+
+  if (!snapshot) {
+    return 0;
+  }
+
+  printAuditSnapshot(snapshot);
+  return 0;
+}
+
+function runAuditDiffFlow(leftPath: string, rightPath: string): number {
+  const leftSnapshot = readAuditSnapshot(leftPath);
+  const rightSnapshot = readAuditSnapshot(rightPath);
+
+  if (!leftSnapshot || !rightSnapshot) {
+    return 0;
+  }
+
+  const diff = diffAuditSnapshots(leftSnapshot, rightSnapshot);
+  console.log(renderAuditDiff(diff));
+  return 0;
+}
 
 const DEFAULT_RESULT_PATH = path.join(".agent-cache", "last-result.json");
 
@@ -80,7 +174,9 @@ function resolveTask(options: CliOptions): string {
   const task = options.task?.trim();
 
   if (!task) {
-    throw new Error("Missing required --task value.");
+    throw new Error(
+      "Missing required --task value. Use --task for agent runs, or use --audit-replay / --audit-diff for audit operations."
+    );
   }
 
   return task;
@@ -117,8 +213,6 @@ function resolveFormat(options: CliOptions): CliOutputFormat {
   }
 }
 
-// resolveOutputFormat — task-only flow için "text" | "json"
-// Geçersiz değer throw eder (caller'da catch edilir → exit 1)
 function resolveOutputFormat(rawFormat: string | undefined): OutputFormat {
   if (!rawFormat || rawFormat === "text") return "text";
   if (rawFormat === "json") return "json";
@@ -138,7 +232,7 @@ async function getChangedFiles(repoPath: string): Promise<string[]> {
 
     const { stdout } = await execFileAsync("git", args, {
       cwd: repoPath,
-      windowsHide: true
+      windowsHide: true,
     });
 
     const lines = stdout
@@ -177,7 +271,7 @@ function buildErrorResult(
       targetPath: repoPath,
       relevantFileCount: 0,
       suggestedFileCount: 0,
-      patchCount: 0
+      patchCount: 0,
     },
     intent: {
       rawTask: task,
@@ -186,30 +280,30 @@ function buildErrorResult(
       scope: "unknown",
       nestedTarget: null,
       confidence: "low",
-      warnings: ["Runtime failure prevented normal execution."]
+      warnings: ["Runtime failure prevented normal execution."],
     },
     schema: {
       summary: "Schema analysis unavailable due to runtime failure.",
       entities: [],
       relations: [],
-      confidence: "low"
+      confidence: "low",
     },
     storage: {
       primaryStorage: "unknown",
       detectedClients: [],
       confidence: "low",
       reasoning: ["Runtime failure prevented storage analysis."],
-      resourceStorageKind: "unknown"
+      resourceStorageKind: "unknown",
     },
     validation: {
       patch: [],
-      schema: []
+      schema: [],
     },
     issues: {
       summary: {
         total: 1,
         errors: 1,
-        warnings: 0
+        warnings: 0,
       },
       grouped: [
         {
@@ -222,10 +316,10 @@ function buildErrorResult(
             {
               code: "RUNTIME_FAILURE",
               severity: "error",
-              message
-            }
-          ]
-        }
+              message,
+            },
+          ],
+        },
       ],
       topRisks: [
         {
@@ -236,15 +330,16 @@ function buildErrorResult(
           score: 100,
           category: "validation",
           source: "derived",
-          relatedCode: "RUNTIME_FAILURE"
-        }
-      ]
+          relatedCode: "RUNTIME_FAILURE",
+        },
+      ],
     },
     decision: {
       mode: "blocked",
       confidence: 0,
       reason: message,
-      recommendation: "Do not apply automatically. Resolve the runtime failure first."
+      recommendation:
+        "Do not apply automatically. Resolve the runtime failure first.",
     },
     confidenceBreakdown: {
       finalScore: 0,
@@ -253,8 +348,8 @@ function buildErrorResult(
         intentClarity: 0,
         schemaCertainty: 0,
         storageCertainty: 0,
-        patchValidationHealth: 0
-      }
+        patchValidationHealth: 0,
+      },
     },
     confidenceDetails: {
       baseWeightedScore: 0,
@@ -263,19 +358,19 @@ function buildErrorResult(
         {
           code: "RUNTIME_FAILURE",
           label: "Runtime failure",
-          appliedPenalty: 100
-        }
-      ]
+          appliedPenalty: 100,
+        },
+      ],
     },
     notes: {
       execution: [message],
       assumptions: [],
-      followUps: ["Fix the runtime failure and rerun the agent."]
+      followUps: ["Fix the runtime failure and rerun the agent."],
     },
     debug: {
       patchTargets: [],
-      suggestedFiles: []
-    }
+      suggestedFiles: [],
+    },
   };
 }
 
@@ -286,8 +381,25 @@ async function runTaskOnlyFlow(options: {
   traceId: string;
   tracker: ExecutionTracker;
   outputFormat: OutputFormat;
+  audit: boolean;
+  auditOut: string | null;
+  apply: boolean;
+  confirmApply: boolean;
+  patchPlanPath: string | null;
 }): Promise<number> {
-  const { task, verbose, showTrace, traceId, tracker, outputFormat } = options;
+  const {
+    task,
+    verbose,
+    showTrace,
+    traceId,
+    tracker,
+    outputFormat,
+    audit,
+    auditOut,
+    apply,
+    confirmApply,
+    patchPlanPath,
+  } = options;
 
   tracker.startPhase("run_agent");
   const result = await runAgent({ task });
@@ -301,14 +413,119 @@ async function runTaskOnlyFlow(options: {
   console.log(formatOutput(result, outputFormat, { showTrace, verbose }));
   console.log("");
 
+  if (apply) {
+    console.log("=== APPLY RESULT ===");
+
+    if (!confirmApply) {
+      console.log(
+        "Status: skipped\nReason: Apply requested but not confirmed. Re-run with --confirm-apply."
+      );
+      console.log("");
+
+      printVerbose(
+        "execution",
+        {
+          traceId,
+          ...tracker.build(),
+        },
+        verbose
+      );
+
+      return 0;
+    }
+
+    if (!patchPlanPath) {
+      throw new Error(
+        'Apply requested but no patch plan was provided. Use --patch-plan <file>.'
+      );
+    }
+
+    tracker.startPhase("load_patch_plan");
+    const patchPlan = loadPatchPlan(patchPlanPath);
+    tracker.endPhase("load_patch_plan");
+
+    tracker.startPhase("run_apply_flow");
+    const applyResult = await runApplyFlow({
+      result,
+      plan: patchPlan,
+      request: {
+        confirm: true
+      }
+    });
+    tracker.endPhase("run_apply_flow");
+
+    console.log(renderApplyResult(applyResult));
+    console.log("");
+
+    printVerbose("applyResult", applyResult, verbose);
+    printVerbose(
+      "execution",
+      {
+        traceId,
+        ...tracker.build(),
+      },
+      verbose
+    );
+
+    if (audit || auditOut) {
+      try {
+        const engineInput = {
+          riskScore: result.risk.score / 100,
+          confidenceScore: result.decision.confidenceScore / 100,
+          mode: result.decision.mode,
+        };
+        const engineResult = runDecisionEngine(engineInput);
+        const snapshot = buildAuditSnapshot(engineInput, engineResult, {
+          reasonCodes: result.reasonCodes,
+        });
+
+        if (audit) {
+          printAuditSnapshot(snapshot);
+        }
+
+        if (auditOut) {
+          writeAuditSnapshot(snapshot, auditOut);
+        }
+      } catch {
+        // audit errors must never propagate
+      }
+    }
+
+    return applyResult.applied ? 0 : 1;
+  }
+
   printVerbose(
     "execution",
     {
       traceId,
-      ...tracker.build()
+      ...tracker.build(),
     },
     verbose
   );
+
+  if (audit || auditOut) {
+    try {
+      const engineInput = {
+        riskScore: result.risk.score / 100,
+        confidenceScore: result.decision.confidenceScore / 100,
+        mode: result.decision.mode,
+      };
+      const engineResult = runDecisionEngine(engineInput);
+      const snapshot = buildAuditSnapshot(engineInput, engineResult, {
+        reasonCodes: result.reasonCodes,
+      });
+
+      if (audit) {
+        printAuditSnapshot(snapshot);
+      }
+
+      if (auditOut) {
+        writeAuditSnapshot(snapshot, auditOut);
+      }
+    } catch {
+      // audit errors must never propagate
+    }
+  }
 
   return 0;
 }
@@ -319,16 +536,38 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
 
   tracker.startPhase("total");
 
+  const verbose = Boolean(options.verbose);
+  const auditReplayPath = resolveAuditReplayPath(options);
+  const auditDiffPaths = resolveAuditDiffPaths(options);
+
+  if (auditReplayPath) {
+    printVerbose("cli.options", options, verbose);
+    return runAuditReplayFlow(auditReplayPath);
+  }
+
+  if (options.auditDiff && !auditDiffPaths) {
+    console.error(
+      '[audit] Failed to diff snapshots: expected --audit-diff="<left.json,right.json>"'
+    );
+    return 0;
+  }
+
+  if (auditDiffPaths) {
+    printVerbose("cli.options", options, verbose);
+    return runAuditDiffFlow(auditDiffPaths.leftPath, auditDiffPaths.rightPath);
+  }
+
   const task = resolveTask(options);
   const repoPath = resolveRepoPath(options);
   const resultPath = resolveResultPath(options);
   const mode = resolveMode(options);
   const format = resolveFormat(options);
   const ciMode = Boolean(options.ci);
-  const verbose = Boolean(options.verbose);
   const showTrace = Boolean(options.trace) || verbose;
   const diffAware = Boolean(options.diffAware);
   const taskOnly = Boolean(options.taskOnly);
+  const audit = Boolean(options.audit);
+  const auditOut = options.auditOut?.trim() || null;
 
   printHeader();
   console.log(`Mode: ${ciMode ? "CI" : "standard"}`);
@@ -348,7 +587,12 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
         showTrace,
         traceId,
         tracker,
-        outputFormat
+        outputFormat,
+        audit,
+        auditOut,
+        apply: Boolean(options.apply),
+        confirmApply: Boolean(options.confirmApply),
+        patchPlanPath: resolvePatchPlanPath(options),
       });
     }
 
@@ -363,7 +607,7 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
       task,
       targetPath: repoPath,
       mode,
-      changedFiles
+      changedFiles,
     });
     tracker.endPhase("run_agent");
 
@@ -383,7 +627,7 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
 
     savedResult.execution = {
       traceId,
-      ...tracker.build()
+      ...tracker.build(),
     };
 
     await writeJsonFile(resultPath, savedResult);
@@ -392,6 +636,28 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
     console.log(renderCliResult(cliView, format));
     console.log("");
     console.log(`Result saved: ${resultPath}`);
+
+    if (audit || auditOut) {
+      try {
+        const engineInput = {
+          riskScore: 0,
+          confidenceScore: savedResult.decision.confidence / 100,
+          mode: mapSavedModeToExecutionMode(savedResult.decision.mode),
+        };
+        const engineResult = runDecisionEngine(engineInput);
+        const snapshot = buildAuditSnapshot(engineInput, engineResult);
+
+        if (audit) {
+          printAuditSnapshot(snapshot);
+        }
+
+        if (auditOut) {
+          writeAuditSnapshot(snapshot, auditOut);
+        }
+      } catch {
+        // audit errors must never propagate
+      }
+    }
 
     if (ciMode) {
       const ciEvaluation = evaluateCiResult(savedResult);
@@ -421,7 +687,7 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
         "execution",
         {
           traceId,
-          ...tracker.build()
+          ...tracker.build(),
         },
         verbose
       );
@@ -433,7 +699,7 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
 
     errorResult.execution = {
       traceId,
-      ...tracker.build()
+      ...tracker.build(),
     };
 
     await writeJsonFile(resultPath, errorResult);
@@ -461,14 +727,38 @@ export async function run(): Promise<void> {
 
   program
     .name("smile-agent")
-    .description("AI-powered code agent for practical repository change planning and patch generation.")
-    .requiredOption("--task <text>", "Task or change request to analyze")
+    .description(
+      "AI-powered code agent for practical repository change planning and patch generation."
+    )
+    .option("--task <text>", "Task or change request to analyze")
     .option("--repo <path>", "Target repository path", process.cwd())
     .option("--ci", "Enable CI mode")
     .option("--verbose", "Enable verbose logs")
     .option("--trace", "Show decision trace in output")
     .option("--diff-aware", "Boost ranking using git diff context")
     .option("--task-only", "Run Sprint 7 task-only orchestration flow")
+    .option("--apply", "Execute controlled apply flow after decision output")
+    .option(
+      "--confirm-apply",
+      "Explicit confirmation required before apply"
+    )
+    .option("--patch-plan <path>", "Path to PatchPlan JSON file")
+    .option(
+      "--audit",
+      "Print full audit snapshot as JSON to stdout (additive, no side effects)"
+    )
+    .option(
+      "--audit-out <path>",
+      "Write audit snapshot as JSON to a file (additive, independent of --audit)"
+    )
+    .option(
+      "--audit-replay <path>",
+      "Read and print an audit snapshot from disk"
+    )
+    .option(
+      "--audit-diff <paths>",
+      'Compare two audit snapshots: "<left.json,right.json>"'
+    )
     .option("--mode <mode>", "Execution mode: preview | dry-run | apply", "preview")
     .option("--format <mode>", "CLI output format: summary | detailed | json", "summary")
     .option(

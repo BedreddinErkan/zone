@@ -30,6 +30,12 @@ type RunAgentTracePenalty = {
   type: string;
   impact: number;
 };
+type RunAgentTraceReasonMapping = {
+  code: string;
+  severity: "info" | "warning" | "critical";
+  category: string;
+  message: string;
+};
 
 export type RunAgentTrace = {
   signals: string[];
@@ -43,6 +49,7 @@ export type RunAgentTrace = {
     triggeredBy: string[];
   };
   confidenceFormula: string;
+  reasonMapping: RunAgentTraceReasonMapping[];
 };
 
 export type RunAgentResult = {
@@ -216,13 +223,6 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
   const mode = mapScoreToMode(score, signals);
   const confidence = computeConfidenceScore({ breakdown });
 
-  const trace = buildDecisionTrace({
-    signals,
-    riskScore: score,
-    confidenceScore: confidence.score,
-    confidenceBreakdown: confidence.breakdown,
-    mode
-  });
 
   const reasonCodes = buildDecisionReasonCodes({
     mode,
@@ -240,7 +240,19 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
   }) as DecisionReasonCode[];
 
   const reasonDetails = buildDecisionReasonDetails(reasonCodes);
-
+const trace = buildDecisionTrace({
+  signals,
+  riskScore: score,
+  confidenceScore: confidence.score,
+  confidenceBreakdown: confidence.breakdown,
+  mode,
+  reasonDetails: reasonDetails.map((reason) => ({
+    code: reason.code,
+    severity: mapReasonSeverityForExplanation(reason.severity),
+    category: reason.category,
+    message: reason.summary
+  }))
+});
   const explanationReasons: DecisionReason[] = reasonDetails.map((reason) => ({
     code: reason.code as ExecutionDecisionReasonCode,
     severity: mapReasonSeverityForExplanation(reason.severity),

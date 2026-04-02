@@ -1,7 +1,7 @@
 import type { ScoredRisk } from "../../types/agent.js";
 import type { DecideExecutionModeResult } from "./decideExecutionMode.js";
 import {
-  type DecisionReasonCode
+  type DecisionReasonCode as MetadataDecisionReasonCode
 } from "./decisionReasonCodeMeta.js";
 import { buildReasonSummaryLine } from "./buildReasonSummaryLine.js";
 
@@ -78,13 +78,37 @@ function buildClosingLine(result: DecideExecutionModeResult): string {
       return "Automatic apply can proceed under the current safeguards.";
   }
 }
+function assertReasonCodeParity(
+  reasons: DecideExecutionModeResult["reasons"],
+  reasonCodes?: readonly MetadataDecisionReasonCode[]
+): void {
+  if (!reasonCodes || reasonCodes.length === 0) {
+    return;
+  }
+
+  const reasonSequence = reasons.map((reason) => String(reason.code));
+
+  let searchStartIndex = 0;
+
+  for (const code of reasonCodes) {
+    const matchedIndex = reasonSequence.indexOf(String(code), searchStartIndex);
+
+    if (matchedIndex === -1) {
+      throw new Error("DECISION_EXPLANATION_REASON_MISMATCH");
+    }
+
+    searchStartIndex = matchedIndex + 1;
+  }
+}
 
 export function buildDecisionExplanation(
   result: DecideExecutionModeResult,
   options: {
-    reasonCodes?: readonly DecisionReasonCode[];
+    reasonCodes?: readonly MetadataDecisionReasonCode[];
   } = {}
 ): string {
+  assertReasonCodeParity(result.reasons, options.reasonCodes);
+
   const lines: string[] = [];
 
   lines.push(buildModeLead(result));

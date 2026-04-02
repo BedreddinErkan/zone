@@ -262,9 +262,27 @@ describe("runAgent explanation consistency", () => {
       expect(result.explanation.toLowerCase()).toMatch(/schema/);
     }
   });
-});
-});
+  it("keeps trace reason mapping codes aligned with reasonCodes", async () => {
+  const result = await runAgent({
+    task: "delete all user sessions"
+  });
 
+  expect(result.reasonCodes.length).toBeGreaterThan(0);
+  expect(result.trace.reasonMapping.length).toBe(result.reasonCodes.length);
+  expect(result.trace.reasonMapping.map((item) => item.code)).toEqual(result.reasonCodes);
+});
+});
+});
+it("keeps blocked explanation semantically aligned for destructive mass-scope tasks", async () => {
+  const result = await runAgent({
+    task: "delete all user sessions"
+  });
+
+  expect(result.decision.mode).toBe("blocked");
+  expect(result.reasonCodes).toContain("BLOCKED_DESTRUCTIVE_OPERATION");
+  expect(result.explanation).toContain("BLOCKED");
+  expect(result.explanation.toLowerCase()).toMatch(/destructive|irreversible|high risk|manual review/);
+});
   // ---------------------------------------------------------------------------
   // buildExplanation v2 — multi-line integration
   // ---------------------------------------------------------------------------

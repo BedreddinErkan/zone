@@ -73,7 +73,8 @@ const mockResult = {
       riskThreshold: 71,
       triggeredBy: ["riskScore"]
     },
-    confidenceFormula: "100 - 50 (destructive) - 25 (schema) = 25"
+    confidenceFormula: "100 - 50 (destructive) - 25 (schema) = 25",
+    reasonMapping: []
   },
   reasonCodes: [
     "BLOCKED_DESTRUCTIVE_OPERATION",

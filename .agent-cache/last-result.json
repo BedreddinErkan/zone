@@ -1,240 +1,132 @@
 {
   "version": 2,
-  "generatedAt": "2026-04-02T00:21:10.960Z",
-  "summary": "Task: add index to orders table\nMode: preview\nIntent action: create\nIntent resource kind: unknown\nIntent scope: parent_record\nParent resource: unknown\nNested resource: unknown\nRelevant files found: 4\nConfidence score: 33/100 (low)\nDecision: blocked",
-  "statusLine": "STATUS: blocked | confidence=33 | warnings=2 | penalties=2 | patches=4 | relevant=4 | suggested=4",
+  "generatedAt": "2026-04-02T21:01:09.188Z",
+  "summary": "Run failed: console.warn is not a function",
+  "statusLine": "STATUS: BLOCKED | confidence=0 | warnings=1 | penalties=1 | patches=0 | relevant=0 | suggested=0",
   "meta": {
-    "task": "add index to orders table",
-    "targetPath": "C:\\Users\\User\\PycharmProjects\\smile-agent",
-    "relevantFileCount": 4,
-    "suggestedFileCount": 4,
-    "patchCount": 4
+    "task": "rename helper",
+    "targetPath": "C:\\repo",
+    "relevantFileCount": 0,
+    "suggestedFileCount": 0,
+    "patchCount": 0
   },
   "intent": {
-    "rawTask": "add index to orders table",
-    "operation": "create",
+    "rawTask": "rename helper",
+    "operation": "unknown",
     "target": "unknown",
-    "scope": "parent_record",
+    "scope": "unknown",
     "nestedTarget": null,
-    "confidence": "medium",
-    "warnings": []
+    "confidence": "low",
+    "warnings": [
+      "Runtime failure prevented normal execution."
+    ]
   },
   "schema": {
-    "summary": "Intent action: create Intent resource kind: unknown Intent scope: parent_record No schema snapshot available. Detected DB client: unknown Detected response shape: unknown",
+    "summary": "Schema analysis unavailable due to runtime failure.",
     "entities": [],
     "relations": [],
-    "confidence": "medium"
+    "confidence": "low"
   },
   "storage": {
     "primaryStorage": "unknown",
     "detectedClients": [],
     "confidence": "low",
     "reasoning": [
-      "No storage insight could be inferred from the current context."
+      "Runtime failure prevented storage analysis."
     ],
     "resourceStorageKind": "unknown"
   },
   "validation": {
-    "patch": [
-      {
-        "code": "PATCH_VALIDATION_ERROR",
-        "message": "Patch targets a protected file or workflow path.",
-        "severity": "error",
-        "source": "patch",
-        "file": "package-lock.json"
-      }
-    ],
-    "schema": [
-      {
-        "code": "SCHEMA_VALIDATION_WARNING",
-        "message": "No schema snapshot loaded. Schema-level patch validation skipped.",
-        "severity": "warning",
-        "source": "schema"
-      }
-    ]
+    "patch": [],
+    "schema": []
   },
   "issues": {
     "summary": {
-      "total": 2,
+      "total": 1,
       "errors": 1,
-      "warnings": 1
+      "warnings": 0
     },
     "grouped": [
       {
-        "key": "patch",
-        "label": "Patch validation",
+        "key": "runtime",
+        "label": "Runtime failure",
         "total": 1,
         "errors": 1,
         "warnings": 0,
         "issues": [
           {
-            "code": "PATCH_VALIDATION_ERROR",
-            "message": "Patch targets a protected file or workflow path.",
+            "code": "RUNTIME_FAILURE",
             "severity": "error",
-            "source": "patch",
-            "file": "package-lock.json"
-          }
-        ]
-      },
-      {
-        "key": "schema",
-        "label": "Schema validation",
-        "total": 1,
-        "errors": 0,
-        "warnings": 1,
-        "issues": [
-          {
-            "code": "SCHEMA_VALIDATION_WARNING",
-            "message": "No schema snapshot loaded. Schema-level patch validation skipped.",
-            "severity": "warning",
-            "source": "schema"
+            "message": "console.warn is not a function"
           }
         ]
       }
     ],
     "topRisks": [
       {
-        "id": "decision:blocked",
-        "title": "Uygulama engellendi",
-        "description": "Sistem kritik riskler nedeniyle patch uygulamasını durdurdu.",
-        "score": 92,
+        "id": "issue:runtime_failure",
+        "title": "Runtime failure",
+        "description": "console.warn is not a function",
         "severity": "high",
+        "score": 100,
         "category": "validation",
-        "source": "decision",
-        "relatedCode": "blocked"
-      },
-      {
-        "id": "issue:patch_validation_error",
-        "title": "Patch targets a protected file or workflow path.",
-        "description": "Validation aşamasında tespit edilen bir risk.",
-        "score": 78,
-        "severity": "medium",
-        "category": "patch",
-        "source": "validation_issue",
-        "relatedCode": "PATCH_VALIDATION_ERROR"
-      },
-      {
-        "id": "issue:schema_validation_warning",
-        "title": "No schema snapshot loaded. Schema-level patch validation skipped.",
-        "description": "Validation aşamasında tespit edilen bir risk.",
-        "score": 52,
-        "severity": "medium",
-        "category": "schema",
-        "source": "validation_issue",
-        "relatedCode": "SCHEMA_VALIDATION_WARNING"
+        "source": "derived",
+        "relatedCode": "RUNTIME_FAILURE"
       }
     ]
   },
   "decision": {
     "mode": "blocked",
-    "confidence": 33,
-    "reason": "Blocking validation errors were detected.",
-    "recommendation": "Apply yapma. Önce blocking validation hatalarını çöz ve agenti tekrar çalıştır."
+    "confidence": 0,
+    "reason": "console.warn is not a function",
+    "recommendation": "Do not apply automatically. Resolve the runtime failure first."
   },
   "confidenceBreakdown": {
-    "finalScore": 33,
+    "finalScore": 0,
     "level": "low",
     "factors": {
-      "intentClarity": 70,
-      "schemaCertainty": 58,
-      "storageCertainty": 18,
-      "patchValidationHealth": 43
+      "intentClarity": 0,
+      "schemaCertainty": 0,
+      "storageCertainty": 0,
+      "patchValidationHealth": 0
     }
   },
   "confidenceDetails": {
-    "baseWeightedScore": 48.43,
-    "totalPenalty": 15,
+    "baseWeightedScore": 0,
+    "totalPenalty": 100,
     "penalties": [
       {
-        "code": "SCHEMA_WARNINGS",
-        "label": "Schema validation warnings",
-        "count": 1,
-        "perItem": 3,
-        "cap": 12,
-        "appliedPenalty": 3
-      },
-      {
-        "code": "LOW_STORAGE_CONFIDENCE",
-        "label": "Low storage confidence",
-        "appliedPenalty": 12
+        "code": "RUNTIME_FAILURE",
+        "label": "Runtime failure",
+        "appliedPenalty": 100
       }
     ]
   },
   "notes": {
-    "execution": [],
-    "assumptions": [
-      "Storage detection was inferred with limited confidence."
+    "execution": [
+      "console.warn is not a function"
     ],
+    "assumptions": [],
     "followUps": [
-      "Resolve validation errors and rerun the agent."
+      "Fix the runtime failure and rerun the agent."
     ]
   },
   "debug": {
-    "patchTargets": [
-      {
-        "path": "package-lock.json",
-        "operation": "modify"
-      },
-      {
-        "path": "package.json",
-        "operation": "modify"
-      },
-      {
-        "path": "ReadMe.md",
-        "operation": "modify"
-      },
-      {
-        "path": "tsconfig.json",
-        "operation": "modify"
-      }
-    ],
-    "suggestedFiles": [
-      {
-        "originalPath": "package-lock.json",
-        "resolvedPath": "package-lock.json",
-        "status": "verified",
-        "action": "inspect"
-      },
-      {
-        "originalPath": "package.json",
-        "resolvedPath": "package.json",
-        "status": "verified",
-        "action": "inspect"
-      },
-      {
-        "originalPath": "ReadMe.md",
-        "resolvedPath": "ReadMe.md",
-        "status": "verified",
-        "action": "inspect"
-      },
-      {
-        "originalPath": "tsconfig.json",
-        "resolvedPath": "tsconfig.json",
-        "status": "verified",
-        "action": "inspect"
-      }
-    ]
+    "patchTargets": [],
+    "suggestedFiles": []
   },
   "execution": {
-    "traceId": "trace_20260402002110_22zexv",
-    "startedAt": "2026-04-02T00:21:10.938Z",
-    "finishedAt": "2026-04-02T00:21:10.962Z",
-    "durationMs": 24,
+    "traceId": "trace_20260402210109_zxis44",
+    "startedAt": "2026-04-02T21:01:09.185Z",
+    "finishedAt": "2026-04-02T21:01:09.188Z",
+    "durationMs": 3,
     "phases": [
       {
         "name": "total",
-        "durationMs": 24
+        "durationMs": 2
       },
       {
         "name": "run_agent",
-        "durationMs": 23
-      },
-      {
-        "name": "load_result",
-        "durationMs": 1
-      },
-      {
-        "name": "build_cli_view",
         "durationMs": 0
       }
     ]

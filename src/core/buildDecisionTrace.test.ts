@@ -521,4 +521,55 @@ describe("buildDecisionTrace – confidenceFormula", () => {
 
     expect(trace.confidenceFormula).toContain(`= ${expectedResult}`);
   });
+  it("includes reasonMapping when reason details are provided", () => {
+  const trace = buildDecisionTrace({
+    signals: ["schema"],
+    riskScore: 40,
+    confidenceScore: 75,
+    confidenceBreakdown: {
+      base: 100,
+      destructivePenalty: 0,
+      schemaPenalty: -25,
+      criticalPenalty: 0,
+      massScopePenalty: 0,
+      lowRiskBonus: 0
+    },
+    mode: "preview_only",
+    reasonDetails: [
+      {
+        code: "PREVIEW_SCHEMA_RISK",
+        severity: "warning",
+        category: "risk",
+        message: "Schema-sensitive changes require preview."
+      }
+    ]
+  });
+
+  expect(trace.reasonMapping).toEqual([
+    {
+      code: "PREVIEW_SCHEMA_RISK",
+      severity: "warning",
+      category: "risk",
+      message: "Schema-sensitive changes require preview."
+    }
+  ]);
+});
+  it("returns empty reasonMapping when reason details are omitted", () => {
+  const trace = buildDecisionTrace({
+    signals: [],
+    riskScore: 0,
+    confidenceScore: 100,
+    confidenceBreakdown: {
+      base: 100,
+      destructivePenalty: 0,
+      schemaPenalty: 0,
+      criticalPenalty: 0,
+      massScopePenalty: 0,
+      lowRiskBonus: 0
+    },
+    mode: "safe_to_apply"
+  });
+
+  expect(trace.reasonMapping).toEqual([]);
+});
 });
