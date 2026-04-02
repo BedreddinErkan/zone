@@ -157,13 +157,14 @@ it("includes confidence breakdown for schema-related tasks", async () => {
   });
 
   expect(result.confidence.score).toBe(75);
-  expect(result.confidence.breakdown).toEqual({
-    base: 100,
-    destructivePenalty: 0,
-    schemaPenalty: -25,
-    criticalPenalty: 0,
-    lowRiskBonus: 0
-  });
+expect(result.confidence.breakdown).toEqual({
+  base: 100,
+  destructivePenalty: 0,
+  schemaPenalty: -25,
+  criticalPenalty: 0,
+  massScopePenalty: 0,
+  lowRiskBonus: 0
+});
 });
 
 it("includes confidence breakdown for destructive database tasks", async () => {
@@ -172,11 +173,12 @@ it("includes confidence breakdown for destructive database tasks", async () => {
   });
 
   expect(result.confidence.score).toBe(25);
-  expect(result.confidence.breakdown).toEqual({
-    base: 100,
-    destructivePenalty: -50,
-    schemaPenalty: -25,
-    criticalPenalty: 0,
-    lowRiskBonus: 0
-  });
+expect(result.confidence.breakdown).toEqual({
+  base: 100,
+  destructivePenalty: -50,
+  schemaPenalty: -25,
+  criticalPenalty: 0,
+  massScopePenalty: 0,
+  lowRiskBonus: 0
+});
 });

@@ -1,28 +1,26 @@
 {
   "version": 2,
-  "generatedAt": "2026-04-01T17:17:23.452Z",
-  "summary": "Task: test\nMode: preview\nIntent action: unknown\nIntent resource kind: unknown\nIntent scope: unknown\nParent resource: unknown\nNested resource: unknown\nRelevant files found: 4\nConfidence score: 28/100 (low)\nDecision: blocked",
-  "statusLine": "STATUS: blocked | confidence=28 | warnings=2 | penalties=3 | patches=4 | relevant=4 | suggested=4",
+  "generatedAt": "2026-04-02T00:21:10.960Z",
+  "summary": "Task: add index to orders table\nMode: preview\nIntent action: create\nIntent resource kind: unknown\nIntent scope: parent_record\nParent resource: unknown\nNested resource: unknown\nRelevant files found: 4\nConfidence score: 33/100 (low)\nDecision: blocked",
+  "statusLine": "STATUS: blocked | confidence=33 | warnings=2 | penalties=2 | patches=4 | relevant=4 | suggested=4",
   "meta": {
-    "task": "test",
+    "task": "add index to orders table",
     "targetPath": "C:\\Users\\User\\PycharmProjects\\smile-agent",
     "relevantFileCount": 4,
     "suggestedFileCount": 4,
     "patchCount": 4
   },
   "intent": {
-    "rawTask": "test",
-    "operation": "unknown",
+    "rawTask": "add index to orders table",
+    "operation": "create",
     "target": "unknown",
-    "scope": "unknown",
+    "scope": "parent_record",
     "nestedTarget": null,
     "confidence": "medium",
-    "warnings": [
-      "Could not confidently determine CRUD action from task wording."
-    ]
+    "warnings": []
   },
   "schema": {
-    "summary": "Intent action: unknown Intent resource kind: unknown Intent scope: unknown No schema snapshot available. Detected DB client: unknown Detected response shape: unknown",
+    "summary": "Intent action: create Intent resource kind: unknown Intent scope: parent_record No schema snapshot available. Detected DB client: unknown Detected response shape: unknown",
     "entities": [],
     "relations": [],
     "confidence": "medium"
@@ -42,6 +40,7 @@
         "code": "PATCH_VALIDATION_ERROR",
         "message": "Patch targets a protected file or workflow path.",
         "severity": "error",
+        "source": "patch",
         "file": "package-lock.json"
       }
     ],
@@ -49,7 +48,8 @@
       {
         "code": "SCHEMA_VALIDATION_WARNING",
         "message": "No schema snapshot loaded. Schema-level patch validation skipped.",
-        "severity": "warning"
+        "severity": "warning",
+        "source": "schema"
       }
     ]
   },
@@ -71,6 +71,7 @@
             "code": "PATCH_VALIDATION_ERROR",
             "message": "Patch targets a protected file or workflow path.",
             "severity": "error",
+            "source": "patch",
             "file": "package-lock.json"
           }
         ]
@@ -85,53 +86,65 @@
           {
             "code": "SCHEMA_VALIDATION_WARNING",
             "message": "No schema snapshot loaded. Schema-level patch validation skipped.",
-            "severity": "warning"
+            "severity": "warning",
+            "source": "schema"
           }
         ]
       }
     ],
     "topRisks": [
       {
-        "code": "PATCH_VALIDATION_ERROR",
-        "message": "Patch targets a protected file or workflow path.",
-        "severity": "error",
-        "file": "package-lock.json"
+        "id": "decision:blocked",
+        "title": "Uygulama engellendi",
+        "description": "Sistem kritik riskler nedeniyle patch uygulamasını durdurdu.",
+        "score": 92,
+        "severity": "high",
+        "category": "validation",
+        "source": "decision",
+        "relatedCode": "blocked"
       },
       {
-        "code": "SCHEMA_VALIDATION_WARNING",
-        "message": "No schema snapshot loaded. Schema-level patch validation skipped.",
-        "severity": "warning"
+        "id": "issue:patch_validation_error",
+        "title": "Patch targets a protected file or workflow path.",
+        "description": "Validation aşamasında tespit edilen bir risk.",
+        "score": 78,
+        "severity": "medium",
+        "category": "patch",
+        "source": "validation_issue",
+        "relatedCode": "PATCH_VALIDATION_ERROR"
+      },
+      {
+        "id": "issue:schema_validation_warning",
+        "title": "No schema snapshot loaded. Schema-level patch validation skipped.",
+        "description": "Validation aşamasında tespit edilen bir risk.",
+        "score": 52,
+        "severity": "medium",
+        "category": "schema",
+        "source": "validation_issue",
+        "relatedCode": "SCHEMA_VALIDATION_WARNING"
       }
     ]
   },
   "decision": {
     "mode": "blocked",
-    "confidence": 28,
+    "confidence": 33,
     "reason": "Blocking validation errors were detected.",
     "recommendation": "Apply yapma. Önce blocking validation hatalarını çöz ve agenti tekrar çalıştır."
   },
   "confidenceBreakdown": {
-    "finalScore": 28,
+    "finalScore": 33,
     "level": "low",
     "factors": {
-      "intentClarity": 66,
+      "intentClarity": 70,
       "schemaCertainty": 58,
       "storageCertainty": 18,
       "patchValidationHealth": 43
     }
   },
   "confidenceDetails": {
-    "baseWeightedScore": 47.47,
-    "totalPenalty": 19,
+    "baseWeightedScore": 48.43,
+    "totalPenalty": 15,
     "penalties": [
-      {
-        "code": "INTENT_WARNINGS",
-        "label": "Intent warnings",
-        "count": 1,
-        "perItem": 4,
-        "cap": 12,
-        "appliedPenalty": 4
-      },
       {
         "code": "SCHEMA_WARNINGS",
         "label": "Schema validation warnings",
@@ -203,18 +216,18 @@
     ]
   },
   "execution": {
-    "traceId": "trace_20260401171723_iuewn3",
-    "startedAt": "2026-04-01T17:17:23.434Z",
-    "finishedAt": "2026-04-01T17:17:23.454Z",
-    "durationMs": 20,
+    "traceId": "trace_20260402002110_22zexv",
+    "startedAt": "2026-04-02T00:21:10.938Z",
+    "finishedAt": "2026-04-02T00:21:10.962Z",
+    "durationMs": 24,
     "phases": [
       {
         "name": "total",
-        "durationMs": 20
+        "durationMs": 24
       },
       {
         "name": "run_agent",
-        "durationMs": 17
+        "durationMs": 23
       },
       {
         "name": "load_result",

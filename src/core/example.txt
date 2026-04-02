@@ -1,0 +1,11 @@
+add index to orders table
+→ beklenen: preview_only (schema sinyali)
+
+rename button label
+→ beklenen: safe_to_apply
+
+delete all user sessions
+→ beklenen: blocked
+
+update readme
+→ beklenen: safe_to_apply

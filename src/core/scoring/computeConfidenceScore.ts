@@ -3,6 +3,7 @@ type ConfidenceBreakdown = {
   destructivePenalty: number;
   schemaPenalty: number;
   criticalPenalty: number;
+  massScopePenalty: number;
   lowRiskBonus: number;
 };
 
@@ -11,6 +12,7 @@ type ComputeConfidenceScoreInput = {
     destructive: number;
     schema: number;
     critical: number;
+    massScope: number;
     lowRisk: number;
   };
 };
@@ -36,7 +38,10 @@ export function computeConfidenceScore(
     schemaPenalty: input.breakdown.schema > 0 ? -input.breakdown.schema : 0,
     criticalPenalty:
       input.breakdown.critical > 0 ? -input.breakdown.critical : 0,
-    lowRiskBonus: input.breakdown.lowRisk < 0 ? Math.abs(input.breakdown.lowRisk) : 0
+    massScopePenalty:
+      input.breakdown.massScope > 0 ? -input.breakdown.massScope : 0,
+    lowRiskBonus:
+      input.breakdown.lowRisk < 0 ? Math.abs(input.breakdown.lowRisk) : 0
   };
 
   const score = clamp(
@@ -44,6 +49,7 @@ export function computeConfidenceScore(
       breakdown.destructivePenalty +
       breakdown.schemaPenalty +
       breakdown.criticalPenalty +
+      breakdown.massScopePenalty +
       breakdown.lowRiskBonus
   );
 

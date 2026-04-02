@@ -8,6 +8,7 @@ describe("computeConfidenceScore", () => {
         destructive: 0,
         schema: 0,
         critical: 0,
+        massScope: 0,
         lowRisk: 0
       }
     });
@@ -18,6 +19,7 @@ describe("computeConfidenceScore", () => {
       destructivePenalty: 0,
       schemaPenalty: 0,
       criticalPenalty: 0,
+      massScopePenalty: 0,
       lowRiskBonus: 0
     });
   });
@@ -28,6 +30,7 @@ describe("computeConfidenceScore", () => {
         destructive: 50,
         schema: 0,
         critical: 0,
+        massScope: 0,
         lowRisk: 0
       }
     });
@@ -42,6 +45,7 @@ describe("computeConfidenceScore", () => {
         destructive: 0,
         schema: 25,
         critical: 20,
+        massScope: 0,
         lowRisk: 0
       }
     });
@@ -51,12 +55,50 @@ describe("computeConfidenceScore", () => {
     expect(result.breakdown.criticalPenalty).toBe(-20);
   });
 
+  it("applies mass_scope penalty", () => {
+    const result = computeConfidenceScore({
+      breakdown: {
+        destructive: 0,
+        schema: 0,
+        critical: 0,
+        massScope: 30,
+        lowRisk: 0
+      }
+    });
+
+    expect(result.score).toBe(70);
+    expect(result.breakdown.massScopePenalty).toBe(-30);
+  });
+
+  it("applies mass_scope together with other penalties", () => {
+    const result = computeConfidenceScore({
+      breakdown: {
+        destructive: 20,
+        schema: 10,
+        critical: 15,
+        massScope: 25,
+        lowRisk: 0
+      }
+    });
+
+    expect(result.score).toBe(30);
+    expect(result.breakdown).toEqual({
+      base: 100,
+      destructivePenalty: -20,
+      schemaPenalty: -10,
+      criticalPenalty: -15,
+      massScopePenalty: -25,
+      lowRiskBonus: 0
+    });
+  });
+
   it("applies low-risk bonus", () => {
     const result = computeConfidenceScore({
       breakdown: {
         destructive: 0,
         schema: 0,
         critical: 0,
+        massScope: 0,
         lowRisk: -20
       }
     });
@@ -71,6 +113,7 @@ describe("computeConfidenceScore", () => {
         destructive: 100,
         schema: 25,
         critical: 20,
+        massScope: 10,
         lowRisk: 0
       }
     });
