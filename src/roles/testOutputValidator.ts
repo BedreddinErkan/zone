@@ -1,4 +1,5 @@
 import type { RepoFile } from "../types/project.js";
+import type { TestComplexity } from "./detectTestComplexity.js";
 
 export type ValidationDecision = "pass" | "preview_only" | "blocked";
 
@@ -465,6 +466,66 @@ function validateSqlOutput(content: string, dialect: string): ValidationIssue[] 
   return issues;
 }
 
+function validateComplexity(
+  content: string,
+  framework: string,
+  complexity: TestComplexity
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const lowerContent = content.toLowerCase();
+
+  if (complexity === "data_driven") {
+    if (
+      (framework === "pytest" || framework === "selenium_python") &&
+      !content.includes("@pytest.mark.parametrize")
+    ) {
+      issues.push({
+        code: "COMPLEXITY_MISSING_PARAMETRIZE",
+        severity: "warning",
+        message: "Data-driven pytest test is missing @pytest.mark.parametrize",
+      });
+    }
+
+    if (
+      framework === "cucumber_java" &&
+      !content.includes("Scenario Outline")
+    ) {
+      issues.push({
+        code: "COMPLEXITY_MISSING_PARAMETRIZE",
+        severity: "warning",
+        message: "Data-driven Cucumber test is missing Scenario Outline",
+      });
+    }
+
+    if (
+      (framework === "playwright_ts" || framework === "playwright_js") &&
+      !content.includes("test.each") &&
+      !content.includes("forEach")
+    ) {
+      issues.push({
+        code: "COMPLEXITY_MISSING_PARAMETRIZE",
+        severity: "warning",
+        message: "Data-driven Playwright test is missing test.each or forEach",
+      });
+    }
+  }
+
+  if (
+    complexity === "negative" &&
+    !lowerContent.includes("error") &&
+    !lowerContent.includes("invalid") &&
+    !lowerContent.includes("fail")
+  ) {
+    issues.push({
+      code: "COMPLEXITY_MISSING_NEGATIVE_CASE",
+      severity: "warning",
+      message: "Negative test intent detected but no error/invalid/fail case found in generated content",
+    });
+  }
+
+  return issues;
+}
+
 // ─── Main Validator ───────────────────────────────────────────────────────────
 
 export function validateTestOutput(input: {
@@ -473,6 +534,7 @@ export function validateTestOutput(input: {
   testFileContent?: string;
   sqlContent?: string;
   sqlDialect?: string;
+  complexityHint?: TestComplexity;
   pageObjectContents?: Array<{ path: string; content: string }>;
   framework: string;
 }): ValidationResult {
@@ -509,6 +571,21 @@ export function validateTestOutput(input: {
 
   if (input.sqlContent) {
     issues.push(...validateSqlOutput(input.sqlContent, input.sqlDialect ?? "unknown"));
+  }
+
+  if (input.complexityHint) {
+    const complexityContent =
+      input.testFileContent ??
+      input.featureContent ??
+      input.stepDefinitionContent ??
+      "";
+    issues.push(
+      ...validateComplexity(
+        complexityContent,
+        input.framework,
+        input.complexityHint
+      )
+    );
   }
 
   const errors = issues.filter(i => i.severity === "error");

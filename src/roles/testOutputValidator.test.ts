@@ -484,4 +484,84 @@ CREATE TABLE IF NOT EXISTS user_profiles (
       expect(result.issues).toHaveLength(0);
     });
   });
+
+  describe("complexity validator", () => {
+    it("warns when data_driven pytest test has no parametrize", () => {
+      const result = validateTestOutput({
+        framework: "pytest",
+        testFileContent: VALID_PYTEST_TEST,
+        complexityHint: "data_driven",
+      });
+      expect(
+        result.issues.some(i => i.code === "COMPLEXITY_MISSING_PARAMETRIZE")
+      ).toBe(true);
+    });
+
+    it("warns when data_driven cucumber test has no Scenario Outline", () => {
+      const simpleFeature = `
+Feature: Login
+  Scenario: Login with valid credentials
+    Given I open the home page
+    When I log in
+    Then I should see the dashboard
+`.trim();
+      const result = validateTestOutput({
+        framework: "cucumber_java",
+        featureContent: simpleFeature,
+        complexityHint: "data_driven",
+      });
+      expect(
+        result.issues.some(i => i.code === "COMPLEXITY_MISSING_PARAMETRIZE")
+      ).toBe(true);
+    });
+
+    it("does not warn when data_driven pytest test has parametrize", () => {
+      const parametrizedPytest = `
+import pytest
+
+@pytest.mark.parametrize("username,password", [
+    ("standard_user", "secret_sauce"),
+    ("problem_user", "secret_sauce"),
+])
+def test_login_redirects_to_inventory(login_page, username, password):
+    login_page.login(username, password)
+    assert "/inventory" in login_page.driver.current_url
+`.trim();
+      const result = validateTestOutput({
+        framework: "pytest",
+        testFileContent: parametrizedPytest,
+        complexityHint: "data_driven",
+      });
+      expect(
+        result.issues.some(i => i.code === "COMPLEXITY_MISSING_PARAMETRIZE")
+      ).toBe(false);
+    });
+
+    it("warns when negative test has no error or invalid in test names", () => {
+      const neutralPytest = `
+def test_login_redirects_to_inventory(login_page):
+    login_page.login("standard_user", "secret_sauce")
+    assert "/inventory" in login_page.driver.current_url
+`.trim();
+      const result = validateTestOutput({
+        framework: "pytest",
+        testFileContent: neutralPytest,
+        complexityHint: "negative",
+      });
+      expect(
+        result.issues.some(i => i.code === "COMPLEXITY_MISSING_NEGATIVE_CASE")
+      ).toBe(true);
+    });
+
+    it("does not warn for simple complexity", () => {
+      const result = validateTestOutput({
+        framework: "playwright_ts",
+        testFileContent: VALID_PLAYWRIGHT_TEST,
+        complexityHint: "simple",
+      });
+      expect(
+        result.issues.some(i => i.code.startsWith("COMPLEXITY_"))
+      ).toBe(false);
+    });
+  });
 });

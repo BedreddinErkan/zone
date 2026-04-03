@@ -1,4 +1,5 @@
 import type { TestEngineerContext } from "../roles/testEngineerContext.js";
+import { detectTestComplexity } from "../roles/detectTestComplexity.js";
 
 export function buildTestEngineerPrompt(input: {
   task: string;
@@ -17,6 +18,7 @@ export function buildTestEngineerPrompt(input: {
     existingTestContents,
   } = input;
   const { framework, outputPaths } = context;
+  const { complexity, hints, suggestedPatterns } = detectTestComplexity(input.task);
 
   const pageObjectSection =
     pageObjectContents.length > 0
@@ -101,6 +103,19 @@ ${context.frameworkSummary}
 
 === OUTPUT RULES ===
 ${rulesSection}
+
+=== COMPLEXITY GUIDANCE ===
+Detected complexity: ${complexity}
+Hints: ${hints.join(", ") || "none"}
+Suggested patterns: ${suggestedPatterns.join(", ") || "none"}
+
+Framework-specific complexity instructions:
+- If complexity is "data_driven" and framework is pytest/selenium_python: MUST use @pytest.mark.parametrize with at least 2 data rows
+- If complexity is "data_driven" and framework is cucumber_java: MUST use Scenario Outline with Examples table containing at least 2 rows
+- If complexity is "data_driven" and framework is playwright_ts/playwright_js: MUST use test.each() or a data array with forEach
+- If complexity is "e2e": Chain multiple page objects, add assertions at each major step
+- If complexity is "negative": Include at least one test case for the failure/error scenario
+- If complexity is "multi_scenario": Write multiple separate test functions or scenarios
 
 === FILE LOCATION RULES ===
 ${locationSection}

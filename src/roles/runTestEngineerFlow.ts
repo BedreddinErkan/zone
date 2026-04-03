@@ -6,6 +6,7 @@ import { buildTestEngineerPrompt } from "../prompts/testEngineerPrompt.js";
 import { createOpenAIClient, getModelName } from "../llm/openaiClient.js";
 import { checkConfidenceGate } from "../core/confidenceGate.js";
 import { validateTestOutput } from "./testOutputValidator.js";
+import { detectTestComplexity } from "./detectTestComplexity.js";
 import type { RepoFile } from "../types/project.js";
 
 export type TestEngineerFlowResult =
@@ -286,9 +287,10 @@ export async function runTestEngineerFlow(input: {
   const featurePatch = applyPatches.find(p => p.filePath.endsWith(".feature"));
   const stepPatch = applyPatches.find(p => p.filePath.endsWith(".java"));
 
- const testFilePatch = applyPatches.find(
+const testFilePatch = applyPatches.find(
   p => p.filePath.endsWith(".spec.ts") || p.filePath.endsWith(".spec.js") || p.filePath.endsWith(".test.ts")
 );
+const { complexity } = detectTestComplexity(input.task);
 
 const validation = validateTestOutput({
   featureContent: featurePatch?.fullContent,
@@ -296,6 +298,7 @@ const validation = validateTestOutput({
   testFileContent: testFilePatch?.fullContent,
   pageObjectContents: pageObjectContents,
   framework: framework.framework,
+  complexityHint: complexity,
 });
 if (validation.decision !== "pass" || validation.issues.length > 0) {
   console.log(`[zone:validate] Decision: ${validation.decision}`);
