@@ -397,12 +397,82 @@ function validatePytestTest(content: string): ValidationIssue[] {
   return issues;
 }
 
+function validateSqlOutput(content: string, dialect: string): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const upperContent = content.toUpperCase();
+
+  if (
+    /\bDROP\s+TABLE\b/.test(upperContent) ||
+    /\bTRUNCATE\s+TABLE\b/.test(upperContent) ||
+    /\bDELETE\s+FROM\b(?![\s\S]*\bWHERE\b)/.test(upperContent)
+  ) {
+    issues.push({
+      code: "SQL_DESTRUCTIVE_OPERATION",
+      severity: "error",
+      message: `Destructive SQL operation detected for dialect ${dialect || "unknown"}`,
+    });
+  }
+
+  const placeholders = [
+    "your_table",
+    "example_table",
+    "my_table",
+    "column_name",
+    "your_column",
+  ];
+
+  for (const placeholder of placeholders) {
+    if (content.toLowerCase().includes(placeholder)) {
+      issues.push({
+        code: "SQL_PLACEHOLDER",
+        severity: "warning",
+        message: `Placeholder SQL identifier detected: "${placeholder}"`,
+      });
+    }
+  }
+
+  const createTableRegex = /CREATE\s+TABLE\s+(?!IF\s+NOT\s+EXISTS)/i;
+  if (createTableRegex.test(content)) {
+    issues.push({
+      code: "SQL_MISSING_IF_NOT_EXISTS",
+      severity: "warning",
+      message: "CREATE TABLE is missing IF NOT EXISTS",
+    });
+  }
+
+  const snakeCaseViolationRegex = /CREATE\s+TABLE[\s\S]*?[a-z][A-Z]|^\s*[a-z_][a-zA-Z0-9_]*[A-Z][a-zA-Z0-9_]*\s+/m;
+  if (snakeCaseViolationRegex.test(content)) {
+    issues.push({
+      code: "SQL_SNAKE_CASE_VIOLATION",
+      severity: "warning",
+      message: "CamelCase table or column naming detected in SQL schema",
+    });
+  }
+
+  const createTableBlockRegex =
+    /CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?[\s\S]*?\(([\s\S]*?)\)/gi;
+  let blockMatch: RegExpExecArray | null;
+  while ((blockMatch = createTableBlockRegex.exec(content)) !== null) {
+    if (!/PRIMARY\s+KEY/i.test(blockMatch[1])) {
+      issues.push({
+        code: "SQL_MISSING_PRIMARY_KEY",
+        severity: "warning",
+        message: "CREATE TABLE block is missing a PRIMARY KEY",
+      });
+    }
+  }
+
+  return issues;
+}
+
 // ─── Main Validator ───────────────────────────────────────────────────────────
 
 export function validateTestOutput(input: {
   featureContent?: string;
   stepDefinitionContent?: string;
   testFileContent?: string;
+  sqlContent?: string;
+  sqlDialect?: string;
   pageObjectContents?: Array<{ path: string; content: string }>;
   framework: string;
 }): ValidationResult {
@@ -435,6 +505,10 @@ export function validateTestOutput(input: {
     input.testFileContent
   ) {
     issues.push(...validatePytestTest(input.testFileContent));
+  }
+
+  if (input.sqlContent) {
+    issues.push(...validateSqlOutput(input.sqlContent, input.sqlDialect ?? "unknown"));
   }
 
   const errors = issues.filter(i => i.severity === "error");

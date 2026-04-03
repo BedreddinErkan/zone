@@ -408,4 +408,80 @@ def test_login_redirects_to_inventory():
       ).toBe(true);
     });
   });
+
+  describe("SQL validator", () => {
+    it("blocks on DROP TABLE", () => {
+      const result = validateTestOutput({
+        framework: "unknown",
+        sqlContent: "DROP TABLE users;",
+        sqlDialect: "postgresql",
+      });
+      expect(result.decision).toBe("blocked");
+      expect(result.issues.some(i => i.code === "SQL_DESTRUCTIVE_OPERATION")).toBe(true);
+    });
+
+    it("blocks on TRUNCATE TABLE", () => {
+      const result = validateTestOutput({
+        framework: "unknown",
+        sqlContent: "TRUNCATE TABLE users;",
+        sqlDialect: "mysql",
+      });
+      expect(result.decision).toBe("blocked");
+      expect(result.issues.some(i => i.code === "SQL_DESTRUCTIVE_OPERATION")).toBe(true);
+    });
+
+    it("warns on placeholder table name", () => {
+      const result = validateTestOutput({
+        framework: "unknown",
+        sqlContent: "CREATE TABLE IF NOT EXISTS your_table (id SERIAL PRIMARY KEY);",
+        sqlDialect: "postgresql",
+      });
+      expect(result.decision).toBe("preview_only");
+      expect(result.issues.some(i => i.code === "SQL_PLACEHOLDER")).toBe(true);
+    });
+
+    it("warns on missing IF NOT EXISTS", () => {
+      const result = validateTestOutput({
+        framework: "unknown",
+        sqlContent: "CREATE TABLE users (id SERIAL PRIMARY KEY);",
+        sqlDialect: "postgresql",
+      });
+      expect(result.issues.some(i => i.code === "SQL_MISSING_IF_NOT_EXISTS")).toBe(true);
+    });
+
+    it("warns on camelCase table name", () => {
+      const result = validateTestOutput({
+        framework: "unknown",
+        sqlContent: "CREATE TABLE IF NOT EXISTS userProfiles (id SERIAL PRIMARY KEY);",
+        sqlDialect: "postgresql",
+      });
+      expect(result.issues.some(i => i.code === "SQL_SNAKE_CASE_VIOLATION")).toBe(true);
+    });
+
+    it("warns on missing primary key", () => {
+      const result = validateTestOutput({
+        framework: "unknown",
+        sqlContent: "CREATE TABLE IF NOT EXISTS users (email TEXT NOT NULL);",
+        sqlDialect: "sqlite",
+      });
+      expect(result.issues.some(i => i.code === "SQL_MISSING_PRIMARY_KEY")).toBe(true);
+    });
+
+    it("passes a clean CREATE TABLE statement", () => {
+      const result = validateTestOutput({
+        framework: "unknown",
+        sqlContent: `
+CREATE TABLE IF NOT EXISTS user_profiles (
+  id SERIAL PRIMARY KEY,
+  email TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+`.trim(),
+        sqlDialect: "postgresql",
+      });
+      expect(result.decision).toBe("pass");
+      expect(result.issues).toHaveLength(0);
+    });
+  });
 });

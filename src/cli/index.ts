@@ -43,6 +43,7 @@ import {
   type PatchPlan,
 } from "../patch/conversion/convertGeneratedPlanToPatchPlan.js";
 import { runTestEngineerFlow } from "../roles/runTestEngineerFlow.js";
+import { runDataAnalystFlow } from "../roles/runDataAnalystFlow.js";
 import { checkConfidenceGate, renderConfidenceGateBlock } from "../core/confidenceGate.js";
 const execFileAsync = promisify(execFile);
 
@@ -469,6 +470,29 @@ const intent = classifyPatchIntent(task);
 let patchSection = generatedPatchPlanPreview;
 
 if (intent === "unknown" && repoPath) {
+  if (role === "data_analyst") {
+    console.log("[zone] Data Analyst role — delegating to data analyst flow...");
+    const daResult = await runDataAnalystFlow({ task, repoPath });
+
+    if (!daResult.ok) {
+      console.error(`[zone] Data analyst flow failed: ${daResult.reason}`);
+      return 1;
+    }
+
+    console.log(`[zone] Dialect detected: ${daResult.dialect} (${daResult.migrationFormat})`);
+    console.log(`[zone] Confidence: ${daResult.confidence}`);
+    console.log(daResult.preview);
+
+    if (apply && confirmApply && daResult.applyPatches.length > 0) {
+      console.log("[zone] Applying migration files...");
+      const applyResult = await applyLlmPatches(daResult.applyPatches, repoPath);
+      console.log(`[zone] Applied: ${applyResult.applied.join(", ") || "none"}`);
+      console.log(`[zone] Failed: ${applyResult.failed.join(", ") || "none"}`);
+    }
+
+    return 0;
+  }
+
   if (role === "test_engineer") {
     console.log("[zone] Test Engineer role — delegating to test engineer flow...");
     const teResult = await runTestEngineerFlow({ task, repoPath });
