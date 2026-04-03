@@ -187,16 +187,18 @@ function validatePlaywrightTest(content: string): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const lowerContent = content.toLowerCase();
 
-const placeholderSelectors = [
-  "your-username",
-  "your-password",
-  "your-selector",
-  "adjust selector",
-  "adjust according",
-  "#dashboard",
-  "#home",
-  "#main-content",
-];
+  const placeholderSelectors = [
+    "#username",
+    "#password",
+    "your-username",
+    "your-password",
+    "your-selector",
+    "adjust selector",
+    "adjust according",
+    "#dashboard",
+    "#home",
+    "#main-content",
+  ];
 
   for (const pattern of placeholderSelectors) {
     if (lowerContent.includes(pattern)) {
@@ -242,6 +244,159 @@ const placeholderSelectors = [
   return issues;
 }
 
+function extractPythonImportedNames(content: string): Set<string> {
+  const importedNames = new Set<string>();
+  const lines = content.split("\n");
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const importMatch = trimmed.match(/^import\s+(.+)$/);
+    if (importMatch) {
+      const names = importMatch[1].split(",").map(name => name.trim());
+      for (const name of names) {
+        const baseName = name.split(/\s+as\s+/)[1] ?? name.split(".")[0];
+        if (baseName) importedNames.add(baseName.trim());
+      }
+    }
+
+    const fromImportMatch = trimmed.match(/^from\s+\S+\s+import\s+(.+)$/);
+    if (fromImportMatch) {
+      const names = fromImportMatch[1].split(",").map(name => name.trim());
+      for (const name of names) {
+        const importedName = name.split(/\s+as\s+/)[1] ?? name;
+        if (importedName) importedNames.add(importedName.trim());
+      }
+    }
+  }
+
+  return importedNames;
+}
+
+function extractPytestFunctions(content: string): Array<{
+  name: string;
+  params: string[];
+  body: string;
+}> {
+  const functions: Array<{ name: string; params: string[]; body: string }> = [];
+  const lines = content.split("\n");
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const headerMatch = lines[index].match(/^def\s+(test_[a-zA-Z0-9_]+)\s*\(([^)]*)\):\s*$/);
+    if (!headerMatch) continue;
+
+    const [, name, rawParams] = headerMatch;
+    const bodyLines: string[] = [];
+    let bodyIndex = index + 1;
+
+    while (bodyIndex < lines.length) {
+      const line = lines[bodyIndex];
+      if (line.startsWith("def test_")) break;
+      if (line.trim().length > 0 && !/^\s/.test(line)) break;
+      bodyLines.push(line);
+      bodyIndex += 1;
+    }
+
+    functions.push({
+      name,
+      params: rawParams
+        .split(",")
+        .map(param => param.trim())
+        .filter(Boolean)
+        .map(param => param.split("=")[0]?.trim())
+        .filter(Boolean) as string[],
+      body: bodyLines.join("\n"),
+    });
+
+    index = bodyIndex - 1;
+  }
+
+  return functions;
+}
+
+function validatePytestTest(content: string): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const lowerContent = content.toLowerCase();
+  const importedNames = extractPythonImportedNames(content);
+  const testFunctions = extractPytestFunctions(content);
+
+  const placeholderCredentials = [
+    "your-username",
+    "your_username",
+    "your-password",
+    "your_password",
+    "example_user",
+    "test_user",
+  ];
+
+  for (const pattern of placeholderCredentials) {
+    if (lowerContent.includes(pattern)) {
+      issues.push({
+        code: "PYTEST_PLACEHOLDER_CREDENTIALS",
+        severity: "warning",
+        message: `Placeholder credential detected: "${pattern}"`,
+      });
+    }
+  }
+
+  let hasAssert = false;
+
+  for (const { name: testName, params, body } of testFunctions) {
+    const availableNames = new Set<string>([
+      ...params,
+      ...importedNames,
+      "self",
+      "True",
+      "False",
+      "None",
+    ]);
+
+    const bodyLines = body.split("\n");
+    for (const line of bodyLines) {
+      const assignmentMatch = line.trim().match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*=/);
+      if (assignmentMatch) {
+        availableNames.add(assignmentMatch[1]);
+      }
+      if (/\bassert\b/.test(line)) {
+        hasAssert = true;
+      }
+      if (/webdriver\.(?:Chrome|Firefox|Edge|Safari|Remote)\s*\(/.test(line)) {
+        issues.push({
+          code: "PYTEST_MISSING_FIXTURE_TEARDOWN",
+          severity: "warning",
+          message: `WebDriver created directly inside ${testName} instead of using a fixture`,
+        });
+      }
+    }
+
+    const variableUseRegex = /(?<!\.)\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\./g;
+    let variableMatch: RegExpExecArray | null;
+    while ((variableMatch = variableUseRegex.exec(body)) !== null) {
+      const variableName = variableMatch[1];
+      if (
+        !availableNames.has(variableName) &&
+        variableName !== "pytest" &&
+        variableName !== "webdriver"
+      ) {
+        issues.push({
+          code: "PYTEST_UNDEFINED_FIXTURE",
+          severity: "warning",
+          message: `Variable "${variableName}" is used in ${testName} but is not a fixture parameter or import`,
+        });
+      }
+    }
+  }
+
+  if (!hasAssert) {
+    issues.push({
+      code: "PYTEST_MISSING_ASSERTION",
+      severity: "warning",
+      message: "No assert statement found in pytest test functions",
+    });
+  }
+
+  return issues;
+}
+
 // ─── Main Validator ───────────────────────────────────────────────────────────
 
 export function validateTestOutput(input: {
@@ -273,6 +428,13 @@ export function validateTestOutput(input: {
     issues.push(
       ...validatePlaywrightTest(input.testFileContent ?? input.featureContent ?? "")
     );
+  }
+
+  if (
+    (input.framework === "pytest" || input.framework === "selenium_python") &&
+    input.testFileContent
+  ) {
+    issues.push(...validatePytestTest(input.testFileContent));
   }
 
   const errors = issues.filter(i => i.severity === "error");

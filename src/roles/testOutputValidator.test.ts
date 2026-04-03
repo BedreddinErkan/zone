@@ -64,6 +64,14 @@ test("logs in", async ({ page }) => {
 });
 `.trim();
 
+const VALID_PYTEST_TEST = `
+import pytest
+
+def test_login_redirects_to_inventory(login_page):
+    login_page.login("standard_user", "secret_sauce")
+    assert "/inventory" in login_page.driver.current_url
+`.trim();
+
 describe("validateTestOutput", () => {
   describe("feature validator", () => {
     it("passes a valid feature file", () => {
@@ -327,6 +335,76 @@ Feature: Bad
       });
       expect(
         result.issues.some(i => i.code === "PLAYWRIGHT_MISSING_AWAIT")
+      ).toBe(true);
+    });
+  });
+
+  describe("pytest validator", () => {
+    it("passes a clean pytest test with proper fixtures", () => {
+      const result = validateTestOutput({
+        testFileContent: VALID_PYTEST_TEST,
+        framework: "pytest",
+      });
+      expect(result.decision).toBe("pass");
+      expect(result.issues).toHaveLength(0);
+    });
+
+    it("warns on undefined fixture variable used in test body", () => {
+      const bad = `
+def test_login_redirects_to_inventory(login_page):
+    login_page.login("standard_user", "secret_sauce")
+    assert "/inventory" in driver.current_url
+`.trim();
+      const result = validateTestOutput({
+        testFileContent: bad,
+        framework: "selenium_python",
+      });
+      expect(
+        result.issues.some(i => i.code === "PYTEST_UNDEFINED_FIXTURE")
+      ).toBe(true);
+    });
+
+    it("warns on missing assert statement", () => {
+      const bad = `
+def test_login_redirects_to_inventory(login_page):
+    login_page.login("standard_user", "secret_sauce")
+    login_page.open_inventory()
+`.trim();
+      const result = validateTestOutput({
+        testFileContent: bad,
+        framework: "pytest",
+      });
+      expect(
+        result.issues.some(i => i.code === "PYTEST_MISSING_ASSERTION")
+      ).toBe(true);
+    });
+
+    it("warns on placeholder credentials", () => {
+      const bad = VALID_PYTEST_TEST.replace("standard_user", "your_username");
+      const result = validateTestOutput({
+        testFileContent: bad,
+        framework: "pytest",
+      });
+      expect(
+        result.issues.some(i => i.code === "PYTEST_PLACEHOLDER_CREDENTIALS")
+      ).toBe(true);
+    });
+
+    it("warns when webdriver created directly in test function", () => {
+      const bad = `
+from selenium import webdriver
+
+def test_login_redirects_to_inventory():
+    driver = webdriver.Chrome()
+    driver.get("/login")
+    assert driver.current_url.endswith("/login")
+`.trim();
+      const result = validateTestOutput({
+        testFileContent: bad,
+        framework: "selenium_python",
+      });
+      expect(
+        result.issues.some(i => i.code === "PYTEST_MISSING_FIXTURE_TEARDOWN")
       ).toBe(true);
     });
   });
