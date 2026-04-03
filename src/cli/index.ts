@@ -34,6 +34,7 @@ import { loadPatchPlan } from "./loadPatchPlan.js";
 import { runApplyFlow } from "../apply/runApplyFlow.js";
 import { renderApplyResult } from "../apply/renderApplyResult.js";
 import { buildGeneratedPatchPlanPreview } from "./buildGeneratedPatchPlanPreview.js";
+import { applyLlmPatches } from "../core/applyLlmPatches.js";
 import { buildGeneratedPatchPlan } from "../patch-generation/buildGeneratedPatchPlan.js";
 import "dotenv/config";
 import { canConvertGeneratedPlanToPatchPlan } from "../patch/conversion/canConvertGeneratedPlanToPatchPlan.js";
@@ -449,11 +450,17 @@ if (intent === "unknown" && repoPath) {
   const llmResult = await runLlmPatchFlow({ task, repoPath });
   if (llmResult.ok) {
     patchSection = llmResult.patchPreview;
+    if (apply && confirmApply && llmResult.applyPatches.length > 0) {
+      console.log("[zone] Applying LLM patches...");
+      const applyResult = await applyLlmPatches(llmResult.applyPatches, repoPath);
+      console.log(`[zone] Applied: ${applyResult.applied.join(", ") || "none"}`);
+      console.log(`[zone] Skipped: ${applyResult.skipped.join(", ") || "none"}`);
+      console.log(`[zone] Failed: ${applyResult.failed.join(", ") || "none"}`);
+    }
   } else {
     patchSection = generatedPatchPlanPreview + "\n\n[zone] LLM patch flow failed: " + llmResult.reason;
   }
 }
-
 const finalOutput = [
   renderedDecisionOutput,
   "",

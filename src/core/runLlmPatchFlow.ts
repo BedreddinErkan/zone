@@ -4,10 +4,16 @@ import { rankRelevantFiles } from "../repo/rankRelevantFiles.js";
 import { readProjectFiles } from "../repo/readProjectFiles.js";
 import { planFeatureWithLlm } from "../llm/planFeature.js";
 import { planPatchPreviewWithLlm } from "../llm/planPatchPreview.js";
+import { planFullPatchWithLlm } from "../llm/planFullPatch.js";
 import type { TaskIntent } from "./taskIntentParser.js";
 
 export type LlmPatchFlowResult =
-  | { ok: true; patchPreview: string; warnings: string[] }
+  | {
+      ok: true;
+      patchPreview: string;
+      warnings: string[];
+      applyPatches: Array<{ filePath: string; fullContent: string }>;
+    }
   | { ok: false; reason: string };
 
 /** A fully-populated TaskIntent representing "I don't know what this is". */
@@ -95,6 +101,46 @@ export async function runLlmPatchFlow(input: {
     return { ok: false, reason };
   }
 
+  // 6b. Generate full file content for modify/create patches
+  let applyPatches: Array<{ filePath: string; fullContent: string }> = [];
+  try {
+    const applyTargets = patchPlan.patches.filter(
+      (p) => p.operation === "modify" || p.operation === "create"
+    );
+
+    const applyResults = await Promise.all(
+      applyTargets.map(async (patch) => {
+        const repoFile = allFiles.find((f) => f.path === patch.path);
+        const absolutePath = repoFile?.absolutePath;
+
+        const currentContentMap =
+          absolutePath !== undefined
+            ? await readProjectFiles([absolutePath])
+            : {};
+
+        const fileContent =
+          absolutePath !== undefined
+            ? (currentContentMap[absolutePath] ?? "")
+            : "";
+
+        const fullPatch = await planFullPatchWithLlm({
+          task: input.task,
+          filePath: patch.path,
+          fileContent,
+          repoSummary: projectSummary,
+          relatedContext: patch.summary,
+        });
+
+        return { filePath: fullPatch.filePath, fullContent: fullPatch.fullContent };
+      })
+    );
+
+    applyPatches = applyResults;
+  } catch {
+    // step 6b is best-effort — never block the preview result
+    applyPatches = [];
+  }
+
   // 7. Build patchPreview string
   const patchPreview = [
     "=== LLM PATCH PREVIEW ===",
@@ -111,5 +157,5 @@ export async function runLlmPatchFlow(input: {
   ].join("\n");
 
   // 8. Return
-  return { ok: true, patchPreview, warnings: patchPlan.warnings };
+  return { ok: true, patchPreview, warnings: patchPlan.warnings, applyPatches };
 }
