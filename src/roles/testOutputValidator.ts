@@ -183,11 +183,73 @@ function validateStepDefinitions(
   return issues;
 }
 
+function validatePlaywrightTest(content: string): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const lowerContent = content.toLowerCase();
+
+  const placeholderSelectors = [
+    "#username",
+    "#password",
+    "your-username",
+    "your-password",
+    "your-selector",
+    "adjust selector",
+    "adjust according",
+    "#dashboard",
+    "#home",
+    "#main-content",
+  ];
+
+  for (const pattern of placeholderSelectors) {
+    if (lowerContent.includes(pattern)) {
+      issues.push({
+        code: "PLAYWRIGHT_PLACEHOLDER_SELECTOR",
+        severity: "warning",
+        message: `Placeholder selector or guidance detected: "${pattern}"`,
+      });
+    }
+  }
+
+  if (!/\bexpect\s*\(/.test(content)) {
+    issues.push({
+      code: "PLAYWRIGHT_MISSING_ASSERTION",
+      severity: "warning",
+      message: "No expect() assertion found in Playwright test",
+    });
+  }
+
+  if (/page\.goto\(\s*["'`]https?:\/\//.test(content)) {
+    issues.push({
+      code: "PLAYWRIGHT_HARDCODED_URL",
+      severity: "warning",
+      message: "page.goto() uses a hardcoded full URL instead of a relative path",
+    });
+  }
+
+  const lines = content.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (
+      /(?:^|[^a-zA-Z0-9_])(?:page|[\w$.()[\]]+)\.(?:click|fill)\s*\(/.test(trimmed) &&
+      !trimmed.startsWith("await ")
+    ) {
+      issues.push({
+        code: "PLAYWRIGHT_MISSING_AWAIT",
+        severity: "warning",
+        message: `Missing await before Playwright action: "${trimmed}"`,
+      });
+    }
+  }
+
+  return issues;
+}
+
 // ─── Main Validator ───────────────────────────────────────────────────────────
 
 export function validateTestOutput(input: {
   featureContent?: string;
   stepDefinitionContent?: string;
+  testFileContent?: string;
   pageObjectContents?: Array<{ path: string; content: string }>;
   framework: string;
 }): ValidationResult {
@@ -203,6 +265,15 @@ export function validateTestOutput(input: {
         input.stepDefinitionContent,
         input.pageObjectContents ?? []
       )
+    );
+  }
+
+  if (
+    (input.framework === "playwright_ts" || input.framework === "playwright_js") &&
+    (input.testFileContent || input.featureContent)
+  ) {
+    issues.push(
+      ...validatePlaywrightTest(input.testFileContent ?? input.featureContent ?? "")
     );
   }
 

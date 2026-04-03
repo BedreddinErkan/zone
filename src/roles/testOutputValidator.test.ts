@@ -52,6 +52,18 @@ public class HomePage {
 `.trim(),
 };
 
+const VALID_PLAYWRIGHT_TEST = `
+import { test, expect } from "@playwright/test";
+
+test("logs in", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#user-name").fill("standard_user");
+  await page.locator("[data-testid='password']").fill("secret_sauce");
+  await page.locator("#login-button").click();
+  await expect(page.locator(".inventory_list")).toBeVisible();
+});
+`.trim();
+
 describe("validateTestOutput", () => {
   describe("feature validator", () => {
     it("passes a valid feature file", () => {
@@ -254,6 +266,68 @@ Feature: Bad
         framework: "cucumber_java",
       });
       expect(result.summary).toContain("passed");
+    });
+  });
+
+  describe("playwright validator", () => {
+    it("warns on placeholder selector your-username", () => {
+      const bad = VALID_PLAYWRIGHT_TEST.replace("#user-name", "your-username");
+      const result = validateTestOutput({
+        testFileContent: bad,
+        framework: "playwright_ts",
+      });
+      expect(result.decision).toBe("preview_only");
+      expect(
+        result.issues.some(i => i.code === "PLAYWRIGHT_PLACEHOLDER_SELECTOR")
+      ).toBe(true);
+    });
+
+    it("warns on missing expect assertion", () => {
+      const bad = VALID_PLAYWRIGHT_TEST.replace(
+        '  await expect(page.locator(".inventory_list")).toBeVisible();\n',
+        ""
+      );
+      const result = validateTestOutput({
+        testFileContent: bad,
+        framework: "playwright_js",
+      });
+      expect(
+        result.issues.some(i => i.code === "PLAYWRIGHT_MISSING_ASSERTION")
+      ).toBe(true);
+    });
+
+    it("warns on hardcoded https url in goto", () => {
+      const bad = VALID_PLAYWRIGHT_TEST.replace('await page.goto("/");', 'await page.goto("https://example.com/login");');
+      const result = validateTestOutput({
+        testFileContent: bad,
+        framework: "playwright_ts",
+      });
+      expect(
+        result.issues.some(i => i.code === "PLAYWRIGHT_HARDCODED_URL")
+      ).toBe(true);
+    });
+
+    it("passes a clean playwright test with relative url and real selectors", () => {
+      const result = validateTestOutput({
+        testFileContent: VALID_PLAYWRIGHT_TEST,
+        framework: "playwright_ts",
+      });
+      expect(result.decision).toBe("pass");
+      expect(result.issues).toHaveLength(0);
+    });
+
+    it("warns on missing await before click", () => {
+      const bad = VALID_PLAYWRIGHT_TEST.replace(
+        '  await page.locator("#login-button").click();',
+        '  page.locator("#login-button").click();'
+      );
+      const result = validateTestOutput({
+        testFileContent: bad,
+        framework: "playwright_ts",
+      });
+      expect(
+        result.issues.some(i => i.code === "PLAYWRIGHT_MISSING_AWAIT")
+      ).toBe(true);
     });
   });
 });
