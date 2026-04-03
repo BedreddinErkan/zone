@@ -1,38 +1,41 @@
 import React, { useState } from 'react';
 
-const LoginForm = () => {
-  const [email, setEmail] = useState('');
+const LoginForm: React.FC = () => {
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
     setError('');
 
-    if (!validateInput(email, password)) {
-      setError('Please enter a valid email and password.');
+    if (!username || !password) {
+      setError('Username and password are required.');
       return;
     }
 
-    // Assume login logic here
-  };
-
-  const validateInput = (email, password) => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email) && password.length >= 6;
+    // Proceed with login logic
   };
 
   return (
     <form onSubmit={handleSubmit}>
       <div>
-        <label>Email:</label>
-        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <label>Username:</label>
+        <input
+          type="text"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+        />
       </div>
       <div>
         <label>Password:</label>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
       </div>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+      {error && <div style={{ color: 'red' }}>{error}</div>}
       <button type="submit">Login</button>
     </form>
   );
