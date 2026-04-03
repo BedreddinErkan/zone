@@ -286,13 +286,17 @@ export async function runTestEngineerFlow(input: {
   const featurePatch = applyPatches.find(p => p.filePath.endsWith(".feature"));
   const stepPatch = applyPatches.find(p => p.filePath.endsWith(".java"));
 
-  const validation = validateTestOutput({
-    featureContent: featurePatch?.fullContent,
-    stepDefinitionContent: stepPatch?.fullContent,
-    pageObjectContents: pageObjectContents,
-    framework: framework.framework,
-  });
+ const testFilePatch = applyPatches.find(
+  p => p.filePath.endsWith(".spec.ts") || p.filePath.endsWith(".spec.js") || p.filePath.endsWith(".test.ts")
+);
 
+const validation = validateTestOutput({
+  featureContent: featurePatch?.fullContent,
+  stepDefinitionContent: stepPatch?.fullContent,
+  testFileContent: testFilePatch?.fullContent,
+  pageObjectContents: pageObjectContents,
+  framework: framework.framework,
+});
 if (validation.decision !== "pass" || validation.issues.length > 0) {
   console.log(`[zone:validate] Decision: ${validation.decision}`);
   for (const issue of validation.issues) {

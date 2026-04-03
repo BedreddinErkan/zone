@@ -34,6 +34,15 @@ const entries = await fg(
     "*.gradle",
     "*.md",
     "*.properties",
+    // Root config files — framework detection
+    "playwright.config.ts",
+    "playwright.config.js",
+    "cypress.config.ts",
+    "cypress.config.js",
+    "pytest.ini",
+    "conftest.py",
+    "pyproject.toml",
+    "testng.xml",
     // Cypress
     "cypress/**/*.{js,ts,feature}",
     // Playwright
