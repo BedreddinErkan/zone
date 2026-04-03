@@ -21,16 +21,22 @@ export function classifyPatchIntent(task: string): PatchIntent {
   }
 
   if (
-    includesAny(normalizedTask, [
-      "update import",
-      "fix import",
-      "change import",
-      "import path",
-      "adjust import"
-    ])
-  ) {
-    return "update_import";
-  }
+  includesAny(normalizedTask, [
+    "update import",
+    "fix import",
+    "change import",
+    "import path",
+    "adjust import"
+  ])
+) {
+  // If it's a test file context, let LLM handle it
+  const isTestContext = includesAny(normalizedTask, [
+    "spec", "test", "cypress", "playwright", "selenium",
+    "cucumber", "jest", "pytest", "feature", "step"
+  ]);
+  if (isTestContext) return "unknown";
+  return "update_import";
+}
 
   if (
     includesAny(normalizedTask, [

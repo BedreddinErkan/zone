@@ -42,7 +42,8 @@ import {
   convertGeneratedPlanToPatchPlan,
   type PatchPlan,
 } from "../patch/conversion/convertGeneratedPlanToPatchPlan.js";
-
+import { runTestEngineerFlow } from "../roles/runTestEngineerFlow.js";
+import { checkConfidenceGate, renderConfidenceGateBlock } from "../core/confidenceGate.js";
 const execFileAsync = promisify(execFile);
 
 type CliOptions = {
@@ -64,6 +65,8 @@ type CliOptions = {
   confirmApply?: boolean;
   patchPlan?: string;
   useGeneratedPatchPlan?: boolean;
+    role?: string;
+
 };
 
 // ---------------------------------------------------------------------------
@@ -398,28 +401,28 @@ async function runTaskOnlyFlow(options: {
   confirmApply: boolean;
   patchPlanPath: string | null;
   useGeneratedPatchPlan: boolean;
-    repoPath: string;
-
+  repoPath: string;
+  role?: string;
 }): Promise<number> {
-  const {
-    task,
-    verbose,
-    showTrace,
-    traceId,
-    tracker,
-    outputFormat,
-    audit,
-    auditOut,
-    apply,
-    confirmApply,
-    patchPlanPath,
-    useGeneratedPatchPlan,
-      repoPath
-  } = options;
+const {
+  task,
+  verbose,
+  showTrace,
+  traceId,
+  tracker,
+  outputFormat,
+  audit,
+  auditOut,
+  apply,
+  confirmApply,
+  patchPlanPath,
+  useGeneratedPatchPlan,
+  repoPath,
+  role,
+} = options;
 
   tracker.startPhase("run_agent");
-  const result = await runAgent({ task });
-  tracker.endPhase("run_agent");
+const result = await runAgent({ task, role });  tracker.endPhase("run_agent");
 
   tracker.endPhase("total");
 
@@ -441,11 +444,58 @@ async function runTaskOnlyFlow(options: {
     decision: result.decision,
     reasonCodes: result.reasonCodes,
   });
+// Confidence gate check
+const gateResult = checkConfidenceGate({
+  confidenceScore: result.decision.confidenceScore,
+  role: role,
+  warnings: result.topRisks?.map(r => r.reason) ?? [],
+});
 
+if (!gateResult.pass && apply && confirmApply) {
+  console.log("");
+  console.log(renderConfidenceGateBlock(gateResult));
+  console.log("");
+  console.log("[zone] Apply blocked by confidence gate. Use --verbose to see details.");
+  return 1;
+}
+
+if (!gateResult.pass) {
+  console.log("");
+  console.log(renderConfidenceGateBlock(gateResult));
+  console.log("[zone] Proceeding in preview mode only.");
+  console.log("");
+}
 const intent = classifyPatchIntent(task);
 let patchSection = generatedPatchPlanPreview;
 
 if (intent === "unknown" && repoPath) {
+  if (role === "test_engineer") {
+    console.log("[zone] Test Engineer role — delegating to test engineer flow...");
+    const teResult = await runTestEngineerFlow({ task, repoPath });
+
+    if (!teResult.ok) {
+      console.error(`[zone] Test engineer flow failed: ${teResult.reason}`);
+      if (teResult.framework === "unknown") {
+        console.error("[zone] No test framework detected in this repository.");
+        console.error("[zone] Supported: playwright-ts, playwright-js, cypress, cucumber-java, selenium-java, testng, pytest");
+      }
+      return 1;
+    }
+
+    console.log(`[zone] Framework detected: ${teResult.framework} (${teResult.language})`);
+    console.log(`[zone] Confidence: ${teResult.confidence}`);
+    console.log(teResult.preview);
+
+    if (apply && confirmApply && teResult.applyPatches.length > 0) {
+      console.log("[zone] Applying test files...");
+      const applyResult = await applyLlmPatches(teResult.applyPatches, repoPath);
+      console.log(`[zone] Applied: ${applyResult.applied.join(", ") || "none"}`);
+      console.log(`[zone] Failed: ${applyResult.failed.join(", ") || "none"}`);
+    }
+
+    return 0;
+  }
+
   console.log("[zone] Intent unknown — delegating to LLM patch flow...");
   const llmResult = await runLlmPatchFlow({ task, repoPath });
   if (llmResult.ok) {
@@ -675,21 +725,22 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
   try {
     if (taskOnly) {
       const outputFormat = resolveOutputFormat(options.format);
-      return await runTaskOnlyFlow({
-        task,
-        verbose,
-        showTrace,
-        traceId,
-        tracker,
-        outputFormat,
-        audit,
-        auditOut,
-        apply: Boolean(options.apply),
-        confirmApply: Boolean(options.confirmApply),
-        patchPlanPath: resolvePatchPlanPath(options),
-        useGeneratedPatchPlan: Boolean(options.useGeneratedPatchPlan),
-        repoPath
-      });
+    return await runTaskOnlyFlow({
+  task,
+  verbose,
+  showTrace,
+  traceId,
+  tracker,
+  outputFormat,
+  audit,
+  auditOut,
+  apply: Boolean(options.apply),
+  confirmApply: Boolean(options.confirmApply),
+  patchPlanPath: resolvePatchPlanPath(options),
+  useGeneratedPatchPlan: Boolean(options.useGeneratedPatchPlan),
+  repoPath,
+  role: options.role,
+});
     }
 
     const changedFiles = diffAware ? await getChangedFiles(repoPath) : [];
@@ -866,6 +917,7 @@ export async function run(): Promise<void> {
       "Path for structured JSON result output",
       DEFAULT_RESULT_PATH
     )
+      .option("--role <role>", "Agent role: developer | test_engineer | data_analyst")
     .allowExcessArguments(false)
     .parse(process.argv);
 

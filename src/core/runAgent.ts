@@ -15,6 +15,7 @@ import type {
 
 type RunAgentInput = {
   task: string;
+  role?: string;
 };
 
 export type RunAgentMode = "blocked" | "preview_only" | "safe_to_apply";
@@ -219,8 +220,10 @@ export function buildTopRisks(
 
 export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
   const normalizedTask = input.task.trim();
-  const { score, signals, breakdown } = computeRiskScore(normalizedTask);
-  const mode = mapScoreToMode(score, signals);
+const { score, signals, breakdown } = computeRiskScore({
+  task: normalizedTask,
+  role: input.role,
+});  const mode = mapScoreToMode(score, signals);
   const confidence = computeConfidenceScore({ breakdown });
 
 

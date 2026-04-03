@@ -21,46 +21,54 @@ export type ComputeRiskScoreResult = {
 
 type ComputeRiskScoreInput = {
   task: string;
+  role?: string;
 };
 
 export function computeRiskScore(
   input: string | ComputeRiskScoreInput
 ): ComputeRiskScoreResult {
   const task = typeof input === "string" ? input : input.task;
+  const role = typeof input === "string" ? undefined : input.role;
 
   const details = computeRiskScoreDetails({ task });
 
+  // Role-aware schema penalty adjustment:
+  // test_engineer: writing tests is not a schema risk
+  // data_analyst: schema changes are expected, handled separately
+  const schemaScore =
+    role === "test_engineer" || role === "data_analyst"
+      ? 0
+      : details.riskBreakdown.schema;
+
   const signals: RiskSignal[] = [];
 
-  if (details.riskBreakdown.destructive > 0) {
-    signals.push("destructive");
-  }
+  if (details.riskBreakdown.destructive > 0) signals.push("destructive");
+  if (schemaScore > 0) signals.push("schema");
+  if (details.riskBreakdown.critical > 0) signals.push("critical_domain");
+  if (details.riskBreakdown.lowRisk < 0) signals.push("low_risk");
+  if (details.riskBreakdown.massScope > 0) signals.push("mass_scope");
 
-  if (details.riskBreakdown.schema > 0) {
-    signals.push("schema");
-  }
-
-  if (details.riskBreakdown.critical > 0) {
-    signals.push("critical_domain");
-  }
-
-  if (details.riskBreakdown.lowRisk < 0) {
-    signals.push("low_risk");
-  }
-
-  if (details.riskBreakdown.massScope > 0) {
-    signals.push("mass_scope");
-  }
+  const adjustedScore = Math.max(
+    0,
+    Math.min(
+      100,
+      details.riskBreakdown.destructive +
+        schemaScore +
+        details.riskBreakdown.critical +
+        details.riskBreakdown.lowRisk +
+        details.riskBreakdown.massScope
+    )
+  );
 
   return {
-    score: details.riskScore,
+    score: adjustedScore,
     signals,
     breakdown: {
       destructive: details.riskBreakdown.destructive,
-      schema: details.riskBreakdown.schema,
+      schema: schemaScore,
       critical: details.riskBreakdown.critical,
       lowRisk: details.riskBreakdown.lowRisk,
-      massScope: details.riskBreakdown.massScope
-    }
+      massScope: details.riskBreakdown.massScope,
+    },
   };
 }
