@@ -223,19 +223,11 @@ function buildFileLocationRules(fw: DetectedTestFramework): string[] {
 }
 
 const TASK_FILLER_WORDS = new Set([
-  "a",
-  "an",
-  "the",
-  "please",
-  "write",
-  "new",
-  "cucumber",
-  "scenario",
-  "for",
-  "test",
-  "create",
-  "generate",
-  "feature",
+  "a", "an", "the", "please", "write", "new", "cucumber",
+  "scenario", "for", "test", "create", "generate", "feature",
+  "playwright", "saucedemo", "username", "selector",
+  "is", "and", "use", "as", "credentials", "after", "verify",
+  "url", "contains", "password", "submit", "with",
 ]);
 
 function buildIntentTokens(task: string): string[] {

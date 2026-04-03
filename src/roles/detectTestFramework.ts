@@ -54,7 +54,6 @@ export function detectTestFramework(files: RepoFile[]): DetectedTestFramework {
     };}
   const evidence: string[] = [];
 
-  console.log("[zone:debug:detect] files received:", files.length, files.map(f => f.path));
 
   // Playwright TS
   if (hasFile(files, "playwright.config.ts")) {

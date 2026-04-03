@@ -187,18 +187,16 @@ function validatePlaywrightTest(content: string): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const lowerContent = content.toLowerCase();
 
-  const placeholderSelectors = [
-    "#username",
-    "#password",
-    "your-username",
-    "your-password",
-    "your-selector",
-    "adjust selector",
-    "adjust according",
-    "#dashboard",
-    "#home",
-    "#main-content",
-  ];
+const placeholderSelectors = [
+  "your-username",
+  "your-password",
+  "your-selector",
+  "adjust selector",
+  "adjust according",
+  "#dashboard",
+  "#home",
+  "#main-content",
+];
 
   for (const pattern of placeholderSelectors) {
     if (lowerContent.includes(pattern)) {
