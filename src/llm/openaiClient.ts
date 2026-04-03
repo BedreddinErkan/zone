@@ -11,5 +11,4 @@ export function createOpenAIClient(): OpenAI {
 }
 
 export function getModelName(): string {
-  return process.env.OPENAI_MODEL || "gpt-5";
-}
+return process.env.OPENAI_MODEL || "gpt-4o-mini";}

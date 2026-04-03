@@ -6,7 +6,8 @@ import process from "node:process";
 import { promises as fs } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-
+import { classifyPatchIntent } from "../patch-generation/classifyPatchIntent.js";
+import { runLlmPatchFlow } from "../core/runLlmPatchFlow.js";
 import { ExecutionTracker } from "../utils/executionTracker.js";
 import { generateTraceId } from "../utils/trace.js";
 import { runFeatureAgent } from "../core/runFeatureAgent.js";
@@ -34,6 +35,7 @@ import { runApplyFlow } from "../apply/runApplyFlow.js";
 import { renderApplyResult } from "../apply/renderApplyResult.js";
 import { buildGeneratedPatchPlanPreview } from "./buildGeneratedPatchPlanPreview.js";
 import { buildGeneratedPatchPlan } from "../patch-generation/buildGeneratedPatchPlan.js";
+import "dotenv/config";
 import { canConvertGeneratedPlanToPatchPlan } from "../patch/conversion/canConvertGeneratedPlanToPatchPlan.js";
 import {
   convertGeneratedPlanToPatchPlan,
@@ -395,6 +397,8 @@ async function runTaskOnlyFlow(options: {
   confirmApply: boolean;
   patchPlanPath: string | null;
   useGeneratedPatchPlan: boolean;
+    repoPath: string;
+
 }): Promise<number> {
   const {
     task,
@@ -409,6 +413,7 @@ async function runTaskOnlyFlow(options: {
     confirmApply,
     patchPlanPath,
     useGeneratedPatchPlan,
+      repoPath
   } = options;
 
   tracker.startPhase("run_agent");
@@ -436,11 +441,24 @@ async function runTaskOnlyFlow(options: {
     reasonCodes: result.reasonCodes,
   });
 
-  const finalOutput = [
-    renderedDecisionOutput,
-    "",
-    generatedPatchPlanPreview,
-  ].join("\n");
+const intent = classifyPatchIntent(task);
+let patchSection = generatedPatchPlanPreview;
+
+if (intent === "unknown" && repoPath) {
+  console.log("[zone] Intent unknown — delegating to LLM patch flow...");
+  const llmResult = await runLlmPatchFlow({ task, repoPath });
+  if (llmResult.ok) {
+    patchSection = llmResult.patchPreview;
+  } else {
+    patchSection = generatedPatchPlanPreview + "\n\n[zone] LLM patch flow failed: " + llmResult.reason;
+  }
+}
+
+const finalOutput = [
+  renderedDecisionOutput,
+  "",
+  patchSection,
+].join("\n");
 
   console.log("");
   console.log(finalOutput);
@@ -663,6 +681,7 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
         confirmApply: Boolean(options.confirmApply),
         patchPlanPath: resolvePatchPlanPath(options),
         useGeneratedPatchPlan: Boolean(options.useGeneratedPatchPlan),
+        repoPath
       });
     }
 

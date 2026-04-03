@@ -1,6 +1,6 @@
 import type { ProjectStructure, RepoFile } from "./project.js";
 import type { TaskIntent } from "../core/taskIntentParser.js";
-export type CliOutputFormat = "summary" | "detailed" | "json";
+export type CliOutputFormat = "summary" | "detailed" | "json" | "bundled";
 export interface FeatureAgentInput {
   task: string;
   targetPath: string;

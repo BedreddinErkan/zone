@@ -1,21 +1,23 @@
 import type { GeneratedPlanConversionCheck } from "./generatedPlanConversionTypes.js";
 import { getGeneratedPlanConversionFailureSummary } from "./generatedPlanConversionFailureMeta.js";
 
-type GeneratedPlanConversionFailure = Extract<
+type Failure = Extract<
   GeneratedPlanConversionCheck,
   { canConvert: false }
 >;
 
 export function formatGeneratedPlanConversionFailure(
-  failure: GeneratedPlanConversionFailure
+  failure: Failure
 ) {
   return {
-    stage: "generated_patch_plan_conversion",
-    status: "failed",
-    canConvert: false,
-    reasonCode: failure.code,
+    stage: "generated_patch_conversion",
+    status: "blocked",
     summary: getGeneratedPlanConversionFailureSummary(failure.code),
     details: failure.reason,
+
+    // existing fields (koru)
+    canConvert: false,
+    reasonCode: failure.code,
     applyStatus: "blocked"
   } as const;
 }

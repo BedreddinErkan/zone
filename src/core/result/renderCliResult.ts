@@ -113,5 +113,7 @@ export function renderCliResult(
       return renderDetailed(view);
     case "json":
       return JSON.stringify(view.rawResult, null, 2);
+    case "bundled":
+      return renderSummary(view);
   }
 }
