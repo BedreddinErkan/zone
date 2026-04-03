@@ -123,13 +123,33 @@ export async function runLlmPatchFlow(input: {
             ? (currentContentMap[absolutePath] ?? "")
             : "";
 
-        const fullPatch = await planFullPatchWithLlm({
-          task: input.task,
-          filePath: patch.path,
-          fileContent,
-          repoSummary: projectSummary,
-          relatedContext: patch.summary,
-        });
+// Java ve diğer page object dosyalarını context'e ekle
+const pageObjectFiles = allFiles.filter(
+  (f) => f.path.endsWith(".java") || f.path.includes("page")
+).slice(0, 5);
+
+const pageObjectPaths = pageObjectFiles
+  .map((f) => f.absolutePath)
+  .filter((p): p is string => typeof p === "string");
+
+const pageObjectContentsMap = pageObjectPaths.length > 0
+  ? await readProjectFiles(pageObjectPaths)
+  : {};
+
+const pageObjectContext = Object.entries(pageObjectContentsMap)
+  .map(([absPath, content]) => {
+    const relPath = allFiles.find((f) => f.absolutePath === absPath)?.path ?? absPath;
+    return `FILE: ${relPath}\n${content}`;
+  })
+  .join("\n\n");
+
+const fullPatch = await planFullPatchWithLlm({
+  task: input.task,
+  filePath: patch.path,
+  fileContent,
+  repoSummary: projectSummary,
+  relatedContext: [patch.summary, pageObjectContext].filter(Boolean).join("\n\n"),
+});
 
         return { filePath: fullPatch.filePath, fullContent: fullPatch.fullContent };
       })
