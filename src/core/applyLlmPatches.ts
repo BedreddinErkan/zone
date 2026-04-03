@@ -15,6 +15,8 @@ export async function applyLlmPatches(
   const skipped: string[] = [];
   const failed: string[] = [];
 
+  const resolvedRepo = path.resolve(repoPath);
+
   for (const patch of patches) {
     if (patch.fullContent === "") {
       skipped.push(patch.filePath);
@@ -24,23 +26,17 @@ export async function applyLlmPatches(
     const absolutePath = path.resolve(repoPath, patch.filePath);
 
     try {
-      await fs.access(repoPath);
-      const parentDir = path.dirname(absolutePath);
-      const relativeParent = path.relative(repoPath, parentDir);
-      const depthFromRepo = relativeParent.split(path.sep).filter(Boolean).length;
+      await fs.access(resolvedRepo);
 
-      if (depthFromRepo <= 1) {
-        try {
-          await fs.mkdir(parentDir);
-        } catch (mkdirErr) {
-          if ((mkdirErr as NodeJS.ErrnoException).code !== "EEXIST") {
-            throw mkdirErr;
-          }
-        }
-      } else {
-        await fs.access(parentDir);
+      const isInsideRepo = absolutePath.startsWith(resolvedRepo + path.sep) ||
+                           absolutePath === resolvedRepo;
+
+      if (!isInsideRepo) {
+        throw new Error("Path outside repo");
       }
 
+      const parentDir = path.dirname(absolutePath);
+      await fs.mkdir(parentDir, { recursive: true });
       await fs.writeFile(absolutePath, patch.fullContent, "utf8");
       applied.push(patch.filePath);
     } catch {

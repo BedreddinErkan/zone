@@ -1,12 +1,13 @@
-// src/roles/runTestEngineerFlow.ts
-
 import { scanRepo } from "../repo/scanRepo.js";
 import { readProjectFiles } from "../repo/readProjectFiles.js";
 import { detectTestFramework } from "./detectTestFramework.js";
 import { buildTestEngineerContext } from "./testEngineerContext.js";
 import { buildTestEngineerPrompt } from "../prompts/testEngineerPrompt.js";
 import { createOpenAIClient, getModelName } from "../llm/openaiClient.js";
-import { runSelfHealingLoop } from "../core/selfHealingLoop.js";
+import { checkConfidenceGate } from "../core/confidenceGate.js";
+import { validateTestOutput } from "./testOutputValidator.js";
+import type { RepoFile } from "../types/project.js";
+
 export type TestEngineerFlowResult =
   | {
       ok: true;
@@ -40,35 +41,28 @@ function buildPreview(
   framework: string
 ): string {
   const lines: string[] = ["=== TEST ENGINEER PREVIEW ==="];
-
   lines.push(`Framework: ${framework}`);
   lines.push(`Summary: ${result["summary"] as string}`);
-
   const warnings = result["warnings"] as string[];
   if (warnings?.length > 0) {
     lines.push("");
     lines.push("Warnings:");
-    warnings.forEach((w) => lines.push(`- ${w}`));
+    warnings.forEach((warning) => lines.push(`- ${warning}`));
   }
-
   lines.push("");
   lines.push("Files to create:");
-
   if (result["testFile"]) {
-    const f = result["testFile"] as { path: string };
-    lines.push(`- ${f.path}`);
+    const file = result["testFile"] as { path: string };
+    lines.push(`- ${file.path}`);
   }
-
   if (result["featureFile"]) {
-    const f = result["featureFile"] as { path: string };
-    lines.push(`- ${f.path} [feature]`);
+    const file = result["featureFile"] as { path: string };
+    lines.push(`- ${file.path} [feature]`);
   }
-
   if (result["stepDefinitionFile"]) {
-    const f = result["stepDefinitionFile"] as { path: string };
-    lines.push(`- ${f.path} [step definitions]`);
+    const file = result["stepDefinitionFile"] as { path: string };
+    lines.push(`- ${file.path} [step definitions]`);
   }
-
   return lines.join("\n");
 }
 
@@ -78,37 +72,103 @@ function buildApplyPatches(
   const patches: Array<{ filePath: string; fullContent: string }> = [];
 
   if (result["testFile"]) {
-    const f = result["testFile"] as { path: string; content: string };
-    if (f.path && f.content) {
-      patches.push({ filePath: f.path, fullContent: f.content });
+    const file = result["testFile"] as { path: string; content: string };
+    if (file.path && file.content) {
+      patches.push({ filePath: file.path, fullContent: file.content });
     }
   }
 
   if (result["featureFile"]) {
-    const f = result["featureFile"] as { path: string; content: string };
-    if (f.path && f.content) {
-      patches.push({ filePath: f.path, fullContent: f.content });
+    const file = result["featureFile"] as { path: string; content: string };
+    if (file.path && file.content) {
+      patches.push({ filePath: file.path, fullContent: file.content });
     }
   }
 
   if (result["stepDefinitionFile"]) {
-    const f = result["stepDefinitionFile"] as { path: string; content: string };
-    if (f.path && f.content) {
-      patches.push({ filePath: f.path, fullContent: f.content });
+    const file = result["stepDefinitionFile"] as {
+      path: string;
+      content: string;
+    };
+    if (file.path && file.content) {
+      patches.push({ filePath: file.path, fullContent: file.content });
     }
   }
 
   return patches;
 }
 
+async function readExampleContents(
+  files: RepoFile[],
+  allFiles: RepoFile[],
+  limit: number
+): Promise<Array<{ path: string; content: string }>> {
+  const examplePaths = files
+    .slice(0, limit)
+    .map((file) => file.absolutePath)
+    .filter((filePath): filePath is string => typeof filePath === "string");
+
+  const contentsMap =
+    examplePaths.length > 0 ? await readProjectFiles(examplePaths) : {};
+
+  return Object.entries(contentsMap).map(([absPath, content]) => ({
+    path: allFiles.find((file) => file.absolutePath === absPath)?.path ?? absPath,
+    content,
+  }));
+}
+
+function scoreFeatureExampleContent(content: string): number {
+  let score = 0;
+
+  if (content.includes("Scenario Outline")) score += 4;
+  if (content.includes("Examples:")) score += 4;
+  if (/^\s*@/m.test(content)) score += 1;
+
+  return score;
+}
+
+function isPreferredCucumberFeaturePath(path: string): boolean {
+  return path.startsWith("src/test/resources/features/");
+}
+
+async function readFeatureExampleContents(
+  files: RepoFile[],
+  allFiles: RepoFile[],
+  framework: { framework: string }
+): Promise<Array<{ path: string; content: string }>> {
+  if (framework.framework !== "cucumber_java") {
+    return readExampleContents(files, allFiles, 2);
+  }
+
+  const inspectedExamples = await readExampleContents(files, allFiles, 4);
+
+  return [...inspectedExamples]
+    .sort((a, b) => {
+      const scoreDiff =
+        scoreFeatureExampleContent(b.content) - scoreFeatureExampleContent(a.content);
+      if (scoreDiff !== 0) return scoreDiff;
+      const preferredPathDiff =
+        Number(isPreferredCucumberFeaturePath(b.path)) -
+        Number(isPreferredCucumberFeaturePath(a.path));
+      if (preferredPathDiff !== 0) return preferredPathDiff;
+      return a.path.localeCompare(b.path);
+    })
+    .slice(0, 2);
+}
+
 export async function runTestEngineerFlow(input: {
   task: string;
   repoPath: string;
 }): Promise<TestEngineerFlowResult> {
-  // 1. Scan repo
-  let allFiles;
+  let allFiles: RepoFile[];
   try {
     allFiles = await scanRepo(input.repoPath);
+    if (!Array.isArray(allFiles)) {
+      return {
+        ok: false,
+        reason: `scanRepo returned unexpected type: ${typeof allFiles}`,
+      };
+    }
   } catch (err) {
     return {
       ok: false,
@@ -116,8 +176,15 @@ export async function runTestEngineerFlow(input: {
     };
   }
 
-  // 2. Detect framework
-  const framework = detectTestFramework(allFiles);
+  let framework;
+  try {
+    framework = detectTestFramework(allFiles);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `detectTestFramework failed: ${err instanceof Error ? err.stack : String(err)}`,
+    };
+  }
 
   if (framework.framework === "unknown") {
     return {
@@ -130,66 +197,51 @@ export async function runTestEngineerFlow(input: {
     };
   }
 
-  // 3. Build context
-  const context = buildTestEngineerContext(input.task, framework, allFiles);
+  let context;
+  try {
+    context = buildTestEngineerContext(input.task, framework, allFiles);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `buildTestEngineerContext failed: ${err instanceof Error ? err.stack : String(err)}`,
+    };
+  }
 
-  // 4. Read page object contents (top 5)
-  const pageObjectPaths = context.pageObjectFiles
-    .slice(0, 5)
-    .map((f) => f.absolutePath)
-    .filter((p): p is string => typeof p === "string");
-
-  const pageObjectContentsMap =
-    pageObjectPaths.length > 0
-      ? await readProjectFiles(pageObjectPaths)
-      : {};
-
-  const pageObjectContents = Object.entries(pageObjectContentsMap).map(
-    ([absPath, content]) => ({
-      path:
-        allFiles.find((f) => f.absolutePath === absPath)?.path ?? absPath,
-      content,
-    })
+  const pageObjectContents = await readExampleContents(
+    context.pageObjectFiles,
+    allFiles,
+    3
+  );
+  const stepDefinitionContents = await readExampleContents(
+    context.stepDefinitionFiles,
+    allFiles,
+    2
+  );
+  const featureContents = await readFeatureExampleContents(
+    context.featureFiles,
+    allFiles,
+    framework
+  );
+  const existingTestContents = await readExampleContents(
+    context.existingTestFiles,
+    allFiles,
+    3
   );
 
-  // 5. Read existing test contents (top 3)
-  const existingTestPaths = context.existingTestFiles
-    .slice(0, 3)
-    .map((f) => f.absolutePath)
-    .filter((p): p is string => typeof p === "string");
-
-  const existingTestContentsMap =
-    existingTestPaths.length > 0
-      ? await readProjectFiles(existingTestPaths)
-      : {};
-
-  const existingTestContents = Object.entries(existingTestContentsMap).map(
-    ([absPath, content]) => ({
-      path:
-        allFiles.find((f) => f.absolutePath === absPath)?.path ?? absPath,
-      content,
-    })
-  );
-
-  // 6. Build prompt
   const prompt = buildTestEngineerPrompt({
     task: input.task,
     context,
     pageObjectContents,
+    stepDefinitionContents,
+    featureContents,
     existingTestContents,
   });
 
-  // 7. Call LLM
   let parsed: Record<string, unknown>;
   try {
     const client = createOpenAIClient();
     const model = getModelName();
-
-    const response = await client.responses.create({
-      model,
-      input: prompt,
-    });
-
+    const response = await client.responses.create({ model, input: prompt });
     const rawText = response.output_text || "";
     const jsonText = extractJson(rawText);
     parsed = JSON.parse(jsonText) as Record<string, unknown>;
@@ -201,62 +253,75 @@ export async function runTestEngineerFlow(input: {
     };
   }
 
-  // 8. Build result
   const applyPatches = buildApplyPatches(parsed);
   const preview = buildPreview(parsed, framework.framework);
-  const confidence = typeof parsed["confidence"] === "number"
-    ? parsed["confidence"]
-    : 70;
-  const summary = typeof parsed["summary"] === "string"
-    ? parsed["summary"]
-    : "Test generated successfully.";
+  const confidence =
+    typeof parsed["confidence"] === "number" ? parsed["confidence"] : 50;
+  const summary =
+    typeof parsed["summary"] === "string"
+      ? parsed["summary"]
+      : "Test generated successfully.";
   const warnings = Array.isArray(parsed["warnings"])
     ? (parsed["warnings"] as string[])
     : [];
-// Self-healing: if confidence is low, pre-emptively check for common errors
-if (confidence < 70 && applyPatches.length > 0) {
-  console.log("[zone:heal] Low confidence detected — running pre-emptive error check...");
+  const confidenceGate = checkConfidenceGate({
+    confidenceScore: confidence,
+    role: "test_engineer",
+    framework: framework.framework,
+    warnings,
+  });
 
-  const exportErrors = applyPatches.filter(p =>
-    p.fullContent.includes("export default new ")
-  );
-
-  if (exportErrors.length > 0) {
-    console.log(`[zone:heal] Found ${exportErrors.length} potential export error(s) — auto-fixing...`);
-
-    const healResult = await runSelfHealingLoop({
-      task: input.task,
-      repoPath: input.repoPath,
-      errorMessage: "export default new ClassName() — instance exported instead of class",
-      affectedFiles: exportErrors,
-      maxAttempts: 1,
-    });
-
-    if (healResult.healed) {
-      for (const attempt of healResult.attempts) {
-        for (const file of attempt.filesChanged) {
-          const patch = applyPatches.find(p => p.filePath === file);
-          if (patch) {
-            const fixed = exportErrors.find(p => p.filePath === file);
-            if (fixed) {
-              patch.fullContent = fixed.fullContent.replace(
-                /export default new (\w+)\(\)/g,
-                "export default $1"
-              );
-            }
-          }
-        }
-      }
+  if (!confidenceGate.pass && applyPatches.length > 0) {
+    const exportErrors = applyPatches.filter((patch) =>
+      patch.fullContent.includes("export default new ")
+    );
+    for (const patch of exportErrors) {
+      patch.fullContent = patch.fullContent.replace(
+        /export default new (\w+)\(\)/g,
+        "export default $1"
+      );
     }
   }
+// 9. Validate output
+  const featurePatch = applyPatches.find(p => p.filePath.endsWith(".feature"));
+  const stepPatch = applyPatches.find(p => p.filePath.endsWith(".java"));
+
+  const validation = validateTestOutput({
+    featureContent: featurePatch?.fullContent,
+    stepDefinitionContent: stepPatch?.fullContent,
+    pageObjectContents: pageObjectContents,
+    framework: framework.framework,
+  });
+
+if (validation.decision !== "pass" || validation.issues.length > 0) {
+  console.log(`[zone:validate] Decision: ${validation.decision}`);
+  for (const issue of validation.issues) {
+    console.log(`  [${issue.severity}] ${issue.code}: ${issue.message}`);
+  }
 }
-  return {
+  if (validation.decision === "blocked") {
+    return {
+      ok: false,
+      reason:
+        `Output validation blocked: ${validation.summary}\n` +
+        validation.issues
+          .filter(i => i.severity === "error")
+          .map(i => `  - ${i.message}`)
+          .join("\n"),
+      framework: framework.framework,
+    };
+  }
+
+  const validationWarnings = validation.issues
+    .filter(i => i.severity === "warning")
+    .map(i => `[${i.code}] ${i.message}`);
+return {
     ok: true,
     framework: framework.framework,
     language: framework.language,
     confidence,
     summary,
-    warnings,
+    warnings: [...warnings, ...validationWarnings],
     applyPatches,
     preview,
   };

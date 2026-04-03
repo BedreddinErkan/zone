@@ -4,8 +4,6 @@ import path from "node:path";
 import os from "node:os";
 import { applyLlmPatches } from "./applyLlmPatches.js";
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
 let tmpDir: string;
 
 beforeEach(async () => {
@@ -26,8 +24,6 @@ async function writeExisting(relative: string, content: string): Promise<void> {
   await fs.writeFile(abs, content, "utf8");
 }
 
-// ── tests ─────────────────────────────────────────────────────────────────────
-
 describe("applyLlmPatches", () => {
   it("returns empty arrays when patches list is empty", async () => {
     const result = await applyLlmPatches([], tmpDir);
@@ -41,21 +37,69 @@ describe("applyLlmPatches", () => {
       [{ filePath: "src/index.ts", fullContent: "" }],
       tmpDir
     );
+
     expect(result.skipped).toEqual(["src/index.ts"]);
     expect(result.applied).toEqual([]);
     expect(result.failed).toEqual([]);
   });
 
-  it("writes file and reports applied when fullContent is non-empty", async () => {
+  it("writes normal shallow files correctly", async () => {
     const content = "export const x = 1;\n";
+
     const result = await applyLlmPatches(
       [{ filePath: "src/x.ts", fullContent: content }],
       tmpDir
     );
+
     expect(result.applied).toEqual(["src/x.ts"]);
     expect(result.skipped).toEqual([]);
     expect(result.failed).toEqual([]);
     expect(await readFile("src/x.ts")).toBe(content);
+  });
+
+  it("applies nested file paths inside repo", async () => {
+    const content = "public class LoginSteps {}\n";
+
+    const result = await applyLlmPatches(
+      [
+        {
+          filePath:
+            "src/test/java/com/enuygun/stepdefinitions/LoginSteps.java",
+          fullContent: content,
+        },
+      ],
+      tmpDir
+    );
+
+    expect(result.applied).toEqual([
+      "src/test/java/com/enuygun/stepdefinitions/LoginSteps.java",
+    ]);
+    expect(result.skipped).toEqual([]);
+    expect(result.failed).toEqual([]);
+    expect(
+      await readFile(
+        "src/test/java/com/enuygun/stepdefinitions/LoginSteps.java"
+      )
+    ).toBe(content);
+  });
+
+  it("creates missing parent directories recursively", async () => {
+    const content = "describe('login', () => {});\n";
+
+    const result = await applyLlmPatches(
+      [
+        {
+          filePath: "cypress/e2e/smoke/login.spec.js",
+          fullContent: content,
+        },
+      ],
+      tmpDir
+    );
+
+    expect(result.applied).toEqual(["cypress/e2e/smoke/login.spec.js"]);
+    expect(result.skipped).toEqual([]);
+    expect(result.failed).toEqual([]);
+    expect(await readFile("cypress/e2e/smoke/login.spec.js")).toBe(content);
   });
 
   it("overwrites an existing file with new content", async () => {
@@ -68,11 +112,36 @@ describe("applyLlmPatches", () => {
     );
 
     expect(result.applied).toEqual(["src/util.ts"]);
+    expect(result.skipped).toEqual([]);
+    expect(result.failed).toEqual([]);
     expect(await readFile("src/util.ts")).toBe(newContent);
   });
 
-  it("reports failed when directory does not exist and cannot be created", async () => {
-    // Point repoPath at a non-existent directory so writeFile fails
+  it("fails when patch path escapes repo using dot dot segments", async () => {
+    const result = await applyLlmPatches(
+      [{ filePath: "../outside.ts", fullContent: "export const x = 1;\n" }],
+      tmpDir
+    );
+
+    expect(result.applied).toEqual([]);
+    expect(result.skipped).toEqual([]);
+    expect(result.failed).toEqual(["../outside.ts"]);
+  });
+
+  it("fails when an absolute path escapes outside the repo", async () => {
+    const outsidePath = path.resolve(tmpDir, "..", "outside.ts");
+
+    const result = await applyLlmPatches(
+      [{ filePath: outsidePath, fullContent: "export const x = 1;\n" }],
+      tmpDir
+    );
+
+    expect(result.applied).toEqual([]);
+    expect(result.skipped).toEqual([]);
+    expect(result.failed).toEqual([outsidePath]);
+  });
+
+  it("fails when repo path does not exist", async () => {
     const badRepoPath = path.join(tmpDir, "does-not-exist");
 
     const result = await applyLlmPatches(
@@ -85,32 +154,40 @@ describe("applyLlmPatches", () => {
     expect(result.skipped).toEqual([]);
   });
 
+  it("skips empty content patches even when repo path does not exist", async () => {
+    const badRepoPath = path.join(tmpDir, "missing-repo");
+
+    const result = await applyLlmPatches(
+      [
+        { filePath: "empty.ts", fullContent: "" },
+        { filePath: "nested/file.ts", fullContent: "export const x = 1;\n" },
+      ],
+      badRepoPath
+    );
+
+    expect(result.applied).toEqual([]);
+    expect(result.skipped).toEqual(["empty.ts"]);
+    expect(result.failed).toEqual(["nested/file.ts"]);
+  });
+
   it("processes multiple patches independently", async () => {
     const goodContent = "export const good = true;\n";
-    const badRepoPath = path.join(tmpDir, "ghost");
-
-    // Mix: one good write, one skip (empty), one fail (bad path written separately)
     const result = await applyLlmPatches(
       [
         { filePath: "src/good.ts", fullContent: goodContent },
+        { filePath: "../outside.ts", fullContent: "export const bad = true;\n" },
         { filePath: "src/empty.ts", fullContent: "" },
       ],
       tmpDir
     );
 
-    expect(result.applied).toContain("src/good.ts");
-    expect(result.skipped).toContain("src/empty.ts");
+    expect(result.applied).toEqual(["src/good.ts"]);
+    expect(result.skipped).toEqual(["src/empty.ts"]);
+    expect(result.failed).toEqual(["../outside.ts"]);
     expect(await readFile("src/good.ts")).toBe(goodContent);
-
-    // Separate failure check
-    const failResult = await applyLlmPatches(
-      [{ filePath: "src/fail.ts", fullContent: "x" }],
-      badRepoPath
-    );
-    expect(failResult.failed).toContain("src/fail.ts");
   });
 
-  it("does not throw when all patches fail — returns failed array instead", async () => {
+  it("does not throw when all patches fail and returns failed array instead", async () => {
     const badRepoPath = path.join(tmpDir, "nonexistent");
 
     await expect(
@@ -128,23 +205,8 @@ describe("applyLlmPatches", () => {
     });
   });
 
-  it("resolves filePath relative to repoPath, not cwd", async () => {
-    const content = "// resolved correctly\n";
-
-    const result = await applyLlmPatches(
-      [{ filePath: "nested/deep/file.ts", fullContent: content }],
-      tmpDir
-    );
-
-    // writeFile to a nested path without mkdirp will fail — that is expected
-    // The point is the path used is path.resolve(repoPath, filePath)
-    // Since we do NOT mkdir -p, nested paths fail gracefully
-    expect(result.failed).toEqual(["nested/deep/file.ts"]);
-    expect(result.applied).toEqual([]);
-  });
-
   it("applied file content is written in utf8", async () => {
-    const unicodeContent = "// こんにちは\nexport const greeting = '世界';\n";
+    const unicodeContent = "// hello\nexport const greeting = 'world';\n";
 
     await applyLlmPatches(
       [{ filePath: "unicode.ts", fullContent: unicodeContent }],
