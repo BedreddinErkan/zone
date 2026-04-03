@@ -42,7 +42,18 @@ function findTestDir(files: RepoFile[], patterns: string[]): string | null {
 }
 
 export function detectTestFramework(files: RepoFile[]): DetectedTestFramework {
+
+ if (!Array.isArray(files)) {
+    return {
+      framework: "unknown",
+      confidence: "low",
+      language: "unknown",
+      evidence: ["Invalid input: files is not an array"],
+      testFilePattern: "*",
+      testDir: null,
+    };}
   const evidence: string[] = [];
+
 
   // Playwright TS
   if (hasFile(files, "playwright.config.ts")) {
