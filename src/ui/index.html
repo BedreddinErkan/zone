@@ -102,8 +102,8 @@ input:focus,textarea:focus{border-color:#007acc}
 .warning-item::before{content:"⚠ "}
 .apply-btn{width:100%;background:transparent;border:1px solid #4ec9b0;border-radius:6px;color:#4ec9b0;font-size:15px;padding:10px;cursor:pointer;margin-top:14px;display:flex;align-items:center;justify-content:center;gap:8px}
 .apply-btn.is-enabled{border-color:#4ec9b0;color:#4ec9b0;background:transparent;opacity:1;cursor:pointer}
+.apply-btn.is-enabled:hover{background:#0e3a1e}
 .apply-btn.is-disabled{border-color:#3c3c3c;color:#858585;background:transparent;opacity:.7;cursor:not-allowed}
-.apply-btn:hover{background:#0e3a1e}
 .apply-btn.is-disabled:hover{background:transparent}
 .apply-btn:disabled{border-color:#3c3c3c;color:#858585;cursor:not-allowed}
 .hidden{display:none}
@@ -121,7 +121,6 @@ input:focus,textarea:focus{border-color:#007acc}
 .pr-icon.skip{color:#858585}
 .pr-path{color:#9cdcfe;flex:1;word-break:break-all}
 .pr-reason{font-size:12px;color:#858585}
-/* ── Diff view ───────────────────────────────────────────────────────────── */
 .diff-card{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;margin-bottom:10px;overflow:hidden}
 .diff-header{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;list-style:none}
 .diff-header::-webkit-details-marker{display:none}
@@ -252,7 +251,6 @@ input:focus,textarea:focus{border-color:#007acc}
   <div class="risk-row"><span class="rlbl">mass scope</span><div class="rbg"><div class="rbar" id="rMass" style="width:0%;background:#ef9f27"></div></div><span class="rval" id="rMassVal">0</span></div>
 </div>
 
-<!-- Dry Run Diff Section -->
 <div class="section hidden" id="diffSection">
   <div class="label">Dry Run — Diff Preview</div>
   <div id="diffSummaryBox" style="font-size:13px;color:#858585;margin-bottom:14px"></div>
@@ -314,7 +312,6 @@ function buildDiffCards(fileDiffs){
     const added=fd.addedLines??0;
     const removed=fd.removedLines??0;
     const diffLines=fd.diff||[];
-    // find changed indices
     const changed=new Set();
     diffLines.forEach((l,idx)=>{if(l.type!=='unchanged')changed.add(idx);});
     const visible=new Set();
@@ -392,19 +389,19 @@ function getApplyBlockingReason(){
   if(!currentRunState.hasPatchResult||!currentPatches.length)return 'Run Execute first.';
   if(currentRunState.validationBlocked||currentRunState.decisionMode==='blocked')return 'Output validation blocked this result. Apply is disabled.';
   if((currentRunState.confidence??0)<70)return 'Confidence too low to apply. Review the preview.';
-  if(currentRunState.decisionMode==='preview_only')return 'Preview only - confidence is not high enough to apply.';
+  if(currentRunState.decisionMode==='preview_only')return 'Preview only — confidence is not high enough to apply.';
   return '';
 }
 
 // Apply button has 2 states:
-// 'enabled'  - canApply true based on result readiness
-// 'disabled' - blocked by validation, missing patch result, low confidence, or run in progress
+// 'enabled'  — canApply true, patch ready, confidence sufficient, not blocked
+// 'disabled' — blocked by validation, missing patch, low confidence, or run in progress
 function getApplyState(){
   const applyBlockingReason=getApplyBlockingReason();
   const resolvedRepoPath=getResolvedRepoPath();
   const targetLabel=currentRepoHandle&&currentRepoSelectionLabel
-    ? currentRepoSelectionLabel.replace(/^Folder:\s*/,'')
-    : resolvedRepoPath;
+    ?currentRepoSelectionLabel.replace(/^Folder:\s*/,'')
+    :resolvedRepoPath;
   let helperText='Run Execute first.';
   if(!applyBlockingReason&&targetLabel){
     helperText=`Ready to apply to: ${targetLabel}`;
@@ -416,10 +413,10 @@ function getApplyState(){
     helperText='Confidence too low to apply safely.';
   }
   return {
-    canApply: !applyBlockingReason,
+    canApply:!applyBlockingReason,
     applyBlockingReason,
     helperText,
-    visualState: applyBlockingReason?'disabled':'enabled',
+    visualState:applyBlockingReason?'disabled':'enabled',
   };
 }
 
@@ -441,11 +438,8 @@ function renderRepoSelection(){
   const manualRepoPath=document.getElementById('repoPath').value.trim();
   const resolvedRepoPath=getResolvedRepoPath();
   if(!currentRepoSelectionLabel){
-    label.textContent='';
-    meta.textContent='';
-    box.classList.add('hidden');
-    updateApplyState();
-    return;
+    label.textContent='';meta.textContent='';box.classList.add('hidden');
+    updateApplyState();return;
   }
   label.textContent=currentRepoSelectionLabel;
   if(manualRepoPath){
@@ -462,16 +456,14 @@ function renderRepoSelection(){
 function syncRepoSelectionDisplay(){renderRepoSelection();}
 
 function clearRepoSelection(){
-  currentRepoHandle=null;
-  currentRepoSelectionLabel='';
+  currentRepoHandle=null;currentRepoSelectionLabel='';
   const fallback=document.getElementById('folderPickerFallback');
   if(fallback)fallback.value='';
   renderRepoSelection();
 }
 
 function setRepoSelection(label,handle){
-  currentRepoHandle=handle||null;
-  currentRepoSelectionLabel=label||'';
+  currentRepoHandle=handle||null;currentRepoSelectionLabel=label||'';
   renderRepoSelection();
 }
 
@@ -510,12 +502,9 @@ function handleFolderFallbackChange(input){
 function validateTaskAndRepo(){
   const task=document.getElementById('task').value.trim();
   const repoPath=getResolvedRepoPath();
-  if(!task){
-    showError('Task is required.');
-    return null;
-  }
+  if(!task){showError('Task is required.');return null;}
   if(!repoPath){
-    showError(currentRepoSelectionLabel?'Select a local repo path for Execute and Dry Run. The selected folder will still be used for Apply once a patch is ready.':'Task and repo path are required.');
+    showError(currentRepoSelectionLabel?'Select a local repo path for Execute and Dry Run.':'Task and repo path are required.');
     return null;
   }
   return {task,repoPath};
@@ -525,18 +514,15 @@ async function executeDryRun(){
   const values=validateTaskAndRepo();
   if(!values)return;
   const {task,repoPath}=values;
-  beginRunState();
-  hideError();
+  beginRunState();hideError();
   document.getElementById('diffSection').classList.add('hidden');
-  setDryRunLoading(true);
-  setProgress('Dry run — generating diff...');
+  setDryRunLoading(true);setProgress('Dry run — generating diff...');
   try{
     const r=await fetch('/api/dry-run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath})});
     if(!r.ok)throw new Error('Dry run failed: '+r.status);
     const data=await r.json();
     if(!data.ok)throw new Error(data.reason||'Dry run failed.');
-    showDiff(data);
-    setProgress('Ready');
+    showDiff(data);setProgress('Ready');
   }catch(e){resetProgress();showError(e.message);}
   finally{currentRunState.runInProgress=false;setDryRunLoading(false);updateApplyState();}
 }
@@ -587,8 +573,7 @@ function loadRecentRun(i){
 function renderResultSummary(){
   const roleLabel=formatRoleLabel(currentSummaryState.role||currentRole);
   const statusLabel=formatStatusLabel(currentSummaryState.status);
-  const wc=currentSummaryState.warningCount??0;
-  const fc=currentSummaryState.fileCount??0;
+  const wc=currentSummaryState.warningCount??0;const fc=currentSummaryState.fileCount??0;
   const chips=[`Status: ${statusLabel}`,fc>0?`Files: ${fc}`:'',`Warnings: ${wc}`,currentSummaryState.contextCount?`Context: ${currentSummaryState.contextCount}`:'',currentSummaryState.framework?`Framework: ${currentSummaryState.framework}`:'',currentSummaryState.complexity?`Complexity: ${currentSummaryState.complexity}`:'',currentSummaryState.dialect?`Dialect: ${currentSummaryState.dialect}`:'',currentSummaryState.migrationFormat?`Format: ${currentSummaryState.migrationFormat}`:''].filter(Boolean);
   document.getElementById('resultSummaryTitle').textContent=`${roleLabel} Result`;
   document.getElementById('resultSummarySubtitle').textContent=`${roleLabel} run summary`;
@@ -597,8 +582,7 @@ function renderResultSummary(){
 function updateResultSummary(s){currentSummaryState={...currentSummaryState,...s};renderResultSummary();}
 function closeProgressStream(){if(currentProgressSource){currentProgressSource.close();currentProgressSource=null;}}
 function setProgress(stage){
-  const box=document.getElementById('progressBox');
-  const text=document.getElementById('progressText');
+  const box=document.getElementById('progressBox');const text=document.getElementById('progressText');
   if(!stage){text.textContent='';box.classList.add('hidden');box.style.display='none';return;}
   text.textContent='⏳ '+stage;box.classList.remove('hidden');box.style.display='block';
 }
@@ -639,8 +623,7 @@ async function execute(){
   const values=validateTaskAndRepo();
   if(!values)return;
   const {task,repoPath}=values;
-  resetProgress();hideError();
-  beginRunState();
+  resetProgress();hideError();beginRunState();
   document.getElementById('diffSection').classList.add('hidden');
   currentRepoPath=repoPath;saveToHistory(repoPath);setLoading(true);
   const runId=`${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
@@ -652,8 +635,7 @@ async function execute(){
       const result=await r.json();
       if(!result.ok&&!(result.validationBlocked&&result.preview)){
         showError(result.reason||'Test generation failed.');
-        addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
-        return;
+        addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;
       }
       const decisionMode=result.decisionMode||(result.validationBlocked?'blocked':result.confidence>=70?'safe_to_apply':'preview_only');
       showDecision({decision:{mode:decisionMode},confidence:{score:result.confidence??0},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity});
@@ -693,8 +675,7 @@ function showDecision(data){
   currentRunState.decisionMode=mode;
   currentRunState.validationBlocked=mode==='blocked';
   currentRunState.confidence=conf;
-  const risk=data.risk?.score??0;
-  const bd=data.risk?.breakdown||{};
+  const risk=data.risk?.score??0;const bd=data.risk?.breakdown||{};
   const cls=mode==='blocked'?'blocked':mode==='preview_only'?'preview':'safe';
   const dot=mode==='blocked'?'#f44747':mode==='preview_only'?'#ce9178':'#4ec9b0';
   document.getElementById('decisionBadge').className='decision-badge '+cls;
@@ -756,14 +737,8 @@ function showPatch(data){
 
 async function ensureRepoWritePermission(handle){
   if(!handle)return false;
-  if(typeof handle.queryPermission==='function'){
-    const state=await handle.queryPermission({mode:'readwrite'});
-    if(state==='granted')return true;
-  }
-  if(typeof handle.requestPermission==='function'){
-    const state=await handle.requestPermission({mode:'readwrite'});
-    return state==='granted';
-  }
+  if(typeof handle.queryPermission==='function'){const state=await handle.queryPermission({mode:'readwrite'});if(state==='granted')return true;}
+  if(typeof handle.requestPermission==='function'){const state=await handle.requestPermission({mode:'readwrite'});return state==='granted';}
   return true;
 }
 
@@ -771,9 +746,7 @@ async function getNestedFileHandle(rootHandle,filePath){
   const parts=String(filePath||'').split('/').filter(Boolean);
   if(parts.length===0)throw new Error('Invalid patch file path.');
   let directory=rootHandle;
-  for(let i=0;i<parts.length-1;i+=1){
-    directory=await directory.getDirectoryHandle(parts[i],{create:true});
-  }
+  for(let i=0;i<parts.length-1;i+=1){directory=await directory.getDirectoryHandle(parts[i],{create:true});}
   return directory.getFileHandle(parts[parts.length-1],{create:true});
 }
 
@@ -786,18 +759,14 @@ async function writePatchFilesWithHandle(rootHandle,patches){
       await writable.write(patch.fullContent||'');
       await writable.close();
       applied.push(patch.filePath);
-    }catch(e){
-      failed.push({filePath:patch.filePath,error:e});
-    }
+    }catch(e){failed.push({filePath:patch.filePath,error:e});}
   }
   return {applied,failed};
 }
 
 function setRestoreAvailability(visible){
-  const btn=document.getElementById('restoreBtn');
-  if(!btn)return;
-  if(visible)btn.classList.remove('hidden');
-  else btn.classList.add('hidden');
+  const btn=document.getElementById('restoreBtn');if(!btn)return;
+  if(visible)btn.classList.remove('hidden');else btn.classList.add('hidden');
 }
 
 async function readExistingFileSnapshot(rootHandle,filePath){
@@ -805,23 +774,17 @@ async function readExistingFileSnapshot(rootHandle,filePath){
   if(parts.length===0)return {filePath,existed:false,content:''};
   try{
     let directory=rootHandle;
-    for(let i=0;i<parts.length-1;i+=1){
-      directory=await directory.getDirectoryHandle(parts[i]);
-    }
+    for(let i=0;i<parts.length-1;i+=1){directory=await directory.getDirectoryHandle(parts[i]);}
     const fileHandle=await directory.getFileHandle(parts[parts.length-1]);
     const file=await fileHandle.getFile();
     return {filePath,existed:true,content:await file.text()};
-  }catch{
-    return {filePath,existed:false,content:''};
-  }
+  }catch{return {filePath,existed:false,content:''};}
 }
 
 async function createBackupSnapshot(rootHandle,patches){
   const uniquePaths=[...new Set((patches||[]).map(p=>p.filePath).filter(Boolean))];
   const entries=[];
-  for(const filePath of uniquePaths){
-    entries.push(await readExistingFileSnapshot(rootHandle,filePath));
-  }
+  for(const filePath of uniquePaths){entries.push(await readExistingFileSnapshot(rootHandle,filePath));}
   return {folderLabel:currentRepoSelectionLabel,entries};
 }
 
@@ -829,13 +792,8 @@ async function removeFileWithHandle(rootHandle,filePath){
   const parts=String(filePath||'').split('/').filter(Boolean);
   if(parts.length===0)return;
   let directory=rootHandle;
-  for(let i=0;i<parts.length-1;i+=1){
-    directory=await directory.getDirectoryHandle(parts[i]);
-  }
-  if(typeof directory.removeEntry==='function'){
-    await directory.removeEntry(parts[parts.length-1]);
-    return;
-  }
+  for(let i=0;i<parts.length-1;i+=1){directory=await directory.getDirectoryHandle(parts[i]);}
+  if(typeof directory.removeEntry==='function'){await directory.removeEntry(parts[parts.length-1]);return;}
   throw new Error(`Cannot remove ${filePath} in this browser.`);
 }
 
@@ -848,29 +806,11 @@ async function restoreBackupSnapshot(rootHandle,snapshot){
         const writable=await fileHandle.createWritable();
         await writable.write(entry.content||'');
         await writable.close();
-      }else{
-        await removeFileWithHandle(rootHandle,entry.filePath);
-      }
+      }else{await removeFileWithHandle(rootHandle,entry.filePath);}
       restored.push(entry.filePath);
-    }catch(e){
-      failed.push({filePath:entry.filePath,error:e});
-    }
+    }catch(e){failed.push({filePath:entry.filePath,error:e});}
   }
   return {restored,failed};
-}
-
-function buildApplySuccessSummary(input){
-  const applied=Array.isArray(input?.applied)?input.applied:[];
-  const failed=Array.isArray(input?.failed)?input.failed:[];
-  const appliedSet=new Set(applied);
-  const appliedPatches=(currentPatches||[]).filter(p=>appliedSet.has(p.filePath));
-  const createdCount=appliedPatches.filter(p=>formatFileOperation(p.filePath)==='create').length;
-  const modifiedCount=Math.max(0,appliedPatches.length-createdCount);
-  const folderMeta=currentRepoSelectionLabel?`<div style="margin-bottom:8px;color:#9cdcfe">${escapeHtml(currentRepoSelectionLabel)}</div>`:'';
-  const countLine=`<div style="margin-bottom:8px"><strong>${applied.length}</strong> file${applied.length!==1?'s':''} written${createdCount||modifiedCount?` · ${createdCount} created · ${modifiedCount} modified`:''}</div>`;
-  const fileList=applied.length>0?`<div>${applied.map(f=>`&nbsp;&nbsp;• ${escapeHtml(f)}`).join('<br>')}</div>`:'';
-  const failedLine=failed.length>0?`<br><span style="color:#ce9178">⚠ Failed: ${failed.map(f=>escapeHtml(f.filePath||f)).join(', ')}</span>`:'';
-  return `${folderMeta}${countLine}${fileList}${failedLine}`;
 }
 
 function buildApplyVerificationSummary(input){
@@ -881,12 +821,12 @@ function buildApplyVerificationSummary(input){
   const createdCount=appliedPatches.filter(p=>formatFileOperation(p.filePath)==='create').length;
   const modifiedCount=Math.max(0,appliedPatches.length-createdCount);
   const targetName=(currentRepoHandle&&currentRepoSelectionLabel?currentRepoSelectionLabel.replace(/^Folder:\s*/,''):getResolvedRepoPath())||'';
-  const folderMeta=targetName?`<div style="margin-bottom:8px;color:#9cdcfe">Target folder: ${escapeHtml(targetName)}</div>`:'';
+  const folderMeta=targetName?`<div style="margin-bottom:8px;color:#9cdcfe">Target: ${escapeHtml(targetName)}</div>`:'';
   const countLine=`<div style="margin-bottom:8px"><strong>${applied.length}</strong> file${applied.length!==1?'s':''} written · ${createdCount} created · ${modifiedCount} modified</div>`;
   const restoreMeta=currentBackupSnapshot&&applied.length>0?'<div style="margin-bottom:8px;color:#4ec9b0">Restore is ready for this session.</div>':'';
   const visibleFiles=applied.slice(0,5);
   const extraCount=Math.max(0,applied.length-visibleFiles.length);
-  const fileList=visibleFiles.length>0?`<div style="margin-bottom:8px">${visibleFiles.map(f=>`&nbsp;&nbsp;• ${escapeHtml(f)}`).join('<br>')}${extraCount>0?`<br>&nbsp;&nbsp;• +${extraCount} more file${extraCount!==1?'s':''}`:''}</div>`:'';
+  const fileList=visibleFiles.length>0?`<div style="margin-bottom:8px">${visibleFiles.map(f=>`&nbsp;&nbsp;• ${escapeHtml(f)}`).join('<br>')}${extraCount>0?`<br>&nbsp;&nbsp;• +${extraCount} more`:''}</div>`:'';
   const failedLine=failed.length>0?`<br><span style="color:#ce9178">⚠ Failed: ${failed.map(f=>escapeHtml(f.filePath||f)).join(', ')}</span>`:'';
   return `<div style="margin-bottom:8px">Applied successfully</div>${folderMeta}${countLine}${restoreMeta}${fileList}${failedLine}`;
 }
@@ -894,23 +834,18 @@ function buildApplyVerificationSummary(input){
 function buildApplyNeutralSummary(input){
   const failed=Array.isArray(input?.failed)?input.failed:[];
   const targetName=(currentRepoHandle&&currentRepoSelectionLabel?currentRepoSelectionLabel.replace(/^Folder:\s*/,''):getResolvedRepoPath())||'';
-  const folderMeta=targetName?`<div style="margin-bottom:8px;color:#9cdcfe">Target folder: ${escapeHtml(targetName)}</div>`:'';
+  const folderMeta=targetName?`<div style="margin-bottom:8px;color:#9cdcfe">Target: ${escapeHtml(targetName)}</div>`:'';
   const failedLine=failed.length>0?`<div style="margin-top:8px;color:#ce9178">Failed writes: ${failed.map(f=>escapeHtml(f.filePath||f)).join(', ')}</div>`:'';
   return `${folderMeta}<div>No files were written</div>${failedLine}`;
 }
 
 async function applyChanges(){
   const applyState=getApplyState();
-  if(!applyState.canApply){
-    showError(applyState.applyBlockingReason);
-    updateApplyState();
-    return;
-  }
+  if(!applyState.canApply){showError(applyState.applyBlockingReason);updateApplyState();return;}
   const sp=document.getElementById('applySpinner');
   const t=document.getElementById('applyText');
   const sb=document.getElementById('successBox');
-  currentRunState.runInProgress=true;
-  updateApplyState();
+  currentRunState.runInProgress=true;updateApplyState();
   sp.style.display='block';
   t.textContent=`Writing ${currentPatches.length} file${currentPatches.length!==1?'s':''}...`;
   sb.style.display='none';
@@ -921,46 +856,37 @@ async function applyChanges(){
       if(!allowed)throw new Error('Write permission denied for the selected folder.');
       const backupSnapshot=await createBackupSnapshot(currentRepoHandle,currentPatches);
       res=await writePatchFilesWithHandle(currentRepoHandle,currentPatches);
-      if(res.applied.length===0){
-        currentBackupSnapshot=null;
-        setRestoreAvailability(false);
-      }else{
-        currentBackupSnapshot=backupSnapshot;
-        setRestoreAvailability(true);
-      }
+      if(res.applied.length===0){currentBackupSnapshot=null;setRestoreAvailability(false);}
+      else{currentBackupSnapshot=backupSnapshot;setRestoreAvailability(true);}
     }else{
       const repoPath=getResolvedRepoPath();
       if(!repoPath)throw new Error('Enter a repo path first.');
       const response=await fetch('/api/apply',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
+        method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({patches:currentPatches,repoPath})
       });
       if(!response.ok)throw new Error('Apply failed: '+response.status);
       const payload=await response.json();
-      res={
-        applied:Array.isArray(payload.applied)?payload.applied:[],
-        failed:Array.isArray(payload.failed)?payload.failed:[],
-      };
-      currentBackupSnapshot=null;
-      setRestoreAvailability(false);
+      res={applied:Array.isArray(payload.applied)?payload.applied:[],failed:Array.isArray(payload.failed)?payload.failed:[]};
+      currentBackupSnapshot=null;setRestoreAvailability(false);
     }
     if(res.applied.length===0){
       sb.innerHTML=buildApplyNeutralSummary(res);
       sb.style.display='block';
+      currentRunState.hasPatchResult=false; // disable apply after neutral
     }else{
       sb.innerHTML=buildApplyVerificationSummary(res);
       sb.style.display='block';
+      currentRunState.hasPatchResult=false; // disable apply after success
     }
     if(res.failed.length>0){
       showError('Some files could not be written: '+res.failed.map(f=>f.filePath||f).join(', '));
     }
-  }catch(e){
-    showError(e.message);
-  }finally{
+  }catch(e){showError(e.message);}
+  finally{
     currentRunState.runInProgress=false;
     sp.style.display='none';
-    t.textContent='Apply Changes';
+    t.textContent='✓  Apply Changes';
     updateApplyState();
   }
 }
@@ -973,17 +899,13 @@ async function restorePreviousState(){
   btn.disabled=true;sp.style.display='block';t.textContent='Restoring files...';
   try{
     const allowed=await ensureRepoWritePermission(currentRepoHandle);
-    if(!allowed){throw new Error('Write permission denied for the selected folder.');}
+    if(!allowed)throw new Error('Write permission denied for the selected folder.');
     const res=await restoreBackupSnapshot(currentRepoHandle,currentBackupSnapshot);
-    if(res.restored.length===0){throw new Error('No files were restored.');}
+    if(res.restored.length===0)throw new Error('No files were restored.');
     sb.innerHTML=`✓ Restored previous state<br><div style="margin-bottom:8px"><strong>${res.restored.length}</strong> file${res.restored.length!==1?'s':''} restored</div><div>${res.restored.map(f=>`&nbsp;&nbsp;• ${escapeHtml(f)}`).join('<br>')}</div>${res.failed.length>0?`<br><span style="color:#ce9178">⚠ Failed: ${res.failed.map(f=>escapeHtml(f.filePath)).join(', ')}</span>`:''}`;
     sb.style.display='block';
-    if(res.failed.length===0){
-      currentBackupSnapshot=null;
-      setRestoreAvailability(false);
-    }else{
-      showError('Some files could not be restored: '+res.failed.map(f=>f.filePath).join(', '));
-    }
+    if(res.failed.length===0){currentBackupSnapshot=null;setRestoreAvailability(false);}
+    else{showError('Some files could not be restored: '+res.failed.map(f=>f.filePath).join(', '));}
   }catch(e){showError(e.message);}
   finally{btn.disabled=false;sp.style.display='none';t.textContent='↩  Restore Previous State';}
 }
@@ -995,8 +917,7 @@ function resetUI(){
   document.getElementById('diffSection').classList.add('hidden');
   hideError();
   const cb=document.getElementById('complexityBadge');cb.textContent='';cb.className='complexity-badge hidden';
-  clearRepoSelection();
-  resetRunState();
+  clearRepoSelection();resetRunState();
   currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};
   renderResultSummary();resetProgress();currentRepoPath='';renderHistory();updateApplyState();
 }
@@ -1008,5 +929,3 @@ updateApplyState();
 </script>
 </body>
 </html>
-
-
