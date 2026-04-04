@@ -291,8 +291,8 @@ function resolveOutputFormat(rawFormat: string | undefined): OutputFormat {
 
 async function getChangedFiles(repoPath: string): Promise<string[]> {
   try {
-    const baseSha = process.env.SMILE_AGENT_BASE_SHA?.trim();
-    const headSha = process.env.SMILE_AGENT_HEAD_SHA?.trim() || "HEAD";
+    const baseSha = process.env.ZONE_BASE_SHA?.trim();
+    const headSha = process.env.ZONE_HEAD_SHA?.trim() || "HEAD";
 
     const args = baseSha
       ? ["diff", "--name-only", `${baseSha}...${headSha}`]

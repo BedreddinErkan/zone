@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   feature-agent:
-    name: Smile Agent CI
+    name: Zone CI
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -73,9 +73,9 @@ jobs:
             } >> "$GITHUB_ENV"
 
             echo "AGENT_REPO_PATH=." >> "$GITHUB_ENV"
-            echo "SMILE_AGENT_BASE_SHA=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_ENV"
-            echo "SMILE_AGENT_HEAD_SHA=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_ENV"
-            echo "SMILE_AGENT_PR_NUMBER=${{ github.event.pull_request.number }}" >> "$GITHUB_ENV"
+            echo "ZONE_BASE_SHA=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_ENV"
+            echo "ZONE_HEAD_SHA=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_ENV"
+            echo "ZONE_PR_NUMBER=${{ github.event.pull_request.number }}" >> "$GITHUB_ENV"
           else
             {
               echo "AGENT_TASK<<EOF"
@@ -87,12 +87,12 @@ jobs:
 
             DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
             git fetch origin "${DEFAULT_BRANCH}" --depth=1
-            echo "SMILE_AGENT_BASE_SHA=$(git rev-parse origin/${DEFAULT_BRANCH})" >> "$GITHUB_ENV"
-            echo "SMILE_AGENT_HEAD_SHA=${GITHUB_SHA}" >> "$GITHUB_ENV"
-            echo "SMILE_AGENT_PR_NUMBER=" >> "$GITHUB_ENV"
+            echo "ZONE_BASE_SHA=$(git rev-parse origin/${DEFAULT_BRANCH})" >> "$GITHUB_ENV"
+            echo "ZONE_HEAD_SHA=${GITHUB_SHA}" >> "$GITHUB_ENV"
+            echo "ZONE_PR_NUMBER=" >> "$GITHUB_ENV"
           fi
 
-      - name: Run Smile Agent
+      - name: Run Zone Agent
         id: agent
         continue-on-error: true
         shell: bash
@@ -194,7 +194,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "## Smile Agent CI Result"
+            echo "## Zone CI Result"
             echo
             echo "- **Decision:** \`${{ steps.result.outputs.decision }}\`"
             echo "- **Confidence:** \`${{ steps.result.outputs.confidence }}\`"
@@ -212,7 +212,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smile-agent-ci-artifacts
+          name: Zone-ci-artifacts
           if-no-files-found: warn
           retention-days: 14
           path: |
@@ -225,11 +225,11 @@ jobs:
         run: |
           case "${{ steps.result.outputs.decision }}" in
             blocked)
-              echo "::error::Smile Agent decision is BLOCKED. Failing workflow."
+              echo "::error::Zone decision is BLOCKED. Failing workflow."
               exit 1
               ;;
             preview_only)
-              echo "::warning::Smile Agent decision is PREVIEW_ONLY. Workflow passes with warning."
+              echo "::warning::Zone decision is PREVIEW_ONLY. Workflow passes with warning."
               exit 0
               ;;
             safe_to_apply)
