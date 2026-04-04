@@ -165,6 +165,132 @@ describe("buildTestEngineerContext output naming", () => {
     expect(context.debug.candidateTestFiles[0]).toEqual(
       expect.objectContaining({
         path: "tests/authentication.spec.ts",
+        suspiciousGenerated: false,
+      })
+    );
+  });
+
+  it("down-ranks a suspicious generated login task slug below a real auth spec", () => {
+    const context = buildTestEngineerContext(
+      "Add a negative login test for invalid credentials",
+      buildFramework({
+        framework: "playwright_ts",
+        language: "typescript",
+        testFilePattern: "*.spec.ts",
+        testDir: "tests",
+      }),
+      [
+        buildRepoFile("tests/add_negative_login_invalid_requirements.spec.ts"),
+        buildRepoFile("tests/login.spec.ts"),
+      ]
+    );
+
+    expect(context.outputPaths.testFile).toBe("tests/login.spec.ts");
+    expect(context.debug.candidateTestFiles[0]).toEqual(
+      expect.objectContaining({
+        path: "tests/login.spec.ts",
+        suspiciousGenerated: false,
+      })
+    );
+    expect(context.debug.candidateTestFiles[1]).toEqual(
+      expect.objectContaining({
+        path: "tests/add_negative_login_invalid_requirements.spec.ts",
+        suspiciousGenerated: true,
+      })
+    );
+    expect(context.debug.candidateTestFiles[1].suspiciousGeneratedPenalty).toBe(-50);
+  });
+
+  it("penalizes suspicious generated task-slug files deterministically when no better auth file exists", () => {
+    const first = buildTestEngineerContext(
+      "Add a negative login test for invalid credentials",
+      buildFramework({
+        framework: "playwright_ts",
+        language: "typescript",
+        testFilePattern: "*.spec.ts",
+        testDir: "tests",
+      }),
+      [buildRepoFile("tests/task_generated_login_case.spec.ts")]
+    );
+    const second = buildTestEngineerContext(
+      "Add a negative login test for invalid credentials",
+      buildFramework({
+        framework: "playwright_ts",
+        language: "typescript",
+        testFilePattern: "*.spec.ts",
+        testDir: "tests",
+      }),
+      [buildRepoFile("tests/task_generated_login_case.spec.ts")]
+    );
+
+    expect(first.outputPaths.testFile).toBe("tests/login.spec.ts");
+    expect(first.debug.candidateTestFiles[0]).toEqual(
+      expect.objectContaining({
+        path: "tests/task_generated_login_case.spec.ts",
+        suspiciousGenerated: true,
+        suspiciousGeneratedPenalty: -50,
+      })
+    );
+    expect(first.outputPaths).toEqual(second.outputPaths);
+    expect(first.debug.candidateTestFiles).toEqual(second.debug.candidateTestFiles);
+  });
+
+  it("keeps concise repository-native login specs preferred and unaffected", () => {
+    const context = buildTestEngineerContext(
+      "Add coverage for invalid credentials on login",
+      buildFramework({
+        framework: "playwright_ts",
+        language: "typescript",
+        testFilePattern: "*.spec.ts",
+        testDir: "tests",
+      }),
+      [
+        buildRepoFile("tests/login.spec.ts"),
+        buildRepoFile("tests/auth.spec.ts"),
+      ]
+    );
+
+    expect(context.outputPaths.testFile).toBe("tests/login.spec.ts");
+    expect(context.debug.candidateTestFiles).toEqual([
+      expect.objectContaining({
+        path: "tests/login.spec.ts",
+        suspiciousGenerated: false,
+      }),
+      expect.objectContaining({
+        path: "tests/auth.spec.ts",
+        suspiciousGenerated: false,
+      }),
+    ]);
+  });
+
+  it("does not penalize normal repository-native non-auth test files", () => {
+    const context = buildTestEngineerContext(
+      "Add checkout smoke coverage",
+      buildFramework({
+        framework: "playwright_ts",
+        language: "typescript",
+        testFilePattern: "*.spec.ts",
+        testDir: "tests",
+      }),
+      [
+        buildRepoFile("tests/checkout.spec.ts"),
+        buildRepoFile("tests/cart.spec.ts"),
+      ]
+    );
+
+    expect(context.outputPaths.testFile).toBe("tests/checkout.spec.ts");
+    expect(context.debug.candidateTestFiles[0]).toEqual(
+      expect.objectContaining({
+        path: "tests/checkout.spec.ts",
+        suspiciousGenerated: false,
+        suspiciousGeneratedPenalty: 0,
+      })
+    );
+    expect(context.debug.candidateTestFiles[1]).toEqual(
+      expect.objectContaining({
+        path: "tests/cart.spec.ts",
+        suspiciousGenerated: false,
+        suspiciousGeneratedPenalty: 0,
       })
     );
   });

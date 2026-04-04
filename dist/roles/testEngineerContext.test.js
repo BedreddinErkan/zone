@@ -89,6 +89,94 @@ function buildRepoFile(path) {
         (0, vitest_1.expect)(context.debug.finalOutputPathSource).toBe("existing_test_file");
         (0, vitest_1.expect)(context.debug.candidateTestFiles[0]).toEqual(vitest_1.expect.objectContaining({
             path: "tests/authentication.spec.ts",
+            suspiciousGenerated: false,
+        }));
+    });
+    (0, vitest_1.it)("down-ranks a suspicious generated login task slug below a real auth spec", () => {
+        const context = (0, testEngineerContext_js_1.buildTestEngineerContext)("Add a negative login test for invalid credentials", buildFramework({
+            framework: "playwright_ts",
+            language: "typescript",
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        }), [
+            buildRepoFile("tests/add_negative_login_invalid_requirements.spec.ts"),
+            buildRepoFile("tests/login.spec.ts"),
+        ]);
+        (0, vitest_1.expect)(context.outputPaths.testFile).toBe("tests/login.spec.ts");
+        (0, vitest_1.expect)(context.debug.candidateTestFiles[0]).toEqual(vitest_1.expect.objectContaining({
+            path: "tests/login.spec.ts",
+            suspiciousGenerated: false,
+        }));
+        (0, vitest_1.expect)(context.debug.candidateTestFiles[1]).toEqual(vitest_1.expect.objectContaining({
+            path: "tests/add_negative_login_invalid_requirements.spec.ts",
+            suspiciousGenerated: true,
+        }));
+        (0, vitest_1.expect)(context.debug.candidateTestFiles[1].suspiciousGeneratedPenalty).toBe(-50);
+    });
+    (0, vitest_1.it)("penalizes suspicious generated task-slug files deterministically when no better auth file exists", () => {
+        const first = (0, testEngineerContext_js_1.buildTestEngineerContext)("Add a negative login test for invalid credentials", buildFramework({
+            framework: "playwright_ts",
+            language: "typescript",
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        }), [buildRepoFile("tests/task_generated_login_case.spec.ts")]);
+        const second = (0, testEngineerContext_js_1.buildTestEngineerContext)("Add a negative login test for invalid credentials", buildFramework({
+            framework: "playwright_ts",
+            language: "typescript",
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        }), [buildRepoFile("tests/task_generated_login_case.spec.ts")]);
+        (0, vitest_1.expect)(first.outputPaths.testFile).toBe("tests/login.spec.ts");
+        (0, vitest_1.expect)(first.debug.candidateTestFiles[0]).toEqual(vitest_1.expect.objectContaining({
+            path: "tests/task_generated_login_case.spec.ts",
+            suspiciousGenerated: true,
+            suspiciousGeneratedPenalty: -50,
+        }));
+        (0, vitest_1.expect)(first.outputPaths).toEqual(second.outputPaths);
+        (0, vitest_1.expect)(first.debug.candidateTestFiles).toEqual(second.debug.candidateTestFiles);
+    });
+    (0, vitest_1.it)("keeps concise repository-native login specs preferred and unaffected", () => {
+        const context = (0, testEngineerContext_js_1.buildTestEngineerContext)("Add coverage for invalid credentials on login", buildFramework({
+            framework: "playwright_ts",
+            language: "typescript",
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        }), [
+            buildRepoFile("tests/login.spec.ts"),
+            buildRepoFile("tests/auth.spec.ts"),
+        ]);
+        (0, vitest_1.expect)(context.outputPaths.testFile).toBe("tests/login.spec.ts");
+        (0, vitest_1.expect)(context.debug.candidateTestFiles).toEqual([
+            vitest_1.expect.objectContaining({
+                path: "tests/login.spec.ts",
+                suspiciousGenerated: false,
+            }),
+            vitest_1.expect.objectContaining({
+                path: "tests/auth.spec.ts",
+                suspiciousGenerated: false,
+            }),
+        ]);
+    });
+    (0, vitest_1.it)("does not penalize normal repository-native non-auth test files", () => {
+        const context = (0, testEngineerContext_js_1.buildTestEngineerContext)("Add checkout smoke coverage", buildFramework({
+            framework: "playwright_ts",
+            language: "typescript",
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        }), [
+            buildRepoFile("tests/checkout.spec.ts"),
+            buildRepoFile("tests/cart.spec.ts"),
+        ]);
+        (0, vitest_1.expect)(context.outputPaths.testFile).toBe("tests/checkout.spec.ts");
+        (0, vitest_1.expect)(context.debug.candidateTestFiles[0]).toEqual(vitest_1.expect.objectContaining({
+            path: "tests/checkout.spec.ts",
+            suspiciousGenerated: false,
+            suspiciousGeneratedPenalty: 0,
+        }));
+        (0, vitest_1.expect)(context.debug.candidateTestFiles[1]).toEqual(vitest_1.expect.objectContaining({
+            path: "tests/cart.spec.ts",
+            suspiciousGenerated: false,
+            suspiciousGeneratedPenalty: 0,
         }));
     });
     (0, vitest_1.it)("falls back to a safe deterministic basename when prompt text is too generic", () => {

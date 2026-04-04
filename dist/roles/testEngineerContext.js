@@ -192,6 +192,23 @@ const BANNED_TEST_FILE_BASENAMES = new Set([
     "task_generated",
     "analyze_repo",
 ]);
+const SUSPICIOUS_GENERATED_FILE_TOKENS = new Set([
+    "add",
+    "requirements",
+    "requirement",
+    "request",
+    "task",
+    "analyze",
+    "repo",
+    "repository",
+    "prompt",
+    "code",
+    "agent",
+    "create",
+    "write",
+    "generated",
+    "case",
+]);
 const LOGIN_TASK_KEYWORDS = new Set([
     "login",
     "signin",
@@ -298,6 +315,32 @@ function scoreAuthRelatedExistingTestFile(pathValue, task) {
     }, 0);
     return keywordScore;
 }
+function countSuspiciousGeneratedTokens(tokens) {
+    return tokens.filter((token) => SUSPICIOUS_GENERATED_FILE_TOKENS.has(token)).length;
+}
+function isSuspiciousGeneratedTestFile(pathValue) {
+    const normalizedPath = pathValue.toLowerCase();
+    const fileTokens = tokenizePath(pathValue);
+    const suspiciousTokenCount = countSuspiciousGeneratedTokens(fileTokens);
+    const fillerTokenCount = fileTokens.filter((token) => TASK_FILLER_WORDS.has(token)).length;
+    if (BANNED_TEST_FILE_BASENAMES.has(node_path_1.default.posix.basename(normalizedPath).replace(/\.(spec|test|cy)\.[a-z]+$/i, ""))) {
+        return true;
+    }
+    if (suspiciousTokenCount >= 2)
+        return true;
+    if (fileTokens.length >= 5 && suspiciousTokenCount >= 1)
+        return true;
+    if (fileTokens.length >= 6)
+        return true;
+    if (fillerTokenCount >= 3)
+        return true;
+    if (normalizedPath.length > 50 && suspiciousTokenCount >= 1)
+        return true;
+    return false;
+}
+function scoreSuspiciousGeneratedPenalty(pathValue) {
+    return isSuspiciousGeneratedTestFile(pathValue) ? -50 : 0;
+}
 function rankExistingTestFiles(files, task) {
     const tokens = buildIntentTokens(task);
     return [...files]
@@ -305,8 +348,11 @@ function rankExistingTestFiles(files, task) {
         path: file.path,
         baseScore: scoreExistingTestFile(file.path, tokens),
         authPreferenceScore: scoreAuthRelatedExistingTestFile(file.path, task),
+        suspiciousGeneratedPenalty: scoreSuspiciousGeneratedPenalty(file.path),
+        suspiciousGenerated: isSuspiciousGeneratedTestFile(file.path),
         totalScore: scoreExistingTestFile(file.path, tokens) +
-            scoreAuthRelatedExistingTestFile(file.path, task),
+            scoreAuthRelatedExistingTestFile(file.path, task) +
+            scoreSuspiciousGeneratedPenalty(file.path),
     }))
         .sort((a, b) => {
         if (b.totalScore !== a.totalScore)
