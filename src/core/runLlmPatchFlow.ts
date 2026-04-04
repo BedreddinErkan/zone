@@ -13,6 +13,7 @@ export type LlmPatchFlowResult =
       patchPreview: string;
       warnings: string[];
       applyPatches: Array<{ filePath: string; fullContent: string }>;
+      originalContents?: Record<string, string>;
       contextFiles?: string[];
     }
   | { ok: false; reason: string };
@@ -486,6 +487,7 @@ export async function runLlmPatchFlow(input: {
 
   // 6b. Generate full file content for modify/create patches
   let applyPatches: Array<{ filePath: string; fullContent: string }> = [];
+  const originalContents: Record<string, string> = {};
   const combinedWarnings = [...patchPlan.warnings];
   try {
     const applyTargets = patchPlan.patches.filter(
@@ -513,6 +515,7 @@ export async function runLlmPatchFlow(input: {
         absolutePath !== undefined
           ? (currentContentMap[absolutePath] ?? "")
           : "";
+      originalContents[patch.path] = fileContent;
 
       // Include a few page-like files as extra context for UI/test-heavy repos.
       const pageObjectFiles = allFiles
@@ -634,6 +637,7 @@ export async function runLlmPatchFlow(input: {
     patchPreview,
     warnings: combinedWarnings,
     applyPatches,
+    originalContents,
     contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
   };
 }

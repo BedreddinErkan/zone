@@ -26,6 +26,7 @@ import { runDecisionEngine } from "../engine/decisionEngine.js";
 import type { ExecutionMode } from "../engine/contradictionDetector.js";
 import { buildAuditSnapshot } from "../audit/auditSnapshot.js";
 import { c, colorize } from "./colors.js";
+import { renderDiffSummary } from "./diffOutput.js";
 import { printAuditSnapshot } from "./output.js";
 import { writeAuditSnapshot } from "../audit/snapshotWriter.js";
 import { readAuditSnapshot } from "../audit/snapshotReader.js";
@@ -56,6 +57,7 @@ type CliOptions = {
   verbose?: boolean;
   trace?: boolean;
   diffAware?: boolean;
+  diff?: boolean;
   output?: string;
   format?: string;
   taskOnly?: boolean;
@@ -68,7 +70,7 @@ type CliOptions = {
   confirmApply?: boolean;
   patchPlan?: string;
   useGeneratedPatchPlan?: boolean;
-    role?: string;
+  role?: string;
 
 };
 
@@ -450,6 +452,7 @@ async function runTaskOnlyFlow(options: {
   auditOut: string | null;
   apply: boolean;
   confirmApply: boolean;
+  diff: boolean;
   patchPlanPath: string | null;
   useGeneratedPatchPlan: boolean;
   repoPath: string;
@@ -466,6 +469,7 @@ const {
   auditOut,
   apply,
   confirmApply,
+  diff,
   patchPlanPath,
   useGeneratedPatchPlan,
   repoPath,
@@ -549,10 +553,26 @@ if (intent === "unknown" && repoPath) {
     console.log(daResult.preview);
 
     if (apply && confirmApply && daResult.applyPatches.length > 0) {
+      const originalContents = await capturePatchOriginals(
+        repoPath,
+        daResult.applyPatches
+      );
       console.log(`${zonePrefix()} ${tone("Applying migration files...", c.white)}`);
       const applyResult = await applyLlmPatches(daResult.applyPatches, repoPath);
       console.log(formatApplyLog("Applied", applyResult.applied));
       console.log(formatApplyLog("Failed", applyResult.failed));
+      if (diff && applyResult.applied.length > 0) {
+        renderDiffSummary(
+          applyResult.applied.map((filePath) => {
+            const patch = daResult.applyPatches.find((p) => p.filePath === filePath);
+            return {
+              filePath,
+              original: originalContents[filePath] ?? "",
+              updated: patch?.fullContent ?? "",
+            };
+          })
+        );
+      }
     }
 
     return 0;
@@ -586,10 +606,26 @@ if (intent === "unknown" && repoPath) {
     console.log(teResult.preview);
 
     if (apply && confirmApply && teResult.applyPatches.length > 0) {
+      const originalContents = await capturePatchOriginals(
+        repoPath,
+        teResult.applyPatches
+      );
       console.log(`${zonePrefix()} ${tone("Applying test files...", c.white)}`);
       const applyResult = await applyLlmPatches(teResult.applyPatches, repoPath);
       console.log(formatApplyLog("Applied", applyResult.applied));
       console.log(formatApplyLog("Failed", applyResult.failed));
+      if (diff && applyResult.applied.length > 0) {
+        renderDiffSummary(
+          applyResult.applied.map((filePath) => {
+            const patch = teResult.applyPatches.find((p) => p.filePath === filePath);
+            return {
+              filePath,
+              original: originalContents[filePath] ?? "",
+              updated: patch?.fullContent ?? "",
+            };
+          })
+        );
+      }
     }
 
     return 0;
@@ -602,11 +638,26 @@ if (intent === "unknown" && repoPath) {
   if (llmResult.ok) {
     patchSection = llmResult.patchPreview;
     if (apply && confirmApply && llmResult.applyPatches.length > 0) {
+      const originalContents =
+        llmResult.originalContents ??
+        (await capturePatchOriginals(repoPath, llmResult.applyPatches));
       console.log(`${zonePrefix()} ${tone("Applying LLM patches...", c.white)}`);
       const applyResult = await applyLlmPatches(llmResult.applyPatches, repoPath);
       console.log(formatApplyLog("Applied", applyResult.applied));
       console.log(formatApplyLog("Skipped", applyResult.skipped));
       console.log(formatApplyLog("Failed", applyResult.failed));
+      if (diff && applyResult.applied.length > 0) {
+        renderDiffSummary(
+          applyResult.applied.map((filePath) => {
+            const patch = llmResult.applyPatches.find((p) => p.filePath === filePath);
+            return {
+              filePath,
+              original: originalContents[filePath] ?? "",
+              updated: patch?.fullContent ?? "",
+            };
+          })
+        );
+      }
     }
   } else {
     patchSection = generatedPatchPlanPreview + "\n\n[zone] LLM patch flow failed: " + llmResult.reason;
@@ -689,6 +740,17 @@ const finalOutput = [
       tracker.endPhase("load_patch_plan");
     }
 
+    const patchEntries = Array.isArray((patchPlan as { patches?: unknown }).patches)
+      ? ((patchPlan as { patches: Array<{ filePath: string; nextContent: string }> }).patches)
+      : [];
+    const originalContents =
+      diff && patchEntries.length > 0
+        ? await capturePatchOriginals(
+            repoPath,
+            patchEntries.map((patch) => ({ filePath: patch.filePath }))
+          )
+        : {};
+
     tracker.startPhase("run_apply_flow");
     const applyResult = await runApplyFlow({
       result,
@@ -701,6 +763,16 @@ const finalOutput = [
 
     console.log(renderApplyResult(applyResult));
     console.log("");
+
+    if (diff && applyResult.applied && patchEntries.length > 0) {
+      renderDiffSummary(
+        patchEntries.map((patch) => ({
+          filePath: patch.filePath,
+          original: originalContents[patch.filePath] ?? "",
+          updated: patch.nextContent,
+        }))
+      );
+    }
 
     printVerbose("applyResult", applyResult, verbose);
     printVerbose(
@@ -837,6 +909,7 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
   auditOut,
   apply: Boolean(options.apply),
   confirmApply: Boolean(options.confirmApply),
+  diff: Boolean(options.diff),
   patchPlanPath: resolvePatchPlanPath(options),
   useGeneratedPatchPlan: Boolean(options.useGeneratedPatchPlan),
   repoPath,
@@ -984,6 +1057,7 @@ export async function run(): Promise<void> {
     .option("--verbose", "Enable verbose logs")
     .option("--trace", "Show decision trace in output")
     .option("--diff-aware", "Boost ranking using git diff context")
+    .option("--diff", "Show colored diff of applied changes")
     .option("--task-only", "Run Sprint 7 task-only orchestration flow")
     .option("--apply", "Execute controlled apply flow after decision output")
     .option(
@@ -1029,4 +1103,29 @@ export async function run(): Promise<void> {
 
 if (process.env.VITEST !== "true") {
   void run();
+}
+
+async function readRepoFileContent(
+  repoPath: string,
+  filePath: string
+): Promise<string> {
+  try {
+    return await fs.readFile(path.resolve(repoPath, filePath), "utf8");
+  } catch {
+    return "";
+  }
+}
+
+async function capturePatchOriginals(
+  repoPath: string,
+  patches: Array<{ filePath: string }>
+): Promise<Record<string, string>> {
+  const entries = await Promise.all(
+    patches.map(async (patch) => [
+      patch.filePath,
+      await readRepoFileContent(repoPath, patch.filePath),
+    ] as const)
+  );
+
+  return Object.fromEntries(entries);
 }
