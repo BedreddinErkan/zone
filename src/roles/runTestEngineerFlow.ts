@@ -158,6 +158,61 @@ async function readFeatureExampleContents(
     .slice(0, 2);
 }
 
+function extractRouteEvidence(contents: Array<{ path: string; content: string }>): string[] {
+  const evidence = new Set<string>();
+  const routePattern =
+    /(goto|toHaveURL|visit|navigate(?:To)?)\(\s*(?:await\s+)?(?:(["'`])([^"'`]+)\2|\/([^/\n]+(?:\/[^/\n]+)*)\/[a-z]*)/g;
+
+  for (const entry of contents) {
+    let match: RegExpExecArray | null;
+    while ((match = routePattern.exec(entry.content)) !== null) {
+      const literalRoute = (match[3] ?? match[4] ?? "").trim();
+      if (literalRoute.length >= 2 && /[a-z]/i.test(literalRoute)) {
+        evidence.add(literalRoute);
+      }
+    }
+  }
+
+  return [...evidence];
+}
+
+function findSuspiciousPlaywrightUrlAssertion(
+  testFileContent: string,
+  routeEvidence: string[]
+): string | null {
+  const assertions = [...testFileContent.matchAll(/toHaveURL\(\s*([^)]+)\)/g)];
+  if (assertions.length === 0) return null;
+
+  for (const assertion of assertions) {
+    const rawArgument = assertion[1]?.trim() ?? "";
+    const normalizedArgument = rawArgument.toLowerCase();
+
+    if (routeEvidence.length === 0) {
+      return "Generated Playwright URL assertion is not grounded in repository route evidence.";
+    }
+
+    const isGenericRegex =
+      /^\/.*\/[a-z]*$/i.test(rawArgument) &&
+      (!/[a-z]{2,}/i.test(rawArgument.replace(/tohaveurl/gi, "")) ||
+        normalizedArgument.includes("/.*\\/#/") ||
+        normalizedArgument.includes("/.*\\/?#/") ||
+        normalizedArgument.includes("/.*\\/$/"));
+
+    if (isGenericRegex) {
+      return "Generated Playwright URL assertion uses an arbitrary regex pattern instead of a repository-evidenced route.";
+    }
+
+    const matchesEvidence = routeEvidence.some((route) =>
+      normalizedArgument.includes(route.toLowerCase())
+    );
+    if (!matchesEvidence) {
+      return "Generated Playwright URL assertion does not match any repository-evidenced route.";
+    }
+  }
+
+  return null;
+}
+
 export async function runTestEngineerFlow(input: {
   task: string;
   repoPath: string;
@@ -320,6 +375,27 @@ if (validation.decision !== "pass" || validation.issues.length > 0) {
     console.log(`  [${issue.severity}] ${issue.code}: ${issue.message}`);
   }
 }
+  if (
+    framework.framework.startsWith("playwright") &&
+    testFilePatch?.fullContent
+  ) {
+    const routeEvidence = extractRouteEvidence([
+      ...existingTestContents,
+      ...pageObjectContents,
+    ]);
+    const playwrightUrlAssertionIssue = findSuspiciousPlaywrightUrlAssertion(
+      testFilePatch.fullContent,
+      routeEvidence
+    );
+
+    if (playwrightUrlAssertionIssue) {
+      return {
+        ok: false,
+        reason: `Output validation blocked: ${playwrightUrlAssertionIssue}`,
+        framework: framework.framework,
+      };
+    }
+  }
   if (validation.decision === "blocked") {
     return {
       ok: false,

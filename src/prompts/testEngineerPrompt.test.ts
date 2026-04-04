@@ -278,4 +278,33 @@ describe("buildTestEngineerPrompt", () => {
       "If repository-specific phrasing exists in the provided examples, do NOT fall back to generic phrasing."
     );
   });
+
+  it("forbids unsupported Playwright URL assertions without route evidence", () => {
+    const prompt = buildTestEngineerPrompt({
+      task: "Add a negative login test",
+      context: buildContext({
+        framework: buildFramework({
+          framework: "playwright_ts",
+          language: "typescript",
+          testFilePattern: "*.spec.ts",
+          testDir: "tests",
+        }),
+        frameworkSummary: "Test framework: playwright_ts",
+        outputPaths: {
+          testFile: "tests/login.spec.ts",
+        },
+      }),
+      pageObjectContents: [],
+      stepDefinitionContents: [],
+      featureContents: [],
+      existingTestContents: [],
+    });
+
+    expect(prompt).toContain(
+      "For Playwright: only use expect(page).toHaveURL(...) when repository examples or context show real route evidence. Do NOT invent wildcard, hash-only, or placeholder URL assertions."
+    );
+    expect(prompt).toContain(
+      "If repository evidence does not establish a success route, prefer visible error-state assertions over redirect assertions."
+    );
+  });
 });

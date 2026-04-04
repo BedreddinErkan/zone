@@ -233,6 +233,7 @@ const TASK_FILLER_WORDS = new Set([
   "you", "are", "code", "agent", "analyze", "repo", "repository",
   "inside", "working", "called", "task", "goal", "expected",
   "behavior", "implement", "update", "local", "flow", "function",
+  "add", "requirements", "request", "prompt",
 ]);
 
 const BANNED_TEST_FILE_BASENAMES = new Set([
@@ -240,9 +241,29 @@ const BANNED_TEST_FILE_BASENAMES = new Set([
   "task_generated",
   "analyze_repo",
 ]);
-function buildIntentTokens(task: string): string[] {
-  const sanitizedTask = task
-   .toLowerCase()
+
+const LOGIN_TASK_KEYWORDS = new Set([
+  "login",
+  "signin",
+  "sign",
+  "authentication",
+  "auth",
+  "credentials",
+]);
+
+const AUTH_FILE_KEYWORDS = new Set([
+  "login",
+  "signin",
+  "auth",
+  "authentication",
+  "credential",
+  "credentials",
+  "session",
+]);
+
+function normalizeTaskText(task: string): string {
+  return task
+    .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/https?:\/\/[^\s]+/g, " ")
@@ -250,6 +271,10 @@ function buildIntentTokens(task: string): string[] {
     .replace(/[a-z0-9-]+\.(com|org|net|io|dev|app|co)[^\s]*/g, " ")
     .replace(/[^a-z0-9\s]+/g, " ")
     .trim();
+}
+
+function buildIntentTokens(task: string): string[] {
+  const sanitizedTask = normalizeTaskText(task);
 
   const rawTokens = sanitizedTask.split(/\s+/).filter(Boolean);
   const meaningfulTokens = rawTokens.filter(
@@ -271,8 +296,43 @@ function buildIntentTokens(task: string): string[] {
   return limitedTokens.length > 0 ? limitedTokens : ["generated", "test"];
 }
 
+function hasLoginIntent(task: string): boolean {
+  const normalizedTask = normalizeTaskText(task);
+  if (
+    normalizedTask.includes("sign in") ||
+    normalizedTask.includes("invalid credential")
+  ) {
+    return true;
+  }
+
+  const tokens = normalizedTask.split(/\s+/).filter(Boolean);
+  return tokens.some((token) => LOGIN_TASK_KEYWORDS.has(token));
+}
+
+function preferredBasenameToken(task: string): string | null {
+  const normalizedTask = normalizeTaskText(task);
+  if (
+    normalizedTask.includes("login") ||
+    normalizedTask.includes("sign in") ||
+    normalizedTask.includes("signin") ||
+    normalizedTask.includes("invalid credential")
+  ) {
+    return "login";
+  }
+
+  if (
+    normalizedTask.includes("auth") ||
+    normalizedTask.includes("authentication")
+  ) {
+    return "auth";
+  }
+
+  return null;
+}
+
 function buildOutputNameParts(task: string): { slug: string; pascal: string } {
-  const tokens = buildIntentTokens(task);
+  const preferredToken = preferredBasenameToken(task);
+  const tokens = preferredToken ? [preferredToken] : buildIntentTokens(task);
   const slug = tokens.join("_");
   const pascal = tokens
     .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
@@ -301,6 +361,19 @@ function scoreExistingTestFile(pathValue: string, tokens: string[]): number {
   );
 }
 
+function scoreAuthRelatedExistingTestFile(pathValue: string, task: string): number {
+  if (!hasLoginIntent(task)) return 0;
+  const pathTokens = tokenizePath(pathValue);
+  const normalizedPath = pathValue.toLowerCase();
+  const keywordScore = [...AUTH_FILE_KEYWORDS].reduce((score, token) => {
+    if (pathTokens.includes(token)) return score + 12;
+    if (normalizedPath.includes(token)) return score + 6;
+    return score;
+  }, 0);
+
+  return keywordScore;
+}
+
 function findClosestExistingTestFile(
   files: RepoFile[],
   task: string
@@ -309,7 +382,9 @@ function findClosestExistingTestFile(
   const ranked = [...files]
     .map((file) => ({
       file,
-      score: scoreExistingTestFile(file.path, tokens),
+      score:
+        scoreExistingTestFile(file.path, tokens) +
+        scoreAuthRelatedExistingTestFile(file.path, task),
     }))
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
@@ -323,7 +398,14 @@ function isUnsafeGeneratedSlug(slug: string): boolean {
   if (!slug) return true;
   if (BANNED_TEST_FILE_BASENAMES.has(slug)) return true;
   const tokens = slug.split("_").filter(Boolean);
-  return tokens.length === 0 || tokens.every((token) => TASK_FILLER_WORDS.has(token));
+  const meaningfulTokens = tokens.filter((token) => !TASK_FILLER_WORDS.has(token));
+
+  return (
+    tokens.length === 0 ||
+    meaningfulTokens.length === 0 ||
+    tokens.length > 4 ||
+    slug.length > 32
+  );
 }
 
 function findExistingDirectory(

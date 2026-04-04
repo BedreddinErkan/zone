@@ -547,4 +547,76 @@ describe("runTestEngineerFlow", () => {
       expect(result.preview).not.toContain("you_are_code_agent_analyze.spec.ts");
     }
   });
+
+  it("blocks arbitrary Playwright URL assertions when repository route evidence is missing", async () => {
+    const files = [buildRepoFile("playwright.config.ts"), buildRepoFile("tests/login.spec.ts")];
+    const framework = {
+      framework: "playwright_ts",
+      confidence: "high",
+      language: "typescript",
+      evidence: ["playwright.config.ts"],
+      testFilePattern: "*.spec.ts",
+      testDir: "tests",
+    };
+    const client = {
+      responses: {
+        create: vi.fn().mockResolvedValue({
+          output_text: JSON.stringify({
+            summary: "Generated login test",
+            warnings: [],
+            confidence: 82,
+            testFile: {
+              path: "tests/login.spec.ts",
+              content:
+                "test('login', async ({ page }) => { await expect(page).toHaveURL(/.*\\/#/); await expect(page.getByText('Invalid credentials')).toBeVisible(); });",
+            },
+          }),
+        }),
+      },
+    };
+
+    scanRepoMock.mockResolvedValue(files);
+    detectTestFrameworkMock.mockReturnValue(framework);
+    buildTestEngineerContextMock.mockReturnValue({
+      framework,
+      existingTestFiles: [files[1]],
+      pageObjectFiles: [],
+      stepDefinitionFiles: [],
+      featureFiles: [],
+      configFiles: [],
+      frameworkSummary: "Test framework: playwright_ts",
+      promptRole: "Test engineer",
+      outputRules: [],
+      fileLocationRules: [],
+      outputPaths: {
+        testFile: "tests/login.spec.ts",
+      },
+    });
+    readProjectFilesMock.mockResolvedValue({
+      "C:/repo/tests/login.spec.ts":
+        "test('login page loads', async ({ page }) => { await page.goto('/login'); await expect(page.getByRole('heading')).toBeVisible(); });",
+    });
+    buildTestEngineerPromptMock.mockReturnValue("prompt");
+    createMock.mockReturnValue(client);
+    getModelNameMock.mockReturnValue("test-model");
+    checkConfidenceGateMock.mockReturnValue({ pass: true });
+    detectTestComplexityMock.mockReturnValue({
+      complexity: "negative",
+      hints: ["Task requires an error path"],
+      suggestedPatterns: ["negative path"],
+    });
+
+    const { runTestEngineerFlow } = await import("./runTestEngineerFlow.js");
+    const result = await runTestEngineerFlow({
+      task: "Add a negative login test",
+      repoPath: "C:/repo",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      framework: "playwright_ts",
+      reason:
+        "Output validation blocked: Generated Playwright URL assertion uses an arbitrary regex pattern instead of a repository-evidenced route.",
+    });
+  });
 });

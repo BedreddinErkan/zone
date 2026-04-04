@@ -121,9 +121,7 @@ describe("buildTestEngineerContext output naming", () => {
     expect(cucumberContext.outputPaths.stepDefinition).toBe(
       "src/test/java/com/enuygun/stepdefinitions/RoundTripFlightSearchSteps.java"
     );
-    expect(cypressContext.outputPaths.testFile).toBe(
-      "cypress/e2e/login_smoke.cy.ts"
-    );
+    expect(cypressContext.outputPaths.testFile).toBe("cypress/e2e/login.cy.ts");
   });
 
   it("reuses the closest matching existing Playwright spec instead of inventing a prompt-based filename", () => {
@@ -144,6 +142,25 @@ describe("buildTestEngineerContext output naming", () => {
     expect(context.outputPaths.testFile).toBe("tests/login.spec.ts");
   });
 
+  it("strongly prefers an existing auth-related Playwright spec for login tasks", () => {
+    const context = buildTestEngineerContext(
+      "Add coverage for invalid credentials on sign in",
+      buildFramework({
+        framework: "playwright_ts",
+        language: "typescript",
+        testFilePattern: "*.spec.ts",
+        testDir: "tests",
+      }),
+      [
+        buildRepoFile("tests/account-settings.spec.ts"),
+        buildRepoFile("tests/authentication.spec.ts"),
+        buildRepoFile("tests/profile.spec.ts"),
+      ]
+    );
+
+    expect(context.outputPaths.testFile).toBe("tests/authentication.spec.ts");
+  });
+
   it("falls back to a safe deterministic basename when prompt text is too generic", () => {
     const context = buildTestEngineerContext(
       "You are code agent analyze repository and implement the task",
@@ -159,6 +176,40 @@ describe("buildTestEngineerContext output naming", () => {
     expect(context.outputPaths.testFile).toBe("tests/app.spec.ts");
     expect(context.outputPaths.testFile).not.toContain("you_are_code_agent_analyze");
     expect(context.outputPaths.testFile).not.toContain("analyze_repo");
+  });
+
+  it("uses a short repository-native login basename when no auth spec exists yet", () => {
+    const context = buildTestEngineerContext(
+      "Add negative login invalid requirements for auth request prompt",
+      buildFramework({
+        framework: "playwright_ts",
+        language: "typescript",
+        testFilePattern: "*.spec.ts",
+        testDir: "tests",
+      }),
+      [buildRepoFile("tests/checkout.spec.ts")]
+    );
+
+    expect(context.outputPaths.testFile).toBe("tests/login.spec.ts");
+    expect(context.outputPaths.testFile).not.toContain("add_negative_login_invalid_requirements");
+  });
+
+  it("blocks suspicious task-derived Playwright filenames from becoming output paths", () => {
+    const context = buildTestEngineerContext(
+      "Create task prompt for code agent to analyze repo and write login test requirements",
+      buildFramework({
+        framework: "playwright_ts",
+        language: "typescript",
+        testFilePattern: "*.spec.ts",
+        testDir: "tests",
+      }),
+      []
+    );
+
+    expect(context.outputPaths.testFile).toBe("tests/login.spec.ts");
+    expect(context.outputPaths.testFile).not.toContain("task");
+    expect(context.outputPaths.testFile).not.toContain("agent");
+    expect(context.outputPaths.testFile).not.toContain("requirements");
   });
 
   it("prefers src/test/resources/features when both feature roots exist", () => {

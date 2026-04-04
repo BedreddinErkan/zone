@@ -152,7 +152,9 @@ ${outputSection}
 13. Follow the exact import/package structure of the existing files.
 14. For Cucumber Java: write both feature file AND step definitions.
 15. confidence field: 0-100 based on how well page objects cover the task.
-16. Return raw JSON only - no markdown, no code fences, no explanations.
+16. For Playwright: only use expect(page).toHaveURL(...) when repository examples or context show real route evidence. Do NOT invent wildcard, hash-only, or placeholder URL assertions.
+17. If repository evidence does not establish a success route, prefer visible error-state assertions over redirect assertions.
+18. Return raw JSON only - no markdown, no code fences, no explanations.
 
 === OUTPUT FORMAT ===
 Return JSON only:
