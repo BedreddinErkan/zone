@@ -27,6 +27,7 @@ export async function planFeatureWithLlm(input: {
   projectSummary: string;
   projectNotes: string[];
   relevantFiles: { path: string; category: string }[];
+  existingFilesSummary: string;
   schemaAwareSummary?: string[];
 }): Promise<LlmFeaturePlan> {
   const client = createOpenAIClient();
@@ -49,6 +50,7 @@ const schemaAwareSummary = (input.schemaAwareSummary ?? [])
     intent: input.intent,
     repoSummary,
     relevantFilesSummary,
+    existingFilesSummary: input.existingFilesSummary,
     schemaAwareSummary
   });
 
