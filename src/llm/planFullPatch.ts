@@ -1,20 +1,34 @@
 import { z } from "zod";
 import { createOpenAIClient, getModelName } from "./openaiClient.js";
-import { buildDeveloperPrompt } from "../prompts/developerPrompt.js";
+import {
+  buildFullPatchPrompt,
+  type FullPatchOutputMode,
+} from "../prompts/fullPatchPrompt.js";
 
-const fullPatchSchema = z.object({
+const fullContentSchema = z.object({
   filePath: z.string(),
-  patchText: z.string(),
+  fullContent: z.string(),
   summary: z.string(),
   warnings: z.array(z.string()),
 });
 
-export interface FullPatchResult {
-  filePath: string;
-  patchText: string;
-  summary: string;
-  warnings: string[];
-}
+const LARGE_FILE_PATCH_THRESHOLD = 8000;
+
+export type FullPatchResult =
+  | {
+      mode: "full_content";
+      filePath: string;
+      fullContent: string;
+      summary: string;
+      warnings: string[];
+    }
+  | {
+      mode: "patch";
+      filePath: string;
+      patchText: string;
+      summary: string;
+      warnings: string[];
+    };
 
 function extractJson(rawText: string): string {
   const trimmed = rawText.trim();
@@ -48,31 +62,41 @@ export async function planFullPatchWithLlm(input: {
 }): Promise<FullPatchResult> {
   const client = createOpenAIClient();
   const model = getModelName();
+  const outputMode: FullPatchOutputMode =
+    input.fileContent.length > LARGE_FILE_PATCH_THRESHOLD
+      ? "find_replace_patch"
+      : "full_content";
 
-  const prompt = buildDeveloperPrompt({
+  const prompt = buildFullPatchPrompt({
     task: input.task,
-    repoPath: input.repoPath ?? "(current workspace)",
-    relevantFiles: Array.isArray(input.relevantFiles) ? input.relevantFiles : [],
-    taskIntent: input.taskIntent ?? "general",
-    existingTargetFiles: Array.isArray(input.existingTargetFiles)
-      ? input.existingTargetFiles
-      : [input.filePath],
-    targetFilePath: input.filePath,
-    targetFileContent: input.fileContent,
+    filePath: input.filePath,
+    fileContent: input.fileContent,
     repoSummary: input.repoSummary,
     relatedContext: input.relatedContext,
+    outputMode,
   });
 
   const response = await client.responses.create({ model, input: prompt });
-
   const rawText = response.output_text ?? "";
+
+  if (outputMode === "find_replace_patch") {
+    return {
+      mode: "patch",
+      filePath: input.filePath,
+      patchText: rawText.trim(),
+      summary: "Large-file targeted patch generated.",
+      warnings: [],
+    };
+  }
+
   const jsonText = extractJson(rawText);
   const parsed = JSON.parse(jsonText) as unknown;
-  const validated = fullPatchSchema.parse(parsed);
+  const validated = fullContentSchema.parse(parsed);
 
   return {
+    mode: "full_content",
     filePath: validated.filePath,
-    patchText: validated.patchText,
+    fullContent: validated.fullContent,
     summary: validated.summary,
     warnings: validated.warnings,
   };

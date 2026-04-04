@@ -44,14 +44,14 @@ describe("buildFullPatchPrompt", () => {
   it("includes the OUTPUT FORMAT JSON shape", () => {
     const prompt = buildFullPatchPrompt(BASE_INPUT);
     expect(prompt).toContain('"filePath"');
-    expect(prompt).toContain('"patchText"');
+    expect(prompt).toContain('"fullContent"');
     expect(prompt).toContain('"summary"');
     expect(prompt).toContain('"warnings"');
   });
 
-  it("instructs not to return full file content", () => {
+  it("instructs to return COMPLETE updated file content", () => {
     const prompt = buildFullPatchPrompt(BASE_INPUT);
-    expect(prompt).toContain("DO NOT output full file content");
+    expect(prompt).toContain("COMPLETE updated file content");
   });
 
   it("instructs not to add markdown fences", () => {
@@ -64,10 +64,14 @@ describe("buildFullPatchPrompt", () => {
     expect(prompt).toContain("Preserve all existing code that is unrelated");
   });
 
-  it("instructs to output patch-style edits only", () => {
-    const prompt = buildFullPatchPrompt(BASE_INPUT);
-    expect(prompt).toContain("ONLY output patch-style edits");
-    expect(prompt).toContain("FIND/REPLACE");
+  it("supports find/replace patch mode for large files", () => {
+    const prompt = buildFullPatchPrompt({
+      ...BASE_INPUT,
+      outputMode: "find_replace_patch",
+    });
+    expect(prompt).toContain("Return ONLY the specific change as a FIND/REPLACE patch");
+    expect(prompt).toContain("--- FIND ---");
+    expect(prompt).toContain("--- REPLACE ---");
   });
 
   it("instructs to return JSON only", () => {

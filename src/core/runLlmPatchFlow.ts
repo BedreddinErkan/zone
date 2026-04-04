@@ -189,7 +189,30 @@ interface ParsedDeveloperPatch {
   createContent?: string;
 }
 
+function parseFindReplacePatch(rawPatchText: string): {
+  find: string;
+  replace: string;
+} | null {
+  const match = rawPatchText.match(
+    /--- FIND ---\s*\n([\s\S]*?)\n--- REPLACE ---\s*\n([\s\S]*)$/i
+  );
+  if (!match) return null;
+
+  return {
+    find: match[1],
+    replace: match[2],
+  };
+}
+
 function parseDeveloperPatchText(rawPatchText: string): ParsedDeveloperPatch | null {
+  const barePatch = parseFindReplacePatch(rawPatchText);
+  if (barePatch) {
+    return {
+      filePath: "",
+      edits: [barePatch],
+    };
+  }
+
   const match = rawPatchText.match(
     /--- FILE:\s*(.+?)\s*---\s*([\s\S]*)$/i
   );
@@ -258,8 +281,7 @@ function applyDeveloperPatchText(
     if (!updatedContent.includes(edit.find)) {
       return {
         ok: false,
-        warning:
-          "[DEVELOPER_PATCH_FORMAT] FIND block was not found in the existing file content.",
+        warning: "[PATCH_FIND_NOT_FOUND] Could not locate the target block in the file",
       };
     }
     updatedContent = updatedContent.replace(edit.find, edit.replace);
@@ -532,13 +554,22 @@ export async function runLlmPatchFlow(input: {
           .filter(Boolean)
           .join("\n\n"),
       });
-      const appliedPatch = applyDeveloperPatchText(
-        fileContent,
-        fullPatch.patchText
-      );
+      const nextContent =
+        fullPatch.mode === "patch"
+          ? (() => {
+              const appliedPatch = applyDeveloperPatchText(
+                fileContent,
+                fullPatch.patchText
+              );
+              if (!appliedPatch.ok) {
+                combinedWarnings.push(appliedPatch.warning);
+                return null;
+              }
+              return appliedPatch.fullContent;
+            })()
+          : fullPatch.fullContent;
 
-      if (!appliedPatch.ok) {
-        combinedWarnings.push(appliedPatch.warning);
+      if (nextContent === null) {
         continue;
       }
 
@@ -546,7 +577,7 @@ export async function runLlmPatchFlow(input: {
         task: input.task,
         filePath: patch.path,
         currentContent: fileContent,
-        nextContent: appliedPatch.fullContent,
+        nextContent,
       });
 
       if (suspiciousUiOverwrite) {
@@ -556,7 +587,7 @@ export async function runLlmPatchFlow(input: {
 
       applyResults.push({
         filePath: fullPatch.filePath,
-        fullContent: appliedPatch.fullContent,
+        fullContent: nextContent,
       });
     }
 

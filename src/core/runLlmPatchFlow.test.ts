@@ -162,9 +162,12 @@ describe("runLlmPatchFlow", () => {
       warnings: [],
     });
     planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
       filePath: "src/ui/index.html",
-      patchText:
-        `--- FILE: src/ui/index.html ---\nFIND:\n<h1>Zone</h1><button>Execute</button><button>Reset</button><section id="patchSection" class="section">Patch Preview</section><div id="progressBox" class="progress-box"></div><div class="badge-row"></div><div class="context-files"></div><div class="recent-runs">Recent Runs</div>\nREPLACE:\n<!DOCTYPE html><html><body><h1>Welcome to My App</h1><section>Features</section><button>Get Started</button><div>Application Dashboard</div></body></html>`,
+      fullContent:
+        `<!DOCTYPE html><html><body><h1>Welcome to My App</h1><section>Features</section><button>Get Started</button><div>Application Dashboard</div></body></html>`,
+      summary: "Generated content",
+      warnings: [],
     });
 
     const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
@@ -216,9 +219,12 @@ describe("runLlmPatchFlow", () => {
       warnings: [],
     });
     planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
       filePath: "src/ui/index.html",
-      patchText:
-        `--- FILE: src/ui/index.html ---\nFIND:\n<body><h1>Zone</h1><div class="toolbar"><button>Execute</button><button>Reset</button></div><div id="progressBox" class="progress-box"></div><div id="patchSection" class="section">Patch Preview</div><div class="recent-runs">Recent Runs</div></body>\nREPLACE:\n<!DOCTYPE html><html><head><title>Document</title></head><body><div id="app"></div><script src="/path/to/your/script.js"></script></body></html>`,
+      fullContent:
+        `<!DOCTYPE html><html><head><title>Document</title></head><body><div id="app"></div><script src="/path/to/your/script.js"></script></body></html>`,
+      summary: "Generated content",
+      warnings: [],
     });
 
     const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
@@ -271,9 +277,12 @@ describe("runLlmPatchFlow", () => {
       warnings: [],
     });
     planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
       filePath: "src/ui/index.html",
-      patchText:
-        `--- FILE: src/ui/index.html ---\nFIND:\n<h1>Zone</h1><div class="toolbar"><button>Execute</button><button>Reset</button></div><section id="patchSection" class="section">Patch Preview</section><aside class="recent-runs">Recent Runs</aside><div id="progressBox" class="progress-box"></div>\nREPLACE:\n<main class="shell"><section class="hero"><h2>Cleaner interface</h2><p>Updated spacing and layout.</p></section><section class="content-grid"><div class="panel"></div><div class="panel"></div><div class="panel"></div></section></main>`,
+      fullContent:
+        `<main class="shell"><section class="hero"><h2>Cleaner interface</h2><p>Updated spacing and layout.</p></section><section class="content-grid"><div class="panel"></div><div class="panel"></div><div class="panel"></div></section></main>`,
+      summary: "Generated content",
+      warnings: [],
     });
 
     const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
@@ -326,9 +335,12 @@ describe("runLlmPatchFlow", () => {
       warnings: [],
     });
     planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
       filePath: "src/ui/index.html",
-      patchText:
-        `--- FILE: src/ui/index.html ---\nFIND:\n<div class="context-files"></div>\nREPLACE:\n<div class="context-files readable" style="line-height:1.7"></div>`,
+      fullContent:
+        `<body><h1>Zone</h1><div class="toolbar compact"><button>Execute</button><button>Reset</button></div><div id="progressBox" class="progress-box"></div><div id="patchSection" class="section">Patch Preview</div><div class="badge-row"></div><div class="context-files readable" style="line-height:1.7"></div><div class="recent-runs">Recent Runs</div></body>`,
+      summary: "Generated content",
+      warnings: [],
     });
 
     const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
@@ -408,9 +420,14 @@ describe("runLlmPatchFlow", () => {
       warnings: [],
     });
     planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
       filePath: "src/ui/index.html",
-      patchText:
-        `--- FILE: src/ui/index.html ---\nFIND:\n<div class="content readable" style="line-height:1.5;padding:12px">Body</div>\nREPLACE:\n<div class="content readable" style="line-height:1.7;padding:16px">Body</div>`,
+      fullContent: currentHtml.replace(
+        "line-height:1.5;padding:12px",
+        "line-height:1.7;padding:16px"
+      ),
+      summary: "Generated content",
+      warnings: [],
     });
 
     const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
@@ -474,9 +491,12 @@ describe("runLlmPatchFlow", () => {
       warnings: [],
     });
     planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "patch",
       filePath: "src/ui/index.html",
       patchText:
         `<!DOCTYPE html><html><head><title>Document</title></head><body><div id="app"></div></body></html>`,
+      summary: "Large-file targeted patch generated.",
+      warnings: [],
     });
 
     const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
@@ -489,6 +509,62 @@ describe("runLlmPatchFlow", () => {
     if (result.ok) {
       expect(result.applyPatches).toEqual([]);
       expect(result.warnings.join("\n")).toContain("DEVELOPER_PATCH_FORMAT");
+    }
+  });
+
+  it("applies raw find/replace patch mode for large files", async () => {
+    const files = [buildRepoFile("src/ui/index.html", "frontend")];
+    const currentHtml = `${"<div class=\"line\">filler</div>\n".repeat(400)}<button class="exec-btn">Execute</button>\n${"<div class=\"line\">after</div>\n".repeat(400)}`;
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["Static UI"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 40 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Polish UI",
+      steps: ["Adjust button color"],
+      suggestedFiles: [
+        { path: "src/ui/index.html", reason: "Main UI file", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, currentHtml]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Polish button color",
+      patches: [
+        {
+          path: "src/ui/index.html",
+          operation: "modify",
+          summary: "Update execute button styling",
+          targetHint: "button block",
+          contentPreview: "button color tweak",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "patch",
+      filePath: "src/ui/index.html",
+      patchText:
+        `--- FIND ---\n<button class="exec-btn">Execute</button>\n--- REPLACE ---\n<button class="exec-btn" style="background:#1a8cdb">Execute</button>`,
+      summary: "Large-file targeted patch generated.",
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "change Execute button color",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.applyPatches).toHaveLength(1);
+      expect(result.applyPatches[0].fullContent).toContain(
+        'style="background:#1a8cdb"'
+      );
+      expect(result.warnings.join("\n")).not.toContain("PATCH_FIND_NOT_FOUND");
     }
   });
 });
