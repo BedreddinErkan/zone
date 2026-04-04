@@ -14,6 +14,7 @@ export type LlmPatchFlowResult =
       warnings: string[];
       applyPatches: Array<{ filePath: string; fullContent: string }>;
       patchResults: PatchResult[];
+      fileDiffs?: FileDiff[];
       originalContents?: Record<string, string>;
       contextFiles?: string[];
     }
@@ -23,6 +24,21 @@ export type PatchResult = {
   filePath: string;
   status: "applied" | "skipped" | "failed";
   reason?: string;
+};
+
+export type DiffLine = {
+  type: "added" | "removed" | "unchanged";
+  content: string;
+  lineNumber: number;
+};
+
+export type FileDiff = {
+  filePath: string;
+  before: string;
+  after: string;
+  diff: DiffLine[];
+  addedLines: number;
+  removedLines: number;
 };
 
 /** A fully-populated TaskIntent representing "I don't know what this is". */
@@ -482,6 +498,78 @@ export function smartContextWindow(input: {
   };
 }
 
+export function computeFileDiff(before: string, after: string): DiffLine[] {
+  const beforeLines = before === "" ? [] : before.split("\n");
+  const afterLines = after === "" ? [] : after.split("\n");
+  const rows = beforeLines.length + 1;
+  const cols = afterLines.length + 1;
+  const lcs = Array.from({ length: rows }, () => Array<number>(cols).fill(0));
+
+  for (let i = beforeLines.length - 1; i >= 0; i -= 1) {
+    for (let j = afterLines.length - 1; j >= 0; j -= 1) {
+      if (beforeLines[i] === afterLines[j]) {
+        lcs[i][j] = lcs[i + 1][j + 1] + 1;
+      } else {
+        lcs[i][j] = Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+      }
+    }
+  }
+
+  const diff: DiffLine[] = [];
+  let i = 0;
+  let j = 0;
+
+  while (i < beforeLines.length && j < afterLines.length) {
+    if (beforeLines[i] === afterLines[j]) {
+      diff.push({
+        type: "unchanged",
+        content: afterLines[j],
+        lineNumber: j + 1,
+      });
+      i += 1;
+      j += 1;
+      continue;
+    }
+
+    if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+      diff.push({
+        type: "removed",
+        content: beforeLines[i],
+        lineNumber: Math.min(j + 1, afterLines.length + 1),
+      });
+      i += 1;
+      continue;
+    }
+
+    diff.push({
+      type: "added",
+      content: afterLines[j],
+      lineNumber: j + 1,
+    });
+    j += 1;
+  }
+
+  while (i < beforeLines.length) {
+    diff.push({
+      type: "removed",
+      content: beforeLines[i],
+      lineNumber: Math.min(j + 1, afterLines.length + 1),
+    });
+    i += 1;
+  }
+
+  while (j < afterLines.length) {
+    diff.push({
+      type: "added",
+      content: afterLines[j],
+      lineNumber: j + 1,
+    });
+    j += 1;
+  }
+
+  return diff;
+}
+
 export function fuzzyFindAndReplace(
   content: string,
   find: string,
@@ -852,6 +940,7 @@ export async function runLlmPatchFlow(input: {
   task: string;
   repoPath: string;
   atomicPatch?: boolean;
+  dryRun?: boolean;
 }): Promise<LlmPatchFlowResult> {
   const taskIntent =
     typeof input.task === "string" ? parseTaskIntent(input.task) : UNKNOWN_INTENT;
@@ -1141,6 +1230,21 @@ export async function runLlmPatchFlow(input: {
     return { ok: false, reason: "atomic_patch_failed" };
   }
 
+  const fileDiffs = input.dryRun
+    ? applyPatches.map((patch) => {
+        const before = originalContents[patch.filePath] ?? "";
+        const diff = computeFileDiff(before, patch.fullContent);
+        return {
+          filePath: patch.filePath,
+          before,
+          after: patch.fullContent,
+          diff,
+          addedLines: diff.filter((line) => line.type === "added").length,
+          removedLines: diff.filter((line) => line.type === "removed").length,
+        };
+      })
+    : undefined;
+
   // 7. Build patchPreview string
   const patchPreview = [
     "=== LLM PATCH PREVIEW ===",
@@ -1172,6 +1276,7 @@ export async function runLlmPatchFlow(input: {
     warnings: combinedWarnings,
     applyPatches,
     patchResults,
+    fileDiffs,
     originalContents,
     contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
   };

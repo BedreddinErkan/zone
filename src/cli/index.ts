@@ -58,6 +58,7 @@ type CliOptions = {
   trace?: boolean;
   diffAware?: boolean;
   diff?: boolean;
+  dryRun?: boolean;
   output?: string;
   format?: string;
   taskOnly?: boolean;
@@ -453,6 +454,7 @@ async function runTaskOnlyFlow(options: {
   apply: boolean;
   confirmApply: boolean;
   diff: boolean;
+  dryRun: boolean;
   patchPlanPath: string | null;
   useGeneratedPatchPlan: boolean;
   repoPath: string;
@@ -470,6 +472,7 @@ const {
   apply,
   confirmApply,
   diff,
+  dryRun,
   patchPlanPath,
   useGeneratedPatchPlan,
   repoPath,
@@ -644,9 +647,30 @@ if (intent === "unknown" && repoPath) {
   console.log(
     `${zonePrefix()} ${tone("Intent unknown — delegating to LLM patch flow...", c.white)}`
   );
-  const llmResult = await runLlmPatchFlow({ task, repoPath });
+  const llmResult = await runLlmPatchFlow({ task, repoPath, dryRun });
   if (llmResult.ok) {
     patchSection = llmResult.patchPreview;
+    if (dryRun) {
+      console.log("");
+      console.log(patchSection);
+      console.log("");
+      for (const fileDiff of llmResult.fileDiffs ?? []) {
+        renderDiffSummary([
+          {
+            filePath: fileDiff.filePath,
+            original: fileDiff.before,
+            updated: fileDiff.after,
+          },
+        ]);
+        console.log(
+          `${zonePrefix()} ${tone(
+            `+${fileDiff.addedLines} lines added, -${fileDiff.removedLines} lines removed`,
+            c.cyan
+          )} ${tone(`(${fileDiff.filePath})`, c.dim, c.gray)}`
+        );
+      }
+      return 0;
+    }
     if (apply && confirmApply && llmResult.applyPatches.length > 0) {
       const originalContents =
         llmResult.originalContents ??
@@ -920,6 +944,7 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
   apply: Boolean(options.apply),
   confirmApply: Boolean(options.confirmApply),
   diff: Boolean(options.diff),
+  dryRun: Boolean(options.dryRun),
   patchPlanPath: resolvePatchPlanPath(options),
   useGeneratedPatchPlan: Boolean(options.useGeneratedPatchPlan),
   repoPath,
@@ -1092,6 +1117,7 @@ export async function run(): Promise<void> {
     .option("--trace", "Show decision trace in output")
     .option("--diff-aware", "Boost ranking using git diff context")
     .option("--diff", "Show colored diff of applied changes")
+    .option("--dry-run", "Preview developer file diffs without writing files")
     .option("--task-only", "Run Sprint 7 task-only orchestration flow")
     .option("--apply", "Execute controlled apply flow after decision output")
     .option(

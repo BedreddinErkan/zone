@@ -70,6 +70,21 @@ exports.app.post("/api/patch", async (req, res) => {
     const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({ task, repoPath });
     res.json(result);
 });
+exports.app.post("/api/dry-run", async (req, res) => {
+    const { task, repoPath } = req.body;
+    const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({ task, repoPath, dryRun: true });
+    if (!result.ok) {
+        res.status(500).json(result);
+        return;
+    }
+    res.json({
+        ok: true,
+        fileDiffs: result.fileDiffs ?? [],
+        patchPreview: result.patchPreview,
+        warnings: result.warnings,
+        patchResults: result.patchResults,
+    });
+});
 exports.app.post("/api/apply", async (req, res) => {
     const { patches, repoPath } = req.body;
     const result = await (0, applyLlmPatches_js_1.applyLlmPatches)(patches, repoPath);

@@ -42,6 +42,8 @@ class MockElement {
     placeholder = "";
     title = "";
     disabled = false;
+    files = [];
+    clicked = false;
     dataset = {};
     classListValue;
     constructor(id, className = "") {
@@ -56,6 +58,12 @@ class MockElement {
     }
     set className(value) {
         this.classListValue.setFromString(value);
+    }
+    click() {
+        this.clicked = true;
+    }
+    scrollIntoView() {
+        // no-op for test harness
     }
 }
 class MockEventSource {
@@ -108,6 +116,11 @@ function buildUiHarness(initialLocalStorage = {}) {
     ensureElement("contextFilesList");
     ensureElement("task");
     ensureElement("repoPath");
+    ensureElement("folderPickerBtn");
+    ensureElement("folderPickerFallback", "hidden");
+    ensureElement("repoSelectionBox", "hidden");
+    ensureElement("repoSelectionLabel");
+    ensureElement("repoSelectionMeta");
     ensureElement("complexityBadge", "complexity-badge hidden");
     ensureElement("frameworkBadge", "framework-badge hidden");
     ensureElement("decisionBadge", "decision-badge safe");
@@ -132,6 +145,12 @@ function buildUiHarness(initialLocalStorage = {}) {
     ensureElement("applyText");
     ensureElement("progressBox", "progress-box hidden");
     ensureElement("progressText");
+    ensureElement("dryRunBtn");
+    ensureElement("drySpinner");
+    ensureElement("dryRunText");
+    ensureElement("diffSection", "hidden");
+    ensureElement("diffSummaryBox");
+    ensureElement("diffFileList");
     const developerRoleButton = new MockElement("developerRole", "role-btn");
     developerRoleButton.dataset.role = "developer";
     const testEngineerRoleButton = new MockElement("testEngineerRole", "role-btn");
@@ -190,10 +209,17 @@ function buildUiHarness(initialLocalStorage = {}) {
         clearTimeout,
         fetch: vitest_1.vi.fn(),
         EventSource: MockEventSource,
+        window: {
+            location: { href: "" },
+            showDirectoryPicker: vitest_1.vi.fn(),
+        },
         Math,
         Date,
         encodeURIComponent,
     };
+    context.window.showDirectoryPicker =
+        vitest_1.vi.fn();
+    context.window = Object.assign(context, context.window);
     MockEventSource.instances = [];
     node_vm_1.default.runInNewContext(scriptMatch[1], context);
     return {
@@ -246,6 +272,79 @@ function buildUiHarness(initialLocalStorage = {}) {
         const badge = elements.get("complexityBadge");
         (0, vitest_1.expect)(badge.textContent).toBe("");
         (0, vitest_1.expect)(badge.classList.contains("hidden")).toBe(true);
+    });
+});
+(0, vitest_1.describe)("UI repo folder picker", () => {
+    (0, vitest_1.it)("renders the folder picker button", () => {
+        const { elements } = buildUiHarness();
+        (0, vitest_1.expect)(elements.get("folderPickerBtn")).toBeTruthy();
+    });
+    (0, vitest_1.it)("shows selected folder name when showDirectoryPicker is available", async () => {
+        const { context, elements } = buildUiHarness();
+        context.window.showDirectoryPicker = vitest_1.vi
+            .fn()
+            .mockResolvedValue({ name: "zone-flyway-test" });
+        await context.selectRepoFolder();
+        (0, vitest_1.expect)(elements.get("repoSelectionBox").classList.contains("hidden")).toBe(false);
+        (0, vitest_1.expect)(elements.get("repoSelectionLabel").textContent).toContain("zone-flyway-test");
+    });
+    (0, vitest_1.it)("uses the fallback directory input when showDirectoryPicker is unavailable", async () => {
+        const { context, elements } = buildUiHarness();
+        context.window.showDirectoryPicker = undefined;
+        const fallback = elements.get("folderPickerFallback");
+        fallback.files = [
+            {
+                name: "index.html",
+                webkitRelativePath: "zone-ui/src/index.html",
+            },
+        ];
+        await context.selectRepoFolder();
+        context.handleFolderFallbackChange(fallback);
+        (0, vitest_1.expect)(fallback.clicked).toBe(true);
+        (0, vitest_1.expect)(elements.get("repoSelectionLabel").textContent).toContain("zone-ui");
+    });
+    (0, vitest_1.it)("keeps manual repo path fallback working for execute", async () => {
+        const { context, elements, roleButtons } = buildUiHarness();
+        context.fetch = vitest_1.vi
+            .fn()
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                decision: { mode: "safe_to_apply" },
+                confidence: { score: 82 },
+                risk: { score: 0, breakdown: {} },
+            }),
+        })
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                ok: true,
+                patchPreview: "Summary: Fix button spacing",
+                warnings: [],
+                applyPatches: [],
+            }),
+        });
+        context.selectRole(roleButtons.developer);
+        elements.get("task").value = "fix button spacing";
+        elements.get("repoPath").value = "C:/repo";
+        await context.execute();
+        (0, vitest_1.expect)(context.fetch).toHaveBeenCalledWith("/api/analyze", vitest_1.expect.objectContaining({ method: "POST" }));
+    });
+    (0, vitest_1.it)("reset clears and hides the selected folder state", async () => {
+        const { context, elements } = buildUiHarness();
+        context.window.showDirectoryPicker = vitest_1.vi.fn().mockResolvedValue({ name: "zone-app" });
+        await context.selectRepoFolder();
+        context.resetUI();
+        (0, vitest_1.expect)(elements.get("repoSelectionBox").classList.contains("hidden")).toBe(true);
+        (0, vitest_1.expect)(elements.get("repoSelectionLabel").textContent).toBe("");
+    });
+    (0, vitest_1.it)("shows a clear validation message when no repo path is provided", async () => {
+        const { context, elements } = buildUiHarness();
+        context.window.showDirectoryPicker = vitest_1.vi.fn().mockResolvedValue({ name: "zone-app" });
+        elements.get("task").value = "polish spacing";
+        await context.selectRepoFolder();
+        await context.executeDryRun();
+        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Repo path is required.");
     });
 });
 (0, vitest_1.describe)("UI result summary", () => {

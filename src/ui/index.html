@@ -6,9 +6,8 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#1e1e1e;color:#d4d4d4;font-family:'Courier New',monospace;font-size:15px;line-height:1.7;padding:24px;max-width:100%;margin:0 auto}.sub{font-size:13px;color:#858585;margin-bottom:28px;line-height:1.7}
-.main-grid{display:grid;grid-template-columns:480px 1fr;gap:24px;align-items:start}
-@media(max-width:900px){.main-grid{grid-template-columns:1fr}}
 .main-grid{display:grid;grid-template-columns:600px 1fr;gap:24px;align-items:start}
+@media(max-width:900px){.main-grid{grid-template-columns:1fr}}
 .section{background:#252526;border:1px solid #3c3c3c;border-radius:10px;padding:22px;margin-bottom:18px;box-shadow:0 8px 24px rgba(0,0,0,0.18)}
 .label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#9a9a9a;margin-bottom:10px}
 .prompt-box{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;padding:12px;font-size:12px;color:#9cdcfe;line-height:1.8;position:relative}
@@ -24,12 +23,20 @@ select{cursor:pointer}
 input:focus,textarea:focus{border-color:#007acc}
 .repo-row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
 .repo-row input{margin-bottom:0;flex:1}
+.picker-btn{padding:8px 12px;font-size:13px;color:#d4d4d4;gap:6px}
+.picker-btn span{white-space:nowrap}
+.repo-selection{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;padding:10px 12px;margin-bottom:10px}
+.repo-selection-label{font-size:13px;color:#9cdcfe;line-height:1.7;word-break:break-word}
+.repo-selection-meta{font-size:12px;color:#858585;line-height:1.7;margin-top:4px}
 .editor-btn{background:#2d2d2d;border:1px solid #3c3c3c;border-radius:6px;padding:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:border-color .15s;flex-shrink:0}
 .editor-btn:hover{border-color:#007acc;background:#1a2a3a}
 .btn-row{display:flex;gap:10px}
 .exec-btn{flex:1;background:#007acc;border:none;border-radius:6px;color:#fff;font-size:15px;padding:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
 .exec-btn:hover{background:#1a8cdb}
 .exec-btn:disabled{background:#3c3c3c;color:#858585;cursor:not-allowed}
+.dryrun-btn{background:transparent;border:1px solid #6b5a1d;border-radius:6px;color:#ce9178;font-size:15px;padding:12px 16px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap}
+.dryrun-btn:hover{background:#3a2e0e;border-color:#ce9178}
+.dryrun-btn:disabled{border-color:#3c3c3c;color:#858585;cursor:not-allowed}
 .reset-btn{background:transparent;border:1px solid #3c3c3c;border-radius:6px;color:#858585;font-size:15px;padding:12px 18px;cursor:pointer}
 .reset-btn:hover{border-color:#d4d4d4;color:#d4d4d4}
 .spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:none}
@@ -99,6 +106,41 @@ input:focus,textarea:focus{border-color:#007acc}
 .hidden{display:none}
 .history-label{font-size:12px;color:#858585;margin-bottom:6px}
 .section-title{font-size:13px;color:#b0b0b0;margin-bottom:10px;font-weight:700}
+.conflict-card{background:#3a0e0e;border:1px solid #6b1d1d;border-radius:6px;padding:12px;margin-bottom:8px}
+.conflict-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.conflict-file{font-size:13px;color:#f44747;word-break:break-all}
+.conflict-score{font-size:12px;color:#858585;white-space:nowrap}
+.conflict-best{font-size:12px;color:#858585;background:#1e1e1e;border-radius:4px;padding:6px 8px;margin-top:6px;white-space:pre-wrap;max-height:80px;overflow:auto;line-height:1.6}
+.patch-results{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;padding:10px 14px;margin-bottom:12px}
+.pr-row{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:13px}
+.pr-icon.ok{color:#4ec9b0}
+.pr-icon.fail{color:#f44747}
+.pr-icon.skip{color:#858585}
+.pr-path{color:#9cdcfe;flex:1;word-break:break-all}
+.pr-reason{font-size:12px;color:#858585}
+/* ── Diff view ───────────────────────────────────────────────────────────── */
+.diff-card{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;margin-bottom:10px;overflow:hidden}
+.diff-header{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;list-style:none}
+.diff-header::-webkit-details-marker{display:none}
+.diff-fname{font-size:13px;color:#9cdcfe;flex:1;word-break:break-all}
+.diff-added-badge{font-size:12px;padding:2px 8px;border-radius:999px;background:#0e3a1e;color:#4ec9b0;border:1px solid #1d6b3a}
+.diff-removed-badge{font-size:12px;padding:2px 8px;border-radius:999px;background:#3a0e0e;color:#f44747;border:1px solid #6b1d1d}
+.diff-body{border-top:1px solid #2d2d2d;background:#141414;max-height:320px;overflow-y:auto}
+.diff-line{display:flex;align-items:baseline;font-size:12px;line-height:1.8;font-family:'Courier New',monospace}
+.diff-line.added{background:#0e2a14}
+.diff-line.removed{background:#2a0e0e}
+.diff-line.unchanged{background:transparent}
+.diff-ln{min-width:36px;padding:0 8px;color:#444;text-align:right;user-select:none;border-right:1px solid #2d2d2d;flex-shrink:0}
+.diff-prefix{width:18px;text-align:center;flex-shrink:0}
+.diff-line.added .diff-prefix{color:#4ec9b0}
+.diff-line.removed .diff-prefix{color:#f44747}
+.diff-line.unchanged .diff-prefix{color:#444}
+.diff-text{padding:0 10px;white-space:pre-wrap;word-break:break-all;flex:1}
+.diff-line.added .diff-text{color:#b5f5c8}
+.diff-line.removed .diff-text{color:#f9a8a8}
+.diff-line.unchanged .diff-text{color:#555}
+.diff-empty{padding:16px;font-size:13px;color:#858585;text-align:center}
+.diff-separator{display:flex;align-items:center;font-size:11px;color:#444;padding:2px 8px;background:#1a1a1a;border-top:1px solid #222;border-bottom:1px solid #222}
 </style>
 </head>
 <body>
@@ -127,7 +169,10 @@ input:focus,textarea:focus{border-color:#007acc}
   <textarea id="task" placeholder="add input validation to login form..."></textarea>
   <div class="history-label">Repo Path</div>
   <div class="repo-row">
-    <input id="repoPath" type="text" placeholder="C:\Users\..." />
+    <input id="repoPath" type="text" placeholder="C:\Users\..." oninput="syncRepoSelectionDisplay()" />
+    <button id="folderPickerBtn" class="editor-btn picker-btn" title="Select repo folder" onclick="selectRepoFolder()">
+      <span>📁</span><span>Select Folder</span>
+    </button>
     <button class="editor-btn" title="Open in VS Code" onclick="openInEditor('vscode')">
       <svg width="18" height="18" viewBox="0 0 100 100" fill="none"><path d="M74.5 6.5L39 38.5L16.5 21L6 27.5L27.5 50L6 72.5L16.5 79L39 61.5L74.5 93.5L94 83V17L74.5 6.5Z" fill="#007ACC"/></svg>
     </button>
@@ -141,6 +186,12 @@ input:focus,textarea:focus{border-color:#007acc}
       <svg width="18" height="18" viewBox="0 0 100 100"><rect width="100" height="100" rx="8" fill="#1e1e1e" stroke="#3c3c3c" stroke-width="4"/><path d="M15 35l25 15-25 15" stroke="#4ec9b0" stroke-width="6" stroke-linecap="round" fill="none"/><path d="M48 65h37" stroke="#4ec9b0" stroke-width="6" stroke-linecap="round"/></svg>
     </button>
   </div>
+  <input id="folderPickerFallback" type="file" webkitdirectory directory multiple class="hidden" onchange="handleFolderFallbackChange(this)" />
+  <div id="repoSelectionBox" class="repo-selection hidden">
+    <div class="section-title">Selected Folder</div>
+    <div id="repoSelectionLabel" class="repo-selection-label"></div>
+    <div id="repoSelectionMeta" class="repo-selection-meta"></div>
+  </div>
   <div id="historyBox" class="hidden">
     <div class="history-label">Recent paths:</div>
     <select id="historySelect" onchange="selectHistory()"><option value="">— select —</option></select>
@@ -151,6 +202,10 @@ input:focus,textarea:focus{border-color:#007acc}
     <button class="exec-btn" id="execBtn" onclick="execute()">
       <div class="spinner" id="spinner"></div>
       <span id="execText">▶  Execute</span>
+    </button>
+    <button class="dryrun-btn" id="dryRunBtn" onclick="executeDryRun()">
+      <div class="spinner" id="drySpinner"></div>
+      <span id="dryRunText">⊘  Dry Run</span>
     </button>
     <button class="reset-btn" onclick="resetUI()">↺ Reset</button>
   </div>
@@ -194,6 +249,13 @@ input:focus,textarea:focus{border-color:#007acc}
   <div class="risk-row"><span class="rlbl">mass scope</span><div class="rbg"><div class="rbar" id="rMass" style="width:0%;background:#ef9f27"></div></div><span class="rval" id="rMassVal">0</span></div>
 </div>
 
+<!-- Dry Run Diff Section -->
+<div class="section hidden" id="diffSection">
+  <div class="label">Dry Run — Diff Preview</div>
+  <div id="diffSummaryBox" style="font-size:13px;color:#858585;margin-bottom:14px"></div>
+  <div id="diffFileList"></div>
+</div>
+
 <div class="section hidden" id="patchSection">
   <div class="label">Patch Preview</div>
   <div id="warningsList" class="hidden" style="margin-bottom:10px"></div>
@@ -208,20 +270,27 @@ input:focus,textarea:focus{border-color:#007acc}
     <div class="spinner" id="applySpinner"></div>
     <span id="applyText">✓  Apply Changes</span>
   </button>
+  <button class="apply-btn hidden" id="restoreBtn" onclick="restorePreviousState()">
+    <div class="spinner" id="restoreSpinner"></div>
+    <span id="restoreText">↩  Restore Previous State</span>
+  </button>
 </div>
 
 </div><!-- rightCol -->
 </div><!-- main-grid -->
 
 <script>
-let currentPatches = [];
-let currentRepoPath = '';
-let currentRole = 'developer';
-let currentProgressSource = null;
-let currentRunId = '';
-let currentSummaryState = {};
-const RECENT_RUNS_KEY = 'zone_recent_runs';
-const MAX_RECENT_RUNS = 6;
+let currentPatches=[];
+let currentRepoPath='';
+let currentRole='developer';
+let currentProgressSource=null;
+let currentRunId='';
+let currentSummaryState={};
+let currentRepoHandle=null;
+let currentRepoSelectionLabel='';
+let currentBackupSnapshot=null;
+const RECENT_RUNS_KEY='zone_recent_runs';
+const MAX_RECENT_RUNS=6;
 
 function formatMetadataBadge(parts){const s=(parts||[]).filter(Boolean);return s.length>0?s.join(' / '):'';}
 function formatRoleLabel(role){return {developer:'Developer',test_engineer:'Test Engineer',data_analyst:'Data Analyst'}[role]||'Developer';}
@@ -231,6 +300,152 @@ function escapeHtml(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'
 function formatFileOperation(p){return String(p||'').includes('[modify]')?'modify':'create';}
 function formatFileLabel(p,i){return p||`generated_file_${i+1}`;}
 
+// ── Diff rendering ──────────────────────────────────────────────────────────
+function buildDiffCards(fileDiffs){
+  if(!fileDiffs||fileDiffs.length===0)return '<div class="diff-empty">No diffs returned.</div>';
+  const CONTEXT=3;
+  return fileDiffs.map((fd,i)=>{
+    const fp=escapeHtml(fd.filePath||`file_${i+1}`);
+    const added=fd.addedLines??0;
+    const removed=fd.removedLines??0;
+    const diffLines=fd.diff||[];
+    // find changed indices
+    const changed=new Set();
+    diffLines.forEach((l,idx)=>{if(l.type!=='unchanged')changed.add(idx);});
+    const visible=new Set();
+    changed.forEach(idx=>{for(let c=Math.max(0,idx-CONTEXT);c<=Math.min(diffLines.length-1,idx+CONTEXT);c++)visible.add(c);});
+    if(visible.size===0)diffLines.slice(0,6).forEach((_,idx)=>visible.add(idx));
+    let prevIdx=-2;
+    const rows=[];
+    [...visible].sort((a,b)=>a-b).forEach(idx=>{
+      if(idx>prevIdx+1&&prevIdx>=0)rows.push(`<div class="diff-separator">·····</div>`);
+      const l=diffLines[idx];
+      const prefix=l.type==='added'?'+':l.type==='removed'?'-':' ';
+      const ln=l.type==='removed'?'':String(l.lineNumber||'');
+      rows.push(`<div class="diff-line ${escapeHtml(l.type)}"><span class="diff-ln">${ln}</span><span class="diff-prefix">${prefix}</span><span class="diff-text">${escapeHtml(l.content)}</span></div>`);
+      prevIdx=idx;
+    });
+    const addedBadge=added>0?`<span class="diff-added-badge">+${added}</span>`:'';
+    const removedBadge=removed>0?`<span class="diff-removed-badge">-${removed}</span>`:'';
+    return `<details class="diff-card"${i===0?' open':''}><summary class="diff-header"><span class="diff-fname">${fp}</span>${addedBadge}${removedBadge}</summary><div class="diff-body">${rows.length>0?rows.join(''):'<div class="diff-empty">No changes detected.</div>'}</div></details>`;
+  }).join('');
+}
+
+function showDiff(data){
+  const section=document.getElementById('diffSection');
+  const fileList=document.getElementById('diffFileList');
+  const summary=document.getElementById('diffSummaryBox');
+  const diffs=data.fileDiffs||[];
+  const totalAdded=diffs.reduce((s,d)=>s+(d.addedLines??0),0);
+  const totalRemoved=diffs.reduce((s,d)=>s+(d.removedLines??0),0);
+  summary.innerHTML=`<span style="color:#4ec9b0">+${totalAdded}</span> lines added &nbsp;·&nbsp; <span style="color:#f44747">-${totalRemoved}</span> lines removed &nbsp;·&nbsp; ${diffs.length} file${diffs.length!==1?'s':''} affected`;
+  fileList.innerHTML=buildDiffCards(diffs);
+  section.classList.remove('hidden');
+  section.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+// ── Dry run ─────────────────────────────────────────────────────────────────
+function setDryRunLoading(l){
+  const btn=document.getElementById('dryRunBtn');
+  const sp=document.getElementById('drySpinner');
+  const t=document.getElementById('dryRunText');
+  btn.disabled=l;sp.style.display=l?'block':'none';t.textContent=l?'Running...':'⊘  Dry Run';
+}
+
+function renderRepoSelection(){
+  const box=document.getElementById('repoSelectionBox');
+  const label=document.getElementById('repoSelectionLabel');
+  const meta=document.getElementById('repoSelectionMeta');
+  const repoPath=document.getElementById('repoPath').value.trim();
+  if(!currentRepoSelectionLabel){
+    label.textContent='';
+    meta.textContent='';
+    box.classList.add('hidden');
+    return;
+  }
+  label.textContent=currentRepoSelectionLabel;
+  meta.textContent=repoPath?`Run path: ${repoPath}`:'Manual repo path is still required for Execute and Dry Run.';
+  box.classList.remove('hidden');
+}
+
+function syncRepoSelectionDisplay(){renderRepoSelection();}
+
+function clearRepoSelection(){
+  currentRepoHandle=null;
+  currentRepoSelectionLabel='';
+  const fallback=document.getElementById('folderPickerFallback');
+  if(fallback)fallback.value='';
+  renderRepoSelection();
+}
+
+function setRepoSelection(label,handle){
+  currentRepoHandle=handle||null;
+  currentRepoSelectionLabel=label||'';
+  renderRepoSelection();
+}
+
+function getFallbackFolderName(input){
+  const files=Array.from(input?.files||[]);
+  if(files.length===0)return '';
+  const first=files[0];
+  const relativePath=String(first.webkitRelativePath||first.name||'');
+  return relativePath.split('/')[0]||relativePath.split('\\')[0]||'';
+}
+
+async function selectRepoFolder(){
+  hideError();
+  if(typeof window.showDirectoryPicker==='function'){
+    try{
+      const handle=await window.showDirectoryPicker();
+      if(!handle)return;
+      setRepoSelection(`Folder: ${handle.name||'Selected folder'}`,handle);
+      return;
+    }catch(e){
+      if(e&&e.name==='AbortError')return;
+      showError('Folder selection failed. You can still paste the repo path manually.');
+      return;
+    }
+  }
+  const fallback=document.getElementById('folderPickerFallback');
+  if(fallback&&typeof fallback.click==='function')fallback.click();
+}
+
+function handleFolderFallbackChange(input){
+  const folderName=getFallbackFolderName(input);
+  if(!folderName)return;
+  setRepoSelection(`Folder: ${folderName}`,null);
+}
+
+function validateTaskAndRepo(){
+  const task=document.getElementById('task').value.trim();
+  const repoPath=document.getElementById('repoPath').value.trim();
+  if(!task||!repoPath){
+    showError(!repoPath&&currentRepoSelectionLabel?'Repo path is required. Folder selection is shown above, but Zone still needs the local repo path.':'Task and repo path are required.');
+    return null;
+  }
+  return {task,repoPath};
+}
+
+async function executeDryRun(){
+  const values=validateTaskAndRepo();
+  if(!values)return;
+  const {task,repoPath}=values;
+  hideError();
+  document.getElementById('diffSection').classList.add('hidden');
+  setDryRunLoading(true);
+  setProgress('Dry run — generating diff...');
+  try{
+    const r=await fetch('/api/dry-run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath})});
+    if(!r.ok)throw new Error('Dry run failed: '+r.status);
+    const data=await r.json();
+    if(!data.ok)throw new Error(data.reason||'Dry run failed.');
+    showDiff(data);
+    setProgress('Ready');
+  }catch(e){resetProgress();showError(e.message);}
+  finally{setDryRunLoading(false);}
+}
+
+// ── File preview cards ───────────────────────────────────────────────────────
 function buildFilePreviewCards(patches){
   return (patches||[]).map((p,i)=>{
     const fp=formatFileLabel(p.filePath,i);
@@ -238,7 +453,7 @@ function buildFilePreviewCards(patches){
     const icon=ext==='java'?'☕':ext==='ts'||ext==='tsx'?'⚡':ext==='feature'?'🥒':ext==='py'?'🐍':ext==='sql'?'🗄️':'📄';
     const op=formatFileOperation(fp);
     const content=escapeHtml(p.fullContent||'(no content)');
-    return `<details class="file-card file-toggle" ${i===0?'open':''}><summary><div class="file-row"><span>${icon}</span><span class="fname">${escapeHtml(fp)}</span><span class="fmeta">${String((p.fullContent||'').length)} chars</span><span class="fop ${op}">${op}</span></div></summary><div class="file-content"><pre>${content}</pre></div></details>`;
+    return `<details class="file-card file-toggle"${i===0?' open':''}><summary><div class="file-row"><span>${icon}</span><span class="fname">${escapeHtml(fp)}</span><span class="fmeta">${String((p.fullContent||'').length)} chars</span><span class="fop ${op}">${op}</span></div></summary><div class="file-content"><pre>${content}</pre></div></details>`;
   }).join('');
 }
 
@@ -253,7 +468,6 @@ function renderContextFiles(files){
 
 function getRecentRuns(){try{const p=JSON.parse(localStorage.getItem(RECENT_RUNS_KEY)||'[]');return Array.isArray(p)?p.sort((a,b)=>(b.timestamp||0)-(a.timestamp||0)):[];}catch{return [];}}
 function saveRecentRuns(r){localStorage.setItem(RECENT_RUNS_KEY,JSON.stringify(r.slice(0,MAX_RECENT_RUNS)));}
-
 function renderRecentRuns(){
   const runs=getRecentRuns();
   const empty=document.getElementById('recentRunsEmpty');
@@ -262,20 +476,18 @@ function renderRecentRuns(){
   empty.classList.add('hidden');list.classList.remove('hidden');
   list.innerHTML=runs.map((r,i)=>`<button class="recent-run-item" onclick="loadRecentRun(${i})"><div class="recent-run-top"><span class="recent-run-task">${escapeHtml(r.task||'(no task)')}</span><span class="recent-run-status ${r.status==='error'?'error':'success'}">${escapeHtml(r.status||'success')}</span></div><div class="recent-run-meta"><span>${escapeHtml(formatRoleLabel(r.role))}</span><span>${escapeHtml(r.repoPath||'')}</span><span>${escapeHtml(formatRecentRunTime(r.timestamp))}</span></div></button>`).join('');
 }
-
 function addRecentRun(run){
   const runs=[{task:run.task||'',role:run.role||'developer',repoPath:run.repoPath||'',status:run.status||'success',timestamp:typeof run.timestamp==='number'?run.timestamp:Date.now()},...getRecentRuns()].slice(0,MAX_RECENT_RUNS);
   saveRecentRuns(runs);renderRecentRuns();
 }
-
 function loadRecentRun(i){
   const r=getRecentRuns()[i];if(!r)return;
   document.getElementById('task').value=r.task||'';
   document.getElementById('repoPath').value=r.repoPath||'';
+  renderRepoSelection();
   const btn=Array.from(document.querySelectorAll('.role-btn')).find(b=>b.dataset.role===r.role);
   if(btn)selectRole(btn);
 }
-
 function renderResultSummary(){
   const roleLabel=formatRoleLabel(currentSummaryState.role||currentRole);
   const statusLabel=formatStatusLabel(currentSummaryState.status);
@@ -286,18 +498,14 @@ function renderResultSummary(){
   document.getElementById('resultSummarySubtitle').textContent=`${roleLabel} run summary`;
   document.getElementById('resultSummaryChips').innerHTML=chips.map(c=>`<span class="result-chip">${escapeHtml(c)}</span>`).join('');
 }
-
 function updateResultSummary(s){currentSummaryState={...currentSummaryState,...s};renderResultSummary();}
-
 function closeProgressStream(){if(currentProgressSource){currentProgressSource.close();currentProgressSource=null;}}
-
 function setProgress(stage){
   const box=document.getElementById('progressBox');
   const text=document.getElementById('progressText');
   if(!stage){text.textContent='';box.classList.add('hidden');box.style.display='none';return;}
   text.textContent='⏳ '+stage;box.classList.remove('hidden');box.style.display='block';
 }
-
 function startProgress(runId,initialStage){
   closeProgressStream();currentRunId=runId;setProgress(initialStage);
   if(typeof EventSource!=='function')return;
@@ -306,52 +514,43 @@ function startProgress(runId,initialStage){
   source.onerror=()=>closeProgressStream();
   currentProgressSource=source;
 }
-
 function finishProgress(){setProgress('Ready');closeProgressStream();}
 function resetProgress(){closeProgressStream();currentRunId='';setProgress('');}
-
 function getHistory(){try{return JSON.parse(localStorage.getItem('zone_repo_history')||'[]');}catch{return [];}}
 function saveToHistory(path){let h=getHistory().filter(p=>p!==path);h.unshift(path);h=h.slice(0,5);localStorage.setItem('zone_repo_history',JSON.stringify(h));renderHistory();}
 function renderHistory(){const h=getHistory();const box=document.getElementById('historyBox');const sel=document.getElementById('historySelect');if(h.length===0){box.classList.add('hidden');return;}box.classList.remove('hidden');sel.innerHTML='<option value="">— select —</option>'+h.map(p=>`<option value="${p}">${p}</option>`).join('');}
-function selectHistory(){const v=document.getElementById('historySelect').value;if(v)document.getElementById('repoPath').value=v;}
-
+function selectHistory(){const v=document.getElementById('historySelect').value;if(v){document.getElementById('repoPath').value=v;renderRepoSelection();}}
 function openInEditor(editor){
   const repoPath=document.getElementById('repoPath').value.trim();
   if(!repoPath){showError('Enter a repo path first.');return;}
   if(editor==='vscode'){window.location.href=`vscode://file/${repoPath}`;}
   else if(editor==='idea'){window.location.href=`idea://open?file=${repoPath}`;}
   else if(editor==='pycharm'){window.location.href=`pycharm://open?file=${repoPath}`;}
-  else if(editor==='terminal'){
-    navigator.clipboard.writeText(`cd "${repoPath}"`);
-    const btn=document.querySelector('[title="Copy cd command"]');
-    if(btn){btn.title='Copied!';setTimeout(()=>btn.title='Copy cd command',2000);}
-  }
+  else if(editor==='terminal'){navigator.clipboard.writeText(`cd "${repoPath}"`);const btn=document.querySelector('[title="Copy cd command"]');if(btn){btn.title='Copied!';setTimeout(()=>btn.title='Copy cd command',2000);}}
 }
-
 function selectRole(btn){
   document.querySelectorAll('.role-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');currentRole=btn.dataset.role;
   const ph={developer:'add input validation to login form...',test_engineer:'write a cucumber scenario for one-way flight search...',data_analyst:'create a users table with id, email, created_at...'};
   document.getElementById('task').placeholder=ph[currentRole]||'';
 }
-
 function copyPrompt(){const t=document.querySelector('.prompt-box').innerText.replace('copy','').trim();navigator.clipboard.writeText(t);document.querySelector('.copy-btn').textContent='copied!';setTimeout(()=>document.querySelector('.copy-btn').textContent='copy',1500);}
 function showError(msg){const b=document.getElementById('errorBox');b.textContent='⚠ '+msg;b.style.display='block';}
 function hideError(){document.getElementById('errorBox').style.display='none';}
 function setLoading(l){const btn=document.getElementById('execBtn');const s=document.getElementById('spinner');const t=document.getElementById('execText');btn.disabled=l;s.style.display=l?'block':'none';t.textContent=l?'Running...':'▶  Execute';}
 
 async function execute(){
-  const task=document.getElementById('task').value.trim();
-  const repoPath=document.getElementById('repoPath').value.trim();
-  if(!task||!repoPath){showError('Task and repo path are required.');return;}
+  const values=validateTaskAndRepo();
+  if(!values)return;
+  const {task,repoPath}=values;
   resetProgress();hideError();
+  document.getElementById('diffSection').classList.add('hidden');
   currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0};
   currentRepoPath=repoPath;saveToHistory(repoPath);setLoading(true);
   document.getElementById('successBox').style.display='none';
   document.getElementById('warningsList').classList.add('hidden');
   const runId=`${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
   startProgress(runId,currentRole==='data_analyst'||currentRole==='test_engineer'?'Scanning repo...':'Generating patch...');
-
   try{
     if(currentRole==='test_engineer'){
       const r=await fetch('/api/test-engineer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});
@@ -362,7 +561,6 @@ async function execute(){
       showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings});
       addRecentRun({task,role:currentRole,repoPath,status:'success',timestamp:Date.now()});
       currentPatches=result.applyPatches||[];finishProgress();
-
     }else if(currentRole==='data_analyst'){
       const r=await fetch('/api/data-analyst',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});
       if(!r.ok)throw new Error('Data analyst flow failed: '+r.status);
@@ -372,7 +570,6 @@ async function execute(){
       showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings});
       addRecentRun({task,role:currentRole,repoPath,status:'success',timestamp:Date.now()});
       currentPatches=result.applyPatches||[];finishProgress();
-
     }else{
       setProgress('Scanning repo...');
       const r1=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});
@@ -419,36 +616,202 @@ function showDecision(data){
 function showPatch(data){
   if(!data.ok){showError('Patch generation failed.');return;}
   const warnings=data.warnings||[];
+  const conflicts=[];const regularWarnings=[];
+  for(const w of warnings){
+    if(w.startsWith('[PATCH_CONFLICT]')){try{const json=w.replace('[PATCH_CONFLICT]','').trim();conflicts.push(JSON.parse(json));}catch{regularWarnings.push(w);}}
+    else{regularWarnings.push(w);}
+  }
   const wl=document.getElementById('warningsList');
-  if(warnings.length>0){wl.innerHTML=warnings.map(w=>`<div class="warning-item">${w}</div>`).join('');wl.classList.remove('hidden');}else{wl.classList.add('hidden');}
+  let warningsHtml='';
+  if(regularWarnings.length>0)warningsHtml+=regularWarnings.map(w=>`<div class="warning-item">${escapeHtml(w)}</div>`).join('');
+  if(conflicts.length>0){
+    warningsHtml+=conflicts.map(c=>`<div class="conflict-card"><div class="conflict-header"><span class="conflict-file">✗ ${escapeHtml(c.filePath||'unknown')}</span><span class="conflict-score">score: ${c.score??'—'} / 100</span></div><div style="font-size:12px;color:#ce9178">reason: ${escapeHtml(c.reason||'low_confidence')}</div>${c.bestMatch?`<div class="conflict-best">${escapeHtml(c.bestMatch.slice(0,200))}${c.bestMatch.length>200?'\n…':''}</div>`:''}</div>`).join('');
+  }
+  if(warningsHtml){wl.innerHTML=warningsHtml;wl.classList.remove('hidden');}else{wl.classList.add('hidden');}
+  const patches=data.applyPatches||[];
+  const patchResults=data.patchResults||[];
+  let patchResultsHtml='';
+  if(patchResults.length>0){
+    const rows=patchResults.map(r=>{const icon=r.status==='applied'?'✓':r.status==='failed'?'✗':'~';const cls=r.status==='applied'?'ok':r.status==='failed'?'fail':'skip';const reason=r.reason?` (${escapeHtml(r.reason)})`:'';return `<div class="pr-row"><span class="pr-icon ${cls}">${icon}</span><span class="pr-path">${escapeHtml(r.filePath||'')}</span><span class="pr-reason">${escapeHtml(r.status)}${reason}</span></div>`;}).join('');
+    patchResultsHtml=`<div class="patch-results"><div class="section-title">Patch Results</div>${rows}</div>`;
+  }
   const preview=data.patchPreview||'';
   const m=preview.match(/Summary: (.+?)(\n|$)/);
   document.getElementById('patchSummary').textContent=m?m[1]:preview;
   renderContextFiles(data.contextFiles);
-  const patches=data.applyPatches||[];
   document.getElementById('filesVal').textContent=patches.length;
   updateResultSummary({role:currentRole,fileCount:patches.length,warningCount:warnings.length,contextCount:Array.isArray(data.contextFiles)?data.contextFiles.filter(Boolean).length:0});
-  document.getElementById('fileList').innerHTML=buildFilePreviewCards(patches);
+  document.getElementById('fileList').innerHTML=patchResultsHtml+buildFilePreviewCards(patches);
   document.getElementById('successBox').style.display='none';
   document.getElementById('patchSection').classList.remove('hidden');
 }
 
+async function ensureRepoWritePermission(handle){
+  if(!handle)return false;
+  if(typeof handle.queryPermission==='function'){
+    const state=await handle.queryPermission({mode:'readwrite'});
+    if(state==='granted')return true;
+  }
+  if(typeof handle.requestPermission==='function'){
+    const state=await handle.requestPermission({mode:'readwrite'});
+    return state==='granted';
+  }
+  return true;
+}
+
+async function getNestedFileHandle(rootHandle,filePath){
+  const parts=String(filePath||'').split('/').filter(Boolean);
+  if(parts.length===0)throw new Error('Invalid patch file path.');
+  let directory=rootHandle;
+  for(let i=0;i<parts.length-1;i+=1){
+    directory=await directory.getDirectoryHandle(parts[i],{create:true});
+  }
+  return directory.getFileHandle(parts[parts.length-1],{create:true});
+}
+
+async function writePatchFilesWithHandle(rootHandle,patches){
+  const applied=[];const failed=[];
+  for(const patch of patches){
+    try{
+      const fileHandle=await getNestedFileHandle(rootHandle,patch.filePath);
+      const writable=await fileHandle.createWritable();
+      await writable.write(patch.fullContent||'');
+      await writable.close();
+      applied.push(patch.filePath);
+    }catch(e){
+      failed.push({filePath:patch.filePath,error:e});
+    }
+  }
+  return {applied,failed};
+}
+
+function setRestoreAvailability(visible){
+  const btn=document.getElementById('restoreBtn');
+  if(!btn)return;
+  if(visible)btn.classList.remove('hidden');
+  else btn.classList.add('hidden');
+}
+
+async function readExistingFileSnapshot(rootHandle,filePath){
+  const parts=String(filePath||'').split('/').filter(Boolean);
+  if(parts.length===0)return {filePath,existed:false,content:''};
+  try{
+    let directory=rootHandle;
+    for(let i=0;i<parts.length-1;i+=1){
+      directory=await directory.getDirectoryHandle(parts[i]);
+    }
+    const fileHandle=await directory.getFileHandle(parts[parts.length-1]);
+    const file=await fileHandle.getFile();
+    return {filePath,existed:true,content:await file.text()};
+  }catch{
+    return {filePath,existed:false,content:''};
+  }
+}
+
+async function createBackupSnapshot(rootHandle,patches){
+  const uniquePaths=[...new Set((patches||[]).map(p=>p.filePath).filter(Boolean))];
+  const entries=[];
+  for(const filePath of uniquePaths){
+    entries.push(await readExistingFileSnapshot(rootHandle,filePath));
+  }
+  return {folderLabel:currentRepoSelectionLabel,entries};
+}
+
+async function removeFileWithHandle(rootHandle,filePath){
+  const parts=String(filePath||'').split('/').filter(Boolean);
+  if(parts.length===0)return;
+  let directory=rootHandle;
+  for(let i=0;i<parts.length-1;i+=1){
+    directory=await directory.getDirectoryHandle(parts[i]);
+  }
+  if(typeof directory.removeEntry==='function'){
+    await directory.removeEntry(parts[parts.length-1]);
+    return;
+  }
+  throw new Error(`Cannot remove ${filePath} in this browser.`);
+}
+
+async function restoreBackupSnapshot(rootHandle,snapshot){
+  const restored=[];const failed=[];
+  for(const entry of snapshot?.entries||[]){
+    try{
+      if(entry.existed){
+        const fileHandle=await getNestedFileHandle(rootHandle,entry.filePath);
+        const writable=await fileHandle.createWritable();
+        await writable.write(entry.content||'');
+        await writable.close();
+      }else{
+        await removeFileWithHandle(rootHandle,entry.filePath);
+      }
+      restored.push(entry.filePath);
+    }catch(e){
+      failed.push({filePath:entry.filePath,error:e});
+    }
+  }
+  return {restored,failed};
+}
+
+function buildApplySuccessSummary(input){
+  const applied=Array.isArray(input?.applied)?input.applied:[];
+  const failed=Array.isArray(input?.failed)?input.failed:[];
+  const appliedSet=new Set(applied);
+  const appliedPatches=(currentPatches||[]).filter(p=>appliedSet.has(p.filePath));
+  const createdCount=appliedPatches.filter(p=>formatFileOperation(p.filePath)==='create').length;
+  const modifiedCount=Math.max(0,appliedPatches.length-createdCount);
+  const folderMeta=currentRepoSelectionLabel?`<div style="margin-bottom:8px;color:#9cdcfe">${escapeHtml(currentRepoSelectionLabel)}</div>`:'';
+  const countLine=`<div style="margin-bottom:8px"><strong>${applied.length}</strong> file${applied.length!==1?'s':''} written${createdCount||modifiedCount?` · ${createdCount} created · ${modifiedCount} modified`:''}</div>`;
+  const fileList=applied.length>0?`<div>${applied.map(f=>`&nbsp;&nbsp;• ${escapeHtml(f)}`).join('<br>')}</div>`:'';
+  const failedLine=failed.length>0?`<br><span style="color:#ce9178">⚠ Failed: ${failed.map(f=>escapeHtml(f.filePath||f)).join(', ')}</span>`:'';
+  return `${folderMeta}${countLine}${fileList}${failedLine}`;
+}
+
 async function applyChanges(){
   if(!currentPatches.length){showError('No patches to apply.');return;}
-  const btn=document.getElementById('applyBtn');
-  const sp=document.getElementById('applySpinner');
-  const t=document.getElementById('applyText');
-  btn.disabled=true;sp.style.display='block';t.textContent='Applying...';
+  if(!currentRepoHandle){showError('Select a folder before applying changes.');return;}
+  const btn=document.getElementById('applyBtn');const sp=document.getElementById('applySpinner');const t=document.getElementById('applyText');
+  const sb=document.getElementById('successBox');
+  btn.disabled=true;sp.style.display='block';t.textContent=`Writing ${currentPatches.length} file${currentPatches.length!==1?'s':''}...`;sb.style.display='none';
   try{
-    const r=await fetch('/api/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({patches:currentPatches,repoPath:currentRepoPath})});
-    if(!r.ok)throw new Error('Apply failed: '+r.status);
-    const res=await r.json();
-    const applied=res.applied||[];const failed=res.failed||[];
-    const sb=document.getElementById('successBox');
-    if(applied.length>0){sb.innerHTML='✓ Applied:<br>'+applied.map(f=>`&nbsp;&nbsp;• ${f}`).join('<br>');if(failed.length>0)sb.innerHTML+='<br>⚠ Failed: '+failed.join(', ');sb.style.display='block';}
-    else{showError('No files applied. Failed: '+failed.join(', '));}
+    const allowed=await ensureRepoWritePermission(currentRepoHandle);
+    if(!allowed){throw new Error('Write permission denied for the selected folder.');}
+    const backupSnapshot=await createBackupSnapshot(currentRepoHandle,currentPatches);
+    const res=await writePatchFilesWithHandle(currentRepoHandle,currentPatches);
+    if(res.applied.length>0){
+      currentBackupSnapshot=backupSnapshot;
+      setRestoreAvailability(true);
+      sb.innerHTML='✓ Applied successfully<br>'+buildApplySuccessSummary(res);
+      sb.style.display='block';
+    }else{
+      throw new Error('No files were written to the selected folder.');
+    }
+    if(res.failed.length>0){
+      showError('Some files could not be written: '+res.failed.map(f=>f.filePath).join(', '));
+    }
   }catch(e){showError(e.message);}
   finally{btn.disabled=false;sp.style.display='none';t.textContent='✓  Apply Changes';}
+}
+
+async function restorePreviousState(){
+  if(!currentBackupSnapshot){showError('No backup is available to restore.');return;}
+  if(!currentRepoHandle){showError('Select the original folder before restoring changes.');return;}
+  const btn=document.getElementById('restoreBtn');const sp=document.getElementById('restoreSpinner');const t=document.getElementById('restoreText');
+  const sb=document.getElementById('successBox');
+  btn.disabled=true;sp.style.display='block';t.textContent='Restoring files...';
+  try{
+    const allowed=await ensureRepoWritePermission(currentRepoHandle);
+    if(!allowed){throw new Error('Write permission denied for the selected folder.');}
+    const res=await restoreBackupSnapshot(currentRepoHandle,currentBackupSnapshot);
+    if(res.restored.length===0){throw new Error('No files were restored.');}
+    sb.innerHTML=`✓ Restored previous state<br><div style="margin-bottom:8px"><strong>${res.restored.length}</strong> file${res.restored.length!==1?'s':''} restored</div><div>${res.restored.map(f=>`&nbsp;&nbsp;• ${escapeHtml(f)}`).join('<br>')}</div>${res.failed.length>0?`<br><span style="color:#ce9178">⚠ Failed: ${res.failed.map(f=>escapeHtml(f.filePath)).join(', ')}</span>`:''}`;
+    sb.style.display='block';
+    if(res.failed.length===0){
+      currentBackupSnapshot=null;
+      setRestoreAvailability(false);
+    }else{
+      showError('Some files could not be restored: '+res.failed.map(f=>f.filePath).join(', '));
+    }
+  }catch(e){showError(e.message);}
+  finally{btn.disabled=false;sp.style.display='none';t.textContent='↩  Restore Previous State';}
 }
 
 function resetUI(){
@@ -456,12 +819,16 @@ function resetUI(){
   document.getElementById('repoPath').value='';
   document.getElementById('decisionSection').classList.add('hidden');
   document.getElementById('patchSection').classList.add('hidden');
+  document.getElementById('diffSection').classList.add('hidden');
   hideError();
   document.getElementById('warningsList').classList.add('hidden');
   document.getElementById('successBox').style.display='none';
   document.getElementById('contextFilesList').innerHTML='';
   document.getElementById('contextFilesBox').classList.add('hidden');
   const cb=document.getElementById('complexityBadge');cb.textContent='';cb.className='complexity-badge hidden';
+  clearRepoSelection();
+  currentBackupSnapshot=null;
+  setRestoreAvailability(false);
   currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};
   renderResultSummary();resetProgress();currentPatches=[];currentRepoPath='';renderHistory();
 }

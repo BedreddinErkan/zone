@@ -43,6 +43,8 @@ class MockElement {
   placeholder = "";
   title = "";
   disabled = false;
+  files: Array<{ name?: string; webkitRelativePath?: string }> = [];
+  clicked = false;
   dataset: Record<string, string> = {};
   private classListValue: MockClassList;
 
@@ -61,6 +63,14 @@ class MockElement {
 
   set className(value: string) {
     this.classListValue.setFromString(value);
+  }
+
+  click(): void {
+    this.clicked = true;
+  }
+
+  scrollIntoView(): void {
+    // no-op for test harness
   }
 }
 
@@ -84,6 +94,92 @@ class MockEventSource {
 
   close(): void {
     this.closed = true;
+  }
+}
+
+class MockWritableFile {
+  private fileHandle: MockFileHandle;
+  written = "";
+
+  constructor(fileHandle: MockFileHandle) {
+    this.fileHandle = fileHandle;
+  }
+
+  async write(value: string): Promise<void> {
+    this.written = value;
+    this.fileHandle.content = value;
+  }
+
+  async close(): Promise<void> {
+    // no-op
+  }
+}
+
+class MockFileHandle {
+  content = "";
+  writable = new MockWritableFile(this);
+
+  async createWritable(): Promise<MockWritableFile> {
+    return this.writable;
+  }
+
+  async getFile(): Promise<{ text(): Promise<string> }> {
+    return {
+      text: async () => this.content,
+    };
+  }
+}
+
+class MockDirectoryHandle {
+  name: string;
+  permissionState: "granted" | "denied" | "prompt";
+  directories = new Map<string, MockDirectoryHandle>();
+  files = new Map<string, MockFileHandle>();
+
+  constructor(
+    name: string,
+    permissionState: "granted" | "denied" | "prompt" = "granted"
+  ) {
+    this.name = name;
+    this.permissionState = permissionState;
+  }
+
+  async queryPermission(): Promise<"granted" | "denied" | "prompt"> {
+    return this.permissionState;
+  }
+
+  async requestPermission(): Promise<"granted" | "denied" | "prompt"> {
+    return this.permissionState;
+  }
+
+  async getDirectoryHandle(
+    name: string,
+    options?: { create?: boolean }
+  ): Promise<MockDirectoryHandle> {
+    if (!this.directories.has(name)) {
+      if (!options?.create) {
+        throw new Error(`Directory not found: ${name}`);
+      }
+      this.directories.set(name, new MockDirectoryHandle(name, this.permissionState));
+    }
+    return this.directories.get(name)!;
+  }
+
+  async getFileHandle(
+    name: string,
+    options?: { create?: boolean }
+  ): Promise<MockFileHandle> {
+    if (!this.files.has(name)) {
+      if (!options?.create) {
+        throw new Error(`File not found: ${name}`);
+      }
+      this.files.set(name, new MockFileHandle());
+    }
+    return this.files.get(name)!;
+  }
+
+  async removeEntry(name: string): Promise<void> {
+    this.files.delete(name);
   }
 }
 
@@ -131,6 +227,10 @@ type UiContext = {
   clearTimeout: typeof clearTimeout;
   fetch: ReturnType<typeof vi.fn>;
   EventSource: typeof MockEventSource;
+  window: {
+    location: { href: string };
+    showDirectoryPicker?: ReturnType<typeof vi.fn>;
+  };
   Math: Math;
   Date: DateConstructor;
   encodeURIComponent: typeof encodeURIComponent;
@@ -139,9 +239,14 @@ type UiContext = {
   selectRole(button: MockElement): void;
   showPatch(data: UiPatchInput): void;
   execute(): Promise<void>;
+  executeDryRun(): Promise<void>;
+  applyChanges(): Promise<void>;
+  restorePreviousState(): Promise<void>;
   addRecentRun(run: UiRun): void;
   loadRecentRun(index: number): void;
   setProgress(stage: string): void;
+  selectRepoFolder(): Promise<void>;
+  handleFolderFallbackChange(input: MockElement): void;
 };
 
 type UiContextBase = Omit<
@@ -151,9 +256,14 @@ type UiContextBase = Omit<
   | "selectRole"
   | "showPatch"
   | "execute"
+  | "executeDryRun"
+  | "applyChanges"
+  | "restorePreviousState"
   | "addRecentRun"
   | "loadRecentRun"
   | "setProgress"
+  | "selectRepoFolder"
+  | "handleFolderFallbackChange"
 >;
 
 function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
@@ -192,6 +302,11 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
   ensureElement("contextFilesList");
   ensureElement("task");
   ensureElement("repoPath");
+  ensureElement("folderPickerBtn");
+  ensureElement("folderPickerFallback", "hidden");
+  ensureElement("repoSelectionBox", "hidden");
+  ensureElement("repoSelectionLabel");
+  ensureElement("repoSelectionMeta");
   ensureElement("complexityBadge", "complexity-badge hidden");
   ensureElement("frameworkBadge", "framework-badge hidden");
   ensureElement("decisionBadge", "decision-badge safe");
@@ -214,8 +329,17 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
   ensureElement("applyBtn");
   ensureElement("applySpinner");
   ensureElement("applyText");
+  ensureElement("restoreBtn", "hidden");
+  ensureElement("restoreSpinner");
+  ensureElement("restoreText");
   ensureElement("progressBox", "progress-box hidden");
   ensureElement("progressText");
+  ensureElement("dryRunBtn");
+  ensureElement("drySpinner");
+  ensureElement("dryRunText");
+  ensureElement("diffSection", "hidden");
+  ensureElement("diffSummaryBox");
+  ensureElement("diffFileList");
 
   const developerRoleButton = new MockElement("developerRole", "role-btn");
   developerRoleButton.dataset.role = "developer";
@@ -278,10 +402,20 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
     clearTimeout,
     fetch: vi.fn(),
     EventSource: MockEventSource,
+    window: {
+      location: { href: "" },
+      showDirectoryPicker: vi.fn(),
+    },
     Math,
     Date,
     encodeURIComponent,
   };
+  (context as UiContextBase & { window: UiContext["window"] }).window.showDirectoryPicker =
+    vi.fn();
+  (context as UiContextBase & { window: UiContext["window"] }).window = Object.assign(
+    context,
+    context.window
+  );
 
   MockEventSource.instances = [];
   vm.runInNewContext(scriptMatch[1], context as vm.Context);
@@ -342,6 +476,99 @@ describe("UI complexity badge", () => {
     const badge = elements.get("complexityBadge");
     expect(badge.textContent).toBe("");
     expect(badge.classList.contains("hidden")).toBe(true);
+  });
+});
+
+describe("UI repo folder picker", () => {
+  it("renders the folder picker button", () => {
+    const { elements } = buildUiHarness();
+    expect(elements.get("folderPickerBtn")).toBeTruthy();
+  });
+
+  it("shows selected folder name when showDirectoryPicker is available", async () => {
+    const { context, elements } = buildUiHarness();
+    context.window.showDirectoryPicker = vi
+      .fn()
+      .mockResolvedValue({ name: "zone-flyway-test" });
+
+    await context.selectRepoFolder();
+
+    expect(elements.get("repoSelectionBox").classList.contains("hidden")).toBe(false);
+    expect(elements.get("repoSelectionLabel").textContent).toContain("zone-flyway-test");
+  });
+
+  it("uses the fallback directory input when showDirectoryPicker is unavailable", async () => {
+    const { context, elements } = buildUiHarness();
+    context.window.showDirectoryPicker = undefined;
+    const fallback = elements.get("folderPickerFallback");
+    fallback.files = [
+      {
+        name: "index.html",
+        webkitRelativePath: "zone-ui/src/index.html",
+      },
+    ];
+
+    await context.selectRepoFolder();
+    context.handleFolderFallbackChange(fallback);
+
+    expect(fallback.clicked).toBe(true);
+    expect(elements.get("repoSelectionLabel").textContent).toContain("zone-ui");
+  });
+
+  it("keeps manual repo path fallback working for execute", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    context.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          decision: { mode: "safe_to_apply" },
+          confidence: { score: 82 },
+          risk: { score: 0, breakdown: {} },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          patchPreview: "Summary: Fix button spacing",
+          warnings: [],
+          applyPatches: [],
+        }),
+      });
+
+    context.selectRole(roleButtons.developer);
+    elements.get("task").value = "fix button spacing";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+
+    expect(context.fetch).toHaveBeenCalledWith(
+      "/api/analyze",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("reset clears and hides the selected folder state", async () => {
+    const { context, elements } = buildUiHarness();
+    context.window.showDirectoryPicker = vi.fn().mockResolvedValue({ name: "zone-app" });
+
+    await context.selectRepoFolder();
+    context.resetUI();
+
+    expect(elements.get("repoSelectionBox").classList.contains("hidden")).toBe(true);
+    expect(elements.get("repoSelectionLabel").textContent).toBe("");
+  });
+
+  it("shows a clear validation message when no repo path is provided", async () => {
+    const { context, elements } = buildUiHarness();
+    context.window.showDirectoryPicker = vi.fn().mockResolvedValue({ name: "zone-app" });
+    elements.get("task").value = "polish spacing";
+
+    await context.selectRepoFolder();
+    await context.executeDryRun();
+
+    expect(elements.get("errorBox").textContent).toContain("Repo path is required.");
   });
 });
 
@@ -798,6 +1025,269 @@ describe("UI patch preview", () => {
 
     expect(elements.get("fileList").innerHTML).toContain("generated_file_1");
     expect(elements.get("fileList").innerHTML).toContain("SELECT 1;");
+  });
+});
+
+describe("UI folder-handle apply", () => {
+  it("writes files through the selected folder handle", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    const rootHandle = new MockDirectoryHandle("zone-repo");
+    context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
+    context.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          decision: { mode: "safe_to_apply" },
+          confidence: { score: 82 },
+          risk: { score: 0, breakdown: {} },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          patchPreview: "Summary: Fix login flow",
+          warnings: [],
+          applyPatches: [
+            {
+              filePath: "src/features/login.ts",
+              fullContent: "export const login = true;",
+            },
+          ],
+        }),
+      });
+
+    await context.selectRepoFolder();
+    context.selectRole(roleButtons.developer);
+    elements.get("task").value = "fix login flow";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+    await context.applyChanges();
+
+    const srcDir = await rootHandle.getDirectoryHandle("src");
+    const featuresDir = await srcDir.getDirectoryHandle("features");
+    const fileHandle = await featuresDir.getFileHandle("login.ts");
+    expect(fileHandle.writable.written).toBe("export const login = true;");
+    expect(elements.get("successBox").innerHTML).toContain("Applied successfully");
+    expect(elements.get("successBox").innerHTML).toContain("file written");
+    expect(elements.get("successBox").innerHTML).toContain(">1</strong>");
+    expect(elements.get("successBox").innerHTML).toContain("src/features/login.ts");
+    expect(elements.get("successBox").innerHTML).toContain("Folder: zone-repo");
+    expect(elements.get("restoreBtn").classList.contains("hidden")).toBe(false);
+  });
+
+  it("shows a compact multi-file apply summary when multiple files are written", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    const rootHandle = new MockDirectoryHandle("zone-repo");
+    context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
+    context.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          decision: { mode: "safe_to_apply" },
+          confidence: { score: 82 },
+          risk: { score: 0, breakdown: {} },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          patchPreview: "Summary: Update repo files",
+          warnings: [],
+          applyPatches: [
+            {
+              filePath: "src/features/login.ts",
+              fullContent: "export const login = true;",
+            },
+            {
+              filePath: "db/migration/V1__init.sql",
+              fullContent: "create table users(id int);",
+            },
+          ],
+        }),
+      });
+
+    await context.selectRepoFolder();
+    context.selectRole(roleButtons.developer);
+    elements.get("task").value = "update repo files";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+    await context.applyChanges();
+
+    expect(elements.get("successBox").innerHTML).toContain("files written");
+    expect(elements.get("successBox").innerHTML).toContain(">2</strong>");
+    expect(elements.get("successBox").innerHTML).toContain("created");
+    expect(elements.get("successBox").innerHTML).toContain("modified");
+    expect(elements.get("successBox").innerHTML).toContain("src/features/login.ts");
+    expect(elements.get("successBox").innerHTML).toContain("db/migration/V1__init.sql");
+  });
+
+  it("shows an error when no folder handle is available during apply", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    context.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          decision: { mode: "safe_to_apply" },
+          confidence: { score: 82 },
+          risk: { score: 0, breakdown: {} },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          patchPreview: "Summary: Fix login flow",
+          warnings: [],
+          applyPatches: [
+            {
+              filePath: "src/features/login.ts",
+              fullContent: "export const login = true;",
+            },
+          ],
+        }),
+      });
+
+    context.selectRole(roleButtons.developer);
+    elements.get("task").value = "fix login flow";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+    await context.applyChanges();
+
+    expect(elements.get("errorBox").textContent).toContain("Select a folder before applying changes.");
+  });
+
+  it("handles permission errors gracefully and reset clears the handle", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    const deniedHandle = new MockDirectoryHandle("zone-repo", "denied");
+    context.window.showDirectoryPicker = vi.fn().mockResolvedValue(deniedHandle);
+    context.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          decision: { mode: "safe_to_apply" },
+          confidence: { score: 82 },
+          risk: { score: 0, breakdown: {} },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          patchPreview: "Summary: Fix login flow",
+          warnings: [],
+          applyPatches: [
+            {
+              filePath: "src/features/login.ts",
+              fullContent: "export const login = true;",
+            },
+          ],
+        }),
+      });
+
+    await context.selectRepoFolder();
+    context.selectRole(roleButtons.developer);
+    elements.get("task").value = "fix login flow";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+    await context.applyChanges();
+    expect(elements.get("errorBox").textContent).toContain("Write permission denied");
+
+    context.resetUI();
+    elements.get("task").value = "fix login flow";
+    elements.get("repoPath").value = "C:/repo";
+    context.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          decision: { mode: "safe_to_apply" },
+          confidence: { score: 82 },
+          risk: { score: 0, breakdown: {} },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          patchPreview: "Summary: Fix login flow",
+          warnings: [],
+          applyPatches: [
+            {
+              filePath: "src/features/login.ts",
+              fullContent: "export const login = true;",
+            },
+          ],
+        }),
+      });
+    await context.execute();
+    await context.applyChanges();
+    expect(elements.get("errorBox").textContent).toContain("Select a folder before applying changes.");
+  });
+
+  it("keeps apply summary safe when no files are written", async () => {
+    const { context, elements } = buildUiHarness();
+    await context.applyChanges();
+    expect(elements.get("errorBox").textContent).toContain("No patches to apply.");
+    expect(elements.get("successBox").innerHTML).toBe("");
+  });
+
+  it("restores original file contents after apply", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    const rootHandle = new MockDirectoryHandle("zone-repo");
+    const srcDir = await rootHandle.getDirectoryHandle("src", { create: true });
+    const featuresDir = await srcDir.getDirectoryHandle("features", { create: true });
+    const fileHandle = await featuresDir.getFileHandle("login.ts", { create: true });
+    fileHandle.content = "export const login = false;";
+    context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
+    context.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          decision: { mode: "safe_to_apply" },
+          confidence: { score: 82 },
+          risk: { score: 0, breakdown: {} },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          patchPreview: "Summary: Fix login flow",
+          warnings: [],
+          applyPatches: [
+            {
+              filePath: "src/features/login.ts",
+              fullContent: "export const login = true;",
+            },
+          ],
+        }),
+      });
+
+    await context.selectRepoFolder();
+    context.selectRole(roleButtons.developer);
+    elements.get("task").value = "fix login flow";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+    await context.applyChanges();
+    expect(fileHandle.content).toBe("export const login = true;");
+
+    await context.restorePreviousState();
+
+    expect(fileHandle.content).toBe("export const login = false;");
+    expect(elements.get("successBox").innerHTML).toContain("Restored previous state");
+    expect(elements.get("restoreBtn").classList.contains("hidden")).toBe(true);
   });
 });
 

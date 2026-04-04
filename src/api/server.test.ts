@@ -153,4 +153,51 @@ describe("/api/test-engineer", () => {
       "server/routes/auth.ts",
     ]);
   });
+
+  it("returns fileDiffs from /api/dry-run", async () => {
+    runLlmPatchFlowMock.mockResolvedValue({
+      ok: true,
+      patchPreview: "=== LLM PATCH PREVIEW ===\nSummary: Dry run",
+      warnings: [],
+      patchResults: [
+        { filePath: "src/foo.ts", status: "applied" },
+      ],
+      fileDiffs: [
+        {
+          filePath: "src/foo.ts",
+          before: "export const foo = 1;",
+          after: "export const foo = 2;",
+          diff: [
+            { type: "removed", content: "export const foo = 1;", lineNumber: 1 },
+            { type: "added", content: "export const foo = 2;", lineNumber: 1 },
+          ],
+          addedLines: 1,
+          removedLines: 1,
+        },
+      ],
+      applyPatches: [
+        {
+          filePath: "src/foo.ts",
+          fullContent: "export const foo = 2;",
+        },
+      ],
+    });
+
+    const response = await fetch(`${baseUrl}/api/dry-run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "update foo",
+        repoPath: "C:/repo",
+      }),
+    });
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.fileDiffs).toHaveLength(1);
+    expect(body.patchResults).toEqual([
+      { filePath: "src/foo.ts", status: "applied" },
+    ]);
+  });
 });

@@ -72,6 +72,23 @@ app.post("/api/patch", async (req, res) => {
   res.json(result);
 });
 
+app.post("/api/dry-run", async (req, res) => {
+  const { task, repoPath } = req.body;
+  const result = await runLlmPatchFlow({ task, repoPath, dryRun: true });
+  if (!result.ok) {
+    res.status(500).json(result);
+    return;
+  }
+
+  res.json({
+    ok: true,
+    fileDiffs: result.fileDiffs ?? [],
+    patchPreview: result.patchPreview,
+    warnings: result.warnings,
+    patchResults: result.patchResults,
+  });
+});
+
 app.post("/api/apply", async (req, res) => {
   const { patches, repoPath } = req.body;
   const result = await applyLlmPatches(patches, repoPath);

@@ -137,5 +137,49 @@ vitest_1.vi.mock("../roles/runDataAnalystFlow.js", () => ({
             "server/routes/auth.ts",
         ]);
     });
+    (0, vitest_1.it)("returns fileDiffs from /api/dry-run", async () => {
+        runLlmPatchFlowMock.mockResolvedValue({
+            ok: true,
+            patchPreview: "=== LLM PATCH PREVIEW ===\nSummary: Dry run",
+            warnings: [],
+            patchResults: [
+                { filePath: "src/foo.ts", status: "applied" },
+            ],
+            fileDiffs: [
+                {
+                    filePath: "src/foo.ts",
+                    before: "export const foo = 1;",
+                    after: "export const foo = 2;",
+                    diff: [
+                        { type: "removed", content: "export const foo = 1;", lineNumber: 1 },
+                        { type: "added", content: "export const foo = 2;", lineNumber: 1 },
+                    ],
+                    addedLines: 1,
+                    removedLines: 1,
+                },
+            ],
+            applyPatches: [
+                {
+                    filePath: "src/foo.ts",
+                    fullContent: "export const foo = 2;",
+                },
+            ],
+        });
+        const response = await fetch(`${baseUrl}/api/dry-run`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                task: "update foo",
+                repoPath: "C:/repo",
+            }),
+        });
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body.ok).toBe(true);
+        (0, vitest_1.expect)(body.fileDiffs).toHaveLength(1);
+        (0, vitest_1.expect)(body.patchResults).toEqual([
+            { filePath: "src/foo.ts", status: "applied" },
+        ]);
+    });
 });
 //# sourceMappingURL=server.test.js.map

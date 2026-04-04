@@ -348,7 +348,7 @@ function buildErrorResult(task, repoPath, message) {
     };
 }
 async function runTaskOnlyFlow(options) {
-    const { task, verbose, showTrace, traceId, tracker, outputFormat, audit, auditOut, apply, confirmApply, diff, patchPlanPath, useGeneratedPatchPlan, repoPath, role, } = options;
+    const { task, verbose, showTrace, traceId, tracker, outputFormat, audit, auditOut, apply, confirmApply, diff, dryRun, patchPlanPath, useGeneratedPatchPlan, repoPath, role, } = options;
     tracker.startPhase("run_agent");
     const result = await (0, runAgent_js_1.runAgent)({ task, role });
     tracker.endPhase("run_agent");
@@ -463,9 +463,25 @@ async function runTaskOnlyFlow(options) {
             return 0;
         }
         console.log(`${zonePrefix()} ${tone("Intent unknown — delegating to LLM patch flow...", colors_js_1.c.white)}`);
-        const llmResult = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({ task, repoPath });
+        const llmResult = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({ task, repoPath, dryRun });
         if (llmResult.ok) {
             patchSection = llmResult.patchPreview;
+            if (dryRun) {
+                console.log("");
+                console.log(patchSection);
+                console.log("");
+                for (const fileDiff of llmResult.fileDiffs ?? []) {
+                    (0, diffOutput_js_1.renderDiffSummary)([
+                        {
+                            filePath: fileDiff.filePath,
+                            original: fileDiff.before,
+                            updated: fileDiff.after,
+                        },
+                    ]);
+                    console.log(`${zonePrefix()} ${tone(`+${fileDiff.addedLines} lines added, -${fileDiff.removedLines} lines removed`, colors_js_1.c.cyan)} ${tone(`(${fileDiff.filePath})`, colors_js_1.c.dim, colors_js_1.c.gray)}`);
+                }
+                return 0;
+            }
             if (apply && confirmApply && llmResult.applyPatches.length > 0) {
                 const originalContents = llmResult.originalContents ??
                     (await capturePatchOriginals(repoPath, llmResult.applyPatches));
@@ -675,6 +691,7 @@ async function runCliWithOptions(options) {
                 apply: Boolean(options.apply),
                 confirmApply: Boolean(options.confirmApply),
                 diff: Boolean(options.diff),
+                dryRun: Boolean(options.dryRun),
                 patchPlanPath: resolvePatchPlanPath(options),
                 useGeneratedPatchPlan: Boolean(options.useGeneratedPatchPlan),
                 repoPath,
@@ -807,6 +824,7 @@ async function run() {
         .option("--trace", "Show decision trace in output")
         .option("--diff-aware", "Boost ranking using git diff context")
         .option("--diff", "Show colored diff of applied changes")
+        .option("--dry-run", "Preview developer file diffs without writing files")
         .option("--task-only", "Run Sprint 7 task-only orchestration flow")
         .option("--apply", "Execute controlled apply flow after decision output")
         .option("--confirm-apply", "Explicit confirmation required before apply")
