@@ -53,6 +53,7 @@ export type TestEngineerFlowResult =
       framework: string;
       language: string;
       confidence: number;
+      decisionMode: "safe_to_apply" | "preview_only";
       summary: string;
       warnings: string[];
       complexity?: TestComplexity;
@@ -64,6 +65,15 @@ export type TestEngineerFlowResult =
       ok: false;
       reason: string;
       framework?: string;
+      language?: string;
+      confidence?: number;
+      decisionMode?: "blocked";
+      summary?: string;
+      warnings?: string[];
+      complexity?: TestComplexity;
+      applyPatches?: Array<{ filePath: string; fullContent: string }>;
+      preview?: string;
+      validationBlocked?: boolean;
       debug?: TestEngineerDebugInfo;
     };
 
@@ -265,6 +275,35 @@ function findSuspiciousPlaywrightUrlAssertion(
   }
 
   return null;
+}
+
+function buildValidationBlockedResult(input: {
+  framework: string;
+  language: string;
+  reason: string;
+  confidence: number;
+  summary: string;
+  warnings: string[];
+  complexity?: TestComplexity;
+  applyPatches: Array<{ filePath: string; fullContent: string }>;
+  preview: string;
+  debug: TestEngineerDebugInfo;
+}): TestEngineerFlowResult {
+  return {
+    ok: false,
+    framework: input.framework,
+    language: input.language,
+    reason: input.reason,
+    confidence: Math.min(input.confidence, 35),
+    decisionMode: "blocked",
+    summary: input.summary,
+    warnings: input.warnings,
+    complexity: input.complexity,
+    applyPatches: input.applyPatches,
+    preview: input.preview,
+    validationBlocked: true,
+    debug: input.debug,
+  };
 }
 
 export async function runTestEngineerFlow(input: {
@@ -508,12 +547,18 @@ if (validation.decision !== "pass" || validation.issues.length > 0) {
         reason: playwrightUrlAssertionIssue,
         routeEvidence,
       };
-      return {
-        ok: false,
-        reason: `Output validation blocked: ${playwrightUrlAssertionIssue}`,
+      return buildValidationBlockedResult({
         framework: framework.framework,
+        language: framework.language,
+        reason: `Output validation blocked: ${playwrightUrlAssertionIssue}`,
+        confidence,
+        summary,
+        warnings,
+        complexity,
+        applyPatches,
+        preview,
         debug,
-      };
+      });
     }
     debug.playwrightUrlAssertionGuard = {
       checked: true,
@@ -523,17 +568,23 @@ if (validation.decision !== "pass" || validation.issues.length > 0) {
     };
   }
   if (validation.decision === "blocked") {
-    return {
-      ok: false,
+    return buildValidationBlockedResult({
+      framework: framework.framework,
+      language: framework.language,
       reason:
         `Output validation blocked: ${validation.summary}\n` +
         validation.issues
           .filter(i => i.severity === "error")
           .map(i => `  - ${i.message}`)
           .join("\n"),
-      framework: framework.framework,
+      confidence,
+      summary,
+      warnings,
+      complexity,
+      applyPatches,
+      preview,
       debug,
-    };
+    });
   }
 
   const validationWarnings = validation.issues
@@ -545,6 +596,7 @@ return {
     framework: framework.framework,
     language: framework.language,
     confidence,
+    decisionMode: confidence >= 70 ? "safe_to_apply" : "preview_only",
     summary,
     warnings: [...warnings, ...validationWarnings],
     complexity,

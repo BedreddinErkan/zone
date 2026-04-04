@@ -162,6 +162,23 @@ function findSuspiciousPlaywrightUrlAssertion(testFileContent, routeEvidence) {
     }
     return null;
 }
+function buildValidationBlockedResult(input) {
+    return {
+        ok: false,
+        framework: input.framework,
+        language: input.language,
+        reason: input.reason,
+        confidence: Math.min(input.confidence, 35),
+        decisionMode: "blocked",
+        summary: input.summary,
+        warnings: input.warnings,
+        complexity: input.complexity,
+        applyPatches: input.applyPatches,
+        preview: input.preview,
+        validationBlocked: true,
+        debug: input.debug,
+    };
+}
 async function runTestEngineerFlow(input) {
     let allFiles;
     try {
@@ -349,12 +366,18 @@ async function runTestEngineerFlow(input) {
                 reason: playwrightUrlAssertionIssue,
                 routeEvidence,
             };
-            return {
-                ok: false,
-                reason: `Output validation blocked: ${playwrightUrlAssertionIssue}`,
+            return buildValidationBlockedResult({
                 framework: framework.framework,
+                language: framework.language,
+                reason: `Output validation blocked: ${playwrightUrlAssertionIssue}`,
+                confidence,
+                summary,
+                warnings,
+                complexity,
+                applyPatches,
+                preview,
                 debug,
-            };
+            });
         }
         debug.playwrightUrlAssertionGuard = {
             checked: true,
@@ -364,16 +387,22 @@ async function runTestEngineerFlow(input) {
         };
     }
     if (validation.decision === "blocked") {
-        return {
-            ok: false,
+        return buildValidationBlockedResult({
+            framework: framework.framework,
+            language: framework.language,
             reason: `Output validation blocked: ${validation.summary}\n` +
                 validation.issues
                     .filter(i => i.severity === "error")
                     .map(i => `  - ${i.message}`)
                     .join("\n"),
-            framework: framework.framework,
+            confidence,
+            summary,
+            warnings,
+            complexity,
+            applyPatches,
+            preview,
             debug,
-        };
+        });
     }
     const validationWarnings = validation.issues
         .filter(i => i.severity === "warning")
@@ -384,6 +413,7 @@ async function runTestEngineerFlow(input) {
         framework: framework.framework,
         language: framework.language,
         confidence,
+        decisionMode: confidence >= 70 ? "safe_to_apply" : "preview_only",
         summary,
         warnings: [...warnings, ...validationWarnings],
         complexity,

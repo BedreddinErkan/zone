@@ -495,6 +495,7 @@ describe("runTestEngineerFlow", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.complexity).toBe("e2e");
+      expect(result.decisionMode).toBe("safe_to_apply");
     }
     expect(validateTestOutputMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -702,8 +703,20 @@ describe("runTestEngineerFlow", () => {
       expect.objectContaining({
         ok: false,
         framework: "playwright_ts",
+        language: "typescript",
+        confidence: 35,
+        decisionMode: "blocked",
+        validationBlocked: true,
         reason:
           "Output validation blocked: Generated Playwright URL assertion uses an arbitrary regex pattern instead of a repository-evidenced route.",
+        preview: expect.stringContaining("Files to create:\n- tests/login.spec.ts"),
+        applyPatches: [
+          {
+            filePath: "tests/login.spec.ts",
+            fullContent:
+              "test('login', async ({ page }) => { await expect(page).toHaveURL(/.*\\/#/); await expect(page.getByText('Invalid credentials')).toBeVisible(); });",
+          },
+        ],
         debug: expect.objectContaining({
           selectedRole: "test_engineer",
           detectedFramework: "playwright_ts",

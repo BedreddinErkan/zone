@@ -843,6 +843,111 @@ function buildUiHarness(initialLocalStorage = {}) {
         (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(true);
         (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Select a folder");
     });
+    (0, vitest_1.it)("keeps validation-blocked preview visible but disables Apply with an explicit blocked message", async () => {
+        const { context, elements, roleButtons } = buildUiHarness();
+        const rootHandle = new MockDirectoryHandle("zone-repo");
+        context.window.showDirectoryPicker = vitest_1.vi.fn().mockResolvedValue(rootHandle);
+        context.fetch = vitest_1.vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                ok: false,
+                validationBlocked: true,
+                decisionMode: "blocked",
+                framework: "playwright_ts",
+                language: "typescript",
+                confidence: 35,
+                summary: "Generated login test",
+                warnings: ["[URL_ASSERTION] Repository route evidence was insufficient"],
+                applyPatches: [
+                    {
+                        filePath: "tests/login.spec.ts",
+                        fullContent: "test('login', async () => {});",
+                    },
+                ],
+                preview: "=== TEST ENGINEER PREVIEW ===\nSummary: Generated login test\n\nFiles to create:\n- tests/login.spec.ts",
+                reason: "Output validation blocked: Generated Playwright URL assertion uses an arbitrary regex pattern instead of a repository-evidenced route.",
+            }),
+        });
+        await context.selectRepoFolder();
+        context.selectRole(roleButtons.testEngineer);
+        elements.get("task").value = "add a negative login test";
+        elements.get("repoPath").value = "C:/repo";
+        await context.execute();
+        (0, vitest_1.expect)(elements.get("patchSection").classList.contains("hidden")).toBe(false);
+        (0, vitest_1.expect)(elements.get("decisionBadge").className).toContain("blocked");
+        (0, vitest_1.expect)(elements.get("confVal").textContent).toBe("35");
+        (0, vitest_1.expect)(elements.get("patchSummary").textContent).toContain("Preview available for debugging only. Apply is blocked by output validation.");
+        (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(true);
+        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Output validation blocked this result");
+        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).not.toContain("Ready to apply");
+        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Output validation blocked");
+    });
+    (0, vitest_1.it)("starting a new run clears stale apply success and restore state before showing a blocked preview", async () => {
+        const { context, elements, roleButtons } = buildUiHarness();
+        const rootHandle = new MockDirectoryHandle("zone-repo");
+        context.window.showDirectoryPicker = vitest_1.vi.fn().mockResolvedValue(rootHandle);
+        context.fetch = vitest_1.vi
+            .fn()
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                decision: { mode: "safe_to_apply" },
+                confidence: { score: 82 },
+                risk: { score: 0, breakdown: {} },
+            }),
+        })
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                ok: true,
+                patchPreview: "Summary: Fix login flow",
+                warnings: [],
+                applyPatches: [
+                    {
+                        filePath: "src/features/login.ts",
+                        fullContent: "export const login = true;",
+                    },
+                ],
+            }),
+        })
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                ok: false,
+                validationBlocked: true,
+                decisionMode: "blocked",
+                framework: "playwright_ts",
+                language: "typescript",
+                confidence: 35,
+                summary: "Generated login test",
+                warnings: [],
+                applyPatches: [
+                    {
+                        filePath: "tests/login.spec.ts",
+                        fullContent: "test('login', async () => {});",
+                    },
+                ],
+                preview: "=== TEST ENGINEER PREVIEW ===\nSummary: Generated login test\n\nFiles to create:\n- tests/login.spec.ts",
+                reason: "Output validation blocked: Generated Playwright URL assertion uses an arbitrary regex pattern instead of a repository-evidenced route.",
+            }),
+        });
+        await context.selectRepoFolder();
+        context.selectRole(roleButtons.developer);
+        elements.get("task").value = "fix login flow";
+        elements.get("repoPath").value = "C:/repo";
+        await context.execute();
+        await context.applyChanges();
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("Applied successfully");
+        (0, vitest_1.expect)(elements.get("restoreBtn").classList.contains("hidden")).toBe(false);
+        context.selectRole(roleButtons.testEngineer);
+        elements.get("task").value = "add a negative login test";
+        await context.execute();
+        (0, vitest_1.expect)(elements.get("successBox").style.display).toBe("none");
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toBe("");
+        (0, vitest_1.expect)(elements.get("restoreBtn").classList.contains("hidden")).toBe(true);
+        (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(true);
+        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Output validation blocked this result");
+    });
     (0, vitest_1.it)("writes files through the selected folder handle", async () => {
         const { context, elements, roleButtons } = buildUiHarness();
         const rootHandle = new MockDirectoryHandle("zone-repo");

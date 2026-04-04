@@ -290,6 +290,7 @@ let currentSummaryState={};
 let currentRepoHandle=null;
 let currentRepoSelectionLabel='';
 let currentBackupSnapshot=null;
+let currentRunState={hasPatchResult:false,validationBlocked:false,runInProgress:false,decisionMode:'',confidence:0};
 const RECENT_RUNS_KEY='zone_recent_runs';
 const MAX_RECENT_RUNS=6;
 
@@ -358,8 +359,35 @@ function getResolvedRepoPath(){
   return manualRepoPath||currentRepoPath||'';
 }
 
+function resetRunState(){
+  currentPatches=[];
+  currentBackupSnapshot=null;
+  currentRunState={hasPatchResult:false,validationBlocked:false,runInProgress:false,decisionMode:'',confidence:0};
+  setRestoreAvailability(false);
+  document.getElementById('successBox').style.display='none';
+  document.getElementById('successBox').innerHTML='';
+  document.getElementById('applyStatusBox').textContent='';
+  document.getElementById('warningsList').classList.add('hidden');
+  document.getElementById('fileList').innerHTML='';
+  document.getElementById('patchSummary').textContent='';
+  document.getElementById('contextFilesList').innerHTML='';
+  document.getElementById('contextFilesBox').classList.add('hidden');
+  document.getElementById('patchSection').classList.add('hidden');
+}
+
+function beginRunState(){
+  resetRunState();
+  document.getElementById('decisionSection').classList.add('hidden');
+  currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};
+  renderResultSummary();
+  currentRunState.runInProgress=true;
+  updateApplyState();
+}
+
 function getApplyBlockingReason(){
-  if(!currentPatches.length)return 'Run Execute first to generate a patch result before applying.';
+  if(currentRunState.runInProgress)return 'Wait for the current run to finish before applying.';
+  if(!currentRunState.hasPatchResult||!currentPatches.length)return 'Run Execute first to generate a patch result before applying.';
+  if(currentRunState.validationBlocked)return 'Output validation blocked this result. Preview is visible for debugging, but Apply is disabled.';
   if(!currentRepoHandle)return 'Select a folder to enable local Apply.';
   return '';
 }
@@ -464,6 +492,7 @@ async function executeDryRun(){
   const values=validateTaskAndRepo();
   if(!values)return;
   const {task,repoPath}=values;
+  beginRunState();
   hideError();
   document.getElementById('diffSection').classList.add('hidden');
   setDryRunLoading(true);
@@ -476,7 +505,7 @@ async function executeDryRun(){
     showDiff(data);
     setProgress('Ready');
   }catch(e){resetProgress();showError(e.message);}
-  finally{setDryRunLoading(false);}
+  finally{currentRunState.runInProgress=false;setDryRunLoading(false);updateApplyState();}
 }
 
 // ── File preview cards ───────────────────────────────────────────────────────
@@ -578,11 +607,9 @@ async function execute(){
   if(!values)return;
   const {task,repoPath}=values;
   resetProgress();hideError();
+  beginRunState();
   document.getElementById('diffSection').classList.add('hidden');
-  currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0};
   currentRepoPath=repoPath;saveToHistory(repoPath);setLoading(true);
-  document.getElementById('successBox').style.display='none';
-  document.getElementById('warningsList').classList.add('hidden');
   const runId=`${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
   startProgress(runId,currentRole==='data_analyst'||currentRole==='test_engineer'?'Scanning repo...':'Generating patch...');
   try{
@@ -590,11 +617,17 @@ async function execute(){
       const r=await fetch('/api/test-engineer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});
       if(!r.ok)throw new Error('Test engineer flow failed: '+r.status);
       const result=await r.json();
-      if(!result.ok){showError(result.reason||'Test generation failed.');return;}
-      showDecision({decision:{mode:result.confidence>=70?'safe_to_apply':'preview_only'},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity});
-      showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings});
-      addRecentRun({task,role:currentRole,repoPath,status:'success',timestamp:Date.now()});
-      currentPatches=result.applyPatches||[];updateApplyState();finishProgress();
+      if(!result.ok&&!(result.validationBlocked&&result.preview)){
+        showError(result.reason||'Test generation failed.');
+        addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
+        return;
+      }
+      const decisionMode=result.decisionMode||(result.validationBlocked?'blocked':result.confidence>=70?'safe_to_apply':'preview_only');
+      showDecision({decision:{mode:decisionMode},confidence:{score:result.confidence??0},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity});
+      showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,validationBlocked:Boolean(result.validationBlocked)});
+      if(result.validationBlocked)showError(result.reason||'Output validation blocked.');
+      addRecentRun({task,role:currentRole,repoPath,status:result.validationBlocked?'error':'success',timestamp:Date.now()});
+      finishProgress();
     }else if(currentRole==='data_analyst'){
       const r=await fetch('/api/data-analyst',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});
       if(!r.ok)throw new Error('Data analyst flow failed: '+r.status);
@@ -603,7 +636,7 @@ async function execute(){
       showDecision({decision:{mode:result.confidence>=70?'safe_to_apply':'preview_only'},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat])});
       showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings});
       addRecentRun({task,role:currentRole,repoPath,status:'success',timestamp:Date.now()});
-      currentPatches=result.applyPatches||[];updateApplyState();finishProgress();
+      finishProgress();
     }else{
       setProgress('Scanning repo...');
       const r1=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});
@@ -615,15 +648,18 @@ async function execute(){
       const patch=await r2.json();
       showPatch(patch);
       addRecentRun({task,role:currentRole,repoPath,status:patch.ok===false?'error':'success',timestamp:Date.now()});
-      currentPatches=patch.applyPatches||[];updateApplyState();finishProgress();
+      finishProgress();
     }
   }catch(e){resetProgress();addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});showError(e.message);}
-  finally{setLoading(false);}
+  finally{currentRunState.runInProgress=false;setLoading(false);updateApplyState();}
 }
 
 function showDecision(data){
   const mode=data.decision?.mode||'safe_to_apply';
   const conf=data.confidence?.score??0;
+  currentRunState.decisionMode=mode;
+  currentRunState.validationBlocked=mode==='blocked';
+  currentRunState.confidence=conf;
   const risk=data.risk?.score??0;
   const bd=data.risk?.breakdown||{};
   const cls=mode==='blocked'?'blocked':mode==='preview_only'?'preview':'safe';
@@ -631,8 +667,8 @@ function showDecision(data){
   document.getElementById('decisionBadge').className='decision-badge '+cls;
   document.getElementById('bdot').style.background=dot;
   document.getElementById('badgeText').textContent=mode.replace(/_/g,' ');
-  document.getElementById('confVal').textContent=conf;
-  document.getElementById('riskVal').textContent=risk;
+  document.getElementById('confVal').textContent=String(conf);
+  document.getElementById('riskVal').textContent=String(risk);
   const d=bd.destructive||0,s=bd.schema||0,m=bd.massScope||bd.mass_scope||0;
   document.getElementById('rDestructive').style.width=Math.min(d,100)+'%';document.getElementById('rDestructiveVal').textContent=d;
   document.getElementById('rSchema').style.width=Math.min(s,100)+'%';document.getElementById('rSchemaVal').textContent=s;
@@ -650,6 +686,7 @@ function showDecision(data){
 function showPatch(data){
   if(!data.ok){showError('Patch generation failed.');return;}
   const warnings=data.warnings||[];
+  const validationBlocked=Boolean(data.validationBlocked);
   const conflicts=[];const regularWarnings=[];
   for(const w of warnings){
     if(w.startsWith('[PATCH_CONFLICT]')){try{const json=w.replace('[PATCH_CONFLICT]','').trim();conflicts.push(JSON.parse(json));}catch{regularWarnings.push(w);}}
@@ -663,6 +700,9 @@ function showPatch(data){
   }
   if(warningsHtml){wl.innerHTML=warningsHtml;wl.classList.remove('hidden');}else{wl.classList.add('hidden');}
   const patches=data.applyPatches||[];
+  currentPatches=patches;
+  currentRunState.hasPatchResult=patches.length>0;
+  currentRunState.validationBlocked=validationBlocked||currentRunState.decisionMode==='blocked';
   const patchResults=data.patchResults||[];
   let patchResultsHtml='';
   if(patchResults.length>0){
@@ -671,10 +711,10 @@ function showPatch(data){
   }
   const preview=data.patchPreview||'';
   const m=preview.match(/Summary: (.+?)(\n|$)/);
-  document.getElementById('patchSummary').textContent=m?m[1]:preview;
+  document.getElementById('patchSummary').textContent=validationBlocked?`Preview available for debugging only. Apply is blocked by output validation.\n\n${m?m[1]:preview}`:(m?m[1]:preview);
   renderContextFiles(data.contextFiles);
   document.getElementById('filesVal').textContent=patches.length;
-  updateResultSummary({role:currentRole,fileCount:patches.length,warningCount:warnings.length,contextCount:Array.isArray(data.contextFiles)?data.contextFiles.filter(Boolean).length:0});
+  updateResultSummary({role:currentRole,status:currentRunState.validationBlocked?'blocked':currentSummaryState.status,fileCount:patches.length,warningCount:warnings.length,contextCount:Array.isArray(data.contextFiles)?data.contextFiles.filter(Boolean).length:0});
   document.getElementById('fileList').innerHTML=patchResultsHtml+buildFilePreviewCards(patches);
   document.getElementById('successBox').style.display='none';
   document.getElementById('patchSection').classList.remove('hidden');
@@ -882,19 +922,13 @@ function resetUI(){
   document.getElementById('task').value='';
   document.getElementById('repoPath').value='';
   document.getElementById('decisionSection').classList.add('hidden');
-  document.getElementById('patchSection').classList.add('hidden');
   document.getElementById('diffSection').classList.add('hidden');
   hideError();
-  document.getElementById('warningsList').classList.add('hidden');
-  document.getElementById('successBox').style.display='none';
-  document.getElementById('contextFilesList').innerHTML='';
-  document.getElementById('contextFilesBox').classList.add('hidden');
   const cb=document.getElementById('complexityBadge');cb.textContent='';cb.className='complexity-badge hidden';
   clearRepoSelection();
-  currentBackupSnapshot=null;
-  setRestoreAvailability(false);
+  resetRunState();
   currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};
-  renderResultSummary();resetProgress();currentPatches=[];currentRepoPath='';renderHistory();updateApplyState();
+  renderResultSummary();resetProgress();currentRepoPath='';renderHistory();updateApplyState();
 }
 
 renderHistory();renderRecentRuns();

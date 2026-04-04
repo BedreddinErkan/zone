@@ -442,6 +442,7 @@ function buildRepoFile(path) {
         (0, vitest_1.expect)(result.ok).toBe(true);
         if (result.ok) {
             (0, vitest_1.expect)(result.complexity).toBe("e2e");
+            (0, vitest_1.expect)(result.decisionMode).toBe("safe_to_apply");
         }
         (0, vitest_1.expect)(validateTestOutputMock).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
             complexityHint: "e2e",
@@ -634,7 +635,18 @@ function buildRepoFile(path) {
         (0, vitest_1.expect)(result).toEqual(vitest_1.expect.objectContaining({
             ok: false,
             framework: "playwright_ts",
+            language: "typescript",
+            confidence: 35,
+            decisionMode: "blocked",
+            validationBlocked: true,
             reason: "Output validation blocked: Generated Playwright URL assertion uses an arbitrary regex pattern instead of a repository-evidenced route.",
+            preview: vitest_1.expect.stringContaining("Files to create:\n- tests/login.spec.ts"),
+            applyPatches: [
+                {
+                    filePath: "tests/login.spec.ts",
+                    fullContent: "test('login', async ({ page }) => { await expect(page).toHaveURL(/.*\\/#/); await expect(page.getByText('Invalid credentials')).toBeVisible(); });",
+                },
+            ],
             debug: vitest_1.expect.objectContaining({
                 selectedRole: "test_engineer",
                 detectedFramework: "playwright_ts",
