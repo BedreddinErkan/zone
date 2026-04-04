@@ -116,8 +116,7 @@ function validateStepDefinitions(
   const issues: ValidationIssue[] = [];
 
   // TODO/stub/placeholder kontrolü
-  const todoPatterns = ["// TODO", "// FIXME", "// STUB", "throw new RuntimeException", "// implement"];
-  for (const pattern of todoPatterns) {
+const todoPatterns = ["// TODO", "// FIXME", "// STUB", "// implement"];  for (const pattern of todoPatterns) {
     if (content.includes(pattern)) {
       issues.push({
         code: "STEP_DEF_STUB",

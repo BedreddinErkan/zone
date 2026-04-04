@@ -20,17 +20,9 @@ export interface DataAnalystContext {
 }
 
 const TASK_FILLER_WORDS = new Set([
-  "create",
-  "table",
-  "add",
-  "column",
-  "make",
-  "a",
-  "an",
-  "the",
-  "for",
-  "with",
-  "new",
+  "create", "table", "add", "column", "make",
+  "a", "an", "the", "for", "with", "new",
+  "and", "or", "to", "in", "of",
 ]);
 
 function buildIntentTokens(task: string): string[] {

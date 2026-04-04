@@ -7,6 +7,7 @@ import { createOpenAIClient, getModelName } from "../llm/openaiClient.js";
 import { checkConfidenceGate } from "../core/confidenceGate.js";
 import { validateTestOutput } from "./testOutputValidator.js";
 import { detectTestComplexity } from "./detectTestComplexity.js";
+import type { TestComplexity } from "./detectTestComplexity.js";
 import type { RepoFile } from "../types/project.js";
 
 export type TestEngineerFlowResult =
@@ -17,6 +18,7 @@ export type TestEngineerFlowResult =
       confidence: number;
       summary: string;
       warnings: string[];
+      complexity?: TestComplexity;
       applyPatches: Array<{ filePath: string; fullContent: string }>;
       preview: string;
     }
@@ -160,9 +162,11 @@ async function readFeatureExampleContents(
 export async function runTestEngineerFlow(input: {
   task: string;
   repoPath: string;
+  onProgress?: (stage: string) => void;
 }): Promise<TestEngineerFlowResult> {
   let allFiles: RepoFile[];
   try {
+    input.onProgress?.("Scanning repo...");
     allFiles = await scanRepo(input.repoPath);
     if (!Array.isArray(allFiles)) {
       return {
@@ -179,6 +183,7 @@ export async function runTestEngineerFlow(input: {
 
   let framework;
   try {
+    input.onProgress?.("Detecting framework...");
     framework = detectTestFramework(allFiles);
   } catch (err) {
     return {
@@ -229,6 +234,7 @@ export async function runTestEngineerFlow(input: {
     3
   );
 
+  input.onProgress?.("Building prompt...");
   const prompt = buildTestEngineerPrompt({
     task: input.task,
     context,
@@ -240,6 +246,7 @@ export async function runTestEngineerFlow(input: {
 
   let parsed: Record<string, unknown>;
   try {
+    input.onProgress?.("Generating patch...");
     const client = createOpenAIClient();
     const model = getModelName();
     const response = await client.responses.create({ model, input: prompt });
@@ -288,10 +295,18 @@ export async function runTestEngineerFlow(input: {
   const stepPatch = applyPatches.find(p => p.filePath.endsWith(".java"));
 
 const testFilePatch = applyPatches.find(
-  p => p.filePath.endsWith(".spec.ts") || p.filePath.endsWith(".spec.js") || p.filePath.endsWith(".test.ts")
+  p =>
+    p.filePath.endsWith(".spec.ts") ||
+    p.filePath.endsWith(".spec.js") ||
+    p.filePath.endsWith(".test.ts") ||
+    p.filePath.endsWith(".test.js") ||
+    p.filePath.endsWith(".cy.ts") ||
+    p.filePath.endsWith(".cy.js") ||
+    p.filePath.endsWith(".py")
 );
 const { complexity } = detectTestComplexity(input.task);
 
+input.onProgress?.("Validating output...");
 const validation = validateTestOutput({
   featureContent: featurePatch?.fullContent,
   stepDefinitionContent: stepPatch?.fullContent,
@@ -322,6 +337,7 @@ if (validation.decision !== "pass" || validation.issues.length > 0) {
   const validationWarnings = validation.issues
     .filter(i => i.severity === "warning")
     .map(i => `[${i.code}] ${i.message}`);
+input.onProgress?.("Ready");
 return {
     ok: true,
     framework: framework.framework,
@@ -329,6 +345,7 @@ return {
     confidence,
     summary,
     warnings: [...warnings, ...validationWarnings],
+    complexity,
     applyPatches,
     preview,
   };

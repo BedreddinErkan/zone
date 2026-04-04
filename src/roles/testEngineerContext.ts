@@ -225,17 +225,19 @@ function buildFileLocationRules(fw: DetectedTestFramework): string[] {
 const TASK_FILLER_WORDS = new Set([
   "a", "an", "the", "please", "write", "new", "cucumber",
   "scenario", "for", "test", "create", "generate", "feature",
-  "playwright", "saucedemo", "username", "selector",
+  "playwright", "pytest", "username", "selector",
   "is", "and", "use", "as", "credentials", "after", "verify",
   "url", "contains", "password", "submit", "with",
 ]);
-
 function buildIntentTokens(task: string): string[] {
   const sanitizedTask = task
-    .toLowerCase()
+   .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/https?:\/\/[^\s]+/g, " ")
+    .replace(/www\.[^\s]+/g, " ")
+    .replace(/[a-z0-9-]+\.(com|org|net|io|dev|app|co)[^\s]*/g, " ")
+    .replace(/[^a-z0-9\s]+/g, " ")
     .trim();
 
   const rawTokens = sanitizedTask.split(/\s+/).filter(Boolean);

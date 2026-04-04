@@ -135,6 +135,8 @@ Migration file: ${input.context.outputPaths.migrationFile}
 5. Reuse existing naming patterns and schema conventions when examples are provided.
 6. If the task implies a conflicting table name, add the risk to warnings instead of inventing a conflicting schema.
 7. Return raw JSON only - no markdown, no code fences, no explanations.
+- confidence: integer 0-100, your honest assessment of how well the generated SQL matches the task and follows repository conventions. 
+  Use 90+ if dialect is known and examples exist, 70-89 if dialect is known but no examples, 50-69 if dialect is unknown.
 
 === OUTPUT FORMAT ===
 Return JSON only:
@@ -145,17 +147,18 @@ Return JSON only:
   },
   "summary": "what this migration does",
   "warnings": [],
-  "confidence": 0
-}
+"confidence": 85}
 `.trim();
 }
 
 export async function runDataAnalystFlow(input: {
   task: string;
   repoPath: string;
+  onProgress?: (stage: string) => void;
 }): Promise<DataAnalystFlowResult> {
   let allFiles: RepoFile[];
   try {
+    input.onProgress?.("Scanning repo...");
     allFiles = await scanRepo(input.repoPath);
     if (!Array.isArray(allFiles)) {
       return {
@@ -172,6 +175,7 @@ export async function runDataAnalystFlow(input: {
 
   let schema;
   try {
+    input.onProgress?.("Detecting schema...");
     schema = detectDataSchema(allFiles);
   } catch (err) {
     return {
@@ -197,6 +201,7 @@ export async function runDataAnalystFlow(input: {
     3
   );
 
+  input.onProgress?.("Building prompt...");
   const prompt = buildDataAnalystPrompt({
     task: input.task,
     context,
@@ -205,6 +210,7 @@ export async function runDataAnalystFlow(input: {
 
   let parsed: Record<string, unknown>;
   try {
+    input.onProgress?.("Generating patch...");
     const client = createOpenAIClient();
     const model = getModelName();
     const response = await client.responses.create({ model, input: prompt });
@@ -232,6 +238,7 @@ export async function runDataAnalystFlow(input: {
     : [];
 
   const migrationPatch = applyPatches[0];
+  input.onProgress?.("Validating output...");
   const validation = validateTestOutput({
     framework: "unknown",
     sqlContent: migrationPatch?.fullContent,
@@ -260,6 +267,7 @@ export async function runDataAnalystFlow(input: {
       ? ["Schema dialect could not be confidently detected; review SQL carefully."]
       : [];
 
+  input.onProgress?.("Ready");
   return {
     ok: true,
     dialect: schema.dialect,
