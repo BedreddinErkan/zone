@@ -43,10 +43,17 @@ function extractTaskSignals(task: string): TaskSignal[] {
     /\bfont-size\b/,
     /\bcolor\b/,
     /\bbackground\b/,
+    /\bbackground.color\b/,
+    /\btext.color\b/,
     /\bcss\b/,
     /\bstyle\b/,
     /\bstyles\b/,
     /\bstyling\b/,
+    /\bbutton\b/,
+    /\bexecute\b/,
+    /\bbtn\b/,
+    /\bzone\s+header\b/,
+    /\bzone\s+ui\b/,
     /\bheader\b/,
     /\bfooter\b/,
     /\blayout\b/,
@@ -134,7 +141,7 @@ function getSignalScore(file: RepoFile, signals: TaskSignal[]): number {
         if (
           filePath.endsWith("index.html")
         ) {
-          score += 46;
+          score += 80;
         } else if (
           filePath.endsWith("styles.css") ||
           filePath.endsWith("global.css") ||
@@ -148,7 +155,7 @@ function getSignalScore(file: RepoFile, signals: TaskSignal[]): number {
           filePath.includes("/styles/") ||
           filePath.includes("/css/")
         ) {
-          score += 20;
+          score += 40;
         }
         break;
       case "route":
@@ -311,6 +318,26 @@ function scoreFile(file: RepoFile, task: string): number {
     filePath.endsWith("index.html")
   ) {
     score += 12;
+  }
+
+  if (
+    (normalizedTask.includes("index.html") || normalizedTask.includes("src/ui")) &&
+    filePath === "src/ui/index.html"
+  ) {
+    score += 100;
+  }
+
+  if (
+    [
+      "exec-btn",
+      "role-btn",
+      "decision-badge",
+      "patch-preview",
+      "apply-btn",
+    ].some((token) => normalizedTask.includes(token)) &&
+    filePath === "src/ui/index.html"
+  ) {
+    score += 60;
   }
 
   if (file.path.includes("/routes/")) {

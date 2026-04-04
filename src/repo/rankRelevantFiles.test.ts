@@ -115,4 +115,30 @@ describe("rankRelevantFiles", () => {
     expect(ranked[0].path).toBe("src/css/global.css");
     expect(ranked[1].path).toBe("src/styles/theme.scss");
   });
+
+  it("prioritizes src/ui/index.html for button background tasks", () => {
+    const ranked = rankRelevantFiles({
+      task: "change Execute button background color in the Zone UI",
+      files: [
+        buildRepoFile("src/components/LoginForm.tsx", "frontend"),
+        buildRepoFile("src/ui/index.html", "frontend"),
+        buildRepoFile("src/ui/styles.css", "frontend"),
+      ],
+    });
+
+    expect(ranked[0].path).toBe("src/ui/index.html");
+  });
+
+  it("prioritizes src/ui/index.html when task explicitly mentions index.html or known ui classes", () => {
+    const ranked = rankRelevantFiles({
+      task: "update src/ui index.html exec-btn color and decision-badge styling",
+      files: [
+        buildRepoFile("src/components/LoginForm.tsx", "frontend"),
+        buildRepoFile("src/ui/index.html", "frontend"),
+        buildRepoFile("src/ui/styles.css", "frontend"),
+      ],
+    });
+
+    expect(ranked[0].path).toBe("src/ui/index.html");
+  });
 });
