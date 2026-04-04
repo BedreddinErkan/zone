@@ -168,6 +168,8 @@ function buildOutputRules(fw: DetectedTestFramework): string[] {
     "Use ONLY methods that exist in the provided page object files",
     "Do NOT invent new methods — if a method does not exist, mention it as a risk",
     "Follow the exact naming conventions used in existing test files",
+    "Extend the closest matching existing test file when a relevant one already exists",
+    "Do NOT derive filenames from prompt boilerplate or instruction text",
     "Keep tests focused and minimal",
   ];
   switch (fw.framework) {
@@ -228,6 +230,15 @@ const TASK_FILLER_WORDS = new Set([
   "playwright", "pytest", "username", "selector",
   "is", "and", "use", "as", "credentials", "after", "verify",
   "url", "contains", "password", "submit", "with",
+  "you", "are", "code", "agent", "analyze", "repo", "repository",
+  "inside", "working", "called", "task", "goal", "expected",
+  "behavior", "implement", "update", "local", "flow", "function",
+]);
+
+const BANNED_TEST_FILE_BASENAMES = new Set([
+  "you_are_code_agent_analyze",
+  "task_generated",
+  "analyze_repo",
 ]);
 function buildIntentTokens(task: string): string[] {
   const sanitizedTask = task
@@ -270,6 +281,51 @@ function buildOutputNameParts(task: string): { slug: string; pascal: string } {
   return { slug, pascal };
 }
 
+function tokenizePath(pathValue: string): string[] {
+  return path.posix
+    .basename(pathValue)
+    .toLowerCase()
+    .replace(/\.(spec|test|cy)\.[a-z]+$/i, "")
+    .replace(/^test_/i, "")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+function scoreExistingTestFile(pathValue: string, tokens: string[]): number {
+  if (tokens.length === 0) return 0;
+  const fileTokens = tokenizePath(pathValue);
+  return tokens.reduce(
+    (score, token) =>
+      score + (fileTokens.includes(token) ? 2 : pathValue.includes(token) ? 1 : 0),
+    0
+  );
+}
+
+function findClosestExistingTestFile(
+  files: RepoFile[],
+  task: string
+): RepoFile | null {
+  const tokens = buildIntentTokens(task);
+  const ranked = [...files]
+    .map((file) => ({
+      file,
+      score: scoreExistingTestFile(file.path, tokens),
+    }))
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.file.path.localeCompare(b.file.path);
+    });
+
+  return ranked[0] && ranked[0].score > 0 ? ranked[0].file : null;
+}
+
+function isUnsafeGeneratedSlug(slug: string): boolean {
+  if (!slug) return true;
+  if (BANNED_TEST_FILE_BASENAMES.has(slug)) return true;
+  const tokens = slug.split("_").filter(Boolean);
+  return tokens.length === 0 || tokens.every((token) => TASK_FILLER_WORDS.has(token));
+}
+
 function findExistingDirectory(
   files: RepoFile[],
   matcher: (file: RepoFile) => boolean
@@ -292,14 +348,25 @@ function buildOutputPaths(
 ): TestEngineerContext["outputPaths"] {
   const { slug, pascal } = buildOutputNameParts(task);
   const base = fw.testDir ?? "tests";
+  const closestExistingTestFile = findClosestExistingTestFile(
+    detectTestFiles(files, fw),
+    task
+  );
+  const safeSlug = isUnsafeGeneratedSlug(slug) ? "app" : slug;
 
   switch (fw.framework) {
     case "playwright_ts":
-      return { testFile: `${base}/${slug}.spec.ts` };
+      return {
+        testFile: closestExistingTestFile?.path ?? `${base}/${safeSlug}.spec.ts`,
+      };
     case "playwright_js":
-      return { testFile: `${base}/${slug}.spec.js` };
+      return {
+        testFile: closestExistingTestFile?.path ?? `${base}/${safeSlug}.spec.js`,
+      };
     case "cypress":
-      return { testFile: `cypress/e2e/${slug}.cy.ts` };
+      return {
+        testFile: closestExistingTestFile?.path ?? `cypress/e2e/${safeSlug}.cy.ts`,
+      };
     case "cucumber_java": {
       const featureDir =
         findExistingDirectory(files, (file) => file.path.endsWith(".feature")) ??
@@ -310,8 +377,8 @@ function buildOutputPaths(
         "src/test/java/com/stepdefinitions";
 
       return {
-        testFile: `${featureDir}/${slug}.feature`,
-        featureFile: `${featureDir}/${slug}.feature`,
+        testFile: `${featureDir}/${safeSlug}.feature`,
+        featureFile: `${featureDir}/${safeSlug}.feature`,
         stepDefinition: `${stepDefinitionDir}/${pascal}Steps.java`,
       };
     }
@@ -320,9 +387,9 @@ function buildOutputPaths(
       return { testFile: `src/test/java/${pascal}Test.java` };
     case "pytest":
     case "selenium_python":
-      return { testFile: `tests/test_${slug}.py` };
+      return { testFile: closestExistingTestFile?.path ?? `tests/test_${safeSlug}.py` };
     default:
-      return { testFile: `tests/${slug}.test` };
+      return { testFile: closestExistingTestFile?.path ?? `tests/${safeSlug}.test` };
   }
 }
 

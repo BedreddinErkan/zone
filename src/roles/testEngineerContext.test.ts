@@ -126,6 +126,41 @@ describe("buildTestEngineerContext output naming", () => {
     );
   });
 
+  it("reuses the closest matching existing Playwright spec instead of inventing a prompt-based filename", () => {
+    const context = buildTestEngineerContext(
+      "You are a code agent. Analyze repo and add a negative login test case.",
+      buildFramework({
+        framework: "playwright_ts",
+        language: "typescript",
+        testFilePattern: "*.spec.ts",
+        testDir: "tests",
+      }),
+      [
+        buildRepoFile("tests/login.spec.ts"),
+        buildRepoFile("tests/checkout.spec.ts"),
+      ]
+    );
+
+    expect(context.outputPaths.testFile).toBe("tests/login.spec.ts");
+  });
+
+  it("falls back to a safe deterministic basename when prompt text is too generic", () => {
+    const context = buildTestEngineerContext(
+      "You are code agent analyze repository and implement the task",
+      buildFramework({
+        framework: "playwright_ts",
+        language: "typescript",
+        testFilePattern: "*.spec.ts",
+        testDir: "tests",
+      }),
+      []
+    );
+
+    expect(context.outputPaths.testFile).toBe("tests/app.spec.ts");
+    expect(context.outputPaths.testFile).not.toContain("you_are_code_agent_analyze");
+    expect(context.outputPaths.testFile).not.toContain("analyze_repo");
+  });
+
   it("prefers src/test/resources/features when both feature roots exist", () => {
     const context = buildTestEngineerContext(
       "Write a new Cucumber scenario for round trip flight search",

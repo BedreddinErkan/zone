@@ -323,6 +323,7 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
   ensureElement("rMassVal");
   ensureElement("fileList");
   ensureElement("patchSummary");
+  ensureElement("applyStatusBox");
   ensureElement("execBtn");
   ensureElement("spinner");
   ensureElement("execText");
@@ -568,7 +569,7 @@ describe("UI repo folder picker", () => {
     await context.selectRepoFolder();
     await context.executeDryRun();
 
-    expect(elements.get("errorBox").textContent).toContain("Repo path is required.");
+    expect(elements.get("errorBox").textContent).toContain("Select a local repo path for Execute and Dry Run.");
   });
 });
 
@@ -1029,6 +1030,46 @@ describe("UI patch preview", () => {
 });
 
 describe("UI folder-handle apply", () => {
+  it("keeps Apply disabled with an exact blocking reason until both a patch and folder handle exist", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+
+    expect(elements.get("applyBtn").disabled).toBe(true);
+    expect(elements.get("applyStatusBox").textContent).toContain("Run Execute first");
+
+    context.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          decision: { mode: "safe_to_apply" },
+          confidence: { score: 82 },
+          risk: { score: 0, breakdown: {} },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          patchPreview: "Summary: Fix login flow",
+          warnings: [],
+          applyPatches: [
+            {
+              filePath: "src/features/login.ts",
+              fullContent: "export const login = true;",
+            },
+          ],
+        }),
+      });
+    context.selectRole(roleButtons.developer);
+    elements.get("task").value = "fix login flow";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+
+    expect(elements.get("applyBtn").disabled).toBe(true);
+    expect(elements.get("applyStatusBox").textContent).toContain("Select a folder");
+  });
+
   it("writes files through the selected folder handle", async () => {
     const { context, elements, roleButtons } = buildUiHarness();
     const rootHandle = new MockDirectoryHandle("zone-repo");
@@ -1066,6 +1107,8 @@ describe("UI folder-handle apply", () => {
     await context.execute();
     await context.applyChanges();
 
+    expect(elements.get("applyBtn").disabled).toBe(false);
+    expect(elements.get("applyStatusBox").textContent).toContain("Ready to apply");
     const srcDir = await rootHandle.getDirectoryHandle("src");
     const featuresDir = await srcDir.getDirectoryHandle("features");
     const fileHandle = await featuresDir.getFileHandle("login.ts");
@@ -1074,7 +1117,8 @@ describe("UI folder-handle apply", () => {
     expect(elements.get("successBox").innerHTML).toContain("file written");
     expect(elements.get("successBox").innerHTML).toContain(">1</strong>");
     expect(elements.get("successBox").innerHTML).toContain("src/features/login.ts");
-    expect(elements.get("successBox").innerHTML).toContain("Folder: zone-repo");
+    expect(elements.get("successBox").innerHTML).toContain("Target folder: zone-repo");
+    expect(elements.get("successBox").innerHTML).toContain("Restore is ready for this session.");
     expect(elements.get("restoreBtn").classList.contains("hidden")).toBe(false);
   });
 
@@ -1107,6 +1151,22 @@ describe("UI folder-handle apply", () => {
               filePath: "db/migration/V1__init.sql",
               fullContent: "create table users(id int);",
             },
+            {
+              filePath: "tests/login.spec.ts",
+              fullContent: "test('login', async () => {});",
+            },
+            {
+              filePath: "src/ui/index.html",
+              fullContent: "<div>ok</div>",
+            },
+            {
+              filePath: "README.md",
+              fullContent: "# Zone",
+            },
+            {
+              filePath: "src/api/server.ts",
+              fullContent: "export const server = true;",
+            },
           ],
         }),
       });
@@ -1115,16 +1175,20 @@ describe("UI folder-handle apply", () => {
     context.selectRole(roleButtons.developer);
     elements.get("task").value = "update repo files";
     elements.get("repoPath").value = "C:/repo";
-
     await context.execute();
     await context.applyChanges();
 
     expect(elements.get("successBox").innerHTML).toContain("files written");
-    expect(elements.get("successBox").innerHTML).toContain(">2</strong>");
+    expect(elements.get("successBox").innerHTML).toContain(">6</strong>");
     expect(elements.get("successBox").innerHTML).toContain("created");
     expect(elements.get("successBox").innerHTML).toContain("modified");
     expect(elements.get("successBox").innerHTML).toContain("src/features/login.ts");
     expect(elements.get("successBox").innerHTML).toContain("db/migration/V1__init.sql");
+    expect(elements.get("successBox").innerHTML).toContain("tests/login.spec.ts");
+    expect(elements.get("successBox").innerHTML).toContain("src/ui/index.html");
+    expect(elements.get("successBox").innerHTML).toContain("README.md");
+    expect(elements.get("successBox").innerHTML).toContain("+1 more file");
+    expect(elements.get("successBox").innerHTML).not.toContain("src/api/server.ts");
   });
 
   it("shows an error when no folder handle is available during apply", async () => {
@@ -1161,7 +1225,7 @@ describe("UI folder-handle apply", () => {
     await context.execute();
     await context.applyChanges();
 
-    expect(elements.get("errorBox").textContent).toContain("Select a folder before applying changes.");
+    expect(elements.get("errorBox").textContent).toContain("Select a folder to enable local Apply.");
   });
 
   it("handles permission errors gracefully and reset clears the handle", async () => {
@@ -1231,13 +1295,54 @@ describe("UI folder-handle apply", () => {
       });
     await context.execute();
     await context.applyChanges();
-    expect(elements.get("errorBox").textContent).toContain("Select a folder before applying changes.");
+    expect(elements.get("errorBox").textContent).toContain("Select a folder to enable local Apply.");
   });
 
   it("keeps apply summary safe when no files are written", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    const rootHandle = new MockDirectoryHandle("zone-repo");
+    context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
+    context.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          decision: { mode: "safe_to_apply" },
+          confidence: { score: 82 },
+          risk: { score: 0, breakdown: {} },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          patchPreview: "Summary: Fix login flow",
+          warnings: [],
+          applyPatches: [
+            {
+              filePath: "/",
+              fullContent: "export const login = true;",
+            },
+          ],
+        }),
+      });
+    await context.selectRepoFolder();
+    context.selectRole(roleButtons.developer);
+    elements.get("task").value = "fix login flow";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+    await context.applyChanges();
+
+    expect(elements.get("successBox").innerHTML).toContain("No files were written");
+    expect(elements.get("successBox").innerHTML).toContain("Target folder: zone-repo");
+    expect(elements.get("restoreBtn").classList.contains("hidden")).toBe(true);
+  });
+
+  it("keeps apply summary safe when no patches exist", async () => {
     const { context, elements } = buildUiHarness();
     await context.applyChanges();
-    expect(elements.get("errorBox").textContent).toContain("No patches to apply.");
+    expect(elements.get("errorBox").textContent).toContain("Run Execute first to generate a patch result before applying.");
     expect(elements.get("successBox").innerHTML).toBe("");
   });
 

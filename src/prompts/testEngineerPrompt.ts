@@ -1,5 +1,6 @@
 import type { TestEngineerContext } from "../roles/testEngineerContext.js";
 import { detectTestComplexity } from "../roles/detectTestComplexity.js";
+import { buildFinalPrompt } from "./buildFinalPrompt.js";
 
 export function buildTestEngineerPrompt(input: {
   task: string;
@@ -88,15 +89,12 @@ Step definitions: ${outputPaths.stepDefinition}`
   "confidence": 0
 }`;
 
-  return `
+  const contextPayload = `
 ${context.promptRole}
 
 Your job is to write a complete, runnable test for the given task.
 You must follow the exact framework, language, and patterns detected in this repository.
 You must NEVER invent new methods - always use what already exists in the page objects.
-
-=== TASK ===
-${task}
 
 === DETECTED FRAMEWORK ===
 ${context.frameworkSummary}
@@ -160,4 +158,11 @@ ${outputSection}
 Return JSON only:
 ${outputFormat}
 `.trim();
+
+  return buildFinalPrompt({
+    role: "test_engineer",
+    task,
+    detectedFramework: framework.framework,
+    context: contextPayload,
+  });
 }

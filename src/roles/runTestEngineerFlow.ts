@@ -41,7 +41,8 @@ function extractJson(rawText: string): string {
 
 function buildPreview(
   result: Record<string, unknown>,
-  framework: string
+  framework: string,
+  outputPaths: { testFile: string; featureFile?: string; stepDefinition?: string }
 ): string {
   const lines: string[] = ["=== TEST ENGINEER PREVIEW ==="];
   lines.push(`Framework: ${framework}`);
@@ -54,37 +55,35 @@ function buildPreview(
   }
   lines.push("");
   lines.push("Files to create:");
-  if (result["testFile"]) {
-    const file = result["testFile"] as { path: string };
-    lines.push(`- ${file.path}`);
+  if (outputPaths.testFile) {
+    lines.push(`- ${outputPaths.testFile}`);
   }
-  if (result["featureFile"]) {
-    const file = result["featureFile"] as { path: string };
-    lines.push(`- ${file.path} [feature]`);
+  if (outputPaths.featureFile) {
+    lines.push(`- ${outputPaths.featureFile} [feature]`);
   }
-  if (result["stepDefinitionFile"]) {
-    const file = result["stepDefinitionFile"] as { path: string };
-    lines.push(`- ${file.path} [step definitions]`);
+  if (outputPaths.stepDefinition) {
+    lines.push(`- ${outputPaths.stepDefinition} [step definitions]`);
   }
   return lines.join("\n");
 }
 
 function buildApplyPatches(
-  result: Record<string, unknown>
+  result: Record<string, unknown>,
+  outputPaths: { testFile: string; featureFile?: string; stepDefinition?: string }
 ): Array<{ filePath: string; fullContent: string }> {
   const patches: Array<{ filePath: string; fullContent: string }> = [];
 
   if (result["testFile"]) {
     const file = result["testFile"] as { path: string; content: string };
-    if (file.path && file.content) {
-      patches.push({ filePath: file.path, fullContent: file.content });
+    if (outputPaths.testFile && file.content) {
+      patches.push({ filePath: outputPaths.testFile, fullContent: file.content });
     }
   }
 
   if (result["featureFile"]) {
     const file = result["featureFile"] as { path: string; content: string };
-    if (file.path && file.content) {
-      patches.push({ filePath: file.path, fullContent: file.content });
+    if (outputPaths.featureFile && file.content) {
+      patches.push({ filePath: outputPaths.featureFile, fullContent: file.content });
     }
   }
 
@@ -93,8 +92,8 @@ function buildApplyPatches(
       path: string;
       content: string;
     };
-    if (file.path && file.content) {
-      patches.push({ filePath: file.path, fullContent: file.content });
+    if (outputPaths.stepDefinition && file.content) {
+      patches.push({ filePath: outputPaths.stepDefinition, fullContent: file.content });
     }
   }
 
@@ -261,8 +260,8 @@ export async function runTestEngineerFlow(input: {
     };
   }
 
-  const applyPatches = buildApplyPatches(parsed);
-  const preview = buildPreview(parsed, framework.framework);
+  const applyPatches = buildApplyPatches(parsed, context.outputPaths);
+  const preview = buildPreview(parsed, framework.framework, context.outputPaths);
   const confidence =
     typeof parsed["confidence"] === "number" ? parsed["confidence"] : 50;
   const summary =

@@ -266,6 +266,7 @@ input:focus,textarea:focus{border-color:#007acc}
   </div>
   <div id="fileList"></div>
   <div id="successBox" class="success-box"></div>
+  <div id="applyStatusBox" class="repo-selection-meta"></div>
   <button class="apply-btn" id="applyBtn" onclick="applyChanges()">
     <div class="spinner" id="applySpinner"></div>
     <span id="applyText">✓  Apply Changes</span>
@@ -352,20 +353,49 @@ function setDryRunLoading(l){
   btn.disabled=l;sp.style.display=l?'block':'none';t.textContent=l?'Running...':'⊘  Dry Run';
 }
 
+function getResolvedRepoPath(){
+  const manualRepoPath=document.getElementById('repoPath').value.trim();
+  return manualRepoPath||currentRepoPath||'';
+}
+
+function getApplyBlockingReason(){
+  if(!currentPatches.length)return 'Run Execute first to generate a patch result before applying.';
+  if(!currentRepoHandle)return 'Select a folder to enable local Apply.';
+  return '';
+}
+
+function updateApplyState(){
+  const btn=document.getElementById('applyBtn');
+  const status=document.getElementById('applyStatusBox');
+  const reason=getApplyBlockingReason();
+  btn.disabled=Boolean(reason);
+  btn.title=reason||'Apply generated changes to the selected folder';
+  status.textContent=reason||'Ready to apply to the selected folder.';
+}
+
 function renderRepoSelection(){
   const box=document.getElementById('repoSelectionBox');
   const label=document.getElementById('repoSelectionLabel');
   const meta=document.getElementById('repoSelectionMeta');
-  const repoPath=document.getElementById('repoPath').value.trim();
+  const manualRepoPath=document.getElementById('repoPath').value.trim();
+  const resolvedRepoPath=getResolvedRepoPath();
   if(!currentRepoSelectionLabel){
     label.textContent='';
     meta.textContent='';
     box.classList.add('hidden');
+    updateApplyState();
     return;
   }
   label.textContent=currentRepoSelectionLabel;
-  meta.textContent=repoPath?`Run path: ${repoPath}`:'Manual repo path is still required for Execute and Dry Run.';
+  if(manualRepoPath){
+    meta.textContent=`Run path: ${manualRepoPath}`;
+  }else if(resolvedRepoPath){
+    meta.textContent=`Run path: ${resolvedRepoPath} (reused from the current session)`;
+  }else{
+    meta.textContent='Selected folder is ready for Apply. Execute and Dry Run still need a local repo path because browser folder access does not expose the absolute filesystem path.';
+  }
   box.classList.remove('hidden');
+  updateApplyState();
 }
 
 function syncRepoSelectionDisplay(){renderRepoSelection();}
@@ -418,9 +448,13 @@ function handleFolderFallbackChange(input){
 
 function validateTaskAndRepo(){
   const task=document.getElementById('task').value.trim();
-  const repoPath=document.getElementById('repoPath').value.trim();
-  if(!task||!repoPath){
-    showError(!repoPath&&currentRepoSelectionLabel?'Repo path is required. Folder selection is shown above, but Zone still needs the local repo path.':'Task and repo path are required.');
+  const repoPath=getResolvedRepoPath();
+  if(!task){
+    showError('Task is required.');
+    return null;
+  }
+  if(!repoPath){
+    showError(currentRepoSelectionLabel?'Select a local repo path for Execute and Dry Run. The selected folder will still be used for Apply once a patch is ready.':'Task and repo path are required.');
     return null;
   }
   return {task,repoPath};
@@ -521,7 +555,7 @@ function saveToHistory(path){let h=getHistory().filter(p=>p!==path);h.unshift(pa
 function renderHistory(){const h=getHistory();const box=document.getElementById('historyBox');const sel=document.getElementById('historySelect');if(h.length===0){box.classList.add('hidden');return;}box.classList.remove('hidden');sel.innerHTML='<option value="">— select —</option>'+h.map(p=>`<option value="${p}">${p}</option>`).join('');}
 function selectHistory(){const v=document.getElementById('historySelect').value;if(v){document.getElementById('repoPath').value=v;renderRepoSelection();}}
 function openInEditor(editor){
-  const repoPath=document.getElementById('repoPath').value.trim();
+  const repoPath=getResolvedRepoPath();
   if(!repoPath){showError('Enter a repo path first.');return;}
   if(editor==='vscode'){window.location.href=`vscode://file/${repoPath}`;}
   else if(editor==='idea'){window.location.href=`idea://open?file=${repoPath}`;}
@@ -560,7 +594,7 @@ async function execute(){
       showDecision({decision:{mode:result.confidence>=70?'safe_to_apply':'preview_only'},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity});
       showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings});
       addRecentRun({task,role:currentRole,repoPath,status:'success',timestamp:Date.now()});
-      currentPatches=result.applyPatches||[];finishProgress();
+      currentPatches=result.applyPatches||[];updateApplyState();finishProgress();
     }else if(currentRole==='data_analyst'){
       const r=await fetch('/api/data-analyst',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});
       if(!r.ok)throw new Error('Data analyst flow failed: '+r.status);
@@ -569,7 +603,7 @@ async function execute(){
       showDecision({decision:{mode:result.confidence>=70?'safe_to_apply':'preview_only'},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat])});
       showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings});
       addRecentRun({task,role:currentRole,repoPath,status:'success',timestamp:Date.now()});
-      currentPatches=result.applyPatches||[];finishProgress();
+      currentPatches=result.applyPatches||[];updateApplyState();finishProgress();
     }else{
       setProgress('Scanning repo...');
       const r1=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});
@@ -581,7 +615,7 @@ async function execute(){
       const patch=await r2.json();
       showPatch(patch);
       addRecentRun({task,role:currentRole,repoPath,status:patch.ok===false?'error':'success',timestamp:Date.now()});
-      currentPatches=patch.applyPatches||[];finishProgress();
+      currentPatches=patch.applyPatches||[];updateApplyState();finishProgress();
     }
   }catch(e){resetProgress();addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});showError(e.message);}
   finally{setLoading(false);}
@@ -644,6 +678,7 @@ function showPatch(data){
   document.getElementById('fileList').innerHTML=patchResultsHtml+buildFilePreviewCards(patches);
   document.getElementById('successBox').style.display='none';
   document.getElementById('patchSection').classList.remove('hidden');
+  updateApplyState();
 }
 
 async function ensureRepoWritePermission(handle){
@@ -765,9 +800,35 @@ function buildApplySuccessSummary(input){
   return `${folderMeta}${countLine}${fileList}${failedLine}`;
 }
 
+function buildApplyVerificationSummary(input){
+  const applied=Array.isArray(input?.applied)?input.applied:[];
+  const failed=Array.isArray(input?.failed)?input.failed:[];
+  const appliedSet=new Set(applied);
+  const appliedPatches=(currentPatches||[]).filter(p=>appliedSet.has(p.filePath));
+  const createdCount=appliedPatches.filter(p=>formatFileOperation(p.filePath)==='create').length;
+  const modifiedCount=Math.max(0,appliedPatches.length-createdCount);
+  const folderName=currentRepoSelectionLabel.replace(/^Folder:\s*/,'');
+  const folderMeta=currentRepoSelectionLabel?`<div style="margin-bottom:8px;color:#9cdcfe">Target folder: ${escapeHtml(folderName)}</div>`:'';
+  const countLine=`<div style="margin-bottom:8px"><strong>${applied.length}</strong> file${applied.length!==1?'s':''} written · ${createdCount} created · ${modifiedCount} modified</div>`;
+  const restoreMeta=applied.length>0?'<div style="margin-bottom:8px;color:#4ec9b0">Restore is ready for this session.</div>':'';
+  const visibleFiles=applied.slice(0,5);
+  const extraCount=Math.max(0,applied.length-visibleFiles.length);
+  const fileList=visibleFiles.length>0?`<div style="margin-bottom:8px">${visibleFiles.map(f=>`&nbsp;&nbsp;• ${escapeHtml(f)}`).join('<br>')}${extraCount>0?`<br>&nbsp;&nbsp;• +${extraCount} more file${extraCount!==1?'s':''}`:''}</div>`:'';
+  const failedLine=failed.length>0?`<br><span style="color:#ce9178">⚠ Failed: ${failed.map(f=>escapeHtml(f.filePath||f)).join(', ')}</span>`:'';
+  return `<div style="margin-bottom:8px">Applied successfully</div>${folderMeta}${countLine}${restoreMeta}${fileList}${failedLine}`;
+}
+
+function buildApplyNeutralSummary(input){
+  const failed=Array.isArray(input?.failed)?input.failed:[];
+  const folderName=currentRepoSelectionLabel.replace(/^Folder:\s*/,'');
+  const folderMeta=currentRepoSelectionLabel?`<div style="margin-bottom:8px;color:#9cdcfe">Target folder: ${escapeHtml(folderName)}</div>`:'';
+  const failedLine=failed.length>0?`<div style="margin-top:8px;color:#ce9178">Failed writes: ${failed.map(f=>escapeHtml(f.filePath||f)).join(', ')}</div>`:'';
+  return `${folderMeta}<div>No files were written</div>${failedLine}`;
+}
+
 async function applyChanges(){
-  if(!currentPatches.length){showError('No patches to apply.');return;}
-  if(!currentRepoHandle){showError('Select a folder before applying changes.');return;}
+  const blockingReason=getApplyBlockingReason();
+  if(blockingReason){showError(blockingReason);updateApplyState();return;}
   const btn=document.getElementById('applyBtn');const sp=document.getElementById('applySpinner');const t=document.getElementById('applyText');
   const sb=document.getElementById('successBox');
   btn.disabled=true;sp.style.display='block';t.textContent=`Writing ${currentPatches.length} file${currentPatches.length!==1?'s':''}...`;sb.style.display='none';
@@ -776,19 +837,22 @@ async function applyChanges(){
     if(!allowed){throw new Error('Write permission denied for the selected folder.');}
     const backupSnapshot=await createBackupSnapshot(currentRepoHandle,currentPatches);
     const res=await writePatchFilesWithHandle(currentRepoHandle,currentPatches);
-    if(res.applied.length>0){
+    if(res.applied.length===0){
+      currentBackupSnapshot=null;
+      setRestoreAvailability(false);
+      sb.innerHTML=buildApplyNeutralSummary(res);
+      sb.style.display='block';
+    }else if(res.applied.length>0){
       currentBackupSnapshot=backupSnapshot;
       setRestoreAvailability(true);
-      sb.innerHTML='✓ Applied successfully<br>'+buildApplySuccessSummary(res);
+      sb.innerHTML=buildApplyVerificationSummary(res);
       sb.style.display='block';
-    }else{
-      throw new Error('No files were written to the selected folder.');
     }
     if(res.failed.length>0){
       showError('Some files could not be written: '+res.failed.map(f=>f.filePath).join(', '));
     }
   }catch(e){showError(e.message);}
-  finally{btn.disabled=false;sp.style.display='none';t.textContent='✓  Apply Changes';}
+  finally{sp.style.display='none';t.textContent='✓  Apply Changes';updateApplyState();}
 }
 
 async function restorePreviousState(){
@@ -830,12 +894,13 @@ function resetUI(){
   currentBackupSnapshot=null;
   setRestoreAvailability(false);
   currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};
-  renderResultSummary();resetProgress();currentPatches=[];currentRepoPath='';renderHistory();
+  renderResultSummary();resetProgress();currentPatches=[];currentRepoPath='';renderHistory();updateApplyState();
 }
 
 renderHistory();renderRecentRuns();
 currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};
 renderResultSummary();
+updateApplyState();
 </script>
 </body>
 </html>

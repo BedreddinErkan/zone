@@ -1,3 +1,5 @@
+import { buildFinalPrompt } from "./buildFinalPrompt.js";
+
 interface DeveloperPromptFile {
   path: string;
   content?: string;
@@ -182,13 +184,10 @@ MICRO-EDIT MODE
 `.trim()
     : "";
 
-  return `
+  const contextPayload = `
 You are Zone's Developer role working inside a real existing repository.
 
 Your job is to produce the smallest safe, grounded update to the target file while preserving the repository's real structure and conventions.
-
-TASK
-${params.task}
 
 TASK INTENT
 ${params.taskIntent || "general"}
@@ -251,4 +250,10 @@ Return JSON only:
   "warnings": ["string"]
 }
 `.trim();
+
+  return buildFinalPrompt({
+    role: "developer",
+    task: params.task,
+    context: contextPayload,
+  });
 }
