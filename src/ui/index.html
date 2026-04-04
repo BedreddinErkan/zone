@@ -577,11 +577,11 @@ async function execute(){
       setProgress('Scanning repo...');
       const r1=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});
       if(!r1.ok)throw new Error('Analyze failed: '+r1.status);
-      showDecision(await r1.json());
       setProgress('Generating patch...');
       const r2=await fetch('/api/patch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});
       if(!r2.ok)throw new Error('Patch failed: '+r2.status);
       const patch=await r2.json();
+      showDecision(await r1.json());
       showPatch(patch);
       addRecentRun({task,role:currentRole,repoPath,status:patch.ok===false?'error':'success',timestamp:Date.now()});
       finishProgress();
