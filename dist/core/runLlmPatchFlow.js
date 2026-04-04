@@ -4,6 +4,7 @@ exports.normalizeLineForMatch = normalizeLineForMatch;
 exports.scoreLineSimilarity = scoreLineSimilarity;
 exports.scoreOrderedSimilarity = scoreOrderedSimilarity;
 exports.scoreCandidateMatch = scoreCandidateMatch;
+exports.smartContextWindow = smartContextWindow;
 exports.fuzzyFindAndReplace = fuzzyFindAndReplace;
 exports.runLlmPatchFlow = runLlmPatchFlow;
 const scanRepo_js_1 = require("../repo/scanRepo.js");
@@ -245,6 +246,106 @@ function buildMicroEditSnippet(filePath, content, task) {
         "// === END SNIPPET ===",
     ].join("\n");
 }
+function isAnchorLine(line) {
+    const trimmed = line.trim();
+    if (!trimmed)
+        return false;
+    return /^(import\s|const\s+\w+\s*=\s*require\(|.*\sfrom\s+["']|export\s|class\s|interface\s|enum\s|struct\s|async function\s|function\s|def\s|fun\s|\s*(public|private|protected)\s+[\w<>\[\],\s]+\()/.test(trimmed);
+}
+function countTaskOverlap(taskWords, line) {
+    const normalizedLine = line.toLowerCase();
+    return taskWords.filter((word) => normalizedLine.includes(word)).length;
+}
+function smartContextWindow(input) {
+    const maxChars = input.maxChars ?? 6000;
+    const lines = input.fileContent.split("\n");
+    const totalLines = lines.length;
+    if (input.fileContent.length <= maxChars) {
+        return {
+            snippet: input.fileContent,
+            startLine: 1,
+            endLine: totalLines,
+            totalLines,
+            isTruncated: false,
+        };
+    }
+    const taskWords = [...new Set(input.task
+            .toLowerCase()
+            .split(/[^a-z0-9_#.-]+/)
+            .map((word) => word.trim())
+            .filter((word) => word.length >= 3))];
+    const anchorIndexes = lines
+        .map((line, index) => ({ line, index }))
+        .filter(({ line }) => isAnchorLine(line))
+        .map(({ index }) => index);
+    const indexes = anchorIndexes.length > 0 ? anchorIndexes : [0];
+    const anchors = indexes.map((lineIndex) => ({
+        lineIndex,
+        score: countTaskOverlap(taskWords, lines[lineIndex]),
+    }));
+    let centerAnchorIndex = 0;
+    for (let i = 1; i < anchors.length; i += 1) {
+        if (anchors[i].score > anchors[centerAnchorIndex].score ||
+            (anchors[i].score === anchors[centerAnchorIndex].score &&
+                anchors[i].lineIndex < anchors[centerAnchorIndex].lineIndex)) {
+            centerAnchorIndex = i;
+        }
+    }
+    const blockRanges = indexes.map((lineIndex, index) => ({
+        start: lineIndex,
+        end: (indexes[index + 1] ?? totalLines) - 1,
+    }));
+    let left = centerAnchorIndex;
+    let right = centerAnchorIndex;
+    const buildSnippet = (startBlock, endBlock) => {
+        const firstTenEnd = Math.min(10, totalLines);
+        const mainStart = blockRanges[startBlock].start;
+        const mainEnd = blockRanges[endBlock].end + 1;
+        const selectedLines = [
+            ...lines.slice(0, firstTenEnd),
+            ...(mainStart < firstTenEnd ? lines.slice(firstTenEnd, mainEnd) : lines.slice(mainStart, mainEnd)),
+        ];
+        const startLine = 1;
+        const endLine = mainStart < firstTenEnd ? mainEnd : Math.max(firstTenEnd, mainEnd);
+        return {
+            snippet: selectedLines.join("\n"),
+            startLine,
+            endLine,
+        };
+    };
+    let window = buildSnippet(left, right);
+    while (window.snippet.length < maxChars) {
+        const canExpandLeft = left > 0;
+        const canExpandRight = right < blockRanges.length - 1;
+        if (!canExpandLeft && !canExpandRight) {
+            break;
+        }
+        const nextLeftSize = canExpandLeft
+            ? buildSnippet(left - 1, right).snippet.length
+            : Number.POSITIVE_INFINITY;
+        const nextRightSize = canExpandRight
+            ? buildSnippet(left, right + 1).snippet.length
+            : Number.POSITIVE_INFINITY;
+        if (nextLeftSize <= maxChars && nextLeftSize <= nextRightSize) {
+            left -= 1;
+            window = buildSnippet(left, right);
+            continue;
+        }
+        if (nextRightSize <= maxChars) {
+            right += 1;
+            window = buildSnippet(left, right);
+            continue;
+        }
+        break;
+    }
+    return {
+        snippet: window.snippet,
+        startLine: window.startLine,
+        endLine: window.endLine,
+        totalLines,
+        isTruncated: true,
+    };
+}
 function fuzzyFindAndReplace(content, find, replace) {
     if (content.includes(find)) {
         return {
@@ -446,6 +547,58 @@ function detectSuspiciousUiOverwrite(input) {
     }
     return null;
 }
+function parsePatchFailureWarning(warning) {
+    if (warning.startsWith("[PATCH_FIND_NOT_FOUND] ")) {
+        try {
+            const payload = JSON.parse(warning.slice("[PATCH_FIND_NOT_FOUND] ".length));
+            return {
+                reason: payload.reason ?? "patch_find_not_found",
+                score: payload.score,
+                bestMatch: payload.bestMatch,
+            };
+        }
+        catch {
+            return { reason: "patch_find_not_found" };
+        }
+    }
+    if (warning.startsWith("[DEVELOPER_PATCH_FORMAT]")) {
+        return { reason: "invalid_patch_format" };
+    }
+    return { reason: "warning" };
+}
+function buildPatchConflictWarning(input) {
+    return `[PATCH_CONFLICT] ${JSON.stringify({
+        filePath: input.filePath,
+        status: "failed",
+        reason: input.reason,
+        ...(typeof input.score === "number" ? { score: input.score } : {}),
+        ...(typeof input.bestMatch === "string" ? { bestMatch: input.bestMatch } : {}),
+    })}`;
+}
+function renderPatchResultLine(result, warnings) {
+    if (result.status === "applied") {
+        return `✓ ${result.filePath}        applied`;
+    }
+    if (result.status === "skipped") {
+        return `~ ${result.filePath}        skipped (${result.reason ?? "skipped"})`;
+    }
+    const conflictWarning = warnings.find((warning) => warning.startsWith("[PATCH_CONFLICT] ") &&
+        warning.includes(`"filePath":"${result.filePath}"`));
+    let details = result.reason ?? "failed";
+    if (conflictWarning) {
+        try {
+            const payload = JSON.parse(conflictWarning.slice("[PATCH_CONFLICT] ".length));
+            details = payload.reason ?? details;
+            if (typeof payload.score === "number") {
+                details += `, score: ${payload.score}`;
+            }
+        }
+        catch {
+            // keep best-effort summary rendering stable
+        }
+    }
+    return `✗ ${result.filePath}        failed (${details})`;
+}
 async function runLlmPatchFlow(input) {
     const taskIntent = typeof input.task === "string" ? (0, taskIntentParser_js_1.parseTaskIntent)(input.task) : UNKNOWN_INTENT;
     // 1. Scan repo
@@ -535,12 +688,18 @@ async function runLlmPatchFlow(input) {
     let applyPatches = [];
     const originalContents = {};
     const combinedWarnings = [...patchPlan.warnings];
+    const patchResults = [];
     try {
         const applyTargets = patchPlan.patches.filter((p) => p.operation === "modify" || p.operation === "create");
         const applyResults = [];
         for (const patch of applyTargets) {
             if (patch.path.startsWith("src/ui/") || patch.path === "src/ui/index.html") {
                 combinedWarnings.push("[PROTECTED_FILE] src/ui/ files cannot be modified by Zone developer mode");
+                patchResults.push({
+                    filePath: patch.path,
+                    status: "skipped",
+                    reason: "protected file",
+                });
                 continue;
             }
             const repoFile = allFiles.find((f) => f.path === patch.path);
@@ -568,6 +727,13 @@ async function runLlmPatchFlow(input) {
                 .join("\n\n");
             const microEditMode = isUiFilePath(patch.path) && isMicroEditUiTask(input.task);
             const fullPatchMode = fileContent.length > 8000 ? "find_replace_patch" : "full_content";
+            const contextWindow = fileContent.length > 8000
+                ? smartContextWindow({
+                    fileContent,
+                    task: input.task,
+                })
+                : null;
+            const llmFileContent = contextWindow?.snippet ?? fileContent;
             const targetedRelevantFiles = microEditMode
                 ? [
                     {
@@ -588,13 +754,19 @@ async function runLlmPatchFlow(input) {
             const fullPatch = await (0, planFullPatch_js_1.planFullPatchWithLlm)({
                 task: input.task,
                 filePath: patch.path,
-                fileContent,
+                fileContent: llmFileContent,
                 repoSummary: projectSummary,
                 repoPath: input.repoPath,
                 taskIntent: taskIntent.normalizedTask || taskIntent.action,
                 relevantFiles: targetedRelevantFiles,
                 existingTargetFiles: allFiles.map((file) => file.path),
-                relatedContext: [patch.summary, pageObjectContext]
+                relatedContext: [
+                    contextWindow
+                        ? `// CONTEXT WINDOW: lines ${contextWindow.startLine}-${contextWindow.endLine} of ${contextWindow.totalLines} total`
+                        : "",
+                    patch.summary,
+                    pageObjectContext,
+                ]
                     .filter(Boolean)
                     .join("\n\n"),
             });
@@ -604,6 +776,18 @@ async function runLlmPatchFlow(input) {
                     const appliedPatch = applyDeveloperPatchText(fileContent, fullPatch.patchText);
                     if (!appliedPatch.ok) {
                         combinedWarnings.push(appliedPatch.warning);
+                        const failure = parsePatchFailureWarning(appliedPatch.warning);
+                        combinedWarnings.push(buildPatchConflictWarning({
+                            filePath: patch.path,
+                            reason: failure.reason,
+                            score: failure.score,
+                            bestMatch: failure.bestMatch,
+                        }));
+                        patchResults.push({
+                            filePath: patch.path,
+                            status: "failed",
+                            reason: failure.reason,
+                        });
                         return null;
                     }
                     return appliedPatch.fullContent;
@@ -620,11 +804,24 @@ async function runLlmPatchFlow(input) {
             });
             if (suspiciousUiOverwrite) {
                 combinedWarnings.push(suspiciousUiOverwrite);
+                combinedWarnings.push(buildPatchConflictWarning({
+                    filePath: patch.path,
+                    reason: "ui_overwrite_guard",
+                }));
+                patchResults.push({
+                    filePath: patch.path,
+                    status: "failed",
+                    reason: "ui_overwrite_guard",
+                });
                 continue;
             }
             applyResults.push({
                 filePath: fullPatch.filePath,
                 fullContent: nextContent,
+            });
+            patchResults.push({
+                filePath: fullPatch.filePath,
+                status: "applied",
             });
         }
         applyPatches = applyResults;
@@ -633,6 +830,9 @@ async function runLlmPatchFlow(input) {
         // step 6b is best-effort — never block the preview result
         applyPatches = [];
     }
+    if (input.atomicPatch && patchResults.some((result) => result.status === "failed")) {
+        return { ok: false, reason: "atomic_patch_failed" };
+    }
     // 7. Build patchPreview string
     const patchPreview = [
         "=== LLM PATCH PREVIEW ===",
@@ -640,6 +840,13 @@ async function runLlmPatchFlow(input) {
         "",
         "Patches:",
         ...patchPlan.patches.map((p) => `- ${p.path} [${p.operation}]\n  ${p.summary}\n  Hint: ${p.targetHint}`),
+        ...(patchResults.length > 0
+            ? [
+                "",
+                "=== PATCH RESULTS ===",
+                ...patchResults.map((result) => renderPatchResultLine(result, combinedWarnings)),
+            ]
+            : []),
         ...(combinedWarnings.length > 0
             ? ["", "Warnings:", ...combinedWarnings.map((w) => `- ${w}`)]
             : []),
@@ -650,6 +857,7 @@ async function runLlmPatchFlow(input) {
         patchPreview,
         warnings: combinedWarnings,
         applyPatches,
+        patchResults,
         originalContents,
         contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
     };
