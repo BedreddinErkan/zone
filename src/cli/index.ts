@@ -603,6 +603,16 @@ if (intent === "unknown" && repoPath) {
       )} (${tone(teResult.language, c.blue)})`
     );
     console.log(`${zonePrefix()} Confidence: ${colorConfidence(teResult.confidence)}`);
+    if (teResult.complexity && teResult.complexity !== 'simple') {
+  const complexityLabels: Record<string, string> = {
+    data_driven: 'Data Driven',
+    e2e: 'E2E',
+    negative: 'Negative',
+    multi_scenario: 'Multi Scenario',
+  };
+  const label = complexityLabels[teResult.complexity] || teResult.complexity;
+  console.log(`${zonePrefix()} Complexity: ${tone(label, c.cyan)}`);
+}
     console.log(teResult.preview);
 
     if (apply && confirmApply && teResult.applyPatches.length > 0) {
