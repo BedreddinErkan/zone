@@ -1,24 +1,43 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildRecommendation = buildRecommendation;
-function buildRecommendation(input) {
-    const errorCount = input.issues.filter((item) => item.severity === "error").length;
-    const warningCount = input.issues.filter((item) => item.severity === "warning").length;
-    if (input.mode === "blocked") {
-        if (errorCount > 0) {
-            return "Apply yapma. Önce error seviyesindeki sorunları çöz ve tekrar çalıştır.";
+function hasReasonCode(result, codes) {
+    return result.reasons.some((reason) => codes.includes(reason.code));
+}
+function hasHighTopRisk(result) {
+    return (result.topRisks ?? []).some((risk) => risk.severity === "high");
+}
+function buildRecommendation(result) {
+    if (result.mode === "blocked") {
+        if (hasReasonCode(result, [
+            "SCHEMA_VALIDATION_ERROR",
+            "SCHEMA_VALIDATION_WARNING",
+            "LOW_SCHEMA_CONFIDENCE"
+        ])) {
+            return "Do not apply automatically. Resolve schema issues and verify schema alignment first.";
         }
-        return "Apply yapma. Karar nedenlerini ve riskleri inceleyip tekrar dene.";
+        return "Do not apply automatically. Fix blocking validation issues first.";
     }
-    if (input.mode === "preview_only") {
-        if (warningCount > 0) {
-            return "Preview çıktısını incele. Warning içeren riskler temizlenmeden otomatik apply önerilmez.";
+    if (result.mode === "preview_only") {
+        if (hasHighTopRisk(result)) {
+            return "Preview the patch and complete manual review before any apply step because high-severity risks are still present.";
         }
-        if (input.confidenceScore < 70) {
-            return "Confidence düşük. Önce manuel inceleme ve dry-run önerilir.";
+        if (hasReasonCode(result, [
+            "SCHEMA_VALIDATION_ERROR",
+            "SCHEMA_VALIDATION_WARNING",
+            "LOW_SCHEMA_CONFIDENCE"
+        ])) {
+            return "Preview the patch and verify schema alignment before any apply step.";
         }
-        return "Manuel inceleme sonrası ilerle. Dry-run ile doğrulama yapmak güvenli olur.";
+        if (hasReasonCode(result, [
+            "PATCH_VALIDATION_WARNING",
+            "PATCH_RISK_WARNING",
+            "MISSING_VALIDATED_FILES"
+        ])) {
+            return "Preview the patch and review patch scope before any apply step.";
+        }
+        return "Preview the patch and review warnings before any apply step.";
     }
-    return "Sonuç güvenli görünüyor. Apply öncesi patch preview ve top riskleri kısa kontrol et.";
+    return "Patch can be applied automatically under current safeguards.";
 }
 //# sourceMappingURL=buildRecommendation.js.map

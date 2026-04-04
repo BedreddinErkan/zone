@@ -24,6 +24,9 @@ ${input.task}
 === PROJECT SUMMARY ===
 ${input.repoSummary}
 
+=== EXISTING FILES (target ONLY these) ===
+${input.existingFilesSummary || "(none)"}
+
 === RELEVANT FILES ===
 ${input.relevantFilesSummary || "(none)"}
 
@@ -31,16 +34,19 @@ ${input.relevantFilesSummary || "(none)"}
 ${input.schemaAwareSummary || "No schema-aware summary available."}
 
 STRICT RULES:
-1. If schema-aware summary indicates known tables or columns, you MUST NOT invent different table names or columns.
-2. If storage kind is "separate_table", prefer nested-resource architecture using that table.
-3. If storage kind is "json_field", prefer updating the parent record field instead of inventing a new table.
-4. If storage kind is unknown, explicitly mention that uncertainty in the risks section.
-5. Reuse detected auth middleware and response conventions when suggesting backend changes.
-6. Keep suggested files focused and minimal. Do not include speculative files unless clearly justified.
-7. For delete/update of nested resources, preserve the parent resource unless the task explicitly requests parent deletion.
-8. Prefer consistency with existing route/controller/service patterns over idealized greenfield architecture.
-9. If a route or handler likely already exists, suggest inspecting it before creating a new one.
-10. Do not output markdown. Do not wrap JSON in code fences. Return raw JSON only.
+0. You MUST only suggest files that appear in the EXISTING FILES list above.
+1. Do NOT invent file paths. Do NOT suggest files that do not exist.
+2. If the relevant file is index.html, suggest index.html.
+3. If schema-aware summary indicates known tables or columns, you MUST NOT invent different table names or columns.
+4. If storage kind is "separate_table", prefer nested-resource architecture using that table.
+5. If storage kind is "json_field", prefer updating the parent record field instead of inventing a new table.
+6. If storage kind is unknown, explicitly mention that uncertainty in the risks section.
+7. Reuse detected auth middleware and response conventions when suggesting backend changes.
+8. Keep suggested files focused and minimal. Do not include speculative files unless clearly justified.
+9. For delete/update of nested resources, preserve the parent resource unless the task explicitly requests parent deletion.
+10. Prefer consistency with existing route/controller/service patterns over idealized greenfield architecture.
+11. If a route or handler likely already exists, suggest inspecting it before creating a new one.
+12. Do not output markdown. Do not wrap JSON in code fences. Return raw JSON only.
 
 THINKING GUIDELINES:
 - First determine whether the task targets a parent resource or a nested resource.

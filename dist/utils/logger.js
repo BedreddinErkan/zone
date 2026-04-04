@@ -45,7 +45,10 @@ function printIssueList(issues = [], options) {
     const visible = issues.slice(0, limit);
     for (const issue of visible) {
         const fileText = issue.file ? ` [${issue.file}]` : "";
-        const detailsText = issue.details ? ` | ${truncate(issue.details, 120)}` : "";
+        const detailsRaw = Array.isArray(issue.details)
+            ? issue.details.join("; ")
+            : issue.details;
+        const detailsText = detailsRaw ? ` | ${truncate(detailsRaw, 120)}` : "";
         console.log(`- [${issue.severity.toUpperCase()}] ${issue.code}: ${truncate(issue.message, 180)}${fileText}${detailsText}`);
     }
     if (issues.length > visible.length) {

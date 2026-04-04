@@ -27,3 +27,10 @@ zone --task "add input validation to login form" --repo /path/to/repo
 npx tsx src/api/server.ts
 # Open http://localhost:3000
 ```
+
+## Start Web UI
+```bash
+zone serve
+zone serve --port 8080
+zone serve --open
+```

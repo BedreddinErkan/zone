@@ -34,6 +34,20 @@ function normalizePenaltyReasons(result) {
         .filter((value) => Boolean(value));
     return [...new Set(reasons)];
 }
+function normalizeIssueSources(result) {
+    const grouped = result?.issues?.grouped ?? [];
+    const sources = grouped
+        .flatMap((group) => group.issues ?? [])
+        .map((issue) => issue.source?.trim())
+        .filter((value) => Boolean(value));
+    return [...new Set(sources)];
+}
+function normalizeTopRisks(result) {
+    return result?.issues?.topRisks ?? [];
+}
+function hasHighSeverityRisk(result) {
+    return normalizeTopRisks(result).some((risk) => risk.severity === "high");
+}
 function buildStatusLine(decisionMode) {
     switch (decisionMode) {
         case "blocked":
@@ -65,6 +79,17 @@ function buildSummaryLine(input) {
     if (typeof warningCount === "number") {
         parts.push(`warnings=${warningCount}`);
     }
+    const issueSources = normalizeIssueSources(input.result);
+    if (issueSources.length > 0) {
+        parts.push(`sources=${issueSources.join(" | ")}`);
+    }
+    const topRisks = normalizeTopRisks(input.result);
+    if (topRisks.length > 0) {
+        parts.push(`topRisks=${topRisks
+            .slice(0, 3)
+            .map((risk) => `${risk.severity ?? "unknown"}:${risk.title ?? risk.id ?? "risk"}`)
+            .join(" | ")}`);
+    }
     if (input.penaltyReasons.length > 0) {
         parts.push(`penalties=${input.penaltyReasons.slice(0, 4).join(" | ")}`);
     }
@@ -78,6 +103,7 @@ function evaluateCiResult(result) {
     const confidenceScore = normalizeConfidenceScore(result);
     const penaltyReasons = normalizePenaltyReasons(result);
     const errorCount = result?.issues?.summary?.errors ?? 0;
+    const containsHighSeverityRisk = hasHighSeverityRisk(result);
     let ciStatus = "warn";
     let shouldFail = false;
     if (decisionMode === "blocked") {
@@ -85,6 +111,10 @@ function evaluateCiResult(result) {
         shouldFail = true;
     }
     else if (errorCount > 0) {
+        ciStatus = "fail";
+        shouldFail = true;
+    }
+    else if (containsHighSeverityRisk) {
         ciStatus = "fail";
         shouldFail = true;
     }

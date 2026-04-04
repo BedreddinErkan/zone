@@ -16,7 +16,7 @@ const getGitChangedFiles_1 = require("./getGitChangedFiles");
     });
     (0, vitest_1.it)("repo root bulunamazsa bos array donmeli", async () => {
         execFileAsyncMock.mockRejectedValueOnce(new Error("not a git repo"));
-        const result = await (0, getGitChangedFiles_1.getGitChangedFiles)("C:/projects/smile-agent");
+        const result = await (0, getGitChangedFiles_1.getGitChangedFiles)("C:/projects/zone");
         (0, vitest_1.expect)(result).toEqual([]);
     });
     (0, vitest_1.it)("base branch varsa diff sonucunu kullanmali ve duplicate dosyalari tekillestirmeli", async () => {

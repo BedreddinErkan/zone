@@ -24,6 +24,7 @@ const buildSchemaAwareContext_js_1 = require("./buildSchemaAwareContext.js");
 const validatePatchAgainstSchema_js_1 = require("./validatePatchAgainstSchema.js");
 const validatePatchPlan_js_1 = require("../patch/validatePatchPlan.js");
 const logger_js_1 = require("../utils/logger.js");
+const normalizeIssues_js_1 = require("./normalizeIssues.js");
 const CONFIDENCE_WEIGHTS = {
     intentClarity: 0.24,
     schemaCertainty: 0.23,
@@ -133,26 +134,6 @@ function buildSchemaAwareSummaryFromContext(input) {
         relations: [],
         confidence
     };
-}
-function normalizePatchValidationIssues(issues) {
-    return issues.map((issue) => ({
-        code: issue.level === "error"
-            ? "PATCH_VALIDATION_ERROR"
-            : "PATCH_VALIDATION_WARNING",
-        message: issue.message,
-        severity: issue.level,
-        file: issue.filePath
-    }));
-}
-function normalizeSchemaValidationIssues(issues) {
-    return issues.map((issue) => ({
-        code: issue.level === "error"
-            ? "SCHEMA_VALIDATION_ERROR"
-            : "SCHEMA_VALIDATION_WARNING",
-        message: issue.message,
-        severity: issue.level,
-        file: issue.filePath
-    }));
 }
 function scoreIntentClarity(intent) {
     let score = 25;
@@ -528,6 +509,10 @@ async function runFeatureAgent(input) {
                 path: file.path,
                 category: file.category
             })),
+            existingFilesSummary: [
+                "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):",
+                ...relevantFiles.slice(0, 12).map((file) => `- ${file.path}`)
+            ].join("\n"),
             schemaAwareSummary: schemaAwareContext.summaryLines
         });
         (0, logger_js_1.logSuccess)("Feature plan created");
@@ -588,13 +573,13 @@ async function runFeatureAgent(input) {
         targetPath: input.targetPath,
         patchPlan
     });
-    const patchValidationIssues = normalizePatchValidationIssues(patchTargetValidation.issues);
+    const patchValidationIssues = (0, normalizeIssues_js_1.normalizePatchValidationIssues)(patchTargetValidation.issues);
     const patchRiskWarnings = uniqueStrings(patchPlan.patches.flatMap((patch) => (0, patchRiskAnalyzer_js_1.analyzePatchRisk)(intent, patch.contentPreview).warnings));
     const schemaPatchIssues = (0, validatePatchAgainstSchema_js_1.validatePatchAgainstSchema)(patchPlan.patches.map((patch) => ({
         path: patch.path,
         contentPreview: patch.contentPreview
     })), schemaSnapshot);
-    const schemaPatchWarnings = normalizeSchemaValidationIssues(schemaPatchIssues);
+    const schemaPatchWarnings = (0, normalizeIssues_js_1.normalizeSchemaValidationIssues)(schemaPatchIssues);
     logIssueSummary("Patch validation", patchValidationIssues);
     logIssueSummary("Schema validation", schemaPatchWarnings);
     if (patchRiskWarnings.length > 0) {

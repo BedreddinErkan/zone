@@ -71,9 +71,14 @@ const sampleResult = {
         ],
         topRisks: [
             {
-                code: "SCHEMA_WARNING",
-                severity: "warning",
-                message: "Possible schema ambiguity."
+                id: "issue:ambiguous_target",
+                title: "Belirsiz dosya hedefi",
+                description: "Değişikliğin uygulanacağı gerçek dosya net değil.",
+                severity: "medium",
+                score: 60,
+                category: "validation",
+                source: "validation_issue",
+                relatedCode: "AMBIGUOUS_TARGET"
             }
         ]
     },
@@ -133,9 +138,10 @@ const sampleResult = {
         (0, vitest_1.expect)(output).toContain("Decision: PREVIEW ONLY");
         (0, vitest_1.expect)(output).toContain("Confidence: 74");
         (0, vitest_1.expect)(output).toContain("Issues: 0 error, 1 warning");
-        (0, vitest_1.expect)(output).toContain("Top Risk: SCHEMA_WARNING: Possible schema ambiguity.");
+        (0, vitest_1.expect)(output).toContain("Top Risk: MEDIUM (score: 60) - Belirsiz dosya hedefi");
+        (0, vitest_1.expect)(output).toContain("Recommendation: Review before apply.");
     });
-    (0, vitest_1.it)("detailed formatinda risk note ve issue bolumlerini yazar", () => {
+    (0, vitest_1.it)("detailed formatinda risk note issue explanation ve recommendation bolumlerini yazar", () => {
         const view = (0, buildCliViewModel_js_1.buildCliViewModel)(sampleResult);
         const output = (0, renderCliResult_js_1.renderCliResult)(view, "detailed");
         (0, vitest_1.expect)(output).toContain("Top Risks");
@@ -143,6 +149,19 @@ const sampleResult = {
         (0, vitest_1.expect)(output).toContain("Issues");
         (0, vitest_1.expect)(output).toContain("Schema");
         (0, vitest_1.expect)(output).toContain("SCHEMA_WARNING");
+        (0, vitest_1.expect)(output).toContain("Recommendation");
+        (0, vitest_1.expect)(output).toContain("Review before apply.");
+        (0, vitest_1.expect)(output).toContain("Explanation");
+        (0, vitest_1.expect)(output).toContain("Decision was saved as PREVIEW ONLY");
+        (0, vitest_1.expect)(output).toContain("1 warning-level issue(s) remain in the saved result");
+    });
+    (0, vitest_1.it)("detailed formatinda risk description ve category gosterir", () => {
+        const view = (0, buildCliViewModel_js_1.buildCliViewModel)(sampleResult);
+        const output = (0, renderCliResult_js_1.renderCliResult)(view, "detailed");
+        (0, vitest_1.expect)(output).toContain("Belirsiz dosya hedefi");
+        (0, vitest_1.expect)(output).toContain("validation");
+        (0, vitest_1.expect)(output).toContain("Değişikliğin uygulanacağı gerçek dosya net değil");
+        (0, vitest_1.expect)(output).toContain("score=60");
     });
     (0, vitest_1.it)("json formatinda parse edilebilir json verir", () => {
         const view = (0, buildCliViewModel_js_1.buildCliViewModel)(sampleResult);
@@ -151,25 +170,25 @@ const sampleResult = {
         (0, vitest_1.expect)(parsed.decision.mode).toBe("preview");
         (0, vitest_1.expect)(parsed.confidenceBreakdown?.finalScore).toBe(74);
     });
-});
-(0, vitest_1.it)("detailed modda execution bilgilerini gosterir", () => {
-    const resultWithExec = {
-        ...sampleResult,
-        execution: {
-            traceId: "trace_test_123",
-            startedAt: "2026-04-01T10:00:00.000Z",
-            finishedAt: "2026-04-01T10:00:01.000Z",
-            durationMs: 1000,
-            phases: [
-                { name: "run_agent", durationMs: 800 },
-                { name: "load_result", durationMs: 50 }
-            ]
-        }
-    };
-    const view = (0, buildCliViewModel_js_1.buildCliViewModel)(resultWithExec);
-    const output = (0, renderCliResult_js_1.renderCliResult)(view, "detailed");
-    (0, vitest_1.expect)(output).toContain("Execution");
-    (0, vitest_1.expect)(output).toContain("trace_test_123");
-    (0, vitest_1.expect)(output).toContain("run_agent");
+    (0, vitest_1.it)("detailed modda execution bilgilerini gosterir", () => {
+        const resultWithExec = {
+            ...sampleResult,
+            execution: {
+                traceId: "trace_test_123",
+                startedAt: "2026-04-01T10:00:00.000Z",
+                finishedAt: "2026-04-01T10:00:01.000Z",
+                durationMs: 1000,
+                phases: [
+                    { name: "run_agent", durationMs: 800 },
+                    { name: "load_result", durationMs: 50 }
+                ]
+            }
+        };
+        const view = (0, buildCliViewModel_js_1.buildCliViewModel)(resultWithExec);
+        const output = (0, renderCliResult_js_1.renderCliResult)(view, "detailed");
+        (0, vitest_1.expect)(output).toContain("Execution");
+        (0, vitest_1.expect)(output).toContain("trace_test_123");
+        (0, vitest_1.expect)(output).toContain("run_agent");
+    });
 });
 //# sourceMappingURL=renderCliResult.test.js.map

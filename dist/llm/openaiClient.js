@@ -14,6 +14,6 @@ function createOpenAIClient() {
     return new openai_1.default({ apiKey });
 }
 function getModelName() {
-    return process.env.OPENAI_MODEL || "gpt-5";
+    return process.env.OPENAI_MODEL || "gpt-4o-mini";
 }
 //# sourceMappingURL=openaiClient.js.map

@@ -2,6 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.renderDecisionSummary = renderDecisionSummary;
 exports.renderSavedAgentResultSummary = renderSavedAgentResultSummary;
+const buildDecisionExplanation_js_1 = require("./buildDecisionExplanation.js");
+const buildSavedRecommendation_js_1 = require("../result/buildSavedRecommendation.js");
+const buildRecommendation_js_1 = require("./buildRecommendation.js");
 function formatReason(reason) {
     const detailSuffix = reason.details && reason.details.length > 0
         ? ` (${reason.details.join(" | ")})`
@@ -13,17 +16,24 @@ function formatReason(reason) {
             : "INFO";
     return `- [${severityLabel}] ${reason.code}: ${reason.message}${detailSuffix}`;
 }
-function buildRecommendation(result) {
-    switch (result.mode) {
-        case "blocked":
-            return "Do not apply automatically. Fix blocking validation issues first.";
-        case "preview_only":
-            return "Preview the patch and review warnings before any apply step.";
-        case "safe_to_apply":
-            return "Patch can be applied automatically under current safeguards.";
-        default:
-            return "Review the result before continuing.";
+function formatRiskSeverity(severity) {
+    if (severity === "high")
+        return "HIGH";
+    if (severity === "medium")
+        return "MEDIUM";
+    return "LOW";
+}
+function renderTopRisks(topRisks, limit = 3) {
+    if (!topRisks || topRisks.length === 0) {
+        return [];
     }
+    const lines = [];
+    lines.push("");
+    lines.push("Top Risks:");
+    for (const risk of topRisks.slice(0, limit)) {
+        lines.push(`- [${formatRiskSeverity(risk.severity)}] ${risk.title}`);
+    }
+    return lines;
 }
 function renderDecisionSummary(result) {
     const lines = [];
@@ -40,9 +50,13 @@ function renderDecisionSummary(result) {
             lines.push(formatReason(reason));
         }
     }
+    lines.push(...renderTopRisks(result.topRisks));
+    lines.push("");
+    lines.push("Explanation:");
+    lines.push((0, buildDecisionExplanation_js_1.buildDecisionExplanation)(result));
     lines.push("");
     lines.push("Recommendation:");
-    lines.push(buildRecommendation(result));
+    lines.push((0, buildRecommendation_js_1.buildRecommendation)(result));
     return lines.join("\n");
 }
 function formatIssueSeverity(severity) {
@@ -51,21 +65,6 @@ function formatIssueSeverity(severity) {
     if (severity === "warning")
         return "WARNING";
     return "INFO";
-}
-function formatSavedRecommendation(result) {
-    if (result.decision.recommendation) {
-        return result.decision.recommendation;
-    }
-    switch (result.decision.mode) {
-        case "blocked":
-            return "Do not apply automatically. Fix blocking validation issues first.";
-        case "preview":
-            return "Preview the patch and review warnings before any apply step.";
-        case "apply":
-            return "Patch can be applied automatically under current safeguards.";
-        default:
-            return "Review the result before continuing.";
-    }
 }
 function renderSavedAgentResultSummary(result) {
     const lines = [];
@@ -77,13 +76,19 @@ function renderSavedAgentResultSummary(result) {
     lines.push(`Confidence: ${result.decision.confidence}/100${confidenceLevel}`);
     lines.push("");
     lines.push("Recommendation:");
-    lines.push(formatSavedRecommendation(result));
+    lines.push((0, buildSavedRecommendation_js_1.buildSavedRecommendation)(result));
     if (result.issues?.topRisks?.length) {
         lines.push("");
         lines.push("Top Risks:");
-        for (const issue of result.issues.topRisks.slice(0, 5)) {
-            const fileSuffix = issue.file ? ` [${issue.file}]` : "";
-            lines.push(`- [${formatIssueSeverity(issue.severity)}] ${issue.code}: ${issue.message}${fileSuffix}`);
+        for (const risk of result.issues.topRisks.slice(0, 5)) {
+            const meta = risk.category && risk.relatedCode
+                ? ` (${risk.category} / ${risk.relatedCode})`
+                : risk.category
+                    ? ` (${risk.category})`
+                    : risk.relatedCode
+                        ? ` (${risk.relatedCode})`
+                        : "";
+            lines.push(`- [${formatRiskSeverity(risk.severity)} | score=${risk.score}] ${risk.title}${meta}`);
         }
     }
     if (result.issues?.grouped?.length) {

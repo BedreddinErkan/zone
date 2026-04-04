@@ -28,6 +28,16 @@ function normalizeIssue(issue) {
     }
     return null;
 }
+function toCliRiskSeverity(severity) {
+    switch (severity) {
+        case "high":
+            return "HIGH";
+        case "medium":
+            return "MEDIUM";
+        case "low":
+            return "LOW";
+    }
+}
 function buildCliViewModel(result) {
     const groupedIssues = (result.issues?.grouped ?? []).map((group) => {
         const issues = group.issues
@@ -53,8 +63,15 @@ function buildCliViewModel(result) {
         confidenceScore: result.confidenceBreakdown?.finalScore ?? result.decision.confidence,
         errorCount: result.issues?.summary.errors ?? 0,
         warningCount: result.issues?.summary.warnings ?? 0,
+        recommendation: result.decision.recommendation ?? result.decision.reason,
         notes,
-        topRisks: (result.issues?.topRisks ?? []).map((risk) => `${risk.code}: ${risk.message}`),
+        topRisks: (result.issues?.topRisks ?? []).map((risk) => ({
+            title: risk.title,
+            severity: toCliRiskSeverity(risk.severity),
+            score: risk.score,
+            description: risk.description,
+            category: risk.category
+        })),
         groupedIssues,
         rawResult: result
     };

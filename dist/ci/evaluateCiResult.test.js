@@ -204,4 +204,188 @@ const evaluateCiResult_js_1 = require("./evaluateCiResult.js");
         (0, vitest_1.expect)(evaluation.summaryLine).toContain("decision=unknown");
     });
 });
+(0, vitest_1.it)("fails CI when topRisks contains a high severity risk even if summary errors are zero", () => {
+    const result = {
+        decision: {
+            mode: "preview_only",
+            confidenceScore: 74,
+            reason: "Review requested because of risk scoring."
+        },
+        issues: {
+            summary: {
+                total: 1,
+                errors: 0,
+                warnings: 1
+            },
+            topRisks: [
+                {
+                    id: "risk-1",
+                    title: "Dangerous patch target",
+                    severity: "high",
+                    source: "warning"
+                }
+            ]
+        }
+    };
+    const evaluation = (0, evaluateCiResult_js_1.evaluateCiResult)(result);
+    (0, vitest_1.expect)(evaluation.decisionMode).toBe("preview_only");
+    (0, vitest_1.expect)(evaluation.ciStatus).toBe("fail");
+    (0, vitest_1.expect)(evaluation.shouldFail).toBe(true);
+    (0, vitest_1.expect)(evaluation.summaryLine).toContain("topRisks=high:Dangerous patch target");
+});
+(0, vitest_1.it)("keeps preview_only as warn when topRisks are not high severity", () => {
+    const result = {
+        decision: {
+            mode: "preview_only",
+            confidenceScore: 72,
+            reason: "Manual review still required."
+        },
+        issues: {
+            summary: {
+                total: 2,
+                errors: 0,
+                warnings: 2
+            },
+            topRisks: [
+                {
+                    id: "risk-1",
+                    title: "Architecture mismatch",
+                    severity: "medium",
+                    source: "warning"
+                },
+                {
+                    id: "risk-2",
+                    title: "Confidence gap",
+                    severity: "low",
+                    source: "derived"
+                }
+            ]
+        }
+    };
+    const evaluation = (0, evaluateCiResult_js_1.evaluateCiResult)(result);
+    (0, vitest_1.expect)(evaluation.ciStatus).toBe("warn");
+    (0, vitest_1.expect)(evaluation.shouldFail).toBe(false);
+    (0, vitest_1.expect)(evaluation.summaryLine).toContain("topRisks=medium:Architecture mismatch");
+});
+(0, vitest_1.it)("includes grouped ValidationIssue sources in summaryLine when present", () => {
+    const result = {
+        decision: {
+            mode: "apply",
+            confidenceScore: 89,
+            reason: "Ready for CI summary rendering."
+        },
+        issues: {
+            summary: {
+                total: 2,
+                errors: 0,
+                warnings: 2
+            },
+            grouped: [
+                {
+                    issues: [
+                        { source: "patch" },
+                        { source: "schema" },
+                        { source: "patch" }
+                    ]
+                }
+            ]
+        }
+    };
+    const evaluation = (0, evaluateCiResult_js_1.evaluateCiResult)(result);
+    (0, vitest_1.expect)(evaluation.ciStatus).toBe("pass");
+    (0, vitest_1.expect)(evaluation.shouldFail).toBe(false);
+    (0, vitest_1.expect)(evaluation.summaryLine).toContain("sources=patch | schema");
+});
+(0, vitest_1.it)("fails CI when topRisks contains a high severity risk even if summary errors are zero", () => {
+    const result = {
+        decision: {
+            mode: "preview_only",
+            confidenceScore: 74,
+            reason: "Review requested because of risk scoring."
+        },
+        issues: {
+            summary: {
+                total: 1,
+                errors: 0,
+                warnings: 1
+            },
+            topRisks: [
+                {
+                    id: "risk-1",
+                    title: "Dangerous patch target",
+                    severity: "high",
+                    source: "warning"
+                }
+            ]
+        }
+    };
+    const evaluation = (0, evaluateCiResult_js_1.evaluateCiResult)(result);
+    (0, vitest_1.expect)(evaluation.decisionMode).toBe("preview_only");
+    (0, vitest_1.expect)(evaluation.ciStatus).toBe("fail");
+    (0, vitest_1.expect)(evaluation.shouldFail).toBe(true);
+    (0, vitest_1.expect)(evaluation.summaryLine).toContain("topRisks=high:Dangerous patch target");
+});
+(0, vitest_1.it)("keeps preview_only as warn when topRisks are not high severity", () => {
+    const result = {
+        decision: {
+            mode: "preview_only",
+            confidenceScore: 72,
+            reason: "Manual review still required."
+        },
+        issues: {
+            summary: {
+                total: 2,
+                errors: 0,
+                warnings: 2
+            },
+            topRisks: [
+                {
+                    id: "risk-1",
+                    title: "Architecture mismatch",
+                    severity: "medium",
+                    source: "warning"
+                },
+                {
+                    id: "risk-2",
+                    title: "Confidence gap",
+                    severity: "low",
+                    source: "derived"
+                }
+            ]
+        }
+    };
+    const evaluation = (0, evaluateCiResult_js_1.evaluateCiResult)(result);
+    (0, vitest_1.expect)(evaluation.ciStatus).toBe("warn");
+    (0, vitest_1.expect)(evaluation.shouldFail).toBe(false);
+    (0, vitest_1.expect)(evaluation.summaryLine).toContain("topRisks=medium:Architecture mismatch");
+});
+(0, vitest_1.it)("includes grouped ValidationIssue sources in summaryLine when present", () => {
+    const result = {
+        decision: {
+            mode: "apply",
+            confidenceScore: 89,
+            reason: "Ready for CI summary rendering."
+        },
+        issues: {
+            summary: {
+                total: 2,
+                errors: 0,
+                warnings: 2
+            },
+            grouped: [
+                {
+                    issues: [
+                        { source: "patch" },
+                        { source: "schema" },
+                        { source: "patch" }
+                    ]
+                }
+            ]
+        }
+    };
+    const evaluation = (0, evaluateCiResult_js_1.evaluateCiResult)(result);
+    (0, vitest_1.expect)(evaluation.ciStatus).toBe("pass");
+    (0, vitest_1.expect)(evaluation.shouldFail).toBe(false);
+    (0, vitest_1.expect)(evaluation.summaryLine).toContain("sources=patch | schema");
+});
 //# sourceMappingURL=evaluateCiResult.test.js.map

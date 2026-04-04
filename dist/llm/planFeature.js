@@ -34,6 +34,7 @@ async function planFeatureWithLlm(input) {
         intent: input.intent,
         repoSummary,
         relevantFilesSummary,
+        existingFilesSummary: input.existingFilesSummary,
         schemaAwareSummary
     });
     const response = await client.responses.create({

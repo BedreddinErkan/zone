@@ -3,12 +3,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.buildTopRisks = buildTopRisks;
 exports.saveAgentResult = saveAgentResult;
 const node_path_1 = __importDefault(require("node:path"));
+const scoreTopRisks_js_1 = require("./result/scoreTopRisks.js");
 const files_js_1 = require("../utils/files.js");
-/**
- * Map internal decision mode -> saved mode
- */
+const normalizeIssues_js_1 = require("./normalizeIssues.js");
 function mapDecisionMode(mode) {
     if (mode === "safe_to_apply")
         return "apply";
@@ -16,9 +16,6 @@ function mapDecisionMode(mode) {
         return "blocked";
     return "preview";
 }
-/**
- * Convert numeric score to confidence level
- */
 function mapConfidence(score) {
     if (score >= 80)
         return "high";
@@ -76,11 +73,7 @@ function buildIssueGroups(result) {
             total: result.patchRiskWarnings.length,
             errors: 0,
             warnings: result.patchRiskWarnings.length,
-            issues: result.patchRiskWarnings.map((message) => ({
-                code: "PATCH_RISK_WARNING",
-                severity: "warning",
-                message
-            }))
+            issues: (0, normalizeIssues_js_1.normalizePatchRiskWarnings)(result.patchRiskWarnings)
         },
         {
             key: "architecture",
@@ -88,11 +81,7 @@ function buildIssueGroups(result) {
             total: result.architectureWarnings.length,
             errors: 0,
             warnings: result.architectureWarnings.length,
-            issues: result.architectureWarnings.map((message) => ({
-                code: "ARCHITECTURE_WARNING",
-                severity: "warning",
-                message
-            }))
+            issues: (0, normalizeIssues_js_1.normalizeArchitectureWarnings)(result.architectureWarnings)
         }
     ].filter((group) => group.total > 0);
 }
@@ -100,18 +89,14 @@ function buildTopRisks(result) {
     const allIssues = [
         ...result.patchValidationIssues,
         ...result.schemaPatchWarnings,
-        ...result.patchRiskWarnings.map((message) => ({
-            code: "PATCH_RISK_WARNING",
-            severity: "warning",
-            message
-        })),
-        ...result.architectureWarnings.map((message) => ({
-            code: "ARCHITECTURE_WARNING",
-            severity: "warning",
-            message
-        }))
+        ...(0, normalizeIssues_js_1.normalizePatchRiskWarnings)(result.patchRiskWarnings),
+        ...(0, normalizeIssues_js_1.normalizeArchitectureWarnings)(result.architectureWarnings)
     ];
-    return sortIssues(allIssues).slice(0, 5);
+    return (0, scoreTopRisks_js_1.scoreTopRisks)({
+        issues: allIssues,
+        decisionMode: result.decision.mode,
+        limit: 5
+    });
 }
 function buildRecommendation(result) {
     const hasPatchError = result.patchValidationIssues.some((issue) => issue.severity === "error");
@@ -137,30 +122,16 @@ function buildRecommendation(result) {
     }
     return "Sonuç temiz görünüyor. Apply öncesi top riskleri ve patch hedeflerini hızlıca kontrol et.";
 }
-/**
- * Convert FeatureAgentResult -> SavedAgentResult
- */
 function toSavedAgentResult(result) {
     const groupedIssues = buildIssueGroups(result);
     const topRisks = buildTopRisks(result);
     const totalIssues = topRisks.length === 0
-        ? countIssues([
-            ...result.patchValidationIssues,
-            ...result.schemaPatchWarnings
-        ])
+        ? countIssues([...result.patchValidationIssues, ...result.schemaPatchWarnings])
         : countIssues([
             ...result.patchValidationIssues,
             ...result.schemaPatchWarnings,
-            ...result.patchRiskWarnings.map((message) => ({
-                code: "PATCH_RISK_WARNING",
-                severity: "warning",
-                message
-            })),
-            ...result.architectureWarnings.map((message) => ({
-                code: "ARCHITECTURE_WARNING",
-                severity: "warning",
-                message
-            }))
+            ...(0, normalizeIssues_js_1.normalizePatchRiskWarnings)(result.patchRiskWarnings),
+            ...(0, normalizeIssues_js_1.normalizeArchitectureWarnings)(result.architectureWarnings)
         ]);
     return {
         version: 2,
@@ -245,9 +216,6 @@ function toSavedAgentResult(result) {
         }
     };
 }
-/**
- * Save agent result as structured engineering report
- */
 async function saveAgentResult(result) {
     const cacheDir = node_path_1.default.join(result.targetPath, ".agent-cache");
     await (0, files_js_1.ensureDir)(cacheDir);

@@ -3,10 +3,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.sortIssuesBySeverity = sortIssuesBySeverity;
 exports.countIssues = countIssues;
 exports.groupIssues = groupIssues;
-exports.pickTopRisks = pickTopRisks;
 exports.buildExecutionResult = buildExecutionResult;
+const scoreTopRisks_js_1 = require("./scoreTopRisks.js");
 function severityWeight(severity) {
-    return severity === "error" ? 2 : 1;
+    if (severity === "error")
+        return 3;
+    if (severity === "warning")
+        return 2;
+    return 1;
 }
 function normalizeIssueGroupKey(source, code) {
     if (source === "schema")
@@ -93,9 +97,6 @@ function groupIssues(input) {
         return a.label.localeCompare(b.label);
     });
 }
-function pickTopRisks(input, limit = 5) {
-    return sortIssuesBySeverity(input).slice(0, limit);
-}
 function buildExecutionResult(input) {
     const sortedIssues = sortIssuesBySeverity(input.issues);
     const counts = countIssues(sortedIssues);
@@ -126,7 +127,11 @@ function buildExecutionResult(input) {
             ...counts,
             items: sortedIssues,
             groups: groupIssues(sortedIssues),
-            topRisks: pickTopRisks(sortedIssues, 5)
+            topRisks: (0, scoreTopRisks_js_1.scoreTopRisks)({
+                issues: sortedIssues,
+                decisionMode: input.decisionMode,
+                limit: 5
+            })
         },
         patch: input.patchTargets
             ? {
