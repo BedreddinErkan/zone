@@ -102,10 +102,8 @@ input:focus,textarea:focus{border-color:#007acc}
 .warning-item::before{content:"⚠ "}
 .apply-btn{width:100%;background:transparent;border:1px solid #4ec9b0;border-radius:6px;color:#4ec9b0;font-size:15px;padding:10px;cursor:pointer;margin-top:14px;display:flex;align-items:center;justify-content:center;gap:8px}
 .apply-btn.is-enabled{border-color:#4ec9b0;color:#4ec9b0;background:transparent;opacity:1;cursor:pointer}
-.apply-btn.is-needs-folder{border-color:#007acc;color:#007acc;background:transparent;opacity:1;cursor:pointer}
 .apply-btn.is-disabled{border-color:#3c3c3c;color:#858585;background:transparent;opacity:.7;cursor:not-allowed}
 .apply-btn:hover{background:#0e3a1e}
-.apply-btn.is-needs-folder:hover{background:#0a2a3a}
 .apply-btn.is-disabled:hover{background:transparent}
 .apply-btn:disabled{border-color:#3c3c3c;color:#858585;cursor:not-allowed}
 .hidden{display:none}
@@ -390,34 +388,38 @@ function beginRunState(){
 }
 
 function getApplyBlockingReason(){
-  if(currentRunState.runInProgress)return 'Wait for the current run to finish before applying.';
-  if(!currentRunState.hasPatchResult||!currentPatches.length)return 'Run Execute first to generate a patch result before applying.';
-  if(currentRunState.validationBlocked)return 'Output validation blocked this result. Preview is visible for debugging, but Apply is disabled.';
-  if(!currentRepoHandle){
-    if(currentRunState.decisionMode==='safe_to_apply')return 'Safe to apply once a folder is selected for local Apply.';
-    return 'Result preview is ready. Select a folder to enable local Apply.';
-  }
+  if(currentRunState.runInProgress)return 'Wait for the current run to finish.';
+  if(!currentRunState.hasPatchResult||!currentPatches.length)return 'Run Execute first.';
+  if(currentRunState.validationBlocked||currentRunState.decisionMode==='blocked')return 'Output validation blocked this result. Apply is disabled.';
+  if((currentRunState.confidence??0)<70)return 'Confidence too low to apply. Review the preview.';
+  if(currentRunState.decisionMode==='preview_only')return 'Preview only - confidence is not high enough to apply.';
   return '';
 }
 
-// Apply button has 3 states:
-// 'enabled'      — canApply true, folder ready, not blocked
-// 'needs-folder' — result is safe but no folder selected yet; clicking opens picker
-// 'disabled'     — blocked by validation, no patch result, or run in progress
+// Apply button has 2 states:
+// 'enabled'  - canApply true based on result readiness
+// 'disabled' - blocked by validation, missing patch result, low confidence, or run in progress
 function getApplyState(){
   const applyBlockingReason=getApplyBlockingReason();
-  const needsFolder=Boolean(
-    !currentRepoHandle &&
-    currentRunState.decisionMode==='safe_to_apply' &&
-    currentRunState.hasPatchResult &&
-    !currentRunState.validationBlocked &&
-    !currentRunState.runInProgress
-  );
+  const resolvedRepoPath=getResolvedRepoPath();
+  const targetLabel=currentRepoHandle&&currentRepoSelectionLabel
+    ? currentRepoSelectionLabel.replace(/^Folder:\s*/,'')
+    : resolvedRepoPath;
+  let helperText='Run Execute first.';
+  if(!applyBlockingReason&&targetLabel){
+    helperText=`Ready to apply to: ${targetLabel}`;
+  }else if(currentRunState.validationBlocked||currentRunState.decisionMode==='blocked'){
+    helperText='Blocked by output validation.';
+  }else if(!currentRunState.hasPatchResult||!currentPatches.length){
+    helperText='Run Execute first.';
+  }else if((currentRunState.confidence??0)<70||currentRunState.decisionMode==='preview_only'){
+    helperText='Confidence too low to apply safely.';
+  }
   return {
-    canApply: !applyBlockingReason && !needsFolder,
+    canApply: !applyBlockingReason,
     applyBlockingReason,
-    helperText: needsFolder?'Select a folder to apply to':applyBlockingReason||'Ready to apply to the selected folder.',
-    visualState: needsFolder?'needs-folder':applyBlockingReason?'disabled':'enabled',
+    helperText,
+    visualState: applyBlockingReason?'disabled':'enabled',
   };
 }
 
@@ -425,9 +427,9 @@ function updateApplyState(){
   const btn=document.getElementById('applyBtn');
   const status=document.getElementById('applyStatusBox');
   const applyState=getApplyState();
-  btn.disabled=applyState.visualState==='disabled';
+  btn.disabled=!applyState.canApply;
   btn.className=`apply-btn is-${applyState.visualState}`;
-  btn.title=applyState.visualState==='needs-folder'?'Select a folder to apply changes':applyState.applyBlockingReason||'Apply generated changes to the selected folder';
+  btn.title=applyState.applyBlockingReason||'Apply generated changes';
   btn.setAttribute('aria-disabled',String(!applyState.canApply));
   status.textContent=applyState.helperText;
 }
@@ -451,7 +453,7 @@ function renderRepoSelection(){
   }else if(resolvedRepoPath){
     meta.textContent=`Run path: ${resolvedRepoPath} (reused from the current session)`;
   }else{
-    meta.textContent='Selected folder is ready for Apply. Execute and Dry Run still need a local repo path because browser folder access does not expose the absolute filesystem path.';
+    meta.textContent='Selected folder is ready for local Apply.';
   }
   box.classList.remove('hidden');
   updateApplyState();
@@ -878,10 +880,10 @@ function buildApplyVerificationSummary(input){
   const appliedPatches=(currentPatches||[]).filter(p=>appliedSet.has(p.filePath));
   const createdCount=appliedPatches.filter(p=>formatFileOperation(p.filePath)==='create').length;
   const modifiedCount=Math.max(0,appliedPatches.length-createdCount);
-  const folderName=currentRepoSelectionLabel.replace(/^Folder:\s*/,'');
-  const folderMeta=currentRepoSelectionLabel?`<div style="margin-bottom:8px;color:#9cdcfe">Target folder: ${escapeHtml(folderName)}</div>`:'';
+  const targetName=(currentRepoHandle&&currentRepoSelectionLabel?currentRepoSelectionLabel.replace(/^Folder:\s*/,''):getResolvedRepoPath())||'';
+  const folderMeta=targetName?`<div style="margin-bottom:8px;color:#9cdcfe">Target folder: ${escapeHtml(targetName)}</div>`:'';
   const countLine=`<div style="margin-bottom:8px"><strong>${applied.length}</strong> file${applied.length!==1?'s':''} written · ${createdCount} created · ${modifiedCount} modified</div>`;
-  const restoreMeta=applied.length>0?'<div style="margin-bottom:8px;color:#4ec9b0">Restore is ready for this session.</div>':'';
+  const restoreMeta=currentBackupSnapshot&&applied.length>0?'<div style="margin-bottom:8px;color:#4ec9b0">Restore is ready for this session.</div>':'';
   const visibleFiles=applied.slice(0,5);
   const extraCount=Math.max(0,applied.length-visibleFiles.length);
   const fileList=visibleFiles.length>0?`<div style="margin-bottom:8px">${visibleFiles.map(f=>`&nbsp;&nbsp;• ${escapeHtml(f)}`).join('<br>')}${extraCount>0?`<br>&nbsp;&nbsp;• +${extraCount} more file${extraCount!==1?'s':''}`:''}</div>`:'';
@@ -891,51 +893,76 @@ function buildApplyVerificationSummary(input){
 
 function buildApplyNeutralSummary(input){
   const failed=Array.isArray(input?.failed)?input.failed:[];
-  const folderName=currentRepoSelectionLabel.replace(/^Folder:\s*/,'');
-  const folderMeta=currentRepoSelectionLabel?`<div style="margin-bottom:8px;color:#9cdcfe">Target folder: ${escapeHtml(folderName)}</div>`:'';
+  const targetName=(currentRepoHandle&&currentRepoSelectionLabel?currentRepoSelectionLabel.replace(/^Folder:\s*/,''):getResolvedRepoPath())||'';
+  const folderMeta=targetName?`<div style="margin-bottom:8px;color:#9cdcfe">Target folder: ${escapeHtml(targetName)}</div>`:'';
   const failedLine=failed.length>0?`<div style="margin-top:8px;color:#ce9178">Failed writes: ${failed.map(f=>escapeHtml(f.filePath||f)).join(', ')}</div>`:'';
   return `${folderMeta}<div>No files were written</div>${failedLine}`;
 }
 
 async function applyChanges(){
-  let applyState=getApplyState();
-  if(applyState.visualState==='needs-folder'){
-    await selectRepoFolder();
-    applyState=getApplyState();
-    if(!applyState.canApply){
-      showError(applyState.applyBlockingReason);
-      updateApplyState();
-      return;
-    }
-  }else if(!applyState.canApply){
+  const applyState=getApplyState();
+  if(!applyState.canApply){
     showError(applyState.applyBlockingReason);
     updateApplyState();
     return;
   }
-  const btn=document.getElementById('applyBtn');const sp=document.getElementById('applySpinner');const t=document.getElementById('applyText');
+  const sp=document.getElementById('applySpinner');
+  const t=document.getElementById('applyText');
   const sb=document.getElementById('successBox');
-  btn.disabled=true;sp.style.display='block';t.textContent=`Writing ${currentPatches.length} file${currentPatches.length!==1?'s':''}...`;sb.style.display='none';
+  currentRunState.runInProgress=true;
+  updateApplyState();
+  sp.style.display='block';
+  t.textContent=`Writing ${currentPatches.length} file${currentPatches.length!==1?'s':''}...`;
+  sb.style.display='none';
   try{
-    const allowed=await ensureRepoWritePermission(currentRepoHandle);
-    if(!allowed){throw new Error('Write permission denied for the selected folder.');}
-    const backupSnapshot=await createBackupSnapshot(currentRepoHandle,currentPatches);
-    const res=await writePatchFilesWithHandle(currentRepoHandle,currentPatches);
-    if(res.applied.length===0){
+    let res;
+    if(currentRepoHandle){
+      const allowed=await ensureRepoWritePermission(currentRepoHandle);
+      if(!allowed)throw new Error('Write permission denied for the selected folder.');
+      const backupSnapshot=await createBackupSnapshot(currentRepoHandle,currentPatches);
+      res=await writePatchFilesWithHandle(currentRepoHandle,currentPatches);
+      if(res.applied.length===0){
+        currentBackupSnapshot=null;
+        setRestoreAvailability(false);
+      }else{
+        currentBackupSnapshot=backupSnapshot;
+        setRestoreAvailability(true);
+      }
+    }else{
+      const repoPath=getResolvedRepoPath();
+      if(!repoPath)throw new Error('Enter a repo path first.');
+      const response=await fetch('/api/apply',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({patches:currentPatches,repoPath})
+      });
+      if(!response.ok)throw new Error('Apply failed: '+response.status);
+      const payload=await response.json();
+      res={
+        applied:Array.isArray(payload.applied)?payload.applied:[],
+        failed:Array.isArray(payload.failed)?payload.failed:[],
+      };
       currentBackupSnapshot=null;
       setRestoreAvailability(false);
+    }
+    if(res.applied.length===0){
       sb.innerHTML=buildApplyNeutralSummary(res);
       sb.style.display='block';
-    }else if(res.applied.length>0){
-      currentBackupSnapshot=backupSnapshot;
-      setRestoreAvailability(true);
+    }else{
       sb.innerHTML=buildApplyVerificationSummary(res);
       sb.style.display='block';
     }
     if(res.failed.length>0){
-      showError('Some files could not be written: '+res.failed.map(f=>f.filePath).join(', '));
+      showError('Some files could not be written: '+res.failed.map(f=>f.filePath||f).join(', '));
     }
-  }catch(e){showError(e.message);}
-  finally{sp.style.display='none';t.textContent='✓  Apply Changes';updateApplyState();}
+  }catch(e){
+    showError(e.message);
+  }finally{
+    currentRunState.runInProgress=false;
+    sp.style.display='none';
+    t.textContent='Apply Changes';
+    updateApplyState();
+  }
 }
 
 async function restorePreviousState(){
@@ -981,3 +1008,5 @@ updateApplyState();
 </script>
 </body>
 </html>
+
+
