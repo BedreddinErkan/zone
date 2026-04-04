@@ -1,6 +1,6 @@
 // src/roles/testEngineerContext.ts
 
-import type { DetectedTestFramework } from "./detectTestFramework.js";
+import type { DetectedTestFramework } from "../roles/detectTestFramework.js";
 import type { RepoFile } from "../types/project.js";
 
 export interface TestEngineerContext {

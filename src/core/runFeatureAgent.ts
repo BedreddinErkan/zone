@@ -742,6 +742,10 @@ export async function runFeatureAgent(
         path: file.path,
         category: file.category
       })),
+      existingFilesSummary: [
+        "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):",
+        ...relevantFiles.slice(0, 12).map((file) => `- ${file.path}`)
+      ].join("\n"),
       schemaAwareSummary: schemaAwareContext.summaryLines
     });
     logSuccess("Feature plan created");

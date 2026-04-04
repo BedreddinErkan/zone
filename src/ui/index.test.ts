@@ -37,8 +37,12 @@ class MockElement {
   id: string;
   style: Record<string, string> = {};
   textContent = "";
+  innerText = "";
   innerHTML = "";
   value = "";
+  placeholder = "";
+  title = "";
+  disabled = false;
   dataset: Record<string, string> = {};
   private classListValue: MockClassList;
 
@@ -82,6 +86,75 @@ class MockEventSource {
     this.closed = true;
   }
 }
+
+type UiDecisionInput = {
+  decision?: { mode?: string };
+  confidence?: { score?: number };
+  risk?: { score?: number; breakdown?: Record<string, number> };
+  frameworkBadge?: string;
+  complexity?: string;
+};
+
+type UiPatchInput = {
+  ok: boolean;
+  patchPreview?: string;
+  warnings?: string[];
+  contextFiles?: string[];
+  applyPatches?: Array<{ filePath: string; fullContent: string }>;
+};
+
+type UiRun = {
+  task: string;
+  role: string;
+  repoPath: string;
+  status: string;
+  timestamp: number;
+};
+
+type UiContext = {
+  document: {
+    getElementById(id: string): MockElement;
+    querySelector(selector?: string): MockElement;
+    querySelectorAll(selector: string): MockElement[];
+  };
+  localStorage: {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+  };
+  navigator: {
+    clipboard: {
+      writeText(value: string): Promise<void>;
+    };
+  };
+  console: Console;
+  setTimeout: typeof setTimeout;
+  clearTimeout: typeof clearTimeout;
+  fetch: ReturnType<typeof vi.fn>;
+  EventSource: typeof MockEventSource;
+  Math: Math;
+  Date: DateConstructor;
+  encodeURIComponent: typeof encodeURIComponent;
+  showDecision(data: UiDecisionInput): void;
+  resetUI(): void;
+  selectRole(button: MockElement): void;
+  showPatch(data: UiPatchInput): void;
+  execute(): Promise<void>;
+  addRecentRun(run: UiRun): void;
+  loadRecentRun(index: number): void;
+  setProgress(stage: string): void;
+};
+
+type UiContextBase = Omit<
+  UiContext,
+  | "showDecision"
+  | "resetUI"
+  | "selectRole"
+  | "showPatch"
+  | "execute"
+  | "addRecentRun"
+  | "loadRecentRun"
+  | "setProgress"
+>;
 
 function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
   const html = readFileSync(
@@ -156,11 +229,22 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
     dataAnalystRoleButton,
   ];
 
+  const promptBox = new MockElement("promptBox", "prompt-box");
+  promptBox.innerText =
+    "You are a code agent. Analyze the repo and apply the task safely. Follow existing patterns, preserve architecture, and explain your reasoning.\ncopy";
+  const copyButton = new MockElement("copyBtn", "copy-btn");
+
   const document = {
     getElementById(id: string) {
       return ensureElement(id);
     },
-    querySelector() {
+    querySelector(selector?: string) {
+      if (selector === ".prompt-box") {
+        return promptBox;
+      }
+      if (selector === ".copy-btn") {
+        return copyButton;
+      }
       return new MockElement("query");
     },
     querySelectorAll(selector: string) {
@@ -172,7 +256,7 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
   };
 
   const localStorageStore = new Map<string, string>(Object.entries(initialLocalStorage));
-  const context = {
+  const context: UiContextBase = {
     document,
     localStorage: {
       getItem(key: string) {
@@ -200,9 +284,9 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
   };
 
   MockEventSource.instances = [];
-  vm.runInNewContext(scriptMatch[1], context);
+  vm.runInNewContext(scriptMatch[1], context as vm.Context);
   return {
-    context,
+    context: context as UiContext,
     elements: { get: ensureElement },
     localStorageStore,
     roleButtons: {
@@ -602,7 +686,7 @@ describe("UI recent runs", () => {
       });
     }
 
-    const saved = JSON.parse(context.localStorage.getItem("zone_recent_runs"));
+    const saved = JSON.parse(context.localStorage.getItem("zone_recent_runs") ?? "[]");
     expect(saved).toHaveLength(6);
     expect(saved[0].task).toBe("task 7");
     expect(saved[5].task).toBe("task 2");
@@ -720,10 +804,16 @@ describe("UI patch preview", () => {
 describe("UI progress feedback", () => {
   it("renders progress while a run is in progress", async () => {
     const { context, elements, roleButtons } = buildUiHarness();
-    let resolveFetch: ((value: unknown) => void) | null = null;
+    let resolveFetch: ((value: {
+      ok: boolean;
+      json: () => Promise<unknown>;
+    }) => void) | undefined;
     context.fetch = vi.fn().mockImplementation(
       () =>
-        new Promise((resolve) => {
+        new Promise<{
+          ok: boolean;
+          json: () => Promise<unknown>;
+        }>((resolve) => {
           resolveFetch = resolve;
         })
     );
@@ -738,7 +828,11 @@ describe("UI progress feedback", () => {
     expect(elements.get("progressBox").classList.contains("hidden")).toBe(false);
     expect(elements.get("progressText").textContent).toBe("⏳ Building prompt...");
 
-    resolveFetch?.({
+    if (!resolveFetch) {
+      throw new Error("Fetch resolver was not assigned");
+    }
+
+    resolveFetch({
       ok: true,
       json: async () => ({
         ok: true,
