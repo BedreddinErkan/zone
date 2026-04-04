@@ -620,6 +620,8 @@ function buildRepoFile(path, category = "unknown") {
         if (result.ok) {
             (0, vitest_1.expect)(result.applyPatches).toEqual([]);
             (0, vitest_1.expect)(result.warnings.join("\n")).toContain("PATCH_FIND_NOT_FOUND");
+            (0, vitest_1.expect)(result.warnings.join("\n")).toContain('"reason":"low_confidence"');
+            (0, vitest_1.expect)(result.warnings.join("\n")).toContain('"score":');
         }
     });
     (0, vitest_1.it)("blocks protected src/ui files from developer apply patches", async () => {

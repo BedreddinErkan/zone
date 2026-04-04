@@ -740,6 +740,8 @@ describe("runLlmPatchFlow", () => {
     if (result.ok) {
       expect(result.applyPatches).toEqual([]);
       expect(result.warnings.join("\n")).toContain("PATCH_FIND_NOT_FOUND");
+      expect(result.warnings.join("\n")).toContain('"reason":"low_confidence"');
+      expect(result.warnings.join("\n")).toContain('"score":');
     }
   });
 

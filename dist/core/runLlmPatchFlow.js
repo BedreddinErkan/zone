@@ -1,5 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.normalizeLineForMatch = normalizeLineForMatch;
+exports.scoreLineSimilarity = scoreLineSimilarity;
+exports.scoreOrderedSimilarity = scoreOrderedSimilarity;
+exports.scoreCandidateMatch = scoreCandidateMatch;
+exports.fuzzyFindAndReplace = fuzzyFindAndReplace;
 exports.runLlmPatchFlow = runLlmPatchFlow;
 const scanRepo_js_1 = require("../repo/scanRepo.js");
 const detectProjectStructure_js_1 = require("../repo/detectProjectStructure.js");
@@ -114,6 +119,97 @@ function extractCriticalAnchors(content) {
 function normalizeWhitespace(s) {
     return s.replace(/\r\n/g, "\n").replace(/\t/g, "  ").trim();
 }
+function normalizeLineForMatch(line) {
+    return line.replace(/\t/g, "  ").replace(/\s+/g, " ").trim();
+}
+function buildTrigrams(value) {
+    if (value.length < 3) {
+        return value ? [value] : [];
+    }
+    const trigrams = [];
+    for (let i = 0; i <= value.length - 3; i += 1) {
+        trigrams.push(value.slice(i, i + 3));
+    }
+    return trigrams;
+}
+function scoreLineSimilarity(a, b) {
+    const left = normalizeLineForMatch(a);
+    const right = normalizeLineForMatch(b);
+    if (!left && !right) {
+        return 1;
+    }
+    if (!left || !right) {
+        return 0;
+    }
+    if (left === right) {
+        return 1;
+    }
+    if (left.includes(right) || right.includes(left)) {
+        return 0.9;
+    }
+    const leftTrigrams = buildTrigrams(left);
+    const rightTrigrams = buildTrigrams(right);
+    if (leftTrigrams.length === 0 || rightTrigrams.length === 0) {
+        return 0;
+    }
+    const rightCounts = new Map();
+    for (const trigram of rightTrigrams) {
+        rightCounts.set(trigram, (rightCounts.get(trigram) ?? 0) + 1);
+    }
+    let intersection = 0;
+    for (const trigram of leftTrigrams) {
+        const count = rightCounts.get(trigram) ?? 0;
+        if (count > 0) {
+            intersection += 1;
+            rightCounts.set(trigram, count - 1);
+        }
+    }
+    const score = (2 * intersection) / (leftTrigrams.length + rightTrigrams.length);
+    return Math.max(0, score);
+}
+function buildLineFrequencyMap(lines) {
+    const counts = new Map();
+    for (const line of lines) {
+        counts.set(line, (counts.get(line) ?? 0) + 1);
+    }
+    return counts;
+}
+function scoreLineOverlap(targetLines, candidateLines) {
+    const targetCounts = buildLineFrequencyMap(targetLines);
+    const candidateCounts = buildLineFrequencyMap(candidateLines);
+    let overlap = 0;
+    for (const [line, targetCount] of targetCounts.entries()) {
+        overlap += Math.min(targetCount, candidateCounts.get(line) ?? 0);
+    }
+    return overlap / Math.max(targetLines.length, candidateLines.length, 1);
+}
+function scoreOrderedSimilarity(targetLines, candidateLines) {
+    let bestRatio = 0;
+    for (let offset = -3; offset <= 3; offset += 1) {
+        let matches = 0;
+        for (let i = 0; i < targetLines.length; i += 1) {
+            const candidateIndex = i + offset;
+            if (candidateIndex < 0 || candidateIndex >= candidateLines.length) {
+                continue;
+            }
+            matches += scoreLineSimilarity(targetLines[i], candidateLines[candidateIndex]);
+        }
+        const ratio = matches / Math.max(targetLines.length, candidateLines.length, 1);
+        if (ratio > bestRatio) {
+            bestRatio = ratio;
+        }
+    }
+    return bestRatio;
+}
+function scoreCandidateMatch(targetLines, candidateLines) {
+    if (targetLines.length === 0 && candidateLines.length === 0) {
+        return 100;
+    }
+    const orderedScore = scoreOrderedSimilarity(targetLines, candidateLines);
+    const overlapScore = scoreLineOverlap(targetLines, candidateLines);
+    const lengthPenalty = Math.min(Math.abs(targetLines.length - candidateLines.length) * 4, 12);
+    return Math.min(100, Math.max(0, Math.round(orderedScore * 70 + overlapScore * 30 - lengthPenalty)));
+}
 function buildMicroEditSnippet(filePath, content, task) {
     if (!content.trim())
         return content;
@@ -151,32 +247,65 @@ function buildMicroEditSnippet(filePath, content, task) {
 }
 function fuzzyFindAndReplace(content, find, replace) {
     if (content.includes(find)) {
-        return content.replace(find, replace);
+        return {
+            success: true,
+            content: content.replace(find, replace),
+            score: 100,
+            bestMatch: find,
+        };
     }
-    const normalizedContent = normalizeWhitespace(content);
-    const normalizedFind = normalizeWhitespace(find);
-    if (!normalizedContent.includes(normalizedFind)) {
-        return null;
+    const contentLines = content.replace(/\r\n/g, "\n").split("\n");
+    const targetLinesRaw = find.replace(/\r\n/g, "\n").split("\n");
+    const targetLines = targetLinesRaw.map(normalizeLineForMatch).filter(Boolean);
+    if (targetLines.length === 0) {
+        return {
+            success: false,
+            reason: "low_confidence",
+            score: 0,
+            bestMatch: "",
+        };
     }
-    const findLines = normalizedFind.split("\n");
-    const contentLines = content.split("\n");
-    for (let i = 0; i <= contentLines.length - findLines.length; i++) {
-        const slice = contentLines
-            .slice(i, i + findLines.length)
-            .map((line) => line.trim())
-            .join("\n");
-        const target = findLines.map((line) => line.trim()).join("\n");
-        if (slice === target) {
-            const replaceLines = replace.split("\n");
-            const newLines = [
-                ...contentLines.slice(0, i),
-                ...replaceLines,
-                ...contentLines.slice(i + findLines.length),
-            ];
-            return newLines.join("\n");
+    let bestCandidate;
+    const minWindow = Math.max(1, targetLines.length - 3);
+    const maxWindow = Math.min(contentLines.length, targetLines.length + 3);
+    for (let windowSize = minWindow; windowSize <= maxWindow; windowSize += 1) {
+        for (let start = 0; start <= contentLines.length - windowSize; start += 1) {
+            const rawSlice = contentLines.slice(start, start + windowSize);
+            const normalizedSlice = rawSlice.map(normalizeLineForMatch).filter(Boolean);
+            if (normalizedSlice.length === 0) {
+                continue;
+            }
+            const score = scoreCandidateMatch(targetLines, normalizedSlice);
+            if (!bestCandidate || score > bestCandidate.score) {
+                bestCandidate = {
+                    start,
+                    length: windowSize,
+                    score,
+                    bestMatch: rawSlice.join("\n"),
+                };
+            }
         }
     }
-    return null;
+    if (!bestCandidate || bestCandidate.score < 80) {
+        return {
+            success: false,
+            reason: "low_confidence",
+            score: bestCandidate?.score ?? 0,
+            bestMatch: bestCandidate?.bestMatch ?? "",
+        };
+    }
+    const replaceLines = replace.replace(/\r\n/g, "\n").split("\n");
+    const updatedLines = [
+        ...contentLines.slice(0, bestCandidate.start),
+        ...replaceLines,
+        ...contentLines.slice(bestCandidate.start + bestCandidate.length),
+    ];
+    return {
+        success: true,
+        content: updatedLines.join("\n"),
+        score: bestCandidate.score,
+        bestMatch: bestCandidate.bestMatch,
+    };
 }
 function parseFindReplacePatch(rawPatchText) {
     const match = rawPatchText.match(/--- FIND ---\s*\n([\s\S]*?)\n--- REPLACE ---\s*\n([\s\S]*)$/i);
@@ -245,13 +374,19 @@ function applyDeveloperPatchText(currentContent, rawPatchText) {
             };
         }
         const nextContent = fuzzyFindAndReplace(updatedContent, edit.find, edit.replace);
-        if (nextContent === null) {
+        if (!nextContent.success) {
             return {
                 ok: false,
-                warning: "[PATCH_FIND_NOT_FOUND] Could not locate the target block in the file",
+                warning: "[PATCH_FIND_NOT_FOUND] " +
+                    JSON.stringify({
+                        success: false,
+                        reason: nextContent.reason,
+                        score: nextContent.score,
+                        bestMatch: nextContent.bestMatch,
+                    }),
             };
         }
-        updatedContent = nextContent;
+        updatedContent = nextContent.content;
     }
     return { ok: true, fullContent: updatedContent };
 }
