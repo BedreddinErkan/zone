@@ -85,6 +85,69 @@ class MockEventSource {
         this.closed = true;
     }
 }
+class MockWritableFile {
+    fileHandle;
+    written = "";
+    constructor(fileHandle) {
+        this.fileHandle = fileHandle;
+    }
+    async write(value) {
+        this.written = value;
+        this.fileHandle.content = value;
+    }
+    async close() {
+        // no-op
+    }
+}
+class MockFileHandle {
+    content = "";
+    writable = new MockWritableFile(this);
+    async createWritable() {
+        return this.writable;
+    }
+    async getFile() {
+        return {
+            text: async () => this.content,
+        };
+    }
+}
+class MockDirectoryHandle {
+    name;
+    permissionState;
+    directories = new Map();
+    files = new Map();
+    constructor(name, permissionState = "granted") {
+        this.name = name;
+        this.permissionState = permissionState;
+    }
+    async queryPermission() {
+        return this.permissionState;
+    }
+    async requestPermission() {
+        return this.permissionState;
+    }
+    async getDirectoryHandle(name, options) {
+        if (!this.directories.has(name)) {
+            if (!options?.create) {
+                throw new Error(`Directory not found: ${name}`);
+            }
+            this.directories.set(name, new MockDirectoryHandle(name, this.permissionState));
+        }
+        return this.directories.get(name);
+    }
+    async getFileHandle(name, options) {
+        if (!this.files.has(name)) {
+            if (!options?.create) {
+                throw new Error(`File not found: ${name}`);
+            }
+            this.files.set(name, new MockFileHandle());
+        }
+        return this.files.get(name);
+    }
+    async removeEntry(name) {
+        this.files.delete(name);
+    }
+}
 function buildUiHarness(initialLocalStorage = {}) {
     const html = (0, node_fs_1.readFileSync)(node_path_1.default.resolve("src/ui/index.html"), "utf8");
     const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
@@ -143,6 +206,9 @@ function buildUiHarness(initialLocalStorage = {}) {
     ensureElement("applyBtn");
     ensureElement("applySpinner");
     ensureElement("applyText");
+    ensureElement("restoreBtn", "hidden");
+    ensureElement("restoreSpinner");
+    ensureElement("restoreText");
     ensureElement("progressBox", "progress-box hidden");
     ensureElement("progressText");
     ensureElement("dryRunBtn");
@@ -738,6 +804,247 @@ function buildUiHarness(initialLocalStorage = {}) {
         });
         (0, vitest_1.expect)(elements.get("fileList").innerHTML).toContain("generated_file_1");
         (0, vitest_1.expect)(elements.get("fileList").innerHTML).toContain("SELECT 1;");
+    });
+});
+(0, vitest_1.describe)("UI folder-handle apply", () => {
+    (0, vitest_1.it)("writes files through the selected folder handle", async () => {
+        const { context, elements, roleButtons } = buildUiHarness();
+        const rootHandle = new MockDirectoryHandle("zone-repo");
+        context.window.showDirectoryPicker = vitest_1.vi.fn().mockResolvedValue(rootHandle);
+        context.fetch = vitest_1.vi
+            .fn()
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                decision: { mode: "safe_to_apply" },
+                confidence: { score: 82 },
+                risk: { score: 0, breakdown: {} },
+            }),
+        })
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                ok: true,
+                patchPreview: "Summary: Fix login flow",
+                warnings: [],
+                applyPatches: [
+                    {
+                        filePath: "src/features/login.ts",
+                        fullContent: "export const login = true;",
+                    },
+                ],
+            }),
+        });
+        await context.selectRepoFolder();
+        context.selectRole(roleButtons.developer);
+        elements.get("task").value = "fix login flow";
+        elements.get("repoPath").value = "C:/repo";
+        await context.execute();
+        await context.applyChanges();
+        const srcDir = await rootHandle.getDirectoryHandle("src");
+        const featuresDir = await srcDir.getDirectoryHandle("features");
+        const fileHandle = await featuresDir.getFileHandle("login.ts");
+        (0, vitest_1.expect)(fileHandle.writable.written).toBe("export const login = true;");
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("Applied successfully");
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("file written");
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain(">1</strong>");
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("src/features/login.ts");
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("Folder: zone-repo");
+        (0, vitest_1.expect)(elements.get("restoreBtn").classList.contains("hidden")).toBe(false);
+    });
+    (0, vitest_1.it)("shows a compact multi-file apply summary when multiple files are written", async () => {
+        const { context, elements, roleButtons } = buildUiHarness();
+        const rootHandle = new MockDirectoryHandle("zone-repo");
+        context.window.showDirectoryPicker = vitest_1.vi.fn().mockResolvedValue(rootHandle);
+        context.fetch = vitest_1.vi
+            .fn()
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                decision: { mode: "safe_to_apply" },
+                confidence: { score: 82 },
+                risk: { score: 0, breakdown: {} },
+            }),
+        })
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                ok: true,
+                patchPreview: "Summary: Update repo files",
+                warnings: [],
+                applyPatches: [
+                    {
+                        filePath: "src/features/login.ts",
+                        fullContent: "export const login = true;",
+                    },
+                    {
+                        filePath: "db/migration/V1__init.sql",
+                        fullContent: "create table users(id int);",
+                    },
+                ],
+            }),
+        });
+        await context.selectRepoFolder();
+        context.selectRole(roleButtons.developer);
+        elements.get("task").value = "update repo files";
+        elements.get("repoPath").value = "C:/repo";
+        await context.execute();
+        await context.applyChanges();
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("files written");
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain(">2</strong>");
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("created");
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("modified");
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("src/features/login.ts");
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("db/migration/V1__init.sql");
+    });
+    (0, vitest_1.it)("shows an error when no folder handle is available during apply", async () => {
+        const { context, elements, roleButtons } = buildUiHarness();
+        context.fetch = vitest_1.vi
+            .fn()
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                decision: { mode: "safe_to_apply" },
+                confidence: { score: 82 },
+                risk: { score: 0, breakdown: {} },
+            }),
+        })
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                ok: true,
+                patchPreview: "Summary: Fix login flow",
+                warnings: [],
+                applyPatches: [
+                    {
+                        filePath: "src/features/login.ts",
+                        fullContent: "export const login = true;",
+                    },
+                ],
+            }),
+        });
+        context.selectRole(roleButtons.developer);
+        elements.get("task").value = "fix login flow";
+        elements.get("repoPath").value = "C:/repo";
+        await context.execute();
+        await context.applyChanges();
+        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Select a folder before applying changes.");
+    });
+    (0, vitest_1.it)("handles permission errors gracefully and reset clears the handle", async () => {
+        const { context, elements, roleButtons } = buildUiHarness();
+        const deniedHandle = new MockDirectoryHandle("zone-repo", "denied");
+        context.window.showDirectoryPicker = vitest_1.vi.fn().mockResolvedValue(deniedHandle);
+        context.fetch = vitest_1.vi
+            .fn()
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                decision: { mode: "safe_to_apply" },
+                confidence: { score: 82 },
+                risk: { score: 0, breakdown: {} },
+            }),
+        })
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                ok: true,
+                patchPreview: "Summary: Fix login flow",
+                warnings: [],
+                applyPatches: [
+                    {
+                        filePath: "src/features/login.ts",
+                        fullContent: "export const login = true;",
+                    },
+                ],
+            }),
+        });
+        await context.selectRepoFolder();
+        context.selectRole(roleButtons.developer);
+        elements.get("task").value = "fix login flow";
+        elements.get("repoPath").value = "C:/repo";
+        await context.execute();
+        await context.applyChanges();
+        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Write permission denied");
+        context.resetUI();
+        elements.get("task").value = "fix login flow";
+        elements.get("repoPath").value = "C:/repo";
+        context.fetch = vitest_1.vi
+            .fn()
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                decision: { mode: "safe_to_apply" },
+                confidence: { score: 82 },
+                risk: { score: 0, breakdown: {} },
+            }),
+        })
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                ok: true,
+                patchPreview: "Summary: Fix login flow",
+                warnings: [],
+                applyPatches: [
+                    {
+                        filePath: "src/features/login.ts",
+                        fullContent: "export const login = true;",
+                    },
+                ],
+            }),
+        });
+        await context.execute();
+        await context.applyChanges();
+        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Select a folder before applying changes.");
+    });
+    (0, vitest_1.it)("keeps apply summary safe when no files are written", async () => {
+        const { context, elements } = buildUiHarness();
+        await context.applyChanges();
+        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("No patches to apply.");
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toBe("");
+    });
+    (0, vitest_1.it)("restores original file contents after apply", async () => {
+        const { context, elements, roleButtons } = buildUiHarness();
+        const rootHandle = new MockDirectoryHandle("zone-repo");
+        const srcDir = await rootHandle.getDirectoryHandle("src", { create: true });
+        const featuresDir = await srcDir.getDirectoryHandle("features", { create: true });
+        const fileHandle = await featuresDir.getFileHandle("login.ts", { create: true });
+        fileHandle.content = "export const login = false;";
+        context.window.showDirectoryPicker = vitest_1.vi.fn().mockResolvedValue(rootHandle);
+        context.fetch = vitest_1.vi
+            .fn()
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                decision: { mode: "safe_to_apply" },
+                confidence: { score: 82 },
+                risk: { score: 0, breakdown: {} },
+            }),
+        })
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                ok: true,
+                patchPreview: "Summary: Fix login flow",
+                warnings: [],
+                applyPatches: [
+                    {
+                        filePath: "src/features/login.ts",
+                        fullContent: "export const login = true;",
+                    },
+                ],
+            }),
+        });
+        await context.selectRepoFolder();
+        context.selectRole(roleButtons.developer);
+        elements.get("task").value = "fix login flow";
+        elements.get("repoPath").value = "C:/repo";
+        await context.execute();
+        await context.applyChanges();
+        (0, vitest_1.expect)(fileHandle.content).toBe("export const login = true;");
+        await context.restorePreviousState();
+        (0, vitest_1.expect)(fileHandle.content).toBe("export const login = false;");
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("Restored previous state");
+        (0, vitest_1.expect)(elements.get("restoreBtn").classList.contains("hidden")).toBe(true);
     });
 });
 (0, vitest_1.describe)("UI progress feedback", () => {
