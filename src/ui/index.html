@@ -102,8 +102,10 @@ input:focus,textarea:focus{border-color:#007acc}
 .warning-item::before{content:"⚠ "}
 .apply-btn{width:100%;background:transparent;border:1px solid #4ec9b0;border-radius:6px;color:#4ec9b0;font-size:15px;padding:10px;cursor:pointer;margin-top:14px;display:flex;align-items:center;justify-content:center;gap:8px}
 .apply-btn.is-enabled{border-color:#4ec9b0;color:#4ec9b0;background:transparent;opacity:1;cursor:pointer}
+.apply-btn.is-needs-folder{border-color:#007acc;color:#007acc;background:transparent;opacity:1;cursor:pointer}
 .apply-btn.is-disabled{border-color:#3c3c3c;color:#858585;background:transparent;opacity:.7;cursor:not-allowed}
 .apply-btn:hover{background:#0e3a1e}
+.apply-btn.is-needs-folder:hover{background:#0a2a3a}
 .apply-btn.is-disabled:hover{background:transparent}
 .apply-btn:disabled{border-color:#3c3c3c;color:#858585;cursor:not-allowed}
 .hidden{display:none}
@@ -398,13 +400,24 @@ function getApplyBlockingReason(){
   return '';
 }
 
+// Apply button has 3 states:
+// 'enabled'      — canApply true, folder ready, not blocked
+// 'needs-folder' — result is safe but no folder selected yet; clicking opens picker
+// 'disabled'     — blocked by validation, no patch result, or run in progress
 function getApplyState(){
   const applyBlockingReason=getApplyBlockingReason();
+  const needsFolder=Boolean(
+    !currentRepoHandle &&
+    currentRunState.decisionMode==='safe_to_apply' &&
+    currentRunState.hasPatchResult &&
+    !currentRunState.validationBlocked &&
+    !currentRunState.runInProgress
+  );
   return {
-    canApply: !applyBlockingReason,
+    canApply: !applyBlockingReason && !needsFolder,
     applyBlockingReason,
-    helperText: applyBlockingReason||'Ready to apply to the selected folder.',
-    visualState: applyBlockingReason?'disabled':'enabled',
+    helperText: needsFolder?'Select a folder to apply to':applyBlockingReason||'Ready to apply to the selected folder.',
+    visualState: needsFolder?'needs-folder':applyBlockingReason?'disabled':'enabled',
   };
 }
 
@@ -412,9 +425,9 @@ function updateApplyState(){
   const btn=document.getElementById('applyBtn');
   const status=document.getElementById('applyStatusBox');
   const applyState=getApplyState();
-  btn.disabled=!applyState.canApply;
+  btn.disabled=applyState.visualState==='disabled';
   btn.className=`apply-btn is-${applyState.visualState}`;
-  btn.title=applyState.applyBlockingReason||'Apply generated changes to the selected folder';
+  btn.title=applyState.visualState==='needs-folder'?'Select a folder to apply changes':applyState.applyBlockingReason||'Apply generated changes to the selected folder';
   btn.setAttribute('aria-disabled',String(!applyState.canApply));
   status.textContent=applyState.helperText;
 }
@@ -885,8 +898,20 @@ function buildApplyNeutralSummary(input){
 }
 
 async function applyChanges(){
-  const applyState=getApplyState();
-  if(!applyState.canApply){showError(applyState.applyBlockingReason);updateApplyState();return;}
+  let applyState=getApplyState();
+  if(applyState.visualState==='needs-folder'){
+    await selectRepoFolder();
+    applyState=getApplyState();
+    if(!applyState.canApply){
+      showError(applyState.applyBlockingReason);
+      updateApplyState();
+      return;
+    }
+  }else if(!applyState.canApply){
+    showError(applyState.applyBlockingReason);
+    updateApplyState();
+    return;
+  }
   const btn=document.getElementById('applyBtn');const sp=document.getElementById('applySpinner');const t=document.getElementById('applyText');
   const sb=document.getElementById('successBox');
   btn.disabled=true;sp.style.display='block';t.textContent=`Writing ${currentPatches.length} file${currentPatches.length!==1?'s':''}...`;sb.style.display='none';
