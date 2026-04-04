@@ -1,11 +1,198 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>Zone</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#1e1e1e;color:#d4d4d4;font-family:'Courier New',monospace;font-size:14px;line-height:1.6;padding:24px;max-width:980px;margin:0 auto}
+h1{font-size:22px;color:#d4d4d4;margin-bottom:6px}
+.sub{font-size:12px;color:#858585;margin-bottom:24px;line-height:1.7}
+.section{background:#252526;border:1px solid #3c3c3c;border-radius:8px;padding:16px;margin-bottom:16px;box-shadow:0 8px 24px rgba(0,0,0,0.18)}
+.label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#9a9a9a;margin-bottom:10px}
+.prompt-box{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;padding:12px;font-size:12px;color:#9cdcfe;line-height:1.8;position:relative}
+.copy-btn{position:absolute;top:8px;right:8px;background:#3c3c3c;border:none;border-radius:4px;color:#858585;font-size:11px;padding:3px 9px;cursor:pointer}
+.copy-btn:hover{color:#d4d4d4}
+.role-row{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.role-btn{background:transparent;border:1px solid #3c3c3c;border-radius:6px;color:#858585;font-family:'Courier New',monospace;font-size:12px;padding:7px 14px;cursor:pointer}
+.role-btn:hover{border-color:#007acc;color:#007acc}
+.role-btn.active{border-color:#007acc;color:#007acc;background:#0a2a3a}
+textarea,input,select{width:100%;background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;color:#d4d4d4;font-family:'Courier New',monospace;font-size:13px;padding:10px;outline:none;margin-bottom:10px}
+textarea{resize:vertical;height:84px;line-height:1.7}
+select{cursor:pointer}
+input:focus,textarea:focus{border-color:#007acc}
+.btn-row{display:flex;gap:10px}
+.exec-btn{flex:1;background:#007acc;border:none;border-radius:6px;color:#fff;font-size:14px;padding:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+.exec-btn:hover{background:#1a8cdb}
+.exec-btn:disabled{background:#3c3c3c;color:#858585;cursor:not-allowed}
+.reset-btn{background:transparent;border:1px solid #3c3c3c;border-radius:6px;color:#858585;font-size:14px;padding:10px 16px;cursor:pointer}
+.reset-btn:hover{border-color:#d4d4d4;color:#d4d4d4}
+.spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.error-box{background:#3a0e0e;border:1px solid #6b1d1d;border-radius:6px;padding:12px;font-size:12px;color:#f44747;margin-bottom:10px;display:none}
+.warning-box{background:#3a2e0e;border:1px solid #6b5a1d;border-radius:4px;padding:10px;font-size:11px;color:#ce9178;margin-bottom:8px;display:none}
+.success-box{background:#0e3a1e;border:1px solid #1d6b3a;border-radius:4px;padding:10px;font-size:11px;color:#4ec9b0;margin-bottom:8px;display:none}
+.progress-box{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:8px;padding:10px 12px;font-size:12px;color:#9cdcfe;margin-bottom:12px;display:none}
+.badge-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.decision-badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 12px;font-size:12px}
+.decision-badge.safe{background:#0e3a1e;border:1px solid #1d6b3a;color:#4ec9b0}
+.decision-badge.preview{background:#3a2e0e;border:1px solid #6b5a1d;color:#ce9178}
+.decision-badge.blocked{background:#3a0e0e;border:1px solid #6b1d1d;color:#f44747}
+.framework-badge{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:999px;padding:5px 10px;font-size:11px;color:#858585}
+.complexity-badge{border-radius:999px;padding:5px 10px;font-size:11px}
+.complexity-badge.simple{background:#1e1e1e;border:1px solid #3c3c3c;color:#d4d4d4}
+.complexity-badge.data_driven{background:#0a1a3a;border:1px solid #1d3a6b;color:#9cdcfe}
+.complexity-badge.e2e{background:#1a0a3a;border:1px solid #3a1d6b;color:#c586c0}
+.complexity-badge.negative{background:#3a0a0a;border:1px solid #6b1d1d;color:#f44747}
+.complexity-badge.multi_scenario{background:#0a3a1a;border:1px solid #1d6b3a;color:#4ec9b0}
+.bdot{width:6px;height:6px;border-radius:50%}
+.result-summary{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:8px;padding:12px;margin-bottom:14px}
+.result-summary-main{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.result-summary-title{font-size:15px;font-weight:700;color:#d4d4d4}
+.result-summary-subtitle{font-size:11px;color:#858585}
+.result-summary-chips{display:flex;flex-wrap:wrap;gap:8px}
+.result-chip{background:#20232a;border:1px solid #3c3c3c;border-radius:999px;padding:4px 10px;font-size:11px;color:#d4d4d4}
+.metrics{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px}
+.metric{background:#1e1e1e;border:1px solid #2d2d2d;border-radius:6px;padding:10px;text-align:center}
+.mval{font-size:22px;font-weight:600;color:#4ec9b0}
+.mlbl{font-size:10px;color:#858585;text-transform:uppercase;margin-top:4px}
+.risk-row{display:flex;align-items:center;gap:10px;margin-bottom:7px}
+.rlbl{font-size:11px;color:#858585;width:84px}
+.rbg{flex:1;background:#3c3c3c;border-radius:2px;height:4px}
+.rbar{height:4px;border-radius:2px;transition:width .5s}
+.rval{font-size:11px;color:#858585;width:28px;text-align:right}
+.preview-text{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;padding:12px;font-size:12px;color:#ce9178;line-height:1.8;margin-bottom:12px;white-space:pre-wrap;max-height:220px;overflow-y:auto}
+.context-files{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;padding:12px;margin-bottom:12px}
+.context-files ul{margin:0;padding-left:16px}
+.context-files li{font-size:12px;color:#9cdcfe;line-height:1.8;word-break:break-word}
+.recent-runs{padding:16px}
+.recent-runs-list{display:flex;flex-direction:column;gap:8px}
+.recent-run-item{width:100%;background:#1e1e1e;border:1px solid #3c3c3c;border-radius:8px;padding:12px;cursor:pointer;text-align:left;font-family:'Courier New',monospace}
+.recent-run-item:hover{border-color:#007acc;background:#20232a}
+.recent-run-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.recent-run-task{font-size:12px;color:#d4d4d4;flex:1;word-break:break-word;line-height:1.7}
+.recent-run-meta{display:flex;flex-wrap:wrap;gap:8px;font-size:11px;color:#858585}
+.recent-run-status{font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid #3c3c3c}
+.recent-run-status.success{background:#0e3a1e;border-color:#1d6b3a;color:#4ec9b0}
+.recent-run-status.error{background:#3a0e0e;border-color:#6b1d1d;color:#f44747}
+.recent-run-empty{font-size:12px;color:#858585;background:#1e1e1e;border:1px dashed #3c3c3c;border-radius:8px;padding:14px;line-height:1.7}
+.file-card{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;margin-bottom:10px;overflow:hidden}
+.file-card:last-child{margin-bottom:0}
+.file-toggle summary{list-style:none;cursor:pointer;padding:12px}
+.file-toggle summary::-webkit-details-marker{display:none}
+.file-row{display:flex;align-items:center;gap:8px}
+.file-icon{font-size:13px}
+.fname{font-size:12px;color:#9cdcfe;flex:1;word-break:break-word;line-height:1.7}
+.fmeta{font-size:11px;color:#858585}
+.fop{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:600}
+.fop.create{background:#0e3a1e;color:#4ec9b0;border:1px solid #1d6b3a}
+.fop.modify{background:#3a2e0e;color:#ce9178;border:1px solid #6b5a1d}
+.file-content{border-top:1px solid #2d2d2d;background:#181818;padding:12px}
+.file-content pre{white-space:pre-wrap;word-break:break-word;font-size:12px;color:#d4d4d4;line-height:1.8;max-height:280px;overflow:auto;padding:2px}
+.warning-item{font-size:12px;color:#ce9178;padding:4px 0;border-bottom:1px solid #2d2d2d;line-height:1.7}
+.warning-item:last-child{border-bottom:none}
+.warning-item::before{content:"⚠ "}
+.apply-btn{width:100%;background:transparent;border:1px solid #4ec9b0;border-radius:6px;color:#4ec9b0;font-size:14px;padding:9px;cursor:pointer;margin-top:12px;display:flex;align-items:center;justify-content:center;gap:8px}
+.apply-btn:hover{background:#0e3a1e}
+.apply-btn:disabled{border-color:#3c3c3c;color:#858585;cursor:not-allowed}
+.hidden{display:none}
+.history-label{font-size:11px;color:#858585;margin-bottom:6px}
+.section-title{font-size:12px;color:#b0b0b0;margin-bottom:10px;font-weight:700}
+</style>
 </head>
 <body>
-<div class="prompt-box">Zone prompt</div>
+<h1>⚡ Zone</h1>
+<p class="sub">AI Code Agent — deterministic, explainable, safe</p>
+
+<div class="section">
+  <div class="label">AI Prompt</div>
+  <div class="prompt-box">
+    You are a code agent. Analyze the repo and apply the task safely. Follow existing patterns, preserve architecture, and explain your reasoning.
+    <button class="copy-btn" onclick="copyPrompt()">copy</button>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">Role</div>
+  <div class="role-row">
+    <button class="role-btn active" data-role="developer" onclick="selectRole(this)">⚡ Developer</button>
+    <button class="role-btn" data-role="test_engineer" onclick="selectRole(this)">🧪 Test Engineer</button>
+    <button class="role-btn" data-role="data_analyst" onclick="selectRole(this)">📊 Data Analyst</button>
+  </div>
+  <div class="label">Task</div>
+  <textarea id="task" placeholder="add input validation to login form..."></textarea>
+  <div class="history-label">Repo Path</div>
+  <input id="repoPath" type="text" placeholder="C:\Users\..." />
+  <div id="historyBox" class="hidden">
+    <div class="history-label">Recent paths:</div>
+    <select id="historySelect" onchange="selectHistory()">
+      <option value="">— select —</option>
+    </select>
+  </div>
+  <div id="errorBox" class="error-box"></div>
+  <div id="progressBox" class="progress-box hidden">
+    <span id="progressText"></span>
+  </div>
+  <div class="btn-row">
+    <button class="exec-btn" id="execBtn" onclick="execute()">
+      <div class="spinner" id="spinner"></div>
+      <span id="execText">▶  Execute</span>
+    </button>
+    <button class="reset-btn" onclick="resetUI()">↺ Reset</button>
+  </div>
+</div>
+
+<div class="section recent-runs" id="recentRunsSection">
+  <div class="label">Recent Runs</div>
+  <div id="recentRunsEmpty" class="recent-run-empty">No recent runs yet.</div>
+  <div id="recentRunsList" class="recent-runs-list hidden"></div>
+</div>
+
+<div class="section hidden" id="decisionSection">
+  <div class="label">Decision</div>
+  <div id="resultSummaryBox" class="result-summary">
+    <div class="result-summary-main">
+      <div>
+        <div id="resultSummaryTitle" class="result-summary-title">Run Summary</div>
+        <div id="resultSummarySubtitle" class="result-summary-subtitle">Developer run</div>
+      </div>
+      <div id="resultSummaryChips" class="result-summary-chips"></div>
+    </div>
+  </div>
+  <div class="badge-row">
+    <div id="decisionBadge" class="decision-badge safe">
+      <div class="bdot" id="bdot" style="background:#4ec9b0"></div>
+      <span id="badgeText">safe to apply</span>
+    </div>
+    <div id="frameworkBadge" class="framework-badge hidden"></div>
+    <div id="complexityBadge" class="complexity-badge hidden"></div>
+  </div>
+  <div class="metrics">
+    <div class="metric"><div class="mval" id="confVal">—</div><div class="mlbl">Confidence</div></div>
+    <div class="metric"><div class="mval" id="riskVal" style="color:#ce9178">—</div><div class="mlbl">Risk</div></div>
+    <div class="metric"><div class="mval" id="filesVal" style="color:#9cdcfe">—</div><div class="mlbl">Files</div></div>
+  </div>
+  <div class="risk-row"><span class="rlbl">destructive</span><div class="rbg"><div class="rbar" id="rDestructive" style="width:0%;background:#e24b4a"></div></div><span class="rval" id="rDestructiveVal">0</span></div>
+  <div class="risk-row"><span class="rlbl">schema</span><div class="rbg"><div class="rbar" id="rSchema" style="width:0%;background:#ef9f27"></div></div><span class="rval" id="rSchemaVal">0</span></div>
+  <div class="risk-row"><span class="rlbl">mass scope</span><div class="rbg"><div class="rbar" id="rMass" style="width:0%;background:#ef9f27"></div></div><span class="rval" id="rMassVal">0</span></div>
+</div>
+
+<div class="section hidden" id="patchSection">
+  <div class="label">Patch Preview</div>
+  <div id="warningsList" class="hidden" style="margin-bottom:10px"></div>
+  <div class="preview-text" id="patchSummary"></div>
+  <div id="contextFilesBox" class="context-files hidden">
+    <div class="section-title">Context Files</div>
+    <ul id="contextFilesList"></ul>
+  </div>
+  <div id="fileList"></div>
+  <div id="successBox" class="success-box"></div>
+  <button class="apply-btn" id="applyBtn" onclick="applyChanges()">
+    <div class="spinner" id="applySpinner"></div>
+    <span id="applyText">✓  Apply Changes</span>
+  </button>
+</div>
+
 <script>
 let currentPatches = [];
 let currentRepoPath = '';
@@ -16,43 +203,589 @@ let currentSummaryState = {};
 const RECENT_RUNS_KEY = 'zone_recent_runs';
 const MAX_RECENT_RUNS = 6;
 
-function formatMetadataBadge(parts){const safeParts=(parts||[]).filter(Boolean);return safeParts.length>0?safeParts.join(' / '):'';}
-function formatRoleLabel(role){const labels={developer:'Developer',test_engineer:'Test Engineer',data_analyst:'Data Analyst'};return labels[role]||'Developer';}
-function formatStatusLabel(status){const labels={safe_to_apply:'Safe to Apply',preview_only:'Preview Only',blocked:'Blocked',success:'Success',error:'Error'};return labels[status]||'Ready';}
-function formatRecentRunTime(timestamp){if(!timestamp)return 'unknown time';const diffMs=Math.max(0,Date.now()-timestamp);const diffMinutes=Math.floor(diffMs/60000);if(diffMinutes<1)return 'just now';if(diffMinutes<60)return `${diffMinutes}m ago`;const diffHours=Math.floor(diffMinutes/60);if(diffHours<24)return `${diffHours}h ago`;const diffDays=Math.floor(diffHours/24);return `${diffDays}d ago`;}
-function escapeHtml(value){return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
-function formatFileOperation(filePath){return String(filePath||'').includes('[modify]')?'modify':'create';}
-function formatFileLabel(filePath,index){return filePath||`generated_file_${index+1}`;}
-function buildFilePreviewCards(patches){return (patches||[]).map((patch,index)=>{const filePath=formatFileLabel(patch.filePath,index);const content=escapeHtml(patch.fullContent||'(no content available)');const operation=formatFileOperation(filePath);return `<details class="file-card file-toggle" ${index===0?'open':''}><summary><div class="file-row"><span class="fname">${escapeHtml(filePath)}</span><span class="fop ${operation}">${operation}</span></div></summary><div class="file-content"><pre>${content}</pre></div></details>`;}).join('');}
-function renderContextFiles(contextFiles){const box=document.getElementById('contextFilesBox');const list=document.getElementById('contextFilesList');const safeFiles=(contextFiles||[]).filter(Boolean);if(safeFiles.length===0){list.innerHTML='';box.classList.add('hidden');return;}list.innerHTML=safeFiles.map((filePath)=>`<li>${escapeHtml(filePath)}</li>`).join('');box.classList.remove('hidden');}
-function getRecentRuns(){try{const parsed=JSON.parse(localStorage.getItem(RECENT_RUNS_KEY)||'[]');return Array.isArray(parsed)?parsed.sort((a,b)=>(b.timestamp||0)-(a.timestamp||0)):[];}catch{return [];}}
-function saveRecentRuns(runs){localStorage.setItem(RECENT_RUNS_KEY,JSON.stringify(runs.slice(0,MAX_RECENT_RUNS)));}
-function renderRecentRuns(){const runs=getRecentRuns();const empty=document.getElementById('recentRunsEmpty');const list=document.getElementById('recentRunsList');if(runs.length===0){empty.classList.remove('hidden');list.classList.add('hidden');list.innerHTML='';return;}empty.classList.add('hidden');list.classList.remove('hidden');list.innerHTML=runs.map((run,index)=>`<button class="recent-run-item" onclick="loadRecentRun(${index})"><div class="recent-run-top"><span class="recent-run-task">${escapeHtml(run.task||'(no task)')}</span><span class="recent-run-status ${run.status==='error'?'error':'success'}">${escapeHtml(run.status||'success')}</span></div><div class="recent-run-meta"><span>${escapeHtml(formatRoleLabel(run.role))}</span><span>${escapeHtml(run.repoPath||'(no repo path)')}</span><span>${escapeHtml(formatRecentRunTime(run.timestamp))}</span></div></button>`).join('');}
-function addRecentRun(run){const recentRuns=[{task:run.task||'',role:run.role||'developer',repoPath:run.repoPath||'',status:run.status||'success',timestamp:typeof run.timestamp==='number'?run.timestamp:Date.now()},...getRecentRuns()].slice(0,MAX_RECENT_RUNS);saveRecentRuns(recentRuns);renderRecentRuns();}
-function loadRecentRun(index){const run=getRecentRuns()[index];if(!run)return;document.getElementById('task').value=run.task||'';document.getElementById('repoPath').value=run.repoPath||'';const matchingButton=Array.from(document.querySelectorAll('.role-btn')).find((button)=>button.dataset.role===run.role);if(matchingButton){selectRole(matchingButton);}}
-function renderResultSummary(){const title=document.getElementById('resultSummaryTitle');const subtitle=document.getElementById('resultSummarySubtitle');const chips=document.getElementById('resultSummaryChips');const roleLabel=formatRoleLabel(currentSummaryState.role||currentRole);const statusLabel=formatStatusLabel(currentSummaryState.status);const warningCount=currentSummaryState.warningCount ?? 0;const fileCount=currentSummaryState.fileCount ?? 0;const summaryChips=[`Status: ${statusLabel}`,fileCount>0?`Files: ${fileCount}`:'',`Warnings: ${warningCount}`,currentSummaryState.contextCount?`Context: ${currentSummaryState.contextCount}`:'',currentSummaryState.framework?`Framework: ${currentSummaryState.framework}`:'',currentSummaryState.complexity?`Complexity: ${currentSummaryState.complexity}`:'',currentSummaryState.dialect?`Dialect: ${currentSummaryState.dialect}`:'',currentSummaryState.migrationFormat?`Format: ${currentSummaryState.migrationFormat}`:''].filter(Boolean);title.textContent=`${roleLabel} Result`;subtitle.textContent=`${roleLabel} run summary`;chips.innerHTML=summaryChips.map((chip)=>`<span class="result-chip">${escapeHtml(chip)}</span>`).join('');}
-function updateResultSummary(partialState){currentSummaryState={...currentSummaryState,...partialState};renderResultSummary();}
-function closeProgressStream(){if(currentProgressSource){currentProgressSource.close();currentProgressSource=null;}}
-function setProgress(stage){const box=document.getElementById('progressBox');const text=document.getElementById('progressText');if(!stage){text.textContent='';box.classList.add('hidden');box.style.display='none';return;}text.textContent='⏳ '+stage;box.classList.remove('hidden');box.style.display='block';}
-function startProgress(runId,initialStage){closeProgressStream();currentRunId=runId;setProgress(initialStage);if(typeof EventSource!=='function')return;const source=new EventSource(`/api/progress?runId=${encodeURIComponent(runId)}`);source.onmessage=(event)=>{try{const payload=JSON.parse(event.data);if(payload.stage&&payload.stage!=='Connected'){setProgress(payload.stage);}}catch{if(event.data&&event.data!=='Connected'){setProgress(event.data);}}};source.onerror=()=>{closeProgressStream();};currentProgressSource=source;}
-function finishProgress(){setProgress('Ready');closeProgressStream();}
-function resetProgress(){closeProgressStream();currentRunId='';setProgress('');}
-function getHistory(){try{return JSON.parse(localStorage.getItem('zone_repo_history')||'[]');}catch{return [];}}
-function saveToHistory(path){let h=getHistory().filter((p)=>p!==path);h.unshift(path);h=h.slice(0,5);localStorage.setItem('zone_repo_history',JSON.stringify(h));renderHistory();}
-function renderHistory(){const h=getHistory();const box=document.getElementById('historyBox');const sel=document.getElementById('historySelect');if(h.length===0){box.classList.add('hidden');return;}box.classList.remove('hidden');sel.innerHTML='<option value="">— select —</option>'+h.map((p)=>`<option value="${p}">${p}</option>`).join('');}
-function selectHistory(){const val=document.getElementById('historySelect').value;if(val)document.getElementById('repoPath').value=val;}
-function selectRole(btn){document.querySelectorAll('.role-btn').forEach((b)=>b.classList.remove('active'));btn.classList.add('active');currentRole=btn.dataset.role;const placeholder={developer:'add input validation to login form...',test_engineer:'write a cucumber scenario for one-way flight search...',data_analyst:'create a users table with id, email, created_at...'};document.getElementById('task').placeholder=placeholder[currentRole]||'';}
-function copyPrompt(){const text=(document.querySelector('.prompt-box').innerText||'').replace('copy','').trim();navigator.clipboard.writeText(text);}
-function showError(msg){const box=document.getElementById('errorBox');box.textContent='? '+msg;box.style.display='block';}
-function hideError(){document.getElementById('errorBox').style.display='none';}
-function setLoading(loading){const btn=document.getElementById('execBtn');const spinner=document.getElementById('spinner');const text=document.getElementById('execText');btn.disabled=loading;spinner.style.display=loading?'block':'none';text.textContent=loading?'Running...':'? Execute';}
-async function execute(){const task=document.getElementById('task').value.trim();const repoPath=document.getElementById('repoPath').value.trim();if(!task||!repoPath){showError('Task and repo path are required.');return;}resetProgress();hideError();currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};renderResultSummary();currentRepoPath=repoPath;saveToHistory(repoPath);setLoading(true);document.getElementById('successBox').style.display='none';document.getElementById('warningsList').classList.add('hidden');const runId=`${Date.now()}-${Math.random().toString(36).slice(2,8)}`;const initialStage=currentRole==='data_analyst'||currentRole==='test_engineer'?'Scanning repo...':'Generating patch...';startProgress(runId,initialStage);try{if(currentRole==='test_engineer'){const r=await fetch('/api/test-engineer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});if(!r.ok)throw new Error('Test engineer flow failed: '+r.status);const result=await r.json();if(!result.ok){showError(result.reason||'Test generation failed.');return;}showDecision({decision:{mode:result.confidence>=70?'safe_to_apply':'preview_only'},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity});showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings});addRecentRun({task,role:currentRole,repoPath,status:'success',timestamp:Date.now()});currentPatches=result.applyPatches||[];finishProgress();}else if(currentRole==='data_analyst'){const r=await fetch('/api/data-analyst',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});if(!r.ok)throw new Error('Data analyst flow failed: '+r.status);const result=await r.json();if(!result.ok){showError(result.reason||'SQL generation failed.');return;}showDecision({decision:{mode:result.confidence>=70?'safe_to_apply':'preview_only'},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat])});showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings});addRecentRun({task,role:currentRole,repoPath,status:'success',timestamp:Date.now()});currentPatches=result.applyPatches||[];finishProgress();}else{setProgress('Scanning repo...');const r1=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});if(!r1.ok)throw new Error('Analyze failed: '+r1.status);const analyze=await r1.json();showDecision(analyze);setProgress('Generating patch...');const r2=await fetch('/api/patch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});if(!r2.ok)throw new Error('Patch failed: '+r2.status);const patch=await r2.json();showPatch(patch);addRecentRun({task,role:currentRole,repoPath,status:patch.ok===false?'error':'success',timestamp:Date.now()});currentPatches=patch.applyPatches||[];finishProgress();}}catch(e){resetProgress();addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});showError(e.message);}finally{setLoading(false);}}
-function showDecision(data){const mode=data.decision?.mode||'safe_to_apply';const conf=data.confidence?.score ?? 0;const risk=data.risk?.score ?? 0;const bd=data.risk?.breakdown||{};const badge=document.getElementById('decisionBadge');const bdot=document.getElementById('bdot');const badgeText=document.getElementById('badgeText');const cls=mode==='blocked'?'blocked':mode==='preview_only'?'preview':'safe';const dotColor=mode==='blocked'?'#f44747':mode==='preview_only'?'#ce9178':'#4ec9b0';badge.className='decision-badge '+cls;bdot.style.background=dotColor;badgeText.textContent=mode.replace(/_/g,' ');document.getElementById('confVal').textContent=String(conf);document.getElementById('riskVal').textContent=String(risk);const d=bd.destructive||0;const s=bd.schema||0;const m=bd.massScope||bd.mass_scope||0;document.getElementById('rDestructive').style.width=Math.min(d,100)+'%';document.getElementById('rDestructiveVal').textContent=String(d);document.getElementById('rSchema').style.width=Math.min(s,100)+'%';document.getElementById('rSchemaVal').textContent=String(s);document.getElementById('rMass').style.width=Math.min(m,100)+'%';document.getElementById('rMassVal').textContent=String(m);const fb=document.getElementById('frameworkBadge');if(data.frameworkBadge){fb.textContent='🔍 '+data.frameworkBadge;fb.classList.remove('hidden');}else{fb.classList.add('hidden');}const complexityBadge=document.getElementById('complexityBadge');const complexityLabels={simple:'Simple',data_driven:'Data Driven',e2e:'E2E',negative:'Negative',multi_scenario:'Multi Scenario'};if(data.complexity&&complexityLabels[data.complexity]){complexityBadge.textContent=complexityLabels[data.complexity];complexityBadge.className='complexity-badge '+data.complexity;complexityBadge.classList.remove('hidden');}else{complexityBadge.textContent='';complexityBadge.className='complexity-badge hidden';}const frameworkParts=String(data.frameworkBadge||'').replace(/^[^A-Za-z0-9]*\s*/,'').split(' / ');updateResultSummary({role:currentRole,status:mode,framework:currentRole==='test_engineer'?frameworkParts[0]||'':'',complexity:currentRole==='test_engineer'&&data.complexity?complexityLabels[data.complexity]:'',dialect:currentRole==='data_analyst'?frameworkParts[0]||'':'',migrationFormat:currentRole==='data_analyst'?frameworkParts[1]||'':''});document.getElementById('decisionSection').classList.remove('hidden');}
-function showPatch(data){if(!data.ok){showError('Patch generation failed.');return;}const warnings=data.warnings||[];const wList=document.getElementById('warningsList');if(warnings.length>0){wList.innerHTML=warnings.map((w)=>`<div class="warning-item">${w}</div>`).join('');wList.classList.remove('hidden');}else{wList.classList.add('hidden');}const preview=data.patchPreview||'';const summaryMatch=preview.match(/Summary: (.+?)(\n|$)/);const summaryText=summaryMatch?summaryMatch[1]:preview;document.getElementById('patchSummary').textContent=summaryText;renderContextFiles(data.contextFiles);const patches=data.applyPatches||[];document.getElementById('filesVal').textContent=String(patches.length);updateResultSummary({role:currentRole,fileCount:patches.length,warningCount:warnings.length,contextCount:Array.isArray(data.contextFiles)?data.contextFiles.filter(Boolean).length:0});document.getElementById('fileList').innerHTML=buildFilePreviewCards(patches);document.getElementById('successBox').style.display='none';document.getElementById('patchSection').classList.remove('hidden');}
-async function applyChanges(){if(!currentPatches.length){showError('No patches to apply.');return;}const btn=document.getElementById('applyBtn');const spinner=document.getElementById('applySpinner');const text=document.getElementById('applyText');btn.disabled=true;spinner.style.display='block';text.textContent='Applying...';try{const r=await fetch('/api/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({patches:currentPatches,repoPath:currentRepoPath})});if(!r.ok)throw new Error('Apply failed: '+r.status);const result=await r.json();const applied=result.applied||[];const failed=result.failed||[];const successBox=document.getElementById('successBox');if(applied.length>0){successBox.innerHTML='? Applied successfully:<br>'+applied.map((f)=>`&nbsp;&nbsp;• ${f}`).join('<br>');if(failed.length>0)successBox.innerHTML+='<br>? Failed: '+failed.join(', ');successBox.style.display='block';}else{showError('No files were applied. Failed: '+failed.join(', '));}}catch(e){showError(e.message);}finally{btn.disabled=false;spinner.style.display='none';text.textContent='? Apply Changes';}}
-function resetUI(){document.getElementById('task').value='';document.getElementById('repoPath').value='';document.getElementById('decisionSection').classList.add('hidden');document.getElementById('patchSection').classList.add('hidden');hideError();document.getElementById('warningsList').classList.add('hidden');document.getElementById('successBox').style.display='none';document.getElementById('contextFilesList').innerHTML='';document.getElementById('contextFilesBox').classList.add('hidden');const complexityBadge=document.getElementById('complexityBadge');complexityBadge.textContent='';complexityBadge.className='complexity-badge hidden';currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};renderResultSummary();resetProgress();currentPatches=[];currentRepoPath='';renderHistory();}
-renderHistory();renderRecentRuns();currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};renderResultSummary();
+function formatMetadataBadge(parts) {
+  const safeParts = (parts || []).filter(Boolean);
+  return safeParts.length > 0 ? safeParts.join(' / ') : '';
+}
+
+function formatRoleLabel(role) {
+  const labels = {
+    developer: 'Developer',
+    test_engineer: 'Test Engineer',
+    data_analyst: 'Data Analyst'
+  };
+  return labels[role] || 'Developer';
+}
+
+function formatStatusLabel(status) {
+  const labels = {
+    safe_to_apply: 'Safe to Apply',
+    preview_only: 'Preview Only',
+    blocked: 'Blocked',
+    success: 'Success',
+    error: 'Error'
+  };
+  return labels[status] || 'Ready';
+}
+
+function formatRecentRunTime(timestamp) {
+  if (!timestamp) return 'unknown time';
+  const diffMs = Math.max(0, Date.now() - timestamp);
+  const diffMinutes = Math.floor(diffMs / 60000);
+  if (diffMinutes < 1) return 'just now';
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+function getRecentRuns() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECENT_RUNS_KEY) || '[]');
+    return Array.isArray(parsed)
+      ? parsed.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentRuns(runs) {
+  localStorage.setItem(RECENT_RUNS_KEY, JSON.stringify(runs.slice(0, MAX_RECENT_RUNS)));
+}
+
+function renderRecentRuns() {
+  const runs = getRecentRuns();
+  const empty = document.getElementById('recentRunsEmpty');
+  const list = document.getElementById('recentRunsList');
+
+  if (runs.length === 0) {
+    empty.classList.remove('hidden');
+    list.classList.add('hidden');
+    list.innerHTML = '';
+    return;
+  }
+
+  empty.classList.add('hidden');
+  list.classList.remove('hidden');
+  list.innerHTML = runs.map((run, index) => `
+    <button class="recent-run-item" onclick="loadRecentRun(${index})">
+      <div class="recent-run-top">
+        <span class="recent-run-task">${escapeHtml(run.task || '(no task)')}</span>
+        <span class="recent-run-status ${run.status === 'error' ? 'error' : 'success'}">${escapeHtml(run.status || 'success')}</span>
+      </div>
+      <div class="recent-run-meta">
+        <span>${escapeHtml(formatRoleLabel(run.role))}</span>
+        <span>${escapeHtml(run.repoPath || '(no repo path)')}</span>
+        <span>${escapeHtml(formatRecentRunTime(run.timestamp))}</span>
+      </div>
+    </button>
+  `).join('');
+}
+
+function addRecentRun(run) {
+  const recentRuns = [
+    {
+      task: run.task || '',
+      role: run.role || 'developer',
+      repoPath: run.repoPath || '',
+      status: run.status || 'success',
+      timestamp: typeof run.timestamp === 'number' ? run.timestamp : Date.now(),
+    },
+    ...getRecentRuns(),
+  ].slice(0, MAX_RECENT_RUNS);
+
+  saveRecentRuns(recentRuns);
+  renderRecentRuns();
+}
+
+function loadRecentRun(index) {
+  const run = getRecentRuns()[index];
+  if (!run) return;
+  document.getElementById('task').value = run.task || '';
+  document.getElementById('repoPath').value = run.repoPath || '';
+  const matchingButton = Array.from(document.querySelectorAll('.role-btn'))
+    .find((button) => button.dataset.role === run.role);
+  if (matchingButton) {
+    selectRole(matchingButton);
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatFileOperation(filePath) {
+  return String(filePath || '').includes('[modify]') ? 'modify' : 'create';
+}
+
+function formatFileLabel(filePath, index) {
+  return filePath || `generated_file_${index + 1}`;
+}
+
+function buildFilePreviewCards(patches) {
+  return (patches || []).map((patch, index) => {
+    const filePath = formatFileLabel(patch.filePath, index);
+    const content = escapeHtml(patch.fullContent || '(no content available)');
+    const ext = filePath.split('.').pop();
+    const icon = ext === 'java' ? 'â˜•' : ext === 'ts' || ext === 'tsx' ? 'âš¡' : ext === 'feature' ? 'ðŸ¥’' : ext === 'py' ? 'ðŸ' : ext === 'sql' ? 'ðŸ—„ï¸' : 'ðŸ“„';
+    const operation = formatFileOperation(filePath);
+    return `<details class="file-card file-toggle" ${index === 0 ? 'open' : ''}><summary><div class="file-row"><span class="file-icon">${icon}</span><span class="fname">${escapeHtml(filePath)}</span><span class="fmeta">${String((patch.fullContent || '').length)} chars</span><span class="fop ${operation}">${operation}</span></div></summary><div class="file-content"><pre>${content}</pre></div></details>`;
+  }).join('');
+}
+
+function renderResultSummary() {
+  const title = document.getElementById('resultSummaryTitle');
+  const subtitle = document.getElementById('resultSummarySubtitle');
+  const chips = document.getElementById('resultSummaryChips');
+  const roleLabel = formatRoleLabel(currentSummaryState.role || currentRole);
+  const statusLabel = formatStatusLabel(currentSummaryState.status);
+  const warningCount = currentSummaryState.warningCount ?? 0;
+  const fileCount = currentSummaryState.fileCount ?? 0;
+  const summaryChips = [
+    `Status: ${statusLabel}`,
+    fileCount > 0 ? `Files: ${fileCount}` : '',
+    warningCount > 0 ? `Warnings: ${warningCount}` : 'Warnings: 0',
+    currentSummaryState.contextCount ? `Context: ${currentSummaryState.contextCount}` : '',
+    currentSummaryState.framework ? `Framework: ${currentSummaryState.framework}` : '',
+    currentSummaryState.complexity ? `Complexity: ${currentSummaryState.complexity}` : '',
+    currentSummaryState.dialect ? `Dialect: ${currentSummaryState.dialect}` : '',
+    currentSummaryState.migrationFormat ? `Format: ${currentSummaryState.migrationFormat}` : '',
+  ].filter(Boolean);
+
+  title.textContent = `${roleLabel} Result`;
+  subtitle.textContent = `${roleLabel} run summary`;
+  chips.innerHTML = summaryChips
+    .map((chip) => `<span class="result-chip">${escapeHtml(chip)}</span>`)
+    .join('');
+}
+
+function updateResultSummary(partialState) {
+  currentSummaryState = {
+    ...currentSummaryState,
+    ...partialState,
+  };
+  renderResultSummary();
+}
+
+function renderContextFiles(contextFiles) {
+  const box = document.getElementById('contextFilesBox');
+  const list = document.getElementById('contextFilesList');
+  const safeFiles = (contextFiles || []).filter(Boolean);
+
+  if (safeFiles.length === 0) {
+    list.innerHTML = '';
+    box.classList.add('hidden');
+    return;
+  }
+
+  list.innerHTML = safeFiles
+    .map((filePath) => `<li>${escapeHtml(filePath)}</li>`)
+    .join('');
+  box.classList.remove('hidden');
+}
+
+function closeProgressStream() {
+  if (currentProgressSource) {
+    currentProgressSource.close();
+    currentProgressSource = null;
+  }
+}
+
+function setProgress(stage) {
+  const box = document.getElementById('progressBox');
+  const text = document.getElementById('progressText');
+  if (!stage) {
+    text.textContent = '';
+    box.classList.add('hidden');
+    box.style.display = 'none';
+    return;
+  }
+  text.textContent = '⏳ ' + stage;
+  box.classList.remove('hidden');
+  box.style.display = 'block';
+}
+
+function startProgress(runId, initialStage) {
+  closeProgressStream();
+  currentRunId = runId;
+  setProgress(initialStage);
+  if (typeof EventSource !== 'function') return;
+
+  const source = new EventSource(`/api/progress?runId=${encodeURIComponent(runId)}`);
+  source.onmessage = (event) => {
+    try {
+      const payload = JSON.parse(event.data);
+      if (payload.stage && payload.stage !== 'Connected') {
+        setProgress(payload.stage);
+      }
+    } catch {
+      if (event.data && event.data !== 'Connected') {
+        setProgress(event.data);
+      }
+    }
+  };
+  source.onerror = () => {
+    closeProgressStream();
+  };
+  currentProgressSource = source;
+}
+
+function finishProgress() {
+  setProgress('Ready');
+  closeProgressStream();
+}
+
+function resetProgress() {
+  closeProgressStream();
+  currentRunId = '';
+  setProgress('');
+}
+
+function getHistory() {
+  try { return JSON.parse(localStorage.getItem('zone_repo_history') || '[]'); } catch { return []; }
+}
+
+function saveToHistory(path) {
+  let h = getHistory().filter(p => p !== path);
+  h.unshift(path);
+  h = h.slice(0, 5);
+  localStorage.setItem('zone_repo_history', JSON.stringify(h));
+  renderHistory();
+}
+
+function renderHistory() {
+  const h = getHistory();
+  const box = document.getElementById('historyBox');
+  const sel = document.getElementById('historySelect');
+  if (h.length === 0) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  sel.innerHTML = '<option value="">— select —</option>' + h.map(p => `<option value="${p}">${p}</option>`).join('');
+}
+
+function selectHistory() {
+  const val = document.getElementById('historySelect').value;
+  if (val) document.getElementById('repoPath').value = val;
+}
+
+function selectRole(btn) {
+  document.querySelectorAll('.role-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentRole = btn.dataset.role;
+  const placeholder = {
+    developer: 'add input validation to login form...',
+    test_engineer: 'write a cucumber scenario for one-way flight search...',
+    data_analyst: 'create a users table with id, email, created_at...'
+  };
+  document.getElementById('task').placeholder = placeholder[currentRole] || '';
+}
+
+function copyPrompt() {
+  const text = document.querySelector('.prompt-box').innerText.replace('copy','').trim();
+  navigator.clipboard.writeText(text);
+  document.querySelector('.copy-btn').textContent = 'copied!';
+  setTimeout(() => document.querySelector('.copy-btn').textContent = 'copy', 1500);
+}
+
+function showError(msg) {
+  const box = document.getElementById('errorBox');
+  box.textContent = '⚠ ' + msg;
+  box.style.display = 'block';
+}
+
+function hideError() {
+  document.getElementById('errorBox').style.display = 'none';
+}
+
+function setLoading(loading) {
+  const btn = document.getElementById('execBtn');
+  const spinner = document.getElementById('spinner');
+  const text = document.getElementById('execText');
+  btn.disabled = loading;
+  spinner.style.display = loading ? 'block' : 'none';
+  text.textContent = loading ? 'Running...' : '▶  Execute';
+}
+
+async function execute() {
+  const task = document.getElementById('task').value.trim();
+  const repoPath = document.getElementById('repoPath').value.trim();
+  if (!task || !repoPath) { showError('Task and repo path are required.'); return; }
+  resetProgress();
+  hideError();
+  currentSummaryState = { role: currentRole, status: '', fileCount: 0, warningCount: 0 };
+  currentRepoPath = repoPath;
+  saveToHistory(repoPath);
+  setLoading(true);
+  document.getElementById('successBox').style.display = 'none';
+  document.getElementById('warningsList').classList.add('hidden');
+  const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const initialStage = currentRole === 'data_analyst' || currentRole === 'test_engineer'
+    ? 'Scanning repo...'
+    : 'Generating patch...';
+  startProgress(runId, initialStage);
+
+  try {
+    if (currentRole === 'test_engineer') {
+      const r = await fetch('/api/test-engineer', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ task, repoPath, runId })
+      });
+      if (!r.ok) throw new Error('Test engineer flow failed: ' + r.status);
+      const result = await r.json();
+      if (!result.ok) { showError(result.reason || 'Test generation failed.'); return; }
+      showDecision({
+        decision: { mode: result.confidence >= 70 ? 'safe_to_apply' : 'preview_only' },
+        confidence: { score: result.confidence },
+        risk: { score: 0, breakdown: {} },
+        frameworkBadge: formatMetadataBadge([result.framework, result.language]),
+        complexity: result.complexity,
+      });
+      showPatch({
+        ok: true,
+        patchPreview: result.preview,
+        applyPatches: result.applyPatches,
+        warnings: result.warnings,
+      });
+      addRecentRun({ task, role: currentRole, repoPath, status: 'success', timestamp: Date.now() });
+      currentPatches = result.applyPatches || [];
+      finishProgress();
+
+    } else if (currentRole === 'data_analyst') {
+      const r = await fetch('/api/data-analyst', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ task, repoPath, runId })
+      });
+      if (!r.ok) throw new Error('Data analyst flow failed: ' + r.status);
+      const result = await r.json();
+      if (!result.ok) { showError(result.reason || 'SQL generation failed.'); return; }
+      showDecision({
+        decision: { mode: result.confidence >= 70 ? 'safe_to_apply' : 'preview_only' },
+        confidence: { score: result.confidence },
+        risk: { score: 0, breakdown: {} },
+        frameworkBadge: formatMetadataBadge([result.dialect, result.migrationFormat]),
+      });
+      showPatch({
+        ok: true,
+        patchPreview: result.preview,
+        applyPatches: result.applyPatches,
+        warnings: result.warnings,
+      });
+      addRecentRun({ task, role: currentRole, repoPath, status: 'success', timestamp: Date.now() });
+      currentPatches = result.applyPatches || [];
+      finishProgress();
+
+    } else {
+      setProgress('Scanning repo...');
+      const r1 = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ task, repoPath, runId })
+      });
+      if (!r1.ok) throw new Error('Analyze failed: ' + r1.status);
+      const analyze = await r1.json();
+      showDecision(analyze);
+      setProgress('Generating patch...');
+      const r2 = await fetch('/api/patch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ task, repoPath, runId })
+      });
+      if (!r2.ok) throw new Error('Patch failed: ' + r2.status);
+      const patch = await r2.json();
+      showPatch(patch);
+      addRecentRun({ task, role: currentRole, repoPath, status: patch.ok === false ? 'error' : 'success', timestamp: Date.now() });
+      currentPatches = patch.applyPatches || [];
+      finishProgress();
+    }
+  } catch(e) {
+    resetProgress();
+    addRecentRun({ task, role: currentRole, repoPath, status: 'error', timestamp: Date.now() });
+    showError(e.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+function showDecision(data) {
+  const mode = data.decision?.mode || 'safe_to_apply';
+  const conf = data.confidence?.score ?? 0;
+  const risk = data.risk?.score ?? 0;
+  const bd = data.risk?.breakdown || {};
+
+  const badge = document.getElementById('decisionBadge');
+  const bdot = document.getElementById('bdot');
+  const badgeText = document.getElementById('badgeText');
+  const cls = mode === 'blocked' ? 'blocked' : mode === 'preview_only' ? 'preview' : 'safe';
+  const dotColor = mode === 'blocked' ? '#f44747' : mode === 'preview_only' ? '#ce9178' : '#4ec9b0';
+  badge.className = 'decision-badge ' + cls;
+  bdot.style.background = dotColor;
+  badgeText.textContent = mode.replace(/_/g, ' ');
+
+  document.getElementById('confVal').textContent = conf;
+  document.getElementById('riskVal').textContent = risk;
+
+  const d = bd.destructive || 0;
+  const s = bd.schema || 0;
+  const m = bd.massScope || bd.mass_scope || 0;
+  document.getElementById('rDestructive').style.width = Math.min(d,100) + '%';
+  document.getElementById('rDestructiveVal').textContent = d;
+  document.getElementById('rSchema').style.width = Math.min(s,100) + '%';
+  document.getElementById('rSchemaVal').textContent = s;
+  document.getElementById('rMass').style.width = Math.min(m,100) + '%';
+  document.getElementById('rMassVal').textContent = m;
+
+  // Framework badge
+  const fb = document.getElementById('frameworkBadge');
+  if (data.frameworkBadge) {
+    fb.textContent = '🔍 ' + data.frameworkBadge;
+    fb.classList.remove('hidden');
+  } else {
+    fb.classList.add('hidden');
+  }
+
+  const complexityBadge = document.getElementById('complexityBadge');
+  const complexityLabels = {
+    simple: 'Simple',
+    data_driven: 'Data Driven',
+    e2e: 'E2E',
+    negative: 'Negative',
+    multi_scenario: 'Multi Scenario'
+  };
+  if (data.complexity && complexityLabels[data.complexity]) {
+    complexityBadge.textContent = complexityLabels[data.complexity];
+    complexityBadge.className = 'complexity-badge ' + data.complexity;
+    complexityBadge.classList.remove('hidden');
+  } else {
+    complexityBadge.textContent = '';
+    complexityBadge.className = 'complexity-badge hidden';
+  }
+
+  const frameworkParts = String(data.frameworkBadge || '').replace(/^ðŸ”\s*/, '').split(' / ');
+  updateResultSummary({
+    role: currentRole,
+    status: mode,
+    framework: currentRole === 'test_engineer' ? frameworkParts[0] || '' : '',
+    complexity: currentRole === 'test_engineer' && data.complexity ? complexityLabels[data.complexity] : '',
+    dialect: currentRole === 'data_analyst' ? frameworkParts[0] || '' : '',
+    migrationFormat: currentRole === 'data_analyst' ? frameworkParts[1] || '' : '',
+  });
+
+  document.getElementById('decisionSection').classList.remove('hidden');
+}
+
+function showPatch(data) {
+  if (!data.ok) { showError('Patch generation failed.'); return; }
+
+  // Warnings
+  const warnings = data.warnings || [];
+  const wList = document.getElementById('warningsList');
+  if (warnings.length > 0) {
+    wList.innerHTML = warnings.map(w => `<div class="warning-item">${w}</div>`).join('');
+    wList.classList.remove('hidden');
+  } else {
+    wList.classList.add('hidden');
+  }
+
+  // Summary
+  const preview = data.patchPreview || '';
+  const summaryMatch = preview.match(/Summary: (.+?)(\n|$)/);
+  const summaryText = summaryMatch ? summaryMatch[1] : preview;
+  document.getElementById('patchSummary').textContent = summaryText;
+  renderContextFiles(data.contextFiles);
+
+  const patches = data.applyPatches || [];
+  document.getElementById('filesVal').textContent = patches.length;
+  updateResultSummary({
+    role: currentRole,
+    fileCount: patches.length,
+    warningCount: warnings.length,
+    contextCount: Array.isArray(data.contextFiles) ? data.contextFiles.filter(Boolean).length : 0,
+  });
+
+  const list = document.getElementById('fileList');
+  list.innerHTML = buildFilePreviewCards(patches);
+  document.getElementById('successBox').style.display = 'none';
+  document.getElementById('patchSection').classList.remove('hidden');
+  return;
+  list.innerHTML = patches.map(p => {
+    const ext = p.filePath.split('.').pop();
+    const icon = ext === 'java' ? '☕' : ext === 'ts' || ext === 'tsx' ? '⚡' : ext === 'feature' ? '🥒' : ext === 'py' ? '🐍' : ext === 'sql' ? '🗄️' : '📄';
+    const isCreate = !p.filePath.includes('[modify]');
+    return `<div class="file-row"><span class="file-icon">${icon}</span><span class="fname">${p.filePath}</span><span class="fop ${isCreate ? 'create' : 'modify'}">${isCreate ? 'create' : 'modify'}</span></div>`;
+  }).join('');
+
+  document.getElementById('successBox').style.display = 'none';
+  document.getElementById('patchSection').classList.remove('hidden');
+}
+
+async function applyChanges() {
+  if (!currentPatches.length) { showError('No patches to apply.'); return; }
+  const btn = document.getElementById('applyBtn');
+  const spinner = document.getElementById('applySpinner');
+  const text = document.getElementById('applyText');
+  btn.disabled = true;
+  spinner.style.display = 'block';
+  text.textContent = 'Applying...';
+  try {
+    const r = await fetch('/api/apply', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ patches: currentPatches, repoPath: currentRepoPath })
+    });
+    if (!r.ok) throw new Error('Apply failed: ' + r.status);
+    const result = await r.json();
+    const applied = result.applied || [];
+    const failed = result.failed || [];
+    const successBox = document.getElementById('successBox');
+    if (applied.length > 0) {
+      successBox.innerHTML = '✓ Applied successfully:<br>' + applied.map(f => `&nbsp;&nbsp;• ${f}`).join('<br>');
+      if (failed.length > 0) successBox.innerHTML += '<br>⚠ Failed: ' + failed.join(', ');
+      successBox.style.display = 'block';
+    } else {
+      showError('No files were applied. Failed: ' + failed.join(', '));
+    }
+  } catch(e) {
+    showError(e.message);
+  } finally {
+    btn.disabled = false;
+    spinner.style.display = 'none';
+    text.textContent = '✓  Apply Changes';
+  }
+}
+
+function resetUI() {
+  document.getElementById('task').value = '';
+  document.getElementById('repoPath').value = '';
+  document.getElementById('decisionSection').classList.add('hidden');
+  document.getElementById('patchSection').classList.add('hidden');
+  hideError();
+  document.getElementById('warningsList').classList.add('hidden');
+  document.getElementById('successBox').style.display = 'none';
+  document.getElementById('contextFilesList').innerHTML = '';
+  document.getElementById('contextFilesBox').classList.add('hidden');
+  const complexityBadge = document.getElementById('complexityBadge');
+  complexityBadge.textContent = '';
+  complexityBadge.className = 'complexity-badge hidden';
+  currentSummaryState = { role: currentRole, status: '', fileCount: 0, warningCount: 0, contextCount: 0 };
+  renderResultSummary();
+  resetProgress();
+  currentPatches = [];
+  currentRepoPath = '';
+  renderHistory();
+}
+
+renderHistory();
+renderRecentRuns();
+currentSummaryState = { role: currentRole, status: '', fileCount: 0, warningCount: 0, contextCount: 0 };
+renderResultSummary();
 </script>
 </body>
 </html>
-
