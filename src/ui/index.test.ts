@@ -36,6 +36,7 @@ class MockClassList {
 class MockElement {
   id: string;
   style: Record<string, string> = {};
+  attributes: Record<string, string> = {};
   textContent = "";
   innerText = "";
   innerHTML = "";
@@ -67,6 +68,14 @@ class MockElement {
 
   click(): void {
     this.clicked = true;
+  }
+
+  setAttribute(name: string, value: string): void {
+    this.attributes[name] = value;
+  }
+
+  getAttribute(name: string): string | null {
+    return this.attributes[name] ?? null;
   }
 
   scrollIntoView(): void {
@@ -1068,6 +1077,8 @@ describe("UI folder-handle apply", () => {
     await context.execute();
 
     expect(elements.get("applyBtn").disabled).toBe(true);
+    expect(elements.get("applyBtn").className).toContain("is-disabled");
+    expect(elements.get("applyBtn").getAttribute("aria-disabled")).toBe("true");
     expect(elements.get("decisionBadge").className).toContain("safe");
     expect(elements.get("applyStatusBox").textContent).toContain("Safe to apply once a folder is selected");
     expect(elements.get("applyStatusBox").textContent).not.toContain("blocked");
@@ -1250,9 +1261,15 @@ describe("UI folder-handle apply", () => {
     elements.get("repoPath").value = "C:/repo";
 
     await context.execute();
+
+    expect(elements.get("applyBtn").disabled).toBe(false);
+    expect(elements.get("applyBtn").className).toContain("is-enabled");
+    expect(elements.get("applyBtn").getAttribute("aria-disabled")).toBe("false");
+
     await context.applyChanges();
 
     expect(elements.get("applyBtn").disabled).toBe(false);
+    expect(elements.get("applyBtn").className).toContain("is-enabled");
     expect(elements.get("applyStatusBox").textContent).toContain("Ready to apply");
     const srcDir = await rootHandle.getDirectoryHandle("src");
     const featuresDir = await srcDir.getDirectoryHandle("features");
@@ -1371,6 +1388,52 @@ describe("UI folder-handle apply", () => {
     await context.applyChanges();
 
     expect(elements.get("errorBox").textContent).toContain("Safe to apply once a folder is selected for local Apply.");
+  });
+
+  it("keeps helper text, visual state, and disabled state aligned for Apply", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    const rootHandle = new MockDirectoryHandle("zone-repo");
+    context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
+    context.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          decision: { mode: "safe_to_apply" },
+          confidence: { score: 82 },
+          risk: { score: 0, breakdown: {} },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          patchPreview: "Summary: Fix login flow",
+          warnings: [],
+          applyPatches: [
+            {
+              filePath: "src/features/login.ts",
+              fullContent: "export const login = true;",
+            },
+          ],
+        }),
+      });
+
+    context.selectRole(roleButtons.developer);
+    elements.get("task").value = "fix login flow";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+
+    expect(elements.get("applyBtn").disabled).toBe(true);
+    expect(elements.get("applyBtn").className).toContain("is-disabled");
+    expect(elements.get("applyStatusBox").textContent).toContain("Safe to apply once a folder is selected");
+
+    await context.selectRepoFolder();
+
+    expect(elements.get("applyBtn").disabled).toBe(false);
+    expect(elements.get("applyBtn").className).toContain("is-enabled");
+    expect(elements.get("applyStatusBox").textContent).toBe("Ready to apply to the selected folder.");
   });
 
   it("handles permission errors gracefully and reset clears the handle", async () => {

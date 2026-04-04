@@ -101,7 +101,10 @@ input:focus,textarea:focus{border-color:#007acc}
 .warning-item:last-child{border-bottom:none}
 .warning-item::before{content:"⚠ "}
 .apply-btn{width:100%;background:transparent;border:1px solid #4ec9b0;border-radius:6px;color:#4ec9b0;font-size:15px;padding:10px;cursor:pointer;margin-top:14px;display:flex;align-items:center;justify-content:center;gap:8px}
+.apply-btn.is-enabled{border-color:#4ec9b0;color:#4ec9b0;background:transparent;opacity:1;cursor:pointer}
+.apply-btn.is-disabled{border-color:#3c3c3c;color:#858585;background:transparent;opacity:.7;cursor:not-allowed}
 .apply-btn:hover{background:#0e3a1e}
+.apply-btn.is-disabled:hover{background:transparent}
 .apply-btn:disabled{border-color:#3c3c3c;color:#858585;cursor:not-allowed}
 .hidden{display:none}
 .history-label{font-size:12px;color:#858585;margin-bottom:6px}
@@ -395,13 +398,25 @@ function getApplyBlockingReason(){
   return '';
 }
 
+function getApplyState(){
+  const applyBlockingReason=getApplyBlockingReason();
+  return {
+    canApply: !applyBlockingReason,
+    applyBlockingReason,
+    helperText: applyBlockingReason||'Ready to apply to the selected folder.',
+    visualState: applyBlockingReason?'disabled':'enabled',
+  };
+}
+
 function updateApplyState(){
   const btn=document.getElementById('applyBtn');
   const status=document.getElementById('applyStatusBox');
-  const reason=getApplyBlockingReason();
-  btn.disabled=Boolean(reason);
-  btn.title=reason||'Apply generated changes to the selected folder';
-  status.textContent=reason||'Ready to apply to the selected folder.';
+  const applyState=getApplyState();
+  btn.disabled=!applyState.canApply;
+  btn.className=`apply-btn is-${applyState.visualState}`;
+  btn.title=applyState.applyBlockingReason||'Apply generated changes to the selected folder';
+  btn.setAttribute('aria-disabled',String(!applyState.canApply));
+  status.textContent=applyState.helperText;
 }
 
 function renderRepoSelection(){
@@ -870,8 +885,8 @@ function buildApplyNeutralSummary(input){
 }
 
 async function applyChanges(){
-  const blockingReason=getApplyBlockingReason();
-  if(blockingReason){showError(blockingReason);updateApplyState();return;}
+  const applyState=getApplyState();
+  if(!applyState.canApply){showError(applyState.applyBlockingReason);updateApplyState();return;}
   const btn=document.getElementById('applyBtn');const sp=document.getElementById('applySpinner');const t=document.getElementById('applyText');
   const sb=document.getElementById('successBox');
   btn.disabled=true;sp.style.display='block';t.textContent=`Writing ${currentPatches.length} file${currentPatches.length!==1?'s':''}...`;sb.style.display='none';

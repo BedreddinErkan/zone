@@ -35,6 +35,7 @@ class MockClassList {
 class MockElement {
     id;
     style = {};
+    attributes = {};
     textContent = "";
     innerText = "";
     innerHTML = "";
@@ -61,6 +62,12 @@ class MockElement {
     }
     click() {
         this.clicked = true;
+    }
+    setAttribute(name, value) {
+        this.attributes[name] = value;
+    }
+    getAttribute(name) {
+        return this.attributes[name] ?? null;
     }
     scrollIntoView() {
         // no-op for test harness
@@ -841,6 +848,8 @@ function buildUiHarness(initialLocalStorage = {}) {
         elements.get("repoPath").value = "C:/repo";
         await context.execute();
         (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(true);
+        (0, vitest_1.expect)(elements.get("applyBtn").className).toContain("is-disabled");
+        (0, vitest_1.expect)(elements.get("applyBtn").getAttribute("aria-disabled")).toBe("true");
         (0, vitest_1.expect)(elements.get("decisionBadge").className).toContain("safe");
         (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Safe to apply once a folder is selected");
         (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).not.toContain("blocked");
@@ -1008,8 +1017,12 @@ function buildUiHarness(initialLocalStorage = {}) {
         elements.get("task").value = "fix login flow";
         elements.get("repoPath").value = "C:/repo";
         await context.execute();
+        (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(false);
+        (0, vitest_1.expect)(elements.get("applyBtn").className).toContain("is-enabled");
+        (0, vitest_1.expect)(elements.get("applyBtn").getAttribute("aria-disabled")).toBe("false");
         await context.applyChanges();
         (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(false);
+        (0, vitest_1.expect)(elements.get("applyBtn").className).toContain("is-enabled");
         (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Ready to apply");
         const srcDir = await rootHandle.getDirectoryHandle("src");
         const featuresDir = await srcDir.getDirectoryHandle("features");
@@ -1121,6 +1134,46 @@ function buildUiHarness(initialLocalStorage = {}) {
         await context.execute();
         await context.applyChanges();
         (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Safe to apply once a folder is selected for local Apply.");
+    });
+    (0, vitest_1.it)("keeps helper text, visual state, and disabled state aligned for Apply", async () => {
+        const { context, elements, roleButtons } = buildUiHarness();
+        const rootHandle = new MockDirectoryHandle("zone-repo");
+        context.window.showDirectoryPicker = vitest_1.vi.fn().mockResolvedValue(rootHandle);
+        context.fetch = vitest_1.vi
+            .fn()
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                decision: { mode: "safe_to_apply" },
+                confidence: { score: 82 },
+                risk: { score: 0, breakdown: {} },
+            }),
+        })
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                ok: true,
+                patchPreview: "Summary: Fix login flow",
+                warnings: [],
+                applyPatches: [
+                    {
+                        filePath: "src/features/login.ts",
+                        fullContent: "export const login = true;",
+                    },
+                ],
+            }),
+        });
+        context.selectRole(roleButtons.developer);
+        elements.get("task").value = "fix login flow";
+        elements.get("repoPath").value = "C:/repo";
+        await context.execute();
+        (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(true);
+        (0, vitest_1.expect)(elements.get("applyBtn").className).toContain("is-disabled");
+        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Safe to apply once a folder is selected");
+        await context.selectRepoFolder();
+        (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(false);
+        (0, vitest_1.expect)(elements.get("applyBtn").className).toContain("is-enabled");
+        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toBe("Ready to apply to the selected folder.");
     });
     (0, vitest_1.it)("handles permission errors gracefully and reset clears the handle", async () => {
         const { context, elements, roleButtons } = buildUiHarness();
