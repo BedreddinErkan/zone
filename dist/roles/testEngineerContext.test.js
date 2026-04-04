@@ -85,12 +85,99 @@ function buildRepoFile(path) {
         ]);
         (0, vitest_1.expect)(context.outputPaths.testFile).toBe("tests/authentication.spec.ts");
         (0, vitest_1.expect)(context.debug.hasLoginIntent).toBe(true);
+        (0, vitest_1.expect)(context.debug.loginSubIntent).toBe("invalid_credentials");
         (0, vitest_1.expect)(context.debug.chosenExistingTestFile).toBe("tests/authentication.spec.ts");
         (0, vitest_1.expect)(context.debug.finalOutputPathSource).toBe("existing_test_file");
         (0, vitest_1.expect)(context.debug.candidateTestFiles[0]).toEqual(vitest_1.expect.objectContaining({
             path: "tests/authentication.spec.ts",
             suspiciousGenerated: false,
         }));
+    });
+    (0, vitest_1.it)("does not prefer a username-specific login spec over a better invalid-credentials candidate", () => {
+        const context = (0, testEngineerContext_js_1.buildTestEngineerContext)("Add a negative login test for invalid credentials", buildFramework({
+            framework: "playwright_ts",
+            language: "typescript",
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        }), [
+            buildRepoFile("tests/playwright_saucedemo_login_username.spec.ts"),
+            buildRepoFile("tests/login_invalid_credentials.spec.ts"),
+        ]);
+        (0, vitest_1.expect)(context.debug.loginSubIntent).toBe("invalid_credentials");
+        (0, vitest_1.expect)(context.outputPaths.testFile).toBe("tests/login_invalid_credentials.spec.ts");
+        (0, vitest_1.expect)(context.debug.candidateTestFiles[0]).toEqual(vitest_1.expect.objectContaining({
+            path: "tests/login_invalid_credentials.spec.ts",
+            subIntentScore: 20,
+        }));
+        (0, vitest_1.expect)(context.debug.candidateTestFiles[1]).toEqual(vitest_1.expect.objectContaining({
+            path: "tests/playwright_saucedemo_login_username.spec.ts",
+            subIntentScore: -18,
+        }));
+    });
+    (0, vitest_1.it)("still prefers a username-specific spec for username-validation tasks", () => {
+        const context = (0, testEngineerContext_js_1.buildTestEngineerContext)("Add login username validation coverage for empty username", buildFramework({
+            framework: "playwright_ts",
+            language: "typescript",
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        }), [
+            buildRepoFile("tests/login.spec.ts"),
+            buildRepoFile("tests/login_username.spec.ts"),
+        ]);
+        (0, vitest_1.expect)(context.debug.loginSubIntent).toBe("username_validation");
+        (0, vitest_1.expect)(context.outputPaths.testFile).toBe("tests/login_username.spec.ts");
+        (0, vitest_1.expect)(context.debug.candidateTestFiles[0]).toEqual(vitest_1.expect.objectContaining({
+            path: "tests/login_username.spec.ts",
+            subIntentScore: 18,
+        }));
+    });
+    (0, vitest_1.it)("lets broad login tasks prefer a general login spec over narrower specialized files", () => {
+        const context = (0, testEngineerContext_js_1.buildTestEngineerContext)("Add general login coverage", buildFramework({
+            framework: "playwright_ts",
+            language: "typescript",
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        }), [
+            buildRepoFile("tests/login.spec.ts"),
+            buildRepoFile("tests/login_username.spec.ts"),
+        ]);
+        (0, vitest_1.expect)(context.debug.loginSubIntent).toBe("general_login");
+        (0, vitest_1.expect)(context.outputPaths.testFile).toBe("tests/login.spec.ts");
+        (0, vitest_1.expect)(context.debug.candidateTestFiles[0]).toEqual(vitest_1.expect.objectContaining({
+            path: "tests/login.spec.ts",
+            subIntentScore: 10,
+        }));
+    });
+    (0, vitest_1.it)("falls back to a clean new login file when no semantically close existing login file exists", () => {
+        const context = (0, testEngineerContext_js_1.buildTestEngineerContext)("Add a negative login test for invalid credentials", buildFramework({
+            framework: "playwright_ts",
+            language: "typescript",
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        }), [buildRepoFile("tests/playwright_saucedemo_login_username.spec.ts")]);
+        (0, vitest_1.expect)(context.outputPaths.testFile).toBe("tests/login.spec.ts");
+        (0, vitest_1.expect)(context.debug.finalOutputPathSource).toBe("generated_fallback");
+        (0, vitest_1.expect)(context.debug.candidateTestFiles[0]).toEqual(vitest_1.expect.objectContaining({
+            path: "tests/playwright_saucedemo_login_username.spec.ts",
+            subIntentScore: -18,
+        }));
+    });
+    (0, vitest_1.it)("keeps sub-intent ranking deterministic across identical inputs", () => {
+        const files = [
+            buildRepoFile("tests/playwright_saucedemo_login_username.spec.ts"),
+            buildRepoFile("tests/login_invalid_credentials.spec.ts"),
+            buildRepoFile("tests/login.spec.ts"),
+        ];
+        const framework = buildFramework({
+            framework: "playwright_ts",
+            language: "typescript",
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        });
+        const first = (0, testEngineerContext_js_1.buildTestEngineerContext)("Add a negative login test for invalid credentials", framework, files);
+        const second = (0, testEngineerContext_js_1.buildTestEngineerContext)("Add a negative login test for invalid credentials", framework, files);
+        (0, vitest_1.expect)(first.outputPaths).toEqual(second.outputPaths);
+        (0, vitest_1.expect)(first.debug.candidateTestFiles).toEqual(second.debug.candidateTestFiles);
     });
     (0, vitest_1.it)("down-ranks a suspicious generated login task slug below a real auth spec", () => {
         const context = (0, testEngineerContext_js_1.buildTestEngineerContext)("Add a negative login test for invalid credentials", buildFramework({

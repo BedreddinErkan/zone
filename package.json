@@ -1,6 +1,6 @@
 {
   "name": "zone-ai-agent",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Zone � AI Code Agent: deterministic, explainable, safe",
   "main": "dist/index.js",
   "bin": {

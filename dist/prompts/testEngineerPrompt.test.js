@@ -36,6 +36,7 @@ function buildContext(overrides = {}) {
             normalizedTask: "write a new cucumber scenario for round trip flight search",
             intentTokens: ["round", "trip", "flight", "search"],
             hasLoginIntent: false,
+            loginSubIntent: "none",
             preferredBasenameToken: null,
             candidateTestFiles: [],
             chosenExistingTestFile: null,

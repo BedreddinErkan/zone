@@ -25,16 +25,28 @@ export interface RankedTestFileCandidate {
   path: string;
   baseScore: number;
   authPreferenceScore: number;
+  subIntentScore: number;
   suspiciousGeneratedPenalty: number;
   suspiciousGenerated: boolean;
   totalScore: number;
 }
+
+type LoginTaskSubIntent =
+  | "invalid_credentials"
+  | "username_validation"
+  | "password_validation"
+  | "locked_user"
+  | "auth_smoke"
+  | "happy_path_login"
+  | "general_login"
+  | "none";
 
 export interface TestEngineerContextDebug {
   selectedRole: "test_engineer";
   normalizedTask: string;
   intentTokens: string[];
   hasLoginIntent: boolean;
+  loginSubIntent: LoginTaskSubIntent;
   preferredBasenameToken: string | null;
   candidateTestFiles: RankedTestFileCandidate[];
   chosenExistingTestFile: string | null;
@@ -305,6 +317,25 @@ const AUTH_FILE_KEYWORDS = new Set([
   "session",
 ]);
 
+const INVALID_CREDENTIAL_TOKENS = new Set([
+  "invalid",
+  "negative",
+  "error",
+  "failure",
+  "credential",
+  "credentials",
+  "unauthorized",
+  "denied",
+  "reject",
+  "rejected",
+]);
+
+const USERNAME_SUB_INTENT_TOKENS = new Set(["username", "email"]);
+const PASSWORD_SUB_INTENT_TOKENS = new Set(["password", "passcode"]);
+const LOCKED_USER_TOKENS = new Set(["locked", "suspended", "disabled"]);
+const SMOKE_TOKENS = new Set(["smoke", "sanity"]);
+const HAPPY_PATH_TOKENS = new Set(["happy", "success", "successful", "valid", "basic"]);
+
 function normalizeTaskText(task: string): string {
   return task
     .toLowerCase()
@@ -374,6 +405,62 @@ function preferredBasenameToken(task: string): string | null {
   return null;
 }
 
+function detectLoginSubIntent(task: string): LoginTaskSubIntent {
+  if (!hasLoginIntent(task)) return "none";
+
+  const normalizedTask = normalizeTaskText(task);
+  const tokens = normalizedTask.split(/\s+/).filter(Boolean);
+
+  if (
+    normalizedTask.includes("invalid credential") ||
+    normalizedTask.includes("invalid password") ||
+    normalizedTask.includes("wrong password") ||
+    normalizedTask.includes("wrong credential") ||
+    tokens.some((token) => INVALID_CREDENTIAL_TOKENS.has(token))
+  ) {
+    return "invalid_credentials";
+  }
+
+  if (
+    tokens.some((token) => USERNAME_SUB_INTENT_TOKENS.has(token)) &&
+    (normalizedTask.includes("validation") ||
+      normalizedTask.includes("required") ||
+      normalizedTask.includes("empty") ||
+      normalizedTask.includes("missing"))
+  ) {
+    return "username_validation";
+  }
+
+  if (
+    tokens.some((token) => PASSWORD_SUB_INTENT_TOKENS.has(token)) &&
+    (normalizedTask.includes("validation") ||
+      normalizedTask.includes("required") ||
+      normalizedTask.includes("empty") ||
+      normalizedTask.includes("missing"))
+  ) {
+    return "password_validation";
+  }
+
+  if (tokens.some((token) => LOCKED_USER_TOKENS.has(token))) {
+    return "locked_user";
+  }
+
+  if (tokens.some((token) => SMOKE_TOKENS.has(token))) {
+    return "auth_smoke";
+  }
+
+  if (
+    normalizedTask.includes("happy path") ||
+    normalizedTask.includes("valid credential") ||
+    normalizedTask.includes("successful login") ||
+    tokens.some((token) => HAPPY_PATH_TOKENS.has(token))
+  ) {
+    return "happy_path_login";
+  }
+
+  return "general_login";
+}
+
 function buildOutputNameParts(task: string): { slug: string; pascal: string } {
   const preferredToken = preferredBasenameToken(task);
   const tokens = preferredToken ? [preferredToken] : buildIntentTokens(task);
@@ -418,6 +505,55 @@ function scoreAuthRelatedExistingTestFile(pathValue: string, task: string): numb
   return keywordScore;
 }
 
+function scoreLoginSubIntent(pathValue: string, task: string): number {
+  const subIntent = detectLoginSubIntent(task);
+  if (subIntent === "none") return 0;
+
+  const tokens = tokenizePath(pathValue);
+  const hasAny = (set: Set<string>) => tokens.some((token) => set.has(token));
+  const invalidMatch = hasAny(INVALID_CREDENTIAL_TOKENS);
+  const usernameMatch = hasAny(USERNAME_SUB_INTENT_TOKENS);
+  const passwordMatch = hasAny(PASSWORD_SUB_INTENT_TOKENS);
+  const lockedMatch = hasAny(LOCKED_USER_TOKENS);
+  const smokeMatch = hasAny(SMOKE_TOKENS);
+  const happyPathMatch = hasAny(HAPPY_PATH_TOKENS);
+  const specializedMatch =
+    invalidMatch || usernameMatch || passwordMatch || lockedMatch || smokeMatch || happyPathMatch;
+
+  switch (subIntent) {
+    case "invalid_credentials":
+      if (invalidMatch) return 20;
+      if (usernameMatch || passwordMatch || lockedMatch || smokeMatch || happyPathMatch) return -18;
+      return -8;
+    case "username_validation":
+      if (usernameMatch) return 18;
+      if (passwordMatch || invalidMatch || lockedMatch || smokeMatch || happyPathMatch) return -14;
+      return -6;
+    case "password_validation":
+      if (passwordMatch) return 18;
+      if (usernameMatch || invalidMatch || lockedMatch || smokeMatch || happyPathMatch) return -14;
+      return -6;
+    case "locked_user":
+      if (lockedMatch) return 18;
+      if (usernameMatch || passwordMatch || invalidMatch || smokeMatch || happyPathMatch) return -14;
+      return -6;
+    case "auth_smoke":
+      if (smokeMatch) return 16;
+      if (invalidMatch || usernameMatch || passwordMatch || lockedMatch) return -10;
+      return 4;
+    case "happy_path_login":
+      if (happyPathMatch) return 16;
+      if (invalidMatch || usernameMatch || passwordMatch || lockedMatch) return -12;
+      return 6;
+    case "general_login":
+      if (!specializedMatch) return 10;
+      if (smokeMatch || happyPathMatch) return 4;
+      return -4;
+    default:
+      return 0;
+  }
+}
+
 function countSuspiciousGeneratedTokens(tokens: string[]): number {
   return tokens.filter((token) => SUSPICIOUS_GENERATED_FILE_TOKENS.has(token)).length;
 }
@@ -455,11 +591,13 @@ function rankExistingTestFiles(
       path: file.path,
       baseScore: scoreExistingTestFile(file.path, tokens),
       authPreferenceScore: scoreAuthRelatedExistingTestFile(file.path, task),
+      subIntentScore: scoreLoginSubIntent(file.path, task),
       suspiciousGeneratedPenalty: scoreSuspiciousGeneratedPenalty(file.path),
       suspiciousGenerated: isSuspiciousGeneratedTestFile(file.path),
       totalScore:
         scoreExistingTestFile(file.path, tokens) +
         scoreAuthRelatedExistingTestFile(file.path, task) +
+        scoreLoginSubIntent(file.path, task) +
         scoreSuspiciousGeneratedPenalty(file.path),
     }))
     .sort((a, b) => {
@@ -517,6 +655,7 @@ function buildOutputPaths(
   const suspiciousFilenameRejected = isUnsafeGeneratedSlug(slug);
   const safeSlug = suspiciousFilenameRejected ? "app" : slug;
   const hasLoginTaskIntent = hasLoginIntent(task);
+  const loginSubIntent = detectLoginSubIntent(task);
   const preferredToken = preferredBasenameToken(task);
 
   const buildDebug = (
@@ -528,6 +667,7 @@ function buildOutputPaths(
     normalizedTask,
     intentTokens,
     hasLoginIntent: hasLoginTaskIntent,
+    loginSubIntent,
     preferredBasenameToken: preferredToken,
     candidateTestFiles: rankedCandidates,
     chosenExistingTestFile: closestExistingTestFile,

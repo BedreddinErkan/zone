@@ -458,6 +458,7 @@ describe("runTestEngineerFlow", () => {
         normalizedTask: "add a negative login test",
         intentTokens: ["login"],
         hasLoginIntent: true,
+        loginSubIntent: "invalid_credentials",
         preferredBasenameToken: "login",
         candidateTestFiles: [
           {
@@ -551,6 +552,7 @@ describe("runTestEngineerFlow", () => {
         normalizedTask: "add a negative login test",
         intentTokens: ["login"],
         hasLoginIntent: true,
+        loginSubIntent: "invalid_credentials",
         preferredBasenameToken: "login",
         candidateTestFiles: [
           {
@@ -661,6 +663,7 @@ describe("runTestEngineerFlow", () => {
         normalizedTask: "add a negative login test",
         intentTokens: ["login"],
         hasLoginIntent: true,
+        loginSubIntent: "invalid_credentials",
         preferredBasenameToken: "login",
         candidateTestFiles: [
           {

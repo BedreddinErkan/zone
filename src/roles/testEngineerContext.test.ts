@@ -160,6 +160,7 @@ describe("buildTestEngineerContext output naming", () => {
 
     expect(context.outputPaths.testFile).toBe("tests/authentication.spec.ts");
     expect(context.debug.hasLoginIntent).toBe(true);
+    expect(context.debug.loginSubIntent).toBe("invalid_credentials");
     expect(context.debug.chosenExistingTestFile).toBe("tests/authentication.spec.ts");
     expect(context.debug.finalOutputPathSource).toBe("existing_test_file");
     expect(context.debug.candidateTestFiles[0]).toEqual(
@@ -168,6 +169,137 @@ describe("buildTestEngineerContext output naming", () => {
         suspiciousGenerated: false,
       })
     );
+  });
+
+  it("does not prefer a username-specific login spec over a better invalid-credentials candidate", () => {
+    const context = buildTestEngineerContext(
+      "Add a negative login test for invalid credentials",
+      buildFramework({
+        framework: "playwright_ts",
+        language: "typescript",
+        testFilePattern: "*.spec.ts",
+        testDir: "tests",
+      }),
+      [
+        buildRepoFile("tests/playwright_saucedemo_login_username.spec.ts"),
+        buildRepoFile("tests/login_invalid_credentials.spec.ts"),
+      ]
+    );
+
+    expect(context.debug.loginSubIntent).toBe("invalid_credentials");
+    expect(context.outputPaths.testFile).toBe("tests/login_invalid_credentials.spec.ts");
+    expect(context.debug.candidateTestFiles[0]).toEqual(
+      expect.objectContaining({
+        path: "tests/login_invalid_credentials.spec.ts",
+        subIntentScore: 20,
+      })
+    );
+    expect(context.debug.candidateTestFiles[1]).toEqual(
+      expect.objectContaining({
+        path: "tests/playwright_saucedemo_login_username.spec.ts",
+        subIntentScore: -18,
+      })
+    );
+  });
+
+  it("still prefers a username-specific spec for username-validation tasks", () => {
+    const context = buildTestEngineerContext(
+      "Add login username validation coverage for empty username",
+      buildFramework({
+        framework: "playwright_ts",
+        language: "typescript",
+        testFilePattern: "*.spec.ts",
+        testDir: "tests",
+      }),
+      [
+        buildRepoFile("tests/login.spec.ts"),
+        buildRepoFile("tests/login_username.spec.ts"),
+      ]
+    );
+
+    expect(context.debug.loginSubIntent).toBe("username_validation");
+    expect(context.outputPaths.testFile).toBe("tests/login_username.spec.ts");
+    expect(context.debug.candidateTestFiles[0]).toEqual(
+      expect.objectContaining({
+        path: "tests/login_username.spec.ts",
+        subIntentScore: 18,
+      })
+    );
+  });
+
+  it("lets broad login tasks prefer a general login spec over narrower specialized files", () => {
+    const context = buildTestEngineerContext(
+      "Add general login coverage",
+      buildFramework({
+        framework: "playwright_ts",
+        language: "typescript",
+        testFilePattern: "*.spec.ts",
+        testDir: "tests",
+      }),
+      [
+        buildRepoFile("tests/login.spec.ts"),
+        buildRepoFile("tests/login_username.spec.ts"),
+      ]
+    );
+
+    expect(context.debug.loginSubIntent).toBe("general_login");
+    expect(context.outputPaths.testFile).toBe("tests/login.spec.ts");
+    expect(context.debug.candidateTestFiles[0]).toEqual(
+      expect.objectContaining({
+        path: "tests/login.spec.ts",
+        subIntentScore: 10,
+      })
+    );
+  });
+
+  it("falls back to a clean new login file when no semantically close existing login file exists", () => {
+    const context = buildTestEngineerContext(
+      "Add a negative login test for invalid credentials",
+      buildFramework({
+        framework: "playwright_ts",
+        language: "typescript",
+        testFilePattern: "*.spec.ts",
+        testDir: "tests",
+      }),
+      [buildRepoFile("tests/playwright_saucedemo_login_username.spec.ts")]
+    );
+
+    expect(context.outputPaths.testFile).toBe("tests/login.spec.ts");
+    expect(context.debug.finalOutputPathSource).toBe("generated_fallback");
+    expect(context.debug.candidateTestFiles[0]).toEqual(
+      expect.objectContaining({
+        path: "tests/playwright_saucedemo_login_username.spec.ts",
+        subIntentScore: -18,
+      })
+    );
+  });
+
+  it("keeps sub-intent ranking deterministic across identical inputs", () => {
+    const files = [
+      buildRepoFile("tests/playwright_saucedemo_login_username.spec.ts"),
+      buildRepoFile("tests/login_invalid_credentials.spec.ts"),
+      buildRepoFile("tests/login.spec.ts"),
+    ];
+    const framework = buildFramework({
+      framework: "playwright_ts",
+      language: "typescript",
+      testFilePattern: "*.spec.ts",
+      testDir: "tests",
+    });
+
+    const first = buildTestEngineerContext(
+      "Add a negative login test for invalid credentials",
+      framework,
+      files
+    );
+    const second = buildTestEngineerContext(
+      "Add a negative login test for invalid credentials",
+      framework,
+      files
+    );
+
+    expect(first.outputPaths).toEqual(second.outputPaths);
+    expect(first.debug.candidateTestFiles).toEqual(second.debug.candidateTestFiles);
   });
 
   it("down-ranks a suspicious generated login task slug below a real auth spec", () => {

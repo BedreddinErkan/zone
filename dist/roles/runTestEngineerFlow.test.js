@@ -407,6 +407,7 @@ function buildRepoFile(path) {
                 normalizedTask: "add a negative login test",
                 intentTokens: ["login"],
                 hasLoginIntent: true,
+                loginSubIntent: "invalid_credentials",
                 preferredBasenameToken: "login",
                 candidateTestFiles: [
                     {
@@ -494,6 +495,7 @@ function buildRepoFile(path) {
                 normalizedTask: "add a negative login test",
                 intentTokens: ["login"],
                 hasLoginIntent: true,
+                loginSubIntent: "invalid_credentials",
                 preferredBasenameToken: "login",
                 candidateTestFiles: [
                     {
@@ -597,6 +599,7 @@ function buildRepoFile(path) {
                 normalizedTask: "add a negative login test",
                 intentTokens: ["login"],
                 hasLoginIntent: true,
+                loginSubIntent: "invalid_credentials",
                 preferredBasenameToken: "login",
                 candidateTestFiles: [
                     {
