@@ -44,14 +44,14 @@ describe("buildFullPatchPrompt", () => {
   it("includes the OUTPUT FORMAT JSON shape", () => {
     const prompt = buildFullPatchPrompt(BASE_INPUT);
     expect(prompt).toContain('"filePath"');
-    expect(prompt).toContain('"fullContent"');
+    expect(prompt).toContain('"patchText"');
     expect(prompt).toContain('"summary"');
     expect(prompt).toContain('"warnings"');
   });
 
-  it("instructs to return COMPLETE updated file content", () => {
+  it("instructs not to return full file content", () => {
     const prompt = buildFullPatchPrompt(BASE_INPUT);
-    expect(prompt).toContain("COMPLETE updated file content");
+    expect(prompt).toContain("DO NOT output full file content");
   });
 
   it("instructs not to add markdown fences", () => {
@@ -62,6 +62,12 @@ describe("buildFullPatchPrompt", () => {
   it("instructs to preserve unrelated code", () => {
     const prompt = buildFullPatchPrompt(BASE_INPUT);
     expect(prompt).toContain("Preserve all existing code that is unrelated");
+  });
+
+  it("instructs to output patch-style edits only", () => {
+    const prompt = buildFullPatchPrompt(BASE_INPUT);
+    expect(prompt).toContain("ONLY output patch-style edits");
+    expect(prompt).toContain("FIND/REPLACE");
   });
 
   it("instructs to return JSON only", () => {

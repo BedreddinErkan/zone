@@ -375,7 +375,6 @@ export async function runLlmPatchFlow(input: {
     files: allFiles,
     intent: taskIntent,
   }).slice(0, 8);
-  console.log("[zone:debug] relevantFiles:", relevantFiles.map(f => f.path));
 
   const topRelevantFilePaths = relevantFiles
     .slice(0, 4)
