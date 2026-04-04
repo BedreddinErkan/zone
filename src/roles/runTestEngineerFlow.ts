@@ -306,6 +306,24 @@ function buildValidationBlockedResult(input: {
   };
 }
 
+function adjustConfidenceForWarnings(
+  confidence: number,
+  warnings: string[]
+): number {
+  if (!warnings.length) return confidence;
+
+  let cappedConfidence = Math.min(confidence, warnings.length > 1 ? 90 : 95);
+  const hasPlaceholderSelectorWarning = warnings.some((warning) =>
+    warning.toLowerCase().includes("placeholder selector")
+  );
+
+  if (hasPlaceholderSelectorWarning) {
+    cappedConfidence = Math.min(cappedConfidence, 80);
+  }
+
+  return cappedConfidence;
+}
+
 export async function runTestEngineerFlow(input: {
   task: string;
   repoPath: string;
@@ -469,7 +487,7 @@ export async function runTestEngineerFlow(input: {
 
   const applyPatches = buildApplyPatches(parsed, context.outputPaths);
   const preview = buildPreview(parsed, framework.framework, context.outputPaths);
-  const confidence =
+  const modelConfidence =
     typeof parsed["confidence"] === "number" ? parsed["confidence"] : 50;
   const summary =
     typeof parsed["summary"] === "string"
@@ -478,6 +496,7 @@ export async function runTestEngineerFlow(input: {
   const warnings = Array.isArray(parsed["warnings"])
     ? (parsed["warnings"] as string[])
     : [];
+  const confidence = adjustConfidenceForWarnings(modelConfidence, warnings);
   const confidenceGate = checkConfidenceGate({
     confidenceScore: confidence,
     role: "test_engineer",

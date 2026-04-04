@@ -179,6 +179,16 @@ function buildValidationBlockedResult(input) {
         debug: input.debug,
     };
 }
+function adjustConfidenceForWarnings(confidence, warnings) {
+    if (!warnings.length)
+        return confidence;
+    let cappedConfidence = Math.min(confidence, warnings.length > 1 ? 90 : 95);
+    const hasPlaceholderSelectorWarning = warnings.some((warning) => warning.toLowerCase().includes("placeholder selector"));
+    if (hasPlaceholderSelectorWarning) {
+        cappedConfidence = Math.min(cappedConfidence, 80);
+    }
+    return cappedConfidence;
+}
 async function runTestEngineerFlow(input) {
     let allFiles;
     try {
@@ -307,13 +317,14 @@ async function runTestEngineerFlow(input) {
     };
     const applyPatches = buildApplyPatches(parsed, context.outputPaths);
     const preview = buildPreview(parsed, framework.framework, context.outputPaths);
-    const confidence = typeof parsed["confidence"] === "number" ? parsed["confidence"] : 50;
+    const modelConfidence = typeof parsed["confidence"] === "number" ? parsed["confidence"] : 50;
     const summary = typeof parsed["summary"] === "string"
         ? parsed["summary"]
         : "Test generated successfully.";
     const warnings = Array.isArray(parsed["warnings"])
         ? parsed["warnings"]
         : [];
+    const confidence = adjustConfidenceForWarnings(modelConfidence, warnings);
     const confidenceGate = (0, confidenceGate_js_1.checkConfidenceGate)({
         confidenceScore: confidence,
         role: "test_engineer",

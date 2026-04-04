@@ -553,6 +553,158 @@ function buildRepoFile(path) {
             }));
         }
     });
+    (0, vitest_1.it)("caps confidence below 100 when non-blocking warnings are present", async () => {
+        const files = [buildRepoFile("playwright.config.ts"), buildRepoFile("tests/login.spec.ts")];
+        const framework = {
+            framework: "playwright_ts",
+            confidence: "high",
+            language: "typescript",
+            evidence: ["playwright.config.ts"],
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        };
+        const client = {
+            responses: {
+                create: vitest_1.vi.fn().mockResolvedValue({
+                    output_text: JSON.stringify({
+                        summary: "Generated login test",
+                        warnings: ["Selector may be brittle but still repository-native"],
+                        confidence: 100,
+                        testFile: {
+                            path: "tests/login.spec.ts",
+                            content: "test('login', async ({ page }) => { await page.goto('/login'); });",
+                        },
+                    }),
+                }),
+            },
+        };
+        scanRepoMock.mockResolvedValue(files);
+        detectTestFrameworkMock.mockReturnValue(framework);
+        buildTestEngineerContextMock.mockReturnValue({
+            framework,
+            existingTestFiles: [],
+            pageObjectFiles: [],
+            stepDefinitionFiles: [],
+            featureFiles: [],
+            configFiles: [],
+            frameworkSummary: "Test framework: playwright_ts",
+            promptRole: "Test engineer",
+            outputRules: [],
+            fileLocationRules: [],
+            outputPaths: {
+                testFile: "tests/login.spec.ts",
+            },
+            debug: {
+                selectedRole: "test_engineer",
+                normalizedTask: "add a login test",
+                intentTokens: ["login"],
+                hasLoginIntent: true,
+                loginSubIntent: "general_login",
+                preferredBasenameToken: "login",
+                candidateTestFiles: [],
+                chosenExistingTestFile: "tests/login.spec.ts",
+                generatedSlug: "login",
+                safeSlug: "login",
+                suspiciousFilenameRejected: false,
+                fallbackTestFilePath: "tests/login.spec.ts",
+                finalOutputPath: "tests/login.spec.ts",
+                finalOutputPathSource: "existing_test_file",
+            },
+        });
+        buildTestEngineerPromptMock.mockReturnValue("prompt");
+        createMock.mockReturnValue(client);
+        getModelNameMock.mockReturnValue("test-model");
+        checkConfidenceGateMock.mockReturnValue({ pass: true });
+        detectTestComplexityMock.mockReturnValue({
+            complexity: "simple",
+            hints: ["Single focused test case"],
+            suggestedPatterns: ["single test function"],
+        });
+        const { runTestEngineerFlow } = await import("./runTestEngineerFlow.js");
+        const result = await runTestEngineerFlow({
+            task: "Add a login test",
+            repoPath: "C:/repo",
+        });
+        (0, vitest_1.expect)(result.ok).toBe(true);
+        if (result.ok) {
+            (0, vitest_1.expect)(result.confidence).toBe(95);
+            (0, vitest_1.expect)(result.decisionMode).toBe("safe_to_apply");
+            (0, vitest_1.expect)(result.warnings).toEqual(["Selector may be brittle but still repository-native"]);
+        }
+    });
+    (0, vitest_1.it)("applies an additional confidence reduction for placeholder selector warnings", async () => {
+        const files = [buildRepoFile("playwright.config.ts"), buildRepoFile("tests/login.spec.ts")];
+        const framework = {
+            framework: "playwright_ts",
+            confidence: "high",
+            language: "typescript",
+            evidence: ["playwright.config.ts"],
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        };
+        const client = {
+            responses: {
+                create: vitest_1.vi.fn().mockResolvedValue({
+                    output_text: JSON.stringify({
+                        summary: "Generated login test",
+                        warnings: ["Placeholder selector was used for the submit button"],
+                        confidence: 100,
+                        testFile: {
+                            path: "tests/login.spec.ts",
+                            content: "test('login', async ({ page }) => { await page.goto('/login'); });",
+                        },
+                    }),
+                }),
+            },
+        };
+        scanRepoMock.mockResolvedValue(files);
+        detectTestFrameworkMock.mockReturnValue(framework);
+        buildTestEngineerContextMock.mockReturnValue({
+            framework,
+            existingTestFiles: [],
+            pageObjectFiles: [],
+            stepDefinitionFiles: [],
+            featureFiles: [],
+            configFiles: [],
+            frameworkSummary: "Test framework: playwright_ts",
+            promptRole: "Test engineer",
+            outputRules: [],
+            fileLocationRules: [],
+            outputPaths: {
+                testFile: "tests/login.spec.ts",
+            },
+            debug: {
+                selectedRole: "test_engineer",
+                normalizedTask: "add a login test",
+                intentTokens: ["login"],
+                hasLoginIntent: true,
+                loginSubIntent: "general_login",
+                preferredBasenameToken: "login",
+                candidateTestFiles: [],
+                chosenExistingTestFile: "tests/login.spec.ts",
+                generatedSlug: "login",
+                safeSlug: "login",
+                suspiciousFilenameRejected: false,
+                fallbackTestFilePath: "tests/login.spec.ts",
+                finalOutputPath: "tests/login.spec.ts",
+                finalOutputPathSource: "existing_test_file",
+            },
+        });
+        buildTestEngineerPromptMock.mockReturnValue("prompt");
+        createMock.mockReturnValue(client);
+        getModelNameMock.mockReturnValue("test-model");
+        checkConfidenceGateMock.mockReturnValue({ pass: true });
+        const { runTestEngineerFlow } = await import("./runTestEngineerFlow.js");
+        const result = await runTestEngineerFlow({
+            task: "Add a login test",
+            repoPath: "C:/repo",
+        });
+        (0, vitest_1.expect)(result.ok).toBe(true);
+        if (result.ok) {
+            (0, vitest_1.expect)(result.confidence).toBe(80);
+            (0, vitest_1.expect)(result.decisionMode).toBe("safe_to_apply");
+        }
+    });
     (0, vitest_1.it)("blocks arbitrary Playwright URL assertions when repository route evidence is missing", async () => {
         const files = [buildRepoFile("playwright.config.ts"), buildRepoFile("tests/login.spec.ts")];
         const framework = {

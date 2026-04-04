@@ -388,7 +388,10 @@ function getApplyBlockingReason(){
   if(currentRunState.runInProgress)return 'Wait for the current run to finish before applying.';
   if(!currentRunState.hasPatchResult||!currentPatches.length)return 'Run Execute first to generate a patch result before applying.';
   if(currentRunState.validationBlocked)return 'Output validation blocked this result. Preview is visible for debugging, but Apply is disabled.';
-  if(!currentRepoHandle)return 'Select a folder to enable local Apply.';
+  if(!currentRepoHandle){
+    if(currentRunState.decisionMode==='safe_to_apply')return 'Safe to apply once a folder is selected for local Apply.';
+    return 'Result preview is ready. Select a folder to enable local Apply.';
+  }
   return '';
 }
 

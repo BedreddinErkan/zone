@@ -841,7 +841,34 @@ function buildUiHarness(initialLocalStorage = {}) {
         elements.get("repoPath").value = "C:/repo";
         await context.execute();
         (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(true);
-        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Select a folder");
+        (0, vitest_1.expect)(elements.get("decisionBadge").className).toContain("safe");
+        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Safe to apply once a folder is selected");
+        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).not.toContain("blocked");
+    });
+    (0, vitest_1.it)("keeps non-blocking warnings from blocking an otherwise safe result", () => {
+        const { context, elements } = buildUiHarness();
+        context.showDecision({
+            decision: { mode: "safe_to_apply" },
+            confidence: { score: 95 },
+            risk: { score: 0, breakdown: {} },
+            frameworkBadge: "playwright_ts / typescript",
+        });
+        context.showPatch({
+            ok: true,
+            patchPreview: "Summary: Generated login tests",
+            warnings: ["Selector may be brittle but still repository-native"],
+            applyPatches: [
+                {
+                    filePath: "tests/login.spec.ts",
+                    fullContent: "test('login', async () => {});",
+                },
+            ],
+        });
+        (0, vitest_1.expect)(elements.get("decisionBadge").className).toContain("safe");
+        (0, vitest_1.expect)(elements.get("confVal").textContent).toBe("95");
+        (0, vitest_1.expect)(elements.get("resultSummaryChips").innerHTML).toContain("Warnings: 1");
+        (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(true);
+        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Safe to apply once a folder is selected");
     });
     (0, vitest_1.it)("keeps validation-blocked preview visible but disables Apply with an explicit blocked message", async () => {
         const { context, elements, roleButtons } = buildUiHarness();
@@ -1093,7 +1120,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         elements.get("repoPath").value = "C:/repo";
         await context.execute();
         await context.applyChanges();
-        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Select a folder to enable local Apply.");
+        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Safe to apply once a folder is selected for local Apply.");
     });
     (0, vitest_1.it)("handles permission errors gracefully and reset clears the handle", async () => {
         const { context, elements, roleButtons } = buildUiHarness();
@@ -1159,7 +1186,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         });
         await context.execute();
         await context.applyChanges();
-        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Select a folder to enable local Apply.");
+        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Safe to apply once a folder is selected for local Apply.");
     });
     (0, vitest_1.it)("keeps apply summary safe when no files are written", async () => {
         const { context, elements, roleButtons } = buildUiHarness();

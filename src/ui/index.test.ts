@@ -1068,7 +1068,37 @@ describe("UI folder-handle apply", () => {
     await context.execute();
 
     expect(elements.get("applyBtn").disabled).toBe(true);
-    expect(elements.get("applyStatusBox").textContent).toContain("Select a folder");
+    expect(elements.get("decisionBadge").className).toContain("safe");
+    expect(elements.get("applyStatusBox").textContent).toContain("Safe to apply once a folder is selected");
+    expect(elements.get("applyStatusBox").textContent).not.toContain("blocked");
+  });
+
+  it("keeps non-blocking warnings from blocking an otherwise safe result", () => {
+    const { context, elements } = buildUiHarness();
+
+    context.showDecision({
+      decision: { mode: "safe_to_apply" },
+      confidence: { score: 95 },
+      risk: { score: 0, breakdown: {} },
+      frameworkBadge: "playwright_ts / typescript",
+    });
+    context.showPatch({
+      ok: true,
+      patchPreview: "Summary: Generated login tests",
+      warnings: ["Selector may be brittle but still repository-native"],
+      applyPatches: [
+        {
+          filePath: "tests/login.spec.ts",
+          fullContent: "test('login', async () => {});",
+        },
+      ],
+    });
+
+    expect(elements.get("decisionBadge").className).toContain("safe");
+    expect(elements.get("confVal").textContent).toBe("95");
+    expect(elements.get("resultSummaryChips").innerHTML).toContain("Warnings: 1");
+    expect(elements.get("applyBtn").disabled).toBe(true);
+    expect(elements.get("applyStatusBox").textContent).toContain("Safe to apply once a folder is selected");
   });
 
   it("keeps validation-blocked preview visible but disables Apply with an explicit blocked message", async () => {
@@ -1340,7 +1370,7 @@ describe("UI folder-handle apply", () => {
     await context.execute();
     await context.applyChanges();
 
-    expect(elements.get("errorBox").textContent).toContain("Select a folder to enable local Apply.");
+    expect(elements.get("errorBox").textContent).toContain("Safe to apply once a folder is selected for local Apply.");
   });
 
   it("handles permission errors gracefully and reset clears the handle", async () => {
@@ -1410,7 +1440,7 @@ describe("UI folder-handle apply", () => {
       });
     await context.execute();
     await context.applyChanges();
-    expect(elements.get("errorBox").textContent).toContain("Select a folder to enable local Apply.");
+    expect(elements.get("errorBox").textContent).toContain("Safe to apply once a folder is selected for local Apply.");
   });
 
   it("keeps apply summary safe when no files are written", async () => {
