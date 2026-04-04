@@ -135,53 +135,94 @@ function extractCriticalAnchors(content: string): string[] {
   return CRITICAL_UI_ANCHORS.filter((anchor) => normalized.includes(anchor));
 }
 
+function normalizeWhitespace(s: string): string {
+  return s.replace(/\r\n/g, "\n").replace(/\t/g, "  ").trim();
+}
+
 function buildMicroEditSnippet(filePath: string, content: string, task: string): string {
   if (!content.trim()) return content;
 
-  const lines = content.split(/\r?\n/);
-  if (lines.length > 1) {
-    const taskTerms = task
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((term) => term.length >= 3);
-    const matchedIndex = lines.findIndex((line) => {
-      const normalizedLine = line.toLowerCase();
-      return (
-        taskTerms.some((term) => normalizedLine.includes(term)) ||
-        CRITICAL_UI_ANCHORS.some((anchor) => normalizedLine.includes(anchor))
-      );
-    });
-    if (matchedIndex >= 0) {
-      const start = Math.max(0, matchedIndex - 2);
-      const end = Math.min(lines.length, matchedIndex + 3);
-      return lines.slice(start, end).join("\n");
-    }
-    return lines.slice(0, Math.min(lines.length, 6)).join("\n");
-  }
+  const lines = content.split("\n");
+  const cssTerms = task.match(/[.#]?[\w-]+(?:\s*\{)?/g) || [];
+  const colorTerms = task.match(/#[0-9a-fA-F]{3,6}/g) || [];
+  const classTerms = task.match(/[\w-]+-btn|[\w-]+-badge|[\w-]+-bar/g) || [];
 
-  const anchors = [
-    "style=",
-    "class=",
-    "line-height",
-    "font-size",
-    "padding",
-    "margin",
-    "badge-row",
-    "progressBox",
-    "patchSection",
+  const searchTerms = [
+    ...new Set(
+      [
+        ...cssTerms.map((term) => term.replace(/[{}]/g, "").trim()),
+        ...colorTerms,
+        ...classTerms,
+      ].filter((term) => term.length > 2)
+    ),
   ];
-  const lower = content.toLowerCase();
-  const anchorIndex = anchors
-    .map((anchor) => lower.indexOf(anchor.toLowerCase()))
-    .find((index) => typeof index === "number" && index >= 0);
 
-  if (typeof anchorIndex === "number" && anchorIndex >= 0) {
-    const start = Math.max(0, anchorIndex - 180);
-    const end = Math.min(content.length, anchorIndex + 320);
-    return content.slice(start, end);
+  let bestLine = -1;
+  let bestScore = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const lineLower = lines[i].toLowerCase();
+    const score = searchTerms.filter((term) =>
+      lineLower.includes(term.toLowerCase())
+    ).length;
+    if (score > bestScore) {
+      bestScore = score;
+      bestLine = i;
+    }
   }
 
-  return content.slice(0, Math.min(content.length, 500));
+  if (bestLine === -1) {
+    return lines.slice(0, 30).join("\n");
+  }
+
+  const start = Math.max(0, bestLine - 10);
+  const end = Math.min(lines.length, bestLine + 11);
+
+  return [
+    `// === SNIPPET: ${filePath} lines ${start + 1}-${end} of ${lines.length} ===`,
+    ...lines.slice(start, end),
+    "// === END SNIPPET ===",
+  ].join("\n");
+}
+
+function fuzzyFindAndReplace(
+  content: string,
+  find: string,
+  replace: string
+): string | null {
+  if (content.includes(find)) {
+    return content.replace(find, replace);
+  }
+
+  const normalizedContent = normalizeWhitespace(content);
+  const normalizedFind = normalizeWhitespace(find);
+
+  if (!normalizedContent.includes(normalizedFind)) {
+    return null;
+  }
+
+  const findLines = normalizedFind.split("\n");
+  const contentLines = content.split("\n");
+
+  for (let i = 0; i <= contentLines.length - findLines.length; i++) {
+    const slice = contentLines
+      .slice(i, i + findLines.length)
+      .map((line) => line.trim())
+      .join("\n");
+    const target = findLines.map((line) => line.trim()).join("\n");
+
+    if (slice === target) {
+      const replaceLines = replace.split("\n");
+      const newLines = [
+        ...contentLines.slice(0, i),
+        ...replaceLines,
+        ...contentLines.slice(i + findLines.length),
+      ];
+      return newLines.join("\n");
+    }
+  }
+
+  return null;
 }
 
 interface ParsedDeveloperPatch {
@@ -279,13 +320,18 @@ function applyDeveloperPatchText(
           "[DEVELOPER_PATCH_FORMAT] FIND blocks must target an existing non-empty block.",
       };
     }
-    if (!updatedContent.includes(edit.find)) {
+    const nextContent = fuzzyFindAndReplace(
+      updatedContent,
+      edit.find,
+      edit.replace
+    );
+    if (nextContent === null) {
       return {
         ok: false,
         warning: "[PATCH_FIND_NOT_FOUND] Could not locate the target block in the file",
       };
     }
-    updatedContent = updatedContent.replace(edit.find, edit.replace);
+    updatedContent = nextContent;
   }
 
   return { ok: true, fullContent: updatedContent };

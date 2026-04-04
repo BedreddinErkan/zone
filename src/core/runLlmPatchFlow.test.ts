@@ -451,7 +451,7 @@ describe("runLlmPatchFlow", () => {
       })
     );
     const relevantFilesArg = planFullPatchWithLlmMock.mock.calls[0][0].relevantFiles;
-    expect(relevantFilesArg[0].content.length).toBeLessThan(currentHtml.length);
+    expect(relevantFilesArg[0].content).toContain("// === SNIPPET:");
     expect(relevantFilesArg[0].content).toContain("padding:12px");
   });
 
@@ -565,6 +565,181 @@ describe("runLlmPatchFlow", () => {
         'style="background:#1a8cdb"'
       );
       expect(result.warnings.join("\n")).not.toContain("PATCH_FIND_NOT_FOUND");
+    }
+  });
+
+  it("applies large-file patch mode when whitespace differs", async () => {
+    const files = [buildRepoFile("src/pages/home.html", "frontend")];
+    const currentHtml = [
+      "<body>",
+      '  <button class="exec-btn">Execute</button>',
+      "</body>",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["Static UI"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 40 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Polish UI",
+      steps: ["Adjust button color"],
+      suggestedFiles: [
+        { path: "src/pages/home.html", reason: "Main UI file", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, currentHtml]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Polish button color",
+      patches: [
+        {
+          path: "src/pages/home.html",
+          operation: "modify",
+          summary: "Update execute button styling",
+          targetHint: "button block",
+          contentPreview: "button color tweak",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "patch",
+      filePath: "src/pages/home.html",
+      patchText:
+        `--- FIND ---\n<button class="exec-btn">Execute</button>\n--- REPLACE ---\n<button class="exec-btn" style="background:#1a8cdb">Execute</button>`,
+      summary: "Large-file targeted patch generated.",
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "change Execute button color",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.applyPatches).toHaveLength(1);
+      expect(result.applyPatches[0].fullContent).toContain(
+        'style="background:#1a8cdb"'
+      );
+    }
+  });
+
+  it("applies large-file patch mode when tabs differ from spaces", async () => {
+    const files = [buildRepoFile("src/pages/home.html", "frontend")];
+    const currentHtml = [
+      "<body>",
+      '\t<button class="exec-btn">Execute</button>',
+      "</body>",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["Static UI"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 40 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Polish UI",
+      steps: ["Adjust button color"],
+      suggestedFiles: [
+        { path: "src/pages/home.html", reason: "Main UI file", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, currentHtml]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Polish button color",
+      patches: [
+        {
+          path: "src/pages/home.html",
+          operation: "modify",
+          summary: "Update execute button styling",
+          targetHint: "button block",
+          contentPreview: "button color tweak",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "patch",
+      filePath: "src/pages/home.html",
+      patchText:
+        `--- FIND ---\n  <button class="exec-btn">Execute</button>\n--- REPLACE ---\n  <button class="exec-btn" style="background:#1a8cdb">Execute</button>`,
+      summary: "Large-file targeted patch generated.",
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "change Execute button color",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.applyPatches).toHaveLength(1);
+      expect(result.applyPatches[0].fullContent).toContain(
+        'style="background:#1a8cdb"'
+      );
+    }
+  });
+
+  it("fails gracefully when fuzzy large-file patch match cannot be found", async () => {
+    const files = [buildRepoFile("src/pages/home.html", "frontend")];
+    const currentHtml = [
+      "<body>",
+      '  <button class="exec-btn">Execute</button>',
+      "</body>",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["Static UI"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 40 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Polish UI",
+      steps: ["Adjust button color"],
+      suggestedFiles: [
+        { path: "src/pages/home.html", reason: "Main UI file", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, currentHtml]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Polish button color",
+      patches: [
+        {
+          path: "src/pages/home.html",
+          operation: "modify",
+          summary: "Update execute button styling",
+          targetHint: "button block",
+          contentPreview: "button color tweak",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "patch",
+      filePath: "src/pages/home.html",
+      patchText:
+        `--- FIND ---\n<button class="missing-btn">Execute</button>\n--- REPLACE ---\n<button class="missing-btn" style="background:#1a8cdb">Execute</button>`,
+      summary: "Large-file targeted patch generated.",
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "change Execute button color",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.applyPatches).toEqual([]);
+      expect(result.warnings.join("\n")).toContain("PATCH_FIND_NOT_FOUND");
     }
   });
 
