@@ -494,6 +494,13 @@ export async function runLlmPatchFlow(input: {
     const applyResults: Array<{ filePath: string; fullContent: string }> = [];
 
     for (const patch of applyTargets) {
+      if (patch.path.startsWith("src/ui/") || patch.path === "src/ui/index.html") {
+        combinedWarnings.push(
+          "[PROTECTED_FILE] src/ui/ files cannot be modified by Zone developer mode"
+        );
+        continue;
+      }
+
       const repoFile = allFiles.find((f) => f.path === patch.path);
       const absolutePath = repoFile?.absolutePath;
 
@@ -528,6 +535,8 @@ export async function runLlmPatchFlow(input: {
         .join("\n\n");
       const microEditMode =
         isUiFilePath(patch.path) && isMicroEditUiTask(input.task);
+      const fullPatchMode =
+        fileContent.length > 8000 ? "find_replace_patch" : "full_content";
       const targetedRelevantFiles = microEditMode
         ? [
             {
@@ -540,6 +549,12 @@ export async function runLlmPatchFlow(input: {
               .map((file) => ({ path: file.path })),
           ]
         : fileContexts;
+
+      console.log("[zone:patch-debug] planFullPatch input:", {
+        path: patch.path,
+        fileContentLength: fileContent.length,
+        mode: fullPatchMode,
+      });
 
       const fullPatch = await planFullPatchWithLlm({
         task: input.task,
@@ -557,6 +572,7 @@ export async function runLlmPatchFlow(input: {
       const nextContent =
         fullPatch.mode === "patch"
           ? (() => {
+              console.log("[zone:patch-debug] raw patchText:", fullPatch.patchText);
               const appliedPatch = applyDeveloperPatchText(
                 fileContent,
                 fullPatch.patchText

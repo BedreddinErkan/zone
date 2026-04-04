@@ -11,6 +11,7 @@ export async function applyLlmPatches(
   patches: Array<{ filePath: string; fullContent: string }>,
   repoPath: string
 ): Promise<ApplyLlmPatchesResult> {
+  const PROTECTED_PATHS = ["src/ui/index.html", "src/ui/"];
   const applied: string[] = [];
   const skipped: string[] = [];
   const failed: string[] = [];
@@ -20,6 +21,11 @@ export async function applyLlmPatches(
   for (const patch of patches) {
     if (patch.fullContent === "") {
       skipped.push(patch.filePath);
+      continue;
+    }
+
+    if (PROTECTED_PATHS.some((p) => patch.filePath.startsWith(p))) {
+      failed.push(patch.filePath);
       continue;
     }
 

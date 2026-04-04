@@ -127,7 +127,7 @@ describe("runLlmPatchFlow", () => {
   });
 
   it("flags and rejects generic scaffold overwrites for existing html files on small ui tasks", async () => {
-    const files = [buildRepoFile("src/ui/index.html", "frontend")];
+    const files = [buildRepoFile("src/pages/home.html", "frontend")];
 
     scanRepoMock.mockResolvedValue(files);
     detectProjectStructureMock.mockReturnValue({ notes: ["Static UI"] });
@@ -136,7 +136,7 @@ describe("runLlmPatchFlow", () => {
       implementationSummary: "Polish UI",
       steps: ["Tighten spacing"],
       suggestedFiles: [
-        { path: "src/ui/index.html", reason: "Main UI file", action: "modify" },
+        { path: "src/pages/home.html", reason: "Main UI file", action: "modify" },
       ],
       risks: [],
     });
@@ -152,7 +152,7 @@ describe("runLlmPatchFlow", () => {
       summary: "Polish the existing UI",
       patches: [
         {
-          path: "src/ui/index.html",
+          path: "src/pages/home.html",
           operation: "modify",
           summary: "Improve readability",
           targetHint: "main layout",
@@ -163,7 +163,7 @@ describe("runLlmPatchFlow", () => {
     });
     planFullPatchWithLlmMock.mockResolvedValue({
       mode: "full_content",
-      filePath: "src/ui/index.html",
+      filePath: "src/pages/home.html",
       fullContent:
         `<!DOCTYPE html><html><body><h1>Welcome to My App</h1><section>Features</section><button>Get Started</button><div>Application Dashboard</div></body></html>`,
       summary: "Generated content",
@@ -184,7 +184,7 @@ describe("runLlmPatchFlow", () => {
   });
 
   it("rejects generic document skeleton outputs for existing ui files on small ui tasks", async () => {
-    const files = [buildRepoFile("src/ui/index.html", "frontend")];
+    const files = [buildRepoFile("src/pages/home.html", "frontend")];
 
     scanRepoMock.mockResolvedValue(files);
     detectProjectStructureMock.mockReturnValue({ notes: ["Static UI"] });
@@ -193,7 +193,7 @@ describe("runLlmPatchFlow", () => {
       implementationSummary: "Polish UI",
       steps: ["Adjust line height"],
       suggestedFiles: [
-        { path: "src/ui/index.html", reason: "Main UI file", action: "modify" },
+        { path: "src/pages/home.html", reason: "Main UI file", action: "modify" },
       ],
       risks: [],
     });
@@ -209,7 +209,7 @@ describe("runLlmPatchFlow", () => {
       summary: "Polish line height",
       patches: [
         {
-          path: "src/ui/index.html",
+          path: "src/pages/home.html",
           operation: "modify",
           summary: "Adjust text spacing",
           targetHint: "styles",
@@ -220,7 +220,7 @@ describe("runLlmPatchFlow", () => {
     });
     planFullPatchWithLlmMock.mockResolvedValue({
       mode: "full_content",
-      filePath: "src/ui/index.html",
+      filePath: "src/pages/home.html",
       fullContent:
         `<!DOCTYPE html><html><head><title>Document</title></head><body><div id="app"></div><script src="/path/to/your/script.js"></script></body></html>`,
       summary: "Generated content",
@@ -242,7 +242,7 @@ describe("runLlmPatchFlow", () => {
   });
 
   it("rejects broad rewrites that remove existing ui anchors on small spacing tasks", async () => {
-    const files = [buildRepoFile("src/ui/index.html", "frontend")];
+    const files = [buildRepoFile("src/pages/home.html", "frontend")];
 
     scanRepoMock.mockResolvedValue(files);
     detectProjectStructureMock.mockReturnValue({ notes: ["Static UI"] });
@@ -251,7 +251,7 @@ describe("runLlmPatchFlow", () => {
       implementationSummary: "Polish UI",
       steps: ["Adjust spacing"],
       suggestedFiles: [
-        { path: "src/ui/index.html", reason: "Main UI file", action: "modify" },
+        { path: "src/pages/home.html", reason: "Main UI file", action: "modify" },
       ],
       risks: [],
     });
@@ -267,7 +267,7 @@ describe("runLlmPatchFlow", () => {
       summary: "Polish spacing",
       patches: [
         {
-          path: "src/ui/index.html",
+          path: "src/pages/home.html",
           operation: "modify",
           summary: "Adjust spacing across the page",
           targetHint: "layout",
@@ -278,7 +278,7 @@ describe("runLlmPatchFlow", () => {
     });
     planFullPatchWithLlmMock.mockResolvedValue({
       mode: "full_content",
-      filePath: "src/ui/index.html",
+      filePath: "src/pages/home.html",
       fullContent:
         `<main class="shell"><section class="hero"><h2>Cleaner interface</h2><p>Updated spacing and layout.</p></section><section class="content-grid"><div class="panel"></div><div class="panel"></div><div class="panel"></div></section></main>`,
       summary: "Generated content",
@@ -300,7 +300,7 @@ describe("runLlmPatchFlow", () => {
   });
 
   it("allows a real minimal ui tweak for an existing html file", async () => {
-    const files = [buildRepoFile("src/ui/index.html", "frontend")];
+    const files = [buildRepoFile("src/pages/home.html", "frontend")];
 
     scanRepoMock.mockResolvedValue(files);
     detectProjectStructureMock.mockReturnValue({ notes: ["Static UI"] });
@@ -309,7 +309,7 @@ describe("runLlmPatchFlow", () => {
       implementationSummary: "Polish UI",
       steps: ["Adjust font size"],
       suggestedFiles: [
-        { path: "src/ui/index.html", reason: "Main UI file", action: "modify" },
+        { path: "src/pages/home.html", reason: "Main UI file", action: "modify" },
       ],
       risks: [],
     });
@@ -325,7 +325,7 @@ describe("runLlmPatchFlow", () => {
       summary: "Polish the existing UI",
       patches: [
         {
-          path: "src/ui/index.html",
+          path: "src/pages/home.html",
           operation: "modify",
           summary: "Increase body line height slightly",
           targetHint: "style block",
@@ -336,7 +336,7 @@ describe("runLlmPatchFlow", () => {
     });
     planFullPatchWithLlmMock.mockResolvedValue({
       mode: "full_content",
-      filePath: "src/ui/index.html",
+      filePath: "src/pages/home.html",
       fullContent:
         `<body><h1>Zone</h1><div class="toolbar compact"><button>Execute</button><button>Reset</button></div><div id="progressBox" class="progress-box"></div><div id="patchSection" class="section">Patch Preview</div><div class="badge-row"></div><div class="context-files readable" style="line-height:1.7"></div><div class="recent-runs">Recent Runs</div></body>`,
       summary: "Generated content",
@@ -359,17 +359,17 @@ describe("runLlmPatchFlow", () => {
         repoPath: "C:/repo",
         taskIntent: expect.stringContaining("small ui polish"),
         relevantFiles: expect.arrayContaining([
-          expect.objectContaining({ path: "src/ui/index.html" }),
+          expect.objectContaining({ path: "src/pages/home.html" }),
         ]),
-        existingTargetFiles: expect.arrayContaining(["src/ui/index.html"]),
+        existingTargetFiles: expect.arrayContaining(["src/pages/home.html"]),
       })
     );
   });
 
   it("uses targeted existing-file snippet context for small spacing tasks", async () => {
     const files = [
-      buildRepoFile("src/ui/index.html", "frontend"),
-      buildRepoFile("src/ui/theme.css", "frontend"),
+      buildRepoFile("src/pages/home.html", "frontend"),
+      buildRepoFile("src/styles/theme.css", "frontend"),
     ];
     const currentHtml = [
       "<body>",
@@ -391,8 +391,8 @@ describe("runLlmPatchFlow", () => {
       implementationSummary: "Polish UI",
       steps: ["Adjust spacing"],
       suggestedFiles: [
-        { path: "src/ui/index.html", reason: "Main UI file", action: "modify" },
-        { path: "src/ui/theme.css", reason: "Related style file", action: "inspect" },
+        { path: "src/pages/home.html", reason: "Main UI file", action: "modify" },
+        { path: "src/styles/theme.css", reason: "Related style file", action: "inspect" },
       ],
       risks: [],
     });
@@ -400,7 +400,7 @@ describe("runLlmPatchFlow", () => {
       Object.fromEntries(
         paths.map((filePath) => [
           filePath,
-          filePath.endsWith("index.html")
+          filePath.endsWith("home.html")
             ? currentHtml
             : ".content { line-height: 1.5; padding: 12px; }",
         ])
@@ -410,7 +410,7 @@ describe("runLlmPatchFlow", () => {
       summary: "Polish spacing",
       patches: [
         {
-          path: "src/ui/index.html",
+          path: "src/pages/home.html",
           operation: "modify",
           summary: "Adjust spacing in the content block",
           targetHint: "content block",
@@ -421,7 +421,7 @@ describe("runLlmPatchFlow", () => {
     });
     planFullPatchWithLlmMock.mockResolvedValue({
       mode: "full_content",
-      filePath: "src/ui/index.html",
+      filePath: "src/pages/home.html",
       fullContent: currentHtml.replace(
         "line-height:1.5;padding:12px",
         "line-height:1.7;padding:16px"
@@ -441,11 +441,11 @@ describe("runLlmPatchFlow", () => {
       expect.objectContaining({
         relevantFiles: [
           expect.objectContaining({
-            path: "src/ui/index.html",
+            path: "src/pages/home.html",
             content: expect.stringContaining("line-height:1.5"),
           }),
           expect.objectContaining({
-            path: "src/ui/theme.css",
+            path: "src/styles/theme.css",
           }),
         ],
       })
@@ -456,7 +456,7 @@ describe("runLlmPatchFlow", () => {
   });
 
   it("rejects invalid full-file scaffold output that is not patch-style", async () => {
-    const files = [buildRepoFile("src/ui/index.html", "frontend")];
+    const files = [buildRepoFile("src/pages/home.html", "frontend")];
 
     scanRepoMock.mockResolvedValue(files);
     detectProjectStructureMock.mockReturnValue({ notes: ["Static UI"] });
@@ -465,7 +465,7 @@ describe("runLlmPatchFlow", () => {
       implementationSummary: "Polish UI",
       steps: ["Adjust spacing"],
       suggestedFiles: [
-        { path: "src/ui/index.html", reason: "Main UI file", action: "modify" },
+        { path: "src/pages/home.html", reason: "Main UI file", action: "modify" },
       ],
       risks: [],
     });
@@ -481,7 +481,7 @@ describe("runLlmPatchFlow", () => {
       summary: "Polish spacing",
       patches: [
         {
-          path: "src/ui/index.html",
+          path: "src/pages/home.html",
           operation: "modify",
           summary: "Adjust spacing",
           targetHint: "body styles",
@@ -492,7 +492,7 @@ describe("runLlmPatchFlow", () => {
     });
     planFullPatchWithLlmMock.mockResolvedValue({
       mode: "patch",
-      filePath: "src/ui/index.html",
+      filePath: "src/pages/home.html",
       patchText:
         `<!DOCTYPE html><html><head><title>Document</title></head><body><div id="app"></div></body></html>`,
       summary: "Large-file targeted patch generated.",
@@ -513,7 +513,7 @@ describe("runLlmPatchFlow", () => {
   });
 
   it("applies raw find/replace patch mode for large files", async () => {
-    const files = [buildRepoFile("src/ui/index.html", "frontend")];
+    const files = [buildRepoFile("src/pages/home.html", "frontend")];
     const currentHtml = `${"<div class=\"line\">filler</div>\n".repeat(400)}<button class="exec-btn">Execute</button>\n${"<div class=\"line\">after</div>\n".repeat(400)}`;
 
     scanRepoMock.mockResolvedValue(files);
@@ -523,7 +523,7 @@ describe("runLlmPatchFlow", () => {
       implementationSummary: "Polish UI",
       steps: ["Adjust button color"],
       suggestedFiles: [
-        { path: "src/ui/index.html", reason: "Main UI file", action: "modify" },
+        { path: "src/pages/home.html", reason: "Main UI file", action: "modify" },
       ],
       risks: [],
     });
@@ -534,7 +534,7 @@ describe("runLlmPatchFlow", () => {
       summary: "Polish button color",
       patches: [
         {
-          path: "src/ui/index.html",
+          path: "src/pages/home.html",
           operation: "modify",
           summary: "Update execute button styling",
           targetHint: "button block",
@@ -545,7 +545,7 @@ describe("runLlmPatchFlow", () => {
     });
     planFullPatchWithLlmMock.mockResolvedValue({
       mode: "patch",
-      filePath: "src/ui/index.html",
+      filePath: "src/pages/home.html",
       patchText:
         `--- FIND ---\n<button class="exec-btn">Execute</button>\n--- REPLACE ---\n<button class="exec-btn" style="background:#1a8cdb">Execute</button>`,
       summary: "Large-file targeted patch generated.",
@@ -566,5 +566,50 @@ describe("runLlmPatchFlow", () => {
       );
       expect(result.warnings.join("\n")).not.toContain("PATCH_FIND_NOT_FOUND");
     }
+  });
+
+  it("blocks protected src/ui files from developer apply patches", async () => {
+    const files = [buildRepoFile("src/ui/index.html", "frontend")];
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["Static UI"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 40 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Polish UI",
+      steps: ["Adjust spacing"],
+      suggestedFiles: [
+        { path: "src/ui/index.html", reason: "Main UI file", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockResolvedValue({});
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Polish spacing",
+      patches: [
+        {
+          path: "src/ui/index.html",
+          operation: "modify",
+          summary: "Adjust spacing",
+          targetHint: "body styles",
+          contentPreview: "spacing polish",
+        },
+      ],
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "small spacing tweak for the existing ui",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.applyPatches).toEqual([]);
+      expect(result.warnings).toContain(
+        "[PROTECTED_FILE] src/ui/ files cannot be modified by Zone developer mode"
+      );
+    }
+    expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
   });
 });

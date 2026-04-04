@@ -216,4 +216,21 @@ describe("applyLlmPatches", () => {
     const written = await readFile("unicode.ts");
     expect(written).toBe(unicodeContent);
   });
+
+  it("fails protected src/ui paths without writing them", async () => {
+    const result = await applyLlmPatches(
+      [
+        {
+          filePath: "src/ui/index.html",
+          fullContent: "<html><body>bad overwrite</body></html>",
+        },
+      ],
+      tmpDir
+    );
+
+    expect(result.applied).toEqual([]);
+    expect(result.skipped).toEqual([]);
+    expect(result.failed).toEqual(["src/ui/index.html"]);
+    await expect(fs.access(path.join(tmpDir, "src/ui/index.html"))).rejects.toThrow();
+  });
 });
