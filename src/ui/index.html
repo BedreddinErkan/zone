@@ -229,7 +229,7 @@ function formatStatusLabel(s){return {safe_to_apply:'Safe to Apply',preview_only
 function formatRecentRunTime(t){if(!t)return 'unknown';const d=Math.max(0,Date.now()-t);const m=Math.floor(d/60000);if(m<1)return 'just now';if(m<60)return m+'m ago';const h=Math.floor(m/60);if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago';}
 function escapeHtml(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function formatFileOperation(p){return String(p||'').includes('[modify]')?'modify':'create';}
-function formatFileLabel(p,i){return p||`file_${i+1}`;}
+function formatFileLabel(p,i){return p||`generated_file_${i+1}`;}
 
 function buildFilePreviewCards(patches){
   return (patches||[]).map((p,i)=>{

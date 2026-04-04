@@ -25,6 +25,7 @@ import { formatOutput, type OutputFormat } from "../core/formatOutput.js";
 import { runDecisionEngine } from "../engine/decisionEngine.js";
 import type { ExecutionMode } from "../engine/contradictionDetector.js";
 import { buildAuditSnapshot } from "../audit/auditSnapshot.js";
+import { c, colorize } from "./colors.js";
 import { printAuditSnapshot } from "./output.js";
 import { writeAuditSnapshot } from "../audit/snapshotWriter.js";
 import { readAuditSnapshot } from "../audit/snapshotReader.js";
@@ -46,6 +47,7 @@ import { runTestEngineerFlow } from "../roles/runTestEngineerFlow.js";
 import { runDataAnalystFlow } from "../roles/runDataAnalystFlow.js";
 import { checkConfidenceGate, renderConfidenceGateBlock } from "../core/confidenceGate.js";
 const execFileAsync = promisify(execFile);
+const ANSI_ENABLED = process.env.VITEST !== "true" && process.env.NO_COLOR !== "1";
 
 type CliOptions = {
   task?: string;
@@ -161,8 +163,56 @@ async function writeJsonFile(filePath: string, data: unknown): Promise<void> {
   await fs.writeFile(filePath, JSON.stringify(data, null, 2), "utf8");
 }
 
+function tone(text: string, ...codes: string[]): string {
+  return ANSI_ENABLED ? colorize(text, ...codes) : text;
+}
+
+function zonePrefix(): string {
+  return tone("[zone]", c.bold, c.cyan);
+}
+
+function colorConfidence(score: number): string {
+  if (!ANSI_ENABLED) return String(score);
+  if (score >= 70) return tone(String(score), c.bold, c.green);
+  if (score >= 50) return tone(String(score), c.bold, c.yellow);
+  return tone(String(score), c.bold, c.red);
+}
+
+function colorLabel(label: string, color: string, symbol?: string): string {
+  if (!ANSI_ENABLED) return label;
+  const prefix = symbol ? `${symbol} ` : "";
+  return `${tone(prefix, c.bold, color)}${tone(label, c.bold, color)}`;
+}
+
+function formatApplyLog(
+  kind: "Applied" | "Failed" | "Skipped",
+  values: string[]
+): string {
+  const colors = {
+    Applied: c.green,
+    Failed: c.red,
+    Skipped: c.gray,
+  };
+  const symbols = {
+    Applied: "✓",
+    Failed: "✗",
+    Skipped: "•",
+  };
+
+  return `${zonePrefix()} ${colorLabel(
+    `${kind}:`,
+    colors[kind],
+    symbols[kind]
+  )} ${values.join(", ") || "none"}`;
+}
+
 function printHeader(): void {
-  console.log("Zone");
+  console.log(
+    tone("⚡ Zone", c.bold, c.orange) + tone(" v0.1.0", c.dim, c.gray)
+  );
+  console.log(
+    tone("AI Code Agent — deterministic, explainable, safe", c.dim, c.gray)
+  );
 }
 
 function printStatusLine(statusLine: string): void {
@@ -181,7 +231,7 @@ function printVerbose(label: string, value: unknown, enabled: boolean): void {
   const serialized =
     typeof value === "string" ? value : JSON.stringify(value, null, 2);
 
-  console.log(`\n[verbose] ${label}`);
+  console.log(`\n${tone("[verbose]", c.dim, c.gray)} ${label}`);
   console.log(serialized);
 }
 
@@ -456,14 +506,19 @@ if (!gateResult.pass && apply && confirmApply) {
   console.log("");
   console.log(renderConfidenceGateBlock(gateResult));
   console.log("");
-  console.log("[zone] Apply blocked by confidence gate. Use --verbose to see details.");
+  console.log(
+    `${zonePrefix()} ${tone(
+      "Apply blocked by confidence gate. Use --verbose to see details.",
+      c.yellow
+    )}`
+  );
   return 1;
 }
 
 if (!gateResult.pass) {
   console.log("");
   console.log(renderConfidenceGateBlock(gateResult));
-  console.log("[zone] Proceeding in preview mode only.");
+  console.log(`${zonePrefix()} ${tone("Proceeding in preview mode only.", c.yellow)}`);
   console.log("");
 }
 const intent = classifyPatchIntent(task);
@@ -471,7 +526,12 @@ let patchSection = generatedPatchPlanPreview;
 
 if (intent === "unknown" && repoPath) {
   if (role === "data_analyst") {
-    console.log("[zone] Data Analyst role — delegating to data analyst flow...");
+    console.log(
+      `${zonePrefix()} ${tone(
+        "Data Analyst role — delegating to data analyst flow...",
+        c.white
+      )}`
+    );
     const daResult = await runDataAnalystFlow({ task, repoPath });
 
     if (!daResult.ok) {
@@ -479,22 +539,32 @@ if (intent === "unknown" && repoPath) {
       return 1;
     }
 
-    console.log(`[zone] Dialect detected: ${daResult.dialect} (${daResult.migrationFormat})`);
-    console.log(`[zone] Confidence: ${daResult.confidence}`);
+    console.log(
+      `${zonePrefix()} Dialect detected: ${tone(
+        daResult.dialect,
+        c.blue
+      )} (${tone(daResult.migrationFormat, c.blue)})`
+    );
+    console.log(`${zonePrefix()} Confidence: ${colorConfidence(daResult.confidence)}`);
     console.log(daResult.preview);
 
     if (apply && confirmApply && daResult.applyPatches.length > 0) {
-      console.log("[zone] Applying migration files...");
+      console.log(`${zonePrefix()} ${tone("Applying migration files...", c.white)}`);
       const applyResult = await applyLlmPatches(daResult.applyPatches, repoPath);
-      console.log(`[zone] Applied: ${applyResult.applied.join(", ") || "none"}`);
-      console.log(`[zone] Failed: ${applyResult.failed.join(", ") || "none"}`);
+      console.log(formatApplyLog("Applied", applyResult.applied));
+      console.log(formatApplyLog("Failed", applyResult.failed));
     }
 
     return 0;
   }
 
   if (role === "test_engineer") {
-    console.log("[zone] Test Engineer role — delegating to test engineer flow...");
+    console.log(
+      `${zonePrefix()} ${tone(
+        "Test Engineer role — delegating to test engineer flow...",
+        c.white
+      )}`
+    );
     const teResult = await runTestEngineerFlow({ task, repoPath });
 
     if (!teResult.ok) {
@@ -506,30 +576,37 @@ if (intent === "unknown" && repoPath) {
       return 1;
     }
 
-    console.log(`[zone] Framework detected: ${teResult.framework} (${teResult.language})`);
-    console.log(`[zone] Confidence: ${teResult.confidence}`);
+    console.log(
+      `${zonePrefix()} Framework detected: ${tone(
+        teResult.framework,
+        c.blue
+      )} (${tone(teResult.language, c.blue)})`
+    );
+    console.log(`${zonePrefix()} Confidence: ${colorConfidence(teResult.confidence)}`);
     console.log(teResult.preview);
 
     if (apply && confirmApply && teResult.applyPatches.length > 0) {
-      console.log("[zone] Applying test files...");
+      console.log(`${zonePrefix()} ${tone("Applying test files...", c.white)}`);
       const applyResult = await applyLlmPatches(teResult.applyPatches, repoPath);
-      console.log(`[zone] Applied: ${applyResult.applied.join(", ") || "none"}`);
-      console.log(`[zone] Failed: ${applyResult.failed.join(", ") || "none"}`);
+      console.log(formatApplyLog("Applied", applyResult.applied));
+      console.log(formatApplyLog("Failed", applyResult.failed));
     }
 
     return 0;
   }
 
-  console.log("[zone] Intent unknown — delegating to LLM patch flow...");
+  console.log(
+    `${zonePrefix()} ${tone("Intent unknown — delegating to LLM patch flow...", c.white)}`
+  );
   const llmResult = await runLlmPatchFlow({ task, repoPath });
   if (llmResult.ok) {
     patchSection = llmResult.patchPreview;
     if (apply && confirmApply && llmResult.applyPatches.length > 0) {
-      console.log("[zone] Applying LLM patches...");
+      console.log(`${zonePrefix()} ${tone("Applying LLM patches...", c.white)}`);
       const applyResult = await applyLlmPatches(llmResult.applyPatches, repoPath);
-      console.log(`[zone] Applied: ${applyResult.applied.join(", ") || "none"}`);
-      console.log(`[zone] Skipped: ${applyResult.skipped.join(", ") || "none"}`);
-      console.log(`[zone] Failed: ${applyResult.failed.join(", ") || "none"}`);
+      console.log(formatApplyLog("Applied", applyResult.applied));
+      console.log(formatApplyLog("Skipped", applyResult.skipped));
+      console.log(formatApplyLog("Failed", applyResult.failed));
     }
   } else {
     patchSection = generatedPatchPlanPreview + "\n\n[zone] LLM patch flow failed: " + llmResult.reason;
