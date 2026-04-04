@@ -39,6 +39,22 @@ function buildContext(
       stepDefinition:
         "src/test/java/com/enuygun/stepdefinitions/RoundTripFlightSearchSteps.java",
     },
+    debug: {
+      selectedRole: "test_engineer",
+      normalizedTask: "write a new cucumber scenario for round trip flight search",
+      intentTokens: ["round", "trip", "flight", "search"],
+      hasLoginIntent: false,
+      preferredBasenameToken: null,
+      candidateTestFiles: [],
+      chosenExistingTestFile: null,
+      generatedSlug: "round_trip_flight_search",
+      safeSlug: "round_trip_flight_search",
+      suspiciousFilenameRejected: false,
+      fallbackTestFilePath:
+        "src/test/resources/features/round_trip_flight_search.feature",
+      finalOutputPath: "src/test/resources/features/round_trip_flight_search.feature",
+      finalOutputPathSource: "generated_fallback",
+    },
     ...overrides,
   };
 }

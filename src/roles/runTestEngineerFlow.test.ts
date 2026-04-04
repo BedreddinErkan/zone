@@ -453,6 +453,28 @@ describe("runTestEngineerFlow", () => {
       outputPaths: {
         testFile: "tests/login.spec.ts",
       },
+      debug: {
+        selectedRole: "test_engineer",
+        normalizedTask: "add a negative login test",
+        intentTokens: ["login"],
+        hasLoginIntent: true,
+        preferredBasenameToken: "login",
+        candidateTestFiles: [
+          {
+            path: "tests/login.spec.ts",
+            baseScore: 2,
+            authPreferenceScore: 12,
+            totalScore: 14,
+          },
+        ],
+        chosenExistingTestFile: "tests/login.spec.ts",
+        generatedSlug: "login",
+        safeSlug: "login",
+        suspiciousFilenameRejected: false,
+        fallbackTestFilePath: "tests/login.spec.ts",
+        finalOutputPath: "tests/login.spec.ts",
+        finalOutputPathSource: "existing_test_file",
+      },
     });
     buildTestEngineerPromptMock.mockReturnValue("prompt");
     createMock.mockReturnValue(client);
@@ -523,6 +545,28 @@ describe("runTestEngineerFlow", () => {
       outputPaths: {
         testFile: "tests/login.spec.ts",
       },
+      debug: {
+        selectedRole: "test_engineer",
+        normalizedTask: "add a negative login test",
+        intentTokens: ["login"],
+        hasLoginIntent: true,
+        preferredBasenameToken: "login",
+        candidateTestFiles: [
+          {
+            path: "tests/login.spec.ts",
+            baseScore: 2,
+            authPreferenceScore: 12,
+            totalScore: 14,
+          },
+        ],
+        chosenExistingTestFile: "tests/login.spec.ts",
+        generatedSlug: "login",
+        safeSlug: "login",
+        suspiciousFilenameRejected: false,
+        fallbackTestFilePath: "tests/login.spec.ts",
+        finalOutputPath: "tests/login.spec.ts",
+        finalOutputPathSource: "existing_test_file",
+      },
     });
     buildTestEngineerPromptMock.mockReturnValue("prompt");
     createMock.mockReturnValue(client);
@@ -545,6 +589,26 @@ describe("runTestEngineerFlow", () => {
       expect(result.applyPatches[0]?.filePath).toBe("tests/login.spec.ts");
       expect(result.preview).toContain("tests/login.spec.ts");
       expect(result.preview).not.toContain("you_are_code_agent_analyze.spec.ts");
+      expect(result.debug).toEqual(
+        expect.objectContaining({
+          selectedRole: "test_engineer",
+          promptPipeline: "buildTestEngineerPrompt",
+          finalPromptBuilder: "buildFinalPrompt",
+          detectedFramework: "playwright_ts",
+          frameworkAugmentation: "playwright",
+          outputPathDecision: expect.objectContaining({
+            finalTestFilePath: "tests/login.spec.ts",
+            finalPathSource: "deterministic_context_override",
+            rawModelTestFilePath: "tests/you_are_code_agent_analyze.spec.ts",
+            rawModelPathDiffers: true,
+          }),
+          suspiciousFilenameFiltering: expect.objectContaining({
+            triggered: false,
+            generatedSlug: "login",
+            safeSlug: "login",
+          }),
+        })
+      );
     }
   });
 
@@ -591,6 +655,28 @@ describe("runTestEngineerFlow", () => {
       outputPaths: {
         testFile: "tests/login.spec.ts",
       },
+      debug: {
+        selectedRole: "test_engineer",
+        normalizedTask: "add a negative login test",
+        intentTokens: ["login"],
+        hasLoginIntent: true,
+        preferredBasenameToken: "login",
+        candidateTestFiles: [
+          {
+            path: "tests/login.spec.ts",
+            baseScore: 2,
+            authPreferenceScore: 12,
+            totalScore: 14,
+          },
+        ],
+        chosenExistingTestFile: "tests/login.spec.ts",
+        generatedSlug: "login",
+        safeSlug: "login",
+        suspiciousFilenameRejected: false,
+        fallbackTestFilePath: "tests/login.spec.ts",
+        finalOutputPath: "tests/login.spec.ts",
+        finalOutputPathSource: "existing_test_file",
+      },
     });
     readProjectFilesMock.mockResolvedValue({
       "C:/repo/tests/login.spec.ts":
@@ -612,11 +698,33 @@ describe("runTestEngineerFlow", () => {
       repoPath: "C:/repo",
     });
 
-    expect(result).toEqual({
-      ok: false,
-      framework: "playwright_ts",
-      reason:
-        "Output validation blocked: Generated Playwright URL assertion uses an arbitrary regex pattern instead of a repository-evidenced route.",
-    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        framework: "playwright_ts",
+        reason:
+          "Output validation blocked: Generated Playwright URL assertion uses an arbitrary regex pattern instead of a repository-evidenced route.",
+        debug: expect.objectContaining({
+          selectedRole: "test_engineer",
+          detectedFramework: "playwright_ts",
+          contextSelection: expect.objectContaining({
+            chosenExistingTestFile: "tests/login.spec.ts",
+          }),
+          outputPathDecision: expect.objectContaining({
+            rawModelTestFilePath: "tests/login.spec.ts",
+            finalTestFilePath: "tests/login.spec.ts",
+            finalPathSource: "deterministic_context",
+            rawModelPathDiffers: false,
+          }),
+          playwrightUrlAssertionGuard: expect.objectContaining({
+            checked: true,
+            triggered: true,
+            reason:
+              "Generated Playwright URL assertion uses an arbitrary regex pattern instead of a repository-evidenced route.",
+            routeEvidence: ["/login"],
+          }),
+        }),
+      })
+    );
   });
 });

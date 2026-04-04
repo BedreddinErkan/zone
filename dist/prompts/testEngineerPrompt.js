@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildTestEngineerPrompt = buildTestEngineerPrompt;
 const detectTestComplexity_js_1 = require("../roles/detectTestComplexity.js");
+const buildFinalPrompt_js_1 = require("./buildFinalPrompt.js");
 function buildTestEngineerPrompt(input) {
     const { task, context, pageObjectContents, stepDefinitionContents, featureContents, existingTestContents, } = input;
     const { framework, outputPaths } = context;
@@ -59,15 +60,12 @@ Step definitions: ${outputPaths.stepDefinition}`
   "warnings": ["any risks or missing methods"],
   "confidence": 0
 }`;
-    return `
+    const contextPayload = `
 ${context.promptRole}
 
 Your job is to write a complete, runnable test for the given task.
 You must follow the exact framework, language, and patterns detected in this repository.
 You must NEVER invent new methods - always use what already exists in the page objects.
-
-=== TASK ===
-${task}
 
 === DETECTED FRAMEWORK ===
 ${context.frameworkSummary}
@@ -125,11 +123,19 @@ ${outputSection}
 13. Follow the exact import/package structure of the existing files.
 14. For Cucumber Java: write both feature file AND step definitions.
 15. confidence field: 0-100 based on how well page objects cover the task.
-16. Return raw JSON only - no markdown, no code fences, no explanations.
+16. For Playwright: only use expect(page).toHaveURL(...) when repository examples or context show real route evidence. Do NOT invent wildcard, hash-only, or placeholder URL assertions.
+17. If repository evidence does not establish a success route, prefer visible error-state assertions over redirect assertions.
+18. Return raw JSON only - no markdown, no code fences, no explanations.
 
 === OUTPUT FORMAT ===
 Return JSON only:
 ${outputFormat}
 `.trim();
+    return (0, buildFinalPrompt_js_1.buildFinalPrompt)({
+        role: "test_engineer",
+        task,
+        detectedFramework: framework.framework,
+        context: contextPayload,
+    });
 }
 //# sourceMappingURL=testEngineerPrompt.js.map

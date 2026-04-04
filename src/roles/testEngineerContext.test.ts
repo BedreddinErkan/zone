@@ -159,6 +159,14 @@ describe("buildTestEngineerContext output naming", () => {
     );
 
     expect(context.outputPaths.testFile).toBe("tests/authentication.spec.ts");
+    expect(context.debug.hasLoginIntent).toBe(true);
+    expect(context.debug.chosenExistingTestFile).toBe("tests/authentication.spec.ts");
+    expect(context.debug.finalOutputPathSource).toBe("existing_test_file");
+    expect(context.debug.candidateTestFiles[0]).toEqual(
+      expect.objectContaining({
+        path: "tests/authentication.spec.ts",
+      })
+    );
   });
 
   it("falls back to a safe deterministic basename when prompt text is too generic", () => {
@@ -176,6 +184,9 @@ describe("buildTestEngineerContext output naming", () => {
     expect(context.outputPaths.testFile).toBe("tests/app.spec.ts");
     expect(context.outputPaths.testFile).not.toContain("you_are_code_agent_analyze");
     expect(context.outputPaths.testFile).not.toContain("analyze_repo");
+    expect(context.debug.suspiciousFilenameRejected).toBe(true);
+    expect(context.debug.generatedSlug).toBe("you_are_code_agent_analyze");
+    expect(context.debug.safeSlug).toBe("app");
   });
 
   it("uses a short repository-native login basename when no auth spec exists yet", () => {
@@ -210,6 +221,9 @@ describe("buildTestEngineerContext output naming", () => {
     expect(context.outputPaths.testFile).not.toContain("task");
     expect(context.outputPaths.testFile).not.toContain("agent");
     expect(context.outputPaths.testFile).not.toContain("requirements");
+    expect(context.debug.generatedSlug).toBe("login");
+    expect(context.debug.suspiciousFilenameRejected).toBe(false);
+    expect(context.debug.finalOutputPathSource).toBe("generated_fallback");
   });
 
   it("prefers src/test/resources/features when both feature roots exist", () => {

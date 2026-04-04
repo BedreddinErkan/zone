@@ -31,6 +31,21 @@ function buildContext(overrides = {}) {
             featureFile: "src/test/resources/features/round_trip_flight_search.feature",
             stepDefinition: "src/test/java/com/enuygun/stepdefinitions/RoundTripFlightSearchSteps.java",
         },
+        debug: {
+            selectedRole: "test_engineer",
+            normalizedTask: "write a new cucumber scenario for round trip flight search",
+            intentTokens: ["round", "trip", "flight", "search"],
+            hasLoginIntent: false,
+            preferredBasenameToken: null,
+            candidateTestFiles: [],
+            chosenExistingTestFile: null,
+            generatedSlug: "round_trip_flight_search",
+            safeSlug: "round_trip_flight_search",
+            suspiciousFilenameRejected: false,
+            fallbackTestFilePath: "src/test/resources/features/round_trip_flight_search.feature",
+            finalOutputPath: "src/test/resources/features/round_trip_flight_search.feature",
+            finalOutputPathSource: "generated_fallback",
+        },
         ...overrides,
     };
 }
@@ -216,6 +231,29 @@ function buildContext(overrides = {}) {
             existingTestContents: [],
         });
         (0, vitest_1.expect)(prompt).toContain("If repository-specific phrasing exists in the provided examples, do NOT fall back to generic phrasing.");
+    });
+    (0, vitest_1.it)("forbids unsupported Playwright URL assertions without route evidence", () => {
+        const prompt = (0, testEngineerPrompt_js_1.buildTestEngineerPrompt)({
+            task: "Add a negative login test",
+            context: buildContext({
+                framework: buildFramework({
+                    framework: "playwright_ts",
+                    language: "typescript",
+                    testFilePattern: "*.spec.ts",
+                    testDir: "tests",
+                }),
+                frameworkSummary: "Test framework: playwright_ts",
+                outputPaths: {
+                    testFile: "tests/login.spec.ts",
+                },
+            }),
+            pageObjectContents: [],
+            stepDefinitionContents: [],
+            featureContents: [],
+            existingTestContents: [],
+        });
+        (0, vitest_1.expect)(prompt).toContain("For Playwright: only use expect(page).toHaveURL(...) when repository examples or context show real route evidence. Do NOT invent wildcard, hash-only, or placeholder URL assertions.");
+        (0, vitest_1.expect)(prompt).toContain("If repository evidence does not establish a success route, prefer visible error-state assertions over redirect assertions.");
     });
 });
 //# sourceMappingURL=testEngineerPrompt.test.js.map

@@ -9,6 +9,43 @@ import { validateTestOutput } from "./testOutputValidator.js";
 import { detectTestComplexity } from "./detectTestComplexity.js";
 import type { TestComplexity } from "./detectTestComplexity.js";
 import type { RepoFile } from "../types/project.js";
+import type { TestEngineerContextDebug } from "./testEngineerContext.js";
+
+interface TestEngineerDebugInfo {
+  selectedRole: "test_engineer";
+  promptPipeline: "buildTestEngineerPrompt";
+  finalPromptBuilder: "buildFinalPrompt";
+  detectedFramework: string;
+  frameworkAugmentation:
+    | "playwright"
+    | "cypress"
+    | "selenium"
+    | "cucumber"
+    | "none";
+  contextSelection: TestEngineerContextDebug | null;
+  outputPathDecision: {
+    finalTestFilePath: string | null;
+    finalPathSource:
+      | "deterministic_context"
+      | "deterministic_context_override"
+      | "model_output";
+    rawModelTestFilePath: string | null;
+    rawModelFeatureFilePath: string | null;
+    rawModelStepDefinitionPath: string | null;
+    rawModelPathDiffers: boolean;
+  };
+  suspiciousFilenameFiltering: {
+    triggered: boolean;
+    generatedSlug: string | null;
+    safeSlug: string | null;
+  };
+  playwrightUrlAssertionGuard: {
+    checked: boolean;
+    triggered: boolean;
+    reason: string | null;
+    routeEvidence: string[];
+  };
+}
 
 export type TestEngineerFlowResult =
   | {
@@ -21,11 +58,13 @@ export type TestEngineerFlowResult =
       complexity?: TestComplexity;
       applyPatches: Array<{ filePath: string; fullContent: string }>;
       preview: string;
+      debug?: TestEngineerDebugInfo;
     }
   | {
       ok: false;
       reason: string;
       framework?: string;
+      debug?: TestEngineerDebugInfo;
     };
 
 function extractJson(rawText: string): string {
@@ -98,6 +137,21 @@ function buildApplyPatches(
   }
 
   return patches;
+}
+
+function resolveFrameworkAugmentation(framework: string): TestEngineerDebugInfo["frameworkAugmentation"] {
+  if (framework.startsWith("playwright")) return "playwright";
+  if (framework === "cypress") return "cypress";
+  if (
+    framework === "selenium_java" ||
+    framework === "selenium_python" ||
+    framework === "junit" ||
+    framework === "testng"
+  ) {
+    return "selenium";
+  }
+  if (framework === "cucumber_java") return "cucumber";
+  return "none";
 }
 
 async function readExampleContents(
@@ -267,6 +321,34 @@ export async function runTestEngineerFlow(input: {
     };
   }
 
+  const debug: TestEngineerDebugInfo = {
+    selectedRole: "test_engineer",
+    promptPipeline: "buildTestEngineerPrompt",
+    finalPromptBuilder: "buildFinalPrompt",
+    detectedFramework: framework.framework,
+    frameworkAugmentation: resolveFrameworkAugmentation(framework.framework),
+    contextSelection: context.debug ?? null,
+    outputPathDecision: {
+      finalTestFilePath: context.outputPaths.testFile ?? null,
+      finalPathSource: "deterministic_context",
+      rawModelTestFilePath: null,
+      rawModelFeatureFilePath: null,
+      rawModelStepDefinitionPath: null,
+      rawModelPathDiffers: false,
+    },
+    suspiciousFilenameFiltering: {
+      triggered: Boolean(context.debug?.suspiciousFilenameRejected),
+      generatedSlug: context.debug?.generatedSlug ?? null,
+      safeSlug: context.debug?.safeSlug ?? null,
+    },
+    playwrightUrlAssertionGuard: {
+      checked: false,
+      triggered: false,
+      reason: null,
+      routeEvidence: [],
+    },
+  };
+
   const pageObjectContents = await readExampleContents(
     context.pageObjectFiles,
     allFiles,
@@ -314,6 +396,37 @@ export async function runTestEngineerFlow(input: {
       framework: framework.framework,
     };
   }
+
+  const rawModelTestFilePath =
+    (parsed["testFile"] as { path?: string } | undefined)?.path ?? null;
+  const rawModelFeatureFilePath =
+    (parsed["featureFile"] as { path?: string } | undefined)?.path ?? null;
+  const rawModelStepDefinitionPath =
+    (parsed["stepDefinitionFile"] as { path?: string } | undefined)?.path ?? null;
+  debug.outputPathDecision = {
+    finalTestFilePath: context.outputPaths.testFile ?? null,
+    finalPathSource:
+      rawModelTestFilePath && rawModelTestFilePath !== context.outputPaths.testFile
+        ? "deterministic_context_override"
+        : rawModelTestFilePath
+          ? "deterministic_context"
+          : "model_output",
+    rawModelTestFilePath,
+    rawModelFeatureFilePath,
+    rawModelStepDefinitionPath,
+    rawModelPathDiffers:
+      Boolean(rawModelTestFilePath && rawModelTestFilePath !== context.outputPaths.testFile) ||
+      Boolean(
+        rawModelFeatureFilePath &&
+          context.outputPaths.featureFile &&
+          rawModelFeatureFilePath !== context.outputPaths.featureFile
+      ) ||
+      Boolean(
+        rawModelStepDefinitionPath &&
+          context.outputPaths.stepDefinition &&
+          rawModelStepDefinitionPath !== context.outputPaths.stepDefinition
+      ),
+  };
 
   const applyPatches = buildApplyPatches(parsed, context.outputPaths);
   const preview = buildPreview(parsed, framework.framework, context.outputPaths);
@@ -389,12 +502,25 @@ if (validation.decision !== "pass" || validation.issues.length > 0) {
     );
 
     if (playwrightUrlAssertionIssue) {
+      debug.playwrightUrlAssertionGuard = {
+        checked: true,
+        triggered: true,
+        reason: playwrightUrlAssertionIssue,
+        routeEvidence,
+      };
       return {
         ok: false,
         reason: `Output validation blocked: ${playwrightUrlAssertionIssue}`,
         framework: framework.framework,
+        debug,
       };
     }
+    debug.playwrightUrlAssertionGuard = {
+      checked: true,
+      triggered: false,
+      reason: null,
+      routeEvidence,
+    };
   }
   if (validation.decision === "blocked") {
     return {
@@ -406,6 +532,7 @@ if (validation.decision !== "pass" || validation.issues.length > 0) {
           .map(i => `  - ${i.message}`)
           .join("\n"),
       framework: framework.framework,
+      debug,
     };
   }
 
@@ -423,5 +550,6 @@ return {
     complexity,
     applyPatches,
     preview,
+    debug,
   };
 }

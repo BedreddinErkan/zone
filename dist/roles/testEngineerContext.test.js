@@ -58,7 +58,77 @@ function buildRepoFile(path) {
         }), files);
         (0, vitest_1.expect)(cucumberContext.outputPaths.featureFile).toBe("src/test/resources/features/round_trip_flight_search.feature");
         (0, vitest_1.expect)(cucumberContext.outputPaths.stepDefinition).toBe("src/test/java/com/enuygun/stepdefinitions/RoundTripFlightSearchSteps.java");
-        (0, vitest_1.expect)(cypressContext.outputPaths.testFile).toBe("cypress/e2e/login_smoke.cy.ts");
+        (0, vitest_1.expect)(cypressContext.outputPaths.testFile).toBe("cypress/e2e/login.cy.ts");
+    });
+    (0, vitest_1.it)("reuses the closest matching existing Playwright spec instead of inventing a prompt-based filename", () => {
+        const context = (0, testEngineerContext_js_1.buildTestEngineerContext)("You are a code agent. Analyze repo and add a negative login test case.", buildFramework({
+            framework: "playwright_ts",
+            language: "typescript",
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        }), [
+            buildRepoFile("tests/login.spec.ts"),
+            buildRepoFile("tests/checkout.spec.ts"),
+        ]);
+        (0, vitest_1.expect)(context.outputPaths.testFile).toBe("tests/login.spec.ts");
+    });
+    (0, vitest_1.it)("strongly prefers an existing auth-related Playwright spec for login tasks", () => {
+        const context = (0, testEngineerContext_js_1.buildTestEngineerContext)("Add coverage for invalid credentials on sign in", buildFramework({
+            framework: "playwright_ts",
+            language: "typescript",
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        }), [
+            buildRepoFile("tests/account-settings.spec.ts"),
+            buildRepoFile("tests/authentication.spec.ts"),
+            buildRepoFile("tests/profile.spec.ts"),
+        ]);
+        (0, vitest_1.expect)(context.outputPaths.testFile).toBe("tests/authentication.spec.ts");
+        (0, vitest_1.expect)(context.debug.hasLoginIntent).toBe(true);
+        (0, vitest_1.expect)(context.debug.chosenExistingTestFile).toBe("tests/authentication.spec.ts");
+        (0, vitest_1.expect)(context.debug.finalOutputPathSource).toBe("existing_test_file");
+        (0, vitest_1.expect)(context.debug.candidateTestFiles[0]).toEqual(vitest_1.expect.objectContaining({
+            path: "tests/authentication.spec.ts",
+        }));
+    });
+    (0, vitest_1.it)("falls back to a safe deterministic basename when prompt text is too generic", () => {
+        const context = (0, testEngineerContext_js_1.buildTestEngineerContext)("You are code agent analyze repository and implement the task", buildFramework({
+            framework: "playwright_ts",
+            language: "typescript",
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        }), []);
+        (0, vitest_1.expect)(context.outputPaths.testFile).toBe("tests/app.spec.ts");
+        (0, vitest_1.expect)(context.outputPaths.testFile).not.toContain("you_are_code_agent_analyze");
+        (0, vitest_1.expect)(context.outputPaths.testFile).not.toContain("analyze_repo");
+        (0, vitest_1.expect)(context.debug.suspiciousFilenameRejected).toBe(true);
+        (0, vitest_1.expect)(context.debug.generatedSlug).toBe("you_are_code_agent_analyze");
+        (0, vitest_1.expect)(context.debug.safeSlug).toBe("app");
+    });
+    (0, vitest_1.it)("uses a short repository-native login basename when no auth spec exists yet", () => {
+        const context = (0, testEngineerContext_js_1.buildTestEngineerContext)("Add negative login invalid requirements for auth request prompt", buildFramework({
+            framework: "playwright_ts",
+            language: "typescript",
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        }), [buildRepoFile("tests/checkout.spec.ts")]);
+        (0, vitest_1.expect)(context.outputPaths.testFile).toBe("tests/login.spec.ts");
+        (0, vitest_1.expect)(context.outputPaths.testFile).not.toContain("add_negative_login_invalid_requirements");
+    });
+    (0, vitest_1.it)("blocks suspicious task-derived Playwright filenames from becoming output paths", () => {
+        const context = (0, testEngineerContext_js_1.buildTestEngineerContext)("Create task prompt for code agent to analyze repo and write login test requirements", buildFramework({
+            framework: "playwright_ts",
+            language: "typescript",
+            testFilePattern: "*.spec.ts",
+            testDir: "tests",
+        }), []);
+        (0, vitest_1.expect)(context.outputPaths.testFile).toBe("tests/login.spec.ts");
+        (0, vitest_1.expect)(context.outputPaths.testFile).not.toContain("task");
+        (0, vitest_1.expect)(context.outputPaths.testFile).not.toContain("agent");
+        (0, vitest_1.expect)(context.outputPaths.testFile).not.toContain("requirements");
+        (0, vitest_1.expect)(context.debug.generatedSlug).toBe("login");
+        (0, vitest_1.expect)(context.debug.suspiciousFilenameRejected).toBe(false);
+        (0, vitest_1.expect)(context.debug.finalOutputPathSource).toBe("generated_fallback");
     });
     (0, vitest_1.it)("prefers src/test/resources/features when both feature roots exist", () => {
         const context = (0, testEngineerContext_js_1.buildTestEngineerContext)("Write a new Cucumber scenario for round trip flight search", buildFramework({

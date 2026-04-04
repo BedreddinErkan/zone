@@ -18,6 +18,30 @@ export interface TestEngineerContext {
     stepDefinition?: string;
     featureFile?: string;
   };
+  debug: TestEngineerContextDebug;
+}
+
+export interface RankedTestFileCandidate {
+  path: string;
+  baseScore: number;
+  authPreferenceScore: number;
+  totalScore: number;
+}
+
+export interface TestEngineerContextDebug {
+  selectedRole: "test_engineer";
+  normalizedTask: string;
+  intentTokens: string[];
+  hasLoginIntent: boolean;
+  preferredBasenameToken: string | null;
+  candidateTestFiles: RankedTestFileCandidate[];
+  chosenExistingTestFile: string | null;
+  generatedSlug: string;
+  safeSlug: string;
+  suspiciousFilenameRejected: boolean;
+  fallbackTestFilePath: string;
+  finalOutputPath: string;
+  finalOutputPathSource: "existing_test_file" | "generated_fallback";
 }
 
 function detectPageObjects(files: RepoFile[], language: string): RepoFile[] {
@@ -374,24 +398,24 @@ function scoreAuthRelatedExistingTestFile(pathValue: string, task: string): numb
   return keywordScore;
 }
 
-function findClosestExistingTestFile(
+function rankExistingTestFiles(
   files: RepoFile[],
   task: string
-): RepoFile | null {
+): RankedTestFileCandidate[] {
   const tokens = buildIntentTokens(task);
-  const ranked = [...files]
+  return [...files]
     .map((file) => ({
-      file,
-      score:
+      path: file.path,
+      baseScore: scoreExistingTestFile(file.path, tokens),
+      authPreferenceScore: scoreAuthRelatedExistingTestFile(file.path, task),
+      totalScore:
         scoreExistingTestFile(file.path, tokens) +
         scoreAuthRelatedExistingTestFile(file.path, task),
     }))
     .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return a.file.path.localeCompare(b.file.path);
+      if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
+      return a.path.localeCompare(b.path);
     });
-
-  return ranked[0] && ranked[0].score > 0 ? ranked[0].file : null;
 }
 
 function isUnsafeGeneratedSlug(slug: string): boolean {
@@ -427,28 +451,81 @@ function buildOutputPaths(
   task: string,
   fw: DetectedTestFramework,
   files: RepoFile[]
-): TestEngineerContext["outputPaths"] {
+): {
+  outputPaths: TestEngineerContext["outputPaths"];
+  debug: TestEngineerContextDebug;
+} {
   const { slug, pascal } = buildOutputNameParts(task);
   const base = fw.testDir ?? "tests";
-  const closestExistingTestFile = findClosestExistingTestFile(
-    detectTestFiles(files, fw),
-    task
-  );
-  const safeSlug = isUnsafeGeneratedSlug(slug) ? "app" : slug;
+  const normalizedTask = normalizeTaskText(task);
+  const intentTokens = buildIntentTokens(task);
+  const rankedCandidates = rankExistingTestFiles(detectTestFiles(files, fw), task);
+  const closestExistingTestFile =
+    rankedCandidates[0] && rankedCandidates[0].totalScore > 0
+      ? rankedCandidates[0].path
+      : null;
+  const suspiciousFilenameRejected = isUnsafeGeneratedSlug(slug);
+  const safeSlug = suspiciousFilenameRejected ? "app" : slug;
+  const hasLoginTaskIntent = hasLoginIntent(task);
+  const preferredToken = preferredBasenameToken(task);
+
+  const buildDebug = (
+    fallbackTestFilePath: string,
+    finalOutputPath: string,
+    finalOutputPathSource: "existing_test_file" | "generated_fallback"
+  ): TestEngineerContextDebug => ({
+    selectedRole: "test_engineer",
+    normalizedTask,
+    intentTokens,
+    hasLoginIntent: hasLoginTaskIntent,
+    preferredBasenameToken: preferredToken,
+    candidateTestFiles: rankedCandidates,
+    chosenExistingTestFile: closestExistingTestFile,
+    generatedSlug: slug,
+    safeSlug,
+    suspiciousFilenameRejected,
+    fallbackTestFilePath,
+    finalOutputPath,
+    finalOutputPathSource,
+  });
 
   switch (fw.framework) {
-    case "playwright_ts":
+    case "playwright_ts": {
+      const fallbackTestFilePath = `${base}/${safeSlug}.spec.ts`;
+      const finalOutputPath = closestExistingTestFile ?? fallbackTestFilePath;
       return {
-        testFile: closestExistingTestFile?.path ?? `${base}/${safeSlug}.spec.ts`,
+        outputPaths: { testFile: finalOutputPath },
+        debug: buildDebug(
+          fallbackTestFilePath,
+          finalOutputPath,
+          closestExistingTestFile ? "existing_test_file" : "generated_fallback"
+        ),
       };
-    case "playwright_js":
+    }
+    case "playwright_js": {
+      const fallbackTestFilePath = `${base}/${safeSlug}.spec.js`;
+      const finalOutputPath = closestExistingTestFile ?? fallbackTestFilePath;
       return {
-        testFile: closestExistingTestFile?.path ?? `${base}/${safeSlug}.spec.js`,
+        outputPaths: { testFile: finalOutputPath },
+        debug: buildDebug(
+          fallbackTestFilePath,
+          finalOutputPath,
+          closestExistingTestFile ? "existing_test_file" : "generated_fallback"
+        ),
       };
-    case "cypress":
+    }
+    case "cypress": {
+      const fallbackTestFilePath = `cypress/e2e/${safeSlug}.cy.ts`;
+      const finalOutputPath = closestExistingTestFile ?? fallbackTestFilePath;
       return {
-        testFile: closestExistingTestFile?.path ?? `cypress/e2e/${safeSlug}.cy.ts`,
+        outputPaths: { testFile: finalOutputPath },
+        debug: buildDebug(
+          fallbackTestFilePath,
+          finalOutputPath,
+          closestExistingTestFile ? "existing_test_file" : "generated_fallback"
+        ),
       };
+    }
     case "cucumber_java": {
       const featureDir =
         findExistingDirectory(files, (file) => file.path.endsWith(".feature")) ??
@@ -457,21 +534,54 @@ function buildOutputPaths(
       const stepDefinitionDir =
         findExistingDirectory(files, (file) => file.path.endsWith("Steps.java")) ??
         "src/test/java/com/stepdefinitions";
+      const fallbackTestFilePath = `${featureDir}/${safeSlug}.feature`;
 
       return {
-        testFile: `${featureDir}/${safeSlug}.feature`,
-        featureFile: `${featureDir}/${safeSlug}.feature`,
-        stepDefinition: `${stepDefinitionDir}/${pascal}Steps.java`,
+        outputPaths: {
+          testFile: fallbackTestFilePath,
+          featureFile: fallbackTestFilePath,
+          stepDefinition: `${stepDefinitionDir}/${pascal}Steps.java`,
+        },
+        debug: buildDebug(
+          fallbackTestFilePath,
+          fallbackTestFilePath,
+          "generated_fallback"
+        ),
       };
     }
     case "selenium_java":
     case "testng":
-      return { testFile: `src/test/java/${pascal}Test.java` };
+      return {
+        outputPaths: { testFile: `src/test/java/${pascal}Test.java` },
+        debug: buildDebug(
+          `src/test/java/${pascal}Test.java`,
+          `src/test/java/${pascal}Test.java`,
+          "generated_fallback"
+        ),
+      };
     case "pytest":
     case "selenium_python":
-      return { testFile: closestExistingTestFile?.path ?? `tests/test_${safeSlug}.py` };
+      return {
+        outputPaths: {
+          testFile: closestExistingTestFile ?? `tests/test_${safeSlug}.py`,
+        },
+        debug: buildDebug(
+          `tests/test_${safeSlug}.py`,
+          closestExistingTestFile ?? `tests/test_${safeSlug}.py`,
+          closestExistingTestFile ? "existing_test_file" : "generated_fallback"
+        ),
+      };
     default:
-      return { testFile: closestExistingTestFile?.path ?? `tests/${safeSlug}.test` };
+      return {
+        outputPaths: {
+          testFile: closestExistingTestFile ?? `tests/${safeSlug}.test`,
+        },
+        debug: buildDebug(
+          `tests/${safeSlug}.test`,
+          closestExistingTestFile ?? `tests/${safeSlug}.test`,
+          closestExistingTestFile ? "existing_test_file" : "generated_fallback"
+        ),
+      };
   }
 }
 
@@ -486,6 +596,7 @@ export function buildTestEngineerContext(
   const stepDefinitionFiles = detectStepDefinitions(safeFiles);
   const featureFiles = detectFeatureFiles(safeFiles);
   const configFiles = detectConfigFiles(safeFiles, framework);
+  const { outputPaths, debug } = buildOutputPaths(task, framework, safeFiles);
 
   return {
     framework,
@@ -498,6 +609,7 @@ export function buildTestEngineerContext(
     promptRole: buildPromptRole(framework),
     outputRules: buildOutputRules(framework),
     fileLocationRules: buildFileLocationRules(framework),
-    outputPaths: buildOutputPaths(task, framework, safeFiles),
+    outputPaths,
+    debug,
   };
 }

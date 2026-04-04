@@ -208,8 +208,8 @@ function resolveOutputFormat(rawFormat) {
 }
 async function getChangedFiles(repoPath) {
     try {
-        const baseSha = node_process_1.default.env.SMILE_AGENT_BASE_SHA?.trim();
-        const headSha = node_process_1.default.env.SMILE_AGENT_HEAD_SHA?.trim() || "HEAD";
+        const baseSha = node_process_1.default.env.ZONE_BASE_SHA?.trim();
+        const headSha = node_process_1.default.env.ZONE_HEAD_SHA?.trim() || "HEAD";
         const args = baseSha
             ? ["diff", "--name-only", `${baseSha}...${headSha}`]
             : ["status", "--short"];

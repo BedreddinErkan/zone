@@ -21,7 +21,7 @@ function extractJson(rawText) {
     }
     throw new Error("No JSON found in model response");
 }
-function buildPreview(result, framework) {
+function buildPreview(result, framework, outputPaths) {
     const lines = ["=== TEST ENGINEER PREVIEW ==="];
     lines.push(`Framework: ${framework}`);
     lines.push(`Summary: ${result["summary"]}`);
@@ -33,41 +33,53 @@ function buildPreview(result, framework) {
     }
     lines.push("");
     lines.push("Files to create:");
-    if (result["testFile"]) {
-        const file = result["testFile"];
-        lines.push(`- ${file.path}`);
+    if (outputPaths.testFile) {
+        lines.push(`- ${outputPaths.testFile}`);
     }
-    if (result["featureFile"]) {
-        const file = result["featureFile"];
-        lines.push(`- ${file.path} [feature]`);
+    if (outputPaths.featureFile) {
+        lines.push(`- ${outputPaths.featureFile} [feature]`);
     }
-    if (result["stepDefinitionFile"]) {
-        const file = result["stepDefinitionFile"];
-        lines.push(`- ${file.path} [step definitions]`);
+    if (outputPaths.stepDefinition) {
+        lines.push(`- ${outputPaths.stepDefinition} [step definitions]`);
     }
     return lines.join("\n");
 }
-function buildApplyPatches(result) {
+function buildApplyPatches(result, outputPaths) {
     const patches = [];
     if (result["testFile"]) {
         const file = result["testFile"];
-        if (file.path && file.content) {
-            patches.push({ filePath: file.path, fullContent: file.content });
+        if (outputPaths.testFile && file.content) {
+            patches.push({ filePath: outputPaths.testFile, fullContent: file.content });
         }
     }
     if (result["featureFile"]) {
         const file = result["featureFile"];
-        if (file.path && file.content) {
-            patches.push({ filePath: file.path, fullContent: file.content });
+        if (outputPaths.featureFile && file.content) {
+            patches.push({ filePath: outputPaths.featureFile, fullContent: file.content });
         }
     }
     if (result["stepDefinitionFile"]) {
         const file = result["stepDefinitionFile"];
-        if (file.path && file.content) {
-            patches.push({ filePath: file.path, fullContent: file.content });
+        if (outputPaths.stepDefinition && file.content) {
+            patches.push({ filePath: outputPaths.stepDefinition, fullContent: file.content });
         }
     }
     return patches;
+}
+function resolveFrameworkAugmentation(framework) {
+    if (framework.startsWith("playwright"))
+        return "playwright";
+    if (framework === "cypress")
+        return "cypress";
+    if (framework === "selenium_java" ||
+        framework === "selenium_python" ||
+        framework === "junit" ||
+        framework === "testng") {
+        return "selenium";
+    }
+    if (framework === "cucumber_java")
+        return "cucumber";
+    return "none";
 }
 async function readExampleContents(files, allFiles, limit) {
     const examplePaths = files
@@ -110,6 +122,45 @@ async function readFeatureExampleContents(files, allFiles, framework) {
         return a.path.localeCompare(b.path);
     })
         .slice(0, 2);
+}
+function extractRouteEvidence(contents) {
+    const evidence = new Set();
+    const routePattern = /(goto|toHaveURL|visit|navigate(?:To)?)\(\s*(?:await\s+)?(?:(["'`])([^"'`]+)\2|\/([^/\n]+(?:\/[^/\n]+)*)\/[a-z]*)/g;
+    for (const entry of contents) {
+        let match;
+        while ((match = routePattern.exec(entry.content)) !== null) {
+            const literalRoute = (match[3] ?? match[4] ?? "").trim();
+            if (literalRoute.length >= 2 && /[a-z]/i.test(literalRoute)) {
+                evidence.add(literalRoute);
+            }
+        }
+    }
+    return [...evidence];
+}
+function findSuspiciousPlaywrightUrlAssertion(testFileContent, routeEvidence) {
+    const assertions = [...testFileContent.matchAll(/toHaveURL\(\s*([^)]+)\)/g)];
+    if (assertions.length === 0)
+        return null;
+    for (const assertion of assertions) {
+        const rawArgument = assertion[1]?.trim() ?? "";
+        const normalizedArgument = rawArgument.toLowerCase();
+        if (routeEvidence.length === 0) {
+            return "Generated Playwright URL assertion is not grounded in repository route evidence.";
+        }
+        const isGenericRegex = /^\/.*\/[a-z]*$/i.test(rawArgument) &&
+            (!/[a-z]{2,}/i.test(rawArgument.replace(/tohaveurl/gi, "")) ||
+                normalizedArgument.includes("/.*\\/#/") ||
+                normalizedArgument.includes("/.*\\/?#/") ||
+                normalizedArgument.includes("/.*\\/$/"));
+        if (isGenericRegex) {
+            return "Generated Playwright URL assertion uses an arbitrary regex pattern instead of a repository-evidenced route.";
+        }
+        const matchesEvidence = routeEvidence.some((route) => normalizedArgument.includes(route.toLowerCase()));
+        if (!matchesEvidence) {
+            return "Generated Playwright URL assertion does not match any repository-evidenced route.";
+        }
+    }
+    return null;
 }
 async function runTestEngineerFlow(input) {
     let allFiles;
@@ -159,6 +210,33 @@ async function runTestEngineerFlow(input) {
             reason: `buildTestEngineerContext failed: ${err instanceof Error ? err.stack : String(err)}`,
         };
     }
+    const debug = {
+        selectedRole: "test_engineer",
+        promptPipeline: "buildTestEngineerPrompt",
+        finalPromptBuilder: "buildFinalPrompt",
+        detectedFramework: framework.framework,
+        frameworkAugmentation: resolveFrameworkAugmentation(framework.framework),
+        contextSelection: context.debug ?? null,
+        outputPathDecision: {
+            finalTestFilePath: context.outputPaths.testFile ?? null,
+            finalPathSource: "deterministic_context",
+            rawModelTestFilePath: null,
+            rawModelFeatureFilePath: null,
+            rawModelStepDefinitionPath: null,
+            rawModelPathDiffers: false,
+        },
+        suspiciousFilenameFiltering: {
+            triggered: Boolean(context.debug?.suspiciousFilenameRejected),
+            generatedSlug: context.debug?.generatedSlug ?? null,
+            safeSlug: context.debug?.safeSlug ?? null,
+        },
+        playwrightUrlAssertionGuard: {
+            checked: false,
+            triggered: false,
+            reason: null,
+            routeEvidence: [],
+        },
+    };
     const pageObjectContents = await readExampleContents(context.pageObjectFiles, allFiles, 3);
     const stepDefinitionContents = await readExampleContents(context.stepDefinitionFiles, allFiles, 2);
     const featureContents = await readFeatureExampleContents(context.featureFiles, allFiles, framework);
@@ -189,8 +267,29 @@ async function runTestEngineerFlow(input) {
             framework: framework.framework,
         };
     }
-    const applyPatches = buildApplyPatches(parsed);
-    const preview = buildPreview(parsed, framework.framework);
+    const rawModelTestFilePath = parsed["testFile"]?.path ?? null;
+    const rawModelFeatureFilePath = parsed["featureFile"]?.path ?? null;
+    const rawModelStepDefinitionPath = parsed["stepDefinitionFile"]?.path ?? null;
+    debug.outputPathDecision = {
+        finalTestFilePath: context.outputPaths.testFile ?? null,
+        finalPathSource: rawModelTestFilePath && rawModelTestFilePath !== context.outputPaths.testFile
+            ? "deterministic_context_override"
+            : rawModelTestFilePath
+                ? "deterministic_context"
+                : "model_output",
+        rawModelTestFilePath,
+        rawModelFeatureFilePath,
+        rawModelStepDefinitionPath,
+        rawModelPathDiffers: Boolean(rawModelTestFilePath && rawModelTestFilePath !== context.outputPaths.testFile) ||
+            Boolean(rawModelFeatureFilePath &&
+                context.outputPaths.featureFile &&
+                rawModelFeatureFilePath !== context.outputPaths.featureFile) ||
+            Boolean(rawModelStepDefinitionPath &&
+                context.outputPaths.stepDefinition &&
+                rawModelStepDefinitionPath !== context.outputPaths.stepDefinition),
+    };
+    const applyPatches = buildApplyPatches(parsed, context.outputPaths);
+    const preview = buildPreview(parsed, framework.framework, context.outputPaths);
     const confidence = typeof parsed["confidence"] === "number" ? parsed["confidence"] : 50;
     const summary = typeof parsed["summary"] === "string"
         ? parsed["summary"]
@@ -236,6 +335,34 @@ async function runTestEngineerFlow(input) {
             console.log(`  [${issue.severity}] ${issue.code}: ${issue.message}`);
         }
     }
+    if (framework.framework.startsWith("playwright") &&
+        testFilePatch?.fullContent) {
+        const routeEvidence = extractRouteEvidence([
+            ...existingTestContents,
+            ...pageObjectContents,
+        ]);
+        const playwrightUrlAssertionIssue = findSuspiciousPlaywrightUrlAssertion(testFilePatch.fullContent, routeEvidence);
+        if (playwrightUrlAssertionIssue) {
+            debug.playwrightUrlAssertionGuard = {
+                checked: true,
+                triggered: true,
+                reason: playwrightUrlAssertionIssue,
+                routeEvidence,
+            };
+            return {
+                ok: false,
+                reason: `Output validation blocked: ${playwrightUrlAssertionIssue}`,
+                framework: framework.framework,
+                debug,
+            };
+        }
+        debug.playwrightUrlAssertionGuard = {
+            checked: true,
+            triggered: false,
+            reason: null,
+            routeEvidence,
+        };
+    }
     if (validation.decision === "blocked") {
         return {
             ok: false,
@@ -245,6 +372,7 @@ async function runTestEngineerFlow(input) {
                     .map(i => `  - ${i.message}`)
                     .join("\n"),
             framework: framework.framework,
+            debug,
         };
     }
     const validationWarnings = validation.issues
@@ -261,6 +389,7 @@ async function runTestEngineerFlow(input) {
         complexity,
         applyPatches,
         preview,
+        debug,
     };
 }
 //# sourceMappingURL=runTestEngineerFlow.js.map

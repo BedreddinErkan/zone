@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildDeveloperPrompt = buildDeveloperPrompt;
+const buildFinalPrompt_js_1 = require("./buildFinalPrompt.js");
 function isMicroEditUiTask(task) {
     const normalized = task.toLowerCase();
     return [
@@ -140,13 +141,10 @@ MICRO-EDIT MODE
 - Reuse the exact nearby existing block/snippet context when making the change.
 `.trim()
         : "";
-    return `
+    const contextPayload = `
 You are Zone's Developer role working inside a real existing repository.
 
 Your job is to produce the smallest safe, grounded update to the target file while preserving the repository's real structure and conventions.
-
-TASK
-${params.task}
 
 TASK INTENT
 ${params.taskIntent || "general"}
@@ -209,5 +207,10 @@ Return JSON only:
   "warnings": ["string"]
 }
 `.trim();
+    return (0, buildFinalPrompt_js_1.buildFinalPrompt)({
+        role: "developer",
+        task: params.task,
+        context: contextPayload,
+    });
 }
 //# sourceMappingURL=developerPrompt.js.map

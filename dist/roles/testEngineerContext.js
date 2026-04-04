@@ -122,6 +122,8 @@ function buildOutputRules(fw) {
         "Use ONLY methods that exist in the provided page object files",
         "Do NOT invent new methods — if a method does not exist, mention it as a risk",
         "Follow the exact naming conventions used in existing test files",
+        "Extend the closest matching existing test file when a relevant one already exists",
+        "Do NOT derive filenames from prompt boilerplate or instruction text",
         "Keep tests focused and minimal",
     ];
     switch (fw.framework) {
@@ -180,9 +182,35 @@ const TASK_FILLER_WORDS = new Set([
     "playwright", "pytest", "username", "selector",
     "is", "and", "use", "as", "credentials", "after", "verify",
     "url", "contains", "password", "submit", "with",
+    "you", "are", "code", "agent", "analyze", "repo", "repository",
+    "inside", "working", "called", "task", "goal", "expected",
+    "behavior", "implement", "update", "local", "flow", "function",
+    "add", "requirements", "request", "prompt",
 ]);
-function buildIntentTokens(task) {
-    const sanitizedTask = task
+const BANNED_TEST_FILE_BASENAMES = new Set([
+    "you_are_code_agent_analyze",
+    "task_generated",
+    "analyze_repo",
+]);
+const LOGIN_TASK_KEYWORDS = new Set([
+    "login",
+    "signin",
+    "sign",
+    "authentication",
+    "auth",
+    "credentials",
+]);
+const AUTH_FILE_KEYWORDS = new Set([
+    "login",
+    "signin",
+    "auth",
+    "authentication",
+    "credential",
+    "credentials",
+    "session",
+]);
+function normalizeTaskText(task) {
+    return task
         .toLowerCase()
         .normalize("NFKD")
         .replace(/[\u0300-\u036f]/g, "")
@@ -191,6 +219,9 @@ function buildIntentTokens(task) {
         .replace(/[a-z0-9-]+\.(com|org|net|io|dev|app|co)[^\s]*/g, " ")
         .replace(/[^a-z0-9\s]+/g, " ")
         .trim();
+}
+function buildIntentTokens(task) {
+    const sanitizedTask = normalizeTaskText(task);
     const rawTokens = sanitizedTask.split(/\s+/).filter(Boolean);
     const meaningfulTokens = rawTokens.filter((token) => !TASK_FILLER_WORDS.has(token));
     const sourceTokens = meaningfulTokens.length > 0 ? meaningfulTokens : rawTokens;
@@ -206,13 +237,94 @@ function buildIntentTokens(task) {
     }
     return limitedTokens.length > 0 ? limitedTokens : ["generated", "test"];
 }
+function hasLoginIntent(task) {
+    const normalizedTask = normalizeTaskText(task);
+    if (normalizedTask.includes("sign in") ||
+        normalizedTask.includes("invalid credential")) {
+        return true;
+    }
+    const tokens = normalizedTask.split(/\s+/).filter(Boolean);
+    return tokens.some((token) => LOGIN_TASK_KEYWORDS.has(token));
+}
+function preferredBasenameToken(task) {
+    const normalizedTask = normalizeTaskText(task);
+    if (normalizedTask.includes("login") ||
+        normalizedTask.includes("sign in") ||
+        normalizedTask.includes("signin") ||
+        normalizedTask.includes("invalid credential")) {
+        return "login";
+    }
+    if (normalizedTask.includes("auth") ||
+        normalizedTask.includes("authentication")) {
+        return "auth";
+    }
+    return null;
+}
 function buildOutputNameParts(task) {
-    const tokens = buildIntentTokens(task);
+    const preferredToken = preferredBasenameToken(task);
+    const tokens = preferredToken ? [preferredToken] : buildIntentTokens(task);
     const slug = tokens.join("_");
     const pascal = tokens
         .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
         .join("");
     return { slug, pascal };
+}
+function tokenizePath(pathValue) {
+    return node_path_1.default.posix
+        .basename(pathValue)
+        .toLowerCase()
+        .replace(/\.(spec|test|cy)\.[a-z]+$/i, "")
+        .replace(/^test_/i, "")
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean);
+}
+function scoreExistingTestFile(pathValue, tokens) {
+    if (tokens.length === 0)
+        return 0;
+    const fileTokens = tokenizePath(pathValue);
+    return tokens.reduce((score, token) => score + (fileTokens.includes(token) ? 2 : pathValue.includes(token) ? 1 : 0), 0);
+}
+function scoreAuthRelatedExistingTestFile(pathValue, task) {
+    if (!hasLoginIntent(task))
+        return 0;
+    const pathTokens = tokenizePath(pathValue);
+    const normalizedPath = pathValue.toLowerCase();
+    const keywordScore = [...AUTH_FILE_KEYWORDS].reduce((score, token) => {
+        if (pathTokens.includes(token))
+            return score + 12;
+        if (normalizedPath.includes(token))
+            return score + 6;
+        return score;
+    }, 0);
+    return keywordScore;
+}
+function rankExistingTestFiles(files, task) {
+    const tokens = buildIntentTokens(task);
+    return [...files]
+        .map((file) => ({
+        path: file.path,
+        baseScore: scoreExistingTestFile(file.path, tokens),
+        authPreferenceScore: scoreAuthRelatedExistingTestFile(file.path, task),
+        totalScore: scoreExistingTestFile(file.path, tokens) +
+            scoreAuthRelatedExistingTestFile(file.path, task),
+    }))
+        .sort((a, b) => {
+        if (b.totalScore !== a.totalScore)
+            return b.totalScore - a.totalScore;
+        return a.path.localeCompare(b.path);
+    });
+}
+function isUnsafeGeneratedSlug(slug) {
+    if (!slug)
+        return true;
+    if (BANNED_TEST_FILE_BASENAMES.has(slug))
+        return true;
+    const tokens = slug.split("_").filter(Boolean);
+    const meaningfulTokens = tokens.filter((token) => !TASK_FILLER_WORDS.has(token));
+    return (tokens.length === 0 ||
+        meaningfulTokens.length === 0 ||
+        tokens.length > 4 ||
+        slug.length > 32);
 }
 function findExistingDirectory(files, matcher) {
     const existingFile = [...files]
@@ -229,33 +341,93 @@ function findExistingDirectory(files, matcher) {
 function buildOutputPaths(task, fw, files) {
     const { slug, pascal } = buildOutputNameParts(task);
     const base = fw.testDir ?? "tests";
+    const normalizedTask = normalizeTaskText(task);
+    const intentTokens = buildIntentTokens(task);
+    const rankedCandidates = rankExistingTestFiles(detectTestFiles(files, fw), task);
+    const closestExistingTestFile = rankedCandidates[0] && rankedCandidates[0].totalScore > 0
+        ? rankedCandidates[0].path
+        : null;
+    const suspiciousFilenameRejected = isUnsafeGeneratedSlug(slug);
+    const safeSlug = suspiciousFilenameRejected ? "app" : slug;
+    const hasLoginTaskIntent = hasLoginIntent(task);
+    const preferredToken = preferredBasenameToken(task);
+    const buildDebug = (fallbackTestFilePath, finalOutputPath, finalOutputPathSource) => ({
+        selectedRole: "test_engineer",
+        normalizedTask,
+        intentTokens,
+        hasLoginIntent: hasLoginTaskIntent,
+        preferredBasenameToken: preferredToken,
+        candidateTestFiles: rankedCandidates,
+        chosenExistingTestFile: closestExistingTestFile,
+        generatedSlug: slug,
+        safeSlug,
+        suspiciousFilenameRejected,
+        fallbackTestFilePath,
+        finalOutputPath,
+        finalOutputPathSource,
+    });
     switch (fw.framework) {
-        case "playwright_ts":
-            return { testFile: `${base}/${slug}.spec.ts` };
-        case "playwright_js":
-            return { testFile: `${base}/${slug}.spec.js` };
-        case "cypress":
-            return { testFile: `cypress/e2e/${slug}.cy.ts` };
+        case "playwright_ts": {
+            const fallbackTestFilePath = `${base}/${safeSlug}.spec.ts`;
+            const finalOutputPath = closestExistingTestFile ?? fallbackTestFilePath;
+            return {
+                outputPaths: { testFile: finalOutputPath },
+                debug: buildDebug(fallbackTestFilePath, finalOutputPath, closestExistingTestFile ? "existing_test_file" : "generated_fallback"),
+            };
+        }
+        case "playwright_js": {
+            const fallbackTestFilePath = `${base}/${safeSlug}.spec.js`;
+            const finalOutputPath = closestExistingTestFile ?? fallbackTestFilePath;
+            return {
+                outputPaths: { testFile: finalOutputPath },
+                debug: buildDebug(fallbackTestFilePath, finalOutputPath, closestExistingTestFile ? "existing_test_file" : "generated_fallback"),
+            };
+        }
+        case "cypress": {
+            const fallbackTestFilePath = `cypress/e2e/${safeSlug}.cy.ts`;
+            const finalOutputPath = closestExistingTestFile ?? fallbackTestFilePath;
+            return {
+                outputPaths: { testFile: finalOutputPath },
+                debug: buildDebug(fallbackTestFilePath, finalOutputPath, closestExistingTestFile ? "existing_test_file" : "generated_fallback"),
+            };
+        }
         case "cucumber_java": {
             const featureDir = findExistingDirectory(files, (file) => file.path.endsWith(".feature")) ??
                 fw.testDir ??
                 "src/test/resources/features";
             const stepDefinitionDir = findExistingDirectory(files, (file) => file.path.endsWith("Steps.java")) ??
                 "src/test/java/com/stepdefinitions";
+            const fallbackTestFilePath = `${featureDir}/${safeSlug}.feature`;
             return {
-                testFile: `${featureDir}/${slug}.feature`,
-                featureFile: `${featureDir}/${slug}.feature`,
-                stepDefinition: `${stepDefinitionDir}/${pascal}Steps.java`,
+                outputPaths: {
+                    testFile: fallbackTestFilePath,
+                    featureFile: fallbackTestFilePath,
+                    stepDefinition: `${stepDefinitionDir}/${pascal}Steps.java`,
+                },
+                debug: buildDebug(fallbackTestFilePath, fallbackTestFilePath, "generated_fallback"),
             };
         }
         case "selenium_java":
         case "testng":
-            return { testFile: `src/test/java/${pascal}Test.java` };
+            return {
+                outputPaths: { testFile: `src/test/java/${pascal}Test.java` },
+                debug: buildDebug(`src/test/java/${pascal}Test.java`, `src/test/java/${pascal}Test.java`, "generated_fallback"),
+            };
         case "pytest":
         case "selenium_python":
-            return { testFile: `tests/test_${slug}.py` };
+            return {
+                outputPaths: {
+                    testFile: closestExistingTestFile ?? `tests/test_${safeSlug}.py`,
+                },
+                debug: buildDebug(`tests/test_${safeSlug}.py`, closestExistingTestFile ?? `tests/test_${safeSlug}.py`, closestExistingTestFile ? "existing_test_file" : "generated_fallback"),
+            };
         default:
-            return { testFile: `tests/${slug}.test` };
+            return {
+                outputPaths: {
+                    testFile: closestExistingTestFile ?? `tests/${safeSlug}.test`,
+                },
+                debug: buildDebug(`tests/${safeSlug}.test`, closestExistingTestFile ?? `tests/${safeSlug}.test`, closestExistingTestFile ? "existing_test_file" : "generated_fallback"),
+            };
     }
 }
 function buildTestEngineerContext(task, framework, files) {
@@ -265,6 +437,7 @@ function buildTestEngineerContext(task, framework, files) {
     const stepDefinitionFiles = detectStepDefinitions(safeFiles);
     const featureFiles = detectFeatureFiles(safeFiles);
     const configFiles = detectConfigFiles(safeFiles, framework);
+    const { outputPaths, debug } = buildOutputPaths(task, framework, safeFiles);
     return {
         framework,
         existingTestFiles,
@@ -276,7 +449,8 @@ function buildTestEngineerContext(task, framework, files) {
         promptRole: buildPromptRole(framework),
         outputRules: buildOutputRules(framework),
         fileLocationRules: buildFileLocationRules(framework),
-        outputPaths: buildOutputPaths(task, framework, safeFiles),
+        outputPaths,
+        debug,
     };
 }
 //# sourceMappingURL=testEngineerContext.js.map
