@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck",
     "zone": "tsx src/cli/index.ts",
+    "serve": "tsx src/cli/index.ts serve",
     "zone:preview": "tsx src/cli/index.ts --mode preview",
     "zone:dry-run": "tsx src/cli/index.ts --mode dry-run",
     "zone:apply": "tsx src/cli/index.ts --mode apply",

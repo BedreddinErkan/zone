@@ -1055,6 +1055,30 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
 
 export async function run(): Promise<void> {
   const program = new Command();
+  let subcommandHandled = false;
+
+  program
+    .command("serve")
+    .description("Start Zone web UI on localhost")
+    .option("--port <port>", "Port to listen on", "3000")
+    .option("--open", "Open browser automatically")
+    .action(async (options: { port: string; open?: boolean }) => {
+      subcommandHandled = true;
+      const port = Number.parseInt(options.port, 10);
+      console.log(
+        tone("⚡ Zone", c.bold, c.orange) + tone(" v0.1.0", c.dim, c.gray)
+      );
+      console.log(tone(`Starting web UI on http://localhost:${port}`, c.cyan));
+
+      process.env.ZONE_SERVER_MANUAL_START = "1";
+      const { startServer } = await import("../api/server.js");
+      await startServer(port);
+
+      if (options.open) {
+        const { exec } = await import("node:child_process");
+        exec(`start http://localhost:${port}`);
+      }
+    });
 
   program
     .name("zone")
@@ -1103,8 +1127,13 @@ export async function run(): Promise<void> {
       DEFAULT_RESULT_PATH
     )
       .option("--role <role>", "Agent role: developer | test_engineer | data_analyst")
-    .allowExcessArguments(false)
-    .parse(process.argv);
+    .allowExcessArguments(false);
+
+  await program.parseAsync(process.argv);
+
+  if (subcommandHandled) {
+    return;
+  }
 
   const options = program.opts<CliOptions>();
   const exitCode = await runCliWithOptions(options);

@@ -8,6 +8,7 @@ import { applyLlmPatches } from "../core/applyLlmPatches.js";
 import { runTestEngineerFlow } from "../roles/runTestEngineerFlow.js";
 import { runDataAnalystFlow } from "../roles/runDataAnalystFlow.js";
 import type { Response } from "express";
+import { c, colorize } from "../cli/colors.js";
 
 export const app = express();
 const PORT = process.env.PORT || 3000;
@@ -123,8 +124,21 @@ app.post("/api/data-analyst", async (req, res) => {
 
 app.use(express.static("src/ui"));
 
-if (process.env.VITEST !== "true") {
-  app.listen(PORT, () => {
-    console.log(`Zone API running on http://localhost:${PORT}`);
+export async function startServer(port = 3000): Promise<void> {
+  await new Promise<void>((resolve) => {
+    app.listen(port, () => {
+      console.log(
+        colorize(`Zone UI running on http://localhost:${port}`, c.green, c.bold)
+      );
+      console.log(colorize("Press Ctrl+C to stop", c.dim, c.gray));
+      resolve();
+    });
   });
+}
+
+if (
+  process.env.VITEST !== "true" &&
+  process.env.ZONE_SERVER_MANUAL_START !== "1"
+) {
+  void startServer(Number(PORT));
 }
