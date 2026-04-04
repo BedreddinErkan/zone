@@ -84,9 +84,9 @@ const mockResult = {
 };
 
 describe("formatOutput - text", () => {
-  it("returns CLI-style string containing SMILE AGENT header", () => {
+  it("returns CLI-style string containing ZONE header", () => {
     const output = formatOutput(mockResult, "text");
-    expect(output).toContain("=== SMILE AGENT ===");
+    expect(output).toContain("=== ZONE ===");
   });
 
   it("includes task and decision in output", () => {
@@ -222,7 +222,7 @@ describe("formatOutput - trace options", () => {
     const withTrace = formatOutput(mockResult, "text", { showTrace: false });
 
     expect(withoutTrace).toBe(withTrace);
-    expect(withoutTrace).toContain("=== SMILE AGENT ===");
+    expect(withoutTrace).toContain("=== ZONE ===");
   });
   it("does not include reasonDetails in JSON output by default", () => {
   const output = formatOutput(mockResult, "json");

@@ -10,7 +10,7 @@ import type { RunAgentMode, RunAgentResult } from "../core/runAgent.js";
 const tempDirs: string[] = [];
 
 async function createTempDir(): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "smile-agent-apply-"));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "zone-apply-"));
   tempDirs.push(dir);
   return dir;
 }

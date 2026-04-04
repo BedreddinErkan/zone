@@ -206,7 +206,7 @@ describe("printAuditSnapshot — snapshot immutability", () => {
 
 describe("resolveAuditFlag — --audit flag parsing from argv", () => {
   it("returns true when '--audit' is in argv", () => {
-    expect(resolveAuditFlag(["node", "smile-agent", "--task", "do X", "--audit"])).toBe(true);
+    expect(resolveAuditFlag(["node", "zone", "--task", "do X", "--audit"])).toBe(true);
   });
 
   it("returns true when '--audit' is the only extra flag", () => {
@@ -214,7 +214,7 @@ describe("resolveAuditFlag — --audit flag parsing from argv", () => {
   });
 
   it("returns false when '--audit' is absent", () => {
-    expect(resolveAuditFlag(["node", "smile-agent", "--task", "do X"])).toBe(false);
+    expect(resolveAuditFlag(["node", "zone", "--task", "do X"])).toBe(false);
   });
 
   it("returns false for an empty argv", () => {
@@ -233,7 +233,7 @@ describe("resolveAuditFlag — --audit flag parsing from argv", () => {
     expect(
       resolveAuditFlag([
         "node",
-        "smile-agent",
+        "zone",
         "--task",
         "refactor service",
         "--ci",

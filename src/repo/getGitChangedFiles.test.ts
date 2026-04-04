@@ -21,7 +21,7 @@ describe("getGitChangedFiles", () => {
   it("repo root bulunamazsa bos array donmeli", async () => {
     execFileAsyncMock.mockRejectedValueOnce(new Error("not a git repo"));
 
-    const result = await getGitChangedFiles("C:/projects/smile-agent");
+    const result = await getGitChangedFiles("C:/projects/zone");
 
     expect(result).toEqual([]);
   });

@@ -625,7 +625,7 @@ expect(printedOutput).toContain("Strategy: blocked");  });
     };
 
     runAgentMock.mockResolvedValue(runAgentResult);
-    formatOutputMock.mockReturnValue("=== SMILE AGENT TEXT OUTPUT ===");
+    formatOutputMock.mockReturnValue("=== ZONE TEXT OUTPUT ===");
 
     const { runCliWithOptions } = await import("./index.js");
 
@@ -646,7 +646,7 @@ const printedOutput = mockLog.mock.calls
   .filter((value) => typeof value === "string")
   .join("\n");
 
-expect(printedOutput).toContain("=== SMILE AGENT TEXT OUTPUT ===");
+expect(printedOutput).toContain("=== ZONE TEXT OUTPUT ===");
 expect(printedOutput).toContain("=== GENERATED PATCH PLAN ===");
 expect(printedOutput).toContain("Allowed: yes");
 expect(printedOutput).toContain("Strategy: safe");

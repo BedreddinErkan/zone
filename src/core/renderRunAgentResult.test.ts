@@ -16,7 +16,7 @@ describe("renderRunAgentResult", () => {
 
     const output = renderRunAgentResult(result);
 
-    expect(output).toContain("=== SMILE AGENT ===");
+    expect(output).toContain("=== ZONE ===");
     expect(output).toContain("Task: rename helper function");
     expect(output).toContain("Decision: safe_to_apply");
     expect(output).toContain("Confidence: 88");

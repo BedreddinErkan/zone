@@ -1,10 +1,10 @@
 {
-  "name": "smile-agent",
-  "version": "1.0.0",
-  "description": "SmileAI development agent",
+  "name": "zone",
+  "version": "0.1.0",
+  "description": "Zone — AI Code Agent: deterministic, explainable, safe",
   "main": "dist/index.js",
   "bin": {
-    "smile-agent": "./dist/cli/index.js"
+    "zone": "./dist/cli/index.js"
   },
   "scripts": {
     "dev": "tsx src/cli/index.ts",
@@ -15,17 +15,17 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck",
-    "agent": "tsx src/cli/index.ts",
-    "agent:preview": "tsx src/cli/index.ts --mode preview",
-    "agent:dry-run": "tsx src/cli/index.ts --mode dry-run",
-    "agent:apply": "tsx src/cli/index.ts --mode apply",
-    "agent:ci": "tsx src/cli/index.ts --ci --diff-aware --mode preview --output .agent-cache/last-result.json",
-    "agent:ci:verbose": "tsx src/cli/index.ts --ci --diff-aware --mode preview --verbose --output .agent-cache/last-result.json"
+    "zone": "tsx src/cli/index.ts",
+    "zone:preview": "tsx src/cli/index.ts --mode preview",
+    "zone:dry-run": "tsx src/cli/index.ts --mode dry-run",
+    "zone:apply": "tsx src/cli/index.ts --mode apply",
+    "zone:ci": "tsx src/cli/index.ts --ci --diff-aware --mode preview --output .agent-cache/last-result.json",
+    "zone:ci:verbose": "tsx src/cli/index.ts --ci --diff-aware --mode preview --verbose --output .agent-cache/last-result.json"
   },
   "keywords": [
     "agent",
     "cli",
-    "smileai",
+    "zone",
     "developer-tools"
   ],
   "author": "",

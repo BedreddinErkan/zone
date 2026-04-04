@@ -62,7 +62,7 @@ function buildFixedSnapshot(
 
 /** Creates a unique temp directory path for each test, cleaning up after. */
 function makeTmpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "smile-agent-audit-test-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "zone-audit-test-"));
 }
 
 // ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ describe("resolveAuditOutFlag — flag parsing", () => {
   });
 
   it("returns null when --audit-out is absent from argv", () => {
-    const result = resolveAuditOutFlag(["node", "smile-agent", "--task", "do X"]);
+    const result = resolveAuditOutFlag(["node", "zone", "--task", "do X"]);
     expect(result).toBeNull();
   });
 
@@ -92,7 +92,7 @@ describe("resolveAuditOutFlag — flag parsing", () => {
   it("returns the path when the flag appears among many other flags", () => {
     const argv = [
       "node",
-      "smile-agent",
+      "zone",
       "--task",
       "refactor service",
       "--audit",

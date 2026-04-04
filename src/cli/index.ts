@@ -162,7 +162,7 @@ async function writeJsonFile(filePath: string, data: unknown): Promise<void> {
 }
 
 function printHeader(): void {
-  console.log("Smile Agent");
+  console.log("Zone");
 }
 
 function printStatusLine(statusLine: string): void {
@@ -897,9 +897,9 @@ export async function run(): Promise<void> {
   const program = new Command();
 
   program
-    .name("smile-agent")
+    .name("zone")
     .description(
-      "AI-powered code agent for practical repository change planning and patch generation."
+      "Zone — AI Code Agent: deterministic, explainable, safe"
     )
     .option("--task <text>", "Task or change request to analyze")
     .option("--repo <path>", "Target repository path", process.cwd())

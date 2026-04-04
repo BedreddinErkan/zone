@@ -56,7 +56,7 @@ export function renderRunAgentResult(
   const reasonCodes = input.reasonCodes ?? [];
   const { verbose = false } = options;
 
-  lines.push("=== SMILE AGENT ===");
+  lines.push("=== ZONE ===");
   lines.push(`Task: ${input.task}`);
   lines.push(`Decision: ${input.decision.mode}`);
   lines.push(`Confidence: ${input.decision.confidenceScore}`);

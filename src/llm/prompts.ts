@@ -17,7 +17,7 @@ export function buildFeaturePlanningPrompt(input: {
       : "- No project notes";
 
   return `
-You are a senior fullstack coding agent working on the SmileAI project.
+You are a senior fullstack coding agent working on the Zone project.
 
 Project rules:
 - Preserve the existing architecture and folder structure
@@ -101,7 +101,7 @@ ${file.content}
       : "No file contents available";
 
   return `
-You are a senior fullstack coding agent working on the SmileAI project.
+You are a senior fullstack coding agent working on the Zone project.
 
 Project rules:
 - Preserve the existing architecture and naming patterns
