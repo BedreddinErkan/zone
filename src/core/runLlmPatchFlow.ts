@@ -12,6 +12,7 @@ export type LlmPatchFlowResult =
       ok: true;
       patchPreview: string;
       warnings: string[];
+      developerConfidence?: number;
       applyPatches: Array<{ filePath: string; fullContent: string }>;
       patchResults: PatchResult[];
       fileDiffs?: FileDiff[];
@@ -160,6 +161,184 @@ function extractCriticalAnchors(content: string): string[] {
 
 function normalizeWhitespace(s: string): string {
   return s.replace(/\r\n/g, "\n").replace(/\t/g, "  ").trim();
+}
+
+function stripCommentsForComparison(content: string): string {
+  return content
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "")
+    .replace(/^\s*#.*$/gm, "")
+    .replace(/^\s*--.*$/gm, "")
+    .trim();
+}
+
+function countChangedLines(before: string, after: string): number {
+  const diff = computeFileDiff(before, after);
+  return diff.filter((line) => line.type !== "unchanged").length;
+}
+
+function countTotalLines(content: string): number {
+  if (!content.trim()) return 0;
+  return content.replace(/\r\n/g, "\n").split("\n").length;
+}
+
+function countPatternMatches(content: string, patterns: RegExp[]): number {
+  return patterns.reduce((total, pattern) => {
+    const matches = content.match(pattern);
+    return total + (matches?.length ?? 0);
+  }, 0);
+}
+
+function hasSensitiveLogging(content: string): boolean {
+  const loggingCalls = [
+    ...content.matchAll(
+      /\b(?:console\.(?:log|info|debug|warn|error)|logger\.\w+)\s*\(([\s\S]*?)\)/gi
+    ),
+  ];
+
+  return loggingCalls.some((match) =>
+    /\b(password|secret|token|key|credential|credentials|auth|authorization|api[_-]?key|access[_-]?token|refresh[_-]?token)\b/i.test(
+      match[1] ?? ""
+    )
+  );
+}
+
+function introducesNewEmptyCatch(
+  originalContent: string,
+  fullContent: string
+): boolean {
+  const emptyCatchPattern =
+    /catch\s*(?:\(\s*[^)]*\s*\))?\s*\{\s*(?:(?:\/\*\s*ignored\s*\*\/)|(?:\/\/\s*ignored)|(?:\/\*\s*\*\/)|\s*)\}/gi;
+  const originalMatches = originalContent.match(emptyCatchPattern)?.length ?? 0;
+  const nextMatches = fullContent.match(emptyCatchPattern)?.length ?? 0;
+  return nextMatches > originalMatches;
+}
+
+function removesValidationOrGuards(
+  originalContent: string,
+  fullContent: string
+): boolean {
+  const originalWithoutComments = stripCommentsForComparison(originalContent);
+  const nextWithoutComments = stripCommentsForComparison(fullContent);
+  const patterns = [
+    /\bvalidate[A-Za-z0-9_]*\b/g,
+    /\bsanitize[A-Za-z0-9_]*\b/g,
+    /\bassert[A-Za-z0-9_]*\b/g,
+    /\bcheck[A-Za-z0-9_]*\b/g,
+    /\bguard[A-Za-z0-9_]*\b/g,
+    /\bthrow\s+new\s+Error\b/g,
+    /\bif\s*\(!/g,
+  ];
+
+  return patterns.some((pattern) => {
+    const beforeCount = countPatternMatches(originalWithoutComments, [pattern]);
+    const afterCount = countPatternMatches(nextWithoutComments, [pattern]);
+    return beforeCount > 0 && afterCount < beforeCount;
+  });
+}
+
+function weakensAuthChecks(originalContent: string, fullContent: string): boolean {
+  const authPatterns = [
+    /\bisAuthenticated\b/g,
+    /\brequiresAuth\b/g,
+    /@AuthGuard\b/g,
+    /\bhasRole\b/g,
+    /\bisAdmin\b/g,
+  ];
+  const bypassPatterns = [
+    /\bif\s*\(\s*true\s*\)/g,
+    /\breturn\s+true\s*;/g,
+    /\bskip\s+auth\b/gi,
+    /\bbypass\s+auth\b/gi,
+  ];
+
+  const originalWithoutComments = stripCommentsForComparison(originalContent);
+  const nextWithoutComments = stripCommentsForComparison(fullContent);
+  const removedAuthCheck = authPatterns.some((pattern) => {
+    const beforeCount = countPatternMatches(originalWithoutComments, [pattern]);
+    const afterCount = countPatternMatches(nextWithoutComments, [pattern]);
+    return beforeCount > 0 && afterCount < beforeCount;
+  });
+
+  if (removedAuthCheck) {
+    return true;
+  }
+
+  return bypassPatterns.some((pattern) => pattern.test(nextWithoutComments));
+}
+
+export function validateDeveloperOutput(input: {
+  task: string;
+  filePath: string;
+  fullContent: string;
+  originalContent: string;
+}): {
+  blocked: boolean;
+  warnings: string[];
+  confidencePenalty: number;
+} {
+  const warnings: string[] = [];
+  let blocked = false;
+  let confidencePenalty = 0;
+
+  if (hasSensitiveLogging(input.fullContent)) {
+    blocked = true;
+    warnings.push(
+      "[DEVELOPER_SECRET_LOGGING] Output logs sensitive data. Apply is disabled."
+    );
+  }
+
+  if (removesValidationOrGuards(input.originalContent, input.fullContent)) {
+    blocked = true;
+    warnings.push(
+      "[DEVELOPER_VALIDATION_REMOVAL] Output removes input validation or guards."
+    );
+  }
+
+  if (weakensAuthChecks(input.originalContent, input.fullContent)) {
+    blocked = true;
+    warnings.push(
+      "[DEVELOPER_AUTH_WEAKENING] Output weakens authentication or authorization."
+    );
+  }
+
+  if (introducesNewEmptyCatch(input.originalContent, input.fullContent)) {
+    warnings.push(
+      "[DEVELOPER_EMPTY_CATCH] Output introduces empty catch blocks."
+    );
+    confidencePenalty += 20;
+  }
+
+  const originalNormalized = normalizeWhitespace(input.originalContent);
+  const nextNormalized = normalizeWhitespace(input.fullContent);
+  const originalWithoutComments = normalizeWhitespace(
+    stripCommentsForComparison(input.originalContent)
+  );
+  const nextWithoutComments = normalizeWhitespace(
+    stripCommentsForComparison(input.fullContent)
+  );
+  if (
+    originalNormalized === nextNormalized ||
+    originalWithoutComments === nextWithoutComments
+  ) {
+    warnings.push("[DEVELOPER_FILLER_PATCH] No meaningful changes detected.");
+    confidencePenalty += 30;
+  }
+
+  const totalLines = countTotalLines(input.originalContent || input.fullContent);
+  const changedLines = countChangedLines(input.originalContent, input.fullContent);
+  if (totalLines > 50 && changedLines / Math.max(totalLines, 1) > 0.6) {
+    warnings.push(
+      "[DEVELOPER_MASS_CHANGE] Patch modifies more than 60% of the file."
+    );
+    confidencePenalty += 25;
+  }
+
+  return {
+    blocked,
+    warnings,
+    confidencePenalty: Math.min(confidencePenalty, 100),
+  };
 }
 
 export function normalizeLineForMatch(line: string): string {
@@ -1051,6 +1230,7 @@ export async function runLlmPatchFlow(input: {
   const originalContents: Record<string, string> = {};
   const combinedWarnings = [...patchPlan.warnings];
   const patchResults: PatchResult[] = [];
+  let developerConfidence = 85;
   try {
     const applyTargets = patchPlan.patches.filter(
       (p) => p.operation === "modify" || p.operation === "create"
@@ -1210,6 +1390,33 @@ export async function runLlmPatchFlow(input: {
         continue;
       }
 
+      const validation = validateDeveloperOutput({
+        task: input.task,
+        filePath: patch.path,
+        fullContent: nextContent,
+        originalContent: fileContent,
+      });
+
+      if (validation.warnings.length > 0) {
+        combinedWarnings.push(...validation.warnings);
+      }
+
+      if (validation.blocked) {
+        patchResults.push({
+          filePath: patch.path,
+          status: "failed",
+          reason: "developer_validation_blocked",
+        });
+        continue;
+      }
+
+      if (validation.confidencePenalty > 0) {
+        developerConfidence = Math.max(
+          0,
+          developerConfidence - validation.confidencePenalty
+        );
+      }
+
       applyResults.push({
         filePath: fullPatch.filePath,
         fullContent: nextContent,
@@ -1274,6 +1481,7 @@ export async function runLlmPatchFlow(input: {
     ok: true,
     patchPreview,
     warnings: combinedWarnings,
+    developerConfidence,
     applyPatches,
     patchResults,
     fileDiffs,
