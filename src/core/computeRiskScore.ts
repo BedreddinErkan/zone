@@ -35,10 +35,10 @@ export function computeRiskScore(
   // Role-aware schema penalty adjustment:
   // test_engineer: writing tests is not a schema risk
   // data_analyst: schema changes are expected, handled separately
-  const schemaScore =
-    role === "test_engineer" || role === "data_analyst"
-      ? 0
-      : details.riskBreakdown.schema;
+const schemaScore =
+  role === "test_engineer" || role === "data_analyst" || role === "developer"
+    ? 0
+    : details.riskBreakdown.schema;
 
   const signals: RiskSignal[] = [];
 
