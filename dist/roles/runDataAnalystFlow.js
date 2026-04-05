@@ -4,6 +4,7 @@ exports.runDataAnalystFlow = runDataAnalystFlow;
 const scanRepo_js_1 = require("../repo/scanRepo.js");
 const readProjectFiles_js_1 = require("../repo/readProjectFiles.js");
 const openaiClient_js_1 = require("../llm/openaiClient.js");
+const runLlmPatchFlow_js_1 = require("../core/runLlmPatchFlow.js");
 const testOutputValidator_js_1 = require("./testOutputValidator.js");
 const dataAnalystContext_js_1 = require("./dataAnalystContext.js");
 const detectDataSchema_js_1 = require("./detectDataSchema.js");
@@ -124,6 +125,7 @@ async function runDataAnalystFlow(input) {
         };
     }
     const applyPatches = buildApplyPatches(parsed);
+    const originalContentByPath = new Map(existingSqlContents.map((file) => [file.path, file.content]));
     const preview = buildPreview(parsed, schema.dialect, schema.migrationFormat);
     const confidence = typeof parsed["confidence"] === "number" ? parsed["confidence"] : 50;
     const summary = typeof parsed["summary"] === "string"
@@ -156,6 +158,16 @@ async function runDataAnalystFlow(input) {
     const detectionWarnings = schema.dialect === "unknown"
         ? ["Schema dialect could not be confidently detected; review SQL carefully."]
         : [];
+    const fileDiffs = applyPatches.map((patch) => {
+        const originalContent = originalContentByPath.get(patch.filePath) ?? "";
+        const diff = (0, runLlmPatchFlow_js_1.computeFileDiff)(originalContent, patch.fullContent);
+        return {
+            filePath: patch.filePath,
+            addedLines: diff.filter((line) => line.type === "added").length,
+            removedLines: diff.filter((line) => line.type === "removed").length,
+            diff,
+        };
+    });
     input.onProgress?.("Ready");
     return {
         ok: true,
@@ -165,6 +177,7 @@ async function runDataAnalystFlow(input) {
         summary,
         warnings: [...detectionWarnings, ...warnings, ...validationWarnings],
         applyPatches,
+        fileDiffs,
         preview,
     };
 }

@@ -37,6 +37,9 @@ input:focus,textarea:focus{border-color:#007acc}
 .dryrun-btn{background:transparent;border:1px solid #6b5a1d;border-radius:6px;color:#ce9178;font-size:15px;padding:12px 16px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap}
 .dryrun-btn:hover{background:#3a2e0e;border-color:#ce9178}
 .dryrun-btn:disabled{border-color:#3c3c3c;color:#858585;cursor:not-allowed}
+.enhance-btn{background:transparent;border:1px solid #6b5a1d;border-radius:6px;color:#ce9178;font-family:'Courier New',monospace;font-size:12px;padding:5px 12px;cursor:pointer}
+.enhance-btn:hover{background:#3a2e0e}
+.enhance-btn:disabled{border-color:#3c3c3c;color:#858585;cursor:not-allowed}
 .reset-btn{background:transparent;border:1px solid #3c3c3c;border-radius:6px;color:#858585;font-size:15px;padding:12px 18px;cursor:pointer}
 .reset-btn:hover{border-color:#d4d4d4;color:#d4d4d4}
 .spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:none}
@@ -169,6 +172,9 @@ input:focus,textarea:focus{border-color:#007acc}
   </div>
   <div class="label">Task</div>
   <textarea id="task" placeholder="add input validation to login form..."></textarea>
+  <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+    <button id="enhanceBtn" class="enhance-btn" onclick="enhanceTask()">✨ Enhance</button>
+  </div>
   <div class="history-label">Repo Path</div>
   <div class="repo-row">
     <input id="repoPath" type="text" placeholder="C:\Users\..." oninput="syncRepoSelectionDisplay()" />
@@ -466,7 +472,12 @@ async function executeDryRun(){
   }catch(e){resetProgress();showError(e.message);}
   finally{currentRunState.runInProgress=false;setDryRunLoading(false);updateApplyState();}
 }
-
+function buildPreviewDiffHtml(data){
+  if(data.fileDiffs&&data.fileDiffs.length>0){
+    return `<div style="margin-bottom:10px"><div class="section-title">Changes</div>${buildDiffCards(data.fileDiffs)}</div>`;
+  }
+  return '';
+}
 function buildFilePreviewCards(patches){
   return (patches||[]).map((p,i)=>{
     const fp=formatFileLabel(p.filePath,i);const ext=fp.split('.').pop();
@@ -546,6 +557,25 @@ function selectRole(btn){
   const ph={developer:'add input validation to login form...',test_engineer:'write a cucumber scenario for one-way flight search...',data_analyst:'create a users table with id, email, created_at...'};
   document.getElementById('task').placeholder=ph[currentRole]||'';
 }
+async function enhanceTask(){
+  const task=document.getElementById('task').value.trim();
+  const repoPath=getResolvedRepoPath();
+  const btn=document.getElementById('enhanceBtn');
+  if(!task){showError('Task is required.');return;}
+  if(!repoPath){showError('Task and repo path are required.');return;}
+  const originalLabel=btn.textContent;
+  btn.disabled=true;btn.textContent='Enhancing...';hideError();
+  try{
+    const r=await fetch('/api/enhance-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,role:currentRole,repoPath})});
+    if(!r.ok){
+      const payload=await r.json().catch(()=>null);
+      throw new Error(payload?.reason||('Enhance failed: '+r.status));
+    }
+    const result=await r.json();
+    document.getElementById('task').value=result.enhancedTask||task;
+  }catch(e){showError(e.message||'Enhance failed.');}
+  finally{btn.disabled=false;btn.textContent=originalLabel;}
+}
 function copyPrompt(){const t=document.querySelector('.prompt-box').innerText.replace('copy','').trim();navigator.clipboard.writeText(t);document.querySelector('.copy-btn').textContent='copied!';setTimeout(()=>document.querySelector('.copy-btn').textContent='copy',1500);}
 function showError(msg){const b=document.getElementById('errorBox');b.textContent='⚠ '+msg;b.style.display='block';}
 function hideError(){document.getElementById('errorBox').style.display='none';}
@@ -567,7 +597,7 @@ async function execute(){
       if(!result.ok&&!(result.validationBlocked&&result.preview)){showError(result.reason||'Test generation failed.');addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
       const decisionMode=result.decisionMode||(result.validationBlocked?'blocked':result.confidence>=70?'safe_to_apply':'preview_only');
       showDecision({decision:{mode:decisionMode},confidence:{score:result.confidence??0},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity});
-      showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,validationBlocked:Boolean(result.validationBlocked)});
+showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,validationBlocked:Boolean(result.validationBlocked),fileDiffs:result.fileDiffs||[]});
       if(result.validationBlocked)showError(result.reason||'Output validation blocked.');
       addRecentRun({task,role:currentRole,repoPath,status:result.validationBlocked?'error':'success',timestamp:Date.now()});
       finishProgress();
@@ -577,7 +607,7 @@ async function execute(){
       const result=await r.json();
       if(!result.ok){showError(result.reason||'SQL generation failed.');return;}
       showDecision({decision:{mode:result.confidence>=70?'safe_to_apply':'preview_only'},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat])});
-      showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings});
+showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,fileDiffs:result.fileDiffs||[]});
       addRecentRun({task,role:currentRole,repoPath,status:'success',timestamp:Date.now()});
       finishProgress();
     }else{
@@ -655,7 +685,7 @@ function showPatch(data){
   renderContextFiles(data.contextFiles);
   document.getElementById('filesVal').textContent=patches.length;
   updateResultSummary({role:currentRole,status:currentRunState.validationBlocked?'blocked':currentSummaryState.status,fileCount:patches.length,warningCount:warnings.length,contextCount:Array.isArray(data.contextFiles)?data.contextFiles.filter(Boolean).length:0});
-  document.getElementById('fileList').innerHTML=patchResultsHtml+buildFilePreviewCards(patches);
+  document.getElementById('fileList').innerHTML=patchResultsHtml+buildPreviewDiffHtml(data)+buildFilePreviewCards(patches);
   document.getElementById('successBox').style.display='none';
   document.getElementById('patchSection').classList.remove('hidden');
   updateApplyState();

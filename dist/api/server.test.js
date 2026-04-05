@@ -7,6 +7,15 @@ const runLlmPatchFlowMock = vitest_1.vi.fn();
 const applyLlmPatchesMock = vitest_1.vi.fn();
 const runTestEngineerFlowMock = vitest_1.vi.fn();
 const runDataAnalystFlowMock = vitest_1.vi.fn();
+const scanRepoMock = vitest_1.vi.fn();
+const readProjectFilesMock = vitest_1.vi.fn();
+const responsesCreateMock = vitest_1.vi.fn();
+const createOpenAIClientMock = vitest_1.vi.fn(() => ({
+    responses: {
+        create: responsesCreateMock,
+    },
+}));
+const getModelNameMock = vitest_1.vi.fn(() => "gpt-4o-mini");
 vitest_1.vi.mock("../core/runAgent.js", () => ({
     runAgent: runAgentMock,
 }));
@@ -21,6 +30,16 @@ vitest_1.vi.mock("../roles/runTestEngineerFlow.js", () => ({
 }));
 vitest_1.vi.mock("../roles/runDataAnalystFlow.js", () => ({
     runDataAnalystFlow: runDataAnalystFlowMock,
+}));
+vitest_1.vi.mock("../repo/scanRepo.js", () => ({
+    scanRepo: scanRepoMock,
+}));
+vitest_1.vi.mock("../repo/readProjectFiles.js", () => ({
+    readProjectFiles: readProjectFilesMock,
+}));
+vitest_1.vi.mock("../llm/openaiClient.js", () => ({
+    createOpenAIClient: createOpenAIClientMock,
+    getModelName: getModelNameMock,
 }));
 (0, vitest_1.describe)("/api/test-engineer", () => {
     let server;
@@ -180,6 +199,55 @@ vitest_1.vi.mock("../roles/runDataAnalystFlow.js", () => ({
         (0, vitest_1.expect)(body.patchResults).toEqual([
             { filePath: "src/foo.ts", status: "applied" },
         ]);
+    });
+    (0, vitest_1.it)("returns an enhanced task from /api/enhance-task", async () => {
+        scanRepoMock.mockResolvedValue([
+            {
+                path: "tests/login.spec.ts",
+                absolutePath: "C:/repo/tests/login.spec.ts",
+            },
+            {
+                path: "tests/cart.spec.ts",
+                absolutePath: "C:/repo/tests/cart.spec.ts",
+            },
+            {
+                path: "src/app.ts",
+                absolutePath: "C:/repo/src/app.ts",
+            },
+        ]);
+        readProjectFilesMock.mockResolvedValue({
+            "C:/repo/tests/cart.spec.ts": "test('cart', async () => {});",
+            "C:/repo/tests/login.spec.ts": "test('login', async () => {});",
+        });
+        responsesCreateMock.mockResolvedValue({
+            output_text: "Extend tests/login.spec.ts with a negative invalid-credentials Playwright test that reuses the existing login flow and asserts the real error state.",
+        });
+        const response = await fetch(`${baseUrl}/api/enhance-task`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                task: "add login test",
+                role: "test_engineer",
+                repoPath: "C:/repo",
+            }),
+        });
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: true,
+            enhancedTask: "Extend tests/login.spec.ts with a negative invalid-credentials Playwright test that reuses the existing login flow and asserts the real error state.",
+        });
+        (0, vitest_1.expect)(scanRepoMock).toHaveBeenCalledWith("C:/repo");
+        (0, vitest_1.expect)(readProjectFilesMock).toHaveBeenCalledWith([
+            "C:/repo/tests/cart.spec.ts",
+            "C:/repo/tests/login.spec.ts",
+        ]);
+        (0, vitest_1.expect)(createOpenAIClientMock).toHaveBeenCalledTimes(1);
+        (0, vitest_1.expect)(responsesCreateMock).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
+            model: "gpt-4o-mini",
+            instructions: vitest_1.expect.stringContaining("You are a task optimizer"),
+            input: vitest_1.expect.stringContaining("User task: add login test"),
+        }));
     });
 });
 //# sourceMappingURL=server.test.js.map

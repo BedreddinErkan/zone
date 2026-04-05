@@ -1437,20 +1437,18 @@ export async function runLlmPatchFlow(input: {
     return { ok: false, reason: "atomic_patch_failed" };
   }
 
-  const fileDiffs = input.dryRun
-    ? applyPatches.map((patch) => {
-        const before = originalContents[patch.filePath] ?? "";
-        const diff = computeFileDiff(before, patch.fullContent);
-        return {
-          filePath: patch.filePath,
-          before,
-          after: patch.fullContent,
-          diff,
-          addedLines: diff.filter((line) => line.type === "added").length,
-          removedLines: diff.filter((line) => line.type === "removed").length,
-        };
-      })
-    : undefined;
+  const fileDiffs = applyPatches.map((patch) => {
+    const before = originalContents[patch.filePath] ?? "";
+    const diff = computeFileDiff(before, patch.fullContent);
+    return {
+      filePath: patch.filePath,
+      before,
+      after: patch.fullContent,
+      diff,
+      addedLines: diff.filter((line) => line.type === "added").length,
+      removedLines: diff.filter((line) => line.type === "removed").length,
+    };
+  });
 
   // 7. Build patchPreview string
   const patchPreview = [

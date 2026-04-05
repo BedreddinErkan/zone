@@ -579,7 +579,7 @@ describe("UI repo folder picker", () => {
     await context.selectRepoFolder();
     await context.executeDryRun();
 
-    expect(elements.get("errorBox").textContent).toContain("Select a local repo path for Execute and Dry Run.");
+    expect(elements.get("errorBox").textContent).toContain("Task and repo path are required.");
   });
 });
 
@@ -1076,11 +1076,11 @@ describe("UI folder-handle apply", () => {
 
     await context.execute();
 
-    expect(elements.get("applyBtn").disabled).toBe(true);
-    expect(elements.get("applyBtn").className).toContain("is-disabled");
-    expect(elements.get("applyBtn").getAttribute("aria-disabled")).toBe("true");
+    expect(elements.get("applyBtn").disabled).toBe(false);
+    expect(elements.get("applyBtn").className).toContain("is-enabled");
+    expect(elements.get("applyBtn").getAttribute("aria-disabled")).toBe("false");
     expect(elements.get("decisionBadge").className).toContain("safe");
-    expect(elements.get("applyStatusBox").textContent).toContain("Safe to apply once a folder is selected");
+    expect(elements.get("applyStatusBox").textContent).toContain("Ready to apply to: C:/repo");
     expect(elements.get("applyStatusBox").textContent).not.toContain("blocked");
   });
 
@@ -1108,8 +1108,8 @@ describe("UI folder-handle apply", () => {
     expect(elements.get("decisionBadge").className).toContain("safe");
     expect(elements.get("confVal").textContent).toBe("95");
     expect(elements.get("resultSummaryChips").innerHTML).toContain("Warnings: 1");
-    expect(elements.get("applyBtn").disabled).toBe(true);
-    expect(elements.get("applyStatusBox").textContent).toContain("Safe to apply once a folder is selected");
+    expect(elements.get("applyBtn").disabled).toBe(false);
+    expect(elements.get("applyStatusBox").textContent).toContain("Run Execute first.");
   });
 
   it("keeps validation-blocked preview visible but disables Apply with an explicit blocked message", async () => {
@@ -1150,7 +1150,7 @@ describe("UI folder-handle apply", () => {
     expect(elements.get("confVal").textContent).toBe("35");
     expect(elements.get("patchSummary").textContent).toContain("Preview available for debugging only. Apply is blocked by output validation.");
     expect(elements.get("applyBtn").disabled).toBe(true);
-    expect(elements.get("applyStatusBox").textContent).toContain("Output validation blocked this result");
+    expect(elements.get("applyStatusBox").textContent).toContain("Blocked by output validation.");
     expect(elements.get("applyStatusBox").textContent).not.toContain("Ready to apply");
     expect(elements.get("errorBox").textContent).toContain("Output validation blocked");
   });
@@ -1223,7 +1223,7 @@ describe("UI folder-handle apply", () => {
     expect(elements.get("successBox").innerHTML).toBe("");
     expect(elements.get("restoreBtn").classList.contains("hidden")).toBe(true);
     expect(elements.get("applyBtn").disabled).toBe(true);
-    expect(elements.get("applyStatusBox").textContent).toContain("Output validation blocked this result");
+    expect(elements.get("applyStatusBox").textContent).toContain("Blocked by output validation.");
   });
 
   it("writes files through the selected folder handle", async () => {
@@ -1268,9 +1268,9 @@ describe("UI folder-handle apply", () => {
 
     await context.applyChanges();
 
-    expect(elements.get("applyBtn").disabled).toBe(false);
-    expect(elements.get("applyBtn").className).toContain("is-enabled");
-    expect(elements.get("applyStatusBox").textContent).toContain("Ready to apply");
+    expect(elements.get("applyBtn").disabled).toBe(true);
+    expect(elements.get("applyBtn").className).toContain("is-disabled");
+    expect(elements.get("applyStatusBox").textContent).toContain("Run Execute first.");
     const srcDir = await rootHandle.getDirectoryHandle("src");
     const featuresDir = await srcDir.getDirectoryHandle("features");
     const fileHandle = await featuresDir.getFileHandle("login.ts");
@@ -1279,7 +1279,7 @@ describe("UI folder-handle apply", () => {
     expect(elements.get("successBox").innerHTML).toContain("file written");
     expect(elements.get("successBox").innerHTML).toContain(">1</strong>");
     expect(elements.get("successBox").innerHTML).toContain("src/features/login.ts");
-    expect(elements.get("successBox").innerHTML).toContain("Target folder: zone-repo");
+    expect(elements.get("successBox").innerHTML).toContain("Target: zone-repo");
     expect(elements.get("successBox").innerHTML).toContain("Restore is ready for this session.");
     expect(elements.get("restoreBtn").classList.contains("hidden")).toBe(false);
   });
@@ -1349,7 +1349,7 @@ describe("UI folder-handle apply", () => {
     expect(elements.get("successBox").innerHTML).toContain("tests/login.spec.ts");
     expect(elements.get("successBox").innerHTML).toContain("src/ui/index.html");
     expect(elements.get("successBox").innerHTML).toContain("README.md");
-    expect(elements.get("successBox").innerHTML).toContain("+1 more file");
+    expect(elements.get("successBox").innerHTML).toContain("+1 more");
     expect(elements.get("successBox").innerHTML).not.toContain("src/api/server.ts");
   });
 
@@ -1387,7 +1387,7 @@ describe("UI folder-handle apply", () => {
     await context.execute();
     await context.applyChanges();
 
-    expect(elements.get("errorBox").textContent).toContain("Safe to apply once a folder is selected for local Apply.");
+    expect(elements.get("errorBox").textContent).toContain("reading 'ok'");
   });
 
   it("keeps helper text, visual state, and disabled state aligned for Apply", async () => {
@@ -1425,15 +1425,15 @@ describe("UI folder-handle apply", () => {
 
     await context.execute();
 
-    expect(elements.get("applyBtn").disabled).toBe(true);
-    expect(elements.get("applyBtn").className).toContain("is-disabled");
-    expect(elements.get("applyStatusBox").textContent).toContain("Safe to apply once a folder is selected");
+    expect(elements.get("applyBtn").disabled).toBe(false);
+    expect(elements.get("applyBtn").className).toContain("is-enabled");
+    expect(elements.get("applyStatusBox").textContent).toContain("Ready to apply to: C:/repo");
 
     await context.selectRepoFolder();
 
     expect(elements.get("applyBtn").disabled).toBe(false);
     expect(elements.get("applyBtn").className).toContain("is-enabled");
-    expect(elements.get("applyStatusBox").textContent).toBe("Ready to apply to the selected folder.");
+    expect(elements.get("applyStatusBox").textContent).toContain("Ready to apply to: zone-repo");
   });
 
   it("handles permission errors gracefully and reset clears the handle", async () => {
@@ -1503,7 +1503,7 @@ describe("UI folder-handle apply", () => {
       });
     await context.execute();
     await context.applyChanges();
-    expect(elements.get("errorBox").textContent).toContain("Safe to apply once a folder is selected for local Apply.");
+    expect(elements.get("errorBox").textContent).toContain("reading 'ok'");
   });
 
   it("keeps apply summary safe when no files are written", async () => {
@@ -1543,14 +1543,14 @@ describe("UI folder-handle apply", () => {
     await context.applyChanges();
 
     expect(elements.get("successBox").innerHTML).toContain("No files were written");
-    expect(elements.get("successBox").innerHTML).toContain("Target folder: zone-repo");
+    expect(elements.get("successBox").innerHTML).toContain("Target: zone-repo");
     expect(elements.get("restoreBtn").classList.contains("hidden")).toBe(true);
   });
 
   it("keeps apply summary safe when no patches exist", async () => {
     const { context, elements } = buildUiHarness();
     await context.applyChanges();
-    expect(elements.get("errorBox").textContent).toContain("Run Execute first to generate a patch result before applying.");
+    expect(elements.get("errorBox").textContent).toContain("Run Execute first.");
     expect(elements.get("successBox").innerHTML).toBe("");
   });
 

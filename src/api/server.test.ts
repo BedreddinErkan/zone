@@ -6,6 +6,15 @@ const runLlmPatchFlowMock = vi.fn();
 const applyLlmPatchesMock = vi.fn();
 const runTestEngineerFlowMock = vi.fn();
 const runDataAnalystFlowMock = vi.fn();
+const scanRepoMock = vi.fn();
+const readProjectFilesMock = vi.fn();
+const responsesCreateMock = vi.fn();
+const createOpenAIClientMock = vi.fn(() => ({
+  responses: {
+    create: responsesCreateMock,
+  },
+}));
+const getModelNameMock = vi.fn(() => "gpt-4o-mini");
 
 vi.mock("../core/runAgent.js", () => ({
   runAgent: runAgentMock,
@@ -25,6 +34,19 @@ vi.mock("../roles/runTestEngineerFlow.js", () => ({
 
 vi.mock("../roles/runDataAnalystFlow.js", () => ({
   runDataAnalystFlow: runDataAnalystFlowMock,
+}));
+
+vi.mock("../repo/scanRepo.js", () => ({
+  scanRepo: scanRepoMock,
+}));
+
+vi.mock("../repo/readProjectFiles.js", () => ({
+  readProjectFiles: readProjectFilesMock,
+}));
+
+vi.mock("../llm/openaiClient.js", () => ({
+  createOpenAIClient: createOpenAIClientMock,
+  getModelName: getModelNameMock,
 }));
 
 describe("/api/test-engineer", () => {
@@ -199,5 +221,61 @@ describe("/api/test-engineer", () => {
     expect(body.patchResults).toEqual([
       { filePath: "src/foo.ts", status: "applied" },
     ]);
+  });
+
+  it("returns an enhanced task from /api/enhance-task", async () => {
+    scanRepoMock.mockResolvedValue([
+      {
+        path: "tests/login.spec.ts",
+        absolutePath: "C:/repo/tests/login.spec.ts",
+      },
+      {
+        path: "tests/cart.spec.ts",
+        absolutePath: "C:/repo/tests/cart.spec.ts",
+      },
+      {
+        path: "src/app.ts",
+        absolutePath: "C:/repo/src/app.ts",
+      },
+    ]);
+    readProjectFilesMock.mockResolvedValue({
+      "C:/repo/tests/cart.spec.ts": "test('cart', async () => {});",
+      "C:/repo/tests/login.spec.ts": "test('login', async () => {});",
+    });
+    responsesCreateMock.mockResolvedValue({
+      output_text:
+        "Extend tests/login.spec.ts with a negative invalid-credentials Playwright test that reuses the existing login flow and asserts the real error state.",
+    });
+
+    const response = await fetch(`${baseUrl}/api/enhance-task`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "add login test",
+        role: "test_engineer",
+        repoPath: "C:/repo",
+      }),
+    });
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      enhancedTask:
+        "Extend tests/login.spec.ts with a negative invalid-credentials Playwright test that reuses the existing login flow and asserts the real error state.",
+    });
+    expect(scanRepoMock).toHaveBeenCalledWith("C:/repo");
+    expect(readProjectFilesMock).toHaveBeenCalledWith([
+      "C:/repo/tests/cart.spec.ts",
+      "C:/repo/tests/login.spec.ts",
+    ]);
+    expect(createOpenAIClientMock).toHaveBeenCalledTimes(1);
+    expect(responsesCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "gpt-4o-mini",
+        instructions: expect.stringContaining("You are a task optimizer"),
+        input: expect.stringContaining("User task: add login test"),
+      })
+    );
   });
 });

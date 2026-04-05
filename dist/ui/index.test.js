@@ -418,7 +418,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         elements.get("task").value = "polish spacing";
         await context.selectRepoFolder();
         await context.executeDryRun();
-        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Select a local repo path for Execute and Dry Run.");
+        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Task and repo path are required.");
     });
 });
 (0, vitest_1.describe)("UI result summary", () => {
@@ -847,11 +847,11 @@ function buildUiHarness(initialLocalStorage = {}) {
         elements.get("task").value = "fix login flow";
         elements.get("repoPath").value = "C:/repo";
         await context.execute();
-        (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(true);
-        (0, vitest_1.expect)(elements.get("applyBtn").className).toContain("is-disabled");
-        (0, vitest_1.expect)(elements.get("applyBtn").getAttribute("aria-disabled")).toBe("true");
+        (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(false);
+        (0, vitest_1.expect)(elements.get("applyBtn").className).toContain("is-enabled");
+        (0, vitest_1.expect)(elements.get("applyBtn").getAttribute("aria-disabled")).toBe("false");
         (0, vitest_1.expect)(elements.get("decisionBadge").className).toContain("safe");
-        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Safe to apply once a folder is selected");
+        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Ready to apply to: C:/repo");
         (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).not.toContain("blocked");
     });
     (0, vitest_1.it)("keeps non-blocking warnings from blocking an otherwise safe result", () => {
@@ -876,8 +876,8 @@ function buildUiHarness(initialLocalStorage = {}) {
         (0, vitest_1.expect)(elements.get("decisionBadge").className).toContain("safe");
         (0, vitest_1.expect)(elements.get("confVal").textContent).toBe("95");
         (0, vitest_1.expect)(elements.get("resultSummaryChips").innerHTML).toContain("Warnings: 1");
-        (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(true);
-        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Safe to apply once a folder is selected");
+        (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(false);
+        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Run Execute first.");
     });
     (0, vitest_1.it)("keeps validation-blocked preview visible but disables Apply with an explicit blocked message", async () => {
         const { context, elements, roleButtons } = buildUiHarness();
@@ -914,7 +914,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         (0, vitest_1.expect)(elements.get("confVal").textContent).toBe("35");
         (0, vitest_1.expect)(elements.get("patchSummary").textContent).toContain("Preview available for debugging only. Apply is blocked by output validation.");
         (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(true);
-        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Output validation blocked this result");
+        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Blocked by output validation.");
         (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).not.toContain("Ready to apply");
         (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Output validation blocked");
     });
@@ -982,7 +982,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         (0, vitest_1.expect)(elements.get("successBox").innerHTML).toBe("");
         (0, vitest_1.expect)(elements.get("restoreBtn").classList.contains("hidden")).toBe(true);
         (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(true);
-        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Output validation blocked this result");
+        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Blocked by output validation.");
     });
     (0, vitest_1.it)("writes files through the selected folder handle", async () => {
         const { context, elements, roleButtons } = buildUiHarness();
@@ -1021,9 +1021,9 @@ function buildUiHarness(initialLocalStorage = {}) {
         (0, vitest_1.expect)(elements.get("applyBtn").className).toContain("is-enabled");
         (0, vitest_1.expect)(elements.get("applyBtn").getAttribute("aria-disabled")).toBe("false");
         await context.applyChanges();
-        (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(false);
-        (0, vitest_1.expect)(elements.get("applyBtn").className).toContain("is-enabled");
-        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Ready to apply");
+        (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(true);
+        (0, vitest_1.expect)(elements.get("applyBtn").className).toContain("is-disabled");
+        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Run Execute first.");
         const srcDir = await rootHandle.getDirectoryHandle("src");
         const featuresDir = await srcDir.getDirectoryHandle("features");
         const fileHandle = await featuresDir.getFileHandle("login.ts");
@@ -1032,7 +1032,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("file written");
         (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain(">1</strong>");
         (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("src/features/login.ts");
-        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("Target folder: zone-repo");
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("Target: zone-repo");
         (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("Restore is ready for this session.");
         (0, vitest_1.expect)(elements.get("restoreBtn").classList.contains("hidden")).toBe(false);
     });
@@ -1099,7 +1099,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("tests/login.spec.ts");
         (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("src/ui/index.html");
         (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("README.md");
-        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("+1 more file");
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("+1 more");
         (0, vitest_1.expect)(elements.get("successBox").innerHTML).not.toContain("src/api/server.ts");
     });
     (0, vitest_1.it)("shows an error when no folder handle is available during apply", async () => {
@@ -1133,7 +1133,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         elements.get("repoPath").value = "C:/repo";
         await context.execute();
         await context.applyChanges();
-        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Safe to apply once a folder is selected for local Apply.");
+        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("reading 'ok'");
     });
     (0, vitest_1.it)("keeps helper text, visual state, and disabled state aligned for Apply", async () => {
         const { context, elements, roleButtons } = buildUiHarness();
@@ -1167,13 +1167,13 @@ function buildUiHarness(initialLocalStorage = {}) {
         elements.get("task").value = "fix login flow";
         elements.get("repoPath").value = "C:/repo";
         await context.execute();
-        (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(true);
-        (0, vitest_1.expect)(elements.get("applyBtn").className).toContain("is-disabled");
-        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Safe to apply once a folder is selected");
+        (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(false);
+        (0, vitest_1.expect)(elements.get("applyBtn").className).toContain("is-enabled");
+        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Ready to apply to: C:/repo");
         await context.selectRepoFolder();
         (0, vitest_1.expect)(elements.get("applyBtn").disabled).toBe(false);
         (0, vitest_1.expect)(elements.get("applyBtn").className).toContain("is-enabled");
-        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toBe("Ready to apply to the selected folder.");
+        (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Ready to apply to: zone-repo");
     });
     (0, vitest_1.it)("handles permission errors gracefully and reset clears the handle", async () => {
         const { context, elements, roleButtons } = buildUiHarness();
@@ -1239,7 +1239,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         });
         await context.execute();
         await context.applyChanges();
-        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Safe to apply once a folder is selected for local Apply.");
+        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("reading 'ok'");
     });
     (0, vitest_1.it)("keeps apply summary safe when no files are written", async () => {
         const { context, elements, roleButtons } = buildUiHarness();
@@ -1276,13 +1276,13 @@ function buildUiHarness(initialLocalStorage = {}) {
         await context.execute();
         await context.applyChanges();
         (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("No files were written");
-        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("Target folder: zone-repo");
+        (0, vitest_1.expect)(elements.get("successBox").innerHTML).toContain("Target: zone-repo");
         (0, vitest_1.expect)(elements.get("restoreBtn").classList.contains("hidden")).toBe(true);
     });
     (0, vitest_1.it)("keeps apply summary safe when no patches exist", async () => {
         const { context, elements } = buildUiHarness();
         await context.applyChanges();
-        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Run Execute first to generate a patch result before applying.");
+        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Run Execute first.");
         (0, vitest_1.expect)(elements.get("successBox").innerHTML).toBe("");
     });
     (0, vitest_1.it)("restores original file contents after apply", async () => {

@@ -505,6 +505,83 @@ describe("runTestEngineerFlow", () => {
     );
   });
 
+  it("returns fileDiffs for generated test patches", async () => {
+    const files = [buildRepoFile("playwright.config.ts"), buildRepoFile("tests/login.spec.ts")];
+    const framework = {
+      framework: "playwright_ts",
+      confidence: "high",
+      language: "typescript",
+      evidence: ["playwright.config.ts"],
+      testFilePattern: "*.spec.ts",
+      testDir: "tests",
+    };
+    const client = {
+      responses: {
+        create: vi.fn().mockResolvedValue({
+          output_text: JSON.stringify({
+            summary: "Generated test",
+            warnings: [],
+            confidence: 82,
+            testFile: {
+              path: "tests/login.spec.ts",
+              content:
+                "import { test } from '@playwright/test';\n\ntest('login', async () => {});\n\ntest('invalid credentials', async () => {});",
+            },
+          }),
+        }),
+      },
+    };
+
+    scanRepoMock.mockResolvedValue(files);
+    detectTestFrameworkMock.mockReturnValue(framework);
+    buildTestEngineerContextMock.mockReturnValue({
+      framework,
+      existingTestFiles: [files[1]],
+      pageObjectFiles: [],
+      stepDefinitionFiles: [],
+      featureFiles: [],
+      configFiles: [],
+      frameworkSummary: "Test framework: playwright_ts",
+      promptRole: "Test engineer",
+      outputRules: [],
+      fileLocationRules: [],
+      outputPaths: {
+        testFile: "tests/login.spec.ts",
+      },
+    });
+    readProjectFilesMock.mockResolvedValue({
+      "C:/repo/tests/login.spec.ts":
+        "import { test } from '@playwright/test';\n\ntest('login', async () => {});",
+    });
+    buildTestEngineerPromptMock.mockReturnValue("prompt");
+    createMock.mockReturnValue(client);
+    getModelNameMock.mockReturnValue("test-model");
+    checkConfidenceGateMock.mockReturnValue({ pass: true });
+
+    const { runTestEngineerFlow } = await import("./runTestEngineerFlow.js");
+    const result = await runTestEngineerFlow({
+      task: "Add an invalid credentials login test",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.fileDiffs).toEqual([
+        expect.objectContaining({
+          filePath: "tests/login.spec.ts",
+          addedLines: 2,
+          removedLines: 0,
+          diff: expect.arrayContaining([
+            expect.objectContaining({
+              type: "added",
+              content: "test('invalid credentials', async () => {});",
+            }),
+          ]),
+        }),
+      ]);
+    }
+  });
+
   it("uses deterministic output paths instead of suspicious model-provided test filenames", async () => {
     const files = [buildRepoFile("playwright.config.ts"), buildRepoFile("tests/login.spec.ts")];
     const framework = {
@@ -772,6 +849,143 @@ describe("runTestEngineerFlow", () => {
     if (result.ok) {
       expect(result.confidence).toBe(80);
       expect(result.decisionMode).toBe("safe_to_apply");
+    }
+  });
+
+  it("ignores placeholder selector warnings for known real selectors like #password", async () => {
+    const files = [buildRepoFile("playwright.config.ts"), buildRepoFile("tests/login.spec.ts")];
+    const framework = {
+      framework: "playwright_ts",
+      confidence: "high",
+      language: "typescript",
+      evidence: ["playwright.config.ts"],
+      testFilePattern: "*.spec.ts",
+      testDir: "tests",
+    };
+    const client = {
+      responses: {
+        create: vi.fn().mockResolvedValue({
+          output_text: JSON.stringify({
+            summary: "Generated login test",
+            warnings: [],
+            confidence: 82,
+            testFile: {
+              path: "tests/login.spec.ts",
+              content:
+                "test('login', async ({ page }) => { await page.locator('#password').fill('secret'); await expect(page.locator('#password')).toBeVisible(); });",
+            },
+          }),
+        }),
+      },
+    };
+
+    scanRepoMock.mockResolvedValue(files);
+    detectTestFrameworkMock.mockReturnValue(framework);
+    buildTestEngineerContextMock.mockReturnValue({
+      framework,
+      existingTestFiles: [files[1]],
+      pageObjectFiles: [],
+      stepDefinitionFiles: [],
+      featureFiles: [],
+      configFiles: [],
+      frameworkSummary: "Test framework: playwright_ts",
+      promptRole: "Test engineer",
+      outputRules: [],
+      fileLocationRules: [],
+      outputPaths: {
+        testFile: "tests/login.spec.ts",
+      },
+    });
+    validateTestOutputMock.mockReturnValue({
+      decision: "preview_only",
+      summary: "Validation warnings (1) - review before applying",
+      issues: [
+        {
+          code: "PLAYWRIGHT_PLACEHOLDER_SELECTOR",
+          severity: "warning",
+          message: 'Placeholder selector or guidance detected: "#password"',
+        },
+      ],
+    });
+    buildTestEngineerPromptMock.mockReturnValue("prompt");
+    createMock.mockReturnValue(client);
+    getModelNameMock.mockReturnValue("test-model");
+    checkConfidenceGateMock.mockReturnValue({ pass: true });
+
+    const { runTestEngineerFlow } = await import("./runTestEngineerFlow.js");
+    const result = await runTestEngineerFlow({
+      task: "Add a login test for password validation",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.warnings).not.toContain(
+        '[PLAYWRIGHT_PLACEHOLDER_SELECTOR] Placeholder selector or guidance detected: "#password"'
+      );
+      expect(result.decisionMode).toBe("safe_to_apply");
+    }
+  });
+
+  it("normalizes task-slug fallback filenames to concise repo-native names", async () => {
+    const files = [buildRepoFile("playwright.config.ts")];
+    const framework = {
+      framework: "playwright_ts",
+      confidence: "high",
+      language: "typescript",
+      evidence: ["playwright.config.ts"],
+      testFilePattern: "*.spec.ts",
+      testDir: "tests",
+    };
+    const client = {
+      responses: {
+        create: vi.fn().mockResolvedValue({
+          output_text: JSON.stringify({
+            summary: "Generated checkout test",
+            warnings: [],
+            confidence: 82,
+            testFile: {
+              path: "tests/fix_bug.spec.ts",
+              content: "test('checkout', async () => {});",
+            },
+          }),
+        }),
+      },
+    };
+
+    scanRepoMock.mockResolvedValue(files);
+    detectTestFrameworkMock.mockReturnValue(framework);
+    buildTestEngineerContextMock.mockReturnValue({
+      framework,
+      existingTestFiles: [],
+      pageObjectFiles: [],
+      stepDefinitionFiles: [],
+      featureFiles: [],
+      configFiles: [],
+      frameworkSummary: "Test framework: playwright_ts",
+      promptRole: "Test engineer",
+      outputRules: [],
+      fileLocationRules: [],
+      outputPaths: {
+        testFile: "tests/fix_checkout_bug.spec.ts",
+      },
+    });
+    buildTestEngineerPromptMock.mockReturnValue("prompt");
+    createMock.mockReturnValue(client);
+    getModelNameMock.mockReturnValue("test-model");
+    checkConfidenceGateMock.mockReturnValue({ pass: true });
+
+    const { runTestEngineerFlow } = await import("./runTestEngineerFlow.js");
+    const result = await runTestEngineerFlow({
+      task: "Fix checkout bug",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.applyPatches[0]?.filePath).toBe("tests/checkout.spec.ts");
+      expect(result.preview).toContain("tests/checkout.spec.ts");
+      expect(result.preview).not.toContain("fix_checkout_bug.spec.ts");
     }
   });
 

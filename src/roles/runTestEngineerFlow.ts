@@ -1,3 +1,4 @@
+import path from "node:path";
 import { scanRepo } from "../repo/scanRepo.js";
 import { readProjectFiles } from "../repo/readProjectFiles.js";
 import { detectTestFramework } from "./detectTestFramework.js";
@@ -5,7 +6,12 @@ import { buildTestEngineerContext } from "./testEngineerContext.js";
 import { buildTestEngineerPrompt } from "../prompts/testEngineerPrompt.js";
 import { createOpenAIClient, getModelName } from "../llm/openaiClient.js";
 import { checkConfidenceGate } from "../core/confidenceGate.js";
-import { validateTestOutput } from "./testOutputValidator.js";
+import { computeFileDiff, type DiffLine } from "../core/runLlmPatchFlow.js";
+import {
+  validateTestOutput,
+  type ValidationDecision,
+  type ValidationIssue,
+} from "./testOutputValidator.js";
 import { detectTestComplexity } from "./detectTestComplexity.js";
 import type { TestComplexity } from "./detectTestComplexity.js";
 import type { RepoFile } from "../types/project.js";
@@ -58,6 +64,12 @@ export type TestEngineerFlowResult =
       warnings: string[];
       complexity?: TestComplexity;
       applyPatches: Array<{ filePath: string; fullContent: string }>;
+      fileDiffs: Array<{
+        filePath: string;
+        addedLines: number;
+        removedLines: number;
+        diff: DiffLine[];
+      }>;
       preview: string;
       debug?: TestEngineerDebugInfo;
     }
@@ -156,6 +168,54 @@ function deduplicatePlaywrightImport(content: string): string {
       return line;
     }
   );
+}
+
+function splitTestBlocks(content: string): { prefix: string; blocks: string[] } {
+  const normalized = normalizeTestContent(content);
+  const blockStartPattern = /^\s*test(?:\.each)?/gm;
+  const starts = [...normalized.matchAll(blockStartPattern)].map(
+    (match) => match.index ?? 0
+  );
+
+  if (starts.length === 0) {
+    return {
+      prefix: normalized,
+      blocks: [],
+    };
+  }
+
+  return {
+    prefix: normalized.slice(0, starts[0]),
+    blocks: starts.map((start, index) =>
+      normalized.slice(start, starts[index + 1] ?? normalized.length)
+    ),
+  };
+}
+
+function countTestBlocks(content: string): number {
+  return (
+    (content.match(/^\s*test\s*\(/gm) || []).length +
+    (content.match(/^\s*test\.each\s*\(/gm) || []).length
+  );
+}
+
+function safeAppendToExisting(
+  originalContent: string,
+  generatedContent: string
+): string {
+  if (!originalContent.trim()) {
+    return generatedContent;
+  }
+
+  const originalCount = countTestBlocks(originalContent);
+  const generatedCount = countTestBlocks(generatedContent);
+  if (generatedCount <= originalCount) {
+    return deduplicateTestBlocks(
+      `${originalContent.trimEnd()}\n${generatedContent.trimStart()}`
+    );
+  }
+
+  return generatedContent;
 }
 
 export function deduplicateTestBlocks(content: string): string {
@@ -315,8 +375,9 @@ async function readExampleContents(
 
   const contentsMap =
     examplePaths.length > 0 ? await readProjectFiles(examplePaths) : {};
+  const safeContentsMap = contentsMap ?? {};
 
-  return Object.entries(contentsMap).map(([absPath, content]) => ({
+  return Object.entries(safeContentsMap).map(([absPath, content]) => ({
     path: allFiles.find((file) => file.absolutePath === absPath)?.path ?? absPath,
     content,
   }));
@@ -463,6 +524,61 @@ function adjustConfidenceForWarnings(
   return cappedConfidence;
 }
 
+function hasRepoContextSelector(
+  repoContext: string,
+  selector: string
+): boolean {
+  return repoContext.toLowerCase().includes(selector.toLowerCase());
+}
+
+function calculateDeterministicConfidence(input: {
+  modelConfidence?: number;
+  complexity?: TestComplexity;
+  warnings: string[];
+  generatedContent: string;
+  isNewFile: boolean;
+  repoContextText: string;
+  vagueTaskDetected: boolean;
+}): number {
+  let penalty = 0;
+
+  if (input.complexity === "e2e") penalty += 15;
+  if (input.complexity === "multi_scenario") penalty += 10;
+  if (input.complexity === "data_driven") penalty += 5;
+
+  penalty += input.warnings.length * 5;
+
+  const hasPlaceholderSelectorWarning = input.warnings.some((warning) =>
+    warning.toLowerCase().includes("placeholder selector")
+  );
+  if (hasPlaceholderSelectorWarning) penalty += 15;
+
+  const lowerGeneratedContent = input.generatedContent.toLowerCase();
+  const lowerRepoContext = input.repoContextText.toLowerCase();
+  const hasGenericSelectors =
+    lowerGeneratedContent.includes(".btn_inventory") ||
+    lowerGeneratedContent.includes("adjust selector") ||
+    lowerGeneratedContent.includes("your_selector") ||
+    (lowerGeneratedContent.includes(".shopping_cart_link") &&
+      !hasRepoContextSelector(lowerRepoContext, ".shopping_cart_link"));
+
+  if (hasGenericSelectors) penalty += 15;
+
+  if (input.generatedContent.length > 3000) penalty += 10;
+  if (input.generatedContent.length > 5000) penalty += 10;
+
+  const deterministicConfidence = Math.max(0, Math.min(100, 100 - penalty));
+  let confidence =
+    typeof input.modelConfidence === "number"
+      ? Math.min(input.modelConfidence, deterministicConfidence)
+      : deterministicConfidence;
+  if (input.vagueTaskDetected) {
+    confidence = Math.min(confidence, 60);
+  }
+
+  return confidence;
+}
+
 const VAGUE_TASK_WARNING =
   "[VAGUE_TASK] Task is too vague to generate a reliable test. Please describe the specific scenario, page, and expected behavior.";
 
@@ -535,6 +651,82 @@ const NON_SPECIFIC_TASK_TOKENS = new Set([
   "behaviour",
 ]);
 
+function normalizeTaskText(task: string): string {
+  return task
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/https?:\/\/[^\s]+/g, " ")
+    .replace(/www\.[^\s]+/g, " ")
+    .replace(/[a-z0-9-]+\.(com|org|net|io|dev|app|co)[^\s]*/g, " ")
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .trim();
+}
+
+const KNOWN_REAL_SELECTORS = [
+  "#password",
+  "#username",
+  "#user-name",
+  "#email",
+  "#login-button",
+  "#submit",
+  "#search",
+];
+
+const GENERIC_FILENAME_TASK_TOKENS = new Set([
+  "fix",
+  "bug",
+  "issue",
+  "problem",
+  "update",
+  "change",
+  "refactor",
+  "improve",
+  "test",
+  "add",
+  "write",
+  "create",
+  "requirements",
+  "request",
+  "task",
+  "analyze",
+  "repo",
+  "prompt",
+  "code",
+  "agent",
+  "page",
+  "feature",
+  "component",
+  "scenario",
+  "case",
+  "spec",
+  "specs",
+]);
+
+const NON_TARGET_FILENAME_TOKENS = new Set([
+  ...GENERIC_FILENAME_TASK_TOKENS,
+  "negative",
+  "positive",
+  "invalid",
+  "valid",
+  "happy",
+  "path",
+  "error",
+  "errors",
+  "credentials",
+  "credential",
+  "username",
+  "password",
+  "requirements",
+  "requirement",
+]);
+
+const FILENAME_KIND_TOKENS = {
+  negative: ["negative", "invalid", "error", "failure", "denied"],
+  e2e: ["e2e", "journey", "integration"],
+  flow: ["flow", "smoke", "sanity"],
+} as const;
+
 function isVagueTestTask(task: string): boolean {
   const normalizedTask = task.trim().toLowerCase().replace(/\s+/g, " ");
   const words = normalizedTask.split(/\s+/).filter(Boolean);
@@ -564,6 +756,165 @@ function isVagueTestTask(task: string): boolean {
   );
 
   return !hasSpecificTarget;
+}
+
+function tokenizeForFilename(task: string): string[] {
+  return normalizeTaskText(task).split(/\s+/).filter(Boolean);
+}
+
+function extractSpecificFilenameTarget(task: string): string | null {
+  const normalizedTask = normalizeTaskText(task);
+  if (
+    normalizedTask.includes("login") ||
+    normalizedTask.includes("sign in") ||
+    normalizedTask.includes("signin")
+  ) {
+    return "login";
+  }
+  if (
+    normalizedTask.includes("auth") ||
+    normalizedTask.includes("authentication")
+  ) {
+    return "auth";
+  }
+
+  const tokens = tokenizeForFilename(task);
+  return (
+    tokens.find(
+      (token) =>
+        token.length >= 3 &&
+        !NON_TARGET_FILENAME_TOKENS.has(token) &&
+        !TASK_STOPWORDS.has(token)
+    ) ?? null
+  );
+}
+
+function detectFilenameKind(task: string): string | null {
+  const normalizedTask = normalizeTaskText(task);
+  for (const [kind, tokens] of Object.entries(FILENAME_KIND_TOKENS)) {
+    if (tokens.some((token) => normalizedTask.includes(token))) {
+      return kind;
+    }
+  }
+  return null;
+}
+
+function isTaskSlugLikeFilename(pathValue: string): boolean {
+  const basename = path.posix
+    .basename(pathValue)
+    .replace(/\.(spec|test|cy)\.[a-z]+$/i, "")
+    .replace(/^test_/i, "");
+  const tokens = basename.split(/[^a-z0-9]+/i).filter(Boolean);
+  const genericCount = tokens.filter((token) =>
+    GENERIC_FILENAME_TASK_TOKENS.has(token.toLowerCase())
+  ).length;
+
+  return tokens.length > 3 || genericCount >= 2 || basename.length > 28;
+}
+
+function chooseExistingTestFileForReuse(
+  existingTestFiles: RepoFile[],
+  task: string
+): string | null {
+  if (!existingTestFiles.length) return null;
+  const target = extractSpecificFilenameTarget(task);
+
+  return [...existingTestFiles]
+    .map((file) => {
+      const basename = path.posix.basename(file.path).toLowerCase();
+      const suspiciousPenalty = isTaskSlugLikeFilename(file.path) ? -20 : 0;
+      const targetScore =
+        target && basename.includes(target.toLowerCase()) ? 15 : 0;
+      return {
+        path: file.path,
+        score: targetScore + suspiciousPenalty - basename.length / 100,
+      };
+    })
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.path.localeCompare(b.path);
+    })[0]?.path ?? null;
+}
+
+function buildShortTestFilePath(currentPath: string, task: string): string {
+  const parsed = path.posix.parse(currentPath);
+  const extensionMatch = parsed.base.match(/(\.(?:spec|test|cy)\.[a-z]+)$/i);
+  const extension = extensionMatch?.[1] ?? parsed.ext;
+  const target = extractSpecificFilenameTarget(task) ?? parsed.name.split(".")[0] ?? "app";
+  const kind = detectFilenameKind(task);
+  const baseName =
+    kind && kind !== target ? `${target}_${kind}` : target;
+  return path.posix.join(parsed.dir, `${baseName}${extension}`);
+}
+
+function resolveOutputPaths(input: {
+  task: string;
+  outputPaths: { testFile: string; featureFile?: string; stepDefinition?: string };
+  existingTestFiles: RepoFile[];
+}): { testFile: string; featureFile?: string; stepDefinition?: string } {
+  const currentTestFile = input.outputPaths.testFile;
+  if (!currentTestFile) return input.outputPaths;
+
+  const shouldNormalize =
+    isTaskSlugLikeFilename(currentTestFile) ||
+    GENERIC_TASK_PHRASES.has(normalizeTaskText(input.task));
+
+  if (!shouldNormalize) {
+    return input.outputPaths;
+  }
+
+  const specificTarget = extractSpecificFilenameTarget(input.task);
+  if (!specificTarget) {
+    const existingReusePath = chooseExistingTestFileForReuse(
+      input.existingTestFiles,
+      input.task
+    );
+    if (existingReusePath) {
+      return { ...input.outputPaths, testFile: existingReusePath };
+    }
+    return input.outputPaths;
+  }
+
+  return {
+    ...input.outputPaths,
+    testFile: buildShortTestFilePath(currentTestFile, input.task),
+  };
+}
+
+function extractQuotedSelector(message: string): string | null {
+  const match = message.match(/"([^"]+)"/);
+  return match?.[1]?.trim().toLowerCase() ?? null;
+}
+
+function shouldIgnoreKnownRealSelectorIssue(issue: ValidationIssue): boolean {
+  if (issue.code !== "PLAYWRIGHT_PLACEHOLDER_SELECTOR") return false;
+  const selector = extractQuotedSelector(issue.message);
+  return selector !== null && KNOWN_REAL_SELECTORS.includes(selector);
+}
+
+function shouldIgnoreKnownRealSelectorWarning(warning: string): boolean {
+  if (!warning.toLowerCase().includes("placeholder selector")) return false;
+  const selector = extractQuotedSelector(warning);
+  return selector !== null && KNOWN_REAL_SELECTORS.includes(selector);
+}
+
+function summarizeValidationIssues(
+  issues: ValidationIssue[]
+): { decision: ValidationDecision; summary: string } {
+  const errors = issues.filter((issue) => issue.severity === "error");
+  const warnings = issues.filter((issue) => issue.severity === "warning");
+
+  const decision: ValidationDecision =
+    errors.length > 0 ? "blocked" : warnings.length > 0 ? "preview_only" : "pass";
+
+  const summary =
+    decision === "pass"
+      ? "Validation passed - output is safe to apply"
+      : decision === "preview_only"
+        ? `Validation warnings (${warnings.length}) - review before applying`
+        : `Validation blocked (${errors.length} error(s)) - cannot apply`;
+
+  return { decision, summary };
 }
 
 export async function runTestEngineerFlow(input: {
@@ -620,6 +971,12 @@ export async function runTestEngineerFlow(input: {
     };
   }
 
+  const resolvedOutputPaths = resolveOutputPaths({
+    task: input.task,
+    outputPaths: context.outputPaths,
+    existingTestFiles: context.existingTestFiles,
+  });
+
   const debug: TestEngineerDebugInfo = {
     selectedRole: "test_engineer",
     promptPipeline: "buildTestEngineerPrompt",
@@ -628,7 +985,7 @@ export async function runTestEngineerFlow(input: {
     frameworkAugmentation: resolveFrameworkAugmentation(framework.framework),
     contextSelection: context.debug ?? null,
     outputPathDecision: {
-      finalTestFilePath: context.outputPaths.testFile ?? null,
+      finalTestFilePath: resolvedOutputPaths.testFile ?? null,
       finalPathSource: "deterministic_context",
       rawModelTestFilePath: null,
       rawModelFeatureFilePath: null,
@@ -672,12 +1029,18 @@ export async function runTestEngineerFlow(input: {
   input.onProgress?.("Building prompt...");
   const prompt = buildTestEngineerPrompt({
     task: input.task,
-    context,
+    context: {
+      ...context,
+      outputPaths: resolvedOutputPaths,
+    },
     pageObjectContents,
     stepDefinitionContents,
     featureContents,
     existingTestContents,
-  });
+  }) +
+    "\n\nIMPORTANT: Do NOT rewrite or modify any existing tests.\n" +
+    "Only add NEW test blocks that do not exist in the file.\n" +
+    "If a similar test already exists, skip it and add a different scenario.";
 
   let parsed: Record<string, unknown>;
   try {
@@ -703,9 +1066,9 @@ export async function runTestEngineerFlow(input: {
   const rawModelStepDefinitionPath =
     (parsed["stepDefinitionFile"] as { path?: string } | undefined)?.path ?? null;
   debug.outputPathDecision = {
-    finalTestFilePath: context.outputPaths.testFile ?? null,
+    finalTestFilePath: resolvedOutputPaths.testFile ?? null,
     finalPathSource:
-      rawModelTestFilePath && rawModelTestFilePath !== context.outputPaths.testFile
+      rawModelTestFilePath && rawModelTestFilePath !== resolvedOutputPaths.testFile
         ? "deterministic_context_override"
         : rawModelTestFilePath
           ? "deterministic_context"
@@ -714,30 +1077,34 @@ export async function runTestEngineerFlow(input: {
     rawModelFeatureFilePath,
     rawModelStepDefinitionPath,
     rawModelPathDiffers:
-      Boolean(rawModelTestFilePath && rawModelTestFilePath !== context.outputPaths.testFile) ||
+      Boolean(rawModelTestFilePath && rawModelTestFilePath !== resolvedOutputPaths.testFile) ||
       Boolean(
         rawModelFeatureFilePath &&
-          context.outputPaths.featureFile &&
-          rawModelFeatureFilePath !== context.outputPaths.featureFile
+          resolvedOutputPaths.featureFile &&
+          rawModelFeatureFilePath !== resolvedOutputPaths.featureFile
       ) ||
       Boolean(
         rawModelStepDefinitionPath &&
-          context.outputPaths.stepDefinition &&
-          rawModelStepDefinitionPath !== context.outputPaths.stepDefinition
+          resolvedOutputPaths.stepDefinition &&
+          rawModelStepDefinitionPath !== resolvedOutputPaths.stepDefinition
       ),
   };
 
-  const modelWarnings = Array.isArray(parsed["warnings"])
+  const rawModelWarnings = Array.isArray(parsed["warnings"])
     ? (parsed["warnings"] as string[])
     : [];
+  const internalWarnings: string[] = [];
+  const modelWarnings = rawModelWarnings.filter(
+    (warning) => !shouldIgnoreKnownRealSelectorWarning(warning)
+  );
   const postProcessingWarnings: string[] = [];
   const originalContentByPath = new Map<string, string>([
     ...existingTestContents.map((file) => [file.path, file.content] as const),
     ...featureContents.map((file) => [file.path, file.content] as const),
     ...stepDefinitionContents.map((file) => [file.path, file.content] as const),
   ]);
-  const applyPatches = buildApplyPatches(parsed, context.outputPaths).map((patch) => {
-    if (patch.filePath !== context.outputPaths.testFile) {
+  let applyPatches = buildApplyPatches(parsed, resolvedOutputPaths).map((patch) => {
+    if (patch.filePath !== resolvedOutputPaths.testFile) {
       return patch;
     }
 
@@ -747,7 +1114,7 @@ export async function runTestEngineerFlow(input: {
     });
 
     if (finalized.warnings.length > 0) {
-      postProcessingWarnings.push(...finalized.warnings);
+      internalWarnings.push(...finalized.warnings);
     }
 
     return {
@@ -761,8 +1128,9 @@ export async function runTestEngineerFlow(input: {
       warnings: [...modelWarnings, ...postProcessingWarnings],
     },
     framework.framework,
-    context.outputPaths
+    resolvedOutputPaths
   );
+  const { complexity } = detectTestComplexity(input.task);
   const modelConfidence =
     typeof parsed["confidence"] === "number" ? parsed["confidence"] : 50;
   const summary =
@@ -773,9 +1141,26 @@ export async function runTestEngineerFlow(input: {
   const warnings = vagueTaskDetected
     ? [...modelWarnings, ...postProcessingWarnings, VAGUE_TASK_WARNING]
     : [...modelWarnings, ...postProcessingWarnings];
-  const confidence = vagueTaskDetected
-    ? Math.min(adjustConfidenceForWarnings(modelConfidence, warnings), 60)
-    : adjustConfidenceForWarnings(modelConfidence, warnings);
+  const repoContextText = [
+    ...existingTestContents.map((file) => file.content),
+    ...pageObjectContents.map((file) => file.content),
+    ...stepDefinitionContents.map((file) => file.content),
+    ...featureContents.map((file) => file.content),
+  ].join("\n\n");
+  const generatedContent = applyPatches.map((patch) => patch.fullContent).join("\n\n");
+  const isNewFile = applyPatches.some((patch) => {
+    const originalContent = originalContentByPath.get(patch.filePath) ?? "";
+    return !originalContent.trim();
+  });
+  const confidence = calculateDeterministicConfidence({
+    modelConfidence,
+    complexity,
+    warnings,
+    generatedContent,
+    isNewFile,
+    repoContextText,
+    vagueTaskDetected,
+  });
   const confidenceGate = checkConfidenceGate({
     confidenceScore: confidence,
     role: "test_engineer",
@@ -808,7 +1193,6 @@ const testFilePatch = applyPatches.find(
     p.filePath.endsWith(".cy.js") ||
     p.filePath.endsWith(".py")
 );
-const { complexity } = detectTestComplexity(input.task);
 
 input.onProgress?.("Validating output...");
 const validation = validateTestOutput({
@@ -819,9 +1203,17 @@ const validation = validateTestOutput({
   framework: framework.framework,
   complexityHint: complexity,
 });
-if (validation.decision !== "pass" || validation.issues.length > 0) {
-  console.log(`[zone:validate] Decision: ${validation.decision}`);
-  for (const issue of validation.issues) {
+const filteredValidationIssues = validation.issues.filter(
+  (issue) => !shouldIgnoreKnownRealSelectorIssue(issue)
+);
+const filteredValidation = {
+  ...validation,
+  issues: filteredValidationIssues,
+  ...summarizeValidationIssues(filteredValidationIssues),
+};
+if (filteredValidation.decision !== "pass" || filteredValidation.issues.length > 0) {
+  console.log(`[zone:validate] Decision: ${filteredValidation.decision}`);
+  for (const issue of filteredValidation.issues) {
     console.log(`  [${issue.severity}] ${issue.code}: ${issue.message}`);
   }
 }
@@ -865,13 +1257,13 @@ if (validation.decision !== "pass" || validation.issues.length > 0) {
       routeEvidence,
     };
   }
-  if (validation.decision === "blocked") {
+  if (filteredValidation.decision === "blocked") {
     return buildValidationBlockedResult({
       framework: framework.framework,
       language: framework.language,
       reason:
-        `Output validation blocked: ${validation.summary}\n` +
-        validation.issues
+        `Output validation blocked: ${filteredValidation.summary}\n` +
+        filteredValidation.issues
           .filter(i => i.severity === "error")
           .map(i => `  - ${i.message}`)
           .join("\n"),
@@ -885,21 +1277,73 @@ if (validation.decision !== "pass" || validation.issues.length > 0) {
     });
   }
 
-  const validationWarnings = validation.issues
+  const validationWarnings = filteredValidation.issues
     .filter(i => i.severity === "warning")
     .map(i => `[${i.code}] ${i.message}`);
+  applyPatches = applyPatches.map((patch) => {
+    if (patch.filePath !== resolvedOutputPaths.testFile) {
+      return patch;
+    }
+
+    const originalContent = originalContentByPath.get(patch.filePath) ?? "";
+    const originalTestCount = countTestBlocks(originalContent);
+    if (originalTestCount === 0) {
+      return patch;
+    }
+
+    const safeContent = safeAppendToExisting(
+      originalContent,
+      patch.fullContent
+    );
+
+    if (safeContent !== patch.fullContent) {
+      internalWarnings.push(
+        "[TEST_CONTENT_PRESERVED] Existing tests were preserved and the new test content was appended safely."
+      );
+      return {
+        ...patch,
+        fullContent: safeContent,
+      };
+    }
+
+    return patch;
+  });
+  const fileDiffs = applyPatches.map((patch) => {
+    const originalContent = originalContentByPath.get(patch.filePath) ?? "";
+    const diff = computeFileDiff(originalContent, patch.fullContent);
+    return {
+      filePath: patch.filePath,
+      addedLines: diff.filter((line) => line.type === "added").length,
+      removedLines: diff.filter((line) => line.type === "removed").length,
+      diff,
+    };
+  });
+  const finalWarnings = [...warnings, ...validationWarnings];
+  const finalGeneratedContent = applyPatches
+    .map((patch) => patch.fullContent)
+    .join("\n\n");
+  const finalConfidence = calculateDeterministicConfidence({
+    modelConfidence,
+    complexity,
+    warnings: finalWarnings,
+    generatedContent: finalGeneratedContent,
+    isNewFile,
+    repoContextText,
+    vagueTaskDetected,
+  });
 input.onProgress?.("Ready");
-return {
+  return {
     ok: true,
     framework: framework.framework,
     language: framework.language,
-    confidence,
+    confidence: finalConfidence,
     decisionMode:
-      vagueTaskDetected || confidence < 70 ? "preview_only" : "safe_to_apply",
+      vagueTaskDetected || finalConfidence < 70 ? "preview_only" : "safe_to_apply",
     summary,
-    warnings: [...warnings, ...validationWarnings],
+    warnings: finalWarnings,
     complexity,
     applyPatches,
+    fileDiffs,
     preview,
     debug,
   };

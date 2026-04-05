@@ -1,6 +1,7 @@
 import { scanRepo } from "../repo/scanRepo.js";
 import { readProjectFiles } from "../repo/readProjectFiles.js";
 import { createOpenAIClient, getModelName } from "../llm/openaiClient.js";
+import { computeFileDiff, type DiffLine } from "../core/runLlmPatchFlow.js";
 import { validateTestOutput } from "./testOutputValidator.js";
 import { buildDataAnalystContext } from "./dataAnalystContext.js";
 import { detectDataSchema } from "./detectDataSchema.js";
@@ -16,6 +17,12 @@ export type DataAnalystFlowResult =
       summary: string;
       warnings: string[];
       applyPatches: Array<{ filePath: string; fullContent: string }>;
+      fileDiffs: Array<{
+        filePath: string;
+        addedLines: number;
+        removedLines: number;
+        diff: DiffLine[];
+      }>;
       preview: string;
     }
   | {
@@ -166,6 +173,7 @@ export async function runDataAnalystFlow(input: {
   }
 
   const applyPatches = buildApplyPatches(parsed);
+  const originalContentByPath = new Map(existingSqlContents.map((file) => [file.path, file.content] as const));
   const preview = buildPreview(parsed, schema.dialect, schema.migrationFormat);
   const confidence =
     typeof parsed["confidence"] === "number" ? parsed["confidence"] : 50;
@@ -206,6 +214,16 @@ export async function runDataAnalystFlow(input: {
     schema.dialect === "unknown"
       ? ["Schema dialect could not be confidently detected; review SQL carefully."]
       : [];
+  const fileDiffs = applyPatches.map((patch) => {
+    const originalContent = originalContentByPath.get(patch.filePath) ?? "";
+    const diff = computeFileDiff(originalContent, patch.fullContent);
+    return {
+      filePath: patch.filePath,
+      addedLines: diff.filter((line) => line.type === "added").length,
+      removedLines: diff.filter((line) => line.type === "removed").length,
+      diff,
+    };
+  });
 
   input.onProgress?.("Ready");
   return {
@@ -216,6 +234,7 @@ export async function runDataAnalystFlow(input: {
     summary,
     warnings: [...detectionWarnings, ...warnings, ...validationWarnings],
     applyPatches,
+    fileDiffs,
     preview,
   };
 }
