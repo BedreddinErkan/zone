@@ -314,7 +314,7 @@ async function runLoginFlow(): Promise<number> {
       }
 
       const loginUrl = `https://zonecli.dev/cli-auth?port=${address.port}`;
-      console.log(tone("⚡ Zone", c.bold, c.orange) + tone(" v0.1.0", c.dim, c.gray));
+      console.log(tone("⚡ Zone", c.bold, c.orange) + tone(" v1.1.9", c.dim, c.gray));
       console.log(`${zonePrefix()} ${tone("Waiting for CLI login confirmation...", c.cyan)}`);
       console.log(`${zonePrefix()} Opened browser to ${loginUrl}`);
       openUrlInBrowser(loginUrl);
@@ -366,7 +366,7 @@ function formatApplyLog(
 
 function printHeader(): void {
   console.log(
-    tone("⚡ Zone", c.bold, c.orange) + tone(" v0.1.0", c.dim, c.gray)
+    tone("⚡ Zone", c.bold, c.orange) + tone(" v1.1.9", c.dim, c.gray)
   );
   console.log(
     tone("AI Code Agent — deterministic, explainable, safe", c.dim, c.gray)
@@ -1273,7 +1273,7 @@ export async function run(): Promise<void> {
       subcommandHandled = true;
       const port = Number.parseInt(options.port, 10);
       console.log(
-        tone("⚡ Zone", c.bold, c.orange) + tone(" v0.1.0", c.dim, c.gray)
+        tone("⚡ Zone", c.bold, c.orange) + tone(" v1.1.9", c.dim, c.gray)
       );
       console.log(tone(`Starting web UI on http://localhost:${port}`, c.cyan));
 
