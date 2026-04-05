@@ -72,7 +72,9 @@ async function logRun(input: RunLogInput): Promise<void> {
     credits_used: input.creditsUsed,
   });
 
-  const profilesTable = supabase.from("profiles") as unknown as {
+  let fallbackCreditsToDeduct = input.creditsUsed;
+
+  const profilesRead = supabase.from("profiles") as unknown as {
     select?: (
       columns: string
     ) => {
@@ -87,12 +89,14 @@ async function logRun(input: RunLogInput): Promise<void> {
         }>;
       };
     };
+  };
+  const profilesWrite = supabase.from("profiles") as unknown as {
     update?: (values: Record<string, unknown>) => {
       eq?: (column: string, value: string) => Promise<unknown> | unknown;
     };
   };
 
-  const profileQuery = profilesTable
+  const profileQuery = profilesRead
     .select?.("credits,total_runs,subscription_status")
     ?.eq?.("id", effectiveUserId);
 
@@ -100,7 +104,7 @@ async function logRun(input: RunLogInput): Promise<void> {
     effectiveUserId &&
     profileQuery &&
     typeof profileQuery.maybeSingle === "function" &&
-    typeof profilesTable.update === "function"
+    typeof profilesWrite.update === "function"
   ) {
     try {
       const { data, error } = await profileQuery.maybeSingle();
@@ -118,12 +122,15 @@ async function logRun(input: RunLogInput): Promise<void> {
         const nextCredits = paidAccess
           ? currentCredits
           : Math.max(0, currentCredits - 1);
+        fallbackCreditsToDeduct = paidAccess ? 0 : 1;
 
-        await profilesTable.update({
+        await profilesWrite
+          .update({
           credits: nextCredits,
           total_runs: currentRuns + 1,
           updated_at: new Date().toISOString(),
-        }).eq?.("id", effectiveUserId);
+          })
+          .eq?.("id", effectiveUserId);
 
         return;
       }
@@ -134,7 +141,7 @@ async function logRun(input: RunLogInput): Promise<void> {
 
   await supabase.rpc("deduct_credits_and_increment_runs", {
     p_user_id: effectiveUserId,
-    p_credits: input.creditsUsed,
+    p_credits: fallbackCreditsToDeduct,
   });
 }
 
