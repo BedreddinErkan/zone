@@ -1,6 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.validateDeveloperOutput = validateDeveloperOutput;
+exports.isVagueDeveloperTask = isVagueDeveloperTask;
+exports.filterVisibleDeveloperWarnings = filterVisibleDeveloperWarnings;
+exports.calculateDeveloperConfidence = calculateDeveloperConfidence;
 exports.normalizeLineForMatch = normalizeLineForMatch;
 exports.scoreLineSimilarity = scoreLineSimilarity;
 exports.scoreOrderedSimilarity = scoreOrderedSimilarity;
@@ -49,6 +52,43 @@ const CRITICAL_UI_ANCHORS = [
     "reset",
     "patch preview",
 ];
+const DEVELOPER_VAGUE_TASK_WARNING = "[VAGUE_TASK] Task is too vague to generate a reliable patch. Please describe the specific file, function, and change needed.";
+const DEVELOPER_GENERIC_TASK_PHRASES = new Set([
+    "fix",
+    "bug",
+    "issue",
+    "problem",
+    "update",
+    "change",
+    "refactor",
+    "improve",
+]);
+const DEVELOPER_GENERIC_TASK_TOKENS = new Set([
+    "fix",
+    "bug",
+    "issue",
+    "problem",
+    "update",
+    "change",
+    "refactor",
+    "improve",
+]);
+const DEVELOPER_TASK_STOPWORDS = new Set([
+    "a",
+    "an",
+    "the",
+    "for",
+    "to",
+    "of",
+    "on",
+    "in",
+    "with",
+    "and",
+    "or",
+    "this",
+    "that",
+    "please",
+]);
 function isUiFilePath(filePath) {
     const normalized = filePath.toLowerCase();
     return (normalized.endsWith(".html") ||
@@ -241,6 +281,65 @@ function validateDeveloperOutput(input) {
         warnings,
         confidencePenalty: Math.min(confidencePenalty, 100),
     };
+}
+function isVagueDeveloperTask(task) {
+    const normalizedTask = task.trim().toLowerCase().replace(/\s+/g, " ");
+    const words = normalizedTask.split(/\s+/).filter(Boolean);
+    if (DEVELOPER_GENERIC_TASK_PHRASES.has(normalizedTask))
+        return true;
+    const tokens = normalizedTask
+        .split(/[^a-z0-9]+/i)
+        .map((token) => token.trim())
+        .filter(Boolean);
+    if (tokens.length > 0 &&
+        tokens.every((token) => DEVELOPER_GENERIC_TASK_TOKENS.has(token) ||
+            DEVELOPER_TASK_STOPWORDS.has(token))) {
+        return true;
+    }
+    const hasSpecificTarget = tokens.some((token) => token.length >= 3 &&
+        !DEVELOPER_GENERIC_TASK_TOKENS.has(token) &&
+        !DEVELOPER_TASK_STOPWORDS.has(token));
+    if (words.length < 4 && !hasSpecificTarget) {
+        return true;
+    }
+    return !hasSpecificTarget;
+}
+function isHiddenDeveloperWarning(warning) {
+    return (warning.startsWith("[DEVELOPER_EMPTY_CATCH]") ||
+        warning.startsWith("[DEVELOPER_FILLER_PATCH]") ||
+        warning.startsWith("[DEVELOPER_MASS_CHANGE]"));
+}
+function filterVisibleDeveloperWarnings(warnings) {
+    return warnings.filter((warning) => !isHiddenDeveloperWarning(warning));
+}
+function hasDeveloperWarning(warnings, code) {
+    return warnings.some((warning) => warning.startsWith(code));
+}
+function calculateDeveloperConfidence(input) {
+    let totalPenalty = 0;
+    if (hasDeveloperWarning(input.warnings, "[DEVELOPER_MASS_CHANGE]")) {
+        totalPenalty += 10;
+    }
+    if (hasDeveloperWarning(input.warnings, "[DEVELOPER_EMPTY_CATCH]")) {
+        totalPenalty += 10;
+    }
+    if (hasDeveloperWarning(input.warnings, "[DEVELOPER_FILLER_PATCH]")) {
+        totalPenalty += 15;
+    }
+    for (const metric of input.changedFileMetrics) {
+        if (metric.totalLines > 200 &&
+            metric.changedLines / Math.max(metric.totalLines, 1) > 0.4) {
+            totalPenalty += 10;
+        }
+    }
+    if (input.changedFileCount > 2) {
+        totalPenalty += (input.changedFileCount - 2) * 5;
+    }
+    let confidence = Math.max(0, Math.min(input.baseConfidence ?? 95, 95 - totalPenalty));
+    if (input.vagueTask) {
+        confidence = Math.min(confidence, 60);
+    }
+    return confidence;
 }
 function normalizeLineForMatch(line) {
     return line.replace(/\t/g, "  ").replace(/\s+/g, " ").trim();
@@ -870,18 +969,34 @@ async function runLlmPatchFlow(input) {
         const reason = err instanceof Error ? err.message : String(err);
         return { ok: false, reason };
     }
+    const vagueTask = isVagueDeveloperTask(input.task);
+    if (vagueTask) {
+        return {
+            ok: true,
+            patchPreview: DEVELOPER_VAGUE_TASK_WARNING,
+            warnings: [DEVELOPER_VAGUE_TASK_WARNING],
+            developerConfidence: 60,
+            decisionMode: "preview_only",
+            applyPatches: [],
+            patchResults: [],
+            fileDiffs: [],
+            originalContents: {},
+            contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
+        };
+    }
     // 6b. Generate full file content for modify/create patches
     let applyPatches = [];
     const originalContents = {};
-    const combinedWarnings = [...patchPlan.warnings];
+    const internalWarnings = [...patchPlan.warnings];
+    const visibleWarnings = filterVisibleDeveloperWarnings(patchPlan.warnings);
     const patchResults = [];
-    let developerConfidence = 85;
     try {
         const applyTargets = patchPlan.patches.filter((p) => p.operation === "modify" || p.operation === "create");
         const applyResults = [];
         for (const patch of applyTargets) {
             if (patch.path.startsWith("src/ui/") || patch.path === "src/ui/index.html") {
-                combinedWarnings.push("[PROTECTED_FILE] src/ui/ files cannot be modified by Zone developer mode");
+                internalWarnings.push("[PROTECTED_FILE] src/ui/ files cannot be modified by Zone developer mode");
+                visibleWarnings.push("[PROTECTED_FILE] src/ui/ files cannot be modified by Zone developer mode");
                 patchResults.push({
                     filePath: patch.path,
                     status: "skipped",
@@ -933,11 +1048,6 @@ async function runLlmPatchFlow(input) {
                         .map((file) => ({ path: file.path })),
                 ]
                 : fileContexts;
-            console.log("[zone:patch-debug] planFullPatch input:", {
-                path: patch.path,
-                fileContentLength: fileContent.length,
-                mode: fullPatchMode,
-            });
             const fullPatch = await (0, planFullPatch_js_1.planFullPatchWithLlm)({
                 task: input.task,
                 filePath: patch.path,
@@ -953,23 +1063,28 @@ async function runLlmPatchFlow(input) {
                         : "",
                     patch.summary,
                     pageObjectContext,
+                    "IMPORTANT: Do NOT remove or rewrite existing functions, classes, or methods unless the task explicitly asks you to. Only add or modify what is necessary. Preserve all existing code structure, comments, and patterns.",
                 ]
                     .filter(Boolean)
                     .join("\n\n"),
             });
             const nextContent = fullPatch.mode === "patch"
                 ? (() => {
-                    console.log("[zone:patch-debug] raw patchText:", fullPatch.patchText);
                     const appliedPatch = applyDeveloperPatchText(fileContent, fullPatch.patchText);
                     if (!appliedPatch.ok) {
-                        combinedWarnings.push(appliedPatch.warning);
+                        internalWarnings.push(appliedPatch.warning);
+                        if (!isHiddenDeveloperWarning(appliedPatch.warning)) {
+                            visibleWarnings.push(appliedPatch.warning);
+                        }
                         const failure = parsePatchFailureWarning(appliedPatch.warning);
-                        combinedWarnings.push(buildPatchConflictWarning({
+                        const patchConflictWarning = buildPatchConflictWarning({
                             filePath: patch.path,
                             reason: failure.reason,
                             score: failure.score,
                             bestMatch: failure.bestMatch,
-                        }));
+                        });
+                        internalWarnings.push(patchConflictWarning);
+                        visibleWarnings.push(patchConflictWarning);
                         patchResults.push({
                             filePath: patch.path,
                             status: "failed",
@@ -990,11 +1105,14 @@ async function runLlmPatchFlow(input) {
                 nextContent,
             });
             if (suspiciousUiOverwrite) {
-                combinedWarnings.push(suspiciousUiOverwrite);
-                combinedWarnings.push(buildPatchConflictWarning({
+                internalWarnings.push(suspiciousUiOverwrite);
+                visibleWarnings.push(suspiciousUiOverwrite);
+                const patchConflictWarning = buildPatchConflictWarning({
                     filePath: patch.path,
                     reason: "ui_overwrite_guard",
-                }));
+                });
+                internalWarnings.push(patchConflictWarning);
+                visibleWarnings.push(patchConflictWarning);
                 patchResults.push({
                     filePath: patch.path,
                     status: "failed",
@@ -1009,7 +1127,8 @@ async function runLlmPatchFlow(input) {
                 originalContent: fileContent,
             });
             if (validation.warnings.length > 0) {
-                combinedWarnings.push(...validation.warnings);
+                internalWarnings.push(...validation.warnings);
+                visibleWarnings.push(...filterVisibleDeveloperWarnings(validation.warnings));
             }
             if (validation.blocked) {
                 patchResults.push({
@@ -1018,9 +1137,6 @@ async function runLlmPatchFlow(input) {
                     reason: "developer_validation_blocked",
                 });
                 continue;
-            }
-            if (validation.confidencePenalty > 0) {
-                developerConfidence = Math.max(0, developerConfidence - validation.confidencePenalty);
             }
             applyResults.push({
                 filePath: fullPatch.filePath,
@@ -1040,6 +1156,19 @@ async function runLlmPatchFlow(input) {
     if (input.atomicPatch && patchResults.some((result) => result.status === "failed")) {
         return { ok: false, reason: "atomic_patch_failed" };
     }
+    const changedFileMetrics = applyPatches.map((patch) => {
+        const before = originalContents[patch.filePath] ?? "";
+        return {
+            totalLines: countTotalLines(before || patch.fullContent),
+            changedLines: countChangedLines(before, patch.fullContent),
+        };
+    });
+    const developerConfidence = calculateDeveloperConfidence({
+        warnings: internalWarnings,
+        changedFileCount: applyPatches.length,
+        changedFileMetrics,
+        vagueTask,
+    });
     const fileDiffs = applyPatches.map((patch) => {
         const before = originalContents[patch.filePath] ?? "";
         const diff = computeFileDiff(before, patch.fullContent);
@@ -1052,6 +1181,7 @@ async function runLlmPatchFlow(input) {
             removedLines: diff.filter((line) => line.type === "removed").length,
         };
     });
+    const decisionMode = vagueTask || developerConfidence < 70 ? "preview_only" : "safe_to_apply";
     // 7. Build patchPreview string
     const patchPreview = [
         "=== LLM PATCH PREVIEW ===",
@@ -1063,19 +1193,20 @@ async function runLlmPatchFlow(input) {
             ? [
                 "",
                 "=== PATCH RESULTS ===",
-                ...patchResults.map((result) => renderPatchResultLine(result, combinedWarnings)),
+                ...patchResults.map((result) => renderPatchResultLine(result, internalWarnings)),
             ]
             : []),
-        ...(combinedWarnings.length > 0
-            ? ["", "Warnings:", ...combinedWarnings.map((w) => `- ${w}`)]
+        ...(visibleWarnings.length > 0
+            ? ["", "Warnings:", ...visibleWarnings.map((w) => `- ${w}`)]
             : []),
     ].join("\n");
     // 8. Return
     return {
         ok: true,
         patchPreview,
-        warnings: combinedWarnings,
+        warnings: visibleWarnings,
         developerConfidence,
+        decisionMode,
         applyPatches,
         patchResults,
         fileDiffs,

@@ -13,6 +13,7 @@ export type LlmPatchFlowResult =
       patchPreview: string;
       warnings: string[];
       developerConfidence?: number;
+      decisionMode?: "preview_only" | "safe_to_apply";
       applyPatches: Array<{ filePath: string; fullContent: string }>;
       patchResults: PatchResult[];
       fileDiffs?: FileDiff[];
@@ -77,6 +78,48 @@ const CRITICAL_UI_ANCHORS = [
   "reset",
   "patch preview",
 ];
+
+const DEVELOPER_VAGUE_TASK_WARNING =
+  "[VAGUE_TASK] Task is too vague to generate a reliable patch. Please describe the specific file, function, and change needed.";
+
+const DEVELOPER_GENERIC_TASK_PHRASES = new Set([
+  "fix",
+  "bug",
+  "issue",
+  "problem",
+  "update",
+  "change",
+  "refactor",
+  "improve",
+]);
+
+const DEVELOPER_GENERIC_TASK_TOKENS = new Set([
+  "fix",
+  "bug",
+  "issue",
+  "problem",
+  "update",
+  "change",
+  "refactor",
+  "improve",
+]);
+
+const DEVELOPER_TASK_STOPWORDS = new Set([
+  "a",
+  "an",
+  "the",
+  "for",
+  "to",
+  "of",
+  "on",
+  "in",
+  "with",
+  "and",
+  "or",
+  "this",
+  "that",
+  "please",
+]);
 
 function isUiFilePath(filePath: string): boolean {
   const normalized = filePath.toLowerCase();
@@ -339,6 +382,107 @@ export function validateDeveloperOutput(input: {
     warnings,
     confidencePenalty: Math.min(confidencePenalty, 100),
   };
+}
+
+export function isVagueDeveloperTask(task: string): boolean {
+  const normalizedTask = task.trim().toLowerCase().replace(/\s+/g, " ");
+  const words = normalizedTask.split(/\s+/).filter(Boolean);
+  if (DEVELOPER_GENERIC_TASK_PHRASES.has(normalizedTask)) return true;
+
+  const tokens = normalizedTask
+    .split(/[^a-z0-9]+/i)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  if (
+    tokens.length > 0 &&
+    tokens.every(
+      (token) =>
+        DEVELOPER_GENERIC_TASK_TOKENS.has(token) ||
+        DEVELOPER_TASK_STOPWORDS.has(token)
+    )
+  ) {
+    return true;
+  }
+
+  const hasSpecificTarget = tokens.some(
+    (token) =>
+      token.length >= 3 &&
+      !DEVELOPER_GENERIC_TASK_TOKENS.has(token) &&
+      !DEVELOPER_TASK_STOPWORDS.has(token)
+  );
+
+  if (words.length < 4 && !hasSpecificTarget) {
+    return true;
+  }
+
+  return !hasSpecificTarget;
+}
+
+function isHiddenDeveloperWarning(warning: string): boolean {
+  return (
+    warning.startsWith("[DEVELOPER_EMPTY_CATCH]") ||
+    warning.startsWith("[DEVELOPER_FILLER_PATCH]") ||
+    warning.startsWith("[DEVELOPER_MASS_CHANGE]")
+  );
+}
+
+export function filterVisibleDeveloperWarnings(warnings: string[]): string[] {
+  return warnings.filter((warning) => !isHiddenDeveloperWarning(warning));
+}
+
+function hasDeveloperWarning(
+  warnings: string[],
+  code:
+    | "[DEVELOPER_EMPTY_CATCH]"
+    | "[DEVELOPER_FILLER_PATCH]"
+    | "[DEVELOPER_MASS_CHANGE]"
+): boolean {
+  return warnings.some((warning) => warning.startsWith(code));
+}
+
+export function calculateDeveloperConfidence(input: {
+  baseConfidence?: number;
+  warnings: string[];
+  changedFileCount: number;
+  changedFileMetrics: Array<{ totalLines: number; changedLines: number }>;
+  vagueTask: boolean;
+}): number {
+  let totalPenalty = 0;
+
+  if (hasDeveloperWarning(input.warnings, "[DEVELOPER_MASS_CHANGE]")) {
+    totalPenalty += 10;
+  }
+  if (hasDeveloperWarning(input.warnings, "[DEVELOPER_EMPTY_CATCH]")) {
+    totalPenalty += 10;
+  }
+  if (hasDeveloperWarning(input.warnings, "[DEVELOPER_FILLER_PATCH]")) {
+    totalPenalty += 15;
+  }
+
+  for (const metric of input.changedFileMetrics) {
+    if (
+      metric.totalLines > 200 &&
+      metric.changedLines / Math.max(metric.totalLines, 1) > 0.4
+    ) {
+      totalPenalty += 10;
+    }
+  }
+
+  if (input.changedFileCount > 2) {
+    totalPenalty += (input.changedFileCount - 2) * 5;
+  }
+
+  let confidence = Math.max(
+    0,
+    Math.min(input.baseConfidence ?? 95, 95 - totalPenalty)
+  );
+
+  if (input.vagueTask) {
+    confidence = Math.min(confidence, 60);
+  }
+
+  return confidence;
 }
 
 export function normalizeLineForMatch(line: string): string {
@@ -1225,12 +1369,28 @@ export async function runLlmPatchFlow(input: {
     return { ok: false, reason };
   }
 
+  const vagueTask = isVagueDeveloperTask(input.task);
+  if (vagueTask) {
+    return {
+      ok: true,
+      patchPreview: DEVELOPER_VAGUE_TASK_WARNING,
+      warnings: [DEVELOPER_VAGUE_TASK_WARNING],
+      developerConfidence: 60,
+      decisionMode: "preview_only",
+      applyPatches: [],
+      patchResults: [],
+      fileDiffs: [],
+      originalContents: {},
+      contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
+    };
+  }
+
   // 6b. Generate full file content for modify/create patches
   let applyPatches: Array<{ filePath: string; fullContent: string }> = [];
   const originalContents: Record<string, string> = {};
-  const combinedWarnings = [...patchPlan.warnings];
+  const internalWarnings = [...patchPlan.warnings];
+  const visibleWarnings = filterVisibleDeveloperWarnings(patchPlan.warnings);
   const patchResults: PatchResult[] = [];
-  let developerConfidence = 85;
   try {
     const applyTargets = patchPlan.patches.filter(
       (p) => p.operation === "modify" || p.operation === "create"
@@ -1239,7 +1399,10 @@ export async function runLlmPatchFlow(input: {
 
     for (const patch of applyTargets) {
       if (patch.path.startsWith("src/ui/") || patch.path === "src/ui/index.html") {
-        combinedWarnings.push(
+        internalWarnings.push(
+          "[PROTECTED_FILE] src/ui/ files cannot be modified by Zone developer mode"
+        );
+        visibleWarnings.push(
           "[PROTECTED_FILE] src/ui/ files cannot be modified by Zone developer mode"
         );
         patchResults.push({
@@ -1308,12 +1471,6 @@ export async function runLlmPatchFlow(input: {
           ]
         : fileContexts;
 
-      console.log("[zone:patch-debug] planFullPatch input:", {
-        path: patch.path,
-        fileContentLength: fileContent.length,
-        mode: fullPatchMode,
-      });
-
       const fullPatch = await planFullPatchWithLlm({
         task: input.task,
         filePath: patch.path,
@@ -1329,6 +1486,7 @@ export async function runLlmPatchFlow(input: {
             : "",
           patch.summary,
           pageObjectContext,
+          "IMPORTANT: Do NOT remove or rewrite existing functions, classes, or methods unless the task explicitly asks you to. Only add or modify what is necessary. Preserve all existing code structure, comments, and patterns.",
         ]
           .filter(Boolean)
           .join("\n\n"),
@@ -1336,22 +1494,24 @@ export async function runLlmPatchFlow(input: {
       const nextContent =
         fullPatch.mode === "patch"
           ? (() => {
-              console.log("[zone:patch-debug] raw patchText:", fullPatch.patchText);
               const appliedPatch = applyDeveloperPatchText(
                 fileContent,
                 fullPatch.patchText
               );
               if (!appliedPatch.ok) {
-                combinedWarnings.push(appliedPatch.warning);
+                internalWarnings.push(appliedPatch.warning);
+                if (!isHiddenDeveloperWarning(appliedPatch.warning)) {
+                  visibleWarnings.push(appliedPatch.warning);
+                }
                 const failure = parsePatchFailureWarning(appliedPatch.warning);
-                combinedWarnings.push(
-                  buildPatchConflictWarning({
-                    filePath: patch.path,
-                    reason: failure.reason,
-                    score: failure.score,
-                    bestMatch: failure.bestMatch,
-                  })
-                );
+                const patchConflictWarning = buildPatchConflictWarning({
+                  filePath: patch.path,
+                  reason: failure.reason,
+                  score: failure.score,
+                  bestMatch: failure.bestMatch,
+                });
+                internalWarnings.push(patchConflictWarning);
+                visibleWarnings.push(patchConflictWarning);
                 patchResults.push({
                   filePath: patch.path,
                   status: "failed",
@@ -1375,13 +1535,14 @@ export async function runLlmPatchFlow(input: {
       });
 
       if (suspiciousUiOverwrite) {
-        combinedWarnings.push(suspiciousUiOverwrite);
-        combinedWarnings.push(
-          buildPatchConflictWarning({
-            filePath: patch.path,
-            reason: "ui_overwrite_guard",
-          })
-        );
+        internalWarnings.push(suspiciousUiOverwrite);
+        visibleWarnings.push(suspiciousUiOverwrite);
+        const patchConflictWarning = buildPatchConflictWarning({
+          filePath: patch.path,
+          reason: "ui_overwrite_guard",
+        });
+        internalWarnings.push(patchConflictWarning);
+        visibleWarnings.push(patchConflictWarning);
         patchResults.push({
           filePath: patch.path,
           status: "failed",
@@ -1398,7 +1559,10 @@ export async function runLlmPatchFlow(input: {
       });
 
       if (validation.warnings.length > 0) {
-        combinedWarnings.push(...validation.warnings);
+        internalWarnings.push(...validation.warnings);
+        visibleWarnings.push(
+          ...filterVisibleDeveloperWarnings(validation.warnings)
+        );
       }
 
       if (validation.blocked) {
@@ -1408,13 +1572,6 @@ export async function runLlmPatchFlow(input: {
           reason: "developer_validation_blocked",
         });
         continue;
-      }
-
-      if (validation.confidencePenalty > 0) {
-        developerConfidence = Math.max(
-          0,
-          developerConfidence - validation.confidencePenalty
-        );
       }
 
       applyResults.push({
@@ -1437,6 +1594,21 @@ export async function runLlmPatchFlow(input: {
     return { ok: false, reason: "atomic_patch_failed" };
   }
 
+  const changedFileMetrics = applyPatches.map((patch) => {
+    const before = originalContents[patch.filePath] ?? "";
+    return {
+      totalLines: countTotalLines(before || patch.fullContent),
+      changedLines: countChangedLines(before, patch.fullContent),
+    };
+  });
+
+  const developerConfidence = calculateDeveloperConfidence({
+    warnings: internalWarnings,
+    changedFileCount: applyPatches.length,
+    changedFileMetrics,
+    vagueTask,
+  });
+
   const fileDiffs = applyPatches.map((patch) => {
     const before = originalContents[patch.filePath] ?? "";
     const diff = computeFileDiff(before, patch.fullContent);
@@ -1449,6 +1621,9 @@ export async function runLlmPatchFlow(input: {
       removedLines: diff.filter((line) => line.type === "removed").length,
     };
   });
+
+  const decisionMode =
+    vagueTask || developerConfidence < 70 ? "preview_only" : "safe_to_apply";
 
   // 7. Build patchPreview string
   const patchPreview = [
@@ -1465,12 +1640,12 @@ export async function runLlmPatchFlow(input: {
           "",
           "=== PATCH RESULTS ===",
           ...patchResults.map((result) =>
-            renderPatchResultLine(result, combinedWarnings)
+            renderPatchResultLine(result, internalWarnings)
           ),
         ]
       : []),
-    ...(combinedWarnings.length > 0
-      ? ["", "Warnings:", ...combinedWarnings.map((w) => `- ${w}`)]
+    ...(visibleWarnings.length > 0
+      ? ["", "Warnings:", ...visibleWarnings.map((w) => `- ${w}`)]
       : []),
   ].join("\n");
 
@@ -1478,8 +1653,9 @@ export async function runLlmPatchFlow(input: {
   return {
     ok: true,
     patchPreview,
-    warnings: combinedWarnings,
+    warnings: visibleWarnings,
     developerConfidence,
+    decisionMode,
     applyPatches,
     patchResults,
     fileDiffs,

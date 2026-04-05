@@ -673,8 +673,19 @@ function showPatch(data){
   currentRunState.hasPatchResult=patches.length>0;
   currentRunState.validationBlocked=validationBlocked||currentRunState.decisionMode==='blocked';
   // Developer confidence override
-  if(typeof data.developerConfidence==='number'){currentRunState.confidence=data.developerConfidence;}
-  const patchResults=data.patchResults||[];
+// Developer confidence override
+if(typeof data.developerConfidence==='number'){
+  currentRunState.confidence=data.developerConfidence;
+  document.getElementById('confVal').textContent=String(data.developerConfidence);
+}
+if(data.decisionMode&&currentRole==='developer'){
+  currentRunState.decisionMode=data.decisionMode;
+  const cls=data.decisionMode==='blocked'?'blocked':data.decisionMode==='preview_only'?'preview':'safe';
+  const dot=data.decisionMode==='blocked'?'#f44747':data.decisionMode==='preview_only'?'#ce9178':'#4ec9b0';
+  document.getElementById('decisionBadge').className='decision-badge '+cls;
+  document.getElementById('bdot').style.background=dot;
+  document.getElementById('badgeText').textContent=data.decisionMode.replace(/_/g,' ');
+}  const patchResults=data.patchResults||[];
   let patchResultsHtml='';
   if(patchResults.length>0){
     const rows=patchResults.map(r=>{const icon=r.status==='applied'?'✓':r.status==='failed'?'✗':'~';const cls=r.status==='applied'?'ok':r.status==='failed'?'fail':'skip';const reason=r.reason?` (${escapeHtml(r.reason)})`:'';return `<div class="pr-row"><span class="pr-icon ${cls}">${icon}</span><span class="pr-path">${escapeHtml(r.filePath||'')}</span><span class="pr-reason">${escapeHtml(r.status)}${reason}</span></div>`;}).join('');
