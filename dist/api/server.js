@@ -9,6 +9,7 @@ require("dotenv/config");
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const body_parser_1 = __importDefault(require("body-parser"));
+const supabase_js_1 = require("@supabase/supabase-js");
 const runAgent_js_1 = require("../core/runAgent.js");
 const runLlmPatchFlow_js_1 = require("../core/runLlmPatchFlow.js");
 const applyLlmPatches_js_1 = require("../core/applyLlmPatches.js");
@@ -31,6 +32,43 @@ const ENHANCE_TASK_SYSTEM_PROMPT = "You are a task optimizer for an AI code agen
 exports.app.use((0, cors_1.default)());
 exports.app.use(body_parser_1.default.json());
 exports.app.use(body_parser_1.default.urlencoded({ extended: true }));
+function getSupabaseClient() {
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key)
+        return null;
+    return (0, supabase_js_1.createClient)(url, key);
+}
+async function logRun(input) {
+    const supabase = getSupabaseClient();
+    if (!supabase)
+        return;
+    await supabase.from("run_logs").insert({
+        user_id: input.userId,
+        role: input.role,
+        task: input.task,
+        repo_path: input.repoPath,
+        decision: input.decisionMode,
+        confidence: input.confidence,
+        credits_used: input.creditsUsed,
+    });
+    await supabase.rpc("deduct_credits_and_increment_runs", {
+        p_user_id: input.userId,
+        p_credits: input.creditsUsed,
+    });
+}
+function queueRunLog(input) {
+    if (!process.env.ZONE_USER_ID)
+        return;
+    void logRun(input).catch(() => undefined);
+}
+function getDecisionModeFromResult(result, confidence) {
+    const decisionMode = result["decisionMode"];
+    if (typeof decisionMode === "string" && decisionMode.length > 0) {
+        return decisionMode;
+    }
+    return confidence < 70 ? "preview_only" : "safe_to_apply";
+}
 function emitProgress(runId, stage) {
     if (!runId)
         return;
@@ -125,6 +163,18 @@ exports.app.post("/api/patch", async (req, res) => {
     const { task, repoPath } = req.body;
     const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({ task, repoPath });
     res.json(result);
+    if (result.ok) {
+        const confidence = typeof result.developerConfidence === "number" ? result.developerConfidence : 0;
+        queueRunLog({
+            userId: process.env.ZONE_USER_ID ?? "",
+            role: "developer",
+            task,
+            repoPath,
+            decisionMode: result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
+            confidence,
+            creditsUsed: 0.1,
+        });
+    }
 });
 exports.app.post("/api/dry-run", async (req, res) => {
     const { task, repoPath } = req.body;
@@ -180,6 +230,17 @@ exports.app.post("/api/test-engineer", async (req, res) => {
             onProgress: (stage) => emitProgress(runId, stage),
         });
         res.json(result);
+        if (result.ok) {
+            queueRunLog({
+                userId: process.env.ZONE_USER_ID ?? "",
+                role: "test_engineer",
+                task,
+                repoPath,
+                decisionMode: getDecisionModeFromResult(result, result.confidence),
+                confidence: result.confidence,
+                creditsUsed: 0.08,
+            });
+        }
     }
     catch (err) {
         emitProgress(runId, "Ready");
@@ -202,6 +263,17 @@ exports.app.post("/api/data-analyst", async (req, res) => {
             onProgress: (stage) => emitProgress(runId, stage),
         });
         res.json(result);
+        if (result.ok) {
+            queueRunLog({
+                userId: process.env.ZONE_USER_ID ?? "",
+                role: "data_analyst",
+                task,
+                repoPath,
+                decisionMode: getDecisionModeFromResult(result, result.confidence),
+                confidence: result.confidence,
+                creditsUsed: 0.06,
+            });
+        }
     }
     catch (err) {
         emitProgress(runId, "Ready");

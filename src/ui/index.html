@@ -156,17 +156,9 @@ input:focus,textarea:focus{border-color:#007acc}
 <div id="leftCol">
 
 <div class="section">
-  <div class="label">AI Prompt</div>
-  <div class="prompt-box">
-    You are a code agent. Analyze the repo and apply the task safely. Follow existing patterns, preserve architecture, and explain your reasoning.
-    <button class="copy-btn" onclick="copyPrompt()">copy</button>
-  </div>
-</div>
-
-<div class="section">
   <div class="label">Role</div>
   <div class="role-row">
-    <button class="role-btn active" data-role="developer" onclick="selectRole(this)">⚡ Developer</button>
+<button class="role-btn active" data-role="developer" onclick="selectRole(this)">⚡ Developer <span style="font-size:10px;background:#1a2a3a;border:1px solid #007acc;border-radius:4px;padding:1px 5px;margin-left:4px;color:#007acc">beta</span></button>
     <button class="role-btn" data-role="test_engineer" onclick="selectRole(this)">🧪 Test Engineer</button>
     <button class="role-btn" data-role="data_analyst" onclick="selectRole(this)">📊 Data Analyst</button>
   </div>

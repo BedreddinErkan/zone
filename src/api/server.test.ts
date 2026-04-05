@@ -9,6 +9,15 @@ const runDataAnalystFlowMock = vi.fn();
 const scanRepoMock = vi.fn();
 const readProjectFilesMock = vi.fn();
 const responsesCreateMock = vi.fn();
+const supabaseInsertMock = vi.fn();
+const supabaseRpcMock = vi.fn();
+const supabaseFromMock = vi.fn(() => ({
+  insert: supabaseInsertMock,
+}));
+const createSupabaseClientMock = vi.fn(() => ({
+  from: supabaseFromMock,
+  rpc: supabaseRpcMock,
+}));
 const createOpenAIClientMock = vi.fn(() => ({
   responses: {
     create: responsesCreateMock,
@@ -49,6 +58,10 @@ vi.mock("../llm/openaiClient.js", () => ({
   getModelName: getModelNameMock,
 }));
 
+vi.mock("@supabase/supabase-js", () => ({
+  createClient: createSupabaseClientMock,
+}));
+
 describe("/api/test-engineer", () => {
   let server: Server;
   let baseUrl: string;
@@ -57,6 +70,9 @@ describe("/api/test-engineer", () => {
     vi.resetModules();
     vi.clearAllMocks();
     process.env.VITEST = "true";
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    delete process.env.ZONE_USER_ID;
     const { app } = await import("./server.js");
     server = createServer(app);
     await new Promise<void>((resolve) => {
@@ -221,6 +237,135 @@ describe("/api/test-engineer", () => {
     expect(body.patchResults).toEqual([
       { filePath: "src/foo.ts", status: "applied" },
     ]);
+  });
+
+  it("logs successful developer runs to Supabase when env is configured", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    process.env.ZONE_USER_ID = "clerk_user_123";
+    runLlmPatchFlowMock.mockResolvedValue({
+      ok: true,
+      patchPreview: "=== LLM PATCH PREVIEW ===",
+      warnings: [],
+      developerConfidence: 78,
+      decisionMode: "safe_to_apply",
+      applyPatches: [],
+      patchResults: [],
+    });
+    supabaseInsertMock.mockResolvedValue({ error: null });
+    supabaseRpcMock.mockResolvedValue({ error: null });
+
+    const response = await fetch(`${baseUrl}/api/patch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "fix login validation",
+        repoPath: "C:/repo",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => {
+      expect(createSupabaseClientMock).toHaveBeenCalledWith(
+        "https://example.supabase.co",
+        "service-role"
+      );
+      expect(supabaseFromMock).toHaveBeenCalledWith("run_logs");
+      expect(supabaseInsertMock).toHaveBeenCalledWith({
+        user_id: "clerk_user_123",
+        role: "developer",
+        task: "fix login validation",
+        repo_path: "C:/repo",
+        decision: "safe_to_apply",
+        confidence: 78,
+        credits_used: 0.1,
+      });
+      expect(supabaseRpcMock).toHaveBeenCalledWith(
+        "deduct_credits_and_increment_runs",
+        {
+          p_user_id: "clerk_user_123",
+          p_credits: 0.1,
+        }
+      );
+    });
+  });
+
+  it("skips Supabase logging silently when user env is missing", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    runTestEngineerFlowMock.mockResolvedValue({
+      ok: true,
+      framework: "playwright_ts",
+      language: "typescript",
+      confidence: 82,
+      summary: "Generated test",
+      warnings: [],
+      complexity: "single_scenario",
+      decisionMode: "safe_to_apply",
+      applyPatches: [],
+      preview: "preview",
+    });
+
+    const response = await fetch(`${baseUrl}/api/test-engineer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "add login test",
+        repoPath: "C:/repo",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(createSupabaseClientMock).not.toHaveBeenCalled();
+    expect(supabaseInsertMock).not.toHaveBeenCalled();
+  });
+
+  it("logs successful data analyst runs with derived decision mode", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    process.env.ZONE_USER_ID = "clerk_user_456";
+    runDataAnalystFlowMock.mockResolvedValue({
+      ok: true,
+      dialect: "postgresql",
+      migrationFormat: "flyway",
+      confidence: 62,
+      summary: "Adds report table",
+      warnings: [],
+      applyPatches: [],
+      fileDiffs: [],
+      preview: "preview",
+    });
+    supabaseInsertMock.mockResolvedValue({ error: null });
+    supabaseRpcMock.mockResolvedValue({ error: null });
+
+    const response = await fetch(`${baseUrl}/api/data-analyst`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "add reporting table",
+        repoPath: "C:/repo",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => {
+      expect(supabaseInsertMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          role: "data_analyst",
+          decision: "preview_only",
+          confidence: 62,
+          credits_used: 0.06,
+        })
+      );
+      expect(supabaseRpcMock).toHaveBeenCalledWith(
+        "deduct_credits_and_increment_runs",
+        {
+          p_user_id: "clerk_user_456",
+          p_credits: 0.06,
+        }
+      );
+    });
   });
 
   it("returns an enhanced task from /api/enhance-task", async () => {

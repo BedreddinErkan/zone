@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { runAgent } from "../core/runAgent.js";
 import { runLlmPatchFlow } from "../core/runLlmPatchFlow.js";
 import { applyLlmPatches } from "../core/applyLlmPatches.js";
@@ -25,9 +26,62 @@ const ENHANCE_TASK_SYSTEM_PROMPT =
   "- The framework/pattern already used in the repo\n" +
   "Keep it under 2 sentences. Return only the optimized task text, nothing else.";
 
+type RunLogInput = {
+  userId: string;
+  role: string;
+  task: string;
+  repoPath: string;
+  decisionMode: string;
+  confidence: number;
+  creditsUsed: number;
+};
+
 app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+
+function getSupabaseClient(): SupabaseClient | null {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key);
+}
+
+async function logRun(input: RunLogInput): Promise<void> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  await supabase.from("run_logs").insert({
+    user_id: input.userId,
+    role: input.role,
+    task: input.task,
+    repo_path: input.repoPath,
+    decision: input.decisionMode,
+    confidence: input.confidence,
+    credits_used: input.creditsUsed,
+  });
+
+  await supabase.rpc("deduct_credits_and_increment_runs", {
+    p_user_id: input.userId,
+    p_credits: input.creditsUsed,
+  });
+}
+
+function queueRunLog(input: RunLogInput): void {
+  if (!process.env.ZONE_USER_ID) return;
+  void logRun(input).catch(() => undefined);
+}
+
+function getDecisionModeFromResult(
+  result: Record<string, unknown>,
+  confidence: number
+): string {
+  const decisionMode = result["decisionMode"];
+  if (typeof decisionMode === "string" && decisionMode.length > 0) {
+    return decisionMode;
+  }
+  return confidence < 70 ? "preview_only" : "safe_to_apply";
+}
 
 function emitProgress(runId: string | undefined, stage: string): void {
   if (!runId) return;
@@ -147,6 +201,20 @@ app.post("/api/patch", async (req, res) => {
   const { task, repoPath } = req.body;
   const result = await runLlmPatchFlow({ task, repoPath });
   res.json(result);
+  if (result.ok) {
+    const confidence =
+      typeof result.developerConfidence === "number" ? result.developerConfidence : 0;
+    queueRunLog({
+      userId: process.env.ZONE_USER_ID ?? "",
+      role: "developer",
+      task,
+      repoPath,
+      decisionMode:
+        result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
+      confidence,
+      creditsUsed: 0.1,
+    });
+  }
 });
 
 app.post("/api/dry-run", async (req, res) => {
@@ -207,6 +275,20 @@ app.post("/api/test-engineer", async (req, res) => {
       onProgress: (stage) => emitProgress(runId, stage),
     });
     res.json(result);
+    if (result.ok) {
+      queueRunLog({
+        userId: process.env.ZONE_USER_ID ?? "",
+        role: "test_engineer",
+        task,
+        repoPath,
+        decisionMode: getDecisionModeFromResult(
+          result as unknown as Record<string, unknown>,
+          result.confidence
+        ),
+        confidence: result.confidence,
+        creditsUsed: 0.08,
+      });
+    }
   } catch (err) {
     emitProgress(runId, "Ready");
     res.status(500).json({
@@ -229,6 +311,20 @@ app.post("/api/data-analyst", async (req, res) => {
       onProgress: (stage) => emitProgress(runId, stage),
     });
     res.json(result);
+    if (result.ok) {
+      queueRunLog({
+        userId: process.env.ZONE_USER_ID ?? "",
+        role: "data_analyst",
+        task,
+        repoPath,
+        decisionMode: getDecisionModeFromResult(
+          result as unknown as Record<string, unknown>,
+          result.confidence
+        ),
+        confidence: result.confidence,
+        creditsUsed: 0.06,
+      });
+    }
   } catch (err) {
     emitProgress(runId, "Ready");
     res.status(500).json({
