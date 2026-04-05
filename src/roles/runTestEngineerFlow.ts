@@ -116,6 +116,145 @@ function buildPreview(
   return lines.join("\n");
 }
 
+function normalizeTestContent(content: string): string {
+  return content.replace(/\r\n/g, "\n");
+}
+
+function extractTestBlockSignature(block: string): string | null {
+  const signatureMatch = block.match(
+    /test(?:\.each\([\s\S]*?\))?\s*\(\s*(['"`])([^'"`]+)\1/
+  );
+  if (signatureMatch) {
+    return signatureMatch[2].trim();
+  }
+
+  const fallbackMatch = block.match(/^\s*test(?:\.each)?[^\n]*/m);
+  return fallbackMatch?.[0].trim() ?? null;
+}
+
+export function extractTestSignatures(content: string): string[] {
+  const normalized = normalizeTestContent(content);
+  const signatures = new Set<string>();
+  const signaturePattern =
+    /test(?:\.each\([\s\S]*?\))?\s*\(\s*(['"`])([^'"`]+)\1/g;
+
+  let match: RegExpExecArray | null;
+  while ((match = signaturePattern.exec(normalized)) !== null) {
+    signatures.add(match[2].trim());
+  }
+
+  return [...signatures];
+}
+
+function deduplicatePlaywrightImport(content: string): string {
+  let seen = false;
+  return content.replace(
+    /^\s*import\s*\{\s*test\s*,\s*expect\s*\}\s*from\s*['"]@playwright\/test['"];\s*$/gm,
+    (line) => {
+      if (seen) return "";
+      seen = true;
+      return line;
+    }
+  );
+}
+
+export function deduplicateTestBlocks(content: string): string {
+  const normalized = normalizeTestContent(content);
+  let nextContent = deduplicatePlaywrightImport(normalized);
+  const lines = normalized.trimEnd().split("\n");
+  if (lines.length % 2 === 0) {
+    const midpoint = lines.length / 2;
+    const firstHalf = lines.slice(0, midpoint).join("\n").trim();
+    const secondHalf = lines.slice(midpoint).join("\n").trim();
+    if (firstHalf && firstHalf === secondHalf) {
+      return firstHalf;
+    }
+  }
+
+  const blockStartPattern = /^\s*test(?:\.each)?/gm;
+  const starts = [...nextContent.matchAll(blockStartPattern)].map(
+    (match) => match.index ?? 0
+  );
+
+  if (starts.length === 0) {
+    return nextContent.replace(/\n{3,}/g, "\n\n").trimEnd();
+  }
+
+  const prefix = nextContent.slice(0, starts[0]);
+  const blocks = starts.map((start, index) =>
+    nextContent.slice(start, starts[index + 1] ?? nextContent.length)
+  );
+
+  const lastIndexBySignature = new Map<string, number>();
+  blocks.forEach((block, index) => {
+    const signature = extractTestBlockSignature(block);
+    if (signature) {
+      lastIndexBySignature.set(signature, index);
+    }
+  });
+
+  const dedupedBlocks = blocks.filter((block, index) => {
+    const signature = extractTestBlockSignature(block);
+    if (!signature) return true;
+    return lastIndexBySignature.get(signature) === index;
+  });
+
+  return `${prefix}${dedupedBlocks.join("")}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+}
+
+export function finalizeGeneratedTestContent(input: {
+  fullContent: string;
+  originalContent: string;
+}): {
+  fullContent: string;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  const rawGeneratedContent = input.fullContent;
+  let nextContent = input.fullContent;
+
+  const deduped = deduplicateTestBlocks(nextContent);
+  if (deduped !== nextContent) {
+    warnings.push("[TEST_DEDUPLICATION] Duplicate test blocks were removed.");
+    nextContent = deduped;
+  }
+
+  const originalSignatures = new Set(extractTestSignatures(input.originalContent));
+  const nextSignatures = new Set(extractTestSignatures(nextContent));
+  const hasNewTestNames = [...nextSignatures].some(
+    (signature) => !originalSignatures.has(signature)
+  );
+
+  if (
+    input.originalContent &&
+    rawGeneratedContent.length > input.originalContent.length * 2
+  ) {
+    warnings.push(
+      "[TEST_DUPLICATE_CONTENT] Generated content appears to be duplicated. Returning original."
+    );
+    return {
+      fullContent: input.originalContent,
+      warnings,
+    };
+  }
+
+  if (
+    input.originalContent &&
+    nextContent.length > input.originalContent.length * 1.5 &&
+    !hasNewTestNames
+  ) {
+    return {
+      fullContent: input.originalContent,
+      warnings,
+    };
+  }
+
+  return {
+    fullContent: nextContent,
+    warnings,
+  };
+}
+
 function buildApplyPatches(
   result: Record<string, unknown>,
   outputPaths: { testFile: string; featureFile?: string; stepDefinition?: string }
@@ -588,21 +727,52 @@ export async function runTestEngineerFlow(input: {
       ),
   };
 
-  const applyPatches = buildApplyPatches(parsed, context.outputPaths);
-  const preview = buildPreview(parsed, framework.framework, context.outputPaths);
+  const modelWarnings = Array.isArray(parsed["warnings"])
+    ? (parsed["warnings"] as string[])
+    : [];
+  const postProcessingWarnings: string[] = [];
+  const originalContentByPath = new Map<string, string>([
+    ...existingTestContents.map((file) => [file.path, file.content] as const),
+    ...featureContents.map((file) => [file.path, file.content] as const),
+    ...stepDefinitionContents.map((file) => [file.path, file.content] as const),
+  ]);
+  const applyPatches = buildApplyPatches(parsed, context.outputPaths).map((patch) => {
+    if (patch.filePath !== context.outputPaths.testFile) {
+      return patch;
+    }
+
+    const finalized = finalizeGeneratedTestContent({
+      fullContent: patch.fullContent,
+      originalContent: originalContentByPath.get(patch.filePath) ?? "",
+    });
+
+    if (finalized.warnings.length > 0) {
+      postProcessingWarnings.push(...finalized.warnings);
+    }
+
+    return {
+      ...patch,
+      fullContent: finalized.fullContent,
+    };
+  });
+  const preview = buildPreview(
+    {
+      ...parsed,
+      warnings: [...modelWarnings, ...postProcessingWarnings],
+    },
+    framework.framework,
+    context.outputPaths
+  );
   const modelConfidence =
     typeof parsed["confidence"] === "number" ? parsed["confidence"] : 50;
   const summary =
     typeof parsed["summary"] === "string"
       ? parsed["summary"]
       : "Test generated successfully.";
-  const modelWarnings = Array.isArray(parsed["warnings"])
-    ? (parsed["warnings"] as string[])
-    : [];
   const vagueTaskDetected = isVagueTestTask(input.task);
   const warnings = vagueTaskDetected
-    ? [...modelWarnings, VAGUE_TASK_WARNING]
-    : modelWarnings;
+    ? [...modelWarnings, ...postProcessingWarnings, VAGUE_TASK_WARNING]
+    : [...modelWarnings, ...postProcessingWarnings];
   const confidence = vagueTaskDetected
     ? Math.min(adjustConfidenceForWarnings(modelConfidence, warnings), 60)
     : adjustConfidenceForWarnings(modelConfidence, warnings);
