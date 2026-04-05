@@ -50,9 +50,20 @@ function getSupabaseClient(): SupabaseClient | null {
 async function logRun(input: RunLogInput): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) return;
+  const authenticatedUserId =
+    typeof process.env.ZONE_USER_ID === "string"
+      ? process.env.ZONE_USER_ID.trim()
+      : "";
+  const userId = typeof input.userId === "string" ? input.userId.trim() : "";
+  const userEmail =
+    typeof process.env.ZONE_USER_EMAIL === "string"
+      ? process.env.ZONE_USER_EMAIL.trim()
+      : "";
+  const effectiveUserId = authenticatedUserId || userId;
 
   await supabase.from("run_logs").insert({
-    user_id: input.userId,
+    ...(effectiveUserId ? { user_id: effectiveUserId } : {}),
+    ...(userEmail ? { user_email: userEmail } : {}),
     role: input.role,
     task: input.task,
     repo_path: input.repoPath,
@@ -61,14 +72,74 @@ async function logRun(input: RunLogInput): Promise<void> {
     credits_used: input.creditsUsed,
   });
 
+  const profilesTable = supabase.from("profiles") as unknown as {
+    select?: (
+      columns: string
+    ) => {
+      eq?: (column: string, value: string) => {
+        maybeSingle?: () => Promise<{
+          data: {
+            credits?: number | string | null;
+            total_runs?: number | string | null;
+            subscription_status?: string | null;
+          } | null;
+          error?: unknown;
+        }>;
+      };
+    };
+    update?: (values: Record<string, unknown>) => {
+      eq?: (column: string, value: string) => Promise<unknown> | unknown;
+    };
+  };
+
+  const profileQuery = profilesTable
+    .select?.("credits,total_runs,subscription_status")
+    ?.eq?.("id", effectiveUserId);
+
+  if (
+    effectiveUserId &&
+    profileQuery &&
+    typeof profileQuery.maybeSingle === "function" &&
+    typeof profilesTable.update === "function"
+  ) {
+    try {
+      const { data, error } = await profileQuery.maybeSingle();
+      if (!error && data) {
+        const currentCredits =
+          typeof data.credits === "number"
+            ? data.credits
+            : Number(data.credits ?? 0);
+        const currentRuns =
+          typeof data.total_runs === "number"
+            ? data.total_runs
+            : Number(data.total_runs ?? 0);
+        const paidAccess = hasPaidAccess(data.subscription_status);
+
+        const nextCredits = paidAccess
+          ? currentCredits
+          : Math.max(0, currentCredits - 1);
+
+        await profilesTable.update({
+          credits: nextCredits,
+          total_runs: currentRuns + 1,
+          updated_at: new Date().toISOString(),
+        }).eq?.("id", effectiveUserId);
+
+        return;
+      }
+    } catch {
+      // fall through to legacy rpc path
+    }
+  }
+
   await supabase.rpc("deduct_credits_and_increment_runs", {
-    p_user_id: input.userId,
+    p_user_id: effectiveUserId,
     p_credits: input.creditsUsed,
   });
 }
 
 function queueRunLog(input: RunLogInput): void {
-  if (!process.env.ZONE_USER_ID) return;
+  if (!process.env.ZONE_USER_ID?.trim()) return;
   void logRun(input).catch(() => undefined);
 }
 
@@ -81,6 +152,93 @@ function getDecisionModeFromResult(
     return decisionMode;
   }
   return confidence < 70 ? "preview_only" : "safe_to_apply";
+}
+
+function normalizeSubscriptionStatus(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function hasPaidAccess(subscriptionStatus: unknown): boolean {
+  const normalized = normalizeSubscriptionStatus(subscriptionStatus);
+  return normalized === "active" || normalized === "trialing";
+}
+
+async function ensureRunAuthorized(): Promise<
+  | { allowed: true }
+  | {
+      allowed: false;
+      status: number;
+      body: { ok: false; reason: "subscription_required" };
+    }
+> {
+  const authenticatedUserId =
+    typeof process.env.ZONE_USER_ID === "string"
+      ? process.env.ZONE_USER_ID.trim()
+      : "";
+  if (!authenticatedUserId) {
+    return { allowed: true };
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return { allowed: true };
+  }
+
+  const profilesTable = supabase.from("profiles") as unknown as {
+    select?: (
+      columns: string
+    ) => {
+      eq?: (column: string, value: string) => {
+        maybeSingle?: () => Promise<{
+          data: {
+            credits?: number | string | null;
+            total_runs?: number | string | null;
+            subscription_status?: string | null;
+          } | null;
+          error?: unknown;
+        }>;
+      };
+    };
+  };
+
+  if (typeof profilesTable.select !== "function") {
+    return { allowed: true };
+  }
+
+  const query = profilesTable
+    .select("credits,total_runs,subscription_status")
+    ?.eq?.("id", authenticatedUserId);
+
+  if (!query || typeof query.maybeSingle !== "function") {
+    return { allowed: true };
+  }
+
+  try {
+    const { data, error } = await query.maybeSingle();
+    if (error || !data) {
+      return { allowed: true };
+    }
+
+    const credits =
+      typeof data.credits === "number"
+        ? data.credits
+        : Number(data.credits ?? 0);
+    const subscriptionStatus = normalizeSubscriptionStatus(
+      data.subscription_status
+    );
+
+    if (credits > 0 || hasPaidAccess(subscriptionStatus)) {
+      return { allowed: true };
+    }
+
+    return {
+      allowed: false,
+      status: 402,
+      body: { ok: false, reason: "subscription_required" },
+    };
+  } catch {
+    return { allowed: true };
+  }
 }
 
 function emitProgress(runId: string | undefined, stage: string): void {
@@ -199,6 +357,11 @@ app.post("/api/analyze", async (req, res) => {
 
 app.post("/api/patch", async (req, res) => {
   const { task, repoPath } = req.body;
+  const authorization = await ensureRunAuthorized();
+  if (!authorization.allowed) {
+    res.status(authorization.status).json(authorization.body);
+    return;
+  }
   const result = await runLlmPatchFlow({ task, repoPath });
   res.json(result);
   if (result.ok) {
@@ -268,6 +431,11 @@ app.post("/api/test-engineer", async (req, res) => {
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
     return;
   }
+  const authorization = await ensureRunAuthorized();
+  if (!authorization.allowed) {
+    res.status(authorization.status).json(authorization.body);
+    return;
+  }
   try {
     const result = await runTestEngineerFlow({
       task,
@@ -302,6 +470,11 @@ app.post("/api/data-analyst", async (req, res) => {
   const { task, repoPath, runId } = req.body;
   if (!task || !repoPath) {
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
+    return;
+  }
+  const authorization = await ensureRunAuthorized();
+  if (!authorization.allowed) {
+    res.status(authorization.status).json(authorization.body);
     return;
   }
   try {
