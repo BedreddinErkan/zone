@@ -189,6 +189,93 @@ function adjustConfidenceForWarnings(confidence, warnings) {
     }
     return cappedConfidence;
 }
+const VAGUE_TASK_WARNING = "[VAGUE_TASK] Task is too vague to generate a reliable test. Please describe the specific scenario, page, and expected behavior.";
+const GENERIC_TASK_PHRASES = new Set([
+    "fix",
+    "bug",
+    "issue",
+    "problem",
+    "update",
+    "change",
+    "refactor",
+    "improve",
+    "test",
+    "add test",
+    "write test",
+]);
+const GENERIC_TASK_TOKENS = new Set([
+    "fix",
+    "bug",
+    "issue",
+    "problem",
+    "update",
+    "change",
+    "refactor",
+    "improve",
+    "test",
+    "add",
+    "write",
+]);
+const TASK_STOPWORDS = new Set([
+    "a",
+    "an",
+    "the",
+    "for",
+    "to",
+    "of",
+    "on",
+    "in",
+    "with",
+    "and",
+    "or",
+    "my",
+    "our",
+    "your",
+    "this",
+    "that",
+]);
+const NON_SPECIFIC_TASK_TOKENS = new Set([
+    "negative",
+    "positive",
+    "happy",
+    "path",
+    "scenario",
+    "case",
+    "coverage",
+    "flow",
+    "spec",
+    "specs",
+    "e2e",
+    "ui",
+    "page",
+    "action",
+    "feature",
+    "component",
+    "screen",
+    "behavior",
+    "behaviour",
+]);
+function isVagueTestTask(task) {
+    const normalizedTask = task.trim().toLowerCase().replace(/\s+/g, " ");
+    const words = normalizedTask.split(/\s+/).filter(Boolean);
+    if (words.length < 4)
+        return true;
+    if (GENERIC_TASK_PHRASES.has(normalizedTask))
+        return true;
+    const tokens = normalizedTask
+        .split(/[^a-z0-9]+/i)
+        .map((token) => token.trim())
+        .filter(Boolean);
+    if (tokens.length > 0 &&
+        tokens.every((token) => GENERIC_TASK_TOKENS.has(token) || TASK_STOPWORDS.has(token))) {
+        return true;
+    }
+    const hasSpecificTarget = tokens.some((token) => token.length >= 3 &&
+        !GENERIC_TASK_TOKENS.has(token) &&
+        !TASK_STOPWORDS.has(token) &&
+        !NON_SPECIFIC_TASK_TOKENS.has(token));
+    return !hasSpecificTarget;
+}
 async function runTestEngineerFlow(input) {
     let allFiles;
     try {
@@ -321,10 +408,16 @@ async function runTestEngineerFlow(input) {
     const summary = typeof parsed["summary"] === "string"
         ? parsed["summary"]
         : "Test generated successfully.";
-    const warnings = Array.isArray(parsed["warnings"])
+    const modelWarnings = Array.isArray(parsed["warnings"])
         ? parsed["warnings"]
         : [];
-    const confidence = adjustConfidenceForWarnings(modelConfidence, warnings);
+    const vagueTaskDetected = isVagueTestTask(input.task);
+    const warnings = vagueTaskDetected
+        ? [...modelWarnings, VAGUE_TASK_WARNING]
+        : modelWarnings;
+    const confidence = vagueTaskDetected
+        ? Math.min(adjustConfidenceForWarnings(modelConfidence, warnings), 60)
+        : adjustConfidenceForWarnings(modelConfidence, warnings);
     const confidenceGate = (0, confidenceGate_js_1.checkConfidenceGate)({
         confidenceScore: confidence,
         role: "test_engineer",
@@ -424,7 +517,7 @@ async function runTestEngineerFlow(input) {
         framework: framework.framework,
         language: framework.language,
         confidence,
-        decisionMode: confidence >= 70 ? "safe_to_apply" : "preview_only",
+        decisionMode: vagueTaskDetected || confidence < 70 ? "preview_only" : "safe_to_apply",
         summary,
         warnings: [...warnings, ...validationWarnings],
         complexity,
