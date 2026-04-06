@@ -8,8 +8,7 @@
   },
   "scripts": {
     "dev": "tsx src/cli/index.ts",
-    "build": "tsc && node -e \"require('node:fs').cpSync('src/ui','dist/ui',{recursive:true})\"",
-    "start": "node dist/cli/index.js",
+"build": "node ./node_modules/typescript/bin/tsc && node -e \"require('node:fs').cpSync('src/ui','dist/ui',{recursive:true})\"",    "start": "node dist/cli/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
