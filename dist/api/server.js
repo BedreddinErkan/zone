@@ -29,7 +29,10 @@ const readProjectFiles_js_1 = require("../repo/readProjectFiles.js");
 const openaiClient_js_1 = require("../llm/openaiClient.js");
 const colors_js_1 = require("../cli/colors.js");
 exports.app = (0, express_1.default)();
-const PORT = process.env.PORT || 3000;
+const port = Number(process.env.PORT) || 3000;
+exports.app.listen(port, () => {
+    console.log(`Zone UI running on http://localhost:${port}`);
+});
 const progressStreams = new Map();
 const zoneUiDir = node_path_1.default.resolve(__dirname, "../ui");
 const zoneUiHtmlTemplate = (0, node_fs_1.readFileSync)(node_path_1.default.join(zoneUiDir, "index.html"), "utf8");

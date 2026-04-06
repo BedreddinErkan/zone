@@ -1163,5 +1163,5 @@ if (
   process.env.VITEST !== "true" &&
   process.env.ZONE_SERVER_MANUAL_START !== "1"
 ) {
-  void startServer(Number(PORT));
+  void startServer(Number(port));
 }
