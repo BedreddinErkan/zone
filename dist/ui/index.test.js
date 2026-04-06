@@ -811,7 +811,7 @@ function buildUiHarness(initialLocalStorage = {}) {
             ok: false,
             reason: "no_free_runs",
             message: "You've used all your free runs. Upgrade to Pro.",
-            upgradeUrl: "https://zonecli.dev/pricing",
+            upgradeUrl: "https://zonecli.dev/#pricing",
         }));
         context.fetch = fetchMock;
         context.selectRole(roleButtons.dataAnalyst);
@@ -822,9 +822,9 @@ function buildUiHarness(initialLocalStorage = {}) {
         (0, vitest_1.expect)(fetchMock).toHaveBeenCalledWith(vitest_1.expect.stringContaining("/api/check-access?userId="));
         (0, vitest_1.expect)(elements.get("progressBox").classList.contains("hidden")).toBe(true);
         (0, vitest_1.expect)(elements.get("progressText").textContent).toBe("");
-        (0, vitest_1.expect)(elements.get("execBtn").disabled).toBe(false);
+        (0, vitest_1.expect)(elements.get("execBtn").disabled).toBe(true);
         (0, vitest_1.expect)(elements.get("errorBox").innerHTML).toContain("Upgrade to Pro");
-        (0, vitest_1.expect)(elements.get("errorBox").innerHTML).toContain("https://zonecli.dev/pricing");
+        (0, vitest_1.expect)(elements.get("errorBox").innerHTML).toContain("https://zonecli.dev/#pricing");
     });
     (0, vitest_1.it)("uses the default pricing URL when no_free_runs does not include upgradeUrl", async () => {
         const { context, elements, roleButtons } = buildUiHarness();
@@ -839,7 +839,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         elements.get("task").value = "add login test";
         elements.get("repoPath").value = "C:/repo";
         await context.execute();
-        (0, vitest_1.expect)(elements.get("errorBox").innerHTML).toContain('href="https://zonecli.dev/pricing"');
+        (0, vitest_1.expect)(elements.get("errorBox").innerHTML).toContain('href="https://zonecli.dev/#pricing"');
     });
     (0, vitest_1.it)("proceeds normally when pre-flight access is allowed", async () => {
         const { context, elements, roleButtons } = buildUiHarness();
@@ -879,6 +879,19 @@ function buildUiHarness(initialLocalStorage = {}) {
         (0, vitest_1.expect)(elements.get("billingSummaryBox").classList.contains("hidden")).toBe(false);
         (0, vitest_1.expect)(elements.get("billingSummaryLabel").textContent).toBe("Plan: Pro · Remaining runs: 18");
         (0, vitest_1.expect)(elements.get("billingSummaryMeta").textContent).toBe("1000 runs / month");
+    });
+    (0, vitest_1.it)("shows the upgrade CTA immediately when billing summary resolves to free with zero runs", async () => {
+        const { context, elements } = buildUiHarness();
+        context.fetch = vitest_1.vi.fn().mockResolvedValueOnce(okResponse({
+            ok: true,
+            plan: "Free",
+            credits: 0,
+            upgradeUrl: "https://zonecli.dev/#pricing",
+        }));
+        await context.refreshBillingSummary();
+        (0, vitest_1.expect)(elements.get("execBtn").disabled).toBe(true);
+        (0, vitest_1.expect)(elements.get("errorBox").innerHTML).toContain("Upgrade to Pro");
+        (0, vitest_1.expect)(elements.get("errorBox").innerHTML).toContain('href="https://zonecli.dev/#pricing"');
     });
 });
 (0, vitest_1.describe)("UI patch preview", () => {

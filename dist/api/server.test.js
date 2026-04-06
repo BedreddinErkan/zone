@@ -222,6 +222,7 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             body: JSON.stringify({
                 task: "update foo",
                 repoPath: "C:/repo",
+                userId: "clerk_user_123",
             }),
         });
         const body = await response.json();
@@ -231,6 +232,47 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
         (0, vitest_1.expect)(body.patchResults).toEqual([
             { filePath: "src/foo.ts", status: "applied" },
         ]);
+    });
+    (0, vitest_1.it)("logs successful dry runs to Supabase when env is configured", async () => {
+        process.env.SUPABASE_URL = "https://example.supabase.co";
+        process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+        runLlmPatchFlowMock.mockResolvedValue({
+            ok: true,
+            patchPreview: "=== LLM PATCH PREVIEW ===\nSummary: Dry run",
+            warnings: [],
+            developerConfidence: 74,
+            decisionMode: "safe_to_apply",
+            patchResults: [],
+            fileDiffs: [],
+            applyPatches: [],
+        });
+        supabaseInsertMock.mockResolvedValue({ error: null });
+        supabaseRpcMock.mockResolvedValue({ error: null });
+        const response = await fetch(`${baseUrl}/api/dry-run`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                task: "preview login fix",
+                repoPath: "C:/repo",
+                userId: "clerk_user_789",
+            }),
+        });
+        (0, vitest_1.expect)(response.status).toBe(200);
+        await vitest_1.vi.waitFor(() => {
+            (0, vitest_1.expect)(supabaseInsertMock).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
+                user_id: "clerk_user_789",
+                role: "developer",
+                task: "preview login fix",
+                repo_path: "C:/repo",
+                decision: "safe_to_apply",
+                confidence: 74,
+                credits_used: 0.1,
+            }));
+            (0, vitest_1.expect)(supabaseRpcMock).toHaveBeenCalledWith("deduct_credits_and_increment_runs", {
+                p_user_id: "clerk_user_789",
+                p_credits: 1,
+            });
+        });
     });
     (0, vitest_1.it)("logs successful developer runs to Supabase when env is configured", async () => {
         process.env.SUPABASE_URL = "https://example.supabase.co";

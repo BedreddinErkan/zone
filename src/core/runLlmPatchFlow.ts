@@ -13,6 +13,14 @@ export type LlmPatchFlowResult =
       patchPreview: string;
       warnings: string[];
       developerConfidence?: number;
+      developerRisk?: {
+        score: number;
+        breakdown: {
+          destructive: number;
+          schema: number;
+          massScope: number;
+        };
+      };
       decisionMode?: "preview_only" | "safe_to_apply";
       applyPatches: Array<{ filePath: string; fullContent: string }>;
       patchResults: PatchResult[];
@@ -121,6 +129,31 @@ const DEVELOPER_TASK_STOPWORDS = new Set([
   "please",
 ]);
 
+const MICRO_EDIT_INTENT_TERMS = [
+  "spacing",
+  "padding",
+  "margin",
+  "gap",
+  "alignment",
+  "align",
+  "typo",
+  "wording",
+  "label text",
+  "label",
+  "placeholder",
+  "small css tweak",
+];
+
+const UI_MAPPING_RISK_TERMS = ["swap", "mapping", "reversed", "order", "before/after"];
+
+const IRRELEVANT_DEVELOPER_CONTEXT_SEGMENTS = [
+  "/venv/",
+  "/site-packages/",
+  "/node_modules/",
+  "/build/",
+  "/dist/",
+];
+
 function isUiFilePath(filePath: string): boolean {
   const normalized = filePath.toLowerCase();
   return (
@@ -170,6 +203,27 @@ function isMicroEditUiTask(task: string): boolean {
       "copy polish",
       "small",
     ].some((term) => normalized.includes(term))
+  );
+}
+
+export function detectMicroEditIntent(task: string): boolean {
+  const normalized = task.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!normalized) return false;
+
+  return MICRO_EDIT_INTENT_TERMS.some((term) => normalized.includes(term));
+}
+
+export function detectUiMappingRiskIntent(task: string): boolean {
+  const normalized = task.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!normalized) return false;
+
+  return UI_MAPPING_RISK_TERMS.some((term) => normalized.includes(term));
+}
+
+export function isIrrelevantDeveloperContextPath(filePath: string): boolean {
+  const normalized = `/${filePath.replace(/\\/g, "/").toLowerCase().replace(/^\/+/, "")}`;
+  return IRRELEVANT_DEVELOPER_CONTEXT_SEGMENTS.some((segment) =>
+    normalized.includes(segment)
   );
 }
 
@@ -483,6 +537,205 @@ export function calculateDeveloperConfidence(input: {
   }
 
   return confidence;
+}
+
+export type DeveloperPatchScope = {
+  changedFileCount: number;
+  totalAddedLines: number;
+  totalRemovedLines: number;
+  totalChangedLines: number;
+  rewriteLikeSuspicion: boolean;
+  cssRewriteSuspicion: boolean;
+};
+
+export function analyzePatchScope(input: {
+  applyPatches: Array<{ filePath: string; fullContent: string }>;
+  originalContents: Record<string, string>;
+}): DeveloperPatchScope {
+  let totalAddedLines = 0;
+  let totalRemovedLines = 0;
+  let rewriteLikeSuspicion = false;
+  let cssRewriteSuspicion = false;
+
+  for (const patch of input.applyPatches) {
+    const before = input.originalContents[patch.filePath] ?? "";
+    const diff = computeFileDiff(before, patch.fullContent);
+    const addedLines = diff.filter((line) => line.type === "added").length;
+    const removedLines = diff.filter((line) => line.type === "removed").length;
+    const changedLines = addedLines + removedLines;
+    const totalLines = countTotalLines(before || patch.fullContent);
+    const changedRatio = changedLines / Math.max(totalLines, 1);
+
+    totalAddedLines += addedLines;
+    totalRemovedLines += removedLines;
+
+    if (before.trim() && totalLines > 0 && changedRatio > 0.6) {
+      rewriteLikeSuspicion = true;
+    }
+
+    if (
+      patch.filePath.toLowerCase().endsWith(".css") &&
+      before.trim() &&
+      totalLines > 0 &&
+      (changedLines > 30 || changedRatio > 0.45)
+    ) {
+      cssRewriteSuspicion = true;
+    }
+  }
+
+  return {
+    changedFileCount: input.applyPatches.length,
+    totalAddedLines,
+    totalRemovedLines,
+    totalChangedLines: totalAddedLines + totalRemovedLines,
+    rewriteLikeSuspicion,
+    cssRewriteSuspicion,
+  };
+}
+
+export function evaluateIntentPatchMismatch(input: {
+  task: string;
+  patchScope: DeveloperPatchScope;
+}): {
+  suspicious: boolean;
+  confidenceCap?: number;
+  warnings: string[];
+  risk: {
+    score: number;
+    breakdown: {
+      destructive: number;
+      schema: number;
+      massScope: number;
+    };
+  };
+} {
+  const microEditIntent = detectMicroEditIntent(input.task);
+  if (!microEditIntent) {
+    return {
+      suspicious: false,
+      warnings: [],
+      risk: {
+        score: 0,
+        breakdown: {
+          destructive: 0,
+          schema: 0,
+          massScope: 0,
+        },
+      },
+    };
+  }
+
+  const oversized =
+    input.patchScope.changedFileCount > 1 ||
+    input.patchScope.totalChangedLines > 30 ||
+    input.patchScope.rewriteLikeSuspicion ||
+    input.patchScope.cssRewriteSuspicion;
+
+  if (!oversized) {
+    return {
+      suspicious: false,
+      warnings: [],
+      risk: {
+        score: 0,
+        breakdown: {
+          destructive: 0,
+          schema: 0,
+          massScope: 0,
+        },
+      },
+    };
+  }
+
+  let massScope = 35;
+  if (input.patchScope.changedFileCount > 1) {
+    massScope = Math.max(massScope, 45);
+  }
+  if (input.patchScope.totalChangedLines > 30) {
+    massScope = Math.max(massScope, 55);
+  }
+  if (input.patchScope.cssRewriteSuspicion) {
+    massScope = Math.max(massScope, 60);
+  }
+  if (input.patchScope.rewriteLikeSuspicion) {
+    massScope = Math.max(massScope, 65);
+  }
+
+  const warnings = ["Micro-edit task produced a larger-than-expected patch."];
+  if (input.patchScope.cssRewriteSuspicion) {
+    warnings.push("CSS patch scope is too large for a spacing-only request.");
+  }
+
+  return {
+    suspicious: true,
+    confidenceCap: 55,
+    warnings,
+    risk: {
+      score: massScope,
+      breakdown: {
+        destructive: 0,
+        schema: 0,
+        massScope,
+      },
+    },
+  };
+}
+
+export function evaluateUiMappingRisk(input: {
+  task: string;
+  patchScope: DeveloperPatchScope;
+}): {
+  applies: boolean;
+  confidenceCap?: number;
+  forcePreviewOnly: boolean;
+  warnings: string[];
+  risk: {
+    score: number;
+    breakdown: {
+      destructive: number;
+      schema: number;
+      massScope: number;
+    };
+  };
+} {
+  if (!detectUiMappingRiskIntent(input.task)) {
+    return {
+      applies: false,
+      forcePreviewOnly: false,
+      warnings: [],
+      risk: {
+        score: 0,
+        breakdown: {
+          destructive: 0,
+          schema: 0,
+          massScope: 0,
+        },
+      },
+    };
+  }
+
+  const massScope =
+    input.patchScope.changedFileCount > 1 ||
+    input.patchScope.totalChangedLines > 40 ||
+    input.patchScope.rewriteLikeSuspicion
+      ? 45
+      : 25;
+
+  return {
+    applies: true,
+    confidenceCap: 70,
+    forcePreviewOnly: massScope >= 40,
+    warnings: [
+      "UI mapping/order changes are higher-risk and should be reviewed carefully.",
+    ],
+    risk: {
+      score: massScope,
+      breakdown: {
+        destructive: 0,
+        schema: 0,
+        massScope,
+      },
+    },
+  };
 }
 
 export function normalizeLineForMatch(line: string): string {
@@ -1270,6 +1523,9 @@ export async function runLlmPatchFlow(input: {
 
   // 1. Scan repo
   const allFiles = await scanRepo(input.repoPath);
+  const developerContextFiles = allFiles.filter(
+    (file) => !isIrrelevantDeveloperContextPath(file.path)
+  );
 
   // 2. Detect structure
   const structure = detectProjectStructure(allFiles);
@@ -1279,7 +1535,7 @@ export async function runLlmPatchFlow(input: {
   // 3. Rank relevant files — top 8
   const relevantFiles = rankRelevantFiles({
     task: input.task,
-    files: allFiles,
+    files: developerContextFiles,
     intent: taskIntent,
   }).slice(0, 8);
 
@@ -1292,7 +1548,9 @@ export async function runLlmPatchFlow(input: {
       ? await readProjectFiles(topRelevantFilePaths)
       : {};
   const existingRelevantPaths = Object.keys(topRelevantFileContentsMap).map(
-    (absPath) => allFiles.find((file) => file.absolutePath === absPath)?.path ?? absPath
+    (absPath) =>
+      developerContextFiles.find((file) => file.absolutePath === absPath)?.path ??
+      absPath
   );
   const existingFilesSummary =
     existingRelevantPaths.length > 0
@@ -1333,6 +1591,7 @@ export async function runLlmPatchFlow(input: {
       reason: "High repo relevance for the requested developer task",
     })),
   ]
+    .filter((file) => !isIrrelevantDeveloperContextPath(file.path))
     .filter(
       (file, index, files) =>
         files.findIndex((candidate) => candidate.path === file.path) === index
@@ -1340,7 +1599,7 @@ export async function runLlmPatchFlow(input: {
     .slice(0, 4);
 
   const filePaths = selectedContextFiles
-    .map((f) => allFiles.find((rf) => rf.path === f.path)?.absolutePath)
+    .map((f) => developerContextFiles.find((rf) => rf.path === f.path)?.absolutePath)
     .filter((p): p is string => typeof p === "string");
 
   const fileContentsMap = await readProjectFiles(filePaths);
@@ -1429,7 +1688,11 @@ export async function runLlmPatchFlow(input: {
 
       // Include a few page-like files as extra context for UI/test-heavy repos.
       const pageObjectFiles = allFiles
-        .filter((f) => f.path.endsWith(".java") || f.path.includes("page"))
+        .filter(
+          (f) =>
+            !isIrrelevantDeveloperContextPath(f.path) &&
+            (f.path.endsWith(".java") || f.path.includes("page"))
+        )
         .slice(0, 5);
 
       const pageObjectPaths = pageObjectFiles
@@ -1601,13 +1864,41 @@ export async function runLlmPatchFlow(input: {
       changedLines: countChangedLines(before, patch.fullContent),
     };
   });
+  const patchScope = analyzePatchScope({
+    applyPatches,
+    originalContents,
+  });
+  const intentMismatch = evaluateIntentPatchMismatch({
+    task: input.task,
+    patchScope,
+  });
+  const uiMappingRisk = evaluateUiMappingRisk({
+    task: input.task,
+    patchScope,
+  });
+  if (intentMismatch.warnings.length > 0) {
+    internalWarnings.push(...intentMismatch.warnings);
+    visibleWarnings.push(...intentMismatch.warnings);
+  }
+  if (uiMappingRisk.warnings.length > 0) {
+    internalWarnings.push(...uiMappingRisk.warnings);
+    visibleWarnings.push(...uiMappingRisk.warnings);
+  }
 
-  const developerConfidence = calculateDeveloperConfidence({
+  const developerConfidenceBase = calculateDeveloperConfidence({
     warnings: internalWarnings,
     changedFileCount: applyPatches.length,
     changedFileMetrics,
     vagueTask,
   });
+  const confidenceCaps = [
+    intentMismatch.confidenceCap,
+    uiMappingRisk.confidenceCap,
+  ].filter((value): value is number => typeof value === "number");
+  const developerConfidence =
+    confidenceCaps.length > 0
+      ? Math.min(developerConfidenceBase, ...confidenceCaps)
+      : developerConfidenceBase;
 
   const fileDiffs = applyPatches.map((patch) => {
     const before = originalContents[patch.filePath] ?? "";
@@ -1622,8 +1913,31 @@ export async function runLlmPatchFlow(input: {
     };
   });
 
+  const mergedDeveloperRisk = {
+    score: Math.max(intentMismatch.risk.score, uiMappingRisk.risk.score),
+    breakdown: {
+      destructive: Math.max(
+        intentMismatch.risk.breakdown.destructive,
+        uiMappingRisk.risk.breakdown.destructive
+      ),
+      schema: Math.max(
+        intentMismatch.risk.breakdown.schema,
+        uiMappingRisk.risk.breakdown.schema
+      ),
+      massScope: Math.max(
+        intentMismatch.risk.breakdown.massScope,
+        uiMappingRisk.risk.breakdown.massScope
+      ),
+    },
+  };
+
   const decisionMode =
-    vagueTask || developerConfidence < 70 ? "preview_only" : "safe_to_apply";
+    vagueTask ||
+    intentMismatch.suspicious ||
+    uiMappingRisk.forcePreviewOnly ||
+    developerConfidence < 70
+      ? "preview_only"
+      : "safe_to_apply";
 
   // 7. Build patchPreview string
   const patchPreview = [
@@ -1655,6 +1969,7 @@ export async function runLlmPatchFlow(input: {
     patchPreview,
     warnings: visibleWarnings,
     developerConfidence,
+    developerRisk: mergedDeveloperRisk,
     decisionMode,
     applyPatches,
     patchResults,

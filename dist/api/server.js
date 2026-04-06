@@ -9,6 +9,8 @@ require("dotenv/config");
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const body_parser_1 = __importDefault(require("body-parser"));
+const node_fs_1 = require("node:fs");
+const node_path_1 = __importDefault(require("node:path"));
 const supabase_js_1 = require("@supabase/supabase-js");
 const runAgent_js_1 = require("../core/runAgent.js");
 const runLlmPatchFlow_js_1 = require("../core/runLlmPatchFlow.js");
@@ -22,6 +24,8 @@ const colors_js_1 = require("../cli/colors.js");
 exports.app = (0, express_1.default)();
 const PORT = process.env.PORT || 3000;
 const progressStreams = new Map();
+const zoneUiDir = node_path_1.default.resolve(__dirname, "../ui");
+const zoneUiHtmlTemplate = (0, node_fs_1.readFileSync)(node_path_1.default.join(zoneUiDir, "index.html"), "utf8");
 const ENHANCE_TASK_SYSTEM_PROMPT = "You are a task optimizer for an AI code agent called Zone.\n" +
     "The user has written a vague or incomplete task description.\n" +
     "Rewrite it as a precise, actionable task that includes:\n" +
@@ -32,12 +36,29 @@ const ENHANCE_TASK_SYSTEM_PROMPT = "You are a task optimizer for an AI code agen
 exports.app.use((0, cors_1.default)());
 exports.app.use(body_parser_1.default.json());
 exports.app.use(body_parser_1.default.urlencoded({ extended: true }));
+exports.app.get("/", (_req, res) => {
+    res.type("html").send(renderZoneUiHtml());
+});
+exports.app.get("/index.html", (_req, res) => {
+    res.type("html").send(renderZoneUiHtml());
+});
 function getSupabaseClient() {
     const url = process.env.SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !key)
         return null;
     return (0, supabase_js_1.createClient)(url, key);
+}
+function renderZoneUiHtml() {
+    const configScript = `<script>window.__ZONE_PUBLIC_CONFIG__=${JSON.stringify({
+        posthogKey: typeof process.env.POSTHOG_KEY === "string"
+            ? process.env.POSTHOG_KEY.trim()
+            : "",
+        posthogHost: typeof process.env.POSTHOG_HOST === "string"
+            ? process.env.POSTHOG_HOST.trim()
+            : "",
+    })};</script>`;
+    return zoneUiHtmlTemplate.replace("</head>", `${configScript}</head>`);
 }
 async function logRun(input) {
     const supabase = getSupabaseClient();
@@ -174,7 +195,7 @@ async function ensureRunAuthorized(rawUserId) {
                 ok: false,
                 reason: "no_free_runs",
                 message: "You've used all your free runs. Upgrade to Pro.",
-                upgradeUrl: "https://zonecli.dev/pricing",
+                upgradeUrl: "https://zonecli.dev/#pricing",
             },
         };
     }
@@ -284,6 +305,16 @@ exports.app.get("/api/billing-summary", async (req, res) => {
         return;
     }
     const profilesTable = supabase.from("profiles");
+    const posthogKey = process.env.POSTHOG_KEY || "";
+    const posthogHost = process.env.POSTHOG_HOST || "";
+    const injectedScript = `
+<script>
+  window.__ZONE_PUBLIC_CONFIG__ = {
+    POSTHOG_KEY: "${posthogKey}",
+    POSTHOG_HOST: "${posthogHost}"
+  };
+</script>
+`;
     const query = profilesTable
         .select?.("credits,subscription_status")
         ?.eq?.("id", userId);
@@ -350,7 +381,12 @@ exports.app.post("/api/patch", async (req, res) => {
     }
 });
 exports.app.post("/api/dry-run", async (req, res) => {
-    const { task, repoPath } = req.body;
+    const { task, repoPath, userId } = req.body;
+    const authorization = await ensureRunAuthorized(userId);
+    if (!authorization.allowed) {
+        res.status(authorization.status).json(authorization.body);
+        return;
+    }
     const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({ task, repoPath, dryRun: true });
     if (!result.ok) {
         res.status(500).json(result);
@@ -362,6 +398,18 @@ exports.app.post("/api/dry-run", async (req, res) => {
         patchPreview: result.patchPreview,
         warnings: result.warnings,
         patchResults: result.patchResults,
+    });
+    const confidence = typeof result.developerConfidence === "number"
+        ? result.developerConfidence
+        : 0;
+    queueRunLog({
+        userId,
+        role: "developer",
+        task,
+        repoPath,
+        decisionMode: result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
+        confidence,
+        creditsUsed: 0.1,
     });
 });
 exports.app.post("/api/apply", async (req, res) => {
@@ -466,7 +514,7 @@ exports.app.post("/api/data-analyst", async (req, res) => {
         });
     }
 });
-exports.app.use(express_1.default.static("src/ui"));
+exports.app.use(express_1.default.static(zoneUiDir));
 async function startServer(port = 3000) {
     await new Promise((resolve) => {
         exports.app.listen(port, () => {

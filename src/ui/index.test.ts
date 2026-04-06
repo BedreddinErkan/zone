@@ -1040,7 +1040,7 @@ describe("UI execute pre-flight access", () => {
           ok: false,
           reason: "no_free_runs",
           message: "You've used all your free runs. Upgrade to Pro.",
-          upgradeUrl: "https://zonecli.dev/pricing",
+          upgradeUrl: "https://zonecli.dev/#pricing",
         })
       );
     context.fetch = fetchMock;
@@ -1056,10 +1056,10 @@ describe("UI execute pre-flight access", () => {
     );
     expect(elements.get("progressBox").classList.contains("hidden")).toBe(true);
     expect(elements.get("progressText").textContent).toBe("");
-    expect(elements.get("execBtn").disabled).toBe(false);
+    expect(elements.get("execBtn").disabled).toBe(true);
     expect(elements.get("errorBox").innerHTML).toContain("Upgrade to Pro");
     expect(elements.get("errorBox").innerHTML).toContain(
-      "https://zonecli.dev/pricing"
+      "https://zonecli.dev/#pricing"
     );
   });
 
@@ -1081,7 +1081,7 @@ describe("UI execute pre-flight access", () => {
     await context.execute();
 
     expect(elements.get("errorBox").innerHTML).toContain(
-      'href="https://zonecli.dev/pricing"'
+      'href="https://zonecli.dev/#pricing"'
     );
   });
 
@@ -1141,6 +1141,26 @@ describe("UI billing summary", () => {
       "Plan: Pro · Remaining runs: 18"
     );
     expect(elements.get("billingSummaryMeta").textContent).toBe("1000 runs / month");
+  });
+
+  it("shows the upgrade CTA immediately when billing summary resolves to free with zero runs", async () => {
+    const { context, elements } = buildUiHarness();
+    context.fetch = vi.fn().mockResolvedValueOnce(
+      okResponse({
+        ok: true,
+        plan: "Free",
+        credits: 0,
+        upgradeUrl: "https://zonecli.dev/#pricing",
+      })
+    );
+
+    await context.refreshBillingSummary();
+
+    expect(elements.get("execBtn").disabled).toBe(true);
+    expect(elements.get("errorBox").innerHTML).toContain("Upgrade to Pro");
+    expect(elements.get("errorBox").innerHTML).toContain(
+      'href="https://zonecli.dev/#pricing"'
+    );
   });
 });
 

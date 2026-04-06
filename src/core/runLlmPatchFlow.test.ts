@@ -126,6 +126,56 @@ describe("runLlmPatchFlow", () => {
     );
   });
 
+  it("excludes irrelevant environment and build files from developer context selection", async () => {
+    const files = [
+      buildRepoFile("src/styles/landing.css", "frontend"),
+      buildRepoFile("node_modules/library/index.js", "unknown"),
+      buildRepoFile("venv/lib/site-packages/pkg.py", "unknown"),
+      buildRepoFile("dist/assets/app.css", "frontend"),
+      buildRepoFile("build/output.css", "frontend"),
+    ];
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["Frontend app"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 35 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Adjust landing spacing",
+      steps: ["Tweak landing card gap"],
+      suggestedFiles: [
+        { path: "node_modules/library/index.js", reason: "bad suggestion", action: "inspect" },
+        { path: "src/styles/landing.css", reason: "Actual target", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, `content:${filePath}`]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Tighten card gap",
+      patches: [],
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "fix spacing between landing cards",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(planPatchPreviewWithLlmMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        suggestedFiles: [
+          {
+            path: "src/styles/landing.css",
+            reason: "Actual target",
+            action: "modify",
+          },
+        ],
+      })
+    );
+  });
+
   it("flags and rejects generic scaffold overwrites for existing html files on small ui tasks", async () => {
     const files = [buildRepoFile("src/pages/home.html", "frontend")];
 
@@ -364,6 +414,148 @@ describe("runLlmPatchFlow", () => {
         existingTargetFiles: expect.arrayContaining(["src/pages/home.html"]),
       })
     );
+  });
+
+  it("downgrades oversized css rewrites for micro-edit tasks to preview_only", async () => {
+    const files = [buildRepoFile("src/styles/landing.css", "frontend")];
+    const originalCss = Array.from(
+      { length: 95 },
+      (_, index) => `.analysis-card-${index} { gap: ${index % 5}px; margin: 0; }`
+    ).join("\n");
+    const rewrittenCss = Array.from(
+      { length: 95 },
+      (_, index) =>
+        `.analysis-card-${index} { display: grid; gap: ${index % 7}px; margin: 12px; padding: 16px; border-radius: 12px; }`
+    ).join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["Marketing site"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 42 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Tighten landing card spacing",
+      steps: ["Adjust spacing only"],
+      suggestedFiles: [
+        { path: "src/styles/landing.css", reason: "Landing styles", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, originalCss]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Adjust spacing between analysis cards",
+      patches: [
+        {
+          path: "src/styles/landing.css",
+          operation: "modify",
+          summary: "Adjust card spacing",
+          targetHint: "analysis cards",
+          contentPreview: "gap tweak",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      filePath: "src/styles/landing.css",
+      fullContent: rewrittenCss,
+      summary: "Generated content",
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "Fix spacing between the analysis cards on the SmileAI landing page. Do not change layout structure or card content.",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.decisionMode).toBe("preview_only");
+      expect(result.developerConfidence).toBeLessThanOrEqual(60);
+      expect(result.developerRisk?.score).toBeGreaterThan(0);
+      expect(result.developerRisk?.breakdown.massScope).toBeGreaterThan(0);
+      expect(result.warnings).toContain(
+        "Micro-edit task produced a larger-than-expected patch."
+      );
+      expect(result.warnings).toContain(
+        "CSS patch scope is too large for a spacing-only request."
+      );
+    }
+  });
+
+  it("adds review risk and caps confidence for ui mapping swap tasks", async () => {
+    const files = [buildRepoFile("src/components/Timeline.tsx", "frontend")];
+    const originalContent = [
+      "export function Timeline() {",
+      "  return (",
+      "    <section>",
+      '      <Card title="Before" description="Old copy" />',
+      '      <Card title="After" description="New copy" />',
+      "    </section>",
+      "  );",
+      "}",
+    ].join("\n");
+    const updatedContent = [
+      "export function Timeline() {",
+      "  return (",
+      "    <section>",
+      '      <Card title="After" description="New copy" />',
+      '      <Card title="Before" description="Old copy" />',
+      "    </section>",
+      "  );",
+      "}",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React landing page"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 38 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Swap before/after card mapping",
+      steps: ["Reverse card order"],
+      suggestedFiles: [
+        { path: "src/components/Timeline.tsx", reason: "Timeline cards", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, originalContent]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Swap card order",
+      patches: [
+        {
+          path: "src/components/Timeline.tsx",
+          operation: "modify",
+          summary: "Swap the before/after cards",
+          targetHint: "card order",
+          contentPreview: "Before/After order",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      filePath: "src/components/Timeline.tsx",
+      fullContent: updatedContent,
+      summary: "Generated content",
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "swap the before and after card mapping on the landing page",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.developerConfidence).toBeLessThanOrEqual(70);
+      expect(result.developerRisk?.score).toBeGreaterThan(0);
+      expect(result.warnings).toContain(
+        "UI mapping/order changes are higher-risk and should be reviewed carefully."
+      );
+    }
   });
 
   it("uses targeted existing-file snippet context for small spacing tasks", async () => {

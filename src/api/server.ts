@@ -2,6 +2,8 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { runAgent } from "../core/runAgent.js";
 import { runLlmPatchFlow } from "../core/runLlmPatchFlow.js";
@@ -17,6 +19,8 @@ import { c, colorize } from "../cli/colors.js";
 export const app = express();
 const PORT = process.env.PORT || 3000;
 const progressStreams = new Map<string, Set<Response>>();
+const zoneUiDir = path.resolve(__dirname, "../ui");
+const zoneUiHtmlTemplate = readFileSync(path.join(zoneUiDir, "index.html"), "utf8");
 const ENHANCE_TASK_SYSTEM_PROMPT =
   "You are a task optimizer for an AI code agent called Zone.\n" +
   "The user has written a vague or incomplete task description.\n" +
@@ -40,11 +44,33 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
+app.get("/", (_req, res) => {
+  res.type("html").send(renderZoneUiHtml());
+});
+
+app.get("/index.html", (_req, res) => {
+  res.type("html").send(renderZoneUiHtml());
+});
+
 function getSupabaseClient(): SupabaseClient | null {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return null;
   return createClient(url, key);
+}
+
+function renderZoneUiHtml(): string {
+  const configScript = `<script>window.__ZONE_PUBLIC_CONFIG__=${JSON.stringify({
+    posthogKey:
+      typeof process.env.POSTHOG_KEY === "string"
+        ? process.env.POSTHOG_KEY.trim()
+        : "",
+    posthogHost:
+      typeof process.env.POSTHOG_HOST === "string"
+        ? process.env.POSTHOG_HOST.trim()
+        : "",
+  })};</script>`;
+  return zoneUiHtmlTemplate.replace("</head>", `${configScript}</head>`);
 }
 
 async function logRun(input: RunLogInput): Promise<void> {
@@ -191,7 +217,7 @@ async function ensureRunAuthorized(
             ok: false;
             reason: "no_free_runs";
             message: "You've used all your free runs. Upgrade to Pro.";
-            upgradeUrl: "https://zonecli.dev/pricing";
+            upgradeUrl: "https://zonecli.dev/#pricing";
           };
     }
 > {
@@ -274,7 +300,7 @@ async function ensureRunAuthorized(
         ok: false,
         reason: "no_free_runs",
         message: "You've used all your free runs. Upgrade to Pro.",
-        upgradeUrl: "https://zonecli.dev/pricing",
+        upgradeUrl: "https://zonecli.dev/#pricing",
       },
     };
   } catch {
@@ -421,6 +447,17 @@ app.get("/api/billing-summary", async (req, res) => {
       };
     };
   };
+  const posthogKey = process.env.POSTHOG_KEY || "";
+const posthogHost = process.env.POSTHOG_HOST || "";
+
+const injectedScript = `
+<script>
+  window.__ZONE_PUBLIC_CONFIG__ = {
+    POSTHOG_KEY: "${posthogKey}",
+    POSTHOG_HOST: "${posthogHost}"
+  };
+</script>
+`;
   const query = profilesTable
     .select?.("credits,subscription_status")
     ?.eq?.("id", userId);
@@ -496,7 +533,14 @@ app.post("/api/patch", async (req, res) => {
   }
 });
 app.post("/api/dry-run", async (req, res) => {
-  const { task, repoPath } = req.body;
+  const { task, repoPath, userId } = req.body;
+
+  const authorization = await ensureRunAuthorized(userId);
+  if (!authorization.allowed) {
+    res.status(authorization.status).json(authorization.body);
+    return;
+  }
+
   const result = await runLlmPatchFlow({ task, repoPath, dryRun: true });
   if (!result.ok) {
     res.status(500).json(result);
@@ -507,8 +551,24 @@ app.post("/api/dry-run", async (req, res) => {
     ok: true,
     fileDiffs: result.fileDiffs ?? [],
     patchPreview: result.patchPreview,
-    warnings: result.warnings,
-    patchResults: result.patchResults,
+      warnings: result.warnings,
+      patchResults: result.patchResults,
+    });
+
+  const confidence =
+    typeof result.developerConfidence === "number"
+      ? result.developerConfidence
+      : 0;
+
+  queueRunLog({
+    userId,
+    role: "developer",
+    task,
+    repoPath,
+    decisionMode:
+      result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
+    confidence,
+    creditsUsed: 0.1,
   });
 });
 
@@ -620,7 +680,7 @@ const authorization = await ensureRunAuthorized(userId);  if (!authorization.all
   }
 });
 
-app.use(express.static("src/ui"));
+app.use(express.static(zoneUiDir));
 
 export async function startServer(port = 3000): Promise<void> {
   await new Promise<void>((resolve) => {

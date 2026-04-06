@@ -203,6 +203,9 @@ input:focus,textarea:focus{border-color:#007acc}
     <div id="billingSummaryMeta" class="repo-selection-meta"></div>
   </div>
   <div id="progressBox" class="progress-box hidden"><span id="progressText"></span></div>
+  <div id="lowCreditsBox" class="repo-selection hidden" style="margin-bottom:10px">
+    <div id="lowCreditsText" class="repo-selection-meta" style="color:#ce9178"></div>
+  </div>
   <div class="btn-row">
     <button class="exec-btn" id="execBtn" onclick="execute()">
       <div class="spinner" id="spinner"></div>
@@ -279,6 +282,7 @@ input:focus,textarea:focus{border-color:#007acc}
     <div class="spinner" id="restoreSpinner"></div>
     <span id="restoreText">↩  Restore Previous State</span>
   </button>
+  <div id="resultUpgradeHint" class="repo-selection-meta hidden" style="margin-top:10px;color:#ce9178"></div>
 </div>
 
 </div><!-- rightCol -->
@@ -295,6 +299,7 @@ let currentRepoHandle=null;
 let currentRepoSelectionLabel='';
 let currentBackupSnapshot=null;
 let currentRunState={hasPatchResult:false,validationBlocked:false,runInProgress:false,decisionMode:'',confidence:0};
+let currentBillingState={plan:'',credits:null,hardBlocked:false};
 const RECENT_RUNS_KEY='zone_recent_runs';
 const MAX_RECENT_RUNS=6;
 
@@ -361,6 +366,8 @@ function resetRunState(){
   setRestoreAvailability(false);
   document.getElementById('successBox').style.display='none';
   document.getElementById('successBox').innerHTML='';
+  document.getElementById('resultUpgradeHint').textContent='';
+  document.getElementById('resultUpgradeHint').classList.add('hidden');
   document.getElementById('applyStatusBox').textContent='';
   document.getElementById('warningsList').classList.add('hidden');
   document.getElementById('fileList').innerHTML='';
@@ -411,6 +418,91 @@ function updateApplyState(){
   status.textContent=applyState.helperText;
 }
 
+const trackedUiImpressions=new Set();
+const pendingAnalyticsEvents=[];
+let posthogLoadAttempted=false;
+let posthogLoadPromise=null;
+
+function getPosthogConfig(){
+  const config=window.__ZONE_PUBLIC_CONFIG__||{};
+  const key=typeof config.posthogKey==='string'?config.posthogKey.trim():'';
+  const host=typeof config.posthogHost==='string'&&config.posthogHost.trim()?config.posthogHost.trim():'https://us.i.posthog.com';
+  return{key,host};
+}
+
+function flushPendingAnalyticsEvents(){
+  if(!window.posthog||typeof window.posthog.capture!=='function')return;
+  while(pendingAnalyticsEvents.length>0){
+    const event=pendingAnalyticsEvents.shift();
+    if(event)window.posthog.capture(event.name,event.data);
+  }
+}
+
+function initPosthog(){
+  try{
+    const{key,host}=getPosthogConfig();
+    if(!key)return Promise.resolve();
+    if(window.posthog&&typeof window.posthog.init==='function'){
+      if(!window.posthog.__zoneInitialized){
+        window.posthog.init(key,{api_host:host,capture_pageview:false,autocapture:false});
+        window.posthog.__zoneInitialized=true;
+      }
+      flushPendingAnalyticsEvents();
+      return Promise.resolve();
+    }
+    if(posthogLoadPromise)return posthogLoadPromise;
+    if(posthogLoadAttempted||!document?.head||typeof document.createElement!=='function')return Promise.resolve();
+    posthogLoadAttempted=true;
+    posthogLoadPromise=new Promise(resolve=>{
+      const script=document.createElement('script');
+      script.async=true;
+      script.src=`${host.replace(/\/$/,'')}/static/array.js`;
+      script.onload=()=>{
+        try{
+          if(window.posthog&&typeof window.posthog.init==='function'&&!window.posthog.__zoneInitialized){
+            window.posthog.init(key,{api_host:host,capture_pageview:false,autocapture:false});
+            window.posthog.__zoneInitialized=true;
+          }
+          flushPendingAnalyticsEvents();
+        }catch(_){}
+        resolve();
+      };
+      script.onerror=()=>resolve();
+      document.head.appendChild(script);
+    });
+    return posthogLoadPromise;
+  }catch(_){
+    return Promise.resolve();
+  }
+}
+
+function trackEvent(name,data={}){
+  try{
+    const impressionOnly=name==='low_credits_banner_shown'||name==='upgrade_cta_shown_result';
+    const impressionKey=impressionOnly?`${name}:${JSON.stringify(data)}`:'';
+    if(impressionOnly&&trackedUiImpressions.has(impressionKey))return;
+    if(impressionOnly)trackedUiImpressions.add(impressionKey);
+    console.log('[zone-analytics]',name,data);
+    void initPosthog();
+    if(window.posthog&&typeof window.posthog.capture==='function'){
+      window.posthog.capture(name,data);
+    }else{
+      pendingAnalyticsEvents.push({name,data});
+    }
+  }catch(_){}
+}
+
+function renderBillingState(){
+  const box=document.getElementById('billingSummaryBox');const label=document.getElementById('billingSummaryLabel');const meta=document.getElementById('billingSummaryMeta');
+  const lowBox=document.getElementById('lowCreditsBox');const lowText=document.getElementById('lowCreditsText');
+  const plan=currentBillingState.plan==='Pro'?'Pro':currentBillingState.plan==='Free'?'Free':'';
+  const credits=typeof currentBillingState.credits==='number'?Math.max(0,currentBillingState.credits):null;
+  if(plan&&credits!==null){label.textContent=`Plan: ${plan} · Remaining runs: ${credits}`;meta.textContent=plan==='Pro'?'1000 runs / month':'Upgrade for more runs';box.classList.remove('hidden');}
+  else{label.textContent='';meta.textContent='';box.classList.add('hidden');}
+  if(plan==='Free'&&credits!==null&&credits>0&&credits<=2){lowText.textContent=`⚠ You have ${credits} run${credits!==1?'s':''} left. Upgrade to Pro to continue.`;lowBox.classList.remove('hidden');trackEvent('low_credits_banner_shown',{credits,plan:'Free'});}
+  else{lowText.textContent='';lowBox.classList.add('hidden');}
+}
+
 function renderRepoSelection(){
   const box=document.getElementById('repoSelectionBox');
   const label=document.getElementById('repoSelectionLabel');
@@ -453,13 +545,18 @@ function validateTaskAndRepo(){
 async function executeDryRun(){
   const values=validateTaskAndRepo();if(!values)return;
   const{task,repoPath}=values;
+  const userId=getCurrentUserId();
   beginRunState();hideError();
   document.getElementById('diffSection').classList.add('hidden');
   setDryRunLoading(true);setProgress('Dry run — generating diff...');
   try{
-    const r=await fetch('/api/dry-run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath})});
-    if(!r.ok)throw new Error('Dry run failed: '+r.status);
-    const data=await r.json();
+    const r=await fetch('/api/dry-run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,userId})});
+    const data=await r.json().catch(()=>null);
+    if(!r.ok){
+      if(data?.reason==='no_free_runs'){trackEvent('dry_run_blocked_no_credits',{role:currentRole,repoPath});showUpgrade(data.message,data.upgradeUrl);return;}
+      if(data?.reason==='unauthorized'){showUnauthorized(data.message);return;}
+      throw new Error(data?.message||data?.reason||('Dry run failed: '+r.status));
+    }
     if(!data.ok)throw new Error(data.reason||'Dry run failed.');
     showDiff(data);setProgress('Ready');
   }catch(e){resetProgress();showError(e.message);}
@@ -590,40 +687,43 @@ function getCurrentUserId(){
 
 function showError(msg){
   const b=document.getElementById('errorBox');
-  b.textContent='⚠ '+msg;
-  b.style.display='block';
+  b.style.background='';b.style.borderColor='';b.style.color='';
+  b.textContent='\u26A0 '+msg;b.style.display='block';
 }
 
 function showUpgrade(message,url){
   const b=document.getElementById('errorBox');
-  const upgradeUrl=typeof url==='string'&&url.trim()?url.trim():'https://zonecli.dev/pricing';
+  const upgradeUrl=typeof url==='string'&&url.trim()?url.trim():'https://zonecli.dev/#pricing';
   const description=typeof message==='string'&&message.trim()&&message.trim().length<120?escapeHtml(message.trim()):'Keep using Zone to generate and apply tests instantly.';
-  b.innerHTML=`<div style="font-weight:700;margin-bottom:6px">You've used all your free runs</div><div style="margin-bottom:8px">${description}</div><ul style="margin:0 0 8px 18px;padding:0"><li>1000 runs / month</li><li>All roles (Developer, Test Engineer, Data Analyst)</li><li>Safe apply with confidence validation</li></ul><div style="margin-bottom:8px;font-weight:700">$9 / month</div><a href="${escapeHtml(upgradeUrl)}" target="_blank" rel="noreferrer" style="display:inline-block;margin-top:4px;padding:6px 12px;border:1px solid #4ec9b0;border-radius:6px;color:#4ec9b0;font-weight:700;text-decoration:none">Upgrade to Pro →</a><div style="margin-top:8px;opacity:.8">or try again with a more specific task</div>`;
+  trackEvent('upgrade_cta_shown_blocked',{plan:'Free',upgradeUrl});
+  currentBillingState={plan:'Free',credits:0,hardBlocked:true};renderBillingState();const btn=document.getElementById('execBtn');const s=document.getElementById('spinner');const t=document.getElementById('execText');btn.disabled=true;btn.title='Upgrade to Pro to continue';s.style.display='none';t.textContent='\u25B6  Execute';b.style.background='#0f241a';b.style.borderColor='#1d6b3a';b.style.color='#d4d4d4';
+  b.innerHTML=`<div style="font-weight:700;margin-bottom:6px">You've used all your free runs</div><div style="margin-bottom:8px">${description}</div><ul style="margin:0 0 8px 18px;padding:0"><li>1000 runs / month</li><li>All roles (Developer, Test Engineer, Data Analyst)</li><li>Safe apply with confidence validation</li></ul><div style="margin-bottom:8px;font-weight:700">$9 / month</div><a href="${escapeHtml(upgradeUrl)}" target="_blank" rel="noreferrer" onclick="trackEvent('upgrade_clicked',{source:'blocked',upgradeUrl:'${escapeHtml(upgradeUrl)}'})" style="display:inline-block;margin-top:4px;padding:6px 12px;border:1px solid #4ec9b0;border-radius:6px;color:#4ec9b0;font-weight:700;text-decoration:none">Upgrade to Pro &#8594;</a><div style="margin-top:8px;opacity:.8">or try again with a more specific task</div>`;
   b.style.display='block';
 }
 async function refreshBillingSummary(){
-  const box=document.getElementById('billingSummaryBox');const label=document.getElementById('billingSummaryLabel');const meta=document.getElementById('billingSummaryMeta');
   const userId=getCurrentUserId();
-  if(!userId){box.classList.add('hidden');label.textContent='';meta.textContent='';return;}
+  if(!userId){currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);return;}
   try{
-    const r=await fetch(`/api/billing-summary?userId=${encodeURIComponent(userId)}`);
+    const r=await fetch('/api/billing-summary?userId='+encodeURIComponent(userId));
     const data=await r.json().catch(()=>null);
-    if(!r.ok||!data?.ok){box.classList.add('hidden');label.textContent='';meta.textContent='';return;}
+    if(!r.ok||!data?.ok){currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);return;}
+    const wasHardBlocked=currentBillingState.hardBlocked;
     const plan=data.plan==='Pro'?'Pro':'Free';const credits=typeof data.credits==='number'?Math.max(0,data.credits):0;
-    label.textContent=`Plan: ${plan} · Remaining runs: ${credits}`;
-    meta.textContent=plan==='Pro'?'1000 runs / month':'Upgrade for more runs';
-    box.classList.remove('hidden');
+    currentBillingState={plan,credits,hardBlocked:plan==='Free'&&credits===0};renderBillingState();setLoading(false);
+    if(currentBillingState.hardBlocked&&!wasHardBlocked){showUpgrade("You've used all your free runs. Upgrade to Pro.",data.upgradeUrl);}
   }catch(_){
-    box.classList.add('hidden');label.textContent='';meta.textContent='';
+    currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);
   }
 }
 function showUnauthorized(message){
   const b=document.getElementById('errorBox');
-  b.textContent='⚠ '+message;
+  b.style.background='';b.style.borderColor='';b.style.color='';
+  b.textContent='\u26A0 '+message;
   b.style.display='block';
 }
 function hideError(){document.getElementById('errorBox').style.display='none';}
-function setLoading(l){const btn=document.getElementById('execBtn');const s=document.getElementById('spinner');const t=document.getElementById('execText');btn.disabled=l;s.style.display=l?'block':'none';t.textContent=l?'Running...':'▶  Execute';}
+function setLoading(l){const btn=document.getElementById('execBtn');const s=document.getElementById('spinner');const t=document.getElementById('execText');btn.disabled=l||currentBillingState.hardBlocked;s.style.display=l?'block':'none';t.textContent=l?'Running...':'\u25B6  Execute';}
+
 
 async function execute(){
   const values=validateTaskAndRepo();if(!values)return;
@@ -644,6 +744,7 @@ async function execute(){
         return;
       }
       if(accessResult?.reason==='no_free_runs'){
+        trackEvent('execute_blocked_no_credits',{role:currentRole,repoPath});
         showUpgrade(accessResult.message,accessResult.upgradeUrl);
         return;
       }
@@ -789,6 +890,15 @@ function showPatch(data){
     document.getElementById('badgeText').textContent=data.decisionMode.replace(/_/g,' ');
   }
 
+  if(data.developerRisk&&typeof data.developerRisk.score==='number'){
+    const risk=data.developerRisk.score;const bd=data.developerRisk.breakdown||{};
+    document.getElementById('riskVal').textContent=String(risk);
+    const d=bd.destructive||0,s=bd.schema||0,m=bd.massScope||bd.mass_scope||0;
+    document.getElementById('rDestructive').style.width=Math.min(d,100)+'%';document.getElementById('rDestructiveVal').textContent=d;
+    document.getElementById('rSchema').style.width=Math.min(s,100)+'%';document.getElementById('rSchemaVal').textContent=s;
+    document.getElementById('rMass').style.width=Math.min(m,100)+'%';document.getElementById('rMassVal').textContent=m;
+  }
+
   const patchResults=data.patchResults||[];
   let patchResultsHtml='';
   if(patchResults.length>0){
@@ -801,7 +911,7 @@ function showPatch(data){
   document.getElementById('filesVal').textContent=patches.length;
   updateResultSummary({role:currentRole,status:currentRunState.validationBlocked?'blocked':currentSummaryState.status,fileCount:patches.length,warningCount:warnings.length,contextCount:Array.isArray(data.contextFiles)?data.contextFiles.filter(Boolean).length:0});
   document.getElementById('fileList').innerHTML=patchResultsHtml+buildPreviewDiffHtml(data)+buildFilePreviewCards(patches);
-  document.getElementById('successBox').style.display='none';
+  document.getElementById('successBox').style.display='none';const upgradeHint=document.getElementById('resultUpgradeHint');if(currentBillingState.plan==='Free'&&!currentRunState.validationBlocked){trackEvent('upgrade_cta_shown_result',{plan:'Free',role:currentRole});upgradeHint.textContent='Generate more with Pro - 1000 runs/month';upgradeHint.classList.remove('hidden');}else{upgradeHint.textContent='';upgradeHint.classList.add('hidden');}
   document.getElementById('patchSection').classList.remove('hidden');
   updateApplyState();
 }
@@ -975,8 +1085,11 @@ renderHistory();renderRecentRuns();
 currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};
 renderResultSummary();
 updateApplyState();
+void initPosthog();
 void refreshBillingSummary();
 </script>
 </body>
 </html></body>
 </html>
+
+
