@@ -404,15 +404,15 @@ function shouldSkipHostedContextPath(filePath){
   return HOSTED_CONTEXT_BINARY_EXTENSIONS.has(ext);
 }
 
-async function collectHostedContextFilesFromHandle(handle,prefix=''){
+async function collectHostedContextFilesFromHandle(handle,prefix='',maxFiles=HOSTED_CONTEXT_MAX_FILES){
   const collected=[];
   async function walk(directoryHandle,currentPrefix){
-    if(collected.length>=HOSTED_CONTEXT_MAX_FILES)return;
+    if(collected.length>=maxFiles)return;
     const entries=[];
     for await(const entry of directoryHandle.values())entries.push(entry);
     entries.sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
     for(const entry of entries){
-      if(collected.length>=HOSTED_CONTEXT_MAX_FILES)break;
+      if(collected.length>=maxFiles)break;
       const relativePath=currentPrefix?`${currentPrefix}/${entry.name}`:entry.name;
       if(shouldSkipHostedContextPath(relativePath))continue;
       if(entry.kind==='directory'){await walk(entry,relativePath);continue;}
@@ -464,10 +464,38 @@ function isHostedFeatureFile(filePath){
   return getHostedContextExtension(filePath)==='feature';
 }
 
+function isHostedFrameworkSignalFile(filePath){
+  const normalized=String(filePath||'').toLowerCase();
+  const base=normalized.split('/').pop()||'';
+  if(base==='package.json'||base==='playwright.config.ts'||base==='playwright.config.js')return true;
+  if(normalized.includes('/tests/')||normalized.includes('/test/')||normalized.includes('/e2e/'))return true;
+  if(base.endsWith('.spec.ts')||base.endsWith('.spec.js')||base.endsWith('.test.ts')||base.endsWith('.test.js'))return true;
+  return false;
+}
+
+function prioritizeHostedTestEngineerFiles(files){
+  const prioritized=[];const seen=new Set();
+  function addMatches(predicate){
+    for(const file of files){
+      if(seen.has(file.path)||!predicate(file))continue;
+      seen.add(file.path);prioritized.push(file);
+      if(prioritized.length>=HOSTED_CONTEXT_MAX_FILES)return;
+    }
+  }
+  addMatches(file=>isHostedFrameworkSignalFile(file.path));
+  addMatches(file=>isHostedTestFile(file.path));
+  addMatches(file=>isHostedPageObjectFile(file.path));
+  addMatches(file=>isHostedStepDefinitionFile(file.path));
+  addMatches(file=>isHostedFeatureFile(file.path));
+  addMatches(()=>true);
+  return prioritized.slice(0,HOSTED_CONTEXT_MAX_FILES);
+}
+
 async function buildHostedTestEngineerContext(){
   if(!currentRepoHandle||currentRepoHandle.kind!=='directory'||typeof currentRepoHandle.values!=='function')return null;
-  const files=await collectHostedContextFilesFromHandle(currentRepoHandle);
+  const files=prioritizeHostedTestEngineerFiles(await collectHostedContextFilesFromHandle(currentRepoHandle,'',80));
   if(files.length===0)return null;
+  console.log('[zone-ui] hosted test context files:',files.map(file=>file.path));
   const availableFiles=files.map(file=>({path:file.path,category:classifyHostedContextCategory(file.path),extension:getHostedContextExtension(file.path)}));
   return{
     availableFiles,

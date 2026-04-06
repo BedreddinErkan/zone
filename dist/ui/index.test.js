@@ -941,9 +941,15 @@ function buildUiHarness(initialLocalStorage = {}) {
     (0, vitest_1.it)("attaches hostedContext to /api/test-engineer when a hosted folder is selected", async () => {
         const { context, elements, roleButtons } = buildUiHarness();
         const rootHandle = new MockDirectoryHandle("zone-repo");
+        const packageJson = await rootHandle.getFileHandle("package.json", { create: true });
+        packageJson.content = JSON.stringify({ devDependencies: { "@playwright/test": "^1.0.0" } });
+        const playwrightConfig = await rootHandle.getFileHandle("playwright.config.ts", {
+            create: true,
+        });
+        playwrightConfig.content = "import { defineConfig } from '@playwright/test'; export default defineConfig({});";
         const testsDir = await rootHandle.getDirectoryHandle("tests", { create: true });
         const testFile = await testsDir.getFileHandle("login.spec.ts", { create: true });
-        testFile.content = "test('login', async () => {});";
+        testFile.content = "import { test, expect } from '@playwright/test'; test('login', async () => {});";
         context.window.__ZONE_PUBLIC_CONFIG__ = {
             zoneApiBaseUrl: "https://api.zonecli.dev",
         };
@@ -972,6 +978,8 @@ function buildUiHarness(initialLocalStorage = {}) {
         const body = JSON.parse(requestInit.body || "{}");
         (0, vitest_1.expect)(body.hostedContext).toBeTruthy();
         (0, vitest_1.expect)(body.hostedContext.availableFiles).toEqual(vitest_1.expect.arrayContaining([
+            vitest_1.expect.objectContaining({ path: "package.json" }),
+            vitest_1.expect.objectContaining({ path: "playwright.config.ts" }),
             vitest_1.expect.objectContaining({ path: "tests/login.spec.ts" }),
         ]));
         (0, vitest_1.expect)(body.hostedContext.existingTestContents).toEqual(vitest_1.expect.arrayContaining([

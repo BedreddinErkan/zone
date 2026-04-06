@@ -1241,9 +1241,15 @@ describe("UI execute pre-flight access", () => {
   it("attaches hostedContext to /api/test-engineer when a hosted folder is selected", async () => {
     const { context, elements, roleButtons } = buildUiHarness();
     const rootHandle = new MockDirectoryHandle("zone-repo");
+    const packageJson = await rootHandle.getFileHandle("package.json", { create: true });
+    packageJson.content = JSON.stringify({ devDependencies: { "@playwright/test": "^1.0.0" } });
+    const playwrightConfig = await rootHandle.getFileHandle("playwright.config.ts", {
+      create: true,
+    });
+    playwrightConfig.content = "import { defineConfig } from '@playwright/test'; export default defineConfig({});";
     const testsDir = await rootHandle.getDirectoryHandle("tests", { create: true });
     const testFile = await testsDir.getFileHandle("login.spec.ts", { create: true });
-    testFile.content = "test('login', async () => {});";
+    testFile.content = "import { test, expect } from '@playwright/test'; test('login', async () => {});";
     (
       context.window as typeof context.window & {
         __ZONE_PUBLIC_CONFIG__?: { zoneApiBaseUrl: string };
@@ -1282,6 +1288,8 @@ describe("UI execute pre-flight access", () => {
     expect(body.hostedContext).toBeTruthy();
     expect(body.hostedContext.availableFiles).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({ path: "package.json" }),
+        expect.objectContaining({ path: "playwright.config.ts" }),
         expect.objectContaining({ path: "tests/login.spec.ts" }),
       ])
     );
