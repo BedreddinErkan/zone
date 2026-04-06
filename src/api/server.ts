@@ -50,19 +50,26 @@ function getSupabaseClient(): SupabaseClient | null {
 async function logRun(input: RunLogInput): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) return;
-  const authenticatedUserId =
-    typeof process.env.ZONE_USER_ID === "string"
-      ? process.env.ZONE_USER_ID.trim()
-      : "";
-  const userId = typeof input.userId === "string" ? input.userId.trim() : "";
+
+  const effectiveUserId =
+    typeof input.userId === "string" ? input.userId.trim() : "";
+
   const userEmail =
     typeof process.env.ZONE_USER_EMAIL === "string"
       ? process.env.ZONE_USER_EMAIL.trim()
       : "";
-  const effectiveUserId = authenticatedUserId || userId;
 
-  await supabase.from("run_logs").insert({
-    ...(effectiveUserId ? { user_id: effectiveUserId } : {}),
+  console.log(
+    `[zone] logRun: effectiveUserId=${effectiveUserId || "missing"}`
+  );
+
+  if (!effectiveUserId) {
+    console.log("[zone] logRun: missing user id, skipping run log + credit update");
+    return;
+  }
+
+  const insertResult = await supabase.from("run_logs").insert({
+    user_id: effectiveUserId,
     ...(userEmail ? { user_email: userEmail } : {}),
     role: input.role,
     task: input.task,
@@ -72,7 +79,15 @@ async function logRun(input: RunLogInput): Promise<void> {
     credits_used: input.creditsUsed,
   });
 
-  let fallbackCreditsToDeduct = input.creditsUsed;
+  if (insertResult.error) {
+    console.log(
+      `[zone] logRun: run_logs insert error=${insertResult.error.message}`
+    );
+  } else {
+    console.log("[zone] logRun: run_logs insert ok");
+  }
+
+  let freeRunDebit = 1;
 
   const profilesRead = supabase.from("profiles") as unknown as {
     select?: (
@@ -90,63 +105,52 @@ async function logRun(input: RunLogInput): Promise<void> {
       };
     };
   };
-  const profilesWrite = supabase.from("profiles") as unknown as {
-    update?: (values: Record<string, unknown>) => {
-      eq?: (column: string, value: string) => Promise<unknown> | unknown;
-    };
-  };
 
   const profileQuery = profilesRead
     .select?.("credits,total_runs,subscription_status")
     ?.eq?.("id", effectiveUserId);
 
-  if (
-    effectiveUserId &&
-    profileQuery &&
-    typeof profileQuery.maybeSingle === "function" &&
-    typeof profilesWrite.update === "function"
-  ) {
-    try {
-      const { data, error } = await profileQuery.maybeSingle();
-      if (!error && data) {
-        const currentCredits =
-          typeof data.credits === "number"
-            ? data.credits
-            : Number(data.credits ?? 0);
-        const currentRuns =
-          typeof data.total_runs === "number"
-            ? data.total_runs
-            : Number(data.total_runs ?? 0);
-        const paidAccess = hasPaidAccess(data.subscription_status);
+if (profileQuery && typeof profileQuery.maybeSingle === "function") {
+  try {
+    const { data, error } = await profileQuery.maybeSingle();
 
-        const nextCredits = paidAccess
-          ? currentCredits
-          : Math.max(0, currentCredits - 1);
-        fallbackCreditsToDeduct = paidAccess ? 0 : 1;
+    if (!error && data) {
+      const normalizedStatus = normalizeSubscriptionStatus(
+        data.subscription_status
+      );
+      const paidAccess = normalizedStatus === "pro";
 
-        await profilesWrite
-          .update({
-          credits: nextCredits,
-          total_runs: currentRuns + 1,
-          updated_at: new Date().toISOString(),
-          })
-          .eq?.("id", effectiveUserId);
+      freeRunDebit = paidAccess ? 0 : 1;
 
-        return;
-      }
-    } catch {
-      // fall through to legacy rpc path
+      console.log(
+        `[zone] logRun: subscription_status=${normalizedStatus || "missing"}`
+      );
+      console.log(`[zone] logRun: paidAccess=${paidAccess}`);
+    } else {
+      console.log("[zone] logRun: profile read failed, defaulting debit=1");
+      freeRunDebit = 1;
     }
+  } catch {
+    console.log("[zone] logRun: profile read threw, defaulting debit=1");
+    freeRunDebit = 1;
   }
-
-  await supabase.rpc("deduct_credits_and_increment_runs", {
-    p_user_id: effectiveUserId,
-    p_credits: fallbackCreditsToDeduct,
-  });
 }
+  console.log(`[zone] logRun: rpc debit=${freeRunDebit}`);
 
+  const rpcResult = await supabase.rpc("deduct_credits_and_increment_runs", {
+    p_user_id: effectiveUserId,
+    p_credits: freeRunDebit,
+  });
+
+  if (rpcResult.error) {
+    console.log(`[zone] logRun: rpc error=${rpcResult.error.message}`);
+  } else {
+    console.log("[zone] logRun: rpc ok");
+  }
+}
 function queueRunLog(input: RunLogInput): void {
-  if (!process.env.ZONE_USER_ID?.trim()) return;
+  const userId = typeof input.userId === "string" ? input.userId.trim() : "";
+  if (!userId) return;
   void logRun(input).catch(() => undefined);
 }
 
@@ -167,23 +171,43 @@ function normalizeSubscriptionStatus(value: unknown): string {
 
 function hasPaidAccess(subscriptionStatus: unknown): boolean {
   const normalized = normalizeSubscriptionStatus(subscriptionStatus);
-  return normalized === "active" || normalized === "trialing";
+  return normalized === "pro";
 }
 
-async function ensureRunAuthorized(): Promise<
+async function ensureRunAuthorized(
+  rawUserId: unknown
+): Promise<
   | { allowed: true }
   | {
       allowed: false;
       status: number;
-      body: { ok: false; reason: "subscription_required" };
+      body:
+        | {
+            ok: false;
+            reason: "unauthorized";
+            message: "Missing user session. Please open Zone from your dashboard.";
+          }
+        | {
+            ok: false;
+            reason: "no_free_runs";
+            message: "You've used all your free runs. Upgrade to Pro.";
+            upgradeUrl: "https://zonecli.dev/pricing";
+          };
     }
 > {
   const authenticatedUserId =
-    typeof process.env.ZONE_USER_ID === "string"
-      ? process.env.ZONE_USER_ID.trim()
-      : "";
+    typeof rawUserId === "string" ? rawUserId.trim() : "";
+
   if (!authenticatedUserId) {
-    return { allowed: true };
+    return {
+      allowed: false,
+      status: 401,
+      body: {
+        ok: false,
+        reason: "unauthorized",
+        message: "Missing user session. Please open Zone from your dashboard.",
+      },
+    };
   }
 
   const supabase = getSupabaseClient();
@@ -230,24 +254,33 @@ async function ensureRunAuthorized(): Promise<
       typeof data.credits === "number"
         ? data.credits
         : Number(data.credits ?? 0);
+
     const subscriptionStatus = normalizeSubscriptionStatus(
       data.subscription_status
     );
 
-    if (credits > 0 || hasPaidAccess(subscriptionStatus)) {
+    if (hasPaidAccess(subscriptionStatus)) {
+      return { allowed: true };
+    }
+
+    if (credits > 0) {
       return { allowed: true };
     }
 
     return {
       allowed: false,
       status: 402,
-      body: { ok: false, reason: "subscription_required" },
+      body: {
+        ok: false,
+        reason: "no_free_runs",
+        message: "You've used all your free runs. Upgrade to Pro.",
+        upgradeUrl: "https://zonecli.dev/pricing",
+      },
     };
   } catch {
     return { allowed: true };
   }
 }
-
 function emitProgress(runId: string | undefined, stage: string): void {
   if (!runId) return;
   const listeners = progressStreams.get(runId);
@@ -363,19 +396,30 @@ app.post("/api/analyze", async (req, res) => {
 });
 
 app.post("/api/patch", async (req, res) => {
-  const { task, repoPath } = req.body;
-  const authorization = await ensureRunAuthorized();
+  const { task, repoPath, userId } = req.body;
+
+  if (!task || !repoPath) {
+    res.status(400).json({ ok: false, reason: "task and repoPath are required" });
+    return;
+  }
+
+  const authorization = await ensureRunAuthorized(userId);
   if (!authorization.allowed) {
     res.status(authorization.status).json(authorization.body);
     return;
   }
+
   const result = await runLlmPatchFlow({ task, repoPath });
   res.json(result);
+
   if (result.ok) {
     const confidence =
-      typeof result.developerConfidence === "number" ? result.developerConfidence : 0;
+      typeof result.developerConfidence === "number"
+        ? result.developerConfidence
+        : 0;
+
     queueRunLog({
-      userId: process.env.ZONE_USER_ID ?? "",
+      userId,
       role: "developer",
       task,
       repoPath,
@@ -386,7 +430,6 @@ app.post("/api/patch", async (req, res) => {
     });
   }
 });
-
 app.post("/api/dry-run", async (req, res) => {
   const { task, repoPath } = req.body;
   const result = await runLlmPatchFlow({ task, repoPath, dryRun: true });
@@ -433,13 +476,12 @@ app.post("/api/enhance-task", async (req, res) => {
 });
 
 app.post("/api/test-engineer", async (req, res) => {
-  const { task, repoPath, runId } = req.body;
+const { task, repoPath, runId, userId } = req.body;
   if (!task || !repoPath) {
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
     return;
   }
-  const authorization = await ensureRunAuthorized();
-  if (!authorization.allowed) {
+const authorization = await ensureRunAuthorized(userId);  if (!authorization.allowed) {
     res.status(authorization.status).json(authorization.body);
     return;
   }
@@ -451,18 +493,18 @@ app.post("/api/test-engineer", async (req, res) => {
     });
     res.json(result);
     if (result.ok) {
-      queueRunLog({
-        userId: process.env.ZONE_USER_ID ?? "",
-        role: "test_engineer",
-        task,
-        repoPath,
-        decisionMode: getDecisionModeFromResult(
-          result as unknown as Record<string, unknown>,
-          result.confidence
-        ),
-        confidence: result.confidence,
-        creditsUsed: 0.08,
-      });
+queueRunLog({
+  userId,
+  role: "test_engineer",
+  task,
+  repoPath,
+  decisionMode: getDecisionModeFromResult(
+    result as unknown as Record<string, unknown>,
+    result.confidence
+  ),
+  confidence: result.confidence,
+  creditsUsed: 0.08,
+});
     }
   } catch (err) {
     emitProgress(runId, "Ready");
@@ -474,13 +516,12 @@ app.post("/api/test-engineer", async (req, res) => {
 });
 
 app.post("/api/data-analyst", async (req, res) => {
-  const { task, repoPath, runId } = req.body;
+const { task, repoPath, runId, userId } = req.body;
   if (!task || !repoPath) {
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
     return;
   }
-  const authorization = await ensureRunAuthorized();
-  if (!authorization.allowed) {
+const authorization = await ensureRunAuthorized(userId);  if (!authorization.allowed) {
     res.status(authorization.status).json(authorization.body);
     return;
   }
@@ -492,18 +533,18 @@ app.post("/api/data-analyst", async (req, res) => {
     });
     res.json(result);
     if (result.ok) {
-      queueRunLog({
-        userId: process.env.ZONE_USER_ID ?? "",
-        role: "data_analyst",
-        task,
-        repoPath,
-        decisionMode: getDecisionModeFromResult(
-          result as unknown as Record<string, unknown>,
-          result.confidence
-        ),
-        confidence: result.confidence,
-        creditsUsed: 0.06,
-      });
+  queueRunLog({
+  userId,
+  role: "data_analyst",
+  task,
+  repoPath,
+  decisionMode: getDecisionModeFromResult(
+    result as unknown as Record<string, unknown>,
+    result.confidence
+  ),
+  confidence: result.confidence,
+  creditsUsed: 0.06,
+});
     }
   } catch (err) {
     emitProgress(runId, "Ready");

@@ -374,10 +374,6 @@ function beginRunState(){
   updateApplyState();
 }
 
-// Apply button has 2 states:
-// 'enabled'  — patch ready, confidence ≥70, not blocked, not running
-// 'disabled' — blocked, low confidence, no patch, or running
-// Folder NOT required — falls back to server /api/apply with repoPath
 function getApplyBlockingReason(){
   if(currentRunState.runInProgress)return 'Wait for the current run to finish.';
   if(!currentRunState.hasPatchResult||!currentPatches.length)return 'Run Execute first.';
@@ -464,12 +460,14 @@ async function executeDryRun(){
   }catch(e){resetProgress();showError(e.message);}
   finally{currentRunState.runInProgress=false;setDryRunLoading(false);updateApplyState();}
 }
+
 function buildPreviewDiffHtml(data){
   if(data.fileDiffs&&data.fileDiffs.length>0){
     return `<div style="margin-bottom:10px"><div class="section-title">Changes</div>${buildDiffCards(data.fileDiffs)}</div>`;
   }
   return '';
 }
+
 function buildFilePreviewCards(patches){
   return (patches||[]).map((p,i)=>{
     const fp=formatFileLabel(p.filePath,i);const ext=fp.split('.').pop();
@@ -568,8 +566,39 @@ async function enhanceTask(){
   }catch(e){showError(e.message||'Enhance failed.');}
   finally{btn.disabled=false;btn.textContent=originalLabel;}
 }
-function copyPrompt(){const t=document.querySelector('.prompt-box').innerText.replace('copy','').trim();navigator.clipboard.writeText(t);document.querySelector('.copy-btn').textContent='copied!';setTimeout(()=>document.querySelector('.copy-btn').textContent='copy',1500);}
-function showError(msg){const b=document.getElementById('errorBox');b.textContent='⚠ '+msg;b.style.display='block';}
+
+function copyPrompt(){
+  const t=document.querySelector('.prompt-box').innerText.replace('copy','').trim();
+  navigator.clipboard.writeText(t);
+  document.querySelector('.copy-btn').textContent='copied!';
+  setTimeout(()=>document.querySelector('.copy-btn').textContent='copy',1500);
+}
+
+function getCurrentUserId(){
+  const clerk=window.Clerk;
+  if(clerk?.user?.id)return clerk.user.id;
+  if(clerk?.session?.user?.id)return clerk.session.user.id;
+  if(window.currentUser?.id)return window.currentUser.id;
+  console.log('[zone-ui] missing current user id');
+  return 'user_3BxAkYxUpGI83ARLfpjaI5Lmu70';
+}
+
+function showError(msg){
+  const b=document.getElementById('errorBox');
+  b.textContent='⚠ '+msg;
+  b.style.display='block';
+}
+
+function showUpgrade(message,url){
+  const b=document.getElementById('errorBox');
+  b.innerHTML=`⚠ ${escapeHtml(message)}<br><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer" style="color:#4ec9b0">Upgrade to Pro →</a>`;
+  b.style.display='block';
+}
+function showUnauthorized(message){
+  const b=document.getElementById('errorBox');
+  b.textContent='⚠ '+message;
+  b.style.display='block';
+}
 function hideError(){document.getElementById('errorBox').style.display='none';}
 function setLoading(l){const btn=document.getElementById('execBtn');const s=document.getElementById('spinner');const t=document.getElementById('execText');btn.disabled=l;s.style.display=l?'block':'none';t.textContent=l?'Running...':'▶  Execute';}
 
@@ -580,26 +609,52 @@ async function execute(){
   document.getElementById('diffSection').classList.add('hidden');
   currentRepoPath=repoPath;saveToHistory(repoPath);setLoading(true);
   const runId=`${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+  const userId=getCurrentUserId();
+  console.log('[zone-ui] execute userId =',userId);
   startProgress(runId,currentRole==='data_analyst'||currentRole==='test_engineer'?'Scanning repo...':'Generating patch...');
   try{
     if(currentRole==='test_engineer'){
-      const r=await fetch('/api/test-engineer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});
-      if(!r.ok)throw new Error('Test engineer flow failed: '+r.status);
-      const result=await r.json();
+      const r=await fetch('/api/test-engineer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId,userId})});
+      const result=await r.json().catch(()=>null);
+     if(!r.ok){
+  if(result?.reason==='unauthorized'){
+    showUnauthorized(result.message);
+    addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
+    return;
+  }
+  if(result?.reason==='no_free_runs'){
+    showUpgrade(result.message,result.upgradeUrl);
+    addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
+    return;
+  }
+  throw new Error(result?.reason||('Test engineer flow failed: '+r.status));
+}
       if(!result.ok&&!(result.validationBlocked&&result.preview)){showError(result.reason||'Test generation failed.');addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
       const decisionMode=result.decisionMode||(result.validationBlocked?'blocked':result.confidence>=70?'safe_to_apply':'preview_only');
       showDecision({decision:{mode:decisionMode},confidence:{score:result.confidence??0},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity});
-showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,validationBlocked:Boolean(result.validationBlocked),fileDiffs:result.fileDiffs||[]});
+      showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,validationBlocked:Boolean(result.validationBlocked),fileDiffs:result.fileDiffs||[]});
       if(result.validationBlocked)showError(result.reason||'Output validation blocked.');
       addRecentRun({task,role:currentRole,repoPath,status:result.validationBlocked?'error':'success',timestamp:Date.now()});
       finishProgress();
     }else if(currentRole==='data_analyst'){
-      const r=await fetch('/api/data-analyst',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});
-      if(!r.ok)throw new Error('Data analyst flow failed: '+r.status);
-      const result=await r.json();
-      if(!result.ok){showError(result.reason||'SQL generation failed.');return;}
+      const r=await fetch('/api/data-analyst',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId,userId})});
+      const result=await r.json().catch(()=>null);
+      if(!r.ok){
+  if(result?.reason==='unauthorized'){
+    showUnauthorized(result.message);
+    addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
+    return;
+  }
+  if(result?.reason==='no_free_runs'){
+    showUpgrade(result.message,result.upgradeUrl);
+    addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
+    return;
+  }
+  throw new Error(result?.reason||('Data analyst flow failed: '+r.status));
+}
+      if(!result.ok){showError(result.reason||'SQL generation failed.');addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
       showDecision({decision:{mode:result.confidence>=70?'safe_to_apply':'preview_only'},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat])});
-showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,fileDiffs:result.fileDiffs||[]});
+      showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,fileDiffs:result.fileDiffs||[]});
       addRecentRun({task,role:currentRole,repoPath,status:'success',timestamp:Date.now()});
       finishProgress();
     }else{
@@ -608,9 +663,21 @@ showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,
       if(!r1.ok)throw new Error('Analyze failed: '+r1.status);
       const analyzeData=await r1.json();
       setProgress('Generating patch...');
-      const r2=await fetch('/api/patch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});
-      if(!r2.ok)throw new Error('Patch failed: '+r2.status);
-      const patch=await r2.json();
+      const r2=await fetch('/api/patch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,userId})});
+      const patch=await r2.json().catch(()=>null);
+     if(!r2.ok){
+  if(patch?.reason==='unauthorized'){
+    showUnauthorized(patch.message);
+    addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
+    return;
+  }
+  if(patch?.reason==='no_free_runs'){
+    showUpgrade(patch.message,patch.upgradeUrl);
+    addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
+    return;
+  }
+  throw new Error(patch?.reason||('Patch failed: '+r2.status));
+}
       showDecision(analyzeData);
       showPatch(patch);
       addRecentRun({task,role:currentRole,repoPath,status:patch.ok===false?'error':'success',timestamp:Date.now()});
@@ -664,20 +731,22 @@ function showPatch(data){
   currentPatches=patches;
   currentRunState.hasPatchResult=patches.length>0;
   currentRunState.validationBlocked=validationBlocked||currentRunState.decisionMode==='blocked';
-  // Developer confidence override
-// Developer confidence override
-if(typeof data.developerConfidence==='number'){
-  currentRunState.confidence=data.developerConfidence;
-  document.getElementById('confVal').textContent=String(data.developerConfidence);
-}
-if(data.decisionMode&&currentRole==='developer'){
-  currentRunState.decisionMode=data.decisionMode;
-  const cls=data.decisionMode==='blocked'?'blocked':data.decisionMode==='preview_only'?'preview':'safe';
-  const dot=data.decisionMode==='blocked'?'#f44747':data.decisionMode==='preview_only'?'#ce9178':'#4ec9b0';
-  document.getElementById('decisionBadge').className='decision-badge '+cls;
-  document.getElementById('bdot').style.background=dot;
-  document.getElementById('badgeText').textContent=data.decisionMode.replace(/_/g,' ');
-}  const patchResults=data.patchResults||[];
+
+  if(typeof data.developerConfidence==='number'){
+    currentRunState.confidence=data.developerConfidence;
+    document.getElementById('confVal').textContent=String(data.developerConfidence);
+  }
+
+  if(data.decisionMode&&currentRole==='developer'){
+    currentRunState.decisionMode=data.decisionMode;
+    const cls=data.decisionMode==='blocked'?'blocked':data.decisionMode==='preview_only'?'preview':'safe';
+    const dot=data.decisionMode==='blocked'?'#f44747':data.decisionMode==='preview_only'?'#ce9178':'#4ec9b0';
+    document.getElementById('decisionBadge').className='decision-badge '+cls;
+    document.getElementById('bdot').style.background=dot;
+    document.getElementById('badgeText').textContent=data.decisionMode.replace(/_/g,' ');
+  }
+
+  const patchResults=data.patchResults||[];
   let patchResultsHtml='';
   if(patchResults.length>0){
     const rows=patchResults.map(r=>{const icon=r.status==='applied'?'✓':r.status==='failed'?'✗':'~';const cls=r.status==='applied'?'ok':r.status==='failed'?'fail':'skip';const reason=r.reason?` (${escapeHtml(r.reason)})`:'';return `<div class="pr-row"><span class="pr-icon ${cls}">${icon}</span><span class="pr-path">${escapeHtml(r.filePath||'')}</span><span class="pr-reason">${escapeHtml(r.status)}${reason}</span></div>`;}).join('');
@@ -865,4 +934,5 @@ renderResultSummary();
 updateApplyState();
 </script>
 </body>
+</html></body>
 </html>
