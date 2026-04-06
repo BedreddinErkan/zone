@@ -164,7 +164,15 @@ function shouldProxyHostedRequest(
     return false;
   }
 
-  const targetOrigin = new URL(getHostedInferenceBaseUrl()).origin.toLowerCase();
+  let targetOrigin = "";
+  try {
+    targetOrigin = new URL(getHostedInferenceBaseUrl()).origin.toLowerCase();
+  } catch {
+    console.warn(
+      `[zone] hosted proxy bypass: invalid hosted base URL for ${routePath}`
+    );
+    return false;
+  }
   const requestOrigin = getRequestOrigin(req);
   if (requestOrigin && requestOrigin === targetOrigin) {
     console.warn(

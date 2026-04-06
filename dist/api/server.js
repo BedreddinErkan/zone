@@ -84,7 +84,14 @@ function shouldProxyHostedRequest(req, routePath) {
     if (!shouldUseHostedInferenceProxy()) {
         return false;
     }
-    const targetOrigin = new URL((0, openaiClient_js_1.getHostedInferenceBaseUrl)()).origin.toLowerCase();
+    let targetOrigin = "";
+    try {
+        targetOrigin = new URL((0, openaiClient_js_1.getHostedInferenceBaseUrl)()).origin.toLowerCase();
+    }
+    catch {
+        console.warn(`[zone] hosted proxy bypass: invalid hosted base URL for ${routePath}`);
+        return false;
+    }
     const requestOrigin = getRequestOrigin(req);
     if (requestOrigin && requestOrigin === targetOrigin) {
         console.warn(`[zone] self-proxy bypass: ${routePath} target ${targetOrigin} matches current request origin`);
