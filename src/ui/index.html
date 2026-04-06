@@ -822,6 +822,11 @@ async function execute(){
         }
         throw new Error(patch?.reason||('Patch failed: '+r2.status));
       }
+      if(!patch?.ok){
+        showError(patch?.reason||'Patch generation failed.');
+        addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
+        return;
+      }
       showDecision(analyzeData);
       showPatch(patch);
       addRecentRun({task,role:currentRole,repoPath,status:patch.ok===false?'error':'success',timestamp:Date.now()});

@@ -146,6 +146,38 @@ function shouldUseHostedInferenceProxy(): boolean {
   return getInferenceMode() === "hosted";
 }
 
+function logStartupDiagnostics(): void {
+  const mode = getInferenceMode();
+  console.log(`[zone] inference mode: ${mode}`);
+
+  if (mode === "hosted") {
+    const hostedBaseUrl = getHostedInferenceBaseUrl();
+    console.log(`[zone] hosted inference base URL: ${hostedBaseUrl}`);
+    if (hostedBaseUrl === "https://zonecli.dev") {
+      console.warn(
+        "[zone] Warning: default hosted target https://zonecli.dev must serve the real Zone product API routes for full hosted role support."
+      );
+    }
+    return;
+  }
+
+  const hasOpenAiKey =
+    typeof process.env.OPENAI_API_KEY === "string" &&
+    process.env.OPENAI_API_KEY.trim().length > 0;
+  console.log(
+    `[zone] local inference OPENAI_API_KEY: ${hasOpenAiKey ? "present" : "missing"}`
+  );
+
+  const explicitMode = (process.env.ZONE_INFERENCE_MODE || "")
+    .trim()
+    .toLowerCase();
+  if (explicitMode === "local" && !hasOpenAiKey) {
+    console.warn(
+      "[zone] Warning: ZONE_INFERENCE_MODE=local requires OPENAI_API_KEY for local inference."
+    );
+  }
+}
+
 async function proxyHostedZoneRequest(
   req: express.Request,
   res: express.Response,
@@ -1113,6 +1145,7 @@ const authorization = await ensureRunAuthorized(userId);  if (!authorization.all
 app.use(express.static(zoneUiDir));
 
 export async function startServer(port = 3000): Promise<void> {
+  logStartupDiagnostics();
   await new Promise<void>((resolve) => {
     app.listen(port, () => {
       console.log(

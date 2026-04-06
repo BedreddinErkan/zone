@@ -70,6 +70,27 @@ function renderZoneUiHtml() {
 function shouldUseHostedInferenceProxy() {
     return (0, openaiClient_js_1.getInferenceMode)() === "hosted";
 }
+function logStartupDiagnostics() {
+    const mode = (0, openaiClient_js_1.getInferenceMode)();
+    console.log(`[zone] inference mode: ${mode}`);
+    if (mode === "hosted") {
+        const hostedBaseUrl = (0, openaiClient_js_1.getHostedInferenceBaseUrl)();
+        console.log(`[zone] hosted inference base URL: ${hostedBaseUrl}`);
+        if (hostedBaseUrl === "https://zonecli.dev") {
+            console.warn("[zone] Warning: default hosted target https://zonecli.dev must serve the real Zone product API routes for full hosted role support.");
+        }
+        return;
+    }
+    const hasOpenAiKey = typeof process.env.OPENAI_API_KEY === "string" &&
+        process.env.OPENAI_API_KEY.trim().length > 0;
+    console.log(`[zone] local inference OPENAI_API_KEY: ${hasOpenAiKey ? "present" : "missing"}`);
+    const explicitMode = (process.env.ZONE_INFERENCE_MODE || "")
+        .trim()
+        .toLowerCase();
+    if (explicitMode === "local" && !hasOpenAiKey) {
+        console.warn("[zone] Warning: ZONE_INFERENCE_MODE=local requires OPENAI_API_KEY for local inference.");
+    }
+}
 async function proxyHostedZoneRequest(req, res, routePath, options) {
     const baseUrl = (0, openaiClient_js_1.getHostedInferenceBaseUrl)();
     const targetUrl = new URL(routePath, `${baseUrl}/`);
@@ -798,6 +819,7 @@ exports.app.post("/api/data-analyst", async (req, res) => {
 });
 exports.app.use(express_1.default.static(zoneUiDir));
 async function startServer(port = 3000) {
+    logStartupDiagnostics();
     await new Promise((resolve) => {
         exports.app.listen(port, () => {
             console.log((0, colors_js_1.colorize)(`Zone UI running on http://localhost:${port}`, colors_js_1.c.green, colors_js_1.c.bold));
