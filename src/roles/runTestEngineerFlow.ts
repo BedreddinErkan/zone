@@ -935,6 +935,19 @@ export async function runTestEngineerFlow(input: {
   onProgress?: (stage: string) => void;
   hostedContext?: HostedTestEngineerContextInput;
 }): Promise<TestEngineerFlowResult> {
+  console.log(
+    `[zone-api] test-engineer hostedContext present: ${Boolean(input.hostedContext)}`
+  );
+  if (input.hostedContext) {
+    console.log(
+      `[zone-api] test-engineer availableFiles: ${input.hostedContext.availableFiles.length}`
+    );
+    console.log(
+      `[zone-api] test-engineer existingTestContents: ${JSON.stringify(
+        input.hostedContext.existingTestContents.map((file) => file.path)
+      )}`
+    );
+  }
   let allFiles: RepoFile[];
   try {
     input.onProgress?.("Scanning repo...");
@@ -962,7 +975,15 @@ export async function runTestEngineerFlow(input: {
   let framework;
   try {
     input.onProgress?.("Detecting framework...");
+    console.log(
+      `[zone-api] test-engineer detection source: ${
+        input.hostedContext ? "hostedContext" : "filesystem"
+      }`
+    );
     framework = detectTestFramework(allFiles);
+    console.log(
+      `[zone-api] test-engineer detected framework: ${framework.framework}`
+    );
   } catch (err) {
     return {
       ok: false,
@@ -971,6 +992,11 @@ export async function runTestEngineerFlow(input: {
   }
 
   if (framework.framework === "unknown") {
+    console.log(
+      `[zone-api] test-engineer detection failed: ${JSON.stringify(
+        framework.evidence
+      )}`
+    );
     return {
       ok: false,
       reason:

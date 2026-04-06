@@ -796,21 +796,6 @@ describe("/api/test-engineer", () => {
 
   it("proxies hosted test-engineer requests with hosted context", async () => {
     getInferenceModeMock.mockReturnValue("hosted");
-    scanRepoMock.mockResolvedValue([
-      {
-        path: "tests/login.spec.ts",
-        absolutePath: "C:/repo/tests/login.spec.ts",
-        extension: "ts",
-        category: "unknown",
-      },
-    ]);
-    buildTestEngineerContextMock.mockReturnValue({
-      pageObjectFiles: [],
-      stepDefinitionFiles: [],
-      featureFiles: [],
-      existingTestFiles: [],
-    });
-
     let forwardedBody: Record<string, unknown> | undefined;
     const hostedServer = createServer((req, res) => {
       let body = "";
@@ -858,6 +843,35 @@ describe("/api/test-engineer", () => {
         repoPath: "C:/repo",
         runId: "run-123",
         userId: "clerk_user_123",
+        hostedContext: {
+          availableFiles: [
+            {
+              path: "package.json",
+              category: "unknown",
+              extension: "json",
+            },
+            {
+              path: "playwright.config.ts",
+              category: "unknown",
+              extension: "ts",
+            },
+            {
+              path: "tests/login.spec.ts",
+              category: "unknown",
+              extension: "ts",
+            },
+          ],
+          pageObjectContents: [],
+          stepDefinitionContents: [],
+          featureContents: [],
+          existingTestContents: [
+            {
+              path: "tests/login.spec.ts",
+              content:
+                "import { test } from '@playwright/test'; test('login', async () => {});",
+            },
+          ],
+        },
       }),
     });
 
@@ -885,6 +899,16 @@ describe("/api/test-engineer", () => {
         hostedContext: {
           availableFiles: [
             {
+              path: "package.json",
+              category: "unknown",
+              extension: "json",
+            },
+            {
+              path: "playwright.config.ts",
+              category: "unknown",
+              extension: "ts",
+            },
+            {
               path: "tests/login.spec.ts",
               category: "unknown",
               extension: "ts",
@@ -893,7 +917,13 @@ describe("/api/test-engineer", () => {
           pageObjectContents: [],
           stepDefinitionContents: [],
           featureContents: [],
-          existingTestContents: [],
+          existingTestContents: [
+            {
+              path: "tests/login.spec.ts",
+              content:
+                "import { test } from '@playwright/test'; test('login', async () => {});",
+            },
+          ],
         },
       })
     );

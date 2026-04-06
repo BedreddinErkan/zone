@@ -638,6 +638,11 @@ function summarizeValidationIssues(issues) {
     return { decision, summary };
 }
 async function runTestEngineerFlow(input) {
+    console.log(`[zone-api] test-engineer hostedContext present: ${Boolean(input.hostedContext)}`);
+    if (input.hostedContext) {
+        console.log(`[zone-api] test-engineer availableFiles: ${input.hostedContext.availableFiles.length}`);
+        console.log(`[zone-api] test-engineer existingTestContents: ${JSON.stringify(input.hostedContext.existingTestContents.map((file) => file.path))}`);
+    }
     let allFiles;
     try {
         input.onProgress?.("Scanning repo...");
@@ -665,7 +670,9 @@ async function runTestEngineerFlow(input) {
     let framework;
     try {
         input.onProgress?.("Detecting framework...");
+        console.log(`[zone-api] test-engineer detection source: ${input.hostedContext ? "hostedContext" : "filesystem"}`);
         framework = (0, detectTestFramework_js_1.detectTestFramework)(allFiles);
+        console.log(`[zone-api] test-engineer detected framework: ${framework.framework}`);
     }
     catch (err) {
         return {
@@ -674,6 +681,7 @@ async function runTestEngineerFlow(input) {
         };
     }
     if (framework.framework === "unknown") {
+        console.log(`[zone-api] test-engineer detection failed: ${JSON.stringify(framework.evidence)}`);
         return {
             ok: false,
             reason: "Could not detect a test framework in this repository. " +

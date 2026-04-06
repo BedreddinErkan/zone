@@ -688,20 +688,6 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
     });
     (0, vitest_1.it)("proxies hosted test-engineer requests with hosted context", async () => {
         getInferenceModeMock.mockReturnValue("hosted");
-        scanRepoMock.mockResolvedValue([
-            {
-                path: "tests/login.spec.ts",
-                absolutePath: "C:/repo/tests/login.spec.ts",
-                extension: "ts",
-                category: "unknown",
-            },
-        ]);
-        buildTestEngineerContextMock.mockReturnValue({
-            pageObjectFiles: [],
-            stepDefinitionFiles: [],
-            featureFiles: [],
-            existingTestFiles: [],
-        });
         let forwardedBody;
         const hostedServer = (0, node_http_1.createServer)((req, res) => {
             let body = "";
@@ -741,6 +727,34 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
                 repoPath: "C:/repo",
                 runId: "run-123",
                 userId: "clerk_user_123",
+                hostedContext: {
+                    availableFiles: [
+                        {
+                            path: "package.json",
+                            category: "unknown",
+                            extension: "json",
+                        },
+                        {
+                            path: "playwright.config.ts",
+                            category: "unknown",
+                            extension: "ts",
+                        },
+                        {
+                            path: "tests/login.spec.ts",
+                            category: "unknown",
+                            extension: "ts",
+                        },
+                    ],
+                    pageObjectContents: [],
+                    stepDefinitionContents: [],
+                    featureContents: [],
+                    existingTestContents: [
+                        {
+                            path: "tests/login.spec.ts",
+                            content: "import { test } from '@playwright/test'; test('login', async () => {});",
+                        },
+                    ],
+                },
             }),
         });
         const body = await response.json();
@@ -765,6 +779,16 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             hostedContext: {
                 availableFiles: [
                     {
+                        path: "package.json",
+                        category: "unknown",
+                        extension: "json",
+                    },
+                    {
+                        path: "playwright.config.ts",
+                        category: "unknown",
+                        extension: "ts",
+                    },
+                    {
                         path: "tests/login.spec.ts",
                         category: "unknown",
                         extension: "ts",
@@ -773,7 +797,12 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
                 pageObjectContents: [],
                 stepDefinitionContents: [],
                 featureContents: [],
-                existingTestContents: [],
+                existingTestContents: [
+                    {
+                        path: "tests/login.spec.ts",
+                        content: "import { test } from '@playwright/test'; test('login', async () => {});",
+                    },
+                ],
             },
         }));
         (0, vitest_1.expect)(runTestEngineerFlowMock).not.toHaveBeenCalled();

@@ -1086,9 +1086,10 @@ app.post("/api/test-engineer", async (req, res) => {
 if (shouldProxyHostedRequest(req, "/api/test-engineer")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
-      typeof task === "string" && typeof repoPath === "string"
+      req.body?.hostedContext ??
+      (typeof task === "string" && typeof repoPath === "string"
         ? await buildHostedTestEngineerContext(task, repoPath)
-        : undefined;
+        : undefined);
     await proxyHostedZoneRequest(req, res, "/api/test-engineer", {
       bodyOverride: hostedContext
         ? {
