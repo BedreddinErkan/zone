@@ -39,8 +39,10 @@ import type { Response } from "express";
 import { c, colorize } from "../cli/colors.js";
 
 export const app = express();
-const PORT = process.env.PORT || 3000;
-const progressStreams = new Map<string, Set<Response>>();
+const port = Number(process.env.PORT) || 3000;
+app.listen(port, () => {
+  console.log(`Zone UI running on http://localhost:${port}`);
+});const progressStreams = new Map<string, Set<Response>>();
 const zoneUiDir = path.resolve(__dirname, "../ui");
 const zoneUiHtmlTemplate = readFileSync(path.join(zoneUiDir, "index.html"), "utf8");
 const ENHANCE_TASK_SYSTEM_PROMPT =
