@@ -86,8 +86,20 @@ export type TestEngineerFlowResult =
       applyPatches?: Array<{ filePath: string; fullContent: string }>;
       preview?: string;
       validationBlocked?: boolean;
-      debug?: TestEngineerDebugInfo;
+    debug?: TestEngineerDebugInfo;
     };
+
+type HostedTestEngineerContextInput = {
+  availableFiles: Array<{
+    path: string;
+    category: RepoFile["category"];
+    extension: string;
+  }>;
+  pageObjectContents: Array<{ path: string; content: string }>;
+  stepDefinitionContents: Array<{ path: string; content: string }>;
+  featureContents: Array<{ path: string; content: string }>;
+  existingTestContents: Array<{ path: string; content: string }>;
+};
 
 function extractJson(rawText: string): string {
   const trimmed = rawText.trim();
@@ -363,7 +375,7 @@ function resolveFrameworkAugmentation(framework: string): TestEngineerDebugInfo[
   return "none";
 }
 
-async function readExampleContents(
+export async function readExampleContents(
   files: RepoFile[],
   allFiles: RepoFile[],
   limit: number
@@ -397,7 +409,7 @@ function isPreferredCucumberFeaturePath(path: string): boolean {
   return path.startsWith("src/test/resources/features/");
 }
 
-async function readFeatureExampleContents(
+export async function readFeatureExampleContents(
   files: RepoFile[],
   allFiles: RepoFile[],
   framework: { framework: string }
@@ -921,11 +933,19 @@ export async function runTestEngineerFlow(input: {
   task: string;
   repoPath: string;
   onProgress?: (stage: string) => void;
+  hostedContext?: HostedTestEngineerContextInput;
 }): Promise<TestEngineerFlowResult> {
   let allFiles: RepoFile[];
   try {
     input.onProgress?.("Scanning repo...");
-    allFiles = await scanRepo(input.repoPath);
+    allFiles = input.hostedContext
+      ? input.hostedContext.availableFiles.map((file) => ({
+          path: file.path,
+          absolutePath: file.path,
+          extension: file.extension,
+          category: file.category,
+        }))
+      : await scanRepo(input.repoPath);
     if (!Array.isArray(allFiles)) {
       return {
         ok: false,
@@ -1005,26 +1025,18 @@ export async function runTestEngineerFlow(input: {
     },
   };
 
-  const pageObjectContents = await readExampleContents(
-    context.pageObjectFiles,
-    allFiles,
-    3
-  );
-  const stepDefinitionContents = await readExampleContents(
-    context.stepDefinitionFiles,
-    allFiles,
-    2
-  );
-  const featureContents = await readFeatureExampleContents(
-    context.featureFiles,
-    allFiles,
-    framework
-  );
-  const existingTestContents = await readExampleContents(
-    context.existingTestFiles,
-    allFiles,
-    3
-  );
+  const pageObjectContents = input.hostedContext
+    ? input.hostedContext.pageObjectContents
+    : await readExampleContents(context.pageObjectFiles, allFiles, 3);
+  const stepDefinitionContents = input.hostedContext
+    ? input.hostedContext.stepDefinitionContents
+    : await readExampleContents(context.stepDefinitionFiles, allFiles, 2);
+  const featureContents = input.hostedContext
+    ? input.hostedContext.featureContents
+    : await readFeatureExampleContents(context.featureFiles, allFiles, framework);
+  const existingTestContents = input.hostedContext
+    ? input.hostedContext.existingTestContents
+    : await readExampleContents(context.existingTestFiles, allFiles, 3);
 
   input.onProgress?.("Building prompt...");
   const prompt = buildTestEngineerPrompt({

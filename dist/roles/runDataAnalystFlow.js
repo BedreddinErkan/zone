@@ -64,7 +64,14 @@ async function runDataAnalystFlow(input) {
     let allFiles;
     try {
         input.onProgress?.("Scanning repo...");
-        allFiles = await (0, scanRepo_js_1.scanRepo)(input.repoPath);
+        allFiles = input.hostedContext
+            ? input.hostedContext.availableFiles.map((file) => ({
+                path: file.path,
+                absolutePath: file.path,
+                extension: file.extension,
+                category: file.category,
+            }))
+            : await (0, scanRepo_js_1.scanRepo)(input.repoPath);
         if (!Array.isArray(allFiles)) {
             return {
                 ok: false,
@@ -81,7 +88,7 @@ async function runDataAnalystFlow(input) {
     let schema;
     try {
         input.onProgress?.("Detecting schema...");
-        schema = (0, detectDataSchema_js_1.detectDataSchema)(allFiles);
+        schema = input.hostedContext?.schema ?? (0, detectDataSchema_js_1.detectDataSchema)(allFiles);
     }
     catch (err) {
         return {
@@ -100,7 +107,9 @@ async function runDataAnalystFlow(input) {
             dialect: schema.dialect,
         };
     }
-    const existingSqlContents = await readExampleContents(context.existingSqlFiles, allFiles, 3);
+    const existingSqlContents = input.hostedContext
+        ? input.hostedContext.existingSqlContents
+        : await readExampleContents(context.existingSqlFiles, allFiles, 3);
     input.onProgress?.("Building prompt...");
     const prompt = (0, dataAnalystPrompt_js_1.buildDataAnalystPrompt)({
         task: input.task,

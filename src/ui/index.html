@@ -658,7 +658,7 @@ async function enhanceTask(){
   const originalLabel=btn.textContent;
   btn.disabled=true;btn.textContent='Enhancing...';hideError();
   try{
-    const r=await fetch('/api/enhance-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,role:currentRole,repoPath})});
+    const r=await fetch('/api/enhance-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,role:currentRole,repoPath,userId:getCurrentUserId()})});
     if(!r.ok){
       const payload=await r.json().catch(()=>null);
       throw new Error(payload?.reason||('Enhance failed: '+r.status));

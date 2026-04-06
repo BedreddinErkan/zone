@@ -6,6 +6,12 @@ const runLlmPatchFlowMock = vi.fn();
 const applyLlmPatchesMock = vi.fn();
 const runTestEngineerFlowMock = vi.fn();
 const runDataAnalystFlowMock = vi.fn();
+const detectTestFrameworkMock = vi.fn();
+const buildTestEngineerContextMock = vi.fn();
+const detectDataSchemaMock = vi.fn();
+const buildDataAnalystContextMock = vi.fn();
+const readExampleContentsMock = vi.fn();
+const readFeatureExampleContentsMock = vi.fn();
 const scanRepoMock = vi.fn();
 const readProjectFilesMock = vi.fn();
 const responsesCreateMock = vi.fn();
@@ -38,6 +44,8 @@ const createOpenAIClientMock = vi.fn(() => ({
   },
 }));
 const getModelNameMock = vi.fn(() => "gpt-4o-mini");
+const getInferenceModeMock = vi.fn(() => "local");
+const getHostedInferenceBaseUrlMock = vi.fn(() => "https://zonecli.dev");
 
 vi.mock("../core/runAgent.js", () => ({
   runAgent: runAgentMock,
@@ -45,6 +53,7 @@ vi.mock("../core/runAgent.js", () => ({
 
 vi.mock("../core/runLlmPatchFlow.js", () => ({
   runLlmPatchFlow: runLlmPatchFlowMock,
+  isIrrelevantDeveloperContextPath: vi.fn(() => false),
 }));
 
 vi.mock("../core/applyLlmPatches.js", () => ({
@@ -53,6 +62,24 @@ vi.mock("../core/applyLlmPatches.js", () => ({
 
 vi.mock("../roles/runTestEngineerFlow.js", () => ({
   runTestEngineerFlow: runTestEngineerFlowMock,
+  readExampleContents: readExampleContentsMock,
+  readFeatureExampleContents: readFeatureExampleContentsMock,
+}));
+
+vi.mock("../roles/detectTestFramework.js", () => ({
+  detectTestFramework: detectTestFrameworkMock,
+}));
+
+vi.mock("../roles/testEngineerContext.js", () => ({
+  buildTestEngineerContext: buildTestEngineerContextMock,
+}));
+
+vi.mock("../roles/detectDataSchema.js", () => ({
+  detectDataSchema: detectDataSchemaMock,
+}));
+
+vi.mock("../roles/dataAnalystContext.js", () => ({
+  buildDataAnalystContext: buildDataAnalystContextMock,
 }));
 
 vi.mock("../roles/runDataAnalystFlow.js", () => ({
@@ -70,6 +97,8 @@ vi.mock("../repo/readProjectFiles.js", () => ({
 vi.mock("../llm/openaiClient.js", () => ({
   createOpenAIClient: createOpenAIClientMock,
   getModelName: getModelNameMock,
+  getInferenceMode: getInferenceModeMock,
+  getHostedInferenceBaseUrl: getHostedInferenceBaseUrlMock,
 }));
 
 vi.mock("@supabase/supabase-js", () => ({
@@ -83,6 +112,25 @@ describe("/api/test-engineer", () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
+    detectTestFrameworkMock.mockReturnValue({
+      framework: "playwright_ts",
+      language: "typescript",
+    });
+    buildTestEngineerContextMock.mockReturnValue({
+      pageObjectFiles: [],
+      stepDefinitionFiles: [],
+      featureFiles: [],
+      existingTestFiles: [],
+    });
+    detectDataSchemaMock.mockReturnValue({
+      dialect: "postgresql",
+      migrationFormat: "flyway",
+    });
+    buildDataAnalystContextMock.mockReturnValue({
+      existingSqlFiles: [],
+    });
+    readExampleContentsMock.mockResolvedValue([]);
+    readFeatureExampleContentsMock.mockResolvedValue([]);
     process.env.VITEST = "true";
     delete process.env.SUPABASE_URL;
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -255,6 +303,102 @@ describe("/api/test-engineer", () => {
     expect(body.patchResults).toEqual([
       { filePath: "src/foo.ts", status: "applied" },
     ]);
+  });
+
+  it("proxies hosted dry-run requests with hostedContext", async () => {
+    getInferenceModeMock.mockReturnValue("hosted");
+    scanRepoMock.mockResolvedValue([
+      {
+        path: "src/foo.ts",
+        absolutePath: "C:/repo/src/foo.ts",
+        extension: "ts",
+        category: "backend",
+      },
+    ]);
+    readProjectFilesMock.mockResolvedValue({
+      "C:/repo/src/foo.ts": "export const foo = 1;",
+    });
+
+    let forwardedBody: Record<string, unknown> | undefined;
+    const hostedServer = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        forwardedBody = JSON.parse(body);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: true,
+            patchPreview: "=== HOSTED DRY RUN ===",
+            warnings: [],
+            patchResults: [],
+            fileDiffs: [],
+            applyPatches: [],
+          })
+        );
+      });
+    });
+
+    await new Promise<void>((resolve) => {
+      hostedServer.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    const hostedAddress = hostedServer.address();
+    if (!hostedAddress || typeof hostedAddress === "string") {
+      throw new Error("Hosted server address unavailable");
+    }
+
+    getHostedInferenceBaseUrlMock.mockReturnValue(
+      `http://127.0.0.1:${hostedAddress.port}`
+    );
+
+    const response = await fetch(`${baseUrl}/api/dry-run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "update foo",
+        repoPath: "C:/repo",
+        userId: "clerk_user_123",
+      }),
+    });
+
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      patchPreview: "=== HOSTED DRY RUN ===",
+      warnings: [],
+      patchResults: [],
+      fileDiffs: [],
+      applyPatches: [],
+    });
+    expect(forwardedBody).toEqual(
+      expect.objectContaining({
+        task: "update foo",
+        repoPath: "C:/repo",
+        userId: "clerk_user_123",
+        hostedContext: expect.objectContaining({
+          repoSummary: expect.any(String),
+          contextFiles: [
+            expect.objectContaining({
+              path: "src/foo.ts",
+              content: "export const foo = 1;",
+            }),
+          ],
+          originalContents: {
+            "src/foo.ts": "export const foo = 1;",
+          },
+        }),
+      })
+    );
+    expect(runLlmPatchFlowMock).not.toHaveBeenCalled();
+
+    await new Promise<void>((resolve, reject) => {
+      hostedServer.close((err) => (err ? reject(err) : resolve()));
+    });
   });
 
   it("logs successful dry runs to Supabase when env is configured", async () => {
@@ -434,6 +578,66 @@ describe("/api/test-engineer", () => {
     });
   });
 
+  it("maps unsupported test framework failures to the product-friendly test engineer message", async () => {
+    runTestEngineerFlowMock.mockResolvedValue({
+      ok: false,
+      reason: "Could not detect a test framework in this repository.",
+      framework: "unknown",
+    });
+
+    const response = await fetch(`${baseUrl}/api/test-engineer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "add login test",
+        repoPath: "C:/repo",
+        userId: "clerk_user_123",
+      }),
+    });
+
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: false,
+      reason:
+        "No supported test setup detected\n\n" +
+        "Zone Test Engineer needs an existing supported test setup in this folder.\n" +
+        "Supported: Playwright, Cypress, Cucumber+Java, Selenium (Java/Python), TestNG, or pytest.",
+      framework: "unknown",
+    });
+  });
+
+  it("maps missing schema context failures to the product-friendly data analyst message", async () => {
+    runDataAnalystFlowMock.mockResolvedValue({
+      ok: false,
+      reason: "detectDataSchema failed: no schema context found",
+      dialect: "unknown",
+    });
+
+    const response = await fetch(`${baseUrl}/api/data-analyst`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "create orders table",
+        repoPath: "C:/repo",
+        userId: "clerk_user_123",
+      }),
+    });
+
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: false,
+      reason:
+        "No database context detected\n\n" +
+        "Zone Data Analyst needs existing schema or migration context in this folder.\n" +
+        "Supported signals include SQL migrations, Alembic, Flyway, Liquibase, or existing database files.",
+      dialect: "unknown",
+    });
+  });
+
   it("returns an enhanced task from /api/enhance-task", async () => {
     scanRepoMock.mockResolvedValue([
       {
@@ -490,6 +694,323 @@ describe("/api/test-engineer", () => {
     );
   });
 
+  it("proxies hosted enhance-task requests with hosted context", async () => {
+    getInferenceModeMock.mockReturnValue("hosted");
+    scanRepoMock.mockResolvedValue([
+      {
+        path: "tests/login.spec.ts",
+        absolutePath: "C:/repo/tests/login.spec.ts",
+      },
+    ]);
+    readProjectFilesMock.mockResolvedValue({
+      "C:/repo/tests/login.spec.ts": "test('login', async () => {});",
+    });
+
+    let forwardedBody: Record<string, unknown> | undefined;
+    const hostedServer = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        forwardedBody = JSON.parse(body);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: true,
+            enhancedTask: "Extend tests/login.spec.ts with a negative login test.",
+          })
+        );
+      });
+    });
+
+    await new Promise<void>((resolve) => {
+      hostedServer.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    const hostedAddress = hostedServer.address();
+    if (!hostedAddress || typeof hostedAddress === "string") {
+      throw new Error("Hosted server address unavailable");
+    }
+
+    getHostedInferenceBaseUrlMock.mockReturnValue(
+      `http://127.0.0.1:${hostedAddress.port}`
+    );
+
+    const response = await fetch(`${baseUrl}/api/enhance-task`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "add login test",
+        role: "test_engineer",
+        repoPath: "C:/repo",
+        userId: "clerk_user_123",
+      }),
+    });
+
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      enhancedTask: "Extend tests/login.spec.ts with a negative login test.",
+    });
+    expect(forwardedBody).toEqual(
+      expect.objectContaining({
+        task: "add login test",
+        role: "test_engineer",
+        repoPath: "C:/repo",
+        userId: "clerk_user_123",
+        hostedContext: {
+          contextFiles: [
+            {
+              path: "tests/login.spec.ts",
+              content: "test('login', async () => {});",
+            },
+          ],
+        },
+      })
+    );
+    expect(createOpenAIClientMock).not.toHaveBeenCalled();
+
+    await new Promise<void>((resolve, reject) => {
+      hostedServer.close((err) => (err ? reject(err) : resolve()));
+    });
+  });
+
+  it("proxies hosted test-engineer requests with hosted context", async () => {
+    getInferenceModeMock.mockReturnValue("hosted");
+    scanRepoMock.mockResolvedValue([
+      {
+        path: "tests/login.spec.ts",
+        absolutePath: "C:/repo/tests/login.spec.ts",
+        extension: "ts",
+        category: "unknown",
+      },
+    ]);
+    buildTestEngineerContextMock.mockReturnValue({
+      pageObjectFiles: [],
+      stepDefinitionFiles: [],
+      featureFiles: [],
+      existingTestFiles: [],
+    });
+
+    let forwardedBody: Record<string, unknown> | undefined;
+    const hostedServer = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        forwardedBody = JSON.parse(body);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: true,
+            framework: "playwright_ts",
+            language: "typescript",
+            confidence: 82,
+            decisionMode: "safe_to_apply",
+            summary: "Generated test",
+            warnings: [],
+            applyPatches: [],
+            fileDiffs: [],
+            preview: "preview",
+          })
+        );
+      });
+    });
+
+    await new Promise<void>((resolve) => {
+      hostedServer.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    const hostedAddress = hostedServer.address();
+    if (!hostedAddress || typeof hostedAddress === "string") {
+      throw new Error("Hosted server address unavailable");
+    }
+
+    getHostedInferenceBaseUrlMock.mockReturnValue(
+      `http://127.0.0.1:${hostedAddress.port}`
+    );
+
+    const response = await fetch(`${baseUrl}/api/test-engineer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "add login test",
+        repoPath: "C:/repo",
+        runId: "run-123",
+        userId: "clerk_user_123",
+      }),
+    });
+
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      framework: "playwright_ts",
+      language: "typescript",
+      confidence: 82,
+      decisionMode: "safe_to_apply",
+      summary: "Generated test",
+      warnings: [],
+      applyPatches: [],
+      fileDiffs: [],
+      preview: "preview",
+    });
+    expect(forwardedBody).toEqual(
+      expect.objectContaining({
+        task: "add login test",
+        repoPath: "C:/repo",
+        runId: "run-123",
+        userId: "clerk_user_123",
+        hostedContext: {
+          availableFiles: [
+            {
+              path: "tests/login.spec.ts",
+              category: "unknown",
+              extension: "ts",
+            },
+          ],
+          pageObjectContents: [],
+          stepDefinitionContents: [],
+          featureContents: [],
+          existingTestContents: [],
+        },
+      })
+    );
+    expect(runTestEngineerFlowMock).not.toHaveBeenCalled();
+
+    await new Promise<void>((resolve, reject) => {
+      hostedServer.close((err) => (err ? reject(err) : resolve()));
+    });
+  });
+
+  it("proxies hosted data-analyst requests with hosted context", async () => {
+    getInferenceModeMock.mockReturnValue("hosted");
+    scanRepoMock.mockResolvedValue([
+      {
+        path: "db/migration/V3__orders.sql",
+        absolutePath: "C:/repo/db/migration/V3__orders.sql",
+        extension: "sql",
+        category: "unknown",
+      },
+    ]);
+    detectDataSchemaMock.mockReturnValue({
+      dialect: "postgresql",
+      migrationFormat: "flyway",
+    });
+    buildDataAnalystContextMock.mockReturnValue({
+      existingSqlFiles: [
+        {
+          path: "db/migration/V3__orders.sql",
+          absolutePath: "C:/repo/db/migration/V3__orders.sql",
+        },
+      ],
+    });
+    readProjectFilesMock.mockResolvedValue({
+      "C:/repo/db/migration/V3__orders.sql": "CREATE TABLE orders(id SERIAL PRIMARY KEY);",
+    });
+
+    let forwardedBody: Record<string, unknown> | undefined;
+    const hostedServer = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        forwardedBody = JSON.parse(body);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: true,
+            dialect: "postgresql",
+            migrationFormat: "flyway",
+            confidence: 90,
+            summary: "Creates orders table",
+            warnings: [],
+            applyPatches: [],
+            fileDiffs: [],
+            preview: "preview",
+          })
+        );
+      });
+    });
+
+    await new Promise<void>((resolve) => {
+      hostedServer.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    const hostedAddress = hostedServer.address();
+    if (!hostedAddress || typeof hostedAddress === "string") {
+      throw new Error("Hosted server address unavailable");
+    }
+
+    getHostedInferenceBaseUrlMock.mockReturnValue(
+      `http://127.0.0.1:${hostedAddress.port}`
+    );
+
+    const response = await fetch(`${baseUrl}/api/data-analyst`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "create orders table",
+        repoPath: "C:/repo",
+        runId: "run-456",
+        userId: "clerk_user_123",
+      }),
+    });
+
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      dialect: "postgresql",
+      migrationFormat: "flyway",
+      confidence: 90,
+      summary: "Creates orders table",
+      warnings: [],
+      applyPatches: [],
+      fileDiffs: [],
+      preview: "preview",
+    });
+    expect(forwardedBody).toEqual(
+      expect.objectContaining({
+        task: "create orders table",
+        repoPath: "C:/repo",
+        runId: "run-456",
+        userId: "clerk_user_123",
+        hostedContext: {
+          availableFiles: [
+            {
+              path: "db/migration/V3__orders.sql",
+              category: "unknown",
+              extension: "sql",
+            },
+          ],
+          schema: {
+            dialect: "postgresql",
+            migrationFormat: "flyway",
+          },
+          existingSqlContents: [
+            {
+              path: "db/migration/V3__orders.sql",
+              content: "CREATE TABLE orders(id SERIAL PRIMARY KEY);",
+            },
+          ],
+        },
+      })
+    );
+    expect(runDataAnalystFlowMock).not.toHaveBeenCalled();
+
+    await new Promise<void>((resolve, reject) => {
+      hostedServer.close((err) => (err ? reject(err) : resolve()));
+    });
+  });
+
   it("returns the billing summary from the authenticated profile", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
@@ -512,6 +1033,462 @@ describe("/api/test-engineer", () => {
       plan: "Free",
       credits: 7,
       subscriptionStatus: "free",
+    });
+  });
+
+  it("returns ok from /api/check-access for a free user with remaining runs", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        credits: 5,
+        subscription_status: "free",
+      },
+      error: null,
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/check-access?userId=clerk_user_123`
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ ok: true });
+  });
+
+  it("returns unauthorized from /api/check-access when userId is missing", async () => {
+    const response = await fetch(`${baseUrl}/api/check-access`);
+
+    const body = await response.json();
+    expect(response.status).toBe(401);
+    expect(body).toEqual({
+      ok: false,
+      reason: "unauthorized",
+      message: "Missing user session. Please open Zone from your dashboard.",
+    });
+  });
+
+  it("returns no_free_runs from /api/check-access for an exhausted free user", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        credits: 0,
+        subscription_status: "free",
+      },
+      error: null,
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/check-access?userId=clerk_user_123`
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(402);
+    expect(body).toEqual({
+      ok: false,
+      reason: "no_free_runs",
+      message: "You've used all your free runs. Upgrade to Pro.",
+      upgradeUrl: "https://zonecli.dev/#pricing",
+    });
+  });
+
+  it("returns ok from /api/check-access for a pro user even with zero credits", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        credits: 0,
+        subscription_status: "pro",
+      },
+      error: null,
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/check-access?userId=clerk_user_123`
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ ok: true });
+  });
+
+  it("returns a pro billing summary shape the UI can render", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        credits: 0,
+        subscription_status: "pro",
+      },
+      error: null,
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/billing-summary?userId=clerk_user_123`
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      plan: "Pro",
+      credits: 0,
+      subscriptionStatus: "pro",
+    });
+  });
+
+  it("proxies hosted patch requests without using the local developer flow", async () => {
+    getInferenceModeMock.mockReturnValue("hosted");
+    scanRepoMock.mockResolvedValue([
+      {
+        path: "src/components/LoginForm.tsx",
+        absolutePath: "C:/repo/src/components/LoginForm.tsx",
+        extension: "tsx",
+        category: "frontend",
+      },
+    ]);
+    readProjectFilesMock.mockResolvedValue({
+      "C:/repo/src/components/LoginForm.tsx": "export function LoginForm() {}",
+    });
+    let forwardedHeaders: Headers | undefined;
+    let forwardedBody: Record<string, unknown> | undefined;
+    const hostedServer = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        forwardedHeaders = new Headers(req.headers as Record<string, string>);
+        forwardedBody = JSON.parse(body);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: true,
+            patchPreview: "=== HOSTED PATCH ===",
+            warnings: [],
+            applyPatches: [],
+          })
+        );
+      });
+    });
+
+    await new Promise<void>((resolve) => {
+      hostedServer.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    const hostedAddress = hostedServer.address();
+    if (!hostedAddress || typeof hostedAddress === "string") {
+      throw new Error("Hosted server address unavailable");
+    }
+
+    getHostedInferenceBaseUrlMock.mockReturnValue(
+      `http://127.0.0.1:${hostedAddress.port}`
+    );
+
+    const response = await fetch(`${baseUrl}/api/patch`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer test-token",
+        Cookie: "session=test",
+      },
+      body: JSON.stringify({
+        task: "fix login validation",
+        repoPath: "C:/repo",
+        userId: "clerk_user_123",
+      }),
+    });
+
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      patchPreview: "=== HOSTED PATCH ===",
+      warnings: [],
+      applyPatches: [],
+    });
+    expect(runLlmPatchFlowMock).not.toHaveBeenCalled();
+    expect(forwardedBody).toEqual(
+      expect.objectContaining({
+        task: "fix login validation",
+        repoPath: "C:/repo",
+        userId: "clerk_user_123",
+        hostedContext: expect.objectContaining({
+          repoSummary: "React-like frontend detected",
+          contextFiles: [
+            expect.objectContaining({
+              path: "src/components/LoginForm.tsx",
+              content: "export function LoginForm() {}",
+            }),
+          ],
+          originalContents: {
+            "src/components/LoginForm.tsx": "export function LoginForm() {}",
+          },
+        }),
+      })
+    );
+    expect(forwardedHeaders?.get("authorization")).toBe("Bearer test-token");
+    expect(forwardedHeaders?.get("cookie")).toContain("session=test");
+    expect(forwardedHeaders?.get("x-zone-user-id")).toBe("clerk_user_123");
+
+    await new Promise<void>((resolve, reject) => {
+      hostedServer.close((err) => (err ? reject(err) : resolve()));
+    });
+  });
+
+  it("returns a service-style hosted error instead of a local key error in hosted mode", async () => {
+    getInferenceModeMock.mockReturnValue("hosted");
+    getHostedInferenceBaseUrlMock.mockReturnValue("http://127.0.0.1:1");
+    scanRepoMock.mockResolvedValue([
+      {
+        path: "tests/login.spec.ts",
+        absolutePath: "C:/repo/tests/login.spec.ts",
+      },
+    ]);
+    readProjectFilesMock.mockResolvedValue({
+      "C:/repo/tests/login.spec.ts": "test('login', async () => {});",
+    });
+
+    const response = await fetch(`${baseUrl}/api/enhance-task`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "add login test",
+        role: "test_engineer",
+        repoPath: "C:/repo",
+        userId: "clerk_user_123",
+      }),
+    });
+
+    const body = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(body.reason).toBe("hosted_inference_unavailable");
+    expect(String(body.message)).toContain("Zone hosted inference is unavailable");
+    expect(createOpenAIClientMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back to local check-access when the hosted route returns 404", async () => {
+    getInferenceModeMock.mockReturnValue("hosted");
+    const hostedServer = createServer((_req, res) => {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, reason: "not_found" }));
+    });
+
+    await new Promise<void>((resolve) => {
+      hostedServer.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    const hostedAddress = hostedServer.address();
+    if (!hostedAddress || typeof hostedAddress === "string") {
+      throw new Error("Hosted server address unavailable");
+    }
+
+    getHostedInferenceBaseUrlMock.mockReturnValue(
+      `http://127.0.0.1:${hostedAddress.port}`
+    );
+
+    const response = await fetch(
+      `${baseUrl}/api/check-access?userId=clerk_user_123`
+    );
+
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ ok: true });
+
+    await new Promise<void>((resolve, reject) => {
+      hostedServer.close((err) => (err ? reject(err) : resolve()));
+    });
+  });
+
+  it("falls back to local billing-summary when the hosted route returns 404", async () => {
+    getInferenceModeMock.mockReturnValue("hosted");
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        credits: 3,
+        subscription_status: "free",
+      },
+      error: null,
+    });
+
+    const hostedServer = createServer((_req, res) => {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, reason: "not_found" }));
+    });
+
+    await new Promise<void>((resolve) => {
+      hostedServer.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    const hostedAddress = hostedServer.address();
+    if (!hostedAddress || typeof hostedAddress === "string") {
+      throw new Error("Hosted server address unavailable");
+    }
+
+    getHostedInferenceBaseUrlMock.mockReturnValue(
+      `http://127.0.0.1:${hostedAddress.port}`
+    );
+
+    const response = await fetch(
+      `${baseUrl}/api/billing-summary?userId=clerk_user_123`
+    );
+
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      plan: "Free",
+      credits: 3,
+      subscriptionStatus: "free",
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      hostedServer.close((err) => (err ? reject(err) : resolve()));
+    });
+  });
+
+  it("passes through hosted unauthorized responses from /api/check-access unchanged", async () => {
+    getInferenceModeMock.mockReturnValue("hosted");
+    const hostedServer = createServer((_req, res) => {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          ok: false,
+          reason: "unauthorized",
+          message: "Missing user session. Please open Zone from your dashboard.",
+        })
+      );
+    });
+
+    await new Promise<void>((resolve) => {
+      hostedServer.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    const hostedAddress = hostedServer.address();
+    if (!hostedAddress || typeof hostedAddress === "string") {
+      throw new Error("Hosted server address unavailable");
+    }
+
+    getHostedInferenceBaseUrlMock.mockReturnValue(
+      `http://127.0.0.1:${hostedAddress.port}`
+    );
+
+    const response = await fetch(
+      `${baseUrl}/api/check-access?userId=clerk_user_123`
+    );
+
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body).toEqual({
+      ok: false,
+      reason: "unauthorized",
+      message: "Missing user session. Please open Zone from your dashboard.",
+    });
+    expect(createSupabaseClientMock).not.toHaveBeenCalled();
+
+    await new Promise<void>((resolve, reject) => {
+      hostedServer.close((err) => (err ? reject(err) : resolve()));
+    });
+  });
+
+  it("passes through hosted no_free_runs responses from /api/check-access unchanged", async () => {
+    getInferenceModeMock.mockReturnValue("hosted");
+    const hostedServer = createServer((_req, res) => {
+      res.writeHead(402, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          ok: false,
+          reason: "no_free_runs",
+          message: "You've used all your free runs. Upgrade to Pro.",
+          upgradeUrl: "https://zonecli.dev/#pricing",
+        })
+      );
+    });
+
+    await new Promise<void>((resolve) => {
+      hostedServer.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    const hostedAddress = hostedServer.address();
+    if (!hostedAddress || typeof hostedAddress === "string") {
+      throw new Error("Hosted server address unavailable");
+    }
+
+    getHostedInferenceBaseUrlMock.mockReturnValue(
+      `http://127.0.0.1:${hostedAddress.port}`
+    );
+
+    const response = await fetch(
+      `${baseUrl}/api/check-access?userId=clerk_user_123`
+    );
+
+    const body = await response.json();
+
+    expect(response.status).toBe(402);
+    expect(body).toEqual({
+      ok: false,
+      reason: "no_free_runs",
+      message: "You've used all your free runs. Upgrade to Pro.",
+      upgradeUrl: "https://zonecli.dev/#pricing",
+    });
+    expect(createSupabaseClientMock).not.toHaveBeenCalled();
+
+    await new Promise<void>((resolve, reject) => {
+      hostedServer.close((err) => (err ? reject(err) : resolve()));
+    });
+  });
+
+  it("passes through hosted billing-summary responses unchanged", async () => {
+    getInferenceModeMock.mockReturnValue("hosted");
+    const hostedServer = createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          ok: true,
+          plan: "Pro",
+          credits: 0,
+          subscriptionStatus: "pro",
+        })
+      );
+    });
+
+    await new Promise<void>((resolve) => {
+      hostedServer.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    const hostedAddress = hostedServer.address();
+    if (!hostedAddress || typeof hostedAddress === "string") {
+      throw new Error("Hosted server address unavailable");
+    }
+
+    getHostedInferenceBaseUrlMock.mockReturnValue(
+      `http://127.0.0.1:${hostedAddress.port}`
+    );
+
+    const response = await fetch(
+      `${baseUrl}/api/billing-summary?userId=clerk_user_123`
+    );
+
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      plan: "Pro",
+      credits: 0,
+      subscriptionStatus: "pro",
+    });
+    expect(createSupabaseClientMock).not.toHaveBeenCalled();
+
+    await new Promise<void>((resolve, reject) => {
+      hostedServer.close((err) => (err ? reject(err) : resolve()));
     });
   });
 });

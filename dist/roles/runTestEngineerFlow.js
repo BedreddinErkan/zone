@@ -6,6 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.extractTestSignatures = extractTestSignatures;
 exports.deduplicateTestBlocks = deduplicateTestBlocks;
 exports.finalizeGeneratedTestContent = finalizeGeneratedTestContent;
+exports.readExampleContents = readExampleContents;
+exports.readFeatureExampleContents = readFeatureExampleContents;
 exports.runTestEngineerFlow = runTestEngineerFlow;
 const node_path_1 = __importDefault(require("node:path"));
 const scanRepo_js_1 = require("../repo/scanRepo.js");
@@ -639,7 +641,14 @@ async function runTestEngineerFlow(input) {
     let allFiles;
     try {
         input.onProgress?.("Scanning repo...");
-        allFiles = await (0, scanRepo_js_1.scanRepo)(input.repoPath);
+        allFiles = input.hostedContext
+            ? input.hostedContext.availableFiles.map((file) => ({
+                path: file.path,
+                absolutePath: file.path,
+                extension: file.extension,
+                category: file.category,
+            }))
+            : await (0, scanRepo_js_1.scanRepo)(input.repoPath);
         if (!Array.isArray(allFiles)) {
             return {
                 ok: false,
@@ -715,10 +724,18 @@ async function runTestEngineerFlow(input) {
             routeEvidence: [],
         },
     };
-    const pageObjectContents = await readExampleContents(context.pageObjectFiles, allFiles, 3);
-    const stepDefinitionContents = await readExampleContents(context.stepDefinitionFiles, allFiles, 2);
-    const featureContents = await readFeatureExampleContents(context.featureFiles, allFiles, framework);
-    const existingTestContents = await readExampleContents(context.existingTestFiles, allFiles, 3);
+    const pageObjectContents = input.hostedContext
+        ? input.hostedContext.pageObjectContents
+        : await readExampleContents(context.pageObjectFiles, allFiles, 3);
+    const stepDefinitionContents = input.hostedContext
+        ? input.hostedContext.stepDefinitionContents
+        : await readExampleContents(context.stepDefinitionFiles, allFiles, 2);
+    const featureContents = input.hostedContext
+        ? input.hostedContext.featureContents
+        : await readFeatureExampleContents(context.featureFiles, allFiles, framework);
+    const existingTestContents = input.hostedContext
+        ? input.hostedContext.existingTestContents
+        : await readExampleContents(context.existingTestFiles, allFiles, 3);
     input.onProgress?.("Building prompt...");
     const prompt = (0, testEngineerPrompt_js_1.buildTestEngineerPrompt)({
         task: input.task,

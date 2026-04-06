@@ -1067,31 +1067,37 @@ function renderPatchResultLine(result, warnings) {
 }
 async function runLlmPatchFlow(input) {
     const taskIntent = typeof input.task === "string" ? (0, taskIntentParser_js_1.parseTaskIntent)(input.task) : UNKNOWN_INTENT;
+    const hostedAvailableFiles = input.hostedContext?.availableFiles.map((file) => ({
+        path: file.path,
+        absolutePath: file.path,
+        extension: file.extension,
+        category: file.category,
+    }));
     // 1. Scan repo
-    const allFiles = await (0, scanRepo_js_1.scanRepo)(input.repoPath);
+    const allFiles = hostedAvailableFiles ?? (await (0, scanRepo_js_1.scanRepo)(input.repoPath));
     const developerContextFiles = allFiles.filter((file) => !isIrrelevantDeveloperContextPath(file.path));
     // 2. Detect structure
-    const structure = (0, detectProjectStructure_js_1.detectProjectStructure)(allFiles);
-    const projectSummary = structure.notes.join(" ") || "No project summary available.";
+    const structure = (0, detectProjectStructure_js_1.detectProjectStructure)(developerContextFiles);
+    const projectSummary = input.hostedContext?.repoSummary ||
+        structure.notes.join(" ") ||
+        "No project summary available.";
+    const projectNotes = input.hostedContext?.projectNotes ?? structure.notes;
     // 3. Rank relevant files — top 8
     const relevantFiles = (0, rankRelevantFiles_js_1.rankRelevantFiles)({
         task: input.task,
         files: developerContextFiles,
         intent: taskIntent,
     }).slice(0, 8);
-    const topRelevantFilePaths = relevantFiles
-        .slice(0, 4)
-        .map((file) => file.absolutePath)
-        .filter((filePath) => typeof filePath === "string");
-    const topRelevantFileContentsMap = topRelevantFilePaths.length > 0
-        ? await (0, readProjectFiles_js_1.readProjectFiles)(topRelevantFilePaths)
-        : {};
-    const existingRelevantPaths = Object.keys(topRelevantFileContentsMap).map((absPath) => developerContextFiles.find((file) => file.absolutePath === absPath)?.path ??
-        absPath);
-    const existingFilesSummary = existingRelevantPaths.length > 0
-        ? "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n" +
-            existingRelevantPaths.map((filePath) => `- ${filePath}`).join("\n")
-        : "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n(none)";
+    const existingFilesSummary = input.hostedContext?.existingFilesSummary ??
+        (() => {
+            const topRelevantPaths = relevantFiles
+                .slice(0, 4)
+                .map((file) => file.path);
+            return topRelevantPaths.length > 0
+                ? "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n" +
+                    topRelevantPaths.map((filePath) => `- ${filePath}`).join("\n")
+                : "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n(none)";
+        })();
     // 4. Plan feature with LLM
     let llmPlan;
     try {
@@ -1099,7 +1105,7 @@ async function runLlmPatchFlow(input) {
             task: input.task,
             intent: taskIntent,
             projectSummary,
-            projectNotes: structure.notes,
+            projectNotes,
             relevantFiles: relevantFiles.map((f) => ({
                 path: f.path,
                 category: f.category,
@@ -1113,29 +1119,43 @@ async function runLlmPatchFlow(input) {
         return { ok: false, reason };
     }
     // 5. Read top 4 suggested files
-    const selectedContextFiles = [
-        ...llmPlan.suggestedFiles.map((file) => ({
+    const selectedContextFiles = input.hostedContext?.contextFiles.map((file) => ({
+        path: file.path,
+        action: file.action,
+        reason: file.reason,
+    })) ??
+        [
+            ...llmPlan.suggestedFiles.map((file) => ({
+                path: file.path,
+                action: file.action,
+                reason: file.reason,
+            })),
+            ...relevantFiles.map((file) => ({
+                path: file.path,
+                action: "inspect",
+                reason: "High repo relevance for the requested developer task",
+            })),
+        ]
+            .filter((file) => !isIrrelevantDeveloperContextPath(file.path))
+            .filter((file, index, files) => files.findIndex((candidate) => candidate.path === file.path) === index)
+            .slice(0, 4);
+    let resolvedFileContexts;
+    if (input.hostedContext) {
+        resolvedFileContexts = input.hostedContext.contextFiles.map((file) => ({
             path: file.path,
-            action: file.action,
-            reason: file.reason,
-        })),
-        ...relevantFiles.map((file) => ({
-            path: file.path,
-            action: "inspect",
-            reason: "High repo relevance for the requested developer task",
-        })),
-    ]
-        .filter((file) => !isIrrelevantDeveloperContextPath(file.path))
-        .filter((file, index, files) => files.findIndex((candidate) => candidate.path === file.path) === index)
-        .slice(0, 4);
-    const filePaths = selectedContextFiles
-        .map((f) => developerContextFiles.find((rf) => rf.path === f.path)?.absolutePath)
-        .filter((p) => typeof p === "string");
-    const fileContentsMap = await (0, readProjectFiles_js_1.readProjectFiles)(filePaths);
-    const fileContexts = Object.entries(fileContentsMap).map(([absPath, content]) => ({
-        path: allFiles.find((f) => f.absolutePath === absPath)?.path ?? absPath,
-        content,
-    }));
+            content: file.content,
+        }));
+    }
+    else {
+        const filePaths = selectedContextFiles
+            .map((f) => developerContextFiles.find((rf) => rf.path === f.path)?.absolutePath)
+            .filter((p) => typeof p === "string");
+        const fileContentsMap = await (0, readProjectFiles_js_1.readProjectFiles)(filePaths);
+        resolvedFileContexts = Object.entries(fileContentsMap).map(([absPath, content]) => ({
+            path: allFiles.find((f) => f.absolutePath === absPath)?.path ?? absPath,
+            content,
+        }));
+    }
     // 6. Plan patch preview with LLM
     let patchPlan;
     try {
@@ -1143,9 +1163,9 @@ async function runLlmPatchFlow(input) {
             task: input.task,
             intent: taskIntent,
             projectSummary,
-            projectNotes: structure.notes,
+            projectNotes,
             suggestedFiles: selectedContextFiles,
-            fileContexts,
+            fileContexts: resolvedFileContexts,
             schemaAwareSummary: [],
         });
     }
@@ -1170,7 +1190,9 @@ async function runLlmPatchFlow(input) {
     }
     // 6b. Generate full file content for modify/create patches
     let applyPatches = [];
-    const originalContents = {};
+    const originalContents = {
+        ...(input.hostedContext?.originalContents ?? {}),
+    };
     const internalWarnings = [...patchPlan.warnings];
     const visibleWarnings = filterVisibleDeveloperWarnings(patchPlan.warnings);
     const patchResults = [];
@@ -1188,30 +1210,49 @@ async function runLlmPatchFlow(input) {
                 });
                 continue;
             }
+            if (input.hostedContext &&
+                !Object.prototype.hasOwnProperty.call(originalContents, patch.path)) {
+                patchResults.push({
+                    filePath: patch.path,
+                    status: "skipped",
+                    reason: "missing hosted context",
+                });
+                continue;
+            }
             const repoFile = allFiles.find((f) => f.path === patch.path);
             const absolutePath = repoFile?.absolutePath;
-            const currentContentMap = absolutePath !== undefined
-                ? await (0, readProjectFiles_js_1.readProjectFiles)([absolutePath])
-                : {};
-            const fileContent = absolutePath !== undefined
-                ? (currentContentMap[absolutePath] ?? "")
-                : "";
+            const fileContent = input.hostedContext
+                ? originalContents[patch.path] ?? ""
+                : absolutePath !== undefined
+                    ? ((await (0, readProjectFiles_js_1.readProjectFiles)([absolutePath]))[absolutePath] ?? "")
+                    : "";
             originalContents[patch.path] = fileContent;
             // Include a few page-like files as extra context for UI/test-heavy repos.
-            const pageObjectFiles = allFiles
-                .filter((f) => !isIrrelevantDeveloperContextPath(f.path) &&
-                (f.path.endsWith(".java") || f.path.includes("page")))
-                .slice(0, 5);
-            const pageObjectPaths = pageObjectFiles
-                .map((f) => f.absolutePath)
-                .filter((p) => typeof p === "string");
-            const pageObjectContentsMap = pageObjectPaths.length > 0 ? await (0, readProjectFiles_js_1.readProjectFiles)(pageObjectPaths) : {};
-            const pageObjectContext = Object.entries(pageObjectContentsMap)
-                .map(([absPath, content]) => {
-                const relPath = allFiles.find((f) => f.absolutePath === absPath)?.path ?? absPath;
-                return `FILE: ${relPath}\n${content}`;
-            })
-                .join("\n\n");
+            let resolvedPageObjectContext = "";
+            if (input.hostedContext) {
+                resolvedPageObjectContext = resolvedFileContexts
+                    .filter((file) => file.path !== patch.path &&
+                    (file.path.endsWith(".java") || file.path.includes("page")))
+                    .slice(0, 5)
+                    .map((file) => `FILE: ${file.path}\n${file.content}`)
+                    .join("\n\n");
+            }
+            else {
+                const pageObjectFiles = allFiles
+                    .filter((f) => !isIrrelevantDeveloperContextPath(f.path) &&
+                    (f.path.endsWith(".java") || f.path.includes("page")))
+                    .slice(0, 5);
+                const pageObjectPaths = pageObjectFiles
+                    .map((f) => f.absolutePath)
+                    .filter((p) => typeof p === "string");
+                const pageObjectContentsMap = pageObjectPaths.length > 0 ? await (0, readProjectFiles_js_1.readProjectFiles)(pageObjectPaths) : {};
+                resolvedPageObjectContext = Object.entries(pageObjectContentsMap)
+                    .map(([absPath, content]) => {
+                    const relPath = allFiles.find((f) => f.absolutePath === absPath)?.path ?? absPath;
+                    return `FILE: ${relPath}\n${content}`;
+                })
+                    .join("\n\n");
+            }
             const microEditMode = isUiFilePath(patch.path) && isMicroEditUiTask(input.task);
             const fullPatchMode = fileContent.length > 8000 ? "find_replace_patch" : "full_content";
             const contextWindow = fileContent.length > 8000
@@ -1227,12 +1268,12 @@ async function runLlmPatchFlow(input) {
                         path: patch.path,
                         content: buildMicroEditSnippet(patch.path, fileContent, input.task),
                     },
-                    ...fileContexts
+                    ...resolvedFileContexts
                         .filter((file) => file.path !== patch.path)
                         .slice(0, 2)
                         .map((file) => ({ path: file.path })),
                 ]
-                : fileContexts;
+                : resolvedFileContexts;
             const fullPatch = await (0, planFullPatch_js_1.planFullPatchWithLlm)({
                 task: input.task,
                 filePath: patch.path,
@@ -1247,7 +1288,7 @@ async function runLlmPatchFlow(input) {
                         ? `// CONTEXT WINDOW: lines ${contextWindow.startLine}-${contextWindow.endLine} of ${contextWindow.totalLines} total`
                         : "",
                     patch.summary,
-                    pageObjectContext,
+                    resolvedPageObjectContext,
                     "IMPORTANT: Do NOT remove or rewrite existing functions, classes, or methods unless the task explicitly asks you to. Only add or modify what is necessary. Preserve all existing code structure, comments, and patterns.",
                 ]
                     .filter(Boolean)

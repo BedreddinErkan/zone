@@ -7,6 +7,12 @@ const runLlmPatchFlowMock = vitest_1.vi.fn();
 const applyLlmPatchesMock = vitest_1.vi.fn();
 const runTestEngineerFlowMock = vitest_1.vi.fn();
 const runDataAnalystFlowMock = vitest_1.vi.fn();
+const detectTestFrameworkMock = vitest_1.vi.fn();
+const buildTestEngineerContextMock = vitest_1.vi.fn();
+const detectDataSchemaMock = vitest_1.vi.fn();
+const buildDataAnalystContextMock = vitest_1.vi.fn();
+const readExampleContentsMock = vitest_1.vi.fn();
+const readFeatureExampleContentsMock = vitest_1.vi.fn();
 const scanRepoMock = vitest_1.vi.fn();
 const readProjectFilesMock = vitest_1.vi.fn();
 const responsesCreateMock = vitest_1.vi.fn();
@@ -39,17 +45,34 @@ const createOpenAIClientMock = vitest_1.vi.fn(() => ({
     },
 }));
 const getModelNameMock = vitest_1.vi.fn(() => "gpt-4o-mini");
+const getInferenceModeMock = vitest_1.vi.fn(() => "local");
+const getHostedInferenceBaseUrlMock = vitest_1.vi.fn(() => "https://zonecli.dev");
 vitest_1.vi.mock("../core/runAgent.js", () => ({
     runAgent: runAgentMock,
 }));
 vitest_1.vi.mock("../core/runLlmPatchFlow.js", () => ({
     runLlmPatchFlow: runLlmPatchFlowMock,
+    isIrrelevantDeveloperContextPath: vitest_1.vi.fn(() => false),
 }));
 vitest_1.vi.mock("../core/applyLlmPatches.js", () => ({
     applyLlmPatches: applyLlmPatchesMock,
 }));
 vitest_1.vi.mock("../roles/runTestEngineerFlow.js", () => ({
     runTestEngineerFlow: runTestEngineerFlowMock,
+    readExampleContents: readExampleContentsMock,
+    readFeatureExampleContents: readFeatureExampleContentsMock,
+}));
+vitest_1.vi.mock("../roles/detectTestFramework.js", () => ({
+    detectTestFramework: detectTestFrameworkMock,
+}));
+vitest_1.vi.mock("../roles/testEngineerContext.js", () => ({
+    buildTestEngineerContext: buildTestEngineerContextMock,
+}));
+vitest_1.vi.mock("../roles/detectDataSchema.js", () => ({
+    detectDataSchema: detectDataSchemaMock,
+}));
+vitest_1.vi.mock("../roles/dataAnalystContext.js", () => ({
+    buildDataAnalystContext: buildDataAnalystContextMock,
 }));
 vitest_1.vi.mock("../roles/runDataAnalystFlow.js", () => ({
     runDataAnalystFlow: runDataAnalystFlowMock,
@@ -63,6 +86,8 @@ vitest_1.vi.mock("../repo/readProjectFiles.js", () => ({
 vitest_1.vi.mock("../llm/openaiClient.js", () => ({
     createOpenAIClient: createOpenAIClientMock,
     getModelName: getModelNameMock,
+    getInferenceMode: getInferenceModeMock,
+    getHostedInferenceBaseUrl: getHostedInferenceBaseUrlMock,
 }));
 vitest_1.vi.mock("@supabase/supabase-js", () => ({
     createClient: createSupabaseClientMock,
@@ -73,6 +98,25 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
     (0, vitest_1.beforeEach)(async () => {
         vitest_1.vi.resetModules();
         vitest_1.vi.clearAllMocks();
+        detectTestFrameworkMock.mockReturnValue({
+            framework: "playwright_ts",
+            language: "typescript",
+        });
+        buildTestEngineerContextMock.mockReturnValue({
+            pageObjectFiles: [],
+            stepDefinitionFiles: [],
+            featureFiles: [],
+            existingTestFiles: [],
+        });
+        detectDataSchemaMock.mockReturnValue({
+            dialect: "postgresql",
+            migrationFormat: "flyway",
+        });
+        buildDataAnalystContextMock.mockReturnValue({
+            existingSqlFiles: [],
+        });
+        readExampleContentsMock.mockResolvedValue([]);
+        readFeatureExampleContentsMock.mockResolvedValue([]);
         process.env.VITEST = "true";
         delete process.env.SUPABASE_URL;
         delete process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -233,6 +277,87 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             { filePath: "src/foo.ts", status: "applied" },
         ]);
     });
+    (0, vitest_1.it)("proxies hosted dry-run requests with hostedContext", async () => {
+        getInferenceModeMock.mockReturnValue("hosted");
+        scanRepoMock.mockResolvedValue([
+            {
+                path: "src/foo.ts",
+                absolutePath: "C:/repo/src/foo.ts",
+                extension: "ts",
+                category: "backend",
+            },
+        ]);
+        readProjectFilesMock.mockResolvedValue({
+            "C:/repo/src/foo.ts": "export const foo = 1;",
+        });
+        let forwardedBody;
+        const hostedServer = (0, node_http_1.createServer)((req, res) => {
+            let body = "";
+            req.on("data", (chunk) => {
+                body += chunk;
+            });
+            req.on("end", () => {
+                forwardedBody = JSON.parse(body);
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({
+                    ok: true,
+                    patchPreview: "=== HOSTED DRY RUN ===",
+                    warnings: [],
+                    patchResults: [],
+                    fileDiffs: [],
+                    applyPatches: [],
+                }));
+            });
+        });
+        await new Promise((resolve) => {
+            hostedServer.listen(0, "127.0.0.1", () => resolve());
+        });
+        const hostedAddress = hostedServer.address();
+        if (!hostedAddress || typeof hostedAddress === "string") {
+            throw new Error("Hosted server address unavailable");
+        }
+        getHostedInferenceBaseUrlMock.mockReturnValue(`http://127.0.0.1:${hostedAddress.port}`);
+        const response = await fetch(`${baseUrl}/api/dry-run`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                task: "update foo",
+                repoPath: "C:/repo",
+                userId: "clerk_user_123",
+            }),
+        });
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: true,
+            patchPreview: "=== HOSTED DRY RUN ===",
+            warnings: [],
+            patchResults: [],
+            fileDiffs: [],
+            applyPatches: [],
+        });
+        (0, vitest_1.expect)(forwardedBody).toEqual(vitest_1.expect.objectContaining({
+            task: "update foo",
+            repoPath: "C:/repo",
+            userId: "clerk_user_123",
+            hostedContext: vitest_1.expect.objectContaining({
+                repoSummary: vitest_1.expect.any(String),
+                contextFiles: [
+                    vitest_1.expect.objectContaining({
+                        path: "src/foo.ts",
+                        content: "export const foo = 1;",
+                    }),
+                ],
+                originalContents: {
+                    "src/foo.ts": "export const foo = 1;",
+                },
+            }),
+        }));
+        (0, vitest_1.expect)(runLlmPatchFlowMock).not.toHaveBeenCalled();
+        await new Promise((resolve, reject) => {
+            hostedServer.close((err) => (err ? reject(err) : resolve()));
+        });
+    });
     (0, vitest_1.it)("logs successful dry runs to Supabase when env is configured", async () => {
         process.env.SUPABASE_URL = "https://example.supabase.co";
         process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
@@ -382,6 +507,56 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             });
         });
     });
+    (0, vitest_1.it)("maps unsupported test framework failures to the product-friendly test engineer message", async () => {
+        runTestEngineerFlowMock.mockResolvedValue({
+            ok: false,
+            reason: "Could not detect a test framework in this repository.",
+            framework: "unknown",
+        });
+        const response = await fetch(`${baseUrl}/api/test-engineer`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                task: "add login test",
+                repoPath: "C:/repo",
+                userId: "clerk_user_123",
+            }),
+        });
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: false,
+            reason: "No supported test setup detected\n\n" +
+                "Zone Test Engineer needs an existing supported test setup in this folder.\n" +
+                "Supported: Playwright, Cypress, Cucumber+Java, Selenium (Java/Python), TestNG, or pytest.",
+            framework: "unknown",
+        });
+    });
+    (0, vitest_1.it)("maps missing schema context failures to the product-friendly data analyst message", async () => {
+        runDataAnalystFlowMock.mockResolvedValue({
+            ok: false,
+            reason: "detectDataSchema failed: no schema context found",
+            dialect: "unknown",
+        });
+        const response = await fetch(`${baseUrl}/api/data-analyst`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                task: "create orders table",
+                repoPath: "C:/repo",
+                userId: "clerk_user_123",
+            }),
+        });
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: false,
+            reason: "No database context detected\n\n" +
+                "Zone Data Analyst needs existing schema or migration context in this folder.\n" +
+                "Supported signals include SQL migrations, Alembic, Flyway, Liquibase, or existing database files.",
+            dialect: "unknown",
+        });
+    });
     (0, vitest_1.it)("returns an enhanced task from /api/enhance-task", async () => {
         scanRepoMock.mockResolvedValue([
             {
@@ -431,6 +606,278 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             input: vitest_1.expect.stringContaining("User task: add login test"),
         }));
     });
+    (0, vitest_1.it)("proxies hosted enhance-task requests with hosted context", async () => {
+        getInferenceModeMock.mockReturnValue("hosted");
+        scanRepoMock.mockResolvedValue([
+            {
+                path: "tests/login.spec.ts",
+                absolutePath: "C:/repo/tests/login.spec.ts",
+            },
+        ]);
+        readProjectFilesMock.mockResolvedValue({
+            "C:/repo/tests/login.spec.ts": "test('login', async () => {});",
+        });
+        let forwardedBody;
+        const hostedServer = (0, node_http_1.createServer)((req, res) => {
+            let body = "";
+            req.on("data", (chunk) => {
+                body += chunk;
+            });
+            req.on("end", () => {
+                forwardedBody = JSON.parse(body);
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({
+                    ok: true,
+                    enhancedTask: "Extend tests/login.spec.ts with a negative login test.",
+                }));
+            });
+        });
+        await new Promise((resolve) => {
+            hostedServer.listen(0, "127.0.0.1", () => resolve());
+        });
+        const hostedAddress = hostedServer.address();
+        if (!hostedAddress || typeof hostedAddress === "string") {
+            throw new Error("Hosted server address unavailable");
+        }
+        getHostedInferenceBaseUrlMock.mockReturnValue(`http://127.0.0.1:${hostedAddress.port}`);
+        const response = await fetch(`${baseUrl}/api/enhance-task`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                task: "add login test",
+                role: "test_engineer",
+                repoPath: "C:/repo",
+                userId: "clerk_user_123",
+            }),
+        });
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: true,
+            enhancedTask: "Extend tests/login.spec.ts with a negative login test.",
+        });
+        (0, vitest_1.expect)(forwardedBody).toEqual(vitest_1.expect.objectContaining({
+            task: "add login test",
+            role: "test_engineer",
+            repoPath: "C:/repo",
+            userId: "clerk_user_123",
+            hostedContext: {
+                contextFiles: [
+                    {
+                        path: "tests/login.spec.ts",
+                        content: "test('login', async () => {});",
+                    },
+                ],
+            },
+        }));
+        (0, vitest_1.expect)(createOpenAIClientMock).not.toHaveBeenCalled();
+        await new Promise((resolve, reject) => {
+            hostedServer.close((err) => (err ? reject(err) : resolve()));
+        });
+    });
+    (0, vitest_1.it)("proxies hosted test-engineer requests with hosted context", async () => {
+        getInferenceModeMock.mockReturnValue("hosted");
+        scanRepoMock.mockResolvedValue([
+            {
+                path: "tests/login.spec.ts",
+                absolutePath: "C:/repo/tests/login.spec.ts",
+                extension: "ts",
+                category: "unknown",
+            },
+        ]);
+        buildTestEngineerContextMock.mockReturnValue({
+            pageObjectFiles: [],
+            stepDefinitionFiles: [],
+            featureFiles: [],
+            existingTestFiles: [],
+        });
+        let forwardedBody;
+        const hostedServer = (0, node_http_1.createServer)((req, res) => {
+            let body = "";
+            req.on("data", (chunk) => {
+                body += chunk;
+            });
+            req.on("end", () => {
+                forwardedBody = JSON.parse(body);
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({
+                    ok: true,
+                    framework: "playwright_ts",
+                    language: "typescript",
+                    confidence: 82,
+                    decisionMode: "safe_to_apply",
+                    summary: "Generated test",
+                    warnings: [],
+                    applyPatches: [],
+                    fileDiffs: [],
+                    preview: "preview",
+                }));
+            });
+        });
+        await new Promise((resolve) => {
+            hostedServer.listen(0, "127.0.0.1", () => resolve());
+        });
+        const hostedAddress = hostedServer.address();
+        if (!hostedAddress || typeof hostedAddress === "string") {
+            throw new Error("Hosted server address unavailable");
+        }
+        getHostedInferenceBaseUrlMock.mockReturnValue(`http://127.0.0.1:${hostedAddress.port}`);
+        const response = await fetch(`${baseUrl}/api/test-engineer`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                task: "add login test",
+                repoPath: "C:/repo",
+                runId: "run-123",
+                userId: "clerk_user_123",
+            }),
+        });
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: true,
+            framework: "playwright_ts",
+            language: "typescript",
+            confidence: 82,
+            decisionMode: "safe_to_apply",
+            summary: "Generated test",
+            warnings: [],
+            applyPatches: [],
+            fileDiffs: [],
+            preview: "preview",
+        });
+        (0, vitest_1.expect)(forwardedBody).toEqual(vitest_1.expect.objectContaining({
+            task: "add login test",
+            repoPath: "C:/repo",
+            runId: "run-123",
+            userId: "clerk_user_123",
+            hostedContext: {
+                availableFiles: [
+                    {
+                        path: "tests/login.spec.ts",
+                        category: "unknown",
+                        extension: "ts",
+                    },
+                ],
+                pageObjectContents: [],
+                stepDefinitionContents: [],
+                featureContents: [],
+                existingTestContents: [],
+            },
+        }));
+        (0, vitest_1.expect)(runTestEngineerFlowMock).not.toHaveBeenCalled();
+        await new Promise((resolve, reject) => {
+            hostedServer.close((err) => (err ? reject(err) : resolve()));
+        });
+    });
+    (0, vitest_1.it)("proxies hosted data-analyst requests with hosted context", async () => {
+        getInferenceModeMock.mockReturnValue("hosted");
+        scanRepoMock.mockResolvedValue([
+            {
+                path: "db/migration/V3__orders.sql",
+                absolutePath: "C:/repo/db/migration/V3__orders.sql",
+                extension: "sql",
+                category: "unknown",
+            },
+        ]);
+        detectDataSchemaMock.mockReturnValue({
+            dialect: "postgresql",
+            migrationFormat: "flyway",
+        });
+        buildDataAnalystContextMock.mockReturnValue({
+            existingSqlFiles: [
+                {
+                    path: "db/migration/V3__orders.sql",
+                    absolutePath: "C:/repo/db/migration/V3__orders.sql",
+                },
+            ],
+        });
+        readProjectFilesMock.mockResolvedValue({
+            "C:/repo/db/migration/V3__orders.sql": "CREATE TABLE orders(id SERIAL PRIMARY KEY);",
+        });
+        let forwardedBody;
+        const hostedServer = (0, node_http_1.createServer)((req, res) => {
+            let body = "";
+            req.on("data", (chunk) => {
+                body += chunk;
+            });
+            req.on("end", () => {
+                forwardedBody = JSON.parse(body);
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({
+                    ok: true,
+                    dialect: "postgresql",
+                    migrationFormat: "flyway",
+                    confidence: 90,
+                    summary: "Creates orders table",
+                    warnings: [],
+                    applyPatches: [],
+                    fileDiffs: [],
+                    preview: "preview",
+                }));
+            });
+        });
+        await new Promise((resolve) => {
+            hostedServer.listen(0, "127.0.0.1", () => resolve());
+        });
+        const hostedAddress = hostedServer.address();
+        if (!hostedAddress || typeof hostedAddress === "string") {
+            throw new Error("Hosted server address unavailable");
+        }
+        getHostedInferenceBaseUrlMock.mockReturnValue(`http://127.0.0.1:${hostedAddress.port}`);
+        const response = await fetch(`${baseUrl}/api/data-analyst`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                task: "create orders table",
+                repoPath: "C:/repo",
+                runId: "run-456",
+                userId: "clerk_user_123",
+            }),
+        });
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: true,
+            dialect: "postgresql",
+            migrationFormat: "flyway",
+            confidence: 90,
+            summary: "Creates orders table",
+            warnings: [],
+            applyPatches: [],
+            fileDiffs: [],
+            preview: "preview",
+        });
+        (0, vitest_1.expect)(forwardedBody).toEqual(vitest_1.expect.objectContaining({
+            task: "create orders table",
+            repoPath: "C:/repo",
+            runId: "run-456",
+            userId: "clerk_user_123",
+            hostedContext: {
+                availableFiles: [
+                    {
+                        path: "db/migration/V3__orders.sql",
+                        category: "unknown",
+                        extension: "sql",
+                    },
+                ],
+                schema: {
+                    dialect: "postgresql",
+                    migrationFormat: "flyway",
+                },
+                existingSqlContents: [
+                    {
+                        path: "db/migration/V3__orders.sql",
+                        content: "CREATE TABLE orders(id SERIAL PRIMARY KEY);",
+                    },
+                ],
+            },
+        }));
+        (0, vitest_1.expect)(runDataAnalystFlowMock).not.toHaveBeenCalled();
+        await new Promise((resolve, reject) => {
+            hostedServer.close((err) => (err ? reject(err) : resolve()));
+        });
+    });
     (0, vitest_1.it)("returns the billing summary from the authenticated profile", async () => {
         process.env.SUPABASE_URL = "https://example.supabase.co";
         process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
@@ -449,6 +896,355 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             plan: "Free",
             credits: 7,
             subscriptionStatus: "free",
+        });
+    });
+    (0, vitest_1.it)("returns ok from /api/check-access for a free user with remaining runs", async () => {
+        process.env.SUPABASE_URL = "https://example.supabase.co";
+        process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+        supabaseProfileMaybeSingleMock.mockResolvedValue({
+            data: {
+                credits: 5,
+                subscription_status: "free",
+            },
+            error: null,
+        });
+        const response = await fetch(`${baseUrl}/api/check-access?userId=clerk_user_123`);
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({ ok: true });
+    });
+    (0, vitest_1.it)("returns unauthorized from /api/check-access when userId is missing", async () => {
+        const response = await fetch(`${baseUrl}/api/check-access`);
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(401);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: false,
+            reason: "unauthorized",
+            message: "Missing user session. Please open Zone from your dashboard.",
+        });
+    });
+    (0, vitest_1.it)("returns no_free_runs from /api/check-access for an exhausted free user", async () => {
+        process.env.SUPABASE_URL = "https://example.supabase.co";
+        process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+        supabaseProfileMaybeSingleMock.mockResolvedValue({
+            data: {
+                credits: 0,
+                subscription_status: "free",
+            },
+            error: null,
+        });
+        const response = await fetch(`${baseUrl}/api/check-access?userId=clerk_user_123`);
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(402);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: false,
+            reason: "no_free_runs",
+            message: "You've used all your free runs. Upgrade to Pro.",
+            upgradeUrl: "https://zonecli.dev/#pricing",
+        });
+    });
+    (0, vitest_1.it)("returns ok from /api/check-access for a pro user even with zero credits", async () => {
+        process.env.SUPABASE_URL = "https://example.supabase.co";
+        process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+        supabaseProfileMaybeSingleMock.mockResolvedValue({
+            data: {
+                credits: 0,
+                subscription_status: "pro",
+            },
+            error: null,
+        });
+        const response = await fetch(`${baseUrl}/api/check-access?userId=clerk_user_123`);
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({ ok: true });
+    });
+    (0, vitest_1.it)("returns a pro billing summary shape the UI can render", async () => {
+        process.env.SUPABASE_URL = "https://example.supabase.co";
+        process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+        supabaseProfileMaybeSingleMock.mockResolvedValue({
+            data: {
+                credits: 0,
+                subscription_status: "pro",
+            },
+            error: null,
+        });
+        const response = await fetch(`${baseUrl}/api/billing-summary?userId=clerk_user_123`);
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: true,
+            plan: "Pro",
+            credits: 0,
+            subscriptionStatus: "pro",
+        });
+    });
+    (0, vitest_1.it)("proxies hosted patch requests without using the local developer flow", async () => {
+        getInferenceModeMock.mockReturnValue("hosted");
+        scanRepoMock.mockResolvedValue([
+            {
+                path: "src/components/LoginForm.tsx",
+                absolutePath: "C:/repo/src/components/LoginForm.tsx",
+                extension: "tsx",
+                category: "frontend",
+            },
+        ]);
+        readProjectFilesMock.mockResolvedValue({
+            "C:/repo/src/components/LoginForm.tsx": "export function LoginForm() {}",
+        });
+        let forwardedHeaders;
+        let forwardedBody;
+        const hostedServer = (0, node_http_1.createServer)((req, res) => {
+            let body = "";
+            req.on("data", (chunk) => {
+                body += chunk;
+            });
+            req.on("end", () => {
+                forwardedHeaders = new Headers(req.headers);
+                forwardedBody = JSON.parse(body);
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({
+                    ok: true,
+                    patchPreview: "=== HOSTED PATCH ===",
+                    warnings: [],
+                    applyPatches: [],
+                }));
+            });
+        });
+        await new Promise((resolve) => {
+            hostedServer.listen(0, "127.0.0.1", () => resolve());
+        });
+        const hostedAddress = hostedServer.address();
+        if (!hostedAddress || typeof hostedAddress === "string") {
+            throw new Error("Hosted server address unavailable");
+        }
+        getHostedInferenceBaseUrlMock.mockReturnValue(`http://127.0.0.1:${hostedAddress.port}`);
+        const response = await fetch(`${baseUrl}/api/patch`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: "Bearer test-token",
+                Cookie: "session=test",
+            },
+            body: JSON.stringify({
+                task: "fix login validation",
+                repoPath: "C:/repo",
+                userId: "clerk_user_123",
+            }),
+        });
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: true,
+            patchPreview: "=== HOSTED PATCH ===",
+            warnings: [],
+            applyPatches: [],
+        });
+        (0, vitest_1.expect)(runLlmPatchFlowMock).not.toHaveBeenCalled();
+        (0, vitest_1.expect)(forwardedBody).toEqual(vitest_1.expect.objectContaining({
+            task: "fix login validation",
+            repoPath: "C:/repo",
+            userId: "clerk_user_123",
+            hostedContext: vitest_1.expect.objectContaining({
+                repoSummary: "React-like frontend detected",
+                contextFiles: [
+                    vitest_1.expect.objectContaining({
+                        path: "src/components/LoginForm.tsx",
+                        content: "export function LoginForm() {}",
+                    }),
+                ],
+                originalContents: {
+                    "src/components/LoginForm.tsx": "export function LoginForm() {}",
+                },
+            }),
+        }));
+        (0, vitest_1.expect)(forwardedHeaders?.get("authorization")).toBe("Bearer test-token");
+        (0, vitest_1.expect)(forwardedHeaders?.get("cookie")).toContain("session=test");
+        (0, vitest_1.expect)(forwardedHeaders?.get("x-zone-user-id")).toBe("clerk_user_123");
+        await new Promise((resolve, reject) => {
+            hostedServer.close((err) => (err ? reject(err) : resolve()));
+        });
+    });
+    (0, vitest_1.it)("returns a service-style hosted error instead of a local key error in hosted mode", async () => {
+        getInferenceModeMock.mockReturnValue("hosted");
+        getHostedInferenceBaseUrlMock.mockReturnValue("http://127.0.0.1:1");
+        scanRepoMock.mockResolvedValue([
+            {
+                path: "tests/login.spec.ts",
+                absolutePath: "C:/repo/tests/login.spec.ts",
+            },
+        ]);
+        readProjectFilesMock.mockResolvedValue({
+            "C:/repo/tests/login.spec.ts": "test('login', async () => {});",
+        });
+        const response = await fetch(`${baseUrl}/api/enhance-task`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                task: "add login test",
+                role: "test_engineer",
+                repoPath: "C:/repo",
+                userId: "clerk_user_123",
+            }),
+        });
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(502);
+        (0, vitest_1.expect)(body.reason).toBe("hosted_inference_unavailable");
+        (0, vitest_1.expect)(String(body.message)).toContain("Zone hosted inference is unavailable");
+        (0, vitest_1.expect)(createOpenAIClientMock).not.toHaveBeenCalled();
+    });
+    (0, vitest_1.it)("falls back to local check-access when the hosted route returns 404", async () => {
+        getInferenceModeMock.mockReturnValue("hosted");
+        const hostedServer = (0, node_http_1.createServer)((_req, res) => {
+            res.writeHead(404, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, reason: "not_found" }));
+        });
+        await new Promise((resolve) => {
+            hostedServer.listen(0, "127.0.0.1", () => resolve());
+        });
+        const hostedAddress = hostedServer.address();
+        if (!hostedAddress || typeof hostedAddress === "string") {
+            throw new Error("Hosted server address unavailable");
+        }
+        getHostedInferenceBaseUrlMock.mockReturnValue(`http://127.0.0.1:${hostedAddress.port}`);
+        const response = await fetch(`${baseUrl}/api/check-access?userId=clerk_user_123`);
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({ ok: true });
+        await new Promise((resolve, reject) => {
+            hostedServer.close((err) => (err ? reject(err) : resolve()));
+        });
+    });
+    (0, vitest_1.it)("falls back to local billing-summary when the hosted route returns 404", async () => {
+        getInferenceModeMock.mockReturnValue("hosted");
+        process.env.SUPABASE_URL = "https://example.supabase.co";
+        process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+        supabaseProfileMaybeSingleMock.mockResolvedValue({
+            data: {
+                credits: 3,
+                subscription_status: "free",
+            },
+            error: null,
+        });
+        const hostedServer = (0, node_http_1.createServer)((_req, res) => {
+            res.writeHead(404, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, reason: "not_found" }));
+        });
+        await new Promise((resolve) => {
+            hostedServer.listen(0, "127.0.0.1", () => resolve());
+        });
+        const hostedAddress = hostedServer.address();
+        if (!hostedAddress || typeof hostedAddress === "string") {
+            throw new Error("Hosted server address unavailable");
+        }
+        getHostedInferenceBaseUrlMock.mockReturnValue(`http://127.0.0.1:${hostedAddress.port}`);
+        const response = await fetch(`${baseUrl}/api/billing-summary?userId=clerk_user_123`);
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: true,
+            plan: "Free",
+            credits: 3,
+            subscriptionStatus: "free",
+        });
+        await new Promise((resolve, reject) => {
+            hostedServer.close((err) => (err ? reject(err) : resolve()));
+        });
+    });
+    (0, vitest_1.it)("passes through hosted unauthorized responses from /api/check-access unchanged", async () => {
+        getInferenceModeMock.mockReturnValue("hosted");
+        const hostedServer = (0, node_http_1.createServer)((_req, res) => {
+            res.writeHead(401, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+                ok: false,
+                reason: "unauthorized",
+                message: "Missing user session. Please open Zone from your dashboard.",
+            }));
+        });
+        await new Promise((resolve) => {
+            hostedServer.listen(0, "127.0.0.1", () => resolve());
+        });
+        const hostedAddress = hostedServer.address();
+        if (!hostedAddress || typeof hostedAddress === "string") {
+            throw new Error("Hosted server address unavailable");
+        }
+        getHostedInferenceBaseUrlMock.mockReturnValue(`http://127.0.0.1:${hostedAddress.port}`);
+        const response = await fetch(`${baseUrl}/api/check-access?userId=clerk_user_123`);
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(401);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: false,
+            reason: "unauthorized",
+            message: "Missing user session. Please open Zone from your dashboard.",
+        });
+        (0, vitest_1.expect)(createSupabaseClientMock).not.toHaveBeenCalled();
+        await new Promise((resolve, reject) => {
+            hostedServer.close((err) => (err ? reject(err) : resolve()));
+        });
+    });
+    (0, vitest_1.it)("passes through hosted no_free_runs responses from /api/check-access unchanged", async () => {
+        getInferenceModeMock.mockReturnValue("hosted");
+        const hostedServer = (0, node_http_1.createServer)((_req, res) => {
+            res.writeHead(402, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+                ok: false,
+                reason: "no_free_runs",
+                message: "You've used all your free runs. Upgrade to Pro.",
+                upgradeUrl: "https://zonecli.dev/#pricing",
+            }));
+        });
+        await new Promise((resolve) => {
+            hostedServer.listen(0, "127.0.0.1", () => resolve());
+        });
+        const hostedAddress = hostedServer.address();
+        if (!hostedAddress || typeof hostedAddress === "string") {
+            throw new Error("Hosted server address unavailable");
+        }
+        getHostedInferenceBaseUrlMock.mockReturnValue(`http://127.0.0.1:${hostedAddress.port}`);
+        const response = await fetch(`${baseUrl}/api/check-access?userId=clerk_user_123`);
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(402);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: false,
+            reason: "no_free_runs",
+            message: "You've used all your free runs. Upgrade to Pro.",
+            upgradeUrl: "https://zonecli.dev/#pricing",
+        });
+        (0, vitest_1.expect)(createSupabaseClientMock).not.toHaveBeenCalled();
+        await new Promise((resolve, reject) => {
+            hostedServer.close((err) => (err ? reject(err) : resolve()));
+        });
+    });
+    (0, vitest_1.it)("passes through hosted billing-summary responses unchanged", async () => {
+        getInferenceModeMock.mockReturnValue("hosted");
+        const hostedServer = (0, node_http_1.createServer)((_req, res) => {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+                ok: true,
+                plan: "Pro",
+                credits: 0,
+                subscriptionStatus: "pro",
+            }));
+        });
+        await new Promise((resolve) => {
+            hostedServer.listen(0, "127.0.0.1", () => resolve());
+        });
+        const hostedAddress = hostedServer.address();
+        if (!hostedAddress || typeof hostedAddress === "string") {
+            throw new Error("Hosted server address unavailable");
+        }
+        getHostedInferenceBaseUrlMock.mockReturnValue(`http://127.0.0.1:${hostedAddress.port}`);
+        const response = await fetch(`${baseUrl}/api/billing-summary?userId=clerk_user_123`);
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: true,
+            plan: "Pro",
+            credits: 0,
+            subscriptionStatus: "pro",
+        });
+        (0, vitest_1.expect)(createSupabaseClientMock).not.toHaveBeenCalled();
+        await new Promise((resolve, reject) => {
+            hostedServer.close((err) => (err ? reject(err) : resolve()));
         });
     });
 });

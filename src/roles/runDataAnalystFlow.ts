@@ -4,7 +4,10 @@ import { createOpenAIClient, getModelName } from "../llm/openaiClient.js";
 import { computeFileDiff, type DiffLine } from "../core/runLlmPatchFlow.js";
 import { validateTestOutput } from "./testOutputValidator.js";
 import { buildDataAnalystContext } from "./dataAnalystContext.js";
-import { detectDataSchema } from "./detectDataSchema.js";
+import {
+  detectDataSchema,
+  type DetectedDataSchema,
+} from "./detectDataSchema.js";
 import { buildDataAnalystPrompt } from "../prompts/dataAnalystPrompt.js";
 import type { RepoFile } from "../types/project.js";
 
@@ -98,15 +101,33 @@ async function readExampleContents(
   }));
 }
 
+type HostedDataAnalystContextInput = {
+  availableFiles: Array<{
+    path: string;
+    category: RepoFile["category"];
+    extension: string;
+  }>;
+  schema: DetectedDataSchema;
+  existingSqlContents: Array<{ path: string; content: string }>;
+};
+
 export async function runDataAnalystFlow(input: {
   task: string;
   repoPath: string;
   onProgress?: (stage: string) => void;
+  hostedContext?: HostedDataAnalystContextInput;
 }): Promise<DataAnalystFlowResult> {
   let allFiles: RepoFile[];
   try {
     input.onProgress?.("Scanning repo...");
-    allFiles = await scanRepo(input.repoPath);
+    allFiles = input.hostedContext
+      ? input.hostedContext.availableFiles.map((file) => ({
+          path: file.path,
+          absolutePath: file.path,
+          extension: file.extension,
+          category: file.category,
+        }))
+      : await scanRepo(input.repoPath);
     if (!Array.isArray(allFiles)) {
       return {
         ok: false,
@@ -123,7 +144,7 @@ export async function runDataAnalystFlow(input: {
   let schema;
   try {
     input.onProgress?.("Detecting schema...");
-    schema = detectDataSchema(allFiles);
+    schema = input.hostedContext?.schema ?? detectDataSchema(allFiles);
   } catch (err) {
     return {
       ok: false,
@@ -142,11 +163,9 @@ export async function runDataAnalystFlow(input: {
     };
   }
 
-  const existingSqlContents = await readExampleContents(
-    context.existingSqlFiles,
-    allFiles,
-    3
-  );
+  const existingSqlContents = input.hostedContext
+    ? input.hostedContext.existingSqlContents
+    : await readExampleContents(context.existingSqlFiles, allFiles, 3);
 
   input.onProgress?.("Building prompt...");
   const prompt = buildDataAnalystPrompt({

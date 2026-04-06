@@ -14,10 +14,17 @@ const node_path_1 = __importDefault(require("node:path"));
 const supabase_js_1 = require("@supabase/supabase-js");
 const runAgent_js_1 = require("../core/runAgent.js");
 const runLlmPatchFlow_js_1 = require("../core/runLlmPatchFlow.js");
+const taskIntentParser_js_1 = require("../core/taskIntentParser.js");
 const applyLlmPatches_js_1 = require("../core/applyLlmPatches.js");
 const runTestEngineerFlow_js_1 = require("../roles/runTestEngineerFlow.js");
+const detectTestFramework_js_1 = require("../roles/detectTestFramework.js");
+const testEngineerContext_js_1 = require("../roles/testEngineerContext.js");
 const runDataAnalystFlow_js_1 = require("../roles/runDataAnalystFlow.js");
+const detectDataSchema_js_1 = require("../roles/detectDataSchema.js");
+const dataAnalystContext_js_1 = require("../roles/dataAnalystContext.js");
 const scanRepo_js_1 = require("../repo/scanRepo.js");
+const detectProjectStructure_js_1 = require("../repo/detectProjectStructure.js");
+const rankRelevantFiles_js_1 = require("../repo/rankRelevantFiles.js");
 const readProjectFiles_js_1 = require("../repo/readProjectFiles.js");
 const openaiClient_js_1 = require("../llm/openaiClient.js");
 const colors_js_1 = require("../cli/colors.js");
@@ -59,6 +66,211 @@ function renderZoneUiHtml() {
             : "",
     })};</script>`;
     return zoneUiHtmlTemplate.replace("</head>", `${configScript}</head>`);
+}
+function shouldUseHostedInferenceProxy() {
+    return (0, openaiClient_js_1.getInferenceMode)() === "hosted";
+}
+async function proxyHostedZoneRequest(req, res, routePath, options) {
+    const baseUrl = (0, openaiClient_js_1.getHostedInferenceBaseUrl)();
+    const targetUrl = new URL(routePath, `${baseUrl}/`);
+    const forwardedUserId = typeof req.body?.userId === "string"
+        ? req.body.userId.trim()
+        : typeof req.query.userId === "string"
+            ? req.query.userId.trim()
+            : "";
+    const forwardedHeaders = {
+        "Content-Type": "application/json",
+        "x-zone-client": "local-ui",
+    };
+    if (typeof req.headers.authorization === "string" && req.headers.authorization) {
+        forwardedHeaders.authorization = req.headers.authorization;
+    }
+    if (typeof req.headers.cookie === "string" && req.headers.cookie) {
+        forwardedHeaders.cookie = req.headers.cookie;
+    }
+    if (forwardedUserId) {
+        forwardedHeaders["x-zone-user-id"] = forwardedUserId;
+    }
+    if (req.method === "GET") {
+        for (const [key, value] of Object.entries(req.query)) {
+            if (typeof value === "string") {
+                targetUrl.searchParams.set(key, value);
+            }
+        }
+    }
+    try {
+        const response = await fetch(targetUrl, {
+            method: req.method,
+            headers: forwardedHeaders,
+            body: req.method === "GET"
+                ? undefined
+                : JSON.stringify(options?.bodyOverride ?? req.body ?? {}),
+        });
+        if (response.status === 404 && options?.onNotFound) {
+            await options.onNotFound();
+            return;
+        }
+        const responseText = await response.text();
+        const contentType = response.headers.get("content-type") ?? "application/json; charset=utf-8";
+        res.status(response.status);
+        res.setHeader("Content-Type", contentType);
+        res.send(responseText);
+    }
+    catch (error) {
+        res.status(502).json({
+            ok: false,
+            reason: "hosted_inference_unavailable",
+            message: error instanceof Error
+                ? `Zone hosted inference is unavailable: ${error.message}`
+                : "Zone hosted inference is unavailable.",
+        });
+    }
+}
+async function buildHostedDeveloperContext(task, repoPath) {
+    const allFiles = await (0, scanRepo_js_1.scanRepo)(repoPath);
+    const developerContextFiles = allFiles.filter((file) => !(0, runLlmPatchFlow_js_1.isIrrelevantDeveloperContextPath)(file.path));
+    const structure = (0, detectProjectStructure_js_1.detectProjectStructure)(developerContextFiles);
+    const taskIntent = (0, taskIntentParser_js_1.parseTaskIntent)(task);
+    const relevantFiles = (0, rankRelevantFiles_js_1.rankRelevantFiles)({
+        task,
+        files: developerContextFiles,
+        intent: taskIntent,
+    }).slice(0, 8);
+    const contextFileRecords = relevantFiles.map((file) => ({
+        path: file.path,
+        action: "inspect",
+        reason: "High repo relevance for the requested developer task",
+        absolutePath: file.absolutePath,
+    }));
+    const contextPaths = contextFileRecords
+        .map((file) => file.absolutePath)
+        .filter((filePath) => typeof filePath === "string");
+    const contentMap = contextPaths.length > 0 ? await (0, readProjectFiles_js_1.readProjectFiles)(contextPaths) : {};
+    const originalContents = Object.fromEntries(contextFileRecords.map((file) => [
+        file.path,
+        file.absolutePath ? contentMap[file.absolutePath] ?? "" : "",
+    ]));
+    const existingFilesSummary = relevantFiles.length > 0
+        ? "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n" +
+            relevantFiles.map((file) => `- ${file.path}`).join("\n")
+        : "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n(none)";
+    return {
+        repoSummary: structure.notes.join(" ") || "No project summary available.",
+        projectNotes: structure.notes,
+        existingFilesSummary,
+        availableFiles: developerContextFiles.map((file) => ({
+            path: file.path,
+            category: file.category,
+            extension: file.extension,
+        })),
+        contextFiles: contextFileRecords.map((file) => ({
+            path: file.path,
+            action: file.action,
+            reason: file.reason,
+            content: originalContents[file.path] ?? "",
+        })),
+        originalContents,
+    };
+}
+async function buildHostedEnhanceContext(role, repoPath) {
+    const repoFiles = await (0, scanRepo_js_1.scanRepo)(repoPath);
+    const contextFiles = selectEnhanceContextFiles(role, repoFiles);
+    const contents = contextFiles.length > 0
+        ? await (0, readProjectFiles_js_1.readProjectFiles)(contextFiles.map((file) => file.absolutePath))
+        : {};
+    return {
+        contextFiles: contextFiles.map((file) => ({
+            path: file.path,
+            content: contents[file.absolutePath] ?? "",
+        })),
+    };
+}
+async function buildHostedTestEngineerContext(task, repoPath) {
+    const allFiles = await (0, scanRepo_js_1.scanRepo)(repoPath);
+    const framework = (0, detectTestFramework_js_1.detectTestFramework)(allFiles);
+    const context = (0, testEngineerContext_js_1.buildTestEngineerContext)(task, framework, allFiles);
+    return {
+        availableFiles: allFiles.map((file) => ({
+            path: file.path,
+            category: file.category,
+            extension: file.extension,
+        })),
+        pageObjectContents: await (0, runTestEngineerFlow_js_1.readExampleContents)(context.pageObjectFiles, allFiles, 3),
+        stepDefinitionContents: await (0, runTestEngineerFlow_js_1.readExampleContents)(context.stepDefinitionFiles, allFiles, 2),
+        featureContents: await (0, runTestEngineerFlow_js_1.readFeatureExampleContents)(context.featureFiles, allFiles, framework),
+        existingTestContents: await (0, runTestEngineerFlow_js_1.readExampleContents)(context.existingTestFiles, allFiles, 3),
+    };
+}
+async function buildHostedDataAnalystContext(task, repoPath) {
+    const allFiles = await (0, scanRepo_js_1.scanRepo)(repoPath);
+    const schema = (0, detectDataSchema_js_1.detectDataSchema)(allFiles);
+    const context = (0, dataAnalystContext_js_1.buildDataAnalystContext)(task, schema, allFiles);
+    const existingSqlFiles = context.existingSqlFiles.slice(0, 3);
+    const sqlPaths = existingSqlFiles
+        .map((file) => file.absolutePath)
+        .filter((filePath) => typeof filePath === "string");
+    const contents = sqlPaths.length > 0 ? await (0, readProjectFiles_js_1.readProjectFiles)(sqlPaths) : {};
+    return {
+        availableFiles: allFiles.map((file) => ({
+            path: file.path,
+            category: file.category,
+            extension: file.extension,
+        })),
+        schema,
+        existingSqlContents: existingSqlFiles.map((file) => ({
+            path: file.path,
+            content: file.absolutePath ? contents[file.absolutePath] ?? "" : "",
+        })),
+    };
+}
+async function handleCheckAccess(req, res) {
+    const userId = typeof req.query.userId === "string" ? req.query.userId : "";
+    const authorization = await ensureRunAuthorized(userId);
+    if (authorization.allowed) {
+        res.json({ ok: true });
+        return;
+    }
+    res.status(authorization.status).json(authorization.body);
+}
+async function handleBillingSummary(req, res) {
+    const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+    if (!userId) {
+        res.json({ ok: false, reason: "missing_user" });
+        return;
+    }
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+        res.json({ ok: false, reason: "profile_unavailable" });
+        return;
+    }
+    const profilesTable = supabase.from("profiles");
+    const query = profilesTable
+        .select?.("credits,subscription_status")
+        ?.eq?.("id", userId);
+    if (!query || typeof query.maybeSingle !== "function") {
+        res.json({ ok: false, reason: "profile_unavailable" });
+        return;
+    }
+    try {
+        const { data, error } = await query.maybeSingle();
+        if (error || !data) {
+            res.json({ ok: false, reason: "profile_unavailable" });
+            return;
+        }
+        const credits = typeof data.credits === "number"
+            ? data.credits
+            : Number(data.credits ?? 0);
+        const status = normalizeSubscriptionStatus(data.subscription_status) || "free";
+        res.json({
+            ok: true,
+            plan: hasPaidAccess(status) ? "Pro" : "Free",
+            credits: Number.isFinite(credits) ? Math.max(0, credits) : 0,
+            subscriptionStatus: status,
+        });
+    }
+    catch {
+        res.json({ ok: false, reason: "profile_unavailable" });
+    }
 }
 async function logRun(input) {
     const supabase = getSupabaseClient();
@@ -138,6 +350,23 @@ function getDecisionModeFromResult(result, confidence) {
         return decisionMode;
     }
     return confidence < 70 ? "preview_only" : "safe_to_apply";
+}
+function getTestEngineerUserFacingReason(reason) {
+    if (reason.includes("Could not detect a test framework")) {
+        return ("No supported test setup detected\n\n" +
+            "Zone Test Engineer needs an existing supported test setup in this folder.\n" +
+            "Supported: Playwright, Cypress, Cucumber+Java, Selenium (Java/Python), TestNG, or pytest.");
+    }
+    return reason;
+}
+function getDataAnalystUserFacingReason(reason) {
+    if (reason.includes("detectDataSchema failed") ||
+        reason.includes("buildDataAnalystContext failed")) {
+        return ("No database context detected\n\n" +
+            "Zone Data Analyst needs existing schema or migration context in this folder.\n" +
+            "Supported signals include SQL migrations, Alembic, Flyway, Liquibase, or existing database files.");
+    }
+    return reason;
 }
 function normalizeSubscriptionStatus(value) {
     return typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -231,19 +460,30 @@ function selectEnhanceContextFiles(role, files) {
 }
 async function enhanceTask(input) {
     try {
-        const repoFiles = await (0, scanRepo_js_1.scanRepo)(input.repoPath);
-        const contextFiles = selectEnhanceContextFiles(input.role, repoFiles);
-        const contents = contextFiles.length > 0
-            ? await (0, readProjectFiles_js_1.readProjectFiles)(contextFiles.map((file) => file.absolutePath))
-            : {};
-        const repoContext = contextFiles.length > 0
-            ? contextFiles
+        const repoContext = input.hostedContext?.contextFiles && input.hostedContext.contextFiles.length > 0
+            ? input.hostedContext.contextFiles
                 .map((file) => {
-                const content = contents[file.absolutePath] ?? "";
-                return `FILE: ${file.path}\n${content}`;
+                return `FILE: ${file.path}\n${file.content ?? ""}`;
             })
                 .join("\n\n")
-            : "(no matching context files found)";
+            : (() => {
+                const repoFiles = (0, scanRepo_js_1.scanRepo)(input.repoPath);
+                return repoFiles.then(async (files) => {
+                    const contextFiles = selectEnhanceContextFiles(input.role, files);
+                    const contents = contextFiles.length > 0
+                        ? await (0, readProjectFiles_js_1.readProjectFiles)(contextFiles.map((file) => file.absolutePath))
+                        : {};
+                    return contextFiles.length > 0
+                        ? contextFiles
+                            .map((file) => {
+                            const content = contents[file.absolutePath] ?? "";
+                            return `FILE: ${file.path}\n${content}`;
+                        })
+                            .join("\n\n")
+                        : "(no matching context files found)";
+                });
+            })();
+        const resolvedRepoContext = typeof repoContext === "string" ? repoContext : await repoContext;
         const client = (0, openaiClient_js_1.createOpenAIClient)();
         const model = (0, openaiClient_js_1.getModelName)();
         const response = await client.responses.create({
@@ -252,7 +492,7 @@ async function enhanceTask(input) {
             input: `Role: ${input.role}\n` +
                 `Repo path: ${input.repoPath}\n` +
                 `User task: ${input.task}\n\n` +
-                `Relevant repository context:\n${repoContext}`,
+                `Relevant repository context:\n${resolvedRepoContext}`,
         });
         return String(response.output_text || "").trim();
     }
@@ -285,63 +525,22 @@ exports.app.get("/api/progress", (req, res) => {
     });
 });
 exports.app.get("/api/check-access", async (req, res) => {
-    const userId = typeof req.query.userId === "string" ? req.query.userId : "";
-    const authorization = await ensureRunAuthorized(userId);
-    if (authorization.allowed) {
-        res.json({ ok: true });
+    if (shouldUseHostedInferenceProxy()) {
+        await proxyHostedZoneRequest(req, res, "/api/check-access", {
+            onNotFound: () => handleCheckAccess(req, res),
+        });
         return;
     }
-    res.status(authorization.status).json(authorization.body);
+    await handleCheckAccess(req, res);
 });
 exports.app.get("/api/billing-summary", async (req, res) => {
-    const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
-    if (!userId) {
-        res.json({ ok: false, reason: "missing_user" });
-        return;
-    }
-    const supabase = getSupabaseClient();
-    if (!supabase) {
-        res.json({ ok: false, reason: "profile_unavailable" });
-        return;
-    }
-    const profilesTable = supabase.from("profiles");
-    const posthogKey = process.env.POSTHOG_KEY || "";
-    const posthogHost = process.env.POSTHOG_HOST || "";
-    const injectedScript = `
-<script>
-  window.__ZONE_PUBLIC_CONFIG__ = {
-    POSTHOG_KEY: "${posthogKey}",
-    POSTHOG_HOST: "${posthogHost}"
-  };
-</script>
-`;
-    const query = profilesTable
-        .select?.("credits,subscription_status")
-        ?.eq?.("id", userId);
-    if (!query || typeof query.maybeSingle !== "function") {
-        res.json({ ok: false, reason: "profile_unavailable" });
-        return;
-    }
-    try {
-        const { data, error } = await query.maybeSingle();
-        if (error || !data) {
-            res.json({ ok: false, reason: "profile_unavailable" });
-            return;
-        }
-        const credits = typeof data.credits === "number"
-            ? data.credits
-            : Number(data.credits ?? 0);
-        const status = normalizeSubscriptionStatus(data.subscription_status) || "free";
-        res.json({
-            ok: true,
-            plan: hasPaidAccess(status) ? "Pro" : "Free",
-            credits: Number.isFinite(credits) ? Math.max(0, credits) : 0,
-            subscriptionStatus: status,
+    if (shouldUseHostedInferenceProxy()) {
+        await proxyHostedZoneRequest(req, res, "/api/billing-summary", {
+            onNotFound: () => handleBillingSummary(req, res),
         });
+        return;
     }
-    catch {
-        res.json({ ok: false, reason: "profile_unavailable" });
-    }
+    await handleBillingSummary(req, res);
 });
 exports.app.post("/api/analyze", async (req, res) => {
     const { task, repoPath } = req.body;
@@ -353,6 +552,21 @@ exports.app.post("/api/analyze", async (req, res) => {
     });
 });
 exports.app.post("/api/patch", async (req, res) => {
+    if (shouldUseHostedInferenceProxy()) {
+        const { task, repoPath } = req.body ?? {};
+        const hostedContext = typeof task === "string" && typeof repoPath === "string"
+            ? await buildHostedDeveloperContext(task, repoPath)
+            : undefined;
+        await proxyHostedZoneRequest(req, res, "/api/patch", {
+            bodyOverride: hostedContext
+                ? {
+                    ...(req.body ?? {}),
+                    hostedContext,
+                }
+                : req.body,
+        });
+        return;
+    }
     const { task, repoPath, userId } = req.body;
     if (!task || !repoPath) {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
@@ -381,6 +595,21 @@ exports.app.post("/api/patch", async (req, res) => {
     }
 });
 exports.app.post("/api/dry-run", async (req, res) => {
+    if (shouldUseHostedInferenceProxy()) {
+        const { task, repoPath } = req.body ?? {};
+        const hostedContext = typeof task === "string" && typeof repoPath === "string"
+            ? await buildHostedDeveloperContext(task, repoPath)
+            : undefined;
+        await proxyHostedZoneRequest(req, res, "/api/dry-run", {
+            bodyOverride: hostedContext
+                ? {
+                    ...(req.body ?? {}),
+                    hostedContext,
+                }
+                : req.body,
+        });
+        return;
+    }
     const { task, repoPath, userId } = req.body;
     const authorization = await ensureRunAuthorized(userId);
     if (!authorization.allowed) {
@@ -418,7 +647,22 @@ exports.app.post("/api/apply", async (req, res) => {
     res.json(result);
 });
 exports.app.post("/api/enhance-task", async (req, res) => {
-    const { task, role, repoPath } = req.body;
+    if (shouldUseHostedInferenceProxy()) {
+        const { role, repoPath } = req.body ?? {};
+        const hostedContext = typeof role === "string" && typeof repoPath === "string"
+            ? await buildHostedEnhanceContext(role, repoPath)
+            : undefined;
+        await proxyHostedZoneRequest(req, res, "/api/enhance-task", {
+            bodyOverride: hostedContext
+                ? {
+                    ...(req.body ?? {}),
+                    hostedContext,
+                }
+                : req.body,
+        });
+        return;
+    }
+    const { task, role, repoPath, hostedContext } = req.body;
     if (!task || !role || !repoPath) {
         res
             .status(400)
@@ -426,7 +670,7 @@ exports.app.post("/api/enhance-task", async (req, res) => {
         return;
     }
     try {
-        const result = await enhanceTask({ task, role, repoPath });
+        const result = await enhanceTask({ task, role, repoPath, hostedContext });
         res
             .type("application/json")
             .send(JSON.stringify({ ok: true, enhancedTask: result }));
@@ -439,7 +683,22 @@ exports.app.post("/api/enhance-task", async (req, res) => {
     }
 });
 exports.app.post("/api/test-engineer", async (req, res) => {
-    const { task, repoPath, runId, userId } = req.body;
+    if (shouldUseHostedInferenceProxy()) {
+        const { task, repoPath } = req.body ?? {};
+        const hostedContext = typeof task === "string" && typeof repoPath === "string"
+            ? await buildHostedTestEngineerContext(task, repoPath)
+            : undefined;
+        await proxyHostedZoneRequest(req, res, "/api/test-engineer", {
+            bodyOverride: hostedContext
+                ? {
+                    ...(req.body ?? {}),
+                    hostedContext,
+                }
+                : req.body,
+        });
+        return;
+    }
+    const { task, repoPath, runId, userId, hostedContext } = req.body;
     if (!task || !repoPath) {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;
@@ -454,7 +713,11 @@ exports.app.post("/api/test-engineer", async (req, res) => {
             task,
             repoPath,
             onProgress: (stage) => emitProgress(runId, stage),
+            hostedContext,
         });
+        if (!result.ok && typeof result.reason === "string") {
+            result.reason = getTestEngineerUserFacingReason(result.reason);
+        }
         res.json(result);
         if (result.ok) {
             queueRunLog({
@@ -477,7 +740,22 @@ exports.app.post("/api/test-engineer", async (req, res) => {
     }
 });
 exports.app.post("/api/data-analyst", async (req, res) => {
-    const { task, repoPath, runId, userId } = req.body;
+    if (shouldUseHostedInferenceProxy()) {
+        const { task, repoPath } = req.body ?? {};
+        const hostedContext = typeof task === "string" && typeof repoPath === "string"
+            ? await buildHostedDataAnalystContext(task, repoPath)
+            : undefined;
+        await proxyHostedZoneRequest(req, res, "/api/data-analyst", {
+            bodyOverride: hostedContext
+                ? {
+                    ...(req.body ?? {}),
+                    hostedContext,
+                }
+                : req.body,
+        });
+        return;
+    }
+    const { task, repoPath, runId, userId, hostedContext } = req.body;
     if (!task || !repoPath) {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;
@@ -492,7 +770,11 @@ exports.app.post("/api/data-analyst", async (req, res) => {
             task,
             repoPath,
             onProgress: (stage) => emitProgress(runId, stage),
+            hostedContext,
         });
+        if (!result.ok && typeof result.reason === "string") {
+            result.reason = getDataAnalystUserFacingReason(result.reason);
+        }
         res.json(result);
         if (result.ok) {
             queueRunLog({
