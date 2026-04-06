@@ -1,0 +1,147 @@
+import { describe, expect, it } from "vitest";
+import { detectSemanticRisks } from "../detectSemanticRisks.js";
+import { scoreSemanticRisk } from "../scoreSemanticRisk.js";
+
+describe("detectSemanticRisks", () => {
+  it("detects auth guard removal", () => {
+    const risks = detectSemanticRisks({
+      filePath: "src/auth/routes.ts",
+      beforeContent: `
+export function loadDashboard() {
+  return requireAuth(request, () => renderDashboard());
+}
+`.trim(),
+      afterContent: `
+export function loadDashboard() {
+  return renderDashboard();
+}
+`.trim(),
+    });
+
+    expect(risks).toHaveLength(1);
+    expect(risks[0]).toMatchObject({
+      code: "AUTH_GUARD_REMOVED",
+      severity: "high",
+      category: "auth",
+      filePath: "src/auth/routes.ts",
+    });
+  });
+
+  it("detects test assertion removal", () => {
+    const risks = detectSemanticRisks({
+      filePath: "src/login/login.test.ts",
+      beforeContent: `
+import { expect, test } from "vitest";
+
+test("logs in", () => {
+  expect(result.ok).toBe(true);
+  assert(user.id);
+});
+`.trim(),
+      afterContent: `
+import { test } from "vitest";
+
+test("logs in", () => {
+  performLogin();
+});
+`.trim(),
+    });
+
+    expect(risks).toHaveLength(1);
+    expect(risks[0]).toMatchObject({
+      code: "TEST_ASSERTION_REMOVED",
+      severity: "high",
+      category: "tests",
+    });
+    expect(risks[0].message).toContain("reduced from 2 to 0");
+  });
+
+  it("detects secret logging exposure", () => {
+    const risks = detectSemanticRisks({
+      filePath: "src/config/debug.ts",
+      beforeContent: `
+export function printConfig(logger: Logger) {
+  logger.info("config loaded");
+}
+`.trim(),
+      afterContent: `
+export function printConfig(logger: Logger) {
+  logger.info(process.env);
+}
+`.trim(),
+    });
+
+    expect(risks).toHaveLength(1);
+    expect(risks[0]).toMatchObject({
+      code: "SECRET_EXPOSED_TO_LOG",
+      severity: "critical",
+      category: "secrets",
+    });
+  });
+
+  it("returns no risks for a no-risk change", () => {
+    const risks = detectSemanticRisks({
+      filePath: "src/utils/format.ts",
+      beforeContent: `
+export function formatName(name: string): string {
+  return name.trim();
+}
+`.trim(),
+      afterContent: `
+export function formatName(name: string): string {
+  return name.trim().toUpperCase();
+}
+`.trim(),
+    });
+
+    expect(risks).toEqual([]);
+  });
+
+  it("detects multiple risks in one file and scores them", () => {
+    const risks = detectSemanticRisks({
+      filePath: "src/api/userRoute.ts",
+      beforeContent: `
+export async function updateUser(req: Request, res: Response) {
+  requireAuth(req);
+  const schema = z.object({ email: z.string().email() });
+  const payload = schema.parse(req.body);
+
+  try {
+    return service.update(payload);
+  } catch (error) {
+    logger.error(error);
+    throw error;
+  }
+}
+`.trim(),
+      afterContent: `
+export async function updateUser(req: Request, res: Response) {
+  try {
+    console.log(process.env);
+    return service.update(req.body);
+  } catch {}
+}
+`.trim(),
+    });
+
+    expect(risks.map((risk) => risk.code)).toEqual([
+      "AUTH_GUARD_REMOVED",
+      "SECRET_EXPOSED_TO_LOG",
+      "VALIDATION_REMOVED",
+      "BROAD_ERROR_SWALLOWING",
+    ]);
+
+    const score = scoreSemanticRisk(risks);
+
+    expect(score).toEqual({
+      totalScore: 310,
+      highestSeverity: "critical",
+      countsBySeverity: {
+        low: 0,
+        medium: 0,
+        high: 3,
+        critical: 1,
+      },
+    });
+  });
+});
