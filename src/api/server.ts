@@ -395,6 +395,61 @@ app.get("/api/check-access", async (req, res) => {
   res.status(authorization.status).json(authorization.body);
 });
 
+app.get("/api/billing-summary", async (req, res) => {
+  const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+  if (!userId) {
+    res.json({ ok: false, reason: "missing_user" });
+    return;
+  }
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    res.json({ ok: false, reason: "profile_unavailable" });
+    return;
+  }
+  const profilesTable = supabase.from("profiles") as unknown as {
+    select?: (
+      columns: string
+    ) => {
+      eq?: (column: string, value: string) => {
+        maybeSingle?: () => Promise<{
+          data: {
+            credits?: number | string | null;
+            subscription_status?: string | null;
+          } | null;
+          error?: unknown;
+        }>;
+      };
+    };
+  };
+  const query = profilesTable
+    .select?.("credits,subscription_status")
+    ?.eq?.("id", userId);
+  if (!query || typeof query.maybeSingle !== "function") {
+    res.json({ ok: false, reason: "profile_unavailable" });
+    return;
+  }
+  try {
+    const { data, error } = await query.maybeSingle();
+    if (error || !data) {
+      res.json({ ok: false, reason: "profile_unavailable" });
+      return;
+    }
+    const credits =
+      typeof data.credits === "number"
+        ? data.credits
+        : Number(data.credits ?? 0);
+    const status = normalizeSubscriptionStatus(data.subscription_status) || "free";
+    res.json({
+      ok: true,
+      plan: hasPaidAccess(status) ? "Pro" : "Free",
+      credits: Number.isFinite(credits) ? Math.max(0, credits) : 0,
+      subscriptionStatus: status,
+    });
+  } catch {
+    res.json({ ok: false, reason: "profile_unavailable" });
+  }
+});
+
 app.post("/api/analyze", async (req, res) => {
   const { task, repoPath } = req.body;
   const result = await runAgent({ task, role: "developer" });

@@ -197,6 +197,11 @@ input:focus,textarea:focus{border-color:#007acc}
     <select id="historySelect" onchange="selectHistory()"><option value="">— select —</option></select>
   </div>
   <div id="errorBox" class="error-box"></div>
+  <div id="billingSummaryBox" class="repo-selection hidden">
+    <div class="section-title">Usage</div>
+    <div id="billingSummaryLabel" class="repo-selection-label"></div>
+    <div id="billingSummaryMeta" class="repo-selection-meta"></div>
+  </div>
   <div id="progressBox" class="progress-box hidden"><span id="progressText"></span></div>
   <div class="btn-row">
     <button class="exec-btn" id="execBtn" onclick="execute()">
@@ -591,8 +596,26 @@ function showError(msg){
 
 function showUpgrade(message,url){
   const b=document.getElementById('errorBox');
-  b.innerHTML=`⚠ ${escapeHtml(message)}<br><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer" style="color:#4ec9b0">Upgrade to Pro →</a>`;
+  const upgradeUrl=typeof url==='string'&&url.trim()?url.trim():'https://zonecli.dev/pricing';
+  const description=typeof message==='string'&&message.trim()&&message.trim().length<120?escapeHtml(message.trim()):'Keep using Zone to generate and apply tests instantly.';
+  b.innerHTML=`<div style="font-weight:700;margin-bottom:6px">You've used all your free runs</div><div style="margin-bottom:8px">${description}</div><ul style="margin:0 0 8px 18px;padding:0"><li>1000 runs / month</li><li>All roles (Developer, Test Engineer, Data Analyst)</li><li>Safe apply with confidence validation</li></ul><div style="margin-bottom:8px;font-weight:700">$9 / month</div><a href="${escapeHtml(upgradeUrl)}" target="_blank" rel="noreferrer" style="display:inline-block;margin-top:4px;padding:6px 12px;border:1px solid #4ec9b0;border-radius:6px;color:#4ec9b0;font-weight:700;text-decoration:none">Upgrade to Pro →</a><div style="margin-top:8px;opacity:.8">or try again with a more specific task</div>`;
   b.style.display='block';
+}
+async function refreshBillingSummary(){
+  const box=document.getElementById('billingSummaryBox');const label=document.getElementById('billingSummaryLabel');const meta=document.getElementById('billingSummaryMeta');
+  const userId=getCurrentUserId();
+  if(!userId){box.classList.add('hidden');label.textContent='';meta.textContent='';return;}
+  try{
+    const r=await fetch(`/api/billing-summary?userId=${encodeURIComponent(userId)}`);
+    const data=await r.json().catch(()=>null);
+    if(!r.ok||!data?.ok){box.classList.add('hidden');label.textContent='';meta.textContent='';return;}
+    const plan=data.plan==='Pro'?'Pro':'Free';const credits=typeof data.credits==='number'?Math.max(0,data.credits):0;
+    label.textContent=`Plan: ${plan} · Remaining runs: ${credits}`;
+    meta.textContent=plan==='Pro'?'1000 runs / month':'Upgrade for more runs';
+    box.classList.remove('hidden');
+  }catch(_){
+    box.classList.add('hidden');label.textContent='';meta.textContent='';
+  }
 }
 function showUnauthorized(message){
   const b=document.getElementById('errorBox');
@@ -952,6 +975,7 @@ renderHistory();renderRecentRuns();
 currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};
 renderResultSummary();
 updateApplyState();
+void refreshBillingSummary();
 </script>
 </body>
 </html></body>

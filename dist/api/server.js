@@ -43,8 +43,18 @@ async function logRun(input) {
     const supabase = getSupabaseClient();
     if (!supabase)
         return;
-    await supabase.from("run_logs").insert({
-        user_id: input.userId,
+    const effectiveUserId = typeof input.userId === "string" ? input.userId.trim() : "";
+    const userEmail = typeof process.env.ZONE_USER_EMAIL === "string"
+        ? process.env.ZONE_USER_EMAIL.trim()
+        : "";
+    console.log(`[zone] logRun: effectiveUserId=${effectiveUserId || "missing"}`);
+    if (!effectiveUserId) {
+        console.log("[zone] logRun: missing user id, skipping run log + credit update");
+        return;
+    }
+    const insertResult = await supabase.from("run_logs").insert({
+        user_id: effectiveUserId,
+        ...(userEmail ? { user_email: userEmail } : {}),
         role: input.role,
         task: input.task,
         repo_path: input.repoPath,
@@ -52,13 +62,52 @@ async function logRun(input) {
         confidence: input.confidence,
         credits_used: input.creditsUsed,
     });
-    await supabase.rpc("deduct_credits_and_increment_runs", {
-        p_user_id: input.userId,
-        p_credits: input.creditsUsed,
+    if (insertResult.error) {
+        console.log(`[zone] logRun: run_logs insert error=${insertResult.error.message}`);
+    }
+    else {
+        console.log("[zone] logRun: run_logs insert ok");
+    }
+    let freeRunDebit = 1;
+    const profilesRead = supabase.from("profiles");
+    const profileQuery = profilesRead
+        .select?.("credits,total_runs,subscription_status")
+        ?.eq?.("id", effectiveUserId);
+    if (profileQuery && typeof profileQuery.maybeSingle === "function") {
+        try {
+            const { data, error } = await profileQuery.maybeSingle();
+            if (!error && data) {
+                const normalizedStatus = normalizeSubscriptionStatus(data.subscription_status);
+                const paidAccess = normalizedStatus === "pro";
+                freeRunDebit = paidAccess ? 0 : 1;
+                console.log(`[zone] logRun: subscription_status=${normalizedStatus || "missing"}`);
+                console.log(`[zone] logRun: paidAccess=${paidAccess}`);
+            }
+            else {
+                console.log("[zone] logRun: profile read failed, defaulting debit=1");
+                freeRunDebit = 1;
+            }
+        }
+        catch {
+            console.log("[zone] logRun: profile read threw, defaulting debit=1");
+            freeRunDebit = 1;
+        }
+    }
+    console.log(`[zone] logRun: rpc debit=${freeRunDebit}`);
+    const rpcResult = await supabase.rpc("deduct_credits_and_increment_runs", {
+        p_user_id: effectiveUserId,
+        p_credits: freeRunDebit,
     });
+    if (rpcResult.error) {
+        console.log(`[zone] logRun: rpc error=${rpcResult.error.message}`);
+    }
+    else {
+        console.log("[zone] logRun: rpc ok");
+    }
 }
 function queueRunLog(input) {
-    if (!process.env.ZONE_USER_ID)
+    const userId = typeof input.userId === "string" ? input.userId.trim() : "";
+    if (!userId)
         return;
     void logRun(input).catch(() => undefined);
 }
@@ -68,6 +117,70 @@ function getDecisionModeFromResult(result, confidence) {
         return decisionMode;
     }
     return confidence < 70 ? "preview_only" : "safe_to_apply";
+}
+function normalizeSubscriptionStatus(value) {
+    return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+function hasPaidAccess(subscriptionStatus) {
+    const normalized = normalizeSubscriptionStatus(subscriptionStatus);
+    return normalized === "pro";
+}
+async function ensureRunAuthorized(rawUserId) {
+    const authenticatedUserId = typeof rawUserId === "string" ? rawUserId.trim() : "";
+    if (!authenticatedUserId) {
+        return {
+            allowed: false,
+            status: 401,
+            body: {
+                ok: false,
+                reason: "unauthorized",
+                message: "Missing user session. Please open Zone from your dashboard.",
+            },
+        };
+    }
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+        return { allowed: true };
+    }
+    const profilesTable = supabase.from("profiles");
+    if (typeof profilesTable.select !== "function") {
+        return { allowed: true };
+    }
+    const query = profilesTable
+        .select("credits,total_runs,subscription_status")
+        ?.eq?.("id", authenticatedUserId);
+    if (!query || typeof query.maybeSingle !== "function") {
+        return { allowed: true };
+    }
+    try {
+        const { data, error } = await query.maybeSingle();
+        if (error || !data) {
+            return { allowed: true };
+        }
+        const credits = typeof data.credits === "number"
+            ? data.credits
+            : Number(data.credits ?? 0);
+        const subscriptionStatus = normalizeSubscriptionStatus(data.subscription_status);
+        if (hasPaidAccess(subscriptionStatus)) {
+            return { allowed: true };
+        }
+        if (credits > 0) {
+            return { allowed: true };
+        }
+        return {
+            allowed: false,
+            status: 402,
+            body: {
+                ok: false,
+                reason: "no_free_runs",
+                message: "You've used all your free runs. Upgrade to Pro.",
+                upgradeUrl: "https://zonecli.dev/pricing",
+            },
+        };
+    }
+    catch {
+        return { allowed: true };
+    }
 }
 function emitProgress(runId, stage) {
     if (!runId)
@@ -150,6 +263,15 @@ exports.app.get("/api/progress", (req, res) => {
         }
     });
 });
+exports.app.get("/api/check-access", async (req, res) => {
+    const userId = typeof req.query.userId === "string" ? req.query.userId : "";
+    const authorization = await ensureRunAuthorized(userId);
+    if (authorization.allowed) {
+        res.json({ ok: true });
+        return;
+    }
+    res.status(authorization.status).json(authorization.body);
+});
 exports.app.post("/api/analyze", async (req, res) => {
     const { task, repoPath } = req.body;
     const result = await (0, runAgent_js_1.runAgent)({ task, role: "developer" });
@@ -160,13 +282,24 @@ exports.app.post("/api/analyze", async (req, res) => {
     });
 });
 exports.app.post("/api/patch", async (req, res) => {
-    const { task, repoPath } = req.body;
+    const { task, repoPath, userId } = req.body;
+    if (!task || !repoPath) {
+        res.status(400).json({ ok: false, reason: "task and repoPath are required" });
+        return;
+    }
+    const authorization = await ensureRunAuthorized(userId);
+    if (!authorization.allowed) {
+        res.status(authorization.status).json(authorization.body);
+        return;
+    }
     const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({ task, repoPath });
     res.json(result);
     if (result.ok) {
-        const confidence = typeof result.developerConfidence === "number" ? result.developerConfidence : 0;
+        const confidence = typeof result.developerConfidence === "number"
+            ? result.developerConfidence
+            : 0;
         queueRunLog({
-            userId: process.env.ZONE_USER_ID ?? "",
+            userId,
             role: "developer",
             task,
             repoPath,
@@ -218,9 +351,14 @@ exports.app.post("/api/enhance-task", async (req, res) => {
     }
 });
 exports.app.post("/api/test-engineer", async (req, res) => {
-    const { task, repoPath, runId } = req.body;
+    const { task, repoPath, runId, userId } = req.body;
     if (!task || !repoPath) {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
+        return;
+    }
+    const authorization = await ensureRunAuthorized(userId);
+    if (!authorization.allowed) {
+        res.status(authorization.status).json(authorization.body);
         return;
     }
     try {
@@ -232,7 +370,7 @@ exports.app.post("/api/test-engineer", async (req, res) => {
         res.json(result);
         if (result.ok) {
             queueRunLog({
-                userId: process.env.ZONE_USER_ID ?? "",
+                userId,
                 role: "test_engineer",
                 task,
                 repoPath,
@@ -251,9 +389,14 @@ exports.app.post("/api/test-engineer", async (req, res) => {
     }
 });
 exports.app.post("/api/data-analyst", async (req, res) => {
-    const { task, repoPath, runId } = req.body;
+    const { task, repoPath, runId, userId } = req.body;
     if (!task || !repoPath) {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
+        return;
+    }
+    const authorization = await ensureRunAuthorized(userId);
+    if (!authorization.allowed) {
+        res.status(authorization.status).json(authorization.body);
         return;
     }
     try {
@@ -265,7 +408,7 @@ exports.app.post("/api/data-analyst", async (req, res) => {
         res.json(result);
         if (result.ok) {
             queueRunLog({
-                userId: process.env.ZONE_USER_ID ?? "",
+                userId,
                 role: "data_analyst",
                 task,
                 repoPath,

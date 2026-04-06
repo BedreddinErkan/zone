@@ -97,6 +97,7 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             body: JSON.stringify({
                 task: "Write a data driven login test for multiple users",
                 repoPath: "C:/repo",
+                userId: "clerk_user_123",
             }),
         });
         const body = await response.json();
@@ -125,6 +126,7 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             body: JSON.stringify({
                 task: "create orders table",
                 repoPath: "C:/repo/zone-flyway-test",
+                userId: "clerk_user_123",
             }),
         });
         const body = await response.json();
@@ -162,6 +164,7 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             body: JSON.stringify({
                 task: "fix login form auth bug",
                 repoPath: "C:/repo",
+                userId: "clerk_user_123",
             }),
         });
         const body = await response.json();
@@ -218,7 +221,6 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
     (0, vitest_1.it)("logs successful developer runs to Supabase when env is configured", async () => {
         process.env.SUPABASE_URL = "https://example.supabase.co";
         process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
-        process.env.ZONE_USER_ID = "clerk_user_123";
         runLlmPatchFlowMock.mockResolvedValue({
             ok: true,
             patchPreview: "=== LLM PATCH PREVIEW ===",
@@ -236,6 +238,7 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             body: JSON.stringify({
                 task: "fix login validation",
                 repoPath: "C:/repo",
+                userId: "clerk_user_123",
             }),
         });
         (0, vitest_1.expect)(response.status).toBe(200);
@@ -253,13 +256,11 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             });
             (0, vitest_1.expect)(supabaseRpcMock).toHaveBeenCalledWith("deduct_credits_and_increment_runs", {
                 p_user_id: "clerk_user_123",
-                p_credits: 0.1,
+                p_credits: 1,
             });
         });
     });
-    (0, vitest_1.it)("skips Supabase logging silently when user env is missing", async () => {
-        process.env.SUPABASE_URL = "https://example.supabase.co";
-        process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    (0, vitest_1.it)("skips Supabase logging silently when Supabase env is missing", async () => {
         runTestEngineerFlowMock.mockResolvedValue({
             ok: true,
             framework: "playwright_ts",
@@ -278,6 +279,7 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             body: JSON.stringify({
                 task: "add login test",
                 repoPath: "C:/repo",
+                userId: "clerk_user_123",
             }),
         });
         (0, vitest_1.expect)(response.status).toBe(200);
@@ -288,7 +290,6 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
     (0, vitest_1.it)("logs successful data analyst runs with derived decision mode", async () => {
         process.env.SUPABASE_URL = "https://example.supabase.co";
         process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
-        process.env.ZONE_USER_ID = "clerk_user_456";
         runDataAnalystFlowMock.mockResolvedValue({
             ok: true,
             dialect: "postgresql",
@@ -308,6 +309,7 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             body: JSON.stringify({
                 task: "add reporting table",
                 repoPath: "C:/repo",
+                userId: "clerk_user_456",
             }),
         });
         (0, vitest_1.expect)(response.status).toBe(200);
@@ -320,7 +322,7 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             }));
             (0, vitest_1.expect)(supabaseRpcMock).toHaveBeenCalledWith("deduct_credits_and_increment_runs", {
                 p_user_id: "clerk_user_456",
-                p_credits: 0.06,
+                p_credits: 1,
             });
         });
     });

@@ -257,6 +257,7 @@ type UiContext = {
   setProgress(stage: string): void;
   selectRepoFolder(): Promise<void>;
   handleFolderFallbackChange(input: MockElement): void;
+  refreshBillingSummary(): Promise<void>;
 };
 
 type UiContextBase = Omit<
@@ -332,6 +333,9 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
   ensureElement("repoSelectionBox", "hidden");
   ensureElement("repoSelectionLabel");
   ensureElement("repoSelectionMeta");
+  ensureElement("billingSummaryBox", "hidden");
+  ensureElement("billingSummaryLabel");
+  ensureElement("billingSummaryMeta");
   ensureElement("complexityBadge", "complexity-badge hidden");
   ensureElement("frameworkBadge", "framework-badge hidden");
   ensureElement("decisionBadge", "decision-badge safe");
@@ -1058,6 +1062,28 @@ describe("UI execute pre-flight access", () => {
     );
   });
 
+  it("uses the default pricing URL when no_free_runs does not include upgradeUrl", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    context.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        deniedResponse(402, {
+          ok: false,
+          reason: "no_free_runs",
+          message: "You've used all your free runs. Upgrade to Pro.",
+        })
+      );
+    context.selectRole(roleButtons.testEngineer);
+    elements.get("task").value = "add login test";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+
+    expect(elements.get("errorBox").innerHTML).toContain(
+      'href="https://zonecli.dev/pricing"'
+    );
+  });
+
   it("proceeds normally when pre-flight access is allowed", async () => {
     const { context, elements, roleButtons } = buildUiHarness();
     const fetchMock = vi
@@ -1092,6 +1118,28 @@ describe("UI execute pre-flight access", () => {
       "/api/test-engineer",
       expect.objectContaining({ method: "POST" })
     );
+  });
+});
+
+describe("UI billing summary", () => {
+  it("renders plan and remaining runs from the billing summary endpoint", async () => {
+    const { context, elements } = buildUiHarness();
+    context.fetch = vi.fn().mockResolvedValueOnce(
+      okResponse({
+        ok: true,
+        plan: "Pro",
+        credits: 18,
+        subscriptionStatus: "pro",
+      })
+    );
+
+    await context.refreshBillingSummary();
+
+    expect(elements.get("billingSummaryBox").classList.contains("hidden")).toBe(false);
+    expect(elements.get("billingSummaryLabel").textContent).toBe(
+      "Plan: Pro · Remaining runs: 18"
+    );
+    expect(elements.get("billingSummaryMeta").textContent).toBe("1000 runs / month");
   });
 });
 

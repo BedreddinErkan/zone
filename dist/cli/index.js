@@ -13,6 +13,8 @@ const node_process_1 = __importDefault(require("node:process"));
 const node_fs_1 = require("node:fs");
 const node_child_process_1 = require("node:child_process");
 const node_util_1 = require("node:util");
+const node_os_1 = __importDefault(require("node:os"));
+const node_http_1 = require("node:http");
 const classifyPatchIntent_js_1 = require("../patch-generation/classifyPatchIntent.js");
 const runLlmPatchFlow_js_1 = require("../core/runLlmPatchFlow.js");
 const executionTracker_js_1 = require("../utils/executionTracker.js");
@@ -47,6 +49,7 @@ const runDataAnalystFlow_js_1 = require("../roles/runDataAnalystFlow.js");
 const confidenceGate_js_1 = require("../core/confidenceGate.js");
 const execFileAsync = (0, node_util_1.promisify)(node_child_process_1.execFile);
 const ANSI_ENABLED = node_process_1.default.env.VITEST !== "true" && node_process_1.default.env.NO_COLOR !== "1";
+const CLI_LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 // ---------------------------------------------------------------------------
 // Audit helpers
 // ---------------------------------------------------------------------------
@@ -107,6 +110,13 @@ function formatErrorMessage(error) {
     }
     return String(error);
 }
+function isSubscriptionRequiredReason(reason) {
+    return (reason ?? "").trim().toLowerCase() === "subscription_required";
+}
+function printSubscriptionRequiredMessage() {
+    console.error(`${zonePrefix()} Your free monthly runs are exhausted.`);
+    console.error(`${zonePrefix()} Enable billing at zonecli.dev/dashboard to continue with pay-as-you-go usage.`);
+}
 async function ensureParentDir(filePath) {
     const dir = node_path_1.default.dirname(filePath);
     await node_fs_1.promises.mkdir(dir, { recursive: true });
@@ -120,6 +130,107 @@ function tone(text, ...codes) {
 }
 function zonePrefix() {
     return tone("[zone]", colors_js_1.c.bold, colors_js_1.c.cyan);
+}
+function getZoneConfigPath() {
+    return node_path_1.default.join(node_os_1.default.homedir(), ".zone", "config.json");
+}
+async function saveZoneLoginConfig(input) {
+    const configPath = getZoneConfigPath();
+    await node_fs_1.promises.mkdir(node_path_1.default.dirname(configPath), { recursive: true });
+    await node_fs_1.promises.writeFile(configPath, JSON.stringify({
+        userId: input.userId,
+        email: input.email ?? "",
+    }, null, 2), "utf8");
+    return configPath;
+}
+function openUrlInBrowser(url) {
+    const platform = node_process_1.default.platform;
+    const command = platform === "win32"
+        ? { file: "cmd", args: ["/c", "start", "", url] }
+        : platform === "darwin"
+            ? { file: "open", args: [url] }
+            : { file: "xdg-open", args: [url] };
+    (0, node_child_process_1.execFile)(command.file, command.args, () => undefined);
+}
+function collectRequestBody(req) {
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        req.on("data", (chunk) => {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+        req.on("error", reject);
+    });
+}
+function sendJson(res, statusCode, payload) {
+    res.statusCode = statusCode;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.end(JSON.stringify(payload));
+}
+async function runLoginFlow() {
+    const server = (0, node_http_1.createServer)();
+    return await new Promise((resolve) => {
+        let settled = false;
+        let timeout = null;
+        const finish = (exitCode, message) => {
+            if (settled)
+                return;
+            settled = true;
+            if (timeout) {
+                clearTimeout(timeout);
+            }
+            server.close(() => {
+                if (message) {
+                    console.log(message);
+                }
+                resolve(exitCode);
+            });
+        };
+        server.on("request", async (req, res) => {
+            if (req.method !== "POST" || req.url !== "/cli-callback") {
+                sendJson(res, 404, { ok: false, reason: "Not found" });
+                return;
+            }
+            try {
+                const rawBody = await collectRequestBody(req);
+                const parsed = JSON.parse(rawBody);
+                const userId = typeof parsed.userId === "string" ? parsed.userId.trim() : "";
+                if (!userId) {
+                    sendJson(res, 400, {
+                        ok: false,
+                        reason: "userId must be a non-empty string",
+                    });
+                    return;
+                }
+                const email = typeof parsed.email === "string" ? parsed.email.trim() : "";
+                const configPath = await saveZoneLoginConfig({ userId, email });
+                sendJson(res, 200, { ok: true });
+                finish(0, `${zonePrefix()} ${tone("Login successful.", colors_js_1.c.green)} Saved config to ${configPath}`);
+            }
+            catch (error) {
+                const message = formatErrorMessage(error);
+                sendJson(res, 400, { ok: false, reason: message });
+            }
+        });
+        server.on("error", (error) => {
+            finish(1, `${zonePrefix()} ${tone(`Login failed: ${formatErrorMessage(error)}`, colors_js_1.c.red)}`);
+        });
+        server.listen(0, "127.0.0.1", () => {
+            const address = server.address();
+            if (!address || typeof address === "string") {
+                finish(1, `${zonePrefix()} ${tone("Login failed: could not determine callback port.", colors_js_1.c.red)}`);
+                return;
+            }
+            const loginUrl = `https://zonecli.dev/cli-auth?port=${address.port}`;
+            console.log(tone("⚡ Zone", colors_js_1.c.bold, colors_js_1.c.orange) + tone(" v1.1.9", colors_js_1.c.dim, colors_js_1.c.gray));
+            console.log(`${zonePrefix()} ${tone("Waiting for CLI login confirmation...", colors_js_1.c.cyan)}`);
+            console.log(`${zonePrefix()} Opened browser to ${loginUrl}`);
+            openUrlInBrowser(loginUrl);
+            timeout = setTimeout(() => {
+                finish(1, `${zonePrefix()} ${tone("Login timed out. Please run `zone login` again.", colors_js_1.c.yellow)}`);
+            }, CLI_LOGIN_TIMEOUT_MS);
+        });
+    });
 }
 function colorConfidence(score) {
     if (!ANSI_ENABLED)
@@ -150,7 +261,7 @@ function formatApplyLog(kind, values) {
     return `${zonePrefix()} ${colorLabel(`${kind}:`, colors[kind], symbols[kind])} ${values.join(", ") || "none"}`;
 }
 function printHeader() {
-    console.log(tone("⚡ Zone", colors_js_1.c.bold, colors_js_1.c.orange) + tone(" v0.1.0", colors_js_1.c.dim, colors_js_1.c.gray));
+    console.log(tone("⚡ Zone", colors_js_1.c.bold, colors_js_1.c.orange) + tone(" v1.1.9", colors_js_1.c.dim, colors_js_1.c.gray));
     console.log(tone("AI Code Agent — deterministic, explainable, safe", colors_js_1.c.dim, colors_js_1.c.gray));
 }
 function printStatusLine(statusLine) {
@@ -394,6 +505,10 @@ async function runTaskOnlyFlow(options) {
             console.log(`${zonePrefix()} ${tone("Data Analyst role — delegating to data analyst flow...", colors_js_1.c.white)}`);
             const daResult = await (0, runDataAnalystFlow_js_1.runDataAnalystFlow)({ task, repoPath });
             if (!daResult.ok) {
+                if (isSubscriptionRequiredReason(daResult.reason)) {
+                    printSubscriptionRequiredMessage();
+                    return 1;
+                }
                 console.error(`[zone] Data analyst flow failed: ${daResult.reason}`);
                 return 1;
             }
@@ -423,6 +538,10 @@ async function runTaskOnlyFlow(options) {
             console.log(`${zonePrefix()} ${tone("Test Engineer role — delegating to test engineer flow...", colors_js_1.c.white)}`);
             const teResult = await (0, runTestEngineerFlow_js_1.runTestEngineerFlow)({ task, repoPath });
             if (!teResult.ok) {
+                if (isSubscriptionRequiredReason(teResult.reason)) {
+                    printSubscriptionRequiredMessage();
+                    return 1;
+                }
                 console.error(`[zone] Test engineer flow failed: ${teResult.reason}`);
                 if (teResult.framework === "unknown") {
                     console.error("[zone] No test framework detected in this repository.");
@@ -503,6 +622,10 @@ async function runTaskOnlyFlow(options) {
             }
         }
         else {
+            if (isSubscriptionRequiredReason(llmResult.reason)) {
+                printSubscriptionRequiredMessage();
+                return 1;
+            }
             patchSection = generatedPatchPlanPreview + "\n\n[zone] LLM patch flow failed: " + llmResult.reason;
         }
     }
@@ -764,6 +887,12 @@ async function runCliWithOptions(options) {
         const message = formatErrorMessage(error);
         tracker.endPhase("total");
         if (taskOnly) {
+            if (isSubscriptionRequiredReason(message)) {
+                console.error("");
+                printSubscriptionRequiredMessage();
+                console.error("");
+                return 1;
+            }
             console.error("");
             console.error(`Task-only flow failed: ${message}`);
             console.error("");
@@ -797,6 +926,14 @@ async function run() {
     const program = new commander_1.Command();
     let subcommandHandled = false;
     program
+        .command("login")
+        .description("Authenticate the Zone CLI with your Zone account")
+        .action(async () => {
+        subcommandHandled = true;
+        const exitCode = await runLoginFlow();
+        node_process_1.default.exit(exitCode);
+    });
+    program
         .command("serve")
         .description("Start Zone web UI on localhost")
         .option("--port <port>", "Port to listen on", "3000")
@@ -804,10 +941,10 @@ async function run() {
         .action(async (options) => {
         subcommandHandled = true;
         const port = Number.parseInt(options.port, 10);
-        console.log(tone("⚡ Zone", colors_js_1.c.bold, colors_js_1.c.orange) + tone(" v0.1.0", colors_js_1.c.dim, colors_js_1.c.gray));
+        console.log(tone("⚡ Zone", colors_js_1.c.bold, colors_js_1.c.orange) + tone(" v1.1.9", colors_js_1.c.dim, colors_js_1.c.gray));
         console.log(tone(`Starting web UI on http://localhost:${port}`, colors_js_1.c.cyan));
         node_process_1.default.env.ZONE_SERVER_MANUAL_START = "1";
-        const { startServer } = await import("../api/server.js");
+        const { startServer } = await import("../server.js");
         await startServer(port);
         if (options.open) {
             const { exec } = await import("node:child_process");

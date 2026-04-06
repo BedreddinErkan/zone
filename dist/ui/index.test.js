@@ -155,6 +155,19 @@ class MockDirectoryHandle {
         this.files.delete(name);
     }
 }
+function okResponse(body) {
+    return {
+        ok: true,
+        json: async () => body,
+    };
+}
+function deniedResponse(status, body) {
+    return {
+        ok: false,
+        status,
+        json: async () => body,
+    };
+}
 function buildUiHarness(initialLocalStorage = {}) {
     const html = (0, node_fs_1.readFileSync)(node_path_1.default.resolve("src/ui/index.html"), "utf8");
     const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
@@ -381,6 +394,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         const { context, elements, roleButtons } = buildUiHarness();
         context.fetch = vitest_1.vi
             .fn()
+            .mockResolvedValueOnce(okResponse({ ok: true }))
             .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
@@ -595,6 +609,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         const { context, elements, roleButtons } = buildUiHarness();
         context.fetch = vitest_1.vi
             .fn()
+            .mockResolvedValueOnce(okResponse({ ok: true }))
             .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
@@ -659,6 +674,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         const { context, elements, roleButtons, localStorageStore } = buildUiHarness();
         context.fetch = vitest_1.vi
             .fn()
+            .mockResolvedValueOnce(okResponse({ ok: true }))
             .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
@@ -687,7 +703,10 @@ function buildUiHarness(initialLocalStorage = {}) {
     });
     (0, vitest_1.it)("adds a recent run after a failed run", async () => {
         const { context, elements, roleButtons } = buildUiHarness();
-        context.fetch = vitest_1.vi.fn().mockRejectedValue(new Error("Network failure"));
+        context.fetch = vitest_1.vi
+            .fn()
+            .mockResolvedValueOnce(okResponse({ ok: true }))
+            .mockRejectedValue(new Error("Network failure"));
         context.selectRole(roleButtons.developer);
         elements.get("task").value = "fix login flow";
         elements.get("repoPath").value = "C:/repo";
@@ -758,6 +777,76 @@ function buildUiHarness(initialLocalStorage = {}) {
         (0, vitest_1.expect)(roleButtons.dataAnalyst.classList.contains("active")).toBe(true);
     });
 });
+(0, vitest_1.describe)("UI execute pre-flight access", () => {
+    (0, vitest_1.it)("stops immediately on unauthorized pre-flight response", async () => {
+        const { context, elements, roleButtons } = buildUiHarness();
+        const fetchMock = vitest_1.vi
+            .fn()
+            .mockResolvedValueOnce(deniedResponse(401, {
+            ok: false,
+            reason: "unauthorized",
+            message: "Missing user session. Please open Zone from your dashboard.",
+        }));
+        context.fetch = fetchMock;
+        context.selectRole(roleButtons.testEngineer);
+        elements.get("task").value = "add login test";
+        elements.get("repoPath").value = "C:/repo";
+        await context.execute();
+        (0, vitest_1.expect)(fetchMock).toHaveBeenCalledTimes(1);
+        (0, vitest_1.expect)(fetchMock).toHaveBeenCalledWith(vitest_1.expect.stringContaining("/api/check-access?userId="));
+        (0, vitest_1.expect)(elements.get("progressBox").classList.contains("hidden")).toBe(true);
+        (0, vitest_1.expect)(elements.get("progressText").textContent).toBe("");
+        (0, vitest_1.expect)(elements.get("execBtn").disabled).toBe(false);
+        (0, vitest_1.expect)(elements.get("errorBox").textContent).toContain("Missing user session. Please open Zone from your dashboard.");
+    });
+    (0, vitest_1.it)("stops immediately on no_free_runs pre-flight response", async () => {
+        const { context, elements, roleButtons } = buildUiHarness();
+        const fetchMock = vitest_1.vi
+            .fn()
+            .mockResolvedValueOnce(deniedResponse(402, {
+            ok: false,
+            reason: "no_free_runs",
+            message: "You've used all your free runs. Upgrade to Pro.",
+            upgradeUrl: "https://zonecli.dev/pricing",
+        }));
+        context.fetch = fetchMock;
+        context.selectRole(roleButtons.dataAnalyst);
+        elements.get("task").value = "create orders table";
+        elements.get("repoPath").value = "C:/repo";
+        await context.execute();
+        (0, vitest_1.expect)(fetchMock).toHaveBeenCalledTimes(1);
+        (0, vitest_1.expect)(fetchMock).toHaveBeenCalledWith(vitest_1.expect.stringContaining("/api/check-access?userId="));
+        (0, vitest_1.expect)(elements.get("progressBox").classList.contains("hidden")).toBe(true);
+        (0, vitest_1.expect)(elements.get("progressText").textContent).toBe("");
+        (0, vitest_1.expect)(elements.get("execBtn").disabled).toBe(false);
+        (0, vitest_1.expect)(elements.get("errorBox").innerHTML).toContain("Upgrade to Pro");
+        (0, vitest_1.expect)(elements.get("errorBox").innerHTML).toContain("https://zonecli.dev/pricing");
+    });
+    (0, vitest_1.it)("proceeds normally when pre-flight access is allowed", async () => {
+        const { context, elements, roleButtons } = buildUiHarness();
+        const fetchMock = vitest_1.vi
+            .fn()
+            .mockResolvedValueOnce(okResponse({ ok: true }))
+            .mockResolvedValueOnce(okResponse({
+            ok: true,
+            framework: "playwright_ts",
+            language: "typescript",
+            confidence: 82,
+            summary: "Generated test",
+            warnings: [],
+            complexity: "single_scenario",
+            applyPatches: [],
+            preview: "preview",
+        }));
+        context.fetch = fetchMock;
+        context.selectRole(roleButtons.testEngineer);
+        elements.get("task").value = "add login test";
+        elements.get("repoPath").value = "C:/repo";
+        await context.execute();
+        (0, vitest_1.expect)(fetchMock).toHaveBeenNthCalledWith(1, vitest_1.expect.stringContaining("/api/check-access?userId="));
+        (0, vitest_1.expect)(fetchMock).toHaveBeenNthCalledWith(2, "/api/test-engineer", vitest_1.expect.objectContaining({ method: "POST" }));
+    });
+});
 (0, vitest_1.describe)("UI patch preview", () => {
     (0, vitest_1.it)("renders grouped patch preview by file", () => {
         const { context, elements } = buildUiHarness();
@@ -821,6 +910,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         (0, vitest_1.expect)(elements.get("applyStatusBox").textContent).toContain("Run Execute first");
         context.fetch = vitest_1.vi
             .fn()
+            .mockResolvedValueOnce(okResponse({ ok: true }))
             .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
@@ -924,6 +1014,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         context.window.showDirectoryPicker = vitest_1.vi.fn().mockResolvedValue(rootHandle);
         context.fetch = vitest_1.vi
             .fn()
+            .mockResolvedValueOnce(okResponse({ ok: true }))
             .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
@@ -946,6 +1037,7 @@ function buildUiHarness(initialLocalStorage = {}) {
                 ],
             }),
         })
+            .mockResolvedValueOnce(okResponse({ ok: true }))
             .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
@@ -990,6 +1082,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         context.window.showDirectoryPicker = vitest_1.vi.fn().mockResolvedValue(rootHandle);
         context.fetch = vitest_1.vi
             .fn()
+            .mockResolvedValueOnce(okResponse({ ok: true }))
             .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
@@ -1042,6 +1135,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         context.window.showDirectoryPicker = vitest_1.vi.fn().mockResolvedValue(rootHandle);
         context.fetch = vitest_1.vi
             .fn()
+            .mockResolvedValueOnce(okResponse({ ok: true }))
             .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
@@ -1106,6 +1200,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         const { context, elements, roleButtons } = buildUiHarness();
         context.fetch = vitest_1.vi
             .fn()
+            .mockResolvedValueOnce(okResponse({ ok: true }))
             .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
@@ -1141,6 +1236,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         context.window.showDirectoryPicker = vitest_1.vi.fn().mockResolvedValue(rootHandle);
         context.fetch = vitest_1.vi
             .fn()
+            .mockResolvedValueOnce(okResponse({ ok: true }))
             .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
@@ -1181,6 +1277,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         context.window.showDirectoryPicker = vitest_1.vi.fn().mockResolvedValue(deniedHandle);
         context.fetch = vitest_1.vi
             .fn()
+            .mockResolvedValueOnce(okResponse({ ok: true }))
             .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
@@ -1215,6 +1312,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         elements.get("repoPath").value = "C:/repo";
         context.fetch = vitest_1.vi
             .fn()
+            .mockResolvedValueOnce(okResponse({ ok: true }))
             .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
@@ -1247,6 +1345,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         context.window.showDirectoryPicker = vitest_1.vi.fn().mockResolvedValue(rootHandle);
         context.fetch = vitest_1.vi
             .fn()
+            .mockResolvedValueOnce(okResponse({ ok: true }))
             .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
@@ -1295,6 +1394,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         context.window.showDirectoryPicker = vitest_1.vi.fn().mockResolvedValue(rootHandle);
         context.fetch = vitest_1.vi
             .fn()
+            .mockResolvedValueOnce(okResponse({ ok: true }))
             .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
@@ -1334,13 +1434,21 @@ function buildUiHarness(initialLocalStorage = {}) {
     (0, vitest_1.it)("renders progress while a run is in progress", async () => {
         const { context, elements, roleButtons } = buildUiHarness();
         let resolveFetch;
-        context.fetch = vitest_1.vi.fn().mockImplementation(() => new Promise((resolve) => {
-            resolveFetch = resolve;
-        }));
+        let callCount = 0;
+        context.fetch = vitest_1.vi.fn().mockImplementation(() => {
+            callCount += 1;
+            if (callCount === 1) {
+                return Promise.resolve(okResponse({ ok: true }));
+            }
+            return new Promise((resolve) => {
+                resolveFetch = resolve;
+            });
+        });
         context.selectRole(roleButtons.dataAnalyst);
         elements.get("task").value = "create orders table";
         elements.get("repoPath").value = "C:/repo/zone-flyway-test";
         const execution = context.execute();
+        await new Promise((resolve) => setTimeout(resolve, 0));
         const source = MockEventSource.instances[0];
         source.emit({ stage: "Building prompt..." });
         (0, vitest_1.expect)(elements.get("progressBox").classList.contains("hidden")).toBe(false);
@@ -1372,7 +1480,10 @@ function buildUiHarness(initialLocalStorage = {}) {
     });
     (0, vitest_1.it)("final completion resolves progress to Ready", async () => {
         const { context, elements, roleButtons } = buildUiHarness();
-        context.fetch = vitest_1.vi.fn().mockResolvedValue({
+        context.fetch = vitest_1.vi
+            .fn()
+            .mockResolvedValueOnce(okResponse({ ok: true }))
+            .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
                 ok: true,
@@ -1396,7 +1507,22 @@ function buildUiHarness(initialLocalStorage = {}) {
         const { context, elements, roleButtons } = buildUiHarness();
         context.fetch = vitest_1.vi
             .fn()
-            .mockResolvedValue({
+            .mockResolvedValueOnce(okResponse({ ok: true }))
+            .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                ok: true,
+                dialect: "postgresql",
+                migrationFormat: "flyway",
+                confidence: 91,
+                summary: "Creates orders table",
+                warnings: [],
+                applyPatches: [],
+                preview: "=== DATA ANALYST PREVIEW ===\nSummary: Creates orders table",
+            }),
+        })
+            .mockResolvedValueOnce(okResponse({ ok: true }))
+            .mockResolvedValueOnce({
             ok: true,
             json: async () => ({
                 ok: true,
