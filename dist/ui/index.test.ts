@@ -125,21 +125,29 @@ class MockWritableFile {
 }
 
 class MockFileHandle {
+  kind = "file";
+  name = "";
   content = "";
   writable = new MockWritableFile(this);
+
+  constructor(name = "") {
+    this.name = name;
+  }
 
   async createWritable(): Promise<MockWritableFile> {
     return this.writable;
   }
 
-  async getFile(): Promise<{ text(): Promise<string> }> {
+  async getFile(): Promise<{ size: number; text(): Promise<string> }> {
     return {
+      size: this.content.length,
       text: async () => this.content,
     };
   }
 }
 
 class MockDirectoryHandle {
+  kind = "directory";
   name: string;
   permissionState: "granted" | "denied" | "prompt";
   directories = new Map<string, MockDirectoryHandle>();
@@ -182,13 +190,24 @@ class MockDirectoryHandle {
       if (!options?.create) {
         throw new Error(`File not found: ${name}`);
       }
-      this.files.set(name, new MockFileHandle());
+      this.files.set(name, new MockFileHandle(name));
     }
     return this.files.get(name)!;
   }
 
   async removeEntry(name: string): Promise<void> {
     this.files.delete(name);
+  }
+
+  async *values(): AsyncGenerator<MockDirectoryHandle | MockFileHandle> {
+    for (const [name, directory] of this.directories) {
+      directory.name = name;
+      yield directory;
+    }
+    for (const [name, file] of this.files) {
+      file.name = name;
+      yield file;
+    }
   }
 }
 
@@ -240,6 +259,16 @@ type UiContext = {
   window: {
     location: { href: string };
     showDirectoryPicker?: ReturnType<typeof vi.fn>;
+    currentUser?: { id: string; email?: string };
+    Clerk?: {
+      user?: { id?: string };
+      session?: { user?: { id?: string } };
+    };
+    __ZONE_PUBLIC_CONFIG__?: {
+      zoneApiBaseUrl?: string;
+      debugFallbackUserId?: string;
+      currentUser?: { id: string; email?: string } | null;
+    };
   };
   Math: Math;
   Date: DateConstructor;
@@ -435,6 +464,7 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
     window: {
       location: { href: "" },
       showDirectoryPicker: vi.fn(),
+      currentUser: { id: "user_test_123" },
     },
     Math,
     Date,
@@ -601,6 +631,65 @@ describe("UI repo folder picker", () => {
     await context.executeDryRun();
 
     expect(elements.get("errorBox").textContent).toContain("Task and repo path are required.");
+  });
+
+  it("shows a missing session message and skips requests when no authenticated user exists", async () => {
+    const { context, elements } = buildUiHarness();
+    context.fetch = vi.fn();
+    delete (
+      context.window as UiContext["window"] & {
+        currentUser?: { id: string };
+      }
+    ).currentUser;
+    elements.get("task").value = "fix spacing";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+
+    expect(elements.get("errorBox").textContent).toContain(
+      "Missing user session. Please open Zone from your dashboard."
+    );
+    expect(context.fetch).not.toHaveBeenCalled();
+  });
+
+  it("uses the injected current user id when available", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    (
+      context.window as UiContext["window"] & { currentUser?: { id: string } }
+    ).currentUser = {
+      id: "user_real_123",
+    };
+    context.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          decision: { mode: "safe_to_apply" },
+          confidence: { score: 82 },
+          risk: { score: 0, breakdown: {} },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          patchPreview: "Summary: Fix button spacing",
+          warnings: [],
+          applyPatches: [],
+        }),
+      });
+
+    context.selectRole(roleButtons.developer);
+    elements.get("task").value = "fix button spacing";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+
+    expect(context.fetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/check-access?userId=user_real_123"
+    );
   });
 });
 
@@ -1118,6 +1207,145 @@ describe("UI execute pre-flight access", () => {
       2,
       "/api/test-engineer",
       expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("requires a selected folder in hosted mode and maps the hosted repo access error", () => {
+    const { context, elements } = buildUiHarness();
+    (
+      context.window as typeof context.window & {
+        __ZONE_PUBLIC_CONFIG__?: { zoneApiBaseUrl: string };
+      }
+    ).__ZONE_PUBLIC_CONFIG__ = {
+      zoneApiBaseUrl: "https://api.zonecli.dev",
+    };
+    elements.get("repoPath").value = "C:/repo";
+
+    (context as unknown as { renderRepoSelection(): void }).renderRepoSelection();
+
+    expect(elements.get("execBtn").disabled).toBe(true);
+    expect(elements.get("dryRunBtn").disabled).toBe(true);
+    expect(elements.get("repoSelectionBox").classList.contains("hidden")).toBe(false);
+    expect(elements.get("repoSelectionMeta").textContent).toContain(
+      "Please select a folder to run in hosted mode."
+    );
+
+    (context as unknown as { showError(message: string): void }).showError(
+      "repo_not_accessible_in_hosted_mode"
+    );
+    expect(elements.get("errorBox").textContent).toContain(
+      "Please select a folder to run in hosted mode."
+    );
+  });
+
+  it("attaches hostedContext to /api/test-engineer when a hosted folder is selected", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    const rootHandle = new MockDirectoryHandle("zone-repo");
+    const testsDir = await rootHandle.getDirectoryHandle("tests", { create: true });
+    const testFile = await testsDir.getFileHandle("login.spec.ts", { create: true });
+    testFile.content = "test('login', async () => {});";
+    (
+      context.window as typeof context.window & {
+        __ZONE_PUBLIC_CONFIG__?: { zoneApiBaseUrl: string };
+      }
+    ).__ZONE_PUBLIC_CONFIG__ = {
+      zoneApiBaseUrl: "https://api.zonecli.dev",
+    };
+    context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
+      .mockResolvedValueOnce(
+        okResponse({
+          ok: true,
+          framework: "playwright_ts",
+          language: "typescript",
+          confidence: 82,
+          summary: "Generated test",
+          warnings: [],
+          complexity: "single_scenario",
+          applyPatches: [],
+          preview: "preview",
+        })
+      );
+    context.fetch = fetchMock;
+
+    await context.selectRepoFolder();
+    context.selectRole(roleButtons.testEngineer);
+    elements.get("task").value = "add login test";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+
+    const requestInit = fetchMock.mock.calls[1]?.[1] as { body?: string };
+    const body = JSON.parse(requestInit.body || "{}");
+    expect(body.hostedContext).toBeTruthy();
+    expect(body.hostedContext.availableFiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "tests/login.spec.ts" }),
+      ])
+    );
+    expect(body.hostedContext.existingTestContents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "tests/login.spec.ts" }),
+      ])
+    );
+  });
+
+  it("attaches hostedContext to /api/data-analyst when a hosted folder is selected", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    const rootHandle = new MockDirectoryHandle("zone-repo");
+    const dbDir = await rootHandle.getDirectoryHandle("db", { create: true });
+    const migrationDir = await dbDir.getDirectoryHandle("migration", { create: true });
+    const sqlFile = await migrationDir.getFileHandle("V1__users.sql", { create: true });
+    sqlFile.content = "CREATE TABLE users(id SERIAL PRIMARY KEY);";
+    (
+      context.window as typeof context.window & {
+        __ZONE_PUBLIC_CONFIG__?: { zoneApiBaseUrl: string };
+      }
+    ).__ZONE_PUBLIC_CONFIG__ = {
+      zoneApiBaseUrl: "https://api.zonecli.dev",
+    };
+    context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
+      .mockResolvedValueOnce(
+        okResponse({
+          ok: true,
+          dialect: "postgresql",
+          migrationFormat: "flyway",
+          confidence: 90,
+          summary: "Creates users table",
+          warnings: [],
+          applyPatches: [],
+          preview: "preview",
+        })
+      );
+    context.fetch = fetchMock;
+
+    await context.selectRepoFolder();
+    context.selectRole(roleButtons.dataAnalyst);
+    elements.get("task").value = "create users table";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+
+    const requestInit = fetchMock.mock.calls[1]?.[1] as { body?: string };
+    const body = JSON.parse(requestInit.body || "{}");
+    expect(body.hostedContext).toBeTruthy();
+    expect(body.hostedContext.availableFiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "db/migration/V1__users.sql" }),
+      ])
+    );
+    expect(body.hostedContext.schema).toEqual(
+      expect.objectContaining({ migrationFormat: "flyway" })
+    );
+    expect(body.hostedContext.existingSqlContents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "db/migration/V1__users.sql" }),
+      ])
     );
   });
 });

@@ -131,6 +131,24 @@ function getSupabaseClient(): SupabaseClient | null {
 }
 
 function renderZoneUiHtml(): string {
+  const currentUserId =
+    typeof process.env.ZONE_USER_ID === "string"
+      ? process.env.ZONE_USER_ID.trim()
+      : "";
+  const currentUserEmail =
+    typeof process.env.ZONE_USER_EMAIL === "string"
+      ? process.env.ZONE_USER_EMAIL.trim()
+      : "";
+  const debugFallbackUserId =
+    typeof process.env.ZONE_DEBUG_FALLBACK_USER_ID === "string"
+      ? process.env.ZONE_DEBUG_FALLBACK_USER_ID.trim()
+      : "";
+  const currentUser = currentUserId
+    ? {
+        id: currentUserId,
+        ...(currentUserEmail ? { email: currentUserEmail } : {}),
+      }
+    : null;
   const configScript = `<script>window.__ZONE_PUBLIC_CONFIG__=${JSON.stringify({
     posthogKey:
       typeof process.env.POSTHOG_KEY === "string"
@@ -140,7 +158,9 @@ function renderZoneUiHtml(): string {
       typeof process.env.POSTHOG_HOST === "string"
         ? process.env.POSTHOG_HOST.trim()
         : "",
-  })};</script>`;
+    currentUser,
+    debugFallbackUserId,
+  })};window.currentUser=window.currentUser||${JSON.stringify(currentUser)};</script>`;
   return zoneUiHtmlTemplate.replace("</head>", `${configScript}</head>`);
 }
 

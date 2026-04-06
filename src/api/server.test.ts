@@ -135,6 +135,8 @@ describe("/api/test-engineer", () => {
     delete process.env.SUPABASE_URL;
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     delete process.env.ZONE_USER_ID;
+    delete process.env.ZONE_USER_EMAIL;
+    delete process.env.ZONE_DEBUG_FALLBACK_USER_ID;
     const { app } = await import("./server.js");
     server = createServer(app);
     await new Promise<void>((resolve) => {
@@ -255,6 +257,20 @@ describe("/api/test-engineer", () => {
       "src/components/LoginForm.tsx",
       "server/routes/auth.ts",
     ]);
+  });
+
+  it("injects the current user bootstrap into the UI html when available", async () => {
+    process.env.ZONE_USER_ID = "user_real_123";
+    process.env.ZONE_USER_EMAIL = "real@example.com";
+
+    const response = await fetch(`${baseUrl}/`);
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain('"currentUser":{"id":"user_real_123","email":"real@example.com"}');
+    expect(body).toContain(
+      'window.currentUser=window.currentUser||{"id":"user_real_123","email":"real@example.com"};'
+    );
   });
 
   it("returns fileDiffs from /api/dry-run", async () => {

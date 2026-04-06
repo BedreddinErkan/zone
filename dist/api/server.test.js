@@ -121,6 +121,8 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
         delete process.env.SUPABASE_URL;
         delete process.env.SUPABASE_SERVICE_ROLE_KEY;
         delete process.env.ZONE_USER_ID;
+        delete process.env.ZONE_USER_EMAIL;
+        delete process.env.ZONE_DEBUG_FALLBACK_USER_ID;
         const { app } = await import("./server.js");
         server = (0, node_http_1.createServer)(app);
         await new Promise((resolve) => {
@@ -231,6 +233,15 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             "src/components/LoginForm.tsx",
             "server/routes/auth.ts",
         ]);
+    });
+    (0, vitest_1.it)("injects the current user bootstrap into the UI html when available", async () => {
+        process.env.ZONE_USER_ID = "user_real_123";
+        process.env.ZONE_USER_EMAIL = "real@example.com";
+        const response = await fetch(`${baseUrl}/`);
+        const body = await response.text();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toContain('"currentUser":{"id":"user_real_123","email":"real@example.com"}');
+        (0, vitest_1.expect)(body).toContain('window.currentUser=window.currentUser||{"id":"user_real_123","email":"real@example.com"};');
     });
     (0, vitest_1.it)("returns fileDiffs from /api/dry-run", async () => {
         runLlmPatchFlowMock.mockResolvedValue({

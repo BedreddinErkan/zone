@@ -357,18 +357,30 @@ function showDiff(data){
 
 function setDryRunLoading(l){
   const btn=document.getElementById('dryRunBtn');const sp=document.getElementById('drySpinner');const t=document.getElementById('dryRunText');
-  btn.disabled=l;sp.style.display=l?'block':'none';t.textContent=l?'Running...':'⊘  Dry Run';
+  btn.disabled=l||requiresHostedFolderSelection();btn.title=requiresHostedFolderSelection()?getHostedFolderRequiredMessage():'';sp.style.display=l?'block':'none';t.textContent=l?'Running...':'⊘  Dry Run';
 }
 
 function getResolvedRepoPath(){
   return document.getElementById('repoPath').value.trim()||currentRepoPath||'';
 }
 
+function hasHostedFolderHandle(){
+  return Boolean(currentRepoHandle&&currentRepoHandle.kind==='directory'&&typeof currentRepoHandle.values==='function');
+}
+
+function requiresHostedFolderSelection(){
+  return Boolean(isHostedExecution()&&!hasHostedFolderHandle());
+}
+
+function getHostedFolderRequiredMessage(){
+  return 'Please select a folder to run in hosted mode.';
+}
+
 function isHostedExecution(){
   const config=window.__ZONE_PUBLIC_CONFIG__||{};
   const zoneApiBaseUrl=typeof config.zoneApiBaseUrl==='string'?config.zoneApiBaseUrl.trim():'';
   const host=String(window.location?.hostname||'').toLowerCase();
-  return Boolean(zoneApiBaseUrl)||(host&&host!=='localhost'&&host!=='127.0.0.1');
+  return Boolean(zoneApiBaseUrl||Boolean(host&&host!=='localhost'&&host!=='127.0.0.1'));
 }
 
 function getHostedContextExtension(filePath){
@@ -430,6 +442,90 @@ async function buildHostedDeveloperContext(){
     availableFiles,
     contextFiles:files.map(file=>({path:file.path,action:'inspect',reason:'Client-provided folder context',content:file.content})),
     originalContents:Object.fromEntries(files.map(file=>[file.path,file.content])),
+  };
+}
+
+function isHostedTestFile(filePath){
+  const normalized=String(filePath||'').toLowerCase();
+  return normalized.includes('/tests/')||normalized.includes('/test/')||normalized.includes('/e2e/')||normalized.includes('.spec.')||normalized.includes('.test.');
+}
+
+function isHostedPageObjectFile(filePath){
+  const normalized=String(filePath||'').toLowerCase();
+  return normalized.includes('pageobject')||normalized.includes('/pages/')||normalized.includes('page.');
+}
+
+function isHostedStepDefinitionFile(filePath){
+  const normalized=String(filePath||'').toLowerCase();
+  return normalized.includes('/steps/')||normalized.includes('stepdefinition')||normalized.includes('.steps.');
+}
+
+function isHostedFeatureFile(filePath){
+  return getHostedContextExtension(filePath)==='feature';
+}
+
+async function buildHostedTestEngineerContext(){
+  if(!currentRepoHandle||currentRepoHandle.kind!=='directory'||typeof currentRepoHandle.values!=='function')return null;
+  const files=await collectHostedContextFilesFromHandle(currentRepoHandle);
+  if(files.length===0)return null;
+  const availableFiles=files.map(file=>({path:file.path,category:classifyHostedContextCategory(file.path),extension:getHostedContextExtension(file.path)}));
+  return{
+    availableFiles,
+    pageObjectContents:files.filter(file=>isHostedPageObjectFile(file.path)).slice(0,3).map(file=>({path:file.path,content:file.content})),
+    stepDefinitionContents:files.filter(file=>isHostedStepDefinitionFile(file.path)).slice(0,2).map(file=>({path:file.path,content:file.content})),
+    featureContents:files.filter(file=>isHostedFeatureFile(file.path)).slice(0,3).map(file=>({path:file.path,content:file.content})),
+    existingTestContents:files.filter(file=>isHostedTestFile(file.path)).slice(0,3).map(file=>({path:file.path,content:file.content})),
+  };
+}
+
+function inferHostedDataSchema(files){
+  const evidence=[];let dialect='unknown';let migrationFormat='unknown';
+  for(const file of files){
+    const path=file.path.toLowerCase();
+    const content=file.content.toLowerCase();
+    if(dialect==='unknown'){
+      if(path.includes('postgres')||content.includes('serial primary key')||content.includes('gen_random_uuid')||content.includes('timestamp with time zone')){dialect='postgresql';evidence.push(`dialect:${file.path}`);}
+      else if(path.includes('mysql')||content.includes('auto_increment')||content.includes('engine=innodb')){dialect='mysql';evidence.push(`dialect:${file.path}`);}
+      else if(path.includes('sqlite')||content.includes('sqlite')||content.includes('integer primary key autoincrement')){dialect='sqlite';evidence.push(`dialect:${file.path}`);}
+    }
+    if(migrationFormat==='unknown'){
+      if(path.includes('/db/migration/')||/v\d+__/.test(path)){migrationFormat='flyway';evidence.push(`migration:${file.path}`);}
+      else if(path.includes('liquibase')||path.endsWith('.xml')){migrationFormat='liquibase';evidence.push(`migration:${file.path}`);}
+      else if(path.includes('alembic')){migrationFormat='alembic';evidence.push(`migration:${file.path}`);}
+      else if(getHostedContextExtension(file.path)==='sql'){migrationFormat='raw_sql';evidence.push(`migration:${file.path}`);}
+    }
+  }
+  const existingTables=[];const tablePattern=/create table(?: if not exists)?\s+["`]?([a-zA-Z0-9_]+)/gi;
+  for(const file of files){
+    let match;
+    while((match=tablePattern.exec(file.content))!==null){
+      if(!existingTables.includes(match[1]))existingTables.push(match[1]);
+    }
+  }
+  const migrationDir=(files.find(file=>getHostedContextExtension(file.path)==='sql')?.path.split('/').slice(0,-1).join('/'))||null;
+  return{
+    dialect,
+    migrationFormat,
+    confidence:evidence.length>=2?'medium':'low',
+    evidence,
+    migrationDir,
+    existingTables,
+  };
+}
+
+async function buildHostedDataAnalystContext(){
+  if(!currentRepoHandle||currentRepoHandle.kind!=='directory'||typeof currentRepoHandle.values!=='function')return null;
+  const files=await collectHostedContextFilesFromHandle(currentRepoHandle);
+  if(files.length===0)return null;
+  const availableFiles=files.map(file=>({path:file.path,category:classifyHostedContextCategory(file.path),extension:getHostedContextExtension(file.path)}));
+  const existingSqlContents=files.filter(file=>{
+    const normalized=file.path.toLowerCase();
+    return getHostedContextExtension(file.path)==='sql'||normalized.includes('migration')||normalized.includes('schema')||normalized.includes('alembic')||normalized.includes('liquibase');
+  }).slice(0,3).map(file=>({path:file.path,content:file.content}));
+  return{
+    availableFiles,
+    schema:inferHostedDataSchema(existingSqlContents.length>0?existingSqlContents:files),
+    existingSqlContents,
   };
 }
 
@@ -580,14 +676,28 @@ function renderRepoSelection(){
   const box=document.getElementById('repoSelectionBox');
   const label=document.getElementById('repoSelectionLabel');
   const meta=document.getElementById('repoSelectionMeta');
+  const repoInput=document.getElementById('repoPath');
   const manualRepoPath=document.getElementById('repoPath').value.trim();
   const resolvedRepoPath=getResolvedRepoPath();
-  if(!currentRepoSelectionLabel){label.textContent='';meta.textContent='';box.classList.add('hidden');updateApplyState();return;}
+  const requiresFolder=requiresHostedFolderSelection();
+  repoInput.readOnly=requiresFolder;
+  repoInput.title=requiresFolder?getHostedFolderRequiredMessage():'';
+  if(!currentRepoSelectionLabel){
+    if(requiresFolder){
+      label.textContent='Hosted Mode';
+      meta.textContent=getHostedFolderRequiredMessage();
+      box.classList.remove('hidden');
+      setLoading(false);setDryRunLoading(false);updateApplyState();
+      return;
+    }
+    label.textContent='';meta.textContent='';box.classList.add('hidden');setLoading(false);setDryRunLoading(false);updateApplyState();return;
+  }
   label.textContent=currentRepoSelectionLabel;
-  if(manualRepoPath)meta.textContent=`Run path: ${manualRepoPath}`;
+  if(requiresFolder)meta.textContent=getHostedFolderRequiredMessage();
+  else if(manualRepoPath)meta.textContent=`Run path: ${manualRepoPath}`;
   else if(resolvedRepoPath)meta.textContent=`Run path: ${resolvedRepoPath}`;
   else meta.textContent='Selected folder is ready for local Apply.';
-  box.classList.remove('hidden');updateApplyState();
+  box.classList.remove('hidden');setLoading(false);setDryRunLoading(false);updateApplyState();
 }
 
 function syncRepoSelectionDisplay(){renderRepoSelection();}
@@ -612,6 +722,8 @@ function validateTaskAndRepo(){
   const repoPath=getResolvedRepoPath();
   if(!task){showError('Task is required.');return null;}
   if(!repoPath){showError('Task and repo path are required.');return null;}
+  if(!getCurrentUserId()){showUnauthorized(getMissingUserSessionMessage());return null;}
+  if(requiresHostedFolderSelection()){showError(getHostedFolderRequiredMessage());return null;}
   return{task,repoPath};
 }
 
@@ -729,12 +841,14 @@ async function enhanceTask(){
   const task=document.getElementById('task').value.trim();
   const repoPath=getResolvedRepoPath();
   const btn=document.getElementById('enhanceBtn');
+  const userId=getCurrentUserId();
   if(!task){showError('Task is required.');return;}
   if(!repoPath){showError('Task and repo path are required.');return;}
+  if(!userId){showUnauthorized(getMissingUserSessionMessage());return;}
   const originalLabel=btn.textContent;
   btn.disabled=true;btn.textContent='Enhancing...';hideError();
   try{
-    const r=await fetch('/api/enhance-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,role:currentRole,repoPath,userId:getCurrentUserId()})});
+    const r=await fetch('/api/enhance-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,role:currentRole,repoPath,userId})});
     if(!r.ok){
       const payload=await r.json().catch(()=>null);
       throw new Error(payload?.reason||('Enhance failed: '+r.status));
@@ -752,11 +866,21 @@ function copyPrompt(){
   setTimeout(()=>document.querySelector('.copy-btn').textContent='copy',1500);
 }
 
+function getMissingUserSessionMessage(){
+  return 'Missing user session. Please open Zone from your dashboard.';
+}
+
+function getDebugFallbackUserId(){
+  const config=window.__ZONE_PUBLIC_CONFIG__||{};
+  return typeof config.debugFallbackUserId==='string'?config.debugFallbackUserId.trim():'';
+}
+
 function logUserIdResolution(state){
   if(currentUserIdLogState===state)return;
   currentUserIdLogState=state;
   if(state==='authenticated')console.log('[zone-ui] using authenticated user id');
-  else if(state==='fallback')console.log('[zone-ui] auth user missing, using fallback user id');
+  else if(state==='debug_fallback')console.log('[zone-ui] auth user missing, using debug fallback user id');
+  else if(state==='missing')console.log('[zone-ui] missing authenticated user session');
 }
 
 function getCurrentUserId(){
@@ -764,13 +888,16 @@ function getCurrentUserId(){
   if(clerk?.user?.id){logUserIdResolution('authenticated');return clerk.user.id;}
   if(clerk?.session?.user?.id){logUserIdResolution('authenticated');return clerk.session.user.id;}
   if(window.currentUser?.id){logUserIdResolution('authenticated');return window.currentUser.id;}
-  logUserIdResolution('fallback');
-  return 'user_3BxAkYxUpGI83ARLfpjaI5Lmu70';
+  const debugFallbackUserId=getDebugFallbackUserId();
+  if(debugFallbackUserId){logUserIdResolution('debug_fallback');return debugFallbackUserId;}
+  logUserIdResolution('missing');
+  return '';
 }
 
 function showError(msg){
   const b=document.getElementById('errorBox');
   b.style.background='';b.style.borderColor='';b.style.color='';
+  if(msg==='repo_not_accessible_in_hosted_mode')msg=getHostedFolderRequiredMessage();
   b.textContent='\u26A0 '+msg;b.style.display='block';
 }
 
@@ -805,7 +932,7 @@ function showUnauthorized(message){
   b.style.display='block';
 }
 function hideError(){document.getElementById('errorBox').style.display='none';}
-function setLoading(l){const btn=document.getElementById('execBtn');const s=document.getElementById('spinner');const t=document.getElementById('execText');btn.disabled=l||currentBillingState.hardBlocked;s.style.display=l?'block':'none';t.textContent=l?'Running...':'\u25B6  Execute';}
+function setLoading(l){const btn=document.getElementById('execBtn');const s=document.getElementById('spinner');const t=document.getElementById('execText');btn.disabled=l||currentBillingState.hardBlocked||requiresHostedFolderSelection();btn.title=requiresHostedFolderSelection()?getHostedFolderRequiredMessage():currentBillingState.hardBlocked?'Upgrade to Pro to continue':'';s.style.display=l?'block':'none';t.textContent=l?'Running...':'\u25B6  Execute';}
 
 
 async function execute(){
@@ -837,7 +964,8 @@ async function execute(){
     runStarted=true;
     startProgress(runId,currentRole==='data_analyst'||currentRole==='test_engineer'?'Scanning repo...':'Generating patch...');
     if(currentRole==='test_engineer'){
-      const r=await fetch('/api/test-engineer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId,userId})});
+      const hostedContext=await buildHostedTestEngineerContext();
+      const r=await fetch('/api/test-engineer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...{task,repoPath,runId,userId},...(hostedContext?{hostedContext}:{})})});
       const result=await r.json().catch(()=>null);
       if(!r.ok){
         resetProgress();
@@ -861,7 +989,8 @@ async function execute(){
       addRecentRun({task,role:currentRole,repoPath,status:result.validationBlocked?'error':'success',timestamp:Date.now()});
       finishProgress();
     }else if(currentRole==='data_analyst'){
-      const r=await fetch('/api/data-analyst',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId,userId})});
+      const hostedContext=await buildHostedDataAnalystContext();
+      const r=await fetch('/api/data-analyst',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...{task,repoPath,runId,userId},...(hostedContext?{hostedContext}:{})})});
       const result=await r.json().catch(()=>null);
       if(!r.ok){
         resetProgress();
@@ -1175,6 +1304,7 @@ renderHistory();renderRecentRuns();
 currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};
 renderResultSummary();
 updateApplyState();
+renderRepoSelection();
 void initPosthog();
 void refreshBillingSummary();
 </script>
