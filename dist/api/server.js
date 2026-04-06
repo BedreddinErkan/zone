@@ -604,9 +604,10 @@ exports.app.post("/api/analyze", async (req, res) => {
 exports.app.post("/api/patch", async (req, res) => {
     if (shouldProxyHostedRequest(req, "/api/patch")) {
         const { task, repoPath } = req.body ?? {};
-        const hostedContext = typeof task === "string" && typeof repoPath === "string"
-            ? await buildHostedDeveloperContext(task, repoPath)
-            : undefined;
+        const hostedContext = req.body?.hostedContext ??
+            (typeof task === "string" && typeof repoPath === "string"
+                ? await buildHostedDeveloperContext(task, repoPath)
+                : undefined);
         await proxyHostedZoneRequest(req, res, "/api/patch", {
             bodyOverride: hostedContext
                 ? {
@@ -617,7 +618,7 @@ exports.app.post("/api/patch", async (req, res) => {
         });
         return;
     }
-    const { task, repoPath, userId } = req.body;
+    const { task, repoPath, userId, hostedContext } = req.body;
     if (!task || !repoPath) {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;
@@ -627,7 +628,7 @@ exports.app.post("/api/patch", async (req, res) => {
         res.status(authorization.status).json(authorization.body);
         return;
     }
-    const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({ task, repoPath });
+    const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({ task, repoPath, hostedContext });
     res.json(result);
     if (result.ok) {
         const confidence = typeof result.developerConfidence === "number"
@@ -647,9 +648,10 @@ exports.app.post("/api/patch", async (req, res) => {
 exports.app.post("/api/dry-run", async (req, res) => {
     if (shouldProxyHostedRequest(req, "/api/dry-run")) {
         const { task, repoPath } = req.body ?? {};
-        const hostedContext = typeof task === "string" && typeof repoPath === "string"
-            ? await buildHostedDeveloperContext(task, repoPath)
-            : undefined;
+        const hostedContext = req.body?.hostedContext ??
+            (typeof task === "string" && typeof repoPath === "string"
+                ? await buildHostedDeveloperContext(task, repoPath)
+                : undefined);
         await proxyHostedZoneRequest(req, res, "/api/dry-run", {
             bodyOverride: hostedContext
                 ? {
@@ -660,13 +662,13 @@ exports.app.post("/api/dry-run", async (req, res) => {
         });
         return;
     }
-    const { task, repoPath, userId } = req.body;
+    const { task, repoPath, userId, hostedContext } = req.body;
     const authorization = await ensureRunAuthorized(userId);
     if (!authorization.allowed) {
         res.status(authorization.status).json(authorization.body);
         return;
     }
-    const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({ task, repoPath, dryRun: true });
+    const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({ task, repoPath, dryRun: true, hostedContext });
     if (!result.ok) {
         res.status(500).json(result);
         return;

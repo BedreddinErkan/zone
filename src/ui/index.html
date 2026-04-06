@@ -303,6 +303,9 @@ let currentBillingState={plan:'',credits:null,hardBlocked:false};
 let currentUserIdLogState='';
 const RECENT_RUNS_KEY='zone_recent_runs';
 const MAX_RECENT_RUNS=6;
+const HOSTED_CONTEXT_MAX_FILES=20;
+const HOSTED_CONTEXT_MAX_FILE_BYTES=20*1024;
+const HOSTED_CONTEXT_BINARY_EXTENSIONS=new Set(['png','jpg','jpeg','gif','webp','ico','pdf','zip','gz','tar','rar','7z','woff','woff2','ttf','eot','mp4','mp3','wav','mov','avi','jar','class','dll','exe','bin']);
 
 function formatMetadataBadge(parts){const s=(parts||[]).filter(Boolean);return s.length>0?s.join(' / '):'';}
 function formatRoleLabel(role){return {developer:'Developer',test_engineer:'Test Engineer',data_analyst:'Data Analyst'}[role]||'Developer';}
@@ -359,6 +362,75 @@ function setDryRunLoading(l){
 
 function getResolvedRepoPath(){
   return document.getElementById('repoPath').value.trim()||currentRepoPath||'';
+}
+
+function isHostedExecution(){
+  const config=window.__ZONE_PUBLIC_CONFIG__||{};
+  const zoneApiBaseUrl=typeof config.zoneApiBaseUrl==='string'?config.zoneApiBaseUrl.trim():'';
+  const host=String(window.location?.hostname||'').toLowerCase();
+  return Boolean(zoneApiBaseUrl)||(host&&host!=='localhost'&&host!=='127.0.0.1');
+}
+
+function getHostedContextExtension(filePath){
+  const base=String(filePath||'').split('/').pop()||'';
+  const dot=base.lastIndexOf('.');
+  return dot>=0?base.slice(dot+1).toLowerCase():'';
+}
+
+function classifyHostedContextCategory(filePath){
+  const normalized=String(filePath||'').toLowerCase();
+  if(normalized.includes('/src/')||normalized.includes('/components/')||normalized.endsWith('.tsx')||normalized.endsWith('.jsx')||normalized.endsWith('.css')||normalized.endsWith('.html'))return'frontend';
+  if(normalized.includes('/api/')||normalized.includes('/server/')||normalized.includes('/backend/')||normalized.endsWith('.ts')||normalized.endsWith('.js')||normalized.endsWith('.py')||normalized.endsWith('.java'))return'backend';
+  if(normalized.includes('/shared/')||normalized.includes('/lib/')||normalized.includes('/utils/'))return'shared';
+  return'unknown';
+}
+
+function shouldSkipHostedContextPath(filePath){
+  const normalized=`/${String(filePath||'').replace(/\\/g,'/').toLowerCase()}/`;
+  if(normalized.includes('/node_modules/')||normalized.includes('/dist/')||normalized.includes('/build/')||normalized.includes('/.git/')||normalized.includes('/venv/')||normalized.includes('/site-packages/'))return true;
+  const ext=getHostedContextExtension(filePath);
+  return HOSTED_CONTEXT_BINARY_EXTENSIONS.has(ext);
+}
+
+async function collectHostedContextFilesFromHandle(handle,prefix=''){
+  const collected=[];
+  async function walk(directoryHandle,currentPrefix){
+    if(collected.length>=HOSTED_CONTEXT_MAX_FILES)return;
+    const entries=[];
+    for await(const entry of directoryHandle.values())entries.push(entry);
+    entries.sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
+    for(const entry of entries){
+      if(collected.length>=HOSTED_CONTEXT_MAX_FILES)break;
+      const relativePath=currentPrefix?`${currentPrefix}/${entry.name}`:entry.name;
+      if(shouldSkipHostedContextPath(relativePath))continue;
+      if(entry.kind==='directory'){await walk(entry,relativePath);continue;}
+      if(entry.kind!=='file')continue;
+      const file=await entry.getFile();
+      if(file.size>HOSTED_CONTEXT_MAX_FILE_BYTES)continue;
+      const content=await file.text();
+      if(content.includes('\0'))continue;
+      collected.push({path:relativePath.replace(/\\/g,'/'),content});
+    }
+  }
+  await walk(handle,prefix);
+  return collected;
+}
+
+async function buildHostedDeveloperContext(){
+  if(!isHostedExecution()||!currentRepoHandle)return null;
+  const files=await collectHostedContextFilesFromHandle(currentRepoHandle);
+  if(files.length===0)return null;
+  console.log(`[zone-ui] sending hosted context with ${files.length} files`);
+  const availableFiles=files.map(file=>({path:file.path,category:classifyHostedContextCategory(file.path),extension:getHostedContextExtension(file.path)}));
+  return{
+    files:files.map(file=>({path:file.path,content:file.content})),
+    repoSummary:`Client-provided hosted context with ${files.length} files.`,
+    projectNotes:[`Client-selected folder: ${currentRepoSelectionLabel.replace(/^Folder:\s*/,'')||'Selected folder'}`],
+    existingFilesSummary:`EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n${availableFiles.map(file=>`- ${file.path}`).join('\n')}`,
+    availableFiles,
+    contextFiles:files.map(file=>({path:file.path,action:'inspect',reason:'Client-provided folder context',content:file.content})),
+    originalContents:Object.fromEntries(files.map(file=>[file.path,file.content])),
+  };
 }
 
 function resetRunState(){
@@ -547,11 +619,12 @@ async function executeDryRun(){
   const values=validateTaskAndRepo();if(!values)return;
   const{task,repoPath}=values;
   const userId=getCurrentUserId();
+  const hostedContext=await buildHostedDeveloperContext();
   beginRunState();hideError();
   document.getElementById('diffSection').classList.add('hidden');
   setDryRunLoading(true);setProgress('Dry run — generating diff...');
   try{
-    const r=await fetch('/api/dry-run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,userId})});
+    const r=await fetch('/api/dry-run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...{task,repoPath,userId},...(hostedContext?{hostedContext}:{})})});
     const data=await r.json().catch(()=>null);
     if(!r.ok){
       if(data?.reason==='no_free_runs'){trackEvent('dry_run_blocked_no_credits',{role:currentRole,repoPath});showUpgrade(data.message,data.upgradeUrl);return;}
@@ -813,7 +886,8 @@ async function execute(){
       if(!r1.ok)throw new Error('Analyze failed: '+r1.status);
       const analyzeData=await r1.json();
       setProgress('Generating patch...');
-      const r2=await fetch('/api/patch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId,userId})});
+      const hostedContext=await buildHostedDeveloperContext();
+      const r2=await fetch('/api/patch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...{task,repoPath,runId,userId},...(hostedContext?{hostedContext}:{})})});
       const patch=await r2.json().catch(()=>null);
       if(!r2.ok){
         resetProgress();

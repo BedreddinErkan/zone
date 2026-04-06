@@ -910,9 +910,10 @@ app.post("/api/patch", async (req, res) => {
   if (shouldProxyHostedRequest(req, "/api/patch")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
-      typeof task === "string" && typeof repoPath === "string"
+      req.body?.hostedContext ??
+      (typeof task === "string" && typeof repoPath === "string"
         ? await buildHostedDeveloperContext(task, repoPath)
-        : undefined;
+        : undefined);
     await proxyHostedZoneRequest(req, res, "/api/patch", {
       bodyOverride: hostedContext
         ? {
@@ -924,7 +925,7 @@ app.post("/api/patch", async (req, res) => {
     return;
   }
 
-  const { task, repoPath, userId } = req.body;
+  const { task, repoPath, userId, hostedContext } = req.body;
 
   if (!task || !repoPath) {
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
@@ -937,7 +938,7 @@ app.post("/api/patch", async (req, res) => {
     return;
   }
 
-  const result = await runLlmPatchFlow({ task, repoPath });
+  const result = await runLlmPatchFlow({ task, repoPath, hostedContext });
   res.json(result);
 
   if (result.ok) {
@@ -962,9 +963,10 @@ app.post("/api/dry-run", async (req, res) => {
   if (shouldProxyHostedRequest(req, "/api/dry-run")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
-      typeof task === "string" && typeof repoPath === "string"
+      req.body?.hostedContext ??
+      (typeof task === "string" && typeof repoPath === "string"
         ? await buildHostedDeveloperContext(task, repoPath)
-        : undefined;
+        : undefined);
     await proxyHostedZoneRequest(req, res, "/api/dry-run", {
       bodyOverride: hostedContext
         ? {
@@ -976,7 +978,7 @@ app.post("/api/dry-run", async (req, res) => {
     return;
   }
 
-  const { task, repoPath, userId } = req.body;
+  const { task, repoPath, userId, hostedContext } = req.body;
 
   const authorization = await ensureRunAuthorized(userId);
   if (!authorization.allowed) {
@@ -984,7 +986,7 @@ app.post("/api/dry-run", async (req, res) => {
     return;
   }
 
-  const result = await runLlmPatchFlow({ task, repoPath, dryRun: true });
+  const result = await runLlmPatchFlow({ task, repoPath, dryRun: true, hostedContext });
   if (!result.ok) {
     res.status(500).json(result);
     return;
