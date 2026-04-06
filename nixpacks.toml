@@ -1,5 +1,5 @@
-[providers]
-node = {}
+[phases.setup]
+providers = ["node"]
 
 [phases.install]
 cmds = ["npm install"]
