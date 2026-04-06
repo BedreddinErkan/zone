@@ -204,6 +204,9 @@ function buildUiHarness(initialLocalStorage = {}) {
     ensureElement("repoSelectionBox", "hidden");
     ensureElement("repoSelectionLabel");
     ensureElement("repoSelectionMeta");
+    ensureElement("billingSummaryBox", "hidden");
+    ensureElement("billingSummaryLabel");
+    ensureElement("billingSummaryMeta");
     ensureElement("complexityBadge", "complexity-badge hidden");
     ensureElement("frameworkBadge", "framework-badge hidden");
     ensureElement("decisionBadge", "decision-badge safe");
@@ -303,6 +306,7 @@ function buildUiHarness(initialLocalStorage = {}) {
         Math,
         Date,
         encodeURIComponent,
+        refreshBillingSummary: async () => { },
     };
     context.window.showDirectoryPicker =
         vitest_1.vi.fn();
@@ -822,6 +826,21 @@ function buildUiHarness(initialLocalStorage = {}) {
         (0, vitest_1.expect)(elements.get("errorBox").innerHTML).toContain("Upgrade to Pro");
         (0, vitest_1.expect)(elements.get("errorBox").innerHTML).toContain("https://zonecli.dev/pricing");
     });
+    (0, vitest_1.it)("uses the default pricing URL when no_free_runs does not include upgradeUrl", async () => {
+        const { context, elements, roleButtons } = buildUiHarness();
+        context.fetch = vitest_1.vi
+            .fn()
+            .mockResolvedValueOnce(deniedResponse(402, {
+            ok: false,
+            reason: "no_free_runs",
+            message: "You've used all your free runs. Upgrade to Pro.",
+        }));
+        context.selectRole(roleButtons.testEngineer);
+        elements.get("task").value = "add login test";
+        elements.get("repoPath").value = "C:/repo";
+        await context.execute();
+        (0, vitest_1.expect)(elements.get("errorBox").innerHTML).toContain('href="https://zonecli.dev/pricing"');
+    });
     (0, vitest_1.it)("proceeds normally when pre-flight access is allowed", async () => {
         const { context, elements, roleButtons } = buildUiHarness();
         const fetchMock = vitest_1.vi
@@ -845,6 +864,21 @@ function buildUiHarness(initialLocalStorage = {}) {
         await context.execute();
         (0, vitest_1.expect)(fetchMock).toHaveBeenNthCalledWith(1, vitest_1.expect.stringContaining("/api/check-access?userId="));
         (0, vitest_1.expect)(fetchMock).toHaveBeenNthCalledWith(2, "/api/test-engineer", vitest_1.expect.objectContaining({ method: "POST" }));
+    });
+});
+(0, vitest_1.describe)("UI billing summary", () => {
+    (0, vitest_1.it)("renders plan and remaining runs from the billing summary endpoint", async () => {
+        const { context, elements } = buildUiHarness();
+        context.fetch = vitest_1.vi.fn().mockResolvedValueOnce(okResponse({
+            ok: true,
+            plan: "Pro",
+            credits: 18,
+            subscriptionStatus: "pro",
+        }));
+        await context.refreshBillingSummary();
+        (0, vitest_1.expect)(elements.get("billingSummaryBox").classList.contains("hidden")).toBe(false);
+        (0, vitest_1.expect)(elements.get("billingSummaryLabel").textContent).toBe("Plan: Pro · Remaining runs: 18");
+        (0, vitest_1.expect)(elements.get("billingSummaryMeta").textContent).toBe("1000 runs / month");
     });
 });
 (0, vitest_1.describe)("UI patch preview", () => {

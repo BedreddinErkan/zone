@@ -12,9 +12,23 @@ const readProjectFilesMock = vitest_1.vi.fn();
 const responsesCreateMock = vitest_1.vi.fn();
 const supabaseInsertMock = vitest_1.vi.fn();
 const supabaseRpcMock = vitest_1.vi.fn();
-const supabaseFromMock = vitest_1.vi.fn(() => ({
-    insert: supabaseInsertMock,
+const supabaseProfileMaybeSingleMock = vitest_1.vi.fn();
+const supabaseSelectEqMock = vitest_1.vi.fn(() => ({
+    maybeSingle: supabaseProfileMaybeSingleMock,
 }));
+const supabaseSelectMock = vitest_1.vi.fn(() => ({
+    eq: supabaseSelectEqMock,
+}));
+const supabaseFromMock = vitest_1.vi.fn((table) => {
+    if (table === "profiles") {
+        return {
+            select: supabaseSelectMock,
+        };
+    }
+    return {
+        insert: supabaseInsertMock,
+    };
+});
 const createSupabaseClientMock = vitest_1.vi.fn(() => ({
     from: supabaseFromMock,
     rpc: supabaseRpcMock,
@@ -374,6 +388,26 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             instructions: vitest_1.expect.stringContaining("You are a task optimizer"),
             input: vitest_1.expect.stringContaining("User task: add login test"),
         }));
+    });
+    (0, vitest_1.it)("returns the billing summary from the authenticated profile", async () => {
+        process.env.SUPABASE_URL = "https://example.supabase.co";
+        process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+        supabaseProfileMaybeSingleMock.mockResolvedValue({
+            data: {
+                credits: 7,
+                subscription_status: "free",
+            },
+            error: null,
+        });
+        const response = await fetch(`${baseUrl}/api/billing-summary?userId=clerk_user_123`);
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: true,
+            plan: "Free",
+            credits: 7,
+            subscriptionStatus: "free",
+        });
     });
 });
 //# sourceMappingURL=server.test.js.map

@@ -439,6 +439,7 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
     Math,
     Date,
     encodeURIComponent,
+    refreshBillingSummary: async () => {},
   };
   (context as UiContextBase & { window: UiContext["window"] }).window.showDirectoryPicker =
     vi.fn();
