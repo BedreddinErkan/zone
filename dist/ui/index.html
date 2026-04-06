@@ -300,6 +300,7 @@ let currentRepoSelectionLabel='';
 let currentBackupSnapshot=null;
 let currentRunState={hasPatchResult:false,validationBlocked:false,runInProgress:false,decisionMode:'',confidence:0};
 let currentBillingState={plan:'',credits:null,hardBlocked:false};
+let currentUserIdLogState='';
 const RECENT_RUNS_KEY='zone_recent_runs';
 const MAX_RECENT_RUNS=6;
 
@@ -676,12 +677,19 @@ function copyPrompt(){
   setTimeout(()=>document.querySelector('.copy-btn').textContent='copy',1500);
 }
 
+function logUserIdResolution(state){
+  if(currentUserIdLogState===state)return;
+  currentUserIdLogState=state;
+  if(state==='authenticated')console.log('[zone-ui] using authenticated user id');
+  else if(state==='fallback')console.log('[zone-ui] auth user missing, using fallback user id');
+}
+
 function getCurrentUserId(){
   const clerk=window.Clerk;
-  if(clerk?.user?.id)return clerk.user.id;
-  if(clerk?.session?.user?.id)return clerk.session.user.id;
-  if(window.currentUser?.id)return window.currentUser.id;
-  console.log('[zone-ui] missing current user id');
+  if(clerk?.user?.id){logUserIdResolution('authenticated');return clerk.user.id;}
+  if(clerk?.session?.user?.id){logUserIdResolution('authenticated');return clerk.session.user.id;}
+  if(window.currentUser?.id){logUserIdResolution('authenticated');return window.currentUser.id;}
+  logUserIdResolution('fallback');
   return 'user_3BxAkYxUpGI83ARLfpjaI5Lmu70';
 }
 
@@ -733,7 +741,6 @@ async function execute(){
   const runId=`${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
   const userId=getCurrentUserId();
   let runStarted=false;
-  console.log('[zone-ui] execute userId =',userId);
   try{
     const accessResponse=await fetch(`/api/check-access?userId=${encodeURIComponent(userId)}`);
     const accessResult=await accessResponse.json().catch(()=>null);
