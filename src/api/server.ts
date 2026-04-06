@@ -148,6 +148,34 @@ function shouldUseHostedInferenceProxy(): boolean {
   return getInferenceMode() === "hosted";
 }
 
+function getRequestOrigin(req: express.Request): string {
+  const forwardedProto = req.get("x-forwarded-proto");
+  const forwardedHost = req.get("x-forwarded-host");
+  const proto = (forwardedProto || req.protocol || "http").split(",")[0].trim();
+  const host = (forwardedHost || req.get("host") || "").split(",")[0].trim();
+  return host ? `${proto}://${host}`.toLowerCase() : "";
+}
+
+function shouldProxyHostedRequest(
+  req: express.Request,
+  routePath: string
+): boolean {
+  if (!shouldUseHostedInferenceProxy()) {
+    return false;
+  }
+
+  const targetOrigin = new URL(getHostedInferenceBaseUrl()).origin.toLowerCase();
+  const requestOrigin = getRequestOrigin(req);
+  if (requestOrigin && requestOrigin === targetOrigin) {
+    console.warn(
+      `[zone] self-proxy bypass: ${routePath} target ${targetOrigin} matches current request origin`
+    );
+    return false;
+  }
+
+  return true;
+}
+
 function logStartupDiagnostics(): void {
   const mode = getInferenceMode();
   console.log(`[zone] inference mode: ${mode}`);
@@ -839,7 +867,7 @@ app.get("/api/progress", (req, res) => {
 });
 
 app.get("/api/check-access", async (req, res) => {
-  if (shouldUseHostedInferenceProxy()) {
+  if (shouldProxyHostedRequest(req, "/api/check-access")) {
     await proxyHostedZoneRequest(req, res, "/api/check-access", {
       onNotFound: () => handleCheckAccess(req, res),
     });
@@ -850,7 +878,7 @@ app.get("/api/check-access", async (req, res) => {
 });
 
 app.get("/api/billing-summary", async (req, res) => {
-  if (shouldUseHostedInferenceProxy()) {
+  if (shouldProxyHostedRequest(req, "/api/billing-summary")) {
     await proxyHostedZoneRequest(req, res, "/api/billing-summary", {
       onNotFound: () => handleBillingSummary(req, res),
     });
@@ -871,7 +899,7 @@ app.post("/api/analyze", async (req, res) => {
 });
 
 app.post("/api/patch", async (req, res) => {
-  if (shouldUseHostedInferenceProxy()) {
+  if (shouldProxyHostedRequest(req, "/api/patch")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
       typeof task === "string" && typeof repoPath === "string"
@@ -923,7 +951,7 @@ app.post("/api/patch", async (req, res) => {
   }
 });
 app.post("/api/dry-run", async (req, res) => {
-  if (shouldUseHostedInferenceProxy()) {
+  if (shouldProxyHostedRequest(req, "/api/dry-run")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
       typeof task === "string" && typeof repoPath === "string"
@@ -986,7 +1014,7 @@ app.post("/api/apply", async (req, res) => {
 });
 
 app.post("/api/enhance-task", async (req, res) => {
-  if (shouldUseHostedInferenceProxy()) {
+  if (shouldProxyHostedRequest(req, "/api/enhance-task")) {
     const { role, repoPath } = req.body ?? {};
     const hostedContext =
       typeof role === "string" && typeof repoPath === "string"
@@ -1025,7 +1053,7 @@ app.post("/api/enhance-task", async (req, res) => {
 });
 
 app.post("/api/test-engineer", async (req, res) => {
-if (shouldUseHostedInferenceProxy()) {
+if (shouldProxyHostedRequest(req, "/api/test-engineer")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
       typeof task === "string" && typeof repoPath === "string"
@@ -1085,7 +1113,7 @@ queueRunLog({
 });
 
 app.post("/api/data-analyst", async (req, res) => {
-if (shouldUseHostedInferenceProxy()) {
+if (shouldProxyHostedRequest(req, "/api/data-analyst")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
       typeof task === "string" && typeof repoPath === "string"

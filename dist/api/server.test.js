@@ -1114,6 +1114,24 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             hostedServer.close((err) => (err ? reject(err) : resolve()));
         });
     });
+    (0, vitest_1.it)("bypasses self-proxy for /api/check-access and uses the local handler", async () => {
+        getInferenceModeMock.mockReturnValue("hosted");
+        process.env.SUPABASE_URL = "https://example.supabase.co";
+        process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+        supabaseProfileMaybeSingleMock.mockResolvedValue({
+            data: {
+                credits: 5,
+                subscription_status: "free",
+            },
+            error: null,
+        });
+        getHostedInferenceBaseUrlMock.mockReturnValue(baseUrl);
+        const response = await fetch(`${baseUrl}/api/check-access?userId=clerk_user_123`);
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({ ok: true });
+        (0, vitest_1.expect)(createSupabaseClientMock).toHaveBeenCalled();
+    });
     (0, vitest_1.it)("falls back to local billing-summary when the hosted route returns 404", async () => {
         getInferenceModeMock.mockReturnValue("hosted");
         process.env.SUPABASE_URL = "https://example.supabase.co";
@@ -1246,6 +1264,38 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
         await new Promise((resolve, reject) => {
             hostedServer.close((err) => (err ? reject(err) : resolve()));
         });
+    });
+    (0, vitest_1.it)("bypasses self-proxy for /api/patch and uses the local developer flow", async () => {
+        getInferenceModeMock.mockReturnValue("hosted");
+        getHostedInferenceBaseUrlMock.mockReturnValue(baseUrl);
+        runLlmPatchFlowMock.mockResolvedValue({
+            ok: true,
+            patchPreview: "=== LOCAL PATCH ===",
+            warnings: [],
+            applyPatches: [],
+            patchResults: [],
+            fileDiffs: [],
+        });
+        const response = await fetch(`${baseUrl}/api/patch`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                task: "fix login validation",
+                repoPath: "C:/repo",
+                userId: "clerk_user_123",
+            }),
+        });
+        const body = await response.json();
+        (0, vitest_1.expect)(response.status).toBe(200);
+        (0, vitest_1.expect)(body).toEqual({
+            ok: true,
+            patchPreview: "=== LOCAL PATCH ===",
+            warnings: [],
+            applyPatches: [],
+            patchResults: [],
+            fileDiffs: [],
+        });
+        (0, vitest_1.expect)(runLlmPatchFlowMock).toHaveBeenCalled();
     });
 });
 //# sourceMappingURL=server.test.js.map
