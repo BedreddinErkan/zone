@@ -1075,6 +1075,9 @@ async function runLlmPatchFlow(input) {
     }));
     // 1. Scan repo
     const allFiles = hostedAvailableFiles ?? (await (0, scanRepo_js_1.scanRepo)(input.repoPath));
+    if (!input.hostedContext && allFiles.length === 0) {
+        return { ok: false, reason: "repo_not_accessible_in_hosted_mode" };
+    }
     const developerContextFiles = allFiles.filter((file) => !isIrrelevantDeveloperContextPath(file.path));
     // 2. Detect structure
     const structure = (0, detectProjectStructure_js_1.detectProjectStructure)(developerContextFiles);
