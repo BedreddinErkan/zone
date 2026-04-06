@@ -276,6 +276,21 @@ type UiContextBase = Omit<
   | "handleFolderFallbackChange"
 >;
 
+function okResponse(body: unknown) {
+  return {
+    ok: true,
+    json: async () => body,
+  };
+}
+
+function deniedResponse(status: number, body: unknown) {
+  return {
+    ok: false,
+    status,
+    json: async () => body,
+  };
+}
+
 function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
   const html = readFileSync(
     path.resolve("src/ui/index.html"),
@@ -530,6 +545,7 @@ describe("UI repo folder picker", () => {
     const { context, elements, roleButtons } = buildUiHarness();
     context.fetch = vi
       .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -780,6 +796,7 @@ describe("UI developer context files", () => {
     const { context, elements, roleButtons } = buildUiHarness();
     context.fetch = vi
       .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -855,6 +872,7 @@ describe("UI recent runs", () => {
     const { context, elements, roleButtons, localStorageStore } = buildUiHarness();
     context.fetch = vi
       .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -887,7 +905,10 @@ describe("UI recent runs", () => {
 
   it("adds a recent run after a failed run", async () => {
     const { context, elements, roleButtons } = buildUiHarness();
-    context.fetch = vi.fn().mockRejectedValue(new Error("Network failure"));
+    context.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
+      .mockRejectedValue(new Error("Network failure"));
     context.selectRole(roleButtons.developer);
     elements.get("task").value = "fix login flow";
     elements.get("repoPath").value = "C:/repo";
@@ -974,6 +995,106 @@ describe("UI recent runs", () => {
   });
 });
 
+describe("UI execute pre-flight access", () => {
+  it("stops immediately on unauthorized pre-flight response", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        deniedResponse(401, {
+          ok: false,
+          reason: "unauthorized",
+          message: "Missing user session. Please open Zone from your dashboard.",
+        })
+      );
+    context.fetch = fetchMock;
+    context.selectRole(roleButtons.testEngineer);
+    elements.get("task").value = "add login test";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/check-access?userId=")
+    );
+    expect(elements.get("progressBox").classList.contains("hidden")).toBe(true);
+    expect(elements.get("progressText").textContent).toBe("");
+    expect(elements.get("execBtn").disabled).toBe(false);
+    expect(elements.get("errorBox").textContent).toContain(
+      "Missing user session. Please open Zone from your dashboard."
+    );
+  });
+
+  it("stops immediately on no_free_runs pre-flight response", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        deniedResponse(402, {
+          ok: false,
+          reason: "no_free_runs",
+          message: "You've used all your free runs. Upgrade to Pro.",
+          upgradeUrl: "https://zonecli.dev/pricing",
+        })
+      );
+    context.fetch = fetchMock;
+    context.selectRole(roleButtons.dataAnalyst);
+    elements.get("task").value = "create orders table";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/check-access?userId=")
+    );
+    expect(elements.get("progressBox").classList.contains("hidden")).toBe(true);
+    expect(elements.get("progressText").textContent).toBe("");
+    expect(elements.get("execBtn").disabled).toBe(false);
+    expect(elements.get("errorBox").innerHTML).toContain("Upgrade to Pro");
+    expect(elements.get("errorBox").innerHTML).toContain(
+      "https://zonecli.dev/pricing"
+    );
+  });
+
+  it("proceeds normally when pre-flight access is allowed", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
+      .mockResolvedValueOnce(
+        okResponse({
+          ok: true,
+          framework: "playwright_ts",
+          language: "typescript",
+          confidence: 82,
+          summary: "Generated test",
+          warnings: [],
+          complexity: "single_scenario",
+          applyPatches: [],
+          preview: "preview",
+        })
+      );
+    context.fetch = fetchMock;
+    context.selectRole(roleButtons.testEngineer);
+    elements.get("task").value = "add login test";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("/api/check-access?userId=")
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/test-engineer",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+});
+
 describe("UI patch preview", () => {
   it("renders grouped patch preview by file", () => {
     const { context, elements } = buildUiHarness();
@@ -1048,6 +1169,7 @@ describe("UI folder-handle apply", () => {
 
     context.fetch = vi
       .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -1161,6 +1283,7 @@ describe("UI folder-handle apply", () => {
     context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
     context.fetch = vi
       .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -1183,6 +1306,7 @@ describe("UI folder-handle apply", () => {
           ],
         }),
       })
+      .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -1232,6 +1356,7 @@ describe("UI folder-handle apply", () => {
     context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
     context.fetch = vi
       .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -1290,6 +1415,7 @@ describe("UI folder-handle apply", () => {
     context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
     context.fetch = vi
       .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -1357,6 +1483,7 @@ describe("UI folder-handle apply", () => {
     const { context, elements, roleButtons } = buildUiHarness();
     context.fetch = vi
       .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -1396,6 +1523,7 @@ describe("UI folder-handle apply", () => {
     context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
     context.fetch = vi
       .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -1442,6 +1570,7 @@ describe("UI folder-handle apply", () => {
     context.window.showDirectoryPicker = vi.fn().mockResolvedValue(deniedHandle);
     context.fetch = vi
       .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -1479,6 +1608,7 @@ describe("UI folder-handle apply", () => {
     elements.get("repoPath").value = "C:/repo";
     context.fetch = vi
       .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -1512,6 +1642,7 @@ describe("UI folder-handle apply", () => {
     context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
     context.fetch = vi
       .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -1564,6 +1695,7 @@ describe("UI folder-handle apply", () => {
     context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
     context.fetch = vi
       .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -1611,20 +1743,25 @@ describe("UI progress feedback", () => {
       ok: boolean;
       json: () => Promise<unknown>;
     }) => void) | undefined;
-    context.fetch = vi.fn().mockImplementation(
-      () =>
-        new Promise<{
-          ok: boolean;
-          json: () => Promise<unknown>;
-        }>((resolve) => {
-          resolveFetch = resolve;
-        })
-    );
+    let callCount = 0;
+    context.fetch = vi.fn().mockImplementation(() => {
+      callCount += 1;
+      if (callCount === 1) {
+        return Promise.resolve(okResponse({ ok: true }));
+      }
+      return new Promise<{
+        ok: boolean;
+        json: () => Promise<unknown>;
+      }>((resolve) => {
+        resolveFetch = resolve;
+      });
+    });
     context.selectRole(roleButtons.dataAnalyst);
     elements.get("task").value = "create orders table";
     elements.get("repoPath").value = "C:/repo/zone-flyway-test";
 
     const execution = context.execute();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     const source = MockEventSource.instances[0];
     source.emit({ stage: "Building prompt..." });
 
@@ -1663,19 +1800,22 @@ describe("UI progress feedback", () => {
 
   it("final completion resolves progress to Ready", async () => {
     const { context, elements, roleButtons } = buildUiHarness();
-    context.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
+    context.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse({ ok: true }))
+      .mockResolvedValueOnce({
         ok: true,
-        dialect: "postgresql",
-        migrationFormat: "flyway",
-        confidence: 91,
-        summary: "Creates orders table",
-        warnings: [],
-        applyPatches: [],
-        preview: "=== DATA ANALYST PREVIEW ===\nSummary: Creates orders table",
-      }),
-    });
+        json: async () => ({
+          ok: true,
+          dialect: "postgresql",
+          migrationFormat: "flyway",
+          confidence: 91,
+          summary: "Creates orders table",
+          warnings: [],
+          applyPatches: [],
+          preview: "=== DATA ANALYST PREVIEW ===\nSummary: Creates orders table",
+        }),
+      });
     context.selectRole(roleButtons.dataAnalyst);
     elements.get("task").value = "create orders table";
     elements.get("repoPath").value = "C:/repo/zone-flyway-test";
@@ -1690,7 +1830,22 @@ describe("UI progress feedback", () => {
     const { context, elements, roleButtons } = buildUiHarness();
     context.fetch = vi
       .fn()
-      .mockResolvedValue({
+      .mockResolvedValueOnce(okResponse({ ok: true }))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          dialect: "postgresql",
+          migrationFormat: "flyway",
+          confidence: 91,
+          summary: "Creates orders table",
+          warnings: [],
+          applyPatches: [],
+          preview: "=== DATA ANALYST PREVIEW ===\nSummary: Creates orders table",
+        }),
+      })
+      .mockResolvedValueOnce(okResponse({ ok: true }))
+      .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
           ok: true,
@@ -1717,3 +1872,5 @@ describe("UI progress feedback", () => {
     expect(elements.get("progressText").textContent).toBe("⏳ Ready");
   });
 });
+
+

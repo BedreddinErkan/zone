@@ -605,14 +605,31 @@ function setLoading(l){const btn=document.getElementById('execBtn');const s=docu
 async function execute(){
   const values=validateTaskAndRepo();if(!values)return;
   const{task,repoPath}=values;
-  resetProgress();hideError();beginRunState();
+  resetProgress();hideError();
   document.getElementById('diffSection').classList.add('hidden');
-  currentRepoPath=repoPath;saveToHistory(repoPath);setLoading(true);
   const runId=`${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
   const userId=getCurrentUserId();
+  let runStarted=false;
   console.log('[zone-ui] execute userId =',userId);
-  startProgress(runId,currentRole==='data_analyst'||currentRole==='test_engineer'?'Scanning repo...':'Generating patch...');
   try{
+    const accessResponse=await fetch(`/api/check-access?userId=${encodeURIComponent(userId)}`);
+    const accessResult=await accessResponse.json().catch(()=>null);
+    if(!accessResponse.ok){
+      resetProgress();
+      if(accessResult?.reason==='unauthorized'){
+        showUnauthorized(accessResult.message);
+        return;
+      }
+      if(accessResult?.reason==='no_free_runs'){
+        showUpgrade(accessResult.message,accessResult.upgradeUrl);
+        return;
+      }
+      throw new Error(accessResult?.message||accessResult?.reason||('Access check failed: '+accessResponse.status));
+    }
+    beginRunState();
+    currentRepoPath=repoPath;saveToHistory(repoPath);setLoading(true);
+    runStarted=true;
+    startProgress(runId,currentRole==='data_analyst'||currentRole==='test_engineer'?'Scanning repo...':'Generating patch...');
     if(currentRole==='test_engineer'){
       const r=await fetch('/api/test-engineer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId,userId})});
       const result=await r.json().catch(()=>null);
@@ -687,7 +704,7 @@ async function execute(){
       finishProgress();
     }
   }catch(e){resetProgress();addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});showError(e.message);}
-  finally{currentRunState.runInProgress=false;setLoading(false);updateApplyState();}
+  finally{if(runStarted){currentRunState.runInProgress=false;setLoading(false);updateApplyState();}}
 }
 
 function showDecision(data){

@@ -110,6 +110,7 @@ describe("/api/test-engineer", () => {
       body: JSON.stringify({
         task: "Write a data driven login test for multiple users",
         repoPath: "C:/repo",
+        userId: "clerk_user_123",
       }),
     });
 
@@ -141,6 +142,7 @@ describe("/api/test-engineer", () => {
       body: JSON.stringify({
         task: "create orders table",
         repoPath: "C:/repo/zone-flyway-test",
+        userId: "clerk_user_123",
       }),
     });
 
@@ -181,6 +183,7 @@ describe("/api/test-engineer", () => {
       body: JSON.stringify({
         task: "fix login form auth bug",
         repoPath: "C:/repo",
+        userId: "clerk_user_123",
       }),
     });
 
@@ -242,7 +245,6 @@ describe("/api/test-engineer", () => {
   it("logs successful developer runs to Supabase when env is configured", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
-    process.env.ZONE_USER_ID = "clerk_user_123";
     runLlmPatchFlowMock.mockResolvedValue({
       ok: true,
       patchPreview: "=== LLM PATCH PREVIEW ===",
@@ -261,6 +263,7 @@ describe("/api/test-engineer", () => {
       body: JSON.stringify({
         task: "fix login validation",
         repoPath: "C:/repo",
+        userId: "clerk_user_123",
       }),
     });
 
@@ -284,15 +287,13 @@ describe("/api/test-engineer", () => {
         "deduct_credits_and_increment_runs",
         {
           p_user_id: "clerk_user_123",
-          p_credits: 0.1,
+          p_credits: 1,
         }
       );
     });
   });
 
-  it("skips Supabase logging silently when user env is missing", async () => {
-    process.env.SUPABASE_URL = "https://example.supabase.co";
-    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+  it("skips Supabase logging silently when Supabase env is missing", async () => {
     runTestEngineerFlowMock.mockResolvedValue({
       ok: true,
       framework: "playwright_ts",
@@ -312,6 +313,7 @@ describe("/api/test-engineer", () => {
       body: JSON.stringify({
         task: "add login test",
         repoPath: "C:/repo",
+        userId: "clerk_user_123",
       }),
     });
 
@@ -324,7 +326,6 @@ describe("/api/test-engineer", () => {
   it("logs successful data analyst runs with derived decision mode", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
-    process.env.ZONE_USER_ID = "clerk_user_456";
     runDataAnalystFlowMock.mockResolvedValue({
       ok: true,
       dialect: "postgresql",
@@ -345,6 +346,7 @@ describe("/api/test-engineer", () => {
       body: JSON.stringify({
         task: "add reporting table",
         repoPath: "C:/repo",
+        userId: "clerk_user_456",
       }),
     });
 
@@ -362,7 +364,7 @@ describe("/api/test-engineer", () => {
         "deduct_credits_and_increment_runs",
         {
           p_user_id: "clerk_user_456",
-          p_credits: 0.06,
+          p_credits: 1,
         }
       );
     });

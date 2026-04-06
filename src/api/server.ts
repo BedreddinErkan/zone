@@ -385,6 +385,16 @@ app.get("/api/progress", (req, res) => {
   });
 });
 
+app.get("/api/check-access", async (req, res) => {
+  const userId = typeof req.query.userId === "string" ? req.query.userId : "";
+  const authorization = await ensureRunAuthorized(userId);
+  if (authorization.allowed) {
+    res.json({ ok: true });
+    return;
+  }
+  res.status(authorization.status).json(authorization.body);
+});
+
 app.post("/api/analyze", async (req, res) => {
   const { task, repoPath } = req.body;
   const result = await runAgent({ task, role: "developer" });
