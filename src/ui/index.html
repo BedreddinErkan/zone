@@ -616,19 +616,20 @@ async function execute(){
     if(currentRole==='test_engineer'){
       const r=await fetch('/api/test-engineer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId,userId})});
       const result=await r.json().catch(()=>null);
-     if(!r.ok){
-  if(result?.reason==='unauthorized'){
-    showUnauthorized(result.message);
-    addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
-    return;
-  }
-  if(result?.reason==='no_free_runs'){
-    showUpgrade(result.message,result.upgradeUrl);
-    addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
-    return;
-  }
-  throw new Error(result?.reason||('Test engineer flow failed: '+r.status));
-}
+      if(!r.ok){
+        resetProgress();
+        if(result?.reason==='unauthorized'){
+          showUnauthorized(result.message);
+          addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
+          return;
+        }
+        if(result?.reason==='no_free_runs'){
+          showUpgrade(result.message,result.upgradeUrl);
+          addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
+          return;
+        }
+        throw new Error(result?.reason||('Test engineer flow failed: '+r.status));
+      }
       if(!result.ok&&!(result.validationBlocked&&result.preview)){showError(result.reason||'Test generation failed.');addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
       const decisionMode=result.decisionMode||(result.validationBlocked?'blocked':result.confidence>=70?'safe_to_apply':'preview_only');
       showDecision({decision:{mode:decisionMode},confidence:{score:result.confidence??0},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity});
@@ -640,18 +641,19 @@ async function execute(){
       const r=await fetch('/api/data-analyst',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId,userId})});
       const result=await r.json().catch(()=>null);
       if(!r.ok){
-  if(result?.reason==='unauthorized'){
-    showUnauthorized(result.message);
-    addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
-    return;
-  }
-  if(result?.reason==='no_free_runs'){
-    showUpgrade(result.message,result.upgradeUrl);
-    addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
-    return;
-  }
-  throw new Error(result?.reason||('Data analyst flow failed: '+r.status));
-}
+        resetProgress();
+        if(result?.reason==='unauthorized'){
+          showUnauthorized(result.message);
+          addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
+          return;
+        }
+        if(result?.reason==='no_free_runs'){
+          showUpgrade(result.message,result.upgradeUrl);
+          addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
+          return;
+        }
+        throw new Error(result?.reason||('Data analyst flow failed: '+r.status));
+      }
       if(!result.ok){showError(result.reason||'SQL generation failed.');addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
       showDecision({decision:{mode:result.confidence>=70?'safe_to_apply':'preview_only'},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat])});
       showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,fileDiffs:result.fileDiffs||[]});
@@ -663,21 +665,22 @@ async function execute(){
       if(!r1.ok)throw new Error('Analyze failed: '+r1.status);
       const analyzeData=await r1.json();
       setProgress('Generating patch...');
-      const r2=await fetch('/api/patch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,userId})});
+      const r2=await fetch('/api/patch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId,userId})});
       const patch=await r2.json().catch(()=>null);
-     if(!r2.ok){
-  if(patch?.reason==='unauthorized'){
-    showUnauthorized(patch.message);
-    addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
-    return;
-  }
-  if(patch?.reason==='no_free_runs'){
-    showUpgrade(patch.message,patch.upgradeUrl);
-    addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
-    return;
-  }
-  throw new Error(patch?.reason||('Patch failed: '+r2.status));
-}
+      if(!r2.ok){
+        resetProgress();
+        if(patch?.reason==='unauthorized'){
+          showUnauthorized(patch.message);
+          addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
+          return;
+        }
+        if(patch?.reason==='no_free_runs'){
+          showUpgrade(patch.message,patch.upgradeUrl);
+          addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
+          return;
+        }
+        throw new Error(patch?.reason||('Patch failed: '+r2.status));
+      }
       showDecision(analyzeData);
       showPatch(patch);
       addRecentRun({task,role:currentRole,repoPath,status:patch.ok===false?'error':'success',timestamp:Date.now()});
