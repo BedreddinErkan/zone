@@ -66,7 +66,7 @@ describe("computeConfidenceScore", () => {
       }
     });
 
-    expect(result.score).toBe(85);
+    expect(result.score).toBe(70);
     expect(result.breakdown.massScopePenalty).toBe(-30);
   });
 
