@@ -1593,23 +1593,25 @@ export async function runLlmPatchFlow(input: {
     })();
 
   // 4. Plan feature with LLM
-  let llmPlan: Awaited<ReturnType<typeof planFeatureWithLlm>>;
-  try {
-    llmPlan = await planFeatureWithLlm({
-      task: input.task,
-      intent: taskIntent,
-      projectSummary,
-      projectNotes,
-      relevantFiles: relevantFiles.map((f) => ({
-        path: f.path,
-        category: f.category,
-      })),
-      existingFilesSummary,
-      schemaAwareSummary: [],
-    });
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    return { ok: false, reason };
+  let llmPlan: Awaited<ReturnType<typeof planFeatureWithLlm>> | null = null;
+  if (!input.hostedContext) {
+    try {
+      llmPlan = await planFeatureWithLlm({
+        task: input.task,
+        intent: taskIntent,
+        projectSummary,
+        projectNotes,
+        relevantFiles: relevantFiles.map((f) => ({
+          path: f.path,
+          category: f.category,
+        })),
+        existingFilesSummary,
+        schemaAwareSummary: [],
+      });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return { ok: false, reason };
+    }
   }
 
   // 5. Read top 4 suggested files
@@ -1620,7 +1622,7 @@ export async function runLlmPatchFlow(input: {
       reason: file.reason,
     })) ??
     [
-      ...llmPlan.suggestedFiles.map((file) => ({
+      ...(llmPlan?.suggestedFiles ?? []).map((file) => ({
         path: file.path,
         action: file.action,
         reason: file.reason,

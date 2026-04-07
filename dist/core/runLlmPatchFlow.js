@@ -1109,24 +1109,26 @@ async function runLlmPatchFlow(input) {
                 : "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n(none)";
         })();
     // 4. Plan feature with LLM
-    let llmPlan;
-    try {
-        llmPlan = await (0, planFeature_js_1.planFeatureWithLlm)({
-            task: input.task,
-            intent: taskIntent,
-            projectSummary,
-            projectNotes,
-            relevantFiles: relevantFiles.map((f) => ({
-                path: f.path,
-                category: f.category,
-            })),
-            existingFilesSummary,
-            schemaAwareSummary: [],
-        });
-    }
-    catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        return { ok: false, reason };
+    let llmPlan = null;
+    if (!input.hostedContext) {
+        try {
+            llmPlan = await (0, planFeature_js_1.planFeatureWithLlm)({
+                task: input.task,
+                intent: taskIntent,
+                projectSummary,
+                projectNotes,
+                relevantFiles: relevantFiles.map((f) => ({
+                    path: f.path,
+                    category: f.category,
+                })),
+                existingFilesSummary,
+                schemaAwareSummary: [],
+            });
+        }
+        catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            return { ok: false, reason };
+        }
     }
     // 5. Read top 4 suggested files
     const selectedContextFiles = input.hostedContext?.contextFiles.map((file) => ({
@@ -1135,7 +1137,7 @@ async function runLlmPatchFlow(input) {
         reason: file.reason,
     })) ??
         [
-            ...llmPlan.suggestedFiles.map((file) => ({
+            ...(llmPlan?.suggestedFiles ?? []).map((file) => ({
                 path: file.path,
                 action: file.action,
                 reason: file.reason,

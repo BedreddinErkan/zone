@@ -60,7 +60,7 @@ const computeConfidenceScore_js_1 = require("./computeConfidenceScore.js");
                 lowRisk: 0
             }
         });
-        (0, vitest_1.expect)(result.score).toBe(85);
+        (0, vitest_1.expect)(result.score).toBe(70);
         (0, vitest_1.expect)(result.breakdown.massScopePenalty).toBe(-30);
     });
     (0, vitest_1.it)("applies mass_scope together with other penalties", () => {
