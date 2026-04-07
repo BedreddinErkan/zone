@@ -171,6 +171,12 @@ const IRRELEVANT_DEVELOPER_CONTEXT_SEGMENTS = [
   "/node_modules/",
   "/build/",
   "/dist/",
+  "/.agent-cache/",
+  "/.agent-patches/",
+  "/.agent-backups/",
+  "/agent-cache/",
+  "/agent-patches/",
+  "/agent-backups/",
 ];
 
 function isUiFilePath(filePath: string): boolean {
