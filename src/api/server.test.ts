@@ -486,7 +486,7 @@ it("logs successful developer runs to Supabase when env is configured", async ()
 
   // ensureRunAuthorized + logRun profile read için
   supabaseProfileMaybeSingleMock.mockResolvedValue({
-    data: { credits: 5, subscription_status: "free" },
+    data: { credits: 20, subscription_status: "free" },
     error: null,
   });
 
