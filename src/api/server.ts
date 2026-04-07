@@ -144,6 +144,10 @@ function renderZoneUiHtml(): string {
     typeof process.env.ZONE_DEBUG_FALLBACK_USER_ID === "string"
       ? process.env.ZONE_DEBUG_FALLBACK_USER_ID.trim()
       : "";
+  const zoneApiBaseUrl =
+    typeof process.env.ZONE_API_BASE_URL === "string"
+      ? process.env.ZONE_API_BASE_URL.trim()
+      : "";
   const currentUser = currentUserId
     ? {
         id: currentUserId,
@@ -161,6 +165,7 @@ function renderZoneUiHtml(): string {
         : "",
     currentUser,
     debugFallbackUserId,
+    zoneApiBaseUrl,
   })};window.currentUser=window.currentUser||${JSON.stringify(currentUser)};</script>`;
   return zoneUiHtmlTemplate.replace("</head>", `${configScript}</head>`);
 }

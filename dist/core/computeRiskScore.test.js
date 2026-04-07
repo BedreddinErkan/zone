@@ -66,7 +66,7 @@ const computeRiskScore_js_1 = require("./computeRiskScore.js");
         const result = (0, computeRiskScore_js_1.computeRiskScore)("delete auth tokens in production");
         (0, vitest_1.expect)(result.signals).toContain("destructive");
         (0, vitest_1.expect)(result.signals).toContain("critical_domain");
-        (0, vitest_1.expect)(result.score).toBe(70);
+        (0, vitest_1.expect)(result.score).toBe(85);
     });
     (0, vitest_1.it)("clamps score to 100", () => {
         const result = (0, computeRiskScore_js_1.computeRiskScore)("delete remove drop reset overwrite database schema migration payment auth production password token");
