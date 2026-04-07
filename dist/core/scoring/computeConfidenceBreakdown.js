@@ -57,11 +57,16 @@ function buildRepeatedWarningPenalty(params) {
         },
     ];
 }
-function buildValidationErrorPenalty(validationErrors) {
+function buildValidationErrorPenalty(validationErrors, role) {
     if (validationErrors.length === 0) {
         return [];
     }
-    const rawPenalty = validationErrors.length * confidenceRules_js_1.CONFIDENCE_RULES.validationErrorPenaltyPerItem;
+    const multiplier = role
+        ? confidenceRules_js_1.CONFIDENCE_RULES.roleValidationErrorMultipliers[role]
+        : 1.0;
+    const rawPenalty = validationErrors.length *
+        confidenceRules_js_1.CONFIDENCE_RULES.validationErrorPenaltyPerItem *
+        multiplier;
     const finalPenalty = Math.max(rawPenalty, confidenceRules_js_1.CONFIDENCE_RULES.validationErrorPenaltyCap);
     return [
         {
@@ -107,7 +112,7 @@ function computeConfidenceBreakdown(input) {
             penaltyCap: confidenceRules_js_1.CONFIDENCE_RULES.patchRiskWarningPenaltyCap,
             reasonPrefix: "Patch risk concerns identified",
         }),
-        ...buildValidationErrorPenalty(validationErrors),
+        ...buildValidationErrorPenalty(validationErrors, input.role),
     ];
     const totalPenalty = factors
         .filter((factor) => factor.impact < 0)

@@ -10,4 +10,5 @@ export type RiskScoreDetails = {
   riskScore: number;
   riskBreakdown: RiskBreakdown;
   detectedSignals: string[];
+  compoundPenalty: number;
 };

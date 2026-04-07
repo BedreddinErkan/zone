@@ -28,6 +28,7 @@ const rankRelevantFiles_js_1 = require("../repo/rankRelevantFiles.js");
 const readProjectFiles_js_1 = require("../repo/readProjectFiles.js");
 const openaiClient_js_1 = require("../llm/openaiClient.js");
 const colors_js_1 = require("../cli/colors.js");
+const validateLlmOutput_js_1 = require("../core/validateLlmOutput.js");
 exports.app = (0, express_1.default)();
 const port = Number(process.env.PORT) || 3000;
 exports.app.listen(port, () => {
@@ -646,6 +647,24 @@ exports.app.post("/api/patch", async (req, res) => {
         return;
     }
     const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({ task, repoPath, hostedContext });
+    if (result.ok && result.applyPatches.length > 0) {
+        const validation = (0, validateLlmOutput_js_1.validateLlmOutput)("developer", result.applyPatches.map((p) => ({
+            filePath: p.filePath,
+            content: p.fullContent,
+        })));
+        if (validation.verdict === "block") {
+            res.status(422).json({
+                ok: false,
+                reason: "Output validation failed — patch blocked.",
+                validationIssues: validation.issues,
+            });
+            return;
+        }
+        if (validation.issues.length > 0) {
+            result.validationIssues = validation.issues;
+            result.validationVerdict = validation.verdict;
+        }
+    }
     res.json(result);
     if (result.ok) {
         const confidence = typeof result.developerConfidence === "number"
@@ -689,6 +708,24 @@ exports.app.post("/api/dry-run", async (req, res) => {
     if (!result.ok) {
         res.status(500).json(result);
         return;
+    }
+    if (result.applyPatches.length > 0) {
+        const validation = (0, validateLlmOutput_js_1.validateLlmOutput)("developer", result.applyPatches.map((p) => ({
+            filePath: p.filePath,
+            content: p.fullContent,
+        })));
+        if (validation.verdict === "block") {
+            res.status(422).json({
+                ok: false,
+                reason: "Output validation failed — patch blocked.",
+                validationIssues: validation.issues,
+            });
+            return;
+        }
+        if (validation.issues.length > 0) {
+            result.validationIssues = validation.issues;
+            result.validationVerdict = validation.verdict;
+        }
     }
     res.json({
         ok: true,
@@ -785,8 +822,27 @@ exports.app.post("/api/test-engineer", async (req, res) => {
             onProgress: (stage) => emitProgress(runId, stage),
             hostedContext,
         });
+        // 1. ÖNCE reason mapping (!ok ise)
         if (!result.ok && typeof result.reason === "string") {
             result.reason = getTestEngineerUserFacingReason(result.reason);
+        }
+        // 2. SONRA validation (ok ise)
+        if (result.ok && result.applyPatches) {
+            const validation = (0, validateLlmOutput_js_1.validateLlmOutput)("test_engineer", result.applyPatches.map((p) => ({
+                filePath: p.filePath,
+                content: p.fullContent,
+            })));
+            if (validation.verdict === "block") {
+                res.status(422).json({
+                    ok: false,
+                    reason: "Output validation failed — patch blocked.",
+                    validationIssues: validation.issues,
+                });
+                return;
+            }
+            if (validation.issues.length > 0) {
+                result.validationIssues = validation.issues;
+            }
         }
         res.json(result);
         if (result.ok) {
@@ -842,6 +898,24 @@ exports.app.post("/api/data-analyst", async (req, res) => {
             onProgress: (stage) => emitProgress(runId, stage),
             hostedContext,
         });
+        if (result.ok && result.applyPatches) {
+            const validation = (0, validateLlmOutput_js_1.validateLlmOutput)("data_analyst", result.applyPatches.map((p) => ({
+                filePath: p.filePath,
+                content: p.fullContent,
+            })));
+            if (validation.verdict === "block") {
+                res.status(422).json({
+                    ok: false,
+                    reason: "Output validation failed — patch blocked.",
+                    validationIssues: validation.issues,
+                });
+                return;
+            }
+            if (validation.issues.length > 0) {
+                result.validationIssues = validation.issues;
+                result.validationVerdict = validation.verdict;
+            }
+        }
         if (!result.ok && typeof result.reason === "string") {
             result.reason = getDataAnalystUserFacingReason(result.reason);
         }

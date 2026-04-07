@@ -54,5 +54,10 @@ exports.CONFIDENCE_RULES = {
     patchRiskWarningPenaltyCap: -24,
     validationErrorPenaltyPerItem: -40,
     validationErrorPenaltyCap: -80,
+    roleValidationErrorMultipliers: {
+        data_analyst: 1.5,
+        developer: 1.0,
+        test_engineer: 0.7,
+    },
 };
 //# sourceMappingURL=confidenceRules.js.map

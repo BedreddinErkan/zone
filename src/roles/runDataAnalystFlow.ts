@@ -2,6 +2,11 @@ import { scanRepo } from "../repo/scanRepo.js";
 import { readProjectFiles } from "../repo/readProjectFiles.js";
 import { createOpenAIClient, getModelName } from "../llm/openaiClient.js";
 import { computeFileDiff, type DiffLine } from "../core/runLlmPatchFlow.js";
+import {
+  withSelfHealingRetry,
+  buildDefaultFeedbackPrompt,
+} from "../core/withSelfHealingRetry.js";
+import { computeRiskScore } from "../core/computeRiskScore.js";
 import { validateTestOutput } from "./testOutputValidator.js";
 import { buildDataAnalystContext } from "./dataAnalystContext.js";
 import {
@@ -17,6 +22,7 @@ export type DataAnalystFlowResult =
       dialect: string;
       migrationFormat: string;
       confidence: number;
+      decisionMode?: "safe_to_apply" | "preview_only" | "blocked";
       summary: string;
       warnings: string[];
       applyPatches: Array<{ filePath: string; fullContent: string }>;
@@ -174,22 +180,102 @@ export async function runDataAnalystFlow(input: {
     existingSqlContents,
   });
 
-  let parsed: Record<string, unknown>;
-  try {
-    input.onProgress?.("Generating patch...");
-    const client = createOpenAIClient();
-    const model = getModelName();
-    const response = await client.responses.create({ model, input: prompt });
-    const rawText = response.output_text || "";
-    const jsonText = extractJson(rawText);
-    parsed = JSON.parse(jsonText) as Record<string, unknown>;
-  } catch (err) {
+  input.onProgress?.("Generating patch...");
+  const client = createOpenAIClient();
+  const model = getModelName();
+
+  const retryResult = await withSelfHealingRetry({
+    maxAttempts: 3,
+    prompt,
+    execute: async (currentPrompt) => {
+      const response = await client.responses.create({
+        model,
+        input: currentPrompt,
+      });
+      const rawText = response.output_text || "";
+      const jsonText = extractJson(rawText);
+      return JSON.parse(jsonText) as Record<string, unknown>;
+    },
+    validate: (result) => {
+      const issues: Array<{
+        code: string;
+        message: string;
+        severity: "error" | "warning";
+      }> = [];
+      if (!result["migrationFile"]) {
+        issues.push({
+          code: "MISSING_MIGRATION_FILE",
+          message: "Response is missing migrationFile field.",
+          severity: "error",
+        });
+      }
+      if (typeof result["summary"] !== "string" || !result["summary"]) {
+        issues.push({
+          code: "MISSING_SUMMARY",
+          message: "Response is missing summary field.",
+          severity: "warning",
+        });
+      }
+      const migrationContent = (
+        result["migrationFile"] as { content?: string } | undefined
+      )?.content;
+      if (migrationContent) {
+        const sqlValidation = validateTestOutput({
+          framework: "unknown",
+          sqlContent: migrationContent,
+          sqlDialect: schema.dialect,
+        });
+        if (sqlValidation.decision === "blocked") {
+          sqlValidation.issues
+            .filter((issue) => issue.severity === "error")
+            .forEach((issue) => {
+              issues.push({
+                code: issue.code,
+                message: issue.message,
+                severity: "error",
+              });
+            });
+        }
+      }
+      return issues;
+    },
+    buildFeedbackPrompt: buildDefaultFeedbackPrompt,
+  });
+
+  if (!retryResult.ok) {
     return {
       ok: false,
-      reason: `LLM call failed: ${err instanceof Error ? err.message : String(err)}`,
+      reason: `LLM generation failed after ${retryResult.attempts} attempt(s): ${retryResult.reason}`,
       dialect: schema.dialect,
     };
   }
+
+  let parsed = retryResult.value;
+
+  // Task-level risk scoring for data analyst
+  const riskResult = computeRiskScore({ task: input.task, role: "data_analyst" });
+
+  // Determine decisionMode from risk score
+  function mapRiskToDecisionMode(
+    score: number,
+    signals: string[]
+  ): "safe_to_apply" | "preview_only" | "blocked" {
+    // Data analyst knows their domain — never hard block, always preview for review
+    if (
+      score >= 31 ||
+      signals.includes("schema") ||
+      signals.includes("critical_domain") ||
+      signals.includes("mass_scope") ||
+      signals.includes("destructive")
+    )
+      return "preview_only";
+    return "safe_to_apply";
+  }
+
+  const taskDecisionMode = mapRiskToDecisionMode(
+    riskResult.score,
+    riskResult.signals
+  );
 
   const applyPatches = buildApplyPatches(parsed);
   const originalContentByPath = new Map(existingSqlContents.map((file) => [file.path, file.content] as const));
@@ -204,35 +290,22 @@ export async function runDataAnalystFlow(input: {
     ? (parsed["warnings"] as string[])
     : [];
 
-  const migrationPatch = applyPatches[0];
-  input.onProgress?.("Validating output...");
-  const validation = validateTestOutput({
-    framework: "unknown",
-    sqlContent: migrationPatch?.fullContent,
-    sqlDialect: schema.dialect,
-  });
-
-  if (validation.decision === "blocked") {
-    return {
-      ok: false,
-      reason:
-        `SQL validation blocked: ${validation.summary}\n` +
-        validation.issues
-          .filter((issue) => issue.severity === "error")
-          .map((issue) => `  - ${issue.message}`)
-          .join("\n"),
-      dialect: schema.dialect,
-    };
-  }
-
-  const validationWarnings = validation.issues
-    .filter((issue) => issue.severity === "warning")
-    .map((issue) => `[${issue.code}] ${issue.message}`);
+  const validationWarnings: string[] = [];
 
   const detectionWarnings =
     schema.dialect === "unknown"
       ? ["Schema dialect could not be confidently detected; review SQL carefully."]
       : [];
+  const riskWarnings =
+    riskResult.score >= 71
+      ? [
+          `[HIGH_RISK] Risk score ${riskResult.score} — detected: ${riskResult.signals.join(", ")}. Review carefully before applying.`,
+        ]
+      : riskResult.score >= 31
+        ? [
+            `[ELEVATED_RISK] Risk score ${riskResult.score} — detected: ${riskResult.signals.join(", ")}.`,
+          ]
+        : [];
   const fileDiffs = applyPatches.map((patch) => {
     const originalContent = originalContentByPath.get(patch.filePath) ?? "";
     const diff = computeFileDiff(originalContent, patch.fullContent);
@@ -250,8 +323,9 @@ export async function runDataAnalystFlow(input: {
     dialect: schema.dialect,
     migrationFormat: schema.migrationFormat,
     confidence,
+    decisionMode: taskDecisionMode,
     summary,
-    warnings: [...detectionWarnings, ...warnings, ...validationWarnings],
+    warnings: [...detectionWarnings, ...riskWarnings, ...warnings, ...validationWarnings],
     applyPatches,
     fileDiffs,
     preview,

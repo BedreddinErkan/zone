@@ -28,6 +28,7 @@ export interface ComputeConfidenceBreakdownInput {
   patchRiskWarnings?: string[];
   validationErrors?: string[];
   hasValidatedFiles: boolean;
+  role?: "test_engineer" | "developer" | "data_analyst";
 }
 
 export const CONFIDENCE_RULES = {
@@ -89,4 +90,10 @@ export const CONFIDENCE_RULES = {
 
   validationErrorPenaltyPerItem: -40,
   validationErrorPenaltyCap: -80,
+
+  roleValidationErrorMultipliers: {
+    data_analyst: 1.5,
+    developer: 1.0,
+    test_engineer: 0.7,
+  } as const,
 } as const;

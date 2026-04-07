@@ -214,7 +214,22 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
             applyPatches: [
                 {
                     filePath: "src/components/LoginForm.tsx",
-                    fullContent: "export function LoginForm() {}",
+                    fullContent: `import React, { useState } from "react";
+
+export function LoginForm() {
+  const [email, setEmail] = useState("");
+  return (
+    <form>
+      <input
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="Email"
+      />
+      <button type="submit">Login</button>
+    </form>
+  );
+}`,
                 },
             ],
         });
@@ -413,6 +428,11 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
     (0, vitest_1.it)("logs successful developer runs to Supabase when env is configured", async () => {
         process.env.SUPABASE_URL = "https://example.supabase.co";
         process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+        // ensureRunAuthorized + logRun profile read için
+        supabaseProfileMaybeSingleMock.mockResolvedValue({
+            data: { credits: 5, subscription_status: "free" },
+            error: null,
+        });
         runLlmPatchFlowMock.mockResolvedValue({
             ok: true,
             patchPreview: "=== LLM PATCH PREVIEW ===",
@@ -424,6 +444,7 @@ vitest_1.vi.mock("@supabase/supabase-js", () => ({
         });
         supabaseInsertMock.mockResolvedValue({ error: null });
         supabaseRpcMock.mockResolvedValue({ error: null });
+        // ... rest of test
         const response = await fetch(`${baseUrl}/api/patch`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },

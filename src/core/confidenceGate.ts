@@ -5,6 +5,7 @@ export type ConfidenceGateResult =
       reason: string;
       risks: string[];
       recommendation: string;
+      effectiveThreshold: number;
     };
 
 export interface ConfidenceGateInput {
@@ -42,6 +43,32 @@ const ROLE_RISK_DESCRIPTIONS: Record<string, string[]> = {
 function getThreshold(role?: string): number {
   if (!role) return THRESHOLDS.default;
   return THRESHOLDS[role as keyof typeof THRESHOLDS] ?? THRESHOLDS.default;
+}
+
+export function computeEffectiveThreshold(input: ConfidenceGateInput): number {
+  let base =
+    THRESHOLDS[input.role as keyof typeof THRESHOLDS] ?? THRESHOLDS.default;
+
+  if (input.role === "test_engineer") {
+    if (
+      input.framework === "cucumber_java" ||
+      input.framework === "selenium_java"
+    ) {
+      base += 5;
+    }
+    if (
+      input.framework === "playwright_ts" ||
+      input.framework === "cypress"
+    ) {
+      base -= 5;
+    }
+  }
+
+  const warningCount = (input.warnings ?? []).length;
+  if (warningCount >= 3) base += 10;
+  else if (warningCount >= 1) base += 5;
+
+  return Math.min(base, 90);
 }
 
 function getRisks(role?: string, warnings?: string[]): string[] {
@@ -85,7 +112,7 @@ function getRecommendation(
 export function checkConfidenceGate(
   input: ConfidenceGateInput
 ): ConfidenceGateResult {
-  const threshold = getThreshold(input.role);
+  const threshold = computeEffectiveThreshold(input);
 
   if (input.confidenceScore >= threshold) {
     return { pass: true };
@@ -100,6 +127,7 @@ export function checkConfidenceGate(
       threshold,
       input.role
     ),
+    effectiveThreshold: threshold,
   };
 }
 

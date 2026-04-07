@@ -37,7 +37,7 @@ import {
 } from "../llm/openaiClient.js";
 import type { Response } from "express";
 import { c, colorize } from "../cli/colors.js";
-
+import { validateLlmOutput } from "../core/validateLlmOutput.js";
 export const app = express();
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {
@@ -958,8 +958,31 @@ app.post("/api/patch", async (req, res) => {
     return;
   }
 
-  const result = await runLlmPatchFlow({ task, repoPath, hostedContext });
-  res.json(result);
+const result = await runLlmPatchFlow({ task, repoPath, hostedContext });
+
+if (result.ok && result.applyPatches.length > 0) {
+  const validation = validateLlmOutput(
+    "developer",
+    result.applyPatches.map((p) => ({
+      filePath: p.filePath,
+      content: p.fullContent,
+    }))
+  );
+  if (validation.verdict === "block") {
+    res.status(422).json({
+      ok: false,
+      reason: "Output validation failed — patch blocked.",
+      validationIssues: validation.issues,
+    });
+    return;
+  }
+  if (validation.issues.length > 0) {
+    (result as Record<string, unknown>).validationIssues = validation.issues;
+    (result as Record<string, unknown>).validationVerdict = validation.verdict;
+  }
+}
+
+res.json(result);
 
   if (result.ok) {
     const confidence =
@@ -1006,19 +1029,41 @@ app.post("/api/dry-run", async (req, res) => {
     return;
   }
 
-  const result = await runLlmPatchFlow({ task, repoPath, dryRun: true, hostedContext });
-  if (!result.ok) {
-    res.status(500).json(result);
+const result = await runLlmPatchFlow({ task, repoPath, dryRun: true, hostedContext });
+if (!result.ok) {
+  res.status(500).json(result);
+  return;
+}
+
+if (result.applyPatches.length > 0) {
+  const validation = validateLlmOutput(
+    "developer",
+    result.applyPatches.map((p) => ({
+      filePath: p.filePath,
+      content: p.fullContent,
+    }))
+  );
+  if (validation.verdict === "block") {
+    res.status(422).json({
+      ok: false,
+      reason: "Output validation failed — patch blocked.",
+      validationIssues: validation.issues,
+    });
     return;
   }
+  if (validation.issues.length > 0) {
+    (result as Record<string, unknown>).validationIssues = validation.issues;
+    (result as Record<string, unknown>).validationVerdict = validation.verdict;
+  }
+}
 
-  res.json({
-    ok: true,
-    fileDiffs: result.fileDiffs ?? [],
-    patchPreview: result.patchPreview,
-      warnings: result.warnings,
-      patchResults: result.patchResults,
-    });
+res.json({
+  ok: true,
+  fileDiffs: result.fileDiffs ?? [],
+  patchPreview: result.patchPreview,
+  warnings: result.warnings,
+  patchResults: result.patchResults,
+});
 
   const confidence =
     typeof result.developerConfidence === "number"
@@ -1110,15 +1155,39 @@ const authorization = await ensureRunAuthorized(userId);  if (!authorization.all
     return;
   }
   try {
-    const result = await runTestEngineerFlow({
-      task,
-      repoPath,
-      onProgress: (stage) => emitProgress(runId, stage),
-      hostedContext,
+const result = await runTestEngineerFlow({
+  task,
+  repoPath,
+  onProgress: (stage) => emitProgress(runId, stage),
+  hostedContext,
+});
+
+// 1. ÖNCE reason mapping (!ok ise)
+if (!result.ok && typeof result.reason === "string") {
+  result.reason = getTestEngineerUserFacingReason(result.reason);
+}
+
+// 2. SONRA validation (ok ise)
+if (result.ok && result.applyPatches) {
+  const validation = validateLlmOutput(
+    "test_engineer",
+    result.applyPatches.map((p: { filePath: string; fullContent: string }) => ({
+      filePath: p.filePath,
+      content: p.fullContent,
+    }))
+  );
+  if (validation.verdict === "block") {
+    res.status(422).json({
+      ok: false,
+      reason: "Output validation failed — patch blocked.",
+      validationIssues: validation.issues,
     });
-    if (!result.ok && typeof result.reason === "string") {
-      result.reason = getTestEngineerUserFacingReason(result.reason);
-    }
+    return;
+  }
+  if (validation.issues.length > 0) {
+    (result as Record<string, unknown>).validationIssues = validation.issues;
+  }
+}
     res.json(result);
     if (result.ok) {
 queueRunLog({
@@ -1170,12 +1239,33 @@ const authorization = await ensureRunAuthorized(userId);  if (!authorization.all
     return;
   }
   try {
-    const result = await runDataAnalystFlow({
-      task,
-      repoPath,
-      onProgress: (stage) => emitProgress(runId, stage),
-      hostedContext,
-    });
+const result = await runDataAnalystFlow({
+  task,
+  repoPath,
+  onProgress: (stage) => emitProgress(runId, stage),
+  hostedContext,
+});
+    if (result.ok && result.applyPatches) {
+      const validation = validateLlmOutput(
+        "data_analyst",
+        result.applyPatches.map((p: { filePath: string; fullContent: string }) => ({
+          filePath: p.filePath,
+          content: p.fullContent,
+        }))
+      );
+      if (validation.verdict === "block") {
+        res.status(422).json({
+          ok: false,
+          reason: "Output validation failed — patch blocked.",
+          validationIssues: validation.issues,
+        });
+        return;
+      }
+      if (validation.issues.length > 0) {
+        (result as Record<string, unknown>).validationIssues = validation.issues;
+        (result as Record<string, unknown>).validationVerdict = validation.verdict;
+      }
+    }
     if (!result.ok && typeof result.reason === "string") {
       result.reason = getDataAnalystUserFacingReason(result.reason);
     }

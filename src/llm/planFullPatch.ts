@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { createOpenAIClient, getModelName } from "./openaiClient.js";
 import {
+  withSelfHealingRetry,
+  buildDefaultFeedbackPrompt,
+} from "../core/withSelfHealingRetry.js";
+import {
   buildFullPatchPrompt,
   type FullPatchOutputMode,
 } from "../prompts/fullPatchPrompt.js";
@@ -76,10 +80,9 @@ export async function planFullPatchWithLlm(input: {
     outputMode,
   });
 
-  const response = await client.responses.create({ model, input: prompt });
-  const rawText = response.output_text ?? "";
-
   if (outputMode === "find_replace_patch") {
+    const response = await client.responses.create({ model, input: prompt });
+    const rawText = response.output_text ?? "";
     return {
       mode: "patch",
       filePath: input.filePath,
@@ -89,9 +92,67 @@ export async function planFullPatchWithLlm(input: {
     };
   }
 
-  const jsonText = extractJson(rawText);
-  const parsed = JSON.parse(jsonText) as unknown;
-  const validated = fullContentSchema.parse(parsed);
+  const retryResult = await withSelfHealingRetry({
+    maxAttempts: 3,
+    prompt,
+    execute: async (currentPrompt) => {
+      const response = await client.responses.create({
+        model,
+        input: currentPrompt,
+      });
+      const rawText = response.output_text ?? "";
+      const jsonText = extractJson(rawText);
+      return JSON.parse(jsonText) as unknown;
+    },
+    validate: (result) => {
+      const issues: Array<{
+        code: string;
+        message: string;
+        severity: "error" | "warning";
+      }> = [];
+
+      const parseResult = fullContentSchema.safeParse(result);
+      if (!parseResult.success) {
+        parseResult.error.errors.forEach((err) => {
+          issues.push({
+            code: "SCHEMA_VALIDATION_FAILED",
+            message: `${err.path.join(".")}: ${err.message}`,
+            severity: "error",
+          });
+        });
+        return issues;
+      }
+
+      const validated = parseResult.data;
+
+      if (!validated.fullContent.trim()) {
+        issues.push({
+          code: "EMPTY_FULL_CONTENT",
+          message: "fullContent field is empty.",
+          severity: "error",
+        });
+      }
+
+      if (!validated.filePath.trim()) {
+        issues.push({
+          code: "MISSING_FILE_PATH",
+          message: "filePath field is empty.",
+          severity: "error",
+        });
+      }
+
+      return issues;
+    },
+    buildFeedbackPrompt: buildDefaultFeedbackPrompt,
+  });
+
+  if (!retryResult.ok) {
+    throw new Error(
+      `planFullPatchWithLlm failed after ${retryResult.attempts} attempt(s): ${retryResult.reason}`
+    );
+  }
+
+  const validated = fullContentSchema.parse(retryResult.value);
 
   return {
     mode: "full_content",

@@ -83,7 +83,7 @@ function buildContext(overrides = {}) {
             ],
             existingTestContents: [],
         });
-        (0, vitest_1.expect)(prompt).toContain("=== EXISTING FEATURE FILE EXAMPLES ===");
+        (0, vitest_1.expect)(prompt).toContain("=== EXISTING FEATURE FILE EXAMPLES (PRESERVE THESE EXACTLY) ===");
         (0, vitest_1.expect)(prompt).toContain("src/test/resources/features/flight_search.feature");
         (0, vitest_1.expect)(prompt).toContain("Feature: Flight search");
     });

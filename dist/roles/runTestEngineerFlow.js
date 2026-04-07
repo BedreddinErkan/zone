@@ -16,6 +16,7 @@ const detectTestFramework_js_1 = require("./detectTestFramework.js");
 const testEngineerContext_js_1 = require("./testEngineerContext.js");
 const testEngineerPrompt_js_1 = require("../prompts/testEngineerPrompt.js");
 const openaiClient_js_1 = require("../llm/openaiClient.js");
+const withSelfHealingRetry_js_1 = require("../core/withSelfHealingRetry.js");
 const confidenceGate_js_1 = require("../core/confidenceGate.js");
 const runLlmPatchFlow_js_1 = require("../core/runLlmPatchFlow.js");
 const testOutputValidator_js_1 = require("./testOutputValidator.js");
@@ -680,16 +681,6 @@ async function runTestEngineerFlow(input) {
             reason: `detectTestFramework failed: ${err instanceof Error ? err.stack : String(err)}`,
         };
     }
-    if (framework.framework === "unknown") {
-        console.log(`[zone-api] test-engineer detection failed: ${JSON.stringify(framework.evidence)}`);
-        return {
-            ok: false,
-            reason: "Could not detect a test framework in this repository. " +
-                "Supported frameworks: Playwright (TS/JS), Cypress, Cucumber+Java, " +
-                "Selenium (Java/Python), TestNG, pytest.",
-            framework: "unknown",
-        };
-    }
     let context;
     try {
         context = (0, testEngineerContext_js_1.buildTestEngineerContext)(input.task, framework, allFiles);
@@ -764,10 +755,58 @@ async function runTestEngineerFlow(input) {
         input.onProgress?.("Generating patch...");
         const client = (0, openaiClient_js_1.createOpenAIClient)();
         const model = (0, openaiClient_js_1.getModelName)();
-        const response = await client.responses.create({ model, input: prompt });
-        const rawText = response.output_text || "";
-        const jsonText = extractJson(rawText);
-        parsed = JSON.parse(jsonText);
+        const retryResult = await (0, withSelfHealingRetry_js_1.withSelfHealingRetry)({
+            maxAttempts: 3,
+            prompt,
+            execute: async (currentPrompt) => {
+                const response = await client.responses.create({
+                    model,
+                    input: currentPrompt,
+                });
+                const rawText = response.output_text || "";
+                const jsonText = extractJson ? extractJson(rawText) : rawText;
+                return JSON.parse(jsonText);
+            },
+            validate: (result) => {
+                const issues = [];
+                const hasTestFile = result["testFile"] || result["featureFile"];
+                if (!hasTestFile) {
+                    issues.push({
+                        code: "MISSING_TEST_FILE",
+                        message: "Response is missing testFile or featureFile field.",
+                        severity: "error",
+                    });
+                }
+                if (typeof result["summary"] !== "string" || !result["summary"]) {
+                    issues.push({
+                        code: "MISSING_SUMMARY",
+                        message: "Response is missing summary field.",
+                        severity: "warning",
+                    });
+                }
+                const testContent = result["testFile"]?.content ??
+                    result["featureFile"]?.content ??
+                    "";
+                if (/TODO|PLACEHOLDER|your\.selector|#placeholder/i.test(testContent)) {
+                    issues.push({
+                        code: "PLACEHOLDER_CONTENT",
+                        message: "Generated test contains placeholder content that must be replaced.",
+                        severity: "error",
+                    });
+                }
+                return issues;
+            },
+            buildFeedbackPrompt: withSelfHealingRetry_js_1.buildDefaultFeedbackPrompt,
+        });
+        if (!retryResult.ok) {
+            return {
+                ok: false,
+                reason: `LLM generation failed after ${retryResult.attempts} attempt(s): ${retryResult.reason}`,
+                framework: framework.framework ?? "unknown",
+                language: framework.language ?? "unknown",
+            };
+        }
+        parsed = retryResult.value;
     }
     catch (err) {
         return {
@@ -822,6 +861,54 @@ async function runTestEngineerFlow(input) {
         return {
             ...patch,
             fullContent: finalized.fullContent,
+        };
+    });
+    applyPatches = applyPatches.map((patch) => {
+        if (!patch.filePath.endsWith(".feature")) {
+            return patch;
+        }
+        const originalContent = originalContentByPath.get(patch.filePath) ?? "";
+        if (!originalContent.trim()) {
+            return patch;
+        }
+        const originalNormalized = originalContent.replace(/\r\n/g, "\n").trimEnd();
+        const generatedNormalized = patch.fullContent.replace(/\r\n/g, "\n").trimEnd();
+        if (generatedNormalized.startsWith(originalNormalized)) {
+            return patch;
+        }
+        // Extract scenario titles from original to detect duplicates
+        const extractScenarioTitles = (text) => {
+            const titles = new Set();
+            const titlePattern = /Scenario(?:\s+Outline)?\s*:\s*(.+)/g;
+            let m;
+            while ((m = titlePattern.exec(text)) !== null) {
+                titles.add(m[1].trim().toLowerCase());
+            }
+            return titles;
+        };
+        const originalTitles = extractScenarioTitles(originalNormalized);
+        // Extract full scenario blocks from generated content
+        const scenarioBlockPattern = /(?:^|\n)([ \t]*(?:@[^\n]*\n[ \t]*)*Scenario(?:\s+Outline)?:[\s\S]*?)(?=\n[ \t]*(?:@|\bScenario\b)|\n[ \t]*Feature:|$)/g;
+        const newScenarioBlocks = [];
+        let m2;
+        while ((m2 = scenarioBlockPattern.exec(generatedNormalized)) !== null) {
+            const block = m2[1].trim();
+            const titleMatch = block.match(/Scenario(?:\s+Outline)?\s*:\s*(.+)/);
+            const title = titleMatch?.[1]?.trim().toLowerCase() ?? "";
+            if (title && !originalTitles.has(title)) {
+                newScenarioBlocks.push(block);
+            }
+        }
+        if (newScenarioBlocks.length === 0) {
+            return {
+                ...patch,
+                fullContent: originalContent,
+            };
+        }
+        const mergedContent = originalNormalized + "\n\n" + newScenarioBlocks.join("\n\n") + "\n";
+        return {
+            ...patch,
+            fullContent: mergedContent,
         };
     });
     const preview = buildPreview({
@@ -976,7 +1063,11 @@ async function runTestEngineerFlow(input) {
     });
     const fileDiffs = applyPatches.map((patch) => {
         const originalContent = originalContentByPath.get(patch.filePath) ?? "";
-        const diff = (0, runLlmPatchFlow_js_1.computeFileDiff)(originalContent, patch.fullContent);
+        // Normalize whitespace before diffing to avoid fake red/green lines
+        const normalizeForDiff = (content) => content.replace(/\r\n/g, "\n").replace(/\t/g, "  ").trimEnd();
+        const normalizedOriginal = normalizeForDiff(originalContent);
+        const normalizedNext = normalizeForDiff(patch.fullContent);
+        const diff = (0, runLlmPatchFlow_js_1.computeFileDiff)(normalizedOriginal, normalizedNext);
         return {
             filePath: patch.filePath,
             addedLines: diff.filter((line) => line.type === "added").length,

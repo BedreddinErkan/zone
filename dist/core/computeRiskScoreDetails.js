@@ -11,30 +11,56 @@ function clampScore(value) {
 function includesAny(text, keywords) {
     return keywords.some((keyword) => text.includes(keyword));
 }
+function scoreWeightedKeywordMatches(text, weightedKeywords) {
+    let maxWeight = 0;
+    for (const entry of weightedKeywords) {
+        if (includesAny(text, entry.keywords)) {
+            maxWeight = Math.max(maxWeight, entry.weight);
+        }
+    }
+    return maxWeight;
+}
+function hasSchemaContextExemption(text) {
+    return includesAny(text, ["test", "mock", "fixture", "seed"]);
+}
+function isSchemaKeywordPrecededByTestOrMock(text, keyword) {
+    const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`\\b(?:test|mock)\\s+${escapedKeyword}\\b`).test(text);
+}
 function computeRiskScoreDetails(input) {
     const normalizedTask = input.task.trim().toLowerCase();
-    const hasDestructiveSignal = includesAny(normalizedTask, [
-        "delete",
-        "drop",
-        "remove",
-        "destroy",
-        "truncate"
+    const destructiveWeight = scoreWeightedKeywordMatches(normalizedTask, [
+        {
+            keywords: ["truncate", "drop table", "delete all", "wipe", "purge"],
+            weight: 1.0,
+        },
+        {
+            keywords: ["delete", "remove", "destroy", "drop"],
+            weight: 0.7,
+        },
+        {
+            keywords: ["clear", "reset", "clean"],
+            weight: 0.4,
+        },
     ]);
-    const hasSchemaSignal = includesAny(normalizedTask, [
-        "schema",
+    const schemaHighWeightKeywords = [
         "migration",
         "migrate",
-        "database",
-        "db",
-        "column",
-        "columns",
-        "table",
-        "tables",
-        "field",
-        "fields",
-        "model",
-        "models"
-    ]);
+        "alter table",
+        "drop column",
+        "add column",
+    ];
+    const hasHighWeightSchemaSignal = schemaHighWeightKeywords.some((keyword) => normalizedTask.includes(keyword) &&
+        !isSchemaKeywordPrecededByTestOrMock(normalizedTask, keyword));
+    const highWeightSchemaScore = hasHighWeightSchemaSignal ? 25 : 0;
+    const reducedSchemaScore = hasSchemaContextExemption(normalizedTask)
+        ? 0
+        : scoreWeightedKeywordMatches(normalizedTask, [
+            {
+                keywords: ["schema", "database", "db", "column", "table"],
+                weight: 0.6,
+            },
+        ]) * 25;
     const hasCriticalSignal = includesAny(normalizedTask, [
         "auth",
         "authentication",
@@ -57,29 +83,35 @@ function computeRiskScoreDetails(input) {
         "docs",
         "readme"
     ]);
-    const hasMassScopeSignal = includesAny(normalizedTask, [
-        "delete all",
-        "drop all",
-        "remove all",
-        "truncate",
-        "wipe",
-        "purge",
-        "flush",
-        "delete everything",
-        "delete every"
+    const hasDestructiveSignal = destructiveWeight > 0;
+    const hasSchemaSignal = highWeightSchemaScore > 0 || reducedSchemaScore > 0;
+    const hasScopeWord = includesAny(normalizedTask, [
+        "all",
+        "every",
+        "entire",
+        "whole"
     ]);
+    const hasMassScopeSignal = hasDestructiveSignal && hasScopeWord;
     const riskBreakdown = {
-        destructive: hasDestructiveSignal ? 50 : 0,
-        schema: hasSchemaSignal ? 25 : 0,
+        destructive: Math.round(50 * destructiveWeight),
+        schema: Math.max(highWeightSchemaScore, Math.round(reducedSchemaScore)),
         critical: hasCriticalSignal ? 20 : 0,
         lowRisk: hasLowRiskSignal ? -20 : 0,
-        massScope: hasMassScopeSignal ? 25 : 0
+        massScope: hasMassScopeSignal ? 40 : 0
     };
+    let compoundPenalty = 0;
+    if (riskBreakdown.destructive > 0 && riskBreakdown.massScope > 0) {
+        compoundPenalty += 20;
+    }
+    if (riskBreakdown.destructive > 0 && riskBreakdown.critical > 0) {
+        compoundPenalty += 15;
+    }
     const rawScore = riskBreakdown.destructive +
         riskBreakdown.schema +
         riskBreakdown.critical +
         riskBreakdown.lowRisk +
-        riskBreakdown.massScope;
+        riskBreakdown.massScope +
+        compoundPenalty;
     const riskScore = clampScore(rawScore);
     const detectedSignals = [];
     if (hasDestructiveSignal) {
@@ -100,7 +132,8 @@ function computeRiskScoreDetails(input) {
     return {
         riskScore,
         riskBreakdown,
-        detectedSignals
+        detectedSignals,
+        compoundPenalty
     };
 }
 //# sourceMappingURL=computeRiskScoreDetails.js.map

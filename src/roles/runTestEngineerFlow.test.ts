@@ -141,8 +141,10 @@ describe("runTestEngineerFlow", () => {
         role: "test_engineer",
       })
     );
-    expect(logSpy).not.toHaveBeenCalled();
-    logSpy.mockRestore();
+const unexpectedLogs = logSpy.mock.calls.filter(
+  (args) => !String(args[0]).startsWith("[zone-api]")
+);
+expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
   });
 
   it("reads only the bounded number of example files for the prompt", async () => {

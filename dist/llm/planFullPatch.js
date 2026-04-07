@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.planFullPatchWithLlm = planFullPatchWithLlm;
 const zod_1 = require("zod");
 const openaiClient_js_1 = require("./openaiClient.js");
+const withSelfHealingRetry_js_1 = require("../core/withSelfHealingRetry.js");
 const fullPatchPrompt_js_1 = require("../prompts/fullPatchPrompt.js");
 const fullContentSchema = zod_1.z.object({
     filePath: zod_1.z.string(),
@@ -37,9 +38,9 @@ async function planFullPatchWithLlm(input) {
         relatedContext: input.relatedContext,
         outputMode,
     });
-    const response = await client.responses.create({ model, input: prompt });
-    const rawText = response.output_text ?? "";
     if (outputMode === "find_replace_patch") {
+        const response = await client.responses.create({ model, input: prompt });
+        const rawText = response.output_text ?? "";
         return {
             mode: "patch",
             filePath: input.filePath,
@@ -48,9 +49,54 @@ async function planFullPatchWithLlm(input) {
             warnings: [],
         };
     }
-    const jsonText = extractJson(rawText);
-    const parsed = JSON.parse(jsonText);
-    const validated = fullContentSchema.parse(parsed);
+    const retryResult = await (0, withSelfHealingRetry_js_1.withSelfHealingRetry)({
+        maxAttempts: 3,
+        prompt,
+        execute: async (currentPrompt) => {
+            const response = await client.responses.create({
+                model,
+                input: currentPrompt,
+            });
+            const rawText = response.output_text ?? "";
+            const jsonText = extractJson(rawText);
+            return JSON.parse(jsonText);
+        },
+        validate: (result) => {
+            const issues = [];
+            const parseResult = fullContentSchema.safeParse(result);
+            if (!parseResult.success) {
+                parseResult.error.errors.forEach((err) => {
+                    issues.push({
+                        code: "SCHEMA_VALIDATION_FAILED",
+                        message: `${err.path.join(".")}: ${err.message}`,
+                        severity: "error",
+                    });
+                });
+                return issues;
+            }
+            const validated = parseResult.data;
+            if (!validated.fullContent.trim()) {
+                issues.push({
+                    code: "EMPTY_FULL_CONTENT",
+                    message: "fullContent field is empty.",
+                    severity: "error",
+                });
+            }
+            if (!validated.filePath.trim()) {
+                issues.push({
+                    code: "MISSING_FILE_PATH",
+                    message: "filePath field is empty.",
+                    severity: "error",
+                });
+            }
+            return issues;
+        },
+        buildFeedbackPrompt: withSelfHealingRetry_js_1.buildDefaultFeedbackPrompt,
+    });
+    if (!retryResult.ok) {
+        throw new Error(`planFullPatchWithLlm failed after ${retryResult.attempts} attempt(s): ${retryResult.reason}`);
+    }
+    const validated = fullContentSchema.parse(retryResult.value);
     return {
         mode: "full_content",
         filePath: validated.filePath,

@@ -5,6 +5,10 @@ import { detectTestFramework } from "./detectTestFramework.js";
 import { buildTestEngineerContext } from "./testEngineerContext.js";
 import { buildTestEngineerPrompt } from "../prompts/testEngineerPrompt.js";
 import { createOpenAIClient, getModelName } from "../llm/openaiClient.js";
+import {
+  withSelfHealingRetry,
+  buildDefaultFeedbackPrompt,
+} from "../core/withSelfHealingRetry.js";
 import { checkConfidenceGate } from "../core/confidenceGate.js";
 import { computeFileDiff, type DiffLine } from "../core/runLlmPatchFlow.js";
 import {
@@ -215,7 +219,8 @@ function safeAppendToExisting(
   originalContent: string,
   generatedContent: string
 ): string {
-  if (!originalContent.trim()) {
+  if (!originalContent.trim())
+  {
     return generatedContent;
   }
 
@@ -991,22 +996,6 @@ export async function runTestEngineerFlow(input: {
     };
   }
 
-  if (framework.framework === "unknown") {
-    console.log(
-      `[zone-api] test-engineer detection failed: ${JSON.stringify(
-        framework.evidence
-      )}`
-    );
-    return {
-      ok: false,
-      reason:
-        "Could not detect a test framework in this repository. " +
-        "Supported frameworks: Playwright (TS/JS), Cypress, Cucumber+Java, " +
-        "Selenium (Java/Python), TestNG, pytest.",
-      framework: "unknown",
-    };
-  }
-
   let context;
   try {
     context = buildTestEngineerContext(input.task, framework, allFiles);
@@ -1085,10 +1074,71 @@ export async function runTestEngineerFlow(input: {
     input.onProgress?.("Generating patch...");
     const client = createOpenAIClient();
     const model = getModelName();
-    const response = await client.responses.create({ model, input: prompt });
-    const rawText = response.output_text || "";
-    const jsonText = extractJson(rawText);
-    parsed = JSON.parse(jsonText) as Record<string, unknown>;
+    const retryResult = await withSelfHealingRetry({
+      maxAttempts: 3,
+      prompt,
+      execute: async (currentPrompt) => {
+        const response = await client.responses.create({
+          model,
+          input: currentPrompt,
+        });
+        const rawText = response.output_text || "";
+        const jsonText = extractJson ? extractJson(rawText) : rawText;
+        return JSON.parse(jsonText) as Record<string, unknown>;
+      },
+      validate: (result) => {
+        const issues: Array<{
+          code: string;
+          message: string;
+          severity: "error" | "warning";
+        }> = [];
+
+        const hasTestFile = result["testFile"] || result["featureFile"];
+        if (!hasTestFile) {
+          issues.push({
+            code: "MISSING_TEST_FILE",
+            message: "Response is missing testFile or featureFile field.",
+            severity: "error",
+          });
+        }
+
+        if (typeof result["summary"] !== "string" || !result["summary"]) {
+          issues.push({
+            code: "MISSING_SUMMARY",
+            message: "Response is missing summary field.",
+            severity: "warning",
+          });
+        }
+
+        const testContent =
+          (result["testFile"] as { content?: string } | undefined)?.content ??
+          (result["featureFile"] as { content?: string } | undefined)?.content ??
+          "";
+
+        if (/TODO|PLACEHOLDER|your\.selector|#placeholder/i.test(testContent)) {
+          issues.push({
+            code: "PLACEHOLDER_CONTENT",
+            message:
+              "Generated test contains placeholder content that must be replaced.",
+            severity: "error",
+          });
+        }
+
+        return issues;
+      },
+      buildFeedbackPrompt: buildDefaultFeedbackPrompt,
+    });
+
+    if (!retryResult.ok) {
+      return {
+        ok: false,
+        reason: `LLM generation failed after ${retryResult.attempts} attempt(s): ${retryResult.reason}`,
+        framework: framework.framework ?? "unknown",
+        language: framework.language ?? "unknown",
+      };
+    }
+
+    parsed = retryResult.value;
   } catch (err) {
     return {
       ok: false,
@@ -1159,6 +1209,60 @@ export async function runTestEngineerFlow(input: {
       ...patch,
       fullContent: finalized.fullContent,
     };
+  });
+  applyPatches = applyPatches.map((patch) => {
+    if (!patch.filePath.endsWith(".feature")) {
+      return patch;
+    }
+
+    const originalContent = originalContentByPath.get(patch.filePath) ?? "";
+  if (!originalContent.trim()) {
+      return patch;
+    }   const originalNormalized = originalContent.replace(/\r\n/g, "\n").trimEnd();
+    const generatedNormalized = patch.fullContent.replace(/\r\n/g, "\n").trimEnd();if (generatedNormalized.startsWith(originalNormalized)) {
+      return patch;
+    }
+
+      // Extract scenario titles from original to detect duplicates
+      const extractScenarioTitles = (text: string): Set<string> => {
+        const titles = new Set<string>();
+        const titlePattern = /Scenario(?:\s+Outline)?\s*:\s*(.+)/g;
+        let m: RegExpExecArray | null;
+        while ((m = titlePattern.exec(text)) !== null) {
+          titles.add(m[1].trim().toLowerCase());
+        }
+        return titles;
+      };
+
+      const originalTitles = extractScenarioTitles(originalNormalized);
+
+      // Extract full scenario blocks from generated content
+      const scenarioBlockPattern =
+        /(?:^|\n)([ \t]*(?:@[^\n]*\n[ \t]*)*Scenario(?:\s+Outline)?:[\s\S]*?)(?=\n[ \t]*(?:@|\bScenario\b)|\n[ \t]*Feature:|$)/g;
+      const newScenarioBlocks: string[] = [];
+      let m2: RegExpExecArray | null;
+      while ((m2 = scenarioBlockPattern.exec(generatedNormalized)) !== null) {
+        const block = m2[1].trim();
+        const titleMatch = block.match(/Scenario(?:\s+Outline)?\s*:\s*(.+)/);
+        const title = titleMatch?.[1]?.trim().toLowerCase() ?? "";
+        if (title && !originalTitles.has(title)) {
+          newScenarioBlocks.push(block);
+        }
+      }
+      if (newScenarioBlocks.length === 0) {
+        return {
+          ...patch,
+          fullContent: originalContent,
+        };
+      }
+
+      const mergedContent =
+        originalNormalized + "\n\n" + newScenarioBlocks.join("\n\n") + "\n";
+
+      return {
+        ...patch,
+        fullContent: mergedContent,
+      };
   });
   const preview = buildPreview(
     {
@@ -1348,7 +1452,15 @@ if (filteredValidation.decision !== "pass" || filteredValidation.issues.length >
   });
   const fileDiffs = applyPatches.map((patch) => {
     const originalContent = originalContentByPath.get(patch.filePath) ?? "";
-    const diff = computeFileDiff(originalContent, patch.fullContent);
+
+    // Normalize whitespace before diffing to avoid fake red/green lines
+    const normalizeForDiff = (content: string): string =>
+      content.replace(/\r\n/g, "\n").replace(/\t/g, "  ").trimEnd();
+
+    const normalizedOriginal = normalizeForDiff(originalContent);
+    const normalizedNext = normalizeForDiff(patch.fullContent);
+
+    const diff = computeFileDiff(normalizedOriginal, normalizedNext);
     return {
       filePath: patch.filePath,
       addedLines: diff.filter((line) => line.type === "added").length,

@@ -99,8 +99,8 @@ describe("buildTestEngineerPrompt", () => {
       existingTestContents: [],
     });
 
-    expect(prompt).toContain("=== EXISTING FEATURE FILE EXAMPLES ===");
-    expect(prompt).toContain("src/test/resources/features/flight_search.feature");
+expect(prompt).toContain("=== EXISTING FEATURE FILE EXAMPLES (PRESERVE THESE EXACTLY) ===");
+expect(prompt).toContain("src/test/resources/features/flight_search.feature");
     expect(prompt).toContain("Feature: Flight search");
   });
 

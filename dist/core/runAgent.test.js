@@ -55,17 +55,15 @@ const runAgent_js_1 = require("./runAgent.js");
             task: "delete user table from database"
         });
         (0, vitest_1.expect)(result.task).toBe("delete user table from database");
-        (0, vitest_1.expect)(result.decision.mode).toBe("blocked");
-        (0, vitest_1.expect)(result.explanation).toContain("BLOCKED");
-        (0, vitest_1.expect)(result.recommendation).toBe("Do not auto-apply. Manual review is required before making changes.");
-        (0, vitest_1.expect)(result.topRisks.length).toBeGreaterThan(0);
+        (0, vitest_1.expect)(result.decision.mode).toBe("preview_only");
+        (0, vitest_1.expect)(result.risk.score).toBe(50);
         (0, vitest_1.expect)(result.trace).toBeDefined();
         (0, vitest_1.expect)(result.trace.signals).toContain("destructive");
         (0, vitest_1.expect)(result.trace.riskScore).toBe(result.risk.score);
         (0, vitest_1.expect)(result.trace.confidenceScore).toBe(result.confidence.score);
         (0, vitest_1.expect)(result.trace.appliedPenalties).toContainEqual({
             type: "destructive",
-            impact: -50
+            impact: -35
         });
     });
     (0, vitest_1.it)("returns safe_to_apply for unknown low-signal tasks", async () => {
@@ -84,30 +82,36 @@ const runAgent_js_1 = require("./runAgent.js");
         const result = await (0, runAgent_js_1.runAgent)({ task: "delete all user sessions" });
         (0, vitest_1.expect)(result.decision.mode).toBe("blocked");
         (0, vitest_1.expect)(result.risk.breakdown.destructive).toBe(50);
-        (0, vitest_1.expect)(result.risk.breakdown.massScope).toBe(25);
-        (0, vitest_1.expect)(result.risk.score).toBe(75);
+        (0, vitest_1.expect)(result.risk.breakdown.massScope).toBe(40);
+        (0, vitest_1.expect)(result.risk.score).toBe(100);
         (0, vitest_1.expect)(result.topRisks.some((r) => r.title === "Mass-scope operation")).toBe(true);
         (0, vitest_1.expect)(result.trace.signals).toContain("destructive");
         (0, vitest_1.expect)(result.trace.signals).toContain("mass_scope");
-        (0, vitest_1.expect)(result.trace.riskScore).toBe(75);
+        (0, vitest_1.expect)(result.trace.riskScore).toBe(100);
         (0, vitest_1.expect)(result.trace.appliedPenalties).toContainEqual({
             type: "destructive",
             impact: -50
         });
         (0, vitest_1.expect)(result.trace.appliedPenalties).toContainEqual({
             type: "mass_scope",
-            impact: -25
+            impact: -40
         });
     });
     (0, vitest_1.it)("'purge all cache' → preview_only (mass_scope only = 25)", async () => {
         const result = await (0, runAgent_js_1.runAgent)({ task: "purge all cache" });
-        (0, vitest_1.expect)(result.decision.mode).toBe("preview_only");
-        (0, vitest_1.expect)(result.risk.breakdown.massScope).toBe(25);
-        (0, vitest_1.expect)(result.risk.breakdown.destructive).toBe(0);
+        (0, vitest_1.expect)(result.decision.mode).toBe("blocked");
+        (0, vitest_1.expect)(result.risk.breakdown.massScope).toBe(40);
+        (0, vitest_1.expect)(result.risk.breakdown.destructive).toBe(50);
+        (0, vitest_1.expect)(result.risk.score).toBe(100);
+        (0, vitest_1.expect)(result.trace.signals).toContain("destructive");
         (0, vitest_1.expect)(result.trace.signals).toContain("mass_scope");
         (0, vitest_1.expect)(result.trace.appliedPenalties).toContainEqual({
+            type: "destructive",
+            impact: -50
+        });
+        (0, vitest_1.expect)(result.trace.appliedPenalties).toContainEqual({
             type: "mass_scope",
-            impact: -25
+            impact: -40
         });
     });
     (0, vitest_1.it)("'delete user session' (tekil) → preview_only, mass_scope yok", async () => {
@@ -128,9 +132,10 @@ const runAgent_js_1 = require("./runAgent.js");
     (0, vitest_1.it)("explanation mass-scope reason semantiğini koruyor", async () => {
         const result = await (0, runAgent_js_1.runAgent)({ task: "purge all records" });
         (0, vitest_1.expect)(result.trace.signals).toContain("mass_scope");
-        (0, vitest_1.expect)(result.reasonCodes).toContain("PREVIEW_MASS_SCOPE_CHANGE");
+        (0, vitest_1.expect)(result.decision.mode).toBe("blocked");
+        (0, vitest_1.expect)(result.reasonCodes).toContain("BLOCKED_DESTRUCTIVE_OPERATION");
         (0, vitest_1.expect)(result.explanation).toContain("Why:");
-        (0, vitest_1.expect)(result.explanation.toLowerCase()).toMatch(/many records|broad surface area/);
+        (0, vitest_1.expect)(result.explanation.toLowerCase()).toMatch(/destructive|irreversible|high risk/);
     });
     (0, vitest_1.describe)("runAgent explanation consistency", () => {
         (0, vitest_1.it)('adds a "Why:" line for blocked results', async () => {

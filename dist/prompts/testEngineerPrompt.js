@@ -37,11 +37,14 @@ function buildTestEngineerPrompt(input) {
 Step definitions: ${outputPaths.stepDefinition}`
         : `Test file: ${outputPaths.testFile}`;
     const isCucumberJava = framework.framework === "cucumber_java";
+    const featureFileInstruction = featureContents.length > 0
+        ? "APPEND ONLY: keep ALL existing scenarios intact, add the new scenario at the end"
+        : "full gherkin content for new file";
     const outputFormat = isCucumberJava
         ? `{
   "featureFile": {
     "path": "${outputPaths.featureFile ?? outputPaths.testFile}",
-    "content": "full gherkin content"
+    "content": "${featureFileInstruction}"
   },
   "stepDefinitionFile": {
     "path": "${outputPaths.stepDefinition ?? ""}",
@@ -98,8 +101,9 @@ ${pageObjectHints}
 === EXISTING STEP DEFINITION EXAMPLES ===
 ${stepDefinitionSection}
 
-=== EXISTING FEATURE FILE EXAMPLES ===
+=== EXISTING FEATURE FILE EXAMPLES (PRESERVE THESE EXACTLY) ===
 ${featureSection}
+${featureContents.length > 0 ? "IMPORTANT: The feature file above already exists. Your output MUST include ALL of the above content PLUS the new scenario appended at the end." : ""}
 
 === EXISTING TEST EXAMPLES ===
 ${existingTestSection}
@@ -126,6 +130,11 @@ ${outputSection}
 16. For Playwright: only use expect(page).toHaveURL(...) when repository examples or context show real route evidence. Do NOT invent wildcard, hash-only, or placeholder URL assertions.
 17. If repository evidence does not establish a success route, prefer visible error-state assertions over redirect assertions.
 18. Return raw JSON only - no markdown, no code fences, no explanations.
+19. For feature files that already exist: PRESERVE ALL existing scenarios exactly as-is.
+    ONLY append the new scenario at the end of the file.
+    Do NOT remove, modify, or reformat any existing scenario, tag, outline, or examples table.
+    The "content" field in your response must include the COMPLETE file:
+    all original scenarios first, then the new scenario appended at the end.
 
 === OUTPUT FORMAT ===
 Return JSON only:

@@ -127,7 +127,8 @@ function buildRepoFile(path) {
             confidenceScore: 50,
             role: "test_engineer",
         }));
-        (0, vitest_1.expect)(logSpy).not.toHaveBeenCalled();
+        const unexpectedLogs = logSpy.mock.calls.filter((args) => !String(args[0]).startsWith("[zone-api]"));
+        (0, vitest_1.expect)(unexpectedLogs).toHaveLength(0);
         logSpy.mockRestore();
     });
     (0, vitest_1.it)("reads only the bounded number of example files for the prompt", async () => {

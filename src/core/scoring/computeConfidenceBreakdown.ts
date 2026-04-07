@@ -94,13 +94,21 @@ function buildRepeatedWarningPenalty(params: {
   ];
 }
 
-function buildValidationErrorPenalty(validationErrors: string[]): ConfidenceFactor[] {
+function buildValidationErrorPenalty(
+  validationErrors: string[],
+  role?: "test_engineer" | "developer" | "data_analyst"
+): ConfidenceFactor[] {
   if (validationErrors.length === 0) {
     return [];
   }
 
+  const multiplier = role
+    ? CONFIDENCE_RULES.roleValidationErrorMultipliers[role]
+    : 1.0;
   const rawPenalty =
-    validationErrors.length * CONFIDENCE_RULES.validationErrorPenaltyPerItem;
+    validationErrors.length *
+    CONFIDENCE_RULES.validationErrorPenaltyPerItem *
+    multiplier;
   const finalPenalty = Math.max(
     rawPenalty,
     CONFIDENCE_RULES.validationErrorPenaltyCap
@@ -156,7 +164,7 @@ export function computeConfidenceBreakdown(
       penaltyCap: CONFIDENCE_RULES.patchRiskWarningPenaltyCap,
       reasonPrefix: "Patch risk concerns identified",
     }),
-    ...buildValidationErrorPenalty(validationErrors),
+    ...buildValidationErrorPenalty(validationErrors, input.role),
   ];
 
   const totalPenalty = factors

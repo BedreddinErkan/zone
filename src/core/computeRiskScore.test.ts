@@ -23,30 +23,26 @@ describe("computeRiskScore", () => {
     expect(result.signals).toContain("critical_domain");
   });
 
-  it("returns high score for destructive database work", () => {
+  it("returns weighted score for destructive database work", () => {
     const result = computeRiskScore("delete user table from database");
 
-    expect(result.score).toBe(75);
+    expect(result.score).toBe(50);
     expect(result.signals).toContain("destructive");
     expect(result.signals).toContain("schema");
   });
-
-  // -----------------------------------------------------------------------
-  // mass_scope signal
-  // -----------------------------------------------------------------------
 
   it("returns mass_scope signal for 'delete all users'", () => {
     const result = computeRiskScore("delete all users");
 
     expect(result.signals).toContain("mass_scope");
-    expect(result.breakdown.massScope).toBe(25);
+    expect(result.breakdown.massScope).toBe(40);
   });
 
-  it("returns mass_scope signal for 'truncate sessions'", () => {
+  it("does NOT return mass_scope signal for 'truncate sessions' without a scope word", () => {
     const result = computeRiskScore("truncate sessions");
 
-    expect(result.signals).toContain("mass_scope");
-    expect(result.breakdown.massScope).toBe(25);
+    expect(result.signals).not.toContain("mass_scope");
+    expect(result.breakdown.massScope).toBe(0);
   });
 
   it("does NOT return mass_scope signal for singular 'delete user'", () => {
@@ -60,24 +56,39 @@ describe("computeRiskScore", () => {
     const result = computeRiskScore("wipe all data");
 
     expect(result.signals).toContain("mass_scope");
-    expect(result.breakdown.massScope).toBe(25);
+    expect(result.breakdown.massScope).toBe(40);
   });
 
   it("returns mass_scope signal for 'purge all cache'", () => {
     const result = computeRiskScore("purge all cache");
 
     expect(result.signals).toContain("mass_scope");
-    expect(result.breakdown.massScope).toBe(25);
+    expect(result.breakdown.massScope).toBe(40);
   });
 
-  it("stacks destructive + mass_scope for 'delete all user sessions' → score 75", () => {
+  it("stacks destructive + mass_scope for 'delete all user sessions' with compound penalty", () => {
     const result = computeRiskScore("delete all user sessions");
 
     expect(result.signals).toContain("destructive");
     expect(result.signals).toContain("mass_scope");
     expect(result.breakdown.destructive).toBe(50);
-    expect(result.breakdown.massScope).toBe(25);
-    expect(result.score).toBe(75);
+    expect(result.breakdown.massScope).toBe(40);
+    expect(result.score).toBe(100);
+  });
+
+  it("does not treat model test tasks as schema risk", () => {
+    const result = computeRiskScore("add a model test for payment validation");
+
+    expect(result.signals).not.toContain("schema");
+    expect(result.breakdown.schema).toBe(0);
+  });
+
+  it("adds destructive + critical compound penalty", () => {
+    const result = computeRiskScore("delete auth tokens in production");
+
+    expect(result.signals).toContain("destructive");
+    expect(result.signals).toContain("critical_domain");
+    expect(result.score).toBe(70);
   });
 
   it("clamps score to 100", () => {

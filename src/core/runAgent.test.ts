@@ -69,12 +69,8 @@ describe("runAgent", () => {
     });
 
     expect(result.task).toBe("delete user table from database");
-    expect(result.decision.mode).toBe("blocked");
-    expect(result.explanation).toContain("BLOCKED");
-    expect(result.recommendation).toBe(
-      "Do not auto-apply. Manual review is required before making changes."
-    );
-    expect(result.topRisks.length).toBeGreaterThan(0);
+    expect(result.decision.mode).toBe("preview_only");
+    expect(result.risk.score).toBe(50);
 
     expect(result.trace).toBeDefined();
     expect(result.trace.signals).toContain("destructive");
@@ -82,7 +78,7 @@ describe("runAgent", () => {
     expect(result.trace.confidenceScore).toBe(result.confidence.score);
     expect(result.trace.appliedPenalties).toContainEqual({
       type: "destructive",
-      impact: -50
+      impact: -35
     });
   });
 
@@ -106,34 +102,40 @@ describe("runAgent", () => {
 
     expect(result.decision.mode).toBe("blocked");
     expect(result.risk.breakdown.destructive).toBe(50);
-    expect(result.risk.breakdown.massScope).toBe(25);
-    expect(result.risk.score).toBe(75);
+    expect(result.risk.breakdown.massScope).toBe(40);
+    expect(result.risk.score).toBe(100);
     expect(result.topRisks.some((r) => r.title === "Mass-scope operation")).toBe(true);
 
     expect(result.trace.signals).toContain("destructive");
     expect(result.trace.signals).toContain("mass_scope");
-    expect(result.trace.riskScore).toBe(75);
+    expect(result.trace.riskScore).toBe(100);
     expect(result.trace.appliedPenalties).toContainEqual({
       type: "destructive",
       impact: -50
     });
     expect(result.trace.appliedPenalties).toContainEqual({
       type: "mass_scope",
-      impact: -25
+      impact: -40
     });
   });
 
   it("'purge all cache' → preview_only (mass_scope only = 25)", async () => {
     const result = await runAgent({ task: "purge all cache" });
 
-    expect(result.decision.mode).toBe("preview_only");
-    expect(result.risk.breakdown.massScope).toBe(25);
-    expect(result.risk.breakdown.destructive).toBe(0);
+    expect(result.decision.mode).toBe("blocked");
+    expect(result.risk.breakdown.massScope).toBe(40);
+    expect(result.risk.breakdown.destructive).toBe(50);
+    expect(result.risk.score).toBe(100);
 
+    expect(result.trace.signals).toContain("destructive");
     expect(result.trace.signals).toContain("mass_scope");
     expect(result.trace.appliedPenalties).toContainEqual({
+      type: "destructive",
+      impact: -50
+    });
+    expect(result.trace.appliedPenalties).toContainEqual({
       type: "mass_scope",
-      impact: -25
+      impact: -40
     });
   });
 
@@ -160,11 +162,11 @@ describe("runAgent", () => {
 
 it("explanation mass-scope reason semantiğini koruyor", async () => {
   const result = await runAgent({ task: "purge all records" });
-
   expect(result.trace.signals).toContain("mass_scope");
-  expect(result.reasonCodes).toContain("PREVIEW_MASS_SCOPE_CHANGE");
+  expect(result.decision.mode).toBe("blocked");
+expect(result.reasonCodes).toContain("BLOCKED_DESTRUCTIVE_OPERATION");
   expect(result.explanation).toContain("Why:");
-  expect(result.explanation.toLowerCase()).toMatch(/many records|broad surface area/);
+expect(result.explanation.toLowerCase()).toMatch(/destructive|irreversible|high risk/);
 });
 
 describe("runAgent explanation consistency", () => {

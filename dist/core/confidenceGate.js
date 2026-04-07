@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.computeEffectiveThreshold = computeEffectiveThreshold;
 exports.checkConfidenceGate = checkConfidenceGate;
 exports.renderConfidenceGateBlock = renderConfidenceGateBlock;
 const THRESHOLDS = {
@@ -30,6 +31,25 @@ function getThreshold(role) {
         return THRESHOLDS.default;
     return THRESHOLDS[role] ?? THRESHOLDS.default;
 }
+function computeEffectiveThreshold(input) {
+    let base = THRESHOLDS[input.role] ?? THRESHOLDS.default;
+    if (input.role === "test_engineer") {
+        if (input.framework === "cucumber_java" ||
+            input.framework === "selenium_java") {
+            base += 5;
+        }
+        if (input.framework === "playwright_ts" ||
+            input.framework === "cypress") {
+            base -= 5;
+        }
+    }
+    const warningCount = (input.warnings ?? []).length;
+    if (warningCount >= 3)
+        base += 10;
+    else if (warningCount >= 1)
+        base += 5;
+    return Math.min(base, 90);
+}
 function getRisks(role, warnings) {
     const roleRisks = ROLE_RISK_DESCRIPTIONS[role ?? "developer"] ??
         ROLE_RISK_DESCRIPTIONS["developer"];
@@ -57,7 +77,7 @@ function getRecommendation(confidenceScore, threshold, role) {
         "Consider using --format detailed to see full output.";
 }
 function checkConfidenceGate(input) {
-    const threshold = getThreshold(input.role);
+    const threshold = computeEffectiveThreshold(input);
     if (input.confidenceScore >= threshold) {
         return { pass: true };
     }
@@ -66,6 +86,7 @@ function checkConfidenceGate(input) {
         reason: `Confidence score ${input.confidenceScore} is below the ${input.role ?? "default"} threshold of ${threshold}.`,
         risks: getRisks(input.role, input.warnings),
         recommendation: getRecommendation(input.confidenceScore, threshold, input.role),
+        effectiveThreshold: threshold,
     };
 }
 function renderConfidenceGateBlock(result) {

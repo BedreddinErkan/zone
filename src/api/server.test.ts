@@ -233,13 +233,27 @@ describe("/api/test-engineer", () => {
         "src/components/LoginForm.tsx",
         "server/routes/auth.ts",
       ],
-      applyPatches: [
-        {
-          filePath: "src/components/LoginForm.tsx",
-          fullContent: "export function LoginForm() {}",
-        },
-      ],
-    });
+applyPatches: [
+  {
+    filePath: "src/components/LoginForm.tsx",
+    fullContent: `import React, { useState } from "react";
+
+export function LoginForm() {
+  const [email, setEmail] = useState("");
+  return (
+    <form>
+      <input
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="Email"
+      />
+      <button type="submit">Login</button>
+    </form>
+  );
+}`,
+  },
+],  });
 
     const response = await fetch(`${baseUrl}/api/patch`, {
       method: "POST",
@@ -466,20 +480,29 @@ describe("/api/test-engineer", () => {
     });
   });
 
-  it("logs successful developer runs to Supabase when env is configured", async () => {
-    process.env.SUPABASE_URL = "https://example.supabase.co";
-    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
-    runLlmPatchFlowMock.mockResolvedValue({
-      ok: true,
-      patchPreview: "=== LLM PATCH PREVIEW ===",
-      warnings: [],
-      developerConfidence: 78,
-      decisionMode: "safe_to_apply",
-      applyPatches: [],
-      patchResults: [],
-    });
-    supabaseInsertMock.mockResolvedValue({ error: null });
-    supabaseRpcMock.mockResolvedValue({ error: null });
+it("logs successful developer runs to Supabase when env is configured", async () => {
+  process.env.SUPABASE_URL = "https://example.supabase.co";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+
+  // ensureRunAuthorized + logRun profile read için
+  supabaseProfileMaybeSingleMock.mockResolvedValue({
+    data: { credits: 5, subscription_status: "free" },
+    error: null,
+  });
+
+  runLlmPatchFlowMock.mockResolvedValue({
+    ok: true,
+    patchPreview: "=== LLM PATCH PREVIEW ===",
+    warnings: [],
+    developerConfidence: 78,
+    decisionMode: "safe_to_apply",
+    applyPatches: [],
+    patchResults: [],
+  });
+  supabaseInsertMock.mockResolvedValue({ error: null });
+  supabaseRpcMock.mockResolvedValue({ error: null });
+
+  // ... rest of test
 
     const response = await fetch(`${baseUrl}/api/patch`, {
       method: "POST",
