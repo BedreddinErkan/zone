@@ -482,5 +482,152 @@ def test_login_redirects_to_inventory(login_page):
             (0, vitest_1.expect)(result.issues.some(i => i.code.startsWith("COMPLEXITY_"))).toBe(false);
         });
     });
+    (0, vitest_1.describe)("Cypress validator", () => {
+        const VALID_CYPRESS_TEST = `
+describe("Login", () => {
+  it("logs in successfully", () => {
+    cy.visit("/");
+    cy.get("#user-name").type("standard_user");
+    cy.get("#password").type("secret_sauce");
+    cy.get("#login-button").click();
+    cy.get(".inventory_list").should("be.visible");
+  });
+});
+`.trim();
+        (0, vitest_1.it)("passes a clean cypress test", () => {
+            const result = (0, testOutputValidator_js_1.validateTestOutput)({
+                testFileContent: VALID_CYPRESS_TEST,
+                framework: "cypress",
+            });
+            (0, vitest_1.expect)(result.decision).toBe("pass");
+        });
+        (0, vitest_1.it)("warns on missing cy.should or cy.contains assertion", () => {
+            const bad = `
+describe("Login", () => {
+  it("logs in successfully", () => {
+    cy.visit("/");
+    cy.get("#user-name").type("standard_user");
+    cy.get("#login-button").click();
+  });
+});
+`.trim();
+            const result = (0, testOutputValidator_js_1.validateTestOutput)({
+                testFileContent: bad,
+                framework: "cypress",
+            });
+            (0, vitest_1.expect)(result.issues.some((i) => i.code === "CYPRESS_MISSING_ASSERTION")).toBe(true);
+        });
+        (0, vitest_1.it)("warns on placeholder selector", () => {
+            const bad = VALID_CYPRESS_TEST.replace("#user-name", "your-selector");
+            const result = (0, testOutputValidator_js_1.validateTestOutput)({
+                testFileContent: bad,
+                framework: "cypress",
+            });
+            (0, vitest_1.expect)(result.issues.some((i) => i.code === "CYPRESS_PLACEHOLDER_SELECTOR")).toBe(true);
+        });
+        (0, vitest_1.it)("warns on hardcoded full URL in cy.visit", () => {
+            const bad = VALID_CYPRESS_TEST.replace('cy.visit("/")', 'cy.visit("https://example.com/login")');
+            const result = (0, testOutputValidator_js_1.validateTestOutput)({
+                testFileContent: bad,
+                framework: "cypress",
+            });
+            (0, vitest_1.expect)(result.issues.some((i) => i.code === "CYPRESS_HARDCODED_URL")).toBe(true);
+        });
+    });
+    (0, vitest_1.describe)("Selenium Java validator", () => {
+        const VALID_SELENIUM_JAVA_TEST = `
+package com.example.tests;
+import org.testng.annotations.Test;
+import com.example.pages.LoginPage;
+public class LoginTest {
+  @Test
+  public void testLoginSuccess() {
+    LoginPage loginPage = new LoginPage(driver);
+    loginPage.enterUsername("standard_user");
+    loginPage.enterPassword("secret_sauce");
+    loginPage.clickLogin();
+    assertTrue(inventoryPage.isDisplayed());
+  }
+}
+`.trim();
+        (0, vitest_1.it)("passes a clean selenium java test", () => {
+            const result = (0, testOutputValidator_js_1.validateTestOutput)({
+                testFileContent: VALID_SELENIUM_JAVA_TEST,
+                framework: "selenium_java",
+            });
+            (0, vitest_1.expect)(result.decision).toBe("pass");
+        });
+        (0, vitest_1.it)("warns on direct driver instantiation", () => {
+            const bad = VALID_SELENIUM_JAVA_TEST.replace("LoginPage loginPage = new LoginPage(driver);", "WebDriver driver = new ChromeDriver();\nLoginPage loginPage = new LoginPage(driver);");
+            const result = (0, testOutputValidator_js_1.validateTestOutput)({
+                testFileContent: bad,
+                framework: "selenium_java",
+            });
+            (0, vitest_1.expect)(result.issues.some((i) => i.code === "SELENIUM_JAVA_DIRECT_DRIVER")).toBe(true);
+        });
+        (0, vitest_1.it)("warns on missing assertion", () => {
+            const bad = `
+package com.example.tests;
+public class LoginTest {
+  public void testLoginSuccess() {
+    LoginPage loginPage = new LoginPage(driver);
+    loginPage.clickLogin();
+  }
+}
+`.trim();
+            const result = (0, testOutputValidator_js_1.validateTestOutput)({
+                testFileContent: bad,
+                framework: "selenium_java",
+            });
+            (0, vitest_1.expect)(result.issues.some((i) => i.code === "SELENIUM_JAVA_MISSING_ASSERTION")).toBe(true);
+        });
+        (0, vitest_1.it)("warns on missing package declaration", () => {
+            const bad = VALID_SELENIUM_JAVA_TEST.replace("package com.example.tests;", "");
+            const result = (0, testOutputValidator_js_1.validateTestOutput)({
+                testFileContent: bad,
+                framework: "selenium_java",
+            });
+            (0, vitest_1.expect)(result.issues.some((i) => i.code === "SELENIUM_JAVA_MISSING_PACKAGE")).toBe(true);
+        });
+    });
+    (0, vitest_1.describe)("TestNG validator", () => {
+        const VALID_TESTNG_TEST = `
+package com.example.tests;
+import org.testng.Assert;
+import org.testng.annotations.Test;
+import com.example.pages.LoginPage;
+public class LoginTest {
+  @Test
+  public void testLoginSuccess() {
+    LoginPage loginPage = new LoginPage(driver);
+    loginPage.login("standard_user", "secret_sauce");
+    Assert.assertTrue(inventoryPage.isDisplayed());
+  }
+}
+`.trim();
+        (0, vitest_1.it)("passes a clean testng test", () => {
+            const result = (0, testOutputValidator_js_1.validateTestOutput)({
+                testFileContent: VALID_TESTNG_TEST,
+                framework: "testng",
+            });
+            (0, vitest_1.expect)(result.decision).toBe("pass");
+        });
+        (0, vitest_1.it)("warns on missing @Test annotation", () => {
+            const bad = VALID_TESTNG_TEST.replace("@Test\n  ", "");
+            const result = (0, testOutputValidator_js_1.validateTestOutput)({
+                testFileContent: bad,
+                framework: "testng",
+            });
+            (0, vitest_1.expect)(result.issues.some((i) => i.code === "TESTNG_MISSING_ANNOTATION")).toBe(true);
+        });
+        (0, vitest_1.it)("warns on missing Assert call", () => {
+            const bad = VALID_TESTNG_TEST.replace("Assert.assertTrue(inventoryPage.isDisplayed());", "// no assertion");
+            const result = (0, testOutputValidator_js_1.validateTestOutput)({
+                testFileContent: bad,
+                framework: "testng",
+            });
+            (0, vitest_1.expect)(result.issues.some((i) => i.code === "TESTNG_MISSING_ASSERTION")).toBe(true);
+        });
+    });
 });
 //# sourceMappingURL=testOutputValidator.test.js.map

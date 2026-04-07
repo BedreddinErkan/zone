@@ -56,4 +56,79 @@ describe("detectDataSchema", () => {
     const result = detectDataSchema([file("db/migration/V1__init.sql")]);
     expect(result.existingTables).toEqual([]);
   });
+
+  describe("path-based dialect detection (hosted mode)", () => {
+    it("detects postgresql from path containing 'postgres'", () => {
+      const files = [
+        file("config/postgres.config.js"),
+        file("db/migrations/V1__init.sql"),
+      ];
+      const result = detectDataSchema(files);
+      expect(result.dialect).toBe("postgresql");
+    });
+
+    it("detects postgresql from supabase path", () => {
+      const files = [file("supabase/migrations/20240101_init.sql")];
+      const result = detectDataSchema(files);
+      expect(result.dialect).toBe("postgresql");
+    });
+
+    it("detects mysql from path containing 'mysql'", () => {
+      const files = [file("config/mysql.config.js"), file("db/schema.sql")];
+      const result = detectDataSchema(files);
+      expect(result.dialect).toBe("mysql");
+    });
+
+    it("detects sqlite from .sqlite file extension", () => {
+      const files = [file("data/app.sqlite"), file("db/schema.sql")];
+      const result = detectDataSchema(files);
+      expect(result.dialect).toBe("sqlite");
+    });
+
+    it("detects sqlite from .db file extension", () => {
+      const files = [file("data/local.db")];
+      const result = detectDataSchema(files);
+      expect(result.dialect).toBe("sqlite");
+    });
+  });
+
+  describe("prisma migration format", () => {
+    it("detects prisma from prisma/migrations path", () => {
+      const files = [
+        file("prisma/migrations/20240101_init/migration.sql"),
+        file("prisma/schema.prisma"),
+      ];
+      const result = detectDataSchema(files);
+      expect(result.migrationFormat).toBe("prisma");
+    });
+
+    it("detects prisma migration dir correctly", () => {
+      const files = [file("prisma/migrations/20240101_init/migration.sql")];
+      const result = detectDataSchema(files);
+      expect(result.migrationDir).toContain("prisma");
+    });
+  });
+
+  describe("confidence levels", () => {
+    it("returns high confidence when both dialect and format are detected", () => {
+      const files = [
+        file("supabase/migrations/V1__init.sql"),
+        file("db/migration/V1__init.sql"),
+      ];
+      const result = detectDataSchema(files);
+      expect(result.confidence).toBe("high");
+    });
+
+    it("returns medium confidence when only format is detected", () => {
+      const files = [file("db/migration/V1__init.sql")];
+      const result = detectDataSchema(files);
+      expect(result.confidence).toBe("medium");
+    });
+
+    it("returns low confidence when nothing is detected", () => {
+      const files = [file("src/index.ts"), file("package.json")];
+      const result = detectDataSchema(files);
+      expect(result.confidence).toBe("low");
+    });
+  });
 });

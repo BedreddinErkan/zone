@@ -1992,13 +1992,16 @@ export async function runLlmPatchFlow(input: {
     },
   };
 
-  const decisionMode =
-    vagueTask ||
-    intentMismatch.suspicious ||
-    uiMappingRisk.forcePreviewOnly ||
-    developerConfidence < 70
-      ? "preview_only"
-      : "safe_to_apply";
+const hasBlockedPatch = patchResults.some(r => r.status === "failed" && r.reason === "developer_validation_blocked");
+
+const decisionMode =
+  hasBlockedPatch ||
+  vagueTask ||
+  intentMismatch.suspicious ||
+  uiMappingRisk.forcePreviewOnly ||
+  developerConfidence < 70
+    ? "preview_only"
+    : "safe_to_apply";
 
   // 7. Build patchPreview string
   const patchPreview = [

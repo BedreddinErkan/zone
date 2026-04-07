@@ -564,4 +564,193 @@ def test_login_redirects_to_inventory(login_page):
       ).toBe(false);
     });
   });
+
+  describe("Cypress validator", () => {
+    const VALID_CYPRESS_TEST = `
+describe("Login", () => {
+  it("logs in successfully", () => {
+    cy.visit("/");
+    cy.get("#user-name").type("standard_user");
+    cy.get("#password").type("secret_sauce");
+    cy.get("#login-button").click();
+    cy.get(".inventory_list").should("be.visible");
+  });
+});
+`.trim();
+
+    it("passes a clean cypress test", () => {
+      const result = validateTestOutput({
+        testFileContent: VALID_CYPRESS_TEST,
+        framework: "cypress",
+      });
+      expect(result.decision).toBe("pass");
+    });
+
+    it("warns on missing cy.should or cy.contains assertion", () => {
+      const bad = `
+describe("Login", () => {
+  it("logs in successfully", () => {
+    cy.visit("/");
+    cy.get("#user-name").type("standard_user");
+    cy.get("#login-button").click();
+  });
+});
+`.trim();
+      const result = validateTestOutput({
+        testFileContent: bad,
+        framework: "cypress",
+      });
+      expect(
+        result.issues.some((i) => i.code === "CYPRESS_MISSING_ASSERTION")
+      ).toBe(true);
+    });
+
+    it("warns on placeholder selector", () => {
+      const bad = VALID_CYPRESS_TEST.replace("#user-name", "your-selector");
+      const result = validateTestOutput({
+        testFileContent: bad,
+        framework: "cypress",
+      });
+      expect(
+        result.issues.some((i) => i.code === "CYPRESS_PLACEHOLDER_SELECTOR")
+      ).toBe(true);
+    });
+
+    it("warns on hardcoded full URL in cy.visit", () => {
+      const bad = VALID_CYPRESS_TEST.replace(
+        'cy.visit("/")',
+        'cy.visit("https://example.com/login")'
+      );
+      const result = validateTestOutput({
+        testFileContent: bad,
+        framework: "cypress",
+      });
+      expect(
+        result.issues.some((i) => i.code === "CYPRESS_HARDCODED_URL")
+      ).toBe(true);
+    });
+  });
+
+  describe("Selenium Java validator", () => {
+    const VALID_SELENIUM_JAVA_TEST = `
+package com.example.tests;
+import org.testng.annotations.Test;
+import com.example.pages.LoginPage;
+public class LoginTest {
+  @Test
+  public void testLoginSuccess() {
+    LoginPage loginPage = new LoginPage(driver);
+    loginPage.enterUsername("standard_user");
+    loginPage.enterPassword("secret_sauce");
+    loginPage.clickLogin();
+    assertTrue(inventoryPage.isDisplayed());
+  }
+}
+`.trim();
+
+    it("passes a clean selenium java test", () => {
+      const result = validateTestOutput({
+        testFileContent: VALID_SELENIUM_JAVA_TEST,
+        framework: "selenium_java",
+      });
+      expect(result.decision).toBe("pass");
+    });
+
+    it("warns on direct driver instantiation", () => {
+      const bad = VALID_SELENIUM_JAVA_TEST.replace(
+        "LoginPage loginPage = new LoginPage(driver);",
+        "WebDriver driver = new ChromeDriver();\nLoginPage loginPage = new LoginPage(driver);"
+      );
+      const result = validateTestOutput({
+        testFileContent: bad,
+        framework: "selenium_java",
+      });
+      expect(
+        result.issues.some((i) => i.code === "SELENIUM_JAVA_DIRECT_DRIVER")
+      ).toBe(true);
+    });
+
+    it("warns on missing assertion", () => {
+      const bad = `
+package com.example.tests;
+public class LoginTest {
+  public void testLoginSuccess() {
+    LoginPage loginPage = new LoginPage(driver);
+    loginPage.clickLogin();
+  }
+}
+`.trim();
+      const result = validateTestOutput({
+        testFileContent: bad,
+        framework: "selenium_java",
+      });
+      expect(
+        result.issues.some((i) => i.code === "SELENIUM_JAVA_MISSING_ASSERTION")
+      ).toBe(true);
+    });
+
+    it("warns on missing package declaration", () => {
+      const bad = VALID_SELENIUM_JAVA_TEST.replace(
+        "package com.example.tests;",
+        ""
+      );
+      const result = validateTestOutput({
+        testFileContent: bad,
+        framework: "selenium_java",
+      });
+      expect(
+        result.issues.some((i) => i.code === "SELENIUM_JAVA_MISSING_PACKAGE")
+      ).toBe(true);
+    });
+  });
+
+  describe("TestNG validator", () => {
+    const VALID_TESTNG_TEST = `
+package com.example.tests;
+import org.testng.Assert;
+import org.testng.annotations.Test;
+import com.example.pages.LoginPage;
+public class LoginTest {
+  @Test
+  public void testLoginSuccess() {
+    LoginPage loginPage = new LoginPage(driver);
+    loginPage.login("standard_user", "secret_sauce");
+    Assert.assertTrue(inventoryPage.isDisplayed());
+  }
+}
+`.trim();
+
+    it("passes a clean testng test", () => {
+      const result = validateTestOutput({
+        testFileContent: VALID_TESTNG_TEST,
+        framework: "testng",
+      });
+      expect(result.decision).toBe("pass");
+    });
+
+    it("warns on missing @Test annotation", () => {
+      const bad = VALID_TESTNG_TEST.replace("@Test\n  ", "");
+      const result = validateTestOutput({
+        testFileContent: bad,
+        framework: "testng",
+      });
+      expect(
+        result.issues.some((i) => i.code === "TESTNG_MISSING_ANNOTATION")
+      ).toBe(true);
+    });
+
+    it("warns on missing Assert call", () => {
+      const bad = VALID_TESTNG_TEST.replace(
+        "Assert.assertTrue(inventoryPage.isDisplayed());",
+        "// no assertion"
+      );
+      const result = validateTestOutput({
+        testFileContent: bad,
+        framework: "testng",
+      });
+      expect(
+        result.issues.some((i) => i.code === "TESTNG_MISSING_ASSERTION")
+      ).toBe(true);
+    });
+  });
 });

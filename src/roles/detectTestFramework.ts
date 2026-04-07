@@ -29,6 +29,14 @@ function hasExtension(files: RepoFile[], ext: string): boolean {
   return files.some((f) => f.path.endsWith(ext));
 }
 
+function hasJavaBuildFile(files: RepoFile[]): boolean {
+  return (
+    hasFile(files, "pom.xml") ||
+    hasFile(files, "build.gradle") ||
+    hasFile(files, "build.gradle.kts")
+  );
+}
+
 function findTestDir(files: RepoFile[], patterns: string[]): string | null {
   for (const pattern of patterns) {
     const found = files.find((f) => f.path.includes(pattern));
@@ -104,11 +112,13 @@ export function detectTestFramework(files: RepoFile[]): DetectedTestFramework {
 
   // Cucumber Java
   if (
-    hasFile(files, "pom.xml") &&
+    hasJavaBuildFile(files) &&
     hasFile(files, ".feature") &&
     hasExtension(files, ".java")
   ) {
-    evidence.push("pom.xml found");
+    if (hasFile(files, "pom.xml")) evidence.push("pom.xml found");
+    else if (hasFile(files, "build.gradle.kts")) evidence.push("build.gradle.kts found");
+    else evidence.push("build.gradle found");
     evidence.push(".feature files found");
     evidence.push(".java files found");
     const hasSelenium = files.some(
@@ -132,8 +142,10 @@ export function detectTestFramework(files: RepoFile[]): DetectedTestFramework {
   }
 
   // Selenium Java (without Cucumber)
-  if (hasFile(files, "pom.xml") && hasExtension(files, ".java")) {
-    evidence.push("pom.xml found");
+  if (hasJavaBuildFile(files) && hasExtension(files, ".java")) {
+    if (hasFile(files, "pom.xml")) evidence.push("pom.xml found");
+    else if (hasFile(files, "build.gradle.kts")) evidence.push("build.gradle.kts found");
+    else evidence.push("build.gradle found");
     evidence.push(".java files found");
     const hasTestNG = hasFile(files, "testng.xml");
     if (hasTestNG) {

@@ -206,5 +206,90 @@ function file(p) {
             (0, vitest_1.expect)(result.framework).toBe("testng");
         });
     });
+    (0, vitest_1.describe)("Gradle / Kotlin projects", () => {
+        (0, vitest_1.it)("detects cucumber_java from build.gradle + feature files", () => {
+            const files = [
+                file("build.gradle"),
+                file("src/test/resources/features/login.feature"),
+                file("src/test/java/com/example/steps/LoginSteps.java"),
+            ];
+            const result = (0, detectTestFramework_js_1.detectTestFramework)(files);
+            (0, vitest_1.expect)(result.framework).toBe("cucumber_java");
+            (0, vitest_1.expect)(result.language).toBe("java");
+        });
+        (0, vitest_1.it)("detects cucumber_java from build.gradle.kts + feature files", () => {
+            const files = [
+                file("build.gradle.kts"),
+                file("src/test/resources/features/login.feature"),
+                file("src/test/java/com/example/steps/LoginSteps.java"),
+            ];
+            const result = (0, detectTestFramework_js_1.detectTestFramework)(files);
+            (0, vitest_1.expect)(result.framework).toBe("cucumber_java");
+        });
+        (0, vitest_1.it)("detects selenium_java from build.gradle without feature files", () => {
+            const files = [
+                file("build.gradle"),
+                file("src/test/java/com/example/LoginTest.java"),
+            ];
+            const result = (0, detectTestFramework_js_1.detectTestFramework)(files);
+            (0, vitest_1.expect)(result.framework).toBe("selenium_java");
+            (0, vitest_1.expect)(result.language).toBe("java");
+        });
+    });
+    (0, vitest_1.describe)("package.json only (no config file)", () => {
+        (0, vitest_1.it)("returns unknown for package.json without test config", () => {
+            const files = [file("package.json"), file("src/index.ts")];
+            const result = (0, detectTestFramework_js_1.detectTestFramework)(files);
+            (0, vitest_1.expect)(result.framework).toBe("unknown");
+        });
+        (0, vitest_1.it)("detects playwright_ts from package.json + spec files", () => {
+            const files = [
+                file("package.json"),
+                file("tests/login.spec.ts"),
+                file("tests/cart.spec.ts"),
+            ];
+            const result = (0, detectTestFramework_js_1.detectTestFramework)(files);
+            (0, vitest_1.expect)(result.framework).toBeDefined();
+            (0, vitest_1.expect)(result.language).toBeDefined();
+        });
+    });
+    (0, vitest_1.describe)("monorepo / nested structure", () => {
+        (0, vitest_1.it)("detects playwright_ts from nested e2e folder", () => {
+            const files = [
+                file("apps/web/package.json"),
+                file("e2e/playwright.config.ts"),
+                file("e2e/tests/login.spec.ts"),
+            ];
+            const result = (0, detectTestFramework_js_1.detectTestFramework)(files);
+            (0, vitest_1.expect)(result.framework).toBe("playwright_ts");
+        });
+        (0, vitest_1.it)("detects cypress from nested cypress folder", () => {
+            const files = [
+                file("frontend/cypress.config.js"),
+                file("frontend/cypress/e2e/login.cy.js"),
+            ];
+            const result = (0, detectTestFramework_js_1.detectTestFramework)(files);
+            (0, vitest_1.expect)(result.framework).toBe("cypress");
+        });
+    });
+    (0, vitest_1.describe)("edge cases", () => {
+        (0, vitest_1.it)("handles files with no extension gracefully", () => {
+            const files = [file("Makefile"), file("Dockerfile"), file("README")];
+            const result = (0, detectTestFramework_js_1.detectTestFramework)(files);
+            (0, vitest_1.expect)(result.framework).toBe("unknown");
+        });
+        (0, vitest_1.it)("handles very large file lists without crashing", () => {
+            const files = Array.from({ length: 500 }, (_, i) => file(`src/main/java/com/example/Page${i}.java`));
+            files.push(file("pom.xml"));
+            files.push(file("src/test/resources/features/login.feature"));
+            const result = (0, detectTestFramework_js_1.detectTestFramework)(files);
+            (0, vitest_1.expect)(result.framework).toBe("cucumber_java");
+        });
+        (0, vitest_1.it)("is case-insensitive for common config filenames", () => {
+            const files = [file("Playwright.config.ts"), file("tests/login.spec.ts")];
+            const result = (0, detectTestFramework_js_1.detectTestFramework)(files);
+            (0, vitest_1.expect)(result.framework).toBeDefined();
+        });
+    });
 });
 //# sourceMappingURL=detectTestFramework.test.js.map

@@ -465,6 +465,112 @@ function validateSqlOutput(content: string, dialect: string): ValidationIssue[] 
   return issues;
 }
 
+// ─── Cypress Validator ────────────────────────────────────────────────────────
+
+function validateCypressTest(content: string): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  if (
+    !content.includes(".should(") &&
+    !content.includes(".contains(") &&
+    !content.includes("expect(")
+  ) {
+    issues.push({
+      code: "CYPRESS_MISSING_ASSERTION",
+      severity: "warning",
+      message: "No cy.should(), cy.contains(), or expect() assertion found",
+    });
+  }
+
+  const placeholders = ["your-selector", "your-username", "your-password", "#todo", ".todo"];
+  for (const p of placeholders) {
+    if (content.toLowerCase().includes(p)) {
+      issues.push({
+        code: "CYPRESS_PLACEHOLDER_SELECTOR",
+        severity: "warning",
+        message: `Placeholder selector detected: "${p}"`,
+      });
+    }
+  }
+
+  if (/cy\.visit\(\s*["'`]https?:\/\//.test(content)) {
+    issues.push({
+      code: "CYPRESS_HARDCODED_URL",
+      severity: "warning",
+      message: "cy.visit() uses a hardcoded full URL instead of a relative path",
+    });
+  }
+
+  return issues;
+}
+
+// ─── Selenium Java Validator ──────────────────────────────────────────────────
+
+function validateSeleniumJavaTest(content: string): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  if (!content.includes("package ")) {
+    issues.push({
+      code: "SELENIUM_JAVA_MISSING_PACKAGE",
+      severity: "warning",
+      message: "Missing package declaration in Selenium Java test",
+    });
+  }
+
+  if (/new\s+(?:Chrome|Firefox|Edge|Safari|Remote)Driver\s*\(/.test(content)) {
+    issues.push({
+      code: "SELENIUM_JAVA_DIRECT_DRIVER",
+      severity: "warning",
+      message: "WebDriver created directly in test — use a base class or fixture instead",
+    });
+  }
+
+  if (
+    !content.includes("assertTrue") &&
+    !content.includes("assertFalse") &&
+    !content.includes("assertEquals") &&
+    !content.includes("assertNotNull") &&
+    !content.includes("Assert.")
+  ) {
+    issues.push({
+      code: "SELENIUM_JAVA_MISSING_ASSERTION",
+      severity: "warning",
+      message: "No assertion found in Selenium Java test",
+    });
+  }
+
+  return issues;
+}
+
+// ─── TestNG Validator ─────────────────────────────────────────────────────────
+
+function validateTestNGTest(content: string): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  if (!content.includes("@Test")) {
+    issues.push({
+      code: "TESTNG_MISSING_ANNOTATION",
+      severity: "warning",
+      message: "No @Test annotation found in TestNG test class",
+    });
+  }
+
+  if (
+    !content.includes("Assert.") &&
+    !content.includes("assertTrue") &&
+    !content.includes("assertFalse") &&
+    !content.includes("assertEquals")
+  ) {
+    issues.push({
+      code: "TESTNG_MISSING_ASSERTION",
+      severity: "warning",
+      message: "No Assert call found in TestNG test",
+    });
+  }
+
+  return issues;
+}
+
 function validateComplexity(
   content: string,
   framework: string,
@@ -555,15 +661,30 @@ export function validateTestOutput(input: {
   if (
     (input.framework === "playwright_ts" || input.framework === "playwright_js") &&
     (input.testFileContent || input.featureContent)
-  ) {
-    issues.push(
-      ...validatePlaywrightTest(input.testFileContent ?? input.featureContent ?? "")
-    );
-  }
+    ) {
+      issues.push(
+        ...validatePlaywrightTest(input.testFileContent ?? input.featureContent ?? "")
+      );
+    }
 
-  if (
-    (input.framework === "pytest" || input.framework === "selenium_python") &&
-    input.testFileContent
+    if (input.framework === "cypress" && input.testFileContent) {
+      issues.push(...validateCypressTest(input.testFileContent));
+    }
+
+    if (
+      (input.framework === "selenium_java" || input.framework === "testng") &&
+      input.testFileContent
+    ) {
+      issues.push(...validateSeleniumJavaTest(input.testFileContent));
+    }
+
+    if (input.framework === "testng" && input.testFileContent) {
+      issues.push(...validateTestNGTest(input.testFileContent));
+    }
+  
+    if (
+      (input.framework === "pytest" || input.framework === "selenium_python") &&
+      input.testFileContent
   ) {
     issues.push(...validatePytestTest(input.testFileContent));
   }

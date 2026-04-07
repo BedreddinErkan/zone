@@ -33,8 +33,13 @@ function findMigrationDir(files, format) {
             file.path.toLowerCase().includes("changelog"));
         return match ? node_path_1.default.posix.dirname(match.path) : null;
     }
+    if (format === "prisma") {
+        const match = files.find((file) => file.path.toLowerCase().includes("prisma/migrations"));
+        return match ? node_path_1.default.posix.dirname(match.path) : "prisma/migrations";
+    }
     if (format === "raw_sql") {
-        const match = files.find((file) => file.path.endsWith(".sql"));
+        const match = files.find((file) => file.path.endsWith(".sql") ||
+            (/migrations\//i.test(file.path) && /\.[jt]s$/i.test(file.path)));
         return match ? node_path_1.default.posix.dirname(match.path) : "sql";
     }
     return null;
@@ -54,6 +59,15 @@ function detectMigrationFormat(files, evidence) {
         evidence.push("Alembic files detected");
         return "alembic";
     }
+    if (files.some((file) => file.path.toLowerCase().includes("prisma/migrations"))) {
+        evidence.push("Prisma migrations detected");
+        return "prisma";
+    }
+    if (files.some((file) => file.path.toLowerCase().includes("knex/migrations") ||
+        (/migrations\//i.test(file.path) && /\.[jt]s$/i.test(file.path)))) {
+        evidence.push("JavaScript/TypeScript migration files detected");
+        return "raw_sql";
+    }
     if (files.some((file) => file.path.endsWith(".sql"))) {
         evidence.push("Raw SQL files detected");
         return "raw_sql";
@@ -66,10 +80,49 @@ function detectDialect(files, evidence) {
     let hasSqlite = false;
     for (const file of files) {
         const lowerPath = file.path.toLowerCase();
+        if (lowerPath.includes("postgres") ||
+            lowerPath.includes("postgresql") ||
+            lowerPath.endsWith("pg.config.js") ||
+            lowerPath.endsWith("pg.config.ts") ||
+            ((lowerPath.endsWith("database.yml") || lowerPath.endsWith("database.yaml")) &&
+                lowerPath.includes("postgres")) ||
+            lowerPath.includes("supabase")) {
+            hasPostgres = true;
+        }
+        if (lowerPath.includes("mysql") || lowerPath.endsWith("my.cnf")) {
+            hasMysql = true;
+        }
+        if (lowerPath.endsWith(".db") ||
+            lowerPath.endsWith(".sqlite") ||
+            lowerPath.endsWith(".sqlite3") ||
+            lowerPath.includes("sqlite")) {
+            hasSqlite = true;
+        }
+    }
+    if (hasPostgres) {
+        evidence.push("PostgreSQL evidence detected");
+        return "postgresql";
+    }
+    if (hasMysql) {
+        evidence.push("MySQL evidence detected");
+        return "mysql";
+    }
+    if (hasSqlite) {
+        evidence.push("SQLite evidence detected");
+        return "sqlite";
+    }
+    for (const file of files) {
+        const lowerPath = file.path.toLowerCase();
         const content = readRepoFileContent(file);
         const lowerContent = content.toLowerCase();
         if (lowerPath.endsWith("postgresql.conf") ||
             lowerContent.includes("postgresql://") ||
+            lowerContent.includes("pg_") ||
+            lowerContent.includes("pgcrypto") ||
+            lowerContent.includes("uuid_generate") ||
+            lowerContent.includes("::text") ||
+            lowerContent.includes("::integer") ||
+            (lowerContent.includes("database_url") && lowerContent.includes("postgres")) ||
             content.includes("SERIAL") ||
             content.includes("BIGSERIAL") ||
             content.includes("TEXT[]") ||
@@ -77,12 +130,18 @@ function detectDialect(files, evidence) {
             hasPostgres = true;
         }
         if (lowerPath.endsWith("my.cnf") ||
+            lowerContent.includes("mysql2") ||
+            lowerContent.includes("mysql://") ||
+            (lowerContent.includes("sequelize") && lowerContent.includes("mysql")) ||
             content.includes("AUTO_INCREMENT") ||
             content.includes("ENGINE=InnoDB")) {
             hasMysql = true;
         }
         if (lowerPath.endsWith(".db") ||
-            lowerContent.includes("sqlite3")) {
+            lowerContent.includes("sqlite3") ||
+            lowerContent.includes("better-sqlite3") ||
+            lowerContent.includes("sqlite://") ||
+            (lowerContent.includes("knex") && lowerContent.includes("sqlite"))) {
             hasSqlite = true;
         }
     }
