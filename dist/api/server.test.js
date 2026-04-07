@@ -430,7 +430,7 @@ export function LoginForm() {
         process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
         // ensureRunAuthorized + logRun profile read için
         supabaseProfileMaybeSingleMock.mockResolvedValue({
-            data: { credits: 5, subscription_status: "free" },
+            data: { credits: 20, subscription_status: "free" },
             error: null,
         });
         runLlmPatchFlowMock.mockResolvedValue({

@@ -9,6 +9,17 @@ interface FullPatchPromptInput {
   outputMode?: FullPatchOutputMode;
 }
 
+function detectRenameIntent(task: string): { isRename: boolean; fromName: string; toName: string } | null {
+  const normalized = task.toLowerCase();
+  const renamePattern =
+    /rename\s+(?:the\s+)?[`'"]?(\w+)[`'"]?\s+(?:function|method|class|variable|const|let|var)?\s*to\s+[`'"]?(\w+)[`'"]?/i;
+  const match = task.match(renamePattern);
+  if (match) {
+    return { isRename: true, fromName: match[1], toName: match[2] };
+  }
+  return null;
+}
+
 export function buildFullPatchPrompt(input: FullPatchPromptInput): string {
   const {
     task,
@@ -18,6 +29,16 @@ export function buildFullPatchPrompt(input: FullPatchPromptInput): string {
     relatedContext,
     outputMode = "full_content",
   } = input;
+  const renameIntent = detectRenameIntent(input.task);
+  const renameInstruction = renameIntent
+    ? `RENAME OPERATION DETECTED:
+- You must find "${renameIntent.fromName}" in the file and rename it to "${renameIntent.toName}"
+- DO NOT add a new function — find the EXISTING function/method/variable named "${renameIntent.fromName}" and rename it in-place
+- Update ALL occurrences of "${renameIntent.fromName}" in the file
+- Keep the function body, parameters, and decorators exactly as-is
+- Only the name changes, nothing else
+`
+    : "";
 
   if (outputMode === "find_replace_patch") {
     return `
@@ -41,6 +62,7 @@ ${fileContent}
 \`\`\`
 
 INSTRUCTIONS
+${renameInstruction}- The target file is large. Return ONLY the specific change as a FIND/REPLACE patch.
 - The target file is large. Return ONLY the specific change as a FIND/REPLACE patch.
 - Do NOT return the full file.
 - Do NOT reconstruct the whole document.
@@ -79,6 +101,7 @@ ${fileContent}
 \`\`\`
 
 INSTRUCTIONS
+${renameInstruction}- Apply the task to the file above
 - Apply the task to the file above
 - Return the COMPLETE updated file content
 - Preserve all existing code that is unrelated to the task

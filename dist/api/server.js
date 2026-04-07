@@ -45,7 +45,8 @@ const ENHANCE_TASK_SYSTEM_PROMPT = "You are a task optimizer for an AI code agen
     "- The framework/pattern already used in the repo\n" +
     "Keep it under 2 sentences. Return only the optimized task text, nothing else.";
 exports.app.use((0, cors_1.default)());
-exports.app.use(body_parser_1.default.json());
+exports.app.use(body_parser_1.default.json({ limit: "10mb" }));
+exports.app.use(body_parser_1.default.urlencoded({ extended: true, limit: "10mb" }));
 exports.app.use(body_parser_1.default.urlencoded({ extended: true }));
 exports.app.get("/", (_req, res) => {
     res.type("html").send(renderZoneUiHtml());

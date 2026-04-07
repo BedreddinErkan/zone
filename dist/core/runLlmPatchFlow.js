@@ -116,6 +116,12 @@ const IRRELEVANT_DEVELOPER_CONTEXT_SEGMENTS = [
     "/node_modules/",
     "/build/",
     "/dist/",
+    "/.agent-cache/",
+    "/.agent-patches/",
+    "/.agent-backups/",
+    "/agent-cache/",
+    "/agent-patches/",
+    "/agent-backups/",
 ];
 function isUiFilePath(filePath) {
     const normalized = filePath.toLowerCase();
@@ -1425,13 +1431,15 @@ async function runLlmPatchFlow(input) {
     const developerConfidence = confidenceCaps.length > 0
         ? Math.min(developerConfidenceBase, ...confidenceCaps)
         : developerConfidenceBase;
+    const normalizeForDiff = (content) => content.replace(/\r\n/g, "\n").replace(/\t/g, "  ").trimEnd();
     const fileDiffs = applyPatches.map((patch) => {
-        const before = originalContents[patch.filePath] ?? "";
-        const diff = computeFileDiff(before, patch.fullContent);
+        const before = normalizeForDiff(originalContents[patch.filePath] ?? "");
+        const after = normalizeForDiff(patch.fullContent);
+        const diff = computeFileDiff(before, after);
         return {
             filePath: patch.filePath,
             before,
-            after: patch.fullContent,
+            after,
             diff,
             addedLines: diff.filter((line) => line.type === "added").length,
             removedLines: diff.filter((line) => line.type === "removed").length,
@@ -1445,7 +1453,9 @@ async function runLlmPatchFlow(input) {
             massScope: Math.max(intentMismatch.risk.breakdown.massScope, uiMappingRisk.risk.breakdown.massScope),
         },
     };
-    const decisionMode = vagueTask ||
+    const hasBlockedPatch = patchResults.some(r => r.status === "failed" && r.reason === "developer_validation_blocked");
+    const decisionMode = hasBlockedPatch ||
+        vagueTask ||
         intentMismatch.suspicious ||
         uiMappingRisk.forcePreviewOnly ||
         developerConfidence < 70

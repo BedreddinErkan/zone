@@ -399,7 +399,10 @@ function classifyHostedContextCategory(filePath){
 
 function shouldSkipHostedContextPath(filePath){
   const normalized=`/${String(filePath||'').replace(/\\/g,'/').toLowerCase()}/`;
-  if(normalized.includes('/node_modules/')||normalized.includes('/dist/')||normalized.includes('/build/')||normalized.includes('/.git/')||normalized.includes('/venv/')||normalized.includes('/site-packages/'))return true;
+  if(normalized.includes('/.claude/')||normalized.includes('/.idea/')||normalized.includes('/.vscode/')||
+
+
+normalized.includes('/node_modules/')||normalized.includes('/dist/')||normalized.includes('/build/')||normalized.includes('/.git/')||normalized.includes('/venv/')||normalized.includes('/site-packages/'))return true;
   const ext=getHostedContextExtension(filePath);
   return HOSTED_CONTEXT_BINARY_EXTENSIONS.has(ext);
 }
