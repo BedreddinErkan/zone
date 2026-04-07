@@ -88,7 +88,7 @@ describe("computeRiskScore", () => {
 
     expect(result.signals).toContain("destructive");
     expect(result.signals).toContain("critical_domain");
-    expect(result.score).toBe(70);
+    expect(result.score).toBe(85);
   });
 
   it("clamps score to 100", () => {

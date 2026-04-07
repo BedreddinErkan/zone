@@ -130,6 +130,14 @@ export function computeRiskScoreDetails(
   if (riskBreakdown.destructive > 0 && riskBreakdown.critical > 0) {
     compoundPenalty += 15;
   }
+  // auth + JWT/token combination = elevated critical
+  if (hasCriticalSignal && (
+    normalizedTask.includes("jwt") ||
+    normalizedTask.includes("token") ||
+    normalizedTask.includes("middleware")
+  )) {
+    compoundPenalty += 15;
+  }
 
   const rawScore =
     riskBreakdown.destructive +
