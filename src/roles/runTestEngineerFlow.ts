@@ -1077,7 +1077,7 @@ export async function runTestEngineerFlow(input: {
     const retryResult = await withSelfHealingRetry({
       maxAttempts: 3,
       prompt,
-      execute: async (currentPrompt) => {
+      execute: async (currentPrompt: string) => {
         const response = await client.responses.create({
           model,
           input: currentPrompt,
@@ -1086,7 +1086,7 @@ export async function runTestEngineerFlow(input: {
         const jsonText = extractJson ? extractJson(rawText) : rawText;
         return JSON.parse(jsonText) as Record<string, unknown>;
       },
-      validate: (result) => {
+      validate: (result: Record<string, unknown>) => {
         const issues: Array<{
           code: string;
           message: string;

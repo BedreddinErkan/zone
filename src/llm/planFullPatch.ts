@@ -95,7 +95,7 @@ export async function planFullPatchWithLlm(input: {
   const retryResult = await withSelfHealingRetry({
     maxAttempts: 3,
     prompt,
-    execute: async (currentPrompt) => {
+    execute: async (currentPrompt: string) => {
       const response = await client.responses.create({
         model,
         input: currentPrompt,
@@ -104,7 +104,7 @@ export async function planFullPatchWithLlm(input: {
       const jsonText = extractJson(rawText);
       return JSON.parse(jsonText) as unknown;
     },
-    validate: (result) => {
+    validate: (result: unknown) => {
       const issues: Array<{
         code: string;
         message: string;
