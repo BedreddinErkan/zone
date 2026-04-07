@@ -25,6 +25,7 @@ const readProjectFiles_js_1 = require("../repo/readProjectFiles.js");
 const planFeature_js_1 = require("../llm/planFeature.js");
 const planPatchPreview_js_1 = require("../llm/planPatchPreview.js");
 const planFullPatch_js_1 = require("../llm/planFullPatch.js");
+const computeRiskScore_js_1 = require("./computeRiskScore.js");
 const taskIntentParser_js_1 = require("./taskIntentParser.js");
 /** A fully-populated TaskIntent representing "I don't know what this is". */
 const UNKNOWN_INTENT = {
@@ -1183,6 +1184,8 @@ async function runLlmPatchFlow(input) {
         return { ok: false, reason };
     }
     const vagueTask = isVagueDeveloperTask(input.task);
+    // Task-level risk scoring for developer
+    const taskRiskResult = (0, computeRiskScore_js_1.computeRiskScore)({ task: input.task, role: "developer" });
     if (vagueTask) {
         return {
             ok: true,
@@ -1418,6 +1421,14 @@ async function runLlmPatchFlow(input) {
         internalWarnings.push(...uiMappingRisk.warnings);
         visibleWarnings.push(...uiMappingRisk.warnings);
     }
+    if (taskRiskResult.score >= 71) {
+        internalWarnings.push(`[HIGH_RISK] Task risk score ${taskRiskResult.score} — detected: ${taskRiskResult.signals.join(", ")}. Review carefully before applying.`);
+        visibleWarnings.push(`[HIGH_RISK] Task risk score ${taskRiskResult.score} — detected: ${taskRiskResult.signals.join(", ")}. Review carefully before applying.`);
+    }
+    else if (taskRiskResult.score >= 31) {
+        internalWarnings.push(`[ELEVATED_RISK] Task risk score ${taskRiskResult.score} — detected: ${taskRiskResult.signals.join(", ")}.`);
+        visibleWarnings.push(`[ELEVATED_RISK] Task risk score ${taskRiskResult.score} — detected: ${taskRiskResult.signals.join(", ")}.`);
+    }
     const developerConfidenceBase = calculateDeveloperConfidence({
         warnings: internalWarnings,
         changedFileCount: applyPatches.length,
@@ -1446,7 +1457,7 @@ async function runLlmPatchFlow(input) {
         };
     });
     const mergedDeveloperRisk = {
-        score: Math.max(intentMismatch.risk.score, uiMappingRisk.risk.score),
+        score: Math.max(intentMismatch.risk.score, uiMappingRisk.risk.score, taskRiskResult.score),
         breakdown: {
             destructive: Math.max(intentMismatch.risk.breakdown.destructive, uiMappingRisk.risk.breakdown.destructive),
             schema: Math.max(intentMismatch.risk.breakdown.schema, uiMappingRisk.risk.breakdown.schema),
@@ -1458,7 +1469,8 @@ async function runLlmPatchFlow(input) {
         vagueTask ||
         intentMismatch.suspicious ||
         uiMappingRisk.forcePreviewOnly ||
-        developerConfidence < 70
+        developerConfidence < 70 ||
+        taskRiskResult.score >= 31
         ? "preview_only"
         : "safe_to_apply";
     // 7. Build patchPreview string

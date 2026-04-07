@@ -5,6 +5,7 @@ import { readProjectFiles } from "../repo/readProjectFiles.js";
 import { planFeatureWithLlm } from "../llm/planFeature.js";
 import { planPatchPreviewWithLlm } from "../llm/planPatchPreview.js";
 import { planFullPatchWithLlm } from "../llm/planFullPatch.js";
+import { computeRiskScore } from "./computeRiskScore.js";
 import { parseTaskIntent, type TaskIntent } from "./taskIntentParser.js";
 import type { RepoFile } from "../types/project.js";
 
@@ -1673,6 +1674,8 @@ export async function runLlmPatchFlow(input: {
   }
 
   const vagueTask = isVagueDeveloperTask(input.task);
+  // Task-level risk scoring for developer
+  const taskRiskResult = computeRiskScore({ task: input.task, role: "developer" });
   if (vagueTask) {
     return {
       ok: true,
@@ -1947,13 +1950,28 @@ export async function runLlmPatchFlow(input: {
     internalWarnings.push(...intentMismatch.warnings);
     visibleWarnings.push(...intentMismatch.warnings);
   }
-  if (uiMappingRisk.warnings.length > 0) {
-    internalWarnings.push(...uiMappingRisk.warnings);
-    visibleWarnings.push(...uiMappingRisk.warnings);
-  }
+    if (uiMappingRisk.warnings.length > 0) {
+      internalWarnings.push(...uiMappingRisk.warnings);
+      visibleWarnings.push(...uiMappingRisk.warnings);
+    }
+    if (taskRiskResult.score >= 71) {
+      internalWarnings.push(
+        `[HIGH_RISK] Task risk score ${taskRiskResult.score} — detected: ${taskRiskResult.signals.join(", ")}. Review carefully before applying.`
+      );
+      visibleWarnings.push(
+        `[HIGH_RISK] Task risk score ${taskRiskResult.score} — detected: ${taskRiskResult.signals.join(", ")}. Review carefully before applying.`
+      );
+    } else if (taskRiskResult.score >= 31) {
+      internalWarnings.push(
+        `[ELEVATED_RISK] Task risk score ${taskRiskResult.score} — detected: ${taskRiskResult.signals.join(", ")}.`
+      );
+      visibleWarnings.push(
+        `[ELEVATED_RISK] Task risk score ${taskRiskResult.score} — detected: ${taskRiskResult.signals.join(", ")}.`
+      );
+    }
 
-  const developerConfidenceBase = calculateDeveloperConfidence({
-    warnings: internalWarnings,
+    const developerConfidenceBase = calculateDeveloperConfidence({
+      warnings: internalWarnings,
     changedFileCount: applyPatches.length,
     changedFileMetrics,
     vagueTask,
@@ -1984,10 +2002,10 @@ const fileDiffs = applyPatches.map((patch) => {
   };
 });
   const mergedDeveloperRisk = {
-    score: Math.max(intentMismatch.risk.score, uiMappingRisk.risk.score),
-    breakdown: {
-      destructive: Math.max(
-        intentMismatch.risk.breakdown.destructive,
+      score: Math.max(intentMismatch.risk.score, uiMappingRisk.risk.score, taskRiskResult.score),
+      breakdown: {
+        destructive: Math.max(
+          intentMismatch.risk.breakdown.destructive,
         uiMappingRisk.risk.breakdown.destructive
       ),
       schema: Math.max(
@@ -2008,7 +2026,8 @@ const decisionMode =
   vagueTask ||
   intentMismatch.suspicious ||
   uiMappingRisk.forcePreviewOnly ||
-  developerConfidence < 70
+  developerConfidence < 70 ||
+  taskRiskResult.score >= 31
     ? "preview_only"
     : "safe_to_apply";
 
