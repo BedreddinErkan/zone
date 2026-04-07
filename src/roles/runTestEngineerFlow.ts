@@ -1073,7 +1073,7 @@ export async function runTestEngineerFlow(input: {
   try {
     input.onProgress?.("Generating patch...");
     const client = createOpenAIClient();
-    const model = getModelName();
+    const model = getModelName("high");
     const retryResult = await withSelfHealingRetry({
       maxAttempts: 3,
       prompt,

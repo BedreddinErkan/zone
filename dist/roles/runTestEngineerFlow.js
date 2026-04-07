@@ -754,7 +754,7 @@ async function runTestEngineerFlow(input) {
     try {
         input.onProgress?.("Generating patch...");
         const client = (0, openaiClient_js_1.createOpenAIClient)();
-        const model = (0, openaiClient_js_1.getModelName)();
+        const model = (0, openaiClient_js_1.getModelName)("high");
         const retryResult = await (0, withSelfHealingRetry_js_1.withSelfHealingRetry)({
             maxAttempts: 3,
             prompt,

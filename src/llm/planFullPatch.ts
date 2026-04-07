@@ -65,7 +65,7 @@ export async function planFullPatchWithLlm(input: {
   existingTargetFiles?: string[];
 }): Promise<FullPatchResult> {
   const client = createOpenAIClient();
-  const model = getModelName();
+  const model = getModelName("high");
   const outputMode: FullPatchOutputMode =
     input.fileContent.length > LARGE_FILE_PATCH_THRESHOLD
       ? "find_replace_patch"

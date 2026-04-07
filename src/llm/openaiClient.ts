@@ -42,5 +42,11 @@ export function createOpenAIClient(): OpenAI {
   return new OpenAI({ apiKey });
 }
 
-export function getModelName(): string {
-return process.env.OPENAI_MODEL || "gpt-4o-mini";}
+export type ZoneModelTier = "high" | "standard";
+
+export function getModelName(tier: ZoneModelTier = "standard"): string {
+  if (tier === "high") {
+    return process.env.ZONE_LLM_MODEL_HIGH ?? process.env.OPENAI_MODEL ?? "gpt-4o";
+  }
+  return process.env.ZONE_LLM_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+}

@@ -36,7 +36,10 @@ function createOpenAIClient() {
     }
     return new openai_1.default({ apiKey });
 }
-function getModelName() {
-    return process.env.OPENAI_MODEL || "gpt-4o-mini";
+function getModelName(tier = "standard") {
+    if (tier === "high") {
+        return process.env.ZONE_LLM_MODEL_HIGH ?? process.env.OPENAI_MODEL ?? "gpt-4o";
+    }
+    return process.env.ZONE_LLM_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-4o-mini";
 }
 //# sourceMappingURL=openaiClient.js.map
