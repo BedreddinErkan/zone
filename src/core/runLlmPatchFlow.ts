@@ -1967,19 +1967,22 @@ export async function runLlmPatchFlow(input: {
       ? Math.min(developerConfidenceBase, ...confidenceCaps)
       : developerConfidenceBase;
 
-  const fileDiffs = applyPatches.map((patch) => {
-    const before = originalContents[patch.filePath] ?? "";
-    const diff = computeFileDiff(before, patch.fullContent);
-    return {
-      filePath: patch.filePath,
-      before,
-      after: patch.fullContent,
-      diff,
-      addedLines: diff.filter((line) => line.type === "added").length,
-      removedLines: diff.filter((line) => line.type === "removed").length,
-    };
-  });
+const normalizeForDiff = (content: string): string =>
+  content.replace(/\r\n/g, "\n").replace(/\t/g, "  ").trimEnd();
 
+const fileDiffs = applyPatches.map((patch) => {
+  const before = normalizeForDiff(originalContents[patch.filePath] ?? "");
+  const after = normalizeForDiff(patch.fullContent);
+  const diff = computeFileDiff(before, after);
+  return {
+    filePath: patch.filePath,
+    before,
+    after,
+    diff,
+    addedLines: diff.filter((line) => line.type === "added").length,
+    removedLines: diff.filter((line) => line.type === "removed").length,
+  };
+});
   const mergedDeveloperRisk = {
     score: Math.max(intentMismatch.risk.score, uiMappingRisk.risk.score),
     breakdown: {
