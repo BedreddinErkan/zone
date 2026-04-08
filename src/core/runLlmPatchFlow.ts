@@ -1941,11 +1941,11 @@ export async function runLlmPatchFlow(input: {
       }
 
       applyResults.push({
-        filePath: fullPatch.filePath,
+        filePath: patch.path,
         fullContent: nextContent,
       });
       patchResults.push({
-        filePath: fullPatch.filePath,
+        filePath: patch.path,
         status: "applied",
       });
     }
@@ -1955,6 +1955,7 @@ export async function runLlmPatchFlow(input: {
     // step 6b is best-effort — never block the preview result
     applyPatches = [];
   }
+  console.log("[hosted] applyPatches count:", applyPatches.length);
 
   if (input.atomicPatch && patchResults.some((result) => result.status === "failed")) {
     return { ok: false, reason: "atomic_patch_failed" };
