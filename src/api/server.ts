@@ -44,9 +44,9 @@ import createLemonCheckoutRouter from "../routes/createLemonCheckout.js";
 import customerPortalRouter from "../routes/getLemonCustomerPortal.js";
 export const app = express();
 const port = Number(process.env.PORT) || 3000;
-app.listen(port, () => {
-  console.log(`Zone UI running on http://localhost:${port}`);
-});const progressStreams = new Map<string, Set<Response>>();
+let startedPort: number | null = null;
+let startPromise: Promise<void> | null = null;
+const progressStreams = new Map<string, Set<Response>>();
 const zoneUiDir = path.resolve(__dirname, "../ui");
 const zoneUiHtmlTemplate = readFileSync(path.join(zoneUiDir, "index.html"), "utf8");
 const ENHANCE_TASK_SYSTEM_PROMPT =
@@ -1340,8 +1340,13 @@ const result = await runDataAnalystFlow({
 app.use(express.static(zoneUiDir));
 
 export async function startServer(port = 3000): Promise<void> {
+  if (startPromise) {
+    return startPromise;
+  }
+
+  startedPort = port;
   logStartupDiagnostics();
-  await new Promise<void>((resolve) => {
+  startPromise = new Promise<void>((resolve) => {
     app.listen(port, () => {
       console.log(
         colorize(`Zone UI running on http://localhost:${port}`, c.green, c.bold)
@@ -1350,11 +1355,13 @@ export async function startServer(port = 3000): Promise<void> {
       resolve();
     });
   });
+
+  await startPromise;
 }
 
 if (
   process.env.VITEST !== "true" &&
   process.env.ZONE_SERVER_MANUAL_START !== "1"
 ) {
-  void startServer(Number(port));
+  void startServer(startedPort ?? Number(port));
 }

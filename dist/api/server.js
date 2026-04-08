@@ -35,9 +35,8 @@ const createLemonCheckout_js_1 = __importDefault(require("../routes/createLemonC
 const getLemonCustomerPortal_js_1 = __importDefault(require("../routes/getLemonCustomerPortal.js"));
 exports.app = (0, express_1.default)();
 const port = Number(process.env.PORT) || 3000;
-exports.app.listen(port, () => {
-    console.log(`Zone UI running on http://localhost:${port}`);
-});
+let startedPort = null;
+let startPromise = null;
 const progressStreams = new Map();
 const zoneUiDir = node_path_1.default.resolve(__dirname, "../ui");
 const zoneUiHtmlTemplate = (0, node_fs_1.readFileSync)(node_path_1.default.join(zoneUiDir, "index.html"), "utf8");
@@ -979,17 +978,22 @@ exports.app.post("/api/data-analyst", async (req, res) => {
 });
 exports.app.use(express_1.default.static(zoneUiDir));
 async function startServer(port = 3000) {
+    if (startPromise) {
+        return startPromise;
+    }
+    startedPort = port;
     logStartupDiagnostics();
-    await new Promise((resolve) => {
+    startPromise = new Promise((resolve) => {
         exports.app.listen(port, () => {
             console.log((0, colors_js_1.colorize)(`Zone UI running on http://localhost:${port}`, colors_js_1.c.green, colors_js_1.c.bold));
             console.log((0, colors_js_1.colorize)("Press Ctrl+C to stop", colors_js_1.c.dim, colors_js_1.c.gray));
             resolve();
         });
     });
+    await startPromise;
 }
 if (process.env.VITEST !== "true" &&
     process.env.ZONE_SERVER_MANUAL_START !== "1") {
-    void startServer(Number(port));
+    void startServer(startedPort ?? Number(port));
 }
 //# sourceMappingURL=server.js.map
