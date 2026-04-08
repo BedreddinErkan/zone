@@ -31,6 +31,7 @@ const colors_js_1 = require("../cli/colors.js");
 const validateLlmOutput_js_1 = require("../core/validateLlmOutput.js");
 const lemonsqueezyWebhook_js_1 = __importDefault(require("../routes/lemonsqueezyWebhook.js"));
 const createLemonCheckout_js_1 = __importDefault(require("../routes/createLemonCheckout.js"));
+const getLemonCustomerPortal_js_1 = __importDefault(require("../routes/getLemonCustomerPortal.js"));
 exports.app = (0, express_1.default)();
 const port = Number(process.env.PORT) || 3000;
 exports.app.listen(port, () => {
@@ -52,6 +53,7 @@ exports.app.use(body_parser_1.default.json({ limit: "10mb" }));
 exports.app.use(body_parser_1.default.urlencoded({ extended: true, limit: "10mb" }));
 exports.app.use(body_parser_1.default.urlencoded({ extended: true }));
 exports.app.use("/api/lemonsqueezy/create-checkout", createLemonCheckout_js_1.default);
+exports.app.use("/api/lemonsqueezy/customer-portal", getLemonCustomerPortal_js_1.default);
 exports.app.get("/", (_req, res) => {
     res.type("html").send(renderZoneUiHtml());
 });

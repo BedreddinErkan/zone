@@ -276,10 +276,10 @@ const runLlmPatchFlow_js_1 = require("../runLlmPatchFlow.js");
     });
     (0, vitest_1.describe)("context filtering", () => {
         (0, vitest_1.it)("filters .env paths from developer context", () => {
-            (0, vitest_1.expect)((0, runLlmPatchFlow_js_1.isIrrelevantDeveloperContextPath)(".env")).toBe(false);
+            (0, vitest_1.expect)((0, runLlmPatchFlow_js_1.isIrrelevantDeveloperContextPath)(".env")).toBe(true);
         });
         (0, vitest_1.it)("filters .gitignore paths from developer context", () => {
-            (0, vitest_1.expect)((0, runLlmPatchFlow_js_1.isIrrelevantDeveloperContextPath)(".gitignore")).toBe(false);
+            (0, vitest_1.expect)((0, runLlmPatchFlow_js_1.isIrrelevantDeveloperContextPath)(".gitignore")).toBe(true);
         });
         (0, vitest_1.it)("filters node_modules paths from developer context", () => {
             (0, vitest_1.expect)((0, runLlmPatchFlow_js_1.isIrrelevantDeveloperContextPath)("node_modules/react/index.js")).toBe(true);
