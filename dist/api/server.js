@@ -9,6 +9,7 @@ require("dotenv/config");
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const body_parser_1 = __importDefault(require("body-parser"));
+const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const supabase_js_1 = require("@supabase/supabase-js");
@@ -54,6 +55,20 @@ exports.app.use(body_parser_1.default.urlencoded({ extended: true, limit: "10mb"
 exports.app.use(body_parser_1.default.urlencoded({ extended: true }));
 exports.app.use("/api/lemonsqueezy/create-checkout", createLemonCheckout_js_1.default);
 exports.app.use("/api/lemonsqueezy/customer-portal", getLemonCustomerPortal_js_1.default);
+const developerRouteLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 60 * 1000,
+    limit: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        ok: false,
+        reason: "rate_limited",
+        message: "Too many requests. Please slow down.",
+    },
+});
+exports.app.use("/api/analyze", developerRouteLimiter);
+exports.app.use("/api/patch", developerRouteLimiter);
+exports.app.use("/api/dry-run", developerRouteLimiter);
 exports.app.get("/", (_req, res) => {
     res.type("html").send(renderZoneUiHtml());
 });
@@ -483,8 +498,21 @@ async function ensureRunAuthorized(rawUserId) {
     }
     try {
         const { data, error } = await query.maybeSingle();
-        if (error || !data) {
+        if (error) {
+            console.error("[auth] supabase error:", error);
             return { allowed: true };
+        }
+        console.log("[auth] userId:", authenticatedUserId, "data:", JSON.stringify(data), "error:", error);
+        if (!data) {
+            return {
+                allowed: false,
+                status: 401,
+                body: {
+                    ok: false,
+                    reason: "unauthorized",
+                    message: "Missing user session. Please open Zone from your dashboard.",
+                },
+            };
         }
         const credits = typeof data.credits === "number"
             ? data.credits
