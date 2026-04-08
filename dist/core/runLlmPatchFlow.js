@@ -185,6 +185,10 @@ function isIrrelevantDeveloperContextPath(filePath) {
     const normalized = `/${filePath.replace(/\\/g, "/").toLowerCase().replace(/^\/+/, "")}`;
     return IRRELEVANT_DEVELOPER_CONTEXT_SEGMENTS.some((segment) => normalized.includes(segment));
 }
+function isHostedEnvironment() {
+    return (process.env.ZONE_INFERENCE_MODE === "hosted" ||
+        Boolean(process.env.ZONE_API_BASE_URL));
+}
 function extractStructureTokens(content) {
     const tokens = new Set();
     const regex = /\b(?:id|class)=["']([^"']+)["']/gi;
@@ -1081,8 +1085,16 @@ async function runLlmPatchFlow(input) {
         category: file.category,
     }));
     // 1. Scan repo
-    const allFiles = hostedAvailableFiles ?? (await (0, scanRepo_js_1.scanRepo)(input.repoPath));
-    if (!input.hostedContext && allFiles.length === 0) {
+    let allFiles = hostedAvailableFiles ?? [];
+    if (!hostedAvailableFiles) {
+        try {
+            allFiles = await (0, scanRepo_js_1.scanRepo)(input.repoPath);
+        }
+        catch {
+            allFiles = [];
+        }
+    }
+    if (!input.hostedContext && allFiles.length === 0 && !isHostedEnvironment()) {
         return { ok: false, reason: "repo_not_accessible_in_hosted_mode" };
     }
     const developerContextFiles = allFiles.filter((file) => !isIrrelevantDeveloperContextPath(file.path));
@@ -1170,20 +1182,38 @@ async function runLlmPatchFlow(input) {
     }
     // 6. Plan patch preview with LLM
     let patchPlan;
-    try {
-        patchPlan = await (0, planPatchPreview_js_1.planPatchPreviewWithLlm)({
-            task: input.task,
-            intent: taskIntent,
-            projectSummary,
-            projectNotes,
-            suggestedFiles: selectedContextFiles,
-            fileContexts: resolvedFileContexts,
-            schemaAwareSummary: [],
-        });
+    if (input.hostedContext) {
+        patchPlan = {
+            patches: input.hostedContext.contextFiles
+                .filter((f) => f.action === "modify" || f.action === "create" || f.action === "inspect")
+                .map((f) => ({
+                path: f.path,
+                operation: (f.action === "create" ? "create" : "modify"),
+                summary: f.reason,
+                targetHint: f.reason,
+                contentPreview: f.content.slice(0, 500),
+                reason: f.reason,
+            })),
+            summary: input.task,
+            warnings: [],
+        };
     }
-    catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        return { ok: false, reason };
+    else {
+        try {
+            patchPlan = await (0, planPatchPreview_js_1.planPatchPreviewWithLlm)({
+                task: input.task,
+                intent: taskIntent,
+                projectSummary,
+                projectNotes,
+                suggestedFiles: selectedContextFiles,
+                fileContexts: resolvedFileContexts,
+                schemaAwareSummary: [],
+            });
+        }
+        catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            return { ok: false, reason };
+        }
     }
     const vagueTask = isVagueDeveloperTask(input.task);
     // Task-level risk scoring for developer

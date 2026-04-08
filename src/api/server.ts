@@ -38,8 +38,8 @@ import {
 import type { Response } from "express";
 import { c, colorize } from "../cli/colors.js";
 import { validateLlmOutput } from "../core/validateLlmOutput.js";
-import stripeWebhookRouter from "../routes/stripeWebhook.js";
-import createCheckoutSessionRouter from "../routes/createCheckoutSession.js";
+import lemonWebhookRouter from "../routes/lemonsqueezyWebhook.js";
+import createLemonCheckoutRouter from "../routes/createLemonCheckout.js";
 export const app = express();
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {
@@ -115,14 +115,14 @@ type HostedDataAnalystContextPayload = {
 
 app.use(cors());
 app.use(
-  "/api/stripe/webhook",
+  "/api/lemonsqueezy/webhook",
   express.raw({ type: "application/json" }),
-  stripeWebhookRouter
+  lemonWebhookRouter
 );
 app.use(bodyParser.json({ limit: "10mb" }));
 app.use(bodyParser.urlencoded({ extended: true, limit: "10mb" }));
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use("/api/stripe/create-checkout-session", createCheckoutSessionRouter);
+app.use("/api/lemonsqueezy/create-checkout", createLemonCheckoutRouter);
 
 app.get("/", (_req, res) => {
   res.type("html").send(renderZoneUiHtml());

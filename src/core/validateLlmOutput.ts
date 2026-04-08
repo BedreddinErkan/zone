@@ -195,6 +195,19 @@ function validateDeveloperOutput(patches: PatchContentItem[]): LlmOutputIssue[] 
       }
     }
 
+    // UNICODE_ESCAPE_DETECTED: LLM emitted raw unicode escapes instead of code
+    const unicodeEscapePattern = /\\u[0-9a-fA-F]{4}/g;
+    const unicodeMatches = c.match(unicodeEscapePattern) || [];
+    const unicodeDensity = unicodeMatches.length / Math.max(c.split("\n").length, 1);
+    if (unicodeMatches.length > 10 || unicodeDensity > 2) {
+      issues.push(issue(
+        "UNICODE_ESCAPE_DETECTED",
+        "error",
+        `Output contains ${unicodeMatches.length} unicode escape sequences (density: ${unicodeDensity.toFixed(1)}/line) — LLM likely hallucinated encoded content instead of real code.`,
+        fp
+      ));
+    }
+
     // MISSING_IMPORTS: usage of identifiers that look unimported
     // Heuristic: file uses React hooks but no React/hooks import
     const usesUseState = hasPattern(c, /\buseState\s*\(/);

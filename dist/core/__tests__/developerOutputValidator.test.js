@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const vitest_1 = require("vitest");
+const validateLlmOutput_js_1 = require("../validateLlmOutput.js");
 const runLlmPatchFlow_js_1 = require("../runLlmPatchFlow.js");
 (0, vitest_1.describe)("validateDeveloperOutput", () => {
     (0, vitest_1.it)("blocks console logging of password-like values", () => {
@@ -185,6 +186,29 @@ const runLlmPatchFlow_js_1 = require("../runLlmPatchFlow.js");
             "[DEVELOPER_VALIDATION_REMOVAL] Output removes input validation or guards.",
             "[DEVELOPER_AUTH_WEAKENING] Output weakens authentication or authorization.",
         ]);
+    });
+    (0, vitest_1.it)("flags hallucinated raw unicode escapes as blocking output", () => {
+        const content = "export const broken = \"" +
+            "\\u0041\\u0042\\u0043\\u0044\\u0045\\u0046\\u0047\\u0048\\u0049\\u0050\\u0051\\u0052\\u0053\\u0054\\u0055" +
+            "\";";
+        const result = (0, validateLlmOutput_js_1.validateLlmOutput)("developer", [
+            {
+                filePath: "src/utils/broken.ts",
+                content,
+            },
+        ]);
+        const issue = result.issues.find((i) => i.code === "UNICODE_ESCAPE_DETECTED");
+        (0, vitest_1.expect)(issue?.severity).toBe("error");
+        (0, vitest_1.expect)(result.verdict).toBe("block");
+    });
+    (0, vitest_1.it)("does not flag normal code with one or two unicode escapes", () => {
+        const result = (0, validateLlmOutput_js_1.validateLlmOutput)("developer", [
+            {
+                filePath: "src/utils/labels.ts",
+                content: 'export const unicodeLabel = "Price \\u20AC";\nexport const newline = "\\u000A";',
+            },
+        ]);
+        (0, vitest_1.expect)(result.issues.some((i) => i.code === "UNICODE_ESCAPE_DETECTED")).toBe(false);
     });
 });
 //# sourceMappingURL=developerOutputValidator.test.js.map
