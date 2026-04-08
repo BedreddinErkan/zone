@@ -1086,6 +1086,8 @@ it("logs successful developer runs to Supabase when env is configured", async ()
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         credits: 7,
+        free_limit: 10,
+        runs_used_this_month: 3,
         subscription_status: "free",
       },
       error: null,
@@ -1168,6 +1170,7 @@ it("logs successful developer runs to Supabase when env is configured", async ()
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         credits: 0,
+        runs_used_this_month: 12,
         subscription_status: "pro",
       },
       error: null,
@@ -1188,6 +1191,7 @@ it("logs successful developer runs to Supabase when env is configured", async ()
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         credits: 0,
+        runs_used_this_month: 12,
         subscription_status: "pro",
       },
       error: null,
@@ -1202,7 +1206,7 @@ it("logs successful developer runs to Supabase when env is configured", async ()
     expect(body).toEqual({
       ok: true,
       plan: "Pro",
-      credits: 0,
+      credits: 988,
       subscriptionStatus: "pro",
     });
   });
@@ -1404,6 +1408,8 @@ it("logs successful developer runs to Supabase when env is configured", async ()
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         credits: 3,
+        free_limit: 8,
+        runs_used_this_month: 5,
         subscription_status: "free",
       },
       error: null,

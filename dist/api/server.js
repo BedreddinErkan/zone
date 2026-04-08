@@ -338,7 +338,7 @@ async function handleBillingSummary(req, res) {
     }
     const profilesTable = supabase.from("profiles");
     const query = profilesTable
-        .select?.("credits,subscription_status")
+        .select?.("credits,runs_used_this_month,free_limit,subscription_status")
         ?.eq?.("clerk_user_id", userId);
     if (!query || typeof query.maybeSingle !== "function") {
         res.json({ ok: false, reason: "profile_unavailable" });
@@ -353,11 +353,21 @@ async function handleBillingSummary(req, res) {
         const credits = typeof data.credits === "number"
             ? data.credits
             : Number(data.credits ?? 0);
+        const runsUsedThisMonth = typeof data.runs_used_this_month === "number"
+            ? data.runs_used_this_month
+            : Number(data.runs_used_this_month ?? 0);
+        const freeLimit = typeof data.free_limit === "number"
+            ? data.free_limit
+            : Number(data.free_limit ?? credits);
         const status = normalizeSubscriptionStatus(data.subscription_status) || "free";
+        const remainingRuns = hasPaidAccess(status)
+            ? Math.max(0, 1000 - (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0))
+            : Math.max(0, (Number.isFinite(freeLimit) ? freeLimit : 0) -
+                (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0));
         res.json({
             ok: true,
             plan: hasPaidAccess(status) ? "Pro" : "Free",
-            credits: Number.isFinite(credits) ? Math.max(0, credits) : 0,
+            credits: remainingRuns,
             subscriptionStatus: status,
         });
     }
@@ -394,7 +404,6 @@ async function logRun(input) {
     else {
         console.log("[zone] logRun: run_logs insert ok");
     }
-    let freeRunDebit = 1;
     const profilesRead = supabase.from("profiles");
     const profileQuery = profilesRead
         .select?.("credits,total_runs,subscription_status")
@@ -404,21 +413,17 @@ async function logRun(input) {
             const { data, error } = await profileQuery.maybeSingle();
             if (!error && data) {
                 const normalizedStatus = normalizeSubscriptionStatus(data.subscription_status);
-                const paidAccess = normalizedStatus === "pro";
-                freeRunDebit = paidAccess ? 0 : 1;
                 console.log(`[zone] logRun: subscription_status=${normalizedStatus || "missing"}`);
-                console.log(`[zone] logRun: paidAccess=${paidAccess}`);
             }
             else {
                 console.log("[zone] logRun: profile read failed, defaulting debit=1");
-                freeRunDebit = 1;
             }
         }
         catch {
             console.log("[zone] logRun: profile read threw, defaulting debit=1");
-            freeRunDebit = 1;
         }
     }
+    const freeRunDebit = 1;
     const rpcName = "deduct_credits_and_increment_runs";
     const rpcPayload = {
         p_user_id: effectiveUserId,
