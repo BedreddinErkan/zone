@@ -1951,8 +1951,12 @@ export async function runLlmPatchFlow(input: {
     }
 
     applyPatches = applyResults;
-  } catch {
+  } catch (err) {
     // step 6b is best-effort — never block the preview result
+    console.error(
+      "[hosted] step 6b failed:",
+      err instanceof Error ? err.message : String(err)
+    );
     applyPatches = [];
   }
   console.log("[hosted] applyPatches count:", applyPatches.length);
