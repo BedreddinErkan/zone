@@ -13,7 +13,11 @@ const fullContentSchema = zod_1.z.object({
 });
 const LARGE_FILE_PATCH_THRESHOLD = 8000;
 function extractJson(rawText) {
-    const trimmed = rawText.trim();
+    const trimmed = rawText
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/```\s*$/i, "")
+        .trim();
     if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
         return trimmed;
     }

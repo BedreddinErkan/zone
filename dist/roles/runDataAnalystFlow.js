@@ -12,7 +12,11 @@ const dataAnalystContext_js_1 = require("./dataAnalystContext.js");
 const detectDataSchema_js_1 = require("./detectDataSchema.js");
 const dataAnalystPrompt_js_1 = require("../prompts/dataAnalystPrompt.js");
 function extractJson(rawText) {
-    const trimmed = rawText.trim();
+    const trimmed = rawText
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/```\s*$/i, "")
+        .trim();
     if (trimmed.startsWith("{") && trimmed.endsWith("}"))
         return trimmed;
     const firstBrace = trimmed.indexOf("{");

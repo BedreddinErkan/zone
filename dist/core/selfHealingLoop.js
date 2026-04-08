@@ -147,7 +147,13 @@ async function runSelfHealingLoop(input) {
                 const lastBrace = rawText.lastIndexOf("}");
                 if (firstBrace < 0 || lastBrace < 0)
                     continue;
-                const parsed = JSON.parse(rawText.slice(firstBrace, lastBrace + 1));
+                const cleaned = rawText
+                    .slice(firstBrace, lastBrace + 1)
+                    .replace(/^```json\s*/i, "")
+                    .replace(/^```\s*/i, "")
+                    .replace(/```\s*$/i, "")
+                    .trim();
+                const parsed = JSON.parse(cleaned);
                 if (parsed.fullContent) {
                     await node_fs_1.promises.mkdir(node_path_1.default.dirname(absolutePath), { recursive: true });
                     await node_fs_1.promises.writeFile(absolutePath, parsed.fullContent, "utf8");

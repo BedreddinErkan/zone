@@ -22,7 +22,11 @@ const runLlmPatchFlow_js_1 = require("../core/runLlmPatchFlow.js");
 const testOutputValidator_js_1 = require("./testOutputValidator.js");
 const detectTestComplexity_js_1 = require("./detectTestComplexity.js");
 function extractJson(rawText) {
-    const trimmed = rawText.trim();
+    const trimmed = rawText
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/```\s*$/i, "")
+        .trim();
     if (trimmed.startsWith("{") && trimmed.endsWith("}"))
         return trimmed;
     const firstBrace = trimmed.indexOf("{");
