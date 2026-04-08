@@ -1692,6 +1692,18 @@ export async function runLlmPatchFlow(input: {
     const reason = err instanceof Error ? err.message : String(err);
     return { ok: false, reason };
   }
+  if (input.hostedContext) {
+    patchPlan = {
+      ...patchPlan,
+      patches: patchPlan.patches.filter((p) =>
+        Object.prototype.hasOwnProperty.call(
+          input.hostedContext!.originalContents,
+          p.path
+        )
+      ),
+    };
+    console.log("[hosted] filtered patches count:", patchPlan.patches.length);
+  }
 
   const vagueTask = isVagueDeveloperTask(input.task);
   // Task-level risk scoring for developer
