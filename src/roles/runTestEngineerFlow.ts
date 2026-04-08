@@ -106,7 +106,11 @@ type HostedTestEngineerContextInput = {
 };
 
 function extractJson(rawText: string): string {
-  const trimmed = rawText.trim();
+  const trimmed = rawText
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
   if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed;
   const firstBrace = trimmed.indexOf("{");
   const lastBrace = trimmed.lastIndexOf("}");

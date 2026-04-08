@@ -203,9 +203,14 @@ export async function runSelfHealingLoop(
 
         if (firstBrace < 0 || lastBrace < 0) continue;
 
-        const parsed = JSON.parse(
-          rawText.slice(firstBrace, lastBrace + 1)
-        ) as {
+        const cleaned = rawText
+          .slice(firstBrace, lastBrace + 1)
+          .replace(/^```json\s*/i, "")
+          .replace(/^```\s*/i, "")
+          .replace(/```\s*$/i, "")
+          .trim();
+
+        const parsed = JSON.parse(cleaned) as {
           filePath: string;
           fullContent: string;
           summary: string;

@@ -5,7 +5,11 @@ import type { TaskIntent } from "../core/taskIntentParser.js";
 import { buildPatchPreviewPrompt } from "../prompts/patchPreviewPrompt.js";
 
 function extractJson(rawText: string): string {
-  const trimmed = rawText.trim();
+  const trimmed = rawText
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
 
   if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
     return trimmed;
