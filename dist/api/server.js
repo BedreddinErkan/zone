@@ -499,10 +499,8 @@ async function ensureRunAuthorized(rawUserId) {
     try {
         const { data, error } = await query.maybeSingle();
         if (error) {
-            console.error("[auth] supabase error:", error);
             return { allowed: true };
         }
-        console.log("[auth] userId:", authenticatedUserId, "data:", JSON.stringify(data), "error:", error);
         if (!data) {
             return {
                 allowed: false,
