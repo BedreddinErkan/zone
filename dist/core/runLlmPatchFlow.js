@@ -112,6 +112,10 @@ const MICRO_EDIT_INTENT_TERMS = [
 ];
 const UI_MAPPING_RISK_TERMS = ["swap", "mapping", "reversed", "order", "before/after"];
 const IRRELEVANT_DEVELOPER_CONTEXT_SEGMENTS = [
+    "/.env",
+    "/.gitignore",
+    "/.idea/",
+    "/.claude/",
     "/venv/",
     "/site-packages/",
     "/node_modules/",

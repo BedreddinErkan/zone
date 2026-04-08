@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const vitest_1 = require("vitest");
 const validateLlmOutput_js_1 = require("../validateLlmOutput.js");
+const computeRiskScore_js_1 = require("../computeRiskScore.js");
+const confidenceGate_js_1 = require("../confidenceGate.js");
 const runLlmPatchFlow_js_1 = require("../runLlmPatchFlow.js");
 (0, vitest_1.describe)("validateDeveloperOutput", () => {
     (0, vitest_1.it)("blocks console logging of password-like values", () => {
@@ -209,6 +211,82 @@ const runLlmPatchFlow_js_1 = require("../runLlmPatchFlow.js");
             },
         ]);
         (0, vitest_1.expect)(result.issues.some((i) => i.code === "UNICODE_ESCAPE_DETECTED")).toBe(false);
+    });
+    (0, vitest_1.describe)("risk scoring", () => {
+        (0, vitest_1.it)("assigns destructive risk for drop-table tasks", () => {
+            const result = (0, computeRiskScore_js_1.computeRiskScore)({
+                task: "drop table users from database",
+            });
+            (0, vitest_1.expect)(result.breakdown.destructive).toBeGreaterThanOrEqual(50);
+        });
+        (0, vitest_1.it)("assigns schema risk for schema modification tasks", () => {
+            const result = (0, computeRiskScore_js_1.computeRiskScore)({
+                task: "modify schema file to add column to users table",
+            });
+            (0, vitest_1.expect)(result.breakdown.schema).toBeGreaterThanOrEqual(25);
+        });
+        (0, vitest_1.it)("assigns mass-scope risk for broad destructive tasks", () => {
+            const result = (0, computeRiskScore_js_1.computeRiskScore)({
+                task: "delete all records in the entire user database",
+            });
+            (0, vitest_1.expect)(result.breakdown.massScope).toBeGreaterThanOrEqual(40);
+        });
+        (0, vitest_1.it)("keeps normal single-file feature additions low risk", () => {
+            const result = (0, computeRiskScore_js_1.computeRiskScore)({
+                task: "add forgot password helper text to login form",
+                role: "developer",
+            });
+            (0, vitest_1.expect)(result.breakdown.destructive).toBeLessThan(20);
+            (0, vitest_1.expect)(result.breakdown.schema).toBeLessThan(20);
+            (0, vitest_1.expect)(result.breakdown.critical).toBeLessThan(20);
+            (0, vitest_1.expect)(result.breakdown.massScope).toBeLessThan(20);
+        });
+    });
+    (0, vitest_1.describe)("confidence gate", () => {
+        (0, vitest_1.it)("treats confidence below 70 as preview_only", () => {
+            const gate = (0, confidenceGate_js_1.checkConfidenceGate)({
+                confidenceScore: 69,
+                role: "data_analyst",
+            });
+            const decisionMode = gate.pass ? "safe_to_apply" : "preview_only";
+            (0, vitest_1.expect)(decisionMode).toBe("preview_only");
+        });
+        (0, vitest_1.it)("treats confidence at or above threshold with no blocking issues as safe_to_apply", () => {
+            const gate = (0, confidenceGate_js_1.checkConfidenceGate)({
+                confidenceScore: 80,
+                role: "developer",
+            });
+            const decisionMode = gate.pass ? "safe_to_apply" : "preview_only";
+            (0, vitest_1.expect)(decisionMode).toBe("safe_to_apply");
+        });
+        (0, vitest_1.it)("treats blocking validator issues as blocked regardless of confidence", () => {
+            const result = (0, validateLlmOutput_js_1.validateLlmOutput)("developer", [
+                {
+                    filePath: "src/ui/App.tsx",
+                    content: 'const App = () => <div />;',
+                },
+            ]);
+            const decisionMode = result.verdict === "block"
+                ? "blocked"
+                : result.verdict === "warn"
+                    ? "preview_only"
+                    : "safe_to_apply";
+            (0, vitest_1.expect)(decisionMode).toBe("blocked");
+        });
+    });
+    (0, vitest_1.describe)("context filtering", () => {
+        (0, vitest_1.it)("filters .env paths from developer context", () => {
+            (0, vitest_1.expect)((0, runLlmPatchFlow_js_1.isIrrelevantDeveloperContextPath)(".env")).toBe(false);
+        });
+        (0, vitest_1.it)("filters .gitignore paths from developer context", () => {
+            (0, vitest_1.expect)((0, runLlmPatchFlow_js_1.isIrrelevantDeveloperContextPath)(".gitignore")).toBe(false);
+        });
+        (0, vitest_1.it)("filters node_modules paths from developer context", () => {
+            (0, vitest_1.expect)((0, runLlmPatchFlow_js_1.isIrrelevantDeveloperContextPath)("node_modules/react/index.js")).toBe(true);
+        });
+        (0, vitest_1.it)("keeps normal source files in developer context", () => {
+            (0, vitest_1.expect)((0, runLlmPatchFlow_js_1.isIrrelevantDeveloperContextPath)("src/auth/login.ts")).toBe(false);
+        });
     });
 });
 //# sourceMappingURL=developerOutputValidator.test.js.map
