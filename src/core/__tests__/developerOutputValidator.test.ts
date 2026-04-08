@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { validateLlmOutput } from "../validateLlmOutput.js";
+import { computeRiskScore } from "../computeRiskScore.js";
+import { checkConfidenceGate } from "../confidenceGate.js";
 
 import {
   analyzePatchScope,
@@ -9,6 +11,7 @@ import {
   evaluateIntentPatchMismatch,
   evaluateUiMappingRisk,
   filterVisibleDeveloperWarnings,
+  isIrrelevantDeveloperContextPath,
   isVagueDeveloperTask,
   validateDeveloperOutput,
 } from "../runLlmPatchFlow.js";
@@ -312,5 +315,95 @@ describe("validateDeveloperOutput", () => {
     expect(
       result.issues.some((i) => i.code === "UNICODE_ESCAPE_DETECTED")
     ).toBe(false);
+  });
+
+  describe("risk scoring", () => {
+    it("assigns destructive risk for drop-table tasks", () => {
+      const result = computeRiskScore({
+        task: "drop table users from database",
+      });
+      expect(result.breakdown.destructive).toBeGreaterThanOrEqual(50);
+    });
+
+    it("assigns schema risk for schema modification tasks", () => {
+      const result = computeRiskScore({
+        task: "modify schema file to add column to users table",
+      });
+      expect(result.breakdown.schema).toBeGreaterThanOrEqual(25);
+    });
+
+    it("assigns mass-scope risk for broad destructive tasks", () => {
+      const result = computeRiskScore({
+        task: "delete all records in the entire user database",
+      });
+      expect(result.breakdown.massScope).toBeGreaterThanOrEqual(40);
+    });
+
+    it("keeps normal single-file feature additions low risk", () => {
+      const result = computeRiskScore({
+        task: "add forgot password helper text to login form",
+        role: "developer",
+      });
+      expect(result.breakdown.destructive).toBeLessThan(20);
+      expect(result.breakdown.schema).toBeLessThan(20);
+      expect(result.breakdown.critical).toBeLessThan(20);
+      expect(result.breakdown.massScope).toBeLessThan(20);
+    });
+  });
+
+  describe("confidence gate", () => {
+    it("treats confidence below 70 as preview_only", () => {
+      const gate = checkConfidenceGate({
+        confidenceScore: 69,
+        role: "data_analyst",
+      });
+      const decisionMode = gate.pass ? "safe_to_apply" : "preview_only";
+      expect(decisionMode).toBe("preview_only");
+    });
+
+    it("treats confidence at or above threshold with no blocking issues as safe_to_apply", () => {
+      const gate = checkConfidenceGate({
+        confidenceScore: 80,
+        role: "developer",
+      });
+      const decisionMode = gate.pass ? "safe_to_apply" : "preview_only";
+      expect(decisionMode).toBe("safe_to_apply");
+    });
+
+    it("treats blocking validator issues as blocked regardless of confidence", () => {
+      const result = validateLlmOutput("developer", [
+        {
+          filePath: "src/ui/App.tsx",
+          content: 'const App = () => <div />;',
+        },
+      ]);
+      const decisionMode =
+        result.verdict === "block"
+          ? "blocked"
+          : result.verdict === "warn"
+            ? "preview_only"
+            : "safe_to_apply";
+      expect(decisionMode).toBe("blocked");
+    });
+  });
+
+  describe("context filtering", () => {
+    it("filters .env paths from developer context", () => {
+      expect(isIrrelevantDeveloperContextPath(".env")).toBe(true);
+    });
+
+    it("filters .gitignore paths from developer context", () => {
+      expect(isIrrelevantDeveloperContextPath(".gitignore")).toBe(true);
+    });
+
+    it("filters node_modules paths from developer context", () => {
+      expect(isIrrelevantDeveloperContextPath("node_modules/react/index.js")).toBe(
+        true
+      );
+    });
+
+    it("keeps normal source files in developer context", () => {
+      expect(isIrrelevantDeveloperContextPath("src/auth/login.ts")).toBe(false);
+    });
   });
 });
