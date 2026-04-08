@@ -1186,38 +1186,27 @@ async function runLlmPatchFlow(input) {
     }
     // 6. Plan patch preview with LLM
     let patchPlan;
+    try {
+        patchPlan = await (0, planPatchPreview_js_1.planPatchPreviewWithLlm)({
+            task: input.task,
+            intent: taskIntent,
+            projectSummary,
+            projectNotes,
+            suggestedFiles: selectedContextFiles,
+            fileContexts: resolvedFileContexts,
+            schemaAwareSummary: [],
+        });
+    }
+    catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        return { ok: false, reason };
+    }
     if (input.hostedContext) {
         patchPlan = {
-            patches: input.hostedContext.contextFiles
-                .filter((f) => f.action === "modify" || f.action === "create" || f.action === "inspect")
-                .map((f) => ({
-                path: f.path,
-                operation: (f.action === "create" ? "create" : "modify"),
-                summary: f.reason,
-                targetHint: f.reason,
-                contentPreview: f.content.slice(0, 500),
-                reason: f.reason,
-            })),
-            summary: input.task,
-            warnings: [],
+            ...patchPlan,
+            patches: patchPlan.patches.filter((p) => Object.prototype.hasOwnProperty.call(input.hostedContext.originalContents, p.path)),
         };
-    }
-    else {
-        try {
-            patchPlan = await (0, planPatchPreview_js_1.planPatchPreviewWithLlm)({
-                task: input.task,
-                intent: taskIntent,
-                projectSummary,
-                projectNotes,
-                suggestedFiles: selectedContextFiles,
-                fileContexts: resolvedFileContexts,
-                schemaAwareSummary: [],
-            });
-        }
-        catch (err) {
-            const reason = err instanceof Error ? err.message : String(err);
-            return { ok: false, reason };
-        }
+        console.log("[hosted] filtered patches count:", patchPlan.patches.length);
     }
     const vagueTask = isVagueDeveloperTask(input.task);
     // Task-level risk scoring for developer
@@ -1258,8 +1247,15 @@ async function runLlmPatchFlow(input) {
                 });
                 continue;
             }
+            const hostedOriginalContent = input.hostedContext &&
+                Object.prototype.hasOwnProperty.call(input.hostedContext.originalContents, patch.path)
+                ? input.hostedContext.originalContents[patch.path] ?? ""
+                : undefined;
+            const hostedContextFileContent = input.hostedContext?.contextFiles.find((file) => file.path === patch.path)
+                ?.content;
             if (input.hostedContext &&
-                !Object.prototype.hasOwnProperty.call(originalContents, patch.path)) {
+                typeof hostedOriginalContent === "undefined" &&
+                typeof hostedContextFileContent === "undefined") {
                 patchResults.push({
                     filePath: patch.path,
                     status: "skipped",
@@ -1270,7 +1266,7 @@ async function runLlmPatchFlow(input) {
             const repoFile = allFiles.find((f) => f.path === patch.path);
             const absolutePath = repoFile?.absolutePath;
             const fileContent = input.hostedContext
-                ? originalContents[patch.path] ?? ""
+                ? hostedOriginalContent ?? hostedContextFileContent ?? ""
                 : absolutePath !== undefined
                     ? ((await (0, readProjectFiles_js_1.readProjectFiles)([absolutePath]))[absolutePath] ?? "")
                     : "";
@@ -1413,20 +1409,22 @@ async function runLlmPatchFlow(input) {
                 continue;
             }
             applyResults.push({
-                filePath: fullPatch.filePath,
+                filePath: patch.path,
                 fullContent: nextContent,
             });
             patchResults.push({
-                filePath: fullPatch.filePath,
+                filePath: patch.path,
                 status: "applied",
             });
         }
         applyPatches = applyResults;
     }
-    catch {
+    catch (err) {
         // step 6b is best-effort — never block the preview result
+        console.error("[hosted] step 6b failed:", err instanceof Error ? err.message : String(err));
         applyPatches = [];
     }
+    console.log("[hosted] applyPatches count:", applyPatches.length);
     if (input.atomicPatch && patchResults.some((result) => result.status === "failed")) {
         return { ok: false, reason: "atomic_patch_failed" };
     }
