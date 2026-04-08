@@ -1741,9 +1741,22 @@ export async function runLlmPatchFlow(input: {
         continue;
       }
 
+      const hostedOriginalContent =
+        input.hostedContext &&
+        Object.prototype.hasOwnProperty.call(
+          input.hostedContext.originalContents,
+          patch.path
+        )
+          ? input.hostedContext.originalContents[patch.path] ?? ""
+          : undefined;
+      const hostedContextFileContent =
+        input.hostedContext?.contextFiles.find((file) => file.path === patch.path)
+          ?.content;
+
       if (
         input.hostedContext &&
-        !Object.prototype.hasOwnProperty.call(originalContents, patch.path)
+        typeof hostedOriginalContent === "undefined" &&
+        typeof hostedContextFileContent === "undefined"
       ) {
         patchResults.push({
           filePath: patch.path,
@@ -1757,7 +1770,7 @@ export async function runLlmPatchFlow(input: {
       const absolutePath = repoFile?.absolutePath;
 
       const fileContent = input.hostedContext
-        ? originalContents[patch.path] ?? ""
+        ? hostedOriginalContent ?? hostedContextFileContent ?? ""
         : absolutePath !== undefined
           ? ((await readProjectFiles([absolutePath]))[absolutePath] ?? "")
           : "";
