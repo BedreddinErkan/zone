@@ -33,7 +33,7 @@ customerPortalRouter.get("/", async (req, res) => {
         const profilesTable = supabase.from("profiles");
         const profileResult = await profilesTable
             .select("email")
-            .eq("id", userId)
+            .eq("clerk_user_id", userId)
             .maybeSingle();
         if (profileResult?.error) {
             res.status(500).json({ error: profileResult.error.message || "Profile lookup failed" });

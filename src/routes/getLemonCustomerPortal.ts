@@ -48,7 +48,7 @@ customerPortalRouter.get("/", async (req, res) => {
 
     const profileResult = await profilesTable
       .select("email")
-      .eq("id", userId)
+      .eq("clerk_user_id", userId)
       .maybeSingle();
 
     if (profileResult?.error) {

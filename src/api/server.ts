@@ -521,7 +521,7 @@ async function handleBillingSummary(
   };
   const query = profilesTable
     .select?.("credits,subscription_status")
-    ?.eq?.("id", userId);
+    ?.eq?.("clerk_user_id", userId);
   if (!query || typeof query.maybeSingle !== "function") {
     res.json({ ok: false, reason: "profile_unavailable" });
     return;
@@ -609,7 +609,7 @@ async function logRun(input: RunLogInput): Promise<void> {
 
   const profileQuery = profilesRead
     .select?.("credits,total_runs,subscription_status")
-    ?.eq?.("id", effectiveUserId);
+    ?.eq?.("clerk_user_id", effectiveUserId);
 
 if (profileQuery && typeof profileQuery.maybeSingle === "function") {
   try {
@@ -766,7 +766,7 @@ async function ensureRunAuthorized(
 
   const query = profilesTable
     .select("credits,total_runs,subscription_status")
-    ?.eq?.("id", authenticatedUserId);
+    ?.eq?.("clerk_user_id", authenticatedUserId);
 
   if (!query || typeof query.maybeSingle !== "function") {
     return { allowed: true };

@@ -339,7 +339,7 @@ async function handleBillingSummary(req, res) {
     const profilesTable = supabase.from("profiles");
     const query = profilesTable
         .select?.("credits,subscription_status")
-        ?.eq?.("id", userId);
+        ?.eq?.("clerk_user_id", userId);
     if (!query || typeof query.maybeSingle !== "function") {
         res.json({ ok: false, reason: "profile_unavailable" });
         return;
@@ -398,7 +398,7 @@ async function logRun(input) {
     const profilesRead = supabase.from("profiles");
     const profileQuery = profilesRead
         .select?.("credits,total_runs,subscription_status")
-        ?.eq?.("id", effectiveUserId);
+        ?.eq?.("clerk_user_id", effectiveUserId);
     if (profileQuery && typeof profileQuery.maybeSingle === "function") {
         try {
             const { data, error } = await profileQuery.maybeSingle();
@@ -491,7 +491,7 @@ async function ensureRunAuthorized(rawUserId) {
     }
     const query = profilesTable
         .select("credits,total_runs,subscription_status")
-        ?.eq?.("id", authenticatedUserId);
+        ?.eq?.("clerk_user_id", authenticatedUserId);
     if (!query || typeof query.maybeSingle !== "function") {
         return { allowed: true };
     }
