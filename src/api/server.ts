@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
+import rateLimit from "express-rate-limit";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -125,6 +126,22 @@ app.use(bodyParser.urlencoded({ extended: true, limit: "10mb" }));
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use("/api/lemonsqueezy/create-checkout", createLemonCheckoutRouter);
 app.use("/api/lemonsqueezy/customer-portal", customerPortalRouter);
+
+const developerRouteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    ok: false,
+    reason: "rate_limited",
+    message: "Too many requests. Please slow down.",
+  },
+});
+
+app.use("/api/analyze", developerRouteLimiter);
+app.use("/api/patch", developerRouteLimiter);
+app.use("/api/dry-run", developerRouteLimiter);
 
 app.get("/", (_req, res) => {
   res.type("html").send(renderZoneUiHtml());
@@ -757,8 +774,19 @@ async function ensureRunAuthorized(
 
   try {
     const { data, error } = await query.maybeSingle();
-    if (error || !data) {
+    if (error) {
       return { allowed: true };
+    }
+    if (!data) {
+      return {
+        allowed: false,
+        status: 401,
+        body: {
+          ok: false,
+          reason: "unauthorized",
+          message: "Missing user session. Please open Zone from your dashboard.",
+        },
+      };
     }
 
     const credits =
