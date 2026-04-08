@@ -253,6 +253,13 @@ export function isIrrelevantDeveloperContextPath(filePath: string): boolean {
   );
 }
 
+function isHostedEnvironment(): boolean {
+  return (
+    process.env.ZONE_INFERENCE_MODE === "hosted" ||
+    Boolean(process.env.ZONE_API_BASE_URL)
+  );
+}
+
 function extractStructureTokens(content: string): string[] {
   const tokens = new Set<string>();
   const regex = /\b(?:id|class)=["']([^"']+)["']/gi;
@@ -1557,8 +1564,15 @@ export async function runLlmPatchFlow(input: {
     }));
 
   // 1. Scan repo
-  const allFiles = hostedAvailableFiles ?? (await scanRepo(input.repoPath));
-  if (!input.hostedContext && allFiles.length === 0) {
+  let allFiles: RepoFile[] = hostedAvailableFiles ?? [];
+  if (!hostedAvailableFiles) {
+    try {
+      allFiles = await scanRepo(input.repoPath);
+    } catch {
+      allFiles = [];
+    }
+  }
+  if (!input.hostedContext && allFiles.length === 0 && !isHostedEnvironment()) {
     return { ok: false, reason: "repo_not_accessible_in_hosted_mode" };
   }
   const developerContextFiles = allFiles.filter(
