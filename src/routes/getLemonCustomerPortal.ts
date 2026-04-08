@@ -2,6 +2,7 @@ import express from "express";
 import { createClient } from "@supabase/supabase-js";
 
 const customerPortalRouter = express.Router();
+const LEMON_ORDERS_FALLBACK_URL = "https://app.lemonsqueezy.com/my-orders";
 
 function getSupabaseAdminClient() {
   const url = process.env.SUPABASE_URL;
@@ -57,7 +58,7 @@ customerPortalRouter.get("/", async (req, res) => {
 
     const email = profileResult?.data?.email?.trim();
     if (!email) {
-      res.status(404).json({ error: "Customer not found" });
+      res.json({ url: LEMON_ORDERS_FALLBACK_URL, fallback: true });
       return;
     }
 
@@ -91,7 +92,7 @@ customerPortalRouter.get("/", async (req, res) => {
 
     const portalUrl = payload.data?.[0]?.attributes?.urls?.customer_portal;
     if (!portalUrl) {
-      res.status(404).json({ error: "Customer not found" });
+      res.json({ url: LEMON_ORDERS_FALLBACK_URL, fallback: true });
       return;
     }
 
