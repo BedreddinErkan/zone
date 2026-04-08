@@ -1678,41 +1678,19 @@ export async function runLlmPatchFlow(input: {
 
   // 6. Plan patch preview with LLM
   let patchPlan: Awaited<ReturnType<typeof planPatchPreviewWithLlm>>;
-  if (input.hostedContext) {
-    patchPlan = {
-      patches: input.hostedContext.contextFiles
-        .filter(
-          (f) =>
-            f.action === "modify" || f.action === "create" || f.action === "inspect"
-        )
-        .map((f) => ({
-          path: f.path,
-          operation: (f.action === "create" ? "create" : "modify") as
-            | "modify"
-            | "create",
-          summary: f.reason,
-          targetHint: f.reason,
-          contentPreview: f.content.slice(0, 500),
-          reason: f.reason,
-        })),
-      summary: input.task,
-      warnings: [],
-    };
-  } else {
-    try {
-      patchPlan = await planPatchPreviewWithLlm({
-        task: input.task,
-        intent: taskIntent,
-        projectSummary,
-        projectNotes,
-        suggestedFiles: selectedContextFiles,
-        fileContexts: resolvedFileContexts,
-        schemaAwareSummary: [],
-      });
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      return { ok: false, reason };
-    }
+  try {
+    patchPlan = await planPatchPreviewWithLlm({
+      task: input.task,
+      intent: taskIntent,
+      projectSummary,
+      projectNotes,
+      suggestedFiles: selectedContextFiles,
+      fileContexts: resolvedFileContexts,
+      schemaAwareSummary: [],
+    });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return { ok: false, reason };
   }
 
   const vagueTask = isVagueDeveloperTask(input.task);
