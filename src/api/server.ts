@@ -40,6 +40,7 @@ import { c, colorize } from "../cli/colors.js";
 import { validateLlmOutput } from "../core/validateLlmOutput.js";
 import lemonWebhookRouter from "../routes/lemonsqueezyWebhook.js";
 import createLemonCheckoutRouter from "../routes/createLemonCheckout.js";
+import customerPortalRouter from "../routes/getLemonCustomerPortal.js";
 export const app = express();
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {
@@ -123,6 +124,7 @@ app.use(bodyParser.json({ limit: "10mb" }));
 app.use(bodyParser.urlencoded({ extended: true, limit: "10mb" }));
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use("/api/lemonsqueezy/create-checkout", createLemonCheckoutRouter);
+app.use("/api/lemonsqueezy/customer-portal", customerPortalRouter);
 
 app.get("/", (_req, res) => {
   res.type("html").send(renderZoneUiHtml());
