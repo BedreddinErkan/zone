@@ -636,12 +636,43 @@ if (profileQuery && typeof profileQuery.maybeSingle === "function") {
     freeRunDebit = 1;
   }
 }
-  console.log(`[zone] logRun: rpc debit=${freeRunDebit}`);
-
-  const rpcResult = await supabase.rpc("deduct_credits_and_increment_runs", {
+  const rpcName = "deduct_credits_and_increment_runs";
+  const rpcPayload = {
     p_user_id: effectiveUserId,
     p_credits: freeRunDebit,
-  });
+  };
+  console.log(`[zone] logRun: rpc debit=${freeRunDebit}`);
+  console.log(
+    `[zone] logRun: rpc call ${rpcName} payload=${JSON.stringify(rpcPayload)}`
+  );
+
+  const rpcResult = await supabase.rpc(rpcName, rpcPayload);
+  console.log(
+    `[zone] logRun: rpc response=${JSON.stringify({
+      data: "data" in rpcResult ? rpcResult.data : undefined,
+      error:
+        rpcResult.error && typeof rpcResult.error === "object"
+          ? {
+              message:
+                "message" in rpcResult.error
+                  ? (rpcResult.error as { message?: unknown }).message
+                  : undefined,
+              code:
+                "code" in rpcResult.error
+                  ? (rpcResult.error as { code?: unknown }).code
+                  : undefined,
+              details:
+                "details" in rpcResult.error
+                  ? (rpcResult.error as { details?: unknown }).details
+                  : undefined,
+              hint:
+                "hint" in rpcResult.error
+                  ? (rpcResult.error as { hint?: unknown }).hint
+                  : undefined,
+            }
+          : rpcResult.error,
+    })}`
+  );
 
   if (rpcResult.error) {
     console.log(`[zone] logRun: rpc error=${rpcResult.error.message}`);
