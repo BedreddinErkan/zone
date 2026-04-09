@@ -1207,7 +1207,16 @@ export async function runTestEngineerFlow(input: {
           (result["featureFile"] as { content?: string } | undefined)?.content ??
           "";
 
-        if (/TODO|PLACEHOLDER|your\.selector|#placeholder/i.test(testContent)) {
+        const contentWithoutPlaceholderSelectors = testContent
+          .replace(/\[placeholder=["'][^"']*["']\]/g, "")
+          .replace(/getByPlaceholder\s*\(["'][^"']*["']\)/g, "")
+          .replace(/placeholder=["'][^"']*["']/g, "");
+
+        if (
+          /TODO|PLACEHOLDER|your\.selector|#placeholder/i.test(
+            contentWithoutPlaceholderSelectors
+          )
+        ) {
           issues.push({
             code: "PLACEHOLDER_CONTENT",
             message: hasPageObjectContext
