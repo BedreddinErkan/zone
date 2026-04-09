@@ -1112,7 +1112,7 @@ it("logs successful developer runs to Supabase when env is configured", async ()
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        credits: 5,
+        credits: 10,
         subscription_status: "free",
       },
       error: null,
@@ -1383,7 +1383,7 @@ it("logs successful developer runs to Supabase when env is configured", async ()
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        credits: 5,
+        credits: 10,
         subscription_status: "free",
       },
       error: null,

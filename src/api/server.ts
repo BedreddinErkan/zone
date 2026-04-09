@@ -68,6 +68,9 @@ type RunLogInput = {
   creditsUsed: number;
 };
 
+const FREE_PLAN_RUN_LIMIT = 10;
+const PRO_PLAN_RUN_LIMIT = 1000;
+
 type HostedDeveloperContextPayload = {
   repoSummary: string;
   projectNotes?: string[];
@@ -495,6 +498,7 @@ async function handleBillingSummary(
   res: express.Response
 ): Promise<void> {
   const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+  console.log(`[zone] billing-summary: userId=${userId || "missing"}`);
   if (!userId) {
     res.json({ ok: false, reason: "missing_user" });
     return;
@@ -521,6 +525,9 @@ async function handleBillingSummary(
       };
     };
   };
+  console.log(
+    `[zone] billing-summary: querying profiles where clerk_user_id=${userId}`
+  );
   const query = profilesTable
     .select?.("credits,runs_used_this_month,free_limit,subscription_status")
     ?.eq?.("clerk_user_id", userId);
@@ -530,6 +537,32 @@ async function handleBillingSummary(
   }
   try {
     const { data, error } = await query.maybeSingle();
+    console.log(
+      `[zone] billing-summary: supabase result=${JSON.stringify({
+        data,
+        error:
+          error && typeof error === "object"
+            ? {
+                message:
+                  "message" in error
+                    ? (error as { message?: unknown }).message
+                    : undefined,
+                code:
+                  "code" in error
+                    ? (error as { code?: unknown }).code
+                    : undefined,
+                details:
+                  "details" in error
+                    ? (error as { details?: unknown }).details
+                    : undefined,
+                hint:
+                  "hint" in error
+                    ? (error as { hint?: unknown }).hint
+                    : undefined,
+              }
+            : error,
+      })}`
+    );
     if (error || !data) {
       res.json({ ok: false, reason: "profile_unavailable" });
       return;
@@ -545,13 +578,16 @@ async function handleBillingSummary(
     const freeLimit =
       typeof data.free_limit === "number"
         ? data.free_limit
-        : Number(data.free_limit ?? credits);
+        : Number(data.free_limit ?? FREE_PLAN_RUN_LIMIT);
     const status = normalizeSubscriptionStatus(data.subscription_status) || "free";
     const remainingRuns = hasPaidAccess(status)
-      ? Math.max(0, 1000 - (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0))
+      ? Math.max(
+          0,
+          PRO_PLAN_RUN_LIMIT - (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0)
+        )
       : Math.max(
           0,
-          (Number.isFinite(freeLimit) ? freeLimit : 0) -
+          (Number.isFinite(freeLimit) ? freeLimit : FREE_PLAN_RUN_LIMIT) -
             (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0)
         );
     res.json({

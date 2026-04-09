@@ -47,6 +47,8 @@ const ENHANCE_TASK_SYSTEM_PROMPT = "You are a task optimizer for an AI code agen
     "- The exact behavior or test scenario\n" +
     "- The framework/pattern already used in the repo\n" +
     "Keep it under 2 sentences. Return only the optimized task text, nothing else.";
+const FREE_PLAN_RUN_LIMIT = 10;
+const PRO_PLAN_RUN_LIMIT = 1000;
 exports.app.use((0, cors_1.default)());
 exports.app.use("/api/lemonsqueezy/webhook", express_1.default.raw({ type: "application/json" }), lemonsqueezyWebhook_js_1.default);
 exports.app.use(body_parser_1.default.json({ limit: "10mb" }));
@@ -327,6 +329,7 @@ async function handleCheckAccess(req, res) {
 }
 async function handleBillingSummary(req, res) {
     const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+    console.log(`[zone] billing-summary: userId=${userId || "missing"}`);
     if (!userId) {
         res.json({ ok: false, reason: "missing_user" });
         return;
@@ -337,6 +340,7 @@ async function handleBillingSummary(req, res) {
         return;
     }
     const profilesTable = supabase.from("profiles");
+    console.log(`[zone] billing-summary: querying profiles where clerk_user_id=${userId}`);
     const query = profilesTable
         .select?.("credits,runs_used_this_month,free_limit,subscription_status")
         ?.eq?.("clerk_user_id", userId);
@@ -346,6 +350,25 @@ async function handleBillingSummary(req, res) {
     }
     try {
         const { data, error } = await query.maybeSingle();
+        console.log(`[zone] billing-summary: supabase result=${JSON.stringify({
+            data,
+            error: error && typeof error === "object"
+                ? {
+                    message: "message" in error
+                        ? error.message
+                        : undefined,
+                    code: "code" in error
+                        ? error.code
+                        : undefined,
+                    details: "details" in error
+                        ? error.details
+                        : undefined,
+                    hint: "hint" in error
+                        ? error.hint
+                        : undefined,
+                }
+                : error,
+        })}`);
         if (error || !data) {
             res.json({ ok: false, reason: "profile_unavailable" });
             return;
@@ -358,11 +381,11 @@ async function handleBillingSummary(req, res) {
             : Number(data.runs_used_this_month ?? 0);
         const freeLimit = typeof data.free_limit === "number"
             ? data.free_limit
-            : Number(data.free_limit ?? credits);
+            : Number(data.free_limit ?? FREE_PLAN_RUN_LIMIT);
         const status = normalizeSubscriptionStatus(data.subscription_status) || "free";
         const remainingRuns = hasPaidAccess(status)
-            ? Math.max(0, 1000 - (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0))
-            : Math.max(0, (Number.isFinite(freeLimit) ? freeLimit : 0) -
+            ? Math.max(0, PRO_PLAN_RUN_LIMIT - (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0))
+            : Math.max(0, (Number.isFinite(freeLimit) ? freeLimit : FREE_PLAN_RUN_LIMIT) -
                 (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0));
         res.json({
             ok: true,

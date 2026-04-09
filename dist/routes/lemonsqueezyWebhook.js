@@ -72,7 +72,7 @@ lemonWebhookRouter.post("/", async (req, res) => {
             await updateProfileSubscription({
                 clerkUserId,
                 subscriptionStatus: "free",
-                credits: 20,
+                credits: 10,
             });
         }
         res.json({ ok: true });
