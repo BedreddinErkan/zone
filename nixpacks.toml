@@ -9,4 +9,4 @@ cmds = ["npm install"]
 cmds = ["npm run build"]
 
 [start]
-cmd = "npm run build && node dist/cli/index.js serve"
+cmd = "echo ZONE_START && ls dist/cli/index.js dist/ui/index.html 2>&1 && node dist/cli/index.js serve"
