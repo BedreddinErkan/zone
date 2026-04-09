@@ -20,6 +20,13 @@ function extractJson(rawText) {
     }
     throw new Error(`No JSON object found in model response. Raw response: ${rawText}`);
 }
+function stripJsonFences(raw) {
+    return raw
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/```\s*$/i, "")
+        .trim();
+}
 async function planPatchPreviewWithLlm(input) {
     const client = (0, openaiClient_js_1.createOpenAIClient)();
     const model = (0, openaiClient_js_1.getModelName)();
@@ -53,7 +60,7 @@ async function planPatchPreviewWithLlm(input) {
     });
     const rawText = response.output_text || "";
     const jsonText = extractJson(rawText);
-    const parsed = JSON.parse(jsonText);
+    const parsed = JSON.parse(stripJsonFences(jsonText));
     const validated = schemas_js_1.llmPatchPlanSchema.parse(parsed);
     return {
         summary: validated.summary,

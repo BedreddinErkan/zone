@@ -120,6 +120,14 @@ function extractJson(rawText: string): string {
   throw new Error("No JSON found in model response");
 }
 
+function stripJsonFences(raw: string): string {
+  return raw
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+}
+
 function buildPreview(
   result: Record<string, unknown>,
   framework: string,
@@ -1088,7 +1096,7 @@ export async function runTestEngineerFlow(input: {
         });
         const rawText = response.output_text || "";
         const jsonText = extractJson ? extractJson(rawText) : rawText;
-        return JSON.parse(jsonText) as Record<string, unknown>;
+        return JSON.parse(stripJsonFences(jsonText)) as Record<string, unknown>;
       },
       validate: (result: Record<string, unknown>) => {
         const issues: Array<{

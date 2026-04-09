@@ -25,6 +25,14 @@ function extractJson(rawText: string): string {
   throw new Error(`No JSON object found in model response. Raw response: ${rawText}`);
 }
 
+function stripJsonFences(raw: string): string {
+  return raw
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+}
+
 export async function planPatchPreviewWithLlm(input: {
   task: string;
   intent: TaskIntent;
@@ -73,7 +81,7 @@ export async function planPatchPreviewWithLlm(input: {
 
   const rawText = response.output_text || "";
   const jsonText = extractJson(rawText);
-  const parsed = JSON.parse(jsonText);
+  const parsed = JSON.parse(stripJsonFences(jsonText));
   const validated = llmPatchPlanSchema.parse(parsed);
 
   return {

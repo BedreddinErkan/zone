@@ -36,6 +36,13 @@ function extractJson(rawText) {
     }
     throw new Error("No JSON found in model response");
 }
+function stripJsonFences(raw) {
+    return raw
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/```\s*$/i, "")
+        .trim();
+}
 function buildPreview(result, framework, outputPaths) {
     const lines = ["=== TEST ENGINEER PREVIEW ==="];
     lines.push(`Framework: ${framework}`);
@@ -769,7 +776,7 @@ async function runTestEngineerFlow(input) {
                 });
                 const rawText = response.output_text || "";
                 const jsonText = extractJson ? extractJson(rawText) : rawText;
-                return JSON.parse(jsonText);
+                return JSON.parse(stripJsonFences(jsonText));
             },
             validate: (result) => {
                 const issues = [];

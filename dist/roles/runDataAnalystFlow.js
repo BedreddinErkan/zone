@@ -26,6 +26,13 @@ function extractJson(rawText) {
     }
     throw new Error("No JSON found in model response");
 }
+function stripJsonFences(raw) {
+    return raw
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/```\s*$/i, "")
+        .trim();
+}
 function buildPreview(result, dialect, migrationFormat) {
     const lines = ["=== DATA ANALYST PREVIEW ==="];
     lines.push(`Dialect: ${dialect}`);
@@ -135,7 +142,7 @@ async function runDataAnalystFlow(input) {
             });
             const rawText = response.output_text || "";
             const jsonText = extractJson(rawText);
-            return JSON.parse(jsonText);
+            return JSON.parse(stripJsonFences(jsonText));
         },
         validate: (result) => {
             const issues = [];

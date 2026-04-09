@@ -57,6 +57,14 @@ function extractJson(rawText: string): string {
   );
 }
 
+function stripJsonFences(raw: string): string {
+  return raw
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+}
+
 export async function planFullPatchWithLlm(input: {
   task: string;
   filePath: string;
@@ -106,7 +114,7 @@ export async function planFullPatchWithLlm(input: {
       });
       const rawText = response.output_text ?? "";
       const jsonText = extractJson(rawText);
-      return JSON.parse(jsonText) as unknown;
+      return JSON.parse(stripJsonFences(jsonText)) as unknown;
     },
     validate: (result: unknown) => {
       const issues: Array<{
