@@ -1484,7 +1484,7 @@ export async function startServer(port = 3000): Promise<void> {
   startedPort = port;
   logStartupDiagnostics();
   startPromise = new Promise<void>((resolve) => {
-    app.listen(port, () => {
+app.listen(port, "0.0.0.0", () => {
       console.log(
         colorize(`Zone UI running on http://localhost:${port}`, c.green, c.bold)
       );
