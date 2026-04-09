@@ -103,6 +103,7 @@ type HostedTestEngineerContextInput = {
   stepDefinitionContents: Array<{ path: string; content: string }>;
   featureContents: Array<{ path: string; content: string }>;
   existingTestContents: Array<{ path: string; content: string }>;
+  appSourceContents?: Array<{ path: string; content: string }>;
 };
 
 function extractJson(rawText: string): string {
@@ -1127,44 +1128,11 @@ export async function runTestEngineerFlow(input: {
   const hasPageObjectContext = pageObjectContents.length > 0;
   let selectorHint = "";
   if (!hasPageObjectContext) {
-    const sourceFilesForExtraction = input.hostedContext
-      ? [
-          ...input.hostedContext.existingTestContents,
-          ...input.hostedContext.pageObjectContents,
-          ...input.hostedContext.stepDefinitionContents,
-          ...input.hostedContext.featureContents,
-        ]
-      : [...existingTestContents, ...pageObjectContents];
-
-    if (input.hostedContext?.availableFiles) {
-      const appSourcePaths = input.hostedContext.availableFiles
-        .filter(
-          (file) =>
-            file.path.endsWith(".jsx") ||
-            file.path.endsWith(".tsx") ||
-            file.path.endsWith(".html") ||
-            file.path.endsWith(".vue") ||
-            file.path.endsWith(".svelte")
-        )
-        .map((file) => file.path);
-
-      const allHostedContent = [
-        ...input.hostedContext.existingTestContents,
-        ...input.hostedContext.pageObjectContents,
-        ...input.hostedContext.stepDefinitionContents,
-        ...input.hostedContext.featureContents,
-      ];
-
-      for (const sourcePath of appSourcePaths) {
-        const existing = allHostedContent.find((file) => file.path === sourcePath);
-        if (
-          existing &&
-          !sourceFilesForExtraction.some((file) => file.path === sourcePath)
-        ) {
-          sourceFilesForExtraction.push(existing);
-        }
-      }
-    }
+    const sourceFilesForExtraction: Array<{ path: string; content: string }> = [
+      ...existingTestContents,
+      ...pageObjectContents,
+      ...(input.hostedContext?.appSourceContents ?? []),
+    ];
 
     const extractedSelectors =
       extractSelectorsFromSourceFiles(sourceFilesForExtraction);
