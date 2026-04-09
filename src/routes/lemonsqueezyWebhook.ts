@@ -107,7 +107,28 @@ lemonWebhookRouter.post("/", async (req, res) => {
         credits: 10,
       });
     }
-
+if (
+      clerkUserId &&
+      eventName === "subscription_payment_success"
+    ) {
+      const supabase = getSupabaseAdminClient();
+      const profilesTable = supabase.from("profiles") as unknown as {
+        update: (values: { runs_used_this_month: number }) => {
+          eq: (
+            column: string,
+            value: string
+          ) => Promise<{ error?: { message?: string } | null }>;
+        };
+      };
+      const result = await profilesTable
+        .update({ runs_used_this_month: 0 })
+        .eq("clerk_user_id", clerkUserId);
+      if (result?.error) {
+        console.log(`[zone] subscription_payment_success reset failed: ${result.error.message}`);
+      } else {
+        console.log(`[zone] subscription_payment_success: reset runs for ${clerkUserId}`);
+      }
+    }
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({
