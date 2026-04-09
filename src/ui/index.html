@@ -650,6 +650,17 @@ async function buildHostedTestEngineerContext(){
   if(files.length===0)return null;
   const availableFiles=files.map(file=>({path:file.path,category:classifyHostedContextCategory(file.path),extension:getHostedContextExtension(file.path)}));
   const existingTestContents=files.filter(file=>isHostedTestFile(file.path)||isHostedFrameworkSignalFile(file.path)).slice(0,5).map(file=>({path:file.path,content:file.content}));
+  const appSourceContents=files
+    .filter(file=>{
+      const ext=getHostedContextExtension(file.path);
+      return(
+        (ext==='jsx'||ext==='tsx'||ext==='html'||ext==='vue'||ext==='svelte') &&
+        !isHostedTestFile(file.path) &&
+        !isHostedPageObjectFile(file.path)
+      );
+    })
+    .slice(0,10)
+    .map(file=>({path:file.path,content:file.content}));
   console.log('[zone-ui] hosted test context files:',files.map(f=>f.path));
   console.log('[zone-ui] test-engineer availableFiles count',availableFiles.length);
   console.log('[zone-ui] test-engineer existingTestContents paths',existingTestContents.map(f=>f.path));
@@ -659,6 +670,7 @@ async function buildHostedTestEngineerContext(){
     stepDefinitionContents:files.filter(file=>isHostedStepDefinitionFile(file.path)).slice(0,2).map(file=>({path:file.path,content:file.content})),
     featureContents:files.filter(file=>isHostedFeatureFile(file.path)).slice(0,3).map(file=>({path:file.path,content:file.content})),
     existingTestContents,
+    appSourceContents,
   };
 }
 
