@@ -1,3 +1,4 @@
+console.log("[zone] api/server.ts loading...");
 import "dotenv/config";
 import express from "express";
 import cors from "cors";

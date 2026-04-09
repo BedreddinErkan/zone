@@ -1,3 +1,4 @@
+console.log("[zone] server.ts loading...");
 import os from "node:os";
 import path from "node:path";
 import { existsSync, readFileSync } from "node:fs";
