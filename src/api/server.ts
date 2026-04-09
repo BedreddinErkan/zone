@@ -1064,6 +1064,39 @@ app.get("/api/billing-summary", async (req, res) => {
   await handleBillingSummary(req, res);
 });
 
+app.post("/api/admin/reset-monthly-runs", async (req, res) => {
+  const adminSecret =
+    typeof process.env.ADMIN_SECRET === "string"
+      ? process.env.ADMIN_SECRET.trim()
+      : "";
+  const providedSecret =
+    typeof req.get("x-admin-secret") === "string"
+      ? req.get("x-admin-secret")!.trim()
+      : "";
+
+  if (!adminSecret || providedSecret !== adminSecret) {
+    res.status(401).json({ ok: false, reason: "unauthorized" });
+    return;
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    res.status(500).json({ ok: false, reason: "profile_unavailable" });
+    return;
+  }
+
+  const rpcResult = await supabase.rpc("reset_monthly_runs");
+  if (rpcResult.error) {
+    res.status(500).json({
+      ok: false,
+      reason: rpcResult.error.message || "reset_monthly_runs_failed",
+    });
+    return;
+  }
+
+  res.json({ ok: true });
+});
+
 app.post("/api/analyze", async (req, res) => {
   const { task, repoPath } = req.body;
   const result = await runAgent({ task, role: "developer" });
