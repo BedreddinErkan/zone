@@ -218,6 +218,7 @@ function buildOutputRules(fw: DetectedTestFramework): string[] {
         "Use async/await pattern",
         "Use expect() from @playwright/test",
         "If no page objects are provided, use standard CSS selectors, data-testid attributes, or role-based locators from the application",
+        "When AVAILABLE SELECTORS are listed in the prompt, use those exact selectors — never invent or guess selectors",
       ];
     case "cypress":
       return [...common, "Use cy.get() with data-testid selectors", "Use cy.visit() for navigation"];

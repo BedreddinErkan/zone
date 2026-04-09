@@ -506,6 +506,64 @@ function findSuspiciousPlaywrightUrlAssertion(
   return null;
 }
 
+function extractSelectorsFromSourceFiles(
+  contextFiles: Array<{ path: string; content: string }>
+): string[] {
+  const selectors = new Set<string>();
+
+  for (const file of contextFiles) {
+    if (
+      file.path.includes(".spec.") ||
+      file.path.includes(".test.") ||
+      file.path.endsWith(".config.ts") ||
+      file.path.endsWith(".config.js") ||
+      file.path.endsWith("package.json")
+    ) {
+      continue;
+    }
+
+    const content = file.content;
+
+    for (const match of content.matchAll(/\bid=["']([^"'{]+)["']/g)) {
+      selectors.add(`#${match[1]}`);
+    }
+
+    for (const match of content.matchAll(/data-testid=["']([^"']+)["']/g)) {
+      selectors.add(`[data-testid="${match[1]}"]`);
+    }
+
+    for (const match of content.matchAll(
+      /<(?:input|textarea|select)[^>]*\bname=["']([^"']+)["']/gi
+    )) {
+      selectors.add(`[name="${match[1]}"]`);
+    }
+
+    for (const match of content.matchAll(/class(?:Name)?=["']([^"'{$]+)["']/g)) {
+      const classes = match[1].split(/\s+/).filter(Boolean);
+      for (const cls of classes) {
+        if (cls.length > 2) {
+          selectors.add(`.${cls}`);
+        }
+      }
+    }
+
+    for (const match of content.matchAll(
+      /<button[^>]*>\s*([^<{][^<]{1,40}?)\s*<\/button>/g
+    )) {
+      const text = match[1].trim();
+      if (text && text.length >= 2 && text.length <= 40) {
+        selectors.add(`button:has-text("${text}")`);
+      }
+    }
+
+    for (const match of content.matchAll(/placeholder=["']([^"'{$]+)["']/g)) {
+      selectors.add(`[placeholder="${match[1]}"]`);
+    }
+  }
+
+  return [...selectors].slice(0, 40);
+}
+
 function buildValidationBlockedResult(input: {
   framework: string;
   language: string;
@@ -1067,6 +1125,56 @@ export async function runTestEngineerFlow(input: {
     ? input.hostedContext.existingTestContents
     : await readExampleContents(context.existingTestFiles, allFiles, 3);
   const hasPageObjectContext = pageObjectContents.length > 0;
+  let selectorHint = "";
+  if (!hasPageObjectContext) {
+    const sourceFilesForExtraction = input.hostedContext
+      ? [
+          ...input.hostedContext.existingTestContents,
+          ...input.hostedContext.pageObjectContents,
+          ...input.hostedContext.stepDefinitionContents,
+          ...input.hostedContext.featureContents,
+        ]
+      : [...existingTestContents, ...pageObjectContents];
+
+    if (input.hostedContext?.availableFiles) {
+      const appSourcePaths = input.hostedContext.availableFiles
+        .filter(
+          (file) =>
+            file.path.endsWith(".jsx") ||
+            file.path.endsWith(".tsx") ||
+            file.path.endsWith(".html") ||
+            file.path.endsWith(".vue") ||
+            file.path.endsWith(".svelte")
+        )
+        .map((file) => file.path);
+
+      const allHostedContent = [
+        ...input.hostedContext.existingTestContents,
+        ...input.hostedContext.pageObjectContents,
+        ...input.hostedContext.stepDefinitionContents,
+        ...input.hostedContext.featureContents,
+      ];
+
+      for (const sourcePath of appSourcePaths) {
+        const existing = allHostedContent.find((file) => file.path === sourcePath);
+        if (
+          existing &&
+          !sourceFilesForExtraction.some((file) => file.path === sourcePath)
+        ) {
+          sourceFilesForExtraction.push(existing);
+        }
+      }
+    }
+
+    const extractedSelectors =
+      extractSelectorsFromSourceFiles(sourceFilesForExtraction);
+    if (extractedSelectors.length > 0) {
+      selectorHint =
+        "\n\nAVAILABLE SELECTORS EXTRACTED FROM APPLICATION SOURCE FILES (use these exact selectors, do NOT guess or invent selectors):\n" +
+        extractedSelectors.map((selector) => `- ${selector}`).join("\n") +
+        '\n\nYou MUST prefer these selectors over any guessed ones. If a form has name attributes, use [name="..."] selectors. If elements have data-testid, use those. Only fall back to CSS class selectors if no better option exists.';
+    }
+  }
 
   input.onProgress?.("Building prompt...");
   const prompt = buildTestEngineerPrompt({
@@ -1082,7 +1190,8 @@ export async function runTestEngineerFlow(input: {
   }) +
     "\n\nIMPORTANT: Do NOT rewrite or modify any existing tests.\n" +
     "Only add NEW test blocks that do not exist in the file.\n" +
-    "If a similar test already exists, skip it and add a different scenario.";
+    "If a similar test already exists, skip it and add a different scenario." +
+    selectorHint;
 
   let parsed: Record<string, unknown>;
   try {
