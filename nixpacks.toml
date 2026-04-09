@@ -1,5 +1,6 @@
 [phases.setup]
 providers = ["node"]
+nixPkgs = ["nodejs_20"]
 
 [phases.install]
 cmds = ["npm install"]
