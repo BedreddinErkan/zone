@@ -1112,7 +1112,8 @@ it("logs successful developer runs to Supabase when env is configured", async ()
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        credits: 10,
+        runs_used_this_month: 2,
+        free_limit: 10,
         subscription_status: "free",
       },
       error: null,
@@ -1144,7 +1145,8 @@ it("logs successful developer runs to Supabase when env is configured", async ()
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        credits: 0,
+        runs_used_this_month: 10,
+        free_limit: 10,
         subscription_status: "free",
       },
       error: null,
@@ -1164,12 +1166,11 @@ it("logs successful developer runs to Supabase when env is configured", async ()
     });
   });
 
-  it("returns ok from /api/check-access for a pro user even with zero credits", async () => {
+  it("returns ok from /api/check-access for a pro user below the monthly limit", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        credits: 0,
         runs_used_this_month: 12,
         subscription_status: "pro",
       },
@@ -1183,6 +1184,30 @@ it("logs successful developer runs to Supabase when env is configured", async ()
     const body = await response.json();
     expect(response.status).toBe(200);
     expect(body).toEqual({ ok: true });
+  });
+
+  it("returns no_free_runs from /api/check-access for a pro user at the monthly limit", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        runs_used_this_month: 1000,
+        subscription_status: "pro",
+      },
+      error: null,
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/check-access?userId=clerk_user_123`
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(402);
+    expect(body).toEqual({
+      ok: false,
+      reason: "no_free_runs",
+      message: "You've used all 1000 monthly runs. Resets next month.",
+    });
   });
 
   it("returns a pro billing summary shape the UI can render", async () => {

@@ -540,7 +540,7 @@ async function ensureRunAuthorized(rawUserId) {
         return { allowed: true };
     }
     const query = profilesTable
-        .select("credits,total_runs,subscription_status")
+        .select("runs_used_this_month,free_limit,subscription_status")
         ?.eq?.("clerk_user_id", authenticatedUserId);
     if (!query || typeof query.maybeSingle !== "function") {
         return { allowed: true };
@@ -561,14 +561,30 @@ async function ensureRunAuthorized(rawUserId) {
                 },
             };
         }
-        const credits = typeof data.credits === "number"
-            ? data.credits
-            : Number(data.credits ?? 0);
+        const runsUsedThisMonth = typeof data.runs_used_this_month === "number"
+            ? data.runs_used_this_month
+            : Number(data.runs_used_this_month ?? 0);
+        const freeLimit = typeof data.free_limit === "number"
+            ? data.free_limit
+            : Number(data.free_limit ?? FREE_PLAN_RUN_LIMIT);
         const subscriptionStatus = normalizeSubscriptionStatus(data.subscription_status);
         if (hasPaidAccess(subscriptionStatus)) {
+            if ((Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0) >=
+                PRO_PLAN_RUN_LIMIT) {
+                return {
+                    allowed: false,
+                    status: 402,
+                    body: {
+                        ok: false,
+                        reason: "no_free_runs",
+                        message: "You've used all 1000 monthly runs. Resets next month.",
+                    },
+                };
+            }
             return { allowed: true };
         }
-        if (credits > 0) {
+        if ((Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : FREE_PLAN_RUN_LIMIT) <
+            (Number.isFinite(freeLimit) ? freeLimit : FREE_PLAN_RUN_LIMIT)) {
             return { allowed: true };
         }
         return {
