@@ -27,21 +27,20 @@ async function updateProfileSubscription(input: {
 }): Promise<void> {
   const supabase = getSupabaseAdminClient();
   const profilesTable = supabase.from("profiles") as unknown as {
-    update: (values: { subscription_status: string; credits: number }) => {
+    update: (values: { subscription_status: string; credits: number; runs_used_this_month: number }) => {
       eq: (
         column: string,
         value: string
       ) => Promise<{ error?: { message?: string } | null }>;
     };
   };
-
   const result = await profilesTable
     .update({
       subscription_status: input.subscriptionStatus,
       credits: input.credits,
+      runs_used_this_month: 0,
     })
     .eq("clerk_user_id", input.clerkUserId);
-
   if (result?.error) {
     throw new Error(result.error.message || "Failed to update profile subscription.");
   }
