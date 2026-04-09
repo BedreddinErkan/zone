@@ -1,100 +1,127 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>Zone</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#1e1e1e;color:#d4d4d4;font-family:'Courier New',monospace;font-size:15px;line-height:1.7;padding:24px;max-width:100%;margin:0 auto}.sub{font-size:13px;color:#858585;margin-bottom:28px;line-height:1.7}
+button{border-radius:8px}
+body{background:#1a1a1a;color:#d4d4d4;font-family:'Courier New',monospace;font-size:15px;line-height:1.7;padding:24px;max-width:100%;margin:0 auto}.sub{font-size:13px;color:#737373;margin-bottom:28px;line-height:1.7}
 .main-grid{display:grid;grid-template-columns:600px 1fr;gap:24px;align-items:start}
 @media(max-width:900px){.main-grid{grid-template-columns:1fr}}
-.section{background:#252526;border:1px solid #3c3c3c;border-radius:10px;padding:22px;margin-bottom:18px;box-shadow:0 8px 24px rgba(0,0,0,0.18)}
-.label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#9a9a9a;margin-bottom:10px}
-.prompt-box{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;padding:12px;font-size:12px;color:#9cdcfe;line-height:1.8;position:relative}
-.copy-btn{position:absolute;top:8px;right:8px;background:#3c3c3c;border:none;border-radius:4px;color:#858585;font-size:11px;padding:3px 9px;cursor:pointer}
+.section{background:#1e1e1e;border:1px solid #2d2d2d;border-radius:12px;padding:22px;margin-bottom:18px;box-shadow:0 8px 24px rgba(0,0,0,0.18)}
+.label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.2em;color:#9a9a9a;margin-bottom:10px}
+.prompt-box{background:#1a1a1a;border:1px solid #2d2d2d;border-radius:8px;padding:12px;font-size:12px;color:#9cdcfe;line-height:1.8;position:relative}
+.copy-btn{position:absolute;top:8px;right:8px;background:#2d2d2d;border:none;color:#737373;font-size:11px;padding:3px 9px;cursor:pointer}
 .copy-btn:hover{color:#d4d4d4}
 .role-row{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
-.role-btn{background:transparent;border:1px solid #3c3c3c;border-radius:6px;color:#858585;font-family:'Courier New',monospace;font-size:13px;padding:8px 16px;cursor:pointer}
+.role-btn{background:transparent;border:1px solid #2d2d2d;color:#737373;font-family:'Courier New',monospace;font-size:13px;padding:8px 16px;cursor:pointer}
 .role-btn:hover{border-color:#007acc;color:#007acc}
 .role-btn.active{border-color:#007acc;color:#007acc;background:#0a2a3a}
-textarea,input,select{width:100%;background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;color:#d4d4d4;font-family:'Courier New',monospace;font-size:14px;padding:10px;outline:none;margin-bottom:10px}
+textarea,input,select{width:100%;background:#1a1a1a;border:1px solid #2d2d2d;border-radius:8px;color:#d4d4d4;font-family:'Courier New',monospace;font-size:14px;padding:10px;outline:none;margin-bottom:10px}
 textarea{resize:vertical;height:96px;line-height:1.7}
 select{cursor:pointer}
 input:focus,textarea:focus{border-color:#007acc}
 .repo-row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
 .repo-row input{margin-bottom:0;flex:1}
+.repo-row input[readonly]{display:none}
+.repo-row input[readonly] + #folderPickerBtn{flex:1;justify-content:center;background:#007acc;border-color:#007acc;color:#fff;padding:14px 16px}
+.repo-row input[readonly] + #folderPickerBtn:hover{background:#1a8cdb;border-color:#1a8cdb}
+.repo-row input[readonly] ~ .editor-btn:not(#folderPickerBtn){display:none}
 .picker-btn{padding:8px 12px;font-size:13px;color:#d4d4d4;gap:6px}
 .picker-btn span{white-space:nowrap}
-.repo-selection{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;padding:10px 12px;margin-bottom:10px}
+.repo-selection{background:#1a1a1a;border:1px solid #2d2d2d;border-radius:8px;padding:10px 12px;margin-bottom:10px}
 .repo-selection-label{font-size:13px;color:#9cdcfe;line-height:1.7;word-break:break-word}
-.repo-selection-meta{font-size:12px;color:#858585;line-height:1.7;margin-top:4px}
-.editor-btn{background:#2d2d2d;border:1px solid #3c3c3c;border-radius:6px;padding:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:border-color .15s;flex-shrink:0}
+.repo-selection-meta{font-size:12px;color:#737373;line-height:1.7;margin-top:4px}
+.billing-summary-box{transition:border-color .15s,background .15s}
+.billing-summary-box.free-low{border-color:rgba(206,145,120,0.45);background:#231914}
+.billing-summary-box.pro{border-color:rgba(78,201,176,0.35);background:#14211e}
+.billing-summary-label.free{color:#d4d4d4}
+.billing-summary-label.free-low{color:#ce9178}
+.billing-summary-label.pro{color:#d4d4d4}
+.billing-summary-meta.free-low{color:#ce9178}
+.billing-summary-meta.pro{color:#4ec9b0}
+.billing-plan-badge{display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(78,201,176,0.3);border-radius:999px;padding:3px 10px;font-size:11px;color:#4ec9b0;background:rgba(78,201,176,0.08);margin-right:8px}
+.billing-upgrade-link{color:#4ec9b0;text-decoration:none;border-bottom:1px solid rgba(78,201,176,0.35)}
+.billing-upgrade-link:hover{color:#d4d4d4;border-bottom-color:#4ec9b0}
+.editor-btn{background:#2d2d2d;border:1px solid #2d2d2d;padding:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:border-color .15s;flex-shrink:0}
 .editor-btn:hover{border-color:#007acc;background:#1a2a3a}
 .btn-row{display:flex;gap:10px}
-.exec-btn{flex:1;background:#007acc;border:none;border-radius:6px;color:#fff;font-size:15px;padding:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
-.exec-btn:hover{background:#1a8cdb}
-.exec-btn:disabled{background:#3c3c3c;color:#858585;cursor:not-allowed}
-.dryrun-btn{background:transparent;border:1px solid #6b5a1d;border-radius:6px;color:#ce9178;font-size:15px;padding:12px 16px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap}
+.exec-btn{flex:1;background:#007acc;border:none;color:#fff;font-size:15px;padding:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+.exec-btn:hover{background:#1a8cdb;box-shadow:0 0 20px rgba(0,122,204,0.3)}
+.exec-btn:disabled{background:#2d2d2d;color:#737373;cursor:not-allowed}
+.dryrun-btn{background:transparent;border:1px solid rgba(206,145,120,0.4);color:#ce9178;font-size:15px;padding:12px 16px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap}
 .dryrun-btn:hover{background:#3a2e0e;border-color:#ce9178}
-.dryrun-btn:disabled{border-color:#3c3c3c;color:#858585;cursor:not-allowed}
-.enhance-btn{background:transparent;border:1px solid #6b5a1d;border-radius:6px;color:#ce9178;font-family:'Courier New',monospace;font-size:12px;padding:5px 12px;cursor:pointer}
+.dryrun-btn:disabled{border-color:#2d2d2d;color:#737373;cursor:not-allowed}
+.enhance-btn{background:transparent;border:1px solid #6b5a1d;color:#ce9178;font-family:'Courier New',monospace;font-size:12px;padding:5px 12px;cursor:pointer}
 .enhance-btn:hover{background:#3a2e0e}
-.enhance-btn:disabled{border-color:#3c3c3c;color:#858585;cursor:not-allowed}
-.reset-btn{background:transparent;border:1px solid #3c3c3c;border-radius:6px;color:#858585;font-size:15px;padding:12px 18px;cursor:pointer}
+.enhance-btn:disabled{border-color:#2d2d2d;color:#737373;cursor:not-allowed}
+.reset-btn{background:transparent;border:1px solid #2d2d2d;color:#737373;font-size:15px;padding:12px 18px;cursor:pointer}
 .reset-btn:hover{border-color:#d4d4d4;color:#d4d4d4}
 .spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:none}
 @keyframes spin{to{transform:rotate(360deg)}}
 .error-box{background:#3a0e0e;border:1px solid #6b1d1d;border-radius:6px;padding:12px;font-size:13px;color:#f44747;margin-bottom:10px;display:none}
+.error-box{border-radius:12px;padding:14px 16px}
+.error-card-title{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;color:#f47474;margin-bottom:6px}
+.error-card-message{color:#f6c2c2;line-height:1.7}
+.error-card-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+.error-card-btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid #f4747440;border-radius:8px;padding:8px 12px;color:#f8d7d7;text-decoration:none;background:rgba(255,255,255,0.02);cursor:pointer}
+.error-card-btn:hover{border-color:#f47474;color:#fff}
+.error-card-details{margin-top:10px}
+.error-card-details summary{cursor:pointer;color:#f0a4a4}
+.error-card-details-content{margin-top:8px;color:#d9a6a6;word-break:break-word;white-space:pre-wrap}
 .success-box{background:#0e3a1e;border:1px solid #1d6b3a;border-radius:6px;padding:12px;font-size:13px;color:#4ec9b0;margin-bottom:10px;display:none}
-.progress-box{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:8px;padding:10px 14px;font-size:13px;color:#9cdcfe;margin-bottom:12px;display:none}
+.progress-box{background:#1a1a1a;border:1px solid #2d2d2d;border-radius:8px;padding:10px 14px;font-size:13px;color:#9cdcfe;margin-bottom:12px;display:none}
 .badge-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
 .decision-badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:6px 14px;font-size:13px}
 .decision-badge.safe{background:#0e3a1e;border:1px solid #1d6b3a;color:#4ec9b0}
 .decision-badge.preview{background:#3a2e0e;border:1px solid #6b5a1d;color:#ce9178}
 .decision-badge.blocked{background:#3a0e0e;border:1px solid #6b1d1d;color:#f44747}
-.framework-badge{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:999px;padding:5px 12px;font-size:12px;color:#858585}
+.preview-helper{display:none;margin-top:-4px;margin-bottom:14px;font-size:12px;line-height:1.7;color:#737373}
+.badge-row:has(.decision-badge.preview) + .preview-helper{display:block}
+.framework-badge{background:#1a1a1a;border:1px solid #2d2d2d;border-radius:999px;padding:5px 12px;font-size:12px;color:#737373}
 .complexity-badge{border-radius:999px;padding:5px 12px;font-size:12px}
 .complexity-badge.data_driven{background:#0a1a3a;border:1px solid #1d3a6b;color:#9cdcfe}
 .complexity-badge.e2e{background:#1a0a3a;border:1px solid #3a1d6b;color:#c586c0}
 .complexity-badge.negative{background:#3a0a0a;border:1px solid #6b1d1d;color:#f44747}
 .complexity-badge.multi_scenario{background:#0a3a1a;border:1px solid #1d6b3a;color:#4ec9b0}
 .bdot{width:7px;height:7px;border-radius:50%}
-.result-summary{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:8px;padding:14px;margin-bottom:16px}
+.result-summary{background:#1a1a1a;border:1px solid #2d2d2d;border-radius:8px;padding:14px;margin-bottom:16px}
 .result-summary-main{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}
 .result-summary-title{font-size:16px;font-weight:700;color:#d4d4d4}
-.result-summary-subtitle{font-size:12px;color:#858585}
+.result-summary-subtitle{font-size:12px;color:#737373}
 .result-summary-chips{display:flex;flex-wrap:wrap;gap:8px}
-.result-chip{background:#20232a;border:1px solid #3c3c3c;border-radius:999px;padding:4px 12px;font-size:12px;color:#d4d4d4}
+.result-chip{background:#20232a;border:1px solid #2d2d2d;border-radius:999px;padding:4px 12px;font-size:12px;color:#d4d4d4}
 .metrics{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px}
 .metric{background:#1e1e1e;border:1px solid #2d2d2d;border-radius:8px;padding:12px;text-align:center}
 .mval{font-size:26px;font-weight:600;color:#4ec9b0}
-.mlbl{font-size:11px;color:#858585;text-transform:uppercase;margin-top:4px}
+.mlbl{font-size:11px;color:#737373;text-transform:uppercase;margin-top:4px}
 .risk-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.rlbl{font-size:12px;color:#858585;width:90px}
-.rbg{flex:1;background:#3c3c3c;border-radius:2px;height:5px}
+.rlbl{font-size:12px;color:#737373;width:90px}
+.rbg{flex:1;background:#2d2d2d;border-radius:2px;height:5px}
 .rbar{height:5px;border-radius:2px;transition:width .5s}
-.rval{font-size:12px;color:#858585;width:28px;text-align:right}
-.preview-text{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;padding:14px;font-size:13px;color:#ce9178;line-height:1.8;margin-bottom:12px;white-space:pre-wrap;max-height:240px;overflow-y:auto}
-.context-files{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;padding:12px;margin-bottom:12px}
+.rval{font-size:12px;color:#737373;width:28px;text-align:right}
+.preview-text{background:#1a1a1a;border:1px solid #2d2d2d;border-radius:8px;padding:14px;font-size:13px;color:#ce9178;line-height:1.8;margin-bottom:12px;white-space:pre-wrap;max-height:240px;overflow-y:auto}
+.context-files{background:#1a1a1a;border:1px solid #2d2d2d;border-radius:8px;padding:12px;margin-bottom:12px}
 .context-files ul{margin:0;padding-left:16px}
 .context-files li{font-size:13px;color:#9cdcfe;line-height:1.9}
 .recent-runs-list{display:flex;flex-direction:column;gap:8px}
-.recent-run-item{width:100%;background:#1e1e1e;border:1px solid #3c3c3c;border-radius:8px;padding:14px;cursor:pointer;text-align:left;font-family:'Courier New',monospace}
-.recent-run-item:hover{border-color:#007acc;background:#20232a}
+.recent-run-item{width:100%;background:#1a1a1a;border:1px solid #2d2d2d;border-radius:10px;padding:14px;cursor:pointer;text-align:left;font-family:'Courier New',monospace}
+.recent-run-item:hover{border-color:#007acc;background:rgba(0,122,204,0.05)}
 .recent-run-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
 .recent-run-task{font-size:13px;color:#d4d4d4;flex:1;word-break:break-word;line-height:1.7}
-.recent-run-meta{display:flex;flex-wrap:wrap;gap:8px;font-size:12px;color:#858585}
-.recent-run-status{font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid #3c3c3c}
+.recent-run-meta{display:flex;flex-wrap:wrap;gap:8px;font-size:12px;color:#737373}
+.recent-run-status{font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid #2d2d2d}
 .recent-run-status.success{background:#0e3a1e;border-color:#1d6b3a;color:#4ec9b0}
 .recent-run-status.error{background:#3a0e0e;border-color:#6b1d1d;color:#f44747}
-.recent-run-empty{font-size:13px;color:#858585;background:#1e1e1e;border:1px dashed #3c3c3c;border-radius:8px;padding:16px}
-.file-card{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;margin-bottom:10px;overflow:hidden}
+.recent-run-empty{font-size:13px;color:#737373;background:#1a1a1a;border:1px dashed #2d2d2d;border-radius:8px;padding:16px}
+.file-card{background:#1a1a1a;border:1px solid #2d2d2d;border-radius:8px;margin-bottom:10px;overflow:hidden}
 .file-card:last-child{margin-bottom:0}
 .file-toggle summary{list-style:none;cursor:pointer;padding:12px}
 .file-toggle summary::-webkit-details-marker{display:none}
 .file-row{display:flex;align-items:center;gap:8px}
 .fname{font-size:13px;color:#9cdcfe;flex:1;word-break:break-word}
-.fmeta{font-size:12px;color:#858585}
+.fmeta{font-size:12px;color:#737373}
 .fop{font-size:12px;padding:2px 10px;border-radius:999px;font-weight:600}
 .fop.create{background:#0e3a1e;color:#4ec9b0;border:1px solid #1d6b3a}
 .fop.modify{background:#3a2e0e;color:#ce9178;border:1px solid #6b5a1d}
@@ -103,28 +130,28 @@ input:focus,textarea:focus{border-color:#007acc}
 .warning-item{font-size:13px;color:#ce9178;padding:5px 0;border-bottom:1px solid #2d2d2d;line-height:1.7}
 .warning-item:last-child{border-bottom:none}
 .warning-item::before{content:"⚠ "}
-.apply-btn{width:100%;background:transparent;border:1px solid #4ec9b0;border-radius:6px;color:#4ec9b0;font-size:15px;padding:10px;cursor:pointer;margin-top:14px;display:flex;align-items:center;justify-content:center;gap:8px}
+.apply-btn{width:100%;background:transparent;border:1px solid #4ec9b0;color:#4ec9b0;font-size:15px;padding:10px;cursor:pointer;margin-top:14px;display:flex;align-items:center;justify-content:center;gap:8px}
 .apply-btn.is-enabled{border-color:#4ec9b0;color:#4ec9b0;background:transparent;opacity:1;cursor:pointer}
 .apply-btn.is-enabled:hover{background:#0e3a1e}
-.apply-btn.is-disabled{border-color:#3c3c3c;color:#858585;background:transparent;opacity:.7;cursor:not-allowed}
+.apply-btn.is-disabled{border-color:#2d2d2d;color:#737373;background:transparent;opacity:.7;cursor:not-allowed}
 .apply-btn.is-disabled:hover{background:transparent}
-.apply-btn:disabled{border-color:#3c3c3c;color:#858585;cursor:not-allowed}
+.apply-btn:disabled{border-color:#2d2d2d;color:#737373;cursor:not-allowed}
 .hidden{display:none}
-.history-label{font-size:12px;color:#858585;margin-bottom:6px}
+.history-label{font-size:12px;color:#737373;margin-bottom:6px}
 .section-title{font-size:13px;color:#b0b0b0;margin-bottom:10px;font-weight:700}
 .conflict-card{background:#3a0e0e;border:1px solid #6b1d1d;border-radius:6px;padding:12px;margin-bottom:8px}
 .conflict-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
 .conflict-file{font-size:13px;color:#f44747;word-break:break-all}
-.conflict-score{font-size:12px;color:#858585;white-space:nowrap}
-.conflict-best{font-size:12px;color:#858585;background:#1e1e1e;border-radius:4px;padding:6px 8px;margin-top:6px;white-space:pre-wrap;max-height:80px;overflow:auto;line-height:1.6}
-.patch-results{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;padding:10px 14px;margin-bottom:12px}
+.conflict-score{font-size:12px;color:#737373;white-space:nowrap}
+.conflict-best{font-size:12px;color:#737373;background:#1a1a1a;border-radius:8px;padding:6px 8px;margin-top:6px;white-space:pre-wrap;max-height:80px;overflow:auto;line-height:1.6}
+.patch-results{background:#1a1a1a;border:1px solid #2d2d2d;border-radius:8px;padding:10px 14px;margin-bottom:12px}
 .pr-row{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:13px}
 .pr-icon.ok{color:#4ec9b0}
 .pr-icon.fail{color:#f44747}
 .pr-icon.skip{color:#858585}
 .pr-path{color:#9cdcfe;flex:1;word-break:break-all}
-.pr-reason{font-size:12px;color:#858585}
-.diff-card{background:#1e1e1e;border:1px solid #3c3c3c;border-radius:6px;margin-bottom:10px;overflow:hidden}
+.pr-reason{font-size:12px;color:#737373}
+.diff-card{background:#1a1a1a;border:1px solid #2d2d2d;border-radius:8px;margin-bottom:10px;overflow:hidden}
 .diff-header{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;list-style:none}
 .diff-header::-webkit-details-marker{display:none}
 .diff-fname{font-size:13px;color:#9cdcfe;flex:1;word-break:break-all}
@@ -144,11 +171,41 @@ input:focus,textarea:focus{border-color:#007acc}
 .diff-line.added .diff-text{color:#b5f5c8}
 .diff-line.removed .diff-text{color:#f9a8a8}
 .diff-line.unchanged .diff-text{color:#555}
-.diff-empty{padding:16px;font-size:13px;color:#858585;text-align:center}
+.diff-empty{padding:16px;font-size:13px;color:#737373;text-align:center}
 .diff-separator{display:flex;align-items:center;font-size:11px;color:#444;padding:2px 8px;background:#1a1a1a;border-top:1px solid #222;border-bottom:1px solid #222}
+.feedback-fab,.user-id-badge{position:fixed;bottom:18px;z-index:40;display:flex;align-items:center;gap:8px;background:#1e1e1e;border:1px solid #2d2d2d;color:#d4d4d4;padding:10px 12px;font-size:12px;box-shadow:0 10px 30px rgba(0,0,0,0.28)}
+.feedback-fab{right:18px;cursor:pointer}
+.feedback-fab:hover{border-color:#007acc;background:#20232a}
+.user-id-badge{left:18px}
+.copy-user-id-btn{background:transparent;border:1px solid #2d2d2d;color:#9cdcfe;font-size:11px;padding:4px 8px;cursor:pointer}
+.copy-user-id-btn:hover{border-color:#007acc;color:#d4d4d4}
+.feedback-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.62);display:flex;align-items:center;justify-content:center;padding:20px;z-index:60}
+.feedback-modal-backdrop.hidden{display:none}
+.feedback-modal{width:min(100%,460px);background:#1e1e1e;border:1px solid #2d2d2d;border-radius:12px;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,0.38)}
+.feedback-modal-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.feedback-modal-title{font-size:18px;font-weight:700;color:#fff}
+.feedback-close-btn{background:transparent;border:1px solid #2d2d2d;color:#737373;padding:6px 10px;cursor:pointer}
+.feedback-close-btn:hover{border-color:#007acc;color:#d4d4d4}
+.feedback-form{display:flex;flex-direction:column;gap:12px}
+.feedback-submit-btn{background:#007acc;border:1px solid #007acc;color:#fff;padding:10px 14px;cursor:pointer}
+.feedback-submit-btn:hover{background:#1a8cdb;border-color:#1a8cdb}
+.feedback-submit-btn:disabled{opacity:.7;cursor:not-allowed}
+.feedback-help{font-size:12px;color:#737373;line-height:1.7}
+.feedback-status{min-height:18px;font-size:12px;line-height:1.6}
+.feedback-status.success{color:#4ec9b0}
+.feedback-status.error{color:#f44747}
+.account-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;height:36px;background:#1a1a1a;border-bottom:1px solid #2d2d2d;padding:0 16px;margin:-24px -24px 18px -24px;font-size:12px;font-family:'Courier New',monospace}
+.account-bar-user{color:#737373;line-height:1}
+.account-bar-signout{background:transparent;border:none;color:#737373;padding:0;cursor:pointer;font-family:'Courier New',monospace;font-size:12px}
+.account-bar-signout:hover{color:#f44747}
+.account-bar-signout:disabled{opacity:.7;cursor:not-allowed}
 </style>
 </head>
 <body>
+<div id="accountBar" class="account-bar hidden">
+  <div id="accountBarUser" class="account-bar-user"></div>
+  <button id="signOutBtn" class="account-bar-signout" type="button" onclick="signOutUser()">Sign Out</button>
+</div>
 <h1>⚡ Zone</h1>
 <p class="sub">AI Code Agent — deterministic, explainable, safe</p>
 
@@ -158,7 +215,7 @@ input:focus,textarea:focus{border-color:#007acc}
 <div class="section">
   <div class="label">Role</div>
   <div class="role-row">
-<button class="role-btn active" data-role="developer" onclick="selectRole(this)">⚡ Developer <span style="font-size:10px;background:#1a2a3a;border:1px solid #007acc;border-radius:4px;padding:1px 5px;margin-left:4px;color:#007acc">beta</span></button>
+<button class="role-btn active" data-role="developer" onclick="selectRole(this)">⚡ Developer</button>
     <button class="role-btn" data-role="test_engineer" onclick="selectRole(this)">🧪 Test Engineer</button>
     <button class="role-btn" data-role="data_analyst" onclick="selectRole(this)">📊 Data Analyst</button>
   </div>
@@ -167,11 +224,20 @@ input:focus,textarea:focus{border-color:#007acc}
   <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
     <button id="enhanceBtn" class="enhance-btn" onclick="enhanceTask()">✨ Enhance</button>
   </div>
+  <div id="exampleTasks" style="margin-bottom:10px">
+  <div style="font-size:11px;color:#858585;margin-bottom:6px">💡 Try an example:</div>
+  <div style="display:flex;flex-wrap:wrap;gap:6px">
+    <button onclick="setExampleTask('add error handling to the login function','developer')" style="background:#1e1e1e;border:1px solid #3c3c3c;border-radius:4px;color:#9cdcfe;font-family:'Courier New',monospace;font-size:11px;padding:4px 8px;cursor:pointer">🔧 add error handling to login</button>
+    <button onclick="setExampleTask('write a test for the checkout flow','test_engineer')" style="background:#1e1e1e;border:1px solid #3c3c3c;border-radius:4px;color:#9cdcfe;font-family:'Courier New',monospace;font-size:11px;padding:4px 8px;cursor:pointer">🧪 write a test for checkout</button>
+    <button onclick="setExampleTask('create a users table migration','data_analyst')" style="background:#1e1e1e;border:1px solid #3c3c3c;border-radius:4px;color:#9cdcfe;font-family:'Courier New',monospace;font-size:11px;padding:4px 8px;cursor:pointer">📊 create a users migration</button>
+  </div>
+</div>
   <div class="history-label">Repo Path</div>
   <div class="repo-row">
     <input id="repoPath" type="text" placeholder="C:\Users\..." oninput="syncRepoSelectionDisplay()" />
     <button id="folderPickerBtn" class="editor-btn picker-btn" title="Select repo folder" onclick="selectRepoFolder()">
-      <span>📁</span><span>Select Folder</span>
+      <span>📁</span>
+      <span id="folderPickerBtnLabel" class="hidden">Select folder to enable Execute</span>
     </button>
     <button class="editor-btn" title="Open in VS Code" onclick="openInEditor('vscode')">
       <svg width="18" height="18" viewBox="0 0 100 100" fill="none"><path d="M74.5 6.5L39 38.5L16.5 21L6 27.5L27.5 50L6 72.5L16.5 79L39 61.5L74.5 93.5L94 83V17L74.5 6.5Z" fill="#007ACC"/></svg>
@@ -247,6 +313,7 @@ input:focus,textarea:focus{border-color:#007acc}
     <div id="frameworkBadge" class="framework-badge hidden"></div>
     <div id="complexityBadge" class="complexity-badge hidden"></div>
   </div>
+  <div class="preview-helper">Zone is not confident enough to apply automatically. Review the changes and apply manually if they look correct.</div>
   <div class="metrics">
     <div class="metric"><div class="mval" id="confVal">—</div><div class="mlbl">Confidence</div></div>
     <div class="metric"><div class="mval" id="riskVal" style="color:#ce9178">—</div><div class="mlbl">Risk</div></div>
@@ -301,11 +368,15 @@ let currentBackupSnapshot=null;
 let currentRunState={hasPatchResult:false,validationBlocked:false,runInProgress:false,decisionMode:'',confidence:0};
 let currentBillingState={plan:'',credits:null,hardBlocked:false};
 let currentUserIdLogState='';
+let currentRepoHandlePermission='unknown';
 const RECENT_RUNS_KEY='zone_recent_runs';
 const MAX_RECENT_RUNS=6;
-const HOSTED_CONTEXT_MAX_FILES=20;
+const HOSTED_CONTEXT_MAX_FILES=35;
 const HOSTED_CONTEXT_MAX_FILE_BYTES=20*1024;
 const HOSTED_CONTEXT_BINARY_EXTENSIONS=new Set(['png','jpg','jpeg','gif','webp','ico','pdf','zip','gz','tar','rar','7z','woff','woff2','ttf','eot','mp4','mp3','wav','mov','avi','jar','class','dll','exe','bin']);
+const ZONE_HANDLE_DB_NAME='zone-folder-handles';
+const ZONE_HANDLE_STORE_NAME='handles';
+const ZONE_FOLDER_HANDLE_KEY='zone-folder-handle';
 
 function formatMetadataBadge(parts){const s=(parts||[]).filter(Boolean);return s.length>0?s.join(' / '):'';}
 function formatRoleLabel(role){return {developer:'Developer',test_engineer:'Test Engineer',data_analyst:'Data Analyst'}[role]||'Developer';}
@@ -364,23 +435,91 @@ function getResolvedRepoPath(){
   return document.getElementById('repoPath').value.trim()||currentRepoPath||'';
 }
 
+function openFolderHandleDb(){
+  return new Promise((resolve,reject)=>{
+    if(!window.indexedDB){resolve(null);return;}
+    const request=window.indexedDB.open(ZONE_HANDLE_DB_NAME,1);
+    request.onerror=()=>reject(request.error||new Error('Failed to open IndexedDB.'));
+    request.onupgradeneeded=()=>{
+      const db=request.result;
+      if(!db.objectStoreNames.contains(ZONE_HANDLE_STORE_NAME)){
+        db.createObjectStore(ZONE_HANDLE_STORE_NAME);
+      }
+    };
+    request.onsuccess=()=>resolve(request.result);
+  });
+}
+
+async function saveStoredFolderHandle(handle){
+  try{
+    const db=await openFolderHandleDb();
+    if(!db)return;
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(ZONE_HANDLE_STORE_NAME,'readwrite');
+      tx.oncomplete=()=>resolve();
+      tx.onerror=()=>reject(tx.error||new Error('Failed to save folder handle.'));
+      tx.objectStore(ZONE_HANDLE_STORE_NAME).put(handle,ZONE_FOLDER_HANDLE_KEY);
+    });
+    db.close();
+  }catch(_){}
+}
+
+async function loadStoredFolderHandle(){
+  try{
+    const db=await openFolderHandleDb();
+    if(!db)return null;
+    const handle=await new Promise((resolve,reject)=>{
+      const tx=db.transaction(ZONE_HANDLE_STORE_NAME,'readonly');
+      const request=tx.objectStore(ZONE_HANDLE_STORE_NAME).get(ZONE_FOLDER_HANDLE_KEY);
+      request.onsuccess=()=>resolve(request.result||null);
+      request.onerror=()=>reject(request.error||new Error('Failed to load folder handle.'));
+    });
+    db.close();
+    return handle;
+  }catch(_){
+    return null;
+  }
+}
+
+async function requestRepoHandlePermission(handle){
+  if(!handle)return false;
+  if(typeof handle.requestPermission==='function'){
+    try{
+      const state=await handle.requestPermission({mode:'readwrite'});
+      currentRepoHandlePermission=state;
+      return state==='granted';
+    }catch(_){
+      currentRepoHandlePermission='denied';
+      return false;
+    }
+  }
+  currentRepoHandlePermission='granted';
+  return true;
+}
+
 function hasHostedFolderHandle(){
   return Boolean(currentRepoHandle&&currentRepoHandle.kind==='directory'&&typeof currentRepoHandle.values==='function');
 }
 
 function requiresHostedFolderSelection(){
-  return Boolean(isHostedExecution()&&!hasHostedFolderHandle());
+  if(!isHostedExecution())return false;
+  if(hasHostedFolderHandle())return false;
+  const repoPath=document.getElementById('repoPath')?.value?.trim();
+  if(repoPath)return false;
+  return true;
 }
 
 function getHostedFolderRequiredMessage(){
-  return 'Please select a folder to run in hosted mode.';
+  return '📁 Select your project folder to get started';
 }
 
 function isHostedExecution(){
   const config=window.__ZONE_PUBLIC_CONFIG__||{};
+  if(config.hosted===true)return true;
   const zoneApiBaseUrl=typeof config.zoneApiBaseUrl==='string'?config.zoneApiBaseUrl.trim():'';
-  const host=String(window.location?.hostname||'').toLowerCase();
-  return Boolean(zoneApiBaseUrl||Boolean(host&&host!=='localhost'&&host!=='127.0.0.1'));
+  if(zoneApiBaseUrl)return true;
+  const host=String(window.top?.location?.hostname||window.location?.hostname||'').toLowerCase();
+  return Boolean(host&&host!=='localhost'&&host!=='127.0.0.1');
 }
 
 function getHostedContextExtension(filePath){
@@ -399,10 +538,12 @@ function classifyHostedContextCategory(filePath){
 
 function shouldSkipHostedContextPath(filePath){
   const normalized=`/${String(filePath||'').replace(/\\/g,'/').toLowerCase()}/`;
-  if(normalized.includes('/.claude/')||normalized.includes('/.idea/')||normalized.includes('/.vscode/')||
-
-
-normalized.includes('/node_modules/')||normalized.includes('/dist/')||normalized.includes('/build/')||normalized.includes('/.git/')||normalized.includes('/venv/')||normalized.includes('/site-packages/'))return true;
+if(normalized.includes('/node_modules/')||normalized.includes('/dist/')||normalized.includes('/build/')||normalized.includes('/.git/')||normalized.includes('/venv/')||normalized.includes('/site-packages/')||normalized.includes('/.agent-cache/')||normalized.includes('/.agent-patches/')||normalized.includes('/.agent-backups/')||normalized.includes('/agent-cache/')||normalized.includes('/agent-patches/')||normalized.includes('/agent-backups/')||normalized.includes('/.claude/')||normalized.includes('/.idea/')||normalized.includes('/.vscode/')||normalized.includes('/.cursor/')||normalized.includes('/coverage/')||normalized.includes('/__pycache__/')||normalized.includes('/.pytest_cache/')||normalized.includes('/.next/')||normalized.includes('/.nuxt/')||normalized.includes('/out/')||normalized.includes('/.turbo/')||normalized.includes('/.expo/')||normalized.includes('/target/')||normalized.includes('/.gradle/'))return true;
+  const filename=String(filePath||'').split('/').pop()?.toLowerCase()||'';
+  const skipFilenames=new Set(['.gitignore','.gitattributes','.npmignore','claude.md','readme.md','readme.txt','changelog.md','license','license.md','.editorconfig','.nvmrc','package-lock.json','yarn.lock','pnpm-lock.yaml','poetry.lock','composer.lock','gemfile.lock','cargo.lock']);
+  if(skipFilenames.has(filename))return true;
+  if(filename==='.env'||filename.startsWith('.env.'))return true;
+  if(filename.endsWith('.min.js')||filename.endsWith('.min.css')||filename.endsWith('.bundle.js')||filename.endsWith('.chunk.js')||filename.endsWith('.map')||filename.endsWith('.pyc')||filename.endsWith('.pyo'))return true;
   const ext=getHostedContextExtension(filePath);
   return HOSTED_CONTEXT_BINARY_EXTENSIONS.has(ext);
 }
@@ -469,43 +610,55 @@ function isHostedFeatureFile(filePath){
 
 function isHostedFrameworkSignalFile(filePath){
   const normalized=String(filePath||'').toLowerCase();
-  const base=normalized.split('/').pop()||'';
-  if(base==='package.json'||base==='playwright.config.ts'||base==='playwright.config.js')return true;
-  if(normalized.includes('/tests/')||normalized.includes('/test/')||normalized.includes('/e2e/'))return true;
-  if(base.endsWith('.spec.ts')||base.endsWith('.spec.js')||base.endsWith('.test.ts')||base.endsWith('.test.js'))return true;
-  return false;
+  const base=normalized.split('/').pop()||normalized;
+  return base==='package.json'
+    || base==='playwright.config.ts'
+    || base==='playwright.config.js'
+    || base==='playwright.config.mjs'
+    || base==='playwright.config.cjs'
+    || base==='cypress.config.ts'
+    || base==='cypress.config.js'
+    || base==='cypress.config.mjs'
+    || base==='cypress.config.cjs'
+    || base==='pytest.ini'
+    || base==='testng.xml';
 }
 
 function prioritizeHostedTestEngineerFiles(files){
-  const prioritized=[];const seen=new Set();
-  function addMatches(predicate){
-    for(const file of files){
-      if(seen.has(file.path)||!predicate(file))continue;
-      seen.add(file.path);prioritized.push(file);
-      if(prioritized.length>=HOSTED_CONTEXT_MAX_FILES)return;
-    }
+  const buckets=[
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+  ];
+  for(const file of files){
+    if(isHostedFrameworkSignalFile(file.path))buckets[0].push(file);
+    else if(isHostedTestFile(file.path))buckets[1].push(file);
+    else if(isHostedPageObjectFile(file.path))buckets[2].push(file);
+    else if(isHostedStepDefinitionFile(file.path))buckets[3].push(file);
+    else if(isHostedFeatureFile(file.path))buckets[4].push(file);
+    else buckets[5].push(file);
   }
-  addMatches(file=>isHostedFrameworkSignalFile(file.path));
-  addMatches(file=>isHostedTestFile(file.path));
-  addMatches(file=>isHostedPageObjectFile(file.path));
-  addMatches(file=>isHostedStepDefinitionFile(file.path));
-  addMatches(file=>isHostedFeatureFile(file.path));
-  addMatches(()=>true);
-  return prioritized.slice(0,HOSTED_CONTEXT_MAX_FILES);
+  return buckets.flat();
 }
 
 async function buildHostedTestEngineerContext(){
   if(!currentRepoHandle||currentRepoHandle.kind!=='directory'||typeof currentRepoHandle.values!=='function')return null;
-  const files=prioritizeHostedTestEngineerFiles(await collectHostedContextFilesFromHandle(currentRepoHandle,'',80));
+  const files=prioritizeHostedTestEngineerFiles(await collectHostedContextFilesFromHandle(currentRepoHandle,'',80)).slice(0,HOSTED_CONTEXT_MAX_FILES);
   if(files.length===0)return null;
-  console.log('[zone-ui] hosted test context files:',files.map(file=>file.path));
   const availableFiles=files.map(file=>({path:file.path,category:classifyHostedContextCategory(file.path),extension:getHostedContextExtension(file.path)}));
+  const existingTestContents=files.filter(file=>isHostedTestFile(file.path)||isHostedFrameworkSignalFile(file.path)).slice(0,5).map(file=>({path:file.path,content:file.content}));
+  console.log('[zone-ui] hosted test context files:',files.map(f=>f.path));
+  console.log('[zone-ui] test-engineer availableFiles count',availableFiles.length);
+  console.log('[zone-ui] test-engineer existingTestContents paths',existingTestContents.map(f=>f.path));
   return{
     availableFiles,
     pageObjectContents:files.filter(file=>isHostedPageObjectFile(file.path)).slice(0,3).map(file=>({path:file.path,content:file.content})),
     stepDefinitionContents:files.filter(file=>isHostedStepDefinitionFile(file.path)).slice(0,2).map(file=>({path:file.path,content:file.content})),
     featureContents:files.filter(file=>isHostedFeatureFile(file.path)).slice(0,3).map(file=>({path:file.path,content:file.content})),
-    existingTestContents:files.filter(file=>isHostedTestFile(file.path)).slice(0,3).map(file=>({path:file.path,content:file.content})),
+    existingTestContents,
   };
 }
 
@@ -697,9 +850,41 @@ function renderBillingState(){
   const lowBox=document.getElementById('lowCreditsBox');const lowText=document.getElementById('lowCreditsText');
   const plan=currentBillingState.plan==='Pro'?'Pro':currentBillingState.plan==='Free'?'Free':'';
   const credits=typeof currentBillingState.credits==='number'?Math.max(0,currentBillingState.credits):null;
-  if(plan&&credits!==null){label.textContent=`Plan: ${plan} · Remaining runs: ${credits}`;meta.textContent=plan==='Pro'?'1000 runs / month':'Upgrade for more runs';box.classList.remove('hidden');}
-  else{label.textContent='';meta.textContent='';box.classList.add('hidden');}
-  if(plan==='Free'&&credits!==null&&credits>0&&credits<=2){lowText.textContent=`⚠ You have ${credits} run${credits!==1?'s':''} left. Upgrade to Pro to continue.`;lowBox.classList.remove('hidden');trackEvent('low_credits_banner_shown',{credits,plan:'Free'});}
+  box.classList.add('hidden');
+  if(plan&&credits!==null){
+    box.className='repo-selection billing-summary-box';
+    label.className='repo-selection-label billing-summary-label';
+    meta.className='repo-selection-meta billing-summary-meta';
+    if(plan==='Pro'){
+      box.classList.add('pro');
+      label.classList.add('pro');
+      meta.classList.add('pro');
+      label.innerHTML=`<span class="billing-plan-badge">⚡ Pro</span><span>${credits} runs remaining this month</span>`;
+      meta.textContent='1000 runs / month';
+    }else{
+      const isLow=credits<=3;
+      label.textContent=`Free Plan · ${credits} runs remaining`;
+      label.classList.add('free');
+      if(isLow){
+        box.classList.add('free-low');
+        label.classList.add('free-low');
+        meta.classList.add('free-low');
+      }
+      if(credits===0){
+        meta.innerHTML=`Your free runs are exhausted. <a class="billing-upgrade-link" href="https://zonecli.dev/#pricing" target="_blank" rel="noreferrer">Upgrade to Pro</a>`;
+      }else if(isLow){
+        meta.textContent='Low on runs. Upgrade soon to avoid interruptions.';
+      }else{
+        meta.textContent='Free plan usage';
+      }
+    }
+    box.classList.remove('hidden');
+  }
+  else{
+    label.textContent='';meta.textContent='';box.classList.add('hidden');
+  }
+  if(plan==='Free'&&credits!==null&&credits>0&&credits<=3){lowText.textContent=`⚠ You have ${credits} run${credits!==1?'s':''} left. Upgrade to Pro to continue.`;lowBox.classList.remove('hidden');trackEvent('low_credits_banner_shown',{credits,plan:'Free'});}
+  else if(plan==='Free'&&credits===0){lowText.innerHTML=`Upgrade to Pro to continue using Zone. <a class="billing-upgrade-link" href="https://zonecli.dev/#pricing" target="_blank" rel="noreferrer">View pricing</a>`;lowBox.classList.remove('hidden');}
   else{lowText.textContent='';lowBox.classList.add('hidden');}
 }
 
@@ -708,13 +893,22 @@ function renderRepoSelection(){
   const label=document.getElementById('repoSelectionLabel');
   const meta=document.getElementById('repoSelectionMeta');
   const repoInput=document.getElementById('repoPath');
+  const folderPickerBtn=document.getElementById('folderPickerBtn');
+  const folderPickerBtnLabel=document.getElementById('folderPickerBtnLabel');
   const manualRepoPath=document.getElementById('repoPath').value.trim();
   const resolvedRepoPath=getResolvedRepoPath();
   const requiresFolder=requiresHostedFolderSelection();
+  console.log('[zone-ui] renderRepoSelection',{currentRepoSelectionLabel,hasHandle:Boolean(currentRepoHandle),requiresHostedFolderSelection:requiresFolder});
   repoInput.readOnly=requiresFolder;
   repoInput.title=requiresFolder?getHostedFolderRequiredMessage():'';
+  if(folderPickerBtn)folderPickerBtn.title=requiresFolder?'Select folder to enable Execute':'Select repo folder';
+  if(folderPickerBtnLabel){
+    folderPickerBtnLabel.textContent='Select folder to enable Execute';
+    if(requiresFolder)folderPickerBtnLabel.classList.remove('hidden');
+    else folderPickerBtnLabel.classList.add('hidden');
+  }
   if(!currentRepoSelectionLabel){
-    if(requiresFolder){
+    if(requiresFolder&&!manualRepoPath){
       label.textContent='Hosted Mode';
       meta.textContent=getHostedFolderRequiredMessage();
       box.classList.remove('hidden');
@@ -725,6 +919,7 @@ function renderRepoSelection(){
   }
   label.textContent=currentRepoSelectionLabel;
   if(requiresFolder)meta.textContent=getHostedFolderRequiredMessage();
+  else if(isHostedExecution()&&manualRepoPath&&!hasHostedFolderHandle())meta.textContent='📁 Folder selected from history. Click the folder button if you need to grant file access.';
   else if(manualRepoPath)meta.textContent=`Run path: ${manualRepoPath}`;
   else if(resolvedRepoPath)meta.textContent=`Run path: ${resolvedRepoPath}`;
   else meta.textContent='Selected folder is ready for local Apply.';
@@ -732,14 +927,14 @@ function renderRepoSelection(){
 }
 
 function syncRepoSelectionDisplay(){renderRepoSelection();}
-function clearRepoSelection(){currentRepoHandle=null;currentRepoSelectionLabel='';const f=document.getElementById('folderPickerFallback');if(f)f.value='';renderRepoSelection();}
-function setRepoSelection(label,handle){currentRepoHandle=handle||null;currentRepoSelectionLabel=label||'';renderRepoSelection();}
+function clearRepoSelection(){currentRepoHandle=null;currentRepoHandlePermission='unknown';currentRepoSelectionLabel='';const f=document.getElementById('folderPickerFallback');if(f)f.value='';renderRepoSelection();}
+function setRepoSelection(label,handle){console.log('[zone-ui] setRepoSelection',{label,hasHandle:Boolean(handle),handleKind:handle?.kind??null,hasHandleValues:typeof handle?.values==='function'});currentRepoHandle=handle||null;currentRepoHandlePermission=handle?'unknown':'denied';currentRepoSelectionLabel=label||'';const folderName=label?label.replace(/^Folder:\s*/,''):'';if(folderName){const inp=document.getElementById('repoPath');if(inp)inp.value=folderName;syncRepoSelectionDisplay();}if(handle)void saveStoredFolderHandle(handle);renderRepoSelection();if(handle&&window.__pendingExecute){window.__pendingExecute=false;setTimeout(()=>execute(),100);}}
 function getFallbackFolderName(input){const files=Array.from(input?.files||[]);if(files.length===0)return '';const r=String(files[0].webkitRelativePath||files[0].name||'');return r.split('/')[0]||r.split('\\')[0]||'';}
 
 async function selectRepoFolder(){
   hideError();
   if(typeof window.showDirectoryPicker==='function'){
-    try{const handle=await window.showDirectoryPicker();if(!handle)return;setRepoSelection(`Folder: ${handle.name||'Selected folder'}`,handle);return;}
+    try{const handle=await window.showDirectoryPicker();if(!handle)return;console.log('[zone-ui] selectRepoFolder handle selected',{name:handle.name||null,hasHandle:true,handleKind:handle.kind??null,hasHandleValues:typeof handle?.values==='function'});setRepoSelection(`Folder: ${handle.name||'Selected folder'}`,handle);return;}
     catch(e){if(e&&e.name==='AbortError')return;showError('Folder selection failed. You can still paste the repo path manually.');return;}
   }
   const fallback=document.getElementById('folderPickerFallback');
@@ -748,13 +943,33 @@ async function selectRepoFolder(){
 
 function handleFolderFallbackChange(input){const n=getFallbackFolderName(input);if(!n)return;setRepoSelection(`Folder: ${n}`,null);}
 
+async function reconnectStoredFolder(){
+  if(!currentRepoHandle)return;
+  hideError();
+  const granted=await requestRepoHandlePermission(currentRepoHandle);
+  if(granted){
+    currentRepoHandlePermission='granted';
+    renderRepoSelection();
+    if(window.__pendingExecute){
+      window.__pendingExecute=false;
+      setTimeout(()=>execute(),100);
+    }
+    return;
+  }
+  currentRepoHandlePermission='prompt';
+  renderRepoSelection();
+}
+
 function validateTaskAndRepo(){
   const task=document.getElementById('task').value.trim();
   const repoPath=getResolvedRepoPath();
   if(!task){showError('Task is required.');return null;}
   if(!repoPath){showError('Task and repo path are required.');return null;}
   if(!getCurrentUserId()){showUnauthorized(getMissingUserSessionMessage());return null;}
-  if(requiresHostedFolderSelection()){showError(getHostedFolderRequiredMessage());return null;}
+  if(isHostedExecution()&&!hasHostedFolderHandle()){
+    const repoPathValue=document.getElementById('repoPath')?.value?.trim();
+    if(!repoPathValue){showError('Please select a folder first using the folder button.');return null;}
+  }
   return{task,repoPath};
 }
 
@@ -854,13 +1069,19 @@ function resetProgress(){closeProgressStream();currentRunId='';setProgress('');}
 function getHistory(){try{return JSON.parse(localStorage.getItem('zone_repo_history')||'[]');}catch{return [];}}
 function saveToHistory(path){let h=getHistory().filter(p=>p!==path);h.unshift(path);h=h.slice(0,5);localStorage.setItem('zone_repo_history',JSON.stringify(h));renderHistory();}
 function renderHistory(){const h=getHistory();const box=document.getElementById('historyBox');const sel=document.getElementById('historySelect');if(h.length===0){box.classList.add('hidden');return;}box.classList.remove('hidden');sel.innerHTML='<option value="">— select —</option>'+h.map(p=>`<option value="${p}">${p}</option>`).join('');}
-function selectHistory(){const v=document.getElementById('historySelect').value;if(v){document.getElementById('repoPath').value=v;renderRepoSelection();}}
+function selectHistory(){const selectedPath=document.getElementById('historySelect').value;if(selectedPath){document.getElementById('repoPath').value=selectedPath;renderRepoSelection();}}
 function openInEditor(editor){
   const repoPath=getResolvedRepoPath();if(!repoPath){showError('Enter a repo path first.');return;}
   if(editor==='vscode'){window.location.href=`vscode://file/${repoPath}`;}
   else if(editor==='idea'){window.location.href=`idea://open?file=${repoPath}`;}
   else if(editor==='pycharm'){window.location.href=`pycharm://open?file=${repoPath}`;}
   else if(editor==='terminal'){navigator.clipboard.writeText(`cd "${repoPath}"`);const btn=document.querySelector('[title="Copy cd command"]');if(btn){btn.title='Copied!';setTimeout(()=>btn.title='Copy cd command',2000);}}
+}
+function setExampleTask(task, role) {
+  document.getElementById('task').value = task;
+  const btn = document.querySelector('[data-role="' + role + '"]');
+  if (btn) selectRole(btn);
+  document.getElementById('exampleTasks').style.display = 'none';
 }
 function selectRole(btn){
   document.querySelectorAll('.role-btn').forEach(b=>b.classList.remove('active'));
@@ -898,12 +1119,11 @@ function copyPrompt(){
 }
 
 function getMissingUserSessionMessage(){
-  return 'Missing user session. Please open Zone from your dashboard.';
+  return 'Please sign in to use Zone.';
 }
 
 function getDebugFallbackUserId(){
-  const config=window.__ZONE_PUBLIC_CONFIG__||{};
-  return typeof config.debugFallbackUserId==='string'?config.debugFallbackUserId.trim():'';
+  return '';
 }
 
 function logUserIdResolution(state){
@@ -928,8 +1148,16 @@ function getCurrentUserId(){
 function showError(msg){
   const b=document.getElementById('errorBox');
   b.style.background='';b.style.borderColor='';b.style.color='';
-  if(msg==='repo_not_accessible_in_hosted_mode')msg=getHostedFolderRequiredMessage();
-  b.textContent='\u26A0 '+msg;b.style.display='block';
+  if(msg==='repo_not_accessible_in_hosted_mode')return;
+  const detailsHtml=`<details class="error-card-details"><summary>Show details</summary><div class="error-card-details-content">${escapeHtml(msg)}</div></details>`;
+  if(String(msg||'').startsWith('Some files could not be written')||String(msg||'').startsWith('Apply failed:')){
+    b.innerHTML=`<div class="error-card-title"><span>⚠</span><span>Apply failed</span></div><div class="error-card-message">Some files could not be written. Check that the folder is still accessible.</div><div class="error-card-actions"><button type="button" class="error-card-btn" onclick="applyChanges()">Try Again</button></div>${detailsHtml}`;
+  }else if(String(msg||'').includes('failed')||String(msg||'').includes('Network')||String(msg||'').includes('moment')){
+    b.innerHTML=`<div class="error-card-title"><span>⚠</span><span>Request failed</span></div><div class="error-card-message">Something went wrong. Please try again in a moment.</div><div class="error-card-actions"><button type="button" class="error-card-btn" onclick="execute()">Retry</button></div>${detailsHtml}`;
+  }else{
+    b.innerHTML=`<div class="error-card-title"><span>⚠</span><span>Something needs attention</span></div><div class="error-card-message">${escapeHtml(msg)}</div>`;
+  }
+  b.style.display='block';
 }
 
 function showUpgrade(message,url){
@@ -950,7 +1178,7 @@ async function refreshBillingSummary(){
     if(!r.ok||!data?.ok){currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);return;}
     const wasHardBlocked=currentBillingState.hardBlocked;
     const plan=data.plan==='Pro'?'Pro':'Free';const credits=typeof data.credits==='number'?Math.max(0,data.credits):0;
-    currentBillingState={plan,credits,hardBlocked:plan==='Free'&&credits===0};renderBillingState();setLoading(false);
+    currentBillingState={plan,credits,hardBlocked:plan==='Free'&&credits===0};console.log('[zone-ui] currentBillingState after refresh',currentBillingState);renderBillingState();setLoading(false);
     if(currentBillingState.hardBlocked&&!wasHardBlocked){showUpgrade("You've used all your free runs. Upgrade to Pro.",data.upgradeUrl);}
   }catch(_){
     currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);
@@ -959,7 +1187,7 @@ async function refreshBillingSummary(){
 function showUnauthorized(message){
   const b=document.getElementById('errorBox');
   b.style.background='';b.style.borderColor='';b.style.color='';
-  b.textContent='\u26A0 '+message;
+  b.innerHTML=`<div class="error-card-title"><span>⚠</span><span>Sign-in required</span></div><div class="error-card-message">${escapeHtml(message)}</div>`;
   b.style.display='block';
 }
 function hideError(){document.getElementById('errorBox').style.display='none';}
@@ -967,6 +1195,15 @@ function setLoading(l){const btn=document.getElementById('execBtn');const s=docu
 
 
 async function execute(){
+  if(isHostedExecution()&&currentRepoHandle){
+    const granted=await currentRepoHandle.requestPermission({mode:'readwrite'});
+    if(granted!=='granted'){
+      currentRepoHandlePermission='prompt';
+      renderRepoSelection();
+      return;
+    }
+    currentRepoHandlePermission='granted';
+  }
   const values=validateTaskAndRepo();if(!values)return;
   const{task,repoPath}=values;
   resetProgress();hideError();
@@ -995,8 +1232,17 @@ async function execute(){
     runStarted=true;
     startProgress(runId,currentRole==='data_analyst'||currentRole==='test_engineer'?'Scanning repo...':'Generating patch...');
     if(currentRole==='test_engineer'){
+      console.log('[zone-ui] execute test-engineer handle state',{currentRole,currentRepoSelectionLabel,hasHandle:Boolean(currentRepoHandle),handleKind:currentRepoHandle?.kind??null});
       const hostedContext=await buildHostedTestEngineerContext();
-      const r=await fetch('/api/test-engineer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...{task,repoPath,runId,userId},...(hostedContext?{hostedContext}:{})})});
+      if(hostedContext){
+        console.log('[zone-ui] test-engineer hostedContext',hostedContext);
+        console.log('[zone-ui] test-engineer hostedContext file count',Array.isArray(hostedContext.files)?hostedContext.files.length:0);
+      }else{
+        console.warn('[zone-ui] hostedContext is NULL — folder handle missing');
+      }
+      const body={...{task,repoPath,runId,userId},...(hostedContext?{hostedContext}:{})};
+      console.log('[zone-ui] test-engineer request body',body);
+      const r=await fetch('/api/test-engineer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       const result=await r.json().catch(()=>null);
       if(!r.ok){
         resetProgress();
@@ -1038,17 +1284,30 @@ async function execute(){
         throw new Error(result?.reason||('Data analyst flow failed: '+r.status));
       }
       if(!result.ok){showError(result.reason||'SQL generation failed.');addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
-      showDecision({decision:{mode:result.confidence>=70?'safe_to_apply':'preview_only'},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat])});
+      const daMode=result.decisionMode||(result.confidence>=70?'safe_to_apply':'preview_only');
+      showDecision({decision:{mode:daMode},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat])});
       showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,fileDiffs:result.fileDiffs||[]});
       addRecentRun({task,role:currentRole,repoPath,status:'success',timestamp:Date.now()});
       finishProgress();
     }else{
-      setProgress('Scanning repo...');
+      setProgress('Analyzing repository...');
       const r1=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});
       if(!r1.ok)throw new Error('Analyze failed: '+r1.status);
       const analyzeData=await r1.json();
-      setProgress('Generating patch...');
+      setProgress('Planning changes...');
       const hostedContext=await buildHostedDeveloperContext();
+      let fakeProgressTimer=null;
+      let fakeProgressStep=0;
+      const fakeProgressStages=['Generating patch...','Generating patch...','Validating output...'];
+      const fakeProgressDelays=[5000,20000,5000];
+      function advanceFakeProgress(){
+        if(fakeProgressStep<fakeProgressStages.length){
+          setProgress(fakeProgressStages[fakeProgressStep]);
+          fakeProgressTimer=setTimeout(advanceFakeProgress,fakeProgressDelays[fakeProgressStep]);
+          fakeProgressStep++;
+        }
+      }
+      setTimeout(advanceFakeProgress,3000);
       const body={...{task,repoPath,runId,userId},...(hostedContext?{hostedContext}:{})};
       console.log('[zone-ui] patch request body',body);
       const r2=await fetch('/api/patch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -1067,6 +1326,7 @@ async function execute(){
         }
         throw new Error(patch?.reason||('Patch failed: '+r2.status));
       }
+      if(fakeProgressTimer)clearTimeout(fakeProgressTimer);
       if(!patch?.ok){
         showError(patch?.reason||'Patch generation failed.');
         addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
@@ -1078,7 +1338,7 @@ async function execute(){
       finishProgress();
     }
   }catch(e){resetProgress();addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});showError(e.message);}
-  finally{if(runStarted){currentRunState.runInProgress=false;setLoading(false);updateApplyState();}}
+  finally{if(runStarted){currentRunState.runInProgress=false;setLoading(false);updateApplyState();void refreshBillingSummary();}}
 }
 
 function showDecision(data){
@@ -1131,7 +1391,7 @@ function showPatch(data){
     document.getElementById('confVal').textContent=String(data.developerConfidence);
   }
 
-  if(data.decisionMode&&currentRole==='developer'){
+  if(data.decisionMode&&(currentRole==='developer'||currentRole==='data_analyst'||currentRole==='test_engineer')){
     currentRunState.decisionMode=data.decisionMode;
     const cls=data.decisionMode==='blocked'?'blocked':data.decisionMode==='preview_only'?'preview':'safe';
     const dot=data.decisionMode==='blocked'?'#f44747':data.decisionMode==='preview_only'?'#ce9178':'#4ec9b0';
@@ -1159,7 +1419,7 @@ function showPatch(data){
   document.getElementById('patchSummary').textContent=validationBlocked?`Preview available for debugging only. Apply is blocked by output validation.\n\n${m?m[1]:preview}`:(m?m[1]:preview);
   renderContextFiles(data.contextFiles);
   document.getElementById('filesVal').textContent=patches.length;
-  updateResultSummary({role:currentRole,status:currentRunState.validationBlocked?'blocked':currentSummaryState.status,fileCount:patches.length,warningCount:warnings.length,contextCount:Array.isArray(data.contextFiles)?data.contextFiles.filter(Boolean).length:0});
+  updateResultSummary({role:currentRole,status:currentRunState.validationBlocked?'blocked':(currentRunState.decisionMode||currentSummaryState.status),fileCount:patches.length,warningCount:warnings.length,contextCount:Array.isArray(data.contextFiles)?data.contextFiles.filter(Boolean).length:0});
   document.getElementById('fileList').innerHTML=patchResultsHtml+buildPreviewDiffHtml(data)+buildFilePreviewCards(patches);
   document.getElementById('successBox').style.display='none';const upgradeHint=document.getElementById('resultUpgradeHint');if(currentBillingState.plan==='Free'&&!currentRunState.validationBlocked){trackEvent('upgrade_cta_shown_result',{plan:'Free',role:currentRole});upgradeHint.textContent='Generate more with Pro - 1000 runs/month';upgradeHint.classList.remove('hidden');}else{upgradeHint.textContent='';upgradeHint.classList.add('hidden');}
   document.getElementById('patchSection').classList.remove('hidden');
@@ -1168,7 +1428,6 @@ function showPatch(data){
 
 async function ensureRepoWritePermission(handle){
   if(!handle)return false;
-  if(typeof handle.queryPermission==='function'){const state=await handle.queryPermission({mode:'readwrite'});if(state==='granted')return true;}
   if(typeof handle.requestPermission==='function'){const state=await handle.requestPermission({mode:'readwrite'});return state==='granted';}
   return true;
 }
@@ -1331,7 +1590,7 @@ function resetUI(){
   renderResultSummary();resetProgress();currentRepoPath='';renderHistory();updateApplyState();
 }
 
-renderHistory();renderRecentRuns();
+renderHistory();renderRecentRuns();const _lastPath=getHistory()[0];if(_lastPath){const _inp=document.getElementById('repoPath');if(_inp&&!_inp.value.trim())_inp.value=_lastPath;renderRepoSelection();}
 currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};
 renderResultSummary();
 updateApplyState();
@@ -1339,8 +1598,212 @@ renderRepoSelection();
 void initPosthog();
 void refreshBillingSummary();
 </script>
+<div id="userIdBadge" class="user-id-badge hidden">
+  <span id="userIdText"></span>
+  <button type="button" id="copyUserIdBtn" class="copy-user-id-btn" onclick="copyUserId()">Copy</button>
+</div>
+<button type="button" class="feedback-fab" onclick="openFeedbackModal()">💬 Feedback</button>
+<div id="feedbackModalBackdrop" class="feedback-modal-backdrop hidden">
+  <div class="feedback-modal">
+    <div class="feedback-modal-header">
+      <div class="feedback-modal-title">Send Feedback</div>
+      <button type="button" class="feedback-close-btn" onclick="closeFeedbackModal()">X</button>
+    </div>
+    <form class="feedback-form" onsubmit="submitFeedback(event)">
+      <input type="hidden" name="userId" id="feedbackUserIdHidden" />
+      <div>
+        <div class="label">User ID</div>
+        <input id="feedbackUserId" type="text" readonly />
+      </div>
+      <div>
+        <div class="label">Message</div>
+        <textarea id="feedbackMessage" name="message" placeholder="What happened? What should we improve?" required></textarea>
+      </div>
+      <div class="feedback-help">We include your Zone user ID so we can investigate account-specific issues faster.</div>
+      <div id="feedbackStatus" class="feedback-status"></div>
+      <button type="submit" id="feedbackSubmitBtn" class="feedback-submit-btn">Send</button>
+    </form>
+  </div>
+</div>
+<script>
+function syncFeedbackUserUi(){
+  const userId=window.currentUser?.id||'';
+  const badge=document.getElementById('userIdBadge');
+  const text=document.getElementById('userIdText');
+  const input=document.getElementById('feedbackUserId');
+  const hidden=document.getElementById('feedbackUserIdHidden');
+  if(text)text.textContent=userId?`ID: ${userId}`:'';
+  if(input)input.value=userId;
+  if(hidden)hidden.value=userId;
+  if(badge){
+    if(userId)badge.classList.remove('hidden');
+    else badge.classList.add('hidden');
+  }
+}
+
+function syncAccountBar(){
+  const bar=document.getElementById('accountBar');
+  const text=document.getElementById('accountBarUser');
+  const user=window.currentUser||null;
+  if(!bar||!text)return;
+  if(!user){
+    bar.classList.add('hidden');
+    text.textContent='';
+    return;
+  }
+  const primaryLabel=user.firstName||user.email||user.id||'Signed in';
+  text.textContent=`Signed in as ${primaryLabel}`;
+  bar.classList.remove('hidden');
+}
+
+async function signOutUser(){
+  const btn=document.getElementById('signOutBtn');
+  if(btn)btn.disabled=true;
+  try{
+    await fetch('/api/sign-out',{method:'POST'});
+  }catch(_){}
+  window.location.href='/sign-in';
+}
+
+function openFeedbackModal(){
+  syncFeedbackUserUi();
+  const backdrop=document.getElementById('feedbackModalBackdrop');
+  if(backdrop)backdrop.classList.remove('hidden');
+  const textarea=document.getElementById('feedbackMessage');
+  if(textarea&&typeof textarea.focus==='function')setTimeout(()=>textarea.focus(),0);
+}
+
+function closeFeedbackModal(){
+  const backdrop=document.getElementById('feedbackModalBackdrop');
+  if(backdrop)backdrop.classList.add('hidden');
+  const status=document.getElementById('feedbackStatus');
+  if(status){
+    status.textContent='';
+    status.className='feedback-status';
+  }
+}
+
+function copyUserId(){
+  const userId=window.currentUser?.id||'';
+  if(!userId)return;
+  navigator.clipboard.writeText(userId);
+  const btn=document.getElementById('copyUserIdBtn');
+  if(btn){
+    const original=btn.textContent;
+    btn.textContent='Copied!';
+    setTimeout(()=>{btn.textContent=original||'Copy';},1500);
+  }
+}
+
+async function restoreStoredFolderHandleOnLoad(){
+  if(!isHostedExecution())return;
+  const storedHandle=await loadStoredFolderHandle();
+  if(!storedHandle||storedHandle.kind!=='directory'||typeof storedHandle.values!=='function')return;
+  currentRepoHandle=storedHandle;
+  currentRepoSelectionLabel=`Folder: ${storedHandle.name||'Selected folder'}`;
+  currentRepoHandlePermission='prompt';
+  const inp=document.getElementById('repoPath');
+  if(inp&&!inp.value.trim()&&storedHandle.name)inp.value=storedHandle.name;
+  renderRepoSelection();
+}
+
+async function submitFeedback(event){
+  event.preventDefault();
+  const userId=window.currentUser?.id||'';
+  const messageField=document.getElementById('feedbackMessage');
+  const status=document.getElementById('feedbackStatus');
+  const submitBtn=document.getElementById('feedbackSubmitBtn');
+  const message=messageField?.value?.trim()||'';
+  if(!message)return;
+  if(status){
+    status.textContent='';
+    status.className='feedback-status';
+  }
+  if(submitBtn)submitBtn.disabled=true;
+  try{
+    const response=await fetch('https://formspree.io/f/mzdkkzgr',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'Accept':'application/json',
+      },
+      body:JSON.stringify({userId,message}),
+    });
+    if(!response.ok)throw new Error('Feedback request failed.');
+    if(status){
+      status.textContent='Thanks for your feedback!';
+      status.className='feedback-status success';
+    }
+    if(messageField)messageField.value='';
+    setTimeout(()=>closeFeedbackModal(),2000);
+  }catch(_){
+    if(status){
+      status.textContent='Something went wrong. Please try again.';
+      status.className='feedback-status error';
+    }
+  }finally{
+    if(submitBtn)submitBtn.disabled=false;
+  }
+}
+
+document.getElementById('feedbackModalBackdrop')?.addEventListener('click',event=>{
+  if(event.target?.id==='feedbackModalBackdrop')closeFeedbackModal();
+});
+
+syncFeedbackUserUi();
+syncAccountBar();
+void restoreStoredFolderHandleOnLoad();
+window.addEventListener('message', function(event) {
+  if (
+    event.data?.source === 'zone-vscode-extension' &&
+    event.data?.type === 'workspacePath' &&
+    event.data?.path
+  ) {
+    const inp = document.getElementById('repoPath');
+    if (inp) {
+      inp.value = event.data.path;
+      syncRepoSelectionDisplay();
+      setLoading(false);
+      setDryRunLoading(false);
+      updateApplyState();
+      console.log('[zone-ui] workspace path from VS Code:', event.data.path);
+    }
+  }
+});
+
+function sendUserInfoToVSCode() {
+  const user = window.currentUser;
+  if (user && window.parent !== window) {
+    window.parent.postMessage({
+      source: 'zone-ui',
+      type: 'userInfo',
+      user: {
+        firstName: user.firstName || '',
+        email: user.email || ''
+      }
+    }, '*');
+  }
+}
+
+setTimeout(sendUserInfoToVSCode, 1000);
+
+setInterval(async () => {
+  try {
+    const response = await fetch('/api/check-auth', { credentials: 'include' });
+    if (response.status === 401) {
+      showUnauthorized('Your session has expired. Please sign in again.');
+      setLoading(true);
+    }
+  } catch (_) {}
+}, 60000);
+</script>
 </body>
-</html></body>
 </html>
+
+
+
+
+
+
 
 
