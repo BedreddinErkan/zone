@@ -6,7 +6,7 @@ nixPkgs = ["nodejs_20"]
 cmds = ["npm install"]
 
 [phases.build]
-cmds = ["npm run build", "ls -la dist/ui/"]
+cmds = ["ls -la src/ui/", "npm run build", "ls -la dist/ui/"]
 
 [start]
 cmd = "node dist/cli/index.js serve"
