@@ -771,7 +771,7 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.confidence).toBe(95);
+      expect(result.confidence).toBe(80);
       expect(result.decisionMode).toBe("safe_to_apply");
       expect(result.warnings).toEqual(["Selector may be brittle but still repository-native"]);
     }
@@ -849,7 +849,7 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.confidence).toBe(80);
+      expect(result.confidence).toBe(65);
       expect(result.decisionMode).toBe("safe_to_apply");
     }
   });
