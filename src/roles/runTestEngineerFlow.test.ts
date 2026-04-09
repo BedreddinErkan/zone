@@ -850,7 +850,7 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.confidence).toBe(65);
-      expect(result.decisionMode).toBe("safe_to_apply");
+      expect(result.decisionMode).toBe("preview_only");
     }
   });
 
