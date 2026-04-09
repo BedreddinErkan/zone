@@ -568,6 +568,7 @@ function calculateDeterministicConfidence(input: {
   isNewFile: boolean;
   repoContextText: string;
   vagueTaskDetected: boolean;
+  hasPageObjects: boolean;
 }): number {
   let penalty = 0;
 
@@ -592,6 +593,7 @@ function calculateDeterministicConfidence(input: {
       !hasRepoContextSelector(lowerRepoContext, ".shopping_cart_link"));
 
   if (hasGenericSelectors) penalty += 15;
+  if (!input.hasPageObjects) penalty += 15;
 
   if (input.generatedContent.length > 3000) penalty += 10;
   if (input.generatedContent.length > 5000) penalty += 10;
@@ -1064,6 +1066,7 @@ export async function runTestEngineerFlow(input: {
   const existingTestContents = input.hostedContext
     ? input.hostedContext.existingTestContents
     : await readExampleContents(context.existingTestFiles, allFiles, 3);
+  const hasPageObjectContext = pageObjectContents.length > 0;
 
   input.onProgress?.("Building prompt...");
   const prompt = buildTestEngineerPrompt({
@@ -1130,9 +1133,10 @@ export async function runTestEngineerFlow(input: {
         if (/TODO|PLACEHOLDER|your\.selector|#placeholder/i.test(testContent)) {
           issues.push({
             code: "PLACEHOLDER_CONTENT",
-            message:
-              "Generated test contains placeholder content that must be replaced.",
-            severity: "error",
+            message: hasPageObjectContext
+              ? "Generated test contains placeholder content that must be replaced."
+              : "Generated test contains placeholder selectors (no page objects available in repo).",
+            severity: hasPageObjectContext ? "error" : "warning",
           });
         }
 
@@ -1314,6 +1318,7 @@ export async function runTestEngineerFlow(input: {
     isNewFile,
     repoContextText,
     vagueTaskDetected,
+    hasPageObjects: hasPageObjectContext,
   });
   const confidenceGate = checkConfidenceGate({
     confidenceScore: confidence,
@@ -1492,6 +1497,7 @@ if (filteredValidation.decision !== "pass" || filteredValidation.issues.length >
     isNewFile,
     repoContextText,
     vagueTaskDetected,
+    hasPageObjects: hasPageObjectContext,
   });
 input.onProgress?.("Ready");
   return {
