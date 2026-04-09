@@ -10,3 +10,6 @@ cmds = ["npm run build"]
 
 [start]
 cmd = "node dist/cli/index.js serve"
+
+[phases.build]
+cmds = ["npm run build", "ls -la dist/ui/"]
