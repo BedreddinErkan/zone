@@ -1475,7 +1475,9 @@ const result = await runDataAnalystFlow({
     });
   }
 });
-
+app.use("/api/lemonsqueezy/webhook", lemonWebhookRouter);
+app.use("/api/lemonsqueezy/create-checkout", createLemonCheckoutRouter);
+app.use("/api/lemonsqueezy/customer-portal", customerPortalRouter);
 app.use(express.static(zoneUiDir));
 
 export async function startServer(port = 3000): Promise<void> {
