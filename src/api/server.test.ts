@@ -1206,7 +1206,7 @@ it("logs successful developer runs to Supabase when env is configured", async ()
     expect(body).toEqual({
       ok: false,
       reason: "no_free_runs",
-      message: "You've used all 1000 monthly runs. Resets next month.",
+      message: "You've used all 250 monthly runs. Resets next month.",
     });
   });
 
@@ -1231,7 +1231,7 @@ it("logs successful developer runs to Supabase when env is configured", async ()
     expect(body).toEqual({
       ok: true,
       plan: "Pro",
-      credits: 988,
+      credits: 238,
       subscriptionStatus: "pro",
     });
   });

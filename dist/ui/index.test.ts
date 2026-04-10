@@ -3,6 +3,24 @@ import path from "node:path";
 import vm from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 
+function htmlToText(html: string): string {
+  return String(html ?? "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/ *\n */g, "\n")
+    .trim();
+}
+
 class MockClassList {
   private classes = new Set<string>();
 
@@ -37,9 +55,7 @@ class MockElement {
   id: string;
   style: Record<string, string> = {};
   attributes: Record<string, string> = {};
-  textContent = "";
-  innerText = "";
-  innerHTML = "";
+  readOnly = false;
   value = "";
   placeholder = "";
   title = "";
@@ -47,7 +63,10 @@ class MockElement {
   files: Array<{ name?: string; webkitRelativePath?: string }> = [];
   clicked = false;
   dataset: Record<string, string> = {};
+  private listeners = new Map<string, Array<(event?: unknown) => void>>();
   private classListValue: MockClassList;
+  private textContentValue = "";
+  private innerHtmlValue = "";
 
   constructor(id: string, className = "") {
     this.id = id;
@@ -66,12 +85,61 @@ class MockElement {
     this.classListValue.setFromString(value);
   }
 
+  get textContent(): string {
+    return this.textContentValue;
+  }
+
+  set textContent(value: string) {
+    this.textContentValue = String(value ?? "");
+  }
+
+  get innerText(): string {
+    return this.textContentValue;
+  }
+
+  set innerText(value: string) {
+    this.textContent = value;
+  }
+
+  get innerHTML(): string {
+    return this.innerHtmlValue;
+  }
+
+  set innerHTML(value: string) {
+    this.innerHtmlValue = String(value ?? "");
+    this.textContentValue = htmlToText(this.innerHtmlValue);
+  }
+
   click(): void {
     this.clicked = true;
+    for (const listener of this.listeners.get("click") ?? []) {
+      listener({ target: this });
+    }
+  }
+
+  addEventListener(type: string, listener: (event?: unknown) => void): void {
+    const current = this.listeners.get(type) ?? [];
+    current.push(listener);
+    this.listeners.set(type, current);
+  }
+
+  removeEventListener(type: string, listener: (event?: unknown) => void): void {
+    const current = this.listeners.get(type);
+    if (!current) return;
+    this.listeners.set(
+      type,
+      current.filter((candidate) => candidate !== listener)
+    );
   }
 
   setAttribute(name: string, value: string): void {
     this.attributes[name] = value;
+    if (name === "title") {
+      this.title = value;
+    }
+    if (name === "class") {
+      this.className = value;
+    }
   }
 
   getAttribute(name: string): string | null {
@@ -326,10 +394,13 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
     path.resolve("src/ui/index.html"),
     "utf8"
   );
-  const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
-  if (!scriptMatch) {
+  const scriptContents = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)]
+    .map((match) => match[1]?.trim() ?? "")
+    .filter(Boolean);
+  if (scriptContents.length === 0) {
     throw new Error("UI script not found");
   }
+  const appScript = scriptContents.join("\n\n");
 
   const elements = new Map<string, MockElement>();
   const ensureElement = (id: string, className = ""): MockElement => {
@@ -428,6 +499,16 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
       if (selector === ".copy-btn") {
         return copyButton;
       }
+      if (selector === '[title="Copy cd command"]') {
+        return ensureElement("copyCdCommandBtn");
+      }
+      const roleSelector = selector?.match(/^\[data-role="([^"]+)"\]$/);
+      if (roleSelector) {
+        return (
+          roleButtons.find((button) => button.dataset.role === roleSelector[1]) ??
+          new MockElement("query")
+        );
+      }
       return new MockElement("query");
     },
     querySelectorAll(selector: string) {
@@ -439,6 +520,7 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
   };
 
   const localStorageStore = new Map<string, string>(Object.entries(initialLocalStorage));
+  const windowListeners = new Map<string, Array<(event?: unknown) => void>>();
   const context: UiContextBase = {
     document,
     localStorage: {
@@ -459,12 +541,27 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
     console,
     setTimeout,
     clearTimeout,
+    setInterval,
+    clearInterval,
     fetch: vi.fn(),
     EventSource: MockEventSource,
     window: {
       location: { href: "" },
       showDirectoryPicker: vi.fn(),
       currentUser: { id: "user_test_123" },
+      addEventListener(type: string, listener: (event?: unknown) => void) {
+        const current = windowListeners.get(type) ?? [];
+        current.push(listener);
+        windowListeners.set(type, current);
+      },
+      removeEventListener(type: string, listener: (event?: unknown) => void) {
+        const current = windowListeners.get(type);
+        if (!current) return;
+        windowListeners.set(
+          type,
+          current.filter((candidate) => candidate !== listener)
+        );
+      },
     },
     Math,
     Date,
@@ -479,7 +576,7 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
   );
 
   MockEventSource.instances = [];
-  vm.runInNewContext(scriptMatch[1], context as vm.Context);
+  vm.runInNewContext(appScript, context as vm.Context);
   return {
     context: context as UiContext,
     elements: { get: ensureElement },
