@@ -32,8 +32,11 @@ export function getHostedInferenceBaseUrl(): string {
   return (configuredBaseUrl || "https://zonecli.dev").replace(/\/+$/, "");
 }
 
-export function createOpenAIClient(): OpenAI {
-  const apiKey = process.env.OPENAI_API_KEY;
+export function createOpenAIClient(userApiKey?: string): OpenAI {
+  const apiKey =
+    typeof userApiKey === "string" && userApiKey.trim()
+      ? userApiKey.trim()
+      : process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is missing for local inference mode.");

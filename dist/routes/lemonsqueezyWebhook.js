@@ -28,6 +28,7 @@ async function updateProfileSubscription(input) {
         .update({
         subscription_status: input.subscriptionStatus,
         credits: input.credits,
+        runs_used_this_month: 0,
     })
         .eq("clerk_user_id", input.clerkUserId);
     if (result?.error) {
@@ -74,6 +75,20 @@ lemonWebhookRouter.post("/", async (req, res) => {
                 subscriptionStatus: "free",
                 credits: 10,
             });
+        }
+        if (clerkUserId &&
+            eventName === "subscription_payment_success") {
+            const supabase = getSupabaseAdminClient();
+            const profilesTable = supabase.from("profiles");
+            const result = await profilesTable
+                .update({ runs_used_this_month: 0 })
+                .eq("clerk_user_id", clerkUserId);
+            if (result?.error) {
+                console.log(`[zone] subscription_payment_success reset failed: ${result.error.message}`);
+            }
+            else {
+                console.log(`[zone] subscription_payment_success: reset runs for ${clerkUserId}`);
+            }
         }
         res.json({ ok: true });
     }

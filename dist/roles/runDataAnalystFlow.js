@@ -130,7 +130,7 @@ async function runDataAnalystFlow(input) {
         existingSqlContents,
     });
     input.onProgress?.("Generating patch...");
-    const client = (0, openaiClient_js_1.createOpenAIClient)();
+    const client = (0, openaiClient_js_1.createOpenAIClient)(input.userOpenAiKey);
     const model = (0, openaiClient_js_1.getModelName)();
     const retryResult = await (0, withSelfHealingRetry_js_1.withSelfHealingRetry)({
         maxAttempts: 3,

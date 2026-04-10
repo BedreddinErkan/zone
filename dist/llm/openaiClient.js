@@ -29,8 +29,10 @@ function getHostedInferenceBaseUrl() {
         : "";
     return (configuredBaseUrl || "https://zonecli.dev").replace(/\/+$/, "");
 }
-function createOpenAIClient() {
-    const apiKey = process.env.OPENAI_API_KEY;
+function createOpenAIClient(userApiKey) {
+    const apiKey = typeof userApiKey === "string" && userApiKey.trim()
+        ? userApiKey.trim()
+        : process.env.OPENAI_API_KEY;
     if (!apiKey) {
         throw new Error("OPENAI_API_KEY is missing for local inference mode.");
     }

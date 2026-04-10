@@ -28,7 +28,7 @@ function stripJsonFences(raw) {
         .trim();
 }
 async function planFeatureWithLlm(input) {
-    const client = (0, openaiClient_js_1.createOpenAIClient)();
+    const client = (0, openaiClient_js_1.createOpenAIClient)(input.userOpenAiKey);
     const model = (0, openaiClient_js_1.getModelName)();
     const relevantFilesSummary = input.relevantFiles
         .map((file) => `- ${file.path} [${file.category}]`)

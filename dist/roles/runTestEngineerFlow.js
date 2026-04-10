@@ -312,6 +312,46 @@ function findSuspiciousPlaywrightUrlAssertion(testFileContent, routeEvidence) {
     }
     return null;
 }
+function extractSelectorsFromSourceFiles(contextFiles) {
+    const selectors = new Set();
+    for (const file of contextFiles) {
+        if (file.path.includes(".spec.") ||
+            file.path.includes(".test.") ||
+            file.path.endsWith(".config.ts") ||
+            file.path.endsWith(".config.js") ||
+            file.path.endsWith("package.json")) {
+            continue;
+        }
+        const content = file.content;
+        for (const match of content.matchAll(/\bid=["']([^"'{]+)["']/g)) {
+            selectors.add(`#${match[1]}`);
+        }
+        for (const match of content.matchAll(/data-testid=["']([^"']+)["']/g)) {
+            selectors.add(`[data-testid="${match[1]}"]`);
+        }
+        for (const match of content.matchAll(/<(?:input|textarea|select)[^>]*\bname=["']([^"']+)["']/gi)) {
+            selectors.add(`[name="${match[1]}"]`);
+        }
+        for (const match of content.matchAll(/class(?:Name)?=["']([^"'{$]+)["']/g)) {
+            const classes = match[1].split(/\s+/).filter(Boolean);
+            for (const cls of classes) {
+                if (cls.length > 2) {
+                    selectors.add(`.${cls}`);
+                }
+            }
+        }
+        for (const match of content.matchAll(/<button[^>]*>\s*([^<{][^<]{1,40}?)\s*<\/button>/g)) {
+            const text = match[1].trim();
+            if (text && text.length >= 2 && text.length <= 40) {
+                selectors.add(`button:has-text("${text}")`);
+            }
+        }
+        for (const match of content.matchAll(/placeholder=["']([^"'{$]+)["']/g)) {
+            selectors.add(`[placeholder="${match[1]}"]`);
+        }
+    }
+    return [...selectors].slice(0, 40);
+}
 function buildValidationBlockedResult(input) {
     return {
         ok: false,
@@ -362,6 +402,8 @@ function calculateDeterministicConfidence(input) {
         (lowerGeneratedContent.includes(".shopping_cart_link") &&
             !hasRepoContextSelector(lowerRepoContext, ".shopping_cart_link"));
     if (hasGenericSelectors)
+        penalty += 15;
+    if (!input.hasPageObjects)
         penalty += 15;
     if (input.generatedContent.length > 3000)
         penalty += 10;
@@ -746,6 +788,22 @@ async function runTestEngineerFlow(input) {
     const existingTestContents = input.hostedContext
         ? input.hostedContext.existingTestContents
         : await readExampleContents(context.existingTestFiles, allFiles, 3);
+    const hasPageObjectContext = pageObjectContents.length > 0;
+    let selectorHint = "";
+    if (!hasPageObjectContext) {
+        const sourceFilesForExtraction = [
+            ...existingTestContents,
+            ...pageObjectContents,
+            ...(input.hostedContext?.appSourceContents ?? []),
+        ];
+        const extractedSelectors = extractSelectorsFromSourceFiles(sourceFilesForExtraction);
+        if (extractedSelectors.length > 0) {
+            selectorHint =
+                "\n\nAVAILABLE SELECTORS EXTRACTED FROM APPLICATION SOURCE FILES (use these exact selectors, do NOT guess or invent selectors):\n" +
+                    extractedSelectors.map((selector) => `- ${selector}`).join("\n") +
+                    '\n\nYou MUST prefer these selectors over any guessed ones. If a form has name attributes, use [name="..."] selectors. If elements have data-testid, use those. Only fall back to CSS class selectors if no better option exists.';
+        }
+    }
     input.onProgress?.("Building prompt...");
     const prompt = (0, testEngineerPrompt_js_1.buildTestEngineerPrompt)({
         task: input.task,
@@ -760,11 +818,12 @@ async function runTestEngineerFlow(input) {
     }) +
         "\n\nIMPORTANT: Do NOT rewrite or modify any existing tests.\n" +
         "Only add NEW test blocks that do not exist in the file.\n" +
-        "If a similar test already exists, skip it and add a different scenario.";
+        "If a similar test already exists, skip it and add a different scenario." +
+        selectorHint;
     let parsed;
     try {
         input.onProgress?.("Generating patch...");
-        const client = (0, openaiClient_js_1.createOpenAIClient)();
+        const client = (0, openaiClient_js_1.createOpenAIClient)(input.userOpenAiKey);
         const model = (0, openaiClient_js_1.getModelName)("high");
         const retryResult = await (0, withSelfHealingRetry_js_1.withSelfHealingRetry)({
             maxAttempts: 3,
@@ -798,11 +857,17 @@ async function runTestEngineerFlow(input) {
                 const testContent = result["testFile"]?.content ??
                     result["featureFile"]?.content ??
                     "";
-                if (/TODO|PLACEHOLDER|your\.selector|#placeholder/i.test(testContent)) {
+                const contentWithoutPlaceholderSelectors = testContent
+                    .replace(/\[placeholder=["'][^"']*["']\]/g, "")
+                    .replace(/getByPlaceholder\s*\(["'][^"']*["']\)/g, "")
+                    .replace(/placeholder=["'][^"']*["']/g, "");
+                if (/TODO|PLACEHOLDER|your\.selector|#placeholder/i.test(contentWithoutPlaceholderSelectors)) {
                     issues.push({
                         code: "PLACEHOLDER_CONTENT",
-                        message: "Generated test contains placeholder content that must be replaced.",
-                        severity: "error",
+                        message: hasPageObjectContext
+                            ? "Generated test contains placeholder content that must be replaced."
+                            : "Generated test contains placeholder selectors (no page objects available in repo).",
+                        severity: hasPageObjectContext ? "error" : "warning",
                     });
                 }
                 return issues;
@@ -954,6 +1019,7 @@ async function runTestEngineerFlow(input) {
         isNewFile,
         repoContextText,
         vagueTaskDetected,
+        hasPageObjects: hasPageObjectContext,
     });
     const confidenceGate = (0, confidenceGate_js_1.checkConfidenceGate)({
         confidenceScore: confidence,
@@ -1098,6 +1164,7 @@ async function runTestEngineerFlow(input) {
         isNewFile,
         repoContextText,
         vagueTaskDetected,
+        hasPageObjects: hasPageObjectContext,
     });
     input.onProgress?.("Ready");
     return {

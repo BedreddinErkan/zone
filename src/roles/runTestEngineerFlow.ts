@@ -1012,6 +1012,7 @@ export async function runTestEngineerFlow(input: {
   repoPath: string;
   onProgress?: (stage: string) => void;
   hostedContext?: HostedTestEngineerContextInput;
+  userOpenAiKey?: string;
 }): Promise<TestEngineerFlowResult> {
   console.log(
     `[zone-api] test-engineer hostedContext present: ${Boolean(input.hostedContext)}`
@@ -1164,7 +1165,7 @@ export async function runTestEngineerFlow(input: {
   let parsed: Record<string, unknown>;
   try {
     input.onProgress?.("Generating patch...");
-    const client = createOpenAIClient();
+    const client = createOpenAIClient(input.userOpenAiKey);
     const model = getModelName("high");
     const retryResult = await withSelfHealingRetry({
       maxAttempts: 3,

@@ -36,7 +36,7 @@ function stripJsonFences(raw) {
         .trim();
 }
 async function planFullPatchWithLlm(input) {
-    const client = (0, openaiClient_js_1.createOpenAIClient)();
+    const client = (0, openaiClient_js_1.createOpenAIClient)(input.userOpenAiKey);
     const model = (0, openaiClient_js_1.getModelName)("high");
     const outputMode = input.fileContent.length > LARGE_FILE_PATCH_THRESHOLD
         ? "find_replace_patch"

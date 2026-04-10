@@ -1139,6 +1139,7 @@ async function runLlmPatchFlow(input) {
                 })),
                 existingFilesSummary,
                 schemaAwareSummary: [],
+                userOpenAiKey: input.userOpenAiKey,
             });
         }
         catch (err) {
@@ -1195,6 +1196,7 @@ async function runLlmPatchFlow(input) {
             suggestedFiles: selectedContextFiles,
             fileContexts: resolvedFileContexts,
             schemaAwareSummary: [],
+            userOpenAiKey: input.userOpenAiKey,
         });
     }
     catch (err) {
@@ -1327,6 +1329,7 @@ async function runLlmPatchFlow(input) {
                 taskIntent: taskIntent.normalizedTask || taskIntent.action,
                 relevantFiles: targetedRelevantFiles,
                 existingTargetFiles: allFiles.map((file) => file.path),
+                userOpenAiKey: input.userOpenAiKey,
                 relatedContext: [
                     contextWindow
                         ? `// CONTEXT WINDOW: lines ${contextWindow.startLine}-${contextWindow.endLine} of ${contextWindow.totalLines} total`

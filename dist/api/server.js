@@ -48,8 +48,9 @@ const ENHANCE_TASK_SYSTEM_PROMPT = "You are a task optimizer for an AI code agen
     "- The framework/pattern already used in the repo\n" +
     "Keep it under 2 sentences. Return only the optimized task text, nothing else.";
 const FREE_PLAN_RUN_LIMIT = 10;
-const PRO_PLAN_RUN_LIMIT = 1000;
+const PRO_PLAN_RUN_LIMIT = 250;
 exports.app.use((0, cors_1.default)());
+exports.app.set('trust proxy', 1);
 exports.app.use("/api/lemonsqueezy/webhook", express_1.default.raw({ type: "application/json" }), lemonsqueezyWebhook_js_1.default);
 exports.app.use(body_parser_1.default.json({ limit: "10mb" }));
 exports.app.use(body_parser_1.default.urlencoded({ extended: true, limit: "10mb" }));
@@ -320,7 +321,7 @@ async function buildHostedDataAnalystContext(task, repoPath) {
 }
 async function handleCheckAccess(req, res) {
     const userId = typeof req.query.userId === "string" ? req.query.userId : "";
-    const authorization = await ensureRunAuthorized(userId);
+    const authorization = await ensureRunAuthorized(userId, isTruthyByok(req.query.isByok));
     if (authorization.allowed) {
         res.json({ ok: true });
         return;
@@ -427,6 +428,10 @@ async function logRun(input) {
     else {
         console.log("[zone] logRun: run_logs insert ok");
     }
+    if (input.isByok) {
+        console.log("[zone] logRun: BYOK run, skipping hosted credit deduction");
+        return;
+    }
     const profilesRead = supabase.from("profiles");
     const profileQuery = profilesRead
         .select?.("credits,total_runs,subscription_status")
@@ -518,7 +523,16 @@ function hasPaidAccess(subscriptionStatus) {
     const normalized = normalizeSubscriptionStatus(subscriptionStatus);
     return normalized === "pro";
 }
-async function ensureRunAuthorized(rawUserId) {
+function isTruthyByok(value) {
+    if (typeof value === "boolean")
+        return value;
+    if (typeof value === "string") {
+        const normalized = value.trim().toLowerCase();
+        return normalized === "true" || normalized === "1" || normalized === "yes";
+    }
+    return false;
+}
+async function ensureRunAuthorized(rawUserId, isByok = false) {
     const authenticatedUserId = typeof rawUserId === "string" ? rawUserId.trim() : "";
     if (!authenticatedUserId) {
         return {
@@ -569,6 +583,9 @@ async function ensureRunAuthorized(rawUserId) {
             : Number(data.free_limit ?? FREE_PLAN_RUN_LIMIT);
         const subscriptionStatus = normalizeSubscriptionStatus(data.subscription_status);
         if (hasPaidAccess(subscriptionStatus)) {
+            if (isByok) {
+                return { allowed: true };
+            }
             if ((Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0) >=
                 PRO_PLAN_RUN_LIMIT) {
                 return {
@@ -577,7 +594,7 @@ async function ensureRunAuthorized(rawUserId) {
                     body: {
                         ok: false,
                         reason: "no_free_runs",
-                        message: "You've used all 1000 monthly runs. Resets next month.",
+                        message: "You've used all 250 monthly runs. Resets next month.",
                     },
                 };
             }
@@ -654,7 +671,7 @@ async function enhanceTask(input) {
                 });
             })();
         const resolvedRepoContext = typeof repoContext === "string" ? repoContext : await repoContext;
-        const client = (0, openaiClient_js_1.createOpenAIClient)();
+        const client = (0, openaiClient_js_1.createOpenAIClient)(input.userOpenAiKey);
         const model = (0, openaiClient_js_1.getModelName)();
         const response = await client.responses.create({
             model,
@@ -748,6 +765,8 @@ exports.app.post("/api/analyze", async (req, res) => {
     });
 });
 exports.app.post("/api/patch", async (req, res) => {
+    const userOpenAiKey = req.headers["x-user-openai-key"];
+    const isByok = Boolean(userOpenAiKey);
     if (shouldProxyHostedRequest(req, "/api/patch")) {
         const { task, repoPath } = req.body ?? {};
         const hostedContext = req.body?.hostedContext ??
@@ -769,12 +788,12 @@ exports.app.post("/api/patch", async (req, res) => {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;
     }
-    const authorization = await ensureRunAuthorized(userId);
+    const authorization = await ensureRunAuthorized(userId, isByok);
     if (!authorization.allowed) {
         res.status(authorization.status).json(authorization.body);
         return;
     }
-    const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({ task, repoPath, hostedContext });
+    const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({ task, repoPath, hostedContext, userOpenAiKey });
     if (result.ok && result.applyPatches.length > 0) {
         const validation = (0, validateLlmOutput_js_1.validateLlmOutput)("developer", result.applyPatches.map((p) => ({
             filePath: p.filePath,
@@ -806,10 +825,13 @@ exports.app.post("/api/patch", async (req, res) => {
             decisionMode: result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
             confidence,
             creditsUsed: 0.1,
+            isByok,
         });
     }
 });
 exports.app.post("/api/dry-run", async (req, res) => {
+    const userOpenAiKey = req.headers["x-user-openai-key"];
+    const isByok = Boolean(userOpenAiKey);
     if (shouldProxyHostedRequest(req, "/api/dry-run")) {
         const { task, repoPath } = req.body ?? {};
         const hostedContext = req.body?.hostedContext ??
@@ -827,12 +849,18 @@ exports.app.post("/api/dry-run", async (req, res) => {
         return;
     }
     const { task, repoPath, userId, hostedContext } = req.body;
-    const authorization = await ensureRunAuthorized(userId);
+    const authorization = await ensureRunAuthorized(userId, isByok);
     if (!authorization.allowed) {
         res.status(authorization.status).json(authorization.body);
         return;
     }
-    const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({ task, repoPath, dryRun: true, hostedContext });
+    const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({
+        task,
+        repoPath,
+        dryRun: true,
+        hostedContext,
+        userOpenAiKey,
+    });
     if (!result.ok) {
         res.status(500).json(result);
         return;
@@ -873,6 +901,7 @@ exports.app.post("/api/dry-run", async (req, res) => {
         decisionMode: result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
         confidence,
         creditsUsed: 0.1,
+        isByok,
     });
 });
 exports.app.post("/api/apply", async (req, res) => {
@@ -881,6 +910,8 @@ exports.app.post("/api/apply", async (req, res) => {
     res.json(result);
 });
 exports.app.post("/api/enhance-task", async (req, res) => {
+    const userOpenAiKey = req.headers["x-user-openai-key"];
+    const isByok = Boolean(userOpenAiKey);
     if (shouldProxyHostedRequest(req, "/api/enhance-task")) {
         const { role, repoPath } = req.body ?? {};
         const hostedContext = typeof role === "string" && typeof repoPath === "string"
@@ -904,7 +935,14 @@ exports.app.post("/api/enhance-task", async (req, res) => {
         return;
     }
     try {
-        const result = await enhanceTask({ task, role, repoPath, hostedContext });
+        const result = await enhanceTask({
+            task,
+            role,
+            repoPath,
+            hostedContext,
+            userOpenAiKey,
+            isByok,
+        });
         res
             .type("application/json")
             .send(JSON.stringify({ ok: true, enhancedTask: result }));
@@ -917,6 +955,8 @@ exports.app.post("/api/enhance-task", async (req, res) => {
     }
 });
 exports.app.post("/api/test-engineer", async (req, res) => {
+    const userOpenAiKey = req.headers["x-user-openai-key"];
+    const isByok = Boolean(userOpenAiKey);
     if (shouldProxyHostedRequest(req, "/api/test-engineer")) {
         const { task, repoPath } = req.body ?? {};
         const hostedContext = req.body?.hostedContext ??
@@ -938,7 +978,7 @@ exports.app.post("/api/test-engineer", async (req, res) => {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;
     }
-    const authorization = await ensureRunAuthorized(userId);
+    const authorization = await ensureRunAuthorized(userId, isByok);
     if (!authorization.allowed) {
         res.status(authorization.status).json(authorization.body);
         return;
@@ -949,6 +989,7 @@ exports.app.post("/api/test-engineer", async (req, res) => {
             repoPath,
             onProgress: (stage) => emitProgress(runId, stage),
             hostedContext,
+            userOpenAiKey,
         });
         // 1. ÖNCE reason mapping (!ok ise)
         if (!result.ok && typeof result.reason === "string") {
@@ -982,6 +1023,7 @@ exports.app.post("/api/test-engineer", async (req, res) => {
                 decisionMode: getDecisionModeFromResult(result, result.confidence),
                 confidence: result.confidence,
                 creditsUsed: 0.08,
+                isByok,
             });
         }
     }
@@ -994,6 +1036,8 @@ exports.app.post("/api/test-engineer", async (req, res) => {
     }
 });
 exports.app.post("/api/data-analyst", async (req, res) => {
+    const userOpenAiKey = req.headers["x-user-openai-key"];
+    const isByok = Boolean(userOpenAiKey);
     if (shouldProxyHostedRequest(req, "/api/data-analyst")) {
         const { task, repoPath } = req.body ?? {};
         const hostedContext = typeof task === "string" && typeof repoPath === "string"
@@ -1014,7 +1058,7 @@ exports.app.post("/api/data-analyst", async (req, res) => {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;
     }
-    const authorization = await ensureRunAuthorized(userId);
+    const authorization = await ensureRunAuthorized(userId, isByok);
     if (!authorization.allowed) {
         res.status(authorization.status).json(authorization.body);
         return;
@@ -1025,6 +1069,7 @@ exports.app.post("/api/data-analyst", async (req, res) => {
             repoPath,
             onProgress: (stage) => emitProgress(runId, stage),
             hostedContext,
+            userOpenAiKey,
         });
         if (result.ok && result.applyPatches) {
             const validation = (0, validateLlmOutput_js_1.validateLlmOutput)("data_analyst", result.applyPatches.map((p) => ({
@@ -1057,6 +1102,7 @@ exports.app.post("/api/data-analyst", async (req, res) => {
                 decisionMode: getDecisionModeFromResult(result, result.confidence),
                 confidence: result.confidence,
                 creditsUsed: 0.06,
+                isByok,
             });
         }
     }
