@@ -55,8 +55,7 @@ createLemonCheckoutRouter.post("/", async (req, res) => {
             variant: {
               data: {
                 type: "variants",
-                id: "1504822",
-              },
+id: "1512928",              },
             },
           },
         },
