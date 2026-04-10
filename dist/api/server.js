@@ -50,6 +50,7 @@ const ENHANCE_TASK_SYSTEM_PROMPT = "You are a task optimizer for an AI code agen
 const FREE_PLAN_RUN_LIMIT = 10;
 const PRO_PLAN_RUN_LIMIT = 1000;
 exports.app.use((0, cors_1.default)());
+exports.app.set('trust proxy', 1);
 exports.app.use("/api/lemonsqueezy/webhook", express_1.default.raw({ type: "application/json" }), lemonsqueezyWebhook_js_1.default);
 exports.app.use(body_parser_1.default.json({ limit: "10mb" }));
 exports.app.use(body_parser_1.default.urlencoded({ extended: true, limit: "10mb" }));
