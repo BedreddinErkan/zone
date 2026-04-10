@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.app = void 0;
 exports.startServer = startServer;
+console.log("[zone] api/server.ts loading...");
 require("dotenv/config");
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
@@ -1069,6 +1070,9 @@ exports.app.post("/api/data-analyst", async (req, res) => {
         });
     }
 });
+exports.app.use("/api/lemonsqueezy/webhook", lemonsqueezyWebhook_js_1.default);
+exports.app.use("/api/lemonsqueezy/create-checkout", createLemonCheckout_js_1.default);
+exports.app.use("/api/lemonsqueezy/customer-portal", getLemonCustomerPortal_js_1.default);
 exports.app.use(express_1.default.static(zoneUiDir));
 async function startServer(port = 3000) {
     if (startPromise) {
@@ -1077,7 +1081,7 @@ async function startServer(port = 3000) {
     startedPort = port;
     logStartupDiagnostics();
     startPromise = new Promise((resolve) => {
-        exports.app.listen(port, () => {
+        exports.app.listen(port, "0.0.0.0", () => {
             console.log((0, colors_js_1.colorize)(`Zone UI running on http://localhost:${port}`, colors_js_1.c.green, colors_js_1.c.bold));
             console.log((0, colors_js_1.colorize)("Press Ctrl+C to stop", colors_js_1.c.dim, colors_js_1.c.gray));
             resolve();
