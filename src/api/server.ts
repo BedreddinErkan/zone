@@ -122,7 +122,15 @@ type HostedDataAnalystContextPayload = {
 
 app.use(
   cors({
-    allowedHeaders: ["Content-Type", "Authorization", "X-User-OpenAI-Key"],
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-User-OpenAI-Key",
+      "Accept",
+    ],
+    exposedHeaders: ["Content-Length", "X-Request-Id"],
   })
 );
 app.set('trust proxy', 1);
