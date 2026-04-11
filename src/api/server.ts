@@ -120,7 +120,11 @@ type HostedDataAnalystContextPayload = {
   existingSqlContents: Array<{ path: string; content: string }>;
 };
 
-app.use(cors());
+app.use(
+  cors({
+    allowedHeaders: ["Content-Type", "Authorization", "X-User-OpenAI-Key"],
+  })
+);
 app.set('trust proxy', 1);
 app.use(
   "/api/lemonsqueezy/webhook",
