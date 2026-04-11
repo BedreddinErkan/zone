@@ -65,7 +65,7 @@ lemonWebhookRouter.post("/", async (req, res) => {
             await updateProfileSubscription({
                 clerkUserId,
                 subscriptionStatus: "pro",
-                credits: 1000,
+                credits: 250,
             });
         }
         if (clerkUserId &&

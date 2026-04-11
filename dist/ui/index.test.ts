@@ -721,10 +721,8 @@ describe("UI repo folder picker", () => {
 
   it("shows a clear validation message when no repo path is provided", async () => {
     const { context, elements } = buildUiHarness();
-    context.window.showDirectoryPicker = vi.fn().mockResolvedValue({ name: "zone-app" });
     elements.get("task").value = "polish spacing";
 
-    await context.selectRepoFolder();
     await context.executeDryRun();
 
     expect(elements.get("errorBox").textContent).toContain("Task and repo path are required.");
@@ -744,7 +742,7 @@ describe("UI repo folder picker", () => {
     await context.execute();
 
     expect(elements.get("errorBox").textContent).toContain(
-      "Missing user session. Please open Zone from your dashboard."
+      "Please sign in to use Zone."
     );
     expect(context.fetch).not.toHaveBeenCalled();
   });
@@ -1316,7 +1314,6 @@ describe("UI execute pre-flight access", () => {
     ).__ZONE_PUBLIC_CONFIG__ = {
       zoneApiBaseUrl: "https://api.zonecli.dev",
     };
-    elements.get("repoPath").value = "C:/repo";
 
     (context as unknown as { renderRepoSelection(): void }).renderRepoSelection();
 
@@ -1324,15 +1321,13 @@ describe("UI execute pre-flight access", () => {
     expect(elements.get("dryRunBtn").disabled).toBe(true);
     expect(elements.get("repoSelectionBox").classList.contains("hidden")).toBe(false);
     expect(elements.get("repoSelectionMeta").textContent).toContain(
-      "Please select a folder to run in hosted mode."
+      "Select your project folder to get started"
     );
 
     (context as unknown as { showError(message: string): void }).showError(
       "repo_not_accessible_in_hosted_mode"
     );
-    expect(elements.get("errorBox").textContent).toContain(
-      "Please select a folder to run in hosted mode."
-    );
+    expect(elements.get("errorBox").textContent).toBe("");
   });
 
   it("attaches hostedContext to /api/test-engineer when a hosted folder is selected", async () => {
@@ -1471,7 +1466,7 @@ describe("UI billing summary", () => {
 
     expect(elements.get("billingSummaryBox").classList.contains("hidden")).toBe(false);
     expect(elements.get("billingSummaryLabel").textContent).toBe(
-      "Plan: Pro · Remaining runs: 18"
+      "⚡ Pro 18 runs remaining this month"
     );
     expect(elements.get("billingSummaryMeta").textContent).toBe("1000 runs / month");
   });
@@ -1708,6 +1703,9 @@ describe("UI folder-handle apply", () => {
           ],
         }),
       })
+      .mockResolvedValueOnce(
+        okResponse({ ok: true, plan: "Free", credits: 10, subscriptionStatus: "free" })
+      )
       .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
@@ -1729,7 +1727,10 @@ describe("UI folder-handle apply", () => {
           preview: "=== TEST ENGINEER PREVIEW ===\nSummary: Generated login test\n\nFiles to create:\n- tests/login.spec.ts",
           reason: "Output validation blocked: Generated Playwright URL assertion uses an arbitrary regex pattern instead of a repository-evidenced route.",
         }),
-      });
+      })
+      .mockResolvedValueOnce(
+        okResponse({ ok: true, plan: "Free", credits: 9, subscriptionStatus: "free" })
+      );
 
     await context.selectRepoFolder();
     context.selectRole(roleButtons.developer);
@@ -2246,6 +2247,9 @@ describe("UI progress feedback", () => {
           preview: "=== DATA ANALYST PREVIEW ===\nSummary: Creates orders table",
         }),
       })
+      .mockResolvedValueOnce(
+        okResponse({ ok: true, plan: "Free", credits: 10, subscriptionStatus: "free" })
+      )
       .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
@@ -2259,7 +2263,10 @@ describe("UI progress feedback", () => {
           applyPatches: [],
           preview: "=== DATA ANALYST PREVIEW ===\nSummary: Creates orders table",
         }),
-      });
+      })
+      .mockResolvedValueOnce(
+        okResponse({ ok: true, plan: "Free", credits: 9, subscriptionStatus: "free" })
+      );
     context.selectRole(roleButtons.dataAnalyst);
     elements.get("task").value = "create orders table";
     elements.get("repoPath").value = "C:/repo/zone-flyway-test";
