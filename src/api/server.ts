@@ -659,11 +659,6 @@ async function logRun(input: RunLogInput): Promise<void> {
     console.log("[zone] logRun: run_logs insert ok");
   }
 
-  if (input.isByok) {
-    console.log("[zone] logRun: BYOK run, skipping hosted credit deduction");
-    return;
-  }
-
   const profilesRead = supabase.from("profiles") as unknown as {
     select?: (
       columns: string
@@ -685,25 +680,31 @@ async function logRun(input: RunLogInput): Promise<void> {
     .select?.("credits,total_runs,subscription_status")
     ?.eq?.("clerk_user_id", effectiveUserId);
 
-if (profileQuery && typeof profileQuery.maybeSingle === "function") {
-  try {
-    const { data, error } = await profileQuery.maybeSingle();
+  let normalizedStatus: string | null = null;
 
-    if (!error && data) {
-      const normalizedStatus = normalizeSubscriptionStatus(
-        data.subscription_status
-      );
+  if (profileQuery && typeof profileQuery.maybeSingle === "function") {
+    try {
+      const { data, error } = await profileQuery.maybeSingle();
 
-      console.log(
-        `[zone] logRun: subscription_status=${normalizedStatus || "missing"}`
-      );
-    } else {
-      console.log("[zone] logRun: profile read failed, defaulting debit=1");
+      if (!error && data) {
+        normalizedStatus = normalizeSubscriptionStatus(data.subscription_status);
+
+        console.log(
+          `[zone] logRun: subscription_status=${normalizedStatus || "missing"}`
+        );
+      } else {
+        console.log("[zone] logRun: profile read failed, defaulting debit=1");
+      }
+    } catch {
+      console.log("[zone] logRun: profile read threw, defaulting debit=1");
     }
-  } catch {
-    console.log("[zone] logRun: profile read threw, defaulting debit=1");
   }
-}
+
+  if (input.isByok && hasPaidAccess(normalizedStatus)) {
+    console.log("[zone] logRun: BYOK pro run, skipping hosted credit deduction");
+    return;
+  }
+
   const freeRunDebit = 1;
   const rpcName = "deduct_credits_and_increment_runs";
   const rpcPayload = {
