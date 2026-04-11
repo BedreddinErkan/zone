@@ -1207,7 +1207,7 @@ res.json(result);
       decisionMode:
         result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
       confidence,
-      creditsUsed: 0.1,
+      creditsUsed: 1,
       isByok,
     });
   }
@@ -1296,7 +1296,7 @@ res.json({
     decisionMode:
       result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
     confidence,
-    creditsUsed: 0.1,
+    creditsUsed: 1,
     isByok,
   });
 });
@@ -1431,7 +1431,7 @@ queueRunLog({
     result.confidence
   ),
   confidence: result.confidence,
-  creditsUsed: 0.08,
+  creditsUsed: 1,
   isByok,
 });
     }
@@ -1516,7 +1516,7 @@ const result = await runDataAnalystFlow({
     result.confidence
   ),
   confidence: result.confidence,
-  creditsUsed: 0.06,
+  creditsUsed: 1,
   isByok,
 });
     }

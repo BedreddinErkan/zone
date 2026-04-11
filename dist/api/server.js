@@ -824,7 +824,7 @@ exports.app.post("/api/patch", async (req, res) => {
             repoPath,
             decisionMode: result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
             confidence,
-            creditsUsed: 0.1,
+            creditsUsed: 1,
             isByok,
         });
     }
@@ -900,7 +900,7 @@ exports.app.post("/api/dry-run", async (req, res) => {
         repoPath,
         decisionMode: result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
         confidence,
-        creditsUsed: 0.1,
+        creditsUsed: 1,
         isByok,
     });
 });
@@ -1022,7 +1022,7 @@ exports.app.post("/api/test-engineer", async (req, res) => {
                 repoPath,
                 decisionMode: getDecisionModeFromResult(result, result.confidence),
                 confidence: result.confidence,
-                creditsUsed: 0.08,
+                creditsUsed: 1,
                 isByok,
             });
         }
@@ -1101,7 +1101,7 @@ exports.app.post("/api/data-analyst", async (req, res) => {
                 repoPath,
                 decisionMode: getDecisionModeFromResult(result, result.confidence),
                 confidence: result.confidence,
-                creditsUsed: 0.06,
+                creditsUsed: 1,
                 isByok,
             });
         }
