@@ -73,6 +73,7 @@ export async function planFullPatchWithLlm(input: {
   relatedContext: string;
   repoPath?: string;
   taskIntent?: string;
+  normalizedTaskIntent?: string;
   relevantFiles?: Array<{ path: string; content?: string }>;
   existingTargetFiles?: string[];
   userOpenAiKey?: string;
@@ -90,6 +91,8 @@ export async function planFullPatchWithLlm(input: {
     fileContent: input.fileContent,
     repoSummary: input.repoSummary,
     relatedContext: input.relatedContext,
+    taskIntent: input.taskIntent,
+    normalizedTaskIntent: input.normalizedTaskIntent,
     outputMode,
   });
 

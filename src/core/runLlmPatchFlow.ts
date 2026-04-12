@@ -10,6 +10,10 @@ import {
   detectIntentMismatch,
   type IntentMismatchReasonCode,
 } from "../engine/intentMismatchDetector.js";
+import {
+  detectDesignSystemSignals,
+  type DesignSystemSignals,
+} from "../engine/designSystemSignals.js";
 import { scorePatchQuality } from "../engine/patchQualityScorer.js";
 import { resolveSafetyLevel } from "../engine/safetyLevelResolver.js";
 import { enforceMicroEditProtection } from "../engine/microEditProtection.js";
@@ -44,6 +48,7 @@ export type LlmPatchFlowResult =
         designSystemComplianceScore: number;
         semanticAlignmentScore: number;
       };
+      designSystemSignals?: DesignSystemSignals;
       safetyResolution?: {
         safetyLevel:
           | "safe_auto_apply"
@@ -664,6 +669,18 @@ export function analyzePatchScope(input: {
     rewriteLikeSuspicion,
     cssRewriteSuspicion,
   };
+}
+
+function collectAddedPatchLines(input: {
+  applyPatches: Array<{ filePath: string; fullContent: string }>;
+  originalContents: Record<string, string>;
+}): string[] {
+  return input.applyPatches.flatMap((patch) => {
+    const before = input.originalContents[patch.filePath] ?? "";
+    return computeFileDiff(before, patch.fullContent)
+      .filter((line) => line.type === "added")
+      .map((line) => line.content);
+  });
 }
 
 export function evaluateIntentPatchMismatch(input: {
@@ -1882,6 +1899,9 @@ export async function runLlmPatchFlow(input: {
               .map((file) => ({ path: file.path })),
           ]
         : resolvedFileContexts;
+      const normalizedTaskIntentForPrompt = detectMicroEditIntent(input.task)
+        ? "micro_edit"
+        : "standard";
 
       const fullPatch = await planFullPatchWithLlm({
         task: input.task,
@@ -1890,6 +1910,7 @@ export async function runLlmPatchFlow(input: {
         repoSummary: projectSummary,
         repoPath: input.repoPath,
         taskIntent: taskIntent.normalizedTask || taskIntent.action,
+        normalizedTaskIntent: normalizedTaskIntentForPrompt,
         relevantFiles: targetedRelevantFiles,
         existingTargetFiles: allFiles.map((file) => file.path),
         userOpenAiKey: input.userOpenAiKey,
@@ -2025,6 +2046,12 @@ export async function runLlmPatchFlow(input: {
     applyPatches,
     originalContents,
   });
+  const designSystemSignals = detectDesignSystemSignals({
+    addedLines: collectAddedPatchLines({
+      applyPatches,
+      originalContents,
+    }),
+  });
   const normalizedIntent = detectMicroEditIntent(input.task)
     ? "micro_edit"
     : "standard";
@@ -2040,6 +2067,7 @@ export async function runLlmPatchFlow(input: {
     taskIntent: normalizedIntent,
     patchScope,
     validationWarnings: visibleWarnings,
+    designSystemSignals,
     intentMismatch: intentMismatchDecision,
   });
   const microEditProtection = enforceMicroEditProtection({
@@ -2207,6 +2235,7 @@ const decisionMode =
       warnings: intentMismatchDecision.warnings,
     },
     patchQuality,
+    designSystemSignals,
     safetyResolution: finalSafetyResolution,
     microEditProtection,
     decisionMode,

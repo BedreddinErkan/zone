@@ -403,6 +403,14 @@ describe("runLlmPatchFlow", () => {
     if (result.ok) {
       expect(result.applyPatches).toHaveLength(1);
       expect(result.warnings.join("\n")).not.toContain("DEVELOPER_UI_OVERWRITE");
+      expect(result.designSystemSignals).toEqual(
+        expect.objectContaining({
+          inlineStyleCount: 0,
+          styleAttributeLines: 1,
+          excessiveInlineStyles: false,
+          reusableClassPreferenceMissed: false,
+        })
+      );
     }
     expect(planFullPatchWithLlmMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -732,6 +740,14 @@ describe("runLlmPatchFlow", () => {
           qualityWarnings: [],
         })
       );
+      expect(result.designSystemSignals).toEqual(
+        expect.objectContaining({
+          inlineStyleCount: 0,
+          styleAttributeLines: 0,
+          excessiveInlineStyles: false,
+          reusableClassPreferenceMissed: false,
+        })
+      );
       expect(result.microEditProtection).toEqual({
         isViolation: false,
         violationReasons: [],
@@ -912,6 +928,84 @@ describe("runLlmPatchFlow", () => {
     const relevantFilesArg = planFullPatchWithLlmMock.mock.calls[0][0].relevantFiles;
     expect(relevantFilesArg[0].content).toContain("// === SNIPPET:");
     expect(relevantFilesArg[0].content).toContain("padding:12px");
+  });
+
+  it("surfaces design system signals and inline-style penalties in developer metadata", async () => {
+    const files = [buildRepoFile("src/components/Card.tsx", "frontend")];
+    const originalContent = [
+      "export function Card() {",
+      "  return <div className=\"card\">Hello</div>;",
+      "}",
+    ].join("\n");
+    const updatedContent = [
+      "export function Card() {",
+      "  return <div className=\"card\" style={{ marginTop: 12 }}>Hello</div>;",
+      "}",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React app"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 35 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Add spacing to card",
+      steps: ["Adjust margin"],
+      suggestedFiles: [
+        { path: "src/components/Card.tsx", reason: "Card component", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, originalContent]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Adjust card spacing",
+      patches: [
+        {
+          path: "src/components/Card.tsx",
+          operation: "modify",
+          summary: "Add top spacing to the card",
+          targetHint: "card wrapper",
+          contentPreview: "style tweak",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      summary: "Generated content",
+      warnings: [],
+      filePath: "src/components/Card.tsx",
+      fullContent: updatedContent,
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "add a small top margin to the card",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.designSystemSignals).toEqual({
+        inlineStyleCount: 1,
+        styleAttributeLines: 1,
+        addedClassNameCount: 1,
+        excessiveInlineStyles: false,
+        reusableClassPreferenceMissed: false,
+      });
+      expect(result.patchQuality).toEqual(
+        expect.objectContaining({
+          designSystemComplianceScore: 96,
+        })
+      );
+      expect(result.patchQuality?.qualityWarnings).toContain(
+        "Inline styles detected instead of using existing UI classes"
+      );
+      expect(result.patchQuality?.qualityWarnings).not.toContain(
+        "Patch does not introduce reusable class-based styling"
+      );
+      expect(result.decisionMode).toBe("preview_only");
+    }
   });
 
   it("rejects invalid full-file scaffold output that is not patch-style", async () => {

@@ -3,11 +3,13 @@ import type {
   IntentMismatchDetectorResult,
   TaskIntent,
 } from "./intentMismatchDetector.js";
+import type { DesignSystemSignals } from "./designSystemSignals.js";
 
 export interface PatchQualityScorerInput {
   taskIntent: TaskIntent;
   patchScope: DeveloperPatchScope;
   validationWarnings?: string[];
+  designSystemSignals?: DesignSystemSignals | null;
   intentMismatch?: Pick<
     IntentMismatchDetectorResult,
     "hasMismatch" | "severity" | "warnings"
@@ -75,6 +77,29 @@ export function scorePatchQuality(
     (input.validationWarnings ?? []).length * 4
   );
   designSystemComplianceScore -= validationPenalty;
+  const inlineStylePenalty = Math.min(
+    18,
+    (input.designSystemSignals?.inlineStyleCount ?? 0) * 4
+  );
+  designSystemComplianceScore -= inlineStylePenalty;
+
+  if ((input.designSystemSignals?.inlineStyleCount ?? 0) > 0) {
+    qualityWarnings.push(
+      "Inline styles detected instead of using existing UI classes"
+    );
+  }
+
+  if (input.designSystemSignals?.excessiveInlineStyles) {
+    designSystemComplianceScore -= 15;
+    qualityWarnings.push(
+      "Excessive inline style usage reduces design system consistency"
+    );
+  }
+
+  if (input.designSystemSignals?.reusableClassPreferenceMissed) {
+    designSystemComplianceScore -= 12;
+    qualityWarnings.push("Patch does not introduce reusable class-based styling");
+  }
 
   if (input.intentMismatch?.hasMismatch) {
     if (input.intentMismatch.severity === "high") {

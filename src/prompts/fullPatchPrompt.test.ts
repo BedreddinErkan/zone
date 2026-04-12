@@ -99,4 +99,39 @@ describe("buildFullPatchPrompt", () => {
     const contentIdx = prompt.indexOf(BASE_INPUT.fileContent);
     expect(contentIdx).toBeGreaterThan(fenceIdx);
   });
+
+  it("adds UI / design system rules for UI-facing patch tasks", () => {
+    const prompt = buildFullPatchPrompt({
+      ...BASE_INPUT,
+      task: "adjust spacing in the card layout",
+      filePath: "src/components/Card.tsx",
+      fileContent: '<div className="card"><button>Run</button></div>',
+    });
+
+    expect(prompt).toContain("UI / DESIGN SYSTEM RULES:");
+    expect(prompt).toContain(
+      "Prefer existing className-based styling over inline styles"
+    );
+    expect(prompt).toContain(
+      "Preserve existing component structure unless the task explicitly requires structural change"
+    );
+  });
+
+  it("adds strict micro-edit constraints when normalized intent is micro_edit", () => {
+    const prompt = buildFullPatchPrompt({
+      ...BASE_INPUT,
+      task: "fix spacing in the card",
+      filePath: "src/components/Card.tsx",
+      fileContent: '<div className="card">Zone</div>',
+      normalizedTaskIntent: "micro_edit",
+    });
+
+    expect(prompt).toContain("MICRO-EDIT CONSTRAINTS:");
+    expect(prompt).toContain("Modify as few lines as possible");
+    expect(prompt).toContain("Do not rewrite the component");
+    expect(prompt).toContain("Do not modify multiple files unless absolutely necessary");
+    expect(prompt).toContain(
+      "If a small class-based change is possible, prefer that over ad-hoc styling"
+    );
+  });
 });
