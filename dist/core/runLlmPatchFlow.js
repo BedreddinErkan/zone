@@ -1081,6 +1081,14 @@ function renderPatchResultLine(result, warnings) {
     return `✗ ${result.filePath}        failed (${details})`;
 }
 async function runLlmPatchFlow(input) {
+    const reportProgress = (stage) => {
+        try {
+            input.onProgress?.(stage);
+        }
+        catch {
+            // keep progress reporting best-effort
+        }
+    };
     const taskIntent = typeof input.task === "string" ? (0, taskIntentParser_js_1.parseTaskIntent)(input.task) : UNKNOWN_INTENT;
     const hostedAvailableFiles = input.hostedContext?.availableFiles.map((file) => ({
         path: file.path,
@@ -1089,6 +1097,7 @@ async function runLlmPatchFlow(input) {
         category: file.category,
     }));
     // 1. Scan repo
+    reportProgress("Scanning repo...");
     let allFiles = hostedAvailableFiles ?? [];
     if (!hostedAvailableFiles) {
         try {
@@ -1103,12 +1112,14 @@ async function runLlmPatchFlow(input) {
     }
     const developerContextFiles = allFiles.filter((file) => !isIrrelevantDeveloperContextPath(file.path));
     // 2. Detect structure
+    reportProgress("Detecting project structure...");
     const structure = (0, detectProjectStructure_js_1.detectProjectStructure)(developerContextFiles);
     const projectSummary = input.hostedContext?.repoSummary ||
         structure.notes.join(" ") ||
         "No project summary available.";
     const projectNotes = input.hostedContext?.projectNotes ?? structure.notes;
     // 3. Rank relevant files — top 8
+    reportProgress("Ranking relevant files...");
     const relevantFiles = (0, rankRelevantFiles_js_1.rankRelevantFiles)({
         task: input.task,
         files: developerContextFiles,
@@ -1125,6 +1136,7 @@ async function runLlmPatchFlow(input) {
                 : "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n(none)";
         })();
     // 4. Plan feature with LLM
+    reportProgress("Planning feature...");
     let llmPlan = null;
     if (!input.hostedContext) {
         try {
@@ -1168,6 +1180,7 @@ async function runLlmPatchFlow(input) {
             .filter((file) => !isIrrelevantDeveloperContextPath(file.path))
             .filter((file, index, files) => files.findIndex((candidate) => candidate.path === file.path) === index)
             .slice(0, 4);
+    reportProgress("Loading file context...");
     let resolvedFileContexts;
     if (input.hostedContext) {
         resolvedFileContexts = input.hostedContext.contextFiles.map((file) => ({
@@ -1186,6 +1199,7 @@ async function runLlmPatchFlow(input) {
         }));
     }
     // 6. Plan patch preview with LLM
+    reportProgress("Planning patch preview...");
     let patchPlan;
     try {
         patchPlan = await (0, planPatchPreview_js_1.planPatchPreviewWithLlm)({
@@ -1214,6 +1228,7 @@ async function runLlmPatchFlow(input) {
     // Task-level risk scoring for developer
     const taskRiskResult = (0, computeRiskScore_js_1.computeRiskScore)({ task: input.task, role: "developer" });
     if (vagueTask) {
+        reportProgress("Ready");
         return {
             ok: true,
             patchPreview: DEVELOPER_VAGUE_TASK_WARNING,
@@ -1228,6 +1243,7 @@ async function runLlmPatchFlow(input) {
         };
     }
     // 6b. Generate full file content for modify/create patches
+    reportProgress("Generating file patches...");
     let applyPatches = [];
     const originalContents = {
         ...(input.hostedContext?.originalContents ?? {}),
@@ -1429,8 +1445,10 @@ async function runLlmPatchFlow(input) {
     }
     console.log("[hosted] applyPatches count:", applyPatches.length);
     if (input.atomicPatch && patchResults.some((result) => result.status === "failed")) {
+        reportProgress("Ready");
         return { ok: false, reason: "atomic_patch_failed" };
     }
+    reportProgress("Validating developer output...");
     const changedFileMetrics = applyPatches.map((patch) => {
         const before = originalContents[patch.filePath] ?? "";
         return {
@@ -1480,6 +1498,7 @@ async function runLlmPatchFlow(input) {
         ? Math.min(developerConfidenceBase, ...confidenceCaps)
         : developerConfidenceBase;
     const normalizeForDiff = (content) => content.replace(/\r\n/g, "\n").replace(/\t/g, "  ").trimEnd();
+    reportProgress("Building diff preview...");
     const fileDiffs = applyPatches.map((patch) => {
         const before = normalizeForDiff(originalContents[patch.filePath] ?? "");
         const after = normalizeForDiff(patch.fullContent);
@@ -1529,6 +1548,7 @@ async function runLlmPatchFlow(input) {
             : []),
     ].join("\n");
     // 8. Return
+    reportProgress("Ready");
     return {
         ok: true,
         patchPreview,

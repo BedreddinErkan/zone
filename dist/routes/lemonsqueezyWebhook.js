@@ -61,7 +61,9 @@ lemonWebhookRouter.post("/", async (req, res) => {
     const clerkUserId = payload.meta?.custom_data?.user_id?.trim() || "";
     try {
         if (clerkUserId &&
-            (eventName === "subscription_created" || eventName === "order_created")) {
+            (eventName === "subscription_created" ||
+                eventName === "subscription_updated" ||
+                eventName === "order_created")) {
             await updateProfileSubscription({
                 clerkUserId,
                 subscriptionStatus: "pro",

@@ -327,6 +327,8 @@ type UiContext = {
   window: {
     location: { href: string };
     showDirectoryPicker?: ReturnType<typeof vi.fn>;
+    parent?: { postMessage(message: unknown, targetOrigin: string): void };
+    top?: unknown;
     currentUser?: { id: string; email?: string };
     Clerk?: {
       user?: { id?: string };
@@ -387,6 +389,63 @@ function deniedResponse(status: number, body: unknown) {
     status,
     json: async () => body,
   };
+}
+
+function developerPatchResponse(body: Record<string, unknown> = {}) {
+  return {
+    ok: true,
+    patchPreview: "Summary: Fix login flow",
+    decisionMode: "safe_to_apply",
+    developerConfidence: 82,
+    developerRisk: {
+      score: 0,
+      breakdown: { destructive: 0, schema: 0, massScope: 0 },
+    },
+    warnings: [],
+    applyPatches: [
+      {
+        filePath: "src/features/login.ts",
+        fullContent: "export const login = true;",
+      },
+    ],
+    ...body,
+  };
+}
+
+function queueDeveloperAsyncRun(
+  fetchMock: ReturnType<typeof vi.fn>,
+  result: Record<string, unknown> = developerPatchResponse(),
+  options: {
+    runId?: string;
+    progressStage?: string;
+    billingResponse?: Record<string, unknown>;
+  } = {}
+) {
+  const runId = options.runId ?? "job_123";
+  fetchMock
+    .mockResolvedValueOnce(okResponse({ ok: true }))
+    .mockResolvedValueOnce(okResponse({ ok: true, runId, status: "queued" }))
+    .mockResolvedValueOnce(
+      okResponse({
+        ok: true,
+        runId,
+        status: "completed",
+        progressStage: options.progressStage ?? "Ready",
+        errorMessage: null,
+      })
+    )
+    .mockResolvedValueOnce(okResponse(result))
+    .mockResolvedValueOnce(
+      okResponse(
+        options.billingResponse ?? {
+          ok: true,
+          plan: "Free",
+          credits: 10,
+          subscriptionStatus: "free",
+        }
+      )
+    );
+  return fetchMock;
 }
 
 function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
@@ -548,6 +607,12 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
     window: {
       location: { href: "" },
       showDirectoryPicker: vi.fn(),
+      parent: {
+        postMessage() {
+          // no-op
+        },
+      },
+      top: null,
       currentUser: { id: "user_test_123" },
       addEventListener(type: string, listener: (event?: unknown) => void) {
         const current = windowListeners.get(type) ?? [];
@@ -675,26 +740,13 @@ describe("UI repo folder picker", () => {
 
   it("keeps manual repo path fallback working for execute", async () => {
     const { context, elements, roleButtons } = buildUiHarness();
-    context.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(okResponse({ ok: true }))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          decision: { mode: "safe_to_apply" },
-          confidence: { score: 82 },
-          risk: { score: 0, breakdown: {} },
-        }),
+    context.fetch = queueDeveloperAsyncRun(
+      vi.fn(),
+      developerPatchResponse({
+        patchPreview: "Summary: Fix button spacing",
+        applyPatches: [],
       })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          patchPreview: "Summary: Fix button spacing",
-          warnings: [],
-          applyPatches: [],
-        }),
-      });
+    );
 
     context.selectRole(roleButtons.developer);
     elements.get("task").value = "fix button spacing";
@@ -703,7 +755,7 @@ describe("UI repo folder picker", () => {
     await context.execute();
 
     expect(context.fetch).toHaveBeenCalledWith(
-      "/api/analyze",
+      "/api/patch/jobs",
       expect.objectContaining({ method: "POST" })
     );
   });
@@ -983,35 +1035,22 @@ describe("UI data analyst flow", () => {
 describe("UI developer context files", () => {
   it("shows context files for developer runs when available", async () => {
     const { context, elements, roleButtons } = buildUiHarness();
-    context.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(okResponse({ ok: true }))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          decision: { mode: "safe_to_apply" },
-          confidence: { score: 82 },
-          risk: { score: 0, breakdown: {} },
-        }),
+    context.fetch = queueDeveloperAsyncRun(
+      vi.fn(),
+      developerPatchResponse({
+        patchPreview: "=== LLM PATCH PREVIEW ===\nSummary: Fix login flow",
+        contextFiles: [
+          "src/components/LoginForm.tsx",
+          "server/routes/auth.ts",
+        ],
+        applyPatches: [
+          {
+            filePath: "src/components/LoginForm.tsx",
+            fullContent: "export function LoginForm() {}",
+          },
+        ],
       })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          patchPreview: "=== LLM PATCH PREVIEW ===\nSummary: Fix login flow",
-          warnings: [],
-          contextFiles: [
-            "src/components/LoginForm.tsx",
-            "server/routes/auth.ts",
-          ],
-          applyPatches: [
-            {
-              filePath: "src/components/LoginForm.tsx",
-              fullContent: "export function LoginForm() {}",
-            },
-          ],
-        }),
-      });
+    );
 
     context.selectRole(roleButtons.developer);
     elements.get("task").value = "fix login flow";
@@ -1059,26 +1098,13 @@ describe("UI developer context files", () => {
 describe("UI recent runs", () => {
   it("adds a recent run after a successful run", async () => {
     const { context, elements, roleButtons, localStorageStore } = buildUiHarness();
-    context.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(okResponse({ ok: true }))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          decision: { mode: "safe_to_apply" },
-          confidence: { score: 82 },
-          risk: { score: 0, breakdown: {} },
-        }),
+    context.fetch = queueDeveloperAsyncRun(
+      vi.fn(),
+      developerPatchResponse({
+        patchPreview: "=== LLM PATCH PREVIEW ===\nSummary: Fix login flow",
+        applyPatches: [],
       })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          patchPreview: "=== LLM PATCH PREVIEW ===\nSummary: Fix login flow",
-          warnings: [],
-          applyPatches: [],
-        }),
-      });
+    );
 
     context.selectRole(roleButtons.developer);
     elements.get("task").value = "fix login flow";
@@ -1564,31 +1590,7 @@ describe("UI folder-handle apply", () => {
     expect(elements.get("applyBtn").disabled).toBe(true);
     expect(elements.get("applyStatusBox").textContent).toContain("Run Execute first");
 
-    context.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(okResponse({ ok: true }))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          decision: { mode: "safe_to_apply" },
-          confidence: { score: 82 },
-          risk: { score: 0, breakdown: {} },
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          patchPreview: "Summary: Fix login flow",
-          warnings: [],
-          applyPatches: [
-            {
-              filePath: "src/features/login.ts",
-              fullContent: "export const login = true;",
-            },
-          ],
-        }),
-      });
+    context.fetch = queueDeveloperAsyncRun(vi.fn());
     context.selectRole(roleButtons.developer);
     elements.get("task").value = "fix login flow";
     elements.get("repoPath").value = "C:/repo";
@@ -1678,34 +1680,7 @@ describe("UI folder-handle apply", () => {
     const { context, elements, roleButtons } = buildUiHarness();
     const rootHandle = new MockDirectoryHandle("zone-repo");
     context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
-    context.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(okResponse({ ok: true }))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          decision: { mode: "safe_to_apply" },
-          confidence: { score: 82 },
-          risk: { score: 0, breakdown: {} },
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          patchPreview: "Summary: Fix login flow",
-          warnings: [],
-          applyPatches: [
-            {
-              filePath: "src/features/login.ts",
-              fullContent: "export const login = true;",
-            },
-          ],
-        }),
-      })
-      .mockResolvedValueOnce(
-        okResponse({ ok: true, plan: "Free", credits: 10, subscriptionStatus: "free" })
-      )
+    context.fetch = queueDeveloperAsyncRun(vi.fn())
       .mockResolvedValueOnce(okResponse({ ok: true }))
       .mockResolvedValueOnce({
         ok: true,
@@ -1757,31 +1732,7 @@ describe("UI folder-handle apply", () => {
     const { context, elements, roleButtons } = buildUiHarness();
     const rootHandle = new MockDirectoryHandle("zone-repo");
     context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
-    context.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(okResponse({ ok: true }))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          decision: { mode: "safe_to_apply" },
-          confidence: { score: 82 },
-          risk: { score: 0, breakdown: {} },
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          patchPreview: "Summary: Fix login flow",
-          warnings: [],
-          applyPatches: [
-            {
-              filePath: "src/features/login.ts",
-              fullContent: "export const login = true;",
-            },
-          ],
-        }),
-      });
+    context.fetch = queueDeveloperAsyncRun(vi.fn());
 
     await context.selectRepoFolder();
     context.selectRole(roleButtons.developer);
@@ -1816,51 +1767,38 @@ describe("UI folder-handle apply", () => {
     const { context, elements, roleButtons } = buildUiHarness();
     const rootHandle = new MockDirectoryHandle("zone-repo");
     context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
-    context.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(okResponse({ ok: true }))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          decision: { mode: "safe_to_apply" },
-          confidence: { score: 82 },
-          risk: { score: 0, breakdown: {} },
-        }),
+    context.fetch = queueDeveloperAsyncRun(
+      vi.fn(),
+      developerPatchResponse({
+        patchPreview: "Summary: Update repo files",
+        applyPatches: [
+          {
+            filePath: "src/features/login.ts",
+            fullContent: "export const login = true;",
+          },
+          {
+            filePath: "db/migration/V1__init.sql",
+            fullContent: "create table users(id int);",
+          },
+          {
+            filePath: "tests/login.spec.ts",
+            fullContent: "test('login', async () => {});",
+          },
+          {
+            filePath: "src/ui/index.html",
+            fullContent: "<div>ok</div>",
+          },
+          {
+            filePath: "README.md",
+            fullContent: "# Zone",
+          },
+          {
+            filePath: "src/api/server.ts",
+            fullContent: "export const server = true;",
+          },
+        ],
       })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          patchPreview: "Summary: Update repo files",
-          warnings: [],
-          applyPatches: [
-            {
-              filePath: "src/features/login.ts",
-              fullContent: "export const login = true;",
-            },
-            {
-              filePath: "db/migration/V1__init.sql",
-              fullContent: "create table users(id int);",
-            },
-            {
-              filePath: "tests/login.spec.ts",
-              fullContent: "test('login', async () => {});",
-            },
-            {
-              filePath: "src/ui/index.html",
-              fullContent: "<div>ok</div>",
-            },
-            {
-              filePath: "README.md",
-              fullContent: "# Zone",
-            },
-            {
-              filePath: "src/api/server.ts",
-              fullContent: "export const server = true;",
-            },
-          ],
-        }),
-      });
+    );
 
     await context.selectRepoFolder();
     context.selectRole(roleButtons.developer);
@@ -1884,31 +1822,7 @@ describe("UI folder-handle apply", () => {
 
   it("shows an error when no folder handle is available during apply", async () => {
     const { context, elements, roleButtons } = buildUiHarness();
-    context.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(okResponse({ ok: true }))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          decision: { mode: "safe_to_apply" },
-          confidence: { score: 82 },
-          risk: { score: 0, breakdown: {} },
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          patchPreview: "Summary: Fix login flow",
-          warnings: [],
-          applyPatches: [
-            {
-              filePath: "src/features/login.ts",
-              fullContent: "export const login = true;",
-            },
-          ],
-        }),
-      });
+    context.fetch = queueDeveloperAsyncRun(vi.fn());
 
     context.selectRole(roleButtons.developer);
     elements.get("task").value = "fix login flow";
@@ -1924,31 +1838,7 @@ describe("UI folder-handle apply", () => {
     const { context, elements, roleButtons } = buildUiHarness();
     const rootHandle = new MockDirectoryHandle("zone-repo");
     context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
-    context.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(okResponse({ ok: true }))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          decision: { mode: "safe_to_apply" },
-          confidence: { score: 82 },
-          risk: { score: 0, breakdown: {} },
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          patchPreview: "Summary: Fix login flow",
-          warnings: [],
-          applyPatches: [
-            {
-              filePath: "src/features/login.ts",
-              fullContent: "export const login = true;",
-            },
-          ],
-        }),
-      });
+    context.fetch = queueDeveloperAsyncRun(vi.fn());
 
     context.selectRole(roleButtons.developer);
     elements.get("task").value = "fix login flow";
@@ -1971,31 +1861,7 @@ describe("UI folder-handle apply", () => {
     const { context, elements, roleButtons } = buildUiHarness();
     const deniedHandle = new MockDirectoryHandle("zone-repo", "denied");
     context.window.showDirectoryPicker = vi.fn().mockResolvedValue(deniedHandle);
-    context.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(okResponse({ ok: true }))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          decision: { mode: "safe_to_apply" },
-          confidence: { score: 82 },
-          risk: { score: 0, breakdown: {} },
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          patchPreview: "Summary: Fix login flow",
-          warnings: [],
-          applyPatches: [
-            {
-              filePath: "src/features/login.ts",
-              fullContent: "export const login = true;",
-            },
-          ],
-        }),
-      });
+    context.fetch = queueDeveloperAsyncRun(vi.fn());
 
     await context.selectRepoFolder();
     context.selectRole(roleButtons.developer);
@@ -2009,31 +1875,7 @@ describe("UI folder-handle apply", () => {
     context.resetUI();
     elements.get("task").value = "fix login flow";
     elements.get("repoPath").value = "C:/repo";
-    context.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(okResponse({ ok: true }))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          decision: { mode: "safe_to_apply" },
-          confidence: { score: 82 },
-          risk: { score: 0, breakdown: {} },
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          patchPreview: "Summary: Fix login flow",
-          warnings: [],
-          applyPatches: [
-            {
-              filePath: "src/features/login.ts",
-              fullContent: "export const login = true;",
-            },
-          ],
-        }),
-      });
+    context.fetch = queueDeveloperAsyncRun(vi.fn());
     await context.execute();
     await context.applyChanges();
     expect(elements.get("errorBox").textContent).toContain("reading 'ok'");
@@ -2043,31 +1885,17 @@ describe("UI folder-handle apply", () => {
     const { context, elements, roleButtons } = buildUiHarness();
     const rootHandle = new MockDirectoryHandle("zone-repo");
     context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
-    context.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(okResponse({ ok: true }))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          decision: { mode: "safe_to_apply" },
-          confidence: { score: 82 },
-          risk: { score: 0, breakdown: {} },
-        }),
+    context.fetch = queueDeveloperAsyncRun(
+      vi.fn(),
+      developerPatchResponse({
+        applyPatches: [
+          {
+            filePath: "/",
+            fullContent: "export const login = true;",
+          },
+        ],
       })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          patchPreview: "Summary: Fix login flow",
-          warnings: [],
-          applyPatches: [
-            {
-              filePath: "/",
-              fullContent: "export const login = true;",
-            },
-          ],
-        }),
-      });
+    );
     await context.selectRepoFolder();
     context.selectRole(roleButtons.developer);
     elements.get("task").value = "fix login flow";
@@ -2096,31 +1924,7 @@ describe("UI folder-handle apply", () => {
     const fileHandle = await featuresDir.getFileHandle("login.ts", { create: true });
     fileHandle.content = "export const login = false;";
     context.window.showDirectoryPicker = vi.fn().mockResolvedValue(rootHandle);
-    context.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(okResponse({ ok: true }))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          decision: { mode: "safe_to_apply" },
-          confidence: { score: 82 },
-          risk: { score: 0, breakdown: {} },
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          patchPreview: "Summary: Fix login flow",
-          warnings: [],
-          applyPatches: [
-            {
-              filePath: "src/features/login.ts",
-              fullContent: "export const login = true;",
-            },
-          ],
-        }),
-      });
+    context.fetch = queueDeveloperAsyncRun(vi.fn());
 
     await context.selectRepoFolder();
     context.selectRole(roleButtons.developer);
@@ -2140,6 +1944,228 @@ describe("UI folder-handle apply", () => {
 });
 
 describe("UI progress feedback", () => {
+  it("developer execute uses async patch jobs and fetches the completed result", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    context.fetch = queueDeveloperAsyncRun(
+      vi.fn(),
+      developerPatchResponse({
+        developerConfidence: 82,
+        decisionMode: "safe_to_apply",
+        developerRisk: { score: 12, breakdown: { destructive: 0, schema: 0, massScope: 0 } },
+      }),
+      { progressStage: "Generating file patches..." }
+    );
+    context.selectRole(roleButtons.developer);
+    elements.get("task").value = "fix login flow";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+
+    expect(context.fetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/patch/jobs",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(context.fetch).toHaveBeenNthCalledWith(3, "/api/patch/jobs/job_123");
+    expect(context.fetch).toHaveBeenNthCalledWith(4, "/api/patch/jobs/job_123/result");
+    expect(elements.get("decisionBadge").className).toContain("safe");
+    expect(elements.get("patchSection").classList.contains("hidden")).toBe(false);
+  });
+
+  it("developer progress UI reflects the polled progress stage", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    let statusCalls = 0;
+    context.fetch = vi.fn().mockImplementation((input: string) => {
+      if (String(input).includes("/api/check-access")) {
+        return Promise.resolve(okResponse({ ok: true }));
+      }
+      if (String(input) === "/api/patch/jobs") {
+        return Promise.resolve(okResponse({ ok: true, runId: "job_123", status: "queued" }));
+      }
+      if (String(input) === "/api/patch/jobs/job_123") {
+        statusCalls += 1;
+        if (statusCalls === 1) {
+          return Promise.resolve(
+            okResponse({
+              ok: true,
+              runId: "job_123",
+              status: "running",
+              progressStage: "Planning feature...",
+              errorMessage: null,
+            })
+          );
+        }
+        return Promise.resolve(
+          okResponse({
+            ok: true,
+            runId: "job_123",
+            status: "completed",
+            progressStage: "Ready",
+            errorMessage: null,
+          })
+        );
+      }
+      if (String(input) === "/api/patch/jobs/job_123/result") {
+        return Promise.resolve(okResponse(developerPatchResponse()));
+      }
+      if (String(input).includes("/api/billing-summary")) {
+        return Promise.resolve(
+          okResponse({ ok: true, plan: "Free", credits: 10, subscriptionStatus: "free" })
+        );
+      }
+      throw new Error(`Unexpected fetch: ${String(input)}`);
+    });
+    context.selectRole(roleButtons.developer);
+    elements.get("task").value = "fix login flow";
+    elements.get("repoPath").value = "C:/repo";
+
+    const execution = context.execute();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(elements.get("progressText").textContent).toBe("⏳ Planning feature...");
+
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await execution;
+  });
+
+  it("reset clears active developer polling safely", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    let statusCalls = 0;
+    context.fetch = vi.fn().mockImplementation((input: string) => {
+      if (String(input).includes("/api/check-access")) {
+        return Promise.resolve(okResponse({ ok: true }));
+      }
+      if (String(input) === "/api/patch/jobs") {
+        return Promise.resolve(okResponse({ ok: true, runId: "job_123", status: "queued" }));
+      }
+      if (String(input) === "/api/patch/jobs/job_123") {
+        statusCalls += 1;
+        return Promise.resolve(
+          okResponse({
+            ok: true,
+            runId: "job_123",
+            status: "running",
+            progressStage: "Generating file patches...",
+            errorMessage: null,
+          })
+        );
+      }
+      if (String(input).includes("/api/billing-summary")) {
+        return Promise.resolve(
+          okResponse({ ok: true, plan: "Free", credits: 10, subscriptionStatus: "free" })
+        );
+      }
+      throw new Error(`Unexpected fetch: ${String(input)}`);
+    });
+    context.selectRole(roleButtons.developer);
+    elements.get("task").value = "fix login flow";
+    elements.get("repoPath").value = "C:/repo";
+
+    void context.execute();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    context.resetUI();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    expect(statusCalls).toBe(1);
+    expect(elements.get("progressText").textContent).toBe("");
+    expect(elements.get("progressBox").classList.contains("hidden")).toBe(true);
+  });
+
+  it("older developer async runs do not overwrite newer ones", async () => {
+    const { context, elements, roleButtons } = buildUiHarness();
+    let run1StatusCalls = 0;
+    context.fetch = vi.fn().mockImplementation((input: string, init?: { body?: string }) => {
+      const url = String(input);
+      if (url.includes("/api/check-access")) {
+        return Promise.resolve(okResponse({ ok: true }));
+      }
+      if (url === "/api/patch/jobs") {
+        const payload = JSON.parse(init?.body || "{}");
+        return Promise.resolve(
+          okResponse({
+            ok: true,
+            runId: payload.task === "first fix" ? "job_1" : "job_2",
+            status: "queued",
+          })
+        );
+      }
+      if (url === "/api/patch/jobs/job_1") {
+        run1StatusCalls += 1;
+        if (run1StatusCalls === 1) {
+          return Promise.resolve(
+            okResponse({
+              ok: true,
+              runId: "job_1",
+              status: "running",
+              progressStage: "Planning feature...",
+              errorMessage: null,
+            })
+          );
+        }
+        return Promise.resolve(
+          okResponse({
+            ok: true,
+            runId: "job_1",
+            status: "completed",
+            progressStage: "Ready",
+            errorMessage: null,
+          })
+        );
+      }
+      if (url === "/api/patch/jobs/job_1/result") {
+        return Promise.resolve(
+          okResponse(
+            developerPatchResponse({
+              patchPreview: "Summary: First result",
+              applyPatches: [{ filePath: "src/first.ts", fullContent: "export const first = true;" }],
+            })
+          )
+        );
+      }
+      if (url === "/api/patch/jobs/job_2") {
+        return Promise.resolve(
+          okResponse({
+            ok: true,
+            runId: "job_2",
+            status: "completed",
+            progressStage: "Ready",
+            errorMessage: null,
+          })
+        );
+      }
+      if (url === "/api/patch/jobs/job_2/result") {
+        return Promise.resolve(
+          okResponse(
+            developerPatchResponse({
+              patchPreview: "Summary: Second result",
+              applyPatches: [{ filePath: "src/second.ts", fullContent: "export const second = true;" }],
+            })
+          )
+        );
+      }
+      if (url.includes("/api/billing-summary")) {
+        return Promise.resolve(
+          okResponse({ ok: true, plan: "Free", credits: 10, subscriptionStatus: "free" })
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    context.selectRole(roleButtons.developer);
+    elements.get("repoPath").value = "C:/repo";
+
+    elements.get("task").value = "first fix";
+    void context.execute();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    elements.get("task").value = "second fix";
+    await context.execute();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    expect(elements.get("patchSummary").textContent).toContain("Second result");
+    expect(elements.get("fileList").innerHTML).toContain("src/second.ts");
+    expect(elements.get("fileList").innerHTML).not.toContain("src/first.ts");
+  });
+
   it("renders progress while a run is in progress", async () => {
     const { context, elements, roleButtons } = buildUiHarness();
     let resolveFetch: ((value: {

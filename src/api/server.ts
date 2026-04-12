@@ -42,6 +42,12 @@ import { validateLlmOutput } from "../core/validateLlmOutput.js";
 import lemonWebhookRouter from "../routes/lemonsqueezyWebhook.js";
 import createLemonCheckoutRouter from "../routes/createLemonCheckout.js";
 import customerPortalRouter from "../routes/getLemonCustomerPortal.js";
+import { queueRunLog } from "./runLogging.js";
+import {
+  createDeveloperPatchJob,
+  getDeveloperPatchJob,
+  type DeveloperPatchJobRequestPayload,
+} from "../jobs/developerPatchJobs.js";
 export const app = express();
 const port = Number(process.env.PORT) || 3000;
 let startedPort: number | null = null;
@@ -57,17 +63,6 @@ const ENHANCE_TASK_SYSTEM_PROMPT =
   "- The exact behavior or test scenario\n" +
   "- The framework/pattern already used in the repo\n" +
   "Keep it under 2 sentences. Return only the optimized task text, nothing else.";
-
-type RunLogInput = {
-  userId: string;
-  role: string;
-  task: string;
-  repoPath: string;
-  decisionMode: string;
-  confidence: number;
-  creditsUsed: number;
-  isByok?: boolean;
-};
 
 const FREE_PLAN_RUN_LIMIT = 10;
 const PRO_PLAN_RUN_LIMIT = 250;
@@ -619,143 +614,6 @@ async function handleBillingSummary(
   }
 }
 
-async function logRun(input: RunLogInput): Promise<void> {
-  const supabase = getSupabaseClient();
-  if (!supabase) return;
-
-  const effectiveUserId =
-    typeof input.userId === "string" ? input.userId.trim() : "";
-
-  const userEmail =
-    typeof process.env.ZONE_USER_EMAIL === "string"
-      ? process.env.ZONE_USER_EMAIL.trim()
-      : "";
-
-  console.log(
-    `[zone] logRun: effectiveUserId=${effectiveUserId || "missing"}`
-  );
-
-  if (!effectiveUserId) {
-    console.log("[zone] logRun: missing user id, skipping run log + credit update");
-    return;
-  }
-
-  const insertResult = await supabase.from("run_logs").insert({
-    user_id: effectiveUserId,
-    ...(userEmail ? { user_email: userEmail } : {}),
-    role: input.role,
-    task: input.task,
-    repo_path: input.repoPath,
-    decision: input.decisionMode,
-    confidence: input.confidence,
-    credits_used: input.creditsUsed,
-  });
-
-  if (insertResult.error) {
-    console.log(
-      `[zone] logRun: run_logs insert error=${insertResult.error.message}`
-    );
-  } else {
-    console.log("[zone] logRun: run_logs insert ok");
-  }
-
-  const profilesRead = supabase.from("profiles") as unknown as {
-    select?: (
-      columns: string
-    ) => {
-      eq?: (column: string, value: string) => {
-        maybeSingle?: () => Promise<{
-          data: {
-            runs_used_this_month?: number | string | null;
-            free_limit?: number | string | null;
-            subscription_status?: string | null;
-          } | null;
-          error?: unknown;
-        }>;
-      };
-    };
-  };
-
-  const profileQuery = profilesRead
-    .select?.("credits,total_runs,subscription_status")
-    ?.eq?.("clerk_user_id", effectiveUserId);
-
-  let normalizedStatus: string | null = null;
-
-  if (profileQuery && typeof profileQuery.maybeSingle === "function") {
-    try {
-      const { data, error } = await profileQuery.maybeSingle();
-
-      if (!error && data) {
-        normalizedStatus = normalizeSubscriptionStatus(data.subscription_status);
-
-        console.log(
-          `[zone] logRun: subscription_status=${normalizedStatus || "missing"}`
-        );
-      } else {
-        console.log("[zone] logRun: profile read failed, defaulting debit=1");
-      }
-    } catch {
-      console.log("[zone] logRun: profile read threw, defaulting debit=1");
-    }
-  }
-
-  if (input.isByok && hasPaidAccess(normalizedStatus)) {
-    console.log("[zone] logRun: BYOK pro run, skipping hosted credit deduction");
-    return;
-  }
-
-  const freeRunDebit = 1;
-  const rpcName = "deduct_credits_and_increment_runs";
-  const rpcPayload = {
-    p_user_id: effectiveUserId,
-    p_credits: freeRunDebit,
-  };
-  console.log(`[zone] logRun: rpc debit=${freeRunDebit}`);
-  console.log(
-    `[zone] logRun: rpc call ${rpcName} payload=${JSON.stringify(rpcPayload)}`
-  );
-
-  const rpcResult = await supabase.rpc(rpcName, rpcPayload);
-  console.log(
-    `[zone] logRun: rpc response=${JSON.stringify({
-      data: "data" in rpcResult ? rpcResult.data : undefined,
-      error:
-        rpcResult.error && typeof rpcResult.error === "object"
-          ? {
-              message:
-                "message" in rpcResult.error
-                  ? (rpcResult.error as { message?: unknown }).message
-                  : undefined,
-              code:
-                "code" in rpcResult.error
-                  ? (rpcResult.error as { code?: unknown }).code
-                  : undefined,
-              details:
-                "details" in rpcResult.error
-                  ? (rpcResult.error as { details?: unknown }).details
-                  : undefined,
-              hint:
-                "hint" in rpcResult.error
-                  ? (rpcResult.error as { hint?: unknown }).hint
-                  : undefined,
-            }
-          : rpcResult.error,
-    })}`
-  );
-
-  if (rpcResult.error) {
-    console.log(`[zone] logRun: rpc error=${rpcResult.error.message}`);
-  } else {
-    console.log("[zone] logRun: rpc ok");
-  }
-}
-function queueRunLog(input: RunLogInput): void {
-  const userId = typeof input.userId === "string" ? input.userId.trim() : "";
-  if (!userId) return;
-  void logRun(input).catch(() => undefined);
-}
-
 function getDecisionModeFromResult(
   result: Record<string, unknown>,
   confidence: number
@@ -972,6 +830,34 @@ function emitProgress(runId: string | undefined, stage: string): void {
   }
 }
 
+async function createDeveloperPatchJobPayload(input: {
+  task: string;
+  repoPath: string;
+  userId: string;
+  hostedContext?: HostedDeveloperContextPayload;
+  userOpenAiKey?: string;
+  isByok: boolean;
+}): Promise<DeveloperPatchJobRequestPayload> {
+  let hostedContext = input.hostedContext;
+  if (
+    !hostedContext &&
+    shouldUseHostedInferenceProxy() &&
+    typeof input.task === "string" &&
+    typeof input.repoPath === "string"
+  ) {
+    hostedContext = await buildHostedDeveloperContext(input.task, input.repoPath);
+  }
+
+  return {
+    task: input.task,
+    repoPath: input.repoPath,
+    userId: input.userId,
+    hostedContext,
+    userOpenAiKey: input.userOpenAiKey,
+    isByok: input.isByok,
+  };
+}
+
 function selectEnhanceContextFiles(
   role: string,
   files: Array<{ path: string; absolutePath?: string }>
@@ -1144,6 +1030,130 @@ app.post("/api/analyze", async (req, res) => {
     risk: result.risk,
     confidence: result.confidence,
   });
+});
+
+app.post("/api/patch/jobs", async (req, res) => {
+  const userOpenAiKey = req.headers["x-user-openai-key"] as string | undefined;
+  const isByok = Boolean(userOpenAiKey);
+  const { task, repoPath, userId, hostedContext } = req.body ?? {};
+
+  if (!task || !repoPath) {
+    res.status(400).json({ ok: false, reason: "task and repoPath are required" });
+    return;
+  }
+
+  const authorization = await ensureRunAuthorized(userId, isByok);
+  if (!authorization.allowed) {
+    res.status(authorization.status).json(authorization.body);
+    return;
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    res.status(500).json({ ok: false, reason: "profile_unavailable" });
+    return;
+  }
+
+  try {
+    const requestPayload = await createDeveloperPatchJobPayload({
+      task,
+      repoPath,
+      userId,
+      hostedContext,
+      userOpenAiKey,
+      isByok,
+    });
+    const job = await createDeveloperPatchJob(supabase, {
+      userId,
+      task,
+      repoPath,
+      requestPayload,
+    });
+    res.json({
+      ok: true,
+      runId: job.id,
+      status: job.status,
+    });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      reason: err instanceof Error ? err.message : "job_enqueue_failed",
+    });
+  }
+});
+
+app.get("/api/patch/jobs/:runId", async (req, res) => {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    res.status(500).json({ ok: false, reason: "profile_unavailable" });
+    return;
+  }
+
+  try {
+    const job = await getDeveloperPatchJob(supabase, req.params.runId);
+    if (!job) {
+      res.status(404).json({ ok: false, reason: "job_not_found" });
+      return;
+    }
+
+    res.json({
+      ok: true,
+      runId: job.id,
+      status: job.status,
+      progressStage: job.progress_stage,
+      errorMessage: job.error_message,
+    });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      reason: err instanceof Error ? err.message : "job_lookup_failed",
+    });
+  }
+});
+
+app.get("/api/patch/jobs/:runId/result", async (req, res) => {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    res.status(500).json({ ok: false, reason: "profile_unavailable" });
+    return;
+  }
+
+  try {
+    const job = await getDeveloperPatchJob(supabase, req.params.runId);
+    if (!job) {
+      res.status(404).json({ ok: false, reason: "job_not_found" });
+      return;
+    }
+
+    if (job.status === "completed" && job.result_payload) {
+      res.json(job.result_payload);
+      return;
+    }
+
+    if (job.status === "failed") {
+      res.json({
+        ok: false,
+        reason: "job_failed",
+        runId: job.id,
+        status: job.status,
+        errorMessage: job.error_message,
+      });
+      return;
+    }
+
+    res.json({
+      ok: false,
+      reason: "job_not_ready",
+      runId: job.id,
+      status: job.status,
+      progressStage: job.progress_stage,
+    });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      reason: err instanceof Error ? err.message : "job_result_lookup_failed",
+    });
+  }
 });
 
 app.post("/api/patch", async (req, res) => {

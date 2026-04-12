@@ -361,6 +361,7 @@ let currentRepoPath='';
 let currentRole='developer';
 let currentProgressSource=null;
 let currentRunId='';
+let currentDeveloperJobPollTimer=null;
 let currentSummaryState={};
 let currentRepoHandle=null;
 let currentRepoSelectionLabel='';
@@ -1063,6 +1064,7 @@ function renderResultSummary(){
 }
 function updateResultSummary(s){currentSummaryState={...currentSummaryState,...s};renderResultSummary();}
 function closeProgressStream(){if(currentProgressSource){currentProgressSource.close();currentProgressSource=null;}}
+function stopDeveloperJobPolling(){if(currentDeveloperJobPollTimer){clearTimeout(currentDeveloperJobPollTimer);currentDeveloperJobPollTimer=null;}}
 function setProgress(stage){
   const box=document.getElementById('progressBox');const text=document.getElementById('progressText');
   if(!stage){text.textContent='';box.classList.add('hidden');box.style.display='none';return;}
@@ -1077,7 +1079,55 @@ function startProgress(runId,initialStage){
   currentProgressSource=source;
 }
 function finishProgress(){setProgress('Ready');closeProgressStream();}
-function resetProgress(){closeProgressStream();currentRunId='';setProgress('');}
+function resetProgress(){stopDeveloperJobPolling();closeProgressStream();currentRunId='';setProgress('');}
+function buildDeveloperDecisionFromPatchResult(patch){
+  return{
+    decision:{mode:patch?.decisionMode||((patch?.developerConfidence??0)<70?'preview_only':'safe_to_apply')},
+    confidence:{score:patch?.developerConfidence??0},
+    risk:patch?.developerRisk||{score:0,breakdown:{destructive:0,schema:0,massScope:0}},
+  };
+}
+async function fetchDeveloperJobResult(runId){
+  const response=await fetch(`/api/patch/jobs/${encodeURIComponent(runId)}/result`);
+  const result=await response.json().catch(()=>null);
+  if(!response.ok)throw new Error(result?.reason||(`Job result failed: ${response.status}`));
+  return result;
+}
+async function waitForDeveloperJobCompletion(runId){
+  return new Promise((resolve,reject)=>{
+    const poll=async()=>{
+      if(currentRunId!==runId){resolve({ok:false,__aborted:true});return;}
+      try{
+        const response=await fetch(`/api/patch/jobs/${encodeURIComponent(runId)}`);
+        const statusPayload=await response.json().catch(()=>null);
+        if(currentRunId!==runId){resolve({ok:false,__aborted:true});return;}
+        if(!response.ok)throw new Error(statusPayload?.reason||(`Job status failed: ${response.status}`));
+        const status=statusPayload?.status||'queued';
+        setProgress(statusPayload?.progressStage||(status==='queued'?'Queued...':'Working...'));
+        if(status==='queued'||status==='running'){
+          currentDeveloperJobPollTimer=setTimeout(poll,1000);
+          return;
+        }
+        stopDeveloperJobPolling();
+        if(status==='failed'){
+          reject(new Error(statusPayload?.errorMessage||'Developer job failed.'));
+          return;
+        }
+        if(status==='completed'){
+          const result=await fetchDeveloperJobResult(runId);
+          if(currentRunId!==runId){resolve({ok:false,__aborted:true});return;}
+          resolve(result);
+          return;
+        }
+        reject(new Error(`Unexpected job status: ${status}`));
+      }catch(error){
+        stopDeveloperJobPolling();
+        reject(error);
+      }
+    };
+    void poll();
+  });
+}
 function getHistory(){try{return JSON.parse(localStorage.getItem('zone_repo_history')||'[]');}catch{return [];}}
 function saveToHistory(path){let h=getHistory().filter(p=>p!==path);h.unshift(path);h=h.slice(0,5);localStorage.setItem('zone_repo_history',JSON.stringify(h));renderHistory();}
 function renderHistory(){const h=getHistory();const box=document.getElementById('historyBox');const sel=document.getElementById('historySelect');if(h.length===0){box.classList.add('hidden');return;}box.classList.remove('hidden');sel.innerHTML='<option value="">— select —</option>'+h.map(p=>`<option value="${p}">${p}</option>`).join('');}
@@ -1302,49 +1352,37 @@ async function execute(){
       addRecentRun({task,role:currentRole,repoPath,status:'success',timestamp:Date.now()});
       finishProgress();
     }else{
-      setProgress('Analyzing repository...');
-      const r1=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});
-      if(!r1.ok)throw new Error('Analyze failed: '+r1.status);
-      const analyzeData=await r1.json();
-      setProgress('Planning changes...');
       const hostedContext=await buildHostedDeveloperContext();
-      let fakeProgressTimer=null;
-      let fakeProgressStep=0;
-      const fakeProgressStages=['Generating patch...','Generating patch...','Validating output...'];
-      const fakeProgressDelays=[5000,20000,5000];
-      function advanceFakeProgress(){
-        if(fakeProgressStep<fakeProgressStages.length){
-          setProgress(fakeProgressStages[fakeProgressStep]);
-          fakeProgressTimer=setTimeout(advanceFakeProgress,fakeProgressDelays[fakeProgressStep]);
-          fakeProgressStep++;
-        }
-      }
-      setTimeout(advanceFakeProgress,3000);
-      const body={...{task,repoPath,runId,userId},...(hostedContext?{hostedContext}:{})};
-      console.log('[zone-ui] patch request body',body);
-      const r2=await fetch('/api/patch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      const patch=await r2.json().catch(()=>null);
-      if(!r2.ok){
+      const body={...{task,repoPath,userId},...(hostedContext?{hostedContext}:{})};
+      console.log('[zone-ui] patch job request body',body);
+      const enqueueResponse=await fetch('/api/patch/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const enqueuePayload=await enqueueResponse.json().catch(()=>null);
+      if(!enqueueResponse.ok){
         resetProgress();
-        if(patch?.reason==='unauthorized'){
-          showUnauthorized(patch.message);
+        if(enqueuePayload?.reason==='unauthorized'){
+          showUnauthorized(enqueuePayload.message);
           addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
           return;
         }
-        if(patch?.reason==='no_free_runs'){
-          showUpgrade(patch.message,patch.upgradeUrl);
+        if(enqueuePayload?.reason==='no_free_runs'){
+          showUpgrade(enqueuePayload.message,enqueuePayload.upgradeUrl);
           addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
           return;
         }
-        throw new Error(patch?.reason||('Patch failed: '+r2.status));
+        throw new Error(enqueuePayload?.reason||(`Patch job enqueue failed: ${enqueueResponse.status}`));
       }
-      if(fakeProgressTimer)clearTimeout(fakeProgressTimer);
+      const jobRunId=enqueuePayload?.runId||runId;
+      currentRunId=jobRunId;
+      setProgress(enqueuePayload?.progressStage||'Queued...');
+      const patch=await waitForDeveloperJobCompletion(jobRunId);
+      if(patch?.__aborted)return;
+      if(currentRunId!==jobRunId)return;
       if(!patch?.ok){
         showError(patch?.reason||'Patch generation failed.');
         addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
         return;
       }
-      showDecision(analyzeData);
+      showDecision(buildDeveloperDecisionFromPatchResult(patch));
       showPatch(patch);
       addRecentRun({task,role:currentRole,repoPath,status:patch.ok===false?'error':'success',timestamp:Date.now()});
       finishProgress();

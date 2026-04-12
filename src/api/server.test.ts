@@ -17,6 +17,8 @@ const readProjectFilesMock = vi.fn();
 const responsesCreateMock = vi.fn();
 const supabaseInsertMock = vi.fn();
 const supabaseRpcMock = vi.fn();
+const createDeveloperPatchJobMock = vi.fn();
+const getDeveloperPatchJobMock = vi.fn();
 const supabaseProfileMaybeSingleMock = vi.fn();
 const supabaseSelectEqMock = vi.fn(() => ({
   maybeSingle: supabaseProfileMaybeSingleMock,
@@ -103,6 +105,11 @@ vi.mock("../llm/openaiClient.js", () => ({
 
 vi.mock("@supabase/supabase-js", () => ({
   createClient: createSupabaseClientMock,
+}));
+
+vi.mock("../jobs/developerPatchJobs.js", () => ({
+  createDeveloperPatchJob: createDeveloperPatchJobMock,
+  getDeveloperPatchJob: getDeveloperPatchJobMock,
 }));
 
 describe("/api/test-engineer", () => {
@@ -271,6 +278,107 @@ export function LoginForm() {
       "src/components/LoginForm.tsx",
       "server/routes/auth.ts",
     ]);
+  });
+
+  it("creates a queued developer patch job", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        runs_used_this_month: 1,
+        free_limit: 10,
+        subscription_status: "free",
+      },
+      error: null,
+    });
+    createDeveloperPatchJobMock.mockResolvedValue({
+      id: "job_123",
+      status: "queued",
+    });
+
+    const response = await fetch(`${baseUrl}/api/patch/jobs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "fix login form auth bug",
+        repoPath: "C:/repo",
+        userId: "clerk_user_123",
+      }),
+    });
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      runId: "job_123",
+      status: "queued",
+    });
+    expect(createDeveloperPatchJobMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        userId: "clerk_user_123",
+        task: "fix login form auth bug",
+        repoPath: "C:/repo",
+        requestPayload: expect.objectContaining({
+          task: "fix login form auth bug",
+          repoPath: "C:/repo",
+          userId: "clerk_user_123",
+        }),
+      })
+    );
+  });
+
+  it("returns developer patch job status", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    getDeveloperPatchJobMock.mockResolvedValue({
+      id: "job_123",
+      status: "running",
+      progress_stage: "Generating file patches...",
+      error_message: null,
+    });
+
+    const response = await fetch(`${baseUrl}/api/patch/jobs/job_123`);
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      runId: "job_123",
+      status: "running",
+      progressStage: "Generating file patches...",
+      errorMessage: null,
+    });
+  });
+
+  it("returns completed developer patch job results", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    getDeveloperPatchJobMock.mockResolvedValue({
+      id: "job_123",
+      status: "completed",
+      result_payload: {
+        ok: true,
+        patchPreview: "=== LLM PATCH PREVIEW ===",
+        warnings: [],
+        applyPatches: [],
+        patchResults: [],
+        fileDiffs: [],
+      },
+    });
+
+    const response = await fetch(`${baseUrl}/api/patch/jobs/job_123/result`);
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      patchPreview: "=== LLM PATCH PREVIEW ===",
+      warnings: [],
+      applyPatches: [],
+      patchResults: [],
+      fileDiffs: [],
+    });
   });
 
   it("injects the current user bootstrap into the UI html when available", async () => {

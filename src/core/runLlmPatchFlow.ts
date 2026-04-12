@@ -1556,7 +1556,16 @@ export async function runLlmPatchFlow(input: {
   dryRun?: boolean;
   hostedContext?: HostedDeveloperContextInput;
   userOpenAiKey?: string;
+  onProgress?: (stage: string) => void;
 }): Promise<LlmPatchFlowResult> {
+  const reportProgress = (stage: string): void => {
+    try {
+      input.onProgress?.(stage);
+    } catch {
+      // keep progress reporting best-effort
+    }
+  };
+
   const taskIntent =
     typeof input.task === "string" ? parseTaskIntent(input.task) : UNKNOWN_INTENT;
 
@@ -1569,6 +1578,7 @@ export async function runLlmPatchFlow(input: {
     }));
 
   // 1. Scan repo
+  reportProgress("Scanning repo...");
   let allFiles: RepoFile[] = hostedAvailableFiles ?? [];
   if (!hostedAvailableFiles) {
     try {
@@ -1585,6 +1595,7 @@ export async function runLlmPatchFlow(input: {
   );
 
   // 2. Detect structure
+  reportProgress("Detecting project structure...");
   const structure = detectProjectStructure(developerContextFiles);
   const projectSummary =
     input.hostedContext?.repoSummary ||
@@ -1593,6 +1604,7 @@ export async function runLlmPatchFlow(input: {
   const projectNotes = input.hostedContext?.projectNotes ?? structure.notes;
 
   // 3. Rank relevant files — top 8
+  reportProgress("Ranking relevant files...");
   const relevantFiles = rankRelevantFiles({
     task: input.task,
     files: developerContextFiles,
@@ -1612,6 +1624,7 @@ export async function runLlmPatchFlow(input: {
     })();
 
   // 4. Plan feature with LLM
+  reportProgress("Planning feature...");
   let llmPlan: Awaited<ReturnType<typeof planFeatureWithLlm>> | null = null;
   if (!input.hostedContext) {
     try {
@@ -1660,6 +1673,7 @@ export async function runLlmPatchFlow(input: {
       )
       .slice(0, 4);
 
+  reportProgress("Loading file context...");
   let resolvedFileContexts: Array<{ path: string; content: string }>;
   if (input.hostedContext) {
     resolvedFileContexts = input.hostedContext.contextFiles.map((file) => ({
@@ -1679,6 +1693,7 @@ export async function runLlmPatchFlow(input: {
   }
 
   // 6. Plan patch preview with LLM
+  reportProgress("Planning patch preview...");
   let patchPlan: Awaited<ReturnType<typeof planPatchPreviewWithLlm>>;
   try {
     patchPlan = await planPatchPreviewWithLlm({
@@ -1712,6 +1727,7 @@ export async function runLlmPatchFlow(input: {
   // Task-level risk scoring for developer
   const taskRiskResult = computeRiskScore({ task: input.task, role: "developer" });
   if (vagueTask) {
+    reportProgress("Ready");
     return {
       ok: true,
       patchPreview: DEVELOPER_VAGUE_TASK_WARNING,
@@ -1727,6 +1743,7 @@ export async function runLlmPatchFlow(input: {
   }
 
   // 6b. Generate full file content for modify/create patches
+  reportProgress("Generating file patches...");
   let applyPatches: Array<{ filePath: string; fullContent: string }> = [];
   const originalContents: Record<string, string> = {
     ...(input.hostedContext?.originalContents ?? {}),
@@ -1978,9 +1995,11 @@ export async function runLlmPatchFlow(input: {
   console.log("[hosted] applyPatches count:", applyPatches.length);
 
   if (input.atomicPatch && patchResults.some((result) => result.status === "failed")) {
+    reportProgress("Ready");
     return { ok: false, reason: "atomic_patch_failed" };
   }
 
+  reportProgress("Validating developer output...");
   const changedFileMetrics = applyPatches.map((patch) => {
     const before = originalContents[patch.filePath] ?? "";
     return {
@@ -2042,6 +2061,7 @@ export async function runLlmPatchFlow(input: {
 const normalizeForDiff = (content: string): string =>
   content.replace(/\r\n/g, "\n").replace(/\t/g, "  ").trimEnd();
 
+reportProgress("Building diff preview...");
 const fileDiffs = applyPatches.map((patch) => {
   const before = normalizeForDiff(originalContents[patch.filePath] ?? "");
   const after = normalizeForDiff(patch.fullContent);
@@ -2110,6 +2130,7 @@ const decisionMode =
   ].join("\n");
 
   // 8. Return
+  reportProgress("Ready");
   return {
     ok: true,
     patchPreview,

@@ -5,7 +5,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.app = void 0;
 exports.startServer = startServer;
-console.log("[zone] api/server.ts loading...");
 require("dotenv/config");
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
@@ -34,6 +33,8 @@ const validateLlmOutput_js_1 = require("../core/validateLlmOutput.js");
 const lemonsqueezyWebhook_js_1 = __importDefault(require("../routes/lemonsqueezyWebhook.js"));
 const createLemonCheckout_js_1 = __importDefault(require("../routes/createLemonCheckout.js"));
 const getLemonCustomerPortal_js_1 = __importDefault(require("../routes/getLemonCustomerPortal.js"));
+const runLogging_js_1 = require("./runLogging.js");
+const developerPatchJobs_js_1 = require("../jobs/developerPatchJobs.js");
 exports.app = (0, express_1.default)();
 const port = Number(process.env.PORT) || 3000;
 let startedPort = null;
@@ -50,7 +51,17 @@ const ENHANCE_TASK_SYSTEM_PROMPT = "You are a task optimizer for an AI code agen
     "Keep it under 2 sentences. Return only the optimized task text, nothing else.";
 const FREE_PLAN_RUN_LIMIT = 10;
 const PRO_PLAN_RUN_LIMIT = 250;
-exports.app.use((0, cors_1.default)());
+exports.app.use((0, cors_1.default)({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "X-User-OpenAI-Key",
+        "Accept",
+    ],
+    exposedHeaders: ["Content-Length", "X-Request-Id"],
+}));
 exports.app.set('trust proxy', 1);
 exports.app.use("/api/lemonsqueezy/webhook", express_1.default.raw({ type: "application/json" }), lemonsqueezyWebhook_js_1.default);
 exports.app.use(body_parser_1.default.json({ limit: "10mb" }));
@@ -400,99 +411,6 @@ async function handleBillingSummary(req, res) {
         res.json({ ok: false, reason: "profile_unavailable" });
     }
 }
-async function logRun(input) {
-    const supabase = getSupabaseClient();
-    if (!supabase)
-        return;
-    const effectiveUserId = typeof input.userId === "string" ? input.userId.trim() : "";
-    const userEmail = typeof process.env.ZONE_USER_EMAIL === "string"
-        ? process.env.ZONE_USER_EMAIL.trim()
-        : "";
-    console.log(`[zone] logRun: effectiveUserId=${effectiveUserId || "missing"}`);
-    if (!effectiveUserId) {
-        console.log("[zone] logRun: missing user id, skipping run log + credit update");
-        return;
-    }
-    const insertResult = await supabase.from("run_logs").insert({
-        user_id: effectiveUserId,
-        ...(userEmail ? { user_email: userEmail } : {}),
-        role: input.role,
-        task: input.task,
-        repo_path: input.repoPath,
-        decision: input.decisionMode,
-        confidence: input.confidence,
-        credits_used: input.creditsUsed,
-    });
-    if (insertResult.error) {
-        console.log(`[zone] logRun: run_logs insert error=${insertResult.error.message}`);
-    }
-    else {
-        console.log("[zone] logRun: run_logs insert ok");
-    }
-    if (input.isByok) {
-        console.log("[zone] logRun: BYOK run, skipping hosted credit deduction");
-        return;
-    }
-    const profilesRead = supabase.from("profiles");
-    const profileQuery = profilesRead
-        .select?.("credits,total_runs,subscription_status")
-        ?.eq?.("clerk_user_id", effectiveUserId);
-    if (profileQuery && typeof profileQuery.maybeSingle === "function") {
-        try {
-            const { data, error } = await profileQuery.maybeSingle();
-            if (!error && data) {
-                const normalizedStatus = normalizeSubscriptionStatus(data.subscription_status);
-                console.log(`[zone] logRun: subscription_status=${normalizedStatus || "missing"}`);
-            }
-            else {
-                console.log("[zone] logRun: profile read failed, defaulting debit=1");
-            }
-        }
-        catch {
-            console.log("[zone] logRun: profile read threw, defaulting debit=1");
-        }
-    }
-    const freeRunDebit = 1;
-    const rpcName = "deduct_credits_and_increment_runs";
-    const rpcPayload = {
-        p_user_id: effectiveUserId,
-        p_credits: freeRunDebit,
-    };
-    console.log(`[zone] logRun: rpc debit=${freeRunDebit}`);
-    console.log(`[zone] logRun: rpc call ${rpcName} payload=${JSON.stringify(rpcPayload)}`);
-    const rpcResult = await supabase.rpc(rpcName, rpcPayload);
-    console.log(`[zone] logRun: rpc response=${JSON.stringify({
-        data: "data" in rpcResult ? rpcResult.data : undefined,
-        error: rpcResult.error && typeof rpcResult.error === "object"
-            ? {
-                message: "message" in rpcResult.error
-                    ? rpcResult.error.message
-                    : undefined,
-                code: "code" in rpcResult.error
-                    ? rpcResult.error.code
-                    : undefined,
-                details: "details" in rpcResult.error
-                    ? rpcResult.error.details
-                    : undefined,
-                hint: "hint" in rpcResult.error
-                    ? rpcResult.error.hint
-                    : undefined,
-            }
-            : rpcResult.error,
-    })}`);
-    if (rpcResult.error) {
-        console.log(`[zone] logRun: rpc error=${rpcResult.error.message}`);
-    }
-    else {
-        console.log("[zone] logRun: rpc ok");
-    }
-}
-function queueRunLog(input) {
-    const userId = typeof input.userId === "string" ? input.userId.trim() : "";
-    if (!userId)
-        return;
-    void logRun(input).catch(() => undefined);
-}
 function getDecisionModeFromResult(result, confidence) {
     const decisionMode = result["decisionMode"];
     if (typeof decisionMode === "string" && decisionMode.length > 0) {
@@ -631,6 +549,23 @@ function emitProgress(runId, stage) {
         res.write(payload);
     }
 }
+async function createDeveloperPatchJobPayload(input) {
+    let hostedContext = input.hostedContext;
+    if (!hostedContext &&
+        shouldUseHostedInferenceProxy() &&
+        typeof input.task === "string" &&
+        typeof input.repoPath === "string") {
+        hostedContext = await buildHostedDeveloperContext(input.task, input.repoPath);
+    }
+    return {
+        task: input.task,
+        repoPath: input.repoPath,
+        userId: input.userId,
+        hostedContext,
+        userOpenAiKey: input.userOpenAiKey,
+        isByok: input.isByok,
+    };
+}
 function selectEnhanceContextFiles(role, files) {
     const sortedFiles = [...files].sort((a, b) => a.path.localeCompare(b.path));
     const roleMatchers = {
@@ -765,6 +700,120 @@ exports.app.post("/api/analyze", async (req, res) => {
         confidence: result.confidence,
     });
 });
+exports.app.post("/api/patch/jobs", async (req, res) => {
+    const userOpenAiKey = req.headers["x-user-openai-key"];
+    const isByok = Boolean(userOpenAiKey);
+    const { task, repoPath, userId, hostedContext } = req.body ?? {};
+    if (!task || !repoPath) {
+        res.status(400).json({ ok: false, reason: "task and repoPath are required" });
+        return;
+    }
+    const authorization = await ensureRunAuthorized(userId, isByok);
+    if (!authorization.allowed) {
+        res.status(authorization.status).json(authorization.body);
+        return;
+    }
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+        res.status(500).json({ ok: false, reason: "profile_unavailable" });
+        return;
+    }
+    try {
+        const requestPayload = await createDeveloperPatchJobPayload({
+            task,
+            repoPath,
+            userId,
+            hostedContext,
+            userOpenAiKey,
+            isByok,
+        });
+        const job = await (0, developerPatchJobs_js_1.createDeveloperPatchJob)(supabase, {
+            userId,
+            task,
+            repoPath,
+            requestPayload,
+        });
+        res.json({
+            ok: true,
+            runId: job.id,
+            status: job.status,
+        });
+    }
+    catch (err) {
+        res.status(500).json({
+            ok: false,
+            reason: err instanceof Error ? err.message : "job_enqueue_failed",
+        });
+    }
+});
+exports.app.get("/api/patch/jobs/:runId", async (req, res) => {
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+        res.status(500).json({ ok: false, reason: "profile_unavailable" });
+        return;
+    }
+    try {
+        const job = await (0, developerPatchJobs_js_1.getDeveloperPatchJob)(supabase, req.params.runId);
+        if (!job) {
+            res.status(404).json({ ok: false, reason: "job_not_found" });
+            return;
+        }
+        res.json({
+            ok: true,
+            runId: job.id,
+            status: job.status,
+            progressStage: job.progress_stage,
+            errorMessage: job.error_message,
+        });
+    }
+    catch (err) {
+        res.status(500).json({
+            ok: false,
+            reason: err instanceof Error ? err.message : "job_lookup_failed",
+        });
+    }
+});
+exports.app.get("/api/patch/jobs/:runId/result", async (req, res) => {
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+        res.status(500).json({ ok: false, reason: "profile_unavailable" });
+        return;
+    }
+    try {
+        const job = await (0, developerPatchJobs_js_1.getDeveloperPatchJob)(supabase, req.params.runId);
+        if (!job) {
+            res.status(404).json({ ok: false, reason: "job_not_found" });
+            return;
+        }
+        if (job.status === "completed" && job.result_payload) {
+            res.json(job.result_payload);
+            return;
+        }
+        if (job.status === "failed") {
+            res.json({
+                ok: false,
+                reason: "job_failed",
+                runId: job.id,
+                status: job.status,
+                errorMessage: job.error_message,
+            });
+            return;
+        }
+        res.json({
+            ok: false,
+            reason: "job_not_ready",
+            runId: job.id,
+            status: job.status,
+            progressStage: job.progress_stage,
+        });
+    }
+    catch (err) {
+        res.status(500).json({
+            ok: false,
+            reason: err instanceof Error ? err.message : "job_result_lookup_failed",
+        });
+    }
+});
 exports.app.post("/api/patch", async (req, res) => {
     const userOpenAiKey = req.headers["x-user-openai-key"];
     const isByok = Boolean(userOpenAiKey);
@@ -818,7 +867,7 @@ exports.app.post("/api/patch", async (req, res) => {
         const confidence = typeof result.developerConfidence === "number"
             ? result.developerConfidence
             : 0;
-        queueRunLog({
+        (0, runLogging_js_1.queueRunLog)({
             userId,
             role: "developer",
             task,
@@ -894,7 +943,7 @@ exports.app.post("/api/dry-run", async (req, res) => {
     const confidence = typeof result.developerConfidence === "number"
         ? result.developerConfidence
         : 0;
-    queueRunLog({
+    (0, runLogging_js_1.queueRunLog)({
         userId,
         role: "developer",
         task,
@@ -1016,7 +1065,7 @@ exports.app.post("/api/test-engineer", async (req, res) => {
         }
         res.json(result);
         if (result.ok) {
-            queueRunLog({
+            (0, runLogging_js_1.queueRunLog)({
                 userId,
                 role: "test_engineer",
                 task,
@@ -1095,7 +1144,7 @@ exports.app.post("/api/data-analyst", async (req, res) => {
         }
         res.json(result);
         if (result.ok) {
-            queueRunLog({
+            (0, runLogging_js_1.queueRunLog)({
                 userId,
                 role: "data_analyst",
                 task,
@@ -1115,9 +1164,6 @@ exports.app.post("/api/data-analyst", async (req, res) => {
         });
     }
 });
-exports.app.use("/api/lemonsqueezy/webhook", lemonsqueezyWebhook_js_1.default);
-exports.app.use("/api/lemonsqueezy/create-checkout", createLemonCheckout_js_1.default);
-exports.app.use("/api/lemonsqueezy/customer-portal", getLemonCustomerPortal_js_1.default);
 exports.app.use(express_1.default.static(zoneUiDir));
 async function startServer(port = 3000) {
     if (startPromise) {
@@ -1126,7 +1172,7 @@ async function startServer(port = 3000) {
     startedPort = port;
     logStartupDiagnostics();
     startPromise = new Promise((resolve) => {
-        exports.app.listen(port, "0.0.0.0", () => {
+        exports.app.listen(port, () => {
             console.log((0, colors_js_1.colorize)(`Zone UI running on http://localhost:${port}`, colors_js_1.c.green, colors_js_1.c.bold));
             console.log((0, colors_js_1.colorize)("Press Ctrl+C to stop", colors_js_1.c.dim, colors_js_1.c.gray));
             resolve();
