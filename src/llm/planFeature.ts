@@ -41,8 +41,9 @@ export async function planFeatureWithLlm(input: {
   relevantFiles: { path: string; category: string }[];
   existingFilesSummary: string;
   schemaAwareSummary?: string[];
+  userOpenAiKey?: string;
 }): Promise<LlmFeaturePlan> {
-  const client = createOpenAIClient();
+  const client = createOpenAIClient(input.userOpenAiKey);
   const model = getModelName();
 
   const relevantFilesSummary = input.relevantFiles

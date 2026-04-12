@@ -1555,6 +1555,7 @@ export async function runLlmPatchFlow(input: {
   atomicPatch?: boolean;
   dryRun?: boolean;
   hostedContext?: HostedDeveloperContextInput;
+  userOpenAiKey?: string;
 }): Promise<LlmPatchFlowResult> {
   const taskIntent =
     typeof input.task === "string" ? parseTaskIntent(input.task) : UNKNOWN_INTENT;
@@ -1625,6 +1626,7 @@ export async function runLlmPatchFlow(input: {
         })),
         existingFilesSummary,
         schemaAwareSummary: [],
+        userOpenAiKey: input.userOpenAiKey,
       });
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
@@ -1687,6 +1689,7 @@ export async function runLlmPatchFlow(input: {
       suggestedFiles: selectedContextFiles,
       fileContexts: resolvedFileContexts,
       schemaAwareSummary: [],
+      userOpenAiKey: input.userOpenAiKey,
     });
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
@@ -1858,6 +1861,7 @@ export async function runLlmPatchFlow(input: {
         taskIntent: taskIntent.normalizedTask || taskIntent.action,
         relevantFiles: targetedRelevantFiles,
         existingTargetFiles: allFiles.map((file) => file.path),
+        userOpenAiKey: input.userOpenAiKey,
         relatedContext: [
           contextWindow
             ? `// CONTEXT WINDOW: lines ${contextWindow.startLine}-${contextWindow.endLine} of ${contextWindow.totalLines} total`

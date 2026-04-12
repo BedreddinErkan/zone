@@ -28,7 +28,7 @@ function stripJsonFences(raw) {
         .trim();
 }
 async function planPatchPreviewWithLlm(input) {
-    const client = (0, openaiClient_js_1.createOpenAIClient)();
+    const client = (0, openaiClient_js_1.createOpenAIClient)(input.userOpenAiKey);
     const model = (0, openaiClient_js_1.getModelName)();
     const combinedContext = input.fileContexts
         .map((file) => `FILE: ${file.path}\n\`\`\`\n${file.content}\n\`\`\``)

@@ -1,4 +1,3 @@
-console.log("[zone] api/server.ts loading...");
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -67,10 +66,11 @@ type RunLogInput = {
   decisionMode: string;
   confidence: number;
   creditsUsed: number;
+  isByok?: boolean;
 };
 
 const FREE_PLAN_RUN_LIMIT = 10;
-const PRO_PLAN_RUN_LIMIT = 1000;
+const PRO_PLAN_RUN_LIMIT = 250;
 
 type HostedDeveloperContextPayload = {
   repoSummary: string;
@@ -107,6 +107,7 @@ type HostedTestEngineerContextPayload = {
   stepDefinitionContents: Array<{ path: string; content: string }>;
   featureContents: Array<{ path: string; content: string }>;
   existingTestContents: Array<{ path: string; content: string }>;
+  appSourceContents?: Array<{ path: string; content: string }>;
 };
 
 type HostedDataAnalystContextPayload = {
@@ -119,7 +120,19 @@ type HostedDataAnalystContextPayload = {
   existingSqlContents: Array<{ path: string; content: string }>;
 };
 
-app.use(cors());
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-User-OpenAI-Key",
+      "Accept",
+    ],
+    exposedHeaders: ["Content-Length", "X-Request-Id"],
+  })
+);
 app.set('trust proxy', 1);
 app.use(
   "/api/lemonsqueezy/webhook",
@@ -487,7 +500,10 @@ async function buildHostedDataAnalystContext(
 
 async function handleCheckAccess(req: express.Request, res: express.Response): Promise<void> {
   const userId = typeof req.query.userId === "string" ? req.query.userId : "";
-  const authorization = await ensureRunAuthorized(userId);
+  const authorization = await ensureRunAuthorized(
+    userId,
+    isTruthyByok(req.query.isByok)
+  );
   if (authorization.allowed) {
     res.json({ ok: true });
     return;
@@ -664,25 +680,31 @@ async function logRun(input: RunLogInput): Promise<void> {
     .select?.("credits,total_runs,subscription_status")
     ?.eq?.("clerk_user_id", effectiveUserId);
 
-if (profileQuery && typeof profileQuery.maybeSingle === "function") {
-  try {
-    const { data, error } = await profileQuery.maybeSingle();
+  let normalizedStatus: string | null = null;
 
-    if (!error && data) {
-      const normalizedStatus = normalizeSubscriptionStatus(
-        data.subscription_status
-      );
+  if (profileQuery && typeof profileQuery.maybeSingle === "function") {
+    try {
+      const { data, error } = await profileQuery.maybeSingle();
 
-      console.log(
-        `[zone] logRun: subscription_status=${normalizedStatus || "missing"}`
-      );
-    } else {
-      console.log("[zone] logRun: profile read failed, defaulting debit=1");
+      if (!error && data) {
+        normalizedStatus = normalizeSubscriptionStatus(data.subscription_status);
+
+        console.log(
+          `[zone] logRun: subscription_status=${normalizedStatus || "missing"}`
+        );
+      } else {
+        console.log("[zone] logRun: profile read failed, defaulting debit=1");
+      }
+    } catch {
+      console.log("[zone] logRun: profile read threw, defaulting debit=1");
     }
-  } catch {
-    console.log("[zone] logRun: profile read threw, defaulting debit=1");
   }
-}
+
+  if (input.isByok && hasPaidAccess(normalizedStatus)) {
+    console.log("[zone] logRun: BYOK pro run, skipping hosted credit deduction");
+    return;
+  }
+
   const freeRunDebit = 1;
   const rpcName = "deduct_credits_and_increment_runs";
   const rpcPayload = {
@@ -781,8 +803,18 @@ function hasPaidAccess(subscriptionStatus: unknown): boolean {
   return normalized === "pro";
 }
 
+function isTruthyByok(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "true" || normalized === "1" || normalized === "yes";
+  }
+  return false;
+}
+
 async function ensureRunAuthorized(
-  rawUserId: unknown
+  rawUserId: unknown,
+  isByok = false
 ): Promise<
   | { allowed: true }
   | {
@@ -803,7 +835,7 @@ async function ensureRunAuthorized(
         | {
             ok: false;
             reason: "no_free_runs";
-            message: "You've used all 1000 monthly runs. Resets next month.";
+            message: "You've used all 250 monthly runs. Resets next month.";
           };
     }
 > {
@@ -887,6 +919,9 @@ async function ensureRunAuthorized(
     );
 
     if (hasPaidAccess(subscriptionStatus)) {
+      if (isByok) {
+        return { allowed: true };
+      }
       if (
         (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0) >=
         PRO_PLAN_RUN_LIMIT
@@ -897,7 +932,7 @@ async function ensureRunAuthorized(
           body: {
             ok: false,
             reason: "no_free_runs",
-            message: "You've used all 1000 monthly runs. Resets next month.",
+            message: "You've used all 250 monthly runs. Resets next month.",
           },
         };
       }
@@ -967,6 +1002,8 @@ async function enhanceTask(input: {
   role: string;
   repoPath: string;
   hostedContext?: HostedEnhanceContextPayload;
+  userOpenAiKey?: string;
+  isByok?: boolean;
 }): Promise<string> {
   try {
     const repoContext =
@@ -999,7 +1036,7 @@ async function enhanceTask(input: {
     const resolvedRepoContext =
       typeof repoContext === "string" ? repoContext : await repoContext;
 
-    const client = createOpenAIClient();
+    const client = createOpenAIClient(input.userOpenAiKey);
     const model = getModelName();
     const response = await client.responses.create({
       model,
@@ -1110,6 +1147,8 @@ app.post("/api/analyze", async (req, res) => {
 });
 
 app.post("/api/patch", async (req, res) => {
+  const userOpenAiKey = req.headers["x-user-openai-key"] as string | undefined;
+  const isByok = Boolean(userOpenAiKey);
   if (shouldProxyHostedRequest(req, "/api/patch")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1135,13 +1174,13 @@ app.post("/api/patch", async (req, res) => {
     return;
   }
 
-  const authorization = await ensureRunAuthorized(userId);
+  const authorization = await ensureRunAuthorized(userId, isByok);
   if (!authorization.allowed) {
     res.status(authorization.status).json(authorization.body);
     return;
   }
 
-const result = await runLlmPatchFlow({ task, repoPath, hostedContext });
+const result = await runLlmPatchFlow({ task, repoPath, hostedContext, userOpenAiKey });
 
 if (result.ok && result.applyPatches.length > 0) {
   const validation = validateLlmOutput(
@@ -1181,11 +1220,14 @@ res.json(result);
       decisionMode:
         result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
       confidence,
-      creditsUsed: 0.1,
+      creditsUsed: 1,
+      isByok,
     });
   }
 });
 app.post("/api/dry-run", async (req, res) => {
+  const userOpenAiKey = req.headers["x-user-openai-key"] as string | undefined;
+  const isByok = Boolean(userOpenAiKey);
   if (shouldProxyHostedRequest(req, "/api/dry-run")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1206,13 +1248,19 @@ app.post("/api/dry-run", async (req, res) => {
 
   const { task, repoPath, userId, hostedContext } = req.body;
 
-  const authorization = await ensureRunAuthorized(userId);
+  const authorization = await ensureRunAuthorized(userId, isByok);
   if (!authorization.allowed) {
     res.status(authorization.status).json(authorization.body);
     return;
   }
 
-const result = await runLlmPatchFlow({ task, repoPath, dryRun: true, hostedContext });
+const result = await runLlmPatchFlow({
+  task,
+  repoPath,
+  dryRun: true,
+  hostedContext,
+  userOpenAiKey,
+});
 if (!result.ok) {
   res.status(500).json(result);
   return;
@@ -1261,7 +1309,8 @@ res.json({
     decisionMode:
       result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
     confidence,
-    creditsUsed: 0.1,
+    creditsUsed: 1,
+    isByok,
   });
 });
 
@@ -1272,6 +1321,8 @@ app.post("/api/apply", async (req, res) => {
 });
 
 app.post("/api/enhance-task", async (req, res) => {
+  const userOpenAiKey = req.headers["x-user-openai-key"] as string | undefined;
+  const isByok = Boolean(userOpenAiKey);
   if (shouldProxyHostedRequest(req, "/api/enhance-task")) {
     const { role, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1298,7 +1349,14 @@ app.post("/api/enhance-task", async (req, res) => {
   }
 
   try {
-    const result = await enhanceTask({ task, role, repoPath, hostedContext });
+    const result = await enhanceTask({
+      task,
+      role,
+      repoPath,
+      hostedContext,
+      userOpenAiKey,
+      isByok,
+    });
     res
       .type("application/json")
       .send(JSON.stringify({ ok: true, enhancedTask: result }));
@@ -1311,6 +1369,8 @@ app.post("/api/enhance-task", async (req, res) => {
 });
 
 app.post("/api/test-engineer", async (req, res) => {
+const userOpenAiKey = req.headers["x-user-openai-key"] as string | undefined;
+  const isByok = Boolean(userOpenAiKey);
 if (shouldProxyHostedRequest(req, "/api/test-engineer")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1333,7 +1393,7 @@ const { task, repoPath, runId, userId, hostedContext } = req.body;
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
     return;
   }
-const authorization = await ensureRunAuthorized(userId);  if (!authorization.allowed) {
+const authorization = await ensureRunAuthorized(userId, isByok);  if (!authorization.allowed) {
     res.status(authorization.status).json(authorization.body);
     return;
   }
@@ -1343,6 +1403,7 @@ const result = await runTestEngineerFlow({
   repoPath,
   onProgress: (stage) => emitProgress(runId, stage),
   hostedContext,
+  userOpenAiKey,
 });
 
 // 1. ÖNCE reason mapping (!ok ise)
@@ -1383,7 +1444,8 @@ queueRunLog({
     result.confidence
   ),
   confidence: result.confidence,
-  creditsUsed: 0.08,
+  creditsUsed: 1,
+  isByok,
 });
     }
   } catch (err) {
@@ -1396,6 +1458,8 @@ queueRunLog({
 });
 
 app.post("/api/data-analyst", async (req, res) => {
+const userOpenAiKey = req.headers["x-user-openai-key"] as string | undefined;
+  const isByok = Boolean(userOpenAiKey);
 if (shouldProxyHostedRequest(req, "/api/data-analyst")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1417,7 +1481,7 @@ const { task, repoPath, runId, userId, hostedContext } = req.body;
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
     return;
   }
-const authorization = await ensureRunAuthorized(userId);  if (!authorization.allowed) {
+const authorization = await ensureRunAuthorized(userId, isByok);  if (!authorization.allowed) {
     res.status(authorization.status).json(authorization.body);
     return;
   }
@@ -1427,6 +1491,7 @@ const result = await runDataAnalystFlow({
   repoPath,
   onProgress: (stage) => emitProgress(runId, stage),
   hostedContext,
+  userOpenAiKey,
 });
     if (result.ok && result.applyPatches) {
       const validation = validateLlmOutput(
@@ -1464,7 +1529,8 @@ const result = await runDataAnalystFlow({
     result.confidence
   ),
   confidence: result.confidence,
-  creditsUsed: 0.06,
+  creditsUsed: 1,
+  isByok,
 });
     }
   } catch (err) {
@@ -1476,6 +1542,8 @@ const result = await runDataAnalystFlow({
   }
 });
 
+app.use(express.static(zoneUiDir));
+
 export async function startServer(port = 3000): Promise<void> {
   if (startPromise) {
     return startPromise;
@@ -1484,7 +1552,7 @@ export async function startServer(port = 3000): Promise<void> {
   startedPort = port;
   logStartupDiagnostics();
   startPromise = new Promise<void>((resolve) => {
-app.listen(port, "0.0.0.0", () => {
+    app.listen(port, () => {
       console.log(
         colorize(`Zone UI running on http://localhost:${port}`, c.green, c.bold)
       );

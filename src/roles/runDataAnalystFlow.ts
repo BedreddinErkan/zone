@@ -134,6 +134,7 @@ export async function runDataAnalystFlow(input: {
   repoPath: string;
   onProgress?: (stage: string) => void;
   hostedContext?: HostedDataAnalystContextInput;
+  userOpenAiKey?: string;
 }): Promise<DataAnalystFlowResult> {
   let allFiles: RepoFile[];
   try {
@@ -193,7 +194,7 @@ export async function runDataAnalystFlow(input: {
   });
 
   input.onProgress?.("Generating patch...");
-  const client = createOpenAIClient();
+  const client = createOpenAIClient(input.userOpenAiKey);
   const model = getModelName();
 
   const retryResult = await withSelfHealingRetry({

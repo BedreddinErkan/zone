@@ -75,8 +75,9 @@ export async function planFullPatchWithLlm(input: {
   taskIntent?: string;
   relevantFiles?: Array<{ path: string; content?: string }>;
   existingTargetFiles?: string[];
+  userOpenAiKey?: string;
 }): Promise<FullPatchResult> {
-  const client = createOpenAIClient();
+  const client = createOpenAIClient(input.userOpenAiKey);
   const model = getModelName("high");
   const outputMode: FullPatchOutputMode =
     input.fileContent.length > LARGE_FILE_PATCH_THRESHOLD

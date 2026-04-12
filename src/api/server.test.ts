@@ -467,7 +467,7 @@ export function LoginForm() {
           repo_path: "C:/repo",
           decision: "safe_to_apply",
           confidence: 74,
-          credits_used: 0.1,
+          credits_used: 1,
         })
       );
       expect(supabaseRpcMock).toHaveBeenCalledWith(
@@ -528,7 +528,7 @@ it("logs successful developer runs to Supabase when env is configured", async ()
         repo_path: "C:/repo",
         decision: "safe_to_apply",
         confidence: 78,
-        credits_used: 0.1,
+        credits_used: 1,
       });
       expect(supabaseRpcMock).toHaveBeenCalledWith(
         "deduct_credits_and_increment_runs",
@@ -604,7 +604,7 @@ it("logs successful developer runs to Supabase when env is configured", async ()
           role: "data_analyst",
           decision: "preview_only",
           confidence: 62,
-          credits_used: 0.06,
+          credits_used: 1,
         })
       );
       expect(supabaseRpcMock).toHaveBeenCalledWith(
@@ -1206,7 +1206,7 @@ it("logs successful developer runs to Supabase when env is configured", async ()
     expect(body).toEqual({
       ok: false,
       reason: "no_free_runs",
-      message: "You've used all 1000 monthly runs. Resets next month.",
+      message: "You've used all 250 monthly runs. Resets next month.",
     });
   });
 
@@ -1231,7 +1231,7 @@ it("logs successful developer runs to Supabase when env is configured", async ()
     expect(body).toEqual({
       ok: true,
       plan: "Pro",
-      credits: 988,
+      credits: 238,
       subscriptionStatus: "pro",
     });
   });
