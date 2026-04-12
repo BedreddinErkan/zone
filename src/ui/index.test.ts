@@ -38,6 +38,23 @@ class MockClassList {
     for (const name of names) this.classes.delete(name);
   }
 
+  toggle(name: string, force?: boolean): boolean {
+    if (force === true) {
+      this.classes.add(name);
+      return true;
+    }
+    if (force === false) {
+      this.classes.delete(name);
+      return false;
+    }
+    if (this.classes.has(name)) {
+      this.classes.delete(name);
+      return false;
+    }
+    this.classes.add(name);
+    return true;
+  }
+
   contains(name: string): boolean {
     return this.classes.has(name);
   }
@@ -1494,7 +1511,9 @@ describe("UI billing summary", () => {
     expect(elements.get("billingSummaryLabel").textContent).toBe(
       "⚡ Pro 18 runs remaining this month"
     );
-    expect(elements.get("billingSummaryMeta").textContent).toBe("1000 runs / month");
+    expect(elements.get("billingSummaryMeta").textContent).toBe(
+      "250 Hosted Runs + Unlimited BYOK / month"
+    );
   });
 
   it("shows the upgrade CTA immediately when billing summary resolves to free with zero runs", async () => {

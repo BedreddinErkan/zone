@@ -6,6 +6,13 @@ import { planFeatureWithLlm } from "../llm/planFeature.js";
 import { planPatchPreviewWithLlm } from "../llm/planPatchPreview.js";
 import { planFullPatchWithLlm } from "../llm/planFullPatch.js";
 import { computeRiskScore } from "./computeRiskScore.js";
+import {
+  detectIntentMismatch,
+  type IntentMismatchReasonCode,
+} from "../engine/intentMismatchDetector.js";
+import { scorePatchQuality } from "../engine/patchQualityScorer.js";
+import { resolveSafetyLevel } from "../engine/safetyLevelResolver.js";
+import { enforceMicroEditProtection } from "../engine/microEditProtection.js";
 import { parseTaskIntent, type TaskIntent } from "./taskIntentParser.js";
 import type { RepoFile } from "../types/project.js";
 
@@ -22,6 +29,35 @@ export type LlmPatchFlowResult =
           schema: number;
           massScope: number;
         };
+      };
+      intentMismatch?: {
+        hasMismatch: boolean;
+        severity: "none" | "low" | "medium" | "high";
+        reasonCodes: IntentMismatchReasonCode[];
+        warnings: string[];
+      };
+      patchQuality?: {
+        qualityScore: number;
+        qualityWarnings: string[];
+        patchSizeScore: number;
+        structurePreservationScore: number;
+        designSystemComplianceScore: number;
+        semanticAlignmentScore: number;
+      };
+      safetyResolution?: {
+        safetyLevel:
+          | "safe_auto_apply"
+          | "safe_with_review"
+          | "preview_only"
+          | "high_risk_blocked";
+        safetyReasons: string[];
+        confidenceAdjusted?: number;
+      };
+      microEditProtection?: {
+        isViolation: boolean;
+        violationReasons: string[];
+        shouldForcePreview: boolean;
+        shouldDowngradeSafety: boolean;
       };
       decisionMode?: "preview_only" | "safe_to_apply";
       applyPatches: Array<{ filePath: string; fullContent: string }>;
@@ -643,14 +679,18 @@ export function evaluateIntentPatchMismatch(input: {
       destructive: number;
       schema: number;
       massScope: number;
+      };
     };
-  };
-} {
-  const microEditIntent = detectMicroEditIntent(input.task);
-  if (!microEditIntent) {
-    return {
-      suspicious: false,
-      warnings: [],
+  } {
+  const mismatch = detectIntentMismatch({
+    taskIntent: detectMicroEditIntent(input.task) ? "micro_edit" : "standard",
+    patchScope: input.patchScope,
+  });
+
+  if (!mismatch.hasMismatch) {
+      return {
+        suspicious: false,
+        warnings: [],
       risk: {
         score: 0,
         breakdown: {
@@ -658,33 +698,12 @@ export function evaluateIntentPatchMismatch(input: {
           schema: 0,
           massScope: 0,
         },
-      },
-    };
-  }
-
-  const oversized =
-    input.patchScope.changedFileCount > 1 ||
-    input.patchScope.totalChangedLines > 30 ||
-    input.patchScope.rewriteLikeSuspicion ||
-    input.patchScope.cssRewriteSuspicion;
-
-  if (!oversized) {
-    return {
-      suspicious: false,
-      warnings: [],
-      risk: {
-        score: 0,
-        breakdown: {
-          destructive: 0,
-          schema: 0,
-          massScope: 0,
         },
-      },
-    };
-  }
+      };
+    }
 
-  let massScope = 35;
-  if (input.patchScope.changedFileCount > 1) {
+    let massScope = 35;
+    if (input.patchScope.changedFileCount > 1) {
     massScope = Math.max(massScope, 45);
   }
   if (input.patchScope.totalChangedLines > 30) {
@@ -694,21 +713,16 @@ export function evaluateIntentPatchMismatch(input: {
     massScope = Math.max(massScope, 60);
   }
   if (input.patchScope.rewriteLikeSuspicion) {
-    massScope = Math.max(massScope, 65);
-  }
+      massScope = Math.max(massScope, 65);
+    }
 
-  const warnings = ["Micro-edit task produced a larger-than-expected patch."];
-  if (input.patchScope.cssRewriteSuspicion) {
-    warnings.push("CSS patch scope is too large for a spacing-only request.");
-  }
-
-  return {
-    suspicious: true,
-    confidenceCap: 55,
-    warnings,
-    risk: {
-      score: massScope,
-      breakdown: {
+    return {
+      suspicious: true,
+      confidenceCap: mismatch.confidenceCap,
+      warnings: mismatch.warnings,
+      risk: {
+        score: massScope,
+        breakdown: {
         destructive: 0,
         schema: 0,
         massScope,
@@ -2011,9 +2025,28 @@ export async function runLlmPatchFlow(input: {
     applyPatches,
     originalContents,
   });
+  const normalizedIntent = detectMicroEditIntent(input.task)
+    ? "micro_edit"
+    : "standard";
+  const intentMismatchDecision = detectIntentMismatch({
+    taskIntent: normalizedIntent,
+    patchScope,
+  });
   const intentMismatch = evaluateIntentPatchMismatch({
     task: input.task,
     patchScope,
+  });
+  const patchQuality = scorePatchQuality({
+    taskIntent: normalizedIntent,
+    patchScope,
+    validationWarnings: visibleWarnings,
+    intentMismatch: intentMismatchDecision,
+  });
+  const microEditProtection = enforceMicroEditProtection({
+    taskIntent: normalizedIntent,
+    patchScope,
+    intentMismatch: intentMismatchDecision,
+    patchQuality,
   });
   const uiMappingRisk = evaluateUiMappingRisk({
     task: input.task,
@@ -2050,7 +2083,9 @@ export async function runLlmPatchFlow(input: {
     vagueTask,
   });
   const confidenceCaps = [
-    intentMismatch.confidenceCap,
+    intentMismatchDecision.severity === "medium"
+      ? intentMismatchDecision.confidenceCap
+      : undefined,
     uiMappingRisk.confidenceCap,
   ].filter((value): value is number => typeof value === "number");
   const developerConfidence =
@@ -2092,18 +2127,46 @@ const fileDiffs = applyPatches.map((patch) => {
       ),
     },
   };
+  if (microEditProtection.isViolation) {
+    internalWarnings.push(...microEditProtection.violationReasons);
+    visibleWarnings.push(...microEditProtection.violationReasons);
+  }
 
 const hasBlockedPatch = patchResults.some(r => r.status === "failed" && r.reason === "developer_validation_blocked");
 
 const decisionMode =
   hasBlockedPatch ||
   vagueTask ||
-  intentMismatch.suspicious ||
+  microEditProtection.shouldForcePreview ||
+  intentMismatchDecision.forcePreviewOnly ||
   uiMappingRisk.forcePreviewOnly ||
   developerConfidence < 70 ||
   taskRiskResult.score >= 31
     ? "preview_only"
     : "safe_to_apply";
+  const safetyResolution = resolveSafetyLevel({
+    hasBlockedPatch,
+    developerConfidence,
+    decisionMode,
+    developerRiskScore: mergedDeveloperRisk.score,
+    intentMismatch: {
+      hasMismatch: intentMismatchDecision.hasMismatch,
+      severity: intentMismatchDecision.severity,
+    },
+    patchQuality,
+  });
+  const finalSafetyResolution =
+    microEditProtection.shouldDowngradeSafety &&
+    safetyResolution.safetyLevel !== "high_risk_blocked"
+      ? {
+          ...safetyResolution,
+          safetyLevel: "preview_only" as const,
+          safetyReasons: [
+            ...safetyResolution.safetyReasons,
+            ...microEditProtection.violationReasons,
+          ],
+        }
+      : safetyResolution;
 
   // 7. Build patchPreview string
   const patchPreview = [
@@ -2137,6 +2200,15 @@ const decisionMode =
     warnings: visibleWarnings,
     developerConfidence,
     developerRisk: mergedDeveloperRisk,
+    intentMismatch: {
+      hasMismatch: intentMismatchDecision.hasMismatch,
+      severity: intentMismatchDecision.severity,
+      reasonCodes: intentMismatchDecision.reasonCodes,
+      warnings: intentMismatchDecision.warnings,
+    },
+    patchQuality,
+    safetyResolution: finalSafetyResolution,
+    microEditProtection,
     decisionMode,
     applyPatches,
     patchResults,

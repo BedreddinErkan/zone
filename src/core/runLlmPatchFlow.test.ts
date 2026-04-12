@@ -472,7 +472,42 @@ describe("runLlmPatchFlow", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.decisionMode).toBe("preview_only");
-      expect(result.developerConfidence).toBeLessThanOrEqual(60);
+      expect(result.intentMismatch).toEqual(
+        expect.objectContaining({
+          hasMismatch: true,
+          severity: "high",
+          reasonCodes: expect.arrayContaining([
+            "LARGE_REWRITE",
+            "STRUCTURAL_LAYOUT_CHANGE",
+            "MASSIVE_STYLE_INJECTION",
+          ]),
+        })
+      );
+      expect(result.patchQuality).toEqual(
+        expect.objectContaining({
+          qualityScore: expect.any(Number),
+          semanticAlignmentScore: expect.any(Number),
+        })
+      );
+      expect(result.microEditProtection).toEqual(
+        expect.objectContaining({
+          isViolation: true,
+          shouldForcePreview: true,
+          violationReasons: expect.arrayContaining([
+            "Micro-edit patch expanded into a large rewrite.",
+            "Micro-edit patch introduced structural change.",
+          ]),
+        })
+      );
+      expect(result.safetyResolution).toEqual(
+        expect.objectContaining({
+          safetyLevel: "preview_only",
+          safetyReasons: expect.arrayContaining([
+            "Intent mismatch requires manual preview.",
+          ]),
+        })
+      );
+      expect(result.patchQuality?.qualityScore).toBeLessThan(80);
       expect(result.developerRisk?.score).toBeGreaterThan(0);
       expect(result.developerRisk?.breakdown.massScope).toBeGreaterThan(0);
       expect(result.warnings).toContain(
@@ -480,6 +515,238 @@ describe("runLlmPatchFlow", () => {
       );
       expect(result.warnings).toContain(
         "CSS patch scope is too large for a spacing-only request."
+      );
+    }
+  });
+
+  it("caps confidence for medium severity intent mismatch without adding a new hard block rule", async () => {
+    const files = [
+      buildRepoFile("src/components/Header.tsx", "frontend"),
+      buildRepoFile("src/components/Footer.tsx", "frontend"),
+    ];
+    const originalContent = [
+      "export function Header() {",
+      "  return (",
+      '    <header className="header">',
+      '      <span className="eyebrow">before</span>',
+      '      <span className="footer-copy">before</span>',
+      "    </header>",
+      "  );",
+      "}",
+    ].join("\n");
+    const updatedHeaderContent = [
+      "export function Header() {",
+      "  return (",
+      '    <header className="header">',
+      '      <span className="eyebrow">after</span>',
+      '      <span className="footer-copy">before</span>',
+      "    </header>",
+      "  );",
+      "}",
+    ].join("\n");
+    const updatedFooterContent = [
+      "export function Header() {",
+      "  return (",
+      '    <header className="header">',
+      '      <span className="eyebrow">before</span>',
+      '      <span className="footer-copy">after</span>',
+      "    </header>",
+      "  );",
+      "}",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React app"] });
+    rankRelevantFilesMock.mockReturnValue([
+      { ...files[0], score: 40 },
+      { ...files[1], score: 38 },
+    ]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Fix small copy polish",
+      steps: ["Update two labels"],
+      suggestedFiles: [
+        { path: "src/components/Header.tsx", reason: "Header copy", action: "modify" },
+        { path: "src/components/Footer.tsx", reason: "Footer copy", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, originalContent]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Adjust two labels",
+      patches: [
+        {
+          path: "src/components/Header.tsx",
+          operation: "modify",
+          summary: "Update header copy",
+          targetHint: "label text",
+          contentPreview: "after",
+        },
+        {
+          path: "src/components/Footer.tsx",
+          operation: "modify",
+          summary: "Update footer copy",
+          targetHint: "label text",
+          contentPreview: "after",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock
+      .mockResolvedValueOnce({
+        mode: "full_content",
+        summary: "Generated content",
+        warnings: [],
+        filePath: "src/components/Header.tsx",
+        fullContent: updatedHeaderContent,
+      })
+      .mockResolvedValueOnce({
+        mode: "full_content",
+        summary: "Generated content",
+        warnings: [],
+        filePath: "src/components/Footer.tsx",
+        fullContent: updatedFooterContent,
+      });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "fix small copy typo in the header label",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.intentMismatch).toEqual(
+        expect.objectContaining({
+          hasMismatch: true,
+          severity: "medium",
+          reasonCodes: expect.arrayContaining(["MULTI_FILE_EXPANSION"]),
+        })
+      );
+      expect(result.patchQuality).toEqual(
+        expect.objectContaining({
+          qualityScore: expect.any(Number),
+          semanticAlignmentScore: 70,
+        })
+      );
+      expect(result.microEditProtection).toEqual(
+        expect.objectContaining({
+          isViolation: true,
+          shouldForcePreview: true,
+          violationReasons: expect.arrayContaining([
+            "Micro-edit patch changed multiple files.",
+          ]),
+        })
+      );
+      expect(result.safetyResolution).toEqual(
+        expect.objectContaining({
+          safetyLevel: "preview_only",
+          safetyReasons: expect.arrayContaining([
+            "Intent mismatch requires manual preview.",
+          ]),
+        })
+      );
+      expect(result.developerConfidence).toBe(55);
+      expect(result.warnings).toContain(
+        "Micro-edit task produced a larger-than-expected patch."
+      );
+    }
+  });
+
+  it("keeps normal flow unchanged when there is no intent mismatch", async () => {
+    const files = [buildRepoFile("src/components/Banner.tsx", "frontend")];
+    const originalContent = [
+      "export function Banner() {",
+      "  return (",
+      '    <section className="banner">',
+      '      <span className="eyebrow">before</span>',
+      '      <strong>Welcome</strong>',
+      "    </section>",
+      "  );",
+      "}",
+    ].join("\n");
+    const updatedContent = [
+      "export function Banner() {",
+      "  return (",
+      '    <section className="banner">',
+      '      <span className="eyebrow">after</span>',
+      '      <strong>Welcome</strong>',
+      "    </section>",
+      "  );",
+      "}",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React app"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 33 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Fix one small copy string",
+      steps: ["Update single string"],
+      suggestedFiles: [
+        { path: "src/components/Banner.tsx", reason: "Banner copy", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, originalContent]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Adjust banner text",
+      patches: [
+        {
+          path: "src/components/Banner.tsx",
+          operation: "modify",
+          summary: "Update banner copy",
+          targetHint: "banner text",
+          contentPreview: "after",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      summary: "Generated content",
+      warnings: [],
+      filePath: "src/components/Banner.tsx",
+      fullContent: updatedContent,
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "fix copy typo in the banner text",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.intentMismatch).toEqual({
+        hasMismatch: false,
+        severity: "none",
+        reasonCodes: [],
+        warnings: [],
+      });
+      expect(result.patchQuality).toEqual(
+        expect.objectContaining({
+          qualityScore: expect.any(Number),
+          qualityWarnings: [],
+        })
+      );
+      expect(result.microEditProtection).toEqual({
+        isViolation: false,
+        violationReasons: [],
+        shouldForcePreview: false,
+        shouldDowngradeSafety: false,
+      });
+      expect(result.safetyResolution).toEqual(
+        expect.objectContaining({
+          safetyLevel: "safe_auto_apply",
+        })
+      );
+      expect(result.patchQuality?.qualityScore).toBeGreaterThanOrEqual(90);
+      expect(result.decisionMode).toBe("safe_to_apply");
+      expect(result.warnings).not.toContain(
+        "Micro-edit task produced a larger-than-expected patch."
       );
     }
   });
