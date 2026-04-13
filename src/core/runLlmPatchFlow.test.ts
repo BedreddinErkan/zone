@@ -1241,6 +1241,73 @@ describe("runLlmPatchFlow", () => {
     }
   });
 
+  it("keeps real destructive changes elevated and explains them with actual signals only", async () => {
+    const files = [buildRepoFile("src/admin/users.ts", "backend")];
+    const originalContent = [
+      "export async function removeDormantUser(userId: string) {",
+      "  return archiveUser(userId);",
+      "}",
+    ].join("\n");
+    const updatedContent = [
+      "export async function removeDormantUser(userId: string) {",
+      "  return deleteUser(userId);",
+      "}",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["Admin backend"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 36 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Delete all dormant users and auth tokens",
+      steps: ["Replace archive path with permanent deletion"],
+      suggestedFiles: [
+        { path: "src/admin/users.ts", reason: "User deletion flow", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, originalContent]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Delete all dormant users instead of archiving them",
+      patches: [
+        {
+          path: "src/admin/users.ts",
+          operation: "modify",
+          summary: "Switch archive call to permanent delete call",
+          targetHint: "user removal helper",
+          contentPreview: "deleteUser(userId)",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      summary: "Generated content",
+      warnings: [],
+      filePath: "src/admin/users.ts",
+      fullContent: updatedContent,
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "delete all dormant users and auth tokens from the production admin panel",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.developerRisk?.score).toBeGreaterThanOrEqual(71);
+      expect(result.developerRisk?.breakdown.destructive).toBeGreaterThan(0);
+      expect(result.developerRisk?.breakdown.schema).toBe(0);
+      expect(result.developerRisk?.breakdown.massScope).toBeGreaterThan(0);
+      expect(result.safetyResolution?.safetyLevel).toBe("high_risk_blocked");
+      expect(result.warnings.join("\n")).toContain("destructive");
+      expect(result.warnings.join("\n")).toContain("mass_scope");
+      expect(result.warnings.join("\n")).not.toContain("schema");
+    }
+  });
+
   it("rejects invalid full-file scaffold output that is not patch-style", async () => {
     const files = [buildRepoFile("src/pages/home.html", "frontend")];
 

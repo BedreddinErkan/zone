@@ -713,35 +713,62 @@ function softenTaskRiskForLocalizedPatch(input: {
   };
 }
 
-function formatRiskSignals(signals: string[]): string {
-  return signals.join(", ");
+function formatDeveloperRiskSignals(input: {
+  breakdown: {
+    destructive: number;
+    schema: number;
+    massScope: number;
+  };
+}): string[] {
+  const signals: string[] = [];
+
+  if (input.breakdown.destructive > 0) signals.push("destructive");
+  if (input.breakdown.schema > 0) signals.push("schema");
+  if (input.breakdown.massScope > 0) signals.push("mass_scope");
+
+  return signals;
 }
 
-function syncTaskRiskWarnings(input: {
+function syncDeveloperRiskWarnings(input: {
   warnings: string[];
-  taskRiskResult: TaskRiskResult;
+  developerRisk: {
+    score: number;
+    breakdown: {
+      destructive: number;
+      schema: number;
+      massScope: number;
+    };
+  };
 }): string[] {
   const withoutTaskRiskWarnings = input.warnings.filter(
     (warning) =>
       !warning.startsWith("[HIGH_RISK] Task risk score") &&
-      !warning.startsWith("[ELEVATED_RISK] Task risk score")
+      !warning.startsWith("[ELEVATED_RISK] Task risk score") &&
+      !warning.startsWith("[HIGH_RISK] Risk signals detected:") &&
+      !warning.startsWith("[ELEVATED_RISK] Risk signals detected:")
   );
 
-  if (input.taskRiskResult.score >= 71) {
+  const riskSignals = formatDeveloperRiskSignals({
+    breakdown: input.developerRisk.breakdown,
+  });
+
+  if (riskSignals.length === 0) {
+    return withoutTaskRiskWarnings;
+  }
+
+  if (input.developerRisk.score >= 71) {
     return [
       ...withoutTaskRiskWarnings,
-      `[HIGH_RISK] Task risk score ${input.taskRiskResult.score} - detected: ${formatRiskSignals(
-        input.taskRiskResult.signals
+      `[HIGH_RISK] Risk signals detected: ${riskSignals.join(
+        ", "
       )}. Review carefully before applying.`,
     ];
   }
 
-  if (input.taskRiskResult.score >= 31) {
+  if (input.developerRisk.score >= 31) {
     return [
       ...withoutTaskRiskWarnings,
-      `[ELEVATED_RISK] Task risk score ${input.taskRiskResult.score} - detected: ${formatRiskSignals(
-        input.taskRiskResult.signals
-      )}.`,
+      `[ELEVATED_RISK] Risk signals detected: ${riskSignals.join(", ")}.`,
     ];
   }
 
@@ -2237,14 +2264,16 @@ export async function runLlmPatchFlow(input: {
       );
     }
 
-  const syncedInternalWarnings = syncTaskRiskWarnings({
-    warnings: internalWarnings,
-    taskRiskResult: effectiveTaskRiskResult,
-  });
-  const syncedVisibleWarnings = syncTaskRiskWarnings({
-    warnings: visibleWarnings,
-    taskRiskResult: effectiveTaskRiskResult,
-  });
+  let syncedInternalWarnings = internalWarnings.filter(
+    (warning) =>
+      !warning.startsWith("[HIGH_RISK] Task risk score") &&
+      !warning.startsWith("[ELEVATED_RISK] Task risk score")
+  );
+  let syncedVisibleWarnings = visibleWarnings.filter(
+    (warning) =>
+      !warning.startsWith("[HIGH_RISK] Task risk score") &&
+      !warning.startsWith("[ELEVATED_RISK] Task risk score")
+  );
 
     const developerConfidenceBase = calculateDeveloperConfidence({
       warnings: syncedInternalWarnings,
@@ -2289,15 +2318,18 @@ const fileDiffs = applyPatches.map((patch) => {
       breakdown: {
         destructive: Math.max(
           intentMismatch.risk.breakdown.destructive,
-        uiMappingRisk.risk.breakdown.destructive
+          uiMappingRisk.risk.breakdown.destructive,
+          effectiveTaskRiskResult.breakdown.destructive
       ),
       schema: Math.max(
         intentMismatch.risk.breakdown.schema,
-        uiMappingRisk.risk.breakdown.schema
+          uiMappingRisk.risk.breakdown.schema,
+          effectiveTaskRiskResult.breakdown.schema
       ),
       massScope: Math.max(
         intentMismatch.risk.breakdown.massScope,
-        uiMappingRisk.risk.breakdown.massScope
+          uiMappingRisk.risk.breakdown.massScope,
+          effectiveTaskRiskResult.breakdown.massScope
       ),
     },
   };
@@ -2318,6 +2350,14 @@ const finalDeveloperRisk = {
   ...mergedDeveloperRisk,
   score: finalDeveloperRiskScore,
 };
+syncedInternalWarnings = syncDeveloperRiskWarnings({
+  warnings: syncedInternalWarnings,
+  developerRisk: finalDeveloperRisk,
+});
+syncedVisibleWarnings = syncDeveloperRiskWarnings({
+  warnings: syncedVisibleWarnings,
+  developerRisk: finalDeveloperRisk,
+});
 
 const decisionMode =
   hasBlockedPatch ||
