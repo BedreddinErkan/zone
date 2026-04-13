@@ -1166,6 +1166,84 @@ describe("runLlmPatchFlow", () => {
     }
   });
 
+  it("does not inflate tiny badge additions from harmless cleanup wording", async () => {
+    const files = [buildRepoFile("src/components/Header.tsx", "frontend")];
+    const originalContent = [
+      "export function Header() {",
+      "  return (",
+      '    <header className="header">',
+      '      <h1 className="title">Zone</h1>',
+      "    </header>",
+      "  );",
+      "}",
+    ].join("\n");
+    const updatedContent = [
+      "export function Header() {",
+      "  return (",
+      '    <header className="header">',
+      '      <h1 className="title">Zone <span className="badge">New</span></h1>',
+      "    </header>",
+      "  );",
+      "}",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React UI"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 28 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Clean up the header card with a tiny badge",
+      steps: ["Add one small badge element"],
+      suggestedFiles: [
+        { path: "src/components/Header.tsx", reason: "Header component", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, originalContent]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Add a tiny badge to the relevant header title",
+      patches: [
+        {
+          path: "src/components/Header.tsx",
+          operation: "modify",
+          summary: "Add one small badge element",
+          targetHint: "header title",
+          contentPreview: "badge",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      summary: "Generated content",
+      warnings: [],
+      filePath: "src/components/Header.tsx",
+      fullContent: updatedContent,
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "clean up every header card by adding a tiny new badge to the title",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.developerRisk).toEqual({
+        score: 0,
+        breakdown: {
+          destructive: 0,
+          schema: 0,
+          massScope: 0,
+        },
+      });
+      expect(result.warnings.join("\n")).not.toContain("destructive");
+      expect(result.warnings.join("\n")).not.toContain("mass_scope");
+      expect(result.safetyResolution?.safetyLevel).toBe("safe_auto_apply");
+    }
+  });
+
   it("keeps a tiny one-file text tweak out of high_risk_blocked", async () => {
     const files = [buildRepoFile("src/components/Hero.tsx", "frontend")];
     const originalContent = [

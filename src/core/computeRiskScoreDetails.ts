@@ -14,6 +14,36 @@ function includesAny(text: string, keywords: string[]): boolean {
   return keywords.some((keyword) => text.includes(keyword));
 }
 
+function hasContextualSoftDestructiveSignal(text: string): boolean {
+  const softDestructiveKeywords = ["clear", "reset", "clean"];
+  const destructiveObjectKeywords = [
+    "cache",
+    "session",
+    "sessions",
+    "token",
+    "tokens",
+    "database",
+    "db",
+    "table",
+    "tables",
+    "record",
+    "records",
+    "row",
+    "rows",
+    "data",
+    "user",
+    "users",
+    "storage",
+    "queue",
+    "queues",
+  ];
+
+  return (
+    includesAny(text, softDestructiveKeywords) &&
+    includesAny(text, destructiveObjectKeywords)
+  );
+}
+
 function scoreWeightedKeywordMatches(
   text: string,
   weightedKeywords: Array<{ keywords: string[]; weight: number }>
@@ -44,20 +74,19 @@ export function computeRiskScoreDetails(
 ): RiskScoreDetails {
   const normalizedTask = input.task.trim().toLowerCase();
 
-  const destructiveWeight = scoreWeightedKeywordMatches(normalizedTask, [
-    {
-      keywords: ["truncate", "drop table", "delete all", "wipe", "purge"],
-      weight: 1.0,
-    },
-    {
-      keywords: ["delete", "remove", "destroy", "drop"],
-      weight: 0.7,
-    },
-    {
-      keywords: ["clear", "reset", "clean"],
-      weight: 0.4,
-    },
-  ]);
+  const destructiveWeight = Math.max(
+    scoreWeightedKeywordMatches(normalizedTask, [
+      {
+        keywords: ["truncate", "drop table", "delete all", "wipe", "purge"],
+        weight: 1.0,
+      },
+      {
+        keywords: ["delete", "remove", "destroy", "drop"],
+        weight: 0.7,
+      },
+    ]),
+    hasContextualSoftDestructiveSignal(normalizedTask) ? 0.4 : 0
+  );
 
   const schemaHighWeightKeywords = [
     "migration",

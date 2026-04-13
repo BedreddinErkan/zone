@@ -66,6 +66,17 @@ describe("computeRiskScore", () => {
     expect(result.breakdown.massScope).toBe(40);
   });
 
+  it("does not treat UI cleanup wording as destructive or mass_scope", () => {
+    const result = computeRiskScore(
+      "clean up every card by adding a tiny new badge to the header"
+    );
+
+    expect(result.signals).not.toContain("destructive");
+    expect(result.signals).not.toContain("mass_scope");
+    expect(result.breakdown.destructive).toBe(0);
+    expect(result.breakdown.massScope).toBe(0);
+  });
+
   it("stacks destructive + mass_scope for 'delete all user sessions' with compound penalty", () => {
     const result = computeRiskScore("delete all user sessions");
 
