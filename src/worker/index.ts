@@ -9,7 +9,7 @@ import {
   updateDeveloperPatchJobProgress,
   type DeveloperPatchJobRecord,
 } from "../jobs/developerPatchJobs.js";
-import { queueRunLog } from "../api/runLogging.js";
+import { logRun } from "../api/runLogging.js";
 
 const IDLE_DELAY_MS = 1500;
 
@@ -95,18 +95,12 @@ async function processDeveloperPatchJob(
       return;
     }
 
-    await markDeveloperPatchJobCompleted(
-      supabase,
-      job.id,
-      result as unknown as Record<string, unknown>
-    );
-
     const confidence =
       typeof result.developerConfidence === "number"
         ? result.developerConfidence
         : 0;
 
-    queueRunLog({
+    const conversationId = await logRun({
       userId: requestPayload.userId,
       role: "developer",
       task: requestPayload.task,
@@ -117,8 +111,20 @@ async function processDeveloperPatchJob(
       ),
       confidence,
       creditsUsed: 1,
+      conversationId: requestPayload.conversationId,
+      billingMode: requestPayload.billingMode,
       isByok: requestPayload.isByok,
-    });
+    }).catch(() => null);
+
+    if (conversationId) {
+      (result as Record<string, unknown>).conversationId = conversationId;
+    }
+
+    await markDeveloperPatchJobCompleted(
+      supabase,
+      job.id,
+      result as unknown as Record<string, unknown>
+    );
   } catch (error) {
     await markDeveloperPatchJobFailed(
       supabase,

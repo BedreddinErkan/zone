@@ -14,6 +14,7 @@ import {
   type DetectedDataSchema,
 } from "./detectDataSchema.js";
 import { buildDataAnalystPrompt } from "../prompts/dataAnalystPrompt.js";
+import type { ConversationBillingMode } from "../types/conversation.js";
 import type { RepoFile } from "../types/project.js";
 
 export type DataAnalystFlowResult =
@@ -132,6 +133,8 @@ type HostedDataAnalystContextInput = {
 export async function runDataAnalystFlow(input: {
   task: string;
   repoPath: string;
+  conversationId?: string;
+  billingMode?: ConversationBillingMode;
   onProgress?: (stage: string) => void;
   hostedContext?: HostedDataAnalystContextInput;
   userOpenAiKey?: string;

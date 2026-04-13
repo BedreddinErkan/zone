@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { ConversationBillingMode } from "../types/conversation.js";
 
 export type DeveloperPatchJobStatus =
   | "queued"
@@ -11,6 +12,8 @@ export type DeveloperPatchJobRequestPayload = {
   task: string;
   repoPath: string;
   userId: string;
+  conversationId?: string;
+  billingMode?: ConversationBillingMode;
   hostedContext?: unknown;
   userOpenAiKey?: string;
   isByok?: boolean;

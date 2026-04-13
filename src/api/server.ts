@@ -42,7 +42,7 @@ import { validateLlmOutput } from "../core/validateLlmOutput.js";
 import lemonWebhookRouter from "../routes/lemonsqueezyWebhook.js";
 import createLemonCheckoutRouter from "../routes/createLemonCheckout.js";
 import customerPortalRouter from "../routes/getLemonCustomerPortal.js";
-import { queueRunLog } from "./runLogging.js";
+import { logRun } from "./runLogging.js";
 import {
   createDeveloperPatchJob,
   getDeveloperPatchJob,
@@ -834,6 +834,8 @@ async function createDeveloperPatchJobPayload(input: {
   task: string;
   repoPath: string;
   userId: string;
+  conversationId?: string;
+  billingMode?: "hosted" | "byok";
   hostedContext?: HostedDeveloperContextPayload;
   userOpenAiKey?: string;
   isByok: boolean;
@@ -852,6 +854,8 @@ async function createDeveloperPatchJobPayload(input: {
     task: input.task,
     repoPath: input.repoPath,
     userId: input.userId,
+    conversationId: input.conversationId,
+    billingMode: input.billingMode,
     hostedContext,
     userOpenAiKey: input.userOpenAiKey,
     isByok: input.isByok,
@@ -1033,9 +1037,10 @@ app.post("/api/analyze", async (req, res) => {
 });
 
 app.post("/api/patch/jobs", async (req, res) => {
-  const userOpenAiKey = req.headers["x-user-openai-key"] as string | undefined;
-  const isByok = Boolean(userOpenAiKey);
-  const { task, repoPath, userId, hostedContext } = req.body ?? {};
+    const userOpenAiKey = req.headers["x-user-openai-key"] as string | undefined;
+    const isByok = Boolean(userOpenAiKey);
+    const { task, repoPath, userId, hostedContext, conversationId, billingMode } =
+      req.body ?? {};
 
   if (!task || !repoPath) {
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
@@ -1059,6 +1064,8 @@ app.post("/api/patch/jobs", async (req, res) => {
       task,
       repoPath,
       userId,
+      conversationId,
+      billingMode,
       hostedContext,
       userOpenAiKey,
       isByok,
@@ -1177,7 +1184,8 @@ app.post("/api/patch", async (req, res) => {
     return;
   }
 
-  const { task, repoPath, userId, hostedContext } = req.body;
+  const { task, repoPath, userId, hostedContext, conversationId, billingMode } =
+    req.body;
 
   if (!task || !repoPath) {
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
@@ -1214,15 +1222,13 @@ if (result.ok && result.applyPatches.length > 0) {
   }
 }
 
-res.json(result);
-
   if (result.ok) {
     const confidence =
       typeof result.developerConfidence === "number"
         ? result.developerConfidence
         : 0;
 
-    queueRunLog({
+    const loggedConversationId = await logRun({
       userId,
       role: "developer",
       task,
@@ -1231,9 +1237,17 @@ res.json(result);
         result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
       confidence,
       creditsUsed: 1,
+      conversationId,
+      billingMode,
       isByok,
-    });
+    }).catch(() => null);
+
+    if (loggedConversationId) {
+      (result as Record<string, unknown>).conversationId = loggedConversationId;
+    }
   }
+
+res.json(result);
 });
 app.post("/api/dry-run", async (req, res) => {
   const userOpenAiKey = req.headers["x-user-openai-key"] as string | undefined;
@@ -1256,7 +1270,8 @@ app.post("/api/dry-run", async (req, res) => {
     return;
   }
 
-  const { task, repoPath, userId, hostedContext } = req.body;
+  const { task, repoPath, userId, hostedContext, conversationId, billingMode } =
+    req.body;
 
   const authorization = await ensureRunAuthorized(userId, isByok);
   if (!authorization.allowed) {
@@ -1298,20 +1313,20 @@ if (result.applyPatches.length > 0) {
   }
 }
 
-res.json({
+  const responseBody: Record<string, unknown> = {
   ok: true,
   fileDiffs: result.fileDiffs ?? [],
   patchPreview: result.patchPreview,
   warnings: result.warnings,
   patchResults: result.patchResults,
-});
+};
 
   const confidence =
     typeof result.developerConfidence === "number"
       ? result.developerConfidence
       : 0;
 
-  queueRunLog({
+  const loggedConversationId = await logRun({
     userId,
     role: "developer",
     task,
@@ -1320,8 +1335,16 @@ res.json({
       result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
     confidence,
     creditsUsed: 1,
+    conversationId,
+    billingMode,
     isByok,
-  });
+  }).catch(() => null);
+
+  if (loggedConversationId) {
+    responseBody.conversationId = loggedConversationId;
+  }
+
+res.json(responseBody);
 });
 
 app.post("/api/apply", async (req, res) => {
@@ -1398,7 +1421,8 @@ if (shouldProxyHostedRequest(req, "/api/test-engineer")) {
     });
     return;
   }
-const { task, repoPath, runId, userId, hostedContext } = req.body;
+const { task, repoPath, runId, userId, hostedContext, conversationId, billingMode } =
+    req.body;
   if (!task || !repoPath) {
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
     return;
@@ -1442,9 +1466,8 @@ if (result.ok && result.applyPatches) {
     (result as Record<string, unknown>).validationIssues = validation.issues;
   }
 }
-    res.json(result);
     if (result.ok) {
-queueRunLog({
+const loggedConversationId = await logRun({
   userId,
   role: "test_engineer",
   task,
@@ -1455,9 +1478,16 @@ queueRunLog({
   ),
   confidence: result.confidence,
   creditsUsed: 1,
+  conversationId,
+  billingMode,
   isByok,
-});
+}).catch(() => null);
+
+      if (loggedConversationId) {
+        (result as Record<string, unknown>).conversationId = loggedConversationId;
+      }
     }
+    res.json(result);
   } catch (err) {
     emitProgress(runId, "Ready");
     res.status(500).json({
@@ -1486,7 +1516,8 @@ if (shouldProxyHostedRequest(req, "/api/data-analyst")) {
     });
     return;
   }
-const { task, repoPath, runId, userId, hostedContext } = req.body;
+const { task, repoPath, runId, userId, hostedContext, conversationId, billingMode } =
+    req.body;
   if (!task || !repoPath) {
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
     return;
@@ -1527,9 +1558,8 @@ const result = await runDataAnalystFlow({
     if (!result.ok && typeof result.reason === "string") {
       result.reason = getDataAnalystUserFacingReason(result.reason);
     }
-    res.json(result);
     if (result.ok) {
-  queueRunLog({
+  const loggedConversationId = await logRun({
   userId,
   role: "data_analyst",
   task,
@@ -1540,9 +1570,16 @@ const result = await runDataAnalystFlow({
   ),
   confidence: result.confidence,
   creditsUsed: 1,
+  conversationId,
+  billingMode,
   isByok,
-});
+}).catch(() => null);
+
+      if (loggedConversationId) {
+        (result as Record<string, unknown>).conversationId = loggedConversationId;
+      }
     }
+    res.json(result);
   } catch (err) {
     emitProgress(runId, "Ready");
     res.status(500).json({

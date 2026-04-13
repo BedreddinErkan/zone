@@ -16,6 +16,11 @@ const scanRepoMock = vi.fn();
 const readProjectFilesMock = vi.fn();
 const responsesCreateMock = vi.fn();
 const supabaseInsertMock = vi.fn();
+const supabaseConversationInsertMock = vi.fn();
+const supabaseConversationCreateSingleMock = vi.fn();
+const supabaseConversationMaybeSingleMock = vi.fn();
+const supabaseConversationUpdateMock = vi.fn();
+const supabaseConversationUpdateSingleMock = vi.fn();
 const supabaseRpcMock = vi.fn();
 const createDeveloperPatchJobMock = vi.fn();
 const getDeveloperPatchJobMock = vi.fn();
@@ -30,6 +35,17 @@ const supabaseFromMock = vi.fn((table: string) => {
   if (table === "profiles") {
     return {
       select: supabaseSelectMock,
+    };
+  }
+  if (table === "conversations") {
+    return {
+      insert: supabaseConversationInsertMock,
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          maybeSingle: supabaseConversationMaybeSingleMock,
+        })),
+      })),
+      update: supabaseConversationUpdateMock,
     };
   }
   return {
@@ -119,6 +135,52 @@ describe("/api/test-engineer", () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
+    supabaseConversationInsertMock.mockReturnValue({
+      select: vi.fn(() => ({
+        single: supabaseConversationCreateSingleMock,
+      })),
+    });
+    supabaseConversationUpdateMock.mockReturnValue({
+      eq: vi.fn(() => ({
+        select: vi.fn(() => ({
+          single: supabaseConversationUpdateSingleMock,
+        })),
+      })),
+    });
+    supabaseConversationMaybeSingleMock.mockResolvedValue({
+      data: null,
+      error: null,
+    });
+    supabaseConversationCreateSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_123",
+        user_id: "clerk_user_123",
+        mode: "hosted",
+        repo_path: "C:/repo",
+        role: "developer",
+        charged_run_count: 0,
+        refinement_count: 0,
+        has_free_refinement_been_used: false,
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:00:00.000Z",
+      },
+      error: null,
+    });
+    supabaseConversationUpdateSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_123",
+        user_id: "clerk_user_123",
+        mode: "hosted",
+        repo_path: "C:/repo",
+        role: "developer",
+        charged_run_count: 1,
+        refinement_count: 0,
+        has_free_refinement_been_used: false,
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:01:00.000Z",
+      },
+      error: null,
+    });
     detectTestFrameworkMock.mockReturnValue({
       framework: "playwright_ts",
       language: "typescript",
@@ -588,7 +650,7 @@ export function LoginForm() {
     });
   });
 
-it("logs successful developer runs to Supabase when env is configured", async () => {
+  it("logs successful developer runs to Supabase when env is configured", async () => {
   process.env.SUPABASE_URL = "https://example.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
 
@@ -623,6 +685,8 @@ it("logs successful developer runs to Supabase when env is configured", async ()
     });
 
     expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.conversationId).toBe("conv_123");
     await vi.waitFor(() => {
       expect(createSupabaseClientMock).toHaveBeenCalledWith(
         "https://example.supabase.co",
@@ -646,6 +710,231 @@ it("logs successful developer runs to Supabase when env is configured", async ()
         }
       );
     });
+  });
+
+  it("does not log or deduct credits for failed developer runs", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    runLlmPatchFlowMock.mockResolvedValue({
+      ok: false,
+      reason: "generation_failed",
+    });
+
+    const response = await fetch(`${baseUrl}/api/patch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "fix login validation",
+        repoPath: "C:/repo",
+        userId: "clerk_user_123",
+      }),
+    });
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.conversationId).toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(supabaseInsertMock).not.toHaveBeenCalled();
+    expect(supabaseRpcMock).not.toHaveBeenCalled();
+  });
+
+  it("returns the same conversationId on a successful continued refinement", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    runLlmPatchFlowMock.mockResolvedValue({
+      ok: true,
+      patchPreview: "=== LLM PATCH PREVIEW ===",
+      warnings: [],
+      developerConfidence: 78,
+      decisionMode: "safe_to_apply",
+      applyPatches: [],
+      patchResults: [],
+    });
+    supabaseInsertMock.mockResolvedValue({ error: null });
+    supabaseConversationMaybeSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_existing",
+        user_id: "clerk_user_123",
+        mode: "hosted",
+        repo_path: "C:/repo",
+        role: "developer",
+        charged_run_count: 1,
+        refinement_count: 0,
+        has_free_refinement_been_used: false,
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:00:00.000Z",
+      },
+      error: null,
+    });
+    supabaseConversationUpdateSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_existing",
+        user_id: "clerk_user_123",
+        mode: "hosted",
+        repo_path: "C:/repo",
+        role: "developer",
+        charged_run_count: 1,
+        refinement_count: 1,
+        has_free_refinement_been_used: true,
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:01:00.000Z",
+      },
+      error: null,
+    });
+
+    const response = await fetch(`${baseUrl}/api/patch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "refine login validation",
+        repoPath: "C:/repo",
+        userId: "clerk_user_123",
+        conversationId: "conv_existing",
+        billingMode: "hosted",
+      }),
+    });
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.conversationId).toBe("conv_existing");
+  });
+
+  it("returns a new conversationId when the provided one mismatches repoPath or role", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    runLlmPatchFlowMock.mockResolvedValue({
+      ok: true,
+      patchPreview: "=== LLM PATCH PREVIEW ===",
+      warnings: [],
+      developerConfidence: 78,
+      decisionMode: "safe_to_apply",
+      applyPatches: [],
+      patchResults: [],
+    });
+    supabaseInsertMock.mockResolvedValue({ error: null });
+    supabaseConversationMaybeSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_old",
+        user_id: "clerk_user_123",
+        mode: "hosted",
+        repo_path: "C:/other-repo",
+        role: "developer",
+        charged_run_count: 1,
+        refinement_count: 0,
+        has_free_refinement_been_used: false,
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:00:00.000Z",
+      },
+      error: null,
+    });
+    supabaseConversationCreateSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_new",
+        user_id: "clerk_user_123",
+        mode: "hosted",
+        repo_path: "C:/repo",
+        role: "developer",
+        charged_run_count: 0,
+        refinement_count: 0,
+        has_free_refinement_been_used: false,
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:00:00.000Z",
+      },
+      error: null,
+    });
+    supabaseConversationUpdateSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_new",
+        user_id: "clerk_user_123",
+        mode: "hosted",
+        repo_path: "C:/repo",
+        role: "developer",
+        charged_run_count: 1,
+        refinement_count: 0,
+        has_free_refinement_been_used: false,
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:01:00.000Z",
+      },
+      error: null,
+    });
+
+    const response = await fetch(`${baseUrl}/api/patch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "fix login validation",
+        repoPath: "C:/repo",
+        userId: "clerk_user_123",
+        conversationId: "conv_old",
+        billingMode: "hosted",
+      }),
+    });
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.conversationId).toBe("conv_new");
+  });
+
+  it("returns a conversationId for successful byok runs", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    runLlmPatchFlowMock.mockResolvedValue({
+      ok: true,
+      patchPreview: "=== LLM PATCH PREVIEW ===",
+      warnings: [],
+      developerConfidence: 78,
+      decisionMode: "safe_to_apply",
+      applyPatches: [],
+      patchResults: [],
+    });
+    supabaseInsertMock.mockResolvedValue({ error: null });
+    supabaseConversationCreateSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_byok",
+        user_id: "clerk_user_123",
+        mode: "byok",
+        repo_path: "C:/repo",
+        role: "developer",
+        charged_run_count: 0,
+        refinement_count: 0,
+        has_free_refinement_been_used: false,
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:00:00.000Z",
+      },
+      error: null,
+    });
+    supabaseConversationUpdateSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_byok",
+        user_id: "clerk_user_123",
+        mode: "byok",
+        repo_path: "C:/repo",
+        role: "developer",
+        charged_run_count: 0,
+        refinement_count: 1,
+        has_free_refinement_been_used: false,
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:01:00.000Z",
+      },
+      error: null,
+    });
+
+    const response = await fetch(`${baseUrl}/api/patch`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-User-OpenAI-Key": "sk-user",
+      },
+      body: JSON.stringify({
+        task: "fix login validation",
+        repoPath: "C:/repo",
+        userId: "clerk_user_123",
+      }),
+    });
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.conversationId).toBe("conv_byok");
   });
 
   it("skips Supabase logging silently when Supabase env is missing", async () => {

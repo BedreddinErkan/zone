@@ -18,6 +18,7 @@ import { scorePatchQuality } from "../engine/patchQualityScorer.js";
 import { resolveSafetyLevel } from "../engine/safetyLevelResolver.js";
 import { enforceMicroEditProtection } from "../engine/microEditProtection.js";
 import { parseTaskIntent, type TaskIntent } from "./taskIntentParser.js";
+import type { ConversationBillingMode } from "../types/conversation.js";
 import type { RepoFile } from "../types/project.js";
 
 export type LlmPatchFlowResult =
@@ -1745,6 +1746,8 @@ export async function runLlmPatchFlow(input: {
   repoPath: string;
   atomicPatch?: boolean;
   dryRun?: boolean;
+  conversationId?: string;
+  billingMode?: ConversationBillingMode;
   hostedContext?: HostedDeveloperContextInput;
   userOpenAiKey?: string;
   onProgress?: (stage: string) => void;

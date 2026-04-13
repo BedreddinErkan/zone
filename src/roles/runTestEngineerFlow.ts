@@ -18,6 +18,7 @@ import {
 } from "./testOutputValidator.js";
 import { detectTestComplexity } from "./detectTestComplexity.js";
 import type { TestComplexity } from "./detectTestComplexity.js";
+import type { ConversationBillingMode } from "../types/conversation.js";
 import type { RepoFile } from "../types/project.js";
 import type { TestEngineerContextDebug } from "./testEngineerContext.js";
 
@@ -1010,6 +1011,8 @@ function summarizeValidationIssues(
 export async function runTestEngineerFlow(input: {
   task: string;
   repoPath: string;
+  conversationId?: string;
+  billingMode?: ConversationBillingMode;
   onProgress?: (stage: string) => void;
   hostedContext?: HostedTestEngineerContextInput;
   userOpenAiKey?: string;

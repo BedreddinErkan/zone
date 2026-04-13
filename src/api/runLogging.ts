@@ -1,13 +1,25 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  createConversation,
+  getConversationById,
+  updateConversation,
+} from "../billing/conversationRepository.js";
+import { resolveBillingAction } from "../billing/resolveBillingAction.js";
+import type {
+  ConversationBillingMode,
+  ConversationRole,
+} from "../types/conversation.js";
 
 export type RunLogInput = {
   userId: string;
-  role: string;
+  role: ConversationRole;
   task: string;
   repoPath: string;
   decisionMode: string;
   confidence: number;
   creditsUsed: number;
+  conversationId?: string;
+  billingMode?: ConversationBillingMode;
   isByok?: boolean;
 };
 
@@ -18,17 +30,17 @@ function getSupabaseClient(): SupabaseClient | null {
   return createClient(url, key);
 }
 
-function normalizeSubscriptionStatus(value: unknown): string {
-  return typeof value === "string" ? value.trim().toLowerCase() : "";
+function resolveBillingMode(input: RunLogInput): ConversationBillingMode {
+  if (input.billingMode === "hosted" || input.billingMode === "byok") {
+    return input.billingMode;
+  }
+
+  return input.isByok ? "byok" : "hosted";
 }
 
-function hasPaidAccess(subscriptionStatus: unknown): boolean {
-  return normalizeSubscriptionStatus(subscriptionStatus) === "pro";
-}
-
-async function logRun(input: RunLogInput): Promise<void> {
+export async function logRun(input: RunLogInput): Promise<string | null> {
   const supabase = getSupabaseClient();
-  if (!supabase) return;
+  if (!supabase) return null;
 
   const effectiveUserId =
     typeof input.userId === "string" ? input.userId.trim() : "";
@@ -39,7 +51,7 @@ async function logRun(input: RunLogInput): Promise<void> {
       : "";
 
   if (!effectiveUserId) {
-    return;
+    return null;
   }
 
   await supabase.from("run_logs").insert({
@@ -53,29 +65,59 @@ async function logRun(input: RunLogInput): Promise<void> {
     credits_used: input.creditsUsed,
   });
 
-  let normalizedStatus: string | null = null;
-  try {
-    const profileResult = await supabase
-      .from("profiles")
-      .select("subscription_status")
-      .eq("clerk_user_id", effectiveUserId)
-      .maybeSingle();
-
-    normalizedStatus = profileResult?.data
-      ? normalizeSubscriptionStatus(profileResult.data.subscription_status)
+  const billingMode = resolveBillingMode(input);
+  let conversation =
+    typeof input.conversationId === "string" && input.conversationId.trim()
+      ? await getConversationById(supabase, input.conversationId.trim())
       : null;
-  } catch {
-    normalizedStatus = null;
+
+  if (
+    conversation &&
+    (conversation.repoPath !== input.repoPath || conversation.role !== input.role)
+  ) {
+    conversation = null;
   }
 
-  if (input.isByok && hasPaidAccess(normalizedStatus)) {
-    return;
+  if (!conversation) {
+    conversation = await createConversation(supabase, {
+      userId: effectiveUserId,
+      mode: billingMode,
+      repoPath: input.repoPath,
+      role: input.role,
+    });
   }
 
-  await supabase.rpc("deduct_credits_and_increment_runs", {
+  const billingAction = resolveBillingAction({
+    mode: billingMode,
+    conversation: {
+      chargedRunCount: conversation.chargedRunCount,
+      hasFreeRefinementBeenUsed: conversation.hasFreeRefinementBeenUsed,
+    },
+  });
+
+  if (billingAction === "FREE") {
+    await updateConversation(supabase, conversation.id, {
+      refinementCount: conversation.refinementCount + 1,
+      hasFreeRefinementBeenUsed:
+        billingMode === "hosted" ? true : conversation.hasFreeRefinementBeenUsed,
+    });
+    return conversation.id;
+  }
+
+  const rpcResult = await supabase.rpc("deduct_credits_and_increment_runs", {
     p_user_id: effectiveUserId,
     p_credits: 1,
   });
+
+  if (rpcResult?.error) {
+    return null;
+  }
+
+  await updateConversation(supabase, conversation.id, {
+    chargedRunCount: conversation.chargedRunCount + 1,
+  });
+
+  return conversation.id;
 }
 
 export function queueRunLog(input: RunLogInput): void {

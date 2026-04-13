@@ -6,7 +6,7 @@ const claimNextQueuedDeveloperPatchJobMock = vi.fn();
 const markDeveloperPatchJobCompletedMock = vi.fn();
 const markDeveloperPatchJobFailedMock = vi.fn();
 const updateDeveloperPatchJobProgressMock = vi.fn();
-const queueRunLogMock = vi.fn();
+const logRunMock = vi.fn();
 const createSupabaseClientMock = vi.fn(() => ({}));
 
 vi.mock("../core/runLlmPatchFlow.js", () => ({
@@ -25,7 +25,7 @@ vi.mock("../jobs/developerPatchJobs.js", () => ({
 }));
 
 vi.mock("../api/runLogging.js", () => ({
-  queueRunLog: queueRunLogMock,
+  logRun: logRunMock,
 }));
 
 vi.mock("@supabase/supabase-js", () => ({
@@ -69,6 +69,7 @@ describe("developer patch worker", () => {
       verdict: "pass",
       issues: [],
     });
+    logRunMock.mockResolvedValue("conv_123");
 
     const { processNextDeveloperPatchJob } = await import("./index.js");
     const processed = await processNextDeveloperPatchJob();
@@ -91,9 +92,10 @@ describe("developer patch worker", () => {
       expect.objectContaining({
         ok: true,
         decisionMode: "safe_to_apply",
+        conversationId: "conv_123",
       })
     );
-    expect(queueRunLogMock).toHaveBeenCalledWith(
+    expect(logRunMock).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "clerk_user_123",
         role: "developer",
