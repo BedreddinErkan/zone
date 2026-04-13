@@ -1563,6 +1563,217 @@ export function LoginForm() {
     });
   });
 
+  it("blocks a hosted first run without conversationId when no credits remain", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        runs_used_this_month: 10,
+        free_limit: 10,
+        subscription_status: "free",
+      },
+      error: null,
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/check-access?userId=clerk_user_123&billingMode=hosted`
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(402);
+    expect(body.reason).toBe("no_free_runs");
+  });
+
+  it("allows a hosted valid continuation when free refinement is still unused and credits are 0", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        runs_used_this_month: 10,
+        free_limit: 10,
+        subscription_status: "free",
+      },
+      error: null,
+    });
+    supabaseConversationMaybeSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_existing",
+        user_id: "clerk_user_123",
+        mode: "hosted",
+        repo_path: "C:/repo",
+        role: "developer",
+        charged_run_count: 1,
+        refinement_count: 0,
+        has_free_refinement_been_used: false,
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:00:00.000Z",
+      },
+      error: null,
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/check-access?userId=clerk_user_123&billingMode=hosted&conversationId=conv_existing&repoPath=C%3A%2Frepo&role=developer`
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ ok: true });
+  });
+
+  it("blocks a hosted valid continuation when free refinement is already used and credits are 0", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        runs_used_this_month: 10,
+        free_limit: 10,
+        subscription_status: "free",
+      },
+      error: null,
+    });
+    supabaseConversationMaybeSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_existing",
+        user_id: "clerk_user_123",
+        mode: "hosted",
+        repo_path: "C:/repo",
+        role: "developer",
+        charged_run_count: 1,
+        refinement_count: 1,
+        has_free_refinement_been_used: true,
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:00:00.000Z",
+      },
+      error: null,
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/check-access?userId=clerk_user_123&billingMode=hosted&conversationId=conv_existing&repoPath=C%3A%2Frepo&role=developer`
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(402);
+    expect(body.reason).toBe("no_free_runs");
+  });
+
+  it("allows byok access even when hosted credits are exhausted", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        runs_used_this_month: 10,
+        free_limit: 10,
+        subscription_status: "free",
+      },
+      error: null,
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/check-access?userId=clerk_user_123&billingMode=byok`
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ ok: true });
+  });
+
+  it("falls back to normal hosted blocking when conversation repoPath mismatches", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        runs_used_this_month: 10,
+        free_limit: 10,
+        subscription_status: "free",
+      },
+      error: null,
+    });
+    supabaseConversationMaybeSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_existing",
+        user_id: "clerk_user_123",
+        mode: "hosted",
+        repo_path: "C:/other-repo",
+        role: "developer",
+        charged_run_count: 1,
+        refinement_count: 0,
+        has_free_refinement_been_used: false,
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:00:00.000Z",
+      },
+      error: null,
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/check-access?userId=clerk_user_123&billingMode=hosted&conversationId=conv_existing&repoPath=C%3A%2Frepo&role=developer`
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(402);
+    expect(body.reason).toBe("no_free_runs");
+  });
+
+  it("falls back to normal hosted blocking when conversation role mismatches", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        runs_used_this_month: 10,
+        free_limit: 10,
+        subscription_status: "free",
+      },
+      error: null,
+    });
+    supabaseConversationMaybeSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_existing",
+        user_id: "clerk_user_123",
+        mode: "hosted",
+        repo_path: "C:/repo",
+        role: "test_engineer",
+        charged_run_count: 1,
+        refinement_count: 0,
+        has_free_refinement_been_used: false,
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:00:00.000Z",
+      },
+      error: null,
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/check-access?userId=clerk_user_123&billingMode=hosted&conversationId=conv_existing&repoPath=C%3A%2Frepo&role=developer`
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(402);
+    expect(body.reason).toBe("no_free_runs");
+  });
+
+  it("preserves old behavior when conversationId does not exist", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        runs_used_this_month: 10,
+        free_limit: 10,
+        subscription_status: "free",
+      },
+      error: null,
+    });
+    supabaseConversationMaybeSingleMock.mockResolvedValue({
+      data: null,
+      error: null,
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/check-access?userId=clerk_user_123&billingMode=hosted&conversationId=conv_missing&repoPath=C%3A%2Frepo&role=developer`
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(402);
+    expect(body.reason).toBe("no_free_runs");
+  });
+
   it("returns ok from /api/check-access for a pro user below the monthly limit", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";

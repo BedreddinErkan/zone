@@ -36,6 +36,8 @@ import {
   getInferenceMode,
   getModelName,
 } from "../llm/openaiClient.js";
+import { getConversationById } from "../billing/conversationRepository.js";
+import { resolveBillingAction } from "../billing/resolveBillingAction.js";
 import type { Response } from "express";
 import { c, colorize } from "../cli/colors.js";
 import { validateLlmOutput } from "../core/validateLlmOutput.js";
@@ -495,9 +497,22 @@ async function buildHostedDataAnalystContext(
 
 async function handleCheckAccess(req: express.Request, res: express.Response): Promise<void> {
   const userId = typeof req.query.userId === "string" ? req.query.userId : "";
+  const conversationId =
+    typeof req.query.conversationId === "string" ? req.query.conversationId : "";
+  const billingMode =
+    typeof req.query.billingMode === "string" ? req.query.billingMode : undefined;
+  const repoPath =
+    typeof req.query.repoPath === "string" ? req.query.repoPath : undefined;
+  const role = typeof req.query.role === "string" ? req.query.role : undefined;
   const authorization = await ensureRunAuthorized(
-    userId,
-    isTruthyByok(req.query.isByok)
+      userId,
+    isTruthyByok(req.query.isByok),
+    {
+      conversationId,
+      billingMode,
+      repoPath,
+      role,
+    }
   );
   if (authorization.allowed) {
     res.json({ ok: true });
@@ -672,7 +687,13 @@ function isTruthyByok(value: unknown): boolean {
 
 async function ensureRunAuthorized(
   rawUserId: unknown,
-  isByok = false
+  isByok = false,
+  options?: {
+    conversationId?: string;
+    billingMode?: string;
+    repoPath?: string;
+    role?: string;
+  }
 ): Promise<
   | { allowed: true }
   | {
@@ -714,6 +735,17 @@ async function ensureRunAuthorized(
 
   const supabase = getSupabaseClient();
   if (!supabase) {
+    return { allowed: true };
+  }
+
+  const resolvedBillingMode =
+    options?.billingMode === "hosted" || options?.billingMode === "byok"
+      ? options.billingMode
+      : isByok
+        ? "byok"
+        : "hosted";
+
+  if (resolvedBillingMode === "byok") {
     return { allowed: true };
   }
 
@@ -772,12 +804,46 @@ async function ensureRunAuthorized(
         ? data.free_limit
         : Number(data.free_limit ?? FREE_PLAN_RUN_LIMIT);
 
-    const subscriptionStatus = normalizeSubscriptionStatus(
-      data.subscription_status
-    );
+      const subscriptionStatus = normalizeSubscriptionStatus(
+        data.subscription_status
+      );
 
-    if (hasPaidAccess(subscriptionStatus)) {
-      if (isByok) {
+      if (
+        resolvedBillingMode === "hosted" &&
+        typeof options?.conversationId === "string" &&
+        options.conversationId.trim()
+      ) {
+        try {
+          const conversation = await getConversationById(
+            supabase,
+            options.conversationId.trim()
+          );
+
+          if (
+            conversation &&
+            conversation.repoPath === options?.repoPath &&
+            conversation.role === options?.role
+          ) {
+            const billingAction = resolveBillingAction({
+              mode: "hosted",
+              conversation: {
+                chargedRunCount: conversation.chargedRunCount,
+                hasFreeRefinementBeenUsed:
+                  conversation.hasFreeRefinementBeenUsed,
+              },
+            });
+
+            if (billingAction === "FREE") {
+              return { allowed: true };
+            }
+          }
+        } catch {
+          // Fall back to the existing hosted access behavior.
+        }
+      }
+
+      if (hasPaidAccess(subscriptionStatus)) {
+        if (isByok) {
         return { allowed: true };
       }
       if (
