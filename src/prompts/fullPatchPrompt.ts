@@ -48,6 +48,44 @@ function isLikelyUiPatchTask(input: {
   );
 }
 
+function isSmallTargetedOrAmbiguousUiTask(input: { task: string }): boolean {
+  const normalizedTask = input.task.toLowerCase();
+
+  const scopedUiSignals = [
+    "small",
+    "slight",
+    "minor",
+    "tiny",
+    "tweak",
+    "adjust",
+    "fix spacing",
+    "fix padding",
+    "fix margin",
+    "align",
+    "move",
+    "shift",
+    "nudge",
+    "one button",
+    "one card",
+    "one field",
+    "one element",
+    "specific",
+    "targeted",
+  ];
+  const ambiguousUiSignals = [
+    "make it look better",
+    "improve ui",
+    "clean up",
+    "polish",
+    "refine",
+  ];
+
+  return (
+    scopedUiSignals.some((signal) => normalizedTask.includes(signal)) ||
+    ambiguousUiSignals.some((signal) => normalizedTask.includes(signal))
+  );
+}
+
 function detectRenameIntent(task: string): { isRename: boolean; fromName: string; toName: string } | null {
   const renamePattern =
     /rename\s+(?:the\s+)?[`'"]?(\w+)[`'"]?\s+(?:function|method|class|variable|const|let|var)?\s*to\s+[`'"]?(\w+)[`'"]?/i;
@@ -93,6 +131,24 @@ export function buildFullPatchPrompt(input: FullPatchPromptInput): string {
 - Keep the diff minimal and localized
 `
     : "";
+  const shouldHardenScopeControl =
+    normalizedTaskIntent === "micro_edit" ||
+    taskIntent === "micro_edit" ||
+    isSmallTargetedOrAmbiguousUiTask({ task });
+  const scopeControlInstruction =
+    isLikelyUiPatchTask({ task, filePath, fileContent }) &&
+    shouldHardenScopeControl
+      ? `SCOPE CONTROL FOR SMALL UI TASKS:
+- Apply the change only to the most relevant instance
+- Avoid repeating the same change across all similar components
+- Avoid propagating style tweaks to sibling or neighboring elements unless explicitly requested
+- Prefer one localized edit over repeated parallel edits
+- Avoid turning a local tweak into a section-wide restyling
+- Modify only one relevant instance unless the task explicitly requires broader consistency
+- Do not apply the same change to every similar card, item, or section
+- Do not convert a small local tweak into a repeated batch edit
+`
+      : "";
   const microEditInstruction =
     normalizedTaskIntent === "micro_edit" || taskIntent === "micro_edit"
       ? `MICRO-EDIT CONSTRAINTS:
@@ -128,8 +184,7 @@ ${fileContent}
 \`\`\`
 
 INSTRUCTIONS
-${renameInstruction}${uiRulesInstruction}${microEditInstruction}- The target file is large. Return ONLY the specific change as a FIND/REPLACE patch.
-- The target file is large. Return ONLY the specific change as a FIND/REPLACE patch.
+${renameInstruction}${uiRulesInstruction}${scopeControlInstruction}${microEditInstruction}- The target file is large. Return ONLY the specific change as a FIND/REPLACE patch.
 - Do NOT return the full file.
 - Do NOT reconstruct the whole document.
 - Modify only the smallest existing block needed.
@@ -167,8 +222,7 @@ ${fileContent}
 \`\`\`
 
 INSTRUCTIONS
-${renameInstruction}${uiRulesInstruction}${microEditInstruction}- Apply the task to the file above
-- Apply the task to the file above
+${renameInstruction}${uiRulesInstruction}${scopeControlInstruction}${microEditInstruction}- Apply the task to the file above
 - Return the COMPLETE updated file content
 - Preserve all existing code that is unrelated to the task
 - Keep existing imports, exports, formatting, and naming conventions

@@ -134,4 +134,75 @@ describe("buildFullPatchPrompt", () => {
       "If a small class-based change is possible, prefer that over ad-hoc styling"
     );
   });
+
+  it("adds scope control rules for small targeted UI tasks", () => {
+    const prompt = buildFullPatchPrompt({
+      ...BASE_INPUT,
+      task: "adjust spacing on one card in the dashboard",
+      filePath: "src/components/DashboardCard.tsx",
+      fileContent: '<div className="card"><button>Open</button></div>',
+    });
+
+    expect(prompt).toContain("SCOPE CONTROL FOR SMALL UI TASKS:");
+    expect(prompt).toContain(
+      "Apply the change only to the most relevant instance"
+    );
+    expect(prompt).toContain(
+      "Avoid repeating the same change across all similar components"
+    );
+    expect(prompt).toContain(
+      "Avoid turning a local tweak into a section-wide restyling"
+    );
+    expect(prompt).toContain(
+      "Modify only one relevant instance unless the task explicitly requires broader consistency"
+    );
+    expect(prompt).toContain(
+      "Do not apply the same change to every similar card, item, or section"
+    );
+    expect(prompt).toContain(
+      "Do not convert a small local tweak into a repeated batch edit"
+    );
+  });
+
+  it("applies stricter scope control for micro-edit UI tasks", () => {
+    const prompt = buildFullPatchPrompt({
+      ...BASE_INPUT,
+      task: "make a tiny spacing fix",
+      filePath: "src/components/Card.tsx",
+      fileContent: '<div className="card">Zone</div>',
+      normalizedTaskIntent: "micro_edit",
+    });
+
+    expect(prompt).toContain("SCOPE CONTROL FOR SMALL UI TASKS:");
+    expect(prompt).toContain(
+      "Modify only one relevant instance unless the task explicitly requires broader consistency"
+    );
+    expect(prompt).toContain(
+      "Do not apply the same change to every similar card, item, or section"
+    );
+    expect(prompt).toContain(
+      "Do not convert a small local tweak into a repeated batch edit"
+    );
+  });
+
+  it("does not add scope control rules for non-targeted backend tasks", () => {
+    const prompt = buildFullPatchPrompt(BASE_INPUT);
+    expect(prompt).not.toContain("SCOPE CONTROL FOR SMALL UI TASKS:");
+  });
+
+  it("does not add the strictest small-scope phrasing for broader UI tasks", () => {
+    const prompt = buildFullPatchPrompt({
+      ...BASE_INPUT,
+      task: "redesign the dashboard layout for better hierarchy",
+      filePath: "src/components/Dashboard.tsx",
+      fileContent:
+        '<section className="dashboard"><div className="card">Metrics</div></section>',
+    });
+
+    expect(prompt).toContain("UI / DESIGN SYSTEM RULES:");
+    expect(prompt).not.toContain("SCOPE CONTROL FOR SMALL UI TASKS:");
+    expect(prompt).not.toContain(
+      "Modify only one relevant instance unless the task explicitly requires broader consistency"
+    );
+  });
 });
