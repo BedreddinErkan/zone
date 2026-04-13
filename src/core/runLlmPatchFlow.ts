@@ -626,6 +626,11 @@ export type DeveloperPatchScope = {
   cssRewriteSuspicion: boolean;
 };
 
+type TaskRiskResult = ReturnType<typeof computeRiskScore>;
+
+const REWRITE_SUSPICION_MIN_TOTAL_LINES = 20;
+const REWRITE_SUSPICION_MIN_CHANGED_LINES = 12;
+
 export function analyzePatchScope(input: {
   applyPatches: Array<{ filePath: string; fullContent: string }>;
   originalContents: Record<string, string>;
@@ -647,7 +652,12 @@ export function analyzePatchScope(input: {
     totalAddedLines += addedLines;
     totalRemovedLines += removedLines;
 
-    if (before.trim() && totalLines > 0 && changedRatio > 0.6) {
+    if (
+      before.trim() &&
+      totalLines >= REWRITE_SUSPICION_MIN_TOTAL_LINES &&
+      changedLines >= REWRITE_SUSPICION_MIN_CHANGED_LINES &&
+      changedRatio > 0.6
+    ) {
       rewriteLikeSuspicion = true;
     }
 
@@ -669,6 +679,125 @@ export function analyzePatchScope(input: {
     rewriteLikeSuspicion,
     cssRewriteSuspicion,
   };
+}
+
+function isSmallLocalizedPatchScope(patchScope: DeveloperPatchScope): boolean {
+  return (
+    patchScope.changedFileCount <= 1 &&
+    patchScope.totalChangedLines <= 20 &&
+    !patchScope.rewriteLikeSuspicion &&
+    !patchScope.cssRewriteSuspicion
+  );
+}
+
+function softenTaskRiskForLocalizedPatch(input: {
+  taskRiskResult: TaskRiskResult;
+  patchScope: DeveloperPatchScope;
+}): TaskRiskResult {
+  const { taskRiskResult, patchScope } = input;
+  const nonCriticalSignals = taskRiskResult.signals.filter(
+    (signal) => signal !== "critical_domain" && signal !== "low_risk"
+  );
+
+  if (
+    !isSmallLocalizedPatchScope(patchScope) ||
+    nonCriticalSignals.length > 0 ||
+    !taskRiskResult.signals.includes("critical_domain")
+  ) {
+    return taskRiskResult;
+  }
+
+  return {
+    ...taskRiskResult,
+    score: Math.min(taskRiskResult.score, 20),
+  };
+}
+
+function formatRiskSignals(signals: string[]): string {
+  return signals.join(", ");
+}
+
+function syncTaskRiskWarnings(input: {
+  warnings: string[];
+  taskRiskResult: TaskRiskResult;
+}): string[] {
+  const withoutTaskRiskWarnings = input.warnings.filter(
+    (warning) =>
+      !warning.startsWith("[HIGH_RISK] Task risk score") &&
+      !warning.startsWith("[ELEVATED_RISK] Task risk score")
+  );
+
+  if (input.taskRiskResult.score >= 71) {
+    return [
+      ...withoutTaskRiskWarnings,
+      `[HIGH_RISK] Task risk score ${input.taskRiskResult.score} - detected: ${formatRiskSignals(
+        input.taskRiskResult.signals
+      )}. Review carefully before applying.`,
+    ];
+  }
+
+  if (input.taskRiskResult.score >= 31) {
+    return [
+      ...withoutTaskRiskWarnings,
+      `[ELEVATED_RISK] Task risk score ${input.taskRiskResult.score} - detected: ${formatRiskSignals(
+        input.taskRiskResult.signals
+      )}.`,
+    ];
+  }
+
+  return withoutTaskRiskWarnings;
+}
+
+const SMALL_SAFE_PATCH_MAX_CHANGED_LINES = 20;
+const SMALL_SAFE_PATCH_RISK_CAP = 25;
+
+function qualifiesForSafePatchRiskCap(input: {
+  developerRisk: {
+    score: number;
+    breakdown: {
+      destructive: number;
+      schema: number;
+      massScope: number;
+    };
+  };
+  patchScope: DeveloperPatchScope;
+  hasIntentMismatch: boolean;
+  hasMicroEditViolation: boolean;
+  hasValidationBlock: boolean;
+}): boolean {
+  return (
+    input.developerRisk.breakdown.destructive === 0 &&
+    input.developerRisk.breakdown.schema === 0 &&
+    input.developerRisk.breakdown.massScope === 0 &&
+    input.patchScope.changedFileCount <= 1 &&
+    input.patchScope.totalChangedLines <= SMALL_SAFE_PATCH_MAX_CHANGED_LINES &&
+    !input.patchScope.rewriteLikeSuspicion &&
+    !input.patchScope.cssRewriteSuspicion &&
+    !input.hasIntentMismatch &&
+    !input.hasMicroEditViolation &&
+    !input.hasValidationBlock
+  );
+}
+
+function applySafePatchRiskCap(input: {
+  developerRisk: {
+    score: number;
+    breakdown: {
+      destructive: number;
+      schema: number;
+      massScope: number;
+    };
+  };
+  patchScope: DeveloperPatchScope;
+  hasIntentMismatch: boolean;
+  hasMicroEditViolation: boolean;
+  hasValidationBlock: boolean;
+}): number {
+  if (!qualifiesForSafePatchRiskCap(input)) {
+    return input.developerRisk.score;
+  }
+
+  return Math.min(input.developerRisk.score, SMALL_SAFE_PATCH_RISK_CAP);
 }
 
 function collectAddedPatchLines(input: {
@@ -2080,6 +2209,10 @@ export async function runLlmPatchFlow(input: {
     task: input.task,
     patchScope,
   });
+  const effectiveTaskRiskResult = softenTaskRiskForLocalizedPatch({
+    taskRiskResult,
+    patchScope,
+  });
   if (intentMismatch.warnings.length > 0) {
     internalWarnings.push(...intentMismatch.warnings);
     visibleWarnings.push(...intentMismatch.warnings);
@@ -2088,14 +2221,14 @@ export async function runLlmPatchFlow(input: {
       internalWarnings.push(...uiMappingRisk.warnings);
       visibleWarnings.push(...uiMappingRisk.warnings);
     }
-    if (taskRiskResult.score >= 71) {
+    if (effectiveTaskRiskResult.score >= 71) {
       internalWarnings.push(
         `[HIGH_RISK] Task risk score ${taskRiskResult.score} — detected: ${taskRiskResult.signals.join(", ")}. Review carefully before applying.`
       );
       visibleWarnings.push(
         `[HIGH_RISK] Task risk score ${taskRiskResult.score} — detected: ${taskRiskResult.signals.join(", ")}. Review carefully before applying.`
       );
-    } else if (taskRiskResult.score >= 31) {
+    } else if (effectiveTaskRiskResult.score >= 31) {
       internalWarnings.push(
         `[ELEVATED_RISK] Task risk score ${taskRiskResult.score} — detected: ${taskRiskResult.signals.join(", ")}.`
       );
@@ -2104,8 +2237,17 @@ export async function runLlmPatchFlow(input: {
       );
     }
 
+  const syncedInternalWarnings = syncTaskRiskWarnings({
+    warnings: internalWarnings,
+    taskRiskResult: effectiveTaskRiskResult,
+  });
+  const syncedVisibleWarnings = syncTaskRiskWarnings({
+    warnings: visibleWarnings,
+    taskRiskResult: effectiveTaskRiskResult,
+  });
+
     const developerConfidenceBase = calculateDeveloperConfidence({
-      warnings: internalWarnings,
+      warnings: syncedInternalWarnings,
     changedFileCount: applyPatches.length,
     changedFileMetrics,
     vagueTask,
@@ -2139,7 +2281,11 @@ const fileDiffs = applyPatches.map((patch) => {
   };
 });
   const mergedDeveloperRisk = {
-      score: Math.max(intentMismatch.risk.score, uiMappingRisk.risk.score, taskRiskResult.score),
+      score: Math.max(
+        intentMismatch.risk.score,
+        uiMappingRisk.risk.score,
+        effectiveTaskRiskResult.score
+      ),
       breakdown: {
         destructive: Math.max(
           intentMismatch.risk.breakdown.destructive,
@@ -2156,11 +2302,22 @@ const fileDiffs = applyPatches.map((patch) => {
     },
   };
   if (microEditProtection.isViolation) {
-    internalWarnings.push(...microEditProtection.violationReasons);
-    visibleWarnings.push(...microEditProtection.violationReasons);
+    syncedInternalWarnings.push(...microEditProtection.violationReasons);
+    syncedVisibleWarnings.push(...microEditProtection.violationReasons);
   }
 
 const hasBlockedPatch = patchResults.some(r => r.status === "failed" && r.reason === "developer_validation_blocked");
+const finalDeveloperRiskScore = applySafePatchRiskCap({
+  developerRisk: mergedDeveloperRisk,
+  patchScope,
+  hasIntentMismatch: intentMismatchDecision.hasMismatch,
+  hasMicroEditViolation: microEditProtection.isViolation,
+  hasValidationBlock: hasBlockedPatch,
+});
+const finalDeveloperRisk = {
+  ...mergedDeveloperRisk,
+  score: finalDeveloperRiskScore,
+};
 
 const decisionMode =
   hasBlockedPatch ||
@@ -2169,14 +2326,14 @@ const decisionMode =
   intentMismatchDecision.forcePreviewOnly ||
   uiMappingRisk.forcePreviewOnly ||
   developerConfidence < 70 ||
-  taskRiskResult.score >= 31
+  finalDeveloperRisk.score >= 31
     ? "preview_only"
     : "safe_to_apply";
   const safetyResolution = resolveSafetyLevel({
     hasBlockedPatch,
     developerConfidence,
     decisionMode,
-    developerRiskScore: mergedDeveloperRisk.score,
+    developerRiskScore: finalDeveloperRisk.score,
     intentMismatch: {
       hasMismatch: intentMismatchDecision.hasMismatch,
       severity: intentMismatchDecision.severity,
@@ -2211,12 +2368,12 @@ const decisionMode =
           "",
           "=== PATCH RESULTS ===",
           ...patchResults.map((result) =>
-            renderPatchResultLine(result, internalWarnings)
+            renderPatchResultLine(result, syncedInternalWarnings)
           ),
         ]
       : []),
-    ...(visibleWarnings.length > 0
-      ? ["", "Warnings:", ...visibleWarnings.map((w) => `- ${w}`)]
+    ...(syncedVisibleWarnings.length > 0
+      ? ["", "Warnings:", ...syncedVisibleWarnings.map((w) => `- ${w}`)]
       : []),
   ].join("\n");
 
@@ -2225,9 +2382,9 @@ const decisionMode =
   return {
     ok: true,
     patchPreview,
-    warnings: visibleWarnings,
+    warnings: syncedVisibleWarnings,
     developerConfidence,
-    developerRisk: mergedDeveloperRisk,
+    developerRisk: finalDeveloperRisk,
     intentMismatch: {
       hasMismatch: intentMismatchDecision.hasMismatch,
       severity: intentMismatchDecision.severity,

@@ -78,4 +78,40 @@ describe("resolveSafetyLevel", () => {
 
     expect(result.safetyLevel).toBe("safe_with_review");
   });
+
+  it("does not escalate a tiny low-risk patch into high_risk_blocked", () => {
+    const result = resolveSafetyLevel(
+      buildInput({
+        developerConfidence: 95,
+        decisionMode: "safe_to_apply",
+        developerRiskScore: 20,
+        intentMismatch: {
+          hasMismatch: false,
+          severity: "none",
+        },
+        patchQuality: {
+          qualityScore: 96,
+        },
+      })
+    );
+
+    expect(result.safetyLevel).toBe("safe_with_review");
+    expect(result.safetyLevel).not.toBe("high_risk_blocked");
+    expect(result.safetyReasons).toContain(
+      "Non-zero risk score keeps the patch reviewable."
+    );
+  });
+
+  it("keeps true high-risk cases blocked", () => {
+    const result = resolveSafetyLevel(
+      buildInput({
+        developerRiskScore: 85,
+      })
+    );
+
+    expect(result.safetyLevel).toBe("high_risk_blocked");
+    expect(result.safetyReasons).toContain(
+      "Risk score exceeded the high-risk threshold."
+    );
+  });
 });

@@ -516,7 +516,7 @@ describe("runLlmPatchFlow", () => {
         })
       );
       expect(result.patchQuality?.qualityScore).toBeLessThan(80);
-      expect(result.developerRisk?.score).toBeGreaterThan(0);
+      expect(result.developerRisk?.score).toBeGreaterThanOrEqual(31);
       expect(result.developerRisk?.breakdown.massScope).toBeGreaterThan(0);
       expect(result.warnings).toContain(
         "Micro-edit task produced a larger-than-expected patch."
@@ -1004,7 +1004,240 @@ describe("runLlmPatchFlow", () => {
       expect(result.patchQuality?.qualityWarnings).not.toContain(
         "Patch does not introduce reusable class-based styling"
       );
-      expect(result.decisionMode).toBe("preview_only");
+      expect(result.decisionMode).toBe("safe_to_apply");
+    }
+  });
+
+  it("does not inflate small localized critical-domain patches into high risk", async () => {
+    const files = [buildRepoFile("src/components/LoginCard.tsx", "frontend")];
+    const originalContent = [
+      "export function LoginCard() {",
+      '  return <button className="login-card__button">Continue</button>;',
+      "}",
+    ].join("\n");
+    const updatedContent = [
+      "export function LoginCard() {",
+      '  return <button className="login-card__button login-card__button--compact">Continue</button>;',
+      "}",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React auth UI"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 32 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Tighten auth button spacing",
+      steps: ["Adjust one auth button class"],
+      suggestedFiles: [
+        { path: "src/components/LoginCard.tsx", reason: "Auth UI button", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, originalContent]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Adjust login button spacing",
+      patches: [
+        {
+          path: "src/components/LoginCard.tsx",
+          operation: "modify",
+          summary: "Add a compact button modifier class",
+          targetHint: "login button",
+          contentPreview: "button class tweak",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      summary: "Generated content",
+      warnings: [],
+      filePath: "src/components/LoginCard.tsx",
+      fullContent: updatedContent,
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "adjust auth button spacing in the login card",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.developerRisk).toEqual({
+        score: 20,
+        breakdown: {
+          destructive: 0,
+          schema: 0,
+          massScope: 0,
+        },
+      });
+      expect(result.safetyResolution).toEqual(
+        expect.objectContaining({
+          safetyLevel: "safe_with_review",
+        })
+      );
+      expect(result.warnings.join("\n")).not.toContain("[HIGH_RISK] Task risk score");
+      expect(result.warnings.join("\n")).not.toContain("destructive");
+      expect(result.warnings.join("\n")).not.toContain("mass_scope");
+    }
+  });
+
+  it("keeps a tiny one-file badge addition in the low-risk range", async () => {
+    const files = [buildRepoFile("src/components/Header.tsx", "frontend")];
+    const originalContent = [
+      "export function Header() {",
+      "  return (",
+      '    <header className="header">',
+      '      <h1 className="title">Zone</h1>',
+      "    </header>",
+      "  );",
+      "}",
+    ].join("\n");
+    const updatedContent = [
+      "export function Header() {",
+      "  return (",
+      '    <header className="header">',
+      '      <h1 className="title">Zone <span className="badge">New</span></h1>',
+      "    </header>",
+      "  );",
+      "}",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React UI"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 28 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Add a small header badge",
+      steps: ["Add one inline badge element"],
+      suggestedFiles: [
+        { path: "src/components/Header.tsx", reason: "Header component", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, originalContent]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Add a small badge next to the title",
+      patches: [
+        {
+          path: "src/components/Header.tsx",
+          operation: "modify",
+          summary: "Add one small badge element",
+          targetHint: "header title",
+          contentPreview: "badge",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      summary: "Generated content",
+      warnings: [],
+      filePath: "src/components/Header.tsx",
+      fullContent: updatedContent,
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "add a small new badge next to the header title",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.developerRisk).toEqual({
+        score: 0,
+        breakdown: {
+          destructive: 0,
+          schema: 0,
+          massScope: 0,
+        },
+      });
+      expect(result.safetyResolution).toEqual(
+        expect.objectContaining({
+          safetyLevel: "safe_auto_apply",
+        })
+      );
+      expect(result.warnings.join("\n")).not.toContain("destructive");
+      expect(result.warnings.join("\n")).not.toContain("mass_scope");
+      expect(result.warnings.join("\n")).not.toContain("[HIGH_RISK] Task risk score");
+    }
+  });
+
+  it("keeps a tiny one-file text tweak out of high_risk_blocked", async () => {
+    const files = [buildRepoFile("src/components/Hero.tsx", "frontend")];
+    const originalContent = [
+      "export function Hero() {",
+      '  return <p className="hero-copy">Start building today.</p>;',
+      "}",
+    ].join("\n");
+    const updatedContent = [
+      "export function Hero() {",
+      '  return <p className="hero-copy">Start building with Zone today.</p>;',
+      "}",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React marketing UI"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 26 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Adjust hero copy",
+      steps: ["Update one sentence"],
+      suggestedFiles: [
+        { path: "src/components/Hero.tsx", reason: "Hero copy", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, originalContent]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Update one hero sentence",
+      patches: [
+        {
+          path: "src/components/Hero.tsx",
+          operation: "modify",
+          summary: "Replace one text string",
+          targetHint: "hero paragraph",
+          contentPreview: "copy tweak",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      summary: "Generated content",
+      warnings: [],
+      filePath: "src/components/Hero.tsx",
+      fullContent: updatedContent,
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "change one hero sentence to mention Zone",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.developerRisk).toEqual({
+        score: 0,
+        breakdown: {
+          destructive: 0,
+          schema: 0,
+          massScope: 0,
+        },
+      });
+      expect(result.safetyResolution).toEqual(
+        expect.objectContaining({
+          safetyLevel: "safe_auto_apply",
+        })
+      );
+      expect(result.safetyResolution?.safetyLevel).not.toBe("high_risk_blocked");
+      expect(result.warnings.join("\n")).not.toContain("destructive");
+      expect(result.warnings.join("\n")).not.toContain("mass_scope");
     }
   });
 
