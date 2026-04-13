@@ -20,6 +20,7 @@ import { enforceMicroEditProtection } from "../engine/microEditProtection.js";
 import { parseTaskIntent, type TaskIntent } from "./taskIntentParser.js";
 import type { ConversationBillingMode } from "../types/conversation.js";
 import type { RepoFile } from "../types/project.js";
+import { startZoneApiPerfRun } from "../api/zoneApiPerf.js";
 
 export type LlmPatchFlowResult =
   | {
@@ -1751,6 +1752,7 @@ export async function runLlmPatchFlow(input: {
   hostedContext?: HostedDeveloperContextInput;
   userOpenAiKey?: string;
   onProgress?: (stage: string) => void;
+  perfLabel?: string;
 }): Promise<LlmPatchFlowResult> {
   const reportProgress = (stage: string): void => {
     try {
@@ -1759,6 +1761,7 @@ export async function runLlmPatchFlow(input: {
       // keep progress reporting best-effort
     }
   };
+  const perf = startZoneApiPerfRun(input.perfLabel ?? "runLlmPatchFlow");
 
   const taskIntent =
     typeof input.task === "string" ? parseTaskIntent(input.task) : UNKNOWN_INTENT;
@@ -1781,7 +1784,9 @@ export async function runLlmPatchFlow(input: {
       allFiles = [];
     }
   }
+  perf.mark("repo scan ready");
   if (!input.hostedContext && allFiles.length === 0 && !isHostedEnvironment()) {
+    perf.finish("repo access blocked");
     return { ok: false, reason: "repo_not_accessible_in_hosted_mode" };
   }
   const developerContextFiles = allFiles.filter(
@@ -1791,6 +1796,7 @@ export async function runLlmPatchFlow(input: {
   // 2. Detect structure
   reportProgress("Detecting project structure...");
   const structure = detectProjectStructure(developerContextFiles);
+  perf.mark("project structure detected");
   const projectSummary =
     input.hostedContext?.repoSummary ||
     structure.notes.join(" ") ||
@@ -1804,6 +1810,7 @@ export async function runLlmPatchFlow(input: {
     files: developerContextFiles,
     intent: taskIntent,
   }).slice(0, 8);
+  perf.mark("relevant files ranked");
 
   const existingFilesSummary =
     input.hostedContext?.existingFilesSummary ??
@@ -1822,6 +1829,7 @@ export async function runLlmPatchFlow(input: {
   let llmPlan: Awaited<ReturnType<typeof planFeatureWithLlm>> | null = null;
   if (!input.hostedContext) {
     try {
+      perf.mark("feature model call start");
       llmPlan = await planFeatureWithLlm({
         task: input.task,
         intent: taskIntent,
@@ -1835,7 +1843,9 @@ export async function runLlmPatchFlow(input: {
         schemaAwareSummary: [],
         userOpenAiKey: input.userOpenAiKey,
       });
+      perf.mark("feature model response received");
     } catch (err) {
+      perf.finish("feature planning failed");
       const reason = err instanceof Error ? err.message : String(err);
       return { ok: false, reason };
     }
@@ -1885,11 +1895,13 @@ export async function runLlmPatchFlow(input: {
       content,
     }));
   }
+  perf.mark("file context loaded");
 
   // 6. Plan patch preview with LLM
   reportProgress("Planning patch preview...");
   let patchPlan: Awaited<ReturnType<typeof planPatchPreviewWithLlm>>;
   try {
+    perf.mark("patch preview model call start");
     patchPlan = await planPatchPreviewWithLlm({
       task: input.task,
       intent: taskIntent,
@@ -1900,7 +1912,9 @@ export async function runLlmPatchFlow(input: {
       schemaAwareSummary: [],
       userOpenAiKey: input.userOpenAiKey,
     });
+    perf.mark("patch preview model response received");
   } catch (err) {
+    perf.finish("patch preview failed");
     const reason = err instanceof Error ? err.message : String(err);
     return { ok: false, reason };
   }
@@ -1926,6 +1940,8 @@ export async function runLlmPatchFlow(input: {
   });
   if (vagueTask) {
     reportProgress("Ready");
+    perf.mark("decision evaluation complete");
+    perf.finish("vague task response ready");
     return {
       ok: true,
       patchPreview: DEVELOPER_VAGUE_TASK_WARNING,
@@ -2070,6 +2086,7 @@ export async function runLlmPatchFlow(input: {
         ? "micro_edit"
         : "standard";
 
+      perf.mark(`full patch model call start ${patch.path}`);
       const fullPatch = await planFullPatchWithLlm({
         task: input.task,
         filePath: patch.path,
@@ -2092,6 +2109,7 @@ export async function runLlmPatchFlow(input: {
           .filter(Boolean)
           .join("\n\n"),
       });
+      perf.mark(`full patch model response received ${patch.path}`);
       const nextContent =
         fullPatch.mode === "patch"
           ? (() => {
@@ -2186,6 +2204,7 @@ export async function runLlmPatchFlow(input: {
     }
 
     applyPatches = applyResults;
+    perf.mark("patch conversion complete");
   } catch (err) {
     // step 6b is best-effort — never block the preview result
     console.error(
@@ -2193,11 +2212,13 @@ export async function runLlmPatchFlow(input: {
       err instanceof Error ? err.message : String(err)
     );
     applyPatches = [];
+    perf.mark("patch conversion fallback complete");
   }
   console.log("[hosted] applyPatches count:", applyPatches.length);
 
   if (input.atomicPatch && patchResults.some((result) => result.status === "failed")) {
     reportProgress("Ready");
+    perf.finish("atomic patch failed");
     return { ok: false, reason: "atomic_patch_failed" };
   }
 
@@ -2427,6 +2448,7 @@ const decisionMode =
           ],
         }
       : safetyResolution;
+  perf.mark("decision evaluation complete");
 
   // 7. Build patchPreview string
   const patchPreview = [
@@ -2454,6 +2476,8 @@ const decisionMode =
 
   // 8. Return
   reportProgress("Ready");
+  perf.mark("response payload ready");
+  perf.finish("complete");
   return {
     ok: true,
     patchPreview,

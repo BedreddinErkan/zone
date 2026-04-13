@@ -45,6 +45,7 @@ import lemonWebhookRouter from "../routes/lemonsqueezyWebhook.js";
 import createLemonCheckoutRouter from "../routes/createLemonCheckout.js";
 import customerPortalRouter from "../routes/getLemonCustomerPortal.js";
 import { logRun } from "./runLogging.js";
+import { startZoneApiPerfRun } from "./zoneApiPerf.js";
 import {
   createDeveloperPatchJob,
   getDeveloperPatchJob,
@@ -1230,6 +1231,8 @@ app.get("/api/patch/jobs/:runId/result", async (req, res) => {
 });
 
 app.post("/api/patch", async (req, res) => {
+  const perf = startZoneApiPerfRun("/api/patch");
+  perf.mark("route entered");
   const userOpenAiKey = req.headers["x-user-openai-key"] as string | undefined;
   const isByok = Boolean(userOpenAiKey);
   if (shouldProxyHostedRequest(req, "/api/patch")) {
@@ -1239,6 +1242,7 @@ app.post("/api/patch", async (req, res) => {
       (typeof task === "string" && typeof repoPath === "string"
         ? await buildHostedDeveloperContext(task, repoPath)
         : undefined);
+    perf.mark("hosted context ready");
     await proxyHostedZoneRequest(req, res, "/api/patch", {
       bodyOverride: hostedContext
         ? {
@@ -1247,24 +1251,36 @@ app.post("/api/patch", async (req, res) => {
           }
         : req.body,
     });
+    perf.finish("proxied response sent");
     return;
   }
 
   const { task, repoPath, userId, hostedContext, conversationId, billingMode } =
     req.body;
+  perf.mark("request normalized");
 
   if (!task || !repoPath) {
+    perf.finish("bad request");
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
     return;
   }
 
   const authorization = await ensureRunAuthorized(userId, isByok);
+  perf.mark("authorization complete");
   if (!authorization.allowed) {
+    perf.finish("authorization blocked");
     res.status(authorization.status).json(authorization.body);
     return;
   }
 
-const result = await runLlmPatchFlow({ task, repoPath, hostedContext, userOpenAiKey });
+const result = await runLlmPatchFlow({
+  task,
+  repoPath,
+  hostedContext,
+  userOpenAiKey,
+  perfLabel: "/api/patch core",
+});
+perf.mark("core patch flow complete");
 
 if (result.ok && result.applyPatches.length > 0) {
   const validation = validateLlmOutput(
@@ -1274,7 +1290,9 @@ if (result.ok && result.applyPatches.length > 0) {
       content: p.fullContent,
     }))
   );
+  perf.mark("output validation complete");
   if (validation.verdict === "block") {
+    perf.finish("validation blocked");
     res.status(422).json({
       ok: false,
       reason: "Output validation failed — patch blocked.",
@@ -1311,8 +1329,11 @@ if (result.ok && result.applyPatches.length > 0) {
     if (loggedConversationId) {
       (result as Record<string, unknown>).conversationId = loggedConversationId;
     }
+    perf.mark("successful accounting complete");
   }
 
+perf.mark("response ready");
+perf.finish("complete");
 res.json(result);
 });
 app.post("/api/dry-run", async (req, res) => {
