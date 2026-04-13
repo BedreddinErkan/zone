@@ -100,6 +100,13 @@ async function processDeveloperPatchJob(
         ? result.developerConfidence
         : 0;
 
+    console.log("[zone-billing-debug] execution success reached", {
+      routeName: "/api/patch/jobs worker",
+      userId: requestPayload.userId,
+      billingMode: requestPayload.billingMode ?? null,
+      isByok: Boolean(requestPayload.isByok),
+    });
+
     const conversationId = await logRun({
       userId: requestPayload.userId,
       role: "developer",
@@ -114,6 +121,7 @@ async function processDeveloperPatchJob(
       conversationId: requestPayload.conversationId,
       billingMode: requestPayload.billingMode,
       isByok: requestPayload.isByok,
+      routeName: "/api/patch/jobs worker",
     }).catch(() => null);
 
     if (conversationId) {

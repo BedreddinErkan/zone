@@ -504,6 +504,14 @@ async function handleCheckAccess(req: express.Request, res: express.Response): P
   const repoPath =
     typeof req.query.repoPath === "string" ? req.query.repoPath : undefined;
   const role = typeof req.query.role === "string" ? req.query.role : undefined;
+  console.log("[zone-billing-debug] preflight check start", {
+    routeName: "/api/check-access",
+    userId: userId || null,
+    billingMode: billingMode ?? null,
+    isByok: isTruthyByok(req.query.isByok),
+    repoPath: repoPath ?? null,
+    role: role ?? null,
+  });
   const authorization = await ensureRunAuthorized(
       userId,
     isTruthyByok(req.query.isByok),
@@ -515,9 +523,21 @@ async function handleCheckAccess(req: express.Request, res: express.Response): P
     }
   );
   if (authorization.allowed) {
+    console.log("[zone-billing-debug] preflight check allowed", {
+      routeName: "/api/check-access",
+      userId: userId || null,
+      billingMode: billingMode ?? null,
+    });
     res.json({ ok: true });
     return;
   }
+  console.log("[zone-billing-debug] preflight check blocked", {
+    routeName: "/api/check-access",
+    userId: userId || null,
+    billingMode: billingMode ?? null,
+    status: authorization.status,
+    reason: authorization.body.reason,
+  });
   res.status(authorization.status).json(authorization.body);
 }
 
@@ -800,18 +820,27 @@ async function ensureRunAuthorized(
         ? data.free_limit
         : Number(data.free_limit ?? FREE_PLAN_RUN_LIMIT);
 
-      const subscriptionStatus = normalizeSubscriptionStatus(
-        data.subscription_status
-      );
-      const billingAction = resolveBillingAction({
-        mode: resolvedBillingMode,
-        hasPaidAccess: hasPaidAccess(subscriptionStatus),
-      });
-      if (billingAction === "FREE") {
-        return { allowed: true };
-      }
+    const subscriptionStatus = normalizeSubscriptionStatus(data.subscription_status);
+    const paidAccess = hasPaidAccess(subscriptionStatus);
+    const billingAction = resolveBillingAction({
+      mode: resolvedBillingMode,
+      hasPaidAccess: paidAccess,
+    });
+    console.log("[zone-billing-debug] authorization resolved", {
+      routeName: "ensureRunAuthorized",
+      userId: authenticatedUserId,
+      billingMode: resolvedBillingMode,
+      subscriptionStatus,
+      hasPaidAccess: paidAccess,
+      billingAction,
+      runsUsedThisMonth,
+      freeLimit,
+    });
+    if (billingAction === "FREE") {
+      return { allowed: true };
+    }
 
-      if (hasPaidAccess(subscriptionStatus)) {
+    if (paidAccess) {
       if (
         (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0) >=
         PRO_PLAN_RUN_LIMIT
@@ -1281,6 +1310,13 @@ if (result.ok && result.applyPatches.length > 0) {
         ? result.developerConfidence
         : 0;
 
+    console.log("[zone-billing-debug] execution success reached", {
+      routeName: "/api/patch",
+      userId: typeof userId === "string" ? userId.trim() : null,
+      billingMode: billingMode ?? null,
+      isByok,
+    });
+
     const loggedConversationId = await logRun({
       userId,
       role: "developer",
@@ -1293,6 +1329,7 @@ if (result.ok && result.applyPatches.length > 0) {
       conversationId,
       billingMode,
       isByok,
+      routeName: "/api/patch",
     }).catch(() => null);
 
     if (loggedConversationId) {
@@ -1384,6 +1421,13 @@ if (result.applyPatches.length > 0) {
       ? result.developerConfidence
       : 0;
 
+  console.log("[zone-billing-debug] execution success reached", {
+    routeName: "/api/dry-run",
+    userId: typeof userId === "string" ? userId.trim() : null,
+    billingMode: billingMode ?? null,
+    isByok,
+  });
+
   const loggedConversationId = await logRun({
     userId,
     role: "developer",
@@ -1396,6 +1440,7 @@ if (result.applyPatches.length > 0) {
     conversationId,
     billingMode,
     isByok,
+    routeName: "/api/dry-run",
   }).catch(() => null);
 
   if (loggedConversationId) {
@@ -1527,6 +1572,13 @@ if (result.ok && result.applyPatches) {
   }
 }
     if (result.ok) {
+const normalizedUserId = typeof userId === "string" ? userId.trim() : null;
+console.log("[zone-billing-debug] execution success reached", {
+  routeName: "/api/test-engineer",
+  userId: normalizedUserId,
+  billingMode: billingMode ?? null,
+  isByok,
+});
 const loggedConversationId = await logRun({
   userId,
   role: "test_engineer",
@@ -1541,6 +1593,7 @@ const loggedConversationId = await logRun({
   conversationId,
   billingMode,
   isByok,
+  routeName: "/api/test-engineer",
 }).catch(() => null);
 
       if (loggedConversationId) {
@@ -1621,6 +1674,13 @@ const result = await runDataAnalystFlow({
       result.reason = getDataAnalystUserFacingReason(result.reason);
     }
     if (result.ok) {
+  const normalizedUserId = typeof userId === "string" ? userId.trim() : null;
+  console.log("[zone-billing-debug] execution success reached", {
+    routeName: "/api/data-analyst",
+    userId: normalizedUserId,
+    billingMode: billingMode ?? null,
+    isByok,
+  });
   const loggedConversationId = await logRun({
   userId,
   role: "data_analyst",
@@ -1635,6 +1695,7 @@ const result = await runDataAnalystFlow({
   conversationId,
   billingMode,
   isByok,
+  routeName: "/api/data-analyst",
 }).catch(() => null);
 
       if (loggedConversationId) {

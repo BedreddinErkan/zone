@@ -21,6 +21,7 @@ export type RunLogInput = {
   conversationId?: string;
   billingMode?: ConversationBillingMode;
   isByok?: boolean;
+  routeName?: string;
 };
 
 function getSupabaseClient(): SupabaseClient | null {
@@ -44,6 +45,15 @@ function normalizeSubscriptionStatus(value: unknown): "free" | "pro" {
     : "free";
 }
 
+function logBillingDebug(message: string, details?: Record<string, unknown>): void {
+  if (details && Object.keys(details).length > 0) {
+    console.log(`[zone-billing-debug] ${message}`, details);
+    return;
+  }
+
+  console.log(`[zone-billing-debug] ${message}`);
+}
+
 export async function logRun(input: RunLogInput): Promise<string | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
@@ -59,6 +69,14 @@ export async function logRun(input: RunLogInput): Promise<string | null> {
   if (!effectiveUserId) {
     return null;
   }
+
+  logBillingDebug("logRun start", {
+    routeName: input.routeName ?? "unknown",
+    userId: effectiveUserId,
+    billingMode: input.billingMode ?? null,
+    isByok: Boolean(input.isByok),
+    decisionMode: input.decisionMode,
+  });
 
   await supabase.from("run_logs").insert({
     user_id: effectiveUserId,
@@ -93,6 +111,9 @@ export async function logRun(input: RunLogInput): Promise<string | null> {
       : { data: null, error: null };
   const hasPaidAccess =
     normalizeSubscriptionStatus(profileResult.data?.subscription_status) === "pro";
+  const normalizedSubscriptionStatus = normalizeSubscriptionStatus(
+    profileResult.data?.subscription_status
+  );
   let conversation =
     typeof input.conversationId === "string" && input.conversationId.trim()
       ? await getConversationById(supabase, input.conversationId.trim())
@@ -119,18 +140,50 @@ export async function logRun(input: RunLogInput): Promise<string | null> {
     hasPaidAccess,
   });
 
+  logBillingDebug("billing action resolved", {
+    routeName: input.routeName ?? "unknown",
+    userId: effectiveUserId,
+    effectiveBillingMode: billingMode,
+    subscriptionStatus: normalizedSubscriptionStatus,
+    hasPaidAccess,
+    billingAction,
+  });
+
   if (billingAction === "FREE") {
+    logBillingDebug("deduction skipped", {
+      routeName: input.routeName ?? "unknown",
+      userId: effectiveUserId,
+      reason: "billing_action_free",
+    });
     return conversation.id;
   }
 
+  logBillingDebug("deduction rpc start", {
+    routeName: input.routeName ?? "unknown",
+    userId: effectiveUserId,
+    credits: 1,
+  });
   const rpcResult = await supabase.rpc("deduct_credits_and_increment_runs", {
     p_user_id: effectiveUserId,
     p_credits: 1,
   });
 
   if (rpcResult?.error) {
+    logBillingDebug("deduction rpc error", {
+      routeName: input.routeName ?? "unknown",
+      userId: effectiveUserId,
+      error:
+        rpcResult.error instanceof Error
+          ? rpcResult.error.message
+          : String(rpcResult.error),
+    });
     return null;
   }
+
+  logBillingDebug("deduction rpc success", {
+    routeName: input.routeName ?? "unknown",
+    userId: effectiveUserId,
+  });
 
   await updateConversation(supabase, conversation.id, {
     chargedRunCount: conversation.chargedRunCount + 1,

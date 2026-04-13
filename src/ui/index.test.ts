@@ -852,7 +852,7 @@ describe("UI repo folder picker", () => {
 
     expect(context.fetch).toHaveBeenNthCalledWith(
       1,
-      "/api/check-access?userId=user_real_123"
+      "/api/check-access?userId=user_real_123&billingMode=hosted"
     );
   });
 });
@@ -1985,10 +1985,52 @@ describe("UI progress feedback", () => {
       "/api/patch/jobs",
       expect.objectContaining({ method: "POST" })
     );
+    expect(context.fetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/check-access?userId=user_test_123&billingMode=hosted"
+    );
+    expect(
+      JSON.parse(String(context.fetch.mock.calls[1]?.[1]?.body ?? "{}"))
+    ).toEqual(
+      expect.objectContaining({
+        billingMode: "hosted",
+      })
+    );
     expect(context.fetch).toHaveBeenNthCalledWith(3, "/api/patch/jobs/job_123");
     expect(context.fetch).toHaveBeenNthCalledWith(4, "/api/patch/jobs/job_123/result");
     expect(elements.get("decisionBadge").className).toContain("safe");
     expect(elements.get("patchSection").classList.contains("hidden")).toBe(false);
+  });
+
+  it("propagates billingMode=byok for local inference developer execution", async () => {
+    const { context, elements, roleButtons } = buildUiHarness({
+      zone_inference_mode: "local",
+      zone_user_openai_key: "sk-user",
+    });
+    context.fetch = queueDeveloperAsyncRun(
+      vi.fn(),
+      developerPatchResponse({
+        developerConfidence: 82,
+        decisionMode: "safe_to_apply",
+      })
+    );
+    context.selectRole(roleButtons.developer);
+    elements.get("task").value = "fix login flow";
+    elements.get("repoPath").value = "C:/repo";
+
+    await context.execute();
+
+    expect(context.fetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/check-access?userId=user_test_123&billingMode=byok"
+    );
+    expect(
+      JSON.parse(String(context.fetch.mock.calls[1]?.[1]?.body ?? "{}"))
+    ).toEqual(
+      expect.objectContaining({
+        billingMode: "byok",
+      })
+    );
   });
 
   it("developer progress UI reflects the polled progress stage", async () => {

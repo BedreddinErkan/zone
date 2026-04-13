@@ -883,7 +883,7 @@ export function LoginForm() {
     expect(body.conversationId).toBe("conv_new");
   });
 
-  it("returns a conversationId for successful byok runs", async () => {
+  it("does not deduct for successful Pro + BYOK runs when billingMode is byok", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
@@ -945,12 +945,63 @@ export function LoginForm() {
         task: "fix login validation",
         repoPath: "C:/repo",
         userId: "clerk_user_123",
+        billingMode: "byok",
       }),
     });
 
     const body = await response.json();
     expect(response.status).toBe(200);
     expect(body.conversationId).toBe("conv_byok");
+    expect(supabaseRpcMock).not.toHaveBeenCalled();
+  });
+
+  it("still deducts for successful Hosted runs even when a user key header is present", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        runs_used_this_month: 12,
+        free_limit: 10,
+        subscription_status: "pro",
+      },
+      error: null,
+    });
+    runLlmPatchFlowMock.mockResolvedValue({
+      ok: true,
+      patchPreview: "=== LLM PATCH PREVIEW ===",
+      warnings: [],
+      developerConfidence: 78,
+      decisionMode: "safe_to_apply",
+      applyPatches: [],
+      patchResults: [],
+    });
+    supabaseInsertMock.mockResolvedValue({ error: null });
+    supabaseRpcMock.mockResolvedValue({ error: null });
+
+    const response = await fetch(`${baseUrl}/api/patch`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-User-OpenAI-Key": "sk-user",
+      },
+      body: JSON.stringify({
+        task: "fix login validation",
+        repoPath: "C:/repo",
+        userId: "clerk_user_123",
+        billingMode: "hosted",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => {
+      expect(supabaseRpcMock).toHaveBeenCalledWith(
+        "deduct_credits_and_increment_runs",
+        {
+          p_user_id: "clerk_user_123",
+          p_credits: 1,
+        }
+      );
+    });
   });
 
   it("skips Supabase logging silently when Supabase env is missing", async () => {
