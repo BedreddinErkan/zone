@@ -1,27 +1,16 @@
-import type { ConversationBillingMode, ConversationRecord } from "../types/conversation.js";
+import type { ConversationBillingMode } from "../types/conversation.js";
 
 export type BillingAction = "CHARGE" | "FREE";
 
 export interface ResolveBillingActionInput {
   mode: ConversationBillingMode;
-  conversation: Pick<
-    ConversationRecord,
-    "chargedRunCount" | "hasFreeRefinementBeenUsed"
-  >;
+  hasPaidAccess: boolean;
 }
 
 export function resolveBillingAction(
   input: ResolveBillingActionInput
 ): BillingAction {
-  if (input.mode === "byok") {
-    return "FREE";
-  }
-
-  if (input.conversation.chargedRunCount === 0) {
-    return "CHARGE";
-  }
-
-  if (!input.conversation.hasFreeRefinementBeenUsed) {
+  if (input.hasPaidAccess && input.mode === "byok") {
     return "FREE";
   }
 

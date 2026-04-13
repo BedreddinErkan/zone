@@ -151,6 +151,14 @@ describe("/api/test-engineer", () => {
       data: null,
       error: null,
     });
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        runs_used_this_month: 0,
+        free_limit: 10,
+        subscription_status: "free",
+      },
+      error: null,
+    });
     supabaseConversationCreateSingleMock.mockResolvedValue({
       data: {
         id: "conv_123",
@@ -878,6 +886,14 @@ export function LoginForm() {
   it("returns a conversationId for successful byok runs", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        runs_used_this_month: 250,
+        free_limit: 10,
+        subscription_status: "pro",
+      },
+      error: null,
+    });
     runLlmPatchFlowMock.mockResolvedValue({
       ok: true,
       patchPreview: "=== LLM PATCH PREVIEW ===",
@@ -1584,7 +1600,7 @@ export function LoginForm() {
     expect(body.reason).toBe("no_free_runs");
   });
 
-  it("allows a hosted valid continuation when free refinement is still unused and credits are 0", async () => {
+  it("blocks a hosted continuation when free credits are exhausted even if old refinement state exists", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
@@ -1616,11 +1632,11 @@ export function LoginForm() {
     );
 
     const body = await response.json();
-    expect(response.status).toBe(200);
-    expect(body).toEqual({ ok: true });
+    expect(response.status).toBe(402);
+    expect(body.reason).toBe("no_free_runs");
   });
 
-  it("blocks a hosted valid continuation when free refinement is already used and credits are 0", async () => {
+  it("still blocks a hosted continuation when old refinement state is already used", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
@@ -1656,7 +1672,7 @@ export function LoginForm() {
     expect(body.reason).toBe("no_free_runs");
   });
 
-  it("allows byok access even when hosted credits are exhausted", async () => {
+  it("blocks Free + BYOK when hosted credits are exhausted", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
@@ -1664,6 +1680,27 @@ export function LoginForm() {
         runs_used_this_month: 10,
         free_limit: 10,
         subscription_status: "free",
+      },
+      error: null,
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/check-access?userId=clerk_user_123&billingMode=byok`
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(402);
+    expect(body.reason).toBe("no_free_runs");
+  });
+
+  it("allows Pro + BYOK without hosted credits", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        runs_used_this_month: 250,
+        free_limit: 10,
+        subscription_status: "pro",
       },
       error: null,
     });

@@ -36,7 +36,6 @@ import {
   getInferenceMode,
   getModelName,
 } from "../llm/openaiClient.js";
-import { getConversationById } from "../billing/conversationRepository.js";
 import { resolveBillingAction } from "../billing/resolveBillingAction.js";
 import type { Response } from "express";
 import { c, colorize } from "../cli/colors.js";
@@ -746,10 +745,6 @@ async function ensureRunAuthorized(
         ? "byok"
         : "hosted";
 
-  if (resolvedBillingMode === "byok") {
-    return { allowed: true };
-  }
-
   const profilesTable = supabase.from("profiles") as unknown as {
     select?: (
       columns: string
@@ -808,45 +803,15 @@ async function ensureRunAuthorized(
       const subscriptionStatus = normalizeSubscriptionStatus(
         data.subscription_status
       );
-
-      if (
-        resolvedBillingMode === "hosted" &&
-        typeof options?.conversationId === "string" &&
-        options.conversationId.trim()
-      ) {
-        try {
-          const conversation = await getConversationById(
-            supabase,
-            options.conversationId.trim()
-          );
-
-          if (
-            conversation &&
-            conversation.repoPath === options?.repoPath &&
-            conversation.role === options?.role
-          ) {
-            const billingAction = resolveBillingAction({
-              mode: "hosted",
-              conversation: {
-                chargedRunCount: conversation.chargedRunCount,
-                hasFreeRefinementBeenUsed:
-                  conversation.hasFreeRefinementBeenUsed,
-              },
-            });
-
-            if (billingAction === "FREE") {
-              return { allowed: true };
-            }
-          }
-        } catch {
-          // Fall back to the existing hosted access behavior.
-        }
+      const billingAction = resolveBillingAction({
+        mode: resolvedBillingMode,
+        hasPaidAccess: hasPaidAccess(subscriptionStatus),
+      });
+      if (billingAction === "FREE") {
+        return { allowed: true };
       }
 
       if (hasPaidAccess(subscriptionStatus)) {
-        if (isByok) {
-        return { allowed: true };
-      }
       if (
         (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0) >=
         PRO_PLAN_RUN_LIMIT
@@ -1114,7 +1079,9 @@ app.post("/api/patch/jobs", async (req, res) => {
     return;
   }
 
-  const authorization = await ensureRunAuthorized(userId, isByok);
+  const authorization = await ensureRunAuthorized(userId, isByok, {
+    billingMode,
+  });
   if (!authorization.allowed) {
     res.status(authorization.status).json(authorization.body);
     return;
@@ -1265,7 +1232,9 @@ app.post("/api/patch", async (req, res) => {
     return;
   }
 
-  const authorization = await ensureRunAuthorized(userId, isByok);
+  const authorization = await ensureRunAuthorized(userId, isByok, {
+    billingMode,
+  });
   perf.mark("authorization complete");
   if (!authorization.allowed) {
     perf.finish("authorization blocked");
@@ -1360,7 +1329,9 @@ app.post("/api/dry-run", async (req, res) => {
   const { task, repoPath, userId, hostedContext, conversationId, billingMode } =
     req.body;
 
-  const authorization = await ensureRunAuthorized(userId, isByok);
+  const authorization = await ensureRunAuthorized(userId, isByok, {
+    billingMode,
+  });
   if (!authorization.allowed) {
     res.status(authorization.status).json(authorization.body);
     return;
@@ -1514,7 +1485,9 @@ const { task, repoPath, runId, userId, hostedContext, conversationId, billingMod
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
     return;
   }
-const authorization = await ensureRunAuthorized(userId, isByok);  if (!authorization.allowed) {
+const authorization = await ensureRunAuthorized(userId, isByok, {
+  billingMode,
+});  if (!authorization.allowed) {
     res.status(authorization.status).json(authorization.body);
     return;
   }
@@ -1609,7 +1582,9 @@ const { task, repoPath, runId, userId, hostedContext, conversationId, billingMod
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
     return;
   }
-const authorization = await ensureRunAuthorized(userId, isByok);  if (!authorization.allowed) {
+const authorization = await ensureRunAuthorized(userId, isByok, {
+  billingMode,
+});  if (!authorization.allowed) {
     res.status(authorization.status).json(authorization.body);
     return;
   }

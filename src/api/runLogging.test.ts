@@ -24,6 +24,7 @@ function createFakeSupabase() {
   const runLogs: Array<Record<string, unknown>> = [];
   const rpcCalls: Array<{ name: string; payload: Record<string, unknown> }> = [];
   const conversations = new Map<string, ConversationRow>();
+  let profileSubscriptionStatus: "free" | "pro" = "free";
 
   const now = () => new Date().toISOString();
 
@@ -113,6 +114,20 @@ function createFakeSupabase() {
           }),
         };
       }
+      if (table === "profiles") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: {
+                  subscription_status: profileSubscriptionStatus,
+                },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
 
       throw new Error(`Unexpected table: ${table}`);
     },
@@ -140,16 +155,21 @@ function createFakeSupabase() {
     });
   }
 
+  function setProfileSubscriptionStatus(status: "free" | "pro"): void {
+    profileSubscriptionStatus = status;
+  }
+
   return {
     supabase,
     runLogs,
     rpcCalls,
     conversations,
     seedConversation,
+    setProfileSubscriptionStatus,
   };
 }
 
-describe("logRun conversation-aware billing", () => {
+describe("logRun billing matrix", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
@@ -158,8 +178,9 @@ describe("logRun conversation-aware billing", () => {
     delete process.env.ZONE_USER_EMAIL;
   });
 
-  it("hosted first run without conversationId deducts credit, creates a charged conversation, and returns its id", async () => {
+  it("charges for Free + Hosted", async () => {
     const fake = createFakeSupabase();
+    fake.setProfileSubscriptionStatus("free");
     createClientMock.mockReturnValue(fake.supabase);
 
     const { logRun } = await import("./runLogging.js");
@@ -188,82 +209,78 @@ describe("logRun conversation-aware billing", () => {
         repo_path: "C:/repo",
         role: "developer",
         charged_run_count: 1,
-        refinement_count: 0,
-        has_free_refinement_been_used: false,
       }),
     ]);
   });
 
-  it("hosted second run on same conversation uses the free refinement", async () => {
+  it("charges for Free + BYOK", async () => {
     const fake = createFakeSupabase();
-    fake.seedConversation({
-      id: "conv_1",
-      charged_run_count: 1,
-      refinement_count: 0,
-      has_free_refinement_been_used: false,
-    });
+    fake.setProfileSubscriptionStatus("free");
     createClientMock.mockReturnValue(fake.supabase);
 
     const { logRun } = await import("./runLogging.js");
     const conversationId = await logRun({
       userId: "user_123",
       role: "developer",
-      task: "refine badge",
+      task: "byok free user run",
       repoPath: "C:/repo",
       decisionMode: "safe_to_apply",
       confidence: 88,
       creditsUsed: 1,
-      conversationId: "conv_1",
-      billingMode: "hosted",
+      billingMode: "byok",
+      isByok: true,
     });
 
-    expect(conversationId).toBe("conv_1");
-    expect(fake.rpcCalls).toEqual([]);
-    expect(fake.conversations.get("conv_1")).toEqual(
+    expect(conversationId).toBeTruthy();
+    expect(fake.rpcCalls).toEqual([
+      {
+        name: "deduct_credits_and_increment_runs",
+        payload: { p_user_id: "user_123", p_credits: 1 },
+      },
+    ]);
+    expect([...fake.conversations.values()]).toEqual([
       expect.objectContaining({
+        mode: "byok",
         charged_run_count: 1,
-        refinement_count: 1,
-        has_free_refinement_been_used: true,
       })
-    );
+    ]);
   });
 
-  it("hosted third run on same conversation after free refinement deducts again", async () => {
+  it("charges for Pro + Hosted", async () => {
     const fake = createFakeSupabase();
-    fake.seedConversation({
-      id: "conv_1",
-      charged_run_count: 1,
-      refinement_count: 1,
-      has_free_refinement_been_used: true,
-    });
+    fake.setProfileSubscriptionStatus("pro");
     createClientMock.mockReturnValue(fake.supabase);
 
     const { logRun } = await import("./runLogging.js");
     const conversationId = await logRun({
       userId: "user_123",
       role: "developer",
-      task: "another refinement",
+      task: "hosted pro run",
       repoPath: "C:/repo",
       decisionMode: "safe_to_apply",
       confidence: 88,
       creditsUsed: 1,
-      conversationId: "conv_1",
       billingMode: "hosted",
     });
 
-    expect(conversationId).toBe("conv_1");
-    expect(fake.rpcCalls).toHaveLength(1);
-    expect(fake.conversations.get("conv_1")).toEqual(
+    expect(conversationId).toBeTruthy();
+    expect(fake.rpcCalls).toEqual([
+      {
+        name: "deduct_credits_and_increment_runs",
+        payload: { p_user_id: "user_123", p_credits: 1 },
+      },
+    ]);
+    expect([...fake.conversations.values()]).toEqual([
       expect.objectContaining({
-        charged_run_count: 2,
-        refinement_count: 1,
-        has_free_refinement_been_used: true,
+        mode: "hosted",
+        charged_run_count: 1,
       })
-    );
+    ]);
   });
 
-  it("byok run does not deduct credit", async () => {
+  it("does not charge for Pro + BYOK", async () => {
     const fake = createFakeSupabase();
+    fake.setProfileSubscriptionStatus("pro");
     createClientMock.mockReturnValue(fake.supabase);
 
     const { logRun } = await import("./runLogging.js");
@@ -284,14 +301,13 @@ describe("logRun conversation-aware billing", () => {
       expect.objectContaining({
         mode: "byok",
         charged_run_count: 0,
-        refinement_count: 1,
-        has_free_refinement_been_used: false,
       }),
     ]);
   });
 
   it("creates a new conversation when a provided conversationId belongs to another repo or role", async () => {
     const fake = createFakeSupabase();
+    fake.setProfileSubscriptionStatus("free");
     fake.seedConversation({
       id: "conv_old",
       repo_path: "C:/other-repo",
@@ -317,11 +333,44 @@ describe("logRun conversation-aware billing", () => {
     expect(fake.conversations.get("conv_old")).toEqual(
       expect.objectContaining({
         charged_run_count: 1,
-        refinement_count: 0,
       })
     );
     expect(
       [...fake.conversations.values()].filter((item) => item.id !== "conv_old")
     ).toHaveLength(1);
+  });
+
+  it("ignores old conversation refinement counters for billing decisions", async () => {
+    const fake = createFakeSupabase();
+    fake.setProfileSubscriptionStatus("free");
+    fake.seedConversation({
+      id: "conv_existing",
+      mode: "byok",
+      charged_run_count: 99,
+      refinement_count: 42,
+      has_free_refinement_been_used: true,
+    });
+    createClientMock.mockReturnValue(fake.supabase);
+
+    const { logRun } = await import("./runLogging.js");
+    await logRun({
+      userId: "user_123",
+      role: "developer",
+      task: "legacy conversation counters should not matter",
+      repoPath: "C:/repo",
+      decisionMode: "safe_to_apply",
+      confidence: 90,
+      creditsUsed: 1,
+      conversationId: "conv_existing",
+      billingMode: "byok",
+      isByok: true,
+    });
+
+    expect(fake.rpcCalls).toEqual([
+      {
+        name: "deduct_credits_and_increment_runs",
+        payload: { p_user_id: "user_123", p_credits: 1 },
+      },
+    ]);
   });
 });

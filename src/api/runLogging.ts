@@ -38,6 +38,12 @@ function resolveBillingMode(input: RunLogInput): ConversationBillingMode {
   return input.isByok ? "byok" : "hosted";
 }
 
+function normalizeSubscriptionStatus(value: unknown): "free" | "pro" {
+  return typeof value === "string" && value.trim().toLowerCase() === "pro"
+    ? "pro"
+    : "free";
+}
+
 export async function logRun(input: RunLogInput): Promise<string | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
@@ -66,6 +72,27 @@ export async function logRun(input: RunLogInput): Promise<string | null> {
   });
 
   const billingMode = resolveBillingMode(input);
+  const profilesTable = supabase.from("profiles") as unknown as {
+    select?: (
+      columns: string
+    ) => {
+      eq?: (column: string, value: string) => {
+        maybeSingle?: () => Promise<{
+          data: { subscription_status?: string | null } | null;
+          error?: unknown;
+        }>;
+      };
+    };
+  };
+  const profileQuery = profilesTable
+    .select?.("subscription_status")
+    ?.eq?.("clerk_user_id", effectiveUserId);
+  const profileResult =
+    profileQuery && typeof profileQuery.maybeSingle === "function"
+      ? await profileQuery.maybeSingle().catch(() => ({ data: null, error: null }))
+      : { data: null, error: null };
+  const hasPaidAccess =
+    normalizeSubscriptionStatus(profileResult.data?.subscription_status) === "pro";
   let conversation =
     typeof input.conversationId === "string" && input.conversationId.trim()
       ? await getConversationById(supabase, input.conversationId.trim())
@@ -89,18 +116,10 @@ export async function logRun(input: RunLogInput): Promise<string | null> {
 
   const billingAction = resolveBillingAction({
     mode: billingMode,
-    conversation: {
-      chargedRunCount: conversation.chargedRunCount,
-      hasFreeRefinementBeenUsed: conversation.hasFreeRefinementBeenUsed,
-    },
+    hasPaidAccess,
   });
 
   if (billingAction === "FREE") {
-    await updateConversation(supabase, conversation.id, {
-      refinementCount: conversation.refinementCount + 1,
-      hasFreeRefinementBeenUsed:
-        billingMode === "hosted" ? true : conversation.hasFreeRefinementBeenUsed,
-    });
     return conversation.id;
   }
 
