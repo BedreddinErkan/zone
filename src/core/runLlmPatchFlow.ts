@@ -631,6 +631,10 @@ type TaskRiskResult = ReturnType<typeof computeRiskScore>;
 const REWRITE_SUSPICION_MIN_TOTAL_LINES = 20;
 const REWRITE_SUSPICION_MIN_CHANGED_LINES = 12;
 
+function logRiskDebug(label: string, payload: Record<string, unknown>): void {
+  console.log(`[zone-debug] ${label}: ${JSON.stringify(payload)}`);
+}
+
 export function analyzePatchScope(input: {
   applyPatches: Array<{ filePath: string; fullContent: string }>;
   originalContents: Record<string, string>;
@@ -1913,6 +1917,10 @@ export async function runLlmPatchFlow(input: {
   const vagueTask = isVagueDeveloperTask(input.task);
   // Task-level risk scoring for developer
   const taskRiskResult = computeRiskScore({ task: input.task, role: "developer" });
+  logRiskDebug("runLlmPatchFlow taskRiskResult", {
+    task: input.task,
+    taskRiskResult,
+  });
   if (vagueTask) {
     reportProgress("Ready");
     return {
@@ -2240,6 +2248,14 @@ export async function runLlmPatchFlow(input: {
     taskRiskResult,
     patchScope,
   });
+  logRiskDebug("runLlmPatchFlow after task-risk adjustments", {
+    task: input.task,
+    patchScope,
+    taskRiskResult,
+    effectiveTaskRiskResult,
+    intentMismatchRisk: intentMismatch.risk,
+    uiMappingRisk: uiMappingRisk.risk,
+  });
   if (intentMismatch.warnings.length > 0) {
     internalWarnings.push(...intentMismatch.warnings);
     visibleWarnings.push(...intentMismatch.warnings);
@@ -2350,6 +2366,22 @@ const finalDeveloperRisk = {
   ...mergedDeveloperRisk,
   score: finalDeveloperRiskScore,
 };
+logRiskDebug("runLlmPatchFlow final risk", {
+  task: input.task,
+  patchScope,
+  mergedDeveloperRisk,
+  finalDeveloperRisk,
+  decisionMode:
+    hasBlockedPatch ||
+    vagueTask ||
+    microEditProtection.shouldForcePreview ||
+    intentMismatchDecision.forcePreviewOnly ||
+    uiMappingRisk.forcePreviewOnly ||
+    developerConfidence < 70 ||
+    finalDeveloperRisk.score >= 31
+      ? "preview_only"
+      : "safe_to_apply",
+});
 syncedInternalWarnings = syncDeveloperRiskWarnings({
   warnings: syncedInternalWarnings,
   developerRisk: finalDeveloperRisk,

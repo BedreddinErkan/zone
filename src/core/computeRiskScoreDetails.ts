@@ -4,6 +4,10 @@ type ComputeRiskScoreDetailsInput = {
   task: string;
 };
 
+function logRiskDebug(label: string, payload: Record<string, unknown>): void {
+  console.log(`[zone-debug] ${label}: ${JSON.stringify(payload)}`);
+}
+
 function clampScore(value: number): number {
   if (value < 0) return 0;
   if (value > 100) return 100;
@@ -199,6 +203,21 @@ export function computeRiskScoreDetails(
   if (hasMassScopeSignal) {
     detectedSignals.push("mass_scope");
   }
+
+  logRiskDebug("computeRiskScoreDetails result", {
+    task: input.task,
+    normalizedTask,
+    destructiveWeight,
+    hasCriticalSignal,
+    hasLowRiskSignal,
+    hasSchemaSignal,
+    hasScopeWord,
+    hasMassScopeSignal,
+    riskBreakdown,
+    detectedSignals,
+    compoundPenalty,
+    riskScore,
+  });
 
   return {
     riskScore,

@@ -31,6 +31,10 @@ type ComputeRiskScoreInput = {
   role?: string;
 };
 
+function logRiskDebug(label: string, payload: Record<string, unknown>): void {
+  console.log(`[zone-debug] ${label}: ${JSON.stringify(payload)}`);
+}
+
 const ROLE_MODIFIERS: Record<string, RoleModifier> = {
   test_engineer: {
     destructiveMultiplier: 0.3,
@@ -108,6 +112,18 @@ export function computeRiskScore(
         details.compoundPenalty
     )
   );
+
+  logRiskDebug("computeRiskScore result", {
+    task,
+    role,
+    details,
+    destructiveScore,
+    schemaScore,
+    criticalScore,
+    massScopeScore,
+    adjustedScore,
+    signals,
+  });
 
   return {
     score: adjustedScore,
