@@ -1720,4 +1720,63 @@ describe("runLlmPatchFlow", () => {
     }
     expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
   });
+
+  it("skips full patch generation for safe single-file preview patches", async () => {
+    const files = [buildRepoFile("src/pages/home.html", "frontend")];
+    const currentHtml =
+      '<body><button class="exec-btn">Execute</button><span class="status">Ready</span></body>';
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["Static UI"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 40 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Add badge",
+      steps: ["Add a tiny status badge"],
+      suggestedFiles: [
+        { path: "src/pages/home.html", reason: "Main UI file", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, currentHtml]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Add a tiny badge",
+      patches: [
+        {
+          path: "src/pages/home.html",
+          operation: "modify",
+          summary: "Append a tiny badge next to status text",
+          targetHint: "status span",
+          contentPreview:
+            "--- FIND ---\n<span class=\"status\">Ready</span>\n--- REPLACE ---\n<span class=\"status\">Ready <span class=\"badge\">New</span></span>",
+        },
+      ],
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "add a tiny badge next to the ready status text",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.applyPatches).toHaveLength(1);
+      expect(result.applyPatches[0].fullContent).toContain(
+        '<span class="badge">New</span>'
+      );
+      expect(result.developerRisk).toEqual(
+        expect.objectContaining({
+          breakdown: {
+            destructive: 0,
+            schema: 0,
+            massScope: 0,
+          },
+        })
+      );
+    }
+    expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
+  });
 });

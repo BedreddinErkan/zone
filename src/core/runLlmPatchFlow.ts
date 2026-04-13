@@ -1578,6 +1578,46 @@ function applyDeveloperPatchText(
   return { ok: true, fullContent: updatedContent };
 }
 
+const SAFE_PREVIEW_REUSE_MAX_CHARS = 4000;
+
+function canReusePatchPreviewAsFinalPatch(input: {
+  patchCount: number;
+  contentPreview: string;
+  taskRiskResult: TaskRiskResult;
+}): boolean {
+  return (
+    input.patchCount === 1 &&
+    input.taskRiskResult.score === 0 &&
+    input.taskRiskResult.breakdown.destructive === 0 &&
+    input.taskRiskResult.breakdown.schema === 0 &&
+    input.taskRiskResult.breakdown.massScope === 0 &&
+    input.contentPreview.trim().length > 0 &&
+    input.contentPreview.length <= SAFE_PREVIEW_REUSE_MAX_CHARS
+  );
+}
+
+function buildApplyPatchFromPreview(input: {
+  patch: { operation: "create" | "modify"; contentPreview: string };
+  currentContent: string;
+}): { ok: true; fullContent: string } | { ok: false } {
+  if (input.patch.operation === "create" && !input.currentContent.trim()) {
+    return {
+      ok: true,
+      fullContent: input.patch.contentPreview,
+    };
+  }
+
+  const applied = applyDeveloperPatchText(
+    input.currentContent,
+    input.patch.contentPreview
+  );
+  if (!applied.ok) {
+    return { ok: false };
+  }
+
+  return applied;
+}
+
 function detectSuspiciousUiOverwrite(input: {
   task: string;
   filePath: string;
@@ -2085,34 +2125,51 @@ export async function runLlmPatchFlow(input: {
       const normalizedTaskIntentForPrompt = detectMicroEditIntent(input.task)
         ? "micro_edit"
         : "standard";
-
-      perf.mark(`full patch model call start ${patch.path}`);
-      const fullPatch = await planFullPatchWithLlm({
-        task: input.task,
-        filePath: patch.path,
-        fileContent: llmFileContent,
-        repoSummary: projectSummary,
-        repoPath: input.repoPath,
-        taskIntent: taskIntent.normalizedTask || taskIntent.action,
-        normalizedTaskIntent: normalizedTaskIntentForPrompt,
-        relevantFiles: targetedRelevantFiles,
-        existingTargetFiles: allFiles.map((file) => file.path),
-        userOpenAiKey: input.userOpenAiKey,
-        relatedContext: [
-          contextWindow
-            ? `// CONTEXT WINDOW: lines ${contextWindow.startLine}-${contextWindow.endLine} of ${contextWindow.totalLines} total`
-            : "",
-          patch.summary,
-          resolvedPageObjectContext,
-          "IMPORTANT: Do NOT remove or rewrite existing functions, classes, or methods unless the task explicitly asks you to. Only add or modify what is necessary. Preserve all existing code structure, comments, and patterns.",
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
-      });
-      perf.mark(`full patch model response received ${patch.path}`);
-      const nextContent =
-        fullPatch.mode === "patch"
-          ? (() => {
+      const safePreviewPatch =
+        canReusePatchPreviewAsFinalPatch({
+          patchCount: patchPlan.patches.length,
+          contentPreview: patch.contentPreview,
+          taskRiskResult,
+        })
+          ? buildApplyPatchFromPreview({
+              patch,
+              currentContent: fileContent,
+            })
+          : { ok: false as const };
+      if (safePreviewPatch.ok) {
+        console.log(
+          "[zone-api] skipping full patch generation (safe micro edit)"
+        );
+      }
+      const nextContent = safePreviewPatch.ok
+        ? safePreviewPatch.fullContent
+        : await (() => {
+            perf.mark(`full patch model call start ${patch.path}`);
+            return planFullPatchWithLlm({
+              task: input.task,
+              filePath: patch.path,
+              fileContent: llmFileContent,
+              repoSummary: projectSummary,
+              repoPath: input.repoPath,
+              taskIntent: taskIntent.normalizedTask || taskIntent.action,
+              normalizedTaskIntent: normalizedTaskIntentForPrompt,
+              relevantFiles: targetedRelevantFiles,
+              existingTargetFiles: allFiles.map((file) => file.path),
+              userOpenAiKey: input.userOpenAiKey,
+              relatedContext: [
+                contextWindow
+                  ? `// CONTEXT WINDOW: lines ${contextWindow.startLine}-${contextWindow.endLine} of ${contextWindow.totalLines} total`
+                  : "",
+                patch.summary,
+                resolvedPageObjectContext,
+                "IMPORTANT: Do NOT remove or rewrite existing functions, classes, or methods unless the task explicitly asks you to. Only add or modify what is necessary. Preserve all existing code structure, comments, and patterns.",
+              ]
+                .filter(Boolean)
+                .join("\n\n"),
+            });
+          })().then((fullPatch) => {
+            perf.mark(`full patch model response received ${patch.path}`);
+            if (fullPatch.mode === "patch") {
               const appliedPatch = applyDeveloperPatchText(
                 fileContent,
                 fullPatch.patchText
@@ -2139,8 +2196,9 @@ export async function runLlmPatchFlow(input: {
                 return null;
               }
               return appliedPatch.fullContent;
-            })()
-          : fullPatch.fullContent;
+            }
+            return fullPatch.fullContent;
+          });
 
       if (nextContent === null) {
         continue;
