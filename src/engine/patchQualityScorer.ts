@@ -4,6 +4,8 @@ import type {
   TaskIntent,
 } from "./intentMismatchDetector.js";
 import type { DesignSystemSignals } from "./designSystemSignals.js";
+import { validatePatchScope } from "./patchScopeValidator.js";
+import type { PatchIntentType } from "./patchScopeValidator.js";
 
 export interface PatchQualityScorerInput {
   taskIntent: TaskIntent;
@@ -33,6 +35,9 @@ export function scorePatchQuality(
   input: PatchQualityScorerInput
 ): PatchQualityScorerResult {
   let patchSizeScore = 100;
+  const scopeIntentType: PatchIntentType =
+    (input.taskIntent as { codeIntent?: PatchIntentType }).codeIntent ??
+    (input.taskIntent === "micro_edit" ? "micro_edit" : "unknown");
   let structurePreservationScore = 100;
   let designSystemComplianceScore = 100;
   let semanticAlignmentScore = 100;
@@ -50,6 +55,16 @@ export function scorePatchQuality(
     patchSizeScore -= 18;
   } else if (input.patchScope.changedFileCount > 1) {
     patchSizeScore -= 10;
+  }
+
+  const scopeResult = validatePatchScope(
+    scopeIntentType,
+    input.patchScope.totalChangedLines,
+    input.patchScope.changedFileCount
+  );
+  patchSizeScore -= scopeResult.confidencePenalty;
+  if (scopeResult.hasHardViolation || scopeResult.hasSoftViolation) {
+    qualityWarnings.push(...scopeResult.violations.map((v) => v.message));
   }
 
   if (input.patchScope.rewriteLikeSuspicion) {

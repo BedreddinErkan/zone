@@ -1,3 +1,13 @@
+export type CodePatchIntent =
+  | "micro_edit"
+  | "style_change"
+  | "bug_fix"
+  | "feature_add"
+  | "refactor"
+  | "test_add"
+  | "config_change"
+  | "unknown";
+
 export type CrudAction = "create" | "update" | "delete" | "read" | "unknown";
 export type ResourceScope =
   | "single_item"
@@ -23,6 +33,7 @@ export interface TaskIntent {
   routeHints: string[];
   paramHints: string[];
   warnings: string[];
+  codeIntent: CodePatchIntent;
 }
 
 const UPDATE_WORDS = ["edit", "update", "modify", "change", "patch"];
@@ -222,6 +233,18 @@ export function parseTaskIntent(rawTask: string): TaskIntent {
     );
   }
 
+  function detectCodePatchIntent(task: string): CodePatchIntent {
+    const t = task.toLowerCase();
+    if (/\b(typo|spacing|padding|margin|gap|alignment|label|placeholder|wording)\b/.test(t)) return "micro_edit";
+    if (/\b(style|css|color|font|theme|ui tweak|visual)\b/.test(t)) return "style_change";
+    if (/\b(fix|bug|error|broken|crash|issue|not working)\b/.test(t)) return "bug_fix";
+    if (/\b(add|create|implement|build|new feature|new component)\b/.test(t)) return "feature_add";
+    if (/\b(refactor|clean up|reorganize|restructure|rename)\b/.test(t)) return "refactor";
+    if (/\b(test|spec|coverage|unit test|integration test)\b/.test(t)) return "test_add";
+    if (/\b(config|env|setting|environment|\.env)\b/.test(t)) return "config_change";
+    return "unknown";
+  }
+
   return {
     rawTask,
     normalizedTask,
@@ -234,6 +257,7 @@ export function parseTaskIntent(rawTask: string): TaskIntent {
     destructiveRisk,
     routeHints: matchedNestedConfig?.routeHints ?? [],
     paramHints: matchedNestedConfig?.paramHints ?? [],
-    warnings
+    warnings,
+    codeIntent: detectCodePatchIntent(rawTask),
   };
 }

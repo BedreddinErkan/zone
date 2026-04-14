@@ -29,6 +29,7 @@ export type ComputeRiskScoreResult = {
 type ComputeRiskScoreInput = {
   task: string;
   role?: string;
+  codeIntent?: import("./taskIntentParser.js").CodePatchIntent;
 };
 
 function logRiskDebug(label: string, payload: Record<string, unknown>): void {
@@ -71,7 +72,10 @@ export function computeRiskScore(
   const task = typeof input === "string" ? input : input.task;
   const role = typeof input === "string" ? undefined : input.role;
 
-  const details = computeRiskScoreDetails({ task });
+  const details = computeRiskScoreDetails({
+    task,
+    codeIntent: typeof input === "string" ? undefined : input.codeIntent,
+  });
   const modifier = getRoleModifier(role);
 
   const destructiveScore = Math.round(

@@ -9,11 +9,17 @@ export type IntentMismatchReasonCode =
   | "STRUCTURAL_LAYOUT_CHANGE"
   | "MASSIVE_STYLE_INJECTION"
   | "MULTI_FILE_EXPANSION"
-  | "LARGE_CHANGED_LINE_COUNT";
+  | "LARGE_CHANGED_LINE_COUNT"
+  | "BUG_FIX_SCOPE_OVERSHOOT"
+  | "REFACTOR_FULL_REWRITE"
+  | "FEATURE_EXCESSIVE_FILE_COUNT"
+  | "STYLE_CHANGE_NON_CSS_EXPANSION"
+  | "CONFIG_MULTI_FILE_EXPANSION";
 
 export interface IntentMismatchDetectorInput {
   taskIntent: TaskIntent;
   patchScope: DeveloperPatchScope;
+  codeIntent?: import("../core/taskIntentParser.js").CodePatchIntent;
 }
 
 export interface IntentMismatchDetectorResult {
@@ -25,10 +31,54 @@ export interface IntentMismatchDetectorResult {
   forcePreviewOnly: boolean;
 }
 
-export function detectIntentMismatch(
+function detectCodeIntentMismatch(
   input: IntentMismatchDetectorInput
 ): IntentMismatchDetectorResult {
-  if (input.taskIntent !== "micro_edit") {
+  const ci = input.codeIntent;
+  const scope = input.patchScope;
+  const reasonCodes: IntentMismatchReasonCode[] = [];
+  const warnings: string[] = [];
+
+  if (ci === "bug_fix") {
+    if (scope.changedFileCount > 3) {
+      reasonCodes.push("BUG_FIX_SCOPE_OVERSHOOT");
+      warnings.push("Bug fix expanded across too many files.");
+    }
+    if (scope.totalChangedLines > 40) {
+      reasonCodes.push("LARGE_CHANGED_LINE_COUNT");
+      warnings.push("Bug fix changed more lines than expected.");
+    }
+  }
+
+  if (ci === "refactor") {
+    if (scope.rewriteLikeSuspicion && scope.changedFileCount > 5) {
+      reasonCodes.push("REFACTOR_FULL_REWRITE");
+      warnings.push("Refactor looks like a full rewrite across many files.");
+    }
+  }
+
+  if (ci === "feature_add") {
+    if (scope.changedFileCount > 8) {
+      reasonCodes.push("FEATURE_EXCESSIVE_FILE_COUNT");
+      warnings.push("Feature touches an unusually high number of files.");
+    }
+  }
+
+  if (ci === "style_change") {
+    if (!scope.cssRewriteSuspicion && scope.changedFileCount > 2) {
+      reasonCodes.push("STYLE_CHANGE_NON_CSS_EXPANSION");
+      warnings.push("Style change expanded into non-style files.");
+    }
+  }
+
+  if (ci === "config_change") {
+    if (scope.changedFileCount > 2) {
+      reasonCodes.push("CONFIG_MULTI_FILE_EXPANSION");
+      warnings.push("Config change expanded across multiple files.");
+    }
+  }
+
+  if (reasonCodes.length === 0) {
     return {
       hasMismatch: false,
       severity: "none",
@@ -36,6 +86,32 @@ export function detectIntentMismatch(
       warnings: [],
       forcePreviewOnly: false,
     };
+  }
+
+  const severity: IntentMismatchSeverity =
+    reasonCodes.includes("REFACTOR_FULL_REWRITE") ||
+    reasonCodes.includes("STYLE_CHANGE_NON_CSS_EXPANSION")
+      ? "high"
+      : reasonCodes.includes("BUG_FIX_SCOPE_OVERSHOOT") ||
+        reasonCodes.includes("LARGE_CHANGED_LINE_COUNT")
+      ? "medium"
+      : "low";
+
+  return {
+    hasMismatch: true,
+    severity,
+    reasonCodes,
+    warnings,
+    confidenceCap: severity === "high" ? 60 : severity === "medium" ? 72 : undefined,
+    forcePreviewOnly: severity === "high",
+  };
+}
+
+export function detectIntentMismatch(
+  input: IntentMismatchDetectorInput
+): IntentMismatchDetectorResult {
+  if (input.taskIntent !== "micro_edit") {
+    return detectCodeIntentMismatch(input);
   }
 
   const reasonCodes: IntentMismatchReasonCode[] = [];

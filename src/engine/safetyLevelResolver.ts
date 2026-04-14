@@ -87,7 +87,7 @@ export function resolveSafetyLevel(
     (input.intentMismatch?.hasMismatch &&
       input.intentMismatch.severity === "low") ||
     qualityScore < REVIEW_QUALITY_THRESHOLD ||
-    riskScore > 0
+    riskScore > 20
   ) {
     if (input.intentMismatch?.severity === "low") {
       safetyReasons.push("Low-severity intent mismatch suggests review.");

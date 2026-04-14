@@ -2,6 +2,7 @@ import type { RiskBreakdown, RiskScoreDetails } from "./types/risk";
 
 type ComputeRiskScoreDetailsInput = {
   task: string;
+  codeIntent?: import("./taskIntentParser.js").CodePatchIntent;
 };
 
 function logRiskDebug(label: string, payload: Record<string, unknown>): void {
@@ -125,8 +126,12 @@ export function computeRiskScoreDetails(
     "permissions",
     "security",
     "jwt",
-    "token",
-    "production"
+    "access token",
+    "refresh token",
+    "api key",
+    "secret key",
+    "production",
+    "prod env",
   ]);
 
   const hasLowRiskSignal = includesAny(normalizedTask, [
@@ -135,7 +140,19 @@ export function computeRiskScoreDetails(
     "rename",
     "comment",
     "docs",
-    "readme"
+    "readme",
+    "typo",
+    "spacing",
+    "padding",
+    "margin",
+    "label",
+    "placeholder",
+    "wording",
+    "alignment",
+    "align",
+    "font size",
+    "color tweak",
+    "ui polish",
   ]);
 
   const hasDestructiveSignal = destructiveWeight > 0;
@@ -148,11 +165,17 @@ export function computeRiskScoreDetails(
   ]);
   const hasMassScopeSignal = hasDestructiveSignal && hasScopeWord;
 
+  const codeIntentLowRiskBonus =
+    input.codeIntent === "test_add" ? -15 :
+    input.codeIntent === "micro_edit" ? -10 :
+    input.codeIntent === "config_change" && !hasCriticalSignal ? 10 :
+    0;
+
   const riskBreakdown: RiskBreakdown = {
     destructive: Math.round(50 * destructiveWeight),
     schema: Math.max(highWeightSchemaScore, Math.round(reducedSchemaScore)),
     critical: hasCriticalSignal ? 20 : 0,
-    lowRisk: hasLowRiskSignal ? -20 : 0,
+    lowRisk: (hasLowRiskSignal ? -20 : 0) + codeIntentLowRiskBonus,
     massScope: hasMassScopeSignal ? 40 : 0
   };
 

@@ -126,6 +126,7 @@ const UNKNOWN_INTENT: TaskIntent = {
   routeHints: [],
   paramHints: [],
   warnings: [],
+  codeIntent: "unknown",
 };
 
 const GENERIC_UI_SCAFFOLD_PATTERNS = [
@@ -1973,7 +1974,7 @@ export async function runLlmPatchFlow(input: {
 
   const vagueTask = isVagueDeveloperTask(input.task);
   // Task-level risk scoring for developer
-  const taskRiskResult = computeRiskScore({ task: input.task, role: "developer" });
+  const taskRiskResult = computeRiskScore({ task: input.task, role: "developer", codeIntent: taskIntent.codeIntent });
   logRiskDebug("runLlmPatchFlow taskRiskResult", {
     task: input.task,
     taskRiskResult,
@@ -2304,6 +2305,7 @@ export async function runLlmPatchFlow(input: {
   const intentMismatchDecision = detectIntentMismatch({
     taskIntent: normalizedIntent,
     patchScope,
+    codeIntent: taskIntent.codeIntent,
   });
   const intentMismatch = evaluateIntentPatchMismatch({
     task: input.task,
