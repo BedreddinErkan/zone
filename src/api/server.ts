@@ -777,13 +777,14 @@ async function ensureRunAuthorized(
     select?: (
       columns: string
     ) => {
-      eq?: (column: string, value: string) => {
-        maybeSingle?: () => Promise<{
-          data: {
-            runs_used_this_month?: number | string | null;
-            free_limit?: number | string | null;
-            subscription_status?: string | null;
-          } | null;
+   eq?: (column: string, value: string) => {
+  maybeSingle?: () => Promise<{
+    data: {
+      credits?: number | string | null;
+      runs_used_this_month?: number | string | null;
+      free_limit?: number | string | null;
+      subscription_status?: string | null;
+    } | null;
           error?: unknown;
         }>;
       };
