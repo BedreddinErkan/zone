@@ -46,8 +46,8 @@ export function enforceMicroEditProtection(
     violationReasons.push("Micro-edit patch expanded into a large rewrite.");
   }
   if (
-    input.patchScope.rewriteLikeSuspicion ||
-    reasonCodes.has("STRUCTURAL_LAYOUT_CHANGE")
+    reasonCodes.has("STRUCTURAL_LAYOUT_CHANGE") &&
+    !reasonCodes.has("LARGE_REWRITE")
   ) {
     violationReasons.push("Micro-edit patch introduced structural change.");
   }

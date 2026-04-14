@@ -632,7 +632,7 @@ export type DeveloperPatchScope = {
 type TaskRiskResult = ReturnType<typeof computeRiskScore>;
 
 const REWRITE_SUSPICION_MIN_TOTAL_LINES = 20;
-const REWRITE_SUSPICION_MIN_CHANGED_LINES = 12;
+const REWRITE_SUSPICION_MIN_CHANGED_LINES = 20;
 
 function logRiskDebug(label: string, payload: Record<string, unknown>): void {
   console.log(`[zone-debug] ${label}: ${JSON.stringify(payload)}`);
