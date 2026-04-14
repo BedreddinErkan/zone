@@ -88,40 +88,41 @@ export async function logRun(input: RunLogInput): Promise<string | null> {
     confidence: input.confidence,
     credits_used: input.creditsUsed,
   });
-
+logBillingDebug("run log insert completed", {
+  routeName: input.routeName ?? "unknown",
+  userId: effectiveUserId,
+});
   const billingMode = resolveBillingMode(input);
-  const profilesTable = supabase.from("profiles") as unknown as {
-    select?: (
-      columns: string
-    ) => {
-      eq?: (column: string, value: string) => {
-        maybeSingle?: () => Promise<{
-          data: { subscription_status?: string | null } | null;
-          error?: unknown;
-        }>;
-      };
-    };
-  };
-  const profileQuery = profilesTable
-    .select?.("subscription_status")
-    ?.eq?.("clerk_user_id", effectiveUserId);
-  const profileResult =
-    profileQuery && typeof profileQuery.maybeSingle === "function"
-      ? await profileQuery.maybeSingle().catch(() => ({ data: null, error: null }))
-      : { data: null, error: null };
-  const hasPaidAccess =
-    normalizeSubscriptionStatus(profileResult.data?.subscription_status) === "pro";
-  const normalizedSubscriptionStatus = normalizeSubscriptionStatus(
-    profileResult.data?.subscription_status
-  );
-  logBillingDebug("billing inputs before resolver", {
+  let profileResult: {
+  data: { subscription_status?: string | null } | null;
+  error?: unknown;
+} = { data: null, error: null };
+
+try {
+  profileResult = await supabase
+    .from("profiles")
+    .select("subscription_status")
+    .eq("clerk_user_id", effectiveUserId)
+    .maybeSingle();
+} catch (error) {
+  logBillingDebug("profile lookup failed", {
     routeName: input.routeName ?? "unknown",
     userId: effectiveUserId,
-    billingMode,
-    subscriptionStatus: normalizedSubscriptionStatus,
-    hasPaidAccess,
+    error: error instanceof Error ? error.message : String(error),
   });
-
+}
+const hasPaidAccess =
+  normalizeSubscriptionStatus(profileResult.data?.subscription_status) === "pro";
+const normalizedSubscriptionStatus = normalizeSubscriptionStatus(
+  profileResult.data?.subscription_status
+);
+logBillingDebug("billing inputs before resolver", {
+  routeName: input.routeName ?? "unknown",
+  userId: effectiveUserId,
+  billingMode,
+  subscriptionStatus: normalizedSubscriptionStatus,
+  hasPaidAccess,
+});
   let conversation = null;
   try {
     conversation =
