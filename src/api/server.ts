@@ -564,9 +564,9 @@ async function handleBillingSummary(
         maybeSingle?: () => Promise<{
           data: {
             credits?: number | string | null;
-            runs_used_this_month?: number | string | null;
-            free_limit?: number | string | null;
-            subscription_status?: string | null;
+runs_used_this_month?: number | string | null;
+free_limit?: number | string | null;
+subscription_status?: string | null;
           } | null;
           error?: unknown;
         }>;
