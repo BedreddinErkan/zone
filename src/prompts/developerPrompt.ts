@@ -62,6 +62,14 @@ function detectDeveloperMode(input: {
       "layout",
       "badge",
       "theme",
+      "padding",
+      "margin",
+      "alignment",
+      "align",
+      "typo",
+      "wording",
+      "label",
+      "placeholder",
     ].some((term) => normalizedTask.includes(term)) ||
     [".html", ".tsx", ".jsx", "/ui/", "/components/", "/pages/"].some((term) =>
       normalizedPaths.includes(term)
@@ -176,11 +184,16 @@ export function buildDeveloperPrompt(params: DeveloperPromptParams): string {
     .join("\n");
   const microEditInstructions = microEditMode
     ? `
-MICRO-EDIT MODE
-- This task is a small UI/style edit. You MUST prefer a tiny in-place edit over any structural rewrite.
-- Modify existing style, class, spacing, line-height, font-size, alignment, or label text where it already exists.
-- Do NOT rewrite the page layout, move major sections, rename core anchors, or replace the document structure.
-- Reuse the exact nearby existing block/snippet context when making the change.
+STRICT MICRO-EDIT MODE — HIGHEST PRIORITY OVERRIDE
+- Change ONLY the single property or value explicitly requested in the task.
+- Do NOT add new elements, sections, paragraphs, list items, or components.
+- Do NOT remove existing elements, even if they seem redundant.
+- Do NOT restructure, reorder, or reformat any part of the file.
+- Do NOT improve, enhance, or expand unrelated content.
+- If the change is a CSS value: update ONLY that value in ONLY the relevant selector.
+- If the change is a text edit: update ONLY that exact string.
+- Produce the smallest possible diff — ideally 1-3 lines changed.
+- Violation of these rules will cause the patch to be rejected automatically.
 `.trim()
     : "";
 
