@@ -172,7 +172,7 @@ export async function logRun(input: RunLogInput): Promise<string | null> {
       userId: effectiveUserId,
       reason: "billing_action_free",
     });
-    return conversation.id;
+  return conversation?.id ?? null;
   }
 
   logBillingDebug("deduction rpc start", {
