@@ -585,32 +585,31 @@ async function handleBillingSummary(
   }
   try {
     const { data, error } = await query.maybeSingle();
-    console.log(
-      `[zone] billing-summary: supabase result=${JSON.stringify({
-        data,
-        error:
-          error && typeof error === "object"
-            ? {
-                message:
-                  "message" in error
-                    ? (error as { message?: unknown }).message
-                    : undefined,
-                code:
-                  "code" in error
-                    ? (error as { code?: unknown }).code
-                    : undefined,
-                details:
-                  "details" in error
-                    ? (error as { details?: unknown }).details
-                    : undefined,
-                hint:
-                  "hint" in error
-                    ? (error as { hint?: unknown }).hint
-                    : undefined,
-              }
-            : error,
-      })}`
-    );
+    console.log("[zone-billing-summary-debug] raw profile row", {
+      userId,
+      data,
+      error:
+        error && typeof error === "object"
+          ? {
+              message:
+                "message" in error
+                  ? (error as { message?: unknown }).message
+                  : undefined,
+              code:
+                "code" in error
+                  ? (error as { code?: unknown }).code
+                  : undefined,
+              details:
+                "details" in error
+                  ? (error as { details?: unknown }).details
+                  : undefined,
+              hint:
+                "hint" in error
+                  ? (error as { hint?: unknown }).hint
+                  : undefined,
+            }
+          : error,
+    });
     if (error || !data) {
       res.json({ ok: false, reason: "profile_unavailable" });
       return;
@@ -628,7 +627,7 @@ async function handleBillingSummary(
         ? data.free_limit
         : Number(data.free_limit ?? FREE_PLAN_RUN_LIMIT);
     const status = normalizeSubscriptionStatus(data.subscription_status) || "free";
-    const remainingRuns = hasPaidAccess(status)
+    const legacyDerivedRemaining = hasPaidAccess(status)
       ? Math.max(
           0,
           PRO_PLAN_RUN_LIMIT - (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0)
@@ -638,12 +637,21 @@ async function handleBillingSummary(
           (Number.isFinite(freeLimit) ? freeLimit : FREE_PLAN_RUN_LIMIT) -
             (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0)
         );
-    res.json({
+    const responsePayload = {
       ok: true,
       plan: hasPaidAccess(status) ? "Pro" : "Free",
-      credits: remainingRuns,
+      credits: Number.isFinite(credits) ? Math.max(0, credits) : 0,
       subscriptionStatus: status,
+    };
+    console.log("[zone-billing-summary-debug] resolved credits", {
+      userId,
+      credits,
+      legacyDerivedRemaining,
+      runsUsedThisMonth,
+      freeLimit,
     });
+    console.log("[zone-billing-summary-debug] final response payload", responsePayload);
+    res.json(responsePayload);
   } catch {
     res.json({ ok: false, reason: "profile_unavailable" });
   }

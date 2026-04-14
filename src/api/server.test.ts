@@ -1927,8 +1927,62 @@ export function LoginForm() {
     expect(body).toEqual({
       ok: true,
       plan: "Pro",
-      credits: 238,
+      credits: 0,
       subscriptionStatus: "pro",
+    });
+  });
+
+  it("returns billing summary credits directly when profile credits is 7", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        credits: 7,
+        runs_used_this_month: 999,
+        free_limit: 0,
+        subscription_status: "free",
+      },
+      error: null,
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/billing-summary?userId=clerk_user_123`
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      plan: "Free",
+      credits: 7,
+      subscriptionStatus: "free",
+    });
+  });
+
+  it("does not derive billing summary credits from free_limit or runs_used_this_month", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    supabaseProfileMaybeSingleMock.mockResolvedValue({
+      data: {
+        credits: 0,
+        free_limit: 10,
+        runs_used_this_month: 3,
+        subscription_status: "free",
+      },
+      error: null,
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/billing-summary?userId=clerk_user_123`
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      plan: "Free",
+      credits: 0,
+      subscriptionStatus: "free",
     });
   });
 
