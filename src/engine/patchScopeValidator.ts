@@ -44,6 +44,7 @@ const SCOPE_LIMITS: Record<IntentType, ScopeLimits> = {
   refactor:      { warnLines: 150, maxLines: 400, warnFiles: 6, maxFiles: 15 },
   test_add:      { warnLines: 100, maxLines: 250, warnFiles: 4, maxFiles: 10 },
   config_change: { warnLines: 20,  maxLines: 60,  warnFiles: 2, maxFiles: 5  },
+  unknown: { warnLines: 50, maxLines: 100, warnFiles: 3, maxFiles: 5 },
 };
 
 export function validatePatchScope(
