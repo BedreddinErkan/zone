@@ -795,7 +795,7 @@ async function ensureRunAuthorized(
   }
 
   const query = profilesTable
-    .select("runs_used_this_month,free_limit,subscription_status")
+    .select("credits,runs_used_this_month,free_limit,subscription_status")
     ?.eq?.("clerk_user_id", authenticatedUserId);
 
   if (!query || typeof query.maybeSingle !== "function") {
@@ -844,6 +844,14 @@ async function ensureRunAuthorized(
       runsUsedThisMonth,
       freeLimit,
     });
+    const credits =
+      typeof data.credits === "number"
+        ? data.credits
+        : Number(data.credits ?? -1);
+    if (Number.isFinite(credits) && credits > 0) {
+      return { allowed: true };
+    }
+
     if (billingAction === "FREE") {
       return { allowed: true };
     }
