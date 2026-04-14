@@ -373,4 +373,66 @@ describe("logRun billing matrix", () => {
       },
     ]);
   });
+
+  it("still deducts when conversation persistence fails before resolver", async () => {
+    const fake = createFakeSupabase();
+    fake.setProfileSubscriptionStatus("pro");
+    const brokenSupabase = {
+      ...fake.supabase,
+      from(table: string) {
+        if (table === "conversations") {
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => {
+                  throw new Error("conversation lookup failed");
+                },
+              }),
+            }),
+            insert: () => ({
+              select: () => ({
+                single: async () => {
+                  throw new Error("conversation create failed");
+                },
+              }),
+            }),
+            update: () => ({
+              eq: () => ({
+                select: () => ({
+                  single: async () => {
+                    throw new Error("conversation update failed");
+                  },
+                }),
+              }),
+            }),
+          };
+        }
+
+        return (fake.supabase as unknown as { from: (name: string) => unknown }).from(
+          table
+        );
+      },
+    } as SupabaseClient;
+    createClientMock.mockReturnValue(brokenSupabase);
+
+    const { logRun } = await import("./runLogging.js");
+    const conversationId = await logRun({
+      userId: "user_123",
+      role: "developer",
+      task: "hosted pro run with broken conversation persistence",
+      repoPath: "C:/repo",
+      decisionMode: "safe_to_apply",
+      confidence: 88,
+      creditsUsed: 1,
+      billingMode: "hosted",
+    });
+
+    expect(conversationId).toBeNull();
+    expect(fake.rpcCalls).toEqual([
+      {
+        name: "deduct_credits_and_increment_runs",
+        payload: { p_user_id: "user_123", p_credits: 1 },
+      },
+    ]);
+  });
 });

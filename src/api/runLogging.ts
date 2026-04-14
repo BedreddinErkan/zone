@@ -114,24 +114,41 @@ export async function logRun(input: RunLogInput): Promise<string | null> {
   const normalizedSubscriptionStatus = normalizeSubscriptionStatus(
     profileResult.data?.subscription_status
   );
-  let conversation =
-    typeof input.conversationId === "string" && input.conversationId.trim()
-      ? await getConversationById(supabase, input.conversationId.trim())
-      : null;
+  logBillingDebug("billing inputs before resolver", {
+    routeName: input.routeName ?? "unknown",
+    userId: effectiveUserId,
+    billingMode,
+    subscriptionStatus: normalizedSubscriptionStatus,
+    hasPaidAccess,
+  });
 
-  if (
-    conversation &&
-    (conversation.repoPath !== input.repoPath || conversation.role !== input.role)
-  ) {
-    conversation = null;
-  }
+  let conversation = null;
+  try {
+    conversation =
+      typeof input.conversationId === "string" && input.conversationId.trim()
+        ? await getConversationById(supabase, input.conversationId.trim())
+        : null;
 
-  if (!conversation) {
-    conversation = await createConversation(supabase, {
+    if (
+      conversation &&
+      (conversation.repoPath !== input.repoPath || conversation.role !== input.role)
+    ) {
+      conversation = null;
+    }
+
+    if (!conversation) {
+      conversation = await createConversation(supabase, {
+        userId: effectiveUserId,
+        mode: billingMode,
+        repoPath: input.repoPath,
+        role: input.role,
+      });
+    }
+  } catch (error) {
+    logBillingDebug("conversation persistence failed", {
+      routeName: input.routeName ?? "unknown",
       userId: effectiveUserId,
-      mode: billingMode,
-      repoPath: input.repoPath,
-      role: input.role,
+      error: error instanceof Error ? error.message : String(error),
     });
   }
 
@@ -185,11 +202,22 @@ export async function logRun(input: RunLogInput): Promise<string | null> {
     userId: effectiveUserId,
   });
 
-  await updateConversation(supabase, conversation.id, {
-    chargedRunCount: conversation.chargedRunCount + 1,
-  });
+  if (conversation) {
+    try {
+      await updateConversation(supabase, conversation.id, {
+        chargedRunCount: conversation.chargedRunCount + 1,
+      });
+    } catch (error) {
+      logBillingDebug("conversation update failed after deduction", {
+        routeName: input.routeName ?? "unknown",
+        userId: effectiveUserId,
+        conversationId: conversation.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
-  return conversation.id;
+  return conversation?.id ?? null;
 }
 
 export function queueRunLog(input: RunLogInput): void {
