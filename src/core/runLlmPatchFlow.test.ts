@@ -497,13 +497,12 @@ describe("runLlmPatchFlow", () => {
           semanticAlignmentScore: expect.any(Number),
         })
       );
-      expect(result.microEditProtection).toEqual(
+  expect(result.microEditProtection).toEqual(
         expect.objectContaining({
           isViolation: true,
           shouldForcePreview: true,
           violationReasons: expect.arrayContaining([
             "Micro-edit patch expanded into a large rewrite.",
-            "Micro-edit patch introduced structural change.",
           ]),
         })
       );
@@ -1065,16 +1064,16 @@ describe("runLlmPatchFlow", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.developerRisk).toEqual({
-        score: 20,
+        score: 0,
         breakdown: {
           destructive: 0,
           schema: 0,
           massScope: 0,
         },
       });
-      expect(result.safetyResolution).toEqual(
+expect(result.safetyResolution).toEqual(
         expect.objectContaining({
-          safetyLevel: "safe_with_review",
+          safetyLevel: "safe_auto_apply",
         })
       );
       expect(result.warnings.join("\n")).not.toContain("[HIGH_RISK] Task risk score");

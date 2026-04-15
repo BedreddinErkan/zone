@@ -83,11 +83,10 @@ describe("buildDeveloperPrompt", () => {
       ],
     });
 
-    expect(prompt).toContain("MICRO-EDIT MODE");
-    expect(prompt).toContain("MUST prefer a tiny in-place edit");
-    expect(prompt).toContain("Modify existing style, class, spacing, line-height");
-    expect(prompt).toContain("Do NOT rewrite the page layout");
-  });
+   expect(prompt).toContain("MICRO-EDIT MODE");
+    expect(prompt).toContain("Change ONLY the single property or value explicitly requested");
+    expect(prompt).toContain("Produce the smallest possible diff");
+    expect(prompt).toContain("Do NOT add new elements"); });
 
   it("enforces patch-style output instead of full files", () => {
     const prompt = buildDeveloperPrompt({

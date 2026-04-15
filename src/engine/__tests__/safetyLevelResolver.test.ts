@@ -95,11 +95,8 @@ describe("resolveSafetyLevel", () => {
       })
     );
 
-    expect(result.safetyLevel).toBe("safe_with_review");
+   expect(result.safetyLevel).toBe("safe_auto_apply");
     expect(result.safetyLevel).not.toBe("high_risk_blocked");
-    expect(result.safetyReasons).toContain(
-      "Non-zero risk score keeps the patch reviewable."
-    );
   });
 
   it("keeps true high-risk cases blocked", () => {

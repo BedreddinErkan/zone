@@ -820,9 +820,9 @@ if (intent === "unknown" && repoPath) {
       for (const fileDiff of llmResult.fileDiffs ?? []) {
         renderDiffSummary([
           {
-            filePath: fileDiff.filePath,
-            original: fileDiff.before,
-            updated: fileDiff.after,
+         filePath: fileDiff.filePath,
+            original: fileDiff.diff.filter(l => l.type !== 'added').map(l => l.content).join('\n'),
+            updated: fileDiff.diff.filter(l => l.type !== 'removed').map(l => l.content).join('\n'),
           },
         ]);
         console.log(
@@ -835,10 +835,7 @@ if (intent === "unknown" && repoPath) {
       return 0;
     }
     if (apply && confirmApply && llmResult.applyPatches.length > 0) {
-      const originalContents =
-        llmResult.originalContents ??
-        (await capturePatchOriginals(repoPath, llmResult.applyPatches));
-      console.log(`${zonePrefix()} ${tone("Applying LLM patches...", c.white)}`);
+      const originalContents = await capturePatchOriginals(repoPath, llmResult.applyPatches);     console.log(`${zonePrefix()} ${tone("Applying LLM patches...", c.white)}`);
       const applyResult = await applyLlmPatches(llmResult.applyPatches, repoPath);
       console.log(formatApplyLog("Applied", applyResult.applied));
       console.log(formatApplyLog("Skipped", applyResult.skipped));
