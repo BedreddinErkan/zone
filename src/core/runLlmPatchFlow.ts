@@ -2402,7 +2402,6 @@ const fileDiffs = applyPatches.map((patch) => {
   const diff = computeFileDiff(before, after);
   return {
     filePath: patch.filePath,
-    before,
     after,
     diff,
     addedLines: diff.filter((line) => line.type === "added").length,
@@ -2558,7 +2557,6 @@ const decisionMode =
     applyPatches,
     patchResults,
     fileDiffs,
-    originalContents,
     contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
   };
 }
