@@ -70,7 +70,6 @@ export type LlmPatchFlowResult =
       applyPatches: Array<{ filePath: string; fullContent: string }>;
       patchResults: PatchResult[];
       fileDiffs?: FileDiff[];
-      originalContents?: Record<string, string>;
       contextFiles?: string[];
     }
   | { ok: false; reason: string };
@@ -89,8 +88,6 @@ export type DiffLine = {
 
 export type FileDiff = {
   filePath: string;
-  before: string;
-  after: string;
   diff: DiffLine[];
   addedLines: number;
   removedLines: number;
@@ -1992,7 +1989,6 @@ export async function runLlmPatchFlow(input: {
       applyPatches: [],
       patchResults: [],
       fileDiffs: [],
-      originalContents: {},
       contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
     };
   }
@@ -2402,7 +2398,6 @@ const fileDiffs = applyPatches.map((patch) => {
   const diff = computeFileDiff(before, after);
   return {
     filePath: patch.filePath,
-    after,
     diff,
     addedLines: diff.filter((line) => line.type === "added").length,
     removedLines: diff.filter((line) => line.type === "removed").length,
