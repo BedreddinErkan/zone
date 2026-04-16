@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -712,7 +713,54 @@ function isTruthyByok(value: unknown): boolean {
   }
   return false;
 }
+// ── DAILY RUN LIMITER (in-memory, resets on server restart) ──
+const DAILY_RUN_LIMIT = 30;
+const dailyRunCounts = new Map<string, { date: string; count: number }>();
 
+function checkDailyRunLimit(userId: string): boolean {
+  const today = new Date().toISOString().slice(0, 10); // "2026-04-16"
+  const entry = dailyRunCounts.get(userId);
+  if (!entry || entry.date !== today) {
+    dailyRunCounts.set(userId, { date: today, count: 1 });
+    return true;
+  }
+  if (entry.count >= DAILY_RUN_LIMIT) return false;
+  entry.count++;
+  return true;
+}
+// ── DESKTOP DEVICE CODE AUTH ────────────────────────────────
+const DESKTOP_TOKEN_SECRET =
+  (process.env.ZONE_DESKTOP_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || "zone-desktop-fallback").trim();
+const DESKTOP_TOKEN_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const deviceCodes = new Map<string, { userId?: string; createdAt: number }>();
+
+function generateDesktopToken(userId: string): string {
+  const expiry = Date.now() + DESKTOP_TOKEN_EXPIRY_MS;
+  const payload = `${userId}:${expiry}`;
+  const hmac = crypto.createHmac("sha256", DESKTOP_TOKEN_SECRET).update(payload).digest("base64url");
+  return Buffer.from(payload).toString("base64url") + "." + hmac;
+}
+
+function verifyDesktopToken(token: string): string | null {
+  try {
+    const [payloadB64, hmac] = token.split(".");
+    if (!payloadB64 || !hmac) return null;
+    const payload = Buffer.from(payloadB64, "base64url").toString("utf8");
+    const expectedHmac = crypto.createHmac("sha256", DESKTOP_TOKEN_SECRET).update(payload).digest("base64url");
+    if (hmac !== expectedHmac) return null;
+    const [userId, expiryStr] = payload.split(":");
+    if (!userId || Number(expiryStr) < Date.now()) return null;
+    return userId;
+  } catch { return null; }
+}
+
+// Cleanup expired codes every 5 min
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, data] of deviceCodes) {
+    if (now - data.createdAt > 10 * 60 * 1000) deviceCodes.delete(code);
+  }
+}, 5 * 60 * 1000);
 async function ensureRunAuthorized(
   rawUserId: unknown,
   isByok = false,
@@ -742,7 +790,8 @@ async function ensureRunAuthorized(
         | {
             ok: false;
             reason: "no_free_runs";
-            message: "You've used all 250 monthly runs. Resets next month.";
+
+            message: string;
           };
     }
 > {
@@ -857,7 +906,7 @@ async function ensureRunAuthorized(
       return { allowed: true };
     }
 
-    if (paidAccess) {
+   if (paidAccess) {
       if (
         (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0) >=
         PRO_PLAN_RUN_LIMIT
@@ -872,7 +921,17 @@ async function ensureRunAuthorized(
           },
         };
       }
-
+      if (!checkDailyRunLimit(authenticatedUserId)) {
+        return {
+          allowed: false,
+          status: 429,
+          body: {
+            ok: false,
+            reason: "no_free_runs",
+            message: `Daily limit reached (${DAILY_RUN_LIMIT} runs/day). Try again tomorrow.`,
+          },
+        };
+      }
       return { allowed: true };
     }
 
@@ -1048,7 +1107,141 @@ app.get("/api/progress", (req, res) => {
     }
   });
 });
+// ── Desktop Auth Routes ──
+app.post("/api/desktop-auth/start", (_req, res) => {
+  const code = crypto.randomBytes(3).toString("hex").toUpperCase(); // 6 char: "A1B2C3"
+  deviceCodes.set(code, { createdAt: Date.now() });
+  res.json({ ok: true, code, expiresIn: 600 });
+});
 
+app.get("/api/desktop-auth/poll", (req, res) => {
+  const code = String(req.query.code || "").trim().toUpperCase();
+  const entry = deviceCodes.get(code);
+  if (!entry) { res.json({ ok: false, status: "expired" }); return; }
+  if (Date.now() - entry.createdAt > 10 * 60 * 1000) {
+    deviceCodes.delete(code);
+    res.json({ ok: false, status: "expired" });
+    return;
+  }
+  if (!entry.userId) { res.json({ ok: false, status: "pending" }); return; }
+  const token = generateDesktopToken(entry.userId);
+  deviceCodes.delete(code);
+  res.json({ ok: true, status: "complete", token, userId: entry.userId });
+});
+
+app.post("/api/desktop-auth/complete", (req, res) => {
+  const code = String(req.body?.code || "").trim().toUpperCase();
+  const userId = String(req.body?.userId || "").trim();
+  if (!code || !userId) { res.status(400).json({ ok: false, reason: "missing_code_or_user" }); return; }
+  const entry = deviceCodes.get(code);
+  if (!entry) { res.status(404).json({ ok: false, reason: "code_expired" }); return; }
+  entry.userId = userId;
+  res.json({ ok: true });
+});
+
+app.get("/desktop-auth", (_req, res) => {
+  res.type("html").send(renderDesktopAuthPage());
+});
+function renderDesktopAuthPage(): string {
+  const clerkPubKey = process.env.CLERK_PUBLISHABLE_KEY || "";
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Zone Desktop — Sign In</title>
+<script
+  async
+  crossorigin="anonymous"
+  data-clerk-publishable-key="${clerkPubKey}"
+  src="https://good-rattler-59.clerk.accounts.dev/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
+  type="text/javascript"
+></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0e0e0e;color:#d4d4d4;font-family:'Courier New',monospace;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.card{background:#111;border:1px solid #1e1e1e;border-radius:16px;padding:32px;max-width:460px;width:100%;text-align:center}
+h1{font-size:20px;color:#fff;margin-bottom:8px}
+.sub{font-size:13px;color:#737373;margin-bottom:24px;line-height:1.6}
+.code-display{font-size:28px;font-weight:700;letter-spacing:.25em;color:#4ec9b0;background:#0e0e0e;border:2px dashed #1d6b3a;border-radius:12px;padding:16px;margin-bottom:20px}
+.status{font-size:14px;color:#9cdcfe;margin-bottom:16px;min-height:24px}
+.status.error{color:#f44747}
+.status.success{color:#4ec9b0}
+#clerk-mount{min-height:40px;margin-bottom:16px}
+.step{font-size:12px;color:#555;margin-top:16px;line-height:1.6}
+</style>
+</head><body>
+<div class="card">
+<h1>⚡ Zone Desktop</h1>
+<div class="sub">Sign in to connect your desktop app</div>
+<div class="code-display" id="codeDisplay">------</div>
+<div id="clerk-mount"></div>
+<div class="status" id="statusText">Loading sign-in...</div>
+<div class="step">This window can be closed after your desktop app shows "Signed in".</div>
+</div>
+<script>
+const params = new URLSearchParams(window.location.search);
+const code = (params.get('code') || '').toUpperCase();
+document.getElementById('codeDisplay').textContent = code || '------';
+const statusEl = document.getElementById('statusText');
+
+async function completeAuth(userId) {
+  statusEl.textContent = 'Linking account...';
+  statusEl.className = 'status';
+  try {
+    const r = await fetch('/api/desktop-auth/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, userId })
+    });
+    const data = await r.json();
+    if (data.ok) {
+      statusEl.textContent = '✓ Desktop app connected! You can close this window.';
+      statusEl.className = 'status success';
+    } else {
+      statusEl.textContent = 'Code expired. Please try again from the desktop app.';
+      statusEl.className = 'status error';
+    }
+  } catch {
+    statusEl.textContent = 'Connection failed. Please try again.';
+    statusEl.className = 'status error';
+  }
+}
+
+async function waitForClerk() {
+  for (let i = 0; i < 50; i++) {
+    if (window.Clerk && window.Clerk.load) return window.Clerk;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  throw new Error('Clerk failed to load');
+}
+
+(async function init() {
+  if (!code) {
+    statusEl.textContent = 'Missing code parameter';
+    statusEl.className = 'status error';
+    return;
+  }
+  try {
+    const clerk = await waitForClerk();
+    await clerk.load();
+
+    if (clerk.user) {
+      await completeAuth(clerk.user.id);
+      return;
+    }
+
+    statusEl.textContent = 'Please sign in below';
+    clerk.mountSignIn(document.getElementById('clerk-mount'));
+
+    clerk.addListener(({ user }) => {
+      if (user) completeAuth(user.id);
+    });
+  } catch (e) {
+    statusEl.textContent = 'Error: ' + e.message;
+    statusEl.className = 'status error';
+  }
+})();
+</script>
+</body></html>`;
+}
 app.get("/api/check-access", async (req, res) => {
   if (shouldProxyHostedRequest(req, "/api/check-access")) {
     await proxyHostedZoneRequest(req, res, "/api/check-access", {
