@@ -19,6 +19,12 @@ type ConversationRow = {
   updated_at: string;
 };
 
+type UserQuotaRow = {
+  runs_used_this_month: number | null;
+  credits: number | null;
+  subscription_status: string | null;
+};
+
 export interface CreateConversationInput {
   userId: string;
   mode: ConversationBillingMode;
@@ -51,6 +57,33 @@ function mapConversationRow(row: ConversationRow): ConversationRecord {
     hasFreeRefinementBeenUsed: row.has_free_refinement_been_used,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+export async function getUserQuota(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<{
+  runsUsedThisMonth: number;
+  credits: number;
+  subscriptionStatus: string;
+}> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("runs_used_this_month,credits,subscription_status")
+    .eq("clerk_user_id", userId)
+    .maybeSingle();
+
+  if (error || !data) {
+    throw new Error(error?.message || "Failed to load user quota");
+  }
+
+  const row = data as UserQuotaRow;
+
+  return {
+    runsUsedThisMonth: row.runs_used_this_month ?? 0,
+    credits: row.credits ?? 0,
+    subscriptionStatus: row.subscription_status ?? "",
   };
 }
 

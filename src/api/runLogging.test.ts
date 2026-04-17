@@ -25,6 +25,8 @@ function createFakeSupabase() {
   const rpcCalls: Array<{ name: string; payload: Record<string, unknown> }> = [];
   const conversations = new Map<string, ConversationRow>();
   let profileSubscriptionStatus: "free" | "pro" = "free";
+  let profileRunsUsedThisMonth = 0;
+  let profileCredits = 10;
 
   const now = () => new Date().toISOString();
 
@@ -120,6 +122,8 @@ function createFakeSupabase() {
             eq: () => ({
               maybeSingle: async () => ({
                 data: {
+                  runs_used_this_month: profileRunsUsedThisMonth,
+                  credits: profileCredits,
                   subscription_status: profileSubscriptionStatus,
                 },
                 error: null,
@@ -159,6 +163,18 @@ function createFakeSupabase() {
     profileSubscriptionStatus = status;
   }
 
+  function setUserQuota(input: {
+    runsUsedThisMonth?: number;
+    credits?: number;
+  }): void {
+    if (typeof input.runsUsedThisMonth === "number") {
+      profileRunsUsedThisMonth = input.runsUsedThisMonth;
+    }
+    if (typeof input.credits === "number") {
+      profileCredits = input.credits;
+    }
+  }
+
   return {
     supabase,
     runLogs,
@@ -166,6 +182,7 @@ function createFakeSupabase() {
     conversations,
     seedConversation,
     setProfileSubscriptionStatus,
+    setUserQuota,
   };
 }
 
@@ -213,7 +230,7 @@ describe("logRun billing matrix", () => {
     ]);
   });
 
-  it("charges for Free + BYOK", async () => {
+  it("does not charge for Free + BYOK", async () => {
     const fake = createFakeSupabase();
     fake.setProfileSubscriptionStatus("free");
     createClientMock.mockReturnValue(fake.supabase);
@@ -232,16 +249,11 @@ describe("logRun billing matrix", () => {
     });
 
     expect(conversationId).toBeTruthy();
-    expect(fake.rpcCalls).toEqual([
-      {
-        name: "deduct_credits_and_increment_runs",
-        payload: { p_user_id: "user_123", p_credits: 1 },
-      },
-    ]);
+    expect(fake.rpcCalls).toEqual([]);
     expect([...fake.conversations.values()]).toEqual([
       expect.objectContaining({
         mode: "byok",
-        charged_run_count: 1,
+        charged_run_count: 0,
       })
     ]);
   });
@@ -366,12 +378,7 @@ describe("logRun billing matrix", () => {
       isByok: true,
     });
 
-    expect(fake.rpcCalls).toEqual([
-      {
-        name: "deduct_credits_and_increment_runs",
-        payload: { p_user_id: "user_123", p_credits: 1 },
-      },
-    ]);
+    expect(fake.rpcCalls).toEqual([]);
   });
 
   it("still deducts when conversation persistence fails before resolver", async () => {

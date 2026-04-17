@@ -37,6 +37,7 @@ import {
   getInferenceMode,
   getModelName,
 } from "../llm/openaiClient.js";
+import { getUserQuota } from "../billing/conversationRepository.js";
 import { resolveBillingAction } from "../billing/resolveBillingAction.js";
 import type { Response } from "express";
 import { c, colorize } from "../cli/colors.js";
@@ -792,6 +793,12 @@ async function ensureRunAuthorized(
             reason: "no_free_runs";
 
             message: string;
+          }
+        | {
+            ok: false;
+            reason: "hosted_run_limit_reached";
+            runsUsedThisMonth: number;
+            credits: number;
           };
     }
 > {
@@ -822,67 +829,21 @@ async function ensureRunAuthorized(
         ? "byok"
         : "hosted";
 
-  const profilesTable = supabase.from("profiles") as unknown as {
-    select?: (
-      columns: string
-    ) => {
-   eq?: (column: string, value: string) => {
-  maybeSingle?: () => Promise<{
-    data: {
-      credits?: number | string | null;
-      runs_used_this_month?: number | string | null;
-      free_limit?: number | string | null;
-      subscription_status?: string | null;
-    } | null;
-          error?: unknown;
-        }>;
-      };
-    };
-  };
-
-  if (typeof profilesTable.select !== "function") {
-    return { allowed: true };
-  }
-
-  const query = profilesTable
-    .select("credits,runs_used_this_month,free_limit,subscription_status")
-    ?.eq?.("clerk_user_id", authenticatedUserId);
-
-  if (!query || typeof query.maybeSingle !== "function") {
+  if (resolvedBillingMode === "byok") {
     return { allowed: true };
   }
 
   try {
-    const { data, error } = await query.maybeSingle();
-    if (error) {
-      return { allowed: true };
-    }
-    if (!data) {
-      return {
-        allowed: false,
-        status: 401,
-        body: {
-          ok: false,
-          reason: "unauthorized",
-          message: "Missing user session. Please open Zone from your dashboard.",
-        },
-      };
-    }
-
-    const runsUsedThisMonth =
-      typeof data.runs_used_this_month === "number"
-        ? data.runs_used_this_month
-        : Number(data.runs_used_this_month ?? 0);
-    const freeLimit =
-      typeof data.free_limit === "number"
-        ? data.free_limit
-        : Number(data.free_limit ?? FREE_PLAN_RUN_LIMIT);
-
-    const subscriptionStatus = normalizeSubscriptionStatus(data.subscription_status);
+    const { runsUsedThisMonth, credits, subscriptionStatus } = await getUserQuota(
+      supabase,
+      authenticatedUserId
+    );
     const paidAccess = hasPaidAccess(subscriptionStatus);
     const billingAction = resolveBillingAction({
       mode: resolvedBillingMode,
       hasPaidAccess: paidAccess,
+      runsUsedThisMonth,
+      credits,
     });
     console.log("[zone-billing-debug] authorization resolved", {
       routeName: "ensureRunAuthorized",
@@ -892,35 +853,27 @@ async function ensureRunAuthorized(
       hasPaidAccess: paidAccess,
       billingAction,
       runsUsedThisMonth,
-      freeLimit,
+      credits,
     });
-    const credits =
-      typeof data.credits === "number"
-        ? data.credits
-        : Number(data.credits ?? -1);
-    if (Number.isFinite(credits) && credits > 0) {
-      return { allowed: true };
-    }
 
     if (billingAction === "FREE") {
       return { allowed: true };
     }
 
-   if (paidAccess) {
-      if (
-        (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0) >=
-        PRO_PLAN_RUN_LIMIT
-      ) {
+    if (billingAction === "LIMIT_EXCEEDED") {
         return {
           allowed: false,
           status: 402,
           body: {
             ok: false,
-            reason: "no_free_runs",
-            message: "You've used all 250 monthly runs. Resets next month.",
+            reason: "hosted_run_limit_reached",
+            runsUsedThisMonth,
+            credits,
           },
         };
-      }
+    }
+
+   if (paidAccess) {
       if (!checkDailyRunLimit(authenticatedUserId)) {
         return {
           allowed: false,
@@ -935,25 +888,17 @@ async function ensureRunAuthorized(
       return { allowed: true };
     }
 
-    if (
-      (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : FREE_PLAN_RUN_LIMIT) <
-      (Number.isFinite(freeLimit) ? freeLimit : FREE_PLAN_RUN_LIMIT)
-    ) {
-      return { allowed: true };
-    }
-
+    return { allowed: true };
+  } catch {
     return {
       allowed: false,
-      status: 402,
+      status: 401,
       body: {
         ok: false,
-        reason: "no_free_runs",
-        message: "You've used all your free runs. Upgrade to Pro.",
-        upgradeUrl: "https://zonecli.dev/#pricing",
+        reason: "unauthorized",
+        message: "Missing user session. Please open Zone from your dashboard.",
       },
     };
-  } catch {
-    return { allowed: true };
   }
 }
 function emitProgress(runId: string | undefined, stage: string): void {

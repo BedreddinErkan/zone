@@ -25,8 +25,26 @@ const supabaseRpcMock = vi.fn();
 const createDeveloperPatchJobMock = vi.fn();
 const getDeveloperPatchJobMock = vi.fn();
 const supabaseProfileMaybeSingleMock = vi.fn();
+const getNormalizedProfileMaybeSingleResult = async () => {
+  const result = await supabaseProfileMaybeSingleMock();
+
+  if (!result || result.data == null) {
+    return result;
+  }
+
+  return {
+    ...result,
+    data: {
+      credits: 10,
+      runs_used_this_month: 0,
+      free_limit: 10,
+      subscription_status: "free",
+      ...result.data,
+    },
+  };
+};
 const supabaseSelectEqMock = vi.fn(() => ({
-  maybeSingle: supabaseProfileMaybeSingleMock,
+  maybeSingle: getNormalizedProfileMaybeSingleResult,
 }));
 const supabaseSelectMock = vi.fn(() => ({
   eq: supabaseSelectEqMock,
@@ -889,6 +907,7 @@ export function LoginForm() {
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         runs_used_this_month: 250,
+        credits: 250,
         free_limit: 10,
         subscription_status: "pro",
       },
@@ -961,6 +980,7 @@ export function LoginForm() {
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         runs_used_this_month: 12,
+        credits: 250,
         free_limit: 10,
         subscription_status: "pro",
       },
@@ -1624,9 +1644,9 @@ export function LoginForm() {
     expect(response.status).toBe(402);
     expect(body).toEqual({
       ok: false,
-      reason: "no_free_runs",
-      message: "You've used all your free runs. Upgrade to Pro.",
-      upgradeUrl: "https://zonecli.dev/#pricing",
+      reason: "hosted_run_limit_reached",
+      runsUsedThisMonth: 10,
+      credits: 10,
     });
   });
 
@@ -1648,7 +1668,7 @@ export function LoginForm() {
 
     const body = await response.json();
     expect(response.status).toBe(402);
-    expect(body.reason).toBe("no_free_runs");
+    expect(body.reason).toBe("hosted_run_limit_reached");
   });
 
   it("blocks a hosted continuation when free credits are exhausted even if old refinement state exists", async () => {
@@ -1684,7 +1704,7 @@ export function LoginForm() {
 
     const body = await response.json();
     expect(response.status).toBe(402);
-    expect(body.reason).toBe("no_free_runs");
+    expect(body.reason).toBe("hosted_run_limit_reached");
   });
 
   it("still blocks a hosted continuation when old refinement state is already used", async () => {
@@ -1720,10 +1740,10 @@ export function LoginForm() {
 
     const body = await response.json();
     expect(response.status).toBe(402);
-    expect(body.reason).toBe("no_free_runs");
+    expect(body.reason).toBe("hosted_run_limit_reached");
   });
 
-  it("blocks Free + BYOK when hosted credits are exhausted", async () => {
+  it("allows BYOK when hosted credits are exhausted", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
@@ -1740,8 +1760,8 @@ export function LoginForm() {
     );
 
     const body = await response.json();
-    expect(response.status).toBe(402);
-    expect(body.reason).toBe("no_free_runs");
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ ok: true });
   });
 
   it("allows Pro + BYOK without hosted credits", async () => {
@@ -1798,7 +1818,7 @@ export function LoginForm() {
 
     const body = await response.json();
     expect(response.status).toBe(402);
-    expect(body.reason).toBe("no_free_runs");
+    expect(body.reason).toBe("hosted_run_limit_reached");
   });
 
   it("falls back to normal hosted blocking when conversation role mismatches", async () => {
@@ -1834,7 +1854,7 @@ export function LoginForm() {
 
     const body = await response.json();
     expect(response.status).toBe(402);
-    expect(body.reason).toBe("no_free_runs");
+    expect(body.reason).toBe("hosted_run_limit_reached");
   });
 
   it("preserves old behavior when conversationId does not exist", async () => {
@@ -1859,7 +1879,7 @@ export function LoginForm() {
 
     const body = await response.json();
     expect(response.status).toBe(402);
-    expect(body.reason).toBe("no_free_runs");
+    expect(body.reason).toBe("hosted_run_limit_reached");
   });
 
   it("returns ok from /api/check-access for a pro user below the monthly limit", async () => {
@@ -1868,6 +1888,7 @@ export function LoginForm() {
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         runs_used_this_month: 12,
+        credits: 250,
         subscription_status: "pro",
       },
       error: null,
@@ -1882,12 +1903,13 @@ export function LoginForm() {
     expect(body).toEqual({ ok: true });
   });
 
-  it("returns no_free_runs from /api/check-access for a pro user at the monthly limit", async () => {
+  it("returns hosted_run_limit_reached from /api/check-access for a pro user at the monthly limit", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         runs_used_this_month: 1000,
+        credits: 250,
         subscription_status: "pro",
       },
       error: null,
@@ -1901,8 +1923,9 @@ export function LoginForm() {
     expect(response.status).toBe(402);
     expect(body).toEqual({
       ok: false,
-      reason: "no_free_runs",
-      message: "You've used all 250 monthly runs. Resets next month.",
+      reason: "hosted_run_limit_reached",
+      runsUsedThisMonth: 1000,
+      credits: 250,
     });
   });
 

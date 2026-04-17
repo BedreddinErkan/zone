@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   createConversation,
   getConversationById,
+  getUserQuota,
   updateConversation,
 } from "../billing/conversationRepository.js";
 import { resolveBillingAction } from "../billing/resolveBillingAction.js";
@@ -93,10 +94,15 @@ logBillingDebug("run log insert completed", {
   userId: effectiveUserId,
 });
   const billingMode = resolveBillingMode(input);
-  let profileResult: {
+let profileResult: {
   data: { subscription_status?: string | null } | null;
   error?: unknown;
 } = { data: null, error: null };
+let userQuota = {
+  runsUsedThisMonth: 0,
+  credits: Number.MAX_SAFE_INTEGER,
+  subscriptionStatus: "free",
+};
 
 try {
   profileResult = await supabase
@@ -111,10 +117,19 @@ try {
     error: error instanceof Error ? error.message : String(error),
   });
 }
+try {
+  userQuota = await getUserQuota(supabase, effectiveUserId);
+} catch (error) {
+  logBillingDebug("quota lookup failed", {
+    routeName: input.routeName ?? "unknown",
+    userId: effectiveUserId,
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
 const hasPaidAccess =
   normalizeSubscriptionStatus(profileResult.data?.subscription_status) === "pro";
 const normalizedSubscriptionStatus = normalizeSubscriptionStatus(
-  profileResult.data?.subscription_status
+  profileResult.data?.subscription_status ?? userQuota.subscriptionStatus
 );
 logBillingDebug("billing inputs before resolver", {
   routeName: input.routeName ?? "unknown",
@@ -156,6 +171,8 @@ logBillingDebug("billing inputs before resolver", {
   const billingAction = resolveBillingAction({
     mode: billingMode,
     hasPaidAccess,
+    runsUsedThisMonth: userQuota.runsUsedThisMonth,
+    credits: userQuota.credits,
   });
 
   logBillingDebug("billing action resolved", {
