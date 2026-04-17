@@ -60,11 +60,16 @@ async function processDeveloperPatchJob(supabase, job) {
             await (0, developerPatchJobs_js_1.markDeveloperPatchJobFailed)(supabase, job.id, result.reason || "Developer patch job failed.");
             return;
         }
-        await (0, developerPatchJobs_js_1.markDeveloperPatchJobCompleted)(supabase, job.id, result);
         const confidence = typeof result.developerConfidence === "number"
             ? result.developerConfidence
             : 0;
-        (0, runLogging_js_1.queueRunLog)({
+        console.log("[zone-billing-debug] execution success reached", {
+            routeName: "/api/patch/jobs worker",
+            userId: requestPayload.userId,
+            billingMode: requestPayload.billingMode ?? null,
+            isByok: Boolean(requestPayload.isByok),
+        });
+        const conversationId = await (0, runLogging_js_1.logRun)({
             userId: requestPayload.userId,
             role: "developer",
             task: requestPayload.task,
@@ -72,8 +77,15 @@ async function processDeveloperPatchJob(supabase, job) {
             decisionMode: getDeveloperDecisionModeFromResult(result, confidence),
             confidence,
             creditsUsed: 1,
+            conversationId: requestPayload.conversationId,
+            billingMode: requestPayload.billingMode,
             isByok: requestPayload.isByok,
-        });
+            routeName: "/api/patch/jobs worker",
+        }).catch(() => null);
+        if (conversationId) {
+            result.conversationId = conversationId;
+        }
+        await (0, developerPatchJobs_js_1.markDeveloperPatchJobCompleted)(supabase, job.id, result);
     }
     catch (error) {
         await (0, developerPatchJobs_js_1.markDeveloperPatchJobFailed)(supabase, job.id, error instanceof Error ? error.message : "Unknown worker error");

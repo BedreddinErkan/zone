@@ -2,6 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.computeRiskScore = computeRiskScore;
 const computeRiskScoreDetails_js_1 = require("./computeRiskScoreDetails.js");
+function logRiskDebug(label, payload) {
+    console.log(`[zone-debug] ${label}: ${JSON.stringify(payload)}`);
+}
 const ROLE_MODIFIERS = {
     test_engineer: {
         destructiveMultiplier: 0.3,
@@ -33,7 +36,10 @@ function getRoleModifier(role) {
 function computeRiskScore(input) {
     const task = typeof input === "string" ? input : input.task;
     const role = typeof input === "string" ? undefined : input.role;
-    const details = (0, computeRiskScoreDetails_js_1.computeRiskScoreDetails)({ task });
+    const details = (0, computeRiskScoreDetails_js_1.computeRiskScoreDetails)({
+        task,
+        codeIntent: typeof input === "string" ? undefined : input.codeIntent,
+    });
     const modifier = getRoleModifier(role);
     const destructiveScore = Math.round(details.riskBreakdown.destructive * modifier.destructiveMultiplier);
     const criticalScore = Math.round(details.riskBreakdown.critical * modifier.criticalMultiplier);
@@ -61,6 +67,17 @@ function computeRiskScore(input) {
         details.riskBreakdown.lowRisk +
         massScopeScore +
         details.compoundPenalty));
+    logRiskDebug("computeRiskScore result", {
+        task,
+        role,
+        details,
+        destructiveScore,
+        schemaScore,
+        criticalScore,
+        massScopeScore,
+        adjustedScore,
+        signals,
+    });
     return {
         score: adjustedScore,
         signals,

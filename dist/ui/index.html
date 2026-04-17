@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Zone</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -10,7 +11,7 @@ body{background:#1a1a1a;color:#d4d4d4;font-family:'Courier New',monospace;font-s
 .main-grid{display:grid;grid-template-columns:600px 1fr;gap:24px;align-items:start}
 @media(max-width:900px){.main-grid{grid-template-columns:1fr}}
 .section{background:#1e1e1e;border:1px solid #2d2d2d;border-radius:12px;padding:22px;margin-bottom:18px;box-shadow:0 8px 24px rgba(0,0,0,0.18)}
-.label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.2em;color:#9a9a9a;margin-bottom:10px}
+.label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.2em;color:#9a9a9a;margin-bottom:10px}
 .prompt-box{background:#1a1a1a;border:1px solid #2d2d2d;border-radius:8px;padding:12px;font-size:12px;color:#9cdcfe;line-height:1.8;position:relative}
 .copy-btn{position:absolute;top:8px;right:8px;background:#2d2d2d;border:none;color:#737373;font-size:11px;padding:3px 9px;cursor:pointer}
 .copy-btn:hover{color:#d4d4d4}
@@ -33,7 +34,7 @@ input:focus,textarea:focus{border-color:#007acc}
 .repo-selection{background:#1a1a1a;border:1px solid #2d2d2d;border-radius:8px;padding:10px 12px;margin-bottom:10px}
 .repo-selection-label{font-size:13px;color:#9cdcfe;line-height:1.7;word-break:break-word}
 .repo-selection-meta{font-size:12px;color:#737373;line-height:1.7;margin-top:4px}
-.billing-summary-box{transition:border-color .15s,background .15s}
+.billing-summary-box{}
 .billing-summary-box.free-low{border-color:rgba(206,145,120,0.45);background:#231914}
 .billing-summary-box.pro{border-color:rgba(78,201,176,0.35);background:#14211e}
 .billing-summary-label.free{color:#d4d4d4}
@@ -53,9 +54,6 @@ input:focus,textarea:focus{border-color:#007acc}
 .dryrun-btn{background:transparent;border:1px solid rgba(206,145,120,0.4);color:#ce9178;font-size:15px;padding:12px 16px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap}
 .dryrun-btn:hover{background:#3a2e0e;border-color:#ce9178}
 .dryrun-btn:disabled{border-color:#2d2d2d;color:#737373;cursor:not-allowed}
-.enhance-btn{background:transparent;border:1px solid #6b5a1d;color:#ce9178;font-family:'Courier New',monospace;font-size:12px;padding:5px 12px;cursor:pointer}
-.enhance-btn:hover{background:#3a2e0e}
-.enhance-btn:disabled{border-color:#2d2d2d;color:#737373;cursor:not-allowed}
 .reset-btn{background:transparent;border:1px solid #2d2d2d;color:#737373;font-size:15px;padding:12px 18px;cursor:pointer}
 .reset-btn:hover{border-color:#d4d4d4;color:#d4d4d4}
 .spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:none}
@@ -96,7 +94,7 @@ input:focus,textarea:focus{border-color:#007acc}
 .metric{background:#1e1e1e;border:1px solid #2d2d2d;border-radius:8px;padding:12px;text-align:center}
 .mval{font-size:26px;font-weight:600;color:#4ec9b0}
 .mlbl{font-size:11px;color:#737373;text-transform:uppercase;margin-top:4px}
-.risk-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.risk-row{display:flex;align-itemss:center;gap:10px;margin-bottom:8px}
 .rlbl{font-size:12px;color:#737373;width:90px}
 .rbg{flex:1;background:#2d2d2d;border-radius:2px;height:5px}
 .rbar{height:5px;border-radius:2px;transition:width .5s}
@@ -138,7 +136,7 @@ input:focus,textarea:focus{border-color:#007acc}
 .apply-btn:disabled{border-color:#2d2d2d;color:#737373;cursor:not-allowed}
 .hidden{display:none}
 .history-label{font-size:12px;color:#737373;margin-bottom:6px}
-.section-title{font-size:13px;color:#b0b0b0;margin-bottom:10px;font-weight:700}
+.section-title{font-size:14px;color:#b0b0b0;margin-bottom:10px;font-weight:700}
 .conflict-card{background:#3a0e0e;border:1px solid #6b1d1d;border-radius:6px;padding:12px;margin-bottom:8px}
 .conflict-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
 .conflict-file{font-size:13px;color:#f44747;word-break:break-all}
@@ -163,6 +161,9 @@ input:focus,textarea:focus{border-color:#007acc}
 .diff-line.removed{background:#2a0e0e}
 .diff-line.unchanged{background:transparent}
 .diff-ln{min-width:36px;padding:0 8px;color:#444;text-align:right;user-select:none;border-right:1px solid #2d2d2d;flex-shrink:0}
+.diff-ln-old,.diff-ln-new{min-width:32px;padding:0 6px;color:#444;text-align:right;user-select:none;border-right:1px solid #2d2d2d;flex-shrink:0;font-size:11px}
+.diff-line.added .diff-ln-old{color:transparent}
+.diff-line.removed .diff-ln-new{color:transparent}
 .diff-prefix{width:18px;text-align:center;flex-shrink:0}
 .diff-line.added .diff-prefix{color:#4ec9b0}
 .diff-line.removed .diff-prefix{color:#f44747}
@@ -194,11 +195,152 @@ input:focus,textarea:focus{border-color:#007acc}
 .feedback-status{min-height:18px;font-size:12px;line-height:1.6}
 .feedback-status.success{color:#4ec9b0}
 .feedback-status.error{color:#f44747}
+.vscode-auth-required{max-width:520px;margin:48px auto 0 auto;padding:24px;text-align:center}
+.vscode-auth-required-title{font-size:24px;font-weight:700;color:#fff;margin-bottom:10px}
+.vscode-auth-required-text{font-size:13px;line-height:1.8;color:#737373;margin-bottom:18px}
 .account-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;height:36px;background:#1a1a1a;border-bottom:1px solid #2d2d2d;padding:0 16px;margin:-24px -24px 18px -24px;font-size:12px;font-family:'Courier New',monospace}
 .account-bar-user{color:#737373;line-height:1}
 .account-bar-signout{background:transparent;border:none;color:#737373;padding:0;cursor:pointer;font-family:'Courier New',monospace;font-size:12px}
 .account-bar-signout:hover{color:#f44747}
 .account-bar-signout:disabled{opacity:.7;cursor:not-allowed}
+@media(max-width:600px){
+  body{padding:12px;font-size:14px}
+  h1{font-size:22px}
+  .sub{font-size:12px;margin-bottom:16px}
+  .section{padding:14px;margin-bottom:12px}
+  .role-row{gap:6px}
+  .role-btn{font-size:12px;padding:6px 10px}
+  textarea{height:80px;font-size:13px}
+  .repo-row{flex-wrap:wrap}
+  .repo-row input{font-size:13px}
+  .editor-btn{padding:6px}
+  .btn-row{flex-direction:column;gap:8px}
+  .exec-btn,.dryrun-btn,.reset-btn{width:100%;font-size:14px;padding:14px}
+  .metrics{grid-template-columns:1fr 1fr 1fr;gap:8px}
+  .mval{font-size:20px}
+  .result-summary-main{flex-direction:column;align-items:flex-start;gap:6px}
+  .result-summary-chips{gap:4px}
+  .result-chip{font-size:11px;padding:3px 8px}
+  .badge-row{gap:6px}
+  .decision-badge{font-size:12px;padding:4px 10px}
+  .preview-text{font-size:12px;padding:10px;max-height:180px}
+  .diff-line{font-size:11px}
+  .diff-ln{min-width:28px;padding:0 4px}
+  .diff-text{padding:0 6px}
+  .file-card .file-row{flex-wrap:wrap;gap:4px}
+  .fname{font-size:12px}
+  .apply-btn{font-size:14px;padding:14px}
+  .account-bar{margin:-12px -12px 12px -12px;padding:0 12px;font-size:11px}
+  .feedback-fab{bottom:12px;right:12px;padding:8px 10px;font-size:11px}
+  .user-id-badge{bottom:12px;left:12px;padding:8px 10px;font-size:11px;max-width:60%;overflow:hidden;text-overflow:ellipsis}
+  .feedback-modal{width:calc(100% - 24px);padding:14px}
+  .context-files li{font-size:12px}
+  .billing-summary-box{font-size:13px}
+  .recent-run-item{padding:10px}
+  .recent-run-task{font-size:12px}
+  .recent-run-meta{font-size:11px}
+  .pr-row{font-size:12px;flex-wrap:wrap}
+  .label{font-size:9px;letter-spacing:.15em}
+  .risk-row{gap:6px}
+  .rlbl{width:70px;font-size:11px}
+  .warning-item{font-size:12px}
+  .error-box{font-size:12px;padding:12px}
+  .error-card-title{font-size:13px}
+  .error-card-message{font-size:12px}
+  .picker-btn span{font-size:12px}
+}
+  /* === POLISH === */
+body{background:#0e0e0e;scrollbar-width:thin;scrollbar-color:#2a2a2a #0e0e0e}
+body::-webkit-scrollbar{width:6px}
+body::-webkit-scrollbar-track{background:#0e0e0e}
+body::-webkit-scrollbar-thumb{background:#2a2a2a;border-radius:3px}
+body::-webkit-scrollbar-thumb:hover{background:#3c3c3c}
+.section{background:#111;border-color:#1e1e1e;box-shadow:0 4px 24px rgba(0,0,0,0.2)}
+.sub{color:#555}
+textarea,input,select{background:#0e0e0e;border-color:#1e1e1e;transition:border-color .15s}
+textarea:focus,input:focus{border-color:#007acc}
+.exec-btn{background:linear-gradient(135deg,#007acc,#0090e8);border-radius:12px;transition:transform .15s,box-shadow .15s}
+.exec-btn:hover:not(:disabled){box-shadow:0 0 24px rgba(0,122,204,0.3);transform:translateY(-1px)}
+.exec-btn:active:not(:disabled){transform:translateY(0)}
+.dryrun-btn{border-radius:12px;transition:transform .15s}
+.dryrun-btn:hover:not(:disabled){transform:translateY(-1px)}
+.reset-btn{border-radius:12px;border-color:#1e1e1e}
+.role-btn{border-radius:10px;border-color:#1e1e1e;transition:border-color .15s,transform .15s,background .15s,box-shadow .15s}
+.role-btn:hover{transform:translateY(-1px)}
+.role-btn.active{background:#0a2a3a;border-color:#007acc;box-shadow:0 0 16px rgba(0,122,204,0.12)}
+.editor-btn{border-radius:10px;border-color:#1e1e1e;transition:border-color .15s,background .15s}
+.editor-btn:hover{background:#111;border-color:#007acc;box-shadow:0 0 10px rgba(0,122,204,0.1)}
+.billing-summary-box{border-radius:14px}
+.billing-summary-box.pro{background:linear-gradient(135deg,#0a1f1a,#111);border-color:rgba(78,201,176,0.2)}
+.billing-plan-badge{background:linear-gradient(135deg,rgba(78,201,176,0.15),rgba(78,201,176,0.05))}
+.decision-badge{transition:background .3s,border-color .3s,color .3s}.decision-badge.safe{background:linear-gradient(135deg,#0a2a1a,#0e3a1e)}
+.decision-badge.preview{background:linear-gradient(135deg,#2a1e0a,#3a2e0e)}
+.metric{background:#111;border-color:#1e1e1e}
+.metric:hover{border-color:#2a2a2a;background:#141414}
+.mval{font-weight:700}
+.diff-card{border-color:#1e1e1e;transition:border-color .2s}
+.diff-card:hover,.diff-card[open]{border-color:#2a2a2a}
+.diff-header{background:#111}
+.diff-body{background:#0a0a0a}
+.file-card{border-color:#1e1e1e}
+.file-card:hover{border-color:#2a2a2a}
+.apply-btn{border-radius:12px;transition:transform .15s,box-shadow .15s}
+.apply-btn.is-enabled:hover{transform:translateY(-1px);box-shadow:0 0 20px rgba(78,201,176,0.15)}
+.result-summary{background:#111;border-color:#1e1e1e}
+.result-chip{background:#0e0e0e;border-color:#1e1e1e}
+.recent-run-item{border-color:#1e1e1e;border-radius:12px;transition:border-color .15s,transform .15s}
+.recent-run-item:hover{border-color:#007acc;transform:translateY(-1px)}
+.progress-box{background:#111;border-color:#1e1e1e;border-radius:12px}
+.error-box{border-radius:14px}
+.success-box{border-radius:14px}
+.context-files{background:#0e0e0e;border-color:#1e1e1e;border-radius:12px}
+.preview-text{background:#0e0e0e;border-color:#1e1e1e;border-radius:12px}
+.patch-results{background:#0e0e0e;border-color:#1e1e1e;border-radius:12px}
+.repo-selection{background:#0e0e0e;border-color:#1e1e1e;border-radius:12px}
+.account-bar{background:#0a0a0a;border-color:#1a1a1a}
+.feedback-fab{border-radius:12px;border-color:#1e1e1e;background:#111;transition:transform .15s,border-color .15s}
+.feedback-fab:hover{border-color:#007acc;transform:translateY(-1px)}
+.user-id-badge{border-radius:12px;border-color:#1e1e1e;background:#111}
+.feedback-modal{border-color:#1e1e1e;background:#111;border-radius:16px}
+.feedback-close-btn{border-radius:8px;border-color:#1e1e1e}
+.risk-row .rbg{background:#1e1e1e;border-radius:3px}
+.risk-row .rbar{border-radius:3px}
+.qa-section{background:#0e0e0e;border:1px solid #1e1e1e;border-radius:10px;padding:12px;margin-bottom:10px;transition:border-color .15s}
+.qa-section:hover{border-color:#2a2a2a}
+.qa-header{display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;-webkit-user-select:none}
+.qa-header-left{display:flex;align-items:center;gap:8px}
+.qa-header-icon{font-size:14px}
+.qa-header-label{font-size:12px;font-weight:700;color:#b0b0b0;text-transform:uppercase;letter-spacing:.08em}
+.qa-header-count{font-size:10px;color:#555;background:#1a1a1a;border-radius:99px;padding:2px 7px}
+.qa-header-right{font-size:10px;color:#555;transition:transform .15s}
+.qa-header-right.open{transform:rotate(90deg)}
+.qa-body{padding-top:10px}
+.qa-toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.qa-filters{display:flex;gap:5px}
+.qa-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+.qa-chip{background:#111;border:1px solid #1e1e1e;border-radius:7px;padding:7px 9px;cursor:pointer;text-align:left;font-family:'Courier New',monospace;font-size:12px;color:#9cdcfe;transition:border-color .15s,transform .1s;display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden}
+.qa-chip:hover{border-color:#007acc;transform:translateY(-1px)}
+.qa-chip:active{transform:translateY(0)}
+.qa-chip-icon{font-size:13px;flex-shrink:0}
+.qa-chip-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qa-chip-role{font-size:8px;color:#444;text-transform:uppercase;letter-spacing:.1em;flex-shrink:0}
+.qa-chip.custom{border-style:dashed;border-color:#2a2a2a}
+.qa-chip.custom:hover{border-color:#4ec9b0;border-style:dashed}
+.qa-filter{background:transparent;border:1px solid #1e1e1e;border-radius:5px;color:#555;font-family:'Courier New',monospace;font-size:10px;padding:3px 7px;cursor:pointer;transition:border-color .15s,color .15s}
+.qa-filter:hover{border-color:#007acc;color:#007acc}
+.qa-filter.active{border-color:#007acc;color:#007acc;background:#0a2a3a}
+.qa-action-btn{background:transparent;border:1px dashed #2a2a2a;border-radius:5px;color:#555;font-family:'Courier New',monospace;font-size:10px;padding:3px 7px;cursor:pointer;transition:border-color .15s,color .15s}
+.qa-action-btn:hover{border-color:#4ec9b0;color:#4ec9b0}
+.qa-saved-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.qa-saved-label{font-size:10px;color:#555;text-transform:uppercase;letter-spacing:.08em}
+.qa-saved-list{display:flex;flex-direction:column;gap:5px}
+.qa-saved-item{display:flex;align-items:center;gap:8px;background:#111;border:1px solid #1e1e1e;border-radius:7px;padding:7px 9px;cursor:pointer;transition:border-color .15s}
+.qa-saved-item:hover{border-color:#007acc}
+.qa-saved-item-name{flex:1;min-width:0;font-size:12px;color:#d4d4d4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qa-saved-item-role{font-size:8px;color:#444;text-transform:uppercase;letter-spacing:.1em;flex-shrink:0}
+.qa-saved-item-delete{background:transparent;border:none;color:#444;font-size:11px;cursor:pointer;padding:2px 4px;border-radius:4px;transition:color .15s}
+.qa-saved-item-delete:hover{color:#f44747}
+@media(max-width:600px){.qa-grid{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
@@ -213,25 +355,48 @@ input:focus,textarea:focus{border-color:#007acc}
 <div id="leftCol">
 
 <div class="section">
-  <div class="label">Role</div>
+  <div class="label">Inference Mode</div>
   <div class="role-row">
-<button class="role-btn active" data-role="developer" onclick="selectRole(this)">⚡ Developer</button>
-    <button class="role-btn" data-role="test_engineer" onclick="selectRole(this)">🧪 Test Engineer</button>
-    <button class="role-btn" data-role="data_analyst" onclick="selectRole(this)">📊 Data Analyst</button>
+    <button class="role-btn active" data-mode="hosted" onclick="selectInferenceMode(this)">Hosted (Zone Server)</button>
+    <button class="role-btn" data-mode="local" onclick="selectInferenceMode(this)">Local (Your API Key)</button>
+  </div>
+  <div id="localApiKeyWrap" class="hidden">
+    <div class="label">OpenAI API Key</div>
+    <input id="localApiKey" type="password" placeholder="sk-..." autocomplete="off" oninput="saveLocalApiKey(this.value)" />
   </div>
   <div class="label">Task</div>
   <textarea id="task" placeholder="add input validation to login form..."></textarea>
-  <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
-    <button id="enhanceBtn" class="enhance-btn" onclick="enhanceTask()">✨ Enhance</button>
+  <div class="qa-section" id="quickActionsPanel">
+    <div class="qa-header" onclick="toggleQuickActions()">
+      <div class="qa-header-left">
+        <span class="qa-header-icon">🎯</span>
+        <span class="qa-header-label">Quick Actions</span>
+        <span class="qa-header-count" id="qaCountBadge">17</span>
+      </div>
+      <span class="qa-header-right" id="qaToggleIcon">▸</span>
+    </div>
+    <div id="qaCollapsible" class="hidden">
+      <div class="qa-body">
+        <div class="qa-toolbar">
+          <div class="qa-filters">
+            <button type="button" id="qaFilterAll" class="qa-filter active" onclick="filterQuickActions('all')">All</button>
+            <button type="button" id="qaFilterDev" class="qa-filter" onclick="filterQuickActions('developer')">Dev</button>
+            <button type="button" id="qaFilterTest" class="qa-filter" onclick="filterQuickActions('test_engineer')">Test</button>
+            <button type="button" id="qaFilterData" class="qa-filter" onclick="filterQuickActions('data_analyst')">Data</button>
+          </div>
+          <button type="button" class="qa-action-btn" onclick="openCreatePromptModal()">+ New</button>
+        </div>
+        <div id="qaTemplatesGrid" class="qa-grid"></div>
+        <div id="qaSavedSection" class="hidden" style="margin-top:10px">
+          <div class="qa-saved-header">
+            <span class="qa-saved-label">💾 My Prompts</span>
+            <button type="button" class="qa-action-btn" onclick="openSavePromptModal()">Save Current</button>
+          </div>
+          <div id="qaSavedList" class="qa-saved-list"></div>
+        </div>
+      </div>
+    </div>
   </div>
-  <div id="exampleTasks" style="margin-bottom:10px">
-  <div style="font-size:11px;color:#858585;margin-bottom:6px">💡 Try an example:</div>
-  <div style="display:flex;flex-wrap:wrap;gap:6px">
-    <button onclick="setExampleTask('add error handling to the login function','developer')" style="background:#1e1e1e;border:1px solid #3c3c3c;border-radius:4px;color:#9cdcfe;font-family:'Courier New',monospace;font-size:11px;padding:4px 8px;cursor:pointer">🔧 add error handling to login</button>
-    <button onclick="setExampleTask('write a test for the checkout flow','test_engineer')" style="background:#1e1e1e;border:1px solid #3c3c3c;border-radius:4px;color:#9cdcfe;font-family:'Courier New',monospace;font-size:11px;padding:4px 8px;cursor:pointer">🧪 write a test for checkout</button>
-    <button onclick="setExampleTask('create a users table migration','data_analyst')" style="background:#1e1e1e;border:1px solid #3c3c3c;border-radius:4px;color:#9cdcfe;font-family:'Courier New',monospace;font-size:11px;padding:4px 8px;cursor:pointer">📊 create a users migration</button>
-  </div>
-</div>
   <div class="history-label">Repo Path</div>
   <div class="repo-row">
     <input id="repoPath" type="text" placeholder="C:\Users\..." oninput="syncRepoSelectionDisplay()" />
@@ -290,7 +455,33 @@ input:focus,textarea:focus{border-color:#007acc}
   <div id="recentRunsEmpty" class="recent-run-empty">No recent runs yet.</div>
   <div id="recentRunsList" class="recent-runs-list hidden"></div>
 </div>
-
+<div id="savePromptModalBackdrop" class="feedback-modal-backdrop hidden">
+  <div class="feedback-modal">
+    <div class="feedback-modal-header">
+      <div class="feedback-modal-title" id="promptModalTitle">Save Prompt</div>
+      <button type="button" class="feedback-close-btn" onclick="closeSavePromptModal()">X</button>
+    </div>
+    <div class="feedback-form">
+      <div>
+        <div class="label">Name</div>
+        <input id="savePromptName" type="text" placeholder="e.g. Login validation" />
+      </div>
+      <div>
+        <div class="label">Role</div>
+        <select id="savePromptRole">
+          <option value="developer">⚡ Developer</option>
+          <option value="test_engineer">🧪 Test Engineer</option>
+          <option value="data_analyst">📊 Data Analyst</option>
+        </select>
+      </div>
+      <div>
+        <div class="label">Prompt</div>
+        <textarea id="savePromptText" style="height:100px;font-size:13px" placeholder="Describe what you want Zone to do..."></textarea>
+      </div>
+      <button type="button" id="savePromptSubmitBtn" class="feedback-submit-btn" onclick="submitSavePrompt()">Save</button>
+    </div>
+  </div>
+</div>
 </div><!-- leftCol -->
 <div id="rightCol">
 
@@ -355,20 +546,95 @@ input:focus,textarea:focus{border-color:#007acc}
 </div><!-- rightCol -->
 </div><!-- main-grid -->
 
+<div id="vsCodeAuthRequired" class="section vscode-auth-required hidden">
+  <div class="vscode-auth-required-title">Sign in to use Zone in VS Code</div>
+  <div class="vscode-auth-required-text">Your VS Code webview needs an authenticated Zone session. Continue in your browser, then come back to the extension.</div>
+  <button type="button" class="exec-btn" style="justify-content:center;max-width:240px;margin:0 auto" onclick="requestVsCodeLogin()">Sign in via Browser</button>
+</div>
+
 <script>
+const ZONE_QUICK_TEMPLATES_KEY='zone_quick_templates';
+const ZONE_SAVED_PROMPTS_KEY='zone_saved_prompts';
+const MAX_SAVED_PROMPTS=20;
+const ZONE_QA_COLLAPSED_KEY='zone_qa_collapsed';
+
+function getDefaultTemplates(){
+  return[
+    {id:'dev-error-handling',role:'developer',icon:'🔒',label:'Error Handling',prompt:'Add comprehensive error handling to {function} with proper logging and user-friendly error messages'},
+    {id:'dev-docstring',role:'developer',icon:'📝',label:'Docstring',prompt:'Add JSDoc/docstring comments to all functions in {file}, including parameter types, return types, and examples'},
+    {id:'dev-refactor',role:'developer',icon:'🔄',label:'Refactor',prompt:'Refactor {file} following clean code principles — extract functions, reduce complexity, improve naming'},
+    {id:'dev-type-hints',role:'developer',icon:'📊',label:'Type Hints',prompt:'Add TypeScript type annotations to {file} — cover all function parameters, return types, and interfaces'},
+    {id:'dev-performance',role:'developer',icon:'⚡',label:'Performance',prompt:'Optimize performance of {function} — reduce time complexity, minimize allocations, add caching where appropriate'},
+    {id:'dev-bug-fix',role:'developer',icon:'🐛',label:'Bug Fix',prompt:'Analyze and fix the bug: {description}'},
+    {id:'dev-code-review',role:'developer',icon:'🔍',label:'Code Review',prompt:'Review {file} for bugs, security issues, performance problems, and code smells. List findings with severity.'},
+    {id:'test-unit',role:'test_engineer',icon:'🧪',label:'Unit Test',prompt:'Write unit tests for {file} covering all public functions, edge cases, and error scenarios'},
+    {id:'test-integration',role:'test_engineer',icon:'🔗',label:'Integration Test',prompt:'Write integration tests for {module} that test the interaction between components'},
+    {id:'test-e2e',role:'test_engineer',icon:'🌐',label:'E2E Test',prompt:'Write end-to-end test for the {feature} flow using the existing test framework'},
+    {id:'test-cucumber',role:'test_engineer',icon:'🥒',label:'Cucumber Scenario',prompt:'Write a Cucumber feature file with scenarios for {feature}, including happy path and error cases'},
+    {id:'test-missing-cases',role:'test_engineer',icon:'❓',label:'Missing Cases',prompt:'Analyze existing tests in {file} and identify missing test cases — then write them'},
+    {id:'data-create-table',role:'data_analyst',icon:'🗄️',label:'Create Table',prompt:'Create a {table} table with appropriate columns, types, constraints, and indexes following existing schema conventions'},
+    {id:'data-migration',role:'data_analyst',icon:'📦',label:'Migration',prompt:'Create a migration file to {description} following the existing migration format and naming convention'},
+    {id:'data-alter-table',role:'data_analyst',icon:'✏️',label:'Alter Table',prompt:'Alter the {table} table to {description} — include up and down migration'},
+    {id:'data-seed-data',role:'data_analyst',icon:'🌱',label:'Seed Data',prompt:'Create seed data SQL for {table} with realistic test records covering all column types and edge cases'},
+    {id:'data-query-optimize',role:'data_analyst',icon:'🚀',label:'Optimize Query',prompt:'Analyze and optimize the query in {file} — add missing indexes, rewrite subqueries, improve join strategy'},
+  ];
+}
+
+function getSavedPrompts(){
+  try{const s=JSON.parse(localStorage.getItem(ZONE_SAVED_PROMPTS_KEY)||'[]');return Array.isArray(s)?s.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)):[];}catch(_){return[];}
+}
+function saveSavedPrompts(p){localStorage.setItem(ZONE_SAVED_PROMPTS_KEY,JSON.stringify(p.slice(0,MAX_SAVED_PROMPTS)));}
+function addSavedPrompt({name,role,prompt}){
+  const id='sp-'+Date.now()+'-'+Math.random().toString(36).slice(2,6);
+  const p={id,name:name||'Untitled',role:role||'developer',prompt:prompt||'',createdAt:Date.now()};
+  const all=[p,...getSavedPrompts()].slice(0,MAX_SAVED_PROMPTS);
+  saveSavedPrompts(all);return p;
+}
+function removeSavedPrompt(id){const all=getSavedPrompts().filter(x=>x.id!==id);saveSavedPrompts(all);return all;}
+function updateSavedPrompt(id,updates){const all=getSavedPrompts();const i=all.findIndex(x=>x.id===id);if(i===-1)return all;all[i]={...all[i],...updates};saveSavedPrompts(all);return all;}
+
+function loadQuickTemplates(){
+  try{const s=JSON.parse(localStorage.getItem(ZONE_QUICK_TEMPLATES_KEY)||'null');if(Array.isArray(s)&&s.length>0)return s;}catch(_){}
+  const d=getDefaultTemplates();saveQuickTemplates(d);return d;
+}
+function saveQuickTemplates(t){try{localStorage.setItem(ZONE_QUICK_TEMPLATES_KEY,JSON.stringify(t));}catch(_){}}
+function getFavourites(){try{const s=JSON.parse(localStorage.getItem(ZONE_FAVOURITE_TEMPLATES_KEY)||'[]');return Array.isArray(s)?s.filter(x=>typeof x==='string'):[];}catch(_){return[];}}
+function saveFavourites(ids){try{localStorage.setItem(ZONE_FAVOURITE_TEMPLATES_KEY,JSON.stringify(ids));}catch(_){}}
+function isFavourite(templateId){return getFavourites().includes(templateId);}
+function toggleFavourite(templateId){
+  const current=getFavourites();
+  const next=current.includes(templateId)?current.filter(id=>id!==templateId):[...current,templateId];
+  saveFavourites(next);
+  return next;
+}
+function addQuickTemplate(tpl){
+  const t=loadQuickTemplates();const id='custom-'+Date.now()+'-'+Math.random().toString(36).slice(2,6);
+  t.push({...tpl,id});saveQuickTemplates(t);return id;
+}
+function removeQuickTemplate(id){let t=loadQuickTemplates();t=t.filter(x=>x.id!==id);saveQuickTemplates(t);return t;}
+function updateQuickTemplate(id,updates){const t=loadQuickTemplates();const i=t.findIndex(x=>x.id===id);if(i===-1)return t;t[i]={...t[i],...updates};saveQuickTemplates(t);return t;}
+function resetQuickTemplates(){const d=getDefaultTemplates();saveQuickTemplates(d);return d;}
+
+let currentQaFilter='all';
 let currentPatches=[];
 let currentRepoPath='';
 let currentRole='developer';
 let currentProgressSource=null;
 let currentRunId='';
+let currentDeveloperJobPollTimer=null;
+let currentDeveloperJobToken=0;
 let currentSummaryState={};
 let currentRepoHandle=null;
 let currentRepoSelectionLabel='';
+let currentGitBranch='';
 let currentBackupSnapshot=null;
 let currentRunState={hasPatchResult:false,validationBlocked:false,runInProgress:false,decisionMode:'',confidence:0};
 let currentBillingState={plan:'',credits:null,hardBlocked:false};
 let currentUserIdLogState='';
 let currentRepoHandlePermission='unknown';
+let hasReceivedVsCodeWorkspacePath=false;
+let promptModalMode='save';
+
 const RECENT_RUNS_KEY='zone_recent_runs';
 const MAX_RECENT_RUNS=6;
 const HOSTED_CONTEXT_MAX_FILES=35;
@@ -377,6 +643,8 @@ const HOSTED_CONTEXT_BINARY_EXTENSIONS=new Set(['png','jpg','jpeg','gif','webp',
 const ZONE_HANDLE_DB_NAME='zone-folder-handles';
 const ZONE_HANDLE_STORE_NAME='handles';
 const ZONE_FOLDER_HANDLE_KEY='zone-folder-handle';
+const ZONE_INFERENCE_MODE_KEY='zone_inference_mode';
+const ZONE_USER_OPENAI_KEY='zone_user_openai_key';
 
 function formatMetadataBadge(parts){const s=(parts||[]).filter(Boolean);return s.length>0?s.join(' / '):'';}
 function formatRoleLabel(role){return {developer:'Developer',test_engineer:'Test Engineer',data_analyst:'Data Analyst'}[role]||'Developer';}
@@ -385,26 +653,184 @@ function formatRecentRunTime(t){if(!t)return 'unknown';const d=Math.max(0,Date.n
 function escapeHtml(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function formatFileOperation(p){return String(p||'').includes('[modify]')?'modify':'create';}
 function formatFileLabel(p,i){return p||`generated_file_${i+1}`;}
+function getSavedInferenceMode(){try{const mode=localStorage.getItem(ZONE_INFERENCE_MODE_KEY)||'hosted';return mode==='local'?'local':'hosted';}catch{return'hosted';}}
+function saveInferenceMode(mode){try{localStorage.setItem(ZONE_INFERENCE_MODE_KEY,mode==='local'?'local':'hosted');}catch{}}
+function getSavedLocalApiKey(){try{return localStorage.getItem(ZONE_USER_OPENAI_KEY)||'';}catch{return'';}}
+function saveLocalApiKey(value){try{localStorage.setItem(ZONE_USER_OPENAI_KEY,String(value||''));}catch{}}
+
+function setRoleSilently(role){
+  currentRole=role||'developer';
+  document.querySelectorAll('.role-btn[data-role]').forEach(b=>b.classList.remove('active'));
+  const activeBtn=document.querySelector(`[data-role="${currentRole}"]`);
+  if(activeBtn)activeBtn.classList.add('active');
+  const ph={developer:'add input validation to login form...',test_engineer:'write a cucumber scenario for one-way flight search...',data_analyst:'create a users table with id, email, created_at...'};
+  document.getElementById('task').placeholder=ph[currentRole]||'';
+}
+
+function filterQuickActions(filter){
+  currentQaFilter=filter||'all';
+  document.querySelectorAll('.qa-filter').forEach(b=>b.classList.remove('active'));
+  const btn=document.getElementById('qaFilter'+(filter==='all'?'All':filter==='developer'?'Dev':filter==='test_engineer'?'Test':'Data'));
+  if(btn)btn.classList.add('active');
+  const grid=document.getElementById('qaTemplatesGrid');
+  if(!grid||!grid.children.length)return;
+  grid.querySelectorAll('.qa-chip').forEach(c=>{
+    c.style.display=(currentQaFilter==='all'||c.dataset.tplRole===currentQaFilter)?'':'none';
+  });
+}
+
+function renderQuickActionsTemplates(){
+  const grid=document.getElementById('qaTemplatesGrid');
+  if(!grid)return;
+  const collapsible=document.getElementById('qaCollapsible');
+  if(collapsible&&collapsible.classList.contains('hidden'))return;
+  const templates=loadQuickTemplates();
+  grid.innerHTML=templates.map(t=>{
+    const roleShort={developer:'dev',test_engineer:'test',data_analyst:'data'}[t.role]||'dev';
+    const isCustom=t.id.startsWith('custom-')?' custom':'';
+    return `<button type="button" class="qa-chip${isCustom}" data-tpl-id="${escapeHtml(t.id)}" data-tpl-role="${escapeHtml(t.role)}" onclick="selectQuickTemplate(this.dataset.tplId)" title="${escapeHtml(t.prompt)}"><span class="qa-chip-icon">${escapeHtml(t.icon)}</span><span class="qa-chip-label">${escapeHtml(t.label)}</span><span class="qa-chip-role">${roleShort}</span></button>`;
+  }).join('');
+}
+
+function selectQuickTemplate(id){
+  const templates=loadQuickTemplates();
+  const tpl=templates.find(t=>t.id===id);
+  if(!tpl)return;
+  setRoleSilently(tpl.role);
+  const textarea=document.getElementById('task');
+  textarea.value=tpl.prompt;
+  textarea.focus();
+  const match=tpl.prompt.match(/\{[^}]+\}/);
+  if(match){const start=tpl.prompt.indexOf(match[0]);textarea.setSelectionRange(start,start+match[0].length);}
+  trackEvent('quick_action_selected',{templateId:id,role:tpl.role});
+}
+
+function renderSavedPrompts(){
+  const section=document.getElementById('qaSavedSection');
+  const list=document.getElementById('qaSavedList');
+  const prompts=getSavedPrompts();
+  if(!section||!list)return;
+  if(prompts.length===0){section.classList.add('hidden');list.innerHTML='';return;}
+  section.classList.remove('hidden');
+  list.innerHTML=prompts.map(p=>{
+    const roleShort={developer:'dev',test_engineer:'test',data_analyst:'data'}[p.role]||'dev';
+    return `<div class="qa-saved-item" onclick="loadSavedPrompt('${escapeHtml(p.id)}')"><span class="qa-saved-item-name">${escapeHtml(p.name)}</span><span class="qa-saved-item-role">${roleShort}</span><button type="button" class="qa-saved-item-delete" onclick="event.stopPropagation();deleteSavedPrompt('${escapeHtml(p.id)}')" title="Delete">✕</button></div>`;
+  }).join('');
+}
+
+function loadSavedPrompt(id){
+  const prompts=getSavedPrompts();const p=prompts.find(x=>x.id===id);
+  if(!p)return;setRoleSilently(p.role);document.getElementById('task').value=p.prompt;document.getElementById('task').focus();
+  trackEvent('saved_prompt_loaded',{promptId:id,role:p.role});
+}
+function deleteSavedPrompt(id){removeSavedPrompt(id);renderSavedPrompts();}
+
+function openSavePromptModal(){
+  const task=document.getElementById('task').value.trim();
+  if(!task){showError('Write a prompt first before saving.');return;}
+  promptModalMode='save';
+  document.getElementById('promptModalTitle').textContent='Save Prompt';
+  document.getElementById('savePromptSubmitBtn').textContent='Save';
+  document.getElementById('savePromptName').value='';
+  document.getElementById('savePromptRole').value=currentRole;
+  document.getElementById('savePromptText').value=task;
+  document.getElementById('savePromptModalBackdrop').classList.remove('hidden');
+  setTimeout(()=>document.getElementById('savePromptName').focus(),0);
+}
+function closeSavePromptModal(){document.getElementById('savePromptModalBackdrop').classList.add('hidden');}
+
+function submitSavePrompt(){
+  const name=document.getElementById('savePromptName').value.trim();
+  const role=document.getElementById('savePromptRole').value;
+  const prompt=document.getElementById('savePromptText').value.trim();
+  if(!name){document.getElementById('savePromptName').style.borderColor='#f44747';setTimeout(()=>document.getElementById('savePromptName').style.borderColor='',2000);return;}
+  if(!prompt)return;
+  if(promptModalMode==='create'){
+    addQuickTemplate({name,role,icon:'⭐',label:name,prompt});
+    invalidateQaGrid();
+  }else{
+    addSavedPrompt({name,role,prompt});
+    renderSavedPrompts();
+  }
+  closeSavePromptModal();
+}
+
+function toggleQuickActions(){
+  const el=document.getElementById('qaCollapsible');
+  const icon=document.getElementById('qaToggleIcon');
+  if(!el)return;
+  const isHidden=el.classList.contains('hidden');
+  el.classList.toggle('hidden',!isHidden);
+  icon.classList.toggle('open',isHidden);
+  icon.textContent=isHidden?'▾':'▸';
+  try{localStorage.setItem(ZONE_QA_COLLAPSED_KEY,isHidden?'open':'closed');}catch(_){}
+  if(isHidden){renderQuickActionsTemplates();renderSavedPrompts();}
+}
+
+function openCreatePromptModal(){
+  promptModalMode='create';
+  document.getElementById('promptModalTitle').textContent='Create Prompt';
+  document.getElementById('savePromptSubmitBtn').textContent='Create';
+  document.getElementById('savePromptName').value='';
+  document.getElementById('savePromptRole').value=currentRole;
+  const ta=document.getElementById('savePromptText');
+  ta.value='';ta.readOnly=false;ta.style.opacity='1';
+  document.getElementById('savePromptModalBackdrop').classList.remove('hidden');
+  setTimeout(()=>document.getElementById('savePromptName').focus(),0);
+}
+
+function invalidateQaGrid(){
+  const collapsible=document.getElementById('qaCollapsible');
+  if(collapsible&&!collapsible.classList.contains('hidden')){renderQuickActionsTemplates();}
+}
+
+function updateQaCount(){
+  const badge=document.getElementById('qaCountBadge');
+  if(badge) badge.textContent=loadQuickTemplates().length;
+}
+
+function initQuickActions(){
+  updateQaCount();
+  if(localStorage.getItem(ZONE_QA_COLLAPSED_KEY)==='open'){
+    const el=document.getElementById('qaCollapsible');
+    const icon=document.getElementById('qaToggleIcon');
+    if(el&&icon){
+      el.classList.remove('hidden');icon.classList.add('open');icon.textContent='▾';
+      renderQuickActionsTemplates();renderSavedPrompts();
+    }
+  }
+  document.getElementById('savePromptModalBackdrop')?.addEventListener('click',event=>{if(event.target?.id==='savePromptModalBackdrop')closeSavePromptModal();});
+}
+
+function applyInferenceModeUi(){
+  const mode=getSavedInferenceMode();
+  document.querySelectorAll('.role-btn[data-mode]').forEach(btn=>btn.classList.toggle('active',btn.dataset.mode===mode));
+  const wrap=document.getElementById('localApiKeyWrap');const input=document.getElementById('localApiKey');
+  const savedKey=getSavedLocalApiKey();if(input&&input.value!==savedKey)input.value=savedKey;
+  if(wrap)wrap.classList.toggle('hidden',mode!=='local');
+}
+function selectInferenceMode(btn){const mode=btn?.dataset?.mode==='local'?'local':'hosted';saveInferenceMode(mode);applyInferenceModeUi();}
+  function getInferenceHeaders(){const headers={'Content-Type':'application/json'};const mode=getSavedInferenceMode();const apiKey=getSavedLocalApiKey().trim();if(mode==='local'&&apiKey)headers['X-User-OpenAI-Key']=apiKey;return headers;}
+  function getRequestedBillingMode(){return getSavedInferenceMode()==='local'?'byok':'hosted';}
+function initializeInferenceMode(){applyInferenceModeUi();}
 
 function buildDiffCards(fileDiffs){
   if(!fileDiffs||fileDiffs.length===0)return '<div class="diff-empty">No diffs returned.</div>';
   const CONTEXT=3;
   return fileDiffs.map((fd,i)=>{
-    const fp=escapeHtml(fd.filePath||`file_${i+1}`);
-    const added=fd.addedLines??0;const removed=fd.removedLines??0;
-    const diffLines=fd.diff||[];
-    const changed=new Set();
-    diffLines.forEach((l,idx)=>{if(l.type!=='unchanged')changed.add(idx);});
-    const visible=new Set();
-    changed.forEach(idx=>{for(let c=Math.max(0,idx-CONTEXT);c<=Math.min(diffLines.length-1,idx+CONTEXT);c++)visible.add(c);});
+    const fp=escapeHtml(fd.filePath||`file_${i+1}`);const added=fd.addedLines??0;const removed=fd.removedLines??0;
+    const diffLines=fd.diff||[];let oldLineCounter=1;let newLineCounter=1;
+    diffLines.forEach(l=>{if(l.type==='unchanged'){l.oldLineNumber=oldLineCounter++;l.newLineNumber=newLineCounter++;}else if(l.type==='removed'){l.oldLineNumber=oldLineCounter++;l.newLineNumber=null;}else if(l.type==='added'){l.oldLineNumber=null;l.newLineNumber=newLineCounter++;}});
+    const changed=new Set();diffLines.forEach((l,idx)=>{if(l.type!=='unchanged')changed.add(idx);});
+    const visible=new Set();changed.forEach(idx=>{for(let c=Math.max(0,idx-CONTEXT);c<=Math.min(diffLines.length-1,idx+CONTEXT);c++)visible.add(c);});
     if(visible.size===0)diffLines.slice(0,6).forEach((_,idx)=>visible.add(idx));
     let prevIdx=-2;const rows=[];
     [...visible].sort((a,b)=>a-b).forEach(idx=>{
       if(idx>prevIdx+1&&prevIdx>=0)rows.push(`<div class="diff-separator">·····</div>`);
-      const l=diffLines[idx];
-      const prefix=l.type==='added'?'+':l.type==='removed'?'-':' ';
-      const ln=l.type==='removed'?'':String(l.lineNumber||'');
-      rows.push(`<div class="diff-line ${escapeHtml(l.type)}"><span class="diff-ln">${ln}</span><span class="diff-prefix">${prefix}</span><span class="diff-text">${escapeHtml(l.content)}</span></div>`);
+      const l=diffLines[idx];const prefix=l.type==='added'?'+':l.type==='removed'?'-':' ';
+      const oldLn=l.type==='added'?'':String(l.oldLineNumber||l.lineNumber||'');
+      const newLn=l.type==='removed'?'':String(l.newLineNumber||l.lineNumber||'');
+      rows.push(`<div class="diff-line ${escapeHtml(l.type)}"><span class="diff-ln-old">${oldLn}</span><span class="diff-ln-new">${newLn}</span><span class="diff-prefix">${prefix}</span><span class="diff-text">${escapeHtml(l.content)}</span></div>`);
       prevIdx=idx;
     });
     const addedBadge=added>0?`<span class="diff-added-badge">+${added}</span>`:'';
@@ -414,1163 +840,170 @@ function buildDiffCards(fileDiffs){
 }
 
 function showDiff(data){
-  const section=document.getElementById('diffSection');
-  const fileList=document.getElementById('diffFileList');
-  const summary=document.getElementById('diffSummaryBox');
-  const diffs=data.fileDiffs||[];
-  const totalAdded=diffs.reduce((s,d)=>s+(d.addedLines??0),0);
-  const totalRemoved=diffs.reduce((s,d)=>s+(d.removedLines??0),0);
+  const section=document.getElementById('diffSection');const fileList=document.getElementById('diffFileList');const summary=document.getElementById('diffSummaryBox');
+  const diffs=data.fileDiffs||[];const totalAdded=diffs.reduce((s,d)=>s+(d.addedLines??0),0);const totalRemoved=diffs.reduce((s,d)=>s+(d.removedLines??0),0);
   summary.innerHTML=`<span style="color:#4ec9b0">+${totalAdded}</span> lines added &nbsp;·&nbsp; <span style="color:#f44747">-${totalRemoved}</span> lines removed &nbsp;·&nbsp; ${diffs.length} file${diffs.length!==1?'s':''} affected`;
-  fileList.innerHTML=buildDiffCards(diffs);
-  section.classList.remove('hidden');
-  section.scrollIntoView({behavior:'smooth',block:'start'});
+  fileList.innerHTML=buildDiffCards(diffs);section.classList.remove('hidden');section.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
-function setDryRunLoading(l){
-  const btn=document.getElementById('dryRunBtn');const sp=document.getElementById('drySpinner');const t=document.getElementById('dryRunText');
-  btn.disabled=l||requiresHostedFolderSelection();btn.title=requiresHostedFolderSelection()?getHostedFolderRequiredMessage():'';sp.style.display=l?'block':'none';t.textContent=l?'Running...':'⊘  Dry Run';
-}
+function setDryRunLoading(l){const btn=document.getElementById('dryRunBtn');const sp=document.getElementById('drySpinner');const t=document.getElementById('dryRunText');btn.disabled=l||requiresHostedFolderSelection();btn.title=requiresHostedFolderSelection()?getHostedFolderRequiredMessage():'';sp.style.display=l?'block':'none';t.textContent=l?'Running...':'⊘  Dry Run';}
+function getResolvedRepoPath(){return document.getElementById('repoPath').value.trim()||currentRepoPath||'';}
 
-function getResolvedRepoPath(){
-  return document.getElementById('repoPath').value.trim()||currentRepoPath||'';
-}
+function openFolderHandleDb(){return new Promise((resolve,reject)=>{if(!window.indexedDB){resolve(null);return;}const request=window.indexedDB.open(ZONE_HANDLE_DB_NAME,1);request.onerror=()=>reject(request.error||new Error('Failed to open IndexedDB.'));request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains(ZONE_HANDLE_STORE_NAME))db.createObjectStore(ZONE_HANDLE_STORE_NAME);};request.onsuccess=()=>resolve(request.result);});}
+async function saveStoredFolderHandle(handle){try{const db=await openFolderHandleDb();if(!db)return;await new Promise((resolve,reject)=>{const tx=db.transaction(ZONE_HANDLE_STORE_NAME,'readwrite');tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error||new Error('Failed to save folder handle.'));tx.objectStore(ZONE_HANDLE_STORE_NAME).put(handle,ZONE_FOLDER_HANDLE_KEY);});db.close();}catch(_){}}
+async function loadStoredFolderHandle(){try{const db=await openFolderHandleDb();if(!db)return null;const handle=await new Promise((resolve,reject)=>{const tx=db.transaction(ZONE_HANDLE_STORE_NAME,'readonly');const request=tx.objectStore(ZONE_HANDLE_STORE_NAME).get(ZONE_FOLDER_HANDLE_KEY);request.onsuccess=()=>resolve(request.result||null);request.onerror=()=>reject(request.error||new Error('Failed to load folder handle.'));});db.close();return handle;}catch(_){return null;}}
+async function requestRepoHandlePermission(handle){if(!handle)return false;if(typeof handle.requestPermission==='function'){try{const state=await handle.requestPermission({mode:'readwrite'});currentRepoHandlePermission=state;return state==='granted';}catch(_){currentRepoHandlePermission='denied';return false;}}currentRepoHandlePermission='granted';return true;}
+function hasHostedFolderHandle(){return Boolean(currentRepoHandle&&currentRepoHandle.kind==='directory'&&typeof currentRepoHandle.values==='function');}
+function requiresHostedFolderSelection(){if(!isHostedExecution())return false;if(hasHostedFolderHandle())return false;const repoPath=document.getElementById('repoPath')?.value?.trim();if(repoPath)return false;return true;}
+function getHostedFolderRequiredMessage(){return '📁 Select your project folder to get started';}
 
-function openFolderHandleDb(){
-  return new Promise((resolve,reject)=>{
-    if(!window.indexedDB){resolve(null);return;}
-    const request=window.indexedDB.open(ZONE_HANDLE_DB_NAME,1);
-    request.onerror=()=>reject(request.error||new Error('Failed to open IndexedDB.'));
-    request.onupgradeneeded=()=>{
-      const db=request.result;
-      if(!db.objectStoreNames.contains(ZONE_HANDLE_STORE_NAME)){
-        db.createObjectStore(ZONE_HANDLE_STORE_NAME);
-      }
-    };
-    request.onsuccess=()=>resolve(request.result);
-  });
-}
+function requestActiveBranchFromVsCode(){if(window.parent!==window){window.parent.postMessage({type:'getActiveBranch'},'*');}setTimeout(async()=>{if(!currentGitBranch&&currentRepoHandle&&currentRepoHandle.kind==='directory'){console.log('[zone-ui] Attempting to read branch from File System Access API...');await readGitBranchFromHandle(currentRepoHandle);}},500);}
+function promptCheckoutBranch(){if(window.parent===window)return;const newBranch=window.prompt('Enter branch name to checkout:',currentGitBranch);if(newBranch===null)return;const trimmedBranch=String(newBranch).trim();if(!trimmedBranch)return;window.parent.postMessage({type:'checkoutBranch',branch:trimmedBranch},'*');}
 
-async function saveStoredFolderHandle(handle){
-  try{
-    const db=await openFolderHandleDb();
-    if(!db)return;
-    await new Promise((resolve,reject)=>{
-      const tx=db.transaction(ZONE_HANDLE_STORE_NAME,'readwrite');
-      tx.oncomplete=()=>resolve();
-      tx.onerror=()=>reject(tx.error||new Error('Failed to save folder handle.'));
-      tx.objectStore(ZONE_HANDLE_STORE_NAME).put(handle,ZONE_FOLDER_HANDLE_KEY);
-    });
-    db.close();
-  }catch(_){}
-}
+function isHostedExecution(){const config=window.__ZONE_PUBLIC_CONFIG__||{};if(config.hosted===true)return true;const zoneApiBaseUrl=typeof config.zoneApiBaseUrl==='string'?config.zoneApiBaseUrl.trim():'';if(zoneApiBaseUrl)return true;let host='';try{host=String(window.top?.location?.hostname||'').toLowerCase();}catch(_){}if(!host)host=String(window.location.hostname||'').toLowerCase();return Boolean(host&&host!=='localhost'&&host!=='127.0.0.1');}
+function getHostedContextExtension(filePath){const base=String(filePath||'').split('/').pop()||'';const dot=base.lastIndexOf('.');return dot>=0?base.slice(dot+1).toLowerCase():'';}
 
-async function loadStoredFolderHandle(){
-  try{
-    const db=await openFolderHandleDb();
-    if(!db)return null;
-    const handle=await new Promise((resolve,reject)=>{
-      const tx=db.transaction(ZONE_HANDLE_STORE_NAME,'readonly');
-      const request=tx.objectStore(ZONE_HANDLE_STORE_NAME).get(ZONE_FOLDER_HANDLE_KEY);
-      request.onsuccess=()=>resolve(request.result||null);
-      request.onerror=()=>reject(request.error||new Error('Failed to load folder handle.'));
-    });
-    db.close();
-    return handle;
-  }catch(_){
-    return null;
-  }
-}
+async function readGitBranchFromHandle(handle){if(!handle||handle.kind!=='directory'||typeof handle.values!=='function')return;try{let gitDir;try{gitDir=await handle.getDirectoryHandle('.git');console.log('[zone-ui] .git directory accessed');}catch(e){console.log('[zone-ui] .git directory not found:',e.message);return;}let headFile;try{headFile=await gitDir.getFileHandle('HEAD');}catch(e){console.log('[zone-ui] HEAD file not found in .git:',e.message);return;}const file=await headFile.getFile();const headContent=(await file.text()).trim();console.log('[zone-ui] HEAD content:',headContent);if(headContent.startsWith('ref: refs/heads/')){currentGitBranch=headContent.replace('ref: refs/heads/','');console.log('[zone-ui] ✓ Detected branch:',currentGitBranch);renderRepoSelection();}else if(/^[0-9a-f]{40}$/i.test(headContent)){currentGitBranch='(detached)';console.log('[zone-ui] Detached HEAD at:',headContent.substring(0,7));renderRepoSelection();}else{console.log('[zone-ui] Unrecognized HEAD format');}}catch(e){console.log('[zone-ui] Error reading git branch:',e.message);}}
 
-async function requestRepoHandlePermission(handle){
-  if(!handle)return false;
-  if(typeof handle.requestPermission==='function'){
-    try{
-      const state=await handle.requestPermission({mode:'readwrite'});
-      currentRepoHandlePermission=state;
-      return state==='granted';
-    }catch(_){
-      currentRepoHandlePermission='denied';
-      return false;
-    }
-  }
-  currentRepoHandlePermission='granted';
-  return true;
-}
+function classifyHostedContextCategory(filePath){const normalized=String(filePath||'').toLowerCase();if(normalized.includes('/src/')||normalized.includes('/components/')||normalized.endsWith('.tsx')||normalized.endsWith('.jsx')||normalized.endsWith('.css')||normalized.endsWith('.html'))return'frontend';if(normalized.includes('/api/')||normalized.includes('/server/')||normalized.includes('/backend/')||normalized.endsWith('.ts')||normalized.endsWith('.js')||normalized.endsWith('.py')||normalized.endsWith('.java'))return'backend';if(normalized.includes('/shared/')||normalized.includes('/lib/')||normalized.includes('/utils/'))return'shared';return'unknown';}
 
-function hasHostedFolderHandle(){
-  return Boolean(currentRepoHandle&&currentRepoHandle.kind==='directory'&&typeof currentRepoHandle.values==='function');
-}
+function shouldSkipHostedContextPath(filePath){const normalized=`/${String(filePath||'').replace(/\\/g,'/').toLowerCase()}/`;if(normalized.includes('/node_modules/')||normalized.includes('/dist/')||normalized.includes('/build/')||normalized.includes('/.git/')||normalized.includes('/venv/')||normalized.includes('/site-packages/')||normalized.includes('/.agent-cache/')||normalized.includes('/.agent-patches/')||normalized.includes('/.agent-backups/')||normalized.includes('/agent-cache/')||normalized.includes('/agent-patches/')||normalized.includes('/agent-backups/')||normalized.includes('/.claude/')||normalized.includes('/.idea/')||normalized.includes('/.vscode/')||normalized.includes('/.cursor/')||normalized.includes('/coverage/')||normalized.includes('/__pycache__/')||normalized.includes('/.pytest_cache/')||normalized.includes('/.next/')||normalized.includes('/.nuxt/')||normalized.includes('/out/')||normalized.includes('/.turbo/')||normalized.includes('/.expo/')||normalized.includes('/target/')||normalized.includes('/.gradle/'))return true;const filename=String(filePath||'').split('/').pop()?.toLowerCase()||'';const skipFilenames=new Set(['.gitignore','.gitattributes','.npmignore','claude.md','readme.md','readme.txt','changelog.md','license','license.md','.editorconfig','.nvmrc','package-lock.json','yarn.lock','pnpm-lock.yaml','poetry.lock','composer.lock','gemfile.lock','cargo.lock']);if(skipFilenames.has(filename))return true;if(filename==='.env'||filename.startsWith('.env.'))return true;if(filename.endsWith('.min.js')||filename.endsWith('.min.css')||filename.endsWith('.bundle.js')||filename.endsWith('.chunk.js')||filename.endsWith('.map')||filename.endsWith('.pyc')||filename.endsWith('.pyo'))return true;const ext=getHostedContextExtension(filePath);return HOSTED_CONTEXT_BINARY_EXTENSIONS.has(ext);}
 
-function requiresHostedFolderSelection(){
-  if(!isHostedExecution())return false;
-  if(hasHostedFolderHandle())return false;
-  const repoPath=document.getElementById('repoPath')?.value?.trim();
-  if(repoPath)return false;
-  return true;
-}
+async function collectHostedContextFilesFromHandle(handle,prefix='',maxFiles=HOSTED_CONTEXT_MAX_FILES){const collected=[];async function walk(directoryHandle,currentPrefix){if(collected.length>=maxFiles)return;const entries=[];for await(const entry of directoryHandle.values())entries.push(entry);entries.sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));for(const entry of entries){if(collected.length>=maxFiles)break;const relativePath=currentPrefix?`${currentPrefix}/${entry.name}`:entry.name;if(shouldSkipHostedContextPath(relativePath))continue;if(entry.kind==='directory'){await walk(entry,relativePath);continue;}if(entry.kind!=='file')continue;const file=await entry.getFile();if(file.size>HOSTED_CONTEXT_MAX_FILE_BYTES)continue;const content=await file.text();if(content.includes('\0'))continue;collected.push({path:relativePath.replace(/\\/g,'/'),content});}}await walk(handle,prefix);return collected;}
 
-function getHostedFolderRequiredMessage(){
-  return '📁 Select your project folder to get started';
-}
+async function buildHostedDeveloperContext(){if(!currentRepoHandle||currentRepoHandle.kind!=='directory'||typeof currentRepoHandle.values!=='function')return null;const files=await collectHostedContextFilesFromHandle(currentRepoHandle);if(files.length===0)return null;console.log(`[zone-ui] sending hosted context with ${files.length} files`);const availableFiles=files.map(file=>({path:file.path,category:classifyHostedContextCategory(file.path),extension:getHostedContextExtension(file.path)}));return{files:files.map(file=>({path:file.path,content:file.content})),repoSummary:`Client-provided hosted context with ${files.length} files.`,projectNotes:[`Client-selected folder: ${currentRepoSelectionLabel.replace(/^Folder:\s*/,'')||'Selected folder'}`],existingFilesSummary:`EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n${availableFiles.map(file=>`- ${file.path}`).join('\n')}`,availableFiles,contextFiles:files.map(file=>({path:file.path,action:'inspect',reason:'Client-provided folder context',content:file.content})),originalContents:Object.fromEntries(files.map(file=>[file.path,file.content]))};}
 
-function isHostedExecution(){
-  const config=window.__ZONE_PUBLIC_CONFIG__||{};
-  if(config.hosted===true)return true;
-  const zoneApiBaseUrl=typeof config.zoneApiBaseUrl==='string'?config.zoneApiBaseUrl.trim():'';
-  if(zoneApiBaseUrl)return true;
-  const host=String(window.top?.location?.hostname||window.location?.hostname||'').toLowerCase();
-  return Boolean(host&&host!=='localhost'&&host!=='127.0.0.1');
-}
+function isHostedTestFile(filePath){const normalized=String(filePath||'').toLowerCase();return normalized.includes('/tests/')||normalized.includes('/test/')||normalized.includes('/e2e/')||normalized.includes('.spec.')||normalized.includes('.test.');}
+function isHostedPageObjectFile(filePath){const normalized=String(filePath||'').toLowerCase();return normalized.includes('pageobject')||normalized.includes('/pages/')||normalized.includes('page.');}
+function isHostedStepDefinitionFile(filePath){const normalized=String(filePath||'').toLowerCase();return normalized.includes('/steps/')||normalized.includes('stepdefinition')||normalized.includes('.steps.');}
+function isHostedFeatureFile(filePath){return getHostedContextExtension(filePath)==='feature';}
+function isHostedFrameworkSignalFile(filePath){const normalized=String(filePath||'').toLowerCase();const base=normalized.split('/').pop()||normalized;return base==='package.json'||base==='playwright.config.ts'||base==='playwright.config.js'||base==='playwright.config.mjs'||base==='playwright.config.cjs'||base==='cypress.config.ts'||base==='cypress.config.js'||base==='cypress.config.mjs'||base==='cypress.config.cjs'||base==='pytest.ini'||base==='testng.xml';}
+function prioritizeHostedTestEngineerFiles(files){const buckets=[[],[],[],[],[],[]];for(const file of files){if(isHostedFrameworkSignalFile(file.path))buckets[0].push(file);else if(isHostedTestFile(file.path))buckets[1].push(file);else if(isHostedPageObjectFile(file.path))buckets[2].push(file);else if(isHostedStepDefinitionFile(file.path))buckets[3].push(file);else if(isHostedFeatureFile(file.path))buckets[4].push(file);else buckets[5].push(file);}return buckets.flat();}
 
-function getHostedContextExtension(filePath){
-  const base=String(filePath||'').split('/').pop()||'';
-  const dot=base.lastIndexOf('.');
-  return dot>=0?base.slice(dot+1).toLowerCase():'';
-}
+async function buildHostedTestEngineerContext(){if(!currentRepoHandle||currentRepoHandle.kind!=='directory'||typeof currentRepoHandle.values!=='function')return null;const files=prioritizeHostedTestEngineerFiles(await collectHostedContextFilesFromHandle(currentRepoHandle,'',80)).slice(0,HOSTED_CONTEXT_MAX_FILES);if(files.length===0)return null;const availableFiles=files.map(file=>({path:file.path,category:classifyHostedContextCategory(file.path),extension:getHostedContextExtension(file.path)}));const existingTestContents=files.filter(file=>isHostedTestFile(file.path)||isHostedFrameworkSignalFile(file.path)).slice(0,5).map(file=>({path:file.path,content:file.content}));return{availableFiles,pageObjectContents:files.filter(file=>isHostedPageObjectFile(file.path)).slice(0,3).map(file=>({path:file.path,content:file.content})),stepDefinitionContents:files.filter(file=>isHostedStepDefinitionFile(file.path)).slice(0,2).map(file=>({path:file.path,content:file.content})),featureContents:files.filter(file=>isHostedFeatureFile(file.path)).slice(0,3).map(file=>({path:file.path,content:file.content})),existingTestContents};}
 
-function classifyHostedContextCategory(filePath){
-  const normalized=String(filePath||'').toLowerCase();
-  if(normalized.includes('/src/')||normalized.includes('/components/')||normalized.endsWith('.tsx')||normalized.endsWith('.jsx')||normalized.endsWith('.css')||normalized.endsWith('.html'))return'frontend';
-  if(normalized.includes('/api/')||normalized.includes('/server/')||normalized.includes('/backend/')||normalized.endsWith('.ts')||normalized.endsWith('.js')||normalized.endsWith('.py')||normalized.endsWith('.java'))return'backend';
-  if(normalized.includes('/shared/')||normalized.includes('/lib/')||normalized.includes('/utils/'))return'shared';
-  return'unknown';
-}
+function inferHostedDataSchema(files){const evidence=[];let dialect='unknown';let migrationFormat='unknown';for(const file of files){const path=file.path.toLowerCase();const content=file.content.toLowerCase();if(dialect==='unknown'){if(path.includes('postgres')||content.includes('serial primary key')||content.includes('gen_random_uuid')||content.includes('timestamp with time zone')){dialect='postgresql';evidence.push(`dialect:${file.path}`);}else if(path.includes('mysql')||content.includes('auto_increment')||content.includes('engine=innodb')){dialect='mysql';evidence.push(`dialect:${file.path}`);}else if(path.includes('sqlite')||content.includes('sqlite')||content.includes('integer primary key autoincrement')){dialect='sqlite';evidence.push(`dialect:${file.path}`);}}if(migrationFormat==='unknown'){if(path.includes('/db/migration/')||/v\d+__/.test(path)){migrationFormat='flyway';evidence.push(`migration:${file.path}`);}else if(path.includes('liquibase')||path.endsWith('.xml')){migrationFormat='liquibase';evidence.push(`migration:${file.path}`);}else if(path.includes('alembic')){migrationFormat='alembic';evidence.push(`migration:${file.path}`);}else if(getHostedContextExtension(file.path)==='sql'){migrationFormat='raw_sql';evidence.push(`migration:${file.path}`);}}}const existingTables=[];const tablePattern=/create table(?: if not exists)?\s+["`]?([a-zA-Z0-9_]+)/gi;for(const file of files){let match;while((match=tablePattern.exec(file.content))!==null){if(!existingTables.includes(match[1]))existingTables.push(match[1]);}}const migrationDir=(files.find(file=>getHostedContextExtension(file.path)==='sql')?.path.split('/').slice(0,-1).join('/'))||null;return{dialect,migrationFormat,confidence:evidence.length>=2?'medium':'low',evidence,migrationDir,existingTables};}
 
-function shouldSkipHostedContextPath(filePath){
-  const normalized=`/${String(filePath||'').replace(/\\/g,'/').toLowerCase()}/`;
-if(normalized.includes('/node_modules/')||normalized.includes('/dist/')||normalized.includes('/build/')||normalized.includes('/.git/')||normalized.includes('/venv/')||normalized.includes('/site-packages/')||normalized.includes('/.agent-cache/')||normalized.includes('/.agent-patches/')||normalized.includes('/.agent-backups/')||normalized.includes('/agent-cache/')||normalized.includes('/agent-patches/')||normalized.includes('/agent-backups/')||normalized.includes('/.claude/')||normalized.includes('/.idea/')||normalized.includes('/.vscode/')||normalized.includes('/.cursor/')||normalized.includes('/coverage/')||normalized.includes('/__pycache__/')||normalized.includes('/.pytest_cache/')||normalized.includes('/.next/')||normalized.includes('/.nuxt/')||normalized.includes('/out/')||normalized.includes('/.turbo/')||normalized.includes('/.expo/')||normalized.includes('/target/')||normalized.includes('/.gradle/'))return true;
-  const filename=String(filePath||'').split('/').pop()?.toLowerCase()||'';
-  const skipFilenames=new Set(['.gitignore','.gitattributes','.npmignore','claude.md','readme.md','readme.txt','changelog.md','license','license.md','.editorconfig','.nvmrc','package-lock.json','yarn.lock','pnpm-lock.yaml','poetry.lock','composer.lock','gemfile.lock','cargo.lock']);
-  if(skipFilenames.has(filename))return true;
-  if(filename==='.env'||filename.startsWith('.env.'))return true;
-  if(filename.endsWith('.min.js')||filename.endsWith('.min.css')||filename.endsWith('.bundle.js')||filename.endsWith('.chunk.js')||filename.endsWith('.map')||filename.endsWith('.pyc')||filename.endsWith('.pyo'))return true;
-  const ext=getHostedContextExtension(filePath);
-  return HOSTED_CONTEXT_BINARY_EXTENSIONS.has(ext);
-}
+async function buildHostedDataAnalystContext(){if(!currentRepoHandle||currentRepoHandle.kind!=='directory'||typeof currentRepoHandle.values!=='function')return null;const files=await collectHostedContextFilesFromHandle(currentRepoHandle);if(files.length===0)return null;const availableFiles=files.map(file=>({path:file.path,category:classifyHostedContextCategory(file.path),extension:getHostedContextExtension(file.path)}));const existingSqlContents=files.filter(file=>{const normalized=file.path.toLowerCase();return getHostedContextExtension(file.path)==='sql'||normalized.includes('migration')||normalized.includes('schema')||normalized.includes('alembic')||normalized.includes('liquibase');}).slice(0,3).map(file=>({path:file.path,content:file.content}));return{availableFiles,schema:inferHostedDataSchema(existingSqlContents.length>0?existingSqlContents:files),existingSqlContents};}
 
-async function collectHostedContextFilesFromHandle(handle,prefix='',maxFiles=HOSTED_CONTEXT_MAX_FILES){
-  const collected=[];
-  async function walk(directoryHandle,currentPrefix){
-    if(collected.length>=maxFiles)return;
-    const entries=[];
-    for await(const entry of directoryHandle.values())entries.push(entry);
-    entries.sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
-    for(const entry of entries){
-      if(collected.length>=maxFiles)break;
-      const relativePath=currentPrefix?`${currentPrefix}/${entry.name}`:entry.name;
-      if(shouldSkipHostedContextPath(relativePath))continue;
-      if(entry.kind==='directory'){await walk(entry,relativePath);continue;}
-      if(entry.kind!=='file')continue;
-      const file=await entry.getFile();
-      if(file.size>HOSTED_CONTEXT_MAX_FILE_BYTES)continue;
-      const content=await file.text();
-      if(content.includes('\0'))continue;
-      collected.push({path:relativePath.replace(/\\/g,'/'),content});
-    }
-  }
-  await walk(handle,prefix);
-  return collected;
-}
+function resetRunState(){currentPatches=[];currentBackupSnapshot=null;currentRunState={hasPatchResult:false,validationBlocked:false,runInProgress:false,decisionMode:'',confidence:0};setRestoreAvailability(false);document.getElementById('successBox').style.display='none';document.getElementById('successBox').innerHTML='';document.getElementById('resultUpgradeHint').textContent='';document.getElementById('resultUpgradeHint').classList.add('hidden');document.getElementById('applyStatusBox').textContent='';document.getElementById('warningsList').classList.add('hidden');document.getElementById('fileList').innerHTML='';document.getElementById('patchSummary').textContent='';document.getElementById('contextFilesList').innerHTML='';document.getElementById('contextFilesBox').classList.add('hidden');document.getElementById('patchSection').classList.add('hidden');}
+function beginRunState(){resetRunState();document.getElementById('decisionSection').classList.add('hidden');currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};renderResultSummary();currentRunState.runInProgress=true;updateApplyState();}
+function getApplyBlockingReason(){if(currentRunState.runInProgress)return 'Wait for the current run to finish.';if(!currentRunState.hasPatchResult||!currentPatches.length)return 'Run Execute first.';if(currentRunState.validationBlocked||currentRunState.decisionMode==='blocked')return 'Output validation blocked this result. Apply is disabled.';if((currentRunState.confidence??0)<70)return 'Confidence too low to apply. Review the preview.';if(currentRunState.decisionMode==='preview_only')return 'Preview only — confidence is not high enough to apply.';return '';}
+function getApplyState(){const applyBlockingReason=getApplyBlockingReason();const resolvedRepoPath=getResolvedRepoPath();const targetLabel=currentRepoHandle&&currentRepoSelectionLabel?currentRepoSelectionLabel.replace(/^Folder:\s*/,''):resolvedRepoPath;let helperText='Run Execute first.';if(!applyBlockingReason&&targetLabel){helperText=`Ready to apply to: ${targetLabel}`;}else if(currentRunState.validationBlocked||currentRunState.decisionMode==='blocked'){helperText='Blocked by output validation.';}else if(!currentRunState.hasPatchResult||!currentPatches.length){helperText='Run Execute first.';}else if((currentRunState.confidence??0)<70||currentRunState.decisionMode==='preview_only'){helperText='Confidence too low to apply safely.';}return{canApply:!applyBlockingReason,applyBlockingReason,helperText,visualState:applyBlockingReason?'disabled':'enabled'};}
+function updateApplyState(){const btn=document.getElementById('applyBtn');const status=document.getElementById('applyStatusBox');const applyState=getApplyState();btn.disabled=!applyState.canApply;btn.className=`apply-btn is-${applyState.visualState}`;btn.title=applyState.applyBlockingReason||'Apply generated changes';btn.setAttribute('aria-disabled',String(!applyState.canApply));status.textContent=applyState.helperText;}
 
-async function buildHostedDeveloperContext(){
-  if(!currentRepoHandle||currentRepoHandle.kind!=='directory'||typeof currentRepoHandle.values!=='function')return null;
-  const files=await collectHostedContextFilesFromHandle(currentRepoHandle);
-  if(files.length===0)return null;
-  console.log(`[zone-ui] sending hosted context with ${files.length} files`);
-  const availableFiles=files.map(file=>({path:file.path,category:classifyHostedContextCategory(file.path),extension:getHostedContextExtension(file.path)}));
-  return{
-    files:files.map(file=>({path:file.path,content:file.content})),
-    repoSummary:`Client-provided hosted context with ${files.length} files.`,
-    projectNotes:[`Client-selected folder: ${currentRepoSelectionLabel.replace(/^Folder:\s*/,'')||'Selected folder'}`],
-    existingFilesSummary:`EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n${availableFiles.map(file=>`- ${file.path}`).join('\n')}`,
-    availableFiles,
-    contextFiles:files.map(file=>({path:file.path,action:'inspect',reason:'Client-provided folder context',content:file.content})),
-    originalContents:Object.fromEntries(files.map(file=>[file.path,file.content])),
-  };
-}
+const trackedUiImpressions=new Set();const pendingAnalyticsEvents=[];let posthogLoadAttempted=false;let posthogLoadPromise=null;
+function getPosthogConfig(){const config=window.__ZONE_PUBLIC_CONFIG__||{};const key=typeof config.posthogKey==='string'?config.posthogKey.trim():'';const host=typeof config.posthogHost==='string'&&config.posthogHost.trim()?config.posthogHost.trim():'https://us.i.posthog.com';return{key,host};}
+function flushPendingAnalyticsEvents(){if(!window.posthog||typeof window.posthog.capture!=='function')return;while(pendingAnalyticsEvents.length>0){const event=pendingAnalyticsEvents.shift();if(event)window.posthog.capture(event.name,event.data);}}
+function initPosthog(){try{const{key,host}=getPosthogConfig();if(!key)return Promise.resolve();if(window.posthog&&typeof window.posthog.init==='function'){if(!window.posthog.__zoneInitialized){window.posthog.init(key,{api_host:host,capture_pageview:false,autocapture:false});window.posthog.__zoneInitialized=true;}flushPendingAnalyticsEvents();return Promise.resolve();}if(posthogLoadPromise)return posthogLoadPromise;if(posthogLoadAttempted||!document?.head||typeof document.createElement!=='function')return Promise.resolve();posthogLoadAttempted=true;posthogLoadPromise=new Promise(resolve=>{const script=document.createElement('script');script.async=true;script.src=`${host.replace(/\/$/,'')}/static/array.js`;script.onload=()=>{try{if(window.posthog&&typeof window.posthog.init==='function'&&!window.posthog.__zoneInitialized){window.posthog.init(key,{api_host:host,capture_pageview:false,autocapture:false});window.posthog.__zoneInitialized=true;}flushPendingAnalyticsEvents();}catch(_){}resolve();};script.onerror=()=>resolve();document.head.appendChild(script);});return posthogLoadPromise;}catch(_){return Promise.resolve();}}
+function trackEvent(name,data={}){try{const impressionOnly=name==='low_credits_banner_shown'||name==='upgrade_cta_shown_result';const impressionKey=impressionOnly?`${name}:${JSON.stringify(data)}`:'';if(impressionOnly&&trackedUiImpressions.has(impressionKey))return;if(impressionOnly)trackedUiImpressions.add(impressionKey);console.log('[zone-analytics]',name,data);void initPosthog();if(window.posthog&&typeof window.posthog.capture==='function'){window.posthog.capture(name,data);}else{pendingAnalyticsEvents.push({name,data});}}catch(_){}}
 
-function isHostedTestFile(filePath){
-  const normalized=String(filePath||'').toLowerCase();
-  return normalized.includes('/tests/')||normalized.includes('/test/')||normalized.includes('/e2e/')||normalized.includes('.spec.')||normalized.includes('.test.');
-}
+function renderBillingState(){const box=document.getElementById('billingSummaryBox');const label=document.getElementById('billingSummaryLabel');const meta=document.getElementById('billingSummaryMeta');const lowBox=document.getElementById('lowCreditsBox');const lowText=document.getElementById('lowCreditsText');const plan=currentBillingState.plan==='Pro'?'Pro':currentBillingState.plan==='Free'?'Free':'';const credits=typeof currentBillingState.credits==='number'?Math.max(0,currentBillingState.credits):null;box.classList.add('hidden');if(plan&&credits!==null){box.className='repo-selection billing-summary-box';label.className='repo-selection-label billing-summary-label';meta.className='repo-selection-meta billing-summary-meta';if(plan==='Pro'){box.classList.add('pro');label.classList.add('pro');meta.classList.add('pro');label.innerHTML=`<span class="billing-plan-badge">⚡ Pro</span><span>${credits} runs remaining this month</span>`;meta.textContent='250 Hosted Runs + Unlimited BYOK / month';}else{const isLow=credits<=3;label.textContent=`Free Plan · ${credits} runs remaining`;label.classList.add('free');if(isLow){box.classList.add('free-low');label.classList.add('free-low');meta.classList.add('free-low');}if(credits===0){meta.innerHTML=`Your 10 Hosted Runs are exhausted. <a class="billing-upgrade-link" href="https://zonecli.dev/#pricing" target="_blank" rel="noreferrer">Upgrade to Pro</a>`;}else if(isLow){meta.textContent='Low on Hosted Runs. Upgrade soon to avoid interruptions.';}else{meta.textContent='10 Hosted Runs included';}}box.classList.remove('hidden');}else{label.textContent='';meta.textContent='';box.classList.add('hidden');}if(plan==='Free'&&credits!==null&&credits>0&&credits<=3){lowText.textContent=`⚠ You have ${credits} Hosted Run${credits!==1?'s':''} left. Upgrade to Pro to continue.`;lowBox.classList.remove('hidden');trackEvent('low_credits_banner_shown',{credits,plan:'Free'});}else if(plan==='Free'&&credits===0){lowText.innerHTML=`Upgrade to Pro for 250 Hosted Runs + Unlimited BYOK. <a class="billing-upgrade-link" href="https://zonecli.dev/#pricing" target="_blank" rel="noreferrer">View pricing</a>`;lowBox.classList.remove('hidden');}else{lowText.textContent='';lowBox.classList.add('hidden');}}
 
-function isHostedPageObjectFile(filePath){
-  const normalized=String(filePath||'').toLowerCase();
-  return normalized.includes('pageobject')||normalized.includes('/pages/')||normalized.includes('page.');
-}
-
-function isHostedStepDefinitionFile(filePath){
-  const normalized=String(filePath||'').toLowerCase();
-  return normalized.includes('/steps/')||normalized.includes('stepdefinition')||normalized.includes('.steps.');
-}
-
-function isHostedFeatureFile(filePath){
-  return getHostedContextExtension(filePath)==='feature';
-}
-
-function isHostedFrameworkSignalFile(filePath){
-  const normalized=String(filePath||'').toLowerCase();
-  const base=normalized.split('/').pop()||normalized;
-  return base==='package.json'
-    || base==='playwright.config.ts'
-    || base==='playwright.config.js'
-    || base==='playwright.config.mjs'
-    || base==='playwright.config.cjs'
-    || base==='cypress.config.ts'
-    || base==='cypress.config.js'
-    || base==='cypress.config.mjs'
-    || base==='cypress.config.cjs'
-    || base==='pytest.ini'
-    || base==='testng.xml';
-}
-
-function prioritizeHostedTestEngineerFiles(files){
-  const buckets=[
-    [],
-    [],
-    [],
-    [],
-    [],
-    [],
-  ];
-  for(const file of files){
-    if(isHostedFrameworkSignalFile(file.path))buckets[0].push(file);
-    else if(isHostedTestFile(file.path))buckets[1].push(file);
-    else if(isHostedPageObjectFile(file.path))buckets[2].push(file);
-    else if(isHostedStepDefinitionFile(file.path))buckets[3].push(file);
-    else if(isHostedFeatureFile(file.path))buckets[4].push(file);
-    else buckets[5].push(file);
-  }
-  return buckets.flat();
-}
-
-async function buildHostedTestEngineerContext(){
-  if(!currentRepoHandle||currentRepoHandle.kind!=='directory'||typeof currentRepoHandle.values!=='function')return null;
-  const files=prioritizeHostedTestEngineerFiles(await collectHostedContextFilesFromHandle(currentRepoHandle,'',80)).slice(0,HOSTED_CONTEXT_MAX_FILES);
-  if(files.length===0)return null;
-  const availableFiles=files.map(file=>({path:file.path,category:classifyHostedContextCategory(file.path),extension:getHostedContextExtension(file.path)}));
-  const existingTestContents=files.filter(file=>isHostedTestFile(file.path)||isHostedFrameworkSignalFile(file.path)).slice(0,5).map(file=>({path:file.path,content:file.content}));
-  const appSourceContents=files
-    .filter(file=>{
-      const ext=getHostedContextExtension(file.path);
-      return(
-        (ext==='jsx'||ext==='tsx'||ext==='html'||ext==='vue'||ext==='svelte') &&
-        !isHostedTestFile(file.path) &&
-        !isHostedPageObjectFile(file.path)
-      );
-    })
-    .slice(0,10)
-    .map(file=>({path:file.path,content:file.content}));
-  console.log('[zone-ui] hosted test context files:',files.map(f=>f.path));
-  console.log('[zone-ui] test-engineer availableFiles count',availableFiles.length);
-  console.log('[zone-ui] test-engineer existingTestContents paths',existingTestContents.map(f=>f.path));
-  return{
-    availableFiles,
-    pageObjectContents:files.filter(file=>isHostedPageObjectFile(file.path)).slice(0,3).map(file=>({path:file.path,content:file.content})),
-    stepDefinitionContents:files.filter(file=>isHostedStepDefinitionFile(file.path)).slice(0,2).map(file=>({path:file.path,content:file.content})),
-    featureContents:files.filter(file=>isHostedFeatureFile(file.path)).slice(0,3).map(file=>({path:file.path,content:file.content})),
-    existingTestContents,
-    appSourceContents,
-  };
-}
-
-function inferHostedDataSchema(files){
-  const evidence=[];let dialect='unknown';let migrationFormat='unknown';
-  for(const file of files){
-    const path=file.path.toLowerCase();
-    const content=file.content.toLowerCase();
-    if(dialect==='unknown'){
-      if(path.includes('postgres')||content.includes('serial primary key')||content.includes('gen_random_uuid')||content.includes('timestamp with time zone')){dialect='postgresql';evidence.push(`dialect:${file.path}`);}
-      else if(path.includes('mysql')||content.includes('auto_increment')||content.includes('engine=innodb')){dialect='mysql';evidence.push(`dialect:${file.path}`);}
-      else if(path.includes('sqlite')||content.includes('sqlite')||content.includes('integer primary key autoincrement')){dialect='sqlite';evidence.push(`dialect:${file.path}`);}
-    }
-    if(migrationFormat==='unknown'){
-      if(path.includes('/db/migration/')||/v\d+__/.test(path)){migrationFormat='flyway';evidence.push(`migration:${file.path}`);}
-      else if(path.includes('liquibase')||path.endsWith('.xml')){migrationFormat='liquibase';evidence.push(`migration:${file.path}`);}
-      else if(path.includes('alembic')){migrationFormat='alembic';evidence.push(`migration:${file.path}`);}
-      else if(getHostedContextExtension(file.path)==='sql'){migrationFormat='raw_sql';evidence.push(`migration:${file.path}`);}
-    }
-  }
-  const existingTables=[];const tablePattern=/create table(?: if not exists)?\s+["`]?([a-zA-Z0-9_]+)/gi;
-  for(const file of files){
-    let match;
-    while((match=tablePattern.exec(file.content))!==null){
-      if(!existingTables.includes(match[1]))existingTables.push(match[1]);
-    }
-  }
-  const migrationDir=(files.find(file=>getHostedContextExtension(file.path)==='sql')?.path.split('/').slice(0,-1).join('/'))||null;
-  return{
-    dialect,
-    migrationFormat,
-    confidence:evidence.length>=2?'medium':'low',
-    evidence,
-    migrationDir,
-    existingTables,
-  };
-}
-
-async function buildHostedDataAnalystContext(){
-  if(!currentRepoHandle||currentRepoHandle.kind!=='directory'||typeof currentRepoHandle.values!=='function')return null;
-  const files=await collectHostedContextFilesFromHandle(currentRepoHandle);
-  if(files.length===0)return null;
-  const availableFiles=files.map(file=>({path:file.path,category:classifyHostedContextCategory(file.path),extension:getHostedContextExtension(file.path)}));
-  const existingSqlContents=files.filter(file=>{
-    const normalized=file.path.toLowerCase();
-    return getHostedContextExtension(file.path)==='sql'||normalized.includes('migration')||normalized.includes('schema')||normalized.includes('alembic')||normalized.includes('liquibase');
-  }).slice(0,3).map(file=>({path:file.path,content:file.content}));
-  return{
-    availableFiles,
-    schema:inferHostedDataSchema(existingSqlContents.length>0?existingSqlContents:files),
-    existingSqlContents,
-  };
-}
-
-function resetRunState(){
-  currentPatches=[];currentBackupSnapshot=null;
-  currentRunState={hasPatchResult:false,validationBlocked:false,runInProgress:false,decisionMode:'',confidence:0};
-  setRestoreAvailability(false);
-  document.getElementById('successBox').style.display='none';
-  document.getElementById('successBox').innerHTML='';
-  document.getElementById('resultUpgradeHint').textContent='';
-  document.getElementById('resultUpgradeHint').classList.add('hidden');
-  document.getElementById('applyStatusBox').textContent='';
-  document.getElementById('warningsList').classList.add('hidden');
-  document.getElementById('fileList').innerHTML='';
-  document.getElementById('patchSummary').textContent='';
-  document.getElementById('contextFilesList').innerHTML='';
-  document.getElementById('contextFilesBox').classList.add('hidden');
-  document.getElementById('patchSection').classList.add('hidden');
-}
-
-function beginRunState(){
-  resetRunState();
-  document.getElementById('decisionSection').classList.add('hidden');
-  currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};
-  renderResultSummary();
-  currentRunState.runInProgress=true;
-  updateApplyState();
-}
-
-function getApplyBlockingReason(){
-  if(currentRunState.runInProgress)return 'Wait for the current run to finish.';
-  if(!currentRunState.hasPatchResult||!currentPatches.length)return 'Run Execute first.';
-  if(currentRunState.validationBlocked||currentRunState.decisionMode==='blocked')return 'Output validation blocked this result. Apply is disabled.';
-  if((currentRunState.confidence??0)<70)return 'Confidence too low to apply. Review the preview.';
-  if(currentRunState.decisionMode==='preview_only')return 'Preview only — confidence is not high enough to apply.';
-  return '';
-}
-
-function getApplyState(){
-  const applyBlockingReason=getApplyBlockingReason();
-  const resolvedRepoPath=getResolvedRepoPath();
-  const targetLabel=currentRepoHandle&&currentRepoSelectionLabel?currentRepoSelectionLabel.replace(/^Folder:\s*/,''):resolvedRepoPath;
-  let helperText='Run Execute first.';
-  if(!applyBlockingReason&&targetLabel){helperText=`Ready to apply to: ${targetLabel}`;}
-  else if(currentRunState.validationBlocked||currentRunState.decisionMode==='blocked'){helperText='Blocked by output validation.';}
-  else if(!currentRunState.hasPatchResult||!currentPatches.length){helperText='Run Execute first.';}
-  else if((currentRunState.confidence??0)<70||currentRunState.decisionMode==='preview_only'){helperText='Confidence too low to apply safely.';}
-  return{canApply:!applyBlockingReason,applyBlockingReason,helperText,visualState:applyBlockingReason?'disabled':'enabled'};
-}
-
-function updateApplyState(){
-  const btn=document.getElementById('applyBtn');
-  const status=document.getElementById('applyStatusBox');
-  const applyState=getApplyState();
-  btn.disabled=!applyState.canApply;
-  btn.className=`apply-btn is-${applyState.visualState}`;
-  btn.title=applyState.applyBlockingReason||'Apply generated changes';
-  btn.setAttribute('aria-disabled',String(!applyState.canApply));
-  status.textContent=applyState.helperText;
-}
-
-const trackedUiImpressions=new Set();
-const pendingAnalyticsEvents=[];
-let posthogLoadAttempted=false;
-let posthogLoadPromise=null;
-
-function getPosthogConfig(){
-  const config=window.__ZONE_PUBLIC_CONFIG__||{};
-  const key=typeof config.posthogKey==='string'?config.posthogKey.trim():'';
-  const host=typeof config.posthogHost==='string'&&config.posthogHost.trim()?config.posthogHost.trim():'https://us.i.posthog.com';
-  return{key,host};
-}
-
-function flushPendingAnalyticsEvents(){
-  if(!window.posthog||typeof window.posthog.capture!=='function')return;
-  while(pendingAnalyticsEvents.length>0){
-    const event=pendingAnalyticsEvents.shift();
-    if(event)window.posthog.capture(event.name,event.data);
-  }
-}
-
-function initPosthog(){
-  try{
-    const{key,host}=getPosthogConfig();
-    if(!key)return Promise.resolve();
-    if(window.posthog&&typeof window.posthog.init==='function'){
-      if(!window.posthog.__zoneInitialized){
-        window.posthog.init(key,{api_host:host,capture_pageview:false,autocapture:false});
-        window.posthog.__zoneInitialized=true;
-      }
-      flushPendingAnalyticsEvents();
-      return Promise.resolve();
-    }
-    if(posthogLoadPromise)return posthogLoadPromise;
-    if(posthogLoadAttempted||!document?.head||typeof document.createElement!=='function')return Promise.resolve();
-    posthogLoadAttempted=true;
-    posthogLoadPromise=new Promise(resolve=>{
-      const script=document.createElement('script');
-      script.async=true;
-      script.src=`${host.replace(/\/$/,'')}/static/array.js`;
-      script.onload=()=>{
-        try{
-          if(window.posthog&&typeof window.posthog.init==='function'&&!window.posthog.__zoneInitialized){
-            window.posthog.init(key,{api_host:host,capture_pageview:false,autocapture:false});
-            window.posthog.__zoneInitialized=true;
-          }
-          flushPendingAnalyticsEvents();
-        }catch(_){}
-        resolve();
-      };
-      script.onerror=()=>resolve();
-      document.head.appendChild(script);
-    });
-    return posthogLoadPromise;
-  }catch(_){
-    return Promise.resolve();
-  }
-}
-
-function trackEvent(name,data={}){
-  try{
-    const impressionOnly=name==='low_credits_banner_shown'||name==='upgrade_cta_shown_result';
-    const impressionKey=impressionOnly?`${name}:${JSON.stringify(data)}`:'';
-    if(impressionOnly&&trackedUiImpressions.has(impressionKey))return;
-    if(impressionOnly)trackedUiImpressions.add(impressionKey);
-    console.log('[zone-analytics]',name,data);
-    void initPosthog();
-    if(window.posthog&&typeof window.posthog.capture==='function'){
-      window.posthog.capture(name,data);
-    }else{
-      pendingAnalyticsEvents.push({name,data});
-    }
-  }catch(_){}
-}
-
-function renderBillingState(){
-  const box=document.getElementById('billingSummaryBox');const label=document.getElementById('billingSummaryLabel');const meta=document.getElementById('billingSummaryMeta');
-  const lowBox=document.getElementById('lowCreditsBox');const lowText=document.getElementById('lowCreditsText');
-  const plan=currentBillingState.plan==='Pro'?'Pro':currentBillingState.plan==='Free'?'Free':'';
-  const credits=typeof currentBillingState.credits==='number'?Math.max(0,currentBillingState.credits):null;
-  box.classList.add('hidden');
-  if(plan&&credits!==null){
-    box.className='repo-selection billing-summary-box';
-    label.className='repo-selection-label billing-summary-label';
-    meta.className='repo-selection-meta billing-summary-meta';
-    if(plan==='Pro'){
-      box.classList.add('pro');
-      label.classList.add('pro');
-      meta.classList.add('pro');
-      label.innerHTML=`<span class="billing-plan-badge">⚡ Pro</span><span>${credits} runs remaining this month</span>`;
-      meta.textContent='1000 runs / month';
-    }else{
-      const isLow=credits<=3;
-      label.textContent=`Free Plan · ${credits} runs remaining`;
-      label.classList.add('free');
-      if(isLow){
-        box.classList.add('free-low');
-        label.classList.add('free-low');
-        meta.classList.add('free-low');
-      }
-      if(credits===0){
-        meta.innerHTML=`Your free runs are exhausted. <a class="billing-upgrade-link" href="https://zonecli.dev/#pricing" target="_blank" rel="noreferrer">Upgrade to Pro</a>`;
-      }else if(isLow){
-        meta.textContent='Low on runs. Upgrade soon to avoid interruptions.';
-      }else{
-        meta.textContent='Free plan usage';
-      }
-    }
-    box.classList.remove('hidden');
-  }
-  else{
-    label.textContent='';meta.textContent='';box.classList.add('hidden');
-  }
-  if(plan==='Free'&&credits!==null&&credits>0&&credits<=3){lowText.textContent=`⚠ You have ${credits} run${credits!==1?'s':''} left. Upgrade to Pro to continue.`;lowBox.classList.remove('hidden');trackEvent('low_credits_banner_shown',{credits,plan:'Free'});}
-  else if(plan==='Free'&&credits===0){lowText.innerHTML=`Upgrade to Pro to continue using Zone. <a class="billing-upgrade-link" href="https://zonecli.dev/#pricing" target="_blank" rel="noreferrer">View pricing</a>`;lowBox.classList.remove('hidden');}
-  else{lowText.textContent='';lowBox.classList.add('hidden');}
-}
-
-function renderRepoSelection(){
-  const box=document.getElementById('repoSelectionBox');
-  const label=document.getElementById('repoSelectionLabel');
-  const meta=document.getElementById('repoSelectionMeta');
-  const repoInput=document.getElementById('repoPath');
-  const folderPickerBtn=document.getElementById('folderPickerBtn');
-  const folderPickerBtnLabel=document.getElementById('folderPickerBtnLabel');
-  const manualRepoPath=document.getElementById('repoPath').value.trim();
-  const resolvedRepoPath=getResolvedRepoPath();
-  const requiresFolder=requiresHostedFolderSelection();
-  console.log('[zone-ui] renderRepoSelection',{currentRepoSelectionLabel,hasHandle:Boolean(currentRepoHandle),requiresHostedFolderSelection:requiresFolder});
-  repoInput.readOnly=requiresFolder;
-  repoInput.title=requiresFolder?getHostedFolderRequiredMessage():'';
-  if(folderPickerBtn)folderPickerBtn.title=requiresFolder?'Select folder to enable Execute':'Select repo folder';
-  if(folderPickerBtnLabel){
-    folderPickerBtnLabel.textContent='Select folder to enable Execute';
-    if(requiresFolder)folderPickerBtnLabel.classList.remove('hidden');
-    else folderPickerBtnLabel.classList.add('hidden');
-  }
-  if(!currentRepoSelectionLabel){
-    if(requiresFolder&&!manualRepoPath){
-      label.textContent='Hosted Mode';
-      meta.textContent=getHostedFolderRequiredMessage();
-      box.classList.remove('hidden');
-      setLoading(false);setDryRunLoading(false);updateApplyState();
-      return;
-    }
-    label.textContent='';meta.textContent='';box.classList.add('hidden');setLoading(false);setDryRunLoading(false);updateApplyState();return;
-  }
-  label.textContent=currentRepoSelectionLabel;
-  if(requiresFolder)meta.textContent=getHostedFolderRequiredMessage();
-  else if(isHostedExecution()&&manualRepoPath&&!hasHostedFolderHandle())meta.textContent='📁 Folder selected from history. Click the folder button if you need to grant file access.';
-  else if(manualRepoPath)meta.textContent=`Run path: ${manualRepoPath}`;
-  else if(resolvedRepoPath)meta.textContent=`Run path: ${resolvedRepoPath}`;
-  else meta.textContent='Selected folder is ready for local Apply.';
-  box.classList.remove('hidden');setLoading(false);setDryRunLoading(false);updateApplyState();
-}
+function renderRepoSelection(){const box=document.getElementById('repoSelectionBox');const label=document.getElementById('repoSelectionLabel');const meta=document.getElementById('repoSelectionMeta');const repoInput=document.getElementById('repoPath');const folderPickerBtn=document.getElementById('folderPickerBtn');const folderPickerBtnLabel=document.getElementById('folderPickerBtnLabel');const manualRepoPath=document.getElementById('repoPath').value.trim();const resolvedRepoPath=getResolvedRepoPath();const requiresFolder=requiresHostedFolderSelection();repoInput.readOnly=requiresFolder;repoInput.title=requiresFolder?getHostedFolderRequiredMessage():'';if(folderPickerBtn)folderPickerBtn.title=requiresFolder?'Select folder to enable Execute':'Select repo folder';if(folderPickerBtnLabel){folderPickerBtnLabel.textContent='Select folder to enable Execute';if(requiresFolder)folderPickerBtnLabel.classList.remove('hidden');else folderPickerBtnLabel.classList.add('hidden');}if(!currentRepoSelectionLabel){if(requiresFolder&&!manualRepoPath){label.textContent='Hosted Mode';meta.textContent=getHostedFolderRequiredMessage();box.classList.remove('hidden');setLoading(false);setDryRunLoading(false);updateApplyState();return;}label.textContent='';meta.textContent='';box.classList.add('hidden');setLoading(false);setDryRunLoading(false);updateApplyState();return;}const branchBadge=currentGitBranch?`<span style="margin-left: 8px; color: #4ec9b0; cursor: pointer;" onclick="promptCheckoutBranch()" title="Click to switch branch">🌿 ${escapeHtml(currentGitBranch)}</span>`:'';label.innerHTML=`${escapeHtml(currentRepoSelectionLabel)}${branchBadge}`;if(requiresFolder)meta.textContent=getHostedFolderRequiredMessage();else if(isHostedExecution()&&manualRepoPath&&!hasHostedFolderHandle())meta.textContent='📁 Folder selected from history. Click the folder button if you need to grant file access.';else if(manualRepoPath)meta.textContent=`Run path: ${manualRepoPath}`;else if(resolvedRepoPath)meta.textContent=`Run path: ${resolvedRepoPath}`;else meta.textContent='Selected folder is ready for local Apply.';box.classList.remove('hidden');setLoading(false);setDryRunLoading(false);updateApplyState();}
 
 function syncRepoSelectionDisplay(){renderRepoSelection();}
-function clearRepoSelection(){currentRepoHandle=null;currentRepoHandlePermission='unknown';currentRepoSelectionLabel='';const f=document.getElementById('folderPickerFallback');if(f)f.value='';renderRepoSelection();}
-function setRepoSelection(label,handle){console.log('[zone-ui] setRepoSelection',{label,hasHandle:Boolean(handle),handleKind:handle?.kind??null,hasHandleValues:typeof handle?.values==='function'});currentRepoHandle=handle||null;currentRepoHandlePermission=handle?'unknown':'denied';currentRepoSelectionLabel=label||'';const folderName=label?label.replace(/^Folder:\s*/,''):'';if(folderName){const inp=document.getElementById('repoPath');if(inp)inp.value=folderName;syncRepoSelectionDisplay();}if(handle)void saveStoredFolderHandle(handle);renderRepoSelection();if(handle&&window.__pendingExecute){window.__pendingExecute=false;setTimeout(()=>execute(),100);}}
+function clearRepoSelection(){currentRepoHandle=null;currentRepoHandlePermission='unknown';currentRepoSelectionLabel='';currentGitBranch='';const f=document.getElementById('folderPickerFallback');if(f)f.value='';renderRepoSelection();}
+
+function setRepoSelection(label,handle){console.log('[zone-ui] setRepoSelection',{label,hasHandle:Boolean(handle),handleKind:handle?.kind??null,hasHandleValues:typeof handle?.values==='function'});currentRepoHandle=handle||null;currentRepoHandlePermission=handle?'unknown':'denied';currentRepoSelectionLabel=label||'';currentGitBranch='';const folderName=label?label.replace(/^Folder:\s*/,''):'';if(folderName){const inp=document.getElementById('repoPath');if(inp)inp.value=folderName;syncRepoSelectionDisplay();}if(handle){void saveStoredFolderHandle(handle);setTimeout(()=>{void readGitBranchFromHandle(handle);},200);}renderRepoSelection();if(handle&&window.__pendingExecute){window.__pendingExecute=false;setTimeout(()=>execute(),300);}}
 function getFallbackFolderName(input){const files=Array.from(input?.files||[]);if(files.length===0)return '';const r=String(files[0].webkitRelativePath||files[0].name||'');return r.split('/')[0]||r.split('\\')[0]||'';}
 
-async function selectRepoFolder(){
-  hideError();
-  if(typeof window.showDirectoryPicker==='function'){
-    try{const handle=await window.showDirectoryPicker();if(!handle)return;console.log('[zone-ui] selectRepoFolder handle selected',{name:handle.name||null,hasHandle:true,handleKind:handle.kind??null,hasHandleValues:typeof handle?.values==='function'});setRepoSelection(`Folder: ${handle.name||'Selected folder'}`,handle);return;}
-    catch(e){if(e&&e.name==='AbortError')return;showError('Folder selection failed. You can still paste the repo path manually.');return;}
-  }
-  const fallback=document.getElementById('folderPickerFallback');
-  if(fallback&&typeof fallback.click==='function')fallback.click();
-}
-
+async function selectRepoFolder(){hideError();if(typeof window.showDirectoryPicker==='function'){try{const handle=await window.showDirectoryPicker();if(!handle)return;console.log('[zone-ui] selectRepoFolder handle selected',{name:handle.name||null,hasHandle:true,handleKind:handle.kind??null,hasHandleValues:typeof handle.values==='function'});setRepoSelection(`Folder: ${handle.name||'Selected folder'}`,handle);return;}catch(e){if(e&&e.name==='AbortError')return;showError('Folder selection failed. You can still paste the repo path manually.');return;}}const fallback=document.getElementById('folderPickerFallback');if(fallback&&typeof fallback.click==='function')fallback.click();}
 function handleFolderFallbackChange(input){const n=getFallbackFolderName(input);if(!n)return;setRepoSelection(`Folder: ${n}`,null);}
+async function reconnectStoredFolder(){if(!currentRepoHandle)return;hideError();const granted=await requestRepoHandlePermission(currentRepoHandle);if(granted){currentRepoHandlePermission='granted';renderRepoSelection();if(window.__pendingExecute){window.__pendingExecute=false;setTimeout(()=>execute(),100);}return;}currentRepoHandlePermission='prompt';renderRepoSelection();}
 
-async function reconnectStoredFolder(){
-  if(!currentRepoHandle)return;
-  hideError();
-  const granted=await requestRepoHandlePermission(currentRepoHandle);
-  if(granted){
-    currentRepoHandlePermission='granted';
-    renderRepoSelection();
-    if(window.__pendingExecute){
-      window.__pendingExecute=false;
-      setTimeout(()=>execute(),100);
-    }
-    return;
-  }
-  currentRepoHandlePermission='prompt';
-  renderRepoSelection();
-}
+function validateTaskAndRepo(){const task=document.getElementById('task').value.trim();const repoPath=getResolvedRepoPath();if(!task){showError('Task is required.');return null;}if(/\{[^}]+\}/.test(task)){showError('Placeholder detected in task. Replace {function}, {file}, {description} etc. with actual values before executing.');return null;}if(!repoPath){showError('Task and repo path are required.');return null;}if(!getCurrentUserId()){showUnauthorized(getMissingUserSessionMessage());return null;}if(isHostedExecution()&&!hasHostedFolderHandle()){const repoPathValue=document.getElementById('repoPath')?.value?.trim();if(!repoPathValue){showError('Please select a folder first using the folder button.');return null;}}return{task,repoPath};}
 
-function validateTaskAndRepo(){
-  const task=document.getElementById('task').value.trim();
-  const repoPath=getResolvedRepoPath();
-  if(!task){showError('Task is required.');return null;}
-  if(!repoPath){showError('Task and repo path are required.');return null;}
-  if(!getCurrentUserId()){showUnauthorized(getMissingUserSessionMessage());return null;}
-  if(isHostedExecution()&&!hasHostedFolderHandle()){
-    const repoPathValue=document.getElementById('repoPath')?.value?.trim();
-    if(!repoPathValue){showError('Please select a folder first using the folder button.');return null;}
-  }
-  return{task,repoPath};
-}
+async function executeDryRun(){const values=validateTaskAndRepo();if(!values)return;const{task,repoPath}=values;const userId=getCurrentUserId();const hostedContext=await buildHostedDeveloperContext();const body={...{task,repoPath,userId},...(hostedContext?{hostedContext}:{})};console.log('[zone-ui] dry-run request body',body);beginRunState();hideError();document.getElementById('diffSection').classList.add('hidden');setDryRunLoading(true);setProgress('Dry run — generating diff...');try{const r=await fetch('/api/dry-run',{method:'POST',headers:getInferenceHeaders(),body:JSON.stringify(body)});const data=await r.json().catch(()=>null);if(!r.ok){if(data?.reason==='no_free_runs'){trackEvent('dry_run_blocked_no_credits',{role:currentRole,repoPath});showUpgrade(data.message,data.upgradeUrl);return;}if(data?.reason==='unauthorized'){showUnauthorized(data.message);return;}throw new Error(data?.message||data?.reason||('Dry run failed: '+r.status));}if(!data.ok)throw new Error(data.reason||'Dry run failed.');showDiff(data);setProgress('Ready');}catch(e){resetProgress();showError(e.message);}finally{currentRunState.runInProgress=false;setDryRunLoading(false);updateApplyState();}}
 
-async function executeDryRun(){
-  const values=validateTaskAndRepo();if(!values)return;
-  const{task,repoPath}=values;
-  const userId=getCurrentUserId();
-  const hostedContext=await buildHostedDeveloperContext();
-  const body={...{task,repoPath,userId},...(hostedContext?{hostedContext}:{})};
-  console.log('[zone-ui] dry-run request body',body);
-  beginRunState();hideError();
-  document.getElementById('diffSection').classList.add('hidden');
-  setDryRunLoading(true);setProgress('Dry run — generating diff...');
-  try{
-    const r=await fetch('/api/dry-run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    const data=await r.json().catch(()=>null);
-    if(!r.ok){
-      if(data?.reason==='no_free_runs'){trackEvent('dry_run_blocked_no_credits',{role:currentRole,repoPath});showUpgrade(data.message,data.upgradeUrl);return;}
-      if(data?.reason==='unauthorized'){showUnauthorized(data.message);return;}
-      throw new Error(data?.message||data?.reason||('Dry run failed: '+r.status));
-    }
-    if(!data.ok)throw new Error(data.reason||'Dry run failed.');
-    showDiff(data);setProgress('Ready');
-  }catch(e){resetProgress();showError(e.message);}
-  finally{currentRunState.runInProgress=false;setDryRunLoading(false);updateApplyState();}
-}
-
-function buildPreviewDiffHtml(data){
-  if(data.fileDiffs&&data.fileDiffs.length>0){
-    return `<div style="margin-bottom:10px"><div class="section-title">Changes</div>${buildDiffCards(data.fileDiffs)}</div>`;
-  }
-  return '';
-}
-
-function buildFilePreviewCards(patches){
-  return (patches||[]).map((p,i)=>{
-    const fp=formatFileLabel(p.filePath,i);const ext=fp.split('.').pop();
-    const icon=ext==='java'?'☕':ext==='ts'||ext==='tsx'?'⚡':ext==='feature'?'🥒':ext==='py'?'🐍':ext==='sql'?'🗄️':'📄';
-    const op=formatFileOperation(fp);const content=escapeHtml(p.fullContent||'(no content)');
-    return `<details class="file-card file-toggle"${i===0?' open':''}><summary><div class="file-row"><span>${icon}</span><span class="fname">${escapeHtml(fp)}</span><span class="fmeta">${String((p.fullContent||'').length)} chars</span><span class="fop ${op}">${op}</span></div></summary><div class="file-content"><pre>${content}</pre></div></details>`;
-  }).join('');
-}
-
-function renderContextFiles(files){
-  const box=document.getElementById('contextFilesBox');const list=document.getElementById('contextFilesList');
-  const safe=(files||[]).filter(Boolean);
-  if(safe.length===0){list.innerHTML='';box.classList.add('hidden');return;}
-  list.innerHTML=safe.map(f=>`<li>${escapeHtml(f)}</li>`).join('');box.classList.remove('hidden');
-}
+function buildPreviewDiffHtml(data){if(data.fileDiffs&&data.fileDiffs.length>0){return `<div style="margin-bottom:10px"><div class="section-title">Changes</div>${buildDiffCards(data.fileDiffs)}</div>`;}return '';}
+function buildFilePreviewCards(patches){return(patches||[]).map((p,i)=>{const fp=formatFileLabel(p.filePath,i);const ext=fp.split('.').pop();const icon=ext==='java'?'☕':ext==='ts'||ext==='tsx'?'⚡':ext==='feature'?'🥒':ext==='py'?'🐍':ext==='sql'?'🗄️':'📄';const op=formatFileOperation(fp);const content=escapeHtml(p.fullContent||'(no content)');return `<details class="file-card file-toggle"${i===0?' open':''}><summary><div class="file-row"><span>${icon}</span><span class="fname">${escapeHtml(fp)}</span><span class="fmeta">${String((p.fullContent||'').length)} chars</span><span class="fop ${op}">${op}</span></div></summary><div class="file-content"><pre>${content}</pre></div></details>`;}).join('');}
+function renderContextFiles(files){const box=document.getElementById('contextFilesBox');const list=document.getElementById('contextFilesList');const safe=(files||[]).filter(Boolean);if(safe.length===0){list.innerHTML='';box.classList.add('hidden');return;}list.innerHTML=safe.map(f=>`<li>${escapeHtml(f)}</li>`).join('');box.classList.remove('hidden');}
 
 function getRecentRuns(){try{const p=JSON.parse(localStorage.getItem(RECENT_RUNS_KEY)||'[]');return Array.isArray(p)?p.sort((a,b)=>(b.timestamp||0)-(a.timestamp||0)):[];}catch{return [];}}
 function saveRecentRuns(r){localStorage.setItem(RECENT_RUNS_KEY,JSON.stringify(r.slice(0,MAX_RECENT_RUNS)));}
-function renderRecentRuns(){
-  const runs=getRecentRuns();const empty=document.getElementById('recentRunsEmpty');const list=document.getElementById('recentRunsList');
-  if(runs.length===0){empty.classList.remove('hidden');list.classList.add('hidden');list.innerHTML='';return;}
-  empty.classList.add('hidden');list.classList.remove('hidden');
-  list.innerHTML=runs.map((r,i)=>`<button class="recent-run-item" onclick="loadRecentRun(${i})"><div class="recent-run-top"><span class="recent-run-task">${escapeHtml(r.task||'(no task)')}</span><span class="recent-run-status ${r.status==='error'?'error':'success'}">${escapeHtml(r.status||'success')}</span></div><div class="recent-run-meta"><span>${escapeHtml(formatRoleLabel(r.role))}</span><span>${escapeHtml(r.repoPath||'')}</span><span>${escapeHtml(formatRecentRunTime(r.timestamp))}</span></div></button>`).join('');
-}
-function addRecentRun(run){
-  const runs=[{task:run.task||'',role:run.role||'developer',repoPath:run.repoPath||'',status:run.status||'success',timestamp:typeof run.timestamp==='number'?run.timestamp:Date.now()},...getRecentRuns()].slice(0,MAX_RECENT_RUNS);
-  saveRecentRuns(runs);renderRecentRuns();
-}
-function loadRecentRun(i){
-  const r=getRecentRuns()[i];if(!r)return;
-  document.getElementById('task').value=r.task||'';
-  document.getElementById('repoPath').value=r.repoPath||'';
-  renderRepoSelection();
-  const btn=Array.from(document.querySelectorAll('.role-btn')).find(b=>b.dataset.role===r.role);
-  if(btn)selectRole(btn);
-}
-function renderResultSummary(){
-  const roleLabel=formatRoleLabel(currentSummaryState.role||currentRole);
-  const statusLabel=formatStatusLabel(currentSummaryState.status);
-  const wc=currentSummaryState.warningCount??0;const fc=currentSummaryState.fileCount??0;
-  const chips=[`Status: ${statusLabel}`,fc>0?`Files: ${fc}`:'',`Warnings: ${wc}`,currentSummaryState.contextCount?`Context: ${currentSummaryState.contextCount}`:'',currentSummaryState.framework?`Framework: ${currentSummaryState.framework}`:'',currentSummaryState.complexity?`Complexity: ${currentSummaryState.complexity}`:'',currentSummaryState.dialect?`Dialect: ${currentSummaryState.dialect}`:'',currentSummaryState.migrationFormat?`Format: ${currentSummaryState.migrationFormat}`:''].filter(Boolean);
-  document.getElementById('resultSummaryTitle').textContent=`${roleLabel} Result`;
-  document.getElementById('resultSummarySubtitle').textContent=`${roleLabel} run summary`;
-  document.getElementById('resultSummaryChips').innerHTML=chips.map(c=>`<span class="result-chip">${escapeHtml(c)}</span>`).join('');
-}
+function renderRecentRuns(){const runs=getRecentRuns();const empty=document.getElementById('recentRunsEmpty');const list=document.getElementById('recentRunsList');if(runs.length===0){empty.classList.remove('hidden');list.classList.add('hidden');list.innerHTML='';return;}empty.classList.add('hidden');list.classList.remove('hidden');list.innerHTML=runs.map((r,i)=>`<button class="recent-run-item" onclick="loadRecentRun(${i})"><div class="recent-run-top"><span class="recent-run-task">${escapeHtml(r.task||'(no task)')}</span><span class="recent-run-status ${r.status==='error'?'error':'success'}">${escapeHtml(r.status||'success')}</span></div><div class="recent-run-meta"><span>${escapeHtml(formatRoleLabel(r.role))}</span><span>${escapeHtml(r.repoPath||'')}</span><span>${escapeHtml(formatRecentRunTime(r.timestamp))}</span></div></button>`).join('');}
+function addRecentRun(run){const runs=[{task:run.task||'',role:run.role||'developer',repoPath:run.repoPath||'',status:run.status||'success',timestamp:typeof run.timestamp==='number'?run.timestamp:Date.now()},...getRecentRuns()].slice(0,MAX_RECENT_RUNS);saveRecentRuns(runs);renderRecentRuns();}
+function loadRecentRun(i){const r=getRecentRuns()[i];if(!r)return;document.getElementById('task').value=r.task||'';document.getElementById('repoPath').value=r.repoPath||'';renderRepoSelection();setRoleSilently(r.role);}
+
+function renderResultSummary(){const roleLabel=formatRoleLabel(currentSummaryState.role||currentRole);const statusLabel=formatStatusLabel(currentSummaryState.status);const wc=currentSummaryState.warningCount??0;const fc=currentSummaryState.fileCount??0;const chips=[`Status: ${statusLabel}`,fc>0?`Files: ${fc}`:'',`Warnings: ${wc}`,currentSummaryState.contextCount?`Context: ${currentSummaryState.contextCount}`:'',currentSummaryState.framework?`Framework: ${currentSummaryState.framework}`:'',currentSummaryState.complexity?`Complexity: ${currentSummaryState.complexity}`:'',currentSummaryState.dialect?`Dialect: ${currentSummaryState.dialect}`:'',currentSummaryState.migrationFormat?`Format: ${currentSummaryState.migrationFormat}`:''].filter(Boolean);document.getElementById('resultSummaryTitle').textContent=`${roleLabel} Result`;document.getElementById('resultSummarySubtitle').textContent=`${roleLabel} run summary`;document.getElementById('resultSummaryChips').innerHTML=chips.map(c=>`<span class="result-chip">${escapeHtml(c)}</span>`).join('');}
 function updateResultSummary(s){currentSummaryState={...currentSummaryState,...s};renderResultSummary();}
 function closeProgressStream(){if(currentProgressSource){currentProgressSource.close();currentProgressSource=null;}}
-function setProgress(stage){
-  const box=document.getElementById('progressBox');const text=document.getElementById('progressText');
-  if(!stage){text.textContent='';box.classList.add('hidden');box.style.display='none';return;}
-  text.textContent='⏳ '+stage;box.classList.remove('hidden');box.style.display='block';
-}
-function startProgress(runId,initialStage){
-  closeProgressStream();currentRunId=runId;setProgress(initialStage);
-  if(typeof EventSource!=='function')return;
-  const source=new EventSource(`/api/progress?runId=${encodeURIComponent(runId)}`);
-  source.onmessage=(e)=>{try{const p=JSON.parse(e.data);if(p.stage&&p.stage!=='Connected')setProgress(p.stage);}catch{if(e.data&&e.data!=='Connected')setProgress(e.data);}};
-  source.onerror=()=>closeProgressStream();
-  currentProgressSource=source;
-}
+function setProgress(stage){const box=document.getElementById('progressBox');const text=document.getElementById('progressText');if(!stage){text.textContent='';box.classList.add('hidden');box.style.display='none';return;}text.textContent='⏳ '+stage;box.classList.remove('hidden');box.style.display='block';}
+function startProgress(runId,initialStage){closeProgressStream();currentRunId=runId;setProgress(initialStage);if(typeof EventSource!=='function')return;const source=new EventSource(`/api/progress?runId=${encodeURIComponent(runId)}`);source.onmessage=(e)=>{try{const p=JSON.parse(e.data);if(p.stage&&p.stage!=='Connected')setProgress(p.stage);}catch{if(e.data&&e.data!=='Connected')setProgress(e.data);}};source.onerror=()=>closeProgressStream();currentProgressSource=source;}
 function finishProgress(){setProgress('Ready');closeProgressStream();}
-function resetProgress(){closeProgressStream();currentRunId='';setProgress('');}
+function clearDeveloperJobPolling(){if(currentDeveloperJobPollTimer){clearTimeout(currentDeveloperJobPollTimer);currentDeveloperJobPollTimer=null;}currentDeveloperJobToken+=1;}
+function resetProgress(){clearDeveloperJobPolling();closeProgressStream();currentRunId='';setProgress('');}
+
 function getHistory(){try{return JSON.parse(localStorage.getItem('zone_repo_history')||'[]');}catch{return [];}}
 function saveToHistory(path){let h=getHistory().filter(p=>p!==path);h.unshift(path);h=h.slice(0,5);localStorage.setItem('zone_repo_history',JSON.stringify(h));renderHistory();}
 function renderHistory(){const h=getHistory();const box=document.getElementById('historyBox');const sel=document.getElementById('historySelect');if(h.length===0){box.classList.add('hidden');return;}box.classList.remove('hidden');sel.innerHTML='<option value="">— select —</option>'+h.map(p=>`<option value="${p}">${p}</option>`).join('');}
 function selectHistory(){const selectedPath=document.getElementById('historySelect').value;if(selectedPath){document.getElementById('repoPath').value=selectedPath;renderRepoSelection();}}
-function openInEditor(editor){
-  const repoPath=getResolvedRepoPath();if(!repoPath){showError('Enter a repo path first.');return;}
-  if(editor==='vscode'){window.location.href=`vscode://file/${repoPath}`;}
-  else if(editor==='idea'){window.location.href=`idea://open?file=${repoPath}`;}
-  else if(editor==='pycharm'){window.location.href=`pycharm://open?file=${repoPath}`;}
-  else if(editor==='terminal'){navigator.clipboard.writeText(`cd "${repoPath}"`);const btn=document.querySelector('[title="Copy cd command"]');if(btn){btn.title='Copied!';setTimeout(()=>btn.title='Copy cd command',2000);}}
-}
-function setExampleTask(task, role) {
-  document.getElementById('task').value = task;
-  const btn = document.querySelector('[data-role="' + role + '"]');
-  if (btn) selectRole(btn);
-  document.getElementById('exampleTasks').style.display = 'none';
-}
-function selectRole(btn){
-  document.querySelectorAll('.role-btn').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');currentRole=btn.dataset.role;
-  const ph={developer:'add input validation to login form...',test_engineer:'write a cucumber scenario for one-way flight search...',data_analyst:'create a users table with id, email, created_at...'};
-  document.getElementById('task').placeholder=ph[currentRole]||'';
-}
-async function enhanceTask(){
-  const task=document.getElementById('task').value.trim();
-  const repoPath=getResolvedRepoPath();
-  const btn=document.getElementById('enhanceBtn');
-  const userId=getCurrentUserId();
-  if(!task){showError('Task is required.');return;}
-  if(!repoPath){showError('Task and repo path are required.');return;}
-  if(!userId){showUnauthorized(getMissingUserSessionMessage());return;}
-  const originalLabel=btn.textContent;
-  btn.disabled=true;btn.textContent='Enhancing...';hideError();
-  try{
-    const r=await fetch('/api/enhance-task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,role:currentRole,repoPath,userId})});
-    if(!r.ok){
-      const payload=await r.json().catch(()=>null);
-      throw new Error(payload?.reason||('Enhance failed: '+r.status));
-    }
-    const result=await r.json();
-    document.getElementById('task').value=result.enhancedTask||task;
-  }catch(e){showError(e.message||'Enhance failed.');}
-  finally{btn.disabled=false;btn.textContent=originalLabel;}
-}
 
-function copyPrompt(){
-  const t=document.querySelector('.prompt-box').innerText.replace('copy','').trim();
-  navigator.clipboard.writeText(t);
-  document.querySelector('.copy-btn').textContent='copied!';
-  setTimeout(()=>document.querySelector('.copy-btn').textContent='copy',1500);
-}
+function openInEditor(editor){const repoPath=getResolvedRepoPath();if(!repoPath){showError('Enter a repo path first.');return;}if(editor==='vscode'){window.location.href=`vscode://file/${repoPath}`;}else if(editor==='idea'){window.location.href=`idea://open?file=${repoPath}`;}else if(editor==='pycharm'){window.location.href=`pycharm://open?file=${repoPath}`;}else if(editor==='terminal'){navigator.clipboard.writeText(`cd "${repoPath}"`);const btn=document.querySelector('[title="Copy cd command"]');if(btn){btn.title='Copied!';setTimeout(()=>btn.title='Copy cd command',2000);}}}
+function setExampleTask(task,role){document.getElementById('task').value=task;const btn=document.querySelector('[data-role="'+role+'"]');if(btn)selectRole(btn);document.getElementById('exampleTasks').style.display='none';}
+function selectRole(btn){document.querySelectorAll('.role-btn[data-role]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');currentRole=btn.dataset.role;const ph={developer:'add input validation to login form...',test_engineer:'write a cucumber scenario for one-way flight search...',data_analyst:'create a users table with id, email, created_at...'};document.getElementById('task').placeholder=ph[currentRole]||'';}
+function copyPrompt(){const t=document.querySelector('.prompt-box').innerText.replace('copy','').trim();navigator.clipboard.writeText(t);document.querySelector('.copy-btn').textContent='copied!';setTimeout(()=>document.querySelector('.copy-btn').textContent='copy',1500);}
+function getMissingUserSessionMessage(){return 'Please sign in to use Zone.';}
+function getDebugFallbackUserId(){return '';}
+function logUserIdResolution(state){if(currentUserIdLogState===state)return;currentUserIdLogState=state;if(state==='authenticated')console.log('[zone-ui] using authenticated user id');else if(state==='debug_fallback')console.log('[zone-ui] auth user missing, using debug fallback user id');else if(state==='missing')console.log('[zone-ui] missing authenticated user session');}
+function getCurrentUserId(){const clerk=window.Clerk;if(clerk?.user?.id){logUserIdResolution('authenticated');return clerk.user.id;}if(clerk?.session?.user?.id){logUserIdResolution('authenticated');return clerk.session.user.id;}if(window.currentUser?.id){logUserIdResolution('authenticated');return window.currentUser.id;}const debugFallbackUserId=getDebugFallbackUserId();if(debugFallbackUserId){logUserIdResolution('debug_fallback');return debugFallbackUserId;}logUserIdResolution('missing');return '';}
+function isRunningInVsCode(){return window.parent!==window||hasReceivedVsCodeWorkspacePath;}
+function requestVsCodeLogin(){window.parent.postMessage({type:'openExternalAuth',url:'https://zonecli.dev/sign-in'},'*');}
 
-function getMissingUserSessionMessage(){
-  return 'Please sign in to use Zone.';
-}
+function setVsCodeAuthRequiredVisible(visible){const authBox=document.getElementById('vsCodeAuthRequired');const mainGrid=document.querySelector('.main-grid');const heading=document.querySelector('h1');const sub=document.querySelector('.sub');const accountBar=document.getElementById('accountBar');const feedbackFab=document.getElementById('feedbackFab');const userIdBadge=document.getElementById('userIdBadge');if(authBox)authBox.classList.toggle('hidden',!visible);if(mainGrid)mainGrid.classList.toggle('hidden',visible);if(heading)heading.classList.toggle('hidden',visible);if(sub)sub.classList.toggle('hidden',visible);if(accountBar)accountBar.classList.toggle('hidden',visible||!window.currentUser);if(feedbackFab)feedbackFab.classList.toggle('hidden',visible);if(userIdBadge)userIdBadge.classList.toggle('hidden',visible||!window.currentUser?.id);}
 
-function getDebugFallbackUserId(){
-  return '';
-}
+function showError(msg){const b=document.getElementById('errorBox');b.style.background='';b.style.borderColor='';b.style.color='';if(msg==='repo_not_accessible_in_hosted_mode')return;const detailsHtml=`<details class="error-card-details"><summary>Show details</summary><div class="error-card-details-content">${escapeHtml(msg)}</div></details>`;if(String(msg||'').startsWith('Some files could not be written')||String(msg||'').startsWith('Apply failed:')){b.innerHTML=`<div class="error-card-title"><span>⚠</span><span>Apply failed</span></div><div class="error-card-message">Some files could not be written. Check that the folder is still accessible.</div><div class="error-card-actions"><button type="button" class="error-card-btn" onclick="applyChanges()">Try Again</button></div>${detailsHtml}`;}else if(String(msg||'').includes('failed')||String(msg||'').includes('Network')||String(msg||'').includes('moment')){b.innerHTML=`<div class="error-card-title"><span>⚠</span><span>Request failed</span></div><div class="error-card-message">Something went wrong. Please try again in a moment.</div><div class="error-card-actions"><button type="button" class="error-card-btn" onclick="execute()">Retry</button></div>${detailsHtml}`;}else{b.innerHTML=`<div class="error-card-title"><span>⚠</span><span>Something needs attention</span></div><div class="error-card-message">${escapeHtml(msg)}</div>`;}b.style.display='block';}
 
-function logUserIdResolution(state){
-  if(currentUserIdLogState===state)return;
-  currentUserIdLogState=state;
-  if(state==='authenticated')console.log('[zone-ui] using authenticated user id');
-  else if(state==='debug_fallback')console.log('[zone-ui] auth user missing, using debug fallback user id');
-  else if(state==='missing')console.log('[zone-ui] missing authenticated user session');
-}
+function showUpgrade(message,url){const b=document.getElementById('errorBox');const upgradeUrl=typeof url==='string'&&url.trim()?url.trim():'https://zonecli.dev/#pricing';const description=typeof message==='string'&&message.trim()&&message.trim().length<120?escapeHtml(message.trim()):'Keep using Zone to generate and apply tests instantly.';trackEvent('upgrade_cta_shown_blocked',{plan:'Free',upgradeUrl});currentBillingState={plan:'Free',credits:0,hardBlocked:true};renderBillingState();const btn=document.getElementById('execBtn');const s=document.getElementById('spinner');const t=document.getElementById('execText');btn.disabled=true;btn.title='Upgrade to Pro to continue';s.style.display='none';t.textContent='\u25B6  Execute';b.style.background='#0f241a';b.style.borderColor='#1d6b3a';b.style.color='#d4d4d4';b.innerHTML=`<div style="font-weight:700;margin-bottom:6px">You've used all your free runs</div><div style="margin-bottom:8px">${description}</div><ul style="margin:0 0 8px 18px;padding:0"><li>250 Hosted Runs / month</li><li>Unlimited runs with your own API key (BYOK)</li><li>All roles (Developer, Test Engineer, Data Analyst)</li><li>Safe apply with confidence validation</li></ul><div style="margin-bottom:8px;font-weight:700">$9 / month</div><a href="${escapeHtml(upgradeUrl)}" target="_blank" rel="noreferrer" onclick="trackEvent('upgrade_clicked',{source:'blocked',upgradeUrl:'${escapeHtml(upgradeUrl)}'})" style="display:inline-block;margin-top:4px;padding:6px 12px;border:1px solid #4ec9b0;border-radius:6px;color:#4ec9b0;font-weight:700;text-decoration:none">Upgrade to Pro &#8594;</a><div style="margin-top:8px;opacity:.8">or try again with a more specific task</div>`;b.style.display='block';}
 
-function getCurrentUserId(){
-  const clerk=window.Clerk;
-  if(clerk?.user?.id){logUserIdResolution('authenticated');return clerk.user.id;}
-  if(clerk?.session?.user?.id){logUserIdResolution('authenticated');return clerk.session.user.id;}
-  if(window.currentUser?.id){logUserIdResolution('authenticated');return window.currentUser.id;}
-  const debugFallbackUserId=getDebugFallbackUserId();
-  if(debugFallbackUserId){logUserIdResolution('debug_fallback');return debugFallbackUserId;}
-  logUserIdResolution('missing');
-  return '';
-}
+async function refreshBillingSummary(){const userId=getCurrentUserId();if(!userId){currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);if(isRunningInVsCode()){setVsCodeAuthRequiredVisible(true);}return;}try{const r=await fetch('/api/billing-summary?userId='+encodeURIComponent(userId));const data=await r.json().catch(()=>null);if(!r.ok||!data?.ok){currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);if(isRunningInVsCode()&&(r.status===401||data?.reason==='unauthorized')){setVsCodeAuthRequiredVisible(true);}return;}const wasHardBlocked=currentBillingState.hardBlocked;const plan=data.plan==='Pro'?'Pro':'Free';const credits=typeof data.credits==='number'?Math.max(0,data.credits):0;setVsCodeAuthRequiredVisible(false);currentBillingState={plan,credits,hardBlocked:plan==='Free'&&credits===0};console.log('[zone-ui] currentBillingState after refresh',currentBillingState);renderBillingState();setLoading(false);if(currentBillingState.hardBlocked&&!wasHardBlocked){showUpgrade("You've used all your free runs. Upgrade to Pro.",data.upgradeUrl);}}catch(_){currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);}}
 
-function showError(msg){
-  const b=document.getElementById('errorBox');
-  b.style.background='';b.style.borderColor='';b.style.color='';
-  if(msg==='repo_not_accessible_in_hosted_mode')return;
-  const detailsHtml=`<details class="error-card-details"><summary>Show details</summary><div class="error-card-details-content">${escapeHtml(msg)}</div></details>`;
-  if(String(msg||'').startsWith('Some files could not be written')||String(msg||'').startsWith('Apply failed:')){
-    b.innerHTML=`<div class="error-card-title"><span>⚠</span><span>Apply failed</span></div><div class="error-card-message">Some files could not be written. Check that the folder is still accessible.</div><div class="error-card-actions"><button type="button" class="error-card-btn" onclick="applyChanges()">Try Again</button></div>${detailsHtml}`;
-  }else if(String(msg||'').includes('failed')||String(msg||'').includes('Network')||String(msg||'').includes('moment')){
-    b.innerHTML=`<div class="error-card-title"><span>⚠</span><span>Request failed</span></div><div class="error-card-message">Something went wrong. Please try again in a moment.</div><div class="error-card-actions"><button type="button" class="error-card-btn" onclick="execute()">Retry</button></div>${detailsHtml}`;
-  }else{
-    b.innerHTML=`<div class="error-card-title"><span>⚠</span><span>Something needs attention</span></div><div class="error-card-message">${escapeHtml(msg)}</div>`;
-  }
-  b.style.display='block';
-}
-
-function showUpgrade(message,url){
-  const b=document.getElementById('errorBox');
-  const upgradeUrl=typeof url==='string'&&url.trim()?url.trim():'https://zonecli.dev/#pricing';
-  const description=typeof message==='string'&&message.trim()&&message.trim().length<120?escapeHtml(message.trim()):'Keep using Zone to generate and apply tests instantly.';
-  trackEvent('upgrade_cta_shown_blocked',{plan:'Free',upgradeUrl});
-  currentBillingState={plan:'Free',credits:0,hardBlocked:true};renderBillingState();const btn=document.getElementById('execBtn');const s=document.getElementById('spinner');const t=document.getElementById('execText');btn.disabled=true;btn.title='Upgrade to Pro to continue';s.style.display='none';t.textContent='\u25B6  Execute';b.style.background='#0f241a';b.style.borderColor='#1d6b3a';b.style.color='#d4d4d4';
-  b.innerHTML=`<div style="font-weight:700;margin-bottom:6px">You've used all your free runs</div><div style="margin-bottom:8px">${description}</div><ul style="margin:0 0 8px 18px;padding:0"><li>1000 runs / month</li><li>All roles (Developer, Test Engineer, Data Analyst)</li><li>Safe apply with confidence validation</li></ul><div style="margin-bottom:8px;font-weight:700">$9 / month</div><a href="${escapeHtml(upgradeUrl)}" target="_blank" rel="noreferrer" onclick="trackEvent('upgrade_clicked',{source:'blocked',upgradeUrl:'${escapeHtml(upgradeUrl)}'})" style="display:inline-block;margin-top:4px;padding:6px 12px;border:1px solid #4ec9b0;border-radius:6px;color:#4ec9b0;font-weight:700;text-decoration:none">Upgrade to Pro &#8594;</a><div style="margin-top:8px;opacity:.8">or try again with a more specific task</div>`;
-  b.style.display='block';
-}
-async function refreshBillingSummary(){
-  const userId=getCurrentUserId();
-  if(!userId){currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);return;}
-  try{
-    const r=await fetch('/api/billing-summary?userId='+encodeURIComponent(userId));
-    const data=await r.json().catch(()=>null);
-    if(!r.ok||!data?.ok){currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);return;}
-    const wasHardBlocked=currentBillingState.hardBlocked;
-    const plan=data.plan==='Pro'?'Pro':'Free';const credits=typeof data.credits==='number'?Math.max(0,data.credits):0;
-    currentBillingState={plan,credits,hardBlocked:plan==='Free'&&credits===0};console.log('[zone-ui] currentBillingState after refresh',currentBillingState);renderBillingState();setLoading(false);
-    if(currentBillingState.hardBlocked&&!wasHardBlocked){showUpgrade("You've used all your free runs. Upgrade to Pro.",data.upgradeUrl);}
-  }catch(_){
-    currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);
-  }
-}
-function showUnauthorized(message){
-  const b=document.getElementById('errorBox');
-  b.style.background='';b.style.borderColor='';b.style.color='';
-  b.innerHTML=`<div class="error-card-title"><span>⚠</span><span>Sign-in required</span></div><div class="error-card-message">${escapeHtml(message)}</div>`;
-  b.style.display='block';
-}
+function showUnauthorized(message){const b=document.getElementById('errorBox');b.style.background='';b.style.borderColor='';b.style.color='';b.innerHTML=`<div class="error-card-title"><span>⚠</span><span>Sign-in required</span></div><div class="error-card-message">${escapeHtml(message)}</div>`;b.style.display='block';}
 function hideError(){document.getElementById('errorBox').style.display='none';}
 function setLoading(l){const btn=document.getElementById('execBtn');const s=document.getElementById('spinner');const t=document.getElementById('execText');btn.disabled=l||currentBillingState.hardBlocked||requiresHostedFolderSelection();btn.title=requiresHostedFolderSelection()?getHostedFolderRequiredMessage():currentBillingState.hardBlocked?'Upgrade to Pro to continue':'';s.style.display=l?'block':'none';t.textContent=l?'Running...':'\u25B6  Execute';}
 
+async function execute(){if(isHostedExecution()&&currentRepoHandle){const granted=await currentRepoHandle.requestPermission({mode:'readwrite'});if(granted!=='granted'){currentRepoHandlePermission='prompt';renderRepoSelection();return;}currentRepoHandlePermission='granted';}const values=validateTaskAndRepo();if(!values)return;const{task,repoPath}=values;resetProgress();hideError();document.getElementById('diffSection').classList.add('hidden');const runId=`${Date.now()}-${Math.random().toString(36).slice(2,8)}`;const userId=getCurrentUserId();let runStarted=false;try{const accessResponse=await fetch(`/api/check-access?userId=${encodeURIComponent(userId)}`);const accessResult=await accessResponse.json().catch(()=>null);if(!accessResponse.ok){resetProgress();if(accessResult?.reason==='unauthorized'){showUnauthorized(accessResult.message);return;}if(accessResult?.reason==='no_free_runs'){trackEvent('execute_blocked_no_credits',{role:currentRole,repoPath});showUpgrade(accessResult.message,accessResult.upgradeUrl);return;}throw new Error(accessResult?.message||accessResult?.reason||('Access check failed: '+accessResponse.status));}beginRunState();currentRepoPath=repoPath;saveToHistory(repoPath);setLoading(true);runStarted=true;startProgress(runId,currentRole==='data_analyst'||currentRole==='test_engineer'?'Scanning repo...':'Generating patch...');if(currentRole==='test_engineer'){const hostedContext=await buildHostedTestEngineerContext();const body={...{task,repoPath,runId,userId},...(hostedContext?{hostedContext}:{})};const r=await fetch('/api/test-engineer',{method:'POST',headers:getInferenceHeaders(),body:JSON.stringify(body)});const result=await r.json().catch(()=>null);if(!r.ok){resetProgress();if(result?.reason==='unauthorized'){showUnauthorized(result.message);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}if(result?.reason==='no_free_runs'){showUpgrade(result.message,result.upgradeUrl);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}throw new Error(result?.reason||('Test engineer flow failed: '+r.status));}if(!result.ok&&!(result.validationBlocked&&result.preview)){showError(result.reason||'Test generation failed.');addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}const decisionMode=result.decisionMode||(result.validationBlocked?'blocked':result.confidence>=70?'safe_to_apply':'preview_only');showDecision({decision:{mode:decisionMode},confidence:{score:result.confidence??0},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity});showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,validationBlocked:Boolean(result.validationBlocked),fileDiffs:result.fileDiffs||[]});if(result.validationBlocked)showError(result.reason||'Output validation blocked.');addRecentRun({task,role:currentRole,repoPath,status:result.validationBlocked?'error':'success',timestamp:Date.now()});finishProgress();}else if(currentRole==='data_analyst'){const hostedContext=await buildHostedDataAnalystContext();const r=await fetch('/api/data-analyst',{method:'POST',headers:getInferenceHeaders(),body:JSON.stringify({...{task,repoPath,runId,userId},...(hostedContext?{hostedContext}:{})})});const result=await r.json().catch(()=>null);if(!r.ok){resetProgress();if(result?.reason==='unauthorized'){showUnauthorized(result.message);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}if(result?.reason==='no_free_runs'){showUpgrade(result.message,result.upgradeUrl);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}throw new Error(result?.reason||('Data analyst flow failed: '+r.status));}if(!result.ok){showError(result.reason||'SQL generation failed.');addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}const daMode=result.decisionMode||(result.confidence>=70?'safe_to_apply':'preview_only');showDecision({decision:{mode:daMode},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat])});showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,fileDiffs:result.fileDiffs||[]});addRecentRun({task,role:currentRole,repoPath,status:'success',timestamp:Date.now()});finishProgress();}else{setProgress('Analyzing repository...');const r1=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});if(!r1.ok)throw new Error('Analyze failed: '+r1.status);const analyzeData=await r1.json();setProgress('Planning changes...');const hostedContext=await buildHostedDeveloperContext();let fakeProgressTimer=null;let fakeProgressStep=0;const fakeProgressStages=['Generating patch...','Generating patch...','Validating output...'];const fakeProgressDelays=[5000,20000,5000];function advanceFakeProgress(){if(fakeProgressStep<fakeProgressStages.length){setProgress(fakeProgressStages[fakeProgressStep]);fakeProgressTimer=setTimeout(advanceFakeProgress,fakeProgressDelays[fakeProgressStep]);fakeProgressStep++;}}setTimeout(advanceFakeProgress,3000);const body={...{task,repoPath,runId,userId},...(hostedContext?{hostedContext}:{})};const r2=await fetch('/api/patch',{method:'POST',headers:getInferenceHeaders(),body:JSON.stringify(body)});const patch=await r2.json().catch(()=>null);if(!r2.ok){resetProgress();if(patch?.reason==='unauthorized'){showUnauthorized(patch.message);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}if(patch?.reason==='no_free_runs'){showUpgrade(patch.message,patch.upgradeUrl);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}throw new Error(patch?.reason||('Patch failed: '+r2.status));}if(fakeProgressTimer)clearTimeout(fakeProgressTimer);if(!patch?.ok){showError(patch?.reason||'Patch generation failed.');addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}showDecision(analyzeData);showPatch(patch);addRecentRun({task,role:currentRole,repoPath,status:patch.ok===false?'error':'success',timestamp:Date.now()});finishProgress();}}catch(e){resetProgress();addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});showError(e.message);}finally{if(runStarted){currentRunState.runInProgress=false;setLoading(false);updateApplyState();void refreshBillingSummary();initQuickActions();}}}
+function buildDeveloperDecisionFromPatchResult(patch){const decisionMode=patch?.decisionMode||((patch?.developerConfidence??0)<70?'preview_only':'safe_to_apply');return{decision:{mode:decisionMode},confidence:{score:patch?.developerConfidence??0},risk:patch?.developerRisk||{score:0,breakdown:{destructive:0,schema:0,massScope:0}}};}
+async function execute(){if(isHostedExecution()&&currentRepoHandle){const granted=await currentRepoHandle.requestPermission({mode:'readwrite'});if(granted!=='granted'){currentRepoHandlePermission='prompt';renderRepoSelection();return;}currentRepoHandlePermission='granted';}const values=validateTaskAndRepo();if(!values)return;const{task,repoPath}=values;resetProgress();hideError();document.getElementById('diffSection').classList.add('hidden');const runId=`${Date.now()}-${Math.random().toString(36).slice(2,8)}`;const userId=getCurrentUserId();const billingMode=getRequestedBillingMode();let runStarted=false;try{const accessResponse=await fetch(`/api/check-access?userId=${encodeURIComponent(userId)}&billingMode=${encodeURIComponent(billingMode)}`);const accessResult=await accessResponse.json().catch(()=>null);if(!accessResponse.ok){resetProgress();if(accessResult?.reason==='unauthorized'){showUnauthorized(accessResult.message);return;}if(accessResult?.reason==='no_free_runs'){trackEvent('execute_blocked_no_credits',{role:currentRole,repoPath});showUpgrade(accessResult.message,accessResult.upgradeUrl);return;}throw new Error(accessResult?.message||accessResult?.reason||('Access check failed: '+accessResponse.status));}beginRunState();currentRepoPath=repoPath;saveToHistory(repoPath);setLoading(true);runStarted=true;startProgress(runId,currentRole==='data_analyst'||currentRole==='test_engineer'?'Scanning repo...':'Queued...');if(currentRole==='test_engineer'){const hostedContext=await buildHostedTestEngineerContext();const body={...{task,repoPath,runId,userId,billingMode},...(hostedContext?{hostedContext}:{})};const r=await fetch('/api/test-engineer',{method:'POST',headers:getInferenceHeaders(),body:JSON.stringify(body)});const result=await r.json().catch(()=>null);if(!r.ok){resetProgress();if(result?.reason==='unauthorized'){showUnauthorized(result.message);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}if(result?.reason==='no_free_runs'){showUpgrade(result.message,result.upgradeUrl);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}throw new Error(result?.reason||('Test engineer flow failed: '+r.status));}if(!result.ok&&!(result.validationBlocked&&result.preview)){showError(result.reason||'Test generation failed.');addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}const decisionMode=result.decisionMode||(result.validationBlocked?'blocked':result.confidence>=70?'safe_to_apply':'preview_only');showDecision({decision:{mode:decisionMode},confidence:{score:result.confidence??0},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity});showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,validationBlocked:Boolean(result.validationBlocked),fileDiffs:result.fileDiffs||[]});if(result.validationBlocked)showError(result.reason||'Output validation blocked.');addRecentRun({task,role:currentRole,repoPath,status:result.validationBlocked?'error':'success',timestamp:Date.now()});finishProgress();}else if(currentRole==='data_analyst'){const hostedContext=await buildHostedDataAnalystContext();const r=await fetch('/api/data-analyst',{method:'POST',headers:getInferenceHeaders(),body:JSON.stringify({...{task,repoPath,runId,userId,billingMode},...(hostedContext?{hostedContext}:{})})});const result=await r.json().catch(()=>null);if(!r.ok){resetProgress();if(result?.reason==='unauthorized'){showUnauthorized(result.message);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}if(result?.reason==='no_free_runs'){showUpgrade(result.message,result.upgradeUrl);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}throw new Error(result?.reason||('Data analyst flow failed: '+r.status));}if(!result.ok){showError(result.reason||'SQL generation failed.');addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}const daMode=result.decisionMode||(result.confidence>=70?'safe_to_apply':'preview_only');showDecision({decision:{mode:daMode},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat])});showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,fileDiffs:result.fileDiffs||[]});addRecentRun({task,role:currentRole,repoPath,status:'success',timestamp:Date.now()});finishProgress();}else{const hostedContext=await buildHostedDeveloperContext();const body={...{task,repoPath,runId,userId,billingMode},...(hostedContext?{hostedContext}:{})};const enqueueResponse=await fetch('/api/patch/jobs',{method:'POST',headers:getInferenceHeaders(),body:JSON.stringify(body)});const enqueueResult=await enqueueResponse.json().catch(()=>null);if(!enqueueResponse.ok||!enqueueResult?.ok||!enqueueResult?.runId){resetProgress();if(enqueueResult?.reason==='unauthorized'){showUnauthorized(enqueueResult.message);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}if(enqueueResult?.reason==='no_free_runs'){showUpgrade(enqueueResult.message,enqueueResult.upgradeUrl);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}throw new Error(enqueueResult?.message||enqueueResult?.reason||'Developer job enqueue failed.');}const jobRunId=enqueueResult.runId;currentRunId=jobRunId;const jobToken=currentDeveloperJobToken;const pollStatus=async()=>{if(jobToken!==currentDeveloperJobToken)return;const statusResponse=await fetch(`/api/patch/jobs/${encodeURIComponent(jobRunId)}`);const statusResult=await statusResponse.json().catch(()=>null);if(jobToken!==currentDeveloperJobToken)return;if(!statusResponse.ok||!statusResult?.ok){resetProgress();addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});showError(statusResult?.message||statusResult?.reason||'Developer job status failed.');return;}setProgress(statusResult.progressStage||'Queued...');if(statusResult.status==='queued'||statusResult.status==='running'){currentDeveloperJobPollTimer=setTimeout(pollStatus,1000);return;}if(statusResult.status==='failed'){finishProgress();addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});showError(statusResult.errorMessage||'Developer job failed.');return;}if(statusResult.status!=='completed'){currentDeveloperJobPollTimer=setTimeout(pollStatus,1000);return;}const resultResponse=await fetch(`/api/patch/jobs/${encodeURIComponent(jobRunId)}/result`);const patch=await resultResponse.json().catch(()=>null);if(jobToken!==currentDeveloperJobToken)return;if(!resultResponse.ok||!patch?.ok){finishProgress();addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});showError(patch?.message||patch?.reason||'Developer job result failed.');return;}showDecision(buildDeveloperDecisionFromPatchResult(patch));showPatch(patch);addRecentRun({task,role:currentRole,repoPath,status:patch.ok===false?'error':'success',timestamp:Date.now()});finishProgress();};await pollStatus();}}catch(e){resetProgress();addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});showError(e.message);}finally{if(runStarted){currentRunState.runInProgress=false;setLoading(false);updateApplyState();void refreshBillingSummary();initQuickActions();}}}
 
-async function execute(){
-  if(isHostedExecution()&&currentRepoHandle){
-    const granted=await currentRepoHandle.requestPermission({mode:'readwrite'});
-    if(granted!=='granted'){
-      currentRepoHandlePermission='prompt';
-      renderRepoSelection();
-      return;
-    }
-    currentRepoHandlePermission='granted';
-  }
-  const values=validateTaskAndRepo();if(!values)return;
-  const{task,repoPath}=values;
-  resetProgress();hideError();
-  document.getElementById('diffSection').classList.add('hidden');
-  const runId=`${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-  const userId=getCurrentUserId();
-  let runStarted=false;
-  try{
-    const accessResponse=await fetch(`/api/check-access?userId=${encodeURIComponent(userId)}`);
-    const accessResult=await accessResponse.json().catch(()=>null);
-    if(!accessResponse.ok){
-      resetProgress();
-      if(accessResult?.reason==='unauthorized'){
-        showUnauthorized(accessResult.message);
-        return;
-      }
-      if(accessResult?.reason==='no_free_runs'){
-        trackEvent('execute_blocked_no_credits',{role:currentRole,repoPath});
-        showUpgrade(accessResult.message,accessResult.upgradeUrl);
-        return;
-      }
-      throw new Error(accessResult?.message||accessResult?.reason||('Access check failed: '+accessResponse.status));
-    }
-    beginRunState();
-    currentRepoPath=repoPath;saveToHistory(repoPath);setLoading(true);
-    runStarted=true;
-    startProgress(runId,currentRole==='data_analyst'||currentRole==='test_engineer'?'Scanning repo...':'Generating patch...');
-    if(currentRole==='test_engineer'){
-      console.log('[zone-ui] execute test-engineer handle state',{currentRole,currentRepoSelectionLabel,hasHandle:Boolean(currentRepoHandle),handleKind:currentRepoHandle?.kind??null});
-      const hostedContext=await buildHostedTestEngineerContext();
-      if(hostedContext){
-        console.log('[zone-ui] test-engineer hostedContext',hostedContext);
-        console.log('[zone-ui] test-engineer hostedContext file count',Array.isArray(hostedContext.files)?hostedContext.files.length:0);
-      }else{
-        console.warn('[zone-ui] hostedContext is NULL — folder handle missing');
-      }
-      const body={...{task,repoPath,runId,userId},...(hostedContext?{hostedContext}:{})};
-      console.log('[zone-ui] test-engineer request body',body);
-      const r=await fetch('/api/test-engineer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      const result=await r.json().catch(()=>null);
-      if(!r.ok){
-        resetProgress();
-        if(result?.reason==='unauthorized'){
-          showUnauthorized(result.message);
-          addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
-          return;
-        }
-        if(result?.reason==='no_free_runs'){
-          showUpgrade(result.message,result.upgradeUrl);
-          addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
-          return;
-        }
-        throw new Error(result?.reason||('Test engineer flow failed: '+r.status));
-      }
-      if(!result.ok&&!(result.validationBlocked&&result.preview)){showError(result.reason||'Test generation failed.');addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
-      const decisionMode=result.decisionMode||(result.validationBlocked?'blocked':result.confidence>=70?'safe_to_apply':'preview_only');
-      showDecision({decision:{mode:decisionMode},confidence:{score:result.confidence??0},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity});
-      showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,validationBlocked:Boolean(result.validationBlocked),fileDiffs:result.fileDiffs||[]});
-      if(result.validationBlocked)showError(result.reason||'Output validation blocked.');
-      addRecentRun({task,role:currentRole,repoPath,status:result.validationBlocked?'error':'success',timestamp:Date.now()});
-      finishProgress();
-    }else if(currentRole==='data_analyst'){
-      const hostedContext=await buildHostedDataAnalystContext();
-      const r=await fetch('/api/data-analyst',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...{task,repoPath,runId,userId},...(hostedContext?{hostedContext}:{})})});
-      const result=await r.json().catch(()=>null);
-      if(!r.ok){
-        resetProgress();
-        if(result?.reason==='unauthorized'){
-          showUnauthorized(result.message);
-          addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
-          return;
-        }
-        if(result?.reason==='no_free_runs'){
-          showUpgrade(result.message,result.upgradeUrl);
-          addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
-          return;
-        }
-        throw new Error(result?.reason||('Data analyst flow failed: '+r.status));
-      }
-      if(!result.ok){showError(result.reason||'SQL generation failed.');addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
-      const daMode=result.decisionMode||(result.confidence>=70?'safe_to_apply':'preview_only');
-      showDecision({decision:{mode:daMode},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat])});
-      showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,fileDiffs:result.fileDiffs||[]});
-      addRecentRun({task,role:currentRole,repoPath,status:'success',timestamp:Date.now()});
-      finishProgress();
-    }else{
-      setProgress('Analyzing repository...');
-      const r1=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,repoPath,runId})});
-      if(!r1.ok)throw new Error('Analyze failed: '+r1.status);
-      const analyzeData=await r1.json();
-      setProgress('Planning changes...');
-      const hostedContext=await buildHostedDeveloperContext();
-      let fakeProgressTimer=null;
-      let fakeProgressStep=0;
-      const fakeProgressStages=['Generating patch...','Generating patch...','Validating output...'];
-      const fakeProgressDelays=[5000,20000,5000];
-      function advanceFakeProgress(){
-        if(fakeProgressStep<fakeProgressStages.length){
-          setProgress(fakeProgressStages[fakeProgressStep]);
-          fakeProgressTimer=setTimeout(advanceFakeProgress,fakeProgressDelays[fakeProgressStep]);
-          fakeProgressStep++;
-        }
-      }
-      setTimeout(advanceFakeProgress,3000);
-      const body={...{task,repoPath,runId,userId},...(hostedContext?{hostedContext}:{})};
-      console.log('[zone-ui] patch request body',body);
-      const r2=await fetch('/api/patch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      const patch=await r2.json().catch(()=>null);
-      if(!r2.ok){
-        resetProgress();
-        if(patch?.reason==='unauthorized'){
-          showUnauthorized(patch.message);
-          addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
-          return;
-        }
-        if(patch?.reason==='no_free_runs'){
-          showUpgrade(patch.message,patch.upgradeUrl);
-          addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
-          return;
-        }
-        throw new Error(patch?.reason||('Patch failed: '+r2.status));
-      }
-      if(fakeProgressTimer)clearTimeout(fakeProgressTimer);
-      if(!patch?.ok){
-        showError(patch?.reason||'Patch generation failed.');
-        addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});
-        return;
-      }
-      showDecision(analyzeData);
-      showPatch(patch);
-      addRecentRun({task,role:currentRole,repoPath,status:patch.ok===false?'error':'success',timestamp:Date.now()});
-      finishProgress();
-    }
-  }catch(e){resetProgress();addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});showError(e.message);}
-  finally{if(runStarted){currentRunState.runInProgress=false;setLoading(false);updateApplyState();void refreshBillingSummary();}}
-}
+function showDecision(data){const mode=data.decision?.mode||'safe_to_apply';const conf=data.confidence?.score??0;currentRunState.decisionMode=mode;currentRunState.validationBlocked=mode==='blocked';currentRunState.confidence=conf;const risk=data.risk?.score??0;const bd=data.risk?.breakdown||{};const cls=mode==='blocked'?'blocked':mode==='preview_only'?'preview':'safe';const dot=mode==='blocked'?'#f44747':mode==='preview_only'?'#ce9178':'#4ec9b0';document.getElementById('decisionBadge').className='decision-badge '+cls;document.getElementById('bdot').style.background=dot;document.getElementById('badgeText').textContent=mode.replace(/_/g,' ');document.getElementById('confVal').textContent=String(conf);document.getElementById('riskVal').textContent=String(risk);const d=bd.destructive||0,s=bd.schema||0,m=bd.massScope||bd.mass_scope||0;document.getElementById('rDestructive').style.width=Math.min(d,100)+'%';document.getElementById('rDestructiveVal').textContent=d;document.getElementById('rSchema').style.width=Math.min(s,100)+'%';document.getElementById('rSchemaVal').textContent=s;document.getElementById('rMass').style.width=Math.min(m,100)+'%';document.getElementById('rMassVal').textContent=m;const fb=document.getElementById('frameworkBadge');if(data.frameworkBadge){fb.textContent='🔍 '+data.frameworkBadge;fb.classList.remove('hidden');}else{fb.classList.add('hidden');}const cb=document.getElementById('complexityBadge');const cl={simple:'Simple',data_driven:'Data Driven',e2e:'E2E',negative:'Negative',multi_scenario:'Multi Scenario'};if(data.complexity&&cl[data.complexity]){cb.textContent=cl[data.complexity];cb.className='complexity-badge '+data.complexity;cb.classList.remove('hidden');}else{cb.textContent='';cb.className='complexity-badge hidden';}const fp=String(data.frameworkBadge||'').replace(/^[^A-Za-z0-9]*/,'').split(' / ');updateResultSummary({role:currentRole,status:mode,framework:currentRole==='test_engineer'?fp[0]||'':'',complexity:currentRole==='test_engineer'&&data.complexity?cl[data.complexity]:'',dialect:currentRole==='data_analyst'?fp[0]||'':'',migrationFormat:currentRole==='data_analyst'?fp[1]||'':''});document.getElementById('decisionSection').classList.remove('hidden');}
 
-function showDecision(data){
-  const mode=data.decision?.mode||'safe_to_apply';const conf=data.confidence?.score??0;
-  currentRunState.decisionMode=mode;currentRunState.validationBlocked=mode==='blocked';currentRunState.confidence=conf;
-  const risk=data.risk?.score??0;const bd=data.risk?.breakdown||{};
-  const cls=mode==='blocked'?'blocked':mode==='preview_only'?'preview':'safe';
-  const dot=mode==='blocked'?'#f44747':mode==='preview_only'?'#ce9178':'#4ec9b0';
-  document.getElementById('decisionBadge').className='decision-badge '+cls;
-  document.getElementById('bdot').style.background=dot;
-  document.getElementById('badgeText').textContent=mode.replace(/_/g,' ');
-  document.getElementById('confVal').textContent=String(conf);
-  document.getElementById('riskVal').textContent=String(risk);
-  const d=bd.destructive||0,s=bd.schema||0,m=bd.massScope||bd.mass_scope||0;
-  document.getElementById('rDestructive').style.width=Math.min(d,100)+'%';document.getElementById('rDestructiveVal').textContent=d;
-  document.getElementById('rSchema').style.width=Math.min(s,100)+'%';document.getElementById('rSchemaVal').textContent=s;
-  document.getElementById('rMass').style.width=Math.min(m,100)+'%';document.getElementById('rMassVal').textContent=m;
-  const fb=document.getElementById('frameworkBadge');
-  if(data.frameworkBadge){fb.textContent='🔍 '+data.frameworkBadge;fb.classList.remove('hidden');}else{fb.classList.add('hidden');}
-  const cb=document.getElementById('complexityBadge');
-  const cl={simple:'Simple',data_driven:'Data Driven',e2e:'E2E',negative:'Negative',multi_scenario:'Multi Scenario'};
-  if(data.complexity&&cl[data.complexity]){cb.textContent=cl[data.complexity];cb.className='complexity-badge '+data.complexity;cb.classList.remove('hidden');}else{cb.textContent='';cb.className='complexity-badge hidden';}
-  const fp=String(data.frameworkBadge||'').replace(/^[^A-Za-z0-9]*/,'').split(' / ');
-  updateResultSummary({role:currentRole,status:mode,framework:currentRole==='test_engineer'?fp[0]||'':'',complexity:currentRole==='test_engineer'&&data.complexity?cl[data.complexity]:'',dialect:currentRole==='data_analyst'?fp[0]||'':'',migrationFormat:currentRole==='data_analyst'?fp[1]||'':''});
-  document.getElementById('decisionSection').classList.remove('hidden');
-}
+function showPatch(data){if(!data.ok){showError('Patch generation failed.');return;}const warnings=data.warnings||[];const validationBlocked=Boolean(data.validationBlocked);const conflicts=[];const regularWarnings=[];for(const w of warnings){if(w.startsWith('[PATCH_CONFLICT]')){try{const json=w.replace('[PATCH_CONFLICT]','').trim();conflicts.push(JSON.parse(json));}catch{regularWarnings.push(w);}}else{regularWarnings.push(w);}}const wl=document.getElementById('warningsList');let warningsHtml='';if(regularWarnings.length>0)warningsHtml+=regularWarnings.map(w=>`<div class="warning-item">${escapeHtml(w)}</div>`).join('');if(conflicts.length>0){warningsHtml+=conflicts.map(c=>`<div class="conflict-card"><div class="conflict-header"><span class="conflict-file">✗ ${escapeHtml(c.filePath||'unknown')}</span><span class="conflict-score">score: ${c.score??'—'} / 100</span></div><div style="font-size:12px;color:#ce9178">reason: ${escapeHtml(c.reason||'low_confidence')}</div>${c.bestMatch?`<div class="conflict-best">${escapeHtml(c.bestMatch.slice(0,200))}${c.bestMatch.length>200?'\n…':''}</div>`:''}</div>`).join('');}if(warningsHtml){wl.innerHTML=warningsHtml;wl.classList.remove('hidden');}else{wl.classList.add('hidden');}const patches=data.applyPatches||[];currentPatches=patches;currentRunState.hasPatchResult=patches.length>0;currentRunState.validationBlocked=validationBlocked||currentRunState.decisionMode==='blocked';if(typeof data.developerConfidence==='number'){currentRunState.confidence=data.developerConfidence;document.getElementById('confVal').textContent=String(data.developerConfidence);}if(data.decisionMode&&(currentRole==='developer'||currentRole==='data_analyst'||currentRole==='test_engineer')){currentRunState.decisionMode=data.decisionMode;const cls=data.decisionMode==='blocked'?'blocked':data.decisionMode==='preview_only'?'preview':'safe';const dot=data.decisionMode==='blocked'?'#f44747':data.decisionMode==='preview_only'?'#ce9178':'#4ec9b0';document.getElementById('decisionBadge').className='decision-badge '+cls;document.getElementById('bdot').style.background=dot;document.getElementById('badgeText').textContent=data.decisionMode.replace(/_/g,' ');}if(data.developerRisk&&typeof data.developerRisk.score==='number'){const risk=data.developerRisk.score;const bd=data.developerRisk.breakdown||{};document.getElementById('riskVal').textContent=String(risk);const d=bd.destructive||0,s=bd.schema||0,m=bd.massScope||bd.mass_scope||0;document.getElementById('rDestructive').style.width=Math.min(d,100)+'%';document.getElementById('rDestructiveVal').textContent=d;document.getElementById('rSchema').style.width=Math.min(s,100)+'%';document.getElementById('rSchemaVal').textContent=s;document.getElementById('rMass').style.width=Math.min(m,100)+'%';document.getElementById('rMassVal').textContent=m;}const patchResults=data.patchResults||[];let patchResultsHtml='';if(patchResults.length>0){const rows=patchResults.map(r=>{const icon=r.status==='applied'?'✓':r.status==='failed'?'✗':'~';const cls=r.status==='applied'?'ok':r.status==='failed'?'fail':'skip';const reason=r.reason?` (${escapeHtml(r.reason)})`:'';return `<div class="pr-row"><span class="pr-icon ${cls}">${icon}</span><span class="pr-path">${escapeHtml(r.filePath||'')}</span><span class="pr-reason">${escapeHtml(r.status)}${reason}</span></div>`;}).join('');patchResultsHtml=`<div class="patch-results"><div class="section-title">Patch Results</div>${rows}</div>`;}const preview=data.patchPreview||'';const m=preview.match(/Summary: (.+?)(\n|$)/);document.getElementById('patchSummary').textContent=validationBlocked?`Preview available for debugging only. Apply is blocked by output validation.\n\n${m?m[1]:preview}`:(m?m[1]:preview);renderContextFiles(data.contextFiles);document.getElementById('filesVal').textContent=patches.length;updateResultSummary({role:currentRole,status:currentRunState.validationBlocked?'blocked':(currentRunState.decisionMode||currentSummaryState.status),fileCount:patches.length,warningCount:warnings.length,contextCount:Array.isArray(data.contextFiles)?data.contextFiles.filter(Boolean).length:0});document.getElementById('fileList').innerHTML=patchResultsHtml+buildPreviewDiffHtml(data)+buildFilePreviewCards(patches);document.getElementById('successBox').style.display='none';const upgradeHint=document.getElementById('resultUpgradeHint');if(currentBillingState.plan==='Free'&&!currentRunState.validationBlocked){trackEvent('upgrade_cta_shown_result',{plan:'Free',role:currentRole});upgradeHint.textContent='Generate more with Pro - 250 Hosted Runs + Unlimited BYOK';upgradeHint.classList.remove('hidden');}else{upgradeHint.textContent='';upgradeHint.classList.add('hidden');}document.getElementById('patchSection').classList.remove('hidden');updateApplyState();}
 
-function showPatch(data){
-  if(!data.ok){showError('Patch generation failed.');return;}
-  const warnings=data.warnings||[];const validationBlocked=Boolean(data.validationBlocked);
-  const conflicts=[];const regularWarnings=[];
-  for(const w of warnings){
-    if(w.startsWith('[PATCH_CONFLICT]')){try{const json=w.replace('[PATCH_CONFLICT]','').trim();conflicts.push(JSON.parse(json));}catch{regularWarnings.push(w);}}
-    else{regularWarnings.push(w);}
-  }
-  const wl=document.getElementById('warningsList');
-  let warningsHtml='';
-  if(regularWarnings.length>0)warningsHtml+=regularWarnings.map(w=>`<div class="warning-item">${escapeHtml(w)}</div>`).join('');
-  if(conflicts.length>0){
-    warningsHtml+=conflicts.map(c=>`<div class="conflict-card"><div class="conflict-header"><span class="conflict-file">✗ ${escapeHtml(c.filePath||'unknown')}</span><span class="conflict-score">score: ${c.score??'—'} / 100</span></div><div style="font-size:12px;color:#ce9178">reason: ${escapeHtml(c.reason||'low_confidence')}</div>${c.bestMatch?`<div class="conflict-best">${escapeHtml(c.bestMatch.slice(0,200))}${c.bestMatch.length>200?'\n…':''}</div>`:''}</div>`).join('');
-  }
-  if(warningsHtml){wl.innerHTML=warningsHtml;wl.classList.remove('hidden');}else{wl.classList.add('hidden');}
-  const patches=data.applyPatches||[];
-  currentPatches=patches;
-  currentRunState.hasPatchResult=patches.length>0;
-  currentRunState.validationBlocked=validationBlocked||currentRunState.decisionMode==='blocked';
+async function ensureRepoWritePermission(handle){if(!handle)return false;if(typeof handle.requestPermission==='function'){const state=await handle.requestPermission({mode:'readwrite'});return state==='granted';}return true;}
+async function getNestedFileHandle(rootHandle,filePath){const parts=String(filePath||'').split('/').filter(Boolean);if(parts.length===0)throw new Error('Invalid patch file path.');let directory=rootHandle;for(let i=0;i<parts.length-1;i+=1){directory=await directory.getDirectoryHandle(parts[i],{create:true});}return directory.getFileHandle(parts[parts.length-1],{create:true});}
+async function writePatchFilesWithHandle(rootHandle,patches){const applied=[];const failed=[];for(const patch of patches){try{const fileHandle=await getNestedFileHandle(rootHandle,patch.filePath);const writable=await fileHandle.createWritable();await writable.write(patch.fullContent||'');await writable.close();applied.push(patch.filePath);}catch(e){failed.push({filePath:patch.filePath,error:e});}}return{applied,failed};}
+function setRestoreAvailability(visible){const btn=document.getElementById('restoreBtn');if(!btn)return;if(visible)btn.classList.remove('hidden');else btn.classList.add('hidden');}
+async function readExistingFileSnapshot(rootHandle,filePath){const parts=String(filePath||'').split('/').filter(Boolean);if(parts.length===0)return{filePath,existed:false,content:''};try{let directory=rootHandle;for(let i=0;i<parts.length-1;i+=1){directory=await directory.getDirectoryHandle(parts[i]);}const fileHandle=await directory.getFileHandle(parts[parts.length-1]);const file=await fileHandle.getFile();return{filePath,existed:true,content:await file.text()};}catch{return{filePath,existed:false,content:''};}}
+async function createBackupSnapshot(rootHandle,patches){const uniquePaths=[...new Set((patches||[]).map(p=>p.filePath).filter(Boolean))];const entries=[];for(const filePath of uniquePaths){entries.push(await readExistingFileSnapshot(rootHandle,filePath));}return{folderLabel:currentRepoSelectionLabel,entries};}
+async function removeFileWithHandle(rootHandle,filePath){const parts=String(filePath||'').split('/').filter(Boolean);if(parts.length===0)return;let directory=rootHandle;for(let i=0;i<parts.length-1;i+=1){directory=await directory.getDirectoryHandle(parts[i]);}if(typeof directory.removeEntry==='function'){await directory.removeEntry(parts[parts.length-1]);return;}throw new Error(`Cannot remove ${filePath} in this browser.`);}
+async function restoreBackupSnapshot(rootHandle,snapshot){const restored=[];const failed=[];for(const entry of snapshot?.entries||[]){try{if(entry.existed){const fileHandle=await getNestedFileHandle(rootHandle,entry.filePath);const writable=await fileHandle.createWritable();await writable.write(entry.content||'');await writable.close();}else{await removeFileWithHandle(rootHandle,entry.filePath);}restored.push(entry.filePath);}catch(e){failed.push({filePath:entry.filePath,error:e});}}return{restored,failed};}
 
-  if(typeof data.developerConfidence==='number'){
-    currentRunState.confidence=data.developerConfidence;
-    document.getElementById('confVal').textContent=String(data.developerConfidence);
-  }
-
-  if(data.decisionMode&&(currentRole==='developer'||currentRole==='data_analyst'||currentRole==='test_engineer')){
-    currentRunState.decisionMode=data.decisionMode;
-    const cls=data.decisionMode==='blocked'?'blocked':data.decisionMode==='preview_only'?'preview':'safe';
-    const dot=data.decisionMode==='blocked'?'#f44747':data.decisionMode==='preview_only'?'#ce9178':'#4ec9b0';
-    document.getElementById('decisionBadge').className='decision-badge '+cls;
-    document.getElementById('bdot').style.background=dot;
-    document.getElementById('badgeText').textContent=data.decisionMode.replace(/_/g,' ');
-  }
-
-  if(data.developerRisk&&typeof data.developerRisk.score==='number'){
-    const risk=data.developerRisk.score;const bd=data.developerRisk.breakdown||{};
-    document.getElementById('riskVal').textContent=String(risk);
-    const d=bd.destructive||0,s=bd.schema||0,m=bd.massScope||bd.mass_scope||0;
-    document.getElementById('rDestructive').style.width=Math.min(d,100)+'%';document.getElementById('rDestructiveVal').textContent=d;
-    document.getElementById('rSchema').style.width=Math.min(s,100)+'%';document.getElementById('rSchemaVal').textContent=s;
-    document.getElementById('rMass').style.width=Math.min(m,100)+'%';document.getElementById('rMassVal').textContent=m;
-  }
-
-  const patchResults=data.patchResults||[];
-  let patchResultsHtml='';
-  if(patchResults.length>0){
-    const rows=patchResults.map(r=>{const icon=r.status==='applied'?'✓':r.status==='failed'?'✗':'~';const cls=r.status==='applied'?'ok':r.status==='failed'?'fail':'skip';const reason=r.reason?` (${escapeHtml(r.reason)})`:'';return `<div class="pr-row"><span class="pr-icon ${cls}">${icon}</span><span class="pr-path">${escapeHtml(r.filePath||'')}</span><span class="pr-reason">${escapeHtml(r.status)}${reason}</span></div>`;}).join('');
-    patchResultsHtml=`<div class="patch-results"><div class="section-title">Patch Results</div>${rows}</div>`;
-  }
-  const preview=data.patchPreview||'';const m=preview.match(/Summary: (.+?)(\n|$)/);
-  document.getElementById('patchSummary').textContent=validationBlocked?`Preview available for debugging only. Apply is blocked by output validation.\n\n${m?m[1]:preview}`:(m?m[1]:preview);
-  renderContextFiles(data.contextFiles);
-  document.getElementById('filesVal').textContent=patches.length;
-  updateResultSummary({role:currentRole,status:currentRunState.validationBlocked?'blocked':(currentRunState.decisionMode||currentSummaryState.status),fileCount:patches.length,warningCount:warnings.length,contextCount:Array.isArray(data.contextFiles)?data.contextFiles.filter(Boolean).length:0});
-  document.getElementById('fileList').innerHTML=patchResultsHtml+buildPreviewDiffHtml(data)+buildFilePreviewCards(patches);
-  document.getElementById('successBox').style.display='none';const upgradeHint=document.getElementById('resultUpgradeHint');if(currentBillingState.plan==='Free'&&!currentRunState.validationBlocked){trackEvent('upgrade_cta_shown_result',{plan:'Free',role:currentRole});upgradeHint.textContent='Generate more with Pro - 1000 runs/month';upgradeHint.classList.remove('hidden');}else{upgradeHint.textContent='';upgradeHint.classList.add('hidden');}
-  document.getElementById('patchSection').classList.remove('hidden');
-  updateApplyState();
-}
-
-async function ensureRepoWritePermission(handle){
-  if(!handle)return false;
-  if(typeof handle.requestPermission==='function'){const state=await handle.requestPermission({mode:'readwrite'});return state==='granted';}
-  return true;
-}
-
-async function getNestedFileHandle(rootHandle,filePath){
-  const parts=String(filePath||'').split('/').filter(Boolean);
-  if(parts.length===0)throw new Error('Invalid patch file path.');
-  let directory=rootHandle;
-  for(let i=0;i<parts.length-1;i+=1){directory=await directory.getDirectoryHandle(parts[i],{create:true});}
-  return directory.getFileHandle(parts[parts.length-1],{create:true});
-}
-
-async function writePatchFilesWithHandle(rootHandle,patches){
-  const applied=[];const failed=[];
-  for(const patch of patches){
-    try{
-      const fileHandle=await getNestedFileHandle(rootHandle,patch.filePath);
-      const writable=await fileHandle.createWritable();
-      await writable.write(patch.fullContent||'');await writable.close();
-      applied.push(patch.filePath);
-    }catch(e){failed.push({filePath:patch.filePath,error:e});}
-  }
-  return{applied,failed};
-}
-
-function setRestoreAvailability(visible){
-  const btn=document.getElementById('restoreBtn');if(!btn)return;
-  if(visible)btn.classList.remove('hidden');else btn.classList.add('hidden');
-}
-
-async function readExistingFileSnapshot(rootHandle,filePath){
-  const parts=String(filePath||'').split('/').filter(Boolean);
-  if(parts.length===0)return{filePath,existed:false,content:''};
-  try{
-    let directory=rootHandle;
-    for(let i=0;i<parts.length-1;i+=1){directory=await directory.getDirectoryHandle(parts[i]);}
-    const fileHandle=await directory.getFileHandle(parts[parts.length-1]);
-    const file=await fileHandle.getFile();
-    return{filePath,existed:true,content:await file.text()};
-  }catch{return{filePath,existed:false,content:''};}
-}
-
-async function createBackupSnapshot(rootHandle,patches){
-  const uniquePaths=[...new Set((patches||[]).map(p=>p.filePath).filter(Boolean))];
-  const entries=[];
-  for(const filePath of uniquePaths){entries.push(await readExistingFileSnapshot(rootHandle,filePath));}
-  return{folderLabel:currentRepoSelectionLabel,entries};
-}
-
-async function removeFileWithHandle(rootHandle,filePath){
-  const parts=String(filePath||'').split('/').filter(Boolean);if(parts.length===0)return;
-  let directory=rootHandle;
-  for(let i=0;i<parts.length-1;i+=1){directory=await directory.getDirectoryHandle(parts[i]);}
-  if(typeof directory.removeEntry==='function'){await directory.removeEntry(parts[parts.length-1]);return;}
-  throw new Error(`Cannot remove ${filePath} in this browser.`);
-}
-
-async function restoreBackupSnapshot(rootHandle,snapshot){
-  const restored=[];const failed=[];
-  for(const entry of snapshot?.entries||[]){
-    try{
-      if(entry.existed){
-        const fileHandle=await getNestedFileHandle(rootHandle,entry.filePath);
-        const writable=await fileHandle.createWritable();
-        await writable.write(entry.content||'');await writable.close();
-      }else{await removeFileWithHandle(rootHandle,entry.filePath);}
-      restored.push(entry.filePath);
-    }catch(e){failed.push({filePath:entry.filePath,error:e});}
-  }
-  return{restored,failed};
-}
-
-function buildApplyVerificationSummary(input){
-  const applied=Array.isArray(input?.applied)?input.applied:[];
-  const failed=Array.isArray(input?.failed)?input.failed:[];
-  const appliedSet=new Set(applied);
-  const appliedPatches=(currentPatches||[]).filter(p=>appliedSet.has(p.filePath));
-  const createdCount=appliedPatches.filter(p=>formatFileOperation(p.filePath)==='create').length;
-  const modifiedCount=Math.max(0,appliedPatches.length-createdCount);
-  const targetName=(currentRepoHandle&&currentRepoSelectionLabel?currentRepoSelectionLabel.replace(/^Folder:\s*/,''):getResolvedRepoPath())||'';
-  const folderMeta=targetName?`<div style="margin-bottom:8px;color:#9cdcfe">Target: ${escapeHtml(targetName)}</div>`:'';
-  const countLine=`<div style="margin-bottom:8px"><strong>${applied.length}</strong> file${applied.length!==1?'s':''} written · ${createdCount} created · ${modifiedCount} modified</div>`;
-  const restoreMeta=currentBackupSnapshot&&applied.length>0?'<div style="margin-bottom:8px;color:#4ec9b0">Restore is ready for this session.</div>':'';
-  const visibleFiles=applied.slice(0,5);const extraCount=Math.max(0,applied.length-visibleFiles.length);
-  const fileList=visibleFiles.length>0?`<div style="margin-bottom:8px">${visibleFiles.map(f=>`&nbsp;&nbsp;• ${escapeHtml(f)}`).join('<br>')}${extraCount>0?`<br>&nbsp;&nbsp;• +${extraCount} more`:''}</div>`:'';
-  const failedLine=failed.length>0?`<br><span style="color:#ce9178">⚠ Failed: ${failed.map(f=>escapeHtml(f.filePath||f)).join(', ')}</span>`:'';
-  return `<div style="margin-bottom:8px">Applied successfully</div>${folderMeta}${countLine}${restoreMeta}${fileList}${failedLine}`;
-}
-
-function buildApplyNeutralSummary(input){
-  const failed=Array.isArray(input?.failed)?input.failed:[];
-  const targetName=(currentRepoHandle&&currentRepoSelectionLabel?currentRepoSelectionLabel.replace(/^Folder:\s*/,''):getResolvedRepoPath())||'';
-  const folderMeta=targetName?`<div style="margin-bottom:8px;color:#9cdcfe">Target: ${escapeHtml(targetName)}</div>`:'';
-  const failedLine=failed.length>0?`<div style="margin-top:8px;color:#ce9178">Failed writes: ${failed.map(f=>escapeHtml(f.filePath||f)).join(', ')}</div>`:'';
-  return `${folderMeta}<div>No files were written</div>${failedLine}`;
-}
+function buildApplyVerificationSummary(input){const applied=Array.isArray(input?.applied)?input.applied:[];const failed=Array.isArray(input?.failed)?input.failed:[];const appliedSet=new Set(applied);const appliedPatches=(currentPatches||[]).filter(p=>appliedSet.has(p.filePath));const createdCount=appliedPatches.filter(p=>formatFileOperation(p.filePath)==='create').length;const modifiedCount=Math.max(0,appliedPatches.length-createdCount);const targetName=(currentRepoHandle&&currentRepoSelectionLabel?currentRepoSelectionLabel.replace(/^Folder:\s*/,''):getResolvedRepoPath())||'';const folderMeta=targetName?`<div style="margin-bottom:8px;color:#9cdcfe">Target: ${escapeHtml(targetName)}</div>`:'';const countLine=`<div style="margin-bottom:8px"><strong>${applied.length}</strong> file${applied.length!==1?'s':''} written · ${createdCount} created · ${modifiedCount} modified</div>`;const restoreMeta=currentBackupSnapshot&&applied.length>0?'<div style="margin-bottom:8px;color:#4ec9b0">Restore is ready for this session.</div>':'';const visibleFiles=applied.slice(0,5);const extraCount=Math.max(0,applied.length-visibleFiles.length);const fileList=visibleFiles.length>0?`<div style="margin-bottom:8px">${visibleFiles.map(f=>`&nbsp;&nbsp;• ${escapeHtml(f)}`).join('<br>')}${extraCount>0?`<br>&nbsp;&nbsp;• +${extraCount} more`:''}</div>`:'';const failedLine=failed.length>0?`<br><span style="color:#ce9178">⚠ Failed: ${failed.map(f=>escapeHtml(f.filePath||f)).join(', ')}</span>`:'';return `<div style="margin-bottom:8px">Applied successfully</div>${folderMeta}${countLine}${restoreMeta}${fileList}${failedLine}`;}
+function buildApplyNeutralSummary(input){const failed=Array.isArray(input?.failed)?input.failed:[];const targetName=(currentRepoHandle&&currentRepoSelectionLabel?currentRepoSelectionLabel.replace(/^Folder:\s*/,''):getResolvedRepoPath())||'';const folderMeta=targetName?`<div style="margin-bottom:8px;color:#9cdcfe">Target: ${escapeHtml(targetName)}</div>`:'';const failedLine=failed.length>0?`<div style="margin-top:8px;color:#ce9178">Failed writes: ${failed.map(f=>escapeHtml(f.filePath||f)).join(', ')}</div>`:'';return `${folderMeta}<div>No files were written</div>${failedLine}`;}
 
 async function applyChanges(){
-  const applyState=getApplyState();
-  if(!applyState.canApply){showError(applyState.applyBlockingReason);updateApplyState();return;}
+  const applyState=getApplyState();if(!applyState.canApply){showError(applyState.applyBlockingReason);updateApplyState();return;}
   const sp=document.getElementById('applySpinner');const t=document.getElementById('applyText');const sb=document.getElementById('successBox');
-  currentRunState.runInProgress=true;updateApplyState();
-  sp.style.display='block';t.textContent=`Writing ${currentPatches.length} file${currentPatches.length!==1?'s':''}...`;sb.style.display='none';
+  currentRunState.runInProgress=true;updateApplyState();sp.style.display='block';t.textContent=`Writing ${currentPatches.length} file${currentPatches.length!==1?'s':''}...`;sb.style.display='none';
   try{
     let res;
     if(currentRepoHandle){
-      const allowed=await ensureRepoWritePermission(currentRepoHandle);
-      if(!allowed)throw new Error('Write permission denied for the selected folder.');
+      const allowed=await ensureRepoWritePermission(currentRepoHandle);if(!allowed)throw new Error('Write permission denied for the selected folder.');
       const backupSnapshot=await createBackupSnapshot(currentRepoHandle,currentPatches);
       res=await writePatchFilesWithHandle(currentRepoHandle,currentPatches);
-      if(res.applied.length===0){currentBackupSnapshot=null;setRestoreAvailability(false);}
-      else{currentBackupSnapshot=backupSnapshot;setRestoreAvailability(true);}
+      if(res.applied.length===0){currentBackupSnapshot=null;setRestoreAvailability(false);}else{currentBackupSnapshot=backupSnapshot;setRestoreAvailability(true);}
     }else{
-      const repoPath=getResolvedRepoPath();
-      if(!repoPath)throw new Error('Enter a repo path first.');
+      const repoPath=getResolvedRepoPath();if(!repoPath)throw new Error('Enter a repo path first.');
       const response=await fetch('/api/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({patches:currentPatches,repoPath})});
       if(!response.ok)throw new Error('Apply failed: '+response.status);
-      const payload=await response.json();
-      res={applied:Array.isArray(payload.applied)?payload.applied:[],failed:Array.isArray(payload.failed)?payload.failed:[]};
-      currentBackupSnapshot=null;setRestoreAvailability(false);
+      const payload=await response.json();res={applied:Array.isArray(payload.applied)?payload.applied:[],failed:Array.isArray(payload.failed)?payload.failed:[]};currentBackupSnapshot=null;setRestoreAvailability(false);
     }
-    if(res.applied.length===0){
-      sb.innerHTML=buildApplyNeutralSummary(res);sb.style.display='block';
-      currentRunState.hasPatchResult=false;
-    }else{
-      sb.innerHTML=buildApplyVerificationSummary(res);sb.style.display='block';
-      currentRunState.hasPatchResult=false;
-    }
+    if(res.applied.length===0){sb.innerHTML=buildApplyNeutralSummary(res);sb.style.display='block';currentRunState.hasPatchResult=false;}
+    else{sb.innerHTML=buildApplyVerificationSummary(res);sb.style.display='block';currentRunState.hasPatchResult=false;}
     if(res.failed.length>0)showError('Some files could not be written: '+res.failed.map(f=>f.filePath||f).join(', '));
-  }catch(e){showError(e.message);}
-  finally{currentRunState.runInProgress=false;sp.style.display='none';t.textContent='✓  Apply Changes';updateApplyState();}
+  }catch(e){showError(e.message);}finally{currentRunState.runInProgress=false;sp.style.display='none';t.textContent='✓  Apply Changes';updateApplyState();}
 }
 
 async function restorePreviousState(){
@@ -1579,37 +1012,29 @@ async function restorePreviousState(){
   const btn=document.getElementById('restoreBtn');const sp=document.getElementById('restoreSpinner');const t=document.getElementById('restoreText');const sb=document.getElementById('successBox');
   btn.disabled=true;sp.style.display='block';t.textContent='Restoring files...';
   try{
-    const allowed=await ensureRepoWritePermission(currentRepoHandle);
-    if(!allowed)throw new Error('Write permission denied for the selected folder.');
+    const allowed=await ensureRepoWritePermission(currentRepoHandle);if(!allowed)throw new Error('Write permission denied for the selected folder.');
     const res=await restoreBackupSnapshot(currentRepoHandle,currentBackupSnapshot);
     if(res.restored.length===0)throw new Error('No files were restored.');
     sb.innerHTML=`✓ Restored previous state<br><div style="margin-bottom:8px"><strong>${res.restored.length}</strong> file${res.restored.length!==1?'s':''} restored</div><div>${res.restored.map(f=>`&nbsp;&nbsp;• ${escapeHtml(f)}`).join('<br>')}</div>${res.failed.length>0?`<br><span style="color:#ce9178">⚠ Failed: ${res.failed.map(f=>escapeHtml(f.filePath)).join(', ')}</span>`:''}`;
     sb.style.display='block';
-    if(res.failed.length===0){currentBackupSnapshot=null;setRestoreAvailability(false);}
-    else{showError('Some files could not be restored: '+res.failed.map(f=>f.filePath).join(', '));}
-  }catch(e){showError(e.message);}
-  finally{btn.disabled=false;sp.style.display='none';t.textContent='↩  Restore Previous State';}
+    if(res.failed.length===0){currentBackupSnapshot=null;setRestoreAvailability(false);}else{showError('Some files could not be restored: '+res.failed.map(f=>f.filePath).join(', '));}
+  }catch(e){showError(e.message);}finally{btn.disabled=false;sp.style.display='none';t.textContent='↩  Restore Previous State';}
 }
 
 function resetUI(){
   document.getElementById('task').value='';document.getElementById('repoPath').value='';
-  document.getElementById('decisionSection').classList.add('hidden');
-  document.getElementById('diffSection').classList.add('hidden');
-  hideError();
-  const cb=document.getElementById('complexityBadge');cb.textContent='';cb.className='complexity-badge hidden';
-  clearRepoSelection();resetRunState();
-  currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};
+  document.getElementById('decisionSection').classList.add('hidden');document.getElementById('diffSection').classList.add('hidden');
+  hideError();const cb=document.getElementById('complexityBadge');cb.textContent='';cb.className='complexity-badge hidden';
+  clearRepoSelection();resetRunState();currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};
   renderResultSummary();resetProgress();currentRepoPath='';renderHistory();updateApplyState();
 }
 
-renderHistory();renderRecentRuns();const _lastPath=getHistory()[0];if(_lastPath){const _inp=document.getElementById('repoPath');if(_inp&&!_inp.value.trim())_inp.value=_lastPath;renderRepoSelection();}
-currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};
-renderResultSummary();
-updateApplyState();
-renderRepoSelection();
-void initPosthog();
-void refreshBillingSummary();
+renderHistory();renderRecentRuns();
+const _lastPath=getHistory()[0];if(_lastPath){const _inp=document.getElementById('repoPath');if(_inp&&!_inp.value.trim())_inp.value=_lastPath;renderRepoSelection();}
+currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};renderResultSummary();updateApplyState();renderRepoSelection();
+void initPosthog();void refreshBillingSummary();initQuickActions();
 </script>
+
 <div id="userIdBadge" class="user-id-badge hidden">
   <span id="userIdText"></span>
   <button type="button" id="copyUserIdBtn" class="copy-user-id-btn" onclick="copyUserId()">Copy</button>
@@ -1637,185 +1062,100 @@ void refreshBillingSummary();
     </form>
   </div>
 </div>
+
 <script>
 function syncFeedbackUserUi(){
   const userId=window.currentUser?.id||'';
-  const badge=document.getElementById('userIdBadge');
-  const text=document.getElementById('userIdText');
-  const input=document.getElementById('feedbackUserId');
-  const hidden=document.getElementById('feedbackUserIdHidden');
+  const badge=document.getElementById('userIdBadge');const text=document.getElementById('userIdText');
+  const input=document.getElementById('feedbackUserId');const hidden=document.getElementById('feedbackUserIdHidden');
   if(text)text.textContent=userId?`ID: ${userId}`:'';
-  if(input)input.value=userId;
-  if(hidden)hidden.value=userId;
-  if(badge){
-    if(userId)badge.classList.remove('hidden');
-    else badge.classList.add('hidden');
-  }
+  if(input)input.value=userId;if(hidden)hidden.value=userId;
+  if(badge){if(userId)badge.classList.remove('hidden');else badge.classList.add('hidden');}
 }
-
 function syncAccountBar(){
-  const bar=document.getElementById('accountBar');
-  const text=document.getElementById('accountBarUser');
-  const user=window.currentUser||null;
-  if(!bar||!text)return;
-  if(!user){
-    bar.classList.add('hidden');
-    text.textContent='';
-    return;
-  }
+  const bar=document.getElementById('accountBar');const text=document.getElementById('accountBarUser');const user=window.currentUser||null;
+  if(!bar||!text)return;if(!user){bar.classList.add('hidden');text.textContent='';return;}
   const primaryLabel=user.firstName||user.email||user.id||'Signed in';
-  text.textContent=`Signed in as ${primaryLabel}`;
-  bar.classList.remove('hidden');
+  text.textContent=`Signed in as ${primaryLabel}`;bar.classList.remove('hidden');
 }
-
 async function signOutUser(){
-  const btn=document.getElementById('signOutBtn');
-  if(btn)btn.disabled=true;
-  try{
-    await fetch('/api/sign-out',{method:'POST'});
-  }catch(_){}
-  window.location.href='/sign-in';
+  const btn=document.getElementById('signOutBtn');if(btn)btn.disabled=true;
+  try{await fetch('/api/sign-out',{method:'POST'});}catch(_){}
+  window.top.location.href='/sign-in';
 }
-
 function openFeedbackModal(){
-  syncFeedbackUserUi();
-  const backdrop=document.getElementById('feedbackModalBackdrop');
+  syncFeedbackUserUi();const backdrop=document.getElementById('feedbackModalBackdrop');
   if(backdrop)backdrop.classList.remove('hidden');
   const textarea=document.getElementById('feedbackMessage');
   if(textarea&&typeof textarea.focus==='function')setTimeout(()=>textarea.focus(),0);
 }
-
 function closeFeedbackModal(){
-  const backdrop=document.getElementById('feedbackModalBackdrop');
-  if(backdrop)backdrop.classList.add('hidden');
-  const status=document.getElementById('feedbackStatus');
-  if(status){
-    status.textContent='';
-    status.className='feedback-status';
-  }
+  const backdrop=document.getElementById('feedbackModalBackdrop');if(backdrop)backdrop.classList.add('hidden');
+  const status=document.getElementById('feedbackStatus');if(status){status.textContent='';status.className='feedback-status';}
 }
-
 function copyUserId(){
-  const userId=window.currentUser?.id||'';
-  if(!userId)return;
-  navigator.clipboard.writeText(userId);
-  const btn=document.getElementById('copyUserIdBtn');
-  if(btn){
-    const original=btn.textContent;
-    btn.textContent='Copied!';
-    setTimeout(()=>{btn.textContent=original||'Copy';},1500);
-  }
+  const userId=window.currentUser?.id||'';if(!userId)return;
+  navigator.clipboard.writeText(userId);const btn=document.getElementById('copyUserIdBtn');
+  if(btn){const original=btn.textContent;btn.textContent='Copied!';setTimeout(()=>{btn.textContent=original||'Copy';},1500);}
 }
-
 async function restoreStoredFolderHandleOnLoad(){
   if(!isHostedExecution())return;
   const storedHandle=await loadStoredFolderHandle();
   if(!storedHandle||storedHandle.kind!=='directory'||typeof storedHandle.values!=='function')return;
   currentRepoHandle=storedHandle;
   currentRepoSelectionLabel=`Folder: ${storedHandle.name||'Selected folder'}`;
-  currentRepoHandlePermission='prompt';
+  currentGitBranch='';currentRepoHandlePermission='prompt';
   const inp=document.getElementById('repoPath');
   if(inp&&!inp.value.trim()&&storedHandle.name)inp.value=storedHandle.name;
-  renderRepoSelection();
+  renderRepoSelection();await readGitBranchFromHandle(storedHandle);
 }
-
 async function submitFeedback(event){
-  event.preventDefault();
-  const userId=window.currentUser?.id||'';
-  const messageField=document.getElementById('feedbackMessage');
-  const status=document.getElementById('feedbackStatus');
-  const submitBtn=document.getElementById('feedbackSubmitBtn');
-  const message=messageField?.value?.trim()||'';
-  if(!message)return;
-  if(status){
-    status.textContent='';
-    status.className='feedback-status';
-  }
-  if(submitBtn)submitBtn.disabled=true;
+  event.preventDefault();const userId=window.currentUser?.id||'';
+  const messageField=document.getElementById('feedbackMessage');const status=document.getElementById('feedbackStatus');
+  const submitBtn=document.getElementById('feedbackSubmitBtn');const message=messageField?.value?.trim()||'';
+  if(!message)return;if(status){status.textContent='';status.className='feedback-status';}if(submitBtn)submitBtn.disabled=true;
   try{
-    const response=await fetch('https://formspree.io/f/mzdkkzgr',{
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'Accept':'application/json',
-      },
-      body:JSON.stringify({userId,message}),
-    });
+    const response=await fetch('https://formspree.io/f/mzdkkzgr',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({userId,message})});
     if(!response.ok)throw new Error('Feedback request failed.');
-    if(status){
-      status.textContent='Thanks for your feedback!';
-      status.className='feedback-status success';
-    }
-    if(messageField)messageField.value='';
-    setTimeout(()=>closeFeedbackModal(),2000);
-  }catch(_){
-    if(status){
-      status.textContent='Something went wrong. Please try again.';
-      status.className='feedback-status error';
-    }
-  }finally{
-    if(submitBtn)submitBtn.disabled=false;
-  }
+    if(status){status.textContent='Thanks for your feedback!';status.className='feedback-status success';}
+    if(messageField)messageField.value='';setTimeout(()=>closeFeedbackModal(),2000);
+  }catch(_){if(status){status.textContent='Something went wrong. Please try again.';status.className='feedback-status error';}}
+  finally{if(submitBtn)submitBtn.disabled=false;}
 }
+document.getElementById('feedbackModalBackdrop')?.addEventListener('click',event=>{if(event.target?.id==='feedbackModalBackdrop')closeFeedbackModal();});
 
-document.getElementById('feedbackModalBackdrop')?.addEventListener('click',event=>{
-  if(event.target?.id==='feedbackModalBackdrop')closeFeedbackModal();
-});
+initializeInferenceMode();syncFeedbackUserUi();syncAccountBar();void restoreStoredFolderHandleOnLoad();
 
-syncFeedbackUserUi();
-syncAccountBar();
-void restoreStoredFolderHandleOnLoad();
 window.addEventListener('message', function(event) {
-  if (
-    event.data?.source === 'zone-vscode-extension' &&
-    event.data?.type === 'workspacePath' &&
-    event.data?.path
-  ) {
+  if (event.data?.source === 'zone-vscode-extension' && event.data?.type === 'workspacePath' && event.data?.path) {
+    hasReceivedVsCodeWorkspacePath=true;
     const inp = document.getElementById('repoPath');
     if (inp) {
       inp.value = event.data.path;
-      syncRepoSelectionDisplay();
-      setLoading(false);
-      setDryRunLoading(false);
-      updateApplyState();
+      const pathParts = event.data.path.replace(/\\/g, '/').split('/');
+      currentRepoSelectionLabel = 'VS Code: ' + (pathParts[pathParts.length - 1] || event.data.path);
+      syncRepoSelectionDisplay();setLoading(false);setDryRunLoading(false);updateApplyState();
       console.log('[zone-ui] workspace path from VS Code:', event.data.path);
+      requestActiveBranchFromVsCode();
     }
+  }
+  if(event.data?.type==='activeBranchResult'){
+    if(event.data?.branch){currentGitBranch=event.data.branch;renderRepoSelection();}
+  }
+  if(event.data?.type==='checkoutResult'){
+    if(event.data?.success){currentGitBranch=event.data.branch||currentGitBranch;renderRepoSelection();console.log('[zone-ui] Branch checkout succeeded:',currentGitBranch);}
+    else{showError(event.data?.error||'Branch checkout failed.');}
   }
 });
 
-function sendUserInfoToVSCode() {
-  const user = window.currentUser;
-  if (user && window.parent !== window) {
-    window.parent.postMessage({
-      source: 'zone-ui',
-      type: 'userInfo',
-      user: {
-        firstName: user.firstName || '',
-        email: user.email || ''
-      }
-    }, '*');
-  }
+function sendUserInfoToVSCode(){
+  const user=window.currentUser;
+  if(user&&window.parent!==window){window.parent.postMessage({source:'zone-ui',type:'userInfo',user:{firstName:user.firstName||'',email:user.email||''}},'*');}
 }
-
-setTimeout(sendUserInfoToVSCode, 1000);
-
-setInterval(async () => {
-  try {
-    const response = await fetch('/api/check-auth', { credentials: 'include' });
-    if (response.status === 401) {
-      showUnauthorized('Your session has expired. Please sign in again.');
-      setLoading(true);
-    }
-  } catch (_) {}
-}, 60000);
+setTimeout(()=>{if(window.parent!==window){window.parent.postMessage({type:'getActiveBranch'},'*');}},300);
+setInterval(async()=>{
+  try{const response=await fetch('/api/check-auth',{credentials:'include'});if(response.status===401){showUnauthorized('Your session has expired. Please sign in again.');setLoading(true);}}catch(_){}
+},60000);
 </script>
 </body>
 </html>
-
-
-
-
-
-
-
-

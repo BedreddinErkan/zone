@@ -1,6 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.computeRiskScoreDetails = computeRiskScoreDetails;
+function logRiskDebug(label, payload) {
+    console.log(`[zone-debug] ${label}: ${JSON.stringify(payload)}`);
+}
 function clampScore(value) {
     if (value < 0)
         return 0;
@@ -10,6 +13,32 @@ function clampScore(value) {
 }
 function includesAny(text, keywords) {
     return keywords.some((keyword) => text.includes(keyword));
+}
+function hasContextualSoftDestructiveSignal(text) {
+    const softDestructiveKeywords = ["clear", "reset", "clean"];
+    const destructiveObjectKeywords = [
+        "cache",
+        "session",
+        "sessions",
+        "token",
+        "tokens",
+        "database",
+        "db",
+        "table",
+        "tables",
+        "record",
+        "records",
+        "row",
+        "rows",
+        "data",
+        "user",
+        "users",
+        "storage",
+        "queue",
+        "queues",
+    ];
+    return (includesAny(text, softDestructiveKeywords) &&
+        includesAny(text, destructiveObjectKeywords));
 }
 function scoreWeightedKeywordMatches(text, weightedKeywords) {
     let maxWeight = 0;
@@ -29,7 +58,7 @@ function isSchemaKeywordPrecededByTestOrMock(text, keyword) {
 }
 function computeRiskScoreDetails(input) {
     const normalizedTask = input.task.trim().toLowerCase();
-    const destructiveWeight = scoreWeightedKeywordMatches(normalizedTask, [
+    const destructiveWeight = Math.max(scoreWeightedKeywordMatches(normalizedTask, [
         {
             keywords: ["truncate", "drop table", "delete all", "wipe", "purge"],
             weight: 1.0,
@@ -38,11 +67,7 @@ function computeRiskScoreDetails(input) {
             keywords: ["delete", "remove", "destroy", "drop"],
             weight: 0.7,
         },
-        {
-            keywords: ["clear", "reset", "clean"],
-            weight: 0.4,
-        },
-    ]);
+    ]), hasContextualSoftDestructiveSignal(normalizedTask) ? 0.4 : 0);
     const schemaHighWeightKeywords = [
         "migration",
         "migrate",
@@ -72,8 +97,12 @@ function computeRiskScoreDetails(input) {
         "permissions",
         "security",
         "jwt",
-        "token",
-        "production"
+        "access token",
+        "refresh token",
+        "api key",
+        "secret key",
+        "production",
+        "prod env",
     ]);
     const hasLowRiskSignal = includesAny(normalizedTask, [
         "copy",
@@ -81,7 +110,19 @@ function computeRiskScoreDetails(input) {
         "rename",
         "comment",
         "docs",
-        "readme"
+        "readme",
+        "typo",
+        "spacing",
+        "padding",
+        "margin",
+        "label",
+        "placeholder",
+        "wording",
+        "alignment",
+        "align",
+        "font size",
+        "color tweak",
+        "ui polish",
     ]);
     const hasDestructiveSignal = destructiveWeight > 0;
     const hasSchemaSignal = highWeightSchemaScore > 0 || reducedSchemaScore > 0;
@@ -92,11 +133,15 @@ function computeRiskScoreDetails(input) {
         "whole"
     ]);
     const hasMassScopeSignal = hasDestructiveSignal && hasScopeWord;
+    const codeIntentLowRiskBonus = input.codeIntent === "test_add" ? -15 :
+        input.codeIntent === "micro_edit" ? -10 :
+            input.codeIntent === "config_change" && !hasCriticalSignal ? 10 :
+                0;
     const riskBreakdown = {
         destructive: Math.round(50 * destructiveWeight),
         schema: Math.max(highWeightSchemaScore, Math.round(reducedSchemaScore)),
         critical: hasCriticalSignal ? 20 : 0,
-        lowRisk: hasLowRiskSignal ? -20 : 0,
+        lowRisk: (hasLowRiskSignal ? -20 : 0) + codeIntentLowRiskBonus,
         massScope: hasMassScopeSignal ? 40 : 0
     };
     let compoundPenalty = 0;
@@ -135,6 +180,20 @@ function computeRiskScoreDetails(input) {
     if (hasMassScopeSignal) {
         detectedSignals.push("mass_scope");
     }
+    logRiskDebug("computeRiskScoreDetails result", {
+        task: input.task,
+        normalizedTask,
+        destructiveWeight,
+        hasCriticalSignal,
+        hasLowRiskSignal,
+        hasSchemaSignal,
+        hasScopeWord,
+        hasMassScopeSignal,
+        riskBreakdown,
+        detectedSignals,
+        compoundPenalty,
+        riskScore,
+    });
     return {
         riskScore,
         riskBreakdown,

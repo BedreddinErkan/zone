@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.app = void 0;
 exports.startServer = startServer;
+const node_crypto_1 = __importDefault(require("node:crypto"));
 require("dotenv/config");
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
@@ -28,12 +29,14 @@ const detectProjectStructure_js_1 = require("../repo/detectProjectStructure.js")
 const rankRelevantFiles_js_1 = require("../repo/rankRelevantFiles.js");
 const readProjectFiles_js_1 = require("../repo/readProjectFiles.js");
 const openaiClient_js_1 = require("../llm/openaiClient.js");
+const resolveBillingAction_js_1 = require("../billing/resolveBillingAction.js");
 const colors_js_1 = require("../cli/colors.js");
 const validateLlmOutput_js_1 = require("../core/validateLlmOutput.js");
 const lemonsqueezyWebhook_js_1 = __importDefault(require("../routes/lemonsqueezyWebhook.js"));
 const createLemonCheckout_js_1 = __importDefault(require("../routes/createLemonCheckout.js"));
 const getLemonCustomerPortal_js_1 = __importDefault(require("../routes/getLemonCustomerPortal.js"));
 const runLogging_js_1 = require("./runLogging.js");
+const zoneApiPerf_js_1 = require("./zoneApiPerf.js");
 const developerPatchJobs_js_1 = require("../jobs/developerPatchJobs.js");
 exports.app = (0, express_1.default)();
 const port = Number(process.env.PORT) || 3000;
@@ -333,11 +336,40 @@ async function buildHostedDataAnalystContext(task, repoPath) {
 }
 async function handleCheckAccess(req, res) {
     const userId = typeof req.query.userId === "string" ? req.query.userId : "";
-    const authorization = await ensureRunAuthorized(userId, isTruthyByok(req.query.isByok));
+    const conversationId = typeof req.query.conversationId === "string" ? req.query.conversationId : "";
+    const billingMode = typeof req.query.billingMode === "string" ? req.query.billingMode : undefined;
+    const repoPath = typeof req.query.repoPath === "string" ? req.query.repoPath : undefined;
+    const role = typeof req.query.role === "string" ? req.query.role : undefined;
+    console.log("[zone-billing-debug] preflight check start", {
+        routeName: "/api/check-access",
+        userId: userId || null,
+        billingMode: billingMode ?? null,
+        isByok: isTruthyByok(req.query.isByok),
+        repoPath: repoPath ?? null,
+        role: role ?? null,
+    });
+    const authorization = await ensureRunAuthorized(userId, isTruthyByok(req.query.isByok), {
+        conversationId,
+        billingMode,
+        repoPath,
+        role,
+    });
     if (authorization.allowed) {
+        console.log("[zone-billing-debug] preflight check allowed", {
+            routeName: "/api/check-access",
+            userId: userId || null,
+            billingMode: billingMode ?? null,
+        });
         res.json({ ok: true });
         return;
     }
+    console.log("[zone-billing-debug] preflight check blocked", {
+        routeName: "/api/check-access",
+        userId: userId || null,
+        billingMode: billingMode ?? null,
+        status: authorization.status,
+        reason: authorization.body.reason,
+    });
     res.status(authorization.status).json(authorization.body);
 }
 async function handleBillingSummary(req, res) {
@@ -363,7 +395,8 @@ async function handleBillingSummary(req, res) {
     }
     try {
         const { data, error } = await query.maybeSingle();
-        console.log(`[zone] billing-summary: supabase result=${JSON.stringify({
+        console.log("[zone-billing-summary-debug] raw profile row", {
+            userId,
             data,
             error: error && typeof error === "object"
                 ? {
@@ -381,7 +414,7 @@ async function handleBillingSummary(req, res) {
                         : undefined,
                 }
                 : error,
-        })}`);
+        });
         if (error || !data) {
             res.json({ ok: false, reason: "profile_unavailable" });
             return;
@@ -396,16 +429,25 @@ async function handleBillingSummary(req, res) {
             ? data.free_limit
             : Number(data.free_limit ?? FREE_PLAN_RUN_LIMIT);
         const status = normalizeSubscriptionStatus(data.subscription_status) || "free";
-        const remainingRuns = hasPaidAccess(status)
+        const legacyDerivedRemaining = hasPaidAccess(status)
             ? Math.max(0, PRO_PLAN_RUN_LIMIT - (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0))
             : Math.max(0, (Number.isFinite(freeLimit) ? freeLimit : FREE_PLAN_RUN_LIMIT) -
                 (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0));
-        res.json({
+        const responsePayload = {
             ok: true,
             plan: hasPaidAccess(status) ? "Pro" : "Free",
-            credits: remainingRuns,
+            credits: Number.isFinite(credits) ? Math.max(0, credits) : 0,
             subscriptionStatus: status,
+        };
+        console.log("[zone-billing-summary-debug] resolved credits", {
+            userId,
+            credits,
+            legacyDerivedRemaining,
+            runsUsedThisMonth,
+            freeLimit,
         });
+        console.log("[zone-billing-summary-debug] final response payload", responsePayload);
+        res.json(responsePayload);
     }
     catch {
         res.json({ ok: false, reason: "profile_unavailable" });
@@ -451,7 +493,58 @@ function isTruthyByok(value) {
     }
     return false;
 }
-async function ensureRunAuthorized(rawUserId, isByok = false) {
+// ── DAILY RUN LIMITER (in-memory, resets on server restart) ──
+const DAILY_RUN_LIMIT = 30;
+const dailyRunCounts = new Map();
+function checkDailyRunLimit(userId) {
+    const today = new Date().toISOString().slice(0, 10); // "2026-04-16"
+    const entry = dailyRunCounts.get(userId);
+    if (!entry || entry.date !== today) {
+        dailyRunCounts.set(userId, { date: today, count: 1 });
+        return true;
+    }
+    if (entry.count >= DAILY_RUN_LIMIT)
+        return false;
+    entry.count++;
+    return true;
+}
+// ── DESKTOP DEVICE CODE AUTH ────────────────────────────────
+const DESKTOP_TOKEN_SECRET = (process.env.ZONE_DESKTOP_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || "zone-desktop-fallback").trim();
+const DESKTOP_TOKEN_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const deviceCodes = new Map();
+function generateDesktopToken(userId) {
+    const expiry = Date.now() + DESKTOP_TOKEN_EXPIRY_MS;
+    const payload = `${userId}:${expiry}`;
+    const hmac = node_crypto_1.default.createHmac("sha256", DESKTOP_TOKEN_SECRET).update(payload).digest("base64url");
+    return Buffer.from(payload).toString("base64url") + "." + hmac;
+}
+function verifyDesktopToken(token) {
+    try {
+        const [payloadB64, hmac] = token.split(".");
+        if (!payloadB64 || !hmac)
+            return null;
+        const payload = Buffer.from(payloadB64, "base64url").toString("utf8");
+        const expectedHmac = node_crypto_1.default.createHmac("sha256", DESKTOP_TOKEN_SECRET).update(payload).digest("base64url");
+        if (hmac !== expectedHmac)
+            return null;
+        const [userId, expiryStr] = payload.split(":");
+        if (!userId || Number(expiryStr) < Date.now())
+            return null;
+        return userId;
+    }
+    catch {
+        return null;
+    }
+}
+// Cleanup expired codes every 5 min
+setInterval(() => {
+    const now = Date.now();
+    for (const [code, data] of deviceCodes) {
+        if (now - data.createdAt > 10 * 60 * 1000)
+            deviceCodes.delete(code);
+    }
+}, 5 * 60 * 1000);
+async function ensureRunAuthorized(rawUserId, isByok = false, options) {
     const authenticatedUserId = typeof rawUserId === "string" ? rawUserId.trim() : "";
     if (!authenticatedUserId) {
         return {
@@ -468,12 +561,17 @@ async function ensureRunAuthorized(rawUserId, isByok = false) {
     if (!supabase) {
         return { allowed: true };
     }
+    const resolvedBillingMode = options?.billingMode === "hosted" || options?.billingMode === "byok"
+        ? options.billingMode
+        : isByok
+            ? "byok"
+            : "hosted";
     const profilesTable = supabase.from("profiles");
     if (typeof profilesTable.select !== "function") {
         return { allowed: true };
     }
     const query = profilesTable
-        .select("runs_used_this_month,free_limit,subscription_status")
+        .select("credits,runs_used_this_month,free_limit,subscription_status")
         ?.eq?.("clerk_user_id", authenticatedUserId);
     if (!query || typeof query.maybeSingle !== "function") {
         return { allowed: true };
@@ -501,10 +599,31 @@ async function ensureRunAuthorized(rawUserId, isByok = false) {
             ? data.free_limit
             : Number(data.free_limit ?? FREE_PLAN_RUN_LIMIT);
         const subscriptionStatus = normalizeSubscriptionStatus(data.subscription_status);
-        if (hasPaidAccess(subscriptionStatus)) {
-            if (isByok) {
-                return { allowed: true };
-            }
+        const paidAccess = hasPaidAccess(subscriptionStatus);
+        const billingAction = (0, resolveBillingAction_js_1.resolveBillingAction)({
+            mode: resolvedBillingMode,
+            hasPaidAccess: paidAccess,
+        });
+        console.log("[zone-billing-debug] authorization resolved", {
+            routeName: "ensureRunAuthorized",
+            userId: authenticatedUserId,
+            billingMode: resolvedBillingMode,
+            subscriptionStatus,
+            hasPaidAccess: paidAccess,
+            billingAction,
+            runsUsedThisMonth,
+            freeLimit,
+        });
+        const credits = typeof data.credits === "number"
+            ? data.credits
+            : Number(data.credits ?? -1);
+        if (Number.isFinite(credits) && credits > 0) {
+            return { allowed: true };
+        }
+        if (billingAction === "FREE") {
+            return { allowed: true };
+        }
+        if (paidAccess) {
             if ((Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0) >=
                 PRO_PLAN_RUN_LIMIT) {
                 return {
@@ -514,6 +633,17 @@ async function ensureRunAuthorized(rawUserId, isByok = false) {
                         ok: false,
                         reason: "no_free_runs",
                         message: "You've used all 250 monthly runs. Resets next month.",
+                    },
+                };
+            }
+            if (!checkDailyRunLimit(authenticatedUserId)) {
+                return {
+                    allowed: false,
+                    status: 429,
+                    body: {
+                        ok: false,
+                        reason: "no_free_runs",
+                        message: `Daily limit reached (${DAILY_RUN_LIMIT} runs/day). Try again tomorrow.`,
                     },
                 };
             }
@@ -561,6 +691,8 @@ async function createDeveloperPatchJobPayload(input) {
         task: input.task,
         repoPath: input.repoPath,
         userId: input.userId,
+        conversationId: input.conversationId,
+        billingMode: input.billingMode,
         hostedContext,
         userOpenAiKey: input.userOpenAiKey,
         isByok: input.isByok,
@@ -647,6 +779,150 @@ exports.app.get("/api/progress", (req, res) => {
         }
     });
 });
+// ── Desktop Auth Routes ──
+exports.app.post("/api/desktop-auth/start", (_req, res) => {
+    const code = node_crypto_1.default.randomBytes(3).toString("hex").toUpperCase(); // 6 char: "A1B2C3"
+    deviceCodes.set(code, { createdAt: Date.now() });
+    res.json({ ok: true, code, expiresIn: 600 });
+});
+exports.app.get("/api/desktop-auth/poll", (req, res) => {
+    const code = String(req.query.code || "").trim().toUpperCase();
+    const entry = deviceCodes.get(code);
+    if (!entry) {
+        res.json({ ok: false, status: "expired" });
+        return;
+    }
+    if (Date.now() - entry.createdAt > 10 * 60 * 1000) {
+        deviceCodes.delete(code);
+        res.json({ ok: false, status: "expired" });
+        return;
+    }
+    if (!entry.userId) {
+        res.json({ ok: false, status: "pending" });
+        return;
+    }
+    const token = generateDesktopToken(entry.userId);
+    deviceCodes.delete(code);
+    res.json({ ok: true, status: "complete", token, userId: entry.userId });
+});
+exports.app.post("/api/desktop-auth/complete", (req, res) => {
+    const code = String(req.body?.code || "").trim().toUpperCase();
+    const userId = String(req.body?.userId || "").trim();
+    if (!code || !userId) {
+        res.status(400).json({ ok: false, reason: "missing_code_or_user" });
+        return;
+    }
+    const entry = deviceCodes.get(code);
+    if (!entry) {
+        res.status(404).json({ ok: false, reason: "code_expired" });
+        return;
+    }
+    entry.userId = userId;
+    res.json({ ok: true });
+});
+exports.app.get("/desktop-auth", (_req, res) => {
+    res.type("html").send(renderDesktopAuthPage());
+});
+function renderDesktopAuthPage() {
+    const clerkPubKey = process.env.CLERK_PUBLISHABLE_KEY || "";
+    return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Zone Desktop — Sign In</title>
+<script
+  async
+  crossorigin="anonymous"
+  data-clerk-publishable-key="${clerkPubKey}"
+  src="https://good-rattler-59.clerk.accounts.dev/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
+  type="text/javascript"
+></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0e0e0e;color:#d4d4d4;font-family:'Courier New',monospace;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.card{background:#111;border:1px solid #1e1e1e;border-radius:16px;padding:32px;max-width:460px;width:100%;text-align:center}
+h1{font-size:20px;color:#fff;margin-bottom:8px}
+.sub{font-size:13px;color:#737373;margin-bottom:24px;line-height:1.6}
+.code-display{font-size:28px;font-weight:700;letter-spacing:.25em;color:#4ec9b0;background:#0e0e0e;border:2px dashed #1d6b3a;border-radius:12px;padding:16px;margin-bottom:20px}
+.status{font-size:14px;color:#9cdcfe;margin-bottom:16px;min-height:24px}
+.status.error{color:#f44747}
+.status.success{color:#4ec9b0}
+#clerk-mount{min-height:40px;margin-bottom:16px}
+.step{font-size:12px;color:#555;margin-top:16px;line-height:1.6}
+</style>
+</head><body>
+<div class="card">
+<h1>⚡ Zone Desktop</h1>
+<div class="sub">Sign in to connect your desktop app</div>
+<div class="code-display" id="codeDisplay">------</div>
+<div id="clerk-mount"></div>
+<div class="status" id="statusText">Loading sign-in...</div>
+<div class="step">This window can be closed after your desktop app shows "Signed in".</div>
+</div>
+<script>
+const params = new URLSearchParams(window.location.search);
+const code = (params.get('code') || '').toUpperCase();
+document.getElementById('codeDisplay').textContent = code || '------';
+const statusEl = document.getElementById('statusText');
+
+async function completeAuth(userId) {
+  statusEl.textContent = 'Linking account...';
+  statusEl.className = 'status';
+  try {
+    const r = await fetch('/api/desktop-auth/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, userId })
+    });
+    const data = await r.json();
+    if (data.ok) {
+      statusEl.textContent = '✓ Desktop app connected! You can close this window.';
+      statusEl.className = 'status success';
+    } else {
+      statusEl.textContent = 'Code expired. Please try again from the desktop app.';
+      statusEl.className = 'status error';
+    }
+  } catch {
+    statusEl.textContent = 'Connection failed. Please try again.';
+    statusEl.className = 'status error';
+  }
+}
+
+async function waitForClerk() {
+  for (let i = 0; i < 50; i++) {
+    if (window.Clerk && window.Clerk.load) return window.Clerk;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  throw new Error('Clerk failed to load');
+}
+
+(async function init() {
+  if (!code) {
+    statusEl.textContent = 'Missing code parameter';
+    statusEl.className = 'status error';
+    return;
+  }
+  try {
+    const clerk = await waitForClerk();
+    await clerk.load();
+
+    if (clerk.user) {
+      await completeAuth(clerk.user.id);
+      return;
+    }
+
+    statusEl.textContent = 'Please sign in below';
+    clerk.mountSignIn(document.getElementById('clerk-mount'));
+
+    clerk.addListener(({ user }) => {
+      if (user) completeAuth(user.id);
+    });
+  } catch (e) {
+    statusEl.textContent = 'Error: ' + e.message;
+    statusEl.className = 'status error';
+  }
+})();
+</script>
+</body></html>`;
+}
 exports.app.get("/api/check-access", async (req, res) => {
     if (shouldProxyHostedRequest(req, "/api/check-access")) {
         await proxyHostedZoneRequest(req, res, "/api/check-access", {
@@ -703,12 +979,14 @@ exports.app.post("/api/analyze", async (req, res) => {
 exports.app.post("/api/patch/jobs", async (req, res) => {
     const userOpenAiKey = req.headers["x-user-openai-key"];
     const isByok = Boolean(userOpenAiKey);
-    const { task, repoPath, userId, hostedContext } = req.body ?? {};
+    const { task, repoPath, userId, hostedContext, conversationId, billingMode } = req.body ?? {};
     if (!task || !repoPath) {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;
     }
-    const authorization = await ensureRunAuthorized(userId, isByok);
+    const authorization = await ensureRunAuthorized(userId, isByok, {
+        billingMode,
+    });
     if (!authorization.allowed) {
         res.status(authorization.status).json(authorization.body);
         return;
@@ -723,6 +1001,8 @@ exports.app.post("/api/patch/jobs", async (req, res) => {
             task,
             repoPath,
             userId,
+            conversationId,
+            billingMode,
             hostedContext,
             userOpenAiKey,
             isByok,
@@ -815,6 +1095,8 @@ exports.app.get("/api/patch/jobs/:runId/result", async (req, res) => {
     }
 });
 exports.app.post("/api/patch", async (req, res) => {
+    const perf = (0, zoneApiPerf_js_1.startZoneApiPerfRun)("/api/patch");
+    perf.mark("route entered");
     const userOpenAiKey = req.headers["x-user-openai-key"];
     const isByok = Boolean(userOpenAiKey);
     if (shouldProxyHostedRequest(req, "/api/patch")) {
@@ -823,6 +1105,7 @@ exports.app.post("/api/patch", async (req, res) => {
             (typeof task === "string" && typeof repoPath === "string"
                 ? await buildHostedDeveloperContext(task, repoPath)
                 : undefined);
+        perf.mark("hosted context ready");
         await proxyHostedZoneRequest(req, res, "/api/patch", {
             bodyOverride: hostedContext
                 ? {
@@ -831,25 +1114,41 @@ exports.app.post("/api/patch", async (req, res) => {
                 }
                 : req.body,
         });
+        perf.finish("proxied response sent");
         return;
     }
-    const { task, repoPath, userId, hostedContext } = req.body;
+    const { task, repoPath, userId, hostedContext, conversationId, billingMode } = req.body;
+    perf.mark("request normalized");
     if (!task || !repoPath) {
+        perf.finish("bad request");
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;
     }
-    const authorization = await ensureRunAuthorized(userId, isByok);
+    const authorization = await ensureRunAuthorized(userId, isByok, {
+        billingMode,
+    });
+    perf.mark("authorization complete");
     if (!authorization.allowed) {
+        perf.finish("authorization blocked");
         res.status(authorization.status).json(authorization.body);
         return;
     }
-    const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({ task, repoPath, hostedContext, userOpenAiKey });
+    const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({
+        task,
+        repoPath,
+        hostedContext,
+        userOpenAiKey,
+        perfLabel: "/api/patch core",
+    });
+    perf.mark("core patch flow complete");
     if (result.ok && result.applyPatches.length > 0) {
         const validation = (0, validateLlmOutput_js_1.validateLlmOutput)("developer", result.applyPatches.map((p) => ({
             filePath: p.filePath,
             content: p.fullContent,
         })));
+        perf.mark("output validation complete");
         if (validation.verdict === "block") {
+            perf.finish("validation blocked");
             res.status(422).json({
                 ok: false,
                 reason: "Output validation failed — patch blocked.",
@@ -862,12 +1161,17 @@ exports.app.post("/api/patch", async (req, res) => {
             result.validationVerdict = validation.verdict;
         }
     }
-    res.json(result);
     if (result.ok) {
         const confidence = typeof result.developerConfidence === "number"
             ? result.developerConfidence
             : 0;
-        (0, runLogging_js_1.queueRunLog)({
+        console.log("[zone-billing-debug] execution success reached", {
+            routeName: "/api/patch",
+            userId: typeof userId === "string" ? userId.trim() : null,
+            billingMode: billingMode ?? null,
+            isByok,
+        });
+        const loggedConversationId = await (0, runLogging_js_1.logRun)({
             userId,
             role: "developer",
             task,
@@ -875,9 +1179,19 @@ exports.app.post("/api/patch", async (req, res) => {
             decisionMode: result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
             confidence,
             creditsUsed: 1,
+            conversationId,
+            billingMode,
             isByok,
-        });
+            routeName: "/api/patch",
+        }).catch(() => null);
+        if (loggedConversationId) {
+            result.conversationId = loggedConversationId;
+        }
+        perf.mark("successful accounting complete");
     }
+    perf.mark("response ready");
+    perf.finish("complete");
+    res.json(result);
 });
 exports.app.post("/api/dry-run", async (req, res) => {
     const userOpenAiKey = req.headers["x-user-openai-key"];
@@ -898,8 +1212,10 @@ exports.app.post("/api/dry-run", async (req, res) => {
         });
         return;
     }
-    const { task, repoPath, userId, hostedContext } = req.body;
-    const authorization = await ensureRunAuthorized(userId, isByok);
+    const { task, repoPath, userId, hostedContext, conversationId, billingMode } = req.body;
+    const authorization = await ensureRunAuthorized(userId, isByok, {
+        billingMode,
+    });
     if (!authorization.allowed) {
         res.status(authorization.status).json(authorization.body);
         return;
@@ -933,17 +1249,23 @@ exports.app.post("/api/dry-run", async (req, res) => {
             result.validationVerdict = validation.verdict;
         }
     }
-    res.json({
+    const responseBody = {
         ok: true,
         fileDiffs: result.fileDiffs ?? [],
         patchPreview: result.patchPreview,
         warnings: result.warnings,
         patchResults: result.patchResults,
-    });
+    };
     const confidence = typeof result.developerConfidence === "number"
         ? result.developerConfidence
         : 0;
-    (0, runLogging_js_1.queueRunLog)({
+    console.log("[zone-billing-debug] execution success reached", {
+        routeName: "/api/dry-run",
+        userId: typeof userId === "string" ? userId.trim() : null,
+        billingMode: billingMode ?? null,
+        isByok,
+    });
+    const loggedConversationId = await (0, runLogging_js_1.logRun)({
         userId,
         role: "developer",
         task,
@@ -951,8 +1273,15 @@ exports.app.post("/api/dry-run", async (req, res) => {
         decisionMode: result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
         confidence,
         creditsUsed: 1,
+        conversationId,
+        billingMode,
         isByok,
-    });
+        routeName: "/api/dry-run",
+    }).catch(() => null);
+    if (loggedConversationId) {
+        responseBody.conversationId = loggedConversationId;
+    }
+    res.json(responseBody);
 });
 exports.app.post("/api/apply", async (req, res) => {
     const { patches, repoPath } = req.body;
@@ -1023,12 +1352,14 @@ exports.app.post("/api/test-engineer", async (req, res) => {
         });
         return;
     }
-    const { task, repoPath, runId, userId, hostedContext } = req.body;
+    const { task, repoPath, runId, userId, hostedContext, conversationId, billingMode } = req.body;
     if (!task || !repoPath) {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;
     }
-    const authorization = await ensureRunAuthorized(userId, isByok);
+    const authorization = await ensureRunAuthorized(userId, isByok, {
+        billingMode,
+    });
     if (!authorization.allowed) {
         res.status(authorization.status).json(authorization.body);
         return;
@@ -1063,9 +1394,15 @@ exports.app.post("/api/test-engineer", async (req, res) => {
                 result.validationIssues = validation.issues;
             }
         }
-        res.json(result);
         if (result.ok) {
-            (0, runLogging_js_1.queueRunLog)({
+            const normalizedUserId = typeof userId === "string" ? userId.trim() : null;
+            console.log("[zone-billing-debug] execution success reached", {
+                routeName: "/api/test-engineer",
+                userId: normalizedUserId,
+                billingMode: billingMode ?? null,
+                isByok,
+            });
+            const loggedConversationId = await (0, runLogging_js_1.logRun)({
                 userId,
                 role: "test_engineer",
                 task,
@@ -1073,9 +1410,16 @@ exports.app.post("/api/test-engineer", async (req, res) => {
                 decisionMode: getDecisionModeFromResult(result, result.confidence),
                 confidence: result.confidence,
                 creditsUsed: 1,
+                conversationId,
+                billingMode,
                 isByok,
-            });
+                routeName: "/api/test-engineer",
+            }).catch(() => null);
+            if (loggedConversationId) {
+                result.conversationId = loggedConversationId;
+            }
         }
+        res.json(result);
     }
     catch (err) {
         emitProgress(runId, "Ready");
@@ -1103,12 +1447,14 @@ exports.app.post("/api/data-analyst", async (req, res) => {
         });
         return;
     }
-    const { task, repoPath, runId, userId, hostedContext } = req.body;
+    const { task, repoPath, runId, userId, hostedContext, conversationId, billingMode } = req.body;
     if (!task || !repoPath) {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;
     }
-    const authorization = await ensureRunAuthorized(userId, isByok);
+    const authorization = await ensureRunAuthorized(userId, isByok, {
+        billingMode,
+    });
     if (!authorization.allowed) {
         res.status(authorization.status).json(authorization.body);
         return;
@@ -1142,9 +1488,15 @@ exports.app.post("/api/data-analyst", async (req, res) => {
         if (!result.ok && typeof result.reason === "string") {
             result.reason = getDataAnalystUserFacingReason(result.reason);
         }
-        res.json(result);
         if (result.ok) {
-            (0, runLogging_js_1.queueRunLog)({
+            const normalizedUserId = typeof userId === "string" ? userId.trim() : null;
+            console.log("[zone-billing-debug] execution success reached", {
+                routeName: "/api/data-analyst",
+                userId: normalizedUserId,
+                billingMode: billingMode ?? null,
+                isByok,
+            });
+            const loggedConversationId = await (0, runLogging_js_1.logRun)({
                 userId,
                 role: "data_analyst",
                 task,
@@ -1152,9 +1504,16 @@ exports.app.post("/api/data-analyst", async (req, res) => {
                 decisionMode: getDecisionModeFromResult(result, result.confidence),
                 confidence: result.confidence,
                 creditsUsed: 1,
+                conversationId,
+                billingMode,
                 isByok,
-            });
+                routeName: "/api/data-analyst",
+            }).catch(() => null);
+            if (loggedConversationId) {
+                result.conversationId = loggedConversationId;
+            }
         }
+        res.json(result);
     }
     catch (err) {
         emitProgress(runId, "Ready");

@@ -26,7 +26,13 @@ const planFeature_js_1 = require("../llm/planFeature.js");
 const planPatchPreview_js_1 = require("../llm/planPatchPreview.js");
 const planFullPatch_js_1 = require("../llm/planFullPatch.js");
 const computeRiskScore_js_1 = require("./computeRiskScore.js");
+const intentMismatchDetector_js_1 = require("../engine/intentMismatchDetector.js");
+const designSystemSignals_js_1 = require("../engine/designSystemSignals.js");
+const patchQualityScorer_js_1 = require("../engine/patchQualityScorer.js");
+const safetyLevelResolver_js_1 = require("../engine/safetyLevelResolver.js");
+const microEditProtection_js_1 = require("../engine/microEditProtection.js");
 const taskIntentParser_js_1 = require("./taskIntentParser.js");
+const zoneApiPerf_js_1 = require("../api/zoneApiPerf.js");
 /** A fully-populated TaskIntent representing "I don't know what this is". */
 const UNKNOWN_INTENT = {
     rawTask: "",
@@ -39,6 +45,7 @@ const UNKNOWN_INTENT = {
     routeHints: [],
     paramHints: [],
     warnings: [],
+    codeIntent: "unknown",
 };
 const GENERIC_UI_SCAFFOLD_PATTERNS = [
     "welcome to my app",
@@ -400,6 +407,11 @@ function calculateDeveloperConfidence(input) {
     }
     return confidence;
 }
+const REWRITE_SUSPICION_MIN_TOTAL_LINES = 20;
+const REWRITE_SUSPICION_MIN_CHANGED_LINES = 20;
+function logRiskDebug(label, payload) {
+    console.log(`[zone-debug] ${label}: ${JSON.stringify(payload)}`);
+}
 function analyzePatchScope(input) {
     let totalAddedLines = 0;
     let totalRemovedLines = 0;
@@ -415,7 +427,10 @@ function analyzePatchScope(input) {
         const changedRatio = changedLines / Math.max(totalLines, 1);
         totalAddedLines += addedLines;
         totalRemovedLines += removedLines;
-        if (before.trim() && totalLines > 0 && changedRatio > 0.6) {
+        if (before.trim() &&
+            totalLines >= REWRITE_SUSPICION_MIN_TOTAL_LINES &&
+            changedLines >= REWRITE_SUSPICION_MIN_CHANGED_LINES &&
+            changedRatio > 0.6) {
             rewriteLikeSuspicion = true;
         }
         if (patch.filePath.toLowerCase().endsWith(".css") &&
@@ -434,27 +449,94 @@ function analyzePatchScope(input) {
         cssRewriteSuspicion,
     };
 }
-function evaluateIntentPatchMismatch(input) {
-    const microEditIntent = detectMicroEditIntent(input.task);
-    if (!microEditIntent) {
-        return {
-            suspicious: false,
-            warnings: [],
-            risk: {
-                score: 0,
-                breakdown: {
-                    destructive: 0,
-                    schema: 0,
-                    massScope: 0,
-                },
-            },
-        };
+function isSmallLocalizedPatchScope(patchScope) {
+    return (patchScope.changedFileCount <= 1 &&
+        patchScope.totalChangedLines <= 20 &&
+        !patchScope.rewriteLikeSuspicion &&
+        !patchScope.cssRewriteSuspicion);
+}
+function softenTaskRiskForLocalizedPatch(input) {
+    const { taskRiskResult, patchScope } = input;
+    const nonCriticalSignals = taskRiskResult.signals.filter((signal) => signal !== "critical_domain" && signal !== "low_risk");
+    if (!isSmallLocalizedPatchScope(patchScope) ||
+        nonCriticalSignals.length > 0 ||
+        !taskRiskResult.signals.includes("critical_domain")) {
+        return taskRiskResult;
     }
-    const oversized = input.patchScope.changedFileCount > 1 ||
-        input.patchScope.totalChangedLines > 30 ||
-        input.patchScope.rewriteLikeSuspicion ||
-        input.patchScope.cssRewriteSuspicion;
-    if (!oversized) {
+    return {
+        ...taskRiskResult,
+        score: Math.min(taskRiskResult.score, 20),
+    };
+}
+function formatDeveloperRiskSignals(input) {
+    const signals = [];
+    if (input.breakdown.destructive > 0)
+        signals.push("destructive");
+    if (input.breakdown.schema > 0)
+        signals.push("schema");
+    if (input.breakdown.massScope > 0)
+        signals.push("mass_scope");
+    return signals;
+}
+function syncDeveloperRiskWarnings(input) {
+    const withoutTaskRiskWarnings = input.warnings.filter((warning) => !warning.startsWith("[HIGH_RISK] Task risk score") &&
+        !warning.startsWith("[ELEVATED_RISK] Task risk score") &&
+        !warning.startsWith("[HIGH_RISK] Risk signals detected:") &&
+        !warning.startsWith("[ELEVATED_RISK] Risk signals detected:"));
+    const riskSignals = formatDeveloperRiskSignals({
+        breakdown: input.developerRisk.breakdown,
+    });
+    if (riskSignals.length === 0) {
+        return withoutTaskRiskWarnings;
+    }
+    if (input.developerRisk.score >= 71) {
+        return [
+            ...withoutTaskRiskWarnings,
+            `[HIGH_RISK] Risk signals detected: ${riskSignals.join(", ")}. Review carefully before applying.`,
+        ];
+    }
+    if (input.developerRisk.score >= 31) {
+        return [
+            ...withoutTaskRiskWarnings,
+            `[ELEVATED_RISK] Risk signals detected: ${riskSignals.join(", ")}.`,
+        ];
+    }
+    return withoutTaskRiskWarnings;
+}
+const SMALL_SAFE_PATCH_MAX_CHANGED_LINES = 20;
+const SMALL_SAFE_PATCH_RISK_CAP = 25;
+function qualifiesForSafePatchRiskCap(input) {
+    return (input.developerRisk.breakdown.destructive === 0 &&
+        input.developerRisk.breakdown.schema === 0 &&
+        input.developerRisk.breakdown.massScope === 0 &&
+        input.patchScope.changedFileCount <= 1 &&
+        input.patchScope.totalChangedLines <= SMALL_SAFE_PATCH_MAX_CHANGED_LINES &&
+        !input.patchScope.rewriteLikeSuspicion &&
+        !input.patchScope.cssRewriteSuspicion &&
+        !input.hasIntentMismatch &&
+        !input.hasMicroEditViolation &&
+        !input.hasValidationBlock);
+}
+function applySafePatchRiskCap(input) {
+    if (!qualifiesForSafePatchRiskCap(input)) {
+        return input.developerRisk.score;
+    }
+    return Math.min(input.developerRisk.score, SMALL_SAFE_PATCH_RISK_CAP);
+}
+function collectAddedPatchLines(input) {
+    return input.applyPatches.flatMap((patch) => {
+        const before = input.originalContents[patch.filePath] ?? "";
+        return computeFileDiff(before, patch.fullContent)
+            .filter((line) => line.type === "added")
+            .map((line) => line.content);
+    });
+}
+function evaluateIntentPatchMismatch(input) {
+    const mismatch = (0, intentMismatchDetector_js_1.detectIntentMismatch)({
+        taskIntent: detectMicroEditIntent(input.task) ? "micro_edit" : "standard",
+        patchScope: input.patchScope,
+    });
+    if (!mismatch.hasMismatch) {
         return {
             suspicious: false,
             warnings: [],
@@ -481,14 +563,10 @@ function evaluateIntentPatchMismatch(input) {
     if (input.patchScope.rewriteLikeSuspicion) {
         massScope = Math.max(massScope, 65);
     }
-    const warnings = ["Micro-edit task produced a larger-than-expected patch."];
-    if (input.patchScope.cssRewriteSuspicion) {
-        warnings.push("CSS patch scope is too large for a spacing-only request.");
-    }
     return {
         suspicious: true,
-        confidenceCap: 55,
-        warnings,
+        confidenceCap: mismatch.confidenceCap,
+        warnings: mismatch.warnings,
         risk: {
             score: massScope,
             breakdown: {
@@ -972,6 +1050,29 @@ function applyDeveloperPatchText(currentContent, rawPatchText) {
     }
     return { ok: true, fullContent: updatedContent };
 }
+const SAFE_PREVIEW_REUSE_MAX_CHARS = 4000;
+function canReusePatchPreviewAsFinalPatch(input) {
+    return (input.patchCount === 1 &&
+        input.taskRiskResult.score === 0 &&
+        input.taskRiskResult.breakdown.destructive === 0 &&
+        input.taskRiskResult.breakdown.schema === 0 &&
+        input.taskRiskResult.breakdown.massScope === 0 &&
+        input.contentPreview.trim().length > 0 &&
+        input.contentPreview.length <= SAFE_PREVIEW_REUSE_MAX_CHARS);
+}
+function buildApplyPatchFromPreview(input) {
+    if (input.patch.operation === "create" && !input.currentContent.trim()) {
+        return {
+            ok: true,
+            fullContent: input.patch.contentPreview,
+        };
+    }
+    const applied = applyDeveloperPatchText(input.currentContent, input.patch.contentPreview);
+    if (!applied.ok) {
+        return { ok: false };
+    }
+    return applied;
+}
 function detectSuspiciousUiOverwrite(input) {
     if (!isUiFilePath(input.filePath))
         return null;
@@ -1089,6 +1190,7 @@ async function runLlmPatchFlow(input) {
             // keep progress reporting best-effort
         }
     };
+    const perf = (0, zoneApiPerf_js_1.startZoneApiPerfRun)(input.perfLabel ?? "runLlmPatchFlow");
     const taskIntent = typeof input.task === "string" ? (0, taskIntentParser_js_1.parseTaskIntent)(input.task) : UNKNOWN_INTENT;
     const hostedAvailableFiles = input.hostedContext?.availableFiles.map((file) => ({
         path: file.path,
@@ -1107,13 +1209,16 @@ async function runLlmPatchFlow(input) {
             allFiles = [];
         }
     }
+    perf.mark("repo scan ready");
     if (!input.hostedContext && allFiles.length === 0 && !isHostedEnvironment()) {
+        perf.finish("repo access blocked");
         return { ok: false, reason: "repo_not_accessible_in_hosted_mode" };
     }
     const developerContextFiles = allFiles.filter((file) => !isIrrelevantDeveloperContextPath(file.path));
     // 2. Detect structure
     reportProgress("Detecting project structure...");
     const structure = (0, detectProjectStructure_js_1.detectProjectStructure)(developerContextFiles);
+    perf.mark("project structure detected");
     const projectSummary = input.hostedContext?.repoSummary ||
         structure.notes.join(" ") ||
         "No project summary available.";
@@ -1125,6 +1230,7 @@ async function runLlmPatchFlow(input) {
         files: developerContextFiles,
         intent: taskIntent,
     }).slice(0, 8);
+    perf.mark("relevant files ranked");
     const existingFilesSummary = input.hostedContext?.existingFilesSummary ??
         (() => {
             const topRelevantPaths = relevantFiles
@@ -1140,6 +1246,7 @@ async function runLlmPatchFlow(input) {
     let llmPlan = null;
     if (!input.hostedContext) {
         try {
+            perf.mark("feature model call start");
             llmPlan = await (0, planFeature_js_1.planFeatureWithLlm)({
                 task: input.task,
                 intent: taskIntent,
@@ -1153,8 +1260,10 @@ async function runLlmPatchFlow(input) {
                 schemaAwareSummary: [],
                 userOpenAiKey: input.userOpenAiKey,
             });
+            perf.mark("feature model response received");
         }
         catch (err) {
+            perf.finish("feature planning failed");
             const reason = err instanceof Error ? err.message : String(err);
             return { ok: false, reason };
         }
@@ -1198,10 +1307,29 @@ async function runLlmPatchFlow(input) {
             content,
         }));
     }
+    perf.mark("file context loaded");
+    // ── TOKEN BUDGET GUARD ──────────────────────────────────────────
+    const SIMPLE_BUDGET_CHARS = 320_000; // ~80K tokens (4o-mini)
+    const COMPLEX_BUDGET_CHARS = 320_000; // ~80K tokens (4.1-mini)
+    const totalContextChars = resolvedFileContexts.reduce((sum, file) => sum + (file.content?.length ?? 0), 0) + (input.task?.length ?? 0);
+    const contextBudget = resolvedFileContexts.length <= 6
+        ? SIMPLE_BUDGET_CHARS
+        : COMPLEX_BUDGET_CHARS;
+    if (totalContextChars > contextBudget) {
+        perf.finish("context budget exceeded");
+        return {
+            ok: false,
+            reason: `Context too large (${Math.round(totalContextChars / 4000)}K tokens). ` +
+                `Limit is ${Math.round(contextBudget / 4000)}K tokens. ` +
+                `Select a smaller folder or specify exact files to change.`,
+        };
+    }
+    perf.mark("token budget checked");
     // 6. Plan patch preview with LLM
     reportProgress("Planning patch preview...");
     let patchPlan;
     try {
+        perf.mark("patch preview model call start");
         patchPlan = await (0, planPatchPreview_js_1.planPatchPreviewWithLlm)({
             task: input.task,
             intent: taskIntent,
@@ -1212,8 +1340,10 @@ async function runLlmPatchFlow(input) {
             schemaAwareSummary: [],
             userOpenAiKey: input.userOpenAiKey,
         });
+        perf.mark("patch preview model response received");
     }
     catch (err) {
+        perf.finish("patch preview failed");
         const reason = err instanceof Error ? err.message : String(err);
         return { ok: false, reason };
     }
@@ -1226,9 +1356,15 @@ async function runLlmPatchFlow(input) {
     }
     const vagueTask = isVagueDeveloperTask(input.task);
     // Task-level risk scoring for developer
-    const taskRiskResult = (0, computeRiskScore_js_1.computeRiskScore)({ task: input.task, role: "developer" });
+    const taskRiskResult = (0, computeRiskScore_js_1.computeRiskScore)({ task: input.task, role: "developer", codeIntent: taskIntent.codeIntent });
+    logRiskDebug("runLlmPatchFlow taskRiskResult", {
+        task: input.task,
+        taskRiskResult,
+    });
     if (vagueTask) {
         reportProgress("Ready");
+        perf.mark("decision evaluation complete");
+        perf.finish("vague task response ready");
         return {
             ok: true,
             patchPreview: DEVELOPER_VAGUE_TASK_WARNING,
@@ -1238,7 +1374,6 @@ async function runLlmPatchFlow(input) {
             applyPatches: [],
             patchResults: [],
             fileDiffs: [],
-            originalContents: {},
             contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
         };
     }
@@ -1336,54 +1471,77 @@ async function runLlmPatchFlow(input) {
                         .map((file) => ({ path: file.path })),
                 ]
                 : resolvedFileContexts;
-            const fullPatch = await (0, planFullPatch_js_1.planFullPatchWithLlm)({
-                task: input.task,
-                filePath: patch.path,
-                fileContent: llmFileContent,
-                repoSummary: projectSummary,
-                repoPath: input.repoPath,
-                taskIntent: taskIntent.normalizedTask || taskIntent.action,
-                relevantFiles: targetedRelevantFiles,
-                existingTargetFiles: allFiles.map((file) => file.path),
-                userOpenAiKey: input.userOpenAiKey,
-                relatedContext: [
-                    contextWindow
-                        ? `// CONTEXT WINDOW: lines ${contextWindow.startLine}-${contextWindow.endLine} of ${contextWindow.totalLines} total`
-                        : "",
-                    patch.summary,
-                    resolvedPageObjectContext,
-                    "IMPORTANT: Do NOT remove or rewrite existing functions, classes, or methods unless the task explicitly asks you to. Only add or modify what is necessary. Preserve all existing code structure, comments, and patterns.",
-                ]
-                    .filter(Boolean)
-                    .join("\n\n"),
-            });
-            const nextContent = fullPatch.mode === "patch"
-                ? (() => {
-                    const appliedPatch = applyDeveloperPatchText(fileContent, fullPatch.patchText);
-                    if (!appliedPatch.ok) {
-                        internalWarnings.push(appliedPatch.warning);
-                        if (!isHiddenDeveloperWarning(appliedPatch.warning)) {
-                            visibleWarnings.push(appliedPatch.warning);
+            const normalizedTaskIntentForPrompt = detectMicroEditIntent(input.task)
+                ? "micro_edit"
+                : "standard";
+            const safePreviewPatch = canReusePatchPreviewAsFinalPatch({
+                patchCount: patchPlan.patches.length,
+                contentPreview: patch.contentPreview,
+                taskRiskResult,
+            })
+                ? buildApplyPatchFromPreview({
+                    patch,
+                    currentContent: fileContent,
+                })
+                : { ok: false };
+            if (safePreviewPatch.ok) {
+                console.log("[zone-api] skipping full patch generation (safe micro edit)");
+            }
+            const nextContent = safePreviewPatch.ok
+                ? safePreviewPatch.fullContent
+                : await (() => {
+                    perf.mark(`full patch model call start ${patch.path}`);
+                    return (0, planFullPatch_js_1.planFullPatchWithLlm)({
+                        task: input.task,
+                        filePath: patch.path,
+                        fileContent: llmFileContent,
+                        repoSummary: projectSummary,
+                        repoPath: input.repoPath,
+                        taskIntent: taskIntent.normalizedTask || taskIntent.action,
+                        normalizedTaskIntent: normalizedTaskIntentForPrompt,
+                        relevantFiles: targetedRelevantFiles,
+                        existingTargetFiles: allFiles.map((file) => file.path),
+                        userOpenAiKey: input.userOpenAiKey,
+                        relatedContext: [
+                            contextWindow
+                                ? `// CONTEXT WINDOW: lines ${contextWindow.startLine}-${contextWindow.endLine} of ${contextWindow.totalLines} total`
+                                : "",
+                            patch.summary,
+                            resolvedPageObjectContext,
+                            "IMPORTANT: Do NOT remove or rewrite existing functions, classes, or methods unless the task explicitly asks you to. Only add or modify what is necessary. Preserve all existing code structure, comments, and patterns.",
+                        ]
+                            .filter(Boolean)
+                            .join("\n\n"),
+                    });
+                })().then((fullPatch) => {
+                    perf.mark(`full patch model response received ${patch.path}`);
+                    if (fullPatch.mode === "patch") {
+                        const appliedPatch = applyDeveloperPatchText(fileContent, fullPatch.patchText);
+                        if (!appliedPatch.ok) {
+                            internalWarnings.push(appliedPatch.warning);
+                            if (!isHiddenDeveloperWarning(appliedPatch.warning)) {
+                                visibleWarnings.push(appliedPatch.warning);
+                            }
+                            const failure = parsePatchFailureWarning(appliedPatch.warning);
+                            const patchConflictWarning = buildPatchConflictWarning({
+                                filePath: patch.path,
+                                reason: failure.reason,
+                                score: failure.score,
+                                bestMatch: failure.bestMatch,
+                            });
+                            internalWarnings.push(patchConflictWarning);
+                            visibleWarnings.push(patchConflictWarning);
+                            patchResults.push({
+                                filePath: patch.path,
+                                status: "failed",
+                                reason: failure.reason,
+                            });
+                            return null;
                         }
-                        const failure = parsePatchFailureWarning(appliedPatch.warning);
-                        const patchConflictWarning = buildPatchConflictWarning({
-                            filePath: patch.path,
-                            reason: failure.reason,
-                            score: failure.score,
-                            bestMatch: failure.bestMatch,
-                        });
-                        internalWarnings.push(patchConflictWarning);
-                        visibleWarnings.push(patchConflictWarning);
-                        patchResults.push({
-                            filePath: patch.path,
-                            status: "failed",
-                            reason: failure.reason,
-                        });
-                        return null;
+                        return appliedPatch.fullContent;
                     }
-                    return appliedPatch.fullContent;
-                })()
-                : fullPatch.fullContent;
+                    return fullPatch.fullContent;
+                });
             if (nextContent === null) {
                 continue;
             }
@@ -1437,15 +1595,18 @@ async function runLlmPatchFlow(input) {
             });
         }
         applyPatches = applyResults;
+        perf.mark("patch conversion complete");
     }
     catch (err) {
         // step 6b is best-effort — never block the preview result
         console.error("[hosted] step 6b failed:", err instanceof Error ? err.message : String(err));
         applyPatches = [];
+        perf.mark("patch conversion fallback complete");
     }
     console.log("[hosted] applyPatches count:", applyPatches.length);
     if (input.atomicPatch && patchResults.some((result) => result.status === "failed")) {
         reportProgress("Ready");
+        perf.finish("atomic patch failed");
         return { ok: false, reason: "atomic_patch_failed" };
     }
     reportProgress("Validating developer output...");
@@ -1460,13 +1621,52 @@ async function runLlmPatchFlow(input) {
         applyPatches,
         originalContents,
     });
+    const designSystemSignals = (0, designSystemSignals_js_1.detectDesignSystemSignals)({
+        addedLines: collectAddedPatchLines({
+            applyPatches,
+            originalContents,
+        }),
+    });
+    const normalizedIntent = detectMicroEditIntent(input.task)
+        ? "micro_edit"
+        : "standard";
+    const intentMismatchDecision = (0, intentMismatchDetector_js_1.detectIntentMismatch)({
+        taskIntent: normalizedIntent,
+        patchScope,
+        codeIntent: taskIntent.codeIntent,
+    });
     const intentMismatch = evaluateIntentPatchMismatch({
         task: input.task,
         patchScope,
     });
+    const patchQuality = (0, patchQualityScorer_js_1.scorePatchQuality)({
+        taskIntent: normalizedIntent,
+        patchScope,
+        validationWarnings: visibleWarnings,
+        designSystemSignals,
+        intentMismatch: intentMismatchDecision,
+    });
+    const microEditProtection = (0, microEditProtection_js_1.enforceMicroEditProtection)({
+        taskIntent: normalizedIntent,
+        patchScope,
+        intentMismatch: intentMismatchDecision,
+        patchQuality,
+    });
     const uiMappingRisk = evaluateUiMappingRisk({
         task: input.task,
         patchScope,
+    });
+    const effectiveTaskRiskResult = softenTaskRiskForLocalizedPatch({
+        taskRiskResult,
+        patchScope,
+    });
+    logRiskDebug("runLlmPatchFlow after task-risk adjustments", {
+        task: input.task,
+        patchScope,
+        taskRiskResult,
+        effectiveTaskRiskResult,
+        intentMismatchRisk: intentMismatch.risk,
+        uiMappingRisk: uiMappingRisk.risk,
     });
     if (intentMismatch.warnings.length > 0) {
         internalWarnings.push(...intentMismatch.warnings);
@@ -1476,22 +1676,28 @@ async function runLlmPatchFlow(input) {
         internalWarnings.push(...uiMappingRisk.warnings);
         visibleWarnings.push(...uiMappingRisk.warnings);
     }
-    if (taskRiskResult.score >= 71) {
+    if (effectiveTaskRiskResult.score >= 71) {
         internalWarnings.push(`[HIGH_RISK] Task risk score ${taskRiskResult.score} — detected: ${taskRiskResult.signals.join(", ")}. Review carefully before applying.`);
         visibleWarnings.push(`[HIGH_RISK] Task risk score ${taskRiskResult.score} — detected: ${taskRiskResult.signals.join(", ")}. Review carefully before applying.`);
     }
-    else if (taskRiskResult.score >= 31) {
+    else if (effectiveTaskRiskResult.score >= 31) {
         internalWarnings.push(`[ELEVATED_RISK] Task risk score ${taskRiskResult.score} — detected: ${taskRiskResult.signals.join(", ")}.`);
         visibleWarnings.push(`[ELEVATED_RISK] Task risk score ${taskRiskResult.score} — detected: ${taskRiskResult.signals.join(", ")}.`);
     }
+    let syncedInternalWarnings = internalWarnings.filter((warning) => !warning.startsWith("[HIGH_RISK] Task risk score") &&
+        !warning.startsWith("[ELEVATED_RISK] Task risk score"));
+    let syncedVisibleWarnings = visibleWarnings.filter((warning) => !warning.startsWith("[HIGH_RISK] Task risk score") &&
+        !warning.startsWith("[ELEVATED_RISK] Task risk score"));
     const developerConfidenceBase = calculateDeveloperConfidence({
-        warnings: internalWarnings,
+        warnings: syncedInternalWarnings,
         changedFileCount: applyPatches.length,
         changedFileMetrics,
         vagueTask,
     });
     const confidenceCaps = [
-        intentMismatch.confidenceCap,
+        intentMismatchDecision.severity === "medium"
+            ? intentMismatchDecision.confidenceCap
+            : undefined,
         uiMappingRisk.confidenceCap,
     ].filter((value) => typeof value === "number");
     const developerConfidence = confidenceCaps.length > 0
@@ -1505,30 +1711,90 @@ async function runLlmPatchFlow(input) {
         const diff = computeFileDiff(before, after);
         return {
             filePath: patch.filePath,
-            before,
-            after,
             diff,
             addedLines: diff.filter((line) => line.type === "added").length,
             removedLines: diff.filter((line) => line.type === "removed").length,
         };
     });
     const mergedDeveloperRisk = {
-        score: Math.max(intentMismatch.risk.score, uiMappingRisk.risk.score, taskRiskResult.score),
+        score: Math.max(intentMismatch.risk.score, uiMappingRisk.risk.score, effectiveTaskRiskResult.score),
         breakdown: {
-            destructive: Math.max(intentMismatch.risk.breakdown.destructive, uiMappingRisk.risk.breakdown.destructive),
-            schema: Math.max(intentMismatch.risk.breakdown.schema, uiMappingRisk.risk.breakdown.schema),
-            massScope: Math.max(intentMismatch.risk.breakdown.massScope, uiMappingRisk.risk.breakdown.massScope),
+            destructive: Math.max(intentMismatch.risk.breakdown.destructive, uiMappingRisk.risk.breakdown.destructive, effectiveTaskRiskResult.breakdown.destructive),
+            schema: Math.max(intentMismatch.risk.breakdown.schema, uiMappingRisk.risk.breakdown.schema, effectiveTaskRiskResult.breakdown.schema),
+            massScope: Math.max(intentMismatch.risk.breakdown.massScope, uiMappingRisk.risk.breakdown.massScope, effectiveTaskRiskResult.breakdown.massScope),
         },
     };
+    if (microEditProtection.isViolation) {
+        syncedInternalWarnings.push(...microEditProtection.violationReasons);
+        syncedVisibleWarnings.push(...microEditProtection.violationReasons);
+    }
     const hasBlockedPatch = patchResults.some(r => r.status === "failed" && r.reason === "developer_validation_blocked");
+    const finalDeveloperRiskScore = applySafePatchRiskCap({
+        developerRisk: mergedDeveloperRisk,
+        patchScope,
+        hasIntentMismatch: intentMismatchDecision.hasMismatch,
+        hasMicroEditViolation: microEditProtection.isViolation,
+        hasValidationBlock: hasBlockedPatch,
+    });
+    const finalDeveloperRisk = {
+        ...mergedDeveloperRisk,
+        score: finalDeveloperRiskScore,
+    };
+    logRiskDebug("runLlmPatchFlow final risk", {
+        task: input.task,
+        patchScope,
+        mergedDeveloperRisk,
+        finalDeveloperRisk,
+        decisionMode: hasBlockedPatch ||
+            vagueTask ||
+            microEditProtection.shouldForcePreview ||
+            intentMismatchDecision.forcePreviewOnly ||
+            uiMappingRisk.forcePreviewOnly ||
+            developerConfidence < 70 ||
+            finalDeveloperRisk.score >= 31
+            ? "preview_only"
+            : "safe_to_apply",
+    });
+    syncedInternalWarnings = syncDeveloperRiskWarnings({
+        warnings: syncedInternalWarnings,
+        developerRisk: finalDeveloperRisk,
+    });
+    syncedVisibleWarnings = syncDeveloperRiskWarnings({
+        warnings: syncedVisibleWarnings,
+        developerRisk: finalDeveloperRisk,
+    });
     const decisionMode = hasBlockedPatch ||
         vagueTask ||
-        intentMismatch.suspicious ||
+        microEditProtection.shouldForcePreview ||
+        intentMismatchDecision.forcePreviewOnly ||
         uiMappingRisk.forcePreviewOnly ||
         developerConfidence < 70 ||
-        taskRiskResult.score >= 31
+        finalDeveloperRisk.score >= 31
         ? "preview_only"
         : "safe_to_apply";
+    const safetyResolution = (0, safetyLevelResolver_js_1.resolveSafetyLevel)({
+        hasBlockedPatch,
+        developerConfidence,
+        decisionMode,
+        developerRiskScore: finalDeveloperRisk.score,
+        intentMismatch: {
+            hasMismatch: intentMismatchDecision.hasMismatch,
+            severity: intentMismatchDecision.severity,
+        },
+        patchQuality,
+    });
+    const finalSafetyResolution = microEditProtection.shouldDowngradeSafety &&
+        safetyResolution.safetyLevel !== "high_risk_blocked"
+        ? {
+            ...safetyResolution,
+            safetyLevel: "preview_only",
+            safetyReasons: [
+                ...safetyResolution.safetyReasons,
+                ...microEditProtection.violationReasons,
+            ],
+        }
+        : safetyResolution;
+    perf.mark("decision evaluation complete");
     // 7. Build patchPreview string
     const patchPreview = [
         "=== LLM PATCH PREVIEW ===",
@@ -1540,26 +1806,37 @@ async function runLlmPatchFlow(input) {
             ? [
                 "",
                 "=== PATCH RESULTS ===",
-                ...patchResults.map((result) => renderPatchResultLine(result, internalWarnings)),
+                ...patchResults.map((result) => renderPatchResultLine(result, syncedInternalWarnings)),
             ]
             : []),
-        ...(visibleWarnings.length > 0
-            ? ["", "Warnings:", ...visibleWarnings.map((w) => `- ${w}`)]
+        ...(syncedVisibleWarnings.length > 0
+            ? ["", "Warnings:", ...syncedVisibleWarnings.map((w) => `- ${w}`)]
             : []),
     ].join("\n");
     // 8. Return
     reportProgress("Ready");
+    perf.mark("response payload ready");
+    perf.finish("complete");
     return {
         ok: true,
         patchPreview,
-        warnings: visibleWarnings,
+        warnings: syncedVisibleWarnings,
         developerConfidence,
-        developerRisk: mergedDeveloperRisk,
+        developerRisk: finalDeveloperRisk,
+        intentMismatch: {
+            hasMismatch: intentMismatchDecision.hasMismatch,
+            severity: intentMismatchDecision.severity,
+            reasonCodes: intentMismatchDecision.reasonCodes,
+            warnings: intentMismatchDecision.warnings,
+        },
+        patchQuality,
+        designSystemSignals,
+        safetyResolution: finalSafetyResolution,
+        microEditProtection,
         decisionMode,
         applyPatches,
         patchResults,
         fileDiffs,
-        originalContents,
         contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
     };
 }

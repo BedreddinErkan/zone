@@ -38,7 +38,8 @@ function stripJsonFences(raw) {
 async function planFullPatchWithLlm(input) {
     const client = (0, openaiClient_js_1.createOpenAIClient)(input.userOpenAiKey);
     const model = (0, openaiClient_js_1.getModelName)("high");
-    const outputMode = input.fileContent.length > LARGE_FILE_PATCH_THRESHOLD
+    const outputMode = input.normalizedTaskIntent === "micro_edit" ||
+        input.fileContent.length > LARGE_FILE_PATCH_THRESHOLD
         ? "find_replace_patch"
         : "full_content";
     const prompt = (0, fullPatchPrompt_js_1.buildFullPatchPrompt)({
@@ -47,6 +48,8 @@ async function planFullPatchWithLlm(input) {
         fileContent: input.fileContent,
         repoSummary: input.repoSummary,
         relatedContext: input.relatedContext,
+        taskIntent: input.taskIntent,
+        normalizedTaskIntent: input.normalizedTaskIntent,
         outputMode,
     });
     if (outputMode === "find_replace_patch") {

@@ -1934,7 +1934,25 @@ export async function runLlmPatchFlow(input: {
     }));
   }
   perf.mark("file context loaded");
-
+// ── TOKEN BUDGET GUARD ──────────────────────────────────────────
+  const SIMPLE_BUDGET_CHARS = 320_000;  // ~80K tokens (4o-mini)
+  const COMPLEX_BUDGET_CHARS = 320_000; // ~80K tokens (4.1-mini)
+  const totalContextChars = resolvedFileContexts.reduce(
+    (sum, file) => sum + (file.content?.length ?? 0), 0
+  ) + (input.task?.length ?? 0);
+  const contextBudget = resolvedFileContexts.length <= 6
+    ? SIMPLE_BUDGET_CHARS
+    : COMPLEX_BUDGET_CHARS;
+  if (totalContextChars > contextBudget) {
+    perf.finish("context budget exceeded");
+    return {
+      ok: false,
+      reason: `Context too large (${Math.round(totalContextChars / 4000)}K tokens). ` +
+        `Limit is ${Math.round(contextBudget / 4000)}K tokens. ` +
+        `Select a smaller folder or specify exact files to change.`,
+    };
+  }
+  perf.mark("token budget checked");
   // 6. Plan patch preview with LLM
   reportProgress("Planning patch preview...");
   let patchPlan: Awaited<ReturnType<typeof planPatchPreviewWithLlm>>;

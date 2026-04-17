@@ -593,8 +593,8 @@ async function runTaskOnlyFlow(options) {
                     (0, diffOutput_js_1.renderDiffSummary)([
                         {
                             filePath: fileDiff.filePath,
-                            original: fileDiff.before,
-                            updated: fileDiff.after,
+                            original: fileDiff.diff.filter(l => l.type !== 'added').map(l => l.content).join('\n'),
+                            updated: fileDiff.diff.filter(l => l.type !== 'removed').map(l => l.content).join('\n'),
                         },
                     ]);
                     console.log(`${zonePrefix()} ${tone(`+${fileDiff.addedLines} lines added, -${fileDiff.removedLines} lines removed`, colors_js_1.c.cyan)} ${tone(`(${fileDiff.filePath})`, colors_js_1.c.dim, colors_js_1.c.gray)}`);
@@ -602,8 +602,7 @@ async function runTaskOnlyFlow(options) {
                 return 0;
             }
             if (apply && confirmApply && llmResult.applyPatches.length > 0) {
-                const originalContents = llmResult.originalContents ??
-                    (await capturePatchOriginals(repoPath, llmResult.applyPatches));
+                const originalContents = await capturePatchOriginals(repoPath, llmResult.applyPatches);
                 console.log(`${zonePrefix()} ${tone("Applying LLM patches...", colors_js_1.c.white)}`);
                 const applyResult = await (0, applyLlmPatches_js_1.applyLlmPatches)(llmResult.applyPatches, repoPath);
                 console.log(formatApplyLog("Applied", applyResult.applied));
