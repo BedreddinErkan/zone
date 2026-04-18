@@ -347,6 +347,15 @@ function stripCommentsForComparison(content: string): string {
     .trim();
 }
 
+function stripCommentOnlyLines(content: string): string {
+  return content
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter((line) => !/^\s*(?:\/\/|\/\*)/.test(line))
+    .join("\n")
+    .trim();
+}
+
 function countChangedLines(before: string, after: string): number {
   const diff = computeFileDiff(before, after);
   return diff.filter((line) => line.type !== "unchanged").length;
@@ -486,6 +495,12 @@ export function validateDeveloperOutput(input: {
 
   const originalNormalized = normalizeWhitespace(input.originalContent);
   const nextNormalized = normalizeWhitespace(input.fullContent);
+  const originalWithoutCommentLines = normalizeWhitespace(
+    stripCommentOnlyLines(input.originalContent)
+  );
+  const nextWithoutCommentLines = normalizeWhitespace(
+    stripCommentOnlyLines(input.fullContent)
+  );
   const originalWithoutComments = normalizeWhitespace(
     stripCommentsForComparison(input.originalContent)
   );
@@ -493,6 +508,7 @@ export function validateDeveloperOutput(input: {
     stripCommentsForComparison(input.fullContent)
   );
   if (
+    originalWithoutCommentLines === nextWithoutCommentLines ||
     originalNormalized === nextNormalized ||
     originalWithoutComments === nextWithoutComments
   ) {
