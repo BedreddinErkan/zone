@@ -2021,6 +2021,27 @@ export async function runLlmPatchFlow(input: {
   const visibleWarnings = filterVisibleDeveloperWarnings(patchPlan.warnings);
   const patchResults: PatchResult[] = [];
   try {
+    const hostedPatchAvailability = input.hostedContext
+      ? patchPlan.patches.map((patch) => {
+          const hasOriginalContent = Object.prototype.hasOwnProperty.call(
+            input.hostedContext!.originalContents,
+            patch.path
+          );
+          const hasContextFile = input.hostedContext!.contextFiles.some(
+            (file) => file.path === patch.path
+          );
+          return {
+            path: patch.path,
+            hasOriginalContent,
+            hasContextFile,
+            reason: !hasOriginalContent
+              ? "missing from originalContents"
+              : !hasContextFile
+                ? "missing from contextFiles"
+                : "available in hosted context",
+          };
+        })
+      : [];
     const applyTargets = patchPlan.patches.filter(
       (p) => p.operation === "modify" || p.operation === "create"
     );
@@ -2288,6 +2309,24 @@ export async function runLlmPatchFlow(input: {
     perf.mark("patch conversion fallback complete");
   }
   console.log("[hosted] applyPatches count:", applyPatches.length);
+  if (
+    input.hostedContext &&
+    applyPatches.length === 0 &&
+    patchPlan.patches.length > 0
+  ) {
+    console.log(
+      "[hosted] patch paths filtered by hosted context:",
+      hostedPatchAvailability
+        .filter(
+          (patch) => !patch.hasOriginalContent || !patch.hasContextFile
+        )
+        .map(({ path, reason }) => ({ path, reason }))
+    );
+    console.log(
+      "[hosted] patch paths still present after hosted filtering:",
+      patchPlan.patches.map((patch) => patch.path)
+    );
+  }
 
   if (input.atomicPatch && patchResults.some((result) => result.status === "failed")) {
     reportProgress("Ready");
