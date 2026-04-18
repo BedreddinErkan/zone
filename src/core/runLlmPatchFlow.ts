@@ -2020,8 +2020,14 @@ export async function runLlmPatchFlow(input: {
   const internalWarnings = [...patchPlan.warnings];
   const visibleWarnings = filterVisibleDeveloperWarnings(patchPlan.warnings);
   const patchResults: PatchResult[] = [];
+  let hostedPatchAvailability: Array<{
+  path: string;
+  hasOriginalContent: boolean;
+  hasContextFile: boolean;
+  reason: string;
+}> = [];
   try {
-    const hostedPatchAvailability = input.hostedContext
+    hostedPatchAvailability = input.hostedContext
       ? patchPlan.patches.map((patch) => {
           const hasOriginalContent = Object.prototype.hasOwnProperty.call(
             input.hostedContext!.originalContents,
