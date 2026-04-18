@@ -268,6 +268,9 @@ function getBaselineScore(file: RepoFile): number {
 function scoreFile(file: RepoFile, task: string): number {
   const normalizedTask = task.toLowerCase();
   const filePath = file.path.toLowerCase();
+  const fileBasename = (file.path.split("/").pop() ?? file.path)
+    .replace(/\.[^.]+$/, "")
+    .toLowerCase();
   const signals = extractTaskSignals(task);
 
   let score = getBaselineScore(file) + getSignalScore(file, signals);
@@ -280,6 +283,17 @@ function scoreFile(file: RepoFile, task: string): number {
   for (const keyword of keywords) {
     if (filePath.includes(keyword)) {
       score += 10;
+    }
+  }
+
+  const explicitFilenameTokens = task.match(
+    /\b(?:[A-Z][A-Za-z0-9_]*|[A-Za-z0-9_-]+\.(?:jsx|tsx|ts|js|py))\b/g
+  ) ?? [];
+
+  for (const token of explicitFilenameTokens) {
+    const normalizedToken = token.replace(/\.[^.]+$/, "").toLowerCase();
+    if (normalizedToken === fileBasename) {
+      score += 50;
     }
   }
 

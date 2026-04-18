@@ -33,6 +33,10 @@ function stripJsonFences(raw: string): string {
     .trim();
 }
 
+function sanitizeInvalidJsonBackslashes(raw: string): string {
+  return raw.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
+}
+
 export async function planPatchPreviewWithLlm(input: {
   task: string;
   intent: TaskIntent;
@@ -82,7 +86,24 @@ export async function planPatchPreviewWithLlm(input: {
 
   const rawText = response.output_text || "";
   const jsonText = extractJson(rawText);
-  const parsed = JSON.parse(stripJsonFences(jsonText));
+  const normalizedJsonText = stripJsonFences(jsonText);
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(normalizedJsonText);
+  } catch (initialError) {
+    try {
+      parsed = JSON.parse(sanitizeInvalidJsonBackslashes(normalizedJsonText));
+    } catch {
+      const preview = rawText.slice(0, 50);
+      const initialMessage =
+        initialError instanceof Error ? initialError.message : String(initialError);
+      throw new Error(
+        `Failed to parse patch preview JSON: ${initialMessage}. Raw preview: ${preview}`
+      );
+    }
+  }
+
   const validated = llmPatchPlanSchema.parse(parsed);
 
   return {

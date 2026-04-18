@@ -141,4 +141,16 @@ describe("rankRelevantFiles", () => {
 
     expect(ranked[0].path).toBe("src/ui/index.html");
   });
+
+  it("strongly boosts explicit basename matches from the task text", () => {
+    const ranked = rankRelevantFiles({
+      task: "In PatientDetail.jsx add uploading state",
+      files: [
+        buildRepoFile("client/src/pages/ForgotPasswordPage.jsx", "frontend"),
+        buildRepoFile("client/src/pages/PatientDetail.jsx", "frontend"),
+      ],
+    });
+
+    expect(ranked[0].path).toBe("client/src/pages/PatientDetail.jsx");
+  });
 });

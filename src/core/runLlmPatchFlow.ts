@@ -2389,12 +2389,15 @@ export async function runLlmPatchFlow(input: {
       !warning.startsWith("[ELEVATED_RISK] Task risk score")
   );
 
-    const developerConfidenceBase = calculateDeveloperConfidence({
+    let developerConfidenceBase = calculateDeveloperConfidence({
       warnings: syncedInternalWarnings,
     changedFileCount: applyPatches.length,
     changedFileMetrics,
     vagueTask,
   });
+  if (applyPatches.length === 0 && patchPlan.patches.length > 0) {
+    developerConfidenceBase = Math.min(developerConfidenceBase, 40);
+  }
   const confidenceCaps = [
     intentMismatchDecision.severity === "medium"
       ? intentMismatchDecision.confidenceCap
