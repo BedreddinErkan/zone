@@ -272,6 +272,13 @@ function scoreFile(file: RepoFile, task: string): number {
     .replace(/\.[^.]+$/, "")
     .toLowerCase();
   const signals = extractTaskSignals(task);
+  const explicitFilenameTokens = task.match(
+    /\b(?:[A-Z][A-Za-z0-9_]*|[A-Za-z0-9_-]+\.(?:jsx|tsx|ts|js|py))\b/g
+  ) ?? [];
+  const explicitBasenameTargets = explicitFilenameTokens.map((token) =>
+    token.replace(/\.[^.]+$/, "").toLowerCase()
+  );
+  const hasExplicitBasenameTarget = explicitBasenameTargets.length > 0;
 
   let score = getBaselineScore(file) + getSignalScore(file, signals);
 
@@ -286,14 +293,10 @@ function scoreFile(file: RepoFile, task: string): number {
     }
   }
 
-  const explicitFilenameTokens = task.match(
-    /\b(?:[A-Z][A-Za-z0-9_]*|[A-Za-z0-9_-]+\.(?:jsx|tsx|ts|js|py))\b/g
-  ) ?? [];
-
   for (const token of explicitFilenameTokens) {
     const normalizedToken = token.replace(/\.[^.]+$/, "").toLowerCase();
     if (normalizedToken === fileBasename) {
-      score += 50;
+      score += token.includes(".") ? 50 : 100;
     }
   }
 
@@ -362,7 +365,10 @@ function scoreFile(file: RepoFile, task: string): number {
     score += 4;
   }
 
-  if (file.path.includes("/pages/")) {
+  if (
+    file.path.includes("/pages/") &&
+    (!hasExplicitBasenameTarget || explicitBasenameTargets.includes(fileBasename))
+  ) {
     score += 4;
   }
 

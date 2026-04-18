@@ -153,4 +153,19 @@ describe("rankRelevantFiles", () => {
 
     expect(ranked[0].path).toBe("client/src/pages/PatientDetail.jsx");
   });
+
+  it("heavily boosts exact component-name matches and suppresses generic page boosts for other pages", () => {
+    const ranked = rankRelevantFiles({
+      task: "In PatientDetail add uploading state",
+      files: [
+        buildRepoFile("client/src/pages/ForgotPasswordPage.jsx", "frontend"),
+        buildRepoFile("client/src/pages/PatientDetail.jsx", "frontend"),
+        buildRepoFile("client/src/pages/PatientList.jsx", "frontend"),
+      ],
+    });
+
+    expect(ranked[0].path).toBe("client/src/pages/PatientDetail.jsx");
+    expect(ranked[0].score).toBeGreaterThan(ranked[1].score);
+    expect(ranked[1].score).toBeGreaterThanOrEqual(ranked[2].score);
+  });
 });
