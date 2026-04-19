@@ -2453,6 +2453,13 @@ export async function runLlmPatchFlow(input: {
       originalContents,
     }),
   });
+  const allDiffLines = applyPatches.flatMap((patch) => {
+    const before = originalContents[patch.filePath] ?? "";
+    return computeFileDiff(before, patch.fullContent).map(
+      (line) =>
+        `${line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}${line.content}`
+    );
+  });
   const normalizedIntent = detectMicroEditIntent(input.task)
     ? "micro_edit"
     : "standard";
@@ -2471,6 +2478,7 @@ export async function runLlmPatchFlow(input: {
     validationWarnings: visibleWarnings,
     designSystemSignals,
     intentMismatch: intentMismatchDecision,
+    diffLines: allDiffLines,
   });
   const microEditProtection = enforceMicroEditProtection({
     taskIntent: normalizedIntent,
