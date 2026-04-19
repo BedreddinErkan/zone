@@ -77,6 +77,35 @@ describe("computeRiskScore", () => {
     expect(result.breakdown.massScope).toBe(0);
   });
 
+  it("does not treat React state reset wording as destructive or mass_scope", () => {
+    const result = computeRiskScore(
+      "reset every reducer action type in useReducer dispatch flow"
+    );
+
+    expect(result.signals).not.toContain("destructive");
+    expect(result.signals).not.toContain("mass_scope");
+    expect(result.breakdown.destructive).toBe(0);
+    expect(result.breakdown.massScope).toBe(0);
+  });
+
+  it("suppresses mass_scope in React state management context", () => {
+    const result = computeRiskScore(
+      "delete every reducer case in the dispatch action type map"
+    );
+
+    expect(result.signals).toContain("destructive");
+    expect(result.signals).not.toContain("mass_scope");
+    expect(result.breakdown.massScope).toBe(0);
+  });
+
+  it("reduces destructive weight for replace-with refactor wording", () => {
+    const result = computeRiskScore(
+      "replace delete token middleware with a safer provider"
+    );
+
+    expect(result.breakdown.destructive).toBe(20);
+  });
+
   it("stacks destructive + mass_scope for 'delete all user sessions' with compound penalty", () => {
     const result = computeRiskScore("delete all user sessions");
 

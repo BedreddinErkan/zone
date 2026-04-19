@@ -49,6 +49,18 @@ function hasContextualSoftDestructiveSignal(text: string): boolean {
   );
 }
 
+function isReactStateManagementContext(text: string): boolean {
+  return includesAny(text, [
+    "usereducer",
+    "reducer",
+    "dispatch",
+    "usestate",
+    "react state",
+    "action type",
+    "action:",
+  ]);
+}
+
 function scoreWeightedKeywordMatches(
   text: string,
   weightedKeywords: Array<{ keywords: string[]; weight: number }>
@@ -78,8 +90,28 @@ export function computeRiskScoreDetails(
   input: ComputeRiskScoreDetailsInput
 ): RiskScoreDetails {
   const normalizedTask = input.task.trim().toLowerCase();
+  const hasReactStateManagementContext =
+    isReactStateManagementContext(normalizedTask);
+  const hasSoftDestructiveKeyword = includesAny(normalizedTask, [
+    "clear",
+    "reset",
+    "clean",
+  ]);
+  const hasStrongDestructiveKeyword = includesAny(normalizedTask, [
+    "truncate",
+    "drop table",
+    "delete all",
+    "wipe",
+    "purge",
+    "delete",
+    "remove",
+    "destroy",
+    "drop",
+  ]);
+  const hasReplaceWithPattern =
+    normalizedTask.includes("replace") && normalizedTask.includes("with");
 
-  const destructiveWeight = Math.max(
+  let destructiveWeight = Math.max(
     scoreWeightedKeywordMatches(normalizedTask, [
       {
         keywords: ["truncate", "drop table", "delete all", "wipe", "purge"],
@@ -92,6 +124,16 @@ export function computeRiskScoreDetails(
     ]),
     hasContextualSoftDestructiveSignal(normalizedTask) ? 0.4 : 0
   );
+  if (
+    hasReactStateManagementContext &&
+    hasSoftDestructiveKeyword &&
+    !hasStrongDestructiveKeyword
+  ) {
+    destructiveWeight = 0;
+  }
+  if (hasReplaceWithPattern) {
+    destructiveWeight = Math.max(0, destructiveWeight - 0.3);
+  }
 
   const schemaHighWeightKeywords = [
     "migration",
@@ -163,7 +205,9 @@ export function computeRiskScoreDetails(
     "entire",
     "whole"
   ]);
-  const hasMassScopeSignal = hasDestructiveSignal && hasScopeWord;
+  const hasMassScopeSignal = hasReactStateManagementContext
+    ? false
+    : hasDestructiveSignal && hasScopeWord;
 
   const codeIntentLowRiskBonus =
     input.codeIntent === "test_add" ? -15 :
