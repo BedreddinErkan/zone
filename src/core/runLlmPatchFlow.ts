@@ -416,7 +416,7 @@ function removesValidationOrGuards(
   ];
 
   if ((diffLines?.length ?? 0) > 0) {
-    const removedLines = diffLines
+    const removedLines = (diffLines ?? [])
       .filter((line) => line.startsWith("-") && !line.startsWith("--"))
       .map((line) => stripCommentsForComparison(line.slice(1)));
 
