@@ -2091,6 +2091,20 @@ export async function runLlmPatchFlow(input: {
     task: input.task,
     taskRiskResult,
   });
+  if (taskRiskResult.score >= 71) {
+    reportProgress("Ready");
+    return {
+      ok: true,
+      patchPreview: `[BLOCKED] Risk score ${taskRiskResult.score} — task was blocked before patch generation. Detected signals: ${taskRiskResult.signals.join(", ")}.`,
+      warnings: [`[HIGH_RISK] Task risk score ${taskRiskResult.score} — blocked before patch generation.`],
+      developerConfidence: 0,
+      decisionMode: "preview_only",
+      applyPatches: [],
+      patchResults: [],
+      fileDiffs: [],
+      contextFiles: [],
+    };
+  }
   if (vagueTask) {
     reportProgress("Ready");
     perf.mark("decision evaluation complete");
