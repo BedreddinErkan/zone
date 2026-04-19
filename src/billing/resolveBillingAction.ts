@@ -12,9 +12,12 @@ export interface ResolveBillingActionInput {
 export function resolveBillingAction(
   input: ResolveBillingActionInput
 ): BillingAction {
-  if (input.mode === "byok") {
-    return "FREE";
+ if (input.mode === "byok") {
+  if (input.runsUsedThisMonth >= input.credits) {
+    return "LIMIT_EXCEEDED";
   }
+  return "CHARGE";
+}
 
   if (input.runsUsedThisMonth >= input.credits) {
     return "LIMIT_EXCEEDED";
