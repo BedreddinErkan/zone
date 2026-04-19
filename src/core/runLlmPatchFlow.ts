@@ -2535,9 +2535,22 @@ export async function runLlmPatchFlow(input: {
     confidenceCaps.length > 0
       ? Math.min(developerConfidenceBase, ...confidenceCaps)
       : developerConfidenceBase;
+  console.log(
+    "[zone-debug] confidence breakdown:",
+    JSON.stringify({
+      developerConfidenceBase,
+      confidenceCaps,
+      developerConfidence,
+      applyPatchesLength: applyPatches.length,
+      patchPlanPatchesLength: patchPlan.patches.length,
+      vagueTask,
+      intentMismatchSeverity: intentMismatchDecision.severity,
+      uiMappingRiskConfidenceCap: uiMappingRisk.confidenceCap,
+    })
+  );
 
-const normalizeForDiff = (content: string): string =>
-  content.replace(/\r\n/g, "\n").replace(/\t/g, "  ").trimEnd();
+  const normalizeForDiff = (content: string): string =>
+    content.replace(/\r\n/g, "\n").replace(/\t/g, "  ").trimEnd();
 
 reportProgress("Building diff preview...");
 const fileDiffs = applyPatches.map((patch) => {
