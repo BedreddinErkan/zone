@@ -80,11 +80,7 @@ export async function planFullPatchWithLlm(input: {
 }): Promise<FullPatchResult> {
   const client = createOpenAIClient(input.userOpenAiKey);
   const model = getModelName("high");
-const outputMode: FullPatchOutputMode =
-  input.normalizedTaskIntent === "micro_edit" ||
-  input.fileContent.length > LARGE_FILE_PATCH_THRESHOLD
-    ? "find_replace_patch"
-    : "full_content";
+const outputMode: FullPatchOutputMode = "find_replace_patch";
   const prompt = buildFullPatchPrompt({
     task: input.task,
     filePath: input.filePath,
