@@ -173,6 +173,11 @@ const DEVELOPER_GENERIC_TASK_TOKENS = new Set([
   "improve",
 ]);
 
+const VAGUE_COMBINATIONS = [
+  /^(improve|update|fix|enhance|optimize|clean up|refactor)\s+(the\s+)?(dashboard|ui|app|page|layout|component|screen|design|interface)\.?$/i,
+  /^make\s+(the\s+)?(dashboard|ui|app|page|layout|component|screen)\s+(better|cleaner|nicer|faster)\.?$/i,
+];
+
 const DEVELOPER_TASK_STOPWORDS = new Set([
   "a",
   "an",
@@ -617,6 +622,9 @@ export function isVagueDeveloperTask(task: string): boolean {
   const normalizedTask = task.trim().toLowerCase().replace(/\s+/g, " ");
   const words = normalizedTask.split(/\s+/).filter(Boolean);
   if (DEVELOPER_GENERIC_TASK_PHRASES.has(normalizedTask)) return true;
+  if (VAGUE_COMBINATIONS.some((pattern) => pattern.test(task.trim()))) {
+    return true;
+  }
 
   const tokens = normalizedTask
     .split(/[^a-z0-9]+/i)
