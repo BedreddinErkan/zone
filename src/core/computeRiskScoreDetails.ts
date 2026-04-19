@@ -181,6 +181,15 @@ export function computeRiskScoreDetails(
     "token validation",
     "skip auth",
     "bypass auth",
+    "haspaidaccess",
+    "paid access",
+    "subscription bypass",
+    "always return true",
+    "return true",
+    "bypass subscription",
+    "free access",
+    "bypass billing",
+    "override billing",
     "access token",
     "refresh token",
     "api key",
@@ -245,6 +254,19 @@ export function computeRiskScoreDetails(
   }
   if (riskBreakdown.destructive > 0 && riskBreakdown.critical > 0) {
     compoundPenalty += 15;
+  }
+  if (
+    hasCriticalSignal &&
+    includesAny(normalizedTask, [
+      "always",
+      "regardless",
+      "bypass",
+      "override",
+      "force",
+      "hardcode",
+    ])
+  ) {
+    compoundPenalty += 30;
   }
   // auth + JWT/token combination = elevated critical
   if (hasCriticalSignal && (
