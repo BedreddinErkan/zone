@@ -503,17 +503,6 @@ export function validateDeveloperOutput(input: {
     (line) =>
       `${line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}${line.content}`
   );
-  console.log(
-    "[zone-debug] validateDeveloperOutput diffLines:",
-    JSON.stringify({
-      filePath: input.filePath,
-      addedLines: computedDiffLines.filter((l) => l.startsWith("+")).length,
-      removedLines: computedDiffLines.filter((l) => l.startsWith("-")).length,
-      removedContent: computedDiffLines
-        .filter((l) => l.startsWith("-"))
-        .slice(0, 5),
-    })
-  );
   const addedDiffLines = computedDiffLines
     .filter((line) => line.startsWith("+"))
     .map((line) => line.slice(1).trim())
@@ -2573,20 +2562,6 @@ export async function runLlmPatchFlow(input: {
     confidenceCaps.length > 0
       ? Math.min(developerConfidenceBase, ...confidenceCaps)
       : developerConfidenceBase;
-    console.log(
-      "[zone-debug] confidence breakdown:",
-      JSON.stringify({
-        developerConfidenceBaseRaw,
-        developerConfidenceBase,
-        confidenceCaps,
-        developerConfidence,
-      applyPatchesLength: applyPatches.length,
-      patchPlanPatchesLength: patchPlan.patches.length,
-      vagueTask,
-      intentMismatchSeverity: intentMismatchDecision.severity,
-      uiMappingRiskConfidenceCap: uiMappingRisk.confidenceCap,
-    })
-  );
 
   const allDiffLines = fileDiffs.flatMap((fd) =>
     fd.diff.map(
