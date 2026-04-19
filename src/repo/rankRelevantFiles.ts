@@ -296,7 +296,7 @@ function scoreFile(file: RepoFile, task: string): number {
   for (const token of explicitFilenameTokens) {
     const normalizedToken = token.replace(/\.[^.]+$/, "").toLowerCase();
     if (normalizedToken === fileBasename) {
-      score += token.includes(".") ? 50 : 100;
+      score += token.includes(".") ? 200 : 500;
     }
   }
 
