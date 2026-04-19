@@ -2443,10 +2443,43 @@ export async function runLlmPatchFlow(input: {
       changedLines: countChangedLines(before, patch.fullContent),
     };
   });
+  const normalizeForDiff = (content: string): string =>
+    content.replace(/\r\n/g, "\n").replace(/\t/g, "  ").trimEnd();
+
+  reportProgress("Building diff preview...");
+  const fileDiffs = applyPatches.map((patch) => {
+    const before = normalizeForDiff(originalContents[patch.filePath] ?? "");
+    const after = normalizeForDiff(patch.fullContent);
+    const diff = computeFileDiff(before, after);
+    return {
+      filePath: patch.filePath,
+      diff,
+      addedLines: diff.filter((line) => line.type === "added").length,
+      removedLines: diff.filter((line) => line.type === "removed").length,
+    };
+  });
   const patchScope = analyzePatchScope({
     applyPatches,
     originalContents,
   });
+  const isCommentOnlyRun =
+    fileDiffs.length > 0 &&
+    fileDiffs.every((fd) =>
+      fd.diff
+        .filter((line) => line.type !== "unchanged")
+        .every(
+          (line) =>
+            line.type === "removed" || /^\s*(\/\/|\/\*|\*)/.test(line.content)
+        )
+    );
+
+  if (isCommentOnlyRun) {
+    patchScope.rewriteLikeSuspicion = false;
+    patchScope.totalChangedLines = fileDiffs.reduce(
+      (sum, fd) => sum + fd.addedLines + fd.removedLines,
+      0
+    );
+  }
   const designSystemSignals = detectDesignSystemSignals({
     addedLines: collectAddedPatchLines({
       applyPatches,
@@ -2549,21 +2582,6 @@ export async function runLlmPatchFlow(input: {
     })
   );
 
-  const normalizeForDiff = (content: string): string =>
-    content.replace(/\r\n/g, "\n").replace(/\t/g, "  ").trimEnd();
-
-reportProgress("Building diff preview...");
-const fileDiffs = applyPatches.map((patch) => {
-  const before = normalizeForDiff(originalContents[patch.filePath] ?? "");
-  const after = normalizeForDiff(patch.fullContent);
-  const diff = computeFileDiff(before, after);
-  return {
-    filePath: patch.filePath,
-    diff,
-    addedLines: diff.filter((line) => line.type === "added").length,
-    removedLines: diff.filter((line) => line.type === "removed").length,
-  };
-});
   const allDiffLines = fileDiffs.flatMap((fd) =>
     fd.diff.map(
       (line) =>
