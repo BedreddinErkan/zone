@@ -231,6 +231,9 @@ export function computeRiskScoreDetails(
   if (riskBreakdown.destructive > 0 && riskBreakdown.massScope > 0) {
     compoundPenalty += 20;
   }
+  if (riskBreakdown.destructive > 0 && riskBreakdown.schema > 0) {
+    compoundPenalty += 20;
+  }
   if (riskBreakdown.destructive > 0 && riskBreakdown.critical > 0) {
     compoundPenalty += 15;
   }
