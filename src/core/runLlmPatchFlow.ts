@@ -437,12 +437,14 @@ function removesValidationOrGuards(
       pattern.lastIndex = 0;
       const beforeCount = countPatternMatches(originalWithoutComments, [pattern]);
       pattern.lastIndex = 0;
+      const afterCount = countPatternMatches(nextWithoutComments, [pattern]);
+      pattern.lastIndex = 0;
       const removedByDiff = removedLines.some((line) => {
         pattern.lastIndex = 0;
         return pattern.test(line);
       });
       pattern.lastIndex = 0;
-      return beforeCount > 0 && removedByDiff;
+      return beforeCount > 0 && afterCount < beforeCount && removedByDiff;
     });
   }
 
