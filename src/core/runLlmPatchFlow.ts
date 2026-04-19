@@ -403,6 +403,13 @@ function removesValidationOrGuards(
   fullContent: string,
   diffLines?: string[]
 ): boolean {
+  const originalStripped = stripCommentsForComparison(originalContent).trim();
+  const fullStripped = stripCommentsForComparison(fullContent).trim();
+
+  if (originalStripped === fullStripped) {
+    return false;
+  }
+
   const originalWithoutComments = stripCommentsForComparison(originalContent);
   const nextWithoutComments = stripCommentsForComparison(fullContent);
   const patterns = [
