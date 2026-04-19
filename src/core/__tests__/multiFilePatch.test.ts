@@ -310,6 +310,116 @@ describe("multi-file patch results", () => {
     });
   });
 
+  it("rolls back hosted multi-file apply results when one file fails validation", async () => {
+    const files = [
+      buildRepoFile("src/foo.ts", "frontend"),
+      buildRepoFile("src/bar.ts", "frontend"),
+    ];
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["TS app"] });
+    rankRelevantFilesMock.mockReturnValue(
+      files.map((file, index) => ({ ...file, score: 20 - index }))
+    );
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Update two files",
+      steps: ["Edit foo", "Edit bar"],
+      suggestedFiles: files.map((file) => ({
+        path: file.path,
+        reason: "Relevant file",
+        action: "modify",
+      })),
+      risks: [],
+    });
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Update constants",
+      patches: [
+        {
+          path: "src/foo.ts",
+          operation: "modify",
+          summary: "Update foo",
+          targetHint: "foo constant",
+          contentPreview: "foo",
+        },
+        {
+          path: "src/bar.ts",
+          operation: "modify",
+          summary: "Update bar",
+          targetHint: "bar constant",
+          contentPreview: "bar",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock
+      .mockResolvedValueOnce({
+        mode: "full_content",
+        filePath: "src/foo.ts",
+        fullContent: "export const foo = 10;",
+        summary: "Updated foo",
+        warnings: [],
+      })
+      .mockResolvedValueOnce({
+        mode: "full_content",
+        filePath: "src/bar.ts",
+        fullContent:
+          "export function register(input: string) {\n  return input;\n}",
+        summary: "Removed validation",
+        warnings: [],
+      });
+
+    const { runLlmPatchFlow } = await import("../runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "update foo and simplify register",
+      repoPath: "C:/repo",
+      hostedContext: {
+        repoSummary: "TS app",
+        existingFilesSummary: "foo and bar",
+        availableFiles: files.map((file) => ({
+          path: file.path,
+          category: file.category,
+          extension: file.extension,
+        })),
+        contextFiles: [
+          {
+            path: "src/foo.ts",
+            action: "modify",
+            reason: "Relevant file",
+            content: "export const foo = 1;",
+          },
+          {
+            path: "src/bar.ts",
+            action: "modify",
+            reason: "Relevant file",
+            content:
+              "export function register(input: string) {\n  validateInput(input);\n  return input;\n}",
+          },
+        ],
+        originalContents: {
+          "src/foo.ts": "export const foo = 1;",
+          "src/bar.ts":
+            "export function register(input: string) {\n  validateInput(input);\n  return input;\n}",
+        },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.applyPatches).toEqual([]);
+      expect(result.patchResults).toEqual([
+        { filePath: "src/foo.ts", status: "failed", reason: "atomic_rollback" },
+        {
+          filePath: "src/bar.ts",
+          status: "failed",
+          reason: "developer_validation_blocked",
+        },
+      ]);
+      expect(result.warnings).toContain(
+        "[ATOMIC_ROLLBACK] One or more files failed validation. All changes in this patch set have been rolled back."
+      );
+    }
+  });
+
   it("marks protected files as skipped", async () => {
     const files = [buildRepoFile("src/ui/index.html", "frontend")];
 

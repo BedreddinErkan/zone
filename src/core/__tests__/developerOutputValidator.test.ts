@@ -130,6 +130,48 @@ describe("validateDeveloperOutput", () => {
     );
   });
 
+  it("does not block when validation patterns remain and only props/comments are added", () => {
+    const result = validateDeveloperOutput({
+      task: "add helper prop",
+      filePath: "src/api/register.ts",
+      originalContent:
+        "export function register(input: string) {\n  validateInput(input);\n  if (!input) throw new Error('required');\n  return input;\n}",
+      fullContent:
+        "export function register(input: string, label?: string) {\n  // keep validation in place\n  validateInput(input);\n  if (!input) throw new Error('required');\n  return input;\n}",
+      diffLines: [
+        "-export function register(input: string) {",
+        '+export function register(input: string, label?: string) {',
+        "+  // keep validation in place",
+      ],
+    });
+
+    expect(result.blocked).toBe(false);
+    expect(result.warnings).not.toContain(
+      "[DEVELOPER_VALIDATION_REMOVAL] Output removes input validation or guards."
+    );
+  });
+
+  it("blocks only when a removed diff line explicitly removes validation", () => {
+    const result = validateDeveloperOutput({
+      task: "simplify input handler",
+      filePath: "src/api/register.ts",
+      originalContent:
+        "export function register(input: string) {\n  validateInput(input);\n  if (!input) throw new Error('required');\n  return input;\n}",
+      fullContent:
+        "export function register(input: string) {\n  return input;\n}",
+      diffLines: [
+        "-  validateInput(input);",
+        "-  if (!input) throw new Error('required');",
+        "+  return input;",
+      ],
+    });
+
+    expect(result.blocked).toBe(true);
+    expect(result.warnings).toContain(
+      "[DEVELOPER_VALIDATION_REMOVAL] Output removes input validation or guards."
+    );
+  });
+
   it("caps vague developer tasks to preview-only confidence levels", () => {
     expect(isVagueDeveloperTask("fix bug")).toBe(true);
     expect(

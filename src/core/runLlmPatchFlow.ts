@@ -400,7 +400,8 @@ function introducesNewEmptyCatch(
 
 function removesValidationOrGuards(
   originalContent: string,
-  fullContent: string
+  fullContent: string,
+  diffLines?: string[]
 ): boolean {
   const originalWithoutComments = stripCommentsForComparison(originalContent);
   const nextWithoutComments = stripCommentsForComparison(fullContent);
@@ -413,6 +414,19 @@ function removesValidationOrGuards(
     /\bthrow\s+new\s+Error\b/g,
     /\bif\s*\(!/g,
   ];
+
+  if ((diffLines?.length ?? 0) > 0) {
+    const removedLines = diffLines
+      .filter((line) => line.startsWith("-") && !line.startsWith("--"))
+      .map((line) => stripCommentsForComparison(line.slice(1)));
+
+    return patterns.some((pattern) => {
+      const beforeCount = countPatternMatches(originalWithoutComments, [pattern]);
+      const removedByDiff = removedLines.some((line) => pattern.test(line));
+      pattern.lastIndex = 0;
+      return beforeCount > 0 && removedByDiff;
+    });
+  }
 
   return patterns.some((pattern) => {
     const beforeCount = countPatternMatches(originalWithoutComments, [pattern]);
@@ -456,6 +470,7 @@ export function validateDeveloperOutput(input: {
   filePath: string;
   fullContent: string;
   originalContent: string;
+  diffLines?: string[];
 }): {
   blocked: boolean;
   warnings: string[];
@@ -472,7 +487,13 @@ export function validateDeveloperOutput(input: {
     );
   }
 
-  if (removesValidationOrGuards(input.originalContent, input.fullContent)) {
+  if (
+    removesValidationOrGuards(
+      input.originalContent,
+      input.fullContent,
+      input.diffLines
+    )
+  ) {
     blocked = true;
     warnings.push(
       "[DEVELOPER_VALIDATION_REMOVAL] Output removes input validation or guards."
@@ -2291,6 +2312,9 @@ export async function runLlmPatchFlow(input: {
         filePath: patch.path,
         fullContent: nextContent,
         originalContent: fileContent,
+        diffLines: computeFileDiff(fileContent, nextContent).map((line) =>
+          `${line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}${line.content}`
+        ),
       });
 
       if (validation.warnings.length > 0) {
@@ -2515,6 +2539,28 @@ const fileDiffs = applyPatches.map((patch) => {
   }
 
 const hasBlockedPatch = patchResults.some(r => r.status === "failed" && r.reason === "developer_validation_blocked");
+if (
+  input.hostedContext &&
+  patchResults.some((result) => result.status === "failed") &&
+  applyPatches.length > 0
+) {
+  const rolledBackPaths = new Set(applyPatches.map((patch) => patch.filePath));
+  if (rolledBackPaths.size > 0) {
+    applyPatches = [];
+    for (const result of patchResults) {
+      if (
+        result.status === "applied" &&
+        rolledBackPaths.has(result.filePath)
+      ) {
+        result.status = "failed";
+        result.reason = "atomic_rollback";
+      }
+    }
+    syncedVisibleWarnings.push(
+      "[ATOMIC_ROLLBACK] One or more files failed validation. All changes in this patch set have been rolled back."
+    );
+  }
+}
 const finalDeveloperRiskScore = applySafePatchRiskCap({
   developerRisk: mergedDeveloperRisk,
   patchScope,
