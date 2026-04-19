@@ -421,8 +421,13 @@ function removesValidationOrGuards(
       .map((line) => stripCommentsForComparison(line.slice(1)));
 
     return patterns.some((pattern) => {
+      pattern.lastIndex = 0;
       const beforeCount = countPatternMatches(originalWithoutComments, [pattern]);
-      const removedByDiff = removedLines.some((line) => pattern.test(line));
+      pattern.lastIndex = 0;
+      const removedByDiff = removedLines.some((line) => {
+        pattern.lastIndex = 0;
+        return pattern.test(line);
+      });
       pattern.lastIndex = 0;
       return beforeCount > 0 && removedByDiff;
     });
