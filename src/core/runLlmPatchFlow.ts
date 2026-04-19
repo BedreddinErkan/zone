@@ -403,8 +403,14 @@ function removesValidationOrGuards(
   fullContent: string,
   diffLines?: string[]
 ): boolean {
-  const originalStripped = stripCommentsForComparison(originalContent).trim();
-  const fullStripped = stripCommentsForComparison(fullContent).trim();
+  const originalStripped = stripCommentsForComparison(originalContent)
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
+  const fullStripped = stripCommentsForComparison(fullContent)
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
 
   if (originalStripped === fullStripped) {
     return false;
