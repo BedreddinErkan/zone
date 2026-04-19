@@ -37,6 +37,14 @@ function sanitizeInvalidJsonBackslashes(raw: string): string {
   return raw.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
 }
 
+function sanitizeBackticksInJsonStrings(raw: string): string {
+  // Replace backticks inside JSON string values with single quotes
+  // Only replace backticks that appear inside quoted JSON strings
+  return raw.replace(/"([^"]*)"/g, (match, inner) => {
+    return '"' + inner.replace(/`/g, "'") + '"';
+  });
+}
+
 export async function planPatchPreviewWithLlm(input: {
   task: string;
   intent: TaskIntent;
@@ -95,12 +103,19 @@ export async function planPatchPreviewWithLlm(input: {
     try {
       parsed = JSON.parse(sanitizeInvalidJsonBackslashes(normalizedJsonText));
     } catch {
-      const preview = rawText.slice(0, 50);
-      const initialMessage =
-        initialError instanceof Error ? initialError.message : String(initialError);
-      throw new Error(
-        `Failed to parse patch preview JSON: ${initialMessage}. Raw preview: ${preview}`
-      );
+      try {
+        const sanitized = sanitizeBackticksInJsonStrings(
+          sanitizeInvalidJsonBackslashes(normalizedJsonText)
+        );
+        parsed = JSON.parse(sanitized);
+      } catch {
+        const preview = rawText.slice(0, 50);
+        const initialMessage =
+          initialError instanceof Error ? initialError.message : String(initialError);
+        throw new Error(
+          `Failed to parse patch preview JSON: ${initialMessage}. Raw preview: ${preview}`
+        );
+      }
     }
   }
 
