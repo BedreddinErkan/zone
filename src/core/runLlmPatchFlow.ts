@@ -481,6 +481,32 @@ export function validateDeveloperOutput(input: {
   warnings: string[];
   confidencePenalty: number;
 } {
+  const computedDiffLines = computeFileDiff(
+    input.originalContent,
+    input.fullContent
+  ).map(
+    (line) =>
+      `${line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}${line.content}`
+  );
+  const addedDiffLines = computedDiffLines
+    .filter((line) => line.startsWith("+"))
+    .map((line) => line.slice(1).trim())
+    .filter(Boolean);
+  const hasRemovedDiffLines = computedDiffLines.some((line) =>
+    line.startsWith("-")
+  );
+  if (
+    addedDiffLines.length > 0 &&
+    !hasRemovedDiffLines &&
+    addedDiffLines.every((line) => /^(?:\/\/|\/\*|\*)/.test(line))
+  ) {
+    return {
+      blocked: false,
+      warnings: [],
+      confidencePenalty: 0,
+    };
+  }
+
   const warnings: string[] = [];
   let blocked = false;
   let confidencePenalty = 0;
