@@ -45,6 +45,10 @@ function sanitizeBackticksInJsonStrings(raw: string): string {
   });
 }
 
+function sanitizeSingleQuotedKeys(raw: string): string {
+  return raw.replace(/'([^']+)'(\s*:)/g, "\"$1\"$2");
+}
+
 export async function planPatchPreviewWithLlm(input: {
   task: string;
   intent: TaskIntent;
@@ -109,12 +113,22 @@ export async function planPatchPreviewWithLlm(input: {
         );
         parsed = JSON.parse(sanitized);
       } catch {
-        const preview = rawText.slice(0, 50);
-        const initialMessage =
-          initialError instanceof Error ? initialError.message : String(initialError);
-        throw new Error(
-          `Failed to parse patch preview JSON: ${initialMessage}. Raw preview: ${preview}`
-        );
+        try {
+          parsed = JSON.parse(
+            sanitizeSingleQuotedKeys(
+              sanitizeBackticksInJsonStrings(
+                sanitizeInvalidJsonBackslashes(normalizedJsonText)
+              )
+            )
+          );
+        } catch {
+          const preview = rawText.slice(0, 50);
+          const initialMessage =
+            initialError instanceof Error ? initialError.message : String(initialError);
+          throw new Error(
+            `Failed to parse patch preview JSON: ${initialMessage}. Raw preview: ${preview}`
+          );
+        }
       }
     }
   }
