@@ -118,6 +118,10 @@ export function computeRiskScoreDetails(
         weight: 1.0,
       },
       {
+        keywords: ["skip", "bypass", "disable", "circumvent"],
+        weight: 0.7,
+      },
+      {
         keywords: ["delete", "remove", "destroy", "drop"],
         weight: 0.7,
       },
@@ -171,7 +175,12 @@ export function computeRiskScoreDetails(
     "permission",
     "permissions",
     "security",
+    "middleware",
     "jwt",
+    "jwt verification",
+    "token validation",
+    "skip auth",
+    "bypass auth",
     "access token",
     "refresh token",
     "api key",
