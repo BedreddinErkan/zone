@@ -2453,13 +2453,6 @@ export async function runLlmPatchFlow(input: {
       originalContents,
     }),
   });
-  const allDiffLines = applyPatches.flatMap((patch) => {
-    const before = originalContents[patch.filePath] ?? "";
-    return computeFileDiff(before, patch.fullContent).map(
-      (line) =>
-        `${line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}${line.content}`
-    );
-  });
   const normalizedIntent = detectMicroEditIntent(input.task)
     ? "micro_edit"
     : "standard";
@@ -2471,20 +2464,6 @@ export async function runLlmPatchFlow(input: {
   const intentMismatch = evaluateIntentPatchMismatch({
     task: input.task,
     patchScope,
-  });
-  const patchQuality = scorePatchQuality({
-    taskIntent: normalizedIntent,
-    patchScope,
-    validationWarnings: visibleWarnings,
-    designSystemSignals,
-    intentMismatch: intentMismatchDecision,
-    diffLines: allDiffLines,
-  });
-  const microEditProtection = enforceMicroEditProtection({
-    taskIntent: normalizedIntent,
-    patchScope,
-    intentMismatch: intentMismatchDecision,
-    patchQuality,
   });
   const uiMappingRisk = evaluateUiMappingRisk({
     task: input.task,
@@ -2572,6 +2551,26 @@ const fileDiffs = applyPatches.map((patch) => {
     removedLines: diff.filter((line) => line.type === "removed").length,
   };
 });
+  const allDiffLines = fileDiffs.flatMap((fd) =>
+    fd.diff.map(
+      (line) =>
+        `${line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}${line.content}`
+    )
+  );
+  const patchQuality = scorePatchQuality({
+    taskIntent: normalizedIntent,
+    patchScope,
+    validationWarnings: visibleWarnings,
+    designSystemSignals,
+    intentMismatch: intentMismatchDecision,
+    diffLines: allDiffLines,
+  });
+  const microEditProtection = enforceMicroEditProtection({
+    taskIntent: normalizedIntent,
+    patchScope,
+    intentMismatch: intentMismatchDecision,
+    patchQuality,
+  });
   const mergedDeveloperRisk = {
       score: Math.max(
         intentMismatch.risk.score,
