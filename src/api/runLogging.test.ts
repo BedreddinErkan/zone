@@ -230,7 +230,7 @@ describe("logRun billing matrix", () => {
     ]);
   });
 
-  it("does not charge for Free + BYOK", async () => {
+  it("charges for Free + BYOK", async () => {
     const fake = createFakeSupabase();
     fake.setProfileSubscriptionStatus("free");
     createClientMock.mockReturnValue(fake.supabase);
@@ -249,11 +249,16 @@ describe("logRun billing matrix", () => {
     });
 
     expect(conversationId).toBeTruthy();
-    expect(fake.rpcCalls).toEqual([]);
+    expect(fake.rpcCalls).toEqual([
+      {
+        name: "deduct_credits_and_increment_runs",
+        payload: { p_user_id: "user_123", p_credits: 1 },
+      },
+    ]);
     expect([...fake.conversations.values()]).toEqual([
       expect.objectContaining({
         mode: "byok",
-        charged_run_count: 0,
+        charged_run_count: 1,
       })
     ]);
   });
@@ -378,7 +383,12 @@ describe("logRun billing matrix", () => {
       isByok: true,
     });
 
-    expect(fake.rpcCalls).toEqual([]);
+    expect(fake.rpcCalls).toEqual([
+      {
+        name: "deduct_credits_and_increment_runs",
+        payload: { p_user_id: "user_123", p_credits: 1 },
+      },
+    ]);
   });
 
   it("still deducts when conversation persistence fails before resolver", async () => {

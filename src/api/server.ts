@@ -829,10 +829,6 @@ async function ensureRunAuthorized(
         ? "byok"
         : "hosted";
 
-  if (resolvedBillingMode === "byok") {
-    return { allowed: true };
-  }
-
   try {
     const { runsUsedThisMonth, credits, subscriptionStatus } = await getUserQuota(
       supabase,

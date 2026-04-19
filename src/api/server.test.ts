@@ -1630,6 +1630,7 @@ export function LoginForm() {
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         runs_used_this_month: 10,
+        credits: 0,
         free_limit: 10,
         subscription_status: "free",
       },
@@ -1646,7 +1647,7 @@ export function LoginForm() {
       ok: false,
       reason: "hosted_run_limit_reached",
       runsUsedThisMonth: 10,
-      credits: 10,
+      credits: 0,
     });
   });
 
@@ -1656,6 +1657,7 @@ export function LoginForm() {
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         runs_used_this_month: 10,
+        credits: 0,
         free_limit: 10,
         subscription_status: "free",
       },
@@ -1677,6 +1679,7 @@ export function LoginForm() {
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         runs_used_this_month: 10,
+        credits: 0,
         free_limit: 10,
         subscription_status: "free",
       },
@@ -1713,6 +1716,7 @@ export function LoginForm() {
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         runs_used_this_month: 10,
+        credits: 0,
         free_limit: 10,
         subscription_status: "free",
       },
@@ -1743,12 +1747,13 @@ export function LoginForm() {
     expect(body.reason).toBe("hosted_run_limit_reached");
   });
 
-  it("allows BYOK when hosted credits are exhausted", async () => {
+  it("blocks Free + BYOK when credits are exhausted", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         runs_used_this_month: 10,
+        credits: 0,
         free_limit: 10,
         subscription_status: "free",
       },
@@ -1760,16 +1765,22 @@ export function LoginForm() {
     );
 
     const body = await response.json();
-    expect(response.status).toBe(200);
-    expect(body).toEqual({ ok: true });
+    expect(response.status).toBe(402);
+    expect(body).toEqual({
+      ok: false,
+      reason: "hosted_run_limit_reached",
+      runsUsedThisMonth: 10,
+      credits: 0,
+    });
   });
 
-  it("allows Pro + BYOK without hosted credits", async () => {
+  it("allows Pro + BYOK when credits remain", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         runs_used_this_month: 250,
+        credits: 250,
         free_limit: 10,
         subscription_status: "pro",
       },
@@ -1791,6 +1802,7 @@ export function LoginForm() {
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         runs_used_this_month: 10,
+        credits: 0,
         free_limit: 10,
         subscription_status: "free",
       },
@@ -1827,6 +1839,7 @@ export function LoginForm() {
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         runs_used_this_month: 10,
+        credits: 0,
         free_limit: 10,
         subscription_status: "free",
       },
@@ -1863,6 +1876,7 @@ export function LoginForm() {
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         runs_used_this_month: 10,
+        credits: 0,
         free_limit: 10,
         subscription_status: "free",
       },
@@ -1903,13 +1917,13 @@ export function LoginForm() {
     expect(body).toEqual({ ok: true });
   });
 
-  it("returns hosted_run_limit_reached from /api/check-access for a pro user at the monthly limit", async () => {
+  it("returns hosted_run_limit_reached from /api/check-access for a pro user with no credits remaining", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
         runs_used_this_month: 1000,
-        credits: 250,
+        credits: 0,
         subscription_status: "pro",
       },
       error: null,
@@ -1925,7 +1939,7 @@ export function LoginForm() {
       ok: false,
       reason: "hosted_run_limit_reached",
       runsUsedThisMonth: 1000,
-      credits: 250,
+      credits: 0,
     });
   });
 
