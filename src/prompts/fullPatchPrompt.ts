@@ -224,7 +224,14 @@ ${fileContent}
 INSTRUCTIONS
 ${renameInstruction}${uiRulesInstruction}${scopeControlInstruction}${microEditInstruction}- Apply the task to the file above
 - Return the COMPLETE updated file content
-- Preserve all existing code that is unrelated to the task
+- CRITICAL: Preserve ALL existing code that is unrelated to the task
+- Do NOT remove, rename, or restructure existing functions, components, state variables, or UI elements unless the task explicitly asks you to
+- Do NOT simplify, clean up, or refactor existing code
+- Do NOT remove existing features like forms, filters, stats, or other UI sections that are not mentioned in the task
+- Only ADD or MODIFY the specific code mentioned in the task
+- The output must contain everything the original file had, plus the requested change
+- If you are unsure whether something should be preserved, preserve it
+- NEVER return \`return null\` or placeholder comments like \`// actual code would continue\` - always return the complete file
 - Keep existing imports, exports, formatting, and naming conventions
 - Do not add markdown fences or explanations
 - If the file does not need changes, return it unchanged
