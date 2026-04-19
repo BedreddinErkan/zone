@@ -33,6 +33,15 @@ function stripJsonFences(raw: string): string {
     .trim();
 }
 
+function sanitizeTemplateLiterals(raw: string): string {
+  // Replace `...` template literals used as JSON values with "..."
+  return raw.replace(/`([^`]*)`/g, (_, inner) => {
+    // Escape any double quotes inside
+    const escaped = inner.replace(/"/g, '\\"').replace(/\n/g, "\\n");
+    return `"${escaped}"`;
+  });
+}
+
 function sanitizeInvalidJsonBackslashes(raw: string): string {
   return raw.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
 }
@@ -99,25 +108,26 @@ export async function planPatchPreviewWithLlm(input: {
   const rawText = response.output_text || "";
   const jsonText = extractJson(rawText);
   const normalizedJsonText = stripJsonFences(jsonText);
+  const sanitized = sanitizeTemplateLiterals(normalizedJsonText);
   let parsed: unknown;
 
   try {
-    parsed = JSON.parse(normalizedJsonText);
+    parsed = JSON.parse(sanitized);
   } catch (initialError) {
     try {
-      parsed = JSON.parse(sanitizeInvalidJsonBackslashes(normalizedJsonText));
+      parsed = JSON.parse(sanitizeInvalidJsonBackslashes(sanitized));
     } catch {
       try {
-        const sanitized = sanitizeBackticksInJsonStrings(
-          sanitizeInvalidJsonBackslashes(normalizedJsonText)
+        const sanitizedBackticks = sanitizeBackticksInJsonStrings(
+          sanitizeInvalidJsonBackslashes(sanitized)
         );
-        parsed = JSON.parse(sanitized);
+        parsed = JSON.parse(sanitizedBackticks);
       } catch {
         try {
           parsed = JSON.parse(
             sanitizeSingleQuotedKeys(
               sanitizeBackticksInJsonStrings(
-                sanitizeInvalidJsonBackslashes(normalizedJsonText)
+                sanitizeInvalidJsonBackslashes(sanitized)
               )
             )
           );
