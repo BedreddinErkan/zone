@@ -10,6 +10,7 @@ import type { PatchIntentType } from "./patchScopeValidator.js";
 export interface PatchQualityScorerInput {
   taskIntent: TaskIntent;
   patchScope: DeveloperPatchScope;
+  diffLines?: string[];
   validationWarnings?: string[];
   designSystemSignals?: DesignSystemSignals | null;
   intentMismatch?: Pick<
@@ -29,6 +30,40 @@ export interface PatchQualityScorerResult {
 
 function clampScore(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function isDynamicValueLine(line: string): boolean {
+  return /(?:item\.|selected|current|dynamic|\.name|\.label|\.title|\.value|\.text|\.url|\.id)/i.test(
+    line
+  );
+}
+
+function isStaticStringReplacementLine(line: string): boolean {
+  const content = line.slice(1).trim();
+
+  if (!/^(['"`])[^'"`]*\1$/.test(content)) {
+    return false;
+  }
+
+  return !/[A-Za-z_$][\w$]*\s*(?:\.|\(|\[)/.test(content);
+}
+
+function detectsDynamicValueReplacement(diffLines: string[]): boolean {
+  const removedLines = diffLines.filter(
+    (line) => line.startsWith("-") && !line.startsWith("---")
+  );
+  const addedLines = diffLines.filter(
+    (line) => line.startsWith("+") && !line.startsWith("+++")
+  );
+
+  if (removedLines.length === 0 || addedLines.length === 0) {
+    return false;
+  }
+
+  return (
+    removedLines.some(isDynamicValueLine) &&
+    addedLines.some(isStaticStringReplacementLine)
+  );
 }
 
 export function scorePatchQuality(
@@ -128,6 +163,13 @@ export function scorePatchQuality(
     if (input.intentMismatch.warnings.length > 0) {
       qualityWarnings.push(...input.intentMismatch.warnings);
     }
+  }
+
+  if (detectsDynamicValueReplacement(input.diffLines ?? [])) {
+    semanticAlignmentScore -= 15;
+    qualityWarnings.push(
+      "Patch replaces dynamic value with static string — consider using a fallback chain instead."
+    );
   }
 
   patchSizeScore = clampScore(patchSizeScore);

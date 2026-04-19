@@ -15,6 +15,7 @@ export type ApplyFlowResult = {
   operationsApplied: number;
   filesTouched: string[];
   backupCreated: boolean;
+  rolledBack?: boolean;
   message: string;
   operationResults: ApplyOperationResult[];
 };

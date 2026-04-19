@@ -38,6 +38,7 @@ export type DetectSemanticRiskInput = {
   filePath: string;
   beforeContent: string;
   afterContent: string;
+  diffLines?: string[];
 };
 
 export type SemanticRiskRule = (

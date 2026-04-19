@@ -122,6 +122,14 @@ export async function updateUser(req: Request, res: Response) {
   } catch {}
 }
 `.trim(),
+      diffLines: [
+        "-  requireAuth(req);",
+        "-  const schema = z.object({ email: z.string().email() });",
+        "-  const payload = schema.parse(req.body);",
+        '+    console.log(process.env);',
+        "+    return service.update(req.body);",
+        "+  } catch {}",
+      ],
     });
 
     expect(risks.map((risk) => risk.code)).toEqual([
@@ -143,5 +151,53 @@ export async function updateUser(req: Request, res: Response) {
         critical: 1,
       },
     });
+  });
+
+  it("does not flag validation removed for comment-only added diff lines", () => {
+    const risks = detectSemanticRisks({
+      filePath: "src/api/userRoute.ts",
+      beforeContent: `
+export async function updateUser(req: Request, res: Response) {
+  const schema = z.object({ email: z.string().email() });
+  return schema.parse(req.body);
+}
+`.trim(),
+      afterContent: `
+export async function updateUser(req: Request, res: Response) {
+  // validation stays documented here
+  /* schema usage explained for future cleanup */
+  return req.body;
+}
+`.trim(),
+      diffLines: [
+        "+ // validation stays documented here",
+        "+ /* schema usage explained for future cleanup */",
+      ],
+    });
+
+    expect(risks.map((risk) => risk.code)).not.toContain("VALIDATION_REMOVED");
+  });
+
+  it("does not flag validation removed without an explicit removed validation diff line", () => {
+    const risks = detectSemanticRisks({
+      filePath: "src/api/userRoute.ts",
+      beforeContent: `
+export async function updateUser(req: Request, res: Response) {
+  const schema = z.object({ email: z.string().email() });
+  return schema.parse(req.body);
+}
+`.trim(),
+      afterContent: `
+export async function updateUser(req: Request, res: Response) {
+  return req.body;
+}
+`.trim(),
+      diffLines: [
+        "-  const payload = buildPayload(req.body);",
+        "+  return req.body;",
+      ],
+    });
+
+    expect(risks.map((risk) => risk.code)).not.toContain("VALIDATION_REMOVED");
   });
 });

@@ -17,6 +17,24 @@ function findMatchedTokens(content: string, patterns: RegExp[]): string[] {
     .filter((match, index, values) => values.indexOf(match) === index);
 }
 
+export function isCommentOnlyDiff(diffLines: string[]): boolean {
+  const addedLines = diffLines
+    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+    .map((line) => line.slice(1).trim())
+    .filter((line) => line.length > 0);
+
+  if (addedLines.length === 0) {
+    return false;
+  }
+
+  return addedLines.every(
+    (line) =>
+      line.startsWith("//") ||
+      line.startsWith("/*") ||
+      line.startsWith("*")
+  );
+}
+
 function buildRisk(
   input: DetectSemanticRiskInput,
   code: SemanticRiskCode,
@@ -112,14 +130,42 @@ export const detectRoleCheckRemoved: SemanticRiskRule = (input) =>
   );
 
 export const detectValidationRemoved: SemanticRiskRule = (input) =>
-  collectRemovedRisk(
-    input,
-    "VALIDATION_REMOVED",
-    "validation",
-    "Validation logic appears to have been removed from the file.",
-    validationPatterns,
-    "high"
-  );
+  {
+    if (isCommentOnlyDiff(input.diffLines ?? [])) {
+      return [];
+    }
+
+    const beforeMatches = findMatchedTokens(input.beforeContent, validationPatterns);
+    if (beforeMatches.length === 0) {
+      return [];
+    }
+
+    const removedLines = (input.diffLines ?? [])
+      .filter((line) => line.startsWith("-") && !line.startsWith("---"))
+      .map((line) => line.slice(1))
+      .join("\n");
+    const removedMatches = findMatchedTokens(removedLines, validationPatterns);
+
+    if (removedMatches.length === 0) {
+      return [];
+    }
+
+    const afterMatches = findMatchedTokens(input.afterContent, validationPatterns);
+
+    return [
+      buildRisk(
+        input,
+        "VALIDATION_REMOVED",
+        "high",
+        "validation",
+        "Validation logic appears to have been removed from the file.",
+        {
+          beforeMatches,
+          afterMatches,
+        }
+      ),
+    ];
+  };
 
 export const detectRateLimitRemoved: SemanticRiskRule = (input) =>
   collectRemovedRisk(

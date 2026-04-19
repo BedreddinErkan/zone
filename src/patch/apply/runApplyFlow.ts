@@ -1,4 +1,6 @@
-import { backupFile } from "../backupFile";
+import fs from "node:fs";
+import path from "node:path";
+
 import type { PatchPlan } from "../conversion/generatedPlanConversionTypes";
 import type {
   ApplyFlowResult,
@@ -10,10 +12,14 @@ export function runApplyFlow(
   backupRoot: string
 ): ApplyFlowResult {
   const operationsAttempted = patchPlan.operations.length;
+  const backupPaths = Array.from(
+    new Set(patchPlan.operations.map((operation) => operation.filePath))
+  );
   let operationsApplied = 0;
   const filesTouched: string[] = [];
   let backupCreated = false;
   const operationResults: ApplyOperationResult[] = [];
+  const backupEntries: Array<{ originalPath: string; backupPath: string }> = [];
 
   try {
     if (operationsAttempted === 0) {
@@ -28,16 +34,39 @@ export function runApplyFlow(
       };
     }
 
+    const backupTimestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupDir = path.join(backupRoot, backupTimestamp);
+
+    const rollbackApplied = () => {
+      for (const entry of backupEntries) {
+        fs.mkdirSync(path.dirname(entry.originalPath), { recursive: true });
+        fs.copyFileSync(entry.backupPath, entry.originalPath);
+      }
+    };
+
+    for (const [index, filePath] of backupPaths.entries()) {
+      if (!fs.existsSync(filePath)) {
+        continue;
+      }
+
+      if (!backupCreated) {
+        fs.mkdirSync(backupDir, { recursive: true });
+      }
+
+      const backupPath = path.join(
+        backupDir,
+        `${index}-${path.basename(filePath)}`
+      );
+      fs.copyFileSync(filePath, backupPath);
+      backupEntries.push({ originalPath: filePath, backupPath });
+      backupCreated = true;
+    }
+
     for (const [index, operation] of patchPlan.operations.entries()) {
       const filePath = operation.filePath;
 
       try {
-        if (!backupCreated) {
-          backupFile(filePath, backupRoot);
-          backupCreated = true;
-        }
-
-        // burada mevcut gerçek apply mantığın kalmalı
+        // Existing apply logic stays here.
 
         operationsApplied += 1;
 
@@ -64,13 +93,16 @@ export function runApplyFlow(
               : "Operation failed due to an unknown error."
         });
 
+        rollbackApplied();
+
         return {
           status: "failed",
           operationsAttempted,
           operationsApplied,
           filesTouched,
           backupCreated,
-          message: "Apply failed during operation execution.",
+          rolledBack: true,
+          message: "Apply failed and all changes were rolled back.",
           operationResults
         };
       }

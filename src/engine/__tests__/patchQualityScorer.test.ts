@@ -92,4 +92,22 @@ describe("scorePatchQuality", () => {
       "Micro-edit task produced a larger-than-expected patch."
     );
   });
+
+  it("reduces quality when a dynamic value is replaced with a static string", () => {
+    const cleanResult = scorePatchQuality(buildInput());
+    const result = scorePatchQuality(
+      buildInput({
+        diffLines: [
+          "- selectedUpload.file_name",
+          '+ "Patient scan image"',
+        ],
+      })
+    );
+
+    expect(result.semanticAlignmentScore).toBe(85);
+    expect(result.qualityScore).toBeLessThan(cleanResult.qualityScore);
+    expect(result.qualityWarnings).toContain(
+      "Patch replaces dynamic value with static string — consider using a fallback chain instead."
+    );
+  });
 });
