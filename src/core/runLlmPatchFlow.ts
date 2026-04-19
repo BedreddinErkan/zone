@@ -488,6 +488,17 @@ export function validateDeveloperOutput(input: {
     (line) =>
       `${line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}${line.content}`
   );
+  console.log(
+    "[zone-debug] validateDeveloperOutput diffLines:",
+    JSON.stringify({
+      filePath: input.filePath,
+      addedLines: computedDiffLines.filter((l) => l.startsWith("+")).length,
+      removedLines: computedDiffLines.filter((l) => l.startsWith("-")).length,
+      removedContent: computedDiffLines
+        .filter((l) => l.startsWith("-"))
+        .slice(0, 5),
+    })
+  );
   const addedDiffLines = computedDiffLines
     .filter((line) => line.startsWith("+"))
     .map((line) => line.slice(1).trim())
