@@ -110,12 +110,48 @@ export function computeRiskScoreDetails(
   ]);
   const hasReplaceWithPattern =
     normalizedTask.includes("replace") && normalizedTask.includes("with");
+  const hasCriticalSignal = includesAny(normalizedTask, [
+    "auth",
+    "authentication",
+    "authorization",
+    "billing",
+    "payment",
+    "payments",
+    "permission",
+    "permissions",
+    "security",
+    "middleware",
+    "jwt",
+    "jwt verification",
+    "token validation",
+    "skip auth",
+    "bypass auth",
+    "haspaidaccess",
+    "paid access",
+    "subscription bypass",
+    "always return true",
+    "return true",
+    "bypass subscription",
+    "free access",
+    "bypass billing",
+    "override billing",
+    "access token",
+    "refresh token",
+    "api key",
+    "secret key",
+    "production",
+    "prod env",
+  ]);
 
   let destructiveWeight = Math.max(
     scoreWeightedKeywordMatches(normalizedTask, [
       {
         keywords: ["truncate", "drop table", "delete all", "wipe", "purge"],
         weight: 1.0,
+      },
+      {
+        keywords: ["modify"],
+        weight: hasCriticalSignal ? 0.4 : 0,
       },
       {
         keywords: ["skip", "bypass", "disable", "circumvent"],
@@ -164,39 +200,6 @@ export function computeRiskScoreDetails(
           weight: 0.6,
         },
       ]) * 25;
-
-  const hasCriticalSignal = includesAny(normalizedTask, [
-    "auth",
-    "authentication",
-    "authorization",
-    "billing",
-    "payment",
-    "payments",
-    "permission",
-    "permissions",
-    "security",
-    "middleware",
-    "jwt",
-    "jwt verification",
-    "token validation",
-    "skip auth",
-    "bypass auth",
-    "haspaidaccess",
-    "paid access",
-    "subscription bypass",
-    "always return true",
-    "return true",
-    "bypass subscription",
-    "free access",
-    "bypass billing",
-    "override billing",
-    "access token",
-    "refresh token",
-    "api key",
-    "secret key",
-    "production",
-    "prod env",
-  ]);
 
   const hasLowRiskSignal = includesAny(normalizedTask, [
     "copy",
@@ -266,7 +269,13 @@ export function computeRiskScoreDetails(
       "hardcode",
     ])
   ) {
-    compoundPenalty += 30;
+    compoundPenalty += 50;
+  }
+  if (
+    hasCriticalSignal &&
+    includesAny(normalizedTask, ["modify", "change", "update", "set"])
+  ) {
+    compoundPenalty += 15;
   }
   // auth + JWT/token combination = elevated critical
   if (hasCriticalSignal && (
