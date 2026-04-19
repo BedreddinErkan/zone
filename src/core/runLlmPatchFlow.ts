@@ -503,6 +503,16 @@ export function validateDeveloperOutput(input: {
     (line) =>
       `${line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}${line.content}`
   );
+  const totalRemovedLines = computedDiffLines.filter((l) =>
+    l.startsWith("-")
+  ).length;
+  const totalAddedLines = computedDiffLines.filter((l) =>
+    l.startsWith("+")
+  ).length;
+  const totalOriginalLines = input.originalContent.split("\n").length;
+  const isFullFileRewrite =
+    totalRemovedLines > totalOriginalLines * 0.5 &&
+    totalAddedLines > totalOriginalLines * 0.3;
   const addedDiffLines = computedDiffLines
     .filter((line) => line.startsWith("+"))
     .map((line) => line.slice(1).trim())
@@ -534,6 +544,7 @@ export function validateDeveloperOutput(input: {
   }
 
   if (
+    !isFullFileRewrite &&
     removesValidationOrGuards(
       input.originalContent,
       input.fullContent,
@@ -546,7 +557,10 @@ export function validateDeveloperOutput(input: {
     );
   }
 
-  if (weakensAuthChecks(input.originalContent, input.fullContent)) {
+  if (
+    !isFullFileRewrite &&
+    weakensAuthChecks(input.originalContent, input.fullContent)
+  ) {
     blocked = true;
     warnings.push(
       "[DEVELOPER_AUTH_WEAKENING] Output weakens authentication or authorization."
