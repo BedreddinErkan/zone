@@ -141,6 +141,10 @@ export function computeRiskScoreDetails(
     "alter table",
     "drop column",
     "add column",
+    "alter",
+    "drop the",
+    "add a new column",
+    "rename column",
   ];
   const hasHighWeightSchemaSignal = schemaHighWeightKeywords.some(
     (keyword) =>

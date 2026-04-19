@@ -2357,6 +2357,24 @@ export async function runLlmPatchFlow(input: {
         continue;
       }
 
+      if (
+        nextContent.includes("--- FIND ---") ||
+        nextContent.includes("--- REPLACE ---")
+      ) {
+        const patchConflictWarning = buildPatchConflictWarning({
+          filePath: patch.path,
+          reason: "patch_format_leaked",
+        });
+        internalWarnings.push(patchConflictWarning);
+        visibleWarnings.push(patchConflictWarning);
+        patchResults.push({
+          filePath: patch.path,
+          status: "failed",
+          reason: "patch_format_leaked",
+        });
+        continue;
+      }
+
       const suspiciousUiOverwrite = detectSuspiciousUiOverwrite({
         task: input.task,
         filePath: patch.path,
