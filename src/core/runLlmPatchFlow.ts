@@ -2549,15 +2549,18 @@ export async function runLlmPatchFlow(input: {
       !warning.startsWith("[ELEVATED_RISK] Task risk score")
   );
 
-    let developerConfidenceBase = calculateDeveloperConfidence({
+    const developerConfidenceBaseRaw = calculateDeveloperConfidence({
       warnings: syncedInternalWarnings,
-    changedFileCount: applyPatches.length,
-    changedFileMetrics,
-    vagueTask,
-  });
-  if (applyPatches.length === 0 && patchPlan.patches.length > 0) {
-    developerConfidenceBase = Math.min(developerConfidenceBase, 40);
-  }
+      changedFileCount: applyPatches.length,
+      changedFileMetrics,
+      vagueTask,
+    });
+    let developerConfidenceBase = isCommentOnlyRun
+      ? Math.max(developerConfidenceBaseRaw, 85)
+      : developerConfidenceBaseRaw;
+    if (applyPatches.length === 0 && patchPlan.patches.length > 0) {
+      developerConfidenceBase = Math.min(developerConfidenceBase, 40);
+    }
   const confidenceCaps = [
     intentMismatchDecision.severity === "medium"
       ? intentMismatchDecision.confidenceCap
@@ -2568,12 +2571,13 @@ export async function runLlmPatchFlow(input: {
     confidenceCaps.length > 0
       ? Math.min(developerConfidenceBase, ...confidenceCaps)
       : developerConfidenceBase;
-  console.log(
-    "[zone-debug] confidence breakdown:",
-    JSON.stringify({
-      developerConfidenceBase,
-      confidenceCaps,
-      developerConfidence,
+    console.log(
+      "[zone-debug] confidence breakdown:",
+      JSON.stringify({
+        developerConfidenceBaseRaw,
+        developerConfidenceBase,
+        confidenceCaps,
+        developerConfidence,
       applyPatchesLength: applyPatches.length,
       patchPlanPatchesLength: patchPlan.patches.length,
       vagueTask,
