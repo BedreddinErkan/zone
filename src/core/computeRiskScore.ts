@@ -47,7 +47,7 @@ const ROLE_MODIFIERS: Record<string, RoleModifier> = {
     destructiveMultiplier: 0.8,
     criticalMultiplier: 1.2,
     massScopeMultiplier: 1.0,
-    schemaMultiplier: 0.0,
+    schemaMultiplier: 1.0,
   },
   data_analyst: {
     destructiveMultiplier: 1.5,
