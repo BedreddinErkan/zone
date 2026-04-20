@@ -5,8 +5,14 @@ import express from "express";
 // - LEMONSQUEEZY_WEBHOOK_SECRET
 
 const createLemonCheckoutRouter = express.Router();
+const PRO_VARIANT_ID = "1512928";
+const UNLIMITED_VARIANT_ID = "1552852";
 
-createLemonCheckoutRouter.post("/", async (req, res) => {
+async function handleCreateCheckout(
+  req: express.Request,
+  res: express.Response,
+  variantId: string
+): Promise<void> {
   const userId =
     typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
   const apiKey =
@@ -55,7 +61,8 @@ createLemonCheckoutRouter.post("/", async (req, res) => {
             variant: {
               data: {
                 type: "variants",
-id: "1512928",              },
+                id: variantId,
+              },
             },
           },
         },
@@ -86,6 +93,16 @@ id: "1512928",              },
       reason: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+createLemonCheckoutRouter.post("/", async (req, res) => {
+  const variantId =
+    req.body?.plan === "unlimited" ? UNLIMITED_VARIANT_ID : PRO_VARIANT_ID;
+  await handleCreateCheckout(req, res, variantId);
+});
+
+createLemonCheckoutRouter.post("/unlimited", async (req, res) => {
+  await handleCreateCheckout(req, res, UNLIMITED_VARIANT_ID);
 });
 
 export default createLemonCheckoutRouter;
