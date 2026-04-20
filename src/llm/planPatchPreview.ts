@@ -59,27 +59,59 @@ function sanitizeSingleQuotedKeys(raw: string): string {
 }
 
 function extractAndRepairJson(raw: string): string {
-  // 1. Apply all existing sanitizations first
-  let text = sanitizeTemplateLiterals(raw);
-  text = sanitizeInvalidJsonBackslashes(text);
-  text = sanitizeBackticksInJsonStrings(text);
-  text = sanitizeSingleQuotedKeys(text);
+  // Step 1: Extract JSON boundaries
+  const first = raw.indexOf("{");
+  const last = raw.lastIndexOf("}");
+  if (first === -1 || last === -1) throw new Error("No JSON found");
+  let json = raw.slice(first, last + 1);
 
-  // 2. Find JSON boundaries
-  const first = text.indexOf("{");
-  const last = text.lastIndexOf("}");
-  if (first < 0 || last <= first) throw new Error("No JSON found");
-  text = text.slice(first, last + 1);
+  // Step 2: Replace template literals with quoted strings
+  json = json.replace(/`([^`]*)`/g, (_, inner) =>
+    '"' + inner.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+      .replace(/\n/g, "\\n").replace(/\r/g, "\\r")
+      .replace(/\t/g, "\\t") + '"'
+  );
 
-  // 3. Fix unescaped newlines inside string values
-  text = text.replace(/"((?:[^"\\]|\\.)*)"/g, (match) => {
-    return match
-      .replace(/\n/g, "\\n")
-      .replace(/\r/g, "\\r")
-      .replace(/\t/g, "\\t");
-  });
-
-  return text;
+  // Step 3: Fix unescaped control characters inside string values
+  // Parse character by character to find string boundaries
+  let result = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i];
+    if (escaped) {
+      result += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      result += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      result += ch;
+      continue;
+    }
+    if (inString) {
+      if (ch === "\n") {
+        result += "\\n";
+        continue;
+      }
+      if (ch === "\r") {
+        result += "\\r";
+        continue;
+      }
+      if (ch === "\t") {
+        result += "\\t";
+        continue;
+      }
+      if (ch === "\u0000") continue;
+    }
+    result += ch;
+  }
+  return result;
 }
 
 export async function planPatchPreviewWithLlm(input: {
