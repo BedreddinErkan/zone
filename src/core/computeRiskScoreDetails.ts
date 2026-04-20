@@ -193,14 +193,15 @@ export function computeRiskScoreDetails(
     }
     // "column" alone in UI context should not trigger schema
     if (
-      keyword === "column" &&
+      (keyword === "column" || keyword === "add column") &&
       !includesAny(normalizedTask, [
         "alter",
         "drop",
-        "add column",
         "database",
         "migration",
         "sql",
+        "alter table",
+        "drop table",
         "table",
       ])
     ) {
