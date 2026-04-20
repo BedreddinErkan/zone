@@ -24,7 +24,7 @@ export const patchPreviewItemSchema = z.object({
 export const llmPatchPlanSchema = z.object({
   summary: z.string(),
   patches: z.array(patchPreviewItemSchema),
-  warnings: z.array(z.string())
+  warnings: z.array(z.string()).optional().default([])
 });
 
 export type LlmFeaturePlanSchema = z.infer<typeof llmFeaturePlanSchema>;
