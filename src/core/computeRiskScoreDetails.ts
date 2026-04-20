@@ -202,7 +202,6 @@ export function computeRiskScoreDetails(
         "sql",
         "alter table",
         "drop table",
-        "table",
       ])
     ) {
       return false;
