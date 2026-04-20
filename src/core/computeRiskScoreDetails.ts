@@ -213,7 +213,7 @@ export function computeRiskScoreDetails(
     ? 0
     : scoreWeightedKeywordMatches(normalizedTask, [
         {
-          keywords: ["schema", "database", "db", "column"],
+          keywords: ["schema", "database", "db"],
           weight: 0.6,
         },
       ]) * 25;
