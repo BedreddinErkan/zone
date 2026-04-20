@@ -185,12 +185,17 @@ ${fileContent}
 
 INSTRUCTIONS
 ${renameInstruction}${uiRulesInstruction}${scopeControlInstruction}${microEditInstruction}- The target file is large. Return ONLY the specific change as a FIND/REPLACE patch.
-- Do NOT return the full file.
-- Do NOT reconstruct the whole document.
-- Modify only the smallest existing block needed.
-- Your FIND block must be exact existing text from the file, usually 3-10 lines around the change.
-- Your REPLACE block must contain only the updated version of that exact block.
-- Do not add markdown fences or explanations.
+  - Do NOT return the full file.
+  - Do NOT reconstruct the whole document.
+  - Modify only the smallest existing block needed.
+  - Your FIND block must be exact existing text from the file, usually 3-10 lines around the change.
+  - Your REPLACE block must contain only the updated version of that exact block.
+  - Do NOT include "--- END ---" or any marker after REPLACE block
+  - Do NOT include any FILE: headers or context file contents in your output
+  - Do NOT include CURRENT FILE CONTENT or INSTRUCTIONS in output
+  - Your entire response must be ONLY the FIND/REPLACE patch, nothing else
+  - If no change is needed, output exactly: NO_CHANGE_NEEDED
+  - Do not add markdown fences or explanations.
 
 OUTPUT FORMAT
 Return plain text only in this exact format:
