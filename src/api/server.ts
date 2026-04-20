@@ -822,14 +822,30 @@ async function ensureRunAuthorized(
     return { allowed: true };
   }
 
-  const resolvedBillingMode =
-    options?.billingMode === "hosted" || options?.billingMode === "byok"
-      ? options.billingMode
-      : isByok
-        ? "byok"
-        : "hosted";
-
   try {
+    const profileQuery = supabase.from("profiles") as unknown as {
+      select: (columns: string) => {
+        eq: (column: string, value: string) => {
+          maybeSingle: () => Promise<{
+            data?: { billing_mode?: string | null } | null;
+            error?: { message?: string } | null;
+          }>;
+        };
+      };
+    };
+    const { data: profileData } = await profileQuery
+      .select("billing_mode")
+      .eq("clerk_user_id", authenticatedUserId)
+      .maybeSingle();
+    const profileBillingMode = profileData?.billing_mode;
+    const resolvedBillingMode =
+      profileBillingMode === "byok"
+        ? "byok"
+        : options?.billingMode === "hosted" || options?.billingMode === "byok"
+          ? options.billingMode
+          : isByok
+            ? "byok"
+            : "hosted";
     const { runsUsedThisMonth, credits, subscriptionStatus } = await getUserQuota(
       supabase,
       authenticatedUserId
