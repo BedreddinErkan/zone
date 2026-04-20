@@ -186,11 +186,28 @@ export function computeRiskScoreDetails(
     "add a new column",
     "rename column",
   ];
-  const hasHighWeightSchemaSignal = schemaHighWeightKeywords.some(
-    (keyword) =>
-      normalizedTask.includes(keyword) &&
-      !isSchemaKeywordPrecededByTestOrMock(normalizedTask, keyword)
-  );
+  const hasHighWeightSchemaSignal = schemaHighWeightKeywords.some((keyword) => {
+    if (!normalizedTask.includes(keyword)) return false;
+    if (isSchemaKeywordPrecededByTestOrMock(normalizedTask, keyword)) {
+      return false;
+    }
+    // "column" alone in UI context should not trigger schema
+    if (
+      keyword === "column" &&
+      !includesAny(normalizedTask, [
+        "alter",
+        "drop",
+        "add column",
+        "database",
+        "migration",
+        "sql",
+        "table",
+      ])
+    ) {
+      return false;
+    }
+    return true;
+  });
   const highWeightSchemaScore = hasHighWeightSchemaSignal ? 25 : 0;
   const reducedSchemaScore = hasSchemaContextExemption(normalizedTask)
     ? 0
