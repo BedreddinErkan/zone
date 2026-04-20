@@ -3,6 +3,8 @@ import express from "express";
 import { createClient } from "@supabase/supabase-js";
 
 const lemonWebhookRouter = express.Router();
+const PRO_VARIANT_ID = "1512928";
+const UNLIMITED_VARIANT_ID = "1552852";
 
 function getSupabaseAdminClient() {
   const url = process.env.SUPABASE_URL;
@@ -24,10 +26,16 @@ async function updateProfileSubscription(input: {
   clerkUserId: string;
   subscriptionStatus: "pro" | "free";
   credits: number;
+  billingMode?: "hosted" | "byok";
 }): Promise<void> {
   const supabase = getSupabaseAdminClient();
   const profilesTable = supabase.from("profiles") as unknown as {
-    update: (values: { subscription_status: string; credits: number; runs_used_this_month: number }) => {
+    update: (values: {
+      subscription_status: string;
+      credits: number;
+      runs_used_this_month: number;
+      billing_mode?: "hosted" | "byok";
+    }) => {
       eq: (
         column: string,
         value: string
@@ -39,6 +47,7 @@ async function updateProfileSubscription(input: {
       subscription_status: input.subscriptionStatus,
       credits: input.credits,
       runs_used_this_month: 0,
+      ...(input.billingMode ? { billing_mode: input.billingMode } : {}),
     })
     .eq("clerk_user_id", input.clerkUserId);
   if (result?.error) {
@@ -51,6 +60,11 @@ type LemonWebhookPayload = {
     event_name?: string;
     custom_data?: {
       user_id?: string;
+    };
+  };
+  data?: {
+    attributes?: {
+      variant_id?: number;
     };
   };
 };
@@ -93,10 +107,13 @@ lemonWebhookRouter.post("/", async (req, res) => {
         eventName === "order_created"
       )
     ) {
+      const variantId = String(payload.data?.attributes?.variant_id ?? "");
+      const isUnlimited = variantId === UNLIMITED_VARIANT_ID;
       await updateProfileSubscription({
         clerkUserId,
         subscriptionStatus: "pro",
-        credits: 250,
+        credits: isUnlimited ? 999999 : 250,
+        billingMode: isUnlimited ? "byok" : "hosted",
       });
     }
 
@@ -108,6 +125,7 @@ lemonWebhookRouter.post("/", async (req, res) => {
         clerkUserId,
         subscriptionStatus: "free",
         credits: 10,
+        billingMode: "hosted",
       });
     }
 if (
