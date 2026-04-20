@@ -2433,14 +2433,27 @@ export async function runLlmPatchFlow(input: {
         continue;
       }
 
-      applyResults.push({
-        filePath: patch.path,
-        fullContent: nextContent,
-      });
-      patchResults.push({
-        filePath: patch.path,
-        status: "applied",
-      });
+        applyResults.push({
+          filePath: patch.path,
+          fullContent: nextContent,
+        });
+        if (
+          nextContent.includes("--- FIND ---") ||
+          nextContent.includes("--- REPLACE ---") ||
+          nextContent.includes("--- END ---")
+        ) {
+          applyResults.pop();
+          patchResults.push({
+            filePath: patch.path,
+            status: "failed",
+            reason: "patch_format_leaked",
+          });
+          continue;
+        }
+        patchResults.push({
+          filePath: patch.path,
+          status: "applied",
+        });
     }
 
     applyPatches = applyResults;
