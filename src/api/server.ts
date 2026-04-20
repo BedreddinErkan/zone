@@ -218,6 +218,57 @@ function shouldUseHostedInferenceProxy(): boolean {
   return getInferenceMode() === "hosted";
 }
 
+function maskApiKeyPrefix(value?: string): string {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed ? trimmed.slice(0, 7) : "none";
+}
+
+function getRequestedInferenceMode(
+  billingMode?: string,
+  userOpenAiKey?: string
+): "hosted" | "local" {
+  if (billingMode === "byok") {
+    return "local";
+  }
+  return typeof userOpenAiKey === "string" && userOpenAiKey.trim()
+    ? "local"
+    : "hosted";
+}
+
+function logByokRequestBoundary(input: {
+  routeName: string;
+  billingMode?: string;
+  userOpenAiKey?: string;
+}): void {
+  const prefix = maskApiKeyPrefix(input.userOpenAiKey);
+  const requestedMode = getRequestedInferenceMode(
+    input.billingMode,
+    input.userOpenAiKey
+  );
+  console.log(
+    `[byok] request route=${input.routeName} header present=${prefix !== "none"} prefix=${prefix} mode=${requestedMode}`
+  );
+}
+
+function respondMissingByokKeyIfNeeded(input: {
+  res: express.Response;
+  billingMode?: string;
+  userOpenAiKey?: string;
+}): boolean {
+  if (
+    input.billingMode === "byok" &&
+    !(typeof input.userOpenAiKey === "string" && input.userOpenAiKey.trim())
+  ) {
+    input.res.status(400).json({
+      ok: false,
+      reason: "missing_user_openai_key",
+    });
+    return true;
+  }
+
+  return false;
+}
+
 function getRequestOrigin(req: express.Request): string {
   const forwardedProto = req.get("x-forwarded-proto");
   const forwardedHost = req.get("x-forwarded-host");
@@ -314,6 +365,13 @@ async function proxyHostedZoneRequest(
 
   if (typeof req.headers.cookie === "string" && req.headers.cookie) {
     forwardedHeaders.cookie = req.headers.cookie;
+  }
+
+  if (
+    typeof req.headers["x-user-openai-key"] === "string" &&
+    req.headers["x-user-openai-key"].trim()
+  ) {
+    forwardedHeaders["x-user-openai-key"] = req.headers["x-user-openai-key"].trim();
   }
 
   if (forwardedUserId) {
@@ -1271,6 +1329,14 @@ app.post("/api/patch/jobs", async (req, res) => {
     const isByok = Boolean(userOpenAiKey);
     const { task, repoPath, userId, hostedContext, conversationId, billingMode } =
       req.body ?? {};
+  logByokRequestBoundary({
+    routeName: "/api/patch/jobs",
+    billingMode,
+    userOpenAiKey,
+  });
+  if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
+    return;
+  }
 
   if (!task || !repoPath) {
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
@@ -1400,6 +1466,16 @@ app.post("/api/patch", async (req, res) => {
   perf.mark("route entered");
   const userOpenAiKey = req.headers["x-user-openai-key"] as string | undefined;
   const isByok = Boolean(userOpenAiKey);
+  const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
+  logByokRequestBoundary({
+    routeName: "/api/patch",
+    billingMode,
+    userOpenAiKey,
+  });
+  if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
+    perf.finish("missing byok key");
+    return;
+  }
   if (shouldProxyHostedRequest(req, "/api/patch")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1420,7 +1496,7 @@ app.post("/api/patch", async (req, res) => {
     return;
   }
 
-  const { task, repoPath, userId, hostedContext, conversationId, billingMode } =
+  const { task, repoPath, userId, hostedContext, conversationId } =
     req.body;
   perf.mark("request normalized");
 
@@ -1514,6 +1590,15 @@ res.json(result);
 app.post("/api/dry-run", async (req, res) => {
   const userOpenAiKey = req.headers["x-user-openai-key"] as string | undefined;
   const isByok = Boolean(userOpenAiKey);
+  const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
+  logByokRequestBoundary({
+    routeName: "/api/dry-run",
+    billingMode,
+    userOpenAiKey,
+  });
+  if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
+    return;
+  }
   if (shouldProxyHostedRequest(req, "/api/dry-run")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1532,7 +1617,7 @@ app.post("/api/dry-run", async (req, res) => {
     return;
   }
 
-  const { task, repoPath, userId, hostedContext, conversationId, billingMode } =
+  const { task, repoPath, userId, hostedContext, conversationId } =
     req.body;
 
   const authorization = await ensureRunAuthorized(userId, isByok, {
@@ -1628,6 +1713,15 @@ app.post("/api/apply", async (req, res) => {
 app.post("/api/enhance-task", async (req, res) => {
   const userOpenAiKey = req.headers["x-user-openai-key"] as string | undefined;
   const isByok = Boolean(userOpenAiKey);
+  const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
+  logByokRequestBoundary({
+    routeName: "/api/enhance-task",
+    billingMode,
+    userOpenAiKey,
+  });
+  if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
+    return;
+  }
   if (shouldProxyHostedRequest(req, "/api/enhance-task")) {
     const { role, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1676,6 +1770,15 @@ app.post("/api/enhance-task", async (req, res) => {
 app.post("/api/test-engineer", async (req, res) => {
 const userOpenAiKey = req.headers["x-user-openai-key"] as string | undefined;
   const isByok = Boolean(userOpenAiKey);
+  const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
+  logByokRequestBoundary({
+    routeName: "/api/test-engineer",
+    billingMode,
+    userOpenAiKey,
+  });
+  if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
+    return;
+  }
 if (shouldProxyHostedRequest(req, "/api/test-engineer")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1693,7 +1796,7 @@ if (shouldProxyHostedRequest(req, "/api/test-engineer")) {
     });
     return;
   }
-const { task, repoPath, runId, userId, hostedContext, conversationId, billingMode } =
+const { task, repoPath, runId, userId, hostedContext, conversationId } =
     req.body;
   if (!task || !repoPath) {
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
@@ -1782,6 +1885,15 @@ const loggedConversationId = await logRun({
 app.post("/api/data-analyst", async (req, res) => {
 const userOpenAiKey = req.headers["x-user-openai-key"] as string | undefined;
   const isByok = Boolean(userOpenAiKey);
+  const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
+  logByokRequestBoundary({
+    routeName: "/api/data-analyst",
+    billingMode,
+    userOpenAiKey,
+  });
+  if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
+    return;
+  }
 if (shouldProxyHostedRequest(req, "/api/data-analyst")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1798,7 +1910,7 @@ if (shouldProxyHostedRequest(req, "/api/data-analyst")) {
     });
     return;
   }
-const { task, repoPath, runId, userId, hostedContext, conversationId, billingMode } =
+const { task, repoPath, runId, userId, hostedContext, conversationId } =
     req.body;
   if (!task || !repoPath) {
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });

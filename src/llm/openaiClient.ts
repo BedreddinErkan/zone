@@ -33,10 +33,20 @@ export function getHostedInferenceBaseUrl(): string {
 }
 
 export function createOpenAIClient(userApiKey?: string): OpenAI {
-  const apiKey =
+  const trimmedUserApiKey =
     typeof userApiKey === "string" && userApiKey.trim()
       ? userApiKey.trim()
-      : process.env.OPENAI_API_KEY;
+      : "";
+  const mode = getInferenceMode();
+  const apiKey = trimmedUserApiKey || process.env.OPENAI_API_KEY;
+
+  if (trimmedUserApiKey) {
+    console.log(
+      `[byok] openai key source=user mode=${mode} prefix=${trimmedUserApiKey.slice(0, 7)}`
+    );
+  } else {
+    console.log(`[byok] openai key source=hosted mode=${mode}`);
+  }
 
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is missing for local inference mode.");
