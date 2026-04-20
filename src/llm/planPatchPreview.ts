@@ -58,6 +58,30 @@ function sanitizeSingleQuotedKeys(raw: string): string {
   return raw.replace(/'([^']+)'(\s*:)/g, "\"$1\"$2");
 }
 
+function extractAndRepairJson(raw: string): string {
+  // 1. Apply all existing sanitizations first
+  let text = sanitizeTemplateLiterals(raw);
+  text = sanitizeInvalidJsonBackslashes(text);
+  text = sanitizeBackticksInJsonStrings(text);
+  text = sanitizeSingleQuotedKeys(text);
+
+  // 2. Find JSON boundaries
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first < 0 || last <= first) throw new Error("No JSON found");
+  text = text.slice(first, last + 1);
+
+  // 3. Fix unescaped newlines inside string values
+  text = text.replace(/"((?:[^"\\]|\\.)*)"/g, (match) => {
+    return match
+      .replace(/\n/g, "\\n")
+      .replace(/\r/g, "\\r")
+      .replace(/\t/g, "\\t");
+  });
+
+  return text;
+}
+
 export async function planPatchPreviewWithLlm(input: {
   task: string;
   intent: TaskIntent;
@@ -106,41 +130,16 @@ export async function planPatchPreviewWithLlm(input: {
   });
 
   const rawText = response.output_text || "";
-  const jsonText = extractJson(rawText);
-  const normalizedJsonText = stripJsonFences(jsonText);
-  const sanitized = sanitizeTemplateLiterals(normalizedJsonText);
   let parsed: unknown;
 
   try {
-    parsed = JSON.parse(sanitized);
-  } catch (initialError) {
-    try {
-      parsed = JSON.parse(sanitizeInvalidJsonBackslashes(sanitized));
-    } catch {
-      try {
-        const sanitizedBackticks = sanitizeBackticksInJsonStrings(
-          sanitizeInvalidJsonBackslashes(sanitized)
-        );
-        parsed = JSON.parse(sanitizedBackticks);
-      } catch {
-        try {
-          parsed = JSON.parse(
-            sanitizeSingleQuotedKeys(
-              sanitizeBackticksInJsonStrings(
-                sanitizeInvalidJsonBackslashes(sanitized)
-              )
-            )
-          );
-        } catch {
-          const preview = rawText.slice(0, 50);
-          const initialMessage =
-            initialError instanceof Error ? initialError.message : String(initialError);
-          throw new Error(
-            `Failed to parse patch preview JSON: ${initialMessage}. Raw preview: ${preview}`
-          );
-        }
-      }
-    }
+    parsed = JSON.parse(extractAndRepairJson(stripJsonFences(rawText)));
+  } catch (error) {
+    const preview = rawText.slice(0, 50);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Failed to parse patch preview JSON: ${message}. Raw preview: ${preview}`
+    );
   }
 
   const validated = llmPatchPlanSchema.parse(parsed);
