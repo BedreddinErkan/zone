@@ -562,25 +562,26 @@ async function handleBillingSummary(
     select?: (
       columns: string
     ) => {
-      eq?: (column: string, value: string) => {
-        maybeSingle?: () => Promise<{
-          data: {
-            credits?: number | string | null;
-runs_used_this_month?: number | string | null;
-free_limit?: number | string | null;
-subscription_status?: string | null;
-          } | null;
+        eq?: (column: string, value: string) => {
+          maybeSingle?: () => Promise<{
+            data: {
+              credits?: number | string | null;
+              runs_used_this_month?: number | string | null;
+              billing_mode?: string | null;
+              free_limit?: number | string | null;
+              subscription_status?: string | null;
+            } | null;
           error?: unknown;
         }>;
       };
     };
   };
-  console.log(
-    `[zone] billing-summary: querying profiles where clerk_user_id=${userId}`
-  );
-  const query = profilesTable
-    .select?.("credits,runs_used_this_month,free_limit,subscription_status")
-    ?.eq?.("clerk_user_id", userId);
+    console.log(
+      `[zone] billing-summary: querying profiles where clerk_user_id=${userId}`
+    );
+    const query = profilesTable
+      .select?.("credits,runs_used_this_month,free_limit,subscription_status,billing_mode")
+      ?.eq?.("clerk_user_id", userId);
   if (!query || typeof query.maybeSingle !== "function") {
     res.json({ ok: false, reason: "profile_unavailable" });
     return;
@@ -639,12 +640,13 @@ subscription_status?: string | null;
           (Number.isFinite(freeLimit) ? freeLimit : FREE_PLAN_RUN_LIMIT) -
             (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0)
         );
-    const responsePayload = {
-      ok: true,
-      plan: hasPaidAccess(status) ? "Pro" : "Free",
-      credits: Number.isFinite(credits) ? Math.max(0, credits) : 0,
-      subscriptionStatus: status,
-    };
+      const responsePayload = {
+        ok: true,
+        plan: hasPaidAccess(status) ? "Pro" : "Free",
+        credits: Number.isFinite(credits) ? Math.max(0, credits) : 0,
+        subscriptionStatus: status,
+        billing_mode: data.billing_mode === "byok" ? "byok" : "hosted",
+      };
     console.log("[zone-billing-summary-debug] resolved credits", {
       userId,
       credits,
