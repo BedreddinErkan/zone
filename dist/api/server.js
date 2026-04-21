@@ -31,6 +31,7 @@ const detectProjectStructure_js_1 = require("../repo/detectProjectStructure.js")
 const rankRelevantFiles_js_1 = require("../repo/rankRelevantFiles.js");
 const readProjectFiles_js_1 = require("../repo/readProjectFiles.js");
 const openaiClient_js_1 = require("../llm/openaiClient.js");
+const refinePrompt_js_1 = require("../llm/refinePrompt.js");
 const conversationRepository_js_1 = require("../billing/conversationRepository.js");
 const resolveBillingAction_js_1 = require("../billing/resolveBillingAction.js");
 const colors_js_1 = require("../cli/colors.js");
@@ -1341,6 +1342,50 @@ exports.app.post("/api/apply", async (req, res) => {
         ...result,
         ...(postApplyVerification ? { postApplyVerification } : {}),
     });
+});
+exports.app.post("/api/refine-prompt", async (req, res) => {
+    const userOpenAiKey = req.headers["x-user-openai-key"];
+    const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
+    logByokRequestBoundary({
+        routeName: "/api/refine-prompt",
+        billingMode,
+        userOpenAiKey,
+    });
+    if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
+        return;
+    }
+    if (shouldProxyHostedRequest(req, "/api/refine-prompt")) {
+        await proxyHostedZoneRequest(req, res, "/api/refine-prompt");
+        return;
+    }
+    const task = typeof req.body?.task === "string" ? req.body.task.trim() : "";
+    if (!task) {
+        res.status(400).json({ ok: false, reason: "task_required" });
+        return;
+    }
+    const role = typeof req.body?.role === "string" ? req.body.role : undefined;
+    const reason = typeof req.body?.reason === "string" ? req.body.reason : undefined;
+    const relevantFiles = Array.isArray(req.body?.relevantFiles)
+        ? req.body.relevantFiles.filter((file) => typeof file === "string")
+        : undefined;
+    const plan = req.body?.plan && typeof req.body.plan === "object"
+        ? req.body.plan
+        : undefined;
+    try {
+        const refinedPrompt = await (0, refinePrompt_js_1.refinePrompt)({
+            task,
+            role,
+            reason,
+            relevantFiles,
+            plan,
+            userOpenAiKey,
+        });
+        console.log(`[zone-refine] prompt refined role=${role || "developer"} reason=${reason || "unspecified"}`);
+        res.json({ ok: true, refinedPrompt });
+    }
+    catch {
+        res.json({ ok: true, refinedPrompt: refinePrompt_js_1.PROMPT_REFINEMENT_FALLBACK });
+    }
 });
 exports.app.post("/api/enhance-task", async (req, res) => {
     const userOpenAiKey = req.headers["x-user-openai-key"];

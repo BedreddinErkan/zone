@@ -39,6 +39,10 @@ import {
   getInferenceMode,
   getModelName,
 } from "../llm/openaiClient.js";
+import {
+  PROMPT_REFINEMENT_FALLBACK,
+  refinePrompt,
+} from "../llm/refinePrompt.js";
 import { getUserQuota } from "../billing/conversationRepository.js";
 import { resolveBillingAction } from "../billing/resolveBillingAction.js";
 import type { Response } from "express";
@@ -1734,6 +1738,58 @@ app.post("/api/apply", async (req, res) => {
     ...result,
     ...(postApplyVerification ? { postApplyVerification } : {}),
   });
+});
+
+app.post("/api/refine-prompt", async (req, res) => {
+  const userOpenAiKey = req.headers["x-user-openai-key"] as string | undefined;
+  const billingMode =
+    typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
+  logByokRequestBoundary({
+    routeName: "/api/refine-prompt",
+    billingMode,
+    userOpenAiKey,
+  });
+  if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
+    return;
+  }
+  if (shouldProxyHostedRequest(req, "/api/refine-prompt")) {
+    await proxyHostedZoneRequest(req, res, "/api/refine-prompt");
+    return;
+  }
+
+  const task = typeof req.body?.task === "string" ? req.body.task.trim() : "";
+  if (!task) {
+    res.status(400).json({ ok: false, reason: "task_required" });
+    return;
+  }
+
+  const role = typeof req.body?.role === "string" ? req.body.role : undefined;
+  const reason =
+    typeof req.body?.reason === "string" ? req.body.reason : undefined;
+  const relevantFiles = Array.isArray(req.body?.relevantFiles)
+    ? req.body.relevantFiles.filter((file: unknown): file is string => typeof file === "string")
+    : undefined;
+  const plan =
+    req.body?.plan && typeof req.body.plan === "object"
+      ? req.body.plan
+      : undefined;
+
+  try {
+    const refinedPrompt = await refinePrompt({
+      task,
+      role,
+      reason,
+      relevantFiles,
+      plan,
+      userOpenAiKey,
+    });
+    console.log(
+      `[zone-refine] prompt refined role=${role || "developer"} reason=${reason || "unspecified"}`
+    );
+    res.json({ ok: true, refinedPrompt });
+  } catch {
+    res.json({ ok: true, refinedPrompt: PROMPT_REFINEMENT_FALLBACK });
+  }
 });
 
 app.post("/api/enhance-task", async (req, res) => {
