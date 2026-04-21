@@ -589,6 +589,9 @@ async function handleBillingSummary(
               subscription_status?: string | null;
               token_credits_used?: number | string | null;
               token_credits_limit?: number | string | null;
+              token_credits_used_today?: number | string | null;
+              token_credits_daily_limit?: number | string | null;
+              daily_reset_at?: string | null;
             } | null;
           error?: unknown;
         }>;
@@ -599,7 +602,7 @@ async function handleBillingSummary(
       `[zone] billing-summary: querying profiles where clerk_user_id=${userId}`
     );
     const query = profilesTable
-      .select?.("credits,runs_used_this_month,free_limit,subscription_status,token_credits_used,token_credits_limit")
+      .select?.("credits,runs_used_this_month,free_limit,subscription_status,token_credits_used,token_credits_limit,token_credits_used_today,token_credits_daily_limit,daily_reset_at")
       ?.eq?.("clerk_user_id", userId);
   if (!query || typeof query.maybeSingle !== "function") {
     res.json({ ok: false, reason: "profile_unavailable" });
@@ -666,6 +669,15 @@ async function handleBillingSummary(
       ? data.token_credits_limit
       : Number(data.token_credits_limit ?? 500000);
     const tokenCreditsRemaining = Math.max(0, tokenCreditsLimit - tokenCreditsUsed);
+    const tokenCreditsUsedToday = typeof data.token_credits_used_today === "number"
+      ? data.token_credits_used_today
+      : Number(data.token_credits_used_today ?? 0);
+    const tokenCreditsDailyLimit = typeof data.token_credits_daily_limit === "number"
+      ? data.token_credits_daily_limit
+      : Number(data.token_credits_daily_limit ?? 50000);
+    const tokenCreditsDailyRemaining = Math.max(0, tokenCreditsDailyLimit - tokenCreditsUsedToday);
+    const dailyResetAt = typeof data.daily_reset_at === "string" ? data.daily_reset_at : null;
+    const dailyResetMs = dailyResetAt ? new Date(dailyResetAt).getTime() + 24 * 60 * 60 * 1000 : null;
     const responsePayload = {
       ok: true,
       plan: hasPaidAccess(status) ? "Pro" : "Free",
@@ -673,6 +685,10 @@ async function handleBillingSummary(
       tokenCreditsUsed,
       tokenCreditsLimit,
       tokenCreditsRemaining,
+      tokenCreditsUsedToday,
+      tokenCreditsDailyLimit,
+      tokenCreditsDailyRemaining,
+      dailyResetAt: dailyResetMs,
       subscriptionStatus: status,
       billing_mode: "hosted",
     };
