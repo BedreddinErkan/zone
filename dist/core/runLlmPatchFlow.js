@@ -29,6 +29,8 @@ const executionPlan_js_1 = require("../llm/executionPlan.js");
 const computeRiskScore_js_1 = require("./computeRiskScore.js");
 const evaluatePlanAlignment_js_1 = require("./evaluatePlanAlignment.js");
 const verifyPatch_js_1 = require("./verifyPatch.js");
+const detectVerificationCommand_js_1 = require("./detectVerificationCommand.js");
+const runRuntimeVerification_js_1 = require("./runRuntimeVerification.js");
 const intentMismatchDetector_js_1 = require("../engine/intentMismatchDetector.js");
 const designSystemSignals_js_1 = require("../engine/designSystemSignals.js");
 const patchQualityScorer_js_1 = require("../engine/patchQualityScorer.js");
@@ -1863,6 +1865,40 @@ async function runLlmPatchFlow(input) {
             console.warn(`[zone-verify] skipped: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
+    let runtimeVerification = null;
+    if (!input.hostedContext && applyPatches.length > 0) {
+        try {
+            const command = (0, detectVerificationCommand_js_1.detectVerificationCommand)({
+                repoPath: input.repoPath,
+                repoFiles: allFiles.map((file) => file.path),
+            });
+            runtimeVerification = await (0, runRuntimeVerification_js_1.runRuntimeVerification)({
+                repoPath: input.repoPath,
+                command,
+            });
+            if (runtimeVerification.command) {
+                console.log(`[zone-runtime-verify] command="${runtimeVerification.command}" status=${runtimeVerification.status}`);
+            }
+            if (runtimeVerification.status === "failed") {
+                const warning = `Runtime verification failed: ${runtimeVerification.command ?? "unknown command"}`;
+                internalWarnings.push(warning);
+                visibleWarnings.push(warning);
+            }
+            else if (runtimeVerification.status === "timeout") {
+                const warning = `Runtime verification timed out: ${runtimeVerification.command ?? "unknown command"}`;
+                internalWarnings.push(warning);
+                visibleWarnings.push(warning);
+            }
+        }
+        catch (err) {
+            runtimeVerification = {
+                attempted: false,
+                status: "skipped",
+                summary: `Runtime verification skipped: ${err instanceof Error ? err.message : String(err)}`,
+            };
+            console.warn(`[zone-runtime-verify] skipped`);
+        }
+    }
     logRiskDebug("runLlmPatchFlow after task-risk adjustments", {
         task: input.task,
         patchScope,
@@ -1910,6 +1946,9 @@ async function runLlmPatchFlow(input) {
         uiMappingRisk.confidenceCap,
         planAlignment?.score,
         verification?.score,
+        runtimeVerification?.status === "failed"
+            ? Math.max(0, developerConfidenceBase - 15)
+            : undefined,
     ].filter((value) => typeof value === "number");
     const developerConfidence = confidenceCaps.length > 0
         ? Math.min(developerConfidenceBase, ...confidenceCaps)
@@ -2070,6 +2109,7 @@ async function runLlmPatchFlow(input) {
         ...(executionPlan ? { plan: executionPlan } : {}),
         ...(planAlignment ? { planAlignment } : {}),
         ...(verification ? { verification } : {}),
+        ...(runtimeVerification ? { runtimeVerification } : {}),
     };
 }
 //# sourceMappingURL=runLlmPatchFlow.js.map

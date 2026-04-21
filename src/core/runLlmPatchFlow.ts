@@ -15,6 +15,11 @@ import {
   type PlanAlignmentResult,
 } from "./evaluatePlanAlignment.js";
 import { verifyPatch, type VerificationResult } from "./verifyPatch.js";
+import { detectVerificationCommand } from "./detectVerificationCommand.js";
+import {
+  runRuntimeVerification,
+  type RuntimeVerificationResult,
+} from "./runRuntimeVerification.js";
 import {
   detectIntentMismatch,
   type IntentMismatchReasonCode,
@@ -79,6 +84,7 @@ export type LlmPatchFlowResult =
       plan?: ExecutionPlan;
       planAlignment?: PlanAlignmentResult;
       verification?: VerificationResult;
+      runtimeVerification?: RuntimeVerificationResult;
       applyPatches: Array<{ filePath: string; fullContent: string }>;
       patchResults: PatchResult[];
       fileDiffs?: FileDiff[];
@@ -2645,6 +2651,40 @@ export async function runLlmPatchFlow(input: {
       );
     }
   }
+  let runtimeVerification: RuntimeVerificationResult | null = null;
+  if (!input.hostedContext && applyPatches.length > 0) {
+    try {
+      const command = detectVerificationCommand({
+        repoPath: input.repoPath,
+        repoFiles: allFiles.map((file) => file.path),
+      });
+      runtimeVerification = await runRuntimeVerification({
+        repoPath: input.repoPath,
+        command,
+      });
+      if (runtimeVerification.command) {
+        console.log(
+          `[zone-runtime-verify] command="${runtimeVerification.command}" status=${runtimeVerification.status}`
+        );
+      }
+      if (runtimeVerification.status === "failed") {
+        const warning = `Runtime verification failed: ${runtimeVerification.command ?? "unknown command"}`;
+        internalWarnings.push(warning);
+        visibleWarnings.push(warning);
+      } else if (runtimeVerification.status === "timeout") {
+        const warning = `Runtime verification timed out: ${runtimeVerification.command ?? "unknown command"}`;
+        internalWarnings.push(warning);
+        visibleWarnings.push(warning);
+      }
+    } catch (err) {
+      runtimeVerification = {
+        attempted: false,
+        status: "skipped",
+        summary: `Runtime verification skipped: ${err instanceof Error ? err.message : String(err)}`,
+      };
+      console.warn(`[zone-runtime-verify] skipped`);
+    }
+  }
   logRiskDebug("runLlmPatchFlow after task-risk adjustments", {
     task: input.task,
     patchScope,
@@ -2707,6 +2747,9 @@ export async function runLlmPatchFlow(input: {
     uiMappingRisk.confidenceCap,
     planAlignment?.score,
     verification?.score,
+    runtimeVerification?.status === "failed"
+      ? Math.max(0, developerConfidenceBase - 15)
+      : undefined,
   ].filter((value): value is number => typeof value === "number");
   const developerConfidence =
     confidenceCaps.length > 0
@@ -2908,5 +2951,6 @@ const decisionMode =
     ...(executionPlan ? { plan: executionPlan } : {}),
     ...(planAlignment ? { planAlignment } : {}),
     ...(verification ? { verification } : {}),
+    ...(runtimeVerification ? { runtimeVerification } : {}),
   };
 }
