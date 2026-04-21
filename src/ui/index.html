@@ -1111,7 +1111,20 @@ function trimChatThreadMessages(){
 function animateChatMessageIn(node){if(!node)return;node.classList.add('is-entering');void node.offsetHeight;requestAnimationFrame(()=>node.classList.remove('is-entering'));}
 function animateChatMessageOut(node,removeFn){if(!node){if(typeof removeFn==='function')removeFn();return;}node.classList.remove('is-entering');void node.offsetHeight;node.classList.add('is-exiting');window.setTimeout(()=>{if(typeof removeFn==='function')removeFn();else node.remove();},220);}
 function appendChatMessage(html){const{thread}=getChatThreadElements();if(!thread)return null;setChatThreadEmptyVisible(false);thread.insertAdjacentHTML('beforeend',html);const node=thread.lastElementChild;if(node instanceof HTMLElement)animateChatMessageIn(node);trimChatThreadMessages();scrollChatThreadToLatest();return node instanceof HTMLElement?node:null;}
-function syncStopRunButton(forceActive){const active=Boolean(forceActive||isExecutionLocked());const stopBtn=document.getElementById('stopRunBtn');const section=document.querySelector('.composer-section');if(stopBtn){stopBtn.classList.toggle('hidden',!active);stopBtn.style.display=active?'inline-flex':'none';stopBtn.disabled=!active;}if(section)section.classList.toggle('is-locked',active);}
+function syncStopRunButton(forceActive){const active = Boolean(forceActive || isExecutionLocked());
+  const stopBtn = document.getElementById('stopRunBtn');
+  const section = document.querySelector('.composer-section');
+  if (stopBtn) {
+    if (active) {
+      stopBtn.classList.remove('hidden');
+      stopBtn.style.cssText = 'display:inline-flex!important;visibility:visible';
+    } else {
+      stopBtn.classList.add('hidden');
+      stopBtn.style.cssText = 'display:none';
+    }
+    stopBtn.disabled = !active;
+  }
+  if (section) section.classList.toggle('is-locked', active);}
 function setComposerLocked(locked){const isLocked=Boolean(locked);const task=document.getElementById('task');const help=document.getElementById('composerHelp');if(task){task.disabled=isLocked;task.setAttribute('aria-disabled',String(isLocked));}if(help)help.classList.add('hidden');syncStopRunButton(isLocked);}
 function stopActiveRun(){if(currentRunAbortController){currentRunAbortController.abort();currentRunAbortController=null;}releaseExecutionLock();setComposerLocked(false);hideError();document.getElementById('task')?.focus();}
 function toggleChatMiniDiffPreview(event,id){if(event)event.preventDefault();const body=document.getElementById(`chatMiniDiffBody-${id}`);const btn=document.getElementById(`chatMiniDiffToggle-${id}`);if(!body||!btn)return;const willShow=!body.classList.contains('is-open');body.classList.toggle('is-open',willShow);body.classList.toggle('is-collapsed',!willShow);btn.textContent=willShow?'Hide Diff Preview':'Show Diff Preview';}
@@ -1286,13 +1299,20 @@ function classifyZoneIntent(input){
 }
 
 function getZoneIntentResponse(intent){
-  if(intent==='help_or_capability'){
+  if (intent === 'help_or_capability') {
     return 'I can make code changes, review diffs, add tests, and help with SQL or migrations. Describe the file, function, or behavior you want changed; I will preview changes and only apply when confidence is high.';
   }
-  if(intent==='greeting')return 'Hey. I am ready to help with a focused code change when you are.';
-  if(intent==='small_talk')return 'Doing well, and ready to work. Tell me the file, function, or behavior you want changed.';
-  if(intent==='acknowledgment')return 'You got it.';
-  return 'Hey. I can help with code changes, tests, and SQL tasks. Describe the file, function, or behavior you want changed.';
+  if (intent === 'greeting') {
+    const picks = [
+      'Hey — tell me the file or feature you want to change.',
+      'Hi. What would you like updated?',
+      'Hello. Describe the change and I\'ll get started.'
+    ];
+    return picks[Math.floor(Date.now() / 1000) % picks.length];
+  }
+  if (intent === 'small_talk') return 'All good. What should I work on next?';
+  if (intent === 'acknowledgment') return 'Got it.';
+  return 'Describe the file, function, or behavior you want changed and I\'ll build a patch.';
 }
 
 function handleZoneIntentBeforeExecution(task,repoPath){
@@ -1897,7 +1917,7 @@ async function execute(){
       showDecision({decision:{mode:decisionMode},confidence:{score:result.confidence??0},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity});
       showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,validationBlocked:Boolean(result.validationBlocked),fileDiffs:result.fileDiffs||[]});
       
-      appendZoneResultMessage({role:currentRole,decisionMode,confidence:result.confidence??0,risk:0,files:Array.isArray(result.applyPatches)?result.applyPatches.length:Array.isArray(result.fileDiffs)?result.fileDiffs.length:0,warnings:Array.isArray(result.warnings)?result.warnings.length:0,summary:result.reason||result.preview,preview:result.preview,patchPreview:result.preview,fileDiffs:result.fileDiffs||[],applyPatches:result.applyPatches||[],inspectPayload:{decisionData:{decision:{mode:decisionMode},confidence:{score:result.confidence??0},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity,validationBlocked:Boolean(result.validationBlocked),warnings:result.warnings||[],reason:result.reason,patchQuality:result.patchQuality,safetyResolution:result.safetyResolution,intentMismatch:result.intentMismatch,microEditProtection:result.microEditProtection,designSystemSignals:result.designSystemSignals},patchData:{ok:true,patchPreview:result.preview,applyPatches:result.applyPatches||[],warnings:result.warnings||[],validationBlocked:Boolean(result.validationBlocked),fileDiffs:result.fileDiffs||[],decisionMode,developerConfidence:result.confidence??0,developerRisk:{score:0,breakdown:{}},contextFiles:result.contextFiles||[],patchResults:result.patchResults||[],plan:result.plan,planAlignment:result.planAlignment,verification:result.verification}}});
+      appendZoneResultMessage({role:currentRole,decisionMode,confidence:result.confidence??0,risk:0,files:Array.isArray(result.applyPatches)?result.applyPatches.length:Array.isArray(result.fileDiffs)?result.fileDiffs.length:0,warnings:Array.isArray(result.warnings)?result.warnings.length:0,summary:result.reason||result.preview,preview:result.preview,patchPreview:result.preview,fileDiffs:result.fileDiffs||[],applyPatches:result.applyPatches||[],inspectPayload:{decisionData:{decision:{mode:decisionMode},confidence:{score:result.confidence??0},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity,validationBlocked:Boolean(result.validationBlocked),warnings:result.warnings||[],reason:result.reason,patchQuality:result.patchQuality,safetyResolution:result.safetyResolution,intentMismatch:result.intentMismatch,microEditProtection:result.microEditProtection,designSystemSignals:result.designSystemSignals},patchData:{ok:true,patchPreview:result.preview,applyPatches:result.applyPatches||[],warnings:result.warnings||[],validationBlocked:Boolean(result.validationBlocked),fileDiffs:result.fileDiffs||[],decisionMode,developerConfidence:result.confidence??0,developerRisk:{score:0,breakdown:{}},contextFiles:result.contextFiles||[],patchResults:result.patchResults||[],plan:result.plan,planAlignment:result.planAlignment,verification:result.verification,suggestedVerification:result.suggestedVerification||null}}});
       appendZoneExplanationMessage({
   role: currentRole,
   decisionMode,
@@ -1943,7 +1963,7 @@ async function execute(){
       const daMode=result.decisionMode||(result.confidence>=70?'safe_to_apply':'preview_only');
       showDecision({decision:{mode:daMode},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat])});
       showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,fileDiffs:result.fileDiffs||[]});
-      appendZoneResultMessage({role:currentRole,decisionMode:daMode,confidence:result.confidence,risk:0,files:Array.isArray(result.applyPatches)?result.applyPatches.length:Array.isArray(result.fileDiffs)?result.fileDiffs.length:0,warnings:Array.isArray(result.warnings)?result.warnings.length:0,summary:result.reason||result.preview,preview:result.preview,patchPreview:result.preview,fileDiffs:result.fileDiffs||[],applyPatches:result.applyPatches||[],inspectPayload:{decisionData:{decision:{mode:daMode},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat]),validationBlocked:Boolean(result.validationBlocked),warnings:result.warnings||[],reason:result.reason,patchQuality:result.patchQuality,safetyResolution:result.safetyResolution,intentMismatch:result.intentMismatch,microEditProtection:result.microEditProtection,designSystemSignals:result.designSystemSignals},patchData:{ok:true,patchPreview:result.preview,applyPatches:result.applyPatches||[],warnings:result.warnings||[],validationBlocked:Boolean(result.validationBlocked),fileDiffs:result.fileDiffs||[],decisionMode:daMode,developerConfidence:result.confidence,developerRisk:{score:0,breakdown:{}},contextFiles:result.contextFiles||[],patchResults:result.patchResults||[],plan:result.plan,planAlignment:result.planAlignment,verification:result.verification}}});
+      appendZoneResultMessage({role:currentRole,decisionMode:daMode,confidence:result.confidence,risk:0,files:Array.isArray(result.applyPatches)?result.applyPatches.length:Array.isArray(result.fileDiffs)?result.fileDiffs.length:0,warnings:Array.isArray(result.warnings)?result.warnings.length:0,summary:result.reason||result.preview,preview:result.preview,patchPreview:result.preview,fileDiffs:result.fileDiffs||[],applyPatches:result.applyPatches||[],inspectPayload:{decisionData:{decision:{mode:daMode},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat]),validationBlocked:Boolean(result.validationBlocked),warnings:result.warnings||[],reason:result.reason,patchQuality:result.patchQuality,safetyResolution:result.safetyResolution,intentMismatch:result.intentMismatch,microEditProtection:result.microEditProtection,designSystemSignals:result.designSystemSignals},patchData:{ok:true,patchPreview:result.preview,applyPatches:result.applyPatches||[],warnings:result.warnings||[],validationBlocked:Boolean(result.validationBlocked),fileDiffs:result.fileDiffs||[],decisionMode:daMode,developerConfidence:result.confidence,developerRisk:{score:0,breakdown:{}},contextFiles:result.contextFiles||[],patchResults:result.patchResults||[],plan:result.plan,planAlignment:result.planAlignment,verification:result.verification,suggestedVerification:result.suggestedVerification||null}}});
       appendZoneExplanationMessage({
   role: currentRole,
   decisionMode: daMode,
