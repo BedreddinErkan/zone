@@ -2,10 +2,12 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.resolveBillingAction = resolveBillingAction;
 function resolveBillingAction(input) {
-    if (input.mode === "byok" && input.hasPaidAccess) {
+    const tokenCreditsUsed = input.tokenCreditsUsed ?? 0;
+    const tokenCreditsLimit = input.tokenCreditsLimit ?? 500000;
+    if (tokenCreditsLimit >= 999999999) {
         return "FREE";
     }
-    if (input.credits <= 0) {
+    if (tokenCreditsUsed >= tokenCreditsLimit) {
         return "LIMIT_EXCEEDED";
     }
     return "CHARGE";

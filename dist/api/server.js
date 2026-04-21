@@ -142,30 +142,6 @@ function maskApiKeyPrefix(value) {
     const trimmed = typeof value === "string" ? value.trim() : "";
     return trimmed ? trimmed.slice(0, 7) : "none";
 }
-function getRequestedInferenceMode(billingMode, userOpenAiKey) {
-    if (billingMode === "byok") {
-        return "local";
-    }
-    return typeof userOpenAiKey === "string" && userOpenAiKey.trim()
-        ? "local"
-        : "hosted";
-}
-function logByokRequestBoundary(input) {
-    const prefix = maskApiKeyPrefix(input.userOpenAiKey);
-    const requestedMode = getRequestedInferenceMode(input.billingMode, input.userOpenAiKey);
-    console.log(`[byok] request route=${input.routeName} header present=${prefix !== "none"} prefix=${prefix} mode=${requestedMode}`);
-}
-function respondMissingByokKeyIfNeeded(input) {
-    if (input.billingMode === "byok" &&
-        !(typeof input.userOpenAiKey === "string" && input.userOpenAiKey.trim())) {
-        input.res.status(400).json({
-            ok: false,
-            reason: "missing_user_openai_key",
-        });
-        return true;
-    }
-    return false;
-}
 function getRequestOrigin(req) {
     const forwardedProto = req.get("x-forwarded-proto");
     const forwardedHost = req.get("x-forwarded-host");
@@ -380,11 +356,11 @@ async function handleCheckAccess(req, res) {
         routeName: "/api/check-access",
         userId: userId || null,
         billingMode: billingMode ?? null,
-        isByok: isTruthyByok(req.query.isByok),
+        isByok: false,
         repoPath: repoPath ?? null,
         role: role ?? null,
     });
-    const authorization = await ensureRunAuthorized(userId, isTruthyByok(req.query.isByok), {
+    const authorization = await ensureRunAuthorized(userId, {
         conversationId,
         billingMode,
         repoPath,
@@ -423,7 +399,7 @@ async function handleBillingSummary(req, res) {
     const profilesTable = supabase.from("profiles");
     console.log(`[zone] billing-summary: querying profiles where clerk_user_id=${userId}`);
     const query = profilesTable
-        .select?.("credits,runs_used_this_month,free_limit,subscription_status,billing_mode")
+        .select?.("credits,runs_used_this_month,free_limit,subscription_status,token_credits_used,token_credits_limit")
         ?.eq?.("clerk_user_id", userId);
     if (!query || typeof query.maybeSingle !== "function") {
         res.json({ ok: false, reason: "profile_unavailable" });
@@ -469,12 +445,22 @@ async function handleBillingSummary(req, res) {
             ? Math.max(0, PRO_PLAN_RUN_LIMIT - (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0))
             : Math.max(0, (Number.isFinite(freeLimit) ? freeLimit : FREE_PLAN_RUN_LIMIT) -
                 (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0));
+        const tokenCreditsUsed = typeof data.token_credits_used === "number"
+            ? data.token_credits_used
+            : Number(data.token_credits_used ?? 0);
+        const tokenCreditsLimit = typeof data.token_credits_limit === "number"
+            ? data.token_credits_limit
+            : Number(data.token_credits_limit ?? 500000);
+        const tokenCreditsRemaining = Math.max(0, tokenCreditsLimit - tokenCreditsUsed);
         const responsePayload = {
             ok: true,
             plan: hasPaidAccess(status) ? "Pro" : "Free",
-            credits: Number.isFinite(credits) ? Math.max(0, credits) : 0,
+            credits: tokenCreditsRemaining,
+            tokenCreditsUsed,
+            tokenCreditsLimit,
+            tokenCreditsRemaining,
             subscriptionStatus: status,
-            billing_mode: data.billing_mode === "byok" ? "byok" : "hosted",
+            billing_mode: "hosted",
         };
         console.log("[zone-billing-summary-debug] resolved credits", {
             userId,
@@ -520,15 +506,6 @@ function normalizeSubscriptionStatus(value) {
 function hasPaidAccess(subscriptionStatus) {
     const normalized = normalizeSubscriptionStatus(subscriptionStatus);
     return normalized === "pro";
-}
-function isTruthyByok(value) {
-    if (typeof value === "boolean")
-        return value;
-    if (typeof value === "string") {
-        const normalized = value.trim().toLowerCase();
-        return normalized === "true" || normalized === "1" || normalized === "yes";
-    }
-    return false;
 }
 // ── DAILY RUN LIMITER (in-memory, resets on server restart) ──
 const DAILY_RUN_LIMIT = 30;
@@ -581,7 +558,7 @@ setInterval(() => {
             deviceCodes.delete(code);
     }
 }, 5 * 60 * 1000);
-async function ensureRunAuthorized(rawUserId, isByok = false, options) {
+async function ensureRunAuthorized(rawUserId, options) {
     const authenticatedUserId = typeof rawUserId === "string" ? rawUserId.trim() : "";
     if (!authenticatedUserId) {
         return {
@@ -601,24 +578,20 @@ async function ensureRunAuthorized(rawUserId, isByok = false, options) {
     try {
         const profileQuery = supabase.from("profiles");
         const { data: profileData } = await profileQuery
-            .select("billing_mode")
+            .select("subscription_status")
             .eq("clerk_user_id", authenticatedUserId)
             .maybeSingle();
-        const profileBillingMode = profileData?.billing_mode;
-        const resolvedBillingMode = profileBillingMode === "byok"
-            ? "byok"
-            : options?.billingMode === "hosted" || options?.billingMode === "byok"
-                ? options.billingMode
-                : isByok
-                    ? "byok"
-                    : "hosted";
+        const resolvedBillingMode = "hosted";
         const { runsUsedThisMonth, credits, subscriptionStatus } = await (0, conversationRepository_js_1.getUserQuota)(supabase, authenticatedUserId);
         const paidAccess = hasPaidAccess(subscriptionStatus);
+        const { tokenCreditsUsed, tokenCreditsLimit } = await (0, conversationRepository_js_1.getUserQuota)(supabase, authenticatedUserId);
         const billingAction = (0, resolveBillingAction_js_1.resolveBillingAction)({
             mode: resolvedBillingMode,
             hasPaidAccess: paidAccess,
             runsUsedThisMonth,
             credits,
+            tokenCreditsUsed,
+            tokenCreditsLimit,
         });
         console.log("[zone-billing-debug] authorization resolved", {
             routeName: "ensureRunAuthorized",
@@ -699,7 +672,6 @@ async function createDeveloperPatchJobPayload(input) {
         conversationId: input.conversationId,
         billingMode: input.billingMode,
         hostedContext,
-        userOpenAiKey: input.userOpenAiKey,
         isByok: input.isByok,
     };
 }
@@ -982,22 +954,13 @@ exports.app.post("/api/analyze", async (req, res) => {
     });
 });
 exports.app.post("/api/patch/jobs", async (req, res) => {
-    const userOpenAiKey = req.headers["x-user-openai-key"];
-    const isByok = Boolean(userOpenAiKey);
+    const isByok = false;
     const { task, repoPath, userId, hostedContext, conversationId, billingMode } = req.body ?? {};
-    logByokRequestBoundary({
-        routeName: "/api/patch/jobs",
-        billingMode,
-        userOpenAiKey,
-    });
-    if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
-        return;
-    }
     if (!task || !repoPath) {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;
     }
-    const authorization = await ensureRunAuthorized(userId, isByok, {
+    const authorization = await ensureRunAuthorized(userId, {
         billingMode,
     });
     if (!authorization.allowed) {
@@ -1017,7 +980,6 @@ exports.app.post("/api/patch/jobs", async (req, res) => {
             conversationId,
             billingMode,
             hostedContext,
-            userOpenAiKey,
             isByok,
         });
         const job = await (0, developerPatchJobs_js_1.createDeveloperPatchJob)(supabase, {
@@ -1110,18 +1072,8 @@ exports.app.get("/api/patch/jobs/:runId/result", async (req, res) => {
 exports.app.post("/api/patch", async (req, res) => {
     const perf = (0, zoneApiPerf_js_1.startZoneApiPerfRun)("/api/patch");
     perf.mark("route entered");
-    const userOpenAiKey = req.headers["x-user-openai-key"];
-    const isByok = Boolean(userOpenAiKey);
-    const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
-    logByokRequestBoundary({
-        routeName: "/api/patch",
-        billingMode,
-        userOpenAiKey,
-    });
-    if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
-        perf.finish("missing byok key");
-        return;
-    }
+    const isByok = false;
+    const billingMode = "hosted";
     if (shouldProxyHostedRequest(req, "/api/patch")) {
         const { task, repoPath } = req.body ?? {};
         const hostedContext = req.body?.hostedContext ??
@@ -1147,7 +1099,7 @@ exports.app.post("/api/patch", async (req, res) => {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;
     }
-    const authorization = await ensureRunAuthorized(userId, isByok, {
+    const authorization = await ensureRunAuthorized(userId, {
         billingMode,
     });
     perf.mark("authorization complete");
@@ -1160,7 +1112,6 @@ exports.app.post("/api/patch", async (req, res) => {
         task,
         repoPath,
         hostedContext,
-        userOpenAiKey,
         perfLabel: "/api/patch core",
     });
     perf.mark("core patch flow complete");
@@ -1204,7 +1155,6 @@ exports.app.post("/api/patch", async (req, res) => {
             creditsUsed: 1,
             conversationId,
             billingMode,
-            isByok,
             routeName: "/api/patch",
         }).catch(() => null);
         if (loggedConversationId) {
@@ -1217,17 +1167,8 @@ exports.app.post("/api/patch", async (req, res) => {
     res.json(result);
 });
 exports.app.post("/api/dry-run", async (req, res) => {
-    const userOpenAiKey = req.headers["x-user-openai-key"];
-    const isByok = Boolean(userOpenAiKey);
-    const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
-    logByokRequestBoundary({
-        routeName: "/api/dry-run",
-        billingMode,
-        userOpenAiKey,
-    });
-    if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
-        return;
-    }
+    const isByok = false;
+    const billingMode = "hosted";
     if (shouldProxyHostedRequest(req, "/api/dry-run")) {
         const { task, repoPath } = req.body ?? {};
         const hostedContext = req.body?.hostedContext ??
@@ -1245,7 +1186,7 @@ exports.app.post("/api/dry-run", async (req, res) => {
         return;
     }
     const { task, repoPath, userId, hostedContext, conversationId } = req.body;
-    const authorization = await ensureRunAuthorized(userId, isByok, {
+    const authorization = await ensureRunAuthorized(userId, {
         billingMode,
     });
     if (!authorization.allowed) {
@@ -1257,7 +1198,6 @@ exports.app.post("/api/dry-run", async (req, res) => {
         repoPath,
         dryRun: true,
         hostedContext,
-        userOpenAiKey,
     });
     if (!result.ok) {
         res.status(500).json(result);
@@ -1307,7 +1247,6 @@ exports.app.post("/api/dry-run", async (req, res) => {
         creditsUsed: 1,
         conversationId,
         billingMode,
-        isByok,
         routeName: "/api/dry-run",
     }).catch(() => null);
     if (loggedConversationId) {
@@ -1400,16 +1339,7 @@ exports.app.post("/api/run-verification", async (req, res) => {
     }
 });
 exports.app.post("/api/refine-prompt", async (req, res) => {
-    const userOpenAiKey = req.headers["x-user-openai-key"];
-    const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
-    logByokRequestBoundary({
-        routeName: "/api/refine-prompt",
-        billingMode,
-        userOpenAiKey,
-    });
-    if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
-        return;
-    }
+    const billingMode = "hosted";
     if (shouldProxyHostedRequest(req, "/api/refine-prompt")) {
         await proxyHostedZoneRequest(req, res, "/api/refine-prompt");
         return;
@@ -1434,7 +1364,6 @@ exports.app.post("/api/refine-prompt", async (req, res) => {
             reason,
             relevantFiles,
             plan,
-            userOpenAiKey,
         });
         console.log(`[zone-refine] prompt refined role=${role || "developer"} reason=${reason || "unspecified"}`);
         res.json({ ok: true, refinedPrompt });
@@ -1444,17 +1373,8 @@ exports.app.post("/api/refine-prompt", async (req, res) => {
     }
 });
 exports.app.post("/api/enhance-task", async (req, res) => {
-    const userOpenAiKey = req.headers["x-user-openai-key"];
-    const isByok = Boolean(userOpenAiKey);
-    const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
-    logByokRequestBoundary({
-        routeName: "/api/enhance-task",
-        billingMode,
-        userOpenAiKey,
-    });
-    if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
-        return;
-    }
+    const isByok = false;
+    const billingMode = "hosted";
     if (shouldProxyHostedRequest(req, "/api/enhance-task")) {
         const { role, repoPath } = req.body ?? {};
         const hostedContext = typeof role === "string" && typeof repoPath === "string"
@@ -1483,7 +1403,6 @@ exports.app.post("/api/enhance-task", async (req, res) => {
             role,
             repoPath,
             hostedContext,
-            userOpenAiKey,
             isByok,
         });
         res
@@ -1498,17 +1417,8 @@ exports.app.post("/api/enhance-task", async (req, res) => {
     }
 });
 exports.app.post("/api/test-engineer", async (req, res) => {
-    const userOpenAiKey = req.headers["x-user-openai-key"];
-    const isByok = Boolean(userOpenAiKey);
-    const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
-    logByokRequestBoundary({
-        routeName: "/api/test-engineer",
-        billingMode,
-        userOpenAiKey,
-    });
-    if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
-        return;
-    }
+    const isByok = false;
+    const billingMode = "hosted";
     if (shouldProxyHostedRequest(req, "/api/test-engineer")) {
         const { task, repoPath } = req.body ?? {};
         const hostedContext = req.body?.hostedContext ??
@@ -1530,7 +1440,7 @@ exports.app.post("/api/test-engineer", async (req, res) => {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;
     }
-    const authorization = await ensureRunAuthorized(userId, isByok, {
+    const authorization = await ensureRunAuthorized(userId, {
         billingMode,
     });
     if (!authorization.allowed) {
@@ -1543,7 +1453,6 @@ exports.app.post("/api/test-engineer", async (req, res) => {
             repoPath,
             onProgress: (stage) => emitProgress(runId, stage),
             hostedContext,
-            userOpenAiKey,
         });
         // 1. ÖNCE reason mapping (!ok ise)
         if (!result.ok && typeof result.reason === "string") {
@@ -1585,7 +1494,6 @@ exports.app.post("/api/test-engineer", async (req, res) => {
                 creditsUsed: 1,
                 conversationId,
                 billingMode,
-                isByok,
                 routeName: "/api/test-engineer",
             }).catch(() => null);
             if (loggedConversationId) {
@@ -1603,17 +1511,8 @@ exports.app.post("/api/test-engineer", async (req, res) => {
     }
 });
 exports.app.post("/api/data-analyst", async (req, res) => {
-    const userOpenAiKey = req.headers["x-user-openai-key"];
-    const isByok = Boolean(userOpenAiKey);
-    const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
-    logByokRequestBoundary({
-        routeName: "/api/data-analyst",
-        billingMode,
-        userOpenAiKey,
-    });
-    if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
-        return;
-    }
+    const isByok = false;
+    const billingMode = "hosted";
     if (shouldProxyHostedRequest(req, "/api/data-analyst")) {
         const { task, repoPath } = req.body ?? {};
         const hostedContext = typeof task === "string" && typeof repoPath === "string"
@@ -1634,7 +1533,7 @@ exports.app.post("/api/data-analyst", async (req, res) => {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;
     }
-    const authorization = await ensureRunAuthorized(userId, isByok, {
+    const authorization = await ensureRunAuthorized(userId, {
         billingMode,
     });
     if (!authorization.allowed) {
@@ -1647,7 +1546,6 @@ exports.app.post("/api/data-analyst", async (req, res) => {
             repoPath,
             onProgress: (stage) => emitProgress(runId, stage),
             hostedContext,
-            userOpenAiKey,
         });
         if (result.ok && result.applyPatches) {
             const validation = (0, validateLlmOutput_js_1.validateLlmOutput)("data_analyst", result.applyPatches.map((p) => ({
@@ -1688,7 +1586,6 @@ exports.app.post("/api/data-analyst", async (req, res) => {
                 creditsUsed: 1,
                 conversationId,
                 billingMode,
-                isByok,
                 routeName: "/api/data-analyst",
             }).catch(() => null);
             if (loggedConversationId) {

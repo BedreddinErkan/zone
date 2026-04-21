@@ -79,7 +79,6 @@ async function processDeveloperPatchJob(supabase, job) {
             creditsUsed: 1,
             conversationId: requestPayload.conversationId,
             billingMode: requestPayload.billingMode,
-            isByok: requestPayload.isByok,
             routeName: "/api/patch/jobs worker",
         }).catch(() => null);
         if (conversationId) {

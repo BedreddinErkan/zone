@@ -7,16 +7,21 @@ export interface ResolveBillingActionInput {
   hasPaidAccess?: boolean;
   runsUsedThisMonth: number;
   credits: number;
+  tokenCreditsUsed?: number;
+  tokenCreditsLimit?: number;
 }
 
 export function resolveBillingAction(
   input: ResolveBillingActionInput
 ): BillingAction {
-  if (input.mode === "byok" && input.hasPaidAccess) {
+  const tokenCreditsUsed = input.tokenCreditsUsed ?? 0;
+  const tokenCreditsLimit = input.tokenCreditsLimit ?? 500000;
+
+  if (tokenCreditsLimit >= 999999999) {
     return "FREE";
   }
 
-  if (input.credits <= 0) {
+  if (tokenCreditsUsed >= tokenCreditsLimit) {
     return "LIMIT_EXCEEDED";
   }
 

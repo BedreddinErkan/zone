@@ -236,9 +236,9 @@ input:focus,textarea:focus{border-color:#007acc}
 .composer-shell .label{margin-bottom:0;color:#7f919c;font-size:10px;letter-spacing:.18em}
 .composer-actions{display:flex;flex-direction:column;gap:10px}
 .composer-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.composer-footer{display:flex;align-items:center;justify-content:flex-end;min-height:0}
-.composer-section.is-locked .composer-footer{min-height:34px}
-.stop-run-btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid #2d2d2d;border-radius:999px;padding:7px 12px;background:#171717;color:#ce9178;font-family:'Courier New',monospace;font-size:12px;cursor:pointer;transition:opacity .18s ease,transform .18s ease,border-color .18s ease,background .18s ease,color .18s ease}
+.composer-footer{display:flex;align-items:center;justify-content:flex-start;min-height:0;padding:4px 0;margin-bottom:8px;}
+.composer-section.is-locked .composer-footer{min-height:40px;padding:6px 0;}
+.stop-run-btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid #ce9178;border-radius:999px;padding:8px 18px;background:#241d12;color:#ce9178;font-family:'Courier New',monospace;font-size:13px;font-weight:700;cursor:pointer;transition:opacity .18s ease,border-color .18s ease;min-width:80px;}
 .stop-run-btn:not(.hidden){display:inline-flex}
 .stop-run-btn:hover{border-color:#ce9178;background:#241d12;color:#f0c38d}
 .stop-run-btn:disabled{opacity:.6;cursor:not-allowed}
@@ -1111,7 +1111,20 @@ function trimChatThreadMessages(){
 function animateChatMessageIn(node){if(!node)return;node.classList.add('is-entering');void node.offsetHeight;requestAnimationFrame(()=>node.classList.remove('is-entering'));}
 function animateChatMessageOut(node,removeFn){if(!node){if(typeof removeFn==='function')removeFn();return;}node.classList.remove('is-entering');void node.offsetHeight;node.classList.add('is-exiting');window.setTimeout(()=>{if(typeof removeFn==='function')removeFn();else node.remove();},220);}
 function appendChatMessage(html){const{thread}=getChatThreadElements();if(!thread)return null;setChatThreadEmptyVisible(false);thread.insertAdjacentHTML('beforeend',html);const node=thread.lastElementChild;if(node instanceof HTMLElement)animateChatMessageIn(node);trimChatThreadMessages();scrollChatThreadToLatest();return node instanceof HTMLElement?node:null;}
-function syncStopRunButton(forceActive){const active=Boolean(forceActive||isExecutionLocked());const stopBtn=document.getElementById('stopRunBtn');const section=document.querySelector('.composer-section');if(stopBtn){stopBtn.classList.toggle('hidden',!active);stopBtn.style.display=active?'inline-flex':'none';stopBtn.disabled=!active;}if(section)section.classList.toggle('is-locked',active);}
+function syncStopRunButton(forceActive){const active = Boolean(forceActive || isExecutionLocked());
+  const stopBtn = document.getElementById('stopRunBtn');
+  const section = document.querySelector('.composer-section');
+  if (stopBtn) {
+    if (active) {
+      stopBtn.classList.remove('hidden');
+      stopBtn.style.cssText = 'display:inline-flex!important;visibility:visible';
+    } else {
+      stopBtn.classList.add('hidden');
+      stopBtn.style.cssText = 'display:none';
+    }
+    stopBtn.disabled = !active;
+  }
+  if (section) section.classList.toggle('is-locked', active);}
 function setComposerLocked(locked){const isLocked=Boolean(locked);const task=document.getElementById('task');const help=document.getElementById('composerHelp');if(task){task.disabled=isLocked;task.setAttribute('aria-disabled',String(isLocked));}if(help)help.classList.add('hidden');syncStopRunButton(isLocked);}
 function stopActiveRun(){if(currentRunAbortController){currentRunAbortController.abort();currentRunAbortController=null;}releaseExecutionLock();setComposerLocked(false);hideError();document.getElementById('task')?.focus();}
 function toggleChatMiniDiffPreview(event,id){if(event)event.preventDefault();const body=document.getElementById(`chatMiniDiffBody-${id}`);const btn=document.getElementById(`chatMiniDiffToggle-${id}`);if(!body||!btn)return;const willShow=!body.classList.contains('is-open');body.classList.toggle('is-open',willShow);body.classList.toggle('is-collapsed',!willShow);btn.textContent=willShow?'Hide Diff Preview':'Show Diff Preview';}
@@ -1286,13 +1299,20 @@ function classifyZoneIntent(input){
 }
 
 function getZoneIntentResponse(intent){
-  if(intent==='help_or_capability'){
+  if (intent === 'help_or_capability') {
     return 'I can make code changes, review diffs, add tests, and help with SQL or migrations. Describe the file, function, or behavior you want changed; I will preview changes and only apply when confidence is high.';
   }
-  if(intent==='greeting')return 'Hey. I am ready to help with a focused code change when you are.';
-  if(intent==='small_talk')return 'Doing well, and ready to work. Tell me the file, function, or behavior you want changed.';
-  if(intent==='acknowledgment')return 'You got it.';
-  return 'Hey. I can help with code changes, tests, and SQL tasks. Describe the file, function, or behavior you want changed.';
+  if (intent === 'greeting') {
+    const picks = [
+      'Hey — tell me the file or feature you want to change.',
+      'Hi. What would you like updated?',
+      'Hello. Describe the change and I\'ll get started.'
+    ];
+    return picks[Math.floor(Date.now() / 1000) % picks.length];
+  }
+  if (intent === 'small_talk') return 'All good. What should I work on next?';
+  if (intent === 'acknowledgment') return 'Got it.';
+  return 'Describe the file, function, or behavior you want changed and I\'ll build a patch.';
 }
 
 function handleZoneIntentBeforeExecution(task,repoPath){
@@ -1897,7 +1917,7 @@ async function execute(){
       showDecision({decision:{mode:decisionMode},confidence:{score:result.confidence??0},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity});
       showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,validationBlocked:Boolean(result.validationBlocked),fileDiffs:result.fileDiffs||[]});
       
-      appendZoneResultMessage({role:currentRole,decisionMode,confidence:result.confidence??0,risk:0,files:Array.isArray(result.applyPatches)?result.applyPatches.length:Array.isArray(result.fileDiffs)?result.fileDiffs.length:0,warnings:Array.isArray(result.warnings)?result.warnings.length:0,summary:result.reason||result.preview,preview:result.preview,patchPreview:result.preview,fileDiffs:result.fileDiffs||[],applyPatches:result.applyPatches||[],inspectPayload:{decisionData:{decision:{mode:decisionMode},confidence:{score:result.confidence??0},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity,validationBlocked:Boolean(result.validationBlocked),warnings:result.warnings||[],reason:result.reason,patchQuality:result.patchQuality,safetyResolution:result.safetyResolution,intentMismatch:result.intentMismatch,microEditProtection:result.microEditProtection,designSystemSignals:result.designSystemSignals},patchData:{ok:true,patchPreview:result.preview,applyPatches:result.applyPatches||[],warnings:result.warnings||[],validationBlocked:Boolean(result.validationBlocked),fileDiffs:result.fileDiffs||[],decisionMode,developerConfidence:result.confidence??0,developerRisk:{score:0,breakdown:{}},contextFiles:result.contextFiles||[],patchResults:result.patchResults||[],plan:result.plan,planAlignment:result.planAlignment,verification:result.verification}}});
+      appendZoneResultMessage({role:currentRole,decisionMode,confidence:result.confidence??0,risk:0,files:Array.isArray(result.applyPatches)?result.applyPatches.length:Array.isArray(result.fileDiffs)?result.fileDiffs.length:0,warnings:Array.isArray(result.warnings)?result.warnings.length:0,summary:result.reason||result.preview,preview:result.preview,patchPreview:result.preview,fileDiffs:result.fileDiffs||[],applyPatches:result.applyPatches||[],inspectPayload:{decisionData:{decision:{mode:decisionMode},confidence:{score:result.confidence??0},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.framework,result.language]),complexity:result.complexity,validationBlocked:Boolean(result.validationBlocked),warnings:result.warnings||[],reason:result.reason,patchQuality:result.patchQuality,safetyResolution:result.safetyResolution,intentMismatch:result.intentMismatch,microEditProtection:result.microEditProtection,designSystemSignals:result.designSystemSignals},patchData:{ok:true,patchPreview:result.preview,applyPatches:result.applyPatches||[],warnings:result.warnings||[],validationBlocked:Boolean(result.validationBlocked),fileDiffs:result.fileDiffs||[],decisionMode,developerConfidence:result.confidence??0,developerRisk:{score:0,breakdown:{}},contextFiles:result.contextFiles||[],patchResults:result.patchResults||[],plan:result.plan,planAlignment:result.planAlignment,verification:result.verification,suggestedVerification:result.suggestedVerification||null}}});
       appendZoneExplanationMessage({
   role: currentRole,
   decisionMode,
@@ -1943,7 +1963,7 @@ async function execute(){
       const daMode=result.decisionMode||(result.confidence>=70?'safe_to_apply':'preview_only');
       showDecision({decision:{mode:daMode},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat])});
       showPatch({ok:true,patchPreview:result.preview,applyPatches:result.applyPatches,warnings:result.warnings,fileDiffs:result.fileDiffs||[]});
-      appendZoneResultMessage({role:currentRole,decisionMode:daMode,confidence:result.confidence,risk:0,files:Array.isArray(result.applyPatches)?result.applyPatches.length:Array.isArray(result.fileDiffs)?result.fileDiffs.length:0,warnings:Array.isArray(result.warnings)?result.warnings.length:0,summary:result.reason||result.preview,preview:result.preview,patchPreview:result.preview,fileDiffs:result.fileDiffs||[],applyPatches:result.applyPatches||[],inspectPayload:{decisionData:{decision:{mode:daMode},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat]),validationBlocked:Boolean(result.validationBlocked),warnings:result.warnings||[],reason:result.reason,patchQuality:result.patchQuality,safetyResolution:result.safetyResolution,intentMismatch:result.intentMismatch,microEditProtection:result.microEditProtection,designSystemSignals:result.designSystemSignals},patchData:{ok:true,patchPreview:result.preview,applyPatches:result.applyPatches||[],warnings:result.warnings||[],validationBlocked:Boolean(result.validationBlocked),fileDiffs:result.fileDiffs||[],decisionMode:daMode,developerConfidence:result.confidence,developerRisk:{score:0,breakdown:{}},contextFiles:result.contextFiles||[],patchResults:result.patchResults||[],plan:result.plan,planAlignment:result.planAlignment,verification:result.verification}}});
+      appendZoneResultMessage({role:currentRole,decisionMode:daMode,confidence:result.confidence,risk:0,files:Array.isArray(result.applyPatches)?result.applyPatches.length:Array.isArray(result.fileDiffs)?result.fileDiffs.length:0,warnings:Array.isArray(result.warnings)?result.warnings.length:0,summary:result.reason||result.preview,preview:result.preview,patchPreview:result.preview,fileDiffs:result.fileDiffs||[],applyPatches:result.applyPatches||[],inspectPayload:{decisionData:{decision:{mode:daMode},confidence:{score:result.confidence},risk:{score:0,breakdown:{}},frameworkBadge:formatMetadataBadge([result.dialect,result.migrationFormat]),validationBlocked:Boolean(result.validationBlocked),warnings:result.warnings||[],reason:result.reason,patchQuality:result.patchQuality,safetyResolution:result.safetyResolution,intentMismatch:result.intentMismatch,microEditProtection:result.microEditProtection,designSystemSignals:result.designSystemSignals},patchData:{ok:true,patchPreview:result.preview,applyPatches:result.applyPatches||[],warnings:result.warnings||[],validationBlocked:Boolean(result.validationBlocked),fileDiffs:result.fileDiffs||[],decisionMode:daMode,developerConfidence:result.confidence,developerRisk:{score:0,breakdown:{}},contextFiles:result.contextFiles||[],patchResults:result.patchResults||[],plan:result.plan,planAlignment:result.planAlignment,verification:result.verification,suggestedVerification:result.suggestedVerification||null}}});
       appendZoneExplanationMessage({
   role: currentRole,
   decisionMode: daMode,
@@ -2079,14 +2099,47 @@ async function restoreBackupSnapshot(rootHandle,snapshot){const restored=[];cons
 function getPostApplyVerification(input){const v=input&&typeof input.postApplyVerification==='object'?input.postApplyVerification:null;if(!v)return null;const status=['passed','failed','timeout','skipped'].includes(String(v.status))?String(v.status):'skipped';return{attempted:Boolean(v.attempted),command:typeof v.command==='string'?v.command:'',status,exitCode:typeof v.exitCode==='number'?v.exitCode:null,summary:typeof v.summary==='string'?v.summary:''};}
 function getPostApplyCompletionMessage(verification){if(!verification||!verification.attempted)return'Apply complete.';if(verification.status==='passed')return'Apply complete. Verification passed.';if(verification.status==='failed')return'Apply complete, but verification failed.';if(verification.status==='timeout')return'Apply complete, but verification timed out.';return'Apply complete.';}
 function buildPostApplyVerificationLine(input){const verification=getPostApplyVerification(input);if(!verification?.attempted)return'';const status=verification.status;const color=status==='passed'?'#4ec9b0':status==='failed'||status==='timeout'?'#ce9178':'#737373';const summary=verification.summary?` · ${escapeHtml(verification.summary)}`:'';const command=verification.command?` · ${escapeHtml(verification.command)}`:'';return `<div style="margin-bottom:8px;color:${color}">Post-apply verification: ${escapeHtml(status)}${summary}${command}</div>`;}
+async function detectVerificationFromFolderHandle(handle){
+  if(!handle||handle.kind!=='directory')return null;
+  try{
+    const pkgFile=await handle.getFileHandle('package.json');
+    const file=await pkgFile.getFile();
+    const pkg=JSON.parse(await file.text());
+    const scripts=pkg.scripts||{};
+    if(scripts['test:e2e'])return{command:'npm run test:e2e',label:'Run E2E tests'};
+    if(scripts['test:playwright'])return{command:'npm run test:playwright',label:'Run Playwright tests'};
+    if(scripts.playwright)return{command:'npm run playwright',label:'Run Playwright'};
+    if(scripts.test&&!String(scripts.test).includes('echo'))return{command:'npm test',label:'Run tests'};
+    if(scripts.build)return{command:'npm run build',label:'Run build'};
+  }catch{return null;}
+  try{
+    await handle.getFileHandle('playwright.config.ts');
+    return{command:'npx playwright test',label:'Run Playwright tests'};
+  }catch{}
+  try{
+    await handle.getFileHandle('playwright.config.js');
+    return{command:'npx playwright test',label:'Run Playwright tests'};
+  }catch{}
+  return null;
+}
 function getSuggestedVerification(input){const v=input&&typeof input.suggestedVerification==='object'?input.suggestedVerification:null;if(!v||v.available!==true)return null;const command=String(v.command||'').trim();if(!command)return null;return{command,repoPath:String(v.repoPath||getResolvedRepoPath()||'').trim()};}
 function getCurrentSuggestedVerificationForApply(){const candidates=[currentInspectResultRef?.inspectPayload?.patchData,currentInspectPayload,currentInspectResultRef?.inspectPayload?.decisionData];for(const candidate of candidates){const suggested=getSuggestedVerification(candidate);if(suggested)return suggested;}return null;}
 function getVerificationLabel(command){if(!command)return'Run verification';const c=command.toLowerCase();if(c==='npm test')return'Run tests';if(c==='npm run build')return'Build project';if(c.includes('pytest'))return'Run pytest';return`Run ${command}`;}
 function getRunningLabel(command){const c=String(command||'').toLowerCase();if(c==='npm test')return'Running tests...';if(c==='npm run build')return'Building project...';if(c.includes('pytest'))return'Running pytest...';return`Running ${command||'verification'}...`;}
 function getResultLabel(command,status){const c=String(command||'').toLowerCase();if(c==='npm test'){if(status==='passed')return'Tests passed';if(status==='failed')return'Tests failed';}if(c==='npm run build'){if(status==='passed')return'Build succeeded';if(status==='failed')return'Build failed';}if(c.includes('pytest')){if(status==='passed')return'Tests passed';if(status==='failed')return'Tests failed';}return`Verification ${status}`;}
-function appendSuggestedVerificationMessage(suggested){if(!suggested?.command)return;const id=++currentSuggestedVerificationId;const label=getVerificationLabel(suggested.command);pendingSuggestedVerifications.set(String(id),suggested);appendChatMessage(`<div class="chat-message zone"><div class="chat-message-top"><span class="chat-message-author">Zone</span><span class="chat-message-role">Verify</span></div><div class="chat-message-text">Patch applied. I can ${escapeHtml(label.toLowerCase())} to verify this change.</div><div class="chat-result-actions" style="margin-top:8px"><button type="button" class="chat-result-action primary" data-verification-id="${id}" onclick="runSuggestedVerification(event)">${escapeHtml(label)}</button><button type="button" class="chat-result-action" onclick="this.closest('.chat-message')?.remove()">Skip</button></div><div style="margin-top:6px;font-size:11px;color:#737373">Command: ${escapeHtml(suggested.command)}</div></div>`);}
+function appendSuggestedVerificationMessage(suggested){
+  if(!suggested?.command)return;
+  const id=++currentSuggestedVerificationId;
+  const label=getVerificationLabel(suggested.command);
+  const repoPath=suggested.repoPath||getResolvedRepoPath()||'';
+  const enriched={...suggested,repoPath};
+  pendingSuggestedVerifications.set(String(id),enriched);
+  appendChatMessage(
+    `<div class="chat-message zone"><div class="chat-message-top"><span class="chat-message-author">Zone</span><span class="chat-message-role">Verify</span></div><div class="chat-message-text">Patch applied. I can ${escapeHtml(label.toLowerCase())} to verify this change.</div><div class="chat-result-actions" style="margin-top:8px"><button type="button" class="chat-result-action primary" data-verification-id="${id}" onclick="runSuggestedVerification(event)">${escapeHtml(label)}</button><button type="button" class="chat-result-action" onclick="this.closest('.chat-message')?.remove()">Skip</button></div><div style="margin-top:6px;font-size:11px;color:#737373">Command: ${escapeHtml(suggested.command)}</div></div>`
+  );
+}
 function normalizeVerificationRunResult(data,responseOk){const raw=String(data?.status||'').toLowerCase();if(['passed','failed','timeout'].includes(raw))return raw;if(raw==='success')return'passed';if(raw==='timed_out')return'timeout';return responseOk?'passed':'failed';}
-async function runSuggestedVerification(event){if(event)event.preventDefault();const btn=event?.currentTarget;const id=btn?.dataset?.verificationId||'';const suggested=pendingSuggestedVerifications.get(id);if(!suggested){showError('Verification request is no longer available.');return;}const row=btn.closest('.chat-message');row?.querySelectorAll('button').forEach(b=>{b.disabled=true;});appendZoneStatusMessage(getRunningLabel(suggested.command),'Verify');try{const response=await fetch('/api/run-verification',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({repoPath:suggested.repoPath,command:suggested.command})});const data=await response.json().catch(()=>({}));const status=normalizeVerificationRunResult(data,response.ok);if(status==='timeout')appendZoneStatusMessage('Verification timed out','Verify');else appendZoneStatusMessage(getResultLabel(suggested.command,status),'Verify');if(!response.ok&&status!=='timeout')showError(data?.message||data?.error||'Verification failed.');}catch(e){appendZoneStatusMessage(getResultLabel(suggested?.command,'failed'),'Verify');showError(e.message||'Verification failed.');}finally{pendingSuggestedVerifications.delete(id);}}
+async function runSuggestedVerification(event){if(event)event.preventDefault();const btn=event?.currentTarget;const id=btn?.dataset?.verificationId||'';const suggested=pendingSuggestedVerifications.get(id);if(!suggested){showError('Verification request is no longer available.');return;}const row=btn.closest('.chat-message');row?.querySelectorAll('button').forEach(b=>{b.disabled=true;});appendZoneStatusMessage(getRunningLabel(suggested.command),'Verify');try{const response=await fetch('/api/run-verification',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({repoPath:suggested.repoPath||getResolvedRepoPath()||'',command:suggested.command})});const data=await response.json().catch(()=>({}));const status=normalizeVerificationRunResult(data,response.ok);if(status==='timeout')appendZoneStatusMessage('Verification timed out','Verify');else appendZoneStatusMessage(getResultLabel(suggested.command,status),'Verify');if(!response.ok&&status!=='timeout')showError(data?.message||data?.error||'Verification failed.');}catch(e){appendZoneStatusMessage(getResultLabel(suggested?.command,'failed'),'Verify');showError(e.message||'Verification failed.');}finally{pendingSuggestedVerifications.delete(id);}}
 function buildApplyVerificationSummary(input){const applied=Array.isArray(input?.applied)?input.applied:[];const failed=Array.isArray(input?.failed)?input.failed:[];const appliedSet=new Set(applied);const appliedPatches=(currentPatches||[]).filter(p=>appliedSet.has(p.filePath));const createdCount=appliedPatches.filter(p=>formatFileOperation(p.filePath)==='create').length;const modifiedCount=Math.max(0,appliedPatches.length-createdCount);const targetName=(currentRepoHandle&&currentRepoSelectionLabel?currentRepoSelectionLabel.replace(/^Folder:\s*/,''):getResolvedRepoPath())||'';const folderMeta=targetName?`<div style="margin-bottom:8px;color:#9cdcfe">Target: ${escapeHtml(targetName)}</div>`:'';const countLine=`<div style="margin-bottom:8px"><strong>${applied.length}</strong> file${applied.length!==1?'s':''} written · ${createdCount} created · ${modifiedCount} modified</div>`;const restoreMeta=currentBackupSnapshot&&applied.length>0?'<div style="margin-bottom:8px;color:#4ec9b0">Restore is ready for this session.</div>':'';const visibleFiles=applied.slice(0,5);const extraCount=Math.max(0,applied.length-visibleFiles.length);const fileList=visibleFiles.length>0?`<div style="margin-bottom:8px">${visibleFiles.map(f=>`&nbsp;&nbsp;• ${escapeHtml(f)}`).join('<br>')}${extraCount>0?`<br>&nbsp;&nbsp;• +${extraCount} more`:''}</div>`:'';const verificationLine=buildPostApplyVerificationLine(input);const failedLine=failed.length>0?`<br><span style="color:#ce9178">⚠ Failed: ${failed.map(f=>escapeHtml(f.filePath||f)).join(', ')}</span>`:'';return `<div style="margin-bottom:8px">Applied successfully</div>${folderMeta}${countLine}${verificationLine}${restoreMeta}${fileList}${failedLine}`;}
 function buildApplyNeutralSummary(input){const failed=Array.isArray(input?.failed)?input.failed:[];const targetName=(currentRepoHandle&&currentRepoSelectionLabel?currentRepoSelectionLabel.replace(/^Folder:\s*/,''):getResolvedRepoPath())||'';const folderMeta=targetName?`<div style="margin-bottom:8px;color:#9cdcfe">Target: ${escapeHtml(targetName)}</div>`:'';const failedLine=failed.length>0?`<div style="margin-top:8px;color:#ce9178">Failed writes: ${failed.map(f=>escapeHtml(f.filePath||f)).join(', ')}</div>`:'';return `${folderMeta}<div>No files were written</div>${failedLine}`;}
 
@@ -2101,7 +2154,11 @@ async function applyChanges(){
       const allowed=await ensureRepoWritePermission(currentRepoHandle);if(!allowed)throw new Error('Write permission denied for the selected folder.');
       const backupSnapshot=await createBackupSnapshot(currentRepoHandle,currentPatches);
       res=await writePatchFilesWithHandle(currentRepoHandle,currentPatches);
-      res.suggestedVerification=getCurrentSuggestedVerificationForApply();
+      const _storedVerify=getCurrentSuggestedVerificationForApply();
+      const _detectedCmd=_storedVerify||await detectVerificationFromFolderHandle(currentRepoHandle);
+      res.suggestedVerification=_detectedCmd&&_detectedCmd.command
+        ?{available:true,command:_detectedCmd.command,repoPath:''}
+        :null;
       if(res.applied.length===0){currentBackupSnapshot=null;setRestoreAvailability(false);if(currentInspectResultRef?.inspectPayload)currentInspectResultRef.inspectPayload.backupSnapshot=null;}else{currentBackupSnapshot=backupSnapshot;setRestoreAvailability(true);if(currentInspectResultRef?.inspectPayload)currentInspectResultRef.inspectPayload.backupSnapshot=backupSnapshot;}
     }else{
       const repoPath=getResolvedRepoPath();if(!repoPath)throw new Error('Enter a repo path first.');

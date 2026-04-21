@@ -120,7 +120,6 @@ async function processDeveloperPatchJob(
       creditsUsed: 1,
       conversationId: requestPayload.conversationId,
       billingMode: requestPayload.billingMode,
-      isByok: requestPayload.isByok,
       routeName: "/api/patch/jobs worker",
     }).catch(() => null);
 

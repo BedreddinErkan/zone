@@ -24,7 +24,7 @@ function mapConversationRow(row) {
 async function getUserQuota(supabase, userId) {
     const { data, error } = await supabase
         .from("profiles")
-        .select("runs_used_this_month,credits,subscription_status")
+        .select("runs_used_this_month,credits,subscription_status,token_credits_used,token_credits_limit")
         .eq("clerk_user_id", userId)
         .maybeSingle();
     if (error || !data) {
@@ -35,6 +35,8 @@ async function getUserQuota(supabase, userId) {
         runsUsedThisMonth: row.runs_used_this_month ?? 0,
         credits: row.credits ?? 0,
         subscriptionStatus: row.subscription_status ?? "",
+        tokenCreditsUsed: row.token_credits_used ?? 0,
+        tokenCreditsLimit: row.token_credits_limit ?? 500000,
     };
 }
 async function createConversation(supabase, input) {

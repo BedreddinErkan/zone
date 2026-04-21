@@ -4,7 +4,6 @@ import { createClient } from "@supabase/supabase-js";
 
 const lemonWebhookRouter = express.Router();
 const PRO_VARIANT_ID = "1512928";
-const UNLIMITED_VARIANT_ID = "1552852";
 
 function getSupabaseAdminClient() {
   const url = process.env.SUPABASE_URL;
@@ -26,7 +25,7 @@ async function updateProfileSubscription(input: {
   clerkUserId: string;
   subscriptionStatus: "pro" | "free";
   credits: number;
-  billingMode?: "hosted" | "byok";
+  tokenCreditsLimit?: number;
 }): Promise<void> {
   const supabase = getSupabaseAdminClient();
   const profilesTable = supabase.from("profiles") as unknown as {
@@ -34,7 +33,8 @@ async function updateProfileSubscription(input: {
       subscription_status: string;
       credits: number;
       runs_used_this_month: number;
-      billing_mode?: "hosted" | "byok";
+      token_credits_limit?: number;
+      token_credits_used?: number;
     }) => {
       eq: (
         column: string,
@@ -47,7 +47,7 @@ async function updateProfileSubscription(input: {
       subscription_status: input.subscriptionStatus,
       credits: input.credits,
       runs_used_this_month: 0,
-      ...(input.billingMode ? { billing_mode: input.billingMode } : {}),
+      ...(input.tokenCreditsLimit ? { token_credits_limit: input.tokenCreditsLimit, token_credits_used: 0 } : {}),
     })
     .eq("clerk_user_id", input.clerkUserId);
   if (result?.error) {
@@ -107,13 +107,11 @@ lemonWebhookRouter.post("/", async (req, res) => {
         eventName === "order_created"
       )
     ) {
-      const variantId = String(payload.data?.attributes?.variant_id ?? "");
-      const isUnlimited = variantId === UNLIMITED_VARIANT_ID;
       await updateProfileSubscription({
         clerkUserId,
         subscriptionStatus: "pro",
-        credits: isUnlimited ? 999999 : 250,
-        billingMode: isUnlimited ? "byok" : "hosted",
+        credits: 250,
+        tokenCreditsLimit: 5000000,
       });
     }
 
@@ -125,7 +123,7 @@ lemonWebhookRouter.post("/", async (req, res) => {
         clerkUserId,
         subscriptionStatus: "free",
         credits: 10,
-        billingMode: "hosted",
+        tokenCreditsLimit: 500000,
       });
     }
 if (
@@ -134,7 +132,7 @@ if (
     ) {
       const supabase = getSupabaseAdminClient();
       const profilesTable = supabase.from("profiles") as unknown as {
-        update: (values: { runs_used_this_month: number }) => {
+        update: (values: { runs_used_this_month: number; token_credits_used: number }) => {
           eq: (
             column: string,
             value: string
@@ -142,7 +140,7 @@ if (
         };
       };
       const result = await profilesTable
-        .update({ runs_used_this_month: 0 })
+        .update({ runs_used_this_month: 0, token_credits_used: 0 })
         .eq("clerk_user_id", clerkUserId);
       if (result?.error) {
         console.log(`[zone] subscription_payment_success reset failed: ${result.error.message}`);

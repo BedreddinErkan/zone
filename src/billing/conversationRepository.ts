@@ -23,6 +23,8 @@ type UserQuotaRow = {
   runs_used_this_month: number | null;
   credits: number | null;
   subscription_status: string | null;
+  token_credits_used: number | null;
+  token_credits_limit: number | null;
 };
 
 export interface CreateConversationInput {
@@ -67,10 +69,12 @@ export async function getUserQuota(
   runsUsedThisMonth: number;
   credits: number;
   subscriptionStatus: string;
+  tokenCreditsUsed: number;
+  tokenCreditsLimit: number;
 }> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("runs_used_this_month,credits,subscription_status")
+    .select("runs_used_this_month,credits,subscription_status,token_credits_used,token_credits_limit")
     .eq("clerk_user_id", userId)
     .maybeSingle();
 
@@ -84,6 +88,8 @@ export async function getUserQuota(
     runsUsedThisMonth: row.runs_used_this_month ?? 0,
     credits: row.credits ?? 0,
     subscriptionStatus: row.subscription_status ?? "",
+    tokenCreditsUsed: row.token_credits_used ?? 0,
+    tokenCreditsLimit: row.token_credits_limit ?? 500000,
   };
 }
 

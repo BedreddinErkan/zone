@@ -12,12 +12,6 @@ function getSupabaseClient() {
         return null;
     return (0, supabase_js_1.createClient)(url, key);
 }
-function resolveBillingMode(input) {
-    if (input.billingMode === "hosted" || input.billingMode === "byok") {
-        return input.billingMode;
-    }
-    return input.isByok ? "byok" : "hosted";
-}
 function normalizeSubscriptionStatus(value) {
     return typeof value === "string" && value.trim().toLowerCase() === "pro"
         ? "pro"
@@ -45,7 +39,6 @@ async function logRun(input) {
         routeName: input.routeName ?? "unknown",
         userId: effectiveUserId,
         billingMode: input.billingMode ?? null,
-        isByok: Boolean(input.isByok),
         decisionMode: input.decisionMode,
     });
     await supabase.from("run_logs").insert({
@@ -62,12 +55,14 @@ async function logRun(input) {
         routeName: input.routeName ?? "unknown",
         userId: effectiveUserId,
     });
-    const billingMode = resolveBillingMode(input);
+    const billingMode = "hosted";
     let profileResult = { data: null, error: null };
     let userQuota = {
         runsUsedThisMonth: 0,
         credits: Number.MAX_SAFE_INTEGER,
         subscriptionStatus: "free",
+        tokenCreditsUsed: 0,
+        tokenCreditsLimit: 500000,
     };
     try {
         profileResult = await supabase
@@ -133,6 +128,8 @@ async function logRun(input) {
         hasPaidAccess,
         runsUsedThisMonth: userQuota.runsUsedThisMonth,
         credits: userQuota.credits,
+        tokenCreditsUsed: userQuota.tokenCreditsUsed,
+        tokenCreditsLimit: userQuota.tokenCreditsLimit,
     });
     logBillingDebug("billing action resolved", {
         routeName: input.routeName ?? "unknown",
@@ -155,9 +152,12 @@ async function logRun(input) {
         userId: effectiveUserId,
         credits: 1,
     });
-    const rpcResult = await supabase.rpc("deduct_credits_and_increment_runs", {
+    const tokensToDeduct = typeof input.tokensUsed === "number" && input.tokensUsed > 0
+        ? input.tokensUsed
+        : 50000;
+    const rpcResult = await supabase.rpc("deduct_tokens", {
         p_user_id: effectiveUserId,
-        p_credits: 1,
+        p_tokens: tokensToDeduct,
     });
     if (rpcResult?.error) {
         logBillingDebug("deduction rpc error", {
