@@ -1110,7 +1110,8 @@ function trimChatThreadMessages(){
 function animateChatMessageIn(node){if(!node)return;node.classList.add('is-entering');void node.offsetHeight;requestAnimationFrame(()=>node.classList.remove('is-entering'));}
 function animateChatMessageOut(node,removeFn){if(!node){if(typeof removeFn==='function')removeFn();return;}node.classList.remove('is-entering');void node.offsetHeight;node.classList.add('is-exiting');window.setTimeout(()=>{if(typeof removeFn==='function')removeFn();else node.remove();},220);}
 function appendChatMessage(html){const{thread}=getChatThreadElements();if(!thread)return null;setChatThreadEmptyVisible(false);thread.insertAdjacentHTML('beforeend',html);const node=thread.lastElementChild;if(node instanceof HTMLElement)animateChatMessageIn(node);trimChatThreadMessages();scrollChatThreadToLatest();return node instanceof HTMLElement?node:null;}
-function setComposerLocked(locked){const isLocked=Boolean(locked);const task=document.getElementById('task');const stopBtn=document.getElementById('stopRunBtn');const help=document.getElementById('composerHelp');const section=document.querySelector('.composer-section');if(task){task.disabled=isLocked;task.setAttribute('aria-disabled',String(isLocked));}if(stopBtn){stopBtn.classList.toggle('hidden',!isLocked);stopBtn.disabled=!isLocked;}if(help)help.classList.add('hidden');if(section)section.classList.toggle('is-locked',isLocked);}
+function syncStopRunButton(forceActive){const active=Boolean(forceActive||isExecutionLocked());const stopBtn=document.getElementById('stopRunBtn');const section=document.querySelector('.composer-section');if(stopBtn){stopBtn.classList.toggle('hidden',!active);stopBtn.disabled=!active;}if(section)section.classList.toggle('is-locked',active);}
+function setComposerLocked(locked){const isLocked=Boolean(locked);const task=document.getElementById('task');const help=document.getElementById('composerHelp');if(task){task.disabled=isLocked;task.setAttribute('aria-disabled',String(isLocked));}if(help)help.classList.add('hidden');syncStopRunButton(isLocked);}
 function stopActiveRun(){if(currentRunAbortController){currentRunAbortController.abort();currentRunAbortController=null;}releaseExecutionLock();setComposerLocked(false);hideError();document.getElementById('task')?.focus();}
 function toggleChatMiniDiffPreview(event,id){if(event)event.preventDefault();const body=document.getElementById(`chatMiniDiffBody-${id}`);const btn=document.getElementById(`chatMiniDiffToggle-${id}`);if(!body||!btn)return;const willShow=!body.classList.contains('is-open');body.classList.toggle('is-open',willShow);body.classList.toggle('is-collapsed',!willShow);btn.textContent=willShow?'Hide Diff Preview':'Show Diff Preview';}
 function toggleCompactResultDetails(event){if(event)event.preventDefault();const card=event?.currentTarget?.closest?.('.execution-result-card');if(!card)return;const expanded=!card.classList.contains('is-expanded');card.classList.toggle('is-expanded',expanded);event.currentTarget.textContent=expanded?'Hide details':'Show details';}
@@ -1265,42 +1266,6 @@ function setRoleSilently(role){
   if(currentRole&&currentRole!==nextRole)resetConversationState();
   currentRole=nextRole;
   document.getElementById('task').placeholder=getRolePlaceholder(currentRole);
-}
-
-function classifyZoneIntent(input){
-  const task=String(input?.task||'').trim();
-  const normalized=task.toLowerCase().replace(/[?!.,]+$/,'').replace(/\s+/g,' ');
-  if(!normalized)return'vague_code_task';
-  if(/^(help|what can you do|what do you do|how do you work|what is zone|how should i use this|how to use this|show help)$/.test(normalized))return'help_or_capability';
-  if(/^(hi|hello|hey|yo|thanks|thank you|ok|okay|cool|nice|how are you|sup)$/.test(normalized))return'general_chat';
-  if(/^(fix|fix the bug|update the code|improve this|make it better|optimize it|change something|add tests|write tests|debug this)$/.test(normalized))return'vague_code_task';
-  const codeSignals=/\b(fix|add|update|change|refactor|implement|debug|test|tests|migration|sql|endpoint|function|component|class|method|file|bug|api|route|schema|button|input|form|validation|login|query)\b/i;
-  const fileSignals=/[\w./-]+\.(ts|tsx|js|jsx|css|html|py|java|sql|feature|json|md)\b/i;
-  const actionable=/\b(fix|add|update|change|refactor|implement|debug|write|create|remove|rename|validate)\b/i;
-  if(fileSignals.test(task)||codeSignals.test(task)||(input?.hasRepoSelected&&actionable.test(task)))return'code_task';
-  return input?.hasRepoSelected?'vague_code_task':'general_chat';
-}
-
-function getZoneIntentResponse(intent){
-  if(intent==='help_or_capability'){
-    return 'I can make code changes, review diffs, add tests, and help with SQL or migrations. Describe the file, function, or behavior you want changed; I will preview changes and only apply when confidence is high.';
-  }
-  return 'Hey. I can help with code changes, tests, and SQL tasks. Describe the file, function, or behavior you want changed.';
-}
-
-function handleZoneIntentBeforeExecution(task,repoPath){
-  const intent=classifyZoneIntent({task,role:currentRole,hasRepoSelected:Boolean(repoPath)});
-  console.log(`[zone-intent] classified=${intent}`);
-  if(intent==='general_chat'||intent==='help_or_capability'){
-    hideError();
-    appendUserChatMessage(task);
-    appendChatMessage(`<div class="chat-message zone"><div class="chat-message-top"><span class="chat-message-author">Zone</span><span class="chat-message-role">Assistant</span></div><div class="chat-message-text">${escapeHtml(getZoneIntentResponse(intent))}</div></div>`);
-    const taskInput=document.getElementById('task');
-    if(taskInput)taskInput.value='';
-    taskInput?.focus();
-    return true;
-  }
-  return false;
 }
 
 function filterQuickActions(filter){
@@ -1586,12 +1551,12 @@ function inferHostedDataSchema(files){const evidence=[];let dialect='unknown';le
 async function buildHostedDataAnalystContext(){if(!currentRepoHandle||currentRepoHandle.kind!=='directory'||typeof currentRepoHandle.values!=='function')return null;const files=await collectHostedContextFilesFromHandle(currentRepoHandle);if(files.length===0)return null;const availableFiles=files.map(file=>({path:file.path,category:classifyHostedContextCategory(file.path),extension:getHostedContextExtension(file.path)}));const existingSqlContents=files.filter(file=>{const normalized=file.path.toLowerCase();return getHostedContextExtension(file.path)==='sql'||normalized.includes('migration')||normalized.includes('schema')||normalized.includes('alembic')||normalized.includes('liquibase');}).slice(0,3).map(file=>({path:file.path,content:file.content}));return{availableFiles,schema:inferHostedDataSchema(existingSqlContents.length>0?existingSqlContents:files),existingSqlContents};}
 
 function resetRunState(){currentPatches=[];currentBackupSnapshot=null;currentInspectPayload=null;currentInspectResultRef=null;currentInspectRenderKey=0;currentInspectRenderedKey=0;currentRunState={hasPatchResult:false,validationBlocked:false,runInProgress:false,jobActive:false,jobState:'',decisionMode:'',confidence:0,finalState:''};currentExplanationState={};renderExplanationState();setRestoreAvailability(false);document.getElementById('successBox').style.display='none';document.getElementById('successBox').innerHTML='';document.getElementById('resultUpgradeHint').textContent='';document.getElementById('resultUpgradeHint').classList.add('hidden');document.getElementById('applyStatusBox').textContent='';document.getElementById('warningsList').innerHTML='';document.getElementById('warningsList').classList.add('hidden');document.getElementById('fileList').innerHTML='';document.getElementById('patchSummary').textContent='';document.getElementById('contextFilesList').innerHTML='';document.getElementById('contextFilesBox').classList.add('hidden');document.getElementById('patchSection').classList.add('hidden');}
-function beginRunState(){resetRunState();document.getElementById('decisionSection').classList.add('hidden');currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};renderResultSummary();currentRunState.runInProgress=true;currentRunState.jobActive=false;currentRunState.jobState='';updateApplyState();}
+function beginRunState(){resetRunState();document.getElementById('decisionSection').classList.add('hidden');currentSummaryState={role:currentRole,status:'',fileCount:0,warningCount:0,contextCount:0};renderResultSummary();currentRunState.runInProgress=true;currentRunState.jobActive=false;currentRunState.jobState='';updateApplyState();syncStopRunButton(true);}
 function normalizeExecutionJobState(value){const raw=String(value||'').trim().toLowerCase();if(!raw)return '';const normalized=raw.replace(/[\s-]+/g,'_');if(normalized==='ready'||normalized==='done'||normalized==='complete')return'completed';if(normalized.includes('cancel'))return'cancelled';if(normalized.includes('block'))return'blocked';if(normalized.includes('fail')||normalized.includes('error'))return'failed';if(normalized.includes('complete')||normalized.includes('success')||normalized.includes('finished'))return'completed';if(normalized.includes('queue'))return'queued';if(normalized.includes('claim'))return'claimed';if(normalized.includes('process'))return'processing';if(normalized.includes('run')||normalized.includes('generat')||normalized.includes('scan')||normalized.includes('validat')||normalized.includes('plan')||normalized.includes('analyz'))return'running';return normalized;}
 function isTerminalExecutionJobState(state){return ['completed','failed','blocked','cancelled'].includes(state);}
 function isActiveExecutionJobState(state){return ['queued','claimed','running','processing'].includes(state);}
 function isExecutionLocked(){return Boolean(currentRunState.runInProgress||currentRunState.jobActive);}
-function syncExecutionLockState(nextState){const normalized=normalizeExecutionJobState(nextState);if(!normalized)return;if(isTerminalExecutionJobState(normalized)){currentRunState.jobActive=false;currentRunState.jobState=normalized;}else if(isActiveExecutionJobState(normalized)){currentRunState.jobActive=true;currentRunState.jobState=normalized;}updateApplyState();}
+function syncExecutionLockState(nextState){const normalized=normalizeExecutionJobState(nextState);if(!normalized)return;if(isTerminalExecutionJobState(normalized)){currentRunState.jobActive=false;currentRunState.jobState=normalized;}else if(isActiveExecutionJobState(normalized)){currentRunState.jobActive=true;currentRunState.jobState=normalized;}syncStopRunButton();updateApplyState();}
 function releaseExecutionLock(options){const opts=options&&typeof options==='object'?options:{};currentRunAbortController=null;currentRunState.runInProgress=false;currentRunState.jobActive=false;currentRunState.jobState='';if(opts.resetProgress!==false)resetProgress();setLoading(false);setComposerLocked(false);updateApplyState();}
 function getResolvedFinalState(input){const source=input&&typeof input==='object'?input:currentRunState;if(source?.validationBlocked)return 'blocked';if(source?.decisionMode==='blocked')return 'blocked';if(source?.decisionMode==='preview_only')return 'preview_only';return 'safe_to_apply';}
 function applyDecisionDisplayState(state){const finalState=state||getResolvedFinalState();const badge=document.getElementById('decisionBadge');const dot=document.getElementById('bdot');const text=document.getElementById('badgeText');const helper=document.querySelector('.preview-helper');const cls=finalState==='blocked'?'blocked':finalState==='preview_only'?'preview':'safe';const dotColor=finalState==='blocked'?'#f44747':finalState==='preview_only'?'#ce9178':'#4ec9b0';if(badge)badge.className='decision-badge '+cls;if(dot)dot.style.background=dotColor;if(text)text.textContent=finalState.replace(/_/g,' ');if(helper){if(finalState==='blocked'){helper.textContent='Zone blocked this result from automatic apply. Review the output and revise the task before continuing.';helper.classList.add('is-visible');}else if(finalState==='preview_only'){helper.textContent='Zone recommends manual review before applying this patch.';helper.classList.add('is-visible');}else{helper.textContent='';helper.classList.remove('is-visible');}}return finalState;}
@@ -1790,8 +1755,6 @@ function showMemoryReloadSuggestion(heapMB){
 function setLoading(l){const btn=document.getElementById('execBtn');const s=document.getElementById('spinner');const t=document.getElementById('execText');const locked=isExecutionLocked();const missingLocalApiKey=requiresLocalApiKey();const isHardBlocked=currentBillingState.hardBlocked&&!(currentBillingState.plan==='Pro'&&getCurrentBillingMode()==='byok');btn.disabled=l||locked||isHardBlocked||requiresHostedFolderSelection()||missingLocalApiKey;btn.title=requiresHostedFolderSelection()?getHostedFolderRequiredMessage():missingLocalApiKey?'Enter your OpenAI API key to continue':(currentBillingState.hardBlocked&&!(currentBillingState.plan==='Pro'&&getCurrentBillingMode()==='byok'))?'Upgrade to continue':locked?'A background run is already in progress.':'';s.style.display=l?'block':'none';t.textContent=l?'Running...':locked?(currentRunState.jobState==='queued'?'Queued...':'Run Active...'):'\u25B6  Execute';}
 
 async function execute(){
-  const initialTask=document.getElementById('task')?.value?.trim()||'';
-  if(initialTask&&handleZoneIntentBeforeExecution(initialTask,getResolvedRepoPath()))return;
   if(requiresLocalApiKey()){showError('Enter your OpenAI API key to use Unlimited BYOK.');return;}
   if(isExecutionLocked())return;
   startZonePerfRun(`run ${currentRole}`);
@@ -2072,6 +2035,7 @@ async function restoreBackupSnapshot(rootHandle,snapshot){const restored=[];cons
 function getPostApplyVerification(input){const v=input&&typeof input.postApplyVerification==='object'?input.postApplyVerification:null;if(!v)return null;const status=['passed','failed','timeout','skipped'].includes(String(v.status))?String(v.status):'skipped';return{attempted:Boolean(v.attempted),command:typeof v.command==='string'?v.command:'',status,exitCode:typeof v.exitCode==='number'?v.exitCode:null,summary:typeof v.summary==='string'?v.summary:''};}
 function getPostApplyCompletionMessage(verification){if(!verification||!verification.attempted)return'Apply complete.';if(verification.status==='passed')return'Apply complete. Verification passed.';if(verification.status==='failed')return'Apply complete, but verification failed.';if(verification.status==='timeout')return'Apply complete, but verification timed out.';return'Apply complete.';}
 function buildPostApplyVerificationLine(input){const verification=getPostApplyVerification(input);if(!verification?.attempted)return'';const status=verification.status;const color=status==='passed'?'#4ec9b0':status==='failed'||status==='timeout'?'#ce9178':'#737373';const summary=verification.summary?` · ${escapeHtml(verification.summary)}`:'';const command=verification.command?` · ${escapeHtml(verification.command)}`:'';return `<div style="margin-bottom:8px;color:${color}">Post-apply verification: ${escapeHtml(status)}${summary}${command}</div>`;}
+function normalizeApplyResponsePayload(payload){const source=payload?.result&&typeof payload.result==='object'?payload.result:payload?.data&&typeof payload.data==='object'?payload.data:payload||{};return{applied:Array.isArray(source.applied)?source.applied:Array.isArray(payload?.applied)?payload.applied:[],failed:Array.isArray(source.failed)?source.failed:Array.isArray(payload?.failed)?payload.failed:[],postApplyVerification:source.postApplyVerification||payload?.postApplyVerification,suggestedVerification:source.suggestedVerification||payload?.suggestedVerification};}
 function getSuggestedVerification(input){const v=input&&typeof input.suggestedVerification==='object'?input.suggestedVerification:null;if(!v||v.available!==true)return null;const command=String(v.command||'').trim();if(!command)return null;return{command,repoPath:String(v.repoPath||getResolvedRepoPath()||'').trim()};}
 function getVerificationLabel(command){if(!command)return'Run verification';const c=command.toLowerCase();if(c==='npm test')return'Run tests';if(c==='npm run build')return'Build project';if(c.includes('pytest'))return'Run pytest';return`Run ${command}`;}
 function getRunningLabel(command){const c=String(command||'').toLowerCase();if(c==='npm test')return'Running tests...';if(c==='npm run build')return'Building project...';if(c.includes('pytest'))return'Running pytest...';return`Running ${command||'verification'}...`;}
@@ -2098,7 +2062,7 @@ async function applyChanges(){
       const repoPath=getResolvedRepoPath();if(!repoPath)throw new Error('Enter a repo path first.');
       const response=await fetch('/api/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({patches:currentPatches,repoPath})});
       if(!response.ok)throw new Error('Apply failed: '+response.status);
-      const payload=await response.json();res={applied:Array.isArray(payload.applied)?payload.applied:[],failed:Array.isArray(payload.failed)?payload.failed:[],postApplyVerification:payload.postApplyVerification,suggestedVerification:payload.suggestedVerification};currentBackupSnapshot=null;setRestoreAvailability(false);if(currentInspectResultRef?.inspectPayload)currentInspectResultRef.inspectPayload.backupSnapshot=null;
+      const payload=await response.json();res=normalizeApplyResponsePayload(payload);console.log(`[zone-ui] apply response suggestedVerification available=${Boolean(res.suggestedVerification?.available)} command="${String(res.suggestedVerification?.command||'')}"`);currentBackupSnapshot=null;setRestoreAvailability(false);if(currentInspectResultRef?.inspectPayload)currentInspectResultRef.inspectPayload.backupSnapshot=null;
     }
     if(res.applied.length===0){sb.innerHTML=buildApplyNeutralSummary(res);sb.style.display='block';currentRunState.hasPatchResult=false;appendZoneStatusMessage('No files were written.','Apply');}
     else{const verification=getPostApplyVerification(res);const suggestedVerification=getSuggestedVerification(res);sb.innerHTML=buildApplyVerificationSummary(res);sb.style.display='block';currentRunState.hasPatchResult=false;appendZoneStatusMessage('Patch applied.','Apply');if(verification?.attempted)appendZoneStatusMessage(getPostApplyCompletionMessage(verification),'Apply');else appendZoneStatusMessage('Apply complete.','Apply');if(suggestedVerification)appendSuggestedVerificationMessage(suggestedVerification);}

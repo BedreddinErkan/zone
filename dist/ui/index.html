@@ -1272,7 +1272,7 @@ function classifyZoneIntent(input){
   const normalized=task.toLowerCase().replace(/[?!.,]+$/,'').replace(/\s+/g,' ');
   if(!normalized)return'vague_code_task';
   if(/^(help|what can you do|what do you do|how do you work|what is zone|how should i use this|how to use this|show help)$/.test(normalized))return'help_or_capability';
-  if(/^(hi|hello|hey|yo|thanks|thank you|ok|okay|cool|nice|how are you|sup)$/.test(normalized))return'general_chat';
+  if(getLightweightChatBucket(normalized))return'general_chat';
   if(/^(fix|fix the bug|update the code|improve this|make it better|optimize it|change something|add tests|write tests|debug this)$/.test(normalized))return'vague_code_task';
   const codeSignals=/\b(fix|add|update|change|refactor|implement|debug|test|tests|migration|sql|endpoint|function|component|class|method|file|bug|api|route|schema|button|input|form|validation|login|query)\b/i;
   const fileSignals=/[\w./-]+\.(ts|tsx|js|jsx|css|html|py|java|sql|feature|json|md)\b/i;
@@ -1281,20 +1281,54 @@ function classifyZoneIntent(input){
   return input?.hasRepoSelected?'vague_code_task':'general_chat';
 }
 
-function getZoneIntentResponse(intent){
+function getLightweightChatBucket(normalized){
+  if(/^(hi|hello|hey|yo|sup)$/.test(normalized))return'greeting';
+  if(/^(how are you|what's up|whats up|how's it going|hows it going|how are things)$/.test(normalized))return'small_talk';
+  if(/^(thanks|thank you|ok|okay|cool|nice|got it|sounds good|great)$/.test(normalized))return'acknowledgment';
+  return'';
+}
+
+function pickZoneResponse(options,seed){
+  if(!Array.isArray(options)||options.length===0)return'';
+  const raw=String(seed||'');
+  let hash=0;
+  for(let i=0;i<raw.length;i+=1)hash=(hash*31+raw.charCodeAt(i))>>>0;
+  return options[hash%options.length];
+}
+
+function getZoneIntentResponse(intent,task,hasRepoSelected){
   if(intent==='help_or_capability'){
-    return 'I can make code changes, review diffs, add tests, and help with SQL or migrations. Describe the file, function, or behavior you want changed; I will preview changes and only apply when confidence is high.';
+    return pickZoneResponse([
+      'I can help with code changes, tests, and SQL tasks. Describe the file, function, or behavior you want changed.',
+      'I work best when you tell me the file, function, or exact behavior to update.',
+      'I can review diffs, add tests, and make localized code changes. Start with a specific task.'
+    ],task);
   }
-  return 'Hey. I can help with code changes, tests, and SQL tasks. Describe the file, function, or behavior you want changed.';
+  const normalized=String(task||'').trim().toLowerCase().replace(/[?!.,]+$/,'').replace(/\s+/g,' ');
+  const bucket=getLightweightChatBucket(normalized);
+  const repoCopy={
+    greeting:['Hey — what do you want to change in this repo?','Hi — what are we updating in this codebase?','Hey — what are we fixing today?'],
+    small_talk:['All good. What are we changing in this repo?','Ready when you are — what should we fix?','Doing well — point me at the code you want changed.'],
+    acknowledgment:['Got it.','Sounds good.','👍']
+  };
+  const noRepoCopy={
+    greeting:['Hey — select a folder and describe what you want to change.','Hi — choose a repo, then tell me what to update.','Hey — what codebase are we working on?'],
+    small_talk:['Doing well — ready once you select a folder.','All good. Pick a repo and tell me what we are changing.','Ready when you are — select a folder or describe the code task.'],
+    acknowledgment:['Got it.','👍','Sounds good.']
+  };
+  const pool=(hasRepoSelected?repoCopy:noRepoCopy)[bucket]||noRepoCopy.greeting;
+  return pickZoneResponse(pool,`${bucket}:${task}:${hasRepoSelected?'repo':'none'}`);
 }
 
 function handleZoneIntentBeforeExecution(task,repoPath){
-  const intent=classifyZoneIntent({task,role:currentRole,hasRepoSelected:Boolean(repoPath)});
+  const hasRepoSelected=Boolean(repoPath);
+  const intent=classifyZoneIntent({task,role:currentRole,hasRepoSelected});
   console.log(`[zone-intent] classified=${intent}`);
   if(intent==='general_chat'||intent==='help_or_capability'){
     hideError();
     appendUserChatMessage(task);
-    appendChatMessage(`<div class="chat-message zone"><div class="chat-message-top"><span class="chat-message-author">Zone</span><span class="chat-message-role">Assistant</span></div><div class="chat-message-text">${escapeHtml(getZoneIntentResponse(intent))}</div></div>`);
+    const response=getZoneIntentResponse(intent,task,hasRepoSelected);
+    if(response)appendChatMessage(`<div class="chat-message zone"><div class="chat-message-top"><span class="chat-message-author">Zone</span><span class="chat-message-role">Assistant</span></div><div class="chat-message-text">${escapeHtml(response)}</div></div>`);
     const taskInput=document.getElementById('task');
     if(taskInput)taskInput.value='';
     taskInput?.focus();
