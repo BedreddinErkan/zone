@@ -2099,6 +2099,20 @@ async function restoreBackupSnapshot(rootHandle,snapshot){const restored=[];cons
 function getPostApplyVerification(input){const v=input&&typeof input.postApplyVerification==='object'?input.postApplyVerification:null;if(!v)return null;const status=['passed','failed','timeout','skipped'].includes(String(v.status))?String(v.status):'skipped';return{attempted:Boolean(v.attempted),command:typeof v.command==='string'?v.command:'',status,exitCode:typeof v.exitCode==='number'?v.exitCode:null,summary:typeof v.summary==='string'?v.summary:''};}
 function getPostApplyCompletionMessage(verification){if(!verification||!verification.attempted)return'Apply complete.';if(verification.status==='passed')return'Apply complete. Verification passed.';if(verification.status==='failed')return'Apply complete, but verification failed.';if(verification.status==='timeout')return'Apply complete, but verification timed out.';return'Apply complete.';}
 function buildPostApplyVerificationLine(input){const verification=getPostApplyVerification(input);if(!verification?.attempted)return'';const status=verification.status;const color=status==='passed'?'#4ec9b0':status==='failed'||status==='timeout'?'#ce9178':'#737373';const summary=verification.summary?` · ${escapeHtml(verification.summary)}`:'';const command=verification.command?` · ${escapeHtml(verification.command)}`:'';return `<div style="margin-bottom:8px;color:${color}">Post-apply verification: ${escapeHtml(status)}${summary}${command}</div>`;}
+async function detectVerificationFromFolderHandle(handle){
+  if(!handle||handle.kind!=='directory')return null;
+  try{
+    const pkgFile=await handle.getFileHandle('package.json');
+    const file=await pkgFile.getFile();
+    const pkg=JSON.parse(await file.text());
+    const scripts=pkg.scripts||{};
+    if(scripts['test:e2e'])return{command:'npm run test:e2e',label:'Run E2E tests'};
+    if(scripts.playwright)return{command:'npm run playwright',label:'Run Playwright'};
+    if(scripts.test&&!String(scripts.test).includes('echo'))return{command:'npm test',label:'Run tests'};
+    if(scripts.build)return{command:'npm run build',label:'Run build'};
+    return null;
+  }catch{return null;}
+}
 function getSuggestedVerification(input){const v=input&&typeof input.suggestedVerification==='object'?input.suggestedVerification:null;if(!v||v.available!==true)return null;const command=String(v.command||'').trim();if(!command)return null;return{command,repoPath:String(v.repoPath||getResolvedRepoPath()||'').trim()};}
 function getCurrentSuggestedVerificationForApply(){const candidates=[currentInspectResultRef?.inspectPayload?.patchData,currentInspectPayload,currentInspectResultRef?.inspectPayload?.decisionData];for(const candidate of candidates){const suggested=getSuggestedVerification(candidate);if(suggested)return suggested;}return null;}
 function getVerificationLabel(command){if(!command)return'Run verification';const c=command.toLowerCase();if(c==='npm test')return'Run tests';if(c==='npm run build')return'Build project';if(c.includes('pytest'))return'Run pytest';return`Run ${command}`;}
@@ -2121,7 +2135,11 @@ async function applyChanges(){
       const allowed=await ensureRepoWritePermission(currentRepoHandle);if(!allowed)throw new Error('Write permission denied for the selected folder.');
       const backupSnapshot=await createBackupSnapshot(currentRepoHandle,currentPatches);
       res=await writePatchFilesWithHandle(currentRepoHandle,currentPatches);
-      res.suggestedVerification=getCurrentSuggestedVerificationForApply();
+      const _storedVerify=getCurrentSuggestedVerificationForApply();
+      const _detectedCmd=_storedVerify||await detectVerificationFromFolderHandle(currentRepoHandle);
+      res.suggestedVerification=_detectedCmd&&_detectedCmd.command
+        ?{available:true,command:_detectedCmd.command,repoPath:''}
+        :null;
       if(res.applied.length===0){currentBackupSnapshot=null;setRestoreAvailability(false);if(currentInspectResultRef?.inspectPayload)currentInspectResultRef.inspectPayload.backupSnapshot=null;}else{currentBackupSnapshot=backupSnapshot;setRestoreAvailability(true);if(currentInspectResultRef?.inspectPayload)currentInspectResultRef.inspectPayload.backupSnapshot=backupSnapshot;}
     }else{
       const repoPath=getResolvedRepoPath();if(!repoPath)throw new Error('Enter a repo path first.');
