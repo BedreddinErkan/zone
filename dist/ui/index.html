@@ -642,28 +642,6 @@ input:focus,textarea:focus{border-color:#007acc}
   <div id="leftCol" class="workspace-sidebar">
     <div class="sidebar-scroll">
 
-<div class="section">
-  <div class="label">Inference Mode</div>
-  <div class="role-row">
-    <button class="role-btn active" data-mode="hosted" onclick="selectInferenceMode(this)">Hosted (Zone Server)</button>
-    <button class="role-btn" data-mode="local" onclick="selectInferenceMode(this)">Local (Your API Key)</button>
-  </div>
-  <div id="localApiKeyWrap" class="hidden">
-    <div class="label">OpenAI API Key</div>
-    <input id="localApiKey" type="password" placeholder="sk-..." autocomplete="off" oninput="handleLocalApiKeyInput(this.value)" />
-    <div style="margin-top:6px;font-size:11px;color:#737373;line-height:1.7">
-      Your key is stored locally and never sent to Zone servers.
-      Zone uses <strong style="color:#9cdcfe">4o-mini</strong> for runs
-      (complex tasks: <strong style="color:#9cdcfe">gpt-4.1</strong>).
-      · max ~80k tokens/run · BYOK is available on Unlimited only.
-      <a href="https://platform.openai.com/api-keys"
-         target="_blank" rel="noreferrer"
-         style="color:#4ec9b0;border-bottom:1px solid rgba(78,201,176,0.35);text-decoration:none"
-         onclick="trackEvent('byok_get_api_key_clicked',{source:'api_key_input'})">
-        Get API key →
-      </a>
-    </div>
-  </div>
   <div class="qa-section" id="quickActionsPanel">
     <div class="qa-header" onclick="toggleQuickActions()">
       <div class="qa-header-left">
@@ -735,8 +713,6 @@ input:focus,textarea:focus{border-color:#007acc}
   <div id="lowCreditsBox" class="repo-selection hidden" style="margin-bottom:10px">
     <div id="lowCreditsText" class="repo-selection-meta" style="color:#ce9178"></div>
   </div>
-</div>
-
     </div><!-- sidebar-scroll -->
 
     <div id="savePromptModalBackdrop" class="feedback-modal-backdrop hidden">
@@ -1081,12 +1057,12 @@ function escapeHtml(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'
 function formatFileOperation(p){return String(p||'').includes('[modify]')?'modify':'create';}
 function formatFileLabel(p,i){return p||`generated_file_${i+1}`;}
 function getRolePlaceholder(role){const ph={developer:'Describe the code change you want Zone to make...',test_engineer:'Describe the test you want Zone to generate or refine...',data_analyst:'Describe the schema or SQL change you want Zone to make...'};return ph[role]||'Describe the change...';}
-function getSavedInferenceMode(){try{const mode=localStorage.getItem(ZONE_INFERENCE_MODE_KEY)||'hosted';return mode==='local'?'local':'hosted';}catch{return'hosted';}}
-function saveInferenceMode(mode){try{localStorage.setItem(ZONE_INFERENCE_MODE_KEY,mode==='local'?'local':'hosted');}catch{}}
-function getSavedLocalApiKey(){try{return localStorage.getItem(ZONE_USER_OPENAI_KEY)||'';}catch{return'';}}
-function saveLocalApiKey(value){try{localStorage.setItem(ZONE_USER_OPENAI_KEY,String(value||''));}catch{}}
-function handleLocalApiKeyInput(value){saveLocalApiKey(value);hideError();setLoading(false);updateApplyState();}
-function getCurrentBillingMode(){return getSavedInferenceMode()==='local'?'byok':'hosted';}
+function getSavedInferenceMode(){return 'hosted';}
+function saveInferenceMode(mode){}
+function getSavedLocalApiKey(){return '';}
+function saveLocalApiKey(value){}
+function handleLocalApiKeyInput(value){}
+function getCurrentBillingMode(){return 'hosted';}
 function resetConversationState(){currentConversationId='';currentConversationRepoPath='';currentConversationRole='';currentConversationMode='';}
 function captureConversationState(conversationId,repoPath){if(!conversationId)return;currentConversationId=String(conversationId);currentConversationRepoPath=String(repoPath||'');currentConversationRole=currentRole||'';currentConversationMode=getCurrentBillingMode();}
 function getConversationRequestFields(repoPath){const nextRepoPath=String(repoPath||'');const nextMode=getCurrentBillingMode();if(currentConversationId&&((currentConversationRepoPath&&currentConversationRepoPath!==nextRepoPath)||(currentConversationRole&&currentConversationRole!==currentRole)||(currentConversationMode&&currentConversationMode!==nextMode)))resetConversationState();return{conversationId:currentConversationId||undefined,billingMode:nextMode};}
@@ -1501,24 +1477,10 @@ function initQuickActions(){
   document.getElementById('savePromptModalBackdrop')?.addEventListener('click',event=>{if(event.target?.id==='savePromptModalBackdrop')closeSavePromptModal();});
 }
 
-function applyInferenceModeUi(){
-  const isUnlimited=currentBillingState?.billing_mode==='byok';
-  const localModeAllowed=isUnlimited;
-  let mode=getSavedInferenceMode();
-  const hostedBtns=document.querySelectorAll('.role-btn[data-mode="hosted"]');
-  const localBtn=document.querySelector('.role-btn[data-mode="local"]');
-  hostedBtns.forEach(btn=>{btn.style.display=isUnlimited?'none':'';});
-  if(localBtn){localBtn.classList.toggle('hidden',!localModeAllowed);localBtn.style.display='';}
-  if(isUnlimited){saveInferenceMode('local');mode='local';}
-  else if(mode==='local'&&!localModeAllowed){saveInferenceMode('hosted');mode='hosted';}
-  document.querySelectorAll('.role-btn[data-mode]').forEach(btn=>btn.classList.toggle('active',btn.dataset.mode===mode));
-  const wrap=document.getElementById('localApiKeyWrap');const input=document.getElementById('localApiKey');
-  const savedKey=getSavedLocalApiKey();if(input&&input.value!==savedKey)input.value=savedKey;
-  if(wrap)wrap.classList.toggle('hidden',mode!=='local');
-}
-function selectInferenceMode(btn){const mode=btn?.dataset?.mode==='local'?'local':'hosted';trackEvent('mode_switch_attempt',{target:mode,plan:currentBillingState?.plan||'unknown',billing_mode:currentBillingState?.billing_mode||'unknown'});if(mode==='local'){const billingMode=currentBillingState?.billing_mode;if(billingMode!=='byok'){saveInferenceMode('hosted');applyInferenceModeUi();trackEvent('byok_blocked',{plan:currentBillingState?.plan||'unknown'});showByokUpgradeRequired();return;}}if(getSavedInferenceMode()!==mode)resetConversationState();saveInferenceMode(mode);applyInferenceModeUi();hideError();renderBillingState();setLoading(false);updateApplyState();}
-function getInferenceHeaders(){const headers={'Content-Type':'application/json'};const mode=getSavedInferenceMode();const apiKey=getSavedLocalApiKey().trim();if(mode==='local'&&apiKey)headers['X-User-OpenAI-Key']=apiKey;return headers;}
-function initializeInferenceMode(){applyInferenceModeUi();}
+function applyInferenceModeUi(){}
+function selectInferenceMode(btn){}
+function getInferenceHeaders(){return{'Content-Type':'application/json'};}
+function initializeInferenceMode(){}
 
 function buildDiffCards(fileDiffs){
   if(!fileDiffs||fileDiffs.length===0)return '<div class="diff-empty">No diffs returned.</div>';
@@ -1634,9 +1596,51 @@ function trackEvent(name,data={}){try{const impressionOnly=name==='low_credits_b
 
 function getBillingCreditsFromSummary(summary){const raw=summary&&typeof summary==='object'?summary.credits:null;return typeof raw==='number'&&Number.isFinite(raw)?Math.max(0,raw):null;}
 function getNumericBillingValue(...values){for(const value of values){if(typeof value==='number'&&Number.isFinite(value))return Math.max(0,value);}return null;}
-function normalizeBillingSummary(data){const summary=data&&typeof data==='object'?data:{};const plan=summary.plan==='Pro'?'Pro':'Free';const credits=getBillingCreditsFromSummary(summary);const hostedRunsRemaining=plan==='Pro'?getNumericBillingValue(summary.hostedRunsRemaining,summary.hosted_runs_remaining,credits):null;const hostedRunsLimit=plan==='Pro'?getNumericBillingValue(summary.hostedRunsLimit,summary.hosted_runs_limit,typeof summary.runsUsedThisMonth==='number'&&hostedRunsRemaining!==null?summary.runsUsedThisMonth+hostedRunsRemaining:null,250):null;const runsUsedThisMonth=plan==='Pro'?getNumericBillingValue(summary.runsUsedThisMonth,summary.runs_used_this_month,hostedRunsLimit!==null&&hostedRunsRemaining!==null?Math.max(0,hostedRunsLimit-hostedRunsRemaining):null):null;const remainingRuns=plan==='Pro'?hostedRunsRemaining:credits;return{plan,credits:remainingRuns,hostedRunsRemaining,hostedRunsLimit,runsUsedThisMonth,hardBlocked:plan==='Pro'?hostedRunsRemaining===0:remainingRuns===0,billing_mode:data.billing_mode||'hosted'};}
+function normalizeBillingSummary(data){
+  const summary=data&&typeof data==='object'?data:{};
+  const plan=summary.plan==='Pro'?'Pro':'Free';
+  const tokenCreditsUsed=typeof summary.tokenCreditsUsed==='number'?summary.tokenCreditsUsed:0;
+  const tokenCreditsLimit=typeof summary.tokenCreditsLimit==='number'?summary.tokenCreditsLimit:(plan==='Pro'?5000000:500000);
+  const tokenCreditsRemaining=Math.max(0,tokenCreditsLimit-tokenCreditsUsed);
+  const hardBlocked=tokenCreditsRemaining<=0;
+  return{
+    plan,
+    credits:tokenCreditsRemaining,
+    tokenCreditsUsed,
+    tokenCreditsLimit,
+    tokenCreditsRemaining,
+    hardBlocked,
+    hostedRunsRemaining:null,
+    hostedRunsLimit:null,
+    runsUsedThisMonth:null,
+    billing_mode:'hosted'
+  };
+}
 function normalizeAccessState(data){const source=data&&typeof data==='object'?data:{};return{runsUsedThisMonth:getNumericBillingValue(source.runsUsedThisMonth,source.runs_used_this_month),hostedRunsRemaining:getNumericBillingValue(source.hostedRunsRemaining,source.hosted_runs_remaining,source.plan==='Pro'?source.credits:null),hostedRunsLimit:getNumericBillingValue(source.hostedRunsLimit,source.hosted_runs_limit,250),credits:getBillingCreditsFromSummary(source)};}
-function getBillingDisplayModel(stateInput){const currentMode=getCurrentBillingMode();const state=stateInput&&typeof stateInput==='object'?stateInput:{};const plan=state.plan==='Pro'?'Pro':state.plan==='Free'?'Free':'';const billingMode=state.billing_mode==='byok'?'byok':'hosted';const credits=typeof state.credits==='number'&&Number.isFinite(state.credits)?Math.max(0,state.credits):null;const hostedRunsRemaining=typeof state.hostedRunsRemaining==='number'&&Number.isFinite(state.hostedRunsRemaining)?Math.max(0,state.hostedRunsRemaining):null;if(!plan)return{visible:false,labelText:'',labelHtml:'',metaText:'',metaHtml:'',boxClasses:[],labelClasses:[],metaClasses:[],lowVisible:false,lowText:'',lowHtml:'',trackLowCredits:false};if(plan==='Pro'){const proRemaining=hostedRunsRemaining!==null?hostedRunsRemaining:credits;if(billingMode==='byok')return{visible:true,labelText:'',labelHtml:`<span class="billing-plan-badge">⚡ Unlimited</span><span>Unlimited active</span>`,metaText:'Using your API key · Unlimited BYOK enabled',metaHtml:'',boxClasses:['pro'],labelClasses:['pro'],metaClasses:['pro'],lowVisible:false,lowText:'',lowHtml:'',trackLowCredits:false};if(proRemaining===null)return{visible:false,labelText:'',labelHtml:'',metaText:'',metaHtml:'',boxClasses:[],labelClasses:[],metaClasses:[],lowVisible:false,lowText:'',lowHtml:'',trackLowCredits:false};if(proRemaining===0){return{visible:true,labelText:'',labelHtml:`<span class="billing-plan-badge">⚡ Pro</span><span style="color:#ce9178">Hosted runs exhausted</span>`,metaText:'Upgrade to Unlimited to use your own API key',metaHtml:'',boxClasses:['free-low'],labelClasses:['pro'],metaClasses:['free-low'],lowVisible:false,lowText:'',lowHtml:'',trackLowCredits:false};}return{visible:true,labelText:'',labelHtml:`<span class="billing-plan-badge">⚡ Pro</span><span>${proRemaining} hosted runs remaining this month</span>`,metaText:'250 Hosted Runs / month · 4o-mini model · ~30 runs/day',metaHtml:'',boxClasses:['pro'],labelClasses:['pro'],metaClasses:['pro'],lowVisible:false,lowText:'',lowHtml:'',trackLowCredits:false};}if(credits===null)return{visible:false,labelText:'',labelHtml:'',metaText:'',metaHtml:'',boxClasses:[],labelClasses:[],metaClasses:[],lowVisible:false,lowText:'',lowHtml:'',trackLowCredits:false};const isLow=credits<=3;if(currentMode==='byok')return{visible:true,labelText:'',labelHtml:'<span class="billing-plan-badge">⚡ Unlimited</span><span>Unlimited active</span>',metaText:'Using your API key · Unlimited BYOK enabled',metaHtml:'',boxClasses:['pro'],labelClasses:['pro'],metaClasses:['pro'],lowVisible:false,lowText:'',lowHtml:'',trackLowCredits:false};return{visible:true,labelText:`Free Plan · ${credits} runs remaining`,labelHtml:'',metaText:credits===0?'':credits<=3?'Low on Hosted Runs. Upgrade soon to avoid interruptions.':'10 Hosted Runs included',metaHtml:credits===0?`Your 10 Hosted Runs are exhausted. <a class="billing-upgrade-link" href="https://zonecli.dev/#pricing" target="_blank" rel="noreferrer">Upgrade to Pro</a>`:'',boxClasses:[isLow?'free-low':''].filter(Boolean),labelClasses:['free',isLow?'free-low':''].filter(Boolean),metaClasses:[isLow?'free-low':''].filter(Boolean),lowVisible:credits>0&&credits<=3,lowText:credits>0?`⚠ You have ${credits} Hosted Run${credits!==1?'s':''} left. Upgrade to Pro to continue.`:'',lowHtml:'',trackLowCredits:credits>0&&credits<=3};}
+function getBillingDisplayModel(stateInput){
+  const state=stateInput&&typeof stateInput==='object'?stateInput:{};
+  const plan=state.plan==='Pro'?'Pro':state.plan==='Free'?'Free':'';
+  if(!plan)return{visible:false,labelText:'',labelHtml:'',metaText:'',metaHtml:'',boxClasses:[],labelClasses:[],metaClasses:[],lowVisible:false,lowText:'',lowHtml:'',trackLowCredits:false};
+  const tokenCreditsLimit=typeof state.tokenCreditsLimit==='number'?state.tokenCreditsLimit:(plan==='Pro'?5000000:500000);
+  const tokenCreditsUsed=typeof state.tokenCreditsUsed==='number'?state.tokenCreditsUsed:0;
+  const tokenCreditsRemaining=Math.max(0,typeof state.tokenCreditsRemaining==='number'?state.tokenCreditsRemaining:tokenCreditsLimit-tokenCreditsUsed);
+  const usedPct=Math.min(100,Math.round((tokenCreditsUsed/tokenCreditsLimit)*100));
+  const formatK=v=>v>=1000000?(v/1000000).toFixed(1)+'M':v>=1000?Math.round(v/1000)+'k':String(v);
+  if(plan==='Pro'){
+    if(tokenCreditsLimit>=999999999){
+      return{visible:true,labelText:'',labelHtml:`<span class="billing-plan-badge">⚡ Pro</span><span>Unlimited</span>`,metaText:'',metaHtml:'',boxClasses:['pro'],labelClasses:['pro'],metaClasses:['pro'],lowVisible:false,lowText:'',lowHtml:'',trackLowCredits:false};
+    }
+    if(tokenCreditsRemaining<=0){
+      return{visible:true,labelText:'',labelHtml:`<span class="billing-plan-badge">⚡ Pro</span><span style="color:#ce9178">Token limit reached</span>`,metaText:'Resets on your next billing date',metaHtml:'',boxClasses:['free-low'],labelClasses:['pro'],metaClasses:['free-low'],lowVisible:false,lowText:'',lowHtml:'',trackLowCredits:false};
+    }
+    return{visible:true,labelText:'',labelHtml:`<span class="billing-plan-badge">⚡ Pro</span><span>${formatK(tokenCreditsRemaining)} tokens remaining</span>`,metaText:`${usedPct}% used · ${formatK(tokenCreditsLimit)} total · resets monthly`,metaHtml:'',boxClasses:['pro'],labelClasses:['pro'],metaClasses:['pro'],lowVisible:false,lowText:'',lowHtml:'',trackLowCredits:false};
+  }
+  const isLow=tokenCreditsRemaining<=100000;
+  if(tokenCreditsRemaining<=0){
+    return{visible:true,labelText:'',labelHtml:`Free Plan · token limit reached`,metaHtml:`Token limit reached. <a class="billing-upgrade-link" href="https://zonecli.dev/#pricing" target="_blank" rel="noreferrer">Upgrade to Pro</a>`,metaText:'',boxClasses:['free-low'],labelClasses:['free','free-low'],metaClasses:['free-low'],lowVisible:false,lowText:'',lowHtml:'',trackLowCredits:false};
+  }
+  return{visible:true,labelText:`Free Plan · ${formatK(tokenCreditsRemaining)} tokens remaining`,labelHtml:'',metaText:`500k tokens included · ${usedPct}% used`,metaHtml:'',boxClasses:[isLow?'free-low':''].filter(Boolean),labelClasses:['free',isLow?'free-low':''].filter(Boolean),metaClasses:[isLow?'free-low':''].filter(Boolean),lowVisible:isLow,lowText:isLow?`⚠ Running low on tokens. Upgrade to Pro for 5M tokens/month.`:'',lowHtml:'',trackLowCredits:isLow};
+}
 function renderBillingState(){const box=document.getElementById('billingSummaryBox');const label=document.getElementById('billingSummaryLabel');const meta=document.getElementById('billingSummaryMeta');const lowBox=document.getElementById('lowCreditsBox');const lowText=document.getElementById('lowCreditsText');const model=getBillingDisplayModel(currentBillingState);box.classList.add('hidden');if(model.visible){box.className='repo-selection billing-summary-box';label.className='repo-selection-label billing-summary-label';meta.className='repo-selection-meta billing-summary-meta';model.boxClasses.forEach(cls=>box.classList.add(cls));model.labelClasses.forEach(cls=>label.classList.add(cls));model.metaClasses.forEach(cls=>meta.classList.add(cls));if(model.labelHtml)label.innerHTML=model.labelHtml;else label.textContent=model.labelText;if(model.metaHtml)meta.innerHTML=model.metaHtml;else meta.textContent=model.metaText;box.classList.remove('hidden');}else{label.textContent='';meta.textContent='';box.classList.add('hidden');}if(model.lowVisible){if(model.lowHtml)lowText.innerHTML=model.lowHtml;else lowText.textContent=model.lowText;lowBox.classList.remove('hidden');if(model.trackLowCredits){trackEvent('low_credits_banner_shown',{credits:currentBillingState.credits,plan:'Free'});}}else{lowText.textContent='';lowBox.classList.add('hidden');}}
 
 function renderRepoSelection(){const box=document.getElementById('repoSelectionBox');const label=document.getElementById('repoSelectionLabel');const meta=document.getElementById('repoSelectionMeta');const repoInput=document.getElementById('repoPath');const folderPickerBtn=document.getElementById('folderPickerBtn');const folderPickerBtnLabel=document.getElementById('folderPickerBtnLabel');const manualRepoPath=document.getElementById('repoPath').value.trim();const resolvedRepoPath=getResolvedRepoPath();const requiresFolder=requiresHostedFolderSelection();repoInput.readOnly=requiresFolder;repoInput.title=requiresFolder?getHostedFolderRequiredMessage():'';if(folderPickerBtn)folderPickerBtn.title=requiresFolder?'Select folder to enable Execute':'Select repo folder';if(folderPickerBtnLabel){folderPickerBtnLabel.textContent='Select folder to enable Execute';if(requiresFolder)folderPickerBtnLabel.classList.remove('hidden');else folderPickerBtnLabel.classList.add('hidden');}if(!currentRepoSelectionLabel){if(requiresFolder&&!manualRepoPath){label.textContent='Hosted Mode';meta.textContent=getHostedFolderRequiredMessage();box.classList.remove('hidden');setLoading(false);setDryRunLoading(false);updateApplyState();return;}label.textContent='';meta.textContent='';box.classList.add('hidden');setLoading(false);setDryRunLoading(false);updateApplyState();return;}const branchBadge=currentGitBranch?`<span style="margin-left: 8px; color: #4ec9b0; cursor: pointer;" onclick="promptCheckoutBranch()" title="Click to switch branch">🌿 ${escapeHtml(currentGitBranch)}</span>`:'';label.innerHTML=`${escapeHtml(currentRepoSelectionLabel)}${branchBadge}`;if(requiresFolder)meta.textContent=getHostedFolderRequiredMessage();else if(isHostedExecution()&&manualRepoPath&&!hasHostedFolderHandle())meta.textContent='📁 Folder selected from history. Click the folder button if you need to grant file access.';else if(manualRepoPath)meta.textContent=`Run path: ${manualRepoPath}`;else if(resolvedRepoPath)meta.textContent=`Run path: ${resolvedRepoPath}`;else meta.textContent='Selected folder is ready for local Apply.';box.classList.remove('hidden');setLoading(false);setDryRunLoading(false);updateApplyState();}
@@ -1652,7 +1656,7 @@ function handleFolderFallbackChange(input){const n=getFallbackFolderName(input);
 async function reconnectStoredFolder(){if(!currentRepoHandle)return;hideError();const granted=await requestRepoHandlePermission(currentRepoHandle);if(granted){currentRepoHandlePermission='granted';renderRepoSelection();if(window.__pendingExecute){window.__pendingExecute=false;setTimeout(()=>execute(),100);}return;}currentRepoHandlePermission='prompt';renderRepoSelection();}
 
 function validateTaskAndRepo(){const task=document.getElementById('task').value.trim();const repoPath=getResolvedRepoPath();if(!task){showError('Task is required.');return null;}if(/\{[^}]+\}/.test(task)){showError('Placeholder detected in task. Replace {function}, {file}, {description} etc. with actual values before executing.');return null;}if(!repoPath){showError('Task and repo path are required.');return null;}if(!getCurrentUserId()){showUnauthorized(getMissingUserSessionMessage());return null;}if(isHostedExecution()&&!hasHostedFolderHandle()){const repoPathValue=document.getElementById('repoPath')?.value?.trim();if(!repoPathValue){showError('Please select a folder first using the folder button.');return null;}}return{task,repoPath};}
-function requiresLocalApiKey(){return getSavedInferenceMode()==='local'&&!getSavedLocalApiKey().trim();}
+function requiresLocalApiKey(){return false;}
 
 async function executeDryRun(){if(requiresLocalApiKey()){showError('Enter your OpenAI API key to use Unlimited BYOK.');return;}const values=validateTaskAndRepo();if(!values)return;const{task,repoPath}=values;const userId=getCurrentUserId();const hostedContext=await buildHostedDeveloperContext();const body={...{task,repoPath,userId},...(hostedContext?{hostedContext}:{})};console.log('[zone-ui] dry-run request body',body);currentThreadProgressEnabled=false;beginRunState();hideError();document.getElementById('diffSection').classList.add('hidden');setDryRunLoading(true);setProgress('Dry run — generating diff...');try{const r=await fetch('/api/dry-run',{method:'POST',headers:getInferenceHeaders(),body:JSON.stringify(body)});const data=await r.json().catch(()=>null);if(!r.ok){if(data?.reason==='no_free_runs'){trackEvent('dry_run_blocked_no_credits',{role:currentRole,repoPath});showUpgrade(data.message,data.upgradeUrl);return;}if(data?.reason==='unauthorized'){showUnauthorized(data.message);return;}throw new Error(data?.message||data?.reason||('Dry run failed: '+r.status));}if(!data.ok)throw new Error(data.reason||'Dry run failed.');showDiff(data);setProgress('Ready');}catch(e){resetProgress();showError(e.message);}finally{currentRunState.runInProgress=false;syncStopRunButton(false);setDryRunLoading(false);updateApplyState();}}
 
@@ -1714,9 +1718,9 @@ function setVsCodeAuthRequiredVisible(visible){const authBox=document.getElement
 
 function showError(msg){const b=document.getElementById('errorBox');b.style.background='';b.style.borderColor='';b.style.color='';if(msg==='repo_not_accessible_in_hosted_mode')return;const detailsHtml=`<details class="error-card-details"><summary>Show details</summary><div class="error-card-details-content">${escapeHtml(msg)}</div></details>`;if(String(msg||'').startsWith('Some files could not be written')||String(msg||'').startsWith('Apply failed:')){b.innerHTML=`<div class="error-card-title"><span>⚠</span><span>Apply failed</span></div><div class="error-card-message">Some files could not be written. Check that the folder is still accessible.</div><div class="error-card-actions"><button type="button" class="error-card-btn" onclick="applyChanges()">Try Again</button></div>${detailsHtml}`;}else if(String(msg||'').includes('failed')||String(msg||'').includes('Network')||String(msg||'').includes('moment')){b.innerHTML=`<div class="error-card-title"><span>⚠</span><span>Request failed</span></div><div class="error-card-message">Something went wrong. Please try again in a moment.</div><div class="error-card-actions"><button type="button" class="error-card-btn" onclick="execute()">Retry</button></div>${detailsHtml}`;}else{b.innerHTML=`<div class="error-card-title"><span>⚠</span><span>Something needs attention</span></div><div class="error-card-message">${escapeHtml(msg)}</div>`;}b.style.display='block';}
 
-function showByokUpgradeRequired(){const b=document.getElementById('errorBox');const upgradeUrl='https://zonecli.dev/#pricing';b.style.background='#0a1520';b.style.borderColor='#1d3a5a';b.style.color='#d4d4d4';b.innerHTML=`<div class="error-card-title"><span>⚡</span><span>Unlimited plan required for BYOK</span></div><div class="error-card-message">Unlimited plan required for BYOK. Use your own OpenAI API key and run Zone with no run limits.</div><div class="error-card-actions"><a href="${upgradeUrl}" target="_blank" rel="noreferrer" class="error-card-btn" onclick="trackEvent('upgrade_clicked',{source:'upgrade_modal'});trackEvent('upgrade_clicked',{source:'byok_gate',upgradeUrl:'${upgradeUrl}'})">Upgrade to Unlimited →</a></div>`;b.style.display='block';}
+function showByokUpgradeRequired(){}
 
-function showUpgrade(message,url){const b=document.getElementById('errorBox');const upgradeUrl=typeof url==='string'&&url.trim()?url.trim():'https://zonecli.dev/#pricing';trackEvent('upgrade_modal_shown',{message});trackEvent('upgrade_cta_shown_blocked',{plan:'Free',upgradeUrl});currentBillingState={plan:'Free',credits:0,hardBlocked:true};renderBillingState();const btn=document.getElementById('execBtn');const s=document.getElementById('spinner');const t=document.getElementById('execText');btn.disabled=true;btn.title='Upgrade to continue';s.style.display='none';t.textContent='\u25B6  Execute';b.style.background='#0f241a';b.style.borderColor='#1d6b3a';b.style.color='#d4d4d4';b.innerHTML=`<div style="font-weight:700;margin-bottom:6px">You've used all your free runs</div><div style="margin-bottom:8px">Upgrade to Pro to continue with 250 hosted runs per month.</div><ul style="margin:0 0 8px 18px;padding:0"><li>250 Hosted Runs / month</li><li>All roles (Developer, Test Engineer, Data Analyst)</li><li>Safe apply with confidence validation</li></ul><div style="margin-bottom:8px;font-weight:700">$9 / month</div><a href="${escapeHtml(upgradeUrl)}" target="_blank" rel="noreferrer" onclick="trackEvent('upgrade_clicked',{source:'upgrade_modal'});trackEvent('upgrade_clicked',{source:'blocked',upgradeUrl:'${escapeHtml(upgradeUrl)}'})" style="display:inline-block;margin-top:4px;padding:6px 12px;border:1px solid #4ec9b0;border-radius:6px;color:#4ec9b0;font-weight:700;text-decoration:none">Upgrade to Pro &#8594;</a>`;b.style.display='block';}
+function showUpgrade(message,url){const b=document.getElementById('errorBox');const upgradeUrl=typeof url==='string'&&url.trim()?url.trim():'https://zonecli.dev/#pricing';trackEvent('upgrade_modal_shown',{message});trackEvent('upgrade_cta_shown_blocked',{plan:'Free',upgradeUrl});currentBillingState={plan:'Free',credits:0,hardBlocked:true};renderBillingState();const btn=document.getElementById('execBtn');const s=document.getElementById('spinner');const t=document.getElementById('execText');btn.disabled=true;btn.title='Upgrade to continue';s.style.display='none';t.textContent='\u25B6  Execute';b.style.background='#0f241a';b.style.borderColor='#1d6b3a';b.style.color='#d4d4d4';b.innerHTML=`<div style="font-weight:700;margin-bottom:6px">You've used all your free tokens</div><div style="margin-bottom:8px">Upgrade to Pro to continue with 5M tokens per month.</div><ul style="margin:0 0 8px 18px;padding:0"><li>5M tokens / month</li><li>All roles (Developer, Test Engineer, Data Analyst)</li><li>Safe apply with confidence validation</li></ul><div style="margin-bottom:8px;font-weight:700">$9 / month</div><a href="${escapeHtml(upgradeUrl)}" target="_blank" rel="noreferrer" onclick="trackEvent('upgrade_clicked',{source:'upgrade_modal'});trackEvent('upgrade_clicked',{source:'blocked',upgradeUrl:'${escapeHtml(upgradeUrl)}'})" style="display:inline-block;margin-top:4px;padding:6px 12px;border:1px solid #4ec9b0;border-radius:6px;color:#4ec9b0;font-weight:700;text-decoration:none">Upgrade to Pro &#8594;</a>`;b.style.display='block';}
 function showProLimitReached(data) {
   const b = document.getElementById('errorBox');
   const normalizedAccessState=normalizeAccessState(data);
@@ -1732,14 +1736,13 @@ function showProLimitReached(data) {
 
   b.innerHTML = `
     <div style="font-weight:700;margin-bottom:6px">
-      <span class="billing-plan-badge">⚡ Pro</span> Hosted runs exhausted
+      <span class="billing-plan-badge">⚡ Pro</span> Token limit reached
     </div>
     <div style="margin-bottom:8px;color:#9cdcfe">
-      You've used ${used} of ${limit} Hosted Runs this month.
-      Your limit resets on your next billing date.
+      Token limit reached for this month. Your limit resets on your next billing date.
     </div>
     <div style="margin-bottom:8px">
-      You’ve used all your hosted runs. Upgrade to Unlimited to continue with your own API key.
+      Upgrade to Pro to get 5M tokens per month.
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <a
@@ -1749,14 +1752,14 @@ function showProLimitReached(data) {
         class="error-card-btn"
         onclick="trackEvent('upgrade_clicked',{source:'pro_limit',upgradeUrl:'https://zonecli.dev/#pricing'})"
       >
-        Upgrade to Unlimited →
+        Upgrade to Pro →
       </a>
     </div>
   `;
   b.style.display = 'block';
 }
 
-async function refreshBillingSummary(){const userId=getCurrentUserId();if(!userId){currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);if(isRunningInVsCode()){setVsCodeAuthRequiredVisible(true);}return;}try{const r=await fetch('/api/billing-summary?userId='+encodeURIComponent(userId));const data=await r.json().catch(()=>null);if(!r.ok||!data?.ok){currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);if(isRunningInVsCode()&&(r.status===401||data?.reason==='unauthorized')){setVsCodeAuthRequiredVisible(true);}return;}const wasHardBlocked=currentBillingState.hardBlocked;const normalizedBillingState=normalizeBillingSummary(data);setVsCodeAuthRequiredVisible(false);currentBillingState=normalizedBillingState;console.log('[zone-ui] currentBillingState after refresh',currentBillingState);renderBillingState();if(data.billing_mode==='byok'&&getSavedInferenceMode()!=='local'){saveInferenceMode('local');applyInferenceModeUi();const wrap=document.getElementById('localApiKeyWrap');if(wrap)wrap.scrollIntoView({behavior:'smooth'});}setLoading(false);if(currentBillingState.hardBlocked&&!wasHardBlocked){const currentMode=getCurrentBillingMode();if(currentMode!=='byok'){if(currentBillingState.plan==='Pro'){showProLimitReached({ runsUsedThisMonth: currentBillingState.runsUsedThisMonth, hostedRunsLimit: currentBillingState.hostedRunsLimit, hostedRunsRemaining: currentBillingState.hostedRunsRemaining });}else{showUpgrade("You've used all your free runs. Upgrade to Pro.", data.upgradeUrl);}}}}catch(_){currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);}}
+async function refreshBillingSummary(){const userId=getCurrentUserId();if(!userId){currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);if(isRunningInVsCode()){setVsCodeAuthRequiredVisible(true);}return;}try{const r=await fetch('/api/billing-summary?userId='+encodeURIComponent(userId));const data=await r.json().catch(()=>null);if(!r.ok||!data?.ok){currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);if(isRunningInVsCode()&&(r.status===401||data?.reason==='unauthorized')){setVsCodeAuthRequiredVisible(true);}return;}const wasHardBlocked=currentBillingState.hardBlocked;const normalizedBillingState=normalizeBillingSummary(data);setVsCodeAuthRequiredVisible(false);currentBillingState=normalizedBillingState;console.log('[zone-ui] currentBillingState after refresh',currentBillingState);renderBillingState();setLoading(false);if(currentBillingState.hardBlocked&&!wasHardBlocked){if(currentBillingState.plan==='Pro'){showProLimitReached({runsUsedThisMonth:0,hostedRunsLimit:0,hostedRunsRemaining:0});}else{showUpgrade("You've used all your free tokens. Upgrade to Pro.",data.upgradeUrl);}}}catch(_){currentBillingState={plan:'',credits:null,hardBlocked:false};renderBillingState();setLoading(false);}}
 
 function showUnauthorized(message){const b=document.getElementById('errorBox');b.style.background='';b.style.borderColor='';b.style.color='';b.innerHTML=`<div class="error-card-title"><span>⚠</span><span>Sign-in required</span></div><div class="error-card-message">${escapeHtml(message)}</div>`;b.style.display='block';}
 function hideError(){document.getElementById('errorBox').style.display='none';}
@@ -2299,7 +2302,7 @@ async function submitFeedback(event){
 }
 document.getElementById('feedbackModalBackdrop')?.addEventListener('click',event=>{if(event.target?.id==='feedbackModalBackdrop')closeFeedbackModal();});
 
-initializeInferenceMode();syncFeedbackUserUi();syncAccountBar();void restoreStoredFolderHandleOnLoad();
+syncFeedbackUserUi();syncAccountBar();void restoreStoredFolderHandleOnLoad();
 initSidebarState();
 // ★ Memory debug — console'da _zoneMemoryReport() ile çağır
 window._zoneMemoryReport=function(){
