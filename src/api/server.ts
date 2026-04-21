@@ -14,6 +14,8 @@ import {
 } from "../core/runLlmPatchFlow.js";
 import { parseTaskIntent } from "../core/taskIntentParser.js";
 import { applyLlmPatches } from "../core/applyLlmPatches.js";
+import { detectVerificationCommand } from "../core/detectVerificationCommand.js";
+import { runRuntimeVerification } from "../core/runRuntimeVerification.js";
 import {
   readExampleContents,
   readFeatureExampleContents,
@@ -1707,7 +1709,31 @@ res.json(responseBody);
 app.post("/api/apply", async (req, res) => {
   const { patches, repoPath } = req.body;
   const result = await applyLlmPatches(patches, repoPath);
-  res.json(result);
+  let postApplyVerification = null;
+  if (result.applied.length > 0 && typeof repoPath === "string") {
+    try {
+      const repoFiles = (await scanRepo(repoPath)).map((file) => file.path);
+      const command = detectVerificationCommand({ repoPath, repoFiles });
+      postApplyVerification = await runRuntimeVerification({
+        repoPath,
+        command,
+      });
+      console.log(
+        `[zone-post-apply] command="${postApplyVerification.command ?? ""}" status=${postApplyVerification.status}`
+      );
+    } catch (err) {
+      postApplyVerification = {
+        attempted: false,
+        status: "skipped" as const,
+        summary: `Post-apply verification skipped: ${err instanceof Error ? err.message : String(err)}`,
+      };
+      console.log(`[zone-post-apply] command="" status=skipped`);
+    }
+  }
+  res.json({
+    ...result,
+    ...(postApplyVerification ? { postApplyVerification } : {}),
+  });
 });
 
 app.post("/api/enhance-task", async (req, res) => {

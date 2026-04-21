@@ -18,6 +18,8 @@ const runAgent_js_1 = require("../core/runAgent.js");
 const runLlmPatchFlow_js_1 = require("../core/runLlmPatchFlow.js");
 const taskIntentParser_js_1 = require("../core/taskIntentParser.js");
 const applyLlmPatches_js_1 = require("../core/applyLlmPatches.js");
+const detectVerificationCommand_js_1 = require("../core/detectVerificationCommand.js");
+const runRuntimeVerification_js_1 = require("../core/runRuntimeVerification.js");
 const runTestEngineerFlow_js_1 = require("../roles/runTestEngineerFlow.js");
 const detectTestFramework_js_1 = require("../roles/detectTestFramework.js");
 const testEngineerContext_js_1 = require("../roles/testEngineerContext.js");
@@ -1315,7 +1317,30 @@ exports.app.post("/api/dry-run", async (req, res) => {
 exports.app.post("/api/apply", async (req, res) => {
     const { patches, repoPath } = req.body;
     const result = await (0, applyLlmPatches_js_1.applyLlmPatches)(patches, repoPath);
-    res.json(result);
+    let postApplyVerification = null;
+    if (result.applied.length > 0 && typeof repoPath === "string") {
+        try {
+            const repoFiles = (await (0, scanRepo_js_1.scanRepo)(repoPath)).map((file) => file.path);
+            const command = (0, detectVerificationCommand_js_1.detectVerificationCommand)({ repoPath, repoFiles });
+            postApplyVerification = await (0, runRuntimeVerification_js_1.runRuntimeVerification)({
+                repoPath,
+                command,
+            });
+            console.log(`[zone-post-apply] command="${postApplyVerification.command ?? ""}" status=${postApplyVerification.status}`);
+        }
+        catch (err) {
+            postApplyVerification = {
+                attempted: false,
+                status: "skipped",
+                summary: `Post-apply verification skipped: ${err instanceof Error ? err.message : String(err)}`,
+            };
+            console.log(`[zone-post-apply] command="" status=skipped`);
+        }
+    }
+    res.json({
+        ...result,
+        ...(postApplyVerification ? { postApplyVerification } : {}),
+    });
 });
 exports.app.post("/api/enhance-task", async (req, res) => {
     const userOpenAiKey = req.headers["x-user-openai-key"];
