@@ -1268,6 +1268,42 @@ function setRoleSilently(role){
   document.getElementById('task').placeholder=getRolePlaceholder(currentRole);
 }
 
+function classifyZoneIntent(input){
+  const task=String(input?.task||'').trim();
+  const normalized=task.toLowerCase().replace(/[?!.,]+$/,'').replace(/\s+/g,' ');
+  if(!normalized)return'vague_code_task';
+  if(/^(help|what can you do|what do you do|how do you work|what is zone|how should i use this|how to use this|show help)$/.test(normalized))return'help_or_capability';
+  if(/^(hi|hello|hey|yo|thanks|thank you|ok|okay|cool|nice|how are you|sup)$/.test(normalized))return'general_chat';
+  if(/^(fix|fix the bug|update the code|improve this|make it better|optimize it|change something|add tests|write tests|debug this)$/.test(normalized))return'vague_code_task';
+  const codeSignals=/\b(fix|add|update|change|refactor|implement|debug|test|tests|migration|sql|endpoint|function|component|class|method|file|bug|api|route|schema|button|input|form|validation|login|query)\b/i;
+  const fileSignals=/[\w./-]+\.(ts|tsx|js|jsx|css|html|py|java|sql|feature|json|md)\b/i;
+  const actionable=/\b(fix|add|update|change|refactor|implement|debug|write|create|remove|rename|validate)\b/i;
+  if(fileSignals.test(task)||codeSignals.test(task)||(input?.hasRepoSelected&&actionable.test(task)))return'code_task';
+  return input?.hasRepoSelected?'vague_code_task':'general_chat';
+}
+
+function getZoneIntentResponse(intent){
+  if(intent==='help_or_capability'){
+    return 'I can make code changes, review diffs, add tests, and help with SQL or migrations. Describe the file, function, or behavior you want changed; I will preview changes and only apply when confidence is high.';
+  }
+  return 'Hey. I can help with code changes, tests, and SQL tasks. Describe the file, function, or behavior you want changed.';
+}
+
+function handleZoneIntentBeforeExecution(task,repoPath){
+  const intent=classifyZoneIntent({task,role:currentRole,hasRepoSelected:Boolean(repoPath)});
+  console.log(`[zone-intent] classified=${intent}`);
+  if(intent==='general_chat'||intent==='help_or_capability'){
+    hideError();
+    appendUserChatMessage(task);
+    appendChatMessage(`<div class="chat-message zone"><div class="chat-message-top"><span class="chat-message-author">Zone</span><span class="chat-message-role">Assistant</span></div><div class="chat-message-text">${escapeHtml(getZoneIntentResponse(intent))}</div></div>`);
+    const taskInput=document.getElementById('task');
+    if(taskInput)taskInput.value='';
+    taskInput?.focus();
+    return true;
+  }
+  return false;
+}
+
 function filterQuickActions(filter){
   currentQaFilter=filter||'all';
   document.querySelectorAll('.qa-filter').forEach(b=>b.classList.remove('active'));
@@ -1592,7 +1628,7 @@ async function reconnectStoredFolder(){if(!currentRepoHandle)return;hideError();
 function validateTaskAndRepo(){const task=document.getElementById('task').value.trim();const repoPath=getResolvedRepoPath();if(!task){showError('Task is required.');return null;}if(/\{[^}]+\}/.test(task)){showError('Placeholder detected in task. Replace {function}, {file}, {description} etc. with actual values before executing.');return null;}if(!repoPath){showError('Task and repo path are required.');return null;}if(!getCurrentUserId()){showUnauthorized(getMissingUserSessionMessage());return null;}if(isHostedExecution()&&!hasHostedFolderHandle()){const repoPathValue=document.getElementById('repoPath')?.value?.trim();if(!repoPathValue){showError('Please select a folder first using the folder button.');return null;}}return{task,repoPath};}
 function requiresLocalApiKey(){return getSavedInferenceMode()==='local'&&!getSavedLocalApiKey().trim();}
 
-async function executeDryRun(){if(requiresLocalApiKey()){showError('Enter your OpenAI API key to use Unlimited BYOK.');return;}const values=validateTaskAndRepo();if(!values)return;const{task,repoPath}=values;const userId=getCurrentUserId();const hostedContext=await buildHostedDeveloperContext();const body={...{task,repoPath,userId},...(hostedContext?{hostedContext}:{})};console.log('[zone-ui] dry-run request body',body);currentThreadProgressEnabled=false;beginRunState();hideError();document.getElementById('diffSection').classList.add('hidden');setDryRunLoading(true);setProgress('Dry run — generating diff...');try{const r=await fetch('/api/dry-run',{method:'POST',headers:getInferenceHeaders(),body:JSON.stringify(body)});const data=await r.json().catch(()=>null);if(!r.ok){if(data?.reason==='no_free_runs'){trackEvent('dry_run_blocked_no_credits',{role:currentRole,repoPath});showUpgrade(data.message,data.upgradeUrl);return;}if(data?.reason==='unauthorized'){showUnauthorized(data.message);return;}throw new Error(data?.message||data?.reason||('Dry run failed: '+r.status));}if(!data.ok)throw new Error(data.reason||'Dry run failed.');showDiff(data);setProgress('Ready');}catch(e){resetProgress();showError(e.message);}finally{currentRunState.runInProgress=false;setDryRunLoading(false);updateApplyState();}}
+async function executeDryRun(){if(requiresLocalApiKey()){showError('Enter your OpenAI API key to use Unlimited BYOK.');return;}const values=validateTaskAndRepo();if(!values)return;const{task,repoPath}=values;const userId=getCurrentUserId();const hostedContext=await buildHostedDeveloperContext();const body={...{task,repoPath,userId},...(hostedContext?{hostedContext}:{})};console.log('[zone-ui] dry-run request body',body);currentThreadProgressEnabled=false;beginRunState();hideError();document.getElementById('diffSection').classList.add('hidden');setDryRunLoading(true);setProgress('Dry run — generating diff...');try{const r=await fetch('/api/dry-run',{method:'POST',headers:getInferenceHeaders(),body:JSON.stringify(body)});const data=await r.json().catch(()=>null);if(!r.ok){if(data?.reason==='no_free_runs'){trackEvent('dry_run_blocked_no_credits',{role:currentRole,repoPath});showUpgrade(data.message,data.upgradeUrl);return;}if(data?.reason==='unauthorized'){showUnauthorized(data.message);return;}throw new Error(data?.message||data?.reason||('Dry run failed: '+r.status));}if(!data.ok)throw new Error(data.reason||'Dry run failed.');showDiff(data);setProgress('Ready');}catch(e){resetProgress();showError(e.message);}finally{currentRunState.runInProgress=false;syncStopRunButton(false);setDryRunLoading(false);updateApplyState();}}
 
 function buildExecutionSummaryHtml(data){const patches=Array.isArray(data?.applyPatches)?data.applyPatches:[];const fileDiffs=Array.isArray(data?.fileDiffs)?data.fileDiffs:[];const fileCount=patches.length||fileDiffs.length||0;if(fileCount===0&&!data?.patchPreview)return'';const firstFile=patches[0]?.filePath||fileDiffs[0]?.filePath||'';const confidence=typeof data?.developerConfidence==='number'?data.developerConfidence:currentRunState.confidence;const alignmentScore=typeof data?.planAlignment?.score==='number'?data.planAlignment.score:null;const verificationScore=typeof data?.verification?.score==='number'?data.verification.score:null;const verificationIssues=Array.isArray(data?.verification?.issues)?data.verification.issues.filter(Boolean):[];const verificationText=verificationScore!==null?`Verification ${verificationIssues.length?'needs review':'passed'} ${verificationScore}`:'';const finalState=data?.finalState||currentRunState.finalState;const applyText=finalState==='blocked'||data?.validationBlocked?'Apply blocked':patches.length>0?'Apply available':'Preview only';const changedText=fileCount===1&&firstFile?`I made a localized change in ${firstFile}.`:fileCount>0?`I prepared changes across ${fileCount} files.`:'I prepared a patch preview.';const meta=[`${fileCount||1} file${(fileCount||1)!==1?'s':''} changed`,typeof confidence==='number'?`Confidence ${confidence}`:'',alignmentScore!==null?`Alignment ${alignmentScore}`:'',verificationText,applyText].filter(Boolean);return `<div class="execution-summary-box"><div class="execution-summary-title">${escapeHtml(changedText)}</div><div class="execution-summary-meta">${meta.map(item=>`<span>${escapeHtml(String(item))}</span>`).join('')}</div><div class="execution-summary-note">Details are collapsed below for review.</div></div>`;}
 function buildExecutionDetailSectionHtml(title,body){return body?`<details class="execution-detail-section"><summary>${escapeHtml(title)}</summary><div class="execution-detail-body">${body}</div></details>`:'';}
@@ -1752,9 +1788,11 @@ function showMemoryReloadSuggestion(heapMB){
     </div>`;
   b.style.display = 'block';
 }
-function setLoading(l){const btn=document.getElementById('execBtn');const s=document.getElementById('spinner');const t=document.getElementById('execText');const locked=isExecutionLocked();const missingLocalApiKey=requiresLocalApiKey();const isHardBlocked=currentBillingState.hardBlocked&&!(currentBillingState.plan==='Pro'&&getCurrentBillingMode()==='byok');btn.disabled=l||locked||isHardBlocked||requiresHostedFolderSelection()||missingLocalApiKey;btn.title=requiresHostedFolderSelection()?getHostedFolderRequiredMessage():missingLocalApiKey?'Enter your OpenAI API key to continue':(currentBillingState.hardBlocked&&!(currentBillingState.plan==='Pro'&&getCurrentBillingMode()==='byok'))?'Upgrade to continue':locked?'A background run is already in progress.':'';s.style.display=l?'block':'none';t.textContent=l?'Running...':locked?(currentRunState.jobState==='queued'?'Queued...':'Run Active...'):'\u25B6  Execute';}
+function setLoading(l){const btn=document.getElementById('execBtn');const s=document.getElementById('spinner');const t=document.getElementById('execText');const locked=isExecutionLocked();const missingLocalApiKey=requiresLocalApiKey();const isHardBlocked=currentBillingState.hardBlocked&&!(currentBillingState.plan==='Pro'&&getCurrentBillingMode()==='byok');btn.disabled=l||locked||isHardBlocked||requiresHostedFolderSelection()||missingLocalApiKey;btn.title=requiresHostedFolderSelection()?getHostedFolderRequiredMessage():missingLocalApiKey?'Enter your OpenAI API key to continue':(currentBillingState.hardBlocked&&!(currentBillingState.plan==='Pro'&&getCurrentBillingMode()==='byok'))?'Upgrade to continue':locked?'A background run is already in progress.':'';s.style.display=l?'block':'none';t.textContent=l?'Running...':locked?(currentRunState.jobState==='queued'?'Queued...':'Run Active...'):'\u25B6  Execute';syncStopRunButton(l||locked);}
 
 async function execute(){
+  const initialTask=document.getElementById('task')?.value?.trim()||'';
+  if(initialTask&&handleZoneIntentBeforeExecution(initialTask,getResolvedRepoPath()))return;
   if(requiresLocalApiKey()){showError('Enter your OpenAI API key to use Unlimited BYOK.');return;}
   if(isExecutionLocked())return;
   startZonePerfRun(`run ${currentRole}`);
@@ -2035,7 +2073,6 @@ async function restoreBackupSnapshot(rootHandle,snapshot){const restored=[];cons
 function getPostApplyVerification(input){const v=input&&typeof input.postApplyVerification==='object'?input.postApplyVerification:null;if(!v)return null;const status=['passed','failed','timeout','skipped'].includes(String(v.status))?String(v.status):'skipped';return{attempted:Boolean(v.attempted),command:typeof v.command==='string'?v.command:'',status,exitCode:typeof v.exitCode==='number'?v.exitCode:null,summary:typeof v.summary==='string'?v.summary:''};}
 function getPostApplyCompletionMessage(verification){if(!verification||!verification.attempted)return'Apply complete.';if(verification.status==='passed')return'Apply complete. Verification passed.';if(verification.status==='failed')return'Apply complete, but verification failed.';if(verification.status==='timeout')return'Apply complete, but verification timed out.';return'Apply complete.';}
 function buildPostApplyVerificationLine(input){const verification=getPostApplyVerification(input);if(!verification?.attempted)return'';const status=verification.status;const color=status==='passed'?'#4ec9b0':status==='failed'||status==='timeout'?'#ce9178':'#737373';const summary=verification.summary?` · ${escapeHtml(verification.summary)}`:'';const command=verification.command?` · ${escapeHtml(verification.command)}`:'';return `<div style="margin-bottom:8px;color:${color}">Post-apply verification: ${escapeHtml(status)}${summary}${command}</div>`;}
-function normalizeApplyResponsePayload(payload){const source=payload?.result&&typeof payload.result==='object'?payload.result:payload?.data&&typeof payload.data==='object'?payload.data:payload||{};return{applied:Array.isArray(source.applied)?source.applied:Array.isArray(payload?.applied)?payload.applied:[],failed:Array.isArray(source.failed)?source.failed:Array.isArray(payload?.failed)?payload.failed:[],postApplyVerification:source.postApplyVerification||payload?.postApplyVerification,suggestedVerification:source.suggestedVerification||payload?.suggestedVerification};}
 function getSuggestedVerification(input){const v=input&&typeof input.suggestedVerification==='object'?input.suggestedVerification:null;if(!v||v.available!==true)return null;const command=String(v.command||'').trim();if(!command)return null;return{command,repoPath:String(v.repoPath||getResolvedRepoPath()||'').trim()};}
 function getVerificationLabel(command){if(!command)return'Run verification';const c=command.toLowerCase();if(c==='npm test')return'Run tests';if(c==='npm run build')return'Build project';if(c.includes('pytest'))return'Run pytest';return`Run ${command}`;}
 function getRunningLabel(command){const c=String(command||'').toLowerCase();if(c==='npm test')return'Running tests...';if(c==='npm run build')return'Building project...';if(c.includes('pytest'))return'Running pytest...';return`Running ${command||'verification'}...`;}
@@ -2062,7 +2099,7 @@ async function applyChanges(){
       const repoPath=getResolvedRepoPath();if(!repoPath)throw new Error('Enter a repo path first.');
       const response=await fetch('/api/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({patches:currentPatches,repoPath})});
       if(!response.ok)throw new Error('Apply failed: '+response.status);
-      const payload=await response.json();res=normalizeApplyResponsePayload(payload);console.log(`[zone-ui] apply response suggestedVerification available=${Boolean(res.suggestedVerification?.available)} command="${String(res.suggestedVerification?.command||'')}"`);currentBackupSnapshot=null;setRestoreAvailability(false);if(currentInspectResultRef?.inspectPayload)currentInspectResultRef.inspectPayload.backupSnapshot=null;
+      const payload=await response.json();res={applied:Array.isArray(payload.applied)?payload.applied:[],failed:Array.isArray(payload.failed)?payload.failed:[],postApplyVerification:payload.postApplyVerification,suggestedVerification:payload.suggestedVerification};currentBackupSnapshot=null;setRestoreAvailability(false);if(currentInspectResultRef?.inspectPayload)currentInspectResultRef.inspectPayload.backupSnapshot=null;
     }
     if(res.applied.length===0){sb.innerHTML=buildApplyNeutralSummary(res);sb.style.display='block';currentRunState.hasPatchResult=false;appendZoneStatusMessage('No files were written.','Apply');}
     else{const verification=getPostApplyVerification(res);const suggestedVerification=getSuggestedVerification(res);sb.innerHTML=buildApplyVerificationSummary(res);sb.style.display='block';currentRunState.hasPatchResult=false;appendZoneStatusMessage('Patch applied.','Apply');if(verification?.attempted)appendZoneStatusMessage(getPostApplyCompletionMessage(verification),'Apply');else appendZoneStatusMessage('Apply complete.','Apply');if(suggestedVerification)appendSuggestedVerificationMessage(suggestedVerification);}
