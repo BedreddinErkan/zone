@@ -236,9 +236,9 @@ input:focus,textarea:focus{border-color:#007acc}
 .composer-shell .label{margin-bottom:0;color:#7f919c;font-size:10px;letter-spacing:.18em}
 .composer-actions{display:flex;flex-direction:column;gap:10px}
 .composer-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.composer-footer{display:flex;align-items:center;justify-content:flex-end;min-height:0}
-.composer-section.is-locked .composer-footer{min-height:34px}
-.stop-run-btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid #2d2d2d;border-radius:999px;padding:7px 12px;background:#171717;color:#ce9178;font-family:'Courier New',monospace;font-size:12px;cursor:pointer;transition:opacity .18s ease,transform .18s ease,border-color .18s ease,background .18s ease,color .18s ease}
+.composer-footer{display:flex;align-items:center;justify-content:flex-end;min-height:0;padding:4px 0;}
+.composer-section.is-locked .composer-footer{min-height:40px;padding:6px 0;}
+.stop-run-btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid #ce9178;border-radius:999px;padding:8px 18px;background:#241d12;color:#ce9178;font-family:'Courier New',monospace;font-size:13px;font-weight:700;cursor:pointer;transition:opacity .18s ease,border-color .18s ease;min-width:80px;}
 .stop-run-btn:not(.hidden){display:inline-flex}
 .stop-run-btn:hover{border-color:#ce9178;background:#241d12;color:#f0c38d}
 .stop-run-btn:disabled{opacity:.6;cursor:not-allowed}
@@ -2107,11 +2107,20 @@ async function detectVerificationFromFolderHandle(handle){
     const pkg=JSON.parse(await file.text());
     const scripts=pkg.scripts||{};
     if(scripts['test:e2e'])return{command:'npm run test:e2e',label:'Run E2E tests'};
+    if(scripts['test:playwright'])return{command:'npm run test:playwright',label:'Run Playwright tests'};
     if(scripts.playwright)return{command:'npm run playwright',label:'Run Playwright'};
     if(scripts.test&&!String(scripts.test).includes('echo'))return{command:'npm test',label:'Run tests'};
     if(scripts.build)return{command:'npm run build',label:'Run build'};
-    return null;
   }catch{return null;}
+  try{
+    await handle.getFileHandle('playwright.config.ts');
+    return{command:'npx playwright test',label:'Run Playwright tests'};
+  }catch{}
+  try{
+    await handle.getFileHandle('playwright.config.js');
+    return{command:'npx playwright test',label:'Run Playwright tests'};
+  }catch{}
+  return null;
 }
 function getSuggestedVerification(input){const v=input&&typeof input.suggestedVerification==='object'?input.suggestedVerification:null;if(!v||v.available!==true)return null;const command=String(v.command||'').trim();if(!command)return null;return{command,repoPath:String(v.repoPath||getResolvedRepoPath()||'').trim()};}
 function getCurrentSuggestedVerificationForApply(){const candidates=[currentInspectResultRef?.inspectPayload?.patchData,currentInspectPayload,currentInspectResultRef?.inspectPayload?.decisionData];for(const candidate of candidates){const suggested=getSuggestedVerification(candidate);if(suggested)return suggested;}return null;}
