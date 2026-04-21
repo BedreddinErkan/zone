@@ -1713,31 +1713,77 @@ res.json(responseBody);
 app.post("/api/apply", async (req, res) => {
   const { patches, repoPath } = req.body;
   const result = await applyLlmPatches(patches, repoPath);
-  let postApplyVerification = null;
+  let suggestedVerification: {
+    available: boolean;
+    command?: string;
+    label?: string;
+  } = { available: false };
   if (result.applied.length > 0 && typeof repoPath === "string") {
     try {
       const repoFiles = (await scanRepo(repoPath)).map((file) => file.path);
       const command = detectVerificationCommand({ repoPath, repoFiles });
-      postApplyVerification = await runRuntimeVerification({
-        repoPath,
-        command,
-      });
+      suggestedVerification = command
+        ? {
+            available: true,
+            command: command.command,
+            label:
+              command.command === "npm run build"
+                ? "Run build"
+                : "Run tests",
+          }
+        : { available: false };
       console.log(
-        `[zone-post-apply] command="${postApplyVerification.command ?? ""}" status=${postApplyVerification.status}`
+        `[zone-verify-suggest] command="${command?.command ?? ""}" available=${Boolean(command)}`
       );
     } catch (err) {
-      postApplyVerification = {
-        attempted: false,
-        status: "skipped" as const,
-        summary: `Post-apply verification skipped: ${err instanceof Error ? err.message : String(err)}`,
-      };
-      console.log(`[zone-post-apply] command="" status=skipped`);
+      suggestedVerification = { available: false };
+      console.log(`[zone-verify-suggest] command="" available=false`);
     }
   }
   res.json({
     ...result,
-    ...(postApplyVerification ? { postApplyVerification } : {}),
+    suggestedVerification,
   });
+});
+
+app.post("/api/run-verification", async (req, res) => {
+  const repoPath = typeof req.body?.repoPath === "string" ? req.body.repoPath : "";
+  const requestedCommand =
+    typeof req.body?.command === "string" ? req.body.command.trim() : "";
+
+  if (!repoPath || !requestedCommand) {
+    res.status(400).json({
+      ok: false,
+      reason: "repoPath_and_command_required",
+    });
+    return;
+  }
+
+  try {
+    const repoFiles = (await scanRepo(repoPath)).map((file) => file.path);
+    const detectedCommand = detectVerificationCommand({ repoPath, repoFiles });
+    if (!detectedCommand || detectedCommand.command !== requestedCommand) {
+      res.status(403).json({
+        ok: false,
+        reason: "verification_command_not_allowed",
+      });
+      return;
+    }
+
+    const verification = await runRuntimeVerification({
+      repoPath,
+      command: detectedCommand,
+    });
+    console.log(
+      `[zone-verify-run] command="${detectedCommand.command}" status=${verification.status}`
+    );
+    res.json({ ok: true, verification });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      reason: err instanceof Error ? err.message : "verification_failed",
+    });
+  }
 });
 
 app.post("/api/refine-prompt", async (req, res) => {

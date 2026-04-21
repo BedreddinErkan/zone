@@ -1318,30 +1318,65 @@ exports.app.post("/api/dry-run", async (req, res) => {
 exports.app.post("/api/apply", async (req, res) => {
     const { patches, repoPath } = req.body;
     const result = await (0, applyLlmPatches_js_1.applyLlmPatches)(patches, repoPath);
-    let postApplyVerification = null;
+    let suggestedVerification = { available: false };
     if (result.applied.length > 0 && typeof repoPath === "string") {
         try {
             const repoFiles = (await (0, scanRepo_js_1.scanRepo)(repoPath)).map((file) => file.path);
             const command = (0, detectVerificationCommand_js_1.detectVerificationCommand)({ repoPath, repoFiles });
-            postApplyVerification = await (0, runRuntimeVerification_js_1.runRuntimeVerification)({
-                repoPath,
-                command,
-            });
-            console.log(`[zone-post-apply] command="${postApplyVerification.command ?? ""}" status=${postApplyVerification.status}`);
+            suggestedVerification = command
+                ? {
+                    available: true,
+                    command: command.command,
+                    label: command.command === "npm run build"
+                        ? "Run build"
+                        : "Run tests",
+                }
+                : { available: false };
+            console.log(`[zone-verify-suggest] command="${command?.command ?? ""}" available=${Boolean(command)}`);
         }
         catch (err) {
-            postApplyVerification = {
-                attempted: false,
-                status: "skipped",
-                summary: `Post-apply verification skipped: ${err instanceof Error ? err.message : String(err)}`,
-            };
-            console.log(`[zone-post-apply] command="" status=skipped`);
+            suggestedVerification = { available: false };
+            console.log(`[zone-verify-suggest] command="" available=false`);
         }
     }
     res.json({
         ...result,
-        ...(postApplyVerification ? { postApplyVerification } : {}),
+        suggestedVerification,
     });
+});
+exports.app.post("/api/run-verification", async (req, res) => {
+    const repoPath = typeof req.body?.repoPath === "string" ? req.body.repoPath : "";
+    const requestedCommand = typeof req.body?.command === "string" ? req.body.command.trim() : "";
+    if (!repoPath || !requestedCommand) {
+        res.status(400).json({
+            ok: false,
+            reason: "repoPath_and_command_required",
+        });
+        return;
+    }
+    try {
+        const repoFiles = (await (0, scanRepo_js_1.scanRepo)(repoPath)).map((file) => file.path);
+        const detectedCommand = (0, detectVerificationCommand_js_1.detectVerificationCommand)({ repoPath, repoFiles });
+        if (!detectedCommand || detectedCommand.command !== requestedCommand) {
+            res.status(403).json({
+                ok: false,
+                reason: "verification_command_not_allowed",
+            });
+            return;
+        }
+        const verification = await (0, runRuntimeVerification_js_1.runRuntimeVerification)({
+            repoPath,
+            command: detectedCommand,
+        });
+        console.log(`[zone-verify-run] command="${detectedCommand.command}" status=${verification.status}`);
+        res.json({ ok: true, verification });
+    }
+    catch (err) {
+        res.status(500).json({
+            ok: false,
+            reason: err instanceof Error ? err.message : "verification_failed",
+        });
+    }
 });
 exports.app.post("/api/refine-prompt", async (req, res) => {
     const userOpenAiKey = req.headers["x-user-openai-key"];
