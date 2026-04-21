@@ -1315,29 +1315,33 @@ exports.app.post("/api/dry-run", async (req, res) => {
     }
     res.json(responseBody);
 });
+function getVerificationLabel(command) {
+    return command === "npm run build" ? "Run build" : "Run tests";
+}
+async function buildSuggestedVerification(repoPath, options) {
+    try {
+        const repoFiles = (await (0, scanRepo_js_1.scanRepo)(repoPath)).map((file) => file.path);
+        const command = (0, detectVerificationCommand_js_1.detectVerificationCommand)({ repoPath, repoFiles });
+        return command
+            ? {
+                available: true,
+                command: command.command,
+                label: getVerificationLabel(command.command),
+                ...(options?.includeRepoPath ? { repoPath } : {}),
+            }
+            : { available: false };
+    }
+    catch {
+        return { available: false };
+    }
+}
 exports.app.post("/api/apply", async (req, res) => {
     const { patches, repoPath } = req.body;
     const result = await (0, applyLlmPatches_js_1.applyLlmPatches)(patches, repoPath);
     let suggestedVerification = { available: false };
     if (result.applied.length > 0 && typeof repoPath === "string") {
-        try {
-            const repoFiles = (await (0, scanRepo_js_1.scanRepo)(repoPath)).map((file) => file.path);
-            const command = (0, detectVerificationCommand_js_1.detectVerificationCommand)({ repoPath, repoFiles });
-            suggestedVerification = command
-                ? {
-                    available: true,
-                    command: command.command,
-                    label: command.command === "npm run build"
-                        ? "Run build"
-                        : "Run tests",
-                }
-                : { available: false };
-            console.log(`[zone-verify-suggest] command="${command?.command ?? ""}" available=${Boolean(command)}`);
-        }
-        catch (err) {
-            suggestedVerification = { available: false };
-            console.log(`[zone-verify-suggest] command="" available=false`);
-        }
+        suggestedVerification = await buildSuggestedVerification(repoPath);
+        console.log(`[zone-verify-suggest] command="${suggestedVerification.command ?? ""}" available=${suggestedVerification.available}`);
     }
     const responseBody = {
         ...result,
@@ -1345,6 +1349,21 @@ exports.app.post("/api/apply", async (req, res) => {
     };
     console.log(`[zone-apply] suggestedVerification available=${suggestedVerification.available} command="${suggestedVerification.command ?? ""}"`);
     res.json(responseBody);
+});
+exports.app.post("/api/suggest-verification", async (req, res) => {
+    const repoPath = typeof req.body?.repoPath === "string" ? req.body.repoPath : "";
+    if (!repoPath) {
+        res.status(400).json({
+            ok: false,
+            reason: "repoPath_required",
+        });
+        return;
+    }
+    const suggestedVerification = await buildSuggestedVerification(repoPath, {
+        includeRepoPath: true,
+    });
+    console.log(`[zone-verify-suggest] command="${suggestedVerification.command ?? ""}" available=${suggestedVerification.available}`);
+    res.json({ ok: true, suggestedVerification });
 });
 exports.app.post("/api/run-verification", async (req, res) => {
     const repoPath = typeof req.body?.repoPath === "string" ? req.body.repoPath : "";

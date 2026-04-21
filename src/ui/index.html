@@ -239,6 +239,7 @@ input:focus,textarea:focus{border-color:#007acc}
 .composer-footer{display:flex;align-items:center;justify-content:flex-end;min-height:0}
 .composer-section.is-locked .composer-footer{min-height:34px}
 .stop-run-btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid #2d2d2d;border-radius:999px;padding:7px 12px;background:#171717;color:#ce9178;font-family:'Courier New',monospace;font-size:12px;cursor:pointer;transition:opacity .18s ease,transform .18s ease,border-color .18s ease,background .18s ease,color .18s ease}
+.stop-run-btn:not(.hidden){display:inline-flex}
 .stop-run-btn:hover{border-color:#ce9178;background:#241d12;color:#f0c38d}
 .stop-run-btn:disabled{opacity:.6;cursor:not-allowed}
 .chat-message{position:relative;border:1px solid #232323;border-radius:14px;padding:12px 14px;background:#171717;box-shadow:0 10px 28px rgba(0,0,0,0.16);max-width:min(92%,760px);opacity:1;transform:translate3d(0,0,0) scale(1);will-change:opacity,transform;transition:opacity .22s cubic-bezier(.2,.7,.2,1),transform .22s cubic-bezier(.2,.7,.2,1),border-color .18s ease,box-shadow .18s ease}
@@ -1110,7 +1111,7 @@ function trimChatThreadMessages(){
 function animateChatMessageIn(node){if(!node)return;node.classList.add('is-entering');void node.offsetHeight;requestAnimationFrame(()=>node.classList.remove('is-entering'));}
 function animateChatMessageOut(node,removeFn){if(!node){if(typeof removeFn==='function')removeFn();return;}node.classList.remove('is-entering');void node.offsetHeight;node.classList.add('is-exiting');window.setTimeout(()=>{if(typeof removeFn==='function')removeFn();else node.remove();},220);}
 function appendChatMessage(html){const{thread}=getChatThreadElements();if(!thread)return null;setChatThreadEmptyVisible(false);thread.insertAdjacentHTML('beforeend',html);const node=thread.lastElementChild;if(node instanceof HTMLElement)animateChatMessageIn(node);trimChatThreadMessages();scrollChatThreadToLatest();return node instanceof HTMLElement?node:null;}
-function syncStopRunButton(forceActive){const active=Boolean(forceActive||isExecutionLocked());const stopBtn=document.getElementById('stopRunBtn');const section=document.querySelector('.composer-section');if(stopBtn){stopBtn.classList.toggle('hidden',!active);stopBtn.disabled=!active;}if(section)section.classList.toggle('is-locked',active);}
+function syncStopRunButton(forceActive){const active=Boolean(forceActive||isExecutionLocked());const stopBtn=document.getElementById('stopRunBtn');const section=document.querySelector('.composer-section');if(stopBtn){stopBtn.classList.toggle('hidden',!active);stopBtn.style.display=active?'inline-flex':'none';stopBtn.disabled=!active;}if(section)section.classList.toggle('is-locked',active);}
 function setComposerLocked(locked){const isLocked=Boolean(locked);const task=document.getElementById('task');const help=document.getElementById('composerHelp');if(task){task.disabled=isLocked;task.setAttribute('aria-disabled',String(isLocked));}if(help)help.classList.add('hidden');syncStopRunButton(isLocked);}
 function stopActiveRun(){if(currentRunAbortController){currentRunAbortController.abort();currentRunAbortController=null;}releaseExecutionLock();setComposerLocked(false);hideError();document.getElementById('task')?.focus();}
 function toggleChatMiniDiffPreview(event,id){if(event)event.preventDefault();const body=document.getElementById(`chatMiniDiffBody-${id}`);const btn=document.getElementById(`chatMiniDiffToggle-${id}`);if(!body||!btn)return;const willShow=!body.classList.contains('is-open');body.classList.toggle('is-open',willShow);body.classList.toggle('is-collapsed',!willShow);btn.textContent=willShow?'Hide Diff Preview':'Show Diff Preview';}
@@ -1273,7 +1274,9 @@ function classifyZoneIntent(input){
   const normalized=task.toLowerCase().replace(/[?!.,]+$/,'').replace(/\s+/g,' ');
   if(!normalized)return'vague_code_task';
   if(/^(help|what can you do|what do you do|how do you work|what is zone|how should i use this|how to use this|show help)$/.test(normalized))return'help_or_capability';
-  if(/^(hi|hello|hey|yo|thanks|thank you|ok|okay|cool|nice|how are you|sup)$/.test(normalized))return'general_chat';
+  if(/^(hi|hello|hey|yo|sup)$/.test(normalized))return'greeting';
+  if(/^(how are you|how's it going|hows it going|how are things)$/.test(normalized))return'small_talk';
+  if(/^(thanks|thank you|ok|okay|cool|nice|got it|sounds good)$/.test(normalized))return'acknowledgment';
   if(/^(fix|fix the bug|update the code|improve this|make it better|optimize it|change something|add tests|write tests|debug this)$/.test(normalized))return'vague_code_task';
   const codeSignals=/\b(fix|add|update|change|refactor|implement|debug|test|tests|migration|sql|endpoint|function|component|class|method|file|bug|api|route|schema|button|input|form|validation|login|query)\b/i;
   const fileSignals=/[\w./-]+\.(ts|tsx|js|jsx|css|html|py|java|sql|feature|json|md)\b/i;
@@ -1286,13 +1289,16 @@ function getZoneIntentResponse(intent){
   if(intent==='help_or_capability'){
     return 'I can make code changes, review diffs, add tests, and help with SQL or migrations. Describe the file, function, or behavior you want changed; I will preview changes and only apply when confidence is high.';
   }
+  if(intent==='greeting')return 'Hey. I am ready to help with a focused code change when you are.';
+  if(intent==='small_talk')return 'Doing well, and ready to work. Tell me the file, function, or behavior you want changed.';
+  if(intent==='acknowledgment')return 'You got it.';
   return 'Hey. I can help with code changes, tests, and SQL tasks. Describe the file, function, or behavior you want changed.';
 }
 
 function handleZoneIntentBeforeExecution(task,repoPath){
   const intent=classifyZoneIntent({task,role:currentRole,hasRepoSelected:Boolean(repoPath)});
   console.log(`[zone-intent] classified=${intent}`);
-  if(intent==='general_chat'||intent==='help_or_capability'){
+  if(['general_chat','greeting','small_talk','acknowledgment','help_or_capability'].includes(intent)){
     hideError();
     appendUserChatMessage(task);
     appendChatMessage(`<div class="chat-message zone"><div class="chat-message-top"><span class="chat-message-author">Zone</span><span class="chat-message-role">Assistant</span></div><div class="chat-message-text">${escapeHtml(getZoneIntentResponse(intent))}</div></div>`);
@@ -2074,6 +2080,7 @@ function getPostApplyVerification(input){const v=input&&typeof input.postApplyVe
 function getPostApplyCompletionMessage(verification){if(!verification||!verification.attempted)return'Apply complete.';if(verification.status==='passed')return'Apply complete. Verification passed.';if(verification.status==='failed')return'Apply complete, but verification failed.';if(verification.status==='timeout')return'Apply complete, but verification timed out.';return'Apply complete.';}
 function buildPostApplyVerificationLine(input){const verification=getPostApplyVerification(input);if(!verification?.attempted)return'';const status=verification.status;const color=status==='passed'?'#4ec9b0':status==='failed'||status==='timeout'?'#ce9178':'#737373';const summary=verification.summary?` · ${escapeHtml(verification.summary)}`:'';const command=verification.command?` · ${escapeHtml(verification.command)}`:'';return `<div style="margin-bottom:8px;color:${color}">Post-apply verification: ${escapeHtml(status)}${summary}${command}</div>`;}
 function getSuggestedVerification(input){const v=input&&typeof input.suggestedVerification==='object'?input.suggestedVerification:null;if(!v||v.available!==true)return null;const command=String(v.command||'').trim();if(!command)return null;return{command,repoPath:String(v.repoPath||getResolvedRepoPath()||'').trim()};}
+function getCurrentSuggestedVerificationForApply(){const candidates=[currentInspectResultRef?.inspectPayload?.patchData,currentInspectPayload,currentInspectResultRef?.inspectPayload?.decisionData];for(const candidate of candidates){const suggested=getSuggestedVerification(candidate);if(suggested)return suggested;}return null;}
 function getVerificationLabel(command){if(!command)return'Run verification';const c=command.toLowerCase();if(c==='npm test')return'Run tests';if(c==='npm run build')return'Build project';if(c.includes('pytest'))return'Run pytest';return`Run ${command}`;}
 function getRunningLabel(command){const c=String(command||'').toLowerCase();if(c==='npm test')return'Running tests...';if(c==='npm run build')return'Building project...';if(c.includes('pytest'))return'Running pytest...';return`Running ${command||'verification'}...`;}
 function getResultLabel(command,status){const c=String(command||'').toLowerCase();if(c==='npm test'){if(status==='passed')return'Tests passed';if(status==='failed')return'Tests failed';}if(c==='npm run build'){if(status==='passed')return'Build succeeded';if(status==='failed')return'Build failed';}if(c.includes('pytest')){if(status==='passed')return'Tests passed';if(status==='failed')return'Tests failed';}return`Verification ${status}`;}
@@ -2094,6 +2101,7 @@ async function applyChanges(){
       const allowed=await ensureRepoWritePermission(currentRepoHandle);if(!allowed)throw new Error('Write permission denied for the selected folder.');
       const backupSnapshot=await createBackupSnapshot(currentRepoHandle,currentPatches);
       res=await writePatchFilesWithHandle(currentRepoHandle,currentPatches);
+      res.suggestedVerification=getCurrentSuggestedVerificationForApply();
       if(res.applied.length===0){currentBackupSnapshot=null;setRestoreAvailability(false);if(currentInspectResultRef?.inspectPayload)currentInspectResultRef.inspectPayload.backupSnapshot=null;}else{currentBackupSnapshot=backupSnapshot;setRestoreAvailability(true);if(currentInspectResultRef?.inspectPayload)currentInspectResultRef.inspectPayload.backupSnapshot=backupSnapshot;}
     }else{
       const repoPath=getResolvedRepoPath();if(!repoPath)throw new Error('Enter a repo path first.');
