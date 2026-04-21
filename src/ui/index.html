@@ -1138,7 +1138,7 @@ function getResultFromActionEvent(event){
   }
   return result;
 }function focusExistingResultPanel(event){const result=getResultFromActionEvent(event);if(!activateInspectResult(result))return;openInspectResult('decisionSection');}
-function focusExistingApplyControls(event){const result=getResultFromActionEvent(event);if(!activateInspectResult(result))return;openInspectResult('applyBtn');}
+function focusExistingApplyControls(event){const result=getResultFromActionEvent(event);if(!activateInspectResult(result))return;const applyState=getApplyState();if(!applyState.canApply){showError(applyState.applyBlockingReason);updateApplyState();return;}void applyChanges();}
 function focusTaskComposerForRefinement(){const task=document.getElementById('task');if(!task)return;task.placeholder='Refine this result...';task.focus();if(typeof task.setSelectionRange==='function'){const end=task.value.length;task.setSelectionRange(end,end);}}
 function appendZoneResultMessage(input){
   const startedAt=getZonePerfNow();
