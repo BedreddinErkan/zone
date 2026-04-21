@@ -1740,10 +1740,14 @@ app.post("/api/apply", async (req, res) => {
       console.log(`[zone-verify-suggest] command="" available=false`);
     }
   }
-  res.json({
+  const responseBody = {
     ...result,
     suggestedVerification,
-  });
+  };
+  console.log(
+    `[zone-apply] suggestedVerification available=${suggestedVerification.available} command="${suggestedVerification.command ?? ""}"`
+  );
+  res.json(responseBody);
 });
 
 app.post("/api/run-verification", async (req, res) => {

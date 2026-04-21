@@ -4,7 +4,8 @@ exports.detectVerificationCommand = detectVerificationCommand;
 const node_fs_1 = require("node:fs");
 const node_path_1 = require("node:path");
 function hasRepoFile(repoFiles, fileName) {
-    return repoFiles.some((filePath) => filePath.replace(/\\/g, "/") === fileName);
+    const normalizedFileName = fileName.replace(/\\/g, "/").toLowerCase();
+    return repoFiles.some((filePath) => filePath.replace(/\\/g, "/").toLowerCase() === normalizedFileName);
 }
 function readRepoText(repoPath, fileName) {
     const path = (0, node_path_1.join)(repoPath, fileName);

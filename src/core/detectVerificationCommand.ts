@@ -8,7 +8,10 @@ export type SafeVerificationCommand = {
 };
 
 function hasRepoFile(repoFiles: string[], fileName: string): boolean {
-  return repoFiles.some((filePath) => filePath.replace(/\\/g, "/") === fileName);
+  const normalizedFileName = fileName.replace(/\\/g, "/").toLowerCase();
+  return repoFiles.some(
+    (filePath) => filePath.replace(/\\/g, "/").toLowerCase() === normalizedFileName
+  );
 }
 
 function readRepoText(repoPath: string, fileName: string): string {

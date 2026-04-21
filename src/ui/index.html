@@ -1267,6 +1267,42 @@ function setRoleSilently(role){
   document.getElementById('task').placeholder=getRolePlaceholder(currentRole);
 }
 
+function classifyZoneIntent(input){
+  const task=String(input?.task||'').trim();
+  const normalized=task.toLowerCase().replace(/[?!.,]+$/,'').replace(/\s+/g,' ');
+  if(!normalized)return'vague_code_task';
+  if(/^(help|what can you do|what do you do|how do you work|what is zone|how should i use this|how to use this|show help)$/.test(normalized))return'help_or_capability';
+  if(/^(hi|hello|hey|yo|thanks|thank you|ok|okay|cool|nice|how are you|sup)$/.test(normalized))return'general_chat';
+  if(/^(fix|fix the bug|update the code|improve this|make it better|optimize it|change something|add tests|write tests|debug this)$/.test(normalized))return'vague_code_task';
+  const codeSignals=/\b(fix|add|update|change|refactor|implement|debug|test|tests|migration|sql|endpoint|function|component|class|method|file|bug|api|route|schema|button|input|form|validation|login|query)\b/i;
+  const fileSignals=/[\w./-]+\.(ts|tsx|js|jsx|css|html|py|java|sql|feature|json|md)\b/i;
+  const actionable=/\b(fix|add|update|change|refactor|implement|debug|write|create|remove|rename|validate)\b/i;
+  if(fileSignals.test(task)||codeSignals.test(task)||(input?.hasRepoSelected&&actionable.test(task)))return'code_task';
+  return input?.hasRepoSelected?'vague_code_task':'general_chat';
+}
+
+function getZoneIntentResponse(intent){
+  if(intent==='help_or_capability'){
+    return 'I can make code changes, review diffs, add tests, and help with SQL or migrations. Describe the file, function, or behavior you want changed; I will preview changes and only apply when confidence is high.';
+  }
+  return 'Hey. I can help with code changes, tests, and SQL tasks. Describe the file, function, or behavior you want changed.';
+}
+
+function handleZoneIntentBeforeExecution(task,repoPath){
+  const intent=classifyZoneIntent({task,role:currentRole,hasRepoSelected:Boolean(repoPath)});
+  console.log(`[zone-intent] classified=${intent}`);
+  if(intent==='general_chat'||intent==='help_or_capability'){
+    hideError();
+    appendUserChatMessage(task);
+    appendChatMessage(`<div class="chat-message zone"><div class="chat-message-top"><span class="chat-message-author">Zone</span><span class="chat-message-role">Assistant</span></div><div class="chat-message-text">${escapeHtml(getZoneIntentResponse(intent))}</div></div>`);
+    const taskInput=document.getElementById('task');
+    if(taskInput)taskInput.value='';
+    taskInput?.focus();
+    return true;
+  }
+  return false;
+}
+
 function filterQuickActions(filter){
   currentQaFilter=filter||'all';
   document.querySelectorAll('.qa-filter').forEach(b=>b.classList.remove('active'));
@@ -1754,6 +1790,8 @@ function showMemoryReloadSuggestion(heapMB){
 function setLoading(l){const btn=document.getElementById('execBtn');const s=document.getElementById('spinner');const t=document.getElementById('execText');const locked=isExecutionLocked();const missingLocalApiKey=requiresLocalApiKey();const isHardBlocked=currentBillingState.hardBlocked&&!(currentBillingState.plan==='Pro'&&getCurrentBillingMode()==='byok');btn.disabled=l||locked||isHardBlocked||requiresHostedFolderSelection()||missingLocalApiKey;btn.title=requiresHostedFolderSelection()?getHostedFolderRequiredMessage():missingLocalApiKey?'Enter your OpenAI API key to continue':(currentBillingState.hardBlocked&&!(currentBillingState.plan==='Pro'&&getCurrentBillingMode()==='byok'))?'Upgrade to continue':locked?'A background run is already in progress.':'';s.style.display=l?'block':'none';t.textContent=l?'Running...':locked?(currentRunState.jobState==='queued'?'Queued...':'Run Active...'):'\u25B6  Execute';}
 
 async function execute(){
+  const initialTask=document.getElementById('task')?.value?.trim()||'';
+  if(initialTask&&handleZoneIntentBeforeExecution(initialTask,getResolvedRepoPath()))return;
   if(requiresLocalApiKey()){showError('Enter your OpenAI API key to use Unlimited BYOK.');return;}
   if(isExecutionLocked())return;
   startZonePerfRun(`run ${currentRole}`);
