@@ -40,6 +40,17 @@ function hasContextualSoftDestructiveSignal(text) {
     return (includesAny(text, softDestructiveKeywords) &&
         includesAny(text, destructiveObjectKeywords));
 }
+function isReactStateManagementContext(text) {
+    return includesAny(text, [
+        "usereducer",
+        "reducer",
+        "dispatch",
+        "usestate",
+        "react state",
+        "action type",
+        "action:",
+    ]);
+}
 function scoreWeightedKeywordMatches(text, weightedKeywords) {
     let maxWeight = 0;
     for (const entry of weightedKeywords) {
@@ -58,34 +69,24 @@ function isSchemaKeywordPrecededByTestOrMock(text, keyword) {
 }
 function computeRiskScoreDetails(input) {
     const normalizedTask = input.task.trim().toLowerCase();
-    const destructiveWeight = Math.max(scoreWeightedKeywordMatches(normalizedTask, [
-        {
-            keywords: ["truncate", "drop table", "delete all", "wipe", "purge"],
-            weight: 1.0,
-        },
-        {
-            keywords: ["delete", "remove", "destroy", "drop"],
-            weight: 0.7,
-        },
-    ]), hasContextualSoftDestructiveSignal(normalizedTask) ? 0.4 : 0);
-    const schemaHighWeightKeywords = [
-        "migration",
-        "migrate",
-        "alter table",
-        "drop column",
-        "add column",
-    ];
-    const hasHighWeightSchemaSignal = schemaHighWeightKeywords.some((keyword) => normalizedTask.includes(keyword) &&
-        !isSchemaKeywordPrecededByTestOrMock(normalizedTask, keyword));
-    const highWeightSchemaScore = hasHighWeightSchemaSignal ? 25 : 0;
-    const reducedSchemaScore = hasSchemaContextExemption(normalizedTask)
-        ? 0
-        : scoreWeightedKeywordMatches(normalizedTask, [
-            {
-                keywords: ["schema", "database", "db", "column", "table"],
-                weight: 0.6,
-            },
-        ]) * 25;
+    const hasReactStateManagementContext = isReactStateManagementContext(normalizedTask);
+    const hasSoftDestructiveKeyword = includesAny(normalizedTask, [
+        "clear",
+        "reset",
+        "clean",
+    ]);
+    const hasStrongDestructiveKeyword = includesAny(normalizedTask, [
+        "truncate",
+        "drop table",
+        "delete all",
+        "wipe",
+        "purge",
+        "delete",
+        "remove",
+        "destroy",
+        "drop",
+    ]);
+    const hasReplaceWithPattern = normalizedTask.includes("replace") && normalizedTask.includes("with");
     const hasCriticalSignal = includesAny(normalizedTask, [
         "auth",
         "authentication",
@@ -96,7 +97,21 @@ function computeRiskScoreDetails(input) {
         "permission",
         "permissions",
         "security",
+        "middleware",
         "jwt",
+        "jwt verification",
+        "token validation",
+        "skip auth",
+        "bypass auth",
+        "haspaidaccess",
+        "paid access",
+        "subscription bypass",
+        "always return true",
+        "return true",
+        "bypass subscription",
+        "free access",
+        "bypass billing",
+        "override billing",
         "access token",
         "refresh token",
         "api key",
@@ -104,6 +119,73 @@ function computeRiskScoreDetails(input) {
         "production",
         "prod env",
     ]);
+    let destructiveWeight = Math.max(scoreWeightedKeywordMatches(normalizedTask, [
+        {
+            keywords: ["truncate", "drop table", "delete all", "wipe", "purge"],
+            weight: 1.0,
+        },
+        {
+            keywords: ["modify"],
+            weight: hasCriticalSignal ? 0.4 : 0,
+        },
+        {
+            keywords: ["skip", "bypass", "disable", "circumvent"],
+            weight: 0.7,
+        },
+        {
+            keywords: ["delete", "remove", "destroy", "drop"],
+            weight: 0.7,
+        },
+    ]), hasContextualSoftDestructiveSignal(normalizedTask) ? 0.4 : 0);
+    if (hasReactStateManagementContext &&
+        hasSoftDestructiveKeyword &&
+        !hasStrongDestructiveKeyword) {
+        destructiveWeight = 0;
+    }
+    if (hasReplaceWithPattern) {
+        destructiveWeight = Math.max(0, destructiveWeight - 0.3);
+    }
+    const schemaHighWeightKeywords = [
+        "migration",
+        "migrate",
+        "alter table",
+        "drop column",
+        "add column",
+        "alter",
+        "drop the",
+        "add a new column",
+        "rename column",
+    ];
+    const hasHighWeightSchemaSignal = schemaHighWeightKeywords.some((keyword) => {
+        if (!normalizedTask.includes(keyword))
+            return false;
+        if (isSchemaKeywordPrecededByTestOrMock(normalizedTask, keyword)) {
+            return false;
+        }
+        // "column" alone in UI context should not trigger schema
+        if ((keyword === "column" || keyword === "add column") &&
+            !includesAny(normalizedTask, [
+                "alter",
+                "drop",
+                "database",
+                "migration",
+                "sql",
+                "alter table",
+                "drop table",
+            ])) {
+            return false;
+        }
+        return true;
+    });
+    const highWeightSchemaScore = hasHighWeightSchemaSignal ? 25 : 0;
+    const reducedSchemaScore = hasSchemaContextExemption(normalizedTask)
+        ? 0
+        : scoreWeightedKeywordMatches(normalizedTask, [
+            {
+                keywords: ["schema", "database", "db"],
+                weight: 0.6,
+            },
+        ]) * 25;
     const hasLowRiskSignal = includesAny(normalizedTask, [
         "copy",
         "text",
@@ -132,7 +214,9 @@ function computeRiskScoreDetails(input) {
         "entire",
         "whole"
     ]);
-    const hasMassScopeSignal = hasDestructiveSignal && hasScopeWord;
+    const hasMassScopeSignal = hasReactStateManagementContext
+        ? false
+        : hasDestructiveSignal && hasScopeWord;
     const codeIntentLowRiskBonus = input.codeIntent === "test_add" ? -15 :
         input.codeIntent === "micro_edit" ? -10 :
             input.codeIntent === "config_change" && !hasCriticalSignal ? 10 :
@@ -148,7 +232,25 @@ function computeRiskScoreDetails(input) {
     if (riskBreakdown.destructive > 0 && riskBreakdown.massScope > 0) {
         compoundPenalty += 20;
     }
+    if (riskBreakdown.destructive > 0 && riskBreakdown.schema > 0) {
+        compoundPenalty += 20;
+    }
     if (riskBreakdown.destructive > 0 && riskBreakdown.critical > 0) {
+        compoundPenalty += 15;
+    }
+    if (hasCriticalSignal &&
+        includesAny(normalizedTask, [
+            "always",
+            "regardless",
+            "bypass",
+            "override",
+            "force",
+            "hardcode",
+        ])) {
+        compoundPenalty += 50;
+    }
+    if (hasCriticalSignal &&
+        includesAny(normalizedTask, ["modify", "change", "update", "set"])) {
         compoundPenalty += 15;
     }
     // auth + JWT/token combination = elevated critical

@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildPatchPreviewPrompt = buildPatchPreviewPrompt;
 function buildPatchPreviewPrompt(input) {
-    const { task, intent, filePath, fileContent, repoSummary, relatedContext, schemaAwareSummary } = input;
+    const { task, intent, filePath, fileContent, repoSummary, relatedContext, schemaAwareSummary, executionPlanContext } = input;
     return `
 You are generating a safe patch preview for a code agent working inside an existing production-style codebase.
 
@@ -24,6 +24,9 @@ TASK INTENT
 
 REPO SUMMARY
 ${repoSummary}
+
+EXECUTION PLAN
+${executionPlanContext || "No execution plan available."}
 
 SCHEMA-AWARE SUMMARY
 ${schemaAwareSummary || "No schema-aware summary available."}
@@ -51,11 +54,16 @@ STRICT PATCH RULES
 9. Do not invent new tables, columns, or route patterns if the schema-aware summary contradicts them.
 10. Prefer existing naming patterns, controller patterns, route patterns, and service conventions already used in the repo.
 11. Preserve multi-tenant or clinic/org scoping if present in the file or related context.
-12. If confidence is low, add a warning instead of inventing architecture.
-13. Return patch previews in the existing agent format.
-14. Do not include markdown fences in the JSON response.
+  12. If confidence is low, add a warning instead of inventing architecture.
+  13. Return patch previews in the existing agent format.
+  14. Do not include markdown fences in the JSON response.
+  15. Do NOT include any context file contents in your JSON response.
+  16. Do NOT include FILE: headers, CURRENT FILE CONTENT, or INSTRUCTIONS text in any field of your response.
+  17. The "contentPreview" field must contain ONLY a brief description of what will change, not actual code or file contents.
+  18. The "summary" field must be a single sentence describing the patch, no longer than 150 characters.
+  19. Your entire response must be valid JSON only - no markdown, no extra text, no file contents outside the JSON structure.
 
-PATCH THINKING GUIDELINES
+  PATCH THINKING GUIDELINES
 - First determine whether this file should be modified at all.
 - If this file is not the right target, return a warning and keep the patch minimal.
 - Reuse existing helpers/imports if they already exist.

@@ -225,7 +225,13 @@ function getBaselineScore(file) {
 function scoreFile(file, task) {
     const normalizedTask = task.toLowerCase();
     const filePath = file.path.toLowerCase();
+    const fileBasename = (file.path.split("/").pop() ?? file.path)
+        .replace(/\.[^.]+$/, "")
+        .toLowerCase();
     const signals = extractTaskSignals(task);
+    const explicitFilenameTokens = task.match(/\b(?:[A-Z][A-Za-z0-9_]*|[A-Za-z0-9_-]+\.(?:jsx|tsx|ts|js|py))\b/g) ?? [];
+    const explicitBasenameTargets = explicitFilenameTokens.map((token) => token.replace(/\.[^.]+$/, "").toLowerCase());
+    const hasExplicitBasenameTarget = explicitBasenameTargets.length > 0;
     let score = getBaselineScore(file) + getSignalScore(file, signals);
     const keywords = normalizedTask
         .split(/\s+/)
@@ -234,6 +240,12 @@ function scoreFile(file, task) {
     for (const keyword of keywords) {
         if (filePath.includes(keyword)) {
             score += 10;
+        }
+    }
+    for (const token of explicitFilenameTokens) {
+        const normalizedToken = token.replace(/\.[^.]+$/, "").toLowerCase();
+        if (normalizedToken === fileBasename) {
+            score += token.includes(".") ? 200 : 500;
         }
     }
     if (normalizedTask.includes("timeline") && filePath.includes("timeline")) {
@@ -283,7 +295,8 @@ function scoreFile(file, task) {
     if (file.path.includes("/controllers/")) {
         score += 4;
     }
-    if (file.path.includes("/pages/")) {
+    if (file.path.includes("/pages/") &&
+        (!hasExplicitBasenameTarget || explicitBasenameTargets.includes(fileBasename))) {
         score += 4;
     }
     return score;

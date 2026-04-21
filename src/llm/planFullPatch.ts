@@ -8,6 +8,10 @@ import {
   buildFullPatchPrompt,
   type FullPatchOutputMode,
 } from "../prompts/fullPatchPrompt.js";
+import {
+  formatExecutionPlanForPrompt,
+  type ExecutionPlan,
+} from "./executionPlan.js";
 
 const fullContentSchema = z.object({
   filePath: z.string(),
@@ -77,6 +81,7 @@ export async function planFullPatchWithLlm(input: {
   relevantFiles?: Array<{ path: string; content?: string }>;
   existingTargetFiles?: string[];
   userOpenAiKey?: string;
+  executionPlan?: ExecutionPlan | null;
 }): Promise<FullPatchResult> {
   const client = createOpenAIClient(input.userOpenAiKey);
   const model = getModelName("high");
@@ -90,6 +95,7 @@ const outputMode: FullPatchOutputMode = "find_replace_patch";
     taskIntent: input.taskIntent,
     normalizedTaskIntent: input.normalizedTaskIntent,
     outputMode,
+    executionPlanContext: formatExecutionPlanForPrompt(input.executionPlan),
   });
 
   if (outputMode === "find_replace_patch") {

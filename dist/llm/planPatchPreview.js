@@ -4,28 +4,22 @@ exports.planPatchPreviewWithLlm = planPatchPreviewWithLlm;
 const openaiClient_js_1 = require("./openaiClient.js");
 const schemas_js_1 = require("./schemas.js");
 const patchPreviewPrompt_js_1 = require("../prompts/patchPreviewPrompt.js");
-function extractJson(rawText) {
-    const trimmed = rawText
-        .replace(/^```json\s*/i, "")
-        .replace(/^```\s*/i, "")
-        .replace(/```\s*$/i, "")
-        .trim();
-    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-        return trimmed;
-    }
-    const firstBrace = trimmed.indexOf("{");
-    const lastBrace = trimmed.lastIndexOf("}");
-    if (firstBrace >= 0 && lastBrace > firstBrace) {
-        return trimmed.slice(firstBrace, lastBrace + 1);
-    }
-    throw new Error(`No JSON object found in model response. Raw response: ${rawText}`);
-}
+const executionPlan_js_1 = require("./executionPlan.js");
 function stripJsonFences(raw) {
     return raw
         .replace(/^```json\s*/i, "")
         .replace(/^```\s*/i, "")
         .replace(/```\s*$/i, "")
         .trim();
+}
+function extractAndRepairJson(raw) {
+    const cleaned = stripJsonFences(raw);
+    const first = cleaned.indexOf("{");
+    const last = cleaned.lastIndexOf("}");
+    if (first === -1 || last === -1 || last <= first) {
+        throw new Error("No JSON found");
+    }
+    return cleaned.slice(first, last + 1);
 }
 async function planPatchPreviewWithLlm(input) {
     const client = (0, openaiClient_js_1.createOpenAIClient)(input.userOpenAiKey);
@@ -52,15 +46,24 @@ async function planPatchPreviewWithLlm(input) {
         fileContent: combinedContext,
         repoSummary,
         relatedContext,
-        schemaAwareSummary
+        schemaAwareSummary,
+        executionPlanContext: (0, executionPlan_js_1.formatExecutionPlanForPrompt)(input.executionPlan),
     });
     const response = await client.responses.create({
         model,
-        input: prompt
+        input: prompt,
+        text: { format: { type: "json_object" } }
     });
     const rawText = response.output_text || "";
-    const jsonText = extractJson(rawText);
-    const parsed = JSON.parse(stripJsonFences(jsonText));
+    let parsed;
+    try {
+        parsed = JSON.parse(extractAndRepairJson(rawText));
+    }
+    catch (error) {
+        const preview = rawText.slice(0, 50);
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to parse patch preview JSON: ${message}. Raw preview: ${preview}`);
+    }
     const validated = schemas_js_1.llmPatchPlanSchema.parse(parsed);
     return {
         summary: validated.summary,

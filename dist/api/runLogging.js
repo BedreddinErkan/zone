@@ -64,6 +64,11 @@ async function logRun(input) {
     });
     const billingMode = resolveBillingMode(input);
     let profileResult = { data: null, error: null };
+    let userQuota = {
+        runsUsedThisMonth: 0,
+        credits: Number.MAX_SAFE_INTEGER,
+        subscriptionStatus: "free",
+    };
     try {
         profileResult = await supabase
             .from("profiles")
@@ -78,8 +83,18 @@ async function logRun(input) {
             error: error instanceof Error ? error.message : String(error),
         });
     }
+    try {
+        userQuota = await (0, conversationRepository_js_1.getUserQuota)(supabase, effectiveUserId);
+    }
+    catch (error) {
+        logBillingDebug("quota lookup failed", {
+            routeName: input.routeName ?? "unknown",
+            userId: effectiveUserId,
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
     const hasPaidAccess = normalizeSubscriptionStatus(profileResult.data?.subscription_status) === "pro";
-    const normalizedSubscriptionStatus = normalizeSubscriptionStatus(profileResult.data?.subscription_status);
+    const normalizedSubscriptionStatus = normalizeSubscriptionStatus(profileResult.data?.subscription_status ?? userQuota.subscriptionStatus);
     logBillingDebug("billing inputs before resolver", {
         routeName: input.routeName ?? "unknown",
         userId: effectiveUserId,
@@ -116,6 +131,8 @@ async function logRun(input) {
     const billingAction = (0, resolveBillingAction_js_1.resolveBillingAction)({
         mode: billingMode,
         hasPaidAccess,
+        runsUsedThisMonth: userQuota.runsUsedThisMonth,
+        credits: userQuota.credits,
     });
     logBillingDebug("billing action resolved", {
         routeName: input.routeName ?? "unknown",

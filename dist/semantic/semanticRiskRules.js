@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.semanticRiskRules = exports.detectBroadErrorSwallowing = exports.detectSecretExposedToLog = exports.detectTestAssertionRemoved = exports.detectRateLimitRemoved = exports.detectValidationRemoved = exports.detectRoleCheckRemoved = exports.detectAuthGuardRemoved = void 0;
+exports.isCommentOnlyDiff = isCommentOnlyDiff;
 function countPatternMatches(content, pattern) {
     return content.match(pattern)?.length ?? 0;
 }
@@ -9,6 +10,18 @@ function findMatchedTokens(content, patterns) {
         .flatMap((pattern) => content.match(pattern) ?? [])
         .map((match) => match.trim())
         .filter((match, index, values) => values.indexOf(match) === index);
+}
+function isCommentOnlyDiff(diffLines) {
+    const addedLines = diffLines
+        .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+        .map((line) => line.slice(1).trim())
+        .filter((line) => line.length > 0);
+    if (addedLines.length === 0) {
+        return false;
+    }
+    return addedLines.every((line) => line.startsWith("//") ||
+        line.startsWith("/*") ||
+        line.startsWith("*"));
 }
 function buildRisk(input, code, severity, category, message, evidence) {
     return {
@@ -66,7 +79,30 @@ const detectAuthGuardRemoved = (input) => collectRemovedRisk(input, "AUTH_GUARD_
 exports.detectAuthGuardRemoved = detectAuthGuardRemoved;
 const detectRoleCheckRemoved = (input) => collectRemovedRisk(input, "ROLE_CHECK_REMOVED", "authorization", "Authorization or role-based access check was removed from the file.", roleCheckPatterns, "high");
 exports.detectRoleCheckRemoved = detectRoleCheckRemoved;
-const detectValidationRemoved = (input) => collectRemovedRisk(input, "VALIDATION_REMOVED", "validation", "Validation logic appears to have been removed from the file.", validationPatterns, "high");
+const detectValidationRemoved = (input) => {
+    if (isCommentOnlyDiff(input.diffLines ?? [])) {
+        return [];
+    }
+    const beforeMatches = findMatchedTokens(input.beforeContent, validationPatterns);
+    if (beforeMatches.length === 0) {
+        return [];
+    }
+    const removedLines = (input.diffLines ?? [])
+        .filter((line) => line.startsWith("-") && !line.startsWith("---"))
+        .map((line) => line.slice(1))
+        .join("\n");
+    const removedMatches = findMatchedTokens(removedLines, validationPatterns);
+    if (removedMatches.length === 0) {
+        return [];
+    }
+    const afterMatches = findMatchedTokens(input.afterContent, validationPatterns);
+    return [
+        buildRisk(input, "VALIDATION_REMOVED", "high", "validation", "Validation logic appears to have been removed from the file.", {
+            beforeMatches,
+            afterMatches,
+        }),
+    ];
+};
 exports.detectValidationRemoved = detectValidationRemoved;
 const detectRateLimitRemoved = (input) => collectRemovedRisk(input, "RATE_LIMIT_REMOVED", "safety_guard", "Rate limiting or throttling protection was removed from the file.", rateLimitPatterns, "high");
 exports.detectRateLimitRemoved = detectRateLimitRemoved;

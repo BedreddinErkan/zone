@@ -25,7 +25,10 @@ const readProjectFiles_js_1 = require("../repo/readProjectFiles.js");
 const planFeature_js_1 = require("../llm/planFeature.js");
 const planPatchPreview_js_1 = require("../llm/planPatchPreview.js");
 const planFullPatch_js_1 = require("../llm/planFullPatch.js");
+const executionPlan_js_1 = require("../llm/executionPlan.js");
 const computeRiskScore_js_1 = require("./computeRiskScore.js");
+const evaluatePlanAlignment_js_1 = require("./evaluatePlanAlignment.js");
+const verifyPatch_js_1 = require("./verifyPatch.js");
 const intentMismatchDetector_js_1 = require("../engine/intentMismatchDetector.js");
 const designSystemSignals_js_1 = require("../engine/designSystemSignals.js");
 const patchQualityScorer_js_1 = require("../engine/patchQualityScorer.js");
@@ -87,6 +90,10 @@ const DEVELOPER_GENERIC_TASK_TOKENS = new Set([
     "refactor",
     "improve",
 ]);
+const VAGUE_COMBINATIONS = [
+    /^(improve|update|fix|enhance|optimize|clean up|refactor)\s+(the\s+)?(dashboard|ui|app|page|layout|component|screen|design|interface)\.?$/i,
+    /^make\s+(the\s+)?(dashboard|ui|app|page|layout|component|screen)\s+(better|cleaner|nicer|faster)\.?$/i,
+];
 const DEVELOPER_TASK_STOPWORDS = new Set([
     "a",
     "an",
@@ -236,6 +243,14 @@ function stripCommentsForComparison(content) {
         .replace(/^\s*--.*$/gm, "")
         .trim();
 }
+function stripCommentOnlyLines(content) {
+    return content
+        .replace(/\r\n/g, "\n")
+        .split("\n")
+        .filter((line) => !/^\s*(?:\/\/|\/\*)/.test(line))
+        .join("\n")
+        .trim();
+}
 function countChangedLines(before, after) {
     const diff = computeFileDiff(before, after);
     return diff.filter((line) => line.type !== "unchanged").length;
@@ -263,7 +278,18 @@ function introducesNewEmptyCatch(originalContent, fullContent) {
     const nextMatches = fullContent.match(emptyCatchPattern)?.length ?? 0;
     return nextMatches > originalMatches;
 }
-function removesValidationOrGuards(originalContent, fullContent) {
+function removesValidationOrGuards(originalContent, fullContent, diffLines) {
+    const originalStripped = stripCommentsForComparison(originalContent)
+        .replace(/\r\n/g, "\n")
+        .replace(/\r/g, "\n")
+        .trim();
+    const fullStripped = stripCommentsForComparison(fullContent)
+        .replace(/\r\n/g, "\n")
+        .replace(/\r/g, "\n")
+        .trim();
+    if (originalStripped === fullStripped) {
+        return false;
+    }
     const originalWithoutComments = stripCommentsForComparison(originalContent);
     const nextWithoutComments = stripCommentsForComparison(fullContent);
     const patterns = [
@@ -275,6 +301,24 @@ function removesValidationOrGuards(originalContent, fullContent) {
         /\bthrow\s+new\s+Error\b/g,
         /\bif\s*\(!/g,
     ];
+    if ((diffLines?.length ?? 0) > 0) {
+        const removedLines = (diffLines ?? [])
+            .filter((line) => line.startsWith("-") && !line.startsWith("--"))
+            .map((line) => stripCommentsForComparison(line.slice(1)));
+        return patterns.some((pattern) => {
+            pattern.lastIndex = 0;
+            const beforeCount = countPatternMatches(originalWithoutComments, [pattern]);
+            pattern.lastIndex = 0;
+            const afterCount = countPatternMatches(nextWithoutComments, [pattern]);
+            pattern.lastIndex = 0;
+            const removedByDiff = removedLines.some((line) => {
+                pattern.lastIndex = 0;
+                return pattern.test(line);
+            });
+            pattern.lastIndex = 0;
+            return beforeCount > 0 && afterCount < beforeCount && removedByDiff;
+        });
+    }
     return patterns.some((pattern) => {
         const beforeCount = countPatternMatches(originalWithoutComments, [pattern]);
         const afterCount = countPatternMatches(nextWithoutComments, [pattern]);
@@ -308,6 +352,26 @@ function weakensAuthChecks(originalContent, fullContent) {
     return bypassPatterns.some((pattern) => pattern.test(nextWithoutComments));
 }
 function validateDeveloperOutput(input) {
+    const computedDiffLines = computeFileDiff(input.originalContent, input.fullContent).map((line) => `${line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}${line.content}`);
+    const totalRemovedLines = computedDiffLines.filter((l) => l.startsWith("-")).length;
+    const totalAddedLines = computedDiffLines.filter((l) => l.startsWith("+")).length;
+    const totalOriginalLines = input.originalContent.split("\n").length;
+    const isFullFileRewrite = totalRemovedLines > totalOriginalLines * 0.5 &&
+        totalAddedLines > totalOriginalLines * 0.3;
+    const addedDiffLines = computedDiffLines
+        .filter((line) => line.startsWith("+"))
+        .map((line) => line.slice(1).trim())
+        .filter(Boolean);
+    const hasRemovedDiffLines = computedDiffLines.some((line) => line.startsWith("-"));
+    if (addedDiffLines.length > 0 &&
+        !hasRemovedDiffLines &&
+        addedDiffLines.every((line) => /^(?:\/\/|\/\*|\*)/.test(line))) {
+        return {
+            blocked: false,
+            warnings: [],
+            confidencePenalty: 0,
+        };
+    }
     const warnings = [];
     let blocked = false;
     let confidencePenalty = 0;
@@ -315,11 +379,13 @@ function validateDeveloperOutput(input) {
         blocked = true;
         warnings.push("[DEVELOPER_SECRET_LOGGING] Output logs sensitive data. Apply is disabled.");
     }
-    if (removesValidationOrGuards(input.originalContent, input.fullContent)) {
+    if (!isFullFileRewrite &&
+        removesValidationOrGuards(input.originalContent, input.fullContent, input.diffLines)) {
         blocked = true;
         warnings.push("[DEVELOPER_VALIDATION_REMOVAL] Output removes input validation or guards.");
     }
-    if (weakensAuthChecks(input.originalContent, input.fullContent)) {
+    if (!isFullFileRewrite &&
+        weakensAuthChecks(input.originalContent, input.fullContent)) {
         blocked = true;
         warnings.push("[DEVELOPER_AUTH_WEAKENING] Output weakens authentication or authorization.");
     }
@@ -329,9 +395,12 @@ function validateDeveloperOutput(input) {
     }
     const originalNormalized = normalizeWhitespace(input.originalContent);
     const nextNormalized = normalizeWhitespace(input.fullContent);
+    const originalWithoutCommentLines = normalizeWhitespace(stripCommentOnlyLines(input.originalContent));
+    const nextWithoutCommentLines = normalizeWhitespace(stripCommentOnlyLines(input.fullContent));
     const originalWithoutComments = normalizeWhitespace(stripCommentsForComparison(input.originalContent));
     const nextWithoutComments = normalizeWhitespace(stripCommentsForComparison(input.fullContent));
-    if (originalNormalized === nextNormalized ||
+    if (originalWithoutCommentLines === nextWithoutCommentLines ||
+        originalNormalized === nextNormalized ||
         originalWithoutComments === nextWithoutComments) {
         warnings.push("[DEVELOPER_FILLER_PATCH] No meaningful changes detected.");
         confidencePenalty += 30;
@@ -353,6 +422,9 @@ function isVagueDeveloperTask(task) {
     const words = normalizedTask.split(/\s+/).filter(Boolean);
     if (DEVELOPER_GENERIC_TASK_PHRASES.has(normalizedTask))
         return true;
+    if (VAGUE_COMBINATIONS.some((pattern) => pattern.test(task.trim()))) {
+        return true;
+    }
     const tokens = normalizedTask
         .split(/[^a-z0-9]+/i)
         .map((token) => token.trim())
@@ -1241,6 +1313,20 @@ async function runLlmPatchFlow(input) {
                     topRelevantPaths.map((filePath) => `- ${filePath}`).join("\n")
                 : "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n(none)";
         })();
+    let executionPlan = null;
+    try {
+        executionPlan = await (0, executionPlan_js_1.generateExecutionPlan)({
+            task: input.task,
+            repoSummary: projectSummary,
+            relevantFiles: relevantFiles.map((file) => file.path),
+            userOpenAiKey: input.userOpenAiKey,
+        });
+        console.log(`[zone-plan] generated steps=${executionPlan.steps.length}`);
+        console.log(`[zone-plan] scope=${executionPlan.scopeSummary}`);
+    }
+    catch (err) {
+        console.warn(`[zone-plan] skipped: ${err instanceof Error ? err.message : String(err)}`);
+    }
     // 4. Plan feature with LLM
     reportProgress("Planning feature...");
     let llmPlan = null;
@@ -1339,6 +1425,7 @@ async function runLlmPatchFlow(input) {
             fileContexts: resolvedFileContexts,
             schemaAwareSummary: [],
             userOpenAiKey: input.userOpenAiKey,
+            executionPlan,
         });
         perf.mark("patch preview model response received");
     }
@@ -1361,6 +1448,21 @@ async function runLlmPatchFlow(input) {
         task: input.task,
         taskRiskResult,
     });
+    if (taskRiskResult.score >= 71) {
+        reportProgress("Ready");
+        return {
+            ok: true,
+            patchPreview: `[BLOCKED] Risk score ${taskRiskResult.score} — task was blocked before patch generation. Detected signals: ${taskRiskResult.signals.join(", ")}.`,
+            warnings: [`[HIGH_RISK] Task risk score ${taskRiskResult.score} — blocked before patch generation.`],
+            developerConfidence: 0,
+            decisionMode: "preview_only",
+            applyPatches: [],
+            patchResults: [],
+            fileDiffs: [],
+            contextFiles: [],
+            ...(executionPlan ? { plan: executionPlan } : {}),
+        };
+    }
     if (vagueTask) {
         reportProgress("Ready");
         perf.mark("decision evaluation complete");
@@ -1375,6 +1477,7 @@ async function runLlmPatchFlow(input) {
             patchResults: [],
             fileDiffs: [],
             contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
+            ...(executionPlan ? { plan: executionPlan } : {}),
         };
     }
     // 6b. Generate full file content for modify/create patches
@@ -1386,7 +1489,24 @@ async function runLlmPatchFlow(input) {
     const internalWarnings = [...patchPlan.warnings];
     const visibleWarnings = filterVisibleDeveloperWarnings(patchPlan.warnings);
     const patchResults = [];
+    let hostedPatchAvailability = [];
     try {
+        hostedPatchAvailability = input.hostedContext
+            ? patchPlan.patches.map((patch) => {
+                const hasOriginalContent = Object.prototype.hasOwnProperty.call(input.hostedContext.originalContents, patch.path);
+                const hasContextFile = input.hostedContext.contextFiles.some((file) => file.path === patch.path);
+                return {
+                    path: patch.path,
+                    hasOriginalContent,
+                    hasContextFile,
+                    reason: !hasOriginalContent
+                        ? "missing from originalContents"
+                        : !hasContextFile
+                            ? "missing from contextFiles"
+                            : "available in hosted context",
+                };
+            })
+            : [];
         const applyTargets = patchPlan.patches.filter((p) => p.operation === "modify" || p.operation === "create");
         const applyResults = [];
         for (const patch of applyTargets) {
@@ -1502,6 +1622,7 @@ async function runLlmPatchFlow(input) {
                         relevantFiles: targetedRelevantFiles,
                         existingTargetFiles: allFiles.map((file) => file.path),
                         userOpenAiKey: input.userOpenAiKey,
+                        executionPlan,
                         relatedContext: [
                             contextWindow
                                 ? `// CONTEXT WINDOW: lines ${contextWindow.startLine}-${contextWindow.endLine} of ${contextWindow.totalLines} total`
@@ -1545,6 +1666,21 @@ async function runLlmPatchFlow(input) {
             if (nextContent === null) {
                 continue;
             }
+            if (nextContent.includes("--- FIND ---") ||
+                nextContent.includes("--- REPLACE ---")) {
+                const patchConflictWarning = buildPatchConflictWarning({
+                    filePath: patch.path,
+                    reason: "patch_format_leaked",
+                });
+                internalWarnings.push(patchConflictWarning);
+                visibleWarnings.push(patchConflictWarning);
+                patchResults.push({
+                    filePath: patch.path,
+                    status: "failed",
+                    reason: "patch_format_leaked",
+                });
+                continue;
+            }
             const suspiciousUiOverwrite = detectSuspiciousUiOverwrite({
                 task: input.task,
                 filePath: patch.path,
@@ -1572,6 +1708,7 @@ async function runLlmPatchFlow(input) {
                 filePath: patch.path,
                 fullContent: nextContent,
                 originalContent: fileContent,
+                diffLines: computeFileDiff(fileContent, nextContent).map((line) => `${line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}${line.content}`),
             });
             if (validation.warnings.length > 0) {
                 internalWarnings.push(...validation.warnings);
@@ -1589,6 +1726,17 @@ async function runLlmPatchFlow(input) {
                 filePath: patch.path,
                 fullContent: nextContent,
             });
+            if (nextContent.includes("--- FIND ---") ||
+                nextContent.includes("--- REPLACE ---") ||
+                nextContent.includes("--- END ---")) {
+                applyResults.pop();
+                patchResults.push({
+                    filePath: patch.path,
+                    status: "failed",
+                    reason: "patch_format_leaked",
+                });
+                continue;
+            }
             patchResults.push({
                 filePath: patch.path,
                 status: "applied",
@@ -1604,6 +1752,14 @@ async function runLlmPatchFlow(input) {
         perf.mark("patch conversion fallback complete");
     }
     console.log("[hosted] applyPatches count:", applyPatches.length);
+    if (input.hostedContext &&
+        applyPatches.length === 0 &&
+        patchPlan.patches.length > 0) {
+        console.log("[hosted] patch paths filtered by hosted context:", hostedPatchAvailability
+            .filter((patch) => !patch.hasOriginalContent || !patch.hasContextFile)
+            .map(({ path, reason }) => ({ path, reason })));
+        console.log("[hosted] patch paths still present after hosted filtering:", patchPlan.patches.map((patch) => patch.path));
+    }
     if (input.atomicPatch && patchResults.some((result) => result.status === "failed")) {
         reportProgress("Ready");
         perf.finish("atomic patch failed");
@@ -1617,10 +1773,31 @@ async function runLlmPatchFlow(input) {
             changedLines: countChangedLines(before, patch.fullContent),
         };
     });
+    const normalizeForDiff = (content) => content.replace(/\r\n/g, "\n").replace(/\t/g, "  ").trimEnd();
+    reportProgress("Building diff preview...");
+    const fileDiffs = applyPatches.map((patch) => {
+        const before = normalizeForDiff(originalContents[patch.filePath] ?? "");
+        const after = normalizeForDiff(patch.fullContent);
+        const diff = computeFileDiff(before, after);
+        return {
+            filePath: patch.filePath,
+            diff,
+            addedLines: diff.filter((line) => line.type === "added").length,
+            removedLines: diff.filter((line) => line.type === "removed").length,
+        };
+    });
     const patchScope = analyzePatchScope({
         applyPatches,
         originalContents,
     });
+    const isCommentOnlyRun = fileDiffs.length > 0 &&
+        fileDiffs.every((fd) => fd.diff
+            .filter((line) => line.type !== "unchanged")
+            .every((line) => line.type === "removed" || /^\s*(\/\/|\/\*|\*)/.test(line.content)));
+    if (isCommentOnlyRun) {
+        patchScope.rewriteLikeSuspicion = false;
+        patchScope.totalChangedLines = fileDiffs.reduce((sum, fd) => sum + fd.addedLines + fd.removedLines, 0);
+    }
     const designSystemSignals = (0, designSystemSignals_js_1.detectDesignSystemSignals)({
         addedLines: collectAddedPatchLines({
             applyPatches,
@@ -1639,19 +1816,6 @@ async function runLlmPatchFlow(input) {
         task: input.task,
         patchScope,
     });
-    const patchQuality = (0, patchQualityScorer_js_1.scorePatchQuality)({
-        taskIntent: normalizedIntent,
-        patchScope,
-        validationWarnings: visibleWarnings,
-        designSystemSignals,
-        intentMismatch: intentMismatchDecision,
-    });
-    const microEditProtection = (0, microEditProtection_js_1.enforceMicroEditProtection)({
-        taskIntent: normalizedIntent,
-        patchScope,
-        intentMismatch: intentMismatchDecision,
-        patchQuality,
-    });
     const uiMappingRisk = evaluateUiMappingRisk({
         task: input.task,
         patchScope,
@@ -1660,6 +1824,45 @@ async function runLlmPatchFlow(input) {
         taskRiskResult,
         patchScope,
     });
+    let planAlignment = null;
+    if (executionPlan && applyPatches.length > 0) {
+        try {
+            planAlignment = (0, evaluatePlanAlignment_js_1.evaluatePlanAlignment)({
+                plan: executionPlan,
+                changedFiles: applyPatches.map((patch) => patch.filePath),
+                massScopeScore: Math.max(intentMismatch.risk.breakdown.massScope, uiMappingRisk.risk.breakdown.massScope, effectiveTaskRiskResult.breakdown.massScope),
+            });
+            console.log(`[zone-plan-align] score=${planAlignment.score} outOfPlan=${planAlignment.outOfPlanFiles.length} scopeMismatch=${planAlignment.scopeMismatch}`);
+            if (planAlignment.warning) {
+                internalWarnings.push(planAlignment.warning);
+                visibleWarnings.push(planAlignment.warning);
+            }
+        }
+        catch (err) {
+            console.warn(`[zone-plan-align] skipped: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+    let verification = null;
+    if (applyPatches.length > 0) {
+        try {
+            verification = (0, verifyPatch_js_1.verifyPatch)({
+                changedFiles: applyPatches.map((patch) => patch.filePath),
+                patchContent: applyPatches
+                    .map((patch) => `FILE: ${patch.filePath}\n${patch.fullContent}`)
+                    .join("\n\n"),
+                task: input.task,
+                repoFiles: allFiles.map((file) => file.path),
+            });
+            console.log(`[zone-verify] score=${verification.score} warnings=${verification.warnings.length}`);
+            if (verification.warnings.length > 0) {
+                internalWarnings.push(...verification.warnings);
+                visibleWarnings.push(...verification.warnings);
+            }
+        }
+        catch (err) {
+            console.warn(`[zone-verify] skipped: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
     logRiskDebug("runLlmPatchFlow after task-risk adjustments", {
         task: input.task,
         patchScope,
@@ -1688,33 +1891,43 @@ async function runLlmPatchFlow(input) {
         !warning.startsWith("[ELEVATED_RISK] Task risk score"));
     let syncedVisibleWarnings = visibleWarnings.filter((warning) => !warning.startsWith("[HIGH_RISK] Task risk score") &&
         !warning.startsWith("[ELEVATED_RISK] Task risk score"));
-    const developerConfidenceBase = calculateDeveloperConfidence({
+    const developerConfidenceBaseRaw = calculateDeveloperConfidence({
         warnings: syncedInternalWarnings,
         changedFileCount: applyPatches.length,
         changedFileMetrics,
         vagueTask,
     });
+    let developerConfidenceBase = isCommentOnlyRun
+        ? Math.max(developerConfidenceBaseRaw, 85)
+        : developerConfidenceBaseRaw;
+    if (applyPatches.length === 0 && patchPlan.patches.length > 0) {
+        developerConfidenceBase = Math.min(developerConfidenceBase, 40);
+    }
     const confidenceCaps = [
         intentMismatchDecision.severity === "medium"
             ? intentMismatchDecision.confidenceCap
             : undefined,
         uiMappingRisk.confidenceCap,
+        planAlignment?.score,
+        verification?.score,
     ].filter((value) => typeof value === "number");
     const developerConfidence = confidenceCaps.length > 0
         ? Math.min(developerConfidenceBase, ...confidenceCaps)
         : developerConfidenceBase;
-    const normalizeForDiff = (content) => content.replace(/\r\n/g, "\n").replace(/\t/g, "  ").trimEnd();
-    reportProgress("Building diff preview...");
-    const fileDiffs = applyPatches.map((patch) => {
-        const before = normalizeForDiff(originalContents[patch.filePath] ?? "");
-        const after = normalizeForDiff(patch.fullContent);
-        const diff = computeFileDiff(before, after);
-        return {
-            filePath: patch.filePath,
-            diff,
-            addedLines: diff.filter((line) => line.type === "added").length,
-            removedLines: diff.filter((line) => line.type === "removed").length,
-        };
+    const allDiffLines = fileDiffs.flatMap((fd) => fd.diff.map((line) => `${line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}${line.content}`));
+    const patchQuality = (0, patchQualityScorer_js_1.scorePatchQuality)({
+        taskIntent: normalizedIntent,
+        patchScope,
+        validationWarnings: visibleWarnings,
+        designSystemSignals,
+        intentMismatch: intentMismatchDecision,
+        diffLines: allDiffLines,
+    });
+    const microEditProtection = (0, microEditProtection_js_1.enforceMicroEditProtection)({
+        taskIntent: normalizedIntent,
+        patchScope,
+        intentMismatch: intentMismatchDecision,
+        patchQuality,
     });
     const mergedDeveloperRisk = {
         score: Math.max(intentMismatch.risk.score, uiMappingRisk.risk.score, effectiveTaskRiskResult.score),
@@ -1729,6 +1942,22 @@ async function runLlmPatchFlow(input) {
         syncedVisibleWarnings.push(...microEditProtection.violationReasons);
     }
     const hasBlockedPatch = patchResults.some(r => r.status === "failed" && r.reason === "developer_validation_blocked");
+    if (input.hostedContext &&
+        patchResults.some((result) => result.status === "failed") &&
+        applyPatches.length > 0) {
+        const rolledBackPaths = new Set(applyPatches.map((patch) => patch.filePath));
+        if (rolledBackPaths.size > 0) {
+            applyPatches = [];
+            for (const result of patchResults) {
+                if (result.status === "applied" &&
+                    rolledBackPaths.has(result.filePath)) {
+                    result.status = "failed";
+                    result.reason = "atomic_rollback";
+                }
+            }
+            syncedVisibleWarnings.push("[ATOMIC_ROLLBACK] One or more files failed validation. All changes in this patch set have been rolled back.");
+        }
+    }
     const finalDeveloperRiskScore = applySafePatchRiskCap({
         developerRisk: mergedDeveloperRisk,
         patchScope,
@@ -1838,6 +2067,9 @@ async function runLlmPatchFlow(input) {
         patchResults,
         fileDiffs,
         contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
+        ...(executionPlan ? { plan: executionPlan } : {}),
+        ...(planAlignment ? { planAlignment } : {}),
+        ...(verification ? { verification } : {}),
     };
 }
 //# sourceMappingURL=runLlmPatchFlow.js.map

@@ -72,7 +72,7 @@ function detectRenameIntent(task) {
     return null;
 }
 function buildFullPatchPrompt(input) {
-    const { task, filePath, fileContent, repoSummary, relatedContext, taskIntent, normalizedTaskIntent, outputMode = "full_content", } = input;
+    const { task, filePath, fileContent, repoSummary, relatedContext, taskIntent, normalizedTaskIntent, outputMode = "full_content", executionPlanContext, } = input;
     const renameIntent = detectRenameIntent(task);
     const renameInstruction = renameIntent
         ? `RENAME OPERATION DETECTED:
@@ -137,6 +137,9 @@ ${filePath}
 REPO SUMMARY
 ${repoSummary}
 
+EXECUTION PLAN
+${executionPlanContext || "No execution plan available."}
+
 RELATED CONTEXT
 ${relatedContext}
 
@@ -147,12 +150,17 @@ ${fileContent}
 
 INSTRUCTIONS
 ${renameInstruction}${uiRulesInstruction}${scopeControlInstruction}${microEditInstruction}- The target file is large. Return ONLY the specific change as a FIND/REPLACE patch.
-- Do NOT return the full file.
-- Do NOT reconstruct the whole document.
-- Modify only the smallest existing block needed.
-- Your FIND block must be exact existing text from the file, usually 3-10 lines around the change.
-- Your REPLACE block must contain only the updated version of that exact block.
-- Do not add markdown fences or explanations.
+  - Do NOT return the full file.
+  - Do NOT reconstruct the whole document.
+  - Modify only the smallest existing block needed.
+  - Your FIND block must be exact existing text from the file, usually 3-10 lines around the change.
+  - Your REPLACE block must contain only the updated version of that exact block.
+  - Do NOT include "--- END ---" or any marker after REPLACE block
+  - Do NOT include any FILE: headers or context file contents in your output
+  - Do NOT include CURRENT FILE CONTENT or INSTRUCTIONS in output
+  - Your entire response must be ONLY the FIND/REPLACE patch, nothing else
+  - If no change is needed, output exactly: NO_CHANGE_NEEDED
+  - Do not add markdown fences or explanations.
 
 OUTPUT FORMAT
 Return plain text only in this exact format:
@@ -174,6 +182,9 @@ ${filePath}
 REPO SUMMARY
 ${repoSummary}
 
+EXECUTION PLAN
+${executionPlanContext || "No execution plan available."}
+
 RELATED CONTEXT
 ${relatedContext}
 
@@ -185,7 +196,14 @@ ${fileContent}
 INSTRUCTIONS
 ${renameInstruction}${uiRulesInstruction}${scopeControlInstruction}${microEditInstruction}- Apply the task to the file above
 - Return the COMPLETE updated file content
-- Preserve all existing code that is unrelated to the task
+- CRITICAL: Preserve ALL existing code that is unrelated to the task
+- Do NOT remove, rename, or restructure existing functions, components, state variables, or UI elements unless the task explicitly asks you to
+- Do NOT simplify, clean up, or refactor existing code
+- Do NOT remove existing features like forms, filters, stats, or other UI sections that are not mentioned in the task
+- Only ADD or MODIFY the specific code mentioned in the task
+- The output must contain everything the original file had, plus the requested change
+- If you are unsure whether something should be preserved, preserve it
+- NEVER return \`return null\` or placeholder comments like \`// actual code would continue\` - always return the complete file
 - Keep existing imports, exports, formatting, and naming conventions
 - Do not add markdown fences or explanations
 - If the file does not need changes, return it unchanged

@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.getUserQuota = getUserQuota;
 exports.createConversation = createConversation;
 exports.getConversationById = getConversationById;
 exports.updateConversation = updateConversation;
@@ -18,6 +19,22 @@ function mapConversationRow(row) {
         hasFreeRefinementBeenUsed: row.has_free_refinement_been_used,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+    };
+}
+async function getUserQuota(supabase, userId) {
+    const { data, error } = await supabase
+        .from("profiles")
+        .select("runs_used_this_month,credits,subscription_status")
+        .eq("clerk_user_id", userId)
+        .maybeSingle();
+    if (error || !data) {
+        throw new Error(error?.message || "Failed to load user quota");
+    }
+    const row = data;
+    return {
+        runsUsedThisMonth: row.runs_used_this_month ?? 0,
+        credits: row.credits ?? 0,
+        subscriptionStatus: row.subscription_status ?? "",
     };
 }
 async function createConversation(supabase, input) {

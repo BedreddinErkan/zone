@@ -7,6 +7,8 @@ const node_crypto_1 = __importDefault(require("node:crypto"));
 const express_1 = __importDefault(require("express"));
 const supabase_js_1 = require("@supabase/supabase-js");
 const lemonWebhookRouter = express_1.default.Router();
+const PRO_VARIANT_ID = "1512928";
+const UNLIMITED_VARIANT_ID = "1552852";
 function getSupabaseAdminClient() {
     const url = process.env.SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -29,6 +31,7 @@ async function updateProfileSubscription(input) {
         subscription_status: input.subscriptionStatus,
         credits: input.credits,
         runs_used_this_month: 0,
+        ...(input.billingMode ? { billing_mode: input.billingMode } : {}),
     })
         .eq("clerk_user_id", input.clerkUserId);
     if (result?.error) {
@@ -64,10 +67,13 @@ lemonWebhookRouter.post("/", async (req, res) => {
             (eventName === "subscription_created" ||
                 eventName === "subscription_updated" ||
                 eventName === "order_created")) {
+            const variantId = String(payload.data?.attributes?.variant_id ?? "");
+            const isUnlimited = variantId === UNLIMITED_VARIANT_ID;
             await updateProfileSubscription({
                 clerkUserId,
                 subscriptionStatus: "pro",
-                credits: 250,
+                credits: isUnlimited ? 999999 : 250,
+                billingMode: isUnlimited ? "byok" : "hosted",
             });
         }
         if (clerkUserId &&
@@ -76,6 +82,7 @@ lemonWebhookRouter.post("/", async (req, res) => {
                 clerkUserId,
                 subscriptionStatus: "free",
                 credits: 10,
+                billingMode: "hosted",
             });
         }
         if (clerkUserId &&

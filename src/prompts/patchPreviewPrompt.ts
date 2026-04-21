@@ -8,6 +8,7 @@ interface PatchPreviewPromptInput {
   repoSummary: string;
   relatedContext: string;
   schemaAwareSummary?: string;
+  executionPlanContext?: string;
 }
 
 export function buildPatchPreviewPrompt(input: PatchPreviewPromptInput): string {
@@ -18,7 +19,8 @@ export function buildPatchPreviewPrompt(input: PatchPreviewPromptInput): string 
     fileContent,
     repoSummary,
     relatedContext,
-    schemaAwareSummary
+    schemaAwareSummary,
+    executionPlanContext
   } = input;
 
   return `
@@ -42,6 +44,9 @@ TASK INTENT
 
 REPO SUMMARY
 ${repoSummary}
+
+EXECUTION PLAN
+${executionPlanContext || "No execution plan available."}
 
 SCHEMA-AWARE SUMMARY
 ${schemaAwareSummary || "No schema-aware summary available."}

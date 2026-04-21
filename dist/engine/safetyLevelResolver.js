@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.resolveSafetyLevel = resolveSafetyLevel;
 const HIGH_RISK_THRESHOLD = 71;
-const PREVIEW_QUALITY_THRESHOLD = 60;
+const PREVIEW_QUALITY_THRESHOLD = 70;
 const REVIEW_QUALITY_THRESHOLD = 85;
 const AUTO_APPLY_CONFIDENCE_THRESHOLD = 85;
 function resolveSafetyLevel(input) {

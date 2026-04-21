@@ -5,6 +5,7 @@ const zod_1 = require("zod");
 const openaiClient_js_1 = require("./openaiClient.js");
 const withSelfHealingRetry_js_1 = require("../core/withSelfHealingRetry.js");
 const fullPatchPrompt_js_1 = require("../prompts/fullPatchPrompt.js");
+const executionPlan_js_1 = require("./executionPlan.js");
 const fullContentSchema = zod_1.z.object({
     filePath: zod_1.z.string(),
     fullContent: zod_1.z.string(),
@@ -38,10 +39,7 @@ function stripJsonFences(raw) {
 async function planFullPatchWithLlm(input) {
     const client = (0, openaiClient_js_1.createOpenAIClient)(input.userOpenAiKey);
     const model = (0, openaiClient_js_1.getModelName)("high");
-    const outputMode = input.normalizedTaskIntent === "micro_edit" ||
-        input.fileContent.length > LARGE_FILE_PATCH_THRESHOLD
-        ? "find_replace_patch"
-        : "full_content";
+    const outputMode = "find_replace_patch";
     const prompt = (0, fullPatchPrompt_js_1.buildFullPatchPrompt)({
         task: input.task,
         filePath: input.filePath,
@@ -51,6 +49,7 @@ async function planFullPatchWithLlm(input) {
         taskIntent: input.taskIntent,
         normalizedTaskIntent: input.normalizedTaskIntent,
         outputMode,
+        executionPlanContext: (0, executionPlan_js_1.formatExecutionPlanForPrompt)(input.executionPlan),
     });
     if (outputMode === "find_replace_patch") {
         const response = await client.responses.create({ model, input: prompt });

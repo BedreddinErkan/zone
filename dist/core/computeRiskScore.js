@@ -16,7 +16,7 @@ const ROLE_MODIFIERS = {
         destructiveMultiplier: 0.8,
         criticalMultiplier: 1.2,
         massScopeMultiplier: 1.0,
-        schemaMultiplier: 0.0,
+        schemaMultiplier: 1.0,
     },
     data_analyst: {
         destructiveMultiplier: 1.5,
@@ -47,7 +47,7 @@ function computeRiskScore(input) {
     // Role-aware schema penalty adjustment:
     // test_engineer: writing tests is not a schema risk
     // data_analyst: schema changes are expected, handled separately
-    const schemaScore = role === "test_engineer" || role === "data_analyst" || role === "developer"
+    const schemaScore = role === "test_engineer" || role === "data_analyst"
         ? 0
         : details.riskBreakdown.schema;
     const signals = [];

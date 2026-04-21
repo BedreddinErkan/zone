@@ -4,11 +4,43 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
+const supabase_js_1 = require("@supabase/supabase-js");
 // Railway env vars:
 // - LEMONSQUEEZY_API_KEY
 // - LEMONSQUEEZY_WEBHOOK_SECRET
 const createLemonCheckoutRouter = express_1.default.Router();
-createLemonCheckoutRouter.post("/", async (req, res) => {
+const PRO_VARIANT_ID = "1512928";
+const UNLIMITED_VARIANT_ID = "1552852";
+function getSupabaseAdminClient() {
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key) {
+        throw new Error("SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing.");
+    }
+    return (0, supabase_js_1.createClient)(url, key);
+}
+async function requireProForUnlimited(req, res) {
+    const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+    if (!userId) {
+        res.status(400).json({ ok: false, reason: "missing_user_id" });
+        return false;
+    }
+    const supabase = getSupabaseAdminClient();
+    const profilesTable = supabase.from("profiles");
+    const result = await profilesTable
+        .select("subscription_status")
+        .eq("clerk_user_id", userId)
+        .maybeSingle();
+    if (result?.error) {
+        throw new Error(result.error.message || "Failed to load subscription status.");
+    }
+    if ((result.data?.subscription_status ?? "").trim().toLowerCase() !== "pro") {
+        res.status(403).json({ ok: false, reason: "pro_required_for_unlimited" });
+        return false;
+    }
+    return true;
+}
+async function handleCreateCheckout(req, res, variantId) {
     const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
     const apiKey = typeof process.env.LEMONSQUEEZY_API_KEY === "string"
         ? process.env.LEMONSQUEEZY_API_KEY.trim()
@@ -52,7 +84,7 @@ createLemonCheckoutRouter.post("/", async (req, res) => {
                         variant: {
                             data: {
                                 type: "variants",
-                                id: "1512928",
+                                id: variantId,
                             },
                         },
                     },
@@ -75,6 +107,19 @@ createLemonCheckoutRouter.post("/", async (req, res) => {
             reason: error instanceof Error ? error.message : String(error),
         });
     }
+}
+createLemonCheckoutRouter.post("/", async (req, res) => {
+    if (req.body?.plan === "unlimited" && !(await requireProForUnlimited(req, res))) {
+        return;
+    }
+    const variantId = req.body?.plan === "unlimited" ? UNLIMITED_VARIANT_ID : PRO_VARIANT_ID;
+    await handleCreateCheckout(req, res, variantId);
+});
+createLemonCheckoutRouter.post("/unlimited", async (req, res) => {
+    if (!(await requireProForUnlimited(req, res))) {
+        return;
+    }
+    await handleCreateCheckout(req, res, UNLIMITED_VARIANT_ID);
 });
 exports.default = createLemonCheckoutRouter;
 //# sourceMappingURL=createLemonCheckout.js.map

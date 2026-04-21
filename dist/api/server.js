@@ -29,6 +29,7 @@ const detectProjectStructure_js_1 = require("../repo/detectProjectStructure.js")
 const rankRelevantFiles_js_1 = require("../repo/rankRelevantFiles.js");
 const readProjectFiles_js_1 = require("../repo/readProjectFiles.js");
 const openaiClient_js_1 = require("../llm/openaiClient.js");
+const conversationRepository_js_1 = require("../billing/conversationRepository.js");
 const resolveBillingAction_js_1 = require("../billing/resolveBillingAction.js");
 const colors_js_1 = require("../cli/colors.js");
 const validateLlmOutput_js_1 = require("../core/validateLlmOutput.js");
@@ -134,6 +135,34 @@ function renderZoneUiHtml() {
 function shouldUseHostedInferenceProxy() {
     return (0, openaiClient_js_1.getInferenceMode)() === "hosted";
 }
+function maskApiKeyPrefix(value) {
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    return trimmed ? trimmed.slice(0, 7) : "none";
+}
+function getRequestedInferenceMode(billingMode, userOpenAiKey) {
+    if (billingMode === "byok") {
+        return "local";
+    }
+    return typeof userOpenAiKey === "string" && userOpenAiKey.trim()
+        ? "local"
+        : "hosted";
+}
+function logByokRequestBoundary(input) {
+    const prefix = maskApiKeyPrefix(input.userOpenAiKey);
+    const requestedMode = getRequestedInferenceMode(input.billingMode, input.userOpenAiKey);
+    console.log(`[byok] request route=${input.routeName} header present=${prefix !== "none"} prefix=${prefix} mode=${requestedMode}`);
+}
+function respondMissingByokKeyIfNeeded(input) {
+    if (input.billingMode === "byok" &&
+        !(typeof input.userOpenAiKey === "string" && input.userOpenAiKey.trim())) {
+        input.res.status(400).json({
+            ok: false,
+            reason: "missing_user_openai_key",
+        });
+        return true;
+    }
+    return false;
+}
 function getRequestOrigin(req) {
     const forwardedProto = req.get("x-forwarded-proto");
     const forwardedHost = req.get("x-forwarded-host");
@@ -198,6 +227,10 @@ async function proxyHostedZoneRequest(req, res, routePath, options) {
     }
     if (typeof req.headers.cookie === "string" && req.headers.cookie) {
         forwardedHeaders.cookie = req.headers.cookie;
+    }
+    if (typeof req.headers["x-user-openai-key"] === "string" &&
+        req.headers["x-user-openai-key"].trim()) {
+        forwardedHeaders["x-user-openai-key"] = req.headers["x-user-openai-key"].trim();
     }
     if (forwardedUserId) {
         forwardedHeaders["x-zone-user-id"] = forwardedUserId;
@@ -387,7 +420,7 @@ async function handleBillingSummary(req, res) {
     const profilesTable = supabase.from("profiles");
     console.log(`[zone] billing-summary: querying profiles where clerk_user_id=${userId}`);
     const query = profilesTable
-        .select?.("credits,runs_used_this_month,free_limit,subscription_status")
+        .select?.("credits,runs_used_this_month,free_limit,subscription_status,billing_mode")
         ?.eq?.("clerk_user_id", userId);
     if (!query || typeof query.maybeSingle !== "function") {
         res.json({ ok: false, reason: "profile_unavailable" });
@@ -438,6 +471,7 @@ async function handleBillingSummary(req, res) {
             plan: hasPaidAccess(status) ? "Pro" : "Free",
             credits: Number.isFinite(credits) ? Math.max(0, credits) : 0,
             subscriptionStatus: status,
+            billing_mode: data.billing_mode === "byok" ? "byok" : "hosted",
         };
         console.log("[zone-billing-summary-debug] resolved credits", {
             userId,
@@ -561,48 +595,27 @@ async function ensureRunAuthorized(rawUserId, isByok = false, options) {
     if (!supabase) {
         return { allowed: true };
     }
-    const resolvedBillingMode = options?.billingMode === "hosted" || options?.billingMode === "byok"
-        ? options.billingMode
-        : isByok
-            ? "byok"
-            : "hosted";
-    const profilesTable = supabase.from("profiles");
-    if (typeof profilesTable.select !== "function") {
-        return { allowed: true };
-    }
-    const query = profilesTable
-        .select("credits,runs_used_this_month,free_limit,subscription_status")
-        ?.eq?.("clerk_user_id", authenticatedUserId);
-    if (!query || typeof query.maybeSingle !== "function") {
-        return { allowed: true };
-    }
     try {
-        const { data, error } = await query.maybeSingle();
-        if (error) {
-            return { allowed: true };
-        }
-        if (!data) {
-            return {
-                allowed: false,
-                status: 401,
-                body: {
-                    ok: false,
-                    reason: "unauthorized",
-                    message: "Missing user session. Please open Zone from your dashboard.",
-                },
-            };
-        }
-        const runsUsedThisMonth = typeof data.runs_used_this_month === "number"
-            ? data.runs_used_this_month
-            : Number(data.runs_used_this_month ?? 0);
-        const freeLimit = typeof data.free_limit === "number"
-            ? data.free_limit
-            : Number(data.free_limit ?? FREE_PLAN_RUN_LIMIT);
-        const subscriptionStatus = normalizeSubscriptionStatus(data.subscription_status);
+        const profileQuery = supabase.from("profiles");
+        const { data: profileData } = await profileQuery
+            .select("billing_mode")
+            .eq("clerk_user_id", authenticatedUserId)
+            .maybeSingle();
+        const profileBillingMode = profileData?.billing_mode;
+        const resolvedBillingMode = profileBillingMode === "byok"
+            ? "byok"
+            : options?.billingMode === "hosted" || options?.billingMode === "byok"
+                ? options.billingMode
+                : isByok
+                    ? "byok"
+                    : "hosted";
+        const { runsUsedThisMonth, credits, subscriptionStatus } = await (0, conversationRepository_js_1.getUserQuota)(supabase, authenticatedUserId);
         const paidAccess = hasPaidAccess(subscriptionStatus);
         const billingAction = (0, resolveBillingAction_js_1.resolveBillingAction)({
             mode: resolvedBillingMode,
             hasPaidAccess: paidAccess,
+            runsUsedThisMonth,
+            credits,
         });
         console.log("[zone-billing-debug] authorization resolved", {
             routeName: "ensureRunAuthorized",
@@ -612,30 +625,24 @@ async function ensureRunAuthorized(rawUserId, isByok = false, options) {
             hasPaidAccess: paidAccess,
             billingAction,
             runsUsedThisMonth,
-            freeLimit,
+            credits,
         });
-        const credits = typeof data.credits === "number"
-            ? data.credits
-            : Number(data.credits ?? -1);
-        if (Number.isFinite(credits) && credits > 0) {
-            return { allowed: true };
-        }
         if (billingAction === "FREE") {
             return { allowed: true };
         }
+        if (billingAction === "LIMIT_EXCEEDED") {
+            return {
+                allowed: false,
+                status: 402,
+                body: {
+                    ok: false,
+                    reason: "hosted_run_limit_reached",
+                    runsUsedThisMonth,
+                    credits,
+                },
+            };
+        }
         if (paidAccess) {
-            if ((Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0) >=
-                PRO_PLAN_RUN_LIMIT) {
-                return {
-                    allowed: false,
-                    status: 402,
-                    body: {
-                        ok: false,
-                        reason: "no_free_runs",
-                        message: "You've used all 250 monthly runs. Resets next month.",
-                    },
-                };
-            }
             if (!checkDailyRunLimit(authenticatedUserId)) {
                 return {
                     allowed: false,
@@ -649,23 +656,18 @@ async function ensureRunAuthorized(rawUserId, isByok = false, options) {
             }
             return { allowed: true };
         }
-        if ((Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : FREE_PLAN_RUN_LIMIT) <
-            (Number.isFinite(freeLimit) ? freeLimit : FREE_PLAN_RUN_LIMIT)) {
-            return { allowed: true };
-        }
-        return {
-            allowed: false,
-            status: 402,
-            body: {
-                ok: false,
-                reason: "no_free_runs",
-                message: "You've used all your free runs. Upgrade to Pro.",
-                upgradeUrl: "https://zonecli.dev/#pricing",
-            },
-        };
+        return { allowed: true };
     }
     catch {
-        return { allowed: true };
+        return {
+            allowed: false,
+            status: 401,
+            body: {
+                ok: false,
+                reason: "unauthorized",
+                message: "Missing user session. Please open Zone from your dashboard.",
+            },
+        };
     }
 }
 function emitProgress(runId, stage) {
@@ -980,6 +982,14 @@ exports.app.post("/api/patch/jobs", async (req, res) => {
     const userOpenAiKey = req.headers["x-user-openai-key"];
     const isByok = Boolean(userOpenAiKey);
     const { task, repoPath, userId, hostedContext, conversationId, billingMode } = req.body ?? {};
+    logByokRequestBoundary({
+        routeName: "/api/patch/jobs",
+        billingMode,
+        userOpenAiKey,
+    });
+    if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
+        return;
+    }
     if (!task || !repoPath) {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;
@@ -1099,6 +1109,16 @@ exports.app.post("/api/patch", async (req, res) => {
     perf.mark("route entered");
     const userOpenAiKey = req.headers["x-user-openai-key"];
     const isByok = Boolean(userOpenAiKey);
+    const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
+    logByokRequestBoundary({
+        routeName: "/api/patch",
+        billingMode,
+        userOpenAiKey,
+    });
+    if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
+        perf.finish("missing byok key");
+        return;
+    }
     if (shouldProxyHostedRequest(req, "/api/patch")) {
         const { task, repoPath } = req.body ?? {};
         const hostedContext = req.body?.hostedContext ??
@@ -1117,7 +1137,7 @@ exports.app.post("/api/patch", async (req, res) => {
         perf.finish("proxied response sent");
         return;
     }
-    const { task, repoPath, userId, hostedContext, conversationId, billingMode } = req.body;
+    const { task, repoPath, userId, hostedContext, conversationId } = req.body;
     perf.mark("request normalized");
     if (!task || !repoPath) {
         perf.finish("bad request");
@@ -1196,6 +1216,15 @@ exports.app.post("/api/patch", async (req, res) => {
 exports.app.post("/api/dry-run", async (req, res) => {
     const userOpenAiKey = req.headers["x-user-openai-key"];
     const isByok = Boolean(userOpenAiKey);
+    const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
+    logByokRequestBoundary({
+        routeName: "/api/dry-run",
+        billingMode,
+        userOpenAiKey,
+    });
+    if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
+        return;
+    }
     if (shouldProxyHostedRequest(req, "/api/dry-run")) {
         const { task, repoPath } = req.body ?? {};
         const hostedContext = req.body?.hostedContext ??
@@ -1212,7 +1241,7 @@ exports.app.post("/api/dry-run", async (req, res) => {
         });
         return;
     }
-    const { task, repoPath, userId, hostedContext, conversationId, billingMode } = req.body;
+    const { task, repoPath, userId, hostedContext, conversationId } = req.body;
     const authorization = await ensureRunAuthorized(userId, isByok, {
         billingMode,
     });
@@ -1291,6 +1320,15 @@ exports.app.post("/api/apply", async (req, res) => {
 exports.app.post("/api/enhance-task", async (req, res) => {
     const userOpenAiKey = req.headers["x-user-openai-key"];
     const isByok = Boolean(userOpenAiKey);
+    const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
+    logByokRequestBoundary({
+        routeName: "/api/enhance-task",
+        billingMode,
+        userOpenAiKey,
+    });
+    if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
+        return;
+    }
     if (shouldProxyHostedRequest(req, "/api/enhance-task")) {
         const { role, repoPath } = req.body ?? {};
         const hostedContext = typeof role === "string" && typeof repoPath === "string"
@@ -1336,6 +1374,15 @@ exports.app.post("/api/enhance-task", async (req, res) => {
 exports.app.post("/api/test-engineer", async (req, res) => {
     const userOpenAiKey = req.headers["x-user-openai-key"];
     const isByok = Boolean(userOpenAiKey);
+    const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
+    logByokRequestBoundary({
+        routeName: "/api/test-engineer",
+        billingMode,
+        userOpenAiKey,
+    });
+    if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
+        return;
+    }
     if (shouldProxyHostedRequest(req, "/api/test-engineer")) {
         const { task, repoPath } = req.body ?? {};
         const hostedContext = req.body?.hostedContext ??
@@ -1352,7 +1399,7 @@ exports.app.post("/api/test-engineer", async (req, res) => {
         });
         return;
     }
-    const { task, repoPath, runId, userId, hostedContext, conversationId, billingMode } = req.body;
+    const { task, repoPath, runId, userId, hostedContext, conversationId } = req.body;
     if (!task || !repoPath) {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;
@@ -1432,6 +1479,15 @@ exports.app.post("/api/test-engineer", async (req, res) => {
 exports.app.post("/api/data-analyst", async (req, res) => {
     const userOpenAiKey = req.headers["x-user-openai-key"];
     const isByok = Boolean(userOpenAiKey);
+    const billingMode = typeof req.body?.billingMode === "string" ? req.body.billingMode : undefined;
+    logByokRequestBoundary({
+        routeName: "/api/data-analyst",
+        billingMode,
+        userOpenAiKey,
+    });
+    if (respondMissingByokKeyIfNeeded({ res, billingMode, userOpenAiKey })) {
+        return;
+    }
     if (shouldProxyHostedRequest(req, "/api/data-analyst")) {
         const { task, repoPath } = req.body ?? {};
         const hostedContext = typeof task === "string" && typeof repoPath === "string"
@@ -1447,7 +1503,7 @@ exports.app.post("/api/data-analyst", async (req, res) => {
         });
         return;
     }
-    const { task, repoPath, runId, userId, hostedContext, conversationId, billingMode } = req.body;
+    const { task, repoPath, runId, userId, hostedContext, conversationId } = req.body;
     if (!task || !repoPath) {
         res.status(400).json({ ok: false, reason: "task and repoPath are required" });
         return;

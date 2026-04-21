@@ -5,7 +5,16 @@ import { readProjectFiles } from "../repo/readProjectFiles.js";
 import { planFeatureWithLlm } from "../llm/planFeature.js";
 import { planPatchPreviewWithLlm } from "../llm/planPatchPreview.js";
 import { planFullPatchWithLlm } from "../llm/planFullPatch.js";
+import {
+  generateExecutionPlan,
+  type ExecutionPlan,
+} from "../llm/executionPlan.js";
 import { computeRiskScore } from "./computeRiskScore.js";
+import {
+  evaluatePlanAlignment,
+  type PlanAlignmentResult,
+} from "./evaluatePlanAlignment.js";
+import { verifyPatch, type VerificationResult } from "./verifyPatch.js";
 import {
   detectIntentMismatch,
   type IntentMismatchReasonCode,
@@ -67,6 +76,9 @@ export type LlmPatchFlowResult =
         shouldDowngradeSafety: boolean;
       };
       decisionMode?: "preview_only" | "safe_to_apply";
+      plan?: ExecutionPlan;
+      planAlignment?: PlanAlignmentResult;
+      verification?: VerificationResult;
       applyPatches: Array<{ filePath: string; fullContent: string }>;
       patchResults: PatchResult[];
       fileDiffs?: FileDiff[];
@@ -1967,6 +1979,22 @@ export async function runLlmPatchFlow(input: {
         : "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n(none)";
     })();
 
+  let executionPlan: ExecutionPlan | null = null;
+  try {
+    executionPlan = await generateExecutionPlan({
+      task: input.task,
+      repoSummary: projectSummary,
+      relevantFiles: relevantFiles.map((file) => file.path),
+      userOpenAiKey: input.userOpenAiKey,
+    });
+    console.log(`[zone-plan] generated steps=${executionPlan.steps.length}`);
+    console.log(`[zone-plan] scope=${executionPlan.scopeSummary}`);
+  } catch (err) {
+    console.warn(
+      `[zone-plan] skipped: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
   // 4. Plan feature with LLM
   reportProgress("Planning feature...");
   let llmPlan: Awaited<ReturnType<typeof planFeatureWithLlm>> | null = null;
@@ -2072,6 +2100,7 @@ export async function runLlmPatchFlow(input: {
       fileContexts: resolvedFileContexts,
       schemaAwareSummary: [],
       userOpenAiKey: input.userOpenAiKey,
+      executionPlan,
     });
     perf.mark("patch preview model response received");
   } catch (err) {
@@ -2111,6 +2140,7 @@ export async function runLlmPatchFlow(input: {
       patchResults: [],
       fileDiffs: [],
       contextFiles: [],
+      ...(executionPlan ? { plan: executionPlan } : {}),
     };
   }
   if (vagueTask) {
@@ -2127,6 +2157,7 @@ export async function runLlmPatchFlow(input: {
       patchResults: [],
       fileDiffs: [],
       contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
+      ...(executionPlan ? { plan: executionPlan } : {}),
     };
   }
 
@@ -2317,6 +2348,7 @@ export async function runLlmPatchFlow(input: {
               relevantFiles: targetedRelevantFiles,
               existingTargetFiles: allFiles.map((file) => file.path),
               userOpenAiKey: input.userOpenAiKey,
+              executionPlan,
               relatedContext: [
                 contextWindow
                   ? `// CONTEXT WINDOW: lines ${contextWindow.startLine}-${contextWindow.endLine} of ${contextWindow.totalLines} total`
@@ -2564,6 +2596,55 @@ export async function runLlmPatchFlow(input: {
     taskRiskResult,
     patchScope,
   });
+  let planAlignment: PlanAlignmentResult | null = null;
+  if (executionPlan && applyPatches.length > 0) {
+    try {
+      planAlignment = evaluatePlanAlignment({
+        plan: executionPlan,
+        changedFiles: applyPatches.map((patch) => patch.filePath),
+        massScopeScore: Math.max(
+          intentMismatch.risk.breakdown.massScope,
+          uiMappingRisk.risk.breakdown.massScope,
+          effectiveTaskRiskResult.breakdown.massScope
+        ),
+      });
+      console.log(
+        `[zone-plan-align] score=${planAlignment.score} outOfPlan=${planAlignment.outOfPlanFiles.length} scopeMismatch=${planAlignment.scopeMismatch}`
+      );
+      if (planAlignment.warning) {
+        internalWarnings.push(planAlignment.warning);
+        visibleWarnings.push(planAlignment.warning);
+      }
+    } catch (err) {
+      console.warn(
+        `[zone-plan-align] skipped: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+  let verification: VerificationResult | null = null;
+  if (applyPatches.length > 0) {
+    try {
+      verification = verifyPatch({
+        changedFiles: applyPatches.map((patch) => patch.filePath),
+        patchContent: applyPatches
+          .map((patch) => `FILE: ${patch.filePath}\n${patch.fullContent}`)
+          .join("\n\n"),
+        task: input.task,
+        repoFiles: allFiles.map((file) => file.path),
+      });
+      console.log(
+        `[zone-verify] score=${verification.score} warnings=${verification.warnings.length}`
+      );
+      if (verification.warnings.length > 0) {
+        internalWarnings.push(...verification.warnings);
+        visibleWarnings.push(...verification.warnings);
+      }
+    } catch (err) {
+      console.warn(
+        `[zone-verify] skipped: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
   logRiskDebug("runLlmPatchFlow after task-risk adjustments", {
     task: input.task,
     patchScope,
@@ -2624,6 +2705,8 @@ export async function runLlmPatchFlow(input: {
       ? intentMismatchDecision.confidenceCap
       : undefined,
     uiMappingRisk.confidenceCap,
+    planAlignment?.score,
+    verification?.score,
   ].filter((value): value is number => typeof value === "number");
   const developerConfidence =
     confidenceCaps.length > 0
@@ -2822,5 +2905,8 @@ const decisionMode =
     patchResults,
     fileDiffs,
     contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
+    ...(executionPlan ? { plan: executionPlan } : {}),
+    ...(planAlignment ? { planAlignment } : {}),
+    ...(verification ? { verification } : {}),
   };
 }

@@ -23,6 +23,6 @@ exports.patchPreviewItemSchema = zod_1.z.object({
 exports.llmPatchPlanSchema = zod_1.z.object({
     summary: zod_1.z.string(),
     patches: zod_1.z.array(exports.patchPreviewItemSchema),
-    warnings: zod_1.z.array(zod_1.z.string())
+    warnings: zod_1.z.array(zod_1.z.string()).optional().default([])
 });
 //# sourceMappingURL=schemas.js.map

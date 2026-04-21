@@ -9,6 +9,7 @@ interface FullPatchPromptInput {
   taskIntent?: string;
   normalizedTaskIntent?: string;
   outputMode?: FullPatchOutputMode;
+  executionPlanContext?: string;
 }
 
 function isLikelyUiPatchTask(input: {
@@ -106,6 +107,7 @@ export function buildFullPatchPrompt(input: FullPatchPromptInput): string {
     taskIntent,
     normalizedTaskIntent,
     outputMode = "full_content",
+    executionPlanContext,
   } = input;
   const renameIntent = detectRenameIntent(task);
   const renameInstruction = renameIntent
@@ -175,6 +177,9 @@ ${filePath}
 REPO SUMMARY
 ${repoSummary}
 
+EXECUTION PLAN
+${executionPlanContext || "No execution plan available."}
+
 RELATED CONTEXT
 ${relatedContext}
 
@@ -217,6 +222,9 @@ ${filePath}
 
 REPO SUMMARY
 ${repoSummary}
+
+EXECUTION PLAN
+${executionPlanContext || "No execution plan available."}
 
 RELATED CONTEXT
 ${relatedContext}

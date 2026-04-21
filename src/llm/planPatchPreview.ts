@@ -3,6 +3,10 @@ import { llmPatchPlanSchema } from "./schemas.js";
 import type { LlmPatchPlan } from "../types/agent.js";
 import type { TaskIntent } from "../core/taskIntentParser.js";
 import { buildPatchPreviewPrompt } from "../prompts/patchPreviewPrompt.js";
+import {
+  formatExecutionPlanForPrompt,
+  type ExecutionPlan,
+} from "./executionPlan.js";
 
 function stripJsonFences(raw: string): string {
   return raw
@@ -31,6 +35,7 @@ export async function planPatchPreviewWithLlm(input: {
   fileContexts: { path: string; content: string }[];
   schemaAwareSummary?: string[];
   userOpenAiKey?: string;
+  executionPlan?: ExecutionPlan | null;
 }): Promise<LlmPatchPlan> {
   const client = createOpenAIClient(input.userOpenAiKey);
   const model = getModelName();
@@ -61,7 +66,8 @@ export async function planPatchPreviewWithLlm(input: {
     fileContent: combinedContext,
     repoSummary,
     relatedContext,
-    schemaAwareSummary
+    schemaAwareSummary,
+    executionPlanContext: formatExecutionPlanForPrompt(input.executionPlan),
   });
 
   const response = await client.responses.create({
