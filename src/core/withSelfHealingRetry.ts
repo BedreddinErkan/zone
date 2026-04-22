@@ -1,4 +1,5 @@
 import {
+  analyzeFailure,
   buildRetryGuidanceFromFailure,
   formatRetryGuidanceBrief,
 } from "./buildRetryGuidanceFromFailure.js";
@@ -11,6 +12,8 @@ export type RetryFeedback = {
     severity: "warning" | "error";
   }>;
   originalPrompt: string;
+  failureSignature?: string;
+  repeatedFailureCount?: number;
 };
 
 export type RetryResult<T> =
@@ -43,13 +46,37 @@ function hasBlockingIssues(issues: RetryIssue[]): boolean {
   return issues.some((issue) => issue.severity === "error");
 }
 
+function buildIssueSignature(issues: RetryIssue[]): string {
+  const analysis = analyzeFailure({ issues });
+  const fallback = issues
+    .map((issue) => `${issue.code}:${issue.message}`)
+    .join("|")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .slice(0, 500);
+  return [
+    analysis.failedTarget,
+    analysis.normalizedFailureReason,
+    analysis.expected,
+    analysis.actual,
+    analysis.incorrectAssumption,
+    analysis.failedTarget === "unknown target" && !analysis.expected && !analysis.actual
+      ? fallback
+      : "",
+  ]
+    .filter(Boolean)
+    .join("|");
+}
+
 export function buildDefaultFeedbackPrompt(feedback: RetryFeedback): string {
   const issueLines = feedback.issues
     .map((issue) => `- [${issue.code}] ${issue.message}`)
     .join("\n");
   const retryGuidance = buildRetryGuidanceFromFailure({
     issues: feedback.issues,
+    repeatedFailureCount: feedback.repeatedFailureCount,
   });
+  const repeated = (feedback.repeatedFailureCount ?? 0) > 0;
 
   return [
     feedback.originalPrompt,
@@ -61,9 +88,35 @@ export function buildDefaultFeedbackPrompt(feedback: RetryFeedback): string {
     "STRUCTURED RETRY BRIEF:",
     formatRetryGuidanceBrief(retryGuidance),
     "",
-    "Please fix ALL of the above issues and return a corrected output.",
-    "Do NOT repeat the same mistakes.",
+    "ROOT CAUSE:",
+    retryGuidance.rootCause,
+    "",
+    "WHAT WAS WRONG:",
+    retryGuidance.incorrectAssumption,
+    "",
+    "WHAT MUST CHANGE:",
+    retryGuidance.requiredFix,
+    "",
+    "WHAT MUST NOT BE REPEATED:",
     retryGuidance.nextAttemptConstraint,
+    "",
+    "WHAT SCOPE TO KEEP:",
+    retryGuidance.scopeConstraint,
+    "",
+    "NO-CHANGE GUARD:",
+    "Verification failed, so do not return 'no changes needed' or an unchanged patch unless you can prove the repo already matches the requested correct state. Produce a concrete correction.",
+    "",
+    ...(repeated
+      ? [
+          "RETRY ESCALATION:",
+          "The same failure repeated. Use a different strategy, increase strictness, and do not duplicate the previous assumption.",
+          "",
+        ]
+      : []),
+    "MINIMAL PATCH DISCIPLINE:",
+    retryGuidance.minimalPatchDiscipline,
+    "",
+    "Please fix ALL of the above issues and return a corrected output.",
     "=== END FEEDBACK ===",
   ].join("\n");
 }
@@ -79,6 +132,8 @@ export async function withSelfHealingRetry<T>(options: {
   const originalPrompt = options.prompt;
   let currentPrompt = originalPrompt;
   let lastIssues: RetryIssue[] = [];
+  let previousFailureSignature = "";
+  let repeatedFailureCount = 0;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
@@ -90,6 +145,12 @@ export async function withSelfHealingRetry<T>(options: {
       }
 
       lastIssues = issues;
+      const failureSignature = buildIssueSignature(issues);
+      repeatedFailureCount =
+        failureSignature && failureSignature === previousFailureSignature
+          ? repeatedFailureCount + 1
+          : 0;
+      previousFailureSignature = failureSignature;
       if (attempt === maxAttempts) {
         return {
           ok: false,
@@ -103,10 +164,18 @@ export async function withSelfHealingRetry<T>(options: {
         attempt,
         issues,
         originalPrompt,
+        failureSignature,
+        repeatedFailureCount,
       });
     } catch (error) {
       const issues = normalizeExecuteError(error);
       lastIssues = issues;
+      const failureSignature = buildIssueSignature(issues);
+      repeatedFailureCount =
+        failureSignature && failureSignature === previousFailureSignature
+          ? repeatedFailureCount + 1
+          : 0;
+      previousFailureSignature = failureSignature;
 
       if (attempt === maxAttempts) {
         return {
@@ -121,6 +190,8 @@ export async function withSelfHealingRetry<T>(options: {
         attempt,
         issues,
         originalPrompt,
+        failureSignature,
+        repeatedFailureCount,
       });
     }
   }

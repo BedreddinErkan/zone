@@ -31,6 +31,7 @@ const evaluatePlanAlignment_js_1 = require("./evaluatePlanAlignment.js");
 const verifyPatch_js_1 = require("./verifyPatch.js");
 const detectVerificationCommand_js_1 = require("./detectVerificationCommand.js");
 const runRuntimeVerification_js_1 = require("./runRuntimeVerification.js");
+const buildRetryGuidanceFromFailure_js_1 = require("./buildRetryGuidanceFromFailure.js");
 const intentMismatchDetector_js_1 = require("../engine/intentMismatchDetector.js");
 const designSystemSignals_js_1 = require("../engine/designSystemSignals.js");
 const patchQualityScorer_js_1 = require("../engine/patchQualityScorer.js");
@@ -1951,6 +1952,25 @@ async function runLlmPatchFlow(input) {
         : developerConfidenceBase;
     const runtimeVerificationFailed = runtimeVerification?.attempted === true &&
         (runtimeVerification.status === "failed" || runtimeVerification.status === "timeout");
+    const runtimeFailureGuidance = runtimeVerificationFailed && runtimeVerification
+        ? (0, buildRetryGuidanceFromFailure_js_1.buildRetryGuidanceFromFailure)({
+            issues: [
+                {
+                    code: runtimeVerification.status === "timeout"
+                        ? "RUNTIME_VERIFICATION_TIMEOUT"
+                        : "RUNTIME_VERIFICATION_FAILED",
+                    message: [
+                        runtimeVerification.command
+                            ? `Command: ${runtimeVerification.command}`
+                            : "",
+                        runtimeVerification.summary,
+                    ]
+                        .filter(Boolean)
+                        .join("\n"),
+                },
+            ],
+        })
+        : null;
     const allDiffLines = fileDiffs.flatMap((fd) => fd.diff.map((line) => `${line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}${line.content}`));
     const patchQuality = (0, patchQualityScorer_js_1.scorePatchQuality)({
         taskIntent: normalizedIntent,
@@ -2056,6 +2076,22 @@ async function runLlmPatchFlow(input) {
             syncedInternalWarnings.push(warning);
         if (!syncedVisibleWarnings.includes(warning))
             syncedVisibleWarnings.push(warning);
+        if (runtimeFailureGuidance) {
+            const correctionWarning = `Required correction: ${runtimeFailureGuidance.requiredFix}`;
+            const noChangeWarning = "Verification failed; do not treat this as no changes needed unless the repo can be proven to already match the requested correct state.";
+            if (!syncedInternalWarnings.includes(correctionWarning)) {
+                syncedInternalWarnings.push(correctionWarning);
+            }
+            if (!syncedVisibleWarnings.includes(correctionWarning)) {
+                syncedVisibleWarnings.push(correctionWarning);
+            }
+            if (!syncedInternalWarnings.includes(noChangeWarning)) {
+                syncedInternalWarnings.push(noChangeWarning);
+            }
+            if (!syncedVisibleWarnings.includes(noChangeWarning)) {
+                syncedVisibleWarnings.push(noChangeWarning);
+            }
+        }
     }
     const safetyResolution = (0, safetyLevelResolver_js_1.resolveSafetyLevel)({
         hasBlockedPatch: hasBlockedPatch || runtimeVerificationFailed,
@@ -2129,6 +2165,16 @@ async function runLlmPatchFlow(input) {
                     status: runtimeVerification.status,
                     command: runtimeVerification.command,
                     summary: runtimeVerification.summary,
+                    ...(runtimeFailureGuidance
+                        ? {
+                            rootCause: runtimeFailureGuidance.rootCause,
+                            normalizedFailureReason: runtimeFailureGuidance.normalizedFailureReason,
+                            incorrectAssumption: runtimeFailureGuidance.incorrectAssumption,
+                            requiredFix: runtimeFailureGuidance.requiredFix,
+                            constraint: runtimeFailureGuidance.nextAttemptConstraint,
+                            scopeConstraint: runtimeFailureGuidance.scopeConstraint,
+                        }
+                        : {}),
                 },
             }
             : {}),

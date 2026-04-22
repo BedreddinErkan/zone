@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { analyzeFailure } from "./buildRetryGuidanceFromFailure.js";
 import {
   buildDefaultFeedbackPrompt,
   withSelfHealingRetry,
@@ -148,6 +149,70 @@ describe("withSelfHealingRetry", () => {
     expect(prompt).toContain("attempt 2");
     expect(prompt).toContain("[ERR_A] first issue");
     expect(prompt).toContain("[ERR_B] second issue");
+  });
+
+  it("normalizes framework-agnostic failure classes", () => {
+    expect(
+      analyzeFailure({
+        issues: [
+          {
+            code: "TSC",
+            message:
+              "src/core/example.ts(12,4): error TS2322: Type 'string' is not assignable to type 'number'.",
+          },
+        ],
+      }).normalizedFailureReason
+    ).toBe("type_error");
+
+    expect(
+      analyzeFailure({
+        issues: [
+          {
+            code: "ESLINT",
+            message: "ESLint: no-unused-vars in src/core/example.ts",
+          },
+        ],
+      }).normalizedFailureReason
+    ).toBe("lint_error");
+
+    expect(
+      analyzeFailure({
+        issues: [
+          {
+            code: "PYTEST",
+            message: "ModuleNotFoundError: Cannot find module 'missing-lib'",
+          },
+        ],
+      }).normalizedFailureReason
+    ).toBe("missing_dependency");
+  });
+
+  it("escalates retry prompt when a normalized failure repeats", async () => {
+    const prompts: string[] = [];
+    const execute = vi.fn(async (prompt: string) => {
+      prompts.push(prompt);
+      return "bad";
+    });
+    const validate = vi.fn().mockReturnValue([
+      {
+        code: "ASSERT",
+        message: 'Expected: "locked out"\nReceived: "invalid credentials"',
+        severity: "error",
+      },
+    ]);
+
+    await withSelfHealingRetry({
+      prompt: "original prompt",
+      maxAttempts: 3,
+      execute,
+      validate,
+      buildFeedbackPrompt: buildDefaultFeedbackPrompt,
+    });
+
+    expect(prompts[1]).toContain("NO-CHANGE GUARD");
+    expect(prompts[1]).toContain("WHAT SCOPE TO KEEP");
+    expect(prompts[2]).toContain("RETRY ESCALATION");
+    expect(prompts[2]).toContain("Use a different strategy");
   });
 
   it("maxAttempts is clamped to 1 minimum and 5 maximum", async () => {

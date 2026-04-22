@@ -20,6 +20,7 @@ import {
   runRuntimeVerification,
   type RuntimeVerificationResult,
 } from "./runRuntimeVerification.js";
+import { buildRetryGuidanceFromFailure } from "./buildRetryGuidanceFromFailure.js";
 import {
   detectIntentMismatch,
   type IntentMismatchReasonCode,
@@ -87,6 +88,12 @@ export type LlmPatchFlowResult =
         status: RuntimeVerificationResult["status"];
         command?: string;
         summary: string;
+        rootCause?: string;
+        normalizedFailureReason?: string;
+        incorrectAssumption?: string;
+        requiredFix?: string;
+        constraint?: string;
+        scopeConstraint?: string;
       };
       attemptsUsed?: number;
       validationBlocked?: boolean;
@@ -2762,6 +2769,27 @@ export async function runLlmPatchFlow(input: {
   const runtimeVerificationFailed =
     runtimeVerification?.attempted === true &&
     (runtimeVerification.status === "failed" || runtimeVerification.status === "timeout");
+  const runtimeFailureGuidance =
+    runtimeVerificationFailed && runtimeVerification
+      ? buildRetryGuidanceFromFailure({
+          issues: [
+            {
+              code:
+                runtimeVerification.status === "timeout"
+                  ? "RUNTIME_VERIFICATION_TIMEOUT"
+                  : "RUNTIME_VERIFICATION_FAILED",
+              message: [
+                runtimeVerification.command
+                  ? `Command: ${runtimeVerification.command}`
+                  : "",
+                runtimeVerification.summary,
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            },
+          ],
+        })
+      : null;
 
   const allDiffLines = fileDiffs.flatMap((fd) =>
     fd.diff.map(
@@ -2899,6 +2927,23 @@ const decisionMode =
     const warning = `Final verification did not pass: ${runtimeVerification.command ?? "unknown command"} (${runtimeVerification.status}).`;
     if (!syncedInternalWarnings.includes(warning)) syncedInternalWarnings.push(warning);
     if (!syncedVisibleWarnings.includes(warning)) syncedVisibleWarnings.push(warning);
+    if (runtimeFailureGuidance) {
+      const correctionWarning = `Required correction: ${runtimeFailureGuidance.requiredFix}`;
+      const noChangeWarning =
+        "Verification failed; do not treat this as no changes needed unless the repo can be proven to already match the requested correct state.";
+      if (!syncedInternalWarnings.includes(correctionWarning)) {
+        syncedInternalWarnings.push(correctionWarning);
+      }
+      if (!syncedVisibleWarnings.includes(correctionWarning)) {
+        syncedVisibleWarnings.push(correctionWarning);
+      }
+      if (!syncedInternalWarnings.includes(noChangeWarning)) {
+        syncedInternalWarnings.push(noChangeWarning);
+      }
+      if (!syncedVisibleWarnings.includes(noChangeWarning)) {
+        syncedVisibleWarnings.push(noChangeWarning);
+      }
+    }
   }
   const safetyResolution = resolveSafetyLevel({
     hasBlockedPatch: hasBlockedPatch || runtimeVerificationFailed,
@@ -2980,6 +3025,18 @@ const decisionMode =
             status: runtimeVerification.status,
             command: runtimeVerification.command,
             summary: runtimeVerification.summary,
+            ...(runtimeFailureGuidance
+              ? {
+                  rootCause: runtimeFailureGuidance.rootCause,
+                  normalizedFailureReason:
+                    runtimeFailureGuidance.normalizedFailureReason,
+                  incorrectAssumption:
+                    runtimeFailureGuidance.incorrectAssumption,
+                  requiredFix: runtimeFailureGuidance.requiredFix,
+                  constraint: runtimeFailureGuidance.nextAttemptConstraint,
+                  scopeConstraint: runtimeFailureGuidance.scopeConstraint,
+                }
+              : {}),
           },
         }
       : {}),
