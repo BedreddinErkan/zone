@@ -44,7 +44,7 @@ export async function planFeatureWithLlm(input: {
   userOpenAiKey?: string;
 }): Promise<LlmFeaturePlan> {
   const client = createOpenAIClient(input.userOpenAiKey);
-  const model = getModelName();
+  const model = getModelName("high");
 
   const relevantFilesSummary = input.relevantFiles
     .map((file) => `- ${file.path} [${file.category}]`)
