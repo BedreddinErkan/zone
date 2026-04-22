@@ -66,7 +66,6 @@ async function processDeveloperPatchJob(supabase, job) {
             routeName: "/api/patch/jobs worker",
             userId: requestPayload.userId,
             billingMode: requestPayload.billingMode ?? null,
-            isByok: Boolean(requestPayload.isByok),
         });
         const conversationId = await (0, runLogging_js_1.logRun)({
             userId: requestPayload.userId,

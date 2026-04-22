@@ -37,7 +37,7 @@ function stripJsonFences(raw) {
         .trim();
 }
 async function planFullPatchWithLlm(input) {
-    const client = (0, openaiClient_js_1.createOpenAIClient)(input.userOpenAiKey);
+    const client = (0, openaiClient_js_1.createOpenAIClient)();
     const model = (0, openaiClient_js_1.getModelName)("high");
     const outputMode = "find_replace_patch";
     const prompt = (0, fullPatchPrompt_js_1.buildFullPatchPrompt)({

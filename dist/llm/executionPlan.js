@@ -51,7 +51,7 @@ function formatExecutionPlanForPrompt(plan) {
     ].join("\n");
 }
 async function generateExecutionPlan(input) {
-    const client = (0, openaiClient_js_1.createOpenAIClient)(input.userOpenAiKey);
+    const client = (0, openaiClient_js_1.createOpenAIClient)();
     const model = (0, openaiClient_js_1.getModelName)();
     const relevantFiles = input.relevantFiles.slice(0, 8).join("\n") || "(none)";
     const prompt = `

@@ -1321,7 +1321,6 @@ async function runLlmPatchFlow(input) {
             task: input.task,
             repoSummary: projectSummary,
             relevantFiles: relevantFiles.map((file) => file.path),
-            userOpenAiKey: input.userOpenAiKey,
         });
         console.log(`[zone-plan] generated steps=${executionPlan.steps.length}`);
         console.log(`[zone-plan] scope=${executionPlan.scopeSummary}`);
@@ -1346,7 +1345,6 @@ async function runLlmPatchFlow(input) {
                 })),
                 existingFilesSummary,
                 schemaAwareSummary: [],
-                userOpenAiKey: input.userOpenAiKey,
             });
             perf.mark("feature model response received");
         }
@@ -1426,7 +1424,6 @@ async function runLlmPatchFlow(input) {
             suggestedFiles: selectedContextFiles,
             fileContexts: resolvedFileContexts,
             schemaAwareSummary: [],
-            userOpenAiKey: input.userOpenAiKey,
             executionPlan,
         });
         perf.mark("patch preview model response received");
@@ -1623,7 +1620,6 @@ async function runLlmPatchFlow(input) {
                         normalizedTaskIntent: normalizedTaskIntentForPrompt,
                         relevantFiles: targetedRelevantFiles,
                         existingTargetFiles: allFiles.map((file) => file.path),
-                        userOpenAiKey: input.userOpenAiKey,
                         executionPlan,
                         relatedContext: [
                             contextWindow

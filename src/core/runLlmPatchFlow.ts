@@ -2025,7 +2025,6 @@ export async function runLlmPatchFlow(input: {
         })),
         existingFilesSummary,
         schemaAwareSummary: [],
-        userOpenAiKey: input.userOpenAiKey,
       });
       perf.mark("feature model response received");
     } catch (err) {
@@ -2112,7 +2111,6 @@ export async function runLlmPatchFlow(input: {
       suggestedFiles: selectedContextFiles,
       fileContexts: resolvedFileContexts,
       schemaAwareSummary: [],
-      userOpenAiKey: input.userOpenAiKey,
       executionPlan,
     });
     perf.mark("patch preview model response received");
@@ -2360,7 +2358,6 @@ export async function runLlmPatchFlow(input: {
               normalizedTaskIntent: normalizedTaskIntentForPrompt,
               relevantFiles: targetedRelevantFiles,
               existingTargetFiles: allFiles.map((file) => file.path),
-              userOpenAiKey: input.userOpenAiKey,
               executionPlan,
               relatedContext: [
                 contextWindow

@@ -155,9 +155,14 @@ async function logRun(input) {
     const tokensToDeduct = typeof input.tokensUsed === "number" && input.tokensUsed > 0
         ? input.tokensUsed
         : 50000;
-    const rpcResult = await supabase.rpc("deduct_tokens", {
+    const executionId = typeof input.executionId === "string" && input.executionId.trim()
+        ? input.executionId.trim()
+        : conversation?.id ?? "";
+    const rpcResult = await supabase.rpc("deduct_tokens_idempotent", {
         p_user_id: effectiveUserId,
+        p_execution_id: executionId,
         p_tokens: tokensToDeduct,
+        p_billing_mode: billingMode,
     });
     if (rpcResult?.error) {
         logBillingDebug("deduction rpc error", {

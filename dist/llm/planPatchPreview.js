@@ -22,7 +22,7 @@ function extractAndRepairJson(raw) {
     return cleaned.slice(first, last + 1);
 }
 async function planPatchPreviewWithLlm(input) {
-    const client = (0, openaiClient_js_1.createOpenAIClient)(input.userOpenAiKey);
+    const client = (0, openaiClient_js_1.createOpenAIClient)();
     const model = (0, openaiClient_js_1.getModelName)();
     const combinedContext = input.fileContexts
         .map((file) => `FILE: ${file.path}\n\`\`\`\n${file.content}\n\`\`\``)

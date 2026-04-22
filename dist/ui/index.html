@@ -1658,7 +1658,7 @@ async function reconnectStoredFolder(){if(!currentRepoHandle)return;hideError();
 function validateTaskAndRepo(){const task=document.getElementById('task').value.trim();const repoPath=getResolvedRepoPath();if(!task){showError('Task is required.');return null;}if(/\{[^}]+\}/.test(task)){showError('Placeholder detected in task. Replace {function}, {file}, {description} etc. with actual values before executing.');return null;}if(!repoPath){showError('Task and repo path are required.');return null;}if(!getCurrentUserId()){showUnauthorized(getMissingUserSessionMessage());return null;}if(isHostedExecution()&&!hasHostedFolderHandle()){const repoPathValue=document.getElementById('repoPath')?.value?.trim();if(!repoPathValue){showError('Please select a folder first using the folder button.');return null;}}return{task,repoPath};}
 function requiresLocalApiKey(){return false;}
 
-async function executeDryRun(){if(requiresLocalApiKey()){showError('Enter your OpenAI API key to use Unlimited BYOK.');return;}const values=validateTaskAndRepo();if(!values)return;const{task,repoPath}=values;const userId=getCurrentUserId();const hostedContext=await buildHostedDeveloperContext();const body={...{task,repoPath,userId},...(hostedContext?{hostedContext}:{})};console.log('[zone-ui] dry-run request body',body);currentThreadProgressEnabled=false;beginRunState();hideError();document.getElementById('diffSection').classList.add('hidden');setDryRunLoading(true);setProgress('Dry run — generating diff...');try{const r=await fetch('/api/dry-run',{method:'POST',headers:getInferenceHeaders(),body:JSON.stringify(body)});const data=await r.json().catch(()=>null);if(!r.ok){if(data?.reason==='no_free_runs'){trackEvent('dry_run_blocked_no_credits',{role:currentRole,repoPath});showUpgrade(data.message,data.upgradeUrl);return;}if(data?.reason==='unauthorized'){showUnauthorized(data.message);return;}throw new Error(data?.message||data?.reason||('Dry run failed: '+r.status));}if(!data.ok)throw new Error(data.reason||'Dry run failed.');showDiff(data);setProgress('Ready');}catch(e){resetProgress();showError(e.message);}finally{currentRunState.runInProgress=false;syncStopRunButton(false);setDryRunLoading(false);updateApplyState();}}
+async function executeDryRun(){if(requiresLocalApiKey()){showError('Enter your OpenAI API key to use Unlimited BYOK.');return;}const values=validateTaskAndRepo();if(!values)return;const{task,repoPath}=values;const userId=getCurrentUserId();const hostedContext=await buildHostedDeveloperContext();const body={...{task,repoPath,userId},...(hostedContext?{hostedContext}:{})};console.log('[zone-ui] dry-run request body',body);currentThreadProgressEnabled=false;beginRunState();hideError();document.getElementById('diffSection').classList.add('hidden');setDryRunLoading(true);setProgress('Dry run — generating diff...');try{const r=await fetch('/api/dry-run',{method:'POST',headers:getInferenceHeaders(),body:JSON.stringify(body)});const data=await r.json().catch(()=>null);if(!r.ok){if(data?.reason==='token_limit_reached'||data?.reason==='token_daily_limit_reached'){trackEvent('dry_run_blocked_no_credits',{role:currentRole,repoPath});showUpgrade(data.message,data.upgradeUrl);return;}if(data?.reason==='unauthorized'){showUnauthorized(data.message);return;}throw new Error(data?.message||data?.reason||('Dry run failed: '+r.status));}if(!data.ok)throw new Error(data.reason||'Dry run failed.');showDiff(data);setProgress('Ready');}catch(e){resetProgress();showError(e.message);}finally{currentRunState.runInProgress=false;syncStopRunButton(false);setDryRunLoading(false);updateApplyState();}}
 
 function buildExecutionSummaryHtml(data){const patches=Array.isArray(data?.applyPatches)?data.applyPatches:[];const fileDiffs=Array.isArray(data?.fileDiffs)?data.fileDiffs:[];const fileCount=patches.length||fileDiffs.length||0;if(fileCount===0&&!data?.patchPreview)return'';const firstFile=patches[0]?.filePath||fileDiffs[0]?.filePath||'';const confidence=typeof data?.developerConfidence==='number'?data.developerConfidence:currentRunState.confidence;const alignmentScore=typeof data?.planAlignment?.score==='number'?data.planAlignment.score:null;const verificationScore=typeof data?.verification?.score==='number'?data.verification.score:null;const verificationIssues=Array.isArray(data?.verification?.issues)?data.verification.issues.filter(Boolean):[];const verificationText=verificationScore!==null?`Verification ${verificationIssues.length?'needs review':'passed'} ${verificationScore}`:'';const finalState=data?.finalState||currentRunState.finalState;const applyText=finalState==='blocked'||data?.validationBlocked?'Apply blocked':patches.length>0?'Apply available':'Preview only';const changedText=fileCount===1&&firstFile?`I made a localized change in ${firstFile}.`:fileCount>0?`I prepared changes across ${fileCount} files.`:'I prepared a patch preview.';const meta=[`${fileCount||1} file${(fileCount||1)!==1?'s':''} changed`,typeof confidence==='number'?`Confidence ${confidence}`:'',alignmentScore!==null?`Alignment ${alignmentScore}`:'',verificationText,applyText].filter(Boolean);return `<div class="execution-summary-box"><div class="execution-summary-title">${escapeHtml(changedText)}</div><div class="execution-summary-meta">${meta.map(item=>`<span>${escapeHtml(String(item))}</span>`).join('')}</div><div class="execution-summary-note">Details are collapsed below for review.</div></div>`;}
 function buildExecutionDetailSectionHtml(title,body){return body?`<details class="execution-detail-section"><summary>${escapeHtml(title)}</summary><div class="execution-detail-body">${body}</div></details>`:'';}
@@ -1867,7 +1867,7 @@ async function execute(){
     if(!accessResponse.ok){
       releaseExecutionLock();
       if(accessResult?.reason==='unauthorized'){showUnauthorized(accessResult.message);return;}
-      if(accessResult?.reason==='no_free_runs'){trackEvent('execute_blocked_no_credits',{role:currentRole,repoPath});showUpgrade(accessResult.message,accessResult.upgradeUrl);return;}
+      if(accessResult?.reason==='token_limit_reached'||accessResult?.reason==='token_daily_limit_reached'){trackEvent('execute_blocked_no_credits',{role:currentRole,repoPath});showUpgrade(accessResult.message,accessResult.upgradeUrl);return;}
       if(accessResult?.reason==='hosted_run_limit_reached'){
         const normalizedAccessState=normalizeAccessState(accessResult);
         trackEvent('execute_blocked_pro_limit_reached',{
@@ -1906,7 +1906,7 @@ async function execute(){
       if(!r.ok){
         releaseExecutionLock();
         if(result?.reason==='unauthorized'){showUnauthorized(result.message);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
-        if(result?.reason==='no_free_runs'){showUpgrade(result.message,result.upgradeUrl);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
+        if(result?.reason==='token_limit_reached'||result?.reason==='token_daily_limit_reached'){showUpgrade(result.message,result.upgradeUrl);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
         throw new Error(result?.reason||('Test engineer flow failed: '+r.status));
       }
       if(!result||(!result.ok&&!(result.validationBlocked&&result.preview))){
@@ -1953,7 +1953,7 @@ async function execute(){
       if(!r.ok){
         releaseExecutionLock();
         if(result?.reason==='unauthorized'){showUnauthorized(result.message);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
-        if(result?.reason==='no_free_runs'){showUpgrade(result.message,result.upgradeUrl);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
+        if(result?.reason==='token_limit_reached'||result?.reason==='token_daily_limit_reached'){showUpgrade(result.message,result.upgradeUrl);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
         throw new Error(result?.reason||('Data analyst flow failed: '+r.status));
       }
       if(!result||!result.ok){
@@ -2021,7 +2021,7 @@ async function execute(){
       if(!r2.ok){
         releaseExecutionLock();
         if(patch?.reason==='unauthorized'){showUnauthorized(patch.message);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
-        if(patch?.reason==='no_free_runs'){showUpgrade(patch.message,patch.upgradeUrl);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
+        if(patch?.reason==='token_limit_reached'||patch?.reason==='token_daily_limit_reached'){showUpgrade(patch.message,patch.upgradeUrl);addRecentRun({task,role:currentRole,repoPath,status:'error',timestamp:Date.now()});return;}
         throw new Error(patch?.reason||('Patch failed: '+r2.status));
       }
       if(fakeProgressTimer)clearTimeout(fakeProgressTimer);
