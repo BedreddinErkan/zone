@@ -84,7 +84,8 @@ logBillingDebug("run log insert completed", {
   routeName: input.routeName ?? "unknown",
   userId: effectiveUserId,
 });
-  const billingMode: ConversationBillingMode = "hosted";
+  const billingMode: ConversationBillingMode =
+    input.billingMode === "byok" ? "byok" : "hosted";
 let profileResult: {
   data: { subscription_status?: string | null } | null;
   error?: unknown;

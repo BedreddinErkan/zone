@@ -667,10 +667,10 @@ export function LoginForm() {
         })
       );
       expect(supabaseRpcMock).toHaveBeenCalledWith(
-        "deduct_credits_and_increment_runs",
+        "deduct_tokens",
         {
           p_user_id: "clerk_user_789",
-          p_credits: 1,
+          p_tokens: 50000,
         }
       );
     });
@@ -682,7 +682,16 @@ export function LoginForm() {
 
   // ensureRunAuthorized + logRun profile read için
   supabaseProfileMaybeSingleMock.mockResolvedValue({
-    data: { credits: 20, subscription_status: "free" },
+    data: {
+      credits: 20,
+      subscription_status: "free",
+      billing_mode: "hosted",
+      token_credits_used: 0,
+      token_credits_limit: 500000,
+      token_credits_used_today: 0,
+      token_credits_daily_limit: 50000,
+      daily_reset_at: null,
+    },
     error: null,
   });
 
@@ -729,10 +738,10 @@ export function LoginForm() {
         credits_used: 1,
       });
       expect(supabaseRpcMock).toHaveBeenCalledWith(
-        "deduct_credits_and_increment_runs",
+        "deduct_tokens",
         {
           p_user_id: "clerk_user_123",
-          p_credits: 1,
+          p_tokens: 50000,
         }
       );
     });
@@ -1015,10 +1024,10 @@ export function LoginForm() {
     expect(response.status).toBe(200);
     await vi.waitFor(() => {
       expect(supabaseRpcMock).toHaveBeenCalledWith(
-        "deduct_credits_and_increment_runs",
+        "deduct_tokens",
         {
           p_user_id: "clerk_user_123",
-          p_credits: 1,
+          p_tokens: 50000,
         }
       );
     });
@@ -1092,10 +1101,10 @@ export function LoginForm() {
         })
       );
       expect(supabaseRpcMock).toHaveBeenCalledWith(
-        "deduct_credits_and_increment_runs",
+        "deduct_tokens",
         {
           p_user_id: "clerk_user_456",
-          p_credits: 1,
+          p_tokens: 50000,
         }
       );
     });
@@ -1569,10 +1578,13 @@ export function LoginForm() {
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        credits: 7,
-        free_limit: 10,
-        runs_used_this_month: 3,
         subscription_status: "free",
+        billing_mode: "hosted",
+        token_credits_used: 123,
+        token_credits_limit: 500000,
+        token_credits_used_today: 1000,
+        token_credits_daily_limit: 50000,
+        daily_reset_at: null,
       },
       error: null,
     });
@@ -1586,19 +1598,31 @@ export function LoginForm() {
     expect(body).toEqual({
       ok: true,
       plan: "Free",
-      credits: 7,
+      billingMode: "hosted",
+      billing_mode: "hosted",
+      tokenCreditsUsed: 123,
+      tokenCreditsLimit: 500000,
+      tokenCreditsRemaining: 499877,
+      tokenCreditsUsedToday: 1000,
+      tokenCreditsDailyLimit: 50000,
+      tokenCreditsDailyRemaining: 49000,
+      dailyResetAt: null,
       subscriptionStatus: "free",
     });
   });
 
-  it("returns ok from /api/check-access for a free user with remaining runs", async () => {
+  it("returns ok from /api/check-access for a free user with remaining tokens", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        runs_used_this_month: 2,
-        free_limit: 10,
         subscription_status: "free",
+        billing_mode: "hosted",
+        token_credits_used: 10,
+        token_credits_limit: 500000,
+        token_credits_used_today: 10,
+        token_credits_daily_limit: 50000,
+        daily_reset_at: null,
       },
       error: null,
     });
@@ -1624,15 +1648,18 @@ export function LoginForm() {
     });
   });
 
-  it("returns no_free_runs from /api/check-access for an exhausted free user", async () => {
+  it("returns token_limit_reached from /api/check-access for an exhausted free user", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        runs_used_this_month: 10,
-        credits: 0,
-        free_limit: 10,
         subscription_status: "free",
+        billing_mode: "hosted",
+        token_credits_used: 500000,
+        token_credits_limit: 500000,
+        token_credits_used_today: 10,
+        token_credits_daily_limit: 50000,
+        daily_reset_at: null,
       },
       error: null,
     });
@@ -1645,21 +1672,24 @@ export function LoginForm() {
     expect(response.status).toBe(402);
     expect(body).toEqual({
       ok: false,
-      reason: "hosted_run_limit_reached",
-      runsUsedThisMonth: 10,
-      credits: 0,
+      reason: "token_limit_reached",
+      message: "You've used all your tokens. Upgrade to Pro.",
+      upgradeUrl: "https://zonecli.dev/#pricing",
     });
   });
 
-  it("blocks a hosted first run without conversationId when no credits remain", async () => {
+  it("blocks a hosted first run without conversationId when no tokens remain", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        runs_used_this_month: 10,
-        credits: 0,
-        free_limit: 10,
         subscription_status: "free",
+        billing_mode: "hosted",
+        token_credits_used: 500000,
+        token_credits_limit: 500000,
+        token_credits_used_today: 10,
+        token_credits_daily_limit: 50000,
+        daily_reset_at: null,
       },
       error: null,
     });
@@ -1670,18 +1700,21 @@ export function LoginForm() {
 
     const body = await response.json();
     expect(response.status).toBe(402);
-    expect(body.reason).toBe("hosted_run_limit_reached");
+    expect(body.reason).toBe("token_limit_reached");
   });
 
-  it("blocks a hosted continuation when free credits are exhausted even if old refinement state exists", async () => {
+  it("blocks a hosted continuation when free tokens are exhausted even if old refinement state exists", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        runs_used_this_month: 10,
-        credits: 0,
-        free_limit: 10,
         subscription_status: "free",
+        billing_mode: "hosted",
+        token_credits_used: 500000,
+        token_credits_limit: 500000,
+        token_credits_used_today: 10,
+        token_credits_daily_limit: 50000,
+        daily_reset_at: null,
       },
       error: null,
     });
@@ -1707,7 +1740,7 @@ export function LoginForm() {
 
     const body = await response.json();
     expect(response.status).toBe(402);
-    expect(body.reason).toBe("hosted_run_limit_reached");
+    expect(body.reason).toBe("token_limit_reached");
   });
 
   it("still blocks a hosted continuation when old refinement state is already used", async () => {
@@ -1715,10 +1748,13 @@ export function LoginForm() {
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        runs_used_this_month: 10,
-        credits: 0,
-        free_limit: 10,
         subscription_status: "free",
+        billing_mode: "hosted",
+        token_credits_used: 500000,
+        token_credits_limit: 500000,
+        token_credits_used_today: 10,
+        token_credits_daily_limit: 50000,
+        daily_reset_at: null,
       },
       error: null,
     });
@@ -1744,18 +1780,21 @@ export function LoginForm() {
 
     const body = await response.json();
     expect(response.status).toBe(402);
-    expect(body.reason).toBe("hosted_run_limit_reached");
+    expect(body.reason).toBe("token_limit_reached");
   });
 
-  it("blocks Free + BYOK when credits are exhausted", async () => {
+  it("allows Free + BYOK even when hosted tokens are exhausted", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        runs_used_this_month: 10,
-        credits: 0,
-        free_limit: 10,
         subscription_status: "free",
+        billing_mode: "hosted",
+        token_credits_used: 500000,
+        token_credits_limit: 500000,
+        token_credits_used_today: 10,
+        token_credits_daily_limit: 50000,
+        daily_reset_at: null,
       },
       error: null,
     });
@@ -1765,24 +1804,22 @@ export function LoginForm() {
     );
 
     const body = await response.json();
-    expect(response.status).toBe(402);
-    expect(body).toEqual({
-      ok: false,
-      reason: "hosted_run_limit_reached",
-      runsUsedThisMonth: 10,
-      credits: 0,
-    });
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ ok: true });
   });
 
-  it("allows Pro + BYOK when credits remain", async () => {
+  it("allows Pro + BYOK when tokens remain", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        runs_used_this_month: 250,
-        credits: 250,
-        free_limit: 10,
         subscription_status: "pro",
+        billing_mode: "hosted",
+        token_credits_used: 10,
+        token_credits_limit: 5000000,
+        token_credits_used_today: 10,
+        token_credits_daily_limit: 999999999,
+        daily_reset_at: null,
       },
       error: null,
     });
@@ -1801,10 +1838,13 @@ export function LoginForm() {
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        runs_used_this_month: 10,
-        credits: 0,
-        free_limit: 10,
         subscription_status: "free",
+        billing_mode: "hosted",
+        token_credits_used: 500000,
+        token_credits_limit: 500000,
+        token_credits_used_today: 10,
+        token_credits_daily_limit: 50000,
+        daily_reset_at: null,
       },
       error: null,
     });
@@ -1830,7 +1870,7 @@ export function LoginForm() {
 
     const body = await response.json();
     expect(response.status).toBe(402);
-    expect(body.reason).toBe("hosted_run_limit_reached");
+    expect(body.reason).toBe("token_limit_reached");
   });
 
   it("falls back to normal hosted blocking when conversation role mismatches", async () => {
@@ -1838,10 +1878,13 @@ export function LoginForm() {
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        runs_used_this_month: 10,
-        credits: 0,
-        free_limit: 10,
         subscription_status: "free",
+        billing_mode: "hosted",
+        token_credits_used: 500000,
+        token_credits_limit: 500000,
+        token_credits_used_today: 10,
+        token_credits_daily_limit: 50000,
+        daily_reset_at: null,
       },
       error: null,
     });
@@ -1867,7 +1910,7 @@ export function LoginForm() {
 
     const body = await response.json();
     expect(response.status).toBe(402);
-    expect(body.reason).toBe("hosted_run_limit_reached");
+    expect(body.reason).toBe("token_limit_reached");
   });
 
   it("preserves old behavior when conversationId does not exist", async () => {
@@ -1875,10 +1918,13 @@ export function LoginForm() {
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        runs_used_this_month: 10,
-        credits: 0,
-        free_limit: 10,
         subscription_status: "free",
+        billing_mode: "hosted",
+        token_credits_used: 500000,
+        token_credits_limit: 500000,
+        token_credits_used_today: 10,
+        token_credits_daily_limit: 50000,
+        daily_reset_at: null,
       },
       error: null,
     });
@@ -1893,17 +1939,21 @@ export function LoginForm() {
 
     const body = await response.json();
     expect(response.status).toBe(402);
-    expect(body.reason).toBe("hosted_run_limit_reached");
+    expect(body.reason).toBe("token_limit_reached");
   });
 
-  it("returns ok from /api/check-access for a pro user below the monthly limit", async () => {
+  it("returns ok from /api/check-access for a pro user below the token limit", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        runs_used_this_month: 12,
-        credits: 250,
         subscription_status: "pro",
+        billing_mode: "hosted",
+        token_credits_used: 100,
+        token_credits_limit: 5000000,
+        token_credits_used_today: 100,
+        token_credits_daily_limit: 50000,
+        daily_reset_at: null,
       },
       error: null,
     });
@@ -1917,14 +1967,18 @@ export function LoginForm() {
     expect(body).toEqual({ ok: true });
   });
 
-  it("returns hosted_run_limit_reached from /api/check-access for a pro user with no credits remaining", async () => {
+  it("returns token_limit_reached from /api/check-access for a pro user with no tokens remaining", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        runs_used_this_month: 1000,
-        credits: 0,
         subscription_status: "pro",
+        billing_mode: "hosted",
+        token_credits_used: 5000000,
+        token_credits_limit: 5000000,
+        token_credits_used_today: 100,
+        token_credits_daily_limit: 50000,
+        daily_reset_at: null,
       },
       error: null,
     });
@@ -1937,9 +1991,10 @@ export function LoginForm() {
     expect(response.status).toBe(402);
     expect(body).toEqual({
       ok: false,
-      reason: "hosted_run_limit_reached",
-      runsUsedThisMonth: 1000,
-      credits: 0,
+      reason: "token_limit_reached",
+      message: "Token limit reached for this billing period.",
+      tokenCreditsUsed: 5000000,
+      tokenCreditsLimit: 5000000,
     });
   });
 
@@ -1948,9 +2003,13 @@ export function LoginForm() {
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        credits: 0,
-        runs_used_this_month: 12,
         subscription_status: "pro",
+        billing_mode: "hosted",
+        token_credits_used: 2500000,
+        token_credits_limit: 5000000,
+        token_credits_used_today: 1000,
+        token_credits_daily_limit: 50000,
+        daily_reset_at: null,
       },
       error: null,
     });
@@ -1964,20 +2023,32 @@ export function LoginForm() {
     expect(body).toEqual({
       ok: true,
       plan: "Pro",
-      credits: 0,
+      billingMode: "hosted",
+      billing_mode: "hosted",
+      tokenCreditsUsed: 2500000,
+      tokenCreditsLimit: 5000000,
+      tokenCreditsRemaining: 2500000,
+      tokenCreditsUsedToday: 1000,
+      tokenCreditsDailyLimit: 50000,
+      tokenCreditsDailyRemaining: 49000,
+      dailyResetAt: null,
       subscriptionStatus: "pro",
     });
   });
 
-  it("returns billing summary credits directly when profile credits is 7", async () => {
+  it("does not depend on legacy credits fields in billing summary", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        credits: 7,
-        runs_used_this_month: 999,
-        free_limit: 0,
+        // legacy fields intentionally omitted
         subscription_status: "free",
+        billing_mode: "hosted",
+        token_credits_used: 0,
+        token_credits_limit: 500000,
+        token_credits_used_today: 0,
+        token_credits_daily_limit: 50000,
+        daily_reset_at: null,
       },
       error: null,
     });
@@ -1991,34 +2062,15 @@ export function LoginForm() {
     expect(body).toEqual({
       ok: true,
       plan: "Free",
-      credits: 7,
-      subscriptionStatus: "free",
-    });
-  });
-
-  it("does not derive billing summary credits from free_limit or runs_used_this_month", async () => {
-    process.env.SUPABASE_URL = "https://example.supabase.co";
-    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
-    supabaseProfileMaybeSingleMock.mockResolvedValue({
-      data: {
-        credits: 0,
-        free_limit: 10,
-        runs_used_this_month: 3,
-        subscription_status: "free",
-      },
-      error: null,
-    });
-
-    const response = await fetch(
-      `${baseUrl}/api/billing-summary?userId=clerk_user_123`
-    );
-
-    const body = await response.json();
-    expect(response.status).toBe(200);
-    expect(body).toEqual({
-      ok: true,
-      plan: "Free",
-      credits: 0,
+      billingMode: "hosted",
+      billing_mode: "hosted",
+      tokenCreditsUsed: 0,
+      tokenCreditsLimit: 500000,
+      tokenCreditsRemaining: 500000,
+      tokenCreditsUsedToday: 0,
+      tokenCreditsDailyLimit: 50000,
+      tokenCreditsDailyRemaining: 50000,
+      dailyResetAt: null,
       subscriptionStatus: "free",
     });
   });
@@ -2219,10 +2271,13 @@ export function LoginForm() {
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
       data: {
-        credits: 3,
-        free_limit: 8,
-        runs_used_this_month: 5,
         subscription_status: "free",
+        billing_mode: "hosted",
+        token_credits_used: 0,
+        token_credits_limit: 500000,
+        token_credits_used_today: 0,
+        token_credits_daily_limit: 50000,
+        daily_reset_at: null,
       },
       error: null,
     });
@@ -2255,7 +2310,15 @@ export function LoginForm() {
     expect(body).toEqual({
       ok: true,
       plan: "Free",
-      credits: 3,
+      billingMode: "hosted",
+      billing_mode: "hosted",
+      tokenCreditsUsed: 0,
+      tokenCreditsLimit: 500000,
+      tokenCreditsRemaining: 500000,
+      tokenCreditsUsedToday: 0,
+      tokenCreditsDailyLimit: 50000,
+      tokenCreditsDailyRemaining: 50000,
+      dailyResetAt: null,
       subscriptionStatus: "free",
     });
 
@@ -2309,15 +2372,15 @@ export function LoginForm() {
     });
   });
 
-  it("passes through hosted no_free_runs responses from /api/check-access unchanged", async () => {
+  it("passes through hosted token_limit_reached responses from /api/check-access unchanged", async () => {
     getInferenceModeMock.mockReturnValue("hosted");
     const hostedServer = createServer((_req, res) => {
       res.writeHead(402, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
           ok: false,
-          reason: "no_free_runs",
-          message: "You've used all your free runs. Upgrade to Pro.",
+          reason: "token_limit_reached",
+          message: "You've used all your tokens. Upgrade to Pro.",
           upgradeUrl: "https://zonecli.dev/#pricing",
         })
       );
@@ -2345,8 +2408,8 @@ export function LoginForm() {
     expect(response.status).toBe(402);
     expect(body).toEqual({
       ok: false,
-      reason: "no_free_runs",
-      message: "You've used all your free runs. Upgrade to Pro.",
+      reason: "token_limit_reached",
+      message: "You've used all your tokens. Upgrade to Pro.",
       upgradeUrl: "https://zonecli.dev/#pricing",
     });
     expect(createSupabaseClientMock).not.toHaveBeenCalled();
@@ -2364,8 +2427,15 @@ export function LoginForm() {
         JSON.stringify({
           ok: true,
           plan: "Pro",
-          credits: 0,
+          billingMode: "hosted",
           subscriptionStatus: "pro",
+          tokenCreditsUsed: 0,
+          tokenCreditsLimit: 5000000,
+          tokenCreditsRemaining: 5000000,
+          tokenCreditsUsedToday: 0,
+          tokenCreditsDailyLimit: 50000,
+          tokenCreditsDailyRemaining: 50000,
+          dailyResetAt: null,
         })
       );
     });
@@ -2393,7 +2463,14 @@ export function LoginForm() {
     expect(body).toEqual({
       ok: true,
       plan: "Pro",
-      credits: 0,
+      billingMode: "hosted",
+      tokenCreditsUsed: 0,
+      tokenCreditsLimit: 5000000,
+      tokenCreditsRemaining: 5000000,
+      tokenCreditsUsedToday: 0,
+      tokenCreditsDailyLimit: 50000,
+      tokenCreditsDailyRemaining: 50000,
+      dailyResetAt: null,
       subscriptionStatus: "pro",
     });
     expect(createSupabaseClientMock).not.toHaveBeenCalled();

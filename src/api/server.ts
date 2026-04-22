@@ -582,10 +582,7 @@ async function handleBillingSummary(
         eq?: (column: string, value: string) => {
           maybeSingle?: () => Promise<{
             data: {
-              credits?: number | string | null;
-              runs_used_this_month?: number | string | null;
               billing_mode?: string | null;
-              free_limit?: number | string | null;
               subscription_status?: string | null;
               token_credits_used?: number | string | null;
               token_credits_limit?: number | string | null;
@@ -602,7 +599,9 @@ async function handleBillingSummary(
       `[zone] billing-summary: querying profiles where clerk_user_id=${userId}`
     );
     const query = profilesTable
-      .select?.("credits,runs_used_this_month,free_limit,subscription_status,token_credits_used,token_credits_limit,token_credits_used_today,token_credits_daily_limit,daily_reset_at")
+      .select?.(
+        "subscription_status,billing_mode,token_credits_used,token_credits_limit,token_credits_used_today,token_credits_daily_limit,daily_reset_at"
+      )
       ?.eq?.("clerk_user_id", userId);
   if (!query || typeof query.maybeSingle !== "function") {
     res.json({ ok: false, reason: "profile_unavailable" });
@@ -639,29 +638,7 @@ async function handleBillingSummary(
       res.json({ ok: false, reason: "profile_unavailable" });
       return;
     }
-    const credits =
-      typeof data.credits === "number"
-        ? data.credits
-        : Number(data.credits ?? 0);
-    const runsUsedThisMonth =
-      typeof data.runs_used_this_month === "number"
-        ? data.runs_used_this_month
-        : Number(data.runs_used_this_month ?? 0);
-    const freeLimit =
-      typeof data.free_limit === "number"
-        ? data.free_limit
-        : Number(data.free_limit ?? FREE_PLAN_RUN_LIMIT);
     const status = normalizeSubscriptionStatus(data.subscription_status) || "free";
-    const legacyDerivedRemaining = hasPaidAccess(status)
-      ? Math.max(
-          0,
-          PRO_PLAN_RUN_LIMIT - (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0)
-        )
-      : Math.max(
-          0,
-          (Number.isFinite(freeLimit) ? freeLimit : FREE_PLAN_RUN_LIMIT) -
-            (Number.isFinite(runsUsedThisMonth) ? runsUsedThisMonth : 0)
-        );
     const tokenCreditsUsed = typeof data.token_credits_used === "number"
       ? data.token_credits_used
       : Number(data.token_credits_used ?? 0);
@@ -678,10 +655,14 @@ async function handleBillingSummary(
     const tokenCreditsDailyRemaining = Math.max(0, tokenCreditsDailyLimit - tokenCreditsUsedToday);
     const dailyResetAt = typeof data.daily_reset_at === "string" ? data.daily_reset_at : null;
     const dailyResetMs = dailyResetAt ? new Date(dailyResetAt).getTime() + 24 * 60 * 60 * 1000 : null;
+    const billingMode =
+      typeof data.billing_mode === "string" && data.billing_mode.trim()
+        ? data.billing_mode.trim()
+        : "hosted";
     const responsePayload = {
       ok: true,
       plan: hasPaidAccess(status) ? "Pro" : "Free",
-      credits: tokenCreditsRemaining,
+      billingMode,
       tokenCreditsUsed,
       tokenCreditsLimit,
       tokenCreditsRemaining,
@@ -690,14 +671,19 @@ async function handleBillingSummary(
       tokenCreditsDailyRemaining,
       dailyResetAt: dailyResetMs,
       subscriptionStatus: status,
-      billing_mode: "hosted",
+      billing_mode: billingMode,
     };
-    console.log("[zone-billing-summary-debug] resolved credits", {
+    console.log("[zone-billing-summary-debug] resolved token credits", {
       userId,
-      credits,
-      legacyDerivedRemaining,
-      runsUsedThisMonth,
-      freeLimit,
+      tokenCreditsUsed,
+      tokenCreditsLimit,
+      tokenCreditsRemaining,
+      tokenCreditsUsedToday,
+      tokenCreditsDailyLimit,
+      tokenCreditsDailyRemaining,
+      dailyResetAt: dailyResetMs,
+      subscriptionStatus: status,
+      billingMode,
     });
     console.log("[zone-billing-summary-debug] final response payload", responsePayload);
     res.json(responsePayload);
@@ -753,21 +739,6 @@ function hasPaidAccess(subscriptionStatus: unknown): boolean {
   return normalized === "pro";
 }
 
-// ── DAILY RUN LIMITER (in-memory, resets on server restart) ──
-const DAILY_RUN_LIMIT = 30;
-const dailyRunCounts = new Map<string, { date: string; count: number }>();
-
-function checkDailyRunLimit(userId: string): boolean {
-  const today = new Date().toISOString().slice(0, 10); // "2026-04-16"
-  const entry = dailyRunCounts.get(userId);
-  if (!entry || entry.date !== today) {
-    dailyRunCounts.set(userId, { date: today, count: 1 });
-    return true;
-  }
-  if (entry.count >= DAILY_RUN_LIMIT) return false;
-  entry.count++;
-  return true;
-}
 // ── DESKTOP DEVICE CODE AUTH ────────────────────────────────
 const DESKTOP_TOKEN_SECRET =
   (process.env.ZONE_DESKTOP_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || "zone-desktop-fallback").trim();
@@ -822,21 +793,21 @@ async function ensureRunAuthorized(
           }
         | {
             ok: false;
-            reason: "no_free_runs";
-            message: "You've used all your free runs. Upgrade to Pro.";
+            reason: "token_limit_reached";
+            message: "You've used all your tokens. Upgrade to Pro.";
             upgradeUrl: "https://zonecli.dev/#pricing";
           }
         | {
             ok: false;
-            reason: "no_free_runs";
-
+            reason: "token_limit_reached" | "token_daily_limit_reached";
             message: string;
+            dailyResetAt?: number | null;
           }
         | {
             ok: false;
-            reason: "hosted_run_limit_reached";
-            runsUsedThisMonth: number;
-            credits: number;
+            reason: "token_limit_reached";
+            tokenCreditsUsed: number;
+            tokenCreditsLimit: number;
           };
     }
 > {
@@ -861,32 +832,72 @@ async function ensureRunAuthorized(
   }
 
   try {
+    const requestedBillingMode =
+      typeof options?.billingMode === "string" && options.billingMode.trim()
+        ? options.billingMode.trim().toLowerCase()
+        : "hosted";
+    if (requestedBillingMode === "byok") {
+      return { allowed: true };
+    }
+
     const profileQuery = supabase.from("profiles") as unknown as {
       select: (columns: string) => {
         eq: (column: string, value: string) => {
           maybeSingle: () => Promise<{
-            data?: { subscription_status?: string | null } | null;
+            data?: {
+              subscription_status?: string | null;
+              billing_mode?: string | null;
+              token_credits_used?: number | string | null;
+              token_credits_limit?: number | string | null;
+              token_credits_used_today?: number | string | null;
+              token_credits_daily_limit?: number | string | null;
+              daily_reset_at?: string | null;
+            } | null;
             error?: { message?: string } | null;
           }>;
         };
       };
     };
     const { data: profileData } = await profileQuery
-      .select("subscription_status")
+      .select(
+        "subscription_status,billing_mode,token_credits_used,token_credits_limit,token_credits_used_today,token_credits_daily_limit,daily_reset_at"
+      )
       .eq("clerk_user_id", authenticatedUserId)
       .maybeSingle();
-    const resolvedBillingMode = "hosted";
-    const { runsUsedThisMonth, credits, subscriptionStatus } = await getUserQuota(
-      supabase,
-      authenticatedUserId
-    );
+
+    const subscriptionStatus = normalizeSubscriptionStatus(profileData?.subscription_status) || "free";
     const paidAccess = hasPaidAccess(subscriptionStatus);
-    const { tokenCreditsUsed, tokenCreditsLimit } = await getUserQuota(supabase, authenticatedUserId);
+    const resolvedBillingMode =
+      typeof profileData?.billing_mode === "string" && profileData.billing_mode.trim()
+        ? profileData.billing_mode.trim()
+        : "hosted";
+
+    const tokenCreditsUsed =
+      typeof profileData?.token_credits_used === "number"
+        ? profileData.token_credits_used
+        : Number(profileData?.token_credits_used ?? 0);
+    const tokenCreditsLimit =
+      typeof profileData?.token_credits_limit === "number"
+        ? profileData.token_credits_limit
+        : Number(profileData?.token_credits_limit ?? 500000);
+    const tokenCreditsUsedToday =
+      typeof profileData?.token_credits_used_today === "number"
+        ? profileData.token_credits_used_today
+        : Number(profileData?.token_credits_used_today ?? 0);
+    const tokenCreditsDailyLimit =
+      typeof profileData?.token_credits_daily_limit === "number"
+        ? profileData.token_credits_daily_limit
+        : Number(profileData?.token_credits_daily_limit ?? 50000);
+    const dailyResetAtRaw =
+      typeof profileData?.daily_reset_at === "string" ? profileData.daily_reset_at : null;
+    const dailyResetAt =
+      dailyResetAtRaw ? new Date(dailyResetAtRaw).getTime() + 24 * 60 * 60 * 1000 : null;
+
     const billingAction = resolveBillingAction({
-      mode: resolvedBillingMode,
+      mode: "hosted",
       hasPaidAccess: paidAccess,
-      runsUsedThisMonth,
-      credits,
+      runsUsedThisMonth: 0,
+      credits: 0,
       tokenCreditsUsed,
       tokenCreditsLimit,
     });
@@ -897,40 +908,52 @@ async function ensureRunAuthorized(
       subscriptionStatus,
       hasPaidAccess: paidAccess,
       billingAction,
-      runsUsedThisMonth,
-      credits,
+      tokenCreditsUsed,
+      tokenCreditsLimit,
+      tokenCreditsUsedToday,
+      tokenCreditsDailyLimit,
+      dailyResetAt,
     });
 
-    if (billingAction === "FREE") {
-      return { allowed: true };
+    if (billingAction === "FREE") return { allowed: true };
+
+    if (tokenCreditsDailyLimit < 999999999 && tokenCreditsUsedToday >= tokenCreditsDailyLimit) {
+      return {
+        allowed: false,
+        status: 429,
+        body: {
+          ok: false,
+          reason: "token_daily_limit_reached",
+          message: "Daily token limit reached. Try again after the daily reset.",
+          dailyResetAt,
+        },
+      };
     }
 
     if (billingAction === "LIMIT_EXCEEDED") {
+      if (!paidAccess) {
         return {
           allowed: false,
           status: 402,
           body: {
             ok: false,
-            reason: "hosted_run_limit_reached",
-            runsUsedThisMonth,
-            credits,
-          },
-        };
-    }
-
-   if (paidAccess) {
-      if (!checkDailyRunLimit(authenticatedUserId)) {
-        return {
-          allowed: false,
-          status: 429,
-          body: {
-            ok: false,
-            reason: "no_free_runs",
-            message: `Daily limit reached (${DAILY_RUN_LIMIT} runs/day). Try again tomorrow.`,
+            reason: "token_limit_reached",
+            message: "You've used all your tokens. Upgrade to Pro.",
+            upgradeUrl: "https://zonecli.dev/#pricing",
           },
         };
       }
-      return { allowed: true };
+      return {
+        allowed: false,
+        status: 402,
+        body: {
+          ok: false,
+          reason: "token_limit_reached",
+          message: "Token limit reached for this billing period.",
+          tokenCreditsUsed,
+          tokenCreditsLimit,
+        },
+      };
     }
 
     return { allowed: true };
@@ -1426,7 +1449,10 @@ app.post("/api/patch", async (req, res) => {
   const perf = startZoneApiPerfRun("/api/patch");
   perf.mark("route entered");
   const isByok = false;
-  const billingMode = "hosted";
+  const billingMode =
+    typeof req.body?.billingMode === "string" && req.body.billingMode.trim()
+      ? (req.body.billingMode.trim() as "hosted" | "byok")
+      : "hosted";
   if (shouldProxyHostedRequest(req, "/api/patch")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1538,7 +1564,10 @@ res.json(result);
 });
 app.post("/api/dry-run", async (req, res) => {
   const isByok = false;
-  const billingMode = "hosted";
+  const billingMode =
+    typeof req.body?.billingMode === "string" && req.body.billingMode.trim()
+      ? (req.body.billingMode.trim() as "hosted" | "byok")
+      : "hosted";
   if (shouldProxyHostedRequest(req, "/api/dry-run")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1753,7 +1782,7 @@ app.post("/api/run-verification", async (req, res) => {
 });
 
 app.post("/api/refine-prompt", async (req, res) => {
-  const billingMode = "hosted";
+  const billingMode: "hosted" | "byok" = "hosted";
   if (shouldProxyHostedRequest(req, "/api/refine-prompt")) {
     await proxyHostedZoneRequest(req, res, "/api/refine-prompt");
     return;
@@ -1795,7 +1824,10 @@ app.post("/api/refine-prompt", async (req, res) => {
 
 app.post("/api/enhance-task", async (req, res) => {
   const isByok = false;
-  const billingMode = "hosted";
+  const billingMode =
+    typeof req.body?.billingMode === "string" && req.body.billingMode.trim()
+      ? (req.body.billingMode.trim() as "hosted" | "byok")
+      : "hosted";
   if (shouldProxyHostedRequest(req, "/api/enhance-task")) {
     const { role, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1842,7 +1874,10 @@ app.post("/api/enhance-task", async (req, res) => {
 
 app.post("/api/test-engineer", async (req, res) => {
   const isByok = false;
-  const billingMode = "hosted";
+  const billingMode =
+    typeof req.body?.billingMode === "string" && req.body.billingMode.trim()
+      ? (req.body.billingMode.trim() as "hosted" | "byok")
+      : "hosted";
 if (shouldProxyHostedRequest(req, "/api/test-engineer")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1946,7 +1981,10 @@ const loggedConversationId = await logRun({
 
 app.post("/api/data-analyst", async (req, res) => {
   const isByok = false;
-  const billingMode = "hosted";
+  const billingMode =
+    typeof req.body?.billingMode === "string" && req.body.billingMode.trim()
+      ? (req.body.billingMode.trim() as "hosted" | "byok")
+      : "hosted";
 if (shouldProxyHostedRequest(req, "/api/data-analyst")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
