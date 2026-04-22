@@ -880,6 +880,10 @@ async function runTestEngineerFlow(input) {
                 reason: `LLM generation failed after ${retryResult.attempts} attempt(s): ${retryResult.reason}`,
                 framework: framework.framework ?? "unknown",
                 language: framework.language ?? "unknown",
+                confidence: 0,
+                decisionMode: "blocked",
+                validationBlocked: true,
+                attemptsUsed: retryResult.attempts,
             };
         }
         parsed = retryResult.value;

@@ -188,6 +188,10 @@ async function runDataAnalystFlow(input) {
             ok: false,
             reason: `LLM generation failed after ${retryResult.attempts} attempt(s): ${retryResult.reason}`,
             dialect: schema.dialect,
+            confidence: 0,
+            decisionMode: "blocked",
+            validationBlocked: true,
+            attemptsUsed: retryResult.attempts,
         };
     }
     let parsed = retryResult.value;

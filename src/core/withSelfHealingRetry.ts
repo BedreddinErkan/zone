@@ -1,3 +1,8 @@
+import {
+  buildRetryGuidanceFromFailure,
+  formatRetryGuidanceBrief,
+} from "./buildRetryGuidanceFromFailure.js";
+
 export type RetryFeedback = {
   attempt: number;
   issues: Array<{
@@ -42,6 +47,9 @@ export function buildDefaultFeedbackPrompt(feedback: RetryFeedback): string {
   const issueLines = feedback.issues
     .map((issue) => `- [${issue.code}] ${issue.message}`)
     .join("\n");
+  const retryGuidance = buildRetryGuidanceFromFailure({
+    issues: feedback.issues,
+  });
 
   return [
     feedback.originalPrompt,
@@ -50,8 +58,12 @@ export function buildDefaultFeedbackPrompt(feedback: RetryFeedback): string {
     "The previous output was rejected due to the following issues:",
     issueLines,
     "",
+    "STRUCTURED RETRY BRIEF:",
+    formatRetryGuidanceBrief(retryGuidance),
+    "",
     "Please fix ALL of the above issues and return a corrected output.",
     "Do NOT repeat the same mistakes.",
+    retryGuidance.nextAttemptConstraint,
     "=== END FEEDBACK ===",
   ].join("\n");
 }

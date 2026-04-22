@@ -56,7 +56,6 @@ async function processDeveloperPatchJob(
       hostedContext: requestPayload.hostedContext as
         | Parameters<typeof runLlmPatchFlow>[0]["hostedContext"]
         | undefined,
-      userOpenAiKey: requestPayload.userOpenAiKey,
       onProgress: async (stage) => {
         await updateDeveloperPatchJobProgress(supabase, job.id, stage);
       },
@@ -118,6 +117,7 @@ async function processDeveloperPatchJob(
       ),
       confidence,
       creditsUsed: 1,
+      tokensUsed: 50000,
       conversationId: requestPayload.conversationId,
       billingMode: requestPayload.billingMode,
       routeName: "/api/patch/jobs worker",

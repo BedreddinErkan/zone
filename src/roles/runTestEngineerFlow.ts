@@ -91,6 +91,7 @@ export type TestEngineerFlowResult =
       applyPatches?: Array<{ filePath: string; fullContent: string }>;
       preview?: string;
       validationBlocked?: boolean;
+      attemptsUsed?: number;
     debug?: TestEngineerDebugInfo;
     };
 
@@ -1241,6 +1242,10 @@ export async function runTestEngineerFlow(input: {
         reason: `LLM generation failed after ${retryResult.attempts} attempt(s): ${retryResult.reason}`,
         framework: framework.framework ?? "unknown",
         language: framework.language ?? "unknown",
+        confidence: 0,
+        decisionMode: "blocked",
+        validationBlocked: true,
+        attemptsUsed: retryResult.attempts,
       };
     }
 

@@ -39,6 +39,10 @@ export type DataAnalystFlowResult =
       ok: false;
       reason: string;
       dialect?: string;
+      confidence?: number;
+      decisionMode?: "blocked";
+      validationBlocked?: boolean;
+      attemptsUsed?: number;
     };
 
 function extractJson(rawText: string): string {
@@ -263,6 +267,10 @@ export async function runDataAnalystFlow(input: {
       ok: false,
       reason: `LLM generation failed after ${retryResult.attempts} attempt(s): ${retryResult.reason}`,
       dialect: schema.dialect,
+      confidence: 0,
+      decisionMode: "blocked",
+      validationBlocked: true,
+      attemptsUsed: retryResult.attempts,
     };
   }
 

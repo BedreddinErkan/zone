@@ -80,7 +80,16 @@ export type LlmPatchFlowResult =
         shouldForcePreview: boolean;
         shouldDowngradeSafety: boolean;
       };
-      decisionMode?: "preview_only" | "safe_to_apply";
+      decisionMode?: "preview_only" | "safe_to_apply" | "blocked";
+      finalState?: "preview_only" | "safe_to_apply" | "blocked";
+      finalExecutionOutcome?: "completed" | "completed_with_issues" | "failed_verification";
+      finalVerificationFailure?: {
+        status: RuntimeVerificationResult["status"];
+        command?: string;
+        summary: string;
+      };
+      attemptsUsed?: number;
+      validationBlocked?: boolean;
       plan?: ExecutionPlan;
       planAlignment?: PlanAlignmentResult;
       verification?: VerificationResult;
@@ -2755,6 +2764,9 @@ export async function runLlmPatchFlow(input: {
     confidenceCaps.length > 0
       ? Math.min(developerConfidenceBase, ...confidenceCaps)
       : developerConfidenceBase;
+  const runtimeVerificationFailed =
+    runtimeVerification?.attempted === true &&
+    (runtimeVerification.status === "failed" || runtimeVerification.status === "timeout");
 
   const allDiffLines = fileDiffs.flatMap((fd) =>
     fd.diff.map(
@@ -2865,19 +2877,38 @@ syncedVisibleWarnings = syncDeveloperRiskWarnings({
 });
 
 const decisionMode =
-  hasBlockedPatch ||
-  vagueTask ||
-  microEditProtection.shouldForcePreview ||
-  intentMismatchDecision.forcePreviewOnly ||
-  uiMappingRisk.forcePreviewOnly ||
-  developerConfidence < 70 ||
-  finalDeveloperRisk.score >= 31
-    ? "preview_only"
-    : "safe_to_apply";
+  runtimeVerificationFailed
+    ? "blocked"
+    : hasBlockedPatch ||
+        vagueTask ||
+        microEditProtection.shouldForcePreview ||
+        intentMismatchDecision.forcePreviewOnly ||
+        uiMappingRisk.forcePreviewOnly ||
+        developerConfidence < 70 ||
+        finalDeveloperRisk.score >= 31
+      ? "preview_only"
+      : "safe_to_apply";
+  const finalExecutionOutcome =
+    runtimeVerification?.status === "failed"
+      ? "failed_verification"
+      : runtimeVerification?.status === "timeout"
+        ? "completed_with_issues"
+        : "completed";
+  const finalState =
+    finalExecutionOutcome === "failed_verification" ||
+    finalExecutionOutcome === "completed_with_issues"
+      ? "blocked"
+      : decisionMode;
+  const validationBlocked = finalState === "blocked";
+  if (runtimeVerificationFailed && runtimeVerification) {
+    const warning = `Final verification did not pass: ${runtimeVerification.command ?? "unknown command"} (${runtimeVerification.status}).`;
+    if (!syncedInternalWarnings.includes(warning)) syncedInternalWarnings.push(warning);
+    if (!syncedVisibleWarnings.includes(warning)) syncedVisibleWarnings.push(warning);
+  }
   const safetyResolution = resolveSafetyLevel({
-    hasBlockedPatch,
+    hasBlockedPatch: hasBlockedPatch || runtimeVerificationFailed,
     developerConfidence,
-    decisionMode,
+    decisionMode: decisionMode === "blocked" ? "preview_only" : decisionMode,
     developerRiskScore: finalDeveloperRisk.score,
     intentMismatch: {
       hasMismatch: intentMismatchDecision.hasMismatch,
@@ -2944,6 +2975,19 @@ const decisionMode =
     safetyResolution: finalSafetyResolution,
     microEditProtection,
     decisionMode,
+    finalState,
+    finalExecutionOutcome,
+    attemptsUsed: runtimeVerification ? 1 : undefined,
+    validationBlocked,
+    ...(runtimeVerificationFailed && runtimeVerification
+      ? {
+          finalVerificationFailure: {
+            status: runtimeVerification.status,
+            command: runtimeVerification.command,
+            summary: runtimeVerification.summary,
+          },
+        }
+      : {}),
     applyPatches,
     patchResults,
     fileDiffs,

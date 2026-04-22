@@ -37,7 +37,6 @@ async function processDeveloperPatchJob(supabase, job) {
             task: requestPayload.task,
             repoPath: requestPayload.repoPath,
             hostedContext: requestPayload.hostedContext,
-            userOpenAiKey: requestPayload.userOpenAiKey,
             onProgress: async (stage) => {
                 await (0, developerPatchJobs_js_1.updateDeveloperPatchJobProgress)(supabase, job.id, stage);
             },
@@ -77,6 +76,7 @@ async function processDeveloperPatchJob(supabase, job) {
             decisionMode: getDeveloperDecisionModeFromResult(result, confidence),
             confidence,
             creditsUsed: 1,
+            tokensUsed: 50000,
             conversationId: requestPayload.conversationId,
             billingMode: requestPayload.billingMode,
             routeName: "/api/patch/jobs worker",

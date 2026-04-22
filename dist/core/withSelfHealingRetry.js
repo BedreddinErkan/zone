@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildDefaultFeedbackPrompt = buildDefaultFeedbackPrompt;
 exports.withSelfHealingRetry = withSelfHealingRetry;
+const buildRetryGuidanceFromFailure_js_1 = require("./buildRetryGuidanceFromFailure.js");
 function clampAttempts(value) {
     if (!Number.isFinite(value))
         return 3;
@@ -23,6 +24,9 @@ function buildDefaultFeedbackPrompt(feedback) {
     const issueLines = feedback.issues
         .map((issue) => `- [${issue.code}] ${issue.message}`)
         .join("\n");
+    const retryGuidance = (0, buildRetryGuidanceFromFailure_js_1.buildRetryGuidanceFromFailure)({
+        issues: feedback.issues,
+    });
     return [
         feedback.originalPrompt,
         "",
@@ -30,8 +34,12 @@ function buildDefaultFeedbackPrompt(feedback) {
         "The previous output was rejected due to the following issues:",
         issueLines,
         "",
+        "STRUCTURED RETRY BRIEF:",
+        (0, buildRetryGuidanceFromFailure_js_1.formatRetryGuidanceBrief)(retryGuidance),
+        "",
         "Please fix ALL of the above issues and return a corrected output.",
         "Do NOT repeat the same mistakes.",
+        retryGuidance.nextAttemptConstraint,
         "=== END FEEDBACK ===",
     ].join("\n");
 }
