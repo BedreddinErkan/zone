@@ -40,13 +40,7 @@ export function createOpenAIClient(userApiKey?: string): OpenAI {
   const mode = getInferenceMode();
   const apiKey = trimmedUserApiKey || process.env.OPENAI_API_KEY;
 
-  if (trimmedUserApiKey) {
-    console.log(
-      `[byok] openai key source=user mode=${mode} prefix=${trimmedUserApiKey.slice(0, 7)}`
-    );
-  } else {
-    console.log(`[byok] openai key source=hosted mode=${mode}`);
-  }
+  console.log(`[zone] openai key source=${trimmedUserApiKey ? "user" : "env"} mode=${mode}`);
 
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is missing for local inference mode.");

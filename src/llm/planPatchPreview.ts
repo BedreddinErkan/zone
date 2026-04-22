@@ -34,10 +34,9 @@ export async function planPatchPreviewWithLlm(input: {
   suggestedFiles: { path: string; action: string; reason: string }[];
   fileContexts: { path: string; content: string }[];
   schemaAwareSummary?: string[];
-  userOpenAiKey?: string;
   executionPlan?: ExecutionPlan | null;
 }): Promise<LlmPatchPlan> {
-  const client = createOpenAIClient(input.userOpenAiKey);
+  const client = createOpenAIClient();
   const model = getModelName();
 
   const combinedContext = input.fileContexts

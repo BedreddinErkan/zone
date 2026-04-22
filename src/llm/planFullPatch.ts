@@ -80,10 +80,9 @@ export async function planFullPatchWithLlm(input: {
   normalizedTaskIntent?: string;
   relevantFiles?: Array<{ path: string; content?: string }>;
   existingTargetFiles?: string[];
-  userOpenAiKey?: string;
   executionPlan?: ExecutionPlan | null;
 }): Promise<FullPatchResult> {
-  const client = createOpenAIClient(input.userOpenAiKey);
+  const client = createOpenAIClient();
   const model = getModelName("high");
 const outputMode: FullPatchOutputMode = "find_replace_patch";
   const prompt = buildFullPatchPrompt({

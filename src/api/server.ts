@@ -132,7 +132,6 @@ app.use(
     allowedHeaders: [
       "Content-Type",
       "Authorization",
-      "X-User-OpenAI-Key",
       "Accept",
     ],
     exposedHeaders: ["Content-Length", "X-Request-Id"],
@@ -519,8 +518,7 @@ async function handleCheckAccess(req: express.Request, res: express.Response): P
   const userId = typeof req.query.userId === "string" ? req.query.userId : "";
   const conversationId =
     typeof req.query.conversationId === "string" ? req.query.conversationId : "";
-  const billingMode =
-    typeof req.query.billingMode === "string" ? req.query.billingMode : undefined;
+  const billingMode = undefined;
   const repoPath =
     typeof req.query.repoPath === "string" ? req.query.repoPath : undefined;
   const role = typeof req.query.role === "string" ? req.query.role : undefined;
@@ -528,7 +526,6 @@ async function handleCheckAccess(req: express.Request, res: express.Response): P
     routeName: "/api/check-access",
     userId: userId || null,
     billingMode: billingMode ?? null,
-    isByok: false,
     repoPath: repoPath ?? null,
     role: role ?? null,
   });
@@ -832,14 +829,6 @@ async function ensureRunAuthorized(
   }
 
   try {
-    const requestedBillingMode =
-      typeof options?.billingMode === "string" && options.billingMode.trim()
-        ? options.billingMode.trim().toLowerCase()
-        : "hosted";
-    if (requestedBillingMode === "byok") {
-      return { allowed: true };
-    }
-
     const profileQuery = supabase.from("profiles") as unknown as {
       select: (columns: string) => {
         eq: (column: string, value: string) => {
@@ -985,9 +974,8 @@ async function createDeveloperPatchJobPayload(input: {
   repoPath: string;
   userId: string;
   conversationId?: string;
-  billingMode?: "hosted" | "byok";
+  billingMode?: "hosted";
   hostedContext?: HostedDeveloperContextPayload;
-  isByok: boolean;
 }): Promise<DeveloperPatchJobRequestPayload> {
   let hostedContext = input.hostedContext;
   if (
@@ -1006,7 +994,6 @@ async function createDeveloperPatchJobPayload(input: {
     conversationId: input.conversationId,
     billingMode: input.billingMode,
     hostedContext,
-    isByok: input.isByok,
   };
 }
 
@@ -1040,8 +1027,6 @@ async function enhanceTask(input: {
   role: string;
   repoPath: string;
   hostedContext?: HostedEnhanceContextPayload;
-  userOpenAiKey?: string;
-  isByok?: boolean;
 }): Promise<string> {
   try {
     const repoContext =
@@ -1074,7 +1059,7 @@ async function enhanceTask(input: {
     const resolvedRepoContext =
       typeof repoContext === "string" ? repoContext : await repoContext;
 
-    const client = createOpenAIClient(input.userOpenAiKey);
+    const client = createOpenAIClient();
     const model = getModelName();
     const response = await client.responses.create({
       model,
@@ -1319,7 +1304,6 @@ app.post("/api/analyze", async (req, res) => {
 });
 
 app.post("/api/patch/jobs", async (req, res) => {
-    const isByok = false;
     const { task, repoPath, userId, hostedContext, conversationId, billingMode } =
       req.body ?? {};
 
@@ -1350,7 +1334,6 @@ app.post("/api/patch/jobs", async (req, res) => {
       conversationId,
       billingMode,
       hostedContext,
-      isByok,
     });
     const job = await createDeveloperPatchJob(supabase, {
       userId,
@@ -1448,11 +1431,7 @@ app.get("/api/patch/jobs/:runId/result", async (req, res) => {
 app.post("/api/patch", async (req, res) => {
   const perf = startZoneApiPerfRun("/api/patch");
   perf.mark("route entered");
-  const isByok = false;
-  const billingMode =
-    typeof req.body?.billingMode === "string" && req.body.billingMode.trim()
-      ? (req.body.billingMode.trim() as "hosted" | "byok")
-      : "hosted";
+  const billingMode = "hosted";
   if (shouldProxyHostedRequest(req, "/api/patch")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1473,7 +1452,7 @@ app.post("/api/patch", async (req, res) => {
     return;
   }
 
-  const { task, repoPath, userId, hostedContext, conversationId } =
+  const { task, repoPath, runId, userId, hostedContext, conversationId } =
     req.body;
   perf.mark("request normalized");
 
@@ -1535,7 +1514,6 @@ if (result.ok && result.applyPatches.length > 0) {
       routeName: "/api/patch",
       userId: typeof userId === "string" ? userId.trim() : null,
       billingMode: billingMode ?? null,
-      isByok,
     });
 
     const loggedConversationId = await logRun({
@@ -1546,6 +1524,7 @@ if (result.ok && result.applyPatches.length > 0) {
       decisionMode:
         result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
       confidence,
+      executionId: typeof runId === "string" ? runId : undefined,
       creditsUsed: 1,
       conversationId,
       billingMode,
@@ -1563,11 +1542,7 @@ perf.finish("complete");
 res.json(result);
 });
 app.post("/api/dry-run", async (req, res) => {
-  const isByok = false;
-  const billingMode =
-    typeof req.body?.billingMode === "string" && req.body.billingMode.trim()
-      ? (req.body.billingMode.trim() as "hosted" | "byok")
-      : "hosted";
+  const billingMode = "hosted";
   if (shouldProxyHostedRequest(req, "/api/dry-run")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1586,7 +1561,7 @@ app.post("/api/dry-run", async (req, res) => {
     return;
   }
 
-  const { task, repoPath, userId, hostedContext, conversationId } =
+  const { task, repoPath, runId, userId, hostedContext, conversationId } =
     req.body;
 
   const authorization = await ensureRunAuthorized(userId, {
@@ -1647,7 +1622,6 @@ if (result.applyPatches.length > 0) {
     routeName: "/api/dry-run",
     userId: typeof userId === "string" ? userId.trim() : null,
     billingMode: billingMode ?? null,
-    isByok,
   });
 
   const loggedConversationId = await logRun({
@@ -1658,6 +1632,7 @@ if (result.applyPatches.length > 0) {
     decisionMode:
       result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
     confidence,
+    executionId: typeof runId === "string" ? runId : undefined,
       creditsUsed: 1,
       conversationId,
       billingMode,
@@ -1782,7 +1757,7 @@ app.post("/api/run-verification", async (req, res) => {
 });
 
 app.post("/api/refine-prompt", async (req, res) => {
-  const billingMode: "hosted" | "byok" = "hosted";
+  const billingMode = "hosted";
   if (shouldProxyHostedRequest(req, "/api/refine-prompt")) {
     await proxyHostedZoneRequest(req, res, "/api/refine-prompt");
     return;
@@ -1823,11 +1798,7 @@ app.post("/api/refine-prompt", async (req, res) => {
 });
 
 app.post("/api/enhance-task", async (req, res) => {
-  const isByok = false;
-  const billingMode =
-    typeof req.body?.billingMode === "string" && req.body.billingMode.trim()
-      ? (req.body.billingMode.trim() as "hosted" | "byok")
-      : "hosted";
+  const billingMode = "hosted";
   if (shouldProxyHostedRequest(req, "/api/enhance-task")) {
     const { role, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1859,7 +1830,6 @@ app.post("/api/enhance-task", async (req, res) => {
       role,
       repoPath,
       hostedContext,
-      isByok,
     });
     res
       .type("application/json")
@@ -1873,11 +1843,7 @@ app.post("/api/enhance-task", async (req, res) => {
 });
 
 app.post("/api/test-engineer", async (req, res) => {
-  const isByok = false;
-  const billingMode =
-    typeof req.body?.billingMode === "string" && req.body.billingMode.trim()
-      ? (req.body.billingMode.trim() as "hosted" | "byok")
-      : "hosted";
+  const billingMode = "hosted";
 if (shouldProxyHostedRequest(req, "/api/test-engineer")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -1947,7 +1913,6 @@ console.log("[zone-billing-debug] execution success reached", {
   routeName: "/api/test-engineer",
   userId: normalizedUserId,
   billingMode: billingMode ?? null,
-  isByok,
 });
 const loggedConversationId = await logRun({
   userId,
@@ -1959,6 +1924,7 @@ const loggedConversationId = await logRun({
     result.confidence
   ),
   confidence: result.confidence,
+  executionId: typeof runId === "string" ? runId : undefined,
   creditsUsed: 1,
   conversationId,
   billingMode,
@@ -1980,11 +1946,7 @@ const loggedConversationId = await logRun({
 });
 
 app.post("/api/data-analyst", async (req, res) => {
-  const isByok = false;
-  const billingMode =
-    typeof req.body?.billingMode === "string" && req.body.billingMode.trim()
-      ? (req.body.billingMode.trim() as "hosted" | "byok")
-      : "hosted";
+  const billingMode = "hosted";
 if (shouldProxyHostedRequest(req, "/api/data-analyst")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -2050,7 +2012,6 @@ const result = await runDataAnalystFlow({
     routeName: "/api/data-analyst",
     userId: normalizedUserId,
     billingMode: billingMode ?? null,
-    isByok,
   });
   const loggedConversationId = await logRun({
   userId,
@@ -2062,6 +2023,7 @@ const result = await runDataAnalystFlow({
     result.confidence
   ),
   confidence: result.confidence,
+  executionId: typeof runId === "string" ? runId : undefined,
   creditsUsed: 1,
   conversationId,
   billingMode,

@@ -15,8 +15,6 @@ export type DeveloperPatchJobRequestPayload = {
   conversationId?: string;
   billingMode?: ConversationBillingMode;
   hostedContext?: unknown;
-  userOpenAiKey?: string;
-  isByok?: boolean;
 };
 
 export type DeveloperPatchJobRecord = {

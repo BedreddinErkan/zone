@@ -28,9 +28,8 @@ export async function refinePrompt(input: {
   plan?: PromptRefinementPlan;
   relevantFiles?: string[];
   reason?: string;
-  userOpenAiKey?: string;
 }): Promise<string> {
-  const client = createOpenAIClient(input.userOpenAiKey);
+  const client = createOpenAIClient();
   const model = getModelName();
   const role = input.role || "developer";
   const relevantFiles = (input.relevantFiles ?? []).slice(0, 8).join(", ") || "unknown";

@@ -14,10 +14,6 @@ export interface ResolveBillingActionInput {
 export function resolveBillingAction(
   input: ResolveBillingActionInput
 ): BillingAction {
-  if (input.mode === "byok") {
-    return "FREE";
-  }
-
   const tokenCreditsUsed = input.tokenCreditsUsed ?? 0;
   const tokenCreditsLimit = input.tokenCreditsLimit ?? 500000;
 

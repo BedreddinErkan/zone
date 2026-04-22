@@ -141,7 +141,6 @@ export async function runDataAnalystFlow(input: {
   billingMode?: ConversationBillingMode;
   onProgress?: (stage: string) => void;
   hostedContext?: HostedDataAnalystContextInput;
-  userOpenAiKey?: string;
 }): Promise<DataAnalystFlowResult> {
   let allFiles: RepoFile[];
   try {
@@ -201,7 +200,7 @@ export async function runDataAnalystFlow(input: {
   });
 
   input.onProgress?.("Generating patch...");
-  const client = createOpenAIClient(input.userOpenAiKey);
+  const client = createOpenAIClient();
   const model = getModelName();
 
   const retryResult = await withSelfHealingRetry({

@@ -70,9 +70,8 @@ export async function generateExecutionPlan(input: {
   task: string;
   repoSummary: string;
   relevantFiles: string[];
-  userOpenAiKey?: string;
 }): Promise<ExecutionPlan> {
-  const client = createOpenAIClient(input.userOpenAiKey);
+  const client = createOpenAIClient();
   const model = getModelName();
   const relevantFiles = input.relevantFiles.slice(0, 8).join("\n") || "(none)";
 

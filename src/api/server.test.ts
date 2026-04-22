@@ -667,11 +667,13 @@ export function LoginForm() {
         })
       );
       expect(supabaseRpcMock).toHaveBeenCalledWith(
-        "deduct_tokens",
-        {
+        "deduct_tokens_idempotent",
+        expect.objectContaining({
           p_user_id: "clerk_user_789",
+          p_execution_id: expect.any(String),
           p_tokens: 50000,
-        }
+          p_billing_mode: "hosted",
+        })
       );
     });
   });
@@ -738,11 +740,13 @@ export function LoginForm() {
         credits_used: 1,
       });
       expect(supabaseRpcMock).toHaveBeenCalledWith(
-        "deduct_tokens",
-        {
+        "deduct_tokens_idempotent",
+        expect.objectContaining({
           p_user_id: "clerk_user_123",
+          p_execution_id: expect.any(String),
           p_tokens: 50000,
-        }
+          p_billing_mode: "hosted",
+        })
       );
     });
   });
@@ -910,7 +914,7 @@ export function LoginForm() {
     expect(body.conversationId).toBe("conv_new");
   });
 
-  it("does not deduct for successful Pro + BYOK runs when billingMode is byok", async () => {
+  it("deducts for successful hosted runs", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
@@ -936,7 +940,7 @@ export function LoginForm() {
       data: {
         id: "conv_byok",
         user_id: "clerk_user_123",
-        mode: "byok",
+        mode: "hosted",
         repo_path: "C:/repo",
         role: "developer",
         charged_run_count: 0,
@@ -951,7 +955,7 @@ export function LoginForm() {
       data: {
         id: "conv_byok",
         user_id: "clerk_user_123",
-        mode: "byok",
+        mode: "hosted",
         repo_path: "C:/repo",
         role: "developer",
         charged_run_count: 0,
@@ -973,14 +977,14 @@ export function LoginForm() {
         task: "fix login validation",
         repoPath: "C:/repo",
         userId: "clerk_user_123",
-        billingMode: "byok",
+        billingMode: "hosted",
       }),
     });
 
     const body = await response.json();
     expect(response.status).toBe(200);
     expect(body.conversationId).toBe("conv_byok");
-    expect(supabaseRpcMock).not.toHaveBeenCalled();
+    expect(supabaseRpcMock).toHaveBeenCalled();
   });
 
   it("still deducts for successful Hosted runs even when a user key header is present", async () => {
@@ -1024,11 +1028,13 @@ export function LoginForm() {
     expect(response.status).toBe(200);
     await vi.waitFor(() => {
       expect(supabaseRpcMock).toHaveBeenCalledWith(
-        "deduct_tokens",
-        {
+        "deduct_tokens_idempotent",
+        expect.objectContaining({
           p_user_id: "clerk_user_123",
+          p_execution_id: expect.any(String),
           p_tokens: 50000,
-        }
+          p_billing_mode: "hosted",
+        })
       );
     });
   });
@@ -1101,11 +1107,13 @@ export function LoginForm() {
         })
       );
       expect(supabaseRpcMock).toHaveBeenCalledWith(
-        "deduct_tokens",
-        {
+        "deduct_tokens_idempotent",
+        expect.objectContaining({
           p_user_id: "clerk_user_456",
+          p_execution_id: expect.any(String),
           p_tokens: 50000,
-        }
+          p_billing_mode: "hosted",
+        })
       );
     });
   });
@@ -1783,7 +1791,7 @@ export function LoginForm() {
     expect(body.reason).toBe("token_limit_reached");
   });
 
-  it("allows Free + BYOK even when hosted tokens are exhausted", async () => {
+  it("blocks hosted access when tokens are exhausted", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
@@ -1799,16 +1807,14 @@ export function LoginForm() {
       error: null,
     });
 
-    const response = await fetch(
-      `${baseUrl}/api/check-access?userId=clerk_user_123&billingMode=byok`
-    );
+    const response = await fetch(`${baseUrl}/api/check-access?userId=clerk_user_123`);
 
     const body = await response.json();
-    expect(response.status).toBe(200);
-    expect(body).toEqual({ ok: true });
+    expect(response.status).toBe(402);
+    expect(body.reason).toBe("token_limit_reached");
   });
 
-  it("allows Pro + BYOK when tokens remain", async () => {
+  it("allows hosted access for a pro user when tokens remain", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
     supabaseProfileMaybeSingleMock.mockResolvedValue({
@@ -1824,9 +1830,7 @@ export function LoginForm() {
       error: null,
     });
 
-    const response = await fetch(
-      `${baseUrl}/api/check-access?userId=clerk_user_123&billingMode=byok`
-    );
+    const response = await fetch(`${baseUrl}/api/check-access?userId=clerk_user_123`);
 
     const body = await response.json();
     expect(response.status).toBe(200);

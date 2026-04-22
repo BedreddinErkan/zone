@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 type ConversationRow = {
   id: string;
   user_id: string;
-  mode: "hosted" | "byok";
+  mode: "hosted";
   repo_path: string;
   role: "developer" | "test_engineer" | "data_analyst";
   charged_run_count: number;
@@ -215,8 +215,13 @@ describe("logRun billing matrix", () => {
     expect(conversationId).toBeTruthy();
     expect(fake.rpcCalls).toEqual([
       {
-        name: "deduct_credits_and_increment_runs",
-        payload: { p_user_id: "user_123", p_credits: 1 },
+        name: "deduct_tokens_idempotent",
+        payload: expect.objectContaining({
+          p_user_id: "user_123",
+          p_tokens: 50000,
+          p_billing_mode: "hosted",
+          p_execution_id: expect.any(String),
+        }),
       },
     ]);
     expect([...fake.conversations.values()]).toEqual([
@@ -227,39 +232,6 @@ describe("logRun billing matrix", () => {
         role: "developer",
         charged_run_count: 1,
       }),
-    ]);
-  });
-
-  it("charges for Free + BYOK", async () => {
-    const fake = createFakeSupabase();
-    fake.setProfileSubscriptionStatus("free");
-    createClientMock.mockReturnValue(fake.supabase);
-
-    const { logRun } = await import("./runLogging.js");
-    const conversationId = await logRun({
-      userId: "user_123",
-      role: "developer",
-      task: "byok free user run",
-      repoPath: "C:/repo",
-      decisionMode: "safe_to_apply",
-      confidence: 88,
-      creditsUsed: 1,
-      billingMode: "byok",
-      isByok: true,
-    });
-
-    expect(conversationId).toBeTruthy();
-    expect(fake.rpcCalls).toEqual([
-      {
-        name: "deduct_credits_and_increment_runs",
-        payload: { p_user_id: "user_123", p_credits: 1 },
-      },
-    ]);
-    expect([...fake.conversations.values()]).toEqual([
-      expect.objectContaining({
-        mode: "byok",
-        charged_run_count: 1,
-      })
     ]);
   });
 
@@ -283,8 +255,13 @@ describe("logRun billing matrix", () => {
     expect(conversationId).toBeTruthy();
     expect(fake.rpcCalls).toEqual([
       {
-        name: "deduct_credits_and_increment_runs",
-        payload: { p_user_id: "user_123", p_credits: 1 },
+        name: "deduct_tokens_idempotent",
+        payload: expect.objectContaining({
+          p_user_id: "user_123",
+          p_tokens: 50000,
+          p_billing_mode: "hosted",
+          p_execution_id: expect.any(String),
+        }),
       },
     ]);
     expect([...fake.conversations.values()]).toEqual([
@@ -292,33 +269,6 @@ describe("logRun billing matrix", () => {
         mode: "hosted",
         charged_run_count: 1,
       })
-    ]);
-  });
-
-  it("does not charge for Pro + BYOK", async () => {
-    const fake = createFakeSupabase();
-    fake.setProfileSubscriptionStatus("pro");
-    createClientMock.mockReturnValue(fake.supabase);
-
-    const { logRun } = await import("./runLogging.js");
-    const conversationId = await logRun({
-      userId: "user_123",
-      role: "developer",
-      task: "byok task",
-      repoPath: "C:/repo",
-      decisionMode: "safe_to_apply",
-      confidence: 80,
-      creditsUsed: 1,
-      isByok: true,
-    });
-
-    expect(conversationId).toBeTruthy();
-    expect(fake.rpcCalls).toEqual([]);
-    expect([...fake.conversations.values()]).toEqual([
-      expect.objectContaining({
-        mode: "byok",
-        charged_run_count: 0,
-      }),
     ]);
   });
 
@@ -362,7 +312,7 @@ describe("logRun billing matrix", () => {
     fake.setProfileSubscriptionStatus("free");
     fake.seedConversation({
       id: "conv_existing",
-      mode: "byok",
+      mode: "hosted",
       charged_run_count: 99,
       refinement_count: 42,
       has_free_refinement_been_used: true,
@@ -379,14 +329,18 @@ describe("logRun billing matrix", () => {
       confidence: 90,
       creditsUsed: 1,
       conversationId: "conv_existing",
-      billingMode: "byok",
-      isByok: true,
+      billingMode: "hosted",
     });
 
     expect(fake.rpcCalls).toEqual([
       {
-        name: "deduct_credits_and_increment_runs",
-        payload: { p_user_id: "user_123", p_credits: 1 },
+        name: "deduct_tokens_idempotent",
+        payload: expect.objectContaining({
+          p_user_id: "user_123",
+          p_tokens: 50000,
+          p_billing_mode: "hosted",
+          p_execution_id: "conv_existing",
+        }),
       },
     ]);
   });
@@ -447,8 +401,13 @@ describe("logRun billing matrix", () => {
     expect(conversationId).toBeNull();
     expect(fake.rpcCalls).toEqual([
       {
-        name: "deduct_credits_and_increment_runs",
-        payload: { p_user_id: "user_123", p_credits: 1 },
+        name: "deduct_tokens_idempotent",
+        payload: expect.objectContaining({
+          p_user_id: "user_123",
+          p_tokens: 50000,
+          p_billing_mode: "hosted",
+          p_execution_id: expect.any(String),
+        }),
       },
     ]);
   });

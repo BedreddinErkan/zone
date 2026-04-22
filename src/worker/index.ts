@@ -103,7 +103,6 @@ async function processDeveloperPatchJob(
       routeName: "/api/patch/jobs worker",
       userId: requestPayload.userId,
       billingMode: requestPayload.billingMode ?? null,
-      isByok: Boolean(requestPayload.isByok),
     });
 
     const conversationId = await logRun({

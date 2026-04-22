@@ -1920,7 +1920,6 @@ export async function runLlmPatchFlow(input: {
   conversationId?: string;
   billingMode?: ConversationBillingMode;
   hostedContext?: HostedDeveloperContextInput;
-  userOpenAiKey?: string;
   onProgress?: (stage: string) => void;
   perfLabel?: string;
 }): Promise<LlmPatchFlowResult> {
@@ -2000,7 +1999,6 @@ export async function runLlmPatchFlow(input: {
       task: input.task,
       repoSummary: projectSummary,
       relevantFiles: relevantFiles.map((file) => file.path),
-      userOpenAiKey: input.userOpenAiKey,
     });
     console.log(`[zone-plan] generated steps=${executionPlan.steps.length}`);
     console.log(`[zone-plan] scope=${executionPlan.scopeSummary}`);

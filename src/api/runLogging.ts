@@ -19,6 +19,7 @@ export type RunLogInput = {
   decisionMode: string;
   confidence: number;
   creditsUsed: number;
+  executionId?: string;
   conversationId?: string;
   billingMode?: ConversationBillingMode;
   tokensUsed?: number;
@@ -84,8 +85,7 @@ logBillingDebug("run log insert completed", {
   routeName: input.routeName ?? "unknown",
   userId: effectiveUserId,
 });
-  const billingMode: ConversationBillingMode =
-    input.billingMode === "byok" ? "byok" : "hosted";
+  const billingMode: ConversationBillingMode = "hosted";
 let profileResult: {
   data: { subscription_status?: string | null } | null;
   error?: unknown;
@@ -197,9 +197,15 @@ logBillingDebug("billing inputs before resolver", {
   const tokensToDeduct = typeof input.tokensUsed === "number" && input.tokensUsed > 0
     ? input.tokensUsed
     : 50000;
-  const rpcResult = await supabase.rpc("deduct_tokens", {
+  const executionId =
+    typeof input.executionId === "string" && input.executionId.trim()
+      ? input.executionId.trim()
+      : conversation?.id ?? "";
+  const rpcResult = await supabase.rpc("deduct_tokens_idempotent", {
     p_user_id: effectiveUserId,
+    p_execution_id: executionId,
     p_tokens: tokensToDeduct,
+    p_billing_mode: billingMode,
   });
 
   if (rpcResult?.error) {

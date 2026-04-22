@@ -1,4 +1,4 @@
-export type ConversationBillingMode = "hosted" | "byok";
+export type ConversationBillingMode = "hosted";
 
 export type ConversationRole =
   | "developer"
