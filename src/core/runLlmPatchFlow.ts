@@ -102,6 +102,7 @@ export type LlmPatchFlowResult =
       planAlignment?: PlanAlignmentResult;
       verification?: VerificationResult;
       runtimeVerification?: RuntimeVerificationResult;
+      targetFile?: string;
       applyPatches: Array<{ filePath: string; fullContent: string }>;
       patchResults: PatchResult[];
       fileDiffs?: FileDiff[];
@@ -565,6 +566,24 @@ function scoreConstraintAwareContextFile(input: {
   }
 
   return score;
+}
+
+function assessConstrainedTargetEligibility(input: {
+  task: string;
+  fileContent: string;
+}): {
+  eligible: boolean;
+  score: number;
+} {
+  const score = scoreConstraintAwareContextFile({
+    task: input.task,
+    content: input.fileContent,
+  });
+
+  return {
+    eligible: score >= 20,
+    score,
+  };
 }
 
 function hasSensitiveLogging(content: string): boolean {
@@ -2483,6 +2502,7 @@ export async function runLlmPatchFlow(input: {
   }
 
   const vagueTask = isVagueDeveloperTask(input.task);
+  const selectedTargetFile = patchPlan.patches[0]?.path ?? null;
   // Task-level risk scoring for developer
   const taskRiskResult = computeRiskScore({ task: input.task, role: "developer", codeIntent: taskIntent.codeIntent });
   logRiskDebug("runLlmPatchFlow taskRiskResult", {
@@ -2497,6 +2517,7 @@ export async function runLlmPatchFlow(input: {
       warnings: [`[HIGH_RISK] Task risk score ${taskRiskResult.score} — blocked before patch generation.`],
       developerConfidence: 0,
       decisionMode: "preview_only",
+      ...(selectedTargetFile ? { targetFile: selectedTargetFile } : {}),
       applyPatches: [],
       patchResults: [],
       fileDiffs: [],
@@ -2514,6 +2535,7 @@ export async function runLlmPatchFlow(input: {
       warnings: [DEVELOPER_VAGUE_TASK_WARNING],
       developerConfidence: 60,
       decisionMode: "preview_only",
+      ...(selectedTargetFile ? { targetFile: selectedTargetFile } : {}),
       applyPatches: [],
       patchResults: [],
       fileDiffs: [],
@@ -2669,6 +2691,38 @@ export async function runLlmPatchFlow(input: {
           ? "find_replace_patch"
           : "full_content";
       const llmFileContent = contextWindow?.snippet ?? fileContent;
+      if (
+        applyTargets.length === 1 &&
+        isConstrainedLocalizedPatchTask(input.task)
+      ) {
+        const targetEligibility = assessConstrainedTargetEligibility({
+          task: input.task,
+          fileContent,
+        });
+        if (!targetEligibility.eligible) {
+          const mismatchWarning = buildPatchConflictWarning({
+            filePath: patch.path,
+            reason: "target_file_constraint_mismatch",
+            score: targetEligibility.score,
+          });
+          internalWarnings.push(mismatchWarning);
+          visibleWarnings.push(mismatchWarning);
+          patchResults.push({
+            filePath: patch.path,
+            status: "failed",
+            reason: "target_file_constraint_mismatch",
+          });
+          console.log(
+            "[zone-target-eligibility]",
+            JSON.stringify({
+              filePath: patch.path,
+              score: targetEligibility.score,
+              reason: "target_file_constraint_mismatch",
+            })
+          );
+          continue;
+        }
+      }
       const targetedRelevantFiles = microEditMode
         ? [
             {
@@ -3359,6 +3413,7 @@ const decisionMode =
   const patchPreview = [
     "=== LLM PATCH PREVIEW ===",
     `Summary: ${patchPlan.summary}`,
+    ...(selectedTargetFile ? [`Targeted file: ${selectedTargetFile}`] : []),
     "",
     "Patches:",
     ...patchPlan.patches.map(
@@ -3388,6 +3443,7 @@ const decisionMode =
     patchPreview,
     warnings: syncedVisibleWarnings,
     ...(noCodeChangeReason ? { reason: noCodeChangeReason } : {}),
+    ...(selectedTargetFile ? { targetFile: selectedTargetFile } : {}),
     developerConfidence,
     developerRisk: finalDeveloperRisk,
     intentMismatch: {

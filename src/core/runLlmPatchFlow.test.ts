@@ -1741,6 +1741,8 @@ expect(result.safetyResolution).toEqual(
 
     expect(result.ok).toBe(true);
     if (result.ok) {
+      expect(result.targetFile).toBe("src/pages/home.html");
+      expect(result.patchPreview).toContain("Targeted file: src/pages/home.html");
       expect(result.applyPatches).toHaveLength(1);
       expect(result.applyPatches[0].fullContent).toContain(
         'style="background:#1a8cdb"'
@@ -2121,6 +2123,81 @@ expect(result.safetyResolution).toEqual(
         outputMode: "full_content",
       })
     );
+  });
+
+  it("blocks constrained tasks when the chosen target file lacks the required existing form structure", async () => {
+    const files = [
+      buildRepoFile("client/src/pages/PatientsPage.jsx", "frontend"),
+      buildRepoFile("client/src/components/ClinicLeads.jsx", "frontend"),
+    ];
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React frontend"] });
+    rankRelevantFilesMock.mockReturnValue([
+      { ...files[0], score: 60 },
+      { ...files[1], score: 58 },
+    ]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Add small create-form validation",
+      steps: ["Reuse the existing Patients form state and submit flow"],
+      suggestedFiles: [
+        { path: "client/src/components/ClinicLeads.jsx", reason: "Lead capture component", action: "inspect" },
+        { path: "client/src/pages/PatientsPage.jsx", reason: "Patients page", action: "inspect" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockResolvedValue({
+      "C:/repo/client/src/components/ClinicLeads.jsx": `
+        export function ClinicLeads() {
+          return <section><h2>Clinic leads</h2></section>;
+        }
+      `,
+      "C:/repo/client/src/pages/PatientsPage.jsx": `
+        import { useState } from "react";
+        export function PatientsPage() {
+          const [formData, setFormData] = useState({ firstName: "" });
+          const handleSubmit = async (event) => {
+            event.preventDefault();
+            await api.post("/patients", formData);
+          };
+          return <form onSubmit={handleSubmit}><button type="submit">Create</button></form>;
+        }
+      `,
+    });
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Patch summary",
+      patches: [
+        {
+          path: "client/src/components/ClinicLeads.jsx",
+          operation: "modify",
+          summary: "Add validation near the create flow",
+          targetHint: "existing create form",
+          contentPreview: "validation around submit flow",
+        },
+      ],
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "Add minimal client-side validation to the existing Patients page create form only. Reuse the existing form state and existing submit flow. Do not create a new form. Do not introduce a new API call. Do not modify unrelated components.",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.targetFile).toBe("client/src/components/ClinicLeads.jsx");
+      expect(result.patchPreview).toContain(
+        "Targeted file: client/src/components/ClinicLeads.jsx"
+      );
+      expect(result.applyPatches).toEqual([]);
+      expect(result.reason).toBe("target_file_constraint_mismatch");
+      expect(result.finalExecutionOutcome).toBe("completed_with_issues");
+      expect(result.finalState).toBe("blocked");
+      expect(result.validationBlocked).toBe(true);
+      expect(result.warnings.join("\n")).toContain("target_file_constraint_mismatch");
+    }
+    expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
   });
 
   it("blocks protected src/ui files from developer apply patches", async () => {
