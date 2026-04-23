@@ -447,6 +447,115 @@ function countPatternMatches(content: string, patterns: RegExp[]): number {
   }, 0);
 }
 
+function detectExistingStructureTaskConstraints(task: string): {
+  requiresExistingForm: boolean;
+  requiresExistingSubmitFlow: boolean;
+  requiresExistingState: boolean;
+  avoidsNewForm: boolean;
+  avoidsNewApiCall: boolean;
+} {
+  const normalizedTask = task.toLowerCase();
+
+  return {
+    requiresExistingForm:
+      /\bexisting form\b/.test(normalizedTask) ||
+      /\bcreate form\b/.test(normalizedTask) ||
+      /\breuse existing form\b/.test(normalizedTask) ||
+      /\bdo not create (?:a )?new form\b/.test(normalizedTask),
+    requiresExistingSubmitFlow:
+      /\bexisting submit flow\b/.test(normalizedTask) ||
+      /\breuse existing submit flow\b/.test(normalizedTask) ||
+      /\bsubmit flow\b/.test(normalizedTask),
+    requiresExistingState:
+      /\breuse (?:the )?existing state\b/.test(normalizedTask) ||
+      /\bexisting state\b/.test(normalizedTask),
+    avoidsNewForm: /\bdo not create (?:a )?new form\b/.test(normalizedTask),
+    avoidsNewApiCall:
+      /\bdo not introduce (?:a )?new api call\b/.test(normalizedTask) ||
+      /\bdo not add (?:a )?new api call\b/.test(normalizedTask) ||
+      /\bno new api call\b/.test(normalizedTask),
+  };
+}
+
+function scoreConstraintAwareContextFile(input: {
+  task: string;
+  content: string;
+}): number {
+  const constraints = detectExistingStructureTaskConstraints(input.task);
+  if (
+    !constraints.requiresExistingForm &&
+    !constraints.requiresExistingSubmitFlow &&
+    !constraints.requiresExistingState &&
+    !constraints.avoidsNewForm &&
+    !constraints.avoidsNewApiCall
+  ) {
+    return 0;
+  }
+
+  const content = input.content.toLowerCase();
+  const hasFormStructure =
+    countPatternMatches(content, [
+      /<form\b/g,
+      /\buseform\b/g,
+      /\bformik\b/g,
+      /\bformstate\b/g,
+      /\bformvalues\b/g,
+      /\bformdata\b/g,
+    ]) > 0;
+  const hasSubmitFlow =
+    countPatternMatches(content, [
+      /\bonsubmit\b/g,
+      /\bhandlesubmit\b/g,
+      /\bsubmit[a-z0-9_]*\s*\(/g,
+      /\bsubmit[a-z0-9_]*\s*=/g,
+      /type\s*=\s*["']submit["']/g,
+      /\bpreventdefault\s*\(/g,
+    ]) > 0;
+  const hasStateHandling =
+    countPatternMatches(content, [
+      /\busestate\b/g,
+      /\busereducer\b/g,
+      /\bformstate\b/g,
+      /\bset[a-z0-9_]+\s*\(/g,
+    ]) > 0;
+  const hasApiUsage =
+    countPatternMatches(content, [
+      /\bfetch\s*\(/g,
+      /\baxios\./g,
+      /\bapi\.(?:get|post|put|patch|delete)\s*\(/g,
+      /\bclient\.(?:get|post|put|patch|delete)\s*\(/g,
+      /\bmutate(?:async)?\s*\(/g,
+    ]) > 0;
+
+  let score = 0;
+
+  if (constraints.requiresExistingForm) {
+    score += hasFormStructure ? 26 : -18;
+  }
+
+  if (constraints.requiresExistingSubmitFlow) {
+    score += hasSubmitFlow ? 20 : -14;
+  }
+
+  if (constraints.requiresExistingState) {
+    score += hasStateHandling ? 16 : -10;
+  }
+
+  if (constraints.avoidsNewForm && !hasFormStructure) {
+    score -= 12;
+  }
+
+  if (constraints.avoidsNewApiCall && hasSubmitFlow && hasApiUsage) {
+    score += 8;
+  }
+
+  if (hasFormStructure && hasSubmitFlow && hasStateHandling) {
+    score += 12;
+  }
+
+  return score;
+}
+
 function hasSensitiveLogging(content: string): boolean {
   const loggingCalls = [
     ...content.matchAll(
@@ -2157,12 +2266,12 @@ export async function runLlmPatchFlow(input: {
     }
   }
 
-  // 5. Read top 4 suggested files
+  // 5. Read top suggested files
   const relevantFileScores = new Map(
     relevantFiles.map((file) => [file.path, file.score])
   );
   const llmSuggestedPaths = new Set((llmPlan?.suggestedFiles ?? []).map((file) => file.path));
-  const selectedContextFiles =
+  const preliminaryContextFiles =
     input.hostedContext?.contextFiles.map((file) => ({
       path: file.path,
       action: file.action,
@@ -2200,9 +2309,10 @@ export async function runLlmPatchFlow(input: {
 
         return a.path.localeCompare(b.path);
       })
-      .slice(0, 4);
+      .slice(0, 6);
 
   reportProgress("Loading file context...");
+  let selectedContextFiles = preliminaryContextFiles;
   let resolvedFileContexts: Array<{ path: string; content: string }>;
   if (input.hostedContext) {
     resolvedFileContexts = input.hostedContext.contextFiles.map((file) => ({
@@ -2210,15 +2320,65 @@ export async function runLlmPatchFlow(input: {
       content: file.content,
     }));
   } else {
-    const filePaths = selectedContextFiles
+    const filePaths = preliminaryContextFiles
       .map((f) => developerContextFiles.find((rf) => rf.path === f.path)?.absolutePath)
       .filter((p): p is string => typeof p === "string");
 
     const fileContentsMap = await readProjectFiles(filePaths);
-    resolvedFileContexts = Object.entries(fileContentsMap).map(([absPath, content]) => ({
-      path: allFiles.find((f) => f.absolutePath === absPath)?.path ?? absPath,
-      content,
-    }));
+    resolvedFileContexts = preliminaryContextFiles
+      .map((file) => {
+        const absolutePath = developerContextFiles.find((rf) => rf.path === file.path)?.absolutePath;
+        if (!absolutePath) {
+          return null;
+        }
+
+        return {
+          path: file.path,
+          content: fileContentsMap[absolutePath] ?? "",
+        };
+      })
+      .filter((file): file is { path: string; content: string } => file !== null);
+
+    const constraintAwareScores = new Map(
+      resolvedFileContexts.map((file) => [
+        file.path,
+        scoreConstraintAwareContextFile({
+          task: input.task,
+          content: file.content,
+        }),
+      ])
+    );
+
+    selectedContextFiles = [...preliminaryContextFiles]
+      .sort((a, b) => {
+        const constraintDifference =
+          (constraintAwareScores.get(b.path) ?? 0) - (constraintAwareScores.get(a.path) ?? 0);
+        if (constraintDifference !== 0) {
+          return constraintDifference;
+        }
+
+        const scoreDifference =
+          (relevantFileScores.get(b.path) ?? -1) - (relevantFileScores.get(a.path) ?? -1);
+        if (scoreDifference !== 0) {
+          return scoreDifference;
+        }
+
+        const suggestionDifference =
+          Number(llmSuggestedPaths.has(b.path)) - Number(llmSuggestedPaths.has(a.path));
+        if (suggestionDifference !== 0) {
+          return suggestionDifference;
+        }
+
+        return a.path.localeCompare(b.path);
+      })
+      .slice(0, 4);
+
+    const fileContextByPath = new Map(
+      resolvedFileContexts.map((file) => [file.path, file] as const)
+    );
+    resolvedFileContexts = selectedContextFiles
+      .map((file) => fileContextByPath.get(file.path))
+      .filter((file): file is { path: string; content: string } => file !== undefined);
   }
   perf.mark("file context loaded");
 // ── TOKEN BUDGET GUARD ──────────────────────────────────────────

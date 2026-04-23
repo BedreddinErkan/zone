@@ -279,6 +279,92 @@ describe("runLlmPatchFlow", () => {
     );
   });
 
+  it("prefers files that already contain the existing form state and submit flow for constrained tasks", async () => {
+    const files = [
+      buildRepoFile("client/src/pages/PatientsPage.jsx", "frontend"),
+      buildRepoFile("client/src/components/ClinicLeads.jsx", "frontend"),
+      buildRepoFile("client/src/App.jsx", "frontend"),
+    ];
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React frontend"] });
+    rankRelevantFilesMock.mockReturnValue([
+      { ...files[1], score: 58 },
+      { ...files[0], score: 54 },
+      { ...files[2], score: 14 },
+    ]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Add small create-form validation",
+      steps: ["Reuse the existing Patients form state and submit flow"],
+      suggestedFiles: [
+        { path: "client/src/components/ClinicLeads.jsx", reason: "Lead capture component", action: "inspect" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockResolvedValue({
+      "C:/repo/client/src/pages/PatientsPage.jsx": `
+        import { useState } from "react";
+        export function PatientsPage() {
+          const [formData, setFormData] = useState({ firstName: "" });
+          const handleSubmit = async (event) => {
+            event.preventDefault();
+            await api.post("/patients", formData);
+          };
+          return <form onSubmit={handleSubmit}><button type="submit">Create</button></form>;
+        }
+      `,
+      "C:/repo/client/src/components/ClinicLeads.jsx": `
+        export function ClinicLeads() {
+          return <section><h2>Clinic leads</h2></section>;
+        }
+      `,
+      "C:/repo/client/src/App.jsx": `
+        export function App() {
+          return <PatientsPage />;
+        }
+      `,
+    });
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Patch summary",
+      patches: [],
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "Add minimal client-side validation to the existing Patients page create form only. Reuse the existing form state and existing submit flow. Do not create a new form. Do not introduce a new API call.",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(planPatchPreviewWithLlmMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        suggestedFiles: [
+          {
+            path: "client/src/pages/PatientsPage.jsx",
+            reason: "High repo relevance for the requested developer task",
+            action: "inspect",
+          },
+          {
+            path: "client/src/components/ClinicLeads.jsx",
+            reason: "Lead capture component",
+            action: "inspect",
+          },
+          {
+            path: "client/src/App.jsx",
+            reason: "High repo relevance for the requested developer task",
+            action: "inspect",
+          },
+        ],
+        fileContexts: [
+          expect.objectContaining({ path: "client/src/pages/PatientsPage.jsx" }),
+          expect.objectContaining({ path: "client/src/components/ClinicLeads.jsx" }),
+          expect.objectContaining({ path: "client/src/App.jsx" }),
+        ],
+      })
+    );
+  });
+
   it("excludes irrelevant environment and build files from developer context selection", async () => {
     const files = [
       buildRepoFile("src/styles/landing.css", "frontend"),
