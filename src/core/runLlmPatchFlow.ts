@@ -568,21 +568,212 @@ function scoreConstraintAwareContextFile(input: {
   return score;
 }
 
+const CONSTRAINT_ENTITY_LEAD_STOPWORDS = new Set([
+  "the",
+  "a",
+  "an",
+  "this",
+  "that",
+  "these",
+  "those",
+  "each",
+  "every",
+  "our",
+  "your",
+  "my",
+  "their",
+  "its",
+  "existing",
+  "new",
+  "entire",
+  "whole",
+  "full",
+  "same",
+  "other",
+  "unrelated",
+  "any",
+  "another",
+  "generic",
+  "current",
+  "original",
+  "given",
+  "specified",
+  "login",
+  "sign",
+  "up",
+  "out",
+  "home",
+  "main",
+  "landing",
+  "error",
+  "settings",
+  "search",
+  "create",
+  "submit",
+  "edit",
+  "update",
+  "delete",
+  "filter",
+  "sort",
+  "select",
+  "client",
+  "server",
+  "side",
+  "web",
+  "mobile",
+  "add",
+  "use",
+  "using",
+  "apply",
+  "build",
+  "make",
+  "get",
+  "set",
+  "empty",
+  "blank",
+  "single",
+  "multi",
+  "related",
+  "only",
+  "first",
+  "last",
+  "next",
+  "previous",
+]);
+
+function normalizeConstrainedTaskText(task: string): string {
+  return task.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function extractConstrainedTaskEntityAnchors(normalizedTask: string): string[] {
+  const patterns = [
+    /\b([a-z][a-z0-9]+)\s+page\b/g,
+    /\b([a-z][a-z0-9]+)\s+form\b/g,
+    /\b([a-z][a-z0-9]+)\s+component\b/g,
+    /\b([a-z][a-z0-9]+)\s+screen\b/g,
+    /\b([a-z][a-z0-9]+)\s+view\b/g,
+  ];
+  const found: string[] = [];
+  for (const pattern of patterns) {
+    pattern.lastIndex = 0;
+    let match: RegExpExecArray | null = null;
+    while ((match = pattern.exec(normalizedTask)) !== null) {
+      const word = match[1];
+      if (word && !CONSTRAINT_ENTITY_LEAD_STOPWORDS.has(word)) {
+        found.push(word);
+      }
+    }
+  }
+  return [...new Set(found)];
+}
+
+function escapeRegExpChars(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function anchorMatchesTargetFile(
+  filePath: string,
+  fileContent: string,
+  anchor: string
+): boolean {
+  const pathLower = filePath.replace(/\\/g, "/").toLowerCase();
+  const baseName = (pathLower.split("/").pop() ?? pathLower).replace(
+    /\.[^/.]+$/,
+    ""
+  );
+  const contentLower = fileContent.toLowerCase();
+  const variants = new Set<string>([anchor]);
+  if (anchor.length >= 4 && anchor.endsWith("s")) {
+    variants.add(anchor.slice(0, -1));
+  } else if (anchor.length >= 4 && !anchor.endsWith("s")) {
+    variants.add(`${anchor}s`);
+  }
+
+  for (const term of variants) {
+    if (term.length < 3) {
+      continue;
+    }
+    if (pathLower.includes(term) || baseName.includes(term)) {
+      return true;
+    }
+    if (term.length >= 4 && contentLower.includes(term)) {
+      return true;
+    }
+    const boundary = new RegExp(
+      `\\b${escapeRegExpChars(term)}s?\\b`,
+      "i"
+    );
+    if (boundary.test(fileContent)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function targetMatchesConstrainedTaskEntities(input: {
+  filePath: string;
+  fileContent: string;
+  anchors: string[];
+}): boolean {
+  if (input.anchors.length === 0) {
+    return true;
+  }
+  return input.anchors.every((anchor) =>
+    anchorMatchesTargetFile(input.filePath, input.fileContent, anchor)
+  );
+}
+
 function assessConstrainedTargetEligibility(input: {
   task: string;
+  filePath: string;
   fileContent: string;
 }): {
   eligible: boolean;
   score: number;
+  structureScore: number;
+  entityMatch: boolean;
+  reason: string;
 } {
-  const score = scoreConstraintAwareContextFile({
+  const normalizedTask = normalizeConstrainedTaskText(input.task);
+  const entityAnchors = extractConstrainedTaskEntityAnchors(normalizedTask);
+  const structureScore = scoreConstraintAwareContextFile({
     task: input.task,
     content: input.fileContent,
   });
+  const structureOk = structureScore >= 20;
+  const entityMatch = targetMatchesConstrainedTaskEntities({
+    filePath: input.filePath,
+    fileContent: input.fileContent,
+    anchors: entityAnchors,
+  });
+
+  if (!structureOk) {
+    return {
+      eligible: false,
+      score: structureScore,
+      structureScore,
+      entityMatch,
+      reason: "target_file_constraint_mismatch",
+    };
+  }
+
+  if (!entityMatch) {
+    return {
+      eligible: false,
+      score: structureScore,
+      structureScore,
+      entityMatch: false,
+      reason: "target_entity_mismatch",
+    };
+  }
 
   return {
-    eligible: score >= 20,
-    score,
+    eligible: true,
+    score: structureScore,
+    structureScore,
+    entityMatch: true,
+    reason: "constraint_structure_ok",
   };
 }
 
@@ -2694,23 +2885,23 @@ export async function runLlmPatchFlow(input: {
       if (isConstrainedLocalizedPatchTask(input.task)) {
         const targetEligibility = assessConstrainedTargetEligibility({
           task: input.task,
+          filePath: patch.path,
           fileContent,
         });
         console.log(
           "[zone-target-eligibility]",
           JSON.stringify({
             filePath: patch.path,
-            score: targetEligibility.score,
+            structureScore: targetEligibility.structureScore,
+            entityMatch: targetEligibility.entityMatch,
             eligible: targetEligibility.eligible,
-            reason: targetEligibility.eligible
-              ? "constraint_structure_ok"
-              : "target_file_constraint_mismatch",
+            reason: targetEligibility.reason,
           })
         );
         if (!targetEligibility.eligible) {
           const mismatchWarning = buildPatchConflictWarning({
             filePath: patch.path,
-            reason: "target_file_constraint_mismatch",
+            reason: targetEligibility.reason,
             score: targetEligibility.score,
           });
           internalWarnings.push(mismatchWarning);
@@ -2718,7 +2909,7 @@ export async function runLlmPatchFlow(input: {
           patchResults.push({
             filePath: patch.path,
             status: "failed",
-            reason: "target_file_constraint_mismatch",
+            reason: targetEligibility.reason,
           });
           continue;
         }
