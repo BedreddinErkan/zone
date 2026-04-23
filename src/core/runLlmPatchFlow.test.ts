@@ -206,7 +206,6 @@ describe("runLlmPatchFlow", () => {
     expect(planPatchPreviewWithLlmMock).toHaveBeenCalledWith(
       expect.objectContaining({
         suggestedFiles: [
-          { path: "src/App.tsx", reason: "Visible entry point", action: "inspect" },
           {
             path: "server/routes/auth.ts",
             reason: "High repo relevance for the requested developer task",
@@ -217,6 +216,64 @@ describe("runLlmPatchFlow", () => {
             reason: "High repo relevance for the requested developer task",
             action: "inspect",
           },
+          { path: "src/App.tsx", reason: "Visible entry point", action: "inspect" },
+        ],
+      })
+    );
+  });
+
+  it("prefers higher-ranked localized files over broad app shells in preview context", async () => {
+    const files = [
+      buildRepoFile("client/src/App.jsx", "frontend"),
+      buildRepoFile("client/src/pages/PatientsPage.jsx", "frontend"),
+      buildRepoFile("client/src/components/PatientCreateForm.jsx", "frontend"),
+    ];
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React frontend"] });
+    rankRelevantFilesMock.mockReturnValue([
+      { ...files[1], score: 52 },
+      { ...files[2], score: 46 },
+      { ...files[0], score: 14 },
+    ]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Add small Patients form validation",
+      steps: ["Validate the create form fields"],
+      suggestedFiles: [
+        { path: "client/src/App.jsx", reason: "Visible entry point", action: "inspect" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, `content:${filePath}`]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Patch summary",
+      patches: [],
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "Add minimal client-side validation to the Patients page create form",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(planPatchPreviewWithLlmMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        suggestedFiles: [
+          {
+            path: "client/src/pages/PatientsPage.jsx",
+            reason: "High repo relevance for the requested developer task",
+            action: "inspect",
+          },
+          {
+            path: "client/src/components/PatientCreateForm.jsx",
+            reason: "High repo relevance for the requested developer task",
+            action: "inspect",
+          },
+          { path: "client/src/App.jsx", reason: "Visible entry point", action: "inspect" },
         ],
       })
     );

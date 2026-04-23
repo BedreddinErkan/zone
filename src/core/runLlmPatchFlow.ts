@@ -2158,6 +2158,10 @@ export async function runLlmPatchFlow(input: {
   }
 
   // 5. Read top 4 suggested files
+  const relevantFileScores = new Map(
+    relevantFiles.map((file) => [file.path, file.score])
+  );
+  const llmSuggestedPaths = new Set((llmPlan?.suggestedFiles ?? []).map((file) => file.path));
   const selectedContextFiles =
     input.hostedContext?.contextFiles.map((file) => ({
       path: file.path,
@@ -2181,6 +2185,21 @@ export async function runLlmPatchFlow(input: {
         (file, index, files) =>
           files.findIndex((candidate) => candidate.path === file.path) === index
       )
+      .sort((a, b) => {
+        const scoreDifference =
+          (relevantFileScores.get(b.path) ?? -1) - (relevantFileScores.get(a.path) ?? -1);
+        if (scoreDifference !== 0) {
+          return scoreDifference;
+        }
+
+        const suggestionDifference =
+          Number(llmSuggestedPaths.has(b.path)) - Number(llmSuggestedPaths.has(a.path));
+        if (suggestionDifference !== 0) {
+          return suggestionDifference;
+        }
+
+        return a.path.localeCompare(b.path);
+      })
       .slice(0, 4);
 
   reportProgress("Loading file context...");

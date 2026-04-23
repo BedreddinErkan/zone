@@ -168,4 +168,21 @@ describe("rankRelevantFiles", () => {
     expect(ranked[0].score).toBeGreaterThan(ranked[1].score);
     expect(ranked[1].score).toBeGreaterThanOrEqual(ranked[2].score);
   });
+
+  it("prefers a localized page file over a broad app shell for page form validation tasks", () => {
+    const ranked = rankRelevantFiles({
+      task: "Add minimal client-side validation to the Patients page create form",
+      files: [
+        buildRepoFile("client/src/App.jsx", "frontend"),
+        buildRepoFile("client/src/pages/PatientsPage.jsx", "frontend"),
+        buildRepoFile("client/src/components/PatientCreateForm.jsx", "frontend"),
+      ],
+    });
+
+    expect(ranked[0].path).toBe("client/src/pages/PatientsPage.jsx");
+    expect(ranked[1].path).toBe("client/src/components/PatientCreateForm.jsx");
+    expect(ranked[2].path).toBe("client/src/App.jsx");
+    expect(ranked[0].score).toBeGreaterThan(ranked[1].score);
+    expect(ranked[1].score).toBeGreaterThan(ranked[2].score);
+  });
 });
