@@ -2425,6 +2425,131 @@ expect(result.safetyResolution).toEqual(
       (call) => call[0] === "[zone-target-fallback]"
     )?.[1] as string | undefined;
     expect(fallbackLog).toContain('"reason":"no_eligible_fallback"');
+    expect(fallbackLog).toContain("candidatesChecked");
+    expect(fallbackLog).toContain("rejectedPreviewPaths");
+    expect(fallbackLog).toContain("rejectedCandidates");
+    consoleLogSpy.mockRestore();
+  });
+
+  it("constrained fallback lazy-loads entity-matched ranked file outside top-8 relevant slice", async () => {
+    const fillerPaths = Array.from(
+      { length: 8 },
+      (_, index) => `client/src/misc/Filler${index}Page.jsx`
+    );
+    const patientsDeep = "client/src/pages/app/PatientsPage.jsx";
+    const clinicPath = "client/src/components/ClinicLeads.jsx";
+
+    const files: RepoFile[] = [
+      ...fillerPaths.map((path) => buildRepoFile(path, "frontend")),
+      buildRepoFile(patientsDeep, "frontend"),
+      buildRepoFile(clinicPath, "frontend"),
+    ];
+
+    const fillerContent = `export function Placeholder() { return <div />; }`;
+    const patientsContent = `
+      import { useState } from "react";
+      export function PatientsPage() {
+        const [formData, setFormData] = useState({ firstName: "" });
+        const handleSubmit = async (event) => {
+          event.preventDefault();
+          await api.post("/patients", formData);
+        };
+        return <form onSubmit={handleSubmit}><button type="submit">Create</button></form>;
+      }
+    `;
+    const clinicContent = `
+      import { useState } from "react";
+      export function ClinicLeads() {
+        const [formData, setFormData] = useState({ email: "" });
+        const handleSubmit = async (event) => {
+          event.preventDefault();
+          await api.post("/clinic-leads", formData);
+        };
+        return <form onSubmit={handleSubmit}><button type="submit">Save</button></form>;
+      }
+    `;
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React frontend"] });
+    const rankOrder = [...fillerPaths, patientsDeep, clinicPath];
+    rankRelevantFilesMock.mockImplementation(({ files: rankedIn }) =>
+      rankOrder
+        .map((path, index) => {
+          const base = rankedIn.find((f) => f.path === path);
+          return base ? { ...base, score: 200 - index } : null;
+        })
+        .filter((entry): entry is RepoFile & { score: number } => entry !== null)
+    );
+
+    readProjectFilesMock.mockImplementation(async (paths: string[]) => {
+      const entries: Record<string, string> = {};
+      for (const abs of paths) {
+        const norm = abs.replace(/\\/g, "/");
+        if (fillerPaths.some((p) => norm.endsWith(p))) {
+          entries[abs] = fillerContent;
+        } else if (norm.includes("PatientsPage")) {
+          entries[abs] = patientsContent;
+        } else if (norm.includes("ClinicLeads")) {
+          entries[abs] = clinicContent;
+        } else {
+          entries[abs] = "// file";
+        }
+      }
+      return entries;
+    });
+
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Validation",
+      steps: ["Patients page"],
+      suggestedFiles: [{ path: clinicPath, reason: "Leads", action: "inspect" }],
+      risks: [],
+    });
+
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Patch summary",
+      patches: [
+        {
+          path: clinicPath,
+          operation: "modify",
+          summary: "Validation",
+          targetHint: "existing create form",
+          contentPreview: "x",
+        },
+      ],
+      warnings: [],
+    });
+
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      filePath: patientsDeep,
+      fullContent: `${patientsContent}\n// ok`,
+      summary: "ok",
+      warnings: [],
+    });
+
+    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "Add minimal client-side validation to the existing Patients page create form only. Reuse the existing form state and existing submit flow. Do not create a new form. Do not introduce a new API call.",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(planFullPatchWithLlmMock).toHaveBeenCalledWith(
+      expect.objectContaining({ filePath: patientsDeep })
+    );
+    expect(
+      planFullPatchWithLlmMock.mock.calls.map(
+        (call) => (call[0] as { filePath: string }).filePath
+      )
+    ).not.toContain(clinicPath);
+
+    const fallbackLog = consoleLogSpy.mock.calls.find(
+      (call) => call[0] === "[zone-target-fallback]"
+    )?.[1] as string | undefined;
+    expect(fallbackLog).toContain('"reason":"selected_fallback"');
+    expect(fallbackLog).toContain(patientsDeep);
+    expect(fallbackLog).toContain("candidatesChecked");
     consoleLogSpy.mockRestore();
   });
 

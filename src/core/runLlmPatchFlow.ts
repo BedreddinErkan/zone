@@ -746,6 +746,24 @@ function pathTokensHitEntityVariants(
   );
 }
 
+function pathAlignsWithConstrainedTaskEntityAnchors(
+  filePath: string,
+  entityAnchors: string[]
+): boolean {
+  if (entityAnchors.length === 0) {
+    return true;
+  }
+  const pathTokens = collectPathEntityTokens(filePath);
+  return entityAnchors.every((anchor) =>
+    pathTokensHitEntityVariants(
+      pathTokens,
+      variantsForConstrainedEntityAnchor(anchor)
+    )
+  );
+}
+
+const CONSTRAINED_FALLBACK_RANKED_READ_LIMIT = 12;
+
 function extractLeadingExportedComponentTokens(fileContent: string): string[] {
   const head = fileContent.slice(0, 8000);
   const names: string[] = [];
@@ -972,7 +990,8 @@ async function loadDeveloperModifyPatchSourceContent(input: {
 
 async function buildConstrainedFallbackContentByPath(input: {
   resolvedFileContexts: Array<{ path: string; content: string }>;
-  relevantFiles: Array<{ path: string; score: number }>;
+  selectedContextFiles: Array<{ path: string }>;
+  rankedCandidates: Array<{ path: string; score: number }>;
   hostedContext: HostedDeveloperContextInput | undefined;
   allFiles: RepoFile[];
 }): Promise<Map<string, string>> {
@@ -992,17 +1011,32 @@ async function buildConstrainedFallbackContentByPath(input: {
       }
     }
   }
-  for (const ranked of input.relevantFiles) {
-    if (!map.has(ranked.path) && !isIrrelevantDeveloperContextPath(ranked.path)) {
-      const absolutePath = input.allFiles.find(
-        (file) => file.path === ranked.path
-      )?.absolutePath;
-      if (typeof absolutePath === "string") {
-        const contents = await readProjectFiles([absolutePath]);
-        map.set(ranked.path, contents[absolutePath] ?? "");
-      }
+
+  async function ensureRepoPathLoaded(path: string): Promise<void> {
+    if (
+      map.has(path) ||
+      isIrrelevantDeveloperContextPath(path) ||
+      isProtectedDeveloperUiPath(path)
+    ) {
+      return;
     }
+    const absolutePath = input.allFiles.find((file) => file.path === path)
+      ?.absolutePath;
+    if (typeof absolutePath !== "string") {
+      return;
+    }
+    const contents = await readProjectFiles([absolutePath]);
+    map.set(path, contents[absolutePath] ?? "");
   }
+
+  for (const entry of input.selectedContextFiles) {
+    await ensureRepoPathLoaded(entry.path);
+  }
+
+  for (const ranked of input.rankedCandidates) {
+    await ensureRepoPathLoaded(ranked.path);
+  }
+
   return map;
 }
 
@@ -1017,53 +1051,86 @@ function buildConstrainedSyntheticModifyPatch(filePath: string): PatchPreviewIte
   };
 }
 
-async function pickConstrainedDeveloperApplyTargetFallback(input: {
+type ConstrainedFallbackPickResult =
+  | {
+      ok: true;
+      path: string;
+      content: string;
+      rankScore: number;
+      candidatesChecked: number;
+      rejectedCandidates: Array<{ path: string; reason: string; score: number }>;
+    }
+  | {
+      ok: false;
+      candidatesChecked: number;
+      rejectedCandidates: Array<{ path: string; reason: string; score: number }>;
+    };
+
+function pickConstrainedDeveloperApplyTargetFallback(input: {
   task: string;
   rejectedPaths: Set<string>;
   contentByPath: Map<string, string>;
   relevantFileScores: Map<string, number>;
-}): Promise<{
-  path: string;
-  content: string;
-  rankScore: number;
-} | null> {
-  const candidates: Array<{
+}): ConstrainedFallbackPickResult {
+  const rejectedCandidates: Array<{ path: string; reason: string; score: number }> =
+    [];
+  const entries = [...input.contentByPath.entries()].filter(
+    ([path]) =>
+      !input.rejectedPaths.has(path) &&
+      !isIrrelevantDeveloperContextPath(path) &&
+      !isProtectedDeveloperUiPath(path)
+  );
+  entries.sort(
+    (a, b) =>
+      (input.relevantFileScores.get(b[0]) ?? 0) -
+        (input.relevantFileScores.get(a[0]) ?? 0) || a[0].localeCompare(b[0])
+  );
+
+  const eligible: Array<{
     path: string;
     content: string;
     rankScore: number;
   }> = [];
-  for (const [path, content] of input.contentByPath) {
-    if (input.rejectedPaths.has(path)) {
-      continue;
-    }
-    if (isIrrelevantDeveloperContextPath(path) || isProtectedDeveloperUiPath(path)) {
-      continue;
-    }
+  for (const [path, content] of entries) {
     const eligibility = assessConstrainedTargetEligibility({
       task: input.task,
       filePath: path,
       fileContent: content,
     });
     if (!eligibility.eligible) {
+      rejectedCandidates.push({
+        path,
+        reason: eligibility.reason,
+        score: eligibility.structureScore,
+      });
       continue;
     }
-    candidates.push({
+    eligible.push({
       path,
       content,
       rankScore: input.relevantFileScores.get(path) ?? 0,
     });
   }
-  if (candidates.length === 0) {
-    return null;
+
+  const candidatesChecked = entries.length;
+  if (eligible.length === 0) {
+    return { ok: false, candidatesChecked, rejectedCandidates };
   }
-  candidates.sort((a, b) => {
+  eligible.sort((a, b) => {
     if (b.rankScore !== a.rankScore) {
       return b.rankScore - a.rankScore;
     }
     return a.path.localeCompare(b.path);
   });
-  const best = candidates[0];
-  return { path: best.path, content: best.content, rankScore: best.rankScore };
+  const best = eligible[0];
+  return {
+    ok: true,
+    path: best.path,
+    content: best.content,
+    rankScore: best.rankScore,
+    candidatesChecked,
+    rejectedCandidates,
+  };
 }
 
 function hasSensitiveLogging(content: string): boolean {
@@ -3181,23 +3248,55 @@ export async function runLlmPatchFlow(input: {
         const rejectedPaths = new Set(
           constraintRejections.map((rejection) => rejection.filePath)
         );
+        const rejectedPreviewPaths = constraintRejections.map(
+          (rejection) => rejection.filePath
+        );
+        const fallbackFullRanked = rankRelevantFiles({
+          task: input.task,
+          files: developerContextFiles,
+          intent: taskIntent,
+        });
+        const fallbackEntityAnchors = extractConstrainedTaskEntityAnchors(
+          normalizeConstrainedTaskText(input.task)
+        );
+        const fallbackEntityRanked =
+          fallbackEntityAnchors.length === 0
+            ? fallbackFullRanked
+            : fallbackFullRanked.filter((file) =>
+                pathAlignsWithConstrainedTaskEntityAnchors(
+                  file.path,
+                  fallbackEntityAnchors
+                )
+              );
+        const rankedForFallbackReads = (
+          fallbackEntityRanked.length > 0
+            ? fallbackEntityRanked
+            : fallbackFullRanked
+        ).slice(0, CONSTRAINED_FALLBACK_RANKED_READ_LIMIT);
+        const fallbackRelevantScores = new Map(relevantFileScores);
+        for (const file of fallbackFullRanked) {
+          fallbackRelevantScores.set(file.path, file.score);
+        }
         const fallbackContentByPath = await buildConstrainedFallbackContentByPath({
           resolvedFileContexts,
-          relevantFiles,
+          selectedContextFiles,
+          rankedCandidates: rankedForFallbackReads,
           hostedContext: input.hostedContext,
           allFiles,
         });
-        const picked = await pickConstrainedDeveloperApplyTargetFallback({
+        const picked = pickConstrainedDeveloperApplyTargetFallback({
           task: input.task,
           rejectedPaths,
           contentByPath: fallbackContentByPath,
-          relevantFileScores,
+          relevantFileScores: fallbackRelevantScores,
         });
-        if (picked) {
+        if (picked.ok) {
           console.log(
             "[zone-target-fallback]",
             JSON.stringify({
-              rejected: constraintRejections.map((rejection) => rejection.filePath),
+              rejectedPreviewPaths,
+              candidatesChecked: picked.candidatesChecked,
+              rejectedCandidates: picked.rejectedCandidates,
               fallback: picked.path,
               reason: "selected_fallback",
             })
@@ -3211,7 +3310,9 @@ export async function runLlmPatchFlow(input: {
           console.log(
             "[zone-target-fallback]",
             JSON.stringify({
-              rejected: constraintRejections.map((rejection) => rejection.filePath),
+              rejectedPreviewPaths,
+              candidatesChecked: picked.candidatesChecked,
+              rejectedCandidates: picked.rejectedCandidates,
               fallback: null,
               reason: "no_eligible_fallback",
             })
