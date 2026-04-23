@@ -2556,6 +2556,22 @@ expect(result.safetyResolution).toEqual(
     expect(fallbackLog).toContain("entityPathCandidates");
     expect(fallbackLog).toContain("entityAnchors");
     expect(fallbackLog).toContain("rankedCandidates");
+    expect(fallbackLog).toContain("pathTokensDebug");
+    const parsed = JSON.parse(fallbackLog!) as {
+      entityPathCandidates: string[];
+      pathTokensDebug: Record<string, string[]>;
+    };
+    expect(parsed.entityPathCandidates).toContain(patientsDeep);
+    expect(parsed.pathTokensDebug[patientsDeep]).toEqual(
+      expect.arrayContaining([
+        "client",
+        "src",
+        "pages",
+        "app",
+        "patients",
+        "page",
+      ])
+    );
     consoleLogSpy.mockRestore();
   });
 

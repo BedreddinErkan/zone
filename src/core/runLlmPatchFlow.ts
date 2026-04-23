@@ -665,7 +665,7 @@ function extractConstrainedTaskEntityAnchors(normalizedTask: string): string[] {
       }
     }
   }
-  return [...new Set(found)];
+  return [...new Set(found.map((word) => word.toLowerCase()))];
 }
 
 function escapeRegExpChars(value: string): string {
@@ -675,30 +675,86 @@ function escapeRegExpChars(value: string): string {
 type ConstrainedEntitySource = "path" | "content" | "none";
 
 function splitIdentifierTokens(identifier: string): string[] {
-  const spaced = identifier
+  const raw = identifier.trim();
+  if (!raw) {
+    return [];
+  }
+  const spaced = raw
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2");
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+    .replace(/([a-zA-Z])([0-9])/g, "$1 $2")
+    .replace(/([0-9])([a-zA-Z])/g, "$1 $2");
   return spaced
     .split(/[^a-zA-Z0-9]+/g)
     .map((token) => token.toLowerCase())
     .filter((token) => token.length > 0);
 }
 
+const PATH_ENTITY_COMPOUND_SUFFIXES = [
+  "page",
+  "pages",
+  "form",
+  "forms",
+  "list",
+  "lists",
+  "view",
+  "views",
+  "grid",
+  "table",
+  "modal",
+  "dialog",
+  "panel",
+  "screen",
+  "wizard",
+];
+
+function expandGluedLowercaseCompoundTokens(token: string): string[] {
+  const lower = token.toLowerCase();
+  if (!/^[a-z0-9]+$/.test(lower) || lower.length < 6) {
+    return [];
+  }
+  const out: string[] = [];
+  for (const suffix of PATH_ENTITY_COMPOUND_SUFFIXES) {
+    if (lower.endsWith(suffix) && lower.length > suffix.length + 2) {
+      out.push(lower.slice(0, -suffix.length));
+    }
+  }
+  return out;
+}
+
+function tokenizePathSegmentForEntityMatch(segment: string): string[] {
+  const withoutExt = segment.replace(/\.[^/.]+$/, "");
+  const tokens = new Set<string>();
+  for (const token of splitIdentifierTokens(withoutExt)) {
+    tokens.add(token);
+    for (const extra of expandGluedLowercaseCompoundTokens(token)) {
+      tokens.add(extra);
+    }
+  }
+  for (const part of withoutExt.toLowerCase().split(/[-_]+/g)) {
+    if (part.length > 0) {
+      tokens.add(part);
+      for (const token of splitIdentifierTokens(part)) {
+        tokens.add(token);
+      }
+      for (const extra of expandGluedLowercaseCompoundTokens(part)) {
+        tokens.add(extra);
+      }
+    }
+  }
+  return [...tokens];
+}
+
 function collectPathEntityTokens(filePath: string): string[] {
-  const normalized = filePath.replace(/\\/g, "/");
-  const segments = normalized.split("/").filter(Boolean);
+  const normalizedSlashes = filePath.replace(/\\/g, "/");
+  const segments = normalizedSlashes.split("/").filter(Boolean);
   const tokens = new Set<string>();
   for (let index = 0; index < segments.length; index++) {
     const segment = segments[index];
     const withoutExt =
       index === segments.length - 1 ? segment.replace(/\.[^/.]+$/, "") : segment;
-    for (const token of splitIdentifierTokens(withoutExt)) {
+    for (const token of tokenizePathSegmentForEntityMatch(withoutExt)) {
       tokens.add(token);
-    }
-    for (const part of withoutExt.toLowerCase().split(/[-_]+/g)) {
-      if (part.length > 0) {
-        tokens.add(part);
-      }
     }
   }
   return [...tokens];
@@ -741,6 +797,21 @@ function pathTokensHitEntityVariants(
       ) {
         return true;
       }
+      if (
+        variant.length >= 4 &&
+        token.length > variant.length &&
+        token.startsWith(variant)
+      ) {
+        const remainder = token.slice(variant.length);
+        if (
+          remainder.length === 0 ||
+          PATH_ENTITY_COMPOUND_SUFFIXES.some((suffix) =>
+            remainder === suffix || remainder.startsWith(suffix)
+          )
+        ) {
+          return true;
+        }
+      }
       return false;
     })
   );
@@ -753,8 +824,9 @@ function pathAlignsWithConstrainedTaskEntityAnchors(
   if (entityAnchors.length === 0) {
     return true;
   }
+  const normalizedAnchors = entityAnchors.map((anchor) => anchor.toLowerCase());
   const pathTokens = collectPathEntityTokens(filePath);
-  return entityAnchors.every((anchor) =>
+  return normalizedAnchors.every((anchor) =>
     pathTokensHitEntityVariants(
       pathTokens,
       variantsForConstrainedEntityAnchor(anchor)
@@ -765,6 +837,21 @@ function pathAlignsWithConstrainedTaskEntityAnchors(
 const CONSTRAINED_FALLBACK_RANKED_READ_LIMIT = 12;
 const CONSTRAINED_FALLBACK_ENTITY_PATH_CAP = 16;
 const CONSTRAINED_FALLBACK_MAX_READ_PATHS = 24;
+
+function buildConstrainedFallbackPathTokensDebug(
+  paths: string[]
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  const seen = new Set<string>();
+  for (const path of paths) {
+    if (seen.has(path)) {
+      continue;
+    }
+    seen.add(path);
+    out[path] = collectPathEntityTokens(path);
+  }
+  return out;
+}
 
 function collectConstrainedFallbackEntityPathCandidates(input: {
   developerContextFiles: RepoFile[];
@@ -3346,6 +3433,9 @@ export async function runLlmPatchFlow(input: {
           contentByPath: fallbackContentByPath,
           relevantFileScores: fallbackRelevantScores,
         });
+        const pathTokensDebug = buildConstrainedFallbackPathTokensDebug(
+          mergedReadOrder.map((item) => item.path)
+        );
         if (picked.ok) {
           console.log(
             "[zone-target-fallback]",
@@ -3354,6 +3444,7 @@ export async function runLlmPatchFlow(input: {
               entityAnchors: fallbackEntityAnchors,
               entityPathCandidates: entityPathCandidatePaths,
               rankedCandidates: rankedCandidatePaths,
+              pathTokensDebug,
               candidatesChecked: picked.candidatesChecked,
               rejectedCandidates: picked.rejectedCandidates,
               fallback: picked.path,
@@ -3373,6 +3464,7 @@ export async function runLlmPatchFlow(input: {
               entityAnchors: fallbackEntityAnchors,
               entityPathCandidates: entityPathCandidatePaths,
               rankedCandidates: rankedCandidatePaths,
+              pathTokensDebug,
               candidatesChecked: picked.candidatesChecked,
               rejectedCandidates: picked.rejectedCandidates,
               fallback: null,
