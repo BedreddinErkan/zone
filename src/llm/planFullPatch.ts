@@ -87,9 +87,9 @@ export async function planFullPatchWithLlm(input: {
   const model = getModelName("high");
   const outputMode: FullPatchOutputMode =
     input.outputMode ??
-    (input.fileContent.length > LARGE_FILE_PATCH_THRESHOLD
-      ? "find_replace_patch"
-      : "full_content");
+    (input.fileContent.length < LARGE_FILE_PATCH_THRESHOLD
+      ? "full_content"
+      : "find_replace_patch");
   const prompt = buildFullPatchPrompt({
     task: input.task,
     filePath: input.filePath,

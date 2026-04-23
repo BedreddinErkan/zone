@@ -81,6 +81,7 @@ export type LlmPatchFlowResult =
         shouldForcePreview: boolean;
         shouldDowngradeSafety: boolean;
       };
+      reason?: string;
       decisionMode?: "preview_only" | "safe_to_apply" | "blocked";
       finalState?: "preview_only" | "safe_to_apply" | "blocked";
       finalExecutionOutcome?: "completed" | "completed_with_issues" | "failed_verification";
@@ -1907,6 +1908,30 @@ function buildPatchConflictWarning(input: {
   })}`;
 }
 
+function normalizePatchOutcomeReason(reason: string | undefined): string | null {
+  const normalized = String(reason ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized || null;
+}
+
+function deriveNoCodeChangeReason(patchResults: PatchResult[]): string {
+  const failedReason = patchResults.find(
+    (result) => result.status === "failed" && result.reason
+  )?.reason;
+  const skippedReason = patchResults.find(
+    (result) => result.status === "skipped" && result.reason
+  )?.reason;
+
+  return (
+    normalizePatchOutcomeReason(failedReason) ??
+    normalizePatchOutcomeReason(skippedReason) ??
+    "no_code_change_produced"
+  );
+}
+
 function renderPatchResultLine(result: PatchResult, warnings: string[]): string {
   if (result.status === "applied") {
     return `✓ ${result.filePath}        applied`;
@@ -2587,6 +2612,12 @@ export async function runLlmPatchFlow(input: {
       removedLines: diff.filter((line) => line.type === "removed").length,
     };
   });
+  const hasRealPatchEvidence =
+    applyPatches.length > 0 &&
+    fileDiffs.some((fileDiff) => fileDiff.addedLines > 0 || fileDiff.removedLines > 0);
+  const noCodeChangeReason = hasRealPatchEvidence
+    ? null
+    : deriveNoCodeChangeReason(patchResults);
   const patchScope = analyzePatchScope({
     applyPatches,
     originalContents,
@@ -2920,6 +2951,15 @@ syncedVisibleWarnings = syncDeveloperRiskWarnings({
   warnings: syncedVisibleWarnings,
   developerRisk: finalDeveloperRisk,
 });
+if (noCodeChangeReason) {
+  const noCodeChangeWarning = `[NO_CODE_CHANGE_PRODUCED] ${noCodeChangeReason}`;
+  if (!syncedInternalWarnings.includes(noCodeChangeWarning)) {
+    syncedInternalWarnings.push(noCodeChangeWarning);
+  }
+  if (!syncedVisibleWarnings.includes(noCodeChangeWarning)) {
+    syncedVisibleWarnings.push(noCodeChangeWarning);
+  }
+}
 
 const decisionMode =
   runtimeVerificationFailed
@@ -2936,7 +2976,7 @@ const decisionMode =
   const finalExecutionOutcome =
     runtimeVerification?.status === "failed"
       ? "failed_verification"
-      : runtimeVerification?.status === "timeout"
+      : runtimeVerification?.status === "timeout" || noCodeChangeReason
         ? "completed_with_issues"
         : "completed";
   const finalState =
@@ -3024,6 +3064,7 @@ const decisionMode =
     ok: true,
     patchPreview,
     warnings: syncedVisibleWarnings,
+    ...(noCodeChangeReason ? { reason: noCodeChangeReason } : {}),
     developerConfidence,
     developerRisk: finalDeveloperRisk,
     intentMismatch: {

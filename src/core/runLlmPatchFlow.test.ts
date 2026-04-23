@@ -1439,7 +1439,12 @@ expect(result.safetyResolution).toEqual(
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.applyPatches).toEqual([]);
+      expect(result.reason).toBe("invalid_patch_format");
+      expect(result.finalExecutionOutcome).toBe("completed_with_issues");
+      expect(result.finalState).toBe("blocked");
+      expect(result.validationBlocked).toBe(true);
       expect(result.warnings.join("\n")).toContain("DEVELOPER_PATCH_FORMAT");
+      expect(result.warnings.join("\n")).toContain("NO_CODE_CHANGE_PRODUCED");
     }
   });
 
@@ -1794,9 +1799,14 @@ expect(result.safetyResolution).toEqual(
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.applyPatches).toEqual([]);
+      expect(result.reason).toBe("low_confidence");
+      expect(result.finalExecutionOutcome).toBe("completed_with_issues");
+      expect(result.finalState).toBe("blocked");
+      expect(result.validationBlocked).toBe(true);
       expect(result.warnings.join("\n")).toContain("PATCH_FIND_NOT_FOUND");
       expect(result.warnings.join("\n")).toContain('"reason":"low_confidence"');
       expect(result.warnings.join("\n")).toContain('"score":');
+      expect(result.warnings.join("\n")).toContain("NO_CODE_CHANGE_PRODUCED");
     }
   });
 
