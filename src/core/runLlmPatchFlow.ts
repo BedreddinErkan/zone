@@ -671,57 +671,197 @@ function escapeRegExpChars(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function anchorMatchesTargetFile(
-  filePath: string,
-  fileContent: string,
-  anchor: string
-): boolean {
-  const pathLower = filePath.replace(/\\/g, "/").toLowerCase();
-  const baseName = (pathLower.split("/").pop() ?? pathLower).replace(
-    /\.[^/.]+$/,
-    ""
-  );
-  const contentLower = fileContent.toLowerCase();
-  const variants = new Set<string>([anchor]);
-  if (anchor.length >= 4 && anchor.endsWith("s")) {
-    variants.add(anchor.slice(0, -1));
-  } else if (anchor.length >= 4 && !anchor.endsWith("s")) {
-    variants.add(`${anchor}s`);
-  }
+type ConstrainedEntitySource = "path" | "content" | "none";
 
-  for (const term of variants) {
-    if (term.length < 3) {
-      continue;
-    }
-    if (pathLower.includes(term) || baseName.includes(term)) {
-      return true;
-    }
-    if (term.length >= 4 && contentLower.includes(term)) {
-      return true;
-    }
-    const boundary = new RegExp(
-      `\\b${escapeRegExpChars(term)}s?\\b`,
-      "i"
-    );
-    if (boundary.test(fileContent)) {
-      return true;
-    }
-  }
-
-  return false;
+function splitIdentifierTokens(identifier: string): string[] {
+  const spaced = identifier
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2");
+  return spaced
+    .split(/[^a-zA-Z0-9]+/g)
+    .map((token) => token.toLowerCase())
+    .filter((token) => token.length > 0);
 }
 
-function targetMatchesConstrainedTaskEntities(input: {
+function collectPathEntityTokens(filePath: string): string[] {
+  const normalized = filePath.replace(/\\/g, "/");
+  const segments = normalized.split("/").filter(Boolean);
+  const tokens = new Set<string>();
+  for (let index = 0; index < segments.length; index++) {
+    const segment = segments[index];
+    const withoutExt =
+      index === segments.length - 1 ? segment.replace(/\.[^/.]+$/, "") : segment;
+    for (const token of splitIdentifierTokens(withoutExt)) {
+      tokens.add(token);
+    }
+    for (const part of withoutExt.toLowerCase().split(/[-_]+/g)) {
+      if (part.length > 0) {
+        tokens.add(part);
+      }
+    }
+  }
+  return [...tokens];
+}
+
+function variantsForConstrainedEntityAnchor(anchor: string): string[] {
+  const lower = anchor.toLowerCase();
+  const variants = new Set<string>([lower]);
+  if (lower.length >= 4 && lower.endsWith("s")) {
+    variants.add(lower.slice(0, -1));
+  } else if (lower.length >= 4 && !lower.endsWith("s")) {
+    variants.add(`${lower}s`);
+  }
+  return [...variants];
+}
+
+function pathTokensHitEntityVariants(
+  pathTokens: string[],
+  variants: string[]
+): boolean {
+  return pathTokens.some((token) =>
+    variants.some((variant) => {
+      if (variant.length < 3) {
+        return false;
+      }
+      if (token === variant) {
+        return true;
+      }
+      if (
+        variant.length >= 4 &&
+        variant.endsWith("s") &&
+        token === variant.slice(0, -1)
+      ) {
+        return true;
+      }
+      if (
+        token.length >= 4 &&
+        token.endsWith("s") &&
+        variant === token.slice(0, -1)
+      ) {
+        return true;
+      }
+      return false;
+    })
+  );
+}
+
+function extractLeadingExportedComponentTokens(fileContent: string): string[] {
+  const head = fileContent.slice(0, 8000);
+  const names: string[] = [];
+  const defaultFn = head.match(/export\s+default\s+function\s+(\w+)/);
+  if (defaultFn?.[1]) {
+    names.push(defaultFn[1]);
+  }
+  const namedExportFn = head.match(/export\s+function\s+(\w+)/);
+  if (namedExportFn?.[1]) {
+    names.push(namedExportFn[1]);
+  }
+  const exportConst = head.match(/export\s+const\s+(\w+)\s*=/);
+  if (exportConst?.[1]) {
+    names.push(exportConst[1]);
+  }
+  const tokens = new Set<string>();
+  for (const name of names) {
+    for (const token of splitIdentifierTokens(name)) {
+      tokens.add(token);
+    }
+  }
+  return [...tokens];
+}
+
+function stripQuotedJsxStringsForHeadingScan(fragment: string): string {
+  return fragment.replace(
+    /(["'`])(?:\\.|(?!\1).)*\1/g,
+    " "
+  );
+}
+
+function strictFormHeadingMatchesEntityVariants(
+  fileContent: string,
+  variants: string[]
+): boolean {
+  const lower = fileContent.toLowerCase();
+  const formIndex = lower.indexOf("<form");
+  if (formIndex < 0) {
+    return false;
+  }
+  const closeTag = lower.indexOf("</form>", formIndex);
+  const slice =
+    closeTag >= 0
+      ? fileContent.slice(formIndex, closeTag)
+      : fileContent.slice(formIndex, formIndex + 4000);
+  const dequoted = stripQuotedJsxStringsForHeadingScan(slice);
+  const headingPattern = /<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/gi;
+  const legendPattern = /<legend[^>]*>([\s\S]*?)<\/legend>/gi;
+  const chunks: string[] = [];
+  let headingMatch: RegExpExecArray | null = null;
+  headingPattern.lastIndex = 0;
+  while ((headingMatch = headingPattern.exec(dequoted)) !== null) {
+    chunks.push(headingMatch[1]);
+  }
+  legendPattern.lastIndex = 0;
+  while ((headingMatch = legendPattern.exec(dequoted)) !== null) {
+    chunks.push(headingMatch[1]);
+  }
+  return chunks.some((chunk) => {
+    const plain = chunk
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return variants.some((variant) => {
+      if (variant.length < 3) {
+        return false;
+      }
+      const boundary = new RegExp(
+        `\\b${escapeRegExpChars(variant)}s?\\b`,
+        "i"
+      );
+      return boundary.test(plain);
+    });
+  });
+}
+
+function strictSecondaryEntitySignals(
+  fileContent: string,
+  variants: string[]
+): boolean {
+  const exportTokens = extractLeadingExportedComponentTokens(fileContent);
+  if (pathTokensHitEntityVariants(exportTokens, variants)) {
+    return true;
+  }
+  return strictFormHeadingMatchesEntityVariants(fileContent, variants);
+}
+
+function evaluateConstrainedEntityAlignment(input: {
   filePath: string;
   fileContent: string;
   anchors: string[];
-}): boolean {
+}): {
+  entityMatch: boolean;
+  entitySource: ConstrainedEntitySource;
+} {
   if (input.anchors.length === 0) {
-    return true;
+    return { entityMatch: true, entitySource: "none" };
   }
-  return input.anchors.every((anchor) =>
-    anchorMatchesTargetFile(input.filePath, input.fileContent, anchor)
-  );
+  const pathTokens = collectPathEntityTokens(input.filePath);
+  let pathHitAll = true;
+  let secondaryHitAll = true;
+  for (const anchor of input.anchors) {
+    const variants = variantsForConstrainedEntityAnchor(anchor);
+    if (!pathTokensHitEntityVariants(pathTokens, variants)) {
+      pathHitAll = false;
+    }
+    if (!strictSecondaryEntitySignals(input.fileContent, variants)) {
+      secondaryHitAll = false;
+    }
+  }
+  const entityMatch = pathHitAll;
+  const entitySource: ConstrainedEntitySource = entityMatch
+    ? "path"
+    : secondaryHitAll
+      ? "content"
+      : "none";
+  return { entityMatch, entitySource };
 }
 
 function assessConstrainedTargetEligibility(input: {
@@ -733,6 +873,7 @@ function assessConstrainedTargetEligibility(input: {
   score: number;
   structureScore: number;
   entityMatch: boolean;
+  entitySource: ConstrainedEntitySource;
   reason: string;
 } {
   const normalizedTask = normalizeConstrainedTaskText(input.task);
@@ -742,7 +883,7 @@ function assessConstrainedTargetEligibility(input: {
     content: input.fileContent,
   });
   const structureOk = structureScore >= 20;
-  const entityMatch = targetMatchesConstrainedTaskEntities({
+  const { entityMatch, entitySource } = evaluateConstrainedEntityAlignment({
     filePath: input.filePath,
     fileContent: input.fileContent,
     anchors: entityAnchors,
@@ -754,6 +895,7 @@ function assessConstrainedTargetEligibility(input: {
       score: structureScore,
       structureScore,
       entityMatch,
+      entitySource,
       reason: "target_file_constraint_mismatch",
     };
   }
@@ -764,6 +906,7 @@ function assessConstrainedTargetEligibility(input: {
       score: structureScore,
       structureScore,
       entityMatch: false,
+      entitySource,
       reason: "target_entity_mismatch",
     };
   }
@@ -773,6 +916,7 @@ function assessConstrainedTargetEligibility(input: {
     score: structureScore,
     structureScore,
     entityMatch: true,
+    entitySource,
     reason: "constraint_structure_ok",
   };
 }
@@ -2894,6 +3038,7 @@ export async function runLlmPatchFlow(input: {
             filePath: patch.path,
             structureScore: targetEligibility.structureScore,
             entityMatch: targetEligibility.entityMatch,
+            entitySource: targetEligibility.entitySource,
             eligible: targetEligibility.eligible,
             reason: targetEligibility.reason,
           })
