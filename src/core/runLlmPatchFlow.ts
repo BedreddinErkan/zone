@@ -2691,14 +2691,22 @@ export async function runLlmPatchFlow(input: {
           ? "find_replace_patch"
           : "full_content";
       const llmFileContent = contextWindow?.snippet ?? fileContent;
-      if (
-        applyTargets.length === 1 &&
-        isConstrainedLocalizedPatchTask(input.task)
-      ) {
+      if (isConstrainedLocalizedPatchTask(input.task)) {
         const targetEligibility = assessConstrainedTargetEligibility({
           task: input.task,
           fileContent,
         });
+        console.log(
+          "[zone-target-eligibility]",
+          JSON.stringify({
+            filePath: patch.path,
+            score: targetEligibility.score,
+            eligible: targetEligibility.eligible,
+            reason: targetEligibility.eligible
+              ? "constraint_structure_ok"
+              : "target_file_constraint_mismatch",
+          })
+        );
         if (!targetEligibility.eligible) {
           const mismatchWarning = buildPatchConflictWarning({
             filePath: patch.path,
@@ -2712,14 +2720,6 @@ export async function runLlmPatchFlow(input: {
             status: "failed",
             reason: "target_file_constraint_mismatch",
           });
-          console.log(
-            "[zone-target-eligibility]",
-            JSON.stringify({
-              filePath: patch.path,
-              score: targetEligibility.score,
-              reason: "target_file_constraint_mismatch",
-            })
-          );
           continue;
         }
       }

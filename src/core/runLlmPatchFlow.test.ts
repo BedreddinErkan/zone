@@ -1558,18 +1558,8 @@ expect(result.safetyResolution).toEqual(
     }
   });
 
-  it("keeps real destructive changes elevated and explains them with actual signals only", async () => {
+  it("blocks very high task-risk destructive admin tasks before patch generation", async () => {
     const files = [buildRepoFile("src/admin/users.ts", "backend")];
-    const originalContent = [
-      "export async function removeDormantUser(userId: string) {",
-      "  return archiveUser(userId);",
-      "}",
-    ].join("\n");
-    const updatedContent = [
-      "export async function removeDormantUser(userId: string) {",
-      "  return deleteUser(userId);",
-      "}",
-    ].join("\n");
 
     scanRepoMock.mockResolvedValue(files);
     detectProjectStructureMock.mockReturnValue({ notes: ["Admin backend"] });
@@ -1582,11 +1572,9 @@ expect(result.safetyResolution).toEqual(
       ],
       risks: [],
     });
-    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
-      Object.fromEntries(paths.map((filePath) => [filePath, originalContent]))
-    );
+    readProjectFilesMock.mockResolvedValue({});
     planPatchPreviewWithLlmMock.mockResolvedValue({
-      summary: "Delete all dormant users instead of archiving them",
+      summary: "Would delete dormant users",
       patches: [
         {
           path: "src/admin/users.ts",
@@ -1598,13 +1586,6 @@ expect(result.safetyResolution).toEqual(
       ],
       warnings: [],
     });
-    planFullPatchWithLlmMock.mockResolvedValue({
-      mode: "full_content",
-      summary: "Generated content",
-      warnings: [],
-      filePath: "src/admin/users.ts",
-      fullContent: updatedContent,
-    });
 
     const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
     const result = await runLlmPatchFlow({
@@ -1614,15 +1595,13 @@ expect(result.safetyResolution).toEqual(
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.developerRisk?.score).toBeGreaterThanOrEqual(71);
-      expect(result.developerRisk?.breakdown.destructive).toBeGreaterThan(0);
-      expect(result.developerRisk?.breakdown.schema).toBe(0);
-      expect(result.developerRisk?.breakdown.massScope).toBeGreaterThan(0);
-      expect(result.safetyResolution?.safetyLevel).toBe("high_risk_blocked");
-      expect(result.warnings.join("\n")).toContain("destructive");
-      expect(result.warnings.join("\n")).toContain("mass_scope");
-      expect(result.warnings.join("\n")).not.toContain("schema");
+      expect(result.patchPreview).toContain("blocked before patch generation");
+      expect(result.applyPatches).toEqual([]);
+      expect(result.decisionMode).toBe("preview_only");
+      expect(result.warnings.join("\n")).toMatch(/HIGH_RISK.*Task risk score/);
     }
+    expect(planPatchPreviewWithLlmMock).toHaveBeenCalled();
+    expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
   });
 
   it("rejects invalid full-file scaffold output that is not patch-style", async () => {
@@ -2198,6 +2177,182 @@ expect(result.safetyResolution).toEqual(
       expect(result.warnings.join("\n")).toContain("target_file_constraint_mismatch");
     }
     expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
+  });
+
+  it("does not call planFullPatchWithLlm for an ineligible constrained target when preview lists multiple files", async () => {
+    const files = [
+      buildRepoFile("client/src/pages/PatientsPage.jsx", "frontend"),
+      buildRepoFile("client/src/components/ClinicLeads.jsx", "frontend"),
+    ];
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React frontend"] });
+    rankRelevantFilesMock.mockReturnValue([
+      { ...files[0], score: 60 },
+      { ...files[1], score: 58 },
+    ]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Add validation",
+      steps: ["Reuse existing form"],
+      suggestedFiles: [
+        { path: "client/src/components/ClinicLeads.jsx", reason: "Leads", action: "inspect" },
+        { path: "client/src/pages/PatientsPage.jsx", reason: "Patients", action: "inspect" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockResolvedValue({
+      "C:/repo/client/src/components/ClinicLeads.jsx": `
+        export function ClinicLeads() {
+          return <section><h2>Clinic leads</h2></section>;
+        }
+      `,
+      "C:/repo/client/src/pages/PatientsPage.jsx": `
+        import { useState } from "react";
+        export function PatientsPage() {
+          const [formData, setFormData] = useState({ firstName: "" });
+          const handleSubmit = async (event) => {
+            event.preventDefault();
+            await api.post("/patients", formData);
+          };
+          return <form onSubmit={handleSubmit}><button type="submit">Create</button></form>;
+        }
+      `,
+    });
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Patch summary",
+      patches: [
+        {
+          path: "client/src/components/ClinicLeads.jsx",
+          operation: "modify",
+          summary: "Add validation",
+          targetHint: "create form",
+          contentPreview: "validation",
+        },
+        {
+          path: "client/src/pages/PatientsPage.jsx",
+          operation: "modify",
+          summary: "Add validation",
+          targetHint: "existing create form",
+          contentPreview: "validation",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      filePath: "client/src/pages/PatientsPage.jsx",
+      fullContent: "// patched",
+      summary: "ok",
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    await runLlmPatchFlow({
+      task: "Add minimal client-side validation to the existing Patients page create form only. Reuse the existing form state and existing submit flow. Do not create a new form. Do not introduce a new API call. Do not modify unrelated components.",
+      repoPath: "C:/repo",
+    });
+
+    const fullPatchPaths = planFullPatchWithLlmMock.mock.calls.map(
+      (call) => (call[0] as { filePath: string }).filePath
+    );
+    expect(fullPatchPaths).not.toContain("client/src/components/ClinicLeads.jsx");
+    expect(fullPatchPaths).toContain("client/src/pages/PatientsPage.jsx");
+  });
+
+  it("hosted context: does not call planFullPatchWithLlm for ineligible constrained target among multiple patches", async () => {
+    detectProjectStructureMock.mockReturnValue({ notes: ["React frontend"] });
+    rankRelevantFilesMock.mockImplementation(({ files }) =>
+      files.map((f, idx) => ({ ...f, score: 55 - idx }))
+    );
+    const clinicLeadsMinimal = `
+      export function ClinicLeads() {
+        return <section><h2>Clinic leads</h2></section>;
+      }
+    `;
+    const patientsWithForm = `
+      import { useState } from "react";
+      export function PatientsPage() {
+        const [formData, setFormData] = useState({ firstName: "" });
+        const handleSubmit = async (event) => {
+          event.preventDefault();
+          await api.post("/patients", formData);
+        };
+        return <form onSubmit={handleSubmit}><button type="submit">Create</button></form>;
+      }
+    `;
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Patch summary",
+      patches: [
+        {
+          path: "client/src/components/ClinicLeads.jsx",
+          operation: "modify",
+          summary: "Tweak leads",
+          targetHint: "form",
+          contentPreview: "x",
+        },
+        {
+          path: "client/src/pages/PatientsPage.jsx",
+          operation: "modify",
+          summary: "Validation",
+          targetHint: "existing form",
+          contentPreview: "y",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      filePath: "client/src/pages/PatientsPage.jsx",
+      fullContent: `${patientsWithForm}\n// ok`,
+      summary: "ok",
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    await runLlmPatchFlow({
+      task: "Add minimal client-side validation to the existing Patients page create form only. Reuse the existing form state and existing submit flow. Do not create a new form. Do not introduce a new API call.",
+      repoPath: "/hosted",
+      hostedContext: {
+        repoSummary: "React",
+        existingFilesSummary: "files",
+        availableFiles: [
+          {
+            path: "client/src/components/ClinicLeads.jsx",
+            category: "frontend",
+            extension: "jsx",
+          },
+          {
+            path: "client/src/pages/PatientsPage.jsx",
+            category: "frontend",
+            extension: "jsx",
+          },
+        ],
+        contextFiles: [
+          {
+            path: "client/src/components/ClinicLeads.jsx",
+            action: "inspect",
+            reason: "ctx",
+            content: clinicLeadsMinimal,
+          },
+          {
+            path: "client/src/pages/PatientsPage.jsx",
+            action: "inspect",
+            reason: "ctx",
+            content: patientsWithForm,
+          },
+        ],
+        originalContents: {
+          "client/src/components/ClinicLeads.jsx": clinicLeadsMinimal,
+          "client/src/pages/PatientsPage.jsx": patientsWithForm,
+        },
+      },
+    });
+
+    const fullPatchPaths = planFullPatchWithLlmMock.mock.calls.map(
+      (call) => (call[0] as { filePath: string }).filePath
+    );
+    expect(fullPatchPaths).not.toContain("client/src/components/ClinicLeads.jsx");
+    expect(fullPatchPaths).toContain("client/src/pages/PatientsPage.jsx");
   });
 
   it("blocks protected src/ui files from developer apply patches", async () => {
