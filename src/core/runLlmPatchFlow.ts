@@ -185,6 +185,8 @@ const CRITICAL_UI_ANCHORS = [
 
 const DEVELOPER_VAGUE_TASK_WARNING =
   "[VAGUE_TASK] Task is too vague to generate a reliable patch. Please describe the specific file, function, and change needed.";
+const ZONE_INTERNAL_TASK_WARNING =
+  "[ZONE_INTERNAL_TASK] Task targets Zone itself, not the selected repo. Switch to the Zone codebase or clarify the intended target before patching.";
 
 const DEVELOPER_GENERIC_TASK_PHRASES = new Set([
   "fix",
@@ -246,6 +248,38 @@ const MICRO_EDIT_INTENT_TERMS = [
 ];
 
 const UI_MAPPING_RISK_TERMS = ["swap", "mapping", "reversed", "order", "before/after"];
+
+const ZONE_INTERNAL_ZONE_TERMS = [
+  "zone ui",
+  "zone itself",
+  "zone product",
+  "zone thread ui",
+  "zone execution ui",
+  "zone inspect panel",
+  "zone billing summary",
+  "zone run-state",
+  "zone run state",
+  "zone developer flow",
+];
+
+const ZONE_INTERNAL_RUNTIME_TERMS = [
+  "agentic developer flow",
+  "run-state mapping",
+  "preview_only",
+  "files changed",
+  "done result behavior",
+  "hosted /api/patch",
+  "/api/patch behavior",
+  "recent runs",
+  "patch preview",
+  "inspect panel",
+  "thread ui",
+  "execution ui",
+  "billing summary",
+  "run-state",
+  "run state",
+  "developer flow",
+];
 
 const IRRELEVANT_DEVELOPER_CONTEXT_SEGMENTS = [
   "/.env",
@@ -1604,6 +1638,21 @@ interface ParsedDeveloperPatch {
   noChangeNeeded?: boolean;
 }
 
+export function detectZoneInternalTask(task: string): boolean {
+  const normalized = task.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!normalized) return false;
+
+  if (ZONE_INTERNAL_ZONE_TERMS.some((term) => normalized.includes(term))) {
+    return true;
+  }
+
+  if (!/\bzone\b/i.test(normalized)) {
+    return false;
+  }
+
+  return ZONE_INTERNAL_RUNTIME_TERMS.some((term) => normalized.includes(term));
+}
+
 function stripPatchTextFences(rawPatchText: string): string {
   return rawPatchText
     .replace(/^```(?:text|txt|patch)?\s*/i, "")
@@ -1987,6 +2036,27 @@ export async function runLlmPatchFlow(input: {
 
   const taskIntent =
     typeof input.task === "string" ? parseTaskIntent(input.task) : UNKNOWN_INTENT;
+  const zoneInternalTask = detectZoneInternalTask(input.task);
+
+  if (zoneInternalTask) {
+    reportProgress("Ready");
+    perf.finish("zone internal task blocked");
+    return {
+      ok: true,
+      reason: "zone_internal_task_target",
+      patchPreview: ZONE_INTERNAL_TASK_WARNING,
+      warnings: [ZONE_INTERNAL_TASK_WARNING],
+      developerConfidence: 0,
+      decisionMode: "blocked",
+      finalState: "blocked",
+      finalExecutionOutcome: "completed_with_issues",
+      validationBlocked: true,
+      applyPatches: [],
+      patchResults: [],
+      fileDiffs: [],
+      contextFiles: [],
+    };
+  }
 
   const hostedAvailableFiles: RepoFile[] | undefined =
     input.hostedContext?.availableFiles.map((file) => ({

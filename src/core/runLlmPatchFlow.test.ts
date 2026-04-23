@@ -54,6 +54,102 @@ describe("runLlmPatchFlow", () => {
     vi.clearAllMocks();
   });
 
+  it("blocks Zone-internal product tasks before patching the selected repo", async () => {
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "fix the Zone UI run-state mapping so preview_only does not show Done in the inspect panel",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.reason).toBe("zone_internal_task_target");
+      expect(result.decisionMode).toBe("blocked");
+      expect(result.finalState).toBe("blocked");
+      expect(result.validationBlocked).toBe(true);
+      expect(result.applyPatches).toEqual([]);
+      expect(result.patchPreview).toContain("Task targets Zone itself");
+      expect(result.warnings).toContain(
+        "[ZONE_INTERNAL_TASK] Task targets Zone itself, not the selected repo. Switch to the Zone codebase or clarify the intended target before patching."
+      );
+    }
+    expect(scanRepoMock).not.toHaveBeenCalled();
+    expect(planFeatureWithLlmMock).not.toHaveBeenCalled();
+    expect(planPatchPreviewWithLlmMock).not.toHaveBeenCalled();
+  });
+
+  it("does not block a normal repo task that mentions /api/patch without referring to Zone", async () => {
+    const files = [buildRepoFile("src/server/routes.ts", "backend")];
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["Express API"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 32 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Fix external endpoint behavior",
+      steps: ["Adjust route logic"],
+      suggestedFiles: [
+        { path: "src/server/routes.ts", reason: "API route", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, `content:${filePath}`]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Patch summary",
+      patches: [],
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "fix the /api/patch endpoint in our app so it returns the correct response body",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(scanRepoMock).toHaveBeenCalledWith("C:/repo");
+    expect(planPatchPreviewWithLlmMock).toHaveBeenCalled();
+  });
+
+  it("does not block a normal repo task that mentions billing summary and thread ui without referring to Zone", async () => {
+    const files = [buildRepoFile("src/components/BillingThreadPanel.tsx", "frontend")];
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React app"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 36 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Fix app panel behavior",
+      steps: ["Adjust thread UI state"],
+      suggestedFiles: [
+        {
+          path: "src/components/BillingThreadPanel.tsx",
+          reason: "Billing thread UI component",
+          action: "modify",
+        },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, `content:${filePath}`]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Patch summary",
+      patches: [],
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "fix the billing summary cards in our thread ui so the panel updates correctly",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(scanRepoMock).toHaveBeenCalledWith("C:/repo");
+    expect(planPatchPreviewWithLlmMock).toHaveBeenCalled();
+  });
+
   it("supplements sparse llm suggestions with ranked relevant files for developer context", async () => {
     const files = [
       buildRepoFile("src/App.tsx", "frontend"),
