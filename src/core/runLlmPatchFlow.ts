@@ -2907,7 +2907,6 @@ export async function runLlmPatchFlow(input: {
       contextFiles: [],
     };
   }
-
   const hostedAvailableFiles: RepoFile[] | undefined =
     input.hostedContext?.availableFiles.map((file) => ({
       path: file.path,
@@ -2918,14 +2917,34 @@ export async function runLlmPatchFlow(input: {
 
   // 1. Scan repo
   reportProgress("Scanning repo...");
-  let allFiles: RepoFile[] = hostedAvailableFiles ?? [];
-  if (!hostedAvailableFiles) {
+  let allFiles: RepoFile[] = [];
+  let fileSource: "scanRepo" | "hosted" | "empty" = "empty";
+
+  if (!isHostedEnvironment() && input.repoPath) {
     try {
       allFiles = await scanRepo(input.repoPath);
+      fileSource = "scanRepo";
     } catch {
       allFiles = [];
     }
   }
+
+  if (allFiles.length === 0 && hostedAvailableFiles) {
+    allFiles = hostedAvailableFiles;
+    fileSource = "hosted";
+  }
+
+  console.log(
+    "[zone-diag-scan]",
+    JSON.stringify({
+      repoPath: input.repoPath,
+      hostedFilesCount: hostedAvailableFiles?.length ?? 0,
+      finalCount: allFiles.length,
+      source: fileSource,
+      isHostedEnv: isHostedEnvironment(),
+    })
+  );
+
   perf.mark("repo scan ready");
   if (!input.hostedContext && allFiles.length === 0 && !isHostedEnvironment()) {
     perf.finish("repo access blocked");
