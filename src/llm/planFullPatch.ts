@@ -75,6 +75,7 @@ export async function planFullPatchWithLlm(input: {
   fileContent: string;
   repoSummary: string;
   relatedContext: string;
+  outputMode?: FullPatchOutputMode;
   repoPath?: string;
   taskIntent?: string;
   normalizedTaskIntent?: string;
@@ -84,7 +85,11 @@ export async function planFullPatchWithLlm(input: {
 }): Promise<FullPatchResult> {
   const client = createOpenAIClient();
   const model = getModelName("high");
-const outputMode: FullPatchOutputMode = "find_replace_patch";
+  const outputMode: FullPatchOutputMode =
+    input.outputMode ??
+    (input.fileContent.length > LARGE_FILE_PATCH_THRESHOLD
+      ? "find_replace_patch"
+      : "full_content");
   const prompt = buildFullPatchPrompt({
     task: input.task,
     filePath: input.filePath,

@@ -1600,6 +1600,14 @@ interface ParsedDeveloperPatch {
   filePath: string;
   edits: Array<{ find: string; replace: string }>;
   createContent?: string;
+  noChangeNeeded?: boolean;
+}
+
+function stripPatchTextFences(rawPatchText: string): string {
+  return rawPatchText
+    .replace(/^```(?:text|txt|patch)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
 }
 
 function parseFindReplacePatch(rawPatchText: string): {
@@ -1618,7 +1626,16 @@ function parseFindReplacePatch(rawPatchText: string): {
 }
 
 function parseDeveloperPatchText(rawPatchText: string): ParsedDeveloperPatch | null {
-  const barePatch = parseFindReplacePatch(rawPatchText);
+  const normalizedPatchText = stripPatchTextFences(rawPatchText);
+  if (normalizedPatchText === "NO_CHANGE_NEEDED") {
+    return {
+      filePath: "",
+      edits: [],
+      noChangeNeeded: true,
+    };
+  }
+
+  const barePatch = parseFindReplacePatch(normalizedPatchText);
   if (barePatch) {
     return {
       filePath: "",
@@ -1626,7 +1643,7 @@ function parseDeveloperPatchText(rawPatchText: string): ParsedDeveloperPatch | n
     };
   }
 
-  const match = rawPatchText.match(
+  const match = normalizedPatchText.match(
     /--- FILE:\s*(.+?)\s*---\s*([\s\S]*)$/i
   );
   if (!match) return null;
@@ -1680,6 +1697,10 @@ function applyDeveloperPatchText(
       };
     }
     return { ok: true, fullContent: parsed.createContent };
+  }
+
+  if (parsed.noChangeNeeded) {
+    return { ok: true, fullContent: currentContent };
   }
 
   let updatedContent = currentContent;
@@ -2363,6 +2384,7 @@ export async function runLlmPatchFlow(input: {
               repoPath: input.repoPath,
               taskIntent: taskIntent.normalizedTask || taskIntent.action,
               normalizedTaskIntent: normalizedTaskIntentForPrompt,
+              outputMode: fullPatchMode,
               relevantFiles: targetedRelevantFiles,
               existingTargetFiles: allFiles.map((file) => file.path),
               executionPlan,
