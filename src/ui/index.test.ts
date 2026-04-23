@@ -647,6 +647,12 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
     },
     Math,
     Date,
+    performance: {
+      now() {
+        return Date.now();
+      },
+      memory: undefined,
+    },
     encodeURIComponent,
     refreshBillingSummary: async () => {},
   };
@@ -1599,6 +1605,36 @@ describe("UI patch preview", () => {
 
     expect(elements.get("fileList").innerHTML).toContain("generated_file_1");
     expect(elements.get("fileList").innerHTML).toContain("SELECT 1;");
+  });
+
+  it("does not let a later log-only noop patch overwrite an existing real patch result", () => {
+    const { context, elements } = buildUiHarness();
+
+    context.showPatch({
+      ok: true,
+      patchPreview: "Summary: Real patch",
+      warnings: [],
+      applyPatches: [
+        {
+          filePath: "src/features/login.ts",
+          fullContent: "export const login = true;",
+        },
+      ],
+    });
+
+    expect(String(elements.get("filesVal").textContent)).toBe("1");
+
+    context.showPatch({
+      ok: true,
+      reason: "log_only_noop",
+      patchPreview: "[LOG_ONLY] noop",
+      warnings: ["[LOG_ONLY] noop"],
+      applyPatches: [],
+      fileDiffs: [],
+    });
+
+    expect(String(elements.get("filesVal").textContent)).toBe("1");
+    expect(elements.get("resultSummaryChips").innerHTML).toContain("Files: 1");
   });
 });
 

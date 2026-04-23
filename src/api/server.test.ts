@@ -777,6 +777,30 @@ export function LoginForm() {
     expect(supabaseRpcMock).not.toHaveBeenCalled();
   });
 
+  it("short-circuits __log_only__ patch requests without running patch flow or billing logs", async () => {
+    process.env.SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+
+    const response = await fetch(`${baseUrl}/api/patch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "__log_only__",
+        repoPath: "C:/repo",
+        userId: "clerk_user_123",
+      }),
+    });
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.reason).toBe("log_only_noop");
+    expect(body.applyPatches).toEqual([]);
+    expect(body.decisionMode).toBe("blocked");
+    expect(runLlmPatchFlowMock).not.toHaveBeenCalled();
+    expect(supabaseInsertMock).not.toHaveBeenCalled();
+    expect(supabaseRpcMock).not.toHaveBeenCalled();
+  });
+
   it("returns the same conversationId on a successful continued refinement", async () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
