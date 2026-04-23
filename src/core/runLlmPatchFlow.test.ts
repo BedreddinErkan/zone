@@ -2104,7 +2104,7 @@ expect(result.safetyResolution).toEqual(
     );
   });
 
-  it("blocks constrained tasks when the chosen target file lacks the required existing form structure", async () => {
+  it("recovers with constrained fallback when preview target lacks required form structure", async () => {
     const files = [
       buildRepoFile("client/src/pages/PatientsPage.jsx", "frontend"),
       buildRepoFile("client/src/components/ClinicLeads.jsx", "frontend"),
@@ -2125,13 +2125,7 @@ expect(result.safetyResolution).toEqual(
       ],
       risks: [],
     });
-    readProjectFilesMock.mockResolvedValue({
-      "C:/repo/client/src/components/ClinicLeads.jsx": `
-        export function ClinicLeads() {
-          return <section><h2>Clinic leads</h2></section>;
-        }
-      `,
-      "C:/repo/client/src/pages/PatientsPage.jsx": `
+    const patientsSource = `
         import { useState } from "react";
         export function PatientsPage() {
           const [formData, setFormData] = useState({ firstName: "" });
@@ -2141,7 +2135,14 @@ expect(result.safetyResolution).toEqual(
           };
           return <form onSubmit={handleSubmit}><button type="submit">Create</button></form>;
         }
+      `;
+    readProjectFilesMock.mockResolvedValue({
+      "C:/repo/client/src/components/ClinicLeads.jsx": `
+        export function ClinicLeads() {
+          return <section><h2>Clinic leads</h2></section>;
+        }
       `,
+      "C:/repo/client/src/pages/PatientsPage.jsx": patientsSource,
     });
     planPatchPreviewWithLlmMock.mockResolvedValue({
       summary: "Patch summary",
@@ -2154,6 +2155,13 @@ expect(result.safetyResolution).toEqual(
           contentPreview: "validation around submit flow",
         },
       ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      filePath: "client/src/pages/PatientsPage.jsx",
+      fullContent: `${patientsSource}\n// validation`,
+      summary: "Updated file",
       warnings: [],
     });
 
@@ -2169,14 +2177,19 @@ expect(result.safetyResolution).toEqual(
       expect(result.patchPreview).toContain(
         "Targeted file: client/src/components/ClinicLeads.jsx"
       );
-      expect(result.applyPatches).toEqual([]);
-      expect(result.reason).toBe("target_file_constraint_mismatch");
-      expect(result.finalExecutionOutcome).toBe("completed_with_issues");
-      expect(result.finalState).toBe("blocked");
-      expect(result.validationBlocked).toBe(true);
+      expect(result.applyPatches.length).toBe(1);
+      expect(result.applyPatches[0].filePath).toBe("client/src/pages/PatientsPage.jsx");
       expect(result.warnings.join("\n")).toContain("target_file_constraint_mismatch");
     }
-    expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
+    expect(planFullPatchWithLlmMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filePath: "client/src/pages/PatientsPage.jsx",
+      })
+    );
+    const fullPatchPaths = planFullPatchWithLlmMock.mock.calls.map(
+      (call) => (call[0] as { filePath: string }).filePath
+    );
+    expect(fullPatchPaths).not.toContain("client/src/components/ClinicLeads.jsx");
   });
 
   it("blocks constrained tasks when the target has form structure but not the task entity (path/content)", async () => {
@@ -2213,9 +2226,7 @@ expect(result.safetyResolution).toEqual(
       ],
       risks: [],
     });
-    readProjectFilesMock.mockResolvedValue({
-      "C:/repo/client/src/components/ClinicLeads.jsx": clinicLeadsWithForm,
-      "C:/repo/client/src/pages/PatientsPage.jsx": `
+    const patientsPageSource = `
         import { useState } from "react";
         export function PatientsPage() {
           const [formData, setFormData] = useState({ firstName: "" });
@@ -2225,7 +2236,10 @@ expect(result.safetyResolution).toEqual(
           };
           return <form onSubmit={handleSubmit}><button type="submit">Create</button></form>;
         }
-      `,
+      `;
+    readProjectFilesMock.mockResolvedValue({
+      "C:/repo/client/src/components/ClinicLeads.jsx": clinicLeadsWithForm,
+      "C:/repo/client/src/pages/PatientsPage.jsx": patientsPageSource,
     });
     planPatchPreviewWithLlmMock.mockResolvedValue({
       summary: "Patch summary",
@@ -2240,6 +2254,13 @@ expect(result.safetyResolution).toEqual(
       ],
       warnings: [],
     });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      filePath: "client/src/pages/PatientsPage.jsx",
+      fullContent: `${patientsPageSource}\n// validation`,
+      summary: "Updated file",
+      warnings: [],
+    });
 
     const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
     const result = await runLlmPatchFlow({
@@ -2250,10 +2271,19 @@ expect(result.safetyResolution).toEqual(
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.targetFile).toBe("client/src/components/ClinicLeads.jsx");
-      expect(result.reason).toBe("target_entity_mismatch");
       expect(result.warnings.join("\n")).toContain("target_entity_mismatch");
+      expect(result.applyPatches[0]?.filePath).toBe("client/src/pages/PatientsPage.jsx");
     }
-    expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
+    expect(planFullPatchWithLlmMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filePath: "client/src/pages/PatientsPage.jsx",
+      })
+    );
+    expect(
+      planFullPatchWithLlmMock.mock.calls.map(
+        (call) => (call[0] as { filePath: string }).filePath
+      )
+    ).not.toContain("client/src/components/ClinicLeads.jsx");
     const eligibilityLog = consoleLogSpy.mock.calls.find(
       (call) => call[0] === "[zone-target-eligibility]"
     )?.[1] as string | undefined;
@@ -2265,10 +2295,7 @@ expect(result.safetyResolution).toEqual(
 
   it("logs entitySource content when strict heading matches but path does not (still ineligible)", async () => {
     const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    const files = [
-      buildRepoFile("client/src/pages/PatientsPage.jsx", "frontend"),
-      buildRepoFile("client/src/components/ClinicLeads.jsx", "frontend"),
-    ];
+    const files = [buildRepoFile("client/src/components/ClinicLeads.jsx", "frontend")];
     const clinicLeadsWithFormAndHeading = `
       import { useState } from "react";
       export function ClinicLeads() {
@@ -2288,28 +2315,17 @@ expect(result.safetyResolution).toEqual(
 
     scanRepoMock.mockResolvedValue(files);
     detectProjectStructureMock.mockReturnValue({ notes: ["React frontend"] });
-    rankRelevantFilesMock.mockReturnValue([
-      { ...files[0], score: 60 },
-      { ...files[1], score: 58 },
-    ]);
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 58 }]);
     planFeatureWithLlmMock.mockResolvedValue({
       implementationSummary: "Add validation",
       steps: ["Patients form"],
       suggestedFiles: [
         { path: "client/src/components/ClinicLeads.jsx", reason: "Leads", action: "inspect" },
-        { path: "client/src/pages/PatientsPage.jsx", reason: "Patients page", action: "inspect" },
       ],
       risks: [],
     });
     readProjectFilesMock.mockResolvedValue({
       "C:/repo/client/src/components/ClinicLeads.jsx": clinicLeadsWithFormAndHeading,
-      "C:/repo/client/src/pages/PatientsPage.jsx": `
-        import { useState } from "react";
-        export function PatientsPage() {
-          const [formData, setFormData] = useState({ firstName: "" });
-          return <form><button type="submit">Create</button></form>;
-        }
-      `,
     });
     planPatchPreviewWithLlmMock.mockResolvedValue({
       summary: "Patch summary",
@@ -2338,6 +2354,77 @@ expect(result.safetyResolution).toEqual(
     expect(eligibilityLog).toContain('"entityMatch":false');
     expect(eligibilityLog).toContain('"entitySource":"content"');
     expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
+    consoleLogSpy.mockRestore();
+  });
+
+  it("returns no_eligible_target_found when preview is rejected and no fallback file passes eligibility", async () => {
+    const files = [
+      buildRepoFile("client/src/pages/PatientsPage.jsx", "frontend"),
+      buildRepoFile("client/src/components/ClinicLeads.jsx", "frontend"),
+    ];
+    const clinicFormWrongEntity = `
+      import { useState } from "react";
+      export function ClinicLeads() {
+        const [formData, setFormData] = useState({ email: "" });
+        const handleSubmit = async (event) => {
+          event.preventDefault();
+          await api.post("/clinic-leads", formData);
+        };
+        return <form onSubmit={handleSubmit}><button type="submit">Save</button></form>;
+      }
+    `;
+    const patientsWeakNoFormFlow = `export function PatientsPage() { return <div>Patients</div>; }`;
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React frontend"] });
+    rankRelevantFilesMock.mockReturnValue([
+      { ...files[0], score: 60 },
+      { ...files[1], score: 58 },
+    ]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Add validation",
+      steps: ["Patients page form"],
+      suggestedFiles: [
+        { path: "client/src/components/ClinicLeads.jsx", reason: "Leads", action: "inspect" },
+        { path: "client/src/pages/PatientsPage.jsx", reason: "Patients page", action: "inspect" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockResolvedValue({
+      "C:/repo/client/src/components/ClinicLeads.jsx": clinicFormWrongEntity,
+      "C:/repo/client/src/pages/PatientsPage.jsx": patientsWeakNoFormFlow,
+    });
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Patch summary",
+      patches: [
+        {
+          path: "client/src/components/ClinicLeads.jsx",
+          operation: "modify",
+          summary: "Add validation",
+          targetHint: "existing create form",
+          contentPreview: "x",
+        },
+      ],
+      warnings: [],
+    });
+
+    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "Add minimal client-side validation to the existing Patients page create form only. Reuse the existing form state and existing submit flow. Do not create a new form. Do not introduce a new API call.",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.reason).toBe("no_eligible_target_found");
+      expect(result.applyPatches).toEqual([]);
+    }
+    expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
+    const fallbackLog = consoleLogSpy.mock.calls.find(
+      (call) => call[0] === "[zone-target-fallback]"
+    )?.[1] as string | undefined;
+    expect(fallbackLog).toContain('"reason":"no_eligible_fallback"');
     consoleLogSpy.mockRestore();
   });
 

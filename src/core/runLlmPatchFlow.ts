@@ -33,6 +33,7 @@ import { scorePatchQuality } from "../engine/patchQualityScorer.js";
 import { resolveSafetyLevel } from "../engine/safetyLevelResolver.js";
 import { enforceMicroEditProtection } from "../engine/microEditProtection.js";
 import { parseTaskIntent, type TaskIntent } from "./taskIntentParser.js";
+import type { PatchPreviewItem } from "../types/agent.js";
 import type { ConversationBillingMode } from "../types/conversation.js";
 import type { RepoFile } from "../types/project.js";
 import { startZoneApiPerfRun } from "../api/zoneApiPerf.js";
@@ -919,6 +920,150 @@ function assessConstrainedTargetEligibility(input: {
     entitySource,
     reason: "constraint_structure_ok",
   };
+}
+
+const CONSTRAINED_ELIGIBILITY_FALLBACK_REJECT_REASONS = new Set([
+  "target_entity_mismatch",
+  "target_file_constraint_mismatch",
+]);
+
+function isProtectedDeveloperUiPath(patchPath: string): boolean {
+  return patchPath.startsWith("src/ui/") || patchPath === "src/ui/index.html";
+}
+
+async function loadDeveloperModifyPatchSourceContent(input: {
+  patchPath: string;
+  hostedContext: HostedDeveloperContextInput | undefined;
+  allFiles: RepoFile[];
+}): Promise<
+  | { ok: true; content: string }
+  | { ok: false; reason: "missing_hosted_context" }
+> {
+  const hostedOriginalContent =
+    input.hostedContext &&
+    Object.prototype.hasOwnProperty.call(
+      input.hostedContext.originalContents,
+      input.patchPath
+    )
+      ? input.hostedContext.originalContents[input.patchPath] ?? ""
+      : undefined;
+  const hostedContextFileContent =
+    input.hostedContext?.contextFiles.find((file) => file.path === input.patchPath)
+      ?.content;
+
+  if (
+    input.hostedContext &&
+    typeof hostedOriginalContent === "undefined" &&
+    typeof hostedContextFileContent === "undefined"
+  ) {
+    return { ok: false, reason: "missing_hosted_context" };
+  }
+
+  const repoFile = input.allFiles.find((f) => f.path === input.patchPath);
+  const absolutePath = repoFile?.absolutePath;
+
+  const content = input.hostedContext
+    ? hostedOriginalContent ?? hostedContextFileContent ?? ""
+    : absolutePath !== undefined
+      ? ((await readProjectFiles([absolutePath]))[absolutePath] ?? "")
+      : "";
+  return { ok: true, content };
+}
+
+async function buildConstrainedFallbackContentByPath(input: {
+  resolvedFileContexts: Array<{ path: string; content: string }>;
+  relevantFiles: Array<{ path: string; score: number }>;
+  hostedContext: HostedDeveloperContextInput | undefined;
+  allFiles: RepoFile[];
+}): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  for (const file of input.resolvedFileContexts) {
+    map.set(file.path, file.content);
+  }
+  if (input.hostedContext) {
+    for (const file of input.hostedContext.contextFiles) {
+      map.set(file.path, file.content);
+    }
+    for (const [pathKey, value] of Object.entries(
+      input.hostedContext.originalContents
+    )) {
+      if (!map.has(pathKey)) {
+        map.set(pathKey, value ?? "");
+      }
+    }
+  }
+  for (const ranked of input.relevantFiles) {
+    if (!map.has(ranked.path) && !isIrrelevantDeveloperContextPath(ranked.path)) {
+      const absolutePath = input.allFiles.find(
+        (file) => file.path === ranked.path
+      )?.absolutePath;
+      if (typeof absolutePath === "string") {
+        const contents = await readProjectFiles([absolutePath]);
+        map.set(ranked.path, contents[absolutePath] ?? "");
+      }
+    }
+  }
+  return map;
+}
+
+function buildConstrainedSyntheticModifyPatch(filePath: string): PatchPreviewItem {
+  return {
+    path: filePath,
+    operation: "modify",
+    summary:
+      "Constrained localized task fallback after preview target eligibility rejection",
+    targetHint: "constrained_fallback_target",
+    contentPreview: "",
+  };
+}
+
+async function pickConstrainedDeveloperApplyTargetFallback(input: {
+  task: string;
+  rejectedPaths: Set<string>;
+  contentByPath: Map<string, string>;
+  relevantFileScores: Map<string, number>;
+}): Promise<{
+  path: string;
+  content: string;
+  rankScore: number;
+} | null> {
+  const candidates: Array<{
+    path: string;
+    content: string;
+    rankScore: number;
+  }> = [];
+  for (const [path, content] of input.contentByPath) {
+    if (input.rejectedPaths.has(path)) {
+      continue;
+    }
+    if (isIrrelevantDeveloperContextPath(path) || isProtectedDeveloperUiPath(path)) {
+      continue;
+    }
+    const eligibility = assessConstrainedTargetEligibility({
+      task: input.task,
+      filePath: path,
+      fileContent: content,
+    });
+    if (!eligibility.eligible) {
+      continue;
+    }
+    candidates.push({
+      path,
+      content,
+      rankScore: input.relevantFileScores.get(path) ?? 0,
+    });
+  }
+  if (candidates.length === 0) {
+    return null;
+  }
+  candidates.sort((a, b) => {
+    if (b.rankScore !== a.rankScore) {
+      return b.rankScore - a.rankScore;
+    }
+    return a.path.localeCompare(b.path);
+  });
+  const best = candidates[0];
+  return { path: best.path, content: best.content, rankScore: best.rankScore };
 }
 
 function hasSensitiveLogging(content: string): boolean {
@@ -2475,6 +2620,13 @@ function normalizePatchOutcomeReason(reason: string | undefined): string | null 
 }
 
 function deriveNoCodeChangeReason(patchResults: PatchResult[]): string {
+  const noEligible = patchResults.find(
+    (result) =>
+      result.status === "failed" && result.reason === "no_eligible_target_found"
+  )?.reason;
+  if (noEligible) {
+    return noEligible;
+  }
   const failedReason = patchResults.find(
     (result) => result.status === "failed" && result.reason
   )?.reason;
@@ -2920,8 +3072,163 @@ export async function runLlmPatchFlow(input: {
       (p) => p.operation === "modify" || p.operation === "create"
     );
     const applyResults: Array<{ filePath: string; fullContent: string }> = [];
+    let loopApplyTargets: PatchPreviewItem[] = applyTargets;
+    let constrainedApplyEligibilityPrefiltered = false;
 
-    for (const patch of applyTargets) {
+    if (isConstrainedLocalizedPatchTask(input.task) && applyTargets.length > 0) {
+      constrainedApplyEligibilityPrefiltered = true;
+      const prefilteredTargets: PatchPreviewItem[] = [];
+      const constraintRejections: Array<{ filePath: string; reason: string }> =
+        [];
+
+      for (const previewPatch of applyTargets) {
+        if (isProtectedDeveloperUiPath(previewPatch.path)) {
+          prefilteredTargets.push(previewPatch);
+          continue;
+        }
+        const hostedOriginalPre =
+          input.hostedContext &&
+          Object.prototype.hasOwnProperty.call(
+            input.hostedContext.originalContents,
+            previewPatch.path
+          )
+            ? input.hostedContext.originalContents[previewPatch.path] ?? ""
+            : undefined;
+        const hostedCtxPre = input.hostedContext?.contextFiles.find(
+          (file) => file.path === previewPatch.path
+        )?.content;
+        if (
+          input.hostedContext &&
+          typeof hostedOriginalPre === "undefined" &&
+          typeof hostedCtxPre === "undefined"
+        ) {
+          patchResults.push({
+            filePath: previewPatch.path,
+            status: "skipped",
+            reason: "missing hosted context",
+          });
+          continue;
+        }
+        const loaded = await loadDeveloperModifyPatchSourceContent({
+          patchPath: previewPatch.path,
+          hostedContext: input.hostedContext,
+          allFiles,
+        });
+        if (!loaded.ok) {
+          patchResults.push({
+            filePath: previewPatch.path,
+            status: "skipped",
+            reason: "missing hosted context",
+          });
+          continue;
+        }
+        const preflightEligibility = assessConstrainedTargetEligibility({
+          task: input.task,
+          filePath: previewPatch.path,
+          fileContent: loaded.content,
+        });
+        console.log(
+          "[zone-target-eligibility]",
+          JSON.stringify({
+            filePath: previewPatch.path,
+            structureScore: preflightEligibility.structureScore,
+            entityMatch: preflightEligibility.entityMatch,
+            entitySource: preflightEligibility.entitySource,
+            eligible: preflightEligibility.eligible,
+            reason: preflightEligibility.reason,
+            decision: preflightEligibility.eligible ? "accepted" : "rejected",
+          })
+        );
+        if (!preflightEligibility.eligible) {
+          const mismatchWarning = buildPatchConflictWarning({
+            filePath: previewPatch.path,
+            reason: preflightEligibility.reason,
+            score: preflightEligibility.score,
+          });
+          internalWarnings.push(mismatchWarning);
+          visibleWarnings.push(mismatchWarning);
+          patchResults.push({
+            filePath: previewPatch.path,
+            status: "failed",
+            reason: preflightEligibility.reason,
+          });
+          if (
+            CONSTRAINED_ELIGIBILITY_FALLBACK_REJECT_REASONS.has(
+              preflightEligibility.reason
+            )
+          ) {
+            constraintRejections.push({
+              filePath: previewPatch.path,
+              reason: preflightEligibility.reason,
+            });
+          }
+          continue;
+        }
+        prefilteredTargets.push(previewPatch);
+      }
+
+      loopApplyTargets = prefilteredTargets;
+      const hasNonProtectedApplyTarget = loopApplyTargets.some(
+        (p) => !isProtectedDeveloperUiPath(p.path)
+      );
+      if (
+        !hasNonProtectedApplyTarget &&
+        constraintRejections.length > 0 &&
+        constraintRejections.every((rejection) =>
+          CONSTRAINED_ELIGIBILITY_FALLBACK_REJECT_REASONS.has(rejection.reason)
+        )
+      ) {
+        const rejectedPaths = new Set(
+          constraintRejections.map((rejection) => rejection.filePath)
+        );
+        const fallbackContentByPath = await buildConstrainedFallbackContentByPath({
+          resolvedFileContexts,
+          relevantFiles,
+          hostedContext: input.hostedContext,
+          allFiles,
+        });
+        const picked = await pickConstrainedDeveloperApplyTargetFallback({
+          task: input.task,
+          rejectedPaths,
+          contentByPath: fallbackContentByPath,
+          relevantFileScores,
+        });
+        if (picked) {
+          console.log(
+            "[zone-target-fallback]",
+            JSON.stringify({
+              rejected: constraintRejections.map((rejection) => rejection.filePath),
+              fallback: picked.path,
+              reason: "selected_fallback",
+            })
+          );
+          originalContents[picked.path] = picked.content;
+          loopApplyTargets = [
+            buildConstrainedSyntheticModifyPatch(picked.path),
+            ...loopApplyTargets,
+          ];
+        } else {
+          console.log(
+            "[zone-target-fallback]",
+            JSON.stringify({
+              rejected: constraintRejections.map((rejection) => rejection.filePath),
+              fallback: null,
+              reason: "no_eligible_fallback",
+            })
+          );
+          patchResults.push({
+            filePath:
+              constraintRejections[0]?.filePath ??
+              applyTargets[0]?.path ??
+              "constrained_task",
+            status: "failed",
+            reason: "no_eligible_target_found",
+          });
+        }
+      }
+    }
+
+    for (const patch of loopApplyTargets) {
       if (patch.path.startsWith("src/ui/") || patch.path === "src/ui/index.html") {
         internalWarnings.push(
           "[PROTECTED_FILE] src/ui/ files cannot be modified by Zone developer mode"
@@ -3018,7 +3325,7 @@ export async function runLlmPatchFlow(input: {
             })
           : null;
       const preferConstrainedFullContent =
-        applyTargets.length === 1 &&
+        loopApplyTargets.length === 1 &&
         contextWindow !== null &&
         isConstrainedLocalizedPatchTask(input.task);
       const fullPatchMode =
@@ -3026,7 +3333,10 @@ export async function runLlmPatchFlow(input: {
           ? "find_replace_patch"
           : "full_content";
       const llmFileContent = contextWindow?.snippet ?? fileContent;
-      if (isConstrainedLocalizedPatchTask(input.task)) {
+      const shouldRunInlineConstrainedEligibility =
+        isConstrainedLocalizedPatchTask(input.task) &&
+        !constrainedApplyEligibilityPrefiltered;
+      if (shouldRunInlineConstrainedEligibility) {
         const targetEligibility = assessConstrainedTargetEligibility({
           task: input.task,
           filePath: patch.path,
@@ -3041,6 +3351,7 @@ export async function runLlmPatchFlow(input: {
             entitySource: targetEligibility.entitySource,
             eligible: targetEligibility.eligible,
             reason: targetEligibility.reason,
+            decision: targetEligibility.eligible ? "accepted" : "rejected",
           })
         );
         if (!targetEligibility.eligible) {
