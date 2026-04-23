@@ -477,6 +477,17 @@ function detectExistingStructureTaskConstraints(task: string): {
   };
 }
 
+function isConstrainedLocalizedPatchTask(task: string): boolean {
+  const constraints = detectExistingStructureTaskConstraints(task);
+  return (
+    constraints.requiresExistingForm ||
+    constraints.requiresExistingSubmitFlow ||
+    constraints.requiresExistingState ||
+    constraints.avoidsNewForm ||
+    constraints.avoidsNewApiCall
+  );
+}
+
 function scoreConstraintAwareContextFile(input: {
   task: string;
   content: string;
@@ -2023,7 +2034,12 @@ function detectSuspiciousUiOverwrite(input: {
 
 function parsePatchFailureWarning(
   warning: string
-): { reason: string; score?: number; bestMatch?: string } {
+): {
+  reason: string;
+  score?: number;
+  bestMatch?: string;
+  normalizedFailureReason?: string;
+} {
   if (warning.startsWith("[PATCH_FIND_NOT_FOUND] ")) {
     try {
       const payload = JSON.parse(
@@ -2035,9 +2051,11 @@ function parsePatchFailureWarning(
       };
 
       return {
-        reason: payload.reason ?? "patch_find_not_found",
+        reason: "patch_find_not_found",
         score: payload.score,
         bestMatch: payload.bestMatch,
+        normalizedFailureReason:
+          normalizePatchOutcomeReason(payload.reason) ?? undefined,
       };
     } catch {
       return { reason: "patch_find_not_found" };
@@ -2066,6 +2084,33 @@ function buildPatchConflictWarning(input: {
   })}`;
 }
 
+function logPatchConversionDebug(input: {
+  filePath: string;
+  chosenOutputMode: "full_content" | "find_replace_patch";
+  responseMode: "full_content" | "patch";
+  status: "applied" | "failed";
+  failureReason?: string;
+  normalizedFailureReason?: string;
+}): void {
+  if (input.status === "applied" && input.responseMode === "full_content") {
+    return;
+  }
+
+  console.log(
+    "[zone-patch-conversion]",
+    JSON.stringify({
+      filePath: input.filePath,
+      chosenOutputMode: input.chosenOutputMode,
+      responseMode: input.responseMode,
+      status: input.status,
+      ...(input.failureReason ? { failureReason: input.failureReason } : {}),
+      ...(input.normalizedFailureReason
+        ? { normalizedFailureReason: input.normalizedFailureReason }
+        : {}),
+    })
+  );
+}
+
 function normalizePatchOutcomeReason(reason: string | undefined): string | null {
   const normalized = String(reason ?? "")
     .trim()
@@ -2082,9 +2127,12 @@ function deriveNoCodeChangeReason(patchResults: PatchResult[]): string {
   const skippedReason = patchResults.find(
     (result) => result.status === "skipped" && result.reason
   )?.reason;
+  const normalizedFailedReason = normalizePatchOutcomeReason(failedReason);
 
   return (
-    normalizePatchOutcomeReason(failedReason) ??
+    (normalizedFailedReason === "warning"
+      ? "patch_conversion_failed"
+      : normalizedFailedReason) ??
     normalizePatchOutcomeReason(skippedReason) ??
     "no_code_change_produced"
   );
@@ -2605,8 +2653,6 @@ export async function runLlmPatchFlow(input: {
       }
       const microEditMode =
         isUiFilePath(patch.path) && isMicroEditUiTask(input.task);
-      const fullPatchMode =
-        fileContent.length > 8000 ? "find_replace_patch" : "full_content";
       const contextWindow =
         fileContent.length > 8000
           ? smartContextWindow({
@@ -2614,6 +2660,14 @@ export async function runLlmPatchFlow(input: {
               task: input.task,
             })
           : null;
+      const preferConstrainedFullContent =
+        applyTargets.length === 1 &&
+        contextWindow !== null &&
+        isConstrainedLocalizedPatchTask(input.task);
+      const fullPatchMode =
+        fileContent.length > 8000 && !preferConstrainedFullContent
+          ? "find_replace_patch"
+          : "full_content";
       const llmFileContent = contextWindow?.snippet ?? fileContent;
       const targetedRelevantFiles = microEditMode
         ? [
@@ -2686,6 +2740,14 @@ export async function runLlmPatchFlow(input: {
                   visibleWarnings.push(appliedPatch.warning);
                 }
                 const failure = parsePatchFailureWarning(appliedPatch.warning);
+                logPatchConversionDebug({
+                  filePath: patch.path,
+                  chosenOutputMode: fullPatchMode,
+                  responseMode: fullPatch.mode,
+                  status: "failed",
+                  failureReason: failure.reason,
+                  normalizedFailureReason: failure.normalizedFailureReason,
+                });
                 const patchConflictWarning = buildPatchConflictWarning({
                   filePath: patch.path,
                   reason: failure.reason,
@@ -2701,8 +2763,20 @@ export async function runLlmPatchFlow(input: {
                 });
                 return null;
               }
+              logPatchConversionDebug({
+                filePath: patch.path,
+                chosenOutputMode: fullPatchMode,
+                responseMode: fullPatch.mode,
+                status: "applied",
+              });
               return appliedPatch.fullContent;
             }
+            logPatchConversionDebug({
+              filePath: patch.path,
+              chosenOutputMode: fullPatchMode,
+              responseMode: fullPatch.mode,
+              status: "applied",
+            });
             return fullPatch.fullContent;
           });
 

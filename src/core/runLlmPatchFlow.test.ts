@@ -1626,6 +1626,7 @@ expect(result.safetyResolution).toEqual(
   });
 
   it("rejects invalid full-file scaffold output that is not patch-style", async () => {
+    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const files = [buildRepoFile("src/pages/home.html", "frontend")];
 
     scanRepoMock.mockResolvedValue(files);
@@ -1685,6 +1686,11 @@ expect(result.safetyResolution).toEqual(
       expect(result.warnings.join("\n")).toContain("DEVELOPER_PATCH_FORMAT");
       expect(result.warnings.join("\n")).toContain("NO_CODE_CHANGE_PRODUCED");
     }
+    expect(consoleLogSpy).toHaveBeenCalledWith(
+      "[zone-patch-conversion]",
+      expect.stringContaining('"failureReason":"invalid_patch_format"')
+    );
+    consoleLogSpy.mockRestore();
   });
 
   it("applies raw find/replace patch mode for large files", async () => {
@@ -1986,6 +1992,7 @@ expect(result.safetyResolution).toEqual(
   });
 
   it("fails gracefully when fuzzy large-file patch match cannot be found", async () => {
+    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const files = [buildRepoFile("src/pages/home.html", "frontend")];
     const currentHtml = [
       "<body>",
@@ -2038,7 +2045,7 @@ expect(result.safetyResolution).toEqual(
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.applyPatches).toEqual([]);
-      expect(result.reason).toBe("low_confidence");
+      expect(result.reason).toBe("patch_find_not_found");
       expect(result.finalExecutionOutcome).toBe("completed_with_issues");
       expect(result.finalState).toBe("blocked");
       expect(result.validationBlocked).toBe(true);
@@ -2047,6 +2054,73 @@ expect(result.safetyResolution).toEqual(
       expect(result.warnings.join("\n")).toContain('"score":');
       expect(result.warnings.join("\n")).toContain("NO_CODE_CHANGE_PRODUCED");
     }
+    expect(consoleLogSpy).toHaveBeenCalledWith(
+      "[zone-patch-conversion]",
+      expect.stringContaining('"failureReason":"patch_find_not_found"')
+    );
+    expect(consoleLogSpy).toHaveBeenCalledWith(
+      "[zone-patch-conversion]",
+      expect.stringContaining('"normalizedFailureReason":"low_confidence"')
+    );
+    consoleLogSpy.mockRestore();
+  });
+
+  it("uses full_content mode for constrained single-file large-file tasks with a narrowed context window", async () => {
+    const files = [buildRepoFile("client/src/pages/PatientsPage.jsx", "frontend")];
+    const currentContent = Array.from(
+      { length: 900 },
+      (_, index) =>
+        index === 450
+          ? '  return <form onSubmit={handleSubmit}><button type="submit">Create</button></form>;'
+          : `const fillerLine${index} = "${index}";`
+    ).join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React frontend"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 60 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Add small validation",
+      steps: ["Reuse the existing state and submit flow"],
+      suggestedFiles: [
+        { path: "client/src/pages/PatientsPage.jsx", reason: "Patients page", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, currentContent]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Patch summary",
+      patches: [
+        {
+          path: "client/src/pages/PatientsPage.jsx",
+          operation: "modify",
+          summary: "Add minimal validation to the existing create form",
+          targetHint: "existing create form",
+          contentPreview: "validation around handleSubmit",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      filePath: "client/src/pages/PatientsPage.jsx",
+      fullContent: `${currentContent}\n// validation`,
+      summary: "Updated file",
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    await runLlmPatchFlow({
+      task: "Add minimal validation to the existing form only. Reuse the existing state and existing submit flow. Do not create a new form. Do not introduce a new API call.",
+      repoPath: "C:/repo",
+    });
+
+    expect(planFullPatchWithLlmMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outputMode: "full_content",
+      })
+    );
   });
 
   it("blocks protected src/ui files from developer apply patches", async () => {

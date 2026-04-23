@@ -102,4 +102,34 @@ describe("planFullPatchWithLlm", () => {
       warnings: [],
     });
   });
+
+  it("uses full_content mode for constrained localized tasks when the content is already narrowed", async () => {
+    withSelfHealingRetryMock.mockResolvedValue({
+      ok: true,
+      value: {
+        filePath: "src/example.tsx",
+        fullContent: "export function Example() { return null; }",
+        summary: "Updated file",
+        warnings: [],
+      },
+    });
+
+    const { planFullPatchWithLlm } = await import("./planFullPatch.js");
+    await planFullPatchWithLlm({
+      task: "Add validation to the existing form only. Reuse the existing state and existing submit flow. Do not create a new form.",
+      filePath: "src/example.tsx",
+      fileContent: "x".repeat(5000),
+      repoSummary: "repo",
+      relatedContext:
+        "// CONTEXT WINDOW: lines 120-180 of 900 total\n\nFocus on the existing create form only.",
+    });
+
+    expect(buildFullPatchPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outputMode: "full_content",
+      })
+    );
+    expect(withSelfHealingRetryMock).toHaveBeenCalled();
+    expect(responsesCreateMock).not.toHaveBeenCalled();
+  });
 });

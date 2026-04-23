@@ -22,6 +22,45 @@ const fullContentSchema = z.object({
 
 const LARGE_FILE_PATCH_THRESHOLD = 8000;
 
+function isConstrainedLocalizedPatchTask(task: string): boolean {
+  const normalizedTask = task.toLowerCase();
+  return [
+    /\bexisting form\b/,
+    /\bexisting submit flow\b/,
+    /\bexisting state\b/,
+    /\breuse (?:the )?existing state\b/,
+    /\breuse (?:the )?existing submit flow\b/,
+    /\bdo not create (?:a )?new form\b/,
+    /\bdo not introduce (?:a )?new api call\b/,
+    /\bdo not add (?:a )?new api call\b/,
+  ].some((pattern) => pattern.test(normalizedTask));
+}
+
+function selectFullPatchOutputMode(input: {
+  outputMode?: FullPatchOutputMode;
+  task: string;
+  fileContent: string;
+  relatedContext: string;
+}): FullPatchOutputMode {
+  if (input.outputMode) {
+    return input.outputMode;
+  }
+
+  const hasContextWindow = input.relatedContext.includes("// CONTEXT WINDOW:");
+  const shouldPreferFullContent =
+    hasContextWindow &&
+    input.fileContent.length < LARGE_FILE_PATCH_THRESHOLD &&
+    isConstrainedLocalizedPatchTask(input.task);
+
+  if (shouldPreferFullContent) {
+    return "full_content";
+  }
+
+  return input.fileContent.length < LARGE_FILE_PATCH_THRESHOLD
+    ? "full_content"
+    : "find_replace_patch";
+}
+
 export type FullPatchResult =
   | {
       mode: "full_content";
@@ -85,11 +124,12 @@ export async function planFullPatchWithLlm(input: {
 }): Promise<FullPatchResult> {
   const client = createOpenAIClient();
   const model = getModelName("high");
-  const outputMode: FullPatchOutputMode =
-    input.outputMode ??
-    (input.fileContent.length < LARGE_FILE_PATCH_THRESHOLD
-      ? "full_content"
-      : "find_replace_patch");
+  const outputMode = selectFullPatchOutputMode({
+    outputMode: input.outputMode,
+    task: input.task,
+    fileContent: input.fileContent,
+    relatedContext: input.relatedContext,
+  });
   const prompt = buildFullPatchPrompt({
     task: input.task,
     filePath: input.filePath,
