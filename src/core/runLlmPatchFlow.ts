@@ -2954,6 +2954,27 @@ export async function runLlmPatchFlow(input: {
   }).slice(0, 8);
   perf.mark("relevant files ranked");
 
+  // TEMP DIAGNOSTIC: surface top 20 ranker scores to verify PatientsPage presence
+  const diagnosticFullRanking = rankRelevantFiles({
+    task: input.task,
+    files: developerContextFiles,
+    intent: taskIntent,
+  });
+  console.log(
+    "[zone-diag-ranker]",
+    JSON.stringify({
+      totalFiles: developerContextFiles.length,
+      totalRanked: diagnosticFullRanking.length,
+      top20: diagnosticFullRanking.slice(0, 20).map((f) => ({
+        path: f.path,
+        score: f.score,
+      })),
+      patientsMatches: diagnosticFullRanking
+        .filter((f) => f.path.toLowerCase().includes("patient"))
+        .map((f) => ({ path: f.path, score: f.score })),
+    })
+  );
+
   const existingFilesSummary =
     input.hostedContext?.existingFilesSummary ??
     (() => {
@@ -3523,21 +3544,35 @@ export async function runLlmPatchFlow(input: {
             reason: eligibility.reason,
             score: eligibility.structureScore,
           });
+        }
 
-          // Tier 3: structure passes, only the entity anchor doesn't match.
-          // Remembered as last-resort ONLY. If used, it will be forced to
-          // preview_only — never safe_to_apply.
-          if (
-            eligibility.reason === "target_entity_mismatch" &&
-            eligibility.structureScore >= 20 &&
-            (tier3Pick === null || candidate.rankScore > tier3Pick.rankScore)
-          ) {
-            tier3Pick = {
-              path: candidate.path,
-              content: candidate.content,
-              rankScore: candidate.rankScore,
-              structureScore: eligibility.structureScore,
-            };
+        // Tier 3: if tier 1/2 found nothing, do a second pass over ALL
+        // grounded candidates (not bounded by MAX_FALLBACK_ATTEMPTS). This
+        // pass makes no LLM calls — only cheap eligibility checks — and
+        // picks the best structure-only match. If used, it will be forced
+        // to preview_only downstream.
+        if (fallbackPick === null) {
+          for (const candidate of orderedFallbackCandidates) {
+            const eligibility = assessConstrainedTargetEligibility({
+              task: input.task,
+              filePath: candidate.path,
+              fileContent: candidate.content,
+            });
+            if (
+              eligibility.reason === "target_entity_mismatch" &&
+              eligibility.structureScore >= 20 &&
+              (tier3Pick === null ||
+                candidate.rankScore > tier3Pick.rankScore ||
+                (candidate.rankScore === tier3Pick.rankScore &&
+                  eligibility.structureScore > tier3Pick.structureScore))
+            ) {
+              tier3Pick = {
+                path: candidate.path,
+                content: candidate.content,
+                rankScore: candidate.rankScore,
+                structureScore: eligibility.structureScore,
+              };
+            }
           }
         }
 
