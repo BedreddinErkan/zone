@@ -763,6 +763,39 @@ function pathAlignsWithConstrainedTaskEntityAnchors(
 }
 
 const CONSTRAINED_FALLBACK_RANKED_READ_LIMIT = 12;
+const CONSTRAINED_FALLBACK_ENTITY_PATH_CAP = 16;
+const CONSTRAINED_FALLBACK_MAX_READ_PATHS = 24;
+
+function collectConstrainedFallbackEntityPathCandidates(input: {
+  developerContextFiles: RepoFile[];
+  entityAnchors: string[];
+  rejectedPaths: Set<string>;
+}): Array<{ path: string; score: number }> {
+  if (input.entityAnchors.length === 0) {
+    return [];
+  }
+  const matches: Array<{ path: string; score: number }> = [];
+  const seen = new Set<string>();
+  for (const file of input.developerContextFiles) {
+    const { path } = file;
+    if (input.rejectedPaths.has(path) || seen.has(path)) {
+      continue;
+    }
+    if (
+      isIrrelevantDeveloperContextPath(path) ||
+      isProtectedDeveloperUiPath(path)
+    ) {
+      continue;
+    }
+    if (!pathAlignsWithConstrainedTaskEntityAnchors(path, input.entityAnchors)) {
+      continue;
+    }
+    seen.add(path);
+    matches.push({ path, score: 0 });
+  }
+  matches.sort((a, b) => a.path.localeCompare(b.path));
+  return matches.slice(0, CONSTRAINED_FALLBACK_ENTITY_PATH_CAP);
+}
 
 function extractLeadingExportedComponentTokens(fileContent: string): string[] {
   const head = fileContent.slice(0, 8000);
@@ -3259,28 +3292,51 @@ export async function runLlmPatchFlow(input: {
         const fallbackEntityAnchors = extractConstrainedTaskEntityAnchors(
           normalizeConstrainedTaskText(input.task)
         );
-        const fallbackEntityRanked =
-          fallbackEntityAnchors.length === 0
-            ? fallbackFullRanked
-            : fallbackFullRanked.filter((file) =>
-                pathAlignsWithConstrainedTaskEntityAnchors(
-                  file.path,
-                  fallbackEntityAnchors
-                )
-              );
-        const rankedForFallbackReads = (
-          fallbackEntityRanked.length > 0
-            ? fallbackEntityRanked
-            : fallbackFullRanked
-        ).slice(0, CONSTRAINED_FALLBACK_RANKED_READ_LIMIT);
+        const entityPathCandidates = collectConstrainedFallbackEntityPathCandidates({
+          developerContextFiles,
+          entityAnchors: fallbackEntityAnchors,
+          rejectedPaths,
+        });
+        const entityPathSet = new Set(
+          entityPathCandidates.map((candidate) => candidate.path)
+        );
+        const rankedSlice = fallbackFullRanked
+          .filter((file) => !entityPathSet.has(file.path))
+          .slice(0, CONSTRAINED_FALLBACK_RANKED_READ_LIMIT);
+        const rankedCandidatePaths = rankedSlice.map((file) => file.path);
+        const entityPathCandidatePaths = entityPathCandidates.map(
+          (candidate) => candidate.path
+        );
+        const mergedReadOrder: Array<{ path: string; score: number }> = [];
+        const mergeSeen = new Set<string>();
+        for (const item of [
+          ...entityPathCandidates,
+          ...rankedSlice.map((file) => ({ path: file.path, score: file.score })),
+        ]) {
+          if (mergeSeen.has(item.path) || rejectedPaths.has(item.path)) {
+            continue;
+          }
+          mergeSeen.add(item.path);
+          mergedReadOrder.push(item);
+          if (mergedReadOrder.length >= CONSTRAINED_FALLBACK_MAX_READ_PATHS) {
+            break;
+          }
+        }
         const fallbackRelevantScores = new Map(relevantFileScores);
         for (const file of fallbackFullRanked) {
           fallbackRelevantScores.set(file.path, file.score);
         }
+        for (const candidate of entityPathCandidates) {
+          const current = fallbackRelevantScores.get(candidate.path) ?? 0;
+          fallbackRelevantScores.set(
+            candidate.path,
+            Math.max(current, 100_000)
+          );
+        }
         const fallbackContentByPath = await buildConstrainedFallbackContentByPath({
           resolvedFileContexts,
           selectedContextFiles,
-          rankedCandidates: rankedForFallbackReads,
+          rankedCandidates: mergedReadOrder,
           hostedContext: input.hostedContext,
           allFiles,
         });
@@ -3295,6 +3351,9 @@ export async function runLlmPatchFlow(input: {
             "[zone-target-fallback]",
             JSON.stringify({
               rejectedPreviewPaths,
+              entityAnchors: fallbackEntityAnchors,
+              entityPathCandidates: entityPathCandidatePaths,
+              rankedCandidates: rankedCandidatePaths,
               candidatesChecked: picked.candidatesChecked,
               rejectedCandidates: picked.rejectedCandidates,
               fallback: picked.path,
@@ -3311,6 +3370,9 @@ export async function runLlmPatchFlow(input: {
             "[zone-target-fallback]",
             JSON.stringify({
               rejectedPreviewPaths,
+              entityAnchors: fallbackEntityAnchors,
+              entityPathCandidates: entityPathCandidatePaths,
+              rankedCandidates: rankedCandidatePaths,
               candidatesChecked: picked.candidatesChecked,
               rejectedCandidates: picked.rejectedCandidates,
               fallback: null,

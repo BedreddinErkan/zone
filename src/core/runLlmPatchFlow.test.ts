@@ -2428,10 +2428,13 @@ expect(result.safetyResolution).toEqual(
     expect(fallbackLog).toContain("candidatesChecked");
     expect(fallbackLog).toContain("rejectedPreviewPaths");
     expect(fallbackLog).toContain("rejectedCandidates");
+    expect(fallbackLog).toContain("entityAnchors");
+    expect(fallbackLog).toContain("entityPathCandidates");
+    expect(fallbackLog).toContain("rankedCandidates");
     consoleLogSpy.mockRestore();
   });
 
-  it("constrained fallback lazy-loads entity-matched ranked file outside top-8 relevant slice", async () => {
+  it("constrained fallback discovers PatientsPage via entity-path candidates when rank omits it", async () => {
     const fillerPaths = Array.from(
       { length: 8 },
       (_, index) => `client/src/misc/Filler${index}Page.jsx`
@@ -2471,9 +2474,9 @@ expect(result.safetyResolution).toEqual(
 
     scanRepoMock.mockResolvedValue(files);
     detectProjectStructureMock.mockReturnValue({ notes: ["React frontend"] });
-    const rankOrder = [...fillerPaths, patientsDeep, clinicPath];
+    const rankOrderExcludingPatients = [...fillerPaths, clinicPath];
     rankRelevantFilesMock.mockImplementation(({ files: rankedIn }) =>
-      rankOrder
+      rankOrderExcludingPatients
         .map((path, index) => {
           const base = rankedIn.find((f) => f.path === path);
           return base ? { ...base, score: 200 - index } : null;
@@ -2550,6 +2553,9 @@ expect(result.safetyResolution).toEqual(
     expect(fallbackLog).toContain('"reason":"selected_fallback"');
     expect(fallbackLog).toContain(patientsDeep);
     expect(fallbackLog).toContain("candidatesChecked");
+    expect(fallbackLog).toContain("entityPathCandidates");
+    expect(fallbackLog).toContain("entityAnchors");
+    expect(fallbackLog).toContain("rankedCandidates");
     consoleLogSpy.mockRestore();
   });
 
