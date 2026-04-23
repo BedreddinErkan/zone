@@ -3221,6 +3221,7 @@ export async function runLlmPatchFlow(input: {
   // 6b. Generate full file content for modify/create patches
   reportProgress("Generating file patches...");
   let applyPatches: Array<{ filePath: string; fullContent: string }> = [];
+  let fallbackForcePreviewOnly = false;
   const originalContents: Record<string, string> = {
     ...(input.hostedContext?.originalContents ?? {}),
   };
@@ -3427,16 +3428,138 @@ export async function runLlmPatchFlow(input: {
           hostedContext: input.hostedContext,
           allFiles,
         });
-        const picked = pickConstrainedDeveloperApplyTargetFallback({
-          task: input.task,
-          rejectedPaths,
-          contentByPath: fallbackContentByPath,
-          relevantFileScores: fallbackRelevantScores,
-        });
         const pathTokensDebug = buildConstrainedFallbackPathTokensDebug(
           mergedReadOrder.map((item) => item.path)
         );
-        if (picked.ok) {
+
+        // Grounded candidate list. mergedReadOrder already places
+        // entity-path candidates (tiers 1/2) before ranked-only candidates.
+        // We do NOT rescan the repo or call any LLM to build this list.
+        const orderedFallbackCandidates: Array<{
+          path: string;
+          content: string;
+          rankScore: number;
+        }> = [];
+        const orderedFallbackSeen = new Set<string>();
+        for (const item of mergedReadOrder) {
+          if (orderedFallbackSeen.has(item.path)) continue;
+          if (rejectedPaths.has(item.path)) continue;
+          if (
+            isIrrelevantDeveloperContextPath(item.path) ||
+            isProtectedDeveloperUiPath(item.path)
+          ) {
+            continue;
+          }
+          const content = fallbackContentByPath.get(item.path);
+          if (typeof content !== "string") continue;
+          orderedFallbackSeen.add(item.path);
+          orderedFallbackCandidates.push({
+            path: item.path,
+            content,
+            rankScore: fallbackRelevantScores.get(item.path) ?? 0,
+          });
+        }
+
+        const MAX_FALLBACK_ATTEMPTS = 3;
+        const retryLogEntries: Array<{
+          attempt: number;
+          filePath: string;
+          eligible: boolean;
+          reason: string;
+        }> = [];
+        const retryRejectedCandidates: Array<{
+          path: string;
+          reason: string;
+          score: number;
+        }> = [];
+        let attemptsMade = 0;
+        let fallbackPick:
+          | { path: string; content: string; rankScore: number }
+          | null = null;
+        let tier3Pick:
+          | {
+              path: string;
+              content: string;
+              rankScore: number;
+              structureScore: number;
+            }
+          | null = null;
+        let fallbackTier:
+          | "tier12_eligible"
+          | "tier3_structure_only_preview"
+          | null = null;
+
+        for (const candidate of orderedFallbackCandidates) {
+          if (attemptsMade >= MAX_FALLBACK_ATTEMPTS) break;
+          attemptsMade += 1;
+
+          const eligibility = assessConstrainedTargetEligibility({
+            task: input.task,
+            filePath: candidate.path,
+            fileContent: candidate.content,
+          });
+
+          const retryEntry = {
+            attempt: attemptsMade,
+            filePath: candidate.path,
+            eligible: eligibility.eligible,
+            reason: eligibility.reason,
+          };
+          retryLogEntries.push(retryEntry);
+          console.log("[zone-target-retry]", JSON.stringify(retryEntry));
+
+          if (eligibility.eligible) {
+            fallbackPick = {
+              path: candidate.path,
+              content: candidate.content,
+              rankScore: candidate.rankScore,
+            };
+            fallbackTier = "tier12_eligible";
+            break;
+          }
+
+          retryRejectedCandidates.push({
+            path: candidate.path,
+            reason: eligibility.reason,
+            score: eligibility.structureScore,
+          });
+
+          // Tier 3: structure passes, only the entity anchor doesn't match.
+          // Remembered as last-resort ONLY. If used, it will be forced to
+          // preview_only — never safe_to_apply.
+          if (
+            eligibility.reason === "target_entity_mismatch" &&
+            eligibility.structureScore >= 20 &&
+            (tier3Pick === null || candidate.rankScore > tier3Pick.rankScore)
+          ) {
+            tier3Pick = {
+              path: candidate.path,
+              content: candidate.content,
+              rankScore: candidate.rankScore,
+              structureScore: eligibility.structureScore,
+            };
+          }
+        }
+
+        if (fallbackPick === null && tier3Pick !== null) {
+          const tier3Entry = {
+            attempt: attemptsMade + 1,
+            filePath: tier3Pick.path,
+            eligible: true,
+            reason: "tier3_structure_only_preview",
+          };
+          retryLogEntries.push(tier3Entry);
+          console.log("[zone-target-retry]", JSON.stringify(tier3Entry));
+          fallbackPick = {
+            path: tier3Pick.path,
+            content: tier3Pick.content,
+            rankScore: tier3Pick.rankScore,
+          };
+          fallbackTier = "tier3_structure_only_preview";
+          fallbackForcePreviewOnly = true;
+        }
+
+        if (fallbackPick !== null) {
           console.log(
             "[zone-target-fallback]",
             JSON.stringify({
@@ -3445,15 +3568,21 @@ export async function runLlmPatchFlow(input: {
               entityPathCandidates: entityPathCandidatePaths,
               rankedCandidates: rankedCandidatePaths,
               pathTokensDebug,
-              candidatesChecked: picked.candidatesChecked,
-              rejectedCandidates: picked.rejectedCandidates,
-              fallback: picked.path,
-              reason: "selected_fallback",
+              candidatesChecked: attemptsMade,
+              candidatesAvailable: orderedFallbackCandidates.length,
+              rejectedCandidates: retryRejectedCandidates,
+              fallback: fallbackPick.path,
+              fallbackTier,
+              reason:
+                fallbackTier === "tier3_structure_only_preview"
+                  ? "selected_fallback_tier3_preview_only"
+                  : "selected_fallback",
+              retryLog: retryLogEntries,
             })
           );
-          originalContents[picked.path] = picked.content;
+          originalContents[fallbackPick.path] = fallbackPick.content;
           loopApplyTargets = [
-            buildConstrainedSyntheticModifyPatch(picked.path),
+            buildConstrainedSyntheticModifyPatch(fallbackPick.path),
             ...loopApplyTargets,
           ];
         } else {
@@ -3465,10 +3594,13 @@ export async function runLlmPatchFlow(input: {
               entityPathCandidates: entityPathCandidatePaths,
               rankedCandidates: rankedCandidatePaths,
               pathTokensDebug,
-              candidatesChecked: picked.candidatesChecked,
-              rejectedCandidates: picked.rejectedCandidates,
+              candidatesChecked: attemptsMade,
+              candidatesAvailable: orderedFallbackCandidates.length,
+              rejectedCandidates: retryRejectedCandidates,
               fallback: null,
+              fallbackTier: null,
               reason: "no_eligible_fallback",
+              retryLog: retryLogEntries,
             })
           );
           patchResults.push({
@@ -4218,7 +4350,8 @@ logRiskDebug("runLlmPatchFlow final risk", {
     intentMismatchDecision.forcePreviewOnly ||
     uiMappingRisk.forcePreviewOnly ||
     developerConfidence < 70 ||
-    finalDeveloperRisk.score >= 31
+    finalDeveloperRisk.score >= 31 ||
+    fallbackForcePreviewOnly
       ? "preview_only"
       : "safe_to_apply",
 });
@@ -4249,7 +4382,8 @@ const decisionMode =
         intentMismatchDecision.forcePreviewOnly ||
         uiMappingRisk.forcePreviewOnly ||
         developerConfidence < 70 ||
-        finalDeveloperRisk.score >= 31
+        finalDeveloperRisk.score >= 31 ||
+        fallbackForcePreviewOnly
       ? "preview_only"
       : "safe_to_apply";
   const finalExecutionOutcome =
