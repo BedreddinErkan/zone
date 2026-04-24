@@ -56,8 +56,10 @@ async function processDeveloperPatchJob(
       hostedContext: requestPayload.hostedContext as
         | Parameters<typeof runLlmPatchFlow>[0]["hostedContext"]
         | undefined,
-      onProgress: async (stage) => {
-        await updateDeveloperPatchJobProgress(supabase, job.id, stage);
+      onProgress: async (update) => {
+        const stage = typeof update === "string" ? update : update.stage;
+        const lifecycle = typeof update === "string" ? undefined : update.lifecycle;
+        await updateDeveloperPatchJobProgress(supabase, job.id, stage, lifecycle);
       },
     });
 

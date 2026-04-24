@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AgentLifecycleEvent } from "../core/agentLifecycleEvents.js";
+import { encodeProgressStage } from "../core/progressStageCodec.js";
 import type { ConversationBillingMode } from "../types/conversation.js";
 
 export type DeveloperPatchJobStatus =
@@ -103,12 +105,13 @@ export async function claimNextQueuedDeveloperPatchJob(
 export async function updateDeveloperPatchJobProgress(
   supabase: SupabaseClient,
   runId: string,
-  progressStage: string
+  progressStage: string,
+  lifecycle?: AgentLifecycleEvent
 ): Promise<void> {
   const { error } = await supabase
     .from(TABLE_NAME)
     .update({
-      progress_stage: progressStage,
+      progress_stage: encodeProgressStage(progressStage, lifecycle),
     })
     .eq("id", runId);
 

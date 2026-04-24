@@ -43,6 +43,15 @@ import type { PatchPreviewItem } from "../types/agent.js";
 import type { ConversationBillingMode } from "../types/conversation.js";
 import type { RepoFile } from "../types/project.js";
 import { startZoneApiPerfRun } from "../api/zoneApiPerf.js";
+import {
+  createAgentLifecycleEvent,
+  type AgentLifecycleEvent,
+  type LlmPatchProgressUpdate,
+} from "./agentLifecycleEvents.js";
+import {
+  generateFinalRunReport,
+  type FinalRunReport,
+} from "./generateFinalRunReport.js";
 
 export type LlmPatchFlowResult =
   | {
@@ -132,8 +141,15 @@ export type LlmPatchFlowResult =
       patchResults: PatchResult[];
       fileDiffs?: FileDiff[];
       contextFiles?: string[];
+      lifecycleEvents?: AgentLifecycleEvent[];
+      finalRunReport: FinalRunReport;
     }
-  | { ok: false; reason: string };
+  | {
+      ok: false;
+      reason: string;
+      lifecycleEvents?: AgentLifecycleEvent[];
+      finalRunReport?: FinalRunReport;
+    };
 
 type PatchSource = "llm_patch" | "deterministic_fallback" | "no_patch";
 
@@ -3355,25 +3371,89 @@ export async function runLlmPatchFlow(input: {
   conversationId?: string;
   billingMode?: ConversationBillingMode;
   hostedContext?: HostedDeveloperContextInput;
-  onProgress?: (stage: string) => void;
+  onProgress?: (update: LlmPatchProgressUpdate) => void | Promise<void>;
   perfLabel?: string;
 }): Promise<LlmPatchFlowResult> {
-  const reportProgress = (stage: string): void => {
+  const lifecycleEvents: AgentLifecycleEvent[] = [];
+
+  const notifyProgress = (
+    legacyStage: string,
+    lifecycleInput?: Omit<AgentLifecycleEvent, "timestamp">
+  ): void => {
+    if (lifecycleInput) {
+      const ev = createAgentLifecycleEvent(lifecycleInput);
+      lifecycleEvents.push(ev);
+      try {
+        const out = input.onProgress?.({ stage: legacyStage, lifecycle: ev });
+        void out;
+      } catch {
+        // keep progress reporting best-effort
+      }
+      return;
+    }
     try {
-      input.onProgress?.(stage);
+      input.onProgress?.(legacyStage);
     } catch {
       // keep progress reporting best-effort
     }
   };
+
+  const reportProgress = (stage: string): void => {
+    notifyProgress(stage);
+  };
+
   const perf = startZoneApiPerfRun(input.perfLabel ?? "runLlmPatchFlow");
 
   const taskIntent =
     typeof input.task === "string" ? parseTaskIntent(input.task) : UNKNOWN_INTENT;
+
+  notifyProgress("Scanning repo...", {
+    type: "run_started",
+    message: "Developer patch run started.",
+    stage: "init",
+  });
+  notifyProgress("Scanning repo...", {
+    type: "intent_understood",
+    message: `Task intent: ${taskIntent.normalizedTask || taskIntent.action || "developer task"}.`,
+    stage: "intent",
+  });
+
   const zoneInternalTask = detectZoneInternalTask(input.task);
 
   if (zoneInternalTask) {
+    notifyProgress("Ready", {
+      type: "run_completed",
+      message: "Run finished (Zone internal task — no patch).",
+      stage: "finalize",
+      status: "zone_internal",
+    });
     reportProgress("Ready");
     perf.finish("zone internal task blocked");
+    const zoneInternalReport = await generateFinalRunReport({
+      task: input.task,
+      contextFilesMeta: [],
+      planObjective: null,
+      planScopeSummary: null,
+      patchSource: "no_patch",
+      fileDiffs: [],
+      patchScope: {
+        changedFileCount: 0,
+        totalAddedLines: 0,
+        totalRemovedLines: 0,
+        totalChangedLines: 0,
+      },
+      decisionMode: "blocked",
+      finalState: "blocked",
+      warnings: [ZONE_INTERNAL_TASK_WARNING],
+      correctness: {
+        status: "skipped",
+        summary: "No patches were generated (Zone internal task).",
+      },
+      verificationCommandsLabel: null,
+      runtimeVerificationSummary: null,
+      finalExecutionOutcome: "completed_with_issues",
+      developerConfidence: 0,
+    });
     return {
       ok: true,
       reason: "zone_internal_task_target",
@@ -3388,6 +3468,8 @@ export async function runLlmPatchFlow(input: {
       patchResults: [],
       fileDiffs: [],
       contextFiles: [],
+      lifecycleEvents: [...lifecycleEvents],
+      finalRunReport: zoneInternalReport,
     };
   }
   const hostedAvailableFiles: RepoFile[] | undefined =
@@ -3444,7 +3526,44 @@ export async function runLlmPatchFlow(input: {
   perf.mark("repo scan ready");
   if (!input.hostedContext && allFiles.length === 0 && !isHostedEnvironment()) {
     perf.finish("repo access blocked");
-    return { ok: false, reason: "repo_not_accessible_in_hosted_mode" };
+    notifyProgress("Ready", {
+      type: "tooling_issue",
+      message: "Repository could not be read in this environment.",
+      stage: "repo",
+      status: "repo_not_accessible_in_hosted_mode",
+    });
+    notifyProgress("Ready", {
+      type: "run_completed",
+      message: "Run finished with errors.",
+      stage: "finalize",
+      status: "failed",
+    });
+    const repoFailReport = await generateFinalRunReport({
+      task: input.task,
+      contextFilesMeta: [],
+      planObjective: null,
+      planScopeSummary: null,
+      patchSource: "no_patch",
+      fileDiffs: [],
+      patchScope: {
+        changedFileCount: 0,
+        totalAddedLines: 0,
+        totalRemovedLines: 0,
+        totalChangedLines: 0,
+      },
+      decisionMode: "preview_only",
+      warnings: ["Repository could not be read in this environment."],
+      correctness: { status: "skipped", summary: "Run stopped before patch planning." },
+      verificationCommandsLabel: null,
+      runtimeVerificationSummary: null,
+      finalExecutionOutcome: "failed",
+    });
+    return {
+      ok: false,
+      reason: "repo_not_accessible_in_hosted_mode",
+      lifecycleEvents: [...lifecycleEvents],
+      finalRunReport: repoFailReport,
+    };
   }
   const developerContextFiles = allFiles.filter(
     (file) => !isIrrelevantDeveloperContextPath(file.path)
@@ -3454,6 +3573,12 @@ export async function runLlmPatchFlow(input: {
   reportProgress("Detecting project structure...");
   const structure = detectProjectStructure(developerContextFiles);
   perf.mark("project structure detected");
+  notifyProgress("Detecting project structure...", {
+    type: "repo_explored",
+    message: `Repository scanned (${allFiles.length} files, structure hints loaded).`,
+    stage: "repo",
+    status: fileSource,
+  });
   const projectSummary =
     input.hostedContext?.repoSummary ||
     structure.notes.join(" ") ||
@@ -3469,6 +3594,12 @@ export async function runLlmPatchFlow(input: {
   });
   const relevantFiles = fullRankedFiles.slice(0, 8);
   perf.mark("relevant files ranked");
+  notifyProgress("Ranking relevant files...", {
+    type: "relevant_files_ranked",
+    message: `Ranked ${fullRankedFiles.length} paths; using top ${relevantFiles.length} for planning.`,
+    stage: "rank",
+    status: "ok",
+  });
 
   // TEMP DIAGNOSTIC: surface top 20 ranker scores to verify PatientsPage presence
   console.log(
@@ -3535,9 +3666,68 @@ export async function runLlmPatchFlow(input: {
     } catch (err) {
       perf.finish("feature planning failed");
       const reason = err instanceof Error ? err.message : String(err);
-      return { ok: false, reason };
+      notifyProgress("Ready", {
+        type: "patch_generation_failed",
+        message: `Feature planning failed: ${reason}`,
+        stage: "plan",
+        status: "feature_plan_error",
+      });
+      notifyProgress("Ready", {
+        type: "run_completed",
+        message: "Run finished with errors.",
+        stage: "finalize",
+        status: "failed",
+      });
+      const featureFailReport = await generateFinalRunReport({
+        task: input.task,
+        contextFilesMeta: relevantFiles.slice(0, 8).map((f) => ({
+          path: f.path,
+          reason: "Ranked as relevant to the task",
+        })),
+        planObjective: executionPlan?.objective ?? null,
+        planScopeSummary: executionPlan?.scopeSummary ?? null,
+        patchSource: "no_patch",
+        fileDiffs: [],
+        patchScope: {
+          changedFileCount: 0,
+          totalAddedLines: 0,
+          totalRemovedLines: 0,
+          totalChangedLines: 0,
+        },
+        decisionMode: "preview_only",
+        warnings: [`Feature planning failed: ${reason}`],
+        correctness: { status: "skipped", summary: "Run stopped during feature planning." },
+        verificationCommandsLabel: null,
+        runtimeVerificationSummary: null,
+        finalExecutionOutcome: "failed",
+      });
+      return {
+        ok: false,
+        reason,
+        lifecycleEvents: [...lifecycleEvents],
+        finalRunReport: featureFailReport,
+      };
     }
   }
+
+  const planSummaryParts: string[] = [];
+  if (executionPlan) {
+    planSummaryParts.push(
+      `${executionPlan.steps.length} execution step(s); scope: ${executionPlan.scopeSummary}`
+    );
+  }
+  if (llmPlan?.suggestedFiles?.length) {
+    planSummaryParts.push(`${llmPlan.suggestedFiles.length} suggested context file(s) from feature plan`);
+  }
+  notifyProgress("Planning feature...", {
+    type: "plan_created",
+    message:
+      planSummaryParts.length > 0
+        ? `Planning complete (${planSummaryParts.join(" · ")}).`
+        : "Planning complete (execution + feature context ready).",
+    stage: "plan",
+    status: executionPlan ? "execution_plan" : "feature_skipped",
+  });
 
   // 5. Read top suggested files
   const relevantFileScores = new Map(
@@ -3654,6 +3844,12 @@ export async function runLlmPatchFlow(input: {
       .filter((file): file is { path: string; content: string } => file !== undefined);
   }
   perf.mark("file context loaded");
+  notifyProgress("Loading file context...", {
+    type: "file_context_loaded",
+    message: `Loaded ${resolvedFileContexts.length} file context(s) for patch generation.`,
+    stage: "context",
+    status: "ok",
+  });
   // ── TOKEN BUDGET GUARD ──────────────────────────────────────────
   const SIMPLE_BUDGET_CHARS = 320_000; // ~80K tokens (4o-mini)
   const COMPLEX_BUDGET_CHARS = 320_000; // ~80K tokens (4.1-mini)
@@ -3718,11 +3914,50 @@ export async function runLlmPatchFlow(input: {
 
   if (totalContextChars > contextBudget) {
     perf.finish("context budget exceeded");
+    notifyProgress("Ready", {
+      type: "tooling_issue",
+      message: "Developer context exceeds the token budget for this run.",
+      stage: "context",
+      status: "context_budget_exceeded",
+    });
+    notifyProgress("Ready", {
+      type: "run_completed",
+      message: "Run finished with errors.",
+      stage: "finalize",
+      status: "failed",
+    });
+    const contextBudgetReport = await generateFinalRunReport({
+      task: input.task,
+      contextFilesMeta: selectedContextFiles.map((f) => ({
+        path: f.path,
+        reason: f.reason,
+      })),
+      planObjective: executionPlan?.objective ?? null,
+      planScopeSummary: executionPlan?.scopeSummary ?? null,
+      patchSource: "no_patch",
+      fileDiffs: [],
+      patchScope: {
+        changedFileCount: 0,
+        totalAddedLines: 0,
+        totalRemovedLines: 0,
+        totalChangedLines: 0,
+      },
+      decisionMode: "preview_only",
+      warnings: [
+        `Context too large (${Math.round(totalContextChars / 4000)}K tokens). Limit ${Math.round(contextBudget / 4000)}K tokens.`,
+      ],
+      correctness: { status: "skipped", summary: "Run stopped before patch preview (context budget)." },
+      verificationCommandsLabel: null,
+      runtimeVerificationSummary: null,
+      finalExecutionOutcome: "failed",
+    });
     return {
       ok: false,
       reason: `Context too large (${Math.round(totalContextChars / 4000)}K tokens). ` +
         `Limit is ${Math.round(contextBudget / 4000)}K tokens. ` +
         `Select a smaller folder or specify exact files to change.`,
+      lifecycleEvents: [...lifecycleEvents],
+      finalRunReport: contextBudgetReport,
     };
   }
   perf.mark("token budget checked");
@@ -3745,7 +3980,47 @@ export async function runLlmPatchFlow(input: {
   } catch (err) {
     perf.finish("patch preview failed");
     const reason = err instanceof Error ? err.message : String(err);
-    return { ok: false, reason };
+    notifyProgress("Ready", {
+      type: "patch_generation_failed",
+      message: `Patch preview planning failed: ${reason}`,
+      stage: "patch_preview",
+      status: "patch_preview_error",
+    });
+    notifyProgress("Ready", {
+      type: "run_completed",
+      message: "Run finished with errors.",
+      stage: "finalize",
+      status: "failed",
+    });
+    const previewFailReport = await generateFinalRunReport({
+      task: input.task,
+      contextFilesMeta: selectedContextFiles.map((f) => ({
+        path: f.path,
+        reason: f.reason,
+      })),
+      planObjective: executionPlan?.objective ?? null,
+      planScopeSummary: executionPlan?.scopeSummary ?? null,
+      patchSource: "no_patch",
+      fileDiffs: [],
+      patchScope: {
+        changedFileCount: 0,
+        totalAddedLines: 0,
+        totalRemovedLines: 0,
+        totalChangedLines: 0,
+      },
+      decisionMode: "preview_only",
+      warnings: [`Patch preview planning failed: ${reason}`],
+      correctness: { status: "skipped", summary: "Run stopped during patch preview planning." },
+      verificationCommandsLabel: null,
+      runtimeVerificationSummary: null,
+      finalExecutionOutcome: "failed",
+    });
+    return {
+      ok: false,
+      reason,
+      lifecycleEvents: [...lifecycleEvents],
+      finalRunReport: previewFailReport,
+    };
   }
   console.log("[zone-preview] received (ignored for patch application)");
   if (input.hostedContext) {
@@ -3770,7 +4045,47 @@ export async function runLlmPatchFlow(input: {
     taskRiskResult,
   });
   if (taskRiskResult.score >= 71) {
+    notifyProgress("Ready", {
+      type: "patch_generation_failed",
+      message: `Patch generation was not started: task risk score ${taskRiskResult.score} (preview-only).`,
+      stage: "patch_gen",
+      status: "high_risk_preview_only",
+      ...(selectedTargetFile ? { filePath: selectedTargetFile } : {}),
+    });
+    notifyProgress("Ready", {
+      type: "run_completed",
+      message: "Run finished (preview-only, high task risk).",
+      stage: "finalize",
+      status: "preview_only",
+    });
     reportProgress("Ready");
+    const highRiskReport = await generateFinalRunReport({
+      task: input.task,
+      contextFilesMeta: selectedContextFiles.map((f) => ({
+        path: f.path,
+        reason: f.reason,
+      })),
+      planObjective: executionPlan?.objective ?? null,
+      planScopeSummary: executionPlan?.scopeSummary ?? null,
+      patchSource: "no_patch",
+      fileDiffs: [],
+      patchScope: {
+        changedFileCount: 0,
+        totalAddedLines: 0,
+        totalRemovedLines: 0,
+        totalChangedLines: 0,
+      },
+      decisionMode: "preview_only",
+      finalState: "preview_only",
+      warnings: [
+        `[HIGH_RISK] Task risk score ${taskRiskResult.score} — blocked before patch generation.`,
+      ],
+      correctness: { status: "skipped", summary: "Patch generation was not started (high task risk)." },
+      verificationCommandsLabel: null,
+      runtimeVerificationSummary: null,
+      finalExecutionOutcome: "completed_with_issues",
+      developerConfidence: 0,
+    });
     return {
       ok: true,
       patchPreview: `[BLOCKED] Risk score ${taskRiskResult.score} — task was blocked before patch generation. Detected signals: ${taskRiskResult.signals.join(", ")}.`,
@@ -3783,12 +4098,52 @@ export async function runLlmPatchFlow(input: {
       fileDiffs: [],
       contextFiles: [],
       ...(executionPlan ? { plan: executionPlan } : {}),
+      lifecycleEvents: [...lifecycleEvents],
+      finalRunReport: highRiskReport,
     };
   }
   if (vagueTask) {
+    notifyProgress("Ready", {
+      type: "patch_generation_failed",
+      message: "Patch generation was not started: task description is too vague for safe edits.",
+      stage: "patch_gen",
+      status: "vague_task_preview_only",
+      ...(selectedTargetFile ? { filePath: selectedTargetFile } : {}),
+    });
+    notifyProgress("Ready", {
+      type: "run_completed",
+      message: "Run finished (preview-only, vague task).",
+      stage: "finalize",
+      status: "preview_only",
+    });
     reportProgress("Ready");
     perf.mark("decision evaluation complete");
     perf.finish("vague task response ready");
+    const vagueReport = await generateFinalRunReport({
+      task: input.task,
+      contextFilesMeta: selectedContextFiles.map((f) => ({
+        path: f.path,
+        reason: f.reason,
+      })),
+      planObjective: executionPlan?.objective ?? null,
+      planScopeSummary: executionPlan?.scopeSummary ?? null,
+      patchSource: "no_patch",
+      fileDiffs: [],
+      patchScope: {
+        changedFileCount: 0,
+        totalAddedLines: 0,
+        totalRemovedLines: 0,
+        totalChangedLines: 0,
+      },
+      decisionMode: "preview_only",
+      finalState: "preview_only",
+      warnings: [DEVELOPER_VAGUE_TASK_WARNING],
+      correctness: { status: "skipped", summary: "Patch generation was not started (vague task policy)." },
+      verificationCommandsLabel: null,
+      runtimeVerificationSummary: null,
+      finalExecutionOutcome: "completed_with_issues",
+      developerConfidence: 60,
+    });
     return {
       ok: true,
       patchPreview: DEVELOPER_VAGUE_TASK_WARNING,
@@ -3801,11 +4156,19 @@ export async function runLlmPatchFlow(input: {
       fileDiffs: [],
       contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
       ...(executionPlan ? { plan: executionPlan } : {}),
+      lifecycleEvents: [...lifecycleEvents],
+      finalRunReport: vagueReport,
     };
   }
 
   // 6b. Generate full file content for modify/create patches
   reportProgress("Generating file patches...");
+  notifyProgress("Generating file patches...", {
+    type: "patch_generation_started",
+    message: "Generating full-file patches from the preview plan.",
+    stage: "patch_gen",
+    status: "started",
+  });
   let applyPatches: Array<{ filePath: string; fullContent: string }> = [];
   let fallbackForcePreviewOnly = false;
   let deterministicFallbackTooLarge = false;
@@ -4786,6 +5149,29 @@ export async function runLlmPatchFlow(input: {
     );
   }
 
+  if (applyPatches.length > 0) {
+    notifyProgress("Validating developer output...", {
+      type: "patch_generated",
+      message: `Generated ${applyPatches.length} patch(es) (${patchSource}).`,
+      stage: "patch_gen",
+      status: patchSource,
+      filePath: applyPatches.map((p) => p.filePath).join(", "),
+    });
+  } else {
+    notifyProgress("Validating developer output...", {
+      type: "patch_generation_failed",
+      message:
+        patchPlan.patches.length > 0
+          ? "No applyable file patches were produced after generation and fallbacks."
+          : "No file patches were planned for apply.",
+      stage: "patch_gen",
+      status: "no_patch",
+      ...(selectedTargetFile ? { filePath: selectedTargetFile } : {}),
+    });
+  }
+
+  const patchCountBeforeCorrectness = applyPatches.length;
+
   let correctnessMustBlock = false;
   // Patch correctness validator v2
   if (applyPatches.length > 0) {
@@ -4905,10 +5291,73 @@ export async function runLlmPatchFlow(input: {
     }
   }
 
+  if (patchCountBeforeCorrectness > 0) {
+    notifyProgress("Validating developer output...", {
+      type: "patch_correctness_checked",
+      message:
+        applyPatches.length > 0
+          ? `Patch correctness checks passed for ${applyPatches.length} file(s).`
+          : "Patch correctness checks rejected all generated patches.",
+      stage: "correctness",
+      status: applyPatches.length > 0 ? "passed" : "rejected_all",
+    });
+  } else {
+    notifyProgress("Validating developer output...", {
+      type: "patch_correctness_checked",
+      message: "Patch correctness checks skipped (no patches to validate).",
+      stage: "correctness",
+      status: "skipped",
+    });
+  }
+
   if (input.atomicPatch && patchResults.some((result) => result.status === "failed")) {
+    notifyProgress("Ready", {
+      type: "patch_generation_failed",
+      message: "Atomic patch mode: one or more files failed validation.",
+      stage: "patch_gen",
+      status: "atomic_patch_failed",
+    });
+    notifyProgress("Ready", {
+      type: "run_completed",
+      message: "Run finished with errors.",
+      stage: "finalize",
+      status: "failed",
+    });
     reportProgress("Ready");
     perf.finish("atomic patch failed");
-    return { ok: false, reason: "atomic_patch_failed" };
+    const atomicDiffLines = applyPatches.map((p) => {
+      const before = originalContents[p.filePath] ?? "";
+      const diff = computeFileDiff(before, p.fullContent);
+      return {
+        filePath: p.filePath,
+        addedLines: diff.filter((l) => l.type === "added").length,
+        removedLines: diff.filter((l) => l.type === "removed").length,
+      };
+    });
+    const atomicReport = await generateFinalRunReport({
+      task: input.task,
+      contextFilesMeta: selectedContextFiles.map((f) => ({
+        path: f.path,
+        reason: f.reason,
+      })),
+      planObjective: executionPlan?.objective ?? null,
+      planScopeSummary: executionPlan?.scopeSummary ?? null,
+      patchSource,
+      fileDiffs: atomicDiffLines,
+      patchScope: analyzePatchScope({ applyPatches, originalContents }),
+      decisionMode: "preview_only",
+      warnings: visibleWarnings,
+      correctness: { status: "rejected_all", summary: "Atomic patch mode failed validation for one or more files." },
+      verificationCommandsLabel: null,
+      runtimeVerificationSummary: null,
+      finalExecutionOutcome: "failed",
+    });
+    return {
+      ok: false,
+      reason: "atomic_patch_failed",
+      lifecycleEvents: [...lifecycleEvents],
+      finalRunReport: atomicReport,
+    };
   }
 
   reportProgress("Validating developer output...");
@@ -5064,6 +5513,27 @@ export async function runLlmPatchFlow(input: {
         repoFiles: allFiles.map((file) => file.path),
         task: input.task,
       });
+      const plannedCommandSummary =
+        plan.length > 0 ? plan.map((s) => s.command).join(" → ") : "";
+      notifyProgress("Validating developer output...", {
+        type: "verification_planned",
+        message:
+          plan.length > 0
+            ? `Runtime verification: ${plan.length} step(s) queued.`
+            : "Runtime verification skipped (no detectable commands).",
+        stage: "verification",
+        status: plan.length > 0 ? "planned" : "skipped_no_command",
+        ...(plannedCommandSummary ? { command: plannedCommandSummary } : {}),
+      });
+      if (plan.length > 0) {
+        notifyProgress("Validating developer output...", {
+          type: "verification_started",
+          message: "Running repository verification commands.",
+          stage: "verification",
+          status: "running",
+          command: plan[0]?.command,
+        });
+      }
       runtimeVerificationPlan = await runRuntimeVerificationPlan({
         repoPath: input.repoPath,
         plan,
@@ -5176,6 +5646,36 @@ export async function runLlmPatchFlow(input: {
         internalWarnings.push(warning);
         visibleWarnings.push(warning);
       }
+
+      const rvp = runtimeVerificationPlan;
+      const cmd = rvp.failedCommand ?? plan[0]?.command;
+      if (rvp.status === "passed") {
+        notifyProgress("Validating developer output...", {
+          type: "verification_passed",
+          message: "Runtime verification completed successfully.",
+          stage: "verification",
+          status: "passed",
+          ...(plannedCommandSummary ? { command: plannedCommandSummary } : {}),
+        });
+      } else if (rvp.status === "failed_environment_or_tooling") {
+        notifyProgress("Validating developer output...", {
+          type: "tooling_issue",
+          message:
+            rvp.summary ||
+            "Verification could not complete because of setup or tooling.",
+          stage: "verification",
+          status: "failed_environment_or_tooling",
+          ...(cmd ? { command: cmd } : {}),
+        });
+      } else if (rvp.status === "failed_code_related" || rvp.status === "timeout") {
+        notifyProgress("Validating developer output...", {
+          type: "verification_failed",
+          message: rvp.summary || `Verification outcome: ${rvp.status}`,
+          stage: "verification",
+          status: rvp.status,
+          ...(cmd ? { command: cmd } : {}),
+        });
+      }
     } catch (err) {
       runtimeVerification = {
         attempted: false,
@@ -5183,6 +5683,12 @@ export async function runLlmPatchFlow(input: {
         summary: `Runtime verification skipped: ${err instanceof Error ? err.message : String(err)}`,
       };
       console.warn(`[zone-runtime-verify] skipped`);
+      notifyProgress("Validating developer output...", {
+        type: "tooling_issue",
+        message: `Runtime verification skipped: ${err instanceof Error ? err.message : String(err)}`,
+        stage: "verification",
+        status: "runtime_verify_exception",
+      });
     }
   }
   logRiskDebug("runLlmPatchFlow after task-risk adjustments", {
@@ -5550,7 +6056,64 @@ const decisionMode =
       : []),
   ].join("\n");
 
+  const verificationCommandsForReport =
+    runtimeVerificationPlan && runtimeVerificationPlan.steps.length > 0
+      ? runtimeVerificationPlan.steps
+          .map((s) => s.command)
+          .filter((c): c is string => typeof c === "string" && c.length > 0)
+          .join(" → ")
+      : null;
+
+  const correctnessForReport =
+    patchCountBeforeCorrectness > 0
+      ? applyPatches.length > 0
+        ? {
+            status: "passed" as const,
+            summary: "Remaining patches passed Zone patch correctness validation.",
+          }
+        : {
+            status: "rejected_all" as const,
+            summary: "Patch correctness validation rejected all generated patches.",
+          }
+      : {
+          status: "skipped" as const,
+          summary: "No patches entered correctness validation.",
+        };
+
+  const finalRunReport = await generateFinalRunReport({
+    task: input.task,
+    contextFilesMeta: selectedContextFiles.map((f) => ({
+      path: f.path,
+      reason: f.reason,
+    })),
+    planObjective: executionPlan?.objective ?? null,
+    planScopeSummary: executionPlan?.scopeSummary ?? null,
+    patchSource,
+    fileDiffs: fileDiffs.map((fd) => ({
+      filePath: fd.filePath,
+      addedLines: fd.addedLines,
+      removedLines: fd.removedLines,
+    })),
+    patchScope,
+    decisionMode,
+    finalState,
+    warnings: syncedVisibleWarnings,
+    correctness: correctnessForReport,
+    verificationCommandsLabel: verificationCommandsForReport,
+    runtimeVerificationSummary: runtimeVerificationPlan?.summary ?? null,
+    runtimeVerificationFailedCommand: runtimeVerificationPlan?.failedCommand ?? null,
+    verificationStatus,
+    finalExecutionOutcome,
+    developerConfidence,
+  });
+
   // 8. Return
+  notifyProgress("Ready", {
+    type: "run_completed",
+    message: "Run finished successfully.",
+    stage: "finalize",
+    status: "success",
+  });
   reportProgress("Ready");
   perf.mark("response payload ready");
   perf.finish("complete");
@@ -5614,5 +6177,7 @@ const decisionMode =
     ...(verification ? { verification } : {}),
     ...(runtimeVerification ? { runtimeVerification } : {}),
     ...(runtimeVerificationPlan ? { runtimeVerificationPlan } : {}),
+    lifecycleEvents: [...lifecycleEvents],
+    finalRunReport,
   };
 }

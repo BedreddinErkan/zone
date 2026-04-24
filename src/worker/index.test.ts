@@ -63,6 +63,17 @@ describe("developer patch worker", () => {
         applyPatches: [],
         patchResults: [],
         fileDiffs: [],
+        finalRunReport: {
+          title: "Test",
+          statusSummary: "ok",
+          intentUnderstood: "fix",
+          filesInspected: [],
+          filesChanged: [],
+          changesMade: [],
+          verificationSummary: { status: "not_run", message: "n/a" },
+          safetySummary: [],
+          nextStep: "done",
+        },
       };
     });
     validateLlmOutputMock.mockReturnValue({
@@ -81,10 +92,19 @@ describe("developer patch worker", () => {
         repoPath: "C:/repo",
       })
     );
-    expect(updateDeveloperPatchJobProgressMock).toHaveBeenCalledWith(
+    expect(updateDeveloperPatchJobProgressMock).toHaveBeenNthCalledWith(
+      1,
       expect.any(Object),
       "job_123",
-      "Planning feature..."
+      "Planning feature...",
+      undefined
+    );
+    expect(updateDeveloperPatchJobProgressMock).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Object),
+      "job_123",
+      "Ready",
+      undefined
     );
     expect(markDeveloperPatchJobCompletedMock).toHaveBeenCalledWith(
       expect.any(Object),

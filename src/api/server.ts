@@ -45,8 +45,14 @@ import {
 } from "../llm/refinePrompt.js";
 import { getUserQuota } from "../billing/conversationRepository.js";
 import { resolveBillingAction } from "../billing/resolveBillingAction.js";
-import type { Response } from "express";
 import { c, colorize } from "../cli/colors.js";
+import type { AgentLifecycleEvent } from "../core/agentLifecycleEvents.js";
+import {
+  attachDeveloperPatchProgressSseClient,
+  detachDeveloperPatchProgressSseClient,
+  emitDeveloperPatchProgress,
+} from "../core/developerRunProgressSse.js";
+import { decodeProgressStage } from "../core/progressStageCodec.js";
 import { validateLlmOutput } from "../core/validateLlmOutput.js";
 import lemonWebhookRouter from "../routes/lemonsqueezyWebhook.js";
 import createLemonCheckoutRouter from "../routes/createLemonCheckout.js";
@@ -62,7 +68,6 @@ export const app = express();
 const port = Number(process.env.PORT) || 3000;
 let startedPort: number | null = null;
 let startPromise: Promise<void> | null = null;
-const progressStreams = new Map<string, Set<Response>>();
 const zoneUiDir = path.resolve(__dirname, "../ui");
 const zoneUiHtmlTemplate = readFileSync(path.join(zoneUiDir, "index.html"), "utf8");
 const ENHANCE_TASK_SYSTEM_PROMPT =
@@ -958,14 +963,15 @@ async function ensureRunAuthorized(
     };
   }
 }
-function emitProgress(runId: string | undefined, stage: string): void {
+function emitProgress(
+  runId: string | undefined,
+  update: string | { stage: string; lifecycle?: AgentLifecycleEvent }
+): void {
   if (!runId) return;
-  const listeners = progressStreams.get(runId);
-  if (!listeners) return;
-
-  const payload = `data: ${JSON.stringify({ stage })}\n\n`;
-  for (const res of listeners) {
-    res.write(payload);
+  if (typeof update === "string") {
+    emitDeveloperPatchProgress(runId, { stage: update });
+  } else {
+    emitDeveloperPatchProgress(runId, update);
   }
 }
 
@@ -1090,17 +1096,10 @@ app.get("/api/progress", (req, res) => {
   res.flushHeaders?.();
   res.write(`data: ${JSON.stringify({ stage: "Connected" })}\n\n`);
 
-  const listeners = progressStreams.get(runId) ?? new Set<Response>();
-  listeners.add(res);
-  progressStreams.set(runId, listeners);
+  attachDeveloperPatchProgressSseClient(runId, res);
 
   req.on("close", () => {
-    const current = progressStreams.get(runId);
-    if (!current) return;
-    current.delete(res);
-    if (current.size === 0) {
-      progressStreams.delete(runId);
-    }
+    detachDeveloperPatchProgressSseClient(runId, res);
   });
 });
 // ── Desktop Auth Routes ──
@@ -1368,11 +1367,15 @@ app.get("/api/patch/jobs/:runId", async (req, res) => {
       return;
     }
 
+    const decoded = decodeProgressStage(job.progress_stage);
     res.json({
       ok: true,
       runId: job.id,
       status: job.status,
-      progressStage: job.progress_stage,
+      progressStage: decoded.displayStage,
+      ...(decoded.lastLifecycle
+        ? { lastLifecycleEvent: decoded.lastLifecycle }
+        : {}),
       errorMessage: job.error_message,
     });
   } catch (err) {
@@ -1413,12 +1416,16 @@ app.get("/api/patch/jobs/:runId/result", async (req, res) => {
       return;
     }
 
+    const decodedNotReady = decodeProgressStage(job.progress_stage);
     res.json({
       ok: false,
       reason: "job_not_ready",
       runId: job.id,
       status: job.status,
-      progressStage: job.progress_stage,
+      progressStage: decodedNotReady.displayStage,
+      ...(decodedNotReady.lastLifecycle
+        ? { lastLifecycleEvent: decodedNotReady.lastLifecycle }
+        : {}),
     });
   } catch (err) {
     res.status(500).json({
@@ -1500,6 +1507,7 @@ const result = await runLlmPatchFlow({
   repoPath,
   hostedContext,
   perfLabel: "/api/patch core",
+  onProgress: (update) => emitProgress(runId, update),
 });
 perf.mark("core patch flow complete");
 
@@ -1600,6 +1608,7 @@ const result = await runLlmPatchFlow({
   repoPath,
   dryRun: true,
   hostedContext,
+  onProgress: (update) => emitProgress(runId, update),
 });
 if (!result.ok) {
   res.status(500).json(result);
