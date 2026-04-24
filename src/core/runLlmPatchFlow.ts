@@ -1754,6 +1754,40 @@ function isSmallLocalizedPatchScope(patchScope: DeveloperPatchScope): boolean {
   );
 }
 
+/** Constrained / micro-edit tasks must not ship huge rewrites as a normal safe patch. */
+function assessConstrainedTaskLargeRewrite(input: {
+  task: string;
+  patchScope: DeveloperPatchScope;
+}): { flagged: boolean; blockApply: boolean } {
+  const constrained = isConstrainedLocalizedPatchTask(input.task);
+  const microMinimal = detectMicroEditIntent(input.task);
+  if (!constrained && !microMinimal) {
+    return { flagged: false, blockApply: false };
+  }
+  const ps = input.patchScope;
+  const removedHeavierThanAdded =
+    ps.totalRemovedLines > ps.totalAddedLines + 50 &&
+    ps.totalRemovedLines > 100;
+  const flagged =
+    ps.rewriteLikeSuspicion ||
+    ps.totalChangedLines > 80 ||
+    removedHeavierThanAdded;
+
+  if (!flagged) {
+    return { flagged: false, blockApply: false };
+  }
+
+  // Hard-block auto-apply only for constrained localized tasks (not micro-edit-only polish).
+  const blockApply =
+    constrained &&
+    (ps.totalChangedLines > 80 ||
+      ps.rewriteLikeSuspicion ||
+      (ps.totalRemovedLines > ps.totalAddedLines * 1.5 &&
+        ps.totalChangedLines > 100));
+
+  return { flagged: true, blockApply };
+}
+
 function softenTaskRiskForLocalizedPatch(input: {
   taskRiskResult: TaskRiskResult;
   patchScope: DeveloperPatchScope;
@@ -4319,6 +4353,23 @@ export async function runLlmPatchFlow(input: {
       0
     );
   }
+
+  const constrainedLargeRewriteAssessment = assessConstrainedTaskLargeRewrite({
+    task: input.task,
+    patchScope,
+  });
+  const constrainedTaskLargeRewriteBlocked =
+    constrainedLargeRewriteAssessment.blockApply;
+  const constrainedTaskLargeRewriteForcePreview =
+    constrainedLargeRewriteAssessment.flagged &&
+    !constrainedLargeRewriteAssessment.blockApply;
+  if (constrainedLargeRewriteAssessment.flagged) {
+    const detail = `+${patchScope.totalAddedLines}/-${patchScope.totalRemovedLines} lines (totalChanged=${patchScope.totalChangedLines}, rewriteLikeSuspicion=${patchScope.rewriteLikeSuspicion}).`;
+    const warnMsg = `[constrained_task_large_rewrite] Patch is too large for a constrained minimal task. ${detail}`;
+    internalWarnings.push(warnMsg);
+    visibleWarnings.push(warnMsg);
+  }
+
   const designSystemSignals = detectDesignSystemSignals({
     addedLines: collectAddedPatchLines({
       applyPatches,
@@ -4612,16 +4663,21 @@ logRiskDebug("runLlmPatchFlow final risk", {
   mergedDeveloperRisk,
   finalDeveloperRisk,
   decisionMode:
-    hasBlockedPatch ||
-    vagueTask ||
-    microEditProtection.shouldForcePreview ||
-    intentMismatchDecision.forcePreviewOnly ||
-    uiMappingRisk.forcePreviewOnly ||
-    developerConfidence < 70 ||
-    finalDeveloperRisk.score >= 31 ||
-    fallbackForcePreviewOnly
-      ? "preview_only"
-      : "safe_to_apply",
+    runtimeVerificationFailed
+      ? "blocked"
+      : constrainedTaskLargeRewriteBlocked
+        ? "blocked"
+        : hasBlockedPatch ||
+            vagueTask ||
+            microEditProtection.shouldForcePreview ||
+            intentMismatchDecision.forcePreviewOnly ||
+            uiMappingRisk.forcePreviewOnly ||
+            developerConfidence < 70 ||
+            finalDeveloperRisk.score >= 31 ||
+            fallbackForcePreviewOnly ||
+            constrainedTaskLargeRewriteForcePreview
+          ? "preview_only"
+          : "safe_to_apply",
 });
 syncedInternalWarnings = syncDeveloperRiskWarnings({
   warnings: syncedInternalWarnings,
@@ -4644,22 +4700,27 @@ if (noCodeChangeReason) {
 const decisionMode =
   runtimeVerificationFailed
     ? "blocked"
-    : hasBlockedPatch ||
-        vagueTask ||
-        microEditProtection.shouldForcePreview ||
-        intentMismatchDecision.forcePreviewOnly ||
-        uiMappingRisk.forcePreviewOnly ||
-        developerConfidence < 70 ||
-        finalDeveloperRisk.score >= 31 ||
-        fallbackForcePreviewOnly
-      ? "preview_only"
-      : "safe_to_apply";
+    : constrainedTaskLargeRewriteBlocked
+      ? "blocked"
+      : hasBlockedPatch ||
+          vagueTask ||
+          microEditProtection.shouldForcePreview ||
+          intentMismatchDecision.forcePreviewOnly ||
+          uiMappingRisk.forcePreviewOnly ||
+          developerConfidence < 70 ||
+          finalDeveloperRisk.score >= 31 ||
+          fallbackForcePreviewOnly ||
+          constrainedTaskLargeRewriteForcePreview
+        ? "preview_only"
+        : "safe_to_apply";
   const finalExecutionOutcome =
     runtimeVerification?.status === "failed"
       ? "failed_verification"
       : runtimeVerification?.status === "timeout" || noCodeChangeReason
         ? "completed_with_issues"
-        : "completed";
+        : constrainedTaskLargeRewriteBlocked
+          ? "completed_with_issues"
+          : "completed";
   const finalState =
     finalExecutionOutcome === "failed_verification" ||
     finalExecutionOutcome === "completed_with_issues"
@@ -4689,7 +4750,10 @@ const decisionMode =
     }
   }
   const safetyResolution = resolveSafetyLevel({
-    hasBlockedPatch: hasBlockedPatch || runtimeVerificationFailed,
+    hasBlockedPatch:
+      hasBlockedPatch ||
+      runtimeVerificationFailed ||
+      constrainedTaskLargeRewriteBlocked,
     developerConfidence,
     decisionMode: decisionMode === "blocked" ? "preview_only" : decisionMode,
     developerRiskScore: finalDeveloperRisk.score,
@@ -4715,6 +4779,9 @@ const decisionMode =
 
   // 7. Build patchPreview string
   const patchPreview = [
+    ...(constrainedLargeRewriteAssessment.flagged
+      ? ["Patch is too large for a constrained minimal task.", ""]
+      : []),
     "=== LLM PATCH PREVIEW ===",
     `Summary: ${patchPlan.summary}`,
     ...(selectedTargetFile ? [`Targeted file: ${selectedTargetFile}`] : []),

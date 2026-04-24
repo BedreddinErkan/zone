@@ -3693,4 +3693,89 @@ expect(result.safetyResolution).toEqual(
       consoleLogSpy.mockRestore();
     });
   });
+
+  describe("constrained task large rewrite guard", () => {
+    it("does not treat a huge diff on a constrained validation task as safe_to_apply", async () => {
+      const patientsPath = "client/src/pages/PatientsPage.jsx";
+      const filler = Array.from(
+        { length: 220 },
+        (_, i) => `  const _p${i} = ${i};`
+      ).join("\n");
+      const before = `import { useState } from "react";
+${filler}
+export function PatientsPage() {
+  const [x, setX] = useState({});
+  return (
+    <form onSubmit={() => {}}>
+      <input name="a" />
+    </form>
+  );
+}
+`;
+      const after = `import { useState } from "react";
+export function PatientsPage() {
+  const [x, setX] = useState({});
+  return (
+    <form onSubmit={() => {}}>
+      <input name="a" required />
+    </form>
+  );
+}
+`;
+      const files = [buildRepoFile(patientsPath, "frontend")];
+      scanRepoMock.mockResolvedValue(files);
+      detectProjectStructureMock.mockReturnValue({ notes: ["React"] });
+      rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 95 }]);
+      planFeatureWithLlmMock.mockResolvedValue({
+        implementationSummary: "Validation",
+        steps: ["Patients form"],
+        suggestedFiles: [{ path: patientsPath, reason: "Page", action: "inspect" }],
+        risks: [],
+      });
+      readProjectFilesMock.mockResolvedValue({
+        [`C:/repo/${patientsPath}`]: before,
+      });
+      planPatchPreviewWithLlmMock.mockResolvedValue({
+        summary: "Patch",
+        patches: [
+          {
+            path: patientsPath,
+            operation: "modify",
+            summary: "Add validation",
+            targetHint: "form",
+            contentPreview: "x",
+          },
+        ],
+        warnings: [],
+      });
+      planFullPatchWithLlmMock.mockResolvedValue({
+        mode: "full_content",
+        filePath: patientsPath,
+        fullContent: after,
+        summary: "ok",
+        warnings: [],
+      });
+
+      const task =
+        "Add minimal client-side validation to the existing Patients page create form only. Reuse the existing form state and existing submit flow. Do not create a new form. Do not introduce a new API call.";
+      const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+      const result = await runLlmPatchFlow({
+        task,
+        repoPath: "C:/repo",
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.decisionMode).not.toBe("safe_to_apply");
+        expect(result.decisionMode).toBe("blocked");
+        expect(result.patchPreview).toContain(
+          "Patch is too large for a constrained minimal task."
+        );
+        expect(
+          result.warnings.some((w) => w.includes("constrained_task_large_rewrite"))
+        ).toBe(true);
+        expect(result.applyPatches).toHaveLength(1);
+      }
+    });
+  });
 });
