@@ -104,6 +104,7 @@ export type LlmPatchFlowResult =
         shouldDowngradeSafety: boolean;
       };
       reason?: string;
+      patchSource?: PatchSource;
       decisionMode?: "preview_only" | "safe_to_apply" | "blocked";
       finalState?: "preview_only" | "safe_to_apply" | "blocked";
       finalExecutionOutcome?:
@@ -269,24 +270,104 @@ function isPathGroundedForPreviewFallback(input: {
   return input.allFiles.some((f) => f.path === input.path);
 }
 
-function pickPreviewEmptyFallbackPath(input: {
+/** Whether an explicit `Target file:` path exists in the selected repo listing or hosted originals (spec: do not rank-fallback when absent). */
+function isExplicitTargetInSelectedRepoContext(input: {
+  path: string;
+  hostedContext: HostedDeveloperContextInput | undefined;
+  allFiles: RepoFile[];
+}): boolean {
+  if (isIrrelevantDeveloperContextPath(input.path) || isProtectedDeveloperUiPath(input.path)) {
+    return false;
+  }
+  const inListing = input.allFiles.some((f) => f.path === input.path);
+  if (input.hostedContext) {
+    const inOriginal = Object.prototype.hasOwnProperty.call(
+      input.hostedContext.originalContents,
+      input.path
+    );
+    return inOriginal || inListing;
+  }
+  return inListing;
+}
+
+const EXPLICIT_TARGET_NOT_FOUND_WARNING =
+  "[EXPLICIT_TARGET_NOT_FOUND] Target file was not found in the selected repository/context.";
+
+function taskTextMentionsRepoPath(task: string, path: string): boolean {
+  const t = task.toLowerCase();
+  const normalized = path.replace(/\\/g, "/");
+  const segments = normalized.split("/").filter(Boolean);
+  const base = segments[segments.length - 1] ?? "";
+  if (base && t.includes(base.toLowerCase())) {
+    return true;
+  }
+  if (t.includes(normalized.toLowerCase())) {
+    return true;
+  }
+  return false;
+}
+
+/** Dependency / config paths we must not use as ranked preview-empty fallback unless the task names them. */
+function isUnrelatedRankedFallbackPath(path: string, task: string): boolean {
+  if (taskTextMentionsRepoPath(task, path)) {
+    return false;
+  }
+  const n = path.replace(/\\/g, "/").toLowerCase();
+  const base = n.split("/").pop() ?? "";
+
+  if (base === ".gitignore" || n.endsWith("/.gitignore")) {
+    return true;
+  }
+  if (base.startsWith(".env") || n.includes("/.env")) {
+    return true;
+  }
+  const lockNames = new Set([
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "npm-shrinkwrap.json",
+    "poetry.lock",
+    "uv.lock",
+    "cargo.lock",
+    "gemfile.lock",
+    "pipfile.lock",
+  ]);
+  if (lockNames.has(base) || base.endsWith(".lock")) {
+    return true;
+  }
+  if (base === "pipfile") {
+    return true;
+  }
+  if (base === "requirements.txt" || n.endsWith("/requirements.txt")) {
+    return true;
+  }
+  if (base === ".npmrc" || base === ".yarnrc.yml" || base === ".pnpmfile.cjs") {
+    return true;
+  }
+  if (base.endsWith(".pem")) {
+    return true;
+  }
+  if (/^tsconfig.*\.json$/i.test(base) || base === "jsconfig.json") {
+    return true;
+  }
+  if (/^(vite|vitest|webpack|rollup|tailwind|postcss|eslint|prettier|jest|playwright)\.config\./i.test(base)) {
+    return true;
+  }
+  if (/^\.eslintrc/i.test(base) || base.startsWith(".prettierrc")) {
+    return true;
+  }
+  if (base === "docker-compose.yml" || base === "docker-compose.yaml") {
+    return true;
+  }
+  return false;
+}
+
+function pickRankedPreviewEmptyFallbackPath(input: {
   task: string;
   fullRankedFiles: RankedRepoFile[];
   hostedContext: HostedDeveloperContextInput | undefined;
   allFiles: RepoFile[];
 }): string | null {
-  const explicit = parseExplicitTargetFileLineFromTask(input.task);
-  if (
-    explicit &&
-    isPathGroundedForPreviewFallback({
-      path: explicit,
-      hostedContext: input.hostedContext,
-      allFiles: input.allFiles,
-    })
-  ) {
-    return explicit;
-  }
-
   const deprioritizeConfig = taskLooksLikeReactOrJsxValidation(input.task);
   const ranked = [...input.fullRankedFiles];
   if (deprioritizeConfig) {
@@ -301,6 +382,9 @@ function pickPreviewEmptyFallbackPath(input: {
   }
 
   for (const f of ranked) {
+    if (isUnrelatedRankedFallbackPath(f.path, input.task)) {
+      continue;
+    }
     if (
       isPathGroundedForPreviewFallback({
         path: f.path,
@@ -312,6 +396,34 @@ function pickPreviewEmptyFallbackPath(input: {
     }
   }
   return null;
+}
+
+type PreviewEmptyFallbackResolution =
+  | { kind: "path"; path: string }
+  | { kind: "explicit_target_not_grounded"; explicitPath: string }
+  | { kind: "none" };
+
+function resolvePreviewEmptyFallbackPath(input: {
+  task: string;
+  fullRankedFiles: RankedRepoFile[];
+  hostedContext: HostedDeveloperContextInput | undefined;
+  allFiles: RepoFile[];
+}): PreviewEmptyFallbackResolution {
+  const explicit = parseExplicitTargetFileLineFromTask(input.task);
+  if (explicit) {
+    if (
+      isExplicitTargetInSelectedRepoContext({
+        path: explicit,
+        hostedContext: input.hostedContext,
+        allFiles: input.allFiles,
+      })
+    ) {
+      return { kind: "path", path: explicit };
+    }
+    return { kind: "explicit_target_not_grounded", explicitPath: explicit };
+  }
+  const rankedPick = pickRankedPreviewEmptyFallbackPath(input);
+  return rankedPick ? { kind: "path", path: rankedPick } : { kind: "none" };
 }
 
 /** A fully-populated TaskIntent representing "I don't know what this is". */
@@ -4256,13 +4368,81 @@ export async function runLlmPatchFlow(input: {
 
   const patchPreviewHadNoStructuredPatchesFromLlm = patchPlan.patches.length === 0;
   if (patchPlan.patches.length === 0) {
-    const fallbackPath = pickPreviewEmptyFallbackPath({
+    const previewEmptyPick = resolvePreviewEmptyFallbackPath({
       task: input.task,
       fullRankedFiles,
       hostedContext: input.hostedContext,
       allFiles,
     });
-    if (fallbackPath) {
+    if (previewEmptyPick.kind === "explicit_target_not_grounded") {
+      notifyProgress("Ready", {
+        type: "patch_generation_failed",
+        message: `Explicit target file is not in the selected repository or hosted context: ${previewEmptyPick.explicitPath}`,
+        stage: "patch_preview",
+        status: "explicit_target_not_found",
+        filePath: previewEmptyPick.explicitPath,
+      });
+      notifyProgress("Ready", {
+        type: "run_completed",
+        message: "Run finished (preview-only, explicit target not found).",
+        stage: "finalize",
+        status: "preview_only",
+      });
+      reportProgress("Ready");
+      perf.mark("decision evaluation complete");
+      perf.finish("explicit target not found");
+      const explicitMissingReport = await generateFinalRunReport({
+        task: input.task,
+        contextFilesMeta: selectedContextFiles.map((f) => ({
+          path: f.path,
+          reason: f.reason,
+        })),
+        planObjective: executionPlan?.objective ?? null,
+        planScopeSummary: executionPlan?.scopeSummary ?? null,
+        patchSource: "no_patch",
+        fileDiffs: [],
+        patchScope: {
+          changedFileCount: 0,
+          totalAddedLines: 0,
+          totalRemovedLines: 0,
+          totalChangedLines: 0,
+        },
+        decisionMode: "preview_only",
+        finalState: "preview_only",
+        warnings: [EXPLICIT_TARGET_NOT_FOUND_WARNING],
+        correctness: {
+          status: "skipped",
+          summary: "Patch generation was not started (explicit_target_not_found).",
+        },
+        verificationCommandsLabel: null,
+        runtimeVerificationSummary: null,
+        finalExecutionOutcome: "completed_with_issues",
+        developerConfidence: 60,
+        terminalAbort: {
+          code: "explicit_target_not_found",
+          missingPath: previewEmptyPick.explicitPath,
+        },
+      });
+      return {
+        ok: true,
+        reason: "explicit_target_not_found",
+        patchPreview: EXPLICIT_TARGET_NOT_FOUND_WARNING,
+        warnings: [EXPLICIT_TARGET_NOT_FOUND_WARNING],
+        developerConfidence: 60,
+        decisionMode: "preview_only",
+        finalState: "preview_only",
+        patchSource: "no_patch",
+        applyPatches: [],
+        patchResults: [],
+        fileDiffs: [],
+        contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
+        ...(executionPlan ? { plan: executionPlan } : {}),
+        lifecycleEvents: [...lifecycleEvents],
+        finalRunReport: explicitMissingReport,
+      };
+    }
+    if (previewEmptyPick.kind === "path") {
+      const fallbackPath = previewEmptyPick.path;
       console.log("[zone-patch-preview-fallback-target]", fallbackPath);
       notifyProgress("Generating file patches...", {
         type: "patch_preview_empty_fallback_target_selected",

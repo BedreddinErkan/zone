@@ -52,6 +52,11 @@ export type GenerateFinalRunReportInput = {
   verificationStatus?: "passed" | "skipped" | "tooling_issue" | "code_failed" | "timeout";
   finalExecutionOutcome: string;
   developerConfidence?: number;
+  /** When set, deterministic report uses a fixed narrative (AI final report is skipped). */
+  terminalAbort?: {
+    code: "explicit_target_not_found";
+    missingPath: string;
+  };
 };
 
 const finalRunReportSchema = z.object({
@@ -166,6 +171,45 @@ export function buildDeterministicFinalRunReport(
           reason: stripMarkdownish(f.reason).slice(0, 200),
         }))
       : [{ path: "(none listed)", reason: "No context file list was attached for this run." }];
+
+  if (input.terminalAbort?.code === "explicit_target_not_found") {
+    const missing = stripMarkdownish(input.terminalAbort.missingPath).slice(0, 400);
+    const warnLine = `[EXPLICIT_TARGET_NOT_FOUND] Target file was not found in the selected repository/context. (${missing})`;
+    const safetySummary: string[] = [
+      `System decisionMode (authoritative): ${input.decisionMode}.`,
+      `System finalState: ${input.finalState ?? input.decisionMode}.`,
+      `Execution outcome: ${input.finalExecutionOutcome}.`,
+      stripMarkdownish(warnLine).slice(0, 400),
+    ];
+    if (typeof input.developerConfidence === "number") {
+      safetySummary.push(`Developer confidence score: ${input.developerConfidence} (informational only).`);
+    }
+    safetySummary.push(
+      `Correctness checks: ${input.correctness.status} — ${stripMarkdownish(input.correctness.summary).slice(0, 240)}`
+    );
+    for (const w of input.warnings.slice(0, 6)) {
+      const t = stripMarkdownish(w).slice(0, 220);
+      if (t) safetySummary.push(t);
+    }
+    return {
+      title: "Patch generation failed",
+      statusSummary: stripMarkdownish(
+        "Patch generation failed: explicit_target_not_found — the Target file path from the task is not present in the selected repository or hosted context."
+      ).slice(0, 800),
+      intentUnderstood: taskOneLine,
+      filesInspected: inspected,
+      filesChanged: [],
+      changesMade: [stripMarkdownish("No files changed.").slice(0, 400)],
+      verificationSummary: {
+        status: "not_run",
+        message: stripMarkdownish("Not run — explicit target file was not found.").slice(0, 800),
+      },
+      safetySummary: safetySummary.map((s) => stripMarkdownish(s).slice(0, 400)),
+      nextStep: stripMarkdownish(
+        "Confirm the Target file line matches a file path in the selected repository or context, then re-run."
+      ).slice(0, 500),
+    };
+  }
 
   const changed = input.fileDiffs.map((d) => ({
     path: d.filePath,
@@ -383,6 +427,9 @@ export async function generateFinalRunReport(
   input: GenerateFinalRunReportInput
 ): Promise<FinalRunReport> {
   const fallback = buildDeterministicFinalRunReport(input);
+  if (input.terminalAbort?.code === "explicit_target_not_found") {
+    return fallback;
+  }
   if (!isAiFinalReportEnabled()) {
     return fallback;
   }

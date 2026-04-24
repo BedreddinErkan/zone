@@ -123,6 +123,149 @@ describe("runLlmPatchFlow", () => {
     expect(planPatchPreviewWithLlmMock).toHaveBeenCalled();
   });
 
+  it("aborts preview-empty fallback when Target file line names a path outside repo/context (explicit_target_not_found)", async () => {
+    const files = [
+      buildRepoFile("ai-service/requirements.txt", "backend"),
+      buildRepoFile("src/server/routes.ts", "backend"),
+    ];
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["Monorepo"] });
+    rankRelevantFilesMock.mockReturnValue([
+      { ...files[0], score: 95 },
+      { ...files[1], score: 30 },
+    ]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Fix conversion",
+      steps: ["Update patch conversion"],
+      suggestedFiles: [{ path: "src/server/routes.ts", reason: "API", action: "modify" }],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, `content:${filePath}`]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Patch summary",
+      patches: [],
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task:
+        "Target file: src/core/patchConversion.ts\n\nRefactor patch conversion helpers for clarity.",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.reason).toBe("explicit_target_not_found");
+      expect(result.patchSource).toBe("no_patch");
+      expect(result.decisionMode).toBe("preview_only");
+      expect(result.finalState).toBe("preview_only");
+      expect(result.warnings[0]).toContain("[EXPLICIT_TARGET_NOT_FOUND]");
+      expect(result.finalRunReport.title).toBe("Patch generation failed");
+      expect(result.finalRunReport.changesMade.join(" ").toLowerCase()).toContain("no files changed");
+      expect(result.finalRunReport.verificationSummary.message.toLowerCase()).toContain(
+        "explicit target file was not found"
+      );
+      expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
+      const failEv = result.lifecycleEvents?.filter((e) => e.type === "patch_generation_failed");
+      expect(failEv?.some((e) => e.status === "explicit_target_not_found")).toBe(true);
+    }
+  });
+
+  it("preview-empty ranked fallback skips unrelated requirements.txt when task does not name it", async () => {
+    const files = [
+      buildRepoFile("ai-service/requirements.txt", "backend"),
+      buildRepoFile("src/server/routes.ts", "backend"),
+    ];
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["Monorepo"] });
+    rankRelevantFilesMock.mockReturnValue([
+      { ...files[0], score: 95 },
+      { ...files[1], score: 30 },
+    ]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Fix endpoint",
+      steps: ["Adjust route logic"],
+      suggestedFiles: [{ path: "src/server/routes.ts", reason: "API route", action: "modify" }],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, `content:${filePath}`]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Patch summary",
+      patches: [],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      filePath: "src/server/routes.ts",
+      fullContent: "patched routes",
+      summary: "ok",
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "fix the /api/patch endpoint in our app so it returns the correct response body",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(planFullPatchWithLlmMock).toHaveBeenCalledWith(
+      expect.objectContaining({ filePath: "src/server/routes.ts" })
+    );
+    expect(planFullPatchWithLlmMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ filePath: "ai-service/requirements.txt" })
+    );
+  });
+
+  it("preview-empty fallback uses explicit Target file when path is grounded in repo", async () => {
+    const files = [buildRepoFile("src/server/routes.ts", "backend")];
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["Express API"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 32 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Fix external endpoint behavior",
+      steps: ["Adjust route logic"],
+      suggestedFiles: [
+        { path: "src/server/routes.ts", reason: "API route", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, `content:${filePath}`]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Patch summary",
+      patches: [],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      filePath: "src/server/routes.ts",
+      fullContent: "patched",
+      summary: "ok",
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "Target file: src/server/routes.ts\n\nAdd request logging to the handler.",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(planFullPatchWithLlmMock).toHaveBeenCalledWith(
+      expect.objectContaining({ filePath: "src/server/routes.ts" })
+    );
+  });
+
   it("does not block a normal repo task that mentions billing summary and thread ui without referring to Zone", async () => {
     const files = [buildRepoFile("src/components/BillingThreadPanel.tsx", "frontend")];
 
