@@ -2927,20 +2927,42 @@ function injectDeterministicValidationIntoSubmitHandler(
 function buildDeterministicFallbackPatch(input: {
   filePath: string;
   fileContent: string;
-}): { updatedContent: string; insertedAt: "before_submit_call" | "handler_top" } | null {
+}): { insertIndex: number; validationBlock: string } | null {
   const handler = findSubmitHandlerBlock(input.fileContent);
   if (!handler) return null;
 
-  const injected = injectDeterministicValidationIntoSubmitHandler(handler.block);
-  if (!injected) return null;
-  const updatedContent =
-    input.fileContent.slice(0, handler.start) +
-    injected.replacedBlock +
-    input.fileContent.slice(handler.endExclusive);
+  const openBraceIndex = input.fileContent.indexOf("{", handler.start);
+  if (openBraceIndex < 0 || openBraceIndex >= handler.endExclusive) {
+    return null;
+  }
 
-  return updatedContent === input.fileContent
-    ? null
-    : { updatedContent, insertedAt: injected.insertedAt };
+  const afterOpen = input.fileContent.slice(openBraceIndex + 1);
+  const nextNewlineOffset = afterOpen.indexOf("\n");
+  const afterLine =
+    nextNewlineOffset >= 0
+      ? afterOpen.slice(nextNewlineOffset + 1)
+      : "";
+  const nextLine = afterLine.split("\n")[0] ?? "";
+  const nextIndent = (nextLine.match(/^\s*/) ?? [""])[0] ?? "";
+
+  const openLineStart = input.fileContent.lastIndexOf("\n", openBraceIndex) + 1;
+  const openLine = input.fileContent.slice(openLineStart, openBraceIndex + 1);
+  const baseIndent = (openLine.match(/^\s*/) ?? [""])[0] ?? "";
+  const indent = nextIndent || `${baseIndent}  `;
+
+  const validationBlock = [
+    `${indent}if (!fullName || fullName.trim() === "") {`,
+    `${indent}  setError("Full name is required");`,
+    `${indent}  return;`,
+    `${indent}}`,
+    "",
+    `${indent}if (email && !email.includes("@")) {`,
+    `${indent}  setError("Invalid email");`,
+    `${indent}  return;`,
+    `${indent}}`,
+  ].join("\n");
+
+  return { insertIndex: openBraceIndex + 1, validationBlock };
 }
 
 function detectSuspiciousUiOverwrite(input: {
@@ -4512,11 +4534,12 @@ export async function runLlmPatchFlow(input: {
       });
       let updatedContent = targetContent;
       if (fallback) {
-        updatedContent = fallback.updatedContent;
+        updatedContent =
+          targetContent.slice(0, fallback.insertIndex) +
+          `\n${fallback.validationBlock}\n` +
+          targetContent.slice(fallback.insertIndex);
+        console.log("[zone-fallback] minimal insert applied");
         console.log("[zone-fallback] inserted validation inside submit handler");
-        if (fallback.insertedAt === "handler_top") {
-          console.log("[zone-fallback] inserting validation at handler top");
-        }
       }
 
       if (!fallback || updatedContent === targetContent) {
