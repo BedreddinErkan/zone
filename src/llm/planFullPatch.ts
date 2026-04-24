@@ -102,6 +102,7 @@ function buildFindReplaceFormatRetryPrompt(feedback: RetryFeedback): string {
   );
 
   if (needsHardPatchCorrection) {
+    console.log("[zone-patch-retry-attempt]", feedback.attempt);
     console.warn("[zone-patch-retry] invalid format, retrying...", {
       attempt: feedback.attempt,
     });
@@ -114,24 +115,50 @@ function buildFindReplaceFormatRetryPrompt(feedback: RetryFeedback): string {
   const hardCorrection = [
     "Your previous response was INVALID.",
     "",
-    "You MUST return ONLY a patch in this format:",
+    "You MUST return ONLY a patch.",
     "",
-    "--- FILE: <path> ---",
+    "VALID FORMAT (EXAMPLE)",
+    "",
+    "--- FILE: client/src/pages/app/PatientsPage.jsx ---",
     "--- FIND ---",
-    "<exact code>",
+    "const handleSubmit = (e) => {",
+    "  e.preventDefault();",
+    "  submitForm();",
+    "}",
     "--- REPLACE ---",
-    "<updated code>",
+    "const handleSubmit = (e) => {",
+    "  e.preventDefault();",
     "",
-    "If you cannot produce a valid patch, output exactly: NO_CHANGE_NEEDED",
+    "  if (!fullName || fullName.trim() === \"\") {",
+    "    setError(\"Full name is required\");",
+    "    return;",
+    "  }",
     "",
-    "NO explanations.",
-    "NO markdown.",
-    "NO text outside patch.",
+    "  if (email && !email.includes(\"@\")) {",
+    "    setError(\"Invalid email format\");",
+    "    return;",
+    "  }",
+    "",
+    "  submitForm();",
+    "}",
+    "",
+    "RULES",
+    "",
+    "- DO NOT explain anything",
+    "- DO NOT describe changes",
+    "- DO NOT write plain text",
+    "- DO NOT use markdown (no ```)",
+    "",
+    "ONLY OUTPUT:",
+    "",
+    "- A valid patch",
+    "OR",
+    "- NO_CHANGE_NEEDED",
     "",
     "Fix your response now.",
   ].join("\n");
 
-  return `${hardCorrection}\n\n${buildDefaultFeedbackPrompt(feedback)}`;
+  return `${hardCorrection}\n\n${feedback.originalPrompt}`;
 }
 
 function buildFindReplaceStrictContract(filePath: string): string {
@@ -278,6 +305,9 @@ export async function planFullPatchWithLlm(input: {
     });
 
     if (!retryResult.ok) {
+      console.error(
+        "[zone-patch] model failed to produce valid patch after retries"
+      );
       return {
         mode: "invalid_patch_format",
         filePath: input.filePath,
