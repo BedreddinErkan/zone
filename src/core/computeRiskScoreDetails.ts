@@ -19,6 +19,44 @@ function includesAny(text: string, keywords: string[]): boolean {
   return keywords.some((keyword) => text.includes(keyword));
 }
 
+/** Mass-scope words must be real tokens (substring matches cause false positives, e.g. "unchanged" contains "whole"). */
+function hasBoundedMassScopeScopeWord(text: string): boolean {
+  return /\b(?:all|every|entire|whole)\b/.test(text);
+}
+
+function isExplicitMinimalSingleFileTask(text: string): boolean {
+  if (!/\btarget\s+file\s*:/i.test(text)) return false;
+  return (
+    /\bminimal\b/i.test(text) ||
+    /\bsingle[-\s]?file\b/i.test(text) ||
+    /\bone\s+file\b/i.test(text)
+  );
+}
+
+/** "Remove duplicated …" / dedupe-style cleanup is not data-destructive when scoped to one file + minimal patch. */
+function isBenignLocalHygieneRemoval(text: string): boolean {
+  if (!/\b(remove|delete)\b/i.test(text)) return false;
+  return /\b(?:duplicat(?:e|ed|es|ing)?|dedupe|redundant|repeat(?:ed)?|unused|obsolete|dead\s+code|lint|debug|console\.|assertion|validation\s+checks?)\b/i.test(
+    text
+  );
+}
+
+function hasCatastrophicDestructiveIntent(text: string): boolean {
+  return (
+    includesAny(text, [
+      "truncate",
+      "drop table",
+      "delete all",
+      "remove all",
+      "wipe",
+      "purge",
+    ]) ||
+    /\b(?:delete|remove)\s+every\b/i.test(text) ||
+    /\b(?:delete|remove)\s+all\b/i.test(text) ||
+    /\b(?:drop|delete)\s+table\b/i.test(text)
+  );
+}
+
 function hasContextualSoftDestructiveSignal(text: string): boolean {
   const softDestructiveKeywords = ["clear", "reset", "clean"];
   const destructiveObjectKeywords = [
@@ -239,14 +277,17 @@ export function computeRiskScoreDetails(
     "ui polish",
   ]);
 
+  if (
+    isExplicitMinimalSingleFileTask(normalizedTask) &&
+    isBenignLocalHygieneRemoval(normalizedTask) &&
+    !hasCatastrophicDestructiveIntent(normalizedTask)
+  ) {
+    destructiveWeight = 0;
+  }
+
   const hasDestructiveSignal = destructiveWeight > 0;
   const hasSchemaSignal = highWeightSchemaScore > 0 || reducedSchemaScore > 0;
-  const hasScopeWord = includesAny(normalizedTask, [
-    "all",
-    "every",
-    "entire",
-    "whole"
-  ]);
+  const hasScopeWord = hasBoundedMassScopeScopeWord(normalizedTask);
   const hasMassScopeSignal = hasReactStateManagementContext
     ? false
     : hasDestructiveSignal && hasScopeWord;

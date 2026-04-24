@@ -19,14 +19,14 @@ describe("computeRiskScore", () => {
   it("returns medium score for critical domain work", () => {
     const result = computeRiskScore("update payment service logic");
 
-    expect(result.score).toBe(20);
+    expect(result.score).toBe(35);
     expect(result.signals).toContain("critical_domain");
   });
 
   it("returns weighted score for destructive database work", () => {
     const result = computeRiskScore("delete user table from database");
 
-    expect(result.score).toBe(50);
+    expect(result.score).toBe(70);
     expect(result.signals).toContain("destructive");
     expect(result.signals).toContain("schema");
   });
@@ -137,5 +137,32 @@ describe("computeRiskScore", () => {
     );
 
     expect(result.score).toBeLessThanOrEqual(100);
+  });
+
+  it("does not treat 'unchanged' as a mass-scope 'whole' signal", () => {
+    const result = computeRiskScore(
+      "Fix create patient form validation. Remove duplicated checks. Keep UI and service calls unchanged."
+    );
+
+    expect(result.signals).not.toContain("mass_scope");
+    expect(result.breakdown.massScope).toBe(0);
+  });
+
+  it("scores explicit minimal single-file dedupe cleanup as low risk (not destructive / mass_scope)", () => {
+    const task = [
+      "Target file: client/src/pages/app/PatientsPage.jsx",
+      "Fix create patient form validation.",
+      "Remove duplicated validation checks.",
+      "Keep UI and service calls unchanged.",
+      "Minimal single-file patch only.",
+    ].join("\n");
+
+    const result = computeRiskScore(task);
+
+    expect(result.signals).not.toContain("destructive");
+    expect(result.signals).not.toContain("mass_scope");
+    expect(result.breakdown.destructive).toBe(0);
+    expect(result.breakdown.massScope).toBe(0);
+    expect(result.score).toBeLessThan(71);
   });
 });
