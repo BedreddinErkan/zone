@@ -3,6 +3,7 @@ import { createOpenAIClient, getModelName } from "./openaiClient.js";
 import {
   withSelfHealingRetry,
   buildDefaultFeedbackPrompt,
+  type RetryFeedback,
 } from "../core/withSelfHealingRetry.js";
 import {
   buildFullPatchPrompt,
@@ -83,6 +84,55 @@ export type FullPatchResult =
       summary: string;
       warnings: string[];
     };
+
+function isValidPatchResponse(text: string): boolean {
+  const t = text.trim();
+  if (t === "NO_CHANGE_NEEDED") return true;
+  return (
+    t.includes("--- FILE:") &&
+    t.includes("--- FIND ---") &&
+    t.includes("--- REPLACE ---")
+  );
+}
+
+function buildFindReplaceFormatRetryPrompt(feedback: RetryFeedback): string {
+  const needsHardPatchCorrection = feedback.issues.some(
+    (issue) =>
+      issue.code === "INVALID_PATCH_FORMAT" || issue.code === "EMPTY_PATCH"
+  );
+
+  if (needsHardPatchCorrection) {
+    console.warn("[zone-patch-retry] invalid format, retrying...", {
+      attempt: feedback.attempt,
+    });
+  }
+
+  if (!needsHardPatchCorrection) {
+    return buildDefaultFeedbackPrompt(feedback);
+  }
+
+  const hardCorrection = [
+    "Your previous response was INVALID.",
+    "",
+    "You MUST return ONLY a patch in this format:",
+    "",
+    "--- FILE: <path> ---",
+    "--- FIND ---",
+    "<exact code>",
+    "--- REPLACE ---",
+    "<updated code>",
+    "",
+    "If you cannot produce a valid patch, output exactly: NO_CHANGE_NEEDED",
+    "",
+    "NO explanations.",
+    "NO markdown.",
+    "NO text outside patch.",
+    "",
+    "Fix your response now.",
+  ].join("\n");
+
+  return `${hardCorrection}\n\n${buildDefaultFeedbackPrompt(feedback)}`;
+}
 
 function buildFindReplaceStrictContract(filePath: string): string {
   return [
@@ -201,15 +251,10 @@ export async function planFullPatchWithLlm(input: {
           });
           return issues;
         }
-        const trimmed = raw.trim();
-        if (trimmed === "NO_CHANGE_NEEDED") {
+        if (raw.trim() === "NO_CHANGE_NEEDED") {
           return issues;
         }
-        if (
-          !raw.includes("--- FILE:") ||
-          !raw.includes("--- FIND ---") ||
-          !raw.includes("--- REPLACE ---")
-        ) {
+        if (!isValidPatchResponse(raw)) {
           issues.push({
             code: "INVALID_PATCH_FORMAT",
             message:
@@ -229,7 +274,7 @@ export async function planFullPatchWithLlm(input: {
         }
         return issues;
       },
-      buildFeedbackPrompt: buildDefaultFeedbackPrompt,
+      buildFeedbackPrompt: buildFindReplaceFormatRetryPrompt,
     });
 
     if (!retryResult.ok) {
@@ -237,27 +282,17 @@ export async function planFullPatchWithLlm(input: {
         mode: "invalid_patch_format",
         filePath: input.filePath,
         summary: "Large-file patch format validation failed.",
-        warnings: [
-          `[invalid_patch_format] Model did not return a parseable patch after ${retryResult.attempts} attempt(s). ${retryResult.reason}`,
-        ],
+        warnings: ["[invalid_patch_format] Model failed after retries"],
       };
     }
 
     const rawText = retryResult.value;
-    const trimmedSuccess = rawText.trim();
-    if (
-      trimmedSuccess !== "NO_CHANGE_NEEDED" &&
-      (!rawText.includes("--- FILE:") ||
-        !rawText.includes("--- FIND ---") ||
-        !rawText.includes("--- REPLACE ---"))
-    ) {
+    if (!isValidPatchResponse(rawText)) {
       return {
         mode: "invalid_patch_format",
         filePath: input.filePath,
         summary: "Large-file patch missing required structure.",
-        warnings: [
-          "[invalid_patch_format] Model did not return a valid patch structure",
-        ],
+        warnings: ["[invalid_patch_format] Model failed after retries"],
       };
     }
 
