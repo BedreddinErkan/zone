@@ -771,78 +771,46 @@ function variantsForConstrainedEntityAnchor(anchor: string): string[] {
   return [...variants];
 }
 
-/** Singular/plural and light inflection bridge between path tokens and task anchors. */
-function englishInflectionTokenVariantMatch(token: string, variant: string): boolean {
-  const t = token.toLowerCase();
-  const v = variant.toLowerCase();
-  if (t.length < 2 || v.length < 2) {
-    return false;
-  }
-  if (t === v) {
-    return true;
-  }
-  if (t + "s" === v || v + "s" === t) {
-    return true;
-  }
-  if (t.length >= 5 && t.endsWith("ies") && v === `${t.slice(0, -3)}y`) {
-    return true;
-  }
-  if (v.length >= 5 && v.endsWith("ies") && t === `${v.slice(0, -3)}y`) {
-    return true;
-  }
-  return false;
-}
-
 function pathTokensHitEntityVariants(
   pathTokens: string[],
-  variants: string[]
+  entityAnchors: string[]
 ): boolean {
-  return pathTokens.some((token) =>
-    variants.some((variant) => {
-      if (variant.length < 3) {
-        return false;
-      }
-      if (englishInflectionTokenVariantMatch(token, variant)) {
+  if (!Array.isArray(pathTokens) || !Array.isArray(entityAnchors)) {
+    return false;
+  }
+
+  for (const anchor of entityAnchors) {
+    const normalizedAnchor = anchor.toLowerCase();
+
+    for (const token of pathTokens) {
+      const normalizedToken = token.toLowerCase();
+
+      // Exact match
+      if (normalizedToken === normalizedAnchor) {
         return true;
       }
-      if (token === variant) {
-        return true;
-      }
+
+      // Singular / plural variations
       if (
-        variant.length >= 4 &&
-        variant.endsWith("s") &&
-        token === variant.slice(0, -1)
+        normalizedToken === normalizedAnchor + "s" ||
+        normalizedToken === normalizedAnchor + "es" ||
+        normalizedAnchor === normalizedToken + "s" ||
+        normalizedAnchor === normalizedToken + "es"
       ) {
         return true;
       }
+
+      // Partial / contains match
       if (
-        token.length >= 4 &&
-        token.endsWith("s") &&
-        variant === token.slice(0, -1)
+        normalizedToken.includes(normalizedAnchor) ||
+        normalizedAnchor.includes(normalizedToken)
       ) {
         return true;
       }
-      if (
-        variant.length >= 4 &&
-        token.length > variant.length &&
-        token.startsWith(variant)
-      ) {
-        const remainder = token.slice(variant.length);
-        if (remainder === "s" || remainder === "es") {
-          return true;
-        }
-        if (
-          remainder.length === 0 ||
-          PATH_ENTITY_COMPOUND_SUFFIXES.some((suffix) =>
-            remainder === suffix || remainder.startsWith(suffix)
-          )
-        ) {
-          return true;
-        }
-      }
-      return false;
-    })
-  );
+    }
+  }
+
+  return false;
 }
 
 function pathAlignsWithConstrainedTaskEntityAnchors(
@@ -855,10 +823,7 @@ function pathAlignsWithConstrainedTaskEntityAnchors(
   const normalizedAnchors = entityAnchors.map((anchor) => anchor.toLowerCase());
   const pathTokens = collectPathEntityTokens(filePath);
   return normalizedAnchors.every((anchor) =>
-    pathTokensHitEntityVariants(
-      pathTokens,
-      variantsForConstrainedEntityAnchor(anchor)
-    )
+    pathTokensHitEntityVariants(pathTokens, [anchor])
   );
 }
 
@@ -1015,7 +980,7 @@ function evaluateConstrainedEntityAlignment(input: {
   let secondaryHitAll = true;
   for (const anchor of input.anchors) {
     const variants = variantsForConstrainedEntityAnchor(anchor);
-    if (!pathTokensHitEntityVariants(pathTokens, variants)) {
+    if (!pathTokensHitEntityVariants(pathTokens, [anchor])) {
       pathHitAll = false;
     }
     if (!strictSecondaryEntitySignals(input.fileContent, variants)) {
