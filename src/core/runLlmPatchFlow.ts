@@ -2781,14 +2781,15 @@ function findSubmitHandlerBlock(fileContent: string): {
 
 function injectDeterministicValidationIntoSubmitHandler(
   handlerBlock: string
-): string | null {
+): { replacedBlock: string; submitCallLine: string } | null {
   const lines = handlerBlock.replace(/\r\n/g, "\n").split("\n");
   const submitLineIndex = lines.findIndex((line) =>
     /\bsubmit[A-Za-z0-9_]*\s*\(/i.test(line)
   );
   if (submitLineIndex < 0) return null;
 
-  const indentMatch = (lines[submitLineIndex] ?? "").match(/^\s*/);
+  const submitCallLine = lines[submitLineIndex] ?? "";
+  const indentMatch = submitCallLine.match(/^\s*/);
   const indent = indentMatch ? indentMatch[0] : "";
   const insert = [
     `${indent}if (!fullName || fullName.trim() === "") {`,
@@ -2809,7 +2810,7 @@ function injectDeterministicValidationIntoSubmitHandler(
     ...lines.slice(submitLineIndex),
   ];
 
-  return nextLines.join("\n");
+  return { replacedBlock: nextLines.join("\n"), submitCallLine };
 }
 
 function buildDeterministicFallbackPatch(input: {
@@ -2819,8 +2820,23 @@ function buildDeterministicFallbackPatch(input: {
   const handler = findSubmitHandlerBlock(input.fileContent);
   if (!handler) return null;
 
-  const replacedBlock = injectDeterministicValidationIntoSubmitHandler(handler.block);
-  if (!replacedBlock) return null;
+  const injected = injectDeterministicValidationIntoSubmitHandler(handler.block);
+  if (!injected) return null;
+  const { replacedBlock, submitCallLine } = injected;
+  const submitIndent = (submitCallLine.match(/^\s*/) ?? [""])[0] ?? "";
+  const validationInsert = [
+    `${submitIndent}if (!fullName || fullName.trim() === "") {`,
+    `${submitIndent}  setError("Full name is required");`,
+    `${submitIndent}  return;`,
+    `${submitIndent}}`,
+    "",
+    `${submitIndent}if (email && !email.includes("@")) {`,
+    `${submitIndent}  setError("Invalid email");`,
+    `${submitIndent}  return;`,
+    `${submitIndent}}`,
+    "",
+  ].join("\n");
+  const replaceAnchorBlock = `${validationInsert}\n${submitCallLine}`.trimEnd();
 
   const fullContent =
     input.fileContent.slice(0, handler.start) +
@@ -2831,9 +2847,9 @@ function buildDeterministicFallbackPatch(input: {
     patchText: [
       `--- FILE: ${input.filePath} ---`,
       "--- FIND ---",
-      handler.block,
+      submitCallLine,
       "--- REPLACE ---",
-      replacedBlock,
+      replaceAnchorBlock,
     ].join("\n"),
     fullContent,
   };
@@ -4413,6 +4429,7 @@ export async function runLlmPatchFlow(input: {
           targetContent,
           fallbackPatchText
         );
+        console.log("[zone-fallback-apply]", fallbackApplied.ok);
         if (fallbackApplied.ok) {
           applyPatches = [
             {
