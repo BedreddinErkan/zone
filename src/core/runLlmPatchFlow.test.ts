@@ -2943,12 +2943,22 @@ expect(result.safetyResolution).toEqual(
       "  const [fullName, setFullName] = useState(\"\");",
       "  const [email, setEmail] = useState(\"\");",
       "  const [error, setError] = useState(null);",
+      "  const [search, setSearch] = useState(\"\");",
+      "  const rows = patients.filter((p) => p.name.includes(search));",
       "  const submitForm = () => fetch(\"/api\", { method: \"POST\" });",
       "  const handleSubmit = (e) => {",
       "    e.preventDefault();",
+      "    setFormError(\"\");",
+      "    setSuccess(\"\");",
       "    submitForm();",
       "  };",
-      "  return <form onSubmit={handleSubmit}></form>;",
+      "  return (",
+      "    <div className=\"page\">",
+      "      <input value={search} onChange={(e) => setSearch(e.target.value)} />",
+      "      <form className=\"form\" onSubmit={handleSubmit}></form>",
+      "      <table className=\"table\">{rows.map((r) => <tr key={r.id}></tr>)}</table>",
+      "    </div>",
+      "  );",
       "}",
     ].join("\n");
 
@@ -3006,6 +3016,13 @@ expect(result.safetyResolution).toEqual(
         "Full name is required"
       );
       expect(result.applyPatches[0].fullContent).toContain("Invalid email");
+      const diff = result.fileDiffs?.[0];
+      const totalChanged =
+        (diff?.addedLines ?? 0) + (diff?.removedLines ?? 0);
+      expect(totalChanged).toBeLessThan(20);
+      // Ensure unrelated UI sections remain present (we didn't rewrite JSX/search/table)
+      expect(result.applyPatches[0].fullContent).toContain("className=\"table\"");
+      expect(result.applyPatches[0].fullContent).toContain("setSearch");
     }
     expect(consoleLogSpy).toHaveBeenCalledWith(
       "[zone-fallback] generating deterministic patch",

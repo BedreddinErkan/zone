@@ -2936,13 +2936,44 @@ function buildDeterministicFallbackPatch(input: {
     return null;
   }
 
-  const afterOpen = input.fileContent.slice(openBraceIndex + 1);
-  const nextNewlineOffset = afterOpen.indexOf("\n");
-  const afterLine =
-    nextNewlineOffset >= 0
-      ? afterOpen.slice(nextNewlineOffset + 1)
-      : "";
-  const nextLine = afterLine.split("\n")[0] ?? "";
+  // Prefer inserting after common reset lines inside the handler.
+  // Specifically: after e.preventDefault(); and optional setFormError(""); setSuccess("");
+  const handlerBlock = handler.block.replace(/\r\n/g, "\n");
+  const handlerLines = handlerBlock.split("\n");
+  const findLineIndex = (re: RegExp): number =>
+    handlerLines.findIndex((l) => re.test(l));
+
+  const preventIdx = findLineIndex(/\bpreventDefault\s*\(\s*\)\s*;/);
+  let insertAfterLineIdx = -1;
+  if (preventIdx >= 0) {
+    insertAfterLineIdx = preventIdx;
+    const formErrorIdx = handlerLines
+      .slice(preventIdx + 1, preventIdx + 6)
+      .findIndex((l) => /\bsetFormError\s*\(\s*["'`]\s*["'`]\s*\)\s*;/.test(l));
+    if (formErrorIdx >= 0) {
+      insertAfterLineIdx = preventIdx + 1 + formErrorIdx;
+    }
+    const successIdx = handlerLines
+      .slice(insertAfterLineIdx + 1, insertAfterLineIdx + 6)
+      .findIndex((l) => /\bsetSuccess\s*\(\s*["'`]\s*["'`]\s*\)\s*;/.test(l));
+    if (successIdx >= 0) {
+      insertAfterLineIdx = insertAfterLineIdx + 1 + successIdx;
+    }
+  }
+
+  // Compute absolute insert position in file content.
+  // Default to just after opening brace.
+  let insertIndex = openBraceIndex + 1;
+  if (insertAfterLineIdx >= 0) {
+    const relativeOffset =
+      handlerLines
+        .slice(0, insertAfterLineIdx + 1)
+        .join("\n").length + 1; // newline after the line
+    insertIndex = handler.start + relativeOffset;
+  }
+
+  const afterInsert = input.fileContent.slice(insertIndex);
+  const nextLine = afterInsert.split("\n")[0] ?? "";
   const nextIndent = (nextLine.match(/^\s*/) ?? [""])[0] ?? "";
 
   const openLineStart = input.fileContent.lastIndexOf("\n", openBraceIndex) + 1;
@@ -2962,7 +2993,7 @@ function buildDeterministicFallbackPatch(input: {
     `${indent}}`,
   ].join("\n");
 
-  return { insertIndex: openBraceIndex + 1, validationBlock };
+  return { insertIndex, validationBlock };
 }
 
 function detectSuspiciousUiOverwrite(input: {
@@ -3703,6 +3734,7 @@ export async function runLlmPatchFlow(input: {
   reportProgress("Generating file patches...");
   let applyPatches: Array<{ filePath: string; fullContent: string }> = [];
   let fallbackForcePreviewOnly = false;
+  let deterministicFallbackTooLarge = false;
   const originalContents: Record<string, string> = {
     ...(input.hostedContext?.originalContents ?? {}),
   };
@@ -4568,14 +4600,28 @@ export async function runLlmPatchFlow(input: {
         console.log("[zone-fallback] forced append fallback");
       }
 
-      applyPatches = [{ filePath: selectedTargetFile, fullContent: updatedContent }];
-      console.log("[zone-fallback-apply] forced success");
-      patchResults.push({
-        filePath: selectedTargetFile,
-        status: "applied",
-        reason: "deterministic_fallback",
-      });
-      originalContents[selectedTargetFile] = targetContent;
+      const fallbackDiff = computeFileDiff(targetContent, updatedContent);
+      const fallbackChangedLines = fallbackDiff.filter(
+        (l) => l.type === "added" || l.type === "removed"
+      ).length;
+      if (fallbackChangedLines > 20) {
+        deterministicFallbackTooLarge = true;
+        console.log("[zone-fallback] rejected oversized fallback patch");
+        patchResults.push({
+          filePath: selectedTargetFile,
+          status: "failed",
+          reason: "deterministic_fallback_too_large",
+        });
+      } else {
+        applyPatches = [{ filePath: selectedTargetFile, fullContent: updatedContent }];
+        console.log("[zone-fallback-apply] forced success");
+        patchResults.push({
+          filePath: selectedTargetFile,
+          status: "applied",
+          reason: "deterministic_fallback",
+        });
+        originalContents[selectedTargetFile] = targetContent;
+      }
     }
   }
 
@@ -5002,7 +5048,9 @@ if (noCodeChangeReason) {
 const decisionMode =
   runtimeVerificationFailed
     ? "blocked"
-    : constrainedTaskLargeRewriteBlocked
+    : deterministicFallbackTooLarge
+      ? "blocked"
+      : constrainedTaskLargeRewriteBlocked
       ? "blocked"
       : hasBlockedPatch ||
           vagueTask ||
