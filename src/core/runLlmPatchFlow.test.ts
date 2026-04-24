@@ -3188,6 +3188,233 @@ expect(result.safetyResolution).toEqual(
     consoleLogSpy.mockRestore();
   });
 
+  it("broken fallback syntax: blocks and warns generated_patch_broken_state_call", async () => {
+    const files = [
+      buildRepoFile("client/src/pages/app/PatientsPage.jsx", "frontend"),
+    ];
+    const brokenJsx = [
+      "import { useState } from \"react\";",
+      "export function PatientsPage() {",
+      "  const [fullName, setFullName] = useState(\"\");",
+      "  const [email, setEmail] = useState(\"\");",
+      "  const [formError, setFormError] = useState(\"\");",
+      "  const [success, setSuccess] = useState(\"\");",
+      "  const submitForm = () => fetch(\"/api\", { method: \"POST\" });",
+      "  const handleSubmit = (e) => {",
+      "    e.preventDefault();",
+      "    setSuccess(\"\"",
+      "    submitForm();",
+      "  };",
+      "  return <form onSubmit={handleSubmit}></form>;",
+      "}",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React app"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 40 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Add validation",
+      steps: ["Validate inputs"],
+      suggestedFiles: [
+        {
+          path: "client/src/pages/app/PatientsPage.jsx",
+          reason: "Target",
+          action: "modify",
+        },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, brokenJsx]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Add validation",
+      patches: [
+        {
+          path: "client/src/pages/app/PatientsPage.jsx",
+          operation: "modify",
+          summary: "Insert validation",
+          targetHint: "handleSubmit",
+          contentPreview: "(preview)",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "invalid_patch_format",
+      filePath: "client/src/pages/app/PatientsPage.jsx",
+      summary: "Model failed",
+      warnings: ["[invalid_patch_format] Model failed after retries"],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "Add minimal client-side validation to the existing form submit handler only. Reuse the existing state and existing submit flow. Do not create a new form.",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.warnings.join("\n")).toContain(
+        "[generated_patch_broken_state_call]"
+      );
+      expect(result.decisionMode).not.toBe("safe_to_apply");
+      expect(result.finalState).toBe("blocked");
+    }
+  });
+
+  it("unbalanced syntax: blocks and warns generated_patch_unbalanced_syntax", async () => {
+    const files = [buildRepoFile("src/example.ts", "frontend")];
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["TS app"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 40 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Change",
+      steps: ["Edit file"],
+      suggestedFiles: [
+        { path: "src/example.ts", reason: "Target", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(
+        paths.map((filePath) => [filePath, "export const x = 1;\n"])
+      )
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Change",
+      patches: [
+        {
+          path: "src/example.ts",
+          operation: "modify",
+          summary: "Edit",
+          targetHint: "x",
+          contentPreview: "(preview)",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      filePath: "src/example.ts",
+      fullContent: "export const x = (1;\n",
+      summary: "Broken syntax",
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "In src/example.ts, change the exported constant x. Keep changes minimal and valid TypeScript.",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.warnings.join("\n")).toContain(
+        "[generated_patch_unbalanced_syntax]"
+      );
+      expect(result.finalState).toBe("blocked");
+    }
+  });
+
+  it("constrained oversized patch: warns generated_patch_too_large_for_constrained_task and is not safe_to_apply", async () => {
+    const files = [
+      buildRepoFile("client/src/pages/app/PatientsPage.jsx", "frontend"),
+    ];
+    const original = [
+      "import { useState } from \"react\";",
+      "export function PatientsPage() {",
+      "  const [fullName, setFullName] = useState(\"\");",
+      "  const [formError, setFormError] = useState(\"\");",
+      "  const [success, setSuccess] = useState(\"\");",
+      "  const submitForm = () => fetch(\"/api\", { method: \"POST\" });",
+      "  const handleSubmit = (e) => {",
+      "    e.preventDefault();",
+      "    setFormError(\"\");",
+      "    setSuccess(\"\");",
+      "    submitForm();",
+      "  };",
+      "  return <form onSubmit={handleSubmit}></form>;",
+      "}",
+      "",
+    ].join("\n");
+    const tooLarge = [
+      "import { useState } from \"react\";",
+      "export function PatientsPage() {",
+      "  const [fullName, setFullName] = useState(\"\");",
+      "  const [formError, setFormError] = useState(\"\");",
+      "  const [success, setSuccess] = useState(\"\");",
+      "  const submitForm = () => fetch(\"/api\", { method: \"POST\" });",
+      "  const handleSubmit = (e) => {",
+      "    e.preventDefault();",
+      "    setFormError(\"\");",
+      "    setSuccess(\"\");",
+      ...Array.from(
+        { length: 28 },
+        (_, i) =>
+          `    if (fullName === "x${i}") { setFormError("bad"); return; }`
+      ),
+      "    submitForm();",
+      "  };",
+      "  return <form onSubmit={handleSubmit}></form>;",
+      "}",
+      "",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React app"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 40 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Validation",
+      steps: ["Edit"],
+      suggestedFiles: [
+        {
+          path: "client/src/pages/app/PatientsPage.jsx",
+          reason: "Target",
+          action: "modify",
+        },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, original]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Validation",
+      patches: [
+        {
+          path: "client/src/pages/app/PatientsPage.jsx",
+          operation: "modify",
+          summary: "Edit",
+          targetHint: "handleSubmit",
+          contentPreview: "(preview)",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      filePath: "client/src/pages/app/PatientsPage.jsx",
+      fullContent: tooLarge,
+      summary: "Too large",
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "Add minimal client-side validation to the existing form submit handler only. Reuse the existing state and existing submit flow. Do not create a new form.",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.warnings.join("\n")).toContain(
+        "[generated_patch_too_large_for_constrained_task]"
+      );
+      expect(result.decisionMode).not.toBe("safe_to_apply");
+    }
+  });
+
   describe("bounded fallback retry loop", () => {
     const captureRetryLogs = () => {
       const entries: Array<{
@@ -4033,10 +4260,10 @@ export function PatientsPage() {
         expect(result.patchPreview).toContain(
           "Patch is too large for a constrained minimal task."
         );
-        expect(
-          result.warnings.some((w) => w.includes("constrained_task_large_rewrite"))
-        ).toBe(true);
-        expect(result.applyPatches).toHaveLength(1);
+        expect(result.warnings.join("\n")).toContain(
+          "[generated_patch_too_large_for_constrained_task]"
+        );
+        expect(result.applyPatches).toHaveLength(0);
       }
     });
   });
