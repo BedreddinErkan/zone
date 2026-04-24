@@ -15,12 +15,16 @@ import {
   type PlanAlignmentResult,
 } from "./evaluatePlanAlignment.js";
 import { verifyPatch, type VerificationResult } from "./verifyPatch.js";
-import { detectVerificationCommand } from "./detectVerificationCommand.js";
+import { detectVerificationPlan } from "./detectVerificationCommand.js";
 import {
-  runRuntimeVerification,
+  runRuntimeVerificationPlan,
   type RuntimeVerificationResult,
+  type RuntimeVerificationPlanResult,
 } from "./runRuntimeVerification.js";
-import { buildRetryGuidanceFromFailure } from "./buildRetryGuidanceFromFailure.js";
+import {
+  buildRetryGuidanceFromFailure,
+  formatRetryGuidanceBrief,
+} from "./buildRetryGuidanceFromFailure.js";
 import {
   detectIntentMismatch,
   type IntentMismatchReasonCode,
@@ -93,7 +97,19 @@ export type LlmPatchFlowResult =
       reason?: string;
       decisionMode?: "preview_only" | "safe_to_apply" | "blocked";
       finalState?: "preview_only" | "safe_to_apply" | "blocked";
-      finalExecutionOutcome?: "completed" | "completed_with_issues" | "failed_verification";
+      finalExecutionOutcome?:
+        | "completed"
+        | "completed_with_verification_skipped"
+        | "completed_with_tooling_issue"
+        | "failed_verification"
+        | "failed_after_retry"
+        | "completed_with_issues";
+      verificationStatus?:
+        | "passed"
+        | "skipped"
+        | "tooling_issue"
+        | "code_failed"
+        | "timeout";
       finalVerificationFailure?: {
         status: RuntimeVerificationResult["status"];
         command?: string;
@@ -5039,27 +5055,124 @@ export async function runLlmPatchFlow(input: {
     }
   }
   let runtimeVerification: RuntimeVerificationResult | null = null;
+  let runtimeVerificationPlan: RuntimeVerificationPlanResult | null = null;
+  let verificationRepairAttempted = false;
   if (!input.hostedContext && applyPatches.length > 0) {
     try {
-      const command = detectVerificationCommand({
+      const plan = detectVerificationPlan({
         repoPath: input.repoPath,
         repoFiles: allFiles.map((file) => file.path),
+        task: input.task,
       });
-      runtimeVerification = await runRuntimeVerification({
+      runtimeVerificationPlan = await runRuntimeVerificationPlan({
         repoPath: input.repoPath,
-        command,
+        plan,
       });
-      if (runtimeVerification.command) {
-        console.log(
-          `[zone-runtime-verify] command="${runtimeVerification.command}" status=${runtimeVerification.status}`
-        );
-      }
-      if (runtimeVerification.status === "failed") {
-        const warning = `Runtime verification failed: ${runtimeVerification.command ?? "unknown command"}`;
+      console.log(
+        `[zone-runtime-verify] status=${runtimeVerificationPlan.status} steps=${runtimeVerificationPlan.steps.length}`
+      );
+      // Keep the legacy single-command field populated for existing consumers.
+      runtimeVerification =
+        runtimeVerificationPlan.steps[0] ?? {
+          attempted: runtimeVerificationPlan.attempted,
+          status:
+            runtimeVerificationPlan.status === "passed"
+              ? "passed"
+              : runtimeVerificationPlan.status === "timeout"
+                ? "timeout"
+                : runtimeVerificationPlan.status === "skipped_no_command"
+                  ? "skipped"
+                  : "failed",
+          command: runtimeVerificationPlan.failedCommand,
+          summary: runtimeVerificationPlan.summary,
+        };
+
+      if (runtimeVerificationPlan.status === "failed_code_related") {
+        const warning = `Runtime verification failed (code): ${runtimeVerificationPlan.failedCommand ?? "unknown command"}`;
         internalWarnings.push(warning);
         visibleWarnings.push(warning);
-      } else if (runtimeVerification.status === "timeout") {
-        const warning = `Runtime verification timed out: ${runtimeVerification.command ?? "unknown command"}`;
+
+        // One automatic repair attempt for code-related verification failures.
+        if (applyPatches.length > 0) {
+          verificationRepairAttempted = true;
+          try {
+            const brief = buildRetryGuidanceFromFailure({
+              issues: [
+                {
+                  code: "RUNTIME_VERIFICATION_FAILED",
+                  message: [
+                    runtimeVerificationPlan.failedCommand
+                      ? `Command: ${runtimeVerificationPlan.failedCommand}`
+                      : "",
+                    runtimeVerificationPlan.summary,
+                  ]
+                    .filter(Boolean)
+                    .join("\n"),
+                },
+              ],
+            });
+            const guidanceText = formatRetryGuidanceBrief(brief);
+            console.log("[zone-runtime-verify-retry] attempting repair");
+
+            // Patch only the already-changed files; keep changes minimal.
+            for (let idx = 0; idx < applyPatches.length; idx += 1) {
+              const patch = applyPatches[idx];
+              if (!patch) continue;
+              const repaired = await planFullPatchWithLlm({
+                task: [
+                  input.task,
+                  "",
+                  "RUNTIME VERIFICATION FAILED AFTER APPLYING YOUR PATCH.",
+                  "You MUST fix the failure with the smallest possible change.",
+                  "You MUST ONLY modify the file below. Do NOT touch other files.",
+                  `TARGET FILE: ${patch.filePath}`,
+                  "",
+                  "Failure guidance:",
+                  guidanceText,
+                ].join("\n"),
+                filePath: patch.filePath,
+                fileContent: patch.fullContent,
+                repoSummary: projectSummary,
+                repoPath: input.repoPath,
+                taskIntent: taskIntent.normalizedTask || taskIntent.action,
+                normalizedTaskIntent: detectMicroEditIntent(input.task)
+                  ? "micro_edit"
+                  : "standard",
+                outputMode: "find_replace_patch",
+                relevantFiles: [{ path: patch.filePath, content: patch.fullContent }],
+                existingTargetFiles: allFiles.map((file) => file.path),
+                executionPlan,
+                relatedContext: "IMPORTANT: Only output a valid patch. Do not explain.",
+              });
+              if (repaired.mode !== "patch") continue;
+              const applied = applyDeveloperPatchText(patch.fullContent, repaired.patchText);
+              if (applied.ok) {
+                applyPatches[idx] = { filePath: patch.filePath, fullContent: applied.fullContent };
+              }
+            }
+
+            // Re-run runtime verification after repair attempt.
+            runtimeVerificationPlan = await runRuntimeVerificationPlan({
+              repoPath: input.repoPath,
+              plan,
+            });
+            console.log(
+              `[zone-runtime-verify-retry] status=${runtimeVerificationPlan.status} steps=${runtimeVerificationPlan.steps.length}`
+            );
+          } catch (err) {
+            console.warn(
+              `[zone-runtime-verify-retry] skipped: ${err instanceof Error ? err.message : String(err)}`
+            );
+          }
+        }
+      } else if (runtimeVerificationPlan.status === "failed_environment_or_tooling") {
+        const warning =
+          "Patch generated, but verification could not complete because of setup/tooling. " +
+          `(${runtimeVerificationPlan.failedCommand ?? "unknown command"})`;
+        internalWarnings.push(warning);
+        visibleWarnings.push(warning);
+      } else if (runtimeVerificationPlan.status === "timeout") {
+        const warning = `Runtime verification timed out: ${runtimeVerificationPlan.failedCommand ?? "unknown command"}`;
         internalWarnings.push(warning);
         visibleWarnings.push(warning);
       }
@@ -5148,8 +5261,11 @@ export async function runLlmPatchFlow(input: {
   const runtimeVerificationFailed =
     runtimeVerification?.attempted === true &&
     (runtimeVerification.status === "failed" || runtimeVerification.status === "timeout");
+  const runtimeVerificationCodeFailed = runtimeVerificationPlan?.status === "failed_code_related";
+  const runtimeVerificationToolingFailed =
+    runtimeVerificationPlan?.status === "failed_environment_or_tooling";
   const runtimeFailureGuidance =
-    runtimeVerificationFailed && runtimeVerification
+    (runtimeVerificationCodeFailed || runtimeVerification?.status === "timeout") && runtimeVerification
       ? buildRetryGuidanceFromFailure({
           issues: [
             {
@@ -5294,7 +5410,7 @@ if (noCodeChangeReason) {
 }
 
 const decisionMode =
-  runtimeVerificationFailed
+  (runtimeVerificationCodeFailed || runtimeVerification?.status === "timeout")
     ? "blocked"
     : deterministicFallbackTooLarge
       ? "blocked"
@@ -5313,21 +5429,50 @@ const decisionMode =
           constrainedTaskLargeRewriteForcePreview
         ? "preview_only"
         : "safe_to_apply";
-  const finalExecutionOutcome =
-    runtimeVerification?.status === "failed"
-      ? "failed_verification"
-      : runtimeVerification?.status === "timeout" || noCodeChangeReason
-        ? "completed_with_issues"
-        : constrainedTaskLargeRewriteBlocked
-          ? "completed_with_issues"
-          : "completed";
+  const verificationStatus: "passed" | "skipped" | "tooling_issue" | "code_failed" | "timeout" =
+    runtimeVerificationPlan?.status === "passed"
+      ? "passed"
+      : runtimeVerificationPlan?.status === "skipped_no_command"
+        ? "skipped"
+        : runtimeVerificationPlan?.status === "failed_environment_or_tooling"
+          ? "tooling_issue"
+          : runtimeVerificationPlan?.status === "failed_code_related"
+            ? "code_failed"
+            : runtimeVerificationPlan?.status === "timeout"
+              ? "timeout"
+              : runtimeVerification?.status === "timeout"
+                ? "timeout"
+                : runtimeVerification
+                  ? "code_failed"
+                  : "skipped";
+
+  const finalExecutionOutcome:
+    | "completed"
+    | "completed_with_verification_skipped"
+    | "completed_with_tooling_issue"
+    | "failed_verification"
+    | "failed_after_retry"
+    | "completed_with_issues" =
+    noCodeChangeReason || constrainedTaskLargeRewriteBlocked
+      ? "completed_with_issues"
+      : verificationStatus === "passed"
+        ? "completed"
+        : verificationStatus === "skipped"
+          ? "completed_with_verification_skipped"
+          : verificationStatus === "tooling_issue"
+            ? "completed_with_tooling_issue"
+            : verificationStatus === "timeout"
+              ? "completed_with_issues"
+              : verificationRepairAttempted
+                ? "failed_after_retry"
+                : "failed_verification";
   const finalState =
     finalExecutionOutcome === "failed_verification" ||
     finalExecutionOutcome === "completed_with_issues"
       ? "blocked"
       : decisionMode;
   const validationBlocked = finalState === "blocked";
-  if (runtimeVerificationFailed && runtimeVerification) {
+  if ((runtimeVerificationCodeFailed || runtimeVerification?.status === "timeout") && runtimeVerification) {
     const warning = `Final verification did not pass: ${runtimeVerification.command ?? "unknown command"} (${runtimeVerification.status}).`;
     if (!syncedInternalWarnings.includes(warning)) syncedInternalWarnings.push(warning);
     if (!syncedVisibleWarnings.includes(warning)) syncedVisibleWarnings.push(warning);
@@ -5436,7 +5581,8 @@ const decisionMode =
     decisionMode,
     finalState,
     finalExecutionOutcome,
-    attemptsUsed: runtimeVerification ? 1 : undefined,
+    verificationStatus,
+    attemptsUsed: runtimeVerification ? (verificationRepairAttempted ? 2 : 1) : undefined,
     validationBlocked,
     ...(runtimeVerificationFailed && runtimeVerification
       ? {
@@ -5467,5 +5613,6 @@ const decisionMode =
     ...(planAlignment ? { planAlignment } : {}),
     ...(verification ? { verification } : {}),
     ...(runtimeVerification ? { runtimeVerification } : {}),
+    ...(runtimeVerificationPlan ? { runtimeVerificationPlan } : {}),
   };
 }

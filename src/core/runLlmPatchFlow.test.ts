@@ -8,6 +8,7 @@ const readProjectFilesMock = vi.fn();
 const planFeatureWithLlmMock = vi.fn();
 const planPatchPreviewWithLlmMock = vi.fn();
 const planFullPatchWithLlmMock = vi.fn();
+const runRuntimeVerificationPlanMock = vi.fn();
 
 vi.mock("../repo/scanRepo.js", () => ({
   scanRepo: scanRepoMock,
@@ -37,6 +38,10 @@ vi.mock("../llm/planFullPatch.js", () => ({
   planFullPatchWithLlm: planFullPatchWithLlmMock,
 }));
 
+vi.mock("./runRuntimeVerification.js", () => ({
+  runRuntimeVerificationPlan: runRuntimeVerificationPlanMock,
+}));
+
 function buildRepoFile(
   path: string,
   category: RepoFile["category"] = "unknown"
@@ -52,6 +57,12 @@ function buildRepoFile(
 describe("runLlmPatchFlow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    runRuntimeVerificationPlanMock.mockResolvedValue({
+      attempted: false,
+      status: "skipped_no_command",
+      steps: [],
+      summary: "No safe verification command detected.",
+    });
   });
 
   it("blocks Zone-internal product tasks before patching the selected repo", async () => {
@@ -1672,6 +1683,9 @@ expect(result.safetyResolution).toEqual(
     consoleLogSpy.mockRestore();
   });
 
+  // Tooling vs code verification behavior is covered in deterministic fallback tests below,
+  // which reliably produce a patch in this harness.
+
   it("applies raw find/replace patch mode for large files", async () => {
     const files = [buildRepoFile("src/pages/home.html", "frontend")];
     const currentHtml = `${"<div class=\"line\">filler</div>\n".repeat(400)}<button class="exec-btn">Execute</button>\n${"<div class=\"line\">after</div>\n".repeat(400)}`;
@@ -3062,6 +3076,23 @@ expect(result.safetyResolution).toEqual(
       summary: "Model failed",
       warnings: ["[invalid_patch_format] Model failed after retries"],
     });
+    runRuntimeVerificationPlanMock.mockResolvedValue({
+      attempted: true,
+      status: "failed_environment_or_tooling",
+      steps: [
+        {
+          attempted: true,
+          command: "npm run test:e2e",
+          status: "failed",
+          exitCode: 1,
+          summary: "Playwright: browser executable doesn't exist",
+          kind: "test",
+          classifiedFailure: "tooling",
+        },
+      ],
+      failedCommand: "npm run test:e2e",
+      summary: "Playwright: browser executable doesn't exist",
+    });
 
     const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
     const result = await runLlmPatchFlow({
@@ -3075,9 +3106,12 @@ expect(result.safetyResolution).toEqual(
       expect(result.patchQualitySummary?.source).toBe("deterministic_fallback");
       expect(result.decisionMode).toBe("preview_only");
       expect(result.developerConfidence).toBeLessThanOrEqual(65);
+      expect(result.verificationStatus).toBe("tooling_issue");
+      expect(result.finalExecutionOutcome).toBe("completed_with_tooling_issue");
       expect(result.warnings.join("\n")).toContain(
         "[deterministic_fallback_used]"
       );
+      expect(result.warnings.join("\n")).toContain("setup/tooling");
       expect(result.applyPatches[0].filePath).toBe(
         "client/src/pages/app/PatientsPage.jsx"
       );
