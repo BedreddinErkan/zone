@@ -5,6 +5,7 @@ import {
   buildDefaultFeedbackPrompt,
   type RetryFeedback,
 } from "../core/withSelfHealingRetry.js";
+import type { ResponseInput } from "openai/resources/responses/responses";
 import {
   buildFullPatchPrompt,
   type FullPatchOutputMode,
@@ -299,17 +300,24 @@ export async function planFullPatchWithLlm(input: {
             temperature: 0,
           })
         );
+
+        const responseInput: ResponseInput = [
+          {
+            role: "system",
+            type: "message",
+            content: strictSystemInstruction,
+          },
+          {
+            role: "user",
+            type: "message",
+            content: currentPrompt,
+          },
+        ];
         const response = await client.responses.create({
           model,
           temperature: 0,
           max_output_tokens: 2000,
-          input: [
-            {
-              role: "system",
-              content: [{ type: "text", text: strictSystemInstruction }],
-            },
-            { role: "user", content: [{ type: "text", text: currentPrompt }] },
-          ] as unknown,
+          input: responseInput,
         });
         return (response.output_text ?? "").trim();
       },
