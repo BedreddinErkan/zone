@@ -771,6 +771,28 @@ function variantsForConstrainedEntityAnchor(anchor: string): string[] {
   return [...variants];
 }
 
+/** Singular/plural and light inflection bridge between path tokens and task anchors. */
+function englishInflectionTokenVariantMatch(token: string, variant: string): boolean {
+  const t = token.toLowerCase();
+  const v = variant.toLowerCase();
+  if (t.length < 2 || v.length < 2) {
+    return false;
+  }
+  if (t === v) {
+    return true;
+  }
+  if (t + "s" === v || v + "s" === t) {
+    return true;
+  }
+  if (t.length >= 5 && t.endsWith("ies") && v === `${t.slice(0, -3)}y`) {
+    return true;
+  }
+  if (v.length >= 5 && v.endsWith("ies") && t === `${v.slice(0, -3)}y`) {
+    return true;
+  }
+  return false;
+}
+
 function pathTokensHitEntityVariants(
   pathTokens: string[],
   variants: string[]
@@ -779,6 +801,9 @@ function pathTokensHitEntityVariants(
     variants.some((variant) => {
       if (variant.length < 3) {
         return false;
+      }
+      if (englishInflectionTokenVariantMatch(token, variant)) {
+        return true;
       }
       if (token === variant) {
         return true;
@@ -803,6 +828,9 @@ function pathTokensHitEntityVariants(
         token.startsWith(variant)
       ) {
         const remainder = token.slice(variant.length);
+        if (remainder === "s" || remainder === "es") {
+          return true;
+        }
         if (
           remainder.length === 0 ||
           PATH_ENTITY_COMPOUND_SUFFIXES.some((suffix) =>
@@ -1007,6 +1035,7 @@ function assessConstrainedTargetEligibility(input: {
   task: string;
   filePath: string;
   fileContent: string;
+  topRankedRelevantPath?: string | null;
 }): {
   eligible: boolean;
   score: number;
@@ -1014,9 +1043,14 @@ function assessConstrainedTargetEligibility(input: {
   entityMatch: boolean;
   entitySource: ConstrainedEntitySource;
   reason: string;
+  topRankedEntityMatch: boolean;
+  overrideReason: string | null;
+  pathTokens: string[];
+  entityAnchors: string[];
 } {
   const normalizedTask = normalizeConstrainedTaskText(input.task);
   const entityAnchors = extractConstrainedTaskEntityAnchors(normalizedTask);
+  const pathTokens = collectPathEntityTokens(input.filePath);
   const structureScore = scoreConstraintAwareContextFile({
     task: input.task,
     content: input.fileContent,
@@ -1028,7 +1062,34 @@ function assessConstrainedTargetEligibility(input: {
     anchors: entityAnchors,
   });
 
+  const topRankedPath =
+    typeof input.topRankedRelevantPath === "string" &&
+    input.topRankedRelevantPath.length > 0
+      ? input.topRankedRelevantPath
+      : null;
+  const topRankedEntityMatch =
+    topRankedPath !== null &&
+    topRankedPath === input.filePath &&
+    entityAnchors.length > 0 &&
+    entityMatch &&
+    !isProtectedDeveloperUiPath(input.filePath) &&
+    !isConstrainedGenericShellPatchPath(input.filePath);
+
   if (!structureOk) {
+    if (topRankedEntityMatch) {
+      return {
+        eligible: true,
+        score: structureScore,
+        structureScore,
+        entityMatch: true,
+        entitySource: "path",
+        reason: "top_ranked_entity_target_preview",
+        topRankedEntityMatch: true,
+        overrideReason: "top_ranked_entity_target_preview",
+        pathTokens,
+        entityAnchors,
+      };
+    }
     return {
       eligible: false,
       score: structureScore,
@@ -1036,6 +1097,10 @@ function assessConstrainedTargetEligibility(input: {
       entityMatch,
       entitySource,
       reason: "target_file_constraint_mismatch",
+      topRankedEntityMatch,
+      overrideReason: null,
+      pathTokens,
+      entityAnchors,
     };
   }
 
@@ -1047,6 +1112,10 @@ function assessConstrainedTargetEligibility(input: {
       entityMatch: false,
       entitySource,
       reason: "target_entity_mismatch",
+      topRankedEntityMatch,
+      overrideReason: null,
+      pathTokens,
+      entityAnchors,
     };
   }
 
@@ -1057,6 +1126,10 @@ function assessConstrainedTargetEligibility(input: {
     entityMatch: true,
     entitySource,
     reason: "constraint_structure_ok",
+    topRankedEntityMatch,
+    overrideReason: null,
+    pathTokens,
+    entityAnchors,
   };
 }
 
@@ -1067,6 +1140,26 @@ const CONSTRAINED_ELIGIBILITY_FALLBACK_REJECT_REASONS = new Set([
 
 function isProtectedDeveloperUiPath(patchPath: string): boolean {
   return patchPath.startsWith("src/ui/") || patchPath === "src/ui/index.html";
+}
+
+const CONSTRAINED_GENERIC_SHELL_BASENAMES = new Set([
+  "app.jsx",
+  "app.tsx",
+  "app.js",
+  "app.ts",
+  "index.jsx",
+  "index.tsx",
+  "index.js",
+  "index.ts",
+  "layout.jsx",
+  "layout.tsx",
+  "layout.js",
+  "layout.ts",
+]);
+
+function isConstrainedGenericShellPatchPath(filePath: string): boolean {
+  const base = filePath.split(/[/\\]/).pop()?.toLowerCase() ?? "";
+  return CONSTRAINED_GENERIC_SHELL_BASENAMES.has(base);
 }
 
 async function loadDeveloperModifyPatchSourceContent(input: {
@@ -3460,6 +3553,7 @@ export async function runLlmPatchFlow(input: {
           task: input.task,
           filePath: previewPatch.path,
           fileContent: loaded.content,
+          topRankedRelevantPath: fullRankedFiles[0]?.path ?? null,
         });
         console.log(
           "[zone-target-eligibility]",
@@ -3471,6 +3565,10 @@ export async function runLlmPatchFlow(input: {
             eligible: preflightEligibility.eligible,
             reason: preflightEligibility.reason,
             decision: preflightEligibility.eligible ? "accepted" : "rejected",
+            topRankedEntityMatch: preflightEligibility.topRankedEntityMatch,
+            overrideReason: preflightEligibility.overrideReason,
+            pathTokens: preflightEligibility.pathTokens,
+            entityAnchors: preflightEligibility.entityAnchors,
           })
         );
         if (!preflightEligibility.eligible) {
@@ -3497,6 +3595,15 @@ export async function runLlmPatchFlow(input: {
             });
           }
           continue;
+        }
+        if (preflightEligibility.reason === "top_ranked_entity_target_preview") {
+          fallbackForcePreviewOnly = true;
+          internalWarnings.push(
+            "[top_ranked_entity_target_used_without_structure_confirmation] Top-ranked file matches the task entity/path, but structure heuristics were weak; keeping preview-only safety."
+          );
+          visibleWarnings.push(
+            "[top_ranked_entity_target_used_without_structure_confirmation] Top-ranked file matches the task entity/path, but structure heuristics were weak; keeping preview-only safety."
+          );
         }
         prefilteredTargets.push(previewPatch);
       }
@@ -3888,6 +3995,7 @@ export async function runLlmPatchFlow(input: {
           task: input.task,
           filePath: patch.path,
           fileContent,
+          topRankedRelevantPath: fullRankedFiles[0]?.path ?? null,
         });
         console.log(
           "[zone-target-eligibility]",
@@ -3899,6 +4007,10 @@ export async function runLlmPatchFlow(input: {
             eligible: targetEligibility.eligible,
             reason: targetEligibility.reason,
             decision: targetEligibility.eligible ? "accepted" : "rejected",
+            topRankedEntityMatch: targetEligibility.topRankedEntityMatch,
+            overrideReason: targetEligibility.overrideReason,
+            pathTokens: targetEligibility.pathTokens,
+            entityAnchors: targetEligibility.entityAnchors,
           })
         );
         if (!targetEligibility.eligible) {
@@ -3915,6 +4027,15 @@ export async function runLlmPatchFlow(input: {
             reason: targetEligibility.reason,
           });
           continue;
+        }
+        if (targetEligibility.reason === "top_ranked_entity_target_preview") {
+          fallbackForcePreviewOnly = true;
+          internalWarnings.push(
+            "[top_ranked_entity_target_used_without_structure_confirmation] Top-ranked file matches the task entity/path, but structure heuristics were weak; keeping preview-only safety."
+          );
+          visibleWarnings.push(
+            "[top_ranked_entity_target_used_without_structure_confirmation] Top-ranked file matches the task entity/path, but structure heuristics were weak; keeping preview-only safety."
+          );
         }
       }
       const targetedRelevantFiles = microEditMode

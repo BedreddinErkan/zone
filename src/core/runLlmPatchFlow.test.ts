@@ -3451,4 +3451,246 @@ expect(result.safetyResolution).toEqual(
       expect(previewArg.fileContexts[0]?.path).toBe(topPath);
     });
   });
+
+  describe("constrained target eligibility entity rank override", () => {
+    const constrainedPatientsFormTask =
+      "Patients page form validation. Reuse the existing form state only. Do not create a new form.";
+
+    it("treats singular/plural entity anchors as matching PatientsPage path tokens", async () => {
+      const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const patientsPath = "client/src/pages/app/PatientsPage.jsx";
+      const files = [buildRepoFile(patientsPath, "frontend")];
+      scanRepoMock.mockResolvedValue(files);
+      detectProjectStructureMock.mockReturnValue({ notes: ["React"] });
+      rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 90 }]);
+      planFeatureWithLlmMock.mockResolvedValue({
+        implementationSummary: "Validation",
+        steps: ["Patients form"],
+        suggestedFiles: [{ path: patientsPath, reason: "Page", action: "inspect" }],
+        risks: [],
+      });
+      readProjectFilesMock.mockResolvedValue({
+        [`C:/repo/${patientsPath}`]: `export function PatientsPage() { return <div />; }`,
+      });
+      planPatchPreviewWithLlmMock.mockResolvedValue({
+        summary: "Patch",
+        patches: [
+          {
+            path: patientsPath,
+            operation: "modify",
+            summary: "Validation",
+            targetHint: "form",
+            contentPreview: "x",
+          },
+        ],
+        warnings: [],
+      });
+      planFullPatchWithLlmMock.mockResolvedValue({
+        mode: "full_content",
+        filePath: patientsPath,
+        fullContent: "// patched",
+        summary: "ok",
+        warnings: [],
+      });
+
+      const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+      await runLlmPatchFlow({
+        task: constrainedPatientsFormTask,
+        repoPath: "C:/repo",
+      });
+
+      const eligibilityLog = consoleLogSpy.mock.calls.find(
+        (call) => call[0] === "[zone-target-eligibility]"
+      )?.[1] as string | undefined;
+      expect(eligibilityLog).toBeDefined();
+      expect(eligibilityLog).toContain('"entityMatch":true');
+      consoleLogSpy.mockRestore();
+    });
+
+    it("accepts top-ranked path via top_ranked_entity_target_preview when structure is weak and calls planFullPatch for that path", async () => {
+      const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const patientsPath = "client/src/pages/app/PatientsPage.jsx";
+      const leadsPath = "client/src/components/ClinicLeads.jsx";
+      const files = [
+        buildRepoFile(patientsPath, "frontend"),
+        buildRepoFile(leadsPath, "frontend"),
+      ];
+      const weakStructure = `export function PatientsPage() { return <div />; }`;
+      scanRepoMock.mockResolvedValue(files);
+      detectProjectStructureMock.mockReturnValue({ notes: ["React"] });
+      rankRelevantFilesMock.mockReturnValue([
+        { ...files[0], score: 100 },
+        { ...files[1], score: 50 },
+      ]);
+      planFeatureWithLlmMock.mockResolvedValue({
+        implementationSummary: "Validation",
+        steps: ["Patients"],
+        suggestedFiles: [{ path: patientsPath, reason: "Page", action: "inspect" }],
+        risks: [],
+      });
+      readProjectFilesMock.mockResolvedValue({
+        [`C:/repo/${patientsPath}`]: weakStructure,
+        [`C:/repo/${leadsPath}`]: `export function ClinicLeads() { return <div />; }`,
+      });
+      planPatchPreviewWithLlmMock.mockResolvedValue({
+        summary: "Patch",
+        patches: [
+          {
+            path: patientsPath,
+            operation: "modify",
+            summary: "Validation",
+            targetHint: "form",
+            contentPreview: "x",
+          },
+        ],
+        warnings: [],
+      });
+      planFullPatchWithLlmMock.mockResolvedValue({
+        mode: "full_content",
+        filePath: patientsPath,
+        fullContent: `${weakStructure}\n// ok`,
+        summary: "ok",
+        warnings: [],
+      });
+
+      const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+      const result = await runLlmPatchFlow({
+        task: constrainedPatientsFormTask,
+        repoPath: "C:/repo",
+      });
+
+      expect(result.ok).toBe(true);
+      const eligibilityLog = consoleLogSpy.mock.calls.find(
+        (call) => call[0] === "[zone-target-eligibility]"
+      )?.[1] as string | undefined;
+      expect(eligibilityLog).toContain('"reason":"top_ranked_entity_target_preview"');
+      expect(eligibilityLog).toContain('"eligible":true');
+      expect(planFullPatchWithLlmMock).toHaveBeenCalledWith(
+        expect.objectContaining({ filePath: patientsPath })
+      );
+      const fallbackPayload = consoleLogSpy.mock.calls.find(
+        (call) => call[0] === "[zone-target-fallback]"
+      )?.[1] as string | undefined;
+      expect(
+        fallbackPayload === undefined ||
+          (typeof fallbackPayload === "string" && fallbackPayload.includes('"fallback":null'))
+      ).toBe(true);
+      if (result.ok) {
+        expect(
+          result.warnings.some((w) =>
+            w.includes("top_ranked_entity_target_used_without_structure_confirmation")
+          )
+        ).toBe(true);
+        expect(result.decisionMode).toBe("preview_only");
+      }
+      consoleLogSpy.mockRestore();
+    });
+
+    it("does not apply top-ranked override for generic App.jsx shell", async () => {
+      const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const appPath = "src/App.jsx";
+      const files = [buildRepoFile(appPath, "frontend")];
+      const weak = `export default function App() { return <div />; }`;
+      scanRepoMock.mockResolvedValue(files);
+      detectProjectStructureMock.mockReturnValue({ notes: ["React"] });
+      rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 100 }]);
+      planFeatureWithLlmMock.mockResolvedValue({
+        implementationSummary: "Tweak",
+        steps: ["App"],
+        suggestedFiles: [{ path: appPath, reason: "Root", action: "inspect" }],
+        risks: [],
+      });
+      readProjectFilesMock.mockResolvedValue({
+        [`C:/repo/${appPath}`]: weak,
+      });
+      planPatchPreviewWithLlmMock.mockResolvedValue({
+        summary: "Patch",
+        patches: [
+          {
+            path: appPath,
+            operation: "modify",
+            summary: "Change",
+            targetHint: "root",
+            contentPreview: "x",
+          },
+        ],
+        warnings: [],
+      });
+
+      const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+      await runLlmPatchFlow({
+        task: "Polish the app page spacing. Reuse the existing form only.",
+        repoPath: "C:/repo",
+      });
+
+      const eligibilityLog = consoleLogSpy.mock.calls.find(
+        (call) => call[0] === "[zone-target-eligibility]"
+      )?.[1] as string | undefined;
+      expect(eligibilityLog).toBeDefined();
+      expect(eligibilityLog).not.toContain("top_ranked_entity_target_preview");
+      expect(eligibilityLog).toContain('"eligible":false');
+      expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
+      consoleLogSpy.mockRestore();
+    });
+
+    it("does not override when preview target is wrong entity vs task", async () => {
+      const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const patientsPath = "client/src/pages/app/PatientsPage.jsx";
+      const leadsPath = "client/src/components/ClinicLeads.jsx";
+      const files = [
+        buildRepoFile(patientsPath, "frontend"),
+        buildRepoFile(leadsPath, "frontend"),
+      ];
+      scanRepoMock.mockResolvedValue(files);
+      detectProjectStructureMock.mockReturnValue({ notes: ["React"] });
+      rankRelevantFilesMock.mockReturnValue([
+        { ...files[0], score: 100 },
+        { ...files[1], score: 50 },
+      ]);
+      planFeatureWithLlmMock.mockResolvedValue({
+        implementationSummary: "Validation",
+        steps: ["Patients"],
+        suggestedFiles: [{ path: leadsPath, reason: "Leads", action: "inspect" }],
+        risks: [],
+      });
+      readProjectFilesMock.mockResolvedValue({
+        [`C:/repo/${patientsPath}`]: `export function PatientsPage() { return <form />; }`,
+        [`C:/repo/${leadsPath}`]: `export function ClinicLeads() { return <div />; }`,
+      });
+      planPatchPreviewWithLlmMock.mockResolvedValue({
+        summary: "Patch",
+        patches: [
+          {
+            path: leadsPath,
+            operation: "modify",
+            summary: "Wrong file",
+            targetHint: "form",
+            contentPreview: "x",
+          },
+        ],
+        warnings: [],
+      });
+      planFullPatchWithLlmMock.mockResolvedValue({
+        mode: "full_content",
+        filePath: leadsPath,
+        fullContent: "// noop",
+        summary: "ok",
+        warnings: [],
+      });
+
+      const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+      await runLlmPatchFlow({
+        task: constrainedPatientsFormTask,
+        repoPath: "C:/repo",
+      });
+
+      const eligibilityLog = consoleLogSpy.mock.calls.find(
+        (call) => call[0] === "[zone-target-eligibility]"
+      )?.[1] as string | undefined;
+      expect(eligibilityLog).toBeDefined();
+      expect(eligibilityLog).toContain('"entityMatch":false');
+      expect(eligibilityLog).not.toContain("top_ranked_entity_target_preview");
+      consoleLogSpy.mockRestore();
+    });
+  });
 });
