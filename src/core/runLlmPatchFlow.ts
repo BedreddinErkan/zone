@@ -3369,6 +3369,7 @@ export async function runLlmPatchFlow(input: {
     const reason = err instanceof Error ? err.message : String(err);
     return { ok: false, reason };
   }
+  console.log("[zone-preview] received (ignored for patch application)");
   if (input.hostedContext) {
     patchPlan = {
       ...patchPlan,
@@ -4024,25 +4025,8 @@ export async function runLlmPatchFlow(input: {
       const normalizedTaskIntentForPrompt = detectMicroEditIntent(input.task)
         ? "micro_edit"
         : "standard";
-      const safePreviewPatch =
-        canReusePatchPreviewAsFinalPatch({
-          patchCount: patchPlan.patches.length,
-          contentPreview: patch.contentPreview,
-          taskRiskResult,
-        })
-          ? buildApplyPatchFromPreview({
-              patch,
-              currentContent: fileContent,
-            })
-          : { ok: false as const };
-      if (safePreviewPatch.ok) {
-        console.log(
-          "[zone-api] skipping full patch generation (safe micro edit)"
-        );
-      }
-      const nextContent = safePreviewPatch.ok
-        ? safePreviewPatch.fullContent
-        : await (() => {
+      console.log("[zone-patch-source] using FULL PATCH ONLY");
+      const nextContent = await (() => {
             perf.mark(`full patch model call start ${patch.path}`);
             return planFullPatchWithLlm({
               task: input.task,

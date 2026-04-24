@@ -2868,7 +2868,7 @@ expect(result.safetyResolution).toEqual(
     expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
   });
 
-  it("skips full patch generation for safe single-file preview patches", async () => {
+  it("does not apply preview patches; uses full patch only", async () => {
     const files = [buildRepoFile("src/pages/home.html", "frontend")];
     const currentHtml =
       '<body><button class="exec-btn">Execute</button><span class="status">Ready</span></body>';
@@ -2901,6 +2901,14 @@ expect(result.safetyResolution).toEqual(
       ],
       warnings: [],
     });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      filePath: "src/pages/home.html",
+      fullContent:
+        '<body><button class="exec-btn">Execute</button><span class="status">Ready <span class="badge">New</span></span></body>',
+      summary: "Added badge next to status text.",
+      warnings: [],
+    });
 
     const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
     const result = await runLlmPatchFlow({
@@ -2924,7 +2932,7 @@ expect(result.safetyResolution).toEqual(
         })
       );
     }
-    expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
+    expect(planFullPatchWithLlmMock).toHaveBeenCalled();
   });
 
   describe("bounded fallback retry loop", () => {
