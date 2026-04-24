@@ -2753,30 +2753,123 @@ function findSubmitHandlerBlock(fileContent: string): {
   endExclusive: number;
   block: string;
 } | null {
-  const patterns: RegExp[] = [
-    /(const|let|var)\s+(handleSubmit|onSubmit|[A-Za-z0-9_]*submit[A-Za-z0-9_]*)\s*=\s*\([^)]*\)\s*=>\s*\{/i,
-    /function\s+(handleSubmit|onSubmit|[A-Za-z0-9_]*submit[A-Za-z0-9_]*)\s*\([^)]*\)\s*\{/i,
+  const namedPatterns: Array<{ name: string; re: RegExp }> = [
+    {
+      name: "const-handleSubmit-arrow",
+      re: /\b(const|let|var)\s+handleSubmit\s*=\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{/i,
+    },
+    {
+      name: "function-handleSubmit",
+      re: /\bfunction\s+handleSubmit\s*\([^)]*\)\s*\{/i,
+    },
+    {
+      name: "const-onSubmit-arrow",
+      re: /\b(const|let|var)\s+onSubmit\s*=\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{/i,
+    },
+    {
+      name: "function-onSubmit",
+      re: /\bfunction\s+onSubmit\s*\([^)]*\)\s*\{/i,
+    },
+    {
+      name: "const-submitLike-arrow",
+      re: /\b(const|let|var)\s+[A-Za-z0-9_]*submit[A-Za-z0-9_]*\s*=\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{/i,
+    },
+    {
+      name: "function-submitLike",
+      re: /\bfunction\s+[A-Za-z0-9_]*submit[A-Za-z0-9_]*\s*\([^)]*\)\s*\{/i,
+    },
   ];
 
-  let bestMatch: RegExpExecArray | null = null;
-  for (const re of patterns) {
+  const extractBlockFromMatch = (
+    match: RegExpExecArray,
+    patternName: string
+  ): { start: number; endExclusive: number; block: string } | null => {
+    const matchText = match[0] ?? "";
+    const openBraceIndex = fileContent.indexOf(
+      "{",
+      match.index + Math.max(0, matchText.length - 1)
+    );
+    if (openBraceIndex < 0) return null;
+    const balanced = findBalancedBraceBlock({ content: fileContent, openBraceIndex });
+    if (!balanced) return null;
+    const start = match.index;
+    const endExclusive = balanced.endExclusive;
+    const block = fileContent.slice(start, endExclusive);
+    console.log("[zone-fallback-detect] handler matched via pattern:", patternName);
+    return { start, endExclusive, block };
+  };
+
+  // First pass: explicit named patterns (handleSubmit/onSubmit/etc)
+  for (const { name, re } of namedPatterns) {
     const m = re.exec(fileContent);
-    if (m && (bestMatch === null || m.index < bestMatch.index)) {
-      bestMatch = m;
+    if (!m) continue;
+    const extracted = extractBlockFromMatch(m, name);
+    if (extracted) return extracted;
+  }
+
+  // Second pass: heuristic — any function-like block with preventDefault() AND submit/create/save call.
+  const genericFunctionStarts: Array<{ name: string; re: RegExp }> = [
+    {
+      name: "generic-const-arrow",
+      re: /\b(const|let|var)\s+([A-Za-z0-9_]+)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{/gi,
+    },
+    {
+      name: "generic-function",
+      re: /\bfunction\s+([A-Za-z0-9_]+)\s*\([^)]*\)\s*\{/gi,
+    },
+  ];
+  const submitLikeCall = /\b(submit|create|save)\w*\s*\(/i;
+  const preventDefaultCall = /\bpreventDefault\s*\(\s*\)/i;
+
+  let bestHeuristic:
+    | { score: number; start: number; endExclusive: number; block: string }
+    | null = null;
+
+  for (const { re } of genericFunctionStarts) {
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null = null;
+    while ((m = re.exec(fileContent)) !== null) {
+      const matchText = m[0] ?? "";
+      const openBraceIndex = fileContent.indexOf(
+        "{",
+        m.index + Math.max(0, matchText.length - 1)
+      );
+      if (openBraceIndex < 0) continue;
+      const balanced = findBalancedBraceBlock({ content: fileContent, openBraceIndex });
+      if (!balanced) continue;
+
+      const start = m.index;
+      const endExclusive = balanced.endExclusive;
+      const block = fileContent.slice(start, endExclusive);
+      const hasPreventDefault = preventDefaultCall.test(block);
+      const hasSubmitLike = submitLikeCall.test(block);
+      if (!hasPreventDefault || !hasSubmitLike) continue;
+
+      const name = (m[2] ?? m[1] ?? "").toString();
+      const nameSuggestsSubmit = /submit|save|create/i.test(name);
+      const score =
+        (hasPreventDefault ? 10 : 0) +
+        (hasSubmitLike ? 6 : 0) +
+        (nameSuggestsSubmit ? 2 : 0) +
+        Math.max(0, Math.min(2, 2 - Math.floor(block.length / 400)));
+
+      if (!bestHeuristic || score > bestHeuristic.score) {
+        bestHeuristic = { score, start, endExclusive, block };
+      }
     }
   }
-  if (!bestMatch) return null;
 
-  const matchText = bestMatch[0] ?? "";
-  const openBraceIndex = fileContent.indexOf("{", bestMatch.index + matchText.length - 1);
-  if (openBraceIndex < 0) return null;
-  const balanced = findBalancedBraceBlock({ content: fileContent, openBraceIndex });
-  if (!balanced) return null;
+  if (bestHeuristic) {
+    console.log("[zone-fallback-detect] fallback heuristic used");
+    return {
+      start: bestHeuristic.start,
+      endExclusive: bestHeuristic.endExclusive,
+      block: bestHeuristic.block,
+    };
+  }
 
-  const start = bestMatch.index;
-  const endExclusive = balanced.endExclusive;
-  const block = fileContent.slice(start, endExclusive);
-  return { start, endExclusive, block };
+  console.log("[zone-fallback-detect] handler NOT found");
+  return null;
 }
 
 function injectDeterministicValidationIntoSubmitHandler(
