@@ -2816,28 +2816,18 @@ function injectDeterministicValidationIntoSubmitHandler(
 function buildDeterministicFallbackPatch(input: {
   filePath: string;
   fileContent: string;
-}): { submitCallLine: string; validationBlock: string } | null {
+}): { updatedContent: string } | null {
   const handler = findSubmitHandlerBlock(input.fileContent);
   if (!handler) return null;
 
   const injected = injectDeterministicValidationIntoSubmitHandler(handler.block);
   if (!injected) return null;
-  const { submitCallLine } = injected;
-  const submitIndent = (submitCallLine.match(/^\s*/) ?? [""])[0] ?? "";
-  const validationBlock = [
-    `${submitIndent}if (!fullName || fullName.trim() === "") {`,
-    `${submitIndent}  setError("Full name is required");`,
-    `${submitIndent}  return;`,
-    `${submitIndent}}`,
-    "",
-    `${submitIndent}if (email && !email.includes("@")) {`,
-    `${submitIndent}  setError("Invalid email");`,
-    `${submitIndent}  return;`,
-    `${submitIndent}}`,
-    "",
-  ].join("\n");
+  const updatedContent =
+    input.fileContent.slice(0, handler.start) +
+    injected.replacedBlock +
+    input.fileContent.slice(handler.endExclusive);
 
-  return { submitCallLine, validationBlock };
+  return updatedContent === input.fileContent ? null : { updatedContent };
 }
 
 function detectSuspiciousUiOverwrite(input: {
@@ -4409,10 +4399,8 @@ export async function runLlmPatchFlow(input: {
       });
       let updatedContent = targetContent;
       if (fallback) {
-        updatedContent = targetContent.replace(
-          fallback.submitCallLine,
-          `${fallback.validationBlock}\n${fallback.submitCallLine}`
-        );
+        updatedContent = fallback.updatedContent;
+        console.log("[zone-fallback] inserted validation inside submit handler");
       }
 
       if (!fallback || updatedContent === targetContent) {
@@ -4430,11 +4418,15 @@ export async function runLlmPatchFlow(input: {
             `    handleSubmit(e);\n` +
             `  }}`
         );
+        if (updatedContent !== targetContent) {
+          console.log("[zone-fallback] used inline onSubmit wrapper fallback");
+        }
       }
 
       if (updatedContent === targetContent) {
         console.warn("[zone-fallback] no change detected, forcing append");
         updatedContent = `${targetContent}\n// validation fallback applied\n`;
+        console.log("[zone-fallback] forced append fallback");
       }
 
       applyPatches = [{ filePath: selectedTargetFile, fullContent: updatedContent }];
