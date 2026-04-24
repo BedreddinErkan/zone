@@ -324,6 +324,74 @@ describe("validatePatchCorrectness", () => {
     );
   });
 
+  it("valid select/map/option JSX pattern passes (prod regression shape)", () => {
+    const src = `
+export default function PatientsPage() {
+  const statuses = [{ value: "active", label: "Active" }];
+  return (
+    <select>
+      {statuses.map((s) => (
+        <option key={s.value} value={s.value}>{s.label}</option>
+      ))}
+    </select>
+  );
+}
+`;
+    const result = validatePatchCorrectness(
+      buildInput({ filePath: "client/src/pages/PatientsPage.jsx", updatedContent: src })
+    );
+    expect(result.ok).toBe(true);
+    expect(result.blocking.some((i) => i.code === "unbalanced_delimiters")).toBe(
+      false
+    );
+  });
+
+  it("valid multiline option with nested JSX expression passes", () => {
+    const src = `
+export default function PatientsPage() {
+  const statuses = [{ value: "active", label: "Active" }];
+  return (
+    <select>
+      {statuses.map((s) => (
+        <option
+          key={s.value}
+          value={s.value}
+        >
+          {s.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+`;
+    const result = validatePatchCorrectness(
+      buildInput({ filePath: "client/src/pages/PatientsPage.jsx", updatedContent: src })
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("invalid select/map/option pattern missing a closing paren is blocked", () => {
+    const src = `
+export default function PatientsPage() {
+  const statuses = [{ value: "active", label: "Active" }];
+  return (
+    <select>
+      {statuses.map((s) => (
+        <option key={s.value} value={s.value}>{s.label}</option>
+      ))}
+    </select>
+  );
+}
+`; // remove one ) from the end sequence
+    const broken = src.replace("      ))}", "      )}");
+    const result = validatePatchCorrectness(
+      buildInput({ filePath: "client/src/pages/PatientsPage.jsx", updatedContent: broken })
+    );
+    expect(result.blocking.some((i) => i.code === "unbalanced_delimiters")).toBe(
+      true
+    );
+  });
+
   it("invalid JSX map option pattern missing closing paren is blocked", () => {
     const src = [
       "export function Select({ items }) {",

@@ -245,6 +245,15 @@ type DelimiterScanResult =
       snippet: string;
       strippedForJsx: string;
       lexicalScanIncomplete: boolean;
+      events: Array<{
+        index: number;
+        line: number;
+        column: number;
+        char: string;
+        action: "push" | "match" | "mode_enter" | "mode_exit" | "skip";
+        mode: LexMode;
+        stack: string[];
+      }>;
     };
 
 function getLineColumn(src: string, index: number): { line: number; column: number } {
@@ -310,6 +319,35 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
   let escaped = false;
   const templateExprDepthStack: number[] = [];
   let regexHeuristicFailed = false;
+  const events: Array<{
+    index: number;
+    line: number;
+    column: number;
+    char: string;
+    action: "push" | "match" | "mode_enter" | "mode_exit" | "skip";
+    mode: LexMode;
+    stack: string[];
+  }> = [];
+
+  const pushEvent = (
+    index: number,
+    char: string,
+    action: "push" | "match" | "mode_enter" | "mode_exit" | "skip"
+  ) => {
+    const { line, column } = getLineColumn(s, index);
+    events.push({
+      index,
+      line,
+      column,
+      char,
+      action,
+      mode,
+      stack: stack.slice(-12),
+    });
+    if (events.length > 200) {
+      events.splice(0, events.length - 200);
+    }
+  };
 
   // Used for conservative regex start detection.
   let lastNonWsChar = "";
@@ -357,6 +395,7 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
       snippet: snippetAround(s, input.index),
       strippedForJsx: strippedForJsxChars.join(""),
       lexicalScanIncomplete: false,
+      events: events.slice(-25),
     };
   };
 
@@ -437,10 +476,12 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
         continue;
       }
       if (ch === "`") {
+        pushEvent(i, ch, "mode_exit");
         mode = "code";
         continue;
       }
       if (ch === "$" && next === "{") {
+        pushEvent(i, "${", "mode_enter");
         mode = "template_expr";
         templateExprDepthStack.push(0);
         writeStripped(" ");
@@ -479,16 +520,19 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
     }
 
     if (ch === "'") {
+      pushEvent(i, ch, "mode_enter");
       mode = "single";
       writeStripped(" ");
       continue;
     }
     if (ch === '"') {
+      pushEvent(i, ch, "mode_enter");
       mode = "double";
       writeStripped(" ");
       continue;
     }
     if (ch === "`") {
+      pushEvent(i, ch, "mode_enter");
       mode = "template";
       writeStripped(" ");
       continue;
@@ -503,6 +547,7 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
           lastNonWsChar === "" ||
           lastNonWsChar === "\n");
       if (canStartRegex) {
+        pushEvent(i, ch, "mode_enter");
         mode = "regex";
         writeStripped(" ");
         continue;
@@ -511,6 +556,7 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
 
     if (ch === "(" || ch === "{" || ch === "[") {
       stack.push(ch);
+      pushEvent(i, ch, "push");
       writeStripped(ch);
     } else if (ch === ")" || ch === "}" || ch === "]") {
       if (inTemplateExpr && ch === "}") {
@@ -548,6 +594,7 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
         return { ...res, lexicalScanIncomplete: regexHeuristicFailed };
       }
       stack.splice(idx, 1);
+      pushEvent(i, ch, "match");
       writeStripped(ch);
     } else {
       writeStripped(ch);
@@ -693,6 +740,10 @@ function layer1LexicalIntegrity(input: PatchCorrectnessInput): LexicalResult {
 
   const scan = scanDelimitersWithDiagnostics(input.updatedContent);
   if (!scan.ok) {
+    console.log(
+      "[zone-delimiter-trace]",
+      JSON.stringify({ filePath: input.filePath, events: scan.events })
+    );
     console.log(
       "[zone-delimiter-diagnostic]",
       JSON.stringify({
