@@ -305,6 +305,25 @@ describe("validatePatchCorrectness", () => {
     );
   });
 
+  it("valid IIFE JSX pattern does not false-positive in layer 1", () => {
+    const src = [
+      "export function Wrap() {",
+      "  return (",
+      "    <div>",
+      "      {(() => { return <div></div>; })()}",
+      "    </div>",
+      "  );",
+      "}",
+      "",
+    ].join("\n");
+    const result = validatePatchCorrectness(
+      buildInput({ filePath: "src/Wrap.jsx", updatedContent: src })
+    );
+    expect(result.blocking.some((i) => i.code === "unbalanced_delimiters")).toBe(
+      false
+    );
+  });
+
   it("invalid JSX map option pattern missing closing paren is blocked", () => {
     const src = [
       "export function Select({ items }) {",
