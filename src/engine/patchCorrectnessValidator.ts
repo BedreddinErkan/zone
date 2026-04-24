@@ -324,6 +324,17 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
     return /[a-zA-Z]/.test(nextChar);
   }
 
+  function isInsideJsxTag(srcText: string, idx: number): boolean {
+    // Simple heuristic: if the nearest angle bracket behind us is "<" (not ">"),
+    // we are inside a JSX tag like <Tag ...> or </Tag ...>.
+    for (let j = idx; j >= 0; j -= 1) {
+      const c = srcText[j] ?? "";
+      if (c === ">") return false;
+      if (c === "<") return true;
+    }
+    return false;
+  }
+
   let mode: LexMode = "code";
   let escaped = false;
   const templateExprDepthStack: number[] = [];
@@ -513,14 +524,14 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
       continue;
     }
 
-    if (ch === "/" && next === "/") {
+    if (mode === "code" && ch === "/" && next === "/" && !isInsideJsxTag(s, i)) {
       mode = "line_comment";
       writeStripped(" ");
       writeStripped(" ");
       i += 1;
       continue;
     }
-    if (ch === "/" && next === "*") {
+    if (mode === "code" && ch === "/" && next === "*" && !isInsideJsxTag(s, i)) {
       mode = "block_comment";
       writeStripped(" ");
       writeStripped(" ");
@@ -548,9 +559,20 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
     }
 
     if (ch === "/") {
+      // JSX safety rule: inside a JSX tag, "/" must never trigger mode changes.
+      if (isInsideJsxTag(s, i)) {
+        writeStripped(ch);
+        continue;
+      }
       // JSX closing tag: </tag> → do not treat "/" as comment/regex.
       if (isJsxClosingTag(s, i)) {
         // Keep scanning in code mode.
+        writeStripped(ch);
+        continue;
+      }
+
+      if (mode !== "code") {
+        // Avoid entering regex mode from non-code contexts.
         writeStripped(ch);
         continue;
       }
@@ -769,6 +791,16 @@ function layer1LexicalIntegrity(input: PatchCorrectnessInput): LexicalResult {
       "[zone-delimiter-trace]",
       JSON.stringify({ filePath: input.filePath, events: scan.events })
     );
+    const last = scan.events[scan.events.length - 1];
+    if (last) {
+      console.log("[zone-mode-debug]", {
+        index: last.index,
+        char: last.char,
+        mode: last.mode,
+        prevMode: scan.events.length >= 2 ? scan.events[scan.events.length - 2]?.mode : undefined,
+        stack: last.stack,
+      });
+    }
     console.log(
       "[zone-delimiter-diagnostic]",
       JSON.stringify({
