@@ -196,16 +196,17 @@ ${renameInstruction}${uiRulesInstruction}${scopeControlInstruction}${microEditIn
   - Your FIND block must be exact existing text from the file, usually 3-10 lines around the change.
   - Your REPLACE block must contain only the updated version of that exact block.
   - Do NOT include "--- END ---" or any marker after REPLACE block
-  - Do NOT include any FILE: headers or context file contents in your output
   - Do NOT include CURRENT FILE CONTENT or INSTRUCTIONS in output
-  - Your entire response must be ONLY the FIND/REPLACE patch, nothing else
+  - Your entire response must be ONLY the patch, nothing else (no preamble, no JSON).
   - If no change is needed, output exactly: NO_CHANGE_NEEDED
-  - Do not add markdown fences or explanations.
+  - If you cannot produce a valid patch, output exactly: NO_VALID_PATCH
+  - You may wrap only the FIND/REPLACE block in a \`\`\`diff fence; do not wrap the FILE line.
 
 OUTPUT FORMAT
-Return plain text only in this exact format:
+Return plain text only in this exact structure (single-file patch):
+--- FILE: ${filePath}
 --- FIND ---
-(exact existing text to find)
+(exact existing text to find — must match the file verbatim)
 --- REPLACE ---
 (updated text)
 `.trim();

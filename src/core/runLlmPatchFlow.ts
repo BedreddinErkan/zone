@@ -32,6 +32,7 @@ import {
 import { scorePatchQuality } from "../engine/patchQualityScorer.js";
 import { resolveSafetyLevel } from "../engine/safetyLevelResolver.js";
 import { enforceMicroEditProtection } from "../engine/microEditProtection.js";
+import { parseDeveloperPatchText } from "./developerPatchParse.js";
 import { parseTaskIntent, type TaskIntent } from "./taskIntentParser.js";
 import type { PatchPreviewItem } from "../types/agent.js";
 import type { ConversationBillingMode } from "../types/conversation.js";
@@ -2551,13 +2552,6 @@ export function fuzzyFindAndReplace(
   };
 }
 
-interface ParsedDeveloperPatch {
-  filePath: string;
-  edits: Array<{ find: string; replace: string }>;
-  createContent?: string;
-  noChangeNeeded?: boolean;
-}
-
 export function detectZoneInternalTask(task: string): boolean {
   const normalized = task.toLowerCase().replace(/\s+/g, " ").trim();
   if (!normalized) return false;
@@ -2571,78 +2565,6 @@ export function detectZoneInternalTask(task: string): boolean {
   }
 
   return ZONE_INTERNAL_RUNTIME_TERMS.some((term) => normalized.includes(term));
-}
-
-function stripPatchTextFences(rawPatchText: string): string {
-  return rawPatchText
-    .replace(/^```(?:text|txt|patch)?\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-}
-
-function parseFindReplacePatch(rawPatchText: string): {
-  find: string;
-  replace: string;
-} | null {
-  const match = rawPatchText.match(
-    /--- FIND ---\s*\n([\s\S]*?)\n--- REPLACE ---\s*\n([\s\S]*)$/i
-  );
-  if (!match) return null;
-
-  return {
-    find: match[1],
-    replace: match[2],
-  };
-}
-
-function parseDeveloperPatchText(rawPatchText: string): ParsedDeveloperPatch | null {
-  const normalizedPatchText = stripPatchTextFences(rawPatchText);
-  if (normalizedPatchText === "NO_CHANGE_NEEDED") {
-    return {
-      filePath: "",
-      edits: [],
-      noChangeNeeded: true,
-    };
-  }
-
-  const barePatch = parseFindReplacePatch(normalizedPatchText);
-  if (barePatch) {
-    return {
-      filePath: "",
-      edits: [barePatch],
-    };
-  }
-
-  const match = normalizedPatchText.match(
-    /--- FILE:\s*(.+?)\s*---\s*([\s\S]*)$/i
-  );
-  if (!match) return null;
-
-  const filePath = match[1].trim();
-  const body = match[2].trim();
-
-  const createMatch = body.match(/^CREATE:\s*\n?([\s\S]*)$/i);
-  if (createMatch) {
-    return {
-      filePath,
-      edits: [],
-      createContent: createMatch[1],
-    };
-  }
-
-  const edits: Array<{ find: string; replace: string }> = [];
-  const editRegex =
-    /FIND:\s*\n([\s\S]*?)\nREPLACE:\s*\n([\s\S]*?)(?=\nFIND:\s*\n|$)/gi;
-  let editMatch: RegExpExecArray | null = null;
-
-  while ((editMatch = editRegex.exec(body)) !== null) {
-    edits.push({
-      find: editMatch[1],
-      replace: editMatch[2],
-    });
-  }
-
-  return edits.length > 0 ? { filePath, edits } : null;
 }
 
 function applyDeveloperPatchText(
@@ -2887,7 +2809,7 @@ function buildPatchConflictWarning(input: {
 function logPatchConversionDebug(input: {
   filePath: string;
   chosenOutputMode: "full_content" | "find_replace_patch";
-  responseMode: "full_content" | "patch";
+  responseMode: "full_content" | "patch" | "invalid_patch_format";
   status: "applied" | "failed";
   failureReason?: string;
   normalizedFailureReason?: string;
@@ -4119,6 +4041,27 @@ export async function runLlmPatchFlow(input: {
             });
           })().then((fullPatch) => {
             perf.mark(`full patch model response received ${patch.path}`);
+            if (fullPatch.mode === "invalid_patch_format") {
+              fallbackForcePreviewOnly = true;
+              for (const w of fullPatch.warnings) {
+                internalWarnings.push(w);
+                visibleWarnings.push(w);
+              }
+              logPatchConversionDebug({
+                filePath: patch.path,
+                chosenOutputMode: fullPatchMode,
+                responseMode: "invalid_patch_format" as const,
+                status: "failed",
+                failureReason: "invalid_patch_format",
+                normalizedFailureReason: "invalid_patch_format",
+              });
+              patchResults.push({
+                filePath: patch.path,
+                status: "failed",
+                reason: "invalid_patch_format",
+              });
+              return null;
+            }
             if (fullPatch.mode === "patch") {
               const appliedPatch = applyDeveloperPatchText(
                 fileContent,
