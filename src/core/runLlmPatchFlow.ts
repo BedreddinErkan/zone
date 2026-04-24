@@ -2580,6 +2580,20 @@ function applyDeveloperPatchText(
   rawPatchText: string
 ): { ok: true; fullContent: string } | { ok: false; warning: string } {
   console.log("[zone-patch-raw]", rawPatchText.slice(0, 1000));
+  const trimmedPatch = rawPatchText.trim();
+  if (
+    trimmedPatch !== "NO_CHANGE_NEEDED" &&
+    !rawPatchText.includes("--- FILE:")
+  ) {
+    console.warn(
+      "[zone-patch] rejected patch text without --- FILE: (skipping parse)"
+    );
+    return {
+      ok: false,
+      warning:
+        "[invalid_patch_format] Model did not return a valid patch structure",
+    };
+  }
   const parsed = parseDeveloperPatchText(rawPatchText);
   if (!parsed || isDeveloperPatchParseStructurallyEmpty(parsed)) {
     console.warn("[zone-patch] empty parse result");

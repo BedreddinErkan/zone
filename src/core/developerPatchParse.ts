@@ -66,7 +66,7 @@ export function parseDeveloperPatchText(
   let body = match[2].trim();
   body = body.replace(/^```diff\s*\n/i, "").replace(/\n```\s*$/i, "").trim();
 
-  const filePath = match[1].trim();
+  const filePath = match[1].trim().replace(/\s+---\s*$/, "").trim();
   const bareInBody = parseFindReplacePatch(body);
   if (bareInBody) {
     return {

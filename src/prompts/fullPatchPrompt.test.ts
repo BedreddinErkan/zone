@@ -61,7 +61,7 @@ describe("buildFullPatchPrompt", () => {
 
   it("instructs to preserve unrelated code", () => {
     const prompt = buildFullPatchPrompt(BASE_INPUT);
-    expect(prompt).toContain("Preserve all existing code that is unrelated");
+    expect(prompt).toContain("Preserve ALL existing code that is unrelated");
   });
 
   it("supports find/replace patch mode for large files", () => {
@@ -69,7 +69,9 @@ describe("buildFullPatchPrompt", () => {
       ...BASE_INPUT,
       outputMode: "find_replace_patch",
     });
-    expect(prompt).toContain("Return ONLY the specific change as a FIND/REPLACE patch");
+    expect(prompt).toContain("REQUIRED OUTPUT FORMAT");
+    expect(prompt).toContain("ONLY a patch");
+    expect(prompt).toContain("--- FILE:");
     expect(prompt).toContain("--- FIND ---");
     expect(prompt).toContain("--- REPLACE ---");
   });

@@ -1707,7 +1707,7 @@ expect(result.safetyResolution).toEqual(
       mode: "patch",
       filePath: "src/pages/home.html",
       patchText:
-        `--- FIND ---\n<button class="exec-btn">Execute</button>\n--- REPLACE ---\n<button class="exec-btn" style="background:#1a8cdb">Execute</button>`,
+        `--- FILE: src/pages/home.html ---\n--- FIND ---\n<button class="exec-btn">Execute</button>\n--- REPLACE ---\n<button class="exec-btn" style="background:#1a8cdb">Execute</button>`,
       summary: "Large-file targeted patch generated.",
       warnings: [],
     });
@@ -1769,7 +1769,7 @@ expect(result.safetyResolution).toEqual(
       mode: "patch",
       filePath: "src/pages/home.html",
       patchText:
-        `--- FIND ---\n<button class="exec-btn">Execute</button>\n--- REPLACE ---\n<button class="exec-btn" style="background:#1a8cdb">Execute</button>`,
+        `--- FILE: src/pages/home.html ---\n--- FIND ---\n<button class="exec-btn">Execute</button>\n--- REPLACE ---\n<button class="exec-btn" style="background:#1a8cdb">Execute</button>`,
       summary: "Large-file targeted patch generated.",
       warnings: [],
     });
@@ -1828,7 +1828,7 @@ expect(result.safetyResolution).toEqual(
       mode: "patch",
       filePath: "src/pages/home.html",
       patchText:
-        `--- FIND ---\n  <button class="exec-btn">Execute</button>\n--- REPLACE ---\n  <button class="exec-btn" style="background:#1a8cdb">Execute</button>`,
+        `--- FILE: src/pages/home.html ---\n--- FIND ---\n  <button class="exec-btn">Execute</button>\n--- REPLACE ---\n  <button class="exec-btn" style="background:#1a8cdb">Execute</button>`,
       summary: "Large-file targeted patch generated.",
       warnings: [],
     });
@@ -1889,7 +1889,7 @@ expect(result.safetyResolution).toEqual(
       mode: "patch",
       filePath: "src/pages/home.html",
       patchText:
-        `--- FIND ---\n<button class="exec-btn">Execute</button>\n--- REPLACE ---\n<button class="exec-btn" style="background:#1a8cdb">Execute</button>`,
+        `--- FILE: src/pages/home.html ---\n--- FIND ---\n<button class="exec-btn">Execute</button>\n--- REPLACE ---\n<button class="exec-btn" style="background:#1a8cdb">Execute</button>`,
       summary: "Large-file targeted patch generated.",
       warnings: [],
     });
@@ -1947,6 +1947,7 @@ expect(result.safetyResolution).toEqual(
       filePath: "src/pages/home.html",
       patchText: [
         "```text",
+        "--- FILE: src/pages/home.html ---",
         "--- FIND ---",
         '<button class="exec-btn">Execute</button>',
         "--- REPLACE ---",
@@ -2012,7 +2013,7 @@ expect(result.safetyResolution).toEqual(
       mode: "patch",
       filePath: "src/pages/home.html",
       patchText:
-        `--- FIND ---\n<button class="missing-btn">Execute</button>\n--- REPLACE ---\n<button class="missing-btn" style="background:#1a8cdb">Execute</button>`,
+        `--- FILE: src/pages/home.html ---\n--- FIND ---\n<button class="missing-btn">Execute</button>\n--- REPLACE ---\n<button class="missing-btn" style="background:#1a8cdb">Execute</button>`,
       summary: "Large-file targeted patch generated.",
       warnings: [],
     });
@@ -2895,7 +2896,7 @@ expect(result.safetyResolution).toEqual(
           summary: "Append a tiny badge next to status text",
           targetHint: "status span",
           contentPreview:
-            "--- FIND ---\n<span class=\"status\">Ready</span>\n--- REPLACE ---\n<span class=\"status\">Ready <span class=\"badge\">New</span></span>",
+            "--- FILE: src/pages/home.html ---\n--- FIND ---\n<span class=\"status\">Ready</span>\n--- REPLACE ---\n<span class=\"status\">Ready <span class=\"badge\">New</span></span>",
         },
       ],
       warnings: [],

@@ -198,6 +198,7 @@ describe("multi-file patch results", () => {
         mode: "patch",
         filePath: "src/bar.ts",
         patchText: [
+          "--- FILE: src/bar.ts ---",
           "--- FIND ---",
           "export const missing = 2;",
           "--- REPLACE ---",
@@ -218,12 +219,12 @@ describe("multi-file patch results", () => {
       expect(result.applyPatches).toHaveLength(1);
       expect(result.patchResults).toEqual([
         { filePath: "src/foo.ts", status: "applied" },
-        { filePath: "src/bar.ts", status: "failed", reason: "low_confidence" },
+        { filePath: "src/bar.ts", status: "failed", reason: "patch_find_not_found" },
       ]);
       expect(result.warnings.join("\n")).toContain("[PATCH_CONFLICT]");
       expect(result.warnings.join("\n")).toContain('"filePath":"src/bar.ts"');
       expect(result.patchPreview).toContain("✗ src/bar.ts");
-      expect(result.patchPreview).toContain("failed (low_confidence");
+      expect(result.patchPreview).toContain("failed (patch_find_not_found");
     }
   });
 
@@ -288,6 +289,7 @@ describe("multi-file patch results", () => {
         mode: "patch",
         filePath: "src/bar.ts",
         patchText: [
+          "--- FILE: src/bar.ts ---",
           "--- FIND ---",
           "export const missing = 2;",
           "--- REPLACE ---",
@@ -451,7 +453,7 @@ describe("multi-file patch results", () => {
 
     const { runLlmPatchFlow } = await import("../runLlmPatchFlow.js");
     const result = await runLlmPatchFlow({
-      task: "change zone ui",
+      task: "adjust layout for the main index page",
       repoPath: "C:/repo",
     });
 

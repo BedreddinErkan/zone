@@ -86,16 +86,24 @@ export type FullPatchResult =
 
 function buildFindReplaceStrictContract(filePath: string): string {
   return [
-    "OUTPUT CONTRACT (MANDATORY — entire reply = patch only, zero preamble/prose):",
-    `1) First non-empty line MUST be: --- FILE: ${filePath}`,
-    "2) Then immediately:",
+    "You are a code patch generator.",
+    "",
+    "You MUST return ONLY a patch in the following format:",
+    "",
+    `--- FILE: ${filePath} ---`,
     "--- FIND ---",
-    "(verbatim excerpt from CURRENT FILE CONTENT — must match exactly)",
+    "code",
     "--- REPLACE ---",
-    "(replacement for that excerpt only)",
-    "3) Optionally wrap only the FIND/REPLACE section in a single ```diff ... ``` fence.",
-    "4) Do NOT return JSON, the full file, or explanations outside the patch.",
-    "5) If you cannot produce a valid patch, output only exactly: NO_VALID_PATCH",
+    "code",
+    "",
+    "If you cannot generate a valid patch, return EXACTLY:",
+    "",
+    "NO_CHANGE_NEEDED",
+    "",
+    "DO NOT return explanations.",
+    "DO NOT return plain text.",
+    "DO NOT describe changes.",
+    "ONLY return a patch.",
   ].join("\n");
 }
 
@@ -194,14 +202,18 @@ export async function planFullPatchWithLlm(input: {
           return issues;
         }
         const trimmed = raw.trim();
-        if (trimmed === "NO_VALID_PATCH" || trimmed === "NO_CHANGE_NEEDED") {
+        if (trimmed === "NO_CHANGE_NEEDED") {
           return issues;
         }
-        if (!raw.includes("--- FILE:") || !raw.includes("--- FIND ---")) {
+        if (
+          !raw.includes("--- FILE:") ||
+          !raw.includes("--- FIND ---") ||
+          !raw.includes("--- REPLACE ---")
+        ) {
           issues.push({
             code: "INVALID_PATCH_FORMAT",
             message:
-              "Response must include --- FILE: <path> and --- FIND --- / --- REPLACE --- blocks (or only NO_VALID_PATCH / NO_CHANGE_NEEDED).",
+              "[invalid_patch_format] Model did not return a valid patch structure",
             severity: "error",
           });
           return issues;
@@ -232,13 +244,19 @@ export async function planFullPatchWithLlm(input: {
     }
 
     const rawText = retryResult.value;
-    if (rawText.trim() === "NO_VALID_PATCH") {
+    const trimmedSuccess = rawText.trim();
+    if (
+      trimmedSuccess !== "NO_CHANGE_NEEDED" &&
+      (!rawText.includes("--- FILE:") ||
+        !rawText.includes("--- FIND ---") ||
+        !rawText.includes("--- REPLACE ---"))
+    ) {
       return {
         mode: "invalid_patch_format",
         filePath: input.filePath,
-        summary: "Model reported NO_VALID_PATCH.",
+        summary: "Large-file patch missing required structure.",
         warnings: [
-          "[invalid_patch_format] Model returned NO_VALID_PATCH — no structured patch was produced.",
+          "[invalid_patch_format] Model did not return a valid patch structure",
         ],
       };
     }

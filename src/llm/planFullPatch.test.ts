@@ -70,7 +70,7 @@ describe("planFullPatchWithLlm", () => {
 
   it("uses find_replace_patch mode for large files", async () => {
     const validPatch =
-      "--- FILE: src/example.ts\n--- FIND ---\nconst value = 1;\n--- REPLACE ---\nconst value = 2;";
+      "--- FILE: src/example.ts ---\n--- FIND ---\nconst value = 1;\n--- REPLACE ---\nconst value = 2;";
     withSelfHealingRetryMock.mockResolvedValue({
       ok: true,
       value: validPatch,
