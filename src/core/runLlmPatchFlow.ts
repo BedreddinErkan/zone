@@ -2864,6 +2864,47 @@ function renderPatchResultLine(result: PatchResult, warnings: string[]): string 
   return `✗ ${result.filePath}        failed (${details})`;
 }
 
+/** Max file contexts kept when trimming to satisfy the patch-flow token budget. */
+const HOSTED_CONTEXT_BUDGET_TRIM_CAP = 12;
+
+/**
+ * Orders paths by `rankRelevantFiles` ranking (plus original tail fill), capped at
+ * `maxFiles`. Always prefers the #1 ranked path that appears in `resolvedFileContexts`
+ * (the primary targeting / preview anchor).
+ */
+function selectRankedContextPathsWithinCap(
+  resolvedFileContexts: Array<{ path: string; content: string }>,
+  fullRankedFiles: Array<{ path: string }>,
+  maxFiles: number
+): string[] {
+  const byPath = new Map(resolvedFileContexts.map((file) => [file.path, true]));
+  const rankedInContext = fullRankedFiles
+    .map((file) => file.path)
+    .filter((path) => byPath.has(path));
+  const previewTargetPath = rankedInContext[0];
+  const ordered: string[] = [];
+  if (typeof previewTargetPath === "string") {
+    ordered.push(previewTargetPath);
+  }
+  for (const path of rankedInContext) {
+    if (ordered.length >= maxFiles) {
+      break;
+    }
+    if (!ordered.includes(path)) {
+      ordered.push(path);
+    }
+  }
+  for (const file of resolvedFileContexts) {
+    if (ordered.length >= maxFiles) {
+      break;
+    }
+    if (!ordered.includes(file.path)) {
+      ordered.push(file.path);
+    }
+  }
+  return ordered;
+}
+
 export async function runLlmPatchFlow(input: {
   task: string;
   repoPath: string;
@@ -2920,12 +2961,25 @@ export async function runLlmPatchFlow(input: {
   let allFiles: RepoFile[] = [];
   let fileSource: "scanRepo" | "hosted" | "empty" = "empty";
 
-  if (!isHostedEnvironment() && input.repoPath) {
+  // Determine whether repoPath points to an actually readable local directory.
+  // In true hosted cloud mode the repoPath is absent, a tmp/hosted path, or
+  // simply not readable — scanRepo will then throw and we fall through to the
+  // hosted context list.
+  const repoPathLooksLocal =
+    typeof input.repoPath === "string" &&
+    input.repoPath.length > 0 &&
+    !input.repoPath.startsWith("/hosted") &&
+    !input.repoPath.startsWith("/tmp/zone-hosted");
+
+  if (repoPathLooksLocal) {
     try {
-      allFiles = await scanRepo(input.repoPath);
-      fileSource = "scanRepo";
+      const scanned = await scanRepo(input.repoPath);
+      if (scanned.length > 0) {
+        allFiles = scanned;
+        fileSource = "scanRepo";
+      }
     } catch {
-      allFiles = [];
+      // Fall through — hostedAvailableFiles may still provide a usable list.
     }
   }
 
@@ -2964,31 +3018,27 @@ export async function runLlmPatchFlow(input: {
     "No project summary available.";
   const projectNotes = input.hostedContext?.projectNotes ?? structure.notes;
 
-  // 3. Rank relevant files — top 8
+  // 3. Rank relevant files — top 8 (full ranking reused for diagnostics + budget trim)
   reportProgress("Ranking relevant files...");
-  const relevantFiles = rankRelevantFiles({
-    task: input.task,
-    files: developerContextFiles,
-    intent: taskIntent,
-  }).slice(0, 8);
-  perf.mark("relevant files ranked");
-
-  // TEMP DIAGNOSTIC: surface top 20 ranker scores to verify PatientsPage presence
-  const diagnosticFullRanking = rankRelevantFiles({
+  const fullRankedFiles = rankRelevantFiles({
     task: input.task,
     files: developerContextFiles,
     intent: taskIntent,
   });
+  const relevantFiles = fullRankedFiles.slice(0, 8);
+  perf.mark("relevant files ranked");
+
+  // TEMP DIAGNOSTIC: surface top 20 ranker scores to verify PatientsPage presence
   console.log(
     "[zone-diag-ranker]",
     JSON.stringify({
       totalFiles: developerContextFiles.length,
-      totalRanked: diagnosticFullRanking.length,
-      top20: diagnosticFullRanking.slice(0, 20).map((f) => ({
+      totalRanked: fullRankedFiles.length,
+      top20: fullRankedFiles.slice(0, 20).map((f) => ({
         path: f.path,
         score: f.score,
       })),
-      patientsMatches: diagnosticFullRanking
+      patientsMatches: fullRankedFiles
         .filter((f) => f.path.toLowerCase().includes("patient"))
         .map((f) => ({ path: f.path, score: f.score })),
     })
@@ -3162,15 +3212,68 @@ export async function runLlmPatchFlow(input: {
       .filter((file): file is { path: string; content: string } => file !== undefined);
   }
   perf.mark("file context loaded");
-// ── TOKEN BUDGET GUARD ──────────────────────────────────────────
-  const SIMPLE_BUDGET_CHARS = 320_000;  // ~80K tokens (4o-mini)
+  // ── TOKEN BUDGET GUARD ──────────────────────────────────────────
+  const SIMPLE_BUDGET_CHARS = 320_000; // ~80K tokens (4o-mini)
   const COMPLEX_BUDGET_CHARS = 320_000; // ~80K tokens (4.1-mini)
-  const totalContextChars = resolvedFileContexts.reduce(
-    (sum, file) => sum + (file.content?.length ?? 0), 0
-  ) + (input.task?.length ?? 0);
-  const contextBudget = resolvedFileContexts.length <= 6
-    ? SIMPLE_BUDGET_CHARS
-    : COMPLEX_BUDGET_CHARS;
+  const taskCharBudget = input.task?.length ?? 0;
+  const sumContextChars = (files: Array<{ path: string; content: string }>) =>
+    files.reduce((sum, file) => sum + (file.content?.length ?? 0), 0) + taskCharBudget;
+
+  let contextBudgetWarnings: string[] = [];
+  let contextBudget =
+    resolvedFileContexts.length <= 6 ? SIMPLE_BUDGET_CHARS : COMPLEX_BUDGET_CHARS;
+  let totalContextChars = sumContextChars(resolvedFileContexts);
+
+  if (totalContextChars > contextBudget) {
+    const originalFileCount = resolvedFileContexts.length;
+    const trimmedPaths = selectRankedContextPathsWithinCap(
+      resolvedFileContexts,
+      fullRankedFiles,
+      HOSTED_CONTEXT_BUDGET_TRIM_CAP
+    );
+    const pathToContent = new Map(
+      resolvedFileContexts.map((file) => [file.path, file.content] as const)
+    );
+    const metaSources = input.hostedContext?.contextFiles ?? preliminaryContextFiles;
+    const pathToMeta = new Map(
+      metaSources.map((file) => [file.path, { action: file.action, reason: file.reason }] as const)
+    );
+
+    resolvedFileContexts = trimmedPaths.map((path) => ({
+      path,
+      content: pathToContent.get(path) ?? "",
+    }));
+    selectedContextFiles = trimmedPaths.map((path) => {
+      const meta = pathToMeta.get(path);
+      return {
+        path,
+        action: meta?.action ?? "inspect",
+        reason: meta?.reason ?? "Retained for patch context after budget trim",
+      };
+    });
+
+    contextBudget =
+      resolvedFileContexts.length <= 6 ? SIMPLE_BUDGET_CHARS : COMPLEX_BUDGET_CHARS;
+    totalContextChars = sumContextChars(resolvedFileContexts);
+
+    const trimmedFileCount = resolvedFileContexts.length;
+    const retainedPaths = resolvedFileContexts.map((file) => file.path);
+    console.log(
+      "[zone-diag-context-trim]",
+      JSON.stringify({
+        originalFileCount,
+        trimmedFileCount,
+        retainedPaths,
+      })
+    );
+
+    if (originalFileCount > trimmedFileCount) {
+      contextBudgetWarnings.push(
+        `[hosted_context_trimmed_to_budget] Trimmed developer context from ${originalFileCount} to ${trimmedFileCount} files to fit the token budget.`
+      );
+    }
+  }
+
   if (totalContextChars > contextBudget) {
     perf.finish("context budget exceeded");
     return {
@@ -3265,8 +3368,11 @@ export async function runLlmPatchFlow(input: {
   const originalContents: Record<string, string> = {
     ...(input.hostedContext?.originalContents ?? {}),
   };
-  const internalWarnings = [...patchPlan.warnings];
-  const visibleWarnings = filterVisibleDeveloperWarnings(patchPlan.warnings);
+  const internalWarnings = [...contextBudgetWarnings, ...patchPlan.warnings];
+  const visibleWarnings = filterVisibleDeveloperWarnings([
+    ...contextBudgetWarnings,
+    ...patchPlan.warnings,
+  ]);
   const patchResults: PatchResult[] = [];
   let hostedPatchAvailability: Array<{
   path: string;

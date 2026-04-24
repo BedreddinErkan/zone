@@ -3267,4 +3267,188 @@ expect(result.safetyResolution).toEqual(
       expect(true).toBe(true);
     });
   });
+
+  describe("hosted context token budget trim", () => {
+    const patientsTask =
+      "Add minimal client-side validation to the existing Patients page create form only. Reuse the existing form state and existing submit flow. Do not create a new form. Do not introduce a new API call.";
+
+    it("trims to top-ranked files, continues, and surfaces hosted_context_trimmed_to_budget", async () => {
+      const chunk = "y".repeat(10_000);
+      const primaryPath = "client/src/pages/app/PatientsPage.jsx";
+      const fillerPaths = Array.from({ length: 39 }, (_, i) => `src/extra/file${i}.jsx`);
+      const allPaths = [primaryPath, ...fillerPaths];
+      const availableFiles = allPaths.map((path) => ({
+        path,
+        category: "frontend",
+        extension: "jsx",
+      }));
+      const contextFiles = allPaths.map((path) => ({
+        path,
+        action: "inspect",
+        reason: "ctx",
+        content: chunk,
+      }));
+      const originalContents = Object.fromEntries(allPaths.map((p) => [p, chunk]));
+
+      detectProjectStructureMock.mockReturnValue({ notes: ["React"] });
+      rankRelevantFilesMock.mockImplementation(({ files }) => {
+        const order = [...allPaths];
+        return [...files]
+          .sort((a, b) => order.indexOf(a.path) - order.indexOf(b.path))
+          .map((f, idx) => ({ ...f, score: 1000 - idx }));
+      });
+      planPatchPreviewWithLlmMock.mockResolvedValue({
+        summary: "Patch summary",
+        patches: [
+          {
+            path: primaryPath,
+            operation: "modify",
+            summary: "Validation",
+            targetHint: "form",
+            contentPreview: "x",
+          },
+        ],
+        warnings: [],
+      });
+      planFullPatchWithLlmMock.mockResolvedValue({
+        mode: "full_content",
+        filePath: primaryPath,
+        fullContent: `${chunk}\n//patched`,
+        summary: "ok",
+        warnings: [],
+      });
+
+      const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+      const result = await runLlmPatchFlow({
+        task: patientsTask,
+        repoPath: "/hosted",
+        hostedContext: {
+          repoSummary: "React",
+          existingFilesSummary: "files",
+          availableFiles,
+          contextFiles,
+          originalContents,
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(planPatchPreviewWithLlmMock).toHaveBeenCalled();
+      const previewArg = planPatchPreviewWithLlmMock.mock.calls[0][0] as {
+        fileContexts: Array<{ path: string; content: string }>;
+      };
+      expect(previewArg.fileContexts.length).toBeLessThanOrEqual(12);
+      expect(previewArg.fileContexts.some((f) => f.path === primaryPath)).toBe(true);
+      if (result.ok) {
+        expect(
+          result.warnings.some((w) => w.includes("hosted_context_trimmed_to_budget"))
+        ).toBe(true);
+      }
+    });
+
+    it("returns the context budget error when trimmed subset is still too large", async () => {
+      const big = "z".repeat(150_000);
+      const paths = ["a.tsx", "b.tsx", "c.tsx"];
+      const availableFiles = paths.map((path) => ({
+        path,
+        category: "frontend",
+        extension: "tsx",
+      }));
+      const contextFiles = paths.map((path) => ({
+        path,
+        action: "inspect",
+        reason: "ctx",
+        content: big,
+      }));
+      const originalContents = Object.fromEntries(paths.map((p) => [p, big]));
+
+      detectProjectStructureMock.mockReturnValue({ notes: ["React"] });
+      rankRelevantFilesMock.mockImplementation(({ files }) =>
+        files.map((f, idx) => ({ ...f, score: 100 - idx }))
+      );
+
+      const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+      const result = await runLlmPatchFlow({
+        task: "Update validation in the existing form handlers only.",
+        repoPath: "/hosted",
+        hostedContext: {
+          repoSummary: "React",
+          existingFilesSummary: "files",
+          availableFiles,
+          contextFiles,
+          originalContents,
+        },
+      });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toMatch(/Context too large/i);
+      }
+      expect(planPatchPreviewWithLlmMock).not.toHaveBeenCalled();
+    });
+
+    it("keeps rank-#1 file first in patch preview contexts after budget trim", async () => {
+      const chunk = "y".repeat(10_000);
+      const topPath = "client/src/pages/app/PatientsPage.jsx";
+      const fillerPaths = Array.from({ length: 39 }, (_, i) => `src/extra/file${i}.jsx`);
+      const allPaths = [topPath, ...fillerPaths];
+      const availableFiles = allPaths.map((path) => ({
+        path,
+        category: "frontend",
+        extension: "jsx",
+      }));
+      const contextFiles = allPaths.map((path) => ({
+        path,
+        action: "inspect",
+        reason: "ctx",
+        content: chunk,
+      }));
+      const originalContents = Object.fromEntries(allPaths.map((p) => [p, chunk]));
+
+      detectProjectStructureMock.mockReturnValue({ notes: ["React"] });
+      rankRelevantFilesMock.mockImplementation(({ files }) => {
+        const order = [...allPaths];
+        return [...files]
+          .sort((a, b) => order.indexOf(a.path) - order.indexOf(b.path))
+          .map((f, idx) => ({ ...f, score: 1000 - idx }));
+      });
+      planPatchPreviewWithLlmMock.mockResolvedValue({
+        summary: "Patch summary",
+        patches: [
+          {
+            path: topPath,
+            operation: "modify",
+            summary: "Validation",
+            targetHint: "form",
+            contentPreview: "x",
+          },
+        ],
+        warnings: [],
+      });
+      planFullPatchWithLlmMock.mockResolvedValue({
+        mode: "full_content",
+        filePath: topPath,
+        fullContent: `${chunk}\n//patched`,
+        summary: "ok",
+        warnings: [],
+      });
+
+      const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+      await runLlmPatchFlow({
+        task: patientsTask,
+        repoPath: "/hosted",
+        hostedContext: {
+          repoSummary: "React",
+          existingFilesSummary: "files",
+          availableFiles,
+          contextFiles,
+          originalContents,
+        },
+      });
+
+      const previewArg = planPatchPreviewWithLlmMock.mock.calls[0][0] as {
+        fileContexts: Array<{ path: string; content: string }>;
+      };
+      expect(previewArg.fileContexts[0]?.path).toBe(topPath);
+    });
+  });
 });
