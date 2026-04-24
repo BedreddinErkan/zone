@@ -268,12 +268,35 @@ function buildFindReplaceStrictContract(filePath: string): string {
     "- COPY the exact lines from the file.",
     "- If the FIND block does not exist exactly, the patch is INVALID.",
     "",
+    "FIND SELECTION STRATEGY:",
+    "- You MUST locate the existing submit handler in the file.",
+    "- Identify the function that handles form submission (e.g. handleSubmit).",
+    "- COPY EXACT lines from that function.",
+    "- Use those lines as the FIND block.",
+    "",
+    "DO NOT:",
+    "- summarize code",
+    "- rewrite code",
+    "- approximate code",
+    "",
+    "The FIND block MUST exist EXACTLY in the file.",
+    "",
     "PATCH RULES:",
     "- Modify ONLY the existing submit handler.",
     "- DO NOT rewrite the component.",
     "- DO NOT add new components.",
     "- DO NOT restructure JSX.",
     "- ONLY insert validation inside existing logic.",
+    "",
+    "IMPORTANT:",
+    "- If a valid target file exists (it does in this case), you MUST produce a patch.",
+    "- DO NOT return NO_CHANGE_NEEDED.",
+    "",
+    "PATCH STRATEGY:",
+    "- Keep FIND block small (only the submit handler).",
+    "- Insert validation logic inside it.",
+    "- Do NOT rewrite the entire function.",
+    "- Do NOT modify unrelated JSX.",
     "",
     "IMPORTANT:",
     "- If you cannot find the exact code to modify:",
@@ -468,6 +491,7 @@ export async function planFullPatchWithLlm(input: {
 
     const rawText = retryResult.value;
     console.log("[zone-patch-debug] raw model output:", rawText.slice(0, 500));
+    console.log("[zone-patch-debug-full]", rawText.slice(0, 500));
     if (!isValidPatchResponse(rawText)) {
       return {
         mode: "invalid_patch_format",
