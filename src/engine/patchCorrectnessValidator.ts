@@ -315,6 +315,15 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
     return -1;
   }
 
+  function isJsxClosingTag(srcText: string, idx: number): boolean {
+    if (srcText[idx] !== "/") return false;
+    let j = idx - 1;
+    while (j >= 0 && /\s/.test(srcText[j] ?? "")) j -= 1;
+    if (j < 0 || srcText[j] !== "<") return false;
+    const nextChar = srcText[idx + 1] ?? "";
+    return /[a-zA-Z]/.test(nextChar);
+  }
+
   let mode: LexMode = "code";
   let escaped = false;
   const templateExprDepthStack: number[] = [];
@@ -539,34 +548,34 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
     }
 
     if (ch === "/") {
-      const prevChar = i > 0 ? (s[i - 1] ?? "") : "";
-
       // JSX closing tag: </tag> → do not treat "/" as comment/regex.
-      if (prevChar === "<") {
-        // fall through: treat as normal character in code mode.
-      } else {
-        updateToken(ch);
-        const canStartRegex =
-          // Keep comment detection above; regex is best-effort only.
-          lastNonWsChar !== "<" &&
-          (lastWord === "return" ||
-            lastNonWsChar === "=" ||
-            lastNonWsChar === "(" ||
-            lastNonWsChar === "[" ||
-            lastNonWsChar === "{" ||
-            lastNonWsChar === "," ||
-            lastNonWsChar === ":" ||
-            lastNonWsChar === "?" ||
-            lastNonWsChar === "\n" ||
-            lastNonWsChar === "" ||
-            // Arrow bodies: `() => /re/`
-            lastNonWsChar === ">");
-        if (canStartRegex) {
-          pushEvent(i, ch, "mode_enter");
-          mode = "regex";
-          writeStripped(" ");
-          continue;
-        }
+      if (isJsxClosingTag(s, i)) {
+        // Keep scanning in code mode.
+        writeStripped(ch);
+        continue;
+      }
+
+      updateToken(ch);
+      const canStartRegex =
+        // Keep comment detection above; regex is best-effort only.
+        lastNonWsChar !== "<" &&
+        (lastWord === "return" ||
+          lastNonWsChar === "=" ||
+          lastNonWsChar === "(" ||
+          lastNonWsChar === "[" ||
+          lastNonWsChar === "{" ||
+          lastNonWsChar === "," ||
+          lastNonWsChar === ":" ||
+          lastNonWsChar === "?" ||
+          lastNonWsChar === "\n" ||
+          lastNonWsChar === "" ||
+          // Arrow bodies: `() => /re/`
+          lastNonWsChar === ">");
+      if (canStartRegex) {
+        pushEvent(i, ch, "mode_enter");
+        mode = "regex";
+        writeStripped(" ");
+        continue;
       }
     }
 
