@@ -1795,6 +1795,17 @@ function isSmallLocalizedPatchScope(patchScope: DeveloperPatchScope): boolean {
   );
 }
 
+function isConstrainedTaskByText(task: string): boolean {
+  const t = task.toLowerCase();
+  return (
+    t.includes("minimal") ||
+    t.includes("existing") ||
+    t.includes("do not create") ||
+    t.includes("reuse") ||
+    t.includes("no rewrite")
+  );
+}
+
 /** Constrained / micro-edit tasks must not ship huge rewrites as a normal safe patch. */
 function assessConstrainedTaskLargeRewrite(input: {
   task: string;
@@ -4596,6 +4607,29 @@ export async function runLlmPatchFlow(input: {
   console.log("[hosted] applyPatches count:", applyPatches.length);
   if (applyPatches.length > 0) {
     patchSource = "llm_patch";
+  }
+
+  const taskIsConstrained =
+    isConstrainedLocalizedPatchTask(input.task) || isConstrainedTaskByText(input.task);
+  if (taskIsConstrained && patchSource === "llm_patch" && applyPatches.length > 0) {
+    const scope = analyzePatchScope({ applyPatches, originalContents });
+    if (scope.totalChangedLines > 30) {
+      fallbackForcePreviewOnly = true;
+      const w =
+        "[patch_exceeds_minimal_scope] Constrained task produced a larger-than-minimal patch; forcing preview-only review.";
+      internalWarnings.push(w);
+      visibleWarnings.push(w);
+    }
+    if (scope.totalChangedLines > 50) {
+      console.log("[zone-scope-guard]", {
+        taskIsConstrained,
+        totalChangedLines: scope.totalChangedLines,
+        action: "fallback_forced",
+      });
+      // Drop LLM patch so the existing deterministic fallback can run.
+      applyPatches = [];
+      patchSource = "no_patch";
+    }
   }
 
   if (

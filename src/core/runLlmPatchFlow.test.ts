@@ -4253,10 +4253,10 @@ export function PatientsPage() {
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.decisionMode).not.toBe("safe_to_apply");
-        expect(result.decisionMode).toBe("blocked");
-        expect(result.warnings.join("\n")).toContain(
-          "[constrained_patch_too_large]"
-        );
+        // Scope-guard can drop the LLM patch and attempt fallback. If fallback cannot
+        // safely insert, the run remains preview-only with no applied patches.
+        expect(result.decisionMode).toBe("preview_only");
+        expect(result.warnings.join("\n")).toContain("[patch_exceeds_minimal_scope]");
         expect(result.applyPatches).toHaveLength(0);
       }
     });
