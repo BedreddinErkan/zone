@@ -2567,16 +2567,26 @@ export function detectZoneInternalTask(task: string): boolean {
   return ZONE_INTERNAL_RUNTIME_TERMS.some((term) => normalized.includes(term));
 }
 
+function isDeveloperPatchParseStructurallyEmpty(
+  parsed: NonNullable<ReturnType<typeof parseDeveloperPatchText>>
+): boolean {
+  if (parsed.noChangeNeeded) return false;
+  if (parsed.createContent !== undefined) return false;
+  return parsed.edits.length === 0;
+}
+
 function applyDeveloperPatchText(
   currentContent: string,
   rawPatchText: string
 ): { ok: true; fullContent: string } | { ok: false; warning: string } {
+  console.log("[zone-patch-raw]", rawPatchText.slice(0, 1000));
   const parsed = parseDeveloperPatchText(rawPatchText);
-  if (!parsed) {
+  if (!parsed || isDeveloperPatchParseStructurallyEmpty(parsed)) {
+    console.warn("[zone-patch] empty parse result");
     return {
       ok: false,
       warning:
-        "[DEVELOPER_PATCH_FORMAT] Model did not return a valid patch-style edit format.",
+        "[invalid_patch_format] Model response could not be parsed into a valid patch",
     };
   }
 
@@ -2782,6 +2792,10 @@ function parsePatchFailureWarning(
     } catch {
       return { reason: "patch_find_not_found" };
     }
+  }
+
+  if (warning.startsWith("[invalid_patch_format]")) {
+    return { reason: "invalid_patch_format" };
   }
 
   if (warning.startsWith("[DEVELOPER_PATCH_FORMAT]")) {
@@ -4073,12 +4087,21 @@ export async function runLlmPatchFlow(input: {
                   visibleWarnings.push(appliedPatch.warning);
                 }
                 const failure = parsePatchFailureWarning(appliedPatch.warning);
+                if (failure.reason === "invalid_patch_format") {
+                  fallbackForcePreviewOnly = true;
+                }
                 logPatchConversionDebug({
                   filePath: patch.path,
                   chosenOutputMode: fullPatchMode,
-                  responseMode: fullPatch.mode,
+                  responseMode:
+                    failure.reason === "invalid_patch_format"
+                      ? "invalid_patch_format"
+                      : fullPatch.mode,
                   status: "failed",
-                  failureReason: failure.reason,
+                  failureReason:
+                    failure.reason === "invalid_patch_format"
+                      ? "invalid_patch_format"
+                      : failure.reason,
                   normalizedFailureReason: failure.normalizedFailureReason,
                 });
                 const patchConflictWarning = buildPatchConflictWarning({

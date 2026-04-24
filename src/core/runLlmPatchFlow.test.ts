@@ -1662,7 +1662,7 @@ expect(result.safetyResolution).toEqual(
       expect(result.finalExecutionOutcome).toBe("completed_with_issues");
       expect(result.finalState).toBe("blocked");
       expect(result.validationBlocked).toBe(true);
-      expect(result.warnings.join("\n")).toContain("DEVELOPER_PATCH_FORMAT");
+      expect(result.warnings.join("\n")).toContain("[invalid_patch_format]");
       expect(result.warnings.join("\n")).toContain("NO_CODE_CHANGE_PRODUCED");
     }
     expect(consoleLogSpy).toHaveBeenCalledWith(
