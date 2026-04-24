@@ -2935,6 +2935,85 @@ expect(result.safetyResolution).toEqual(
     expect(planFullPatchWithLlmMock).toHaveBeenCalled();
   });
 
+  it("generates a deterministic fallback patch when LLM fails for constrained localized task", async () => {
+    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const files = [buildRepoFile("client/src/pages/app/PatientsPage.jsx", "frontend")];
+    const currentJsx = [
+      "export function PatientsPage() {",
+      "  const [fullName, setFullName] = useState(\"\");",
+      "  const [email, setEmail] = useState(\"\");",
+      "  const [error, setError] = useState(null);",
+      "  const submitForm = () => fetch(\"/api\", { method: \"POST\" });",
+      "  const handleSubmit = (e) => {",
+      "    e.preventDefault();",
+      "    submitForm();",
+      "  };",
+      "  return <form onSubmit={handleSubmit}></form>;",
+      "}",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React app"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 40 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Add validation",
+      steps: ["Validate inputs"],
+      suggestedFiles: [
+        {
+          path: "client/src/pages/app/PatientsPage.jsx",
+          reason: "Target page",
+          action: "modify",
+        },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, currentJsx]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Add validation",
+      patches: [
+        {
+          path: "client/src/pages/app/PatientsPage.jsx",
+          operation: "modify",
+          summary: "Insert validation in submit handler",
+          targetHint: "handleSubmit",
+          contentPreview: "(advisory preview)",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "invalid_patch_format",
+      filePath: "client/src/pages/app/PatientsPage.jsx",
+      summary: "Model failed",
+      warnings: ["[invalid_patch_format] Model failed after retries"],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "Add minimal client-side validation to the existing form submit handler only. Reuse the existing state and existing submit flow. Do not create a new form. Do not introduce a new API call.",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.applyPatches).toHaveLength(1);
+      expect(result.applyPatches[0].filePath).toBe(
+        "client/src/pages/app/PatientsPage.jsx"
+      );
+      expect(result.applyPatches[0].fullContent).toContain(
+        "Full name is required"
+      );
+      expect(result.applyPatches[0].fullContent).toContain("Invalid email");
+    }
+    expect(consoleLogSpy).toHaveBeenCalledWith(
+      "[zone-fallback] generating deterministic patch",
+      "client/src/pages/app/PatientsPage.jsx"
+    );
+    consoleLogSpy.mockRestore();
+  });
+
   describe("bounded fallback retry loop", () => {
     const captureRetryLogs = () => {
       const entries: Array<{
