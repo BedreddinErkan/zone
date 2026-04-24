@@ -539,18 +539,34 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
     }
 
     if (ch === "/") {
-      updateToken(ch);
-      const canStartRegex =
-        lastNonWsChar !== "<" &&
-        (lastWord === "return" ||
-          "=([{:;,!?&|+-*%^~<>".includes(lastNonWsChar) ||
-          lastNonWsChar === "" ||
-          lastNonWsChar === "\n");
-      if (canStartRegex) {
-        pushEvent(i, ch, "mode_enter");
-        mode = "regex";
-        writeStripped(" ");
-        continue;
+      const prevChar = i > 0 ? (s[i - 1] ?? "") : "";
+
+      // JSX closing tag: </tag> → do not treat "/" as comment/regex.
+      if (prevChar === "<") {
+        // fall through: treat as normal character in code mode.
+      } else {
+        updateToken(ch);
+        const canStartRegex =
+          // Keep comment detection above; regex is best-effort only.
+          lastNonWsChar !== "<" &&
+          (lastWord === "return" ||
+            lastNonWsChar === "=" ||
+            lastNonWsChar === "(" ||
+            lastNonWsChar === "[" ||
+            lastNonWsChar === "{" ||
+            lastNonWsChar === "," ||
+            lastNonWsChar === ":" ||
+            lastNonWsChar === "?" ||
+            lastNonWsChar === "\n" ||
+            lastNonWsChar === "" ||
+            // Arrow bodies: `() => /re/`
+            lastNonWsChar === ">");
+        if (canStartRegex) {
+          pushEvent(i, ch, "mode_enter");
+          mode = "regex";
+          writeStripped(" ");
+          continue;
+        }
       }
     }
 
