@@ -26,6 +26,49 @@ function buildInput(
 }
 
 describe("validatePatchCorrectness", () => {
+  it("valid JS with normal if blocks passes layer 1", () => {
+    const src = [
+      "export function f(x: number) {",
+      "  if (x > 1) {",
+      "    return { ok: true, value: [1, 2, 3] };",
+      "  }",
+      "  return { ok: false };",
+      "}",
+      "",
+    ].join("\n");
+    const result = validatePatchCorrectness(buildInput({ updatedContent: src }));
+    expect(result.ok).toBe(true);
+    expect(result.blocking.some((i) => i.code === "unbalanced_delimiters")).toBe(
+      false
+    );
+  });
+
+  it("valid JSX file passes layer 1", () => {
+    const src = [
+      "export function A() {",
+      "  return (",
+      "    <div>",
+      "      <span>{\")\"}</span>",
+      "    </div>",
+      "  );",
+      "}",
+      "",
+    ].join("\n");
+    const result = validatePatchCorrectness(
+      buildInput({ filePath: "src/A.jsx", updatedContent: src })
+    );
+    expect(result.ok).toBe(true);
+    expect(result.blocking.some((i) => i.code === "unbalanced_delimiters")).toBe(
+      false
+    );
+  });
+
+  it("valid template literal text containing delimiters passes", () => {
+    const src = "export const s = `text has { } ( ) [ ]`; \n";
+    const result = validatePatchCorrectness(buildInput({ updatedContent: src }));
+    expect(result.ok).toBe(true);
+  });
+
   it("no-op: identical before/after blocks with no_op_patch", () => {
     const result = validatePatchCorrectness(
       buildInput({
@@ -80,6 +123,13 @@ describe("validatePatchCorrectness", () => {
     const result = validatePatchCorrectness(buildInput({ updatedContent: src }));
     expect(result.ok).toBe(true);
     expect(result.blocking).toEqual([]);
+  });
+
+  it("valid template literal expression with nested delimiters passes", () => {
+    const src =
+      "const x = `${items.map((item) => ({ id: item.id }))}`;\nexport const y = x;\n";
+    const result = validatePatchCorrectness(buildInput({ updatedContent: src }));
+    expect(result.ok).toBe(true);
   });
 
   it("dropped export on constrained task blocks", () => {
@@ -192,6 +242,45 @@ describe("validatePatchCorrectness", () => {
     );
     expect(result.warnings.some((i) => i.code === "jsx_tag_imbalance")).toBe(
       true
+    );
+  });
+
+  it("PatientsPage-style fallback insert is not blocked by layer 1 when balanced", () => {
+    const before = [
+      "export function PatientsPage() {",
+      "  const handleSubmit = async (e) => {",
+      "    e.preventDefault();",
+      "    setFormError(\"\");",
+      "    setSuccess(\"\");",
+      "    await createPatient({ fullName, email });",
+      "  };",
+      "  return <form onSubmit={handleSubmit}></form>;",
+      "}",
+      "",
+    ].join("\n");
+    const validation = [
+      "    if (!fullName || fullName.trim() === \"\") {",
+      "      setError(\"Full name is required\");",
+      "      return;",
+      "    }",
+      "",
+      "    if (email && !email.includes(\"@\")) {",
+      "      setError(\"Invalid email\");",
+      "      return;",
+      "    }",
+    ].join("\n");
+    const insertAt = before.indexOf('setSuccess(\"\");') + 'setSuccess(\"\");'.length;
+    const after =
+      before.slice(0, insertAt) + "\n" + validation + "\n" + before.slice(insertAt);
+    const result = validatePatchCorrectness(
+      buildInput({
+        filePath: "client/src/pages/PatientsPage.jsx",
+        originalContent: before,
+        updatedContent: after,
+      })
+    );
+    expect(result.blocking.some((i) => i.code === "unbalanced_delimiters")).toBe(
+      false
     );
   });
 });

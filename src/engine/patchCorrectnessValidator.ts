@@ -222,6 +222,411 @@ type LexicalResult = {
   strippedForJsx: string;
 };
 
+type DelimiterScanResult =
+  | { ok: true; strippedForJsx: string; lexicalScanIncomplete: boolean }
+  | {
+      ok: false;
+      code: "unbalanced_delimiters";
+      subtype:
+        | "stack_not_empty"
+        | "unexpected_closing_delimiter"
+        | "unterminated_single_quote"
+        | "unterminated_double_quote"
+        | "unterminated_template"
+        | "unterminated_block_comment";
+      message: string;
+      index: number;
+      line: number;
+      column: number;
+      char?: string;
+      expected?: string;
+      actual?: string;
+      stackTop?: string;
+      snippet: string;
+      strippedForJsx: string;
+      lexicalScanIncomplete: boolean;
+    };
+
+function getLineColumn(src: string, index: number): { line: number; column: number } {
+  const i = Math.max(0, Math.min(index, src.length));
+  const prefix = src.slice(0, i);
+  const lines = prefix.split("\n");
+  const line = lines.length;
+  const column = (lines[lines.length - 1]?.length ?? 0) + 1;
+  return { line, column };
+}
+
+function snippetAround(src: string, index: number, radius = 40): string {
+  const i = Math.max(0, Math.min(index, src.length));
+  const start = Math.max(0, i - radius);
+  const end = Math.min(src.length, i + radius);
+  return src.slice(start, end).replace(/\n/g, "\\n");
+}
+
+function formatDelimiterDiagnostic(input: {
+  subtype:
+    | "stack_not_empty"
+    | "unexpected_closing_delimiter"
+    | "unterminated_single_quote"
+    | "unterminated_double_quote"
+    | "unterminated_template"
+    | "unterminated_block_comment";
+  line: number;
+  column: number;
+  index: number;
+  char?: string;
+  expected?: string;
+  actual?: string;
+  stackTop?: string;
+  snippet: string;
+}): string {
+  const parts: string[] = [];
+  parts.push(
+    `Unbalanced delimiters detected: ${input.subtype} at line ${input.line}, column ${input.column} (index ${input.index}).`
+  );
+  if (input.expected || input.actual) {
+    parts.push(`Expected ${input.expected ?? "?"}, got ${input.actual ?? "?"}.`);
+  }
+  if (input.char) parts.push(`Char: ${JSON.stringify(input.char)}.`);
+  if (input.stackTop) parts.push(`Stack top: ${JSON.stringify(input.stackTop)}.`);
+  parts.push(`Snippet: ${input.snippet}`);
+  return parts.join(" ");
+}
+
+function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
+  const s = src.replace(/\r\n/g, "\n");
+  const stack: string[] = [];
+  const strippedForJsxChars: string[] = [];
+  const writeStripped = (c: string) => strippedForJsxChars.push(c);
+
+  let mode: LexMode = "code";
+  let escaped = false;
+  const templateExprDepthStack: number[] = [];
+  let regexHeuristicFailed = false;
+
+  // Used for conservative regex start detection.
+  let lastNonWsChar = "";
+  let wordBuf = "";
+  let lastWord = "";
+  const updateToken = (ch: string) => {
+    if (/[A-Za-z0-9_$]/.test(ch)) {
+      wordBuf += ch;
+      return;
+    }
+    if (wordBuf) {
+      lastWord = wordBuf;
+      wordBuf = "";
+    }
+  };
+
+  const failResult = (input: {
+    subtype:
+      | "stack_not_empty"
+      | "unexpected_closing_delimiter"
+      | "unterminated_single_quote"
+      | "unterminated_double_quote"
+      | "unterminated_template"
+      | "unterminated_block_comment";
+    message: string;
+    index: number;
+    char?: string;
+    expected?: string;
+    actual?: string;
+    stackTop?: string;
+  }): DelimiterScanResult => {
+    const { line, column } = getLineColumn(s, input.index);
+    return {
+      ok: false,
+      code: "unbalanced_delimiters",
+      subtype: input.subtype,
+      message: input.message,
+      index: input.index,
+      line,
+      column,
+      char: input.char,
+      expected: input.expected,
+      actual: input.actual,
+      stackTop: input.stackTop,
+      snippet: snippetAround(s, input.index),
+      strippedForJsx: strippedForJsxChars.join(""),
+      lexicalScanIncomplete: false,
+    };
+  };
+
+  for (let i = 0; i < s.length; i += 1) {
+    const ch = s[i] ?? "";
+    const next = s[i + 1] ?? "";
+
+    if (mode === "line_comment") {
+      writeStripped(ch === "\n" ? "\n" : " ");
+      if (ch === "\n") mode = "code";
+      continue;
+    }
+    if (mode === "block_comment") {
+      writeStripped(" ");
+      if (ch === "*" && next === "/") {
+        writeStripped(" ");
+        mode = "code";
+        i += 1;
+      }
+      continue;
+    }
+
+    if (mode === "single" || mode === "double") {
+      writeStripped(" ");
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (mode === "single" && ch === "'") mode = "code";
+      if (mode === "double" && ch === '"') mode = "code";
+      continue;
+    }
+
+    if (mode === "regex") {
+      writeStripped(" ");
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === "[") {
+        while (i < s.length) {
+          const c = s[i] ?? "";
+          writeStripped(" ");
+          if (c === "\\" && !escaped) {
+            escaped = true;
+          } else if (escaped) {
+            escaped = false;
+          } else if (c === "]") {
+            break;
+          }
+          i += 1;
+        }
+        continue;
+      }
+      if (ch === "/") {
+        mode = "code";
+        continue;
+      }
+      continue;
+    }
+
+    if (mode === "template") {
+      writeStripped(" ");
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === "`") {
+        mode = "code";
+        continue;
+      }
+      if (ch === "$" && next === "{") {
+        mode = "template_expr";
+        templateExprDepthStack.push(0);
+        writeStripped(" ");
+        i += 1;
+        continue;
+      }
+      continue;
+    }
+
+    const inTemplateExpr = mode === "template_expr";
+
+    if (escaped) {
+      escaped = false;
+      writeStripped(" ");
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      writeStripped(" ");
+      continue;
+    }
+
+    if (ch === "/" && next === "/") {
+      mode = "line_comment";
+      writeStripped(" ");
+      writeStripped(" ");
+      i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      mode = "block_comment";
+      writeStripped(" ");
+      writeStripped(" ");
+      i += 1;
+      continue;
+    }
+
+    if (ch === "'") {
+      mode = "single";
+      writeStripped(" ");
+      continue;
+    }
+    if (ch === '"') {
+      mode = "double";
+      writeStripped(" ");
+      continue;
+    }
+    if (ch === "`") {
+      mode = "template";
+      writeStripped(" ");
+      continue;
+    }
+
+    if (ch === "/") {
+      updateToken(ch);
+      const canStartRegex =
+        lastNonWsChar !== "<" &&
+        (lastWord === "return" ||
+          "=([{:;,!?&|+-*%^~<>".includes(lastNonWsChar) ||
+          lastNonWsChar === "" ||
+          lastNonWsChar === "\n");
+      if (canStartRegex) {
+        mode = "regex";
+        writeStripped(" ");
+        continue;
+      }
+    }
+
+    if (ch === "(" || ch === "{" || ch === "[") {
+      stack.push(ch);
+      writeStripped(ch);
+    } else if (ch === ")" || ch === "}" || ch === "]") {
+      if (inTemplateExpr && ch === "}") {
+        const depth =
+          templateExprDepthStack[templateExprDepthStack.length - 1] ?? 0;
+        if (depth === 0) {
+          templateExprDepthStack.pop();
+          mode = "template";
+          writeStripped(" ");
+          continue;
+        }
+        templateExprDepthStack[templateExprDepthStack.length - 1] = depth - 1;
+      }
+
+      const open = stack.pop();
+      const ok =
+        (open === "(" && ch === ")") ||
+        (open === "{" && ch === "}") ||
+        (open === "[" && ch === "]");
+      if (!ok) {
+        const expected =
+          ch === ")"
+            ? "("
+            : ch === "}"
+              ? "{"
+              : ch === "]"
+                ? "["
+                : undefined;
+        const res = failResult({
+          subtype: "unexpected_closing_delimiter",
+          message: "Unexpected closing delimiter.",
+          index: i,
+          char: ch,
+          expected,
+          actual: ch,
+          stackTop: open,
+        });
+        return { ...res, lexicalScanIncomplete: regexHeuristicFailed };
+      }
+      writeStripped(ch);
+    } else {
+      writeStripped(ch);
+    }
+
+    if (inTemplateExpr && ch === "{") {
+      const depth =
+        templateExprDepthStack[templateExprDepthStack.length - 1] ?? 0;
+      templateExprDepthStack[templateExprDepthStack.length - 1] = depth + 1;
+    }
+
+    if (!/\s/.test(ch)) {
+      lastNonWsChar = ch;
+    }
+    updateToken(ch);
+  }
+
+  if (mode === "regex") {
+    regexHeuristicFailed = true;
+  }
+
+  const eofIndex = Math.max(0, s.length - 1);
+
+  if (templateExprDepthStack.length > 0) {
+    const res = failResult({
+      subtype: "unterminated_template",
+      message: "Template literal expression did not close.",
+      index: eofIndex,
+      stackTop: stack[stack.length - 1],
+    });
+    return { ...res, lexicalScanIncomplete: regexHeuristicFailed };
+  }
+
+  if (mode === "single") {
+    const res = failResult({
+      subtype: "unterminated_single_quote",
+      message: "Single-quoted string did not terminate.",
+      index: eofIndex,
+    });
+    return { ...res, lexicalScanIncomplete: regexHeuristicFailed };
+  }
+  if (mode === "double") {
+    const res = failResult({
+      subtype: "unterminated_double_quote",
+      message: "Double-quoted string did not terminate.",
+      index: eofIndex,
+    });
+    return { ...res, lexicalScanIncomplete: regexHeuristicFailed };
+  }
+  if (mode === "template" || mode === "template_expr") {
+    const res = failResult({
+      subtype: "unterminated_template",
+      message: "Template literal did not terminate.",
+      index: eofIndex,
+    });
+    return { ...res, lexicalScanIncomplete: regexHeuristicFailed };
+  }
+  if (mode === "block_comment") {
+    const res = failResult({
+      subtype: "unterminated_block_comment",
+      message: "Block comment did not terminate.",
+      index: eofIndex,
+    });
+    return { ...res, lexicalScanIncomplete: regexHeuristicFailed };
+  }
+
+  if (stack.length > 0) {
+    const open = stack[stack.length - 1];
+    const res = failResult({
+      subtype: "stack_not_empty",
+      message: "Delimiter stack is not empty at end of file.",
+      index: eofIndex,
+      stackTop: open,
+    });
+    return { ...res, lexicalScanIncomplete: regexHeuristicFailed };
+  }
+
+  return {
+    ok: true,
+    strippedForJsx: strippedForJsxChars.join(""),
+    lexicalScanIncomplete: regexHeuristicFailed,
+  };
+}
+
 function layer0DiffSanity(input: PatchCorrectnessInput): PatchCorrectnessIssue[] {
   const normalizedBefore = normalizeForSanityCompare(input.originalContent);
   const normalizedAfter = normalizeForSanityCompare(input.updatedContent);
@@ -281,278 +686,58 @@ function layer1LexicalIntegrity(input: PatchCorrectnessInput): LexicalResult {
     return { issues: [], strippedForJsx: input.updatedContent };
   }
 
-  const s = input.updatedContent.replace(/\r\n/g, "\n");
-  const stack: string[] = [];
+  const scan = scanDelimitersWithDiagnostics(input.updatedContent);
+  if (!scan.ok) {
+    console.log(
+      "[zone-delimiter-diagnostic]",
+      JSON.stringify({
+        filePath: input.filePath,
+        subtype: scan.subtype,
+        line: scan.line,
+        column: scan.column,
+        index: scan.index,
+        char: scan.char,
+        expected: scan.expected,
+        actual: scan.actual,
+        stackTop: scan.stackTop,
+        snippet: scan.snippet,
+      })
+    );
+
+    const issues: PatchCorrectnessIssue[] = [
+      issue({
+        layer: 1,
+        code: "unbalanced_delimiters",
+        severity: "block",
+        message: formatDelimiterDiagnostic({
+          subtype: scan.subtype,
+          line: scan.line,
+          column: scan.column,
+          index: scan.index,
+          char: scan.char,
+          expected: scan.expected,
+          actual: scan.actual,
+          stackTop: scan.stackTop,
+          snippet: scan.snippet,
+        }),
+      }),
+    ];
+    if (scan.lexicalScanIncomplete) {
+      issues.push(
+        issue({
+          layer: 1,
+          code: "lexical_scan_incomplete",
+          severity: "warn",
+          message:
+            "Lexical scan could not confidently parse a regex literal; results may be incomplete.",
+        })
+      );
+    }
+    return { issues, strippedForJsx: scan.strippedForJsx };
+  }
+
   const issues: PatchCorrectnessIssue[] = [];
-
-  let mode: LexMode = "code";
-  let escaped = false;
-  let templateExprDepthStack: number[] = [];
-  let regexHeuristicFailed = false;
-
-  // Used for conservative regex start detection.
-  let lastNonWsChar = "";
-  let wordBuf = "";
-  let lastWord = "";
-  const updateToken = (ch: string) => {
-    if (/[A-Za-z0-9_$]/.test(ch)) {
-      wordBuf += ch;
-      return;
-    }
-    if (wordBuf) {
-      lastWord = wordBuf;
-      wordBuf = "";
-    }
-  };
-
-  const strippedForJsxChars: string[] = [];
-
-  for (let i = 0; i < s.length; i += 1) {
-    const ch = s[i] ?? "";
-    const next = s[i + 1] ?? "";
-
-    const writeStripped = (c: string) => {
-      strippedForJsxChars.push(c);
-    };
-
-    if (mode === "line_comment") {
-      writeStripped(ch === "\n" ? "\n" : " ");
-      if (ch === "\n") mode = "code";
-      continue;
-    }
-    if (mode === "block_comment") {
-      writeStripped(" ");
-      if (ch === "*" && next === "/") {
-        writeStripped(" ");
-        mode = "code";
-        i += 1;
-      }
-      continue;
-    }
-
-    if (mode === "single" || mode === "double") {
-      writeStripped(" ");
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (mode === "single" && ch === "'") mode = "code";
-      if (mode === "double" && ch === '"') mode = "code";
-      continue;
-    }
-
-    if (mode === "regex") {
-      writeStripped(" ");
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      // Character class [...]; do not treat / inside as end.
-      if (ch === "[") {
-        // consume until closing ] best-effort
-        while (i < s.length) {
-          const c = s[i] ?? "";
-          writeStripped(" ");
-          if (c === "\\" && !escaped) {
-            escaped = true;
-          } else if (escaped) {
-            escaped = false;
-          } else if (c === "]") {
-            break;
-          }
-          i += 1;
-        }
-        continue;
-      }
-      if (ch === "/") {
-        mode = "code";
-        continue;
-      }
-      continue;
-    }
-
-    if (mode === "template") {
-      // Raw template literal text.
-      writeStripped(" ");
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (ch === "`") {
-        mode = "code";
-        continue;
-      }
-      if (ch === "$" && next === "{") {
-        mode = "template_expr";
-        templateExprDepthStack.push(0);
-        writeStripped(" ");
-        i += 1;
-        continue;
-      }
-      continue;
-    }
-
-    // template_expr and code share most logic, except for how } closes template expr.
-    const inTemplateExpr = mode === "template_expr";
-
-    // Handle string/comment transitions in code/template_expr
-    if (escaped) {
-      escaped = false;
-      writeStripped(" ");
-      continue;
-    }
-    if (ch === "\\") {
-      escaped = true;
-      writeStripped(" ");
-      continue;
-    }
-
-    if (ch === "/" && next === "/") {
-      mode = "line_comment";
-      writeStripped(" ");
-      writeStripped(" ");
-      i += 1;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      mode = "block_comment";
-      writeStripped(" ");
-      writeStripped(" ");
-      i += 1;
-      continue;
-    }
-
-    if (ch === "'") {
-      mode = "single";
-      writeStripped(" ");
-      continue;
-    }
-    if (ch === '"') {
-      mode = "double";
-      writeStripped(" ");
-      continue;
-    }
-    if (ch === "`") {
-      mode = "template";
-      writeStripped(" ");
-      continue;
-    }
-
-    // Conservative regex detection (best-effort).
-    if (ch === "/") {
-      updateToken(ch);
-      const canStartRegex =
-        lastNonWsChar !== "<" &&
-        (lastWord === "return" ||
-          "=([{:;,!?&|+-*%^~<>".includes(lastNonWsChar) ||
-          lastNonWsChar === "" ||
-          lastNonWsChar === "\n");
-      if (canStartRegex) {
-        mode = "regex";
-        writeStripped(" ");
-        continue;
-      }
-      // ambiguous division; stay in code
-    }
-
-    // Delimiters
-    if (ch === "(" || ch === "{" || ch === "[") {
-      stack.push(ch);
-      writeStripped(ch);
-    } else if (ch === ")" || ch === "}" || ch === "]") {
-      if (inTemplateExpr && ch === "}") {
-        const depth = templateExprDepthStack[templateExprDepthStack.length - 1] ?? 0;
-        if (depth === 0) {
-          templateExprDepthStack.pop();
-          mode = "template";
-          writeStripped(" ");
-          continue;
-        }
-        templateExprDepthStack[templateExprDepthStack.length - 1] = depth - 1;
-      }
-
-      const open = stack.pop();
-      const ok =
-        (open === "(" && ch === ")") ||
-        (open === "{" && ch === "}") ||
-        (open === "[" && ch === "]");
-      if (!ok) {
-        return {
-          issues: [
-            issue({
-              layer: 1,
-              code: "unbalanced_delimiters",
-              severity: "block",
-              message: "Unbalanced delimiters detected.",
-            }),
-          ],
-          strippedForJsx: strippedForJsxChars.join(""),
-        };
-      }
-      writeStripped(ch);
-    } else {
-      writeStripped(ch);
-    }
-
-    // Track template expr depth for nested { } inside template expressions.
-    if (inTemplateExpr && ch === "{") {
-      const depth = templateExprDepthStack[templateExprDepthStack.length - 1] ?? 0;
-      templateExprDepthStack[templateExprDepthStack.length - 1] = depth + 1;
-    }
-
-    // Track last token context
-    if (!/\s/.test(ch)) {
-      lastNonWsChar = ch;
-    }
-    updateToken(ch);
-
-  }
-
-  if (templateExprDepthStack.length > 0) {
-    issues.push(
-      issue({
-        layer: 1,
-        code: "broken_template_expression",
-        severity: "block",
-        message: "Template literal expression did not close.",
-      })
-    );
-  } else if (mode !== "code") {
-    issues.push(
-      issue({
-        layer: 1,
-        code: "unbalanced_delimiters",
-        severity: "block",
-        message: "Unbalanced delimiters detected.",
-      })
-    );
-  } else if (stack.length > 0) {
-    issues.push(
-      issue({
-        layer: 1,
-        code: "unbalanced_delimiters",
-        severity: "block",
-        message: "Unbalanced delimiters detected.",
-      })
-    );
-  }
-
-  if (mode === "regex") {
-    regexHeuristicFailed = true;
-  }
-  if (regexHeuristicFailed) {
+  if (scan.lexicalScanIncomplete) {
     issues.push(
       issue({
         layer: 1,
@@ -564,7 +749,7 @@ function layer1LexicalIntegrity(input: PatchCorrectnessInput): LexicalResult {
     );
   }
 
-  return { issues, strippedForJsx: strippedForJsxChars.join("") };
+  return { issues, strippedForJsx: scan.strippedForJsx };
 }
 
 const BROKEN_CALL_AT_EOL =
