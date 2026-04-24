@@ -2937,17 +2937,20 @@ function buildDeterministicFallbackPatch(input: {
   filePath: string;
   fileContent: string;
 }): { insertIndex: number; validationBlock: string } | null {
-  const handler = findSubmitHandlerBlock(input.fileContent);
+  // Normalize at the boundary. All offset math below operates on \n-only content.
+  const normalizedContent = input.fileContent.replace(/\r\n/g, "\n");
+
+  const handler = findSubmitHandlerBlock(normalizedContent);
   if (!handler) return null;
 
-  const openBraceIndex = input.fileContent.indexOf("{", handler.start);
+  const openBraceIndex = normalizedContent.indexOf("{", handler.start);
   if (openBraceIndex < 0 || openBraceIndex >= handler.endExclusive) {
     return null;
   }
 
   // Prefer inserting after common reset lines inside the handler.
   // Specifically: after e.preventDefault(); and optional setFormError(""); setSuccess("");
-  const handlerBlock = handler.block.replace(/\r\n/g, "\n");
+  const handlerBlock = handler.block;
   const handlerLines = handlerBlock.split("\n");
   const findLineIndex = (re: RegExp): number =>
     handlerLines.findIndex((l) => re.test(l));
@@ -2981,12 +2984,12 @@ function buildDeterministicFallbackPatch(input: {
     insertIndex = handler.start + relativeOffset;
   }
 
-  const afterInsert = input.fileContent.slice(insertIndex);
+  const afterInsert = normalizedContent.slice(insertIndex);
   const nextLine = afterInsert.split("\n")[0] ?? "";
   const nextIndent = (nextLine.match(/^\s*/) ?? [""])[0] ?? "";
 
-  const openLineStart = input.fileContent.lastIndexOf("\n", openBraceIndex) + 1;
-  const openLine = input.fileContent.slice(openLineStart, openBraceIndex + 1);
+  const openLineStart = normalizedContent.lastIndexOf("\n", openBraceIndex) + 1;
+  const openLine = normalizedContent.slice(openLineStart, openBraceIndex + 1);
   const baseIndent = (openLine.match(/^\s*/) ?? [""])[0] ?? "";
   const indent = nextIndent || `${baseIndent}  `;
 
@@ -3004,6 +3007,10 @@ function buildDeterministicFallbackPatch(input: {
 
   return { insertIndex, validationBlock };
 }
+
+// Exposed only for deterministic unit tests (no I/O, pure).
+export const __testOnly_buildDeterministicFallbackPatch =
+  buildDeterministicFallbackPatch;
 
 function detectSuspiciousUiOverwrite(input: {
   task: string;
@@ -4573,22 +4580,37 @@ export async function runLlmPatchFlow(input: {
         "[zone-fallback] generating deterministic patch",
         selectedTargetFile
       );
+      const hasCrlf = /\r\n/.test(targetContent);
+      const normalizedTarget = hasCrlf
+        ? targetContent.replace(/\r\n/g, "\n")
+        : targetContent;
+      console.log(
+        "[zone-fallback-line-endings]",
+        JSON.stringify({
+          filePath: selectedTargetFile,
+          hasCrlf,
+          originalLength: targetContent.length,
+          normalizedLength: normalizedTarget.length,
+        })
+      );
+
       const fallback = buildDeterministicFallbackPatch({
         filePath: selectedTargetFile,
-        fileContent: targetContent,
+        fileContent: normalizedTarget,
       });
-      let updatedContent = targetContent;
+
+      let updatedNormalized = normalizedTarget;
       if (fallback) {
-        updatedContent =
-          targetContent.slice(0, fallback.insertIndex) +
+        updatedNormalized =
+          normalizedTarget.slice(0, fallback.insertIndex) +
           `\n${fallback.validationBlock}\n` +
-          targetContent.slice(fallback.insertIndex);
+          normalizedTarget.slice(fallback.insertIndex);
         console.log("[zone-fallback] minimal insert applied");
         console.log("[zone-fallback] inserted validation inside submit handler");
       }
 
-      if (!fallback || updatedContent === targetContent) {
-        updatedContent = targetContent.replace(
+      if (!fallback || updatedNormalized === normalizedTarget) {
+        updatedNormalized = normalizedTarget.replace(
           "onSubmit={handleSubmit}",
           `onSubmit={(e) => {\n` +
             `    if (!fullName || fullName.trim() === "") {\n` +
@@ -4602,12 +4624,12 @@ export async function runLlmPatchFlow(input: {
             `    handleSubmit(e);\n` +
             `  }}`
         );
-        if (updatedContent !== targetContent) {
+        if (updatedNormalized !== normalizedTarget) {
           console.log("[zone-fallback] used inline onSubmit wrapper fallback");
         }
       }
 
-      if (updatedContent === targetContent) {
+      if (updatedNormalized === normalizedTarget) {
         console.log("[zone-fallback-detect] handler NOT found");
         patchResults.push({
           filePath: selectedTargetFile,
@@ -4615,10 +4637,12 @@ export async function runLlmPatchFlow(input: {
           reason: "deterministic_fallback_no_safe_insertion",
         });
         // Do not create a fake/no-op patch.
-        updatedContent = targetContent;
       }
 
-      if (updatedContent !== targetContent) {
+      if (updatedNormalized !== normalizedTarget) {
+        const updatedContent = hasCrlf
+          ? updatedNormalized.replace(/\n/g, "\r\n")
+          : updatedNormalized;
         const fallbackDiff = computeFileDiff(targetContent, updatedContent);
         const fallbackChangedLines = fallbackDiff.filter(
           (l) => l.type === "added" || l.type === "removed"
