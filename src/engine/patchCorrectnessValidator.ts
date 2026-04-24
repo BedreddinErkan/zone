@@ -299,6 +299,13 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
   const strippedForJsxChars: string[] = [];
   const writeStripped = (c: string) => strippedForJsxChars.push(c);
 
+  function findLastIndex(arr: string[], target: string): number {
+    for (let i = arr.length - 1; i >= 0; i -= 1) {
+      if (arr[i] === target) return i;
+    }
+    return -1;
+  }
+
   let mode: LexMode = "code";
   let escaped = false;
   const templateExprDepthStack: number[] = [];
@@ -518,31 +525,29 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
         templateExprDepthStack[templateExprDepthStack.length - 1] = depth - 1;
       }
 
-      const open = stack.pop();
-      const ok =
-        (open === "(" && ch === ")") ||
-        (open === "{" && ch === "}") ||
-        (open === "[" && ch === "]");
-      if (!ok) {
-        const expected =
-          ch === ")"
-            ? "("
-            : ch === "}"
-              ? "{"
-              : ch === "]"
-                ? "["
-                : undefined;
+      const expectedOpening =
+        ch === ")"
+          ? "("
+          : ch === "}"
+            ? "{"
+            : ch === "]"
+              ? "["
+              : "";
+      const idx = expectedOpening ? findLastIndex(stack, expectedOpening) : -1;
+      if (idx === -1) {
+        const stackTop = stack.length > 0 ? stack[stack.length - 1] : undefined;
         const res = failResult({
           subtype: "unexpected_closing_delimiter",
           message: "Unexpected closing delimiter.",
           index: i,
           char: ch,
-          expected,
+          expected: expectedOpening || undefined,
           actual: ch,
-          stackTop: open,
+          stackTop,
         });
         return { ...res, lexicalScanIncomplete: regexHeuristicFailed };
       }
+      stack.splice(idx, 1);
       writeStripped(ch);
     } else {
       writeStripped(ch);

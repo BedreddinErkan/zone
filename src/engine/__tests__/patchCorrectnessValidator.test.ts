@@ -283,5 +283,47 @@ describe("validatePatchCorrectness", () => {
       false
     );
   });
+
+  it("valid JSX map option pattern does not false-positive in layer 1", () => {
+    const src = [
+      "export function Select({ items }) {",
+      "  return (",
+      "    <select>",
+      "      {items.map((s) => (",
+      "        <option key={s.id}>{s.label}</option>",
+      "      ))}",
+      "    </select>",
+      "  );",
+      "}",
+      "",
+    ].join("\n");
+    const result = validatePatchCorrectness(
+      buildInput({ filePath: "src/Select.jsx", updatedContent: src })
+    );
+    expect(result.blocking.some((i) => i.code === "unbalanced_delimiters")).toBe(
+      false
+    );
+  });
+
+  it("invalid JSX map option pattern missing closing paren is blocked", () => {
+    const src = [
+      "export function Select({ items }) {",
+      "  return (",
+      "    <select>",
+      "      {items.map((s) => (",
+      "        <option key={s.id}>{s.label}</option>",
+      "      )}",
+      "    </select>",
+      "  );",
+      "}",
+      "",
+    ].join("\n");
+    const result = validatePatchCorrectness(
+      buildInput({ filePath: "src/Select.jsx", updatedContent: src })
+    );
+    expect(result.blocking.some((i) => i.code === "unbalanced_delimiters")).toBe(
+      true
+    );
+  });
 });
 
