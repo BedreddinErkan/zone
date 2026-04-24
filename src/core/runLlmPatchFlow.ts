@@ -105,10 +105,7 @@ export type LlmPatchFlowResult =
       verification?: VerificationResult;
       runtimeVerification?: RuntimeVerificationResult;
       targetFile?: string;
-      applyPatches: Array<
-        | { filePath: string; fullContent: string }
-        | { filePath: string; patch: string }
-      >;
+      applyPatches: Array<{ filePath: string; fullContent: string }>;
       patchResults: PatchResult[];
       fileDiffs?: FileDiff[];
       contextFiles?: string[];
@@ -3578,10 +3575,7 @@ export async function runLlmPatchFlow(input: {
 
   // 6b. Generate full file content for modify/create patches
   reportProgress("Generating file patches...");
-  let applyPatches: Array<
-    | { filePath: string; fullContent: string }
-    | { filePath: string; patch: string }
-  > = [];
+  let applyPatches: Array<{ filePath: string; fullContent: string }> = [];
   let fallbackForcePreviewOnly = false;
   const originalContents: Record<string, string> = {
     ...(input.hostedContext?.originalContents ?? {}),
@@ -4413,50 +4407,39 @@ export async function runLlmPatchFlow(input: {
         fileContent: targetContent,
       });
       if (fallback) {
-        applyPatches = [{ filePath: selectedTargetFile, patch: fallback.patchText }];
+        const fallbackPatchText = fallback.patchText.trim();
         console.log("[zone-fallback] generated FIND/REPLACE patch");
-        patchResults.push({
-          filePath: selectedTargetFile,
-          status: "applied",
-          reason: "deterministic_fallback",
-        });
-        originalContents[selectedTargetFile] = targetContent;
-      }
-    }
-  }
-
-  // Convert any patch-text apply results into fullContent using the existing parser/apply logic.
-  if (applyPatches.some((p) => "patch" in p)) {
-    const normalized: Array<{ filePath: string; fullContent: string }> = [];
-    for (const patch of applyPatches) {
-      if ("fullContent" in patch) {
-        normalized.push(patch);
-        continue;
-      }
-      const before = originalContents[patch.filePath] ?? "";
-      const applied = applyDeveloperPatchText(before, patch.patch);
-      if (!applied.ok) {
-        internalWarnings.push(applied.warning);
-        if (!isHiddenDeveloperWarning(applied.warning)) {
-          visibleWarnings.push(applied.warning);
+        const fallbackApplied = applyDeveloperPatchText(
+          targetContent,
+          fallbackPatchText
+        );
+        if (fallbackApplied.ok) {
+          applyPatches = [
+            {
+              filePath: selectedTargetFile,
+              fullContent: fallbackApplied.fullContent,
+            },
+          ];
+          patchResults.push({
+            filePath: selectedTargetFile,
+            status: "applied",
+            reason: "deterministic_fallback",
+          });
+          originalContents[selectedTargetFile] = targetContent;
+        } else {
+          internalWarnings.push(fallbackApplied.warning);
+          if (!isHiddenDeveloperWarning(fallbackApplied.warning)) {
+            visibleWarnings.push(fallbackApplied.warning);
+          }
+          patchResults.push({
+            filePath: selectedTargetFile,
+            status: "failed",
+            reason: "deterministic_fallback_apply_failed",
+          });
         }
-        patchResults.push({
-          filePath: patch.filePath,
-          status: "failed",
-          reason: "invalid_patch_format",
-        });
-        continue;
       }
-      normalized.push({ filePath: patch.filePath, fullContent: applied.fullContent });
     }
-    applyPatches = normalized;
   }
-
-  const applyPatchesFull: Array<{ filePath: string; fullContent: string }> =
-    applyPatches.filter(
-      (patch): patch is { filePath: string; fullContent: string } =>
-        "fullContent" in patch
-    );
 
   if (
     input.hostedContext &&
@@ -4484,7 +4467,7 @@ export async function runLlmPatchFlow(input: {
   }
 
   reportProgress("Validating developer output...");
-  const changedFileMetrics = applyPatchesFull.map((patch) => {
+  const changedFileMetrics = applyPatches.map((patch) => {
     const before = originalContents[patch.filePath] ?? "";
     return {
       totalLines: countTotalLines(before || patch.fullContent),
@@ -4495,7 +4478,7 @@ export async function runLlmPatchFlow(input: {
     content.replace(/\r\n/g, "\n").replace(/\t/g, "  ").trimEnd();
 
   reportProgress("Building diff preview...");
-  const fileDiffs = applyPatchesFull.map((patch) => {
+  const fileDiffs = applyPatches.map((patch) => {
     const before = normalizeForDiff(originalContents[patch.filePath] ?? "");
     const after = normalizeForDiff(patch.fullContent);
     const diff = computeFileDiff(before, after);
@@ -4507,13 +4490,13 @@ export async function runLlmPatchFlow(input: {
     };
   });
   const hasRealPatchEvidence =
-    applyPatchesFull.length > 0 &&
+    applyPatches.length > 0 &&
     fileDiffs.some((fileDiff) => fileDiff.addedLines > 0 || fileDiff.removedLines > 0);
   const noCodeChangeReason = hasRealPatchEvidence
     ? null
     : deriveNoCodeChangeReason(patchResults);
   const patchScope = analyzePatchScope({
-    applyPatches: applyPatchesFull,
+    applyPatches,
     originalContents,
   });
   const isCommentOnlyRun =
@@ -4553,7 +4536,7 @@ export async function runLlmPatchFlow(input: {
 
   const designSystemSignals = detectDesignSystemSignals({
     addedLines: collectAddedPatchLines({
-      applyPatches: applyPatchesFull,
+      applyPatches,
       originalContents,
     }),
   });
@@ -4578,11 +4561,11 @@ export async function runLlmPatchFlow(input: {
     patchScope,
   });
   let planAlignment: PlanAlignmentResult | null = null;
-  if (executionPlan && applyPatchesFull.length > 0) {
+  if (executionPlan && applyPatches.length > 0) {
     try {
       planAlignment = evaluatePlanAlignment({
         plan: executionPlan,
-        changedFiles: applyPatchesFull.map((patch) => patch.filePath),
+        changedFiles: applyPatches.map((patch) => patch.filePath),
         massScopeScore: Math.max(
           intentMismatch.risk.breakdown.massScope,
           uiMappingRisk.risk.breakdown.massScope,
@@ -4603,11 +4586,11 @@ export async function runLlmPatchFlow(input: {
     }
   }
   let verification: VerificationResult | null = null;
-  if (applyPatchesFull.length > 0) {
+  if (applyPatches.length > 0) {
     try {
       verification = verifyPatch({
-        changedFiles: applyPatchesFull.map((patch) => patch.filePath),
-        patchContent: applyPatchesFull
+        changedFiles: applyPatches.map((patch) => patch.filePath),
+        patchContent: applyPatches
           .map((patch) => `FILE: ${patch.filePath}\n${patch.fullContent}`)
           .join("\n\n"),
         task: input.task,
@@ -4627,7 +4610,7 @@ export async function runLlmPatchFlow(input: {
     }
   }
   let runtimeVerification: RuntimeVerificationResult | null = null;
-  if (!input.hostedContext && applyPatchesFull.length > 0) {
+  if (!input.hostedContext && applyPatches.length > 0) {
     try {
       const command = detectVerificationCommand({
         repoPath: input.repoPath,
@@ -4808,9 +4791,9 @@ const hasBlockedPatch = patchResults.some(r => r.status === "failed" && r.reason
 if (
   input.hostedContext &&
   patchResults.some((result) => result.status === "failed") &&
-  applyPatchesFull.length > 0
+  applyPatches.length > 0
 ) {
-  const rolledBackPaths = new Set(applyPatchesFull.map((patch) => patch.filePath));
+  const rolledBackPaths = new Set(applyPatches.map((patch) => patch.filePath));
   if (rolledBackPaths.size > 0) {
     applyPatches = [];
     for (const result of patchResults) {
