@@ -2874,42 +2874,60 @@ function findSubmitHandlerBlock(fileContent: string): {
 
 function injectDeterministicValidationIntoSubmitHandler(
   handlerBlock: string
-): { replacedBlock: string; submitCallLine: string } | null {
+): { replacedBlock: string; insertedAt: "before_submit_call" | "handler_top" } | null {
   const lines = handlerBlock.replace(/\r\n/g, "\n").split("\n");
   const submitLineIndex = lines.findIndex((line) =>
     /\bsubmit[A-Za-z0-9_]*\s*\(/i.test(line)
   );
-  if (submitLineIndex < 0) return null;
+  const indentFromLine = (line: string): string => {
+    const m = line.match(/^\s*/);
+    return m ? m[0] : "";
+  };
 
-  const submitCallLine = lines[submitLineIndex] ?? "";
-  const indentMatch = submitCallLine.match(/^\s*/);
-  const indent = indentMatch ? indentMatch[0] : "";
+  const validationIndent =
+    submitLineIndex >= 0
+      ? indentFromLine(lines[submitLineIndex] ?? "")
+      : (() => {
+          // Prefer indentation of the first non-empty line inside the block.
+          const firstInner =
+            lines.slice(1).find((l) => l.trim().length > 0) ?? "";
+          if (firstInner) return indentFromLine(firstInner);
+          // Fallback: base indentation + two spaces.
+          return `${indentFromLine(lines[0] ?? "")}  `;
+        })();
+
   const insert = [
-    `${indent}if (!fullName || fullName.trim() === "") {`,
-    `${indent}  setError("Full name is required");`,
-    `${indent}  return;`,
-    `${indent}}`,
+    `${validationIndent}if (!fullName || fullName.trim() === "") {`,
+    `${validationIndent}  setError("Full name is required");`,
+    `${validationIndent}  return;`,
+    `${validationIndent}}`,
     "",
-    `${indent}if (email && !email.includes("@")) {`,
-    `${indent}  setError("Invalid email");`,
-    `${indent}  return;`,
-    `${indent}}`,
+    `${validationIndent}if (email && !email.includes("@")) {`,
+    `${validationIndent}  setError("Invalid email");`,
+    `${validationIndent}  return;`,
+    `${validationIndent}}`,
     "",
   ];
 
-  const nextLines = [
-    ...lines.slice(0, submitLineIndex),
-    ...insert,
-    ...lines.slice(submitLineIndex),
-  ];
+  const insertedAt =
+    submitLineIndex >= 0 ? ("before_submit_call" as const) : ("handler_top" as const);
 
-  return { replacedBlock: nextLines.join("\n"), submitCallLine };
+  const nextLines =
+    submitLineIndex >= 0
+      ? [
+          ...lines.slice(0, submitLineIndex),
+          ...insert,
+          ...lines.slice(submitLineIndex),
+        ]
+      : [lines[0] ?? "", ...insert, ...lines.slice(1)];
+
+  return { replacedBlock: nextLines.join("\n"), insertedAt };
 }
 
 function buildDeterministicFallbackPatch(input: {
   filePath: string;
   fileContent: string;
-}): { updatedContent: string } | null {
+}): { updatedContent: string; insertedAt: "before_submit_call" | "handler_top" } | null {
   const handler = findSubmitHandlerBlock(input.fileContent);
   if (!handler) return null;
 
@@ -2920,7 +2938,9 @@ function buildDeterministicFallbackPatch(input: {
     injected.replacedBlock +
     input.fileContent.slice(handler.endExclusive);
 
-  return updatedContent === input.fileContent ? null : { updatedContent };
+  return updatedContent === input.fileContent
+    ? null
+    : { updatedContent, insertedAt: injected.insertedAt };
 }
 
 function detectSuspiciousUiOverwrite(input: {
@@ -4494,6 +4514,9 @@ export async function runLlmPatchFlow(input: {
       if (fallback) {
         updatedContent = fallback.updatedContent;
         console.log("[zone-fallback] inserted validation inside submit handler");
+        if (fallback.insertedAt === "handler_top") {
+          console.log("[zone-fallback] inserting validation at handler top");
+        }
       }
 
       if (!fallback || updatedContent === targetContent) {
