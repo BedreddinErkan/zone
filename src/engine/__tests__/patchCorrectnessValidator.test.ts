@@ -1,0 +1,198 @@
+import { describe, expect, it } from "vitest";
+import {
+  validatePatchCorrectness,
+  type PatchCorrectnessInput,
+} from "../patchCorrectnessValidator.js";
+
+function buildInput(
+  overrides: Partial<PatchCorrectnessInput> = {}
+): PatchCorrectnessInput {
+  return {
+    filePath: "src/example.ts",
+    originalContent: "export const x = 1;\n",
+    updatedContent: "export const x = 2;\n",
+    task: "Change x",
+    isConstrained: false,
+    taskConstraints: {
+      requiresExistingForm: false,
+      requiresExistingSubmitFlow: false,
+      requiresExistingState: false,
+      avoidsNewForm: false,
+      avoidsNewApiCall: false,
+    },
+    strictMode: false,
+    ...overrides,
+  };
+}
+
+describe("validatePatchCorrectness", () => {
+  it("no-op: identical before/after blocks with no_op_patch", () => {
+    const result = validatePatchCorrectness(
+      buildInput({
+        originalContent: "export const x = 1; // comment\n",
+        updatedContent: "export const x = 1;\n",
+      })
+    );
+    expect(result.ok).toBe(false);
+    expect(result.blocking.some((i) => i.code === "no_op_patch")).toBe(true);
+  });
+
+  it("broken setter: setSuccess(\"\" if (...) blocks", () => {
+    const src = `export function A() {
+  setSuccess("" if (!fullName) return;
+}`;
+    const result = validatePatchCorrectness(buildInput({ updatedContent: src }));
+    expect(result.ok).toBe(false);
+    expect(
+      result.blocking.some((i) =>
+        ["inline_keyword_in_call", "broken_setter_call", "unbalanced_delimiters"].includes(
+          i.code
+        )
+      )
+    ).toBe(true);
+  });
+
+  it("unbalanced braces blocks with unbalanced_delimiters", () => {
+    const result = validatePatchCorrectness(
+      buildInput({
+        updatedContent: "export function foo() { return 1;\n",
+      })
+    );
+    expect(result.ok).toBe(false);
+    expect(
+      result.blocking.some((i) => i.code === "unbalanced_delimiters")
+    ).toBe(true);
+  });
+
+  it("template-literal expression bug regression: `${foo(}` blocks", () => {
+    const src = "export const x = `${foo(}`;\n";
+    const result = validatePatchCorrectness(buildInput({ updatedContent: src }));
+    expect(result.ok).toBe(false);
+    expect(
+      result.blocking.some((i) =>
+        ["broken_template_expression", "unbalanced_delimiters"].includes(i.code)
+      )
+    ).toBe(true);
+  });
+
+  it("valid template literal passes", () => {
+    const src = "export const x = `hello ${name.toUpperCase()}!`;\n";
+    const result = validatePatchCorrectness(buildInput({ updatedContent: src }));
+    expect(result.ok).toBe(true);
+    expect(result.blocking).toEqual([]);
+  });
+
+  it("dropped export on constrained task blocks", () => {
+    const before = "export function PatientsPage() { return null; }\n";
+    const after = "function PatientsPage() { return null; }\n";
+    const result = validatePatchCorrectness(
+      buildInput({
+        filePath: "client/src/pages/PatientsPage.jsx",
+        originalContent: before,
+        updatedContent: after,
+        isConstrained: true,
+      })
+    );
+    expect(result.ok).toBe(false);
+    expect(result.blocking.some((i) => i.code === "dropped_export")).toBe(true);
+  });
+
+  it("dropped export on non-constrained task warns but does not block", () => {
+    const before = "export function PatientsPage() { return null; }\n";
+    const after = "function PatientsPage() { return null; }\n";
+    const result = validatePatchCorrectness(
+      buildInput({
+        filePath: "client/src/pages/PatientsPage.jsx",
+        originalContent: before,
+        updatedContent: after,
+        isConstrained: false,
+      })
+    );
+    expect(result.ok).toBe(true);
+    expect(result.blocking).toEqual([]);
+    expect(result.warnings.some((i) => i.code === "dropped_export")).toBe(true);
+  });
+
+  it("constrained too-large blocks with constrained_patch_too_large", () => {
+    const before = "export const x = 1;\n";
+    const after =
+      before +
+      Array.from({ length: 30 }, (_, i) => `export const v${i} = ${i};`).join(
+        "\n"
+      ) +
+      "\n";
+    const result = validatePatchCorrectness(
+      buildInput({
+        originalContent: before,
+        updatedContent: after,
+        isConstrained: true,
+      })
+    );
+    expect(result.ok).toBe(false);
+    expect(
+      result.blocking.some((i) =>
+        ["constrained_patch_too_large", "byte_explosion"].includes(i.code)
+      )
+    ).toBe(true);
+  });
+
+  it("broken import blocks with broken_import_line", () => {
+    const src = 'import { useState from "react";\nexport const x = 1;\n';
+    const result = validatePatchCorrectness(
+      buildInput({ filePath: "src/example.ts", updatedContent: src })
+    );
+    expect(result.ok).toBe(false);
+    expect(
+      result.blocking.some((i) =>
+        ["broken_import_line", "unbalanced_delimiters"].includes(i.code)
+      )
+    ).toBe(true);
+  });
+
+  it("strictMode promotes warn to block", () => {
+    const before = "export function PatientsPage() { return null; }\n";
+    const after = "function PatientsPage() { return null; }\n";
+    const result = validatePatchCorrectness(
+      buildInput({
+        originalContent: before,
+        updatedContent: after,
+        isConstrained: false,
+        strictMode: true,
+      })
+    );
+    expect(result.ok).toBe(false);
+    expect(result.blocking.some((i) => i.code === "dropped_export")).toBe(true);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("CSS file skips layer 2 heuristics (no false positive)", () => {
+    const css = "body { color: red; }\n";
+    const result = validatePatchCorrectness(
+      buildInput({
+        filePath: "styles/app.css",
+        originalContent: "body { color: blue; }\n",
+        updatedContent: css,
+      })
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("JSX tag imbalance emits warn, not block", () => {
+    const before = `export function A(){ return <div></div>; }\n`;
+    const after = `export function A(){ return <div><span></div>; }\n`;
+    const result = validatePatchCorrectness(
+      buildInput({
+        filePath: "src/A.jsx",
+        originalContent: before,
+        updatedContent: after,
+      })
+    );
+    expect(result.blocking.some((i) => i.code === "jsx_tag_imbalance")).toBe(
+      false
+    );
+    expect(result.warnings.some((i) => i.code === "jsx_tag_imbalance")).toBe(
+      true
+    );
+  });
+});
+

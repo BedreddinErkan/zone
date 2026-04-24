@@ -32,6 +32,7 @@ import {
 import { scorePatchQuality } from "../engine/patchQualityScorer.js";
 import { resolveSafetyLevel } from "../engine/safetyLevelResolver.js";
 import { enforceMicroEditProtection } from "../engine/microEditProtection.js";
+import { validatePatchCorrectness } from "../engine/patchCorrectnessValidator.js";
 import { parseDeveloperPatchText } from "./developerPatchParse.js";
 import { parseTaskIntent, type TaskIntent } from "./taskIntentParser.js";
 import type { PatchPreviewItem } from "../types/agent.js";
@@ -1752,149 +1753,6 @@ export function analyzePatchScope(input: {
     rewriteLikeSuspicion,
     cssRewriteSuspicion,
   };
-}
-
-function validateGeneratedPatchCorrectness(input: {
-  filePath: string;
-  originalContent: string;
-  updatedContent: string;
-  task: string;
-}): { ok: boolean; reason?: string; warnings: string[] } {
-  const warnings: string[] = [];
-
-  const isConstrained = isConstrainedLocalizedPatchTask(input.task);
-  const diff = computeFileDiff(input.originalContent, input.updatedContent);
-  const added = diff.filter((l) => l.type === "added").length;
-  const removed = diff.filter((l) => l.type === "removed").length;
-  const totalChanged = added + removed;
-
-  if (isConstrained && (totalChanged > 20 || removed > 5)) {
-    return {
-      ok: false,
-      reason: "generated_patch_too_large_for_constrained_task",
-      warnings: [
-        "[generated_patch_too_large_for_constrained_task] Patch is too large for a constrained minimal task.",
-      ],
-    };
-  }
-
-  // Broken common React setter patterns that commonly indicate truncated lines.
-  // Example: setSuccess(""   (missing closing `);`)
-  const brokenSetter = input.updatedContent.match(
-    /\b(setSuccess|setError|setFormError)\s*\(\s*["'`][^\n;)]*$/m
-  );
-  if (brokenSetter) {
-    return {
-      ok: false,
-      reason: "generated_patch_broken_state_call",
-      warnings: [
-        "[generated_patch_broken_state_call] Generated patch appears to break a React state setter call.",
-      ],
-    };
-  }
-
-  // Conservative delimiter balance check with basic string/comment skipping.
-  const stack: string[] = [];
-  let inSingle = false;
-  let inDouble = false;
-  let inTemplate = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-  let escaped = false;
-
-  const s = input.updatedContent;
-  for (let i = 0; i < s.length; i += 1) {
-    const ch = s[i] ?? "";
-    const next = s[i + 1] ?? "";
-
-    if (inLineComment) {
-      if (ch === "\n") inLineComment = false;
-      continue;
-    }
-    if (inBlockComment) {
-      if (ch === "*" && next === "/") {
-        inBlockComment = false;
-        i += 1;
-      }
-      continue;
-    }
-
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (ch === "\\") {
-      escaped = true;
-      continue;
-    }
-
-    if (!inSingle && !inDouble && !inTemplate) {
-      if (ch === "/" && next === "/") {
-        inLineComment = true;
-        i += 1;
-        continue;
-      }
-      if (ch === "/" && next === "*") {
-        inBlockComment = true;
-        i += 1;
-        continue;
-      }
-    }
-
-    if (!inDouble && !inTemplate && ch === "'" && !inSingle) {
-      inSingle = true;
-      continue;
-    } else if (inSingle && ch === "'") {
-      inSingle = false;
-      continue;
-    }
-    if (!inSingle && !inTemplate && ch === '"' && !inDouble) {
-      inDouble = true;
-      continue;
-    } else if (inDouble && ch === '"') {
-      inDouble = false;
-      continue;
-    }
-    if (!inSingle && !inDouble && ch === "`") {
-      inTemplate = !inTemplate;
-      continue;
-    }
-
-    if (inSingle || inDouble || inTemplate) continue;
-
-    if (ch === "(" || ch === "{" || ch === "[") {
-      stack.push(ch);
-      continue;
-    }
-    if (ch === ")" || ch === "}" || ch === "]") {
-      const open = stack.pop();
-      const ok =
-        (open === "(" && ch === ")") ||
-        (open === "{" && ch === "}") ||
-        (open === "[" && ch === "]");
-      if (!ok) {
-        return {
-          ok: false,
-          reason: "generated_patch_unbalanced_syntax",
-          warnings: [
-            "[generated_patch_unbalanced_syntax] Generated patch appears to have unbalanced brackets or parentheses.",
-          ],
-        };
-      }
-    }
-  }
-
-  if (stack.length > 0 || inSingle || inDouble || inTemplate || inBlockComment) {
-    return {
-      ok: false,
-      reason: "generated_patch_unbalanced_syntax",
-      warnings: [
-        "[generated_patch_unbalanced_syntax] Generated patch appears to have unbalanced brackets or parentheses.",
-      ],
-    };
-  }
-
-  return { ok: true, warnings };
 }
 
 function isSmallLocalizedPatchScope(patchScope: DeveloperPatchScope): boolean {
@@ -4824,51 +4682,70 @@ export async function runLlmPatchFlow(input: {
   }
 
   let correctnessMustBlock = false;
-  // Patch correctness validator v1
+  // Patch correctness validator v2
   if (applyPatches.length > 0) {
     const kept: Array<{ filePath: string; fullContent: string }> = [];
     for (const patch of applyPatches) {
       const before = originalContents[patch.filePath] ?? "";
-      const correctness = validateGeneratedPatchCorrectness({
+      const report = validatePatchCorrectness({
         filePath: patch.filePath,
         originalContent: before,
         updatedContent: patch.fullContent,
         task: input.task,
-      });
-      console.log("[zone-patch-correctness]", {
-        filePath: patch.filePath,
-        ok: correctness.ok,
-        reason: correctness.reason,
+        isConstrained: isConstrainedLocalizedPatchTask(input.task),
+        taskConstraints: detectExistingStructureTaskConstraints(input.task),
+        strictMode: patchSource === "deterministic_fallback",
       });
 
-      if (correctness.ok) {
+      console.log(
+        "[zone-patch-correctness-v2]",
+        JSON.stringify({
+          filePath: patch.filePath,
+          ok: report.ok,
+          layersRun: report.layersRun,
+          shortCircuitedAt: report.shortCircuitedAt,
+          blockingCodes: report.blocking.map((i) => i.code),
+          warningCodes: report.warnings.map((i) => i.code),
+          strictMode: patchSource === "deterministic_fallback",
+        })
+      );
+
+      if (report.ok && report.warnings.length === 0) {
         kept.push(patch);
         continue;
       }
 
-      internalWarnings.push(...correctness.warnings);
-      visibleWarnings.push(...correctness.warnings);
-      fallbackForcePreviewOnly = true;
+      const allIssues = [...report.blocking, ...report.warnings];
+      for (const issue of allIssues) {
+        const warningText = `[${issue.code}] ${issue.message}`;
+        internalWarnings.push(warningText);
+        visibleWarnings.push(warningText);
+      }
 
-      if (
-        correctness.reason === "generated_patch_unbalanced_syntax" ||
-        correctness.reason === "generated_patch_broken_state_call" ||
-        correctness.reason === "generated_patch_too_large_for_constrained_task"
-      ) {
+      if (report.forceBlocked) {
         correctnessMustBlock = true;
+      } else if (report.forcePreviewOnly) {
+        fallbackForcePreviewOnly = true;
       }
 
-      for (const result of patchResults) {
-        if (result.filePath === patch.filePath && result.status === "applied") {
-          result.status = "failed";
-          result.reason = correctness.reason;
+      if (!report.ok) {
+        const firstBlockingCode =
+          report.blocking[0]?.code ?? "correctness_failed";
+        for (const result of patchResults) {
+          if (result.filePath === patch.filePath && result.status === "applied") {
+            result.status = "failed";
+            result.reason = firstBlockingCode;
+          }
         }
+        patchResults.push({
+          filePath: patch.filePath,
+          status: "failed",
+          reason: firstBlockingCode,
+        });
+        continue;
       }
-      patchResults.push({
-        filePath: patch.filePath,
-        status: "failed",
-        reason: correctness.reason,
-      });
+
+      kept.push(patch);
     }
     applyPatches = kept;
     if (applyPatches.length === 0) {

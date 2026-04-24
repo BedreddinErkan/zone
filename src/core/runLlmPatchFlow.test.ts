@@ -2178,8 +2178,8 @@ expect(result.safetyResolution).toEqual(
       expect(result.patchPreview).toContain(
         "Targeted file: client/src/components/ClinicLeads.jsx"
       );
-      expect(result.applyPatches.length).toBe(1);
-      expect(result.applyPatches[0].filePath).toBe("client/src/pages/PatientsPage.jsx");
+      expect(result.applyPatches.length).toBe(0);
+      expect(result.warnings.join("\n")).toContain("[no_op_patch]");
       expect(result.warnings.join("\n")).toContain("target_file_constraint_mismatch");
     }
     expect(planFullPatchWithLlmMock).toHaveBeenCalledWith(
@@ -2273,7 +2273,8 @@ expect(result.safetyResolution).toEqual(
     if (result.ok) {
       expect(result.targetFile).toBe("client/src/components/ClinicLeads.jsx");
       expect(result.warnings.join("\n")).toContain("target_entity_mismatch");
-      expect(result.applyPatches[0]?.filePath).toBe("client/src/pages/PatientsPage.jsx");
+      expect(result.applyPatches.length).toBe(0);
+      expect(result.warnings.join("\n")).toContain("[no_op_patch]");
     }
     expect(planFullPatchWithLlmMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3255,9 +3256,7 @@ expect(result.safetyResolution).toEqual(
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.warnings.join("\n")).toContain(
-        "[generated_patch_broken_state_call]"
-      );
+      expect(result.warnings.join("\n")).toContain("[unbalanced_delimiters]");
       expect(result.decisionMode).not.toBe("safe_to_apply");
       expect(result.finalState).toBe("blocked");
     }
@@ -3310,9 +3309,7 @@ expect(result.safetyResolution).toEqual(
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.warnings.join("\n")).toContain(
-        "[generated_patch_unbalanced_syntax]"
-      );
+      expect(result.warnings.join("\n")).toContain("[unbalanced_delimiters]");
       expect(result.finalState).toBe("blocked");
     }
   });
@@ -3408,9 +3405,7 @@ expect(result.safetyResolution).toEqual(
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.warnings.join("\n")).toContain(
-        "[generated_patch_too_large_for_constrained_task]"
-      );
+      expect(result.warnings.join("\n")).toContain("[byte_explosion]");
       expect(result.decisionMode).not.toBe("safe_to_apply");
     }
   });
@@ -3741,7 +3736,8 @@ expect(result.safetyResolution).toEqual(
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.decisionMode).toBe("preview_only");
+        expect(result.decisionMode).toBe("blocked");
+        expect(result.warnings.join("\n")).toContain("[no_op_patch]");
       }
       const tier3 = entries.find((e) => e.reason === "tier3_structure_only_preview");
       expect(tier3).toBeDefined();
@@ -4070,7 +4066,8 @@ expect(result.safetyResolution).toEqual(
             w.includes("top_ranked_entity_target_used_without_structure_confirmation")
           )
         ).toBe(true);
-        expect(result.decisionMode).toBe("preview_only");
+        expect(result.decisionMode).toBe("blocked");
+        expect(result.warnings.join("\n")).toContain("[no_op_patch]");
       }
       consoleLogSpy.mockRestore();
     });
@@ -4257,11 +4254,8 @@ export function PatientsPage() {
       if (result.ok) {
         expect(result.decisionMode).not.toBe("safe_to_apply");
         expect(result.decisionMode).toBe("blocked");
-        expect(result.patchPreview).toContain(
-          "Patch is too large for a constrained minimal task."
-        );
         expect(result.warnings.join("\n")).toContain(
-          "[generated_patch_too_large_for_constrained_task]"
+          "[constrained_patch_too_large]"
         );
         expect(result.applyPatches).toHaveLength(0);
       }
