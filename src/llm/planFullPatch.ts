@@ -6,6 +6,11 @@ import {
   type RetryFeedback,
 } from "../core/withSelfHealingRetry.js";
 import type { ResponseInput } from "openai/resources/responses/responses";
+import type {
+  Tool,
+  ToolChoiceFunction,
+  ResponseFunctionToolCall,
+} from "openai/resources/responses/responses";
 import {
   buildFullPatchPrompt,
   type FullPatchOutputMode,
@@ -120,6 +125,62 @@ function buildStrictPatchSystemInstruction(): string {
     "",
     "If you output anything else, the response is INVALID.",
   ].join("\n");
+}
+
+const APPLY_PATCH_TOOL_NAME = "apply_patch" as const;
+
+function buildApplyPatchTool(): Tool {
+  return {
+    type: "function",
+    name: APPLY_PATCH_TOOL_NAME,
+    strict: true,
+    description:
+      "Return a patch in --- FILE / --- FIND --- / --- REPLACE --- format OR exactly NO_CHANGE_NEEDED.",
+    parameters: {
+      type: "object",
+      properties: {
+        patch: {
+          type: "string",
+          description:
+            "Patch in --- FILE / FIND / REPLACE format OR exactly NO_CHANGE_NEEDED",
+        },
+      },
+      required: ["patch"],
+    } as Record<string, unknown>,
+  };
+}
+
+function buildApplyPatchToolChoice(): ToolChoiceFunction {
+  return {
+    type: "function",
+    name: APPLY_PATCH_TOOL_NAME,
+  };
+}
+
+function extractPatchFromToolCall(response: unknown): string | null {
+  const outputItems = (response as { output?: unknown[] } | null)?.output;
+  if (!Array.isArray(outputItems) || outputItems.length === 0) {
+    return null;
+  }
+
+  const toolCall = outputItems.find((item) => {
+    const t = item as Partial<ResponseFunctionToolCall> | null;
+    return (
+      !!t &&
+      t.type === "function_call" &&
+      t.name === APPLY_PATCH_TOOL_NAME &&
+      typeof t.arguments === "string"
+    );
+  }) as ResponseFunctionToolCall | undefined;
+
+  if (!toolCall) return null;
+
+  try {
+    const parsed = JSON.parse(toolCall.arguments) as { patch?: unknown };
+    return typeof parsed.patch === "string" ? parsed.patch : null;
+  } catch {
+    return null;
+  }
 }
 
 function buildFindReplaceFormatRetryPrompt(feedback: RetryFeedback): string {
@@ -287,6 +348,8 @@ export async function planFullPatchWithLlm(input: {
       input.filePath
     )}`;
     const strictSystemInstruction = buildStrictPatchSystemInstruction();
+    const applyPatchTool = buildApplyPatchTool();
+    const applyPatchToolChoice = buildApplyPatchToolChoice();
 
     const retryResult = await withSelfHealingRetry({
       maxAttempts: 3,
@@ -317,9 +380,20 @@ export async function planFullPatchWithLlm(input: {
           model,
           temperature: 0,
           max_output_tokens: 2000,
+          tools: [applyPatchTool],
+          tool_choice: applyPatchToolChoice,
           input: responseInput,
         });
-        return (response.output_text ?? "").trim();
+
+        const toolPatch = extractPatchFromToolCall(response);
+        if (toolPatch) {
+          console.log("[zone-patch-tool] tool call received");
+          console.log("[zone-patch-tool] patch length:", toolPatch.length);
+          return toolPatch.trim();
+        }
+
+        console.error("[zone-patch-tool] No structured patch returned");
+        return "";
       },
       validate: (raw: string) => {
         const issues: Array<{
