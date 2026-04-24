@@ -2816,15 +2816,15 @@ function injectDeterministicValidationIntoSubmitHandler(
 function buildDeterministicFallbackPatch(input: {
   filePath: string;
   fileContent: string;
-}): { patchText: string; fullContent: string } | null {
+}): { submitCallLine: string; validationBlock: string } | null {
   const handler = findSubmitHandlerBlock(input.fileContent);
   if (!handler) return null;
 
   const injected = injectDeterministicValidationIntoSubmitHandler(handler.block);
   if (!injected) return null;
-  const { replacedBlock, submitCallLine } = injected;
+  const { submitCallLine } = injected;
   const submitIndent = (submitCallLine.match(/^\s*/) ?? [""])[0] ?? "";
-  const validationInsert = [
+  const validationBlock = [
     `${submitIndent}if (!fullName || fullName.trim() === "") {`,
     `${submitIndent}  setError("Full name is required");`,
     `${submitIndent}  return;`,
@@ -2836,23 +2836,8 @@ function buildDeterministicFallbackPatch(input: {
     `${submitIndent}}`,
     "",
   ].join("\n");
-  const replaceAnchorBlock = `${validationInsert}\n${submitCallLine}`.trimEnd();
 
-  const fullContent =
-    input.fileContent.slice(0, handler.start) +
-    replacedBlock +
-    input.fileContent.slice(handler.endExclusive);
-
-  return {
-    patchText: [
-      `--- FILE: ${input.filePath} ---`,
-      "--- FIND ---",
-      submitCallLine,
-      "--- REPLACE ---",
-      replaceAnchorBlock,
-    ].join("\n"),
-    fullContent,
-  };
+  return { submitCallLine, validationBlock };
 }
 
 function detectSuspiciousUiOverwrite(input: {
@@ -4423,36 +4408,27 @@ export async function runLlmPatchFlow(input: {
         fileContent: targetContent,
       });
       if (fallback) {
-        const fallbackPatchText = fallback.patchText.trim();
-        console.log("[zone-fallback] generated FIND/REPLACE patch");
-        const fallbackApplied = applyDeveloperPatchText(
-          targetContent,
-          fallbackPatchText
+        const updatedContent = targetContent.replace(
+          fallback.submitCallLine,
+          `${fallback.validationBlock}\n${fallback.submitCallLine}`
         );
-        console.log("[zone-fallback-apply]", fallbackApplied.ok);
-        if (fallbackApplied.ok) {
-          applyPatches = [
-            {
-              filePath: selectedTargetFile,
-              fullContent: fallbackApplied.fullContent,
-            },
-          ];
+
+        if (updatedContent === targetContent) {
+          console.warn("[zone-fallback] replace failed, no match");
+          patchResults.push({
+            filePath: selectedTargetFile,
+            status: "failed",
+            reason: "deterministic_fallback_apply_failed",
+          });
+        } else {
+          console.log("[zone-fallback-apply] direct insert success");
+          applyPatches = [{ filePath: selectedTargetFile, fullContent: updatedContent }];
           patchResults.push({
             filePath: selectedTargetFile,
             status: "applied",
             reason: "deterministic_fallback",
           });
           originalContents[selectedTargetFile] = targetContent;
-        } else {
-          internalWarnings.push(fallbackApplied.warning);
-          if (!isHiddenDeveloperWarning(fallbackApplied.warning)) {
-            visibleWarnings.push(fallbackApplied.warning);
-          }
-          patchResults.push({
-            filePath: selectedTargetFile,
-            status: "failed",
-            reason: "deterministic_fallback_apply_failed",
-          });
         }
       }
     }
