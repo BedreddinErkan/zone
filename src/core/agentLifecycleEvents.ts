@@ -4,6 +4,7 @@ export const AGENT_LIFECYCLE_EVENT_TYPES = [
   "repo_explored",
   "relevant_files_ranked",
   "plan_created",
+  "patch_preview_empty_fallback_target_selected",
   "file_context_loaded",
   "patch_generation_started",
   "patch_generated",

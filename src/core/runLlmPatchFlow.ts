@@ -39,7 +39,7 @@ import { enforceMicroEditProtection } from "../engine/microEditProtection.js";
 import { validatePatchCorrectness } from "../engine/patchCorrectnessValidator.js";
 import { parseDeveloperPatchText } from "./developerPatchParse.js";
 import { parseTaskIntent, type TaskIntent } from "./taskIntentParser.js";
-import type { PatchPreviewItem } from "../types/agent.js";
+import type { PatchPreviewItem, RankedRepoFile } from "../types/agent.js";
 import type { ConversationBillingMode } from "../types/conversation.js";
 import type { RepoFile } from "../types/project.js";
 import { startZoneApiPerfRun } from "../api/zoneApiPerf.js";
@@ -220,6 +220,99 @@ type HostedDeveloperContextInput = {
   }>;
   originalContents: Record<string, string>;
 };
+
+function isDeprioritizedConfigPathForFrontendTask(filePath: string): boolean {
+  const n = filePath.replace(/\\/g, "/").toLowerCase();
+  return n.endsWith("requirements.txt") || n.includes("ai-service/requirements.txt");
+}
+
+function taskLooksLikeReactOrJsxValidation(task: string): boolean {
+  const t = task.toLowerCase();
+  return (
+    /\bjsx\b/.test(t) ||
+    /\breact\b/.test(t) ||
+    /\.jsx\b/.test(t) ||
+    /\.tsx\b/.test(t) ||
+    /\bcomponent\b/.test(t) ||
+    /\bvalidation\b/.test(t)
+  );
+}
+
+/** First line matching `Target file: <path>` (case-insensitive). */
+function parseExplicitTargetFileLineFromTask(task: string): string | null {
+  for (const line of task.split(/\r?\n/)) {
+    const m = line.match(/^\s*Target\s+file:\s*(.+?)\s*$/i);
+    if (m) {
+      const raw = m[1].trim().replace(/^[`'"]+|[`'"]+$/g, "");
+      if (raw.length > 0) {
+        return raw.replace(/\\/g, "/");
+      }
+    }
+  }
+  return null;
+}
+
+function isPathGroundedForPreviewFallback(input: {
+  path: string;
+  hostedContext: HostedDeveloperContextInput | undefined;
+  allFiles: RepoFile[];
+}): boolean {
+  if (isIrrelevantDeveloperContextPath(input.path) || isProtectedDeveloperUiPath(input.path)) {
+    return false;
+  }
+  if (input.hostedContext) {
+    return Object.prototype.hasOwnProperty.call(
+      input.hostedContext.originalContents,
+      input.path
+    );
+  }
+  return input.allFiles.some((f) => f.path === input.path);
+}
+
+function pickPreviewEmptyFallbackPath(input: {
+  task: string;
+  fullRankedFiles: RankedRepoFile[];
+  hostedContext: HostedDeveloperContextInput | undefined;
+  allFiles: RepoFile[];
+}): string | null {
+  const explicit = parseExplicitTargetFileLineFromTask(input.task);
+  if (
+    explicit &&
+    isPathGroundedForPreviewFallback({
+      path: explicit,
+      hostedContext: input.hostedContext,
+      allFiles: input.allFiles,
+    })
+  ) {
+    return explicit;
+  }
+
+  const deprioritizeConfig = taskLooksLikeReactOrJsxValidation(input.task);
+  const ranked = [...input.fullRankedFiles];
+  if (deprioritizeConfig) {
+    ranked.sort((a, b) => {
+      const aBad = isDeprioritizedConfigPathForFrontendTask(a.path) ? 1 : 0;
+      const bBad = isDeprioritizedConfigPathForFrontendTask(b.path) ? 1 : 0;
+      if (aBad !== bBad) {
+        return aBad - bBad;
+      }
+      return b.score - a.score;
+    });
+  }
+
+  for (const f of ranked) {
+    if (
+      isPathGroundedForPreviewFallback({
+        path: f.path,
+        hostedContext: input.hostedContext,
+        allFiles: input.allFiles,
+      })
+    ) {
+      return f.path;
+    }
+  }
+  return null;
+}
 
 /** A fully-populated TaskIntent representing "I don't know what this is". */
 const UNKNOWN_INTENT: TaskIntent = {
@@ -4037,7 +4130,7 @@ export async function runLlmPatchFlow(input: {
   }
 
   const vagueTask = isVagueDeveloperTask(input.task);
-  const selectedTargetFile = patchPlan.patches[0]?.path ?? null;
+  let selectedTargetFile = patchPlan.patches[0]?.path ?? null;
   // Task-level risk scoring for developer
   const taskRiskResult = computeRiskScore({ task: input.task, role: "developer", codeIntent: taskIntent.codeIntent });
   logRiskDebug("runLlmPatchFlow taskRiskResult", {
@@ -4160,6 +4253,43 @@ export async function runLlmPatchFlow(input: {
       finalRunReport: vagueReport,
     };
   }
+
+  const patchPreviewHadNoStructuredPatchesFromLlm = patchPlan.patches.length === 0;
+  if (patchPlan.patches.length === 0) {
+    const fallbackPath = pickPreviewEmptyFallbackPath({
+      task: input.task,
+      fullRankedFiles,
+      hostedContext: input.hostedContext,
+      allFiles,
+    });
+    if (fallbackPath) {
+      console.log("[zone-patch-preview-fallback-target]", fallbackPath);
+      notifyProgress("Generating file patches...", {
+        type: "patch_preview_empty_fallback_target_selected",
+        message: `Patch preview returned no structured patches; selected ${fallbackPath} for full patch generation.`,
+        stage: "patch_preview",
+        status: "selected",
+        filePath: fallbackPath,
+      });
+      const synthetic: PatchPreviewItem = {
+        path: fallbackPath,
+        operation: "modify",
+        summary:
+          "Fallback target selected because patch preview returned no structured patches.",
+        targetHint: "preview_empty_fallback_target",
+        contentPreview: "",
+      };
+      patchPlan = {
+        ...patchPlan,
+        patches: [synthetic],
+        warnings: [
+          ...patchPlan.warnings,
+          `[preview_empty_fallback] Using ${fallbackPath} because patch preview returned zero patches.`,
+        ],
+      };
+    }
+  }
+  selectedTargetFile = patchPlan.patches[0]?.path ?? selectedTargetFile;
 
   // 6b. Generate full file content for modify/create patches
   reportProgress("Generating file patches...");
@@ -5915,7 +6045,7 @@ if (noCodeChangeReason) {
   }
 }
 
-const decisionMode =
+let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
   (runtimeVerificationCodeFailed || runtimeVerification?.status === "timeout")
     ? "blocked"
     : deterministicFallbackTooLarge
@@ -5935,6 +6065,12 @@ const decisionMode =
           constrainedTaskLargeRewriteForcePreview
         ? "preview_only"
         : "safe_to_apply";
+  if (
+    (applyPatches.length === 0 || patchSource === "no_patch") &&
+    decisionMode === "safe_to_apply"
+  ) {
+    decisionMode = "preview_only";
+  }
   const verificationStatus: "passed" | "skipped" | "tooling_issue" | "code_failed" | "timeout" =
     runtimeVerificationPlan?.status === "passed"
       ? "passed"
@@ -5972,11 +6108,21 @@ const decisionMode =
               : verificationRepairAttempted
                 ? "failed_after_retry"
                 : "failed_verification";
-  const finalState =
-    finalExecutionOutcome === "failed_verification" ||
-    finalExecutionOutcome === "completed_with_issues"
+  const noApplyablePatch = applyPatches.length === 0 || patchSource === "no_patch";
+  const finalState: "preview_only" | "safe_to_apply" | "blocked" =
+    decisionMode === "blocked"
       ? "blocked"
-      : decisionMode;
+      : finalExecutionOutcome === "failed_verification" ||
+          finalExecutionOutcome === "failed_after_retry"
+        ? "blocked"
+        : finalExecutionOutcome === "completed_with_issues" &&
+            !(
+              noApplyablePatch &&
+              decisionMode === "preview_only" &&
+              patchPreviewHadNoStructuredPatchesFromLlm
+            )
+          ? "blocked"
+          : decisionMode;
   const validationBlocked = finalState === "blocked";
   if ((runtimeVerificationCodeFailed || runtimeVerification?.status === "timeout") && runtimeVerification) {
     const warning = `Final verification did not pass: ${runtimeVerification.command ?? "unknown command"} (${runtimeVerification.status}).`;
