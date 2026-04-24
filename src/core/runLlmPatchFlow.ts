@@ -140,6 +140,37 @@ export type FileDiff = {
   removedLines: number;
 };
 
+function countJsxTagsDiagnostic(src: string): {
+  opens: number;
+  closes: number;
+  selfClosing: number;
+} {
+  // Strip strings and comments conservatively so matches inside them don't skew counts.
+  const stripped = src
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
+    .replace(/(["'`])(?:\\.|(?!\1).)*\1/g, " ");
+  const selfClosing =
+    (stripped.match(/<[A-Za-z][A-Za-z0-9_.]*\b[^<>]*\/>/g) ?? []).length;
+  const closes =
+    (stripped.match(/<\/[A-Za-z][A-Za-z0-9_.]*\s*>/g) ?? []).length;
+  // Any `<Tag ...>` that is not self-closing.
+  const allOpens =
+    (stripped.match(/<[A-Za-z][A-Za-z0-9_.]*\b[^<>]*>/g) ?? []).length;
+  const opens = Math.max(0, allOpens - selfClosing);
+  return { opens, closes, selfClosing };
+}
+
+function buildDiffHeadSample(diff: DiffLine[], maxChars = 200): string {
+  const formatted = diff
+    .filter((line) => line.type !== "unchanged")
+    .map((line) => `${line.type === "added" ? "+" : "-"}${line.content}`)
+    .join("\n");
+  return formatted.length <= maxChars
+    ? formatted
+    : `${formatted.slice(0, maxChars)}…`;
+}
+
 type HostedDeveloperContextInput = {
   repoSummary: string;
   projectNotes?: string[];
@@ -4731,6 +4762,53 @@ export async function runLlmPatchFlow(input: {
           blockingCodes: report.blocking.map((i) => i.code),
           warningCodes: report.warnings.map((i) => i.code),
           strictMode: patchSource === "deterministic_fallback",
+        })
+      );
+
+      const diagDiff = computeFileDiff(before, patch.fullContent);
+      const diagAdded = diagDiff.filter((l) => l.type === "added").length;
+      const diagRemoved = diagDiff.filter((l) => l.type === "removed").length;
+      const diagTotalChanged = diagAdded + diagRemoved;
+      const diagOriginalLines = countTotalLines(before || patch.fullContent);
+      const diagIsConstrained = isConstrainedLocalizedPatchTask(input.task);
+      const diagBeforeJsx = countJsxTagsDiagnostic(before);
+      const diagAfterJsx = countJsxTagsDiagnostic(patch.fullContent);
+
+      console.log(
+        "[zone-patch-diagnostic]",
+        JSON.stringify({
+          filePath: patch.filePath,
+          patchSource,
+          addedLines: diagAdded,
+          removedLines: diagRemoved,
+          totalChangedLines: diagTotalChanged,
+          totalOriginalLines: diagOriginalLines,
+          changeRatio:
+            diagOriginalLines > 0
+              ? Number((diagTotalChanged / diagOriginalLines).toFixed(3))
+              : 0,
+          taskIsConstrained: diagIsConstrained,
+          layer4Limit: { totalChanged: 20, removed: 5 },
+          exceedsLayer4Limit: diagTotalChanged > 20 || diagRemoved > 5,
+          jsxBefore: diagBeforeJsx,
+          jsxAfter: diagAfterJsx,
+          jsxDelta: {
+            opens: diagAfterJsx.opens - diagBeforeJsx.opens,
+            closes: diagAfterJsx.closes - diagBeforeJsx.closes,
+            selfClosing:
+              diagAfterJsx.selfClosing - diagBeforeJsx.selfClosing,
+            balanced:
+              diagAfterJsx.opens - diagBeforeJsx.opens ===
+              diagAfterJsx.closes - diagBeforeJsx.closes,
+          },
+          validatorVerdict: {
+            ok: report.ok,
+            layersRun: report.layersRun,
+            shortCircuitedAt: report.shortCircuitedAt,
+            blockingCodes: report.blocking.map((i) => i.code),
+            warningCodes: report.warnings.map((i) => i.code),
+          },
+          diffHeadSample: buildDiffHeadSample(diagDiff, 200),
         })
       );
 
