@@ -95,6 +95,32 @@ function isValidPatchResponse(text: string): boolean {
   );
 }
 
+function buildStrictPatchSystemInstruction(): string {
+  return [
+    "You are a code patch generator.",
+    "",
+    "You MUST output ONLY a valid patch.",
+    "",
+    "Allowed outputs:",
+    "1) A valid patch using:",
+    "--- FILE:",
+    "--- FIND ---",
+    "--- REPLACE ---",
+    "",
+    "2) OR exactly:",
+    "NO_CHANGE_NEEDED",
+    "",
+    "You are FORBIDDEN from:",
+    "- explanations",
+    "- natural language",
+    "- descriptions",
+    "- markdown",
+    "- comments",
+    "",
+    "If you output anything else, the response is INVALID.",
+  ].join("\n");
+}
+
 function buildFindReplaceFormatRetryPrompt(feedback: RetryFeedback): string {
   const needsHardPatchCorrection = feedback.issues.some(
     (issue) =>
@@ -250,17 +276,40 @@ export async function planFullPatchWithLlm(input: {
   });
 
   if (outputMode === "find_replace_patch") {
-    const findReplacePrompt = `${prompt.trim()}\n\n${buildFindReplaceStrictContract(
+    const strictHeader = [
+      "IMPORTANT:",
+      "DO NOT describe the change.",
+      "DO NOT explain the change.",
+      "ONLY output the patch.",
+    ].join("\n");
+    const findReplacePrompt = `${strictHeader}\n\n${prompt.trim()}\n\n${buildFindReplaceStrictContract(
       input.filePath
     )}`;
+    const strictSystemInstruction = buildStrictPatchSystemInstruction();
 
     const retryResult = await withSelfHealingRetry({
       maxAttempts: 3,
       prompt: findReplacePrompt,
       execute: async (currentPrompt: string) => {
+        console.log(
+          "[zone-patch-request] sending strict patch system instruction",
+          JSON.stringify({
+            filePath: input.filePath,
+            max_output_tokens: 2000,
+            temperature: 0,
+          })
+        );
         const response = await client.responses.create({
           model,
-          input: currentPrompt,
+          temperature: 0,
+          max_output_tokens: 2000,
+          input: [
+            {
+              role: "system",
+              content: [{ type: "text", text: strictSystemInstruction }],
+            },
+            { role: "user", content: [{ type: "text", text: currentPrompt }] },
+          ] as unknown,
         });
         return (response.output_text ?? "").trim();
       },
