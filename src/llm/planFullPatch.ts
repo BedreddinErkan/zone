@@ -261,6 +261,25 @@ function buildFindReplaceStrictContract(filePath: string): string {
     "--- REPLACE ---",
     "code",
     "",
+    "CRITICAL REQUIREMENT:",
+    "- The FIND block MUST match EXACT code from the file.",
+    "- DO NOT invent or approximate code.",
+    "- DO NOT summarize code.",
+    "- COPY the exact lines from the file.",
+    "- If the FIND block does not exist exactly, the patch is INVALID.",
+    "",
+    "PATCH RULES:",
+    "- Modify ONLY the existing submit handler.",
+    "- DO NOT rewrite the component.",
+    "- DO NOT add new components.",
+    "- DO NOT restructure JSX.",
+    "- ONLY insert validation inside existing logic.",
+    "",
+    "IMPORTANT:",
+    "- If you cannot find the exact code to modify:",
+    "  - DO NOT return NO_CHANGE_NEEDED",
+    "  - Instead return EXACTLY: INVALID_PATCH_FORMAT",
+    "",
     "If you cannot generate a valid patch, return EXACTLY:",
     "",
     "NO_CHANGE_NEEDED",
@@ -448,6 +467,7 @@ export async function planFullPatchWithLlm(input: {
     }
 
     const rawText = retryResult.value;
+    console.log("[zone-patch-debug] raw model output:", rawText.slice(0, 500));
     if (!isValidPatchResponse(rawText)) {
       return {
         mode: "invalid_patch_format",
