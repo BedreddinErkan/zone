@@ -67,6 +67,12 @@ export type LlmPatchFlowResult =
         designSystemComplianceScore: number;
         semanticAlignmentScore: number;
       };
+      patchQualitySummary?: {
+        source: PatchSource;
+        fallbackUsed: boolean;
+        changedFileCount: number;
+        totalChangedLines: number;
+      };
       designSystemSignals?: DesignSystemSignals;
       safetyResolution?: {
         safetyLevel:
@@ -111,6 +117,8 @@ export type LlmPatchFlowResult =
       contextFiles?: string[];
     }
   | { ok: false; reason: string };
+
+type PatchSource = "llm_patch" | "deterministic_fallback" | "no_patch";
 
 export type PatchResult = {
   filePath: string;
@@ -3735,6 +3743,7 @@ export async function runLlmPatchFlow(input: {
   let applyPatches: Array<{ filePath: string; fullContent: string }> = [];
   let fallbackForcePreviewOnly = false;
   let deterministicFallbackTooLarge = false;
+  let patchSource: PatchSource = "no_patch";
   const originalContents: Record<string, string> = {
     ...(input.hostedContext?.originalContents ?? {}),
   };
@@ -4546,6 +4555,9 @@ export async function runLlmPatchFlow(input: {
     perf.mark("patch conversion fallback complete");
   }
   console.log("[hosted] applyPatches count:", applyPatches.length);
+  if (applyPatches.length > 0) {
+    patchSource = "llm_patch";
+  }
 
   if (
     applyPatches.length === 0 &&
@@ -4595,35 +4607,59 @@ export async function runLlmPatchFlow(input: {
       }
 
       if (updatedContent === targetContent) {
-        console.warn("[zone-fallback] no change detected, forcing append");
-        updatedContent = `${targetContent}\n// validation fallback applied\n`;
-        console.log("[zone-fallback] forced append fallback");
-      }
-
-      const fallbackDiff = computeFileDiff(targetContent, updatedContent);
-      const fallbackChangedLines = fallbackDiff.filter(
-        (l) => l.type === "added" || l.type === "removed"
-      ).length;
-      if (fallbackChangedLines > 20) {
-        deterministicFallbackTooLarge = true;
-        console.log("[zone-fallback] rejected oversized fallback patch");
+        console.log("[zone-fallback-detect] handler NOT found");
         patchResults.push({
           filePath: selectedTargetFile,
           status: "failed",
-          reason: "deterministic_fallback_too_large",
+          reason: "deterministic_fallback_no_safe_insertion",
         });
-      } else {
-        applyPatches = [{ filePath: selectedTargetFile, fullContent: updatedContent }];
-        console.log("[zone-fallback-apply] forced success");
-        patchResults.push({
-          filePath: selectedTargetFile,
-          status: "applied",
-          reason: "deterministic_fallback",
-        });
-        originalContents[selectedTargetFile] = targetContent;
+        // Do not create a fake/no-op patch.
+        updatedContent = targetContent;
+      }
+
+      if (updatedContent !== targetContent) {
+        const fallbackDiff = computeFileDiff(targetContent, updatedContent);
+        const fallbackChangedLines = fallbackDiff.filter(
+          (l) => l.type === "added" || l.type === "removed"
+        ).length;
+        if (fallbackChangedLines > 20) {
+          deterministicFallbackTooLarge = true;
+          console.log("[zone-fallback] rejected oversized fallback patch");
+          patchResults.push({
+            filePath: selectedTargetFile,
+            status: "failed",
+            reason: "deterministic_fallback_too_large",
+          });
+        } else {
+          applyPatches = [
+            { filePath: selectedTargetFile, fullContent: updatedContent },
+          ];
+          patchSource = "deterministic_fallback";
+          fallbackForcePreviewOnly = true;
+          internalWarnings.push(
+            "[deterministic_fallback_used] LLM patch generation failed; Zone generated a deterministic fallback patch."
+          );
+          visibleWarnings.push(
+            "[deterministic_fallback_used] LLM patch generation failed; Zone generated a deterministic fallback patch."
+          );
+          console.log(
+            "[zone-fallback-apply] deterministic fallback produced patch"
+          );
+          patchResults.push({
+            filePath: selectedTargetFile,
+            status: "applied",
+            reason: "deterministic_fallback",
+          });
+          originalContents[selectedTargetFile] = targetContent;
+        }
       }
     }
   }
+
+  if (applyPatches.length === 0 && patchSource === "no_patch") {
+    patchSource = "no_patch";
+  }
+  console.log("[zone-patch-quality] source", patchSource);
 
   if (
     input.hostedContext &&
@@ -4893,10 +4929,13 @@ export async function runLlmPatchFlow(input: {
       ? Math.max(0, developerConfidenceBase - 15)
       : undefined,
   ].filter((value): value is number => typeof value === "number");
-  const developerConfidence =
+  let developerConfidence =
     confidenceCaps.length > 0
       ? Math.min(developerConfidenceBase, ...confidenceCaps)
       : developerConfidenceBase;
+  if (patchSource === "deterministic_fallback") {
+    developerConfidence = Math.min(developerConfidence, 65);
+  }
   const runtimeVerificationFailed =
     runtimeVerification?.attempted === true &&
     (runtimeVerification.status === "failed" || runtimeVerification.status === "timeout");
@@ -5174,6 +5213,12 @@ const decisionMode =
       warnings: intentMismatchDecision.warnings,
     },
     patchQuality,
+    patchQualitySummary: {
+      source: patchSource,
+      fallbackUsed: patchSource === "deterministic_fallback",
+      changedFileCount: patchScope.changedFileCount,
+      totalChangedLines: patchScope.totalChangedLines,
+    },
     designSystemSignals,
     safetyResolution: finalSafetyResolution,
     microEditProtection,

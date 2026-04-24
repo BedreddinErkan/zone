@@ -2935,6 +2935,68 @@ expect(result.safetyResolution).toEqual(
     expect(planFullPatchWithLlmMock).toHaveBeenCalled();
   });
 
+  it("LLM patch success: reports llm_patch source and no fallback warning", async () => {
+    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const files = [buildRepoFile("src/pages/home.html", "frontend")];
+    const currentHtml =
+      '<body><button class="exec-btn">Execute</button><span class="status">Ready</span></body>';
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["Static UI"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 40 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Add badge",
+      steps: ["Add badge"],
+      suggestedFiles: [
+        { path: "src/pages/home.html", reason: "Main UI file", action: "modify" },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, currentHtml]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Add badge",
+      patches: [
+        {
+          path: "src/pages/home.html",
+          operation: "modify",
+          summary: "Add badge",
+          targetHint: "status span",
+          contentPreview: "(preview)",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "full_content",
+      filePath: "src/pages/home.html",
+      fullContent:
+        '<body><button class="exec-btn">Execute</button><span class="status">Ready <span class="badge">New</span></span></body>',
+      summary: "Added badge next to status text.",
+      warnings: [],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "add a badge next to the ready status text",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.patchQualitySummary?.source).toBe("llm_patch");
+      expect(result.warnings.join("\n")).not.toContain(
+        "[deterministic_fallback_used]"
+      );
+    }
+    expect(consoleLogSpy).toHaveBeenCalledWith(
+      "[zone-patch-quality] source",
+      "llm_patch"
+    );
+    consoleLogSpy.mockRestore();
+  });
+
   it("generates a deterministic fallback patch when LLM fails for constrained localized task", async () => {
     const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const files = [buildRepoFile("client/src/pages/app/PatientsPage.jsx", "frontend")];
@@ -3009,6 +3071,12 @@ expect(result.safetyResolution).toEqual(
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.applyPatches).toHaveLength(1);
+      expect(result.patchQualitySummary?.source).toBe("deterministic_fallback");
+      expect(result.decisionMode).toBe("preview_only");
+      expect(result.developerConfidence).toBeLessThanOrEqual(65);
+      expect(result.warnings.join("\n")).toContain(
+        "[deterministic_fallback_used]"
+      );
       expect(result.applyPatches[0].filePath).toBe(
         "client/src/pages/app/PatientsPage.jsx"
       );
@@ -3027,6 +3095,95 @@ expect(result.safetyResolution).toEqual(
     expect(consoleLogSpy).toHaveBeenCalledWith(
       "[zone-fallback] generating deterministic patch",
       "client/src/pages/app/PatientsPage.jsx"
+    );
+    expect(consoleLogSpy).toHaveBeenCalledWith(
+      "[zone-patch-quality] source",
+      "deterministic_fallback"
+    );
+    consoleLogSpy.mockRestore();
+  });
+
+  it("fallback cannot safely insert: reports no_patch source and deterministic_fallback_no_safe_insertion", async () => {
+    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const files = [buildRepoFile("client/src/pages/app/PatientsPage.jsx", "frontend")];
+    const currentJsx = [
+      "import { useState } from \"react\";",
+      "export function PatientsPage() {",
+      "  const [fullName, setFullName] = useState(\"\");",
+      "  const [email, setEmail] = useState(\"\");",
+      "  const [formError, setFormError] = useState(\"\");",
+      "  const [success, setSuccess] = useState(\"\");",
+      "  const onCreate = () => {};",
+      "  return (",
+      "    <div>",
+      "      <h1>Patients</h1>",
+      "      <form onSubmit={onCreate}>",
+      "        <input value={fullName} onChange={(e) => setFullName(e.target.value)} />",
+      "        <input value={email} onChange={(e) => setEmail(e.target.value)} />",
+      "        <button type=\"submit\">Create</button>",
+      "      </form>",
+      "    </div>",
+      "  );",
+      "}",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React app"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 40 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Add validation",
+      steps: ["Validate inputs"],
+      suggestedFiles: [
+        {
+          path: "client/src/pages/app/PatientsPage.jsx",
+          reason: "Target page",
+          action: "modify",
+        },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, currentJsx]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Add validation",
+      patches: [
+        {
+          path: "client/src/pages/app/PatientsPage.jsx",
+          operation: "modify",
+          summary: "Insert validation",
+          targetHint: "handleSubmit",
+          contentPreview: "(advisory preview)",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "invalid_patch_format",
+      filePath: "client/src/pages/app/PatientsPage.jsx",
+      summary: "Model failed",
+      warnings: ["[invalid_patch_format] Model failed after retries"],
+    });
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "Add minimal client-side validation to the existing form submit handler only. Reuse the existing state and existing submit flow. Do not create a new form. Do not introduce a new API call.",
+      repoPath: "C:/repo",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.applyPatches).toEqual([]);
+      expect(result.patchQualitySummary?.source).toBe("no_patch");
+      expect(result.patchPreview).toContain(
+        "deterministic_fallback_no_safe_insertion"
+      );
+      // Ensure we didn't generate a fake comment-only append patch.
+      expect(result.patchPreview).not.toContain("validation fallback applied");
+    }
+    expect(consoleLogSpy).toHaveBeenCalledWith(
+      "[zone-patch-quality] source",
+      "no_patch"
     );
     consoleLogSpy.mockRestore();
   });
