@@ -646,6 +646,23 @@ function normalizeConstrainedTaskText(task: string): string {
   return task.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+/** Lead words before page/form/… must not become entity anchors (instruction / meta noise). */
+const CONSTRAINT_ENTITY_EXTRACTED_ANCHOR_STOPWORDS = new Set([
+  "e2e",
+  "random",
+  "task",
+  "goal",
+  "form",
+  "create",
+  "add",
+  "modify",
+  "existing",
+  "file",
+  "page",
+  "component",
+  "logic",
+]);
+
 function extractConstrainedTaskEntityAnchors(normalizedTask: string): string[] {
   const patterns = [
     /\b([a-z][a-z0-9]+)\s+page\b/g,
@@ -665,7 +682,12 @@ function extractConstrainedTaskEntityAnchors(normalizedTask: string): string[] {
       }
     }
   }
-  return [...new Set(found.map((word) => word.toLowerCase()))];
+  const unique = [...new Set(found.map((word) => word.toLowerCase()))];
+  return unique.filter(
+    (word) =>
+      word.length >= 4 &&
+      !CONSTRAINT_ENTITY_EXTRACTED_ANCHOR_STOPWORDS.has(word)
+  );
 }
 
 function escapeRegExpChars(value: string): string {
