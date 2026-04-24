@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.__testOnly_buildDeterministicFallbackPatch = void 0;
 exports.detectMicroEditIntent = detectMicroEditIntent;
 exports.detectUiMappingRiskIntent = detectUiMappingRiskIntent;
 exports.isIrrelevantDeveloperContextPath = isIrrelevantDeveloperContextPath;
@@ -17,6 +18,7 @@ exports.scoreCandidateMatch = scoreCandidateMatch;
 exports.smartContextWindow = smartContextWindow;
 exports.computeFileDiff = computeFileDiff;
 exports.fuzzyFindAndReplace = fuzzyFindAndReplace;
+exports.detectZoneInternalTask = detectZoneInternalTask;
 exports.runLlmPatchFlow = runLlmPatchFlow;
 const scanRepo_js_1 = require("../repo/scanRepo.js");
 const detectProjectStructure_js_1 = require("../repo/detectProjectStructure.js");
@@ -37,8 +39,32 @@ const designSystemSignals_js_1 = require("../engine/designSystemSignals.js");
 const patchQualityScorer_js_1 = require("../engine/patchQualityScorer.js");
 const safetyLevelResolver_js_1 = require("../engine/safetyLevelResolver.js");
 const microEditProtection_js_1 = require("../engine/microEditProtection.js");
+const patchCorrectnessValidator_js_1 = require("../engine/patchCorrectnessValidator.js");
+const developerPatchParse_js_1 = require("./developerPatchParse.js");
 const taskIntentParser_js_1 = require("./taskIntentParser.js");
 const zoneApiPerf_js_1 = require("../api/zoneApiPerf.js");
+function countJsxTagsDiagnostic(src) {
+    // Strip strings and comments conservatively so matches inside them don't skew counts.
+    const stripped = src
+        .replace(/\/\*[\s\S]*?\*\//g, " ")
+        .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
+        .replace(/(["'`])(?:\\.|(?!\1).)*\1/g, " ");
+    const selfClosing = (stripped.match(/<[A-Za-z][A-Za-z0-9_.]*\b[^<>]*\/>/g) ?? []).length;
+    const closes = (stripped.match(/<\/[A-Za-z][A-Za-z0-9_.]*\s*>/g) ?? []).length;
+    // Any `<Tag ...>` that is not self-closing.
+    const allOpens = (stripped.match(/<[A-Za-z][A-Za-z0-9_.]*\b[^<>]*>/g) ?? []).length;
+    const opens = Math.max(0, allOpens - selfClosing);
+    return { opens, closes, selfClosing };
+}
+function buildDiffHeadSample(diff, maxChars = 200) {
+    const formatted = diff
+        .filter((line) => line.type !== "unchanged")
+        .map((line) => `${line.type === "added" ? "+" : "-"}${line.content}`)
+        .join("\n");
+    return formatted.length <= maxChars
+        ? formatted
+        : `${formatted.slice(0, maxChars)}…`;
+}
 /** A fully-populated TaskIntent representing "I don't know what this is". */
 const UNKNOWN_INTENT = {
     rawTask: "",
@@ -73,6 +99,7 @@ const CRITICAL_UI_ANCHORS = [
     "patch preview",
 ];
 const DEVELOPER_VAGUE_TASK_WARNING = "[VAGUE_TASK] Task is too vague to generate a reliable patch. Please describe the specific file, function, and change needed.";
+const ZONE_INTERNAL_TASK_WARNING = "[ZONE_INTERNAL_TASK] Task targets Zone itself, not the selected repo. Switch to the Zone codebase or clarify the intended target before patching.";
 const DEVELOPER_GENERIC_TASK_PHRASES = new Set([
     "fix",
     "bug",
@@ -128,6 +155,36 @@ const MICRO_EDIT_INTENT_TERMS = [
     "small css tweak",
 ];
 const UI_MAPPING_RISK_TERMS = ["swap", "mapping", "reversed", "order", "before/after"];
+const ZONE_INTERNAL_ZONE_TERMS = [
+    "zone ui",
+    "zone itself",
+    "zone product",
+    "zone thread ui",
+    "zone execution ui",
+    "zone inspect panel",
+    "zone billing summary",
+    "zone run-state",
+    "zone run state",
+    "zone developer flow",
+];
+const ZONE_INTERNAL_RUNTIME_TERMS = [
+    "agentic developer flow",
+    "run-state mapping",
+    "preview_only",
+    "files changed",
+    "done result behavior",
+    "hosted /api/patch",
+    "/api/patch behavior",
+    "recent runs",
+    "patch preview",
+    "inspect panel",
+    "thread ui",
+    "execution ui",
+    "billing summary",
+    "run-state",
+    "run state",
+    "developer flow",
+];
 const IRRELEVANT_DEVELOPER_CONTEXT_SEGMENTS = [
     "/.env",
     "/.gitignore",
@@ -268,6 +325,688 @@ function countPatternMatches(content, patterns) {
         const matches = content.match(pattern);
         return total + (matches?.length ?? 0);
     }, 0);
+}
+function detectExistingStructureTaskConstraints(task) {
+    const normalizedTask = task.toLowerCase();
+    return {
+        requiresExistingForm: /\bexisting form\b/.test(normalizedTask) ||
+            /\bcreate form\b/.test(normalizedTask) ||
+            /\breuse existing form\b/.test(normalizedTask) ||
+            /\bdo not create (?:a )?new form\b/.test(normalizedTask),
+        requiresExistingSubmitFlow: /\bexisting submit flow\b/.test(normalizedTask) ||
+            /\breuse existing submit flow\b/.test(normalizedTask) ||
+            /\bsubmit flow\b/.test(normalizedTask),
+        requiresExistingState: /\breuse (?:the )?existing state\b/.test(normalizedTask) ||
+            /\bexisting state\b/.test(normalizedTask),
+        avoidsNewForm: /\bdo not create (?:a )?new form\b/.test(normalizedTask),
+        avoidsNewApiCall: /\bdo not introduce (?:a )?new api call\b/.test(normalizedTask) ||
+            /\bdo not add (?:a )?new api call\b/.test(normalizedTask) ||
+            /\bno new api call\b/.test(normalizedTask),
+    };
+}
+function isConstrainedLocalizedPatchTask(task) {
+    const constraints = detectExistingStructureTaskConstraints(task);
+    return (constraints.requiresExistingForm ||
+        constraints.requiresExistingSubmitFlow ||
+        constraints.requiresExistingState ||
+        constraints.avoidsNewForm ||
+        constraints.avoidsNewApiCall);
+}
+function scoreConstraintAwareContextFile(input) {
+    const constraints = detectExistingStructureTaskConstraints(input.task);
+    if (!constraints.requiresExistingForm &&
+        !constraints.requiresExistingSubmitFlow &&
+        !constraints.requiresExistingState &&
+        !constraints.avoidsNewForm &&
+        !constraints.avoidsNewApiCall) {
+        return 0;
+    }
+    const content = input.content.toLowerCase();
+    const hasFormStructure = countPatternMatches(content, [
+        /<form\b/g,
+        /\buseform\b/g,
+        /\bformik\b/g,
+        /\bformstate\b/g,
+        /\bformvalues\b/g,
+        /\bformdata\b/g,
+    ]) > 0;
+    const hasSubmitFlow = countPatternMatches(content, [
+        /\bonsubmit\b/g,
+        /\bhandlesubmit\b/g,
+        /\bsubmit[a-z0-9_]*\s*\(/g,
+        /\bsubmit[a-z0-9_]*\s*=/g,
+        /type\s*=\s*["']submit["']/g,
+        /\bpreventdefault\s*\(/g,
+    ]) > 0;
+    const hasStateHandling = countPatternMatches(content, [
+        /\busestate\b/g,
+        /\busereducer\b/g,
+        /\bformstate\b/g,
+        /\bset[a-z0-9_]+\s*\(/g,
+    ]) > 0;
+    const hasApiUsage = countPatternMatches(content, [
+        /\bfetch\s*\(/g,
+        /\baxios\./g,
+        /\bapi\.(?:get|post|put|patch|delete)\s*\(/g,
+        /\bclient\.(?:get|post|put|patch|delete)\s*\(/g,
+        /\bmutate(?:async)?\s*\(/g,
+    ]) > 0;
+    let score = 0;
+    if (constraints.requiresExistingForm) {
+        score += hasFormStructure ? 26 : -18;
+    }
+    if (constraints.requiresExistingSubmitFlow) {
+        score += hasSubmitFlow ? 20 : -14;
+    }
+    if (constraints.requiresExistingState) {
+        score += hasStateHandling ? 16 : -10;
+    }
+    if (constraints.avoidsNewForm && !hasFormStructure) {
+        score -= 12;
+    }
+    if (constraints.avoidsNewApiCall && hasSubmitFlow && hasApiUsage) {
+        score += 8;
+    }
+    if (hasFormStructure && hasSubmitFlow && hasStateHandling) {
+        score += 12;
+    }
+    return score;
+}
+const CONSTRAINT_ENTITY_LEAD_STOPWORDS = new Set([
+    "the",
+    "a",
+    "an",
+    "this",
+    "that",
+    "these",
+    "those",
+    "each",
+    "every",
+    "our",
+    "your",
+    "my",
+    "their",
+    "its",
+    "existing",
+    "new",
+    "entire",
+    "whole",
+    "full",
+    "same",
+    "other",
+    "unrelated",
+    "any",
+    "another",
+    "generic",
+    "current",
+    "original",
+    "given",
+    "specified",
+    "login",
+    "sign",
+    "up",
+    "out",
+    "home",
+    "main",
+    "landing",
+    "error",
+    "settings",
+    "search",
+    "create",
+    "submit",
+    "edit",
+    "update",
+    "delete",
+    "filter",
+    "sort",
+    "select",
+    "client",
+    "server",
+    "side",
+    "web",
+    "mobile",
+    "add",
+    "use",
+    "using",
+    "apply",
+    "build",
+    "make",
+    "get",
+    "set",
+    "empty",
+    "blank",
+    "single",
+    "multi",
+    "related",
+    "only",
+    "first",
+    "last",
+    "next",
+    "previous",
+]);
+function normalizeConstrainedTaskText(task) {
+    return task.trim().toLowerCase().replace(/\s+/g, " ");
+}
+/** Lead words before page/form/… must not become entity anchors (instruction / meta noise). */
+const CONSTRAINT_ENTITY_EXTRACTED_ANCHOR_STOPWORDS = new Set([
+    "e2e",
+    "random",
+    "task",
+    "goal",
+    "form",
+    "create",
+    "add",
+    "modify",
+    "existing",
+    "file",
+    "page",
+    "component",
+    "logic",
+]);
+function extractConstrainedTaskEntityAnchors(normalizedTask) {
+    const patterns = [
+        /\b([a-z][a-z0-9]+)\s+page\b/g,
+        /\b([a-z][a-z0-9]+)\s+form\b/g,
+        /\b([a-z][a-z0-9]+)\s+component\b/g,
+        /\b([a-z][a-z0-9]+)\s+screen\b/g,
+        /\b([a-z][a-z0-9]+)\s+view\b/g,
+    ];
+    const found = [];
+    for (const pattern of patterns) {
+        pattern.lastIndex = 0;
+        let match = null;
+        while ((match = pattern.exec(normalizedTask)) !== null) {
+            const word = match[1];
+            if (word && !CONSTRAINT_ENTITY_LEAD_STOPWORDS.has(word)) {
+                found.push(word);
+            }
+        }
+    }
+    const unique = [...new Set(found.map((word) => word.toLowerCase()))];
+    return unique.filter((word) => word.length >= 4 &&
+        !CONSTRAINT_ENTITY_EXTRACTED_ANCHOR_STOPWORDS.has(word));
+}
+function escapeRegExpChars(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function splitIdentifierTokens(identifier) {
+    const raw = identifier.trim();
+    if (!raw) {
+        return [];
+    }
+    const spaced = raw
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+        .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+        .replace(/([a-zA-Z])([0-9])/g, "$1 $2")
+        .replace(/([0-9])([a-zA-Z])/g, "$1 $2");
+    return spaced
+        .split(/[^a-zA-Z0-9]+/g)
+        .map((token) => token.toLowerCase())
+        .filter((token) => token.length > 0);
+}
+const PATH_ENTITY_COMPOUND_SUFFIXES = [
+    "page",
+    "pages",
+    "form",
+    "forms",
+    "list",
+    "lists",
+    "view",
+    "views",
+    "grid",
+    "table",
+    "modal",
+    "dialog",
+    "panel",
+    "screen",
+    "wizard",
+];
+function expandGluedLowercaseCompoundTokens(token) {
+    const lower = token.toLowerCase();
+    if (!/^[a-z0-9]+$/.test(lower) || lower.length < 6) {
+        return [];
+    }
+    const out = [];
+    for (const suffix of PATH_ENTITY_COMPOUND_SUFFIXES) {
+        if (lower.endsWith(suffix) && lower.length > suffix.length + 2) {
+            out.push(lower.slice(0, -suffix.length));
+        }
+    }
+    return out;
+}
+function tokenizePathSegmentForEntityMatch(segment) {
+    const withoutExt = segment.replace(/\.[^/.]+$/, "");
+    const tokens = new Set();
+    for (const token of splitIdentifierTokens(withoutExt)) {
+        tokens.add(token);
+        for (const extra of expandGluedLowercaseCompoundTokens(token)) {
+            tokens.add(extra);
+        }
+    }
+    for (const part of withoutExt.toLowerCase().split(/[-_]+/g)) {
+        if (part.length > 0) {
+            tokens.add(part);
+            for (const token of splitIdentifierTokens(part)) {
+                tokens.add(token);
+            }
+            for (const extra of expandGluedLowercaseCompoundTokens(part)) {
+                tokens.add(extra);
+            }
+        }
+    }
+    return [...tokens];
+}
+function collectPathEntityTokens(filePath) {
+    const normalizedSlashes = filePath.replace(/\\/g, "/");
+    const segments = normalizedSlashes.split("/").filter(Boolean);
+    const tokens = new Set();
+    for (let index = 0; index < segments.length; index++) {
+        const segment = segments[index];
+        const withoutExt = index === segments.length - 1 ? segment.replace(/\.[^/.]+$/, "") : segment;
+        for (const token of tokenizePathSegmentForEntityMatch(withoutExt)) {
+            tokens.add(token);
+        }
+    }
+    return [...tokens];
+}
+function variantsForConstrainedEntityAnchor(anchor) {
+    const lower = anchor.toLowerCase();
+    const variants = new Set([lower]);
+    if (lower.length >= 4 && lower.endsWith("s")) {
+        variants.add(lower.slice(0, -1));
+    }
+    else if (lower.length >= 4 && !lower.endsWith("s")) {
+        variants.add(`${lower}s`);
+    }
+    return [...variants];
+}
+function pathTokensHitEntityVariants(pathTokens, entityAnchors) {
+    if (!Array.isArray(pathTokens) || !Array.isArray(entityAnchors)) {
+        return false;
+    }
+    for (const anchor of entityAnchors) {
+        const normalizedAnchor = anchor.toLowerCase();
+        for (const token of pathTokens) {
+            const normalizedToken = token.toLowerCase();
+            // Exact match
+            if (normalizedToken === normalizedAnchor) {
+                return true;
+            }
+            // Singular / plural variations
+            if (normalizedToken === normalizedAnchor + "s" ||
+                normalizedToken === normalizedAnchor + "es" ||
+                normalizedAnchor === normalizedToken + "s" ||
+                normalizedAnchor === normalizedToken + "es") {
+                return true;
+            }
+            // Partial / contains match
+            if (normalizedToken.includes(normalizedAnchor) ||
+                normalizedAnchor.includes(normalizedToken)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+function pathAlignsWithConstrainedTaskEntityAnchors(filePath, entityAnchors) {
+    if (entityAnchors.length === 0) {
+        return true;
+    }
+    const normalizedAnchors = entityAnchors.map((anchor) => anchor.toLowerCase());
+    const pathTokens = collectPathEntityTokens(filePath);
+    return normalizedAnchors.every((anchor) => pathTokensHitEntityVariants(pathTokens, [anchor]));
+}
+const CONSTRAINED_FALLBACK_RANKED_READ_LIMIT = 12;
+const CONSTRAINED_FALLBACK_ENTITY_PATH_CAP = 16;
+const CONSTRAINED_FALLBACK_MAX_READ_PATHS = 24;
+function buildConstrainedFallbackPathTokensDebug(paths) {
+    const out = {};
+    const seen = new Set();
+    for (const path of paths) {
+        if (seen.has(path)) {
+            continue;
+        }
+        seen.add(path);
+        out[path] = collectPathEntityTokens(path);
+    }
+    return out;
+}
+function collectConstrainedFallbackEntityPathCandidates(input) {
+    if (input.entityAnchors.length === 0) {
+        return [];
+    }
+    const matches = [];
+    const seen = new Set();
+    for (const file of input.developerContextFiles) {
+        const { path } = file;
+        if (input.rejectedPaths.has(path) || seen.has(path)) {
+            continue;
+        }
+        if (isIrrelevantDeveloperContextPath(path) ||
+            isProtectedDeveloperUiPath(path)) {
+            continue;
+        }
+        if (!pathAlignsWithConstrainedTaskEntityAnchors(path, input.entityAnchors)) {
+            continue;
+        }
+        seen.add(path);
+        matches.push({ path, score: 0 });
+    }
+    matches.sort((a, b) => a.path.localeCompare(b.path));
+    return matches.slice(0, CONSTRAINED_FALLBACK_ENTITY_PATH_CAP);
+}
+function extractLeadingExportedComponentTokens(fileContent) {
+    const head = fileContent.slice(0, 8000);
+    const names = [];
+    const defaultFn = head.match(/export\s+default\s+function\s+(\w+)/);
+    if (defaultFn?.[1]) {
+        names.push(defaultFn[1]);
+    }
+    const namedExportFn = head.match(/export\s+function\s+(\w+)/);
+    if (namedExportFn?.[1]) {
+        names.push(namedExportFn[1]);
+    }
+    const exportConst = head.match(/export\s+const\s+(\w+)\s*=/);
+    if (exportConst?.[1]) {
+        names.push(exportConst[1]);
+    }
+    const tokens = new Set();
+    for (const name of names) {
+        for (const token of splitIdentifierTokens(name)) {
+            tokens.add(token);
+        }
+    }
+    return [...tokens];
+}
+function stripQuotedJsxStringsForHeadingScan(fragment) {
+    return fragment.replace(/(["'`])(?:\\.|(?!\1).)*\1/g, " ");
+}
+function strictFormHeadingMatchesEntityVariants(fileContent, variants) {
+    const lower = fileContent.toLowerCase();
+    const formIndex = lower.indexOf("<form");
+    if (formIndex < 0) {
+        return false;
+    }
+    const closeTag = lower.indexOf("</form>", formIndex);
+    const slice = closeTag >= 0
+        ? fileContent.slice(formIndex, closeTag)
+        : fileContent.slice(formIndex, formIndex + 4000);
+    const dequoted = stripQuotedJsxStringsForHeadingScan(slice);
+    const headingPattern = /<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/gi;
+    const legendPattern = /<legend[^>]*>([\s\S]*?)<\/legend>/gi;
+    const chunks = [];
+    let headingMatch = null;
+    headingPattern.lastIndex = 0;
+    while ((headingMatch = headingPattern.exec(dequoted)) !== null) {
+        chunks.push(headingMatch[1]);
+    }
+    legendPattern.lastIndex = 0;
+    while ((headingMatch = legendPattern.exec(dequoted)) !== null) {
+        chunks.push(headingMatch[1]);
+    }
+    return chunks.some((chunk) => {
+        const plain = chunk
+            .replace(/<[^>]+>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+        return variants.some((variant) => {
+            if (variant.length < 3) {
+                return false;
+            }
+            const boundary = new RegExp(`\\b${escapeRegExpChars(variant)}s?\\b`, "i");
+            return boundary.test(plain);
+        });
+    });
+}
+function strictSecondaryEntitySignals(fileContent, variants) {
+    const exportTokens = extractLeadingExportedComponentTokens(fileContent);
+    if (pathTokensHitEntityVariants(exportTokens, variants)) {
+        return true;
+    }
+    return strictFormHeadingMatchesEntityVariants(fileContent, variants);
+}
+function evaluateConstrainedEntityAlignment(input) {
+    if (input.anchors.length === 0) {
+        return { entityMatch: true, entitySource: "none" };
+    }
+    const pathTokens = collectPathEntityTokens(input.filePath);
+    let pathHitAll = true;
+    let secondaryHitAll = true;
+    for (const anchor of input.anchors) {
+        const variants = variantsForConstrainedEntityAnchor(anchor);
+        if (!pathTokensHitEntityVariants(pathTokens, [anchor])) {
+            pathHitAll = false;
+        }
+        if (!strictSecondaryEntitySignals(input.fileContent, variants)) {
+            secondaryHitAll = false;
+        }
+    }
+    const entityMatch = pathHitAll;
+    const entitySource = entityMatch
+        ? "path"
+        : secondaryHitAll
+            ? "content"
+            : "none";
+    return { entityMatch, entitySource };
+}
+function assessConstrainedTargetEligibility(input) {
+    const normalizedTask = normalizeConstrainedTaskText(input.task);
+    const entityAnchors = extractConstrainedTaskEntityAnchors(normalizedTask);
+    const pathTokens = collectPathEntityTokens(input.filePath);
+    const structureScore = scoreConstraintAwareContextFile({
+        task: input.task,
+        content: input.fileContent,
+    });
+    const structureOk = structureScore >= 20;
+    const { entityMatch, entitySource } = evaluateConstrainedEntityAlignment({
+        filePath: input.filePath,
+        fileContent: input.fileContent,
+        anchors: entityAnchors,
+    });
+    const topRankedPath = typeof input.topRankedRelevantPath === "string" &&
+        input.topRankedRelevantPath.length > 0
+        ? input.topRankedRelevantPath
+        : null;
+    const topRankedEntityMatch = topRankedPath !== null &&
+        topRankedPath === input.filePath &&
+        entityAnchors.length > 0 &&
+        entityMatch &&
+        !isProtectedDeveloperUiPath(input.filePath) &&
+        !isConstrainedGenericShellPatchPath(input.filePath);
+    if (!structureOk) {
+        if (topRankedEntityMatch) {
+            return {
+                eligible: true,
+                score: structureScore,
+                structureScore,
+                entityMatch: true,
+                entitySource: "path",
+                reason: "top_ranked_entity_target_preview",
+                topRankedEntityMatch: true,
+                overrideReason: "top_ranked_entity_target_preview",
+                pathTokens,
+                entityAnchors,
+            };
+        }
+        return {
+            eligible: false,
+            score: structureScore,
+            structureScore,
+            entityMatch,
+            entitySource,
+            reason: "target_file_constraint_mismatch",
+            topRankedEntityMatch,
+            overrideReason: null,
+            pathTokens,
+            entityAnchors,
+        };
+    }
+    if (!entityMatch) {
+        return {
+            eligible: false,
+            score: structureScore,
+            structureScore,
+            entityMatch: false,
+            entitySource,
+            reason: "target_entity_mismatch",
+            topRankedEntityMatch,
+            overrideReason: null,
+            pathTokens,
+            entityAnchors,
+        };
+    }
+    return {
+        eligible: true,
+        score: structureScore,
+        structureScore,
+        entityMatch: true,
+        entitySource,
+        reason: "constraint_structure_ok",
+        topRankedEntityMatch,
+        overrideReason: null,
+        pathTokens,
+        entityAnchors,
+    };
+}
+const CONSTRAINED_ELIGIBILITY_FALLBACK_REJECT_REASONS = new Set([
+    "target_entity_mismatch",
+    "target_file_constraint_mismatch",
+]);
+function isProtectedDeveloperUiPath(patchPath) {
+    return patchPath.startsWith("src/ui/") || patchPath === "src/ui/index.html";
+}
+const CONSTRAINED_GENERIC_SHELL_BASENAMES = new Set([
+    "app.jsx",
+    "app.tsx",
+    "app.js",
+    "app.ts",
+    "index.jsx",
+    "index.tsx",
+    "index.js",
+    "index.ts",
+    "layout.jsx",
+    "layout.tsx",
+    "layout.js",
+    "layout.ts",
+]);
+function isConstrainedGenericShellPatchPath(filePath) {
+    const base = filePath.split(/[/\\]/).pop()?.toLowerCase() ?? "";
+    return CONSTRAINED_GENERIC_SHELL_BASENAMES.has(base);
+}
+async function loadDeveloperModifyPatchSourceContent(input) {
+    const hostedOriginalContent = input.hostedContext &&
+        Object.prototype.hasOwnProperty.call(input.hostedContext.originalContents, input.patchPath)
+        ? input.hostedContext.originalContents[input.patchPath] ?? ""
+        : undefined;
+    const hostedContextFileContent = input.hostedContext?.contextFiles.find((file) => file.path === input.patchPath)
+        ?.content;
+    if (input.hostedContext &&
+        typeof hostedOriginalContent === "undefined" &&
+        typeof hostedContextFileContent === "undefined") {
+        return { ok: false, reason: "missing_hosted_context" };
+    }
+    const repoFile = input.allFiles.find((f) => f.path === input.patchPath);
+    const absolutePath = repoFile?.absolutePath;
+    const content = input.hostedContext
+        ? hostedOriginalContent ?? hostedContextFileContent ?? ""
+        : absolutePath !== undefined
+            ? ((await (0, readProjectFiles_js_1.readProjectFiles)([absolutePath]))[absolutePath] ?? "")
+            : "";
+    return { ok: true, content };
+}
+async function buildConstrainedFallbackContentByPath(input) {
+    const map = new Map();
+    for (const file of input.resolvedFileContexts) {
+        map.set(file.path, file.content);
+    }
+    if (input.hostedContext) {
+        for (const file of input.hostedContext.contextFiles) {
+            map.set(file.path, file.content);
+        }
+        for (const [pathKey, value] of Object.entries(input.hostedContext.originalContents)) {
+            if (!map.has(pathKey)) {
+                map.set(pathKey, value ?? "");
+            }
+        }
+    }
+    async function ensureRepoPathLoaded(path) {
+        if (map.has(path) ||
+            isIrrelevantDeveloperContextPath(path) ||
+            isProtectedDeveloperUiPath(path)) {
+            return;
+        }
+        const absolutePath = input.allFiles.find((file) => file.path === path)
+            ?.absolutePath;
+        if (typeof absolutePath !== "string") {
+            return;
+        }
+        const contents = await (0, readProjectFiles_js_1.readProjectFiles)([absolutePath]);
+        map.set(path, contents[absolutePath] ?? "");
+    }
+    for (const entry of input.selectedContextFiles) {
+        await ensureRepoPathLoaded(entry.path);
+    }
+    for (const ranked of input.rankedCandidates) {
+        await ensureRepoPathLoaded(ranked.path);
+    }
+    return map;
+}
+function buildConstrainedSyntheticModifyPatch(filePath) {
+    return {
+        path: filePath,
+        operation: "modify",
+        summary: "Constrained localized task fallback after preview target eligibility rejection",
+        targetHint: "constrained_fallback_target",
+        contentPreview: "",
+    };
+}
+function pickConstrainedDeveloperApplyTargetFallback(input) {
+    const rejectedCandidates = [];
+    const entries = [...input.contentByPath.entries()].filter(([path]) => !input.rejectedPaths.has(path) &&
+        !isIrrelevantDeveloperContextPath(path) &&
+        !isProtectedDeveloperUiPath(path));
+    entries.sort((a, b) => (input.relevantFileScores.get(b[0]) ?? 0) -
+        (input.relevantFileScores.get(a[0]) ?? 0) || a[0].localeCompare(b[0]));
+    const eligible = [];
+    for (const [path, content] of entries) {
+        const eligibility = assessConstrainedTargetEligibility({
+            task: input.task,
+            filePath: path,
+            fileContent: content,
+        });
+        if (!eligibility.eligible) {
+            rejectedCandidates.push({
+                path,
+                reason: eligibility.reason,
+                score: eligibility.structureScore,
+            });
+            continue;
+        }
+        eligible.push({
+            path,
+            content,
+            rankScore: input.relevantFileScores.get(path) ?? 0,
+        });
+    }
+    const candidatesChecked = entries.length;
+    if (eligible.length === 0) {
+        return { ok: false, candidatesChecked, rejectedCandidates };
+    }
+    eligible.sort((a, b) => {
+        if (b.rankScore !== a.rankScore) {
+            return b.rankScore - a.rankScore;
+        }
+        return a.path.localeCompare(b.path);
+    });
+    const best = eligible[0];
+    return {
+        ok: true,
+        path: best.path,
+        content: best.content,
+        rankScore: best.rankScore,
+        candidatesChecked,
+        rejectedCandidates,
+    };
 }
 function hasSensitiveLogging(content) {
     const loggingCalls = [
@@ -529,6 +1268,38 @@ function isSmallLocalizedPatchScope(patchScope) {
         patchScope.totalChangedLines <= 20 &&
         !patchScope.rewriteLikeSuspicion &&
         !patchScope.cssRewriteSuspicion);
+}
+function isConstrainedTaskByText(task) {
+    const t = task.toLowerCase();
+    return (t.includes("minimal") ||
+        t.includes("existing") ||
+        t.includes("do not create") ||
+        t.includes("reuse") ||
+        t.includes("no rewrite"));
+}
+/** Constrained / micro-edit tasks must not ship huge rewrites as a normal safe patch. */
+function assessConstrainedTaskLargeRewrite(input) {
+    const constrained = isConstrainedLocalizedPatchTask(input.task);
+    const microMinimal = detectMicroEditIntent(input.task);
+    if (!constrained && !microMinimal) {
+        return { flagged: false, blockApply: false };
+    }
+    const ps = input.patchScope;
+    const removedHeavierThanAdded = ps.totalRemovedLines > ps.totalAddedLines + 50 &&
+        ps.totalRemovedLines > 100;
+    const flagged = ps.rewriteLikeSuspicion ||
+        ps.totalChangedLines > 80 ||
+        removedHeavierThanAdded;
+    if (!flagged) {
+        return { flagged: false, blockApply: false };
+    }
+    // Hard-block auto-apply only for constrained localized tasks (not micro-edit-only polish).
+    const blockApply = constrained &&
+        (ps.totalChangedLines > 80 ||
+            ps.rewriteLikeSuspicion ||
+            (ps.totalRemovedLines > ps.totalAddedLines * 1.5 &&
+                ps.totalChangedLines > 100));
+    return { flagged: true, blockApply };
 }
 function softenTaskRiskForLocalizedPatch(input) {
     const { taskRiskResult, patchScope } = input;
@@ -1042,53 +1813,42 @@ function fuzzyFindAndReplace(content, find, replace) {
         bestMatch: bestCandidate.bestMatch,
     };
 }
-function parseFindReplacePatch(rawPatchText) {
-    const match = rawPatchText.match(/--- FIND ---\s*\n([\s\S]*?)\n--- REPLACE ---\s*\n([\s\S]*)$/i);
-    if (!match)
-        return null;
-    return {
-        find: match[1],
-        replace: match[2],
-    };
+function detectZoneInternalTask(task) {
+    const normalized = task.toLowerCase().replace(/\s+/g, " ").trim();
+    if (!normalized)
+        return false;
+    if (ZONE_INTERNAL_ZONE_TERMS.some((term) => normalized.includes(term))) {
+        return true;
+    }
+    if (!/\bzone\b/i.test(normalized)) {
+        return false;
+    }
+    return ZONE_INTERNAL_RUNTIME_TERMS.some((term) => normalized.includes(term));
 }
-function parseDeveloperPatchText(rawPatchText) {
-    const barePatch = parseFindReplacePatch(rawPatchText);
-    if (barePatch) {
-        return {
-            filePath: "",
-            edits: [barePatch],
-        };
-    }
-    const match = rawPatchText.match(/--- FILE:\s*(.+?)\s*---\s*([\s\S]*)$/i);
-    if (!match)
-        return null;
-    const filePath = match[1].trim();
-    const body = match[2].trim();
-    const createMatch = body.match(/^CREATE:\s*\n?([\s\S]*)$/i);
-    if (createMatch) {
-        return {
-            filePath,
-            edits: [],
-            createContent: createMatch[1],
-        };
-    }
-    const edits = [];
-    const editRegex = /FIND:\s*\n([\s\S]*?)\nREPLACE:\s*\n([\s\S]*?)(?=\nFIND:\s*\n|$)/gi;
-    let editMatch = null;
-    while ((editMatch = editRegex.exec(body)) !== null) {
-        edits.push({
-            find: editMatch[1],
-            replace: editMatch[2],
-        });
-    }
-    return edits.length > 0 ? { filePath, edits } : null;
+function isDeveloperPatchParseStructurallyEmpty(parsed) {
+    if (parsed.noChangeNeeded)
+        return false;
+    if (parsed.createContent !== undefined)
+        return false;
+    return parsed.edits.length === 0;
 }
 function applyDeveloperPatchText(currentContent, rawPatchText) {
-    const parsed = parseDeveloperPatchText(rawPatchText);
-    if (!parsed) {
+    console.log("[zone-patch-raw]", rawPatchText.slice(0, 1000));
+    const trimmedPatch = rawPatchText.trim();
+    if (trimmedPatch !== "NO_CHANGE_NEEDED" &&
+        !rawPatchText.includes("--- FILE:")) {
+        console.warn("[zone-patch] rejected patch text without --- FILE: (skipping parse)");
         return {
             ok: false,
-            warning: "[DEVELOPER_PATCH_FORMAT] Model did not return a valid patch-style edit format.",
+            warning: "[invalid_patch_format] Model did not return a valid patch structure",
+        };
+    }
+    const parsed = (0, developerPatchParse_js_1.parseDeveloperPatchText)(rawPatchText);
+    if (!parsed || isDeveloperPatchParseStructurallyEmpty(parsed)) {
+        console.warn("[zone-patch] empty parse result");
+        return {
+            ok: false,
+            warning: "[invalid_patch_format] Model response could not be parsed into a valid patch",
         };
     }
     if (parsed.createContent !== undefined) {
@@ -1099,6 +1859,9 @@ function applyDeveloperPatchText(currentContent, rawPatchText) {
             };
         }
         return { ok: true, fullContent: parsed.createContent };
+    }
+    if (parsed.noChangeNeeded) {
+        return { ok: true, fullContent: currentContent };
     }
     let updatedContent = currentContent;
     for (const edit of parsed.edits) {
@@ -1148,6 +1911,266 @@ function buildApplyPatchFromPreview(input) {
     }
     return applied;
 }
+function findBalancedBraceBlock(input) {
+    const { content, openBraceIndex } = input;
+    if (openBraceIndex < 0 || openBraceIndex >= content.length)
+        return null;
+    if (content[openBraceIndex] !== "{")
+        return null;
+    let depth = 0;
+    let inSingle = false;
+    let inDouble = false;
+    let inTemplate = false;
+    let escaped = false;
+    for (let i = openBraceIndex; i < content.length; i += 1) {
+        const ch = content[i] ?? "";
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (ch === "\\") {
+            escaped = true;
+            continue;
+        }
+        if (!inDouble && !inTemplate && ch === "'" && !inSingle) {
+            inSingle = true;
+            continue;
+        }
+        else if (inSingle && ch === "'") {
+            inSingle = false;
+            continue;
+        }
+        if (!inSingle && !inTemplate && ch === '"' && !inDouble) {
+            inDouble = true;
+            continue;
+        }
+        else if (inDouble && ch === '"') {
+            inDouble = false;
+            continue;
+        }
+        if (!inSingle && !inDouble && ch === "`") {
+            inTemplate = !inTemplate;
+            continue;
+        }
+        if (inSingle || inDouble || inTemplate)
+            continue;
+        if (ch === "{")
+            depth += 1;
+        if (ch === "}") {
+            depth -= 1;
+            if (depth === 0) {
+                return { endExclusive: i + 1 };
+            }
+        }
+    }
+    return null;
+}
+function findSubmitHandlerBlock(fileContent) {
+    const namedPatterns = [
+        {
+            name: "const-handleSubmit-arrow",
+            re: /\b(const|let|var)\s+handleSubmit\s*=\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{/i,
+        },
+        {
+            name: "function-handleSubmit",
+            re: /\bfunction\s+handleSubmit\s*\([^)]*\)\s*\{/i,
+        },
+        {
+            name: "const-onSubmit-arrow",
+            re: /\b(const|let|var)\s+onSubmit\s*=\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{/i,
+        },
+        {
+            name: "function-onSubmit",
+            re: /\bfunction\s+onSubmit\s*\([^)]*\)\s*\{/i,
+        },
+        {
+            name: "const-submitLike-arrow",
+            re: /\b(const|let|var)\s+[A-Za-z0-9_]*submit[A-Za-z0-9_]*\s*=\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{/i,
+        },
+        {
+            name: "function-submitLike",
+            re: /\bfunction\s+[A-Za-z0-9_]*submit[A-Za-z0-9_]*\s*\([^)]*\)\s*\{/i,
+        },
+    ];
+    const extractBlockFromMatch = (match, patternName) => {
+        const matchText = match[0] ?? "";
+        const openBraceIndex = fileContent.indexOf("{", match.index + Math.max(0, matchText.length - 1));
+        if (openBraceIndex < 0)
+            return null;
+        const balanced = findBalancedBraceBlock({ content: fileContent, openBraceIndex });
+        if (!balanced)
+            return null;
+        const start = match.index;
+        const endExclusive = balanced.endExclusive;
+        const block = fileContent.slice(start, endExclusive);
+        console.log("[zone-fallback-detect] handler matched via pattern:", patternName);
+        return { start, endExclusive, block };
+    };
+    // First pass: explicit named patterns (handleSubmit/onSubmit/etc)
+    for (const { name, re } of namedPatterns) {
+        const m = re.exec(fileContent);
+        if (!m)
+            continue;
+        const extracted = extractBlockFromMatch(m, name);
+        if (extracted)
+            return extracted;
+    }
+    // Second pass: heuristic — any function-like block with preventDefault() AND submit/create/save call.
+    const genericFunctionStarts = [
+        {
+            name: "generic-const-arrow",
+            re: /\b(const|let|var)\s+([A-Za-z0-9_]+)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{/gi,
+        },
+        {
+            name: "generic-function",
+            re: /\bfunction\s+([A-Za-z0-9_]+)\s*\([^)]*\)\s*\{/gi,
+        },
+    ];
+    const submitLikeCall = /\b(submit|create|save)\w*\s*\(/i;
+    const preventDefaultCall = /\bpreventDefault\s*\(\s*\)/i;
+    let bestHeuristic = null;
+    for (const { re } of genericFunctionStarts) {
+        re.lastIndex = 0;
+        let m = null;
+        while ((m = re.exec(fileContent)) !== null) {
+            const matchText = m[0] ?? "";
+            const openBraceIndex = fileContent.indexOf("{", m.index + Math.max(0, matchText.length - 1));
+            if (openBraceIndex < 0)
+                continue;
+            const balanced = findBalancedBraceBlock({ content: fileContent, openBraceIndex });
+            if (!balanced)
+                continue;
+            const start = m.index;
+            const endExclusive = balanced.endExclusive;
+            const block = fileContent.slice(start, endExclusive);
+            const hasPreventDefault = preventDefaultCall.test(block);
+            const hasSubmitLike = submitLikeCall.test(block);
+            if (!hasPreventDefault || !hasSubmitLike)
+                continue;
+            const name = (m[2] ?? m[1] ?? "").toString();
+            const nameSuggestsSubmit = /submit|save|create/i.test(name);
+            const score = (hasPreventDefault ? 10 : 0) +
+                (hasSubmitLike ? 6 : 0) +
+                (nameSuggestsSubmit ? 2 : 0) +
+                Math.max(0, Math.min(2, 2 - Math.floor(block.length / 400)));
+            if (!bestHeuristic || score > bestHeuristic.score) {
+                bestHeuristic = { score, start, endExclusive, block };
+            }
+        }
+    }
+    if (bestHeuristic) {
+        console.log("[zone-fallback-detect] fallback heuristic used");
+        return {
+            start: bestHeuristic.start,
+            endExclusive: bestHeuristic.endExclusive,
+            block: bestHeuristic.block,
+        };
+    }
+    console.log("[zone-fallback-detect] handler NOT found");
+    return null;
+}
+function injectDeterministicValidationIntoSubmitHandler(handlerBlock) {
+    const lines = handlerBlock.replace(/\r\n/g, "\n").split("\n");
+    const submitLineIndex = lines.findIndex((line) => /\bsubmit[A-Za-z0-9_]*\s*\(/i.test(line));
+    const indentFromLine = (line) => {
+        const m = line.match(/^\s*/);
+        return m ? m[0] : "";
+    };
+    const validationIndent = submitLineIndex >= 0
+        ? indentFromLine(lines[submitLineIndex] ?? "")
+        : (() => {
+            // Prefer indentation of the first non-empty line inside the block.
+            const firstInner = lines.slice(1).find((l) => l.trim().length > 0) ?? "";
+            if (firstInner)
+                return indentFromLine(firstInner);
+            // Fallback: base indentation + two spaces.
+            return `${indentFromLine(lines[0] ?? "")}  `;
+        })();
+    const insert = [
+        `${validationIndent}if (!fullName || fullName.trim() === "") {`,
+        `${validationIndent}  setError("Full name is required");`,
+        `${validationIndent}  return;`,
+        `${validationIndent}}`,
+        "",
+        `${validationIndent}if (email && !email.includes("@")) {`,
+        `${validationIndent}  setError("Invalid email");`,
+        `${validationIndent}  return;`,
+        `${validationIndent}}`,
+        "",
+    ];
+    const insertedAt = submitLineIndex >= 0 ? "before_submit_call" : "handler_top";
+    const nextLines = submitLineIndex >= 0
+        ? [
+            ...lines.slice(0, submitLineIndex),
+            ...insert,
+            ...lines.slice(submitLineIndex),
+        ]
+        : [lines[0] ?? "", ...insert, ...lines.slice(1)];
+    return { replacedBlock: nextLines.join("\n"), insertedAt };
+}
+function buildDeterministicFallbackPatch(input) {
+    // Normalize at the boundary. All offset math below operates on \n-only content.
+    const normalizedContent = input.fileContent.replace(/\r\n/g, "\n");
+    const handler = findSubmitHandlerBlock(normalizedContent);
+    if (!handler)
+        return null;
+    const openBraceIndex = normalizedContent.indexOf("{", handler.start);
+    if (openBraceIndex < 0 || openBraceIndex >= handler.endExclusive) {
+        return null;
+    }
+    // Prefer inserting after common reset lines inside the handler.
+    // Specifically: after e.preventDefault(); and optional setFormError(""); setSuccess("");
+    const handlerBlock = handler.block;
+    const handlerLines = handlerBlock.split("\n");
+    const findLineIndex = (re) => handlerLines.findIndex((l) => re.test(l));
+    const preventIdx = findLineIndex(/\bpreventDefault\s*\(\s*\)\s*;/);
+    let insertAfterLineIdx = -1;
+    if (preventIdx >= 0) {
+        insertAfterLineIdx = preventIdx;
+        const formErrorIdx = handlerLines
+            .slice(preventIdx + 1, preventIdx + 6)
+            .findIndex((l) => /\bsetFormError\s*\(\s*["'`]\s*["'`]\s*\)\s*;/.test(l));
+        if (formErrorIdx >= 0) {
+            insertAfterLineIdx = preventIdx + 1 + formErrorIdx;
+        }
+        const successIdx = handlerLines
+            .slice(insertAfterLineIdx + 1, insertAfterLineIdx + 6)
+            .findIndex((l) => /\bsetSuccess\s*\(\s*["'`]\s*["'`]\s*\)\s*;/.test(l));
+        if (successIdx >= 0) {
+            insertAfterLineIdx = insertAfterLineIdx + 1 + successIdx;
+        }
+    }
+    // Compute absolute insert position in file content.
+    // Default to just after opening brace.
+    let insertIndex = openBraceIndex + 1;
+    if (insertAfterLineIdx >= 0) {
+        const relativeOffset = handlerLines
+            .slice(0, insertAfterLineIdx + 1)
+            .join("\n").length + 1; // newline after the line
+        insertIndex = handler.start + relativeOffset;
+    }
+    const afterInsert = normalizedContent.slice(insertIndex);
+    const nextLine = afterInsert.split("\n")[0] ?? "";
+    const nextIndent = (nextLine.match(/^\s*/) ?? [""])[0] ?? "";
+    const openLineStart = normalizedContent.lastIndexOf("\n", openBraceIndex) + 1;
+    const openLine = normalizedContent.slice(openLineStart, openBraceIndex + 1);
+    const baseIndent = (openLine.match(/^\s*/) ?? [""])[0] ?? "";
+    const indent = nextIndent || `${baseIndent}  `;
+    const validationBlock = [
+        `${indent}if (!fullName || fullName.trim() === "") {`,
+        `${indent}  setError("Full name is required");`,
+        `${indent}  return;`,
+        `${indent}}`,
+        "",
+        `${indent}if (email && !email.includes("@")) {`,
+        `${indent}  setError("Invalid email");`,
+        `${indent}  return;`,
+        `${indent}}`,
+    ].join("\n");
+    return { insertIndex, validationBlock };
+}
+// Exposed only for deterministic unit tests (no I/O, pure).
+exports.__testOnly_buildDeterministicFallbackPatch = buildDeterministicFallbackPatch;
 function detectSuspiciousUiOverwrite(input) {
     if (!isUiFilePath(input.filePath))
         return null;
@@ -1209,14 +2232,18 @@ function parsePatchFailureWarning(warning) {
         try {
             const payload = JSON.parse(warning.slice("[PATCH_FIND_NOT_FOUND] ".length));
             return {
-                reason: payload.reason ?? "patch_find_not_found",
+                reason: "patch_find_not_found",
                 score: payload.score,
                 bestMatch: payload.bestMatch,
+                normalizedFailureReason: normalizePatchOutcomeReason(payload.reason) ?? undefined,
             };
         }
         catch {
             return { reason: "patch_find_not_found" };
         }
+    }
+    if (warning.startsWith("[invalid_patch_format]")) {
+        return { reason: "invalid_patch_format" };
     }
     if (warning.startsWith("[DEVELOPER_PATCH_FORMAT]")) {
         return { reason: "invalid_patch_format" };
@@ -1231,6 +2258,43 @@ function buildPatchConflictWarning(input) {
         ...(typeof input.score === "number" ? { score: input.score } : {}),
         ...(typeof input.bestMatch === "string" ? { bestMatch: input.bestMatch } : {}),
     })}`;
+}
+function logPatchConversionDebug(input) {
+    if (input.status === "applied" && input.responseMode === "full_content") {
+        return;
+    }
+    console.log("[zone-patch-conversion]", JSON.stringify({
+        filePath: input.filePath,
+        chosenOutputMode: input.chosenOutputMode,
+        responseMode: input.responseMode,
+        status: input.status,
+        ...(input.failureReason ? { failureReason: input.failureReason } : {}),
+        ...(input.normalizedFailureReason
+            ? { normalizedFailureReason: input.normalizedFailureReason }
+            : {}),
+    }));
+}
+function normalizePatchOutcomeReason(reason) {
+    const normalized = String(reason ?? "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+    return normalized || null;
+}
+function deriveNoCodeChangeReason(patchResults) {
+    const noEligible = patchResults.find((result) => result.status === "failed" && result.reason === "no_eligible_target_found")?.reason;
+    if (noEligible) {
+        return noEligible;
+    }
+    const failedReason = patchResults.find((result) => result.status === "failed" && result.reason)?.reason;
+    const skippedReason = patchResults.find((result) => result.status === "skipped" && result.reason)?.reason;
+    const normalizedFailedReason = normalizePatchOutcomeReason(failedReason);
+    return ((normalizedFailedReason === "warning"
+        ? "patch_conversion_failed"
+        : normalizedFailedReason) ??
+        normalizePatchOutcomeReason(skippedReason) ??
+        "no_code_change_produced");
 }
 function renderPatchResultLine(result, warnings) {
     if (result.status === "applied") {
@@ -1256,6 +2320,41 @@ function renderPatchResultLine(result, warnings) {
     }
     return `✗ ${result.filePath}        failed (${details})`;
 }
+/** Max file contexts kept when trimming to satisfy the patch-flow token budget. */
+const HOSTED_CONTEXT_BUDGET_TRIM_CAP = 12;
+/**
+ * Orders paths by `rankRelevantFiles` ranking (plus original tail fill), capped at
+ * `maxFiles`. Always prefers the #1 ranked path that appears in `resolvedFileContexts`
+ * (the primary targeting / preview anchor).
+ */
+function selectRankedContextPathsWithinCap(resolvedFileContexts, fullRankedFiles, maxFiles) {
+    const byPath = new Map(resolvedFileContexts.map((file) => [file.path, true]));
+    const rankedInContext = fullRankedFiles
+        .map((file) => file.path)
+        .filter((path) => byPath.has(path));
+    const previewTargetPath = rankedInContext[0];
+    const ordered = [];
+    if (typeof previewTargetPath === "string") {
+        ordered.push(previewTargetPath);
+    }
+    for (const path of rankedInContext) {
+        if (ordered.length >= maxFiles) {
+            break;
+        }
+        if (!ordered.includes(path)) {
+            ordered.push(path);
+        }
+    }
+    for (const file of resolvedFileContexts) {
+        if (ordered.length >= maxFiles) {
+            break;
+        }
+        if (!ordered.includes(file.path)) {
+            ordered.push(file.path);
+        }
+    }
+    return ordered;
+}
 async function runLlmPatchFlow(input) {
     const reportProgress = (stage) => {
         try {
@@ -1267,6 +2366,26 @@ async function runLlmPatchFlow(input) {
     };
     const perf = (0, zoneApiPerf_js_1.startZoneApiPerfRun)(input.perfLabel ?? "runLlmPatchFlow");
     const taskIntent = typeof input.task === "string" ? (0, taskIntentParser_js_1.parseTaskIntent)(input.task) : UNKNOWN_INTENT;
+    const zoneInternalTask = detectZoneInternalTask(input.task);
+    if (zoneInternalTask) {
+        reportProgress("Ready");
+        perf.finish("zone internal task blocked");
+        return {
+            ok: true,
+            reason: "zone_internal_task_target",
+            patchPreview: ZONE_INTERNAL_TASK_WARNING,
+            warnings: [ZONE_INTERNAL_TASK_WARNING],
+            developerConfidence: 0,
+            decisionMode: "blocked",
+            finalState: "blocked",
+            finalExecutionOutcome: "completed_with_issues",
+            validationBlocked: true,
+            applyPatches: [],
+            patchResults: [],
+            fileDiffs: [],
+            contextFiles: [],
+        };
+    }
     const hostedAvailableFiles = input.hostedContext?.availableFiles.map((file) => ({
         path: file.path,
         absolutePath: file.path,
@@ -1275,15 +2394,39 @@ async function runLlmPatchFlow(input) {
     }));
     // 1. Scan repo
     reportProgress("Scanning repo...");
-    let allFiles = hostedAvailableFiles ?? [];
-    if (!hostedAvailableFiles) {
+    let allFiles = [];
+    let fileSource = "empty";
+    // Determine whether repoPath points to an actually readable local directory.
+    // In true hosted cloud mode the repoPath is absent, a tmp/hosted path, or
+    // simply not readable — scanRepo will then throw and we fall through to the
+    // hosted context list.
+    const repoPathLooksLocal = typeof input.repoPath === "string" &&
+        input.repoPath.length > 0 &&
+        !input.repoPath.startsWith("/hosted") &&
+        !input.repoPath.startsWith("/tmp/zone-hosted");
+    if (repoPathLooksLocal) {
         try {
-            allFiles = await (0, scanRepo_js_1.scanRepo)(input.repoPath);
+            const scanned = await (0, scanRepo_js_1.scanRepo)(input.repoPath);
+            if (scanned.length > 0) {
+                allFiles = scanned;
+                fileSource = "scanRepo";
+            }
         }
         catch {
-            allFiles = [];
+            // Fall through — hostedAvailableFiles may still provide a usable list.
         }
     }
+    if (allFiles.length === 0 && hostedAvailableFiles) {
+        allFiles = hostedAvailableFiles;
+        fileSource = "hosted";
+    }
+    console.log("[zone-diag-scan]", JSON.stringify({
+        repoPath: input.repoPath,
+        hostedFilesCount: hostedAvailableFiles?.length ?? 0,
+        finalCount: allFiles.length,
+        source: fileSource,
+        isHostedEnv: isHostedEnvironment(),
+    }));
     perf.mark("repo scan ready");
     if (!input.hostedContext && allFiles.length === 0 && !isHostedEnvironment()) {
         perf.finish("repo access blocked");
@@ -1298,14 +2441,27 @@ async function runLlmPatchFlow(input) {
         structure.notes.join(" ") ||
         "No project summary available.";
     const projectNotes = input.hostedContext?.projectNotes ?? structure.notes;
-    // 3. Rank relevant files — top 8
+    // 3. Rank relevant files — top 8 (full ranking reused for diagnostics + budget trim)
     reportProgress("Ranking relevant files...");
-    const relevantFiles = (0, rankRelevantFiles_js_1.rankRelevantFiles)({
+    const fullRankedFiles = (0, rankRelevantFiles_js_1.rankRelevantFiles)({
         task: input.task,
         files: developerContextFiles,
         intent: taskIntent,
-    }).slice(0, 8);
+    });
+    const relevantFiles = fullRankedFiles.slice(0, 8);
     perf.mark("relevant files ranked");
+    // TEMP DIAGNOSTIC: surface top 20 ranker scores to verify PatientsPage presence
+    console.log("[zone-diag-ranker]", JSON.stringify({
+        totalFiles: developerContextFiles.length,
+        totalRanked: fullRankedFiles.length,
+        top20: fullRankedFiles.slice(0, 20).map((f) => ({
+            path: f.path,
+            score: f.score,
+        })),
+        patientsMatches: fullRankedFiles
+            .filter((f) => f.path.toLowerCase().includes("patient"))
+            .map((f) => ({ path: f.path, score: f.score })),
+    }));
     const existingFilesSummary = input.hostedContext?.existingFilesSummary ??
         (() => {
             const topRelevantPaths = relevantFiles
@@ -1355,8 +2511,10 @@ async function runLlmPatchFlow(input) {
             return { ok: false, reason };
         }
     }
-    // 5. Read top 4 suggested files
-    const selectedContextFiles = input.hostedContext?.contextFiles.map((file) => ({
+    // 5. Read top suggested files
+    const relevantFileScores = new Map(relevantFiles.map((file) => [file.path, file.score]));
+    const llmSuggestedPaths = new Set((llmPlan?.suggestedFiles ?? []).map((file) => file.path));
+    const preliminaryContextFiles = input.hostedContext?.contextFiles.map((file) => ({
         path: file.path,
         action: file.action,
         reason: file.reason,
@@ -1375,8 +2533,20 @@ async function runLlmPatchFlow(input) {
         ]
             .filter((file) => !isIrrelevantDeveloperContextPath(file.path))
             .filter((file, index, files) => files.findIndex((candidate) => candidate.path === file.path) === index)
-            .slice(0, 4);
+            .sort((a, b) => {
+            const scoreDifference = (relevantFileScores.get(b.path) ?? -1) - (relevantFileScores.get(a.path) ?? -1);
+            if (scoreDifference !== 0) {
+                return scoreDifference;
+            }
+            const suggestionDifference = Number(llmSuggestedPaths.has(b.path)) - Number(llmSuggestedPaths.has(a.path));
+            if (suggestionDifference !== 0) {
+                return suggestionDifference;
+            }
+            return a.path.localeCompare(b.path);
+        })
+            .slice(0, 6);
     reportProgress("Loading file context...");
+    let selectedContextFiles = preliminaryContextFiles;
     let resolvedFileContexts;
     if (input.hostedContext) {
         resolvedFileContexts = input.hostedContext.contextFiles.map((file) => ({
@@ -1385,23 +2555,92 @@ async function runLlmPatchFlow(input) {
         }));
     }
     else {
-        const filePaths = selectedContextFiles
+        const filePaths = preliminaryContextFiles
             .map((f) => developerContextFiles.find((rf) => rf.path === f.path)?.absolutePath)
             .filter((p) => typeof p === "string");
         const fileContentsMap = await (0, readProjectFiles_js_1.readProjectFiles)(filePaths);
-        resolvedFileContexts = Object.entries(fileContentsMap).map(([absPath, content]) => ({
-            path: allFiles.find((f) => f.absolutePath === absPath)?.path ?? absPath,
-            content,
-        }));
+        resolvedFileContexts = preliminaryContextFiles
+            .map((file) => {
+            const absolutePath = developerContextFiles.find((rf) => rf.path === file.path)?.absolutePath;
+            if (!absolutePath) {
+                return null;
+            }
+            return {
+                path: file.path,
+                content: fileContentsMap[absolutePath] ?? "",
+            };
+        })
+            .filter((file) => file !== null);
+        const constraintAwareScores = new Map(resolvedFileContexts.map((file) => [
+            file.path,
+            scoreConstraintAwareContextFile({
+                task: input.task,
+                content: file.content,
+            }),
+        ]));
+        selectedContextFiles = [...preliminaryContextFiles]
+            .sort((a, b) => {
+            const constraintDifference = (constraintAwareScores.get(b.path) ?? 0) - (constraintAwareScores.get(a.path) ?? 0);
+            if (constraintDifference !== 0) {
+                return constraintDifference;
+            }
+            const scoreDifference = (relevantFileScores.get(b.path) ?? -1) - (relevantFileScores.get(a.path) ?? -1);
+            if (scoreDifference !== 0) {
+                return scoreDifference;
+            }
+            const suggestionDifference = Number(llmSuggestedPaths.has(b.path)) - Number(llmSuggestedPaths.has(a.path));
+            if (suggestionDifference !== 0) {
+                return suggestionDifference;
+            }
+            return a.path.localeCompare(b.path);
+        })
+            .slice(0, 4);
+        const fileContextByPath = new Map(resolvedFileContexts.map((file) => [file.path, file]));
+        resolvedFileContexts = selectedContextFiles
+            .map((file) => fileContextByPath.get(file.path))
+            .filter((file) => file !== undefined);
     }
     perf.mark("file context loaded");
     // ── TOKEN BUDGET GUARD ──────────────────────────────────────────
     const SIMPLE_BUDGET_CHARS = 320_000; // ~80K tokens (4o-mini)
     const COMPLEX_BUDGET_CHARS = 320_000; // ~80K tokens (4.1-mini)
-    const totalContextChars = resolvedFileContexts.reduce((sum, file) => sum + (file.content?.length ?? 0), 0) + (input.task?.length ?? 0);
-    const contextBudget = resolvedFileContexts.length <= 6
-        ? SIMPLE_BUDGET_CHARS
-        : COMPLEX_BUDGET_CHARS;
+    const taskCharBudget = input.task?.length ?? 0;
+    const sumContextChars = (files) => files.reduce((sum, file) => sum + (file.content?.length ?? 0), 0) + taskCharBudget;
+    let contextBudgetWarnings = [];
+    let contextBudget = resolvedFileContexts.length <= 6 ? SIMPLE_BUDGET_CHARS : COMPLEX_BUDGET_CHARS;
+    let totalContextChars = sumContextChars(resolvedFileContexts);
+    if (totalContextChars > contextBudget) {
+        const originalFileCount = resolvedFileContexts.length;
+        const trimmedPaths = selectRankedContextPathsWithinCap(resolvedFileContexts, fullRankedFiles, HOSTED_CONTEXT_BUDGET_TRIM_CAP);
+        const pathToContent = new Map(resolvedFileContexts.map((file) => [file.path, file.content]));
+        const metaSources = input.hostedContext?.contextFiles ?? preliminaryContextFiles;
+        const pathToMeta = new Map(metaSources.map((file) => [file.path, { action: file.action, reason: file.reason }]));
+        resolvedFileContexts = trimmedPaths.map((path) => ({
+            path,
+            content: pathToContent.get(path) ?? "",
+        }));
+        selectedContextFiles = trimmedPaths.map((path) => {
+            const meta = pathToMeta.get(path);
+            return {
+                path,
+                action: meta?.action ?? "inspect",
+                reason: meta?.reason ?? "Retained for patch context after budget trim",
+            };
+        });
+        contextBudget =
+            resolvedFileContexts.length <= 6 ? SIMPLE_BUDGET_CHARS : COMPLEX_BUDGET_CHARS;
+        totalContextChars = sumContextChars(resolvedFileContexts);
+        const trimmedFileCount = resolvedFileContexts.length;
+        const retainedPaths = resolvedFileContexts.map((file) => file.path);
+        console.log("[zone-diag-context-trim]", JSON.stringify({
+            originalFileCount,
+            trimmedFileCount,
+            retainedPaths,
+        }));
+        if (originalFileCount > trimmedFileCount) {
+            contextBudgetWarnings.push(`[hosted_context_trimmed_to_budget] Trimmed developer context from ${originalFileCount} to ${trimmedFileCount} files to fit the token budget.`);
+        }
+    }
     if (totalContextChars > contextBudget) {
         perf.finish("context budget exceeded");
         return {
@@ -1434,6 +2673,7 @@ async function runLlmPatchFlow(input) {
         const reason = err instanceof Error ? err.message : String(err);
         return { ok: false, reason };
     }
+    console.log("[zone-preview] received (ignored for patch application)");
     if (input.hostedContext) {
         patchPlan = {
             ...patchPlan,
@@ -1442,6 +2682,7 @@ async function runLlmPatchFlow(input) {
         console.log("[hosted] filtered patches count:", patchPlan.patches.length);
     }
     const vagueTask = isVagueDeveloperTask(input.task);
+    const selectedTargetFile = patchPlan.patches[0]?.path ?? null;
     // Task-level risk scoring for developer
     const taskRiskResult = (0, computeRiskScore_js_1.computeRiskScore)({ task: input.task, role: "developer", codeIntent: taskIntent.codeIntent });
     logRiskDebug("runLlmPatchFlow taskRiskResult", {
@@ -1456,6 +2697,7 @@ async function runLlmPatchFlow(input) {
             warnings: [`[HIGH_RISK] Task risk score ${taskRiskResult.score} — blocked before patch generation.`],
             developerConfidence: 0,
             decisionMode: "preview_only",
+            ...(selectedTargetFile ? { targetFile: selectedTargetFile } : {}),
             applyPatches: [],
             patchResults: [],
             fileDiffs: [],
@@ -1473,6 +2715,7 @@ async function runLlmPatchFlow(input) {
             warnings: [DEVELOPER_VAGUE_TASK_WARNING],
             developerConfidence: 60,
             decisionMode: "preview_only",
+            ...(selectedTargetFile ? { targetFile: selectedTargetFile } : {}),
             applyPatches: [],
             patchResults: [],
             fileDiffs: [],
@@ -1483,11 +2726,17 @@ async function runLlmPatchFlow(input) {
     // 6b. Generate full file content for modify/create patches
     reportProgress("Generating file patches...");
     let applyPatches = [];
+    let fallbackForcePreviewOnly = false;
+    let deterministicFallbackTooLarge = false;
+    let patchSource = "no_patch";
     const originalContents = {
         ...(input.hostedContext?.originalContents ?? {}),
     };
-    const internalWarnings = [...patchPlan.warnings];
-    const visibleWarnings = filterVisibleDeveloperWarnings(patchPlan.warnings);
+    const internalWarnings = [...contextBudgetWarnings, ...patchPlan.warnings];
+    const visibleWarnings = filterVisibleDeveloperWarnings([
+        ...contextBudgetWarnings,
+        ...patchPlan.warnings,
+    ]);
     const patchResults = [];
     let hostedPatchAvailability = [];
     try {
@@ -1509,7 +2758,303 @@ async function runLlmPatchFlow(input) {
             : [];
         const applyTargets = patchPlan.patches.filter((p) => p.operation === "modify" || p.operation === "create");
         const applyResults = [];
-        for (const patch of applyTargets) {
+        let loopApplyTargets = applyTargets;
+        let constrainedApplyEligibilityPrefiltered = false;
+        if (isConstrainedLocalizedPatchTask(input.task) && applyTargets.length > 0) {
+            constrainedApplyEligibilityPrefiltered = true;
+            const prefilteredTargets = [];
+            const constraintRejections = [];
+            for (const previewPatch of applyTargets) {
+                if (isProtectedDeveloperUiPath(previewPatch.path)) {
+                    prefilteredTargets.push(previewPatch);
+                    continue;
+                }
+                const hostedOriginalPre = input.hostedContext &&
+                    Object.prototype.hasOwnProperty.call(input.hostedContext.originalContents, previewPatch.path)
+                    ? input.hostedContext.originalContents[previewPatch.path] ?? ""
+                    : undefined;
+                const hostedCtxPre = input.hostedContext?.contextFiles.find((file) => file.path === previewPatch.path)?.content;
+                if (input.hostedContext &&
+                    typeof hostedOriginalPre === "undefined" &&
+                    typeof hostedCtxPre === "undefined") {
+                    patchResults.push({
+                        filePath: previewPatch.path,
+                        status: "skipped",
+                        reason: "missing hosted context",
+                    });
+                    continue;
+                }
+                const loaded = await loadDeveloperModifyPatchSourceContent({
+                    patchPath: previewPatch.path,
+                    hostedContext: input.hostedContext,
+                    allFiles,
+                });
+                if (!loaded.ok) {
+                    patchResults.push({
+                        filePath: previewPatch.path,
+                        status: "skipped",
+                        reason: "missing hosted context",
+                    });
+                    continue;
+                }
+                const preflightEligibility = assessConstrainedTargetEligibility({
+                    task: input.task,
+                    filePath: previewPatch.path,
+                    fileContent: loaded.content,
+                    topRankedRelevantPath: fullRankedFiles[0]?.path ?? null,
+                });
+                console.log("[zone-target-eligibility]", JSON.stringify({
+                    filePath: previewPatch.path,
+                    structureScore: preflightEligibility.structureScore,
+                    entityMatch: preflightEligibility.entityMatch,
+                    entitySource: preflightEligibility.entitySource,
+                    eligible: preflightEligibility.eligible,
+                    reason: preflightEligibility.reason,
+                    decision: preflightEligibility.eligible ? "accepted" : "rejected",
+                    topRankedEntityMatch: preflightEligibility.topRankedEntityMatch,
+                    overrideReason: preflightEligibility.overrideReason,
+                    pathTokens: preflightEligibility.pathTokens,
+                    entityAnchors: preflightEligibility.entityAnchors,
+                }));
+                if (!preflightEligibility.eligible) {
+                    const mismatchWarning = buildPatchConflictWarning({
+                        filePath: previewPatch.path,
+                        reason: preflightEligibility.reason,
+                        score: preflightEligibility.score,
+                    });
+                    internalWarnings.push(mismatchWarning);
+                    visibleWarnings.push(mismatchWarning);
+                    patchResults.push({
+                        filePath: previewPatch.path,
+                        status: "failed",
+                        reason: preflightEligibility.reason,
+                    });
+                    if (CONSTRAINED_ELIGIBILITY_FALLBACK_REJECT_REASONS.has(preflightEligibility.reason)) {
+                        constraintRejections.push({
+                            filePath: previewPatch.path,
+                            reason: preflightEligibility.reason,
+                        });
+                    }
+                    continue;
+                }
+                if (preflightEligibility.reason === "top_ranked_entity_target_preview") {
+                    fallbackForcePreviewOnly = true;
+                    internalWarnings.push("[top_ranked_entity_target_used_without_structure_confirmation] Top-ranked file matches the task entity/path, but structure heuristics were weak; keeping preview-only safety.");
+                    visibleWarnings.push("[top_ranked_entity_target_used_without_structure_confirmation] Top-ranked file matches the task entity/path, but structure heuristics were weak; keeping preview-only safety.");
+                }
+                prefilteredTargets.push(previewPatch);
+            }
+            loopApplyTargets = prefilteredTargets;
+            const hasNonProtectedApplyTarget = loopApplyTargets.some((p) => !isProtectedDeveloperUiPath(p.path));
+            if (!hasNonProtectedApplyTarget &&
+                constraintRejections.length > 0 &&
+                constraintRejections.every((rejection) => CONSTRAINED_ELIGIBILITY_FALLBACK_REJECT_REASONS.has(rejection.reason))) {
+                const rejectedPaths = new Set(constraintRejections.map((rejection) => rejection.filePath));
+                const rejectedPreviewPaths = constraintRejections.map((rejection) => rejection.filePath);
+                const fallbackFullRanked = (0, rankRelevantFiles_js_1.rankRelevantFiles)({
+                    task: input.task,
+                    files: developerContextFiles,
+                    intent: taskIntent,
+                });
+                const fallbackEntityAnchors = extractConstrainedTaskEntityAnchors(normalizeConstrainedTaskText(input.task));
+                const entityPathCandidates = collectConstrainedFallbackEntityPathCandidates({
+                    developerContextFiles,
+                    entityAnchors: fallbackEntityAnchors,
+                    rejectedPaths,
+                });
+                const entityPathSet = new Set(entityPathCandidates.map((candidate) => candidate.path));
+                const rankedSlice = fallbackFullRanked
+                    .filter((file) => !entityPathSet.has(file.path))
+                    .slice(0, CONSTRAINED_FALLBACK_RANKED_READ_LIMIT);
+                const rankedCandidatePaths = rankedSlice.map((file) => file.path);
+                const entityPathCandidatePaths = entityPathCandidates.map((candidate) => candidate.path);
+                const mergedReadOrder = [];
+                const mergeSeen = new Set();
+                for (const item of [
+                    ...entityPathCandidates,
+                    ...rankedSlice.map((file) => ({ path: file.path, score: file.score })),
+                ]) {
+                    if (mergeSeen.has(item.path) || rejectedPaths.has(item.path)) {
+                        continue;
+                    }
+                    mergeSeen.add(item.path);
+                    mergedReadOrder.push(item);
+                    if (mergedReadOrder.length >= CONSTRAINED_FALLBACK_MAX_READ_PATHS) {
+                        break;
+                    }
+                }
+                const fallbackRelevantScores = new Map(relevantFileScores);
+                for (const file of fallbackFullRanked) {
+                    fallbackRelevantScores.set(file.path, file.score);
+                }
+                for (const candidate of entityPathCandidates) {
+                    const current = fallbackRelevantScores.get(candidate.path) ?? 0;
+                    fallbackRelevantScores.set(candidate.path, Math.max(current, 100_000));
+                }
+                const fallbackContentByPath = await buildConstrainedFallbackContentByPath({
+                    resolvedFileContexts,
+                    selectedContextFiles,
+                    rankedCandidates: mergedReadOrder,
+                    hostedContext: input.hostedContext,
+                    allFiles,
+                });
+                const pathTokensDebug = buildConstrainedFallbackPathTokensDebug(mergedReadOrder.map((item) => item.path));
+                // Grounded candidate list. mergedReadOrder already places
+                // entity-path candidates (tiers 1/2) before ranked-only candidates.
+                // We do NOT rescan the repo or call any LLM to build this list.
+                const orderedFallbackCandidates = [];
+                const orderedFallbackSeen = new Set();
+                for (const item of mergedReadOrder) {
+                    if (orderedFallbackSeen.has(item.path))
+                        continue;
+                    if (rejectedPaths.has(item.path))
+                        continue;
+                    if (isIrrelevantDeveloperContextPath(item.path) ||
+                        isProtectedDeveloperUiPath(item.path)) {
+                        continue;
+                    }
+                    const content = fallbackContentByPath.get(item.path);
+                    if (typeof content !== "string")
+                        continue;
+                    orderedFallbackSeen.add(item.path);
+                    orderedFallbackCandidates.push({
+                        path: item.path,
+                        content,
+                        rankScore: fallbackRelevantScores.get(item.path) ?? 0,
+                    });
+                }
+                const MAX_FALLBACK_ATTEMPTS = 3;
+                const retryLogEntries = [];
+                const retryRejectedCandidates = [];
+                let attemptsMade = 0;
+                let fallbackPick = null;
+                let tier3Pick = null;
+                let fallbackTier = null;
+                for (const candidate of orderedFallbackCandidates) {
+                    if (attemptsMade >= MAX_FALLBACK_ATTEMPTS)
+                        break;
+                    attemptsMade += 1;
+                    const eligibility = assessConstrainedTargetEligibility({
+                        task: input.task,
+                        filePath: candidate.path,
+                        fileContent: candidate.content,
+                    });
+                    const retryEntry = {
+                        attempt: attemptsMade,
+                        filePath: candidate.path,
+                        eligible: eligibility.eligible,
+                        reason: eligibility.reason,
+                    };
+                    retryLogEntries.push(retryEntry);
+                    console.log("[zone-target-retry]", JSON.stringify(retryEntry));
+                    if (eligibility.eligible) {
+                        fallbackPick = {
+                            path: candidate.path,
+                            content: candidate.content,
+                            rankScore: candidate.rankScore,
+                        };
+                        fallbackTier = "tier12_eligible";
+                        break;
+                    }
+                    retryRejectedCandidates.push({
+                        path: candidate.path,
+                        reason: eligibility.reason,
+                        score: eligibility.structureScore,
+                    });
+                }
+                // Tier 3: if tier 1/2 found nothing, do a second pass over ALL
+                // grounded candidates (not bounded by MAX_FALLBACK_ATTEMPTS). This
+                // pass makes no LLM calls — only cheap eligibility checks — and
+                // picks the best structure-only match. If used, it will be forced
+                // to preview_only downstream.
+                if (fallbackPick === null) {
+                    for (const candidate of orderedFallbackCandidates) {
+                        const eligibility = assessConstrainedTargetEligibility({
+                            task: input.task,
+                            filePath: candidate.path,
+                            fileContent: candidate.content,
+                        });
+                        if (eligibility.reason === "target_entity_mismatch" &&
+                            eligibility.structureScore >= 20 &&
+                            (tier3Pick === null ||
+                                candidate.rankScore > tier3Pick.rankScore ||
+                                (candidate.rankScore === tier3Pick.rankScore &&
+                                    eligibility.structureScore > tier3Pick.structureScore))) {
+                            tier3Pick = {
+                                path: candidate.path,
+                                content: candidate.content,
+                                rankScore: candidate.rankScore,
+                                structureScore: eligibility.structureScore,
+                            };
+                        }
+                    }
+                }
+                if (fallbackPick === null && tier3Pick !== null) {
+                    const tier3Entry = {
+                        attempt: attemptsMade + 1,
+                        filePath: tier3Pick.path,
+                        eligible: true,
+                        reason: "tier3_structure_only_preview",
+                    };
+                    retryLogEntries.push(tier3Entry);
+                    console.log("[zone-target-retry]", JSON.stringify(tier3Entry));
+                    fallbackPick = {
+                        path: tier3Pick.path,
+                        content: tier3Pick.content,
+                        rankScore: tier3Pick.rankScore,
+                    };
+                    fallbackTier = "tier3_structure_only_preview";
+                    fallbackForcePreviewOnly = true;
+                }
+                if (fallbackPick !== null) {
+                    console.log("[zone-target-fallback]", JSON.stringify({
+                        rejectedPreviewPaths,
+                        entityAnchors: fallbackEntityAnchors,
+                        entityPathCandidates: entityPathCandidatePaths,
+                        rankedCandidates: rankedCandidatePaths,
+                        pathTokensDebug,
+                        candidatesChecked: attemptsMade,
+                        candidatesAvailable: orderedFallbackCandidates.length,
+                        rejectedCandidates: retryRejectedCandidates,
+                        fallback: fallbackPick.path,
+                        fallbackTier,
+                        reason: fallbackTier === "tier3_structure_only_preview"
+                            ? "selected_fallback_tier3_preview_only"
+                            : "selected_fallback",
+                        retryLog: retryLogEntries,
+                    }));
+                    originalContents[fallbackPick.path] = fallbackPick.content;
+                    loopApplyTargets = [
+                        buildConstrainedSyntheticModifyPatch(fallbackPick.path),
+                        ...loopApplyTargets,
+                    ];
+                }
+                else {
+                    console.log("[zone-target-fallback]", JSON.stringify({
+                        rejectedPreviewPaths,
+                        entityAnchors: fallbackEntityAnchors,
+                        entityPathCandidates: entityPathCandidatePaths,
+                        rankedCandidates: rankedCandidatePaths,
+                        pathTokensDebug,
+                        candidatesChecked: attemptsMade,
+                        candidatesAvailable: orderedFallbackCandidates.length,
+                        rejectedCandidates: retryRejectedCandidates,
+                        fallback: null,
+                        fallbackTier: null,
+                        reason: "no_eligible_fallback",
+                        retryLog: retryLogEntries,
+                    }));
+                    patchResults.push({
+                        filePath: constraintRejections[0]?.filePath ??
+                            applyTargets[0]?.path ??
+                            "constrained_task",
+                        status: "failed",
+                        reason: "no_eligible_target_found",
+                    });
+                }
+            }
+        }
+        for (const patch of loopApplyTargets) {
             if (patch.path.startsWith("src/ui/") || patch.path === "src/ui/index.html") {
                 internalWarnings.push("[PROTECTED_FILE] src/ui/ files cannot be modified by Zone developer mode");
                 visibleWarnings.push("[PROTECTED_FILE] src/ui/ files cannot be modified by Zone developer mode");
@@ -1571,14 +3116,62 @@ async function runLlmPatchFlow(input) {
                     .join("\n\n");
             }
             const microEditMode = isUiFilePath(patch.path) && isMicroEditUiTask(input.task);
-            const fullPatchMode = fileContent.length > 8000 ? "find_replace_patch" : "full_content";
             const contextWindow = fileContent.length > 8000
                 ? smartContextWindow({
                     fileContent,
                     task: input.task,
                 })
                 : null;
+            const preferConstrainedFullContent = loopApplyTargets.length === 1 &&
+                contextWindow !== null &&
+                isConstrainedLocalizedPatchTask(input.task);
+            const fullPatchMode = fileContent.length > 8000 && !preferConstrainedFullContent
+                ? "find_replace_patch"
+                : "full_content";
             const llmFileContent = contextWindow?.snippet ?? fileContent;
+            const shouldRunInlineConstrainedEligibility = isConstrainedLocalizedPatchTask(input.task) &&
+                !constrainedApplyEligibilityPrefiltered;
+            if (shouldRunInlineConstrainedEligibility) {
+                const targetEligibility = assessConstrainedTargetEligibility({
+                    task: input.task,
+                    filePath: patch.path,
+                    fileContent,
+                    topRankedRelevantPath: fullRankedFiles[0]?.path ?? null,
+                });
+                console.log("[zone-target-eligibility]", JSON.stringify({
+                    filePath: patch.path,
+                    structureScore: targetEligibility.structureScore,
+                    entityMatch: targetEligibility.entityMatch,
+                    entitySource: targetEligibility.entitySource,
+                    eligible: targetEligibility.eligible,
+                    reason: targetEligibility.reason,
+                    decision: targetEligibility.eligible ? "accepted" : "rejected",
+                    topRankedEntityMatch: targetEligibility.topRankedEntityMatch,
+                    overrideReason: targetEligibility.overrideReason,
+                    pathTokens: targetEligibility.pathTokens,
+                    entityAnchors: targetEligibility.entityAnchors,
+                }));
+                if (!targetEligibility.eligible) {
+                    const mismatchWarning = buildPatchConflictWarning({
+                        filePath: patch.path,
+                        reason: targetEligibility.reason,
+                        score: targetEligibility.score,
+                    });
+                    internalWarnings.push(mismatchWarning);
+                    visibleWarnings.push(mismatchWarning);
+                    patchResults.push({
+                        filePath: patch.path,
+                        status: "failed",
+                        reason: targetEligibility.reason,
+                    });
+                    continue;
+                }
+                if (targetEligibility.reason === "top_ranked_entity_target_preview") {
+                    fallbackForcePreviewOnly = true;
+                    internalWarnings.push("[top_ranked_entity_target_used_without_structure_confirmation] Top-ranked file matches the task entity/path, but structure heuristics were weak; keeping preview-only safety.");
+                    visibleWarnings.push("[top_ranked_entity_target_used_without_structure_confirmation] Top-ranked file matches the task entity/path, but structure heuristics were weak; keeping preview-only safety.");
+                }
+            }
             const targetedRelevantFiles = microEditMode
                 ? [
                     {
@@ -1594,74 +3187,109 @@ async function runLlmPatchFlow(input) {
             const normalizedTaskIntentForPrompt = detectMicroEditIntent(input.task)
                 ? "micro_edit"
                 : "standard";
-            const safePreviewPatch = canReusePatchPreviewAsFinalPatch({
-                patchCount: patchPlan.patches.length,
-                contentPreview: patch.contentPreview,
-                taskRiskResult,
-            })
-                ? buildApplyPatchFromPreview({
-                    patch,
-                    currentContent: fileContent,
-                })
-                : { ok: false };
-            if (safePreviewPatch.ok) {
-                console.log("[zone-api] skipping full patch generation (safe micro edit)");
-            }
-            const nextContent = safePreviewPatch.ok
-                ? safePreviewPatch.fullContent
-                : await (() => {
-                    perf.mark(`full patch model call start ${patch.path}`);
-                    return (0, planFullPatch_js_1.planFullPatchWithLlm)({
-                        task: input.task,
-                        filePath: patch.path,
-                        fileContent: llmFileContent,
-                        repoSummary: projectSummary,
-                        repoPath: input.repoPath,
-                        taskIntent: taskIntent.normalizedTask || taskIntent.action,
-                        normalizedTaskIntent: normalizedTaskIntentForPrompt,
-                        relevantFiles: targetedRelevantFiles,
-                        existingTargetFiles: allFiles.map((file) => file.path),
-                        executionPlan,
-                        relatedContext: [
-                            contextWindow
-                                ? `// CONTEXT WINDOW: lines ${contextWindow.startLine}-${contextWindow.endLine} of ${contextWindow.totalLines} total`
-                                : "",
-                            patch.summary,
-                            resolvedPageObjectContext,
-                            "IMPORTANT: Do NOT remove or rewrite existing functions, classes, or methods unless the task explicitly asks you to. Only add or modify what is necessary. Preserve all existing code structure, comments, and patterns.",
-                        ]
-                            .filter(Boolean)
-                            .join("\n\n"),
-                    });
-                })().then((fullPatch) => {
-                    perf.mark(`full patch model response received ${patch.path}`);
-                    if (fullPatch.mode === "patch") {
-                        const appliedPatch = applyDeveloperPatchText(fileContent, fullPatch.patchText);
-                        if (!appliedPatch.ok) {
-                            internalWarnings.push(appliedPatch.warning);
-                            if (!isHiddenDeveloperWarning(appliedPatch.warning)) {
-                                visibleWarnings.push(appliedPatch.warning);
-                            }
-                            const failure = parsePatchFailureWarning(appliedPatch.warning);
-                            const patchConflictWarning = buildPatchConflictWarning({
-                                filePath: patch.path,
-                                reason: failure.reason,
-                                score: failure.score,
-                                bestMatch: failure.bestMatch,
-                            });
-                            internalWarnings.push(patchConflictWarning);
-                            visibleWarnings.push(patchConflictWarning);
-                            patchResults.push({
-                                filePath: patch.path,
-                                status: "failed",
-                                reason: failure.reason,
-                            });
-                            return null;
-                        }
-                        return appliedPatch.fullContent;
-                    }
-                    return fullPatch.fullContent;
+            console.log("[zone-patch-source] using FULL PATCH ONLY");
+            const nextContent = await (() => {
+                perf.mark(`full patch model call start ${patch.path}`);
+                return (0, planFullPatch_js_1.planFullPatchWithLlm)({
+                    task: input.task,
+                    filePath: patch.path,
+                    fileContent: llmFileContent,
+                    repoSummary: projectSummary,
+                    repoPath: input.repoPath,
+                    taskIntent: taskIntent.normalizedTask || taskIntent.action,
+                    normalizedTaskIntent: normalizedTaskIntentForPrompt,
+                    outputMode: fullPatchMode,
+                    relevantFiles: targetedRelevantFiles,
+                    existingTargetFiles: allFiles.map((file) => file.path),
+                    executionPlan,
+                    relatedContext: [
+                        contextWindow
+                            ? `// CONTEXT WINDOW: lines ${contextWindow.startLine}-${contextWindow.endLine} of ${contextWindow.totalLines} total`
+                            : "",
+                        patch.summary,
+                        resolvedPageObjectContext,
+                        "IMPORTANT: Do NOT remove or rewrite existing functions, classes, or methods unless the task explicitly asks you to. Only add or modify what is necessary. Preserve all existing code structure, comments, and patterns.",
+                    ]
+                        .filter(Boolean)
+                        .join("\n\n"),
                 });
+            })().then((fullPatch) => {
+                perf.mark(`full patch model response received ${patch.path}`);
+                if (fullPatch.mode === "invalid_patch_format") {
+                    fallbackForcePreviewOnly = true;
+                    for (const w of fullPatch.warnings) {
+                        internalWarnings.push(w);
+                        visibleWarnings.push(w);
+                    }
+                    logPatchConversionDebug({
+                        filePath: patch.path,
+                        chosenOutputMode: fullPatchMode,
+                        responseMode: "invalid_patch_format",
+                        status: "failed",
+                        failureReason: "invalid_patch_format",
+                        normalizedFailureReason: "invalid_patch_format",
+                    });
+                    patchResults.push({
+                        filePath: patch.path,
+                        status: "failed",
+                        reason: "invalid_patch_format",
+                    });
+                    return null;
+                }
+                if (fullPatch.mode === "patch") {
+                    const appliedPatch = applyDeveloperPatchText(fileContent, fullPatch.patchText);
+                    if (!appliedPatch.ok) {
+                        internalWarnings.push(appliedPatch.warning);
+                        if (!isHiddenDeveloperWarning(appliedPatch.warning)) {
+                            visibleWarnings.push(appliedPatch.warning);
+                        }
+                        const failure = parsePatchFailureWarning(appliedPatch.warning);
+                        if (failure.reason === "invalid_patch_format") {
+                            fallbackForcePreviewOnly = true;
+                        }
+                        logPatchConversionDebug({
+                            filePath: patch.path,
+                            chosenOutputMode: fullPatchMode,
+                            responseMode: failure.reason === "invalid_patch_format"
+                                ? "invalid_patch_format"
+                                : fullPatch.mode,
+                            status: "failed",
+                            failureReason: failure.reason === "invalid_patch_format"
+                                ? "invalid_patch_format"
+                                : failure.reason,
+                            normalizedFailureReason: failure.normalizedFailureReason,
+                        });
+                        const patchConflictWarning = buildPatchConflictWarning({
+                            filePath: patch.path,
+                            reason: failure.reason,
+                            score: failure.score,
+                            bestMatch: failure.bestMatch,
+                        });
+                        internalWarnings.push(patchConflictWarning);
+                        visibleWarnings.push(patchConflictWarning);
+                        patchResults.push({
+                            filePath: patch.path,
+                            status: "failed",
+                            reason: failure.reason,
+                        });
+                        return null;
+                    }
+                    logPatchConversionDebug({
+                        filePath: patch.path,
+                        chosenOutputMode: fullPatchMode,
+                        responseMode: fullPatch.mode,
+                        status: "applied",
+                    });
+                    return appliedPatch.fullContent;
+                }
+                logPatchConversionDebug({
+                    filePath: patch.path,
+                    chosenOutputMode: fullPatchMode,
+                    responseMode: fullPatch.mode,
+                    status: "applied",
+                });
+                return fullPatch.fullContent;
+            });
             if (nextContent === null) {
                 continue;
             }
@@ -1751,6 +3379,123 @@ async function runLlmPatchFlow(input) {
         perf.mark("patch conversion fallback complete");
     }
     console.log("[hosted] applyPatches count:", applyPatches.length);
+    if (applyPatches.length > 0) {
+        patchSource = "llm_patch";
+    }
+    const taskIsConstrained = isConstrainedLocalizedPatchTask(input.task) || isConstrainedTaskByText(input.task);
+    if (taskIsConstrained && patchSource === "llm_patch" && applyPatches.length > 0) {
+        const scope = analyzePatchScope({ applyPatches, originalContents });
+        if (scope.totalChangedLines > 30) {
+            fallbackForcePreviewOnly = true;
+            const w = "[patch_exceeds_minimal_scope] Constrained task produced a larger-than-minimal patch; forcing preview-only review.";
+            internalWarnings.push(w);
+            visibleWarnings.push(w);
+        }
+        if (scope.totalChangedLines > 50) {
+            console.log("[zone-scope-guard]", {
+                taskIsConstrained,
+                totalChangedLines: scope.totalChangedLines,
+                action: "fallback_forced",
+            });
+            // Drop LLM patch so the existing deterministic fallback can run.
+            applyPatches = [];
+            patchSource = "no_patch";
+        }
+    }
+    if (applyPatches.length === 0 &&
+        selectedTargetFile &&
+        patchPlan.patches.length > 0 &&
+        patchPlan.patches[0]?.path === selectedTargetFile &&
+        isConstrainedLocalizedPatchTask(input.task)) {
+        const targetContent = originalContents[selectedTargetFile] ?? "";
+        if (targetContent.trim()) {
+            console.log("[zone-fallback] generating deterministic patch", selectedTargetFile);
+            const hasCrlf = /\r\n/.test(targetContent);
+            const normalizedTarget = hasCrlf
+                ? targetContent.replace(/\r\n/g, "\n")
+                : targetContent;
+            console.log("[zone-fallback-line-endings]", JSON.stringify({
+                filePath: selectedTargetFile,
+                hasCrlf,
+                originalLength: targetContent.length,
+                normalizedLength: normalizedTarget.length,
+            }));
+            const fallback = buildDeterministicFallbackPatch({
+                filePath: selectedTargetFile,
+                fileContent: normalizedTarget,
+            });
+            let updatedNormalized = normalizedTarget;
+            if (fallback) {
+                updatedNormalized =
+                    normalizedTarget.slice(0, fallback.insertIndex) +
+                        `\n${fallback.validationBlock}\n` +
+                        normalizedTarget.slice(fallback.insertIndex);
+                console.log("[zone-fallback] minimal insert applied");
+                console.log("[zone-fallback] inserted validation inside submit handler");
+            }
+            if (!fallback || updatedNormalized === normalizedTarget) {
+                updatedNormalized = normalizedTarget.replace("onSubmit={handleSubmit}", `onSubmit={(e) => {\n` +
+                    `    if (!fullName || fullName.trim() === "") {\n` +
+                    `      setError("Full name is required");\n` +
+                    `      return;\n` +
+                    `    }\n` +
+                    `    if (email && !email.includes("@")) {\n` +
+                    `      setError("Invalid email");\n` +
+                    `      return;\n` +
+                    `    }\n` +
+                    `    handleSubmit(e);\n` +
+                    `  }}`);
+                if (updatedNormalized !== normalizedTarget) {
+                    console.log("[zone-fallback] used inline onSubmit wrapper fallback");
+                }
+            }
+            if (updatedNormalized === normalizedTarget) {
+                console.log("[zone-fallback-detect] handler NOT found");
+                patchResults.push({
+                    filePath: selectedTargetFile,
+                    status: "failed",
+                    reason: "deterministic_fallback_no_safe_insertion",
+                });
+                // Do not create a fake/no-op patch.
+            }
+            if (updatedNormalized !== normalizedTarget) {
+                const updatedContent = hasCrlf
+                    ? updatedNormalized.replace(/\n/g, "\r\n")
+                    : updatedNormalized;
+                const fallbackDiff = computeFileDiff(targetContent, updatedContent);
+                const fallbackChangedLines = fallbackDiff.filter((l) => l.type === "added" || l.type === "removed").length;
+                if (fallbackChangedLines > 20) {
+                    deterministicFallbackTooLarge = true;
+                    console.log("[zone-fallback] rejected oversized fallback patch");
+                    patchResults.push({
+                        filePath: selectedTargetFile,
+                        status: "failed",
+                        reason: "deterministic_fallback_too_large",
+                    });
+                }
+                else {
+                    applyPatches = [
+                        { filePath: selectedTargetFile, fullContent: updatedContent },
+                    ];
+                    patchSource = "deterministic_fallback";
+                    fallbackForcePreviewOnly = true;
+                    internalWarnings.push("[deterministic_fallback_used] LLM patch generation failed; Zone generated a deterministic fallback patch.");
+                    visibleWarnings.push("[deterministic_fallback_used] LLM patch generation failed; Zone generated a deterministic fallback patch.");
+                    console.log("[zone-fallback-apply] deterministic fallback produced patch");
+                    patchResults.push({
+                        filePath: selectedTargetFile,
+                        status: "applied",
+                        reason: "deterministic_fallback",
+                    });
+                    originalContents[selectedTargetFile] = targetContent;
+                }
+            }
+        }
+    }
+    if (applyPatches.length === 0 && patchSource === "no_patch") {
+        patchSource = "no_patch";
+    }
+    console.log("[zone-patch-quality] source", patchSource);
     if (input.hostedContext &&
         applyPatches.length === 0 &&
         patchPlan.patches.length > 0) {
@@ -1758,6 +3503,107 @@ async function runLlmPatchFlow(input) {
             .filter((patch) => !patch.hasOriginalContent || !patch.hasContextFile)
             .map(({ path, reason }) => ({ path, reason })));
         console.log("[hosted] patch paths still present after hosted filtering:", patchPlan.patches.map((patch) => patch.path));
+    }
+    let correctnessMustBlock = false;
+    // Patch correctness validator v2
+    if (applyPatches.length > 0) {
+        const kept = [];
+        for (const patch of applyPatches) {
+            const before = originalContents[patch.filePath] ?? "";
+            const report = (0, patchCorrectnessValidator_js_1.validatePatchCorrectness)({
+                filePath: patch.filePath,
+                originalContent: before,
+                updatedContent: patch.fullContent,
+                task: input.task,
+                isConstrained: isConstrainedLocalizedPatchTask(input.task),
+                taskConstraints: detectExistingStructureTaskConstraints(input.task),
+                strictMode: patchSource === "deterministic_fallback",
+            });
+            console.log("[zone-patch-correctness-v2]", JSON.stringify({
+                filePath: patch.filePath,
+                ok: report.ok,
+                layersRun: report.layersRun,
+                shortCircuitedAt: report.shortCircuitedAt,
+                blockingCodes: report.blocking.map((i) => i.code),
+                warningCodes: report.warnings.map((i) => i.code),
+                strictMode: patchSource === "deterministic_fallback",
+            }));
+            const diagDiff = computeFileDiff(before, patch.fullContent);
+            const diagAdded = diagDiff.filter((l) => l.type === "added").length;
+            const diagRemoved = diagDiff.filter((l) => l.type === "removed").length;
+            const diagTotalChanged = diagAdded + diagRemoved;
+            const diagOriginalLines = countTotalLines(before || patch.fullContent);
+            const diagIsConstrained = isConstrainedLocalizedPatchTask(input.task);
+            const diagBeforeJsx = countJsxTagsDiagnostic(before);
+            const diagAfterJsx = countJsxTagsDiagnostic(patch.fullContent);
+            console.log("[zone-patch-diagnostic]", JSON.stringify({
+                filePath: patch.filePath,
+                patchSource,
+                addedLines: diagAdded,
+                removedLines: diagRemoved,
+                totalChangedLines: diagTotalChanged,
+                totalOriginalLines: diagOriginalLines,
+                changeRatio: diagOriginalLines > 0
+                    ? Number((diagTotalChanged / diagOriginalLines).toFixed(3))
+                    : 0,
+                taskIsConstrained: diagIsConstrained,
+                layer4Limit: { totalChanged: 20, removed: 5 },
+                exceedsLayer4Limit: diagTotalChanged > 20 || diagRemoved > 5,
+                jsxBefore: diagBeforeJsx,
+                jsxAfter: diagAfterJsx,
+                jsxDelta: {
+                    opens: diagAfterJsx.opens - diagBeforeJsx.opens,
+                    closes: diagAfterJsx.closes - diagBeforeJsx.closes,
+                    selfClosing: diagAfterJsx.selfClosing - diagBeforeJsx.selfClosing,
+                    balanced: diagAfterJsx.opens - diagBeforeJsx.opens ===
+                        diagAfterJsx.closes - diagBeforeJsx.closes,
+                },
+                validatorVerdict: {
+                    ok: report.ok,
+                    layersRun: report.layersRun,
+                    shortCircuitedAt: report.shortCircuitedAt,
+                    blockingCodes: report.blocking.map((i) => i.code),
+                    warningCodes: report.warnings.map((i) => i.code),
+                },
+                diffHeadSample: buildDiffHeadSample(diagDiff, 200),
+            }));
+            if (report.ok && report.warnings.length === 0) {
+                kept.push(patch);
+                continue;
+            }
+            const allIssues = [...report.blocking, ...report.warnings];
+            for (const issue of allIssues) {
+                const warningText = `[${issue.code}] ${issue.message}`;
+                internalWarnings.push(warningText);
+                visibleWarnings.push(warningText);
+            }
+            if (report.forceBlocked) {
+                correctnessMustBlock = true;
+            }
+            else if (report.forcePreviewOnly) {
+                fallbackForcePreviewOnly = true;
+            }
+            if (!report.ok) {
+                const firstBlockingCode = report.blocking[0]?.code ?? "correctness_failed";
+                for (const result of patchResults) {
+                    if (result.filePath === patch.filePath && result.status === "applied") {
+                        result.status = "failed";
+                        result.reason = firstBlockingCode;
+                    }
+                }
+                patchResults.push({
+                    filePath: patch.filePath,
+                    status: "failed",
+                    reason: firstBlockingCode,
+                });
+                continue;
+            }
+            kept.push(patch);
+        }
+        applyPatches = kept;
+        if (applyPatches.length === 0) {
+            patchSource = "no_patch";
+        }
     }
     if (input.atomicPatch && patchResults.some((result) => result.status === "failed")) {
         reportProgress("Ready");
@@ -1785,6 +3631,11 @@ async function runLlmPatchFlow(input) {
             removedLines: diff.filter((line) => line.type === "removed").length,
         };
     });
+    const hasRealPatchEvidence = applyPatches.length > 0 &&
+        fileDiffs.some((fileDiff) => fileDiff.addedLines > 0 || fileDiff.removedLines > 0);
+    const noCodeChangeReason = hasRealPatchEvidence
+        ? null
+        : deriveNoCodeChangeReason(patchResults);
     const patchScope = analyzePatchScope({
         applyPatches,
         originalContents,
@@ -1796,6 +3647,19 @@ async function runLlmPatchFlow(input) {
     if (isCommentOnlyRun) {
         patchScope.rewriteLikeSuspicion = false;
         patchScope.totalChangedLines = fileDiffs.reduce((sum, fd) => sum + fd.addedLines + fd.removedLines, 0);
+    }
+    const constrainedLargeRewriteAssessment = assessConstrainedTaskLargeRewrite({
+        task: input.task,
+        patchScope,
+    });
+    const constrainedTaskLargeRewriteBlocked = constrainedLargeRewriteAssessment.blockApply;
+    const constrainedTaskLargeRewriteForcePreview = constrainedLargeRewriteAssessment.flagged &&
+        !constrainedLargeRewriteAssessment.blockApply;
+    if (constrainedLargeRewriteAssessment.flagged) {
+        const detail = `+${patchScope.totalAddedLines}/-${patchScope.totalRemovedLines} lines (totalChanged=${patchScope.totalChangedLines}, rewriteLikeSuspicion=${patchScope.rewriteLikeSuspicion}).`;
+        const warnMsg = `[constrained_task_large_rewrite] Patch is too large for a constrained minimal task. ${detail}`;
+        internalWarnings.push(warnMsg);
+        visibleWarnings.push(warnMsg);
     }
     const designSystemSignals = (0, designSystemSignals_js_1.detectDesignSystemSignals)({
         addedLines: collectAddedPatchLines({
@@ -1947,9 +3811,12 @@ async function runLlmPatchFlow(input) {
             ? Math.max(0, developerConfidenceBase - 15)
             : undefined,
     ].filter((value) => typeof value === "number");
-    const developerConfidence = confidenceCaps.length > 0
+    let developerConfidence = confidenceCaps.length > 0
         ? Math.min(developerConfidenceBase, ...confidenceCaps)
         : developerConfidenceBase;
+    if (patchSource === "deterministic_fallback") {
+        developerConfidence = Math.min(developerConfidence, 65);
+    }
     const runtimeVerificationFailed = runtimeVerification?.attempted === true &&
         (runtimeVerification.status === "failed" || runtimeVerification.status === "timeout");
     const runtimeFailureGuidance = runtimeVerificationFailed && runtimeVerification
@@ -2031,15 +3898,21 @@ async function runLlmPatchFlow(input) {
         patchScope,
         mergedDeveloperRisk,
         finalDeveloperRisk,
-        decisionMode: hasBlockedPatch ||
-            vagueTask ||
-            microEditProtection.shouldForcePreview ||
-            intentMismatchDecision.forcePreviewOnly ||
-            uiMappingRisk.forcePreviewOnly ||
-            developerConfidence < 70 ||
-            finalDeveloperRisk.score >= 31
-            ? "preview_only"
-            : "safe_to_apply",
+        decisionMode: runtimeVerificationFailed
+            ? "blocked"
+            : constrainedTaskLargeRewriteBlocked
+                ? "blocked"
+                : hasBlockedPatch ||
+                    vagueTask ||
+                    microEditProtection.shouldForcePreview ||
+                    intentMismatchDecision.forcePreviewOnly ||
+                    uiMappingRisk.forcePreviewOnly ||
+                    developerConfidence < 70 ||
+                    finalDeveloperRisk.score >= 31 ||
+                    fallbackForcePreviewOnly ||
+                    constrainedTaskLargeRewriteForcePreview
+                    ? "preview_only"
+                    : "safe_to_apply",
     });
     syncedInternalWarnings = syncDeveloperRiskWarnings({
         warnings: syncedInternalWarnings,
@@ -2049,22 +3922,41 @@ async function runLlmPatchFlow(input) {
         warnings: syncedVisibleWarnings,
         developerRisk: finalDeveloperRisk,
     });
+    if (noCodeChangeReason) {
+        const noCodeChangeWarning = `[NO_CODE_CHANGE_PRODUCED] ${noCodeChangeReason}`;
+        if (!syncedInternalWarnings.includes(noCodeChangeWarning)) {
+            syncedInternalWarnings.push(noCodeChangeWarning);
+        }
+        if (!syncedVisibleWarnings.includes(noCodeChangeWarning)) {
+            syncedVisibleWarnings.push(noCodeChangeWarning);
+        }
+    }
     const decisionMode = runtimeVerificationFailed
         ? "blocked"
-        : hasBlockedPatch ||
-            vagueTask ||
-            microEditProtection.shouldForcePreview ||
-            intentMismatchDecision.forcePreviewOnly ||
-            uiMappingRisk.forcePreviewOnly ||
-            developerConfidence < 70 ||
-            finalDeveloperRisk.score >= 31
-            ? "preview_only"
-            : "safe_to_apply";
+        : deterministicFallbackTooLarge
+            ? "blocked"
+            : correctnessMustBlock
+                ? "blocked"
+                : constrainedTaskLargeRewriteBlocked
+                    ? "blocked"
+                    : hasBlockedPatch ||
+                        vagueTask ||
+                        microEditProtection.shouldForcePreview ||
+                        intentMismatchDecision.forcePreviewOnly ||
+                        uiMappingRisk.forcePreviewOnly ||
+                        developerConfidence < 70 ||
+                        finalDeveloperRisk.score >= 31 ||
+                        fallbackForcePreviewOnly ||
+                        constrainedTaskLargeRewriteForcePreview
+                        ? "preview_only"
+                        : "safe_to_apply";
     const finalExecutionOutcome = runtimeVerification?.status === "failed"
         ? "failed_verification"
-        : runtimeVerification?.status === "timeout"
+        : runtimeVerification?.status === "timeout" || noCodeChangeReason
             ? "completed_with_issues"
-            : "completed";
+            : constrainedTaskLargeRewriteBlocked
+                ? "completed_with_issues"
+                : "completed";
     const finalState = finalExecutionOutcome === "failed_verification" ||
         finalExecutionOutcome === "completed_with_issues"
         ? "blocked"
@@ -2094,7 +3986,9 @@ async function runLlmPatchFlow(input) {
         }
     }
     const safetyResolution = (0, safetyLevelResolver_js_1.resolveSafetyLevel)({
-        hasBlockedPatch: hasBlockedPatch || runtimeVerificationFailed,
+        hasBlockedPatch: hasBlockedPatch ||
+            runtimeVerificationFailed ||
+            constrainedTaskLargeRewriteBlocked,
         developerConfidence,
         decisionMode: decisionMode === "blocked" ? "preview_only" : decisionMode,
         developerRiskScore: finalDeveloperRisk.score,
@@ -2118,8 +4012,12 @@ async function runLlmPatchFlow(input) {
     perf.mark("decision evaluation complete");
     // 7. Build patchPreview string
     const patchPreview = [
+        ...(constrainedLargeRewriteAssessment.flagged
+            ? ["Patch is too large for a constrained minimal task.", ""]
+            : []),
         "=== LLM PATCH PREVIEW ===",
         `Summary: ${patchPlan.summary}`,
+        ...(selectedTargetFile ? [`Targeted file: ${selectedTargetFile}`] : []),
         "",
         "Patches:",
         ...patchPlan.patches.map((p) => `- ${p.path} [${p.operation}]\n  ${p.summary}\n  Hint: ${p.targetHint}`),
@@ -2142,6 +4040,8 @@ async function runLlmPatchFlow(input) {
         ok: true,
         patchPreview,
         warnings: syncedVisibleWarnings,
+        ...(noCodeChangeReason ? { reason: noCodeChangeReason } : {}),
+        ...(selectedTargetFile ? { targetFile: selectedTargetFile } : {}),
         developerConfidence,
         developerRisk: finalDeveloperRisk,
         intentMismatch: {
@@ -2151,6 +4051,12 @@ async function runLlmPatchFlow(input) {
             warnings: intentMismatchDecision.warnings,
         },
         patchQuality,
+        patchQualitySummary: {
+            source: patchSource,
+            fallbackUsed: patchSource === "deterministic_fallback",
+            changedFileCount: patchScope.changedFileCount,
+            totalChangedLines: patchScope.totalChangedLines,
+        },
         designSystemSignals,
         safetyResolution: finalSafetyResolution,
         microEditProtection,

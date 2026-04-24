@@ -2,6 +2,61 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.rankRelevantFiles = rankRelevantFiles;
 const intentAwareScore_js_1 = require("../core/intentAwareScore.js");
+const GENERIC_TASK_TERMS = new Set([
+    "add",
+    "adjust",
+    "app",
+    "bug",
+    "change",
+    "client",
+    "component",
+    "create",
+    "error",
+    "feature",
+    "fix",
+    "flow",
+    "form",
+    "frontend",
+    "improve",
+    "issue",
+    "minimal",
+    "page",
+    "screen",
+    "small",
+    "task",
+    "ui",
+    "update",
+    "validation",
+    "view",
+]);
+const GENERIC_SHELL_BASENAMES = new Set(["app", "index", "layout", "main", "root"]);
+function singularizeTerm(term) {
+    if (term.endsWith("ies") && term.length > 4) {
+        return `${term.slice(0, -3)}y`;
+    }
+    if (term.endsWith("s") && term.length > 4 && !term.endsWith("ss")) {
+        return term.slice(0, -1);
+    }
+    return term;
+}
+function extractNormalizedTerms(text) {
+    const expandedText = text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+    const terms = expandedText
+        .split(/[^a-z0-9]+/)
+        .map((term) => term.trim())
+        .filter((term) => term.length > 2);
+    return [...new Set(terms.flatMap((term) => [term, singularizeTerm(term)]))];
+}
+function getTaskEntityTerms(task) {
+    return extractNormalizedTerms(task).filter((term) => !GENERIC_TASK_TERMS.has(term));
+}
+function getPathTermMatches(filePath, taskEntityTerms) {
+    if (taskEntityTerms.length === 0) {
+        return [];
+    }
+    const pathTerms = new Set(extractNormalizedTerms(filePath));
+    return taskEntityTerms.filter((term) => pathTerms.has(term));
+}
 function extractTaskSignals(task) {
     const normalizedTask = task.toLowerCase();
     const signals = [];
@@ -229,6 +284,8 @@ function scoreFile(file, task) {
         .replace(/\.[^.]+$/, "")
         .toLowerCase();
     const signals = extractTaskSignals(task);
+    const taskEntityTerms = getTaskEntityTerms(task);
+    const pathTermMatches = getPathTermMatches(file.path, taskEntityTerms);
     const explicitFilenameTokens = task.match(/\b(?:[A-Z][A-Za-z0-9_]*|[A-Za-z0-9_-]+\.(?:jsx|tsx|ts|js|py))\b/g) ?? [];
     const explicitBasenameTargets = explicitFilenameTokens.map((token) => token.replace(/\.[^.]+$/, "").toLowerCase());
     const hasExplicitBasenameTarget = explicitBasenameTargets.length > 0;
@@ -240,6 +297,15 @@ function scoreFile(file, task) {
     for (const keyword of keywords) {
         if (filePath.includes(keyword)) {
             score += 10;
+        }
+    }
+    score += pathTermMatches.length * 14;
+    if (pathTermMatches.length > 0) {
+        if (filePath.includes("/pages/")) {
+            score += 12;
+        }
+        else if (filePath.includes("/components/")) {
+            score += 8;
         }
     }
     for (const token of explicitFilenameTokens) {
@@ -298,6 +364,12 @@ function scoreFile(file, task) {
     if (file.path.includes("/pages/") &&
         (!hasExplicitBasenameTarget || explicitBasenameTargets.includes(fileBasename))) {
         score += 4;
+    }
+    if (signals.includes("component") &&
+        taskEntityTerms.length > 0 &&
+        pathTermMatches.length === 0 &&
+        GENERIC_SHELL_BASENAMES.has(fileBasename)) {
+        score -= 18;
     }
     return score;
 }

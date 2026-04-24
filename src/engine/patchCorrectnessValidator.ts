@@ -215,7 +215,8 @@ type LexMode =
   | "template_expr"
   | "line_comment"
   | "block_comment"
-  | "regex";
+  | "regex"
+  | "jsx";
 
 type LexicalResult = {
   issues: PatchCorrectnessIssue[];
@@ -339,6 +340,10 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
   let escaped = false;
   const templateExprDepthStack: number[] = [];
   let regexHeuristicFailed = false;
+  // When we enter JS code temporarily from JSX (e.g. key={expr}),
+  // track nested braces so we can return to JSX after the matching "}".
+  let jsxExprDepth = 0;
+  let jsxReturnMode: LexMode = "code";
   const events: Array<{
     index: number;
     line: number;
@@ -422,6 +427,30 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
   for (let i = 0; i < s.length; i += 1) {
     const ch = s[i] ?? "";
     const next = s[i + 1] ?? "";
+
+    if (mode === "jsx") {
+      // In JSX tag scanning mode, ignore all delimiter tracking and all JS lexical modes.
+      // Only recognize:
+      // - `{` → enter code temporarily (JSX expression)
+      // - `>` → exit JSX tag scanning back to code
+      if (ch === "{") {
+        // Enter code to parse the expression; return to JSX when the brace closes.
+        jsxExprDepth = 1;
+        jsxReturnMode = "jsx";
+        stack.push("{");
+        pushEvent(i, ch, "push");
+        writeStripped(ch);
+        mode = "code";
+        continue;
+      }
+      if (ch === ">") {
+        writeStripped(ch);
+        mode = "code";
+        continue;
+      }
+      writeStripped(ch);
+      continue;
+    }
 
     if (mode === "line_comment") {
       writeStripped(ch === "\n" ? "\n" : " ");
@@ -558,6 +587,31 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
       continue;
     }
 
+    if (mode === "code" && ch === "<") {
+      // Heuristic JSX entry: `<Tag` or `</Tag` in expression position.
+      // Avoid common JS operators: `<=`, `<<`, `<1`, `a<b`, etc.
+      const looksLikeJsxStart = /[a-zA-Z/]/.test(next);
+      const allowedPrev =
+        lastWord === "return" ||
+        lastNonWsChar === "" ||
+        lastNonWsChar === "\n" ||
+        lastNonWsChar === "(" ||
+        lastNonWsChar === "{" ||
+        lastNonWsChar === "[" ||
+        lastNonWsChar === "=" ||
+        lastNonWsChar === "," ||
+        lastNonWsChar === ":" ||
+        lastNonWsChar === "?" ||
+        // Arrow bodies: `() => <Tag />`
+        lastNonWsChar === ">";
+      const notOperator = next !== "=" && next !== "<";
+      if (looksLikeJsxStart && allowedPrev && notOperator) {
+        mode = "jsx";
+        writeStripped(ch);
+        continue;
+      }
+    }
+
     if (ch === "/") {
       // JSX safety rule: inside a JSX tag, "/" must never trigger mode changes.
       if (isInsideJsxTag(s, i)) {
@@ -643,6 +697,13 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
       stack.splice(idx, 1);
       pushEvent(i, ch, "match");
       writeStripped(ch);
+
+      if (jsxExprDepth > 0 && ch === "}") {
+        jsxExprDepth -= 1;
+        if (jsxExprDepth === 0) {
+          mode = jsxReturnMode;
+        }
+      }
     } else {
       writeStripped(ch);
     }
@@ -651,6 +712,9 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
       const depth =
         templateExprDepthStack[templateExprDepthStack.length - 1] ?? 0;
       templateExprDepthStack[templateExprDepthStack.length - 1] = depth + 1;
+    }
+    if (jsxExprDepth > 0 && ch === "{") {
+      jsxExprDepth += 1;
     }
 
     if (!/\s/.test(ch)) {

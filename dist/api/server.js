@@ -1122,6 +1122,27 @@ exports.app.post("/api/patch", async (req, res) => {
         res.status(authorization.status).json(authorization.body);
         return;
     }
+    if (task === "__log_only__") {
+        perf.finish("log-only request ignored");
+        res.json({
+            ok: true,
+            reason: "log_only_noop",
+            patchPreview: "[LOG_ONLY] Bookkeeping request ignored. Existing patch result remains authoritative.",
+            warnings: [
+                "[LOG_ONLY] Bookkeeping request ignored. Existing patch result remains authoritative.",
+            ],
+            developerConfidence: 0,
+            decisionMode: "blocked",
+            finalState: "blocked",
+            finalExecutionOutcome: "completed_with_issues",
+            validationBlocked: true,
+            applyPatches: [],
+            patchResults: [],
+            fileDiffs: [],
+            contextFiles: [],
+        });
+        return;
+    }
     const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({
         task,
         repoPath,

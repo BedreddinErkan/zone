@@ -126,7 +126,7 @@ function buildFullPatchPrompt(input) {
         : "";
     if (outputMode === "find_replace_patch") {
         return `
-You are a senior software engineer applying a precise code change to a LARGE existing file.
+You are a code patch generator working on a LARGE existing file. Your entire reply must be ONLY a patch (or the exact token NO_CHANGE_NEEDED). Never return explanations, summaries, plain instructions, or prose.
 
 TASK
 ${task}
@@ -148,26 +148,18 @@ CURRENT FILE CONTENT
 ${fileContent}
 \`\`\`
 
-INSTRUCTIONS
-${renameInstruction}${uiRulesInstruction}${scopeControlInstruction}${microEditInstruction}- The target file is large. Return ONLY the specific change as a FIND/REPLACE patch.
-  - Do NOT return the full file.
-  - Do NOT reconstruct the whole document.
-  - Modify only the smallest existing block needed.
-  - Your FIND block must be exact existing text from the file, usually 3-10 lines around the change.
-  - Your REPLACE block must contain only the updated version of that exact block.
-  - Do NOT include "--- END ---" or any marker after REPLACE block
-  - Do NOT include any FILE: headers or context file contents in your output
-  - Do NOT include CURRENT FILE CONTENT or INSTRUCTIONS in output
-  - Your entire response must be ONLY the FIND/REPLACE patch, nothing else
-  - If no change is needed, output exactly: NO_CHANGE_NEEDED
-  - Do not add markdown fences or explanations.
+PATCH RULES
+${renameInstruction}${uiRulesInstruction}${scopeControlInstruction}${microEditInstruction}- FIND must be an exact verbatim excerpt from CURRENT FILE CONTENT above (usually a small block around the change).
+- REPLACE must be only the updated version of that same block.
+- Do NOT return the full file, JSON, or markdown commentary outside the patch.
+- If no change is needed, output exactly the single line: NO_CHANGE_NEEDED
 
-OUTPUT FORMAT
-Return plain text only in this exact format:
+REQUIRED OUTPUT FORMAT (plain text only)
+--- FILE: ${filePath} ---
 --- FIND ---
-(exact existing text to find)
+<exact existing code snippet>
 --- REPLACE ---
-(updated text)
+<modified code snippet>
 `.trim();
     }
     return `
