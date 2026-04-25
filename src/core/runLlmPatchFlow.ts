@@ -4243,6 +4243,41 @@ export async function runLlmPatchFlow(input: {
     }
   }
 
+  if (explicitTargetPath) {
+    const explicitRepoAfterTrim = resolveRepoFileForExplicitTarget(explicitTargetPath, allFiles);
+    if (
+      explicitRepoAfterTrim &&
+      !isIrrelevantDeveloperContextPath(explicitRepoAfterTrim.path) &&
+      !isProtectedDeveloperUiPath(explicitRepoAfterTrim.path)
+    ) {
+      const canonAfterTrim = explicitRepoAfterTrim.path;
+      if (!resolvedFileContextsIncludePath(resolvedFileContexts, canonAfterTrim)) {
+        const reinjectedContent = await loadExplicitTargetFileContentForPatchContext({
+          canonPath: canonAfterTrim,
+          hostedContext: input.hostedContext,
+          allFiles,
+        });
+        explicitTargetForceContentByPath.set(canonAfterTrim, reinjectedContent);
+        console.log("[zone-explicit-target-reinjected-after-trim]", canonAfterTrim);
+        resolvedFileContexts.unshift({
+          path: canonAfterTrim,
+          content: reinjectedContent,
+        });
+        selectedContextFiles.unshift({
+          path: canonAfterTrim,
+          action: "inspect",
+          reason: "Explicit target file from user prompt",
+        });
+        if (explicitTargetCanonicalPath === null) {
+          explicitTargetCanonicalPath = canonAfterTrim;
+        }
+        totalContextChars = sumContextChars(resolvedFileContexts);
+        contextBudget =
+          resolvedFileContexts.length <= 6 ? SIMPLE_BUDGET_CHARS : COMPLEX_BUDGET_CHARS;
+      }
+    }
+  }
+
   if (totalContextChars > contextBudget) {
     perf.finish("context budget exceeded");
     notifyProgress("Ready", {
