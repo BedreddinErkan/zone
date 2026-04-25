@@ -7356,13 +7356,15 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
     applyPatches.length === 1 &&
     patchScope.changedFileCount === 1 &&
     patchScope.totalChangedLines <= 3 &&
-    patchScope.totalRemovedLines === 0 &&
+    patchScope.totalRemovedLines <= 1 &&
     patchScope.totalAddedLines >= 1 &&
     validatorAllOk === true &&
     finalDeveloperRisk.score <= 10 &&
     finalDeveloperRisk.breakdown.schema === 0 &&
     finalDeveloperRisk.breakdown.destructive === 0 &&
     finalDeveloperRisk.breakdown.massScope === 0 &&
+    !patchScope.rewriteLikeSuspicion &&
+    !patchScope.cssRewriteSuspicion &&
     !hasBlockedPatch &&
     !vagueTask &&
     !microEditProtection.shouldForcePreview &&
@@ -7373,9 +7375,15 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
     !constrainedTaskLargeRewriteBlocked &&
     (verification == null || verification.score >= 60)
   ) {
+    const previousDecision = decisionMode;
     console.log(
       "[zone-decision-fast-path]",
-      JSON.stringify({ applied: true, reason: "minimal_safe_patch" })
+      JSON.stringify({
+        applied: true,
+        reason: "minimal_safe_patch",
+        previousDecision,
+        nextDecision: "safe_to_apply",
+      })
     );
     decisionMode = "safe_to_apply";
   }
