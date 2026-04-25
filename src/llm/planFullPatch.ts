@@ -678,6 +678,7 @@ export async function planFullPatchWithLlm(input: {
         requestedFilePath: input.filePath,
         originalFileContent: originalForRecovery,
         rawModelText: rawAttempt,
+        task: input.task,
       });
       if (recovered.ok) {
         return {
@@ -718,6 +719,7 @@ export async function planFullPatchWithLlm(input: {
         requestedFilePath: input.filePath,
         originalFileContent: originalForRecovery,
         rawModelText: lastRawPatchResponse || rawText,
+        task: input.task,
       });
       if (recovered.ok) {
         return {

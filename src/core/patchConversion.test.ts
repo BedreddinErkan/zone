@@ -84,6 +84,33 @@ describe("tryRecoverDeveloperPatchFromModelOutput", () => {
     });
     expect(r.ok).toBe(false);
   });
+
+  it("recovers with fuzzy match when whitespace/comma differs", () => {
+    const original = [
+      "const {",
+      "  getScanFindingReviews,",
+      "} = api;",
+      "export default function PatientScanViewerPage() {",
+      "  return null;",
+      "}",
+    ].join("\n");
+    const raw = [
+      "--- FILE: client/src/pages/app/PatientScanViewerPage.jsx ---",
+      "--- FIND ---",
+      "  getScanFindingReviews,",
+      "export default function PatientScanViewerPage() {",
+      "--- REPLACE ---",
+      "  getScanFindingReviews",
+      "export default function PatientScanViewerPage() {",
+    ].join("\n");
+    const r = tryRecoverDeveloperPatchFromModelOutput({
+      requestedFilePath: "client/src/pages/app/PatientScanViewerPage.jsx",
+      originalFileContent: original,
+      rawModelText: raw,
+      task: "remove stray character",
+    });
+    expect(r.ok).toBe(true);
+  });
 });
 
 describe("buildStrictDeveloperPatchText", () => {

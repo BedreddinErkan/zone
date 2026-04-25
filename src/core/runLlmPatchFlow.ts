@@ -5711,6 +5711,7 @@ export async function runLlmPatchFlow(input: {
                     requestedFilePath: patch.path,
                     originalFileContent: fileContent,
                     rawModelText: fullPatch.patchText,
+                    task: input.task,
                   });
                   if (recovered.ok) {
                     appliedPatch = applyDeveloperPatchText(
