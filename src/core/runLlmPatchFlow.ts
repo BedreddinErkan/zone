@@ -240,7 +240,7 @@ function taskLooksLikeReactOrJsxValidation(task: string): boolean {
 }
 
 /** First line matching `Target file: <path>` (case-insensitive). */
-function parseExplicitTargetFileLineFromTask(task: string): string | null {
+function extractExplicitTarget(task: string): string | null {
   for (const line of task.split(/\r?\n/)) {
     const m = line.match(/^\s*Target\s+file:\s*(.+?)\s*$/i);
     if (m) {
@@ -261,16 +261,19 @@ function normalizeExplicitTargetPathKey(path: string): string {
  * Resolve `Target file:` against the raw repo file list (not ranked/trimmed views).
  * Order: exact path → normalized slashes → case-insensitive full path → basename match only if unique.
  */
-function findRepoFileByExplicitTarget(allFiles: RepoFile[], explicitTargetPath: string | null): RepoFile | null {
-  if (!explicitTargetPath) {
+function resolveExplicitTarget(
+  allFiles: RepoFile[],
+  targetPath: string | null
+): RepoFile | null {
+  if (!targetPath) {
     return null;
   }
-  const norm = normalizeExplicitTargetPathKey(explicitTargetPath);
+  const norm = normalizeExplicitTargetPathKey(targetPath);
   if (!norm) {
     return null;
   }
   for (const f of allFiles) {
-    if (f.path === explicitTargetPath) {
+    if (f.path === targetPath) {
       return f;
     }
   }
@@ -298,6 +301,17 @@ function findRepoFileByExplicitTarget(allFiles: RepoFile[], explicitTargetPath: 
     return basenameMatches[0] ?? null;
   }
   return null;
+}
+
+function parseExplicitTargetFileLineFromTask(task: string): string | null {
+  return extractExplicitTarget(task);
+}
+
+function findRepoFileByExplicitTarget(
+  allFiles: RepoFile[],
+  explicitTargetPath: string | null
+): RepoFile | null {
+  return resolveExplicitTarget(allFiles, explicitTargetPath);
 }
 
 function mergeExplicitRepoFileIntoRankedFiles(
@@ -3881,9 +3895,9 @@ export async function runLlmPatchFlow(input: {
     };
   }
 
-  explicitTargetPath = parseExplicitTargetFileLineFromTask(input.task);
+  explicitTargetPath = extractExplicitTarget(input.task);
   if (explicitTargetPath) {
-    explicitTargetRepoFile = findRepoFileByExplicitTarget(allFiles, explicitTargetPath);
+    explicitTargetRepoFile = resolveExplicitTarget(allFiles, explicitTargetPath);
     if (!explicitTargetRepoFile) {
       notifyProgress("Ready", {
         type: "patch_generation_failed",
@@ -3947,7 +3961,7 @@ export async function runLlmPatchFlow(input: {
         finalRunReport: explicitEarlyReport,
       };
     }
-    console.log("[zone-explicit-target-found-in-repo]", explicitTargetRepoFile.path);
+    console.log("[zone-explicit-target-found]", explicitTargetRepoFile.path);
     explicitTargetCanonicalPath = explicitTargetRepoFile.path;
   }
 
@@ -3979,9 +3993,16 @@ export async function runLlmPatchFlow(input: {
     intent: taskIntent,
   });
   if (explicitTargetRepoFile) {
+    console.log("[zone-explicit-target-forced-into-ranking]", explicitTargetRepoFile.path);
     fullRankedFiles = mergeExplicitRepoFileIntoRankedFiles(fullRankedFiles, explicitTargetRepoFile);
   }
-  const relevantFiles = fullRankedFiles.slice(0, 8);
+  let relevantFiles = fullRankedFiles.slice(0, 8);
+  if (
+    explicitTargetRepoFile &&
+    !relevantFiles.some((file) => file.path === explicitTargetRepoFile.path)
+  ) {
+    relevantFiles = [explicitTargetRepoFile, ...relevantFiles].slice(0, 8);
+  }
   perf.mark("relevant files ranked");
   notifyProgress("Ranking relevant files...", {
     type: "relevant_files_ranked",
@@ -4249,6 +4270,7 @@ export async function runLlmPatchFlow(input: {
           allFiles,
         });
         explicitTargetForceContentByPath.set(canon, loadedContent);
+        console.log("[zone-explicit-target-forced-into-context]", canon);
         console.log("[zone-explicit-target-force-included]", canon);
         resolvedFileContexts.unshift({
           path: canon,
@@ -4361,7 +4383,8 @@ export async function runLlmPatchFlow(input: {
           allFiles,
         });
         explicitTargetForceContentByPath.set(canonAfterTrim, reinjectedContent);
-        console.log("[zone-explicit-target-reinjected-after-trim]", canonAfterTrim);
+        console.log("[zone-explicit-target-forced-into-context]", canonAfterTrim);
+        console.log("[zone-explicit-target-force-included]", canonAfterTrim);
         resolvedFileContexts.unshift({
           path: canonAfterTrim,
           content: reinjectedContent,
