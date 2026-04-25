@@ -58,7 +58,7 @@ describe("applyDeveloperPatchText localized replacement", () => {
     const applied = __testOnly_applyDeveloperPatchText(content, patch);
     expect(applied.ok).toBe(false);
     if (!applied.ok) {
-      expect(applied.warning).toContain("[PATCH_FIND_NOT_FOUND]");
+      expect(applied.warning).toContain("[PATCH_NO_MATCH_ABORT]");
     }
   });
 

@@ -219,12 +219,12 @@ describe("multi-file patch results", () => {
       expect(result.applyPatches).toHaveLength(1);
       expect(result.patchResults).toEqual([
         { filePath: "src/foo.ts", status: "applied" },
-        { filePath: "src/bar.ts", status: "failed", reason: "patch_find_not_found" },
+        { filePath: "src/bar.ts", status: "failed", reason: "no_match_abort" },
       ]);
       expect(result.warnings.join("\n")).toContain("[PATCH_CONFLICT]");
       expect(result.warnings.join("\n")).toContain('"filePath":"src/bar.ts"');
       expect(result.patchPreview).toContain("✗ src/bar.ts");
-      expect(result.patchPreview).toContain("failed (patch_find_not_found");
+      expect(result.patchPreview).toContain("failed (no_match_abort");
     }
   });
 

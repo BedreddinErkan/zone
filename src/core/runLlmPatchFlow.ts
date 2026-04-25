@@ -3179,6 +3179,46 @@ function applyDeveloperPatchText(
       JSON.stringify({ raw: findCountRaw })
     );
 
+    // Strict guard: do not proceed to fuzzy matching if the FIND block can't be
+    // located even after safe normalization. (We still allow exact normalized
+    // matches like tab↔spaces or LF↔CRLF.)
+    if (findCountRaw === 0) {
+      const map = buildLfNormalizedIndexMap(updatedContent);
+      const normalizedFind = edit.find.replace(/\r\n/g, "\n");
+      const normalizedCount = countOccurrences(map.normalized, normalizedFind);
+      if (normalizedCount === 0) {
+        const wsNormalizedContent = map.normalized.replace(/[ \t]+/g, " ");
+        const wsNormalizedFind = normalizedFind.replace(/[ \t]+/g, " ");
+        const wsNormalizedCount = countOccurrences(
+          wsNormalizedContent,
+          wsNormalizedFind
+        );
+        if (wsNormalizedCount === 1) {
+          // Allow patch application to proceed; fuzzyFindAndReplace will handle
+          // mapping and replacement while preserving original line endings.
+        } else {
+        console.log(
+          "[zone-patch-no-match-abort]",
+          JSON.stringify({
+            reason: "raw_and_normalized_find_not_found",
+            findPreview: edit.find.slice(0, 180),
+          })
+        );
+        return {
+          ok: false,
+          warning:
+            "[PATCH_NO_MATCH_ABORT] " +
+            JSON.stringify({
+              success: false,
+              reason: "raw_and_normalized_find_not_found",
+              score: 0,
+              bestMatch: "",
+            }),
+        };
+        }
+      }
+    }
+
     const nextContent = fuzzyFindAndReplace(updatedContent, edit.find, edit.replace);
     if (!nextContent.success) {
       console.log(
@@ -3674,6 +3714,9 @@ function parsePatchFailureWarning(
   bestMatch?: string;
   normalizedFailureReason?: string;
 } {
+  if (warning.startsWith("[PATCH_NO_MATCH_ABORT] ")) {
+    return { reason: "no_match_abort", normalizedFailureReason: "no_match_abort" };
+  }
   if (warning.startsWith("[PATCH_FIND_NOT_FOUND] ")) {
     try {
       const payload = JSON.parse(
@@ -6245,6 +6288,11 @@ export async function runLlmPatchFlow(input: {
                 "- Fix JSX structure if needed",
                 "- Prefer smallest possible change",
                 "",
+                "STRICT PATCH RULES:",
+                "- FIND block MUST exactly match existing code.",
+                "- Do not approximate.",
+                "- Do not regenerate large sections.",
+                "",
                 `TARGET FILE: ${patch.filePath}`,
                 "",
                 "Previous raw patch (for reference):",
@@ -6298,8 +6346,40 @@ export async function runLlmPatchFlow(input: {
                     reason: "repair_patch_apply_failed",
                   })
                 );
+                const failure = parsePatchFailureWarning(applied.warning);
+                if (failure.reason === "no_match_abort") {
+                  console.log("[zone-retry-skipped-no-match]", patch.filePath);
+                  fallbackForcePreviewOnly = true;
+                }
                 visibleWarnings.push("repair_attempted_but_failed");
               } else {
+                const repairDiff = computeFileDiff(
+                  patch.fullContent,
+                  applied.fullContent
+                );
+                const repairChangedLines = repairDiff.filter(
+                  (l) => l.type === "added" || l.type === "removed"
+                ).length;
+                if (repairChangedLines > 50) {
+                  console.log(
+                    "[zone-retry-aborted-large-diff]",
+                    JSON.stringify({
+                      filePath: patch.filePath,
+                      changedLines: repairChangedLines,
+                    })
+                  );
+                  fallbackForcePreviewOnly = true;
+                  visibleWarnings.push("repair_attempted_but_failed");
+                  console.log(
+                    "[zone-repair-validation-failed]",
+                    JSON.stringify({
+                      filePath: patch.filePath,
+                      reason: "repair_diff_too_large",
+                      changedLines: repairChangedLines,
+                    })
+                  );
+                  // fall through to blocked behavior (do not keep repaired content)
+                } else {
                 const report2 = validatePatchCorrectness({
                   filePath: patch.filePath,
                   originalContent: before,
@@ -6328,6 +6408,7 @@ export async function runLlmPatchFlow(input: {
                   })
                 );
                 visibleWarnings.push("repair_attempted_but_failed");
+                }
               }
             }
           } catch (err) {
@@ -6783,6 +6864,11 @@ export async function runLlmPatchFlow(input: {
                   "RUNTIME VERIFICATION FAILED AFTER APPLYING YOUR PATCH.",
                   "You MUST fix the failure with the smallest possible change.",
                   "You MUST ONLY modify the file below. Do NOT touch other files.",
+                  "",
+                  "STRICT PATCH RULES:",
+                  "- FIND block MUST exactly match existing code.",
+                  "- Do not approximate.",
+                  "- Do not regenerate large sections.",
                   `TARGET FILE: ${patch.filePath}`,
                   "",
                   "Failure guidance:",
@@ -6806,9 +6892,25 @@ export async function runLlmPatchFlow(input: {
               if (repaired.mode !== "patch") continue;
               console.log("[zone-repair-patch-generated]", patch.filePath);
               const applied = applyDeveloperPatchText(patch.fullContent, repaired.patchText);
-              if (applied.ok) {
-                applyPatches[idx] = { filePath: patch.filePath, fullContent: applied.fullContent };
+              if (!applied.ok) {
+                const failure = parsePatchFailureWarning(applied.warning);
+                if (failure.reason === "no_match_abort") {
+                  console.log("[zone-retry-skipped-no-match]", patch.filePath);
+                  fallbackForcePreviewOnly = true;
+                }
+                continue;
               }
+              const diff = computeFileDiff(patch.fullContent, applied.fullContent);
+              const changed = diff.filter((l) => l.type === "added" || l.type === "removed").length;
+              if (changed > 50) {
+                console.log(
+                  "[zone-retry-aborted-large-diff]",
+                  JSON.stringify({ filePath: patch.filePath, changedLines: changed })
+                );
+                fallbackForcePreviewOnly = true;
+                continue;
+              }
+              applyPatches[idx] = { filePath: patch.filePath, fullContent: applied.fullContent };
             }
             repairAttempts.push({
               attempt,

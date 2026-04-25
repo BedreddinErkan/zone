@@ -415,6 +415,16 @@ export function tryRecoverDeveloperPatchFromModelOutput(input: {
 
     const finalHits = countOccurrences(original, resolvedFind);
     if (finalHits !== 1) {
+    if (finalHits === 0) {
+      console.log(
+        "[zone-patch-no-match-abort]",
+        JSON.stringify({
+          filePath: input.requestedFilePath,
+          reason: "recovery_find_not_found",
+        })
+      );
+      return { ok: false, reason: "no_match_abort" };
+    }
       console.log("[zone-patch-recovery-failed]", `find_occurrences_${finalHits}`);
       return { ok: false, reason: `find_occurrences_${finalHits}` };
     }

@@ -2315,22 +2315,17 @@ expect(result.safetyResolution).toEqual(
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.applyPatches).toEqual([]);
-      expect(result.reason).toBe("patch_find_not_found");
+      expect(result.reason).toBe("no_match_abort");
       expect(result.finalExecutionOutcome).toBe("completed_with_issues");
       expect(result.finalState).toBe("blocked");
       expect(result.validationBlocked).toBe(true);
-      expect(result.warnings.join("\n")).toContain("PATCH_FIND_NOT_FOUND");
-      expect(result.warnings.join("\n")).toContain('"reason":"low_confidence"');
-      expect(result.warnings.join("\n")).toContain('"score":');
+      expect(result.warnings.join("\n")).toContain("PATCH_NO_MATCH_ABORT");
+      expect(result.warnings.join("\n")).toContain("raw_and_normalized_find_not_found");
       expect(result.warnings.join("\n")).toContain("NO_CODE_CHANGE_PRODUCED");
     }
     expect(consoleLogSpy).toHaveBeenCalledWith(
       "[zone-patch-conversion]",
-      expect.stringContaining('"failureReason":"patch_find_not_found"')
-    );
-    expect(consoleLogSpy).toHaveBeenCalledWith(
-      "[zone-patch-conversion]",
-      expect.stringContaining('"normalizedFailureReason":"low_confidence"')
+      expect.stringContaining('"failureReason":"no_match_abort"')
     );
     consoleLogSpy.mockRestore();
   });
