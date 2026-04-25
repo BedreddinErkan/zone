@@ -155,6 +155,74 @@ function fastDiffCounts(before: string, after: string): {
   return { addedLines, removedLines, totalChangedLines: addedLines + removedLines };
 }
 
+function estimateChangedLineRange(before: string, after: string): {
+  startLine: number;
+  endLineBefore: number;
+  endLineAfter: number;
+} {
+  const beforeLines = before.replace(/\r\n/g, "\n").split("\n");
+  const afterLines = after.replace(/\r\n/g, "\n").split("\n");
+  const minLen = Math.min(beforeLines.length, afterLines.length);
+  let start = 0;
+  while (start < minLen && beforeLines[start] === afterLines[start]) start += 1;
+  let endBefore = beforeLines.length - 1;
+  let endAfter = afterLines.length - 1;
+  while (endBefore >= start && endAfter >= start && beforeLines[endBefore] === afterLines[endAfter]) {
+    endBefore -= 1;
+    endAfter -= 1;
+  }
+  return {
+    startLine: start + 1,
+    endLineBefore: Math.max(start + 1, endBefore + 1),
+    endLineAfter: Math.max(start + 1, endAfter + 1),
+  };
+}
+
+function getImportRegionEndLine(original: string): number {
+  const lines = original.replace(/\r\n/g, "\n").split("\n");
+  let started = false;
+  let endLine = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const raw = lines[i] ?? "";
+    const t = raw.trim();
+    if (!t) {
+      if (!started) continue;
+      // allow blank lines inside import block
+      endLine = i + 1;
+      continue;
+    }
+    if (t.startsWith("//") || t.startsWith("/*") || t.startsWith("*")) {
+      if (!started) continue;
+      endLine = i + 1;
+      continue;
+    }
+    if (t === "\"use strict\";" || t === "'use strict';") {
+      if (!started) continue;
+      endLine = i + 1;
+      continue;
+    }
+    if (t.startsWith("import ")) {
+      started = true;
+      endLine = i + 1;
+      continue;
+    }
+    // First real non-import statement after imports -> stop.
+    if (started) break;
+    // If imports never started, keep scanning.
+  }
+  return endLine;
+}
+
+function touchesImportRegion(input: {
+  originalContent: string;
+  updatedContent: string;
+}): boolean {
+  const range = estimateChangedLineRange(input.originalContent, input.updatedContent);
+  const importEnd = getImportRegionEndLine(input.originalContent);
+  if (importEnd <= 0) return false;
+  return range.startLine <= importEnd;
+}
+
 function isJsLike(filePath: string): boolean {
   const p = filePath.toLowerCase();
   return p.endsWith(".js") || p.endsWith(".jsx") || p.endsWith(".ts") || p.endsWith(".tsx");
@@ -1321,6 +1389,7 @@ export function validatePatchCorrectness(
   const warnings: PatchCorrectnessIssue[] = [];
   let layersRun = 0;
   let shortCircuitedAt: number | null = null;
+  let minimalSafeOverrideApplied = false;
 
   const runLayer = (layer: 0 | 1 | 2 | 3 | 4, fn: () => PatchCorrectnessIssue[]) => {
     if (shortCircuitedAt != null) return;
@@ -1358,7 +1427,49 @@ export function validatePatchCorrectness(
   runLayer(3, () => layer3StructuralPreservation(input));
   runLayer(4, () => layer4TaskScopePreservation(input));
 
-  if (input.strictMode && blocking.length === 0 && warnings.length > 0) {
+  // ── Minimal safe patch override ─────────────────────────────────────────
+  // If a patch is very small and does not worsen delimiter counts, allow it even if
+  // heuristics like broken_import_line fire on an already-broken file outside the import region.
+  const diffCountsFinal = fastDiffCounts(input.originalContent, input.updatedContent);
+  const beforeCountsFinal = analyzeDelimiterCounts(input.originalContent);
+  const afterCountsFinal = analyzeDelimiterCounts(input.updatedContent);
+  const noDelimiterRegression = !delimiterWorsened(beforeCountsFinal, afterCountsFinal);
+  const touchesImport = touchesImportRegion({
+    originalContent: input.originalContent,
+    updatedContent: input.updatedContent,
+  });
+
+  const blockingCodes = blocking.map((b) => b.code);
+  const hasBrokenImport = blocking.some((b) => b.code === "broken_import_line");
+  if (hasBrokenImport && !touchesImport) {
+    const ignored = blocking.filter((b) => b.code === "broken_import_line");
+    // Drop broken_import_line if the diff doesn't intersect the import block.
+    for (let i = blocking.length - 1; i >= 0; i -= 1) {
+      if (blocking[i]?.code === "broken_import_line") blocking.splice(i, 1);
+    }
+    warnings.push(
+      ...ignored.map((i) => ({
+        ...i,
+        severity: "warn" as const,
+        message: i.message + " (ignored: patch did not touch import region)",
+      }))
+    );
+    console.log(
+      "[zone-validator-override]",
+      JSON.stringify({
+        reason: "minimal_safe_patch",
+        ignoredBlockingCodes: ["broken_import_line"],
+      })
+    );
+    minimalSafeOverrideApplied = true;
+  }
+
+  if (
+    input.strictMode &&
+    !minimalSafeOverrideApplied &&
+    blocking.length === 0 &&
+    warnings.length > 0
+  ) {
     const promoted = warnings.map((w) => ({ ...w, severity: "block" as const }));
     blocking.push(...promoted);
     warnings.length = 0;

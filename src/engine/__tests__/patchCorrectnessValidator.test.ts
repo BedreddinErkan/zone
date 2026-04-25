@@ -238,6 +238,28 @@ describe("validatePatchCorrectness", () => {
     ).toBe(true);
   });
 
+  it("does not block broken_import_line when patch does not touch the import region and is minimal", () => {
+    const before =
+      'import { useState from "react";\n' + // broken import line (missing })
+      "export const x = 1;\n" +
+      "\n" +
+      "const stray = 'd';\n";
+    const after =
+      'import { useState from "react";\n' +
+      "export const x = 1;\n" +
+      "\n";
+    const result = validatePatchCorrectness(
+      buildInput({
+        filePath: "client/src/pages/app/PatientScanViewerPage.jsx",
+        originalContent: before,
+        updatedContent: after,
+        isConstrained: true,
+      })
+    );
+    expect(result.ok).toBe(true);
+    expect(result.blocking.some((i) => i.code === "broken_import_line")).toBe(false);
+  });
+
   it("strictMode promotes warn to block", () => {
     const before = "export function PatientsPage() { return null; }\n";
     const after = "function PatientsPage() { return null; }\n";
