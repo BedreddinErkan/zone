@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildEmptyModelResponseDetailsLine,
   extractResponsesApiOutputText,
   formatResponsesTextExtractionFailure,
+  getResponsesApiDiagnosticSnapshot,
 } from "./openaiClient.js";
 
 describe("extractResponsesApiOutputText", () => {
@@ -55,5 +57,31 @@ describe("extractResponsesApiOutputText", () => {
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe("incomplete");
+  });
+});
+
+describe("getResponsesApiDiagnosticSnapshot / buildEmptyModelResponseDetailsLine", () => {
+  it("builds non-empty JSON details for empty body", () => {
+    const response = {
+      status: "completed",
+      output: [{ type: "message", content: [{ type: "text", text: "" }] }],
+      output_text: "",
+    };
+    const ext = extractResponsesApiOutputText(response);
+    expect(ext.ok).toBe(false);
+    const line = buildEmptyModelResponseDetailsLine({
+      response,
+      extraction: ext as Extract<
+        ReturnType<typeof extractResponsesApiOutputText>,
+        { ok: false }
+      >,
+      linearReasonWhenExtractionOk: "unused",
+    });
+    const parsed = JSON.parse(line) as Record<string, unknown>;
+    expect(parsed.outputLength).toBe(1);
+    expect(parsed.responseStatus).toBe("completed");
+    expect(getResponsesApiDiagnosticSnapshot(response).contentTypes.length).toBeGreaterThan(
+      0
+    );
   });
 });

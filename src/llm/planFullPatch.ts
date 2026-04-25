@@ -1,7 +1,9 @@
 import { z } from "zod";
 import {
+  buildEmptyModelResponseDetailsLine,
   createOpenAIClient,
   extractResponsesApiOutputText,
+  formatOpenAiThrownErrorPayload,
   formatResponsesTextExtractionFailure,
   getModelName,
   logOpenAiResponseDebug,
@@ -107,7 +109,17 @@ export type FullPatchResult =
       summary: string;
       warnings: string[];
       normalizedFailureReason: "empty_model_response";
-      emptyModelDetails?: string;
+      /** JSON: extractionReason, responseStatus, contentTypes, outputLength, outputTextLength */
+      emptyModelDetails: string;
+    }
+  | {
+      mode: "openai_call_error";
+      filePath: string;
+      summary: string;
+      warnings: string[];
+      normalizedFailureReason: "openai_call_error";
+      /** JSON from formatOpenAiThrownErrorPayload + elapsedMs */
+      openAiCallDetails: string;
     };
 
 function isValidPatchResponse(text: string): boolean {
@@ -393,6 +405,8 @@ export async function planFullPatchWithLlm(input: {
 }): Promise<FullPatchResult> {
   const client = createOpenAIClient();
   const model = getModelName("high");
+  let openAiTransportErrorDetails: string | null = null;
+  let lastSuccessfulResponsesCreateResult: unknown = null;
   const outputMode = selectFullPatchOutputMode({
     outputMode: input.outputMode,
     task: input.task,
@@ -427,7 +441,15 @@ export async function planFullPatchWithLlm(input: {
 
     let lastRawPatchResponse = "";
     let findReplaceAttemptIndex = 0;
-    let lastStructuredEmptyFailure: string | null = null;
+    let lastEmptyModelDetailsLine: string | null = null;
+
+    const resolveEmptyModelDetailsLine = (): string =>
+      lastEmptyModelDetailsLine ??
+      buildEmptyModelResponseDetailsLine({
+        response: lastSuccessfulResponsesCreateResult,
+        extraction: { ok: false, reason: "no_nonempty_raw_recorded_in_execute" },
+        linearReasonWhenExtractionOk: "no_raw_output",
+      });
 
     const retryResult = await withSelfHealingRetry({
       maxAttempts: 3,
@@ -458,14 +480,63 @@ export async function planFullPatchWithLlm(input: {
             content: currentPrompt,
           },
         ];
-        const response = await client.responses.create({
-          model,
-          temperature: 0,
-          max_output_tokens: maxOutputTokens,
-          tools: [applyPatchTool],
-          tool_choice: applyPatchToolChoice,
-          input: responseInput,
-        });
+
+        const callStartedAt = Date.now();
+        console.log(
+          "[zone-openai-call-start]",
+          JSON.stringify({
+            filePath: input.filePath,
+            attempt: findReplaceAttemptIndex,
+            model,
+            max_output_tokens: maxOutputTokens,
+          })
+        );
+
+        let response: unknown;
+        try {
+          response = await client.responses.create({
+            model,
+            temperature: 0,
+            max_output_tokens: maxOutputTokens,
+            tools: [applyPatchTool],
+            tool_choice: applyPatchToolChoice,
+            input: responseInput,
+          });
+        } catch (err) {
+          const elapsedMs = Date.now() - callStartedAt;
+          const p = formatOpenAiThrownErrorPayload(err);
+          openAiTransportErrorDetails = JSON.stringify({ ...p, elapsedMs });
+          console.log(
+            "[zone-openai-call-error]",
+            JSON.stringify({
+              filePath: input.filePath,
+              attempt: findReplaceAttemptIndex,
+              elapsedMs,
+              name: p.name,
+              message: p.message,
+              status: p.status,
+              code: p.code,
+              type: p.type,
+            })
+          );
+          throw err;
+        }
+
+        const elapsedMs = Date.now() - callStartedAt;
+        openAiTransportErrorDetails = null;
+        lastSuccessfulResponsesCreateResult = response;
+        console.log(
+          "[zone-openai-call-success]",
+          JSON.stringify({
+            filePath: input.filePath,
+            attempt: findReplaceAttemptIndex,
+            elapsedMs,
+            responseKeys:
+              response && typeof response === "object"
+                ? Object.keys(response as object)
+                : [],
+          })
+        );
 
         logOpenAiResponseDebug(response, {
           filePath: input.filePath,
@@ -491,16 +562,27 @@ export async function planFullPatchWithLlm(input: {
         if (rawForAttempt.length > 0) {
           lastRawPatchResponse = rawForAttempt;
         } else {
-          const emptyReason = extraction.ok
-            ? "tool_and_extractable_text_empty"
-            : formatResponsesTextExtractionFailure(extraction);
-          lastStructuredEmptyFailure = emptyReason;
+          const detailsLine = buildEmptyModelResponseDetailsLine({
+            response,
+            extraction,
+            linearReasonWhenExtractionOk: "tool_and_extractable_text_empty",
+          });
+          lastEmptyModelDetailsLine = detailsLine;
+          let emptyLog: Record<string, unknown>;
+          try {
+            emptyLog = {
+              attempt: findReplaceAttemptIndex,
+              ...JSON.parse(detailsLine),
+            };
+          } catch {
+            emptyLog = {
+              attempt: findReplaceAttemptIndex,
+              detailsLine,
+            };
+          }
           console.log(
             "[zone-full-patch-empty-response]",
-            JSON.stringify({
-              attempt: findReplaceAttemptIndex,
-              reason: emptyReason,
-            })
+            JSON.stringify(emptyLog)
           );
         }
 
@@ -567,19 +649,28 @@ export async function planFullPatchWithLlm(input: {
       console.error(
         "[zone-patch] model failed to produce valid patch after retries"
       );
+      if (openAiTransportErrorDetails !== null) {
+        return {
+          mode: "openai_call_error",
+          filePath: input.filePath,
+          summary: "OpenAI API call failed during large-file patch generation.",
+          warnings: [`[openai_call_error] ${openAiTransportErrorDetails}`],
+          normalizedFailureReason: "openai_call_error",
+          openAiCallDetails: openAiTransportErrorDetails,
+        };
+      }
       const rawAttempt =
         lastRawPatchResponse ||
         (typeof retryResult.lastValue === "string" ? retryResult.lastValue : "");
       if (rawAttempt.length === 0) {
+        const emptyDetails = resolveEmptyModelDetailsLine();
         return {
           mode: "empty_model_response",
           filePath: input.filePath,
           summary: "Large-file patch: model returned no usable output text.",
-          warnings: [
-            `[empty_model_response] ${lastStructuredEmptyFailure ?? "no_raw_output"}`,
-          ],
+          warnings: [`[empty_model_response] ${emptyDetails}`],
           normalizedFailureReason: "empty_model_response",
-          emptyModelDetails: lastStructuredEmptyFailure ?? undefined,
+          emptyModelDetails: emptyDetails,
         };
       }
       const recovered = tryRecoverDeveloperPatchFromModelOutput({
@@ -612,15 +703,14 @@ export async function planFullPatchWithLlm(input: {
     if (!isValidPatchResponse(rawText)) {
       const recoveredRaw = (lastRawPatchResponse || rawText).trim();
       if (recoveredRaw.length === 0) {
+        const emptyDetails = resolveEmptyModelDetailsLine();
         return {
           mode: "empty_model_response",
           filePath: input.filePath,
           summary: "Large-file patch: model returned no usable output text.",
-          warnings: [
-            `[empty_model_response] ${lastStructuredEmptyFailure ?? "no_raw_output"}`,
-          ],
+          warnings: [`[empty_model_response] ${emptyDetails}`],
           normalizedFailureReason: "empty_model_response",
-          emptyModelDetails: lastStructuredEmptyFailure ?? undefined,
+          emptyModelDetails: emptyDetails,
         };
       }
       const recovered = tryRecoverDeveloperPatchFromModelOutput({
@@ -657,15 +747,72 @@ export async function planFullPatchWithLlm(input: {
     };
   }
 
+  let fullContentAttemptIndex = 0;
   const retryResult = await withSelfHealingRetry({
     maxAttempts: 3,
     prompt,
     execute: async (currentPrompt: string) => {
-      const response = await client.responses.create({
-        model,
-        input: currentPrompt,
+      fullContentAttemptIndex += 1;
+      const callStartedAt = Date.now();
+      console.log(
+        "[zone-openai-call-start]",
+        JSON.stringify({
+          filePath: input.filePath,
+          attempt: fullContentAttemptIndex,
+          model,
+          max_output_tokens: null,
+        })
+      );
+      let response: unknown;
+      try {
+        response = await client.responses.create({
+          model,
+          input: currentPrompt,
+        });
+      } catch (err) {
+        const elapsedMs = Date.now() - callStartedAt;
+        const p = formatOpenAiThrownErrorPayload(err);
+        openAiTransportErrorDetails = JSON.stringify({ ...p, elapsedMs });
+        console.log(
+          "[zone-openai-call-error]",
+          JSON.stringify({
+            filePath: input.filePath,
+            attempt: fullContentAttemptIndex,
+            elapsedMs,
+            name: p.name,
+            message: p.message,
+            status: p.status,
+            code: p.code,
+            type: p.type,
+          })
+        );
+        throw err;
+      }
+      const elapsedMs = Date.now() - callStartedAt;
+      openAiTransportErrorDetails = null;
+      lastSuccessfulResponsesCreateResult = response;
+      console.log(
+        "[zone-openai-call-success]",
+        JSON.stringify({
+          filePath: input.filePath,
+          attempt: fullContentAttemptIndex,
+          elapsedMs,
+          responseKeys:
+            response && typeof response === "object"
+              ? Object.keys(response as object)
+              : [],
+        })
+      );
+      logOpenAiResponseDebug(response, {
+        filePath: input.filePath,
+        attempt: fullContentAttemptIndex,
+        mode: "full_content_json",
       });
-      const rawText = response.output_text ?? "";
+      const extraction = extractResponsesApiOutputText(response);
+      const r = response as { output_text?: string };
+      const rawText = extraction.ok
+        ? extraction.text
+        : (r.output_text ?? "");
       const jsonText = extractJson(rawText);
       return JSON.parse(stripJsonFences(jsonText)) as unknown;
     },
@@ -712,6 +859,11 @@ export async function planFullPatchWithLlm(input: {
   });
 
   if (!retryResult.ok) {
+    if (openAiTransportErrorDetails !== null) {
+      throw new Error(
+        `planFullPatchWithLlm: openai_call_error after ${retryResult.attempts} attempt(s): ${openAiTransportErrorDetails}`
+      );
+    }
     throw new Error(
       `planFullPatchWithLlm failed after ${retryResult.attempts} attempt(s): ${retryResult.reason}`
     );

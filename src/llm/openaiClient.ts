@@ -256,3 +256,83 @@ export function formatResponsesTextExtractionFailure(
     .filter(Boolean)
     .join(" | ");
 }
+
+export function getResponsesApiDiagnosticSnapshot(response: unknown): {
+  status: string | null;
+  contentTypes: string[];
+  outputLength: number;
+  outputTextLength: number;
+} {
+  if (!response || typeof response !== "object") {
+    return { status: null, contentTypes: [], outputLength: 0, outputTextLength: 0 };
+  }
+  const r = response as Record<string, unknown>;
+  const output = Array.isArray(r.output) ? r.output : [];
+  const outputText = safeString(r.output_text) ?? "";
+  return {
+    status: safeString(r.status),
+    contentTypes: collectOutputContentTypes(output),
+    outputLength: output.length,
+    outputTextLength: outputText.length,
+  };
+}
+
+/** Serializable fields from thrown OpenAI / fetch errors. */
+export function formatOpenAiThrownErrorPayload(error: unknown): {
+  name: string;
+  message: string;
+  status?: number | string;
+  code?: string;
+  type?: string;
+} {
+  if (error instanceof Error) {
+    const e = error as Error & {
+      status?: number;
+      code?: string;
+      type?: string;
+    };
+    return {
+      name: e.name,
+      message: e.message,
+      status: e.status,
+      code: typeof e.code === "string" ? e.code : undefined,
+      type: typeof e.type === "string" ? e.type : undefined,
+    };
+  }
+  if (error && typeof error === "object") {
+    const e = error as Record<string, unknown>;
+    const status = e.status ?? e.statusCode;
+    return {
+      name: String(e.name ?? "Error"),
+      message: String(e.message ?? JSON.stringify(error)),
+      status:
+        typeof status === "number" || typeof status === "string" ? status : undefined,
+      code: typeof e.code === "string" ? e.code : undefined,
+      type: typeof e.type === "string" ? e.type : undefined,
+    };
+  }
+  return { name: "non_object_error", message: String(error) };
+}
+
+/**
+ * Single-line JSON for empty_model_response (never null — always includes extraction + response shape).
+ */
+export function buildEmptyModelResponseDetailsLine(input: {
+  response: unknown;
+  extraction: ZoneResponsesTextExtraction;
+  linearReasonWhenExtractionOk: string;
+}): string {
+  const snap = getResponsesApiDiagnosticSnapshot(input.response);
+  const extractionReason = input.extraction.ok
+    ? input.linearReasonWhenExtractionOk
+    : formatResponsesTextExtractionFailure(
+        input.extraction as Extract<ZoneResponsesTextExtraction, { ok: false }>
+      );
+  return JSON.stringify({
+    extractionReason,
+    responseStatus: snap.status,
+    contentTypes: snap.contentTypes,
+    outputLength: snap.outputLength,
+    outputTextLength: snap.outputTextLength,
+  });
+}

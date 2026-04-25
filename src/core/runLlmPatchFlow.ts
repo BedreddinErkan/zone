@@ -3559,7 +3559,8 @@ function logPatchConversionDebug(input: {
     | "full_content"
     | "patch"
     | "invalid_patch_format"
-    | "empty_model_response";
+    | "empty_model_response"
+    | "openai_call_error";
   status: "applied" | "failed";
   failureReason?: string;
   normalizedFailureReason?: string;
@@ -5422,6 +5423,35 @@ export async function runLlmPatchFlow(input: {
             });
           })().then((fullPatch) => {
             perf.mark(`full patch model response received ${patch.path}`);
+            if (fullPatch.mode === "openai_call_error") {
+              fallbackForcePreviewOnly = true;
+              console.log(
+                "[zone-patch-recovery-context]",
+                JSON.stringify({
+                  filePath: patch.path,
+                  mode: "openai_call_error",
+                  details: fullPatch.openAiCallDetails,
+                })
+              );
+              for (const w of fullPatch.warnings) {
+                internalWarnings.push(w);
+                visibleWarnings.push(w);
+              }
+              logPatchConversionDebug({
+                filePath: patch.path,
+                chosenOutputMode: fullPatchMode,
+                responseMode: "openai_call_error" as const,
+                status: "failed",
+                failureReason: "openai_call_error",
+                normalizedFailureReason: "openai_call_error",
+              });
+              patchResults.push({
+                filePath: patch.path,
+                status: "failed",
+                reason: "openai_call_error",
+              });
+              return null;
+            }
             if (fullPatch.mode === "empty_model_response") {
               fallbackForcePreviewOnly = true;
               console.log(
@@ -5429,7 +5459,7 @@ export async function runLlmPatchFlow(input: {
                 JSON.stringify({
                   filePath: patch.path,
                   mode: "empty_model_response",
-                  details: fullPatch.emptyModelDetails ?? null,
+                  details: fullPatch.emptyModelDetails,
                 })
               );
               for (const w of fullPatch.warnings) {

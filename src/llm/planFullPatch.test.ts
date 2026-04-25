@@ -5,14 +5,18 @@ const withSelfHealingRetryMock = vi.fn();
 const buildFullPatchPromptMock = vi.fn(() => "prompt");
 const formatExecutionPlanForPromptMock = vi.fn(() => "");
 
-vi.mock("./openaiClient.js", () => ({
-  createOpenAIClient: () => ({
-    responses: {
-      create: responsesCreateMock,
-    },
-  }),
-  getModelName: () => "test-model",
-}));
+vi.mock("./openaiClient.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./openaiClient.js")>();
+  return {
+    ...actual,
+    createOpenAIClient: () => ({
+      responses: {
+        create: responsesCreateMock,
+      },
+    }),
+    getModelName: () => "test-model",
+  };
+});
 
 vi.mock("../core/withSelfHealingRetry.js", () => ({
   withSelfHealingRetry: withSelfHealingRetryMock,
@@ -151,6 +155,10 @@ describe("planFullPatchWithLlm", () => {
     expect(result.mode).toBe("empty_model_response");
     if (result.mode === "empty_model_response") {
       expect(result.normalizedFailureReason).toBe("empty_model_response");
+      expect(result.emptyModelDetails.length).toBeGreaterThan(0);
+      const parsed = JSON.parse(result.emptyModelDetails) as Record<string, unknown>;
+      expect(parsed).toHaveProperty("extractionReason");
+      expect(parsed).toHaveProperty("outputLength");
       expect(result.warnings.some((w) => w.includes("[empty_model_response]"))).toBe(
         true
       );
