@@ -207,6 +207,73 @@ function minimalBraceBracketBalance(
   return [];
 }
 
+type DelimiterCounts = {
+  braces: { opens: number; closes: number };
+  brackets: { opens: number; closes: number };
+  parens: { opens: number; closes: number };
+};
+
+function analyzeDelimiterCounts(content: string): DelimiterCounts {
+  const s = content.replace(/\r\n/g, "\n");
+  let bracesOpen = 0;
+  let bracesClose = 0;
+  let bracketsOpen = 0;
+  let bracketsClose = 0;
+  let parensOpen = 0;
+  let parensClose = 0;
+  for (let i = 0; i < s.length; i += 1) {
+    const ch = s[i] ?? "";
+    if (ch === "{") bracesOpen += 1;
+    else if (ch === "}") bracesClose += 1;
+    else if (ch === "[") bracketsOpen += 1;
+    else if (ch === "]") bracketsClose += 1;
+    else if (ch === "(") parensOpen += 1;
+    else if (ch === ")") parensClose += 1;
+  }
+  return {
+    braces: { opens: bracesOpen, closes: bracesClose },
+    brackets: { opens: bracketsOpen, closes: bracketsClose },
+    parens: { opens: parensOpen, closes: parensClose },
+  };
+}
+
+function computeDelimiterDelta(before: DelimiterCounts, after: DelimiterCounts): DelimiterCounts {
+  return {
+    braces: {
+      opens: after.braces.opens - before.braces.opens,
+      closes: after.braces.closes - before.braces.closes,
+    },
+    brackets: {
+      opens: after.brackets.opens - before.brackets.opens,
+      closes: after.brackets.closes - before.brackets.closes,
+    },
+    parens: {
+      opens: after.parens.opens - before.parens.opens,
+      closes: after.parens.closes - before.parens.closes,
+    },
+  };
+}
+
+function delimiterWorsened(before: DelimiterCounts, after: DelimiterCounts): boolean {
+  const worsenedKind = (b: { opens: number; closes: number }, a: { opens: number; closes: number }) =>
+    a.opens > b.opens || a.closes < b.closes;
+  return (
+    worsenedKind(before.braces, after.braces) ||
+    worsenedKind(before.brackets, after.brackets) ||
+    worsenedKind(before.parens, after.parens)
+  );
+}
+
+function delimiterUnchangedOrImproved(before: DelimiterCounts, after: DelimiterCounts): boolean {
+  const okKind = (b: { opens: number; closes: number }, a: { opens: number; closes: number }) =>
+    (a.opens === b.opens && a.closes === b.closes) || (a.opens <= b.opens && a.closes >= b.closes);
+  return (
+    okKind(before.braces, after.braces) &&
+    okKind(before.brackets, after.brackets) &&
+    okKind(before.parens, after.parens)
+  );
+}
+
 type LexMode =
   | "code"
   | "single"
@@ -851,6 +918,30 @@ function layer1LexicalIntegrity(input: PatchCorrectnessInput): LexicalResult {
 
   const scan = scanDelimitersWithDiagnostics(input.updatedContent);
   if (!scan.ok) {
+    const beforeCounts = analyzeDelimiterCounts(input.originalContent);
+    const afterCounts = analyzeDelimiterCounts(input.updatedContent);
+    const deltaCounts = computeDelimiterDelta(beforeCounts, afterCounts);
+    const worsened = delimiterWorsened(beforeCounts, afterCounts);
+    const unchangedOrImproved = delimiterUnchangedOrImproved(beforeCounts, afterCounts);
+    const diffCounts = fastDiffCounts(input.originalContent, input.updatedContent);
+    const minimalPatch = diffCounts.totalChangedLines < 5;
+    const decision = !worsened && (unchangedOrImproved || minimalPatch) ? "allow" : "block";
+    console.log(
+      "[zone-validator-delta]",
+      JSON.stringify({
+        filePath: input.filePath,
+        before: beforeCounts,
+        after: afterCounts,
+        delta: deltaCounts,
+        totalChangedLines: diffCounts.totalChangedLines,
+        decision,
+      })
+    );
+    if (decision === "allow") {
+      // Do not block if the file was already broken and the patch does not worsen delimiter counts.
+      return { issues: [], strippedForJsx: scan.strippedForJsx };
+    }
+
     console.log(
       "[zone-delimiter-trace]",
       JSON.stringify({ filePath: input.filePath, events: scan.events })

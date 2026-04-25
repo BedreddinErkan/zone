@@ -107,6 +107,45 @@ describe("validatePatchCorrectness", () => {
     ).toBe(true);
   });
 
+  it("does not block unbalanced_delimiters when BEFORE was already unbalanced and counts are unchanged (minimal patch)", () => {
+    const before =
+      "export function foo() {\n" +
+      "  d\n" +
+      "  return 1;\n"; // missing closing }
+    const after =
+      "export function foo() {\n" +
+      "  return 1;\n"; // still missing closing }, same delimiter counts (removed one non-delimiter line)
+    const result = validatePatchCorrectness(
+      buildInput({
+        originalContent: before,
+        updatedContent: after,
+        filePath: "client/src/pages/app/PatientScanViewerPage.jsx",
+        isConstrained: true,
+      })
+    );
+    expect(result.ok).toBe(true);
+    expect(result.blocking.some((i) => i.code === "unbalanced_delimiters")).toBe(
+      false
+    );
+  });
+
+  it("blocks unbalanced_delimiters when patch worsens delimiter counts", () => {
+    const before = "export function foo() { return 1;\n"; // missing }
+    const after = "export function foo() { if (x) { return 1;\n"; // adds another '{' (worse)
+    const result = validatePatchCorrectness(
+      buildInput({
+        originalContent: before,
+        updatedContent: after,
+        filePath: "client/src/pages/app/PatientScanViewerPage.jsx",
+        isConstrained: true,
+      })
+    );
+    expect(result.ok).toBe(false);
+    expect(result.blocking.some((i) => i.code === "unbalanced_delimiters")).toBe(
+      true
+    );
+  });
+
   it("template-literal expression bug regression: `${foo(}` blocks", () => {
     const src = "export const x = `${foo(}`;\n";
     const result = validatePatchCorrectness(buildInput({ updatedContent: src }));
