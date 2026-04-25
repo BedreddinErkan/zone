@@ -37,8 +37,10 @@ async function processDeveloperPatchJob(supabase, job) {
             task: requestPayload.task,
             repoPath: requestPayload.repoPath,
             hostedContext: requestPayload.hostedContext,
-            onProgress: async (stage) => {
-                await (0, developerPatchJobs_js_1.updateDeveloperPatchJobProgress)(supabase, job.id, stage);
+            onProgress: async (update) => {
+                const stage = typeof update === "string" ? update : update.stage;
+                const lifecycle = typeof update === "string" ? undefined : update.lifecycle;
+                await (0, developerPatchJobs_js_1.updateDeveloperPatchJobProgress)(supabase, job.id, stage, lifecycle);
             },
         });
         if (result.ok && result.applyPatches.length > 0) {

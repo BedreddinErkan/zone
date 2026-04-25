@@ -4001,7 +4001,11 @@ export async function runLlmPatchFlow(input: {
     explicitTargetRepoFile &&
     !relevantFiles.some((file) => file.path === explicitTargetRepoFile.path)
   ) {
-    relevantFiles = [explicitTargetRepoFile, ...relevantFiles].slice(0, 8);
+    const explicitRankedFile: RankedRepoFile = {
+      ...explicitTargetRepoFile,
+      score: Math.max(...fullRankedFiles.map((file) => file.score), 0) + 10_000,
+    };
+    relevantFiles = [explicitRankedFile, ...relevantFiles].slice(0, 8);
   }
   perf.mark("relevant files ranked");
   notifyProgress("Ranking relevant files...", {

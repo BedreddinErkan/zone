@@ -8,6 +8,7 @@ exports.markDeveloperPatchJobRunning = markDeveloperPatchJobRunning;
 exports.markDeveloperPatchJobCompleted = markDeveloperPatchJobCompleted;
 exports.markDeveloperPatchJobFailed = markDeveloperPatchJobFailed;
 const node_crypto_1 = require("node:crypto");
+const progressStageCodec_js_1 = require("../core/progressStageCodec.js");
 const TABLE_NAME = "developer_patch_jobs";
 const JOB_COLUMNS = "id,user_id,role,task,repo_path,status,progress_stage,request_payload,result_payload,error_message,created_at,started_at,finished_at";
 async function createDeveloperPatchJob(supabase, input) {
@@ -52,11 +53,11 @@ async function claimNextQueuedDeveloperPatchJob(supabase) {
     const claimed = Array.isArray(data) ? data[0] : data;
     return claimed ?? null;
 }
-async function updateDeveloperPatchJobProgress(supabase, runId, progressStage) {
+async function updateDeveloperPatchJobProgress(supabase, runId, progressStage, lifecycle) {
     const { error } = await supabase
         .from(TABLE_NAME)
         .update({
-        progress_stage: progressStage,
+        progress_stage: (0, progressStageCodec_js_1.encodeProgressStage)(progressStage, lifecycle),
     })
         .eq("id", runId);
     if (error) {

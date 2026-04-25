@@ -43,6 +43,8 @@ const patchCorrectnessValidator_js_1 = require("../engine/patchCorrectnessValida
 const developerPatchParse_js_1 = require("./developerPatchParse.js");
 const taskIntentParser_js_1 = require("./taskIntentParser.js");
 const zoneApiPerf_js_1 = require("../api/zoneApiPerf.js");
+const agentLifecycleEvents_js_1 = require("./agentLifecycleEvents.js");
+const generateFinalRunReport_js_1 = require("./generateFinalRunReport.js");
 function countJsxTagsDiagnostic(src) {
     // Strip strings and comments conservatively so matches inside them don't skew counts.
     const stripped = src
@@ -64,6 +66,240 @@ function buildDiffHeadSample(diff, maxChars = 200) {
     return formatted.length <= maxChars
         ? formatted
         : `${formatted.slice(0, maxChars)}…`;
+}
+function isDeprioritizedConfigPathForFrontendTask(filePath) {
+    const n = filePath.replace(/\\/g, "/").toLowerCase();
+    return n.endsWith("requirements.txt") || n.includes("ai-service/requirements.txt");
+}
+function taskLooksLikeReactOrJsxValidation(task) {
+    const t = task.toLowerCase();
+    return (/\bjsx\b/.test(t) ||
+        /\breact\b/.test(t) ||
+        /\.jsx\b/.test(t) ||
+        /\.tsx\b/.test(t) ||
+        /\bcomponent\b/.test(t) ||
+        /\bvalidation\b/.test(t));
+}
+/** First line matching `Target file: <path>` (case-insensitive). */
+function extractExplicitTarget(task) {
+    for (const line of task.split(/\r?\n/)) {
+        const m = line.match(/^\s*Target\s+file:\s*(.+?)\s*$/i);
+        if (m) {
+            const raw = m[1].trim().replace(/^[`'"]+|[`'"]+$/g, "");
+            if (raw.length > 0) {
+                return raw.replace(/\\/g, "/");
+            }
+        }
+    }
+    return null;
+}
+function normalizeExplicitTargetPathKey(path) {
+    return path.replace(/\\/g, "/").trim();
+}
+/**
+ * Resolve `Target file:` against the raw repo file list (not ranked/trimmed views).
+ * Order: exact path → normalized slashes → case-insensitive full path → basename match only if unique.
+ */
+function resolveExplicitTarget(allFiles, targetPath) {
+    if (!targetPath) {
+        return null;
+    }
+    const norm = normalizeExplicitTargetPathKey(targetPath);
+    if (!norm) {
+        return null;
+    }
+    for (const f of allFiles) {
+        if (f.path === targetPath) {
+            return f;
+        }
+    }
+    for (const f of allFiles) {
+        if (normalizeExplicitTargetPathKey(f.path) === norm) {
+            return f;
+        }
+    }
+    const lower = norm.toLowerCase();
+    for (const f of allFiles) {
+        if (normalizeExplicitTargetPathKey(f.path).toLowerCase() === lower) {
+            return f;
+        }
+    }
+    const base = norm.split("/").filter(Boolean).pop() ?? "";
+    if (!base) {
+        return null;
+    }
+    const baseLower = base.toLowerCase();
+    const basenameMatches = allFiles.filter((f) => {
+        const seg = normalizeExplicitTargetPathKey(f.path).split("/").filter(Boolean).pop() ?? "";
+        return seg.toLowerCase() === baseLower;
+    });
+    if (basenameMatches.length === 1) {
+        return basenameMatches[0] ?? null;
+    }
+    return null;
+}
+function parseExplicitTargetFileLineFromTask(task) {
+    return extractExplicitTarget(task);
+}
+function findRepoFileByExplicitTarget(allFiles, explicitTargetPath) {
+    return resolveExplicitTarget(allFiles, explicitTargetPath);
+}
+function mergeExplicitRepoFileIntoRankedFiles(ranked, explicit) {
+    const maxScore = ranked.length > 0 ? Math.max(...ranked.map((f) => f.score)) : 0;
+    const boosted = maxScore + 10_000;
+    const explicitLower = normalizeExplicitTargetPathKey(explicit.path).toLowerCase();
+    const withoutDup = ranked.filter((f) => normalizeExplicitTargetPathKey(f.path).toLowerCase() !== explicitLower);
+    const asRanked = { ...explicit, score: boosted };
+    return [asRanked, ...withoutDup];
+}
+function resolvedFileContextsIncludePath(contexts, canonPath) {
+    const want = normalizeExplicitTargetPathKey(canonPath).toLowerCase();
+    return contexts.some((f) => normalizeExplicitTargetPathKey(f.path).toLowerCase() === want);
+}
+async function loadExplicitTargetFileContentForPatchContext(input) {
+    const { canonPath, hostedContext, allFiles } = input;
+    if (hostedContext) {
+        if (Object.prototype.hasOwnProperty.call(hostedContext.originalContents, canonPath)) {
+            return hostedContext.originalContents[canonPath] ?? "";
+        }
+        for (const [k, v] of Object.entries(hostedContext.originalContents)) {
+            if (normalizeExplicitTargetPathKey(k).toLowerCase() === normalizeExplicitTargetPathKey(canonPath).toLowerCase()) {
+                return v ?? "";
+            }
+        }
+        const ctx = hostedContext.contextFiles.find((f) => f.path === canonPath);
+        if (ctx) {
+            return ctx.content;
+        }
+        const ctxInsensitive = hostedContext.contextFiles.find((f) => normalizeExplicitTargetPathKey(f.path).toLowerCase() ===
+            normalizeExplicitTargetPathKey(canonPath).toLowerCase());
+        if (ctxInsensitive) {
+            return ctxInsensitive.content;
+        }
+    }
+    const repoFile = allFiles.find((f) => f.path === canonPath) ?? findRepoFileByExplicitTarget(allFiles, canonPath);
+    if (!repoFile?.absolutePath) {
+        return "";
+    }
+    const disk = await (0, readProjectFiles_js_1.readProjectFiles)([repoFile.absolutePath]);
+    return disk[repoFile.absolutePath] ?? "";
+}
+function isPathGroundedForPreviewFallback(input) {
+    if (isIrrelevantDeveloperContextPath(input.path) || isProtectedDeveloperUiPath(input.path)) {
+        return false;
+    }
+    if (input.hostedContext) {
+        return Object.prototype.hasOwnProperty.call(input.hostedContext.originalContents, input.path);
+    }
+    return input.allFiles.some((f) => f.path === input.path);
+}
+const EXPLICIT_TARGET_NOT_FOUND_WARNING = "[EXPLICIT_TARGET_NOT_FOUND] Target file was not found in the selected repository/context.";
+function taskTextMentionsRepoPath(task, path) {
+    const t = task.toLowerCase();
+    const normalized = path.replace(/\\/g, "/");
+    const segments = normalized.split("/").filter(Boolean);
+    const base = segments[segments.length - 1] ?? "";
+    if (base && t.includes(base.toLowerCase())) {
+        return true;
+    }
+    if (t.includes(normalized.toLowerCase())) {
+        return true;
+    }
+    return false;
+}
+/** Dependency / config paths we must not use as ranked preview-empty fallback unless the task names them. */
+function isUnrelatedRankedFallbackPath(path, task) {
+    if (taskTextMentionsRepoPath(task, path)) {
+        return false;
+    }
+    const n = path.replace(/\\/g, "/").toLowerCase();
+    const base = n.split("/").pop() ?? "";
+    if (base === ".gitignore" || n.endsWith("/.gitignore")) {
+        return true;
+    }
+    if (base.startsWith(".env") || n.includes("/.env")) {
+        return true;
+    }
+    const lockNames = new Set([
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "npm-shrinkwrap.json",
+        "poetry.lock",
+        "uv.lock",
+        "cargo.lock",
+        "gemfile.lock",
+        "pipfile.lock",
+    ]);
+    if (lockNames.has(base) || base.endsWith(".lock")) {
+        return true;
+    }
+    if (base === "pipfile") {
+        return true;
+    }
+    if (base === "requirements.txt" || n.endsWith("/requirements.txt")) {
+        return true;
+    }
+    if (base === ".npmrc" || base === ".yarnrc.yml" || base === ".pnpmfile.cjs") {
+        return true;
+    }
+    if (base.endsWith(".pem")) {
+        return true;
+    }
+    if (/^tsconfig.*\.json$/i.test(base) || base === "jsconfig.json") {
+        return true;
+    }
+    if (/^(vite|vitest|webpack|rollup|tailwind|postcss|eslint|prettier|jest|playwright)\.config\./i.test(base)) {
+        return true;
+    }
+    if (/^\.eslintrc/i.test(base) || base.startsWith(".prettierrc")) {
+        return true;
+    }
+    if (base === "docker-compose.yml" || base === "docker-compose.yaml") {
+        return true;
+    }
+    return false;
+}
+function pickRankedPreviewEmptyFallbackPath(input) {
+    const deprioritizeConfig = taskLooksLikeReactOrJsxValidation(input.task);
+    const ranked = [...input.fullRankedFiles];
+    if (deprioritizeConfig) {
+        ranked.sort((a, b) => {
+            const aBad = isDeprioritizedConfigPathForFrontendTask(a.path) ? 1 : 0;
+            const bBad = isDeprioritizedConfigPathForFrontendTask(b.path) ? 1 : 0;
+            if (aBad !== bBad) {
+                return aBad - bBad;
+            }
+            return b.score - a.score;
+        });
+    }
+    for (const f of ranked) {
+        if (isUnrelatedRankedFallbackPath(f.path, input.task)) {
+            continue;
+        }
+        if (isPathGroundedForPreviewFallback({
+            path: f.path,
+            hostedContext: input.hostedContext,
+            allFiles: input.allFiles,
+        })) {
+            return f.path;
+        }
+    }
+    return null;
+}
+function resolvePreviewEmptyFallbackPath(input) {
+    const explicit = input.explicitTargetParsed;
+    if (explicit) {
+        const repoFile = findRepoFileByExplicitTarget(input.allFiles, explicit);
+        if (repoFile &&
+            !isIrrelevantDeveloperContextPath(repoFile.path) &&
+            !isProtectedDeveloperUiPath(repoFile.path)) {
+            return { kind: "path", path: repoFile.path };
+        }
+        return { kind: "explicit_target_not_grounded", explicitPath: explicit };
+    }
+    const rankedPick = pickRankedPreviewEmptyFallbackPath(input);
+    return rankedPick ? { kind: "path", path: rankedPick } : { kind: "none" };
 }
 /** A fully-populated TaskIntent representing "I don't know what this is". */
 const UNKNOWN_INTENT = {
@@ -894,15 +1130,28 @@ function isConstrainedGenericShellPatchPath(filePath) {
     return CONSTRAINED_GENERIC_SHELL_BASENAMES.has(base);
 }
 async function loadDeveloperModifyPatchSourceContent(input) {
+    const forced = input.hostedForceLoadedContent?.get(input.patchPath);
     const hostedOriginalContent = input.hostedContext &&
         Object.prototype.hasOwnProperty.call(input.hostedContext.originalContents, input.patchPath)
         ? input.hostedContext.originalContents[input.patchPath] ?? ""
         : undefined;
     const hostedContextFileContent = input.hostedContext?.contextFiles.find((file) => file.path === input.patchPath)
         ?.content;
+    if (typeof forced === "string") {
+        return { ok: true, content: forced };
+    }
     if (input.hostedContext &&
         typeof hostedOriginalContent === "undefined" &&
         typeof hostedContextFileContent === "undefined") {
+        const repoFile = input.allFiles.find((f) => f.path === input.patchPath);
+        const abs = repoFile?.absolutePath;
+        if (typeof abs === "string" && abs.length > 0 && abs !== input.patchPath) {
+            const disk = await (0, readProjectFiles_js_1.readProjectFiles)([abs]);
+            const fromDisk = disk[abs];
+            if (typeof fromDisk === "string" && fromDisk.length > 0) {
+                return { ok: true, content: fromDisk };
+            }
+        }
         return { ok: false, reason: "missing_hosted_context" };
     }
     const repoFile = input.allFiles.find((f) => f.path === input.patchPath);
@@ -2327,14 +2576,19 @@ const HOSTED_CONTEXT_BUDGET_TRIM_CAP = 12;
  * `maxFiles`. Always prefers the #1 ranked path that appears in `resolvedFileContexts`
  * (the primary targeting / preview anchor).
  */
-function selectRankedContextPathsWithinCap(resolvedFileContexts, fullRankedFiles, maxFiles) {
+function selectRankedContextPathsWithinCap(resolvedFileContexts, fullRankedFiles, maxFiles, pinnedPaths) {
     const byPath = new Map(resolvedFileContexts.map((file) => [file.path, true]));
+    const ordered = [];
+    for (const p of pinnedPaths ?? []) {
+        if (typeof p === "string" && byPath.has(p) && !ordered.includes(p)) {
+            ordered.push(p);
+        }
+    }
     const rankedInContext = fullRankedFiles
         .map((file) => file.path)
         .filter((path) => byPath.has(path));
-    const previewTargetPath = rankedInContext[0];
-    const ordered = [];
-    if (typeof previewTargetPath === "string") {
+    const previewTargetPath = rankedInContext.find((path) => !ordered.includes(path)) ?? rankedInContext[0];
+    if (typeof previewTargetPath === "string" && !ordered.includes(previewTargetPath)) {
         ordered.push(previewTargetPath);
     }
     for (const path of rankedInContext) {
@@ -2356,20 +2610,80 @@ function selectRankedContextPathsWithinCap(resolvedFileContexts, fullRankedFiles
     return ordered;
 }
 async function runLlmPatchFlow(input) {
-    const reportProgress = (stage) => {
+    const lifecycleEvents = [];
+    const notifyProgress = (legacyStage, lifecycleInput) => {
+        if (lifecycleInput) {
+            const ev = (0, agentLifecycleEvents_js_1.createAgentLifecycleEvent)(lifecycleInput);
+            lifecycleEvents.push(ev);
+            try {
+                const out = input.onProgress?.({ stage: legacyStage, lifecycle: ev });
+                void out;
+            }
+            catch {
+                // keep progress reporting best-effort
+            }
+            return;
+        }
         try {
-            input.onProgress?.(stage);
+            input.onProgress?.(legacyStage);
         }
         catch {
             // keep progress reporting best-effort
         }
     };
+    const reportProgress = (stage) => {
+        notifyProgress(stage);
+    };
     const perf = (0, zoneApiPerf_js_1.startZoneApiPerfRun)(input.perfLabel ?? "runLlmPatchFlow");
     const taskIntent = typeof input.task === "string" ? (0, taskIntentParser_js_1.parseTaskIntent)(input.task) : UNKNOWN_INTENT;
+    let explicitTargetPath = null;
+    let explicitTargetRepoFile = null;
+    let explicitTargetCanonicalPath = null;
+    notifyProgress("Scanning repo...", {
+        type: "run_started",
+        message: "Developer patch run started.",
+        stage: "init",
+    });
+    notifyProgress("Scanning repo...", {
+        type: "intent_understood",
+        message: `Task intent: ${taskIntent.normalizedTask || taskIntent.action || "developer task"}.`,
+        stage: "intent",
+    });
     const zoneInternalTask = detectZoneInternalTask(input.task);
     if (zoneInternalTask) {
+        notifyProgress("Ready", {
+            type: "run_completed",
+            message: "Run finished (Zone internal task — no patch).",
+            stage: "finalize",
+            status: "zone_internal",
+        });
         reportProgress("Ready");
         perf.finish("zone internal task blocked");
+        const zoneInternalReport = await (0, generateFinalRunReport_js_1.generateFinalRunReport)({
+            task: input.task,
+            contextFilesMeta: [],
+            planObjective: null,
+            planScopeSummary: null,
+            patchSource: "no_patch",
+            fileDiffs: [],
+            patchScope: {
+                changedFileCount: 0,
+                totalAddedLines: 0,
+                totalRemovedLines: 0,
+                totalChangedLines: 0,
+            },
+            decisionMode: "blocked",
+            finalState: "blocked",
+            warnings: [ZONE_INTERNAL_TASK_WARNING],
+            correctness: {
+                status: "skipped",
+                summary: "No patches were generated (Zone internal task).",
+            },
+            verificationCommandsLabel: null,
+            runtimeVerificationSummary: null,
+            finalExecutionOutcome: "completed_with_issues",
+            developerConfidence: 0,
+        });
         return {
             ok: true,
             reason: "zone_internal_task_target",
@@ -2384,6 +2698,8 @@ async function runLlmPatchFlow(input) {
             patchResults: [],
             fileDiffs: [],
             contextFiles: [],
+            lifecycleEvents: [...lifecycleEvents],
+            finalRunReport: zoneInternalReport,
         };
     }
     const hostedAvailableFiles = input.hostedContext?.availableFiles.map((file) => ({
@@ -2430,26 +2746,156 @@ async function runLlmPatchFlow(input) {
     perf.mark("repo scan ready");
     if (!input.hostedContext && allFiles.length === 0 && !isHostedEnvironment()) {
         perf.finish("repo access blocked");
-        return { ok: false, reason: "repo_not_accessible_in_hosted_mode" };
+        notifyProgress("Ready", {
+            type: "tooling_issue",
+            message: "Repository could not be read in this environment.",
+            stage: "repo",
+            status: "repo_not_accessible_in_hosted_mode",
+        });
+        notifyProgress("Ready", {
+            type: "run_completed",
+            message: "Run finished with errors.",
+            stage: "finalize",
+            status: "failed",
+        });
+        const repoFailReport = await (0, generateFinalRunReport_js_1.generateFinalRunReport)({
+            task: input.task,
+            contextFilesMeta: [],
+            planObjective: null,
+            planScopeSummary: null,
+            patchSource: "no_patch",
+            fileDiffs: [],
+            patchScope: {
+                changedFileCount: 0,
+                totalAddedLines: 0,
+                totalRemovedLines: 0,
+                totalChangedLines: 0,
+            },
+            decisionMode: "preview_only",
+            warnings: ["Repository could not be read in this environment."],
+            correctness: { status: "skipped", summary: "Run stopped before patch planning." },
+            verificationCommandsLabel: null,
+            runtimeVerificationSummary: null,
+            finalExecutionOutcome: "failed",
+        });
+        return {
+            ok: false,
+            reason: "repo_not_accessible_in_hosted_mode",
+            lifecycleEvents: [...lifecycleEvents],
+            finalRunReport: repoFailReport,
+        };
+    }
+    explicitTargetPath = extractExplicitTarget(input.task);
+    if (explicitTargetPath) {
+        explicitTargetRepoFile = resolveExplicitTarget(allFiles, explicitTargetPath);
+        if (!explicitTargetRepoFile) {
+            notifyProgress("Ready", {
+                type: "patch_generation_failed",
+                message: `Explicit target file is not in the raw repository file list: ${explicitTargetPath}`,
+                stage: "repo",
+                status: "explicit_target_not_found",
+                filePath: explicitTargetPath,
+            });
+            notifyProgress("Ready", {
+                type: "run_completed",
+                message: "Run finished (preview-only, explicit target not in repo).",
+                stage: "finalize",
+                status: "preview_only",
+            });
+            reportProgress("Ready");
+            perf.mark("decision evaluation complete");
+            perf.finish("explicit target not in raw repo");
+            const explicitEarlyReport = await (0, generateFinalRunReport_js_1.generateFinalRunReport)({
+                task: input.task,
+                contextFilesMeta: [],
+                planObjective: null,
+                planScopeSummary: null,
+                patchSource: "no_patch",
+                fileDiffs: [],
+                patchScope: {
+                    changedFileCount: 0,
+                    totalAddedLines: 0,
+                    totalRemovedLines: 0,
+                    totalChangedLines: 0,
+                },
+                decisionMode: "preview_only",
+                finalState: "preview_only",
+                warnings: [EXPLICIT_TARGET_NOT_FOUND_WARNING],
+                correctness: {
+                    status: "skipped",
+                    summary: "Patch generation was not started (explicit_target_not_found).",
+                },
+                verificationCommandsLabel: null,
+                runtimeVerificationSummary: null,
+                finalExecutionOutcome: "completed_with_issues",
+                developerConfidence: 60,
+                terminalAbort: {
+                    code: "explicit_target_not_found",
+                    missingPath: explicitTargetPath,
+                },
+            });
+            return {
+                ok: true,
+                reason: "explicit_target_not_found",
+                patchPreview: EXPLICIT_TARGET_NOT_FOUND_WARNING,
+                warnings: [EXPLICIT_TARGET_NOT_FOUND_WARNING],
+                developerConfidence: 60,
+                decisionMode: "preview_only",
+                finalState: "preview_only",
+                patchSource: "no_patch",
+                applyPatches: [],
+                patchResults: [],
+                fileDiffs: [],
+                contextFiles: [],
+                lifecycleEvents: [...lifecycleEvents],
+                finalRunReport: explicitEarlyReport,
+            };
+        }
+        console.log("[zone-explicit-target-found]", explicitTargetRepoFile.path);
+        explicitTargetCanonicalPath = explicitTargetRepoFile.path;
     }
     const developerContextFiles = allFiles.filter((file) => !isIrrelevantDeveloperContextPath(file.path));
     // 2. Detect structure
     reportProgress("Detecting project structure...");
     const structure = (0, detectProjectStructure_js_1.detectProjectStructure)(developerContextFiles);
     perf.mark("project structure detected");
+    notifyProgress("Detecting project structure...", {
+        type: "repo_explored",
+        message: `Repository scanned (${allFiles.length} files, structure hints loaded).`,
+        stage: "repo",
+        status: fileSource,
+    });
     const projectSummary = input.hostedContext?.repoSummary ||
         structure.notes.join(" ") ||
         "No project summary available.";
     const projectNotes = input.hostedContext?.projectNotes ?? structure.notes;
     // 3. Rank relevant files — top 8 (full ranking reused for diagnostics + budget trim)
     reportProgress("Ranking relevant files...");
-    const fullRankedFiles = (0, rankRelevantFiles_js_1.rankRelevantFiles)({
+    let fullRankedFiles = (0, rankRelevantFiles_js_1.rankRelevantFiles)({
         task: input.task,
         files: developerContextFiles,
         intent: taskIntent,
     });
-    const relevantFiles = fullRankedFiles.slice(0, 8);
+    if (explicitTargetRepoFile) {
+        console.log("[zone-explicit-target-forced-into-ranking]", explicitTargetRepoFile.path);
+        fullRankedFiles = mergeExplicitRepoFileIntoRankedFiles(fullRankedFiles, explicitTargetRepoFile);
+    }
+    let relevantFiles = fullRankedFiles.slice(0, 8);
+    if (explicitTargetRepoFile &&
+        !relevantFiles.some((file) => file.path === explicitTargetRepoFile.path)) {
+        const explicitRankedFile = {
+            ...explicitTargetRepoFile,
+            score: Math.max(...fullRankedFiles.map((file) => file.score), 0) + 10_000,
+        };
+        relevantFiles = [explicitRankedFile, ...relevantFiles].slice(0, 8);
+    }
     perf.mark("relevant files ranked");
+    notifyProgress("Ranking relevant files...", {
+        type: "relevant_files_ranked",
+        message: `Ranked ${fullRankedFiles.length} paths; using top ${relevantFiles.length} for planning.`,
+        stage: "rank",
+        status: "ok",
+    });
     // TEMP DIAGNOSTIC: surface top 20 ranker scores to verify PatientsPage presence
     console.log("[zone-diag-ranker]", JSON.stringify({
         totalFiles: developerContextFiles.length,
@@ -2508,9 +2954,65 @@ async function runLlmPatchFlow(input) {
         catch (err) {
             perf.finish("feature planning failed");
             const reason = err instanceof Error ? err.message : String(err);
-            return { ok: false, reason };
+            notifyProgress("Ready", {
+                type: "patch_generation_failed",
+                message: `Feature planning failed: ${reason}`,
+                stage: "plan",
+                status: "feature_plan_error",
+            });
+            notifyProgress("Ready", {
+                type: "run_completed",
+                message: "Run finished with errors.",
+                stage: "finalize",
+                status: "failed",
+            });
+            const featureFailReport = await (0, generateFinalRunReport_js_1.generateFinalRunReport)({
+                task: input.task,
+                contextFilesMeta: relevantFiles.slice(0, 8).map((f) => ({
+                    path: f.path,
+                    reason: "Ranked as relevant to the task",
+                })),
+                planObjective: executionPlan?.objective ?? null,
+                planScopeSummary: executionPlan?.scopeSummary ?? null,
+                patchSource: "no_patch",
+                fileDiffs: [],
+                patchScope: {
+                    changedFileCount: 0,
+                    totalAddedLines: 0,
+                    totalRemovedLines: 0,
+                    totalChangedLines: 0,
+                },
+                decisionMode: "preview_only",
+                warnings: [`Feature planning failed: ${reason}`],
+                correctness: { status: "skipped", summary: "Run stopped during feature planning." },
+                verificationCommandsLabel: null,
+                runtimeVerificationSummary: null,
+                finalExecutionOutcome: "failed",
+            });
+            return {
+                ok: false,
+                reason,
+                lifecycleEvents: [...lifecycleEvents],
+                finalRunReport: featureFailReport,
+            };
         }
     }
+    const planSummaryParts = [];
+    if (executionPlan) {
+        planSummaryParts.push(`${executionPlan.steps.length} execution step(s); scope: ${executionPlan.scopeSummary}`);
+    }
+    if (llmPlan?.suggestedFiles?.length) {
+        planSummaryParts.push(`${llmPlan.suggestedFiles.length} suggested context file(s) from feature plan`);
+    }
+    notifyProgress("Planning feature...", {
+        type: "plan_created",
+        message: planSummaryParts.length > 0
+            ? `Planning complete (${planSummaryParts.join(" · ")}).`
+            : "Planning complete (execution + feature context ready).",
+        stage: "plan",
+        status: executionPlan ? "execution_plan" : "feature_skipped",
+    });
+    const explicitTargetForceContentByPath = new Map();
     // 5. Read top suggested files
     const relevantFileScores = new Map(relevantFiles.map((file) => [file.path, file.score]));
     const llmSuggestedPaths = new Set((llmPlan?.suggestedFiles ?? []).map((file) => file.path));
@@ -2600,7 +3102,39 @@ async function runLlmPatchFlow(input) {
             .map((file) => fileContextByPath.get(file.path))
             .filter((file) => file !== undefined);
     }
+    if (explicitTargetRepoFile) {
+        if (!isIrrelevantDeveloperContextPath(explicitTargetRepoFile.path) &&
+            !isProtectedDeveloperUiPath(explicitTargetRepoFile.path)) {
+            const canon = explicitTargetRepoFile.path;
+            explicitTargetCanonicalPath = canon;
+            if (!resolvedFileContextsIncludePath(resolvedFileContexts, canon)) {
+                const loadedContent = await loadExplicitTargetFileContentForPatchContext({
+                    canonPath: canon,
+                    hostedContext: input.hostedContext,
+                    allFiles,
+                });
+                explicitTargetForceContentByPath.set(canon, loadedContent);
+                console.log("[zone-explicit-target-forced-into-context]", canon);
+                console.log("[zone-explicit-target-force-included]", canon);
+                resolvedFileContexts.unshift({
+                    path: canon,
+                    content: loadedContent,
+                });
+                selectedContextFiles.unshift({
+                    path: canon,
+                    action: "inspect",
+                    reason: "Explicit target file from user prompt",
+                });
+            }
+        }
+    }
     perf.mark("file context loaded");
+    notifyProgress("Loading file context...", {
+        type: "file_context_loaded",
+        message: `Loaded ${resolvedFileContexts.length} file context(s) for patch generation.`,
+        stage: "context",
+        status: "ok",
+    });
     // ── TOKEN BUDGET GUARD ──────────────────────────────────────────
     const SIMPLE_BUDGET_CHARS = 320_000; // ~80K tokens (4o-mini)
     const COMPLEX_BUDGET_CHARS = 320_000; // ~80K tokens (4.1-mini)
@@ -2611,7 +3145,11 @@ async function runLlmPatchFlow(input) {
     let totalContextChars = sumContextChars(resolvedFileContexts);
     if (totalContextChars > contextBudget) {
         const originalFileCount = resolvedFileContexts.length;
-        const trimmedPaths = selectRankedContextPathsWithinCap(resolvedFileContexts, fullRankedFiles, HOSTED_CONTEXT_BUDGET_TRIM_CAP);
+        const trimPinned = explicitTargetCanonicalPath !== null &&
+            resolvedFileContextsIncludePath(resolvedFileContexts, explicitTargetCanonicalPath)
+            ? [explicitTargetCanonicalPath]
+            : [];
+        const trimmedPaths = selectRankedContextPathsWithinCap(resolvedFileContexts, fullRankedFiles, HOSTED_CONTEXT_BUDGET_TRIM_CAP, trimPinned);
         const pathToContent = new Map(resolvedFileContexts.map((file) => [file.path, file.content]));
         const metaSources = input.hostedContext?.contextFiles ?? preliminaryContextFiles;
         const pathToMeta = new Map(metaSources.map((file) => [file.path, { action: file.action, reason: file.reason }]));
@@ -2620,6 +3158,14 @@ async function runLlmPatchFlow(input) {
             content: pathToContent.get(path) ?? "",
         }));
         selectedContextFiles = trimmedPaths.map((path) => {
+            if (explicitTargetCanonicalPath !== null &&
+                path === explicitTargetCanonicalPath) {
+                return {
+                    path,
+                    action: "inspect",
+                    reason: "Explicit target file from user prompt",
+                };
+            }
             const meta = pathToMeta.get(path);
             return {
                 path,
@@ -2641,13 +3187,83 @@ async function runLlmPatchFlow(input) {
             contextBudgetWarnings.push(`[hosted_context_trimmed_to_budget] Trimmed developer context from ${originalFileCount} to ${trimmedFileCount} files to fit the token budget.`);
         }
     }
+    if (explicitTargetRepoFile) {
+        if (!isIrrelevantDeveloperContextPath(explicitTargetRepoFile.path) &&
+            !isProtectedDeveloperUiPath(explicitTargetRepoFile.path)) {
+            const canonAfterTrim = explicitTargetRepoFile.path;
+            if (!resolvedFileContextsIncludePath(resolvedFileContexts, canonAfterTrim)) {
+                const reinjectedContent = await loadExplicitTargetFileContentForPatchContext({
+                    canonPath: canonAfterTrim,
+                    hostedContext: input.hostedContext,
+                    allFiles,
+                });
+                explicitTargetForceContentByPath.set(canonAfterTrim, reinjectedContent);
+                console.log("[zone-explicit-target-forced-into-context]", canonAfterTrim);
+                console.log("[zone-explicit-target-force-included]", canonAfterTrim);
+                resolvedFileContexts.unshift({
+                    path: canonAfterTrim,
+                    content: reinjectedContent,
+                });
+                selectedContextFiles.unshift({
+                    path: canonAfterTrim,
+                    action: "inspect",
+                    reason: "Explicit target file from user prompt",
+                });
+                if (explicitTargetCanonicalPath === null) {
+                    explicitTargetCanonicalPath = canonAfterTrim;
+                }
+                totalContextChars = sumContextChars(resolvedFileContexts);
+                contextBudget =
+                    resolvedFileContexts.length <= 6 ? SIMPLE_BUDGET_CHARS : COMPLEX_BUDGET_CHARS;
+            }
+        }
+    }
     if (totalContextChars > contextBudget) {
         perf.finish("context budget exceeded");
+        notifyProgress("Ready", {
+            type: "tooling_issue",
+            message: "Developer context exceeds the token budget for this run.",
+            stage: "context",
+            status: "context_budget_exceeded",
+        });
+        notifyProgress("Ready", {
+            type: "run_completed",
+            message: "Run finished with errors.",
+            stage: "finalize",
+            status: "failed",
+        });
+        const contextBudgetReport = await (0, generateFinalRunReport_js_1.generateFinalRunReport)({
+            task: input.task,
+            contextFilesMeta: selectedContextFiles.map((f) => ({
+                path: f.path,
+                reason: f.reason,
+            })),
+            planObjective: executionPlan?.objective ?? null,
+            planScopeSummary: executionPlan?.scopeSummary ?? null,
+            patchSource: "no_patch",
+            fileDiffs: [],
+            patchScope: {
+                changedFileCount: 0,
+                totalAddedLines: 0,
+                totalRemovedLines: 0,
+                totalChangedLines: 0,
+            },
+            decisionMode: "preview_only",
+            warnings: [
+                `Context too large (${Math.round(totalContextChars / 4000)}K tokens). Limit ${Math.round(contextBudget / 4000)}K tokens.`,
+            ],
+            correctness: { status: "skipped", summary: "Run stopped before patch preview (context budget)." },
+            verificationCommandsLabel: null,
+            runtimeVerificationSummary: null,
+            finalExecutionOutcome: "failed",
+        });
         return {
             ok: false,
             reason: `Context too large (${Math.round(totalContextChars / 4000)}K tokens). ` +
                 `Limit is ${Math.round(contextBudget / 4000)}K tokens. ` +
                 `Select a smaller folder or specify exact files to change.`,
+            lifecycleEvents: [...lifecycleEvents],
+            finalRunReport: contextBudgetReport,
         };
     }
     perf.mark("token budget checked");
@@ -2671,18 +3287,66 @@ async function runLlmPatchFlow(input) {
     catch (err) {
         perf.finish("patch preview failed");
         const reason = err instanceof Error ? err.message : String(err);
-        return { ok: false, reason };
+        notifyProgress("Ready", {
+            type: "patch_generation_failed",
+            message: `Patch preview planning failed: ${reason}`,
+            stage: "patch_preview",
+            status: "patch_preview_error",
+        });
+        notifyProgress("Ready", {
+            type: "run_completed",
+            message: "Run finished with errors.",
+            stage: "finalize",
+            status: "failed",
+        });
+        const previewFailReport = await (0, generateFinalRunReport_js_1.generateFinalRunReport)({
+            task: input.task,
+            contextFilesMeta: selectedContextFiles.map((f) => ({
+                path: f.path,
+                reason: f.reason,
+            })),
+            planObjective: executionPlan?.objective ?? null,
+            planScopeSummary: executionPlan?.scopeSummary ?? null,
+            patchSource: "no_patch",
+            fileDiffs: [],
+            patchScope: {
+                changedFileCount: 0,
+                totalAddedLines: 0,
+                totalRemovedLines: 0,
+                totalChangedLines: 0,
+            },
+            decisionMode: "preview_only",
+            warnings: [`Patch preview planning failed: ${reason}`],
+            correctness: { status: "skipped", summary: "Run stopped during patch preview planning." },
+            verificationCommandsLabel: null,
+            runtimeVerificationSummary: null,
+            finalExecutionOutcome: "failed",
+        });
+        return {
+            ok: false,
+            reason,
+            lifecycleEvents: [...lifecycleEvents],
+            finalRunReport: previewFailReport,
+        };
     }
     console.log("[zone-preview] received (ignored for patch application)");
     if (input.hostedContext) {
         patchPlan = {
             ...patchPlan,
-            patches: patchPlan.patches.filter((p) => Object.prototype.hasOwnProperty.call(input.hostedContext.originalContents, p.path)),
+            patches: patchPlan.patches.filter((p) => {
+                if (Object.prototype.hasOwnProperty.call(input.hostedContext.originalContents, p.path)) {
+                    return true;
+                }
+                if (input.hostedContext.contextFiles.some((cf) => cf.path === p.path)) {
+                    return true;
+                }
+                return explicitTargetForceContentByPath.has(p.path);
+            }),
         };
         console.log("[hosted] filtered patches count:", patchPlan.patches.length);
     }
     const vagueTask = isVagueDeveloperTask(input.task);
-    const selectedTargetFile = patchPlan.patches[0]?.path ?? null;
+    let selectedTargetFile = patchPlan.patches[0]?.path ?? null;
     // Task-level risk scoring for developer
     const taskRiskResult = (0, computeRiskScore_js_1.computeRiskScore)({ task: input.task, role: "developer", codeIntent: taskIntent.codeIntent });
     logRiskDebug("runLlmPatchFlow taskRiskResult", {
@@ -2690,7 +3354,47 @@ async function runLlmPatchFlow(input) {
         taskRiskResult,
     });
     if (taskRiskResult.score >= 71) {
+        notifyProgress("Ready", {
+            type: "patch_generation_failed",
+            message: `Patch generation was not started: task risk score ${taskRiskResult.score} (preview-only).`,
+            stage: "patch_gen",
+            status: "high_risk_preview_only",
+            ...(selectedTargetFile ? { filePath: selectedTargetFile } : {}),
+        });
+        notifyProgress("Ready", {
+            type: "run_completed",
+            message: "Run finished (preview-only, high task risk).",
+            stage: "finalize",
+            status: "preview_only",
+        });
         reportProgress("Ready");
+        const highRiskReport = await (0, generateFinalRunReport_js_1.generateFinalRunReport)({
+            task: input.task,
+            contextFilesMeta: selectedContextFiles.map((f) => ({
+                path: f.path,
+                reason: f.reason,
+            })),
+            planObjective: executionPlan?.objective ?? null,
+            planScopeSummary: executionPlan?.scopeSummary ?? null,
+            patchSource: "no_patch",
+            fileDiffs: [],
+            patchScope: {
+                changedFileCount: 0,
+                totalAddedLines: 0,
+                totalRemovedLines: 0,
+                totalChangedLines: 0,
+            },
+            decisionMode: "preview_only",
+            finalState: "preview_only",
+            warnings: [
+                `[HIGH_RISK] Task risk score ${taskRiskResult.score} — blocked before patch generation.`,
+            ],
+            correctness: { status: "skipped", summary: "Patch generation was not started (high task risk)." },
+            verificationCommandsLabel: null,
+            runtimeVerificationSummary: null,
+            finalExecutionOutcome: "completed_with_issues",
+            developerConfidence: 0,
+        });
         return {
             ok: true,
             patchPreview: `[BLOCKED] Risk score ${taskRiskResult.score} — task was blocked before patch generation. Detected signals: ${taskRiskResult.signals.join(", ")}.`,
@@ -2703,12 +3407,52 @@ async function runLlmPatchFlow(input) {
             fileDiffs: [],
             contextFiles: [],
             ...(executionPlan ? { plan: executionPlan } : {}),
+            lifecycleEvents: [...lifecycleEvents],
+            finalRunReport: highRiskReport,
         };
     }
     if (vagueTask) {
+        notifyProgress("Ready", {
+            type: "patch_generation_failed",
+            message: "Patch generation was not started: task description is too vague for safe edits.",
+            stage: "patch_gen",
+            status: "vague_task_preview_only",
+            ...(selectedTargetFile ? { filePath: selectedTargetFile } : {}),
+        });
+        notifyProgress("Ready", {
+            type: "run_completed",
+            message: "Run finished (preview-only, vague task).",
+            stage: "finalize",
+            status: "preview_only",
+        });
         reportProgress("Ready");
         perf.mark("decision evaluation complete");
         perf.finish("vague task response ready");
+        const vagueReport = await (0, generateFinalRunReport_js_1.generateFinalRunReport)({
+            task: input.task,
+            contextFilesMeta: selectedContextFiles.map((f) => ({
+                path: f.path,
+                reason: f.reason,
+            })),
+            planObjective: executionPlan?.objective ?? null,
+            planScopeSummary: executionPlan?.scopeSummary ?? null,
+            patchSource: "no_patch",
+            fileDiffs: [],
+            patchScope: {
+                changedFileCount: 0,
+                totalAddedLines: 0,
+                totalRemovedLines: 0,
+                totalChangedLines: 0,
+            },
+            decisionMode: "preview_only",
+            finalState: "preview_only",
+            warnings: [DEVELOPER_VAGUE_TASK_WARNING],
+            correctness: { status: "skipped", summary: "Patch generation was not started (vague task policy)." },
+            verificationCommandsLabel: null,
+            runtimeVerificationSummary: null,
+            finalExecutionOutcome: "completed_with_issues",
+            developerConfidence: 60,
+        });
         return {
             ok: true,
             patchPreview: DEVELOPER_VAGUE_TASK_WARNING,
@@ -2721,10 +3465,122 @@ async function runLlmPatchFlow(input) {
             fileDiffs: [],
             contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
             ...(executionPlan ? { plan: executionPlan } : {}),
+            lifecycleEvents: [...lifecycleEvents],
+            finalRunReport: vagueReport,
         };
     }
+    const patchPreviewHadNoStructuredPatchesFromLlm = patchPlan.patches.length === 0;
+    if (patchPlan.patches.length === 0) {
+        const previewEmptyPick = resolvePreviewEmptyFallbackPath({
+            task: input.task,
+            explicitTargetParsed: explicitTargetPath,
+            fullRankedFiles,
+            hostedContext: input.hostedContext,
+            allFiles,
+        });
+        if (previewEmptyPick.kind === "explicit_target_not_grounded") {
+            notifyProgress("Ready", {
+                type: "patch_generation_failed",
+                message: `Explicit target file is not in the selected repository or hosted context: ${previewEmptyPick.explicitPath}`,
+                stage: "patch_preview",
+                status: "explicit_target_not_found",
+                filePath: previewEmptyPick.explicitPath,
+            });
+            notifyProgress("Ready", {
+                type: "run_completed",
+                message: "Run finished (preview-only, explicit target not found).",
+                stage: "finalize",
+                status: "preview_only",
+            });
+            reportProgress("Ready");
+            perf.mark("decision evaluation complete");
+            perf.finish("explicit target not found");
+            const explicitMissingReport = await (0, generateFinalRunReport_js_1.generateFinalRunReport)({
+                task: input.task,
+                contextFilesMeta: selectedContextFiles.map((f) => ({
+                    path: f.path,
+                    reason: f.reason,
+                })),
+                planObjective: executionPlan?.objective ?? null,
+                planScopeSummary: executionPlan?.scopeSummary ?? null,
+                patchSource: "no_patch",
+                fileDiffs: [],
+                patchScope: {
+                    changedFileCount: 0,
+                    totalAddedLines: 0,
+                    totalRemovedLines: 0,
+                    totalChangedLines: 0,
+                },
+                decisionMode: "preview_only",
+                finalState: "preview_only",
+                warnings: [EXPLICIT_TARGET_NOT_FOUND_WARNING],
+                correctness: {
+                    status: "skipped",
+                    summary: "Patch generation was not started (explicit_target_not_found).",
+                },
+                verificationCommandsLabel: null,
+                runtimeVerificationSummary: null,
+                finalExecutionOutcome: "completed_with_issues",
+                developerConfidence: 60,
+                terminalAbort: {
+                    code: "explicit_target_not_found",
+                    missingPath: previewEmptyPick.explicitPath,
+                },
+            });
+            return {
+                ok: true,
+                reason: "explicit_target_not_found",
+                patchPreview: EXPLICIT_TARGET_NOT_FOUND_WARNING,
+                warnings: [EXPLICIT_TARGET_NOT_FOUND_WARNING],
+                developerConfidence: 60,
+                decisionMode: "preview_only",
+                finalState: "preview_only",
+                patchSource: "no_patch",
+                applyPatches: [],
+                patchResults: [],
+                fileDiffs: [],
+                contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
+                ...(executionPlan ? { plan: executionPlan } : {}),
+                lifecycleEvents: [...lifecycleEvents],
+                finalRunReport: explicitMissingReport,
+            };
+        }
+        if (previewEmptyPick.kind === "path") {
+            const fallbackPath = previewEmptyPick.path;
+            console.log("[zone-patch-preview-fallback-target]", fallbackPath);
+            notifyProgress("Generating file patches...", {
+                type: "patch_preview_empty_fallback_target_selected",
+                message: `Patch preview returned no structured patches; selected ${fallbackPath} for full patch generation.`,
+                stage: "patch_preview",
+                status: "selected",
+                filePath: fallbackPath,
+            });
+            const synthetic = {
+                path: fallbackPath,
+                operation: "modify",
+                summary: "Fallback target selected because patch preview returned no structured patches.",
+                targetHint: "preview_empty_fallback_target",
+                contentPreview: "",
+            };
+            patchPlan = {
+                ...patchPlan,
+                patches: [synthetic],
+                warnings: [
+                    ...patchPlan.warnings,
+                    `[preview_empty_fallback] Using ${fallbackPath} because patch preview returned zero patches.`,
+                ],
+            };
+        }
+    }
+    selectedTargetFile = patchPlan.patches[0]?.path ?? selectedTargetFile;
     // 6b. Generate full file content for modify/create patches
     reportProgress("Generating file patches...");
+    notifyProgress("Generating file patches...", {
+        type: "patch_generation_started",
+        message: "Generating full-file patches from the preview plan.",
+        stage: "patch_gen",
+        status: "started",
+    });
     let applyPatches = [];
     let fallbackForcePreviewOnly = false;
     let deterministicFallbackTooLarge = false;
@@ -2774,9 +3630,11 @@ async function runLlmPatchFlow(input) {
                     ? input.hostedContext.originalContents[previewPatch.path] ?? ""
                     : undefined;
                 const hostedCtxPre = input.hostedContext?.contextFiles.find((file) => file.path === previewPatch.path)?.content;
+                const hostedForcePre = explicitTargetForceContentByPath.get(previewPatch.path);
                 if (input.hostedContext &&
                     typeof hostedOriginalPre === "undefined" &&
-                    typeof hostedCtxPre === "undefined") {
+                    typeof hostedCtxPre === "undefined" &&
+                    typeof hostedForcePre === "undefined") {
                     patchResults.push({
                         filePath: previewPatch.path,
                         status: "skipped",
@@ -2788,6 +3646,7 @@ async function runLlmPatchFlow(input) {
                     patchPath: previewPatch.path,
                     hostedContext: input.hostedContext,
                     allFiles,
+                    hostedForceLoadedContent: explicitTargetForceContentByPath,
                 });
                 if (!loaded.ok) {
                     patchResults.push({
@@ -3071,9 +3930,11 @@ async function runLlmPatchFlow(input) {
                 : undefined;
             const hostedContextFileContent = input.hostedContext?.contextFiles.find((file) => file.path === patch.path)
                 ?.content;
+            const hostedForceMain = explicitTargetForceContentByPath.get(patch.path);
             if (input.hostedContext &&
                 typeof hostedOriginalContent === "undefined" &&
-                typeof hostedContextFileContent === "undefined") {
+                typeof hostedContextFileContent === "undefined" &&
+                typeof hostedForceMain === "undefined") {
                 patchResults.push({
                     filePath: patch.path,
                     status: "skipped",
@@ -3084,7 +3945,7 @@ async function runLlmPatchFlow(input) {
             const repoFile = allFiles.find((f) => f.path === patch.path);
             const absolutePath = repoFile?.absolutePath;
             const fileContent = input.hostedContext
-                ? hostedOriginalContent ?? hostedContextFileContent ?? ""
+                ? hostedOriginalContent ?? hostedContextFileContent ?? hostedForceMain ?? ""
                 : absolutePath !== undefined
                     ? ((await (0, readProjectFiles_js_1.readProjectFiles)([absolutePath]))[absolutePath] ?? "")
                     : "";
@@ -3504,6 +4365,27 @@ async function runLlmPatchFlow(input) {
             .map(({ path, reason }) => ({ path, reason })));
         console.log("[hosted] patch paths still present after hosted filtering:", patchPlan.patches.map((patch) => patch.path));
     }
+    if (applyPatches.length > 0) {
+        notifyProgress("Validating developer output...", {
+            type: "patch_generated",
+            message: `Generated ${applyPatches.length} patch(es) (${patchSource}).`,
+            stage: "patch_gen",
+            status: patchSource,
+            filePath: applyPatches.map((p) => p.filePath).join(", "),
+        });
+    }
+    else {
+        notifyProgress("Validating developer output...", {
+            type: "patch_generation_failed",
+            message: patchPlan.patches.length > 0
+                ? "No applyable file patches were produced after generation and fallbacks."
+                : "No file patches were planned for apply.",
+            stage: "patch_gen",
+            status: "no_patch",
+            ...(selectedTargetFile ? { filePath: selectedTargetFile } : {}),
+        });
+    }
+    const patchCountBeforeCorrectness = applyPatches.length;
     let correctnessMustBlock = false;
     // Patch correctness validator v2
     if (applyPatches.length > 0) {
@@ -3605,10 +4487,72 @@ async function runLlmPatchFlow(input) {
             patchSource = "no_patch";
         }
     }
+    if (patchCountBeforeCorrectness > 0) {
+        notifyProgress("Validating developer output...", {
+            type: "patch_correctness_checked",
+            message: applyPatches.length > 0
+                ? `Patch correctness checks passed for ${applyPatches.length} file(s).`
+                : "Patch correctness checks rejected all generated patches.",
+            stage: "correctness",
+            status: applyPatches.length > 0 ? "passed" : "rejected_all",
+        });
+    }
+    else {
+        notifyProgress("Validating developer output...", {
+            type: "patch_correctness_checked",
+            message: "Patch correctness checks skipped (no patches to validate).",
+            stage: "correctness",
+            status: "skipped",
+        });
+    }
     if (input.atomicPatch && patchResults.some((result) => result.status === "failed")) {
+        notifyProgress("Ready", {
+            type: "patch_generation_failed",
+            message: "Atomic patch mode: one or more files failed validation.",
+            stage: "patch_gen",
+            status: "atomic_patch_failed",
+        });
+        notifyProgress("Ready", {
+            type: "run_completed",
+            message: "Run finished with errors.",
+            stage: "finalize",
+            status: "failed",
+        });
         reportProgress("Ready");
         perf.finish("atomic patch failed");
-        return { ok: false, reason: "atomic_patch_failed" };
+        const atomicDiffLines = applyPatches.map((p) => {
+            const before = originalContents[p.filePath] ?? "";
+            const diff = computeFileDiff(before, p.fullContent);
+            return {
+                filePath: p.filePath,
+                addedLines: diff.filter((l) => l.type === "added").length,
+                removedLines: diff.filter((l) => l.type === "removed").length,
+            };
+        });
+        const atomicReport = await (0, generateFinalRunReport_js_1.generateFinalRunReport)({
+            task: input.task,
+            contextFilesMeta: selectedContextFiles.map((f) => ({
+                path: f.path,
+                reason: f.reason,
+            })),
+            planObjective: executionPlan?.objective ?? null,
+            planScopeSummary: executionPlan?.scopeSummary ?? null,
+            patchSource,
+            fileDiffs: atomicDiffLines,
+            patchScope: analyzePatchScope({ applyPatches, originalContents }),
+            decisionMode: "preview_only",
+            warnings: visibleWarnings,
+            correctness: { status: "rejected_all", summary: "Atomic patch mode failed validation for one or more files." },
+            verificationCommandsLabel: null,
+            runtimeVerificationSummary: null,
+            finalExecutionOutcome: "failed",
+        });
+        return {
+            ok: false,
+            reason: "atomic_patch_failed",
+            lifecycleEvents: [...lifecycleEvents],
+            finalRunReport: atomicReport,
+        };
     }
     reportProgress("Validating developer output...");
     const changedFileMetrics = applyPatches.map((patch) => {
@@ -3727,28 +4671,168 @@ async function runLlmPatchFlow(input) {
         }
     }
     let runtimeVerification = null;
+    let runtimeVerificationPlan = null;
+    let verificationRepairAttempted = false;
     if (!input.hostedContext && applyPatches.length > 0) {
         try {
-            const command = (0, detectVerificationCommand_js_1.detectVerificationCommand)({
+            const plan = (0, detectVerificationCommand_js_1.detectVerificationPlan)({
                 repoPath: input.repoPath,
                 repoFiles: allFiles.map((file) => file.path),
+                task: input.task,
             });
-            runtimeVerification = await (0, runRuntimeVerification_js_1.runRuntimeVerification)({
+            const plannedCommandSummary = plan.length > 0 ? plan.map((s) => s.command).join(" → ") : "";
+            notifyProgress("Validating developer output...", {
+                type: "verification_planned",
+                message: plan.length > 0
+                    ? `Runtime verification: ${plan.length} step(s) queued.`
+                    : "Runtime verification skipped (no detectable commands).",
+                stage: "verification",
+                status: plan.length > 0 ? "planned" : "skipped_no_command",
+                ...(plannedCommandSummary ? { command: plannedCommandSummary } : {}),
+            });
+            if (plan.length > 0) {
+                notifyProgress("Validating developer output...", {
+                    type: "verification_started",
+                    message: "Running repository verification commands.",
+                    stage: "verification",
+                    status: "running",
+                    command: plan[0]?.command,
+                });
+            }
+            runtimeVerificationPlan = await (0, runRuntimeVerification_js_1.runRuntimeVerificationPlan)({
                 repoPath: input.repoPath,
-                command,
+                plan,
             });
-            if (runtimeVerification.command) {
-                console.log(`[zone-runtime-verify] command="${runtimeVerification.command}" status=${runtimeVerification.status}`);
+            console.log(`[zone-runtime-verify] status=${runtimeVerificationPlan.status} steps=${runtimeVerificationPlan.steps.length}`);
+            // Keep the legacy single-command field populated for existing consumers.
+            runtimeVerification =
+                runtimeVerificationPlan.steps[0] ?? {
+                    attempted: runtimeVerificationPlan.attempted,
+                    status: runtimeVerificationPlan.status === "passed"
+                        ? "passed"
+                        : runtimeVerificationPlan.status === "timeout"
+                            ? "timeout"
+                            : runtimeVerificationPlan.status === "skipped_no_command"
+                                ? "skipped"
+                                : "failed",
+                    command: runtimeVerificationPlan.failedCommand,
+                    summary: runtimeVerificationPlan.summary,
+                };
+            if (runtimeVerificationPlan.status === "failed_code_related") {
+                const warning = `Runtime verification failed (code): ${runtimeVerificationPlan.failedCommand ?? "unknown command"}`;
+                internalWarnings.push(warning);
+                visibleWarnings.push(warning);
+                // One automatic repair attempt for code-related verification failures.
+                if (applyPatches.length > 0) {
+                    verificationRepairAttempted = true;
+                    try {
+                        const brief = (0, buildRetryGuidanceFromFailure_js_1.buildRetryGuidanceFromFailure)({
+                            issues: [
+                                {
+                                    code: "RUNTIME_VERIFICATION_FAILED",
+                                    message: [
+                                        runtimeVerificationPlan.failedCommand
+                                            ? `Command: ${runtimeVerificationPlan.failedCommand}`
+                                            : "",
+                                        runtimeVerificationPlan.summary,
+                                    ]
+                                        .filter(Boolean)
+                                        .join("\n"),
+                                },
+                            ],
+                        });
+                        const guidanceText = (0, buildRetryGuidanceFromFailure_js_1.formatRetryGuidanceBrief)(brief);
+                        console.log("[zone-runtime-verify-retry] attempting repair");
+                        // Patch only the already-changed files; keep changes minimal.
+                        for (let idx = 0; idx < applyPatches.length; idx += 1) {
+                            const patch = applyPatches[idx];
+                            if (!patch)
+                                continue;
+                            const repaired = await (0, planFullPatch_js_1.planFullPatchWithLlm)({
+                                task: [
+                                    input.task,
+                                    "",
+                                    "RUNTIME VERIFICATION FAILED AFTER APPLYING YOUR PATCH.",
+                                    "You MUST fix the failure with the smallest possible change.",
+                                    "You MUST ONLY modify the file below. Do NOT touch other files.",
+                                    `TARGET FILE: ${patch.filePath}`,
+                                    "",
+                                    "Failure guidance:",
+                                    guidanceText,
+                                ].join("\n"),
+                                filePath: patch.filePath,
+                                fileContent: patch.fullContent,
+                                repoSummary: projectSummary,
+                                repoPath: input.repoPath,
+                                taskIntent: taskIntent.normalizedTask || taskIntent.action,
+                                normalizedTaskIntent: detectMicroEditIntent(input.task)
+                                    ? "micro_edit"
+                                    : "standard",
+                                outputMode: "find_replace_patch",
+                                relevantFiles: [{ path: patch.filePath, content: patch.fullContent }],
+                                existingTargetFiles: allFiles.map((file) => file.path),
+                                executionPlan,
+                                relatedContext: "IMPORTANT: Only output a valid patch. Do not explain.",
+                            });
+                            if (repaired.mode !== "patch")
+                                continue;
+                            const applied = applyDeveloperPatchText(patch.fullContent, repaired.patchText);
+                            if (applied.ok) {
+                                applyPatches[idx] = { filePath: patch.filePath, fullContent: applied.fullContent };
+                            }
+                        }
+                        // Re-run runtime verification after repair attempt.
+                        runtimeVerificationPlan = await (0, runRuntimeVerification_js_1.runRuntimeVerificationPlan)({
+                            repoPath: input.repoPath,
+                            plan,
+                        });
+                        console.log(`[zone-runtime-verify-retry] status=${runtimeVerificationPlan.status} steps=${runtimeVerificationPlan.steps.length}`);
+                    }
+                    catch (err) {
+                        console.warn(`[zone-runtime-verify-retry] skipped: ${err instanceof Error ? err.message : String(err)}`);
+                    }
+                }
             }
-            if (runtimeVerification.status === "failed") {
-                const warning = `Runtime verification failed: ${runtimeVerification.command ?? "unknown command"}`;
+            else if (runtimeVerificationPlan.status === "failed_environment_or_tooling") {
+                const warning = "Patch generated, but verification could not complete because of setup/tooling. " +
+                    `(${runtimeVerificationPlan.failedCommand ?? "unknown command"})`;
                 internalWarnings.push(warning);
                 visibleWarnings.push(warning);
             }
-            else if (runtimeVerification.status === "timeout") {
-                const warning = `Runtime verification timed out: ${runtimeVerification.command ?? "unknown command"}`;
+            else if (runtimeVerificationPlan.status === "timeout") {
+                const warning = `Runtime verification timed out: ${runtimeVerificationPlan.failedCommand ?? "unknown command"}`;
                 internalWarnings.push(warning);
                 visibleWarnings.push(warning);
+            }
+            const rvp = runtimeVerificationPlan;
+            const cmd = rvp.failedCommand ?? plan[0]?.command;
+            if (rvp.status === "passed") {
+                notifyProgress("Validating developer output...", {
+                    type: "verification_passed",
+                    message: "Runtime verification completed successfully.",
+                    stage: "verification",
+                    status: "passed",
+                    ...(plannedCommandSummary ? { command: plannedCommandSummary } : {}),
+                });
+            }
+            else if (rvp.status === "failed_environment_or_tooling") {
+                notifyProgress("Validating developer output...", {
+                    type: "tooling_issue",
+                    message: rvp.summary ||
+                        "Verification could not complete because of setup or tooling.",
+                    stage: "verification",
+                    status: "failed_environment_or_tooling",
+                    ...(cmd ? { command: cmd } : {}),
+                });
+            }
+            else if (rvp.status === "failed_code_related" || rvp.status === "timeout") {
+                notifyProgress("Validating developer output...", {
+                    type: "verification_failed",
+                    message: rvp.summary || `Verification outcome: ${rvp.status}`,
+                    stage: "verification",
+                    status: rvp.status,
+                    ...(cmd ? { command: cmd } : {}),
+                });
             }
         }
         catch (err) {
@@ -3758,6 +4842,12 @@ async function runLlmPatchFlow(input) {
                 summary: `Runtime verification skipped: ${err instanceof Error ? err.message : String(err)}`,
             };
             console.warn(`[zone-runtime-verify] skipped`);
+            notifyProgress("Validating developer output...", {
+                type: "tooling_issue",
+                message: `Runtime verification skipped: ${err instanceof Error ? err.message : String(err)}`,
+                stage: "verification",
+                status: "runtime_verify_exception",
+            });
         }
     }
     logRiskDebug("runLlmPatchFlow after task-risk adjustments", {
@@ -3819,7 +4909,9 @@ async function runLlmPatchFlow(input) {
     }
     const runtimeVerificationFailed = runtimeVerification?.attempted === true &&
         (runtimeVerification.status === "failed" || runtimeVerification.status === "timeout");
-    const runtimeFailureGuidance = runtimeVerificationFailed && runtimeVerification
+    const runtimeVerificationCodeFailed = runtimeVerificationPlan?.status === "failed_code_related";
+    const runtimeVerificationToolingFailed = runtimeVerificationPlan?.status === "failed_environment_or_tooling";
+    const runtimeFailureGuidance = (runtimeVerificationCodeFailed || runtimeVerification?.status === "timeout") && runtimeVerification
         ? (0, buildRetryGuidanceFromFailure_js_1.buildRetryGuidanceFromFailure)({
             issues: [
                 {
@@ -3931,7 +5023,7 @@ async function runLlmPatchFlow(input) {
             syncedVisibleWarnings.push(noCodeChangeWarning);
         }
     }
-    const decisionMode = runtimeVerificationFailed
+    let decisionMode = (runtimeVerificationCodeFailed || runtimeVerification?.status === "timeout")
         ? "blocked"
         : deterministicFallbackTooLarge
             ? "blocked"
@@ -3950,19 +5042,52 @@ async function runLlmPatchFlow(input) {
                         constrainedTaskLargeRewriteForcePreview
                         ? "preview_only"
                         : "safe_to_apply";
-    const finalExecutionOutcome = runtimeVerification?.status === "failed"
-        ? "failed_verification"
-        : runtimeVerification?.status === "timeout" || noCodeChangeReason
-            ? "completed_with_issues"
-            : constrainedTaskLargeRewriteBlocked
-                ? "completed_with_issues"
-                : "completed";
-    const finalState = finalExecutionOutcome === "failed_verification" ||
-        finalExecutionOutcome === "completed_with_issues"
+    if ((applyPatches.length === 0 || patchSource === "no_patch") &&
+        decisionMode === "safe_to_apply") {
+        decisionMode = "preview_only";
+    }
+    const verificationStatus = runtimeVerificationPlan?.status === "passed"
+        ? "passed"
+        : runtimeVerificationPlan?.status === "skipped_no_command"
+            ? "skipped"
+            : runtimeVerificationPlan?.status === "failed_environment_or_tooling"
+                ? "tooling_issue"
+                : runtimeVerificationPlan?.status === "failed_code_related"
+                    ? "code_failed"
+                    : runtimeVerificationPlan?.status === "timeout"
+                        ? "timeout"
+                        : runtimeVerification?.status === "timeout"
+                            ? "timeout"
+                            : runtimeVerification
+                                ? "code_failed"
+                                : "skipped";
+    const finalExecutionOutcome = noCodeChangeReason || constrainedTaskLargeRewriteBlocked
+        ? "completed_with_issues"
+        : verificationStatus === "passed"
+            ? "completed"
+            : verificationStatus === "skipped"
+                ? "completed_with_verification_skipped"
+                : verificationStatus === "tooling_issue"
+                    ? "completed_with_tooling_issue"
+                    : verificationStatus === "timeout"
+                        ? "completed_with_issues"
+                        : verificationRepairAttempted
+                            ? "failed_after_retry"
+                            : "failed_verification";
+    const noApplyablePatch = applyPatches.length === 0 || patchSource === "no_patch";
+    const finalState = decisionMode === "blocked"
         ? "blocked"
-        : decisionMode;
+        : finalExecutionOutcome === "failed_verification" ||
+            finalExecutionOutcome === "failed_after_retry"
+            ? "blocked"
+            : finalExecutionOutcome === "completed_with_issues" &&
+                !(noApplyablePatch &&
+                    decisionMode === "preview_only" &&
+                    patchPreviewHadNoStructuredPatchesFromLlm)
+                ? "blocked"
+                : decisionMode;
     const validationBlocked = finalState === "blocked";
-    if (runtimeVerificationFailed && runtimeVerification) {
+    if ((runtimeVerificationCodeFailed || runtimeVerification?.status === "timeout") && runtimeVerification) {
         const warning = `Final verification did not pass: ${runtimeVerification.command ?? "unknown command"} (${runtimeVerification.status}).`;
         if (!syncedInternalWarnings.includes(warning))
             syncedInternalWarnings.push(warning);
@@ -4032,7 +5157,59 @@ async function runLlmPatchFlow(input) {
             ? ["", "Warnings:", ...syncedVisibleWarnings.map((w) => `- ${w}`)]
             : []),
     ].join("\n");
+    const verificationCommandsForReport = runtimeVerificationPlan && runtimeVerificationPlan.steps.length > 0
+        ? runtimeVerificationPlan.steps
+            .map((s) => s.command)
+            .filter((c) => typeof c === "string" && c.length > 0)
+            .join(" → ")
+        : null;
+    const correctnessForReport = patchCountBeforeCorrectness > 0
+        ? applyPatches.length > 0
+            ? {
+                status: "passed",
+                summary: "Remaining patches passed Zone patch correctness validation.",
+            }
+            : {
+                status: "rejected_all",
+                summary: "Patch correctness validation rejected all generated patches.",
+            }
+        : {
+            status: "skipped",
+            summary: "No patches entered correctness validation.",
+        };
+    const finalRunReport = await (0, generateFinalRunReport_js_1.generateFinalRunReport)({
+        task: input.task,
+        contextFilesMeta: selectedContextFiles.map((f) => ({
+            path: f.path,
+            reason: f.reason,
+        })),
+        planObjective: executionPlan?.objective ?? null,
+        planScopeSummary: executionPlan?.scopeSummary ?? null,
+        patchSource,
+        fileDiffs: fileDiffs.map((fd) => ({
+            filePath: fd.filePath,
+            addedLines: fd.addedLines,
+            removedLines: fd.removedLines,
+        })),
+        patchScope,
+        decisionMode,
+        finalState,
+        warnings: syncedVisibleWarnings,
+        correctness: correctnessForReport,
+        verificationCommandsLabel: verificationCommandsForReport,
+        runtimeVerificationSummary: runtimeVerificationPlan?.summary ?? null,
+        runtimeVerificationFailedCommand: runtimeVerificationPlan?.failedCommand ?? null,
+        verificationStatus,
+        finalExecutionOutcome,
+        developerConfidence,
+    });
     // 8. Return
+    notifyProgress("Ready", {
+        type: "run_completed",
+        message: "Run finished successfully.",
+        stage: "finalize",
+        status: "success",
+    });
     reportProgress("Ready");
     perf.mark("response payload ready");
     perf.finish("complete");
@@ -4063,7 +5240,8 @@ async function runLlmPatchFlow(input) {
         decisionMode,
         finalState,
         finalExecutionOutcome,
-        attemptsUsed: runtimeVerification ? 1 : undefined,
+        verificationStatus,
+        attemptsUsed: runtimeVerification ? (verificationRepairAttempted ? 2 : 1) : undefined,
         validationBlocked,
         ...(runtimeVerificationFailed && runtimeVerification
             ? {
@@ -4092,6 +5270,9 @@ async function runLlmPatchFlow(input) {
         ...(planAlignment ? { planAlignment } : {}),
         ...(verification ? { verification } : {}),
         ...(runtimeVerification ? { runtimeVerification } : {}),
+        ...(runtimeVerificationPlan ? { runtimeVerificationPlan } : {}),
+        lifecycleEvents: [...lifecycleEvents],
+        finalRunReport,
     };
 }
 //# sourceMappingURL=runLlmPatchFlow.js.map

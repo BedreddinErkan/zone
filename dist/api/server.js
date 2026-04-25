@@ -34,6 +34,8 @@ const openaiClient_js_1 = require("../llm/openaiClient.js");
 const refinePrompt_js_1 = require("../llm/refinePrompt.js");
 const resolveBillingAction_js_1 = require("../billing/resolveBillingAction.js");
 const colors_js_1 = require("../cli/colors.js");
+const developerRunProgressSse_js_1 = require("../core/developerRunProgressSse.js");
+const progressStageCodec_js_1 = require("../core/progressStageCodec.js");
 const validateLlmOutput_js_1 = require("../core/validateLlmOutput.js");
 const lemonsqueezyWebhook_js_1 = __importDefault(require("../routes/lemonsqueezyWebhook.js"));
 const createLemonCheckout_js_1 = __importDefault(require("../routes/createLemonCheckout.js"));
@@ -45,7 +47,6 @@ exports.app = (0, express_1.default)();
 const port = Number(process.env.PORT) || 3000;
 let startedPort = null;
 let startPromise = null;
-const progressStreams = new Map();
 const zoneUiDir = node_path_1.default.resolve(__dirname, "../ui");
 const zoneUiHtmlTemplate = (0, node_fs_1.readFileSync)(node_path_1.default.join(zoneUiDir, "index.html"), "utf8");
 const ENHANCE_TASK_SYSTEM_PROMPT = "You are a task optimizer for an AI code agent called Zone.\n" +
@@ -664,15 +665,14 @@ async function ensureRunAuthorized(rawUserId, options) {
         };
     }
 }
-function emitProgress(runId, stage) {
+function emitProgress(runId, update) {
     if (!runId)
         return;
-    const listeners = progressStreams.get(runId);
-    if (!listeners)
-        return;
-    const payload = `data: ${JSON.stringify({ stage })}\n\n`;
-    for (const res of listeners) {
-        res.write(payload);
+    if (typeof update === "string") {
+        (0, developerRunProgressSse_js_1.emitDeveloperPatchProgress)(runId, { stage: update });
+    }
+    else {
+        (0, developerRunProgressSse_js_1.emitDeveloperPatchProgress)(runId, update);
     }
 }
 async function createDeveloperPatchJobPayload(input) {
@@ -760,17 +760,9 @@ exports.app.get("/api/progress", (req, res) => {
     res.setHeader("Connection", "keep-alive");
     res.flushHeaders?.();
     res.write(`data: ${JSON.stringify({ stage: "Connected" })}\n\n`);
-    const listeners = progressStreams.get(runId) ?? new Set();
-    listeners.add(res);
-    progressStreams.set(runId, listeners);
+    (0, developerRunProgressSse_js_1.attachDeveloperPatchProgressSseClient)(runId, res);
     req.on("close", () => {
-        const current = progressStreams.get(runId);
-        if (!current)
-            return;
-        current.delete(res);
-        if (current.size === 0) {
-            progressStreams.delete(runId);
-        }
+        (0, developerRunProgressSse_js_1.detachDeveloperPatchProgressSseClient)(runId, res);
     });
 });
 // ── Desktop Auth Routes ──
@@ -1028,11 +1020,15 @@ exports.app.get("/api/patch/jobs/:runId", async (req, res) => {
             res.status(404).json({ ok: false, reason: "job_not_found" });
             return;
         }
+        const decoded = (0, progressStageCodec_js_1.decodeProgressStage)(job.progress_stage);
         res.json({
             ok: true,
             runId: job.id,
             status: job.status,
-            progressStage: job.progress_stage,
+            progressStage: decoded.displayStage,
+            ...(decoded.lastLifecycle
+                ? { lastLifecycleEvent: decoded.lastLifecycle }
+                : {}),
             errorMessage: job.error_message,
         });
     }
@@ -1069,12 +1065,16 @@ exports.app.get("/api/patch/jobs/:runId/result", async (req, res) => {
             });
             return;
         }
+        const decodedNotReady = (0, progressStageCodec_js_1.decodeProgressStage)(job.progress_stage);
         res.json({
             ok: false,
             reason: "job_not_ready",
             runId: job.id,
             status: job.status,
-            progressStage: job.progress_stage,
+            progressStage: decodedNotReady.displayStage,
+            ...(decodedNotReady.lastLifecycle
+                ? { lastLifecycleEvent: decodedNotReady.lastLifecycle }
+                : {}),
         });
     }
     catch (err) {
@@ -1148,6 +1148,7 @@ exports.app.post("/api/patch", async (req, res) => {
         repoPath,
         hostedContext,
         perfLabel: "/api/patch core",
+        onProgress: (update) => emitProgress(runId, update),
     });
     perf.mark("core patch flow complete");
     if (result.ok && result.applyPatches.length > 0) {
@@ -1232,6 +1233,7 @@ exports.app.post("/api/dry-run", async (req, res) => {
         repoPath,
         dryRun: true,
         hostedContext,
+        onProgress: (update) => emitProgress(runId, update),
     });
     if (!result.ok) {
         res.status(500).json(result);
