@@ -44,6 +44,17 @@ export type AgentLifecycleEvent = {
   timestamp: string;
 };
 
+/** Rich UI progress payload (SSE); legacy `stage` string remains for older clients. */
+export type ZoneStructuredProgressEvent = {
+  runId: string;
+  ts: number;
+  type: string;
+  title: string;
+  detail?: string;
+  filePath?: string;
+  status: "active" | "success" | "warning" | "error";
+};
+
 export function createAgentLifecycleEvent(
   input: Omit<AgentLifecycleEvent, "timestamp"> & { timestamp?: string }
 ): AgentLifecycleEvent {
@@ -58,4 +69,5 @@ export type LlmPatchProgressUpdate =
   | {
       stage: string;
       lifecycle?: AgentLifecycleEvent;
+      progress?: ZoneStructuredProgressEvent;
     };

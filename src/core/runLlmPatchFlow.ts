@@ -50,6 +50,7 @@ import {
   createAgentLifecycleEvent,
   type AgentLifecycleEvent,
   type LlmPatchProgressUpdate,
+  type ZoneStructuredProgressEvent,
 } from "./agentLifecycleEvents.js";
 import {
   generateFinalRunReport,
@@ -3141,7 +3142,8 @@ function isInstructionLikeFindBlock(find: string): boolean {
 
 function applyDeveloperPatchText(
   currentContent: string,
-  rawPatchText: string
+  rawPatchText: string,
+  options?: { filePath?: string }
 ): { ok: true; fullContent: string } | { ok: false; warning: string } {
   console.log("[zone-patch-raw]", rawPatchText.slice(0, 1000));
   const trimmedPatch = rawPatchText.trim();
@@ -3202,6 +3204,32 @@ function applyDeveloperPatchText(
           JSON.stringify({
             reason: "patch_protocol_leak",
             syntheticFindBlock: true,
+          }),
+      };
+    }
+    const findLinesNonEmpty = edit.find
+      .trim()
+      .split("\n")
+      .filter((l) => l.trim()).length;
+    const replaceLineCount = edit.replace.split("\n").length;
+    if (findLinesNonEmpty <= 2 && replaceLineCount > 20) {
+      const filePath = options?.filePath ?? "(unknown)";
+      console.log(
+        "[zone-anchor-too-small-blocked]",
+        JSON.stringify({
+          filePath,
+          findLines: findLinesNonEmpty,
+          replaceLines: replaceLineCount,
+        })
+      );
+      return {
+        ok: false,
+        warning:
+          "[ANCHOR_TOO_SMALL_FOR_LARGE_REPLACE] " +
+          JSON.stringify({
+            reason: "anchor_too_small_for_large_replace",
+            findLines: findLinesNonEmpty,
+            replaceLines: replaceLineCount,
           }),
       };
     }
@@ -3769,6 +3797,23 @@ function parsePatchFailureWarning(
     return { reason: "patch_protocol_leak", normalizedFailureReason: "patch_protocol_leak" };
   }
 
+  if (warning.startsWith("[ANCHOR_TOO_SMALL_FOR_LARGE_REPLACE] ")) {
+    try {
+      const payload = JSON.parse(
+        warning.slice("[ANCHOR_TOO_SMALL_FOR_LARGE_REPLACE] ".length)
+      ) as { reason?: string };
+      return {
+        reason: "anchor_too_small_for_large_replace",
+        normalizedFailureReason: payload.reason ?? "anchor_too_small_for_large_replace",
+      };
+    } catch {
+      return {
+        reason: "anchor_too_small_for_large_replace",
+        normalizedFailureReason: "anchor_too_small_for_large_replace",
+      };
+    }
+  }
+
   return { reason: "warning" };
 }
 
@@ -3942,10 +3987,28 @@ export async function runLlmPatchFlow(input: {
   conversationId?: string;
   billingMode?: ConversationBillingMode;
   hostedContext?: HostedDeveloperContextInput;
+  runId?: string;
   onProgress?: (update: LlmPatchProgressUpdate) => void | Promise<void>;
   perfLabel?: string;
 }): Promise<LlmPatchFlowResult> {
   const lifecycleEvents: AgentLifecycleEvent[] = [];
+
+  const emitStructuredProgress = (
+    event: Omit<ZoneStructuredProgressEvent, "runId" | "ts">
+  ): void => {
+    const runId = typeof input.runId === "string" ? input.runId.trim() : "";
+    if (!runId) return;
+    const progress: ZoneStructuredProgressEvent = {
+      runId,
+      ts: Date.now(),
+      ...event,
+    };
+    try {
+      input.onProgress?.({ stage: event.title, progress });
+    } catch {
+      // best-effort
+    }
+  };
 
   const notifyProgress = (
     legacyStage: string,
@@ -4207,6 +4270,12 @@ export async function runLlmPatchFlow(input: {
       };
     }
     console.log("[zone-explicit-target-found]", explicitTargetRepoFile.path);
+    emitStructuredProgress({
+      type: "reading_file",
+      title: "Reading target file",
+      filePath: explicitTargetRepoFile.path,
+      status: "active",
+    });
     explicitTargetCanonicalPath = explicitTargetRepoFile.path;
   }
 
@@ -4258,6 +4327,12 @@ export async function runLlmPatchFlow(input: {
     message: `Ranked ${fullRankedFiles.length} paths; using top ${relevantFiles.length} for planning.`,
     stage: "rank",
     status: "ok",
+  });
+  emitStructuredProgress({
+    type: "ranking_context",
+    title: "Finding relevant files",
+    detail: "Ranking repository context",
+    status: "success",
   });
 
   // TEMP DIAGNOSTIC: surface top 20 ranker scores to verify PatientsPage presence
@@ -4543,16 +4618,22 @@ export async function runLlmPatchFlow(input: {
           reason: "Explicit target file from user prompt",
         },
       ];
-      console.log("[zone-context-files-count]", resolvedFileContexts.length);
     }
   }
 
+  console.log("[zone-context-files-count]", resolvedFileContexts.length);
   perf.mark("file context loaded");
   notifyProgress("Loading file context...", {
     type: "file_context_loaded",
     message: `Loaded ${resolvedFileContexts.length} file context(s) for patch generation.`,
     stage: "context",
     status: "ok",
+  });
+  emitStructuredProgress({
+    type: "context_ready",
+    title: "Loaded context",
+    detail: `Using ${resolvedFileContexts.length} file(s)`,
+    status: "success",
   });
   // ── TOKEN BUDGET GUARD ──────────────────────────────────────────
   const SIMPLE_BUDGET_CHARS = 320_000; // ~80K tokens (4o-mini)
@@ -5646,6 +5727,13 @@ export async function runLlmPatchFlow(input: {
       console.log("[zone-patch-source] using FULL PATCH ONLY");
       const nextContent = await (() => {
             perf.mark(`full patch model call start ${patch.path}`);
+            emitStructuredProgress({
+              type: "generating_patch",
+              title: "Generating minimal patch",
+              detail: "Localized edit via LLM",
+              status: "active",
+              filePath: patch.path,
+            });
             return planFullPatchWithLlm({
               task: input.task,
               filePath: patch.path,
@@ -5762,7 +5850,8 @@ export async function runLlmPatchFlow(input: {
               rawPatchTextByFile[patch.path] = fullPatch.patchText;
               let appliedPatch = applyDeveloperPatchText(
                 fileContent,
-                fullPatch.patchText
+                fullPatch.patchText,
+                { filePath: patch.path }
               );
               let recoveredFromApply = false;
               if (!appliedPatch.ok) {
@@ -5779,7 +5868,8 @@ export async function runLlmPatchFlow(input: {
                   if (recovered.ok) {
                     appliedPatch = applyDeveloperPatchText(
                       fileContent,
-                      recovered.strictPatchText
+                      recovered.strictPatchText,
+                      { filePath: patch.path }
                     );
                     recoveredFromApply = appliedPatch.ok;
                   }
@@ -5794,10 +5884,14 @@ export async function runLlmPatchFlow(input: {
                 if (failure.reason === "invalid_patch_format") {
                   fallbackForcePreviewOnly = true;
                 }
+                if (failure.reason === "anchor_too_small_for_large_replace") {
+                  fallbackForcePreviewOnly = true;
+                }
                 if (
                   (failure.reason === "patch_find_not_found" ||
                     failure.reason === "no_match_abort" ||
-                    failure.reason === "patch_protocol_leak") &&
+                    failure.reason === "patch_protocol_leak" ||
+                    failure.reason === "anchor_too_small_for_large_replace") &&
                   loopApplyTargets.length === 1 &&
                   !isProtectedDeveloperUiPath(patch.path) &&
                   isUiFilePath(patch.path) &&
@@ -5826,7 +5920,8 @@ export async function runLlmPatchFlow(input: {
                     usedLlmPatchRecovered = false;
                     const appliedFromAst = applyDeveloperPatchText(
                       fileContent,
-                      astFallback.patchText
+                      astFallback.patchText,
+                      { filePath: patch.path }
                     );
                     if (appliedFromAst.ok) {
                       // Return minimally-edited full content (applied via FIND/REPLACE patch).
@@ -5886,6 +5981,13 @@ export async function runLlmPatchFlow(input: {
                 chosenOutputMode: fullPatchMode,
                 responseMode: fullPatch.mode,
                 status: "applied",
+              });
+              emitStructuredProgress({
+                type: "patch_converted",
+                title: "Patch converted",
+                detail: "FIND/REPLACE matched original file",
+                status: "success",
+                filePath: patch.path,
               });
               return appliedPatch.fullContent;
             }
@@ -6341,6 +6443,13 @@ export async function runLlmPatchFlow(input: {
             })
           );
           try {
+            emitStructuredProgress({
+              type: "generating_patch",
+              title: "Generating minimal patch",
+              detail: "Localized edit via LLM",
+              status: "active",
+              filePath: patch.filePath,
+            });
             const repaired = await planFullPatchWithLlm({
               task: [
                 input.task,
@@ -6409,7 +6518,8 @@ export async function runLlmPatchFlow(input: {
               console.log("[zone-repair-patch-generated]", patch.filePath);
               const applied = applyDeveloperPatchText(
                 patch.fullContent,
-                repaired.patchText
+                repaired.patchText,
+                { filePath: patch.filePath }
               );
               if (!applied.ok) {
                 console.log(
@@ -6422,6 +6532,9 @@ export async function runLlmPatchFlow(input: {
                 const failure = parsePatchFailureWarning(applied.warning);
                 if (failure.reason === "no_match_abort") {
                   console.log("[zone-retry-skipped-no-match]", patch.filePath);
+                  fallbackForcePreviewOnly = true;
+                }
+                if (failure.reason === "anchor_too_small_for_large_replace") {
                   fallbackForcePreviewOnly = true;
                 }
                 visibleWarnings.push("repair_attempted_but_failed");
@@ -6555,6 +6668,26 @@ export async function runLlmPatchFlow(input: {
       message: "Patch correctness checks skipped (no patches to validate).",
       stage: "correctness",
       status: "skipped",
+    });
+  }
+
+  if (patchCountBeforeCorrectness > 0) {
+    const validatedChangedLines = applyPatches.reduce((sum, p) => {
+      const before = originalContents[p.filePath] ?? "";
+      const diff = computeFileDiff(before, p.fullContent);
+      return (
+        sum + diff.filter((l) => l.type === "added" || l.type === "removed").length
+      );
+    }, 0);
+    const validatedStatus: "success" | "warning" =
+      applyPatches.length > 0 && validatorAllOk && !correctnessMustBlock
+        ? "success"
+        : "warning";
+    emitStructuredProgress({
+      type: "validated",
+      title: "Patch validated",
+      detail: `${validatedChangedLines} changed lines`,
+      status: validatedStatus,
     });
   }
 
@@ -6796,6 +6929,14 @@ export async function runLlmPatchFlow(input: {
         "[zone-verification-start]",
         JSON.stringify({ steps: plan.map((s) => s.command) })
       );
+      if (plan.length > 0) {
+        emitStructuredProgress({
+          type: "verification",
+          title: "Running verification",
+          detail: plan[0]?.command ?? "Repository verification",
+          status: "active",
+        });
+      }
       runtimeVerificationPlan = await runRuntimeVerificationPlan({
         repoPath: input.repoPath,
         plan,
@@ -6930,6 +7071,13 @@ export async function runLlmPatchFlow(input: {
             for (let idx = 0; idx < applyPatches.length; idx += 1) {
               const patch = applyPatches[idx];
               if (!patch) continue;
+              emitStructuredProgress({
+                type: "generating_patch",
+                title: "Generating minimal patch",
+                detail: "Localized edit via LLM",
+                status: "active",
+                filePath: patch.filePath,
+              });
               const repaired = await planFullPatchWithLlm({
                 task: [
                   input.task,
@@ -6964,11 +7112,16 @@ export async function runLlmPatchFlow(input: {
               });
               if (repaired.mode !== "patch") continue;
               console.log("[zone-repair-patch-generated]", patch.filePath);
-              const applied = applyDeveloperPatchText(patch.fullContent, repaired.patchText);
+              const applied = applyDeveloperPatchText(patch.fullContent, repaired.patchText, {
+                filePath: patch.filePath,
+              });
               if (!applied.ok) {
                 const failure = parsePatchFailureWarning(applied.warning);
                 if (failure.reason === "no_match_abort") {
                   console.log("[zone-retry-skipped-no-match]", patch.filePath);
+                  fallbackForcePreviewOnly = true;
+                }
+                if (failure.reason === "anchor_too_small_for_large_replace") {
                   fallbackForcePreviewOnly = true;
                 }
                 continue;
@@ -6994,6 +7147,14 @@ export async function runLlmPatchFlow(input: {
 
             // Re-run runtime verification after repair attempt.
             console.log("[zone-repair-verification-start]", JSON.stringify({ attempt }));
+            if (plan.length > 0) {
+              emitStructuredProgress({
+                type: "verification",
+                title: "Running verification",
+                detail: plan[0]?.command ?? "Repository verification",
+                status: "active",
+              });
+            }
             runtimeVerificationPlan = await runRuntimeVerificationPlan({
               repoPath: input.repoPath,
               plan,

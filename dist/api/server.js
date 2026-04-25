@@ -672,7 +672,14 @@ function emitProgress(runId, update) {
         (0, developerRunProgressSse_js_1.emitDeveloperPatchProgress)(runId, { stage: update });
     }
     else {
-        (0, developerRunProgressSse_js_1.emitDeveloperPatchProgress)(runId, update);
+        const progress = update.progress && !update.progress.runId
+            ? { ...update.progress, runId, ts: update.progress.ts ?? Date.now() }
+            : update.progress;
+        (0, developerRunProgressSse_js_1.emitDeveloperPatchProgress)(runId, {
+            stage: update.stage,
+            lifecycle: update.lifecycle,
+            progress,
+        });
     }
 }
 async function createDeveloperPatchJobPayload(input) {
@@ -1147,6 +1154,7 @@ exports.app.post("/api/patch", async (req, res) => {
         task,
         repoPath,
         hostedContext,
+        runId: typeof runId === "string" ? runId : undefined,
         perfLabel: "/api/patch core",
         onProgress: (update) => emitProgress(runId, update),
     });
@@ -1233,6 +1241,7 @@ exports.app.post("/api/dry-run", async (req, res) => {
         repoPath,
         dryRun: true,
         hostedContext,
+        runId: typeof runId === "string" ? runId : undefined,
         onProgress: (update) => emitProgress(runId, update),
     });
     if (!result.ok) {

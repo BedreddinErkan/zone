@@ -90,6 +90,30 @@ describe("applyDeveloperPatchText localized replacement", () => {
     }
   });
 
+  it("rejects tiny FIND anchor (≤2 non-empty lines) with large REPLACE (>20 lines)", () => {
+    const content = "// UTIL: simple email format check\nfunction f() {}\n";
+    const find = "// UTIL: simple email format check";
+    const replace = Array.from({ length: 21 }, (_, i) => `  line${i + 1}();`).join("\n");
+    const patch = wrapPatch(find, replace);
+    const applied = __testOnly_applyDeveloperPatchText(content, patch, {
+      filePath: "src/example.ts",
+    });
+    expect(applied.ok).toBe(false);
+    if (!applied.ok) {
+      expect(applied.warning).toContain("[ANCHOR_TOO_SMALL_FOR_LARGE_REPLACE]");
+      expect(applied.warning).toContain("anchor_too_small_for_large_replace");
+    }
+  });
+
+  it("allows FIND with 3+ non-empty lines alongside large REPLACE", () => {
+    const find = "ONE\nTWO\nTHREE";
+    const content = `${find}\nREST\n`;
+    const replace = `${find}\n` + Array.from({ length: 21 }, (_, i) => `x${i}`).join("\n");
+    const patch = wrapPatch(find, replace);
+    const applied = __testOnly_applyDeveloperPatchText(content, patch);
+    expect(applied.ok).toBe(true);
+  });
+
   it("raw match count 0 is blocked unless LF-normalized match is exactly 1", () => {
     const content =
       "function x() {\n" +

@@ -36,6 +36,7 @@ async function processDeveloperPatchJob(supabase, job) {
         const result = await (0, runLlmPatchFlow_js_1.runLlmPatchFlow)({
             task: requestPayload.task,
             repoPath: requestPayload.repoPath,
+            runId: job.id,
             hostedContext: requestPayload.hostedContext,
             onProgress: async (update) => {
                 const stage = typeof update === "string" ? update : update.stage;

@@ -2202,7 +2202,7 @@ function isInstructionLikeFindBlock(find) {
         t.includes("your code here") ||
         t.includes("replace this"));
 }
-function applyDeveloperPatchText(currentContent, rawPatchText) {
+function applyDeveloperPatchText(currentContent, rawPatchText, options) {
     console.log("[zone-patch-raw]", rawPatchText.slice(0, 1000));
     const trimmedPatch = rawPatchText.trim();
     if (trimmedPatch !== "NO_CHANGE_NEEDED" &&
@@ -2250,6 +2250,28 @@ function applyDeveloperPatchText(currentContent, rawPatchText) {
                     JSON.stringify({
                         reason: "patch_protocol_leak",
                         syntheticFindBlock: true,
+                    }),
+            };
+        }
+        const findLinesNonEmpty = edit.find
+            .trim()
+            .split("\n")
+            .filter((l) => l.trim()).length;
+        const replaceLineCount = edit.replace.split("\n").length;
+        if (findLinesNonEmpty <= 2 && replaceLineCount > 20) {
+            const filePath = options?.filePath ?? "(unknown)";
+            console.log("[zone-anchor-too-small-blocked]", JSON.stringify({
+                filePath,
+                findLines: findLinesNonEmpty,
+                replaceLines: replaceLineCount,
+            }));
+            return {
+                ok: false,
+                warning: "[ANCHOR_TOO_SMALL_FOR_LARGE_REPLACE] " +
+                    JSON.stringify({
+                        reason: "anchor_too_small_for_large_replace",
+                        findLines: findLinesNonEmpty,
+                        replaceLines: replaceLineCount,
                     }),
             };
         }
@@ -2677,6 +2699,21 @@ function parsePatchFailureWarning(warning) {
     if (warning.startsWith("[PATCH_PROTOCOL_LEAK]")) {
         return { reason: "patch_protocol_leak", normalizedFailureReason: "patch_protocol_leak" };
     }
+    if (warning.startsWith("[ANCHOR_TOO_SMALL_FOR_LARGE_REPLACE] ")) {
+        try {
+            const payload = JSON.parse(warning.slice("[ANCHOR_TOO_SMALL_FOR_LARGE_REPLACE] ".length));
+            return {
+                reason: "anchor_too_small_for_large_replace",
+                normalizedFailureReason: payload.reason ?? "anchor_too_small_for_large_replace",
+            };
+        }
+        catch {
+            return {
+                reason: "anchor_too_small_for_large_replace",
+                normalizedFailureReason: "anchor_too_small_for_large_replace",
+            };
+        }
+    }
     return { reason: "warning" };
 }
 function buildPatchConflictWarning(input) {
@@ -2791,6 +2828,22 @@ function selectRankedContextPathsWithinCap(resolvedFileContexts, fullRankedFiles
 }
 async function runLlmPatchFlow(input) {
     const lifecycleEvents = [];
+    const emitStructuredProgress = (event) => {
+        const runId = typeof input.runId === "string" ? input.runId.trim() : "";
+        if (!runId)
+            return;
+        const progress = {
+            runId,
+            ts: Date.now(),
+            ...event,
+        };
+        try {
+            input.onProgress?.({ stage: event.title, progress });
+        }
+        catch {
+            // best-effort
+        }
+    };
     const notifyProgress = (legacyStage, lifecycleInput) => {
         if (lifecycleInput) {
             const ev = (0, agentLifecycleEvents_js_1.createAgentLifecycleEvent)(lifecycleInput);
@@ -3032,6 +3085,12 @@ async function runLlmPatchFlow(input) {
             };
         }
         console.log("[zone-explicit-target-found]", explicitTargetRepoFile.path);
+        emitStructuredProgress({
+            type: "reading_file",
+            title: "Reading target file",
+            filePath: explicitTargetRepoFile.path,
+            status: "active",
+        });
         explicitTargetCanonicalPath = explicitTargetRepoFile.path;
     }
     const developerContextFiles = allFiles.filter((file) => !isIrrelevantDeveloperContextPath(file.path));
@@ -3077,6 +3136,12 @@ async function runLlmPatchFlow(input) {
         message: `Ranked ${fullRankedFiles.length} paths; using top ${relevantFiles.length} for planning.`,
         stage: "rank",
         status: "ok",
+    });
+    emitStructuredProgress({
+        type: "ranking_context",
+        title: "Finding relevant files",
+        detail: "Ranking repository context",
+        status: "success",
     });
     // TEMP DIAGNOSTIC: surface top 20 ranker scores to verify PatientsPage presence
     console.log("[zone-diag-ranker]", JSON.stringify({
@@ -3319,15 +3384,21 @@ async function runLlmPatchFlow(input) {
                     reason: "Explicit target file from user prompt",
                 },
             ];
-            console.log("[zone-context-files-count]", resolvedFileContexts.length);
         }
     }
+    console.log("[zone-context-files-count]", resolvedFileContexts.length);
     perf.mark("file context loaded");
     notifyProgress("Loading file context...", {
         type: "file_context_loaded",
         message: `Loaded ${resolvedFileContexts.length} file context(s) for patch generation.`,
         stage: "context",
         status: "ok",
+    });
+    emitStructuredProgress({
+        type: "context_ready",
+        title: "Loaded context",
+        detail: `Using ${resolvedFileContexts.length} file(s)`,
+        status: "success",
     });
     // ── TOKEN BUDGET GUARD ──────────────────────────────────────────
     const SIMPLE_BUDGET_CHARS = 320_000; // ~80K tokens (4o-mini)
@@ -4247,6 +4318,13 @@ async function runLlmPatchFlow(input) {
             console.log("[zone-patch-source] using FULL PATCH ONLY");
             const nextContent = await (() => {
                 perf.mark(`full patch model call start ${patch.path}`);
+                emitStructuredProgress({
+                    type: "generating_patch",
+                    title: "Generating minimal patch",
+                    detail: "Localized edit via LLM",
+                    status: "active",
+                    filePath: patch.path,
+                });
                 return (0, planFullPatch_js_1.planFullPatchWithLlm)({
                     task: input.task,
                     filePath: patch.path,
@@ -4352,7 +4430,7 @@ async function runLlmPatchFlow(input) {
                 }
                 if (fullPatch.mode === "patch") {
                     rawPatchTextByFile[patch.path] = fullPatch.patchText;
-                    let appliedPatch = applyDeveloperPatchText(fileContent, fullPatch.patchText);
+                    let appliedPatch = applyDeveloperPatchText(fileContent, fullPatch.patchText, { filePath: patch.path });
                     let recoveredFromApply = false;
                     if (!appliedPatch.ok) {
                         const failurePreview = parsePatchFailureWarning(appliedPatch.warning);
@@ -4364,7 +4442,7 @@ async function runLlmPatchFlow(input) {
                                 task: input.task,
                             });
                             if (recovered.ok) {
-                                appliedPatch = applyDeveloperPatchText(fileContent, recovered.strictPatchText);
+                                appliedPatch = applyDeveloperPatchText(fileContent, recovered.strictPatchText, { filePath: patch.path });
                                 recoveredFromApply = appliedPatch.ok;
                             }
                         }
@@ -4378,9 +4456,13 @@ async function runLlmPatchFlow(input) {
                         if (failure.reason === "invalid_patch_format") {
                             fallbackForcePreviewOnly = true;
                         }
+                        if (failure.reason === "anchor_too_small_for_large_replace") {
+                            fallbackForcePreviewOnly = true;
+                        }
                         if ((failure.reason === "patch_find_not_found" ||
                             failure.reason === "no_match_abort" ||
-                            failure.reason === "patch_protocol_leak") &&
+                            failure.reason === "patch_protocol_leak" ||
+                            failure.reason === "anchor_too_small_for_large_replace") &&
                             loopApplyTargets.length === 1 &&
                             !isProtectedDeveloperUiPath(patch.path) &&
                             isUiFilePath(patch.path) &&
@@ -4400,7 +4482,7 @@ async function runLlmPatchFlow(input) {
                                 }));
                                 patchSource = "ast_fallback";
                                 usedLlmPatchRecovered = false;
-                                const appliedFromAst = applyDeveloperPatchText(fileContent, astFallback.patchText);
+                                const appliedFromAst = applyDeveloperPatchText(fileContent, astFallback.patchText, { filePath: patch.path });
                                 if (appliedFromAst.ok) {
                                     // Return minimally-edited full content (applied via FIND/REPLACE patch).
                                     return appliedFromAst.fullContent;
@@ -4451,6 +4533,13 @@ async function runLlmPatchFlow(input) {
                         chosenOutputMode: fullPatchMode,
                         responseMode: fullPatch.mode,
                         status: "applied",
+                    });
+                    emitStructuredProgress({
+                        type: "patch_converted",
+                        title: "Patch converted",
+                        detail: "FIND/REPLACE matched original file",
+                        status: "success",
+                        filePath: patch.path,
                     });
                     return appliedPatch.fullContent;
                 }
@@ -4818,6 +4907,13 @@ async function runLlmPatchFlow(input) {
                         diffHeadSample: diagDiffHeadSample,
                     }));
                     try {
+                        emitStructuredProgress({
+                            type: "generating_patch",
+                            title: "Generating minimal patch",
+                            detail: "Localized edit via LLM",
+                            status: "active",
+                            filePath: patch.filePath,
+                        });
                         const repaired = await (0, planFullPatch_js_1.planFullPatchWithLlm)({
                             task: [
                                 input.task,
@@ -4881,7 +4977,7 @@ async function runLlmPatchFlow(input) {
                         }
                         else {
                             console.log("[zone-repair-patch-generated]", patch.filePath);
-                            const applied = applyDeveloperPatchText(patch.fullContent, repaired.patchText);
+                            const applied = applyDeveloperPatchText(patch.fullContent, repaired.patchText, { filePath: patch.filePath });
                             if (!applied.ok) {
                                 console.log("[zone-repair-validation-failed]", JSON.stringify({
                                     filePath: patch.filePath,
@@ -4890,6 +4986,9 @@ async function runLlmPatchFlow(input) {
                                 const failure = parsePatchFailureWarning(applied.warning);
                                 if (failure.reason === "no_match_abort") {
                                     console.log("[zone-retry-skipped-no-match]", patch.filePath);
+                                    fallbackForcePreviewOnly = true;
+                                }
+                                if (failure.reason === "anchor_too_small_for_large_replace") {
                                     fallbackForcePreviewOnly = true;
                                 }
                                 visibleWarnings.push("repair_attempted_but_failed");
@@ -4997,6 +5096,22 @@ async function runLlmPatchFlow(input) {
             message: "Patch correctness checks skipped (no patches to validate).",
             stage: "correctness",
             status: "skipped",
+        });
+    }
+    if (patchCountBeforeCorrectness > 0) {
+        const validatedChangedLines = applyPatches.reduce((sum, p) => {
+            const before = originalContents[p.filePath] ?? "";
+            const diff = computeFileDiff(before, p.fullContent);
+            return (sum + diff.filter((l) => l.type === "added" || l.type === "removed").length);
+        }, 0);
+        const validatedStatus = applyPatches.length > 0 && validatorAllOk && !correctnessMustBlock
+            ? "success"
+            : "warning";
+        emitStructuredProgress({
+            type: "validated",
+            title: "Patch validated",
+            detail: `${validatedChangedLines} changed lines`,
+            status: validatedStatus,
         });
     }
     if (input.atomicPatch && patchResults.some((result) => result.status === "failed")) {
@@ -5194,6 +5309,14 @@ async function runLlmPatchFlow(input) {
                 });
             }
             console.log("[zone-verification-start]", JSON.stringify({ steps: plan.map((s) => s.command) }));
+            if (plan.length > 0) {
+                emitStructuredProgress({
+                    type: "verification",
+                    title: "Running verification",
+                    detail: plan[0]?.command ?? "Repository verification",
+                    status: "active",
+                });
+            }
             runtimeVerificationPlan = await (0, runRuntimeVerification_js_1.runRuntimeVerificationPlan)({
                 repoPath: input.repoPath,
                 plan,
@@ -5301,6 +5424,13 @@ async function runLlmPatchFlow(input) {
                                 const patch = applyPatches[idx];
                                 if (!patch)
                                     continue;
+                                emitStructuredProgress({
+                                    type: "generating_patch",
+                                    title: "Generating minimal patch",
+                                    detail: "Localized edit via LLM",
+                                    status: "active",
+                                    filePath: patch.filePath,
+                                });
                                 const repaired = await (0, planFullPatch_js_1.planFullPatchWithLlm)({
                                     task: [
                                         input.task,
@@ -5336,11 +5466,16 @@ async function runLlmPatchFlow(input) {
                                 if (repaired.mode !== "patch")
                                     continue;
                                 console.log("[zone-repair-patch-generated]", patch.filePath);
-                                const applied = applyDeveloperPatchText(patch.fullContent, repaired.patchText);
+                                const applied = applyDeveloperPatchText(patch.fullContent, repaired.patchText, {
+                                    filePath: patch.filePath,
+                                });
                                 if (!applied.ok) {
                                     const failure = parsePatchFailureWarning(applied.warning);
                                     if (failure.reason === "no_match_abort") {
                                         console.log("[zone-retry-skipped-no-match]", patch.filePath);
+                                        fallbackForcePreviewOnly = true;
+                                    }
+                                    if (failure.reason === "anchor_too_small_for_large_replace") {
                                         fallbackForcePreviewOnly = true;
                                     }
                                     continue;
@@ -5362,6 +5497,14 @@ async function runLlmPatchFlow(input) {
                             });
                             // Re-run runtime verification after repair attempt.
                             console.log("[zone-repair-verification-start]", JSON.stringify({ attempt }));
+                            if (plan.length > 0) {
+                                emitStructuredProgress({
+                                    type: "verification",
+                                    title: "Running verification",
+                                    detail: plan[0]?.command ?? "Repository verification",
+                                    status: "active",
+                                });
+                            }
                             runtimeVerificationPlan = await (0, runRuntimeVerification_js_1.runRuntimeVerificationPlan)({
                                 repoPath: input.repoPath,
                                 plan,

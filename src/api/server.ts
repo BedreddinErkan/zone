@@ -46,7 +46,10 @@ import {
 import { getUserQuota } from "../billing/conversationRepository.js";
 import { resolveBillingAction } from "../billing/resolveBillingAction.js";
 import { c, colorize } from "../cli/colors.js";
-import type { AgentLifecycleEvent } from "../core/agentLifecycleEvents.js";
+import type {
+  AgentLifecycleEvent,
+  ZoneStructuredProgressEvent,
+} from "../core/agentLifecycleEvents.js";
 import {
   attachDeveloperPatchProgressSseClient,
   detachDeveloperPatchProgressSseClient,
@@ -965,13 +968,27 @@ async function ensureRunAuthorized(
 }
 function emitProgress(
   runId: string | undefined,
-  update: string | { stage: string; lifecycle?: AgentLifecycleEvent }
+  update:
+    | string
+    | {
+        stage: string;
+        lifecycle?: AgentLifecycleEvent;
+        progress?: ZoneStructuredProgressEvent;
+      }
 ): void {
   if (!runId) return;
   if (typeof update === "string") {
     emitDeveloperPatchProgress(runId, { stage: update });
   } else {
-    emitDeveloperPatchProgress(runId, update);
+    const progress =
+      update.progress && !update.progress.runId
+        ? { ...update.progress, runId, ts: update.progress.ts ?? Date.now() }
+        : update.progress;
+    emitDeveloperPatchProgress(runId, {
+      stage: update.stage,
+      lifecycle: update.lifecycle,
+      progress,
+    });
   }
 }
 
@@ -1506,6 +1523,7 @@ const result = await runLlmPatchFlow({
   task,
   repoPath,
   hostedContext,
+  runId: typeof runId === "string" ? runId : undefined,
   perfLabel: "/api/patch core",
   onProgress: (update) => emitProgress(runId, update),
 });
@@ -1608,6 +1626,7 @@ const result = await runLlmPatchFlow({
   repoPath,
   dryRun: true,
   hostedContext,
+  runId: typeof runId === "string" ? runId : undefined,
   onProgress: (update) => emitProgress(runId, update),
 });
 if (!result.ok) {

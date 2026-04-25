@@ -53,6 +53,7 @@ async function processDeveloperPatchJob(
     const result = await runLlmPatchFlow({
       task: requestPayload.task,
       repoPath: requestPayload.repoPath,
+      runId: job.id,
       hostedContext: requestPayload.hostedContext as
         | Parameters<typeof runLlmPatchFlow>[0]["hostedContext"]
         | undefined,

@@ -1,9 +1,10 @@
 import type { Response } from "express";
-import type { AgentLifecycleEvent } from "./agentLifecycleEvents.js";
+import type { AgentLifecycleEvent, ZoneStructuredProgressEvent } from "./agentLifecycleEvents.js";
 
 export type DeveloperPatchProgressPayload = {
   stage: string;
   lifecycle?: AgentLifecycleEvent;
+  progress?: ZoneStructuredProgressEvent;
 };
 
 const progressStreams = new Map<string, Set<Response>>();
