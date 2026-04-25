@@ -5780,7 +5780,8 @@ export async function runLlmPatchFlow(input: {
                 }
                 if (
                   (failure.reason === "patch_find_not_found" ||
-                    failure.reason === "no_match_abort") &&
+                    failure.reason === "no_match_abort" ||
+                    failure.reason === "patch_protocol_leak") &&
                   loopApplyTargets.length === 1 &&
                   !isProtectedDeveloperUiPath(patch.path) &&
                   isUiFilePath(patch.path) &&

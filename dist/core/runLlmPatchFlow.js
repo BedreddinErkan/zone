@@ -4366,7 +4366,8 @@ async function runLlmPatchFlow(input) {
                             fallbackForcePreviewOnly = true;
                         }
                         if ((failure.reason === "patch_find_not_found" ||
-                            failure.reason === "no_match_abort") &&
+                            failure.reason === "no_match_abort" ||
+                            failure.reason === "patch_protocol_leak") &&
                             loopApplyTargets.length === 1 &&
                             !isProtectedDeveloperUiPath(patch.path) &&
                             isUiFilePath(patch.path) &&
@@ -5652,6 +5653,39 @@ async function runLlmPatchFlow(input) {
                         constrainedTaskLargeRewriteForcePreview
                         ? "preview_only"
                         : "safe_to_apply";
+    // Minimal safe patch fast-path: tiny additive patch + validator ok + low risk => safe_to_apply.
+    // This intentionally ignores warnings and verifyPatch warnings; only blocking signals matter.
+    if (decisionMode !== "blocked" &&
+        applyPatches.length === 1 &&
+        patchScope.changedFileCount === 1 &&
+        patchScope.totalChangedLines <= 3 &&
+        patchScope.totalRemovedLines <= 1 &&
+        patchScope.totalAddedLines >= 1 &&
+        validatorAllOk === true &&
+        finalDeveloperRisk.score <= 10 &&
+        finalDeveloperRisk.breakdown.schema === 0 &&
+        finalDeveloperRisk.breakdown.destructive === 0 &&
+        finalDeveloperRisk.breakdown.massScope === 0 &&
+        !patchScope.rewriteLikeSuspicion &&
+        !patchScope.cssRewriteSuspicion &&
+        !hasBlockedPatch &&
+        !vagueTask &&
+        !microEditProtection.shouldForcePreview &&
+        !intentMismatchDecision.forcePreviewOnly &&
+        !uiMappingRisk.forcePreviewOnly &&
+        !fallbackForcePreviewOnly &&
+        !constrainedTaskLargeRewriteForcePreview &&
+        !constrainedTaskLargeRewriteBlocked &&
+        (verification == null || verification.score >= 60)) {
+        const previousDecision = decisionMode;
+        console.log("[zone-decision-fast-path]", JSON.stringify({
+            applied: true,
+            reason: "minimal_safe_patch",
+            previousDecision,
+            nextDecision: "safe_to_apply",
+        }));
+        decisionMode = "safe_to_apply";
+    }
     // Minimal safe patch override (explicitly allow auto-apply).
     if (decisionMode === "preview_only" &&
         applyPatches.length === 1 &&
@@ -5684,6 +5718,31 @@ async function runLlmPatchFlow(input) {
     if ((applyPatches.length === 0 || patchSource === "no_patch") &&
         decisionMode === "safe_to_apply") {
         decisionMode = "preview_only";
+    }
+    // LAST-MILE minimal safe patch override.
+    // This runs after all other decision calculations and before response payload construction.
+    const minimalSafePatch = applyPatches.length === 1 &&
+        patchScope.changedFileCount === 1 &&
+        patchScope.totalChangedLines <= 3 &&
+        validatorAllOk === true &&
+        finalDeveloperRisk.score <= 10 &&
+        !patchScope.rewriteLikeSuspicion &&
+        !patchScope.cssRewriteSuspicion &&
+        !finalDeveloperRisk.breakdown?.schema &&
+        !finalDeveloperRisk.breakdown?.massScope &&
+        !finalDeveloperRisk.breakdown?.destructive &&
+        patchScope.totalRemovedLines <= 1 &&
+        (verification == null || verification.score >= 60);
+    if (minimalSafePatch && decisionMode !== "safe_to_apply") {
+        console.log("[zone-decision-fast-path]", {
+            applied: true,
+            reason: "minimal_safe_patch",
+            previousDecision: decisionMode,
+            nextDecision: "safe_to_apply",
+            patchScope,
+            finalDeveloperRisk,
+        });
+        decisionMode = "safe_to_apply";
     }
     const verificationStatus = runtimeVerificationPlan?.status === "passed"
         ? "passed"
