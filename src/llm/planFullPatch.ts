@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { createOpenAIClient, getModelName } from "./openaiClient.js";
+import {
+  createOpenAIClient,
+  extractResponsesApiOutputText,
+  formatResponsesTextExtractionFailure,
+  getModelName,
+  logOpenAiResponseDebug,
+} from "./openaiClient.js";
 import {
   withSelfHealingRetry,
   buildDefaultFeedbackPrompt,
@@ -94,6 +100,14 @@ export type FullPatchResult =
       warnings: string[];
       /** Length of the last non-empty raw model output used for recovery (0 if none). */
       lastNonEmptyRawLength?: number;
+    }
+  | {
+      mode: "empty_model_response";
+      filePath: string;
+      summary: string;
+      warnings: string[];
+      normalizedFailureReason: "empty_model_response";
+      emptyModelDetails?: string;
     };
 
 function isValidPatchResponse(text: string): boolean {
@@ -193,6 +207,9 @@ function buildFindReplaceFormatRetryPrompt(feedback: RetryFeedback): string {
     (issue) =>
       issue.code === "INVALID_PATCH_FORMAT" || issue.code === "EMPTY_PATCH"
   );
+  const hadEmptyPatch = feedback.issues.some(
+    (issue) => issue.code === "EMPTY_PATCH"
+  );
 
   if (needsHardPatchCorrection) {
     console.log("[zone-patch-retry-attempt]", feedback.attempt);
@@ -206,6 +223,14 @@ function buildFindReplaceFormatRetryPrompt(feedback: RetryFeedback): string {
   }
 
   const hardCorrection = [
+    ...(hadEmptyPatch
+      ? [
+          "Your previous response contained NO usable patch text (empty output or missing tool payload).",
+          "",
+          "Return only a find/replace patch. No explanation.",
+          "",
+        ]
+      : []),
     "Your previous response was INVALID.",
     "",
     "You MUST return ONLY a patch.",
@@ -402,18 +427,22 @@ export async function planFullPatchWithLlm(input: {
 
     let lastRawPatchResponse = "";
     let findReplaceAttemptIndex = 0;
+    let lastStructuredEmptyFailure: string | null = null;
 
     const retryResult = await withSelfHealingRetry({
       maxAttempts: 3,
       prompt: findReplacePrompt,
       execute: async (currentPrompt: string) => {
         findReplaceAttemptIndex += 1;
+        const maxOutputTokens =
+          [2000, 4096, 8192][Math.min(findReplaceAttemptIndex - 1, 2)] ?? 8192;
         console.log(
           "[zone-patch-request] sending strict patch system instruction",
           JSON.stringify({
             filePath: input.filePath,
-            max_output_tokens: 2000,
+            max_output_tokens: maxOutputTokens,
             temperature: 0,
+            attempt: findReplaceAttemptIndex,
           })
         );
 
@@ -432,19 +461,22 @@ export async function planFullPatchWithLlm(input: {
         const response = await client.responses.create({
           model,
           temperature: 0,
-          max_output_tokens: 2000,
+          max_output_tokens: maxOutputTokens,
           tools: [applyPatchTool],
           tool_choice: applyPatchToolChoice,
           input: responseInput,
         });
 
+        logOpenAiResponseDebug(response, {
+          filePath: input.filePath,
+          attempt: findReplaceAttemptIndex,
+        });
+
+        const extraction = extractResponsesApiOutputText(response);
         const toolPatch = extractPatchFromToolCall(response);
-        const outputText =
-          typeof (response as { output_text?: unknown }).output_text === "string"
-            ? (response as { output_text: string }).output_text.trim()
-            : "";
         const fromTool = toolPatch != null ? String(toolPatch).trim() : "";
-        const rawForAttempt = fromTool || outputText;
+        const fromExtract = extraction.ok ? extraction.text.trim() : "";
+        const rawForAttempt = fromTool || fromExtract;
 
         console.log(
           "[zone-patch-raw-response-debug]",
@@ -458,6 +490,18 @@ export async function planFullPatchWithLlm(input: {
 
         if (rawForAttempt.length > 0) {
           lastRawPatchResponse = rawForAttempt;
+        } else {
+          const emptyReason = extraction.ok
+            ? "tool_and_extractable_text_empty"
+            : formatResponsesTextExtractionFailure(extraction);
+          lastStructuredEmptyFailure = emptyReason;
+          console.log(
+            "[zone-full-patch-empty-response]",
+            JSON.stringify({
+              attempt: findReplaceAttemptIndex,
+              reason: emptyReason,
+            })
+          );
         }
 
         if (fromTool) {
@@ -466,11 +510,11 @@ export async function planFullPatchWithLlm(input: {
           return fromTool;
         }
 
-        if (outputText) {
+        if (fromExtract) {
           console.warn(
-            "[zone-patch-tool] No structured tool patch; using output_text for validation"
+            "[zone-patch-tool] No structured tool patch; using extracted response text for validation"
           );
-          return outputText;
+          return fromExtract;
         }
 
         console.error("[zone-patch-tool] No structured patch returned");
@@ -526,6 +570,18 @@ export async function planFullPatchWithLlm(input: {
       const rawAttempt =
         lastRawPatchResponse ||
         (typeof retryResult.lastValue === "string" ? retryResult.lastValue : "");
+      if (rawAttempt.length === 0) {
+        return {
+          mode: "empty_model_response",
+          filePath: input.filePath,
+          summary: "Large-file patch: model returned no usable output text.",
+          warnings: [
+            `[empty_model_response] ${lastStructuredEmptyFailure ?? "no_raw_output"}`,
+          ],
+          normalizedFailureReason: "empty_model_response",
+          emptyModelDetails: lastStructuredEmptyFailure ?? undefined,
+        };
+      }
       const recovered = tryRecoverDeveloperPatchFromModelOutput({
         requestedFilePath: input.filePath,
         originalFileContent: originalForRecovery,
@@ -554,6 +610,19 @@ export async function planFullPatchWithLlm(input: {
     console.log("[zone-patch-debug] raw model output:", rawText.slice(0, 500));
     console.log("[zone-patch-debug-full]", rawText.slice(0, 500));
     if (!isValidPatchResponse(rawText)) {
+      const recoveredRaw = (lastRawPatchResponse || rawText).trim();
+      if (recoveredRaw.length === 0) {
+        return {
+          mode: "empty_model_response",
+          filePath: input.filePath,
+          summary: "Large-file patch: model returned no usable output text.",
+          warnings: [
+            `[empty_model_response] ${lastStructuredEmptyFailure ?? "no_raw_output"}`,
+          ],
+          normalizedFailureReason: "empty_model_response",
+          emptyModelDetails: lastStructuredEmptyFailure ?? undefined,
+        };
+      }
       const recovered = tryRecoverDeveloperPatchFromModelOutput({
         requestedFilePath: input.filePath,
         originalFileContent: originalForRecovery,

@@ -3555,7 +3555,11 @@ function buildPatchConflictWarning(input: {
 function logPatchConversionDebug(input: {
   filePath: string;
   chosenOutputMode: "full_content" | "find_replace_patch";
-  responseMode: "full_content" | "patch" | "invalid_patch_format";
+  responseMode:
+    | "full_content"
+    | "patch"
+    | "invalid_patch_format"
+    | "empty_model_response";
   status: "applied" | "failed";
   failureReason?: string;
   normalizedFailureReason?: string;
@@ -5418,6 +5422,35 @@ export async function runLlmPatchFlow(input: {
             });
           })().then((fullPatch) => {
             perf.mark(`full patch model response received ${patch.path}`);
+            if (fullPatch.mode === "empty_model_response") {
+              fallbackForcePreviewOnly = true;
+              console.log(
+                "[zone-patch-recovery-context]",
+                JSON.stringify({
+                  filePath: patch.path,
+                  mode: "empty_model_response",
+                  details: fullPatch.emptyModelDetails ?? null,
+                })
+              );
+              for (const w of fullPatch.warnings) {
+                internalWarnings.push(w);
+                visibleWarnings.push(w);
+              }
+              logPatchConversionDebug({
+                filePath: patch.path,
+                chosenOutputMode: fullPatchMode,
+                responseMode: "empty_model_response" as const,
+                status: "failed",
+                failureReason: "empty_model_response",
+                normalizedFailureReason: "empty_model_response",
+              });
+              patchResults.push({
+                filePath: patch.path,
+                status: "failed",
+                reason: "empty_model_response",
+              });
+              return null;
+            }
             if (fullPatch.mode === "invalid_patch_format") {
               fallbackForcePreviewOnly = true;
               console.log(

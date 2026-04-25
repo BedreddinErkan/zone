@@ -130,6 +130,33 @@ describe("planFullPatchWithLlm", () => {
     }
   });
 
+  it("returns empty_model_response when retries exhaust with no captured raw text", async () => {
+    withSelfHealingRetryMock.mockResolvedValue({
+      ok: false,
+      reason: "Validation failed after 3 attempts.",
+      attempts: 3,
+      lastIssues: [],
+      lastValue: "",
+    });
+
+    const { planFullPatchWithLlm } = await import("./planFullPatch.js");
+    const result = await planFullPatchWithLlm({
+      task: "update the constant",
+      filePath: "src/huge.ts",
+      fileContent: "b".repeat(8000),
+      repoSummary: "repo",
+      relatedContext: "context",
+    });
+
+    expect(result.mode).toBe("empty_model_response");
+    if (result.mode === "empty_model_response") {
+      expect(result.normalizedFailureReason).toBe("empty_model_response");
+      expect(result.warnings.some((w) => w.includes("[empty_model_response]"))).toBe(
+        true
+      );
+    }
+  });
+
   it("uses full_content mode for constrained localized tasks when the content is already narrowed", async () => {
     withSelfHealingRetryMock.mockResolvedValue({
       ok: true,
