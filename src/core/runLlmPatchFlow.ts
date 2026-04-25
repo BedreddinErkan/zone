@@ -7349,6 +7349,36 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
           constrainedTaskLargeRewriteForcePreview
         ? "preview_only"
         : "safe_to_apply";
+  // Minimal safe patch fast-path: tiny additive patch + validator ok + low risk => safe_to_apply.
+  // This intentionally ignores warnings and verifyPatch warnings; only blocking signals matter.
+  if (
+    decisionMode !== "blocked" &&
+    applyPatches.length === 1 &&
+    patchScope.changedFileCount === 1 &&
+    patchScope.totalChangedLines <= 3 &&
+    patchScope.totalRemovedLines === 0 &&
+    patchScope.totalAddedLines >= 1 &&
+    validatorAllOk === true &&
+    finalDeveloperRisk.score <= 10 &&
+    finalDeveloperRisk.breakdown.schema === 0 &&
+    finalDeveloperRisk.breakdown.destructive === 0 &&
+    finalDeveloperRisk.breakdown.massScope === 0 &&
+    !hasBlockedPatch &&
+    !vagueTask &&
+    !microEditProtection.shouldForcePreview &&
+    !intentMismatchDecision.forcePreviewOnly &&
+    !uiMappingRisk.forcePreviewOnly &&
+    !fallbackForcePreviewOnly &&
+    !constrainedTaskLargeRewriteForcePreview &&
+    !constrainedTaskLargeRewriteBlocked &&
+    (verification == null || verification.score >= 60)
+  ) {
+    console.log(
+      "[zone-decision-fast-path]",
+      JSON.stringify({ applied: true, reason: "minimal_safe_patch" })
+    );
+    decisionMode = "safe_to_apply";
+  }
   // Minimal safe patch override (explicitly allow auto-apply).
   if (
     decisionMode === "preview_only" &&
