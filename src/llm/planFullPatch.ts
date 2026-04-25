@@ -177,6 +177,7 @@ function buildApplyPatchTool(): Tool {
         },
       },
       required: ["patch"],
+      additionalProperties: false,
     } as Record<string, unknown>,
   };
 }
