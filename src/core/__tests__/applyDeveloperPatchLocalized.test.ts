@@ -72,5 +72,36 @@ describe("applyDeveloperPatchText localized replacement", () => {
       expect(applied.warning).toContain("patch_protocol_leak");
     }
   });
+
+  it("instruction-like FIND block is rejected (patch_protocol_leak)", () => {
+    const content = "function foo(){\n  return 1;\n}\n";
+    const find =
+      "// Guard: Ensure selectedUpload...\n" +
+      "// Usage example...\n" +
+      "// Example:\n";
+    const patch = wrapPatch(find, "x");
+    const applied = __testOnly_applyDeveloperPatchText(content, patch);
+    expect(applied.ok).toBe(false);
+    if (!applied.ok) {
+      expect(applied.warning).toContain("[PATCH_PROTOCOL_LEAK]");
+      expect(applied.warning).toContain("syntheticFindBlock");
+      expect(applied.warning).toContain("patch_protocol_leak");
+    }
+  });
+
+  it("whitespace-normalized unique match still applies when not instruction-like", () => {
+    const content =
+      "function x() {\n" +
+      "  const a    =    1;\n" +
+      "  return a;\n" +
+      "}\n";
+    // Same logical line with different whitespace; should match via safe ws normalization.
+    const patch = wrapPatch("  const a = 1;", "  const a = 2;");
+    const applied = __testOnly_applyDeveloperPatchText(content, patch);
+    expect(applied.ok).toBe(true);
+    if (applied.ok) {
+      expect(applied.fullContent).toContain("const a = 2");
+    }
+  });
 });
 

@@ -3119,6 +3119,26 @@ function isDeveloperPatchParseStructurallyEmpty(
   return parsed.edits.length === 0;
 }
 
+function isInstructionLikeFindBlock(find: string): boolean {
+  const t = String(find || "").toLowerCase().trim();
+
+  return (
+    t.includes("insert this") ||
+    t.includes("insert here") ||
+    t.includes("where selectedupload is used") ||
+    t.includes("usage:") ||
+    t.includes("usage example") ||
+    t.includes("example:") ||
+    t.includes("wrap image preview") ||
+    t.includes("guard for") ||
+    t.includes("guard:") ||
+    t.includes("ensure selectedupload") ||
+    t.includes("placeholder") ||
+    t.includes("your code here") ||
+    t.includes("replace this")
+  );
+}
+
 function applyDeveloperPatchText(
   currentContent: string,
   rawPatchText: string
@@ -3171,6 +3191,18 @@ function applyDeveloperPatchText(
         ok: false,
         warning:
           "[DEVELOPER_PATCH_FORMAT] FIND blocks must target an existing non-empty block.",
+      };
+    }
+    if (isInstructionLikeFindBlock(edit.find)) {
+      console.log("[zone-patch-protocol-leak-blocked]");
+      return {
+        ok: false,
+        warning:
+          "[PATCH_PROTOCOL_LEAK] " +
+          JSON.stringify({
+            reason: "patch_protocol_leak",
+            syntheticFindBlock: true,
+          }),
       };
     }
     const findCountRaw = countOccurrences(updatedContent, edit.find);
