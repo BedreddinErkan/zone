@@ -7428,6 +7428,33 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
   ) {
     decisionMode = "preview_only";
   }
+
+  // LAST-MILE minimal safe patch override.
+  // This runs after all other decision calculations and before response payload construction.
+  const minimalSafePatch =
+    applyPatches.length === 1 &&
+    patchScope.changedFileCount === 1 &&
+    patchScope.totalChangedLines <= 3 &&
+    validatorAllOk === true &&
+    finalDeveloperRisk.score <= 10 &&
+    !patchScope.rewriteLikeSuspicion &&
+    !patchScope.cssRewriteSuspicion &&
+    !finalDeveloperRisk.breakdown?.schema &&
+    !finalDeveloperRisk.breakdown?.massScope &&
+    !finalDeveloperRisk.breakdown?.destructive &&
+    patchScope.totalRemovedLines <= 1 &&
+    (verification == null || verification.score >= 60);
+  if (minimalSafePatch && decisionMode !== "safe_to_apply") {
+    console.log("[zone-decision-fast-path]", {
+      applied: true,
+      reason: "minimal_safe_patch",
+      previousDecision: decisionMode,
+      nextDecision: "safe_to_apply",
+      patchScope,
+      finalDeveloperRisk,
+    });
+    decisionMode = "safe_to_apply";
+  }
   const verificationStatus: "passed" | "skipped" | "tooling_issue" | "code_failed" | "timeout" =
     runtimeVerificationPlan?.status === "passed"
       ? "passed"
