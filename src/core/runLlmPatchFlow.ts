@@ -4007,15 +4007,15 @@ export async function runLlmPatchFlow(input: {
     fullRankedFiles = mergeExplicitRepoFileIntoRankedFiles(fullRankedFiles, explicitTargetRepoFile);
   }
   let relevantFiles = fullRankedFiles.slice(0, 8);
-  if (
-    explicitTargetRepoFile &&
-    !relevantFiles.some((file) => file.path === explicitTargetRepoFile.path)
-  ) {
+  if (explicitTargetRepoFile) {
     const explicitRankedFile: RankedRepoFile = {
       ...explicitTargetRepoFile,
       score: Math.max(...fullRankedFiles.map((file) => file.score), 0) + 10_000,
     };
-    relevantFiles = [explicitRankedFile, ...relevantFiles].slice(0, 8);
+    // Explicit target mode: keep planning context ultra-minimal to avoid token overflow and
+    // ensure the model focuses on the requested file.
+    console.log("[zone-context-mode] explicit_single_file_mode");
+    relevantFiles = [explicitRankedFile];
   }
   perf.mark("relevant files ranked");
   notifyProgress("Ranking relevant files...", {
@@ -4277,7 +4277,12 @@ export async function runLlmPatchFlow(input: {
     ) {
       const canon = explicitTargetRepoFile.path;
       explicitTargetCanonicalPath = canon;
-      if (!resolvedFileContextsIncludePath(resolvedFileContexts, canon)) {
+      let targetContent: string | null = null;
+      const existing = resolvedFileContexts.find((f) => f.path === canon);
+      if (existing && typeof existing.content === "string") {
+        targetContent = existing.content;
+      }
+      if (!targetContent) {
         const loadedContent = await loadExplicitTargetFileContentForPatchContext({
           canonPath: canon,
           hostedContext: input.hostedContext,
@@ -4286,16 +4291,24 @@ export async function runLlmPatchFlow(input: {
         explicitTargetForceContentByPath.set(canon, loadedContent);
         console.log("[zone-explicit-target-forced-into-context]", canon);
         console.log("[zone-explicit-target-force-included]", canon);
-        resolvedFileContexts.unshift({
+        targetContent = loadedContent;
+      }
+
+      // Explicit target mode: override any ranked/hosted context and send only the target file.
+      resolvedFileContexts = [
+        {
           path: canon,
-          content: loadedContent,
-        });
-        selectedContextFiles.unshift({
+          content: targetContent,
+        },
+      ];
+      selectedContextFiles = [
+        {
           path: canon,
           action: "inspect",
           reason: "Explicit target file from user prompt",
-        });
-      }
+        },
+      ];
+      console.log("[zone-context-files-count]", resolvedFileContexts.length);
     }
   }
 
