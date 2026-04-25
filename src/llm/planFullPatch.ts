@@ -218,11 +218,14 @@ function extractPatchFromToolCall(response: unknown): string | null {
 function buildFindReplaceFormatRetryPrompt(feedback: RetryFeedback): string {
   const needsHardPatchCorrection = feedback.issues.some(
     (issue) =>
-      issue.code === "INVALID_PATCH_FORMAT" || issue.code === "EMPTY_PATCH"
+      issue.code === "INVALID_PATCH_FORMAT" ||
+      issue.code === "EMPTY_PATCH" ||
+      issue.code === "NOOP_DETECTED"
   );
   const hadEmptyPatch = feedback.issues.some(
     (issue) => issue.code === "EMPTY_PATCH"
   );
+  const hadNoop = feedback.issues.some((issue) => issue.code === "NOOP_DETECTED");
 
   if (needsHardPatchCorrection) {
     console.log("[zone-patch-retry-attempt]", feedback.attempt);
@@ -236,6 +239,22 @@ function buildFindReplaceFormatRetryPrompt(feedback: RetryFeedback): string {
   }
 
   const hardCorrection = [
+    ...(hadNoop
+      ? [
+          "Your previous response contained NO_CHANGE_NEEDED.",
+          "",
+          "DO NOT return NO_CHANGE_NEEDED.",
+          "There IS a bug in this file.",
+          "You MUST produce a minimal patch.",
+          "",
+          "FORCED PATCH STRATEGY:",
+          "- Remove ANY suspicious or stray characters",
+          "- Fix JSX structure if needed",
+          "- Prefer the smallest possible change",
+          "- You must output a patch",
+          "",
+        ]
+      : []),
     ...(hadEmptyPatch
       ? [
           "Your previous response contained NO usable patch text (empty output or missing tool payload).",
@@ -283,8 +302,6 @@ function buildFindReplaceFormatRetryPrompt(feedback: RetryFeedback): string {
     "ONLY OUTPUT:",
     "",
     "- A valid patch",
-    "OR",
-    "- NO_CHANGE_NEEDED",
     "",
     "Fix your response now.",
   ].join("\n");
@@ -617,7 +634,33 @@ export async function planFullPatchWithLlm(input: {
           });
           return issues;
         }
-        if (raw.trim() === "NO_CHANGE_NEEDED") {
+        if (raw.includes("NO_CHANGE_NEEDED")) {
+          console.log(
+            "[zone-noop-detected]",
+            JSON.stringify({
+              filePath: input.filePath,
+              attempt: findReplaceAttemptIndex,
+              rawPreview: raw.slice(0, 120),
+            })
+          );
+          if (findReplaceAttemptIndex < 2) {
+            console.log(
+              "[zone-noop-retry]",
+              JSON.stringify({ filePath: input.filePath, attempt: findReplaceAttemptIndex })
+            );
+            issues.push({
+              code: "NOOP_DETECTED",
+              message:
+                "Model returned NO_CHANGE_NEEDED, but a patch is required. Retry with forced patch instructions.",
+              severity: "error",
+            });
+            return issues;
+          }
+          console.log(
+            "[zone-noop-final]",
+            JSON.stringify({ filePath: input.filePath, attempt: findReplaceAttemptIndex })
+          );
+          // After a forced retry, accept NO_CHANGE_NEEDED so the caller can treat it as no-op.
           return issues;
         }
         if (!isValidPatchResponse(raw)) {
