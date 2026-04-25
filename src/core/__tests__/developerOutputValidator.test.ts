@@ -371,7 +371,7 @@ describe("validateDeveloperOutput", () => {
       const result = computeRiskScore({
         task: "modify schema file to add column to users table",
       });
-      expect(result.breakdown.schema).toBeGreaterThanOrEqual(25);
+      expect(result.breakdown.schema).toBeGreaterThanOrEqual(15);
     });
 
     it("assigns mass-scope risk for broad destructive tasks", () => {

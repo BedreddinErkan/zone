@@ -22,6 +22,7 @@ import {
   type RuntimeVerificationResult,
   type RuntimeVerificationPlanResult,
 } from "./runRuntimeVerification.js";
+import { getInferenceMode } from "../llm/openaiClient.js";
 import {
   buildRetryGuidanceFromFailure,
   formatRetryGuidanceBrief,
@@ -115,6 +116,12 @@ export type LlmPatchFlowResult =
         | "failed_verification"
         | "failed_after_retry"
         | "completed_with_issues";
+      resultState?:
+        | "completed_verified"
+        | "completed_after_repair"
+        | "failed_verification"
+        | "failed_after_repair"
+        | "completed_with_tooling_issue";
       verificationStatus?:
         | "passed"
         | "skipped"
@@ -138,6 +145,18 @@ export type LlmPatchFlowResult =
       planAlignment?: PlanAlignmentResult;
       verification?: VerificationResult;
       runtimeVerification?: RuntimeVerificationResult;
+      verificationAttempts?: Array<{
+        command?: string;
+        status: string;
+        failureType?: "code_related" | "tooling_issue" | "timeout" | "skipped";
+        failureSummary: string;
+      }>;
+      repairAttempts?: Array<{
+        attempt: number;
+        files: string[];
+        status: "generated" | "applied" | "skipped" | "failed";
+        summary: string;
+      }>;
       targetFile?: string;
       applyPatches: Array<{ filePath: string; fullContent: string }>;
       patchResults: PatchResult[];
@@ -6063,6 +6082,7 @@ export async function runLlmPatchFlow(input: {
   const patchCountBeforeCorrectness = applyPatches.length;
 
   let correctnessMustBlock = false;
+  let validatorAllOk = true;
   // Patch correctness validator v2
   if (applyPatches.length > 0) {
     const kept: Array<{ filePath: string; fullContent: string }> = [];
@@ -6152,11 +6172,13 @@ export async function runLlmPatchFlow(input: {
 
       if (report.forceBlocked) {
         correctnessMustBlock = true;
+        validatorAllOk = false;
       } else if (report.forcePreviewOnly) {
         fallbackForcePreviewOnly = true;
       }
 
       if (!report.ok) {
+        validatorAllOk = false;
         const firstBlockingCode =
           report.blocking[0]?.code ?? "correctness_failed";
         for (const result of patchResults) {
@@ -6245,8 +6267,6 @@ export async function runLlmPatchFlow(input: {
     return {
       ok: false,
       reason: "atomic_patch_failed",
-      lifecycleEvents: [...lifecycleEvents],
-      finalRunReport: atomicReport,
     };
   }
 
@@ -6396,6 +6416,18 @@ export async function runLlmPatchFlow(input: {
   let runtimeVerification: RuntimeVerificationResult | null = null;
   let runtimeVerificationPlan: RuntimeVerificationPlanResult | null = null;
   let verificationRepairAttempted = false;
+  const verificationAttempts: Array<{
+    command?: string;
+    status: string;
+    failureType?: "code_related" | "tooling_issue" | "timeout" | "skipped";
+    failureSummary: string;
+  }> = [];
+  const repairAttempts: Array<{
+    attempt: number;
+    files: string[];
+    status: "generated" | "applied" | "skipped" | "failed";
+    summary: string;
+  }> = [];
   if (!input.hostedContext && applyPatches.length > 0) {
     try {
       const plan = detectVerificationPlan({
@@ -6424,38 +6456,116 @@ export async function runLlmPatchFlow(input: {
           command: plan[0]?.command,
         });
       }
+      console.log(
+        "[zone-verification-start]",
+        JSON.stringify({ steps: plan.map((s) => s.command) })
+      );
       runtimeVerificationPlan = await runRuntimeVerificationPlan({
         repoPath: input.repoPath,
         plan,
       });
+      const rvp0 = runtimeVerificationPlan;
       console.log(
-        `[zone-runtime-verify] status=${runtimeVerificationPlan.status} steps=${runtimeVerificationPlan.steps.length}`
+        `[zone-runtime-verify] status=${rvp0.status} steps=${rvp0.steps.length}`
+      );
+      const mapFailureType = (
+        status: RuntimeVerificationPlanResult["status"]
+      ):
+        | "code_related"
+        | "tooling_issue"
+        | "timeout"
+        | "skipped"
+        | undefined =>
+        status === "failed_environment_or_tooling"
+          ? "tooling_issue"
+          : status === "failed_code_related"
+            ? "code_related"
+            : status === "timeout"
+              ? "timeout"
+              : status === "skipped_no_command"
+                ? "skipped"
+                : undefined;
+      verificationAttempts.push(
+        ...rvp0.steps.map((s) => ({
+          command: s.command,
+          status: s.status,
+          failureType: mapFailureType(rvp0.status),
+          failureSummary: s.summary,
+        }))
       );
       // Keep the legacy single-command field populated for existing consumers.
       runtimeVerification =
-        runtimeVerificationPlan.steps[0] ?? {
-          attempted: runtimeVerificationPlan.attempted,
+        rvp0.steps[0] ?? {
+          attempted: rvp0.attempted,
           status:
-            runtimeVerificationPlan.status === "passed"
+            rvp0.status === "passed"
               ? "passed"
-              : runtimeVerificationPlan.status === "timeout"
+              : rvp0.status === "timeout"
                 ? "timeout"
-                : runtimeVerificationPlan.status === "skipped_no_command"
+                : rvp0.status === "skipped_no_command"
                   ? "skipped"
                   : "failed",
-          command: runtimeVerificationPlan.failedCommand,
-          summary: runtimeVerificationPlan.summary,
+          command: rvp0.failedCommand,
+          summary: rvp0.summary,
         };
 
-      if (runtimeVerificationPlan.status === "failed_code_related") {
-        const warning = `Runtime verification failed (code): ${runtimeVerificationPlan.failedCommand ?? "unknown command"}`;
+      if (rvp0.status === "failed_code_related") {
+        console.log(
+          "[zone-verification-failed]",
+          JSON.stringify({
+            failureType: "code_related",
+            command: rvp0.failedCommand,
+            failureSummary: rvp0.summary,
+          })
+        );
+        const warning = `Runtime verification failed (code): ${rvp0.failedCommand ?? "unknown command"}`;
         internalWarnings.push(warning);
         visibleWarnings.push(warning);
 
-        // One automatic repair attempt for code-related verification failures.
-        if (applyPatches.length > 0) {
-          verificationRepairAttempted = true;
-          try {
+        const inferenceMode = getInferenceMode();
+        const maxRepairAttempts = inferenceMode === "hosted" ? 1 : 2;
+        const touchesProtected = applyPatches.some((p) =>
+          isProtectedDeveloperUiPath(p.filePath)
+        );
+        const safeRepairLineThreshold = 30;
+        const totalChangedForRepair = applyPatches.reduce((sum, p) => {
+          const before = originalContents[p.filePath] ?? "";
+          const diff = computeFileDiff(before, p.fullContent);
+          return (
+            sum +
+            diff.filter((l) => l.type === "added" || l.type === "removed").length
+          );
+        }, 0);
+        if (touchesProtected || totalChangedForRepair > safeRepairLineThreshold) {
+          console.log(
+            "[zone-repair-skipped]",
+            JSON.stringify({
+              reason: touchesProtected ? "protected_files" : "patch_too_large",
+              changedFiles: applyPatches.map((p) => p.filePath),
+              totalChangedLines: totalChangedForRepair,
+              maxRepairAttempts,
+            })
+          );
+          repairAttempts.push({
+            attempt: 1,
+            files: applyPatches.map((p) => p.filePath),
+            status: "skipped",
+            summary: touchesProtected
+              ? "Repair skipped: patch touched protected files."
+              : `Repair skipped: patch too large (>${safeRepairLineThreshold} changed lines).`,
+          });
+        } else if (applyPatches.length > 0) {
+          for (let attempt = 1; attempt <= maxRepairAttempts; attempt += 1) {
+            verificationRepairAttempted = true;
+            console.log(
+              "[zone-repair-start]",
+              JSON.stringify({
+                attempt,
+                files: applyPatches.map((p) => p.filePath),
+                command: rvp0.failedCommand,
+              })
+            );
+            try {
             const brief = buildRetryGuidanceFromFailure({
               issues: [
                 {
@@ -6475,6 +6585,12 @@ export async function runLlmPatchFlow(input: {
             console.log("[zone-runtime-verify-retry] attempting repair");
 
             // Patch only the already-changed files; keep changes minimal.
+            repairAttempts.push({
+              attempt,
+              files: applyPatches.map((p) => p.filePath),
+              status: "generated",
+              summary: `Repair attempt ${attempt}: generating patch for changed file(s).`,
+            });
             for (let idx = 0; idx < applyPatches.length; idx += 1) {
               const patch = applyPatches[idx];
               if (!patch) continue;
@@ -6506,33 +6622,90 @@ export async function runLlmPatchFlow(input: {
                 relatedContext: "IMPORTANT: Only output a valid patch. Do not explain.",
               });
               if (repaired.mode !== "patch") continue;
+              console.log("[zone-repair-patch-generated]", patch.filePath);
               const applied = applyDeveloperPatchText(patch.fullContent, repaired.patchText);
               if (applied.ok) {
                 applyPatches[idx] = { filePath: patch.filePath, fullContent: applied.fullContent };
               }
             }
+            repairAttempts.push({
+              attempt,
+              files: applyPatches.map((p) => p.filePath),
+              status: "applied",
+              summary: `Repair attempt ${attempt}: patch applied to changed file(s).`,
+            });
 
             // Re-run runtime verification after repair attempt.
+            console.log("[zone-repair-verification-start]", JSON.stringify({ attempt }));
             runtimeVerificationPlan = await runRuntimeVerificationPlan({
               repoPath: input.repoPath,
               plan,
             });
+            const rvp1 = runtimeVerificationPlan;
             console.log(
-              `[zone-runtime-verify-retry] status=${runtimeVerificationPlan.status} steps=${runtimeVerificationPlan.steps.length}`
+              `[zone-runtime-verify-retry] status=${rvp1.status} steps=${rvp1.steps.length}`
+            );
+            verificationAttempts.push(
+              ...rvp1.steps.map((s) => ({
+                command: s.command,
+                status: s.status,
+                failureType: mapFailureType(rvp1.status),
+                failureSummary: s.summary,
+              }))
+            );
+            if (rvp1.status === "passed") {
+              console.log("[zone-repair-success]", JSON.stringify({ attempt }));
+              break;
+            }
+            if (rvp1.status === "failed_environment_or_tooling") {
+              console.log(
+                "[zone-repair-failed]",
+                JSON.stringify({ attempt, reason: "tooling_issue" })
+              );
+              break;
+            }
+            console.log(
+              "[zone-repair-failed]",
+              JSON.stringify({ attempt, reason: rvp1.status })
             );
           } catch (err) {
+            repairAttempts.push({
+              attempt,
+              files: applyPatches.map((p) => p.filePath),
+              status: "failed",
+              summary: `Repair attempt ${attempt} failed: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            });
             console.warn(
               `[zone-runtime-verify-retry] skipped: ${err instanceof Error ? err.message : String(err)}`
             );
           }
         }
+        }
       } else if (runtimeVerificationPlan.status === "failed_environment_or_tooling") {
+        console.log(
+          "[zone-verification-failed]",
+          JSON.stringify({
+            failureType: "tooling_issue",
+            command: runtimeVerificationPlan.failedCommand,
+            failureSummary: runtimeVerificationPlan.summary,
+          })
+        );
         const warning =
           "Patch generated, but verification could not complete because of setup/tooling. " +
           `(${runtimeVerificationPlan.failedCommand ?? "unknown command"})`;
         internalWarnings.push(warning);
         visibleWarnings.push(warning);
       } else if (runtimeVerificationPlan.status === "timeout") {
+        console.log(
+          "[zone-verification-failed]",
+          JSON.stringify({
+            failureType: "timeout",
+            command: runtimeVerificationPlan.failedCommand,
+            failureSummary: runtimeVerificationPlan.summary,
+          })
+        );
         const warning = `Runtime verification timed out: ${runtimeVerificationPlan.failedCommand ?? "unknown command"}`;
         internalWarnings.push(warning);
         visibleWarnings.push(warning);
@@ -6762,10 +6935,37 @@ const finalDeveloperRiskScore = applySafePatchRiskCap({
   hasMicroEditViolation: microEditProtection.isViolation,
   hasValidationBlock: hasBlockedPatch,
 });
-const finalDeveloperRisk = {
+let finalDeveloperRisk = {
   ...mergedDeveloperRisk,
   score: finalDeveloperRiskScore,
 };
+
+// Micro-destructive: tiny localized removals should not carry full destructive weight.
+if (patchScope.changedFileCount === 1 && applyPatches.length === 1) {
+  const onlyPath = applyPatches[0]?.filePath ?? "";
+  const originalLines = countTotalLines(originalContents[onlyPath] ?? "");
+  const changeRatio =
+    originalLines > 0 ? patchScope.totalChangedLines / originalLines : 1;
+  const isMicroDestructive =
+    patchScope.totalChangedLines <= 3 &&
+    patchScope.totalRemovedLines <= 3 &&
+    changeRatio < 0.01;
+  if (
+    isMicroDestructive &&
+    finalDeveloperRisk.breakdown.schema === 0 &&
+    finalDeveloperRisk.breakdown.massScope === 0 &&
+    finalDeveloperRisk.breakdown.destructive > 0
+  ) {
+    finalDeveloperRisk = {
+      ...finalDeveloperRisk,
+      score: Math.min(finalDeveloperRisk.score, 5),
+      breakdown: {
+        ...finalDeveloperRisk.breakdown,
+        destructive: Math.min(finalDeveloperRisk.breakdown.destructive, 5),
+      },
+    };
+  }
+}
 logRiskDebug("runLlmPatchFlow final risk", {
   task: input.task,
   patchScope,
@@ -6826,6 +7026,41 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
           constrainedTaskLargeRewriteForcePreview
         ? "preview_only"
         : "safe_to_apply";
+  // Minimal safe patch override (explicitly allow auto-apply).
+  if (
+    decisionMode === "preview_only" &&
+    applyPatches.length === 1 &&
+    patchScope.changedFileCount === 1 &&
+    patchScope.totalChangedLines <= 3 &&
+    patchScope.totalRemovedLines <= 3 &&
+    finalDeveloperRisk.breakdown.schema === 0 &&
+    finalDeveloperRisk.breakdown.massScope === 0 &&
+    validatorAllOk === true &&
+    !intentMismatchDecision.hasMismatch &&
+    intentMismatch.risk.score === 0 &&
+    uiMappingRisk.risk.score === 0 &&
+    !uiMappingRisk.forcePreviewOnly &&
+    !intentMismatchDecision.forcePreviewOnly &&
+    !microEditProtection.shouldForcePreview &&
+    !fallbackForcePreviewOnly &&
+    !constrainedTaskLargeRewriteForcePreview
+  ) {
+    const onlyPath = applyPatches[0]?.filePath ?? "";
+    const originalLines = countTotalLines(originalContents[onlyPath] ?? "");
+    const changeRatio =
+      originalLines > 0 ? patchScope.totalChangedLines / originalLines : 1;
+    if (changeRatio < 0.01) {
+      console.log(
+        "[zone-decision-override]",
+        JSON.stringify({
+          reason: "minimal_safe_patch",
+          previous: "preview_only",
+          next: "safe_to_apply",
+        })
+      );
+      decisionMode = "safe_to_apply";
+    }
+  }
   if (
     (applyPatches.length === 0 || patchSource === "no_patch") &&
     decisionMode === "safe_to_apply"
@@ -6869,6 +7104,21 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
               : verificationRepairAttempted
                 ? "failed_after_retry"
                 : "failed_verification";
+  const resultState:
+    | "completed_verified"
+    | "completed_after_repair"
+    | "failed_verification"
+    | "failed_after_repair"
+    | "completed_with_tooling_issue" =
+    verificationStatus === "passed"
+      ? verificationRepairAttempted
+        ? "completed_after_repair"
+        : "completed_verified"
+      : verificationStatus === "tooling_issue"
+        ? "completed_with_tooling_issue"
+        : verificationRepairAttempted
+          ? "failed_after_repair"
+          : "failed_verification";
   const noApplyablePatch = applyPatches.length === 0 || patchSource === "no_patch";
   const finalState: "preview_only" | "safe_to_apply" | "blocked" =
     decisionMode === "blocked"
@@ -7051,8 +7301,11 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
     decisionMode,
     finalState,
     finalExecutionOutcome,
+    resultState,
     verificationStatus,
     attemptsUsed: runtimeVerification ? (verificationRepairAttempted ? 2 : 1) : undefined,
+    ...(verificationAttempts.length > 0 ? { verificationAttempts } : {}),
+    ...(repairAttempts.length > 0 ? { repairAttempts } : {}),
     validationBlocked,
     ...(runtimeVerificationFailed && runtimeVerification
       ? {

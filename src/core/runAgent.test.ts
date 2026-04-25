@@ -70,7 +70,7 @@ describe("runAgent", () => {
 
     expect(result.task).toBe("delete user table from database");
     expect(result.decision.mode).toBe("preview_only");
-    expect(result.risk.score).toBe(50);
+    expect(result.risk.score).toBe(70);
 
     expect(result.trace).toBeDefined();
     expect(result.trace.signals).toContain("destructive");

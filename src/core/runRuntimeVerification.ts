@@ -7,6 +7,8 @@ export type RuntimeVerificationResult = {
   command?: string;
   status: "passed" | "failed" | "timeout" | "skipped";
   exitCode?: number;
+  stdout?: string;
+  stderr?: string;
   summary: string;
 };
 
@@ -70,6 +72,12 @@ function looksLikeToolingFailure(message: string): boolean {
   );
 }
 
+function trimOutput(s: string, maxChars = 6000): string {
+  const t = String(s || "");
+  if (t.length <= maxChars) return t;
+  return t.slice(-maxChars);
+}
+
 export async function runRuntimeVerification(input: {
   repoPath: string;
   command: SafeVerificationCommand | null;
@@ -115,6 +123,8 @@ export async function runRuntimeVerification(input: {
         attempted: true,
         command: input.command!.command,
         status: "timeout",
+        stdout: trimOutput(stdout),
+        stderr: trimOutput(stderr),
         summary: `Runtime verification timed out after ${timeoutMs / 1000}s.`,
       });
     }, timeoutMs);
@@ -134,6 +144,8 @@ export async function runRuntimeVerification(input: {
         attempted: false,
         command: input.command!.command,
         status: "skipped",
+        stdout: trimOutput(stdout),
+        stderr: trimOutput(stderr),
         summary: `Runtime verification could not start: ${err.message}`,
       });
     });
@@ -147,6 +159,8 @@ export async function runRuntimeVerification(input: {
         command: input.command!.command,
         status: code === 0 ? "passed" : "failed",
         ...(typeof code === "number" ? { exitCode: code } : {}),
+        stdout: trimOutput(stdout),
+        stderr: trimOutput(stderr),
         summary: summarizeOutput(stdout, stderr),
       });
     });
