@@ -253,6 +253,80 @@ function parseExplicitTargetFileLineFromTask(task: string): string | null {
   return null;
 }
 
+function normalizeExplicitTargetPathKey(path: string): string {
+  return path.replace(/\\/g, "/").trim();
+}
+
+/** Resolve `Target file:` path against repo listing (exact, slash-normalized, then case-insensitive). */
+function resolveRepoFileForExplicitTarget(
+  parsed: string | null,
+  allFiles: RepoFile[]
+): RepoFile | null {
+  if (!parsed) {
+    return null;
+  }
+  const norm = normalizeExplicitTargetPathKey(parsed);
+  if (!norm) {
+    return null;
+  }
+  for (const f of allFiles) {
+    if (normalizeExplicitTargetPathKey(f.path) === norm) {
+      return f;
+    }
+  }
+  const lower = norm.toLowerCase();
+  for (const f of allFiles) {
+    if (normalizeExplicitTargetPathKey(f.path).toLowerCase() === lower) {
+      return f;
+    }
+  }
+  return null;
+}
+
+function resolvedFileContextsIncludePath(
+  contexts: Array<{ path: string }>,
+  canonPath: string
+): boolean {
+  const want = normalizeExplicitTargetPathKey(canonPath).toLowerCase();
+  return contexts.some((f) => normalizeExplicitTargetPathKey(f.path).toLowerCase() === want);
+}
+
+async function loadExplicitTargetFileContentForPatchContext(input: {
+  canonPath: string;
+  hostedContext: HostedDeveloperContextInput | undefined;
+  allFiles: RepoFile[];
+}): Promise<string> {
+  const { canonPath, hostedContext, allFiles } = input;
+  if (hostedContext) {
+    if (Object.prototype.hasOwnProperty.call(hostedContext.originalContents, canonPath)) {
+      return hostedContext.originalContents[canonPath] ?? "";
+    }
+    for (const [k, v] of Object.entries(hostedContext.originalContents)) {
+      if (normalizeExplicitTargetPathKey(k).toLowerCase() === normalizeExplicitTargetPathKey(canonPath).toLowerCase()) {
+        return v ?? "";
+      }
+    }
+    const ctx = hostedContext.contextFiles.find((f) => f.path === canonPath);
+    if (ctx) {
+      return ctx.content;
+    }
+    const ctxInsensitive = hostedContext.contextFiles.find(
+      (f) =>
+        normalizeExplicitTargetPathKey(f.path).toLowerCase() ===
+        normalizeExplicitTargetPathKey(canonPath).toLowerCase()
+    );
+    if (ctxInsensitive) {
+      return ctxInsensitive.content;
+    }
+  }
+  const repoFile = allFiles.find((f) => f.path === canonPath) ?? resolveRepoFileForExplicitTarget(canonPath, allFiles);
+  if (!repoFile?.absolutePath) {
+    return "";
+  }
+  const disk = await readProjectFiles([repoFile.absolutePath]);
+  return disk[repoFile.absolutePath] ?? "";
+}
+
 function isPathGroundedForPreviewFallback(input: {
   path: string;
   hostedContext: HostedDeveloperContextInput | undefined;
@@ -268,26 +342,6 @@ function isPathGroundedForPreviewFallback(input: {
     );
   }
   return input.allFiles.some((f) => f.path === input.path);
-}
-
-/** Whether an explicit `Target file:` path exists in the selected repo listing or hosted originals (spec: do not rank-fallback when absent). */
-function isExplicitTargetInSelectedRepoContext(input: {
-  path: string;
-  hostedContext: HostedDeveloperContextInput | undefined;
-  allFiles: RepoFile[];
-}): boolean {
-  if (isIrrelevantDeveloperContextPath(input.path) || isProtectedDeveloperUiPath(input.path)) {
-    return false;
-  }
-  const inListing = input.allFiles.some((f) => f.path === input.path);
-  if (input.hostedContext) {
-    const inOriginal = Object.prototype.hasOwnProperty.call(
-      input.hostedContext.originalContents,
-      input.path
-    );
-    return inOriginal || inListing;
-  }
-  return inListing;
 }
 
 const EXPLICIT_TARGET_NOT_FOUND_WARNING =
@@ -405,20 +459,20 @@ type PreviewEmptyFallbackResolution =
 
 function resolvePreviewEmptyFallbackPath(input: {
   task: string;
+  explicitTargetParsed: string | null;
   fullRankedFiles: RankedRepoFile[];
   hostedContext: HostedDeveloperContextInput | undefined;
   allFiles: RepoFile[];
 }): PreviewEmptyFallbackResolution {
-  const explicit = parseExplicitTargetFileLineFromTask(input.task);
+  const explicit = input.explicitTargetParsed;
   if (explicit) {
+    const repoFile = resolveRepoFileForExplicitTarget(explicit, input.allFiles);
     if (
-      isExplicitTargetInSelectedRepoContext({
-        path: explicit,
-        hostedContext: input.hostedContext,
-        allFiles: input.allFiles,
-      })
+      repoFile &&
+      !isIrrelevantDeveloperContextPath(repoFile.path) &&
+      !isProtectedDeveloperUiPath(repoFile.path)
     ) {
-      return { kind: "path", path: explicit };
+      return { kind: "path", path: repoFile.path };
     }
     return { kind: "explicit_target_not_grounded", explicitPath: explicit };
   }
@@ -1431,10 +1485,12 @@ async function loadDeveloperModifyPatchSourceContent(input: {
   patchPath: string;
   hostedContext: HostedDeveloperContextInput | undefined;
   allFiles: RepoFile[];
+  hostedForceLoadedContent?: ReadonlyMap<string, string>;
 }): Promise<
   | { ok: true; content: string }
   | { ok: false; reason: "missing_hosted_context" }
 > {
+  const forced = input.hostedForceLoadedContent?.get(input.patchPath);
   const hostedOriginalContent =
     input.hostedContext &&
     Object.prototype.hasOwnProperty.call(
@@ -1447,11 +1503,24 @@ async function loadDeveloperModifyPatchSourceContent(input: {
     input.hostedContext?.contextFiles.find((file) => file.path === input.patchPath)
       ?.content;
 
+  if (typeof forced === "string") {
+    return { ok: true, content: forced };
+  }
+
   if (
     input.hostedContext &&
     typeof hostedOriginalContent === "undefined" &&
     typeof hostedContextFileContent === "undefined"
   ) {
+    const repoFile = input.allFiles.find((f) => f.path === input.patchPath);
+    const abs = repoFile?.absolutePath;
+    if (typeof abs === "string" && abs.length > 0 && abs !== input.patchPath) {
+      const disk = await readProjectFiles([abs]);
+      const fromDisk = disk[abs];
+      if (typeof fromDisk === "string" && fromDisk.length > 0) {
+        return { ok: true, content: fromDisk };
+      }
+    }
     return { ok: false, reason: "missing_hosted_context" };
   }
 
@@ -3538,15 +3607,22 @@ const HOSTED_CONTEXT_BUDGET_TRIM_CAP = 12;
 function selectRankedContextPathsWithinCap(
   resolvedFileContexts: Array<{ path: string; content: string }>,
   fullRankedFiles: Array<{ path: string }>,
-  maxFiles: number
+  maxFiles: number,
+  pinnedPaths?: string[]
 ): string[] {
   const byPath = new Map(resolvedFileContexts.map((file) => [file.path, true]));
+  const ordered: string[] = [];
+  for (const p of pinnedPaths ?? []) {
+    if (typeof p === "string" && byPath.has(p) && !ordered.includes(p)) {
+      ordered.push(p);
+    }
+  }
   const rankedInContext = fullRankedFiles
     .map((file) => file.path)
     .filter((path) => byPath.has(path));
-  const previewTargetPath = rankedInContext[0];
-  const ordered: string[] = [];
-  if (typeof previewTargetPath === "string") {
+  const previewTargetPath =
+    rankedInContext.find((path) => !ordered.includes(path)) ?? rankedInContext[0];
+  if (typeof previewTargetPath === "string" && !ordered.includes(previewTargetPath)) {
     ordered.push(previewTargetPath);
   }
   for (const path of rankedInContext) {
@@ -3611,6 +3687,7 @@ export async function runLlmPatchFlow(input: {
 
   const taskIntent =
     typeof input.task === "string" ? parseTaskIntent(input.task) : UNKNOWN_INTENT;
+  const explicitTargetPath = parseExplicitTargetFileLineFromTask(input.task);
 
   notifyProgress("Scanning repo...", {
     type: "run_started",
@@ -3934,6 +4011,9 @@ export async function runLlmPatchFlow(input: {
     status: executionPlan ? "execution_plan" : "feature_skipped",
   });
 
+  const explicitTargetForceContentByPath = new Map<string, string>();
+  let explicitTargetCanonicalPath: string | null = null;
+
   // 5. Read top suggested files
   const relevantFileScores = new Map(
     relevantFiles.map((file) => [file.path, file.score])
@@ -4048,6 +4128,36 @@ export async function runLlmPatchFlow(input: {
       .map((file) => fileContextByPath.get(file.path))
       .filter((file): file is { path: string; content: string } => file !== undefined);
   }
+
+  if (explicitTargetPath) {
+    const explicitRepo = resolveRepoFileForExplicitTarget(explicitTargetPath, allFiles);
+    if (
+      explicitRepo &&
+      !isIrrelevantDeveloperContextPath(explicitRepo.path) &&
+      !isProtectedDeveloperUiPath(explicitRepo.path)
+    ) {
+      explicitTargetCanonicalPath = explicitRepo.path;
+      if (!resolvedFileContextsIncludePath(resolvedFileContexts, explicitTargetCanonicalPath)) {
+        const loadedContent = await loadExplicitTargetFileContentForPatchContext({
+          canonPath: explicitTargetCanonicalPath,
+          hostedContext: input.hostedContext,
+          allFiles,
+        });
+        explicitTargetForceContentByPath.set(explicitTargetCanonicalPath, loadedContent);
+        console.log("[zone-explicit-target-force-included]", explicitTargetCanonicalPath);
+        resolvedFileContexts.unshift({
+          path: explicitTargetCanonicalPath,
+          content: loadedContent,
+        });
+        selectedContextFiles.unshift({
+          path: explicitTargetCanonicalPath,
+          action: "inspect",
+          reason: "Explicit target file from user prompt",
+        });
+      }
+    }
+  }
+
   perf.mark("file context loaded");
   notifyProgress("Loading file context...", {
     type: "file_context_loaded",
@@ -4069,10 +4179,16 @@ export async function runLlmPatchFlow(input: {
 
   if (totalContextChars > contextBudget) {
     const originalFileCount = resolvedFileContexts.length;
+    const trimPinned =
+      explicitTargetCanonicalPath !== null &&
+      resolvedFileContextsIncludePath(resolvedFileContexts, explicitTargetCanonicalPath)
+        ? [explicitTargetCanonicalPath]
+        : [];
     const trimmedPaths = selectRankedContextPathsWithinCap(
       resolvedFileContexts,
       fullRankedFiles,
-      HOSTED_CONTEXT_BUDGET_TRIM_CAP
+      HOSTED_CONTEXT_BUDGET_TRIM_CAP,
+      trimPinned
     );
     const pathToContent = new Map(
       resolvedFileContexts.map((file) => [file.path, file.content] as const)
@@ -4087,6 +4203,16 @@ export async function runLlmPatchFlow(input: {
       content: pathToContent.get(path) ?? "",
     }));
     selectedContextFiles = trimmedPaths.map((path) => {
+      if (
+        explicitTargetCanonicalPath !== null &&
+        path === explicitTargetCanonicalPath
+      ) {
+        return {
+          path,
+          action: "inspect" as const,
+          reason: "Explicit target file from user prompt",
+        };
+      }
       const meta = pathToMeta.get(path);
       return {
         path,
@@ -4231,12 +4357,20 @@ export async function runLlmPatchFlow(input: {
   if (input.hostedContext) {
     patchPlan = {
       ...patchPlan,
-      patches: patchPlan.patches.filter((p) =>
-        Object.prototype.hasOwnProperty.call(
-          input.hostedContext!.originalContents,
-          p.path
-        )
-      ),
+      patches: patchPlan.patches.filter((p) => {
+        if (
+          Object.prototype.hasOwnProperty.call(
+            input.hostedContext!.originalContents,
+            p.path
+          )
+        ) {
+          return true;
+        }
+        if (input.hostedContext!.contextFiles.some((cf) => cf.path === p.path)) {
+          return true;
+        }
+        return explicitTargetForceContentByPath.has(p.path);
+      }),
     };
     console.log("[hosted] filtered patches count:", patchPlan.patches.length);
   }
@@ -4370,6 +4504,7 @@ export async function runLlmPatchFlow(input: {
   if (patchPlan.patches.length === 0) {
     const previewEmptyPick = resolvePreviewEmptyFallbackPath({
       task: input.task,
+      explicitTargetParsed: explicitTargetPath,
       fullRankedFiles,
       hostedContext: input.hostedContext,
       allFiles,
@@ -4549,10 +4684,12 @@ export async function runLlmPatchFlow(input: {
         const hostedCtxPre = input.hostedContext?.contextFiles.find(
           (file) => file.path === previewPatch.path
         )?.content;
+        const hostedForcePre = explicitTargetForceContentByPath.get(previewPatch.path);
         if (
           input.hostedContext &&
           typeof hostedOriginalPre === "undefined" &&
-          typeof hostedCtxPre === "undefined"
+          typeof hostedCtxPre === "undefined" &&
+          typeof hostedForcePre === "undefined"
         ) {
           patchResults.push({
             filePath: previewPatch.path,
@@ -4565,6 +4702,7 @@ export async function runLlmPatchFlow(input: {
           patchPath: previewPatch.path,
           hostedContext: input.hostedContext,
           allFiles,
+          hostedForceLoadedContent: explicitTargetForceContentByPath,
         });
         if (!loaded.ok) {
           patchResults.push({
@@ -4934,11 +5072,13 @@ export async function runLlmPatchFlow(input: {
       const hostedContextFileContent =
         input.hostedContext?.contextFiles.find((file) => file.path === patch.path)
           ?.content;
+      const hostedForceMain = explicitTargetForceContentByPath.get(patch.path);
 
       if (
         input.hostedContext &&
         typeof hostedOriginalContent === "undefined" &&
-        typeof hostedContextFileContent === "undefined"
+        typeof hostedContextFileContent === "undefined" &&
+        typeof hostedForceMain === "undefined"
       ) {
         patchResults.push({
           filePath: patch.path,
@@ -4952,7 +5092,7 @@ export async function runLlmPatchFlow(input: {
       const absolutePath = repoFile?.absolutePath;
 
       const fileContent = input.hostedContext
-        ? hostedOriginalContent ?? hostedContextFileContent ?? ""
+        ? hostedOriginalContent ?? hostedContextFileContent ?? hostedForceMain ?? ""
         : absolutePath !== undefined
           ? ((await readProjectFiles([absolutePath]))[absolutePath] ?? "")
           : "";

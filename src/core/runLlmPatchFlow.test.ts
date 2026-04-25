@@ -266,6 +266,134 @@ describe("runLlmPatchFlow", () => {
     );
   });
 
+  describe("explicit Target file hosted force-include", () => {
+    const patientScanPath = "client/src/pages/app/PatientScanViewerPage.jsx";
+
+    it("force-loads explicit target from repo listing when missing from hosted originals/context", async () => {
+      const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const otherPath = "src/utils/helpers.jsx";
+      const availableFiles = [
+        { path: patientScanPath, category: "frontend" as const, extension: "jsx" },
+        { path: otherPath, category: "frontend" as const, extension: "jsx" },
+      ];
+      const contextFiles = [
+        {
+          path: otherPath,
+          action: "inspect",
+          reason: "ctx",
+          content: "export const x = 1;\n",
+        },
+      ];
+      const originalContents: Record<string, string> = {};
+
+      detectProjectStructureMock.mockReturnValue({ notes: ["React"] });
+      rankRelevantFilesMock.mockImplementation(({ files }) =>
+        [...files].map((f, idx) => ({ ...f, score: 100 - idx }))
+      );
+      readProjectFilesMock.mockImplementation(async (paths: string[]) => {
+        const out: Record<string, string> = {};
+        for (const p of paths) {
+          out[p] =
+            p === patientScanPath
+              ? "export function PatientScanViewerPage() { return <div/>; }\n"
+              : `// ${p}\n`;
+        }
+        return out;
+      });
+      planPatchPreviewWithLlmMock.mockResolvedValue({
+        summary: "Patch summary",
+        patches: [],
+        warnings: [],
+      });
+      planFullPatchWithLlmMock.mockResolvedValue({
+        mode: "full_content",
+        filePath: patientScanPath,
+        fullContent: "export function PatientScanViewerPage() { return <div/>; }\n//fixed\n",
+        summary: "ok",
+        warnings: [],
+      });
+
+      const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+      const result = await runLlmPatchFlow({
+        task: `Target file: ${patientScanPath}\n\nFix the syntax issue caused by an accidental stray character.`,
+        repoPath: "/hosted",
+        hostedContext: {
+          repoSummary: "React",
+          existingFilesSummary: "files",
+          availableFiles,
+          contextFiles,
+          originalContents,
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.reason).not.toBe("explicit_target_not_found");
+      }
+      expect(
+        consoleLogSpy.mock.calls.some(
+          (c) => c[0] === "[zone-explicit-target-force-included]" && c[1] === patientScanPath
+        )
+      ).toBe(true);
+      expect(planFullPatchWithLlmMock).toHaveBeenCalledWith(
+        expect.objectContaining({ filePath: patientScanPath })
+      );
+      expect(planFullPatchWithLlmMock).not.toHaveBeenCalledWith(
+        expect.objectContaining({ filePath: "ai-service/requirements.txt" })
+      );
+      const previewArg = planPatchPreviewWithLlmMock.mock.calls[0][0] as {
+        fileContexts: Array<{ path: string; content: string }>;
+        suggestedFiles: Array<{ path: string; reason: string }>;
+      };
+      expect(previewArg.fileContexts[0]?.path).toBe(patientScanPath);
+      expect(previewArg.suggestedFiles[0]?.reason).toContain("Explicit target file from user prompt");
+      consoleLogSpy.mockRestore();
+    });
+
+    it("returns explicit_target_not_found when Target file is absent from hosted availableFiles listing", async () => {
+      const availableFiles = [
+        { path: "src/other.jsx", category: "frontend" as const, extension: "jsx" },
+      ];
+      const contextFiles = [
+        {
+          path: "src/other.jsx",
+          action: "inspect",
+          reason: "ctx",
+          content: "export const y = 2;\n",
+        },
+      ];
+      detectProjectStructureMock.mockReturnValue({ notes: ["React"] });
+      rankRelevantFilesMock.mockImplementation(({ files }) =>
+        [...files].map((f, idx) => ({ ...f, score: 100 - idx }))
+      );
+      readProjectFilesMock.mockResolvedValue({});
+      planPatchPreviewWithLlmMock.mockResolvedValue({
+        summary: "Patch summary",
+        patches: [],
+        warnings: [],
+      });
+
+      const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+      const result = await runLlmPatchFlow({
+        task: `Target file: ${patientScanPath}\n\nFix typo.`,
+        repoPath: "/hosted",
+        hostedContext: {
+          repoSummary: "React",
+          existingFilesSummary: "files",
+          availableFiles,
+          contextFiles,
+          originalContents: {},
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.reason).toBe("explicit_target_not_found");
+      }
+      expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
+    });
+  });
+
   it("does not block a normal repo task that mentions billing summary and thread ui without referring to Zone", async () => {
     const files = [buildRepoFile("src/components/BillingThreadPanel.tsx", "frontend")];
 
