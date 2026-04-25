@@ -169,6 +169,8 @@ describe("runLlmPatchFlow", () => {
       expect(result.finalRunReport.verificationSummary.message.toLowerCase()).toContain(
         "explicit target file was not found"
       );
+      expect(planFeatureWithLlmMock).not.toHaveBeenCalled();
+      expect(planPatchPreviewWithLlmMock).not.toHaveBeenCalled();
       expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
       const failEv = result.lifecycleEvents?.filter((e) => e.type === "patch_generation_failed");
       expect(failEv?.some((e) => e.status === "explicit_target_not_found")).toBe(true);
@@ -390,6 +392,7 @@ describe("runLlmPatchFlow", () => {
       if (result.ok) {
         expect(result.reason).toBe("explicit_target_not_found");
       }
+      expect(planPatchPreviewWithLlmMock).not.toHaveBeenCalled();
       expect(planFullPatchWithLlmMock).not.toHaveBeenCalled();
     });
   });

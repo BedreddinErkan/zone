@@ -257,17 +257,22 @@ function normalizeExplicitTargetPathKey(path: string): string {
   return path.replace(/\\/g, "/").trim();
 }
 
-/** Resolve `Target file:` path against repo listing (exact, slash-normalized, then case-insensitive). */
-function resolveRepoFileForExplicitTarget(
-  parsed: string | null,
-  allFiles: RepoFile[]
-): RepoFile | null {
-  if (!parsed) {
+/**
+ * Resolve `Target file:` against the raw repo file list (not ranked/trimmed views).
+ * Order: exact path → normalized slashes → case-insensitive full path → basename match only if unique.
+ */
+function findRepoFileByExplicitTarget(allFiles: RepoFile[], explicitTargetPath: string | null): RepoFile | null {
+  if (!explicitTargetPath) {
     return null;
   }
-  const norm = normalizeExplicitTargetPathKey(parsed);
+  const norm = normalizeExplicitTargetPathKey(explicitTargetPath);
   if (!norm) {
     return null;
+  }
+  for (const f of allFiles) {
+    if (f.path === explicitTargetPath) {
+      return f;
+    }
   }
   for (const f of allFiles) {
     if (normalizeExplicitTargetPathKey(f.path) === norm) {
@@ -280,7 +285,33 @@ function resolveRepoFileForExplicitTarget(
       return f;
     }
   }
+  const base = norm.split("/").filter(Boolean).pop() ?? "";
+  if (!base) {
+    return null;
+  }
+  const baseLower = base.toLowerCase();
+  const basenameMatches = allFiles.filter((f) => {
+    const seg = normalizeExplicitTargetPathKey(f.path).split("/").filter(Boolean).pop() ?? "";
+    return seg.toLowerCase() === baseLower;
+  });
+  if (basenameMatches.length === 1) {
+    return basenameMatches[0] ?? null;
+  }
   return null;
+}
+
+function mergeExplicitRepoFileIntoRankedFiles(
+  ranked: RankedRepoFile[],
+  explicit: RepoFile
+): RankedRepoFile[] {
+  const maxScore = ranked.length > 0 ? Math.max(...ranked.map((f) => f.score)) : 0;
+  const boosted = maxScore + 10_000;
+  const explicitLower = normalizeExplicitTargetPathKey(explicit.path).toLowerCase();
+  const withoutDup = ranked.filter(
+    (f) => normalizeExplicitTargetPathKey(f.path).toLowerCase() !== explicitLower
+  );
+  const asRanked: RankedRepoFile = { ...explicit, score: boosted };
+  return [asRanked, ...withoutDup];
 }
 
 function resolvedFileContextsIncludePath(
@@ -319,7 +350,7 @@ async function loadExplicitTargetFileContentForPatchContext(input: {
       return ctxInsensitive.content;
     }
   }
-  const repoFile = allFiles.find((f) => f.path === canonPath) ?? resolveRepoFileForExplicitTarget(canonPath, allFiles);
+  const repoFile = allFiles.find((f) => f.path === canonPath) ?? findRepoFileByExplicitTarget(allFiles, canonPath);
   if (!repoFile?.absolutePath) {
     return "";
   }
@@ -466,7 +497,7 @@ function resolvePreviewEmptyFallbackPath(input: {
 }): PreviewEmptyFallbackResolution {
   const explicit = input.explicitTargetParsed;
   if (explicit) {
-    const repoFile = resolveRepoFileForExplicitTarget(explicit, input.allFiles);
+    const repoFile = findRepoFileByExplicitTarget(input.allFiles, explicit);
     if (
       repoFile &&
       !isIrrelevantDeveloperContextPath(repoFile.path) &&
@@ -3687,7 +3718,9 @@ export async function runLlmPatchFlow(input: {
 
   const taskIntent =
     typeof input.task === "string" ? parseTaskIntent(input.task) : UNKNOWN_INTENT;
-  const explicitTargetPath = parseExplicitTargetFileLineFromTask(input.task);
+  let explicitTargetPath: string | null = null;
+  let explicitTargetRepoFile: RepoFile | null = null;
+  let explicitTargetCanonicalPath: string | null = null;
 
   notifyProgress("Scanning repo...", {
     type: "run_started",
@@ -3847,6 +3880,77 @@ export async function runLlmPatchFlow(input: {
       finalRunReport: repoFailReport,
     };
   }
+
+  explicitTargetPath = parseExplicitTargetFileLineFromTask(input.task);
+  if (explicitTargetPath) {
+    explicitTargetRepoFile = findRepoFileByExplicitTarget(allFiles, explicitTargetPath);
+    if (!explicitTargetRepoFile) {
+      notifyProgress("Ready", {
+        type: "patch_generation_failed",
+        message: `Explicit target file is not in the raw repository file list: ${explicitTargetPath}`,
+        stage: "repo",
+        status: "explicit_target_not_found",
+        filePath: explicitTargetPath,
+      });
+      notifyProgress("Ready", {
+        type: "run_completed",
+        message: "Run finished (preview-only, explicit target not in repo).",
+        stage: "finalize",
+        status: "preview_only",
+      });
+      reportProgress("Ready");
+      perf.mark("decision evaluation complete");
+      perf.finish("explicit target not in raw repo");
+      const explicitEarlyReport = await generateFinalRunReport({
+        task: input.task,
+        contextFilesMeta: [],
+        planObjective: null,
+        planScopeSummary: null,
+        patchSource: "no_patch",
+        fileDiffs: [],
+        patchScope: {
+          changedFileCount: 0,
+          totalAddedLines: 0,
+          totalRemovedLines: 0,
+          totalChangedLines: 0,
+        },
+        decisionMode: "preview_only",
+        finalState: "preview_only",
+        warnings: [EXPLICIT_TARGET_NOT_FOUND_WARNING],
+        correctness: {
+          status: "skipped",
+          summary: "Patch generation was not started (explicit_target_not_found).",
+        },
+        verificationCommandsLabel: null,
+        runtimeVerificationSummary: null,
+        finalExecutionOutcome: "completed_with_issues",
+        developerConfidence: 60,
+        terminalAbort: {
+          code: "explicit_target_not_found",
+          missingPath: explicitTargetPath,
+        },
+      });
+      return {
+        ok: true,
+        reason: "explicit_target_not_found",
+        patchPreview: EXPLICIT_TARGET_NOT_FOUND_WARNING,
+        warnings: [EXPLICIT_TARGET_NOT_FOUND_WARNING],
+        developerConfidence: 60,
+        decisionMode: "preview_only",
+        finalState: "preview_only",
+        patchSource: "no_patch",
+        applyPatches: [],
+        patchResults: [],
+        fileDiffs: [],
+        contextFiles: [],
+        lifecycleEvents: [...lifecycleEvents],
+        finalRunReport: explicitEarlyReport,
+      };
+    }
+    console.log("[zone-explicit-target-found-in-repo]", explicitTargetRepoFile.path);
+    explicitTargetCanonicalPath = explicitTargetRepoFile.path;
+  }
+
   const developerContextFiles = allFiles.filter(
     (file) => !isIrrelevantDeveloperContextPath(file.path)
   );
@@ -3869,11 +3973,14 @@ export async function runLlmPatchFlow(input: {
 
   // 3. Rank relevant files — top 8 (full ranking reused for diagnostics + budget trim)
   reportProgress("Ranking relevant files...");
-  const fullRankedFiles = rankRelevantFiles({
+  let fullRankedFiles = rankRelevantFiles({
     task: input.task,
     files: developerContextFiles,
     intent: taskIntent,
   });
+  if (explicitTargetRepoFile) {
+    fullRankedFiles = mergeExplicitRepoFileIntoRankedFiles(fullRankedFiles, explicitTargetRepoFile);
+  }
   const relevantFiles = fullRankedFiles.slice(0, 8);
   perf.mark("relevant files ranked");
   notifyProgress("Ranking relevant files...", {
@@ -4012,7 +4119,6 @@ export async function runLlmPatchFlow(input: {
   });
 
   const explicitTargetForceContentByPath = new Map<string, string>();
-  let explicitTargetCanonicalPath: string | null = null;
 
   // 5. Read top suggested files
   const relevantFileScores = new Map(
@@ -4129,28 +4235,27 @@ export async function runLlmPatchFlow(input: {
       .filter((file): file is { path: string; content: string } => file !== undefined);
   }
 
-  if (explicitTargetPath) {
-    const explicitRepo = resolveRepoFileForExplicitTarget(explicitTargetPath, allFiles);
+  if (explicitTargetRepoFile) {
     if (
-      explicitRepo &&
-      !isIrrelevantDeveloperContextPath(explicitRepo.path) &&
-      !isProtectedDeveloperUiPath(explicitRepo.path)
+      !isIrrelevantDeveloperContextPath(explicitTargetRepoFile.path) &&
+      !isProtectedDeveloperUiPath(explicitTargetRepoFile.path)
     ) {
-      explicitTargetCanonicalPath = explicitRepo.path;
-      if (!resolvedFileContextsIncludePath(resolvedFileContexts, explicitTargetCanonicalPath)) {
+      const canon = explicitTargetRepoFile.path;
+      explicitTargetCanonicalPath = canon;
+      if (!resolvedFileContextsIncludePath(resolvedFileContexts, canon)) {
         const loadedContent = await loadExplicitTargetFileContentForPatchContext({
-          canonPath: explicitTargetCanonicalPath,
+          canonPath: canon,
           hostedContext: input.hostedContext,
           allFiles,
         });
-        explicitTargetForceContentByPath.set(explicitTargetCanonicalPath, loadedContent);
-        console.log("[zone-explicit-target-force-included]", explicitTargetCanonicalPath);
+        explicitTargetForceContentByPath.set(canon, loadedContent);
+        console.log("[zone-explicit-target-force-included]", canon);
         resolvedFileContexts.unshift({
-          path: explicitTargetCanonicalPath,
+          path: canon,
           content: loadedContent,
         });
         selectedContextFiles.unshift({
-          path: explicitTargetCanonicalPath,
+          path: canon,
           action: "inspect",
           reason: "Explicit target file from user prompt",
         });
@@ -4243,14 +4348,12 @@ export async function runLlmPatchFlow(input: {
     }
   }
 
-  if (explicitTargetPath) {
-    const explicitRepoAfterTrim = resolveRepoFileForExplicitTarget(explicitTargetPath, allFiles);
+  if (explicitTargetRepoFile) {
     if (
-      explicitRepoAfterTrim &&
-      !isIrrelevantDeveloperContextPath(explicitRepoAfterTrim.path) &&
-      !isProtectedDeveloperUiPath(explicitRepoAfterTrim.path)
+      !isIrrelevantDeveloperContextPath(explicitTargetRepoFile.path) &&
+      !isProtectedDeveloperUiPath(explicitTargetRepoFile.path)
     ) {
-      const canonAfterTrim = explicitRepoAfterTrim.path;
+      const canonAfterTrim = explicitTargetRepoFile.path;
       if (!resolvedFileContextsIncludePath(resolvedFileContexts, canonAfterTrim)) {
         const reinjectedContent = await loadExplicitTargetFileContentForPatchContext({
           canonPath: canonAfterTrim,
