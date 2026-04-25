@@ -2538,10 +2538,88 @@ type FuzzyReplaceResult =
     }
   | {
       success: false;
-      reason: "low_confidence";
+      reason: "low_confidence" | "ambiguous_match" | "not_found";
       score: number;
       bestMatch: string;
     };
+
+function countOccurrences(haystack: string, needle: string): number {
+  if (!needle) return 0;
+  let count = 0;
+  let idx = 0;
+  while (idx <= haystack.length) {
+    const next = haystack.indexOf(needle, idx);
+    if (next === -1) break;
+    count += 1;
+    idx = next + needle.length;
+  }
+  return count;
+}
+
+function detectPrimaryLineEnding(content: string): "\r\n" | "\n" {
+  return /\r\n/.test(content) ? "\r\n" : "\n";
+}
+
+function convertReplacementLineEndings(
+  replace: string,
+  lineEnding: "\r\n" | "\n"
+): string {
+  if (lineEnding === "\n") {
+    return replace.replace(/\r\n/g, "\n");
+  }
+  // Convert LF-only newlines to CRLF; preserve existing CRLF.
+  return replace.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
+}
+
+function buildLfNormalizedIndexMap(raw: string): {
+  normalized: string;
+  /** Maps normalized index -> raw index (start). Length is normalized.length + 1. */
+  normToRaw: number[];
+} {
+  const normToRaw: number[] = [];
+  let normalized = "";
+  let normPos = 0;
+  for (let i = 0; i < raw.length; ) {
+    normToRaw[normPos] = i;
+    const ch = raw[i] ?? "";
+    if (ch === "\r" && raw[i + 1] === "\n") {
+      normalized += "\n";
+      normPos += 1;
+      i += 2;
+      continue;
+    }
+    normalized += ch;
+    normPos += 1;
+    i += 1;
+  }
+  normToRaw[normPos] = raw.length;
+  return { normalized, normToRaw };
+}
+
+function countChangedLinesLocalized(before: string, after: string): number {
+  const diff = computeFileDiff(before, after);
+  const added = diff.filter((d) => d.type === "added").length;
+  const removed = diff.filter((d) => d.type === "removed").length;
+  return added + removed;
+}
+
+function containsLoneLf(content: string): boolean {
+  // Detect '\n' that is not part of '\r\n'
+  for (let i = 0; i < content.length; i += 1) {
+    if (content[i] === "\n" && content[i - 1] !== "\r") return true;
+  }
+  return false;
+}
+
+function containsPatchProtocolMarkers(content: string): boolean {
+  return (
+    content.includes("--- FIND ---") ||
+    content.includes("--- REPLACE ---") ||
+    content.includes("--- END ---") ||
+    content.includes("--- FILE:") ||
+    content.includes("--- FILE ---")
+  );
+}
 
 function buildLineFrequencyMap(lines: string[]): Map<string, number> {
   const counts = new Map<string, number>();
@@ -2881,17 +2959,51 @@ export function fuzzyFindAndReplace(
   find: string,
   replace: string
 ): FuzzyReplaceResult {
-  if (content.includes(find)) {
+  const lineEnding = detectPrimaryLineEnding(content);
+  const exactCount = countOccurrences(content, find);
+  if (exactCount === 1) {
     return {
       success: true,
-      content: content.replace(find, replace),
+      content: content.replace(find, convertReplacementLineEndings(replace, lineEnding)),
       score: 100,
       bestMatch: find,
     };
   }
+  if (exactCount > 1) {
+    return {
+      success: false,
+      reason: "ambiguous_match",
+      score: 0,
+      bestMatch: find,
+    };
+  }
 
-  const contentLines = content.replace(/\r\n/g, "\n").split("\n");
-  const targetLinesRaw = find.replace(/\r\n/g, "\n").split("\n");
+  const map = buildLfNormalizedIndexMap(content);
+  const normalizedFind = find.replace(/\r\n/g, "\n");
+  const normalizedReplace = convertReplacementLineEndings(replace, lineEnding);
+  const normalizedCount = countOccurrences(map.normalized, normalizedFind);
+  if (normalizedCount === 1) {
+    const normIdx = map.normalized.indexOf(normalizedFind);
+    const rawStart = map.normToRaw[normIdx] ?? 0;
+    const rawEnd = map.normToRaw[normIdx + normalizedFind.length] ?? content.length;
+    return {
+      success: true,
+      content: content.slice(0, rawStart) + normalizedReplace + content.slice(rawEnd),
+      score: 99,
+      bestMatch: map.normalized.slice(normIdx, normIdx + normalizedFind.length),
+    };
+  }
+  if (normalizedCount > 1) {
+    return {
+      success: false,
+      reason: "ambiguous_match",
+      score: 0,
+      bestMatch: normalizedFind,
+    };
+  }
+
+  const contentLines = map.normalized.split("\n");
+  const targetLinesRaw = normalizedFind.split("\n");
   const targetLines = targetLinesRaw.map(normalizeLineForMatch).filter(Boolean);
 
   if (targetLines.length === 0) {
@@ -2944,16 +3056,20 @@ export function fuzzyFindAndReplace(
     };
   }
 
-  const replaceLines = replace.replace(/\r\n/g, "\n").split("\n");
-  const updatedLines = [
-    ...contentLines.slice(0, bestCandidate.start),
-    ...replaceLines,
-    ...contentLines.slice(bestCandidate.start + bestCandidate.length),
-  ];
+  // Apply the best candidate window as a localized replacement on the RAW content using index mapping.
+  const lineStartIdx: number[] = [0];
+  for (let i = 0; i < map.normalized.length; i += 1) {
+    if (map.normalized[i] === "\n") lineStartIdx.push(i + 1);
+  }
+  const normStart = lineStartIdx[bestCandidate.start] ?? 0;
+  const normEnd =
+    lineStartIdx[bestCandidate.start + bestCandidate.length] ?? map.normalized.length;
+  const rawStart = map.normToRaw[normStart] ?? 0;
+  const rawEnd = map.normToRaw[normEnd] ?? content.length;
 
   return {
     success: true,
-    content: updatedLines.join("\n"),
+    content: content.slice(0, rawStart) + normalizedReplace + content.slice(rawEnd),
     score: bestCandidate.score,
     bestMatch: bestCandidate.bestMatch,
   };
@@ -3010,6 +3126,7 @@ function applyDeveloperPatchText(
         "[invalid_patch_format] Model response could not be parsed into a valid patch",
     };
   }
+  console.log("[zone-patch-protocol-parsed]");
 
   if (parsed.createContent !== undefined) {
     if (currentContent.trim()) {
@@ -3035,12 +3152,20 @@ function applyDeveloperPatchText(
           "[DEVELOPER_PATCH_FORMAT] FIND blocks must target an existing non-empty block.",
       };
     }
-    const nextContent = fuzzyFindAndReplace(
-      updatedContent,
-      edit.find,
-      edit.replace
+    const findCountRaw = countOccurrences(updatedContent, edit.find);
+    const lineEnding = detectPrimaryLineEnding(updatedContent);
+    const preservedBefore = lineEnding === "\r\n" ? !containsLoneLf(updatedContent) : true;
+    console.log(
+      "[zone-patch-match-count]",
+      JSON.stringify({ raw: findCountRaw })
     );
+
+    const nextContent = fuzzyFindAndReplace(updatedContent, edit.find, edit.replace);
     if (!nextContent.success) {
+      console.log(
+        "[zone-patch-apply-mode]",
+        nextContent.reason === "ambiguous_match" ? "failed" : "failed"
+      );
       return {
         ok: false,
         warning:
@@ -3053,11 +3178,37 @@ function applyDeveloperPatchText(
           }),
       };
     }
+    const mode = findCountRaw === 1 ? "exact" : nextContent.score >= 99 ? "exact" : "fuzzy";
+    console.log("[zone-patch-apply-mode]", mode);
+    const preservedAfter =
+      lineEnding === "\r\n" ? !containsLoneLf(nextContent.content) : true;
+    console.log(
+      "[zone-patch-line-ending-preserved]",
+      preservedBefore && preservedAfter
+    );
+    console.log(
+      "[zone-patch-localized-change-lines]",
+      countChangedLinesLocalized(updatedContent, nextContent.content)
+    );
+    if (containsPatchProtocolMarkers(nextContent.content)) {
+      console.log("[zone-patch-protocol-leak-blocked]");
+      return {
+        ok: false,
+        warning:
+          "[PATCH_PROTOCOL_LEAK] " +
+          JSON.stringify({
+            reason: "patch_protocol_leak",
+            leakedMarkers: true,
+          }),
+      };
+    }
     updatedContent = nextContent.content;
   }
 
   return { ok: true, fullContent: updatedContent };
 }
+
+export const __testOnly_applyDeveloperPatchText = applyDeveloperPatchText;
 
 const SAFE_PREVIEW_REUSE_MAX_CHARS = 4000;
 
@@ -3532,6 +3683,10 @@ function parsePatchFailureWarning(
 
   if (warning.startsWith("[DEVELOPER_PATCH_FORMAT]")) {
     return { reason: "invalid_patch_format" };
+  }
+
+  if (warning.startsWith("[PATCH_PROTOCOL_LEAK]")) {
+    return { reason: "patch_protocol_leak", normalizedFailureReason: "patch_protocol_leak" };
   }
 
   return { reason: "warning" };
@@ -5611,18 +5766,21 @@ export async function runLlmPatchFlow(input: {
 
       if (
         nextContent.includes("--- FIND ---") ||
-        nextContent.includes("--- REPLACE ---")
+        nextContent.includes("--- REPLACE ---") ||
+        nextContent.includes("--- FILE:") ||
+        nextContent.includes("--- FILE ---")
       ) {
         const patchConflictWarning = buildPatchConflictWarning({
           filePath: patch.path,
-          reason: "patch_format_leaked",
+          reason: "patch_protocol_leak",
         });
         internalWarnings.push(patchConflictWarning);
         visibleWarnings.push(patchConflictWarning);
+        console.log("[zone-patch-protocol-leak-blocked]");
         patchResults.push({
           filePath: patch.path,
           status: "failed",
-          reason: "patch_format_leaked",
+          reason: "patch_protocol_leak",
         });
         continue;
       }
