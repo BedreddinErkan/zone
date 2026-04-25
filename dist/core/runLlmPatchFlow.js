@@ -4400,10 +4400,21 @@ async function runLlmPatchFlow(input) {
                                 }));
                                 patchSource = "ast_fallback";
                                 usedLlmPatchRecovered = false;
-                                // Return AST-generated full content; correctness validation still runs later.
-                                return astFallback.finalContent;
+                                const appliedFromAst = applyDeveloperPatchText(fileContent, astFallback.patchText);
+                                if (appliedFromAst.ok) {
+                                    // Return minimally-edited full content (applied via FIND/REPLACE patch).
+                                    return appliedFromAst.fullContent;
+                                }
+                                console.log("[zone-ast-fallback-failed]", JSON.stringify({
+                                    filePath: patch.path,
+                                    reason: "patch_apply_failed",
+                                    warning: appliedFromAst.warning,
+                                }));
+                                // fall through to treat original patch as failed
                             }
-                            console.log("[zone-ast-fallback-failed]", JSON.stringify({ filePath: patch.path, reason: astFallback.reason }));
+                            else {
+                                console.log("[zone-ast-fallback-failed]", JSON.stringify({ filePath: patch.path, reason: astFallback.reason }));
+                            }
                         }
                         logPatchConversionDebug({
                             filePath: patch.path,

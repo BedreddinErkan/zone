@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { tryAstPatchFallback } from "./astPatchFallback.js";
+import { __testOnly_applyDeveloperPatchText } from "./runLlmPatchFlow.js";
 
 describe("tryAstPatchFallback", () => {
   it("Capability A: inserts upload null guard into isImageFile(upload)", () => {
@@ -20,10 +21,18 @@ describe("tryAstPatchFallback", () => {
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.mode).toBe("ast_fallback");
-      expect(r.finalContent).toContain("function isImageFile(upload)");
-      expect(r.finalContent).toContain("if (!upload) return false;");
+      expect(r.patchText).toContain("--- FIND ---");
+      expect(r.patchText).toContain("function isImageFile(upload)");
+      expect(r.patchText).toContain("if (!upload) return false;");
       expect(r.changedLinesEstimate).toBeGreaterThan(0);
       expect(r.changedLinesEstimate).toBeLessThanOrEqual(20);
+
+      const applied = __testOnly_applyDeveloperPatchText(original, r.patchText);
+      expect(applied.ok).toBe(true);
+      if (applied.ok) {
+        expect(applied.fullContent).toContain("if (!upload) return false;");
+        expect(applied.fullContent).toContain("const mime = upload?.mime_type");
+      }
     }
   });
 
@@ -66,7 +75,11 @@ describe("tryAstPatchFallback", () => {
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.finalContent).not.toContain("\n  d;\n");
+      const applied = __testOnly_applyDeveloperPatchText(original, r.patchText);
+      expect(applied.ok).toBe(true);
+      if (applied.ok) {
+        expect(applied.fullContent).not.toContain("\n  d;\n");
+      }
       expect(r.changedLinesEstimate).toBeLessThanOrEqual(3);
     }
   });

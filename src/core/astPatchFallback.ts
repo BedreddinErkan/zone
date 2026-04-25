@@ -14,7 +14,7 @@ export type AstPatchFallbackResult =
   | {
       ok: true;
       mode: "ast_fallback";
-      finalContent: string;
+      patchText: string;
       summary: string;
       changedLinesEstimate: number;
     }
@@ -142,6 +142,57 @@ function removeStrayOneCharIdentifierStatements(ast: t.File): { removed: number 
   return { removed };
 }
 
+function detectPrimaryLineEnding(content: string): "\r\n" | "\n" {
+  return String(content || "").includes("\r\n") ? "\r\n" : "\n";
+}
+
+function buildIsImageFileUploadGuardPatch(input: {
+  filePath: string;
+  originalContent: string;
+}): { ok: true; patchText: string; insertedLines: string[] } | { ok: false } {
+  const original = String(input.originalContent || "");
+  const lineEnding = detectPrimaryLineEnding(original);
+
+  // Anchor strategy: first `function isImageFile(upload) {` (exact text from file).
+  const functionRegex = /function\s+isImageFile\s*\(\s*upload\s*\)\s*\{/;
+  const match = original.match(functionRegex);
+  if (!match || !match[0]) return { ok: false };
+
+  // Use the full matched token as the FIND anchor (keeps formatting stable).
+  const anchor = match[0];
+  const anchorIdx = original.indexOf(anchor);
+  if (anchorIdx < 0) return { ok: false };
+
+  // Infer indentation from the line after the anchor line.
+  const afterAnchorIdx = anchorIdx + anchor.length;
+  const nextLineStart = original.indexOf(lineEnding, afterAnchorIdx);
+  let indent = "  ";
+  if (nextLineStart >= 0) {
+    const nextLineEnd = original.indexOf(lineEnding, nextLineStart + lineEnding.length);
+    const nextLine =
+      nextLineEnd >= 0
+        ? original.slice(nextLineStart + lineEnding.length, nextLineEnd)
+        : original.slice(nextLineStart + lineEnding.length);
+    const m = nextLine.match(/^\s+/);
+    if (m && m[0]) indent = m[0];
+  }
+
+  const guardLine = `${indent}if (!upload) return false;`;
+  const insertedLines = [guardLine];
+
+  const findBlock = anchor;
+  const replaceBlock = `${anchor}${lineEnding}${guardLine}`;
+  const patchText = [
+    `--- FILE: ${input.filePath} ---`,
+    `--- FIND ---`,
+    findBlock,
+    `--- REPLACE ---`,
+    replaceBlock,
+  ].join(lineEnding);
+
+  return { ok: true, patchText, insertedLines };
+}
+
 export function tryAstPatchFallback(input: AstPatchFallbackInput): AstPatchFallbackResult {
   if (!isSupportedScriptFile(input.filePath)) {
     return { ok: false, reason: "unsupported_file_type" };
@@ -168,6 +219,7 @@ export function tryAstPatchFallback(input: AstPatchFallbackInput): AstPatchFallb
 
   let changed = false;
   let summary = "";
+  let patchText = "";
 
   if (supportsA) {
     const candidates: t.FunctionDeclaration[] = [];
@@ -183,11 +235,20 @@ export function tryAstPatchFallback(input: AstPatchFallbackInput): AstPatchFallb
     if (candidates.length > 1) return { ok: false, reason: "ambiguous_target" };
     const fn = candidates[0];
     if (!fn) return { ok: false, reason: "target_not_found" };
-    const ok = insertUploadNullGuard(fn);
-    if (!ok) return { ok: false, reason: "no_change" };
+    if (hasUploadGuardAlready(fn)) return { ok: false, reason: "no_change" };
+    const patch = buildIsImageFileUploadGuardPatch({
+      filePath,
+      originalContent: input.originalContent,
+    });
+    if (!patch.ok) return { ok: false, reason: "target_not_found" };
     console.log("[zone-ast-safe-guard-insert]", JSON.stringify({ filePath }));
+    console.log(
+      "[zone-ast-patch-generated]",
+      JSON.stringify({ lines: patch.insertedLines.length })
+    );
     changed = true;
     summary = "Added `if (!upload) return false;` guard to isImageFile(upload).";
+    patchText = patch.patchText;
   } else if (supportsB) {
     const res = removeStrayOneCharIdentifierStatements(ast);
     if (res.removed === 0) return { ok: false, reason: "target_not_found" };
@@ -197,6 +258,19 @@ export function tryAstPatchFallback(input: AstPatchFallbackInput): AstPatchFallb
   }
 
   if (!changed) return { ok: false, reason: "no_change" };
+
+  // For the guard insertion path, emit a minimal FIND/REPLACE patch (not full rewritten content).
+  if (supportsA) {
+    const changedLinesEstimate = patchText ? 1 : 0;
+    if (changedLinesEstimate === 0) return { ok: false, reason: "no_change" };
+    return {
+      ok: true,
+      mode: "ast_fallback",
+      patchText,
+      summary,
+      changedLinesEstimate,
+    };
+  }
 
   const generated = generate(
     ast,
@@ -230,7 +304,15 @@ export function tryAstPatchFallback(input: AstPatchFallbackInput): AstPatchFallb
   return {
     ok: true,
     mode: "ast_fallback",
-    finalContent: generated,
+    patchText: [
+      `--- FILE: ${filePath} ---`,
+      `--- FIND ---`,
+      // conservative: replace the whole file (legacy path) only for stray identifier removal.
+      // This path isn't used for the guard insertion scenario.
+      String(input.originalContent || ""),
+      `--- REPLACE ---`,
+      generated,
+    ].join(detectPrimaryLineEnding(input.originalContent)),
     summary,
     changedLinesEstimate,
   };
