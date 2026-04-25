@@ -58,7 +58,8 @@ describe("applyDeveloperPatchText localized replacement", () => {
     const applied = __testOnly_applyDeveloperPatchText(content, patch);
     expect(applied.ok).toBe(false);
     if (!applied.ok) {
-      expect(applied.warning).toContain("[PATCH_NO_MATCH_ABORT]");
+      expect(applied.warning).toContain("[PATCH_PROTOCOL_LEAK]");
+      expect(applied.warning).toContain("rawMatchCount");
     }
   });
 
@@ -89,7 +90,7 @@ describe("applyDeveloperPatchText localized replacement", () => {
     }
   });
 
-  it("whitespace-normalized unique match still applies when not instruction-like", () => {
+  it("raw match count 0 is blocked unless LF-normalized match is exactly 1", () => {
     const content =
       "function x() {\n" +
       "  const a    =    1;\n" +
@@ -98,9 +99,10 @@ describe("applyDeveloperPatchText localized replacement", () => {
     // Same logical line with different whitespace; should match via safe ws normalization.
     const patch = wrapPatch("  const a = 1;", "  const a = 2;");
     const applied = __testOnly_applyDeveloperPatchText(content, patch);
-    expect(applied.ok).toBe(true);
-    if (applied.ok) {
-      expect(applied.fullContent).toContain("const a = 2");
+    expect(applied.ok).toBe(false);
+    if (!applied.ok) {
+      expect(applied.warning).toContain("[PATCH_PROTOCOL_LEAK]");
+      expect(applied.warning).toContain("rawMatchCount");
     }
   });
 });

@@ -3213,44 +3213,28 @@ function applyDeveloperPatchText(
       JSON.stringify({ raw: findCountRaw })
     );
 
-    // Strict guard: do not proceed to fuzzy matching if the FIND block can't be
-    // located even after safe normalization. (We still allow exact normalized
-    // matches like tab↔spaces or LF↔CRLF.)
+    // CRITICAL correctness guard:
+    // If raw match count is 0, we must NOT apply unless LF/CRLF normalization yields exactly one match.
     if (findCountRaw === 0) {
       const map = buildLfNormalizedIndexMap(updatedContent);
       const normalizedFind = edit.find.replace(/\r\n/g, "\n");
       const normalizedCount = countOccurrences(map.normalized, normalizedFind);
-      if (normalizedCount === 0) {
-        const wsNormalizedContent = map.normalized.replace(/[ \t]+/g, " ");
-        const wsNormalizedFind = normalizedFind.replace(/[ \t]+/g, " ");
-        const wsNormalizedCount = countOccurrences(
-          wsNormalizedContent,
-          wsNormalizedFind
-        );
-        if (wsNormalizedCount === 1) {
-          // Allow patch application to proceed; fuzzyFindAndReplace will handle
-          // mapping and replacement while preserving original line endings.
-        } else {
-        console.log(
-          "[zone-patch-no-match-abort]",
-          JSON.stringify({
-            reason: "raw_and_normalized_find_not_found",
-            findPreview: edit.find.slice(0, 180),
-          })
+      if (normalizedCount !== 1) {
+        console.warn(
+          "[zone-patch-protocol-leak-blocked]",
+          JSON.stringify({ reason: "patch_protocol_leak", rawMatchCount: findCountRaw })
         );
         return {
           ok: false,
           warning:
-            "[PATCH_NO_MATCH_ABORT] " +
+            "[PATCH_PROTOCOL_LEAK] " +
             JSON.stringify({
-              success: false,
-              reason: "raw_and_normalized_find_not_found",
-              score: 0,
-              bestMatch: "",
+              reason: "patch_protocol_leak",
+              rawMatchCount: 0,
             }),
         };
-        }
       }
+      // normalizedCount === 1 is allowed to proceed (safe normalized exact match)
     }
 
     const nextContent = fuzzyFindAndReplace(updatedContent, edit.find, edit.replace);
