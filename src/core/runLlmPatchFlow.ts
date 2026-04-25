@@ -4990,6 +4990,7 @@ export async function runLlmPatchFlow(input: {
     ...patchPlan.warnings,
   ]);
   const patchResults: PatchResult[] = [];
+  const rawPatchTextByFile: Record<string, string> = {};
   let hostedPatchAvailability: Array<{
   path: string;
   hasOriginalContent: boolean;
@@ -5697,6 +5698,7 @@ export async function runLlmPatchFlow(input: {
               return null;
             }
             if (fullPatch.mode === "patch") {
+              rawPatchTextByFile[patch.path] = fullPatch.patchText;
               let appliedPatch = applyDeveloperPatchText(
                 fileContent,
                 fullPatch.patchText
@@ -5777,6 +5779,8 @@ export async function runLlmPatchFlow(input: {
               responseMode: fullPatch.mode,
               status: "applied",
             });
+            // Track a hint of previous output for repair prompts.
+            rawPatchTextByFile[patch.path] = `[full_content] ${fullPatch.summary ?? ""}`.trim();
             return fullPatch.fullContent;
           });
 
@@ -6084,6 +6088,14 @@ export async function runLlmPatchFlow(input: {
 
   let correctnessMustBlock = false;
   let validatorAllOk = true;
+  const correctnessRepairAttempted = new Set<string>();
+  const retryableCorrectnessCodes = new Set([
+    "unbalanced_delimiters",
+    "unterminated_template",
+    "jsx_mismatch",
+    "syntax_error",
+    "broken_import_line",
+  ]);
   // Patch correctness validator v2
   if (applyPatches.length > 0) {
     const kept: Array<{ filePath: string; fullContent: string }> = [];
@@ -6179,6 +6191,175 @@ export async function runLlmPatchFlow(input: {
       }
 
       if (!report.ok) {
+        const diagDiffHeadSample = buildDiffHeadSample(diagDiff, 240);
+        const blockingCodes = report.blocking.map((i) => i.code);
+        const retryableBlocking = blockingCodes.filter((c) =>
+          retryableCorrectnessCodes.has(c)
+        );
+        const canAttemptRepair =
+          retryableBlocking.length > 0 &&
+          !correctnessRepairAttempted.has(patch.filePath) &&
+          diagTotalChanged <= 25 &&
+          patchSource !== "deterministic_fallback";
+        const maxRepairAttempts = getInferenceMode() === "hosted" ? 1 : 1;
+
+        if (canAttemptRepair && maxRepairAttempts >= 1) {
+          correctnessRepairAttempted.add(patch.filePath);
+          console.log(
+            "[zone-repair-start]",
+            JSON.stringify({
+              filePath: patch.filePath,
+              blockingCodes,
+              retryableBlocking,
+              totalChangedLines: diagTotalChanged,
+            })
+          );
+          console.log(
+            "[zone-repair-context]",
+            JSON.stringify({
+              filePath: patch.filePath,
+              originalTask: input.task.slice(0, 400),
+              previousRawPatchPreview: (rawPatchTextByFile[patch.filePath] ?? "")
+                .slice(0, 400),
+              diffHeadSample: diagDiffHeadSample,
+            })
+          );
+          try {
+            const repaired = await planFullPatchWithLlm({
+              task: [
+                input.task,
+                "",
+                "PATCH CORRECTNESS VALIDATION FAILED AFTER APPLYING YOUR PATCH.",
+                "You MUST repair the previous patch.",
+                "",
+                "CRITICAL REPAIR RULES:",
+                "- Repair the previous patch. Do not introduce new structure.",
+                "- Do NOT wrap components.",
+                "- Do NOT add new functions.",
+                "- Only fix the syntax/JSX issue with the smallest possible localized edit.",
+                "- Do NOT expand scope. Do NOT modify other files.",
+                "- You MUST output a patch.",
+                "",
+                "Extra guidance:",
+                "- Remove ANY suspicious or stray characters",
+                "- Fix JSX structure if needed",
+                "- Prefer smallest possible change",
+                "",
+                `TARGET FILE: ${patch.filePath}`,
+                "",
+                "Previous raw patch (for reference):",
+                rawPatchTextByFile[patch.filePath] ?? "",
+                "",
+                "Patched content that failed validation:",
+                patch.fullContent.slice(0, 9000),
+                "",
+                "Validator blocking codes:",
+                blockingCodes.join(", "),
+                "",
+                "Diagnostic diff head sample:",
+                diagDiffHeadSample,
+              ].join("\n"),
+              filePath: patch.filePath,
+              fileContent: patch.fullContent,
+              fullOriginalFileContent: patch.fullContent,
+              repoSummary: projectSummary,
+              repoPath: input.repoPath,
+              taskIntent: taskIntent.normalizedTask || taskIntent.action,
+              normalizedTaskIntent: detectMicroEditIntent(input.task)
+                ? "micro_edit"
+                : "standard",
+              outputMode: "find_replace_patch",
+              relevantFiles: [{ path: patch.filePath, content: patch.fullContent }],
+              existingTargetFiles: allFiles.map((file) => file.path),
+              executionPlan,
+              relatedContext:
+                "IMPORTANT: Only output a valid patch. Do not explain.",
+            });
+            if (repaired.mode !== "patch") {
+              console.log(
+                "[zone-repair-validation-failed]",
+                JSON.stringify({
+                  filePath: patch.filePath,
+                  reason: `repair_mode_${repaired.mode}`,
+                })
+              );
+              visibleWarnings.push("repair_attempted_but_failed");
+            } else {
+              console.log("[zone-repair-patch-generated]", patch.filePath);
+              const applied = applyDeveloperPatchText(
+                patch.fullContent,
+                repaired.patchText
+              );
+              if (!applied.ok) {
+                console.log(
+                  "[zone-repair-validation-failed]",
+                  JSON.stringify({
+                    filePath: patch.filePath,
+                    reason: "repair_patch_apply_failed",
+                  })
+                );
+                visibleWarnings.push("repair_attempted_but_failed");
+              } else {
+                const report2 = validatePatchCorrectness({
+                  filePath: patch.filePath,
+                  originalContent: before,
+                  updatedContent: applied.fullContent,
+                  task: input.task,
+                  isConstrained: isConstrainedLocalizedPatchTask(input.task),
+                  taskConstraints: detectExistingStructureTaskConstraints(
+                    input.task
+                  ),
+                  strictMode: patchSource === "deterministic_fallback",
+                });
+                if (report2.ok) {
+                  console.log(
+                    "[zone-repair-validation-passed]",
+                    JSON.stringify({ filePath: patch.filePath })
+                  );
+                  visibleWarnings.push("repair_attempted_and_passed");
+                  kept.push({ filePath: patch.filePath, fullContent: applied.fullContent });
+                  continue;
+                }
+                console.log(
+                  "[zone-repair-validation-failed]",
+                  JSON.stringify({
+                    filePath: patch.filePath,
+                    blockingCodes: report2.blocking.map((i) => i.code),
+                  })
+                );
+                visibleWarnings.push("repair_attempted_but_failed");
+              }
+            }
+          } catch (err) {
+            console.log(
+              "[zone-repair-validation-failed]",
+              JSON.stringify({
+                filePath: patch.filePath,
+                reason: err instanceof Error ? err.message : String(err),
+              })
+            );
+            visibleWarnings.push("repair_attempted_but_failed");
+          }
+        } else if (retryableBlocking.length > 0 && diagTotalChanged > 25) {
+          console.log(
+            "[zone-repair-skipped]",
+            JSON.stringify({
+              filePath: patch.filePath,
+              reason: "patch_too_large",
+              totalChangedLines: diagTotalChanged,
+              blockingCodes,
+            })
+          );
+        } else if (retryableBlocking.length > 0 && correctnessRepairAttempted.has(patch.filePath)) {
+          console.log(
+            "[zone-repair-skipped]",
+            JSON.stringify({
+              filePath: patch.filePath,
+              reason: "already_attempted",
+              blockingCodes,
+            })
+          );
+        }
         validatorAllOk = false;
         const firstBlockingCode =
           report.blocking[0]?.code ?? "correctness_failed";
