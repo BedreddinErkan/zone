@@ -984,14 +984,38 @@ function layer1LexicalIntegrity(input: PatchCorrectnessInput): LexicalResult {
     return { issues: [], strippedForJsx: input.updatedContent };
   }
 
-  const scan = scanDelimitersWithDiagnostics(input.updatedContent);
+  const diffCounts = fastDiffCounts(input.originalContent, input.updatedContent);
+  const range = estimateChangedLineRange(input.originalContent, input.updatedContent);
+  const beforeCounts = analyzeDelimiterCounts(input.originalContent);
+  const afterCounts = analyzeDelimiterCounts(input.updatedContent);
+  const deltaCounts = computeDelimiterDelta(beforeCounts, afterCounts);
+  const deltaBalanced =
+    deltaCounts.braces.opens === deltaCounts.braces.closes &&
+    deltaCounts.brackets.opens === deltaCounts.brackets.closes &&
+    deltaCounts.parens.opens === deltaCounts.parens.closes;
+  const additiveOnly = diffCounts.removedLines === 0;
+  const localizedValidationMode =
+    diffCounts.totalChangedLines <= 5 && additiveOnly && deltaBalanced;
+  if (localizedValidationMode) {
+    console.log(
+      "[zone-validator-localized-mode]",
+      JSON.stringify({ enabled: true, reason: "small_safe_patch" })
+    );
+  }
+
+  const scanTarget = localizedValidationMode
+    ? (() => {
+        const lines = input.updatedContent.replace(/\\r\\n/g, "\\n").split("\\n");
+        const start = Math.max(1, range.startLine - 5);
+        const end = Math.min(lines.length, range.endLineAfter + 5);
+        return lines.slice(start - 1, end).join("\\n");
+      })()
+    : input.updatedContent;
+
+  const scan = scanDelimitersWithDiagnostics(scanTarget);
   if (!scan.ok) {
-    const beforeCounts = analyzeDelimiterCounts(input.originalContent);
-    const afterCounts = analyzeDelimiterCounts(input.updatedContent);
-    const deltaCounts = computeDelimiterDelta(beforeCounts, afterCounts);
     const worsened = delimiterWorsened(beforeCounts, afterCounts);
     const unchangedOrImproved = delimiterUnchangedOrImproved(beforeCounts, afterCounts);
-    const diffCounts = fastDiffCounts(input.originalContent, input.updatedContent);
     const minimalPatch = diffCounts.totalChangedLines < 5;
     const decision = !worsened && (unchangedOrImproved || minimalPatch) ? "allow" : "block";
     console.log(
@@ -1008,6 +1032,32 @@ function layer1LexicalIntegrity(input: PatchCorrectnessInput): LexicalResult {
     if (decision === "allow") {
       // Do not block if the file was already broken and the patch does not worsen delimiter counts.
       return { issues: [], strippedForJsx: scan.strippedForJsx };
+    }
+
+    // Localized validation mode: never hard-block on delimiter/template artifacts that
+    // are likely outside the changed region. Downgrade to warning instead.
+    if (localizedValidationMode) {
+      const issues: PatchCorrectnessIssue[] = [
+        issue({
+          layer: 1,
+          code: "unbalanced_delimiters",
+          severity: "warn",
+          message: `Localized validation mode: delimiter scan failed (${scan.subtype}). This may be unrelated to the small additive edit.`,
+          locationHint: { line: scan.line, snippet: scan.snippet },
+        }),
+      ];
+      if (scan.lexicalScanIncomplete) {
+        issues.push(
+          issue({
+            layer: 1,
+            code: "lexical_scan_incomplete",
+            severity: "warn",
+            message:
+              "Lexical scan could not confidently parse a regex literal; results may be incomplete.",
+          })
+        );
+      }
+      return { issues, strippedForJsx: input.updatedContent };
     }
 
     console.log(
