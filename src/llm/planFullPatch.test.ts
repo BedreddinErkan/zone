@@ -108,6 +108,8 @@ describe("planFullPatchWithLlm", () => {
       reason: "Validation failed after 3 attempts.",
       attempts: 3,
       lastIssues: [],
+      // Simulates last execute() return when in-process tracking of lastRawPatchResponse is unavailable (mocked retry).
+      lastValue: "model returned text but not a valid strict patch",
     });
 
     const { planFullPatchWithLlm } = await import("./planFullPatch.js");
@@ -124,6 +126,7 @@ describe("planFullPatchWithLlm", () => {
       expect(result.warnings.some((w) => w.includes("[invalid_patch_format]"))).toBe(
         true
       );
+      expect(result.lastNonEmptyRawLength).toBeGreaterThan(0);
     }
   });
 

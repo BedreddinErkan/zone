@@ -5420,6 +5420,13 @@ export async function runLlmPatchFlow(input: {
             perf.mark(`full patch model response received ${patch.path}`);
             if (fullPatch.mode === "invalid_patch_format") {
               fallbackForcePreviewOnly = true;
+              console.log(
+                "[zone-patch-recovery-context]",
+                JSON.stringify({
+                  filePath: patch.path,
+                  lastNonEmptyRawLength: fullPatch.lastNonEmptyRawLength ?? 0,
+                })
+              );
               for (const w of fullPatch.warnings) {
                 internalWarnings.push(w);
                 visibleWarnings.push(w);

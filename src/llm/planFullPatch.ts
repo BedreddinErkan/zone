@@ -92,6 +92,8 @@ export type FullPatchResult =
       filePath: string;
       summary: string;
       warnings: string[];
+      /** Length of the last non-empty raw model output used for recovery (0 if none). */
+      lastNonEmptyRawLength?: number;
     };
 
 function isValidPatchResponse(text: string): boolean {
@@ -398,10 +400,14 @@ export async function planFullPatchWithLlm(input: {
     const applyPatchTool = buildApplyPatchTool();
     const applyPatchToolChoice = buildApplyPatchToolChoice();
 
+    let lastRawPatchResponse = "";
+    let findReplaceAttemptIndex = 0;
+
     const retryResult = await withSelfHealingRetry({
       maxAttempts: 3,
       prompt: findReplacePrompt,
       execute: async (currentPrompt: string) => {
+        findReplaceAttemptIndex += 1;
         console.log(
           "[zone-patch-request] sending strict patch system instruction",
           JSON.stringify({
@@ -433,10 +439,38 @@ export async function planFullPatchWithLlm(input: {
         });
 
         const toolPatch = extractPatchFromToolCall(response);
-        if (toolPatch) {
+        const outputText =
+          typeof (response as { output_text?: unknown }).output_text === "string"
+            ? (response as { output_text: string }).output_text.trim()
+            : "";
+        const fromTool = toolPatch != null ? String(toolPatch).trim() : "";
+        const rawForAttempt = fromTool || outputText;
+
+        console.log(
+          "[zone-patch-raw-response-debug]",
+          JSON.stringify({
+            filePath: input.filePath,
+            attempt: findReplaceAttemptIndex,
+            rawLength: rawForAttempt.length,
+            rawPreview: rawForAttempt.slice(0, 240),
+          })
+        );
+
+        if (rawForAttempt.length > 0) {
+          lastRawPatchResponse = rawForAttempt;
+        }
+
+        if (fromTool) {
           console.log("[zone-patch-tool] tool call received");
-          console.log("[zone-patch-tool] patch length:", toolPatch.length);
-          return toolPatch.trim();
+          console.log("[zone-patch-tool] patch length:", fromTool.length);
+          return fromTool;
+        }
+
+        if (outputText) {
+          console.warn(
+            "[zone-patch-tool] No structured tool patch; using output_text for validation"
+          );
+          return outputText;
         }
 
         console.error("[zone-patch-tool] No structured patch returned");
@@ -490,7 +524,8 @@ export async function planFullPatchWithLlm(input: {
         "[zone-patch] model failed to produce valid patch after retries"
       );
       const rawAttempt =
-        typeof retryResult.lastValue === "string" ? retryResult.lastValue : "";
+        lastRawPatchResponse ||
+        (typeof retryResult.lastValue === "string" ? retryResult.lastValue : "");
       const recovered = tryRecoverDeveloperPatchFromModelOutput({
         requestedFilePath: input.filePath,
         originalFileContent: originalForRecovery,
@@ -511,6 +546,7 @@ export async function planFullPatchWithLlm(input: {
         filePath: input.filePath,
         summary: "Large-file patch format validation failed.",
         warnings: ["[invalid_patch_format] Model failed after retries"],
+        lastNonEmptyRawLength: rawAttempt.length,
       };
     }
 
@@ -521,7 +557,7 @@ export async function planFullPatchWithLlm(input: {
       const recovered = tryRecoverDeveloperPatchFromModelOutput({
         requestedFilePath: input.filePath,
         originalFileContent: originalForRecovery,
-        rawModelText: rawText,
+        rawModelText: lastRawPatchResponse || rawText,
       });
       if (recovered.ok) {
         return {
@@ -533,11 +569,13 @@ export async function planFullPatchWithLlm(input: {
           patchRecovered: true,
         };
       }
+      const rawForRecoveryMeta = lastRawPatchResponse || rawText;
       return {
         mode: "invalid_patch_format",
         filePath: input.filePath,
         summary: "Large-file patch missing required structure.",
         warnings: ["[invalid_patch_format] Model failed after retries"],
+        lastNonEmptyRawLength: rawForRecoveryMeta.length,
       };
     }
 
