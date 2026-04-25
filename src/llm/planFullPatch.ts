@@ -20,6 +20,7 @@ import {
   type ExecutionPlan,
 } from "./executionPlan.js";
 import { parseDeveloperPatchText } from "../core/developerPatchParse.js";
+import { tryRecoverDeveloperPatchFromModelOutput } from "../core/patchConversion.js";
 
 const fullContentSchema = z.object({
   filePath: z.string(),
@@ -83,6 +84,8 @@ export type FullPatchResult =
       patchText: string;
       summary: string;
       warnings: string[];
+      /** True when patch text was recovered from non-strict model output (safe single-hunk rules). */
+      patchRecovered?: boolean;
     }
   | {
       mode: "invalid_patch_format";
@@ -349,6 +352,8 @@ export async function planFullPatchWithLlm(input: {
   task: string;
   filePath: string;
   fileContent: string;
+  /** Full on-disk file used for safe recovery (substring must match once). Defaults to fileContent when omitted. */
+  fullOriginalFileContent?: string;
   repoSummary: string;
   relatedContext: string;
   outputMode?: FullPatchOutputMode;
@@ -477,10 +482,30 @@ export async function planFullPatchWithLlm(input: {
       buildFeedbackPrompt: buildFindReplaceFormatRetryPrompt,
     });
 
+    const originalForRecovery =
+      input.fullOriginalFileContent ?? input.fileContent;
+
     if (!retryResult.ok) {
       console.error(
         "[zone-patch] model failed to produce valid patch after retries"
       );
+      const rawAttempt =
+        typeof retryResult.lastValue === "string" ? retryResult.lastValue : "";
+      const recovered = tryRecoverDeveloperPatchFromModelOutput({
+        requestedFilePath: input.filePath,
+        originalFileContent: originalForRecovery,
+        rawModelText: rawAttempt,
+      });
+      if (recovered.ok) {
+        return {
+          mode: "patch",
+          filePath: input.filePath,
+          patchText: recovered.strictPatchText,
+          summary: "Large-file targeted patch generated (recovered from non-strict model output).",
+          warnings: [],
+          patchRecovered: true,
+        };
+      }
       return {
         mode: "invalid_patch_format",
         filePath: input.filePath,
@@ -493,6 +518,21 @@ export async function planFullPatchWithLlm(input: {
     console.log("[zone-patch-debug] raw model output:", rawText.slice(0, 500));
     console.log("[zone-patch-debug-full]", rawText.slice(0, 500));
     if (!isValidPatchResponse(rawText)) {
+      const recovered = tryRecoverDeveloperPatchFromModelOutput({
+        requestedFilePath: input.filePath,
+        originalFileContent: originalForRecovery,
+        rawModelText: rawText,
+      });
+      if (recovered.ok) {
+        return {
+          mode: "patch",
+          filePath: input.filePath,
+          patchText: recovered.strictPatchText,
+          summary: "Large-file targeted patch generated (recovered from non-strict model output).",
+          warnings: [],
+          patchRecovered: true,
+        };
+      }
       return {
         mode: "invalid_patch_format",
         filePath: input.filePath,

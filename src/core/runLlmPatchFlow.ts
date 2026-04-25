@@ -5,6 +5,7 @@ import { readProjectFiles } from "../repo/readProjectFiles.js";
 import { planFeatureWithLlm } from "../llm/planFeature.js";
 import { planPatchPreviewWithLlm } from "../llm/planPatchPreview.js";
 import { planFullPatchWithLlm } from "../llm/planFullPatch.js";
+import { tryRecoverDeveloperPatchFromModelOutput } from "./patchConversion.js";
 import {
   generateExecutionPlan,
   type ExecutionPlan,
@@ -152,7 +153,11 @@ export type LlmPatchFlowResult =
       finalRunReport?: FinalRunReport;
     };
 
-type PatchSource = "llm_patch" | "deterministic_fallback" | "no_patch";
+type PatchSource =
+  | "llm_patch"
+  | "llm_patch_recovered"
+  | "deterministic_fallback"
+  | "no_patch";
 
 export type PatchResult = {
   filePath: string;
@@ -4782,6 +4787,7 @@ export async function runLlmPatchFlow(input: {
   let applyPatches: Array<{ filePath: string; fullContent: string }> = [];
   let fallbackForcePreviewOnly = false;
   let deterministicFallbackTooLarge = false;
+  let usedLlmPatchRecovered = false;
   let patchSource: PatchSource = "no_patch";
   const originalContents: Record<string, string> = {
     ...(input.hostedContext?.originalContents ?? {}),
@@ -5390,6 +5396,7 @@ export async function runLlmPatchFlow(input: {
               task: input.task,
               filePath: patch.path,
               fileContent: llmFileContent,
+              fullOriginalFileContent: fileContent,
               repoSummary: projectSummary,
               repoPath: input.repoPath,
               taskIntent: taskIntent.normalizedTask || taskIntent.action,
@@ -5433,10 +5440,30 @@ export async function runLlmPatchFlow(input: {
               return null;
             }
             if (fullPatch.mode === "patch") {
-              const appliedPatch = applyDeveloperPatchText(
+              let appliedPatch = applyDeveloperPatchText(
                 fileContent,
                 fullPatch.patchText
               );
+              let recoveredFromApply = false;
+              if (!appliedPatch.ok) {
+                const failurePreview = parsePatchFailureWarning(
+                  appliedPatch.warning
+                );
+                if (failurePreview.reason === "invalid_patch_format") {
+                  const recovered = tryRecoverDeveloperPatchFromModelOutput({
+                    requestedFilePath: patch.path,
+                    originalFileContent: fileContent,
+                    rawModelText: fullPatch.patchText,
+                  });
+                  if (recovered.ok) {
+                    appliedPatch = applyDeveloperPatchText(
+                      fileContent,
+                      recovered.strictPatchText
+                    );
+                    recoveredFromApply = appliedPatch.ok;
+                  }
+                }
+              }
               if (!appliedPatch.ok) {
                 internalWarnings.push(appliedPatch.warning);
                 if (!isHiddenDeveloperWarning(appliedPatch.warning)) {
@@ -5474,6 +5501,9 @@ export async function runLlmPatchFlow(input: {
                   reason: failure.reason,
                 });
                 return null;
+              }
+              if (fullPatch.patchRecovered || recoveredFromApply) {
+                usedLlmPatchRecovered = true;
               }
               logPatchConversionDebug({
                 filePath: patch.path,
@@ -5600,12 +5630,16 @@ export async function runLlmPatchFlow(input: {
   }
   console.log("[hosted] applyPatches count:", applyPatches.length);
   if (applyPatches.length > 0) {
-    patchSource = "llm_patch";
+    patchSource = usedLlmPatchRecovered ? "llm_patch_recovered" : "llm_patch";
   }
 
   const taskIsConstrained =
     isConstrainedLocalizedPatchTask(input.task) || isConstrainedTaskByText(input.task);
-  if (taskIsConstrained && patchSource === "llm_patch" && applyPatches.length > 0) {
+  if (
+    taskIsConstrained &&
+    (patchSource === "llm_patch" || patchSource === "llm_patch_recovered") &&
+    applyPatches.length > 0
+  ) {
     const scope = analyzePatchScope({ applyPatches, originalContents });
     if (scope.totalChangedLines > 30) {
       fallbackForcePreviewOnly = true;
@@ -6217,6 +6251,7 @@ export async function runLlmPatchFlow(input: {
                 ].join("\n"),
                 filePath: patch.filePath,
                 fileContent: patch.fullContent,
+                fullOriginalFileContent: patch.fullContent,
                 repoSummary: projectSummary,
                 repoPath: input.repoPath,
                 taskIntent: taskIntent.normalizedTask || taskIntent.action,

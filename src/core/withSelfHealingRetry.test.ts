@@ -65,6 +65,7 @@ describe("withSelfHealingRetry", () => {
       reason: "Validation failed after 2 attempts.",
       attempts: 2,
       lastIssues: issues,
+      lastValue: "bad",
     });
   });
 
@@ -134,6 +135,29 @@ describe("withSelfHealingRetry", () => {
     });
 
     expect(result).toEqual({ ok: true, value: "good", attempts: 3 });
+  });
+
+  it("returns lastValue from the final execute when validation never passes", async () => {
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce("first-bad")
+      .mockResolvedValueOnce("second-bad");
+    const validate = vi.fn().mockReturnValue([
+      { code: "ERR", message: "no", severity: "error" },
+    ]);
+
+    const result = await withSelfHealingRetry({
+      prompt: "p",
+      maxAttempts: 2,
+      execute,
+      validate,
+      buildFeedbackPrompt: buildDefaultFeedbackPrompt,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.lastValue).toBe("second-bad");
+    }
   });
 
   it("buildDefaultFeedbackPrompt output contains issue codes and attempt number", () => {
@@ -234,6 +258,7 @@ describe("withSelfHealingRetry", () => {
       reason: "Validation failed after 1 attempts.",
       attempts: 1,
       lastIssues: [{ code: "ERR_MIN", message: "min", severity: "error" }],
+      lastValue: "bad",
     });
     expect(executeMin).toHaveBeenCalledTimes(1);
 
@@ -255,6 +280,7 @@ describe("withSelfHealingRetry", () => {
       reason: "Validation failed after 5 attempts.",
       attempts: 5,
       lastIssues: [{ code: "ERR_MAX", message: "max", severity: "error" }],
+      lastValue: "bad",
     });
     expect(executeMax).toHaveBeenCalledTimes(5);
   });

@@ -21,6 +21,7 @@ export type FinalRunReport = {
 
 export type GenerateFinalRunReportPatchSource =
   | "llm_patch"
+  | "llm_patch_recovered"
   | "deterministic_fallback"
   | "no_patch";
 
@@ -228,6 +229,11 @@ export function buildDeterministicFinalRunReport(
     changesMade.push(
       `Edited ${input.patchScope.changedFileCount} file(s): +${input.patchScope.totalAddedLines} / -${input.patchScope.totalRemovedLines} lines (total changed lines: ${input.patchScope.totalChangedLines}).`
     );
+    if (input.patchSource === "llm_patch_recovered") {
+      changesMade.push(
+        "Strict patch parsing failed initially; Zone recovered a single validated find/replace from the model output."
+      );
+    }
     if (input.patchSource === "deterministic_fallback") {
       changesMade.push("A deterministic fallback patch was used after LLM patch generation did not apply cleanly.");
     }

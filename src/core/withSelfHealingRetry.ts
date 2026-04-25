@@ -23,6 +23,8 @@ export type RetryResult<T> =
       reason: string;
       attempts: number;
       lastIssues: RetryFeedback["issues"];
+      /** Last value returned by execute() before validation failed (best-effort). */
+      lastValue?: T;
     };
 
 type RetryIssue = RetryFeedback["issues"][number];
@@ -132,12 +134,14 @@ export async function withSelfHealingRetry<T>(options: {
   const originalPrompt = options.prompt;
   let currentPrompt = originalPrompt;
   let lastIssues: RetryIssue[] = [];
+  let lastValue: T | undefined;
   let previousFailureSignature = "";
   let repeatedFailureCount = 0;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const value = await options.execute(currentPrompt);
+      lastValue = value;
       const issues = options.validate(value);
 
       if (!hasBlockingIssues(issues)) {
@@ -157,6 +161,7 @@ export async function withSelfHealingRetry<T>(options: {
           reason: `Validation failed after ${attempt} attempts.`,
           attempts: attempt,
           lastIssues,
+          ...(lastValue !== undefined ? { lastValue } : {}),
         };
       }
 
@@ -183,6 +188,7 @@ export async function withSelfHealingRetry<T>(options: {
           reason: `Execution failed after ${attempt} attempts.`,
           attempts: attempt,
           lastIssues,
+          ...(lastValue !== undefined ? { lastValue } : {}),
         };
       }
 
@@ -201,5 +207,6 @@ export async function withSelfHealingRetry<T>(options: {
     reason: `Validation failed after ${maxAttempts} attempts.`,
     attempts: maxAttempts,
     lastIssues,
+    ...(lastValue !== undefined ? { lastValue } : {}),
   };
 }
