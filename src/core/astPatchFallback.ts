@@ -91,6 +91,16 @@ function containsUploadOrIsImageFileHints(task: string, failedRawPatch?: string)
   return s.includes("isimagefile") || s.includes("upload");
 }
 
+function isSafeGuardInsertion(code: string): boolean {
+  const lower = String(code || "").toLowerCase();
+
+  return (
+    lower.includes("if (!") &&
+    (lower.includes("return") || lower.includes("return null")) &&
+    String(code || "").split("\n").length <= 6
+  );
+}
+
 function hasUploadGuardAlready(fn: t.FunctionDeclaration): boolean {
   const body = fn.body?.body ?? [];
   const first = body[0];
@@ -139,6 +149,7 @@ export function tryAstPatchFallback(input: AstPatchFallbackInput): AstPatchFallb
 
   const task = String(input.task || "");
   const failedRawPatch = input.failedRawPatch;
+  const filePath = input.filePath;
 
   const supportsA =
     taskLooksLikeNullGuard(task, failedRawPatch) &&
@@ -174,6 +185,7 @@ export function tryAstPatchFallback(input: AstPatchFallbackInput): AstPatchFallb
     if (!fn) return { ok: false, reason: "target_not_found" };
     const ok = insertUploadNullGuard(fn);
     if (!ok) return { ok: false, reason: "no_change" };
+    console.log("[zone-ast-safe-guard-insert]", JSON.stringify({ filePath }));
     changed = true;
     summary = "Added `if (!upload) return false;` guard to isImageFile(upload).";
   } else if (supportsB) {
@@ -205,7 +217,10 @@ export function tryAstPatchFallback(input: AstPatchFallbackInput): AstPatchFallb
 
   const changedLinesEstimate = estimateChangedLines(input.originalContent, generated);
   if (changedLinesEstimate > 20) {
-    return { ok: false, reason: "unsafe_change" };
+    const insertedGuardCode = supportsA ? "if (!upload) return false;" : "";
+    if (!supportsA || !isSafeGuardInsertion(insertedGuardCode)) {
+      return { ok: false, reason: "unsafe_change" };
+    }
   }
 
   if (changedLinesEstimate === 0) {
