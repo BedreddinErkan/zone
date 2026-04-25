@@ -40,6 +40,12 @@ function looksLikeToolingFailure(message) {
         m.includes("yarn: command not found") ||
         m.includes("npm err! code enoent"));
 }
+function trimOutput(s, maxChars = 6000) {
+    const t = String(s || "");
+    if (t.length <= maxChars)
+        return t;
+    return t.slice(-maxChars);
+}
 async function runRuntimeVerification(input) {
     if (!input.command) {
         return {
@@ -75,6 +81,8 @@ async function runRuntimeVerification(input) {
                 attempted: true,
                 command: input.command.command,
                 status: "timeout",
+                stdout: trimOutput(stdout),
+                stderr: trimOutput(stderr),
                 summary: `Runtime verification timed out after ${timeoutMs / 1000}s.`,
             });
         }, timeoutMs);
@@ -93,6 +101,8 @@ async function runRuntimeVerification(input) {
                 attempted: false,
                 command: input.command.command,
                 status: "skipped",
+                stdout: trimOutput(stdout),
+                stderr: trimOutput(stderr),
                 summary: `Runtime verification could not start: ${err.message}`,
             });
         });
@@ -106,6 +116,8 @@ async function runRuntimeVerification(input) {
                 command: input.command.command,
                 status: code === 0 ? "passed" : "failed",
                 ...(typeof code === "number" ? { exitCode: code } : {}),
+                stdout: trimOutput(stdout),
+                stderr: trimOutput(stderr),
                 summary: summarizeOutput(stdout, stderr),
             });
         });

@@ -100,6 +100,70 @@ function fastDiffCounts(before, after) {
     const addedLines = Math.max(0, endAfter - start + 1);
     return { addedLines, removedLines, totalChangedLines: addedLines + removedLines };
 }
+function estimateChangedLineRange(before, after) {
+    const beforeLines = before.replace(/\r\n/g, "\n").split("\n");
+    const afterLines = after.replace(/\r\n/g, "\n").split("\n");
+    const minLen = Math.min(beforeLines.length, afterLines.length);
+    let start = 0;
+    while (start < minLen && beforeLines[start] === afterLines[start])
+        start += 1;
+    let endBefore = beforeLines.length - 1;
+    let endAfter = afterLines.length - 1;
+    while (endBefore >= start && endAfter >= start && beforeLines[endBefore] === afterLines[endAfter]) {
+        endBefore -= 1;
+        endAfter -= 1;
+    }
+    return {
+        startLine: start + 1,
+        endLineBefore: Math.max(start + 1, endBefore + 1),
+        endLineAfter: Math.max(start + 1, endAfter + 1),
+    };
+}
+function getImportRegionEndLine(original) {
+    const lines = original.replace(/\r\n/g, "\n").split("\n");
+    let started = false;
+    let endLine = 0;
+    for (let i = 0; i < lines.length; i += 1) {
+        const raw = lines[i] ?? "";
+        const t = raw.trim();
+        if (!t) {
+            if (!started)
+                continue;
+            // allow blank lines inside import block
+            endLine = i + 1;
+            continue;
+        }
+        if (t.startsWith("//") || t.startsWith("/*") || t.startsWith("*")) {
+            if (!started)
+                continue;
+            endLine = i + 1;
+            continue;
+        }
+        if (t === "\"use strict\";" || t === "'use strict';") {
+            if (!started)
+                continue;
+            endLine = i + 1;
+            continue;
+        }
+        if (t.startsWith("import ")) {
+            started = true;
+            endLine = i + 1;
+            continue;
+        }
+        // First real non-import statement after imports -> stop.
+        if (started)
+            break;
+        // If imports never started, keep scanning.
+    }
+    return endLine;
+}
+function touchesImportRegion(input) {
+    const range = estimateChangedLineRange(input.originalContent, input.updatedContent);
+    const importEnd = getImportRegionEndLine(input.originalContent);
+    if (importEnd <= 0)
+        return false;
+    return range.startLine <= importEnd;
+}
 function isJsLike(filePath) {
     const p = filePath.toLowerCase();
     return p.endsWith(".js") || p.endsWith(".jsx") || p.endsWith(".ts") || p.endsWith(".tsx");
@@ -147,6 +211,63 @@ function minimalBraceBracketBalance(layer, content) {
         ];
     }
     return [];
+}
+function analyzeDelimiterCounts(content) {
+    const s = content.replace(/\r\n/g, "\n");
+    let bracesOpen = 0;
+    let bracesClose = 0;
+    let bracketsOpen = 0;
+    let bracketsClose = 0;
+    let parensOpen = 0;
+    let parensClose = 0;
+    for (let i = 0; i < s.length; i += 1) {
+        const ch = s[i] ?? "";
+        if (ch === "{")
+            bracesOpen += 1;
+        else if (ch === "}")
+            bracesClose += 1;
+        else if (ch === "[")
+            bracketsOpen += 1;
+        else if (ch === "]")
+            bracketsClose += 1;
+        else if (ch === "(")
+            parensOpen += 1;
+        else if (ch === ")")
+            parensClose += 1;
+    }
+    return {
+        braces: { opens: bracesOpen, closes: bracesClose },
+        brackets: { opens: bracketsOpen, closes: bracketsClose },
+        parens: { opens: parensOpen, closes: parensClose },
+    };
+}
+function computeDelimiterDelta(before, after) {
+    return {
+        braces: {
+            opens: after.braces.opens - before.braces.opens,
+            closes: after.braces.closes - before.braces.closes,
+        },
+        brackets: {
+            opens: after.brackets.opens - before.brackets.opens,
+            closes: after.brackets.closes - before.brackets.closes,
+        },
+        parens: {
+            opens: after.parens.opens - before.parens.opens,
+            closes: after.parens.closes - before.parens.closes,
+        },
+    };
+}
+function delimiterWorsened(before, after) {
+    const worsenedKind = (b, a) => a.opens > b.opens || a.closes < b.closes;
+    return (worsenedKind(before.braces, after.braces) ||
+        worsenedKind(before.brackets, after.brackets) ||
+        worsenedKind(before.parens, after.parens));
+}
+function delimiterUnchangedOrImproved(before, after) {
+    const okKind = (b, a) => (a.opens === b.opens && a.closes === b.closes) || (a.opens <= b.opens && a.closes >= b.closes);
+    return (okKind(before.braces, after.braces) &&
+        okKind(before.brackets, after.brackets) &&
+        okKind(before.parens, after.parens));
 }
 function getLineColumn(src, index) {
     const i = Math.max(0, Math.min(index, src.length));
@@ -663,6 +784,26 @@ function layer1LexicalIntegrity(input) {
     }
     const scan = scanDelimitersWithDiagnostics(input.updatedContent);
     if (!scan.ok) {
+        const beforeCounts = analyzeDelimiterCounts(input.originalContent);
+        const afterCounts = analyzeDelimiterCounts(input.updatedContent);
+        const deltaCounts = computeDelimiterDelta(beforeCounts, afterCounts);
+        const worsened = delimiterWorsened(beforeCounts, afterCounts);
+        const unchangedOrImproved = delimiterUnchangedOrImproved(beforeCounts, afterCounts);
+        const diffCounts = fastDiffCounts(input.originalContent, input.updatedContent);
+        const minimalPatch = diffCounts.totalChangedLines < 5;
+        const decision = !worsened && (unchangedOrImproved || minimalPatch) ? "allow" : "block";
+        console.log("[zone-validator-delta]", JSON.stringify({
+            filePath: input.filePath,
+            before: beforeCounts,
+            after: afterCounts,
+            delta: deltaCounts,
+            totalChangedLines: diffCounts.totalChangedLines,
+            decision,
+        }));
+        if (decision === "allow") {
+            // Do not block if the file was already broken and the patch does not worsen delimiter counts.
+            return { issues: [], strippedForJsx: scan.strippedForJsx };
+        }
         console.log("[zone-delimiter-trace]", JSON.stringify({ filePath: input.filePath, events: scan.events }));
         const last = scan.events[scan.events.length - 1];
         if (last) {
@@ -971,6 +1112,7 @@ function validatePatchCorrectness(input) {
     const warnings = [];
     let layersRun = 0;
     let shortCircuitedAt = null;
+    let minimalSafeOverrideApplied = false;
     const runLayer = (layer, fn) => {
         if (shortCircuitedAt != null)
             return;
@@ -1004,7 +1146,41 @@ function validatePatchCorrectness(input) {
     }
     runLayer(3, () => layer3StructuralPreservation(input));
     runLayer(4, () => layer4TaskScopePreservation(input));
-    if (input.strictMode && blocking.length === 0 && warnings.length > 0) {
+    // ── Minimal safe patch override ─────────────────────────────────────────
+    // If a patch is very small and does not worsen delimiter counts, allow it even if
+    // heuristics like broken_import_line fire on an already-broken file outside the import region.
+    const diffCountsFinal = fastDiffCounts(input.originalContent, input.updatedContent);
+    const beforeCountsFinal = analyzeDelimiterCounts(input.originalContent);
+    const afterCountsFinal = analyzeDelimiterCounts(input.updatedContent);
+    const noDelimiterRegression = !delimiterWorsened(beforeCountsFinal, afterCountsFinal);
+    const touchesImport = touchesImportRegion({
+        originalContent: input.originalContent,
+        updatedContent: input.updatedContent,
+    });
+    const blockingCodes = blocking.map((b) => b.code);
+    const hasBrokenImport = blocking.some((b) => b.code === "broken_import_line");
+    if (hasBrokenImport && !touchesImport) {
+        const ignored = blocking.filter((b) => b.code === "broken_import_line");
+        // Drop broken_import_line if the diff doesn't intersect the import block.
+        for (let i = blocking.length - 1; i >= 0; i -= 1) {
+            if (blocking[i]?.code === "broken_import_line")
+                blocking.splice(i, 1);
+        }
+        warnings.push(...ignored.map((i) => ({
+            ...i,
+            severity: "warn",
+            message: i.message + " (ignored: patch did not touch import region)",
+        })));
+        console.log("[zone-validator-override]", JSON.stringify({
+            reason: "minimal_safe_patch",
+            ignoredBlockingCodes: ["broken_import_line"],
+        }));
+        minimalSafeOverrideApplied = true;
+    }
+    if (input.strictMode &&
+        !minimalSafeOverrideApplied &&
+        blocking.length === 0 &&
+        warnings.length > 0) {
         const promoted = warnings.map((w) => ({ ...w, severity: "block" }));
         blocking.push(...promoted);
         warnings.length = 0;

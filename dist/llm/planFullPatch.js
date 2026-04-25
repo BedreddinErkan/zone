@@ -7,6 +7,7 @@ const withSelfHealingRetry_js_1 = require("../core/withSelfHealingRetry.js");
 const fullPatchPrompt_js_1 = require("../prompts/fullPatchPrompt.js");
 const executionPlan_js_1 = require("./executionPlan.js");
 const developerPatchParse_js_1 = require("../core/developerPatchParse.js");
+const patchConversion_js_1 = require("../core/patchConversion.js");
 const fullContentSchema = zod_1.z.object({
     filePath: zod_1.z.string(),
     fullContent: zod_1.z.string(),
@@ -91,6 +92,7 @@ function buildApplyPatchTool() {
                 },
             },
             required: ["patch"],
+            additionalProperties: false,
         },
     };
 }
@@ -123,7 +125,11 @@ function extractPatchFromToolCall(response) {
     }
 }
 function buildFindReplaceFormatRetryPrompt(feedback) {
-    const needsHardPatchCorrection = feedback.issues.some((issue) => issue.code === "INVALID_PATCH_FORMAT" || issue.code === "EMPTY_PATCH");
+    const needsHardPatchCorrection = feedback.issues.some((issue) => issue.code === "INVALID_PATCH_FORMAT" ||
+        issue.code === "EMPTY_PATCH" ||
+        issue.code === "NOOP_DETECTED");
+    const hadEmptyPatch = feedback.issues.some((issue) => issue.code === "EMPTY_PATCH");
+    const hadNoop = feedback.issues.some((issue) => issue.code === "NOOP_DETECTED");
     if (needsHardPatchCorrection) {
         console.log("[zone-patch-retry-attempt]", feedback.attempt);
         console.warn("[zone-patch-retry] invalid format, retrying...", {
@@ -134,6 +140,30 @@ function buildFindReplaceFormatRetryPrompt(feedback) {
         return (0, withSelfHealingRetry_js_1.buildDefaultFeedbackPrompt)(feedback);
     }
     const hardCorrection = [
+        ...(hadNoop
+            ? [
+                "Your previous response contained NO_CHANGE_NEEDED.",
+                "",
+                "DO NOT return NO_CHANGE_NEEDED.",
+                "There IS a bug in this file.",
+                "You MUST produce a minimal patch.",
+                "",
+                "FORCED PATCH STRATEGY:",
+                "- Remove ANY suspicious or stray characters",
+                "- Fix JSX structure if needed",
+                "- Prefer the smallest possible change",
+                "- You must output a patch",
+                "",
+            ]
+            : []),
+        ...(hadEmptyPatch
+            ? [
+                "Your previous response contained NO usable patch text (empty output or missing tool payload).",
+                "",
+                "Return only a find/replace patch. No explanation.",
+                "",
+            ]
+            : []),
         "Your previous response was INVALID.",
         "",
         "You MUST return ONLY a patch.",
@@ -173,8 +203,6 @@ function buildFindReplaceFormatRetryPrompt(feedback) {
         "ONLY OUTPUT:",
         "",
         "- A valid patch",
-        "OR",
-        "- NO_CHANGE_NEEDED",
         "",
         "Fix your response now.",
     ].join("\n");
@@ -270,6 +298,8 @@ function stripJsonFences(raw) {
 async function planFullPatchWithLlm(input) {
     const client = (0, openaiClient_js_1.createOpenAIClient)();
     const model = (0, openaiClient_js_1.getModelName)("high");
+    let openAiTransportErrorDetails = null;
+    let lastSuccessfulResponsesCreateResult = null;
     const outputMode = selectFullPatchOutputMode({
         outputMode: input.outputMode,
         task: input.task,
@@ -298,14 +328,26 @@ async function planFullPatchWithLlm(input) {
         const strictSystemInstruction = buildStrictPatchSystemInstruction();
         const applyPatchTool = buildApplyPatchTool();
         const applyPatchToolChoice = buildApplyPatchToolChoice();
+        let lastRawPatchResponse = "";
+        let findReplaceAttemptIndex = 0;
+        let lastEmptyModelDetailsLine = null;
+        const resolveEmptyModelDetailsLine = () => lastEmptyModelDetailsLine ??
+            (0, openaiClient_js_1.buildEmptyModelResponseDetailsLine)({
+                response: lastSuccessfulResponsesCreateResult,
+                extraction: { ok: false, reason: "no_nonempty_raw_recorded_in_execute" },
+                linearReasonWhenExtractionOk: "no_raw_output",
+            });
         const retryResult = await (0, withSelfHealingRetry_js_1.withSelfHealingRetry)({
             maxAttempts: 3,
             prompt: findReplacePrompt,
             execute: async (currentPrompt) => {
+                findReplaceAttemptIndex += 1;
+                const maxOutputTokens = [2000, 4096, 8192][Math.min(findReplaceAttemptIndex - 1, 2)] ?? 8192;
                 console.log("[zone-patch-request] sending strict patch system instruction", JSON.stringify({
                     filePath: input.filePath,
-                    max_output_tokens: 2000,
+                    max_output_tokens: maxOutputTokens,
                     temperature: 0,
+                    attempt: findReplaceAttemptIndex,
                 }));
                 const responseInput = [
                     {
@@ -319,19 +361,99 @@ async function planFullPatchWithLlm(input) {
                         content: currentPrompt,
                     },
                 ];
-                const response = await client.responses.create({
+                const callStartedAt = Date.now();
+                console.log("[zone-openai-call-start]", JSON.stringify({
+                    filePath: input.filePath,
+                    attempt: findReplaceAttemptIndex,
                     model,
-                    temperature: 0,
-                    max_output_tokens: 2000,
-                    tools: [applyPatchTool],
-                    tool_choice: applyPatchToolChoice,
-                    input: responseInput,
+                    max_output_tokens: maxOutputTokens,
+                }));
+                let response;
+                try {
+                    response = await client.responses.create({
+                        model,
+                        temperature: 0,
+                        max_output_tokens: maxOutputTokens,
+                        tools: [applyPatchTool],
+                        tool_choice: applyPatchToolChoice,
+                        input: responseInput,
+                    });
+                }
+                catch (err) {
+                    const elapsedMs = Date.now() - callStartedAt;
+                    const p = (0, openaiClient_js_1.formatOpenAiThrownErrorPayload)(err);
+                    openAiTransportErrorDetails = JSON.stringify({ ...p, elapsedMs });
+                    console.log("[zone-openai-call-error]", JSON.stringify({
+                        filePath: input.filePath,
+                        attempt: findReplaceAttemptIndex,
+                        elapsedMs,
+                        name: p.name,
+                        message: p.message,
+                        status: p.status,
+                        code: p.code,
+                        type: p.type,
+                    }));
+                    throw err;
+                }
+                const elapsedMs = Date.now() - callStartedAt;
+                openAiTransportErrorDetails = null;
+                lastSuccessfulResponsesCreateResult = response;
+                console.log("[zone-openai-call-success]", JSON.stringify({
+                    filePath: input.filePath,
+                    attempt: findReplaceAttemptIndex,
+                    elapsedMs,
+                    responseKeys: response && typeof response === "object"
+                        ? Object.keys(response)
+                        : [],
+                }));
+                (0, openaiClient_js_1.logOpenAiResponseDebug)(response, {
+                    filePath: input.filePath,
+                    attempt: findReplaceAttemptIndex,
                 });
+                const extraction = (0, openaiClient_js_1.extractResponsesApiOutputText)(response);
                 const toolPatch = extractPatchFromToolCall(response);
-                if (toolPatch) {
+                const fromTool = toolPatch != null ? String(toolPatch).trim() : "";
+                const fromExtract = extraction.ok ? extraction.text.trim() : "";
+                const rawForAttempt = fromTool || fromExtract;
+                console.log("[zone-patch-raw-response-debug]", JSON.stringify({
+                    filePath: input.filePath,
+                    attempt: findReplaceAttemptIndex,
+                    rawLength: rawForAttempt.length,
+                    rawPreview: rawForAttempt.slice(0, 240),
+                }));
+                if (rawForAttempt.length > 0) {
+                    lastRawPatchResponse = rawForAttempt;
+                }
+                else {
+                    const detailsLine = (0, openaiClient_js_1.buildEmptyModelResponseDetailsLine)({
+                        response,
+                        extraction,
+                        linearReasonWhenExtractionOk: "tool_and_extractable_text_empty",
+                    });
+                    lastEmptyModelDetailsLine = detailsLine;
+                    let emptyLog;
+                    try {
+                        emptyLog = {
+                            attempt: findReplaceAttemptIndex,
+                            ...JSON.parse(detailsLine),
+                        };
+                    }
+                    catch {
+                        emptyLog = {
+                            attempt: findReplaceAttemptIndex,
+                            detailsLine,
+                        };
+                    }
+                    console.log("[zone-full-patch-empty-response]", JSON.stringify(emptyLog));
+                }
+                if (fromTool) {
                     console.log("[zone-patch-tool] tool call received");
-                    console.log("[zone-patch-tool] patch length:", toolPatch.length);
-                    return toolPatch.trim();
+                    console.log("[zone-patch-tool] patch length:", fromTool.length);
+                    return fromTool;
+                }
+                if (fromExtract) {
+                    console.warn("[zone-patch-tool] No structured tool patch; using extracted response text for validation");
+                    return fromExtract;
                 }
                 console.error("[zone-patch-tool] No structured patch returned");
                 return "";
@@ -346,7 +468,23 @@ async function planFullPatchWithLlm(input) {
                     });
                     return issues;
                 }
-                if (raw.trim() === "NO_CHANGE_NEEDED") {
+                if (raw.includes("NO_CHANGE_NEEDED")) {
+                    console.log("[zone-noop-detected]", JSON.stringify({
+                        filePath: input.filePath,
+                        attempt: findReplaceAttemptIndex,
+                        rawPreview: raw.slice(0, 120),
+                    }));
+                    if (findReplaceAttemptIndex < 2) {
+                        console.log("[zone-noop-retry]", JSON.stringify({ filePath: input.filePath, attempt: findReplaceAttemptIndex }));
+                        issues.push({
+                            code: "NOOP_DETECTED",
+                            message: "Model returned NO_CHANGE_NEEDED, but a patch is required. Retry with forced patch instructions.",
+                            severity: "error",
+                        });
+                        return issues;
+                    }
+                    console.log("[zone-noop-final]", JSON.stringify({ filePath: input.filePath, attempt: findReplaceAttemptIndex }));
+                    // After a forced retry, accept NO_CHANGE_NEEDED so the caller can treat it as no-op.
                     return issues;
                 }
                 if (!isValidPatchResponse(raw)) {
@@ -369,24 +507,95 @@ async function planFullPatchWithLlm(input) {
             },
             buildFeedbackPrompt: buildFindReplaceFormatRetryPrompt,
         });
+        const originalForRecovery = input.fullOriginalFileContent ?? input.fileContent;
         if (!retryResult.ok) {
             console.error("[zone-patch] model failed to produce valid patch after retries");
+            if (openAiTransportErrorDetails !== null) {
+                return {
+                    mode: "openai_call_error",
+                    filePath: input.filePath,
+                    summary: "OpenAI API call failed during large-file patch generation.",
+                    warnings: [`[openai_call_error] ${openAiTransportErrorDetails}`],
+                    normalizedFailureReason: "openai_call_error",
+                    openAiCallDetails: openAiTransportErrorDetails,
+                };
+            }
+            const rawAttempt = lastRawPatchResponse ||
+                (typeof retryResult.lastValue === "string" ? retryResult.lastValue : "");
+            if (rawAttempt.length === 0) {
+                const emptyDetails = resolveEmptyModelDetailsLine();
+                return {
+                    mode: "empty_model_response",
+                    filePath: input.filePath,
+                    summary: "Large-file patch: model returned no usable output text.",
+                    warnings: [`[empty_model_response] ${emptyDetails}`],
+                    normalizedFailureReason: "empty_model_response",
+                    emptyModelDetails: emptyDetails,
+                };
+            }
+            const recovered = (0, patchConversion_js_1.tryRecoverDeveloperPatchFromModelOutput)({
+                requestedFilePath: input.filePath,
+                originalFileContent: originalForRecovery,
+                rawModelText: rawAttempt,
+                task: input.task,
+            });
+            if (recovered.ok) {
+                return {
+                    mode: "patch",
+                    filePath: input.filePath,
+                    patchText: recovered.strictPatchText,
+                    summary: "Large-file targeted patch generated (recovered from non-strict model output).",
+                    warnings: [],
+                    patchRecovered: true,
+                };
+            }
             return {
                 mode: "invalid_patch_format",
                 filePath: input.filePath,
                 summary: "Large-file patch format validation failed.",
                 warnings: ["[invalid_patch_format] Model failed after retries"],
+                lastNonEmptyRawLength: rawAttempt.length,
             };
         }
         const rawText = retryResult.value;
         console.log("[zone-patch-debug] raw model output:", rawText.slice(0, 500));
         console.log("[zone-patch-debug-full]", rawText.slice(0, 500));
         if (!isValidPatchResponse(rawText)) {
+            const recoveredRaw = (lastRawPatchResponse || rawText).trim();
+            if (recoveredRaw.length === 0) {
+                const emptyDetails = resolveEmptyModelDetailsLine();
+                return {
+                    mode: "empty_model_response",
+                    filePath: input.filePath,
+                    summary: "Large-file patch: model returned no usable output text.",
+                    warnings: [`[empty_model_response] ${emptyDetails}`],
+                    normalizedFailureReason: "empty_model_response",
+                    emptyModelDetails: emptyDetails,
+                };
+            }
+            const recovered = (0, patchConversion_js_1.tryRecoverDeveloperPatchFromModelOutput)({
+                requestedFilePath: input.filePath,
+                originalFileContent: originalForRecovery,
+                rawModelText: lastRawPatchResponse || rawText,
+                task: input.task,
+            });
+            if (recovered.ok) {
+                return {
+                    mode: "patch",
+                    filePath: input.filePath,
+                    patchText: recovered.strictPatchText,
+                    summary: "Large-file targeted patch generated (recovered from non-strict model output).",
+                    warnings: [],
+                    patchRecovered: true,
+                };
+            }
+            const rawForRecoveryMeta = lastRawPatchResponse || rawText;
             return {
                 mode: "invalid_patch_format",
                 filePath: input.filePath,
                 summary: "Large-file patch missing required structure.",
                 warnings: ["[invalid_patch_format] Model failed after retries"],
+                lastNonEmptyRawLength: rawForRecoveryMeta.length,
             };
         }
         return {
@@ -397,15 +606,63 @@ async function planFullPatchWithLlm(input) {
             warnings: [],
         };
     }
+    let fullContentAttemptIndex = 0;
     const retryResult = await (0, withSelfHealingRetry_js_1.withSelfHealingRetry)({
         maxAttempts: 3,
         prompt,
         execute: async (currentPrompt) => {
-            const response = await client.responses.create({
+            fullContentAttemptIndex += 1;
+            const callStartedAt = Date.now();
+            console.log("[zone-openai-call-start]", JSON.stringify({
+                filePath: input.filePath,
+                attempt: fullContentAttemptIndex,
                 model,
-                input: currentPrompt,
+                max_output_tokens: null,
+            }));
+            let response;
+            try {
+                response = await client.responses.create({
+                    model,
+                    input: currentPrompt,
+                });
+            }
+            catch (err) {
+                const elapsedMs = Date.now() - callStartedAt;
+                const p = (0, openaiClient_js_1.formatOpenAiThrownErrorPayload)(err);
+                openAiTransportErrorDetails = JSON.stringify({ ...p, elapsedMs });
+                console.log("[zone-openai-call-error]", JSON.stringify({
+                    filePath: input.filePath,
+                    attempt: fullContentAttemptIndex,
+                    elapsedMs,
+                    name: p.name,
+                    message: p.message,
+                    status: p.status,
+                    code: p.code,
+                    type: p.type,
+                }));
+                throw err;
+            }
+            const elapsedMs = Date.now() - callStartedAt;
+            openAiTransportErrorDetails = null;
+            lastSuccessfulResponsesCreateResult = response;
+            console.log("[zone-openai-call-success]", JSON.stringify({
+                filePath: input.filePath,
+                attempt: fullContentAttemptIndex,
+                elapsedMs,
+                responseKeys: response && typeof response === "object"
+                    ? Object.keys(response)
+                    : [],
+            }));
+            (0, openaiClient_js_1.logOpenAiResponseDebug)(response, {
+                filePath: input.filePath,
+                attempt: fullContentAttemptIndex,
+                mode: "full_content_json",
             });
-            const rawText = response.output_text ?? "";
+            const extraction = (0, openaiClient_js_1.extractResponsesApiOutputText)(response);
+            const r = response;
+            const rawText = extraction.ok
+                ? extraction.text
+                : (r.output_text ?? "");
             const jsonText = extractJson(rawText);
             return JSON.parse(stripJsonFences(jsonText));
         },
@@ -442,6 +699,9 @@ async function planFullPatchWithLlm(input) {
         buildFeedbackPrompt: withSelfHealingRetry_js_1.buildDefaultFeedbackPrompt,
     });
     if (!retryResult.ok) {
+        if (openAiTransportErrorDetails !== null) {
+            throw new Error(`planFullPatchWithLlm: openai_call_error after ${retryResult.attempts} attempt(s): ${openAiTransportErrorDetails}`);
+        }
         throw new Error(`planFullPatchWithLlm failed after ${retryResult.attempts} attempt(s): ${retryResult.reason}`);
     }
     const validated = fullContentSchema.parse(retryResult.value);

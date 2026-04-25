@@ -22,6 +22,7 @@ export type FinalRunReport = {
 export type GenerateFinalRunReportPatchSource =
   | "llm_patch"
   | "llm_patch_recovered"
+  | "ast_fallback"
   | "deterministic_fallback"
   | "no_patch";
 
@@ -232,6 +233,11 @@ export function buildDeterministicFinalRunReport(
     if (input.patchSource === "llm_patch_recovered") {
       changesMade.push(
         "Strict patch parsing failed initially; Zone recovered a single validated find/replace from the model output."
+      );
+    }
+    if (input.patchSource === "ast_fallback") {
+      changesMade.push(
+        "Text patch matching failed; Zone used a safe AST-based fallback for a small, localized JavaScript/JSX repair."
       );
     }
     if (input.patchSource === "deterministic_fallback") {

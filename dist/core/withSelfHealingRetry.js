@@ -97,11 +97,13 @@ async function withSelfHealingRetry(options) {
     const originalPrompt = options.prompt;
     let currentPrompt = originalPrompt;
     let lastIssues = [];
+    let lastValue;
     let previousFailureSignature = "";
     let repeatedFailureCount = 0;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         try {
             const value = await options.execute(currentPrompt);
+            lastValue = value;
             const issues = options.validate(value);
             if (!hasBlockingIssues(issues)) {
                 return { ok: true, value, attempts: attempt };
@@ -119,6 +121,7 @@ async function withSelfHealingRetry(options) {
                     reason: `Validation failed after ${attempt} attempts.`,
                     attempts: attempt,
                     lastIssues,
+                    ...(lastValue !== undefined ? { lastValue } : {}),
                 };
             }
             currentPrompt = options.buildFeedbackPrompt({
@@ -144,6 +147,7 @@ async function withSelfHealingRetry(options) {
                     reason: `Execution failed after ${attempt} attempts.`,
                     attempts: attempt,
                     lastIssues,
+                    ...(lastValue !== undefined ? { lastValue } : {}),
                 };
             }
             currentPrompt = options.buildFeedbackPrompt({
@@ -160,6 +164,7 @@ async function withSelfHealingRetry(options) {
         reason: `Validation failed after ${maxAttempts} attempts.`,
         attempts: maxAttempts,
         lastIssues,
+        ...(lastValue !== undefined ? { lastValue } : {}),
     };
 }
 //# sourceMappingURL=withSelfHealingRetry.js.map

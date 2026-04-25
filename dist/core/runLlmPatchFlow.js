@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.__testOnly_buildDeterministicFallbackPatch = void 0;
+exports.__testOnly_buildDeterministicFallbackPatch = exports.__testOnly_applyDeveloperPatchText = void 0;
 exports.detectMicroEditIntent = detectMicroEditIntent;
 exports.detectUiMappingRiskIntent = detectUiMappingRiskIntent;
 exports.isIrrelevantDeveloperContextPath = isIrrelevantDeveloperContextPath;
@@ -27,12 +27,14 @@ const readProjectFiles_js_1 = require("../repo/readProjectFiles.js");
 const planFeature_js_1 = require("../llm/planFeature.js");
 const planPatchPreview_js_1 = require("../llm/planPatchPreview.js");
 const planFullPatch_js_1 = require("../llm/planFullPatch.js");
+const patchConversion_js_1 = require("./patchConversion.js");
 const executionPlan_js_1 = require("../llm/executionPlan.js");
 const computeRiskScore_js_1 = require("./computeRiskScore.js");
 const evaluatePlanAlignment_js_1 = require("./evaluatePlanAlignment.js");
 const verifyPatch_js_1 = require("./verifyPatch.js");
 const detectVerificationCommand_js_1 = require("./detectVerificationCommand.js");
 const runRuntimeVerification_js_1 = require("./runRuntimeVerification.js");
+const openaiClient_js_1 = require("../llm/openaiClient.js");
 const buildRetryGuidanceFromFailure_js_1 = require("./buildRetryGuidanceFromFailure.js");
 const intentMismatchDetector_js_1 = require("../engine/intentMismatchDetector.js");
 const designSystemSignals_js_1 = require("../engine/designSystemSignals.js");
@@ -42,6 +44,7 @@ const microEditProtection_js_1 = require("../engine/microEditProtection.js");
 const patchCorrectnessValidator_js_1 = require("../engine/patchCorrectnessValidator.js");
 const developerPatchParse_js_1 = require("./developerPatchParse.js");
 const taskIntentParser_js_1 = require("./taskIntentParser.js");
+const astPatchFallback_js_1 = require("./astPatchFallback.js");
 const zoneApiPerf_js_1 = require("../api/zoneApiPerf.js");
 const agentLifecycleEvents_js_1 = require("./agentLifecycleEvents.js");
 const generateFinalRunReport_js_1 = require("./generateFinalRunReport.js");
@@ -1758,6 +1761,71 @@ function scoreLineSimilarity(a, b) {
     const score = (2 * intersection) / (leftTrigrams.length + rightTrigrams.length);
     return Math.max(0, score);
 }
+function countOccurrences(haystack, needle) {
+    if (!needle)
+        return 0;
+    let count = 0;
+    let idx = 0;
+    while (idx <= haystack.length) {
+        const next = haystack.indexOf(needle, idx);
+        if (next === -1)
+            break;
+        count += 1;
+        idx = next + needle.length;
+    }
+    return count;
+}
+function detectPrimaryLineEnding(content) {
+    return /\r\n/.test(content) ? "\r\n" : "\n";
+}
+function convertReplacementLineEndings(replace, lineEnding) {
+    if (lineEnding === "\n") {
+        return replace.replace(/\r\n/g, "\n");
+    }
+    // Convert LF-only newlines to CRLF; preserve existing CRLF.
+    return replace.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
+}
+function buildLfNormalizedIndexMap(raw) {
+    const normToRaw = [];
+    let normalized = "";
+    let normPos = 0;
+    for (let i = 0; i < raw.length;) {
+        normToRaw[normPos] = i;
+        const ch = raw[i] ?? "";
+        if (ch === "\r" && raw[i + 1] === "\n") {
+            normalized += "\n";
+            normPos += 1;
+            i += 2;
+            continue;
+        }
+        normalized += ch;
+        normPos += 1;
+        i += 1;
+    }
+    normToRaw[normPos] = raw.length;
+    return { normalized, normToRaw };
+}
+function countChangedLinesLocalized(before, after) {
+    const diff = computeFileDiff(before, after);
+    const added = diff.filter((d) => d.type === "added").length;
+    const removed = diff.filter((d) => d.type === "removed").length;
+    return added + removed;
+}
+function containsLoneLf(content) {
+    // Detect '\n' that is not part of '\r\n'
+    for (let i = 0; i < content.length; i += 1) {
+        if (content[i] === "\n" && content[i - 1] !== "\r")
+            return true;
+    }
+    return false;
+}
+function containsPatchProtocolMarkers(content) {
+    return (content.includes("--- FIND ---") ||
+        content.includes("--- REPLACE ---") ||
+        content.includes("--- END ---") ||
+        content.includes("--- FILE:") ||
+        content.includes("--- FILE ---"));
+}
 function buildLineFrequencyMap(lines) {
     const counts = new Map();
     for (const line of lines) {
@@ -2001,16 +2069,49 @@ function computeFileDiff(before, after) {
     return diff;
 }
 function fuzzyFindAndReplace(content, find, replace) {
-    if (content.includes(find)) {
+    const lineEnding = detectPrimaryLineEnding(content);
+    const exactCount = countOccurrences(content, find);
+    if (exactCount === 1) {
         return {
             success: true,
-            content: content.replace(find, replace),
+            content: content.replace(find, convertReplacementLineEndings(replace, lineEnding)),
             score: 100,
             bestMatch: find,
         };
     }
-    const contentLines = content.replace(/\r\n/g, "\n").split("\n");
-    const targetLinesRaw = find.replace(/\r\n/g, "\n").split("\n");
+    if (exactCount > 1) {
+        return {
+            success: false,
+            reason: "ambiguous_match",
+            score: 0,
+            bestMatch: find,
+        };
+    }
+    const map = buildLfNormalizedIndexMap(content);
+    const normalizedFind = find.replace(/\r\n/g, "\n");
+    const normalizedReplace = convertReplacementLineEndings(replace, lineEnding);
+    const normalizedCount = countOccurrences(map.normalized, normalizedFind);
+    if (normalizedCount === 1) {
+        const normIdx = map.normalized.indexOf(normalizedFind);
+        const rawStart = map.normToRaw[normIdx] ?? 0;
+        const rawEnd = map.normToRaw[normIdx + normalizedFind.length] ?? content.length;
+        return {
+            success: true,
+            content: content.slice(0, rawStart) + normalizedReplace + content.slice(rawEnd),
+            score: 99,
+            bestMatch: map.normalized.slice(normIdx, normIdx + normalizedFind.length),
+        };
+    }
+    if (normalizedCount > 1) {
+        return {
+            success: false,
+            reason: "ambiguous_match",
+            score: 0,
+            bestMatch: normalizedFind,
+        };
+    }
+    const contentLines = map.normalized.split("\n");
+    const targetLinesRaw = normalizedFind.split("\n");
     const targetLines = targetLinesRaw.map(normalizeLineForMatch).filter(Boolean);
     if (targetLines.length === 0) {
         return {
@@ -2049,15 +2150,19 @@ function fuzzyFindAndReplace(content, find, replace) {
             bestMatch: bestCandidate?.bestMatch ?? "",
         };
     }
-    const replaceLines = replace.replace(/\r\n/g, "\n").split("\n");
-    const updatedLines = [
-        ...contentLines.slice(0, bestCandidate.start),
-        ...replaceLines,
-        ...contentLines.slice(bestCandidate.start + bestCandidate.length),
-    ];
+    // Apply the best candidate window as a localized replacement on the RAW content using index mapping.
+    const lineStartIdx = [0];
+    for (let i = 0; i < map.normalized.length; i += 1) {
+        if (map.normalized[i] === "\n")
+            lineStartIdx.push(i + 1);
+    }
+    const normStart = lineStartIdx[bestCandidate.start] ?? 0;
+    const normEnd = lineStartIdx[bestCandidate.start + bestCandidate.length] ?? map.normalized.length;
+    const rawStart = map.normToRaw[normStart] ?? 0;
+    const rawEnd = map.normToRaw[normEnd] ?? content.length;
     return {
         success: true,
-        content: updatedLines.join("\n"),
+        content: content.slice(0, rawStart) + normalizedReplace + content.slice(rawEnd),
         score: bestCandidate.score,
         bestMatch: bestCandidate.bestMatch,
     };
@@ -2100,6 +2205,7 @@ function applyDeveloperPatchText(currentContent, rawPatchText) {
             warning: "[invalid_patch_format] Model response could not be parsed into a valid patch",
         };
     }
+    console.log("[zone-patch-protocol-parsed]");
     if (parsed.createContent !== undefined) {
         if (currentContent.trim()) {
             return {
@@ -2120,8 +2226,46 @@ function applyDeveloperPatchText(currentContent, rawPatchText) {
                 warning: "[DEVELOPER_PATCH_FORMAT] FIND blocks must target an existing non-empty block.",
             };
         }
+        const findCountRaw = countOccurrences(updatedContent, edit.find);
+        const lineEnding = detectPrimaryLineEnding(updatedContent);
+        const preservedBefore = lineEnding === "\r\n" ? !containsLoneLf(updatedContent) : true;
+        console.log("[zone-patch-match-count]", JSON.stringify({ raw: findCountRaw }));
+        // Strict guard: do not proceed to fuzzy matching if the FIND block can't be
+        // located even after safe normalization. (We still allow exact normalized
+        // matches like tab↔spaces or LF↔CRLF.)
+        if (findCountRaw === 0) {
+            const map = buildLfNormalizedIndexMap(updatedContent);
+            const normalizedFind = edit.find.replace(/\r\n/g, "\n");
+            const normalizedCount = countOccurrences(map.normalized, normalizedFind);
+            if (normalizedCount === 0) {
+                const wsNormalizedContent = map.normalized.replace(/[ \t]+/g, " ");
+                const wsNormalizedFind = normalizedFind.replace(/[ \t]+/g, " ");
+                const wsNormalizedCount = countOccurrences(wsNormalizedContent, wsNormalizedFind);
+                if (wsNormalizedCount === 1) {
+                    // Allow patch application to proceed; fuzzyFindAndReplace will handle
+                    // mapping and replacement while preserving original line endings.
+                }
+                else {
+                    console.log("[zone-patch-no-match-abort]", JSON.stringify({
+                        reason: "raw_and_normalized_find_not_found",
+                        findPreview: edit.find.slice(0, 180),
+                    }));
+                    return {
+                        ok: false,
+                        warning: "[PATCH_NO_MATCH_ABORT] " +
+                            JSON.stringify({
+                                success: false,
+                                reason: "raw_and_normalized_find_not_found",
+                                score: 0,
+                                bestMatch: "",
+                            }),
+                    };
+                }
+            }
+        }
         const nextContent = fuzzyFindAndReplace(updatedContent, edit.find, edit.replace);
         if (!nextContent.success) {
+            console.log("[zone-patch-apply-mode]", nextContent.reason === "ambiguous_match" ? "failed" : "failed");
             return {
                 ok: false,
                 warning: "[PATCH_FIND_NOT_FOUND] " +
@@ -2133,10 +2277,27 @@ function applyDeveloperPatchText(currentContent, rawPatchText) {
                     }),
             };
         }
+        const mode = findCountRaw === 1 ? "exact" : nextContent.score >= 99 ? "exact" : "fuzzy";
+        console.log("[zone-patch-apply-mode]", mode);
+        const preservedAfter = lineEnding === "\r\n" ? !containsLoneLf(nextContent.content) : true;
+        console.log("[zone-patch-line-ending-preserved]", preservedBefore && preservedAfter);
+        console.log("[zone-patch-localized-change-lines]", countChangedLinesLocalized(updatedContent, nextContent.content));
+        if (containsPatchProtocolMarkers(nextContent.content)) {
+            console.log("[zone-patch-protocol-leak-blocked]");
+            return {
+                ok: false,
+                warning: "[PATCH_PROTOCOL_LEAK] " +
+                    JSON.stringify({
+                        reason: "patch_protocol_leak",
+                        leakedMarkers: true,
+                    }),
+            };
+        }
         updatedContent = nextContent.content;
     }
     return { ok: true, fullContent: updatedContent };
 }
+exports.__testOnly_applyDeveloperPatchText = applyDeveloperPatchText;
 const SAFE_PREVIEW_REUSE_MAX_CHARS = 4000;
 function canReusePatchPreviewAsFinalPatch(input) {
     return (input.patchCount === 1 &&
@@ -2477,6 +2638,9 @@ function detectSuspiciousUiOverwrite(input) {
     return null;
 }
 function parsePatchFailureWarning(warning) {
+    if (warning.startsWith("[PATCH_NO_MATCH_ABORT] ")) {
+        return { reason: "no_match_abort", normalizedFailureReason: "no_match_abort" };
+    }
     if (warning.startsWith("[PATCH_FIND_NOT_FOUND] ")) {
         try {
             const payload = JSON.parse(warning.slice("[PATCH_FIND_NOT_FOUND] ".length));
@@ -2496,6 +2660,9 @@ function parsePatchFailureWarning(warning) {
     }
     if (warning.startsWith("[DEVELOPER_PATCH_FORMAT]")) {
         return { reason: "invalid_patch_format" };
+    }
+    if (warning.startsWith("[PATCH_PROTOCOL_LEAK]")) {
+        return { reason: "patch_protocol_leak", normalizedFailureReason: "patch_protocol_leak" };
     }
     return { reason: "warning" };
 }
@@ -2881,13 +3048,15 @@ async function runLlmPatchFlow(input) {
         fullRankedFiles = mergeExplicitRepoFileIntoRankedFiles(fullRankedFiles, explicitTargetRepoFile);
     }
     let relevantFiles = fullRankedFiles.slice(0, 8);
-    if (explicitTargetRepoFile &&
-        !relevantFiles.some((file) => file.path === explicitTargetRepoFile.path)) {
+    if (explicitTargetRepoFile) {
         const explicitRankedFile = {
             ...explicitTargetRepoFile,
             score: Math.max(...fullRankedFiles.map((file) => file.score), 0) + 10_000,
         };
-        relevantFiles = [explicitRankedFile, ...relevantFiles].slice(0, 8);
+        // Explicit target mode: keep planning context ultra-minimal to avoid token overflow and
+        // ensure the model focuses on the requested file.
+        console.log("[zone-context-mode] explicit_single_file_mode");
+        relevantFiles = [explicitRankedFile];
     }
     perf.mark("relevant files ranked");
     notifyProgress("Ranking relevant files...", {
@@ -3107,7 +3276,12 @@ async function runLlmPatchFlow(input) {
             !isProtectedDeveloperUiPath(explicitTargetRepoFile.path)) {
             const canon = explicitTargetRepoFile.path;
             explicitTargetCanonicalPath = canon;
-            if (!resolvedFileContextsIncludePath(resolvedFileContexts, canon)) {
+            let targetContent = null;
+            const existing = resolvedFileContexts.find((f) => f.path === canon);
+            if (existing && typeof existing.content === "string") {
+                targetContent = existing.content;
+            }
+            if (!targetContent) {
                 const loadedContent = await loadExplicitTargetFileContentForPatchContext({
                     canonPath: canon,
                     hostedContext: input.hostedContext,
@@ -3116,16 +3290,23 @@ async function runLlmPatchFlow(input) {
                 explicitTargetForceContentByPath.set(canon, loadedContent);
                 console.log("[zone-explicit-target-forced-into-context]", canon);
                 console.log("[zone-explicit-target-force-included]", canon);
-                resolvedFileContexts.unshift({
+                targetContent = loadedContent;
+            }
+            // Explicit target mode: override any ranked/hosted context and send only the target file.
+            resolvedFileContexts = [
+                {
                     path: canon,
-                    content: loadedContent,
-                });
-                selectedContextFiles.unshift({
+                    content: targetContent,
+                },
+            ];
+            selectedContextFiles = [
+                {
                     path: canon,
                     action: "inspect",
                     reason: "Explicit target file from user prompt",
-                });
-            }
+                },
+            ];
+            console.log("[zone-context-files-count]", resolvedFileContexts.length);
         }
     }
     perf.mark("file context loaded");
@@ -3584,6 +3765,7 @@ async function runLlmPatchFlow(input) {
     let applyPatches = [];
     let fallbackForcePreviewOnly = false;
     let deterministicFallbackTooLarge = false;
+    let usedLlmPatchRecovered = false;
     let patchSource = "no_patch";
     const originalContents = {
         ...(input.hostedContext?.originalContents ?? {}),
@@ -3594,6 +3776,7 @@ async function runLlmPatchFlow(input) {
         ...patchPlan.warnings,
     ]);
     const patchResults = [];
+    const rawPatchTextByFile = {};
     let hostedPatchAvailability = [];
     try {
         hostedPatchAvailability = input.hostedContext
@@ -4055,6 +4238,7 @@ async function runLlmPatchFlow(input) {
                     task: input.task,
                     filePath: patch.path,
                     fileContent: llmFileContent,
+                    fullOriginalFileContent: fileContent,
                     repoSummary: projectSummary,
                     repoPath: input.repoPath,
                     taskIntent: taskIntent.normalizedTask || taskIntent.action,
@@ -4076,8 +4260,64 @@ async function runLlmPatchFlow(input) {
                 });
             })().then((fullPatch) => {
                 perf.mark(`full patch model response received ${patch.path}`);
+                if (fullPatch.mode === "openai_call_error") {
+                    fallbackForcePreviewOnly = true;
+                    console.log("[zone-patch-recovery-context]", JSON.stringify({
+                        filePath: patch.path,
+                        mode: "openai_call_error",
+                        details: fullPatch.openAiCallDetails,
+                    }));
+                    for (const w of fullPatch.warnings) {
+                        internalWarnings.push(w);
+                        visibleWarnings.push(w);
+                    }
+                    logPatchConversionDebug({
+                        filePath: patch.path,
+                        chosenOutputMode: fullPatchMode,
+                        responseMode: "openai_call_error",
+                        status: "failed",
+                        failureReason: "openai_call_error",
+                        normalizedFailureReason: "openai_call_error",
+                    });
+                    patchResults.push({
+                        filePath: patch.path,
+                        status: "failed",
+                        reason: "openai_call_error",
+                    });
+                    return null;
+                }
+                if (fullPatch.mode === "empty_model_response") {
+                    fallbackForcePreviewOnly = true;
+                    console.log("[zone-patch-recovery-context]", JSON.stringify({
+                        filePath: patch.path,
+                        mode: "empty_model_response",
+                        details: fullPatch.emptyModelDetails,
+                    }));
+                    for (const w of fullPatch.warnings) {
+                        internalWarnings.push(w);
+                        visibleWarnings.push(w);
+                    }
+                    logPatchConversionDebug({
+                        filePath: patch.path,
+                        chosenOutputMode: fullPatchMode,
+                        responseMode: "empty_model_response",
+                        status: "failed",
+                        failureReason: "empty_model_response",
+                        normalizedFailureReason: "empty_model_response",
+                    });
+                    patchResults.push({
+                        filePath: patch.path,
+                        status: "failed",
+                        reason: "empty_model_response",
+                    });
+                    return null;
+                }
                 if (fullPatch.mode === "invalid_patch_format") {
                     fallbackForcePreviewOnly = true;
+                    console.log("[zone-patch-recovery-context]", JSON.stringify({
+                        filePath: patch.path,
+                        lastNonEmptyRawLength: fullPatch.lastNonEmptyRawLength ?? 0,
+                    }));
                     for (const w of fullPatch.warnings) {
                         internalWarnings.push(w);
                         visibleWarnings.push(w);
@@ -4098,7 +4338,24 @@ async function runLlmPatchFlow(input) {
                     return null;
                 }
                 if (fullPatch.mode === "patch") {
-                    const appliedPatch = applyDeveloperPatchText(fileContent, fullPatch.patchText);
+                    rawPatchTextByFile[patch.path] = fullPatch.patchText;
+                    let appliedPatch = applyDeveloperPatchText(fileContent, fullPatch.patchText);
+                    let recoveredFromApply = false;
+                    if (!appliedPatch.ok) {
+                        const failurePreview = parsePatchFailureWarning(appliedPatch.warning);
+                        if (failurePreview.reason === "invalid_patch_format") {
+                            const recovered = (0, patchConversion_js_1.tryRecoverDeveloperPatchFromModelOutput)({
+                                requestedFilePath: patch.path,
+                                originalFileContent: fileContent,
+                                rawModelText: fullPatch.patchText,
+                                task: input.task,
+                            });
+                            if (recovered.ok) {
+                                appliedPatch = applyDeveloperPatchText(fileContent, recovered.strictPatchText);
+                                recoveredFromApply = appliedPatch.ok;
+                            }
+                        }
+                    }
                     if (!appliedPatch.ok) {
                         internalWarnings.push(appliedPatch.warning);
                         if (!isHiddenDeveloperWarning(appliedPatch.warning)) {
@@ -4107,6 +4364,32 @@ async function runLlmPatchFlow(input) {
                         const failure = parsePatchFailureWarning(appliedPatch.warning);
                         if (failure.reason === "invalid_patch_format") {
                             fallbackForcePreviewOnly = true;
+                        }
+                        if ((failure.reason === "patch_find_not_found" ||
+                            failure.reason === "no_match_abort") &&
+                            loopApplyTargets.length === 1 &&
+                            !isProtectedDeveloperUiPath(patch.path) &&
+                            isUiFilePath(patch.path) &&
+                            !/schema|database|db|migration/i.test(input.task)) {
+                            console.log("[zone-ast-fallback-start]", JSON.stringify({ filePath: patch.path, reason: failure.reason }));
+                            const astFallback = (0, astPatchFallback_js_1.tryAstPatchFallback)({
+                                filePath: patch.path,
+                                task: input.task,
+                                originalContent: fileContent,
+                                failedRawPatch: fullPatch.patchText,
+                            });
+                            if (astFallback.ok) {
+                                console.log("[zone-ast-fallback-success]", JSON.stringify({
+                                    filePath: patch.path,
+                                    summary: astFallback.summary,
+                                    changedLinesEstimate: astFallback.changedLinesEstimate,
+                                }));
+                                patchSource = "ast_fallback";
+                                usedLlmPatchRecovered = false;
+                                // Return AST-generated full content; correctness validation still runs later.
+                                return astFallback.finalContent;
+                            }
+                            console.log("[zone-ast-fallback-failed]", JSON.stringify({ filePath: patch.path, reason: astFallback.reason }));
                         }
                         logPatchConversionDebug({
                             filePath: patch.path,
@@ -4135,6 +4418,9 @@ async function runLlmPatchFlow(input) {
                         });
                         return null;
                     }
+                    if (fullPatch.patchRecovered || recoveredFromApply) {
+                        usedLlmPatchRecovered = true;
+                    }
                     logPatchConversionDebug({
                         filePath: patch.path,
                         chosenOutputMode: fullPatchMode,
@@ -4149,23 +4435,28 @@ async function runLlmPatchFlow(input) {
                     responseMode: fullPatch.mode,
                     status: "applied",
                 });
+                // Track a hint of previous output for repair prompts.
+                rawPatchTextByFile[patch.path] = `[full_content] ${fullPatch.summary ?? ""}`.trim();
                 return fullPatch.fullContent;
             });
             if (nextContent === null) {
                 continue;
             }
             if (nextContent.includes("--- FIND ---") ||
-                nextContent.includes("--- REPLACE ---")) {
+                nextContent.includes("--- REPLACE ---") ||
+                nextContent.includes("--- FILE:") ||
+                nextContent.includes("--- FILE ---")) {
                 const patchConflictWarning = buildPatchConflictWarning({
                     filePath: patch.path,
-                    reason: "patch_format_leaked",
+                    reason: "patch_protocol_leak",
                 });
                 internalWarnings.push(patchConflictWarning);
                 visibleWarnings.push(patchConflictWarning);
+                console.log("[zone-patch-protocol-leak-blocked]");
                 patchResults.push({
                     filePath: patch.path,
                     status: "failed",
-                    reason: "patch_format_leaked",
+                    reason: "patch_protocol_leak",
                 });
                 continue;
             }
@@ -4241,10 +4532,12 @@ async function runLlmPatchFlow(input) {
     }
     console.log("[hosted] applyPatches count:", applyPatches.length);
     if (applyPatches.length > 0) {
-        patchSource = "llm_patch";
+        patchSource = usedLlmPatchRecovered ? "llm_patch_recovered" : "llm_patch";
     }
     const taskIsConstrained = isConstrainedLocalizedPatchTask(input.task) || isConstrainedTaskByText(input.task);
-    if (taskIsConstrained && patchSource === "llm_patch" && applyPatches.length > 0) {
+    if (taskIsConstrained &&
+        (patchSource === "llm_patch" || patchSource === "llm_patch_recovered") &&
+        applyPatches.length > 0) {
         const scope = analyzePatchScope({ applyPatches, originalContents });
         if (scope.totalChangedLines > 30) {
             fallbackForcePreviewOnly = true;
@@ -4387,6 +4680,15 @@ async function runLlmPatchFlow(input) {
     }
     const patchCountBeforeCorrectness = applyPatches.length;
     let correctnessMustBlock = false;
+    let validatorAllOk = true;
+    const correctnessRepairAttempted = new Set();
+    const retryableCorrectnessCodes = new Set([
+        "unbalanced_delimiters",
+        "unterminated_template",
+        "jsx_mismatch",
+        "syntax_error",
+        "broken_import_line",
+    ]);
     // Patch correctness validator v2
     if (applyPatches.length > 0) {
         const kept = [];
@@ -4461,11 +4763,178 @@ async function runLlmPatchFlow(input) {
             }
             if (report.forceBlocked) {
                 correctnessMustBlock = true;
+                validatorAllOk = false;
             }
             else if (report.forcePreviewOnly) {
                 fallbackForcePreviewOnly = true;
             }
             if (!report.ok) {
+                const diagDiffHeadSample = buildDiffHeadSample(diagDiff, 240);
+                const blockingCodes = report.blocking.map((i) => i.code);
+                const retryableBlocking = blockingCodes.filter((c) => retryableCorrectnessCodes.has(c));
+                const canAttemptRepair = retryableBlocking.length > 0 &&
+                    !correctnessRepairAttempted.has(patch.filePath) &&
+                    diagTotalChanged <= 25 &&
+                    patchSource !== "deterministic_fallback";
+                const maxRepairAttempts = (0, openaiClient_js_1.getInferenceMode)() === "hosted" ? 1 : 1;
+                if (canAttemptRepair && maxRepairAttempts >= 1) {
+                    correctnessRepairAttempted.add(patch.filePath);
+                    console.log("[zone-repair-start]", JSON.stringify({
+                        filePath: patch.filePath,
+                        blockingCodes,
+                        retryableBlocking,
+                        totalChangedLines: diagTotalChanged,
+                    }));
+                    console.log("[zone-repair-context]", JSON.stringify({
+                        filePath: patch.filePath,
+                        originalTask: input.task.slice(0, 400),
+                        previousRawPatchPreview: (rawPatchTextByFile[patch.filePath] ?? "")
+                            .slice(0, 400),
+                        diffHeadSample: diagDiffHeadSample,
+                    }));
+                    try {
+                        const repaired = await (0, planFullPatch_js_1.planFullPatchWithLlm)({
+                            task: [
+                                input.task,
+                                "",
+                                "PATCH CORRECTNESS VALIDATION FAILED AFTER APPLYING YOUR PATCH.",
+                                "You MUST repair the previous patch.",
+                                "",
+                                "CRITICAL REPAIR RULES:",
+                                "- Repair the previous patch. Do not introduce new structure.",
+                                "- Do NOT wrap components.",
+                                "- Do NOT add new functions.",
+                                "- Only fix the syntax/JSX issue with the smallest possible localized edit.",
+                                "- Do NOT expand scope. Do NOT modify other files.",
+                                "- You MUST output a patch.",
+                                "",
+                                "Extra guidance:",
+                                "- Remove ANY suspicious or stray characters",
+                                "- Fix JSX structure if needed",
+                                "- Prefer smallest possible change",
+                                "",
+                                "STRICT PATCH RULES:",
+                                "- FIND block MUST exactly match existing code.",
+                                "- Do not approximate.",
+                                "- Do not regenerate large sections.",
+                                "",
+                                `TARGET FILE: ${patch.filePath}`,
+                                "",
+                                "Previous raw patch (for reference):",
+                                rawPatchTextByFile[patch.filePath] ?? "",
+                                "",
+                                "Patched content that failed validation:",
+                                patch.fullContent.slice(0, 9000),
+                                "",
+                                "Validator blocking codes:",
+                                blockingCodes.join(", "),
+                                "",
+                                "Diagnostic diff head sample:",
+                                diagDiffHeadSample,
+                            ].join("\n"),
+                            filePath: patch.filePath,
+                            fileContent: patch.fullContent,
+                            fullOriginalFileContent: patch.fullContent,
+                            repoSummary: projectSummary,
+                            repoPath: input.repoPath,
+                            taskIntent: taskIntent.normalizedTask || taskIntent.action,
+                            normalizedTaskIntent: detectMicroEditIntent(input.task)
+                                ? "micro_edit"
+                                : "standard",
+                            outputMode: "find_replace_patch",
+                            relevantFiles: [{ path: patch.filePath, content: patch.fullContent }],
+                            existingTargetFiles: allFiles.map((file) => file.path),
+                            executionPlan,
+                            relatedContext: "IMPORTANT: Only output a valid patch. Do not explain.",
+                        });
+                        if (repaired.mode !== "patch") {
+                            console.log("[zone-repair-validation-failed]", JSON.stringify({
+                                filePath: patch.filePath,
+                                reason: `repair_mode_${repaired.mode}`,
+                            }));
+                            visibleWarnings.push("repair_attempted_but_failed");
+                        }
+                        else {
+                            console.log("[zone-repair-patch-generated]", patch.filePath);
+                            const applied = applyDeveloperPatchText(patch.fullContent, repaired.patchText);
+                            if (!applied.ok) {
+                                console.log("[zone-repair-validation-failed]", JSON.stringify({
+                                    filePath: patch.filePath,
+                                    reason: "repair_patch_apply_failed",
+                                }));
+                                const failure = parsePatchFailureWarning(applied.warning);
+                                if (failure.reason === "no_match_abort") {
+                                    console.log("[zone-retry-skipped-no-match]", patch.filePath);
+                                    fallbackForcePreviewOnly = true;
+                                }
+                                visibleWarnings.push("repair_attempted_but_failed");
+                            }
+                            else {
+                                const repairDiff = computeFileDiff(patch.fullContent, applied.fullContent);
+                                const repairChangedLines = repairDiff.filter((l) => l.type === "added" || l.type === "removed").length;
+                                if (repairChangedLines > 50) {
+                                    console.log("[zone-retry-aborted-large-diff]", JSON.stringify({
+                                        filePath: patch.filePath,
+                                        changedLines: repairChangedLines,
+                                    }));
+                                    fallbackForcePreviewOnly = true;
+                                    visibleWarnings.push("repair_attempted_but_failed");
+                                    console.log("[zone-repair-validation-failed]", JSON.stringify({
+                                        filePath: patch.filePath,
+                                        reason: "repair_diff_too_large",
+                                        changedLines: repairChangedLines,
+                                    }));
+                                    // fall through to blocked behavior (do not keep repaired content)
+                                }
+                                else {
+                                    const report2 = (0, patchCorrectnessValidator_js_1.validatePatchCorrectness)({
+                                        filePath: patch.filePath,
+                                        originalContent: before,
+                                        updatedContent: applied.fullContent,
+                                        task: input.task,
+                                        isConstrained: isConstrainedLocalizedPatchTask(input.task),
+                                        taskConstraints: detectExistingStructureTaskConstraints(input.task),
+                                        strictMode: patchSource === "deterministic_fallback",
+                                    });
+                                    if (report2.ok) {
+                                        console.log("[zone-repair-validation-passed]", JSON.stringify({ filePath: patch.filePath }));
+                                        visibleWarnings.push("repair_attempted_and_passed");
+                                        kept.push({ filePath: patch.filePath, fullContent: applied.fullContent });
+                                        continue;
+                                    }
+                                    console.log("[zone-repair-validation-failed]", JSON.stringify({
+                                        filePath: patch.filePath,
+                                        blockingCodes: report2.blocking.map((i) => i.code),
+                                    }));
+                                    visibleWarnings.push("repair_attempted_but_failed");
+                                }
+                            }
+                        }
+                    }
+                    catch (err) {
+                        console.log("[zone-repair-validation-failed]", JSON.stringify({
+                            filePath: patch.filePath,
+                            reason: err instanceof Error ? err.message : String(err),
+                        }));
+                        visibleWarnings.push("repair_attempted_but_failed");
+                    }
+                }
+                else if (retryableBlocking.length > 0 && diagTotalChanged > 25) {
+                    console.log("[zone-repair-skipped]", JSON.stringify({
+                        filePath: patch.filePath,
+                        reason: "patch_too_large",
+                        totalChangedLines: diagTotalChanged,
+                        blockingCodes,
+                    }));
+                }
+                else if (retryableBlocking.length > 0 && correctnessRepairAttempted.has(patch.filePath)) {
+                    console.log("[zone-repair-skipped]", JSON.stringify({
+                        filePath: patch.filePath,
+                        reason: "already_attempted",
+                        blockingCodes,
+                    }));
+                }
+                validatorAllOk = false;
                 const firstBlockingCode = report.blocking[0]?.code ?? "correctness_failed";
                 for (const result of patchResults) {
                     if (result.filePath === patch.filePath && result.status === "applied") {
@@ -4550,8 +5019,6 @@ async function runLlmPatchFlow(input) {
         return {
             ok: false,
             reason: "atomic_patch_failed",
-            lifecycleEvents: [...lifecycleEvents],
-            finalRunReport: atomicReport,
         };
     }
     reportProgress("Validating developer output...");
@@ -4673,6 +5140,8 @@ async function runLlmPatchFlow(input) {
     let runtimeVerification = null;
     let runtimeVerificationPlan = null;
     let verificationRepairAttempted = false;
+    const verificationAttempts = [];
+    const repairAttempts = [];
     if (!input.hostedContext && applyPatches.length > 0) {
         try {
             const plan = (0, detectVerificationCommand_js_1.detectVerificationPlan)({
@@ -4699,107 +5168,226 @@ async function runLlmPatchFlow(input) {
                     command: plan[0]?.command,
                 });
             }
+            console.log("[zone-verification-start]", JSON.stringify({ steps: plan.map((s) => s.command) }));
             runtimeVerificationPlan = await (0, runRuntimeVerification_js_1.runRuntimeVerificationPlan)({
                 repoPath: input.repoPath,
                 plan,
             });
-            console.log(`[zone-runtime-verify] status=${runtimeVerificationPlan.status} steps=${runtimeVerificationPlan.steps.length}`);
+            const rvp0 = runtimeVerificationPlan;
+            console.log(`[zone-runtime-verify] status=${rvp0.status} steps=${rvp0.steps.length}`);
+            const mapFailureType = (status) => status === "failed_environment_or_tooling"
+                ? "tooling_issue"
+                : status === "failed_code_related"
+                    ? "code_related"
+                    : status === "timeout"
+                        ? "timeout"
+                        : status === "skipped_no_command"
+                            ? "skipped"
+                            : undefined;
+            verificationAttempts.push(...rvp0.steps.map((s) => ({
+                command: s.command,
+                status: s.status,
+                failureType: mapFailureType(rvp0.status),
+                failureSummary: s.summary,
+            })));
             // Keep the legacy single-command field populated for existing consumers.
             runtimeVerification =
-                runtimeVerificationPlan.steps[0] ?? {
-                    attempted: runtimeVerificationPlan.attempted,
-                    status: runtimeVerificationPlan.status === "passed"
+                rvp0.steps[0] ?? {
+                    attempted: rvp0.attempted,
+                    status: rvp0.status === "passed"
                         ? "passed"
-                        : runtimeVerificationPlan.status === "timeout"
+                        : rvp0.status === "timeout"
                             ? "timeout"
-                            : runtimeVerificationPlan.status === "skipped_no_command"
+                            : rvp0.status === "skipped_no_command"
                                 ? "skipped"
                                 : "failed",
-                    command: runtimeVerificationPlan.failedCommand,
-                    summary: runtimeVerificationPlan.summary,
+                    command: rvp0.failedCommand,
+                    summary: rvp0.summary,
                 };
-            if (runtimeVerificationPlan.status === "failed_code_related") {
-                const warning = `Runtime verification failed (code): ${runtimeVerificationPlan.failedCommand ?? "unknown command"}`;
+            if (rvp0.status === "failed_code_related") {
+                console.log("[zone-verification-failed]", JSON.stringify({
+                    failureType: "code_related",
+                    command: rvp0.failedCommand,
+                    failureSummary: rvp0.summary,
+                }));
+                const warning = `Runtime verification failed (code): ${rvp0.failedCommand ?? "unknown command"}`;
                 internalWarnings.push(warning);
                 visibleWarnings.push(warning);
-                // One automatic repair attempt for code-related verification failures.
-                if (applyPatches.length > 0) {
-                    verificationRepairAttempted = true;
-                    try {
-                        const brief = (0, buildRetryGuidanceFromFailure_js_1.buildRetryGuidanceFromFailure)({
-                            issues: [
-                                {
-                                    code: "RUNTIME_VERIFICATION_FAILED",
-                                    message: [
-                                        runtimeVerificationPlan.failedCommand
-                                            ? `Command: ${runtimeVerificationPlan.failedCommand}`
-                                            : "",
-                                        runtimeVerificationPlan.summary,
-                                    ]
-                                        .filter(Boolean)
-                                        .join("\n"),
-                                },
-                            ],
-                        });
-                        const guidanceText = (0, buildRetryGuidanceFromFailure_js_1.formatRetryGuidanceBrief)(brief);
-                        console.log("[zone-runtime-verify-retry] attempting repair");
-                        // Patch only the already-changed files; keep changes minimal.
-                        for (let idx = 0; idx < applyPatches.length; idx += 1) {
-                            const patch = applyPatches[idx];
-                            if (!patch)
-                                continue;
-                            const repaired = await (0, planFullPatch_js_1.planFullPatchWithLlm)({
-                                task: [
-                                    input.task,
-                                    "",
-                                    "RUNTIME VERIFICATION FAILED AFTER APPLYING YOUR PATCH.",
-                                    "You MUST fix the failure with the smallest possible change.",
-                                    "You MUST ONLY modify the file below. Do NOT touch other files.",
-                                    `TARGET FILE: ${patch.filePath}`,
-                                    "",
-                                    "Failure guidance:",
-                                    guidanceText,
-                                ].join("\n"),
-                                filePath: patch.filePath,
-                                fileContent: patch.fullContent,
-                                repoSummary: projectSummary,
-                                repoPath: input.repoPath,
-                                taskIntent: taskIntent.normalizedTask || taskIntent.action,
-                                normalizedTaskIntent: detectMicroEditIntent(input.task)
-                                    ? "micro_edit"
-                                    : "standard",
-                                outputMode: "find_replace_patch",
-                                relevantFiles: [{ path: patch.filePath, content: patch.fullContent }],
-                                existingTargetFiles: allFiles.map((file) => file.path),
-                                executionPlan,
-                                relatedContext: "IMPORTANT: Only output a valid patch. Do not explain.",
+                const inferenceMode = (0, openaiClient_js_1.getInferenceMode)();
+                const maxRepairAttempts = inferenceMode === "hosted" ? 1 : 2;
+                const touchesProtected = applyPatches.some((p) => isProtectedDeveloperUiPath(p.filePath));
+                const safeRepairLineThreshold = 30;
+                const totalChangedForRepair = applyPatches.reduce((sum, p) => {
+                    const before = originalContents[p.filePath] ?? "";
+                    const diff = computeFileDiff(before, p.fullContent);
+                    return (sum +
+                        diff.filter((l) => l.type === "added" || l.type === "removed").length);
+                }, 0);
+                if (touchesProtected || totalChangedForRepair > safeRepairLineThreshold) {
+                    console.log("[zone-repair-skipped]", JSON.stringify({
+                        reason: touchesProtected ? "protected_files" : "patch_too_large",
+                        changedFiles: applyPatches.map((p) => p.filePath),
+                        totalChangedLines: totalChangedForRepair,
+                        maxRepairAttempts,
+                    }));
+                    repairAttempts.push({
+                        attempt: 1,
+                        files: applyPatches.map((p) => p.filePath),
+                        status: "skipped",
+                        summary: touchesProtected
+                            ? "Repair skipped: patch touched protected files."
+                            : `Repair skipped: patch too large (>${safeRepairLineThreshold} changed lines).`,
+                    });
+                }
+                else if (applyPatches.length > 0) {
+                    for (let attempt = 1; attempt <= maxRepairAttempts; attempt += 1) {
+                        verificationRepairAttempted = true;
+                        console.log("[zone-repair-start]", JSON.stringify({
+                            attempt,
+                            files: applyPatches.map((p) => p.filePath),
+                            command: rvp0.failedCommand,
+                        }));
+                        try {
+                            const brief = (0, buildRetryGuidanceFromFailure_js_1.buildRetryGuidanceFromFailure)({
+                                issues: [
+                                    {
+                                        code: "RUNTIME_VERIFICATION_FAILED",
+                                        message: [
+                                            runtimeVerificationPlan.failedCommand
+                                                ? `Command: ${runtimeVerificationPlan.failedCommand}`
+                                                : "",
+                                            runtimeVerificationPlan.summary,
+                                        ]
+                                            .filter(Boolean)
+                                            .join("\n"),
+                                    },
+                                ],
                             });
-                            if (repaired.mode !== "patch")
-                                continue;
-                            const applied = applyDeveloperPatchText(patch.fullContent, repaired.patchText);
-                            if (applied.ok) {
+                            const guidanceText = (0, buildRetryGuidanceFromFailure_js_1.formatRetryGuidanceBrief)(brief);
+                            console.log("[zone-runtime-verify-retry] attempting repair");
+                            // Patch only the already-changed files; keep changes minimal.
+                            repairAttempts.push({
+                                attempt,
+                                files: applyPatches.map((p) => p.filePath),
+                                status: "generated",
+                                summary: `Repair attempt ${attempt}: generating patch for changed file(s).`,
+                            });
+                            for (let idx = 0; idx < applyPatches.length; idx += 1) {
+                                const patch = applyPatches[idx];
+                                if (!patch)
+                                    continue;
+                                const repaired = await (0, planFullPatch_js_1.planFullPatchWithLlm)({
+                                    task: [
+                                        input.task,
+                                        "",
+                                        "RUNTIME VERIFICATION FAILED AFTER APPLYING YOUR PATCH.",
+                                        "You MUST fix the failure with the smallest possible change.",
+                                        "You MUST ONLY modify the file below. Do NOT touch other files.",
+                                        "",
+                                        "STRICT PATCH RULES:",
+                                        "- FIND block MUST exactly match existing code.",
+                                        "- Do not approximate.",
+                                        "- Do not regenerate large sections.",
+                                        `TARGET FILE: ${patch.filePath}`,
+                                        "",
+                                        "Failure guidance:",
+                                        guidanceText,
+                                    ].join("\n"),
+                                    filePath: patch.filePath,
+                                    fileContent: patch.fullContent,
+                                    fullOriginalFileContent: patch.fullContent,
+                                    repoSummary: projectSummary,
+                                    repoPath: input.repoPath,
+                                    taskIntent: taskIntent.normalizedTask || taskIntent.action,
+                                    normalizedTaskIntent: detectMicroEditIntent(input.task)
+                                        ? "micro_edit"
+                                        : "standard",
+                                    outputMode: "find_replace_patch",
+                                    relevantFiles: [{ path: patch.filePath, content: patch.fullContent }],
+                                    existingTargetFiles: allFiles.map((file) => file.path),
+                                    executionPlan,
+                                    relatedContext: "IMPORTANT: Only output a valid patch. Do not explain.",
+                                });
+                                if (repaired.mode !== "patch")
+                                    continue;
+                                console.log("[zone-repair-patch-generated]", patch.filePath);
+                                const applied = applyDeveloperPatchText(patch.fullContent, repaired.patchText);
+                                if (!applied.ok) {
+                                    const failure = parsePatchFailureWarning(applied.warning);
+                                    if (failure.reason === "no_match_abort") {
+                                        console.log("[zone-retry-skipped-no-match]", patch.filePath);
+                                        fallbackForcePreviewOnly = true;
+                                    }
+                                    continue;
+                                }
+                                const diff = computeFileDiff(patch.fullContent, applied.fullContent);
+                                const changed = diff.filter((l) => l.type === "added" || l.type === "removed").length;
+                                if (changed > 50) {
+                                    console.log("[zone-retry-aborted-large-diff]", JSON.stringify({ filePath: patch.filePath, changedLines: changed }));
+                                    fallbackForcePreviewOnly = true;
+                                    continue;
+                                }
                                 applyPatches[idx] = { filePath: patch.filePath, fullContent: applied.fullContent };
                             }
+                            repairAttempts.push({
+                                attempt,
+                                files: applyPatches.map((p) => p.filePath),
+                                status: "applied",
+                                summary: `Repair attempt ${attempt}: patch applied to changed file(s).`,
+                            });
+                            // Re-run runtime verification after repair attempt.
+                            console.log("[zone-repair-verification-start]", JSON.stringify({ attempt }));
+                            runtimeVerificationPlan = await (0, runRuntimeVerification_js_1.runRuntimeVerificationPlan)({
+                                repoPath: input.repoPath,
+                                plan,
+                            });
+                            const rvp1 = runtimeVerificationPlan;
+                            console.log(`[zone-runtime-verify-retry] status=${rvp1.status} steps=${rvp1.steps.length}`);
+                            verificationAttempts.push(...rvp1.steps.map((s) => ({
+                                command: s.command,
+                                status: s.status,
+                                failureType: mapFailureType(rvp1.status),
+                                failureSummary: s.summary,
+                            })));
+                            if (rvp1.status === "passed") {
+                                console.log("[zone-repair-success]", JSON.stringify({ attempt }));
+                                break;
+                            }
+                            if (rvp1.status === "failed_environment_or_tooling") {
+                                console.log("[zone-repair-failed]", JSON.stringify({ attempt, reason: "tooling_issue" }));
+                                break;
+                            }
+                            console.log("[zone-repair-failed]", JSON.stringify({ attempt, reason: rvp1.status }));
                         }
-                        // Re-run runtime verification after repair attempt.
-                        runtimeVerificationPlan = await (0, runRuntimeVerification_js_1.runRuntimeVerificationPlan)({
-                            repoPath: input.repoPath,
-                            plan,
-                        });
-                        console.log(`[zone-runtime-verify-retry] status=${runtimeVerificationPlan.status} steps=${runtimeVerificationPlan.steps.length}`);
-                    }
-                    catch (err) {
-                        console.warn(`[zone-runtime-verify-retry] skipped: ${err instanceof Error ? err.message : String(err)}`);
+                        catch (err) {
+                            repairAttempts.push({
+                                attempt,
+                                files: applyPatches.map((p) => p.filePath),
+                                status: "failed",
+                                summary: `Repair attempt ${attempt} failed: ${err instanceof Error ? err.message : String(err)}`,
+                            });
+                            console.warn(`[zone-runtime-verify-retry] skipped: ${err instanceof Error ? err.message : String(err)}`);
+                        }
                     }
                 }
             }
             else if (runtimeVerificationPlan.status === "failed_environment_or_tooling") {
+                console.log("[zone-verification-failed]", JSON.stringify({
+                    failureType: "tooling_issue",
+                    command: runtimeVerificationPlan.failedCommand,
+                    failureSummary: runtimeVerificationPlan.summary,
+                }));
                 const warning = "Patch generated, but verification could not complete because of setup/tooling. " +
                     `(${runtimeVerificationPlan.failedCommand ?? "unknown command"})`;
                 internalWarnings.push(warning);
                 visibleWarnings.push(warning);
             }
             else if (runtimeVerificationPlan.status === "timeout") {
+                console.log("[zone-verification-failed]", JSON.stringify({
+                    failureType: "timeout",
+                    command: runtimeVerificationPlan.failedCommand,
+                    failureSummary: runtimeVerificationPlan.summary,
+                }));
                 const warning = `Runtime verification timed out: ${runtimeVerificationPlan.failedCommand ?? "unknown command"}`;
                 internalWarnings.push(warning);
                 visibleWarnings.push(warning);
@@ -4981,10 +5569,32 @@ async function runLlmPatchFlow(input) {
         hasMicroEditViolation: microEditProtection.isViolation,
         hasValidationBlock: hasBlockedPatch,
     });
-    const finalDeveloperRisk = {
+    let finalDeveloperRisk = {
         ...mergedDeveloperRisk,
         score: finalDeveloperRiskScore,
     };
+    // Micro-destructive: tiny localized removals should not carry full destructive weight.
+    if (patchScope.changedFileCount === 1 && applyPatches.length === 1) {
+        const onlyPath = applyPatches[0]?.filePath ?? "";
+        const originalLines = countTotalLines(originalContents[onlyPath] ?? "");
+        const changeRatio = originalLines > 0 ? patchScope.totalChangedLines / originalLines : 1;
+        const isMicroDestructive = patchScope.totalChangedLines <= 3 &&
+            patchScope.totalRemovedLines <= 3 &&
+            changeRatio < 0.01;
+        if (isMicroDestructive &&
+            finalDeveloperRisk.breakdown.schema === 0 &&
+            finalDeveloperRisk.breakdown.massScope === 0 &&
+            finalDeveloperRisk.breakdown.destructive > 0) {
+            finalDeveloperRisk = {
+                ...finalDeveloperRisk,
+                score: Math.min(finalDeveloperRisk.score, 5),
+                breakdown: {
+                    ...finalDeveloperRisk.breakdown,
+                    destructive: Math.min(finalDeveloperRisk.breakdown.destructive, 5),
+                },
+            };
+        }
+    }
     logRiskDebug("runLlmPatchFlow final risk", {
         task: input.task,
         patchScope,
@@ -5042,6 +5652,35 @@ async function runLlmPatchFlow(input) {
                         constrainedTaskLargeRewriteForcePreview
                         ? "preview_only"
                         : "safe_to_apply";
+    // Minimal safe patch override (explicitly allow auto-apply).
+    if (decisionMode === "preview_only" &&
+        applyPatches.length === 1 &&
+        patchScope.changedFileCount === 1 &&
+        patchScope.totalChangedLines <= 3 &&
+        patchScope.totalRemovedLines <= 3 &&
+        finalDeveloperRisk.breakdown.schema === 0 &&
+        finalDeveloperRisk.breakdown.massScope === 0 &&
+        validatorAllOk === true &&
+        !intentMismatchDecision.hasMismatch &&
+        intentMismatch.risk.score === 0 &&
+        uiMappingRisk.risk.score === 0 &&
+        !uiMappingRisk.forcePreviewOnly &&
+        !intentMismatchDecision.forcePreviewOnly &&
+        !microEditProtection.shouldForcePreview &&
+        !fallbackForcePreviewOnly &&
+        !constrainedTaskLargeRewriteForcePreview) {
+        const onlyPath = applyPatches[0]?.filePath ?? "";
+        const originalLines = countTotalLines(originalContents[onlyPath] ?? "");
+        const changeRatio = originalLines > 0 ? patchScope.totalChangedLines / originalLines : 1;
+        if (changeRatio < 0.01) {
+            console.log("[zone-decision-override]", JSON.stringify({
+                reason: "minimal_safe_patch",
+                previous: "preview_only",
+                next: "safe_to_apply",
+            }));
+            decisionMode = "safe_to_apply";
+        }
+    }
     if ((applyPatches.length === 0 || patchSource === "no_patch") &&
         decisionMode === "safe_to_apply") {
         decisionMode = "preview_only";
@@ -5074,6 +5713,15 @@ async function runLlmPatchFlow(input) {
                         : verificationRepairAttempted
                             ? "failed_after_retry"
                             : "failed_verification";
+    const resultState = verificationStatus === "passed"
+        ? verificationRepairAttempted
+            ? "completed_after_repair"
+            : "completed_verified"
+        : verificationStatus === "tooling_issue"
+            ? "completed_with_tooling_issue"
+            : verificationRepairAttempted
+                ? "failed_after_repair"
+                : "failed_verification";
     const noApplyablePatch = applyPatches.length === 0 || patchSource === "no_patch";
     const finalState = decisionMode === "blocked"
         ? "blocked"
@@ -5240,8 +5888,11 @@ async function runLlmPatchFlow(input) {
         decisionMode,
         finalState,
         finalExecutionOutcome,
+        resultState,
         verificationStatus,
         attemptsUsed: runtimeVerification ? (verificationRepairAttempted ? 2 : 1) : undefined,
+        ...(verificationAttempts.length > 0 ? { verificationAttempts } : {}),
+        ...(repairAttempts.length > 0 ? { repairAttempts } : {}),
         validationBlocked,
         ...(runtimeVerificationFailed && runtimeVerification
             ? {

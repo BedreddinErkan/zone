@@ -41,6 +41,7 @@ import { enforceMicroEditProtection } from "../engine/microEditProtection.js";
 import { validatePatchCorrectness } from "../engine/patchCorrectnessValidator.js";
 import { parseDeveloperPatchText } from "./developerPatchParse.js";
 import { parseTaskIntent, type TaskIntent } from "./taskIntentParser.js";
+import { tryAstPatchFallback } from "./astPatchFallback.js";
 import type { PatchPreviewItem, RankedRepoFile } from "../types/agent.js";
 import type { ConversationBillingMode } from "../types/conversation.js";
 import type { RepoFile } from "../types/project.js";
@@ -175,6 +176,7 @@ export type LlmPatchFlowResult =
 type PatchSource =
   | "llm_patch"
   | "llm_patch_recovered"
+  | "ast_fallback"
   | "deterministic_fallback"
   | "no_patch";
 
@@ -5775,6 +5777,43 @@ export async function runLlmPatchFlow(input: {
                 const failure = parsePatchFailureWarning(appliedPatch.warning);
                 if (failure.reason === "invalid_patch_format") {
                   fallbackForcePreviewOnly = true;
+                }
+                if (
+                  (failure.reason === "patch_find_not_found" ||
+                    failure.reason === "no_match_abort") &&
+                  loopApplyTargets.length === 1 &&
+                  !isProtectedDeveloperUiPath(patch.path) &&
+                  isUiFilePath(patch.path) &&
+                  !/schema|database|db|migration/i.test(input.task)
+                ) {
+                  console.log(
+                    "[zone-ast-fallback-start]",
+                    JSON.stringify({ filePath: patch.path, reason: failure.reason })
+                  );
+                  const astFallback = tryAstPatchFallback({
+                    filePath: patch.path,
+                    task: input.task,
+                    originalContent: fileContent,
+                    failedRawPatch: fullPatch.patchText,
+                  });
+                  if (astFallback.ok) {
+                    console.log(
+                      "[zone-ast-fallback-success]",
+                      JSON.stringify({
+                        filePath: patch.path,
+                        summary: astFallback.summary,
+                        changedLinesEstimate: astFallback.changedLinesEstimate,
+                      })
+                    );
+                    patchSource = "ast_fallback";
+                    usedLlmPatchRecovered = false;
+                    // Return AST-generated full content; correctness validation still runs later.
+                    return astFallback.finalContent;
+                  }
+                  console.log(
+                    "[zone-ast-fallback-failed]",
+                    JSON.stringify({ filePath: patch.path, reason: astFallback.reason })
+                  );
                 }
                 logPatchConversionDebug({
                   filePath: patch.path,
