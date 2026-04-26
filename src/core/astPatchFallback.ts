@@ -235,7 +235,13 @@ export function tryAstPatchFallback(input: AstPatchFallbackInput): AstPatchFallb
     if (candidates.length > 1) return { ok: false, reason: "ambiguous_target" };
     const fn = candidates[0];
     if (!fn) return { ok: false, reason: "target_not_found" };
-    if (hasUploadGuardAlready(fn)) return { ok: false, reason: "no_change" };
+    if (hasUploadGuardAlready(fn)) {
+      console.log(
+        "[zone-ast-fallback-no-change]",
+        JSON.stringify({ filePath, reason: "guard_already_present" })
+      );
+      return { ok: false, reason: "no_change" };
+    }
     const patch = buildIsImageFileUploadGuardPatch({
       filePath,
       originalContent: input.originalContent,
@@ -257,7 +263,13 @@ export function tryAstPatchFallback(input: AstPatchFallbackInput): AstPatchFallb
     summary = "Removed stray one-character identifier statement.";
   }
 
-  if (!changed) return { ok: false, reason: "no_change" };
+  if (!changed) {
+    console.log(
+      "[zone-ast-fallback-no-change]",
+      JSON.stringify({ filePath, reason: "no_ast_transform_applied" })
+    );
+    return { ok: false, reason: "no_change" };
+  }
 
   // For the guard insertion path, emit a minimal FIND/REPLACE patch (not full rewritten content).
   if (supportsA) {
@@ -298,6 +310,10 @@ export function tryAstPatchFallback(input: AstPatchFallbackInput): AstPatchFallb
   }
 
   if (changedLinesEstimate === 0) {
+    console.log(
+      "[zone-ast-fallback-no-change]",
+      JSON.stringify({ filePath, reason: "generated_equals_original" })
+    );
     return { ok: false, reason: "no_change" };
   }
 

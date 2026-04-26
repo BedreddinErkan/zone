@@ -1,6 +1,69 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildFullPatchPrompt = buildFullPatchPrompt;
+function detectCodeStyleFromSample(fileContent) {
+    const lines = String(fileContent || "")
+        .replace(/\r\n/g, "\n")
+        .split("\n")
+        .slice(0, 50);
+    const spaceIndentCounts = new Map();
+    let tabIndented = 0;
+    let spaceIndented = 0;
+    let singleQuoteHits = 0;
+    let doubleQuoteHits = 0;
+    let semiYes = 0;
+    let semiNo = 0;
+    for (const raw of lines) {
+        const line = raw ?? "";
+        const trimmed = line.trim();
+        if (!trimmed)
+            continue;
+        const ws = line.match(/^[\t ]+/)?.[0] ?? "";
+        if (ws) {
+            if (ws.includes("\t"))
+                tabIndented += 1;
+            if (ws.includes(" "))
+                spaceIndented += 1;
+            if (!ws.includes("\t")) {
+                const spaces = ws.length;
+                spaceIndentCounts.set(spaces, (spaceIndentCounts.get(spaces) ?? 0) + 1);
+            }
+        }
+        // Skip comment-only lines for quote/semicolon heuristics.
+        if (/^\s*\/\//.test(line) || /^\s*\*/.test(line))
+            continue;
+        singleQuoteHits += (line.match(/'/g) ?? []).length;
+        doubleQuoteHits += (line.match(/"/g) ?? []).length;
+        if (/[;]\s*$/.test(line))
+            semiYes += 1;
+        else
+            semiNo += 1;
+    }
+    const indentation = tabIndented > spaceIndented
+        ? "tabs"
+        : (() => {
+            let bestWidth = 2;
+            let bestCount = 0;
+            for (const [width, count] of spaceIndentCounts) {
+                if (count > bestCount) {
+                    bestCount = count;
+                    bestWidth = width;
+                }
+            }
+            return `${bestWidth} spaces`;
+        })();
+    const quotes = singleQuoteHits === 0 && doubleQuoteHits === 0
+        ? "unknown"
+        : singleQuoteHits > doubleQuoteHits
+            ? "single"
+            : "double";
+    const semicolons = semiYes === 0 && semiNo === 0
+        ? "unknown"
+        : semiYes >= semiNo
+            ? "yes"
+            : "no";
+    return { indentation, quotes, semicolons };
+}
 function isLikelyUiPatchTask(input) {
     const normalizedTask = input.task.toLowerCase();
     const normalizedPath = input.filePath.toLowerCase();
@@ -73,6 +136,7 @@ function detectRenameIntent(task) {
 }
 function buildFullPatchPrompt(input) {
     const { task, filePath, fileContent, repoSummary, relatedContext, taskIntent, normalizedTaskIntent, outputMode = "full_content", executionPlanContext, } = input;
+    const codeStyle = detectCodeStyleFromSample(fileContent);
     const renameIntent = detectRenameIntent(task);
     const renameInstruction = renameIntent
         ? `RENAME OPERATION DETECTED:
@@ -137,16 +201,37 @@ ${filePath}
 REPO SUMMARY
 ${repoSummary}
 
-EXECUTION PLAN
-${executionPlanContext || "No execution plan available."}
+${executionPlanContext && executionPlanContext.trim()
+            ? `EXECUTION PLAN
+${executionPlanContext.trim()}
 
-RELATED CONTEXT
+`
+            : ""}RELATED CONTEXT
 ${relatedContext}
 
 CURRENT FILE CONTENT
 \`\`\`
 ${fileContent}
 \`\`\`
+
+CODE STYLE (mirror exactly):
+- Indentation: ${codeStyle.indentation}
+- Quotes: ${codeStyle.quotes}
+- Semicolons: ${codeStyle.semicolons}
+Match this style in REPLACE block exactly.
+
+REASONING STEP (silent):
+Before generating the patch, silently consider:
+- What is the minimal change that satisfies the task?
+- What lines in the file are the best unique anchor?
+- What must NOT be touched?
+Then output only the patch.
+
+SCOPE BOUNDARY:
+- Touch ONLY the lines required by the task
+- Do NOT refactor surrounding code
+- Do NOT rename variables not mentioned in the task
+- Do NOT add imports unless strictly required
 
 PATCH RULES
 ${renameInstruction}${uiRulesInstruction}${scopeControlInstruction}${microEditInstruction}- FIND must be an exact verbatim excerpt from CURRENT FILE CONTENT above (usually a small block around the change).
