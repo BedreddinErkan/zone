@@ -48,11 +48,22 @@ export type AgentLifecycleEvent = {
 export type ZoneStructuredProgressEvent = {
   runId: string;
   ts: number;
-  type: string;
+  type:
+    | "reading_file"
+    | "ranking_context"
+    | "context_ready"
+    | "generating_patch"
+    | "patch_rejected"
+    | "fallback"
+    | "fallback_success"
+    | "patch_converted"
+    | "validated"
+    | "verification";
   title: string;
   detail?: string;
   filePath?: string;
-  status: "active" | "success" | "warning" | "error";
+  command?: string;
+  status?: "active" | "success" | "warning" | "error";
 };
 
 export function createAgentLifecycleEvent(

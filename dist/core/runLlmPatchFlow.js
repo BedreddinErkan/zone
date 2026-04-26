@@ -2312,6 +2312,18 @@ function applyDeveloperPatchText(currentContent, rawPatchText, options) {
                     }),
             };
         }
+        if (findCountRaw === 0) {
+            const changed = countChangedLinesLocalized(updatedContent, nextContent.content);
+            if (changed === 0) {
+                return {
+                    ok: false,
+                    warning: "[PATCH_NO_MATCH_ABORT] " +
+                        JSON.stringify({
+                            reason: "no_op_or_zero_match",
+                        }),
+                };
+            }
+        }
         const mode = findCountRaw === 1 ? "exact" : nextContent.score >= 99 ? "exact" : "fuzzy";
         console.log("[zone-patch-apply-mode]", mode);
         const preservedAfter = lineEnding === "\r\n" ? !containsLoneLf(nextContent.content) : true;
@@ -3140,8 +3152,7 @@ async function runLlmPatchFlow(input) {
     emitStructuredProgress({
         type: "ranking_context",
         title: "Finding relevant files",
-        detail: "Ranking repository context",
-        status: "success",
+        status: "active",
     });
     // TEMP DIAGNOSTIC: surface top 20 ranker scores to verify PatientsPage presence
     console.log("[zone-diag-ranker]", JSON.stringify({
@@ -3396,8 +3407,8 @@ async function runLlmPatchFlow(input) {
     });
     emitStructuredProgress({
         type: "context_ready",
-        title: "Loaded context",
-        detail: `Using ${resolvedFileContexts.length} file(s)`,
+        title: "Loaded focused context",
+        detail: `${resolvedFileContexts.length} files`,
         status: "success",
     });
     // ── TOKEN BUDGET GUARD ──────────────────────────────────────────
@@ -4320,8 +4331,7 @@ async function runLlmPatchFlow(input) {
                 perf.mark(`full patch model call start ${patch.path}`);
                 emitStructuredProgress({
                     type: "generating_patch",
-                    title: "Generating minimal patch",
-                    detail: "Localized edit via LLM",
+                    title: "Generating a localized patch",
                     status: "active",
                     filePath: patch.path,
                 });
@@ -4453,11 +4463,36 @@ async function runLlmPatchFlow(input) {
                             visibleWarnings.push(appliedPatch.warning);
                         }
                         const failure = parsePatchFailureWarning(appliedPatch.warning);
+                        emitStructuredProgress({
+                            type: "patch_rejected",
+                            title: "Rejected unsafe patch output",
+                            detail: failure.reason,
+                            status: "warning",
+                            filePath: patch.path,
+                        });
                         if (failure.reason === "invalid_patch_format") {
                             fallbackForcePreviewOnly = true;
                         }
                         if (failure.reason === "anchor_too_small_for_large_replace") {
                             fallbackForcePreviewOnly = true;
+                        }
+                        if (failure.reason === "patch_protocol_leak") {
+                            emitStructuredProgress({
+                                type: "patch_rejected",
+                                title: "Patch protocol leak rejected",
+                                detail: "Instruction text inside FIND/REPLACE",
+                                status: "warning",
+                                filePath: patch.path,
+                            });
+                        }
+                        if (failure.reason === "anchor_too_small_for_large_replace") {
+                            emitStructuredProgress({
+                                type: "patch_rejected",
+                                title: "Patch anchor too small",
+                                detail: "FIND was too thin for a large REPLACE",
+                                status: "warning",
+                                filePath: patch.path,
+                            });
                         }
                         if ((failure.reason === "patch_find_not_found" ||
                             failure.reason === "no_match_abort" ||
@@ -4467,6 +4502,12 @@ async function runLlmPatchFlow(input) {
                             !isProtectedDeveloperUiPath(patch.path) &&
                             isUiFilePath(patch.path) &&
                             !/schema|database|db|migration/i.test(input.task)) {
+                            emitStructuredProgress({
+                                type: "fallback",
+                                title: "Trying deterministic fallback",
+                                status: "active",
+                                filePath: patch.path,
+                            });
                             console.log("[zone-ast-fallback-start]", JSON.stringify({ filePath: patch.path, reason: failure.reason }));
                             const astFallback = (0, astPatchFallback_js_1.tryAstPatchFallback)({
                                 filePath: patch.path,
@@ -4480,6 +4521,12 @@ async function runLlmPatchFlow(input) {
                                     summary: astFallback.summary,
                                     changedLinesEstimate: astFallback.changedLinesEstimate,
                                 }));
+                                emitStructuredProgress({
+                                    type: "fallback_success",
+                                    title: "Generated a safer localized edit",
+                                    status: "success",
+                                    filePath: patch.path,
+                                });
                                 patchSource = "ast_fallback";
                                 usedLlmPatchRecovered = false;
                                 const appliedFromAst = applyDeveloperPatchText(fileContent, astFallback.patchText, { filePath: patch.path });
@@ -4504,7 +4551,7 @@ async function runLlmPatchFlow(input) {
                             responseMode: failure.reason === "invalid_patch_format"
                                 ? "invalid_patch_format"
                                 : fullPatch.mode,
-                            status: "failed",
+                            status: failure.reason === "no_match_abort" ? "no_match" : "failed",
                             failureReason: failure.reason === "invalid_patch_format"
                                 ? "invalid_patch_format"
                                 : failure.reason,
@@ -4536,8 +4583,7 @@ async function runLlmPatchFlow(input) {
                     });
                     emitStructuredProgress({
                         type: "patch_converted",
-                        title: "Patch converted",
-                        detail: "FIND/REPLACE matched original file",
+                        title: "Patch matched the original file",
                         status: "success",
                         filePath: patch.path,
                     });
@@ -4909,8 +4955,7 @@ async function runLlmPatchFlow(input) {
                     try {
                         emitStructuredProgress({
                             type: "generating_patch",
-                            title: "Generating minimal patch",
-                            detail: "Localized edit via LLM",
+                            title: "Generating a localized patch",
                             status: "active",
                             filePath: patch.filePath,
                         });
@@ -5109,9 +5154,9 @@ async function runLlmPatchFlow(input) {
             : "warning";
         emitStructuredProgress({
             type: "validated",
-            title: "Patch validated",
-            detail: `${validatedChangedLines} changed lines`,
-            status: validatedStatus,
+            title: "Patch validation completed",
+            detail: `changed lines: ${validatedChangedLines}`,
+            status: "success",
         });
     }
     if (input.atomicPatch && patchResults.some((result) => result.status === "failed")) {
@@ -5313,7 +5358,7 @@ async function runLlmPatchFlow(input) {
                 emitStructuredProgress({
                     type: "verification",
                     title: "Running verification",
-                    detail: plan[0]?.command ?? "Repository verification",
+                    command: plan[0]?.command,
                     status: "active",
                 });
             }
@@ -5426,8 +5471,7 @@ async function runLlmPatchFlow(input) {
                                     continue;
                                 emitStructuredProgress({
                                     type: "generating_patch",
-                                    title: "Generating minimal patch",
-                                    detail: "Localized edit via LLM",
+                                    title: "Generating a localized patch",
                                     status: "active",
                                     filePath: patch.filePath,
                                 });
@@ -5501,7 +5545,7 @@ async function runLlmPatchFlow(input) {
                                 emitStructuredProgress({
                                     type: "verification",
                                     title: "Running verification",
-                                    detail: plan[0]?.command ?? "Repository verification",
+                                    command: plan[0]?.command,
                                     status: "active",
                                 });
                             }
