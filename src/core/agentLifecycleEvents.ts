@@ -53,6 +53,7 @@ export type ZoneStructuredProgressEvent = {
     | "ranking_context"
     | "context_ready"
     | "generating_patch"
+    | "planner_result"
     | "patch_rejected"
     | "fallback"
     | "fallback_success"
@@ -64,6 +65,11 @@ export type ZoneStructuredProgressEvent = {
   filePath?: string;
   command?: string;
   status?: "active" | "success" | "warning" | "error";
+  planner?: {
+    changeDescription: string;
+    strategy: string;
+    filesToEdit: string[];
+  };
 };
 
 export function createAgentLifecycleEvent(

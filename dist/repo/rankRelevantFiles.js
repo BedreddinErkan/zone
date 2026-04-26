@@ -375,6 +375,10 @@ function scoreFile(file, task) {
 }
 function rankRelevantFiles(args) {
     const { task, files, intent } = args;
+    const maxContextFilesRaw = (process.env.MAX_CONTEXT_FILES ?? "").trim();
+    const maxContextFiles = maxContextFilesRaw && Number.isFinite(Number(maxContextFilesRaw))
+        ? Math.max(1, Math.floor(Number(maxContextFilesRaw)))
+        : 5;
     return files
         .map((file) => {
         const baseScore = scoreFile(file, task);
@@ -386,6 +390,7 @@ function rankRelevantFiles(args) {
             score: baseScore + boost
         };
     })
-        .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
+        .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
+        .slice(0, maxContextFiles);
 }
 //# sourceMappingURL=rankRelevantFiles.js.map

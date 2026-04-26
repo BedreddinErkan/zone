@@ -13,7 +13,11 @@ function truncateContent(content, maxLength = 6000) {
 }
 async function readProjectFiles(paths) {
     const result = {};
-    for (const filePath of paths) {
+    const maxContextFilesRaw = (process.env.MAX_CONTEXT_FILES ?? "").trim();
+    const maxContextFiles = maxContextFilesRaw && Number.isFinite(Number(maxContextFilesRaw))
+        ? Math.max(1, Math.floor(Number(maxContextFilesRaw)))
+        : 5;
+    for (const filePath of paths.slice(0, maxContextFiles)) {
         try {
             const content = await promises_1.default.readFile(filePath, "utf-8");
             result[filePath] = truncateContent(content);

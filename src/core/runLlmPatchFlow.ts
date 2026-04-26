@@ -5,6 +5,7 @@ import { readProjectFiles } from "../repo/readProjectFiles.js";
 import { planFeatureWithLlm } from "../llm/planFeature.js";
 import { planPatchPreviewWithLlm } from "../llm/planPatchPreview.js";
 import { planFullPatchWithLlm } from "../llm/planFullPatch.js";
+import { plannerStep } from "../llm/plannerStep.js";
 import { tryRecoverDeveloperPatchFromModelOutput } from "./patchConversion.js";
 import {
   generateExecutionPlan,
@@ -4006,6 +4007,12 @@ export async function runLlmPatchFlow(input: {
 }): Promise<LlmPatchFlowResult> {
   const lifecycleEvents: AgentLifecycleEvent[] = [];
 
+  const getMaxContextFiles = (): number => {
+    const raw = (process.env.MAX_CONTEXT_FILES ?? "").trim();
+    const n = raw ? Number(raw) : NaN;
+    return Number.isFinite(n) ? Math.max(1, Math.floor(n)) : 5;
+  };
+
   const emitStructuredProgress = (
     event: Omit<ZoneStructuredProgressEvent, "runId" | "ts">
   ): void => {
@@ -4323,7 +4330,7 @@ export async function runLlmPatchFlow(input: {
     console.log("[zone-explicit-target-forced-into-ranking]", explicitTargetRepoFile.path);
     fullRankedFiles = mergeExplicitRepoFileIntoRankedFiles(fullRankedFiles, explicitTargetRepoFile);
   }
-  let relevantFiles = fullRankedFiles.slice(0, 8);
+  let relevantFiles = fullRankedFiles.slice(0, getMaxContextFiles());
   if (explicitTargetRepoFile) {
     const explicitRankedFile: RankedRepoFile = {
       ...explicitTargetRepoFile,
@@ -4346,6 +4353,47 @@ export async function runLlmPatchFlow(input: {
     title: "Finding relevant files",
     status: "active",
   });
+
+  const skipPlanner = (process.env.SKIP_PLANNER ?? "").trim().toLowerCase() === "true";
+  let plannerSelection: { filesToEdit: string[]; changeDescription: string; strategy: string } | null =
+    null;
+  if (!skipPlanner && !input.hostedContext && !explicitTargetRepoFile) {
+    try {
+      plannerSelection = await plannerStep({
+        task: input.task,
+        rankedFilePaths: relevantFiles.map((f) => f.path),
+        repoSummary: projectSummary,
+      });
+    } catch {
+      plannerSelection = null;
+    }
+    if (plannerSelection?.filesToEdit?.length) {
+      emitStructuredProgress({
+        type: "planner_result",
+        title: "Planner result",
+        status: "success",
+        planner: {
+          changeDescription: plannerSelection.changeDescription,
+          strategy: plannerSelection.strategy,
+          filesToEdit: plannerSelection.filesToEdit,
+        },
+      });
+    }
+    if (plannerSelection?.filesToEdit?.length) {
+      const allowed = new Set(plannerSelection.filesToEdit);
+      relevantFiles = relevantFiles.filter((f) => allowed.has(f.path));
+    }
+  }
+
+  if ((process.env.DEBUG_PLANNER ?? "").trim().toLowerCase() === "true") {
+    console.log("[planner]", {
+      rankedCount: fullRankedFiles.length,
+      selectedCount: plannerSelection?.filesToEdit?.length ?? 0,
+      selectedPaths: plannerSelection?.filesToEdit ?? [],
+      changeDescription: plannerSelection?.changeDescription ?? "",
+      strategy: plannerSelection?.strategy ?? "",
+    });
+  }
 
   // TEMP DIAGNOSTIC: surface top 20 ranker scores to verify PatientsPage presence
   console.log(
@@ -4426,7 +4474,7 @@ export async function runLlmPatchFlow(input: {
       });
       const featureFailReport = await generateFinalRunReport({
         task: input.task,
-        contextFilesMeta: relevantFiles.slice(0, 8).map((f) => ({
+        contextFilesMeta: relevantFiles.slice(0, getMaxContextFiles()).map((f) => ({
           path: f.path,
           reason: "Ranked as relevant to the task",
         })),
@@ -4482,7 +4530,7 @@ export async function runLlmPatchFlow(input: {
     relevantFiles.map((file) => [file.path, file.score])
   );
   const llmSuggestedPaths = new Set((llmPlan?.suggestedFiles ?? []).map((file) => file.path));
-  const preliminaryContextFiles =
+  let preliminaryContextFiles =
     input.hostedContext?.contextFiles.map((file) => ({
       path: file.path,
       action: file.action,
@@ -4521,6 +4569,11 @@ export async function runLlmPatchFlow(input: {
         return a.path.localeCompare(b.path);
       })
       .slice(0, 6);
+
+  if (!skipPlanner && plannerSelection?.filesToEdit?.length) {
+    const allowed = new Set(plannerSelection.filesToEdit);
+    preliminaryContextFiles = preliminaryContextFiles.filter((f) => allowed.has(f.path));
+  }
 
   reportProgress("Loading file context...");
   let selectedContextFiles = preliminaryContextFiles;

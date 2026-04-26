@@ -13,7 +13,13 @@ export async function readProjectFiles(
 ): Promise<Record<string, string>> {
   const result: Record<string, string> = {};
 
-  for (const filePath of paths) {
+  const maxContextFilesRaw = (process.env.MAX_CONTEXT_FILES ?? "").trim();
+  const maxContextFiles =
+    maxContextFilesRaw && Number.isFinite(Number(maxContextFilesRaw))
+      ? Math.max(1, Math.floor(Number(maxContextFilesRaw)))
+      : 5;
+
+  for (const filePath of paths.slice(0, maxContextFiles)) {
     try {
       const content = await fs.readFile(filePath, "utf-8");
       result[filePath] = truncateContent(content);
