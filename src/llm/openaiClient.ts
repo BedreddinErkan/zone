@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { getRequestUserApiKey } from "./openaiContext.js";
 
 export type ZoneInferenceMode = "hosted" | "local";
 
@@ -37,10 +38,26 @@ export function createOpenAIClient(userApiKey?: string): OpenAI {
     typeof userApiKey === "string" && userApiKey.trim()
       ? userApiKey.trim()
       : "";
+  const contextApiKey = getRequestUserApiKey();
+  const trimmedContextApiKey =
+    typeof contextApiKey === "string" && contextApiKey.trim()
+      ? contextApiKey.trim()
+      : "";
   const mode = getInferenceMode();
-  const apiKey = trimmedUserApiKey || process.env.OPENAI_API_KEY;
+  const envApiKey =
+    typeof process.env.OPENAI_API_KEY === "string" && process.env.OPENAI_API_KEY.trim()
+      ? process.env.OPENAI_API_KEY.trim()
+      : "";
+  const apiKey = trimmedUserApiKey || trimmedContextApiKey || envApiKey;
+  const source = trimmedUserApiKey
+    ? "explicit"
+    : trimmedContextApiKey
+      ? "user"
+      : envApiKey
+        ? "env"
+        : "none";
 
-  console.log(`[zone] openai key source=${trimmedUserApiKey ? "user" : "env"} mode=${mode}`);
+  console.log(`[zone] openai key source=${source} mode=${mode}`);
 
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is missing for local inference mode.");

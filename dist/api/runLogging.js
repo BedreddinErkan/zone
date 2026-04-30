@@ -5,6 +5,7 @@ exports.queueRunLog = queueRunLog;
 const supabase_js_1 = require("@supabase/supabase-js");
 const conversationRepository_js_1 = require("../billing/conversationRepository.js");
 const resolveBillingAction_js_1 = require("../billing/resolveBillingAction.js");
+const node_crypto_1 = require("node:crypto");
 function getSupabaseClient() {
     const url = process.env.SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -99,22 +100,35 @@ async function logRun(input) {
     });
     let conversation = null;
     try {
-        conversation =
-            typeof input.conversationId === "string" && input.conversationId.trim()
-                ? await (0, conversationRepository_js_1.getConversationById)(supabase, input.conversationId.trim())
-                : null;
-        if (conversation &&
-            (conversation.repoPath !== input.repoPath || conversation.role !== input.role)) {
-            conversation = null;
-        }
-        if (!conversation) {
-            conversation = await (0, conversationRepository_js_1.createConversation)(supabase, {
-                userId: effectiveUserId,
-                mode: billingMode,
-                repoPath: input.repoPath,
+        const threadId = typeof input.conversationId === "string" && input.conversationId.trim()
+            ? input.conversationId.trim()
+            : (0, node_crypto_1.randomUUID)();
+        const now = Date.now();
+        const appendMessages = [
+            {
+                type: "user",
+                text: input.task,
+                ts: now,
                 role: input.role,
-            });
-        }
+                changedFiles: Array.isArray(input.changedFiles)
+                    ? input.changedFiles.filter((x) => typeof x === "string" && x.trim()).slice(0, 20)
+                    : undefined,
+            },
+            {
+                type: "run",
+                ts: now,
+                decisionMode: input.decisionMode,
+                confidence: input.confidence,
+                creditsUsed: input.creditsUsed,
+                executionId: input.executionId ?? null,
+            },
+        ];
+        conversation = await (0, conversationRepository_js_1.appendConversationMessages)(supabase, {
+            userId: effectiveUserId,
+            threadId,
+            repoPath: input.repoPath,
+            appendMessages,
+        });
     }
     catch (error) {
         logBillingDebug("conversation persistence failed", {
@@ -145,7 +159,7 @@ async function logRun(input) {
             userId: effectiveUserId,
             reason: "billing_action_free",
         });
-        return conversation?.id ?? null;
+        return conversation?.threadId ?? null;
     }
     logBillingDebug("deduction rpc start", {
         routeName: input.routeName ?? "unknown",
@@ -165,12 +179,17 @@ async function logRun(input) {
         p_billing_mode: billingMode,
     });
     if (rpcResult?.error) {
+        const rpcError = rpcResult.error;
         logBillingDebug("deduction rpc error", {
             routeName: input.routeName ?? "unknown",
             userId: effectiveUserId,
-            error: rpcResult.error instanceof Error
-                ? rpcResult.error.message
+            error: typeof rpcError?.message === "string" && rpcError.message.trim()
+                ? rpcError.message
                 : String(rpcResult.error),
+            code: rpcError?.code,
+            details: rpcError?.details,
+            hint: rpcError?.hint,
+            raw: JSON.stringify(rpcResult.error, Object.getOwnPropertyNames(rpcResult.error ?? {})),
         });
         return null;
     }
@@ -179,21 +198,9 @@ async function logRun(input) {
         userId: effectiveUserId,
     });
     if (conversation) {
-        try {
-            await (0, conversationRepository_js_1.updateConversation)(supabase, conversation.id, {
-                chargedRunCount: conversation.chargedRunCount + 1,
-            });
-        }
-        catch (error) {
-            logBillingDebug("conversation update failed after deduction", {
-                routeName: input.routeName ?? "unknown",
-                userId: effectiveUserId,
-                conversationId: conversation.id,
-                error: error instanceof Error ? error.message : String(error),
-            });
-        }
+        // No-op: conversation persistence is message-based now; billing is enforced via profile quota + RPC.
     }
-    return conversation?.id ?? null;
+    return conversation?.threadId ?? null;
 }
 function queueRunLog(input) {
     const userId = typeof input.userId === "string" ? input.userId.trim() : "";

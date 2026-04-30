@@ -1,10 +1,32 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.logger = exports.LOG_LEVEL = void 0;
 exports.logInfo = logInfo;
 exports.logSuccess = logSuccess;
 exports.logWarn = logWarn;
 exports.logError = logError;
 exports.printFeatureAgentReport = printFeatureAgentReport;
+exports.LOG_LEVEL = (() => {
+    const raw = String(process.env.ZONE_LOG_LEVEL || "debug")
+        .trim()
+        .toLowerCase();
+    if (raw === "info" || raw === "quiet")
+        return raw;
+    return "debug";
+})();
+exports.logger = {
+    debug: (...args) => {
+        if (exports.LOG_LEVEL === "debug")
+            console.log(...args);
+    },
+    info: (...args) => {
+        if (exports.LOG_LEVEL === "debug" || exports.LOG_LEVEL === "info")
+            console.log(...args);
+    },
+    error: (...args) => {
+        console.error(...args);
+    },
+};
 function timestamp() {
     return new Date().toISOString();
 }

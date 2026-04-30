@@ -18,6 +18,21 @@ function includesAny(text, keywords) {
 function hasBoundedMassScopeScopeWord(text) {
     return /\b(?:all|every|entire|whole)\b/.test(text);
 }
+function isPreserveAllContext(text) {
+    // Avoid false positives like "keep all X intact" / "preserve all X"
+    return (/\b(?:keep|preserve|maintain|leave)\s+all\b/.test(text) ||
+        /\ball\b[^.\n]{0,40}\bintact\b/.test(text));
+}
+function hasDestructiveVerbBeforeScopeWord(text) {
+    const scope = text.match(/\b(?:all|every|entire|whole)\b/);
+    if (!scope || typeof scope.index !== "number")
+        return false;
+    const scopeIdx = scope.index;
+    const destructiveVerb = text.match(/\b(?:remove|delete|destroy|drop|truncate|wipe|purge|clear|reset|clean)\b/);
+    if (!destructiveVerb || typeof destructiveVerb.index !== "number")
+        return false;
+    return destructiveVerb.index < scopeIdx;
+}
 function isExplicitMinimalSingleFileTask(text) {
     if (!/\btarget\s+file\s*:/i.test(text))
         return false;
@@ -216,7 +231,11 @@ function computeRiskScoreDetails(input) {
                 weight: 0.6,
             },
         ]) * 25;
-    const hasLowRiskSignal = includesAny(normalizedTask, [
+    const isConsoleLogCleanup = /\bremove\b.*\bconsole\.(?:log|debug|info)\b/i.test(normalizedTask) ||
+        /\bdelete\b.*\bconsole\.log\b/i.test(normalizedTask) ||
+        /\bclean\b.*\bconsole\b/i.test(normalizedTask) ||
+        /\bremove\b.*\bdebug\b.*\blog\b/i.test(normalizedTask);
+    let hasLowRiskSignal = includesAny(normalizedTask, [
         "copy",
         "text",
         "rename",
@@ -235,7 +254,15 @@ function computeRiskScoreDetails(input) {
         "font size",
         "color tweak",
         "ui polish",
+        "console.log",
+        "console.debug",
+        "debug log",
+        "console statement",
+        "unused import",
+        "dead code",
     ]);
+    if (isConsoleLogCleanup)
+        hasLowRiskSignal = true;
     if (isExplicitMinimalSingleFileTask(normalizedTask) &&
         isBenignLocalHygieneRemoval(normalizedTask) &&
         !hasCatastrophicDestructiveIntent(normalizedTask)) {
@@ -246,7 +273,11 @@ function computeRiskScoreDetails(input) {
     const hasScopeWord = hasBoundedMassScopeScopeWord(normalizedTask);
     const hasMassScopeSignal = hasReactStateManagementContext
         ? false
-        : hasDestructiveSignal && hasScopeWord;
+        : hasDestructiveSignal &&
+            hasScopeWord &&
+            hasDestructiveVerbBeforeScopeWord(normalizedTask) &&
+            !isPreserveAllContext(normalizedTask) &&
+            !isConsoleLogCleanup;
     const codeIntentLowRiskBonus = input.codeIntent === "test_add" ? -15 :
         input.codeIntent === "micro_edit" ? -10 :
             input.codeIntent === "config_change" && !hasCriticalSignal ? 10 :

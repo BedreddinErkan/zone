@@ -5,6 +5,7 @@ const zod_1 = require("zod");
 const openaiClient_js_1 = require("./openaiClient.js");
 const withSelfHealingRetry_js_1 = require("../core/withSelfHealingRetry.js");
 const fullPatchPrompt_js_1 = require("../prompts/fullPatchPrompt.js");
+const extractSymbolContext_js_1 = require("../ast/extractSymbolContext.js");
 const executionPlan_js_1 = require("./executionPlan.js");
 const developerPatchParse_js_1 = require("../core/developerPatchParse.js");
 const patchConversion_js_1 = require("../core/patchConversion.js");
@@ -15,6 +16,7 @@ const fullContentSchema = zod_1.z.object({
     warnings: zod_1.z.array(zod_1.z.string()),
 });
 const LARGE_FILE_PATCH_THRESHOLD = 8000;
+const FULL_CONTENT_MAX_LINE_COUNT = 150;
 function isConstrainedLocalizedPatchTask(task) {
     const normalizedTask = task.toLowerCase();
     return [
@@ -32,6 +34,10 @@ function selectFullPatchOutputMode(input) {
     if (input.outputMode) {
         return input.outputMode;
     }
+    const fileLineCount = input.fileContent.split(/\r?\n/).length;
+    if (fileLineCount > FULL_CONTENT_MAX_LINE_COUNT) {
+        return "find_replace_patch";
+    }
     const hasContextWindow = input.relatedContext.includes("// CONTEXT WINDOW:");
     const shouldPreferFullContent = hasContextWindow &&
         input.fileContent.length < LARGE_FILE_PATCH_THRESHOLD &&
@@ -42,6 +48,48 @@ function selectFullPatchOutputMode(input) {
     return input.fileContent.length < LARGE_FILE_PATCH_THRESHOLD
         ? "full_content"
         : "find_replace_patch";
+}
+function countChar(text, char) {
+    if (!text)
+        return 0;
+    let n = 0;
+    for (let i = 0; i < text.length; i += 1) {
+        if (text[i] === char)
+            n += 1;
+    }
+    return n;
+}
+function looksLikeTruncatedFullContent(fullContent) {
+    const raw = typeof fullContent === "string" ? fullContent : "";
+    const trimmed = raw.trimEnd();
+    if (!trimmed)
+        return { ok: false, reason: "empty_full_content" };
+    const openBraces = countChar(trimmed, "{");
+    const closeBraces = countChar(trimmed, "}");
+    const braceDelta = Math.abs(openBraces - closeBraces);
+    if (braceDelta > 3) {
+        return {
+            ok: false,
+            reason: "brace_imbalance",
+            braceDelta,
+            endingPreview: trimmed.slice(-20),
+        };
+    }
+    // Heuristic: rewritten full file should end on a statement / block close.
+    const endsOk = trimmed.endsWith("}") ||
+        trimmed.endsWith("};") ||
+        trimmed.endsWith("})") ||
+        trimmed.endsWith("});") ||
+        trimmed.endsWith("})]") ||
+        /\}\s*\)\s*;?\s*$/.test(trimmed);
+    if (!endsOk) {
+        return {
+            ok: false,
+            reason: "suspicious_eof",
+            endingPreview: trimmed.slice(-20),
+        };
+    }
+    return { ok: true };
 }
 function isValidPatchResponse(text) {
     const t = text.trim();
@@ -72,6 +120,13 @@ function buildStrictPatchSystemInstruction() {
         "- descriptions",
         "- markdown",
         "- comments",
+        "",
+        "CRITICAL RULES:",
+        "- REPLACE must contain EVERY line from FIND, plus your additions/changes.",
+        "- You may ONLY omit a line from REPLACE if the task explicitly asks to DELETE that line.",
+        "- If you are ADDING lines, FIND should be 1-3 lines (the anchor), REPLACE = FIND + new lines.",
+        "- NEVER shrink REPLACE compared to FIND unless deletion is explicitly requested.",
+        "- If unsure, make FIND smaller rather than risk omitting lines.",
         "",
         "If you output anything else, the response is INVALID.",
     ].join("\n");
@@ -243,6 +298,14 @@ function buildFindReplaceStrictContract(filePath) {
         "The FIND block MUST exist EXACTLY in the file.",
         "",
         "PATCH RULES:",
+        "",
+        "WARNING:",
+        "If your REPLACE block has FEWER lines than your FIND block, you are DELETING code.",
+        "Only do this if the task explicitly asks for deletion.",
+        "For additions (comments, new functions, imports):",
+        "  FIND = small anchor (1-3 lines)",
+        "  REPLACE = same anchor + new lines inserted",
+        "",
         "- Modify ONLY the existing submit handler.",
         "- DO NOT rewrite the component.",
         "- DO NOT add new components.",
@@ -302,18 +365,98 @@ async function planFullPatchWithLlm(input) {
     const model = (0, openaiClient_js_1.getModelName)("high");
     let openAiTransportErrorDetails = null;
     let lastSuccessfulResponsesCreateResult = null;
-    const outputMode = selectFullPatchOutputMode({
+    const funcNameMatch = input.task.match(/(?:in|the|fix|update|modify|refactor|change)\s+(?:the\s+)?(\w+)\s+(?:function|method)/i);
+    const targetFuncName = funcNameMatch?.[1] ? String(funcNameMatch[1]).trim() : "";
+    const symbolCtx = targetFuncName.length > 0
+        ? (0, extractSymbolContext_js_1.extractSymbolContext)(input.fileContent, targetFuncName, input.filePath, 5)
+        : null;
+    const astTargetInstruction = symbolCtx && targetFuncName
+        ? [
+            `Target function: ${targetFuncName} (lines ${symbolCtx.targetFunction.startLine}-${symbolCtx.targetFunction.endLine})`,
+            "Only modify this function. Do not touch other parts of the file.",
+            "Return FIND/REPLACE that targets only lines within this function.",
+            "Note: the provided context may include a literal '...' placeholder for omitted code. Do NOT use that placeholder in FIND/REPLACE.",
+        ].join("\n")
+        : "";
+    const fileContentForPrompt = symbolCtx && targetFuncName
+        ? `${symbolCtx.fileHeader}\n...\n${symbolCtx.targetFunction.content}`
+        : input.fileContent;
+    const relatedContextForPrompt = symbolCtx && targetFuncName
+        ? `${input.relatedContext}\n\nAST TARGETING\n${astTargetInstruction}\n\nSURROUNDING CONTEXT (read-only)\n${symbolCtx.surroundingContext}`
+        : input.relatedContext;
+    if (symbolCtx && targetFuncName) {
+        console.log("[zone-ast]", {
+            file: input.filePath,
+            targetFunc: targetFuncName,
+            lines: `${symbolCtx.targetFunction.startLine}-${symbolCtx.targetFunction.endLine}`,
+            contextSize: symbolCtx.targetFunction.content.length,
+        });
+    }
+    // Best-effort: surface a target symbol to the UI (used for streaming header).
+    if (typeof input.onProgress === "function") {
+        const sym = targetFuncName || "";
+        if (sym) {
+            try {
+                input.onProgress({
+                    type: "patch_stream_target",
+                    filePath: input.filePath,
+                    targetSymbol: sym,
+                });
+            }
+            catch { }
+        }
+    }
+    const contentForLineCount = (input.fullOriginalFileContent ?? input.fileContent) || "";
+    const lineCount = contentForLineCount.split(/\r?\n/).length;
+    const isSimpleTask = /comment|rename|add.*import|remove.*import|add.*log/i.test(input.task);
+    let outputMode = selectFullPatchOutputMode({
         outputMode: input.outputMode,
         task: input.task,
-        fileContent: input.fileContent,
-        relatedContext: input.relatedContext,
+        fileContent: fileContentForPrompt,
+        relatedContext: relatedContextForPrompt,
     });
+    if (symbolCtx && targetFuncName) {
+        // Prefer surgical patches when we have a concrete symbol range.
+        outputMode = "find_replace_patch";
+    }
+    if (lineCount > 150 && isSimpleTask) {
+        outputMode = "find_replace_patch";
+    }
+    const lastAddedFns = Array.isArray(input.lastAddedFunctions)
+        ? input.lastAddedFunctions
+            .filter((x) => typeof x === "string" && x.trim())
+            .map((x) => String(x).trim())
+            .slice(0, 5)
+        : [];
+    const rawTask = String(input.task || "");
+    const normalizedTask = rawTask.toLowerCase();
+    const shouldClarifyRecentFunc = lastAddedFns.length > 0 &&
+        [
+            "function you just added",
+            "the function you just added",
+            "just added",
+            "previous function",
+            "the previous function",
+            "the function i just added",
+            "function i just added",
+        ].some((phrase) => normalizedTask.includes(phrase));
+    const clarifiedTask = shouldClarifyRecentFunc
+        ? [
+            "CONTEXT: The user is referring to the recently added function(s):",
+            ...lastAddedFns.map((n) => `- ${n}`),
+            "",
+            `When the task says "the function you just added", it means: ${lastAddedFns[0]}`,
+            "",
+            rawTask,
+        ].join("\n")
+        : rawTask;
     const prompt = (0, fullPatchPrompt_js_1.buildFullPatchPrompt)({
-        task: input.task,
+        task: clarifiedTask,
+        plannerSuggestedFile: input.plannerSuggestedFile,
         filePath: input.filePath,
-        fileContent: input.fileContent,
+        fileContent: fileContentForPrompt,
         repoSummary: input.repoSummary,
-        relatedContext: input.relatedContext,
+        relatedContext: relatedContextForPrompt,
         taskIntent: input.taskIntent,
         normalizedTaskIntent: input.normalizedTaskIntent,
         outputMode,
@@ -327,7 +470,10 @@ async function planFullPatchWithLlm(input) {
             "ONLY output the patch.",
         ].join("\n");
         const findReplacePrompt = `${strictHeader}\n\n${prompt.trim()}\n\n${buildFindReplaceStrictContract(input.filePath)}`;
-        const strictSystemInstruction = buildStrictPatchSystemInstruction();
+        const strictSystemInstruction = [
+            buildStrictPatchSystemInstruction(),
+            ...(astTargetInstruction ? ["", "AST TARGETING (hard constraint)", astTargetInstruction] : []),
+        ].join("\n");
         const applyPatchTool = buildApplyPatchTool();
         const applyPatchToolChoice = buildApplyPatchToolChoice();
         let lastRawPatchResponse = "";
@@ -372,14 +518,188 @@ async function planFullPatchWithLlm(input) {
                 }));
                 let response;
                 try {
-                    response = await client.responses.create({
-                        model,
-                        temperature: 0,
-                        max_output_tokens: maxOutputTokens,
-                        tools: [applyPatchTool],
-                        tool_choice: applyPatchToolChoice,
-                        input: responseInput,
-                    });
+                    // Streaming (best-effort): prefer streaming tool-call arguments; fallback to non-streaming.
+                    const streamFn = client.responses.stream;
+                    if (typeof streamFn === "function") {
+                        console.log("[zone-stream-start]", { filePath: input.filePath });
+                        const controller = new AbortController();
+                        const timeout = setTimeout(() => {
+                            try {
+                                controller.abort();
+                            }
+                            catch { }
+                        }, 120_000);
+                        const runner = client.responses.stream({
+                            model,
+                            temperature: 0,
+                            max_output_tokens: maxOutputTokens,
+                            tools: [applyPatchTool],
+                            tool_choice: applyPatchToolChoice,
+                            input: responseInput,
+                        });
+                        let argsSnapshot = "";
+                        let lastPatchLen = 0;
+                        let sawAnyToolArgsEvent = false;
+                        const tryExtractPatchFromArgs = (raw) => {
+                            const key = `"patch"`;
+                            const k = raw.indexOf(key);
+                            if (k < 0)
+                                return null;
+                            const colon = raw.indexOf(":", k + key.length);
+                            if (colon < 0)
+                                return null;
+                            const firstQuote = raw.indexOf('"', colon + 1);
+                            if (firstQuote < 0)
+                                return null;
+                            // parse JSON string value with escapes
+                            let i = firstQuote + 1;
+                            let out = "";
+                            while (i < raw.length) {
+                                const ch = raw[i];
+                                if (ch === "\\") {
+                                    const nxt = raw[i + 1];
+                                    if (nxt == null)
+                                        return null;
+                                    // handle common escapes
+                                    if (nxt === "n")
+                                        out += "\n";
+                                    else if (nxt === "r")
+                                        out += "\r";
+                                    else if (nxt === "t")
+                                        out += "\t";
+                                    else if (nxt === '"')
+                                        out += '"';
+                                    else if (nxt === "\\")
+                                        out += "\\";
+                                    else
+                                        out += nxt;
+                                    i += 2;
+                                    continue;
+                                }
+                                if (ch === '"') {
+                                    return out;
+                                }
+                                out += ch;
+                                i += 1;
+                            }
+                            return null;
+                        };
+                        try {
+                            for await (const event of runner) {
+                                if (controller.signal.aborted)
+                                    break;
+                                if (!event || typeof event !== "object")
+                                    continue;
+                                // Primary: tool-call arguments streaming
+                                if (event.type === "response.function_call_arguments.delta") {
+                                    sawAnyToolArgsEvent = true;
+                                    const snap = typeof event.snapshot === "string" ? event.snapshot : "";
+                                    if (snap && snap !== argsSnapshot) {
+                                        argsSnapshot = snap;
+                                        const patchText = tryExtractPatchFromArgs(argsSnapshot);
+                                        if (typeof patchText === "string" && patchText.length >= lastPatchLen) {
+                                            const delta = patchText.slice(lastPatchLen);
+                                            if (delta) {
+                                                console.log("[zone-stream-delta]", { delta: delta.slice(0, 30) });
+                                                input.onProgress?.({
+                                                    type: "patch_stream_delta",
+                                                    filePath: input.filePath,
+                                                    delta,
+                                                });
+                                                lastPatchLen = patchText.length;
+                                            }
+                                        }
+                                    }
+                                    continue;
+                                }
+                                // Secondary: output_text streaming (if tool-call isn't used by the model)
+                                if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
+                                    console.log("[zone-stream-delta]", { delta: String(event.delta).slice(0, 30) });
+                                    input.onProgress?.({
+                                        type: "patch_stream_delta",
+                                        filePath: input.filePath,
+                                        delta: event.delta,
+                                    });
+                                }
+                            }
+                        }
+                        finally {
+                            try {
+                                clearTimeout(timeout);
+                            }
+                            catch { }
+                        }
+                        response = await runner.finalResponse();
+                        // If the SDK doesn't emit function_call_arguments.delta events (common in some tool-call modes),
+                        // fall back to emitting the FINAL tool arguments as a single "delta" so the UI shows something.
+                        if (typeof input.onProgress === "function" && lastPatchLen === 0) {
+                            const toolPatch = extractPatchFromToolCall(response);
+                            if (typeof toolPatch === "string" && toolPatch.length > 0) {
+                                const buildPatchSnippet = (raw) => {
+                                    const t = String(raw || "").replace(/\r\n/g, "\n");
+                                    const findIdx = t.lastIndexOf("\n--- FIND ---");
+                                    const repIdx = t.lastIndexOf("\n--- REPLACE ---");
+                                    if (repIdx < 0)
+                                        return t;
+                                    const findStart = findIdx >= 0 ? findIdx + "\n--- FIND ---".length : -1;
+                                    const repStart = repIdx + "\n--- REPLACE ---".length;
+                                    const findBlock = findStart >= 0 && findStart < repIdx
+                                        ? t.slice(findStart, repIdx).replace(/^\s*\n/, "").replace(/\s*$/, "")
+                                        : "";
+                                    let replaceBlock = t.slice(repStart).replace(/^\s*\n/, "");
+                                    // Cap output aggressively: show only changed region.
+                                    const findLines = findBlock ? findBlock.split("\n") : [];
+                                    const replaceLines = replaceBlock ? replaceBlock.split("\n") : [];
+                                    const before = findLines.slice(Math.max(0, findLines.length - 2));
+                                    const after = findLines.slice(0, Math.min(2, findLines.length));
+                                    const maxReplaceLines = 60;
+                                    const replaceCapped = replaceLines.length > maxReplaceLines
+                                        ? [...replaceLines.slice(0, maxReplaceLines), "… (truncated)"]
+                                        : replaceLines;
+                                    // Rebuild a mini patch blob so FE can parse FIND/REPLACE.
+                                    const fileLine = t.split("\n").find((l) => l.startsWith("--- FILE:")) ?? "--- FILE: (unknown) ---";
+                                    return [
+                                        fileLine,
+                                        "--- FIND ---",
+                                        ...before,
+                                        ...(findLines.length > 4 ? ["…"] : []),
+                                        ...after,
+                                        "--- REPLACE ---",
+                                        ...replaceCapped,
+                                        "",
+                                    ].join("\n");
+                                };
+                                const snippet = buildPatchSnippet(toolPatch);
+                                console.log("[zone-stream-delta]", {
+                                    filePath: input.filePath,
+                                    deltaLength: snippet.length,
+                                    preview: snippet.slice(0, 50),
+                                    fallback: true,
+                                    sawAnyToolArgsEvent,
+                                });
+                                try {
+                                    input.onProgress({
+                                        type: "patch_stream_delta",
+                                        filePath: input.filePath,
+                                        delta: snippet,
+                                        fallback: true,
+                                    });
+                                    lastPatchLen = snippet.length;
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+                    else {
+                        response = await client.responses.create({
+                            model,
+                            temperature: 0,
+                            max_output_tokens: maxOutputTokens,
+                            tools: [applyPatchTool],
+                            tool_choice: applyPatchToolChoice,
+                            input: responseInput,
+                        });
+                    }
                 }
                 catch (err) {
                     const elapsedMs = Date.now() - callStartedAt;
@@ -395,7 +715,16 @@ async function planFullPatchWithLlm(input) {
                         code: p.code,
                         type: p.type,
                     }));
-                    throw err;
+                    console.log("[zone-stream-fallback]", { error: err instanceof Error ? err.message : String(err) });
+                    // Fallback to non-streaming on any streaming failure.
+                    response = await client.responses.create({
+                        model,
+                        temperature: 0,
+                        max_output_tokens: maxOutputTokens,
+                        tools: [applyPatchTool],
+                        tool_choice: applyPatchToolChoice,
+                        input: responseInput,
+                    });
                 }
                 const elapsedMs = Date.now() - callStartedAt;
                 openAiTransportErrorDetails = null;
@@ -417,6 +746,7 @@ async function planFullPatchWithLlm(input) {
                 const fromTool = toolPatch != null ? String(toolPatch).trim() : "";
                 const fromExtract = extraction.ok ? extraction.text.trim() : "";
                 const rawForAttempt = fromTool || fromExtract;
+                console.log("[zone-gpt-raw]", rawForAttempt.slice(0, 500));
                 console.log("[zone-patch-raw-response-debug]", JSON.stringify({
                     filePath: input.filePath,
                     attempt: findReplaceAttemptIndex,
@@ -462,6 +792,14 @@ async function planFullPatchWithLlm(input) {
             },
             validate: (raw) => {
                 const issues = [];
+                const parsed = (0, developerPatchParse_js_1.parseDeveloperPatchText)(raw);
+                const patchCount = parsed && !parsed.noChangeNeeded
+                    ? (parsed.createContent !== undefined ? 1 : parsed.edits.length)
+                    : 0;
+                console.log("[zone-parse-result]", {
+                    patchCount,
+                    rawSnippet: String(raw || "").slice(0, 200),
+                });
                 if (!raw.trim()) {
                     issues.push({
                         code: "EMPTY_PATCH",
@@ -497,7 +835,7 @@ async function planFullPatchWithLlm(input) {
                     });
                     return issues;
                 }
-                if (!(0, developerPatchParse_js_1.parseDeveloperPatchText)(raw)) {
+                if (!parsed) {
                     issues.push({
                         code: "INVALID_PATCH_FORMAT",
                         message: "Patch text could not be parsed into structured FIND/REPLACE edits.",
@@ -609,6 +947,12 @@ async function planFullPatchWithLlm(input) {
         };
     }
     let fullContentAttemptIndex = 0;
+    const originalLineCount = lineCount;
+    let maxOutputTokensFull;
+    if (originalLineCount > 200)
+        maxOutputTokensFull = 6000;
+    else if (originalLineCount > 100)
+        maxOutputTokensFull = 4000;
     const retryResult = await (0, withSelfHealingRetry_js_1.withSelfHealingRetry)({
         maxAttempts: 3,
         prompt,
@@ -619,14 +963,126 @@ async function planFullPatchWithLlm(input) {
                 filePath: input.filePath,
                 attempt: fullContentAttemptIndex,
                 model,
-                max_output_tokens: null,
+                max_output_tokens: maxOutputTokensFull ?? null,
             }));
             let response;
+            let promptWithAntiTruncation = fullContentAttemptIndex >= 2
+                ? [
+                    currentPrompt,
+                    "",
+                    "CRITICAL: You MUST include the COMPLETE file content. Do not truncate.",
+                    `The file has ${originalLineCount} lines.`,
+                    "Your response must have approximately the same number of lines.",
+                ].join("\n")
+                : currentPrompt;
             try {
-                response = await client.responses.create({
-                    model,
-                    input: currentPrompt,
-                });
+                // Streaming (best-effort) for full_content_json mode: stream output_text deltas directly.
+                const streamFn = client.responses.stream;
+                if (typeof streamFn === "function") {
+                    console.log("[zone-stream-start]", { filePath: input.filePath });
+                    const controller = new AbortController();
+                    const timeout = setTimeout(() => {
+                        try {
+                            controller.abort();
+                        }
+                        catch { }
+                    }, 120_000);
+                    const runner = client.responses.stream({
+                        model,
+                        input: promptWithAntiTruncation,
+                        ...(maxOutputTokensFull != null
+                            ? { max_output_tokens: maxOutputTokensFull }
+                            : {}),
+                    });
+                    let rawAccum = "";
+                    let lastFullContentLen = 0;
+                    const tryExtractJsonStringValuePartial = (raw, key) => {
+                        const k = raw.indexOf(`"${key}"`);
+                        if (k < 0)
+                            return "";
+                        const colon = raw.indexOf(":", k + key.length + 2);
+                        if (colon < 0)
+                            return "";
+                        const firstQuote = raw.indexOf('"', colon + 1);
+                        if (firstQuote < 0)
+                            return "";
+                        let i = firstQuote + 1;
+                        let out = "";
+                        while (i < raw.length) {
+                            const ch = raw[i];
+                            if (ch === "\\") {
+                                const nxt = raw[i + 1];
+                                if (nxt == null)
+                                    return out;
+                                if (nxt === "n")
+                                    out += "\n";
+                                else if (nxt === "r")
+                                    out += "\r";
+                                else if (nxt === "t")
+                                    out += "\t";
+                                else if (nxt === '"')
+                                    out += '"';
+                                else if (nxt === "\\")
+                                    out += "\\";
+                                else
+                                    out += nxt;
+                                i += 2;
+                                continue;
+                            }
+                            if (ch === '"')
+                                return out;
+                            out += ch;
+                            i += 1;
+                        }
+                        return out;
+                    };
+                    try {
+                        for await (const event of runner) {
+                            if (controller.signal.aborted)
+                                break;
+                            if (!event || typeof event !== "object")
+                                continue;
+                            if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
+                                rawAccum += event.delta;
+                                console.log("[zone-stream-delta]", { delta: String(event.delta).slice(0, 30) });
+                                try {
+                                    // Emit only fullContent deltas (skip JSON wrapper) to avoid raw JSON in UI.
+                                    const fullContentSnap = tryExtractJsonStringValuePartial(rawAccum, "fullContent");
+                                    if (fullContentSnap.length >= lastFullContentLen) {
+                                        const d = fullContentSnap.slice(lastFullContentLen);
+                                        if (d) {
+                                            input.onProgress?.({
+                                                type: "patch_stream_delta",
+                                                filePath: input.filePath,
+                                                delta: d,
+                                            });
+                                            lastFullContentLen = fullContentSnap.length;
+                                        }
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+                    finally {
+                        try {
+                            clearTimeout(timeout);
+                        }
+                        catch { }
+                    }
+                    response = await runner.finalResponse();
+                    // Some SDK versions may omit output_text on finalResponse(); keep our accumulated text.
+                    response.output_text = rawAccum;
+                }
+                else {
+                    response = await client.responses.create({
+                        model,
+                        input: promptWithAntiTruncation,
+                        ...(maxOutputTokensFull != null
+                            ? { max_output_tokens: maxOutputTokensFull }
+                            : {}),
+                    });
+                }
             }
             catch (err) {
                 const elapsedMs = Date.now() - callStartedAt;
@@ -642,7 +1098,17 @@ async function planFullPatchWithLlm(input) {
                     code: p.code,
                     type: p.type,
                 }));
-                throw err;
+                console.log("[zone-stream-fallback]", {
+                    error: err instanceof Error ? err.message : String(err),
+                });
+                // Fallback to non-streaming on any streaming failure.
+                response = await client.responses.create({
+                    model,
+                    input: promptWithAntiTruncation,
+                    ...(maxOutputTokensFull != null
+                        ? { max_output_tokens: maxOutputTokensFull }
+                        : {}),
+                });
             }
             const elapsedMs = Date.now() - callStartedAt;
             openAiTransportErrorDetails = null;
@@ -665,6 +1131,7 @@ async function planFullPatchWithLlm(input) {
             const rawText = extraction.ok
                 ? extraction.text
                 : (r.output_text ?? "");
+            console.log("[zone-full-content-debug]", rawText?.slice(0, 500));
             const jsonText = extractJson(rawText);
             return JSON.parse(stripJsonFences(jsonText));
         },
@@ -688,6 +1155,16 @@ async function planFullPatchWithLlm(input) {
                     message: "fullContent field is empty.",
                     severity: "error",
                 });
+            }
+            else {
+                const truncationCheck = looksLikeTruncatedFullContent(validated.fullContent);
+                if (!truncationCheck.ok) {
+                    issues.push({
+                        code: "TRUNCATED_FULL_CONTENT",
+                        message: `fullContent looks truncated (${truncationCheck.reason ?? "unknown"}).`,
+                        severity: "error",
+                    });
+                }
             }
             if (!validated.filePath.trim()) {
                 issues.push({

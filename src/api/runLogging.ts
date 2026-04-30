@@ -1,15 +1,14 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
-  createConversation,
-  getConversationById,
   getUserQuota,
-  updateConversation,
+  appendConversationMessages,
 } from "../billing/conversationRepository.js";
 import { resolveBillingAction } from "../billing/resolveBillingAction.js";
 import type {
   ConversationBillingMode,
   ConversationRole,
 } from "../types/conversation.js";
+import { randomUUID } from "node:crypto";
 
 export type RunLogInput = {
   userId: string;
@@ -21,6 +20,7 @@ export type RunLogInput = {
   creditsUsed: number;
   executionId?: string;
   conversationId?: string;
+  changedFiles?: string[];
   billingMode?: ConversationBillingMode;
   tokensUsed?: number;
   routeName?: string;
@@ -134,26 +134,38 @@ logBillingDebug("billing inputs before resolver", {
 });
   let conversation = null;
   try {
-    conversation =
+    const threadId =
       typeof input.conversationId === "string" && input.conversationId.trim()
-        ? await getConversationById(supabase, input.conversationId.trim())
-        : null;
+        ? input.conversationId.trim()
+        : randomUUID();
 
-    if (
-      conversation &&
-      (conversation.repoPath !== input.repoPath || conversation.role !== input.role)
-    ) {
-      conversation = null;
-    }
-
-    if (!conversation) {
-      conversation = await createConversation(supabase, {
-        userId: effectiveUserId,
-        mode: billingMode,
-        repoPath: input.repoPath,
+    const now = Date.now();
+    const appendMessages = [
+      {
+        type: "user",
+        text: input.task,
+        ts: now,
         role: input.role,
-      });
-    }
+        changedFiles: Array.isArray(input.changedFiles)
+          ? input.changedFiles.filter((x) => typeof x === "string" && x.trim()).slice(0, 20)
+          : undefined,
+      },
+      {
+        type: "run",
+        ts: now,
+        decisionMode: input.decisionMode,
+        confidence: input.confidence,
+        creditsUsed: input.creditsUsed,
+        executionId: input.executionId ?? null,
+      },
+    ];
+
+    conversation = await appendConversationMessages(supabase, {
+      userId: effectiveUserId,
+      threadId,
+      repoPath: input.repoPath,
+      appendMessages,
+    });
   } catch (error) {
     logBillingDebug("conversation persistence failed", {
       routeName: input.routeName ?? "unknown",
@@ -186,7 +198,7 @@ logBillingDebug("billing inputs before resolver", {
       userId: effectiveUserId,
       reason: "billing_action_free",
     });
-  return conversation?.id ?? null;
+    return conversation?.threadId ?? null;
   }
 
   logBillingDebug("deduction rpc start", {
@@ -209,13 +221,29 @@ logBillingDebug("billing inputs before resolver", {
   });
 
   if (rpcResult?.error) {
+    const rpcError = rpcResult.error as
+      | {
+          message?: unknown;
+          code?: unknown;
+          details?: unknown;
+          hint?: unknown;
+        }
+      | null
+      | undefined;
     logBillingDebug("deduction rpc error", {
       routeName: input.routeName ?? "unknown",
       userId: effectiveUserId,
       error:
-        rpcResult.error instanceof Error
-          ? rpcResult.error.message
+        typeof rpcError?.message === "string" && rpcError.message.trim()
+          ? rpcError.message
           : String(rpcResult.error),
+      code: rpcError?.code,
+      details: rpcError?.details,
+      hint: rpcError?.hint,
+      raw: JSON.stringify(
+        rpcResult.error,
+        Object.getOwnPropertyNames(rpcResult.error ?? {})
+      ),
     });
     return null;
   }
@@ -226,21 +254,10 @@ logBillingDebug("billing inputs before resolver", {
   });
 
   if (conversation) {
-    try {
-      await updateConversation(supabase, conversation.id, {
-        chargedRunCount: conversation.chargedRunCount + 1,
-      });
-    } catch (error) {
-      logBillingDebug("conversation update failed after deduction", {
-        routeName: input.routeName ?? "unknown",
-        userId: effectiveUserId,
-        conversationId: conversation.id,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+    // No-op: conversation persistence is message-based now; billing is enforced via profile quota + RPC.
   }
 
-  return conversation?.id ?? null;
+  return conversation?.threadId ?? null;
 }
 
 export function queueRunLog(input: RunLogInput): void {

@@ -24,6 +24,7 @@ export type GenerateFinalRunReportPatchSource =
   | "llm_patch_recovered"
   | "ast_fallback"
   | "deterministic_fallback"
+  | "agent_loop"
   | "no_patch";
 
 export type GenerateFinalRunReportInput = {

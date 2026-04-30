@@ -14,7 +14,9 @@ export async function scanRepo(targetPath: string): Promise<RepoFile[]> {
     [
       // JavaScript/TypeScript projects
       "client/src/**/*.{js,jsx,ts,tsx,css}",
+      "client/package.json",
       "server/**/*.{js,ts}",
+      "server/package.json",
       "src/**/*.{js,jsx,ts,tsx}",
       // Java projects
       "src/**/*.java",
@@ -73,7 +75,12 @@ export async function scanRepo(targetPath: string): Promise<RepoFile[]> {
         "**/.agent-cache/**",
         "**/.agent-patches/**",
         "**/.agent-backups/**",
+        "**/venv/**",
+        "**/.venv/**",
+        "**/env/**",
         "**/__pycache__/**",
+        "**/*.pyc",
+        "**/site-packages/**",
         "**/.pytest_cache/**",
       ],
     }

@@ -49,6 +49,14 @@ function summarizeOutput(stdout: string, stderr: string): string {
   return lines.slice(-8).join("\n").slice(0, 1200);
 }
 
+function buildFailureSummary(stdout: string, stderr: string): string {
+  const out = trimOutput(stdout, 12_000).trim();
+  const err = trimOutput(stderr, 12_000).trim();
+  const combined = [out, err].filter(Boolean).join("\n\n");
+  if (!combined) return "Command failed with no output.";
+  return combined;
+}
+
 function looksLikeToolingFailure(message: string): boolean {
   const m = message.toLowerCase();
   return (
@@ -111,7 +119,9 @@ export async function runRuntimeVerification(input: {
     let stderr = "";
     const child = spawn(input.command!.executable, input.command!.args, {
       cwd: input.repoPath,
-      shell: false,
+      // Windows: spawn('npm', [...]) without a shell often fails with EINVAL;
+      // npm is a cmd/shim that expects shell invocation.
+      shell: true,
       windowsHide: true,
     });
 
@@ -154,14 +164,17 @@ export async function runRuntimeVerification(input: {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      const status = code === 0 ? "passed" : "failed";
       resolve({
         attempted: true,
         command: input.command!.command,
-        status: code === 0 ? "passed" : "failed",
+        status,
         ...(typeof code === "number" ? { exitCode: code } : {}),
         stdout: trimOutput(stdout),
         stderr: trimOutput(stderr),
-        summary: summarizeOutput(stdout, stderr),
+        // IMPORTANT: for failures, keep raw-ish output so downstream parsers can extract
+        // failing files/lines (e.g. Jest stack traces). For passes, keep it short.
+        summary: status === "failed" ? buildFailureSummary(stdout, stderr) : summarizeOutput(stdout, stderr),
       });
     });
   });

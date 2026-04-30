@@ -1,0 +1,76 @@
+import crypto from "node:crypto";
+import { createOpenAIClient } from "../llm/openaiClient.js";
+
+const EMBEDDING_MODEL = "text-embedding-3-small";
+const MAX_INPUT_CHARS = 24000;
+const MAX_CONTENT_CHARS = 6000;
+const EMBED_TIMEOUT_MS = 30000;
+
+function truncateForEmbedding(text: string, maxChars = MAX_INPUT_CHARS): string {
+  const raw = String(text || "");
+  if (raw.length <= maxChars) return raw;
+  return raw.slice(0, maxChars);
+}
+
+export function hashFileContent(content: string): string {
+  return crypto.createHash("sha256").update(String(content || ""), "utf8").digest("hex");
+}
+
+export function buildEmbedInput(filePath: string, content: string): string {
+  const normalizedPath = String(filePath || "").trim();
+  const body = String(content || "").slice(0, MAX_CONTENT_CHARS);
+  return `FILE: ${normalizedPath}\n\n${body}`;
+}
+
+export async function embedText(text: string): Promise<number[]> {
+  const startedAt = Date.now();
+  const truncated = truncateForEmbedding(text);
+  const tokensApprox = Math.ceil(truncated.length / 4);
+
+  try {
+    const client = createOpenAIClient();
+    const response = await Promise.race([
+      client.embeddings.create({
+        model: EMBEDDING_MODEL,
+        input: truncated,
+      }),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`Embedding request timed out after ${EMBED_TIMEOUT_MS}ms`));
+        }, EMBED_TIMEOUT_MS);
+      }),
+    ]);
+    const embedding = Array.isArray(response.data?.[0]?.embedding)
+      ? response.data[0].embedding
+      : null;
+
+    if (!embedding || embedding.length === 0) {
+      throw new Error("Embedding API returned no embedding vector.");
+    }
+
+    console.log("[zone-embed-debug]", {
+      textLength: truncated.length,
+      tokensApprox,
+      elapsedMs: Date.now() - startedAt,
+    });
+
+    return embedding;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("timed out")) {
+      console.error("[zone-embed-timeout]", {
+        textLength: truncated.length,
+        tokensApprox,
+        elapsedMs: Date.now() - startedAt,
+        stage: "embedText",
+      });
+    }
+    console.error("[zone-embed-error]", {
+      textLength: truncated.length,
+      tokensApprox,
+      elapsedMs: Date.now() - startedAt,
+      error: message,
+    });
+    throw error;
+  }
+}

@@ -20,6 +20,7 @@ exports.AGENT_LIFECYCLE_EVENT_TYPES = [
     "verification_failed",
     "tooling_issue",
     "run_completed",
+    "run_cancelled",
 ];
 function createAgentLifecycleEvent(input) {
     return {

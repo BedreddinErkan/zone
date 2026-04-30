@@ -4,7 +4,9 @@ import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
 import rateLimit from "express-rate-limit";
+import { exec, execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { runAgent } from "../core/runAgent.js";
@@ -39,22 +41,37 @@ import {
   getInferenceMode,
   getModelName,
 } from "../llm/openaiClient.js";
+import { withUserApiKey } from "../llm/openaiContext.js";
 import {
   PROMPT_REFINEMENT_FALLBACK,
   refinePrompt,
 } from "../llm/refinePrompt.js";
-import { getUserQuota } from "../billing/conversationRepository.js";
+import { detectIntent, detectMessageType } from "../llm/detectIntent.js";
+import { getChatResponseWithContext } from "../llm/chatResponse.js";
+import {
+  appendConversationMessages,
+  getUserQuota,
+} from "../billing/conversationRepository.js";
 import { resolveBillingAction } from "../billing/resolveBillingAction.js";
 import { c, colorize } from "../cli/colors.js";
-import type {
-  AgentLifecycleEvent,
-  ZoneStructuredProgressEvent,
+import {
+  createAgentLifecycleEvent,
+  type AgentLifecycleEvent,
+  type ZoneStructuredProgressEvent,
 } from "../core/agentLifecycleEvents.js";
 import {
   attachDeveloperPatchProgressSseClient,
+  closeDeveloperPatchProgressSseForRun,
   detachDeveloperPatchProgressSseClient,
   emitDeveloperPatchProgress,
+  getRunBuffer,
+  registerRunComplete,
+  registerRunStart,
 } from "../core/developerRunProgressSse.js";
+import {
+  rejectPendingApprovalsForRun,
+  resolveCommandApproval,
+} from "./commandApprovals.js";
 import { decodeProgressStage } from "../core/progressStageCodec.js";
 import { validateLlmOutput } from "../core/validateLlmOutput.js";
 import lemonWebhookRouter from "../routes/lemonsqueezyWebhook.js";
@@ -67,12 +84,105 @@ import {
   getDeveloperPatchJob,
   type DeveloperPatchJobRequestPayload,
 } from "../jobs/developerPatchJobs.js";
+import {
+  completeActiveRun,
+  getActiveRunsByUser,
+  markAllRunningAsInterrupted,
+  upsertActiveRun,
+} from "../billing/activeRunsRepository.js";
+import { indexRepoFiles } from "../embeddings/indexRepository.js";
+import { LOG_LEVEL, logger } from "../utils/logger.js";
 export const app = express();
+/** Active /api/patch runs — cancelled via POST /api/cancel (AbortSignal → runLlmPatchFlow). */
+const activePatchRunAbortControllers = new Map<string, AbortController>();
 const port = Number(process.env.PORT) || 3000;
 let startedPort: number | null = null;
 let startPromise: Promise<void> | null = null;
 const zoneUiDir = path.resolve(__dirname, "../ui");
-const zoneUiHtmlTemplate = readFileSync(path.join(zoneUiDir, "index.html"), "utf8");
+const zoneUiIndexPath = path.join(zoneUiDir, "index.html");
+/** Cached HTML shell in production only; dev re-reads from disk each request so UI edits apply without restart. */
+let zoneUiHtmlTemplateCached: string | null = null;
+
+function installConsoleLogFilter(): void {
+  const globalState = globalThis as typeof globalThis & {
+    __zoneConsoleFilterInstalled?: boolean;
+    __zoneConsoleLogOriginal?: typeof console.log;
+    __zoneConsoleWarnOriginal?: typeof console.warn;
+  };
+  if (globalState.__zoneConsoleFilterInstalled) {
+    return;
+  }
+  globalState.__zoneConsoleFilterInstalled = true;
+
+  const originalLog = console.log.bind(console);
+  const originalWarn = console.warn.bind(console);
+  globalState.__zoneConsoleLogOriginal = originalLog;
+  globalState.__zoneConsoleWarnOriginal = originalWarn;
+
+  if (LOG_LEVEL === "debug") {
+    return;
+  }
+
+  const allowedPrefixes = [
+    "[patch-handler]",
+    "[zone-flow-entry]",
+    "[active-runs]",
+    "[zone-rank-hybrid-debug]",
+    "[zone-rank-rescue-check]",
+    "[zone-rank-rescue-debug]",
+    "[zone-rank-semantic-rescue]",
+    "[zone-context-priority]",
+    "[zone-plan",
+    "[zone-plan-debug]",
+    "[zone-patch-diagnostic]",
+    "[zone-verification-start]",
+    "[zone-runtime-verify]",
+    "[zone-billing-debug]",
+    "[debug-mem]",
+    "[resume-debug]",
+    "[zone-embed-query-debug]",
+    "[zone-chat-debug]",
+    "[zone-intent-classify]",
+  ];
+
+  const shouldAllowLog = (args: unknown[]): boolean => {
+    if (LOG_LEVEL === "quiet") return false;
+    const first = typeof args[0] === "string" ? args[0] : "";
+    if (
+      first.startsWith("[zone-api-perf]") &&
+      args.some(
+        (arg) => typeof arg === "string" && /\bcomplete\b/i.test(arg)
+      )
+    ) {
+      return true;
+    }
+    return allowedPrefixes.some((prefix) => first.startsWith(prefix));
+  };
+
+  console.log = (...args: unknown[]): void => {
+    if (shouldAllowLog(args)) {
+      originalLog(...args);
+    }
+  };
+
+  console.warn = (...args: unknown[]): void => {
+    if (LOG_LEVEL !== "quiet") {
+      originalWarn(...args);
+    }
+  };
+}
+
+installConsoleLogFilter();
+
+function readZoneUiHtmlTemplate(): string {
+  if (process.env.NODE_ENV === "production") {
+    if (!zoneUiHtmlTemplateCached) {
+      zoneUiHtmlTemplateCached = readFileSync(zoneUiIndexPath, "utf8");
+    }
+    return zoneUiHtmlTemplateCached;
+  }
+  return readFileSync(zoneUiIndexPath, "utf8");
+}
 const ENHANCE_TASK_SYSTEM_PROMPT =
   "You are a task optimizer for an AI code agent called Zone.\n" +
   "The user has written a vague or incomplete task description.\n" +
@@ -102,6 +212,18 @@ type HostedDeveloperContextPayload = {
   }>;
   originalContents: Record<string, string>;
 };
+
+/** True when the client sent an actual hosted file payload (not billing-only / empty). */
+function hostedDeveloperContextRequestHasFiles(ctx: unknown): boolean {
+  if (!ctx || typeof ctx !== "object") return false;
+  const o = ctx as Record<string, unknown>;
+  const cf = o.contextFiles;
+  const legacy = o.files;
+  return (
+    (Array.isArray(cf) && cf.length > 0) ||
+    (Array.isArray(legacy) && legacy.length > 0)
+  );
+}
 
 type HostedEnhanceContextPayload = {
   contextFiles: Array<{
@@ -171,7 +293,19 @@ const developerRouteLimiter = rateLimit({
 
 app.use("/api/analyze", developerRouteLimiter);
 app.use("/api/patch", developerRouteLimiter);
+app.use("/api/cancel", developerRouteLimiter);
+app.use("/api/approve-command", developerRouteLimiter);
 app.use("/api/dry-run", developerRouteLimiter);
+
+// Increase timeouts for long-running patch operations & SSE.
+app.use("/api/patch", (_req, res, next) => {
+  res.setTimeout(300000); // 5 minutes
+  next();
+});
+app.use("/api/progress", (_req, res, next) => {
+  res.setTimeout(300000); // 5 minutes
+  next();
+});
 
 app.get("/", (_req, res) => {
   res.type("html").send(renderZoneUiHtml());
@@ -223,12 +357,25 @@ function renderZoneUiHtml(): string {
     currentUser,
     debugFallbackUserId,
     zoneApiBaseUrl,
+    /** True when the server has OPENAI_API_KEY set in the environment.
+     *  Used by the UI to decide whether to prompt for a user-supplied key.
+     *  The key VALUE is never exposed. */
+    serverHasOpenAIKey: !!(
+      typeof process.env.OPENAI_API_KEY === "string" &&
+      process.env.OPENAI_API_KEY.trim()
+    ),
   })};window.currentUser=window.currentUser||${JSON.stringify(currentUser)};</script>`;
-  return zoneUiHtmlTemplate.replace("</head>", `${configScript}</head>`);
+  return readZoneUiHtmlTemplate().replace("</head>", `${configScript}</head>`);
 }
 
 function shouldUseHostedInferenceProxy(): boolean {
   return getInferenceMode() === "hosted";
+}
+
+function getHeaderUserApiKey(req: express.Request): string {
+  return typeof req.headers["x-user-openai-key"] === "string"
+    ? req.headers["x-user-openai-key"].trim()
+    : "";
 }
 
 function maskApiKeyPrefix(value?: string): string {
@@ -992,6 +1139,151 @@ function emitProgress(
   }
 }
 
+async function persistChatConversationMessage(input: {
+  userId: string;
+  threadId: string;
+  repoPath: string;
+  runId: string;
+  userText: string;
+  responseText: string;
+  responseHtml: string;
+  contextFiles: string[];
+}): Promise<void> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  await appendConversationMessages(supabase, {
+    userId: input.userId,
+    threadId: input.threadId,
+    repoPath: input.repoPath,
+    appendMessages: [
+      {
+        type: "chat_response",
+        runId: input.runId,
+        ts: Date.now(),
+        userText: input.userText,
+        responseText: input.responseText,
+        responseHtml: input.responseHtml,
+        contextFiles: input.contextFiles.slice(0, 10),
+      },
+    ],
+  });
+}
+
+async function runConversationalFlow(input: {
+  task: string;
+  repoPath: string;
+  runId: string;
+  userId: string;
+  conversationId?: string;
+  messageType: "question" | "discussion";
+  /** BYOK: user-supplied OpenAI API key forwarded from the browser header. */
+  userApiKey?: string;
+}): Promise<{
+  ok: true;
+  decisionMode: "chat";
+  chatResponse: string;
+  responseHtml: string;
+  contextFiles: string[];
+  messageType: "question" | "discussion";
+  conversationId: string;
+  applyPatches: [];
+  fileDiffs: [];
+}> {
+  emitProgress(input.runId, {
+    stage: "chat_response",
+    progress: {
+      type: "chat_start",
+      title: "Thinking...",
+      runId: input.runId,
+      ts: Date.now(),
+      status: "active",
+    },
+    lifecycle: createAgentLifecycleEvent({
+      type: "run_started",
+      message: "Conversational response started.",
+      stage: "init",
+      status: "active",
+    }),
+  });
+
+  const chatResult = await getChatResponseWithContext({
+    task: input.task,
+    repoPath: input.repoPath,
+    onChunk: async (delta) => {
+      emitProgress(input.runId, {
+        stage: "chat_response",
+        progress: {
+          type: "chat_chunk",
+          title: "Streaming response",
+          delta,
+          runId: input.runId,
+          ts: Date.now(),
+          status: "active",
+        },
+      });
+    },
+  });
+
+  emitProgress(input.runId, {
+    stage: "chat_response",
+    progress: {
+      type: "chat_done",
+      title: "Response ready",
+      runId: input.runId,
+      ts: Date.now(),
+      status: "success",
+      responseText: chatResult.responseText,
+      responseHtml: chatResult.responseHtml,
+      contextFiles: chatResult.contextFiles,
+    },
+    lifecycle: createAgentLifecycleEvent({
+      type: "run_completed",
+      message: "Conversational response completed.",
+      stage: "finalize",
+      status: "success",
+    }),
+  });
+
+  const finalConversationId =
+    typeof input.conversationId === "string" && input.conversationId.trim()
+      ? input.conversationId.trim()
+      : input.runId;
+
+  try {
+    await persistChatConversationMessage({
+      userId: input.userId,
+      threadId: finalConversationId,
+      repoPath: input.repoPath,
+      runId: input.runId,
+      userText: input.task,
+      responseText: chatResult.responseText,
+      responseHtml: chatResult.responseHtml,
+      contextFiles: chatResult.contextFiles,
+    });
+  } catch (error) {
+    console.warn(
+      "[zone-chat-debug]",
+      JSON.stringify({
+        stage: "conversation_persist_failed",
+        error: error instanceof Error ? error.message : String(error),
+      })
+    );
+  }
+
+  return {
+    ok: true,
+    decisionMode: "chat",
+    chatResponse: chatResult.responseText,
+    responseHtml: chatResult.responseHtml,
+    contextFiles: chatResult.contextFiles,
+    messageType: input.messageType,
+    conversationId: finalConversationId,
+    applyPatches: [],
+    fileDiffs: [],
+  };
+}
+
 async function createDeveloperPatchJobPayload(input: {
   task: string;
   repoPath: string;
@@ -1050,6 +1342,7 @@ async function enhanceTask(input: {
   role: string;
   repoPath: string;
   hostedContext?: HostedEnhanceContextPayload;
+  userApiKey?: string;
 }): Promise<string> {
   try {
     const repoContext =
@@ -1082,7 +1375,7 @@ async function enhanceTask(input: {
     const resolvedRepoContext =
       typeof repoContext === "string" ? repoContext : await repoContext;
 
-    const client = createOpenAIClient();
+    const client = createOpenAIClient(input.userApiKey);
     const model = getModelName();
     const response = await client.responses.create({
       model,
@@ -1115,8 +1408,330 @@ app.get("/api/progress", (req, res) => {
 
   attachDeveloperPatchProgressSseClient(runId, res);
 
+  const keepalive = setInterval(() => {
+    try {
+      res.write(": keepalive\n\n");
+    } catch {
+      clearInterval(keepalive);
+    }
+  }, 15000);
+
   req.on("close", () => {
+    clearInterval(keepalive);
     detachDeveloperPatchProgressSseClient(runId, res);
+  });
+});
+
+app.get("/api/run-status/:runId", (req, res) => {
+  const runId = typeof req.params?.runId === "string" ? req.params.runId.trim() : "";
+  if (!runId) {
+    res.status(400).json({ ok: false, reason: "missing_run_id" });
+    return;
+  }
+  const buf = getRunBuffer(runId);
+  if (!buf) {
+    res.status(404).json({ ok: false, reason: "not_found" });
+    return;
+  }
+  res.json({
+    ok: true,
+    runId,
+    status: buf.status,
+    task: buf.task ?? null,
+    startedAt: buf.startedAt,
+    completedAt: buf.completedAt ?? null,
+    eventCount: buf.events.length,
+  });
+});
+
+app.get("/api/active-runs", async (req, res) => {
+  const rawUserId =
+    typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+  const userId =
+    rawUserId || (process.env.NODE_ENV !== "production" ? "dev-user" : "");
+
+  if (!userId) {
+    res.status(401).json({
+      ok: false,
+      reason: "unauthorized",
+      message: "Missing user session. Please open Zone from your dashboard.",
+    });
+    return;
+  }
+
+  try {
+    const runs = await getActiveRunsByUser(userId);
+    logger.info("[active-runs] poll, count=%d, staleCount=%d", runs.length, runs.filter((run) => run.status !== "running").length);
+    console.log("[resume-debug] /api/active-runs", {
+      rawUserId: rawUserId || null,
+      effectiveUserId: userId,
+      count: runs.length,
+      runIds: runs.map((run) => run.runId),
+      statuses: runs.map((run) => ({ runId: run.runId, status: run.status })),
+    });
+    res.json(
+      runs.map((run) => ({
+        runId: run.runId,
+        task: run.task,
+        repoPath: run.repoPath,
+        threadId: run.threadId,
+        status: run.status,
+        startedAt: run.startedAt,
+        lastChangedFiles: run.lastChangedFiles,
+        lastAddedFunctions: run.lastAddedFunctions,
+      }))
+    );
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      reason: err instanceof Error ? err.message : "active_runs_lookup_failed",
+    });
+  }
+});
+
+app.get("/api/run-replay/:runId", (req, res) => {
+  const runId = typeof req.params?.runId === "string" ? req.params.runId.trim() : "";
+  if (!runId) {
+    res.status(400).end();
+    return;
+  }
+  const buf = getRunBuffer(runId);
+  if (!buf) {
+    res.status(404).end();
+    return;
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  // Replay buffered events first.
+  try {
+    for (const evt of buf.events) {
+      res.write(`data: ${JSON.stringify(evt.payload)}\n\n`);
+    }
+  } catch {
+    // ignore
+  }
+
+  // If still running, attach for live tail; otherwise close.
+  if (buf.status !== "running") {
+    try {
+      res.end();
+    } catch {}
+    return;
+  }
+
+  attachDeveloperPatchProgressSseClient(runId, res);
+
+  const keepalive = setInterval(() => {
+    try {
+      res.write(": keepalive\n\n");
+    } catch {
+      clearInterval(keepalive);
+    }
+  }, 15000);
+
+  req.on("close", () => {
+    clearInterval(keepalive);
+    detachDeveloperPatchProgressSseClient(runId, res);
+  });
+});
+
+app.post("/api/cancel", (req, res) => {
+  const runId = typeof req.body?.runId === "string" ? req.body.runId.trim() : "";
+  if (!runId) {
+    res.status(400).json({ ok: false, reason: "missing_run_id" });
+    return;
+  }
+  const ac = activePatchRunAbortControllers.get(runId);
+  if (!ac) {
+    res.status(404).json({ ok: false, reason: "no_active_run" });
+    return;
+  }
+  try {
+    emitDeveloperPatchProgress(runId, {
+      stage: "Cancelled",
+      lifecycle: createAgentLifecycleEvent({
+        type: "run_cancelled",
+        message: "Run cancelled by user.",
+        stage: "finalize",
+      }),
+    });
+  } catch {
+    // best-effort
+  }
+  closeDeveloperPatchProgressSseForRun(runId);
+  try {
+    // If a command approval is pending, treat cancel as rejection.
+    rejectPendingApprovalsForRun(runId);
+  } catch {
+    // best-effort
+  }
+  try {
+    ac.abort();
+  } catch {
+    // ignore
+  }
+  activePatchRunAbortControllers.delete(runId);
+  try {
+    registerRunComplete(runId, "cancelled");
+  } catch {}
+  void completeActiveRun(runId, "cancelled").catch(() => undefined);
+  res.json({ ok: true });
+});
+
+// Native OS folder-picker — returns the full filesystem path selected by the user.
+// Uses PowerShell FolderBrowserDialog on Windows, osascript on macOS,
+// zenity/kdialog on Linux. Falls back gracefully if none available.
+app.post("/api/browse-folder", (_req, res) => {
+  const platform = process.platform;
+  let command: string;
+
+  if (platform === "win32") {
+    command = [
+      "powershell",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      [
+        "Add-Type -AssemblyName System.Windows.Forms;",
+        "$d = New-Object System.Windows.Forms.FolderBrowserDialog;",
+        "$d.Description = 'Select project folder';",
+        "$d.ShowNewFolderButton = $true;",
+        "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK)",
+        "{ Write-Output $d.SelectedPath }",
+        "else { exit 1 }",
+      ].join(" "),
+    ].join(" ");
+  } else if (platform === "darwin") {
+    command =
+      "osascript -e 'POSIX path of (choose folder with prompt \"Select project folder\")'";
+  } else {
+    // Linux: prefer zenity, fall back to kdialog
+    command =
+      "zenity --file-selection --directory --title='Select project folder' 2>/dev/null ||" +
+      " kdialog --getexistingdirectory \"$HOME\" 2>/dev/null";
+  }
+
+  try {
+    const result = execSync(command, { encoding: "utf8", timeout: 120_000 }).trim();
+    if (!result) {
+      res.json({ ok: false, cancelled: true });
+      return;
+    }
+    const parts = result.replace(/\\/g, "/").split("/").filter(Boolean);
+    const name = parts[parts.length - 1] || result;
+    res.json({ ok: true, path: result, name });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Exit code 1 from zenity/kdialog/osascript = user cancelled — not an error.
+    if (/exit code 1|status 1|exited with code 1/i.test(msg)) {
+      res.json({ ok: false, cancelled: true });
+    } else {
+      res.json({ ok: false, error: "Folder picker unavailable on this system" });
+    }
+  }
+});
+
+app.post("/api/approve-command", (req, res) => {
+  const approvalId = typeof req.body?.approvalId === "string" ? req.body.approvalId.trim() : "";
+  const runId = typeof req.body?.runId === "string" ? req.body.runId.trim() : "";
+  const approved = !!req.body?.approved;
+  if (!approvalId || !runId) {
+    res.status(400).json({ ok: false, reason: "missing_approval_id_or_run_id" });
+    return;
+  }
+  const r = resolveCommandApproval({ approvalId, approved, runId });
+  if (!r.ok) {
+    res.status(404).json({ ok: false, reason: r.message || "not_found" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/run-command", async (req, res) => {
+  const { command: rawCommand, repoPath, runId } = req.body ?? {};
+  const command = typeof rawCommand === "string" ? rawCommand.trim() : "";
+  const repo = typeof repoPath === "string" ? repoPath.trim() : "";
+  const rid = typeof runId === "string" ? runId.trim() : "";
+  if (!command || !repo || !rid) {
+    res.status(400).json({ ok: false, reason: "missing_command_repoPath_or_runId" });
+    return;
+  }
+
+  // Respond immediately; output will stream via SSE.
+  res.json({ ok: true });
+
+  const shell = process.platform === "win32" ? (process.env.ComSpec ?? "cmd.exe") : "/bin/sh";
+
+  const emitTerminalLine = (line: string, stream: "stdout" | "stderr") => {
+    emitProgress(rid, {
+      stage: "terminal_output",
+      progress: {
+        runId: rid,
+        ts: Date.now(),
+        type: "terminal_output",
+        title: line,
+        status: "active",
+        stream,
+      },
+    });
+  };
+
+  const emitDone = (exitCode: number) => {
+    emitProgress(rid, {
+      stage: "terminal_done",
+      progress: {
+        runId: rid,
+        ts: Date.now(),
+        type: "terminal_done",
+        title: "terminal_done",
+        status: exitCode === 0 ? "success" : "error",
+        exitCode,
+      },
+    });
+  };
+
+  let killedByTimeout = false;
+  const child = exec(command, { cwd: repo, timeout: 30000, windowsHide: true, shell });
+
+  const bufs: Record<"stdout" | "stderr", string> = { stdout: "", stderr: "" };
+  const flush = (stream: "stdout" | "stderr") => {
+    const s = bufs[stream];
+    const parts = s.split(/\r?\n/);
+    bufs[stream] = parts.pop() ?? "";
+    for (const p of parts) {
+      if (p.trim().length === 0) continue;
+      emitTerminalLine(p, stream);
+    }
+  };
+
+  child.stdout?.on("data", (chunk) => {
+    bufs.stdout += String(chunk ?? "");
+    flush("stdout");
+  });
+  child.stderr?.on("data", (chunk) => {
+    bufs.stderr += String(chunk ?? "");
+    flush("stderr");
+  });
+
+  // `exec` handles timeout internally; detect it by error.killed/signal in callback.
+  child.on("error", () => {
+    // best-effort; callback will emit done
+  });
+
+  child.on("close", (code) => {
+    flush("stdout");
+    flush("stderr");
+    const exitCode = typeof code === "number" ? code : (killedByTimeout ? 124 : 1);
+    emitDone(exitCode);
+    closeDeveloperPatchProgressSseForRun(rid);
+  });
+
+  child.once("exit", (_code, signal) => {
+    if (signal && String(signal).toLowerCase().includes("sigterm")) killedByTimeout = true;
   });
 });
 // ── Desktop Auth Routes ──
@@ -1310,12 +1925,62 @@ app.post("/api/admin/reset-monthly-runs", async (req, res) => {
 });
 
 app.post("/api/analyze", async (req, res) => {
-  const { task, repoPath } = req.body;
+  const { task, repoPath, userId: rawUserId } = req.body ?? {};
+  const userId =
+    typeof rawUserId === "string" && rawUserId.trim()
+      ? rawUserId.trim()
+      : process.env.NODE_ENV !== "production"
+        ? "dev-user"
+        : null;
+  if (!userId) {
+    res.status(401).json({
+      ok: false,
+      reason: "unauthorized",
+      message: "Missing user session. Please open Zone from your dashboard.",
+    });
+    return;
+  }
   const result = await runAgent({ task, role: "developer" });
   res.json({
     decision: result.decision,
     risk: result.risk,
     confidence: result.confidence,
+  });
+});
+
+app.post("/api/dev/index-repo", async (req, res) => {
+  const userApiKey = getHeaderUserApiKey(req);
+  const repoPath = typeof req.body?.repoPath === "string" ? req.body.repoPath.trim() : "";
+  if (!repoPath) {
+    res.status(400).json({ ok: false, reason: "repoPath is required" });
+    return;
+  }
+
+  const startedAt = Date.now();
+  await withUserApiKey(userApiKey || undefined, async () => {
+    try {
+      const repoFiles = await scanRepo(repoPath);
+      const files = await Promise.all(
+        repoFiles.map(async (file) => ({
+          path: file.path,
+          content: await readFile(file.absolutePath, "utf8").catch(() => ""),
+        }))
+      );
+      const indexResult = await indexRepoFiles({
+        repoPath,
+        files: files.filter((file) => typeof file.content === "string" && file.content.length > 0),
+      });
+      res.json({
+        ok: true,
+        ...indexResult,
+        elapsedMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      res.status(500).json({
+        ok: false,
+        reason: error instanceof Error ? error.message : "repo_index_failed",
+      });
+    }
   });
 });
 
@@ -1452,11 +2117,170 @@ app.get("/api/patch/jobs/:runId/result", async (req, res) => {
   }
 });
 
+function shouldForceExecuteTask(task: string): boolean {
+  const agentLoopPatterns = [
+    /run .*(test|spec|build|install)/i,
+    /npm (test|run|install)/i,
+    /yarn (test|run|add)/i,
+    /pytest/i,
+    /cargo (test|build|run)/i,
+    /check if .*(test|build|work)/i,
+    /tell me if .*(pass|fail|work)/i,
+    /does .*(test|build) pass/i,
+  ];
+
+  return (
+    agentLoopPatterns.some((re) => re.test(String(task || ""))) ||
+    /\b(?:run|verify|install|build)\b/i.test(String(task || ""))
+  );
+}
+
+app.post("/api/classify-intent", async (req, res) => {
+  const task = typeof req.body?.task === "string" ? req.body.task : "";
+  const normalizedTask = task.trim();
+  const userApiKey = getHeaderUserApiKey(req);
+
+  await withUserApiKey(userApiKey || undefined, async () => {
+    const forcedExecute = shouldForceExecuteTask(normalizedTask);
+    const messageType = forcedExecute
+      ? "patch_request"
+      : await detectMessageType(normalizedTask, userApiKey || undefined);
+    const intent = messageType === "patch_request" ? "execute" : "chat";
+
+    res.json({
+      ok: true,
+      intent,
+      messageType,
+    });
+  });
+});
+
+app.post("/api/chat", async (req, res) => {
+  const perf = startZoneApiPerfRun("/api/chat");
+  // BYOK: extract user-supplied OpenAI API key from the custom request header.
+  const chatUserApiKey = getHeaderUserApiKey(req);
+
+  await withUserApiKey(chatUserApiKey || undefined, async () => {
+    const {
+      task,
+      repoPath,
+      runId,
+      userId: rawUserId,
+      conversationId,
+      threadId,
+    } = req.body ?? {};
+
+    const userId =
+      typeof rawUserId === "string" && rawUserId.trim()
+        ? rawUserId.trim()
+        : process.env.NODE_ENV !== "production"
+          ? "dev-user"
+          : null;
+    const normalizedTask = typeof task === "string" ? task.trim() : "";
+    const normalizedRepoPath = typeof repoPath === "string" ? repoPath.trim() : "";
+    const runIdStr = typeof runId === "string" && runId.trim() ? runId.trim() : "";
+    const threadIdStr =
+      typeof threadId === "string" && threadId.trim()
+        ? threadId.trim()
+        : typeof conversationId === "string" && conversationId.trim()
+          ? conversationId.trim()
+          : runIdStr;
+
+    if (!normalizedTask || !normalizedRepoPath || !runIdStr) {
+      perf.finish("bad request");
+      res.status(400).json({
+        ok: false,
+        reason: "task, repoPath, and runId are required",
+      });
+      return;
+    }
+    if (!userId) {
+      perf.finish("missing user");
+      res.status(401).json({
+        ok: false,
+        reason: "unauthorized",
+        message: "Missing user session. Please open Zone from your dashboard.",
+      });
+      return;
+    }
+
+    const authorization = await ensureRunAuthorized(userId, { billingMode: "hosted" });
+    if (!authorization.allowed) {
+      perf.finish("authorization blocked");
+      res.status(authorization.status).json(authorization.body);
+      return;
+    }
+
+    const forcedExecute = shouldForceExecuteTask(normalizedTask);
+    const messageType = forcedExecute
+      ? "patch_request"
+      : await detectMessageType(normalizedTask, chatUserApiKey || undefined);
+    if (messageType === "patch_request") {
+      perf.finish("wrong route");
+      res.status(409).json({
+        ok: false,
+        reason: "patch_request_detected",
+        message: "This request should be sent to /api/patch.",
+        intent: "execute",
+        messageType,
+      });
+      return;
+    }
+    const conversationalMessageType = messageType as "question" | "discussion";
+
+    registerRunStart(runIdStr, { task: normalizedTask });
+    const chatAbort = new AbortController();
+    activePatchRunAbortControllers.set(runIdStr, chatAbort);
+
+    try {
+      const result = await runConversationalFlow({
+        task: normalizedTask,
+        repoPath: normalizedRepoPath,
+        runId: runIdStr,
+        userId,
+        conversationId: threadIdStr,
+        messageType: conversationalMessageType,
+        userApiKey: chatUserApiKey || undefined,
+      });
+
+      registerRunComplete(runIdStr, "completed");
+      emitDeveloperPatchProgress(runIdStr, {
+        stage: "run_completed_with_result",
+        progress: {
+          runId: runIdStr,
+          ts: Date.now(),
+          type: "chat_response",
+          title: result.chatResponse,
+          status: "success",
+          result,
+        } as any,
+      });
+      perf.finish("complete");
+      res.json(result);
+    } catch (error) {
+      registerRunComplete(runIdStr, "cancelled");
+      perf.finish("error");
+      res.status(500).json({
+        ok: false,
+        reason: error instanceof Error ? error.message : "chat_flow_failed",
+      });
+    } finally {
+      activePatchRunAbortControllers.delete(runIdStr);
+    }
+  });
+});
+
 app.post("/api/patch", async (req, res) => {
   const perf = startZoneApiPerfRun("/api/patch");
   perf.mark("route entered");
+  const patchHandlerStartedAt = Date.now();
   const billingMode = "hosted";
-  if (shouldProxyHostedRequest(req, "/api/patch")) {
+  // BYOK: extract user-supplied OpenAI API key from the custom request header.
+  // This header is set by the browser when the user has configured their own key in Settings.
+  // The key is NEVER logged — only the source ("user" vs "env") is recorded inside createOpenAIClient.
+  const userApiKey = getHeaderUserApiKey(req);
+  // When the user provides their own key, skip the hosted-proxy path and run locally with that key.
+  if (!userApiKey && shouldProxyHostedRequest(req, "/api/patch")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
       req.body?.hostedContext ??
@@ -1476,13 +2300,54 @@ app.post("/api/patch", async (req, res) => {
     return;
   }
 
-  const { task, repoPath, runId, userId, hostedContext, conversationId } =
-    req.body;
+  await withUserApiKey(userApiKey || undefined, async () => {
+  const {
+    task,
+    repoPath,
+    runId,
+    userId: rawUserId,
+    hostedContext: hostedContextFromBody,
+    conversationId,
+    lastChangedFiles,
+    lastAddedFunctions,
+  } = req.body ?? {};
+  console.log("[debug-mem] received lastChangedFiles:", lastChangedFiles);
+  const hostedContext =
+    process.env.NODE_ENV === "production"
+      ? hostedContextFromBody
+      : hostedDeveloperContextRequestHasFiles(hostedContextFromBody)
+        ? hostedContextFromBody
+        : undefined;
+  const userId =
+    typeof rawUserId === "string" && rawUserId.trim()
+      ? rawUserId.trim()
+      : process.env.NODE_ENV !== "production"
+        ? "dev-user"
+        : null;
   perf.mark("request normalized");
+  logger.info(
+    "[patch-handler] received: threadId=%s, runId=%s, ts=%s",
+    typeof conversationId === "string" && conversationId.trim()
+      ? conversationId.trim()
+      : typeof runId === "string" && runId.trim()
+        ? runId.trim()
+        : "",
+    typeof runId === "string" && runId.trim() ? runId.trim() : "",
+    new Date(patchHandlerStartedAt).toISOString()
+  );
 
   if (!task || !repoPath) {
     perf.finish("bad request");
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
+    return;
+  }
+  if (!userId) {
+    perf.finish("missing user");
+    res.status(401).json({
+      ok: false,
+      reason: "unauthorized",
+      message: "Missing user session. Please open Zone from your dashboard.",
+    });
     return;
   }
 
@@ -1519,80 +2384,399 @@ app.post("/api/patch", async (req, res) => {
     return;
   }
 
-const result = await runLlmPatchFlow({
-  task,
-  repoPath,
-  hostedContext,
-  runId: typeof runId === "string" ? runId : undefined,
-  perfLabel: "/api/patch core",
-  onProgress: (update) => emitProgress(runId, update),
-});
-perf.mark("core patch flow complete");
+  const agentLoopPatterns = [
+    /run .*(test|spec|build|install)/i,
+    /npm (test|run|install)/i,
+    /yarn (test|run|add)/i,
+    /pytest/i,
+    /cargo (test|build|run)/i,
+    /check if .*(test|build|work)/i,
+    /tell me if .*(pass|fail|work)/i,
+    /does .*(test|build) pass/i,
+  ];
+  // Do not use bare \btest\b here — it false-positives on normal tasks ("latest", "contest", etc.).
+  // Test-related execution is still covered by agentLoopPatterns (npm test, run tests, …).
+  const shouldForceExecute = shouldForceExecuteTask(String(task || ""));
 
-if (result.ok && result.applyPatches.length > 0) {
-  const validation = validateLlmOutput(
-    "developer",
-    result.applyPatches.map((p) => ({
-      filePath: p.filePath,
-      content: p.fullContent,
-    }))
-  );
-  perf.mark("output validation complete");
-  if (validation.verdict === "block") {
-    perf.finish("validation blocked");
-    res.status(422).json({
-      ok: false,
-      reason: "Output validation failed — patch blocked.",
-      validationIssues: validation.issues,
-    });
-    return;
+  const intent = shouldForceExecute
+    ? "execute"
+    : await detectIntent(String(task), userApiKey || undefined);
+  if (intent === "chat") {
+    try {
+      emitProgress(runId, {
+        stage: "chat_response",
+        progress: {
+          type: "chat_start",
+          title: "Thinking...",
+          runId: String(runId || ""),
+          ts: Date.now(),
+          status: "active",
+        },
+      });
+    } catch {}
+
+    const runIdStr = typeof runId === "string" && runId.trim() ? runId.trim() : "";
+    const messageType = await detectMessageType(String(task), userApiKey || undefined);
+    const conversationalMessageType =
+      messageType === "discussion" ? "discussion" : "question";
+    try {
+      if (runIdStr) {
+        registerRunStart(runIdStr, { task: String(task) });
+      }
+      const result = await runConversationalFlow({
+        task: String(task),
+        repoPath: String(repoPath),
+        runId: runIdStr,
+        userId,
+        conversationId:
+          typeof conversationId === "string" && conversationId.trim()
+            ? conversationId.trim()
+            : runIdStr,
+        messageType: conversationalMessageType,
+      });
+      if (runIdStr) {
+        registerRunComplete(runIdStr, "completed");
+        emitDeveloperPatchProgress(runIdStr, {
+          stage: "run_completed_with_result",
+          progress: {
+            runId: runIdStr,
+            ts: Date.now(),
+            type: "chat_response",
+            title: result.chatResponse,
+            status: "success",
+            result,
+          } as any,
+        });
+      }
+      perf.finish("chat response sent");
+      res.json(result);
+      return;
+    } catch (error) {
+      if (runIdStr) {
+        registerRunComplete(runIdStr, "cancelled");
+      }
+      perf.finish("chat response failed");
+      res.status(500).json({
+        ok: false,
+        reason: error instanceof Error ? error.message : "chat_flow_failed",
+      });
+      return;
+    }
   }
-  if (validation.issues.length > 0) {
-    (result as Record<string, unknown>).validationIssues = validation.issues;
-    (result as Record<string, unknown>).validationVerdict = validation.verdict;
+
+  const runIdStr = typeof runId === "string" && runId.trim() ? runId.trim() : "";
+  const threadIdForRun =
+    typeof conversationId === "string" && conversationId.trim()
+      ? conversationId.trim()
+      : runIdStr;
+  try {
+    const existingRuns = await getActiveRunsByUser(userId);
+    const existingRun = existingRuns.find(
+      (run) =>
+        run.runId !== runIdStr &&
+        run.threadId === threadIdForRun &&
+        (run.status === "running" || run.status === "interrupted")
+    );
+    logger.info(
+      "[patch-handler] active-run check: existingRunId=%s, blocked=%s, threadId=%s",
+      existingRun?.runId ?? "",
+      "false",
+      threadIdForRun
+    );
+  } catch (error) {
+    logger.info(
+      "[patch-handler] active-run check: existingRunId=%s, blocked=%s, threadId=%s",
+      "",
+      "false",
+      threadIdForRun
+    );
+    console.warn(
+      "[zone] active run diagnostic lookup failed",
+      error instanceof Error ? error.message : String(error)
+    );
   }
-}
-
-  if (result.ok) {
-    const confidence =
-      typeof result.developerConfidence === "number"
-        ? result.developerConfidence
-        : 0;
-
-    console.log("[zone-billing-debug] execution success reached", {
-      routeName: "/api/patch",
-      userId: typeof userId === "string" ? userId.trim() : null,
-      billingMode: billingMode ?? null,
-    });
-
-    const loggedConversationId = await logRun({
-      userId,
-      role: "developer",
+  let patchAbort: AbortController | null = null;
+  if (runIdStr) {
+    patchAbort = new AbortController();
+    activePatchRunAbortControllers.set(runIdStr, patchAbort);
+    try {
+      registerRunStart(runIdStr, { task: typeof task === "string" ? task : undefined });
+    } catch {}
+    try {
+      await upsertActiveRun(runIdStr, {
+        userId,
+        threadId: threadIdForRun,
+        conversationId:
+          typeof conversationId === "string" && conversationId.trim()
+            ? conversationId.trim()
+            : runIdStr,
+        repoPath: String(repoPath),
+        task: String(task),
+        status: "running",
+        lastChangedFiles: Array.isArray(lastChangedFiles)
+          ? lastChangedFiles
+          : null,
+        lastAddedFunctions: Array.isArray(lastAddedFunctions)
+          ? lastAddedFunctions
+          : null,
+      });
+      console.log("[resume-debug] upsertActiveRun running", {
+        runId: runIdStr,
+        userId,
+        threadId: threadIdForRun,
+        repoPath: String(repoPath),
+        task: String(task),
+      });
+    } catch (error) {
+      console.warn(
+        "[zone] active run upsert failed",
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+  try {
+    logger.info(
+      "[patch-handler] reached planner, ms since entry=%d",
+      Date.now() - patchHandlerStartedAt
+    );
+    const result = await runLlmPatchFlow({
       task,
       repoPath,
-      decisionMode:
-        result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
-      confidence,
-      executionId: typeof runId === "string" ? runId : undefined,
-      creditsUsed: 1,
       conversationId,
-      billingMode,
-      routeName: "/api/patch",
-    }).catch(() => null);
+      userId,
+      lastChangedFiles: Array.isArray(lastChangedFiles) ? lastChangedFiles : undefined,
+      lastAddedFunctions: Array.isArray(lastAddedFunctions) ? lastAddedFunctions : undefined,
+      hostedContext,
+      runId: typeof runId === "string" ? runId : undefined,
+      perfLabel: "/api/patch core",
+      onProgress: (update) => emitProgress(runId, update),
+      abortSignal: patchAbort?.signal,
+      userApiKey: userApiKey || undefined,
+    });
+    perf.mark("core patch flow complete");
 
-    if (loggedConversationId) {
-      (result as Record<string, unknown>).conversationId = loggedConversationId;
+    // Best-effort: extract newly added function names from added diff lines.
+    try {
+      const diffs = Array.isArray((result as { fileDiffs?: unknown }).fileDiffs)
+        ? ((result as { fileDiffs?: Array<{ diff?: unknown }> }).fileDiffs || [])
+        : [];
+      const addedLines: string[] = [];
+      for (const fd of diffs) {
+        const lines = Array.isArray(fd?.diff) ? (fd!.diff as Array<{ type?: unknown; content?: unknown }>) : [];
+        for (const l of lines) {
+          if (l && l.type === "added" && typeof l.content === "string") {
+            addedLines.push(l.content);
+          }
+        }
+      }
+      const names = new Set<string>();
+      const patterns: RegExp[] = [
+        /^\s*export\s+async\s+function\s+([A-Za-z_$][\w$]*)\s*\(/,
+        /^\s*export\s+function\s+([A-Za-z_$][\w$]*)\s*\(/,
+        /^\s*async\s+function\s+([A-Za-z_$][\w$]*)\s*\(/,
+        /^\s*function\s+([A-Za-z_$][\w$]*)\s*\(/,
+        /^\s*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>/,
+        /^\s*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?[A-Za-z_$][\w$]*\s*=>/,
+      ];
+      for (const line of addedLines) {
+        const s = String(line || "");
+        for (const re of patterns) {
+          const m = s.match(re);
+          if (m?.[1]) {
+            names.add(m[1]);
+            break;
+          }
+        }
+      }
+      (result as Record<string, unknown>).addedFunctions = Array.from(names).slice(0, 10);
+    } catch {}
+
+    if (result.ok && result.applyPatches.length > 0) {
+      const validation = validateLlmOutput(
+        "developer",
+        result.applyPatches.map((p) => ({
+          filePath: p.filePath,
+          content: p.fullContent,
+        }))
+      );
+      perf.mark("output validation complete");
+      if (validation.verdict === "block") {
+        perf.finish("validation blocked");
+        try {
+          if (runIdStr) {
+            await completeActiveRun(runIdStr, "cancelled");
+          }
+        } catch (error) {
+          console.warn(
+            "[zone] active run validation cleanup failed",
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+        res.status(422).json({
+          ok: false,
+          reason: "Output validation failed — patch blocked.",
+          validationIssues: validation.issues,
+        });
+        return;
+      }
+      if (validation.issues.length > 0) {
+        (result as Record<string, unknown>).validationIssues = validation.issues;
+        (result as Record<string, unknown>).validationVerdict = validation.verdict;
+      }
     }
-    perf.mark("successful accounting complete");
-  }
 
-perf.mark("response ready");
-perf.finish("complete");
-res.json(result);
+    if (result.ok) {
+      const confidence =
+        typeof result.developerConfidence === "number"
+          ? result.developerConfidence
+          : 0;
+
+      console.log("[zone-billing-debug] execution success reached", {
+        routeName: "/api/patch",
+        userId: typeof userId === "string" ? userId.trim() : null,
+        billingMode: billingMode ?? null,
+      });
+
+      const loggedConversationId = await logRun({
+        userId,
+        role: "developer",
+        task,
+        repoPath,
+        decisionMode:
+          result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
+        confidence,
+        executionId: typeof runId === "string" ? runId : undefined,
+        creditsUsed: 1,
+        conversationId,
+        changedFiles: Array.isArray((result as { applyPatches?: unknown }).applyPatches)
+          ? ((result as { applyPatches?: Array<{ filePath?: unknown }> }).applyPatches || [])
+              .map((p) => String(p?.filePath ?? "").trim())
+              .filter(Boolean)
+          : Array.isArray((result as { fileDiffs?: unknown }).fileDiffs)
+            ? ((result as { fileDiffs?: Array<{ filePath?: unknown }> }).fileDiffs || [])
+                .map((d) => String(d?.filePath ?? "").trim())
+                .filter(Boolean)
+            : [],
+        billingMode,
+        routeName: "/api/patch",
+      }).catch(() => null);
+
+      if (loggedConversationId) {
+        (result as Record<string, unknown>).conversationId = loggedConversationId;
+      }
+      perf.mark("successful accounting complete");
+    }
+
+    perf.mark("response ready");
+    perf.finish("complete");
+    logger.info(
+      "[patch-handler] dispatched runId=%s, total ms=%d",
+      runIdStr,
+      Date.now() - patchHandlerStartedAt
+    );
+    try {
+      if (runIdStr) registerRunComplete(runIdStr, "completed");
+    } catch {}
+    try {
+      if (runIdStr) {
+        await completeActiveRun(runIdStr, "completed");
+      }
+    } catch (error) {
+      console.warn(
+        "[zone] active run complete failed",
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    // After refresh, the original HTTP response is orphaned. Emit the final result via SSE too.
+    try {
+      if (runIdStr) {
+        emitDeveloperPatchProgress(runIdStr, {
+          stage: "run_completed_with_result",
+          progress: {
+            runId: runIdStr,
+            ts: Date.now(),
+            type: "run_completed_with_result",
+            title: "Run completed",
+            status: "success",
+            result,
+          } as any,
+        });
+      }
+    } catch {}
+    res.json(result);
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      perf.finish("cancelled");
+      try {
+        if (runIdStr) registerRunComplete(runIdStr, "cancelled");
+      } catch {}
+      try {
+        if (runIdStr) {
+          await completeActiveRun(runIdStr, "cancelled");
+        }
+      } catch (error) {
+        console.warn(
+          "[zone] active run cancel failed",
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+      const payload = {
+        ok: false,
+        cancelled: true,
+        reason: "cancelled",
+        message: "Run was cancelled.",
+        applyPatches: [],
+        fileDiffs: [],
+        decisionMode: "preview_only",
+        developerConfidence: 0,
+      };
+      try {
+        if (runIdStr) {
+          emitDeveloperPatchProgress(runIdStr, {
+            stage: "run_completed_with_result",
+            progress: {
+              runId: runIdStr,
+              ts: Date.now(),
+              type: "run_completed_with_result",
+              title: "Run cancelled",
+              status: "warning",
+              result: payload,
+            } as any,
+          });
+        }
+      } catch {}
+      res.json(payload);
+      return;
+    }
+    perf.finish("error");
+    try {
+      if (runIdStr) registerRunComplete(runIdStr, "cancelled");
+    } catch {}
+    try {
+      if (runIdStr) {
+        await completeActiveRun(runIdStr, "cancelled");
+      }
+    } catch (error) {
+      console.warn(
+        "[zone] active run error cleanup failed",
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    res.status(500).json({
+      ok: false,
+      reason: err instanceof Error ? err.message : "patch_flow_failed",
+    });
+  } finally {
+    if (runIdStr) {
+      activePatchRunAbortControllers.delete(runIdStr);
+    }
+  }
+  });
 });
 app.post("/api/dry-run", async (req, res) => {
   const billingMode = "hosted";
-  if (shouldProxyHostedRequest(req, "/api/dry-run")) {
+  const userApiKey = getHeaderUserApiKey(req);
+  if (!userApiKey && shouldProxyHostedRequest(req, "/api/dry-run")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
       req.body?.hostedContext ??
@@ -1610,8 +2794,35 @@ app.post("/api/dry-run", async (req, res) => {
     return;
   }
 
-  const { task, repoPath, runId, userId, hostedContext, conversationId } =
-    req.body;
+  await withUserApiKey(userApiKey || undefined, async () => {
+  const {
+    task,
+    repoPath,
+    runId,
+    userId: rawUserId,
+    hostedContext: hostedContextFromBodyDry,
+    conversationId,
+  } = req.body ?? {};
+  const hostedContext =
+    process.env.NODE_ENV === "production"
+      ? hostedContextFromBodyDry
+      : hostedDeveloperContextRequestHasFiles(hostedContextFromBodyDry)
+        ? hostedContextFromBodyDry
+        : undefined;
+  const userId =
+    typeof rawUserId === "string" && rawUserId.trim()
+      ? rawUserId.trim()
+      : process.env.NODE_ENV !== "production"
+        ? "dev-user"
+        : null;
+  if (!userId) {
+    res.status(401).json({
+      ok: false,
+      reason: "unauthorized",
+      message: "Missing user session. Please open Zone from your dashboard.",
+    });
+    return;
+  }
 
   const authorization = await ensureRunAuthorized(userId, {
     billingMode,
@@ -1628,6 +2839,7 @@ const result = await runLlmPatchFlow({
   hostedContext,
   runId: typeof runId === "string" ? runId : undefined,
   onProgress: (update) => emitProgress(runId, update),
+  userApiKey: userApiKey || undefined,
 });
 if (!result.ok) {
   res.status(500).json(result);
@@ -1695,6 +2907,7 @@ if (result.applyPatches.length > 0) {
   }
 
 res.json(responseBody);
+  });
 });
 
 type SuggestedVerification = {
@@ -1730,22 +2943,36 @@ async function buildSuggestedVerification(
 
 app.post("/api/apply", async (req, res) => {
   const { patches, repoPath } = req.body;
-  const result = await applyLlmPatches(patches, repoPath);
-  let suggestedVerification: SuggestedVerification = { available: false };
-  if (result.applied.length > 0 && typeof repoPath === "string") {
-    suggestedVerification = await buildSuggestedVerification(repoPath);
+  console.log("[zone-apply-input]", {
+    repoPath,
+    patchCount: Array.isArray(patches) ? patches.length : null,
+  });
+  try {
+    const result = await applyLlmPatches(patches, repoPath);
+    let suggestedVerification: SuggestedVerification = { available: false };
+    if (result.applied.length > 0 && typeof repoPath === "string") {
+      suggestedVerification = await buildSuggestedVerification(repoPath);
+      console.log(
+        `[zone-verify-suggest] command="${suggestedVerification.command ?? ""}" available=${suggestedVerification.available}`
+      );
+    }
+    const responseBody = {
+      ...result,
+      suggestedVerification,
+    };
     console.log(
-      `[zone-verify-suggest] command="${suggestedVerification.command ?? ""}" available=${suggestedVerification.available}`
+      `[zone-apply] suggestedVerification available=${suggestedVerification.available} command="${suggestedVerification.command ?? ""}"`
     );
+    res.json(responseBody);
+  } catch (err) {
+    console.log(
+      "[zone-apply-error]",
+      (err as any)?.message,
+      (err as any)?.code,
+      String((err as any)?.stack || "").slice(0, 300)
+    );
+    res.status(500).json({ ok: false, reason: "apply_failed" });
   }
-  const responseBody = {
-    ...result,
-    suggestedVerification,
-  };
-  console.log(
-    `[zone-apply] suggestedVerification available=${suggestedVerification.available} command="${suggestedVerification.command ?? ""}"`
-  );
-  res.json(responseBody);
 });
 
 app.post("/api/suggest-verification", async (req, res) => {
@@ -1809,7 +3036,8 @@ app.post("/api/run-verification", async (req, res) => {
 
 app.post("/api/refine-prompt", async (req, res) => {
   const billingMode = "hosted";
-  if (shouldProxyHostedRequest(req, "/api/refine-prompt")) {
+  const userApiKey = getHeaderUserApiKey(req);
+  if (!userApiKey && shouldProxyHostedRequest(req, "/api/refine-prompt")) {
     await proxyHostedZoneRequest(req, res, "/api/refine-prompt");
     return;
   }
@@ -1831,26 +3059,29 @@ app.post("/api/refine-prompt", async (req, res) => {
       ? req.body.plan
       : undefined;
 
-  try {
-    const refinedPrompt = await refinePrompt({
-      task,
-      role,
-      reason,
-      relevantFiles,
-      plan,
-    });
-    console.log(
-      `[zone-refine] prompt refined role=${role || "developer"} reason=${reason || "unspecified"}`
-    );
-    res.json({ ok: true, refinedPrompt });
-  } catch {
-    res.json({ ok: true, refinedPrompt: PROMPT_REFINEMENT_FALLBACK });
-  }
+  await withUserApiKey(userApiKey || undefined, async () => {
+    try {
+      const refinedPrompt = await refinePrompt({
+        task,
+        role,
+        reason,
+        relevantFiles,
+        plan,
+      });
+      console.log(
+        `[zone-refine] prompt refined role=${role || "developer"} reason=${reason || "unspecified"}`
+      );
+      res.json({ ok: true, refinedPrompt });
+    } catch {
+      res.json({ ok: true, refinedPrompt: PROMPT_REFINEMENT_FALLBACK });
+    }
+  });
 });
 
 app.post("/api/enhance-task", async (req, res) => {
   const billingMode = "hosted";
-  if (shouldProxyHostedRequest(req, "/api/enhance-task")) {
+  const userApiKey = getHeaderUserApiKey(req);
+  if (!userApiKey && shouldProxyHostedRequest(req, "/api/enhance-task")) {
     const { role, repoPath } = req.body ?? {};
     const hostedContext =
       typeof role === "string" && typeof repoPath === "string"
@@ -1875,27 +3106,31 @@ app.post("/api/enhance-task", async (req, res) => {
     return;
   }
 
-  try {
-    const result = await enhanceTask({
-      task,
-      role,
-      repoPath,
-      hostedContext,
-    });
-    res
-      .type("application/json")
-      .send(JSON.stringify({ ok: true, enhancedTask: result }));
-  } catch (err) {
-    res.status(500).json({
-      ok: false,
-      reason: err instanceof Error ? err.message : "Unknown error",
-    });
-  }
+  await withUserApiKey(userApiKey || undefined, async () => {
+    try {
+      const result = await enhanceTask({
+        task,
+        role,
+        repoPath,
+        hostedContext,
+        userApiKey: userApiKey || undefined,
+      });
+      res
+        .type("application/json")
+        .send(JSON.stringify({ ok: true, enhancedTask: result }));
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        reason: err instanceof Error ? err.message : "Unknown error",
+      });
+    }
+  });
 });
 
 app.post("/api/test-engineer", async (req, res) => {
   const billingMode = "hosted";
-if (shouldProxyHostedRequest(req, "/api/test-engineer")) {
+  const userApiKey = getHeaderUserApiKey(req);
+if (!userApiKey && shouldProxyHostedRequest(req, "/api/test-engineer")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
       req.body?.hostedContext ??
@@ -1912,6 +3147,7 @@ if (shouldProxyHostedRequest(req, "/api/test-engineer")) {
     });
     return;
   }
+await withUserApiKey(userApiKey || undefined, async () => {
 const { task, repoPath, runId, userId, hostedContext, conversationId } =
     req.body;
   if (!task || !repoPath) {
@@ -1995,10 +3231,12 @@ const loggedConversationId = await logRun({
     });
   }
 });
+});
 
 app.post("/api/data-analyst", async (req, res) => {
   const billingMode = "hosted";
-if (shouldProxyHostedRequest(req, "/api/data-analyst")) {
+  const userApiKey = getHeaderUserApiKey(req);
+if (!userApiKey && shouldProxyHostedRequest(req, "/api/data-analyst")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
       typeof task === "string" && typeof repoPath === "string"
@@ -2014,6 +3252,7 @@ if (shouldProxyHostedRequest(req, "/api/data-analyst")) {
     });
     return;
   }
+await withUserApiKey(userApiKey || undefined, async () => {
 const { task, repoPath, runId, userId, hostedContext, conversationId } =
     req.body;
   if (!task || !repoPath) {
@@ -2094,6 +3333,7 @@ const result = await runDataAnalystFlow({
     });
   }
 });
+});
 
 app.use(express.static(zoneUiDir));
 
@@ -2107,9 +3347,9 @@ export async function startServer(port = 3000): Promise<void> {
   startPromise = new Promise<void>((resolve) => {
     app.listen(port, () => {
       console.log(
-        colorize(`Zone UI running on http://localhost:${port}`, c.green, c.bold)
+        colorize(`Zone UI running on http://localhost:${port}`, "\x1b[32m", "\x1b[1m")
       );
-      console.log(colorize("Press Ctrl+C to stop", c.dim, c.gray));
+      console.log(colorize("Press Ctrl+C to stop", "\x1b[2m", "\x1b[90m"));
       resolve();
     });
   });

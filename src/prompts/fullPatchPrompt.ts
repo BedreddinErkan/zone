@@ -6,6 +6,7 @@ interface FullPatchPromptInput {
   fileContent: string;
   repoSummary: string;
   relatedContext: string;
+  plannerSuggestedFile?: string;
   taskIntent?: string;
   normalizedTaskIntent?: string;
   outputMode?: FullPatchOutputMode;
@@ -181,11 +182,20 @@ export function buildFullPatchPrompt(input: FullPatchPromptInput): string {
     fileContent,
     repoSummary,
     relatedContext,
+    plannerSuggestedFile,
     taskIntent,
     normalizedTaskIntent,
     outputMode = "full_content",
     executionPlanContext,
   } = input;
+  const plannerTargetInstruction =
+    plannerSuggestedFile && plannerSuggestedFile.trim()
+      ? `PLANNER TARGET
+The planner identified ${plannerSuggestedFile} as the most relevant file.
+Generate the patch for this file unless evidence shows otherwise.
+
+`
+      : "";
   const codeStyle = detectCodeStyleFromSample(fileContent);
   const renameIntent = detectRenameIntent(task);
   const renameInstruction = renameIntent
@@ -249,7 +259,7 @@ You are a code patch generator working on a LARGE existing file. Your entire rep
 TASK
 ${task}
 
-TARGET FILE
+${plannerTargetInstruction}TARGET FILE
 ${filePath}
 
 REPO SUMMARY
@@ -308,7 +318,7 @@ You are a senior software engineer applying a precise code change to an existing
 TASK
 ${task}
 
-TARGET FILE
+${plannerTargetInstruction}TARGET FILE
 ${filePath}
 
 REPO SUMMARY

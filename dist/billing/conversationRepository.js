@@ -2,21 +2,21 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getUserQuota = getUserQuota;
 exports.createConversation = createConversation;
-exports.getConversationById = getConversationById;
-exports.updateConversation = updateConversation;
-const node_crypto_1 = require("node:crypto");
+exports.getConversationByThreadId = getConversationByThreadId;
+exports.upsertConversation = upsertConversation;
+exports.appendConversationMessages = appendConversationMessages;
 const TABLE_NAME = "conversations";
-const CONVERSATION_COLUMNS = "id,user_id,mode,repo_path,role,charged_run_count,refinement_count,has_free_refinement_been_used,created_at,updated_at";
+const CONVERSATION_COLUMNS = "id,user_id,thread_id,repo_path,messages,created_at,updated_at";
+function normalizeMessages(value) {
+    return Array.isArray(value) ? value : [];
+}
 function mapConversationRow(row) {
     return {
         id: row.id,
         userId: row.user_id,
-        mode: row.mode,
+        threadId: row.thread_id,
         repoPath: row.repo_path,
-        role: row.role,
-        chargedRunCount: row.charged_run_count,
-        refinementCount: row.refinement_count,
-        hasFreeRefinementBeenUsed: row.has_free_refinement_been_used,
+        messages: normalizeMessages(row.messages),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
     };
@@ -40,18 +40,13 @@ async function getUserQuota(supabase, userId) {
     };
 }
 async function createConversation(supabase, input) {
-    const id = (0, node_crypto_1.randomUUID)();
     const { data, error } = await supabase
         .from(TABLE_NAME)
         .insert({
-        id,
         user_id: input.userId,
-        mode: input.mode,
-        repo_path: input.repoPath,
-        role: input.role,
-        charged_run_count: 0,
-        refinement_count: 0,
-        has_free_refinement_been_used: false,
+        thread_id: input.threadId,
+        repo_path: input.repoPath ?? null,
+        messages: Array.isArray(input.messages) ? input.messages : [],
     })
         .select(CONVERSATION_COLUMNS)
         .single();
@@ -60,43 +55,49 @@ async function createConversation(supabase, input) {
     }
     return mapConversationRow(data);
 }
-async function getConversationById(supabase, id) {
+async function getConversationByThreadId(supabase, input) {
     const { data, error } = await supabase
         .from(TABLE_NAME)
         .select(CONVERSATION_COLUMNS)
-        .eq("id", id)
+        .eq("user_id", input.userId)
+        .eq("thread_id", input.threadId)
         .maybeSingle();
     if (error) {
         throw new Error(error.message || "Failed to load conversation");
     }
     return data ? mapConversationRow(data) : null;
 }
-async function updateConversation(supabase, id, patch) {
+async function upsertConversation(supabase, input) {
     const { data, error } = await supabase
         .from(TABLE_NAME)
-        .update({
-        ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
-        ...(patch.repoPath !== undefined ? { repo_path: patch.repoPath } : {}),
-        ...(patch.role !== undefined ? { role: patch.role } : {}),
-        ...(patch.chargedRunCount !== undefined
-            ? { charged_run_count: patch.chargedRunCount }
-            : {}),
-        ...(patch.refinementCount !== undefined
-            ? { refinement_count: patch.refinementCount }
-            : {}),
-        ...(patch.hasFreeRefinementBeenUsed !== undefined
-            ? {
-                has_free_refinement_been_used: patch.hasFreeRefinementBeenUsed,
-            }
-            : {}),
+        .upsert({
+        user_id: input.userId,
+        thread_id: input.threadId,
+        repo_path: input.repoPath ?? null,
+        messages: Array.isArray(input.messages) ? input.messages : [],
         updated_at: new Date().toISOString(),
-    })
-        .eq("id", id)
+    }, { onConflict: "user_id,thread_id" })
         .select(CONVERSATION_COLUMNS)
         .single();
     if (error || !data) {
-        throw new Error(error?.message || "Failed to update conversation");
+        throw new Error(error?.message || "Failed to upsert conversation");
     }
     return mapConversationRow(data);
+}
+async function appendConversationMessages(supabase, input) {
+    const existing = await getConversationByThreadId(supabase, {
+        userId: input.userId,
+        threadId: input.threadId,
+    });
+    const mergedMessages = [
+        ...normalizeMessages(existing?.messages),
+        ...(Array.isArray(input.appendMessages) ? input.appendMessages : []),
+    ];
+    return await upsertConversation(supabase, {
+        userId: input.userId,
+        threadId: input.threadId,
+        repoPath: input.repoPath ?? existing?.repoPath ?? null,
+        messages: mergedMessages,
+    });
 }
 //# sourceMappingURL=conversationRepository.js.map

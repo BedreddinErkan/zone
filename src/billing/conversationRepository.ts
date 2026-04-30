@@ -1,20 +1,15 @@
-import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   ConversationBillingMode,
-  ConversationRecord,
   ConversationRole,
 } from "../types/conversation.js";
 
 type ConversationRow = {
   id: string;
   user_id: string;
-  mode: ConversationBillingMode;
-  repo_path: string;
-  role: ConversationRole;
-  charged_run_count: number;
-  refinement_count: number;
-  has_free_refinement_been_used: boolean;
+  thread_id: string;
+  repo_path: string | null;
+  messages: unknown;
   created_at: string;
   updated_at: string;
 };
@@ -29,34 +24,46 @@ type UserQuotaRow = {
 
 export interface CreateConversationInput {
   userId: string;
-  mode: ConversationBillingMode;
-  repoPath: string;
-  role: ConversationRole;
+  threadId: string;
+  repoPath?: string | null;
+  messages?: unknown[];
+  // kept for backwards-compat callers; not stored in table
+  mode?: ConversationBillingMode;
+  role?: ConversationRole;
 }
 
-export interface UpdateConversationInput {
-  mode?: ConversationBillingMode;
-  repoPath?: string;
-  role?: ConversationRole;
-  chargedRunCount?: number;
-  refinementCount?: number;
-  hasFreeRefinementBeenUsed?: boolean;
+export interface AppendConversationMessagesInput {
+  userId: string;
+  threadId: string;
+  repoPath?: string | null;
+  appendMessages: unknown[];
 }
 
 const TABLE_NAME = "conversations";
 const CONVERSATION_COLUMNS =
-  "id,user_id,mode,repo_path,role,charged_run_count,refinement_count,has_free_refinement_been_used,created_at,updated_at";
+  "id,user_id,thread_id,repo_path,messages,created_at,updated_at";
 
-function mapConversationRow(row: ConversationRow): ConversationRecord {
+export type PersistedConversation = {
+  id: string;
+  userId: string;
+  threadId: string;
+  repoPath: string | null;
+  messages: unknown[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+function normalizeMessages(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function mapConversationRow(row: ConversationRow): PersistedConversation {
   return {
     id: row.id,
     userId: row.user_id,
-    mode: row.mode,
+    threadId: row.thread_id,
     repoPath: row.repo_path,
-    role: row.role,
-    chargedRunCount: row.charged_run_count,
-    refinementCount: row.refinement_count,
-    hasFreeRefinementBeenUsed: row.has_free_refinement_been_used,
+    messages: normalizeMessages(row.messages),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -96,19 +103,14 @@ export async function getUserQuota(
 export async function createConversation(
   supabase: SupabaseClient,
   input: CreateConversationInput
-): Promise<ConversationRecord> {
-  const id = randomUUID();
+): Promise<PersistedConversation> {
   const { data, error } = await supabase
     .from(TABLE_NAME)
     .insert({
-      id,
       user_id: input.userId,
-      mode: input.mode,
-      repo_path: input.repoPath,
-      role: input.role,
-      charged_run_count: 0,
-      refinement_count: 0,
-      has_free_refinement_been_used: false,
+      thread_id: input.threadId,
+      repo_path: input.repoPath ?? null,
+      messages: Array.isArray(input.messages) ? input.messages : [],
     })
     .select(CONVERSATION_COLUMNS)
     .single();
@@ -120,14 +122,15 @@ export async function createConversation(
   return mapConversationRow(data as ConversationRow);
 }
 
-export async function getConversationById(
+export async function getConversationByThreadId(
   supabase: SupabaseClient,
-  id: string
-): Promise<ConversationRecord | null> {
+  input: { userId: string; threadId: string }
+): Promise<PersistedConversation | null> {
   const { data, error } = await supabase
     .from(TABLE_NAME)
     .select(CONVERSATION_COLUMNS)
-    .eq("id", id)
+    .eq("user_id", input.userId)
+    .eq("thread_id", input.threadId)
     .maybeSingle();
 
   if (error) {
@@ -137,37 +140,55 @@ export async function getConversationById(
   return data ? mapConversationRow(data as ConversationRow) : null;
 }
 
-export async function updateConversation(
+export async function upsertConversation(
   supabase: SupabaseClient,
-  id: string,
-  patch: UpdateConversationInput
-): Promise<ConversationRecord> {
+  input: {
+    userId: string;
+    threadId: string;
+    repoPath?: string | null;
+    messages: unknown[];
+  }
+): Promise<PersistedConversation> {
   const { data, error } = await supabase
     .from(TABLE_NAME)
-    .update({
-      ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
-      ...(patch.repoPath !== undefined ? { repo_path: patch.repoPath } : {}),
-      ...(patch.role !== undefined ? { role: patch.role } : {}),
-      ...(patch.chargedRunCount !== undefined
-        ? { charged_run_count: patch.chargedRunCount }
-        : {}),
-      ...(patch.refinementCount !== undefined
-        ? { refinement_count: patch.refinementCount }
-        : {}),
-      ...(patch.hasFreeRefinementBeenUsed !== undefined
-        ? {
-            has_free_refinement_been_used: patch.hasFreeRefinementBeenUsed,
-          }
-        : {}),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", id)
+    .upsert(
+      {
+        user_id: input.userId,
+        thread_id: input.threadId,
+        repo_path: input.repoPath ?? null,
+        messages: Array.isArray(input.messages) ? input.messages : [],
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id,thread_id" }
+    )
     .select(CONVERSATION_COLUMNS)
     .single();
 
   if (error || !data) {
-    throw new Error(error?.message || "Failed to update conversation");
+    throw new Error(error?.message || "Failed to upsert conversation");
   }
 
   return mapConversationRow(data as ConversationRow);
+}
+
+export async function appendConversationMessages(
+  supabase: SupabaseClient,
+  input: AppendConversationMessagesInput
+): Promise<PersistedConversation> {
+  const existing = await getConversationByThreadId(supabase, {
+    userId: input.userId,
+    threadId: input.threadId,
+  });
+
+  const mergedMessages = [
+    ...normalizeMessages(existing?.messages),
+    ...(Array.isArray(input.appendMessages) ? input.appendMessages : []),
+  ];
+
+  return await upsertConversation(supabase, {
+    userId: input.userId,
+    threadId: input.threadId,
+    repoPath: input.repoPath ?? existing?.repoPath ?? null,
+    messages: mergedMessages,
+  });
 }

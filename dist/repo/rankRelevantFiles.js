@@ -374,23 +374,148 @@ function scoreFile(file, task) {
     return score;
 }
 function rankRelevantFiles(args) {
-    const { task, files, intent } = args;
+    console.log("[zone-rank-fn-entry] rankRelevantFiles called", {
+        hasSemanticScores: !!args.semanticScores,
+        semanticScoresSize: args.semanticScores?.size || 0,
+        fileCount: args.files?.length,
+    });
+    const { task, files, intent, semanticScores } = args;
+    console.log("[zone-rank-input-debug]", {
+        hasSemanticScores: !!semanticScores,
+        semanticScoresSize: semanticScores?.size || 0,
+    });
     const maxContextFilesRaw = (process.env.MAX_CONTEXT_FILES ?? "").trim();
     const maxContextFiles = maxContextFilesRaw && Number.isFinite(Number(maxContextFilesRaw))
         ? Math.max(1, Math.floor(Number(maxContextFilesRaw)))
         : 5;
-    return files
+    const shouldSkipPath = (filePath) => {
+        const p = (filePath ?? "").toLowerCase();
+        return [
+            "venv",
+            ".venv",
+            "site-packages",
+            "__pycache__",
+            "node_modules",
+            "/.git/",
+            "\\.git\\",
+            "dist",
+            "build",
+            ".next",
+        ].some((token) => p.includes(token));
+    };
+    const ranked = files
+        .filter((f) => !shouldSkipPath(f.path))
         .map((file) => {
-        const baseScore = scoreFile(file, task);
+        const keywordScore = scoreFile(file, task);
         const boost = intent
             ? (0, intentAwareScore_js_1.getIntentAwareScoreBoost)(file.path, "", intent)
             : 0;
         return {
             ...file,
-            score: baseScore + boost
+            score: keywordScore + boost,
+            __keywordScore: keywordScore,
+            __boost: boost,
         };
-    })
+    });
+    if (semanticScores && semanticScores.size > 0 && ranked.length > 0) {
+        const taskLen = String(task || "").length;
+        const semanticWeight = taskLen > 80 ? 0.75 : 0.6;
+        const keywordWeight = 1 - semanticWeight;
+        const keywordScores = ranked.map((file) => Number(file.__keywordScore || 0));
+        const maxKeyword = Math.max(...keywordScores);
+        const minKeyword = Math.min(...keywordScores);
+        const normalizeKeywordScore = (value) => {
+            if (maxKeyword === minKeyword) {
+                return value > 0 ? 90 : 0;
+            }
+            return Math.min(90, ((value - minKeyword) / (maxKeyword - minKeyword)) * 100);
+        };
+        const hybridRanked = ranked.map((file) => {
+            const keywordScore = Number(file.__keywordScore || 0);
+            const boost = Number(file.__boost || 0);
+            const semanticScore = Math.max(0, Math.min(1, Number(semanticScores.get(file.path) ?? 0)));
+            const normalizedKeywordScore = normalizeKeywordScore(keywordScore);
+            const hybridScore = keywordWeight * normalizedKeywordScore +
+                semanticWeight * (semanticScore * 100);
+            return {
+                ...file,
+                score: hybridScore + boost,
+                __keywordScoreNormalized: normalizedKeywordScore,
+                __semanticScore: semanticScore,
+                __hybridScore: hybridScore + boost,
+            };
+        });
+        let finalHybridRanked = [...hybridRanked]
+            .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
+        const topSemanticMatch = [...hybridRanked]
+            .filter((file) => Number(file.__semanticScore || 0) > 0)
+            .sort((a, b) => {
+            const semanticDelta = Number(b.__semanticScore || 0) -
+                Number(a.__semanticScore || 0);
+            if (semanticDelta !== 0)
+                return semanticDelta;
+            return b.score - a.score || a.path.localeCompare(b.path);
+        })[0];
+        if (topSemanticMatch) {
+            const topSemanticSimilarity = Number(topSemanticMatch
+                .__semanticScore || 0);
+            const currentTopFive = finalHybridRanked.slice(0, 5).map((file) => file.path);
+            const thresholdMet = topSemanticSimilarity > 0.35;
+            const alreadyInTop5 = currentTopFive.includes(topSemanticMatch.path);
+            const willInsert = thresholdMet && !alreadyInTop5;
+            console.log("[zone-rank-rescue-check]", {
+                topSemantic: {
+                    file: topSemanticMatch.path,
+                    similarity: topSemanticSimilarity,
+                },
+                thresholdMet,
+                alreadyInTop5,
+                willInsert,
+            });
+            if (willInsert) {
+                finalHybridRanked = finalHybridRanked.filter((file) => file.path !== topSemanticMatch.path);
+                finalHybridRanked.splice(1, 0, topSemanticMatch);
+                console.log("[zone-rank-rescue-debug]", {
+                    candidateFile: topSemanticMatch.path,
+                    candidateSimilarity: topSemanticSimilarity,
+                    decision: "inserted",
+                });
+                console.log("[zone-rank-semantic-rescue]", {
+                    file: topSemanticMatch.path,
+                    similarity: topSemanticSimilarity,
+                    hybridScore: Number(topSemanticMatch
+                        .__hybridScore || topSemanticMatch.score),
+                    action: "inserted_at_top",
+                });
+            }
+            else {
+                console.log("[zone-rank-rescue-debug]", {
+                    candidateFile: topSemanticMatch.path,
+                    candidateSimilarity: topSemanticSimilarity,
+                    decision: "skipped",
+                    skipReason: !thresholdMet ? "below_threshold" : "already_present",
+                });
+            }
+        }
+        const topFiles = finalHybridRanked
+            .slice(0, Math.min(5, finalHybridRanked.length))
+            .map((file) => ({
+            path: file.path,
+            keywordScore: Number(file.__keywordScoreNormalized || 0),
+            semanticScore: Number(file.__semanticScore || 0),
+            hybridScore: Number(file.__hybridScore || file.score),
+        }));
+        console.log("[zone-rank-hybrid-debug]", {
+            task,
+            topFiles,
+        });
+        return finalHybridRanked
+            .slice(0, maxContextFiles)
+            .map(({ __keywordScore, __boost, __keywordScoreNormalized, __semanticScore, __hybridScore, ...file }) => file);
+    }
+    return ranked
         .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
-        .slice(0, maxContextFiles);
+        .slice(0, maxContextFiles)
+        .map(({ __keywordScore, __boost, ...file }) => file);
 }
 //# sourceMappingURL=rankRelevantFiles.js.map

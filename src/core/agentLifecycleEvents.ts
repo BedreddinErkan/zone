@@ -16,6 +16,7 @@ export const AGENT_LIFECYCLE_EVENT_TYPES = [
   "verification_failed",
   "tooling_issue",
   "run_completed",
+  "run_cancelled",
 ] as const;
 
 export type AgentLifecycleEventType = (typeof AGENT_LIFECYCLE_EVENT_TYPES)[number];
@@ -44,6 +45,19 @@ export type AgentLifecycleEvent = {
   timestamp: string;
 };
 
+/** Payload for `handoff_report` progress events and persisted run results. */
+export type ZoneHandoffReport = {
+  summary: string;
+  changes: Array<{
+    file: string;
+    added: number;
+    removed: number;
+    description: string;
+  }>;
+  verification: "passed" | "skipped" | "failed";
+  suggestedNextPrompt: string;
+};
+
 /** Rich UI progress payload (SSE); legacy `stage` string remains for older clients. */
 export type ZoneStructuredProgressEvent = {
   runId: string;
@@ -59,16 +73,56 @@ export type ZoneStructuredProgressEvent = {
     | "fallback_success"
     | "patch_converted"
     | "validated"
-    | "verification";
+    | "verification"
+    | "verification_investigating"
+    | "verification_fixing"
+    | "verification_fixed"
+    | "chat_start"
+    | "chat_chunk"
+    | "chat_done"
+    | "chat_response"
+    | "plan_generated"
+    | "plan_discard"
+    | "plan_step_complete"
+    | "patch_stream_delta"
+    | "patch_stream_target"
+    | "tool_call"
+    | "tool_result"
+    | "agent_loop_start"
+    | "agent_loop_complete"
+    | "handoff_report"
+    | "command_approval_required"
+    | "terminal_output"
+    | "terminal_done";
   title: string;
   detail?: string;
   filePath?: string;
   command?: string;
   status?: "active" | "success" | "warning" | "error";
+  stream?: "stdout" | "stderr";
+  exitCode?: number;
+  approvalId?: string;
+  steps?: Array<{
+    index: number;
+    text: string;
+    status: "pending" | "active" | "done";
+  }>;
+  stepIndex?: number;
+  delta?: string;
+  /** True when backend emitted a single fallback delta (not real token streaming). */
+  fallback?: boolean;
+  targetSymbol?: string;
+  report?: ZoneHandoffReport;
+  responseText?: string;
+  responseHtml?: string;
+  contextFiles?: string[];
   planner?: {
     changeDescription: string;
     strategy: string;
     filesToEdit: string[];
+    relatedFiles?: Array<{ filePath: string; relationship: string; score: number }>;
+    /** Cross-file dependency hints (e.g. imports / dependents). */
+    warnings?: string[];
   };
 };
 

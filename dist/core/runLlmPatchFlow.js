@@ -1,4 +1,7 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.__testOnly_buildDeterministicFallbackPatch = exports.__testOnly_applyDeveloperPatchText = void 0;
 exports.detectMicroEditIntent = detectMicroEditIntent;
@@ -24,11 +27,18 @@ const scanRepo_js_1 = require("../repo/scanRepo.js");
 const detectProjectStructure_js_1 = require("../repo/detectProjectStructure.js");
 const rankRelevantFiles_js_1 = require("../repo/rankRelevantFiles.js");
 const readProjectFiles_js_1 = require("../repo/readProjectFiles.js");
+const extractFunctionRange_js_1 = require("../ast/extractFunctionRange.js");
+const extractSymbolContext_js_1 = require("../ast/extractSymbolContext.js");
+const node_fs_1 = require("node:fs");
+const promises_1 = require("node:fs/promises");
+const node_path_1 = __importDefault(require("node:path"));
 const planFeature_js_1 = require("../llm/planFeature.js");
 const planPatchPreview_js_1 = require("../llm/planPatchPreview.js");
 const planFullPatch_js_1 = require("../llm/planFullPatch.js");
 const plannerStep_js_1 = require("../llm/plannerStep.js");
+const getDynamicContextLimit_js_1 = require("../repo/getDynamicContextLimit.js");
 const patchConversion_js_1 = require("./patchConversion.js");
+const detectFramework_js_1 = require("../repo/detectFramework.js");
 const executionPlan_js_1 = require("../llm/executionPlan.js");
 const computeRiskScore_js_1 = require("./computeRiskScore.js");
 const evaluatePlanAlignment_js_1 = require("./evaluatePlanAlignment.js");
@@ -44,11 +54,20 @@ const safetyLevelResolver_js_1 = require("../engine/safetyLevelResolver.js");
 const microEditProtection_js_1 = require("../engine/microEditProtection.js");
 const patchCorrectnessValidator_js_1 = require("../engine/patchCorrectnessValidator.js");
 const developerPatchParse_js_1 = require("./developerPatchParse.js");
+const applyLlmPatches_js_1 = require("./applyLlmPatches.js");
 const taskIntentParser_js_1 = require("./taskIntentParser.js");
 const astPatchFallback_js_1 = require("./astPatchFallback.js");
+const agentLoop_js_1 = require("../llm/agentLoop.js");
+const parseVerificationError_js_1 = require("./parseVerificationError.js");
 const zoneApiPerf_js_1 = require("../api/zoneApiPerf.js");
+const supabase_js_1 = require("@supabase/supabase-js");
+const conversationRepository_js_1 = require("../billing/conversationRepository.js");
 const agentLifecycleEvents_js_1 = require("./agentLifecycleEvents.js");
 const generateFinalRunReport_js_1 = require("./generateFinalRunReport.js");
+const embedFile_js_1 = require("../embeddings/embedFile.js");
+const embeddingsRepository_js_1 = require("../embeddings/embeddingsRepository.js");
+const indexRepository_js_1 = require("../embeddings/indexRepository.js");
+const logger_js_1 = require("../utils/logger.js");
 function countJsxTagsDiagnostic(src) {
     // Strip strings and comments conservatively so matches inside them don't skew counts.
     const stripped = src
@@ -71,6 +90,48 @@ function buildDiffHeadSample(diff, maxChars = 200) {
         ? formatted
         : `${formatted.slice(0, maxChars)}…`;
 }
+function hostedDeveloperContextHasHostedFiles(ctx) {
+    if (!ctx)
+        return false;
+    if (Array.isArray(ctx.contextFiles) && ctx.contextFiles.length > 0)
+        return true;
+    const legacy = ctx.files;
+    return Array.isArray(legacy) && legacy.length > 0;
+}
+function findFunctionDeclarationIndex(source, funcName) {
+    const patterns = [
+        `function ${funcName}`,
+        `async function ${funcName}`,
+        `function ${funcName}(`,
+        `async function ${funcName}(`,
+    ];
+    for (const p of patterns) {
+        const i = source.indexOf(p);
+        if (i >= 0)
+            return i;
+    }
+    return -1;
+}
+/** Best-effort: detect comment/JSDoc tasks that already appear satisfied in file text. */
+function isTaskAlreadyDone(task, fileContent) {
+    if (!/add.*comment|add.*jsdoc/i.test(task)) {
+        return false;
+    }
+    const funcMatch = task.match(/(?:above|for|to)\s+(?:the\s+)?(\w+)\s+function/i);
+    if (!funcMatch?.[1]) {
+        return false;
+    }
+    const funcName = funcMatch[1];
+    const funcIdx = findFunctionDeclarationIndex(fileContent, funcName);
+    if (funcIdx <= 0) {
+        return false;
+    }
+    const before = fileContent.slice(Math.max(0, funcIdx - 200), funcIdx);
+    if (before.includes("/**") || before.includes("//")) {
+        return true;
+    }
+    return false;
+}
 function isDeprioritizedConfigPathForFrontendTask(filePath) {
     const n = filePath.replace(/\\/g, "/").toLowerCase();
     return n.endsWith("requirements.txt") || n.includes("ai-service/requirements.txt");
@@ -83,6 +144,140 @@ function taskLooksLikeReactOrJsxValidation(task) {
         /\.tsx\b/.test(t) ||
         /\bcomponent\b/.test(t) ||
         /\bvalidation\b/.test(t));
+}
+function parseExactLineReplaceTask(task) {
+    const lines = String(task || "").split(/\r?\n/);
+    let findLine = "";
+    let replaceLine = "";
+    for (let i = 0; i < lines.length; i += 1) {
+        const l = String(lines[i] ?? "");
+        if (/replace\s+this\s+exact\s+line\s*:/i.test(l)) {
+            for (let j = i + 1; j < lines.length; j += 1) {
+                const c = String(lines[j] ?? "").trim();
+                if (!c)
+                    continue;
+                findLine = c;
+                i = j;
+                break;
+            }
+            continue;
+        }
+        if (/^\s*with\s*:/i.test(l)) {
+            for (let j = i + 1; j < lines.length; j += 1) {
+                const c = String(lines[j] ?? "").trim();
+                if (!c)
+                    continue;
+                replaceLine = c;
+                i = j;
+                break;
+            }
+        }
+    }
+    if (!findLine || !replaceLine)
+        return null;
+    if (findLine === replaceLine)
+        return null;
+    return { findLine, replaceLine };
+}
+function buildQuoteVariants(line) {
+    const s = String(line || "");
+    const out = new Set();
+    out.add(s);
+    if (s.includes('\\"')) {
+        out.add(s.replace(/\\"/g, '"'));
+        out.add(s.replace(/\\"/g, "'"));
+    }
+    if (s.includes('"')) {
+        out.add(s.replace(/"/g, "'"));
+    }
+    if (s.includes("'")) {
+        out.add(s.replace(/'/g, '"'));
+    }
+    return Array.from(out);
+}
+function extractFirstStringLiteralFromLine(line) {
+    const s = String(line || "");
+    // Very small heuristic: first "..." or '...'
+    const m = s.match(/"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'/);
+    if (!m)
+        return null;
+    const raw = typeof m[1] === "string" ? m[1] : typeof m[2] === "string" ? m[2] : "";
+    return raw;
+}
+function inferReplacementFromPatchedFile(opts) {
+    const beforeLines = String(opts.before || "").split(/\r?\n/);
+    const afterLines = String(opts.after || "").split(/\r?\n/);
+    const beforeIdx = beforeLines.findIndex((l) => l.includes(opts.oldExpected));
+    if (beforeIdx < 0)
+        return null;
+    const beforeLine = beforeLines[beforeIdx] ?? "";
+    const oldLiteral = extractFirstStringLiteralFromLine(beforeLine);
+    if (!oldLiteral || oldLiteral !== opts.oldExpected) {
+        // Still allow: if oldExpected is substring, fall back.
+        if (!beforeLine.includes(opts.oldExpected))
+            return null;
+    }
+    // Build a loose anchor using the parts around the oldExpected (trimmed).
+    const parts = beforeLine.split(opts.oldExpected);
+    const prefix = String(parts[0] ?? "").trim();
+    const suffix = String(parts[1] ?? "").trim();
+    const afterCandidate = afterLines[beforeIdx] ??
+        afterLines.find((l) => (prefix ? l.includes(prefix) : true) && (suffix ? l.includes(suffix) : true)) ??
+        "";
+    if (!afterCandidate)
+        return null;
+    const newLiteral = extractFirstStringLiteralFromLine(afterCandidate);
+    if (!newLiteral)
+        return null;
+    if (newLiteral === opts.oldExpected)
+        return null;
+    return newLiteral;
+}
+function tryApplyExactLineReplacement(opts) {
+    const normalizeForLooseMatch = (s) => String(s || "")
+        .normalize("NFD")
+        // Strip diacritics (e.g. ş -> s + ¸).
+        .replace(/\p{M}/gu, "")
+        // Normalize Turkish dotted/dotless i.
+        .replace(/ı/g, "i")
+        .replace(/İ/g, "I");
+    const findVariants = buildQuoteVariants(opts.findLine).map((s) => s.trim()).filter(Boolean);
+    const replaceVariants = buildQuoteVariants(opts.replaceLine).map((s) => s.trim()).filter(Boolean);
+    if (findVariants.length === 0 || replaceVariants.length === 0) {
+        return { ok: false, reason: "no_variants" };
+    }
+    const findVariantsNormalized = findVariants.map((v) => ({
+        raw: v,
+        norm: normalizeForLooseMatch(v),
+    }));
+    const lines = opts.fileContent.split(/\r?\n/);
+    const matches = [];
+    for (let i = 0; i < lines.length; i += 1) {
+        const originalLine = lines[i] ?? "";
+        const trimmed = originalLine.trim();
+        if (!trimmed)
+            continue;
+        const trimmedNorm = normalizeForLooseMatch(trimmed);
+        const matched = findVariantsNormalized.find((v) => v.norm === trimmedNorm)?.raw;
+        if (matched)
+            matches.push({ index: i, originalLine, findVariant: matched });
+    }
+    if (matches.length === 0)
+        return { ok: false, reason: "no_match" };
+    if (matches.length > 1)
+        return { ok: false, reason: `ambiguous_${matches.length}` };
+    const m = matches[0];
+    const leadingWs = (m.originalLine.match(/^\s*/) ?? [""])[0];
+    const trailingWs = (m.originalLine.match(/\s*$/) ?? [""])[0];
+    const preferSingleQuote = m.findVariant.includes("'") && !m.findVariant.includes('"');
+    const replacement = preferSingleQuote
+        ? replaceVariants.find((r) => r.includes("'")) ?? opts.replaceLine.trim()
+        : replaceVariants.find((r) => r.includes('"')) ?? opts.replaceLine.trim();
+    lines[m.index] = `${leadingWs}${replacement}${trailingWs}`;
+    const fullContent = lines.join("\n");
+    if (fullContent === opts.fileContent)
+        return { ok: false, reason: "no_change" };
+    return { ok: true, fullContent };
 }
 /** First line matching `Target file: <path>` (case-insensitive). */
 function extractExplicitTarget(task) {
@@ -2237,6 +2432,11 @@ function applyDeveloperPatchText(currentContent, rawPatchText, options) {
     }
     let updatedContent = currentContent;
     for (const edit of parsed.edits) {
+        const originalLineEnding = detectPrimaryLineEnding(updatedContent);
+        const normalizedContent = updatedContent.replace(/\r\n/g, "\n");
+        const normalizedFind = edit.find.replace(/\r\n/g, "\n");
+        console.log("[zone-find-debug] FIND block first 200 chars:", edit.find.slice(0, 200));
+        console.log("[zone-find-debug] File contains match:", normalizedContent.includes(normalizedFind));
         if (!edit.find.trim()) {
             return {
                 ok: false,
@@ -2259,12 +2459,23 @@ function applyDeveloperPatchText(currentContent, rawPatchText, options) {
             .split("\n")
             .filter((l) => l.trim()).length;
         const replaceLineCount = edit.replace.split("\n").length;
-        if (findLinesNonEmpty <= 2 && replaceLineCount > 20) {
+        // If REPLACE preserves FIND verbatim and only appends new lines, treat as a pure addition.
+        // In that case, the "anchor too small" heuristic is overly aggressive and can block valid insertions.
+        const normalizedFindTrimmed = normalizedFind.trimEnd();
+        const normalizedReplace = edit.replace.replace(/\r\n/g, "\n");
+        const replacePreservesFind = normalizedFindTrimmed.length > 0 &&
+            normalizedReplace.startsWith(normalizedFindTrimmed);
+        const findLineCountRaw = edit.find.replace(/\r\n/g, "\n").split("\n").length;
+        const addedLines = Math.max(0, replaceLineCount - findLineCountRaw);
+        const isPureAddition = replacePreservesFind && addedLines > 10;
+        if (!isPureAddition && findLinesNonEmpty <= 2 && replaceLineCount > 20) {
             const filePath = options?.filePath ?? "(unknown)";
             console.log("[zone-anchor-too-small-blocked]", JSON.stringify({
                 filePath,
                 findLines: findLinesNonEmpty,
                 replaceLines: replaceLineCount,
+                isPureAddition,
+                addedLines,
             }));
             return {
                 ok: false,
@@ -2273,33 +2484,19 @@ function applyDeveloperPatchText(currentContent, rawPatchText, options) {
                         reason: "anchor_too_small_for_large_replace",
                         findLines: findLinesNonEmpty,
                         replaceLines: replaceLineCount,
+                        isPureAddition,
+                        addedLines,
                     }),
             };
         }
-        const findCountRaw = countOccurrences(updatedContent, edit.find);
-        const lineEnding = detectPrimaryLineEnding(updatedContent);
+        const findCountRaw = countOccurrences(normalizedContent, normalizedFind);
+        const lineEnding = originalLineEnding;
         const preservedBefore = lineEnding === "\r\n" ? !containsLoneLf(updatedContent) : true;
         console.log("[zone-patch-match-count]", JSON.stringify({ raw: findCountRaw }));
         // CRITICAL correctness guard:
         // If raw match count is 0, we must NOT apply unless LF/CRLF normalization yields exactly one match.
-        if (findCountRaw === 0) {
-            const map = buildLfNormalizedIndexMap(updatedContent);
-            const normalizedFind = edit.find.replace(/\r\n/g, "\n");
-            const normalizedCount = countOccurrences(map.normalized, normalizedFind);
-            if (normalizedCount !== 1) {
-                console.warn("[zone-patch-protocol-leak-blocked]", JSON.stringify({ reason: "patch_protocol_leak", rawMatchCount: findCountRaw }));
-                return {
-                    ok: false,
-                    warning: "[PATCH_PROTOCOL_LEAK] " +
-                        JSON.stringify({
-                            reason: "patch_protocol_leak",
-                            rawMatchCount: 0,
-                        }),
-                };
-            }
-            // normalizedCount === 1 is allowed to proceed (safe normalized exact match)
-        }
-        const nextContent = fuzzyFindAndReplace(updatedContent, edit.find, edit.replace);
+        // We already normalized CRLF→LF above, so this 0-match path is a true miss now.
+        const nextContent = fuzzyFindAndReplace(normalizedContent, normalizedFind, edit.replace.replace(/\r\n/g, "\n"));
         if (!nextContent.success) {
             console.log("[zone-patch-apply-mode]", nextContent.reason === "ambiguous_match" ? "failed" : "failed");
             return {
@@ -2341,7 +2538,10 @@ function applyDeveloperPatchText(currentContent, rawPatchText, options) {
                     }),
             };
         }
-        updatedContent = nextContent.content;
+        updatedContent =
+            lineEnding === "\r\n"
+                ? nextContent.content.replace(/\n/g, "\r\n")
+                : nextContent.content;
     }
     return { ok: true, fullContent: updatedContent };
 }
@@ -2840,13 +3040,24 @@ function selectRankedContextPathsWithinCap(resolvedFileContexts, fullRankedFiles
     return ordered;
 }
 async function runLlmPatchFlow(input) {
+    logger_js_1.logger.info("[zone-flow-entry] runId=%s, ts=%s, lockHeld=%s", typeof input.runId === "string" ? input.runId.trim() : "", new Date().toISOString(), "false");
     const lifecycleEvents = [];
+    let executionPlan = null;
+    let planStepCursor = 0;
     const getMaxContextFiles = () => {
         const raw = (process.env.MAX_CONTEXT_FILES ?? "").trim();
         const n = raw ? Number(raw) : NaN;
-        return Number.isFinite(n) ? Math.max(1, Math.floor(n)) : 5;
+        if (Number.isFinite(n))
+            return Math.max(1, Math.floor(n));
+        return (0, getDynamicContextLimit_js_1.getDynamicContextLimit)(input.task, framework);
+    };
+    const throwIfAborted = () => {
+        if (input.abortSignal?.aborted) {
+            throw new DOMException("Run aborted", "AbortError");
+        }
     };
     const emitStructuredProgress = (event) => {
+        throwIfAborted();
         const runId = typeof input.runId === "string" ? input.runId.trim() : "";
         if (!runId)
             return;
@@ -2863,6 +3074,7 @@ async function runLlmPatchFlow(input) {
         }
     };
     const notifyProgress = (legacyStage, lifecycleInput) => {
+        throwIfAborted();
         if (lifecycleInput) {
             const ev = (0, agentLifecycleEvents_js_1.createAgentLifecycleEvent)(lifecycleInput);
             lifecycleEvents.push(ev);
@@ -2872,6 +3084,28 @@ async function runLlmPatchFlow(input) {
             }
             catch {
                 // keep progress reporting best-effort
+            }
+            // Plan step completion: best-effort sequential mapping to lifecycle milestones.
+            if (executionPlan && executionPlan.steps.length > 0) {
+                const shouldAdvance = ev.type === "file_context_loaded" ||
+                    ev.type === "patch_generated" ||
+                    ev.type === "patch_correctness_checked" ||
+                    ev.type === "verification_passed" ||
+                    ev.type === "verification_failed" ||
+                    ev.type === "run_completed";
+                if (shouldAdvance) {
+                    while (planStepCursor < executionPlan.steps.length) {
+                        emitStructuredProgress({
+                            type: "plan_step_complete",
+                            title: `Plan step ${planStepCursor + 1} complete`,
+                            status: "success",
+                            stepIndex: planStepCursor,
+                        });
+                        planStepCursor += 1;
+                        if (ev.type !== "run_completed")
+                            break;
+                    }
+                }
             }
             return;
         }
@@ -2886,6 +3120,13 @@ async function runLlmPatchFlow(input) {
         notifyProgress(stage);
     };
     const perf = (0, zoneApiPerf_js_1.startZoneApiPerfRun)(input.perfLabel ?? "runLlmPatchFlow");
+    console.log("[zone-flow-entry]", JSON.stringify({
+        task: (input.task ?? "").slice(0, 150),
+        repoPath: input.repoPath,
+        hasLastChangedFiles: Array.isArray(input.lastChangedFiles),
+        hasHostedContext: !!input.hostedContext,
+        runId: typeof input.runId === "string" ? input.runId.slice(0, 20) : null,
+    }));
     const taskIntent = typeof input.task === "string" ? (0, taskIntentParser_js_1.parseTaskIntent)(input.task) : UNKNOWN_INTENT;
     let explicitTargetPath = null;
     let explicitTargetRepoFile = null;
@@ -2902,6 +3143,7 @@ async function runLlmPatchFlow(input) {
     });
     const zoneInternalTask = detectZoneInternalTask(input.task);
     if (zoneInternalTask) {
+        console.log("[zone-flow-early-return]", JSON.stringify({ reason: "zone_internal_task", task: (input.task ?? "").slice(0, 150) }));
         notifyProgress("Ready", {
             type: "run_completed",
             message: "Run finished (Zone internal task — no patch).",
@@ -2963,6 +3205,12 @@ async function runLlmPatchFlow(input) {
     reportProgress("Scanning repo...");
     let allFiles = [];
     let fileSource = "empty";
+    console.log("[zone-diag-repoPath-input]", JSON.stringify({
+        repoPath: input.repoPath,
+        cwd: process.cwd(),
+        repoPathType: typeof input.repoPath,
+        repoPathLen: typeof input.repoPath === "string" ? input.repoPath.length : null,
+    }));
     // Determine whether repoPath points to an actually readable local directory.
     // In true hosted cloud mode the repoPath is absent, a tmp/hosted path, or
     // simply not readable — scanRepo will then throw and we fall through to the
@@ -2996,6 +3244,7 @@ async function runLlmPatchFlow(input) {
     }));
     perf.mark("repo scan ready");
     if (!input.hostedContext && allFiles.length === 0 && !isHostedEnvironment()) {
+        console.log("[zone-flow-early-return]", JSON.stringify({ reason: "repo_not_accessible", repoPath: input.repoPath, fileSource }));
         perf.finish("repo access blocked");
         notifyProgress("Ready", {
             type: "tooling_issue",
@@ -3040,6 +3289,7 @@ async function runLlmPatchFlow(input) {
     if (explicitTargetPath) {
         explicitTargetRepoFile = resolveExplicitTarget(allFiles, explicitTargetPath);
         if (!explicitTargetRepoFile) {
+            console.log("[zone-flow-early-return]", JSON.stringify({ reason: "explicit_target_not_found_pre_agent", path: explicitTargetPath }));
             notifyProgress("Ready", {
                 type: "patch_generation_failed",
                 message: `Explicit target file is not in the raw repository file list: ${explicitTargetPath}`,
@@ -3126,13 +3376,742 @@ async function runLlmPatchFlow(input) {
         structure.notes.join(" ") ||
         "No project summary available.";
     const projectNotes = input.hostedContext?.projectNotes ?? structure.notes;
+    const shouldUseAgentLoop = (task) => {
+        const forceFlow = String(process.env["ZONE_FORCE_FLOW"] || "").trim().toLowerCase();
+        if (forceFlow === "agent_loop")
+            return true;
+        if (forceFlow === "plan_full_patch")
+            return false;
+        // No repo accessible — agent loop cannot read files, fall through to plan path
+        if (fileSource === "empty")
+            return false;
+        // Vague tasks have their own early-return downstream; skip agent_loop so they reach it
+        if (isVagueDeveloperTask(task))
+            return false;
+        // Default: use the interactive tool loop for all local-repo patch tasks
+        return true;
+    };
+    let framework = {
+        language: "unknown",
+        framework: "Unknown",
+        testCommand: "",
+        buildCommand: "",
+        devCommand: "",
+        packageManager: "unknown",
+        hasTests: false,
+        testFramework: "unknown",
+        configFiles: [],
+        subProjects: [],
+    };
+    if (repoPathLooksLocal && fileSource === "scanRepo") {
+        try {
+            framework = await (0, detectFramework_js_1.detectFramework)(input.repoPath);
+        }
+        catch {
+            // best-effort
+        }
+    }
+    console.log("[zone-framework]", JSON.stringify({
+        framework: framework.framework,
+        language: framework.language,
+        testCommand: framework.testCommand,
+        hasTests: framework.hasTests,
+        subProjects: framework.subProjects.length,
+    }));
+    emitStructuredProgress({
+        type: "context_ready",
+        title: `${framework.framework} project detected`,
+        detail: `${framework.language} · ${framework.testCommand || "no test command"}`,
+        status: "success",
+    });
+    // Agentic tool loop execution mode (tool calling + direct writes).
+    const _useAgentLoop = shouldUseAgentLoop(input.task);
+    const _forceFlowEnv = String(process.env["ZONE_FORCE_FLOW"] || "").trim().toLowerCase() || null;
+    console.log("[zone-flow-branch]", JSON.stringify({
+        branch: _useAgentLoop ? "agent_loop" : "plan_full_patch",
+        task: input.task.slice(0, 200),
+        reason: _forceFlowEnv
+            ? "env_override"
+            : fileSource === "empty"
+                ? "fallback_empty_repo"
+                : isVagueDeveloperTask(input.task)
+                    ? "fallback_vague_task"
+                    : "default_for_patch_tasks",
+        overrideEnv: _forceFlowEnv,
+        repoPathLooksLocal,
+        fileSource,
+    }));
+    if (_useAgentLoop) {
+        const runId = typeof input.runId === "string" ? input.runId.trim() : "";
+        if (runId) {
+            emitStructuredProgress({
+                type: "agent_loop_start",
+                title: "Starting agent tool loop",
+                status: "active",
+            });
+        }
+        const beforeByFile = new Map();
+        const filesTouched = [];
+        // ── Import-context injection (Phase 3B-2, fixed in bug-fix pass) ──────────
+        // Import-context injection is OFF by default as of Phase 3B-3.
+        // Live A/B testing on refactor tasks showed the current summary format
+        // (which under-reports transitive symbol consumers) misleads the agent into
+        // premature single-pass rewrites with placeholder REPLACE blocks that break
+        // syntax. Infrastructure is preserved for future improvement.
+        // Opt in by setting ZONE_ENABLE_IMPORT_CONTEXT=1.
+        const _importContextFlag = String(process.env["ZONE_ENABLE_IMPORT_CONTEXT"] || "").trim().toLowerCase();
+        const _importContextEnabled = _importContextFlag === "1" || _importContextFlag === "true";
+        // Heuristic: extract a primary symbol name from the task string.
+        // Matches camelCase (at least one interior uppercase) and PascalCase identifiers.
+        // Stop-list is checked CASE-INSENSITIVELY so "Add" doesn't slip past lowercase "add".
+        // Only camelCase/PascalCase words can match the regex — pure lowercase entries in the
+        // stop-list serve as case-folded anchors (e.g. "add" blocks both "Add" and "addFoo"
+        // when the word folds to "add", which it won't for "addFoo" but will for bare "Add").
+        const _importContextStopWords = new Set([
+            // English verb/adjective prefixes that are too generic to be symbols on their own
+            "add", "the", "fix", "get", "set", "use", "run", "let", "var", "new",
+            "try", "put", "map", "key", "api", "url", "uid", "id", "io", "js",
+            "ts", "css", "html", "sql", "http", "https", "json", "xml", "csv",
+            "return", "function", "const", "class", "type", "interface", "export",
+            "import", "default", "async", "await", "this", "true", "false", "null",
+            "undefined", "void", "string", "number", "boolean", "object", "array",
+            "validate", "validation", "handle", "handler",
+            "refactor", "update", "create", "delete", "remove", "rename", "move",
+            "extract", "migrate", "implement", "replace", "modify", "convert",
+            "render", "connect", "extend", "register", "enable", "disable",
+            "inject", "wrap", "apply", "process", "write", "make", "ensure",
+            "fetch", "load", "save", "send", "receive", "parse", "build",
+            "init", "setup", "test", "tests", "spec", "mock", "stub", "check",
+            "error", "warn", "warning", "info", "debug", "log", "logger",
+            "config", "option", "param", "data", "result",
+            "response", "request", "input", "output", "event", "context",
+            "state", "store", "model", "schema", "query", "field", "value",
+            "props", "ref", "node", "list", "item", "index", "page", "route",
+            "path", "file", "repo", "project",
+        ]);
+        function _extractPrimarySymbol(task) {
+            // All candidates the regex extracts (for diagnostic logging)
+            const all = [];
+            const re = /\b([a-z][a-zA-Z0-9_]*[A-Z][a-zA-Z0-9_]*|[A-Z][a-zA-Z0-9_]+)\b/g;
+            let m;
+            while ((m = re.exec(task)) !== null) {
+                const word = m[1];
+                all.push(word);
+            }
+            // Return first match not in stop-list (case-insensitive lookup)
+            for (const word of all) {
+                if (!_importContextStopWords.has(word.toLowerCase()))
+                    return word;
+            }
+            return null;
+        }
+        function _extractAllSymbols(task) {
+            const re = /\b([a-z][a-zA-Z0-9_]*[A-Z][a-zA-Z0-9_]*|[A-Z][a-zA-Z0-9_]+)\b/g;
+            const all = [];
+            let m;
+            while ((m = re.exec(task)) !== null)
+                all.push(m[1]);
+            return all;
+        }
+        let _importContextSummary;
+        const _importContextSymbol = _importContextEnabled ? _extractPrimarySymbol(input.task) : null;
+        const _allExtractedSymbols = _importContextEnabled ? _extractAllSymbols(input.task) : [];
+        if (!_importContextEnabled) {
+            console.log("[zone-import-context]", JSON.stringify({
+                enabled: false,
+                reason: "default_off",
+                primaryFile: null,
+                primarySymbolName: null,
+                summaryLength: 0,
+                truncated: false,
+                stats: { forwardCount: 0, reverseCount: 0, symbolReverseCount: 0 },
+            }));
+        }
+        else {
+            // Resolve primary file: explicit target takes priority; else scan for symbol declaration.
+            let _importContextPrimaryFile = null;
+            let _resolveReason = "not_attempted";
+            let _candidateFiles = [];
+            try {
+                const _allPaths = developerContextFiles.map((f) => f.path);
+                // _resolvePrimaryFile uses top-level fs/path — we avoid dynamic import here since
+                // both are available in the surrounding scope via the existing Node imports.
+                if (explicitTargetRepoFile?.path) {
+                    _importContextPrimaryFile = explicitTargetRepoFile.path;
+                    _candidateFiles = [explicitTargetRepoFile.path];
+                    _resolveReason = "explicit_target";
+                }
+                else if (_importContextSymbol) {
+                    // Lightweight grep over developer file list
+                    const _declPatterns = [
+                        new RegExp("\\bfunction\\s+" + _importContextSymbol + "\\b"),
+                        new RegExp("\\basync\\s+function\\s+" + _importContextSymbol + "\\b"),
+                        new RegExp("\\bconst\\s+" + _importContextSymbol + "\\s*="),
+                        new RegExp("\\bexport\\s+(?:async\\s+)?function\\s+" + _importContextSymbol + "\\b"),
+                        new RegExp("\\bexport\\s+const\\s+" + _importContextSymbol + "\\s*="),
+                        new RegExp("\\bclass\\s+" + _importContextSymbol + "\\b"),
+                        new RegExp("\\bexport\\s+class\\s+" + _importContextSymbol + "\\b"),
+                    ];
+                    for (const relPath of _allPaths) {
+                        const lower = relPath.toLowerCase();
+                        if (/\.(test|spec)\.|\/__tests__\/|\/__mocks__\//.test(lower))
+                            continue;
+                        let _fc;
+                        try {
+                            _fc = (0, node_fs_1.existsSync)(node_path_1.default.join(input.repoPath, relPath))
+                                ? (0, node_fs_1.readFileSync)(node_path_1.default.join(input.repoPath, relPath), "utf8").slice(0, 50000)
+                                : "";
+                        }
+                        catch {
+                            continue;
+                        }
+                        if (_declPatterns.some((re) => re.test(_fc))) {
+                            _candidateFiles.push(relPath);
+                        }
+                    }
+                    if (_candidateFiles.length > 0) {
+                        // Score: prefer files whose name contains the noun portion of the symbol
+                        const _noun = _importContextSymbol
+                            .replace(/^(create|get|set|update|delete|find|list|add|remove|fetch|handle|build|make|run|init|load|save|send)/i, "")
+                            .toLowerCase();
+                        const _scored = _candidateFiles.map((c) => ({
+                            p: c,
+                            s: _noun.length > 2 && c.toLowerCase().includes(_noun) ? 1 : 0,
+                        }));
+                        _scored.sort((a, b) => b.s - a.s);
+                        _importContextPrimaryFile = _scored[0].p;
+                        _resolveReason = _scored[0].s > 0 ? "scored_filename_similarity" : "first_match";
+                    }
+                    else {
+                        _resolveReason = "no_candidates";
+                    }
+                }
+                else {
+                    _resolveReason = "no_symbol";
+                }
+            }
+            catch (_resolveErr) {
+                _resolveReason = "resolve_error:" + String(_resolveErr).slice(0, 100);
+            }
+            console.log("[zone-import-context-resolve]", JSON.stringify({
+                taskPreview: input.task.slice(0, 120),
+                extractedSymbols: _allExtractedSymbols,
+                chosenSymbol: _importContextSymbol,
+                candidateFiles: _candidateFiles,
+                chosenFile: _importContextPrimaryFile,
+                reason: _resolveReason,
+            }));
+            if (!_importContextPrimaryFile) {
+                console.log("[zone-import-context]", JSON.stringify({
+                    enabled: true,
+                    reason: "opted_in_via_env",
+                    primaryFile: null,
+                    primarySymbolName: _importContextSymbol,
+                    summaryLength: 0,
+                    truncated: false,
+                    stats: { forwardCount: 0, reverseCount: 0, symbolReverseCount: 0 },
+                }));
+            }
+            else {
+                try {
+                    const { buildDependencyGraph: _bdg } = await import("../repo/buildDependencyGraph.js");
+                    const { buildImportContextSummary: _bics } = await import("../repo/buildImportContextSummary.js");
+                    const _allPaths = developerContextFiles.map((f) => f.path);
+                    const _graph = await _bdg(input.repoPath, _allPaths);
+                    const _ctxResult = _bics(_graph, _importContextPrimaryFile, _importContextSymbol, { maxChars: 3000 });
+                    _importContextSummary = _ctxResult.summary;
+                    const _primaryNodeKey = _importContextPrimaryFile.replace(/\\/g, "/");
+                    const _primaryNode = _graph.nodes.get(_primaryNodeKey);
+                    const _symbolReverse = _importContextSymbol
+                        ? (_primaryNode?.importedBy ?? []).filter((imp) => {
+                            const n = _graph.nodes.get(imp);
+                            return n ? (n.importedSymbolsBySource.get(_primaryNodeKey) ?? []).some((s) => s.name === _importContextSymbol || s.alias === _importContextSymbol) : false;
+                        }).length
+                        : 0;
+                    console.log("[zone-import-context]", JSON.stringify({
+                        enabled: true,
+                        reason: "opted_in_via_env",
+                        primaryFile: _importContextPrimaryFile,
+                        primarySymbolName: _importContextSymbol,
+                        summaryLength: _ctxResult.summary.length,
+                        truncated: _ctxResult.summary.endsWith("..."),
+                        stats: {
+                            forwardCount: _ctxResult.totalForward,
+                            reverseCount: _ctxResult.totalReverse,
+                            symbolReverseCount: _symbolReverse,
+                        },
+                    }));
+                }
+                catch (err) {
+                    console.log("[zone-import-context]", JSON.stringify({
+                        enabled: true,
+                        reason: "opted_in_via_env",
+                        primaryFile: _importContextPrimaryFile,
+                        primarySymbolName: _importContextSymbol,
+                        summaryLength: 0,
+                        truncated: false,
+                        stats: { forwardCount: 0, reverseCount: 0, symbolReverseCount: 0 },
+                        error: String(err),
+                    }));
+                }
+            }
+        }
+        // ── End import-context injection ─────────────────────────────────────────
+        const loop = await (0, agentLoop_js_1.runAgentLoop)({
+            task: input.task,
+            repoPath: input.repoPath,
+            runId,
+            framework,
+            importContextSummary: _importContextSummary,
+            abortSignal: input.abortSignal,
+            userApiKey: input.userApiKey,
+            onStructuredEvent: (evt) => {
+                if (!runId)
+                    return;
+                // Bridge custom events into the normal `{ stage, progress }` SSE format.
+                const e = evt;
+                if (e && typeof e === "object" && e.type === "command_approval_required") {
+                    emitStructuredProgress({
+                        type: "command_approval_required",
+                        title: "Command approval required",
+                        status: "active",
+                        command: String(e.command || ""),
+                        approvalId: String(e.approvalId || ""),
+                    });
+                }
+            },
+            onProgress: (msg) => {
+                if (!runId)
+                    return;
+                emitStructuredProgress({
+                    type: "tool_call",
+                    title: String(msg || "").slice(0, 200),
+                    status: "active",
+                });
+            },
+            onToolCall: (name, args) => {
+                if (!runId)
+                    return;
+                const cmd = name === "run_command"
+                    ? String(args.command ?? "")
+                    : name === "read_file" || name === "write_file"
+                        ? String(args.filePath ?? "")
+                        : "";
+                emitStructuredProgress({
+                    type: "tool_call",
+                    title: `[tool] ${name}${cmd ? `: ${cmd}` : ""}`.slice(0, 240),
+                    status: "active",
+                });
+                // Agent loop write_file: emit a fallback streaming patch preview so the chat livecode block shows content.
+                if (name === "write_file" && typeof args.filePath === "string" && typeof args.content === "string") {
+                    const rel = String(args.filePath);
+                    const newContent = String(args.content);
+                    const capLines = (text, max) => {
+                        const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+                        if (lines.length <= max)
+                            return lines.join("\n");
+                        return [...lines.slice(0, max), "… (truncated)"].join("\n");
+                    };
+                    const patchBlob = [
+                        `--- FILE: ${rel} ---`,
+                        "--- FIND ---",
+                        "",
+                        "--- REPLACE ---",
+                        capLines(newContent, 80),
+                    ].join("\n");
+                    emitStructuredProgress({
+                        type: "patch_stream_delta",
+                        title: "Streaming patch",
+                        status: "active",
+                        filePath: rel,
+                        delta: patchBlob,
+                        fallback: true,
+                    });
+                    setTimeout(() => {
+                        emitStructuredProgress({
+                            type: "patch_converted",
+                            title: "Patch converted",
+                            status: "success",
+                            filePath: rel,
+                        });
+                    }, 50);
+                }
+                // Snapshot "before" content on first write_file or apply_patch.
+                const snapPath = (name === "write_file" || name === "apply_patch") && typeof args.filePath === "string"
+                    ? args.filePath
+                    : "";
+                if (snapPath && !beforeByFile.has(snapPath)) {
+                    try {
+                        const abs = node_path_1.default.join(input.repoPath, snapPath);
+                        const before = (0, node_fs_1.existsSync)(abs) ? (0, node_fs_1.readFileSync)(abs, "utf8") : "";
+                        beforeByFile.set(snapPath, before);
+                    }
+                    catch {
+                        beforeByFile.set(snapPath, "");
+                    }
+                }
+            },
+            onToolResult: (name, result) => {
+                if (!runId)
+                    return;
+                emitStructuredProgress({
+                    type: "tool_result",
+                    title: String(result.output || "").slice(0, 100) || "tool result",
+                    detail: String(result.output || "").slice(0, 4000),
+                    status: result.success ? "success" : "error",
+                });
+            },
+        });
+        filesTouched.push(...(loop.filesModified || []));
+        const agentLoopHadRunCommandFailure = loop.toolCallLog.some((entry) => {
+            if (entry.tool !== "run_command")
+                return false;
+            const r = String(entry.result || "");
+            return (/\bexit code:\s*[1-9]\d*\b/i.test(r) ||
+                /\bexited with code\s*[1-9]\d*\b/i.test(r) ||
+                /\bcommand failed\b/i.test(r) ||
+                /\berror\b/i.test(r));
+        });
+        const fileDiffs = filesTouched.map((rel) => {
+            const abs = node_path_1.default.join(input.repoPath, rel);
+            const before = beforeByFile.get(rel) ?? ((0, node_fs_1.existsSync)(abs) ? (0, node_fs_1.readFileSync)(abs, "utf8") : "");
+            const after = (0, node_fs_1.existsSync)(abs) ? (0, node_fs_1.readFileSync)(abs, "utf8") : "";
+            const diff = computeFileDiff(before, after);
+            const addedLines = diff.filter((l) => l.type === "added").length;
+            const removedLines = diff.filter((l) => l.type === "removed").length;
+            return { filePath: rel, diff, addedLines, removedLines };
+        });
+        // Use agent's self-reported verification reason to determine safety
+        const vr = loop.verificationReason;
+        let agentDecisionMode;
+        let agentVerificationNote;
+        if (vr === "tests_passed") {
+            agentDecisionMode = "safe_to_apply";
+            agentVerificationNote = "Tests passed";
+        }
+        else if (vr === "tests_skipped_no_infra") {
+            agentDecisionMode = "safe_to_apply";
+            agentVerificationNote = "Tests skipped (no test infrastructure found)";
+        }
+        else if (vr === "tests_failed_unrelated") {
+            agentDecisionMode = "safe_to_apply";
+            agentVerificationNote = "Tests had pre-existing failures — not caused by this patch";
+        }
+        else if (vr === "tests_inconclusive") {
+            agentDecisionMode = "preview_only";
+            agentVerificationNote = "Tests inconclusive (environment issue) — review manually";
+        }
+        else if (vr === "tests_failed_by_patch") {
+            agentDecisionMode = "preview_only";
+            agentVerificationNote = "Tests failed — patch may need revision";
+        }
+        else {
+            // no_verification_attempted: fall back to run-command heuristic
+            agentDecisionMode = loop.success && !agentLoopHadRunCommandFailure
+                ? "safe_to_apply"
+                : "preview_only";
+            agentVerificationNote = agentDecisionMode === "safe_to_apply"
+                ? "Patch applied by agent (no test verification)"
+                : "Agent loop encountered errors";
+        }
+        const warnings = loop.success ? [] : [`[AGENT_LOOP] ${loop.summary}`];
+        if (vr === "tests_inconclusive") {
+            warnings.push("[AGENT_LOOP] Tests could not run (environment issue) — manual review recommended.");
+        }
+        else if (vr === "tests_failed_by_patch") {
+            warnings.push("[AGENT_LOOP] Tests failed because of this patch.");
+        }
+        else if (vr === "no_verification_attempted" && agentLoopHadRunCommandFailure) {
+            warnings.push("[AGENT_LOOP] A run_command step failed; forcing preview-only.");
+        }
+        const finalRunReport = await (0, generateFinalRunReport_js_1.generateFinalRunReport)({
+            task: input.task,
+            contextFilesMeta: [],
+            planObjective: "Agent tool loop execution",
+            planScopeSummary: null,
+            patchSource: fileDiffs.length > 0 ? "agent_loop" : "no_patch",
+            fileDiffs,
+            patchScope: {
+                changedFileCount: fileDiffs.length,
+                totalAddedLines: fileDiffs.reduce((s, d) => s + d.addedLines, 0),
+                totalRemovedLines: fileDiffs.reduce((s, d) => s + d.removedLines, 0),
+                totalChangedLines: fileDiffs.reduce((s, d) => s + d.addedLines + d.removedLines, 0),
+            },
+            decisionMode: agentDecisionMode,
+            finalState: agentDecisionMode,
+            warnings,
+            correctness: {
+                status: agentDecisionMode === "safe_to_apply" ? "passed" : "skipped",
+                summary: agentVerificationNote,
+            },
+            verificationCommandsLabel: null,
+            runtimeVerificationSummary: null,
+            finalExecutionOutcome: agentDecisionMode === "safe_to_apply" ? "completed" : "completed_with_issues",
+            developerConfidence: 80,
+        });
+        if (runId) {
+            emitStructuredProgress({
+                type: "agent_loop_complete",
+                title: loop.success
+                    ? "Agent tool loop complete"
+                    : "Agent tool loop ended with issues",
+                detail: loop.summary.slice(0, 4000),
+                status: loop.success ? "success" : "warning",
+            });
+            // Surface the model's final text (or a clear failure explanation) as a chat bubble in the UI.
+            const summaryTrim = (loop.summary || "").trim();
+            const ts = Date.now();
+            if (loop.success && summaryTrim.length > 0) {
+                input.onProgress?.({
+                    stage: "agent_loop_complete",
+                    progress: {
+                        runId,
+                        ts,
+                        type: "chat_response",
+                        title: summaryTrim.slice(0, 16_000),
+                        status: "success",
+                    },
+                });
+            }
+            else if (loop.success && summaryTrim.length === 0) {
+                input.onProgress?.({
+                    stage: "agent_loop_complete",
+                    progress: {
+                        runId,
+                        ts,
+                        type: "chat_response",
+                        title: "The agent run finished, but the model did not return a text summary. Check the tool log for details.",
+                        status: "warning",
+                    },
+                });
+            }
+            else {
+                const code = loop.error ?? "agent_loop_failed";
+                const failureTitle = code === "max_iterations_reached"
+                    ? `The agent reached the tool-call limit without a final answer. Last note: ${summaryTrim || "(none)"}`.slice(0, 16_000)
+                    : `Agent run did not complete successfully (${code}). ${summaryTrim || ""}`.trim().slice(0, 16_000);
+                input.onProgress?.({
+                    stage: "agent_loop_complete",
+                    progress: {
+                        runId,
+                        ts,
+                        type: "chat_response",
+                        title: failureTitle,
+                        status: "error",
+                    },
+                });
+            }
+        }
+        return {
+            ok: true,
+            patchPreview: `=== AGENT LOOP SUMMARY ===\n${loop.summary}`,
+            warnings,
+            developerConfidence: 80,
+            reason: "agent_loop",
+            patchSource: fileDiffs.length > 0 ? "agent_loop" : "no_patch",
+            patchesAlreadyApplied: fileDiffs.length > 0 && agentDecisionMode === "safe_to_apply",
+            verificationReason: vr,
+            verificationNote: agentVerificationNote,
+            decisionMode: agentDecisionMode,
+            finalState: agentDecisionMode,
+            finalExecutionOutcome: agentDecisionMode === "safe_to_apply" ? "completed" : "completed_with_issues",
+            applyPatches: [],
+            patchResults: [],
+            fileDiffs,
+            contextFiles: [],
+            lifecycleEvents,
+            finalRunReport,
+        };
+    }
     // 3. Rank relevant files — top 8 (full ranking reused for diagnostics + budget trim)
     reportProgress("Ranking relevant files...");
+    console.log("[debug-mem] runLlmPatchFlow lastChangedFiles:", input.lastChangedFiles);
+    const lastAddedFunctions = Array.isArray(input.lastAddedFunctions)
+        ? input.lastAddedFunctions
+            .filter((x) => typeof x === "string" && x.trim())
+            .map((x) => String(x).trim())
+            .slice(0, 8)
+        : [];
+    const rankingTask = lastAddedFunctions.length > 0
+        ? `${input.task}\n\nRecent function names: ${lastAddedFunctions.join(", ")}`
+        : input.task;
+    let semanticScores;
+    const canUseSemanticRanking = repoPathLooksLocal &&
+        typeof input.repoPath === "string" &&
+        input.repoPath.length > 0 &&
+        developerContextFiles.length > 0 &&
+        developerContextFiles.every((file) => typeof file.absolutePath === "string" && file.absolutePath.length > 0);
+    console.log("[zone-embed-block-entry] entering embedding section", {
+        canUseSemanticRanking,
+        repoPathLooksLocal,
+        developerContextFileCount: developerContextFiles.length,
+    });
+    if (canUseSemanticRanking) {
+        try {
+            const embeddableFiles = (await Promise.all(developerContextFiles.map(async (file) => ({
+                path: file.path,
+                content: await (0, promises_1.readFile)(String(file.absolutePath), "utf8").catch(() => ""),
+            })))).filter((file) => file.content.length > 0);
+            const existingEmbeddingCount = await (0, embeddingsRepository_js_1.getEmbeddingCountForRepo)(input.repoPath);
+            if (existingEmbeddingCount === 0) {
+                await (0, indexRepository_js_1.indexRepoFiles)({
+                    repoPath: input.repoPath,
+                    files: embeddableFiles,
+                });
+            }
+            else {
+                void (0, indexRepository_js_1.indexRepoFiles)({
+                    repoPath: input.repoPath,
+                    files: embeddableFiles,
+                }).catch((error) => {
+                    console.warn("[zone-embed-bg-error]", error instanceof Error ? error.message : String(error));
+                });
+            }
+            const queryEmbedding = await (0, embedFile_js_1.embedText)(input.task);
+            const matches = await (0, embeddingsRepository_js_1.matchSimilarFiles)({
+                repoPath: input.repoPath,
+                queryEmbedding,
+                matchCount: 30,
+            });
+            semanticScores = new Map(matches
+                .filter((match) => typeof match.filePath === "string" &&
+                match.filePath.trim().length > 0 &&
+                Number.isFinite(match.similarity))
+                .map((match) => [match.filePath, match.similarity]));
+            console.log("[zone-embed-pre-rank]", {
+                hasEmbeddings: existingEmbeddingCount > 0 || matches.length > 0,
+                queryEmbeddingDims: Array.isArray(queryEmbedding) ? queryEmbedding.length : 0,
+                topMatchCount: matches.length,
+                semanticScoresSize: semanticScores.size,
+            });
+            console.log("[zone-embed-query-debug]", {
+                task: input.task,
+                topMatches: matches.slice(0, 5),
+            });
+        }
+        catch (error) {
+            console.warn("[zone-embed-bg-error]", error instanceof Error ? error.message : String(error));
+            semanticScores = undefined;
+        }
+    }
+    else {
+        console.log("[zone-embed-pre-rank]", {
+            hasEmbeddings: false,
+            queryEmbeddingDims: 0,
+            topMatchCount: 0,
+            semanticScoresSize: 0,
+            skipped: true,
+            repoPathLooksLocal,
+            developerContextFileCount: developerContextFiles.length,
+        });
+    }
     let fullRankedFiles = (0, rankRelevantFiles_js_1.rankRelevantFiles)({
-        task: input.task,
+        task: rankingTask,
         files: developerContextFiles,
         intent: taskIntent,
+        semanticScores,
     });
+    // Multi-turn memory: only boost lastChangedFiles when they are still semantically relevant
+    // to the current task. This prevents unrelated previous edits from displacing better candidates.
+    try {
+        const lastChanged = Array.isArray(input.lastChangedFiles)
+            ? input.lastChangedFiles
+                .filter((x) => typeof x === "string" && x.trim())
+                .map((x) => String(x).trim())
+                .slice(0, 10)
+            : [];
+        if (lastChanged.length > 0 && Array.isArray(fullRankedFiles)) {
+            console.log("[debug-mem] before boost ranked:", fullRankedFiles.map((f) => f.path));
+            const maxKeep = fullRankedFiles.length; // N from rankRelevantFiles (default 5 unless env overrides)
+            const rankedList = [...fullRankedFiles];
+            const currentTopPaths = new Set(rankedList.slice(0, 5).map((file) => file.path));
+            const repoByPath = new Map();
+            for (const f of developerContextFiles)
+                repoByPath.set(f.path, f);
+            for (const p of lastChanged) {
+                const similarity = Number(semanticScores?.get(p) ?? 0);
+                if (!Number.isFinite(similarity) || similarity < 0.3) {
+                    console.log("[debug-mem] boost decision:", {
+                        file: p,
+                        similarity,
+                        boosted: false,
+                        reason: "low_semantic_similarity",
+                    });
+                    continue;
+                }
+                const existingIndex = rankedList.findIndex((file) => file.path === p);
+                if (existingIndex >= 0 && existingIndex < 5) {
+                    console.log("[debug-mem] boost decision:", {
+                        file: p,
+                        similarity,
+                        boosted: false,
+                        reason: "already_in_top_5",
+                    });
+                    continue;
+                }
+                if (!semanticScores?.has(p)) {
+                    console.log("[debug-mem] boost decision:", {
+                        file: p,
+                        similarity,
+                        boosted: false,
+                        reason: "not_in_top_30_semantic_matches",
+                    });
+                    continue;
+                }
+                if (existingIndex >= 0) {
+                    const [existing] = rankedList.splice(existingIndex, 1);
+                    if (existing) {
+                        rankedList.splice(1, 0, {
+                            ...existing,
+                            score: Math.max(existing.score, rankedList[0]?.score ?? existing.score) + 1,
+                        });
+                        currentTopPaths.add(p);
+                        console.log("[debug-mem] boost decision:", {
+                            file: p,
+                            similarity,
+                            boosted: true,
+                            reason: "semantic_match_inserted",
+                        });
+                    }
+                    continue;
+                }
+                const repoHit = repoByPath.get(p);
+                if (!repoHit) {
+                    console.log("[debug-mem] boost decision:", {
+                        file: p,
+                        similarity,
+                        boosted: false,
+                        reason: "file_not_found_in_repo",
+                    });
+                    continue;
+                }
+                const insertedScore = (rankedList[0]?.score ?? 0) + 1;
+                rankedList.splice(1, 0, {
+                    ...repoHit,
+                    score: insertedScore,
+                });
+                currentTopPaths.add(p);
+                console.log("[debug-mem] boost decision:", {
+                    file: p,
+                    similarity,
+                    boosted: true,
+                    reason: "semantic_match_added",
+                });
+            }
+            if (rankedList.length > 0) {
+                fullRankedFiles = rankedList.slice(0, maxKeep);
+                console.log("[zone-ranker-boost-last-changed]", {
+                    boosted: lastChanged.filter((path) => fullRankedFiles.some((file) => file.path === path)),
+                    maxKeep,
+                });
+                console.log("[debug-mem] after boost ranked:", fullRankedFiles.map((f) => f.path));
+                console.log("[debug-mem] ranked files after boost:", fullRankedFiles.map((f) => ({ path: f.path, score: f.score })));
+            }
+        }
+    }
+    catch {
+        // best-effort only
+    }
     if (explicitTargetRepoFile) {
         console.log("[zone-explicit-target-forced-into-ranking]", explicitTargetRepoFile.path);
         fullRankedFiles = mergeExplicitRepoFileIntoRankedFiles(fullRankedFiles, explicitTargetRepoFile);
@@ -3160,14 +4139,49 @@ async function runLlmPatchFlow(input) {
         title: "Finding relevant files",
         status: "active",
     });
+    // Multi-turn memory: load the last conversation messages for this thread (best-effort).
+    // Only used for planning; patch generation prompts remain unchanged.
+    let conversationHistory = [];
+    try {
+        const threadId = typeof input.conversationId === "string" ? input.conversationId.trim() : "";
+        const userId = typeof input.userId === "string" ? input.userId.trim() : "";
+        const url = process.env.SUPABASE_URL;
+        const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (threadId && userId && url && key) {
+            const supabase = (0, supabase_js_1.createClient)(url, key);
+            const history = await (0, conversationRepository_js_1.getConversationByThreadId)(supabase, {
+                userId,
+                threadId,
+            });
+            conversationHistory = Array.isArray(history?.messages)
+                ? history.messages.slice(-10)
+                : [];
+        }
+    }
+    catch {
+        conversationHistory = [];
+    }
+    const lastChangedFiles = Array.isArray(input.lastChangedFiles)
+        ? input.lastChangedFiles
+            .filter((x) => typeof x === "string" && x.trim())
+            .map((x) => String(x).trim())
+            .slice(0, 20)
+        : [];
     const skipPlanner = (process.env.SKIP_PLANNER ?? "").trim().toLowerCase() === "true";
     let plannerSelection = null;
-    if (!skipPlanner && !input.hostedContext && !explicitTargetRepoFile) {
+    const hasRealHostedContext = hostedDeveloperContextHasHostedFiles(input.hostedContext);
+    if (!skipPlanner && !hasRealHostedContext && !explicitTargetRepoFile) {
         try {
             plannerSelection = await (0, plannerStep_js_1.plannerStep)({
                 task: input.task,
                 rankedFilePaths: relevantFiles.map((f) => f.path),
                 repoSummary: projectSummary,
+                framework,
+                repoPath: input.repoPath,
+                allRepoFilePaths: developerContextFiles.map((f) => f.path),
+                conversationHistory,
+                lastChangedFiles,
+                lastAddedFunctions,
             });
         }
         catch {
@@ -3182,12 +4196,34 @@ async function runLlmPatchFlow(input) {
                     changeDescription: plannerSelection.changeDescription,
                     strategy: plannerSelection.strategy,
                     filesToEdit: plannerSelection.filesToEdit,
+                    relatedFiles: plannerSelection.relatedFiles ?? [],
+                    warnings: plannerSelection.dependencyWarnings?.length > 0
+                        ? plannerSelection.dependencyWarnings
+                        : undefined,
                 },
             });
         }
         if (plannerSelection?.filesToEdit?.length) {
             const allowed = new Set(plannerSelection.filesToEdit);
             relevantFiles = relevantFiles.filter((f) => allowed.has(f.path));
+        }
+    }
+    // Even with explicit target, build dep graph for context
+    if (explicitTargetRepoFile && !hasRealHostedContext) {
+        try {
+            const { buildDependencyGraph } = await import("../repo/buildDependencyGraph.js");
+            const { getRelatedFiles } = await import("../repo/getRelatedFiles.js");
+            const allPaths = developerContextFiles.map((f) => f.path);
+            const graph = await buildDependencyGraph(input.repoPath, allPaths);
+            const related = getRelatedFiles([explicitTargetRepoFile.path], graph, 5);
+            console.log("[zone-dep-graph-explicit]", {
+                target: explicitTargetRepoFile.path,
+                relatedCount: related.length,
+                related: related.map((f) => f.filePath + ":" + f.relationship),
+            });
+        }
+        catch (err) {
+            console.log("[zone-dep-graph-explicit-error]", err instanceof Error ? err.message : String(err));
         }
     }
     if ((process.env.DEBUG_PLANNER ?? "").trim().toLowerCase() === "true") {
@@ -3197,6 +4233,7 @@ async function runLlmPatchFlow(input) {
             selectedPaths: plannerSelection?.filesToEdit ?? [],
             changeDescription: plannerSelection?.changeDescription ?? "",
             strategy: plannerSelection?.strategy ?? "",
+            relatedFiles: plannerSelection?.relatedFiles ?? [],
         });
     }
     // TEMP DIAGNOSTIC: surface top 20 ranker scores to verify PatientsPage presence
@@ -3221,7 +4258,6 @@ async function runLlmPatchFlow(input) {
                     topRelevantPaths.map((filePath) => `- ${filePath}`).join("\n")
                 : "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n(none)";
         })();
-    let executionPlan = null;
     try {
         executionPlan = await (0, executionPlan_js_1.generateExecutionPlan)({
             task: input.task,
@@ -3255,6 +4291,7 @@ async function runLlmPatchFlow(input) {
             perf.mark("feature model response received");
         }
         catch (err) {
+            console.log("[zone-flow-early-return]", JSON.stringify({ step: "feature_planning_failed", reason: "feature_planning_failed" }));
             perf.finish("feature planning failed");
             const reason = err instanceof Error ? err.message : String(err);
             notifyProgress("Ready", {
@@ -3300,6 +4337,33 @@ async function runLlmPatchFlow(input) {
             };
         }
     }
+    // Plan UI should be based ONLY on files the LLM said we should modify/create,
+    // not ranked/inspect-only context files.
+    const suggestedFilesForPlanUi = (llmPlan?.suggestedFiles ?? []).filter((f) => f.action === "modify" || f.action === "create");
+    const planStepCount = executionPlan?.steps.length ?? 0;
+    const isComplexTaskPreview = executionPlan != null && planStepCount >= 4 && suggestedFilesForPlanUi.length > 1;
+    console.log("[zone-plan-debug]", {
+        planStepCount,
+        suggestedFilesCount: suggestedFilesForPlanUi.length,
+        suggestedFiles: suggestedFilesForPlanUi,
+        isComplexTask: isComplexTaskPreview,
+    });
+    /** Single-file tasks never show a plan. Require many steps AND multiple modify/create files. */
+    const isComplexTask = isComplexTaskPreview;
+    if (isComplexTask && executionPlan) {
+        const planForUi = executionPlan;
+        emitStructuredProgress({
+            type: "plan_generated",
+            title: "Plan generated",
+            detail: planForUi.scopeSummary,
+            status: "success",
+            steps: planForUi.steps.map((step, i) => ({
+                index: i,
+                text: step.description || step.title || String(step),
+                status: "pending",
+            })),
+        });
+    }
     const planSummaryParts = [];
     if (executionPlan) {
         planSummaryParts.push(`${executionPlan.steps.length} execution step(s); scope: ${executionPlan.scopeSummary}`);
@@ -3318,6 +4382,8 @@ async function runLlmPatchFlow(input) {
     const explicitTargetForceContentByPath = new Map();
     // 5. Read top suggested files
     const relevantFileScores = new Map(relevantFiles.map((file) => [file.path, file.score]));
+    const plannerSuggestedPaths = plannerSelection?.filesToEdit?.slice(0, getMaxContextFiles()) ?? [];
+    const plannerSuggestedPathSet = new Set(plannerSuggestedPaths);
     const llmSuggestedPaths = new Set((llmPlan?.suggestedFiles ?? []).map((file) => file.path));
     let preliminaryContextFiles = input.hostedContext?.contextFiles.map((file) => ({
         path: file.path,
@@ -3325,10 +4391,10 @@ async function runLlmPatchFlow(input) {
         reason: file.reason,
     })) ??
         [
-            ...(llmPlan?.suggestedFiles ?? []).map((file) => ({
-                path: file.path,
-                action: file.action,
-                reason: file.reason,
+            ...plannerSuggestedPaths.map((filePath) => ({
+                path: filePath,
+                action: "inspect",
+                reason: "Planner identified this file as the most relevant patch target",
             })),
             ...relevantFiles.map((file) => ({
                 path: file.path,
@@ -3338,17 +4404,6 @@ async function runLlmPatchFlow(input) {
         ]
             .filter((file) => !isIrrelevantDeveloperContextPath(file.path))
             .filter((file, index, files) => files.findIndex((candidate) => candidate.path === file.path) === index)
-            .sort((a, b) => {
-            const scoreDifference = (relevantFileScores.get(b.path) ?? -1) - (relevantFileScores.get(a.path) ?? -1);
-            if (scoreDifference !== 0) {
-                return scoreDifference;
-            }
-            const suggestionDifference = Number(llmSuggestedPaths.has(b.path)) - Number(llmSuggestedPaths.has(a.path));
-            if (suggestionDifference !== 0) {
-                return suggestionDifference;
-            }
-            return a.path.localeCompare(b.path);
-        })
             .slice(0, 6);
     if (!skipPlanner && plannerSelection?.filesToEdit?.length) {
         const allowed = new Set(plannerSelection.filesToEdit);
@@ -3367,7 +4422,15 @@ async function runLlmPatchFlow(input) {
         const filePaths = preliminaryContextFiles
             .map((f) => developerContextFiles.find((rf) => rf.path === f.path)?.absolutePath)
             .filter((p) => typeof p === "string");
-        const fileContentsMap = await (0, readProjectFiles_js_1.readProjectFiles)(filePaths);
+        // Primary file: first in planner's filesToEdit list — gets expanded context budget
+        const _primaryRelPath = plannerSelection?.filesToEdit?.[0] ?? null;
+        const _primaryAbsPath = _primaryRelPath
+            ? (developerContextFiles.find((rf) => rf.path === _primaryRelPath)?.absolutePath ?? null)
+            : (filePaths[0] ?? null);
+        const fileContentsMap = await (0, readProjectFiles_js_1.readProjectFiles)(filePaths, {
+            primaryFile: _primaryAbsPath ?? undefined,
+            primaryMaxChars: 50_000,
+        });
         resolvedFileContexts = preliminaryContextFiles
             .map((file) => {
             const absolutePath = developerContextFiles.find((rf) => rf.path === file.path)?.absolutePath;
@@ -3403,11 +4466,62 @@ async function runLlmPatchFlow(input) {
             }
             return a.path.localeCompare(b.path);
         })
-            .slice(0, 4);
+            .slice(0, Math.max(4, getMaxContextFiles()));
+        if (plannerSuggestedPaths.length > 0) {
+            const selectedByPath = new Map(selectedContextFiles.map((file) => [file.path, file]));
+            const preliminaryByPath = new Map(preliminaryContextFiles.map((file) => [file.path, file]));
+            const prioritized = plannerSuggestedPaths
+                .map((filePath) => selectedByPath.get(filePath) ?? preliminaryByPath.get(filePath))
+                .filter((file) => file != null);
+            const remainder = selectedContextFiles.filter((file) => !plannerSuggestedPathSet.has(file.path));
+            selectedContextFiles = [...prioritized, ...remainder].slice(0, getMaxContextFiles());
+        }
+        else {
+            selectedContextFiles = selectedContextFiles.slice(0, getMaxContextFiles());
+        }
         const fileContextByPath = new Map(resolvedFileContexts.map((file) => [file.path, file]));
         resolvedFileContexts = selectedContextFiles
             .map((file) => fileContextByPath.get(file.path))
             .filter((file) => file !== undefined);
+        if (plannerSelection?.relatedFiles?.length) {
+            const primaryPaths = new Set(resolvedFileContexts.map((f) => f.path));
+            const relatedSorted = [...plannerSelection.relatedFiles]
+                .filter((r) => !primaryPaths.has(r.filePath))
+                .sort((a, b) => b.score - a.score || a.filePath.localeCompare(b.filePath))
+                .slice(0, 6);
+            const relAbsPaths = [];
+            const labelByAbs = new Map();
+            for (const r of relatedSorted) {
+                const abs = developerContextFiles.find((df) => df.path === r.filePath)?.absolutePath;
+                if (!abs)
+                    continue;
+                relAbsPaths.push(abs);
+                labelByAbs.set(abs, `// [RELATED - ${r.relationship}] ${r.filePath}`);
+            }
+            if (relAbsPaths.length > 0) {
+                const relMap = await (0, readProjectFiles_js_1.readProjectFiles)(relAbsPaths, {
+                    maxFiles: relAbsPaths.length,
+                    maxCharsPerFile: 5000,
+                });
+                for (const abs of relAbsPaths) {
+                    const relPath = developerContextFiles.find((df) => df.absolutePath === abs)?.path;
+                    if (!relPath || primaryPaths.has(relPath))
+                        continue;
+                    const raw = relMap[abs] ?? "";
+                    const label = labelByAbs.get(abs) ?? `// [RELATED] ${relPath}`;
+                    resolvedFileContexts.push({
+                        path: relPath,
+                        content: `${label}\n${raw}`,
+                    });
+                    primaryPaths.add(relPath);
+                }
+            }
+        }
+        console.log("[zone-context-priority]", {
+            plannerSuggested: plannerSuggestedPaths,
+            rankerTop5: relevantFiles.slice(0, getMaxContextFiles()).map((file) => file.path),
+            finalContext: selectedContextFiles.map((file) => file.path),
+        });
     }
     if (explicitTargetRepoFile) {
         if (!isIrrelevantDeveloperContextPath(explicitTargetRepoFile.path) &&
@@ -3463,11 +4577,34 @@ async function runLlmPatchFlow(input) {
     // ── TOKEN BUDGET GUARD ──────────────────────────────────────────
     const SIMPLE_BUDGET_CHARS = 320_000; // ~80K tokens (4o-mini)
     const COMPLEX_BUDGET_CHARS = 320_000; // ~80K tokens (4.1-mini)
+    const MAX_BUDGET_CHARS = 200_000; // ZONE_CONTEXT_BUDGET=max override
     const taskCharBudget = input.task?.length ?? 0;
     const sumContextChars = (files) => files.reduce((sum, file) => sum + (file.content?.length ?? 0), 0) + taskCharBudget;
+    // ZONE_CONTEXT_BUDGET env override
+    const _budgetEnv = String(process.env["ZONE_CONTEXT_BUDGET"] || "").trim().toLowerCase();
     let contextBudgetWarnings = [];
-    let contextBudget = resolvedFileContexts.length <= 6 ? SIMPLE_BUDGET_CHARS : COMPLEX_BUDGET_CHARS;
+    let contextBudget = _budgetEnv === "max"
+        ? MAX_BUDGET_CHARS
+        : _budgetEnv === "simple"
+            ? SIMPLE_BUDGET_CHARS
+            : _budgetEnv === "complex"
+                ? COMPLEX_BUDGET_CHARS
+                : resolvedFileContexts.length <= 6 ? SIMPLE_BUDGET_CHARS : COMPLEX_BUDGET_CHARS;
     let totalContextChars = sumContextChars(resolvedFileContexts);
+    // Diagnostic: context budget usage
+    const _primaryCtxFile = (resolvedFileContexts[0]?.path) ?? null;
+    const _primaryCtxChars = (resolvedFileContexts[0]?.content?.length) ?? 0;
+    const _secondaryChars = resolvedFileContexts.slice(1).reduce((s, f) => s + (f.content?.length ?? 0), 0);
+    console.log("[zone-context-budget]", JSON.stringify({
+        totalFiles: resolvedFileContexts.length,
+        primaryFile: _primaryCtxFile,
+        primaryFileChars: _primaryCtxChars,
+        secondaryFilesChars: _secondaryChars,
+        totalContextChars,
+        budget: contextBudget,
+        withinBudget: totalContextChars <= contextBudget,
+        budgetOverride: _budgetEnv || null,
+    }));
     if (totalContextChars > contextBudget) {
         const originalFileCount = resolvedFileContexts.length;
         const trimPinned = explicitTargetCanonicalPath !== null &&
@@ -3544,6 +4681,7 @@ async function runLlmPatchFlow(input) {
         }
     }
     if (totalContextChars > contextBudget) {
+        console.log("[zone-flow-early-return]", JSON.stringify({ step: "context_budget_exceeded", totalContextChars: typeof totalContextChars !== "undefined" ? totalContextChars : null }));
         perf.finish("context budget exceeded");
         notifyProgress("Ready", {
             type: "tooling_issue",
@@ -3594,6 +4732,9 @@ async function runLlmPatchFlow(input) {
     perf.mark("token budget checked");
     // 6. Plan patch preview with LLM
     reportProgress("Planning patch preview...");
+    const projectNotesForPatchPreview = plannerSelection?.dependencyContextForPrompt?.trim()
+        ? [...projectNotes, plannerSelection.dependencyContextForPrompt]
+        : projectNotes;
     let patchPlan;
     try {
         perf.mark("patch preview model call start");
@@ -3601,7 +4742,7 @@ async function runLlmPatchFlow(input) {
             task: input.task,
             intent: taskIntent,
             projectSummary,
-            projectNotes,
+            projectNotes: projectNotesForPatchPreview,
             suggestedFiles: selectedContextFiles,
             fileContexts: resolvedFileContexts,
             schemaAwareSummary: [],
@@ -3610,6 +4751,7 @@ async function runLlmPatchFlow(input) {
         perf.mark("patch preview model response received");
     }
     catch (err) {
+        console.log("[zone-flow-early-return]", JSON.stringify({ step: "patch_preview_failed", reason: "patch_preview_failed" }));
         perf.finish("patch preview failed");
         const reason = err instanceof Error ? err.message : String(err);
         notifyProgress("Ready", {
@@ -3678,7 +4820,8 @@ async function runLlmPatchFlow(input) {
         task: input.task,
         taskRiskResult,
     });
-    if (taskRiskResult.score >= 71) {
+    const taskRiskPreviewOnlyThreshold = process.env.NODE_ENV !== "production" ? 95 : 71;
+    if (taskRiskResult.score >= taskRiskPreviewOnlyThreshold) {
         notifyProgress("Ready", {
             type: "patch_generation_failed",
             message: `Patch generation was not started: task risk score ${taskRiskResult.score} (preview-only).`,
@@ -3752,6 +4895,7 @@ async function runLlmPatchFlow(input) {
         });
         reportProgress("Ready");
         perf.mark("decision evaluation complete");
+        console.log("[zone-flow-early-return]", JSON.stringify({ step: "vague_task", reason: "vague_task_no_patch" }));
         perf.finish("vague task response ready");
         const vagueReport = await (0, generateFinalRunReport_js_1.generateFinalRunReport)({
             task: input.task,
@@ -3819,6 +4963,7 @@ async function runLlmPatchFlow(input) {
             });
             reportProgress("Ready");
             perf.mark("decision evaluation complete");
+            console.log("[zone-flow-early-return]", JSON.stringify({ step: "explicit_target_not_found_planning", reason: "explicit_target_not_found_in_planning" }));
             perf.finish("explicit target not found");
             const explicitMissingReport = await (0, generateFinalRunReport_js_1.generateFinalRunReport)({
                 task: input.task,
@@ -4041,6 +5186,7 @@ async function runLlmPatchFlow(input) {
                     task: input.task,
                     files: developerContextFiles,
                     intent: taskIntent,
+                    semanticScores,
                 });
                 const fallbackEntityAnchors = extractConstrainedTaskEntityAnchors(normalizeConstrainedTaskText(input.task));
                 const entityPathCandidates = collectConstrainedFallbackEntityPathCandidates({
@@ -4274,9 +5420,99 @@ async function runLlmPatchFlow(input) {
             const fileContent = input.hostedContext
                 ? hostedOriginalContent ?? hostedContextFileContent ?? hostedForceMain ?? ""
                 : absolutePath !== undefined
-                    ? ((await (0, readProjectFiles_js_1.readProjectFiles)([absolutePath]))[absolutePath] ?? "")
+                    ? ((await (0, readProjectFiles_js_1.readProjectFiles)([absolutePath], {
+                        maxFiles: 1,
+                        // Large files (e.g. controllers) must not be truncated or FIND/REPLACE will fail.
+                        maxCharsPerFile: 200_000,
+                    }))[absolutePath] ?? "")
                     : "";
             originalContents[patch.path] = fileContent;
+            const astScan = (0, extractFunctionRange_js_1.extractFunctionRanges)(fileContent, patch.path);
+            if (astScan.ok && astScan.functions.length > 0) {
+                console.log("[zone-ast-scan]", {
+                    file: patch.path,
+                    functionsFound: astScan.functions.length,
+                    names: astScan.functions.map((r) => r.name),
+                });
+            }
+            if (isTaskAlreadyDone(input.task, fileContent)) {
+                const msg = "This change appears to already be implemented.";
+                emitStructuredProgress({
+                    type: "plan_discard",
+                    title: "Plan dismissed",
+                    detail: "Change already present in codebase.",
+                    status: "success",
+                });
+                const runIdTrim = typeof input.runId === "string" ? input.runId.trim() : "";
+                if (runIdTrim) {
+                    input.onProgress?.({
+                        stage: "Ready",
+                        progress: {
+                            runId: runIdTrim,
+                            ts: Date.now(),
+                            type: "chat_response",
+                            title: msg,
+                            status: "success",
+                        },
+                    });
+                }
+                notifyProgress("Ready", {
+                    type: "run_completed",
+                    message: msg,
+                    stage: "finalize",
+                    status: "completed",
+                });
+                reportProgress("Ready");
+                const alreadyDoneReport = await (0, generateFinalRunReport_js_1.generateFinalRunReport)({
+                    task: input.task,
+                    contextFilesMeta: [{ path: patch.path, reason: "already_implemented_precheck" }],
+                    planObjective: executionPlan?.objective ?? null,
+                    planScopeSummary: executionPlan?.scopeSummary ?? null,
+                    patchSource: "no_patch",
+                    fileDiffs: [],
+                    patchScope: {
+                        changedFileCount: 0,
+                        totalAddedLines: 0,
+                        totalRemovedLines: 0,
+                        totalChangedLines: 0,
+                    },
+                    decisionMode: "preview_only",
+                    finalState: "preview_only",
+                    warnings: [],
+                    correctness: {
+                        status: "skipped",
+                        summary: "Precheck: requested comment/JSDoc already appears present near the target function.",
+                    },
+                    verificationCommandsLabel: null,
+                    runtimeVerificationSummary: null,
+                    finalExecutionOutcome: "completed",
+                    developerConfidence: 100,
+                });
+                return {
+                    ok: true,
+                    patchPreview: msg,
+                    warnings: [],
+                    developerConfidence: 100,
+                    decisionMode: "chat",
+                    finalState: "preview_only",
+                    chatResponse: msg,
+                    reason: "already_implemented",
+                    patchSource: "no_patch",
+                    finalExecutionOutcome: "completed",
+                    applyPatches: [],
+                    patchResults: [
+                        {
+                            filePath: patch.path,
+                            status: "skipped",
+                            reason: "already_implemented",
+                        },
+                    ],
+                    fileDiffs: [],
+                    contextFiles: [],
+                    lifecycleEvents: [...lifecycleEvents],
+                    finalRunReport: alreadyDoneReport,
+                };
+            }
             // Include a few page-like files as extra context for UI/test-heavy repos.
             let resolvedPageObjectContext = "";
             if (input.hostedContext) {
@@ -4317,6 +5553,46 @@ async function runLlmPatchFlow(input) {
                 ? "find_replace_patch"
                 : "full_content";
             const llmFileContent = contextWindow?.snippet ?? fileContent;
+            const explicitFromTaskMatch = input.task.match(/Target file:\s*([^\r\n]+)/i);
+            const explicitFromTask = explicitFromTaskMatch?.[1] ? String(explicitFromTaskMatch[1]).trim().replace(/\\/g, "/") : "";
+            const isExplicitPrimaryTarget = (explicitTargetCanonicalPath !== null && patch.path === explicitTargetCanonicalPath) ||
+                (explicitFromTask.length > 0 && patch.path === explicitFromTask);
+            const fullContextForExplicitTarget = isExplicitPrimaryTarget ? fileContent : llmFileContent;
+            // Deterministic fallback for explicit "replace this exact line" tasks.
+            // This avoids LLM no-op/no_patch when we have an unambiguous single-line replacement.
+            if (isExplicitPrimaryTarget) {
+                const exact = parseExactLineReplaceTask(input.task);
+                if (exact) {
+                    console.log("[zone-exact-line-fallback]", {
+                        filePath: patch.path,
+                        findLine: exact.findLine,
+                        replaceLine: exact.replaceLine,
+                    });
+                    const applied = tryApplyExactLineReplacement({
+                        fileContent,
+                        findLine: exact.findLine,
+                        replaceLine: exact.replaceLine,
+                    });
+                    if (applied.ok) {
+                        if (!applyResults.some((p) => p.filePath === patch.path)) {
+                            applyResults.push({ filePath: patch.path, fullContent: applied.fullContent });
+                        }
+                        patchResults.push({ filePath: patch.path, status: "applied" });
+                        emitStructuredProgress({
+                            type: "patch_converted",
+                            title: "Applied exact line replacement",
+                            status: "success",
+                            filePath: patch.path,
+                        });
+                        continue;
+                    }
+                    else if (applied.reason.startsWith("ambiguous_")) {
+                        const w = `[exact_line_replace_ambiguous] Found multiple matching lines; skipping deterministic replacement (${applied.reason}).`;
+                        internalWarnings.push(w);
+                        visibleWarnings.push(w);
+                    }
+                }
+            }
             const shouldRunInlineConstrainedEligibility = isConstrainedLocalizedPatchTask(input.task) &&
                 !constrainedApplyEligibilityPrefiltered;
             if (shouldRunInlineConstrainedEligibility) {
@@ -4386,8 +5662,12 @@ async function runLlmPatchFlow(input) {
                 });
                 return (0, planFullPatch_js_1.planFullPatchWithLlm)({
                     task: input.task,
+                    lastAddedFunctions,
+                    plannerSuggestedFile: plannerSelection?.filesToEdit?.[0],
                     filePath: patch.path,
-                    fileContent: llmFileContent,
+                    // For explicit targets, the model MUST see the exact full file content that the patch
+                    // will be applied to; otherwise FIND anchors can be generated against a truncated snippet.
+                    fileContent: fullContextForExplicitTarget,
                     fullOriginalFileContent: fileContent,
                     repoSummary: projectSummary,
                     repoPath: input.repoPath,
@@ -4397,6 +5677,28 @@ async function runLlmPatchFlow(input) {
                     relevantFiles: targetedRelevantFiles,
                     existingTargetFiles: allFiles.map((file) => file.path),
                     executionPlan,
+                    onProgress: (e) => {
+                        if (e.type === "patch_stream_target") {
+                            emitStructuredProgress({
+                                type: "patch_stream_target",
+                                title: "Patch target",
+                                status: "active",
+                                filePath: patch.path,
+                                targetSymbol: e.targetSymbol ?? "",
+                            });
+                            return;
+                        }
+                        if (e.type === "patch_stream_delta") {
+                            emitStructuredProgress({
+                                type: "patch_stream_delta",
+                                title: "Streaming patch",
+                                status: "active",
+                                filePath: patch.path,
+                                delta: e.delta,
+                                ...(e.fallback ? { fallback: true } : {}),
+                            });
+                        }
+                    },
                     relatedContext: [
                         contextWindow
                             ? `// CONTEXT WINDOW: lines ${contextWindow.startLine}-${contextWindow.endLine} of ${contextWindow.totalLines} total`
@@ -4489,7 +5791,53 @@ async function runLlmPatchFlow(input) {
                 }
                 if (fullPatch.mode === "patch") {
                     rawPatchTextByFile[patch.path] = fullPatch.patchText;
-                    let appliedPatch = applyDeveloperPatchText(fileContent, fullPatch.patchText, { filePath: patch.path });
+                    console.log("[zone-raw-before-convert]", String(fullPatch.patchText || "").slice(0, 800));
+                    const parsedForAnchor = (0, developerPatchParse_js_1.parseDeveloperPatchText)(fullPatch.patchText);
+                    const anchorLine = parsedForAnchor && !parsedForAnchor.noChangeNeeded && parsedForAnchor.edits.length > 0
+                        ? (String(parsedForAnchor.edits[0]?.find ?? "")
+                            .split(/\r?\n/)
+                            .map((l) => l.trim())
+                            .find((l) => l.length > 0) ?? "")
+                        : "";
+                    console.log("[zone-patch-anchor-debug]", {
+                        filePath: patch.path,
+                        llmFileContentHasAnchor: anchorLine ? llmFileContent.includes(anchorLine) : null,
+                        fileContentHasAnchor: anchorLine ? fileContent.includes(anchorLine) : null,
+                        patchPreview: String(fullPatch.patchText || "").slice(0, 200),
+                    });
+                    const funcNameMatch = input.task.match(/(?:in|the|fix|update|modify|refactor|change)\s+(?:the\s+)?(\w+)\s+(?:function|method)/i);
+                    const targetFuncName = funcNameMatch?.[1]
+                        ? String(funcNameMatch[1]).trim()
+                        : "";
+                    const symbolCtx = targetFuncName.length > 0
+                        ? (0, extractSymbolContext_js_1.extractSymbolContext)(fileContent, targetFuncName, patch.path, 5)
+                        : null;
+                    let appliedPatch = (() => {
+                        if (!symbolCtx) {
+                            return applyDeveloperPatchText(fileContent, fullPatch.patchText, {
+                                filePath: patch.path,
+                            });
+                        }
+                        // AST mode: apply patch against the function slice (more reliable FIND),
+                        // then splice into the full file to preserve complete content.
+                        const funcApply = applyDeveloperPatchText(symbolCtx.targetFunction.content, fullPatch.patchText, { filePath: patch.path });
+                        if (!funcApply.ok) {
+                            return applyDeveloperPatchText(fileContent, fullPatch.patchText, {
+                                filePath: patch.path,
+                            });
+                        }
+                        const patchedFunctionContent = funcApply.fullContent;
+                        const fullFileContent = fileContent.slice(0, symbolCtx.targetFunction.startChar) +
+                            patchedFunctionContent +
+                            fileContent.slice(symbolCtx.targetFunction.endChar);
+                        console.log("[zone-ast-reconstruct]", {
+                            file: patch.path,
+                            targetFunc: targetFuncName,
+                            lines: `${symbolCtx.targetFunction.startLine}-${symbolCtx.targetFunction.endLine}`,
+                            patchedSize: patchedFunctionContent.length,
+                        });
+                        return { ok: true, fullContent: fullFileContent };
+                    })();
                     let recoveredFromApply = false;
                     if (!appliedPatch.ok) {
                         const failurePreview = parsePatchFailureWarning(appliedPatch.warning);
@@ -4624,6 +5972,12 @@ async function runLlmPatchFlow(input) {
                     if (fullPatch.patchRecovered || recoveredFromApply) {
                         usedLlmPatchRecovered = true;
                     }
+                    if (!applyResults.some((p) => p.filePath === patch.path)) {
+                        applyResults.push({
+                            filePath: patch.path,
+                            fullContent: appliedPatch.fullContent,
+                        });
+                    }
                     logPatchConversionDebug({
                         filePath: patch.path,
                         chosenOutputMode: fullPatchMode,
@@ -4644,6 +5998,27 @@ async function runLlmPatchFlow(input) {
                     responseMode: fullPatch.mode,
                     status: "applied",
                 });
+                console.log("[zone-full-content-apply-debug]", String(fullPatch.fullContent || "").slice(0, 500));
+                if (fullPatch.fullContent && String(fullPatch.fullContent).trim()) {
+                    // Ensure full-content output is staged as an apply patch (otherwise applyPatches stays empty).
+                    const fullContentFilePath = fullPatch.filePath || patch.path;
+                    if (!applyResults.some((p) => p.filePath === fullContentFilePath)) {
+                        applyResults.push({
+                            filePath: fullContentFilePath,
+                            fullContent: fullPatch.fullContent,
+                        });
+                    }
+                    patchResults.push({
+                        filePath: fullContentFilePath,
+                        status: "applied",
+                    });
+                    emitStructuredProgress({
+                        type: "patch_converted",
+                        title: "Patch matched the original file",
+                        status: "success",
+                        filePath: fullContentFilePath,
+                    });
+                }
                 // Track a hint of previous output for repair prompts.
                 rawPatchTextByFile[patch.path] = `[full_content] ${fullPatch.summary ?? ""}`.trim();
                 return fullPatch.fullContent;
@@ -4710,10 +6085,12 @@ async function runLlmPatchFlow(input) {
                 });
                 continue;
             }
-            applyResults.push({
-                filePath: patch.path,
-                fullContent: nextContent,
-            });
+            if (!applyResults.some((p) => p.filePath === patch.path)) {
+                applyResults.push({
+                    filePath: patch.path,
+                    fullContent: nextContent,
+                });
+            }
             if (nextContent.includes("--- FIND ---") ||
                 nextContent.includes("--- REPLACE ---") ||
                 nextContent.includes("--- END ---")) {
@@ -4731,6 +6108,12 @@ async function runLlmPatchFlow(input) {
             });
         }
         applyPatches = applyResults;
+        console.log("[zone-convert-result]", {
+            patchCount: applyPatches.length,
+            firstPatch: applyPatches[0]
+                ? JSON.stringify(applyPatches[0]).slice(0, 300)
+                : null,
+        });
         perf.mark("patch conversion complete");
     }
     catch (err) {
@@ -4912,14 +6295,53 @@ async function runLlmPatchFlow(input) {
                 taskConstraints: detectExistingStructureTaskConstraints(input.task),
                 strictMode: patchSource === "deterministic_fallback",
             });
+            // Dev-mode bypass: warn but don't block on broken_call_at_eol.
+            // This heuristic can false-positive with newline artifacts (CR/CRLF) or minified code.
+            const isDevBypassMode = process.env.NODE_ENV !== "production";
+            const devBypassUnbalancedDelimiters = isDevBypassMode;
+            const bypassedBrokenCallAtEol = isDevBypassMode
+                ? report.blocking.filter((i) => i.code === "broken_call_at_eol")
+                : [];
+            const bypassedUnbalancedDelimiters = devBypassUnbalancedDelimiters
+                ? report.blocking.filter((i) => i.code === "unbalanced_delimiters")
+                : [];
+            const effectiveBlocking = isDevBypassMode
+                ? report.blocking.filter((i) => i.code !== "broken_call_at_eol" &&
+                    (!devBypassUnbalancedDelimiters || i.code !== "unbalanced_delimiters"))
+                : report.blocking;
+            const effectiveWarnings = bypassedBrokenCallAtEol.length
+                ? [
+                    ...report.warnings,
+                    ...bypassedBrokenCallAtEol.map((i) => ({
+                        ...i,
+                        severity: "warn",
+                        message: `[DEV_BYPASS] ${i.message}`,
+                    })),
+                ]
+                : report.warnings;
+            const effectiveWarningsWithDelimitersBypass = bypassedUnbalancedDelimiters.length
+                ? [
+                    ...effectiveWarnings,
+                    ...bypassedUnbalancedDelimiters.map((i) => ({
+                        ...i,
+                        severity: "warn",
+                        message: `[DEV_BYPASS] ${i.message}`,
+                    })),
+                ]
+                : effectiveWarnings;
+            const effectiveOk = report.ok || (report.blocking.length > 0 && effectiveBlocking.length === 0);
+            const effectiveForceBlocked = report.forceBlocked && effectiveBlocking.length > 0;
+            const effectiveForcePreviewOnly = report.forcePreviewOnly;
             console.log("[zone-patch-correctness-v2]", JSON.stringify({
                 filePath: patch.filePath,
-                ok: report.ok,
+                ok: effectiveOk,
                 layersRun: report.layersRun,
                 shortCircuitedAt: report.shortCircuitedAt,
-                blockingCodes: report.blocking.map((i) => i.code),
-                warningCodes: report.warnings.map((i) => i.code),
+                blockingCodes: effectiveBlocking.map((i) => i.code),
+                warningCodes: effectiveWarningsWithDelimitersBypass.map((i) => i.code),
                 strictMode: patchSource === "deterministic_fallback",
+                devBypassBrokenCallAtEol: bypassedBrokenCallAtEol.length > 0,
+                devBypassUnbalancedDelimiters: bypassedUnbalancedDelimiters.length > 0,
             }));
             const diagDiff = computeFileDiff(before, patch.fullContent);
             const diagAdded = diagDiff.filter((l) => l.type === "added").length;
@@ -4952,34 +6374,34 @@ async function runLlmPatchFlow(input) {
                         diagAfterJsx.closes - diagBeforeJsx.closes,
                 },
                 validatorVerdict: {
-                    ok: report.ok,
+                    ok: effectiveOk,
                     layersRun: report.layersRun,
                     shortCircuitedAt: report.shortCircuitedAt,
-                    blockingCodes: report.blocking.map((i) => i.code),
-                    warningCodes: report.warnings.map((i) => i.code),
+                    blockingCodes: effectiveBlocking.map((i) => i.code),
+                    warningCodes: effectiveWarningsWithDelimitersBypass.map((i) => i.code),
                 },
                 diffHeadSample: buildDiffHeadSample(diagDiff, 200),
             }));
-            if (report.ok && report.warnings.length === 0) {
+            if (effectiveOk && effectiveWarningsWithDelimitersBypass.length === 0) {
                 kept.push(patch);
                 continue;
             }
-            const allIssues = [...report.blocking, ...report.warnings];
+            const allIssues = [...effectiveBlocking, ...effectiveWarningsWithDelimitersBypass];
             for (const issue of allIssues) {
                 const warningText = `[${issue.code}] ${issue.message}`;
                 internalWarnings.push(warningText);
                 visibleWarnings.push(warningText);
             }
-            if (report.forceBlocked) {
+            if (effectiveForceBlocked) {
                 correctnessMustBlock = true;
                 validatorAllOk = false;
             }
-            else if (report.forcePreviewOnly) {
+            else if (effectiveForcePreviewOnly) {
                 fallbackForcePreviewOnly = true;
             }
-            if (!report.ok) {
+            if (!effectiveOk) {
                 const diagDiffHeadSample = buildDiffHeadSample(diagDiff, 240);
-                const blockingCodes = report.blocking.map((i) => i.code);
+                const blockingCodes = effectiveBlocking.map((i) => i.code);
                 const retryableBlocking = blockingCodes.filter((c) => retryableCorrectnessCodes.has(c));
                 const canAttemptRepair = retryableBlocking.length > 0 &&
                     !correctnessRepairAttempted.has(patch.filePath) &&
@@ -5047,6 +6469,8 @@ async function runLlmPatchFlow(input) {
                                 "Diagnostic diff head sample:",
                                 diagDiffHeadSample,
                             ].join("\n"),
+                            lastAddedFunctions,
+                            plannerSuggestedFile: plannerSelection?.filesToEdit?.[0],
                             filePath: patch.filePath,
                             fileContent: patch.fullContent,
                             fullOriginalFileContent: patch.fullContent,
@@ -5153,7 +6577,7 @@ async function runLlmPatchFlow(input) {
                     }));
                 }
                 validatorAllOk = false;
-                const firstBlockingCode = report.blocking[0]?.code ?? "correctness_failed";
+                const firstBlockingCode = effectiveBlocking[0]?.code ?? "correctness_failed";
                 for (const result of patchResults) {
                     if (result.filePath === patch.filePath && result.status === "applied") {
                         result.status = "failed";
@@ -5222,6 +6646,7 @@ async function runLlmPatchFlow(input) {
             status: "failed",
         });
         reportProgress("Ready");
+        console.log("[zone-flow-early-return]", JSON.stringify({ step: "atomic_patch_failed", reason: "atomic_patch_failed" }));
         perf.finish("atomic patch failed");
         const atomicDiffLines = applyPatches.map((p) => {
             const before = originalContents[p.filePath] ?? "";
@@ -5378,10 +6803,19 @@ async function runLlmPatchFlow(input) {
     const repairAttempts = [];
     if (!input.hostedContext && applyPatches.length > 0) {
         try {
+            // Apply patches to disk before running verification, otherwise verification
+            // runs against the unmodified repo and can yield misleading "passed" results.
+            const applyResult = await (0, applyLlmPatches_js_1.applyLlmPatches)(applyPatches, input.repoPath);
+            console.log("[zone-apply-before-verify]", {
+                attempted: applyPatches.length,
+                applied: applyResult.applied.length,
+                failed: applyResult.failed.length,
+            });
             const plan = (0, detectVerificationCommand_js_1.detectVerificationPlan)({
                 repoPath: input.repoPath,
                 repoFiles: allFiles.map((file) => file.path),
                 task: input.task,
+                patchedFilePaths: applyPatches.map((p) => p.filePath),
             });
             const plannedCommandSummary = plan.length > 0 ? plan.map((s) => s.command).join(" → ") : "";
             notifyProgress("Validating developer output...", {
@@ -5446,13 +6880,429 @@ async function runLlmPatchFlow(input) {
                     command: rvp0.failedCommand,
                     summary: rvp0.summary,
                 };
-            if (rvp0.status === "failed_code_related") {
+            const combinedVerificationSummary = [
+                rvp0.summary,
+                ...rvp0.steps.map((s) => `${s.command ?? ""}\n${s.summary ?? ""}\n${s.stderr ?? ""}`.trim()),
+            ]
+                .filter(Boolean)
+                .join("\n\n");
+            let verificationErrorInfo = (0, parseVerificationError_js_1.parseVerificationErrorWithRepo)(combinedVerificationSummary, applyPatches.map((p) => p.filePath), input.repoPath);
+            if (verificationErrorInfo.failingFile) {
+                const failingNorm = verificationErrorInfo.failingFile.replace(/\\/g, "/");
+                const repoPaths = new Set(allFiles.map((f) => f.path));
+                if (!repoPaths.has(failingNorm)) {
+                    const prefixedServer = `server/${failingNorm.replace(/^\.?\//, "")}`;
+                    const prefixedClient = `client/${failingNorm.replace(/^\.?\//, "")}`;
+                    const resolved = repoPaths.has(prefixedServer)
+                        ? prefixedServer
+                        : repoPaths.has(prefixedClient)
+                            ? prefixedClient
+                            : null;
+                    if (resolved) {
+                        verificationErrorInfo = { ...verificationErrorInfo, failingFile: resolved };
+                    }
+                }
+            }
+            console.log("[zone-verification-parse]", verificationErrorInfo);
+            // Order is critical:
+            // 1) parseVerificationError always runs first
+            // 2) pre-existing skips only when parseVerificationError says so
+            // 3) no-tests-found + failing file => try smart fix loop
+            if (runtimeVerificationPlan && verificationErrorInfo.isPreExisting) {
+                const msg = verificationErrorInfo.errorType === "no_tests_found"
+                    ? "Verification skipped: pre-existing issue (no tests found)"
+                    : "Verification skipped: pre-existing verification failure";
+                console.log("[zone-verification-preexisting]", {
+                    command: runtimeVerificationPlan.failedCommand ?? plan[0]?.command,
+                    failingFile: verificationErrorInfo.failingFile,
+                    errorType: verificationErrorInfo.errorType,
+                });
+                // Downgrade from code-related failure: do not block apply; do not enter repair loop.
+                runtimeVerificationPlan = {
+                    ...runtimeVerificationPlan,
+                    status: "failed_environment_or_tooling",
+                    summary: msg,
+                };
+                runtimeVerification = {
+                    attempted: runtimeVerification.attempted,
+                    status: "skipped",
+                    command: runtimeVerification.command,
+                    summary: msg,
+                };
+                internalWarnings.push(msg);
+                visibleWarnings.push(msg);
+            }
+            // Smart verification loop: if tests can't be found but we can attribute it to a specific file,
+            // try to fix the test file via agent loop, then re-run verification.
+            if (runtimeVerificationPlan &&
+                runtimeVerificationPlan.status === "failed_code_related" &&
+                verificationErrorInfo.errorType === "no_tests_found" &&
+                verificationErrorInfo.failingFile &&
+                input.repoPath &&
+                plan.length > 0) {
+                const verificationCommand = runtimeVerificationPlan.failedCommand ?? plan[0]?.command ?? "";
+                emitStructuredProgress({
+                    type: "verification_investigating",
+                    title: "Investigating test failure...",
+                    status: "active",
+                });
+                emitStructuredProgress({
+                    type: "verification_fixing",
+                    title: `Fixing test file: ${verificationErrorInfo.failingFile}`,
+                    status: "active",
+                    filePath: verificationErrorInfo.failingFile,
+                });
+                const fixResult = await (0, agentLoop_js_1.runAgentLoop)({
+                    task: [
+                        `The test file ${verificationErrorInfo.failingFile} has no tests or is broken.`,
+                        `Error: ${verificationErrorInfo.errorMessage}`,
+                        "Read the file, understand what's wrong, and fix it so tests can be found.",
+                        verificationCommand ? `Then verify with: ${verificationCommand}` : "",
+                    ]
+                        .filter(Boolean)
+                        .join("\n"),
+                    repoPath: input.repoPath,
+                    runId: typeof input.runId === "string" ? input.runId.trim() : "",
+                    framework,
+                    maxIterations: 5,
+                    abortSignal: input.abortSignal,
+                    onStructuredEvent: (evt) => {
+                        const rid = typeof input.runId === "string" ? input.runId.trim() : "";
+                        if (!rid)
+                            return;
+                        const e = evt;
+                        if (e && typeof e === "object" && e.type === "command_approval_required") {
+                            emitStructuredProgress({
+                                type: "command_approval_required",
+                                title: "Command approval required",
+                                status: "active",
+                                command: String(e.command || ""),
+                                approvalId: String(e.approvalId || ""),
+                            });
+                        }
+                    },
+                    onProgress: (msg) => {
+                        emitStructuredProgress({
+                            type: "verification_fixing",
+                            title: msg,
+                            status: "active",
+                        });
+                    },
+                    onToolCall: (name, args) => {
+                        emitStructuredProgress({
+                            type: "tool_call",
+                            title: `[fix] ${name}: ${String(args?.filePath || args?.command || "")}`,
+                            status: "active",
+                        });
+                    },
+                    onToolResult: (name, result) => {
+                        emitStructuredProgress({
+                            type: "tool_result",
+                            title: String(result.output || "").slice(0, 100),
+                            status: result.success ? "success" : "error",
+                        });
+                    },
+                    userApiKey: input.userApiKey,
+                });
+                if (fixResult.success) {
+                    emitStructuredProgress({
+                        type: "verification_fixed",
+                        title: "Test file fixed, re-running verification...",
+                        status: "success",
+                    });
+                    emitStructuredProgress({
+                        type: "chat_response",
+                        title: fixResult.summary || "Fixed test file to enable verification.",
+                        status: "success",
+                    });
+                    // Re-run verification after fix.
+                    const rerunAfterFix = await (0, runRuntimeVerification_js_1.runRuntimeVerificationPlan)({
+                        repoPath: input.repoPath,
+                        plan,
+                    });
+                    runtimeVerificationPlan = rerunAfterFix;
+                    const first = rerunAfterFix.steps[0];
+                    runtimeVerification =
+                        first ?? {
+                            attempted: rerunAfterFix.attempted,
+                            status: rerunAfterFix.status === "passed"
+                                ? "passed"
+                                : rerunAfterFix.status === "timeout"
+                                    ? "timeout"
+                                    : rerunAfterFix.status === "skipped_no_command"
+                                        ? "skipped"
+                                        : "failed",
+                            command: rerunAfterFix.failedCommand,
+                            summary: rerunAfterFix.summary,
+                        };
+                }
+                else {
+                    const w = "Could not fix test file automatically";
+                    internalWarnings.push(w);
+                    visibleWarnings.push(w);
+                }
+            }
+            const patchedFilesSet = new Set(applyPatches.map((p) => p.filePath));
+            const failingFileIsPatched = verificationErrorInfo.failingFile != null &&
+                (patchedFilesSet.has(verificationErrorInfo.failingFile) ||
+                    Array.from(patchedFilesSet).some((p) => verificationErrorInfo.failingFile.endsWith(p)));
+            console.log("[zone-verification-smart-check]", {
+                status: runtimeVerificationPlan?.status,
+                failingFile: verificationErrorInfo.failingFile,
+                failingFileIsPatched,
+                repoPathPresent: Boolean(input.repoPath),
+                planLen: plan.length,
+            });
+            // Smart verification loop: if the failing file is NOT one we patched (e.g. a unit test),
+            // investigate and attempt to fix that file, then re-run verification.
+            if (runtimeVerificationPlan &&
+                runtimeVerificationPlan.status === "failed_code_related" &&
+                verificationErrorInfo.failingFile &&
+                !failingFileIsPatched &&
+                input.repoPath &&
+                plan.length > 0) {
+                let deterministicAssertionFixSucceeded = false;
+                // Deterministic assertion fix (fast path): update expected string in test file
+                // to match the new value inferred from the patched source file.
+                const isTestFile = /\.test\.[jt]sx?$/i.test(verificationErrorInfo.failingFile) ||
+                    /\.spec\.[jt]sx?$/i.test(verificationErrorInfo.failingFile);
+                if (verificationErrorInfo.errorType === "assertion_error" &&
+                    isTestFile &&
+                    typeof verificationErrorInfo.failingLine === "number" &&
+                    verificationErrorInfo.failingLine > 0) {
+                    try {
+                        const absFailing = node_path_1.default.join(input.repoPath, verificationErrorInfo.failingFile);
+                        const failingText = (0, node_fs_1.existsSync)(absFailing) ? (0, node_fs_1.readFileSync)(absFailing, "utf8") : "";
+                        const failingLines = failingText.split(/\r?\n/);
+                        const lineIdx = verificationErrorInfo.failingLine - 1;
+                        const window = [
+                            failingLines[lineIdx - 1] ?? "",
+                            failingLines[lineIdx] ?? "",
+                            failingLines[lineIdx + 1] ?? "",
+                        ].join("\n");
+                        const oldExpected = extractFirstStringLiteralFromLine(window);
+                        if (oldExpected) {
+                            // Infer new expected string from the patch's before/after for the patched source file.
+                            let inferredNew = null;
+                            for (const p of applyPatches) {
+                                const before = originalContents[p.filePath] ?? "";
+                                if (!before.includes(oldExpected))
+                                    continue;
+                                const after = p.fullContent ?? "";
+                                inferredNew = inferReplacementFromPatchedFile({
+                                    before,
+                                    after,
+                                    oldExpected,
+                                });
+                                if (inferredNew)
+                                    break;
+                            }
+                            if (inferredNew) {
+                                emitStructuredProgress({
+                                    type: "verification_investigating",
+                                    title: "Investigating test failure...",
+                                    status: "active",
+                                });
+                                emitStructuredProgress({
+                                    type: "verification_fixing",
+                                    title: `Fixing: ${verificationErrorInfo.failingFile}`,
+                                    status: "active",
+                                    filePath: verificationErrorInfo.failingFile,
+                                });
+                                const replacementApplied = failingLines[lineIdx] && failingLines[lineIdx].includes(oldExpected)
+                                    ? (() => {
+                                        failingLines[lineIdx] = failingLines[lineIdx].replace(oldExpected, inferredNew);
+                                        return true;
+                                    })()
+                                    : (() => {
+                                        // fallback: replace first occurrence in file
+                                        const idx = failingText.indexOf(oldExpected);
+                                        if (idx < 0)
+                                            return false;
+                                        const nextText = failingText.replace(oldExpected, inferredNew);
+                                        (0, node_fs_1.writeFileSync)(absFailing, nextText, "utf8");
+                                        return true;
+                                    })();
+                                if (replacementApplied && failingLines[lineIdx]) {
+                                    // If we modified the failing line, write back joined content.
+                                    (0, node_fs_1.writeFileSync)(absFailing, failingLines.join("\n"), "utf8");
+                                }
+                                // Re-run verification immediately.
+                                const rerunAfterDeterministicFix = await (0, runRuntimeVerification_js_1.runRuntimeVerificationPlan)({
+                                    repoPath: input.repoPath,
+                                    plan,
+                                });
+                                console.log("[zone-verification-rerun]", {
+                                    status: rerunAfterDeterministicFix.status,
+                                    failedCommand: rerunAfterDeterministicFix.failedCommand,
+                                });
+                                if (rerunAfterDeterministicFix.status === "passed") {
+                                    emitStructuredProgress({
+                                        type: "verification_fixed",
+                                        title: "Verification fixed.",
+                                        status: "success",
+                                    });
+                                    runtimeVerificationPlan = rerunAfterDeterministicFix;
+                                    const first = rerunAfterDeterministicFix.steps[0];
+                                    runtimeVerification =
+                                        first ?? {
+                                            attempted: rerunAfterDeterministicFix.attempted,
+                                            status: "passed",
+                                            command: rerunAfterDeterministicFix.failedCommand,
+                                            summary: rerunAfterDeterministicFix.summary,
+                                        };
+                                    deterministicAssertionFixSucceeded = true;
+                                }
+                            }
+                        }
+                    }
+                    catch (e) {
+                        console.warn("[zone-verification-deterministic-fix] failed:", e instanceof Error ? e.message : String(e));
+                    }
+                }
+                if (deterministicAssertionFixSucceeded) {
+                    // Deterministic fix worked; skip agent-loop fallback.
+                    // Continue through the outer verification flow with runtimeVerificationPlan updated.
+                }
+                else {
+                    console.log("[zone-verification-investigating]", {
+                        failingFile: verificationErrorInfo.failingFile,
+                        errorType: verificationErrorInfo.errorType,
+                    });
+                    emitStructuredProgress({
+                        type: "verification_investigating",
+                        title: "Investigating test failure...",
+                        status: "active",
+                    });
+                    emitStructuredProgress({
+                        type: "verification_fixing",
+                        title: `Fixing: ${verificationErrorInfo.failingFile}`,
+                        status: "active",
+                        filePath: verificationErrorInfo.failingFile,
+                    });
+                    const verificationCommand = runtimeVerificationPlan.failedCommand ?? plan[0]?.command ?? "";
+                    const fixResult = await (0, agentLoop_js_1.runAgentLoop)({
+                        task: [
+                            `Target file: ${verificationErrorInfo.failingFile}`,
+                            "",
+                            "A verification command failed after applying a patch to a different file.",
+                            `Error type: ${verificationErrorInfo.errorType}`,
+                            `Error: ${verificationErrorInfo.errorMessage}`,
+                            "",
+                            "Fix ONLY the failing file above so that verification passes.",
+                            'If this is a Jest assertion mismatch, update the expected string to match the new behavior (e.g. "Email is required.").',
+                            "Do NOT run any commands. Only edit the file.",
+                        ].join("\n"),
+                        repoPath: input.repoPath,
+                        runId: typeof input.runId === "string" ? input.runId.trim() : "",
+                        framework,
+                        maxIterations: 8,
+                        abortSignal: input.abortSignal,
+                        onStructuredEvent: (evt) => {
+                            const rid = typeof input.runId === "string" ? input.runId.trim() : "";
+                            if (!rid)
+                                return;
+                            const e = evt;
+                            if (e && typeof e === "object" && e.type === "command_approval_required") {
+                                emitStructuredProgress({
+                                    type: "command_approval_required",
+                                    title: "Command approval required",
+                                    status: "active",
+                                    command: String(e.command || ""),
+                                    approvalId: String(e.approvalId || ""),
+                                });
+                            }
+                        },
+                        onProgress: (msg) => {
+                            emitStructuredProgress({
+                                type: "verification_fixing",
+                                title: msg,
+                                status: "active",
+                            });
+                        },
+                        onToolCall: (name, args) => {
+                            emitStructuredProgress({
+                                type: "tool_call",
+                                title: `[fix] ${name}: ${String(args?.filePath || args?.command || "")}`,
+                                status: "active",
+                            });
+                        },
+                        onToolResult: (_name, result) => {
+                            emitStructuredProgress({
+                                type: "tool_result",
+                                title: String(result.output || "").slice(0, 100),
+                                status: result.success ? "success" : "error",
+                            });
+                        },
+                        userApiKey: input.userApiKey,
+                    });
+                    console.log("[zone-verification-fix-result]", {
+                        success: fixResult.success,
+                        error: fixResult.error,
+                        summary: String(fixResult.summary || "").slice(0, 400),
+                        filesModified: Array.isArray(fixResult.filesModified)
+                            ? fixResult.filesModified.slice(0, 20)
+                            : [],
+                    });
+                    if (fixResult.success) {
+                        console.log("[zone-verification-fixed]", { failingFile: verificationErrorInfo.failingFile });
+                        emitStructuredProgress({
+                            type: "verification_fixed",
+                            title: "Verification-related file fixed, re-running verification...",
+                            status: "success",
+                        });
+                        emitStructuredProgress({
+                            type: "chat_response",
+                            title: fixResult.summary || "Fixed verification-related file.",
+                            status: "success",
+                        });
+                        const rerunAfterFix = await (0, runRuntimeVerification_js_1.runRuntimeVerificationPlan)({
+                            repoPath: input.repoPath,
+                            plan,
+                        });
+                        runtimeVerificationPlan = rerunAfterFix;
+                        const first = rerunAfterFix.steps[0];
+                        runtimeVerification =
+                            first ?? {
+                                attempted: rerunAfterFix.attempted,
+                                status: rerunAfterFix.status === "passed"
+                                    ? "passed"
+                                    : rerunAfterFix.status === "timeout"
+                                        ? "timeout"
+                                        : rerunAfterFix.status === "skipped_no_command"
+                                            ? "skipped"
+                                            : "failed",
+                                command: rerunAfterFix.failedCommand,
+                                summary: rerunAfterFix.summary,
+                            };
+                        console.log("[zone-verification-rerun]", {
+                            status: rerunAfterFix.status,
+                            failedCommand: rerunAfterFix.failedCommand,
+                        });
+                    }
+                    else {
+                        const w = "Could not fix failing verification file automatically";
+                        internalWarnings.push(w);
+                        visibleWarnings.push(w);
+                    }
+                }
+            }
+            // Gate the existing repair loop so it only triggers when the failure is clearly attributable
+            // to the patched file(s) and the error type matches common code-regression categories.
+            const shouldEnterExistingRepairLoop = runtimeVerificationPlan &&
+                runtimeVerificationPlan.status === "failed_code_related" &&
+                failingFileIsPatched &&
+                (verificationErrorInfo.errorType === "syntax_error" ||
+                    verificationErrorInfo.errorType === "assertion_error" ||
+                    verificationErrorInfo.errorType === "runtime_error" ||
+                    verificationErrorInfo.errorType === "unknown");
+            if (runtimeVerificationPlan.status === "failed_code_related" && shouldEnterExistingRepairLoop) {
                 console.log("[zone-verification-failed]", JSON.stringify({
                     failureType: "code_related",
-                    command: rvp0.failedCommand,
-                    failureSummary: rvp0.summary,
+                    command: runtimeVerificationPlan.failedCommand,
+                    failureSummary: runtimeVerificationPlan.summary,
                 }));
-                const warning = `Runtime verification failed (code): ${rvp0.failedCommand ?? "unknown command"}`;
+                const warning = `Runtime verification failed (code): ${runtimeVerificationPlan.failedCommand ?? "unknown command"}`;
                 internalWarnings.push(warning);
                 visibleWarnings.push(warning);
                 const inferenceMode = (0, openaiClient_js_1.getInferenceMode)();
@@ -5487,7 +7337,7 @@ async function runLlmPatchFlow(input) {
                         console.log("[zone-repair-start]", JSON.stringify({
                             attempt,
                             files: applyPatches.map((p) => p.filePath),
-                            command: rvp0.failedCommand,
+                            command: runtimeVerificationPlan.failedCommand,
                         }));
                         try {
                             const brief = (0, buildRetryGuidanceFromFailure_js_1.buildRetryGuidanceFromFailure)({
@@ -5541,6 +7391,8 @@ async function runLlmPatchFlow(input) {
                                         "Failure guidance:",
                                         guidanceText,
                                     ].join("\n"),
+                                    lastAddedFunctions,
+                                    plannerSuggestedFile: plannerSelection?.filesToEdit?.[0],
                                     filePath: patch.filePath,
                                     fileContent: patch.fullContent,
                                     fullOriginalFileContent: patch.fullContent,
@@ -6170,6 +8022,55 @@ async function runLlmPatchFlow(input) {
         finalExecutionOutcome,
         developerConfidence,
     });
+    let handoffReport;
+    const hasHandoffWorthyDiff = applyPatches.length > 0 &&
+        fileDiffs.some((fd) => fd.addedLines > 0 || fd.removedLines > 0);
+    if ((decisionMode === "safe_to_apply" || decisionMode === "preview_only") &&
+        hasHandoffWorthyDiff) {
+        const normalizePathKey = (p) => String(p || "").replace(/\\/g, "/").replace(/^\.\/+/, "");
+        const patchDescByNorm = new Map();
+        for (const p of patchPlan.patches) {
+            patchDescByNorm.set(normalizePathKey(p.path), String(p.summary || "").trim());
+        }
+        const implLine = String(patchPlan.summary || "")
+            .split(/\n/)[0]
+            ?.trim();
+        const changes = fileDiffs.map((fd) => {
+            const norm = normalizePathKey(fd.filePath);
+            const description = (patchDescByNorm.get(norm) ||
+                implLine ||
+                "Updated file").slice(0, 300);
+            return {
+                file: fd.filePath,
+                added: fd.addedLines,
+                removed: fd.removedLines,
+                description,
+            };
+        });
+        const handoffVerification = verificationStatus === "passed"
+            ? "passed"
+            : verificationStatus === "skipped" || verificationStatus === "tooling_issue"
+                ? "skipped"
+                : "failed";
+        const changesSummary = changes.length > 0
+            ? changes
+                .map((c) => `- ${c.file} (+${c.added}/-${c.removed}): ${c.description}`)
+                .join("\n")
+            : "No recorded file diffs.";
+        const suggestedNextPrompt = `The following changes were made to your repo:\n${changesSummary}\n\nYou can continue from here.`;
+        handoffReport = {
+            summary: "Zone applied the following changes:",
+            changes,
+            verification: handoffVerification,
+            suggestedNextPrompt,
+        };
+        emitStructuredProgress({
+            type: "handoff_report",
+            title: "AI Handoff",
+            status: "success",
+            report: handoffReport,
+        });
+    }
     // 8. Return
     notifyProgress("Ready", {
         type: "run_completed",
@@ -6243,6 +8144,7 @@ async function runLlmPatchFlow(input) {
         ...(runtimeVerificationPlan ? { runtimeVerificationPlan } : {}),
         lifecycleEvents: [...lifecycleEvents],
         finalRunReport,
+        ...(handoffReport ? { handoffReport } : {}),
     };
 }
 //# sourceMappingURL=runLlmPatchFlow.js.map

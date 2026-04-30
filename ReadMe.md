@@ -1,71 +1,73 @@
-# zone README
+# Zone
 
-This is the README for your extension "zone". After writing up a brief description, we recommend including the following sections.
+> Most AI coders happily commit broken syntax. Zone refuses.
+> AI code edits with guardrails — catches broken syntax, duplicate imports,
+> and malformed templates before they touch your disk.
 
-## Features
-
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
-
-For example if there is an image subfolder under your extension project workspace:
-
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
-
-## Requirements
-
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
-
-## Extension Settings
-
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Status: experimental](https://img.shields.io/badge/status-experimental-orange.svg)
 
 ---
 
-## Following extension guidelines
+Zone is an open-source AI code agent. You give it a task, it edits your code,
+and a built-in validator double-checks every change for common syntax bugs
+before letting it stick. If the AI produces broken code, Zone catches it,
+reverts the file, and tries again — instead of silently committing nonsense.
 
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
+## Why Zone?
 
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
+- **Built-in safety net.** Every patch goes through AST validation. Broken
+  syntax, malformed template literals, duplicate JSX attributes, and
+  duplicate imports get caught and reverted automatically.
+- **Bring your own API key.** Free to use. You pay OpenAI directly for what
+  you use. No subscription, no Zone account, no data sent to our servers
+  (your key stays in your browser).
+- **Open source.** MIT licensed. Read the code, fork it, contribute, or
+  self-host.
+- **Honest about limits.** Zone handles single-line edits and small refactors
+  well. Big multi-file changes and complex JSX still trip it up — see
+  "What works, what doesn't" below (coming soon).
 
-## Working with Markdown
+## Quick Start
 
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
+Requirements: Node.js 18+, an OpenAI API key.
 
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
+```bash
+git clone https://github.com/<BedreddinErkan>/zone
+cd zone
+npm install
+npm run build
+npm run serve
+```
 
-## For more information
+Open http://localhost:3000 in your browser. On first run, you'll be prompted
+to enter your OpenAI API key — it's stored in your browser only and never
+sent to any server other than OpenAI's.
 
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
+That's it. Try a task like:
 
-**Enjoy!**
+> *"In src/utils/format.js, add JSDoc comments to the formatDate function"*
+
+## Roadmap
+
+Zone is being actively developed (in spare time). Planned next:
+
+- Architecture documentation (`docs/decisions/`)
+- Smoke test report with detailed task results
+- Plan mode (agent shows its plan before executing, like Cursor)
+- Anthropic Claude support (currently OpenAI only)
+- VSCode extension (eventually)
+
+This is a hobby project — releases happen when they happen.
+
+## Contributing
+
+Zone is small enough that the easiest contribution is **trying it and
+opening an issue**. What didn't work? What confused you? What would you
+want it to do?
+
+PRs welcome too, but please open an issue first to discuss the change.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

@@ -14,6 +14,7 @@ exports.getResponsesApiDiagnosticSnapshot = getResponsesApiDiagnosticSnapshot;
 exports.formatOpenAiThrownErrorPayload = formatOpenAiThrownErrorPayload;
 exports.buildEmptyModelResponseDetailsLine = buildEmptyModelResponseDetailsLine;
 const openai_1 = __importDefault(require("openai"));
+const openaiContext_js_1 = require("./openaiContext.js");
 function getInferenceMode() {
     const explicitMode = (process.env.ZONE_INFERENCE_MODE || "")
         .trim()
@@ -39,9 +40,23 @@ function createOpenAIClient(userApiKey) {
     const trimmedUserApiKey = typeof userApiKey === "string" && userApiKey.trim()
         ? userApiKey.trim()
         : "";
+    const contextApiKey = (0, openaiContext_js_1.getRequestUserApiKey)();
+    const trimmedContextApiKey = typeof contextApiKey === "string" && contextApiKey.trim()
+        ? contextApiKey.trim()
+        : "";
     const mode = getInferenceMode();
-    const apiKey = trimmedUserApiKey || process.env.OPENAI_API_KEY;
-    console.log(`[zone] openai key source=${trimmedUserApiKey ? "user" : "env"} mode=${mode}`);
+    const envApiKey = typeof process.env.OPENAI_API_KEY === "string" && process.env.OPENAI_API_KEY.trim()
+        ? process.env.OPENAI_API_KEY.trim()
+        : "";
+    const apiKey = trimmedUserApiKey || trimmedContextApiKey || envApiKey;
+    const source = trimmedUserApiKey
+        ? "explicit"
+        : trimmedContextApiKey
+            ? "user"
+            : envApiKey
+                ? "env"
+                : "none";
+    console.log(`[zone] openai key source=${source} mode=${mode}`);
     if (!apiKey) {
         throw new Error("OPENAI_API_KEY is missing for local inference mode.");
     }

@@ -1,5 +1,28 @@
 import type { FeatureAgentResult, ValidationIssue } from "../types/agent.js";
 
+export type ZoneLogLevel = "debug" | "info" | "quiet";
+
+export const LOG_LEVEL: ZoneLogLevel =
+  ((): ZoneLogLevel => {
+    const raw = String(process.env.ZONE_LOG_LEVEL || "debug")
+      .trim()
+      .toLowerCase();
+    if (raw === "info" || raw === "quiet") return raw;
+    return "debug";
+  })();
+
+export const logger = {
+  debug: (...args: unknown[]): void => {
+    if (LOG_LEVEL === "debug") console.log(...args);
+  },
+  info: (...args: unknown[]): void => {
+    if (LOG_LEVEL === "debug" || LOG_LEVEL === "info") console.log(...args);
+  },
+  error: (...args: unknown[]): void => {
+    console.error(...args);
+  },
+};
+
 function timestamp(): string {
   return new Date().toISOString();
 }

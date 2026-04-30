@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { execPath } from "node:process";
 
 export type SafeVerificationCommand = {
   command: string;
@@ -49,6 +50,21 @@ function parsePackageScripts(repoPath: string, repoFiles: string[]): Record<stri
   }
 }
 
+function parseSubPackageScripts(
+  repoPath: string,
+  repoFiles: string[],
+  relPackageJsonPath: string
+): Record<string, string> {
+  if (!hasRepoFile(repoFiles, relPackageJsonPath)) return {};
+  const packageJson = readRepoText(repoPath, relPackageJsonPath);
+  try {
+    const parsed = JSON.parse(packageJson) as { scripts?: Record<string, string> };
+    return parsed.scripts ?? {};
+  } catch {
+    return {};
+  }
+}
+
 function hasScript(scripts: Record<string, string>, name: string): boolean {
   const value = scripts[name];
   return typeof value === "string" && value.trim().length > 0;
@@ -59,6 +75,36 @@ function normalizeTaskHints(task: string): { wantsE2E: boolean; wantsUnit: boole
   return {
     wantsE2E: /e2e|playwright|cypress/.test(t),
     wantsUnit: /\bunit\b|\bunit[-_\s]?test\b/.test(t),
+  };
+}
+
+function isPatchedTypeScriptSourceFile(filePath: string): boolean {
+  const n = filePath.replace(/\\/g, "/");
+  if (/\.tsx$/i.test(n)) return true;
+  if (/\.ts$/i.test(n) && !/\.d\.ts$/i.test(n)) return true;
+  return false;
+}
+
+function planAlreadyRunsTscNoEmit(steps: SafeVerificationStep[]): boolean {
+  return steps.some((s) => /\btsc\b/.test(s.command) && /--noEmit\b/.test(s.command));
+}
+
+function buildTscNoEmitStep(repoPath: string): SafeVerificationStep | null {
+  const tscJs = join(repoPath, "node_modules", "typescript", "bin", "tsc");
+  if (existsSync(tscJs)) {
+    return {
+      kind: "typecheck",
+      command: "tsc --noEmit",
+      executable: execPath,
+      args: [tscJs, "--noEmit"],
+    };
+  }
+  const npx = process.platform === "win32" ? "npx.cmd" : "npx";
+  return {
+    kind: "typecheck",
+    command: "npx tsc --noEmit",
+    executable: npx,
+    args: ["tsc", "--noEmit"],
   };
 }
 
@@ -82,10 +128,13 @@ export function detectVerificationPlan(input: {
   repoPath: string;
   repoFiles: string[];
   task?: string;
+  /** After a patch: if any changed file is .ts/.tsx, queue `tsc --noEmit` before tests. */
+  patchedFilePaths?: string[];
 }): SafeVerificationStep[] {
   const steps: SafeVerificationStep[] = [];
   const npm = getNpmExecutable();
   const scripts = parsePackageScripts(input.repoPath, input.repoFiles);
+  const serverScripts = parseSubPackageScripts(input.repoPath, input.repoFiles, "server/package.json");
   const hints = normalizeTaskHints(input.task ?? "");
 
   if (Object.keys(scripts).length > 0) {
@@ -132,13 +181,64 @@ export function detectVerificationPlan(input: {
     }
   }
 
-  if (hasPytestSignals(input.repoPath, input.repoFiles)) {
+  // Monorepo secondary step: if server has unit tests, run them too.
+  // Use `npm --prefix server test` so we don't rely on shell `cd`.
+  if (Object.keys(serverScripts).length > 0 && hasScript(serverScripts, "test")) {
+    steps.push({
+      kind: "test",
+      command: "cd server && npm test",
+      executable: npm,
+      args: ["--prefix", "server", "test"],
+    });
+  }
+
+  // If we patched a server/ file, prefer server unit tests BEFORE e2e.
+  // This avoids "no tests found" from e2e blocking targeted backend fixes.
+  const patched = input.patchedFilePaths ?? [];
+  const patchedTouchesServer = patched.some((p) => p.replace(/\\/g, "/").startsWith("server/"));
+  if (patchedTouchesServer) {
+    const serverIdx = steps.findIndex((s) => s.command === "cd server && npm test");
+    if (serverIdx > 0) {
+      const [serverStep] = steps.splice(serverIdx, 1);
+      const firstTestIdx = steps.findIndex((s) => s.kind === "test");
+      if (firstTestIdx === -1) {
+        steps.unshift(serverStep);
+      } else {
+        steps.splice(firstTestIdx, 0, serverStep);
+      }
+    }
+    // For backend-only patches, keep verification focused on server unit tests
+    // to avoid unrelated e2e/playwright noise.
+    const serverTestStep = steps.find((s) => s.command === "cd server && npm test");
+    const nonTestSteps = steps.filter((s) => s.kind !== "test");
+    if (serverTestStep) {
+      steps.length = 0;
+      steps.push(...nonTestSteps, serverTestStep);
+    }
+  }
+
+  if (!patchedTouchesServer && hasPytestSignals(input.repoPath, input.repoFiles)) {
     steps.push({
       kind: "test",
       command: "pytest -q",
       executable: getPytestExecutable(),
       args: ["-q"],
     });
+  }
+
+  if (
+    patched.some(isPatchedTypeScriptSourceFile) &&
+    !planAlreadyRunsTscNoEmit(steps)
+  ) {
+    const tscStep = buildTscNoEmitStep(input.repoPath);
+    if (tscStep) {
+      const firstTestIdx = steps.findIndex((s) => s.kind === "test");
+      if (firstTestIdx === -1) {
+        steps.push(tscStep);
+      } else {
+        steps.splice(firstTestIdx, 0, tscStep);
+      }
+    }
   }
 
   return steps;

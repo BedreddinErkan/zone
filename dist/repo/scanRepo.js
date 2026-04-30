@@ -18,7 +18,9 @@ async function scanRepo(targetPath) {
     const entries = await (0, fast_glob_1.default)([
         // JavaScript/TypeScript projects
         "client/src/**/*.{js,jsx,ts,tsx,css}",
+        "client/package.json",
         "server/**/*.{js,ts}",
+        "server/package.json",
         "src/**/*.{js,jsx,ts,tsx}",
         // Java projects
         "src/**/*.java",
@@ -76,7 +78,12 @@ async function scanRepo(targetPath) {
             "**/.agent-cache/**",
             "**/.agent-patches/**",
             "**/.agent-backups/**",
+            "**/venv/**",
+            "**/.venv/**",
+            "**/env/**",
             "**/__pycache__/**",
+            "**/*.pyc",
+            "**/site-packages/**",
             "**/.pytest_cache/**",
         ],
     });

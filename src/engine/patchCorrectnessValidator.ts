@@ -66,6 +66,10 @@ function stripCommentsForComparison(input: string): string {
   for (let i = 0; i < s.length; i += 1) {
     const ch = s[i] ?? "";
     const next = s[i + 1] ?? "";
+    const chCode = ch ? ch.charCodeAt(0) : -1;
+    const isAsciiSingleQuote = chCode === 39; // '
+    const isAsciiDoubleQuote = chCode === 34; // "
+    const isAsciiBacktick = chCode === 96; // `
 
     if (mode === "line") {
       if (ch === "\n") {
@@ -92,9 +96,9 @@ function stripCommentsForComparison(input: string): string {
         escaped = true;
         continue;
       }
-      if (mode === "single" && ch === "'") mode = "code";
-      if (mode === "double" && ch === '"') mode = "code";
-      if (mode === "template" && ch === "`") mode = "code";
+      if (mode === "single" && isAsciiSingleQuote) mode = "code";
+      if (mode === "double" && isAsciiDoubleQuote) mode = "code";
+      if (mode === "template" && isAsciiBacktick) mode = "code";
       continue;
     }
 
@@ -110,9 +114,9 @@ function stripCommentsForComparison(input: string): string {
       continue;
     }
     out += ch;
-    if (ch === "'") mode = "single";
-    if (ch === '"') mode = "double";
-    if (ch === "`") mode = "template";
+    if (isAsciiSingleQuote) mode = "single";
+    if (isAsciiDoubleQuote) mode = "double";
+    if (isAsciiBacktick) mode = "template";
   }
 
   return out;
@@ -247,6 +251,9 @@ function minimalBraceBracketBalance(
   let brackets = 0;
   for (let i = 0; i < content.length; i += 1) {
     const ch = content[i] ?? "";
+    if (!ch) continue;
+    const code = ch.charCodeAt(0);
+    if (code > 127) continue;
     if (ch === "{") braces += 1;
     else if (ch === "}") braces -= 1;
     else if (ch === "[") brackets += 1;
@@ -291,6 +298,10 @@ function analyzeDelimiterCounts(content: string): DelimiterCounts {
   let parensClose = 0;
   for (let i = 0; i < s.length; i += 1) {
     const ch = s[i] ?? "";
+    // Only count ASCII delimiters; non-ASCII characters (e.g. Turkish ş) are irrelevant to JS/TS syntax delimiters.
+    if (!ch) continue;
+    const code = ch.charCodeAt(0);
+    if (code > 127) continue;
     if (ch === "{") bracesOpen += 1;
     else if (ch === "}") bracesClose += 1;
     else if (ch === "[") bracketsOpen += 1;
@@ -562,6 +573,10 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
   for (let i = 0; i < s.length; i += 1) {
     const ch = s[i] ?? "";
     const next = s[i + 1] ?? "";
+    const chCode = ch ? ch.charCodeAt(0) : -1;
+    const isAsciiSingleQuote = chCode === 39; // '
+    const isAsciiDoubleQuote = chCode === 34; // "
+    const isAsciiBacktick = chCode === 96; // `
 
     if (mode === "jsx") {
       // In JSX tag scanning mode, ignore all delimiter tracking and all JS lexical modes.
@@ -612,8 +627,8 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
         escaped = true;
         continue;
       }
-      if (mode === "single" && ch === "'") mode = "code";
-      if (mode === "double" && ch === '"') mode = "code";
+      if (mode === "single" && isAsciiSingleQuote) mode = "code";
+      if (mode === "double" && isAsciiDoubleQuote) mode = "code";
       continue;
     }
 
@@ -703,19 +718,19 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
       continue;
     }
 
-    if (ch === "'") {
+    if (isAsciiSingleQuote) {
       pushEvent(i, ch, "mode_enter");
       mode = "single";
       writeStripped(" ");
       continue;
     }
-    if (ch === '"') {
+    if (isAsciiDoubleQuote) {
       pushEvent(i, ch, "mode_enter");
       mode = "double";
       writeStripped(" ");
       continue;
     }
-    if (ch === "`") {
+    if (isAsciiBacktick) {
       pushEvent(i, ch, "mode_enter");
       mode = "template";
       writeStripped(" ");
@@ -929,7 +944,11 @@ function layer0DiffSanity(input: PatchCorrectnessInput): PatchCorrectnessIssue[]
   const normalizedBefore = normalizeForSanityCompare(input.originalContent);
   const normalizedAfter = normalizeForSanityCompare(input.updatedContent);
 
-  if (normalizedBefore === normalizedAfter) {
+  // Only treat as a no-op when the patch truly changed zero lines.
+  // Normalization can collapse whitespace/comments and make legitimate additive-only patches
+  // appear identical, so guard with a raw line-diff check.
+  const rawCounts = fastDiffCounts(input.originalContent, input.updatedContent);
+  if (rawCounts.addedLines === 0 && rawCounts.removedLines === 0) {
     return [
       issue({
         layer: 0,
@@ -1146,13 +1165,59 @@ const BROKEN_IMPORT_LINE = /^\s*import\s*\{[^}]*$/m;
 const BROKEN_EXPORT_LINE = /^\s*export\s*\{[^}]*$/m;
 const UNTERMINATED_JSX_OPEN = /<[A-Z][A-Za-z0-9_]*\b[^>]*\n/;
 
+function stripStringLiteralsForHeuristics(src: string): string {
+  // Replace string literal contents with spaces so keyword heuristics don't fire on them.
+  // Handles: single quotes, double quotes, template strings; respects backslash escapes.
+  let out = "";
+  let mode: "'" | '"' | "`" | null = null;
+  let escaped = false;
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i] ?? "";
+    if (!mode) {
+      if (ch === "'" || ch === '"' || ch === "`") {
+        mode = ch as "'" | '"' | "`";
+        out += ch;
+        escaped = false;
+      } else {
+        out += ch;
+      }
+      continue;
+    }
+
+    // Inside string mode
+    if (escaped) {
+      // Preserve length while hiding content.
+      out += " ";
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      out += " ";
+      escaped = true;
+      continue;
+    }
+    if (ch === mode) {
+      out += ch;
+      mode = null;
+      escaped = false;
+      continue;
+    }
+    // Hide string content (including newlines if present in templates).
+    out += ch === "\n" ? "\n" : " ";
+  }
+  return out;
+}
+
 function layer2LanguageHeuristics(input: PatchCorrectnessInput): PatchCorrectnessIssue[] {
   if (!isJsLike(input.filePath)) return [];
 
   const issues: PatchCorrectnessIssue[] = [];
-  const src = input.updatedContent.replace(/\r\n/g, "\n");
+  // Normalize newlines for EOL heuristics. CRLF is common on Windows, but we also
+  // defensively collapse any stray CR characters to avoid false positives.
+  const src = input.updatedContent.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const srcNoStrings = stripStringLiteralsForHeuristics(src);
 
-  const inlineKeyword = src.match(INLINE_KEYWORD_IN_CALL);
+  const inlineKeyword = srcNoStrings.match(INLINE_KEYWORD_IN_CALL);
   if (inlineKeyword) {
     issues.push(
       issue({
