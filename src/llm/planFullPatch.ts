@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { debugLog, errorLog } from "../utils/logger.js";
 import {
   buildEmptyModelResponseDetailsLine,
   extractResponsesApiOutputText,
@@ -303,7 +304,7 @@ function buildFindReplaceFormatRetryPrompt(feedback: RetryFeedback): string {
   const hadNoop = feedback.issues.some((issue) => issue.code === "NOOP_DETECTED");
 
   if (needsHardPatchCorrection) {
-    console.log("[zone-patch-retry-attempt]", feedback.attempt);
+    debugLog("[zone-patch-retry-attempt]", feedback.attempt);
     console.warn("[zone-patch-retry] invalid format, retrying...", {
       attempt: feedback.attempt,
     });
@@ -545,7 +546,7 @@ export async function planFullPatchWithLlm(input: {
       : input.relatedContext;
 
   if (symbolCtx && targetFuncName) {
-    console.log("[zone-ast]", {
+    debugLog("[zone-ast]", {
       file: input.filePath,
       targetFunc: targetFuncName,
       lines: `${symbolCtx.targetFunction.startLine}-${symbolCtx.targetFunction.endLine}`,
@@ -668,7 +669,7 @@ export async function planFullPatchWithLlm(input: {
         findReplaceAttemptIndex += 1;
         const maxOutputTokens =
           [2000, 4096, 8192][Math.min(findReplaceAttemptIndex - 1, 2)] ?? 8192;
-        console.log(
+        debugLog(
           "[zone-patch-request] sending strict patch system instruction",
           JSON.stringify({
             filePath: input.filePath,
@@ -690,7 +691,7 @@ export async function planFullPatchWithLlm(input: {
         ];
 
         const callStartedAt = Date.now();
-        console.log(
+        debugLog(
           "[zone-openai-call-start]",
           JSON.stringify({
             filePath: input.filePath,
@@ -703,7 +704,7 @@ export async function planFullPatchWithLlm(input: {
         let response: unknown;
         try {
           // Streaming primary: chat completions tool-call argument deltas.
-          console.log("[zone-stream-start]", { filePath: input.filePath });
+          debugLog("[zone-stream-start]", { filePath: input.filePath });
           const controller = new AbortController();
           const timeout = setTimeout(() => {
             try { controller.abort(); } catch {}
@@ -786,7 +787,7 @@ export async function planFullPatchWithLlm(input: {
                     if (typeof patchText === "string" && patchText.length >= lastPatchLen) {
                       const deltaPiece = patchText.slice(lastPatchLen);
                       if (deltaPiece) {
-                        console.log("[zone-stream-delta]", { delta: deltaPiece.slice(0, 30) });
+                        debugLog("[zone-stream-delta]", { delta: deltaPiece.slice(0, 30) });
                         input.onProgress?.({
                           type: "patch_stream_delta",
                           filePath: input.filePath,
@@ -803,7 +804,7 @@ export async function planFullPatchWithLlm(input: {
               const contentFrag = (delta as { content?: string }).content;
               if (typeof contentFrag === "string" && contentFrag.length > 0) {
                 textAccum += contentFrag;
-                console.log("[zone-stream-delta]", { delta: contentFrag.slice(0, 30) });
+                debugLog("[zone-stream-delta]", { delta: contentFrag.slice(0, 30) });
                 input.onProgress?.({
                   type: "patch_stream_delta",
                   filePath: input.filePath,
@@ -882,7 +883,7 @@ export async function planFullPatchWithLlm(input: {
                   ].join("\n");
                 };
                 const snippet = buildPatchSnippet(toolPatch);
-                console.log("[zone-stream-delta]", {
+                debugLog("[zone-stream-delta]", {
                   filePath: input.filePath,
                   deltaLength: snippet.length,
                   preview: snippet.slice(0, 50),
@@ -904,8 +905,8 @@ export async function planFullPatchWithLlm(input: {
           const elapsedMs = Date.now() - callStartedAt;
           const p = formatOpenAiThrownErrorPayload(err);
           openAiTransportErrorDetails = JSON.stringify({ ...p, elapsedMs });
-          console.log(
-            "[zone-openai-call-error]",
+          errorLog(
+          "[zone-openai-call-error]",
             JSON.stringify({
               filePath: input.filePath,
               attempt: findReplaceAttemptIndex,
@@ -917,7 +918,7 @@ export async function planFullPatchWithLlm(input: {
               type: p.type,
             })
           );
-          console.log("[zone-stream-fallback]", { error: err instanceof Error ? err.message : String(err) });
+          debugLog("[zone-stream-fallback]", { error: err instanceof Error ? err.message : String(err) });
           // Fallback to non-streaming on any streaming failure.
           response = await client.createChatCompletion({
             model,
@@ -932,7 +933,7 @@ export async function planFullPatchWithLlm(input: {
         const elapsedMs = Date.now() - callStartedAt;
         openAiTransportErrorDetails = null;
         lastSuccessfulResponsesCreateResult = response;
-        console.log(
+        debugLog(
           "[zone-openai-call-success]",
           JSON.stringify({
             filePath: input.filePath,
@@ -956,9 +957,9 @@ export async function planFullPatchWithLlm(input: {
         const fromExtract = extraction.ok ? extraction.text.trim() : "";
         const rawForAttempt = fromTool || fromExtract;
 
-        console.log("[zone-gpt-raw]", rawForAttempt.slice(0, 500));
+        debugLog("[zone-gpt-raw]", rawForAttempt.slice(0, 500));
 
-        console.log(
+        debugLog(
           "[zone-patch-raw-response-debug]",
           JSON.stringify({
             filePath: input.filePath,
@@ -989,15 +990,15 @@ export async function planFullPatchWithLlm(input: {
               detailsLine,
             };
           }
-          console.log(
+          debugLog(
             "[zone-full-patch-empty-response]",
             JSON.stringify(emptyLog)
           );
         }
 
         if (fromTool) {
-          console.log("[zone-patch-tool] tool call received");
-          console.log("[zone-patch-tool] patch length:", fromTool.length);
+          debugLog("[zone-patch-tool] tool call received");
+          debugLog("[zone-patch-tool] patch length:", fromTool.length);
           return fromTool;
         }
 
@@ -1008,7 +1009,7 @@ export async function planFullPatchWithLlm(input: {
           return fromExtract;
         }
 
-        console.error("[zone-patch-tool] No structured patch returned");
+        errorLog("[zone-patch-tool] No structured patch returned");
         return "";
       },
       validate: (raw: string) => {
@@ -1022,7 +1023,7 @@ export async function planFullPatchWithLlm(input: {
           parsed && !parsed.noChangeNeeded
             ? (parsed.createContent !== undefined ? 1 : parsed.edits.length)
             : 0;
-        console.log("[zone-parse-result]", {
+        debugLog("[zone-parse-result]", {
           patchCount,
           rawSnippet: String(raw || "").slice(0, 200),
         });
@@ -1035,7 +1036,7 @@ export async function planFullPatchWithLlm(input: {
           return issues;
         }
         if (raw.includes("NO_CHANGE_NEEDED")) {
-          console.log(
+          debugLog(
             "[zone-noop-detected]",
             JSON.stringify({
               filePath: input.filePath,
@@ -1044,7 +1045,7 @@ export async function planFullPatchWithLlm(input: {
             })
           );
           if (findReplaceAttemptIndex < 2) {
-            console.log(
+            debugLog(
               "[zone-noop-retry]",
               JSON.stringify({ filePath: input.filePath, attempt: findReplaceAttemptIndex })
             );
@@ -1056,7 +1057,7 @@ export async function planFullPatchWithLlm(input: {
             });
             return issues;
           }
-          console.log(
+          debugLog(
             "[zone-noop-final]",
             JSON.stringify({ filePath: input.filePath, attempt: findReplaceAttemptIndex })
           );
@@ -1090,7 +1091,7 @@ export async function planFullPatchWithLlm(input: {
       input.fullOriginalFileContent ?? input.fileContent;
 
     if (!retryResult.ok) {
-      console.error(
+      errorLog(
         "[zone-patch] model failed to produce valid patch after retries"
       );
       if (openAiTransportErrorDetails !== null) {
@@ -1143,8 +1144,8 @@ export async function planFullPatchWithLlm(input: {
     }
 
     const rawText = retryResult.value;
-    console.log("[zone-patch-debug] raw model output:", rawText.slice(0, 500));
-    console.log("[zone-patch-debug-full]", rawText.slice(0, 500));
+    debugLog("[zone-patch-debug] raw model output:", rawText.slice(0, 500));
+    debugLog("[zone-patch-debug-full]", rawText.slice(0, 500));
     if (!isValidPatchResponse(rawText)) {
       const recoveredRaw = (lastRawPatchResponse || rawText).trim();
       if (recoveredRaw.length === 0) {
@@ -1205,7 +1206,7 @@ export async function planFullPatchWithLlm(input: {
     execute: async (currentPrompt: string) => {
       fullContentAttemptIndex += 1;
       const callStartedAt = Date.now();
-      console.log(
+      debugLog(
         "[zone-openai-call-start]",
         JSON.stringify({
           filePath: input.filePath,
@@ -1227,7 +1228,7 @@ export async function planFullPatchWithLlm(input: {
           : currentPrompt;
       try {
         // Streaming primary for full_content_json mode: stream content deltas directly.
-        console.log("[zone-stream-start]", { filePath: input.filePath });
+        debugLog("[zone-stream-start]", { filePath: input.filePath });
         const controller = new AbortController();
         const timeout = setTimeout(() => {
           try { controller.abort(); } catch {}
@@ -1278,7 +1279,7 @@ export async function planFullPatchWithLlm(input: {
             const contentFrag = chunk.choices?.[0]?.delta?.content;
             if (typeof contentFrag === "string" && contentFrag.length > 0) {
               rawAccum += contentFrag;
-              console.log("[zone-stream-delta]", { delta: contentFrag.slice(0, 30) });
+              debugLog("[zone-stream-delta]", { delta: contentFrag.slice(0, 30) });
               try {
                 // Emit only fullContent deltas (skip JSON wrapper) to avoid raw JSON in UI.
                 const fullContentSnap = tryExtractJsonStringValuePartial(rawAccum, "fullContent");
@@ -1315,7 +1316,7 @@ export async function planFullPatchWithLlm(input: {
         const elapsedMs = Date.now() - callStartedAt;
         const p = formatOpenAiThrownErrorPayload(err);
         openAiTransportErrorDetails = JSON.stringify({ ...p, elapsedMs });
-        console.log(
+        errorLog(
           "[zone-openai-call-error]",
           JSON.stringify({
             filePath: input.filePath,
@@ -1328,7 +1329,7 @@ export async function planFullPatchWithLlm(input: {
             type: p.type,
           })
         );
-        console.log("[zone-stream-fallback]", {
+        debugLog("[zone-stream-fallback]", {
           error: err instanceof Error ? err.message : String(err),
         });
         // Fallback to non-streaming on any streaming failure.
@@ -1343,7 +1344,7 @@ export async function planFullPatchWithLlm(input: {
       const elapsedMs = Date.now() - callStartedAt;
       openAiTransportErrorDetails = null;
       lastSuccessfulResponsesCreateResult = response;
-      console.log(
+      debugLog(
         "[zone-openai-call-success]",
         JSON.stringify({
           filePath: input.filePath,
@@ -1365,7 +1366,7 @@ export async function planFullPatchWithLlm(input: {
       const rawText = extraction.ok
         ? extraction.text
         : (r.output_text ?? "");
-      console.log("[zone-full-content-debug]", rawText?.slice(0, 500));
+      debugLog("[zone-full-content-debug]", rawText?.slice(0, 500));
       const jsonText = extractJson(rawText);
       return JSON.parse(stripJsonFences(jsonText)) as unknown;
     },

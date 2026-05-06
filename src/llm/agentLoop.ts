@@ -6,7 +6,7 @@ import { createLLMClient } from "./factory.js";
 import { recordExecution } from "../usage/usageTracker.js";
 import type { ProviderName } from "../usage/pricing.js";
 import { getRequestContext } from "./openaiContext.js";
-import { debugLog } from "../utils/debugLog.js";
+import { log, debugLog, errorLog } from "../utils/logger.js";
 import { parseVerificationError } from "../core/parseVerificationError.js";
 import { buildVerifyDiagnostic } from "../core/buildVerifyDiagnostic.js";
 import { maybeExpandScopeForVerifyDiagnostic } from "../tools/scopeGuard.js";
@@ -669,7 +669,7 @@ export function applyNoInfraVerificationOverride(input: {
     (input.verificationReason === "tests_inconclusive" ||
       input.verificationReason === "no_verification_attempted")
   ) {
-    console.log("[zone-agent-no-infra-override]", JSON.stringify({
+    debugLog("[zone-agent-no-infra-override]", JSON.stringify({
       triggeredBy: input.triggeredBy,
       originalVerdict: input.verificationReason,
       overriddenTo: "tests_skipped_no_infra",
@@ -770,7 +770,7 @@ export async function finalizeStaging(input: {
     withStagingTempFlush: input.withStagingTempFlush,
   });
 
-  console.log("[zone-staging-verification]", JSON.stringify({
+  debugLog("[zone-staging-verification]", JSON.stringify({
     status: verification.status,
     label: "label" in verification ? verification.label : null,
     durationMs: "durationMs" in verification ? verification.durationMs : null,
@@ -782,7 +782,7 @@ export async function finalizeStaging(input: {
   if (verification.status === "fail") {
     const discardedCount = input.stagingFiles.size;
     input.stagingFiles.clear();
-    console.log("[zone-staging-discard]", JSON.stringify({
+    debugLog("[zone-staging-discard]", JSON.stringify({
       reason: "verification_failed",
       discardedCount,
     }));
@@ -813,7 +813,7 @@ export async function finalizeStaging(input: {
   }
 
   if (allUnchanged && comparedCount > 0) {
-    console.log("[zone-staging-noop]", JSON.stringify({
+    debugLog("[zone-staging-noop]", JSON.stringify({
       stagedCount: input.stagingFiles.size,
       comparedCount,
     }));
@@ -855,7 +855,7 @@ export async function finalizeStaging(input: {
       } catch {
         diskContentMatches = false;
       }
-      console.log("[zone-staging-flush-write]", JSON.stringify({
+      debugLog("[zone-staging-flush-write]", JSON.stringify({
         filePath: abs,
         bytesWritten: content.length,
         mtimeBefore,
@@ -867,7 +867,7 @@ export async function finalizeStaging(input: {
         filesFlushed++;
       } else {
         flushFailures++;
-        console.error("[zone-staging-flush-error]", {
+        errorLog("[zone-staging-flush-error]", {
           filePath: abs,
           error: "post_write_content_mismatch",
           bytesExpected: content.length,
@@ -875,7 +875,7 @@ export async function finalizeStaging(input: {
       }
     } catch (err) {
       flushFailures++;
-      console.error("[zone-staging-flush-error]", {
+      errorLog("[zone-staging-flush-error]", {
         filePath: abs,
         error: String((err as Error).message ?? err),
       });
@@ -893,7 +893,7 @@ export async function finalizeStaging(input: {
       postFlushMismatches++;
     }
   }
-  console.log("[zone-staging-flush]", JSON.stringify({
+  debugLog("[zone-staging-flush]", JSON.stringify({
     filesFlushed,
     failures: flushFailures,
     totalStaged: input.stagingFiles.size,
@@ -914,7 +914,7 @@ export function inferVerificationFromLog(
 ): VerificationReason {
   const patchApplied = didApplyPatch(log);
   if (framework && !framework.hasTests && patchApplied) {
-    console.log("[zone-agent-no-infra-verdict]", JSON.stringify({
+    debugLog("[zone-agent-no-infra-verdict]", JSON.stringify({
       reason: "tests_skipped_no_infra",
       hasTests: false,
       testFilesDetected: framework.testFilesDetected,
@@ -1157,7 +1157,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const stagingFiles = new Map<string, string>();
 
   // Diagnostic: confirm agent loop entry and tool inventory
-  console.log("[zone-agent-loop-entry]", JSON.stringify({
+  debugLog("[zone-agent-loop-entry]", JSON.stringify({
     task: input.task.slice(0, 200),
     repoPath: input.repoPath,
     maxIterations: iterationBudget.maxIterationsForRun,
@@ -1436,7 +1436,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       const output = u?.completion_tokens ?? u?.output_tokens ?? 0;
       if (write > 0 || read > 0) {
         const ratio = read + write > 0 ? (read / (read + write + input)).toFixed(2) : "0.00";
-        console.log(
+        debugLog(
           `[zone-cache] iter=${iter + 1} write=${write} read=${read} input_uncached=${input} output=${output} hit_ratio=${ratio}`
         );
       }
@@ -1483,7 +1483,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         input.onToolCall?.(name, parsedArgs);
 
         // Diagnostic: log every tool call before execution
-        console.log("[zone-agent-tool-call]", JSON.stringify({
+        debugLog("[zone-agent-tool-call]", JSON.stringify({
           iter: iter + 1,
           tool: name,
           filePath: parsedArgs.filePath ?? null,
@@ -1502,7 +1502,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           const targetFilePath =
             typeof parsedArgs.filePath === "string" ? parsedArgs.filePath : null;
           if (targetFilePath && !wasFileReadOrWritten(toolCallLog, targetFilePath)) {
-            console.log("[zone-apply-patch-no-read-first]", JSON.stringify({
+            debugLog("[zone-apply-patch-no-read-first]", JSON.stringify({
               filePath: targetFilePath,
               iter: iter + 1,
               blocked: true,
@@ -1587,7 +1587,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         input.onToolResult?.(name, result);
 
         // Diagnostic: log every tool result after execution
-        console.log("[zone-agent-tool-result]", JSON.stringify({
+        debugLog("[zone-agent-tool-result]", JSON.stringify({
           iter: iter + 1,
           tool: name,
           success: result.success,
@@ -1723,7 +1723,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           diagnosticText +=
             `\n\n**Scope expanded**: \`${scopeExpansion.addedFile}\` has been added to the writable scope ` +
             `for this run because the verification parser pinned it as the failing file. Apply your patch directly.`;
-          console.log("[zone-scope-expanded]", JSON.stringify({
+          debugLog("[zone-scope-expanded]", JSON.stringify({
             runId: input.runId ?? null,
             addedFile: scopeExpansion.addedFile,
             reason: scopeExpansion.reason,
@@ -1744,7 +1744,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           }
         );
         const remaining = MAX_SELF_CORRECTION_ATTEMPTS - selfCorrectionAttempts;
-        console.log("[zone-agent-self-correct]", JSON.stringify({
+        debugLog("[zone-agent-self-correct]", JSON.stringify({
           iter: iter + 1,
           trigger: failedToolName === "run_command" ? "test_failed" : failedToolName,
           routedTrigger,
@@ -1761,7 +1761,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           willRetry: true,
           reason: "routed_coaching_prompt_injected",
         }));
-        console.log("[zone-agent-diagnostic]", JSON.stringify({
+        debugLog("[zone-agent-diagnostic]", JSON.stringify({
           attempt: selfCorrectionAttempts,
           failingFile: diagnostic.parsed?.failingFile ?? null,
           failingLine: diagnostic.parsed?.failingLine ?? null,
@@ -1794,7 +1794,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         const perFileAttempt = routedFilePath
           ? failureHistory.get(routedFilePath)?.length ?? 0
           : 0;
-        console.log("[zone-agent-self-correct]", JSON.stringify({
+        debugLog("[zone-agent-self-correct]", JSON.stringify({
           iter: iter + 1,
           trigger: failedToolName === "run_command" ? "test_failed" : failedToolName,
           routedTrigger,
@@ -1845,7 +1845,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             overriddenTo: verificationReason,
             reason: passedValidation.reason,
           }));
-          console.log("[zone-agent-verdict-override]", JSON.stringify({
+          debugLog("[zone-agent-verdict-override]", JSON.stringify({
             triggeredBy: "natural_completion",
             originalVerdict: "tests_passed",
             overriddenTo: verificationReason,
@@ -1863,7 +1863,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         });
         if (!verdictValidation.accept) {
           verificationReason = verdictValidation.demoteTo ?? "tests_inconclusive";
-          console.log("[zone-agent-verdict-override]", JSON.stringify({
+          debugLog("[zone-agent-verdict-override]", JSON.stringify({
             triggeredBy: "natural_completion",
             originalVerdict: "tests_failed_unrelated",
             overriddenTo: verdictValidation.demoteTo,
@@ -1878,7 +1878,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           // `tests_passed` so the UI doesn't render a "tests failed" chip
           // alongside a "safe to apply" badge.
           verificationReason = "tests_passed";
-          console.log("[zone-agent-verdict-promote]", JSON.stringify({
+          debugLog("[zone-agent-verdict-promote]", JSON.stringify({
             triggeredBy: "natural_completion",
             originalVerdict: "tests_failed_unrelated",
             promotedTo: "tests_passed",
@@ -1901,13 +1901,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         verificationReason === 'tests_passed' ||
         verificationReason === 'tests_skipped_no_infra' ||
         verificationReason === 'tests_failed_unrelated';
-      console.log("[zone-staging-state]", JSON.stringify({
+      debugLog("[zone-staging-state]", JSON.stringify({
         stagedFileCount: stagingFiles.size,
         stagedFiles: Array.from(stagingFiles.keys()).map((abs) => path.basename(abs)),
         // staging-flush-bug diag: full absolute paths surface symlink/realpath drift
         stagedAbsPaths: Array.from(stagingFiles.keys()),
       }));
-      console.log("[zone-agent-final-assessment]", JSON.stringify({
+      log("[zone-agent-final-assessment]", JSON.stringify({
         triggeredBy: "natural_completion",
         verificationReason,
         patchValidatedByAgent,
@@ -2027,7 +2027,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
                 overriddenTo: finalVerificationReason,
                 reason: passedValidation.reason,
               }));
-              console.log("[zone-agent-verdict-override]", JSON.stringify({
+              debugLog("[zone-agent-verdict-override]", JSON.stringify({
                 triggeredBy: "max_iterations",
                 originalVerdict: "tests_passed",
                 overriddenTo: finalVerificationReason,
@@ -2046,7 +2046,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             if (!verdictValidation.accept) {
               finalVerificationReason =
                 verdictValidation.demoteTo ?? "tests_inconclusive";
-              console.log("[zone-agent-verdict-override]", JSON.stringify({
+              debugLog("[zone-agent-verdict-override]", JSON.stringify({
                 triggeredBy: "max_iterations",
                 originalVerdict: "tests_failed_unrelated",
                 overriddenTo: verdictValidation.demoteTo,
@@ -2058,7 +2058,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             ) {
               // Bug 44b: see natural_completion site for rationale.
               finalVerificationReason = "tests_passed";
-              console.log("[zone-agent-verdict-promote]", JSON.stringify({
+              debugLog("[zone-agent-verdict-promote]", JSON.stringify({
                 triggeredBy: "max_iterations",
                 originalVerdict: "tests_failed_unrelated",
                 promotedTo: "tests_passed",
@@ -2088,11 +2088,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     finalVerificationReason === "tests_skipped_no_infra" ||
     finalVerificationReason === "tests_failed_unrelated";
 
-  console.log("[zone-staging-state]", JSON.stringify({
+  debugLog("[zone-staging-state]", JSON.stringify({
     stagedFileCount: stagingFiles.size,
     stagedFiles: Array.from(stagingFiles.keys()).map((abs) => path.basename(abs)),
   }));
-  console.log("[zone-agent-final-assessment]", JSON.stringify({
+  log("[zone-agent-final-assessment]", JSON.stringify({
     triggeredBy: "max_iterations",
     finalVerificationReason,
     inferredFrom,

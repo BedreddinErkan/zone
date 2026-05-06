@@ -98,8 +98,7 @@ import {
   upsertActiveRun,
 } from "../billing/activeRunsRepository.js";
 import { indexRepoFiles } from "../embeddings/indexRepository.js";
-import { LOG_LEVEL, logger } from "../utils/logger.js";
-import { debugLog } from "../utils/debugLog.js";
+import { LOG_LEVEL, logger, log, debugLog, errorLog } from "../utils/logger.js";
 export const app = express();
 /** Active /api/patch runs — cancelled via POST /api/cancel (AbortSignal → runLlmPatchFlow). */
 const activePatchRunAbortControllers = new Map<string, AbortController>();
@@ -463,11 +462,11 @@ function shouldProxyHostedRequest(
 
 function logStartupDiagnostics(): void {
   const mode = getInferenceMode();
-  console.log(`[zone] inference mode: ${mode}`);
+  log(`[zone] inference mode: ${mode}`);
 
   if (mode === "hosted") {
     const hostedBaseUrl = getHostedInferenceBaseUrl();
-    console.log(`[zone] hosted inference base URL: ${hostedBaseUrl}`);
+    log(`[zone] hosted inference base URL: ${hostedBaseUrl}`);
     if (hostedBaseUrl === "https://zonecli.dev") {
       console.warn(
         "[zone] Warning: default hosted target https://zonecli.dev must serve the real Zone product API routes for full hosted role support."
@@ -479,7 +478,7 @@ function logStartupDiagnostics(): void {
   const hasOpenAiKey =
     typeof process.env.OPENAI_API_KEY === "string" &&
     process.env.OPENAI_API_KEY.trim().length > 0;
-  console.log(
+  log(
     `[zone] local inference OPENAI_API_KEY: ${hasOpenAiKey ? "present" : "missing"}`
   );
 
@@ -734,7 +733,7 @@ async function handleCheckAccess(req: express.Request, res: express.Response): P
   const repoPath =
     typeof req.query.repoPath === "string" ? req.query.repoPath : undefined;
   const role = typeof req.query.role === "string" ? req.query.role : undefined;
-  console.log("[zone-billing-debug] preflight check start", {
+  debugLog("[zone-billing-debug] preflight check start", {
     routeName: "/api/check-access",
     userId: userId || null,
     billingMode: billingMode ?? null,
@@ -751,7 +750,7 @@ async function handleCheckAccess(req: express.Request, res: express.Response): P
     }
   );
   if (authorization.allowed) {
-    console.log("[zone-billing-debug] preflight check allowed", {
+    debugLog("[zone-billing-debug] preflight check allowed", {
       routeName: "/api/check-access",
       userId: userId || null,
       billingMode: billingMode ?? null,
@@ -759,7 +758,7 @@ async function handleCheckAccess(req: express.Request, res: express.Response): P
     res.json({ ok: true });
     return;
   }
-  console.log("[zone-billing-debug] preflight check blocked", {
+  debugLog("[zone-billing-debug] preflight check blocked", {
     routeName: "/api/check-access",
     userId: userId || null,
     billingMode: billingMode ?? null,
@@ -774,7 +773,7 @@ async function handleBillingSummary(
   res: express.Response
 ): Promise<void> {
   const userId = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
-  console.log(`[zone] billing-summary: userId=${userId || "missing"}`);
+  debugLog(`[zone] billing-summary: userId=${userId || "missing"}`);
   if (!userId) {
     res.json({ ok: false, reason: "missing_user" });
     return;
@@ -804,7 +803,7 @@ async function handleBillingSummary(
       };
     };
   };
-    console.log(
+    debugLog(
       `[zone] billing-summary: querying profiles where clerk_user_id=${userId}`
     );
     const query = profilesTable
@@ -818,7 +817,7 @@ async function handleBillingSummary(
   }
   try {
     const { data, error } = await query.maybeSingle();
-    console.log("[zone-billing-summary-debug] raw profile row", {
+    debugLog("[zone-billing-summary-debug] raw profile row", {
       userId,
       data,
       error:
@@ -882,7 +881,7 @@ async function handleBillingSummary(
       subscriptionStatus: status,
       billing_mode: billingMode,
     };
-    console.log("[zone-billing-summary-debug] resolved token credits", {
+    debugLog("[zone-billing-summary-debug] resolved token credits", {
       userId,
       tokenCreditsUsed,
       tokenCreditsLimit,
@@ -894,7 +893,7 @@ async function handleBillingSummary(
       subscriptionStatus: status,
       billingMode,
     });
-    console.log("[zone-billing-summary-debug] final response payload", responsePayload);
+    debugLog("[zone-billing-summary-debug] final response payload", responsePayload);
     res.json(responsePayload);
   } catch {
     res.json({ ok: false, reason: "profile_unavailable" });
@@ -1113,7 +1112,7 @@ async function ensureRunAuthorized(
       tokenCreditsUsed,
       tokenCreditsLimit,
     });
-    console.log("[zone-billing-debug] authorization resolved", {
+    debugLog("[zone-billing-debug] authorization resolved", {
       routeName: "ensureRunAuthorized",
       userId: authenticatedUserId,
       billingMode: resolvedBillingMode,
@@ -1538,7 +1537,7 @@ app.get("/api/active-runs", async (req, res) => {
   try {
     const runs = await getActiveRunsByUser(userId);
     logger.info("[active-runs] poll, count=%d, staleCount=%d", runs.length, runs.filter((run) => run.status !== "running").length);
-    console.log("[resume-debug] /api/active-runs", {
+    debugLog("[resume-debug] /api/active-runs", {
       rawUserId: rawUserId || null,
       effectiveUserId: userId,
       count: runs.length,
@@ -1711,7 +1710,7 @@ app.post("/api/runs/:runId/undo", async (req, res) => {
       res.status(404).json({ error: "no snapshot for this run" });
       return;
     }
-    console.error("[zone-undo-error]", msg);
+    errorLog("[zone-undo-error]", msg);
     res.status(500).json({ error: "undo failed", detail: msg });
   }
 });
@@ -2039,7 +2038,7 @@ app.get("/api/usage", async (req, res) => {
     const usage = await getUsage(userId, period);
     res.json(usage);
   } catch (err) {
-    console.error("[zone] /api/usage failed", err);
+    errorLog("[zone] /api/usage failed", err);
     res.status(500).json({ ok: false, reason: "usage_read_failed" });
   }
 });
@@ -2570,7 +2569,7 @@ app.post("/api/patch", async (req, res) => {
     lastChangedFiles,
     lastAddedFunctions,
   } = req.body ?? {};
-  console.log("[debug-mem] received lastChangedFiles:", lastChangedFiles);
+  debugLog("[debug-mem] received lastChangedFiles:", lastChangedFiles);
   const hostedContext =
     process.env.NODE_ENV === "production"
       ? hostedContextFromBody
@@ -2787,7 +2786,7 @@ app.post("/api/patch", async (req, res) => {
           ? lastAddedFunctions
           : null,
       });
-      console.log("[resume-debug] upsertActiveRun running", {
+      debugLog("[resume-debug] upsertActiveRun running", {
         runId: runIdStr,
         userId,
         threadId: threadIdForRun,
@@ -2898,7 +2897,7 @@ app.post("/api/patch", async (req, res) => {
           ? result.developerConfidence
           : 0;
 
-      console.log("[zone-billing-debug] execution success reached", {
+      debugLog("[zone-billing-debug] execution success reached", {
         routeName: "/api/patch",
         userId: typeof userId === "string" ? userId.trim() : null,
         billingMode: billingMode ?? null,
@@ -3158,7 +3157,7 @@ if (result.applyPatches.length > 0) {
       ? result.developerConfidence
       : 0;
 
-  console.log("[zone-billing-debug] execution success reached", {
+  debugLog("[zone-billing-debug] execution success reached", {
     routeName: "/api/dry-run",
     userId: typeof userId === "string" ? userId.trim() : null,
     billingMode: billingMode ?? null,
@@ -3222,7 +3221,7 @@ async function buildSuggestedVerification(
 
 app.post("/api/apply", async (req, res) => {
   const { patches, repoPath } = req.body;
-  console.log("[zone-apply-input]", {
+  debugLog("[zone-apply-input]", {
     repoPath,
     patchCount: Array.isArray(patches) ? patches.length : null,
   });
@@ -3231,7 +3230,7 @@ app.post("/api/apply", async (req, res) => {
     let suggestedVerification: SuggestedVerification = { available: false };
     if (result.applied.length > 0 && typeof repoPath === "string") {
       suggestedVerification = await buildSuggestedVerification(repoPath);
-      console.log(
+      debugLog(
         `[zone-verify-suggest] command="${suggestedVerification.command ?? ""}" available=${suggestedVerification.available}`
       );
     }
@@ -3239,12 +3238,12 @@ app.post("/api/apply", async (req, res) => {
       ...result,
       suggestedVerification,
     };
-    console.log(
+    debugLog(
       `[zone-apply] suggestedVerification available=${suggestedVerification.available} command="${suggestedVerification.command ?? ""}"`
     );
     res.json(responseBody);
   } catch (err) {
-    console.log(
+    debugLog(
       "[zone-apply-error]",
       (err as any)?.message,
       (err as any)?.code,
@@ -3267,7 +3266,7 @@ app.post("/api/suggest-verification", async (req, res) => {
   const suggestedVerification = await buildSuggestedVerification(repoPath, {
     includeRepoPath: true,
   });
-  console.log(
+  debugLog(
     `[zone-verify-suggest] command="${suggestedVerification.command ?? ""}" available=${suggestedVerification.available}`
   );
   res.json({ ok: true, suggestedVerification });
@@ -3301,7 +3300,7 @@ app.post("/api/run-verification", async (req, res) => {
       repoPath,
       command: detectedCommand,
     });
-    console.log(
+    debugLog(
       `[zone-verify-run] command="${detectedCommand.command}" status=${verification.status}`
     );
     res.json({ ok: true, verification });
@@ -3347,7 +3346,7 @@ app.post("/api/refine-prompt", async (req, res) => {
         relevantFiles,
         plan,
       });
-      console.log(
+      debugLog(
         `[zone-refine] prompt refined role=${role || "developer"} reason=${reason || "unspecified"}`
       );
       res.json({ ok: true, refinedPrompt });
@@ -3475,7 +3474,7 @@ if (result.ok && result.applyPatches) {
 }
     if (result.ok) {
 const normalizedUserId = typeof userId === "string" ? userId.trim() : null;
-console.log("[zone-billing-debug] execution success reached", {
+debugLog("[zone-billing-debug] execution success reached", {
   routeName: "/api/test-engineer",
   userId: normalizedUserId,
   billingMode: billingMode ?? null,
@@ -3577,7 +3576,7 @@ const result = await runDataAnalystFlow({
     }
     if (result.ok) {
   const normalizedUserId = typeof userId === "string" ? userId.trim() : null;
-  console.log("[zone-billing-debug] execution success reached", {
+  debugLog("[zone-billing-debug] execution success reached", {
     routeName: "/api/data-analyst",
     userId: normalizedUserId,
     billingMode: billingMode ?? null,
@@ -3625,10 +3624,10 @@ export async function startServer(port = 3000): Promise<void> {
   logStartupDiagnostics();
   startPromise = new Promise<void>((resolve) => {
     app.listen(port, () => {
-      console.log(
+      log(
         colorize(`Zone UI running on http://localhost:${port}`, "\x1b[32m", "\x1b[1m")
       );
-      console.log(colorize("Press Ctrl+C to stop", "\x1b[2m", "\x1b[90m"));
+      log(colorize("Press Ctrl+C to stop", "\x1b[2m", "\x1b[90m"));
       resolve();
     });
   });

@@ -4,6 +4,7 @@ import {
   getAllEmbeddingsForRepo,
   upsertEmbedding,
 } from "./embeddingsRepository.js";
+import { debugLog, errorLog } from "../utils/logger.js";
 
 type RepoFileInput = {
   path: string;
@@ -34,7 +35,7 @@ export async function indexRepoFiles(args: IndexRepoFilesArgs): Promise<{
   const startedAt = Date.now();
   const files = Array.isArray(args.files) ? args.files : [];
 
-  console.log("[zone-embed-index-start]", {
+  debugLog("[zone-embed-index-start]", {
     repoPath: args.repoPath,
     fileCount: files.length,
   });
@@ -65,7 +66,7 @@ export async function indexRepoFiles(args: IndexRepoFilesArgs): Promise<{
   for (let batchIndex = 0; batchIndex < chunks.length; batchIndex += 1) {
     const chunk = chunks[batchIndex] ?? [];
     const batchStartedAt = Date.now();
-    console.log("[zone-embed-batch-start]", {
+    debugLog("[zone-embed-batch-start]", {
       batchIndex,
       batchSize: chunk.length,
       fileNames: chunk.map((file) => file.path),
@@ -80,7 +81,7 @@ export async function indexRepoFiles(args: IndexRepoFilesArgs): Promise<{
           batchSucceeded += 1;
           done += 1;
           args.onProgress?.(done, files.length);
-          console.log("[zone-embed-index-progress]", {
+          debugLog("[zone-embed-index-progress]", {
             done,
             total: files.length,
             lastFile: file.path,
@@ -92,7 +93,7 @@ export async function indexRepoFiles(args: IndexRepoFilesArgs): Promise<{
         try {
           const embedding = await embedText(buildEmbedInput(file.path, file.content));
           if (embedding === null) {
-            console.log("[zone-embed-index-progress]", {
+            debugLog("[zone-embed-index-progress]", {
               done: done + 1,
               total: files.length,
               lastFile: file.path,
@@ -109,7 +110,7 @@ export async function indexRepoFiles(args: IndexRepoFilesArgs): Promise<{
           });
           embedded += 1;
           batchSucceeded += 1;
-          console.log("[zone-embed-index-progress]", {
+          debugLog("[zone-embed-index-progress]", {
             done: done + 1,
             total: files.length,
             lastFile: file.path,
@@ -129,13 +130,13 @@ export async function indexRepoFiles(args: IndexRepoFilesArgs): Promise<{
               ? errorRecord.message
               : String(error);
           if (message.includes("timed out")) {
-            console.error("[zone-embed-timeout]", {
+            errorLog("[zone-embed-timeout]", {
               filePath: file.path,
               stage: "indexRepoFiles",
               error: message,
             });
           }
-          console.error("[zone-embed-error]", {
+          errorLog("[zone-embed-error]", {
             filePath: file.path,
             error: message,
             code: errorRecord?.code,
@@ -147,7 +148,7 @@ export async function indexRepoFiles(args: IndexRepoFilesArgs): Promise<{
         }
       })
     );
-    console.log("[zone-embed-batch-end]", {
+    debugLog("[zone-embed-batch-end]", {
       batchIndex,
       succeeded: batchSucceeded,
       failed: batchFailed,
@@ -155,7 +156,7 @@ export async function indexRepoFiles(args: IndexRepoFilesArgs): Promise<{
     });
   }
 
-  console.log("[zone-embed-index-done]", {
+  debugLog("[zone-embed-index-done]", {
     embedded,
     cacheHits,
     deleted: deletedPaths.length,

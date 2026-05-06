@@ -82,8 +82,7 @@ import {
   matchSimilarFiles,
 } from "../embeddings/embeddingsRepository.js";
 import { indexRepoFiles } from "../embeddings/indexRepository.js";
-import { logger } from "../utils/logger.js";
-import { debugLog } from "../utils/debugLog.js";
+import { logger, debugLog, errorLog } from "../utils/logger.js";
 
 export type LlmPatchFlowResult =
   | {
@@ -2363,7 +2362,7 @@ const REWRITE_SUSPICION_MIN_TOTAL_LINES = 20;
 const REWRITE_SUSPICION_MIN_CHANGED_LINES = 20;
 
 function logRiskDebug(label: string, payload: Record<string, unknown>): void {
-  console.log(`[zone-debug] ${label}: ${JSON.stringify(payload)}`);
+  debugLog(`[zone-debug] ${label}: ${JSON.stringify(payload)}`);
 }
 
 export function analyzePatchScope(input: {
@@ -3397,7 +3396,7 @@ function applyDeveloperPatchText(
   rawPatchText: string,
   options?: { filePath?: string }
 ): { ok: true; fullContent: string } | { ok: false; warning: string } {
-  console.log("[zone-patch-raw]", rawPatchText.slice(0, 1000));
+  debugLog("[zone-patch-raw]", rawPatchText.slice(0, 1000));
   const trimmedPatch = rawPatchText.trim();
   if (
     trimmedPatch !== "NO_CHANGE_NEEDED" &&
@@ -3421,7 +3420,7 @@ function applyDeveloperPatchText(
         "[invalid_patch_format] Model response could not be parsed into a valid patch",
     };
   }
-  console.log("[zone-patch-protocol-parsed]");
+  debugLog("[zone-patch-protocol-parsed]");
 
   if (parsed.createContent !== undefined) {
     if (currentContent.trim()) {
@@ -3444,11 +3443,11 @@ function applyDeveloperPatchText(
     const normalizedContent = updatedContent.replace(/\r\n/g, "\n");
     const normalizedFind = edit.find.replace(/\r\n/g, "\n");
 
-    console.log(
+    debugLog(
       "[zone-find-debug] FIND block first 200 chars:",
       edit.find.slice(0, 200)
     );
-    console.log(
+    debugLog(
       "[zone-find-debug] File contains match:",
       normalizedContent.includes(normalizedFind)
     );
@@ -3461,7 +3460,7 @@ function applyDeveloperPatchText(
       };
     }
     if (isInstructionLikeFindBlock(edit.find)) {
-      console.log("[zone-patch-protocol-leak-blocked]");
+      debugLog("[zone-patch-protocol-leak-blocked]");
       return {
         ok: false,
         warning:
@@ -3490,7 +3489,7 @@ function applyDeveloperPatchText(
 
     if (!isPureAddition && findLinesNonEmpty <= 2 && replaceLineCount > 20) {
       const filePath = options?.filePath ?? "(unknown)";
-      console.log(
+      debugLog(
         "[zone-anchor-too-small-blocked]",
         JSON.stringify({
           filePath,
@@ -3516,7 +3515,7 @@ function applyDeveloperPatchText(
     const findCountRaw = countOccurrences(normalizedContent, normalizedFind);
     const lineEnding = originalLineEnding;
     const preservedBefore = lineEnding === "\r\n" ? !containsLoneLf(updatedContent) : true;
-    console.log(
+    debugLog(
       "[zone-patch-match-count]",
       JSON.stringify({ raw: findCountRaw })
     );
@@ -3527,7 +3526,7 @@ function applyDeveloperPatchText(
 
     const nextContent = fuzzyFindAndReplace(normalizedContent, normalizedFind, edit.replace.replace(/\r\n/g, "\n"));
     if (!nextContent.success) {
-      console.log(
+      debugLog(
         "[zone-patch-apply-mode]",
         nextContent.reason === "ambiguous_match" ? "failed" : "failed"
       );
@@ -3557,19 +3556,19 @@ function applyDeveloperPatchText(
       }
     }
     const mode = findCountRaw === 1 ? "exact" : nextContent.score >= 99 ? "exact" : "fuzzy";
-    console.log("[zone-patch-apply-mode]", mode);
+    debugLog("[zone-patch-apply-mode]", mode);
     const preservedAfter =
       lineEnding === "\r\n" ? !containsLoneLf(nextContent.content) : true;
-    console.log(
+    debugLog(
       "[zone-patch-line-ending-preserved]",
       preservedBefore && preservedAfter
     );
-    console.log(
+    debugLog(
       "[zone-patch-localized-change-lines]",
       countChangedLinesLocalized(updatedContent, nextContent.content)
     );
     if (containsPatchProtocolMarkers(nextContent.content)) {
-      console.log("[zone-patch-protocol-leak-blocked]");
+      debugLog("[zone-patch-protocol-leak-blocked]");
       return {
         ok: false,
         warning:
@@ -3734,7 +3733,7 @@ function findSubmitHandlerBlock(fileContent: string): {
     const start = match.index;
     const endExclusive = balanced.endExclusive;
     const block = fileContent.slice(start, endExclusive);
-    console.log("[zone-fallback-detect] handler matched via pattern:", patternName);
+    debugLog("[zone-fallback-detect] handler matched via pattern:", patternName);
     return { start, endExclusive, block };
   };
 
@@ -3799,7 +3798,7 @@ function findSubmitHandlerBlock(fileContent: string): {
   }
 
   if (bestHeuristic) {
-    console.log("[zone-fallback-detect] fallback heuristic used");
+    debugLog("[zone-fallback-detect] fallback heuristic used");
     return {
       start: bestHeuristic.start,
       endExclusive: bestHeuristic.endExclusive,
@@ -3807,7 +3806,7 @@ function findSubmitHandlerBlock(fileContent: string): {
     };
   }
 
-  console.log("[zone-fallback-detect] handler NOT found");
+  debugLog("[zone-fallback-detect] handler NOT found");
   return null;
 }
 
@@ -4125,7 +4124,7 @@ function logPatchConversionDebug(input: {
     return;
   }
 
-  console.log(
+  debugLog(
     "[zone-patch-conversion]",
     JSON.stringify({
       filePath: input.filePath,
@@ -4435,7 +4434,7 @@ export async function runLlmPatchFlow(input: {
 
   const perf = startZoneApiPerfRun(input.perfLabel ?? "runLlmPatchFlow");
 
-  console.log("[zone-flow-entry]", JSON.stringify({
+  debugLog("[zone-flow-entry]", JSON.stringify({
     task: (input.task ?? "").slice(0, 150),
     repoPath: input.repoPath,
     hasLastChangedFiles: Array.isArray(input.lastChangedFiles),
@@ -4463,7 +4462,7 @@ export async function runLlmPatchFlow(input: {
   const zoneInternalTask = detectZoneInternalTask(input.task);
 
   if (zoneInternalTask) {
-    console.log("[zone-flow-early-return]", JSON.stringify({ reason: "zone_internal_task", task: (input.task ?? "").slice(0, 150) }));
+    debugLog("[zone-flow-early-return]", JSON.stringify({ reason: "zone_internal_task", task: (input.task ?? "").slice(0, 150) }));
     notifyProgress("Ready", {
       type: "run_completed",
       message: "Run finished (Zone internal task — no patch).",
@@ -4528,7 +4527,7 @@ export async function runLlmPatchFlow(input: {
   let allFiles: RepoFile[] = [];
   let fileSource: "scanRepo" | "hosted" | "empty" = "empty";
 
-  console.log(
+  debugLog(
     "[zone-diag-repoPath-input]",
     JSON.stringify({
       repoPath: input.repoPath,
@@ -4565,7 +4564,7 @@ export async function runLlmPatchFlow(input: {
     fileSource = "hosted";
   }
 
-  console.log(
+  debugLog(
     "[zone-diag-scan]",
     JSON.stringify({
       repoPath: input.repoPath,
@@ -4578,7 +4577,7 @@ export async function runLlmPatchFlow(input: {
 
   perf.mark("repo scan ready");
   if (!input.hostedContext && allFiles.length === 0 && !isHostedEnvironment()) {
-    console.log("[zone-flow-early-return]", JSON.stringify({ reason: "repo_not_accessible", repoPath: input.repoPath, fileSource }));
+    debugLog("[zone-flow-early-return]", JSON.stringify({ reason: "repo_not_accessible", repoPath: input.repoPath, fileSource }));
     perf.finish("repo access blocked");
     notifyProgress("Ready", {
       type: "tooling_issue",
@@ -4624,7 +4623,7 @@ export async function runLlmPatchFlow(input: {
   if (explicitTargetPath) {
     explicitTargetRepoFile = resolveExplicitTarget(allFiles, explicitTargetPath);
     if (!explicitTargetRepoFile) {
-      console.log("[zone-flow-early-return]", JSON.stringify({ reason: "explicit_target_not_found_pre_agent", path: explicitTargetPath }));
+      debugLog("[zone-flow-early-return]", JSON.stringify({ reason: "explicit_target_not_found_pre_agent", path: explicitTargetPath }));
       notifyProgress("Ready", {
         type: "patch_generation_failed",
         message: `Explicit target file is not in the raw repository file list: ${explicitTargetPath}`,
@@ -4687,7 +4686,7 @@ export async function runLlmPatchFlow(input: {
         finalRunReport: explicitEarlyReport,
       };
     }
-    console.log("[zone-explicit-target-found]", explicitTargetRepoFile.path);
+    debugLog("[zone-explicit-target-found]", explicitTargetRepoFile.path);
     emitStructuredProgress({
       type: "reading_file",
       title: "Reading target file",
@@ -4753,7 +4752,7 @@ export async function runLlmPatchFlow(input: {
     }
   }
 
-  console.log(
+  debugLog(
     "[zone-framework]",
     JSON.stringify({
       framework: framework.framework,
@@ -4775,7 +4774,7 @@ export async function runLlmPatchFlow(input: {
   // Agentic tool loop execution mode (tool calling + direct writes).
   const _useAgentLoop = shouldUseAgentLoop(input.task);
   const _forceFlowEnv = String(process.env["ZONE_FORCE_FLOW"] || "").trim().toLowerCase() || null;
-  console.log("[zone-flow-branch]", JSON.stringify({
+  debugLog("[zone-flow-branch]", JSON.stringify({
     branch: _useAgentLoop ? "agent_loop" : "plan_full_patch",
     task: input.task.slice(0, 200),
     reason: _forceFlowEnv
@@ -4832,8 +4831,8 @@ export async function runLlmPatchFlow(input: {
           repoSummary: projectSummary,
           relevantFiles: agentLoopPlanFiles,
         });
-        console.log(`[zone-plan] generated steps=${executionPlan.steps.length} (agent_loop)`);
-        console.log(`[zone-plan] scope=${executionPlan.scopeSummary}`);
+        debugLog(`[zone-plan] generated steps=${executionPlan.steps.length} (agent_loop)`);
+        debugLog(`[zone-plan] scope=${executionPlan.scopeSummary}`);
       } catch (err) {
         console.warn(
           `[zone-plan] skipped (agent_loop): ${err instanceof Error ? err.message : String(err)}`
@@ -4844,7 +4843,7 @@ export async function runLlmPatchFlow(input: {
     {
       const planStepCount = executionPlan?.steps.length ?? 0;
       const isComplexTask = executionPlan != null && planStepCount >= 2;
-      console.log("[zone-plan-debug]", {
+      debugLog("[zone-plan-debug]", {
         planStepCount,
         isComplexTask,
         branch: "agent_loop",
@@ -5003,7 +5002,7 @@ export async function runLlmPatchFlow(input: {
     const _allExtractedSymbols = _importContextEnabled ? _extractAllSymbols(input.task) : [];
 
     if (!_importContextEnabled) {
-      console.log("[zone-import-context]", JSON.stringify({
+      debugLog("[zone-import-context]", JSON.stringify({
         enabled: false,
         reason: "default_off",
         primaryFile: null,
@@ -5071,7 +5070,7 @@ export async function runLlmPatchFlow(input: {
         _resolveReason = "resolve_error:" + String(_resolveErr).slice(0, 100);
       }
 
-      console.log("[zone-import-context-resolve]", JSON.stringify({
+      debugLog("[zone-import-context-resolve]", JSON.stringify({
         taskPreview: input.task.slice(0, 120),
         extractedSymbols: _allExtractedSymbols,
         chosenSymbol: _importContextSymbol,
@@ -5081,7 +5080,7 @@ export async function runLlmPatchFlow(input: {
       }));
 
       if (!_importContextPrimaryFile) {
-        console.log("[zone-import-context]", JSON.stringify({
+        debugLog("[zone-import-context]", JSON.stringify({
           enabled: true,
           reason: "opted_in_via_env",
           primaryFile: null,
@@ -5108,7 +5107,7 @@ export async function runLlmPatchFlow(input: {
                 ) : false;
               }).length
             : 0;
-          console.log("[zone-import-context]", JSON.stringify({
+          debugLog("[zone-import-context]", JSON.stringify({
             enabled: true,
             reason: "opted_in_via_env",
             primaryFile: _importContextPrimaryFile,
@@ -5122,7 +5121,7 @@ export async function runLlmPatchFlow(input: {
             },
           }));
         } catch (err) {
-          console.log("[zone-import-context]", JSON.stringify({
+          debugLog("[zone-import-context]", JSON.stringify({
             enabled: true,
             reason: "opted_in_via_env",
             primaryFile: _importContextPrimaryFile,
@@ -5275,18 +5274,18 @@ export async function runLlmPatchFlow(input: {
 
     let loop: AgentLoopResult;
     if (_planOrchestrationEnabled && executionPlan && executionPlan.steps.length >= 2) {
-      console.log("[zone-orchestrator] activated", JSON.stringify({
+      debugLog("[zone-orchestrator] activated", JSON.stringify({
         runId: runId || null,
         stepCount: executionPlan.steps.length,
       }));
       const stepResults: AgentLoopResult[] = [];
       for (let stepIdx = 0; stepIdx < executionPlan.steps.length; stepIdx += 1) {
         if (input.abortSignal?.aborted) {
-          console.log("[zone-orchestrator] aborted before step", JSON.stringify({ stepIdx }));
+          debugLog("[zone-orchestrator] aborted before step", JSON.stringify({ stepIdx }));
           break;
         }
         const step = executionPlan.steps[stepIdx]!;
-        console.log("[zone-orchestrator] step start", JSON.stringify({
+        debugLog("[zone-orchestrator] step start", JSON.stringify({
           stepIdx,
           total: executionPlan.steps.length,
           title: String(step.title || "").slice(0, 120),
@@ -5309,13 +5308,13 @@ export async function runLlmPatchFlow(input: {
           status: "success",
           stepIndex: stepIdx,
         });
-        console.log("[zone-orchestrator] step done", JSON.stringify({
+        debugLog("[zone-orchestrator] step done", JSON.stringify({
           stepIdx,
           success: stepResult.success,
           filesModified: (stepResult.filesModified || []).length,
         }));
       }
-      console.log("[zone-orchestrator] all steps done", JSON.stringify({
+      debugLog("[zone-orchestrator] all steps done", JSON.stringify({
         totalSteps: stepResults.length,
         anyFailures: stepResults.some((r) => !r.success),
       }));
@@ -5520,7 +5519,7 @@ export async function runLlmPatchFlow(input: {
           repoPath: input.repoPath,
           files: snapshotFiles,
         });
-        console.log(
+        debugLog(
           "[zone-snapshot-created]",
           JSON.stringify({
             runId,
@@ -5530,7 +5529,7 @@ export async function runLlmPatchFlow(input: {
           })
         );
       } catch (err) {
-        console.error(
+        errorLog(
           "[zone-snapshot-error]",
           err instanceof Error ? err.message : String(err)
         );
@@ -5546,13 +5545,13 @@ export async function runLlmPatchFlow(input: {
         );
         const result = await killAllForRun(runId);
         if (result.killed > 0) {
-          console.log(
+          debugLog(
             "[zone-bg-cleanup]",
             JSON.stringify({ runId, killed: result.killed })
           );
         }
       } catch (err) {
-        console.error(
+        errorLog(
           "[zone-bg-cleanup-error]",
           err instanceof Error ? err.message : String(err)
         );
@@ -5584,7 +5583,7 @@ export async function runLlmPatchFlow(input: {
 
   // 3. Rank relevant files — top 8 (full ranking reused for diagnostics + budget trim)
   reportProgress("Ranking relevant files...");
-  console.log("[debug-mem] runLlmPatchFlow lastChangedFiles:", input.lastChangedFiles);
+  debugLog("[debug-mem] runLlmPatchFlow lastChangedFiles:", input.lastChangedFiles);
   const lastAddedFunctions =
     Array.isArray(input.lastAddedFunctions)
       ? (input.lastAddedFunctions as unknown[])
@@ -5606,7 +5605,7 @@ export async function runLlmPatchFlow(input: {
       (file) => typeof file.absolutePath === "string" && file.absolutePath.length > 0
     );
 
-  console.log("[zone-embed-block-entry] entering embedding section", {
+  debugLog("[zone-embed-block-entry] entering embedding section", {
     canUseSemanticRanking,
     repoPathLooksLocal,
     developerContextFileCount: developerContextFiles.length,
@@ -5651,7 +5650,7 @@ export async function runLlmPatchFlow(input: {
               matchCount: 30,
             });
       if (queryEmbedding === null) {
-        console.log("[zone-embed-pre-rank]", {
+        debugLog("[zone-embed-pre-rank]", {
           hasEmbeddings: false,
           queryEmbeddingDims: 0,
           topMatchCount: 0,
@@ -5670,13 +5669,13 @@ export async function runLlmPatchFlow(input: {
           )
           .map((match) => [match.filePath, match.similarity])
       );
-      console.log("[zone-embed-pre-rank]", {
+      debugLog("[zone-embed-pre-rank]", {
         hasEmbeddings: existingEmbeddingCount > 0 || matches.length > 0,
         queryEmbeddingDims: Array.isArray(queryEmbedding) ? queryEmbedding.length : 0,
         topMatchCount: matches.length,
         semanticScoresSize: semanticScores.size,
       });
-      console.log("[zone-embed-query-debug]", {
+      debugLog("[zone-embed-query-debug]", {
         task: input.task,
         topMatches: matches.slice(0, 5),
       });
@@ -5688,7 +5687,7 @@ export async function runLlmPatchFlow(input: {
       semanticScores = undefined;
     }
   } else {
-    console.log("[zone-embed-pre-rank]", {
+    debugLog("[zone-embed-pre-rank]", {
       hasEmbeddings: false,
       queryEmbeddingDims: 0,
       topMatchCount: 0,
@@ -5728,7 +5727,7 @@ export async function runLlmPatchFlow(input: {
             .slice(0, 10)
         : [];
     if (lastChanged.length > 0 && Array.isArray(fullRankedFiles)) {
-      console.log(
+      debugLog(
         "[debug-mem] before boost ranked:",
         fullRankedFiles.map((f) => f.path)
       );
@@ -5748,7 +5747,7 @@ export async function runLlmPatchFlow(input: {
         const semanticOk = Number.isFinite(similarity) && similarity >= 0.3;
         const keywordOk = pathScore >= MINIMUM_KEYWORD_SCORE;
         if (!semanticOk && !keywordOk) {
-          console.log("[debug-mem] boost decision:", {
+          debugLog("[debug-mem] boost decision:", {
             file: p,
             similarity,
             pathScore,
@@ -5760,7 +5759,7 @@ export async function runLlmPatchFlow(input: {
 
         const existingIndex = rankedList.findIndex((file) => file.path === p);
         if (existingIndex >= 0 && existingIndex < 5) {
-          console.log("[debug-mem] boost decision:", {
+          debugLog("[debug-mem] boost decision:", {
             file: p,
             similarity,
             pathScore,
@@ -5775,7 +5774,7 @@ export async function runLlmPatchFlow(input: {
           continue;
         }
         if (!semanticScores?.has(p) && !keywordOk) {
-          console.log("[debug-mem] boost decision:", {
+          debugLog("[debug-mem] boost decision:", {
             file: p,
             similarity,
             pathScore,
@@ -5793,7 +5792,7 @@ export async function runLlmPatchFlow(input: {
               score: Math.max(existing.score, rankedList[0]?.score ?? existing.score) + 1,
             });
             currentTopPaths.add(p);
-            console.log("[debug-mem] boost decision:", {
+            debugLog("[debug-mem] boost decision:", {
               file: p,
               similarity,
               boosted: true,
@@ -5805,7 +5804,7 @@ export async function runLlmPatchFlow(input: {
 
         const repoHit = repoByPath.get(p);
         if (!repoHit) {
-          console.log("[debug-mem] boost decision:", {
+          debugLog("[debug-mem] boost decision:", {
             file: p,
             similarity,
             boosted: false,
@@ -5820,7 +5819,7 @@ export async function runLlmPatchFlow(input: {
           score: insertedScore,
         });
         currentTopPaths.add(p);
-        console.log("[debug-mem] boost decision:", {
+        debugLog("[debug-mem] boost decision:", {
           file: p,
           similarity,
           boosted: true,
@@ -5830,15 +5829,15 @@ export async function runLlmPatchFlow(input: {
 
       if (rankedList.length > 0) {
         fullRankedFiles = rankedList.slice(0, maxKeep);
-        console.log("[zone-ranker-boost-last-changed]", {
+        debugLog("[zone-ranker-boost-last-changed]", {
           boosted: lastChanged.filter((path) => fullRankedFiles.some((file) => file.path === path)),
           maxKeep,
         });
-        console.log(
+        debugLog(
           "[debug-mem] after boost ranked:",
           fullRankedFiles.map((f) => f.path)
         );
-        console.log(
+        debugLog(
           "[debug-mem] ranked files after boost:",
           fullRankedFiles.map((f) => ({ path: f.path, score: f.score }))
         );
@@ -5848,7 +5847,7 @@ export async function runLlmPatchFlow(input: {
     // best-effort only
   }
   if (explicitTargetRepoFile) {
-    console.log("[zone-explicit-target-forced-into-ranking]", explicitTargetRepoFile.path);
+    debugLog("[zone-explicit-target-forced-into-ranking]", explicitTargetRepoFile.path);
     fullRankedFiles = mergeExplicitRepoFileIntoRankedFiles(fullRankedFiles, explicitTargetRepoFile);
   }
   let relevantFiles = fullRankedFiles.slice(0, getMaxContextFiles());
@@ -5859,7 +5858,7 @@ export async function runLlmPatchFlow(input: {
     };
     // Explicit target mode: keep planning context ultra-minimal to avoid token overflow and
     // ensure the model focuses on the requested file.
-    console.log("[zone-context-mode] explicit_single_file_mode");
+    debugLog("[zone-context-mode] explicit_single_file_mode");
     relevantFiles = [explicitRankedFile];
   }
   perf.mark("relevant files ranked");
@@ -5959,13 +5958,13 @@ export async function runLlmPatchFlow(input: {
       const allPaths = developerContextFiles.map((f) => f.path);
       const graph = await buildDependencyGraph(input.repoPath, allPaths);
       const related = getRelatedFiles([explicitTargetRepoFile.path], graph, 5);
-      console.log("[zone-dep-graph-explicit]", {
+      debugLog("[zone-dep-graph-explicit]", {
         target: explicitTargetRepoFile.path,
         relatedCount: related.length,
         related: related.map((f) => f.filePath + ":" + f.relationship),
       });
     } catch (err) {
-      console.log(
+      debugLog(
         "[zone-dep-graph-explicit-error]",
         err instanceof Error ? err.message : String(err)
       );
@@ -5973,7 +5972,7 @@ export async function runLlmPatchFlow(input: {
   }
 
   if ((process.env.DEBUG_PLANNER ?? "").trim().toLowerCase() === "true") {
-    console.log("[planner]", {
+    debugLog("[planner]", {
       rankedCount: fullRankedFiles.length,
       selectedCount: plannerSelection?.filesToEdit?.length ?? 0,
       selectedPaths: plannerSelection?.filesToEdit ?? [],
@@ -5984,7 +5983,7 @@ export async function runLlmPatchFlow(input: {
   }
 
   // TEMP DIAGNOSTIC: surface top 20 ranker scores to verify PatientsPage presence
-  console.log(
+  debugLog(
     "[zone-diag-ranker]",
     JSON.stringify({
       totalFiles: developerContextFiles.length,
@@ -6017,8 +6016,8 @@ export async function runLlmPatchFlow(input: {
       repoSummary: projectSummary,
       relevantFiles: relevantFiles.map((file) => file.path),
     });
-    console.log(`[zone-plan] generated steps=${executionPlan.steps.length}`);
-    console.log(`[zone-plan] scope=${executionPlan.scopeSummary}`);
+    debugLog(`[zone-plan] generated steps=${executionPlan.steps.length}`);
+    debugLog(`[zone-plan] scope=${executionPlan.scopeSummary}`);
   } catch (err) {
     console.warn(
       `[zone-plan] skipped: ${err instanceof Error ? err.message : String(err)}`
@@ -6045,7 +6044,7 @@ export async function runLlmPatchFlow(input: {
       });
       perf.mark("feature model response received");
     } catch (err) {
-      console.log("[zone-flow-early-return]", JSON.stringify({ step: "feature_planning_failed", reason: "feature_planning_failed" }));
+      debugLog("[zone-flow-early-return]", JSON.stringify({ step: "feature_planning_failed", reason: "feature_planning_failed" }));
       perf.finish("feature planning failed");
       const reason = err instanceof Error ? err.message : String(err);
       notifyProgress("Ready", {
@@ -6100,7 +6099,7 @@ export async function runLlmPatchFlow(input: {
   const planStepCount = executionPlan?.steps.length ?? 0;
   const isComplexTaskPreview =
     executionPlan != null && planStepCount >= 2;
-  console.log("[zone-plan-debug]", {
+  debugLog("[zone-plan-debug]", {
     planStepCount,
     suggestedFilesCount: suggestedFilesForPlanUi.length,
     suggestedFiles: suggestedFilesForPlanUi,
@@ -6313,7 +6312,7 @@ export async function runLlmPatchFlow(input: {
       }
     }
 
-    console.log("[zone-context-priority]", {
+    debugLog("[zone-context-priority]", {
       plannerSuggested: plannerSuggestedPaths,
       rankerTop5: relevantFiles.slice(0, getMaxContextFiles()).map((file) => file.path),
       finalContext: selectedContextFiles.map((file) => file.path),
@@ -6339,8 +6338,8 @@ export async function runLlmPatchFlow(input: {
           allFiles,
         });
         explicitTargetForceContentByPath.set(canon, loadedContent);
-        console.log("[zone-explicit-target-forced-into-context]", canon);
-        console.log("[zone-explicit-target-force-included]", canon);
+        debugLog("[zone-explicit-target-forced-into-context]", canon);
+        debugLog("[zone-explicit-target-force-included]", canon);
         targetContent = loadedContent;
       }
 
@@ -6361,7 +6360,7 @@ export async function runLlmPatchFlow(input: {
     }
   }
 
-  console.log("[zone-context-files-count]", resolvedFileContexts.length);
+  debugLog("[zone-context-files-count]", resolvedFileContexts.length);
   perf.mark("file context loaded");
   notifyProgress("Loading file context...", {
     type: "file_context_loaded",
@@ -6401,7 +6400,7 @@ export async function runLlmPatchFlow(input: {
   const _secondaryChars = resolvedFileContexts.slice(1).reduce(
     (s, f) => s + (f.content?.length ?? 0), 0
   );
-  console.log("[zone-context-budget]", JSON.stringify({
+  debugLog("[zone-context-budget]", JSON.stringify({
     totalFiles: resolvedFileContexts.length,
     primaryFile: _primaryCtxFile,
     primaryFileChars: _primaryCtxChars,
@@ -6462,7 +6461,7 @@ export async function runLlmPatchFlow(input: {
 
     const trimmedFileCount = resolvedFileContexts.length;
     const retainedPaths = resolvedFileContexts.map((file) => file.path);
-    console.log(
+    debugLog(
       "[zone-diag-context-trim]",
       JSON.stringify({
         originalFileCount,
@@ -6491,8 +6490,8 @@ export async function runLlmPatchFlow(input: {
           allFiles,
         });
         explicitTargetForceContentByPath.set(canonAfterTrim, reinjectedContent);
-        console.log("[zone-explicit-target-forced-into-context]", canonAfterTrim);
-        console.log("[zone-explicit-target-force-included]", canonAfterTrim);
+        debugLog("[zone-explicit-target-forced-into-context]", canonAfterTrim);
+        debugLog("[zone-explicit-target-force-included]", canonAfterTrim);
         resolvedFileContexts.unshift({
           path: canonAfterTrim,
           content: reinjectedContent,
@@ -6513,7 +6512,7 @@ export async function runLlmPatchFlow(input: {
   }
 
   if (totalContextChars > contextBudget) {
-    console.log("[zone-flow-early-return]", JSON.stringify({ step: "context_budget_exceeded", totalContextChars: typeof totalContextChars !== "undefined" ? totalContextChars : null }));
+    debugLog("[zone-flow-early-return]", JSON.stringify({ step: "context_budget_exceeded", totalContextChars: typeof totalContextChars !== "undefined" ? totalContextChars : null }));
     perf.finish("context budget exceeded");
     notifyProgress("Ready", {
       type: "tooling_issue",
@@ -6583,7 +6582,7 @@ export async function runLlmPatchFlow(input: {
     });
     perf.mark("patch preview model response received");
   } catch (err) {
-    console.log("[zone-flow-early-return]", JSON.stringify({ step: "patch_preview_failed", reason: "patch_preview_failed" }));
+    debugLog("[zone-flow-early-return]", JSON.stringify({ step: "patch_preview_failed", reason: "patch_preview_failed" }));
     perf.finish("patch preview failed");
     const reason = err instanceof Error ? err.message : String(err);
     notifyProgress("Ready", {
@@ -6628,7 +6627,7 @@ export async function runLlmPatchFlow(input: {
       finalRunReport: previewFailReport,
     };
   }
-  console.log("[zone-preview] received (ignored for patch application)");
+  debugLog("[zone-preview] received (ignored for patch application)");
   if (input.hostedContext) {
     patchPlan = {
       ...patchPlan,
@@ -6647,7 +6646,7 @@ export async function runLlmPatchFlow(input: {
         return explicitTargetForceContentByPath.has(p.path);
       }),
     };
-    console.log("[hosted] filtered patches count:", patchPlan.patches.length);
+    debugLog("[hosted] filtered patches count:", patchPlan.patches.length);
   }
 
   const vagueTask = isVagueDeveloperTask(input.task);
@@ -6734,7 +6733,7 @@ export async function runLlmPatchFlow(input: {
     });
     reportProgress("Ready");
     perf.mark("decision evaluation complete");
-    console.log("[zone-flow-early-return]", JSON.stringify({ step: "vague_task", reason: "vague_task_no_patch" }));
+    debugLog("[zone-flow-early-return]", JSON.stringify({ step: "vague_task", reason: "vague_task_no_patch" }));
     perf.finish("vague task response ready");
     const vagueReport = await generateFinalRunReport({
       task: input.task,
@@ -6803,7 +6802,7 @@ export async function runLlmPatchFlow(input: {
       });
       reportProgress("Ready");
       perf.mark("decision evaluation complete");
-      console.log("[zone-flow-early-return]", JSON.stringify({ step: "explicit_target_not_found_planning", reason: "explicit_target_not_found_in_planning" }));
+      debugLog("[zone-flow-early-return]", JSON.stringify({ step: "explicit_target_not_found_planning", reason: "explicit_target_not_found_in_planning" }));
       perf.finish("explicit target not found");
       const explicitMissingReport = await generateFinalRunReport({
         task: input.task,
@@ -6857,7 +6856,7 @@ export async function runLlmPatchFlow(input: {
     }
     if (previewEmptyPick.kind === "path") {
       const fallbackPath = previewEmptyPick.path;
-      console.log("[zone-patch-preview-fallback-target]", fallbackPath);
+      debugLog("[zone-patch-preview-fallback-target]", fallbackPath);
       notifyProgress("Generating file patches...", {
         type: "patch_preview_empty_fallback_target_selected",
         message: `Patch preview returned no structured patches; selected ${fallbackPath} for full patch generation.`,
@@ -6999,7 +6998,7 @@ export async function runLlmPatchFlow(input: {
           fileContent: loaded.content,
           topRankedRelevantPath: fullRankedFiles[0]?.path ?? null,
         });
-        console.log(
+        debugLog(
           "[zone-target-eligibility]",
           JSON.stringify({
             filePath: previewPatch.path,
@@ -7205,7 +7204,7 @@ export async function runLlmPatchFlow(input: {
             reason: eligibility.reason,
           };
           retryLogEntries.push(retryEntry);
-          console.log("[zone-target-retry]", JSON.stringify(retryEntry));
+          debugLog("[zone-target-retry]", JSON.stringify(retryEntry));
 
           if (eligibility.eligible) {
             fallbackPick = {
@@ -7262,7 +7261,7 @@ export async function runLlmPatchFlow(input: {
             reason: "tier3_structure_only_preview",
           };
           retryLogEntries.push(tier3Entry);
-          console.log("[zone-target-retry]", JSON.stringify(tier3Entry));
+          debugLog("[zone-target-retry]", JSON.stringify(tier3Entry));
           fallbackPick = {
             path: tier3Pick.path,
             content: tier3Pick.content,
@@ -7273,7 +7272,7 @@ export async function runLlmPatchFlow(input: {
         }
 
         if (fallbackPick !== null) {
-          console.log(
+          debugLog(
             "[zone-target-fallback]",
             JSON.stringify({
               rejectedPreviewPaths,
@@ -7299,7 +7298,7 @@ export async function runLlmPatchFlow(input: {
             ...loopApplyTargets,
           ];
         } else {
-          console.log(
+          debugLog(
             "[zone-target-fallback]",
             JSON.stringify({
               rejectedPreviewPaths,
@@ -7391,7 +7390,7 @@ export async function runLlmPatchFlow(input: {
 
       const astScan = extractFunctionRanges(fileContent, patch.path);
       if (astScan.ok && astScan.functions.length > 0) {
-        console.log("[zone-ast-scan]", {
+        debugLog("[zone-ast-scan]", {
           file: patch.path,
           functionsFound: astScan.functions.length,
           names: astScan.functions.map((r) => r.name),
@@ -7544,7 +7543,7 @@ export async function runLlmPatchFlow(input: {
       if (isExplicitPrimaryTarget) {
         const exact = parseExactLineReplaceTask(input.task);
         if (exact) {
-          console.log("[zone-exact-line-fallback]", {
+          debugLog("[zone-exact-line-fallback]", {
             filePath: patch.path,
             findLine: exact.findLine,
             replaceLine: exact.replaceLine,
@@ -7583,7 +7582,7 @@ export async function runLlmPatchFlow(input: {
           fileContent,
           topRankedRelevantPath: fullRankedFiles[0]?.path ?? null,
         });
-        console.log(
+        debugLog(
           "[zone-target-eligibility]",
           JSON.stringify({
             filePath: patch.path,
@@ -7639,7 +7638,7 @@ export async function runLlmPatchFlow(input: {
       const normalizedTaskIntentForPrompt = detectMicroEditIntent(input.task)
         ? "micro_edit"
         : "standard";
-      console.log("[zone-patch-source] using FULL PATCH ONLY");
+      debugLog("[zone-patch-source] using FULL PATCH ONLY");
       const nextContent = await (() => {
             perf.mark(`full patch model call start ${patch.path}`);
             emitStructuredProgress({
@@ -7706,7 +7705,7 @@ export async function runLlmPatchFlow(input: {
             perf.mark(`full patch model response received ${patch.path}`);
             if (fullPatch.mode === "openai_call_error") {
               fallbackForcePreviewOnly = true;
-              console.log(
+              debugLog(
                 "[zone-patch-recovery-context]",
                 JSON.stringify({
                   filePath: patch.path,
@@ -7735,7 +7734,7 @@ export async function runLlmPatchFlow(input: {
             }
             if (fullPatch.mode === "empty_model_response") {
               fallbackForcePreviewOnly = true;
-              console.log(
+              debugLog(
                 "[zone-patch-recovery-context]",
                 JSON.stringify({
                   filePath: patch.path,
@@ -7764,7 +7763,7 @@ export async function runLlmPatchFlow(input: {
             }
             if (fullPatch.mode === "invalid_patch_format") {
               fallbackForcePreviewOnly = true;
-              console.log(
+              debugLog(
                 "[zone-patch-recovery-context]",
                 JSON.stringify({
                   filePath: patch.path,
@@ -7792,7 +7791,7 @@ export async function runLlmPatchFlow(input: {
             }
             if (fullPatch.mode === "patch") {
               rawPatchTextByFile[patch.path] = fullPatch.patchText;
-              console.log(
+              debugLog(
                 "[zone-raw-before-convert]",
                 String(fullPatch.patchText || "").slice(0, 800)
               );
@@ -7804,7 +7803,7 @@ export async function runLlmPatchFlow(input: {
                       .map((l) => l.trim())
                       .find((l) => l.length > 0) ?? "")
                   : "";
-              console.log("[zone-patch-anchor-debug]", {
+              debugLog("[zone-patch-anchor-debug]", {
                 filePath: patch.path,
                 llmFileContentHasAnchor: anchorLine ? llmFileContent.includes(anchorLine) : null,
                 fileContentHasAnchor: anchorLine ? fileContent.includes(anchorLine) : null,
@@ -7845,7 +7844,7 @@ export async function runLlmPatchFlow(input: {
                   fileContent.slice(0, symbolCtx.targetFunction.startChar) +
                   patchedFunctionContent +
                   fileContent.slice(symbolCtx.targetFunction.endChar);
-                console.log("[zone-ast-reconstruct]", {
+                debugLog("[zone-ast-reconstruct]", {
                   file: patch.path,
                   targetFunc: targetFuncName,
                   lines: `${symbolCtx.targetFunction.startLine}-${symbolCtx.targetFunction.endLine}`,
@@ -7928,7 +7927,7 @@ export async function runLlmPatchFlow(input: {
                     status: "active",
                     filePath: patch.path,
                   });
-                  console.log(
+                  debugLog(
                     "[zone-ast-fallback-start]",
                     JSON.stringify({ filePath: patch.path, reason: failure.reason })
                   );
@@ -7939,7 +7938,7 @@ export async function runLlmPatchFlow(input: {
                     failedRawPatch: fullPatch.patchText,
                   });
                   if (astFallback.ok) {
-                    console.log(
+                    debugLog(
                       "[zone-ast-fallback-success]",
                       JSON.stringify({
                         filePath: patch.path,
@@ -7964,7 +7963,7 @@ export async function runLlmPatchFlow(input: {
                       // Return minimally-edited full content (applied via FIND/REPLACE patch).
                       return appliedFromAst.fullContent;
                     }
-                    console.log(
+                    debugLog(
                       "[zone-ast-fallback-failed]",
                       JSON.stringify({
                         filePath: patch.path,
@@ -7975,7 +7974,7 @@ export async function runLlmPatchFlow(input: {
                     // fall through to treat original patch as failed
                   }
                   else {
-                    console.log(
+                    debugLog(
                       "[zone-ast-fallback-failed]",
                       JSON.stringify({ filePath: patch.path, reason: astFallback.reason })
                     );
@@ -8039,7 +8038,7 @@ export async function runLlmPatchFlow(input: {
               responseMode: fullPatch.mode,
               status: "applied",
             });
-            console.log(
+            debugLog(
               "[zone-full-content-apply-debug]",
               String(fullPatch.fullContent || "").slice(0, 500)
             );
@@ -8084,7 +8083,7 @@ export async function runLlmPatchFlow(input: {
         });
         internalWarnings.push(patchConflictWarning);
         visibleWarnings.push(patchConflictWarning);
-        console.log("[zone-patch-protocol-leak-blocked]");
+        debugLog("[zone-patch-protocol-leak-blocked]");
         patchResults.push({
           filePath: patch.path,
           status: "failed",
@@ -8169,7 +8168,7 @@ export async function runLlmPatchFlow(input: {
     }
 
     applyPatches = applyResults;
-    console.log("[zone-convert-result]", {
+    debugLog("[zone-convert-result]", {
       patchCount: applyPatches.length,
       firstPatch: applyPatches[0]
         ? JSON.stringify(applyPatches[0]).slice(0, 300)
@@ -8178,14 +8177,14 @@ export async function runLlmPatchFlow(input: {
     perf.mark("patch conversion complete");
   } catch (err) {
     // step 6b is best-effort — never block the preview result
-    console.error(
+    errorLog(
       "[hosted] step 6b failed:",
       err instanceof Error ? err.message : String(err)
     );
     applyPatches = [];
     perf.mark("patch conversion fallback complete");
   }
-  console.log("[hosted] applyPatches count:", applyPatches.length);
+  debugLog("[hosted] applyPatches count:", applyPatches.length);
   if (applyPatches.length > 0) {
     patchSource = usedLlmPatchRecovered ? "llm_patch_recovered" : "llm_patch";
   }
@@ -8206,7 +8205,7 @@ export async function runLlmPatchFlow(input: {
       visibleWarnings.push(w);
     }
     if (scope.totalChangedLines > 50) {
-      console.log("[zone-scope-guard]", {
+      debugLog("[zone-scope-guard]", {
         taskIsConstrained,
         totalChangedLines: scope.totalChangedLines,
         action: "fallback_forced",
@@ -8226,7 +8225,7 @@ export async function runLlmPatchFlow(input: {
   ) {
     const targetContent = originalContents[selectedTargetFile] ?? "";
     if (targetContent.trim()) {
-      console.log(
+      debugLog(
         "[zone-fallback] generating deterministic patch",
         selectedTargetFile
       );
@@ -8234,7 +8233,7 @@ export async function runLlmPatchFlow(input: {
       const normalizedTarget = hasCrlf
         ? targetContent.replace(/\r\n/g, "\n")
         : targetContent;
-      console.log(
+      debugLog(
         "[zone-fallback-line-endings]",
         JSON.stringify({
           filePath: selectedTargetFile,
@@ -8255,8 +8254,8 @@ export async function runLlmPatchFlow(input: {
           normalizedTarget.slice(0, fallback.insertIndex) +
           `\n${fallback.validationBlock}\n` +
           normalizedTarget.slice(fallback.insertIndex);
-        console.log("[zone-fallback] minimal insert applied");
-        console.log("[zone-fallback] inserted validation inside submit handler");
+        debugLog("[zone-fallback] minimal insert applied");
+        debugLog("[zone-fallback] inserted validation inside submit handler");
       }
 
       if (!fallback || updatedNormalized === normalizedTarget) {
@@ -8275,12 +8274,12 @@ export async function runLlmPatchFlow(input: {
             `  }}`
         );
         if (updatedNormalized !== normalizedTarget) {
-          console.log("[zone-fallback] used inline onSubmit wrapper fallback");
+          debugLog("[zone-fallback] used inline onSubmit wrapper fallback");
         }
       }
 
       if (updatedNormalized === normalizedTarget) {
-        console.log("[zone-fallback-detect] handler NOT found");
+        debugLog("[zone-fallback-detect] handler NOT found");
         patchResults.push({
           filePath: selectedTargetFile,
           status: "failed",
@@ -8299,7 +8298,7 @@ export async function runLlmPatchFlow(input: {
         ).length;
         if (fallbackChangedLines > 20) {
           deterministicFallbackTooLarge = true;
-          console.log("[zone-fallback] rejected oversized fallback patch");
+          debugLog("[zone-fallback] rejected oversized fallback patch");
           patchResults.push({
             filePath: selectedTargetFile,
             status: "failed",
@@ -8317,7 +8316,7 @@ export async function runLlmPatchFlow(input: {
           visibleWarnings.push(
             "[deterministic_fallback_used] LLM patch generation failed; Zone generated a deterministic fallback patch."
           );
-          console.log(
+          debugLog(
             "[zone-fallback-apply] deterministic fallback produced patch"
           );
           patchResults.push({
@@ -8334,14 +8333,14 @@ export async function runLlmPatchFlow(input: {
   if (applyPatches.length === 0 && patchSource === "no_patch") {
     patchSource = "no_patch";
   }
-  console.log("[zone-patch-quality] source", patchSource);
+  debugLog("[zone-patch-quality] source", patchSource);
 
   if (
     input.hostedContext &&
     applyPatches.length === 0 &&
     patchPlan.patches.length > 0
   ) {
-    console.log(
+    debugLog(
       "[hosted] patch paths filtered by hosted context:",
       hostedPatchAvailability
         .filter(
@@ -8349,7 +8348,7 @@ export async function runLlmPatchFlow(input: {
         )
         .map(({ path, reason }) => ({ path, reason }))
     );
-    console.log(
+    debugLog(
       "[hosted] patch paths still present after hosted filtering:",
       patchPlan.patches.map((patch) => patch.path)
     );
@@ -8444,7 +8443,7 @@ export async function runLlmPatchFlow(input: {
       const effectiveForceBlocked = report.forceBlocked && effectiveBlocking.length > 0;
       const effectiveForcePreviewOnly = report.forcePreviewOnly;
 
-      console.log(
+      debugLog(
         "[zone-patch-correctness-v2]",
         JSON.stringify({
           filePath: patch.filePath,
@@ -8468,7 +8467,7 @@ export async function runLlmPatchFlow(input: {
       const diagBeforeJsx = countJsxTagsDiagnostic(before);
       const diagAfterJsx = countJsxTagsDiagnostic(patch.fullContent);
 
-      console.log(
+      debugLog(
         "[zone-patch-diagnostic]",
         JSON.stringify({
           filePath: patch.filePath,
@@ -8540,7 +8539,7 @@ export async function runLlmPatchFlow(input: {
 
         if (canAttemptRepair && maxRepairAttempts >= 1) {
           correctnessRepairAttempted.add(patch.filePath);
-          console.log(
+          debugLog(
             "[zone-repair-start]",
             JSON.stringify({
               filePath: patch.filePath,
@@ -8549,7 +8548,7 @@ export async function runLlmPatchFlow(input: {
               totalChangedLines: diagTotalChanged,
             })
           );
-          console.log(
+          debugLog(
             "[zone-repair-context]",
             JSON.stringify({
               filePath: patch.filePath,
@@ -8624,7 +8623,7 @@ export async function runLlmPatchFlow(input: {
                 "IMPORTANT: Only output a valid patch. Do not explain.",
             });
             if (repaired.mode !== "patch") {
-              console.log(
+              debugLog(
                 "[zone-repair-validation-failed]",
                 JSON.stringify({
                   filePath: patch.filePath,
@@ -8633,14 +8632,14 @@ export async function runLlmPatchFlow(input: {
               );
               visibleWarnings.push("repair_attempted_but_failed");
             } else {
-              console.log("[zone-repair-patch-generated]", patch.filePath);
+              debugLog("[zone-repair-patch-generated]", patch.filePath);
               const applied = applyDeveloperPatchText(
                 patch.fullContent,
                 repaired.patchText,
                 { filePath: patch.filePath }
               );
               if (!applied.ok) {
-                console.log(
+                debugLog(
                   "[zone-repair-validation-failed]",
                   JSON.stringify({
                     filePath: patch.filePath,
@@ -8649,7 +8648,7 @@ export async function runLlmPatchFlow(input: {
                 );
                 const failure = parsePatchFailureWarning(applied.warning);
                 if (failure.reason === "no_match_abort") {
-                  console.log("[zone-retry-skipped-no-match]", patch.filePath);
+                  debugLog("[zone-retry-skipped-no-match]", patch.filePath);
                   fallbackForcePreviewOnly = true;
                 }
                 if (failure.reason === "anchor_too_small_for_large_replace") {
@@ -8665,7 +8664,7 @@ export async function runLlmPatchFlow(input: {
                   (l) => l.type === "added" || l.type === "removed"
                 ).length;
                 if (repairChangedLines > 50) {
-                  console.log(
+                  debugLog(
                     "[zone-retry-aborted-large-diff]",
                     JSON.stringify({
                       filePath: patch.filePath,
@@ -8674,7 +8673,7 @@ export async function runLlmPatchFlow(input: {
                   );
                   fallbackForcePreviewOnly = true;
                   visibleWarnings.push("repair_attempted_but_failed");
-                  console.log(
+                  debugLog(
                     "[zone-repair-validation-failed]",
                     JSON.stringify({
                       filePath: patch.filePath,
@@ -8696,7 +8695,7 @@ export async function runLlmPatchFlow(input: {
                   strictMode: patchSource === "deterministic_fallback",
                 });
                 if (report2.ok) {
-                  console.log(
+                  debugLog(
                     "[zone-repair-validation-passed]",
                     JSON.stringify({ filePath: patch.filePath })
                   );
@@ -8704,7 +8703,7 @@ export async function runLlmPatchFlow(input: {
                   kept.push({ filePath: patch.filePath, fullContent: applied.fullContent });
                   continue;
                 }
-                console.log(
+                debugLog(
                   "[zone-repair-validation-failed]",
                   JSON.stringify({
                     filePath: patch.filePath,
@@ -8716,7 +8715,7 @@ export async function runLlmPatchFlow(input: {
               }
             }
           } catch (err) {
-            console.log(
+            debugLog(
               "[zone-repair-validation-failed]",
               JSON.stringify({
                 filePath: patch.filePath,
@@ -8726,7 +8725,7 @@ export async function runLlmPatchFlow(input: {
             visibleWarnings.push("repair_attempted_but_failed");
           }
         } else if (retryableBlocking.length > 0 && diagTotalChanged > 25) {
-          console.log(
+          debugLog(
             "[zone-repair-skipped]",
             JSON.stringify({
               filePath: patch.filePath,
@@ -8736,7 +8735,7 @@ export async function runLlmPatchFlow(input: {
             })
           );
         } else if (retryableBlocking.length > 0 && correctnessRepairAttempted.has(patch.filePath)) {
-          console.log(
+          debugLog(
             "[zone-repair-skipped]",
             JSON.stringify({
               filePath: patch.filePath,
@@ -8823,7 +8822,7 @@ export async function runLlmPatchFlow(input: {
       status: "failed",
     });
     reportProgress("Ready");
-    console.log("[zone-flow-early-return]", JSON.stringify({ step: "atomic_patch_failed", reason: "atomic_patch_failed" }));
+    debugLog("[zone-flow-early-return]", JSON.stringify({ step: "atomic_patch_failed", reason: "atomic_patch_failed" }));
     perf.finish("atomic patch failed");
     const atomicDiffLines = applyPatches.map((p) => {
       const before = originalContents[p.filePath] ?? "";
@@ -8964,7 +8963,7 @@ export async function runLlmPatchFlow(input: {
           effectiveTaskRiskResult.breakdown.massScope
         ),
       });
-      console.log(
+      debugLog(
         `[zone-plan-align] score=${planAlignment.score} outOfPlan=${planAlignment.outOfPlanFiles.length} scopeMismatch=${planAlignment.scopeMismatch}`
       );
       if (planAlignment.warning) {
@@ -8988,7 +8987,7 @@ export async function runLlmPatchFlow(input: {
         task: input.task,
         repoFiles: allFiles.map((file) => file.path),
       });
-      console.log(
+      debugLog(
         `[zone-verify] score=${verification.score} warnings=${verification.warnings.length}`
       );
       if (verification.warnings.length > 0) {
@@ -9021,7 +9020,7 @@ export async function runLlmPatchFlow(input: {
       // Apply patches to disk before running verification, otherwise verification
       // runs against the unmodified repo and can yield misleading "passed" results.
       const applyResult = await applyLlmPatches(applyPatches, input.repoPath);
-      console.log("[zone-apply-before-verify]", {
+      debugLog("[zone-apply-before-verify]", {
         attempted: applyPatches.length,
         applied: applyResult.applied.length,
         failed: applyResult.failed.length,
@@ -9053,7 +9052,7 @@ export async function runLlmPatchFlow(input: {
           command: plan[0]?.command,
         });
       }
-      console.log(
+      debugLog(
         "[zone-verification-start]",
         JSON.stringify({ steps: plan.map((s) => s.command) })
       );
@@ -9070,7 +9069,7 @@ export async function runLlmPatchFlow(input: {
         plan,
       });
       const rvp0 = runtimeVerificationPlan;
-      console.log(
+      debugLog(
         `[zone-runtime-verify] status=${rvp0.status} steps=${rvp0.steps.length}`
       );
       const mapFailureType = (
@@ -9142,7 +9141,7 @@ export async function runLlmPatchFlow(input: {
           }
         }
       }
-      console.log("[zone-verification-parse]", verificationErrorInfo);
+      debugLog("[zone-verification-parse]", verificationErrorInfo);
 
       // Order is critical:
       // 1) parseVerificationError always runs first
@@ -9152,7 +9151,7 @@ export async function runLlmPatchFlow(input: {
         const msg = verificationErrorInfo.errorType === "no_tests_found"
           ? "Verification skipped: pre-existing issue (no tests found)"
           : "Verification skipped: pre-existing verification failure";
-        console.log("[zone-verification-preexisting]", {
+        debugLog("[zone-verification-preexisting]", {
           command: runtimeVerificationPlan.failedCommand ?? plan[0]?.command,
           failingFile: verificationErrorInfo.failingFile,
           errorType: verificationErrorInfo.errorType,
@@ -9294,7 +9293,7 @@ export async function runLlmPatchFlow(input: {
           Array.from(patchedFilesSet).some((p) =>
             verificationErrorInfo.failingFile!.endsWith(p)
           ));
-      console.log("[zone-verification-smart-check]", {
+      debugLog("[zone-verification-smart-check]", {
         status: runtimeVerificationPlan?.status,
         failingFile: verificationErrorInfo.failingFile,
         failingFileIsPatched,
@@ -9391,7 +9390,7 @@ export async function runLlmPatchFlow(input: {
                   repoPath: input.repoPath,
                   plan,
                 });
-                console.log("[zone-verification-rerun]", {
+                debugLog("[zone-verification-rerun]", {
                   status: rerunAfterDeterministicFix.status,
                   failedCommand: rerunAfterDeterministicFix.failedCommand,
                 });
@@ -9426,7 +9425,7 @@ export async function runLlmPatchFlow(input: {
           // Deterministic fix worked; skip agent-loop fallback.
           // Continue through the outer verification flow with runtimeVerificationPlan updated.
         } else {
-        console.log("[zone-verification-investigating]", {
+        debugLog("[zone-verification-investigating]", {
           failingFile: verificationErrorInfo.failingFile,
           errorType: verificationErrorInfo.errorType,
         });
@@ -9497,7 +9496,7 @@ export async function runLlmPatchFlow(input: {
           },
           userApiKey: input.userApiKey,
         });
-        console.log("[zone-verification-fix-result]", {
+        debugLog("[zone-verification-fix-result]", {
           success: fixResult.success,
           error: fixResult.error,
           summary: String(fixResult.summary || "").slice(0, 400),
@@ -9507,7 +9506,7 @@ export async function runLlmPatchFlow(input: {
         });
 
         if (fixResult.success) {
-          console.log("[zone-verification-fixed]", { failingFile: verificationErrorInfo.failingFile });
+          debugLog("[zone-verification-fixed]", { failingFile: verificationErrorInfo.failingFile });
           emitStructuredProgress({
             type: "verification_fixed" as any,
             title: "Verification-related file fixed, re-running verification...",
@@ -9538,7 +9537,7 @@ export async function runLlmPatchFlow(input: {
               command: rerunAfterFix.failedCommand,
               summary: rerunAfterFix.summary,
             };
-          console.log("[zone-verification-rerun]", {
+          debugLog("[zone-verification-rerun]", {
             status: rerunAfterFix.status,
             failedCommand: rerunAfterFix.failedCommand,
           });
@@ -9562,7 +9561,7 @@ export async function runLlmPatchFlow(input: {
           verificationErrorInfo.errorType === "unknown");
 
       if (runtimeVerificationPlan.status === "failed_code_related" && shouldEnterExistingRepairLoop) {
-        console.log(
+        debugLog(
           "[zone-verification-failed]",
           JSON.stringify({
             failureType: "code_related",
@@ -9589,7 +9588,7 @@ export async function runLlmPatchFlow(input: {
           );
         }, 0);
         if (touchesProtected || totalChangedForRepair > safeRepairLineThreshold) {
-          console.log(
+          debugLog(
             "[zone-repair-skipped]",
             JSON.stringify({
               reason: touchesProtected ? "protected_files" : "patch_too_large",
@@ -9609,7 +9608,7 @@ export async function runLlmPatchFlow(input: {
         } else if (applyPatches.length > 0) {
           for (let attempt = 1; attempt <= maxRepairAttempts; attempt += 1) {
             verificationRepairAttempted = true;
-            console.log(
+            debugLog(
               "[zone-repair-start]",
               JSON.stringify({
                 attempt,
@@ -9634,7 +9633,7 @@ export async function runLlmPatchFlow(input: {
               ],
             });
             const guidanceText = formatRetryGuidanceBrief(brief);
-            console.log("[zone-runtime-verify-retry] attempting repair");
+            debugLog("[zone-runtime-verify-retry] attempting repair");
 
             // Patch only the already-changed files; keep changes minimal.
             repairAttempts.push({
@@ -9687,14 +9686,14 @@ export async function runLlmPatchFlow(input: {
                 relatedContext: "IMPORTANT: Only output a valid patch. Do not explain.",
               });
               if (repaired.mode !== "patch") continue;
-              console.log("[zone-repair-patch-generated]", patch.filePath);
+              debugLog("[zone-repair-patch-generated]", patch.filePath);
               const applied = applyDeveloperPatchText(patch.fullContent, repaired.patchText, {
                 filePath: patch.filePath,
               });
               if (!applied.ok) {
                 const failure = parsePatchFailureWarning(applied.warning);
                 if (failure.reason === "no_match_abort") {
-                  console.log("[zone-retry-skipped-no-match]", patch.filePath);
+                  debugLog("[zone-retry-skipped-no-match]", patch.filePath);
                   fallbackForcePreviewOnly = true;
                 }
                 if (failure.reason === "anchor_too_small_for_large_replace") {
@@ -9705,7 +9704,7 @@ export async function runLlmPatchFlow(input: {
               const diff = computeFileDiff(patch.fullContent, applied.fullContent);
               const changed = diff.filter((l) => l.type === "added" || l.type === "removed").length;
               if (changed > 50) {
-                console.log(
+                debugLog(
                   "[zone-retry-aborted-large-diff]",
                   JSON.stringify({ filePath: patch.filePath, changedLines: changed })
                 );
@@ -9722,7 +9721,7 @@ export async function runLlmPatchFlow(input: {
             });
 
             // Re-run runtime verification after repair attempt.
-            console.log("[zone-repair-verification-start]", JSON.stringify({ attempt }));
+            debugLog("[zone-repair-verification-start]", JSON.stringify({ attempt }));
             if (plan.length > 0) {
               emitStructuredProgress({
                 type: "verification",
@@ -9736,7 +9735,7 @@ export async function runLlmPatchFlow(input: {
               plan,
             });
             const rvp1 = runtimeVerificationPlan;
-            console.log(
+            debugLog(
               `[zone-runtime-verify-retry] status=${rvp1.status} steps=${rvp1.steps.length}`
             );
             verificationAttempts.push(
@@ -9748,17 +9747,17 @@ export async function runLlmPatchFlow(input: {
               }))
             );
             if (rvp1.status === "passed") {
-              console.log("[zone-repair-success]", JSON.stringify({ attempt }));
+              debugLog("[zone-repair-success]", JSON.stringify({ attempt }));
               break;
             }
             if (rvp1.status === "failed_environment_or_tooling") {
-              console.log(
+              debugLog(
                 "[zone-repair-failed]",
                 JSON.stringify({ attempt, reason: "tooling_issue" })
               );
               break;
             }
-            console.log(
+            debugLog(
               "[zone-repair-failed]",
               JSON.stringify({ attempt, reason: rvp1.status })
             );
@@ -9778,7 +9777,7 @@ export async function runLlmPatchFlow(input: {
         }
         }
       } else if (runtimeVerificationPlan.status === "failed_environment_or_tooling") {
-        console.log(
+        debugLog(
           "[zone-verification-failed]",
           JSON.stringify({
             failureType: "tooling_issue",
@@ -9792,7 +9791,7 @@ export async function runLlmPatchFlow(input: {
         internalWarnings.push(warning);
         visibleWarnings.push(warning);
       } else if (runtimeVerificationPlan.status === "timeout") {
-        console.log(
+        debugLog(
           "[zone-verification-failed]",
           JSON.stringify({
             failureType: "timeout",
@@ -10147,7 +10146,7 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
     (verification == null || verification.score >= 60)
   ) {
     const previousDecision = decisionMode;
-    console.log(
+    debugLog(
       "[zone-decision-fast-path]",
       JSON.stringify({
         applied: true,
@@ -10182,7 +10181,7 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
     const changeRatio =
       originalLines > 0 ? patchScope.totalChangedLines / originalLines : 1;
     if (changeRatio < 0.01) {
-      console.log(
+      debugLog(
         "[zone-decision-override]",
         JSON.stringify({
           reason: "minimal_safe_patch",
@@ -10216,7 +10215,7 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
     patchScope.totalRemovedLines <= 1 &&
     (verification == null || verification.score >= 60);
   if (minimalSafePatch && decisionMode !== "safe_to_apply") {
-    console.log("[zone-decision-fast-path]", {
+    debugLog("[zone-decision-fast-path]", {
       applied: true,
       reason: "minimal_safe_patch",
       previousDecision: decisionMode,

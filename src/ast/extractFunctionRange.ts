@@ -1,3 +1,5 @@
+import { debugLog } from "../utils/logger.js";
+
 export interface FunctionRange {
   name: string;
   startLine: number; // 1-indexed
@@ -208,7 +210,7 @@ export function extractFunctionRanges(
         const content = normalized.slice(lineOffsets[li], endChar);
         try {
           const previewStart = Math.max(0, startChar - 20);
-          console.log("[zone-ast-range-preview]", {
+          debugLog("[zone-ast-range-preview]", {
             file: filePath,
             name,
             startChar,

@@ -10,6 +10,7 @@ import {
   type DeveloperPatchJobRecord,
 } from "../jobs/developerPatchJobs.js";
 import { logRun } from "../api/runLogging.js";
+import { debugLog } from "../utils/logger.js";
 
 const IDLE_DELAY_MS = 1500;
 
@@ -102,7 +103,7 @@ async function processDeveloperPatchJob(
         ? result.developerConfidence
         : 0;
 
-    console.log("[zone-billing-debug] execution success reached", {
+    debugLog("[zone-billing-debug] execution success reached", {
       routeName: "/api/patch/jobs worker",
       userId: requestPayload.userId,
       billingMode: requestPayload.billingMode ?? null,

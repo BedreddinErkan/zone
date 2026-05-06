@@ -3,6 +3,7 @@ import { applyLlmPatches } from "./applyLlmPatches.js";
 import { readProjectFiles } from "../repo/readProjectFiles.js";
 import path from "node:path";
 import { promises as fs } from "node:fs";
+import { debugLog, errorLog } from "../utils/logger.js";
 
 export interface HealingAttempt {
   attempt: number;
@@ -159,11 +160,11 @@ export async function runSelfHealingLoop(
   let currentError = input.errorMessage;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    console.log(`[zone:heal] Attempt ${attempt}/${maxAttempts} — analyzing error...`);
+    debugLog(`[zone:heal] Attempt ${attempt}/${maxAttempts} — analyzing error...`);
 
     const errorContext = extractErrorContext(currentError);
-    console.log(`[zone:heal] Error type: ${errorContext.type}`);
-    console.log(`[zone:heal] Hint: ${errorContext.hint}`);
+    debugLog(`[zone:heal] Error type: ${errorContext.type}`);
+    debugLog(`[zone:heal] Hint: ${errorContext.hint}`);
 
     const filesChanged: string[] = [];
     let anyFixed = false;
@@ -222,10 +223,10 @@ export async function runSelfHealingLoop(
           await fs.writeFile(absolutePath, parsed.fullContent, "utf8");
           filesChanged.push(affectedFile.filePath);
           anyFixed = true;
-          console.log(`[zone:heal] Fixed: ${affectedFile.filePath} — ${parsed.summary}`);
+          debugLog(`[zone:heal] Fixed: ${affectedFile.filePath} — ${parsed.summary}`);
         }
       } catch (err) {
-        console.error(
+        errorLog(
           `[zone:heal] Failed to fix ${affectedFile.filePath}: ${
             err instanceof Error ? err.message : String(err)
           }`

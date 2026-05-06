@@ -1,3 +1,5 @@
+import { debugLog } from "../utils/logger.js";
+
 export type PatchCorrectnessIssue = {
   layer: 0 | 1 | 2 | 3 | 4;
   code: string;
@@ -1016,7 +1018,7 @@ function layer1LexicalIntegrity(input: PatchCorrectnessInput): LexicalResult {
   const localizedValidationMode =
     diffCounts.totalChangedLines <= 5 && additiveOnly && deltaBalanced;
   if (localizedValidationMode) {
-    console.log(
+    debugLog(
       "[zone-validator-localized-mode]",
       JSON.stringify({ enabled: true, reason: "small_safe_patch" })
     );
@@ -1037,7 +1039,7 @@ function layer1LexicalIntegrity(input: PatchCorrectnessInput): LexicalResult {
     const unchangedOrImproved = delimiterUnchangedOrImproved(beforeCounts, afterCounts);
     const minimalPatch = diffCounts.totalChangedLines < 5;
     const decision = !worsened && (unchangedOrImproved || minimalPatch) ? "allow" : "block";
-    console.log(
+    debugLog(
       "[zone-validator-delta]",
       JSON.stringify({
         filePath: input.filePath,
@@ -1079,13 +1081,13 @@ function layer1LexicalIntegrity(input: PatchCorrectnessInput): LexicalResult {
       return { issues, strippedForJsx: input.updatedContent };
     }
 
-    console.log(
+    debugLog(
       "[zone-delimiter-trace]",
       JSON.stringify({ filePath: input.filePath, events: scan.events })
     );
     const last = scan.events[scan.events.length - 1];
     if (last) {
-      console.log("[zone-mode-debug]", {
+      debugLog("[zone-mode-debug]", {
         index: last.index,
         char: last.char,
         mode: last.mode,
@@ -1093,7 +1095,7 @@ function layer1LexicalIntegrity(input: PatchCorrectnessInput): LexicalResult {
         stack: last.stack,
       });
     }
-    console.log(
+    debugLog(
       "[zone-delimiter-diagnostic]",
       JSON.stringify({
         filePath: input.filePath,
@@ -1569,7 +1571,7 @@ export function validatePatchCorrectness(
         message: i.message + " (ignored: patch did not touch import region)",
       }))
     );
-    console.log(
+    debugLog(
       "[zone-validator-override]",
       JSON.stringify({
         reason: "minimal_safe_patch",

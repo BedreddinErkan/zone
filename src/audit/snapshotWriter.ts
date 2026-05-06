@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { AuditSnapshot } from "./auditSnapshot.js";
+import { errorLog } from "../utils/logger.js";
 
 // ---------------------------------------------------------------------------
 // writeAuditSnapshot
@@ -28,7 +29,7 @@ export function writeAuditSnapshot(
     fs.writeFileSync(filePath, JSON.stringify(snapshot, null, 2), "utf8");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`[audit] Failed to write snapshot: ${message}`);
+    errorLog(`[audit] Failed to write snapshot: ${message}`);
   }
 }
 

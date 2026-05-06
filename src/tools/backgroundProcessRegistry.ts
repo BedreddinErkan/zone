@@ -4,6 +4,7 @@ import {
   type SpawnOptions,
 } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { errorLog } from "../utils/logger.js";
 
 const RING_CAP = 256 * 1024;
 const MAX_PER_RUN = 3;
@@ -392,7 +393,7 @@ export async function killAllForRun(
       const r = await kill({ runId, handle: proc.handle, signal: "SIGTERM" });
       if (r.success) killed += 1;
     } catch (err) {
-      console.error(
+      errorLog(
         "[zone-bg-cleanup-error]",
         JSON.stringify({
           runId,

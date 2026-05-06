@@ -1,5 +1,19 @@
 import type { FeatureAgentResult, ValidationIssue } from "../types/agent.js";
 
+const VERBOSE = process.env.ZONE_VERBOSE_LOGS === "1";
+
+export const log = (...args: unknown[]): void => {
+  console.log(...args);
+};
+
+export const debugLog = (...args: unknown[]): void => {
+  if (VERBOSE) console.log(...args);
+};
+
+export const errorLog = (...args: unknown[]): void => {
+  console.error(...args);
+};
+
 export type ZoneLogLevel = "debug" | "info" | "quiet";
 
 export const LOG_LEVEL: ZoneLogLevel =

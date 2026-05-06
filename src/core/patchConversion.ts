@@ -1,4 +1,5 @@
 import { stripPatchTextFences } from "./developerPatchParse.js";
+import { debugLog } from "../utils/logger.js";
 
 export type TryRecoverDeveloperPatchResult =
   | { ok: true; strictPatchText: string }
@@ -220,10 +221,10 @@ export function tryRecoverDeveloperPatchFromModelOutput(input: {
   rawModelText: string;
   task?: string;
 }): TryRecoverDeveloperPatchResult {
-  console.log("[zone-patch-recovery-start]", input.requestedFilePath);
+  debugLog("[zone-patch-recovery-start]", input.requestedFilePath);
   const raw = stripPatchTextFences(String(input.rawModelText || "")).trim();
   if (!raw) {
-    console.log("[zone-patch-recovery-failed]", "empty_raw");
+    debugLog("[zone-patch-recovery-failed]", "empty_raw");
     return { ok: false, reason: "empty_raw" };
   }
 
@@ -231,14 +232,14 @@ export function tryRecoverDeveloperPatchFromModelOutput(input: {
   const blocks = extractFileBlocks(raw);
 
   if (blocks.length > 1) {
-    console.log("[zone-patch-recovery-failed]", "multiple_file_blocks");
+    debugLog("[zone-patch-recovery-failed]", "multiple_file_blocks");
     return { ok: false, reason: "multiple_file_blocks" };
   }
 
   let body: string;
   if (blocks.length === 1) {
     if (!pathsEqual(input.requestedFilePath, blocks[0].path)) {
-      console.log("[zone-patch-recovery-failed]", "file_path_mismatch");
+      debugLog("[zone-patch-recovery-failed]", "file_path_mismatch");
       return { ok: false, reason: "file_path_mismatch" };
     }
     body = blocks[0].body;
@@ -247,30 +248,30 @@ export function tryRecoverDeveloperPatchFromModelOutput(input: {
   }
 
   if (findHeaderOccurrences(body) > 1) {
-    console.log("[zone-patch-recovery-failed]", "multiple_find_sections");
+    debugLog("[zone-patch-recovery-failed]", "multiple_find_sections");
     return { ok: false, reason: "multiple_find_sections" };
   }
 
   const pair = extractFindReplacePair(body);
   if (!pair) {
-    console.log("[zone-patch-recovery-failed]", "no_find_replace_pair");
+    debugLog("[zone-patch-recovery-failed]", "no_find_replace_pair");
     return { ok: false, reason: "no_find_replace_pair" };
   }
 
   const find = pair.find;
   const replace = pair.replace;
   if (!find.trim()) {
-    console.log("[zone-patch-recovery-failed]", "empty_find");
+    debugLog("[zone-patch-recovery-failed]", "empty_find");
     return { ok: false, reason: "empty_find" };
   }
   if (find === replace) {
-    console.log("[zone-patch-recovery-failed]", "no_op_replace");
+    debugLog("[zone-patch-recovery-failed]", "no_op_replace");
     return { ok: false, reason: "no_op_replace" };
   }
 
   const patchChangedLines = estimateChangedLines(find, replace);
   if (patchChangedLines > 5) {
-    console.log("[zone-patch-recovery-failed]", "edit_too_large");
+    debugLog("[zone-patch-recovery-failed]", "edit_too_large");
     return { ok: false, reason: "edit_too_large" };
   }
 
@@ -297,7 +298,7 @@ export function tryRecoverDeveloperPatchFromModelOutput(input: {
         const tokenHits =
           countOccurrences(original, withNl) || countOccurrences(original, tokenLine);
         if (tokenHits === 1) {
-          console.log("[zone-patch-fallback-applied]", "minimal_patch_ignore_find");
+          debugLog("[zone-patch-fallback-applied]", "minimal_patch_ignore_find");
           resolvedFind = countOccurrences(original, withNl) === 1 ? withNl : tokenLine;
           resolvedReplace = "";
         }
@@ -324,7 +325,7 @@ export function tryRecoverDeveloperPatchFromModelOutput(input: {
           const replaceNoIndent = singleLine.replaceLine.replace(/^\s*/, "");
           resolvedFind = rawLine;
           resolvedReplace = `${indent}${replaceNoIndent}`;
-          console.log(
+          debugLog(
             "[zone-patch-fuzzy-match]",
             JSON.stringify({
               filePath: input.requestedFilePath,
@@ -332,16 +333,16 @@ export function tryRecoverDeveloperPatchFromModelOutput(input: {
               line: idx + 1,
             })
           );
-          console.log("[zone-patch-fallback-applied]", "single_line_normalized");
+          debugLog("[zone-patch-fallback-applied]", "single_line_normalized");
         } else if (matchingIdxs.length > 1) {
-          console.log("[zone-patch-recovery-failed]", "single_line_ambiguous");
+          debugLog("[zone-patch-recovery-failed]", "single_line_ambiguous");
           return { ok: false, reason: "single_line_ambiguous" };
         }
       }
 
       const fuzzy = findBestFuzzyWindowMatch({ original, find });
       if (fuzzy.ok) {
-        console.log(
+        debugLog(
           "[zone-patch-fuzzy-match]",
           JSON.stringify({
             filePath: input.requestedFilePath,
@@ -356,9 +357,9 @@ export function tryRecoverDeveloperPatchFromModelOutput(input: {
           .join("\n");
         if (countOccurrences(original, candidate) === 1) {
           resolvedFind = candidate;
-          console.log("[zone-patch-fallback-applied]", "fuzzy_window");
+          debugLog("[zone-patch-fallback-applied]", "fuzzy_window");
         } else {
-          console.log("[zone-patch-recovery-failed]", "fuzzy_ambiguous");
+          debugLog("[zone-patch-recovery-failed]", "fuzzy_ambiguous");
           return { ok: false, reason: "fuzzy_ambiguous" };
         }
       } else {
@@ -387,7 +388,7 @@ export function tryRecoverDeveloperPatchFromModelOutput(input: {
               anchorLineRange: { start, end },
             });
             if (heur.ok) {
-              console.log(
+              debugLog(
                 "[zone-patch-heuristic-match]",
                 JSON.stringify({
                   filePath: input.requestedFilePath,
@@ -402,9 +403,9 @@ export function tryRecoverDeveloperPatchFromModelOutput(input: {
                 .join("\n");
               if (countOccurrences(original, candidate) === 1) {
                 resolvedFind = candidate;
-                console.log("[zone-patch-fallback-applied]", "heuristic_function_anchor");
+                debugLog("[zone-patch-fallback-applied]", "heuristic_function_anchor");
               } else {
-                console.log("[zone-patch-recovery-failed]", "heuristic_ambiguous");
+                debugLog("[zone-patch-recovery-failed]", "heuristic_ambiguous");
                 return { ok: false, reason: "heuristic_ambiguous" };
               }
             }
@@ -416,7 +417,7 @@ export function tryRecoverDeveloperPatchFromModelOutput(input: {
     const finalHits = countOccurrences(original, resolvedFind);
     if (finalHits !== 1) {
     if (finalHits === 0) {
-      console.log(
+      debugLog(
         "[zone-patch-no-match-abort]",
         JSON.stringify({
           filePath: input.requestedFilePath,
@@ -425,7 +426,7 @@ export function tryRecoverDeveloperPatchFromModelOutput(input: {
       );
       return { ok: false, reason: "no_match_abort" };
     }
-      console.log("[zone-patch-recovery-failed]", `find_occurrences_${finalHits}`);
+      debugLog("[zone-patch-recovery-failed]", `find_occurrences_${finalHits}`);
       return { ok: false, reason: `find_occurrences_${finalHits}` };
     }
   }
@@ -436,7 +437,7 @@ export function tryRecoverDeveloperPatchFromModelOutput(input: {
     resolvedReplace +
     original.slice(idx + resolvedFind.length);
   if (merged === original) {
-    console.log("[zone-patch-recovery-failed]", "merged_unchanged");
+    debugLog("[zone-patch-recovery-failed]", "merged_unchanged");
     return { ok: false, reason: "merged_unchanged" };
   }
 
@@ -445,6 +446,6 @@ export function tryRecoverDeveloperPatchFromModelOutput(input: {
     resolvedFind,
     resolvedReplace
   );
-  console.log("[zone-patch-recovery-success]", input.requestedFilePath);
+  debugLog("[zone-patch-recovery-success]", input.requestedFilePath);
   return { ok: true, strictPatchText };
 }

@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { debugLog } from "../utils/logger.js";
 import {
   extractResponsesApiOutputText,
   getModelName,
@@ -121,7 +122,7 @@ async function buildChatContext(
               matchCount: 30,
             });
       if (queryEmbedding === null) {
-        console.log("[zone-chat-debug]", {
+        debugLog("[zone-chat-debug]", {
           stage: "semantic_skipped",
           reason: "no_query_embedding",
         });
@@ -137,7 +138,7 @@ async function buildChatContext(
           .map((match) => [match.filePath, match.similarity])
       );
 
-      console.log("[zone-chat-debug]", {
+      debugLog("[zone-chat-debug]", {
         stage: "semantic_context_ready",
         repoPath,
         semanticScoresSize: semanticScores.size,
@@ -177,7 +178,7 @@ async function buildChatContext(
     content: contents[file.absolutePath] ?? "",
   }));
 
-  console.log("[zone-chat-debug]", {
+  debugLog("[zone-chat-debug]", {
     stage: "context_ranked",
     repoPath,
     contextFiles: contextFiles.map((file) => file.path),
@@ -271,7 +272,7 @@ export async function getChatResponseWithContext(input: {
     contextFiles,
   });
 
-  console.log("[zone-chat-debug]", {
+  debugLog("[zone-chat-debug]", {
     stage: "prompt_ready",
     repoPath: normalizedRepoPath,
     taskPreview: normalizedTask.slice(0, 120),

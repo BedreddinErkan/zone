@@ -1,6 +1,7 @@
 import type { RepoFile } from "../types/project.js";
 import { getIntentAwareScoreBoost } from "../core/intentAwareScore.js";
 import type { TaskIntent } from "../core/taskIntentParser.js";
+import { debugLog } from "../utils/logger.js";
 
 type TaskSignal =
   | "component"
@@ -989,7 +990,7 @@ export async function rankRelevantFiles(args: {
   lastChangedFiles?: string[];
   readContent?: (filePath: string) => Promise<string | null>;
 }): Promise<Array<RepoFile & { score: number }>> {
-  console.log("[zone-rank-fn-entry] rankRelevantFiles called", {
+  debugLog("[zone-rank-fn-entry] rankRelevantFiles called", {
     hasSemanticScores: !!args.semanticScores,
     semanticScoresSize: args.semanticScores?.size || 0,
     fileCount: args.files?.length,
@@ -997,7 +998,7 @@ export async function rankRelevantFiles(args: {
   const { task, files, intent, semanticScores, lastChangedFiles, readContent } =
     args;
 
-  console.log("[zone-rank-input-debug]", {
+  debugLog("[zone-rank-input-debug]", {
     hasSemanticScores: !!semanticScores,
     semanticScoresSize: semanticScores?.size || 0,
   });
@@ -1054,7 +1055,7 @@ export async function rankRelevantFiles(args: {
     if (allTerms.length > 0) {
       ranked.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
       await applyLexicalBoost(ranked, task, readContent);
-      console.log("[zone-rank-lexical-debug]", {
+      debugLog("[zone-rank-lexical-debug]", {
         baseTerms,
         domainTerms: allTerms.filter((t) => !baseTerms.includes(t)),
         topAfterLexical: ranked
@@ -1128,7 +1129,7 @@ export async function rankRelevantFiles(args: {
       const thresholdMet = topSemanticSimilarity > 0.35;
       const alreadyInTop5 = currentTopFive.includes(topSemanticMatch.path);
       const willInsert = thresholdMet && !alreadyInTop5;
-      console.log("[zone-rank-rescue-check]", {
+      debugLog("[zone-rank-rescue-check]", {
         topSemantic: {
           file: topSemanticMatch.path,
           similarity: topSemanticSimilarity,
@@ -1144,12 +1145,12 @@ export async function rankRelevantFiles(args: {
           (file) => file.path !== topSemanticMatch.path
         );
         finalHybridRanked.splice(1, 0, topSemanticMatch);
-        console.log("[zone-rank-rescue-debug]", {
+        debugLog("[zone-rank-rescue-debug]", {
           candidateFile: topSemanticMatch.path,
           candidateSimilarity: topSemanticSimilarity,
           decision: "inserted",
         });
-        console.log("[zone-rank-semantic-rescue]", {
+        debugLog("[zone-rank-semantic-rescue]", {
           file: topSemanticMatch.path,
           similarity: topSemanticSimilarity,
           hybridScore: Number(
@@ -1159,7 +1160,7 @@ export async function rankRelevantFiles(args: {
           action: "inserted_at_top",
         });
       } else {
-        console.log("[zone-rank-rescue-debug]", {
+        debugLog("[zone-rank-rescue-debug]", {
           candidateFile: topSemanticMatch.path,
           candidateSimilarity: topSemanticSimilarity,
           decision: "skipped",
@@ -1177,7 +1178,7 @@ export async function rankRelevantFiles(args: {
         hybridScore: Number((file as typeof file & { __hybridScore: number }).__hybridScore || file.score),
       }));
 
-    console.log("[zone-rank-hybrid-debug]", {
+    debugLog("[zone-rank-hybrid-debug]", {
       task,
       topFiles,
     });

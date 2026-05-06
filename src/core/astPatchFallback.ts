@@ -2,6 +2,7 @@ import { parse } from "@babel/parser";
 import traverse, { type NodePath } from "@babel/traverse";
 import generate from "@babel/generator";
 import * as t from "@babel/types";
+import { debugLog } from "../utils/logger.js";
 
 export type AstPatchFallbackInput = {
   filePath: string;
@@ -236,7 +237,7 @@ export function tryAstPatchFallback(input: AstPatchFallbackInput): AstPatchFallb
     const fn = candidates[0];
     if (!fn) return { ok: false, reason: "target_not_found" };
     if (hasUploadGuardAlready(fn)) {
-      console.log(
+      debugLog(
         "[zone-ast-fallback-no-change]",
         JSON.stringify({ filePath, reason: "guard_already_present" })
       );
@@ -247,8 +248,8 @@ export function tryAstPatchFallback(input: AstPatchFallbackInput): AstPatchFallb
       originalContent: input.originalContent,
     });
     if (!patch.ok) return { ok: false, reason: "target_not_found" };
-    console.log("[zone-ast-safe-guard-insert]", JSON.stringify({ filePath }));
-    console.log(
+    debugLog("[zone-ast-safe-guard-insert]", JSON.stringify({ filePath }));
+    debugLog(
       "[zone-ast-patch-generated]",
       JSON.stringify({ lines: patch.insertedLines.length })
     );
@@ -264,7 +265,7 @@ export function tryAstPatchFallback(input: AstPatchFallbackInput): AstPatchFallb
   }
 
   if (!changed) {
-    console.log(
+    debugLog(
       "[zone-ast-fallback-no-change]",
       JSON.stringify({ filePath, reason: "no_ast_transform_applied" })
     );
@@ -310,7 +311,7 @@ export function tryAstPatchFallback(input: AstPatchFallbackInput): AstPatchFallb
   }
 
   if (changedLinesEstimate === 0) {
-    console.log(
+    debugLog(
       "[zone-ast-fallback-no-change]",
       JSON.stringify({ filePath, reason: "generated_equals_original" })
     );

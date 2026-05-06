@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createLLMClient } from "../llm/factory.js";
+import { debugLog, errorLog } from "../utils/logger.js";
 
 const EMBEDDING_MODEL = "text-embedding-3-small";
 const MAX_INPUT_CHARS = 24000;
@@ -40,7 +41,7 @@ export async function embedText(text: string): Promise<number[] | null> {
   }
 
   if (client.provider !== "openai") {
-    console.log("[zone-embed-skipped]", {
+    debugLog("[zone-embed-skipped]", {
       reason: "provider_no_embedding_support",
       provider: client.provider,
     });
@@ -67,7 +68,7 @@ export async function embedText(text: string): Promise<number[] | null> {
       throw new Error("Embedding API returned no embedding vector.");
     }
 
-    console.log("[zone-embed-debug]", {
+    debugLog("[zone-embed-debug]", {
       textLength: truncated.length,
       tokensApprox,
       elapsedMs: Date.now() - startedAt,
@@ -77,21 +78,21 @@ export async function embedText(text: string): Promise<number[] | null> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("not supported by the Anthropic provider")) {
-      console.log("[zone-embed-skipped]", {
+      debugLog("[zone-embed-skipped]", {
         reason: "provider_no_embedding_support",
         provider: client.provider,
       });
       return null;
     }
     if (message.includes("timed out")) {
-      console.error("[zone-embed-timeout]", {
+      errorLog("[zone-embed-timeout]", {
         textLength: truncated.length,
         tokensApprox,
         elapsedMs: Date.now() - startedAt,
         stage: "embedText",
       });
     }
-    console.error("[zone-embed-error]", {
+    errorLog("[zone-embed-error]", {
       textLength: truncated.length,
       tokensApprox,
       elapsedMs: Date.now() - startedAt,

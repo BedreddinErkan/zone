@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { AuditSnapshot } from "./auditSnapshot.js";
+import { errorLog } from "../utils/logger.js";
 
 /**
  * Reads an audit snapshot JSON file from disk and parses it.
@@ -24,7 +25,7 @@ export function readAuditSnapshot(filePath: string): AuditSnapshot | null {
     const message =
       error instanceof Error ? error.message : String(error);
 
-    console.error(`[audit] Failed to read snapshot: ${message}`);
+    errorLog(`[audit] Failed to read snapshot: ${message}`);
 
     return null;
   }

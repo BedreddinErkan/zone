@@ -1,6 +1,7 @@
 import { extractResponsesApiOutputText, getModelName } from "./openaiClient.js";
 import { createLLMClient } from "./factory.js";
 import { getRequestContext } from "./openaiContext.js";
+import { debugLog } from "../utils/logger.js";
 
 export type ZoneMessageType = "patch_request" | "question" | "discussion";
 export type ZoneLegacyIntent = "execute" | "chat";
@@ -96,7 +97,7 @@ export async function detectMessageType(
     const raw = extraction.ok ? extraction.text : "";
     const messageType = parseMessageTypeJson(raw) ?? fallbackMessageType(normalizedTask);
 
-    console.log("[zone-intent-classify]", {
+    debugLog("[zone-intent-classify]", {
       taskPreview: normalizedTask.slice(0, 120),
       raw: raw.slice(0, 120),
       messageType,
@@ -105,7 +106,7 @@ export async function detectMessageType(
     return messageType;
   } catch (error) {
     const messageType = fallbackMessageType(normalizedTask);
-    console.log("[zone-intent-classify]", {
+    debugLog("[zone-intent-classify]", {
       taskPreview: normalizedTask.slice(0, 120),
       error: error instanceof Error ? error.message : String(error),
       messageType,

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createLLMClient } from "./factory.js";
+import { debugLog, errorLog } from "../utils/logger.js";
 import { getModelName } from "./openaiClient.js";
 import { getRequestContext } from "./openaiContext.js";
 import type { ProjectFramework } from "../repo/detectFramework.js";
@@ -224,7 +225,7 @@ export async function plannerStep(input: {
   let dependencyWarnings: string[] = [];
   let dependencyContextForPrompt = "";
 
-  console.log("[zone-dep-graph-start]", {
+  debugLog("[zone-dep-graph-start]", {
     repoPath: !!input.repoPath,
     filesCount: input.rankedFilePaths?.length,
   });
@@ -238,7 +239,7 @@ export async function plannerStep(input: {
     try {
       const graph = await buildDependencyGraph(input.repoPath, input.allRepoFilePaths);
       relatedFiles = getRelatedFiles(filesToEdit, graph, 8);
-      console.log("[zone-dep-graph]", {
+      debugLog("[zone-dep-graph]", {
         targetFiles: filesToEdit,
         relatedCount: relatedFiles.length,
         related: relatedFiles.map((f) => f.filePath + ":" + f.relationship),
@@ -247,7 +248,7 @@ export async function plannerStep(input: {
       dependencyWarnings = art.warnings;
       dependencyContextForPrompt = art.prompt;
     } catch (err) {
-      console.log(
+      errorLog(
         "[zone-dep-graph-error]",
         err instanceof Error ? err.message : String(err)
       );
@@ -284,7 +285,7 @@ export async function plannerStep(input: {
           .join("\n");
       }
     } catch (err) {
-      console.log(
+      errorLog(
         "[zone-ast-scan-error]",
         err instanceof Error ? err.message : String(err)
       );

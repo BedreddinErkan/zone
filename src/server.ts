@@ -1,7 +1,9 @@
-console.log("[zone] server.ts loading...");
 import os from "node:os";
 import path from "node:path";
 import { existsSync, readFileSync } from "node:fs";
+import { log, debugLog } from "./utils/logger.js";
+
+debugLog("[zone] server.ts loading...");
 
 function loadCliAuthConfig(): void {
   const configPath = path.join(os.homedir(), ".zone", "config.json");
@@ -25,7 +27,7 @@ function loadCliAuthConfig(): void {
       process.env.ZONE_USER_EMAIL = email;
     }
 
-    console.log(`[zone] Loaded CLI auth for user ${userId}`);
+    log(`[zone] Loaded CLI auth for user ${userId}`);
   } catch {
     console.warn("[zone] Warning: could not parse ~/.zone/config.json");
   }

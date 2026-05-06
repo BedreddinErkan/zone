@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import fg from "fast-glob";
+import { debugLog, errorLog } from "../utils/logger.js";
 import {
   extractDeclaredSymbols,
   locateSymbol,
@@ -128,7 +129,7 @@ export function resolveAgentPath(
       // Legacy safeRelPath behavior: strip leading separators.
       resolved = raw.replace(/^[\\/]+/, "");
     }
-    console.log("[zone-tool-path-resolve]", JSON.stringify({
+    debugLog("[zone-tool-path-resolve]", JSON.stringify({
       tool: toolName ?? null,
       agentInput: raw,
       isAbsolute: true,
@@ -324,7 +325,7 @@ export async function withStagingTempFlush<T>(
       fs.writeFileSync(abs, content, "utf8");
       filesFlushed++;
     } catch (err) {
-      console.error("[zone-staging-temp-flush-error]", {
+      errorLog("[zone-staging-temp-flush-error]", {
         filePath: abs,
         error: String((err as Error).message ?? err),
       });
@@ -352,13 +353,13 @@ export async function withStagingTempFlush<T>(
         filesRestored++;
       } catch (err) {
         restoreFailures++;
-        console.error("[zone-staging-restore-error]", {
+        errorLog("[zone-staging-restore-error]", {
           filePath: abs,
           error: String((err as Error).message ?? err),
         });
       }
     }
-    console.log("[zone-staging-temp-flush]", JSON.stringify({
+    debugLog("[zone-staging-temp-flush]", JSON.stringify({
       filesFlushed,
       filesRestored,
       restoreFailures,
@@ -395,7 +396,7 @@ export async function executeTool(
       const command = String(args.command ?? "");
       const resolved = resolveRunCommandCwd(args.cwd, repoPath);
       if (!resolved.ok) {
-        console.log("[zone-tool-runcmd-cwd-error]", {
+        debugLog("[zone-tool-runcmd-cwd-error]", {
           rawCwd: args.cwd,
           repoPath,
           error: resolved.error,
@@ -452,7 +453,7 @@ export async function executeTool(
         execOptions.signal = input.abortSignal;
       }
 
-      console.log("[zone-tool-runcmd-debug]", {
+      debugLog("[zone-tool-runcmd-debug]", {
         command: command.slice(0, 100),
         cwd,
         platform: process.platform,
@@ -501,7 +502,7 @@ export async function executeTool(
         return rest;
       })();
       const r = startBg({ runId, command, cwd: resolved.cwd, label, env });
-      console.log(
+      debugLog(
         "[zone-bg-start]",
         JSON.stringify({
           runId,
@@ -539,7 +540,7 @@ export async function executeTool(
         typeof maxBytesRaw === "number" ? maxBytesRaw : null;
       const { read: readBg } = await import("./backgroundProcessRegistry.js");
       const r = readBg({ runId, handle, sinceOffset, maxBytes });
-      console.log(
+      debugLog(
         "[zone-bg-read]",
         JSON.stringify({
           runId,
@@ -575,7 +576,7 @@ export async function executeTool(
         sigRaw === "SIGTERM" || sigRaw === "SIGKILL" ? sigRaw : null;
       const { kill: killBg } = await import("./backgroundProcessRegistry.js");
       const r = await killBg({ runId, handle, signal });
-      console.log(
+      debugLog(
         "[zone-bg-kill]",
         JSON.stringify({
           runId,
@@ -604,7 +605,7 @@ export async function executeTool(
       }
       const { list: listBg } = await import("./backgroundProcessRegistry.js");
       const r = listBg({ runId });
-      console.log(
+      debugLog(
         "[zone-bg-list]",
         JSON.stringify({ runId, count: r.processes.length })
       );
@@ -627,7 +628,7 @@ export async function executeTool(
         ? `[FILE TRUNCATED — read ${chunk.length} of ${content.length} chars from the start; remaining ${remainingChars} chars NOT shown. The file is too large to read in one call. Use search_in_files to find the section you need, then ask the user to break the task into smaller scopes if necessary.]\n\n`
         : "";
 
-      console.log("[zone-tool-readfile-debug]", JSON.stringify({
+      debugLog("[zone-tool-readfile-debug]", JSON.stringify({
         filePath,
         fullSize: content.length,
         returnedChars: chunk.length,
@@ -635,7 +636,7 @@ export async function executeTool(
         limit: READ_FILE_MAX_CHARS,
       }));
       if (wasTruncated) {
-        console.log("[zone-tool-readfile-truncated]", JSON.stringify({
+        debugLog("[zone-tool-readfile-truncated]", JSON.stringify({
           filePath,
           fullSize: content.length,
           returnedChars: chunk.length,
@@ -692,7 +693,7 @@ export async function executeTool(
             filePath,
             reason: "out_of_plan_scope",
           }));
-          console.log("[zone-scope-block]", JSON.stringify({
+          debugLog("[zone-scope-block]", JSON.stringify({
             tool: "apply_patch",
             filePath,
             reason: "out_of_plan_scope",
@@ -755,7 +756,7 @@ export async function executeTool(
         const scopeRequested =
           (args.scope as { symbolName?: string } | null | undefined) != null;
         if (!preflightValidation.ok && preflightValidation.reason === "parse_error") {
-          console.log(
+          debugLog(
             "[zone-apply-patch-preflight]",
             JSON.stringify({
               filePath,
@@ -784,7 +785,7 @@ export async function executeTool(
             rejectionReason: "file_already_broken_pre_patch",
           };
         }
-        console.log(
+        debugLog(
           "[zone-apply-patch-preflight]",
           JSON.stringify({
             filePath,
@@ -798,7 +799,7 @@ export async function executeTool(
         );
       }
 
-      console.log(
+      debugLog(
         "[zone-apply-patch-file-preview]",
         JSON.stringify({
           filePath,
@@ -832,7 +833,7 @@ export async function executeTool(
           `<replacement for second region>\n\n` +
           `Each block does ONE local substitution. Do not collapse two unrelated edits into one block.`;
 
-        console.log("[zone-apply-patch-marker-imbalance]", JSON.stringify({
+        debugLog("[zone-apply-patch-marker-imbalance]", JSON.stringify({
           filePath,
           findMarkerCount,
           replaceMarkerCount,
@@ -904,7 +905,7 @@ export async function executeTool(
         const locateResult = locateSymbol(originalWithoutBom, abs, descriptor);
 
         if (!locateResult.ok && locateResult.reason === "unsupported_extension") {
-          console.log(
+          debugLog(
             "[zone-apply-patch-scope]",
             JSON.stringify({
               filePath,
@@ -920,7 +921,7 @@ export async function executeTool(
           );
           // Unsupported extension — fall through to normal whole-file matching.
         } else if (!locateResult.ok && locateResult.reason === "parse_error") {
-          console.log(
+          debugLog(
             "[zone-apply-patch-scope]",
             JSON.stringify({
               filePath,
@@ -942,7 +943,7 @@ export async function executeTool(
               `Re-read the file and verify it's syntactically valid before patching.`,
           };
         } else if (!locateResult.ok && locateResult.reason === "not_found") {
-          console.log(
+          debugLog(
             "[zone-apply-patch-scope]",
             JSON.stringify({
               filePath,
@@ -966,7 +967,7 @@ export async function executeTool(
           const lineRanges = locateResult.matches
             .map((m) => `${m.startLine}-${m.endLine}`)
             .join(", ");
-          console.log(
+          debugLog(
             "[zone-apply-patch-scope]",
             JSON.stringify({
               filePath,
@@ -1000,7 +1001,7 @@ export async function executeTool(
             startLine: match.startLine,
             endLine: match.endLine,
           };
-          console.log(
+          debugLog(
             "[zone-apply-patch-scope]",
             JSON.stringify({
               filePath,
@@ -1024,7 +1025,7 @@ export async function executeTool(
       // ─── Block loop ─────────────────────────────────────────────────────────
       for (let bi = 0; bi < blocks.length; bi += 1) {
         const block = blocks[bi]!;
-        console.log(
+        debugLog(
           "[zone-apply-patch-find-preview]",
           JSON.stringify({
             filePath,
@@ -1036,7 +1037,7 @@ export async function executeTool(
         const findHadCrOnly = /\r(?!\n)/.test(block.find);
         const replaceHadCrOnly = /\r(?!\n)/.test(block.replace);
         if (findHadCrOnly || replaceHadCrOnly) {
-          console.log(
+          debugLog(
             "[zone-apply-patch-eol-warn]",
             JSON.stringify({
               filePath,
@@ -1066,7 +1067,7 @@ export async function executeTool(
             ? 0
             : countOccurrences(searchTarget, normalizedFind);
 
-        console.log(
+        debugLog(
           "[zone-apply-patch-eol]",
           JSON.stringify({
             filePath,
@@ -1097,7 +1098,7 @@ export async function executeTool(
         };
 
         if (normalizedFind.length === 0) {
-          console.log(
+          debugLog(
             "[zone-apply-patch-debug]",
             JSON.stringify({
               ...diagBase,
@@ -1112,7 +1113,7 @@ export async function executeTool(
         }
 
         if (normalizedReplace.length === 0) {
-          console.log(
+          debugLog(
             "[zone-apply-patch-debug]",
             JSON.stringify({
               ...diagBase,
@@ -1129,7 +1130,7 @@ export async function executeTool(
         }
 
         if (normalizedOccurrences === 0) {
-          console.log(
+          debugLog(
             "[zone-apply-patch-debug]",
             JSON.stringify({
               ...diagBase,
@@ -1150,7 +1151,7 @@ export async function executeTool(
         }
 
         if (normalizedOccurrences > 1) {
-          console.log(
+          debugLog(
             "[zone-apply-patch-debug]",
             JSON.stringify({
               ...diagBase,
@@ -1170,7 +1171,7 @@ export async function executeTool(
         }
 
         if (!allowShrink && replaceLineCount < findLineCount) {
-          console.log(
+          debugLog(
             "[zone-apply-patch-debug]",
             JSON.stringify({
               ...diagBase,
@@ -1187,7 +1188,7 @@ export async function executeTool(
           };
         }
 
-        console.log(
+        debugLog(
           "[zone-apply-patch-debug]",
           JSON.stringify({
             ...diagBase,
@@ -1290,7 +1291,7 @@ export async function executeTool(
       }
 
       if (originalEol === "mixed") {
-        console.log(
+        debugLog(
           "[zone-apply-patch-eol-warn]",
           JSON.stringify({
             filePath,
@@ -1315,7 +1316,7 @@ export async function executeTool(
           ? checkSemanticSmells(outputContent, abs, validation.ast)
           : { ok: true as const };
       const semanticSmellDetected = !smellValidation.ok;
-      console.log(
+      debugLog(
         "[zone-apply-patch-syntax-validation]",
         JSON.stringify({
           filePath,
@@ -1384,7 +1385,7 @@ export async function executeTool(
             filePath,
             reason: "out_of_plan_scope",
           }));
-          console.log("[zone-scope-block]", JSON.stringify({
+          debugLog("[zone-scope-block]", JSON.stringify({
             tool: "write_file",
             filePath,
             reason: "out_of_plan_scope",
@@ -1415,7 +1416,7 @@ export async function executeTool(
       const overwriteOverrideAllowed = input?.allowWriteFileOverwritePaths?.has(filePath) === true;
       const blocked = fileExists && shrinkRatio < 0.7 && !overwriteOverrideAllowed;
 
-      console.log(
+      debugLog(
         `[zone-agent-write-debug] ${JSON.stringify({
           tool: "write_file",
           filePath,
@@ -1453,7 +1454,7 @@ export async function executeTool(
           ? checkSemanticSmells(content, abs, validation.ast)
           : { ok: true as const };
       const semanticSmellDetected = !smellValidation.ok;
-      console.log(
+      debugLog(
         "[zone-write-file-validation]",
         JSON.stringify({
           filePath,
@@ -1640,7 +1641,7 @@ export async function executeTool(
         }
       }
 
-      console.log("[zone-tool-find-references]", JSON.stringify({
+      debugLog("[zone-tool-find-references]", JSON.stringify({
         sourceFile: sourceKey,
         symbolName,
         consumerCount: consumers.length,

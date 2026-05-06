@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { debugLog } from "../utils/logger.js";
 
 const TABLE_NAME = "zone_file_embeddings";
 const UPSERT_TIMEOUT_MS = 30000;
@@ -54,7 +55,7 @@ export async function getStoredEmbedding(
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
-  console.log("[zone-embed-repo-debug]", {
+  debugLog("[zone-embed-repo-debug]", {
     action: "getStoredEmbedding",
     repoPath,
     filePath,
@@ -89,7 +90,7 @@ export async function upsertEmbedding(args: {
   const supabase = getSupabaseClient();
   if (!supabase) return;
 
-  console.log("[zone-embed-repo-debug]", {
+  debugLog("[zone-embed-repo-debug]", {
     action: "upsertEmbedding",
     repoPath: args.repoPath,
     filePath: args.filePath,
@@ -98,7 +99,7 @@ export async function upsertEmbedding(args: {
   });
 
   const startedAt = Date.now();
-  console.log("[zone-embed-upsert-start]", {
+  debugLog("[zone-embed-upsert-start]", {
     filePath: args.filePath,
     embeddingLength: args.embedding.length,
   });
@@ -122,7 +123,7 @@ export async function upsertEmbedding(args: {
     }),
   ]);
 
-  console.log("[zone-embed-upsert-end]", {
+  debugLog("[zone-embed-upsert-end]", {
     filePath: args.filePath,
     elapsedMs: Date.now() - startedAt,
   });
@@ -138,7 +139,7 @@ export async function getAllEmbeddingsForRepo(
   const supabase = getSupabaseClient();
   if (!supabase) return [];
 
-  console.log("[zone-embed-repo-debug]", {
+  debugLog("[zone-embed-repo-debug]", {
     action: "getAllEmbeddingsForRepo",
     repoPath,
   });
@@ -164,7 +165,7 @@ export async function getEmbeddingCountForRepo(repoPath: string): Promise<number
   const supabase = getSupabaseClient();
   if (!supabase) return 0;
 
-  console.log("[zone-embed-repo-debug]", {
+  debugLog("[zone-embed-repo-debug]", {
     action: "getEmbeddingCountForRepo",
     repoPath,
   });
@@ -189,7 +190,7 @@ export async function deleteEmbeddingsForFiles(
   const supabase = getSupabaseClient();
   if (!supabase) return;
 
-  console.log("[zone-embed-repo-debug]", {
+  debugLog("[zone-embed-repo-debug]", {
     action: "deleteEmbeddingsForFiles",
     repoPath,
     count: filePaths.length,
@@ -216,7 +217,7 @@ export async function matchSimilarFiles(args: {
 
   const matchCount = Math.max(1, Math.floor(args.matchCount ?? 20));
 
-  console.log("[zone-embed-repo-debug]", {
+  debugLog("[zone-embed-repo-debug]", {
     action: "matchSimilarFiles",
     repoPath: args.repoPath,
     matchCount,
