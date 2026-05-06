@@ -10,21 +10,25 @@ Zone runs a code-modification loop with an AST-based validator as a defensive la
 
 ## Why Zone
 
-### Real cost — 30 days, single developer
+### Real cost — 30 days of solo development
 
-| Provider | Spend | Requests | Tokens |
-|---|---|---|---|
-| OpenAI (GPT-4o) | $4.79 | 4,708 | 28.2M |
-| Anthropic (Sonnet 4.6, with prompt caching) | $0.83 | 5 runs | 1.13M |
-| **Total** | **$5.62** | **4,713** | **29.3M** |
+OpenAI usage on this volume:
 
-Same volume on subscription tools:
+| Spend | Requests | Tokens |
+|---|---|---|
+| **$4.79** | **4,708** | **28.2M** |
 
-- **Cursor Pro** ($20/mo) — $20 credit pool covers ~225 Sonnet or ~500 GPT-5 requests; 4,700+ requests pushes you to Pro+ ($60) or Ultra ($200)
-- **Claude Code Max** ($100-200/mo) — 5-hour rolling windows constrain sustained sessions
-- **Codex Pro** ($20-200/mo) — quota-based; OpenAI-only
+That's roughly **$0.001 per request**. Same volume on subscription tools:
 
-With Zone BYOK you pay your provider directly — no markup, no subscription floor, no rolling time windows. Anthropic prompt caching is enabled by default; cached iterations typically save 50-80% on input cost. A typical multi-iter Zone run costs ~$0.05-0.50 on Sonnet 4.6 depending on task complexity.
+- **Cursor Pro** ($20/mo) — $20 credit pool covers ~225-650 premium requests; 4,700+ requests pushes to Pro+ ($60) or Ultra ($200)
+- **Claude Code Pro / Max** ($20-200/mo) — coding tokens shared with Claude chat, with 5-hour rolling windows
+- **Codex Pro** ($20-200/mo) — quota-based, OpenAI-only
+
+**Already pay for Claude Pro or Max?** Zone lets you offload everyday coding tasks — small refactors, bug fixes, scoped edits — to BYOK API at fractional cost, preserving your subscription quota for chat, research, and the complex multi-step agent sessions where Claude Code's deeper context truly shines.
+
+Anthropic Sonnet 4.6 is supported with prompt caching enabled by default. Cached iterations save 50-80% on input cost — a typical multi-iter Zone run costs ~$0.05–0.50 depending on task complexity.
+
+With Zone BYOK you pay your provider directly — no markup, no subscription floor, no rolling time windows.
 
 ## Quick start (self-hosted)
 
