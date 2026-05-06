@@ -6146,6 +6146,53 @@
     }
 
     // ---- Branch management ----
+    // In Tauri, route through local Rust commands (git CLI on the user's
+    // machine). In browser, fall back to the hosted /api/branches endpoints.
+    async function branchApiList(repoPath){
+      if (isTauriRuntime()) {
+        const core = getTauriCore();
+        if (core?.invoke) {
+          return await core.invoke('list_git_branches', { repo: repoPath });
+        }
+      }
+      const res = await apiFetch('/api/branches?repo=' + encodeURIComponent(repoPath));
+      return res.ok ? await res.json() : { current: null, detached: false, branches: [] };
+    }
+
+    async function branchApiSwitch(repoPath, branch){
+      if (isTauriRuntime()) {
+        const core = getTauriCore();
+        if (core?.invoke) {
+          return await core.invoke('switch_git_branch', { repo: repoPath, branch });
+        }
+      }
+      const res = await apiFetch('/api/branches/switch', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ repo: repoPath, branch }),
+      });
+      return await res.json();
+    }
+
+    async function branchApiCreate(repoPath, name, baseBranch){
+      if (isTauriRuntime()) {
+        const core = getTauriCore();
+        if (core?.invoke) {
+          return await core.invoke('create_git_branch', {
+            repo: repoPath,
+            name,
+            baseBranch: baseBranch || null,
+          });
+        }
+      }
+      const res = await apiFetch('/api/branches/create', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ repo: repoPath, name, baseBranch }),
+      });
+      return await res.json();
+    }
+
     async function fetchBranchList(){
       if (!state.activeRepo?.path) {
         state.activeBranch = null;
@@ -6156,11 +6203,9 @@
       state.branchLoading = true;
       renderBranchChip();
       try {
-        const res = await apiFetch('/api/branches?repo=' + encodeURIComponent(state.activeRepo.path));
-        if (!res.ok) throw new Error('fetch failed');
-        const data = await res.json();
-        state.activeBranch = data.current;
-        state.branchList = Array.isArray(data.branches) ? data.branches : [];
+        const data = await branchApiList(state.activeRepo.path);
+        state.activeBranch = data?.current ?? null;
+        state.branchList = Array.isArray(data?.branches) ? data.branches : [];
       } catch (err) {
         state.activeBranch = null;
         state.branchList = [];
@@ -6277,23 +6322,18 @@
       closeBranchDropdown();
       if (!state.activeRepo?.path) return;
       try {
-        const res = await apiFetch('/api/branches/switch', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ repo: state.activeRepo.path, branch })
-        });
-        const data = await res.json();
-        if (res.ok && data.ok) {
+        const data = await branchApiSwitch(state.activeRepo.path, branch);
+        if (data && data.ok) {
           state.activeBranch = branch;
           renderBranchChip();
         } else {
           let msg = 'Failed to switch';
-          if (data.error === 'uncommitted_changes') {
+          if (data?.error === 'uncommitted_changes') {
             const n = Array.isArray(data.dirtyFiles) ? data.dirtyFiles.length : 0;
             msg = 'Cannot switch: uncommitted changes' + (n > 0 ? ' in ' + n + ' file' + (n === 1 ? '' : 's') : '');
-          } else if (data.error === 'not_found') {
+          } else if (data?.error === 'not_found') {
             msg = 'Branch not found: ' + branch;
-          } else if (data.message) {
+          } else if (data?.message) {
             msg = data.message;
           }
           showBranchError(msg);
@@ -6307,21 +6347,16 @@
       name = String(name || '').trim();
       if (!name) return;
       try {
-        const res = await apiFetch('/api/branches/create', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ repo: state.activeRepo.path, name })
-        });
-        const data = await res.json();
-        if (res.ok && data.ok) {
+        const data = await branchApiCreate(state.activeRepo.path, name);
+        if (data && data.ok) {
           state.activeBranch = data.branch;
           await fetchBranchList();
           closeBranchDropdown();
         } else {
           let msg = 'Failed to create';
-          if (data.error === 'exists') msg = 'Branch already exists';
-          else if (data.error === 'invalid_name') msg = 'Invalid branch name';
-          else if (data.message) msg = data.message;
+          if (data?.error === 'exists') msg = 'Branch already exists';
+          else if (data?.error === 'invalid_name') msg = 'Invalid branch name';
+          else if (data?.message) msg = data.message;
           const inputBox = els.branchDropdown.querySelector('.branchInlineInput');
           if (inputBox) {
             let err = els.branchDropdown.querySelector('.branchError');
