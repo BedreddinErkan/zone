@@ -8,3 +8,5 @@ dist/
 .env
 .env.*
 !.env.example
+zone-debug.log
+zone-debug.log.*
