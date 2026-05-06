@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { scanRepo } from "../repo/scanRepo.js";
 import { detectProjectStructure } from "../repo/detectProjectStructure.js";
 import { rankRelevantFiles } from "../repo/rankRelevantFiles.js";
@@ -665,11 +667,20 @@ export async function runFeatureAgent(
   const structure = detectProjectStructure(allFiles);
   const intent = parseTaskIntent(input.task);
 
-  const rankedFiles = rankRelevantFiles({
+  const readContentForRanker = async (relPath: string): Promise<string | null> => {
+    try {
+      return await fs.promises.readFile(path.join(input.targetPath, relPath), "utf8");
+    } catch {
+      return null;
+    }
+  };
+  const rankedFiles = await rankRelevantFiles({
     task: input.task,
     files: allFiles,
     projectStructure: structure,
-    intent
+    intent,
+    lastChangedFiles: input.changedFiles,
+    readContent: readContentForRanker,
   });
 
   const relevantFiles = boostRelevantFilesWithChangedFiles(

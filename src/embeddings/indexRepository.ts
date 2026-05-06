@@ -91,6 +91,15 @@ export async function indexRepoFiles(args: IndexRepoFilesArgs): Promise<{
 
         try {
           const embedding = await embedText(buildEmbedInput(file.path, file.content));
+          if (embedding === null) {
+            console.log("[zone-embed-index-progress]", {
+              done: done + 1,
+              total: files.length,
+              lastFile: file.path,
+              mode: "skipped_no_embedding_support",
+            });
+            return;
+          }
           await upsertEmbedding({
             repoPath: args.repoPath,
             filePath: file.path,

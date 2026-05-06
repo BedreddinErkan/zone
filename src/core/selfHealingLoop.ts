@@ -186,18 +186,19 @@ export async function runSelfHealingLoop(
       });
 
       try {
-        const { createOpenAIClient, getModelName } = await import(
-          "../llm/openaiClient.js"
-        );
-        const client = createOpenAIClient();
-        const model = getModelName();
+        const { getModelName } = await import("../llm/openaiClient.js");
+        const { createLLMClient } = await import("../llm/factory.js");
+        const { getRequestContext } = await import("../llm/openaiContext.js");
+        const client = createLLMClient();
+        const ctx = getRequestContext();
+        const model = getModelName("standard", client.provider, ctx?.modelOverride);
 
-        const response = await client.responses.create({
+        const response = await client.createChatCompletion({
           model,
-          input: prompt,
+          messages: [{ role: "user", content: prompt }],
         });
 
-        const rawText = response.output_text || "";
+        const rawText = response.choices[0]?.message?.content ?? "";
         const firstBrace = rawText.indexOf("{");
         const lastBrace = rawText.lastIndexOf("}");
 

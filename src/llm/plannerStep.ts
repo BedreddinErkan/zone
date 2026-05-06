@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { createOpenAIClient } from "./openaiClient.js";
+import { createLLMClient } from "./factory.js";
+import { getModelName } from "./openaiClient.js";
+import { getRequestContext } from "./openaiContext.js";
 import type { ProjectFramework } from "../repo/detectFramework.js";
 import { buildDependencyGraph, type DependencyGraph } from "../repo/buildDependencyGraph.js";
 import { getRelatedFiles, type RelatedFile } from "../repo/getRelatedFiles.js";
@@ -80,7 +82,7 @@ export async function plannerStep(input: {
   /** Recently added function names (synchronous hint from UI). */
   lastAddedFunctions?: string[];
 }): Promise<PlannerStepOutput | null> {
-  const client = createOpenAIClient();
+  const client = createLLMClient();
   const fwLine = input.framework
     ? `Project type: ${input.framework.framework} (${input.framework.language})\nTest command: ${input.framework.testCommand}`
     : "";
@@ -176,13 +178,14 @@ export async function plannerStep(input: {
   ].join("\n");
 
   async function requestPlannerOutput(promptText: string): Promise<string> {
-    const response = await client.responses.create({
-      model: "gpt-4o-mini",
+    const ctx = getRequestContext();
+    const response = await client.createChatCompletion({
+      model: getModelName("standard", client.provider, ctx?.modelOverride),
       temperature: 0,
-      input: promptText,
+      messages: [{ role: "user", content: promptText }],
     });
 
-    return String((response as { output_text?: unknown }).output_text ?? "").trim();
+    return String(response.choices[0]?.message?.content ?? "").trim();
   }
 
   let raw = await requestPlannerOutput(prompt);

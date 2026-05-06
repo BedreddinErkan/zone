@@ -23,6 +23,10 @@ vi.mock("../llm/openaiClient.js", () => ({
   getModelName: getModelNameMock,
 }));
 
+vi.mock("../llm/factory.js", () => ({
+  createLLMClient: createMock,
+}));
+
 vi.mock("./testOutputValidator.js", () => ({
   validateTestOutput: validateTestOutputMock,
 }));
@@ -62,20 +66,27 @@ describe("runDataAnalystFlow", () => {
   it("returns fileDiffs for generated migration patches", async () => {
     const files = [buildRepoFile("db/migration/V3__orders.sql")];
     const client = {
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
-            summary: "Creates orders table",
-            warnings: [],
-            confidence: 90,
-            migrationFile: {
-              path: "db/migration/V3__orders.sql",
-              content:
-                "CREATE TABLE IF NOT EXISTS orders (\n  id SERIAL PRIMARY KEY,\n  email TEXT NOT NULL\n);",
+      provider: "openai" as const,
+      createChatCompletion: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: "Creates orders table",
+                warnings: [],
+                confidence: 90,
+                migrationFile: {
+                  path: "db/migration/V3__orders.sql",
+                  content:
+                    "CREATE TABLE IF NOT EXISTS orders (\n  id SERIAL PRIMARY KEY,\n  email TEXT NOT NULL\n);",
+                },
+              }),
             },
-          }),
-        }),
-      },
+          },
+        ],
+      }),
+      createChatCompletionStream: vi.fn(),
+      createEmbedding: vi.fn(),
     };
 
     scanRepoMock.mockResolvedValue(files);

@@ -1,4 +1,6 @@
-import { createOpenAIClient, extractResponsesApiOutputText } from "./openaiClient.js";
+import { extractResponsesApiOutputText, getModelName } from "./openaiClient.js";
+import { createLLMClient } from "./factory.js";
+import { getRequestContext } from "./openaiContext.js";
 
 export type ZoneMessageType = "patch_request" | "question" | "discussion";
 export type ZoneLegacyIntent = "execute" | "chat";
@@ -70,7 +72,7 @@ export async function detectMessageType(
   if (!normalizedTask) return "question";
 
   try {
-    const client = createOpenAIClient(userApiKey);
+    const client = createLLMClient({ apiKey: userApiKey });
     const prompt = [
       "Classify this user message into one of:",
       "- patch_request: user wants code to be modified",
@@ -82,11 +84,12 @@ export async function detectMessageType(
       `Message: ${normalizedTask}`,
     ].join("\n");
 
-    const response = await client.responses.create({
-      model: "gpt-4o-mini",
+    const ctx = getRequestContext();
+    const response = await client.createChatCompletion({
+      model: getModelName("standard", client.provider, ctx?.modelOverride),
       temperature: 0,
-      max_output_tokens: 50,
-      input: prompt,
+      max_tokens: 50,
+      messages: [{ role: "user", content: prompt }],
     });
 
     const extraction = extractResponsesApiOutputText(response);

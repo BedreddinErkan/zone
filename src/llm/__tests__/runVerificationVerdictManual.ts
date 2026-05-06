@@ -241,9 +241,118 @@ console.log("\n=== verification verdict ===");
   );
 }
 
-const passedCount = checks.filter((entry) => entry.pass).length;
-console.log(`\n[verification-verdict-test] PASSED ${passedCount}/10 assertions`);
+// Bug 44: stale-failure resolution.
+{
+  const log = [
+    {
+      tool: "run_command",
+      args: { command: "npm run build" },
+      result:
+        "Command failed: npm run build\n./app/layout.tsx:1:10\nType error: Module '@/components/AppProviders' has no exported member 'NonExistentExport'.",
+      success: false,
+    },
+    {
+      tool: "apply_patch",
+      args: { filePath: "app/layout.tsx" },
+      result: "applied",
+      success: true,
+    },
+    {
+      tool: "run_command",
+      args: { command: "npm run build" },
+      result: "Compiled successfully in 3.3s\nGenerated 25 static pages",
+      success: true,
+    },
+  ];
+  const result = validateUnrelatedClaim({
+    log,
+    patchedFilePaths: ["app/layout.tsx"],
+    framework: { hasTests: true },
+  });
+  checks.push(
+    check(
+      "Bug 44: failure resolved by later successful run_command → accept",
+      result.accept === true &&
+        /resolved by a later successful/.test(result.reason),
+      result
+    )
+  );
+}
 
-if (passedCount !== 10) {
+// Bug 44 negative: unresolved failure must still demote.
+{
+  const log2 = [
+    {
+      tool: "run_command",
+      args: { command: "npm run build" },
+      result:
+        "Command failed: npm run build\n./app/layout.tsx:1:10\nType error: Module '@/components/AppProviders' has no exported member 'NonExistentExport'.",
+      success: false,
+    },
+    {
+      tool: "apply_patch",
+      args: { filePath: "app/layout.tsx" },
+      result: "applied",
+      success: true,
+    },
+  ];
+  const result2 = validateUnrelatedClaim({
+    log: log2,
+    patchedFilePaths: ["app/layout.tsx"],
+    framework: { hasTests: true },
+  });
+  checks.push(
+    check(
+      "Bug 44 negative: still unresolved → demote tests_failed_by_patch",
+      result2.accept === false &&
+        result2.demoteTo === "tests_failed_by_patch",
+      result2
+    )
+  );
+}
+
+// Bug 44b: validator's accept reason on resolved failures must match the
+// regex used at the call site to trigger verdict promotion to tests_passed.
+{
+  const log = [
+    {
+      tool: "run_command",
+      args: { command: "npm run build" },
+      result:
+        "Command failed: ./app/layout.tsx:1:10\nType error: Module '@/components/AppProviders' has no exported member 'NonExistentExport'.",
+      success: false,
+    },
+    {
+      tool: "apply_patch",
+      args: { filePath: "app/layout.tsx" },
+      result: "applied",
+      success: true,
+    },
+    {
+      tool: "run_command",
+      args: { command: "npm run build" },
+      result: "Compiled successfully",
+      success: true,
+    },
+  ];
+  const result = validateUnrelatedClaim({
+    log,
+    patchedFilePaths: ["app/layout.tsx"],
+    framework: { hasTests: true },
+  });
+  checks.push(
+    check(
+      "Bug 44b: validator accept reason matches the call-site promote regex",
+      result.accept === true &&
+        /resolved by a later successful run_command/i.test(result.reason),
+      result
+    )
+  );
+}
+
+const passedCount = checks.filter((entry) => entry.pass).length;
+console.log(`\n[verification-verdict-test] PASSED ${passedCount}/13 assertions`);
+
+if (passedCount !== 13) {
   process.exitCode = 1;
 }

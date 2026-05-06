@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { createOpenAIClient } from "../llm/openaiClient.js";
+import { createLLMClient } from "../llm/factory.js";
 
 const EMBEDDING_MODEL = "text-embedding-3-small";
 const MAX_INPUT_CHARS = 24000;
@@ -22,15 +22,34 @@ export function buildEmbedInput(filePath: string, content: string): string {
   return `FILE: ${normalizedPath}\n\n${body}`;
 }
 
-export async function embedText(text: string): Promise<number[]> {
+export async function embedText(text: string): Promise<number[] | null> {
   const startedAt = Date.now();
   const truncated = truncateForEmbedding(text);
   const tokensApprox = Math.ceil(truncated.length / 4);
 
+  let client: ReturnType<typeof createLLMClient>;
   try {
-    const client = createOpenAIClient();
+    client = createLLMClient();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("[zone-embed-skipped]", {
+      reason: "client_init_failed",
+      detail: message,
+    });
+    return null;
+  }
+
+  if (client.provider !== "openai") {
+    console.log("[zone-embed-skipped]", {
+      reason: "provider_no_embedding_support",
+      provider: client.provider,
+    });
+    return null;
+  }
+
+  try {
     const response = await Promise.race([
-      client.embeddings.create({
+      client.createEmbedding({
         model: EMBEDDING_MODEL,
         input: truncated,
       }),
@@ -57,6 +76,13 @@ export async function embedText(text: string): Promise<number[]> {
     return embedding;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("not supported by the Anthropic provider")) {
+      console.log("[zone-embed-skipped]", {
+        reason: "provider_no_embedding_support",
+        provider: client.provider,
+      });
+      return null;
+    }
     if (message.includes("timed out")) {
       console.error("[zone-embed-timeout]", {
         textLength: truncated.length,

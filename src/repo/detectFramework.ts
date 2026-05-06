@@ -18,10 +18,16 @@ export interface ProjectFramework {
   devCommand: string;
   packageManager: string;
   hasTests: boolean;
+  testFilesDetected: boolean;
   testFramework: string;
   configFiles: string[];
   subProjects: ProjectFramework[];
 }
+
+type DetectedFrameworkBase = Omit<
+  ProjectFramework,
+  "configFiles" | "subProjects" | "testFilesDetected"
+>;
 
 function exists(p: string): boolean {
   try {
@@ -66,7 +72,7 @@ function buildScriptCommand(
 function detectNodeFromPackageJson(
   packageJson: Record<string, unknown> | null,
   dir: string
-): Omit<ProjectFramework, "configFiles" | "subProjects"> | null {
+): DetectedFrameworkBase | null {
   if (!packageJson) return null;
   const deps = {
     ...(packageJson.dependencies as Record<string, unknown> | undefined),
@@ -98,24 +104,30 @@ function detectNodeFromPackageJson(
   else if (has("koa")) framework = "Node.js API (Koa)";
 
   let testFramework = "unknown";
-  let testCommand = "npm test";
+  let testCommand = "";
   if (has("vitest")) {
     testFramework = "vitest";
-    testCommand = buildScriptCommand(pm, hasScript("test") ? "test" : "test");
+    testCommand = hasScript("test") ? buildScriptCommand(pm, "test") : "npx vitest run";
   } else if (has("jest") || has("@jest/core")) {
     testFramework = "jest";
-    testCommand = buildScriptCommand(pm, "test");
+    testCommand = hasScript("test") ? buildScriptCommand(pm, "test") : "npx jest";
   } else if (has("mocha")) {
     testFramework = "mocha";
-    testCommand = buildScriptCommand(pm, "test");
+    testCommand = hasScript("test") ? buildScriptCommand(pm, "test") : "npx mocha";
   } else if (has("cypress")) {
     testFramework = "cypress";
     testCommand = hasScript("test:e2e")
       ? buildScriptCommand(pm, "test:e2e")
-      : buildScriptCommand(pm, "test");
+      : hasScript("test")
+        ? buildScriptCommand(pm, "test")
+        : "npx cypress run";
   } else if (has("playwright") || has("@playwright/test")) {
     testFramework = "playwright";
-    testCommand = "npx playwright test";
+    testCommand = hasScript("test:e2e")
+      ? buildScriptCommand(pm, "test:e2e")
+      : hasScript("test")
+        ? buildScriptCommand(pm, "test")
+        : "npx playwright test";
   } else if (hasScript("test")) {
     testFramework = "unknown";
     testCommand = buildScriptCommand(pm, "test");
@@ -135,12 +147,12 @@ function detectNodeFromPackageJson(
     buildCommand,
     devCommand,
     packageManager: pm,
-    hasTests: hasScript("test") || testFramework !== "unknown",
+    hasTests: testCommand !== "",
     testFramework,
   };
 }
 
-function detectPython(dir: string): Omit<ProjectFramework, "configFiles" | "subProjects"> | null {
+function detectPython(dir: string): DetectedFrameworkBase | null {
   const req = path.join(dir, "requirements.txt");
   const pyproject = path.join(dir, "pyproject.toml");
   if (!exists(req) && !exists(pyproject)) return null;
@@ -172,7 +184,7 @@ function detectPython(dir: string): Omit<ProjectFramework, "configFiles" | "subP
   };
 }
 
-function detectRust(dir: string): Omit<ProjectFramework, "configFiles" | "subProjects"> | null {
+function detectRust(dir: string): DetectedFrameworkBase | null {
   const cargo = path.join(dir, "Cargo.toml");
   if (!exists(cargo)) return null;
   const txt = readText(cargo).toLowerCase();
@@ -189,7 +201,7 @@ function detectRust(dir: string): Omit<ProjectFramework, "configFiles" | "subPro
   };
 }
 
-function detectGo(dir: string): Omit<ProjectFramework, "configFiles" | "subProjects"> | null {
+function detectGo(dir: string): DetectedFrameworkBase | null {
   const mod = path.join(dir, "go.mod");
   if (!exists(mod)) return null;
   return {
@@ -204,7 +216,7 @@ function detectGo(dir: string): Omit<ProjectFramework, "configFiles" | "subProje
   };
 }
 
-function detectJava(dir: string): Omit<ProjectFramework, "configFiles" | "subProjects"> | null {
+function detectJava(dir: string): DetectedFrameworkBase | null {
   const pom = path.join(dir, "pom.xml");
   const gradle = path.join(dir, "build.gradle");
   const gradleKts = path.join(dir, "build.gradle.kts");
@@ -233,7 +245,7 @@ function detectJava(dir: string): Omit<ProjectFramework, "configFiles" | "subPro
   };
 }
 
-function detectPhp(dir: string): Omit<ProjectFramework, "configFiles" | "subProjects"> | null {
+function detectPhp(dir: string): DetectedFrameworkBase | null {
   const composer = path.join(dir, "composer.json");
   if (!exists(composer)) return null;
   return {
@@ -248,24 +260,33 @@ function detectPhp(dir: string): Omit<ProjectFramework, "configFiles" | "subProj
   };
 }
 
-async function detectHasTests(dir: string): Promise<boolean> {
+async function detectTestFiles(dir: string): Promise<boolean> {
   const hits = await fg(
     [
-      "**/__tests__/**",
-      "**/tests/**",
-      "**/test/**",
-      "**/*.test.{js,jsx,ts,tsx}",
-      "**/*.spec.{js,jsx,ts,tsx}",
+      "**/__tests__/**/*.{js,jsx,ts,tsx,mjs,cjs}",
+      "**/*.test.{js,jsx,ts,tsx,mjs,cjs}",
+      "**/*.spec.{js,jsx,ts,tsx,mjs,cjs}",
+      "**/*_test.go",
+      "**/test_*.py",
+      "**/*_test.py",
       "pytest.ini",
       "conftest.py",
       "testng.xml",
     ],
     {
       cwd: dir,
-      onlyFiles: false,
+      onlyFiles: true,
       dot: false,
       unique: true,
-      ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**"],
+      ignore: [
+        "**/node_modules/**",
+        "**/.git/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/.next/**",
+        "**/target/**",
+        "**/vendor/**",
+      ],
     }
   );
   return hits.length > 0;
@@ -320,11 +341,11 @@ async function detectInDir(dir: string): Promise<ProjectFramework> {
       testFramework: "unknown",
     };
 
-  const hasTests = base.hasTests || (await detectHasTests(dir));
+  const testFilesDetected = await detectTestFiles(dir);
 
   return {
     ...base,
-    hasTests,
+    testFilesDetected,
     configFiles,
     subProjects: [],
   };
@@ -361,6 +382,9 @@ export async function detectFramework(repoPath: string): Promise<ProjectFramewor
     return {
       ...root,
       testCommand: combinedTestCommand,
+      hasTests: combinedTestCommand !== "",
+      testFilesDetected:
+        root.testFilesDetected || client.testFilesDetected || server.testFilesDetected,
       framework: "Monorepo",
       subProjects: [client, server],
     };
@@ -368,4 +392,3 @@ export async function detectFramework(repoPath: string): Promise<ProjectFramewor
 
   return detectInDir(repoPath);
 }
-

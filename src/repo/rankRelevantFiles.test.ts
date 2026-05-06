@@ -15,9 +15,9 @@ function buildRepoFile(
   };
 }
 
-describe("rankRelevantFiles", () => {
-  it("prioritizes frontend component files for component tasks", () => {
-    const ranked = rankRelevantFiles({
+describe("rankRelevantFiles", async () => {
+  it("prioritizes frontend component files for component tasks", async () => {
+    const ranked = await rankRelevantFiles({
       task: "update the booking component UI",
       files: [
         buildRepoFile("server/routes/bookings.ts", "backend"),
@@ -29,8 +29,8 @@ describe("rankRelevantFiles", () => {
     expect(ranked[0].path).toBe("src/components/BookingCard.tsx");
   });
 
-  it("prioritizes backend endpoint files for endpoint tasks", () => {
-    const ranked = rankRelevantFiles({
+  it("prioritizes backend endpoint files for endpoint tasks", async () => {
+    const ranked = await rankRelevantFiles({
       task: "fix the bookings endpoint response",
       files: [
         buildRepoFile("src/components/BookingCard.tsx", "frontend"),
@@ -43,8 +43,8 @@ describe("rankRelevantFiles", () => {
     expect(ranked[1].path).toBe("server/routes/bookings.ts");
   });
 
-  it("prioritizes auth-related files for auth tasks", () => {
-    const ranked = rankRelevantFiles({
+  it("prioritizes auth-related files for auth tasks", async () => {
+    const ranked = await rankRelevantFiles({
       task: "fix auth bug in login flow",
       files: [
         buildRepoFile("src/components/Dashboard.tsx", "frontend"),
@@ -57,8 +57,8 @@ describe("rankRelevantFiles", () => {
     expect(ranked[1].path).toBe("server/routes/login.ts");
   });
 
-  it("prioritizes config files for config and build tasks", () => {
-    const ranked = rankRelevantFiles({
+  it("prioritizes config files for config and build tasks", async () => {
+    const ranked = await rankRelevantFiles({
       task: "update build config for vite",
       files: [
         buildRepoFile("src/components/App.tsx", "frontend"),
@@ -71,8 +71,8 @@ describe("rankRelevantFiles", () => {
     expect(ranked[1].path).toBe("package.json");
   });
 
-  it("falls back deterministically for ambiguous tasks", () => {
-    const ranked = rankRelevantFiles({
+  it("falls back deterministically for ambiguous tasks", async () => {
+    const ranked = await rankRelevantFiles({
       task: "improve flow",
       files: [
         buildRepoFile("README.md"),
@@ -86,8 +86,8 @@ describe("rankRelevantFiles", () => {
     expect(ranked[2].path).toBe("README.md");
   });
 
-  it("prioritizes ui html and css files for font and styling tasks", () => {
-    const ranked = rankRelevantFiles({
+  it("prioritizes ui html and css files for font and styling tasks", async () => {
+    const ranked = await rankRelevantFiles({
       task: "improve font size and css styling for the ui header",
       files: [
         buildRepoFile("server/routes/bookings.ts", "backend"),
@@ -101,8 +101,8 @@ describe("rankRelevantFiles", () => {
     expect(ranked[1].path).toBe("src/ui/styles.css");
   });
 
-  it("prioritizes css directory files for spacing and layout tasks", () => {
-    const ranked = rankRelevantFiles({
+  it("prioritizes css directory files for spacing and layout tasks", async () => {
+    const ranked = await rankRelevantFiles({
       task: "fix layout spacing and padding in css",
       files: [
         buildRepoFile("src/app.ts", "frontend"),
@@ -116,8 +116,8 @@ describe("rankRelevantFiles", () => {
     expect(ranked[1].path).toBe("src/styles/theme.scss");
   });
 
-  it("prioritizes src/ui/index.html for button background tasks", () => {
-    const ranked = rankRelevantFiles({
+  it("prioritizes src/ui/index.html for button background tasks", async () => {
+    const ranked = await rankRelevantFiles({
       task: "change Execute button background color in the Zone UI",
       files: [
         buildRepoFile("src/components/LoginForm.tsx", "frontend"),
@@ -129,8 +129,8 @@ describe("rankRelevantFiles", () => {
     expect(ranked[0].path).toBe("src/ui/index.html");
   });
 
-  it("prioritizes src/ui/index.html when task explicitly mentions index.html or known ui classes", () => {
-    const ranked = rankRelevantFiles({
+  it("prioritizes src/ui/index.html when task explicitly mentions index.html or known ui classes", async () => {
+    const ranked = await rankRelevantFiles({
       task: "update src/ui index.html exec-btn color and decision-badge styling",
       files: [
         buildRepoFile("src/components/LoginForm.tsx", "frontend"),
@@ -142,8 +142,8 @@ describe("rankRelevantFiles", () => {
     expect(ranked[0].path).toBe("src/ui/index.html");
   });
 
-  it("strongly boosts explicit basename matches from the task text", () => {
-    const ranked = rankRelevantFiles({
+  it("strongly boosts explicit basename matches from the task text", async () => {
+    const ranked = await rankRelevantFiles({
       task: "In PatientDetail.jsx add uploading state",
       files: [
         buildRepoFile("client/src/pages/ForgotPasswordPage.jsx", "frontend"),
@@ -154,8 +154,8 @@ describe("rankRelevantFiles", () => {
     expect(ranked[0].path).toBe("client/src/pages/PatientDetail.jsx");
   });
 
-  it("heavily boosts exact component-name matches and suppresses generic page boosts for other pages", () => {
-    const ranked = rankRelevantFiles({
+  it("heavily boosts exact component-name matches and suppresses generic page boosts for other pages", async () => {
+    const ranked = await rankRelevantFiles({
       task: "In PatientDetail add uploading state",
       files: [
         buildRepoFile("client/src/pages/ForgotPasswordPage.jsx", "frontend"),
@@ -169,8 +169,8 @@ describe("rankRelevantFiles", () => {
     expect(ranked[1].score).toBeGreaterThanOrEqual(ranked[2].score);
   });
 
-  it("prefers a localized page file over a broad app shell for page form validation tasks", () => {
-    const ranked = rankRelevantFiles({
+  it("prefers a localized page file over a broad app shell for page form validation tasks", async () => {
+    const ranked = await rankRelevantFiles({
       task: "Add minimal client-side validation to the Patients page create form",
       files: [
         buildRepoFile("client/src/App.jsx", "frontend"),

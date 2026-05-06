@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { createOpenAIClient, getModelName } from "../llm/openaiClient.js";
+import { getModelName } from "../llm/openaiClient.js";
+import { createLLMClient } from "../llm/factory.js";
+import { getRequestContext } from "../llm/openaiContext.js";
 
 export type FinalRunReportVerificationStatus = "passed" | "failed" | "tooling_issue" | "not_run";
 
@@ -295,8 +297,18 @@ export function buildDeterministicFinalRunReport(
     nextStep =
       "Narrow the task to a specific file and behavior, then re-run. If the preview targets the wrong path, correct it before retrying.";
   } else if (input.decisionMode === "preview_only") {
-    nextStep =
-      "Review the diff and warnings carefully, then apply manually if appropriate. Consider a follow-up task to address warnings.";
+    const allDiffsEmpty =
+      input.fileDiffs.length === 0 ||
+      input.fileDiffs.every(
+        (d) => (d.addedLines ?? 0) === 0 && (d.removedLines ?? 0) === 0
+      );
+    if (allDiffsEmpty) {
+      nextStep =
+        "No diff to apply — the agent attempted changes but ended with no net effect. Review the chat above and re-run with a clarified task if needed.";
+    } else {
+      nextStep =
+        "Review the diff and warnings carefully, then apply manually if appropriate. Consider a follow-up task to address warnings.";
+    }
   } else if (verificationSummary.status === "failed") {
     nextStep = "Fix the failing verification issue, then re-run or apply the suggested correction path from warnings.";
   } else if (verificationSummary.status === "tooling_issue") {
@@ -351,8 +363,9 @@ function buildModelPayload(input: GenerateFinalRunReportInput): string {
 async function generateAiFinalRunReport(
   input: GenerateFinalRunReportInput
 ): Promise<FinalRunReport | null> {
-  const client = createOpenAIClient();
-  const model = getModelName();
+  const client = createLLMClient();
+  const ctx = getRequestContext();
+  const model = getModelName("standard", client.provider, ctx?.modelOverride);
   const payload = buildModelPayload(input);
 
   const prompt = `
@@ -382,14 +395,14 @@ FACTS_JSON:
 ${payload}
 `.trim();
 
-  const response = await client.responses.create({
+  const response = await client.createChatCompletion({
     model,
     temperature: 0,
-    input: prompt,
-    text: { format: { type: "json_object" } },
+    messages: [{ role: "user", content: prompt }],
+    response_format: { type: "json_object" },
   });
 
-  const rawText = response.output_text || "";
+  const rawText = response.choices[0]?.message?.content ?? "";
   let parsed: unknown;
   try {
     parsed = JSON.parse(extractJsonObject(rawText));

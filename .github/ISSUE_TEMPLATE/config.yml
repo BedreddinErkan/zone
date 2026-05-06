@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Discussions
-    url: https://github.com/BedreddinErkan/zone-api/discussions
+    url: https://github.com/BedreddinErkan/zone/discussions
     about: Ask questions, share ideas, talk to other users
   - name: Documentation
-    url: https://github.com/BedreddinErkan/zone-api#readme
+    url: https://github.com/BedreddinErkan/zone#readme
     about: Read setup and usage docs

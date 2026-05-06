@@ -1275,6 +1275,26 @@ export async function run(): Promise<void> {
       console.log(tone(`Starting web UI on http://localhost:${port}`, c.cyan));
 
       process.env.ZONE_SERVER_MANUAL_START = "1";
+
+      // Zone Undo Tur 2a: lazy garbage-collect old snapshots on each serve
+      // startup. Best-effort — never blocks server start.
+      try {
+        const { cleanupOldSnapshots } = await import(
+          "../snapshots/snapshotStore.js"
+        );
+        const result = await cleanupOldSnapshots();
+        if (result.removed > 0) {
+          console.log(
+            `[zone-snapshot-gc] removed ${result.removed} old snapshot(s)`
+          );
+        }
+      } catch (err) {
+        console.error(
+          "[zone-snapshot-gc-error]",
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+
       const { startServer } = await import("../server.js");
       await startServer(port);
 

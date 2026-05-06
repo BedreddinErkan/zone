@@ -38,6 +38,10 @@ vi.mock("../llm/openaiClient.js", () => ({
   getModelName: getModelNameMock,
 }));
 
+vi.mock("../llm/factory.js", () => ({
+  createLLMClient: createMock,
+}));
+
 vi.mock("../core/confidenceGate.js", () => ({
   checkConfidenceGate: checkConfidenceGateMock,
 }));
@@ -81,9 +85,12 @@ describe("runTestEngineerFlow", () => {
       testDir: "src/test/resources/features",
     };
     const client = {
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
+      provider: "openai" as const,
+      createChatCompletion: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
             summary: "Generated test",
             warnings: [],
             featureFile: {
@@ -95,8 +102,12 @@ describe("runTestEngineerFlow", () => {
               content: "public class RoundTripFlightSearchSteps {}",
             },
           }),
-        }),
-      },
+            },
+          },
+        ],
+      }),
+      createChatCompletionStream: vi.fn(),
+      createEmbedding: vi.fn(),
     };
 
     scanRepoMock.mockResolvedValue(files);
@@ -173,9 +184,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
       testDir: "src/test/resources/features",
     };
     const client = {
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
+      provider: "openai" as const,
+      createChatCompletion: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
             summary: "Generated test",
             warnings: [],
             confidence: 75,
@@ -188,8 +202,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
               content: "public class RoundTripFlightSearchSteps {}",
             },
           }),
-        }),
-      },
+            },
+          },
+        ],
+      }),
+      createChatCompletionStream: vi.fn(),
+      createEmbedding: vi.fn(),
     };
 
     scanRepoMock.mockResolvedValue(files);
@@ -262,9 +280,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
       testDir: "src/test/resources/features",
     };
     const client = {
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
+      provider: "openai" as const,
+      createChatCompletion: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
             summary: "Generated test",
             warnings: [],
             confidence: 75,
@@ -277,8 +298,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
               content: "public class RoundTripFlightSearchSteps {}",
             },
           }),
-        }),
-      },
+            },
+          },
+        ],
+      }),
+      createChatCompletionStream: vi.fn(),
+      createEmbedding: vi.fn(),
     };
 
     scanRepoMock.mockResolvedValue(files);
@@ -353,9 +378,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
       testDir: "src/test/resources/features",
     };
     const client = {
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
+      provider: "openai" as const,
+      createChatCompletion: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
             summary: "Generated test",
             warnings: [],
             confidence: 75,
@@ -368,8 +396,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
               content: "public class RoundTripFlightSearchSteps {}",
             },
           }),
-        }),
-      },
+            },
+          },
+        ],
+      }),
+      createChatCompletionStream: vi.fn(),
+      createEmbedding: vi.fn(),
     };
 
     scanRepoMock.mockResolvedValue(files);
@@ -424,9 +456,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
       testDir: "tests",
     };
     const client = {
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
+      provider: "openai" as const,
+      createChatCompletion: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
             summary: "Generated test",
             warnings: [],
             confidence: 82,
@@ -435,8 +470,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
               content: "test('login', async ({ page }) => { await page.goto('/'); });",
             },
           }),
-        }),
-      },
+            },
+          },
+        ],
+      }),
+      createChatCompletionStream: vi.fn(),
+      createEmbedding: vi.fn(),
     };
 
     scanRepoMock.mockResolvedValue(files);
@@ -518,9 +557,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
       testDir: "tests",
     };
     const client = {
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
+      provider: "openai" as const,
+      createChatCompletion: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
             summary: "Generated test",
             warnings: [],
             confidence: 82,
@@ -530,8 +572,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
                 "import { test } from '@playwright/test';\n\ntest('login', async () => {});\n\ntest('invalid credentials', async () => {});",
             },
           }),
-        }),
-      },
+            },
+          },
+        ],
+      }),
+      createChatCompletionStream: vi.fn(),
+      createEmbedding: vi.fn(),
     };
 
     scanRepoMock.mockResolvedValue(files);
@@ -595,9 +641,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
       testDir: "tests",
     };
     const client = {
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
+      provider: "openai" as const,
+      createChatCompletion: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
             summary: "Generated login test",
             warnings: [],
             confidence: 82,
@@ -606,8 +655,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
               content: "test('login', async ({ page }) => { await page.goto('/'); expect(true).toBe(true); });",
             },
           }),
-        }),
-      },
+            },
+          },
+        ],
+      }),
+      createChatCompletionStream: vi.fn(),
+      createEmbedding: vi.fn(),
     };
 
     scanRepoMock.mockResolvedValue(files);
@@ -705,9 +758,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
       testDir: "tests",
     };
     const client = {
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
+      provider: "openai" as const,
+      createChatCompletion: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
             summary: "Generated login test",
             warnings: ["Selector may be brittle but still repository-native"],
             confidence: 100,
@@ -716,8 +772,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
               content: "test('login', async ({ page }) => { await page.goto('/login'); });",
             },
           }),
-        }),
-      },
+            },
+          },
+        ],
+      }),
+      createChatCompletionStream: vi.fn(),
+      createEmbedding: vi.fn(),
     };
 
     scanRepoMock.mockResolvedValue(files);
@@ -788,9 +848,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
       testDir: "tests",
     };
     const client = {
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
+      provider: "openai" as const,
+      createChatCompletion: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
             summary: "Generated login test",
             warnings: ["Placeholder selector was used for the submit button"],
             confidence: 100,
@@ -799,8 +862,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
               content: "test('login', async ({ page }) => { await page.goto('/login'); });",
             },
           }),
-        }),
-      },
+            },
+          },
+        ],
+      }),
+      createChatCompletionStream: vi.fn(),
+      createEmbedding: vi.fn(),
     };
 
     scanRepoMock.mockResolvedValue(files);
@@ -865,9 +932,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
       testDir: "tests",
     };
     const client = {
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
+      provider: "openai" as const,
+      createChatCompletion: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
             summary: "Generated login test",
             warnings: [],
             confidence: 82,
@@ -877,8 +947,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
                 "test('login', async ({ page }) => { await page.locator('#password').fill('secret'); await expect(page.locator('#password')).toBeVisible(); });",
             },
           }),
-        }),
-      },
+            },
+          },
+        ],
+      }),
+      createChatCompletionStream: vi.fn(),
+      createEmbedding: vi.fn(),
     };
 
     scanRepoMock.mockResolvedValue(files);
@@ -940,9 +1014,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
       testDir: "tests",
     };
     const client = {
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
+      provider: "openai" as const,
+      createChatCompletion: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
             summary: "Generated checkout test",
             warnings: [],
             confidence: 82,
@@ -951,8 +1028,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
               content: "test('checkout', async () => {});",
             },
           }),
-        }),
-      },
+            },
+          },
+        ],
+      }),
+      createChatCompletionStream: vi.fn(),
+      createEmbedding: vi.fn(),
     };
 
     scanRepoMock.mockResolvedValue(files);
@@ -1002,9 +1083,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
       testDir: "tests",
     };
     const client = {
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
+      provider: "openai" as const,
+      createChatCompletion: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
             summary: "Generated login test",
             warnings: [],
             confidence: 82,
@@ -1014,8 +1098,12 @@ expect(unexpectedLogs).toHaveLength(0);    logSpy.mockRestore();
                 "test('login', async ({ page }) => { await expect(page).toHaveURL(/.*\\/#/); await expect(page.getByText('Invalid credentials')).toBeVisible(); });",
             },
           }),
-        }),
-      },
+            },
+          },
+        ],
+      }),
+      createChatCompletionStream: vi.fn(),
+      createEmbedding: vi.fn(),
     };
 
     scanRepoMock.mockResolvedValue(files);

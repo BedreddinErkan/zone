@@ -37,6 +37,11 @@ export type LocateResult =
       parseErrorMessage?: string;
     };
 
+export interface SymbolDeclaration {
+  name: string;
+  kind: "function" | "class" | "variable" | "method" | "default";
+}
+
 type ConcreteSymbolKind = Exclude<SymbolKind, "any">;
 
 type Candidate = {
@@ -264,6 +269,29 @@ function collectCandidates(fileContent: string): Candidate[] {
   });
 
   return candidates;
+}
+
+export function extractDeclaredSymbols(
+  fileContent: string,
+  filePath: string
+): SymbolDeclaration[] {
+  if (!isSupportedScriptExtension(filePath)) return [];
+
+  try {
+    return collectCandidates(String(fileContent ?? ""))
+      .filter((candidate) => candidate.name !== "__default__")
+      .map((candidate) => ({
+        name: candidate.name,
+        kind:
+          candidate.kind === "arrow"
+            ? "variable"
+            : candidate.kind === "export_default"
+              ? "default"
+              : candidate.kind,
+      }));
+  } catch {
+    return [];
+  }
 }
 
 export function locateSymbol(

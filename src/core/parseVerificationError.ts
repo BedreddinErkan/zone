@@ -39,14 +39,16 @@ function extractAllFileMentions(summary: string): string[] {
   const s = String(summary || "").replace(/\r\n/g, "\n");
   const hits = new Set<string>();
 
-  // Windows paths like C:\...\file.ts:12:3 or C:/.../file.ts:12:3
-  const winRe = /([A-Za-z]:[\\/][^\s()]+?\.(?:ts|tsx|js|jsx))(?:\:(\d+))?(?:\:(\d+))?/g;
+  // Windows paths like C:\...\file.ts:12:3 or C:/.../file.ts:12:3.
+  // parser-fix Tur: longer extensions first — regex alternation is left-to-right
+  // eager, so `ts|tsx` would match `.ts` and drop the trailing `x` from `.tsx`.
+  const winRe = /([A-Za-z]:[\\/][^\s()]+?\.(?:tsx|jsx|ts|js))(?:\:(\d+))?(?:\:(\d+))?/g;
   for (const m of s.matchAll(winRe)) {
     if (m[1]) hits.add(normPath(m[1]));
   }
 
   // POSIX-ish paths like src/foo/bar.ts:12:3
-  const posixRe = /((?:\.{0,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx))(?:\:(\d+))?(?:\:(\d+))?/g;
+  const posixRe = /((?:\.{0,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:tsx|jsx|ts|js))(?:\:(\d+))?(?:\:(\d+))?/g;
   for (const m of s.matchAll(posixRe)) {
     if (m[1]) hits.add(normPath(m[1]));
   }
@@ -64,15 +66,17 @@ function pickFailingFileAndLine(summary: string): { file: string | null; line: n
   // Collect path:line candidates in order of appearance.
   // Stack traces often have: at ... (C:\path\file.js:17:6)
   const candidates: Array<{ file: string; line: number | null }> = [];
-  const atRe = /\(([^()]+?\.(?:ts|tsx|js|jsx))\:(\d+)\:(\d+)\)/g;
+  // parser-fix Tur: longer extensions first to avoid `.ts` swallowing `.tsx`.
+  const atRe = /\(([^()]+?\.(?:tsx|jsx|ts|js))\:(\d+)\:(\d+)\)/g;
   for (const m of s.matchAll(atRe)) {
     if (!m?.[1]) continue;
     candidates.push({ file: normPath(m[1]), line: Number(m[2] || "") || null });
   }
 
-  // Also handle bare: file.js:17:6 (including absolute win paths)
+  // Also handle bare: file.js:17:6 (including absolute win paths).
+  // parser-fix Tur: same alternation reorder applied to both branches of the union.
   const fileReGlobal =
-    /([A-Za-z]:[\\/][^\s:()]+?\.(?:ts|tsx|js|jsx)|(?:\.{0,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx))\:(\d+)(?:\:(\d+))?/g;
+    /([A-Za-z]:[\\/][^\s:()]+?\.(?:tsx|jsx|ts|js)|(?:\.{0,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:tsx|jsx|ts|js))\:(\d+)(?:\:(\d+))?/g;
   for (const m of s.matchAll(fileReGlobal)) {
     if (!m?.[1]) continue;
     candidates.push({ file: normPath(m[1]), line: Number(m[2] || "") || null });

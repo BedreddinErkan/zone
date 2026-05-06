@@ -322,15 +322,483 @@ function getSignalScore(file: RepoFile, signals: TaskSignal[]): number {
   return score;
 }
 
-function getBaselineScore(file: RepoFile): number {
-  const filePath = file.path.toLowerCase();
-  if (filePath.startsWith("src/") || filePath.startsWith("client/") || filePath.startsWith("server/")) {
-    return 1;
+/**
+ * Framework-agnostic path tiers.
+ * Higher priority = more likely to contain "the answer" for typical queries.
+ * Match is by path SEGMENT (split on "/"), not substring — so "componentry"
+ * doesn't accidentally match the "components" tier.
+ */
+const PATH_TIERS: Array<{
+  priority: number;
+  segments: string[];
+  description: string;
+}> = [
+  {
+    priority: 8,
+    segments: [
+      "lib",
+      "libs",
+      "utils",
+      "util",
+      "helpers",
+      "services",
+      "domain",
+      "core",
+      "shared",
+      "common",
+      "modules",
+    ],
+    description: "source-of-truth: shared logic, helpers, services",
+  },
+  {
+    priority: 5,
+    segments: [
+      "app",
+      "pages",
+      "routes",
+      "controllers",
+      "views",
+      "handlers",
+      "endpoints",
+      "actions",
+    ],
+    description: "entry points: pages, routes, controllers",
+  },
+  {
+    priority: 4,
+    segments: [
+      "components",
+      "widgets",
+      "partials",
+      "ui",
+      "elements",
+      "containers",
+      "screens",
+    ],
+    description: "UI: components, widgets",
+  },
+  {
+    priority: 4,
+    segments: [
+      "models",
+      "schemas",
+      "stores",
+      "state",
+      "store",
+      "repositories",
+      "repos",
+      "data",
+      "entities",
+    ],
+    description: "data layer: models, schemas, stores",
+  },
+  {
+    priority: 3,
+    segments: [
+      "middleware",
+      "middlewares",
+      "api",
+      "server",
+      "client",
+      "providers",
+      "adapters",
+      "integrations",
+      "plugins",
+    ],
+    description: "infrastructure: middleware, api, providers",
+  },
+  {
+    priority: 4,
+    segments: ["hooks", "composables", "mixins"],
+    description: "hooks, composables, mixins",
+  },
+  {
+    priority: 2,
+    segments: ["config", "configs", "configuration"],
+    description: "config",
+  },
+  {
+    priority: 2,
+    segments: ["styles", "css", "scss", "themes"],
+    description: "styles",
+  },
+  {
+    priority: 1,
+    segments: [
+      "tests",
+      "test",
+      "__tests__",
+      "spec",
+      "specs",
+      "fixtures",
+      "mocks",
+      "__mocks__",
+      "e2e",
+      "cypress",
+    ],
+    description: "tests & fixtures",
+  },
+  {
+    priority: 0,
+    segments: [
+      "generated",
+      "gen",
+      "auto-generated",
+      ".next",
+      "dist",
+      "build",
+    ],
+    description: "generated/build artifacts",
+  },
+];
+
+/**
+ * Returns the highest tier priority across the file's path segments.
+ * Segment match (case-insensitive) — not substring — to avoid false positives
+ * like "components" inside "componentry/" or third-party paths.
+ */
+export function computePathTierScore(filePath: string): number {
+  const segments = (filePath || "").split("/").filter(Boolean);
+  if (segments.length === 0) return 0;
+  const lowerSegments = segments.map((s) => s.toLowerCase());
+
+  let highest = 0;
+  for (const tier of PATH_TIERS) {
+    for (const seg of lowerSegments) {
+      if (tier.segments.includes(seg)) {
+        if (tier.priority > highest) highest = tier.priority;
+      }
+    }
   }
-  return 0;
+  return highest;
 }
 
-function scoreFile(file: RepoFile, task: string): number {
+const MONOREPO_CONTAINER_SEGMENTS = new Set([
+  "src",
+  "client",
+  "server",
+  "packages",
+  "apps",
+]);
+
+function getBaselineScore(file: RepoFile): number {
+  const tierScore = computePathTierScore(file.path);
+  const firstSegment = (file.path.split("/")[0] ?? "").toLowerCase();
+  const containerBonus = MONOREPO_CONTAINER_SEGMENTS.has(firstSegment) ? 1 : 0;
+  return tierScore + containerBonus;
+}
+
+/**
+ * Extract path-like tokens from task text and resolve to actual repo files.
+ * Catches "look at lib/env.ts", "edit src/foo.ts", "the env.ts file",
+ * "AppProviders component". Returns a Set of file paths (from the candidate
+ * list) the user explicitly mentioned.
+ */
+export function extractMentionedFiles(
+  task: string,
+  files: RepoFile[]
+): Set<string> {
+  const mentioned = new Set<string>();
+  if (!task || files.length === 0) return mentioned;
+
+  const fileByBasename = new Map<string, string[]>();
+  const fileByFullPath = new Set<string>();
+
+  for (const f of files) {
+    fileByFullPath.add(f.path);
+    const basename = f.path.split("/").pop() ?? "";
+    if (!fileByBasename.has(basename)) fileByBasename.set(basename, []);
+    fileByBasename.get(basename)!.push(f.path);
+  }
+
+  // Pattern A: full path-like tokens with extension.
+  const fullPathRegex =
+    /\b[\w/.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|css|scss|html|md|json|sql|yaml|yml|toml)\b/gi;
+  for (const match of task.matchAll(fullPathRegex)) {
+    const candidate = match[0];
+
+    if (fileByFullPath.has(candidate)) {
+      mentioned.add(candidate);
+      continue;
+    }
+
+    const basename = candidate.split("/").pop() ?? "";
+    const matches = fileByBasename.get(basename);
+    if (matches && matches.length === 1) {
+      mentioned.add(matches[0]);
+    } else if (matches && matches.length > 1) {
+      const taskLower = task.toLowerCase();
+      const partialMatch = matches.find((p) =>
+        taskLower.includes(p.toLowerCase())
+      );
+      if (partialMatch) {
+        mentioned.add(partialMatch);
+      } else {
+        for (const p of matches) mentioned.add(p);
+      }
+    }
+  }
+
+  // Pattern B: bare CamelCase words → unique-stem basenames.
+  const camelCaseRegex = /\b([A-Z][A-Za-z0-9_]{2,})\b/g;
+  for (const match of task.matchAll(camelCaseRegex)) {
+    const word = match[0];
+    for (const [basename, paths] of fileByBasename) {
+      const stem = basename.replace(/\.[^.]+$/, "");
+      if (stem === word && paths.length === 1) {
+        mentioned.add(paths[0]);
+      }
+    }
+  }
+
+  return mentioned;
+}
+
+const ENTITY_TERM_BLOCKLIST = new Set([
+  "function",
+  "functions",
+  "const",
+  "var",
+  "let",
+  "class",
+  "interface",
+  "type",
+  "import",
+  "export",
+  "default",
+  "return",
+  "async",
+  "await",
+  "string",
+  "number",
+  "boolean",
+  "object",
+  "array",
+  "null",
+  "undefined",
+  "true",
+  "false",
+  "this",
+  "that",
+  "what",
+  "which",
+  "when",
+  "where",
+  "who",
+  "why",
+  "how",
+  "the",
+  "and",
+  "for",
+  "with",
+  "from",
+  "into",
+  "have",
+  "has",
+  "are",
+  "was",
+  "were",
+  "been",
+  "use",
+  "uses",
+  "used",
+  "using",
+  "project",
+  "projects",
+  "code",
+  "codebase",
+  "file",
+  "files",
+  "test",
+  "tests",
+  "component",
+  "components",
+  "feature",
+  "features",
+  "task",
+  "tasks",
+  "tell",
+  "give",
+  "show",
+  "find",
+  "list",
+  "check",
+  "look",
+  "make",
+  "add",
+  "fix",
+]);
+
+/**
+ * Extract entity-like terms from task text — identifiers, function names,
+ * env-var names. Excludes common English/dev stopwords. Returns lowercase
+ * terms for case-insensitive matching.
+ */
+export function extractEntityTerms(task: string): string[] {
+  if (!task) return [];
+
+  const terms = new Set<string>();
+
+  // CamelCase identifiers (functions, classes, components).
+  for (const match of task.matchAll(
+    /\b(?:[A-Z][A-Za-z0-9]{2,}|[a-z]+[A-Z][A-Za-z0-9]+)\b/g
+  )) {
+    terms.add(match[0].toLowerCase());
+  }
+
+  // SCREAMING_SNAKE_CASE (env vars, constants).
+  for (const match of task.matchAll(/\b([A-Z][A-Z0-9_]{3,})\b/g)) {
+    terms.add(match[0].toLowerCase());
+  }
+
+  // snake_case identifiers (require an underscore so "router" is not picked up).
+  for (const match of task.matchAll(/\b([a-z][a-z0-9_]{4,})\b/g)) {
+    const word = match[0];
+    if (word.includes("_")) terms.add(word.toLowerCase());
+  }
+
+  // Quoted strings (user might quote a function/var name).
+  for (const match of task.matchAll(/[`'"]([\w]+)[`'"]/g)) {
+    if (match[1].length > 2) terms.add(match[1].toLowerCase());
+  }
+
+  return Array.from(terms).filter((t) => !ENTITY_TERM_BLOCKLIST.has(t));
+}
+
+/**
+ * Domain phrases → identifier terms.
+ * When a query uses domain language (e.g. "environment variables") we expand
+ * to concrete identifier-like tokens that lexical scan can match against
+ * actual file contents. Framework-agnostic: works whether the project uses
+ * Clerk/Supabase/Prisma/Stripe/etc.
+ */
+const DOMAIN_TERM_MAP: Record<string, string[]> = {
+  // env & config
+  "environment variable": ["env", "process.env", "readenv", "getenv"],
+  "environment variables": ["env", "process.env", "readenv", "getenv"],
+  "env var": ["env", "process.env", "readenv"],
+  "env vars": ["env", "process.env", "readenv"],
+  "configuration": ["config", "configure", "settings", "options"],
+  "settings": ["config", "settings", "preferences", "options"],
+
+  // auth
+  "authentication": ["auth", "clerk", "auth0", "login", "session", "jwt", "oauth", "user"],
+  "auth": ["auth", "clerk", "login", "session", "jwt", "oauth"],
+  "login": ["login", "signin", "auth", "session"],
+  "user session": ["session", "user", "auth", "cookie"],
+  "permissions": ["permission", "role", "access", "policy"],
+
+  // database
+  "database": ["supabase", "prisma", "drizzle", "mongoose", "db", "query", "table", "schema"],
+  "data layer": ["repository", "repo", "model", "entity", "schema"],
+  "sql": ["sql", "query", "table", "column", "migration"],
+  "migration": ["migration", "schema", "alter", "create"],
+  "schema": ["schema", "model", "table", "type"],
+  "orm": ["prisma", "drizzle", "mongoose", "sequelize", "typeorm"],
+
+  // api & routes
+  "api": ["route", "endpoint", "handler", "controller", "api"],
+  "endpoint": ["route", "endpoint", "handler", "controller"],
+  "rest": ["rest", "route", "endpoint", "handler"],
+  "graphql": ["graphql", "resolver", "schema", "query", "mutation"],
+  "webhook": ["webhook", "event", "handler", "callback"],
+
+  // ui
+  "component": ["component", "props", "render", "jsx", "tsx"],
+  "page": ["page", "route", "layout", "view"],
+  "layout": ["layout", "wrapper", "container", "shell"],
+  "form": ["form", "input", "field", "validation", "zod", "yup"],
+  "modal": ["modal", "dialog", "popup", "overlay"],
+
+  // styling
+  "styling": ["css", "scss", "tailwind", "style", "theme", "classname"],
+  "style": ["css", "style", "tailwind", "theme"],
+  "theme": ["theme", "color", "palette", "dark", "light"],
+  "tailwind": ["tailwind", "tw", "classname", "cn"],
+
+  // state
+  "state management": ["state", "store", "reducer", "redux", "zustand", "context"],
+  "store": ["store", "state", "reducer", "atom"],
+  "context": ["context", "provider", "consumer", "use"],
+
+  // networking
+  "fetch": ["fetch", "axios", "request", "http", "api"],
+  "http": ["http", "request", "response", "fetch", "axios"],
+  "websocket": ["websocket", "ws", "socket", "realtime"],
+
+  // payments
+  "payment": ["stripe", "payment", "checkout", "charge", "subscription"],
+  "billing": ["billing", "invoice", "subscription", "stripe", "plan"],
+  "subscription": ["subscription", "plan", "tier", "stripe"],
+  "stripe": ["stripe", "checkout", "webhook", "session"],
+
+  // testing
+  "test": ["test", "spec", "fixture", "mock"],
+  "unit test": ["test", "spec", "describe", "it", "expect"],
+  "integration test": ["test", "spec", "fixture", "setup"],
+  "mock": ["mock", "stub", "fixture", "fake"],
+
+  // build & tooling
+  "build": ["webpack", "vite", "rollup", "esbuild", "bundle"],
+  "bundle": ["webpack", "vite", "rollup", "bundle"],
+  "linting": ["eslint", "prettier", "lint", "rule"],
+  "typescript": ["tsconfig", "typescript", "type", "interface"],
+
+  // i18n
+  "internationalization": ["i18n", "locale", "translation", "language"],
+  "i18n": ["i18n", "locale", "translation", "lang"],
+  "translation": ["translation", "i18n", "locale", "messages"],
+
+  // monitoring
+  "logging": ["log", "logger", "console", "winston", "pino"],
+  "monitoring": ["sentry", "datadog", "telemetry", "metric"],
+  "error handling": ["error", "exception", "catch", "throw"],
+  "telemetry": ["telemetry", "tracking", "analytics", "metric"],
+
+  // queue & messaging
+  "queue": ["queue", "job", "worker", "bullmq", "redis"],
+  "background job": ["job", "worker", "queue", "task"],
+
+  // cache
+  "cache": ["cache", "redis", "memcached", "lru"],
+  "caching": ["cache", "redis", "memo", "ttl"],
+
+  // file & storage
+  "file upload": ["upload", "file", "multipart", "formdata", "s3"],
+  "storage": ["storage", "s3", "blob", "bucket"],
+};
+
+const DOMAIN_PHRASES_BY_LENGTH = Object.keys(DOMAIN_TERM_MAP).sort(
+  (a, b) => b.length - a.length
+);
+
+/**
+ * If the task contains any domain phrase, fold its mapped identifier terms
+ * into the existing entity term set. Case-insensitive substring match so
+ * "the environment variables here" still triggers.
+ */
+export function expandWithDomainTerms(
+  task: string,
+  baseTerms: string[]
+): string[] {
+  if (!task) return baseTerms;
+  const expanded = new Set(baseTerms);
+  const lowerTask = task.toLowerCase();
+  for (const phrase of DOMAIN_PHRASES_BY_LENGTH) {
+    if (lowerTask.includes(phrase)) {
+      for (const term of DOMAIN_TERM_MAP[phrase]) {
+        expanded.add(term.toLowerCase());
+      }
+    }
+  }
+  return Array.from(expanded);
+}
+
+function scoreFile(
+  file: RepoFile,
+  task: string,
+  mentionedFiles: Set<string>
+): number {
   const normalizedTask = task.toLowerCase();
   const filePath = file.path.toLowerCase();
   const fileBasename = (file.path.split("/").pop() ?? file.path)
@@ -348,6 +816,10 @@ function scoreFile(file: RepoFile, task: string): number {
   const hasExplicitBasenameTarget = explicitBasenameTargets.length > 0;
 
   let score = getBaselineScore(file) + getSignalScore(file, signals);
+
+  if (mentionedFiles.has(file.path)) {
+    score += 300;
+  }
 
   const keywords = normalizedTask
     .split(/\s+/)
@@ -461,19 +933,69 @@ function scoreFile(file: RepoFile, task: string): number {
   return score;
 }
 
-export function rankRelevantFiles(args: {
+/**
+ * Read top-N candidate file contents (bounded I/O) and award a small score
+ * boost for each entity-term match. Caps per-file boost at +50.
+ */
+async function applyLexicalBoost<
+  T extends { path: string; score: number; __keywordScore: number }
+>(
+  scored: T[],
+  task: string,
+  readContent: (filePath: string) => Promise<string | null>
+): Promise<void> {
+  const baseTerms = extractEntityTerms(task);
+  const allTerms = expandWithDomainTerms(task, baseTerms);
+  if (allTerms.length === 0 || scored.length === 0) return;
+
+  const TOP_N = 30;
+  const MAX_FILE_BYTES = 50_000;
+  const top = scored.slice(0, TOP_N);
+
+  await Promise.all(
+    top.map(async (sf) => {
+      let content: string | null = null;
+      try {
+        content = await readContent(sf.path);
+      } catch {
+        return;
+      }
+      if (!content) return;
+      if (content.length > MAX_FILE_BYTES) {
+        content = content.slice(0, MAX_FILE_BYTES);
+      }
+      const lower = content.toLowerCase();
+      let totalHits = 0;
+      for (const term of allTerms) {
+        const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const matches = lower.match(new RegExp(`\\b${escaped}\\b`, "g"));
+        if (matches) totalHits += Math.min(matches.length, 3);
+      }
+      if (totalHits > 0) {
+        const boost = Math.min(totalHits * 5, 50);
+        sf.score += boost;
+        sf.__keywordScore += boost;
+      }
+    })
+  );
+}
+
+export async function rankRelevantFiles(args: {
   task: string;
   files: RepoFile[];
   projectStructure?: unknown;
   intent?: TaskIntent;
   semanticScores?: Map<string, number>;
-}): Array<RepoFile & { score: number }> {
+  lastChangedFiles?: string[];
+  readContent?: (filePath: string) => Promise<string | null>;
+}): Promise<Array<RepoFile & { score: number }>> {
   console.log("[zone-rank-fn-entry] rankRelevantFiles called", {
     hasSemanticScores: !!args.semanticScores,
     semanticScoresSize: args.semanticScores?.size || 0,
     fileCount: args.files?.length,
   });
-  const { task, files, intent, semanticScores } = args;
+  const { task, files, intent, semanticScores, lastChangedFiles, readContent } =
+    args;
 
   console.log("[zone-rank-input-debug]", {
     hasSemanticScores: !!semanticScores,
@@ -502,21 +1024,49 @@ export function rankRelevantFiles(args: {
     ].some((token) => p.includes(token));
   };
 
-  const ranked = files
-    .filter((f) => !shouldSkipPath(f.path))
-    .map((file) => {
-      const keywordScore = scoreFile(file, task);
-      const boost = intent
-        ? getIntentAwareScoreBoost(file.path, "", intent)
-        : 0;
+  const candidateFiles = files.filter((f) => !shouldSkipPath(f.path));
+  const mentionedFiles = extractMentionedFiles(task, candidateFiles);
+  const lastChangedSet = new Set(
+    Array.isArray(lastChangedFiles)
+      ? lastChangedFiles.filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+      : []
+  );
 
-      return {
-        ...file,
-        score: keywordScore + boost,
-        __keywordScore: keywordScore,
-        __boost: boost,
-      };
-    });
+  const ranked = candidateFiles.map((file) => {
+    const keywordScore = scoreFile(file, task, mentionedFiles);
+    const boost = intent
+      ? getIntentAwareScoreBoost(file.path, "", intent)
+      : 0;
+    const lastChangedBoost =
+      lastChangedSet.has(file.path) && keywordScore > 0 ? 30 : 0;
+
+    return {
+      ...file,
+      score: keywordScore + boost + lastChangedBoost,
+      __keywordScore: keywordScore + lastChangedBoost,
+      __boost: boost,
+    };
+  });
+
+  if (readContent) {
+    const baseTerms = extractEntityTerms(task);
+    const allTerms = expandWithDomainTerms(task, baseTerms);
+    if (allTerms.length > 0) {
+      ranked.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
+      await applyLexicalBoost(ranked, task, readContent);
+      console.log("[zone-rank-lexical-debug]", {
+        baseTerms,
+        domainTerms: allTerms.filter((t) => !baseTerms.includes(t)),
+        topAfterLexical: ranked
+          .slice()
+          .sort(
+            (a, b) => b.score - a.score || a.path.localeCompare(b.path)
+          )
+          .slice(0, 5)
+          .map((f) => ({ path: f.path, score: f.score })),
+      });
+    }
+  }
 
   if (semanticScores && semanticScores.size > 0 && ranked.length > 0) {
     const taskLen = String(task || "").length;

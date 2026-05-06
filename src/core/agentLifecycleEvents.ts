@@ -83,6 +83,7 @@ export type ZoneStructuredProgressEvent = {
     | "chat_response"
     | "plan_generated"
     | "plan_discard"
+    | "plan_step_started"
     | "plan_step_complete"
     | "patch_stream_delta"
     | "patch_stream_target"

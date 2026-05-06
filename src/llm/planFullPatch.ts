@@ -1,24 +1,24 @@
 import { z } from "zod";
 import {
   buildEmptyModelResponseDetailsLine,
-  createOpenAIClient,
   extractResponsesApiOutputText,
   formatOpenAiThrownErrorPayload,
   formatResponsesTextExtractionFailure,
   getModelName,
   logOpenAiResponseDebug,
 } from "./openaiClient.js";
+import { createLLMClient } from "./factory.js";
+import { getRequestContext } from "./openaiContext.js";
 import {
   withSelfHealingRetry,
   buildDefaultFeedbackPrompt,
   type RetryFeedback,
 } from "../core/withSelfHealingRetry.js";
-import type { ResponseInput } from "openai/resources/responses/responses";
 import type {
-  Tool,
-  ToolChoiceFunction,
-  ResponseFunctionToolCall,
-} from "openai/resources/responses/responses";
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
+  ChatCompletionToolChoiceOption,
+} from "openai/resources/chat/completions";
 import {
   buildFullPatchPrompt,
   type FullPatchOutputMode,
@@ -225,55 +225,65 @@ function buildStrictPatchSystemInstruction(): string {
 
 const APPLY_PATCH_TOOL_NAME = "apply_patch" as const;
 
-function buildApplyPatchTool(): Tool {
+function buildApplyPatchTool(): ChatCompletionTool {
   return {
     type: "function",
-    name: APPLY_PATCH_TOOL_NAME,
-    strict: true,
-    description:
-      "Return a patch in --- FILE / --- FIND --- / --- REPLACE --- format OR exactly NO_CHANGE_NEEDED.",
-    parameters: {
-      type: "object",
-      properties: {
-        patch: {
-          type: "string",
-          description:
-            "Patch in --- FILE / FIND / REPLACE format OR exactly NO_CHANGE_NEEDED",
+    function: {
+      name: APPLY_PATCH_TOOL_NAME,
+      strict: true,
+      description:
+        "Return a patch in --- FILE / --- FIND --- / --- REPLACE --- format OR exactly NO_CHANGE_NEEDED.",
+      parameters: {
+        type: "object",
+        properties: {
+          patch: {
+            type: "string",
+            description:
+              "Patch in --- FILE / FIND / REPLACE format OR exactly NO_CHANGE_NEEDED",
+          },
         },
-      },
-      required: ["patch"],
-      additionalProperties: false,
-    } as Record<string, unknown>,
+        required: ["patch"],
+        additionalProperties: false,
+      } as Record<string, unknown>,
+    },
   };
 }
 
-function buildApplyPatchToolChoice(): ToolChoiceFunction {
+function buildApplyPatchToolChoice(): ChatCompletionToolChoiceOption {
   return {
     type: "function",
-    name: APPLY_PATCH_TOOL_NAME,
+    function: { name: APPLY_PATCH_TOOL_NAME },
   };
+}
+
+interface ChatToolCallShape {
+  id?: string;
+  type?: string;
+  function?: { name?: string; arguments?: string };
 }
 
 function extractPatchFromToolCall(response: unknown): string | null {
-  const outputItems = (response as { output?: unknown[] } | null)?.output;
-  if (!Array.isArray(outputItems) || outputItems.length === 0) {
-    return null;
-  }
+  const choices = (response as { choices?: unknown[] } | null)?.choices;
+  if (!Array.isArray(choices) || choices.length === 0) return null;
+  const message = (choices[0] as { message?: { tool_calls?: unknown[] } } | null)
+    ?.message;
+  const toolCalls = message?.tool_calls;
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) return null;
 
-  const toolCall = outputItems.find((item) => {
-    const t = item as Partial<ResponseFunctionToolCall> | null;
+  const toolCall = toolCalls.find((item) => {
+    const t = item as ChatToolCallShape | null;
     return (
       !!t &&
-      t.type === "function_call" &&
-      t.name === APPLY_PATCH_TOOL_NAME &&
-      typeof t.arguments === "string"
+      t.type === "function" &&
+      t.function?.name === APPLY_PATCH_TOOL_NAME &&
+      typeof t.function?.arguments === "string"
     );
-  }) as ResponseFunctionToolCall | undefined;
+  }) as ChatToolCallShape | undefined;
 
-  if (!toolCall) return null;
+  if (!toolCall || typeof toolCall.function?.arguments !== "string") return null;
 
   try {
-    const parsed = JSON.parse(toolCall.arguments) as { patch?: unknown };
+    const parsed = JSON.parse(toolCall.function.arguments) as { patch?: unknown };
     return typeof parsed.patch === "string" ? parsed.patch : null;
   } catch {
     return null;
@@ -502,8 +512,9 @@ export async function planFullPatchWithLlm(input: {
     | { type: "patch_stream_target"; filePath: string; targetSymbol: string }
   ) => void;
 }): Promise<FullPatchResult> {
-  const client = createOpenAIClient();
-  const model = getModelName("high");
+  const client = createLLMClient();
+  const ctx = getRequestContext();
+  const model = getModelName("high", client.provider, ctx?.modelOverride);
   let openAiTransportErrorDetails: string | null = null;
   let lastSuccessfulResponsesCreateResult: unknown = null;
 
@@ -667,15 +678,13 @@ export async function planFullPatchWithLlm(input: {
           })
         );
 
-        const responseInput: ResponseInput = [
+        const responseInput: ChatCompletionMessageParam[] = [
           {
             role: "system",
-            type: "message",
             content: strictSystemInstruction,
           },
           {
             role: "user",
-            type: "message",
             content: currentPrompt,
           },
         ];
@@ -693,108 +702,150 @@ export async function planFullPatchWithLlm(input: {
 
         let response: unknown;
         try {
-          // Streaming (best-effort): prefer streaming tool-call arguments; fallback to non-streaming.
-          const streamFn = (client.responses as unknown as { stream?: unknown }).stream;
-          if (typeof streamFn === "function") {
-            console.log("[zone-stream-start]", { filePath: input.filePath });
-            const controller = new AbortController();
-            const timeout = setTimeout(() => {
-              try { controller.abort(); } catch {}
-            }, 120_000);
-            const runner = (client.responses as unknown as { stream: Function }).stream({
-              model,
-              temperature: 0,
-              max_output_tokens: maxOutputTokens,
-              tools: [applyPatchTool],
-              tool_choice: applyPatchToolChoice,
-              input: responseInput,
-            });
+          // Streaming primary: chat completions tool-call argument deltas.
+          console.log("[zone-stream-start]", { filePath: input.filePath });
+          const controller = new AbortController();
+          const timeout = setTimeout(() => {
+            try { controller.abort(); } catch {}
+          }, 120_000);
+          const stream = await client.createChatCompletionStream({
+            model,
+            temperature: 0,
+            max_tokens: maxOutputTokens,
+            tools: [applyPatchTool],
+            tool_choice: applyPatchToolChoice,
+            messages: responseInput,
+            stream: true,
+          });
 
-            let argsSnapshot = "";
-            let lastPatchLen = 0;
-            let sawAnyToolArgsEvent = false;
-            const tryExtractPatchFromArgs = (raw: string): string | null => {
-              const key = `"patch"`;
-              const k = raw.indexOf(key);
-              if (k < 0) return null;
-              const colon = raw.indexOf(":", k + key.length);
-              if (colon < 0) return null;
-              const firstQuote = raw.indexOf('"', colon + 1);
-              if (firstQuote < 0) return null;
-              // parse JSON string value with escapes
-              let i = firstQuote + 1;
-              let out = "";
-              while (i < raw.length) {
-                const ch = raw[i];
-                if (ch === "\\") {
-                  const nxt = raw[i + 1];
-                  if (nxt == null) return null;
-                  // handle common escapes
-                  if (nxt === "n") out += "\n";
-                  else if (nxt === "r") out += "\r";
-                  else if (nxt === "t") out += "\t";
-                  else if (nxt === '"') out += '"';
-                  else if (nxt === "\\") out += "\\";
-                  else out += nxt;
-                  i += 2;
-                  continue;
-                }
-                if (ch === '"') {
-                  return out;
-                }
-                out += ch;
-                i += 1;
+          let argsAccum = "";
+          let toolCallId = "";
+          let toolCallName = "";
+          let textAccum = "";
+          let lastPatchLen = 0;
+          let sawAnyToolArgsEvent = false;
+          const tryExtractPatchFromArgs = (raw: string): string | null => {
+            const key = `"patch"`;
+            const k = raw.indexOf(key);
+            if (k < 0) return null;
+            const colon = raw.indexOf(":", k + key.length);
+            if (colon < 0) return null;
+            const firstQuote = raw.indexOf('"', colon + 1);
+            if (firstQuote < 0) return null;
+            // parse JSON string value with escapes
+            let i = firstQuote + 1;
+            let out = "";
+            while (i < raw.length) {
+              const ch = raw[i];
+              if (ch === "\\") {
+                const nxt = raw[i + 1];
+                if (nxt == null) return null;
+                // handle common escapes
+                if (nxt === "n") out += "\n";
+                else if (nxt === "r") out += "\r";
+                else if (nxt === "t") out += "\t";
+                else if (nxt === '"') out += '"';
+                else if (nxt === "\\") out += "\\";
+                else out += nxt;
+                i += 2;
+                continue;
               }
-              return null;
-            };
+              if (ch === '"') {
+                return out;
+              }
+              out += ch;
+              i += 1;
+            }
+            return null;
+          };
 
-            try {
-              for await (const event of runner as AsyncIterable<any>) {
+          try {
+            for await (const chunk of stream) {
               if (controller.signal.aborted) break;
-              if (!event || typeof event !== "object") continue;
+              if (!chunk || typeof chunk !== "object") continue;
+              const delta = chunk.choices?.[0]?.delta;
+              if (!delta) continue;
               // Primary: tool-call arguments streaming
-              if (event.type === "response.function_call_arguments.delta") {
-                sawAnyToolArgsEvent = true;
-                const snap = typeof event.snapshot === "string" ? event.snapshot : "";
-                if (snap && snap !== argsSnapshot) {
-                  argsSnapshot = snap;
-                  const patchText = tryExtractPatchFromArgs(argsSnapshot);
-                  if (typeof patchText === "string" && patchText.length >= lastPatchLen) {
-                    const delta = patchText.slice(lastPatchLen);
-                    if (delta) {
-                      console.log("[zone-stream-delta]", { delta: delta.slice(0, 30) });
-                      input.onProgress?.({
-                        type: "patch_stream_delta",
-                        filePath: input.filePath,
-                        delta,
-                      });
-                      lastPatchLen = patchText.length;
+              const tcArr = (delta as { tool_calls?: unknown[] }).tool_calls;
+              if (Array.isArray(tcArr) && tcArr.length > 0) {
+                for (const tc of tcArr) {
+                  const tcObj = tc as {
+                    id?: string;
+                    function?: { name?: string; arguments?: string };
+                  } | null;
+                  if (!tcObj) continue;
+                  if (typeof tcObj.id === "string" && tcObj.id) toolCallId = tcObj.id;
+                  if (typeof tcObj.function?.name === "string" && tcObj.function.name) {
+                    toolCallName = tcObj.function.name;
+                  }
+                  const argFrag = tcObj.function?.arguments;
+                  if (typeof argFrag === "string" && argFrag.length > 0) {
+                    sawAnyToolArgsEvent = true;
+                    argsAccum += argFrag;
+                    const patchText = tryExtractPatchFromArgs(argsAccum);
+                    if (typeof patchText === "string" && patchText.length >= lastPatchLen) {
+                      const deltaPiece = patchText.slice(lastPatchLen);
+                      if (deltaPiece) {
+                        console.log("[zone-stream-delta]", { delta: deltaPiece.slice(0, 30) });
+                        input.onProgress?.({
+                          type: "patch_stream_delta",
+                          filePath: input.filePath,
+                          delta: deltaPiece,
+                        });
+                        lastPatchLen = patchText.length;
+                      }
                     }
                   }
                 }
                 continue;
               }
-              // Secondary: output_text streaming (if tool-call isn't used by the model)
-              if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
-                console.log("[zone-stream-delta]", { delta: String(event.delta).slice(0, 30) });
+              // Secondary: text content streaming (if tool-call isn't used by the model)
+              const contentFrag = (delta as { content?: string }).content;
+              if (typeof contentFrag === "string" && contentFrag.length > 0) {
+                textAccum += contentFrag;
+                console.log("[zone-stream-delta]", { delta: contentFrag.slice(0, 30) });
                 input.onProgress?.({
                   type: "patch_stream_delta",
                   filePath: input.filePath,
-                  delta: event.delta,
+                  delta: contentFrag,
                 });
               }
-              }
-            } finally {
-              try { clearTimeout(timeout); } catch {}
             }
+          } finally {
+            try { clearTimeout(timeout); } catch {}
+          }
 
-            response = await (runner as any).finalResponse();
+          // Synthesize a chat-completion-shaped response from accumulated stream state
+          // so downstream extractors (extractPatchFromToolCall / extractResponsesApiOutputText)
+          // see the same shape as a non-streaming result.
+          response = {
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: textAccum || null,
+                  tool_calls: argsAccum
+                    ? [
+                        {
+                          id: toolCallId || "stream",
+                          type: "function",
+                          function: {
+                            name: toolCallName || APPLY_PATCH_TOOL_NAME,
+                            arguments: argsAccum,
+                          },
+                        },
+                      ]
+                    : undefined,
+                },
+              },
+            ],
+          };
 
-            // If the SDK doesn't emit function_call_arguments.delta events (common in some tool-call modes),
-            // fall back to emitting the FINAL tool arguments as a single "delta" so the UI shows something.
-            if (typeof input.onProgress === "function" && lastPatchLen === 0) {
-              const toolPatch = extractPatchFromToolCall(response);
-              if (typeof toolPatch === "string" && toolPatch.length > 0) {
+          // If the SDK didn't emit tool_call argument deltas (some providers/modes),
+          // fall back to emitting the FINAL tool arguments as a single "delta" so the UI shows something.
+          if (typeof input.onProgress === "function" && lastPatchLen === 0) {
+            const toolPatch = extractPatchFromToolCall(response);
+            if (typeof toolPatch === "string" && toolPatch.length > 0) {
                 const buildPatchSnippet = (raw: string): string => {
                   const t = String(raw || "").replace(/\r\n/g, "\n");
                   const findIdx = t.lastIndexOf("\n--- FIND ---");
@@ -849,16 +900,6 @@ export async function planFullPatchWithLlm(input: {
                 } catch {}
               }
             }
-          } else {
-            response = await client.responses.create({
-              model,
-              temperature: 0,
-              max_output_tokens: maxOutputTokens,
-              tools: [applyPatchTool],
-              tool_choice: applyPatchToolChoice,
-              input: responseInput,
-            });
-          }
         } catch (err) {
           const elapsedMs = Date.now() - callStartedAt;
           const p = formatOpenAiThrownErrorPayload(err);
@@ -878,13 +919,13 @@ export async function planFullPatchWithLlm(input: {
           );
           console.log("[zone-stream-fallback]", { error: err instanceof Error ? err.message : String(err) });
           // Fallback to non-streaming on any streaming failure.
-          response = await client.responses.create({
+          response = await client.createChatCompletion({
             model,
             temperature: 0,
-            max_output_tokens: maxOutputTokens,
+            max_tokens: maxOutputTokens,
             tools: [applyPatchTool],
             tool_choice: applyPatchToolChoice,
-            input: responseInput,
+            messages: responseInput,
           });
         }
 
@@ -1185,91 +1226,91 @@ export async function planFullPatchWithLlm(input: {
             ].join("\n")
           : currentPrompt;
       try {
-        // Streaming (best-effort) for full_content_json mode: stream output_text deltas directly.
-        const streamFn = (client.responses as unknown as { stream?: unknown }).stream;
-        if (typeof streamFn === "function") {
-          console.log("[zone-stream-start]", { filePath: input.filePath });
-          const controller = new AbortController();
-          const timeout = setTimeout(() => {
-            try { controller.abort(); } catch {}
-          }, 120_000);
-          const runner = (client.responses as unknown as { stream: Function }).stream({
-            model,
-            input: promptWithAntiTruncation,
-            ...(maxOutputTokensFull != null
-              ? { max_output_tokens: maxOutputTokensFull }
-              : {}),
-          });
-          let rawAccum = "";
-          let lastFullContentLen = 0;
-          const tryExtractJsonStringValuePartial = (raw: string, key: string): string => {
-            const k = raw.indexOf(`"${key}"`);
-            if (k < 0) return "";
-            const colon = raw.indexOf(":", k + key.length + 2);
-            if (colon < 0) return "";
-            const firstQuote = raw.indexOf('"', colon + 1);
-            if (firstQuote < 0) return "";
-            let i = firstQuote + 1;
-            let out = "";
-            while (i < raw.length) {
-              const ch = raw[i];
-              if (ch === "\\") {
-                const nxt = raw[i + 1];
-                if (nxt == null) return out;
-                if (nxt === "n") out += "\n";
-                else if (nxt === "r") out += "\r";
-                else if (nxt === "t") out += "\t";
-                else if (nxt === '"') out += '"';
-                else if (nxt === "\\") out += "\\";
-                else out += nxt;
-                i += 2;
-                continue;
-              }
-              if (ch === '"') return out;
-              out += ch;
-              i += 1;
+        // Streaming primary for full_content_json mode: stream content deltas directly.
+        console.log("[zone-stream-start]", { filePath: input.filePath });
+        const controller = new AbortController();
+        const timeout = setTimeout(() => {
+          try { controller.abort(); } catch {}
+        }, 120_000);
+        const stream = await client.createChatCompletionStream({
+          model,
+          messages: [{ role: "user", content: promptWithAntiTruncation }],
+          stream: true,
+          ...(maxOutputTokensFull != null
+            ? { max_tokens: maxOutputTokensFull }
+            : {}),
+        });
+        let rawAccum = "";
+        let lastFullContentLen = 0;
+        const tryExtractJsonStringValuePartial = (raw: string, key: string): string => {
+          const k = raw.indexOf(`"${key}"`);
+          if (k < 0) return "";
+          const colon = raw.indexOf(":", k + key.length + 2);
+          if (colon < 0) return "";
+          const firstQuote = raw.indexOf('"', colon + 1);
+          if (firstQuote < 0) return "";
+          let i = firstQuote + 1;
+          let out = "";
+          while (i < raw.length) {
+            const ch = raw[i];
+            if (ch === "\\") {
+              const nxt = raw[i + 1];
+              if (nxt == null) return out;
+              if (nxt === "n") out += "\n";
+              else if (nxt === "r") out += "\r";
+              else if (nxt === "t") out += "\t";
+              else if (nxt === '"') out += '"';
+              else if (nxt === "\\") out += "\\";
+              else out += nxt;
+              i += 2;
+              continue;
             }
-            return out;
-          };
-          try {
-            for await (const event of runner as AsyncIterable<any>) {
-              if (controller.signal.aborted) break;
-              if (!event || typeof event !== "object") continue;
-              if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
-                rawAccum += event.delta;
-                console.log("[zone-stream-delta]", { delta: String(event.delta).slice(0, 30) });
-                try {
-                  // Emit only fullContent deltas (skip JSON wrapper) to avoid raw JSON in UI.
-                  const fullContentSnap = tryExtractJsonStringValuePartial(rawAccum, "fullContent");
-                  if (fullContentSnap.length >= lastFullContentLen) {
-                    const d = fullContentSnap.slice(lastFullContentLen);
-                    if (d) {
-                      input.onProgress?.({
-                        type: "patch_stream_delta",
-                        filePath: input.filePath,
-                        delta: d,
-                      });
-                      lastFullContentLen = fullContentSnap.length;
-                    }
-                  }
-                } catch {}
-              }
-            }
-          } finally {
-            try { clearTimeout(timeout); } catch {}
+            if (ch === '"') return out;
+            out += ch;
+            i += 1;
           }
-          response = await (runner as any).finalResponse();
-          // Some SDK versions may omit output_text on finalResponse(); keep our accumulated text.
-          (response as Record<string, unknown>).output_text = rawAccum;
-        } else {
-          response = await client.responses.create({
-            model,
-            input: promptWithAntiTruncation,
-            ...(maxOutputTokensFull != null
-              ? { max_output_tokens: maxOutputTokensFull }
-              : {}),
-          });
+          return out;
+        };
+        try {
+          for await (const chunk of stream) {
+            if (controller.signal.aborted) break;
+            if (!chunk || typeof chunk !== "object") continue;
+            const contentFrag = chunk.choices?.[0]?.delta?.content;
+            if (typeof contentFrag === "string" && contentFrag.length > 0) {
+              rawAccum += contentFrag;
+              console.log("[zone-stream-delta]", { delta: contentFrag.slice(0, 30) });
+              try {
+                // Emit only fullContent deltas (skip JSON wrapper) to avoid raw JSON in UI.
+                const fullContentSnap = tryExtractJsonStringValuePartial(rawAccum, "fullContent");
+                if (fullContentSnap.length >= lastFullContentLen) {
+                  const d = fullContentSnap.slice(lastFullContentLen);
+                  if (d) {
+                    input.onProgress?.({
+                      type: "patch_stream_delta",
+                      filePath: input.filePath,
+                      delta: d,
+                    });
+                    lastFullContentLen = fullContentSnap.length;
+                  }
+                }
+              } catch {}
+            }
+          }
+        } finally {
+          try { clearTimeout(timeout); } catch {}
         }
+        // Synthesize a chat-completion-shaped response from accumulated stream content
+        // so downstream code can read choices[0].message.content uniformly.
+        response = {
+          choices: [
+            {
+              message: {
+                role: "assistant",
+                content: rawAccum,
+              },
+            },
+          ],
+        };
       } catch (err) {
         const elapsedMs = Date.now() - callStartedAt;
         const p = formatOpenAiThrownErrorPayload(err);
@@ -1291,11 +1332,11 @@ export async function planFullPatchWithLlm(input: {
           error: err instanceof Error ? err.message : String(err),
         });
         // Fallback to non-streaming on any streaming failure.
-        response = await client.responses.create({
+        response = await client.createChatCompletion({
           model,
-          input: promptWithAntiTruncation,
+          messages: [{ role: "user", content: promptWithAntiTruncation }],
           ...(maxOutputTokensFull != null
-            ? { max_output_tokens: maxOutputTokensFull }
+            ? { max_tokens: maxOutputTokensFull }
             : {}),
         });
       }

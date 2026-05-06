@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import {
+  expandAlias,
+  parseTsconfigPaths,
+  type PathAliasConfig,
+} from "./parseTsconfigPaths.js";
 
 // ─── Symbol-level import types ───────────────────────────────────────────────
 
@@ -70,7 +75,7 @@ function posix(p: string): string {
   return p.replace(/\\/g, "/");
 }
 
-function cacheKey(repoPath: string, files: string[]): string {
+function cacheKey(repoPath: string, files: string[], aliasConfig: PathAliasConfig | null): string {
   const h = createHash("sha256");
   h.update(repoPath);
   h.update("\0");
@@ -78,6 +83,12 @@ function cacheKey(repoPath: string, files: string[]): string {
   const sample = sorted.slice(0, 500).join("\n");
   h.update(sample);
   h.update(`\0${sorted.length}`);
+  if (aliasConfig) {
+    h.update(`\0baseUrl:${aliasConfig.baseUrl}`);
+    for (const [pattern, targets] of aliasConfig.paths) {
+      h.update(`\0path:${pattern}=>${targets.join("|")}`);
+    }
+  }
   return h.digest("hex").slice(0, 32);
 }
 
@@ -95,47 +106,29 @@ function fileSetFromList(files: string[]): Set<string> {
   return new Set(files.map((f) => posix(f)));
 }
 
-function tryResolveImport(
+function resolveCandidatePath(
   repoPath: string,
-  fromRel: string,
-  spec: string,
+  candidate: string,
   fileSet: Set<string>
 ): string | null {
-  let s = spec.trim().replace(/^["'`]|["'`]$/g, "");
-  if (!s || s.startsWith("node:")) return null;
-  if (s.includes("://")) return null;
-  if (!s.startsWith(".") && !s.startsWith("/")) {
-    // bare specifier — map only if exact path exists in repo (rare)
-    const bare = posix(s);
-    if (fileSet.has(bare)) return bare;
-    // NOTE: tsconfig path aliases (e.g. @/controllers/foo) are NOT resolved here.
-    // Such imports produce no edge. A [zone-graph-alias-unresolved] diagnostic
-    // would fire here if/when alias support is added.
-    return null;
-  }
-
-  const fromDir = posix(path.posix.dirname(posix(fromRel)));
-  let candidate = s.startsWith("/")
-    ? posix(path.posix.normalize(s.slice(1)))
-    : posix(path.posix.normalize(path.posix.join(fromDir, s)));
-
   const tryPaths: string[] = [];
-  const noExt = !/\.[a-z0-9]+$/i.test(path.posix.basename(candidate));
+  const normalizedCandidate = posix(path.posix.normalize(candidate));
+  const noExt = !/\.[a-z0-9]+$/i.test(path.posix.basename(normalizedCandidate));
   if (noExt) {
     tryPaths.push(
-      candidate + ".ts",
-      candidate + ".tsx",
-      candidate + ".js",
-      candidate + ".jsx",
-      candidate + ".mjs",
-      candidate + ".cjs",
-      path.posix.join(candidate, "index.ts"),
-      path.posix.join(candidate, "index.tsx"),
-      path.posix.join(candidate, "index.js"),
-      path.posix.join(candidate, "index.jsx")
+      normalizedCandidate + ".ts",
+      normalizedCandidate + ".tsx",
+      normalizedCandidate + ".js",
+      normalizedCandidate + ".jsx",
+      normalizedCandidate + ".mjs",
+      normalizedCandidate + ".cjs",
+      path.posix.join(normalizedCandidate, "index.ts"),
+      path.posix.join(normalizedCandidate, "index.tsx"),
+      path.posix.join(normalizedCandidate, "index.js"),
+      path.posix.join(normalizedCandidate, "index.jsx")
     );
   }
-  tryPaths.unshift(candidate);
+  tryPaths.unshift(normalizedCandidate);
 
   for (const rel of tryPaths) {
     const n = posix(rel).replace(/^\/+/, "");
@@ -144,6 +137,37 @@ function tryResolveImport(
     if (fs.existsSync(abs) && fs.statSync(abs).isFile()) return n;
   }
   return null;
+}
+
+function tryResolveImport(
+  repoPath: string,
+  fromRel: string,
+  spec: string,
+  fileSet: Set<string>,
+  aliasConfig: PathAliasConfig | null
+): string | null {
+  let s = spec.trim().replace(/^["'`]|["'`]$/g, "");
+  if (!s || s.startsWith("node:")) return null;
+  if (s.includes("://")) return null;
+  if (!s.startsWith(".") && !s.startsWith("/")) {
+    if (aliasConfig) {
+      const candidates = expandAlias(s, aliasConfig);
+      for (const candidate of candidates) {
+        const resolved = resolveCandidatePath(repoPath, candidate, fileSet);
+        if (resolved) return resolved;
+      }
+    }
+    const bare = posix(s);
+    if (fileSet.has(bare)) return bare;
+    return null;
+  }
+
+  const fromDir = posix(path.posix.dirname(posix(fromRel)));
+  const candidate = s.startsWith("/")
+    ? posix(path.posix.normalize(s.slice(1)))
+    : posix(path.posix.normalize(path.posix.join(fromDir, s)));
+
+  return resolveCandidatePath(repoPath, candidate, fileSet);
 }
 
 // ─── Symbol clause parser ─────────────────────────────────────────────────────
@@ -245,7 +269,7 @@ function extractJsImportsWithSymbols(content: string): RawImport[] {
   // Lazy quantifier stops at first `from` keyword — correct for the vast
   // majority of real-world import statements.
   const reStaticFrom =
-    /\bimport\s+([\s\S]*?)\s+from\s+["'`](\.[^"'`]+)["'`]/gs;
+    /\bimport\s+([\s\S]*?)\s+from\s+["'`]([^"'`]+)["'`]/gs;
   let m: RegExpExecArray | null;
   while ((m = reStaticFrom.exec(content)) !== null) {
     const clauseRaw = m[1]!.trim();
@@ -262,7 +286,7 @@ function extractJsImportsWithSymbols(content: string): RawImport[] {
 
   // ── Pass 2: side-effect imports `import "./x"` ────────────────────────────
   // These have no clause; `reStaticFrom` won't match them (no `from`).
-  const reSideEffect = /\bimport\s+["'`](\.[^"'`]+)["'`]/g;
+  const reSideEffect = /\bimport\s+["'`]([^"'`]+)["'`]/g;
   while ((m = reSideEffect.exec(content)) !== null) {
     const spec = m[1]!;
     if (!fromSpecsSeen.has(spec)) {
@@ -271,7 +295,7 @@ function extractJsImportsWithSymbols(content: string): RawImport[] {
   }
 
   // ── Pass 3: dynamic import("./x") — no symbol info available ─────────────
-  const reDynamic = /\bimport\s*\(\s*["'`](\.[^"'`]+)["'`]\s*\)/g;
+  const reDynamic = /\bimport\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/g;
   while ((m = reDynamic.exec(content)) !== null) {
     results.push({ spec: m[1]!, symbols: [] });
   }
@@ -279,7 +303,7 @@ function extractJsImportsWithSymbols(content: string): RawImport[] {
   // ── Pass 4a: destructured require `const { a, b } = require("./x")` ──────
   const destructuredSpecs = new Set<string>();
   const reDestructuredReq =
-    /(?:const|let|var)\s*\{\s*([^}]+)\}\s*=\s*require\s*\(\s*["'`](\.[^"'`]+)["'`]\s*\)/g;
+    /(?:const|let|var)\s*\{\s*([^}]+)\}\s*=\s*require\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/g;
   while ((m = reDestructuredReq.exec(content)) !== null) {
     const namesStr = m[1]!;
     const spec = m[2]!;
@@ -303,7 +327,7 @@ function extractJsImportsWithSymbols(content: string): RawImport[] {
 
   // ── Pass 4b: plain require `const x = require("./x")` ────────────────────
   const rePlainReq =
-    /(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*require\s*\(\s*["'`](\.[^"'`]+)["'`]\s*\)/g;
+    /(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*require\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/g;
   while ((m = rePlainReq.exec(content)) !== null) {
     const binding = m[1]!;
     const spec = m[2]!;
@@ -411,7 +435,8 @@ export async function buildDependencyGraph(
   repoPath: string,
   files: string[]
 ): Promise<DependencyGraph> {
-  const key = cacheKey(repoPath, files);
+  const aliasConfig = parseTsconfigPaths(repoPath);
+  const key = cacheKey(repoPath, files, aliasConfig);
   const now = Date.now();
   const hit = CACHE.get(key);
   if (hit && now - hit.ts < TTL_MS) {
@@ -444,7 +469,7 @@ export async function buildDependencyGraph(
     } else {
       const rawImports = extractJsImportsWithSymbols(head);
       for (const { spec, symbols } of rawImports) {
-        const resolved = tryResolveImport(repoPath, rel, spec, fileSet);
+        const resolved = tryResolveImport(repoPath, rel, spec, fileSet, aliasConfig);
         if (!resolved) continue;
         resolvedImports.push(resolved);
         // Merge symbols if the same source appears more than once (unusual but safe)

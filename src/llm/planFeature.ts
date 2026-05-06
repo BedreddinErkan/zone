@@ -1,4 +1,6 @@
-import { createOpenAIClient, getModelName } from "./openaiClient.js";
+import { getModelName } from "./openaiClient.js";
+import { createLLMClient } from "./factory.js";
+import { getRequestContext } from "./openaiContext.js";
 import { llmFeaturePlanSchema } from "./schemas.js";
 import type { LlmFeaturePlan } from "../types/agent.js";
 import type { TaskIntent } from "../core/taskIntentParser.js";
@@ -43,8 +45,9 @@ export async function planFeatureWithLlm(input: {
   schemaAwareSummary?: string[];
   userOpenAiKey?: string;
 }): Promise<LlmFeaturePlan> {
-  const client = createOpenAIClient(input.userOpenAiKey);
-  const model = getModelName("high");
+  const client = createLLMClient({ apiKey: input.userOpenAiKey });
+  const ctx = getRequestContext();
+  const model = getModelName("high", client.provider, ctx?.modelOverride);
 
   const relevantFilesSummary = input.relevantFiles
     .map((file) => `- ${file.path} [${file.category}]`)
@@ -67,15 +70,15 @@ const schemaAwareSummary = (input.schemaAwareSummary ?? [])
     schemaAwareSummary
   });
 
-  const response = await client.responses.create({
+  const response = await client.createChatCompletion({
     model,
-    input: prompt
+    messages: [{ role: "user", content: prompt }],
   });
 
-  console.log("\n=== RAW MODEL OUTPUT ===");
-  console.log(response.output_text);
+  const rawText = response.choices[0]?.message?.content ?? "";
 
-  const rawText = response.output_text || "";
+  console.log("\n=== RAW MODEL OUTPUT ===");
+  console.log(rawText);
   const jsonText = extractJson(rawText);
   const parsed = JSON.parse(stripJsonFences(jsonText));
 

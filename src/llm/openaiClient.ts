@@ -1,5 +1,7 @@
 import OpenAI from "openai";
 import { getRequestUserApiKey } from "./openaiContext.js";
+import type { LLMProvider } from "./types.js";
+import { isValidModelId } from "./models.js";
 
 export type ZoneInferenceMode = "hosted" | "local";
 
@@ -68,7 +70,35 @@ export function createOpenAIClient(userApiKey?: string): OpenAI {
 
 export type ZoneModelTier = "high" | "standard";
 
-export function getModelName(tier: ZoneModelTier = "standard"): string {
+export interface ZoneModelOverride {
+  high?: string;
+  standard?: string;
+}
+
+export function getModelName(
+  tier: ZoneModelTier = "standard",
+  provider: LLMProvider = "openai",
+  override?: ZoneModelOverride
+): string {
+  if (override) {
+    const candidate = tier === "high" ? override.high : override.standard;
+    if (candidate && isValidModelId(provider, candidate)) {
+      return candidate;
+    }
+    if (candidate && !isValidModelId(provider, candidate)) {
+      console.warn(
+        `[zone] ignoring invalid model override "${candidate}" for provider=${provider} tier=${tier}; falling back to default.`
+      );
+    }
+  }
+
+  if (provider === "anthropic") {
+    if (tier === "high") {
+      return process.env.ZONE_ANTHROPIC_MODEL_HIGH ?? "claude-sonnet-4-5";
+    }
+    return process.env.ZONE_ANTHROPIC_MODEL ?? "claude-haiku-4-5";
+  }
+
   if (tier === "high") {
     return process.env.ZONE_LLM_MODEL_HIGH ?? process.env.OPENAI_MODEL ?? "gpt-4o";
   }

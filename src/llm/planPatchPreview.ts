@@ -1,4 +1,6 @@
-import { createOpenAIClient, getModelName } from "./openaiClient.js";
+import { getModelName } from "./openaiClient.js";
+import { createLLMClient } from "./factory.js";
+import { getRequestContext } from "./openaiContext.js";
 import { llmPatchPlanSchema } from "./schemas.js";
 import type { LlmPatchPlan } from "../types/agent.js";
 import type { TaskIntent } from "../core/taskIntentParser.js";
@@ -36,8 +38,9 @@ export async function planPatchPreviewWithLlm(input: {
   schemaAwareSummary?: string[];
   executionPlan?: ExecutionPlan | null;
 }): Promise<LlmPatchPlan> {
-  const client = createOpenAIClient();
-  const model = getModelName();
+  const client = createLLMClient();
+  const ctx = getRequestContext();
+  const model = getModelName("standard", client.provider, ctx?.modelOverride);
 
   const combinedContext = input.fileContexts
     .map((file) => `FILE: ${file.path}\n\`\`\`\n${file.content}\n\`\`\``)
@@ -69,13 +72,13 @@ export async function planPatchPreviewWithLlm(input: {
     executionPlanContext: formatExecutionPlanForPrompt(input.executionPlan),
   });
 
-  const response = await client.responses.create({
+  const response = await client.createChatCompletion({
     model,
-    input: prompt,
-    text: { format: { type: "json_object" } }
+    messages: [{ role: "user", content: prompt }],
+    response_format: { type: "json_object" },
   });
 
-  const rawText = response.output_text || "";
+  const rawText = response.choices[0]?.message?.content ?? "";
   let parsed: unknown;
 
   try {

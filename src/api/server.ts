@@ -5,11 +5,12 @@ import cors from "cors";
 import bodyParser from "body-parser";
 import rateLimit from "express-rate-limit";
 import { exec, execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import fs, { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { runAgent } from "../core/runAgent.js";
+import { getUsage } from "../usage/usageTracker.js";
 import {
   isIrrelevantDeveloperContextPath,
   runLlmPatchFlow,
@@ -36,12 +37,18 @@ import { detectProjectStructure } from "../repo/detectProjectStructure.js";
 import { rankRelevantFiles } from "../repo/rankRelevantFiles.js";
 import { readProjectFiles } from "../repo/readProjectFiles.js";
 import {
-  createOpenAIClient,
+  listBranches,
+  switchBranch,
+  createBranch,
+} from "../repo/gitBranches.js";
+import {
   getHostedInferenceBaseUrl,
   getInferenceMode,
   getModelName,
 } from "../llm/openaiClient.js";
-import { withUserApiKey } from "../llm/openaiContext.js";
+import { createLLMClient } from "../llm/factory.js";
+import { withRequestContext, getRequestContext } from "../llm/openaiContext.js";
+import type { LLMProvider } from "../llm/types.js";
 import {
   PROMPT_REFINEMENT_FALLBACK,
   refinePrompt,
@@ -92,6 +99,7 @@ import {
 } from "../billing/activeRunsRepository.js";
 import { indexRepoFiles } from "../embeddings/indexRepository.js";
 import { LOG_LEVEL, logger } from "../utils/logger.js";
+import { debugLog } from "../utils/debugLog.js";
 export const app = express();
 /** Active /api/patch runs — cancelled via POST /api/cancel (AbortSignal → runLlmPatchFlow). */
 const activePatchRunAbortControllers = new Map<string, AbortController>();
@@ -298,12 +306,16 @@ app.use("/api/approve-command", developerRouteLimiter);
 app.use("/api/dry-run", developerRouteLimiter);
 
 // Increase timeouts for long-running patch operations & SSE.
+// 30 minutes covers worst-case agent runs (multi-file refactors with self-correction
+// loops). Below 5–10 min the response socket dies mid-run and the browser auto-retries
+// the POST, causing a same-runId double-invocation (Tur 3 re-trigger bug).
+// AbortController + /api/cancel still terminate runs sooner on user request.
 app.use("/api/patch", (_req, res, next) => {
-  res.setTimeout(300000); // 5 minutes
+  res.setTimeout(30 * 60 * 1000); // 30 minutes
   next();
 });
 app.use("/api/progress", (_req, res, next) => {
-  res.setTimeout(300000); // 5 minutes
+  res.setTimeout(30 * 60 * 1000); // 30 minutes
   next();
 });
 
@@ -372,10 +384,40 @@ function shouldUseHostedInferenceProxy(): boolean {
   return getInferenceMode() === "hosted";
 }
 
-function getHeaderUserApiKey(req: express.Request): string {
-  return typeof req.headers["x-user-openai-key"] === "string"
-    ? req.headers["x-user-openai-key"].trim()
-    : "";
+// Removed Tur 5a: legacy X-User-OpenAI-Key header was a Tur 0-2 backward-compat
+// shim. All clients (UI + zone-cli) now use X-Zone-LLM-Key + X-Zone-Provider.
+
+export function getRequestContextFromHeaders(req: express.Request): {
+  apiKey: string;
+  provider: LLMProvider | undefined;
+  modelHigh?: string;
+  modelStandard?: string;
+} {
+  const newKey =
+    typeof req.headers["x-zone-llm-key"] === "string"
+      ? req.headers["x-zone-llm-key"].trim()
+      : "";
+  const providerRaw =
+    typeof req.headers["x-zone-provider"] === "string"
+      ? req.headers["x-zone-provider"].trim().toLowerCase()
+      : "";
+  const provider: LLMProvider | undefined =
+    providerRaw === "openai" || providerRaw === "anthropic"
+      ? (providerRaw as LLMProvider)
+      : undefined;
+
+  const modelHighRaw =
+    typeof req.headers["x-zone-llm-model-high"] === "string"
+      ? req.headers["x-zone-llm-model-high"].trim()
+      : "";
+  const modelStandardRaw =
+    typeof req.headers["x-zone-llm-model-standard"] === "string"
+      ? req.headers["x-zone-llm-model-standard"].trim()
+      : "";
+  const modelHigh = modelHighRaw || undefined;
+  const modelStandard = modelStandardRaw || undefined;
+
+  return { apiKey: newKey, provider, modelHigh, modelStandard };
 }
 
 function maskApiKeyPrefix(value?: string): string {
@@ -482,12 +524,17 @@ async function proxyHostedZoneRequest(
   }
 
   if (
-    typeof req.headers["x-user-openai-key"] === "string" &&
-    req.headers["x-user-openai-key"].trim()
+    typeof req.headers["x-zone-llm-key"] === "string" &&
+    req.headers["x-zone-llm-key"].trim()
   ) {
-    forwardedHeaders["x-user-openai-key"] = req.headers["x-user-openai-key"].trim();
+    forwardedHeaders["x-zone-llm-key"] = req.headers["x-zone-llm-key"].trim();
   }
-
+  if (
+    typeof req.headers["x-zone-provider"] === "string" &&
+    req.headers["x-zone-provider"].trim()
+  ) {
+    forwardedHeaders["x-zone-provider"] = req.headers["x-zone-provider"].trim();
+  }
   if (forwardedUserId) {
     forwardedHeaders["x-zone-user-id"] = forwardedUserId;
   }
@@ -544,11 +591,21 @@ async function buildHostedDeveloperContext(
   );
   const structure = detectProjectStructure(developerContextFiles);
   const taskIntent = parseTaskIntent(task);
-  const relevantFiles = rankRelevantFiles({
-    task,
-    files: developerContextFiles,
-    intent: taskIntent,
-  }).slice(0, 8);
+  const readContentForRanker = async (relPath: string): Promise<string | null> => {
+    try {
+      return await fs.promises.readFile(path.join(repoPath, relPath), "utf8");
+    } catch {
+      return null;
+    }
+  };
+  const relevantFiles = (
+    await rankRelevantFiles({
+      task,
+      files: developerContextFiles,
+      intent: taskIntent,
+      readContent: readContentForRanker,
+    })
+  ).slice(0, 8);
   const contextFileRecords = relevantFiles.map((file) => ({
     path: file.path,
     action: "inspect",
@@ -852,6 +909,17 @@ function getDecisionModeFromResult(
   if (typeof decisionMode === "string" && decisionMode.length > 0) {
     return decisionMode;
   }
+  // Bug 46 fix: when verification is weak (agent skipped tests, tests inconclusive,
+  // or unrelated tests failed), do not claim safe_to_apply. Demote to preview_only
+  // so the UI's "Safe to apply" pill matches the underlying verification signal.
+  const verificationReason = String(result["verificationReason"] || "");
+  const verificationLooksWeak =
+    verificationReason === "no_verification_attempted" ||
+    verificationReason === "tests_inconclusive" ||
+    verificationReason === "tests_failed_unrelated" ||
+    verificationReason === "verification_failed_staged" ||
+    verificationReason === "no_changes_made";
+  if (verificationLooksWeak) return "preview_only";
   return confidence < 70 ? "preview_only" : "safe_to_apply";
 }
 
@@ -1179,6 +1247,7 @@ async function runConversationalFlow(input: {
   messageType: "question" | "discussion";
   /** BYOK: user-supplied OpenAI API key forwarded from the browser header. */
   userApiKey?: string;
+  lastChangedFiles?: string[];
 }): Promise<{
   ok: true;
   decisionMode: "chat";
@@ -1210,6 +1279,7 @@ async function runConversationalFlow(input: {
   const chatResult = await getChatResponseWithContext({
     task: input.task,
     repoPath: input.repoPath,
+    lastChangedFiles: input.lastChangedFiles,
     onChunk: async (delta) => {
       emitProgress(input.runId, {
         stage: "chat_response",
@@ -1375,19 +1445,25 @@ async function enhanceTask(input: {
     const resolvedRepoContext =
       typeof repoContext === "string" ? repoContext : await repoContext;
 
-    const client = createOpenAIClient(input.userApiKey);
-    const model = getModelName();
-    const response = await client.responses.create({
+    const client = createLLMClient({ apiKey: input.userApiKey });
+    const enhanceCtx = getRequestContext();
+    const model = getModelName("standard", client.provider, enhanceCtx?.modelOverride);
+    const response = await client.createChatCompletion({
       model,
-      instructions: ENHANCE_TASK_SYSTEM_PROMPT,
-      input:
-        `Role: ${input.role}\n` +
-        `Repo path: ${input.repoPath}\n` +
-        `User task: ${input.task}\n\n` +
-        `Relevant repository context:\n${resolvedRepoContext}`,
+      messages: [
+        { role: "system", content: ENHANCE_TASK_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content:
+            `Role: ${input.role}\n` +
+            `Repo path: ${input.repoPath}\n` +
+            `User task: ${input.task}\n\n` +
+            `Relevant repository context:\n${resolvedRepoContext}`,
+        },
+      ],
     });
 
-    return String(response.output_text || "").trim();
+    return String(response.choices[0]?.message?.content ?? "").trim();
   } catch (err) {
     throw err instanceof Error ? err : new Error(String(err));
   }
@@ -1545,6 +1621,12 @@ app.post("/api/cancel", (req, res) => {
     res.status(400).json({ ok: false, reason: "missing_run_id" });
     return;
   }
+  debugLog("[zone-cancel-trigger]", {
+    runId,
+    hasController: activePatchRunAbortControllers.has(runId),
+    controllerCount: activePatchRunAbortControllers.size,
+    timestamp: new Date().toISOString(),
+  });
   const ac = activePatchRunAbortControllers.get(runId);
   if (!ac) {
     res.status(404).json({ ok: false, reason: "no_active_run" });
@@ -1574,12 +1656,64 @@ app.post("/api/cancel", (req, res) => {
   } catch {
     // ignore
   }
+  debugLog("[zone-cancel-aborted]", {
+    runId,
+    signalState: ac?.signal?.aborted ?? null,
+    timestamp: new Date().toISOString(),
+  });
   activePatchRunAbortControllers.delete(runId);
   try {
     registerRunComplete(runId, "cancelled");
   } catch {}
   void completeActiveRun(runId, "cancelled").catch(() => undefined);
   res.json({ ok: true });
+});
+
+// Zone Undo Tur 2a: restore the snapshot captured at the end of a
+// safe_to_apply run. Body: { repoPath: string }. Status codes:
+//   200 → reverted; 400 → bad input; 404 → no snapshot; 410 → already undone.
+app.post("/api/runs/:runId/undo", async (req, res) => {
+  const runId = String(req.params.runId || "").trim();
+  const repoPath =
+    typeof req.body?.repoPath === "string" ? req.body.repoPath.trim() : "";
+  if (!runId) {
+    res.status(400).json({ error: "runId required" });
+    return;
+  }
+  if (!repoPath) {
+    res.status(400).json({ error: "repoPath required in body" });
+    return;
+  }
+  try {
+    const { restoreSnapshot } = await import("../snapshots/snapshotStore.js");
+    const result = await restoreSnapshot(runId, repoPath);
+    if (result.alreadyUndone) {
+      res.status(410).json({
+        error: "already undone",
+        reverted: 0,
+        files: [],
+        alreadyUndone: true,
+      });
+      return;
+    }
+    res.json({
+      reverted: result.reverted,
+      files: result.files,
+      alreadyUndone: false,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("invalid runId")) {
+      res.status(400).json({ error: msg });
+      return;
+    }
+    if (msg.includes("ENOENT") || msg.includes("not found")) {
+      res.status(404).json({ error: "no snapshot for this run" });
+      return;
+    }
+    console.error("[zone-undo-error]", msg);
+    res.status(500).json({ error: "undo failed", detail: msg });
+  }
 });
 
 // Native OS folder-picker — returns the full filesystem path selected by the user.
@@ -1891,6 +2025,25 @@ app.get("/api/billing-summary", async (req, res) => {
   await handleBillingSummary(req, res);
 });
 
+// Usage-tracker Tur: BYOK estimated spend, sourced from per-iter token logs
+// × pricing.ts. Local-only — no hosted-proxy fallback because each instance
+// owns its own JSONL. period=month|all (default month).
+app.get("/api/usage", async (req, res) => {
+  const userIdRaw =
+    typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+  const userId = userIdRaw || "local-dev";
+  const periodRaw =
+    typeof req.query.period === "string" ? req.query.period.trim() : "";
+  const period: "month" | "all" = periodRaw === "all" ? "all" : "month";
+  try {
+    const usage = await getUsage(userId, period);
+    res.json(usage);
+  } catch (err) {
+    console.error("[zone] /api/usage failed", err);
+    res.status(500).json({ ok: false, reason: "usage_read_failed" });
+  }
+});
+
 app.post("/api/admin/reset-monthly-runs", async (req, res) => {
   const adminSecret =
     typeof process.env.ADMIN_SECRET === "string"
@@ -1949,7 +2102,7 @@ app.post("/api/analyze", async (req, res) => {
 });
 
 app.post("/api/dev/index-repo", async (req, res) => {
-  const userApiKey = getHeaderUserApiKey(req);
+  const { apiKey: userApiKey, provider: byokProvider, modelHigh: byokModelHigh, modelStandard: byokModelStandard } = getRequestContextFromHeaders(req);
   const repoPath = typeof req.body?.repoPath === "string" ? req.body.repoPath.trim() : "";
   if (!repoPath) {
     res.status(400).json({ ok: false, reason: "repoPath is required" });
@@ -1957,7 +2110,7 @@ app.post("/api/dev/index-repo", async (req, res) => {
   }
 
   const startedAt = Date.now();
-  await withUserApiKey(userApiKey || undefined, async () => {
+  await withRequestContext({ userApiKey: userApiKey || undefined, provider: byokProvider, modelOverride: { high: byokModelHigh, standard: byokModelStandard } }, async () => {
     try {
       const repoFiles = await scanRepo(repoPath);
       const files = await Promise.all(
@@ -1982,6 +2135,79 @@ app.post("/api/dev/index-repo", async (req, res) => {
       });
     }
   });
+});
+
+app.get("/api/branches", async (req, res) => {
+  const repo = String(req.query.repo ?? "").trim();
+  if (!repo) {
+    return res.status(400).json({ error: "missing_repo" });
+  }
+  try {
+    const result = await listBranches(repo);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({
+      error: "internal",
+      message: String((err as Error).message ?? err),
+    });
+  }
+});
+
+app.post("/api/branches/switch", async (req, res) => {
+  const repo = String(req.body?.repo ?? "").trim();
+  const branch = String(req.body?.branch ?? "").trim();
+  if (!repo || !branch) {
+    return res.status(400).json({ ok: false, error: "missing_params" });
+  }
+  try {
+    const result = await switchBranch(repo, branch);
+    if (result.ok) return res.json(result);
+    const status =
+      result.error === "uncommitted_changes"
+        ? 409
+        : result.error === "not_found"
+        ? 404
+        : result.error === "not_a_repo"
+        ? 400
+        : 500;
+    res.status(status).json(result);
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: "internal",
+      message: String((err as Error).message ?? err),
+    });
+  }
+});
+
+app.post("/api/branches/create", async (req, res) => {
+  const repo = String(req.body?.repo ?? "").trim();
+  const name = String(req.body?.name ?? "").trim();
+  const baseBranch = req.body?.baseBranch
+    ? String(req.body.baseBranch).trim()
+    : undefined;
+  if (!repo || !name) {
+    return res.status(400).json({ ok: false, error: "missing_params" });
+  }
+  try {
+    const result = await createBranch(repo, name, baseBranch);
+    if (result.ok) return res.json(result);
+    const status =
+      result.error === "invalid_name"
+        ? 400
+        : result.error === "exists"
+        ? 409
+        : result.error === "not_a_repo"
+        ? 400
+        : 500;
+    res.status(status).json(result);
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: "internal",
+      message: String((err as Error).message ?? err),
+    });
+  }
 });
 
 app.post("/api/patch/jobs", async (req, res) => {
@@ -2138,9 +2364,9 @@ function shouldForceExecuteTask(task: string): boolean {
 app.post("/api/classify-intent", async (req, res) => {
   const task = typeof req.body?.task === "string" ? req.body.task : "";
   const normalizedTask = task.trim();
-  const userApiKey = getHeaderUserApiKey(req);
+  const { apiKey: userApiKey, provider: byokProvider, modelHigh: byokModelHigh, modelStandard: byokModelStandard } = getRequestContextFromHeaders(req);
 
-  await withUserApiKey(userApiKey || undefined, async () => {
+  await withRequestContext({ userApiKey: userApiKey || undefined, provider: byokProvider, modelOverride: { high: byokModelHigh, standard: byokModelStandard } }, async () => {
     const forcedExecute = shouldForceExecuteTask(normalizedTask);
     const messageType = forcedExecute
       ? "patch_request"
@@ -2157,10 +2383,10 @@ app.post("/api/classify-intent", async (req, res) => {
 
 app.post("/api/chat", async (req, res) => {
   const perf = startZoneApiPerfRun("/api/chat");
-  // BYOK: extract user-supplied OpenAI API key from the custom request header.
-  const chatUserApiKey = getHeaderUserApiKey(req);
+  // BYOK: extract user-supplied LLM API key + provider + model overrides from request headers.
+  const { apiKey: chatUserApiKey, provider: chatByokProvider, modelHigh: chatModelHigh, modelStandard: chatModelStandard } = getRequestContextFromHeaders(req);
 
-  await withUserApiKey(chatUserApiKey || undefined, async () => {
+  await withRequestContext({ userApiKey: chatUserApiKey || undefined, provider: chatByokProvider, modelOverride: { high: chatModelHigh, standard: chatModelStandard } }, async () => {
     const {
       task,
       repoPath,
@@ -2168,7 +2394,13 @@ app.post("/api/chat", async (req, res) => {
       userId: rawUserId,
       conversationId,
       threadId,
+      lastChangedFiles: rawLastChangedFiles,
     } = req.body ?? {};
+    const lastChangedFiles = Array.isArray(rawLastChangedFiles)
+      ? rawLastChangedFiles.filter(
+          (x: unknown): x is string => typeof x === "string" && x.trim().length > 0
+        )
+      : undefined;
 
     const userId =
       typeof rawUserId === "string" && rawUserId.trim()
@@ -2230,6 +2462,14 @@ app.post("/api/chat", async (req, res) => {
 
     registerRunStart(runIdStr, { task: normalizedTask });
     const chatAbort = new AbortController();
+    const _priorChatController = activePatchRunAbortControllers.get(runIdStr);
+    if (_priorChatController) {
+      console.warn(
+        "[zone] duplicate runId on /api/chat — aborting previous controller before overwrite",
+        JSON.stringify({ runId: runIdStr })
+      );
+      try { _priorChatController.abort(); } catch {}
+    }
     activePatchRunAbortControllers.set(runIdStr, chatAbort);
 
     try {
@@ -2241,6 +2481,7 @@ app.post("/api/chat", async (req, res) => {
         conversationId: threadIdStr,
         messageType: conversationalMessageType,
         userApiKey: chatUserApiKey || undefined,
+        lastChangedFiles,
       });
 
       registerRunComplete(runIdStr, "completed");
@@ -2266,6 +2507,14 @@ app.post("/api/chat", async (req, res) => {
       });
     } finally {
       activePatchRunAbortControllers.delete(runIdStr);
+      try {
+        const { killAllForRun } = await import(
+          "../tools/backgroundProcessRegistry.js"
+        );
+        await killAllForRun(runIdStr);
+      } catch {
+        // best-effort, orchestrator hook is primary
+      }
     }
   });
 });
@@ -2274,11 +2523,21 @@ app.post("/api/patch", async (req, res) => {
   const perf = startZoneApiPerfRun("/api/patch");
   perf.mark("route entered");
   const patchHandlerStartedAt = Date.now();
+  debugLog("[zone-route-trigger] /api/patch invoked", {
+    runId: req.body?.runId,
+    threadId: req.body?.threadId ?? req.body?.conversationId,
+    hasResumePayload: !!(req.body?.resumeFromCommandResult ?? req.body?.resumeData),
+    taskPreview: typeof req.body?.task === "string" ? req.body.task.slice(0, 80) : null,
+    timestamp: new Date().toISOString(),
+    ip: req.ip,
+    userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"].slice(0, 80) : null,
+    referer: typeof req.headers.referer === "string" ? req.headers.referer.slice(0, 120) : null,
+  });
   const billingMode = "hosted";
   // BYOK: extract user-supplied OpenAI API key from the custom request header.
   // This header is set by the browser when the user has configured their own key in Settings.
   // The key is NEVER logged — only the source ("user" vs "env") is recorded inside createOpenAIClient.
-  const userApiKey = getHeaderUserApiKey(req);
+  const { apiKey: userApiKey, provider: byokProvider, modelHigh: byokModelHigh, modelStandard: byokModelStandard } = getRequestContextFromHeaders(req);
   // When the user provides their own key, skip the hosted-proxy path and run locally with that key.
   if (!userApiKey && shouldProxyHostedRequest(req, "/api/patch")) {
     const { task, repoPath } = req.body ?? {};
@@ -2300,7 +2559,7 @@ app.post("/api/patch", async (req, res) => {
     return;
   }
 
-  await withUserApiKey(userApiKey || undefined, async () => {
+  await withRequestContext({ userApiKey: userApiKey || undefined, provider: byokProvider, modelOverride: { high: byokModelHigh, standard: byokModelStandard } }, async () => {
   const {
     task,
     repoPath,
@@ -2498,6 +2757,14 @@ app.post("/api/patch", async (req, res) => {
   let patchAbort: AbortController | null = null;
   if (runIdStr) {
     patchAbort = new AbortController();
+    const _priorPatchController = activePatchRunAbortControllers.get(runIdStr);
+    if (_priorPatchController) {
+      console.warn(
+        "[zone] duplicate runId on /api/patch — aborting previous controller before overwrite",
+        JSON.stringify({ runId: runIdStr })
+      );
+      try { _priorPatchController.abort(); } catch {}
+    }
     activePatchRunAbortControllers.set(runIdStr, patchAbort);
     try {
       registerRunStart(runIdStr, { task: typeof task === "string" ? task : undefined });
@@ -2642,8 +2909,10 @@ app.post("/api/patch", async (req, res) => {
         role: "developer",
         task,
         repoPath,
-        decisionMode:
-          result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
+        decisionMode: getDecisionModeFromResult(
+          result as Record<string, unknown>,
+          confidence
+        ),
         confidence,
         executionId: typeof runId === "string" ? runId : undefined,
         creditsUsed: 1,
@@ -2769,13 +3038,21 @@ app.post("/api/patch", async (req, res) => {
   } finally {
     if (runIdStr) {
       activePatchRunAbortControllers.delete(runIdStr);
+      try {
+        const { killAllForRun } = await import(
+          "../tools/backgroundProcessRegistry.js"
+        );
+        await killAllForRun(runIdStr);
+      } catch {
+        // best-effort, orchestrator hook is primary
+      }
     }
   }
   });
 });
 app.post("/api/dry-run", async (req, res) => {
   const billingMode = "hosted";
-  const userApiKey = getHeaderUserApiKey(req);
+  const { apiKey: userApiKey, provider: byokProvider, modelHigh: byokModelHigh, modelStandard: byokModelStandard } = getRequestContextFromHeaders(req);
   if (!userApiKey && shouldProxyHostedRequest(req, "/api/dry-run")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -2794,7 +3071,7 @@ app.post("/api/dry-run", async (req, res) => {
     return;
   }
 
-  await withUserApiKey(userApiKey || undefined, async () => {
+  await withRequestContext({ userApiKey: userApiKey || undefined, provider: byokProvider, modelOverride: { high: byokModelHigh, standard: byokModelStandard } }, async () => {
   const {
     task,
     repoPath,
@@ -2892,8 +3169,10 @@ if (result.applyPatches.length > 0) {
     role: "developer",
     task,
     repoPath,
-    decisionMode:
-      result.decisionMode ?? (confidence < 70 ? "preview_only" : "safe_to_apply"),
+    decisionMode: getDecisionModeFromResult(
+      result as Record<string, unknown>,
+      confidence
+    ),
     confidence,
     executionId: typeof runId === "string" ? runId : undefined,
       creditsUsed: 1,
@@ -3036,7 +3315,7 @@ app.post("/api/run-verification", async (req, res) => {
 
 app.post("/api/refine-prompt", async (req, res) => {
   const billingMode = "hosted";
-  const userApiKey = getHeaderUserApiKey(req);
+  const { apiKey: userApiKey, provider: byokProvider, modelHigh: byokModelHigh, modelStandard: byokModelStandard } = getRequestContextFromHeaders(req);
   if (!userApiKey && shouldProxyHostedRequest(req, "/api/refine-prompt")) {
     await proxyHostedZoneRequest(req, res, "/api/refine-prompt");
     return;
@@ -3059,7 +3338,7 @@ app.post("/api/refine-prompt", async (req, res) => {
       ? req.body.plan
       : undefined;
 
-  await withUserApiKey(userApiKey || undefined, async () => {
+  await withRequestContext({ userApiKey: userApiKey || undefined, provider: byokProvider, modelOverride: { high: byokModelHigh, standard: byokModelStandard } }, async () => {
     try {
       const refinedPrompt = await refinePrompt({
         task,
@@ -3080,7 +3359,7 @@ app.post("/api/refine-prompt", async (req, res) => {
 
 app.post("/api/enhance-task", async (req, res) => {
   const billingMode = "hosted";
-  const userApiKey = getHeaderUserApiKey(req);
+  const { apiKey: userApiKey, provider: byokProvider, modelHigh: byokModelHigh, modelStandard: byokModelStandard } = getRequestContextFromHeaders(req);
   if (!userApiKey && shouldProxyHostedRequest(req, "/api/enhance-task")) {
     const { role, repoPath } = req.body ?? {};
     const hostedContext =
@@ -3106,7 +3385,7 @@ app.post("/api/enhance-task", async (req, res) => {
     return;
   }
 
-  await withUserApiKey(userApiKey || undefined, async () => {
+  await withRequestContext({ userApiKey: userApiKey || undefined, provider: byokProvider, modelOverride: { high: byokModelHigh, standard: byokModelStandard } }, async () => {
     try {
       const result = await enhanceTask({
         task,
@@ -3129,7 +3408,7 @@ app.post("/api/enhance-task", async (req, res) => {
 
 app.post("/api/test-engineer", async (req, res) => {
   const billingMode = "hosted";
-  const userApiKey = getHeaderUserApiKey(req);
+  const { apiKey: userApiKey, provider: byokProvider, modelHigh: byokModelHigh, modelStandard: byokModelStandard } = getRequestContextFromHeaders(req);
 if (!userApiKey && shouldProxyHostedRequest(req, "/api/test-engineer")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -3147,7 +3426,7 @@ if (!userApiKey && shouldProxyHostedRequest(req, "/api/test-engineer")) {
     });
     return;
   }
-await withUserApiKey(userApiKey || undefined, async () => {
+await withRequestContext({ userApiKey: userApiKey || undefined, provider: byokProvider, modelOverride: { high: byokModelHigh, standard: byokModelStandard } }, async () => {
 const { task, repoPath, runId, userId, hostedContext, conversationId } =
     req.body;
   if (!task || !repoPath) {
@@ -3235,7 +3514,7 @@ const loggedConversationId = await logRun({
 
 app.post("/api/data-analyst", async (req, res) => {
   const billingMode = "hosted";
-  const userApiKey = getHeaderUserApiKey(req);
+  const { apiKey: userApiKey, provider: byokProvider, modelHigh: byokModelHigh, modelStandard: byokModelStandard } = getRequestContextFromHeaders(req);
 if (!userApiKey && shouldProxyHostedRequest(req, "/api/data-analyst")) {
     const { task, repoPath } = req.body ?? {};
     const hostedContext =
@@ -3252,7 +3531,7 @@ if (!userApiKey && shouldProxyHostedRequest(req, "/api/data-analyst")) {
     });
     return;
   }
-await withUserApiKey(userApiKey || undefined, async () => {
+await withRequestContext({ userApiKey: userApiKey || undefined, provider: byokProvider, modelOverride: { high: byokModelHigh, standard: byokModelStandard } }, async () => {
 const { task, repoPath, runId, userId, hostedContext, conversationId } =
     req.body;
   if (!task || !repoPath) {
@@ -3357,9 +3636,7 @@ export async function startServer(port = 3000): Promise<void> {
   await startPromise;
 }
 
-if (
-  process.env.VITEST !== "true" &&
-  process.env.ZONE_SERVER_MANUAL_START !== "1"
-) {
-  void startServer(startedPort ?? Number(port));
-}
+// Tur 5a: removed module-load-time auto-start. The CLI (src/cli/index.ts)
+// imports `startServer` and invokes it explicitly. Importing this module no
+// longer side-effects an `app.listen` — manual tests can `import` cleanly
+// without ZONE_SERVER_MANUAL_START.

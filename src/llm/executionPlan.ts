@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { createOpenAIClient, getModelName } from "./openaiClient.js";
+import { getModelName } from "./openaiClient.js";
+import { createLLMClient } from "./factory.js";
+import { getRequestContext } from "./openaiContext.js";
 
 export type ExecutionPlan = {
   objective: string;
@@ -71,8 +73,9 @@ export async function generateExecutionPlan(input: {
   repoSummary: string;
   relevantFiles: string[];
 }): Promise<ExecutionPlan> {
-  const client = createOpenAIClient();
-  const model = getModelName();
+  const client = createLLMClient();
+  const ctx = getRequestContext();
+  const model = getModelName("standard", client.provider, ctx?.modelOverride);
   const relevantFiles = input.relevantFiles.slice(0, 8).join("\n") || "(none)";
 
   const prompt = `
@@ -109,13 +112,15 @@ JSON shape:
 }
 `.trim();
 
-  const response = await client.responses.create({
+  const response = await client.createChatCompletion({
     model,
-    input: prompt,
-    text: { format: { type: "json_object" } },
+    messages: [{ role: "user", content: prompt }],
+    response_format: { type: "json_object" },
   });
 
-  const parsed = JSON.parse(extractJson(response.output_text || ""));
+  const parsed = JSON.parse(
+    extractJson(response.choices[0]?.message?.content ?? "")
+  );
   const plan = executionPlanSchema.parse(parsed);
 
   return {

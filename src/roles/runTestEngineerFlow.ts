@@ -4,7 +4,9 @@ import { readProjectFiles } from "../repo/readProjectFiles.js";
 import { detectTestFramework } from "./detectTestFramework.js";
 import { buildTestEngineerContext } from "./testEngineerContext.js";
 import { buildTestEngineerPrompt } from "../prompts/testEngineerPrompt.js";
-import { createOpenAIClient, getModelName } from "../llm/openaiClient.js";
+import { getModelName } from "../llm/openaiClient.js";
+import { createLLMClient } from "../llm/factory.js";
+import { getRequestContext } from "../llm/openaiContext.js";
 import {
   withSelfHealingRetry,
   buildDefaultFeedbackPrompt,
@@ -1168,17 +1170,18 @@ export async function runTestEngineerFlow(input: {
   let parsed: Record<string, unknown>;
   try {
     input.onProgress?.("Generating patch...");
-    const client = createOpenAIClient();
-    const model = getModelName("high");
+    const client = createLLMClient();
+    const ctx = getRequestContext();
+    const model = getModelName("high", client.provider, ctx?.modelOverride);
     const retryResult = await withSelfHealingRetry({
       maxAttempts: 3,
       prompt,
       execute: async (currentPrompt: string) => {
-        const response = await client.responses.create({
+        const response = await client.createChatCompletion({
           model,
-          input: currentPrompt,
+          messages: [{ role: "user", content: currentPrompt }],
         });
-        const rawText = response.output_text || "";
+        const rawText = response.choices[0]?.message?.content ?? "";
         const jsonText = extractJson ? extractJson(rawText) : rawText;
         return JSON.parse(stripJsonFences(jsonText)) as Record<string, unknown>;
       },

@@ -9,14 +9,18 @@ vi.mock("./openaiClient.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./openaiClient.js")>();
   return {
     ...actual,
-    createOpenAIClient: () => ({
-      responses: {
-        create: responsesCreateMock,
-      },
-    }),
     getModelName: () => "test-model",
   };
 });
+
+vi.mock("./factory.js", () => ({
+  createLLMClient: () => ({
+    provider: "openai" as const,
+    createChatCompletion: responsesCreateMock,
+    createChatCompletionStream: responsesCreateMock,
+    createEmbedding: vi.fn(),
+  }),
+}));
 
 vi.mock("../core/withSelfHealingRetry.js", () => ({
   withSelfHealingRetry: withSelfHealingRetryMock,

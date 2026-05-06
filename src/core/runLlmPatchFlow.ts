@@ -51,7 +51,13 @@ import { parseDeveloperPatchText } from "./developerPatchParse.js";
 import { applyLlmPatches } from "./applyLlmPatches.js";
 import { parseTaskIntent, type TaskIntent } from "./taskIntentParser.js";
 import { tryAstPatchFallback } from "./astPatchFallback.js";
-import { runAgentLoop } from "../llm/agentLoop.js";
+import { runAgentLoop, stripVerificationTag, type AgentLoopResult } from "../llm/agentLoop.js";
+import {
+  isPlanOrchestrationEnabled,
+  buildStepTask,
+  aggregateOrchestratorResults,
+} from "./planOrchestrator.js";
+import { collectVerificationCommands } from "./verdictClassifier.js";
 import { parseVerificationErrorWithRepo as parseVerificationError } from "./parseVerificationError.js";
 import type { PatchPreviewItem, RankedRepoFile } from "../types/agent.js";
 import type { ConversationBillingMode } from "../types/conversation.js";
@@ -77,6 +83,7 @@ import {
 } from "../embeddings/embeddingsRepository.js";
 import { indexRepoFiles } from "../embeddings/indexRepository.js";
 import { logger } from "../utils/logger.js";
+import { debugLog } from "../utils/debugLog.js";
 
 export type LlmPatchFlowResult =
   | {
@@ -186,6 +193,11 @@ export type LlmPatchFlowResult =
       patchesAlreadyApplied?: boolean;
       verificationReason?: string;
       verificationNote?: string;
+      /** verdict-fix Tur: classified run_command outcomes (test/build/typecheck)
+       *  the agent actually executed during this run. Empty array when the
+       *  agent ran no recognizable verification commands. UI uses this to
+       *  show honest secondary text under the verdict badge. */
+      verificationCommands?: import("./verdictClassifier.js").VerificationCommand[];
       applyPatches: Array<{ filePath: string; fullContent: string }>;
       patchResults: PatchResult[];
       fileDiffs?: FileDiff[];
@@ -480,6 +492,30 @@ function tryApplyExactLineReplacement(opts: {
   const fullContent = lines.join("\n");
   if (fullContent === opts.fileContent) return { ok: false, reason: "no_change" };
   return { ok: true, fullContent };
+}
+
+/**
+ * Find the index of the first ExecutionPlan step whose `filesLikely` includes
+ * the given file path. Returns null when no step claims the file. Used by the
+ * P1 plan-checklist event emitter — replaces the prior monotonic cursor with
+ * a truthful file-driven mapping. P1 best-effort: P2 orchestrator will emit
+ * explicit stepIndex per step boundary instead of inferring from file activity.
+ */
+export function findMatchingStepIndex(
+  executionPlan: { steps?: Array<{ filesLikely?: string[] }> } | null | undefined,
+  filePath: string
+): number | null {
+  if (!executionPlan || !Array.isArray(executionPlan.steps)) return null;
+  if (!filePath) return null;
+  const target = filePath.trim();
+  if (!target) return null;
+  for (let i = 0; i < executionPlan.steps.length; i += 1) {
+    const files = executionPlan.steps[i]?.filesLikely;
+    if (Array.isArray(files) && files.some((f) => f === target)) {
+      return i;
+    }
+  }
+  return null;
 }
 
 /** First line matching `Target file: <path>` (case-insensitive). */
@@ -4247,9 +4283,23 @@ export async function runLlmPatchFlow(input: {
     new Date().toISOString(),
     "false"
   );
+  debugLog("[zone-flow-trigger] runLlmPatchFlow invoked", {
+    runId: typeof input.runId === "string" ? input.runId : null,
+    conversationId: typeof input.conversationId === "string" ? input.conversationId : null,
+    dryRun: !!input.dryRun,
+    atomicPatch: !!input.atomicPatch,
+    hasHostedContext: !!input.hostedContext,
+    hasUserApiKey: !!input.userApiKey,
+    timestamp: new Date().toISOString(),
+  });
   const lifecycleEvents: AgentLifecycleEvent[] = [];
   let executionPlan: ExecutionPlan | null = null;
-  let planStepCursor = 0;
+  // P1 plan-step bookkeeping. Replaced the prior monotonic cursor with two
+  // sets so we only emit each step's `started` / `complete` event once,
+  // semantically driven by file activity matching `executionPlan.steps[i].filesLikely`.
+  // P2 will replace this with explicit stepIndex emissions from the orchestrator.
+  const planStepsStarted = new Set<number>();
+  const planStepsCompleted = new Set<number>();
 
   const getMaxContextFiles = (): number => {
     const raw = (process.env.MAX_CONTEXT_FILES ?? "").trim();
@@ -4297,25 +4347,76 @@ export async function runLlmPatchFlow(input: {
         // keep progress reporting best-effort
       }
 
-      // Plan step completion: best-effort sequential mapping to lifecycle milestones.
+      // P1 plan-step events: file-match driven (truthful). When a lifecycle
+      // event carries a filePath, look up which plan step claims that file
+      // (`step.filesLikely`) and emit `plan_step_started` / `plan_step_complete`
+      // with the explicit stepIndex. No file match → silent (better than lying).
+      // On `run_completed`, cascade-complete any started-but-not-completed step.
       if (executionPlan && executionPlan.steps.length > 0) {
-        const shouldAdvance =
+        const filePathRaw = (ev as { filePath?: unknown }).filePath;
+        const filePaths =
+          typeof filePathRaw === "string"
+            ? filePathRaw
+                .split(",")
+                .map((p) => p.trim())
+                .filter((p) => p.length > 0)
+            : [];
+
+        const matchedStepIndices = new Set<number>();
+        for (const fp of filePaths) {
+          const idx = findMatchingStepIndex(executionPlan, fp);
+          if (idx !== null) matchedStepIndices.add(idx);
+        }
+
+        const isStartingEvent =
           ev.type === "file_context_loaded" ||
+          ev.type === "patch_generation_started" ||
           ev.type === "patch_generated" ||
+          ev.type === "verification_started";
+        const isCompletingEvent =
           ev.type === "patch_correctness_checked" ||
           ev.type === "verification_passed" ||
-          ev.type === "verification_failed" ||
-          ev.type === "run_completed";
-        if (shouldAdvance) {
-          while (planStepCursor < executionPlan.steps.length) {
-            emitStructuredProgress({
-              type: "plan_step_complete",
-              title: `Plan step ${planStepCursor + 1} complete`,
-              status: "success",
-              stepIndex: planStepCursor,
-            });
-            planStepCursor += 1;
-            if (ev.type !== "run_completed") break;
+          ev.type === "verification_failed";
+
+        if (isStartingEvent) {
+          for (const idx of matchedStepIndices) {
+            if (!planStepsStarted.has(idx)) {
+              planStepsStarted.add(idx);
+              emitStructuredProgress({
+                type: "plan_step_started",
+                title: `Plan step ${idx + 1} started`,
+                status: "active",
+                stepIndex: idx,
+              });
+            }
+          }
+        }
+
+        if (isCompletingEvent) {
+          for (const idx of matchedStepIndices) {
+            if (!planStepsCompleted.has(idx)) {
+              planStepsCompleted.add(idx);
+              emitStructuredProgress({
+                type: "plan_step_complete",
+                title: `Plan step ${idx + 1} complete`,
+                status: "success",
+                stepIndex: idx,
+              });
+            }
+          }
+        }
+
+        if (ev.type === "run_completed") {
+          for (const idx of planStepsStarted) {
+            if (!planStepsCompleted.has(idx)) {
+              planStepsCompleted.add(idx);
+              emitStructuredProgress({
+                type: "plan_step_complete",
+                title: `Plan step ${idx + 1} complete`,
+                status: "success",
+                stepIndex: idx,
+              });
+            }
           }
         }
       }
@@ -4639,6 +4740,7 @@ export async function runLlmPatchFlow(input: {
     devCommand: "",
     packageManager: "unknown",
     hasTests: false,
+    testFilesDetected: false,
     testFramework: "unknown",
     configFiles: [],
     subProjects: [],
@@ -4658,6 +4760,7 @@ export async function runLlmPatchFlow(input: {
       language: framework.language,
       testCommand: framework.testCommand,
       hasTests: framework.hasTests,
+      testFilesDetected: framework.testFilesDetected,
       subProjects: framework.subProjects.length,
     })
   );
@@ -4694,6 +4797,138 @@ export async function runLlmPatchFlow(input: {
         type: "agent_loop_start",
         title: "Starting agent tool loop",
         status: "active",
+      });
+    }
+
+    // ── Tur P1.5: lightweight plan generation for agent_loop branch ──
+    // agent_loop doesn't go through plannerStep narrowing, so we use top-N
+    // developerContextFiles ranked quickly by rankRelevantFiles for the plan.
+    // This is COARSER than plan_full_patch's narrowed plan but provides
+    // enough step structure for the UI checklist + plan_step cursor.
+    let agentLoopPlanFiles: string[] = [];
+    try {
+      const ranker = await rankRelevantFiles({
+        task: input.task,
+        files: developerContextFiles,
+        readContent: async (relPath: string): Promise<string | null> => {
+          try {
+            return await readFile(path.join(input.repoPath ?? "", relPath), "utf-8");
+          } catch {
+            return null;
+          }
+        },
+      });
+      agentLoopPlanFiles = ranker.slice(0, 5).map((f) => f.path);
+    } catch (err) {
+      console.warn(
+        `[zone-plan] ranker skipped (agent_loop): ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+
+    if (agentLoopPlanFiles.length > 0) {
+      try {
+        executionPlan = await generateExecutionPlan({
+          task: input.task,
+          repoSummary: projectSummary,
+          relevantFiles: agentLoopPlanFiles,
+        });
+        console.log(`[zone-plan] generated steps=${executionPlan.steps.length} (agent_loop)`);
+        console.log(`[zone-plan] scope=${executionPlan.scopeSummary}`);
+      } catch (err) {
+        console.warn(
+          `[zone-plan] skipped (agent_loop): ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+
+    {
+      const planStepCount = executionPlan?.steps.length ?? 0;
+      const isComplexTask = executionPlan != null && planStepCount >= 2;
+      console.log("[zone-plan-debug]", {
+        planStepCount,
+        isComplexTask,
+        branch: "agent_loop",
+      });
+      if (isComplexTask && executionPlan) {
+        const planForUi = executionPlan;
+        emitStructuredProgress({
+          type: "plan_generated",
+          title: "Plan generated",
+          detail: planForUi.scopeSummary,
+          status: "success",
+          steps: planForUi.steps.map((step, i) => ({
+            index: i,
+            text: step.description || step.title || String(step),
+            status: "pending",
+          })),
+        });
+      }
+    }
+
+    // Tur P1.6: agent_loop step-cursor. The function-scope cursor at line 4344
+    // listens for plan_full_patch events (`patch_generated`, `verification_*`)
+    // that agent_loop never emits. Agent_loop emits `tool_call` (no filePath)
+    // and `patch_converted` (with filePath, only for write_file). Hook directly
+    // off the tool-call where filePath is in hand.
+    const agentLoopStepsStarted = new Set<number>();
+    const agentLoopStepsCompleted = new Set<number>();
+    // Tur P1.6 fix: track which step the cursor is currently "on" so we only
+    // complete it when the cursor moves to a different step. Emitting started+complete
+    // in the same call (the previous behavior) meant the UI's active state survived
+    // for ~1ms — the mor-halo spinner never rendered.
+    let agentLoopActiveStepIdx: number | null = null;
+
+    const advanceAgentLoopStep = (filePath: string | null | undefined): void => {
+      if (!filePath || !executionPlan || executionPlan.steps.length === 0) return;
+      const idx = findMatchingStepIndex(executionPlan, filePath);
+      if (idx === null) return;
+
+      // Cursor transitioned to a new step → complete the previous one.
+      if (
+        agentLoopActiveStepIdx !== null &&
+        agentLoopActiveStepIdx !== idx &&
+        !agentLoopStepsCompleted.has(agentLoopActiveStepIdx)
+      ) {
+        agentLoopStepsCompleted.add(agentLoopActiveStepIdx);
+        emitStructuredProgress({
+          type: "plan_step_complete",
+          title: `Plan step ${agentLoopActiveStepIdx + 1} complete`,
+          status: "success",
+          stepIndex: agentLoopActiveStepIdx,
+        });
+      }
+
+      if (!agentLoopStepsStarted.has(idx)) {
+        agentLoopStepsStarted.add(idx);
+        emitStructuredProgress({
+          type: "plan_step_started",
+          title: `Plan step ${idx + 1} started`,
+          status: "active",
+          stepIndex: idx,
+        });
+      }
+      agentLoopActiveStepIdx = idx;
+    };
+
+    // Tur P1.7 seed: ensure step 0 emits `plan_step_started` at agent-loop entry,
+    // independent of whether tool calls match step.filesLikely. Plans where steps
+    // lack file hints (command-only steps like "Run npm run build", analysis
+    // steps like "Review build output") would otherwise never trigger any
+    // plan_step_started event, leaving the UI counter pinned at 0/N and the
+    // mor-halo spinner unrendered. Forward-cursor advancement and
+    // run_completed cascade-complete handle subsequent steps.
+    if (
+      executionPlan &&
+      executionPlan.steps.length > 0 &&
+      !agentLoopStepsStarted.has(0)
+    ) {
+      agentLoopStepsStarted.add(0);
+      agentLoopActiveStepIdx = 0;
+      emitStructuredProgress({
+        type: "plan_step_started",
+        title: `Plan step 1 started`,
+        status: "active",
+        stepIndex: 0,
       });
     }
 
@@ -4902,15 +5137,20 @@ export async function runLlmPatchFlow(input: {
     }
     // ── End import-context injection ─────────────────────────────────────────
 
-    const loop = await runAgentLoop({
-      task: input.task,
-      repoPath: input.repoPath,
-      runId,
-      framework,
-      importContextSummary: _importContextSummary,
-      abortSignal: input.abortSignal,
-      userApiKey: input.userApiKey,
-      onStructuredEvent: (evt) => {
+    // Tur P2.1: feature-flagged multi-step orchestration. Default OFF — same
+    // single-pass agent_loop as before. When `ZONE_PLAN_ORCHESTRATION=1` AND
+    // the run has a plan with ≥2 steps, runAgentLoop is invoked once per step
+    // with a step-framed task. State transfer / cancellation parent / verdict
+    // gating are deferred to P2.2 / P2.3 / P2.4. The same `executionPlan` is
+    // forwarded into every step's call so the P2-scope guard sees the union
+    // of `filesLikely` and the agent can combine work optimistically.
+    const _planOrchestrationEnabled = isPlanOrchestrationEnabled(
+      executionPlan,
+      process.env["ZONE_PLAN_ORCHESTRATION"]
+    );
+
+    const agentLoopCallbacks = {
+      onStructuredEvent: (evt: unknown) => {
         if (!runId) return;
         // Bridge custom events into the normal `{ stage, progress }` SSE format.
         const e = evt as any;
@@ -4924,7 +5164,7 @@ export async function runLlmPatchFlow(input: {
           } as any);
         }
       },
-      onProgress: (msg) => {
+      onProgress: (msg: string) => {
         if (!runId) return;
         emitStructuredProgress({
           type: "tool_call",
@@ -4932,7 +5172,7 @@ export async function runLlmPatchFlow(input: {
           status: "active",
         });
       },
-      onToolCall: (name, args) => {
+      onToolCall: (name: string, args: Record<string, unknown>) => {
         if (!runId) return;
         const cmd =
           name === "run_command"
@@ -4994,8 +5234,13 @@ export async function runLlmPatchFlow(input: {
             beforeByFile.set(snapPath, "");
           }
         }
+        // Tur P1.6: advance plan-step cursor on every file-touching tool call.
+        // Skip when the orchestrator is active — it emits explicit step-boundary
+        // events around each iteration instead, and the file-match cursor would
+        // double-fire.
+        if (snapPath && !_planOrchestrationEnabled) advanceAgentLoopStep(snapPath);
       },
-      onToolResult: (name, result) => {
+      onToolResult: (_name: string, result: { output?: string; success?: boolean }) => {
         if (!runId) return;
         emitStructuredProgress({
           type: "tool_result",
@@ -5004,7 +5249,80 @@ export async function runLlmPatchFlow(input: {
           status: result.success ? "success" : "error",
         });
       },
-    });
+    } as const;
+
+    const agentLoopBaseInput = {
+      task: input.task,
+      repoPath: input.repoPath,
+      runId,
+      framework,
+      importContextSummary: _importContextSummary,
+      abortSignal: input.abortSignal,
+      userApiKey: input.userApiKey,
+      // Usage-tracker Tur: attribute spend to the requesting user so the
+      // Settings → Usage tab can show per-user totals. Falls back to
+      // "local-dev" inside agentLoop when missing.
+      userId: input.userId,
+      // Tur P2-scope: forward the plan so the tool layer can hard-block
+      // writes that fall outside `plan.steps[*].filesLikely`.
+      executionPlan,
+      // agent-persistence Tur: feed the full repo file list so
+      // buildVerifyDiagnostic can surface candidate culprits when a
+      // build/test failure points to a framework-generated path.
+      repoFilePaths: developerContextFiles.map((f) => f.path),
+      ...agentLoopCallbacks,
+    };
+
+    let loop: AgentLoopResult;
+    if (_planOrchestrationEnabled && executionPlan && executionPlan.steps.length >= 2) {
+      console.log("[zone-orchestrator] activated", JSON.stringify({
+        runId: runId || null,
+        stepCount: executionPlan.steps.length,
+      }));
+      const stepResults: AgentLoopResult[] = [];
+      for (let stepIdx = 0; stepIdx < executionPlan.steps.length; stepIdx += 1) {
+        if (input.abortSignal?.aborted) {
+          console.log("[zone-orchestrator] aborted before step", JSON.stringify({ stepIdx }));
+          break;
+        }
+        const step = executionPlan.steps[stepIdx]!;
+        console.log("[zone-orchestrator] step start", JSON.stringify({
+          stepIdx,
+          total: executionPlan.steps.length,
+          title: String(step.title || "").slice(0, 120),
+        }));
+        emitStructuredProgress({
+          type: "plan_step_started",
+          title: `Plan step ${stepIdx + 1} started`,
+          status: "active",
+          stepIndex: stepIdx,
+        });
+        const stepTask = buildStepTask(input.task, stepIdx, executionPlan);
+        const stepResult = await runAgentLoop({
+          ...agentLoopBaseInput,
+          task: stepTask,
+        });
+        stepResults.push(stepResult);
+        emitStructuredProgress({
+          type: "plan_step_complete",
+          title: `Plan step ${stepIdx + 1} complete`,
+          status: "success",
+          stepIndex: stepIdx,
+        });
+        console.log("[zone-orchestrator] step done", JSON.stringify({
+          stepIdx,
+          success: stepResult.success,
+          filesModified: (stepResult.filesModified || []).length,
+        }));
+      }
+      console.log("[zone-orchestrator] all steps done", JSON.stringify({
+        totalSteps: stepResults.length,
+        anyFailures: stepResults.some((r) => !r.success),
+      }));
+      loop = aggregateOrchestratorResults(stepResults);
+    } else {
+      loop = await runAgentLoop(agentLoopBaseInput);
+    }
 
     filesTouched.push(...(loop.filesModified || []));
 
@@ -5099,6 +5417,24 @@ export async function runLlmPatchFlow(input: {
     });
 
     if (runId) {
+      // Tur P1.6: cascade-complete any plan steps the cursor never reached
+      // (steps with empty filesLikely, or merged-into-one-patch by the agent).
+      // Mirrors the UI `finalizeRemaining()` so logs and UI agree.
+      // Tur P2.1: skipped when the orchestrator drove explicit per-step events
+      // (it already emitted plan_step_complete for every step it ran).
+      if (executionPlan && executionPlan.steps.length > 0 && !_planOrchestrationEnabled) {
+        for (let i = 0; i < executionPlan.steps.length; i += 1) {
+          if (!agentLoopStepsCompleted.has(i)) {
+            agentLoopStepsCompleted.add(i);
+            emitStructuredProgress({
+              type: "plan_step_complete",
+              title: `Plan step ${i + 1} complete`,
+              status: "success",
+              stepIndex: i,
+            });
+          }
+        }
+      }
       emitStructuredProgress({
         type: "agent_loop_complete",
         title: loop.success
@@ -5109,7 +5445,7 @@ export async function runLlmPatchFlow(input: {
       });
 
       // Surface the model's final text (or a clear failure explanation) as a chat bubble in the UI.
-      const summaryTrim = (loop.summary || "").trim();
+      const summaryTrim = stripVerificationTag(String(loop.summary || ""));
       const ts = Date.now();
       if (loop.success && summaryTrim.length > 0) {
         input.onProgress?.({
@@ -5159,6 +5495,70 @@ export async function runLlmPatchFlow(input: {
       }
     }
 
+    // Zone Undo Tur 2a: capture a snapshot for safe_to_apply runs so the user
+    // can revert via POST /api/runs/:runId/undo. Pre-flush content comes from
+    // beforeByFile (orchestrator-tracked); post-flush content is read fresh
+    // from disk. A path absent from beforeByFile but present in filesTouched
+    // is treated as kind="created" (undo deletes it).
+    if (agentDecisionMode === "safe_to_apply" && filesTouched.length > 0) {
+      try {
+        const { createSnapshot } = await import("../snapshots/snapshotStore.js");
+        const snapshotFiles = await Promise.all(
+          filesTouched.map(async (relPath) => {
+            const abs = path.resolve(input.repoPath, relPath);
+            const preFlushText = beforeByFile.get(relPath);
+            const preFlushContent =
+              preFlushText !== undefined
+                ? Buffer.from(preFlushText, "utf8")
+                : null;
+            const postFlushContent = await readFile(abs);
+            return { path: relPath, preFlushContent, postFlushContent };
+          })
+        );
+        const manifest = await createSnapshot({
+          runId,
+          repoPath: input.repoPath,
+          files: snapshotFiles,
+        });
+        console.log(
+          "[zone-snapshot-created]",
+          JSON.stringify({
+            runId,
+            fileCount: manifest.files.length,
+            created: manifest.files.filter((f) => f.kind === "created").length,
+            modified: manifest.files.filter((f) => f.kind === "modified").length,
+          })
+        );
+      } catch (err) {
+        console.error(
+          "[zone-snapshot-error]",
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    }
+
+    // Background process cleanup: every run kills its own bg processes.
+    // Idempotent — safe even if no processes were started this run.
+    if (runId) {
+      try {
+        const { killAllForRun } = await import(
+          "../tools/backgroundProcessRegistry.js"
+        );
+        const result = await killAllForRun(runId);
+        if (result.killed > 0) {
+          console.log(
+            "[zone-bg-cleanup]",
+            JSON.stringify({ runId, killed: result.killed })
+          );
+        }
+      } catch (err) {
+        console.error(
+          "[zone-bg-cleanup-error]",
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    }
+
     return {
       ok: true,
       patchPreview: `=== AGENT LOOP SUMMARY ===\n${loop.summary}`,
@@ -5169,6 +5569,7 @@ export async function runLlmPatchFlow(input: {
       patchesAlreadyApplied: fileDiffs.length > 0 && agentDecisionMode === "safe_to_apply",
       verificationReason: vr,
       verificationNote: agentVerificationNote,
+      verificationCommands: collectVerificationCommands(loop.toolCallLog),
       decisionMode: agentDecisionMode,
       finalState: agentDecisionMode,
       finalExecutionOutcome: agentDecisionMode === "safe_to_apply" ? "completed" : "completed_with_issues",
@@ -5241,11 +5642,24 @@ export async function runLlmPatchFlow(input: {
       }
 
       const queryEmbedding = await embedText(input.task);
-      const matches = await matchSimilarFiles({
-        repoPath: input.repoPath,
-        queryEmbedding,
-        matchCount: 30,
-      });
+      const matches =
+        queryEmbedding === null
+          ? []
+          : await matchSimilarFiles({
+              repoPath: input.repoPath,
+              queryEmbedding,
+              matchCount: 30,
+            });
+      if (queryEmbedding === null) {
+        console.log("[zone-embed-pre-rank]", {
+          hasEmbeddings: false,
+          queryEmbeddingDims: 0,
+          topMatchCount: 0,
+          semanticScoresSize: 0,
+          skipped: true,
+          reason: "no_query_embedding",
+        });
+      }
       semanticScores = new Map(
         matches
           .filter(
@@ -5284,11 +5698,23 @@ export async function runLlmPatchFlow(input: {
       developerContextFileCount: developerContextFiles.length,
     });
   }
-  let fullRankedFiles = rankRelevantFiles({
+  const readContentForRanker = async (relPath: string): Promise<string | null> => {
+    try {
+      return await readFile(path.join(input.repoPath, relPath), "utf8");
+    } catch {
+      return null;
+    }
+  };
+  let fullRankedFiles = await rankRelevantFiles({
     task: rankingTask,
     files: developerContextFiles,
     intent: taskIntent,
     semanticScores,
+    lastChangedFiles: Array.isArray(input.lastChangedFiles)
+      ? (input.lastChangedFiles as unknown[])
+          .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+      : undefined,
+    readContent: readContentForRanker,
   });
 
   // Multi-turn memory: only boost lastChangedFiles when they are still semantically relevant
@@ -5314,14 +5740,20 @@ export async function runLlmPatchFlow(input: {
       const repoByPath = new Map<string, RepoFile>();
       for (const f of developerContextFiles) repoByPath.set(f.path, f);
 
+      const MINIMUM_KEYWORD_SCORE = 5;
       for (const p of lastChanged) {
         const similarity = Number(semanticScores?.get(p) ?? 0);
-        if (!Number.isFinite(similarity) || similarity < 0.3) {
+        const rankedHit = rankedList.find((file) => file.path === p);
+        const pathScore = Number(rankedHit?.score ?? 0);
+        const semanticOk = Number.isFinite(similarity) && similarity >= 0.3;
+        const keywordOk = pathScore >= MINIMUM_KEYWORD_SCORE;
+        if (!semanticOk && !keywordOk) {
           console.log("[debug-mem] boost decision:", {
             file: p,
             similarity,
+            pathScore,
             boosted: false,
-            reason: "low_semantic_similarity",
+            reason: "low_semantic_and_low_path_score",
           });
           continue;
         }
@@ -5331,18 +5763,24 @@ export async function runLlmPatchFlow(input: {
           console.log("[debug-mem] boost decision:", {
             file: p,
             similarity,
+            pathScore,
             boosted: false,
             reason: "already_in_top_5",
           });
           continue;
         }
 
-        if (!semanticScores?.has(p)) {
+        if (!semanticOk && !keywordOk) {
+          // already filtered above; defensive
+          continue;
+        }
+        if (!semanticScores?.has(p) && !keywordOk) {
           console.log("[debug-mem] boost decision:", {
             file: p,
             similarity,
+            pathScore,
             boosted: false,
-            reason: "not_in_top_30_semantic_matches",
+            reason: "not_in_top_30_semantic_matches_and_low_path_score",
           });
           continue;
         }
@@ -5661,14 +6099,14 @@ export async function runLlmPatchFlow(input: {
   );
   const planStepCount = executionPlan?.steps.length ?? 0;
   const isComplexTaskPreview =
-    executionPlan != null && planStepCount >= 4 && suggestedFilesForPlanUi.length > 1;
+    executionPlan != null && planStepCount >= 2;
   console.log("[zone-plan-debug]", {
     planStepCount,
     suggestedFilesCount: suggestedFilesForPlanUi.length,
     suggestedFiles: suggestedFilesForPlanUi,
     isComplexTask: isComplexTaskPreview,
   });
-  /** Single-file tasks never show a plan. Require many steps AND multiple modify/create files. */
+  /** Tur P1: lowered threshold from "≥4 steps + ≥2 files" to "≥2 steps" so multi-task prompts surface the plan checklist. P2 will remove the gate entirely (always emit, UI decides). */
   const isComplexTask = isComplexTaskPreview;
   if (isComplexTask && executionPlan) {
     const planForUi = executionPlan;
@@ -6631,11 +7069,12 @@ export async function runLlmPatchFlow(input: {
         const rejectedPreviewPaths = constraintRejections.map(
           (rejection) => rejection.filePath
         );
-        const fallbackFullRanked = rankRelevantFiles({
+        const fallbackFullRanked = await rankRelevantFiles({
           task: input.task,
           files: developerContextFiles,
           intent: taskIntent,
           semanticScores,
+          readContent: readContentForRanker,
         });
         const fallbackEntityAnchors = extractConstrainedTaskEntityAnchors(
           normalizeConstrainedTaskText(input.task)

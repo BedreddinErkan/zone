@@ -1,16 +1,31 @@
 ﻿import {
-  createOpenAIClient,
   extractResponsesApiOutputText,
   getModelName,
 } from "./openaiClient.js";
+import { createLLMClient } from "./factory.js";
+import { recordExecution } from "../usage/usageTracker.js";
+import type { ProviderName } from "../usage/pricing.js";
+import { getRequestContext } from "./openaiContext.js";
+import { debugLog } from "../utils/debugLog.js";
 import { parseVerificationError } from "../core/parseVerificationError.js";
+import { buildVerifyDiagnostic } from "../core/buildVerifyDiagnostic.js";
+import { maybeExpandScopeForVerifyDiagnostic } from "../tools/scopeGuard.js";
+import { createHash } from "node:crypto";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+import fs from "node:fs";
+import path from "node:path";
 import { ZONE_TOOLS } from "../tools/toolDefinitions.js";
-import { executeTool, type ToolResult } from "../tools/toolExecutor.js";
+import {
+  executeTool,
+  withStagingTempFlush,
+  type ToolResult,
+} from "../tools/toolExecutor.js";
 import type { ProjectFramework } from "../repo/detectFramework.js";
 import type {
-  ResponseFunctionToolCall,
-  ResponseInput,
-} from "openai/resources/responses/responses";
+  ChatCompletionMessageParam,
+  ChatCompletionMessageFunctionToolCall,
+} from "openai/resources/chat/completions";
 
 export interface AgentLoopInput {
   task: string;
@@ -26,11 +41,22 @@ export interface AgentLoopInput {
   /** Optional import-ecosystem context block built by buildImportContextSummary. Injected by runLlmPatchFlow. */
   importContextSummary?: string;
   /**
-   * BYOK: user-supplied OpenAI API key (sent from the browser via X-User-OpenAI-Key header).
+   * BYOK: user-supplied LLM API key (sent from the browser via X-Zone-LLM-Key header).
    * Takes priority over process.env.OPENAI_API_KEY when present.
    * Never logged â€” only the source ("user" vs "env") is logged.
    */
   userApiKey?: string;
+  /** Tur P2-scope: when present, write tools reject paths outside the
+   *  union of plan.steps[*].filesLikely. Forwarded into executeTool. */
+  executionPlan?: import("./executionPlan.js").ExecutionPlan | null;
+  /** agent-persistence Tur: full repo file list, used by buildVerifyDiagnostic
+   *  to surface candidate culprits when a build/test failure points to a
+   *  framework-generated path. Optional — when missing, the diagnostic still
+   *  fires but with no candidate list. */
+  repoFilePaths?: string[];
+  /** Usage-tracker Tur: who to attribute this run's BYOK token spend to.
+   *  Defaults to "local-dev" when missing. Plumbed through runLlmPatchFlow. */
+  userId?: string;
 }
 
 export type VerificationReason =
@@ -39,7 +65,9 @@ export type VerificationReason =
   | 'tests_inconclusive'
   | 'tests_failed_unrelated'
   | 'tests_failed_by_patch'
-  | 'no_verification_attempted';
+  | 'no_verification_attempted'
+  | 'verification_failed_staged'
+  | 'no_changes_made';
 
 export interface AgentLoopResult {
   success: boolean;
@@ -57,19 +85,41 @@ export interface AgentLoopResult {
 }
 
 const MAX_SELF_CORRECTION_ATTEMPTS = 5;
+// agent-loop-stability Tur: bumped 10 → 15. Build-failure investigations need
+// more headroom than test-failure ones — first iter for the build, second to
+// read the failing file, third to apply the fix, fourth to re-verify; multiply
+// for two-bug scenarios. Existing escalation bonus still adds 5 on top for
+// apply_patch repeat-failure (max 20).
+export const BASE_MAX_ITERATIONS = 15;
+export const ESCALATION_BONUS_ITERATIONS = 5;
 
-/** True when a run_command output looks like a test/build failure. */
-function looksLikeCommandFailure(output: string): boolean {
-  const t = String(output || "");
-  return (
-    /SyntaxError|ReferenceError|TypeError|RangeError/i.test(t) ||
-    /\bFAIL\b|\bFAILED\b|\bfailing\b/i.test(t) ||
-    /error TS\d+|tsc.*error/i.test(t) ||
-    /exit code[:\s]+[1-9]\d*|exited with code [1-9]/i.test(t) ||
-    /\bERROR\b.*\n|\berror:\s/im.test(t) ||
-    /\d+ (test|spec|suite)s? failed/i.test(t) ||
-    /npm ERR!|yarn error/i.test(t)
-  );
+export type IterationBudgetState = {
+  maxIterationsForRun: number;
+  escalationBonusGranted: boolean;
+};
+
+export function maybeGrantEscalationBonus(
+  state: IterationBudgetState,
+  escalatedFileCount: number,
+  currentIter: number,
+  onProgress: ((msg: string) => void) | undefined,
+  baseMaxIterations = BASE_MAX_ITERATIONS
+): IterationBudgetState {
+  if (state.escalationBonusGranted || escalatedFileCount <= 0) {
+    return state;
+  }
+
+  const nextState = {
+    maxIterationsForRun: baseMaxIterations + ESCALATION_BONUS_ITERATIONS,
+    escalationBonusGranted: true,
+  };
+  onProgress?.(JSON.stringify({
+    event: "zone-agent-escalation-bonus-granted",
+    newMaxIterations: nextState.maxIterationsForRun,
+    escalatedFileCount,
+    currentIter,
+  }));
+  return nextState;
 }
 
 function normalizePatchedPath(filePath: string): string {
@@ -84,10 +134,13 @@ export type SelfCorrectTrigger =
   | "apply_patch_multiple_matches"
   | "apply_patch_semantic_smell"
   | "apply_patch_syntax_broken_post_write"
+  | "apply_patch_repeated_failure_same_file"
   | "apply_patch_pre_existing_broken"
   | "apply_patch_scope_not_found"
   | "apply_patch_replace_shorter_than_find"
   | "apply_patch_find_block_empty"
+  | "apply_patch_marker_imbalance"
+  | "apply_patch_no_read_first"
   | "tool_command_spawn_failure"
   | "tool_path_enoent"
   | "unknown";
@@ -114,6 +167,126 @@ const PRE_EXISTING_BROKEN_COACHING_PROMPT =
   `3. Construct ONE apply_patch whose FIND block is large enough to cover BOTH the breakage region AND the area you originally wanted to change, and whose REPLACE block fixes both.\n\n` +
   `Next action: read the file, then submit one combined repair-plus-feature apply_patch.`;
 
+// Provider-agnostic hardening: appended to test_failed and
+// apply_patch_syntax_broken_post_write coaching to block three failure modes
+// observed in OpenAI gpt-4o smoke runs (run bddcd8d3):
+//   1. Comment-out as fix (line preserved with "// " prefix)
+//   2. Duplicate imports/declarations in REPLACE blocks
+//   3. "Pre-existing/unrelated" verdicts without any investigation
+// Sonnet 4.5 already complies with all three rules; the directives are
+// imperative-form so they don't regress Sonnet but force OpenAI compliance.
+const PROVIDER_AGNOSTIC_HARDENING =
+  `\n\n**REMOVING CODE MEANS DELETING IT**\n\n` +
+  `If a line of code is causing an error and the fix is to remove it:\n` +
+  `- DELETE the line entirely (omit it from REPLACE block)\n` +
+  `- DO NOT prefix with "// " — that is not a fix, the line still exists\n` +
+  `- "// import X" is preserved code, not removed code\n\n` +
+  `CORRECT removal:\n` +
+  `  --- FIND ---\n` +
+  `  import { Bad } from "y";\n` +
+  `  import { Good } from "z";\n` +
+  `  --- REPLACE ---\n` +
+  `  import { Good } from "z";\n\n` +
+  `INCORRECT (comment-out is NOT a fix):\n` +
+  `  --- FIND ---\n` +
+  `  import { Bad } from "y";\n` +
+  `  --- REPLACE ---\n` +
+  `  // import { Bad } from "y";\n\n` +
+  `**REPLACE ONLY SUBSTITUTES THE FIND BLOCK**\n\n` +
+  `Lines BEFORE and AFTER the FIND block stay untouched. Do NOT include them in REPLACE.\n\n` +
+  `If FIND is "import A;" and you put "import B;\\nimport A;" in REPLACE:\n` +
+  `- The result is duplicate "import A;" in the file (one was already below)\n` +
+  `- This causes "Identifier already declared" syntax errors\n\n` +
+  `Before constructing REPLACE: re-read the surrounding lines. Only include in REPLACE the new content for the FIND region.\n\n` +
+  `**BEFORE CLAIMING ANY ERROR IS PRE-EXISTING OR UNRELATED**\n\n` +
+  `You MUST satisfy ALL of the following:\n` +
+  `1. Read at least one file that could plausibly be the cause\n` +
+  `2. Form a specific hypothesis about why the error occurs\n` +
+  `3. Attempt at least one apply_patch implementing that hypothesis\n` +
+  `4. Verify whether the patch resolved or worsened the error\n\n` +
+  `"I cannot determine the cause" or "this seems unrelated" are NOT acceptable verdicts without evidence of investigation. The verification system will mark unrelated claims without patch attempts as failed assessment.\n\n` +
+  `Acceptable verdict reasons after investigation:\n` +
+  `- Patch attempted, error resolved → tests_passed\n` +
+  `- Patch attempted, new error revealed → continue investigation OR tests_failed_by_patch\n` +
+  `- Multiple patch attempts, root cause is architectural → state the architectural finding with specific file/line evidence`;
+
+export type FailureRecord = {
+  trigger: SelfCorrectTrigger;
+  errorLine: number | null;
+  patchHash: string;
+  iter: number;
+};
+
+function parsePatchBlocks(patch: string): Array<{ find: string; replace: string }> {
+  const blocks: Array<{ find: string; replace: string }> = [];
+  const FIND_MARKER = "--- FIND ---";
+  const REPLACE_MARKER = "--- REPLACE ---";
+  let remaining = String(patch || "");
+  while (remaining.includes(FIND_MARKER)) {
+    const findIdx = remaining.indexOf(FIND_MARKER);
+    const afterFind = remaining.slice(findIdx + FIND_MARKER.length);
+    const repIdx = afterFind.indexOf(REPLACE_MARKER);
+    if (repIdx === -1) break;
+    const findContent = afterFind.slice(0, repIdx);
+    const afterReplace = afterFind.slice(repIdx + REPLACE_MARKER.length);
+    const nextFindIdx = afterReplace.indexOf(FIND_MARKER);
+    const replaceContent =
+      nextFindIdx === -1 ? afterReplace : afterReplace.slice(0, nextFindIdx);
+    blocks.push({
+      find: findContent.replace(/^\r?\n/, "").replace(/\r?\n$/, ""),
+      replace: replaceContent.replace(/^\r?\n/, "").replace(/\r?\n$/, ""),
+    });
+    remaining = nextFindIdx === -1 ? "" : afterReplace.slice(nextFindIdx);
+  }
+  return blocks;
+}
+
+export function hashPatchBlocks(args: Record<string, unknown> | null | undefined): string {
+  const patch = String(args?.patch ?? "");
+  const blocks = parsePatchBlocks(patch);
+  const concatenated = blocks.length > 0
+    ? blocks.map((b) => `${b.find}\n--\n${b.replace}`).join("\n===\n")
+    : patch;
+  return createHash("sha256").update(concatenated).digest("hex").slice(0, 12);
+}
+
+export function extractErrorLine(output: string): number | null {
+  const match = String(output || "").match(/\bline\s+(\d+)\b/i);
+  if (!match) return null;
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function detectRepeatedFailure(
+  failureHistory: Map<string, FailureRecord[]>,
+  targetFilePath: string | null
+): { filePath: string; reason: string } | null {
+  if (!targetFilePath) return null;
+  const records = failureHistory.get(targetFilePath);
+  if (!records || records.length < 2) return null;
+
+  const last = records[records.length - 1]!;
+  const prev = records[records.length - 2]!;
+
+  if (last.trigger === prev.trigger && last.patchHash === prev.patchHash) {
+    return { filePath: targetFilePath, reason: "identical_patch_retried" };
+  }
+
+  if (
+    last.trigger === prev.trigger &&
+    last.errorLine !== null &&
+    last.errorLine === prev.errorLine
+  ) {
+    return { filePath: targetFilePath, reason: "same_root_cause_different_patch" };
+  }
+
+  const sameTriggerCount = records.filter((r) => r.trigger === last.trigger).length;
+  if (sameTriggerCount >= 3) {
+    return { filePath: targetFilePath, reason: "trigger_repeated_3x" };
+  }
+  return null;
+}
+
 function extractSemanticSmellName(errorPreview: string): string {
   const match = String(errorPreview || "").match(/smell detected was:\s*([a-z_]+)/i);
   return match?.[1]?.toLowerCase() ?? "unknown";
@@ -127,6 +300,8 @@ function getSemanticSmellSpecificGuidance(smellName: string): string {
       return "The JSX element has the same attribute defined twice. Remove the old attribute when adding the new one.";
     case "duplicate_import_statement":
       return "Two import statements target the same module path. Merge them into one import.";
+    case "duplicate_adjacent_jsdoc":
+      return "You added two identical /** */ JSDoc blocks back-to-back above the same declaration. Remove the duplicate — keep only one comment.";
     case "inline_style_pseudo_class":
       return "Inline React style does not support pseudo-classes like `:hover`. Use a CSS class instead.";
     default:
@@ -142,6 +317,12 @@ export function classifyFailure(
 ): SelfCorrectTrigger {
   const text = `${output ?? ""} ${error ?? ""}`.toLowerCase();
   if (toolName === "apply_patch") {
+    if (/no_read_first|haven't read this file yet|haven.t read this file yet/i.test(text)) {
+      return "apply_patch_no_read_first";
+    }
+    if (/marker imbalance|--- find ---.*marker.*but.*--- replace ---.*marker/i.test(text)) {
+      return "apply_patch_marker_imbalance";
+    }
     // Pre-existing broken file: output says "NOT caused by your patch" or "already syntactically broken".
     // The literal rejectionReason "file_already_broken_pre_patch" is a separate field, not in output text.
     if (/file_already_broken_pre_patch|not caused by your patch|already syntactically broken/i.test(text))
@@ -178,9 +359,29 @@ export function classifyFailure(
 export function buildCoachingPrompt(
   trigger: SelfCorrectTrigger,
   errorPreview: string,
-  _recentToolCalls: Array<{ tool: string; args: Record<string, unknown>; result: string }>
+  _recentToolCalls: Array<{ tool: string; args: Record<string, unknown>; result: string }>,
+  options?: {
+    attemptCount?: number;
+    filePath?: string;
+    /** agent-persistence Tur: when true, the failing file lives under a
+     *  framework-generated path (.next/, dist/, etc.). The coaching
+     *  prompt switches to a hard-investigate variant that bans
+     *  tests_failed_unrelated and requires reading candidate culprits. */
+    generatedPathDetected?: boolean;
+    /** Optional parsed failing path, surfaced inside the coaching text
+     *  so the agent doesn't have to re-extract it from raw output. */
+    parsedFailingFile?: string | null;
+  }
 ): string {
+  const attemptCount = options?.attemptCount ?? 2;
+  const filePath = options?.filePath ?? "this file";
   switch (trigger) {
+    case "apply_patch_no_read_first":
+      return (
+        "You tried to apply_patch a file you haven't read in this run. " +
+        "Call read_file FIRST to see the exact lines, then write apply_patch with FIND " +
+        "blocks that match verbatim (whitespace included). Don't guess from prior knowledge of similar projects."
+      );
     case "apply_patch_find_not_found":
       return (
         `Your FIND block did not match any content in the file.\n` +
@@ -199,6 +400,17 @@ export function buildCoachingPrompt(
         `2. Extend the FIND block with surrounding lines until it becomes unique in the file.\n` +
         `Next action: produce a new apply_patch with either scope OR a longer, unique FIND block.`
       );
+    case "apply_patch_marker_imbalance":
+      return (
+        `Your last apply_patch had unbalanced --- FIND --- / --- REPLACE --- markers.\n\n` +
+        `Required structure: each \`--- FIND ---\` MUST be followed by exactly one \`--- REPLACE ---\`. ` +
+        `For multiple edits in one file, use multiple block pairs.\n\n` +
+        `WRONG (one FIND, two REPLACE - what you submitted):\n` +
+        `  --- FIND ---\n  <region A>\n  --- REPLACE ---\n  <new A>\n  <new B>\n  --- REPLACE ---\n  <new B alt>\n\n` +
+        `RIGHT (two FIND, two REPLACE - multi-block):\n` +
+        `  --- FIND ---\n  <region A>\n  --- REPLACE ---\n  <new A>\n  --- FIND ---\n  <region B>\n  --- REPLACE ---\n  <new B>\n\n` +
+        `Next action: re-issue apply_patch with balanced markers. If only one edit is needed, use exactly one FIND/REPLACE pair.`
+      );
     case "apply_patch_semantic_smell": {
       const smellName = extractSemanticSmellName(errorPreview);
       const smellSpecificGuidance = getSemanticSmellSpecificGuidance(smellName);
@@ -214,13 +426,33 @@ export function buildCoachingPrompt(
       );
     }
     case "apply_patch_syntax_broken_post_write":
-      return SYNTAX_BROKEN_POST_WRITE_COACHING_PROMPT;
+      return SYNTAX_BROKEN_POST_WRITE_COACHING_PROMPT + PROVIDER_AGNOSTIC_HARDENING;
       return (
         `Your patch was applied but produced invalid syntax â€” the file was reverted to its pre-patch state.\n` +
         `This means your REPLACE block has a bug: missing brace, semicolon, paren, comma, or malformed statement.\n` +
         `Do NOT just retry the same patch. Re-examine your REPLACE block character by character.\n` +
         `If you're unsure where the syntax broke, narrow the change to the smallest possible REPLACE that still accomplishes the task.\n` +
         `Next action: produce a corrected apply_patch with a verified syntactically valid REPLACE block.`
+      );
+    case "apply_patch_repeated_failure_same_file":
+      return (
+        `Tool change required for ONE file: "${filePath}".\n\n` +
+        `You've failed ${attemptCount} times on "${filePath}" with the same root cause. ` +
+        `apply_patch is now blocked for THIS FILE ONLY. Other files in this task are unaffected - ` +
+        `keep using apply_patch for them as normal.\n\n` +
+        `For "${filePath}" specifically, switch tools:\n` +
+        `1. Call read_file on "${filePath}" to see the current state.\n` +
+        `2. Mentally compute the FULL corrected file content (every line, top to bottom).\n` +
+        `3. Call write_file with filePath="${filePath}" and content=<the entire corrected file>.\n\n` +
+        `write_file replaces the whole file atomically. The validator will still check syntax/semantics, ` +
+        `but you don't have to reason about FIND/REPLACE matching, indentation, or surrounding lines.\n\n` +
+        `Important - task continuation:\n` +
+        `Switching tools for "${filePath}" is a LOCAL fix, not a signal to pause the rest of the task. ` +
+        `If your task involves other files (cross-file refactor, multi-file rename, etc.), continue working on ` +
+        `those files with apply_patch as you were. Handle "${filePath}" with write_file when you reach it; ` +
+        `do not let this escalation reorder the remaining work.\n\n` +
+        `Note: write_file is normally restricted, but the shrink-guard has been bypassed for "${filePath}" ` +
+        `because of the escalation. Use it for this file.`
       );
     case "apply_patch_pre_existing_broken":
       return PRE_EXISTING_BROKEN_COACHING_PROMPT;
@@ -260,6 +492,38 @@ export function buildCoachingPrompt(
         `Next action: re-issue the call with a repo-relative path.`
       );
     case "test_failed":
+      if (options?.generatedPathDetected) {
+        // agent-persistence Tur: hard investigator path. Generated paths
+        // (.next/, dist/, build/, out/, .svelte-kit/, .nuxt/) are NEVER the
+        // user's direct fault — they are downstream of user-source bugs.
+        // We ban tests_failed_unrelated for this case and require the agent
+        // to read candidate culprits before any verdict.
+        const failingFileRef = options.parsedFailingFile
+          ? `\`${options.parsedFailingFile}\``
+          : "the framework-generated path shown in the diagnostic above";
+        return (
+          `Build/test failed and the failing file is in a framework-generated path ` +
+          `(${failingFileRef}). Generated paths are downstream of user-source bugs ` +
+          `— the real cause lives in YOUR \`app/\`, \`components/\`, \`lib/\` etc.\n\n` +
+          `MANDATORY investigation steps before any verdict:\n` +
+          `1. Read at least 2 candidate culprit files from the diagnostic above ` +
+          `(layout files, providers, recently-modified user files).\n` +
+          `2. Look specifically for: missing \`"use client";\` directive, server/client mismatch, ` +
+          `broken imports, hooks called from server components.\n` +
+          `3. Form a SPECIFIC hypothesis: which file + which line + what change.\n` +
+          `4. Apply the fix via apply_patch (or write_file when prepending a single directive).\n` +
+          `5. Re-run the failing command to verify the fix.\n\n` +
+          `You MUST NOT emit [ZONE_VERIFICATION: tests_failed_unrelated] in this case. ` +
+          `Generated paths are never "unrelated" — they reflect user-source state.\n\n` +
+          `Permitted verdicts after investigation:\n` +
+          `- [ZONE_VERIFICATION: tests_passed] â€” fix applied and verified.\n` +
+          `- [ZONE_VERIFICATION: tests_failed_by_patch] â€” fix attempt didn't resolve it; surface what you tried.\n` +
+          `- [ZONE_VERIFICATION: tests_inconclusive] â€” investigated thoroughly but couldn't isolate cause; ` +
+          `cite which files you read and what you ruled out.\n\n` +
+          `Next action: read the candidate files now, then form a hypothesis.` +
+          PROVIDER_AGNOSTIC_HARDENING
+        );
+      }
       return (
         `Tests reported failure or warnings. Determine: is the failure RELATED to your change, ` +
         `or pre-existing/infrastructure noise (deprecation warnings, missing optional deps, env issues)?\n` +
@@ -274,7 +538,8 @@ export function buildCoachingPrompt(
         `- Related: read the assertion/stack trace pointing to your change and produce a corrective apply_patch.\n` +
         `- Cannot tell: emit [ZONE_VERIFICATION: tests_inconclusive].\n` +
         `Avoid blindly re-running the same test command; that consumes attempts without progress.\n` +
-        `Next action: classify with evidence; if related, produce a corrective patch.`
+        `Next action: classify with evidence; if related, produce a corrective patch.` +
+        PROVIDER_AGNOSTIC_HARDENING
       );
     case "apply_patch_replace_shorter_than_find":
       return (
@@ -302,21 +567,28 @@ export function buildCoachingPrompt(
   }
 }
 
-/** Responses API: `response.output` items with `type === "function_call"`. */
-function extractFunctionCallItems(response: unknown): ResponseFunctionToolCall[] {
-  const outputItems = (response as { output?: unknown[] } | null)?.output;
-  if (!Array.isArray(outputItems)) return [];
-  const calls: ResponseFunctionToolCall[] = [];
-  for (const item of outputItems) {
-    const t = item as Partial<ResponseFunctionToolCall> | null;
+/** Chat Completions API: `response.choices[0].message.tool_calls`. */
+function extractFunctionCallItems(
+  response: unknown
+): ChatCompletionMessageFunctionToolCall[] {
+  const choices = (response as { choices?: unknown[] } | null)?.choices;
+  if (!Array.isArray(choices) || choices.length === 0) return [];
+  const message = (choices[0] as { message?: { tool_calls?: unknown[] } } | null)
+    ?.message;
+  const toolCalls = message?.tool_calls;
+  if (!Array.isArray(toolCalls)) return [];
+  const calls: ChatCompletionMessageFunctionToolCall[] = [];
+  for (const item of toolCalls) {
+    const t = item as Partial<ChatCompletionMessageFunctionToolCall> | null;
     if (
       t &&
-      t.type === "function_call" &&
-      typeof t.name === "string" &&
-      typeof t.arguments === "string" &&
-      typeof t.call_id === "string"
+      t.type === "function" &&
+      typeof t.id === "string" &&
+      t.function &&
+      typeof t.function.name === "string" &&
+      typeof t.function.arguments === "string"
     ) {
-      calls.push(item as ResponseFunctionToolCall);
+      calls.push(item as ChatCompletionMessageFunctionToolCall);
     }
   }
   return calls;
@@ -330,26 +602,326 @@ function parseVerificationTag(text: string): VerificationReason | null {
   const valid: VerificationReason[] = [
     'tests_passed', 'tests_skipped_no_infra', 'tests_inconclusive',
     'tests_failed_unrelated', 'tests_failed_by_patch', 'no_verification_attempted',
+    'verification_failed_staged',
+    'no_changes_made',
   ];
   return (valid as string[]).includes(raw) ? (raw as VerificationReason) : null;
 }
 
-/** Infer verification reason from the tool call log when the agent gave no tag. */
-function inferVerificationFromLog(
+/** Remove any [ZONE_VERIFICATION: <reason>] tag (and the whitespace/newlines around it) from text. */
+export function stripVerificationTag(text: string): string {
+  return String(text || "")
+    .replace(/\s*\[ZONE_VERIFICATION:\s*[\w_]+\]\s*/gi, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .trim();
+}
+
+function didApplyPatch(
   log: Array<{
     tool: string;
     args: Record<string, unknown>;
     result: string;
     success?: boolean;
   }>
-): VerificationReason {
-  const patchApplied = log.some(
+): boolean {
+  return log.some(
     (e) =>
       (e.tool === "apply_patch" || e.tool === "write_file") &&
       !String(e.result || "").toLowerCase().includes("error") &&
       !String(e.result || "").toLowerCase().includes("not found") &&
       !String(e.result || "").toLowerCase().includes("fail")
   );
+}
+
+/** Check whether the agent has read or written this file earlier in the current run.
+ * A subsequent successful apply_patch/write_file on the same file does NOT invalidate
+ * the read — the agent emitted that change so the context is still fresh. */
+function wasFileReadOrWritten(
+  log: Array<{ tool: string; args: Record<string, unknown>; success?: boolean }>,
+  filePath: string
+): boolean {
+  const target = String(filePath || "").trim();
+  if (!target) return false;
+  for (const entry of log) {
+    const entryPath =
+      typeof entry.args?.filePath === "string"
+        ? String(entry.args.filePath)
+        : null;
+    if (entryPath !== target) continue;
+    if (entry.tool === "read_file" && entry.success !== false) return true;
+    if (entry.tool === "write_file" && entry.success !== false) return true;
+    if (entry.tool === "apply_patch" && entry.success === true) return true;
+  }
+  return false;
+}
+
+export function applyNoInfraVerificationOverride(input: {
+  verificationReason: VerificationReason;
+  framework?: { hasTests: boolean; testFilesDetected: boolean };
+  patchApplied: boolean;
+  triggeredBy: "natural_completion" | "max_iterations";
+}): VerificationReason {
+  if (
+    input.framework &&
+    !input.framework.hasTests &&
+    input.patchApplied &&
+    (input.verificationReason === "tests_inconclusive" ||
+      input.verificationReason === "no_verification_attempted")
+  ) {
+    console.log("[zone-agent-no-infra-override]", JSON.stringify({
+      triggeredBy: input.triggeredBy,
+      originalVerdict: input.verificationReason,
+      overriddenTo: "tests_skipped_no_infra",
+      reason: "framework has no runnable tests; downgraded inconclusive/no-verification to skipped",
+      hasTests: false,
+      testFilesDetected: input.framework.testFilesDetected,
+      patchApplied: true,
+    }));
+    return "tests_skipped_no_infra";
+  }
+
+  return input.verificationReason;
+}
+
+const execAsync_verify = promisify(exec);
+
+export function selectVerificationCommand(
+  framework: { language?: string; testCommand?: string } | undefined
+): { command: string; timeoutMs: number; label: string } | null {
+  if (!framework) return null;
+  if (framework.language === "typescript") {
+    return { command: "npx tsc --noEmit", timeoutMs: 60000, label: "tsc" };
+  }
+  if (framework.language === "javascript" && framework.testCommand) {
+    return { command: framework.testCommand, timeoutMs: 90000, label: "test" };
+  }
+  return null;
+}
+
+export async function runStagingVerification(input: {
+  stagingFiles: Map<string, string>;
+  repoPath: string;
+  framework: { language?: string; testCommand?: string } | undefined;
+  withStagingTempFlush: <T>(
+    staging: Map<string, string>,
+    body: () => Promise<T>
+  ) => Promise<T>;
+}): Promise<
+  | { status: "pass"; label: string; durationMs: number }
+  | { status: "fail"; label: string; durationMs: number; errorPreview: string }
+  | { status: "skipped"; reason: string }
+> {
+  if (input.stagingFiles.size === 0) {
+    return { status: "skipped", reason: "no_staged_files" };
+  }
+  const choice = selectVerificationCommand(input.framework);
+  if (!choice) {
+    return { status: "skipped", reason: "no_command_for_framework" };
+  }
+
+  const start = Date.now();
+  try {
+    const result = await input.withStagingTempFlush(input.stagingFiles, async () => {
+      return await execAsync_verify(choice.command, {
+        cwd: input.repoPath,
+        timeout: choice.timeoutMs,
+        windowsHide: true,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+    });
+    void result;
+    return { status: "pass", label: choice.label, durationMs: Date.now() - start };
+  } catch (err) {
+    const stdout = String((err as { stdout?: unknown }).stdout ?? "");
+    const stderr = String((err as { stderr?: unknown }).stderr ?? "");
+    const combined = (stdout + "\n" + stderr).trim();
+    const preview = combined.split("\n").slice(0, 30).join("\n").slice(0, 2000);
+    return {
+      status: "fail",
+      label: choice.label,
+      durationMs: Date.now() - start,
+      errorPreview: preview || String((err as Error).message ?? err),
+    };
+  }
+}
+
+export async function finalizeStaging(input: {
+  stagingFiles: Map<string, string>;
+  repoPath: string;
+  framework: { language?: string; testCommand?: string } | undefined;
+  withStagingTempFlush: <T>(
+    staging: Map<string, string>,
+    body: () => Promise<T>
+  ) => Promise<T>;
+}): Promise<{
+  flushed: boolean;
+  verification:
+    | { status: "pass"; label: string; durationMs: number }
+    | { status: "fail"; label: string; durationMs: number; errorPreview: string }
+    | { status: "skipped"; reason: string };
+  filesFlushed: number;
+  flushFailures: number;
+}> {
+  const verification = await runStagingVerification({
+    stagingFiles: input.stagingFiles,
+    repoPath: input.repoPath,
+    framework: input.framework,
+    withStagingTempFlush: input.withStagingTempFlush,
+  });
+
+  console.log("[zone-staging-verification]", JSON.stringify({
+    status: verification.status,
+    label: "label" in verification ? verification.label : null,
+    durationMs: "durationMs" in verification ? verification.durationMs : null,
+    reason: "reason" in verification ? verification.reason : null,
+    errorPreviewLen:
+      verification.status === "fail" ? verification.errorPreview.length : 0,
+  }));
+
+  if (verification.status === "fail") {
+    const discardedCount = input.stagingFiles.size;
+    input.stagingFiles.clear();
+    console.log("[zone-staging-discard]", JSON.stringify({
+      reason: "verification_failed",
+      discardedCount,
+    }));
+    return { flushed: false, verification, filesFlushed: 0, flushFailures: 0 };
+  }
+
+  let allUnchanged = true;
+  let comparedCount = 0;
+  for (const [abs, content] of input.stagingFiles) {
+    comparedCount++;
+    let diskContent: string | null = null;
+    try {
+      diskContent = fs.readFileSync(abs, "utf8");
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        diskContent = null;
+        allUnchanged = false;
+        break;
+      }
+      allUnchanged = false;
+      break;
+    }
+    if (diskContent !== content) {
+      allUnchanged = false;
+      break;
+    }
+  }
+
+  if (allUnchanged && comparedCount > 0) {
+    console.log("[zone-staging-noop]", JSON.stringify({
+      stagedCount: input.stagingFiles.size,
+      comparedCount,
+    }));
+    return {
+      flushed: false,
+      verification: { status: "skipped", reason: "no_changes_made" },
+      filesFlushed: 0,
+      flushFailures: 0,
+    };
+  }
+
+  // staging-flush-bug Tur: filesFlushed previously incremented immediately
+  // after fs.writeFileSync regardless of whether disk actually persisted the
+  // content. The smoke for run 71133d8f saw [zone-staging-flush] report 2
+  // files written but on-disk mtime was unchanged — the log was lying. The
+  // counter now reflects VERIFIED writes (re-read disk content matches
+  // staging). Per-file [zone-staging-flush-write] logs surface mtime
+  // before/after and content-match status to catch any future regression.
+  let filesFlushed = 0;
+  let flushFailures = 0;
+  for (const [abs, content] of input.stagingFiles) {
+    let mtimeBefore: number | null = null;
+    try {
+      mtimeBefore = fs.statSync(abs).mtimeMs;
+    } catch {
+      mtimeBefore = null;
+    }
+    try {
+      fs.writeFileSync(abs, content, "utf8");
+      let mtimeAfter: number | null = null;
+      try {
+        mtimeAfter = fs.statSync(abs).mtimeMs;
+      } catch {
+        mtimeAfter = null;
+      }
+      let diskContentMatches = false;
+      try {
+        diskContentMatches = fs.readFileSync(abs, "utf8") === content;
+      } catch {
+        diskContentMatches = false;
+      }
+      console.log("[zone-staging-flush-write]", JSON.stringify({
+        filePath: abs,
+        bytesWritten: content.length,
+        mtimeBefore,
+        mtimeAfter,
+        changed: mtimeBefore !== mtimeAfter,
+        diskContentMatches,
+      }));
+      if (diskContentMatches) {
+        filesFlushed++;
+      } else {
+        flushFailures++;
+        console.error("[zone-staging-flush-error]", {
+          filePath: abs,
+          error: "post_write_content_mismatch",
+          bytesExpected: content.length,
+        });
+      }
+    } catch (err) {
+      flushFailures++;
+      console.error("[zone-staging-flush-error]", {
+        filePath: abs,
+        error: String((err as Error).message ?? err),
+      });
+    }
+  }
+  // Final integrity sweep: re-read all files at the moment we emit the
+  // [zone-staging-flush] log. If a downstream restore overwrites any of our
+  // writes between the per-file write and this point, postFlushMismatches
+  // will be > 0 and surface the bug visibly.
+  let postFlushMismatches = 0;
+  for (const [abs, content] of input.stagingFiles) {
+    try {
+      if (fs.readFileSync(abs, "utf8") !== content) postFlushMismatches++;
+    } catch {
+      postFlushMismatches++;
+    }
+  }
+  console.log("[zone-staging-flush]", JSON.stringify({
+    filesFlushed,
+    failures: flushFailures,
+    totalStaged: input.stagingFiles.size,
+    postFlushMismatches,
+  }));
+  return { flushed: true, verification, filesFlushed, flushFailures };
+}
+
+/** Infer verification reason from the tool call log when the agent gave no tag. */
+export function inferVerificationFromLog(
+  log: Array<{
+    tool: string;
+    args: Record<string, unknown>;
+    result: string;
+    success?: boolean;
+  }>,
+  framework?: { hasTests: boolean; testFilesDetected: boolean }
+): VerificationReason {
+  const patchApplied = didApplyPatch(log);
+  if (framework && !framework.hasTests && patchApplied) {
+    console.log("[zone-agent-no-infra-verdict]", JSON.stringify({
+      reason: "tests_skipped_no_infra",
+      hasTests: false,
+      testFilesDetected: framework.testFilesDetected,
+      patchApplied: true,
+    }));
+    return "tests_skipped_no_infra";
+  }
   const hasInfraError = log.some(
     (e) =>
       e.tool === "run_command" &&
@@ -374,7 +946,12 @@ export function validateUnrelatedClaim(input: {
     success?: boolean;
   }>;
   patchedFilePaths: string[];
+  framework?: { hasTests: boolean };
 }): { accept: boolean; demoteTo?: VerificationReason; reason: string } {
+  const noInfraDemote: VerificationReason =
+    input.framework && !input.framework.hasTests
+      ? "tests_skipped_no_infra"
+      : "tests_inconclusive";
   const anyRunCommand = input.log.some((entry) => entry.tool === "run_command");
   const looksLikePassingRunCommand = (output: string): boolean => {
     const text = String(output || "");
@@ -390,8 +967,7 @@ export function validateUnrelatedClaim(input: {
     success?: boolean;
   }): boolean => {
     if (entry.tool !== "run_command") return false;
-    if (entry.success === false) return true;
-    return looksLikeCommandFailure(String(entry.result || ""));
+    return entry.success === false;
   };
   const failingRunCommand = [...input.log]
     .reverse()
@@ -401,10 +977,32 @@ export function validateUnrelatedClaim(input: {
         !looksLikePassingRunCommand(String(entry.result || ""))
     );
 
+  // Bug 44: stale-failure resolution check.
+  // If a failing run_command was followed by a successful run_command,
+  // the failure was resolved by a subsequent patch+retry. The agent's
+  // `tests_failed_unrelated` claim might still be technically wrong (the
+  // failure was related to their patch path), but it should not be demoted
+  // to `tests_failed_by_patch` because the file is no longer failing.
+  // This handles the canonical "agent encountered a build error, fixed it,
+  // re-ran build, build passed" sequence.
+  if (failingRunCommand) {
+    const failingIdx = input.log.indexOf(failingRunCommand);
+    const succeededAfter = input.log.slice(failingIdx + 1).some(
+      (entry) => entry.tool === "run_command" && entry.success === true
+    );
+    if (succeededAfter) {
+      return {
+        accept: true,
+        reason:
+          "failing run_command was resolved by a later successful run_command — verification effectively passed",
+      };
+    }
+  }
+
   if (!anyRunCommand) {
     return {
       accept: false,
-      demoteTo: "tests_inconclusive",
+      demoteTo: noInfraDemote,
       reason:
         "no run_command in log â€” agent claimed test failure without ever running tests",
     };
@@ -468,14 +1066,81 @@ export function validateUnrelatedClaim(input: {
 
   return {
     accept: false,
-    demoteTo: "tests_inconclusive",
+    demoteTo: noInfraDemote,
     reason:
       "cannot verify unrelated claim â€” no failing file extracted or evidence ambiguous",
   };
 }
 
+export function validatePassedClaim(
+  toolCallLog: Array<{
+    tool: string;
+    args: Record<string, unknown>;
+    result: string;
+    success?: boolean;
+  }>,
+  framework?: { hasTests: boolean }
+): { accept: boolean; demoteTo?: VerificationReason; reason: string } {
+  const noInfraDemote: VerificationReason =
+    framework && !framework.hasTests
+      ? "tests_skipped_no_infra"
+      : "tests_inconclusive";
+  const runCommands = toolCallLog.filter((entry) => entry.tool === "run_command");
+
+  if (runCommands.length === 0) {
+    return {
+      accept: false,
+      demoteTo: framework && !framework.hasTests
+        ? "tests_skipped_no_infra"
+        : "no_verification_attempted",
+      reason: "agent claimed tests passed without ever running tests",
+    };
+  }
+
+  const hasSuccessPattern = runCommands.some((entry) => {
+    const output = String(entry.result || "");
+    return (
+      /\b\d+\s+pass(?:ed|ing)\b/i.test(output) ||
+      /\bTests:\s+.*passed/i.test(output) ||
+      /\bOK\s*\(\d+\s+tests?\)/i.test(output) ||
+      /(?:✓|✔)\s+\d+\s+tests?\s+passed/i.test(output) ||
+      /===\s+\d+\s+passed/i.test(output) ||
+      /All tests passed/i.test(output)
+    );
+  });
+
+  if (!hasSuccessPattern) {
+    const anyFailed = runCommands.some((entry) => entry.success === false);
+    if (anyFailed) {
+      return {
+        accept: false,
+        demoteTo: noInfraDemote,
+        reason:
+          "agent claimed passed but at least one run_command failed and no success pattern matched",
+      };
+    }
+
+    return {
+      accept: false,
+      demoteTo: noInfraDemote,
+      reason:
+        "agent claimed passed but no test-success pattern detected in any run_command output",
+    };
+  }
+
+  return {
+    accept: true,
+    reason: "test success pattern detected in run_command output",
+  };
+}
+
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
-  const maxIterations = typeof input.maxIterations === "number" ? input.maxIterations : 10;
+  const baseMaxIterations =
+    typeof input.maxIterations === "number" ? input.maxIterations : BASE_MAX_ITERATIONS;
+  let iterationBudget: IterationBudgetState = {
+    maxIterationsForRun: baseMaxIterations,
+    escalationBonusGranted: false,
+  };
   const toolCallLog: Array<{
     tool: string;
     args: Record<string, unknown>;
@@ -484,33 +1149,82 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   }> = [];
   const filesModified = new Set<string>();
   let selfCorrectionAttempts = 0;
+  const failureHistory = new Map<string, FailureRecord[]>();
+  const escalatedFiles = new Set<string>();
+  // Tur 1: in-memory staging. Writes go here instead of disk during the loop;
+  // reads fall back to staging first, disk second. Flushed unconditionally at exit.
+  // run_command stays disk-bound — it sees the OLD disk state until flush. (Tur 2)
+  const stagingFiles = new Map<string, string>();
 
   // Diagnostic: confirm agent loop entry and tool inventory
   console.log("[zone-agent-loop-entry]", JSON.stringify({
     task: input.task.slice(0, 200),
     repoPath: input.repoPath,
-    maxIterations,
-    toolsAvailable: ZONE_TOOLS.map((t) => (t as { name?: string }).name ?? "unknown"),
+    maxIterations: iterationBudget.maxIterationsForRun,
+    toolsAvailable: ZONE_TOOLS.map(
+      (t) =>
+        (t as { function?: { name?: string }; name?: string }).function?.name ??
+        (t as { name?: string }).name ??
+        "unknown"
+    ),
     hasRunId: !!(input.runId && input.runId.trim()),
   }));
 
   const fw = input.framework;
+  const fwLines: string[] = fw
+    ? [
+        `## Project framework`,
+        `- Framework: ${fw.framework} (${fw.language})`,
+        `- Package manager: ${fw.packageManager}`,
+        `- Build command: ${fw.buildCommand || "none"}`,
+        `- Dev command: ${fw.devCommand || "none"}`,
+        `- Test command: ${fw.testCommand || "none"}`,
+        `- Test framework: ${fw.testFramework}`,
+        `- Has runnable tests: ${fw.hasTests}`,
+        `- Test files detected: ${fw.testFilesDetected}`,
+      ]
+    : [];
+  if (fw) {
+    if (fw.hasTests && fw.testFilesDetected) {
+      fwLines.push(
+        ``,
+        `**Test execution policy:**`,
+        `- Use exactly: \`${fw.testCommand}\``,
+        `- Do not substitute alternative test commands. If this command fails, investigate the failure - do not try other runners.`
+      );
+    } else if (fw.hasTests && !fw.testFilesDetected) {
+      fwLines.push(
+        ``,
+        `**Test execution policy:**`,
+        `- Runner is installed (${fw.testFramework}) but no test files were detected.`,
+        `- Use exactly: \`${fw.testCommand}\` if you need to verify.`,
+        `- Do not invent test commands.`
+      );
+    } else if (!fw.hasTests && fw.testFilesDetected) {
+      fwLines.push(
+        ``,
+        `**Test execution policy:**`,
+        `- Test files exist but no runner is installed. Report this as a finding in the verdict.`,
+        `- Do NOT attempt to run tests. Do NOT install a runner.`,
+        `- Verification: disk-write inspection + ${fw.buildCommand ? `\`${fw.buildCommand}\`` : "build skipped (no build command)"}.`
+      );
+    } else {
+      fwLines.push(
+        ``,
+        `**Test execution policy:**`,
+        `- This repository has no test infrastructure (no runner, no test files).`,
+        `- Do NOT attempt \`npm test\`, \`npm run test\`, \`eslint\`, or any test/lint command as a verification proxy. Lint is not test.`,
+        `- Verification: disk-write inspection + ${fw.buildCommand ? `\`${fw.buildCommand}\`` : "build skipped (no build command)"}.`
+      );
+    }
+
+    if (fw.subProjects?.length) {
+      fwLines.push(``, `- Sub-projects: ${fw.subProjects.map((s) => s.framework).join(", ")}`);
+    }
+  }
   const systemContent =
     `You are Zone, an AI code agent${fw?.framework ? ` working on a ${fw.framework} project` : ""}.\n\n` +
-    (fw
-      ? `Project info:\n` +
-        `- Language: ${fw.language}\n` +
-        `- Framework: ${fw.framework}\n` +
-        `- Test command: ${fw.testCommand || "none"}\n` +
-        `- Build command: ${fw.buildCommand || "none"}\n` +
-        `- Dev command: ${fw.devCommand || "none"}\n` +
-        `- Package manager: ${fw.packageManager || "unknown"}\n` +
-        `- Has tests: ${fw.hasTests}\n` +
-        (fw.subProjects?.length
-          ? `- Sub-projects: ${fw.subProjects.map((s) => s.framework).join(", ")}\n`
-          : "") +
-        `\n`
-      : "") +
+    (fw ? `${fwLines.join("\n")}\n\n` : "") +
     (input.importContextSummary
       ? `RELATED FILES (read-only context for planning â€” call read_file for full content):\n` +
         `This block lists the primary file's import ecosystem. Use it to anticipate what other files might need updating, but do NOT assume contents â€” call read_file when you need to actually edit.\n` +
@@ -585,7 +1299,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     `5. If tests fail: read_file at the error location, determine cause,\n` +
     `   apply targeted fix with intent='modify' or intent='delete', re-run tests.\n` +
     `6. When all checks pass (or no tests exist), respond with a plain-text summary.\n` +
-    `Maximum iterations: 10 (already enforced -- do not stall).\n\n` +
+    `Maximum iterations: ${baseMaxIterations} (already enforced -- do not stall).\n\n` +
     `TRUNCATED FILE SECTIONS: If you see a ZONE_CONTEXT_TRUNCATED marker in a file,\n` +
     `part of the file was omitted from the initial context to save space.\n` +
     `- DO NOT include the marker line in any apply_patch FIND block.\n` +
@@ -605,48 +1319,162 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     `conflicts, or any environment issue that prevented the suite from running at all.\n` +
     `Use tests_failed_by_patch ONLY when the error clearly points at code you changed.\n\n` +
     (fw ? `When running commands, use the correct package manager and commands above.\n` : "") +
+    `\n## Background commands\n` +
+    `For long-running commands (dev servers, watchers, anything that doesn't exit on its own), use \`run_command_background\` instead of \`run_command\`. ` +
+    `This returns a handle immediately so you can keep working. Read the output later with \`read_background_output\` (passing the previous \`new_offset\` to get only new bytes). ` +
+    `Kill with \`kill_background\` when done — processes are also auto-killed when the run ends.\n\n` +
+    `Heuristic:\n` +
+    `- Long-lived (npm run dev, vite, next dev, pytest --watch, tail -f) → \`run_command_background\`\n` +
+    `- One-shot (npm run build, npm test, eslint, tsc --noEmit) → \`run_command\`\n\n` +
+    `Poll sparingly. Calling \`read_background_output\` every iteration wastes tokens. Read once after a few iterations of other work, or right before you need the result.\n\n` +
+    `Example:\n` +
+    `1. \`run_command_background\` → handle "bg_a3k7q2"\n` +
+    `2. read_file / apply_patch / etc. (a few iterations)\n` +
+    `3. \`read_background_output { handle: "bg_a3k7q2", since_offset: null, max_bytes: 4096 }\`\n` +
+    `4. If output looks done → \`kill_background\`. Else iterate.\n\n` +
     `Repository path: ${input.repoPath}`;
 
-  // Responses API input (same pattern as planFullPatch.ts: role + type "message").
-  const responseInput: ResponseInput = [
+  // Chat Completions messages (system + user kickoff).
+  const responseInput: ChatCompletionMessageParam[] = [
     {
       role: "system",
-      type: "message",
       content: systemContent,
     },
     {
       role: "user",
-      type: "message",
       content: input.task,
     },
   ];
 
-  const client = createOpenAIClient(input.userApiKey);
+  const client = createLLMClient({ apiKey: input.userApiKey });
+  const requestCtx = getRequestContext();
 
-  for (let iter = 0; iter < maxIterations; iter += 1) {
-    input.onProgress?.(`[agent_loop] Iteration ${iter + 1}/${maxIterations}`);
+  // Usage-tracker Tur: capture provider+model once at run start (they are
+  // stable for the duration of the loop) and accumulate per-iter token
+  // counts. Recorded once on exit through either path.
+  const usageProvider: ProviderName =
+    (client as { provider?: string }).provider === "anthropic" ? "anthropic" : "openai";
+  const usageModel = getModelName("high", client.provider, requestCtx?.modelOverride);
+  const executionUsage = {
+    input_uncached: 0,
+    cache_write: 0,
+    cache_read: 0,
+    output: 0,
+  };
+  const recordUsageOnExit = async (): Promise<void> => {
+    if (
+      executionUsage.input_uncached === 0 &&
+      executionUsage.cache_write === 0 &&
+      executionUsage.cache_read === 0 &&
+      executionUsage.output === 0
+    ) {
+      return;
+    }
+    try {
+      await recordExecution({
+        userId: input.userId ?? "local-dev",
+        runId: input.runId ?? "",
+        provider: usageProvider,
+        model: usageModel,
+        ...executionUsage,
+      });
+    } catch (e) {
+      console.warn("[zone-usage] failed to record", e);
+    }
+  };
 
-    const response = await client.responses.create({
-      model: getModelName("high"),
-      input: responseInput,
-      tools: ZONE_TOOLS,
-      tool_choice: "auto" as any,
+  const throwIfAborted = (stage: string): void => {
+    if (input.abortSignal?.aborted) {
+      debugLog("[zone-agent-aborted]", {
+        runId: input.runId,
+        stage,
+        timestamp: new Date().toISOString(),
+      });
+      throw new DOMException("Run aborted", "AbortError");
+    }
+  };
+
+  for (let iter = 0; iter < iterationBudget.maxIterationsForRun; iter += 1) {
+    debugLog("[zone-agent-iter-start]", {
+      runId: input.runId,
+      iter,
+      abortSignal: !!input.abortSignal,
+      abortAlready: input.abortSignal?.aborted ?? false,
+      timestamp: new Date().toISOString(),
     });
+    throwIfAborted("iter_start");
+    input.onProgress?.(
+      `[agent_loop] Iteration ${iter + 1}/${iterationBudget.maxIterationsForRun}`
+    );
+
+    debugLog("[zone-agent-llm-pre]", {
+      runId: input.runId,
+      iter,
+      abortAlready: input.abortSignal?.aborted ?? false,
+    });
+    const response = await client.createChatCompletion(
+      {
+        model: getModelName("high", client.provider, requestCtx?.modelOverride),
+        messages: responseInput,
+        tools: ZONE_TOOLS,
+        tool_choice: "auto",
+      },
+      { signal: input.abortSignal }
+    );
+    debugLog("[zone-agent-llm-post]", {
+      runId: input.runId,
+      iter,
+      abortAlready: input.abortSignal?.aborted ?? false,
+    });
+    // Cache telemetry (Anthropic-only; OpenAI usage will not have these fields).
+    // Bedo: this prints once per iter so you can see hit ratio in real time.
+    try {
+      const u = (response as { usage?: Record<string, number> }).usage;
+      const write = u?.cache_creation_input_tokens ?? 0;
+      const read = u?.cache_read_input_tokens ?? 0;
+      const input = u?.prompt_tokens ?? 0;
+      const output = u?.completion_tokens ?? u?.output_tokens ?? 0;
+      if (write > 0 || read > 0) {
+        const ratio = read + write > 0 ? (read / (read + write + input)).toFixed(2) : "0.00";
+        console.log(
+          `[zone-cache] iter=${iter + 1} write=${write} read=${read} input_uncached=${input} output=${output} hit_ratio=${ratio}`
+        );
+      }
+      // Usage-tracker Tur: accumulate every iter regardless of cache hit/miss.
+      // Anthropic clients populate cache_*; OpenAI clients leave them at 0.
+      executionUsage.input_uncached += input;
+      executionUsage.cache_write += write;
+      executionUsage.cache_read += read;
+      executionUsage.output += output;
+    } catch {}
+    throwIfAborted("after_llm");
 
     const toolCalls = extractFunctionCallItems(response);
     if (toolCalls.length > 0) {
+      // Push the assistant message with all tool_calls ONCE before processing them.
+      // Chat-completions protocol requires the assistant message with tool_calls to
+      // precede every role:"tool" message that references those call ids.
+      const assistantContent = response.choices[0]?.message?.content ?? null;
+      responseInput.push({
+        role: "assistant",
+        content: assistantContent,
+        tool_calls: toolCalls,
+      });
       let failureDetected = false;
       let failedToolName = "";
       let failedToolOutput = "";
       let failedToolError = "";
+      let failedToolFilePath: string | null = null;
+      const failedFilesThisIter = new Set<string>();
 
       for (const call of toolCalls) {
-        const name = call.name;
-        const callId = call.call_id;
+        const name = call.function.name;
+        const callId = call.id;
+        const argsString = call.function.arguments ?? "";
         let parsedArgs: Record<string, unknown> = {};
         try {
-          parsedArgs = call.arguments
-            ? (JSON.parse(call.arguments) as Record<string, unknown>)
+          parsedArgs = argsString
+            ? (JSON.parse(argsString) as Record<string, unknown>)
             : {};
         } catch {
           parsedArgs = {};
@@ -670,7 +1498,67 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           command: parsedArgs.command ?? null,
         }));
 
+        if (name === "apply_patch") {
+          const targetFilePath =
+            typeof parsedArgs.filePath === "string" ? parsedArgs.filePath : null;
+          if (targetFilePath && !wasFileReadOrWritten(toolCallLog, targetFilePath)) {
+            console.log("[zone-apply-patch-no-read-first]", JSON.stringify({
+              filePath: targetFilePath,
+              iter: iter + 1,
+              blocked: true,
+            }));
+            const syntheticOutput =
+              `Block 1: You haven't read this file yet in this run. ` +
+              `Call read_file on ${targetFilePath} first to see the exact current content, ` +
+              `then issue apply_patch with FIND lines that match the file verbatim.`;
+            toolCallLog.push({
+              tool: name,
+              args: parsedArgs,
+              result: syntheticOutput,
+              success: false,
+            });
+            // Chat Completions protocol: assistant tool_call already pushed above.
+            // Each tool_call needs exactly one matching role:"tool" reply.
+            responseInput.push({
+              role: "tool",
+              tool_call_id: callId,
+              content: syntheticOutput,
+            });
+            failureDetected = true;
+            failedToolName = name;
+            failedToolOutput = syntheticOutput;
+            failedToolError = "apply_patch_no_read_first";
+            failedToolFilePath = targetFilePath;
+            // Mirror the same failure tracking that real apply_patch failures get.
+            // Without this, backup sweep / repeat detection never sees the blocked file
+            // and the agent can drift to other files without returning.
+            failedFilesThisIter.add(targetFilePath);
+            const noReadTrigger = classifyFailure(
+              name,
+              syntheticOutput,
+              "apply_patch_no_read_first"
+            );
+            const noReadPatchHash = hashPatchBlocks(parsedArgs);
+            const noReadList = failureHistory.get(targetFilePath) ?? [];
+            noReadList.push({
+              trigger: noReadTrigger,
+              errorLine: null,
+              patchHash: noReadPatchHash,
+              iter: iter + 1,
+            });
+            failureHistory.set(targetFilePath, noReadList);
+            continue;
+          }
+        }
+
         const rid = String(input.runId || "").trim();
+        debugLog("[zone-agent-tool-pre]", {
+          runId: input.runId,
+          iter,
+          tool: name,
+          abortAlready: input.abortSignal?.aborted ?? false,
+        });
+        throwIfAborted("before_tool");
         const result = await executeTool(name, parsedArgs, input.repoPath, input.onProgress, {
           runId: rid || undefined,
           onApprovalRequired: async (command, runId) => {
@@ -683,7 +1571,19 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             });
             return !!approval.approved;
           },
+          escalatedFiles,
+          allowWriteFileOverwritePaths: escalatedFiles,
+          stagingFiles,
+          abortSignal: input.abortSignal,
+          executionPlan: input.executionPlan ?? null,
         });
+        debugLog("[zone-agent-tool-post]", {
+          runId: input.runId,
+          iter,
+          tool: name,
+          abortAlready: input.abortSignal?.aborted ?? false,
+        });
+        throwIfAborted("after_tool");
         input.onToolResult?.(name, result);
 
         // Diagnostic: log every tool result after execution
@@ -696,17 +1596,18 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         }));
 
         // Detect failures from any tool â€” feeds coaching-prompt router.
-        // apply_patch / write_file: failure if result.success === false.
-        // run_command: failure if output looks like a test/build error.
-        // Other tools: failure if result.success === false.
-        const toolFailed =
-          (name === "run_command" && looksLikeCommandFailure(result.output)) ||
-          (!result.success && name !== "run_command");
+        // All tools: failure iff result.success === false (exit code for run_command,
+        // explicit success bool for others). Output-content heuristics removed â€”
+        // they produced false positives on passing Next.js builds whose stderr
+        // contains tokens like "_global-error" or "FAIL".
+        const toolFailed = !result.success;
         if (toolFailed) {
           failureDetected = true;
           failedToolName = name;
           failedToolOutput = result.output;
           failedToolError = result.error ?? "";
+          failedToolFilePath =
+            typeof parsedArgs.filePath === "string" ? parsedArgs.filePath : null;
         }
 
         toolCallLog.push({
@@ -716,6 +1617,19 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           success: result.success,
         });
 
+        if (name === "apply_patch" && !result.success) {
+          const parsedFilePath =
+            typeof parsedArgs.filePath === "string" ? parsedArgs.filePath : null;
+          if (parsedFilePath) failedFilesThisIter.add(parsedFilePath);
+          const filePath = parsedFilePath ?? "unknown";
+          const trigger = classifyFailure(name, result.output, result.error);
+          const errorLine = extractErrorLine(result.output);
+          const patchHash = hashPatchBlocks(parsedArgs);
+          const list = failureHistory.get(filePath) ?? [];
+          list.push({ trigger, errorLine, patchHash, iter: iter + 1 });
+          failureHistory.set(filePath, list);
+        }
+
         if (
           (name === "write_file" || name === "apply_patch") &&
           parsedArgs.filePath != null
@@ -723,12 +1637,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           filesModified.add(String(parsedArgs.filePath));
         }
 
-        // Mirror Responses API: assistant tool call + tool output (not chat role:"tool").
-        responseInput.push(call);
+        // Chat Completions: each tool_call gets one matching role:"tool" reply.
+        // The assistant message with tool_calls was pushed before the loop.
         responseInput.push({
-          type: "function_call_output",
-          call_id: callId,
-          output: result.output,
+          role: "tool",
+          tool_call_id: callId,
+          content: result.output,
         });
       }
 
@@ -737,10 +1651,98 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       // The selfCorrectionAttempts counter is a SUBSET of total iterations â€”
       // it limits how many times we inject coaching, not how many total iterations run.
       // This way a long but successful run won't hit the coaching budget.
+      let repeatPattern: { filePath: string; reason: string } | null = null;
+      if (failureDetected && failedToolName === "apply_patch") {
+        repeatPattern = detectRepeatedFailure(failureHistory, failedToolFilePath);
+        if (!repeatPattern) {
+          for (const filePath of failedFilesThisIter) {
+            if (filePath === failedToolFilePath) continue;
+            const candidate = detectRepeatedFailure(failureHistory, filePath);
+            if (candidate) {
+              repeatPattern = candidate;
+              break;
+            }
+          }
+        }
+      }
+      const failedFilePath = failedToolName === "apply_patch" ? failedToolFilePath : null;
+      const pickedFromBackupSweep =
+        repeatPattern !== null && repeatPattern.filePath !== failedToolFilePath;
       if (failureDetected && selfCorrectionAttempts < MAX_SELF_CORRECTION_ATTEMPTS) {
         selfCorrectionAttempts += 1;
-        const routedTrigger = classifyFailure(failedToolName, failedToolOutput, failedToolError);
-        const coachingText = buildCoachingPrompt(routedTrigger, failedToolOutput, toolCallLog);
+        let routedTrigger: SelfCorrectTrigger;
+        if (repeatPattern) {
+          routedTrigger = "apply_patch_repeated_failure_same_file";
+          escalatedFiles.add(repeatPattern.filePath);
+          input.onProgress?.(JSON.stringify({
+            event: "zone-agent-repeat-detected",
+            filePath: repeatPattern.filePath,
+            reason: repeatPattern.reason,
+            attempts: failureHistory.get(repeatPattern.filePath)?.length ?? 0,
+          }));
+          iterationBudget = maybeGrantEscalationBonus(
+            iterationBudget,
+            escalatedFiles.size,
+            iter,
+            input.onProgress,
+            baseMaxIterations
+          );
+        } else {
+          routedTrigger = classifyFailure(failedToolName, failedToolOutput, failedToolError);
+        }
+        const routedFilePath = repeatPattern?.filePath ?? failedFilePath;
+        const perFileAttempt = routedFilePath
+          ? failureHistory.get(routedFilePath)?.length ?? 0
+          : 0;
+        // agent-persistence Tur: build a structured diagnostic prelude
+        // (parsed failingFile/line/errorType + generated-path indicator +
+        // candidate culprits) and inject it ABOVE the coaching directives.
+        // Generated-path detection also flips the test_failed coaching into
+        // its mandatory-investigation variant inside buildCoachingPrompt.
+        const diagnostic = buildVerifyDiagnostic({
+          failedToolOutput,
+          filesModified: Array.from(filesModified),
+          filesInRepo: Array.isArray(input.repoFilePaths) ? input.repoFilePaths : [],
+          framework: input.framework
+            ? { framework: input.framework.framework, language: input.framework.language }
+            : null,
+          attemptCount: selfCorrectionAttempts,
+        });
+        // scope-expansion Tur: when the diagnostic parser pinned a concrete
+        // user-source failing file, expand the plan's covered set so the
+        // agent's next apply_patch can land. Mutates plan in-place; persists
+        // for the rest of this run (and across orchestrator step boundaries
+        // because the plan reference is shared).
+        const scopeExpansion = maybeExpandScopeForVerifyDiagnostic(
+          input.executionPlan ?? null,
+          diagnostic,
+          input.repoPath
+        );
+        let diagnosticText = diagnostic.text;
+        if (scopeExpansion.expanded && scopeExpansion.addedFile) {
+          diagnosticText +=
+            `\n\n**Scope expanded**: \`${scopeExpansion.addedFile}\` has been added to the writable scope ` +
+            `for this run because the verification parser pinned it as the failing file. Apply your patch directly.`;
+          console.log("[zone-scope-expanded]", JSON.stringify({
+            runId: input.runId ?? null,
+            addedFile: scopeExpansion.addedFile,
+            reason: scopeExpansion.reason,
+            parsedFailingFile: diagnostic.parsed?.failingFile ?? null,
+            parsedErrorType: diagnostic.parsed?.errorType ?? null,
+            attempt: selfCorrectionAttempts,
+          }));
+        }
+        const coachingText = buildCoachingPrompt(
+          routedTrigger,
+          failedToolOutput,
+          toolCallLog,
+          {
+            attemptCount: perFileAttempt || selfCorrectionAttempts,
+            filePath: routedFilePath ?? undefined,
+            generatedPathDetected: diagnostic.generatedPathDetected,
+            parsedFailingFile: diagnostic.parsed?.failingFile ?? null,
+          }
+        );
         const remaining = MAX_SELF_CORRECTION_ATTEMPTS - selfCorrectionAttempts;
         console.log("[zone-agent-self-correct]", JSON.stringify({
           iter: iter + 1,
@@ -748,18 +1750,34 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           routedTrigger,
           selfCorrectionAttempt: selfCorrectionAttempts,
           maxAttempts: MAX_SELF_CORRECTION_ATTEMPTS,
+          filePath: routedFilePath,
+          perFileAttempt,
+          detectedRepeatedFailure: repeatPattern !== null,
+          repeatReason: repeatPattern?.reason ?? null,
+          iterationCap: iterationBudget.maxIterationsForRun,
+          failedFilesThisIterCount: failedFilesThisIter.size,
+          pickedFromBackupSweep,
           errorPreview: failedToolOutput.slice(0, 200),
           willRetry: true,
           reason: "routed_coaching_prompt_injected",
+        }));
+        console.log("[zone-agent-diagnostic]", JSON.stringify({
+          attempt: selfCorrectionAttempts,
+          failingFile: diagnostic.parsed?.failingFile ?? null,
+          failingLine: diagnostic.parsed?.failingLine ?? null,
+          errorType: diagnostic.parsed?.errorType ?? null,
+          generatedPathDetected: diagnostic.generatedPathDetected,
+          candidateCount: diagnostic.candidates.length,
+          candidatesPreview: diagnostic.candidates.slice(0, 5),
         }));
         input.onProgress?.(
           `[agent_loop] Failure detected (${routedTrigger}) â€” self-correction attempt ${selfCorrectionAttempts}/${MAX_SELF_CORRECTION_ATTEMPTS}`
         );
         responseInput.push({
           role: "user",
-          type: "message",
           content:
             `[Zone coaching â€” attempt ${selfCorrectionAttempts} of ${MAX_SELF_CORRECTION_ATTEMPTS}]\n` +
+            diagnosticText + `\n\n` +
             coachingText +
             `\n\nRecent failure context:\n` +
             `- Tool: ${failedToolName}\n` +
@@ -769,13 +1787,26 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         });
       } else if (failureDetected) {
         // Budget exhausted â€” log and let the model produce its final summary naturally.
-        const routedTrigger = classifyFailure(failedToolName, failedToolOutput, failedToolError);
+        const routedTrigger = repeatPattern
+          ? "apply_patch_repeated_failure_same_file"
+          : classifyFailure(failedToolName, failedToolOutput, failedToolError);
+        const routedFilePath = repeatPattern?.filePath ?? failedFilePath;
+        const perFileAttempt = routedFilePath
+          ? failureHistory.get(routedFilePath)?.length ?? 0
+          : 0;
         console.log("[zone-agent-self-correct]", JSON.stringify({
           iter: iter + 1,
           trigger: failedToolName === "run_command" ? "test_failed" : failedToolName,
           routedTrigger,
           selfCorrectionAttempt: selfCorrectionAttempts,
           maxAttempts: MAX_SELF_CORRECTION_ATTEMPTS,
+          filePath: routedFilePath,
+          perFileAttempt,
+          detectedRepeatedFailure: repeatPattern !== null,
+          repeatReason: repeatPattern?.reason ?? null,
+          iterationCap: iterationBudget.maxIterationsForRun,
+          failedFilesThisIterCount: failedFilesThisIter.size,
+          pickedFromBackupSweep,
           errorPreview: failedToolOutput.slice(0, 200),
           willRetry: false,
           reason: "self-correction budget exhausted â€” allowing model to summarise",
@@ -793,15 +1824,42 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       const validReasons: VerificationReason[] = [
         'tests_passed', 'tests_skipped_no_infra', 'tests_inconclusive',
         'tests_failed_unrelated', 'tests_failed_by_patch', 'no_verification_attempted',
+        'verification_failed_staged',
+        'no_changes_made',
       ];
       let verificationReason: VerificationReason =
         (validReasons as string[]).includes(vrRaw)
           ? (vrRaw as VerificationReason)
           : 'no_verification_attempted';
+      if (verificationReason === "tests_passed") {
+        const passedValidation = validatePassedClaim(
+          toolCallLog,
+          input.framework ? { hasTests: input.framework.hasTests } : undefined
+        );
+        if (!passedValidation.accept) {
+          verificationReason = passedValidation.demoteTo ?? "tests_inconclusive";
+          input.onProgress?.(JSON.stringify({
+            event: "zone-agent-verdict-override",
+            triggeredBy: "natural_completion",
+            originalVerdict: "tests_passed",
+            overriddenTo: verificationReason,
+            reason: passedValidation.reason,
+          }));
+          console.log("[zone-agent-verdict-override]", JSON.stringify({
+            triggeredBy: "natural_completion",
+            originalVerdict: "tests_passed",
+            overriddenTo: verificationReason,
+            reason: passedValidation.reason,
+          }));
+        }
+      }
       if (verificationReason === "tests_failed_unrelated") {
         const verdictValidation = validateUnrelatedClaim({
           log: toolCallLog,
           patchedFilePaths: Array.from(filesModified),
+          framework: input.framework
+            ? { hasTests: input.framework.hasTests }
+            : undefined,
         });
         if (!verdictValidation.accept) {
           verificationReason = verdictValidation.demoteTo ?? "tests_inconclusive";
@@ -811,12 +1869,44 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             overriddenTo: verdictValidation.demoteTo,
             reason: verdictValidation.reason,
           }));
+        } else if (
+          verdictValidation.reason &&
+          /resolved by a later successful run_command/i.test(verdictValidation.reason)
+        ) {
+          // Bug 44b: failure was demonstrably resolved by a later successful
+          // run_command. Promote the verdict from `tests_failed_unrelated` to
+          // `tests_passed` so the UI doesn't render a "tests failed" chip
+          // alongside a "safe to apply" badge.
+          verificationReason = "tests_passed";
+          console.log("[zone-agent-verdict-promote]", JSON.stringify({
+            triggeredBy: "natural_completion",
+            originalVerdict: "tests_failed_unrelated",
+            promotedTo: "tests_passed",
+            reason: verdictValidation.reason,
+          }));
         }
       }
-      const patchValidatedByAgent =
+      verificationReason = applyNoInfraVerificationOverride({
+        verificationReason,
+        framework: input.framework
+          ? {
+              hasTests: input.framework.hasTests,
+              testFilesDetected: input.framework.testFilesDetected,
+            }
+          : undefined,
+        patchApplied: didApplyPatch(toolCallLog),
+        triggeredBy: "natural_completion",
+      });
+      let patchValidatedByAgent =
         verificationReason === 'tests_passed' ||
         verificationReason === 'tests_skipped_no_infra' ||
         verificationReason === 'tests_failed_unrelated';
+      console.log("[zone-staging-state]", JSON.stringify({
+        stagedFileCount: stagingFiles.size,
+        stagedFiles: Array.from(stagingFiles.keys()).map((abs) => path.basename(abs)),
+        // staging-flush-bug diag: full absolute paths surface symlink/realpath drift
+        stagedAbsPaths: Array.from(stagingFiles.keys()),
+      }));
       console.log("[zone-agent-final-assessment]", JSON.stringify({
         triggeredBy: "natural_completion",
         verificationReason,
@@ -824,9 +1914,34 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         inferredFrom: vrMatch ? "tag" : "heuristic",
         summaryPreview: finalText.slice(0, 200),
       }));
+      const finalizeResult = await finalizeStaging({
+        stagingFiles,
+        repoPath: input.repoPath,
+        framework: input.framework,
+        withStagingTempFlush,
+      });
+      let summaryAppendix = "";
+      if (finalizeResult.verification.status === "fail") {
+        verificationReason = "verification_failed_staged";
+        patchValidatedByAgent = false;
+        summaryAppendix =
+          "\n\n**Verification failed (" + finalizeResult.verification.label +
+          ", " + finalizeResult.verification.durationMs + "ms).** " +
+          "Changes were NOT applied to disk.\n\n```\n" +
+          finalizeResult.verification.errorPreview +
+          "\n```";
+      } else if (
+        finalizeResult.verification.status === "skipped" &&
+        "reason" in finalizeResult.verification &&
+        finalizeResult.verification.reason === "no_changes_made"
+      ) {
+        verificationReason = "no_changes_made";
+        patchValidatedByAgent = false;
+      }
+      await recordUsageOnExit();
       return {
         success: true,
-        summary: finalText,
+        summary: finalText + summaryAppendix,
         toolCallLog,
         filesModified: Array.from(filesModified),
         patchValidatedByAgent,
@@ -839,40 +1954,94 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
   // Max iterations hit â€” request one final no-tool assessment call
   input.onProgress?.("[agent_loop] Max iterations reached â€” requesting final assessment");
-  let finalVerificationReason: VerificationReason = inferVerificationFromLog(toolCallLog);
+  let finalVerificationReason: VerificationReason = inferVerificationFromLog(
+    toolCallLog,
+    input.framework
+      ? {
+          hasTests: input.framework.hasTests,
+          testFilesDetected: input.framework.testFilesDetected,
+        }
+      : undefined
+  );
   let inferredFrom: "tag" | "heuristic" = "heuristic";
   let finalSummary = "Max iterations reached";
+  const grantedBonus = iterationBudget.escalationBonusGranted
+    ? ` (including ${ESCALATION_BONUS_ITERATIONS} bonus iterations granted after escalation)`
+    : "";
+  const fwHint = (() => {
+    const fw = input.framework;
+    if (!fw) return "";
+    if (!fw.hasTests) {
+      return (
+        `\n\nThis project has NO runnable test infrastructure ` +
+        `(testCommand: "${fw.testCommand || "none"}", testFramework: "${fw.testFramework}"). ` +
+        `If your patch was applied successfully, the correct verdict is ` +
+        `[ZONE_VERIFICATION: tests_skipped_no_infra]. ` +
+        `Do NOT use tests_inconclusive - there was no test attempt to be inconclusive about. ` +
+        `Do NOT use no_verification_attempted - skipping is the correct behavior here.`
+      );
+    }
+    return "";
+  })();
   try {
-    const assessmentResponse = await client.responses.create({
-      model: getModelName("high"),
-      input: [
+    const assessmentResponse = await client.createChatCompletion({
+      model: getModelName("high", client.provider, requestCtx?.modelOverride),
+      messages: [
         ...responseInput,
         {
-          role: "user" as const,
-          type: "message" as const,
+          role: "user",
           content:
-            "You have reached the maximum number of iterations. " +
+            `You have reached the maximum number of iterations${grantedBonus}. ` +
             "Provide a brief final summary of what you did and include exactly one " +
             "[ZONE_VERIFICATION: <reason>] tag. " +
             "Choose: tests_passed, tests_skipped_no_infra, tests_inconclusive, " +
             "tests_failed_unrelated, tests_failed_by_patch, or no_verification_attempted. " +
             "Use tests_inconclusive if tests failed due to environment issues " +
             "(spawn errors, ENOENT, missing script, missing deps). " +
-            "Use tests_failed_by_patch ONLY if your patch caused the failure.",
+            "Use tests_failed_by_patch ONLY if your patch caused the failure." +
+            fwHint,
         },
       ],
-    });
+    }, { signal: input.abortSignal });
     const ae = extractResponsesApiOutputText(assessmentResponse);
       if (ae.ok && ae.text.trim()) {
         finalSummary = ae.text.trim();
         const tagged = parseVerificationTag(finalSummary);
         if (tagged) {
+          // Strip the tag from the text so downstream consumers (CLI, web UI) don't display it.
+          finalSummary = stripVerificationTag(finalSummary);
           finalVerificationReason = tagged;
           inferredFrom = "tag";
+          if (finalVerificationReason === "tests_passed") {
+            const passedValidation = validatePassedClaim(
+              toolCallLog,
+              input.framework ? { hasTests: input.framework.hasTests } : undefined
+            );
+            if (!passedValidation.accept) {
+              finalVerificationReason =
+                passedValidation.demoteTo ?? "tests_inconclusive";
+              input.onProgress?.(JSON.stringify({
+                event: "zone-agent-verdict-override",
+                triggeredBy: "max_iterations",
+                originalVerdict: "tests_passed",
+                overriddenTo: finalVerificationReason,
+                reason: passedValidation.reason,
+              }));
+              console.log("[zone-agent-verdict-override]", JSON.stringify({
+                triggeredBy: "max_iterations",
+                originalVerdict: "tests_passed",
+                overriddenTo: finalVerificationReason,
+                reason: passedValidation.reason,
+              }));
+            }
+          }
           if (finalVerificationReason === "tests_failed_unrelated") {
             const verdictValidation = validateUnrelatedClaim({
               log: toolCallLog,
               patchedFilePaths: Array.from(filesModified),
+              framework: input.framework
+                ? { hasTests: input.framework.hasTests }
+                : undefined,
             });
             if (!verdictValidation.accept) {
               finalVerificationReason =
@@ -883,19 +2052,46 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
                 overriddenTo: verdictValidation.demoteTo,
                 reason: verdictValidation.reason,
               }));
+            } else if (
+              verdictValidation.reason &&
+              /resolved by a later successful run_command/i.test(verdictValidation.reason)
+            ) {
+              // Bug 44b: see natural_completion site for rationale.
+              finalVerificationReason = "tests_passed";
+              console.log("[zone-agent-verdict-promote]", JSON.stringify({
+                triggeredBy: "max_iterations",
+                originalVerdict: "tests_failed_unrelated",
+                promotedTo: "tests_passed",
+                reason: verdictValidation.reason,
+              }));
             }
           }
         }
+        finalVerificationReason = applyNoInfraVerificationOverride({
+          verificationReason: finalVerificationReason,
+          framework: input.framework
+            ? {
+                hasTests: input.framework.hasTests,
+                testFilesDetected: input.framework.testFilesDetected,
+              }
+            : undefined,
+          patchApplied: didApplyPatch(toolCallLog),
+          triggeredBy: "max_iterations",
+        });
       }
   } catch {
     // Best-effort â€” fall through with heuristic
   }
 
-  const patchValidatedByAgent =
+  let patchValidatedByAgent =
     finalVerificationReason === "tests_passed" ||
     finalVerificationReason === "tests_skipped_no_infra" ||
     finalVerificationReason === "tests_failed_unrelated";
 
+  console.log("[zone-staging-state]", JSON.stringify({
+    stagedFileCount: stagingFiles.size,
+    stagedFiles: Array.from(stagingFiles.keys()).map((abs) => path.basename(abs)),
+  }));
   console.log("[zone-agent-final-assessment]", JSON.stringify({
     triggeredBy: "max_iterations",
     finalVerificationReason,
@@ -903,6 +2099,32 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     patchValidatedByAgent,
   }));
 
+  const finalizeResult = await finalizeStaging({
+    stagingFiles,
+    repoPath: input.repoPath,
+    framework: input.framework,
+    withStagingTempFlush,
+  });
+  if (finalizeResult.verification.status === "fail") {
+    finalVerificationReason = "verification_failed_staged";
+    patchValidatedByAgent = false;
+    finalSummary =
+      finalSummary +
+      "\n\n**Verification failed (" + finalizeResult.verification.label +
+      ", " + finalizeResult.verification.durationMs + "ms).** " +
+      "Changes were NOT applied to disk.\n\n```\n" +
+      finalizeResult.verification.errorPreview +
+      "\n```";
+  } else if (
+    finalizeResult.verification.status === "skipped" &&
+    "reason" in finalizeResult.verification &&
+    finalizeResult.verification.reason === "no_changes_made"
+  ) {
+    finalVerificationReason = "no_changes_made";
+    patchValidatedByAgent = false;
+  }
+
+  await recordUsageOnExit();
   return {
     success: false,
     summary: finalSummary,

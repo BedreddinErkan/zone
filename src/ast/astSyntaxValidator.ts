@@ -16,7 +16,9 @@ export type SemanticSmellReason =
   | "broken_template_expression"
   | "duplicate_jsx_attribute"
   | "duplicate_import_statement"
-  | "inline_style_pseudo_class";
+  | "duplicate_adjacent_jsdoc"
+  | "inline_style_pseudo_class"
+  | "declaration_identity_swap";
 
 export interface SemanticSmellResult {
   ok: boolean;
@@ -73,6 +75,10 @@ function getObjectPropertyKeyName(property: t.ObjectProperty): string | null {
   if (t.isStringLiteral(key)) return key.value;
   if (t.isNumericLiteral(key)) return String(key.value);
   return null;
+}
+
+function normalizeCommentText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }
 
 export function validateSyntax(
@@ -175,6 +181,31 @@ export function checkSemanticSmells(
       };
     }
     seenImports.add(sourceValue);
+  }
+
+  const allComments = ast.comments ?? [];
+  const jsdocComments = allComments.filter(
+    (c) => c.type === "CommentBlock" && c.value.startsWith("*")
+  );
+  jsdocComments.sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
+
+  for (let i = 0; i + 1 < jsdocComments.length; i++) {
+    const a = jsdocComments[i];
+    const b = jsdocComments[i + 1];
+    const aEnd = a.end ?? 0;
+    const bStart = b.start ?? 0;
+    if (bStart <= aEnd) continue;
+    const between = fileContent.slice(aEnd, bStart);
+    if (!/^\s*$/.test(between)) continue;
+    if (normalizeCommentText(a.value) !== normalizeCommentText(b.value)) continue;
+
+    return {
+      ok: false,
+      reason: "duplicate_adjacent_jsdoc",
+      details:
+        `Two identical /** */ JSDoc comment blocks appear back-to-back near line ` +
+        `${b.loc?.start.line ?? "?"}. Only one should be kept.`,
+    };
   }
 
   let inlineStylePseudoClass: InlineStylePseudoClassInfo | null = null;

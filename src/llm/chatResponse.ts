@@ -1,9 +1,11 @@
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import {
-  createOpenAIClient,
   extractResponsesApiOutputText,
   getModelName,
 } from "./openaiClient.js";
+import { createLLMClient } from "./factory.js";
+import { getRequestContext } from "./openaiContext.js";
 import { scanRepo } from "../repo/scanRepo.js";
 import { rankRelevantFiles } from "../repo/rankRelevantFiles.js";
 import { readProjectFiles } from "../repo/readProjectFiles.js";
@@ -65,7 +67,8 @@ function buildChatPrompt(input: {
 
 async function buildChatContext(
   task: string,
-  repoPath: string
+  repoPath: string,
+  lastChangedFiles?: string[]
 ): Promise<BuildChatContextResult> {
   const files = await scanRepo(repoPath);
   const developerContextFiles = files.filter(
@@ -109,11 +112,20 @@ async function buildChatContext(
       }
 
       const queryEmbedding = await embedText(task);
-      const matches = await matchSimilarFiles({
-        repoPath,
-        queryEmbedding,
-        matchCount: 30,
-      });
+      const matches =
+        queryEmbedding === null
+          ? []
+          : await matchSimilarFiles({
+              repoPath,
+              queryEmbedding,
+              matchCount: 30,
+            });
+      if (queryEmbedding === null) {
+        console.log("[zone-chat-debug]", {
+          stage: "semantic_skipped",
+          reason: "no_query_embedding",
+        });
+      }
       semanticScores = new Map(
         matches
           .filter(
@@ -140,10 +152,19 @@ async function buildChatContext(
     }
   }
 
-  const ranked = rankRelevantFiles({
+  const readContentForRanker = async (relPath: string): Promise<string | null> => {
+    try {
+      return await readFile(path.join(repoPath, relPath), "utf8");
+    } catch {
+      return null;
+    }
+  };
+  const ranked = await rankRelevantFiles({
     task,
     files: developerContextFiles,
     semanticScores,
+    lastChangedFiles,
+    readContent: readContentForRanker,
   });
   const topFiles = ranked.slice(0, 5);
   const contents =
@@ -169,48 +190,41 @@ async function streamChatText(input: {
   prompt: string;
   onChunk?: (delta: string) => void | Promise<void>;
 }): Promise<string> {
-  const client = createOpenAIClient();
-  const model = getModelName("high");
-  const streamFn = (client.responses as unknown as { stream?: unknown }).stream;
+  const client = createLLMClient();
+  const ctx = getRequestContext();
+  const model = getModelName("high", client.provider, ctx?.modelOverride);
 
-  if (typeof streamFn === "function") {
-    const runner = (client.responses as unknown as { stream: Function }).stream({
+  try {
+    const stream = await client.createChatCompletionStream({
       model,
       temperature: 0.2,
-      input: input.prompt,
+      messages: [{ role: "user", content: input.prompt }],
+      stream: true,
     });
 
     let fullResponse = "";
-    for await (const event of runner as AsyncIterable<{
-      type?: string;
-      delta?: string;
-    }>) {
-      if (
-        event?.type === "response.output_text.delta" &&
-        typeof event.delta === "string" &&
-        event.delta.length > 0
-      ) {
-        fullResponse += event.delta;
-        await input.onChunk?.(event.delta);
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content ?? "";
+      if (delta) {
+        fullResponse += delta;
+        await input.onChunk?.(delta);
       }
     }
-
-    const response = await (runner as { finalResponse(): Promise<unknown> }).finalResponse();
+    return fullResponse.trim();
+  } catch {
+    // Fallback to non-streaming on any streaming failure.
+    const response = await client.createChatCompletion({
+      model,
+      temperature: 0.2,
+      messages: [{ role: "user", content: input.prompt }],
+    });
     const extraction = extractResponsesApiOutputText(response);
-    return extraction.ok ? extraction.text.trim() || fullResponse.trim() : fullResponse.trim();
+    const text = extraction.ok ? extraction.text.trim() : "";
+    if (text) {
+      await input.onChunk?.(text);
+    }
+    return text;
   }
-
-  const response = await client.responses.create({
-    model,
-    temperature: 0.2,
-    input: input.prompt,
-  });
-  const extraction = extractResponsesApiOutputText(response);
-  const text = extraction.ok ? extraction.text.trim() : "";
-  if (text) {
-    await input.onChunk?.(text);
-  }
-  return text;
 }
 
 export async function getChatResponse(
@@ -229,6 +243,7 @@ export async function getChatResponseWithContext(input: {
   task: string;
   repoPath: string;
   onChunk?: (delta: string) => void | Promise<void>;
+  lastChangedFiles?: string[];
 }): Promise<ZoneChatResponseResult> {
   const normalizedTask = typeof input.task === "string" ? input.task.trim() : "";
   const normalizedRepoPath =
@@ -245,7 +260,11 @@ export async function getChatResponseWithContext(input: {
     };
   }
 
-  const { contextFiles } = await buildChatContext(normalizedTask, normalizedRepoPath);
+  const { contextFiles } = await buildChatContext(
+    normalizedTask,
+    normalizedRepoPath,
+    input.lastChangedFiles
+  );
   const prompt = buildChatPrompt({
     task: normalizedTask,
     repoPath: normalizedRepoPath,

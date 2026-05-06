@@ -1,4 +1,6 @@
-import { createOpenAIClient, getModelName } from "./openaiClient.js";
+import { getModelName } from "./openaiClient.js";
+import { createLLMClient } from "./factory.js";
+import { getRequestContext } from "./openaiContext.js";
 
 export const PROMPT_REFINEMENT_FALLBACK =
   "Describe the exact file, function, and behavior you want changed.";
@@ -29,8 +31,9 @@ export async function refinePrompt(input: {
   relevantFiles?: string[];
   reason?: string;
 }): Promise<string> {
-  const client = createOpenAIClient();
-  const model = getModelName();
+  const client = createLLMClient();
+  const ctx = getRequestContext();
+  const model = getModelName("standard", client.provider, ctx?.modelOverride);
   const role = input.role || "developer";
   const relevantFiles = (input.relevantFiles ?? []).slice(0, 8).join(", ") || "unknown";
   const planSteps =
@@ -62,11 +65,13 @@ Rules:
 - No explanation, preamble, bullets, or markdown.
 `.trim();
 
-  const response = await client.responses.create({
+  const response = await client.createChatCompletion({
     model,
-    input: prompt,
+    messages: [{ role: "user", content: prompt }],
   });
 
-  const refined = cleanRefinedPrompt(response.output_text || "");
+  const refined = cleanRefinedPrompt(
+    response.choices[0]?.message?.content ?? ""
+  );
   return refined || PROMPT_REFINEMENT_FALLBACK;
 }

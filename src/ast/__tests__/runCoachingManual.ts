@@ -319,6 +319,45 @@ checks.push(check(
   {}
 ));
 
+// ── Provider-agnostic hardening (OpenAI persistence Tur) ─────────────────────
+// Smoke run bddcd8d3 saw OpenAI gpt-4o (i) comment-out the bad import instead
+// of deleting it, (ii) put a duplicate Metadata import in REPLACE, and (iii)
+// emit tests_failed_unrelated without investigating. The hardening text is
+// appended to test_failed and apply_patch_syntax_broken_post_write coaching.
+
+checks.push(check(
+  "test_failed prompt contains anti-comment-out directive",
+  buildCoachingPrompt("test_failed", "", []).includes("DELETE the line entirely") &&
+    buildCoachingPrompt("test_failed", "", []).includes("comment-out is NOT a fix"),
+  {}
+));
+
+checks.push(check(
+  "test_failed prompt contains REPLACE-scope rule (duplicate import prevention)",
+  buildCoachingPrompt("test_failed", "", []).includes("REPLACE ONLY SUBSTITUTES THE FIND BLOCK") &&
+    buildCoachingPrompt("test_failed", "", []).includes("Identifier already declared"),
+  {}
+));
+
+checks.push(check(
+  "test_failed prompt contains mandatory-investigation rule",
+  buildCoachingPrompt("test_failed", "", []).includes("BEFORE CLAIMING ANY ERROR IS PRE-EXISTING"),
+  {}
+));
+
+checks.push(check(
+  "syntax_broken_post_write prompt also contains hardening",
+  buildCoachingPrompt("apply_patch_syntax_broken_post_write", "", []).includes("DELETE the line entirely") &&
+    buildCoachingPrompt("apply_patch_syntax_broken_post_write", "", []).includes("REPLACE ONLY SUBSTITUTES THE FIND BLOCK"),
+  {}
+));
+
+checks.push(check(
+  "test_failed (generated-path branch) contains hardening",
+  buildCoachingPrompt("test_failed", "", [], { generatedPathDetected: true, parsedFailingFile: ".next/server/app/_global-error.tsx" }).includes("BEFORE CLAIMING ANY ERROR IS PRE-EXISTING"),
+  {}
+));
+
 // ── Summary ──────────────────────────────────────────────────────────────────
 
 const failed = checks.filter((c) => !c.pass);

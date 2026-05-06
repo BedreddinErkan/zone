@@ -3,11 +3,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import fg from "fast-glob";
-import { locateSymbol, type SymbolKind } from "../ast/astSymbolLocator.js";
+import {
+  extractDeclaredSymbols,
+  locateSymbol,
+  type SymbolKind,
+} from "../ast/astSymbolLocator.js";
 import {
   checkSemanticSmells,
   validateSyntax,
 } from "../ast/astSyntaxValidator.js";
+import { checkWriteScope } from "./scopeGuard.js";
 
 const execAsync = promisify(exec);
 const READ_FILE_MAX_CHARS = 150_000;
@@ -28,6 +33,10 @@ const DISPATCHED_TOOLS = new Set([
   "write_file",
   "search_in_files",
   "find_references",
+  "run_command_background",
+  "read_background_output",
+  "kill_background",
+  "list_background",
 ]);
 
 // Import the definitions lazily to keep the check co-located with the executor.
@@ -35,20 +44,24 @@ const DISPATCHED_TOOLS = new Set([
 (function verifyToolDispatch() {
   // Dynamically import the definitions at runtime to avoid a circular reference
   // at compile time.  If the module isn't compiled yet this is a no-op.
-  let defs: Array<{ name: string }>;
+  let defs: Array<{ function: { name: string } }>;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    defs = (require("./toolDefinitions.js") as { ZONE_TOOLS: Array<{ name: string }> })
-      .ZONE_TOOLS;
+    defs = (
+      require("./toolDefinitions.js") as {
+        ZONE_TOOLS: Array<{ function: { name: string } }>;
+      }
+    ).ZONE_TOOLS;
   } catch {
     // dist/ not built yet — skip guard during source-only runs
     return;
   }
   for (const tool of defs) {
-    if (!DISPATCHED_TOOLS.has(tool.name)) {
+    const name = tool.function?.name;
+    if (!DISPATCHED_TOOLS.has(name)) {
       throw new Error(
-        `FATAL: Tool '${tool.name}' is defined in toolDefinitions but has no executor dispatch. ` +
-          `Add a 'if (toolName === "${tool.name}") { ... }' branch to executeTool().`
+        `FATAL: Tool '${name}' is defined in toolDefinitions but has no executor dispatch. ` +
+          `Add a 'if (toolName === "${name}") { ... }' branch to executeTool().`
       );
     }
   }
@@ -72,6 +85,61 @@ function truncateText(
 
 function safeRelPath(rel: string): string {
   return String(rel || "").replace(/^[\\/]+/, "");
+}
+
+/**
+ * path-duplication Tur: agents sometimes pass absolute paths that already
+ * include the repoPath prefix (e.g. "/home/bedo/zone-landing/app/global-error.tsx"
+ * when repoPath is "/home/bedo/zone-landing"). The previous safeRelPath only
+ * stripped leading slashes, so path.join(repoPath, ...) duplicated the prefix.
+ *
+ * Behavior:
+ *   - relative input ("components/Foo.tsx")  → returns it unchanged
+ *   - leading-slashed relative ("/foo/bar")  → strips the slash (legacy)
+ *   - absolute matching repoPath             → returns the trailing relative form
+ *   - absolute outside repoPath              → falls back to leading-slash strip;
+ *                                              downstream scope guard / FS catches it
+ *
+ * Always emits [zone-tool-path-resolve] when the input was absolute, so the
+ * smoke can prove no duplication happens after the fix.
+ */
+export function resolveAgentPath(
+  rawPath: string,
+  repoPath: string,
+  toolName?: string
+): string {
+  const raw = String(rawPath || "").trim();
+  if (!raw) return "";
+  const wasAbsolute = path.isAbsolute(raw);
+  let resolved: string;
+  let strippedRepoPrefix = false;
+
+  if (wasAbsolute) {
+    const repoAbs = path.resolve(repoPath);
+    const inputAbs = path.normalize(raw);
+    if (inputAbs === repoAbs) {
+      resolved = "";
+      strippedRepoPrefix = true;
+    } else if (inputAbs.startsWith(repoAbs + path.sep)) {
+      resolved = inputAbs.slice(repoAbs.length + 1);
+      strippedRepoPrefix = true;
+    } else {
+      // Absolute path that doesn't share the repo prefix.
+      // Legacy safeRelPath behavior: strip leading separators.
+      resolved = raw.replace(/^[\\/]+/, "");
+    }
+    console.log("[zone-tool-path-resolve]", JSON.stringify({
+      tool: toolName ?? null,
+      agentInput: raw,
+      isAbsolute: true,
+      repoPath,
+      resolved,
+      strippedRepoPrefix,
+    }));
+  } else {
+    resolved = raw.replace(/^[\\/]+/, "");
+  }
+  return resolved;
 }
 
 function isBlockedCommand(command: string): boolean {
@@ -206,6 +274,99 @@ function countCrlfsBefore(s: string, offset: number): number {
   return count;
 }
 
+function stagedRead(
+  staging: Map<string, string> | undefined,
+  abs: string
+): string | null {
+  if (!staging) return null;
+  const key = path.resolve(abs);
+  return staging.has(key) ? staging.get(key)! : null;
+}
+
+function stagedWrite(
+  staging: Map<string, string> | undefined,
+  abs: string,
+  content: string
+): boolean {
+  if (!staging) return false;
+  const key = path.resolve(abs);
+  staging.set(key, content);
+  return true;
+}
+
+export async function withStagingTempFlush<T>(
+  staging: Map<string, string> | undefined,
+  body: () => Promise<T>
+): Promise<T> {
+  if (!staging || staging.size === 0) {
+    return body();
+  }
+
+  const backup = new Map<string, string | null>();
+
+  for (const [abs] of staging) {
+    try {
+      backup.set(abs, fs.readFileSync(abs, "utf8"));
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        backup.set(abs, null);
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  let filesFlushed = 0;
+  for (const [abs, content] of staging) {
+    try {
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, content, "utf8");
+      filesFlushed++;
+    } catch (err) {
+      console.error("[zone-staging-temp-flush-error]", {
+        filePath: abs,
+        error: String((err as Error).message ?? err),
+      });
+    }
+  }
+
+  let restoreFailures = 0;
+
+  try {
+    return await body();
+  } finally {
+    let filesRestored = 0;
+    for (const [abs, original] of backup) {
+      try {
+        if (original === null) {
+          try {
+            fs.unlinkSync(abs);
+          } catch (unlinkErr) {
+            const code = (unlinkErr as NodeJS.ErrnoException).code;
+            if (code !== "ENOENT") throw unlinkErr;
+          }
+        } else {
+          fs.writeFileSync(abs, original, "utf8");
+        }
+        filesRestored++;
+      } catch (err) {
+        restoreFailures++;
+        console.error("[zone-staging-restore-error]", {
+          filePath: abs,
+          error: String((err as Error).message ?? err),
+        });
+      }
+    }
+    console.log("[zone-staging-temp-flush]", JSON.stringify({
+      filesFlushed,
+      filesRestored,
+      restoreFailures,
+      totalStaged: staging.size,
+    }));
+  }
+}
+
 export async function executeTool(
   toolName: string,
   toolArgs: Record<string, unknown>,
@@ -213,7 +374,18 @@ export async function executeTool(
   onProgress?: (msg: string) => void,
   input?: {
     runId?: string;
-    onApprovalRequired?: (command: string, runId: string) => Promise<boolean>;
+    onApprovalRequired?: (
+      command: string,
+      runId: string,
+      meta?: { kind?: "blocking" | "background"; label?: string | null }
+    ) => Promise<boolean>;
+    escalatedFiles?: Set<string>;
+    allowWriteFileOverwritePaths?: Set<string>;
+    stagingFiles?: Map<string, string>;
+    abortSignal?: AbortSignal;
+    /** Tur P2-scope: when present, write tools (apply_patch, write_file)
+     *  reject paths outside the union of plan.steps[*].filesLikely. */
+    executionPlan?: import("../llm/executionPlan.js").ExecutionPlan | null;
   }
 ): Promise<ToolResult> {
   const args = (toolArgs ?? {}) as Record<string, unknown>;
@@ -254,11 +426,21 @@ export async function executeTool(
         windowsHide: boolean;
         maxBuffer: number;
         shell?: string;
+        signal?: AbortSignal;
+        env: NodeJS.ProcessEnv;
       } = {
         cwd,
         timeout: 30000,
         windowsHide: true,
         maxBuffer: 10 * 1024 * 1024,
+        // Build/test commands run by the agent must execute under a clean NODE_ENV.
+        // The parent zone-api process may have NODE_ENV set to "development" via
+        // dotenv or other means; inheriting that breaks Next.js prerender and other
+        // production-mode tooling. Strip it; let npm/next decide the right value.
+        env: (() => {
+          const { NODE_ENV: _drop, ...rest } = process.env;
+          return rest;
+        })(),
       };
 
       if (process.platform === "win32") {
@@ -266,25 +448,178 @@ export async function executeTool(
       } else {
         execOptions.shell = "/bin/sh";
       }
+      if (input?.abortSignal) {
+        execOptions.signal = input.abortSignal;
+      }
 
       console.log("[zone-tool-runcmd-debug]", {
         command: command.slice(0, 100),
         cwd,
         platform: process.platform,
         shellOption: execOptions.shell || "default",
+        hasAbortSignal: !!input?.abortSignal,
       });
 
-      const { stdout, stderr } = await execAsync(command, execOptions);
+      const { stdout, stderr } = await withStagingTempFlush(input?.stagingFiles, async () => {
+        return await execAsync(command, execOptions);
+      });
       const combined = [stdout, stderr].filter(Boolean).join("\n");
       const t = truncateText(combined || "(no output)", 4000);
       return { success: true, output: t.text, truncated: t.truncated };
     }
 
+    if (toolName === "run_command_background") {
+      const command = String(args.command ?? "");
+      const resolved = resolveRunCommandCwd(args.cwd, repoPath);
+      if (!resolved.ok) {
+        return { success: false, output: resolved.error };
+      }
+      if (isBlockedCommand(command)) {
+        return { success: false, output: "Command blocked for safety" };
+      }
+      const runId = String(input?.runId ?? "");
+      if (!runId) {
+        return { success: false, output: "background commands require a runId" };
+      }
+      const label = typeof args.label === "string" && args.label.length > 0 ? args.label : null;
+      if (input?.onApprovalRequired) {
+        const approved = await input.onApprovalRequired(command, runId, {
+          kind: "background",
+          label,
+        });
+        if (!approved) {
+          return {
+            success: false,
+            output: `User rejected the background command: ${command}. Do not retry it.`,
+          };
+        }
+      }
+      onProgress?.(`[tool] Spawning background: ${command}`);
+      const { start: startBg } = await import("./backgroundProcessRegistry.js");
+      const env = (() => {
+        const { NODE_ENV: _drop, ...rest } = process.env;
+        return rest;
+      })();
+      const r = startBg({ runId, command, cwd: resolved.cwd, label, env });
+      console.log(
+        "[zone-bg-start]",
+        JSON.stringify({
+          runId,
+          handle: r.success ? r.handle : null,
+          ok: r.success,
+          command: command.slice(0, 100),
+          cwd: resolved.cwd,
+          label,
+        })
+      );
+      if (!r.success) {
+        return { success: false, output: r.error };
+      }
+      return {
+        success: true,
+        output: JSON.stringify({
+          handle: r.handle,
+          pid: r.pid,
+          message: r.message,
+        }),
+      };
+    }
+
+    if (toolName === "read_background_output") {
+      const runId = String(input?.runId ?? "");
+      if (!runId) {
+        return { success: false, output: "background reads require a runId" };
+      }
+      const handle = String(args.handle ?? "");
+      const sinceOffsetRaw = args.since_offset;
+      const sinceOffset =
+        typeof sinceOffsetRaw === "number" ? sinceOffsetRaw : null;
+      const maxBytesRaw = args.max_bytes;
+      const maxBytes =
+        typeof maxBytesRaw === "number" ? maxBytesRaw : null;
+      const { read: readBg } = await import("./backgroundProcessRegistry.js");
+      const r = readBg({ runId, handle, sinceOffset, maxBytes });
+      console.log(
+        "[zone-bg-read]",
+        JSON.stringify({
+          runId,
+          handle,
+          ok: r.success,
+          bytes: r.success ? r.output.length : 0,
+          eof: r.success ? r.eof : null,
+        })
+      );
+      if (!r.success) {
+        return { success: false, output: r.error };
+      }
+      return {
+        success: true,
+        output: JSON.stringify({
+          output: r.output,
+          new_offset: r.newOffset,
+          eof: r.eof,
+          exit_code: r.exitCode,
+          truncated: r.truncated,
+        }),
+      };
+    }
+
+    if (toolName === "kill_background") {
+      const runId = String(input?.runId ?? "");
+      if (!runId) {
+        return { success: false, output: "background kill requires a runId" };
+      }
+      const handle = String(args.handle ?? "");
+      const sigRaw = args.signal;
+      const signal =
+        sigRaw === "SIGTERM" || sigRaw === "SIGKILL" ? sigRaw : null;
+      const { kill: killBg } = await import("./backgroundProcessRegistry.js");
+      const r = await killBg({ runId, handle, signal });
+      console.log(
+        "[zone-bg-kill]",
+        JSON.stringify({
+          runId,
+          handle,
+          ok: r.success,
+          signal,
+          exitCode: r.success ? r.exitCode : null,
+        })
+      );
+      if (!r.success) {
+        return { success: false, output: r.error };
+      }
+      return {
+        success: true,
+        output: JSON.stringify({
+          exit_code: r.exitCode,
+          message: r.message,
+        }),
+      };
+    }
+
+    if (toolName === "list_background") {
+      const runId = String(input?.runId ?? "");
+      if (!runId) {
+        return { success: false, output: "background list requires a runId" };
+      }
+      const { list: listBg } = await import("./backgroundProcessRegistry.js");
+      const r = listBg({ runId });
+      console.log(
+        "[zone-bg-list]",
+        JSON.stringify({ runId, count: r.processes.length })
+      );
+      return {
+        success: true,
+        output: JSON.stringify({ processes: r.processes }),
+      };
+    }
+
     if (toolName === "read_file") {
-      const filePath = safeRelPath(String(args.filePath || ""));
+      const filePath = resolveAgentPath(String(args.filePath || ""), repoPath, "read_file");
       onProgress?.(`[tool] Reading: ${filePath}`);
       const abs = path.join(repoPath, filePath);
-      const content = fs.readFileSync(abs, "utf8");
+      const staged = stagedRead(input?.stagingFiles, abs);
+      const content = staged !== null ? staged : fs.readFileSync(abs, "utf8");
       const chunk = content.slice(0, READ_FILE_MAX_CHARS);
       const remainingChars = Math.max(content.length - chunk.length, 0);
       const wasTruncated = remainingChars > 0;
@@ -315,7 +650,7 @@ export async function executeTool(
     }
 
     if (toolName === "list_files") {
-      const dirPath = safeRelPath(String(args.dirPath || ""));
+      const dirPath = resolveAgentPath(String(args.dirPath || ""), repoPath, "list_files");
       const patternRaw = args.pattern;
       const pattern =
         patternRaw === null ||
@@ -339,18 +674,67 @@ export async function executeTool(
     }
 
     if (toolName === "apply_patch") {
-      const filePath = safeRelPath(String(args.filePath || ""));
+      const filePath = resolveAgentPath(String(args.filePath || ""), repoPath, "apply_patch");
       const patch = String(args.patch ?? "");
       const intentRaw = String(args.intent ?? "add").toLowerCase().trim();
       const intent = intentRaw === "delete" || intentRaw === "modify" ? intentRaw : "add";
       const allowShrink = intent === "delete" || intent === "modify";
       const abs = path.join(repoPath, filePath);
 
+      // Tur P2-scope: hard-block writes that fall outside the active plan's
+      // filesLikely union. Independent of the per-file escalation gate below.
+      {
+        const scopeError = checkWriteScope(filePath, input?.executionPlan ?? null, repoPath);
+        if (scopeError) {
+          onProgress?.(JSON.stringify({
+            event: "zone-scope-block",
+            tool: "apply_patch",
+            filePath,
+            reason: "out_of_plan_scope",
+          }));
+          console.log("[zone-scope-block]", JSON.stringify({
+            tool: "apply_patch",
+            filePath,
+            reason: "out_of_plan_scope",
+          }));
+          return {
+            success: false,
+            output: scopeError,
+            error: "apply_patch_blocked_out_of_plan_scope",
+            rejectionReason: "out_of_plan_scope",
+          };
+        }
+      }
+
+      if (input?.escalatedFiles?.has(filePath)) {
+        const errorMsg =
+          `BLOCKED: apply_patch is no longer allowed for "${filePath}". ` +
+          `This file has been ESCALATED because previous apply_patch attempts failed repeatedly with the same root cause. ` +
+          `You MUST use write_file with the FULL corrected file content for this file. ` +
+          `Steps:\n` +
+          `1. Call read_file on "${filePath}" to see the current state.\n` +
+          `2. Mentally compute the FULL corrected file (every line top to bottom).\n` +
+          `3. Call write_file with filePath="${filePath}" and content=<the entire corrected file>.\n` +
+          `Do NOT call apply_patch on "${filePath}" again - it will be blocked.`;
+        onProgress?.(JSON.stringify({
+          event: "zone-tool-apply-patch-blocked-escalated",
+          filePath,
+          reason: "previously_escalated_after_repeated_failure",
+        }));
+        return {
+          success: false,
+          output: errorMsg,
+          error: "apply_patch_blocked_escalated",
+          rejectionReason: "blocked_escalated_file",
+        };
+      }
+
       onProgress?.(`[tool] Patching: ${filePath}`);
 
       let original: string;
       try {
-        original = fs.readFileSync(abs, "utf8");
+        const stagedOrig = stagedRead(input?.stagingFiles, abs);
+        original = stagedOrig !== null ? stagedOrig : fs.readFileSync(abs, "utf8");
       } catch {
         return {
           success: false,
@@ -430,6 +814,39 @@ export async function executeTool(
       const blocks: FindReplaceBlock[] = [];
       const FIND_MARKER = "--- FIND ---";
       const REPLACE_MARKER = "--- REPLACE ---";
+      const findMarkerCount = (patch.match(/--- FIND ---/g) || []).length;
+      const replaceMarkerCount = (patch.match(/--- REPLACE ---/g) || []).length;
+
+      if (findMarkerCount !== replaceMarkerCount) {
+        const errorMessage =
+          `Your patch has ${findMarkerCount} \`${FIND_MARKER}\` marker(s) but ${replaceMarkerCount} \`${REPLACE_MARKER}\` marker(s). ` +
+          `Markers must be balanced: every \`${FIND_MARKER}\` must be paired with exactly one \`${REPLACE_MARKER}\`.\n\n` +
+          `If you intended to make multiple edits in this file, use the multi-block syntax:\n\n` +
+          `--- FIND ---\n` +
+          `<first region from file>\n` +
+          `--- REPLACE ---\n` +
+          `<replacement for first region>\n` +
+          `--- FIND ---\n` +
+          `<second region from file>\n` +
+          `--- REPLACE ---\n` +
+          `<replacement for second region>\n\n` +
+          `Each block does ONE local substitution. Do not collapse two unrelated edits into one block.`;
+
+        console.log("[zone-apply-patch-marker-imbalance]", JSON.stringify({
+          filePath,
+          findMarkerCount,
+          replaceMarkerCount,
+          rejected: true,
+        }));
+
+        return {
+          success: false,
+          output: errorMessage,
+          error: "apply_patch_marker_imbalance",
+          rejectionReason: "marker_imbalance",
+        };
+      }
+
       let remaining = patch;
       while (remaining.includes(FIND_MARKER)) {
         const findIdx = remaining.indexOf(FIND_MARKER);
@@ -779,6 +1196,68 @@ export async function executeTool(
           })
         );
 
+        const findDecls = extractDeclaredSymbols(normalizedFind, abs);
+        const replaceDecls = extractDeclaredSymbols(normalizedReplace, abs);
+        const findNames = new Set(findDecls.map((decl) => decl.name));
+        const replaceNames = new Set(replaceDecls.map((decl) => decl.name));
+        const removed = [...findNames].filter((name) => !replaceNames.has(name));
+        const added = [...replaceNames].filter((name) => !findNames.has(name));
+        const hasIdentitySwap =
+          findDecls.length > 0 &&
+          replaceDecls.length > 0 &&
+          removed.length > 0 &&
+          added.length > 0 &&
+          [...findNames].every((name) => !replaceNames.has(name));
+
+        if (hasIdentitySwap) {
+          const maxBlockLength = Math.max(normalizedFind.length, normalizedReplace.length);
+          const sizeRatio =
+            maxBlockLength > 0
+              ? Math.min(normalizedFind.length, normalizedReplace.length) / maxBlockLength
+              : 1;
+          const lineDelta = Math.abs(findLineCount - replaceLineCount);
+          const isLikelyRename = sizeRatio >= 0.8 && lineDelta <= 1;
+
+          if (isLikelyRename) {
+            onProgress?.(JSON.stringify({
+              event: "zone-tool-apply-patch-identity-swap-allowed-as-rename",
+              filePath,
+              block: bi + 1,
+              findDeclared: [...findNames],
+              replaceDeclared: [...replaceNames],
+              removed,
+              added,
+              sizeRatio,
+              lineDelta,
+            }));
+          } else {
+            onProgress?.(JSON.stringify({
+              event: "zone-tool-apply-patch-identity-swap-blocked",
+              filePath,
+              block: bi + 1,
+              findDeclared: [...findNames],
+              replaceDeclared: [...replaceNames],
+              removed,
+              added,
+              sizeRatio,
+              lineDelta,
+            }));
+            return {
+              success: false,
+              output:
+                `Block ${bi + 1}: FIND declares symbol(s) [${[...findNames].join(", ")}] ` +
+                `but REPLACE declares completely different symbol(s) [${[...replaceNames].join(", ")}]. ` +
+                `This would DELETE [${removed.join(", ")}] and ADD [${added.join(", ")}], ` +
+                `which is likely an unintended out-of-scope change. ` +
+                `If you intended to rename [${removed.join(", ")}] -> [${added.join(", ")}], ` +
+                `make sure the REPLACE keeps the original function body and only changes the name. ` +
+                `Otherwise, target the correct symbol.`,
+              error: "apply_patch_identity_swap",
+              rejectionReason: "declaration_identity_swap",
+            };
+          }
+        }
+
         // Apply the replacement — scoped or whole-file.
         const updatedSearchTarget = searchTarget.replace(normalizedFind, normalizedReplace);
         if (activeScopeInfo !== null) {
@@ -824,7 +1303,9 @@ export async function executeTool(
         );
       }
 
-      fs.writeFileSync(abs, outputContent, "utf8");
+      if (!stagedWrite(input?.stagingFiles, abs, outputContent)) {
+        fs.writeFileSync(abs, outputContent, "utf8");
+      }
 
       // ─── Post-write syntax validation ────────────────────────────────────────
       const validation = validateSyntax(outputContent, abs);
@@ -849,7 +1330,9 @@ export async function executeTool(
       );
       if (syntaxBroken) {
         // Roll back to the original file content.
-        fs.writeFileSync(abs, original, "utf8");
+        if (!stagedWrite(input?.stagingFiles, abs, original)) {
+          fs.writeFileSync(abs, original, "utf8");
+        }
         return {
           success: false,
           output:
@@ -861,7 +1344,9 @@ export async function executeTool(
         };
       }
       if (semanticSmellDetected) {
-        fs.writeFileSync(abs, original, "utf8");
+        if (!stagedWrite(input?.stagingFiles, abs, original)) {
+          fs.writeFileSync(abs, original, "utf8");
+        }
         return {
           success: false,
           output:
@@ -882,16 +1367,44 @@ export async function executeTool(
     }
 
     if (toolName === "write_file") {
-      const filePath = safeRelPath(String(args.filePath || ""));
+      const filePath = resolveAgentPath(String(args.filePath || ""), repoPath, "write_file");
       const content = String(args.content ?? "");
       const abs = path.join(repoPath, filePath);
+
+      // Tur P2-scope: same plan-based guard as apply_patch. Note that
+      // `allowWriteFileOverwritePaths` (escalated-file override) is NOT a
+      // bypass — escalation lives in a different layer and only allows the
+      // shrink-guard to be skipped for files already known to need a rewrite.
+      {
+        const scopeError = checkWriteScope(filePath, input?.executionPlan ?? null, repoPath);
+        if (scopeError) {
+          onProgress?.(JSON.stringify({
+            event: "zone-scope-block",
+            tool: "write_file",
+            filePath,
+            reason: "out_of_plan_scope",
+          }));
+          console.log("[zone-scope-block]", JSON.stringify({
+            tool: "write_file",
+            filePath,
+            reason: "out_of_plan_scope",
+          }));
+          return {
+            success: false,
+            output: scopeError,
+            error: "write_file_blocked_out_of_plan_scope",
+            rejectionReason: "out_of_plan_scope",
+          };
+        }
+      }
 
       // Shrink guard: block write_file on existing files if new content < 70% of original
       let originalSize = 0;
       let fileExists = false;
       let originalContent = "";
       try {
-        originalContent = fs.readFileSync(abs, "utf8");
+        const stagedPrev = stagedRead(input?.stagingFiles, abs);
+        originalContent = stagedPrev !== null ? stagedPrev : fs.readFileSync(abs, "utf8");
         originalSize = originalContent.length;
         fileExists = true;
       } catch {
@@ -899,7 +1412,8 @@ export async function executeTool(
       }
       const newSize = content.length;
       const shrinkRatio = fileExists && originalSize > 0 ? newSize / originalSize : 1;
-      const blocked = fileExists && shrinkRatio < 0.7;
+      const overwriteOverrideAllowed = input?.allowWriteFileOverwritePaths?.has(filePath) === true;
+      const blocked = fileExists && shrinkRatio < 0.7 && !overwriteOverrideAllowed;
 
       console.log(
         `[zone-agent-write-debug] ${JSON.stringify({
@@ -909,6 +1423,7 @@ export async function executeTool(
           newSize,
                     delta: newSize - originalSize,
           blocked,
+          overwriteOverrideAllowed,
           reason: blocked
             ? `new content is ${Math.round(shrinkRatio * 100)}% of original (threshold: 70%)`
             : null,
@@ -927,7 +1442,9 @@ export async function executeTool(
       }
 
       fs.mkdirSync(path.dirname(abs), { recursive: true });
-      fs.writeFileSync(abs, content, "utf8");
+      if (!stagedWrite(input?.stagingFiles, abs, content)) {
+        fs.writeFileSync(abs, content, "utf8");
+      }
 
       const validation = validateSyntax(content, abs);
       const syntaxBroken = !validation.ok && validation.reason === "parse_error";
@@ -953,7 +1470,9 @@ export async function executeTool(
 
       if (syntaxBroken || semanticSmellDetected) {
         if (fileExists) {
-          fs.writeFileSync(abs, originalContent, "utf8");
+          if (!stagedWrite(input?.stagingFiles, abs, originalContent)) {
+            fs.writeFileSync(abs, originalContent, "utf8");
+          }
         } else {
           try {
             fs.unlinkSync(abs);
@@ -1023,7 +1542,9 @@ export async function executeTool(
         }
         let text = "";
         try {
-          text = fs.readFileSync(path.join(repoPath, rel), "utf8");
+          const searchAbs = path.join(repoPath, rel);
+          const stagedSearch = stagedRead(input?.stagingFiles, searchAbs);
+          text = stagedSearch !== null ? stagedSearch : fs.readFileSync(searchAbs, "utf8");
         } catch {
           continue;
         }
@@ -1071,7 +1592,7 @@ export async function executeTool(
     }
 
     if (toolName === "find_references") {
-      const sourceFile = safeRelPath(String(args.sourceFile || ""));
+      const sourceFile = resolveAgentPath(String(args.sourceFile || ""), repoPath, "find_references");
       const symbolName = String(args.symbolName || "").trim();
 
       if (!symbolName) {

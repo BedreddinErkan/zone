@@ -75,9 +75,10 @@ const createSupabaseClientMock = vi.fn(() => ({
   rpc: supabaseRpcMock,
 }));
 const createOpenAIClientMock = vi.fn(() => ({
-  responses: {
-    create: responsesCreateMock,
-  },
+  provider: "openai" as const,
+  createChatCompletion: responsesCreateMock,
+  createChatCompletionStream: vi.fn(),
+  createEmbedding: vi.fn(),
 }));
 const getModelNameMock = vi.fn(() => "gpt-4o-mini");
 const getInferenceModeMock = vi.fn(() => "local");
@@ -135,6 +136,10 @@ vi.mock("../llm/openaiClient.js", () => ({
   getModelName: getModelNameMock,
   getInferenceMode: getInferenceModeMock,
   getHostedInferenceBaseUrl: getHostedInferenceBaseUrlMock,
+}));
+
+vi.mock("../llm/factory.js", () => ({
+  createLLMClient: createOpenAIClientMock,
 }));
 
 vi.mock("@supabase/supabase-js", () => ({
@@ -995,7 +1000,8 @@ export function LoginForm() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-User-OpenAI-Key": "sk-user",
+        "X-Zone-LLM-Key": "sk-user",
+        "X-Zone-Provider": "openai",
       },
       body: JSON.stringify({
         task: "fix login validation",
@@ -1039,7 +1045,8 @@ export function LoginForm() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-User-OpenAI-Key": "sk-user",
+        "X-Zone-LLM-Key": "sk-user",
+        "X-Zone-Provider": "openai",
       },
       body: JSON.stringify({
         task: "fix login validation",
@@ -1222,8 +1229,14 @@ export function LoginForm() {
       "C:/repo/tests/login.spec.ts": "test('login', async () => {});",
     });
     responsesCreateMock.mockResolvedValue({
-      output_text:
-        "Extend tests/login.spec.ts with a negative invalid-credentials Playwright test that reuses the existing login flow and asserts the real error state.",
+      choices: [
+        {
+          message: {
+            content:
+              "Extend tests/login.spec.ts with a negative invalid-credentials Playwright test that reuses the existing login flow and asserts the real error state.",
+          },
+        },
+      ],
     });
 
     const response = await fetch(`${baseUrl}/api/enhance-task`, {
@@ -1252,8 +1265,16 @@ export function LoginForm() {
     expect(responsesCreateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "gpt-4o-mini",
-        instructions: expect.stringContaining("You are a task optimizer"),
-        input: expect.stringContaining("User task: add login test"),
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: "system",
+            content: expect.stringContaining("You are a task optimizer"),
+          }),
+          expect.objectContaining({
+            role: "user",
+            content: expect.stringContaining("User task: add login test"),
+          }),
+        ]),
       })
     );
   });

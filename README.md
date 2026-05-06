@@ -24,7 +24,7 @@ Pay your provider directly. No subscription, no per-seat fees, no message caps, 
 ## Quick start (self-hosted)
 
 ```bash
-git clone https://github.com/BedreddinErkan/zone-api.git
+git clone https://github.com/BedreddinErkan/zone.git
 cd zone-api
 npm install
 cp .env.example .env
@@ -53,4 +53,4 @@ Supported providers: Anthropic (Sonnet 4.6 / Haiku 4.5 / Opus 4.7), OpenAI (GPT-
 
 ## Contributing
 
-Issues and PRs welcome at [github.com/BedreddinErkan/zone-api](https://github.com/BedreddinErkan/zone-api).
+Issues and PRs welcome at [github.com/BedreddinErkan/zone](https://github.com/BedreddinErkan/zone).

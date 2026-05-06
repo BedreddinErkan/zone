@@ -42,21 +42,20 @@ console.log("\n=== scope discipline ===");
 
 {
   const applyPatchTool = ZONE_TOOLS.find(
-    (tool) => "name" in tool && tool.name === "apply_patch"
+    (tool) => tool.function?.name === "apply_patch"
   );
   const scopeDescription =
     applyPatchTool &&
-    "parameters" in applyPatchTool &&
-    applyPatchTool.parameters &&
-    typeof applyPatchTool.parameters === "object" &&
-    "properties" in applyPatchTool.parameters &&
-    applyPatchTool.parameters.properties &&
-    typeof applyPatchTool.parameters.properties === "object" &&
-    "scope" in applyPatchTool.parameters.properties &&
-    applyPatchTool.parameters.properties.scope &&
-    typeof applyPatchTool.parameters.properties.scope === "object" &&
-    "description" in applyPatchTool.parameters.properties.scope
-      ? String(applyPatchTool.parameters.properties.scope.description ?? "")
+    applyPatchTool.function?.parameters &&
+    typeof applyPatchTool.function.parameters === "object" &&
+    "properties" in applyPatchTool.function.parameters &&
+    applyPatchTool.function.parameters.properties &&
+    typeof applyPatchTool.function.parameters.properties === "object" &&
+    "scope" in applyPatchTool.function.parameters.properties &&
+    applyPatchTool.function.parameters.properties.scope &&
+    typeof applyPatchTool.function.parameters.properties.scope === "object" &&
+    "description" in applyPatchTool.function.parameters.properties.scope
+      ? String(applyPatchTool.function.parameters.properties.scope.description ?? "")
       : "";
   const lower = scopeDescription.toLowerCase();
 

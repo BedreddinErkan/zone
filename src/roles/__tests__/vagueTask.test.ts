@@ -41,6 +41,10 @@ vi.mock("../../llm/openaiClient.js", () => ({
   getModelName: getModelNameMock,
 }));
 
+vi.mock("../../llm/factory.js", () => ({
+  createLLMClient: createMock,
+}));
+
 vi.mock("../../core/confidenceGate.js", () => ({
   checkConfidenceGate: checkConfidenceGateMock,
 }));
@@ -110,20 +114,27 @@ describe("runTestEngineerFlow vague task penalty", () => {
     const files = [buildRepoFile("playwright.config.ts"), buildRepoFile("tests/login.spec.ts")];
     const framework = buildFramework();
     const client = {
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
-            summary: "Generated login test",
-            warnings: ["Existing warning"],
-            confidence: 96,
-            testFile: {
-              path: "tests/login.spec.ts",
-              content:
-                "test('login', async ({ page }) => { await page.goto('/login'); await expect(page.getByText('Invalid credentials')).toBeVisible(); });",
+      provider: "openai" as const,
+      createChatCompletion: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: "Generated login test",
+                warnings: ["Existing warning"],
+                confidence: 96,
+                testFile: {
+                  path: "tests/login.spec.ts",
+                  content:
+                    "test('login', async ({ page }) => { await page.goto('/login'); await expect(page.getByText('Invalid credentials')).toBeVisible(); });",
+                },
+              }),
             },
-          }),
-        }),
-      },
+          },
+        ],
+      }),
+      createChatCompletionStream: vi.fn(),
+      createEmbedding: vi.fn(),
     };
 
     scanRepoMock.mockResolvedValue(files);
@@ -161,20 +172,27 @@ describe("runTestEngineerFlow vague task penalty", () => {
     const files = [buildRepoFile("playwright.config.ts"), buildRepoFile("tests/login.spec.ts")];
     const framework = buildFramework();
     const client = {
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
-            summary: "Generated login test",
-            warnings: [],
-            confidence: 82,
-            testFile: {
-              path: "tests/login.spec.ts",
-              content:
-                "test('invalid login', async ({ page }) => { await page.goto('/login'); await expect(page.getByText('Invalid credentials')).toBeVisible(); });",
+      provider: "openai" as const,
+      createChatCompletion: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: "Generated login test",
+                warnings: [],
+                confidence: 82,
+                testFile: {
+                  path: "tests/login.spec.ts",
+                  content:
+                    "test('invalid login', async ({ page }) => { await page.goto('/login'); await expect(page.getByText('Invalid credentials')).toBeVisible(); });",
+                },
+              }),
             },
-          }),
-        }),
-      },
+          },
+        ],
+      }),
+      createChatCompletionStream: vi.fn(),
+      createEmbedding: vi.fn(),
     };
 
     scanRepoMock.mockResolvedValue(files);
