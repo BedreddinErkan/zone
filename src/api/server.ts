@@ -270,6 +270,8 @@ app.use(
       "Content-Type",
       "Authorization",
       "Accept",
+      "X-Zone-LLM-Key",
+      "X-Zone-Provider",
     ],
     exposedHeaders: ["Content-Length", "X-Request-Id"],
   })
