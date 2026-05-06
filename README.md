@@ -63,3 +63,13 @@ Supported providers: Anthropic (Sonnet 4.6 / Haiku 4.5 / Opus 4.7), OpenAI (GPT-
 ## Contributing
 
 Issues and PRs welcome at [github.com/BedreddinErkan/zone](https://github.com/BedreddinErkan/zone).
+
+## Debugging
+
+By default Zone shows only high-level run summaries and errors. To see verbose internal logs (request flow, cache hits, tool calls, performance traces), set the verbose flag:
+
+```bash
+ZONE_VERBOSE_LOGS=1 npm run serve
+```
+
+Useful when filing a bug report or investigating agent behavior locally.
