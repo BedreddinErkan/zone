@@ -10,14 +10,21 @@ Zone runs a code-modification loop with an AST-based validator as a defensive la
 
 ## Why Zone
 
-| | Zone | Cursor Pro | Claude Code Max | Codex Pro |
-|---|---|---|---|---|
-| **Pricing** | BYOK only | $20–200/mo | $100–200/mo | $20–200/mo |
-| **Usage limits** | None | Quota-based | 5-hour rolling windows | Quota-based |
-| **Providers** | OpenAI + Anthropic | Multiple cloud | Anthropic only | OpenAI only |
-| **AST validation** | ✓ | — | — | — |
-| **Self-hostable** | ✓ | — | — | — |
-| **Open source** | AGPL-3.0 | — | — | — |
+### Real cost — 30 days, single developer
+
+| Provider | Spend | Requests | Tokens |
+|---|---|---|---|
+| OpenAI (GPT-4o) | $4.79 | 4,708 | 28.2M |
+| Anthropic (Sonnet 4.6, with prompt caching) | $0.83 | 5 runs | 1.13M |
+| **Total** | **$5.62** | **4,713** | **29.3M** |
+
+Same volume on subscription tools:
+
+- **Cursor Pro** ($20/mo) — $20 credit pool covers ~225 Sonnet or ~500 GPT-5 requests; 4,700+ requests pushes you to Pro+ ($60) or Ultra ($200)
+- **Claude Code Max** ($100-200/mo) — 5-hour rolling windows constrain sustained sessions
+- **Codex Pro** ($20-200/mo) — quota-based; OpenAI-only
+
+With Zone BYOK you pay your provider directly — no markup, no subscription floor, no rolling time windows. Anthropic prompt caching is enabled by default; cached iterations typically save 50-80% on input cost. A typical multi-iter Zone run costs ~$0.05-0.50 on Sonnet 4.6 depending on task complexity.
 
 Pay your provider directly. No subscription, no per-seat fees, no message caps, no rolling time windows. With Anthropic prompt caching enabled by default, a typical multi-iter Zone run uses ~$0.05–0.50 BYOK Sonnet 4.6 depending on task complexity.
 
