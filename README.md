@@ -26,8 +26,6 @@ Same volume on subscription tools:
 
 With Zone BYOK you pay your provider directly — no markup, no subscription floor, no rolling time windows. Anthropic prompt caching is enabled by default; cached iterations typically save 50-80% on input cost. A typical multi-iter Zone run costs ~$0.05-0.50 on Sonnet 4.6 depending on task complexity.
 
-Pay your provider directly. No subscription, no per-seat fees, no message caps, no rolling time windows. With Anthropic prompt caching enabled by default, a typical multi-iter Zone run uses ~$0.05–0.50 BYOK Sonnet 4.6 depending on task complexity.
-
 ## Quick start (self-hosted)
 
 ```bash
