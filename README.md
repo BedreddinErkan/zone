@@ -34,7 +34,7 @@ With Zone BYOK you pay your provider directly — no markup, no subscription flo
 
 ```bash
 git clone https://github.com/BedreddinErkan/zone.git
-cd zone-api
+cd zone
 npm install
 cp .env.example .env
 # Add ANTHROPIC_API_KEY or OPENAI_API_KEY to .env
