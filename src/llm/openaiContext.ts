@@ -6,6 +6,10 @@ export interface ZoneRequestContext {
   provider?: LLMProvider;
   model?: string;
   modelOverride?: { high?: string; standard?: string };
+  // Set after route handlers parse runId/userId from the request body.
+  // Read by the recording LLM client wrapper to attribute usage records.
+  userId?: string;
+  runId?: string;
 }
 
 export const zoneRequestContext = new AsyncLocalStorage<ZoneRequestContext>();
@@ -16,6 +20,17 @@ export function getRequestUserApiKey(): string | undefined {
 
 export function getRequestContext(): ZoneRequestContext | undefined {
   return zoneRequestContext.getStore();
+}
+
+export function attachRunIdentity(input: { userId?: string; runId?: string }): void {
+  const store = zoneRequestContext.getStore();
+  if (!store) return;
+  if (typeof input.userId === "string" && input.userId.trim()) {
+    store.userId = input.userId.trim();
+  }
+  if (typeof input.runId === "string" && input.runId.trim()) {
+    store.runId = input.runId.trim();
+  }
 }
 
 export function withUserApiKey<T>(

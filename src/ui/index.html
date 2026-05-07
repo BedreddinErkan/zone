@@ -4006,6 +4006,31 @@
       try { finalizeCoalescedLine(runId); } catch {}
     }
 
+    // Per-run inline cost: shows '$0.07' on the run header once the server
+    // emits costUsd in the run_completed_with_result payload. Idempotent —
+    // SSE may replay the final event after a refresh; same cost = same render.
+    function setRunCost(runId, costUsd) {
+      const n = Number(costUsd);
+      if (!Number.isFinite(n) || n < 0) return;
+      const card = document.getElementById('logBlock-' + runId);
+      if (!card) return;
+      const header = card.querySelector('.exec-header');
+      if (!header) return;
+      let badge = header.querySelector('.run-cost');
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'run-cost';
+        badge.style.cssText = 'margin-left:auto;opacity:0.6;font-size:11px;font-family:var(--font-mono,monospace)';
+        header.style.display = 'flex';
+        header.style.alignItems = 'center';
+        header.appendChild(badge);
+      }
+      // Render cents-level precision when small ($0.07), otherwise 2 decimals.
+      const formatted = n < 0.01 && n > 0 ? '<$0.01' : '$' + n.toFixed(n < 1 ? 2 : 2);
+      badge.textContent = formatted;
+      badge.title = 'Estimated BYOK spend for this run';
+    }
+
     // ════════════════════════════════════════════════════════════════════
     // Step Timeline — compact collapsible run progress groups
     // ════════════════════════════════════════════════════════════════════
@@ -8678,6 +8703,7 @@
       if (state.eventSource === _esForRun) state.eventSource = null;
 
       setLogBlockDone(runId);
+      try { setRunCost(runId, result && result.costUsd); } catch {}
       setRunningUI(false);
       completeExecutionSummary(runId);
       try { dismissPlanChecklistForRun(runId); } catch {}
@@ -9289,10 +9315,30 @@
     function renderUsageSettings(){
       // BYOK estimated spend. Sourced from /api/usage which aggregates per-run
       // token logs (input_uncached + cache_write + cache_read + output) ×
-      // pricing.ts rates. Period toggle: month (calendar) | all-time.
+      // pricing.ts rates. Period toggle: day | week | month | all-time.
       let usagePeriod = 'month';
       let usageBreakdownOpen = false;
       const PROVIDER_LABELS = { anthropic: 'Anthropic', openai: 'OpenAI' };
+      const PERIOD_BUTTONS = [
+        { key: 'day',   label: 'Today' },
+        { key: 'week',  label: 'This week' },
+        { key: 'month', label: 'This month' },
+        { key: 'all',   label: 'All time' },
+      ];
+      const PERIOD_RUNS_LABEL = {
+        day: 'Runs today',
+        week: 'Runs this week',
+        month: 'Runs this month',
+        all: 'Runs (all time)',
+      };
+      function renderPeriodButtons(active) {
+        return PERIOD_BUTTONS.map(({ key, label }) => {
+          const isActive = key === active;
+          const bg = isActive ? 'var(--violet,#7a5af8)' : 'transparent';
+          const fg = isActive ? '#fff' : 'var(--color-text,#ddd)';
+          return `<button class="usage-period-btn${isActive ? ' active' : ''}" data-usage-period="${key}" style="padding:4px 10px;border-radius:var(--radius-sm,6px);border:1px solid var(--color-border,#333);background:${bg};color:${fg};font-size:var(--font-size-sm,12px);cursor:pointer">${escapeHtml(label)}</button>`;
+        }).join('');
+      }
 
       function formatTokens(n){
         const x = Number(n) || 0;
@@ -9312,13 +9358,11 @@
       }
 
       function paintSkeleton(){
-        const periodAttr = (p) => p === usagePeriod ? ' active' : '';
         els.settingsBody.innerHTML = `
-          <div class="row" style="justify-content:flex-start;gap:8px">
-            <button class="usage-period-btn${periodAttr('month')}" data-usage-period="month" style="padding:4px 10px;border-radius:var(--radius-sm,6px);border:1px solid var(--color-border,#333);background:transparent;color:var(--color-text,#ddd);font-size:var(--font-size-sm,12px);cursor:pointer">This month</button>
-            <button class="usage-period-btn${periodAttr('all')}" data-usage-period="all" style="padding:4px 10px;border-radius:var(--radius-sm,6px);border:1px solid var(--color-border,#333);background:transparent;color:var(--color-text,#ddd);font-size:var(--font-size-sm,12px);cursor:pointer">All time</button>
+          <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">
+            ${renderPeriodButtons(usagePeriod)}
           </div>
-          <div class="row"><div class="k">Runs this month</div><div class="v"><div class="skeleton" style="width:90px"></div></div></div>
+          <div class="row"><div class="k">${escapeHtml(PERIOD_RUNS_LABEL[usagePeriod] || 'Runs')}</div><div class="v"><div class="skeleton" style="width:90px"></div></div></div>
           <div class="row"><div class="k">Usage</div><div class="v"><div class="skeleton" style="width:80px"></div></div></div>
           <div class="row"><div class="k">API tokens used</div><div class="v"><div class="skeleton" style="width:70px"></div></div></div>
           <div class="row"><div class="k">Provider</div><div class="v"><div class="skeleton" style="width:90px"></div></div></div>
@@ -9327,12 +9371,11 @@
       }
 
       function paintLoaded(data){
-        const runsLabel = usagePeriod === 'month' ? 'Runs this month' : 'Runs (all time)';
+        const runsLabel = PERIOD_RUNS_LABEL[usagePeriod] || 'Runs';
         const totalRuns = data?.totalRuns ?? 0;
         const totalTokens = data?.totalTokens ?? 0;
         const totalCostUsd = data?.totalCostUsd ?? 0;
         const providers = formatProviders(data?.byProvider);
-        const periodAttr = (p) => p === usagePeriod ? ' active' : '';
         const byModel = data?.byModel || {};
         const modelEntries = Object.keys(byModel).map(m => ({ model: m, ...byModel[m] }));
         const breakdownChevron = usageBreakdownOpen ? '▾' : '▸';
@@ -9348,9 +9391,8 @@
               : '');
 
         els.settingsBody.innerHTML = `
-          <div class="row" style="justify-content:flex-start;gap:8px">
-            <button class="usage-period-btn${periodAttr('month')}" data-usage-period="month" style="padding:4px 10px;border-radius:var(--radius-sm,6px);border:1px solid var(--color-border,#333);background:${usagePeriod==='month'?'var(--violet,#7a5af8)':'transparent'};color:${usagePeriod==='month'?'#fff':'var(--color-text,#ddd)'};font-size:var(--font-size-sm,12px);cursor:pointer">This month</button>
-            <button class="usage-period-btn${periodAttr('all')}" data-usage-period="all" style="padding:4px 10px;border-radius:var(--radius-sm,6px);border:1px solid var(--color-border,#333);background:${usagePeriod==='all'?'var(--violet,#7a5af8)':'transparent'};color:${usagePeriod==='all'?'#fff':'var(--color-text,#ddd)'};font-size:var(--font-size-sm,12px);cursor:pointer">All time</button>
+          <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">
+            ${renderPeriodButtons(usagePeriod)}
           </div>
           <div class="row"><div class="k">${escapeHtml(runsLabel)}</div><div class="v">${escapeHtml(String(totalRuns))}</div></div>
           <div class="row"><div class="k">Usage</div><div class="v">${escapeHtml(formatUsd(totalCostUsd))}</div></div>
@@ -9375,7 +9417,11 @@
       function wirePeriodButtons(){
         document.querySelectorAll('.usage-period-btn').forEach(b => {
           b.addEventListener('click', () => {
-            const next = b.dataset.usagePeriod === 'all' ? 'all' : 'month';
+            const raw = b.dataset.usagePeriod;
+            const next =
+              raw === 'day' || raw === 'week' || raw === 'month' || raw === 'all'
+                ? raw
+                : 'month';
             if (next === usagePeriod) return;
             usagePeriod = next;
             usageBreakdownOpen = false;

@@ -26,6 +26,11 @@ async function collect(events: any[]): Promise<any[]> {
   return out;
 }
 
+// Convenience for tests that don't care about the trailing usage chunk.
+function withoutUsage(chunks: any[]): any[] {
+  return chunks.filter((c) => Array.isArray(c.choices) && c.choices.length > 0);
+}
+
 function buildMessageStart(id = "msg_x", model = "claude-haiku-4-5"): any {
   return {
     type: "message_start",
@@ -76,8 +81,12 @@ function buildMessageStart(id = "msg_x", model = "claude-haiku-4-5"): any {
   ];
   const chunks = await collect(events);
   const initial = chunks[0];
-  const deltas = chunks.slice(1, -1);
-  const final = chunks[chunks.length - 1];
+  // After Tur N, convertStream emits a synthetic trailing usage chunk (choices: [])
+  // matching OpenAI's stream_options.include_usage shape, so the stop chunk is
+  // second-to-last and the final chunk carries usage.
+  const usageChunk = chunks[chunks.length - 1];
+  const stopChunk = chunks[chunks.length - 2];
+  const deltas = chunks.slice(1, -2);
   const text = deltas.map((c) => c.choices[0].delta.content ?? "").join("");
 
   check(
@@ -87,10 +96,17 @@ function buildMessageStart(id = "msg_x", model = "claude-haiku-4-5"): any {
   );
   check("text deltas concatenate to 'Hello world'", text === "Hello world", text);
   check(
-    "final chunk has finish_reason 'stop' and empty delta",
-    final.choices[0].finish_reason === "stop" &&
-      Object.keys(final.choices[0].delta).length === 0,
-    final.choices[0]
+    "stop chunk has finish_reason 'stop' and empty delta",
+    stopChunk.choices[0].finish_reason === "stop" &&
+      Object.keys(stopChunk.choices[0].delta).length === 0,
+    stopChunk.choices[0]
+  );
+  check(
+    "trailing usage chunk has empty choices and populated usage",
+    Array.isArray(usageChunk.choices) &&
+      usageChunk.choices.length === 0 &&
+      typeof usageChunk.usage?.completion_tokens === "number",
+    usageChunk.usage
   );
   check(
     "all chunks share id and model",
@@ -133,7 +149,7 @@ function buildMessageStart(id = "msg_x", model = "claude-haiku-4-5"): any {
     },
     { type: "message_stop" },
   ];
-  const chunks = await collect(events);
+  const chunks = withoutUsage(await collect(events));
   const startChunk = chunks.find(
     (c) =>
       Array.isArray(c.choices[0].delta.tool_calls) &&
@@ -213,7 +229,7 @@ function buildMessageStart(id = "msg_x", model = "claude-haiku-4-5"): any {
     },
     { type: "message_stop" },
   ];
-  const chunks = await collect(events);
+  const chunks = withoutUsage(await collect(events));
   const text = chunks
     .map((c) => c.choices[0].delta.content ?? "")
     .join("");
@@ -278,7 +294,7 @@ function buildMessageStart(id = "msg_x", model = "claude-haiku-4-5"): any {
     },
     { type: "message_stop" },
   ];
-  const chunks = await collect(events);
+  const chunks = withoutUsage(await collect(events));
   const allToolIndices: number[] = [];
   for (const c of chunks) {
     const tc = c.choices[0].delta.tool_calls;
@@ -310,7 +326,7 @@ function buildMessageStart(id = "msg_x", model = "claude-haiku-4-5"): any {
     },
     { type: "message_stop" },
   ];
-  const chunks = await collect(events);
+  const chunks = withoutUsage(await collect(events));
   // Should still emit initial role chunk + final stop chunk; no content deltas in between.
   const finals = chunks.filter((c) => c.choices[0].finish_reason !== null);
   check(

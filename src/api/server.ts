@@ -10,7 +10,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { runAgent } from "../core/runAgent.js";
-import { getUsage } from "../usage/usageTracker.js";
+import { getUsage, getRunCost } from "../usage/usageTracker.js";
 import {
   isIrrelevantDeveloperContextPath,
   runLlmPatchFlow,
@@ -47,7 +47,7 @@ import {
   getModelName,
 } from "../llm/openaiClient.js";
 import { createLLMClient } from "../llm/factory.js";
-import { withRequestContext, getRequestContext } from "../llm/openaiContext.js";
+import { withRequestContext, getRequestContext, attachRunIdentity } from "../llm/openaiContext.js";
 import type { LLMProvider } from "../llm/types.js";
 import {
   PROMPT_REFINEMENT_FALLBACK,
@@ -2035,7 +2035,10 @@ app.get("/api/usage", async (req, res) => {
   const userId = userIdRaw || "local-dev";
   const periodRaw =
     typeof req.query.period === "string" ? req.query.period.trim() : "";
-  const period: "month" | "all" = periodRaw === "all" ? "all" : "month";
+  const period: "day" | "week" | "month" | "all" =
+    periodRaw === "all" || periodRaw === "day" || periodRaw === "week" || periodRaw === "month"
+      ? periodRaw
+      : "month";
   try {
     const usage = await getUsage(userId, period);
     res.json(usage);
@@ -2436,6 +2439,7 @@ app.post("/api/chat", async (req, res) => {
       });
       return;
     }
+    attachRunIdentity({ userId, runId: runIdStr });
 
     const authorization = await ensureRunAuthorized(userId, { billingMode: "hosted" });
     if (!authorization.allowed) {
@@ -2486,6 +2490,8 @@ app.post("/api/chat", async (req, res) => {
       });
 
       registerRunComplete(runIdStr, "completed");
+      const chatCostUsd = getRunCost(userId, runIdStr);
+      const chatResultWithCost = { ...(result as Record<string, unknown>), costUsd: chatCostUsd };
       emitDeveloperPatchProgress(runIdStr, {
         stage: "run_completed_with_result",
         progress: {
@@ -2494,11 +2500,12 @@ app.post("/api/chat", async (req, res) => {
           type: "chat_response",
           title: result.chatResponse,
           status: "success",
-          result,
+          result: chatResultWithCost,
+          costUsd: chatCostUsd,
         } as any,
       });
       perf.finish("complete");
-      res.json(result);
+      res.json(chatResultWithCost);
     } catch (error) {
       registerRunComplete(runIdStr, "cancelled");
       perf.finish("error");
@@ -2696,6 +2703,8 @@ app.post("/api/patch", async (req, res) => {
       });
       if (runIdStr) {
         registerRunComplete(runIdStr, "completed");
+        const detectedChatCost = getRunCost(userId ?? "", runIdStr);
+        const detectedChatResultWithCost = { ...(result as Record<string, unknown>), costUsd: detectedChatCost };
         emitDeveloperPatchProgress(runIdStr, {
           stage: "run_completed_with_result",
           progress: {
@@ -2704,9 +2713,13 @@ app.post("/api/patch", async (req, res) => {
             type: "chat_response",
             title: result.chatResponse,
             status: "success",
-            result,
+            result: detectedChatResultWithCost,
+            costUsd: detectedChatCost,
           } as any,
         });
+        perf.finish("chat response sent");
+        res.json(detectedChatResultWithCost);
+        return;
       }
       perf.finish("chat response sent");
       res.json(result);
@@ -2958,6 +2971,8 @@ app.post("/api/patch", async (req, res) => {
       );
     }
     // After refresh, the original HTTP response is orphaned. Emit the final result via SSE too.
+    const finalCostUsd = runIdStr ? getRunCost(userId ?? "", runIdStr) : 0;
+    const resultWithCost = { ...(result as Record<string, unknown>), costUsd: finalCostUsd };
     try {
       if (runIdStr) {
         emitDeveloperPatchProgress(runIdStr, {
@@ -2968,12 +2983,13 @@ app.post("/api/patch", async (req, res) => {
             type: "run_completed_with_result",
             title: "Run completed",
             status: "success",
-            result,
+            result: resultWithCost,
+            costUsd: finalCostUsd,
           } as any,
         });
       }
     } catch {}
-    res.json(result);
+    res.json(resultWithCost);
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       perf.finish("cancelled");
@@ -3109,6 +3125,8 @@ app.post("/api/dry-run", async (req, res) => {
     res.status(authorization.status).json(authorization.body);
     return;
   }
+
+  attachRunIdentity({ userId, runId: typeof runId === "string" ? runId : undefined });
 
 const result = await runLlmPatchFlow({
   task,
@@ -3434,6 +3452,10 @@ const { task, repoPath, runId, userId, hostedContext, conversationId } =
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
     return;
   }
+  attachRunIdentity({
+    userId: typeof userId === "string" ? userId : undefined,
+    runId: typeof runId === "string" ? runId : undefined,
+  });
 const authorization = await ensureRunAuthorized(userId, {
   billingMode,
 });  if (!authorization.allowed) {
@@ -3539,6 +3561,10 @@ const { task, repoPath, runId, userId, hostedContext, conversationId } =
     res.status(400).json({ ok: false, reason: "task and repoPath are required" });
     return;
   }
+  attachRunIdentity({
+    userId: typeof userId === "string" ? userId : undefined,
+    runId: typeof runId === "string" ? runId : undefined,
+  });
 const authorization = await ensureRunAuthorized(userId, {
   billingMode,
 });  if (!authorization.allowed) {

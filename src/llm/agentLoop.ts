@@ -3,9 +3,7 @@
   getModelName,
 } from "./openaiClient.js";
 import { createLLMClient } from "./factory.js";
-import { recordExecution } from "../usage/usageTracker.js";
-import type { ProviderName } from "../usage/pricing.js";
-import { getRequestContext } from "./openaiContext.js";
+import { attachRunIdentity, getRequestContext } from "./openaiContext.js";
 import { log, debugLog, errorLog } from "../utils/logger.js";
 import { parseVerificationError } from "../core/parseVerificationError.js";
 import { buildVerifyDiagnostic } from "../core/buildVerifyDiagnostic.js";
@@ -1135,6 +1133,9 @@ export function validatePassedClaim(
 }
 
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
+  // Stamp identity so RecordingLLMClient can attribute every LLM call inside
+  // this run to (userId, runId) for the per-run cost rollup and JSONL logs.
+  attachRunIdentity({ userId: input.userId, runId: input.runId });
   const baseMaxIterations =
     typeof input.maxIterations === "number" ? input.maxIterations : BASE_MAX_ITERATIONS;
   let iterationBudget: IterationBudgetState = {
@@ -1348,40 +1349,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
   const client = createLLMClient({ apiKey: input.userApiKey });
   const requestCtx = getRequestContext();
-
-  // Usage-tracker Tur: capture provider+model once at run start (they are
-  // stable for the duration of the loop) and accumulate per-iter token
-  // counts. Recorded once on exit through either path.
-  const usageProvider: ProviderName =
-    (client as { provider?: string }).provider === "anthropic" ? "anthropic" : "openai";
-  const usageModel = getModelName("high", client.provider, requestCtx?.modelOverride);
-  const executionUsage = {
-    input_uncached: 0,
-    cache_write: 0,
-    cache_read: 0,
-    output: 0,
-  };
-  const recordUsageOnExit = async (): Promise<void> => {
-    if (
-      executionUsage.input_uncached === 0 &&
-      executionUsage.cache_write === 0 &&
-      executionUsage.cache_read === 0 &&
-      executionUsage.output === 0
-    ) {
-      return;
-    }
-    try {
-      await recordExecution({
-        userId: input.userId ?? "local-dev",
-        runId: input.runId ?? "",
-        provider: usageProvider,
-        model: usageModel,
-        ...executionUsage,
-      });
-    } catch (e) {
-      console.warn("[zone-usage] failed to record", e);
-    }
-  };
+  // Usage recording is centralized in RecordingLLMClient (src/llm/recordingClient.ts):
+  // every chat completion across the codebase appends one JSONL record. agentLoop
+  // used to accumulate-then-record-on-exit, but that double-counted with the wrapper
+  // and missed every other LLM call site (planner, intent, final report, etc.).
 
   const throwIfAborted = (stage: string): void => {
     if (input.abortSignal?.aborted) {
@@ -1428,6 +1399,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     });
     // Cache telemetry (Anthropic-only; OpenAI usage will not have these fields).
     // Bedo: this prints once per iter so you can see hit ratio in real time.
+    // Persistence happens in RecordingLLMClient — this block is debug-only.
     try {
       const u = (response as { usage?: Record<string, number> }).usage;
       const write = u?.cache_creation_input_tokens ?? 0;
@@ -1440,12 +1412,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           `[zone-cache] iter=${iter + 1} write=${write} read=${read} input_uncached=${input} output=${output} hit_ratio=${ratio}`
         );
       }
-      // Usage-tracker Tur: accumulate every iter regardless of cache hit/miss.
-      // Anthropic clients populate cache_*; OpenAI clients leave them at 0.
-      executionUsage.input_uncached += input;
-      executionUsage.cache_write += write;
-      executionUsage.cache_read += read;
-      executionUsage.output += output;
     } catch {}
     throwIfAborted("after_llm");
 
@@ -1938,7 +1904,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         verificationReason = "no_changes_made";
         patchValidatedByAgent = false;
       }
-      await recordUsageOnExit();
       return {
         success: true,
         summary: finalText + summaryAppendix,
@@ -2124,7 +2089,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     patchValidatedByAgent = false;
   }
 
-  await recordUsageOnExit();
   return {
     success: false,
     summary: finalSummary,
