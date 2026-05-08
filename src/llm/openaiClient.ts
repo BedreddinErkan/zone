@@ -94,15 +94,15 @@ export function getModelName(
 
   if (provider === "anthropic") {
     if (tier === "high") {
-      return process.env.ZONE_ANTHROPIC_MODEL_HIGH ?? "claude-sonnet-4-5";
+      return process.env.ZONE_ANTHROPIC_MODEL_HIGH ?? "claude-sonnet-4-6";
     }
     return process.env.ZONE_ANTHROPIC_MODEL ?? "claude-haiku-4-5";
   }
 
   if (tier === "high") {
-    return process.env.ZONE_LLM_MODEL_HIGH ?? process.env.OPENAI_MODEL ?? "gpt-4o";
+    return process.env.ZONE_LLM_MODEL_HIGH ?? process.env.OPENAI_MODEL ?? "gpt-5.4";
   }
-  return process.env.ZONE_LLM_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+  return process.env.ZONE_LLM_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-5.4-mini";
 }
 
 export type ZoneResponsesTextExtraction =

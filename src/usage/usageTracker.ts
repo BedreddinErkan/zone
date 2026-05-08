@@ -7,6 +7,9 @@ export interface UsageRecord {
   timestamp: string;
   userId: string;
   runId: string;
+  subagentId?: string;
+  subagentType?: "worker" | "explore" | "verifier";
+  parentRunId?: string;
   provider: ProviderName;
   model: string;
   input_uncached: number;

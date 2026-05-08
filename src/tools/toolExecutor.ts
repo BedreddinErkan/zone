@@ -1,4 +1,5 @@
 import { exec } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -14,6 +15,8 @@ import {
   validateSyntax,
 } from "../ast/astSyntaxValidator.js";
 import { checkWriteScope } from "./scopeGuard.js";
+import { sanitizeVerificationEnv, strippedEnvKeys } from "../core/buildEnv.js";
+import type { ProjectFramework } from "../repo/detectFramework.js";
 
 const execAsync = promisify(exec);
 const READ_FILE_MAX_CHARS = 150_000;
@@ -34,6 +37,7 @@ const DISPATCHED_TOOLS = new Set([
   "write_file",
   "search_in_files",
   "find_references",
+  "Task",
   "run_command_background",
   "read_background_output",
   "kill_background",
@@ -388,11 +392,121 @@ export async function executeTool(
     /** Tur P2-scope: when present, write tools (apply_patch, write_file)
      *  reject paths outside the union of plan.steps[*].filesLikely. */
     executionPlan?: import("../llm/executionPlan.js").ExecutionPlan | null;
+    allowedTools?: ReadonlySet<string>;
+    userId?: string;
+    framework?: ProjectFramework;
+    subagent?: {
+      id: string;
+      type: "worker" | "explore" | "verifier";
+      parentRunId: string;
+    };
   }
 ): Promise<ToolResult> {
   const args = (toolArgs ?? {}) as Record<string, unknown>;
 
   try {
+    if (toolName === "Task") {
+      // nested subagent refused: Workers cannot dispatch Task.
+      if (input?.subagent !== undefined) {
+        return {
+          success: false,
+          output:
+            "Nested subagents are not allowed. The Task tool can only be invoked from the top-level agent.",
+        };
+      }
+      if (input?.allowedTools && !input.allowedTools.has(toolName)) {
+        return {
+          success: false,
+          output: `Tool "${toolName}" is not in the allowed set for this run.`,
+        };
+      }
+
+      const parentRunId = input?.runId;
+      if (!parentRunId) {
+        return {
+          success: false,
+          output: "Task tool requires a parent runId in execution context.",
+        };
+      }
+      // TODO(PR 5+): relax this once subagent write-set prediction and
+      // conflict handling can prove the Worker cannot overlap parent edits.
+      if (input?.stagingFiles && input.stagingFiles.size > 0) {
+        return {
+          success: false,
+          output:
+            "Task dispatch is currently not allowed after the parent run has staged uncommitted writes. " +
+            "The parent must flush or discard its current staging set before delegating to a Worker subagent. " +
+            "Continue the work directly in this run.",
+          error: "task_dispatch_blocked_parent_has_staged_writes",
+          rejectionReason: "parent_staged_writes_present",
+        };
+      }
+
+      const {
+        incrementSubagentCallCount,
+        getSubagentCallCount,
+        MAX_SUBAGENT_CALLS_PER_PARENT_RUN,
+        WORKER_ALLOWED_TOOLS,
+        WORKER_MAX_ITERATIONS,
+        formatSubagentToolResultForParent,
+      } = await import("../llm/subagents.js");
+
+      if (getSubagentCallCount(parentRunId) >= MAX_SUBAGENT_CALLS_PER_PARENT_RUN) {
+        return {
+          success: false,
+          output:
+            `Subagent call budget exhausted (${MAX_SUBAGENT_CALLS_PER_PARENT_RUN} per parent run). ` +
+            "Complete remaining work directly without delegation.",
+        };
+      }
+
+      const subagentType = args.subagent_type;
+      const description = args.description;
+      if (subagentType !== "worker") {
+        return {
+          success: false,
+          output: `Subagent type "${String(subagentType)}" not yet implemented. Currently supported: worker.`,
+        };
+      }
+      if (typeof description !== "string" || !description.trim()) {
+        return {
+          success: false,
+          output: "Task description must be a non-empty string.",
+        };
+      }
+
+      const subagentId = randomUUID();
+      incrementSubagentCallCount(parentRunId);
+
+      const { runAgentLoop } = await import("../llm/agentLoop.js");
+      const { withRequestContext } = await import("../llm/openaiContext.js");
+      const subagentResult = await withRequestContext(
+        { subagentId, subagentType: "worker", parentRunId },
+        () =>
+          runAgentLoop({
+            task: description.trim(),
+            repoPath: repoPath || process.cwd(),
+            runId: parentRunId,
+            userId: input?.userId,
+            framework: input?.framework,
+            maxIterationsOverride: WORKER_MAX_ITERATIONS,
+            allowedTools: WORKER_ALLOWED_TOOLS,
+            subagent: { id: subagentId, type: "worker", parentRunId },
+            parentStagingFiles: input?.stagingFiles,
+            abortSignal: input?.abortSignal,
+          })
+      );
+
+      return formatSubagentToolResultForParent(subagentResult, subagentId);
+    }
+
+    if (input?.allowedTools && !input.allowedTools.has(toolName)) {
+      return {
+        success: false,
+        output: `Tool "${toolName}" is not in the allowed set for this run.`,
+      };
+    }
+
     if (toolName === "run_command") {
       const command = String(args.command ?? "");
       const resolved = resolveRunCommandCwd(args.cwd, repoPath);
@@ -436,13 +550,7 @@ export async function executeTool(
         windowsHide: true,
         maxBuffer: 10 * 1024 * 1024,
         // Build/test commands run by the agent must execute under a clean NODE_ENV.
-        // The parent zone-api process may have NODE_ENV set to "development" via
-        // dotenv or other means; inheriting that breaks Next.js prerender and other
-        // production-mode tooling. Strip it; let npm/next decide the right value.
-        env: (() => {
-          const { NODE_ENV: _drop, ...rest } = process.env;
-          return rest;
-        })(),
+        env: sanitizeVerificationEnv(),
       };
 
       if (process.platform === "win32") {
@@ -462,9 +570,25 @@ export async function executeTool(
         hasAbortSignal: !!input?.abortSignal,
       });
 
-      const { stdout, stderr } = await withStagingTempFlush(input?.stagingFiles, async () => {
-        return await execAsync(command, execOptions);
-      });
+      let stdout = "";
+      let stderr = "";
+      try {
+        const result = await withStagingTempFlush(input?.stagingFiles, async () => {
+          return await execAsync(command, execOptions);
+        });
+        stdout = result.stdout;
+        stderr = result.stderr;
+        console.log(
+          `[zone-verify] cmd="${command.slice(0, 80)}" cwd="${cwd}" exitCode=0 stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
+        );
+      } catch (err) {
+        const code = Number((err as { code?: unknown }).code);
+        const exitCode = Number.isFinite(code) ? code : 1;
+        console.log(
+          `[zone-verify] cmd="${command.slice(0, 80)}" cwd="${cwd}" exitCode=${exitCode} stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
+        );
+        throw err;
+      }
       const combined = [stdout, stderr].filter(Boolean).join("\n");
       const t = truncateText(combined || "(no output)", 4000);
       return { success: true, output: t.text, truncated: t.truncated };
@@ -1314,7 +1438,7 @@ export async function executeTool(
       const syntaxBroken = !validation.ok && validation.reason === "parse_error";
       const smellValidation =
         validation.ok && validation.reason !== "unsupported_extension"
-          ? checkSemanticSmells(outputContent, abs, validation.ast)
+          ? checkSemanticSmells(outputContent, abs, validation.ast, original)
           : { ok: true as const };
       const semanticSmellDetected = !smellValidation.ok;
       debugLog(
@@ -1452,7 +1576,12 @@ export async function executeTool(
       const syntaxBroken = !validation.ok && validation.reason === "parse_error";
       const smellValidation =
         validation.ok && validation.reason !== "unsupported_extension"
-          ? checkSemanticSmells(content, abs, validation.ast)
+          ? checkSemanticSmells(
+              content,
+              abs,
+              validation.ast,
+              fileExists ? originalContent : undefined
+            )
           : { ok: true as const };
       const semanticSmellDetected = !smellValidation.ok;
       debugLog(

@@ -10,8 +10,9 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
     function: {
       name: "run_command",
       strict: true,
+      // P3: output reduction - command results are already returned by the tool.
       description:
-        "Run a shell command in the repo directory. Use for: npm test, npm run build, git status, checking if files exist, etc.",
+        "Run a shell command in the repo directory. Use for: npm test, npm run build, git status, checking if files exist, etc. Do not repeat successful command output in assistant prose.",
       parameters: {
         type: "object",
         properties: {
@@ -159,9 +160,10 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
     function: {
       name: "apply_patch",
       strict: true,
+      // P3: output reduction - keep patch-call turns focused on structured args.
       description:
         "Apply targeted FIND/REPLACE substitutions to an EXISTING file. " +
-        "Always use this instead of write_file when the file already exists.\n\n" +
+        "Always use this instead of write_file when the file already exists. Do not narrate the patch outside the tool arguments.\n\n" +
 
         "## Universal contract (applies to ALL intents)\n" +
         "Each block performs ONE local substitution: the file region matching FIND is replaced verbatim by REPLACE. " +
@@ -355,6 +357,45 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
           },
         },
         required: ["sourceFile", "symbolName"],
+        additionalProperties: false,
+      } as Record<string, unknown>,
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "Task",
+      description:
+        "Delegate a focused, bounded subtask to a subagent running in an " +
+        "isolated context. Use this when a subtask is well-specified and you " +
+        "want to keep your own context clean (e.g., reading many files to " +
+        "answer one question, implementing one component end-to-end). The " +
+        "subagent returns a structured summary; its detailed work is hidden " +
+        "from your context. " +
+        "\n\n" +
+        "DO NOT use Task for trivial work that can be done in 1-2 tool calls. " +
+        "DO NOT use Task to escape your iteration budget on tasks you should " +
+        "be doing yourself.",
+      parameters: {
+        type: "object",
+        properties: {
+          subagent_type: {
+            type: "string",
+            enum: ["worker"],
+            description:
+              "Type of subagent. 'worker' is for focused implementation tasks " +
+              "(file edits within a clear scope). The worker has read/write " +
+              "access to files but cannot run commands or update memory.",
+          },
+          description: {
+            type: "string",
+            description:
+              "A clear, self-contained description of the subtask. The " +
+              "subagent does not see your conversation history, so include " +
+              "all necessary context. Specify expected outcome explicitly.",
+          },
+        },
+        required: ["subagent_type", "description"],
         additionalProperties: false,
       } as Record<string, unknown>,
     },

@@ -53,9 +53,15 @@ async function recordFromResponse(
     const ctx = getRequestContext();
     const userId = ctx?.userId?.trim() || "local-dev";
     const runId = ctx?.runId?.trim() || "";
+    const subagentId = ctx?.subagentId?.trim() || undefined;
+    const subagentType = ctx?.subagentType;
+    const parentRunId = ctx?.parentRunId?.trim() || undefined;
     await recordExecution({
       userId,
       runId,
+      subagentId,
+      subagentType,
+      parentRunId,
       provider: toProviderName(provider),
       model: responseModel || fallbackModel,
       ...usage,

@@ -3,10 +3,11 @@
   getModelName,
 } from "./openaiClient.js";
 import { createLLMClient } from "./factory.js";
-import { attachRunIdentity, getRequestContext } from "./openaiContext.js";
+import { getRequestContext, withRequestContext } from "./openaiContext.js";
 import { readMemory, formatMemoryForPrompt } from "../memory/projectMemory.js";
 import { log, debugLog, errorLog } from "../utils/logger.js";
 import { parseVerificationError } from "../core/parseVerificationError.js";
+import { sanitizeVerificationEnv, strippedEnvKeys } from "../core/buildEnv.js";
 import { buildVerifyDiagnostic } from "../core/buildVerifyDiagnostic.js";
 import { maybeExpandScopeForVerifyDiagnostic } from "../tools/scopeGuard.js";
 import { createHash } from "node:crypto";
@@ -15,6 +16,7 @@ import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
 import { ZONE_TOOLS } from "../tools/toolDefinitions.js";
+import { resetSubagentCallCount } from "./subagents.js";
 import {
   executeTool,
   withStagingTempFlush,
@@ -32,6 +34,11 @@ export interface AgentLoopInput {
   runId?: string;
   framework?: ProjectFramework;
   maxIterations?: number; // default: 10
+  /**
+   * Optional custom max iterations. When set, this is a hard cap: escalation
+   * bonus logic is disabled so restricted runtimes stay bounded.
+   */
+  maxIterationsOverride?: number;
   onProgress?: (msg: string) => void;
   onToolCall?: (name: string, args: Record<string, unknown>) => void;
   onToolResult?: (name: string, result: ToolResult) => void;
@@ -56,6 +63,26 @@ export interface AgentLoopInput {
   /** Usage-tracker Tur: who to attribute this run's BYOK token spend to.
    *  Defaults to "local-dev" when missing. Plumbed through runLlmPatchFlow. */
   userId?: string;
+  /**
+   * Optional tool whitelist. If provided, only tools whose name appears in this
+   * set are exposed to the LLM and accepted by the executor. If undefined,
+   * defaults to the full ZONE_TOOLS set.
+   */
+  allowedTools?: ReadonlySet<string>;
+  /**
+   * Optional subagent metadata reserved for the Task tool follow-up. Setting
+   * this does not change behavior beyond allowedTools enforcement.
+   */
+  subagent?: {
+    id: string;
+    type: "worker" | "explore" | "verifier";
+    parentRunId: string;
+  };
+  /**
+   * Shared staging map owned by a parent agent loop. Subagents write into this
+   * map so the top-level parent keeps exclusive flush/discard authority.
+   */
+  parentStagingFiles?: Map<string, string>;
 }
 
 export type VerificationReason =
@@ -91,6 +118,14 @@ const MAX_SELF_CORRECTION_ATTEMPTS = 5;
 // apply_patch repeat-failure (max 20).
 export const BASE_MAX_ITERATIONS = 15;
 export const ESCALATION_BONUS_ITERATIONS = 5;
+
+function getZoneToolName(tool: (typeof ZONE_TOOLS)[number]): string {
+  return (
+    (tool as { function?: { name?: string }; name?: string }).function?.name ??
+    (tool as { name?: string }).name ??
+    ""
+  );
+}
 
 export type IterationBudgetState = {
   maxIterationsForRun: number;
@@ -210,7 +245,7 @@ const PROVIDER_AGNOSTIC_HARDENING =
   `- Multiple patch attempts, root cause is architectural → state the architectural finding with specific file/line evidence`;
 
 export type FailureRecord = {
-  trigger: SelfCorrectTrigger;
+  trigger: SelfCorrectTrigger | string;
   errorLine: number | null;
   patchHash: string;
   iter: number;
@@ -277,6 +312,10 @@ export function detectRepeatedFailure(
     last.errorLine === prev.errorLine
   ) {
     return { filePath: targetFilePath, reason: "same_root_cause_different_patch" };
+  }
+
+  if (last.trigger === prev.trigger) {
+    return { filePath: targetFilePath, reason: "same_trigger_repeated_2x" };
   }
 
   const sameTriggerCount = records.filter((r) => r.trigger === last.trigger).length;
@@ -561,7 +600,7 @@ export function buildCoachingPrompt(
         `Something went wrong but the failure mode wasn't recognized automatically.\n` +
         `Re-read the most recent tool error carefully. If the error says "not found", it is likely a path or naming issue. ` +
         `If it mentions syntax, check your REPLACE blocks. If it mentions multiple matches, narrow your FIND.\n` +
-        `Next action: do not repeat the previous attempt verbatim â€” change ONE specific thing and explain what you changed.`
+        `Next action: do not repeat the previous attempt verbatim â€” change ONE specific thing; keep any note concise.`
       );
   }
 }
@@ -727,11 +766,20 @@ export async function runStagingVerification(input: {
         timeout: choice.timeoutMs,
         windowsHide: true,
         maxBuffer: 10 * 1024 * 1024,
+        env: sanitizeVerificationEnv(),
       });
     });
     void result;
+    console.log(
+      `[zone-verify] cmd="${choice.command.slice(0, 80)}" cwd="${input.repoPath}" exitCode=0 stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
+    );
     return { status: "pass", label: choice.label, durationMs: Date.now() - start };
   } catch (err) {
+    const code = Number((err as { code?: unknown }).code);
+    const exitCode = Number.isFinite(code) ? code : 1;
+    console.log(
+      `[zone-verify] cmd="${choice.command.slice(0, 80)}" cwd="${input.repoPath}" exitCode=${exitCode} stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
+    );
     const stdout = String((err as { stdout?: unknown }).stdout ?? "");
     const stderr = String((err as { stderr?: unknown }).stderr ?? "");
     const combined = (stdout + "\n" + stderr).trim();
@@ -1134,15 +1182,45 @@ export function validatePassedClaim(
 }
 
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
-  // Stamp identity so RecordingLLMClient can attribute every LLM call inside
-  // this run to (userId, runId) for the per-run cost rollup and JSONL logs.
-  attachRunIdentity({ userId: input.userId, runId: input.runId });
+  const scopedContext: Parameters<typeof withRequestContext>[0] = {};
+  if (typeof input.userId === "string" && input.userId.trim()) {
+    scopedContext.userId = input.userId.trim();
+  }
+  if (typeof input.runId === "string" && input.runId.trim()) {
+    scopedContext.runId = input.runId.trim();
+  }
+  if (input.subagent) {
+    scopedContext.subagentId = input.subagent.id;
+    scopedContext.subagentType = input.subagent.type;
+    scopedContext.parentRunId = input.subagent.parentRunId;
+  }
+  try {
+    return await withRequestContext(scopedContext, () => runAgentLoopScoped(input));
+  } finally {
+    if (!input.subagent && input.runId) {
+      resetSubagentCallCount(input.runId);
+    }
+  }
+}
+
+async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResult> {
   const baseMaxIterations =
-    typeof input.maxIterations === "number" ? input.maxIterations : BASE_MAX_ITERATIONS;
+    typeof input.maxIterationsOverride === "number"
+      ? input.maxIterationsOverride
+      : typeof input.maxIterations === "number"
+        ? input.maxIterations
+        : BASE_MAX_ITERATIONS;
+  const escalationEnabled = typeof input.maxIterationsOverride !== "number";
   let iterationBudget: IterationBudgetState = {
     maxIterationsForRun: baseMaxIterations,
     escalationBonusGranted: false,
   };
+  const toolsForLLM = input.allowedTools
+    ? ZONE_TOOLS.filter((t) => input.allowedTools!.has(getZoneToolName(t)))
+    : ZONE_TOOLS;
+  if (input.allowedTools && toolsForLLM.length === 0) {
+    throw new Error("AgentLoopInput.allowedTools resolved to zero tools — aborting.");
+  }
   const toolCallLog: Array<{
     tool: string;
     args: Record<string, unknown>;
@@ -1154,20 +1232,19 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const failureHistory = new Map<string, FailureRecord[]>();
   const escalatedFiles = new Set<string>();
   // Tur 1: in-memory staging. Writes go here instead of disk during the loop;
-  // reads fall back to staging first, disk second. Flushed unconditionally at exit.
+  // reads fall back to staging first, disk second. Top-level loops own flushing;
+  // subagents share the parent map and must not flush independently.
   // run_command stays disk-bound — it sees the OLD disk state until flush. (Tur 2)
-  const stagingFiles = new Map<string, string>();
+  const ownsStagingFiles = input.parentStagingFiles === undefined;
+  const stagingFiles = input.parentStagingFiles ?? new Map<string, string>();
 
   // Diagnostic: confirm agent loop entry and tool inventory
   debugLog("[zone-agent-loop-entry]", JSON.stringify({
     task: input.task.slice(0, 200),
     repoPath: input.repoPath,
     maxIterations: iterationBudget.maxIterationsForRun,
-    toolsAvailable: ZONE_TOOLS.map(
-      (t) =>
-        (t as { function?: { name?: string }; name?: string }).function?.name ??
-        (t as { name?: string }).name ??
-        "unknown"
+    toolsAvailable: toolsForLLM.map(
+      (t) => getZoneToolName(t) || "unknown"
     ),
     hasRunId: !!(input.runId && input.runId.trim()),
   }));
@@ -1239,8 +1316,44 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     debugLog("[zone-memory] read failed", err);
   }
 
+  const isWorkerSubagent = input.subagent?.type === "worker";
+  const agentIntro = isWorkerSubagent
+    ? `You are a Worker subagent in Zone. You have been delegated a single,\n` +
+      `specific subtask by a parent agent. Your job is to complete this subtask\n` +
+      `efficiently and return a structured summary.\n\n` +
+      `Constraints:\n` +
+      `- You have a restricted tool set. Only use the tools available to you.\n` +
+      `- You CANNOT delegate further (no nested subagents).\n` +
+      `- You CANNOT update project memory or run shell commands.\n` +
+      `- Stay focused on the delegated subtask. Do not expand scope.\n` +
+      `- Iteration budget is limited (12 iterations). Be decisive.\n\n` +
+      `When the subtask is done (or you determine it cannot be completed), respond\n` +
+      `with the following structured summary as your final message — and nothing else:\n\n` +
+      `SUMMARY: <one short paragraph, 2-4 sentences>\n` +
+      `FILES_MODIFIED: <comma-separated relative paths, or "none">\n` +
+      `STATUS: <success | failed | partial>\n` +
+      `NOTES: <optional; one sentence only if there are caveats>\n\n` +
+      `Do not include any other text after the structured summary block.`
+    : `You are Zone, an AI code agent${fw?.framework ? ` working on a ${fw.framework} project` : ""}.`;
+  const canRunCommand = toolsForLLM.some((t) => getZoneToolName(t) === "run_command");
+  const backgroundCommandBlock = canRunCommand
+    ? `\n## Background commands\n` +
+      `For long-running commands (dev servers, watchers, anything that doesn't exit on its own), use \`run_command_background\` instead of \`run_command\`. ` +
+      `This returns a handle immediately so you can keep working. Read the output later with \`read_background_output\` (passing the previous \`new_offset\` to get only new bytes). ` +
+      `Kill with \`kill_background\` when done — processes are also auto-killed when the run ends.\n\n` +
+      `Heuristic:\n` +
+      `- Long-lived (npm run dev, vite, next dev, pytest --watch, tail -f) → \`run_command_background\`\n` +
+      `- One-shot (npm run build, npm test, eslint, tsc --noEmit) → \`run_command\`\n\n` +
+      `Poll sparingly. Calling \`read_background_output\` every iteration wastes tokens. Read once after a few iterations of other work, or right before you need the result.\n\n` +
+      `Example:\n` +
+      `1. \`run_command_background\` → handle "bg_a3k7q2"\n` +
+      `2. read_file / apply_patch / etc. (a few iterations)\n` +
+      `3. \`read_background_output { handle: "bg_a3k7q2", since_offset: null, max_bytes: 4096 }\`\n` +
+      `4. If output looks done → \`kill_background\`. Else iterate.\n\n`
+    : "";
+
   const systemContent =
-    `You are Zone, an AI code agent${fw?.framework ? ` working on a ${fw.framework} project` : ""}.\n\n` +
+    `${agentIntro}\n\n` +
     (fw ? `${fwLines.join("\n")}\n\n` : "") +
     (projectMemoryBlock ? `${projectMemoryBlock}\n\n` : "") +
     (input.importContextSummary
@@ -1316,8 +1429,14 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     `4. run_command to verify (run the test suite if one exists).\n` +
     `5. If tests fail: read_file at the error location, determine cause,\n` +
     `   apply targeted fix with intent='modify' or intent='delete', re-run tests.\n` +
-    `6. When all checks pass (or no tests exist), respond with a plain-text summary.\n` +
+    `6. When all checks pass (or no tests exist), respond with a concise plain-text summary.\n` +
     `Maximum iterations: ${baseMaxIterations} (already enforced -- do not stall).\n\n` +
+    // P3: output reduction - final prose should add status, not restate the visible diff.
+    `OUTPUT ECONOMY:\n` +
+    `- Final response: 60-80 words unless an error/warning needs more detail.\n` +
+    `- Include changed files, verification result, and any remaining warning.\n` +
+    `- Omit tables, decorative markdown, and per-file explanations already visible in the diff.\n` +
+    `- Do not recap tool output or command logs unless they explain a failure.\n\n` +
     `TRUNCATED FILE SECTIONS: If you see a ZONE_CONTEXT_TRUNCATED marker in a file,\n` +
     `part of the file was omitted from the initial context to save space.\n` +
     `- DO NOT include the marker line in any apply_patch FIND block.\n` +
@@ -1336,20 +1455,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     `Use tests_inconclusive for: 'missing script', 'command not found', 'ENOENT', port\n` +
     `conflicts, or any environment issue that prevented the suite from running at all.\n` +
     `Use tests_failed_by_patch ONLY when the error clearly points at code you changed.\n\n` +
-    (fw ? `When running commands, use the correct package manager and commands above.\n` : "") +
-    `\n## Background commands\n` +
-    `For long-running commands (dev servers, watchers, anything that doesn't exit on its own), use \`run_command_background\` instead of \`run_command\`. ` +
-    `This returns a handle immediately so you can keep working. Read the output later with \`read_background_output\` (passing the previous \`new_offset\` to get only new bytes). ` +
-    `Kill with \`kill_background\` when done — processes are also auto-killed when the run ends.\n\n` +
-    `Heuristic:\n` +
-    `- Long-lived (npm run dev, vite, next dev, pytest --watch, tail -f) → \`run_command_background\`\n` +
-    `- One-shot (npm run build, npm test, eslint, tsc --noEmit) → \`run_command\`\n\n` +
-    `Poll sparingly. Calling \`read_background_output\` every iteration wastes tokens. Read once after a few iterations of other work, or right before you need the result.\n\n` +
-    `Example:\n` +
-    `1. \`run_command_background\` → handle "bg_a3k7q2"\n` +
-    `2. read_file / apply_patch / etc. (a few iterations)\n` +
-    `3. \`read_background_output { handle: "bg_a3k7q2", since_offset: null, max_bytes: 4096 }\`\n` +
-    `4. If output looks done → \`kill_background\`. Else iterate.\n\n` +
+    (fw && canRunCommand ? `When running commands, use the correct package manager and commands above.\n` : "") +
+    backgroundCommandBlock +
     `Repository path: ${input.repoPath}`;
 
   // Chat Completions messages (system + user kickoff).
@@ -1404,7 +1511,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       {
         model: getModelName("high", client.provider, requestCtx?.modelOverride),
         messages: responseInput,
-        tools: ZONE_TOOLS,
+        tools: toolsForLLM,
         tool_choice: "auto",
       },
       { signal: input.abortSignal }
@@ -1559,6 +1666,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           stagingFiles,
           abortSignal: input.abortSignal,
           executionPlan: input.executionPlan ?? null,
+          allowedTools: input.allowedTools,
+          userId: input.userId,
+          framework: input.framework,
+          subagent: input.subagent,
         });
         debugLog("[zone-agent-tool-post]", {
           runId: input.runId,
@@ -1605,7 +1716,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             typeof parsedArgs.filePath === "string" ? parsedArgs.filePath : null;
           if (parsedFilePath) failedFilesThisIter.add(parsedFilePath);
           const filePath = parsedFilePath ?? "unknown";
-          const trigger = classifyFailure(name, result.output, result.error);
+          const classifiedTrigger = classifyFailure(name, result.output, result.error);
+          const trigger =
+            classifiedTrigger === "apply_patch_semantic_smell"
+              ? extractSemanticSmellName(result.output)
+              : classifiedTrigger;
           const errorLine = extractErrorLine(result.output);
           const patchHash = hashPatchBlocks(parsedArgs);
           const list = failureHistory.get(filePath) ?? [];
@@ -1618,6 +1733,21 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           parsedArgs.filePath != null
         ) {
           filesModified.add(String(parsedArgs.filePath));
+        }
+        if (name === "Task" && result.success) {
+          try {
+            const parsed = JSON.parse(result.output) as { filesModified?: unknown };
+            if (Array.isArray(parsed.filesModified)) {
+              for (const filePath of parsed.filesModified) {
+                if (typeof filePath === "string" && filePath.trim()) {
+                  filesModified.add(filePath.trim());
+                }
+              }
+            }
+          } catch {
+            // Best-effort only. Task summaries are user-visible tool content,
+            // but modified-file aggregation should not make the loop fail.
+          }
         }
 
         // Chat Completions: each tool_call gets one matching role:"tool" reply.
@@ -1663,13 +1793,15 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             reason: repeatPattern.reason,
             attempts: failureHistory.get(repeatPattern.filePath)?.length ?? 0,
           }));
-          iterationBudget = maybeGrantEscalationBonus(
-            iterationBudget,
-            escalatedFiles.size,
-            iter,
-            input.onProgress,
-            baseMaxIterations
-          );
+          if (escalationEnabled) {
+            iterationBudget = maybeGrantEscalationBonus(
+              iterationBudget,
+              escalatedFiles.size,
+              iter,
+              input.onProgress,
+              baseMaxIterations
+            );
+          }
         } else {
           routedTrigger = classifyFailure(failedToolName, failedToolOutput, failedToolError);
         }
@@ -1897,12 +2029,22 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         inferredFrom: vrMatch ? "tag" : "heuristic",
         summaryPreview: finalText.slice(0, 200),
       }));
-      const finalizeResult = await finalizeStaging({
-        stagingFiles,
-        repoPath: input.repoPath,
-        framework: input.framework,
-        withStagingTempFlush,
-      });
+      const finalizeResult = ownsStagingFiles
+        ? await finalizeStaging({
+            stagingFiles,
+            repoPath: input.repoPath,
+            framework: input.framework,
+            withStagingTempFlush,
+          })
+        : {
+            flushed: false,
+            verification: {
+              status: "skipped" as const,
+              reason: "subagent_deferred_to_parent",
+            },
+            filesFlushed: 0,
+            flushFailures: 0,
+          };
       let summaryAppendix = "";
       if (finalizeResult.verification.status === "fail") {
         verificationReason = "verification_failed_staged";
@@ -1974,8 +2116,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           role: "user",
           content:
             `You have reached the maximum number of iterations${grantedBonus}. ` +
-            "Provide a brief final summary of what you did and include exactly one " +
+            // P3: output reduction - cap the fallback assessment summary too.
+            "Provide a 60-80 word final summary and include exactly one " +
             "[ZONE_VERIFICATION: <reason>] tag. " +
+            "Do not use tables or recap details already visible in the diff. " +
             "Choose: tests_passed, tests_skipped_no_infra, tests_inconclusive, " +
             "tests_failed_unrelated, tests_failed_by_patch, or no_verification_attempted. " +
             "Use tests_inconclusive if tests failed due to environment issues " +
@@ -2081,12 +2225,22 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     patchValidatedByAgent,
   }));
 
-  const finalizeResult = await finalizeStaging({
-    stagingFiles,
-    repoPath: input.repoPath,
-    framework: input.framework,
-    withStagingTempFlush,
-  });
+  const finalizeResult = ownsStagingFiles
+    ? await finalizeStaging({
+        stagingFiles,
+        repoPath: input.repoPath,
+        framework: input.framework,
+        withStagingTempFlush,
+      })
+    : {
+        flushed: false,
+        verification: {
+          status: "skipped" as const,
+          reason: "subagent_deferred_to_parent",
+        },
+        filesFlushed: 0,
+        flushFailures: 0,
+      };
   if (finalizeResult.verification.status === "fail") {
     finalVerificationReason = "verification_failed_staged";
     patchValidatedByAgent = false;

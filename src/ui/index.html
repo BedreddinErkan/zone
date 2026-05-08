@@ -1167,7 +1167,7 @@
       }
       window.ZONE_REPOS = Array.isArray(window.ZONE_REPOS) ? window.ZONE_REPOS : [];
       window.ZONE_USER_ID = window.ZONE_USER_ID || null;
-      window.ZONE_MODEL = window.ZONE_MODEL || 'gpt-4o';
+      window.ZONE_MODEL = window.ZONE_MODEL || 'gpt-5.4';
     })();
 
     const state = {
@@ -1190,7 +1190,6 @@
       sidebarResizing: false,
       __resumeScanInProgress: false,
       __sendDebugByRun: {},
-      __trustedSession: false,
       __useStepTimeline: false,  // Summary view retired; raw log is the only view
       activeBranch: null,
       branchList: [],
@@ -2631,7 +2630,7 @@
     }
 
     function createChatHeaderMarkup(){
-      const model = escapeHtml(String(window.ZONE_MODEL || 'gpt-4o'));
+      const model = escapeHtml(String(window.ZONE_MODEL || 'gpt-5.4'));
       return `
         <div class="zone-chat-head">
           <div class="zone-chat-brand">
@@ -3148,7 +3147,7 @@
               trustCb.type = 'checkbox';
               trustCb.style.cssText = 'accent-color:#7c3aed;transform:translateY(1px)';
               const trustTxt = document.createElement('span');
-              trustTxt.textContent = 'Trust all commands for this session';
+              trustTxt.textContent = 'Trust this command for this run';
               trustRow.appendChild(trustCb);
               trustRow.appendChild(trustTxt);
               const statusEl = document.createElement('div');
@@ -3157,14 +3156,13 @@
                 approveBtn.disabled = true;
                 rejectBtn.disabled = true;
                 statusEl.textContent = approved ? 'Approved ✓' : 'Rejected ✗';
-                if (approved && trustCb && trustCb.checked) state.__trustedSession = true;
                 const idx = entry.pendingApprovals.indexOf(approvalId);
                 if (idx !== -1) entry.pendingApprovals.splice(idx, 1);
                 try {
                   await apiFetch('/api/approve-command', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ approvalId, approved: !!approved, runId, trustSession: !!(approved && trustCb && trustCb.checked) })
+                    body: JSON.stringify({ approvalId, approved: !!approved, runId, trust: !!(approved && trustCb && trustCb.checked) })
                   });
                 } catch {}
                 renderExecutionSummaryCategory(runId, 'run');
@@ -5432,18 +5430,22 @@
       return getApiKeys()[getActiveProvider()] || '';
     }
 
-    // ---- Model catalog (mirrors src/llm/models.ts) ----
+    // MUST mirror src/llm/models.ts MODEL_CATALOG.
+    // TODO(post-launch): replace with fetch from /api/models endpoint to remove duplication.
     const ZONE_MODEL_CATALOG = {
       openai: [
-        { id: 'gpt-4o', label: 'GPT-4o', recommendedTier: 'high' },
-        { id: 'gpt-4o-mini', label: 'GPT-4o mini', recommendedTier: 'standard' },
-        { id: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-        { id: 'o1', label: 'o1 (reasoning)', costNote: 'Slower, more expensive — best for complex multi-step reasoning' },
+        { id: 'gpt-5.4', label: 'GPT-5.4', recommendedTier: 'high' },
+        { id: 'gpt-5.4-mini', label: 'GPT-5.4 mini', recommendedTier: 'standard' },
+        { id: 'gpt-5.5', label: 'GPT-5.5', costNote: 'Frontier model — higher cost, best for complex multi-step work' },
+        { id: 'gpt-5.4-nano', label: 'GPT-5.4 nano', costNote: 'Ultra-budget — for classification/routing' },
+        { id: 'gpt-4o', label: 'GPT-4o', costNote: 'Legacy — GPT-5.4 recommended' },
+        { id: 'gpt-4o-mini', label: 'GPT-4o mini', costNote: 'Legacy — GPT-5.4 mini recommended' },
       ],
       anthropic: [
-        { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', recommendedTier: 'high' },
+        { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', recommendedTier: 'high' },
         { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', recommendedTier: 'standard' },
-        { id: 'claude-opus-4-5', label: 'Claude Opus 4.5', costNote: '~5× more expensive than Sonnet — verify your usage budget' },
+        { id: 'claude-opus-4-7', label: 'Claude Opus 4.7', costNote: 'Frontier model — ~1.7× Sonnet output cost; verify usage budget' },
+        { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', costNote: 'Legacy — Sonnet 4.6 recommended' },
       ],
     };
     function getModelOption(provider, modelId){
@@ -5660,8 +5662,8 @@
      * Tur P1-approval: ApprovalPrompt — sticky command-approval UI.
      * Replaces the inline "Run this command?" card. One prompt at a time;
      * additional approvals queue. Approve/Reject POST to /api/approve-command
-     * with the same payload shape as the inline path. Trust state lives in
-     * `state.__trustedSession` (window-level, not persisted) — same as before.
+     * with the same payload shape as the inline path. Command trust is scoped
+     * server-side to the active run and exact command string.
      * Keyboard: Approve focused by default, Left/Right toggles, Enter triggers,
      * Esc rejects. Keyboard handler is gated when the chat textarea has focus.
      */
@@ -5688,8 +5690,8 @@
             '<button type="button" class="zone-approval-sticky-button" data-action="approve">✓ Approve</button>' +
             '<button type="button" class="zone-approval-sticky-button" data-action="reject">✗ Reject</button>' +
             '<label class="zone-approval-sticky-trust">' +
-              '<input type="checkbox" data-role="trust" />' +
-              '<span>Trust all commands for this session</span>' +
+              '<input type="checkbox" data-role="trust" data-trust />' +
+              '<span>Trust this command for this run</span>' +
             '</label>' +
           '</div>' +
           '<div class="zone-approval-sticky-status" data-role="status"></div>';
@@ -5697,12 +5699,12 @@
         this._rejectBtn = this.container.querySelector('[data-action="reject"]');
         this._trustCb = this.container.querySelector('[data-role="trust"]');
         this._statusEl = this.container.querySelector('[data-role="status"]');
-        if (this._trustCb && state.__trustedSession){
-          // Edge case: a prior approval set trust mid-queue. Mirror current state.
-          this._trustCb.checked = true;
-        }
-        this._approveBtn.addEventListener('click', () => { this._decide(true); });
-        this._rejectBtn.addEventListener('click', () => { this._decide(false); });
+        this._approveBtn.addEventListener('click', () => {
+          const trustCheckbox = this.container.querySelector('input[data-trust]');
+          const trust = trustCheckbox?.checked === true;
+          this._decide(true, trust);
+        });
+        this._rejectBtn.addEventListener('click', () => { this._decide(false, false); });
       }
       _bindKeyboard(){
         this._keyHandler = (e) => {
@@ -5723,7 +5725,7 @@
             this._decide(this.focusedAction === 'approve');
           } else if (e.key === 'Escape'){
             e.preventDefault();
-            this._decide(false);
+            this._decide(false, false);
           }
         };
         window.addEventListener('keydown', this._keyHandler, true);
@@ -5741,11 +5743,10 @@
           try { btn.focus({ preventScroll: true }); } catch { try { btn.focus(); } catch {} }
         }
       }
-      _decide(approved){
+      _decide(approved, trust = false){
         if (this._dismissed) return;
         this._dismissed = true;
-        const trustChecked = !!(approved && this._trustCb && this._trustCb.checked);
-        if (approved && trustChecked) state.__trustedSession = true;
+        const trustChecked = !!(approved && (trust || (this._trustCb && this._trustCb.checked)));
         if (this._approveBtn) this._approveBtn.disabled = true;
         if (this._rejectBtn) this._rejectBtn.disabled = true;
         if (this.callbacks.onDecide){
@@ -5776,24 +5777,6 @@
       const approvalId = String(approvalEvt.approvalId || '');
       const command = String(approvalEvt.command || '');
       if (!approvalId || !command) return;
-      // Auto-approve when the user has trusted the session — preserves the
-      // exact behavior of the prior inline path (lines 6233-6246).
-      if (state.__trustedSession){
-        if (logBlock){
-          try { appendLogLine(logBlock, { timestamp: nowTs(), message: 'Auto-approved: $ ' + command, status: 'done' }); } catch {}
-        }
-        void (async () => {
-          try {
-            await apiFetch('/api/approve-command', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ approvalId, approved: true, runId, trustSession: true })
-            });
-          } catch {}
-        })();
-        if (logBlock) scrollChatIfFollowing(logBlock);
-        return;
-      }
       const payload = { approvalId, command, runId };
       if (__zoneActiveApproval){
         __zoneApprovalQueue.push(payload);
@@ -5847,7 +5830,7 @@
                   approvalId: p.approvalId,
                   approved: !!approved,
                   runId: p.runId,
-                  trustSession: !!(approved && state.__trustedSession),
+                  trust: !!_trustChecked,
                 })
               });
             } catch {}
@@ -5861,25 +5844,6 @@
     function __zoneProcessApprovalQueue(){
       if (__zoneApprovalQueue.length === 0) return;
       const next = __zoneApprovalQueue.shift();
-      // Trust may have just been turned on by the prior decision — re-check.
-      if (state.__trustedSession){
-        const lb = document.getElementById('logBlock-' + next.runId);
-        if (lb){
-          try { appendLogLine(lb, { timestamp: nowTs(), message: 'Auto-approved: $ ' + next.command, status: 'done' }); } catch {}
-        }
-        void (async () => {
-          try {
-            await apiFetch('/api/approve-command', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ approvalId: next.approvalId, approved: true, runId: next.runId, trustSession: true })
-            });
-          } catch {}
-        })();
-        // Drain any remaining queued items the same way.
-        __zoneProcessApprovalQueue();
-        return;
-      }
       // Tiny gap so the dismiss-then-show transition reads visually.
       setTimeout(() => { __zoneRenderApproval(next); }, 100);
     }
@@ -6662,8 +6626,6 @@
     function createNewThreadForRepo(repo){
       const normalizedRepo = normalizeRepoRecord(repo);
       if (!normalizedRepo) return;
-      // Reset session trust on new thread creation (in-memory only).
-      state.__trustedSession = false;
       const thread = {
         id: crypto.randomUUID(),
         repoPath: normalizedRepo.path,

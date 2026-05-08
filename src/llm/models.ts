@@ -11,20 +11,21 @@ export interface ModelOption {
 
 export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {
   openai: [
-    { id: "gpt-4o", label: "GPT-4o", recommendedTier: "high" },
-    { id: "gpt-4o-mini", label: "GPT-4o mini", recommendedTier: "standard" },
-    { id: "gpt-4-turbo", label: "GPT-4 Turbo" },
+    { id: "gpt-5.4",      label: "GPT-5.4",      recommendedTier: "high" },
+    { id: "gpt-5.4-mini", label: "GPT-5.4 mini", recommendedTier: "standard" },
     {
-      id: "o1",
-      label: "o1 (reasoning)",
-      costNote:
-        "Slower, more expensive — best for complex multi-step reasoning",
+      id: "gpt-5.5",
+      label: "GPT-5.5",
+      costNote: "Frontier model — higher cost, best for complex multi-step work",
     },
+    { id: "gpt-5.4-nano", label: "GPT-5.4 nano", costNote: "Ultra-budget — for classification/routing" },
+    { id: "gpt-4o",       label: "GPT-4o",       costNote: "Legacy — GPT-5.4 recommended" },
+    { id: "gpt-4o-mini",  label: "GPT-4o mini",  costNote: "Legacy — GPT-5.4 mini recommended" },
   ],
   anthropic: [
     {
-      id: "claude-sonnet-4-5",
-      label: "Claude Sonnet 4.5",
+      id: "claude-sonnet-4-6",
+      label: "Claude Sonnet 4.6",
       recommendedTier: "high",
     },
     {
@@ -33,10 +34,11 @@ export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {
       recommendedTier: "standard",
     },
     {
-      id: "claude-opus-4-5",
-      label: "Claude Opus 4.5",
-      costNote: "~5× more expensive than Sonnet — verify your usage budget",
+      id: "claude-opus-4-7",
+      label: "Claude Opus 4.7",
+      costNote: "Frontier model — ~1.7× Sonnet output cost; verify usage budget",
     },
+    { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5", costNote: "Legacy — Sonnet 4.6 recommended" },
   ],
 };
 
