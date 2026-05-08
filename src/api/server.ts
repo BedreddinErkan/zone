@@ -2141,6 +2141,45 @@ app.post("/api/dev/index-repo", async (req, res) => {
   });
 });
 
+// Project memory: <repo>/.zone/memory.md, populated by the agent's update_memory tool.
+app.get("/api/memory", async (req, res) => {
+  const repo = String(req.query.repo ?? "").trim();
+  if (!repo) {
+    return res.status(400).json({ ok: false, error: "missing_repo" });
+  }
+  try {
+    const { readMemory } = await import("../memory/projectMemory.js");
+    const entries = await readMemory(repo);
+    res.json({ ok: true, entries });
+  } catch (err) {
+    errorLog("[zone] /api/memory failed", err);
+    res.status(500).json({ ok: false, error: "internal" });
+  }
+});
+
+app.delete("/api/memory/entry", async (req, res) => {
+  const repo = String(req.query.repo ?? "").trim();
+  const indexRaw = req.query.index;
+  const index = Number.parseInt(String(indexRaw ?? ""), 10);
+  if (!repo) {
+    return res.status(400).json({ ok: false, error: "missing_repo" });
+  }
+  if (!Number.isInteger(index) || index < 0) {
+    return res.status(400).json({ ok: false, error: "missing_index" });
+  }
+  try {
+    const { deleteMemoryEntry } = await import("../memory/projectMemory.js");
+    const ok = await deleteMemoryEntry(repo, index);
+    if (!ok) {
+      return res.status(404).json({ ok: false, error: "not_found" });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    errorLog("[zone] /api/memory/entry DELETE failed", err);
+    res.status(500).json({ ok: false, error: "internal" });
+  }
+});
+
 app.get("/api/branches", async (req, res) => {
   const repo = String(req.query.repo ?? "").trim();
   if (!repo) {

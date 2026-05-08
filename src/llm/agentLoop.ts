@@ -4,6 +4,7 @@
 } from "./openaiClient.js";
 import { createLLMClient } from "./factory.js";
 import { attachRunIdentity, getRequestContext } from "./openaiContext.js";
+import { readMemory, formatMemoryForPrompt } from "../memory/projectMemory.js";
 import { log, debugLog, errorLog } from "../utils/logger.js";
 import { parseVerificationError } from "../core/parseVerificationError.js";
 import { buildVerifyDiagnostic } from "../core/buildVerifyDiagnostic.js";
@@ -1223,9 +1224,25 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       fwLines.push(``, `- Sub-projects: ${fw.subProjects.map((s) => s.framework).join(", ")}`);
     }
   }
+  // Project memory: <repo>/.zone/memory.md, populated via the update_memory tool.
+  // Best-effort read — a missing/corrupt file just returns no entries.
+  let projectMemoryBlock = "";
+  try {
+    const memoryEntries = await readMemory(input.repoPath);
+    projectMemoryBlock = formatMemoryForPrompt(memoryEntries);
+    if (memoryEntries.length > 0) {
+      debugLog(
+        `[zone-memory] injected ${memoryEntries.length} entries into agent system prompt`
+      );
+    }
+  } catch (err) {
+    debugLog("[zone-memory] read failed", err);
+  }
+
   const systemContent =
     `You are Zone, an AI code agent${fw?.framework ? ` working on a ${fw.framework} project` : ""}.\n\n` +
     (fw ? `${fwLines.join("\n")}\n\n` : "") +
+    (projectMemoryBlock ? `${projectMemoryBlock}\n\n` : "") +
     (input.importContextSummary
       ? `RELATED FILES (read-only context for planning â€” call read_file for full content):\n` +
         `This block lists the primary file's import ecosystem. Use it to anticipate what other files might need updating, but do NOT assume contents â€” call read_file when you need to actually edit.\n` +

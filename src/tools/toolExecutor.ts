@@ -38,6 +38,7 @@ const DISPATCHED_TOOLS = new Set([
   "read_background_output",
   "kill_background",
   "list_background",
+  "update_memory",
 ]);
 
 // Import the definitions lazily to keep the check co-located with the executor.
@@ -1668,6 +1669,37 @@ export async function executeTool(
       ];
 
       return { success: true, output: lines.join("\n") };
+    }
+
+    if (toolName === "update_memory") {
+      const entry = String(args.entry || "").trim();
+      const reason = String(args.reason || "").trim();
+      if (!entry) {
+        return { success: false, output: "update_memory: entry is required" };
+      }
+      if (entry.length > 200) {
+        return {
+          success: false,
+          output: `update_memory: entry too long (${entry.length}/200). Rephrase as a single short sentence.`,
+        };
+      }
+      if (!reason) {
+        return {
+          success: false,
+          output:
+            "update_memory: reason is required — explain why this isn't obvious from the repo structure.",
+        };
+      }
+      const { appendMemory } = await import("../memory/projectMemory.js");
+      const saved = await appendMemory(repoPath, entry);
+      console.log(
+        `[zone-memory] entry added: "${saved.text}" — reason: ${reason}`
+      );
+      onProgress?.(`[tool] Saved memory: ${saved.text}`);
+      return {
+        success: true,
+        output: `Saved to project memory:\n  - [${saved.date}] ${saved.text}\n\nThis convention will be injected into future Zone agent prompts on this repo.`,
+      };
     }
 
     return {
