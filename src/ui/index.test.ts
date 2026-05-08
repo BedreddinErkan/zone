@@ -447,6 +447,12 @@ type UiContext = {
     effectiveDiffsEmpty: boolean;
   };
   cacheClass(ratio: number): string;
+  setRun(threadId: string, runState: { runId: string; todos?: unknown[] } | null): void;
+  clearRun(threadId: string): void;
+  activateThread(threadId: string): void;
+  setTodosForRun(runId: string, todos: unknown[]): void;
+  updateTodoStatusForRun(runId: string, todoId: string, status: string): void;
+  renderTodoSidebar(): void;
 };
 
 type UiContextBase = Omit<
@@ -1080,6 +1086,47 @@ describe("UI cost meter cache colors", () => {
     expect(context.cacheClass(0)).toBe("cold");
     expect(context.cacheClass(0.5)).toBe("warm");
     expect(context.cacheClass(0.89)).toBe("hot");
+  });
+});
+
+describe("UI todo sidebar", () => {
+  it("renders mixed todo statuses with completed plus skipped counter", () => {
+    const { context, elements } = buildUiHarness();
+
+    context.activateThread("thread-1");
+    context.setRun("thread-1", { runId: "run-1" });
+    context.setTodosForRun("run-1", [
+      { id: "todo-0", text: "Read files", status: "completed" },
+      { id: "todo-1", text: "Patch UI", description: "Render sidebar", status: "in_progress" },
+      { id: "todo-2", text: "Skip deploy", filesLikely: ["src/ui/index.html"], status: "skipped" },
+    ]);
+
+    const sidebar = elements.get("zoneTodoSidebar");
+    expect(sidebar.dataset.state).toBe("visible");
+    expect(sidebar.textContent).toContain("2/3");
+    expect(sidebar.textContent).toContain("Read files");
+    expect(sidebar.textContent).toContain("Render sidebar");
+    expect(sidebar.textContent).toContain("src/ui/index.html");
+  });
+
+  it("shows todos for the active thread run and hides for a new run without todos", () => {
+    const { context, elements } = buildUiHarness();
+
+    context.activateThread("thread-1");
+    context.setRun("thread-1", { runId: "run-1" });
+    context.setTodosForRun("run-1", [
+      { id: "todo-0", text: "First thread", status: "completed" },
+    ]);
+    expect(elements.get("zoneTodoSidebar").textContent).toContain("First thread");
+
+    context.setRun("thread-1", { runId: "run-2" });
+    expect(elements.get("zoneTodoSidebar").dataset.state).toBe("hidden");
+
+    context.setTodosForRun("run-2", [
+      { id: "todo-0", text: "Second run", status: "pending" },
+    ]);
+    expect(elements.get("zoneTodoSidebar").textContent).toContain("Second run");
+    expect(elements.get("zoneTodoSidebar").textContent).not.toContain("First thread");
   });
 });
 

@@ -86,10 +86,9 @@ export type ZoneStructuredProgressEvent = {
     | "chat_chunk"
     | "chat_done"
     | "chat_response"
-    | "plan_generated"
-    | "plan_discard"
-    | "plan_step_started"
-    | "plan_step_complete"
+    | "todos_initialized"
+    | "todo_status_changed"
+    | "todo_revised"
     | "patch_stream_delta"
     | "patch_stream_target"
     | "tool_call"
@@ -132,12 +131,15 @@ export type ZoneStructuredProgressEvent = {
   total_output?: number;
   iter_count?: number;
   approvalId?: string;
-  steps?: Array<{
-    index: number;
+  todos?: Array<{
+    id: string;
     text: string;
-    status: "pending" | "active" | "done";
+    description?: string;
+    filesLikely?: string[];
+    status: "pending" | "in_progress" | "completed" | "skipped";
   }>;
-  stepIndex?: number;
+  todoId?: string;
+  todoStatus?: "pending" | "in_progress" | "completed" | "skipped";
   delta?: string;
   /** True when backend emitted a single fallback delta (not real token streaming). */
   fallback?: boolean;

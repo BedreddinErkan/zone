@@ -23,6 +23,7 @@ import {
   emptyIterCostAccumulator,
   type IterCostAccumulator,
 } from "../usage/iterCostMeter.js";
+import { parseTodoProgressMarkers } from "../core/todoLifecycle.js";
 import {
   executeTool,
   withStagingTempFlush,
@@ -165,6 +166,7 @@ export function assembleAgentSystemPrompt(input: {
   canRunCommand: boolean;
   backgroundCommandBlock: string;
   repoPath: string;
+  planProgressBlock?: string;
 }): string {
   return (
     `${input.agentIntro}\n\n` +
@@ -176,6 +178,7 @@ export function assembleAgentSystemPrompt(input: {
         input.importContextSummary + `\n` +
         `(End related files context)\n\n`
       : "") +
+    (input.planProgressBlock ? `${input.planProgressBlock}\n\n` : "") +
     `CRITICAL PATCH RULES â€” follow these exactly:\n` +
     `1. To modify an EXISTING file, ALWAYS use apply_patch with --- FIND --- / --- REPLACE --- blocks.\n` +
     `   NEVER use write_file on a file that already exists.\n` +
@@ -1522,6 +1525,13 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       `3. \`read_background_output { handle: "bg_a3k7q2", since_offset: null, max_bytes: 4096 }\`\n` +
       `4. If output looks done → \`kill_background\`. Else iterate.\n\n`
     : "";
+  const planProgressBlock =
+    input.executionPlan && input.executionPlan.steps.length > 0
+      ? `PLAN PROGRESS MARKERS:\n` +
+        `When you start work on a planned step, prefix your assistant message with \`[step:start:N]\` where N is the 1-based step number. ` +
+        `When you finish a step, prefix your assistant message with \`[step:done:N]\`. ` +
+        `These markers are only for UI progress tracking; continue using tools normally.`
+      : "";
 
   const systemContent = assembleAgentSystemPrompt({
     agentIntro,
@@ -1533,6 +1543,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     canRunCommand,
     backgroundCommandBlock,
     repoPath: input.repoPath,
+    planProgressBlock,
   });
 
   // Chat Completions messages (system + user kickoff).
@@ -1640,6 +1651,15 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       }
     } catch {}
     throwIfAborted("after_llm");
+
+    const assistantContentForProgress = response.choices[0]?.message?.content ?? "";
+    for (const marker of parseTodoProgressMarkers(assistantContentForProgress)) {
+      input.onStructuredEvent?.({
+        type: "todo_status_changed",
+        todoId: marker.todoId,
+        todoStatus: marker.status,
+      });
+    }
 
     const toolCalls = extractFunctionCallItems(response);
     if (toolCalls.length > 0) {

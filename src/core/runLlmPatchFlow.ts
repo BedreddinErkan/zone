@@ -58,6 +58,16 @@ import {
   buildStepTask,
   aggregateOrchestratorResults,
 } from "./planOrchestrator.js";
+import {
+  completeTodo,
+  executionPlanToTodos,
+  finalizeTodos,
+  findTodoIdForFile,
+  startTodo,
+  todoIdForStepIndex,
+  type RunTodo,
+  type TodoStatus,
+} from "./todoLifecycle.js";
 import { collectVerificationCommands } from "./verdictClassifier.js";
 import { parseVerificationErrorWithRepo as parseVerificationError } from "./parseVerificationError.js";
 import type { PatchPreviewItem, RankedRepoFile } from "../types/agent.js";
@@ -493,30 +503,6 @@ function tryApplyExactLineReplacement(opts: {
   const fullContent = lines.join("\n");
   if (fullContent === opts.fileContent) return { ok: false, reason: "no_change" };
   return { ok: true, fullContent };
-}
-
-/**
- * Find the index of the first ExecutionPlan step whose `filesLikely` includes
- * the given file path. Returns null when no step claims the file. Used by the
- * P1 plan-checklist event emitter — replaces the prior monotonic cursor with
- * a truthful file-driven mapping. P1 best-effort: P2 orchestrator will emit
- * explicit stepIndex per step boundary instead of inferring from file activity.
- */
-export function findMatchingStepIndex(
-  executionPlan: { steps?: Array<{ filesLikely?: string[] }> } | null | undefined,
-  filePath: string
-): number | null {
-  if (!executionPlan || !Array.isArray(executionPlan.steps)) return null;
-  if (!filePath) return null;
-  const target = filePath.trim();
-  if (!target) return null;
-  for (let i = 0; i < executionPlan.steps.length; i += 1) {
-    const files = executionPlan.steps[i]?.filesLikely;
-    if (Array.isArray(files) && files.some((f) => f === target)) {
-      return i;
-    }
-  }
-  return null;
 }
 
 /** First line matching `Target file: <path>` (case-insensitive). */
@@ -4297,12 +4283,7 @@ export async function runLlmPatchFlow(input: {
   });
   const lifecycleEvents: AgentLifecycleEvent[] = [];
   let executionPlan: ExecutionPlan | null = null;
-  // P1 plan-step bookkeeping. Replaced the prior monotonic cursor with two
-  // sets so we only emit each step's `started` / `complete` event once,
-  // semantically driven by file activity matching `executionPlan.steps[i].filesLikely`.
-  // P2 will replace this with explicit stepIndex emissions from the orchestrator.
-  const planStepsStarted = new Set<number>();
-  const planStepsCompleted = new Set<number>();
+  let runTodos: RunTodo[] = [];
 
   const getMaxContextFiles = (): number => {
     const raw = (process.env.MAX_CONTEXT_FILES ?? "").trim();
@@ -4335,6 +4316,67 @@ export async function runLlmPatchFlow(input: {
     }
   };
 
+  const emitTodos = (type: "todos_initialized" | "todo_revised"): void => {
+    if (runTodos.length === 0) return;
+    emitStructuredProgress({
+      type,
+      title: type === "todo_revised" ? "Plan revised" : "Plan initialized",
+      status: "success",
+      todos: runTodos,
+    });
+  };
+
+  const emitTodoStatus = (todoId: string, todoStatus: TodoStatus): void => {
+    if (!todoId) return;
+    emitStructuredProgress({
+      type: "todo_status_changed",
+      title: "Plan item updated",
+      status: todoStatus === "completed" ? "success" : todoStatus === "skipped" ? "warning" : "active",
+      todoId,
+      todoStatus,
+    });
+  };
+
+  const setTodoStatus = (todoId: string, todoStatus: TodoStatus): void => {
+    if (runTodos.length === 0) return;
+    if (
+      todoStatus !== "pending" &&
+      todoStatus !== "in_progress" &&
+      todoStatus !== "completed" &&
+      todoStatus !== "skipped"
+    ) {
+      return;
+    }
+    const before = runTodos.find((todo) => todo.id === todoId)?.status;
+    if (!before || before === todoStatus) return;
+    if (todoStatus === "in_progress") runTodos = startTodo(runTodos, todoId);
+    else if (todoStatus === "completed") runTodos = completeTodo(runTodos, todoId);
+    else runTodos = runTodos.map((todo) => todo.id === todoId ? { ...todo, status: todoStatus } : todo);
+    emitTodoStatus(todoId, todoStatus);
+  };
+
+  const initializeTodosFromPlan = (): void => {
+    if (!executionPlan || executionPlan.steps.length === 0) return;
+    runTodos = executionPlanToTodos(executionPlan);
+    emitTodos("todos_initialized");
+  };
+
+  const startTodoForFile = (filePath: string | null | undefined): void => {
+    const todoId = findTodoIdForFile(runTodos, filePath);
+    if (todoId) setTodoStatus(todoId, "in_progress");
+  };
+
+  const finalizeRunTodos = (outcome: "completed" | "skipped"): void => {
+    if (runTodos.length === 0) return;
+    const previous = runTodos;
+    runTodos = finalizeTodos(runTodos, outcome);
+    for (const todo of runTodos) {
+      if (previous.find((prev) => prev.id === todo.id)?.status !== todo.status) {
+        emitTodoStatus(todo.id, todo.status);
+      }
+    }
+  };
+
   const notifyProgress = (
     legacyStage: string,
     lifecycleInput?: Omit<AgentLifecycleEvent, "timestamp">
@@ -4350,79 +4392,6 @@ export async function runLlmPatchFlow(input: {
         // keep progress reporting best-effort
       }
 
-      // P1 plan-step events: file-match driven (truthful). When a lifecycle
-      // event carries a filePath, look up which plan step claims that file
-      // (`step.filesLikely`) and emit `plan_step_started` / `plan_step_complete`
-      // with the explicit stepIndex. No file match → silent (better than lying).
-      // On `run_completed`, cascade-complete any started-but-not-completed step.
-      if (executionPlan && executionPlan.steps.length > 0) {
-        const filePathRaw = (ev as { filePath?: unknown }).filePath;
-        const filePaths =
-          typeof filePathRaw === "string"
-            ? filePathRaw
-                .split(",")
-                .map((p) => p.trim())
-                .filter((p) => p.length > 0)
-            : [];
-
-        const matchedStepIndices = new Set<number>();
-        for (const fp of filePaths) {
-          const idx = findMatchingStepIndex(executionPlan, fp);
-          if (idx !== null) matchedStepIndices.add(idx);
-        }
-
-        const isStartingEvent =
-          ev.type === "file_context_loaded" ||
-          ev.type === "patch_generation_started" ||
-          ev.type === "patch_generated" ||
-          ev.type === "verification_started";
-        const isCompletingEvent =
-          ev.type === "patch_correctness_checked" ||
-          ev.type === "verification_passed" ||
-          ev.type === "verification_failed";
-
-        if (isStartingEvent) {
-          for (const idx of matchedStepIndices) {
-            if (!planStepsStarted.has(idx)) {
-              planStepsStarted.add(idx);
-              emitStructuredProgress({
-                type: "plan_step_started",
-                title: `Plan step ${idx + 1} started`,
-                status: "active",
-                stepIndex: idx,
-              });
-            }
-          }
-        }
-
-        if (isCompletingEvent) {
-          for (const idx of matchedStepIndices) {
-            if (!planStepsCompleted.has(idx)) {
-              planStepsCompleted.add(idx);
-              emitStructuredProgress({
-                type: "plan_step_complete",
-                title: `Plan step ${idx + 1} complete`,
-                status: "success",
-                stepIndex: idx,
-              });
-            }
-          }
-        }
-
-        if (ev.type === "run_completed") {
-          for (const idx of planStepsStarted) {
-            if (!planStepsCompleted.has(idx)) {
-              planStepsCompleted.add(idx);
-              emitStructuredProgress({
-                type: "plan_step_complete",
-                title: `Plan step ${idx + 1} complete`,
-                status: "success",
-                stepIndex: idx,
-              });
-            }
-          }
-        }
-      }
       return;
     }
     try {
@@ -4807,7 +4776,7 @@ export async function runLlmPatchFlow(input: {
     // agent_loop doesn't go through plannerStep narrowing, so we use top-N
     // developerContextFiles ranked quickly by rankRelevantFiles for the plan.
     // This is COARSER than plan_full_patch's narrowed plan but provides
-    // enough step structure for the UI checklist + plan_step cursor.
+    // enough step structure for todo display and the scope guard.
     let agentLoopPlanFiles: string[] = [];
     try {
       const ranker = await rankRelevantFiles({
@@ -4839,6 +4808,7 @@ export async function runLlmPatchFlow(input: {
         });
         debugLog(`[zone-plan] generated steps=${executionPlan.steps.length} (agent_loop)`);
         debugLog(`[zone-plan] scope=${executionPlan.scopeSummary}`);
+        initializeTodosFromPlan();
       } catch (err) {
         console.warn(
           `[zone-plan] skipped (agent_loop): ${err instanceof Error ? err.message : String(err)}`
@@ -4854,87 +4824,7 @@ export async function runLlmPatchFlow(input: {
         isComplexTask,
         branch: "agent_loop",
       });
-      if (isComplexTask && executionPlan) {
-        const planForUi = executionPlan;
-        emitStructuredProgress({
-          type: "plan_generated",
-          title: "Plan generated",
-          detail: planForUi.scopeSummary,
-          status: "success",
-          steps: planForUi.steps.map((step, i) => ({
-            index: i,
-            text: step.description || step.title || String(step),
-            status: "pending",
-          })),
-        });
-      }
-    }
-
-    // Tur P1.6: agent_loop step-cursor. The function-scope cursor at line 4344
-    // listens for plan_full_patch events (`patch_generated`, `verification_*`)
-    // that agent_loop never emits. Agent_loop emits `tool_call` (no filePath)
-    // and `patch_converted` (with filePath, only for write_file). Hook directly
-    // off the tool-call where filePath is in hand.
-    const agentLoopStepsStarted = new Set<number>();
-    const agentLoopStepsCompleted = new Set<number>();
-    // Tur P1.6 fix: track which step the cursor is currently "on" so we only
-    // complete it when the cursor moves to a different step. Emitting started+complete
-    // in the same call (the previous behavior) meant the UI's active state survived
-    // for ~1ms — the mor-halo spinner never rendered.
-    let agentLoopActiveStepIdx: number | null = null;
-
-    const advanceAgentLoopStep = (filePath: string | null | undefined): void => {
-      if (!filePath || !executionPlan || executionPlan.steps.length === 0) return;
-      const idx = findMatchingStepIndex(executionPlan, filePath);
-      if (idx === null) return;
-
-      // Cursor transitioned to a new step → complete the previous one.
-      if (
-        agentLoopActiveStepIdx !== null &&
-        agentLoopActiveStepIdx !== idx &&
-        !agentLoopStepsCompleted.has(agentLoopActiveStepIdx)
-      ) {
-        agentLoopStepsCompleted.add(agentLoopActiveStepIdx);
-        emitStructuredProgress({
-          type: "plan_step_complete",
-          title: `Plan step ${agentLoopActiveStepIdx + 1} complete`,
-          status: "success",
-          stepIndex: agentLoopActiveStepIdx,
-        });
-      }
-
-      if (!agentLoopStepsStarted.has(idx)) {
-        agentLoopStepsStarted.add(idx);
-        emitStructuredProgress({
-          type: "plan_step_started",
-          title: `Plan step ${idx + 1} started`,
-          status: "active",
-          stepIndex: idx,
-        });
-      }
-      agentLoopActiveStepIdx = idx;
-    };
-
-    // Tur P1.7 seed: ensure step 0 emits `plan_step_started` at agent-loop entry,
-    // independent of whether tool calls match step.filesLikely. Plans where steps
-    // lack file hints (command-only steps like "Run npm run build", analysis
-    // steps like "Review build output") would otherwise never trigger any
-    // plan_step_started event, leaving the UI counter pinned at 0/N and the
-    // mor-halo spinner unrendered. Forward-cursor advancement and
-    // run_completed cascade-complete handle subsequent steps.
-    if (
-      executionPlan &&
-      executionPlan.steps.length > 0 &&
-      !agentLoopStepsStarted.has(0)
-    ) {
-      agentLoopStepsStarted.add(0);
-      agentLoopActiveStepIdx = 0;
-      emitStructuredProgress({
-        type: "plan_step_started",
-        title: `Plan step 1 started`,
-        status: "active",
-        stepIndex: 0,
-      });
+      void isComplexTask;
     }
 
     const beforeByFile = new Map<string, string>();
@@ -5215,6 +5105,16 @@ export async function runLlmPatchFlow(input: {
         if (
           e &&
           typeof e === "object" &&
+          e.type === "todo_status_changed"
+        ) {
+          setTodoStatus(
+            String(e.todoId || ""),
+            String(e.todoStatus || "") as TodoStatus
+          );
+        }
+        if (
+          e &&
+          typeof e === "object" &&
           (e.type === "subagent_started" || e.type === "subagent_completed")
         ) {
           emitStructuredProgress({
@@ -5298,11 +5198,7 @@ export async function runLlmPatchFlow(input: {
             beforeByFile.set(snapPath, "");
           }
         }
-        // Tur P1.6: advance plan-step cursor on every file-touching tool call.
-        // Skip when the orchestrator is active — it emits explicit step-boundary
-        // events around each iteration instead, and the file-match cursor would
-        // double-fire.
-        if (snapPath && !_planOrchestrationEnabled) advanceAgentLoopStep(snapPath);
+        if (snapPath && !_planOrchestrationEnabled) startTodoForFile(snapPath);
       },
       onToolResult: (_name: string, result: { output?: string; success?: boolean }) => {
         if (!runId) return;
@@ -5355,24 +5251,14 @@ export async function runLlmPatchFlow(input: {
           total: executionPlan.steps.length,
           title: String(step.title || "").slice(0, 120),
         }));
-        emitStructuredProgress({
-          type: "plan_step_started",
-          title: `Plan step ${stepIdx + 1} started`,
-          status: "active",
-          stepIndex: stepIdx,
-        });
+        setTodoStatus(todoIdForStepIndex(stepIdx), "in_progress");
         const stepTask = buildStepTask(input.task, stepIdx, executionPlan);
         const stepResult = await runAgentLoop({
           ...agentLoopBaseInput,
           task: stepTask,
         });
         stepResults.push(stepResult);
-        emitStructuredProgress({
-          type: "plan_step_complete",
-          title: `Plan step ${stepIdx + 1} complete`,
-          status: "success",
-          stepIndex: stepIdx,
-        });
+        setTodoStatus(todoIdForStepIndex(stepIdx), "completed");
         debugLog("[zone-orchestrator] step done", JSON.stringify({
           stepIdx,
           success: stepResult.success,
@@ -5481,24 +5367,7 @@ export async function runLlmPatchFlow(input: {
     });
 
     if (runId) {
-      // Tur P1.6: cascade-complete any plan steps the cursor never reached
-      // (steps with empty filesLikely, or merged-into-one-patch by the agent).
-      // Mirrors the UI `finalizeRemaining()` so logs and UI agree.
-      // Tur P2.1: skipped when the orchestrator drove explicit per-step events
-      // (it already emitted plan_step_complete for every step it ran).
-      if (executionPlan && executionPlan.steps.length > 0 && !_planOrchestrationEnabled) {
-        for (let i = 0; i < executionPlan.steps.length; i += 1) {
-          if (!agentLoopStepsCompleted.has(i)) {
-            agentLoopStepsCompleted.add(i);
-            emitStructuredProgress({
-              type: "plan_step_complete",
-              title: `Plan step ${i + 1} complete`,
-              status: "success",
-              stepIndex: i,
-            });
-          }
-        }
-      }
+      finalizeRunTodos(agentDecisionMode === "safe_to_apply" ? "completed" : "skipped");
       emitStructuredProgress({
         type: "agent_loop_complete",
         title: loop.success
@@ -6085,6 +5954,7 @@ export async function runLlmPatchFlow(input: {
     });
     debugLog(`[zone-plan] generated steps=${executionPlan.steps.length}`);
     debugLog(`[zone-plan] scope=${executionPlan.scopeSummary}`);
+    initializeTodosFromPlan();
   } catch (err) {
     console.warn(
       `[zone-plan] skipped: ${err instanceof Error ? err.message : String(err)}`
@@ -6175,20 +6045,7 @@ export async function runLlmPatchFlow(input: {
   });
   /** Tur P1: lowered threshold from "≥4 steps + ≥2 files" to "≥2 steps" so multi-task prompts surface the plan checklist. P2 will remove the gate entirely (always emit, UI decides). */
   const isComplexTask = isComplexTaskPreview;
-  if (isComplexTask && executionPlan) {
-    const planForUi = executionPlan;
-    emitStructuredProgress({
-      type: "plan_generated",
-      title: "Plan generated",
-      detail: planForUi.scopeSummary,
-      status: "success",
-      steps: planForUi.steps.map((step, i) => ({
-        index: i,
-        text: step.description || step.title || String(step),
-        status: "pending",
-      })),
-    });
-  }
+  void isComplexTask;
 
   const planSummaryParts: string[] = [];
   if (executionPlan) {
@@ -7467,12 +7324,6 @@ export async function runLlmPatchFlow(input: {
 
       if (isTaskAlreadyDone(input.task, fileContent)) {
         const msg = "This change appears to already be implemented.";
-        emitStructuredProgress({
-          type: "plan_discard",
-          title: "Plan dismissed",
-          detail: "Change already present in codebase.",
-          status: "success",
-        });
         const runIdTrim = typeof input.runId === "string" ? input.runId.trim() : "";
         if (runIdTrim) {
           input.onProgress?.({
