@@ -7,6 +7,8 @@ export interface ModelOption {
   label: string;
   costNote?: string;
   recommendedTier?: ZoneModelTier;
+  workerSuitable?: boolean;
+  workerSuitabilityNote?: string;
 }
 
 export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {
@@ -20,7 +22,13 @@ export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {
     },
     { id: "gpt-5.4-nano", label: "GPT-5.4 nano", costNote: "Ultra-budget — for classification/routing" },
     { id: "gpt-4o",       label: "GPT-4o",       costNote: "Legacy — GPT-5.4 recommended" },
-    { id: "gpt-4o-mini",  label: "GPT-4o mini",  costNote: "Legacy — GPT-5.4 mini recommended" },
+    {
+      id: "gpt-4o-mini",
+      label: "GPT-4o mini",
+      costNote: "Legacy — GPT-5.4 mini recommended",
+      workerSuitable: false,
+      workerSuitabilityNote: "Not recommended as Worker subagent — may corrupt file content during write_file operations",
+    },
   ],
   anthropic: [
     {

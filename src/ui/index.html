@@ -5449,7 +5449,7 @@
         { id: 'gpt-5.5', label: 'GPT-5.5', costNote: 'Frontier model — higher cost, best for complex multi-step work' },
         { id: 'gpt-5.4-nano', label: 'GPT-5.4 nano', costNote: 'Ultra-budget — for classification/routing' },
         { id: 'gpt-4o', label: 'GPT-4o', costNote: 'Legacy — GPT-5.4 recommended' },
-        { id: 'gpt-4o-mini', label: 'GPT-4o mini', costNote: 'Legacy — GPT-5.4 mini recommended' },
+        { id: 'gpt-4o-mini', label: 'GPT-4o mini', costNote: 'Legacy — GPT-5.4 mini recommended', workerSuitable: false, workerSuitabilityNote: 'Not recommended as Worker subagent — may corrupt file content during write_file operations' },
       ],
       anthropic: [
         { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', recommendedTier: 'high' },
@@ -6000,9 +6000,10 @@
         const html = [];
         for (const opt of this.options){
           const selected = opt.value === this.value ? 'true' : 'false';
-          const costAttr = opt.costNote ? ' data-cost-warning="true"' : '';
+          const costAttr = (opt.costNote || opt.workerSuitable === false) ? ' data-cost-warning="true"' : '';
+          const titleAttr = opt.workerSuitable === false && opt.workerSuitabilityNote ? ` title="${escapeHtml(opt.workerSuitabilityNote)}"` : '';
           html.push(
-            `<div class="zone-dropdown-option" role="option" aria-selected="${selected}" data-value="${escapeHtml(opt.value)}"${costAttr}>` +
+            `<div class="zone-dropdown-option" role="option" aria-selected="${selected}" data-value="${escapeHtml(opt.value)}"${costAttr}${titleAttr}>` +
               `<span class="zone-dropdown-option-label">${escapeHtml(opt.label)}</span>` +
               `<span class="zone-dropdown-option-icons">` +
                 `<svg class="zone-dropdown-option-warning" viewBox="0 0 12 12" aria-hidden="true">` +
@@ -6044,7 +6045,7 @@
       const catalog = ZONE_MODEL_CATALOG[provider] || [];
       const options = [{ value: '', label: '(server default)' }];
       for (const m of catalog){
-        options.push({ value: m.id, label: m.label, costNote: m.costNote });
+        options.push({ value: m.id, label: m.label, costNote: m.costNote, workerSuitable: m.workerSuitable, workerSuitabilityNote: m.workerSuitabilityNote });
       }
       const dd = window._zoneFooterDropdowns && window._zoneFooterDropdowns.model;
       if (!dd) return;
@@ -9130,6 +9131,8 @@
         const stdOpt = getModelOption(provider, activeModels.standard);
         const highCost = highOpt && highOpt.costNote ? highOpt.costNote : '';
         const stdCost = stdOpt && stdOpt.costNote ? stdOpt.costNote : '';
+        const highWorker = highOpt && highOpt.workerSuitable === false ? (highOpt.workerSuitabilityNote || 'Not recommended as Worker subagent') : '';
+        const stdWorker = stdOpt && stdOpt.workerSuitable === false ? (stdOpt.workerSuitabilityNote || 'Not recommended as Worker subagent') : '';
         return `
           <div class="apikey-field-label">${escapeHtml(label)} API Key</div>
           <div class="apikey-input-row">
@@ -9148,6 +9151,7 @@
               ${modelOptions(activeModels.high || '')}
             </select>
             <div id="modelCost-${provider}-high" class="model-cost-warning" style="${highCost ? '' : 'display:none'}">${highCost ? '⚠ ' + escapeHtml(highCost) : ''}</div>
+            <div id="modelWorker-${provider}-high" class="model-cost-warning" style="${highWorker ? '' : 'display:none'}">${highWorker ? '⚠ Worker risk: ' + escapeHtml(highWorker) : ''}</div>
           </div>
           <div class="model-select-row">
             <div class="apikey-field-label" style="margin:0">Planner model</div>
@@ -9155,6 +9159,7 @@
               ${modelOptions(activeModels.standard || '')}
             </select>
             <div id="modelCost-${provider}-standard" class="model-cost-warning" style="${stdCost ? '' : 'display:none'}">${stdCost ? '⚠ ' + escapeHtml(stdCost) : ''}</div>
+            <div id="modelWorker-${provider}-standard" class="model-cost-warning" style="${stdWorker ? '' : 'display:none'}">${stdWorker ? '⚠ Worker risk: ' + escapeHtml(stdWorker) : ''}</div>
           </div>
         `;
       }
@@ -9213,6 +9218,7 @@
       function wireModelSelect(provider, tier) {
         const sel = document.getElementById(`modelSelect-${provider}-${tier}`);
         const costEl = document.getElementById(`modelCost-${provider}-${tier}`);
+        const workerEl = document.getElementById(`modelWorker-${provider}-${tier}`);
         if (!sel) return;
         sel.addEventListener('change', () => {
           const value = sel.value || '';
@@ -9225,6 +9231,15 @@
             } else {
               costEl.textContent = '';
               costEl.style.display = 'none';
+            }
+          }
+          if (workerEl) {
+            if (opt && opt.workerSuitable === false) {
+              workerEl.textContent = '⚠ Worker risk: ' + (opt.workerSuitabilityNote || 'Not recommended as Worker subagent');
+              workerEl.style.display = '';
+            } else {
+              workerEl.textContent = '';
+              workerEl.style.display = 'none';
             }
           }
           updateFooterModelLabel();
