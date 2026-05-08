@@ -7,6 +7,7 @@ import rateLimit from "express-rate-limit";
 import { exec, execSync } from "node:child_process";
 import fs, { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { runAgent } from "../core/runAgent.js";
@@ -333,6 +334,92 @@ function getSupabaseClient(): SupabaseClient | null {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return null;
   return createClient(url, key);
+}
+
+function getUsageFilePath(userId: string): string {
+  const safeUserId = String(userId).replace(/[^a-zA-Z0-9._-]/g, "_") || "local-dev";
+  return path.join(os.homedir(), ".zone", "usage", `${safeUserId}.jsonl`);
+}
+
+function parseJsonlFile(raw: string): Array<Record<string, unknown>> {
+  const records: Array<Record<string, unknown>> = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      records.push(JSON.parse(trimmed) as Record<string, unknown>);
+    } catch {
+      // Skip malformed telemetry lines.
+    }
+  }
+  return records;
+}
+
+function mostCommonModels(records: Array<Record<string, unknown>>): string {
+  const counts = new Map<string, number>();
+  for (const record of records) {
+    const model = typeof record.model === "string" ? record.model.trim() : "";
+    if (!model) continue;
+    counts.set(model, (counts.get(model) ?? 0) + 1);
+  }
+  if (counts.size === 0) return "";
+  const max = Math.max(...counts.values());
+  const models = Array.from(counts.entries())
+    .filter(([, count]) => count === max)
+    .map(([model]) => model)
+    .sort();
+  return models.length === 1 ? models[0] : models.join(", ");
+}
+
+function resolveUserJsonlPath(userId: string): string {
+  return getUsageFilePath(userId);
+}
+
+function getRunSubagentsFromTelemetry(records: Array<Record<string, unknown>>, runId: string) {
+  const filtered = records.filter((record) => {
+    const parentRunId = typeof record.parentRunId === "string" ? record.parentRunId : "";
+    const recordRunId = typeof record.runId === "string" ? record.runId : "";
+    const subagentId = typeof record.subagentId === "string" ? record.subagentId.trim() : "";
+    return (parentRunId === runId || (recordRunId === runId && subagentId)) && subagentId;
+  });
+
+  const groups = new Map<string, Array<Record<string, unknown>>>();
+  for (const record of filtered) {
+    const subagentId = String(record.subagentId ?? "").trim();
+    if (!subagentId) continue;
+    const existing = groups.get(subagentId) ?? [];
+    existing.push(record);
+    groups.set(subagentId, existing);
+  }
+
+  const subagents = Array.from(groups.entries()).map(([subagentId, group]) => {
+    const llmCallCount = group.length;
+    const totalInputTokens = group.reduce((sum, record) => sum + Number(record.input_tokens ?? record.inputTokens ?? 0), 0);
+    const totalOutputTokens = group.reduce((sum, record) => sum + Number(record.output_tokens ?? record.outputTokens ?? 0), 0);
+    const totalCost = group.reduce((sum, record) => sum + Number(record.est_cost_usd ?? 0), 0);
+    const sortedTimes = group
+      .map((record) => typeof record.timestamp === "string" ? record.timestamp : typeof record.createdAt === "string" ? record.createdAt : "")
+      .filter(Boolean)
+      .sort();
+    const subagentType = group.find((record) => typeof record.subagentType === "string" && record.subagentType.trim())?.subagentType ?? "worker";
+    return {
+      subagentId,
+      subagentType: String(subagentType),
+      llmCallCount,
+      totalInputTokens,
+      totalOutputTokens,
+      totalCost: Number(totalCost.toFixed(4)),
+      model: mostCommonModels(group),
+      firstCallAt: sortedTimes[0] ?? null,
+      lastCallAt: sortedTimes[sortedTimes.length - 1] ?? null,
+    };
+  }).sort((a, b) => a.subagentId.localeCompare(b.subagentId));
+
+  return {
+    subagents,
+    totalSubagents: subagents.length,
+    aggregateCost: Number(subagents.reduce((sum, subagent) => sum + subagent.totalCost, 0).toFixed(4)),
+  };
 }
 
 function renderZoneUiHtml(): string {
@@ -1614,6 +1701,39 @@ app.get("/api/run-replay/:runId", (req, res) => {
     clearInterval(keepalive);
     detachDeveloperPatchProgressSseClient(runId, res);
   });
+});
+
+app.get("/api/runs/:runId/subagents", async (req, res) => {
+  const runId = typeof req.params?.runId === "string" ? req.params.runId.trim() : "";
+  const userId =
+    typeof req.query.userId === "string"
+      ? req.query.userId.trim()
+      : typeof process.env.ZONE_USER_ID === "string"
+        ? process.env.ZONE_USER_ID.trim()
+        : "";
+  if (!runId) {
+    res.status(400).json({ ok: false, reason: "missing_run_id" });
+    return;
+  }
+  if (!userId) {
+    res.status(401).json({ ok: false, reason: "missing_user_id" });
+    return;
+  }
+  try {
+    const filePath = resolveUserJsonlPath(userId);
+    const raw = await readFile(filePath, "utf8").catch((err) => {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return "";
+      throw err;
+    });
+    const records = parseJsonlFile(raw);
+    const { subagents, totalSubagents, aggregateCost } = getRunSubagentsFromTelemetry(records, runId);
+    res.json({ runId, subagents, totalSubagents, aggregateCost });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      reason: err instanceof Error ? err.message : "subagents_lookup_failed",
+    });
+  }
 });
 
 app.post("/api/cancel", (req, res) => {
