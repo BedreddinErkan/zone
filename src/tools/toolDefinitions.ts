@@ -359,4 +359,35 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
       } as Record<string, unknown>,
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "update_memory",
+      strict: true,
+      description:
+        "Save a project-specific convention or lesson you've learned that would be useful in future Zone sessions on this repo. " +
+        "Use sparingly — only for non-obvious things specific to THIS project that you couldn't infer from package.json, tsconfig, or directory structure. " +
+        "Examples of good entries: 'API routes all live in src/api/server.ts', 'We use shadcn/ui for components'. " +
+        "Examples of bad entries: 'This is a TypeScript project' (obvious from tsconfig.json), 'Files are in src/' (obvious from listing). " +
+        "At most one call per session — pick the single most valuable convention if any.",
+      parameters: {
+        type: "object",
+        properties: {
+          entry: {
+            type: "string",
+            description:
+              "The convention to remember. One sentence, max 200 characters. Phrase it as actionable guidance.",
+            maxLength: 200,
+          },
+          reason: {
+            type: "string",
+            description:
+              "Brief explanation of why this isn't obvious from the repo structure alone. Used for logging only, not stored.",
+          },
+        },
+        required: ["entry", "reason"],
+        additionalProperties: false,
+      } as Record<string, unknown>,
+    },
+  },
 ];

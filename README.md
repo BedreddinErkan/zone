@@ -2,8 +2,7 @@
 
 Open-source AI coding agent with TypeScript AST-based validation. Self-hostable, BYOK (bring your own key).
 
-[zonecli.dev](https://zonecli.dev) · [Desktop app](https://github.com/BedreddinErkan/zone-desktop) · [CLI](https://github.com/BedreddinErkan/zone-cli)
-
+[zonecli.dev](https://zonecli.dev)
 ## What it does
 
 Zone runs a code-modification loop with an AST-based validator as a defensive layer. Each iteration is checked for scope discipline, syntax integrity, and a growing set of structural smells (duplicate JSDoc, declaration identity swaps, out-of-scope mutations). Per-file failure tracking escalates: after 3 failures on the same file, the agent is hard-blocked from `apply_patch` and forced to switch strategies (`write_file` with full content).
@@ -34,7 +33,7 @@ With Zone BYOK you pay your provider directly — no markup, no subscription flo
 
 ```bash
 git clone https://github.com/BedreddinErkan/zone.git
-cd zone-api
+cd zone
 npm install
 cp .env.example .env
 # Add ANTHROPIC_API_KEY or OPENAI_API_KEY to .env

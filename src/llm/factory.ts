@@ -2,22 +2,24 @@ import type { LLMClient, LLMClientResolveOptions, LLMProvider } from "./types.js
 import { OpenAIAdapter } from "./openaiAdapter.js";
 import { AnthropicAdapter } from "./anthropicAdapter.js";
 import { getRequestContext } from "./openaiContext.js";
+import { RecordingLLMClient } from "./recordingClient.js";
 
 export function createLLMClient(options: LLMClientResolveOptions = {}): LLMClient {
   const ctx = getRequestContext();
   const provider = resolveProvider(options.provider, ctx?.provider);
 
+  let inner: LLMClient;
   if (provider === "openai") {
     const apiKey = resolveOpenAIApiKey(options.apiKey, ctx?.userApiKey);
-    return new OpenAIAdapter(apiKey);
-  }
-
-  if (provider === "anthropic") {
+    inner = new OpenAIAdapter(apiKey);
+  } else if (provider === "anthropic") {
     const apiKey = resolveAnthropicApiKey(options.apiKey, ctx?.userApiKey);
-    return new AnthropicAdapter(apiKey);
+    inner = new AnthropicAdapter(apiKey);
+  } else {
+    throw new Error(`Unsupported provider: ${provider}`);
   }
 
-  throw new Error(`Unsupported provider: ${provider}`);
+  return new RecordingLLMClient(inner);
 }
 
 /**

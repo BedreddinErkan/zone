@@ -18,6 +18,7 @@ import {
 } from "../embeddings/embeddingsRepository.js";
 import { indexRepoFiles } from "../embeddings/indexRepository.js";
 import { renderChatMarkdownToHtml } from "./renderChatMarkdown.js";
+import { readMemory, formatMemoryForPrompt } from "../memory/projectMemory.js";
 
 export type ZoneChatContextFile = {
   path: string;
@@ -38,6 +39,7 @@ function buildChatPrompt(input: {
   task: string;
   repoPath: string;
   contextFiles: ZoneChatContextFile[];
+  memoryBlock?: string;
 }): string {
   const contextText =
     input.contextFiles.length > 0
@@ -59,6 +61,7 @@ function buildChatPrompt(input: {
     "- Format with markdown (headings, code blocks for snippets, lists)",
     "",
     `Repo path: ${input.repoPath}`,
+    ...(input.memoryBlock ? ["", input.memoryBlock] : []),
     "",
     `User task:\n${input.task}`,
     "",
@@ -266,10 +269,21 @@ export async function getChatResponseWithContext(input: {
     normalizedRepoPath,
     input.lastChangedFiles
   );
+  let memoryBlock = "";
+  try {
+    const entries = await readMemory(normalizedRepoPath);
+    memoryBlock = formatMemoryForPrompt(entries);
+    if (entries.length > 0) {
+      debugLog(`[zone-memory] injected ${entries.length} entries into chat prompt`);
+    }
+  } catch (err) {
+    debugLog("[zone-memory] chat read failed", err);
+  }
   const prompt = buildChatPrompt({
     task: normalizedTask,
     repoPath: normalizedRepoPath,
     contextFiles,
+    memoryBlock,
   });
 
   debugLog("[zone-chat-debug]", {

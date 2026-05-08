@@ -83,6 +83,7 @@ import {
 } from "../embeddings/embeddingsRepository.js";
 import { indexRepoFiles } from "../embeddings/indexRepository.js";
 import { logger, debugLog, errorLog } from "../utils/logger.js";
+import { attachRunIdentity } from "../llm/openaiContext.js";
 
 export type LlmPatchFlowResult =
   | {
@@ -4276,6 +4277,7 @@ export async function runLlmPatchFlow(input: {
    */
   userApiKey?: string;
 }): Promise<LlmPatchFlowResult> {
+  attachRunIdentity({ userId: input.userId, runId: input.runId });
   logger.info(
     "[zone-flow-entry] runId=%s, ts=%s, lockHeld=%s",
     typeof input.runId === "string" ? input.runId.trim() : "",

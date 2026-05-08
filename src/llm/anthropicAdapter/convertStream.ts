@@ -18,11 +18,31 @@ export async function* convertStream(
   const blocks = new Map<number, BlockState>();
   let initialChunkEmitted = false;
 
+  // Usage telemetry: Anthropic delivers input + cache token counts on
+  // message_start.usage, then output_tokens on message_delta.usage.
+  // We accumulate them and append a synthetic final chunk so the recording
+  // wrapper (RecordingLLMClient) can read the same usage shape OpenAI emits
+  // when stream_options.include_usage=true.
+  let usageInput = 0;
+  let usageOutput = 0;
+  let usageCacheWrite = 0;
+  let usageCacheRead = 0;
+
   for await (const event of source) {
     switch (event.type) {
       case "message_start": {
         id = event.message.id || id;
         model = event.message.model || model;
+        const u = (event.message.usage ?? {}) as {
+          input_tokens?: number;
+          output_tokens?: number;
+          cache_creation_input_tokens?: number;
+          cache_read_input_tokens?: number;
+        };
+        usageInput += Number(u.input_tokens ?? 0) || 0;
+        usageOutput += Number(u.output_tokens ?? 0) || 0;
+        usageCacheWrite += Number(u.cache_creation_input_tokens ?? 0) || 0;
+        usageCacheRead += Number(u.cache_read_input_tokens ?? 0) || 0;
         if (!initialChunkEmitted) {
           initialChunkEmitted = true;
           yield {
@@ -142,6 +162,10 @@ export async function* convertStream(
         if (event.delta?.stop_reason) {
           stopReason = event.delta.stop_reason as Anthropic.StopReason;
         }
+        const du = (event as { usage?: { output_tokens?: number } }).usage;
+        if (du && typeof du.output_tokens === "number") {
+          usageOutput += Number(du.output_tokens) || 0;
+        }
         break;
       }
 
@@ -159,6 +183,27 @@ export async function* convertStream(
             },
           ],
         };
+        // Synthetic usage chunk so recordingClient can read final usage.
+        // Match the shape OpenAI emits with stream_options.include_usage=true:
+        // an empty-choices chunk that carries the usage object. The
+        // cache_* fields are non-standard (Anthropic-only) and downstream
+        // readers use bracket access, same as in convertResponse.
+        yield {
+          id,
+          object: "chat.completion.chunk",
+          created,
+          model,
+          choices: [],
+          usage: {
+            prompt_tokens: usageInput,
+            completion_tokens: usageOutput,
+            total_tokens: usageInput + usageOutput,
+            ...({
+              cache_creation_input_tokens: usageCacheWrite,
+              cache_read_input_tokens: usageCacheRead,
+            } as Record<string, number>),
+          },
+        } as ChatCompletionChunk;
         break;
       }
 

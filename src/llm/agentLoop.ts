@@ -3,9 +3,8 @@
   getModelName,
 } from "./openaiClient.js";
 import { createLLMClient } from "./factory.js";
-import { recordExecution } from "../usage/usageTracker.js";
-import type { ProviderName } from "../usage/pricing.js";
-import { getRequestContext } from "./openaiContext.js";
+import { attachRunIdentity, getRequestContext } from "./openaiContext.js";
+import { readMemory, formatMemoryForPrompt } from "../memory/projectMemory.js";
 import { log, debugLog, errorLog } from "../utils/logger.js";
 import { parseVerificationError } from "../core/parseVerificationError.js";
 import { buildVerifyDiagnostic } from "../core/buildVerifyDiagnostic.js";
@@ -1135,6 +1134,9 @@ export function validatePassedClaim(
 }
 
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
+  // Stamp identity so RecordingLLMClient can attribute every LLM call inside
+  // this run to (userId, runId) for the per-run cost rollup and JSONL logs.
+  attachRunIdentity({ userId: input.userId, runId: input.runId });
   const baseMaxIterations =
     typeof input.maxIterations === "number" ? input.maxIterations : BASE_MAX_ITERATIONS;
   let iterationBudget: IterationBudgetState = {
@@ -1222,9 +1224,25 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       fwLines.push(``, `- Sub-projects: ${fw.subProjects.map((s) => s.framework).join(", ")}`);
     }
   }
+  // Project memory: <repo>/.zone/memory.md, populated via the update_memory tool.
+  // Best-effort read — a missing/corrupt file just returns no entries.
+  let projectMemoryBlock = "";
+  try {
+    const memoryEntries = await readMemory(input.repoPath);
+    projectMemoryBlock = formatMemoryForPrompt(memoryEntries);
+    if (memoryEntries.length > 0) {
+      debugLog(
+        `[zone-memory] injected ${memoryEntries.length} entries into agent system prompt`
+      );
+    }
+  } catch (err) {
+    debugLog("[zone-memory] read failed", err);
+  }
+
   const systemContent =
     `You are Zone, an AI code agent${fw?.framework ? ` working on a ${fw.framework} project` : ""}.\n\n` +
     (fw ? `${fwLines.join("\n")}\n\n` : "") +
+    (projectMemoryBlock ? `${projectMemoryBlock}\n\n` : "") +
     (input.importContextSummary
       ? `RELATED FILES (read-only context for planning â€” call read_file for full content):\n` +
         `This block lists the primary file's import ecosystem. Use it to anticipate what other files might need updating, but do NOT assume contents â€” call read_file when you need to actually edit.\n` +
@@ -1348,40 +1366,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
   const client = createLLMClient({ apiKey: input.userApiKey });
   const requestCtx = getRequestContext();
-
-  // Usage-tracker Tur: capture provider+model once at run start (they are
-  // stable for the duration of the loop) and accumulate per-iter token
-  // counts. Recorded once on exit through either path.
-  const usageProvider: ProviderName =
-    (client as { provider?: string }).provider === "anthropic" ? "anthropic" : "openai";
-  const usageModel = getModelName("high", client.provider, requestCtx?.modelOverride);
-  const executionUsage = {
-    input_uncached: 0,
-    cache_write: 0,
-    cache_read: 0,
-    output: 0,
-  };
-  const recordUsageOnExit = async (): Promise<void> => {
-    if (
-      executionUsage.input_uncached === 0 &&
-      executionUsage.cache_write === 0 &&
-      executionUsage.cache_read === 0 &&
-      executionUsage.output === 0
-    ) {
-      return;
-    }
-    try {
-      await recordExecution({
-        userId: input.userId ?? "local-dev",
-        runId: input.runId ?? "",
-        provider: usageProvider,
-        model: usageModel,
-        ...executionUsage,
-      });
-    } catch (e) {
-      console.warn("[zone-usage] failed to record", e);
-    }
-  };
+  // Usage recording is centralized in RecordingLLMClient (src/llm/recordingClient.ts):
+  // every chat completion across the codebase appends one JSONL record. agentLoop
+  // used to accumulate-then-record-on-exit, but that double-counted with the wrapper
+  // and missed every other LLM call site (planner, intent, final report, etc.).
 
   const throwIfAborted = (stage: string): void => {
     if (input.abortSignal?.aborted) {
@@ -1428,6 +1416,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     });
     // Cache telemetry (Anthropic-only; OpenAI usage will not have these fields).
     // Bedo: this prints once per iter so you can see hit ratio in real time.
+    // Persistence happens in RecordingLLMClient — this block is debug-only.
     try {
       const u = (response as { usage?: Record<string, number> }).usage;
       const write = u?.cache_creation_input_tokens ?? 0;
@@ -1440,12 +1429,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           `[zone-cache] iter=${iter + 1} write=${write} read=${read} input_uncached=${input} output=${output} hit_ratio=${ratio}`
         );
       }
-      // Usage-tracker Tur: accumulate every iter regardless of cache hit/miss.
-      // Anthropic clients populate cache_*; OpenAI clients leave them at 0.
-      executionUsage.input_uncached += input;
-      executionUsage.cache_write += write;
-      executionUsage.cache_read += read;
-      executionUsage.output += output;
     } catch {}
     throwIfAborted("after_llm");
 
@@ -1938,7 +1921,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         verificationReason = "no_changes_made";
         patchValidatedByAgent = false;
       }
-      await recordUsageOnExit();
       return {
         success: true,
         summary: finalText + summaryAppendix,
@@ -2124,7 +2106,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     patchValidatedByAgent = false;
   }
 
-  await recordUsageOnExit();
   return {
     success: false,
     summary: finalSummary,
