@@ -831,11 +831,6 @@
       background:rgba(8,8,12,0.92);box-shadow:0 16px 40px rgba(0,0,0,0.28);
       padding:var(--space-md) var(--space-lg);color:var(--text-1);backdrop-filter:blur(14px)
     }
-    .cost-meter-overlay{
-      position:fixed;top:18px;right:22px;z-index:60;display:none;pointer-events:none
-    }
-    .cost-meter-overlay.show{display:block}
-    .cost-meter-overlay .cost-meter{margin:0;pointer-events:auto}
     .cost-meter.final{background:rgba(10,10,15,0.72);box-shadow:none}
     .cost-meter-top{display:flex;align-items:baseline;gap:var(--space-md);white-space:nowrap}
     .cost-meter-cost{font-size:20px;font-weight:750;letter-spacing:0;color:var(--text-1);font-family:var(--font-family-mono)}
@@ -1320,7 +1315,6 @@
       }
       state.runsByThread.set(threadId, runState);
       refreshSidebarRunningStates();
-      updateCostMeterOverlay();
     }
 
     function clearRun(threadId) {
@@ -1338,7 +1332,6 @@
       }
       const had = state.runsByThread.delete(threadId);
       if (had) refreshSidebarRunningStates();
-      updateCostMeterOverlay();
     }
 
     function getOrCreateTaskQueueForThread(threadId) {
@@ -2152,7 +2145,6 @@
       renderQueuePanel();
       renderBgTasks();
       renderBranchChip();
-      updateCostMeterOverlay();
       if (state.isRunning) {
         els.statusBadge.textContent = 'working...';
         els.statusBadge.classList.add('show');
@@ -4196,33 +4188,6 @@
       return card;
     }
 
-    function ensureCostMeterOverlay(){
-      let overlay = document.getElementById('costMeterOverlay');
-      if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'costMeterOverlay';
-        overlay.className = 'cost-meter-overlay';
-        const card = document.createElement('div');
-        card.className = 'cost-meter';
-        overlay.appendChild(card);
-        document.body.appendChild(overlay);
-      }
-      return overlay;
-    }
-
-    function updateCostMeterOverlay(){
-      const overlay = ensureCostMeterOverlay();
-      const active = getActiveRun();
-      const meter = active && active.runId ? getCostMeterState(active.runId) : null;
-      if (!meter || meter.done) {
-        overlay.classList.remove('show');
-        return;
-      }
-      const card = overlay.querySelector('.cost-meter');
-      renderCostMeterContents(card, meter, { final: false });
-      overlay.classList.add('show');
-    }
-
     function applyIterCostUpdate(progress, runId){
       const rid = String(progress?.runId || runId || '').trim();
       if (!rid) return;
@@ -4249,14 +4214,12 @@
       if (run) run.costMeter = meter;
       const card = ensureCostMeterCard(rid);
       renderCostMeterContents(card, meter, { final: false });
-      updateCostMeterOverlay();
     }
 
     function finalizeCostMeter(runId, result){
       const meter = getCostMeterState(runId);
       if (!meter) {
         if (result && result.costUsd != null) setRunCost(runId, result.costUsd);
-        updateCostMeterOverlay();
         return;
       }
       if (result && result.costUsd != null) {
@@ -4266,7 +4229,6 @@
       meter.done = true;
       const card = ensureCostMeterCard(runId);
       renderCostMeterContents(card, meter, { final: true });
-      updateCostMeterOverlay();
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -6926,7 +6888,6 @@
       // newly-active thread (each thread has its own queue).
       try { renderQueuePanel(); } catch {}
       updateInputPlaceholder();
-      updateCostMeterOverlay();
     }
 
     function focusInputSoon(){
