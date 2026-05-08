@@ -10,3 +10,5 @@ dist/
 !.env.example
 zone-debug.log
 zone-debug.log.*
+zone-debug.log
+zone-debug.log.*
