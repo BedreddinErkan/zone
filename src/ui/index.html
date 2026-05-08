@@ -535,10 +535,18 @@
       margin-left:var(--space-sm);transform:translateY(2px);animation:blink 1s step-end infinite;
     }
     .log-card.done .log-line.active .log-msg::after{content:none}
-    /* Hide the run timeline once the run is done — leave only summary + status bar + diffs */
-    .log-card.done {
-      display: none;
+    .log-card.timeline-collapsed .exec-raw-view{display:none}
+    .timeline-toggle{
+      border:1px solid var(--border);
+      background:var(--surface-alpha-1);
+      color:var(--text-2);
+      border-radius:var(--radius-md);
+      padding:var(--space-xs) var(--space-md);
+      font-size:var(--font-size-sm);
+      cursor:pointer;
+      transition:border-color var(--transition-fast),background var(--transition-fast),color var(--transition-fast)
     }
+    .timeline-toggle:hover{border-color:var(--border2);background:var(--surface-alpha-2);color:var(--text-1)}
     @keyframes blink{50%{opacity:0}}
     /* ── Run Step Timeline ──────────────────────────────────────────────── */
     .step-timeline{display:flex;flex-direction:column;gap:var(--space-xs);padding:var(--space-sm) 0 2px}
@@ -818,6 +826,27 @@
     .toast.error{border-color:rgba(239,68,68,0.35);background:rgba(239,68,68,0.07);color:var(--text-1)}
     .ticon{width:10px;height:10px;border-radius:var(--radius-pill);background:var(--color-success)}
     .toast.error .ticon{background:var(--color-error)}
+    .cost-meter{
+      max-width:360px;margin:var(--space-lg) 0;border:1px solid var(--border);border-radius:var(--radius-lg);
+      background:rgba(8,8,12,0.92);box-shadow:0 16px 40px rgba(0,0,0,0.28);
+      padding:var(--space-md) var(--space-lg);color:var(--text-1);backdrop-filter:blur(14px)
+    }
+    .cost-meter-overlay{
+      position:fixed;top:18px;right:22px;z-index:60;display:none;pointer-events:none
+    }
+    .cost-meter-overlay.show{display:block}
+    .cost-meter-overlay .cost-meter{margin:0;pointer-events:auto}
+    .cost-meter.final{background:rgba(10,10,15,0.72);box-shadow:none}
+    .cost-meter-top{display:flex;align-items:baseline;gap:var(--space-md);white-space:nowrap}
+    .cost-meter-cost{font-size:20px;font-weight:750;letter-spacing:0;color:var(--text-1);font-family:var(--font-family-mono)}
+    .cost-meter-iter{font-size:12px;color:var(--text-3)}
+    .cost-meter-cache{margin-left:auto;font-size:12px;font-weight:700}
+    .cost-meter-cache.hot{color:var(--color-success)}
+    .cost-meter-cache.warm{color:var(--color-warning)}
+    .cost-meter-cache.cold{color:var(--color-error)}
+    .cost-meter-bar{height:7px;margin-top:var(--space-sm);border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden}
+    .cost-meter-fill{height:100%;width:0%;border-radius:999px;background:linear-gradient(90deg,var(--color-error),var(--color-warning),var(--color-success));transition:width 260ms ease}
+    .cost-meter-sub{margin-top:var(--space-sm);font-size:11px;color:var(--text-4);font-family:var(--font-family-mono)}
 
     /* Verification fix loop summary (collapsible) */
     .verify-sum{
@@ -1285,8 +1314,13 @@
 
     function setRun(threadId, runState) {
       if (!threadId) return;
+      if (runState && runState.runId) {
+        const meter = getCostMeterState(runState.runId);
+        if (meter) runState.costMeter = meter;
+      }
       state.runsByThread.set(threadId, runState);
       refreshSidebarRunningStates();
+      updateCostMeterOverlay();
     }
 
     function clearRun(threadId) {
@@ -1304,6 +1338,7 @@
       }
       const had = state.runsByThread.delete(threadId);
       if (had) refreshSidebarRunningStates();
+      updateCostMeterOverlay();
     }
 
     function getOrCreateTaskQueueForThread(threadId) {
@@ -2117,6 +2152,7 @@
       renderQueuePanel();
       renderBgTasks();
       renderBranchChip();
+      updateCostMeterOverlay();
       if (state.isRunning) {
         els.statusBadge.textContent = 'working...';
         els.statusBadge.classList.add('show');
@@ -2723,6 +2759,18 @@
       header.innerHTML = `
         <div class="exec-header-title">Run timeline</div>
       `;
+      const toggle = document.createElement('button');
+      toggle.className = 'timeline-toggle';
+      toggle.type = 'button';
+      toggle.textContent = 'Hide timeline';
+      toggle.addEventListener('click', () => {
+        const collapsed = !card.classList.contains('timeline-collapsed');
+        card.classList.toggle('timeline-collapsed', collapsed);
+        toggle.textContent = collapsed ? 'Show timeline' : 'Hide timeline';
+        toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      });
+      toggle.setAttribute('aria-expanded', 'true');
+      header.appendChild(toggle);
       const rawView = document.createElement('div');
       rawView.className = 'exec-raw-view';
       const lines = document.createElement('div');
@@ -4062,6 +4110,165 @@
       if (header) writeCost(header);
     }
 
+    function formatCostUsd(value){
+      const n = Number(value);
+      if (!Number.isFinite(n) || n <= 0) return '$0.00';
+      return n < 0.01 ? '<$0.01' : '$' + n.toFixed(2);
+    }
+
+    function formatPct(value){
+      const n = Number(value);
+      const pct = Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n * 100))) : 0;
+      return pct;
+    }
+
+    function cacheClass(ratio){
+      const pct = formatPct(ratio);
+      return pct >= 70 ? 'hot' : pct >= 30 ? 'warm' : 'cold';
+    }
+
+    function getCostMeterState(runId){
+      const rid = String(runId || '').trim();
+      if (!rid) return null;
+      state.__costMetersByRunId = state.__costMetersByRunId || {};
+      return state.__costMetersByRunId[rid] || null;
+    }
+
+    function ensureCostMeterState(runId){
+      const rid = String(runId || '').trim();
+      if (!rid) return null;
+      state.__costMetersByRunId = state.__costMetersByRunId || {};
+      if (!state.__costMetersByRunId[rid]) {
+        state.__costMetersByRunId[rid] = {
+          runId: rid,
+          cumulative: 0,
+          perIter: [],
+          cacheHitCumulative: 0,
+          cacheHitThisIter: 0,
+          currentIter: 0,
+          totalIter: 0,
+          totalInputUncached: 0,
+          totalCacheRead: 0,
+          totalCacheWrite: 0,
+          totalOutput: 0,
+          done: false,
+        };
+      }
+      return state.__costMetersByRunId[rid];
+    }
+
+    function renderCostMeterContents(target, meter, opts){
+      if (!target || !meter) return;
+      const final = !!(opts && opts.final);
+      const pct = formatPct(meter.cacheHitCumulative);
+      const thisPct = formatPct(meter.cacheHitThisIter);
+      const cls = cacheClass(meter.cacheHitCumulative);
+      const totalTokens =
+        Number(meter.totalInputUncached || 0) +
+        Number(meter.totalCacheRead || 0) +
+        Number(meter.totalCacheWrite || 0) +
+        Number(meter.totalOutput || 0);
+      target.className = 'cost-meter' + (final ? ' final' : '');
+      target.innerHTML = `
+        <div class="cost-meter-top">
+          <div class="cost-meter-cost">${escapeHtml(formatCostUsd(meter.cumulative))}</div>
+          <div class="cost-meter-iter">${final ? 'final' : 'iter'} ${escapeHtml(String(meter.currentIter || 0))}/${escapeHtml(String(meter.totalIter || '?'))}</div>
+          <div class="cost-meter-cache ${cls}">${pct}% cached</div>
+        </div>
+        <div class="cost-meter-bar"><div class="cost-meter-fill" style="width:${pct}%"></div></div>
+        <div class="cost-meter-sub">${thisPct}% this iter · ${totalTokens.toLocaleString()} tokens · ${Number(meter.totalCacheRead || 0).toLocaleString()} cached</div>
+      `;
+    }
+
+    function ensureCostMeterCard(runId){
+      const rid = String(runId || '').trim();
+      if (!rid) return null;
+      const group = document.getElementById(`runGroup-${rid}`);
+      if (!group) return null;
+      let card = group.querySelector(':scope > .cost-meter');
+      if (!card) {
+        card = document.createElement('div');
+        card.className = 'cost-meter';
+        const log = document.getElementById(`logBlock-${rid}`);
+        if (log && log.parentElement === group) group.insertBefore(card, log);
+        else group.appendChild(card);
+      }
+      return card;
+    }
+
+    function ensureCostMeterOverlay(){
+      let overlay = document.getElementById('costMeterOverlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'costMeterOverlay';
+        overlay.className = 'cost-meter-overlay';
+        const card = document.createElement('div');
+        card.className = 'cost-meter';
+        overlay.appendChild(card);
+        document.body.appendChild(overlay);
+      }
+      return overlay;
+    }
+
+    function updateCostMeterOverlay(){
+      const overlay = ensureCostMeterOverlay();
+      const active = getActiveRun();
+      const meter = active && active.runId ? getCostMeterState(active.runId) : null;
+      if (!meter || meter.done) {
+        overlay.classList.remove('show');
+        return;
+      }
+      const card = overlay.querySelector('.cost-meter');
+      renderCostMeterContents(card, meter, { final: false });
+      overlay.classList.add('show');
+    }
+
+    function applyIterCostUpdate(progress, runId){
+      const rid = String(progress?.runId || runId || '').trim();
+      if (!rid) return;
+      const meter = ensureCostMeterState(rid);
+      if (!meter) return;
+      const iter = Number(progress.iter || 0) || 0;
+      meter.currentIter = iter;
+      meter.totalIter = Number(progress.totalIter || meter.totalIter || 0) || meter.totalIter;
+      meter.cumulative = Number(progress.cumulativeCost || meter.cumulative || 0) || 0;
+      meter.cacheHitThisIter = Number(progress.cacheHitThisIter || 0) || 0;
+      meter.cacheHitCumulative = Number(progress.cacheHitCumulative || 0) || 0;
+      meter.totalInputUncached = Number(progress.total_input_uncached || 0) || 0;
+      meter.totalCacheRead = Number(progress.total_cache_read || 0) || 0;
+      meter.totalCacheWrite = Number(progress.total_cache_write || 0) || 0;
+      meter.totalOutput = Number(progress.total_output || 0) || 0;
+      meter.perIter = Array.isArray(meter.perIter) ? meter.perIter : [];
+      meter.perIter.push({
+        iter,
+        cost: Number(progress.iterCost || 0) || 0,
+        cacheHit: meter.cacheHitThisIter,
+      });
+      const tid = getThreadIdForRunId(rid);
+      const run = tid ? state.runsByThread.get(tid) : null;
+      if (run) run.costMeter = meter;
+      const card = ensureCostMeterCard(rid);
+      renderCostMeterContents(card, meter, { final: false });
+      updateCostMeterOverlay();
+    }
+
+    function finalizeCostMeter(runId, result){
+      const meter = getCostMeterState(runId);
+      if (!meter) {
+        if (result && result.costUsd != null) setRunCost(runId, result.costUsd);
+        updateCostMeterOverlay();
+        return;
+      }
+      if (result && result.costUsd != null) {
+        const n = Number(result.costUsd);
+        if (Number.isFinite(n) && n >= 0) meter.cumulative = n;
+      }
+      meter.done = true;
+      const card = ensureCostMeterCard(runId);
+      renderCostMeterContents(card, meter, { final: true });
+      updateCostMeterOverlay();
+    }
+
     // ════════════════════════════════════════════════════════════════════
     // Step Timeline — compact collapsible run progress groups
     // ════════════════════════════════════════════════════════════════════
@@ -4960,6 +5167,49 @@
       return lines.join('\n');
     }
 
+    function countChangedLinesInUnifiedText(diffText){
+      let count = 0;
+      const lines = String(diffText || '').split(/\r?\n/);
+      for (const raw of lines) {
+        if (!raw || raw.startsWith('@@') || raw.startsWith('+++') || raw.startsWith('---')) continue;
+        if (raw[0] === '+' || raw[0] === '-') count += 1;
+      }
+      return count;
+    }
+
+    function getFileDiffChangedLineCount(fileDiff){
+      if (!fileDiff || typeof fileDiff !== 'object') return 0;
+      const added = Number(fileDiff.addedLines ?? fileDiff.additions ?? fileDiff.linesAdded ?? 0) || 0;
+      const removed = Number(fileDiff.removedLines ?? fileDiff.deletions ?? fileDiff.linesRemoved ?? 0) || 0;
+      if (added > 0 || removed > 0) return added + removed;
+      const diffText = diffToUnifiedText(fileDiff.diff || fileDiff.unifiedDiff || fileDiff.patch || '');
+      return countChangedLinesInUnifiedText(diffText);
+    }
+
+    function getEffectiveDiffState(result){
+      const r = result && typeof result === 'object' ? result : {};
+      const diffs = Array.isArray(r.fileDiffs) ? r.fileDiffs : [];
+      const explicitTotalRaw =
+        r.totalChangedLines ??
+        r.patchScope?.totalChangedLines ??
+        r.finalRunReport?.patchScope?.totalChangedLines;
+      const explicitTotal = Number(explicitTotalRaw);
+      const hasExplicitTotal = Number.isFinite(explicitTotal) && explicitTotal >= 0;
+      const computedTotal = diffs.reduce((sum, fd) => sum + getFileDiffChangedLineCount(fd), 0);
+      const totalChangedLines = hasExplicitTotal ? explicitTotal : computedTotal;
+      const allDiffPatchesEmpty =
+        diffs.length === 0 || diffs.every((fd) => getFileDiffChangedLineCount(fd) === 0);
+      return {
+        totalChangedLines,
+        allDiffPatchesEmpty,
+        effectiveDiffsEmpty: totalChangedLines === 0 || allDiffPatchesEmpty,
+      };
+    }
+
+    function createNoChangesIndicator(){
+      return createToast('success', 'No changes made — file content unchanged');
+    }
+
     function splitDiffToColumns(diffText){
       const left = [];
       const right = [];
@@ -4995,9 +5245,7 @@
 
       // If the diff is empty (no actual lines changed), skip rendering this card entirely.
       // Happens when staging was discarded (verification_failed_staged) or detected as no-op.
-      const trimmedDiff = String(diffText || '').trim();
-      const hasContent = trimmedDiff.length > 0 && /[+\-]/.test(trimmedDiff);
-      if (!hasContent) {
+      if (getFileDiffChangedLineCount(fileDiff) === 0) {
         return null;
       }
 
@@ -6678,6 +6926,7 @@
       // newly-active thread (each thread has its own queue).
       try { renderQueuePanel(); } catch {}
       updateInputPlaceholder();
+      updateCostMeterOverlay();
     }
 
     function focusInputSoon(){
@@ -7829,6 +8078,7 @@
         progressTypeForMissingBlock === 'chat_chunk' ||
         progressTypeForMissingBlock === 'chat_done' ||
         progressTypeForMissingBlock === 'chat_response' ||
+        progressTypeForMissingBlock === 'iter_cost_update' ||
         progressTypeForMissingBlock === 'run_completed_with_result';
       if (!logBlock) {
         if (progress && canHandleWithoutLogBlock) {
@@ -7858,6 +8108,11 @@
       const lifecycleType = String(lifecycle?.type || '');
       const progressType = String(progress?.type || '');
       const progressTitle = String(progress?.title || '');
+
+      if (progress && progressType === 'iter_cost_update') {
+        applyIterCostUpdate(progress, runId);
+        return;
+      }
 
       recordExecutionSummaryPayload(logBlock, payload, runId);
 
@@ -8740,6 +8995,7 @@
 
       setLogBlockDone(runId);
       try { setRunCost(runId, result && result.costUsd); } catch {}
+      try { finalizeCostMeter(runId, result); } catch {}
       setRunningUI(false);
       completeExecutionSummary(runId);
       try { dismissPlanChecklistForRun(runId); } catch {}
@@ -8846,6 +9102,7 @@
         if (lb) appendLogLine(lb, { timestamp: nowTs(), message: '✗ Blocked for safety', status:'error' });
 
         const diffsBlocked = Array.isArray(result.fileDiffs) ? result.fileDiffs : [];
+        const blockedDiffState = getEffectiveDiffState(result);
         const blockedMsg = String(result?.reason || result?.message || '✗ Blocked for safety');
         const maxShowBlocked = 3;
         try {
@@ -8853,14 +9110,18 @@
             console.log('[zone-ui][diff-shape]', JSON.stringify(diffsBlocked[0].diff[0]));
           }
         } catch {}
-        diffsBlocked.slice(0, maxShowBlocked).forEach((fd, i) => {
-          const card = renderDiffCard(fd, i, diffsBlocked.length, {
-            decisionMode: 'blocked',
-            blockedMessage: blockedMsg,
+        if (blockedDiffState.effectiveDiffsEmpty) {
+          appendToRunGroup(runId, createNoChangesIndicator());
+        } else {
+          diffsBlocked.slice(0, maxShowBlocked).forEach((fd, i) => {
+            const card = renderDiffCard(fd, i, diffsBlocked.length, {
+              decisionMode: 'blocked',
+              blockedMessage: blockedMsg,
+            });
+            if (card) appendToRunGroup(runId, card);
           });
-          if (card) appendToRunGroup(runId, card);
-        });
-        if (diffsBlocked.length > maxShowBlocked) {
+        }
+        if (!blockedDiffState.effectiveDiffsEmpty && diffsBlocked.length > maxShowBlocked) {
           const moreB = document.createElement('div');
           moreB.className = 'toast';
           moreB.innerHTML = `<div class="ticon" style="background:var(--blue)"></div><div>+${diffsBlocked.length - maxShowBlocked} more diffs in report</div>`;
@@ -8927,6 +9188,7 @@
 
       // append diff blocks (first 3)
       const diffs = Array.isArray(result.fileDiffs) ? result.fileDiffs : [];
+      const diffState = getEffectiveDiffState(result);
       try {
         if (diffs[0] && diffs[0].diff && Array.isArray(diffs[0].diff) && diffs[0].diff[0]) {
           console.log('[zone-ui][diff-shape]', JSON.stringify(diffs[0].diff[0]));
@@ -8941,11 +9203,15 @@
         decision === 'safe_to_apply'
           ? { decisionMode: 'safe_to_apply', applied: patchesAlreadyApplied, handoffReport: handoffLive, verificationReason: result.verificationReason }
           : { decisionMode: 'preview_only', patchesAlreadyApplied, handoffReport: handoffLive, verificationReason: result.verificationReason };
-      diffs.slice(0, maxShow).forEach((fd, i) => {
-        const card = renderDiffCard(fd, i, diffs.length, diffToolbarOpts);
-        if (card) appendToRunGroup(runId, card);
-      });
-      if (diffs.length > maxShow) {
+      if (diffState.effectiveDiffsEmpty) {
+        appendToRunGroup(runId, createNoChangesIndicator());
+      } else {
+        diffs.slice(0, maxShow).forEach((fd, i) => {
+          const card = renderDiffCard(fd, i, diffs.length, diffToolbarOpts);
+          if (card) appendToRunGroup(runId, card);
+        });
+      }
+      if (!diffState.effectiveDiffsEmpty && diffs.length > maxShow) {
         const more = document.createElement('div');
         more.className = 'toast';
         more.innerHTML = `<div class="ticon" style="background:var(--blue)"></div><div>+${diffs.length - maxShow} more diffs in report</div>`;
@@ -8956,7 +9222,7 @@
       // Hidden on preview_only / blocked / chat. The 404 path covers older
       // runs whose snapshots have been GC'd.
       try {
-        if (decision === 'safe_to_apply' && runId && state.activeRepo?.path) {
+        if (decision === 'safe_to_apply' && !diffState.effectiveDiffsEmpty && runId && state.activeRepo?.path) {
           appendToRunGroup(runId, renderUndoControl(runId, state.activeRepo.path));
         }
       } catch {}
@@ -8967,7 +9233,7 @@
         }
       } catch {}
 
-      if (decision === 'safe_to_apply') {
+      if (decision === 'safe_to_apply' && !diffState.effectiveDiffsEmpty) {
         if (patchesAlreadyApplied) {
           showToast('success', '✓ Applied by agent', 1600);
         } else {

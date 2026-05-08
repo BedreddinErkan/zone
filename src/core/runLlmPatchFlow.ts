@@ -5189,6 +5189,32 @@ export async function runLlmPatchFlow(input: {
         if (
           e &&
           typeof e === "object" &&
+          e.type === "iter_cost_update"
+        ) {
+          emitStructuredProgress({
+            type: "iter_cost_update" as any,
+            title: "Cost updated",
+            status: "active",
+            iter: Number(e.iter ?? 0) || 0,
+            totalIter: Number(e.totalIter ?? 0) || 0,
+            iterCost: Number(e.iterCost ?? 0) || 0,
+            cumulativeCost: Number(e.cumulativeCost ?? 0) || 0,
+            cacheHitThisIter: Number(e.cacheHitThisIter ?? 0) || 0,
+            cacheHitCumulative: Number(e.cacheHitCumulative ?? 0) || 0,
+            input_uncached: Number(e.input_uncached ?? 0) || 0,
+            cache_write: Number(e.cache_write ?? 0) || 0,
+            cache_read: Number(e.cache_read ?? 0) || 0,
+            output: Number(e.output ?? 0) || 0,
+            total_input_uncached: Number(e.total_input_uncached ?? 0) || 0,
+            total_cache_read: Number(e.total_cache_read ?? 0) || 0,
+            total_cache_write: Number(e.total_cache_write ?? 0) || 0,
+            total_output: Number(e.total_output ?? 0) || 0,
+            iter_count: Number(e.iter_count ?? 0) || 0,
+          } as any);
+        }
+        if (
+          e &&
+          typeof e === "object" &&
           (e.type === "subagent_started" || e.type === "subagent_completed")
         ) {
           emitStructuredProgress({

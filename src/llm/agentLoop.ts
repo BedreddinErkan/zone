@@ -17,6 +17,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { ZONE_TOOLS } from "../tools/toolDefinitions.js";
 import { resetSubagentCallCount } from "./subagents.js";
+import { extractUsage } from "./recordingClient.js";
+import {
+  buildIterCostUpdate,
+  emptyIterCostAccumulator,
+  type IterCostAccumulator,
+} from "../usage/iterCostMeter.js";
 import {
   executeTool,
   withStagingTempFlush,
@@ -1543,6 +1549,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
 
   const client = createLLMClient({ apiKey: input.userApiKey });
   const requestCtx = getRequestContext();
+  let iterCostAccumulator: IterCostAccumulator = emptyIterCostAccumulator();
   // Usage recording is centralized in RecordingLLMClient (src/llm/recordingClient.ts):
   // every chat completion across the codebase appends one JSONL record. agentLoop
   // used to accumulate-then-record-on-exit, but that double-counted with the wrapper
@@ -1579,9 +1586,10 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     });
     const promptCacheKey =
       client.provider === "openai" ? buildOpenAIPromptCacheKey(input.runId) : undefined;
+    const modelName = getModelName("high", client.provider, requestCtx?.modelOverride);
     const response = await client.createChatCompletion(
       {
-        model: getModelName("high", client.provider, requestCtx?.modelOverride),
+        model: modelName,
         messages: responseInput,
         tools: toolsForLLM,
         tool_choice: "auto",
@@ -1594,6 +1602,25 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       iter,
       abortAlready: input.abortSignal?.aborted ?? false,
     });
+    try {
+      const usage = extractUsage((response as { usage?: unknown }).usage);
+      const runId = typeof input.runId === "string" ? input.runId.trim() : "";
+      if (usage && runId) {
+        const update = buildIterCostUpdate({
+          runId,
+          iter: iter + 1,
+          totalIter: iterationBudget.maxIterationsForRun,
+          provider: client.provider,
+          model: response.model || modelName,
+          current: usage,
+          previous: iterCostAccumulator,
+        });
+        iterCostAccumulator = update.accumulator;
+        input.onStructuredEvent?.(update.payload);
+      }
+    } catch (err) {
+      debugLog("[zone-iter-cost-update-failed]", err);
+    }
     // Persistence happens in RecordingLLMClient — this block is debug-only.
     try {
       const u = (response as { usage?: Record<string, unknown> }).usage;

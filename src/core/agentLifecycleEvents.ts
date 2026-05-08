@@ -96,6 +96,7 @@ export type ZoneStructuredProgressEvent = {
     | "tool_result"
     | "agent_loop_start"
     | "agent_loop_complete"
+    | "iter_cost_update"
     | "subagent_started"
     | "subagent_completed"
     | "handoff_report"
@@ -115,6 +116,21 @@ export type ZoneStructuredProgressEvent = {
   parentRunId?: string;
   stream?: "stdout" | "stderr";
   exitCode?: number;
+  iter?: number;
+  totalIter?: number;
+  iterCost?: number;
+  cumulativeCost?: number;
+  cacheHitThisIter?: number;
+  cacheHitCumulative?: number;
+  input_uncached?: number;
+  cache_write?: number;
+  cache_read?: number;
+  output?: number;
+  total_input_uncached?: number;
+  total_cache_read?: number;
+  total_cache_write?: number;
+  total_output?: number;
+  iter_count?: number;
   approvalId?: string;
   steps?: Array<{
     index: number;
