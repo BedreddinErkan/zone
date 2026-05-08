@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { ZONE_TOOLS } from "../tools/toolDefinitions.js";
 import {
+  EXPLORE_ALLOWED_TOOLS,
   WORKER_ALLOWED_TOOLS,
   formatSubagentToolResultForParent,
   getSubagentCallCount,
   incrementSubagentCallCount,
   parseWorkerSummary,
   resetSubagentCallCount,
+  subagentTypeAllowedTools,
+  subagentTypeMaxIterations,
 } from "./subagents.js";
 
 describe("subagent helpers", () => {
@@ -64,6 +67,16 @@ describe("subagent helpers", () => {
   it("documents PR 3 staging-isolation limitation for worker writes", () => {
     expect(WORKER_ALLOWED_TOOLS.has("apply_patch")).toBe(true);
     expect(WORKER_ALLOWED_TOOLS.has("write_file")).toBe(true);
+  });
+
+  it("subagentTypeAllowedTools routes correctly", () => {
+    expect(subagentTypeAllowedTools("worker")).toBe(WORKER_ALLOWED_TOOLS);
+    expect(subagentTypeAllowedTools("explore")).toBe(EXPLORE_ALLOWED_TOOLS);
+  });
+
+  it("subagentTypeMaxIterations routes correctly", () => {
+    expect(subagentTypeMaxIterations("worker")).toBe(12);
+    expect(subagentTypeMaxIterations("explore")).toBe(8);
   });
 
   it("formats a failed worker as a terminal successful Task tool result", () => {

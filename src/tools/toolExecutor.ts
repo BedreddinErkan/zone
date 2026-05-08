@@ -450,9 +450,11 @@ export async function executeTool(
         incrementSubagentCallCount,
         getSubagentCallCount,
         MAX_SUBAGENT_CALLS_PER_PARENT_RUN,
-        WORKER_ALLOWED_TOOLS,
-        WORKER_MAX_ITERATIONS,
+        subagentTypeAllowedTools,
+        subagentTypeMaxIterations,
+        VALID_SUBAGENT_TYPES,
         formatSubagentToolResultForParent,
+        formatExploreSubagentToolResultForParent,
       } = await import("../llm/subagents.js");
 
       if (getSubagentCallCount(parentRunId) >= MAX_SUBAGENT_CALLS_PER_PARENT_RUN) {
@@ -466,12 +468,13 @@ export async function executeTool(
 
       const subagentType = args.subagent_type;
       const description = args.description;
-      if (subagentType !== "worker") {
+      if (!VALID_SUBAGENT_TYPES.includes(subagentType as "worker" | "explore")) {
         return {
           success: false,
-          output: `Subagent type "${String(subagentType)}" not yet implemented. Currently supported: worker.`,
+          output: `Subagent type "${String(subagentType)}" is not supported. Valid types: ${VALID_SUBAGENT_TYPES.join(", ")}.`,
         };
       }
+      const resolvedType = subagentType as "worker" | "explore";
       if (typeof description !== "string" || !description.trim()) {
         return {
           success: false,
@@ -487,14 +490,14 @@ export async function executeTool(
         title: description.trim().slice(0, 80),
         status: "active",
         subagentId,
-        subagentType: "worker",
+        subagentType: resolvedType,
         parentRunId,
       } satisfies Partial<ZoneStructuredProgressEvent>);
 
       const { runAgentLoop } = await import("../llm/agentLoop.js");
       const { withRequestContext } = await import("../llm/openaiContext.js");
       const subagentResult = await withRequestContext(
-        { subagentId, subagentType: "worker", parentRunId },
+        { subagentId, subagentType: resolvedType, parentRunId },
         () =>
           runAgentLoop({
             task: description.trim(),
@@ -502,10 +505,10 @@ export async function executeTool(
             runId: parentRunId,
             userId: input?.userId,
             framework: input?.framework,
-            maxIterationsOverride: WORKER_MAX_ITERATIONS,
-            allowedTools: WORKER_ALLOWED_TOOLS,
-            subagent: { id: subagentId, type: "worker", parentRunId },
-            parentStagingFiles: input?.stagingFiles,
+            maxIterationsOverride: subagentTypeMaxIterations(resolvedType),
+            allowedTools: subagentTypeAllowedTools(resolvedType),
+            subagent: { id: subagentId, type: resolvedType, parentRunId },
+            parentStagingFiles: resolvedType === "worker" ? input?.stagingFiles : undefined,
             abortSignal: input?.abortSignal,
             onProgress,
             onToolCall: input?.onToolCall,
@@ -514,11 +517,15 @@ export async function executeTool(
           })
       );
 
-      const result = formatSubagentToolResultForParent(subagentResult, subagentId);
+      const result =
+        resolvedType === "explore"
+          ? formatExploreSubagentToolResultForParent(subagentResult, subagentId)
+          : formatSubagentToolResultForParent(subagentResult, subagentId);
       let subagentStatus: "completed" | "partial" | "failed" = subagentResult.success
         ? "completed"
         : "failed";
-      let title = subagentResult.summary || "Worker completed";
+      const defaultTitle = resolvedType === "explore" ? "Explore completed" : "Worker completed";
+      let title = subagentResult.summary || defaultTitle;
       try {
         const parsed = JSON.parse(result.output) as {
           status?: "completed" | "partial" | "failed";
@@ -548,7 +555,7 @@ export async function executeTool(
               : "error",
         subagentStatus,
         subagentId,
-        subagentType: "worker",
+        subagentType: resolvedType,
         parentRunId,
       } satisfies Partial<ZoneStructuredProgressEvent>);
 

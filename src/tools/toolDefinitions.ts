@@ -366,26 +366,29 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
     function: {
       name: "Task",
       description:
-        "Delegate a focused, bounded subtask to a subagent running in an " +
-        "isolated context. Use this when a subtask is well-specified and you " +
-        "want to keep your own context clean (e.g., reading many files to " +
-        "answer one question, implementing one component end-to-end). The " +
-        "subagent returns a structured summary; its detailed work is hidden " +
-        "from your context. " +
-        "\n\n" +
+        "Delegate a focused, bounded subtask to a subagent running in an isolated context. " +
+        "The subagent returns a structured summary; its detailed work is hidden from your context.\n\n" +
+        "Choose subagent_type based on the nature of the work:\n\n" +
+        "• worker — Use for bounded multi-file implementation tasks where the pattern is clear " +
+        "(e.g., adding a new endpoint with its handler + test, refactoring a function with 3+ call " +
+        "sites, implementing a small new module). Has read/write file access; cannot run commands. " +
+        "Do NOT use for single-line edits or content you can produce in 1-2 steps.\n\n" +
+        "• explore — Use for read-only investigation BEFORE deciding how to implement " +
+        "(e.g., finding all call sites of a function before refactoring, understanding how an " +
+        "existing flow works across 3-5 files, locating the right entry point for a new feature). " +
+        "Returns findings (file:line + relevance notes) plus a high-level summary. " +
+        "Do NOT use for any task that involves file modification.\n\n" +
         "DO NOT use Task for trivial work that can be done in 1-2 tool calls. " +
-        "DO NOT use Task to escape your iteration budget on tasks you should " +
-        "be doing yourself.",
+        "DO NOT use Task to escape your iteration budget on tasks you should be doing yourself.",
       parameters: {
         type: "object",
         properties: {
           subagent_type: {
             type: "string",
-            enum: ["worker"],
+            enum: ["worker", "explore"],
             description:
-              "Type of subagent. 'worker' is for focused implementation tasks " +
-              "(file edits within a clear scope). The worker has read/write " +
-              "access to files but cannot run commands or update memory.",
+              "'worker' for implementation tasks (file edits). " +
+              "'explore' for read-only investigation (find, read, summarize — no writes).",
           },
           description: {
             type: "string",

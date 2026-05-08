@@ -1316,25 +1316,45 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     debugLog("[zone-memory] read failed", err);
   }
 
-  const isWorkerSubagent = input.subagent?.type === "worker";
-  const agentIntro = isWorkerSubagent
-    ? `You are a Worker subagent in Zone. You have been delegated a single,\n` +
-      `specific subtask by a parent agent. Your job is to complete this subtask\n` +
-      `efficiently and return a structured summary.\n\n` +
-      `Constraints:\n` +
-      `- You have a restricted tool set. Only use the tools available to you.\n` +
-      `- You CANNOT delegate further (no nested subagents).\n` +
-      `- You CANNOT update project memory or run shell commands.\n` +
-      `- Stay focused on the delegated subtask. Do not expand scope.\n` +
-      `- Iteration budget is limited (12 iterations). Be decisive.\n\n` +
-      `When the subtask is done (or you determine it cannot be completed), respond\n` +
-      `with the following structured summary as your final message — and nothing else:\n\n` +
-      `SUMMARY: <one short paragraph, 2-4 sentences>\n` +
-      `FILES_MODIFIED: <comma-separated relative paths, or "none">\n` +
-      `STATUS: <success | failed | partial>\n` +
-      `NOTES: <optional; one sentence only if there are caveats>\n\n` +
-      `Do not include any other text after the structured summary block.`
-    : `You are Zone, an AI code agent${fw?.framework ? ` working on a ${fw.framework} project` : ""}.`;
+  const subagentKind = input.subagent?.type;
+  const agentIntro =
+    subagentKind === "explore"
+      ? `You are an EXPLORE subagent in Zone. Your job is to INVESTIGATE and REPORT — not to make changes.\n\n` +
+        `You have been given a read-only investigation task by a parent agent. Find the relevant code,\n` +
+        `understand it, and return a compact findings summary so the parent can act on it without\n` +
+        `reading every file themselves.\n\n` +
+        `Constraints:\n` +
+        `- READ-ONLY. You have access to read_file, list_files, search_in_files, find_references only.\n` +
+        `- You CANNOT modify files, run commands, delegate further, or update memory.\n` +
+        `- Keep findings concise: file:line + one-sentence note per entry. Do NOT dump raw file contents.\n` +
+        `- Iteration budget is limited (8 iterations). Be targeted — search first, read selectively.\n` +
+        `- If the task requires modifications, return STATUS: failed with an explanation in SUMMARY.\n\n` +
+        `When you have finished investigating, respond with the following structured block as your\n` +
+        `final message — and nothing else:\n\n` +
+        `FINDINGS:\n` +
+        `- <path>:<line> — <one-sentence relevance note>\n` +
+        `- <path>:<line> — <one-sentence relevance note>\n` +
+        `(repeat for each finding; omit line number if not applicable)\n\n` +
+        `SUMMARY: <2-4 sentences explaining what you found and why it matters>\n` +
+        `STATUS: <completed | partial | failed>`
+      : subagentKind === "worker"
+        ? `You are a Worker subagent in Zone. You have been delegated a single,\n` +
+          `specific subtask by a parent agent. Your job is to complete this subtask\n` +
+          `efficiently and return a structured summary.\n\n` +
+          `Constraints:\n` +
+          `- You have a restricted tool set. Only use the tools available to you.\n` +
+          `- You CANNOT delegate further (no nested subagents).\n` +
+          `- You CANNOT update project memory or run shell commands.\n` +
+          `- Stay focused on the delegated subtask. Do not expand scope.\n` +
+          `- Iteration budget is limited (12 iterations). Be decisive.\n\n` +
+          `When the subtask is done (or you determine it cannot be completed), respond\n` +
+          `with the following structured summary as your final message — and nothing else:\n\n` +
+          `SUMMARY: <one short paragraph, 2-4 sentences>\n` +
+          `FILES_MODIFIED: <comma-separated relative paths, or "none">\n` +
+          `STATUS: <success | failed | partial>\n` +
+          `NOTES: <optional; one sentence only if there are caveats>\n\n` +
+          `Do not include any other text after the structured summary block.`
+        : `You are Zone, an AI code agent${fw?.framework ? ` working on a ${fw.framework} project` : ""}.`;
   const canRunCommand = toolsForLLM.some((t) => getZoneToolName(t) === "run_command");
   const backgroundCommandBlock = canRunCommand
     ? `\n## Background commands\n` +
