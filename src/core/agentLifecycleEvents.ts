@@ -100,6 +100,8 @@ export type ZoneStructuredProgressEvent = {
     | "subagent_completed"
     | "handoff_report"
     | "command_approval_required"
+    | "command_auto_approved"
+    | "command_trusted"
     | "terminal_output"
     | "terminal_done";
   title: string;
