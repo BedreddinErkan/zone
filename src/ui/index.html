@@ -524,6 +524,12 @@
     .log-line.warning .log-msg {
       color: inherit;
     }
+    .log-line.subagent-line{padding-left:24px;border-left:1px solid rgba(167,139,250,.35)}
+    .log-line.subagent-line .log-ts{min-width:64px;color:#7c6fb5}
+    .subagent-pill{display:inline-flex;align-items:center;border-radius:999px;padding:1px 7px;margin:0 6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.02em}
+    .subagent-pill.completed{background:rgba(74,222,128,.14);color:#4ade80}
+    .subagent-pill.partial{background:rgba(250,204,21,.14);color:#facc15}
+    .subagent-pill.failed{background:rgba(248,113,113,.14);color:#f87171}
     .log-line.active .log-msg::after{
       content:"";display:inline-block;width:6px;height:13px;background:var(--violet);
       margin-left:var(--space-sm);transform:translateY(2px);animation:blink 1s step-end infinite;
@@ -4437,7 +4443,7 @@
       if (ctx && !ctx.lineEl) ctx.lineEl = lineEl;
     }
 
-    function appendLogLine(logBlock, { timestamp, message, status, className }){
+    function appendLogLine(logBlock, { timestamp, message, messageHtml, status, className }){
       if (!logBlock) return;
       // NEVER log streaming deltas as separate lines (stream is rendered in livecode block).
       if (String(message || '').toLowerCase().includes('streaming patch')) return;
@@ -4590,13 +4596,17 @@
       if (status === 'warning') row.classList.add('warning');
       if (status === 'error') row.classList.add('error');
       // Allow callers to force design-system color classes (e.g. c-active, c-done).
-      if (className) row.classList.add(String(className));
+      if (className) String(className).split(/\s+/).filter(Boolean).forEach((cls) => row.classList.add(cls));
       const ts = document.createElement('div');
       ts.className = 'log-ts';
       ts.textContent = timestamp || nowTs();
       const msg = document.createElement('div');
       msg.className = 'log-msg';
-      msg.textContent = finalMessage || '';
+      if (messageHtml) {
+        msg.innerHTML = String(messageHtml || '');
+      } else {
+        msg.textContent = finalMessage || '';
+      }
       row.appendChild(ts);
       row.appendChild(msg);
       // Always append at bottom so log reads chronologically (top → bottom).
@@ -8095,6 +8105,12 @@
         const type = progress.type;
         const progTitle = String(progress.title || '');
         const stageLower = String(stage || '').toLowerCase();
+        const subagentId = String(progress.subagentId || '').trim();
+        const subagentType = String(progress.subagentType || 'worker').trim() || 'worker';
+        const subagentShort = subagentId ? subagentId.slice(0, 6) : '';
+        const subagentPrefix = subagentId ? `↳ ${subagentType} ${subagentShort} ` : '';
+        const subagentClass = subagentId ? 'subagent-line' : '';
+        const subagentMessage = (text) => subagentPrefix ? `${subagentPrefix}${text}` : text;
 
         if (type === 'handoff_report' && progress.report) {
           state.__handoffReportByRun = state.__handoffReportByRun || {};
@@ -8102,11 +8118,38 @@
           return;
         }
 
+        if (type === 'subagent_started') {
+          appendLogLine(logBlock, {
+            timestamp: new Date(progress.ts || Date.now()).toLocaleTimeString(),
+            message: `↳ worker ${subagentShort || ''} Dispatched: ${progTitle || 'subtask'}`,
+            status: 'active',
+            className: 'subagent-line c-active'
+          });
+          return;
+        }
+        if (type === 'subagent_completed') {
+          const subStatus = String(progress.subagentStatus || progress.status || 'completed').toLowerCase();
+          const safeStatus = /^(completed|partial|failed)$/.test(subStatus) ? subStatus : 'completed';
+          const rowStatus = safeStatus === 'completed' ? 'done' : safeStatus === 'partial' ? 'warning' : 'error';
+          const label = `Worker ${subagentShort || ''}`;
+          appendLogLine(logBlock, {
+            timestamp: new Date(progress.ts || Date.now()).toLocaleTimeString(),
+            message: `${label} ${safeStatus}: ${progTitle || 'completed'}`,
+            messageHtml:
+              `${escapeHtml(label)} <span class="subagent-pill ${safeStatus}">${escapeHtml(safeStatus)}</span>: ` +
+              `${escapeHtml(progTitle || 'completed')}`,
+            status: rowStatus,
+            className: 'subagent-line'
+          });
+          return;
+        }
+
         if (type === 'agent_loop_start' || /starting agent tool loop/i.test(progTitle)) {
           appendLogLine(logBlock, {
             timestamp: new Date(progress.ts || Date.now()).toLocaleTimeString(),
-            message: 'Agent working...',
-            status: 'active'
+            message: subagentMessage(subagentId ? 'Worker working...' : 'Agent working...'),
+            status: 'active',
+            className: subagentClass
           });
           return;
         }
@@ -8114,8 +8157,9 @@
           const ok = (progress.status === 'success');
           appendLogLine(logBlock, {
             timestamp: new Date(progress.ts || Date.now()).toLocaleTimeString(),
-            message: 'Agent finished',
-            status: ok ? 'done' : 'warning'
+            message: subagentMessage(subagentId ? 'Worker finished' : 'Agent finished'),
+            status: ok ? 'done' : 'warning',
+            className: subagentClass
           });
           return;
         }
@@ -8146,12 +8190,14 @@
           };
           const humanized = humanizeTool(progress.title || '[tool] call');
           const ts = new Date(progress.ts || Date.now()).toLocaleTimeString();
-          const wasCoalesced = tryCoalesceToolLine(logBlock, runId, humanized, ts);
+          const displayHumanized = subagentMessage(humanized);
+          const wasCoalesced = subagentId ? false : tryCoalesceToolLine(logBlock, runId, humanized, ts);
           if (!wasCoalesced) {
             appendLogLine(logBlock, {
               timestamp: ts,
-              message: humanized,
-              status: 'active'
+              message: displayHumanized,
+              status: 'active',
+              className: subagentClass
             });
             const lines = logBlock.querySelectorAll('.log-line');
             const last = lines[lines.length - 1];
@@ -8279,12 +8325,12 @@
         if (stageLower.includes('agent_loop') && /\biteration\b/i.test(String(title))) {
           return;
         }
-        const msg = progress.command ? `${title}: ${progress.command}` : title;
+        const msg = subagentMessage(progress.command ? `${title}: ${progress.command}` : title);
         let st = 'active';
         if (type === 'patch_rejected' || type === 'fallback') st = 'warning';
         if (type === 'validated' || type === 'fallback_success' || type === 'patch_converted') st = 'done';
         st = normalizeStatus(progress.status || st);
-        appendLogLine(logBlock, { timestamp: new Date(progress.ts || Date.now()).toLocaleTimeString(), message: msg, status: st });
+        appendLogLine(logBlock, { timestamp: new Date(progress.ts || Date.now()).toLocaleTimeString(), message: msg, status: st, className: subagentClass });
         return;
       }
 

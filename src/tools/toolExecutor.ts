@@ -16,6 +16,7 @@ import {
 } from "../ast/astSyntaxValidator.js";
 import { checkWriteScope } from "./scopeGuard.js";
 import { sanitizeVerificationEnv, strippedEnvKeys } from "../core/buildEnv.js";
+import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import type { ProjectFramework } from "../repo/detectFramework.js";
 
 const execAsync = promisify(exec);
@@ -400,6 +401,9 @@ export async function executeTool(
       type: "worker" | "explore" | "verifier";
       parentRunId: string;
     };
+    onToolCall?: (name: string, args: Record<string, unknown>) => void;
+    onToolResult?: (name: string, result: ToolResult) => void;
+    onStructuredEvent?: (evt: unknown) => void;
   }
 ): Promise<ToolResult> {
   const args = (toolArgs ?? {}) as Record<string, unknown>;
@@ -478,6 +482,15 @@ export async function executeTool(
       const subagentId = randomUUID();
       incrementSubagentCallCount(parentRunId);
 
+      input?.onStructuredEvent?.({
+        type: "subagent_started",
+        title: description.trim().slice(0, 80),
+        status: "active",
+        subagentId,
+        subagentType: "worker",
+        parentRunId,
+      } satisfies Partial<ZoneStructuredProgressEvent>);
+
       const { runAgentLoop } = await import("../llm/agentLoop.js");
       const { withRequestContext } = await import("../llm/openaiContext.js");
       const subagentResult = await withRequestContext(
@@ -494,10 +507,52 @@ export async function executeTool(
             subagent: { id: subagentId, type: "worker", parentRunId },
             parentStagingFiles: input?.stagingFiles,
             abortSignal: input?.abortSignal,
+            onProgress,
+            onToolCall: input?.onToolCall,
+            onToolResult: input?.onToolResult,
+            onStructuredEvent: input?.onStructuredEvent,
           })
       );
 
-      return formatSubagentToolResultForParent(subagentResult, subagentId);
+      const result = formatSubagentToolResultForParent(subagentResult, subagentId);
+      let subagentStatus: "completed" | "partial" | "failed" = subagentResult.success
+        ? "completed"
+        : "failed";
+      let title = subagentResult.summary || "Worker completed";
+      try {
+        const parsed = JSON.parse(result.output) as {
+          status?: "completed" | "partial" | "failed";
+          summary?: string;
+        };
+        if (
+          parsed.status === "completed" ||
+          parsed.status === "partial" ||
+          parsed.status === "failed"
+        ) {
+          subagentStatus = parsed.status;
+        }
+        if (typeof parsed.summary === "string" && parsed.summary.trim()) {
+          title = parsed.summary.trim();
+        }
+      } catch {
+        // Keep lifecycle reporting best-effort; the tool result still carries the raw summary.
+      }
+      input?.onStructuredEvent?.({
+        type: "subagent_completed",
+        title: title.slice(0, 120),
+        status:
+          subagentStatus === "completed"
+            ? "success"
+            : subagentStatus === "partial"
+              ? "warning"
+              : "error",
+        subagentStatus,
+        subagentId,
+        subagentType: "worker",
+        parentRunId,
+      } satisfies Partial<ZoneStructuredProgressEvent>);
+
+      return result;
     }
 
     if (input?.allowedTools && !input.allowedTools.has(toolName)) {

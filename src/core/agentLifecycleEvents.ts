@@ -21,6 +21,11 @@ export const AGENT_LIFECYCLE_EVENT_TYPES = [
 
 export type AgentLifecycleEventType = (typeof AGENT_LIFECYCLE_EVENT_TYPES)[number];
 
+export const SUBAGENT_STRUCTURED_PROGRESS_EVENT_TYPES = [
+  "subagent_started",
+  "subagent_completed",
+] as const;
+
 /** Coarse pipeline stage for UI grouping (distinct from legacy progress strings). */
 export type AgentLifecyclePipelineStage =
   | "init"
@@ -91,6 +96,8 @@ export type ZoneStructuredProgressEvent = {
     | "tool_result"
     | "agent_loop_start"
     | "agent_loop_complete"
+    | "subagent_started"
+    | "subagent_completed"
     | "handoff_report"
     | "command_approval_required"
     | "terminal_output"
@@ -100,6 +107,10 @@ export type ZoneStructuredProgressEvent = {
   filePath?: string;
   command?: string;
   status?: "active" | "success" | "warning" | "error";
+  subagentStatus?: "completed" | "partial" | "failed";
+  subagentId?: string;
+  subagentType?: "worker" | "explore" | "verifier";
+  parentRunId?: string;
   stream?: "stdout" | "stderr";
   exitCode?: number;
   approvalId?: string;

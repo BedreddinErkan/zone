@@ -1670,6 +1670,9 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
           userId: input.userId,
           framework: input.framework,
           subagent: input.subagent,
+          onToolCall: input.onToolCall,
+          onToolResult: input.onToolResult,
+          onStructuredEvent: input.onStructuredEvent,
         });
         debugLog("[zone-agent-tool-post]", {
           runId: input.runId,

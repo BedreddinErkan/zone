@@ -8,6 +8,7 @@ type PendingApproval = {
 };
 
 const pendingApprovals = new Map<string, PendingApproval>();
+const trustedCommandsByRun = new Map<string, Set<string>>();
 
 export function requestCommandApproval(input: {
   runId: string;
@@ -66,6 +67,7 @@ export function resolveCommandApproval(input: {
   approvalId: string;
   approved: boolean;
   runId: string;
+  trust?: boolean;
 }): { ok: boolean; message?: string } {
   const approvalId = String(input.approvalId || "").trim();
   const approved = !!input.approved;
@@ -73,8 +75,19 @@ export function resolveCommandApproval(input: {
   const entry = pendingApprovals.get(approvalId);
   if (!entry) return { ok: false, message: "unknown_approval_id" };
   if (runId && entry.runId && runId !== entry.runId) return { ok: false, message: "run_id_mismatch" };
+  if (approved && input.trust) {
+    const trusted = trustedCommandsByRun.get(entry.runId) ?? new Set<string>();
+    trusted.add(entry.command);
+    trustedCommandsByRun.set(entry.runId, trusted);
+  }
   entry.resolve(approved);
   return { ok: true };
+}
+
+export function clearTrustedCommandsForRun(runIdRaw: string): void {
+  const runId = String(runIdRaw || "").trim();
+  if (!runId) return;
+  trustedCommandsByRun.delete(runId);
 }
 
 export function rejectPendingApprovalsForRun(runIdRaw: string): number {
@@ -95,4 +108,3 @@ export function rejectPendingApprovalsForRun(runIdRaw: string): number {
   }
   return n;
 }
-

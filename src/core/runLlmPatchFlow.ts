@@ -5186,6 +5186,21 @@ export async function runLlmPatchFlow(input: {
             approvalId: String(e.approvalId || ""),
           } as any);
         }
+        if (
+          e &&
+          typeof e === "object" &&
+          (e.type === "subagent_started" || e.type === "subagent_completed")
+        ) {
+          emitStructuredProgress({
+            type: e.type,
+            title: String(e.title || e.type).slice(0, 160),
+            status: e.status,
+            subagentStatus: e.subagentStatus,
+            subagentId: e.subagentId,
+            subagentType: e.subagentType,
+            parentRunId: e.parentRunId,
+          } as any);
+        }
       },
       onProgress: (msg: string) => {
         if (!runId) return;
