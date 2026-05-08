@@ -1149,6 +1149,7 @@
       <div class="modal-tabs">
         <button class="mtab active" data-stab="usage">Usage</button>
         <button class="mtab" data-stab="keys">API Keys</button>
+        <button class="mtab" data-stab="memory">Memory</button>
       </div>
       <div class="modal-b" id="settingsBody"></div>
     </div>
@@ -4012,23 +4013,49 @@
     function setRunCost(runId, costUsd) {
       const n = Number(costUsd);
       if (!Number.isFinite(n) || n < 0) return;
-      const card = document.getElementById('logBlock-' + runId);
-      if (!card) return;
-      const header = card.querySelector('.exec-header');
-      if (!header) return;
-      let badge = header.querySelector('.run-cost');
-      if (!badge) {
-        badge = document.createElement('span');
-        badge.className = 'run-cost';
-        badge.style.cssText = 'margin-left:auto;opacity:0.6;font-size:11px;font-family:var(--font-mono,monospace)';
-        header.style.display = 'flex';
-        header.style.alignItems = 'center';
-        header.appendChild(badge);
-      }
       // Render cents-level precision when small ($0.07), otherwise 2 decimals.
-      const formatted = n < 0.01 && n > 0 ? '<$0.01' : '$' + n.toFixed(n < 1 ? 2 : 2);
-      badge.textContent = formatted;
-      badge.title = 'Estimated BYOK spend for this run';
+      const formatted = n < 0.01 && n > 0 ? '<$0.01' : '$' + n.toFixed(2);
+      const badgeStyle = 'margin-left:auto;opacity:0.85;font-size:13px;font-family:var(--font-mono,monospace);color:var(--text-2);padding:2px 8px;border-radius:6px;background:var(--surface-alpha-2)';
+      // Helper: ensure a .run-cost child exists in target, set text + title.
+      const writeCost = (target) => {
+        let badge = target.querySelector(':scope > .run-cost');
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'run-cost';
+          badge.style.cssText = badgeStyle;
+          if (getComputedStyle(target).display !== 'flex') {
+            target.style.display = 'flex';
+            target.style.alignItems = 'center';
+            target.style.flexWrap = 'wrap';
+          }
+          target.appendChild(badge);
+        }
+        badge.textContent = formatted;
+        badge.title = 'Estimated BYOK spend for this run';
+      };
+      // Primary target: verify-banner (rendered AFTER run completes — may not
+      // exist yet when this is first called). Try now; if not present, watch
+      // for DOM mutations and write when it appears (max 5s).
+      const group = document.getElementById('runGroup-' + runId);
+      const tryVerify = () => {
+        const v = group?.querySelector('.verify-banner');
+        if (v && !v.querySelector(':scope > .run-cost')) {
+          writeCost(v);
+          return true;
+        }
+        return false;
+      };
+      if (group && !tryVerify()) {
+        const observer = new MutationObserver(() => {
+          if (tryVerify()) observer.disconnect();
+        });
+        observer.observe(group, { childList: true, subtree: true });
+        setTimeout(() => observer.disconnect(), 5000);
+      }
+      // Secondary target: exec-header (visible during run, before run timeline collapses).
+      const card = document.getElementById('logBlock-' + runId);
+      const header = card?.querySelector('.exec-header');
+      if (header) writeCost(header);
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -9060,6 +9087,7 @@
       document.querySelectorAll('.mtab').forEach(b => b.classList.toggle('active', b.dataset.stab === tab));
       if (tab === 'usage') renderUsageSettings();
       if (tab === 'keys') renderKeysSettings();
+      if (tab === 'memory') renderMemorySettings();
     }
 
     function renderKeysSettings(){
@@ -9443,6 +9471,105 @@
       }
 
       loadAndPaint();
+    }
+
+    function renderMemorySettings(){
+      // Project memory: <repo>/.zone/memory.md, written by the agent's
+      // update_memory tool. This tab lists entries and lets the user delete.
+      const repoPath = state.activeRepo?.path || '';
+
+      function paintEmpty(){
+        els.settingsBody.innerHTML = `
+          <div style="margin-bottom:12px">
+            <div style="font-size:var(--font-size-md,13px);color:var(--color-text,#ddd);font-weight:500">Project Memory</div>
+            <div style="font-size:var(--font-size-sm,12px);color:var(--color-text-muted,#888);margin-top:4px">
+              Conventions Zone has learned about your repo. Stored in
+              <code style="font-family:var(--font-mono,monospace);font-size:11px">&lt;repo&gt;/.zone/memory.md</code>
+              — you can commit it to share with your team.
+            </div>
+          </div>
+          <div class="row" style="opacity:0.6;justify-content:center;padding:20px 0">
+            <div class="v" style="text-align:center;font-size:var(--font-size-sm,12px)">No memories yet. Zone will save lessons here as it learns about your project.</div>
+          </div>
+        `;
+      }
+
+      function paintList(entries){
+        const header = `
+          <div style="margin-bottom:12px">
+            <div style="font-size:var(--font-size-md,13px);color:var(--color-text,#ddd);font-weight:500">Project Memory</div>
+            <div style="font-size:var(--font-size-sm,12px);color:var(--color-text-muted,#888);margin-top:4px">
+              Conventions Zone has learned about your repo. Stored in
+              <code style="font-family:var(--font-mono,monospace);font-size:11px">&lt;repo&gt;/.zone/memory.md</code>
+              — you can commit it to share with your team.
+            </div>
+          </div>
+        `;
+        if (!entries.length) {
+          paintEmpty();
+          return;
+        }
+        const rows = entries.map((e, i) => `
+          <div class="row memory-row" data-memory-index="${i}" style="align-items:flex-start;gap:8px">
+            <div class="k" style="font-family:var(--font-mono,monospace);font-size:11px;opacity:0.6;flex:0 0 auto;padding-top:2px">[${escapeHtml(String(e.date || ''))}]</div>
+            <div class="v" style="flex:1 1 auto;text-align:left;white-space:normal;word-break:break-word">${escapeHtml(String(e.text || ''))}</div>
+            <button class="memory-delete-btn" data-memory-delete="${i}" title="Delete this memory" aria-label="Delete this memory" style="flex:0 0 auto;background:transparent;border:none;color:var(--color-text-muted,#888);cursor:pointer;padding:2px 6px;border-radius:var(--radius-sm,6px);font-size:14px;line-height:1">🗑</button>
+          </div>
+        `).join('');
+        els.settingsBody.innerHTML = header + rows;
+        els.settingsBody.querySelectorAll('.memory-delete-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const idxRaw = btn.getAttribute('data-memory-delete');
+            const idx = Number.parseInt(String(idxRaw || ''), 10);
+            if (!Number.isInteger(idx) || idx < 0) return;
+            deleteEntry(idx);
+          });
+        });
+      }
+
+      function paintFailed(){
+        els.settingsBody.innerHTML = `
+          <div class="row"><div class="k">Memory</div><div class="v">Failed to load.</div></div>
+        `;
+      }
+
+      function load(){
+        if (!repoPath) {
+          els.settingsBody.innerHTML = `
+            <div class="row"><div class="k">Memory</div><div class="v">Open a project first.</div></div>
+          `;
+          return;
+        }
+        const url = '/api/memory?repo=' + encodeURIComponent(repoPath);
+        fetch(url)
+          .then(r => r.json())
+          .then(data => {
+            if (!data || data.ok === false) { paintFailed(); return; }
+            paintList(Array.isArray(data.entries) ? data.entries : []);
+          })
+          .catch(paintFailed);
+      }
+
+      function deleteEntry(idx){
+        if (!repoPath) return;
+        const url = '/api/memory/entry?repo=' + encodeURIComponent(repoPath) +
+                    '&index=' + encodeURIComponent(String(idx));
+        fetch(url, { method: 'DELETE' })
+          .then(r => r.json())
+          .then(data => {
+            if (data && data.ok) {
+              try { showToast('info', 'Memory entry deleted', 1600); } catch {}
+              load();
+            } else {
+              try { showToast('error', 'Delete failed', 2000); } catch {}
+            }
+          })
+          .catch(() => {
+            try { showToast('error', 'Delete failed', 2000); } catch {}
+          });
+      }
+
+      load();
     }
 
     // ---- Wiring ----

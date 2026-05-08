@@ -41,7 +41,18 @@ export function costFor(
   type: TokenType,
   tokens: number
 ): number {
-  const rates = PRICING_USD_PER_MTOK[provider]?.[model];
+  // Try exact match first; if not found, strip Anthropic-style date
+  // suffix (-YYYYMMDD) which the API returns even when the user picked
+  // a base alias. Example: "claude-sonnet-4-5-20250929" -> "claude-sonnet-4-5".
+  let rates = PRICING_USD_PER_MTOK[provider]?.[model];
+  if (!rates) {
+    const baseModel = model
+      .replace(/-\d{8}$/, '')             // Anthropic snapshot: -YYYYMMDD
+      .replace(/-\d{4}-\d{2}-\d{2}$/, ''); // OpenAI snapshot: -YYYY-MM-DD
+    if (baseModel !== model) {
+      rates = PRICING_USD_PER_MTOK[provider]?.[baseModel];
+    }
+  }
   if (!rates) {
     console.warn(`[zone-pricing] unknown model ${provider}/${model}, cost=0`);
     return 0;
