@@ -2,6 +2,7 @@ import { z } from "zod";
 import { getModelName } from "./openaiClient.js";
 import { createLLMClient } from "./factory.js";
 import { getRequestContext } from "./openaiContext.js";
+import type { LLMProvider } from "./types.js";
 
 export type ExecutionPlan = {
   objective: string;
@@ -72,8 +73,13 @@ export async function generateExecutionPlan(input: {
   task: string;
   repoSummary: string;
   relevantFiles: string[];
+  userApiKey?: string;
+  provider?: LLMProvider;
 }): Promise<ExecutionPlan> {
-  const client = createLLMClient();
+  const client = createLLMClient({
+    apiKey: input.userApiKey,
+    provider: input.provider,
+  });
   const ctx = getRequestContext();
   const model = getModelName("standard", client.provider, ctx?.modelOverride);
   const relevantFiles = input.relevantFiles.slice(0, 8).join("\n") || "(none)";

@@ -31,6 +31,7 @@ import {
   type RuntimeVerificationPlanResult,
 } from "./runRuntimeVerification.js";
 import { getInferenceMode } from "../llm/openaiClient.js";
+import type { LLMProvider } from "../llm/types.js";
 import {
   buildRetryGuidanceFromFailure,
   formatRetryGuidanceBrief,
@@ -4276,6 +4277,7 @@ export async function runLlmPatchFlow(input: {
    * Passed through to runAgentLoop → createOpenAIClient so it is used instead of the env var.
    */
   userApiKey?: string;
+  provider?: LLMProvider;
 }): Promise<LlmPatchFlowResult> {
   attachRunIdentity({ userId: input.userId, runId: input.runId });
   logger.info(
@@ -4832,6 +4834,8 @@ export async function runLlmPatchFlow(input: {
           task: input.task,
           repoSummary: projectSummary,
           relevantFiles: agentLoopPlanFiles,
+          userApiKey: input.userApiKey,
+          provider: input.provider,
         });
         debugLog(`[zone-plan] generated steps=${executionPlan.steps.length} (agent_loop)`);
         debugLog(`[zone-plan] scope=${executionPlan.scopeSummary}`);
@@ -5160,6 +5164,24 @@ export async function runLlmPatchFlow(input: {
             type: "command_approval_required" as any,
             title: "Command approval required",
             status: "active",
+            command: String(e.command || ""),
+            approvalId: String(e.approvalId || ""),
+          } as any);
+        }
+        if (e && typeof e === "object" && e.type === "command_auto_approved") {
+          emitStructuredProgress({
+            type: "command_auto_approved" as any,
+            title: "Command auto-approved",
+            status: "success",
+            command: String(e.command || ""),
+            approvalId: String(e.approvalId || ""),
+          } as any);
+        }
+        if (e && typeof e === "object" && e.type === "command_trusted") {
+          emitStructuredProgress({
+            type: "command_trusted" as any,
+            title: "Trusted command auto-approved",
+            status: "success",
             command: String(e.command || ""),
             approvalId: String(e.approvalId || ""),
           } as any);
@@ -6017,6 +6039,8 @@ export async function runLlmPatchFlow(input: {
       task: input.task,
       repoSummary: projectSummary,
       relevantFiles: relevantFiles.map((file) => file.path),
+      userApiKey: input.userApiKey,
+      provider: input.provider,
     });
     debugLog(`[zone-plan] generated steps=${executionPlan.steps.length}`);
     debugLog(`[zone-plan] scope=${executionPlan.scopeSummary}`);
@@ -6043,6 +6067,7 @@ export async function runLlmPatchFlow(input: {
         })),
         existingFilesSummary,
         schemaAwareSummary: [],
+        userOpenAiKey: input.userApiKey,
       });
       perf.mark("feature model response received");
     } catch (err) {
@@ -9224,6 +9249,24 @@ export async function runLlmPatchFlow(input: {
                 approvalId: String(e.approvalId || ""),
               } as any);
             }
+            if (e && typeof e === "object" && e.type === "command_auto_approved") {
+              emitStructuredProgress({
+                type: "command_auto_approved" as any,
+                title: "Command auto-approved",
+                status: "success",
+                command: String(e.command || ""),
+                approvalId: String(e.approvalId || ""),
+              } as any);
+            }
+            if (e && typeof e === "object" && e.type === "command_trusted") {
+              emitStructuredProgress({
+                type: "command_trusted" as any,
+                title: "Trusted command auto-approved",
+                status: "success",
+                command: String(e.command || ""),
+                approvalId: String(e.approvalId || ""),
+              } as any);
+            }
           },
           onProgress: (msg) => {
             emitStructuredProgress({
@@ -9470,6 +9513,24 @@ export async function runLlmPatchFlow(input: {
                 type: "command_approval_required" as any,
                 title: "Command approval required",
                 status: "active",
+                command: String(e.command || ""),
+                approvalId: String(e.approvalId || ""),
+              } as any);
+            }
+            if (e && typeof e === "object" && e.type === "command_auto_approved") {
+              emitStructuredProgress({
+                type: "command_auto_approved" as any,
+                title: "Command auto-approved",
+                status: "success",
+                command: String(e.command || ""),
+                approvalId: String(e.approvalId || ""),
+              } as any);
+            }
+            if (e && typeof e === "object" && e.type === "command_trusted") {
+              emitStructuredProgress({
+                type: "command_trusted" as any,
+                title: "Trusted command auto-approved",
+                status: "success",
                 command: String(e.command || ""),
                 approvalId: String(e.approvalId || ""),
               } as any);

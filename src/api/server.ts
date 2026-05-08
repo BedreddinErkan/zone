@@ -76,6 +76,7 @@ import {
   registerRunStart,
 } from "../core/developerRunProgressSse.js";
 import {
+  clearTrustedCommandsForRun,
   rejectPendingApprovalsForRun,
   resolveCommandApproval,
 } from "./commandApprovals.js";
@@ -92,7 +93,7 @@ import {
   type DeveloperPatchJobRequestPayload,
 } from "../jobs/developerPatchJobs.js";
 import {
-  completeActiveRun,
+  completeActiveRun as completeActiveRunRecord,
   getActiveRunsByUser,
   markAllRunningAsInterrupted,
   upsertActiveRun,
@@ -103,6 +104,15 @@ export const app = express();
 /** Active /api/patch runs — cancelled via POST /api/cancel (AbortSignal → runLlmPatchFlow). */
 const activePatchRunAbortControllers = new Map<string, AbortController>();
 const port = Number(process.env.PORT) || 3000;
+
+async function completeActiveRun(runId: string, status: "completed" | "cancelled"): Promise<void> {
+  try {
+    clearTrustedCommandsForRun(runId);
+  } catch {
+    // best-effort
+  }
+  await completeActiveRunRecord(runId, status);
+}
 let startedPort: number | null = null;
 let startPromise: Promise<void> | null = null;
 const zoneUiDir = path.resolve(__dirname, "../ui");
@@ -1649,6 +1659,7 @@ app.post("/api/cancel", (req, res) => {
   try {
     // If a command approval is pending, treat cancel as rejection.
     rejectPendingApprovalsForRun(runId);
+    clearTrustedCommandsForRun(runId);
   } catch {
     // best-effort
   }
@@ -1774,11 +1785,12 @@ app.post("/api/approve-command", (req, res) => {
   const approvalId = typeof req.body?.approvalId === "string" ? req.body.approvalId.trim() : "";
   const runId = typeof req.body?.runId === "string" ? req.body.runId.trim() : "";
   const approved = !!req.body?.approved;
+  const trust = !!req.body?.trust;
   if (!approvalId || !runId) {
     res.status(400).json({ ok: false, reason: "missing_approval_id_or_run_id" });
     return;
   }
-  const r = resolveCommandApproval({ approvalId, approved, runId });
+  const r = resolveCommandApproval({ approvalId, approved, runId, trust });
   if (!r.ok) {
     res.status(404).json({ ok: false, reason: r.message || "not_found" });
     return;
@@ -2872,6 +2884,7 @@ app.post("/api/patch", async (req, res) => {
       onProgress: (update) => emitProgress(runId, update),
       abortSignal: patchAbort?.signal,
       userApiKey: userApiKey || undefined,
+      provider: byokProvider,
     });
     perf.mark("core patch flow complete");
 
