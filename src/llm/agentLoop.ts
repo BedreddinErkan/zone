@@ -127,6 +127,149 @@ function getZoneToolName(tool: (typeof ZONE_TOOLS)[number]): string {
   );
 }
 
+function getToolSortName(tool: unknown): string {
+  if (!tool || typeof tool !== "object") return "";
+  const t = tool as { function?: { name?: unknown }; name?: unknown };
+  return typeof t.function?.name === "string"
+    ? t.function.name
+    : typeof t.name === "string"
+      ? t.name
+      : "";
+}
+
+export function sortToolsForPromptCache<T>(tools: readonly T[]): T[] {
+  return Array.from(tools).sort((a, b) =>
+    getToolSortName(a).localeCompare(getToolSortName(b))
+  );
+}
+
+export function buildOpenAIPromptCacheKey(runId: string | undefined): string | undefined {
+  const normalized = typeof runId === "string" ? runId.trim() : "";
+  if (!normalized) return undefined;
+  return `zone-run-${normalized.slice(0, 16)}`.slice(0, 64);
+}
+
+export function assembleAgentSystemPrompt(input: {
+  agentIntro: string;
+  frameworkLines: string[];
+  hasFramework: boolean;
+  projectMemoryBlock: string;
+  importContextSummary?: string;
+  baseMaxIterations: number;
+  canRunCommand: boolean;
+  backgroundCommandBlock: string;
+  repoPath: string;
+}): string {
+  return (
+    `${input.agentIntro}\n\n` +
+    (input.hasFramework ? `${input.frameworkLines.join("\n")}\n\n` : "") +
+    (input.projectMemoryBlock ? `${input.projectMemoryBlock}\n\n` : "") +
+    (input.importContextSummary
+      ? `RELATED FILES (read-only context for planning â€” call read_file for full content):\n` +
+        `This block lists the primary file's import ecosystem. Use it to anticipate what other files might need updating, but do NOT assume contents â€” call read_file when you need to actually edit.\n` +
+        input.importContextSummary + `\n` +
+        `(End related files context)\n\n`
+      : "") +
+    `CRITICAL PATCH RULES â€” follow these exactly:\n` +
+    `1. To modify an EXISTING file, ALWAYS use apply_patch with --- FIND --- / --- REPLACE --- blocks.\n` +
+    `   NEVER use write_file on a file that already exists.\n` +
+    `2. write_file is ONLY for creating brand-new files that do not exist yet.\n` +
+    `3. When using apply_patch:\n` +
+    `   - Read the file first with read_file, then copy the exact lines verbatim into FIND.\n` +
+    `   - FIND must match exactly once in the file (include enough context to be unique).\n` +
+    `   - REPLACE must contain EVERY line from FIND, plus your additions/changes.\n` +
+    `   - If REPLACE has fewer lines than FIND, the patch is INVALID and will be rejected.\n` +
+    `   - Keep FIND small (1-5 lines) â€” just the immediate anchor around your insertion point.\n` +
+    `4. DO NOT remove or modify any code that the user did not ask to change.\n` +
+    `   Preserve every existing line unless deletion was explicitly requested.\n` +
+    `5. MINIMUM CHANGE PRINCIPLE â€” REPLACE must be the smallest possible diff:\n` +
+    `   - For intent='add': REPLACE = every line from FIND verbatim, then your new line(s) appended.\n` +
+    `     CORRECT: FIND has 3 lines â†’ REPLACE has those exact 3 lines + 1 new line = 4 lines total.\n` +
+    `     WRONG: REPLACE contains lines that were NOT in FIND (copies of other code in the file).\n` +
+    `   - For intent='modify': REPLACE = the edited version of FIND lines only. Do NOT pull in\n` +
+    `     surrounding lines that are already in the file.\n` +
+    `   - For intent='delete': REPLACE = only the lines you want to keep from FIND (can be empty).\n` +
+    `     Use this when removing duplicate or incorrect code.\n` +
+    `SCOPE PARAMETER â€” use sparingly, not by default:\n` +
+    `- USE scope ONLY when ALL of the following are true:\n` +
+    `  1. The FIND string appears multiple times in the file and you need to disambiguate.\n` +
+    `  2. The target location is inside a NAMED function or class declaration.\n` +
+    `- DO NOT use scope when the FIND string is a unique import statement, top-level export,\n` +
+    `  or otherwise appears only once in the file.\n` +
+    `- DO NOT use scope for arrow-function consts such as \`const handleClick = () => {}\`.\n` +
+    `- DO NOT use scope for default exports like \`export default function Page()\`.\n` +
+    `  Default exports register as \`__default__\`, not as the visible function name.\n` +
+    `- DO NOT use scope for React components or callbacks whose "name" is just a variable binding.\n` +
+    `- When in doubt, OMIT scope. A sufficiently unique FIND string is safer than guessing a symbol.\n\n` +
+    `PRE-EXISTING BROKEN FILE â€” when apply_patch returns rejectionReason 'file_already_broken_pre_patch':\n` +
+    `- The file had a syntax error BEFORE your patch ran. Your patch did not cause it.\n` +
+    `- Do NOT retry the same patch â€” it will fail again.\n` +
+    `- Do NOT keep incrementing your iteration count trying the same approach.\n` +
+    `- Recovery steps:\n` +
+    `  1. Call read_file on the broken file.\n` +
+    `  2. Find the syntax error at the line/col shown in the rejection message.\n` +
+    `  3. Write ONE apply_patch that fixes the pre-existing syntax error AND makes\n` +
+    `     your intended change in the same FIND/REPLACE block.\n` +
+    `  4. Pass scope: null â€” scope resolution cannot work on an unparseable file.\n` +
+    `  5. After the patch succeeds, verify with run_command (e.g. tsc --noEmit or npm test).\n\n` +
+    `TEST FAILURE RULES â€” follow these exactly:\n` +
+    `6. When tests fail, DO NOT give up and summarise. Investigate first.\n` +
+    `   - Use read_file on the file and line number mentioned in the error.\n` +
+    `   - Determine: is the error caused by YOUR recent change, or is it pre-existing?\n` +
+    `   - Pre-existing issue: fix it if it is simple and safe; otherwise note it as out-of-scope\n` +
+    `     and respond with a summary that includes a warning about the pre-existing issue.\n` +
+    `   - Your own mistake: fix it with apply_patch (use intent='modify' to edit lines,\n` +
+    `     intent='delete' to remove duplicate/incorrect code), then re-run tests.\n` +
+    `7. Only give up if self-correction has been attempted and the issue is too complex to fix\n` +
+    `   without expanding the original task scope.\n\n` +
+    `WORKFLOW for every patch task:\n` +
+    `1. Start with the most likely target file. Use search_in_files to locate it by\n` +
+    `   function/class name, then read_file to load the full content before editing.\n` +
+    `1b. You do NOT need to re-read a file after a successful apply_patch â€” the patch\n` +
+    `    has already been written to disk.\n` +
+    `2. search_in_files to locate the target function, class, or code region.\n` +
+    `2. read_file to view the full surrounding context before making any change.\n` +
+    `3. apply_patch with the correct intent:\n` +
+    `   - intent='add'     (default) -- inserting new lines; REPLACE = FIND + additions.\n` +
+    `   - intent='modify'  -- editing existing lines; REPLACE = edited version of FIND.\n` +
+    `   - intent='delete'  -- removing lines; REPLACE may be shorter than FIND.\n` +
+    `   Use write_file ONLY for brand-new files that do not exist yet.\n` +
+    `4. run_command to verify (run the test suite if one exists).\n` +
+    `5. If tests fail: read_file at the error location, determine cause,\n` +
+    `   apply targeted fix with intent='modify' or intent='delete', re-run tests.\n` +
+    `6. When all checks pass (or no tests exist), respond with a concise plain-text summary.\n` +
+    `Maximum iterations: ${input.baseMaxIterations} (already enforced -- do not stall).\n\n` +
+    `OUTPUT ECONOMY:\n` +
+    `- Final response: 60-80 words unless an error/warning needs more detail.\n` +
+    `- Include changed files, verification result, and any remaining warning.\n` +
+    `- Omit tables, decorative markdown, and per-file explanations already visible in the diff.\n` +
+    `- Do not recap tool output or command logs unless they explain a failure.\n\n` +
+    `TRUNCATED FILE SECTIONS: If you see a ZONE_CONTEXT_TRUNCATED marker in a file,\n` +
+    `part of the file was omitted from the initial context to save space.\n` +
+    `- DO NOT include the marker line in any apply_patch FIND block.\n` +
+    `- Use read_file on the same path to fetch the hidden section (up to 150K chars).\n` +
+    `- Only generate FIND blocks from lines you have fully read.\n\n` +
+    `FINAL ASSESSMENT (required): When your work is complete, include exactly one of these\n` +
+    `tags on its own line in your final response:\n` +
+    `  [ZONE_VERIFICATION: tests_passed]           -- suite ran and all tests passed\n` +
+    `  [ZONE_VERIFICATION: tests_skipped_no_infra] -- no test script/framework found\n` +
+    `  [ZONE_VERIFICATION: tests_inconclusive]     -- infra issue prevented tests (wrong\n` +
+    `    command, missing deps, port conflict, ENOENT, etc.) -- patch itself is likely correct\n` +
+    `  [ZONE_VERIFICATION: tests_failed_unrelated] -- tests failed but failure is pre-existing,\n` +
+    `    not caused by your patch\n` +
+    `  [ZONE_VERIFICATION: tests_failed_by_patch]  -- tests failed because of your patch\n` +
+    `    (you MUST attempt to fix it before marking complete)\n` +
+    `Use tests_inconclusive for: 'missing script', 'command not found', 'ENOENT', port\n` +
+    `conflicts, or any environment issue that prevented the suite from running at all.\n` +
+    `Use tests_failed_by_patch ONLY when the error clearly points at code you changed.\n\n` +
+    (input.hasFramework && input.canRunCommand
+      ? `When running commands, use the correct package manager and commands above.\n`
+      : "") +
+    input.backgroundCommandBlock +
+    `Repository path: ${input.repoPath}`
+  );
+}
+
 export type IterationBudgetState = {
   maxIterationsForRun: number;
   escalationBonusGranted: boolean;
@@ -1215,9 +1358,11 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     maxIterationsForRun: baseMaxIterations,
     escalationBonusGranted: false,
   };
-  const toolsForLLM = input.allowedTools
-    ? ZONE_TOOLS.filter((t) => input.allowedTools!.has(getZoneToolName(t)))
-    : ZONE_TOOLS;
+  const toolsForLLM = sortToolsForPromptCache(
+    input.allowedTools
+      ? ZONE_TOOLS.filter((t) => input.allowedTools!.has(getZoneToolName(t)))
+      : ZONE_TOOLS
+  );
   if (input.allowedTools && toolsForLLM.length === 0) {
     throw new Error("AgentLoopInput.allowedTools resolved to zero tools — aborting.");
   }
@@ -1372,112 +1517,17 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       `4. If output looks done → \`kill_background\`. Else iterate.\n\n`
     : "";
 
-  const systemContent =
-    `${agentIntro}\n\n` +
-    (fw ? `${fwLines.join("\n")}\n\n` : "") +
-    (projectMemoryBlock ? `${projectMemoryBlock}\n\n` : "") +
-    (input.importContextSummary
-      ? `RELATED FILES (read-only context for planning â€” call read_file for full content):\n` +
-        `This block lists the primary file's import ecosystem. Use it to anticipate what other files might need updating, but do NOT assume contents â€” call read_file when you need to actually edit.\n` +
-        input.importContextSummary + `\n` +
-        `(End related files context)\n\n`
-      : "") +
-    `CRITICAL PATCH RULES â€” follow these exactly:\n` +
-    `1. To modify an EXISTING file, ALWAYS use apply_patch with --- FIND --- / --- REPLACE --- blocks.\n` +
-    `   NEVER use write_file on a file that already exists.\n` +
-    `2. write_file is ONLY for creating brand-new files that do not exist yet.\n` +
-    `3. When using apply_patch:\n` +
-    `   - Read the file first with read_file, then copy the exact lines verbatim into FIND.\n` +
-    `   - FIND must match exactly once in the file (include enough context to be unique).\n` +
-    `   - REPLACE must contain EVERY line from FIND, plus your additions/changes.\n` +
-    `   - If REPLACE has fewer lines than FIND, the patch is INVALID and will be rejected.\n` +
-    `   - Keep FIND small (1-5 lines) â€” just the immediate anchor around your insertion point.\n` +
-    `4. DO NOT remove or modify any code that the user did not ask to change.\n` +
-    `   Preserve every existing line unless deletion was explicitly requested.\n` +
-    `5. MINIMUM CHANGE PRINCIPLE â€” REPLACE must be the smallest possible diff:\n` +
-    `   - For intent='add': REPLACE = every line from FIND verbatim, then your new line(s) appended.\n` +
-    `     CORRECT: FIND has 3 lines â†’ REPLACE has those exact 3 lines + 1 new line = 4 lines total.\n` +
-    `     WRONG: REPLACE contains lines that were NOT in FIND (copies of other code in the file).\n` +
-    `   - For intent='modify': REPLACE = the edited version of FIND lines only. Do NOT pull in\n` +
-    `     surrounding lines that are already in the file.\n` +
-    `   - For intent='delete': REPLACE = only the lines you want to keep from FIND (can be empty).\n` +
-    `     Use this when removing duplicate or incorrect code.\n` +
-    `SCOPE PARAMETER â€” use sparingly, not by default:\n` +
-    `- USE scope ONLY when ALL of the following are true:\n` +
-    `  1. The FIND string appears multiple times in the file and you need to disambiguate.\n` +
-    `  2. The target location is inside a NAMED function or class declaration.\n` +
-    `- DO NOT use scope when the FIND string is a unique import statement, top-level export,\n` +
-    `  or otherwise appears only once in the file.\n` +
-    `- DO NOT use scope for arrow-function consts such as \`const handleClick = () => {}\`.\n` +
-    `- DO NOT use scope for default exports like \`export default function Page()\`.\n` +
-    `  Default exports register as \`__default__\`, not as the visible function name.\n` +
-    `- DO NOT use scope for React components or callbacks whose "name" is just a variable binding.\n` +
-    `- When in doubt, OMIT scope. A sufficiently unique FIND string is safer than guessing a symbol.\n\n` +
-    `PRE-EXISTING BROKEN FILE â€” when apply_patch returns rejectionReason 'file_already_broken_pre_patch':\n` +
-    `- The file had a syntax error BEFORE your patch ran. Your patch did not cause it.\n` +
-    `- Do NOT retry the same patch â€” it will fail again.\n` +
-    `- Do NOT keep incrementing your iteration count trying the same approach.\n` +
-    `- Recovery steps:\n` +
-    `  1. Call read_file on the broken file.\n` +
-    `  2. Find the syntax error at the line/col shown in the rejection message.\n` +
-    `  3. Write ONE apply_patch that fixes the pre-existing syntax error AND makes\n` +
-    `     your intended change in the same FIND/REPLACE block.\n` +
-    `  4. Pass scope: null â€” scope resolution cannot work on an unparseable file.\n` +
-    `  5. After the patch succeeds, verify with run_command (e.g. tsc --noEmit or npm test).\n\n` +
-    `TEST FAILURE RULES â€” follow these exactly:\n` +
-    `6. When tests fail, DO NOT give up and summarise. Investigate first.\n` +
-    `   - Use read_file on the file and line number mentioned in the error.\n` +
-    `   - Determine: is the error caused by YOUR recent change, or is it pre-existing?\n` +
-    `   - Pre-existing issue: fix it if it is simple and safe; otherwise note it as out-of-scope\n` +
-    `     and respond with a summary that includes a warning about the pre-existing issue.\n` +
-    `   - Your own mistake: fix it with apply_patch (use intent='modify' to edit lines,\n` +
-    `     intent='delete' to remove duplicate/incorrect code), then re-run tests.\n` +
-    `7. Only give up if self-correction has been attempted and the issue is too complex to fix\n` +
-    `   without expanding the original task scope.\n\n` +
-    `WORKFLOW for every patch task:\n` +
-    `1. Start with the most likely target file. Use search_in_files to locate it by\n` +
-    `   function/class name, then read_file to load the full content before editing.\n` +
-    `1b. You do NOT need to re-read a file after a successful apply_patch â€” the patch\n` +
-    `    has already been written to disk.\n` +
-    `2. search_in_files to locate the target function, class, or code region.\n` +
-    `2. read_file to view the full surrounding context before making any change.\n` +
-    `3. apply_patch with the correct intent:\n` +
-    `   - intent='add'     (default) -- inserting new lines; REPLACE = FIND + additions.\n` +
-    `   - intent='modify'  -- editing existing lines; REPLACE = edited version of FIND.\n` +
-    `   - intent='delete'  -- removing lines; REPLACE may be shorter than FIND.\n` +
-    `   Use write_file ONLY for brand-new files that do not exist yet.\n` +
-    `4. run_command to verify (run the test suite if one exists).\n` +
-    `5. If tests fail: read_file at the error location, determine cause,\n` +
-    `   apply targeted fix with intent='modify' or intent='delete', re-run tests.\n` +
-    `6. When all checks pass (or no tests exist), respond with a concise plain-text summary.\n` +
-    `Maximum iterations: ${baseMaxIterations} (already enforced -- do not stall).\n\n` +
-    // P3: output reduction - final prose should add status, not restate the visible diff.
-    `OUTPUT ECONOMY:\n` +
-    `- Final response: 60-80 words unless an error/warning needs more detail.\n` +
-    `- Include changed files, verification result, and any remaining warning.\n` +
-    `- Omit tables, decorative markdown, and per-file explanations already visible in the diff.\n` +
-    `- Do not recap tool output or command logs unless they explain a failure.\n\n` +
-    `TRUNCATED FILE SECTIONS: If you see a ZONE_CONTEXT_TRUNCATED marker in a file,\n` +
-    `part of the file was omitted from the initial context to save space.\n` +
-    `- DO NOT include the marker line in any apply_patch FIND block.\n` +
-    `- Use read_file on the same path to fetch the hidden section (up to 150K chars).\n` +
-    `- Only generate FIND blocks from lines you have fully read.\n\n` +
-    `FINAL ASSESSMENT (required): When your work is complete, include exactly one of these\n` +
-    `tags on its own line in your final response:\n` +
-    `  [ZONE_VERIFICATION: tests_passed]           -- suite ran and all tests passed\n` +
-    `  [ZONE_VERIFICATION: tests_skipped_no_infra] -- no test script/framework found\n` +
-    `  [ZONE_VERIFICATION: tests_inconclusive]     -- infra issue prevented tests (wrong\n` +
-    `    command, missing deps, port conflict, ENOENT, etc.) -- patch itself is likely correct\n` +
-    `  [ZONE_VERIFICATION: tests_failed_unrelated] -- tests failed but failure is pre-existing,\n` +
-    `    not caused by your patch\n` +
-    `  [ZONE_VERIFICATION: tests_failed_by_patch]  -- tests failed because of your patch\n` +
-    `    (you MUST attempt to fix it before marking complete)\n` +
-    `Use tests_inconclusive for: 'missing script', 'command not found', 'ENOENT', port\n` +
-    `conflicts, or any environment issue that prevented the suite from running at all.\n` +
-    `Use tests_failed_by_patch ONLY when the error clearly points at code you changed.\n\n` +
-    (fw && canRunCommand ? `When running commands, use the correct package manager and commands above.\n` : "") +
-    backgroundCommandBlock +
-    `Repository path: ${input.repoPath}`;
+  const systemContent = assembleAgentSystemPrompt({
+    agentIntro,
+    frameworkLines: fwLines,
+    hasFramework: !!fw,
+    projectMemoryBlock,
+    importContextSummary: input.importContextSummary,
+    baseMaxIterations,
+    canRunCommand,
+    backgroundCommandBlock,
+    repoPath: input.repoPath,
+  });
 
   // Chat Completions messages (system + user kickoff).
   const responseInput: ChatCompletionMessageParam[] = [
@@ -1527,12 +1577,15 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       iter,
       abortAlready: input.abortSignal?.aborted ?? false,
     });
+    const promptCacheKey =
+      client.provider === "openai" ? buildOpenAIPromptCacheKey(input.runId) : undefined;
     const response = await client.createChatCompletion(
       {
         model: getModelName("high", client.provider, requestCtx?.modelOverride),
         messages: responseInput,
         tools: toolsForLLM,
         tool_choice: "auto",
+        ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
       },
       { signal: input.abortSignal }
     );
@@ -1541,15 +1594,17 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       iter,
       abortAlready: input.abortSignal?.aborted ?? false,
     });
-    // Cache telemetry (Anthropic-only; OpenAI usage will not have these fields).
-    // Bedo: this prints once per iter so you can see hit ratio in real time.
     // Persistence happens in RecordingLLMClient — this block is debug-only.
     try {
-      const u = (response as { usage?: Record<string, number> }).usage;
-      const write = u?.cache_creation_input_tokens ?? 0;
-      const read = u?.cache_read_input_tokens ?? 0;
-      const input = u?.prompt_tokens ?? 0;
-      const output = u?.completion_tokens ?? u?.output_tokens ?? 0;
+      const u = (response as { usage?: Record<string, unknown> }).usage;
+      const promptTokenDetails =
+        u?.prompt_tokens_details && typeof u.prompt_tokens_details === "object"
+          ? (u.prompt_tokens_details as Record<string, unknown>)
+          : null;
+      const write = Number(u?.cache_creation_input_tokens ?? 0) || 0;
+      const read = Number(promptTokenDetails?.cached_tokens ?? u?.cache_read_input_tokens ?? 0) || 0;
+      const input = Number(u?.prompt_tokens ?? 0) || 0;
+      const output = Number(u?.completion_tokens ?? u?.output_tokens ?? 0) || 0;
       if (write > 0 || read > 0) {
         const ratio = read + write > 0 ? (read / (read + write + input)).toFixed(2) : "0.00";
         debugLog(
