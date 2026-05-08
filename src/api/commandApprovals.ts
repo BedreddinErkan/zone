@@ -11,9 +11,15 @@ const SAFE_COMMAND_PREFIXES = [
 ];
 
 /**
- * Returns true if `command` exactly matches a safe prefix or starts with `<prefix> `.
- * Returns false if the command contains shell metacharacters that could chain
- * dangerous operations (e.g. "ls && rm -rf /").
+ * Checks whether a command is auto-approvable by rejecting shell metacharacters
+ * such as `&`, `|`, `;`, backticks, subshell syntax, or redirection, then
+ * allowing only commands that exactly match a SAFE_COMMAND_PREFIXES entry or
+ * begin with that prefix followed by a space.
+ *
+ * @param command Raw shell command text to evaluate.
+ * @returns `true` when the trimmed command is non-empty, contains no rejected
+ * shell metacharacters, and exactly matches or starts with an allowed
+ * SAFE_COMMAND_PREFIXES entry; otherwise `false`.
  */
 export function isSafeCommand(command: string): boolean {
   const trimmed = String(command || "").trim();
@@ -35,8 +41,14 @@ const pendingApprovals = new Map<string, PendingApproval>();
 const trustedCommandsByRunId = new Map<string, Set<string>>();
 
 /**
- * True if `command` (trimmed) was previously approved with `trust: true`
- * for this runId.
+ * Checks the in-memory trusted-command set for a specific runId to see whether
+ * this exact trimmed command was previously approved with `trust: true` during
+ * the current run.
+ *
+ * @param runId Run identifier whose trust map entry should be consulted.
+ * @param command Command text to trim and look up in that run-scoped trusted set.
+ * @returns `true` when both inputs are non-empty after trimming and the exact
+ * command exists in the trusted set for that runId; otherwise `false`.
  */
 export function isCommandTrusted(runId: string, command: string): boolean {
   const rid = String(runId || "").trim();
@@ -47,7 +59,15 @@ export function isCommandTrusted(runId: string, command: string): boolean {
 }
 
 /**
- * Add `command` to the trusted set for this runId. No-op for empty inputs.
+ * Records a command in the trusted set for a run after an approval is accepted
+ * with `trust: true`, so later identical commands in that same run can bypass
+ * another approval prompt. This trust only lives in memory until the run ends
+ * or its trusted entries are cleared.
+ *
+ * @param runId Run identifier whose trusted-command set should be updated.
+ * @param command Command text to trim and store for the lifetime of that run.
+ * @returns Nothing. The command is stored only for the current in-memory run;
+ * if either input is empty after trimming, nothing is added.
  */
 export function addTrustedCommand(runId: string, command: string): void {
   const rid = String(runId || "").trim();
