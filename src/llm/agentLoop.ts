@@ -1739,24 +1739,6 @@ Example first call (immediately after task framing):
           parsedArgs = {};
         }
 
-        input.onToolCall?.(name, parsedArgs);
-
-        // Diagnostic: log every tool call before execution
-        debugLog("[zone-agent-tool-call]", JSON.stringify({
-          iter: iter + 1,
-          tool: name,
-          filePath: parsedArgs.filePath ?? null,
-          patchPreview:
-            typeof parsedArgs.patch === "string"
-              ? parsedArgs.patch.slice(0, 400)
-              : null,
-          contentLength:
-            typeof parsedArgs.content === "string"
-              ? parsedArgs.content.length
-              : null,
-          command: parsedArgs.command ?? null,
-        }));
-
         if (name === "TodoWrite") {
           const validation = validateTodoWriteArgs(parsedArgs);
           if (!validation.ok) {
@@ -1771,11 +1753,6 @@ Example first call (immediately after task framing):
               args: parsedArgs,
               result: validation.error,
               success: false,
-            });
-            input.onToolResult?.(name, {
-              success: false,
-              output: rejectionMsg,
-              error: validation.error,
             });
             continue;
           }
@@ -1799,9 +1776,26 @@ Example first call (immediately after task framing):
             result: "ok",
             success: true,
           });
-          input.onToolResult?.(name, { success: true, output: okMsg });
           continue;
         }
+
+        input.onToolCall?.(name, parsedArgs);
+
+        // Diagnostic: log every tool call before execution
+        debugLog("[zone-agent-tool-call]", JSON.stringify({
+          iter: iter + 1,
+          tool: name,
+          filePath: parsedArgs.filePath ?? null,
+          patchPreview:
+            typeof parsedArgs.patch === "string"
+              ? parsedArgs.patch.slice(0, 400)
+              : null,
+          contentLength:
+            typeof parsedArgs.content === "string"
+              ? parsedArgs.content.length
+              : null,
+          command: parsedArgs.command ?? null,
+        }));
 
         if (name === "apply_patch") {
           const targetFilePath =
