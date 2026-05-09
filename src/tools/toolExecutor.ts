@@ -18,9 +18,9 @@ import { checkWriteScope } from "./scopeGuard.js";
 import { sanitizeVerificationEnv, strippedEnvKeys } from "../core/buildEnv.js";
 import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import type { ProjectFramework } from "../repo/detectFramework.js";
+import { generateFileOutline } from "./fileOutline.js";
 
 const execAsync = promisify(exec);
-const READ_FILE_MAX_CHARS = 150_000;
 
 export type ResolveCwdResult =
   | { ok: true; cwd: string }
@@ -84,6 +84,7 @@ export interface ToolResult {
   error?: string;
   truncated?: boolean;
   rejectionReason?: string;
+  contentLength?: number;
 }
 
 function truncateText(
@@ -811,34 +812,109 @@ export async function executeTool(
       onProgress?.(`[tool] Reading: ${filePath}`);
       const abs = path.join(repoPath, filePath);
       const staged = stagedRead(input?.stagingFiles, abs);
-      const content = staged !== null ? staged : fs.readFileSync(abs, "utf8");
-      const chunk = content.slice(0, READ_FILE_MAX_CHARS);
-      const remainingChars = Math.max(content.length - chunk.length, 0);
-      const wasTruncated = remainingChars > 0;
-      const warning = wasTruncated
-        ? `[FILE TRUNCATED — read ${chunk.length} of ${content.length} chars from the start; remaining ${remainingChars} chars NOT shown. The file is too large to read in one call. Use search_in_files to find the section you need, then ask the user to break the task into smaller scopes if necessary.]\n\n`
-        : "";
+      const fullContent = staged !== null ? staged : fs.readFileSync(abs, "utf8");
+      const charCount = fullContent.length;
+      const lineRange = args.lineRange;
 
-      debugLog("[zone-tool-readfile-debug]", JSON.stringify({
-        filePath,
-        fullSize: content.length,
-        returnedChars: chunk.length,
-        wasTruncated,
-        limit: READ_FILE_MAX_CHARS,
-      }));
-      if (wasTruncated) {
-        debugLog("[zone-tool-readfile-truncated]", JSON.stringify({
-          filePath,
-          fullSize: content.length,
-          returnedChars: chunk.length,
-          remainingChars,
-        }));
+      if (lineRange != null && (!Array.isArray(lineRange) || lineRange.length !== 2)) {
+        return {
+          success: false,
+          output: "lineRange must be [startLine, endLine] both integers",
+        };
       }
-      return {
-        success: true,
-        output: warning + chunk,
-        truncated: wasTruncated,
-      };
+
+      if (Array.isArray(lineRange)) {
+        const [startRaw, endRaw] = lineRange.map((n) => Number(n));
+        if (!Number.isFinite(startRaw) || !Number.isFinite(endRaw)) {
+          return {
+            success: false,
+            output: "lineRange must be [startLine, endLine] both integers",
+          };
+        }
+        const lines = fullContent.split("\n");
+        const start = Math.max(1, Math.floor(startRaw));
+        const end = Math.min(lines.length, Math.floor(endRaw));
+        if (start > end) {
+          return {
+            success: false,
+            output: `Invalid lineRange [${start}, ${end}]: start > end`,
+          };
+        }
+        const sliced = lines.slice(start - 1, end).join("\n");
+        debugLog("[zone-tool-readfile-smart]", JSON.stringify({
+          mode: "lineRange",
+          filePath,
+          lineRange: [start, end],
+          totalLines: lines.length,
+          fullSize: charCount,
+          returnedChars: sliced.length,
+        }));
+        return {
+          success: true,
+          output: `[lineRange ${start}-${end} of ${lines.length} total lines from ${filePath}]\n\n${sliced}`,
+          contentLength: sliced.length,
+        };
+      }
+
+      if (charCount <= 30_000) {
+        debugLog("[zone-tool-readfile-smart]", JSON.stringify({
+          mode: "full-small",
+          filePath,
+          fullSize: charCount,
+          returnedChars: charCount,
+        }));
+        return { success: true, output: fullContent, contentLength: charCount };
+      }
+
+      if (charCount <= 100_000) {
+        const lineCount = fullContent.split("\n").length;
+        const hint = `[${filePath}: ${charCount} chars, ${lineCount} lines. For focused reads use lineRange: [start, end].]\n\n`;
+        debugLog("[zone-tool-readfile-smart]", JSON.stringify({
+          mode: "full-medium",
+          filePath,
+          fullSize: charCount,
+          lineCount,
+          returnedChars: hint.length + charCount,
+        }));
+        return {
+          success: true,
+          output: hint + fullContent,
+          contentLength: charCount,
+        };
+      }
+
+      const lines = fullContent.split("\n");
+      const head = lines.slice(0, 100).join("\n");
+      const tail = lines.slice(-50).join("\n");
+      const outline = generateFileOutline(fullContent, filePath);
+      const elidedCount = Math.max(lines.length - 150, 0);
+      const summary = [
+        `[FILE OUTLINE — ${filePath} is ${lines.length} lines, ${charCount} chars.]`,
+        `[Use read_file({ filePath, lineRange: [start, end] }) to read specific sections.]`,
+        "",
+        outline || "[no top-level symbols detected]",
+        "",
+        "─── HEAD: first 100 lines ───",
+        head,
+        "",
+        `─── ${elidedCount} lines elided (use lineRange) ───`,
+        "",
+        "─── TAIL: last 50 lines ───",
+        tail,
+      ].join("\n");
+
+      debugLog(
+        "[zone-tool-readfile-smart]",
+        `[FILE OUTLINE — ${filePath}] ` + JSON.stringify({
+          mode: "outline-large",
+          filePath,
+          fullSize: charCount,
+          lineCount: lines.length,
+          returnedChars: summary.length,
+          elidedLines: elidedCount,
+        })
+      );
+      return { success: true, output: summary, contentLength: summary.length };
     }
 
     if (toolName === "list_files") {

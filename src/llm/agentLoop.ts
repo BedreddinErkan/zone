@@ -270,6 +270,17 @@ export function assembleAgentSystemPrompt(input: {
     `Keep it to one short line. No bullet points, no markdown headers, no emoji. ` +
     `This sentence is shown to the user as live narration so they can follow your reasoning. ` +
     `Write each statement only once — do not restate or repeat your summary in the same response.\n\n` +
+    `READ_FILE ECONOMY:\n` +
+    `read_file behavior depends on file size:\n` +
+    `- <30k chars: full content.\n` +
+    `- 30-100k chars: full content with a hint to use lineRange.\n` +
+    `- >100k chars: first 100 lines + structural outline + last 50 lines.\n` +
+    `Examples:\n` +
+    `- read_file({ filePath: "src/foo.ts", lineRange: null })\n` +
+    `- read_file({ filePath: "src/big.ts", lineRange: null })\n` +
+    `- read_file({ filePath: "src/big.ts", lineRange: [4900, 5100] })\n` +
+    `When you need an exact section of a large file, prefer lineRange over broad reads. ` +
+    `Outline + lineRange is much more token-efficient than repeated full-file reads.\n\n` +
     `OUTPUT ECONOMY:\n` +
     `- Final response: 60-80 words unless an error/warning needs more detail.\n` +
     `- Include changed files, verification result, and any remaining warning.\n` +
@@ -278,7 +289,7 @@ export function assembleAgentSystemPrompt(input: {
     `TRUNCATED FILE SECTIONS: If you see a ZONE_CONTEXT_TRUNCATED marker in a file,\n` +
     `part of the file was omitted from the initial context to save space.\n` +
     `- DO NOT include the marker line in any apply_patch FIND block.\n` +
-    `- Use read_file on the same path to fetch the hidden section (up to 150K chars).\n` +
+    `- Use read_file with lineRange on the same path to fetch the hidden section.\n` +
     `- Only generate FIND blocks from lines you have fully read.\n\n` +
     `FINAL ASSESSMENT (required): When your work is complete, include exactly one of these\n` +
     `tags on its own line in your final response:\n` +
@@ -312,7 +323,7 @@ export function assembleInvestigationSystemPrompt(input: {
     "Use the available tools to explore before answering. Do not rely on intuition when the repository can be searched.",
     "",
     "Tools available:",
-    "- read_file",
+    "- read_file: <30k chars returns full content; 30-100k returns full content with a lineRange hint; >100k returns head 100 + outline + tail 50. Use lineRange: [start, end] for exact large-file sections.",
     "- list_files",
     "- search_in_files",
     "- find_references",

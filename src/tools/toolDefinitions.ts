@@ -171,13 +171,27 @@ required: ["id", "content", "description", "status"],
     function: {
       name: "read_file",
       strict: true,
-      description: "Read the contents of a file in the repo.",
+      description:
+        "Reads file content. For files >100k chars, returns head + structural outline + tail by default. " +
+        "Use the optional lineRange parameter ([startLine, endLine], 1-indexed, inclusive) for exact " +
+        "ranges of large files. Small files (<30k) return full content unchanged.",
       parameters: {
         type: "object",
         properties: {
-          filePath: { type: "string", description: "Relative path from repo root" },
+          filePath: {
+            type: "string",
+            description: "Path relative to repo root, e.g. 'src/llm/agentLoop.ts'.",
+          },
+          lineRange: {
+            type: ["array", "null"],
+            description:
+              "Optional [startLine, endLine] 1-indexed inclusive. Use for focused reads of large files.",
+            items: { type: "integer" },
+            minItems: 2,
+            maxItems: 2,
+          },
         },
-        required: ["filePath"],
+        required: ["filePath", "lineRange"],
         additionalProperties: false,
       } as Record<string, unknown>,
     },
