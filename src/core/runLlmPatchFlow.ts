@@ -52,7 +52,12 @@ import { parseDeveloperPatchText } from "./developerPatchParse.js";
 import { applyLlmPatches } from "./applyLlmPatches.js";
 import { parseTaskIntent, type TaskIntent } from "./taskIntentParser.js";
 import { tryAstPatchFallback } from "./astPatchFallback.js";
-import { runAgentLoop, stripVerificationTag, type AgentLoopResult } from "../llm/agentLoop.js";
+import {
+  runAgentLoop,
+  stripVerificationTag,
+  type AgentLoopResult,
+  type VerificationReason,
+} from "../llm/agentLoop.js";
 import {
   isPlanOrchestrationEnabled,
   buildStepTask,
@@ -68,7 +73,10 @@ import {
   type RunTodo,
   type TodoStatus,
 } from "./todoLifecycle.js";
-import { collectVerificationCommands } from "./verdictClassifier.js";
+import {
+  collectVerificationCommands,
+  type VerificationCommand,
+} from "./verdictClassifier.js";
 import { parseVerificationErrorWithRepo as parseVerificationError } from "./parseVerificationError.js";
 import type { PatchPreviewItem, RankedRepoFile } from "../types/agent.js";
 import type { ConversationBillingMode } from "../types/conversation.js";
@@ -80,9 +88,12 @@ import {
   createAgentLifecycleEvent,
   type AgentLifecycleEvent,
   type LlmPatchProgressUpdate,
+  type RunSummaryPayload,
   type ZoneHandoffReport,
   type ZoneStructuredProgressEvent,
 } from "./agentLifecycleEvents.js";
+import { cacheHitRatio, type IterCostUpdatePayload } from "../usage/iterCostMeter.js";
+import { getRunCost } from "../usage/usageTracker.js";
 import {
   generateFinalRunReport,
   type FinalRunReport,
@@ -250,6 +261,186 @@ export type FileDiff = {
   addedLines: number;
   removedLines: number;
 };
+
+const RUN_SUMMARY_DEFAULT_VERIFICATION_REASON: VerificationReason =
+  "no_verification_attempted";
+
+function deriveAgentVerificationSummary(input: {
+  reason?: VerificationReason | string | null;
+  loopSuccess?: boolean;
+  hadRunCommandFailure?: boolean;
+}): {
+  decisionMode: RunSummaryPayload["verification"]["decisionMode"];
+  note: string;
+} {
+  const reason = String(
+    input.reason || RUN_SUMMARY_DEFAULT_VERIFICATION_REASON
+  ) as VerificationReason;
+  if (reason === "tests_passed") {
+    return { decisionMode: "safe_to_apply", note: "Tests passed" };
+  }
+  if (reason === "tests_skipped_no_infra") {
+    return {
+      decisionMode: "safe_to_apply",
+      note: "Tests skipped (no test infrastructure found)",
+    };
+  }
+  if (reason === "tests_failed_unrelated") {
+    return {
+      decisionMode: "safe_to_apply",
+      note: "Tests had pre-existing failures — not caused by this patch",
+    };
+  }
+  if (reason === "tests_inconclusive") {
+    return {
+      decisionMode: "preview_only",
+      note: "Tests inconclusive (environment issue) — review manually",
+    };
+  }
+  if (reason === "tests_failed_by_patch") {
+    return {
+      decisionMode: "preview_only",
+      note: "Tests failed — patch may need revision",
+    };
+  }
+
+  const decisionMode =
+    input.loopSuccess && !input.hadRunCommandFailure
+      ? "safe_to_apply"
+      : "preview_only";
+  return {
+    decisionMode,
+    note:
+      decisionMode === "safe_to_apply"
+        ? "Patch applied by agent (no test verification)"
+        : "Agent loop encountered errors",
+  };
+}
+
+function aggregateToolsUsed(
+  toolCallLog?: AgentLoopResult["toolCallLog"] | null
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const entry of Array.isArray(toolCallLog) ? toolCallLog : []) {
+    const tool = String(entry?.tool || "").trim();
+    if (!tool) continue;
+    out[tool] = (out[tool] ?? 0) + 1;
+  }
+  return out;
+}
+
+function deriveRuntimeVerificationReason(
+  verificationStatus?: string | null
+): VerificationReason {
+  if (verificationStatus === "passed") return "tests_passed";
+  if (verificationStatus === "skipped") return "tests_skipped_no_infra";
+  if (verificationStatus === "tooling_issue" || verificationStatus === "timeout") {
+    return "tests_inconclusive";
+  }
+  if (verificationStatus === "code_failed") return "tests_failed_by_patch";
+  return RUN_SUMMARY_DEFAULT_VERIFICATION_REASON;
+}
+
+function deriveRuntimeVerificationNote(input: {
+  verificationStatus?: string | null;
+  runtimeVerificationPlan?: RuntimeVerificationPlanResult | null;
+  runtimeVerification?: RuntimeVerificationResult | null;
+}): string {
+  const summary =
+    String(input.runtimeVerificationPlan?.summary || "").trim() ||
+    String(input.runtimeVerification?.summary || "").trim();
+  if (summary) return summary;
+  if (input.verificationStatus === "passed") return "Runtime verification passed";
+  if (input.verificationStatus === "skipped") return "Runtime verification skipped";
+  if (input.verificationStatus === "tooling_issue") {
+    return "Runtime verification could not complete because of setup/tooling";
+  }
+  if (input.verificationStatus === "timeout") return "Runtime verification timed out";
+  if (input.verificationStatus === "code_failed") return "Runtime verification failed";
+  return "";
+}
+
+function runtimeVerificationCommands(
+  runtimeVerificationPlan?: RuntimeVerificationPlanResult | null
+): VerificationCommand[] {
+  const steps = Array.isArray(runtimeVerificationPlan?.steps)
+    ? runtimeVerificationPlan.steps
+    : [];
+  return steps.flatMap((step) => {
+    const category =
+      step.kind === "typecheck"
+        ? "typecheck"
+        : step.kind === "test"
+          ? "test"
+          : null;
+    if (!category) return [];
+    const outcome =
+      step.status === "passed"
+        ? "passed"
+        : step.status === "failed" || step.status === "timeout"
+          ? "failed"
+          : "unknown";
+    return [
+      {
+        command: String(step.command || "").slice(0, 240),
+        category,
+        outcome,
+      },
+    ];
+  });
+}
+
+function assembleRunSummary(input: {
+  fileDiffs?: Array<Pick<FileDiff, "filePath" | "addedLines" | "removedLines">> | null;
+  toolCallLog?: AgentLoopResult["toolCallLog"] | null;
+  verificationReason?: VerificationReason | string | null;
+  verificationNote?: string | null;
+  verificationCommands?: VerificationCommand[] | null;
+  decisionMode?: "safe_to_apply" | "preview_only" | "blocked" | "chat" | null;
+  totalUsd?: number | null;
+  iterCost?: Pick<
+    IterCostUpdatePayload,
+    "iter_count" | "total_input_uncached" | "total_cache_read" | "total_cache_write"
+  > | null;
+}): RunSummaryPayload {
+  const filesChanged = (Array.isArray(input.fileDiffs) ? input.fileDiffs : []).map((fd) => ({
+    filePath: String(fd?.filePath || ""),
+    addedLines: Number(fd?.addedLines ?? 0) || 0,
+    removedLines: Number(fd?.removedLines ?? 0) || 0,
+  }));
+  const reason = String(
+    input.verificationReason || RUN_SUMMARY_DEFAULT_VERIFICATION_REASON
+  ) as VerificationReason;
+  const decisionMode =
+    input.decisionMode === "safe_to_apply" ? "safe_to_apply" : "preview_only";
+  const totalUsd = Number(input.totalUsd ?? 0) || 0;
+  const iterCount = Number(input.iterCost?.iter_count ?? 0) || 0;
+  const cacheHitPct =
+    cacheHitRatio({
+      input_uncached: Number(input.iterCost?.total_input_uncached ?? 0) || 0,
+      cache_write: Number(input.iterCost?.total_cache_write ?? 0) || 0,
+      cache_read: Number(input.iterCost?.total_cache_read ?? 0) || 0,
+    }) * 100;
+
+  return {
+    filesChanged,
+    toolsUsed: aggregateToolsUsed(input.toolCallLog),
+    verification: {
+      reason,
+      note: String(input.verificationNote || ""),
+      commands: Array.isArray(input.verificationCommands)
+        ? input.verificationCommands
+        : [],
+      decisionMode,
+    },
+    cost: {
+      totalUsd,
+      iterCount,
+      cacheHitPct,
+      avgIterUsd: iterCount > 0 ? totalUsd / iterCount : 0,
+    },
+  };
+}
 
 function countJsxTagsDiagnostic(src: string): {
   opens: number;
@@ -4316,6 +4507,8 @@ export async function runLlmPatchFlow(input: {
     }
   };
 
+  let latestIterCostUpdate: IterCostUpdatePayload | null = null;
+
  const emitTodos = (type: "todos_initialized" | "todo_revised"): void => {
   if (runTodos.length === 0) return;
     emitStructuredProgress({
@@ -5081,10 +5274,9 @@ const initializeTodosFromPlan = (): void => {
           typeof e === "object" &&
           e.type === "iter_cost_update"
         ) {
-          emitStructuredProgress({
-            type: "iter_cost_update" as any,
-            title: "Cost updated",
-            status: "active",
+          latestIterCostUpdate = {
+            type: "iter_cost_update",
+            runId: String((e as { runId?: unknown }).runId ?? input.runId ?? ""),
             iter: Number(e.iter ?? 0) || 0,
             totalIter: Number(e.totalIter ?? 0) || 0,
             iterCost: Number(e.iterCost ?? 0) || 0,
@@ -5100,6 +5292,26 @@ const initializeTodosFromPlan = (): void => {
             total_cache_write: Number(e.total_cache_write ?? 0) || 0,
             total_output: Number(e.total_output ?? 0) || 0,
             iter_count: Number(e.iter_count ?? 0) || 0,
+          };
+          emitStructuredProgress({
+            type: "iter_cost_update" as any,
+            title: "Cost updated",
+            status: "active",
+            iter: latestIterCostUpdate.iter,
+            totalIter: latestIterCostUpdate.totalIter,
+            iterCost: latestIterCostUpdate.iterCost,
+            cumulativeCost: latestIterCostUpdate.cumulativeCost,
+            cacheHitThisIter: latestIterCostUpdate.cacheHitThisIter,
+            cacheHitCumulative: latestIterCostUpdate.cacheHitCumulative,
+            input_uncached: latestIterCostUpdate.input_uncached,
+            cache_write: latestIterCostUpdate.cache_write,
+            cache_read: latestIterCostUpdate.cache_read,
+            output: latestIterCostUpdate.output,
+            total_input_uncached: latestIterCostUpdate.total_input_uncached,
+            total_cache_read: latestIterCostUpdate.total_cache_read,
+            total_cache_write: latestIterCostUpdate.total_cache_write,
+            total_output: latestIterCostUpdate.total_output,
+            iter_count: latestIterCostUpdate.iter_count,
           } as any);
         }
         if (
@@ -5324,33 +5536,13 @@ const initializeTodosFromPlan = (): void => {
 
     // Use agent's self-reported verification reason to determine safety
     const vr = loop.verificationReason;
-    let agentDecisionMode: "safe_to_apply" | "preview_only";
-    let agentVerificationNote: string;
-
-    if (vr === "tests_passed") {
-      agentDecisionMode = "safe_to_apply";
-      agentVerificationNote = "Tests passed";
-    } else if (vr === "tests_skipped_no_infra") {
-      agentDecisionMode = "safe_to_apply";
-      agentVerificationNote = "Tests skipped (no test infrastructure found)";
-    } else if (vr === "tests_failed_unrelated") {
-      agentDecisionMode = "safe_to_apply";
-      agentVerificationNote = "Tests had pre-existing failures — not caused by this patch";
-    } else if (vr === "tests_inconclusive") {
-      agentDecisionMode = "preview_only";
-      agentVerificationNote = "Tests inconclusive (environment issue) — review manually";
-    } else if (vr === "tests_failed_by_patch") {
-      agentDecisionMode = "preview_only";
-      agentVerificationNote = "Tests failed — patch may need revision";
-    } else {
-      // no_verification_attempted: fall back to run-command heuristic
-      agentDecisionMode = loop.success && !agentLoopHadRunCommandFailure
-        ? "safe_to_apply"
-        : "preview_only";
-      agentVerificationNote = agentDecisionMode === "safe_to_apply"
-        ? "Patch applied by agent (no test verification)"
-        : "Agent loop encountered errors";
-    }
+    const agentVerificationSummary = deriveAgentVerificationSummary({
+      reason: vr,
+      loopSuccess: loop.success,
+      hadRunCommandFailure: agentLoopHadRunCommandFailure,
+    });
+    const agentDecisionMode = agentVerificationSummary.decisionMode;
+    const agentVerificationNote = agentVerificationSummary.note;
 
     const warnings: string[] = loop.success ? [] : [`[AGENT_LOOP] ${loop.summary}`];
     if (vr === "tests_inconclusive") {
@@ -5389,6 +5581,7 @@ const initializeTodosFromPlan = (): void => {
       finalExecutionOutcome: agentDecisionMode === "safe_to_apply" ? "completed" : "completed_with_issues",
       developerConfidence: 80,
     });
+    const agentVerificationCommands = collectVerificationCommands(loop.toolCallLog);
 
     if (runId) {
       finalizeRunTodos(agentDecisionMode === "safe_to_apply" ? "completed" : "skipped");
@@ -5516,6 +5709,25 @@ const initializeTodosFromPlan = (): void => {
       }
     }
 
+    if (runId) {
+      const summary = assembleRunSummary({
+        fileDiffs,
+        toolCallLog: loop.toolCallLog,
+        verificationReason: vr,
+        verificationNote: agentVerificationNote,
+        verificationCommands: agentVerificationCommands,
+        decisionMode: agentDecisionMode,
+        totalUsd: getRunCost(input.userId ?? "local-dev", runId),
+        iterCost: latestIterCostUpdate,
+      });
+      emitStructuredProgress({
+        type: "run_summary",
+        title: "Run summary",
+        status: "success",
+        ...summary,
+      });
+    }
+
     return {
       ok: true,
       patchPreview: `=== AGENT LOOP SUMMARY ===\n${loop.summary}`,
@@ -5526,7 +5738,7 @@ const initializeTodosFromPlan = (): void => {
       patchesAlreadyApplied: fileDiffs.length > 0 && agentDecisionMode === "safe_to_apply",
       verificationReason: vr,
       verificationNote: agentVerificationNote,
-      verificationCommands: collectVerificationCommands(loop.toolCallLog),
+      verificationCommands: agentVerificationCommands,
       decisionMode: agentDecisionMode,
       finalState: agentDecisionMode,
       finalExecutionOutcome: agentDecisionMode === "safe_to_apply" ? "completed" : "completed_with_issues",
@@ -10466,6 +10678,28 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
   }
 
   // 8. Return
+  const runSummaryVerificationReason = deriveRuntimeVerificationReason(verificationStatus);
+  const runSummaryVerificationCommands =
+    runtimeVerificationCommands(runtimeVerificationPlan);
+  const runSummary = assembleRunSummary({
+    fileDiffs,
+    verificationReason: runSummaryVerificationReason,
+    verificationNote: deriveRuntimeVerificationNote({
+      verificationStatus,
+      runtimeVerificationPlan,
+      runtimeVerification,
+    }),
+    verificationCommands: runSummaryVerificationCommands,
+    decisionMode,
+    totalUsd: getRunCost(input.userId ?? "local-dev", input.runId ?? ""),
+    iterCost: latestIterCostUpdate,
+  });
+  emitStructuredProgress({
+    type: "run_summary",
+    title: "Run summary",
+    status: "success",
+    ...runSummary,
+  });
   notifyProgress("Ready", {
     type: "run_completed",
     message: "Run finished successfully.",

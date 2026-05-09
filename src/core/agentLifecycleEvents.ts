@@ -1,3 +1,6 @@
+import type { VerificationReason } from "../llm/agentLoop.js";
+import type { VerificationCommand } from "./verdictClassifier.js";
+
 export const AGENT_LIFECYCLE_EVENT_TYPES = [
   "run_started",
   "intent_understood",
@@ -63,6 +66,27 @@ export type ZoneHandoffReport = {
   suggestedNextPrompt: string;
 };
 
+export type RunSummaryPayload = {
+  filesChanged: Array<{
+    filePath: string;
+    addedLines: number;
+    removedLines: number;
+  }>;
+  toolsUsed: Record<string, number>;
+  verification: {
+    reason: VerificationReason;
+    note: string;
+    commands: VerificationCommand[];
+    decisionMode: "safe_to_apply" | "preview_only";
+  };
+  cost: {
+    totalUsd: number;
+    iterCount: number;
+    cacheHitPct: number;
+    avgIterUsd: number;
+  };
+};
+
 /** Rich UI progress payload (SSE); legacy `stage` string remains for older clients. */
 export type ZoneStructuredProgressEvent = {
   runId: string;
@@ -95,6 +119,7 @@ export type ZoneStructuredProgressEvent = {
     | "tool_result"
     | "agent_loop_start"
     | "agent_loop_complete"
+    | "run_summary"
     | "iter_cost_update"
     | "subagent_started"
     | "subagent_completed"
@@ -145,6 +170,10 @@ export type ZoneStructuredProgressEvent = {
   fallback?: boolean;
   targetSymbol?: string;
   report?: ZoneHandoffReport;
+  filesChanged?: RunSummaryPayload["filesChanged"];
+  toolsUsed?: RunSummaryPayload["toolsUsed"];
+  verification?: RunSummaryPayload["verification"];
+  cost?: RunSummaryPayload["cost"];
   responseText?: string;
   responseHtml?: string;
   contextFiles?: string[];
