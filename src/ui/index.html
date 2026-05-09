@@ -829,22 +829,15 @@
     .toast.error{border-color:rgba(239,68,68,0.35);background:rgba(239,68,68,0.07);color:var(--text-1)}
     .ticon{width:10px;height:10px;border-radius:var(--radius-pill);background:var(--color-success)}
     .toast.error .ticon{background:var(--color-error)}
-    .cost-meter{
-      max-width:360px;margin:var(--space-lg) 0;border:1px solid var(--border);border-radius:var(--radius-lg);
-      background:rgba(8,8,12,0.92);box-shadow:0 16px 40px rgba(0,0,0,0.28);
-      padding:var(--space-md) var(--space-lg);color:var(--text-1);backdrop-filter:blur(14px)
+    .zone-cost-strip{
+      position:fixed;top:64px;right:22px;font-family:var(--font-family-mono);font-size:11px;color:var(--text-3);
+      display:flex;align-items:center;gap:10px;z-index:31;pointer-events:none
     }
-    .cost-meter.final{background:rgba(10,10,15,0.72);box-shadow:none}
-    .cost-meter-top{display:flex;align-items:baseline;gap:var(--space-md);white-space:nowrap}
-    .cost-meter-cost{font-size:20px;font-weight:750;letter-spacing:0;color:var(--text-1);font-family:var(--font-family-mono)}
-    .cost-meter-iter{font-size:12px;color:var(--text-3)}
-    .cost-meter-cache{margin-left:auto;font-size:12px;font-weight:700}
-    .cost-meter-cache.hot{color:var(--color-success)}
-    .cost-meter-cache.warm{color:var(--color-warning)}
-    .cost-meter-cache.cold{color:var(--color-error)}
-    .cost-meter-bar{height:7px;margin-top:var(--space-sm);border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden}
-    .cost-meter-fill{height:100%;width:0%;border-radius:999px;background:linear-gradient(90deg,var(--color-error),var(--color-warning),var(--color-success));transition:width 260ms ease}
-    .cost-meter-sub{margin-top:var(--space-sm);font-size:11px;color:var(--text-4);font-family:var(--font-family-mono)}
+    .zone-cost-strip[data-state="hidden"]{display:none}
+    .zone-cost-strip-bar{width:70px;height:3px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden}
+    .zone-cost-strip-fill{height:100%;background:var(--violet);width:0%;transition:width 0.2s ease-out}
+    .zone-cost-strip-text{white-space:nowrap}
+    @media (max-width:1180px){.zone-cost-strip{display:none!important}}
 
     /* Verification fix loop summary (collapsible) */
     .verify-sum{
@@ -4205,55 +4198,14 @@
       try { finalizeCoalescedLine(runId); } catch {}
     }
 
-    // Per-run inline cost: shows '$0.07' on the run header once the server
-    // emits costUsd in the run_completed_with_result payload. Idempotent —
-    // SSE may replay the final event after a refresh; same cost = same render.
     function setRunCost(runId, costUsd) {
       const n = Number(costUsd);
       if (!Number.isFinite(n) || n < 0) return;
-      // Render cents-level precision when small ($0.07), otherwise 2 decimals.
-      const formatted = n < 0.01 && n > 0 ? '<$0.01' : '$' + n.toFixed(2);
-      const badgeStyle = 'margin-left:auto;opacity:0.85;font-size:13px;font-family:var(--font-mono,monospace);color:var(--text-2);padding:2px 8px;border-radius:6px;background:var(--surface-alpha-2)';
-      // Helper: ensure a .run-cost child exists in target, set text + title.
-      const writeCost = (target) => {
-        let badge = target.querySelector(':scope > .run-cost');
-        if (!badge) {
-          badge = document.createElement('span');
-          badge.className = 'run-cost';
-          badge.style.cssText = badgeStyle;
-          if (getComputedStyle(target).display !== 'flex') {
-            target.style.display = 'flex';
-            target.style.alignItems = 'center';
-            target.style.flexWrap = 'wrap';
-          }
-          target.appendChild(badge);
-        }
-        badge.textContent = formatted;
-        badge.title = 'Estimated BYOK spend for this run';
-      };
-      // Primary target: verify-banner (rendered AFTER run completes — may not
-      // exist yet when this is first called). Try now; if not present, watch
-      // for DOM mutations and write when it appears (max 5s).
-      const group = document.getElementById('runGroup-' + runId);
-      const tryVerify = () => {
-        const v = group?.querySelector('.verify-banner');
-        if (v && !v.querySelector(':scope > .run-cost')) {
-          writeCost(v);
-          return true;
-        }
-        return false;
-      };
-      if (group && !tryVerify()) {
-        const observer = new MutationObserver(() => {
-          if (tryVerify()) observer.disconnect();
-        });
-        observer.observe(group, { childList: true, subtree: true });
-        setTimeout(() => observer.disconnect(), 5000);
+      const meter = getCostMeterState(runId);
+      if (meter) {
+        meter.cumulative = n;
+        refreshCostStripForActiveRun();
       }
-      // Secondary target: exec-header (visible during run, before run timeline collapses).
-      const card = document.getElementById('logBlock-' + runId);
-      const header = card?.querySelector('.exec-header');
-      if (header) writeCost(header);
     }
 
     function formatCostUsd(value){
@@ -4271,6 +4223,50 @@
     function cacheClass(ratio){
       const pct = formatPct(ratio);
       return pct >= 70 ? 'hot' : pct >= 30 ? 'warm' : 'cold';
+    }
+
+    function ensureCostStrip() {
+      let strip = document.getElementById('zoneCostStrip');
+      if (strip) return strip;
+      strip = document.createElement('div');
+      strip.id = 'zoneCostStrip';
+      strip.className = 'zone-cost-strip';
+      strip.dataset.state = 'hidden';
+      strip.innerHTML = `
+        <div class="zone-cost-strip-bar"><div class="zone-cost-strip-fill"></div></div>
+        <span class="zone-cost-strip-text">$0.00</span>
+      `;
+      document.body.appendChild(strip);
+      return strip;
+    }
+
+    function updateCostStripFromMeter(meter) {
+      const strip = ensureCostStrip();
+      if (!meter) { strip.dataset.state = 'hidden'; return; }
+      const cacheRead = Number(meter.totalCacheRead || 0);
+      const uncached = Number(meter.totalInputUncached || 0);
+      const totalInput = cacheRead + uncached;
+      const pct = totalInput > 0 ? Math.round((cacheRead / totalInput) * 100) : 0;
+      const cumulative = Number(meter.cumulative || 0);
+      strip.querySelector('.zone-cost-strip-fill').style.width = `${pct}%`;
+      strip.querySelector('.zone-cost-strip-text').textContent =
+        `${typeof formatCostUsd === 'function' ? formatCostUsd(cumulative) : '$' + cumulative.toFixed(2)} · ${pct}% cached`;
+      strip.dataset.state = 'visible';
+    }
+
+    function hideCostStrip() {
+      const strip = document.getElementById('zoneCostStrip');
+      if (strip) strip.dataset.state = 'hidden';
+    }
+
+    function refreshCostStripForActiveRun() {
+      const tid = state.activeThreadId;
+      if (!tid || !state.runsByThread.has(tid)) { hideCostStrip(); return; }
+      const run = state.runsByThread.get(tid);
+      if (!run || !run.runId) { hideCostStrip(); return; }
+      const meter = (state.__costMetersByRunId || {})[String(run.runId)];
+      if (!meter || meter.done) { hideCostStrip(); return; }
+      updateCostStripFromMeter(meter);
     }
 
     function getCostMeterState(runId){
@@ -4303,45 +4299,6 @@
       return state.__costMetersByRunId[rid];
     }
 
-    function renderCostMeterContents(target, meter, opts){
-      if (!target || !meter) return;
-      const final = !!(opts && opts.final);
-      const pct = formatPct(meter.cacheHitCumulative);
-      const thisPct = formatPct(meter.cacheHitThisIter);
-      const cls = cacheClass(meter.cacheHitCumulative);
-      const totalTokens =
-        Number(meter.totalInputUncached || 0) +
-        Number(meter.totalCacheRead || 0) +
-        Number(meter.totalCacheWrite || 0) +
-        Number(meter.totalOutput || 0);
-      target.className = 'cost-meter' + (final ? ' final' : '');
-      target.innerHTML = `
-        <div class="cost-meter-top">
-          <div class="cost-meter-cost">${escapeHtml(formatCostUsd(meter.cumulative))}</div>
-          <div class="cost-meter-iter">${final ? 'final' : 'iter'} ${escapeHtml(String(meter.currentIter || 0))}/${escapeHtml(String(meter.totalIter || '?'))}</div>
-          <div class="cost-meter-cache ${cls}">${pct}% cached</div>
-        </div>
-        <div class="cost-meter-bar"><div class="cost-meter-fill" style="width:${pct}%"></div></div>
-        <div class="cost-meter-sub">${thisPct}% this iter · ${totalTokens.toLocaleString()} tokens · ${Number(meter.totalCacheRead || 0).toLocaleString()} cached</div>
-      `;
-    }
-
-    function ensureCostMeterCard(runId){
-      const rid = String(runId || '').trim();
-      if (!rid) return null;
-      const group = document.getElementById(`runGroup-${rid}`);
-      if (!group) return null;
-      let card = group.querySelector(':scope > .cost-meter');
-      if (!card) {
-        card = document.createElement('div');
-        card.className = 'cost-meter';
-        const log = document.getElementById(`logBlock-${rid}`);
-        if (log && log.parentElement === group) group.insertBefore(card, log);
-        else group.appendChild(card);
-      }
-      return card;
-    }
-
     function applyIterCostUpdate(progress, runId){
       const rid = String(progress?.runId || runId || '').trim();
       if (!rid) return;
@@ -4366,8 +4323,7 @@
       const tid = getThreadIdForRunId(rid);
       const run = tid ? state.runsByThread.get(tid) : null;
       if (run) run.costMeter = meter;
-      const card = ensureCostMeterCard(rid);
-      renderCostMeterContents(card, meter, { final: false });
+      refreshCostStripForActiveRun();
     }
 
     function finalizeCostMeter(runId, result){
@@ -4381,8 +4337,7 @@
         if (Number.isFinite(n) && n >= 0) meter.cumulative = n;
       }
       meter.done = true;
-      const card = ensureCostMeterCard(runId);
-      renderCostMeterContents(card, meter, { final: true });
+      refreshCostStripForActiveRun();
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -7482,6 +7437,7 @@
       const container = getOrCreateThreadContainer(thread.id);
       const needsInitialPopulate = container && container.children.length === 0;
       showOnlyActiveThreadContainer();
+      refreshCostStripForActiveRun();
       if (!needsInitialPopulate) {
         // Already populated from a previous activation; just reveal it
         // and let the existing scroll-position be preserved.
@@ -8200,6 +8156,9 @@
           if (g) g.dataset.runStatus = 'completed';
         } catch {}
         stopDurationTicker(runId);
+        const meter = (state.__costMetersByRunId || {})[String(runId)];
+        if (meter) meter.done = true;
+        refreshCostStripForActiveRun();
         persistRunGroupHtmlToThread(runId, 'completed');
         scrollChatIfFollowing();
         return;
@@ -8284,6 +8243,9 @@
           if (g) g.dataset.runStatus = 'cancelled';
         } catch {}
         stopDurationTicker(runId);
+        const meter = (state.__costMetersByRunId || {})[String(runId)];
+        if (meter) meter.done = true;
+        refreshCostStripForActiveRun();
         try { persistRunGroupHtmlToThread(runId, 'cancelled'); } catch {}
       }
       const placeholderFilePath =
@@ -9073,6 +9035,9 @@
           if (g) g.dataset.runStatus = 'completed';
         } catch {}
         stopDurationTicker(runId);
+        const meter = (state.__costMetersByRunId || {})[String(runId)];
+        if (meter) meter.done = true;
+        refreshCostStripForActiveRun();
         persistRunGroupHtmlToThread(runId, 'completed');
         dequeueAndRunNext(_owningThreadId);
         return;
@@ -9094,6 +9059,9 @@
           if (g) g.dataset.runStatus = 'completed';
         } catch {}
         stopDurationTicker(runId);
+        const meter = (state.__costMetersByRunId || {})[String(runId)];
+        if (meter) meter.done = true;
+        refreshCostStripForActiveRun();
         persistRunGroupHtmlToThread(runId, 'completed');
         dequeueAndRunNext(_owningThreadId);
         return;
@@ -9201,6 +9169,9 @@
         if (g) g.dataset.runStatus = 'completed';
       } catch {}
       stopDurationTicker(runId);
+      const meter = (state.__costMetersByRunId || {})[String(runId)];
+      if (meter) meter.done = true;
+      refreshCostStripForActiveRun();
       persistRunGroupHtmlToThread(runId, 'completed');
 
       // If user queued tasks while this run was executing, start next automatically.
