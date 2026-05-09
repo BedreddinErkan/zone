@@ -1,14 +1,26 @@
 import crypto from "node:crypto";
 
-const SAFE_COMMAND_PREFIXES = [
-  "npm run build", "npm run test", "npm test",
-  "yarn build", "yarn test",
-  "ls", "cat", "find", "grep", "head", "tail", "wc",
-  "git status", "git diff", "git log",
-  "tsc --noEmit", "tsc -p",
-  "node --version", "node -v", "npm --version",
-  "echo",
-];
+export const SAFE_COMMAND_PREFIXES = {
+  build: [
+    "npm run build",
+    "yarn build",
+    "tsc --noEmit",
+    "tsc -p",
+  ],
+  test: [
+    "npm run test",
+    "npm test",
+    "yarn test",
+  ],
+  readonly: [
+    "ls", "cat", "find", "grep", "head", "tail", "wc",
+    "node --version", "node -v", "npm --version",
+    "echo",
+  ],
+  git: [
+    "git status", "git diff", "git log",
+  ],
+} as const;
 
 /**
  * Checks whether a command is auto-approvable by rejecting shell metacharacters
@@ -21,13 +33,30 @@ const SAFE_COMMAND_PREFIXES = [
  * shell metacharacters, and exactly matches or starts with an allowed
  * SAFE_COMMAND_PREFIXES entry; otherwise `false`.
  */
-export function isSafeCommand(command: string): boolean {
+export function getSafeCommandCategory(command: string): string | null {
   const trimmed = String(command || "").trim();
-  if (!trimmed) return false;
-  if (/[&|;`$()<>]/.test(trimmed)) return false;
-  return SAFE_COMMAND_PREFIXES.some(prefix =>
-    trimmed === prefix || trimmed.startsWith(prefix + " ")
-  );
+  if (!trimmed) return null;
+  if (/[&|;`$()<>]/.test(trimmed)) return null;
+
+  for (const [category, prefixes] of Object.entries(SAFE_COMMAND_PREFIXES)) {
+    if (prefixes.some(prefix => trimmed === prefix || trimmed.startsWith(prefix + " "))) {
+      return category;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Returns whether the provided command is considered safe for automatic
+ * approval by delegating to {@link getSafeCommandCategory}.
+ *
+ * @param command Raw shell command text to evaluate.
+ * @returns `true` when the command matches one of the allowed safe-command
+ * categories; otherwise `false`.
+ */
+export function isSafeCommand(command: string): boolean {
+  return getSafeCommandCategory(command) !== null;
 }
 
 type PendingApproval = {

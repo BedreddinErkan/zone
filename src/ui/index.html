@@ -7484,16 +7484,18 @@
     // ---- SSE + Patch ----
     // thinking block removed (replaced by log-thinking line)
 
-    function openSSE(runId){
+    function openSSE(runId, _isRetry){
       try { console.log('[send-debug] SSE subscription opening for runId=' + String(runId || '')); } catch {}
       // Phase 1b: per-runId EventSource. Don't close other threads' streams.
       // If a stream already exists for THIS runId (re-attach scenario), close it first.
       const _existingForThisRun = state.eventSourcesByRunId.get(runId);
       try { _existingForThisRun?.close(); } catch {}
-      const es = new EventSource(`/api/progress?runId=${encodeURIComponent(runId)}`);
+      const es = new EventSource(`/api/run-replay/${encodeURIComponent(runId)}`);
       state.eventSourcesByRunId.set(runId, es);
       state.eventSource = es;
+      let _hadMessage = false;
       es.onmessage = (e) => {
+        _hadMessage = true;
         let payload = null;
         try { payload = JSON.parse(e.data); } catch { return; }
         try {
@@ -7510,7 +7512,13 @@
         } catch {}
         handleSSEPayload(payload, runId);
       };
-      es.onerror = () => { try { es.close(); } catch {} };
+      // /api/run-replay returns 404 if the run buffer doesn't exist yet (openSSE is called
+      // before the POST, so registerRunStart hasn't fired). Retry once after 600ms —
+      // by then the POST has been processed and the buffer exists.
+      es.onerror = () => {
+        try { es.close(); } catch {}
+        if (!_hadMessage && !_isRetry) setTimeout(() => openSSE(runId, true), 600);
+      };
     }
 
     function openReplaySSE(runId){

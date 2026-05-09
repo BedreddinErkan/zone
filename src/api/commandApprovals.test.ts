@@ -4,6 +4,7 @@ import {
   clearTrustedCommandsForRun,
   isCommandTrusted,
   isSafeCommand,
+  getSafeCommandCategory,
   requestCommandApproval,
   resolveCommandApproval,
 } from "./commandApprovals";
@@ -49,6 +50,34 @@ describe("isSafeCommand", () => {
     expect(isSafeCommand("lsblk")).toBe(false);
     expect(isSafeCommand("npm runner")).toBe(false);
     expect(isSafeCommand("catalog")).toBe(false);
+  });
+});
+
+describe("getSafeCommandCategory", () => {
+  it("returns build for build commands", () => {
+    expect(getSafeCommandCategory("npm run build")).toBe("build");
+    expect(getSafeCommandCategory("tsc --noEmit -p tsconfig.json")).toBe("build");
+  });
+
+  it("returns test for test commands", () => {
+    expect(getSafeCommandCategory("npm test")).toBe("test");
+    expect(getSafeCommandCategory("yarn test --watch=false")).toBe("test");
+  });
+
+  it("returns readonly for readonly commands", () => {
+    expect(getSafeCommandCategory("ls -la")).toBe("readonly");
+    expect(getSafeCommandCategory("node --version")).toBe("readonly");
+  });
+
+  it("returns git for safe git commands", () => {
+    expect(getSafeCommandCategory("git status")).toBe("git");
+    expect(getSafeCommandCategory("git diff HEAD~1")).toBe("git");
+  });
+
+  it("returns null for unsafe or unmatched commands", () => {
+    expect(getSafeCommandCategory("git push origin main")).toBeNull();
+    expect(getSafeCommandCategory("ls && rm -rf /")).toBeNull();
+    expect(getSafeCommandCategory("   ")).toBeNull();
   });
 });
 

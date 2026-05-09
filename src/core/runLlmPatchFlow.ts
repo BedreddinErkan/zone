@@ -4316,8 +4316,9 @@ export async function runLlmPatchFlow(input: {
     }
   };
 
-  const emitTodos = (type: "todos_initialized" | "todo_revised"): void => {
-    if (runTodos.length === 0) return;
+ const emitTodos = (type: "todos_initialized" | "todo_revised"): void => {
+  console.log(`[zone-todo-debug] emitTodos called type=${type} runTodos.length=${runTodos.length}`);
+  if (runTodos.length === 0) return;
     emitStructuredProgress({
       type,
       title: type === "todo_revised" ? "Plan revised" : "Plan initialized",
@@ -4355,11 +4356,13 @@ export async function runLlmPatchFlow(input: {
     emitTodoStatus(todoId, todoStatus);
   };
 
-  const initializeTodosFromPlan = (): void => {
-    if (!executionPlan || executionPlan.steps.length === 0) return;
-    runTodos = executionPlanToTodos(executionPlan);
-    emitTodos("todos_initialized");
-  };
+const initializeTodosFromPlan = (): void => {
+  console.log(`[zone-todo-debug] initializeTodosFromPlan called executionPlan=${executionPlan?.steps?.length ?? 'null'}`);
+  if (!executionPlan || executionPlan.steps.length === 0) return;
+  runTodos = executionPlanToTodos(executionPlan);
+  console.log(`[zone-todo-debug] runTodos populated count=${runTodos.length}`);
+  emitTodos("todos_initialized");
+};
 
   const startTodoForFile = (filePath: string | null | undefined): void => {
     const todoId = findTodoIdForFile(runTodos, filePath);
@@ -5100,6 +5103,30 @@ export async function runLlmPatchFlow(input: {
             total_cache_write: Number(e.total_cache_write ?? 0) || 0,
             total_output: Number(e.total_output ?? 0) || 0,
             iter_count: Number(e.iter_count ?? 0) || 0,
+          } as any);
+        }
+        if (
+          e &&
+          typeof e === "object" &&
+          e.type === "todos_initialized"
+        ) {
+          emitStructuredProgress({
+            type: "todos_initialized" as any,
+            title: String(e.title || "Plan initialized"),
+            status: "success",
+            todos: e.todos,
+          } as any);
+        }
+        if (
+          e &&
+          typeof e === "object" &&
+          e.type === "todo_revised"
+        ) {
+          emitStructuredProgress({
+            type: "todo_revised" as any,
+            title: String(e.title || "Plan revised"),
+            status: "success",
+            todos: e.todos,
           } as any);
         }
         if (
