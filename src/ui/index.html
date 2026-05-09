@@ -8674,6 +8674,7 @@
       }
 
       let messageType = 'patch_request';
+      let intent = 'execute';
       const classifyStartedAt = Date.now();
       try {
         const _classifyHeaders = { 'Content-Type': 'application/json', ...buildAuthHeaders() };
@@ -8684,13 +8685,14 @@
         });
         const classifyBody = await classifyRes.json();
         messageType = String(classifyBody?.messageType || 'patch_request');
-        try { console.log('[send-debug] classify-intent resolved', { messageType, msElapsed: Date.now() - classifyStartedAt }); } catch {}
+        intent = String(classifyBody?.intent || (messageType === 'patch_request' ? 'execute' : 'chat'));
+        try { console.log('[send-debug] classify-intent resolved', { messageType, intent, msElapsed: Date.now() - classifyStartedAt }); } catch {}
       } catch (e) {
         console.log('[zone-intent-classify] classify request failed', e?.message || e);
         try { console.log('[send-debug] classify-intent failed', { msElapsed: Date.now() - classifyStartedAt, error: e?.message || String(e) }); } catch {}
       }
 
-      if (messageType === 'question' || messageType === 'discussion') {
+      if (intent === 'chat' || (!intent && (messageType === 'question' || messageType === 'discussion'))) {
         hideEmpty();
         const chatBubble = ensureChatBubbleForRun(runId);
         if (chatBubble && !document.getElementById(`chatBubble-${runId}`)) {
@@ -9006,6 +9008,30 @@
             }));
           }
         }
+        scrollChatIfFollowing(runId);
+        try {
+          const g = document.getElementById(`runGroup-${runId}`);
+          if (g) g.dataset.runStatus = 'completed';
+        } catch {}
+        stopDurationTicker(runId);
+        const meter = (state.__costMetersByRunId || {})[String(runId)];
+        if (meter) meter.done = true;
+        refreshCostStripForActiveRun();
+        persistRunGroupHtmlToThread(runId, 'completed');
+        dequeueAndRunNext(_owningThreadId);
+        return;
+      }
+      if (decision === 'investigation') {
+        hideEmpty();
+        const answerText = String(result.chatResponse || '');
+        const bubble = createAgentBubbleFromMarkdown(answerText, {
+          runId,
+          html: result.responseHtml || '',
+          contextFiles: result.contextFiles || [],
+          userText: findUserTextForRun(runId),
+        });
+        bubble.id = `investigationBubble-${runId}`;
+        appendToRunGroup(runId, bubble);
         scrollChatIfFollowing(runId);
         try {
           const g = document.getElementById(`runGroup-${runId}`);

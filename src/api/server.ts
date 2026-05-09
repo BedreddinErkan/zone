@@ -53,8 +53,13 @@ import {
   PROMPT_REFINEMENT_FALLBACK,
   refinePrompt,
 } from "../llm/refinePrompt.js";
-import { detectIntent, detectMessageType } from "../llm/detectIntent.js";
+import {
+  detectIntent,
+  detectMessageType,
+  shouldUseInvestigationMode,
+} from "../llm/detectIntent.js";
 import { getChatResponseWithContext } from "../llm/chatResponse.js";
+import { runInvestigationFlow } from "../llm/investigationFlow.js";
 import {
   appendConversationMessages,
   getUserQuota,
@@ -2426,7 +2431,13 @@ app.post("/api/classify-intent", async (req, res) => {
     const messageType = forcedExecute
       ? "patch_request"
       : await detectMessageType(normalizedTask, userApiKey || undefined);
-    const intent = messageType === "patch_request" ? "execute" : "chat";
+    const intent = forcedExecute
+      ? "execute"
+      : shouldUseInvestigationMode(normalizedTask, messageType)
+        ? "investigation"
+        : messageType === "patch_request"
+          ? "execute"
+          : "chat";
 
     res.json({
       ok: true,
@@ -2719,6 +2730,120 @@ app.post("/api/patch", async (req, res) => {
   const intent = shouldForceExecute
     ? "execute"
     : await detectIntent(String(task), userApiKey || undefined);
+  if (intent === "investigation") {
+    const investigationRunId =
+      typeof runId === "string" && runId.trim() ? runId.trim() : "";
+    const threadIdForInvestigation =
+      typeof conversationId === "string" && conversationId.trim()
+        ? conversationId.trim()
+        : investigationRunId;
+    let investigationAbort: AbortController | null = null;
+    if (investigationRunId) {
+      investigationAbort = new AbortController();
+      activePatchRunAbortControllers.set(investigationRunId, investigationAbort);
+      try {
+        registerRunStart(investigationRunId, { task: String(task) });
+      } catch {}
+      try {
+        await upsertActiveRun(investigationRunId, {
+          userId,
+          threadId: threadIdForInvestigation,
+          conversationId: threadIdForInvestigation,
+          repoPath: String(repoPath),
+          task: String(task),
+          status: "running",
+          lastChangedFiles: Array.isArray(lastChangedFiles) ? lastChangedFiles : null,
+          lastAddedFunctions: Array.isArray(lastAddedFunctions) ? lastAddedFunctions : null,
+        });
+      } catch (error) {
+        console.warn(
+          "[zone] investigation active run upsert failed",
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+      emitProgress(investigationRunId, {
+        stage: "investigation",
+        lifecycle: createAgentLifecycleEvent({
+          type: "run_started",
+          message: "Investigation started.",
+          stage: "init",
+          status: "active",
+        }),
+      });
+    }
+    try {
+      const result = await runInvestigationFlow({
+        task: String(task),
+        repoPath: String(repoPath),
+        runId: investigationRunId,
+        userId,
+        userApiKey: userApiKey || undefined,
+        abortSignal: investigationAbort?.signal,
+        onProgress: (update) => emitProgress(investigationRunId, update as any),
+      });
+      if (investigationRunId) {
+        registerRunComplete(investigationRunId, "completed");
+        try {
+          await completeActiveRun(investigationRunId, "completed");
+        } catch {}
+      }
+      const confidence = 80;
+      const loggedConversationId = await logRun({
+        userId,
+        role: "developer",
+        task: String(task),
+        repoPath: String(repoPath),
+        decisionMode: "investigation",
+        confidence,
+        executionId: investigationRunId || undefined,
+        creditsUsed: 1,
+        conversationId,
+        changedFiles: [],
+        billingMode,
+        routeName: "/api/patch",
+      }).catch(() => null);
+      if (loggedConversationId) {
+        (result as Record<string, unknown>).conversationId = loggedConversationId;
+      }
+      const costUsd = investigationRunId ? getRunCost(userId ?? "", investigationRunId) : 0;
+      const resultWithCost = { ...(result as Record<string, unknown>), costUsd };
+      if (investigationRunId) {
+        emitProgress(investigationRunId, {
+          stage: "investigation",
+          lifecycle: createAgentLifecycleEvent({
+            type: "run_completed",
+            message: "Investigation completed.",
+            stage: "finalize",
+            status: "success",
+          }),
+          progress: {
+            type: "run_completed_with_result",
+            title: "Investigation completed",
+            status: "success",
+            result: resultWithCost,
+          } as any,
+        });
+      }
+      perf.finish("investigation response sent");
+      res.json(resultWithCost);
+      return;
+    } catch (error) {
+      if (investigationRunId) {
+        registerRunComplete(investigationRunId, "cancelled");
+        try {
+          await completeActiveRun(investigationRunId, "cancelled");
+        } catch {}
+      }
+      perf.finish("investigation failed");
+      res.status(500).json({
+        ok: false,
+        reason: error instanceof Error ? error.message : "investigation_flow_failed",
+      });
+      return;
+    } finally {
+      if (investigationRunId) activePatchRunAbortControllers.delete(investigationRunId);
+    }
+  }
   if (intent === "chat") {
     try {
       emitProgress(runId, {

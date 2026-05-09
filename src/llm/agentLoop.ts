@@ -39,6 +39,7 @@ import type {
 export interface AgentLoopInput {
   task: string;
   repoPath: string;
+  mode?: "patch" | "investigation";
   runId?: string;
   framework?: ProjectFramework;
   maxIterations?: number; // default: 10
@@ -77,6 +78,8 @@ export interface AgentLoopInput {
    * defaults to the full ZONE_TOOLS set.
    */
   allowedTools?: ReadonlySet<string>;
+  /** Suppress TodoWrite's sidebar meta-tool path for read-only modes. */
+  disableTodoWrite?: boolean;
   /**
    * Optional subagent metadata reserved for the Task tool follow-up. Setting
    * this does not change behavior beyond allowedTools enforcement.
@@ -284,6 +287,44 @@ export function assembleAgentSystemPrompt(input: {
     input.backgroundCommandBlock +
     `Repository path: ${input.repoPath}`
   );
+}
+
+export function assembleInvestigationSystemPrompt(input: {
+  repoPath: string;
+  projectMemoryBlock: string;
+  baseMaxIterations: number;
+}): string {
+  return [
+    "You are Zone, answering a question about the codebase in read-only investigation mode.",
+    "",
+    "Use the available tools to explore before answering. Do not rely on intuition when the repository can be searched.",
+    "",
+    "Tools available:",
+    "- read_file",
+    "- list_files",
+    "- search_in_files",
+    "- find_references",
+    "",
+    "Process:",
+    "1. Identify what the question asks: definition, usages, control flow, data shape, or design rationale.",
+    "2. Search for relevant terms with search_in_files. Prefer source globs such as `src/**/*.ts` or `src/**/*.{ts,tsx,js,jsx}` before broad `**/*` searches.",
+    "3. Read the most important matches with read_file. Read related context files when imports or callers matter.",
+    "4. If the question is about usages of an identifier, use find_references when you know the exporting source file, and read each relevant call site briefly.",
+    "5. Ignore logs, build output, dependency folders, and generated artifacts unless the user specifically asks about them.",
+    "6. If the search results show a short list of source call-site files, read each source file before answering.",
+    "7. Synthesize from the explored files only. If evidence is incomplete, say what was and was not checked.",
+    "",
+    "Final answer:",
+    "- Write clear markdown.",
+    "- Include file paths in backticks, with line numbers where helpful, for example `src/foo.ts:42`.",
+    "- Use code blocks for short snippets only when they clarify the answer.",
+    "- End with a `Summary` section if the answer has multiple parts.",
+    "",
+    "Do not write or modify code. Do not run commands. Do not call TodoWrite. Do not produce patches.",
+    `Maximum iterations: ${input.baseMaxIterations} (already enforced; be targeted).`,
+    `Repository path: ${input.repoPath}`,
+    ...(input.projectMemoryBlock ? ["", input.projectMemoryBlock] : []),
+  ].join("\n");
 }
 
 export type IterationBudgetState = {
@@ -1363,6 +1404,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 }
 
 async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResult> {
+  const isInvestigationMode = input.mode === "investigation";
   const baseMaxIterations =
     typeof input.maxIterationsOverride === "number"
       ? input.maxIterationsOverride
@@ -1480,7 +1522,9 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
 
   const subagentKind = input.subagent?.type;
   const agentIntro =
-    subagentKind === "explore"
+    isInvestigationMode
+      ? `You are Zone in read-only investigation mode.`
+      : subagentKind === "explore"
       ? `You are an EXPLORE subagent in Zone. Your job is to INVESTIGATE and REPORT — not to make changes.\n\n` +
         `You have been given a read-only investigation task by a parent agent. Find the relevant code,\n` +
         `understand it, and return a compact findings summary so the parent can act on it without\n` +
@@ -1553,18 +1597,24 @@ Example first call (immediately after task framing):
     { id: "4", content: "Re-run the suite",                 status: "pending" },
   ]})`;
 
-  const systemContent = assembleAgentSystemPrompt({
-    agentIntro,
-    frameworkLines: fwLines,
-    hasFramework: !!fw,
-    projectMemoryBlock,
-    importContextSummary: input.importContextSummary,
-    baseMaxIterations,
-    canRunCommand,
-    backgroundCommandBlock,
-    repoPath: input.repoPath,
-    planProgressBlock,
-  });
+  const systemContent = isInvestigationMode
+    ? assembleInvestigationSystemPrompt({
+        repoPath: input.repoPath,
+        projectMemoryBlock,
+        baseMaxIterations,
+      })
+    : assembleAgentSystemPrompt({
+        agentIntro,
+        frameworkLines: fwLines,
+        hasFramework: !!fw,
+        projectMemoryBlock,
+        importContextSummary: input.importContextSummary,
+        baseMaxIterations,
+        canRunCommand,
+        backgroundCommandBlock,
+        repoPath: input.repoPath,
+        planProgressBlock,
+      });
 
   // Chat Completions messages (system + user kickoff).
   const responseInput: ChatCompletionMessageParam[] = [
@@ -1737,6 +1787,22 @@ Example first call (immediately after task framing):
             : {};
         } catch {
           parsedArgs = {};
+        }
+
+        if (name === "TodoWrite" && input.disableTodoWrite) {
+          const rejectionMsg = "TodoWrite rejected: TodoWrite is disabled for this read-only investigation run.";
+          responseInput.push({
+            role: "tool",
+            tool_call_id: callId,
+            content: rejectionMsg,
+          });
+          toolCallLog.push({
+            tool: name,
+            args: parsedArgs,
+            result: rejectionMsg,
+            success: false,
+          });
+          continue;
         }
 
         if (name === "TodoWrite") {
@@ -2146,6 +2212,16 @@ Example first call (immediately after task framing):
     const extracted = extractResponsesApiOutputText(response);
     if (extracted.ok && extracted.text.trim()) {
       const finalText = extracted.text.trim();
+      if (isInvestigationMode) {
+        return {
+          success: true,
+          summary: finalText,
+          toolCallLog,
+          filesModified: [],
+          patchValidatedByAgent: false,
+          verificationReason: "no_verification_attempted",
+        };
+      }
       const vrMatch = finalText.match(/\[ZONE_VERIFICATION:\s*([\w_]+)\]/i);
       const vrRaw = vrMatch ? vrMatch[1].toLowerCase() : 'no_verification_attempted';
       const validReasons: VerificationReason[] = [
@@ -2286,6 +2362,40 @@ Example first call (immediately after task framing):
     }
 
     // If we got neither tool calls nor text, keep looping (rare).
+  }
+
+  if (isInvestigationMode) {
+    input.onProgress?.("[agent_loop] Max iterations reached - requesting final investigation answer");
+    let finalSummary = "Max iterations reached before a final answer was produced.";
+    try {
+      const assessmentResponse = await client.createChatCompletion({
+        model: getModelName("high", client.provider, requestCtx?.modelOverride),
+        messages: [
+          ...responseInput,
+          {
+            role: "user",
+            content:
+              "You have reached the maximum number of investigation iterations. " +
+              "Provide the best clear markdown answer you can from the files and search results already explored. " +
+              "Do not call tools. Do not mention patches or verification.",
+          },
+        ],
+      }, { signal: input.abortSignal });
+      const ae = extractResponsesApiOutputText(assessmentResponse);
+      if (ae.ok && ae.text.trim()) {
+        finalSummary = ae.text.trim();
+      }
+    } catch {
+      // Keep the fallback summary.
+    }
+    return {
+      success: false,
+      summary: finalSummary,
+      toolCallLog,
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted",
+    };
   }
 
   // Max iterations hit â€” request one final no-tool assessment call

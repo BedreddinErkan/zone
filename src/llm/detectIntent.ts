@@ -4,7 +4,47 @@ import { getRequestContext } from "./openaiContext.js";
 import { debugLog } from "../utils/logger.js";
 
 export type ZoneMessageType = "patch_request" | "question" | "discussion";
-export type ZoneLegacyIntent = "execute" | "chat";
+export type ZoneLegacyIntent = "execute" | "chat" | "investigation";
+
+export function shouldUseInvestigationMode(
+  task: string,
+  messageType: ZoneMessageType
+): boolean {
+  if (messageType === "patch_request") return false;
+  const normalizedTask = String(task || "").trim();
+  if (!normalizedTask) return false;
+  const lower = normalizedTask.toLowerCase();
+
+  if (/^(?:hi|hello|hey|thanks|thank you)\b/.test(lower)) return false;
+  if (
+    /\b(?:best|better|recommend|opinion|approach|tradeoff|vs|versus)\b/.test(lower) &&
+    !/\b(?:codebase|repo|repository|file|function|class|component|endpoint|call\s*site|reference|import|export)\b/.test(lower)
+  ) {
+    return false;
+  }
+
+  const hasPathSignal =
+    /(?:^|\s)(?:src|app|pages|lib|server|api|components|tests?|packages?)\/[^\s]+/i.test(normalizedTask) ||
+    /\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|css|scss|html|py|go|rs|java|kt|rb|php)\b/i.test(normalizedTask);
+  const hasIdentifierSignal =
+    /\b[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?\s*\(/.test(normalizedTask) ||
+    /\b[a-z]+[A-Z][A-Za-z0-9_$]*\b/.test(normalizedTask) ||
+    /\b[A-Z][A-Za-z0-9_$]*[A-Z][A-Za-z0-9_$]*\b/.test(normalizedTask) ||
+    /\b[a-z]+_[a-z0-9_]+\b/.test(normalizedTask);
+  const asksForCodebaseFacts =
+    /\b(?:what does|where is|where are|which files?|who calls|what calls|find usages?|uses?|used by|references?|call sites?|return|returns|flow|end to end|how does|how do|trace|explain)\b/i.test(
+      normalizedTask
+    );
+  const explicitCodebaseQuestion =
+    /\b(?:codebase|repo|repository|source|implementation|function|class|component|endpoint|module|import|export|caller|callee)\b/i.test(
+      normalizedTask
+    );
+
+  return (
+    hasPathSignal ||
+    (asksForCodebaseFacts && (hasIdentifierSignal || explicitCodebaseQuestion))
+  );
+}
 
 function fallbackMessageType(task: string): ZoneMessageType {
   const normalizedTask = String(task || "").trim();
@@ -121,5 +161,6 @@ export async function detectIntent(
   userApiKey?: string,
 ): Promise<ZoneLegacyIntent> {
   const messageType = await detectMessageType(task, userApiKey);
+  if (shouldUseInvestigationMode(task, messageType)) return "investigation";
   return messageType === "patch_request" ? "execute" : "chat";
 }
