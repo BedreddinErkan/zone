@@ -648,13 +648,11 @@
     .planner-dep-warnings{margin-top:var(--space-sm);display:flex;flex-direction:column;gap:var(--space-xs)}
     .rf-warn-line{font-size:var(--font-size-xs);color:#3f3f46;line-height:1.45;opacity:.92}
 
-    .diff-card{max-width:920px;margin:var(--space-2xl) 0;border-radius:var(--radius-lg);border:1px solid var(--border);background:var(--surface2);overflow:hidden}
-    .diff-toolbar{display:flex;align-items:center;gap:var(--space-lg);padding:var(--space-lg) var(--space-xl);border-bottom:1px solid var(--border);background:rgba(255,255,255,0.01);position:sticky;top:0;z-index:2}
+    .diff-card{max-width:920px;margin:var(--space-sm) 0;border-radius:var(--radius-sm);border:1px solid var(--border);background:transparent;overflow:hidden}
+    .diff-toolbar{display:flex;align-items:center;gap:var(--space-md);padding:var(--space-sm) var(--space-md);border-bottom:1px solid var(--border);background:transparent;position:sticky;top:0;z-index:2}
     .file-ico{width:18px;height:18px;border:1px solid rgba(59,130,246,0.55);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--blue);font-size:var(--font-size-sm);flex-shrink:0}
     .diff-fname{flex:1;min-width:0;font-family:var(--font-family-mono);font-size:var(--font-size-base);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .toggle-tabs{display:flex;border:1px solid var(--border);border-radius:var(--radius-pill);overflow:hidden;background:rgba(0,0,0,0.12)}
-    .toggle-tabs button{border:none;background:transparent;padding:5px var(--space-lg);font-size:var(--font-size-sm);color:var(--text-3)}
-    .toggle-tabs button.active{color:var(--violet);background:var(--violet-bg)}
+    .diff-stat{font-family:var(--font-family-mono);font-size:var(--font-size-xs);color:var(--text-3);white-space:nowrap}
     .diff-copy{
       width:26px;height:26px;border-radius:var(--radius-md);border:1px solid var(--border);
       background:transparent;color:var(--text-2);display:flex;align-items:center;justify-content:center;
@@ -669,25 +667,16 @@
     }
     .diff-toggle:hover{border-color:var(--border2);background:var(--surface-alpha-2);color:var(--text-1)}
     .diff-card.collapsed .diff-toggle{background:var(--surface-alpha-1)}
-    .apply-btn{border:1px solid var(--violet-bd);background:var(--violet-bg);color:var(--text-1);border-radius:var(--radius-md);padding:var(--space-sm) var(--space-lg);font-size:var(--font-size-sm)}
-    .apply-btn:hover{filter:brightness(1.06)}
-    .apply-btn.apply-with-warning{border-color:var(--color-warn-fg, #d97706)}
-    .diff-toolbar-status{
-      margin-left:auto;font-size:var(--font-size-sm);padding:var(--space-sm) var(--space-lg);border-radius:var(--radius-md);white-space:nowrap;flex-shrink:0
+    .zone-action-chips{display:flex;gap:var(--space-xs);margin-top:var(--space-sm);align-items:center;flex-wrap:wrap}
+    .zone-action-chip{
+      display:inline-flex;align-items:center;gap:6px;padding:4px 12px;font-size:12px;font-family:var(--font-family-mono);
+      background:transparent;border:0.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text-2);
+      cursor:pointer;transition:background 0.15s ease,border-color 0.15s ease
     }
-    .diff-toolbar-status.applying{
-      color:var(--color-success);border:1px solid rgba(34,197,94,0.35);background:rgba(34,197,94,0.10)
-    }
-    .diff-toolbar-status.applied-done{
-      color:var(--color-success);border:1px solid rgba(34,197,94,0.35);background:rgba(34,197,94,0.10)
-    }
-    .diff-toolbar-status.blocked-toolbar{
-      color:var(--color-error);border:1px solid rgba(239,68,68,0.28);background:rgba(239,68,68,0.10);max-width:min(420px,42vw);overflow:hidden;text-overflow:ellipsis
-    }
-    .diff-applied-badge{
-      margin-left:auto;font-size:var(--font-size-sm);color:var(--color-success);border:1px solid rgba(34,197,94,0.35);
-      background:rgba(34,197,94,0.10);padding:5px var(--space-lg);border-radius:var(--radius-pill);white-space:nowrap
-    }
+    .zone-action-chip:hover{background:rgba(255,255,255,0.04);border-color:var(--text-3)}
+    .zone-action-chip.primary{background:var(--violet-bg);border-color:var(--violet-bd);color:var(--text-1)}
+    .zone-action-chip.primary:hover{background:var(--violet);color:#fff}
+    .zone-action-chip.secondary{}
     /* Zone Undo Tur 2b: per-run revert affordance, sits adjacent to the
        safe_to_apply diff cards. Chip-style to match .diff-toggle. */
     .zone-undo-card{
@@ -5263,6 +5252,26 @@
       return countChangedLinesInUnifiedText(diffText);
     }
 
+    function getFileDiffLineStats(fileDiff){
+      const explicitAdded = Number(fileDiff?.addedLines ?? fileDiff?.additions ?? fileDiff?.linesAdded ?? NaN);
+      const explicitRemoved = Number(fileDiff?.removedLines ?? fileDiff?.deletions ?? fileDiff?.linesRemoved ?? NaN);
+      if (Number.isFinite(explicitAdded) || Number.isFinite(explicitRemoved)) {
+        return {
+          added: Number.isFinite(explicitAdded) ? Math.max(0, explicitAdded) : 0,
+          removed: Number.isFinite(explicitRemoved) ? Math.max(0, explicitRemoved) : 0,
+        };
+      }
+      const diffText = diffToUnifiedText(fileDiff?.diff || fileDiff?.unifiedDiff || fileDiff?.patch || '');
+      let added = 0;
+      let removed = 0;
+      String(diffText || '').split(/\r?\n/).forEach((raw) => {
+        if (!raw || raw.startsWith('@@') || raw.startsWith('+++') || raw.startsWith('---')) return;
+        if (raw[0] === '+') added += 1;
+        else if (raw[0] === '-') removed += 1;
+      });
+      return { added, removed };
+    }
+
     function getEffectiveDiffState(result){
       const r = result && typeof result === 'object' ? result : {};
       const diffs = Array.isArray(r.fileDiffs) ? r.fileDiffs : [];
@@ -5319,6 +5328,7 @@
 
       const filePath = fileDiff.filePath || fileDiff.path || fileDiff.file || `file-${idx+1}`;
       const diffText = diffToUnifiedText(fileDiff.diff || fileDiff.unifiedDiff || fileDiff.patch || '');
+      const lineStats = getFileDiffLineStats(fileDiff);
 
       // If the diff is empty (no actual lines changed), skip rendering this card entirely.
       // Happens when staging was discarded (verification_failed_staged) or detected as no-op.
@@ -5343,16 +5353,10 @@
       fn.textContent = filePath;
       tb.appendChild(fn);
 
-      const tabs = document.createElement('div');
-      tabs.className = 'toggle-tabs';
-      const b1 = document.createElement('button');
-      const b2 = document.createElement('button');
-      b1.textContent = 'diff';
-      b2.textContent = 'split';
-      b1.className = 'active';
-      tabs.appendChild(b1);
-      tabs.appendChild(b2);
-      tb.appendChild(tabs);
+      const stat = document.createElement('div');
+      stat.className = 'diff-stat';
+      stat.textContent = `+${lineStats.added} / -${lineStats.removed}`;
+      tb.appendChild(stat);
 
       if (handoffPrompt) {
         const copyBtn = document.createElement('button');
@@ -5377,45 +5381,9 @@
       const toggleBtn = document.createElement('button');
       toggleBtn.className = 'diff-toggle';
       toggleBtn.type = 'button';
-      toggleBtn.title = 'Collapse';
-      toggleBtn.textContent = '˄';
+      toggleBtn.title = 'Expand';
+      toggleBtn.textContent = '˅';
       tb.appendChild(toggleBtn);
-
-      if (applied) {
-        const badge = document.createElement('div');
-        badge.className = 'diff-applied-badge';
-        badge.textContent = '✓ Applied';
-        tb.appendChild(badge);
-      } else if (decisionMode === 'safe_to_apply') {
-        const st = document.createElement('div');
-        st.className = 'diff-toolbar-status applying';
-        st.textContent = '✓ Applying...';
-        tb.appendChild(st);
-      } else if (decisionMode === 'preview_only' && options && options.patchesAlreadyApplied) {
-        const st = document.createElement('div');
-        st.className = 'diff-toolbar-status applying';
-        st.style.background = 'var(--yellow, #b8860b)';
-        st.textContent = '⚠ Applied (review recommended)';
-        tb.appendChild(st);
-      } else if (decisionMode === 'blocked') {
-        const st = document.createElement('div');
-        st.className = 'diff-toolbar-status blocked-toolbar';
-        st.textContent = blockedMessage;
-        st.title = blockedMessage;
-        tb.appendChild(st);
-      } else if (decisionMode === 'preview_only') {
-        const applyBtn = document.createElement('button');
-        applyBtn.className = 'apply-btn';
-        applyBtn.type = 'button';
-        applyBtn.textContent = 'Apply';
-        if (verificationReason === 'verification_failed_staged') {
-          applyBtn.title = 'Verification failed at zone — applying will write the staged (broken) content to disk. Review the error first.';
-          applyBtn.classList.add('apply-with-warning');
-        }
-        applyBtn.addEventListener('click', () => applyPatches());
-        tb.appendChild(applyBtn);
-      }
-      /* decisionMode === 'chat': no apply control */
 
       const area = document.createElement('div');
       area.className = 'diff-area';
@@ -5447,43 +5415,52 @@
         });
       }
 
-      function renderSplit(){
-        // simple split: show right column as "new", left as "old" by concatenating with divider
-        area.innerHTML = '';
-        const cols = splitDiffToColumns(diffText);
-        const max = Math.min(cols.left.length, 240);
-        for (let i=0;i<max;i++){
-          const L = cols.left[i] || { pm:'', code:'', kind:'unchanged' };
-          const R = cols.right[i] || { pm:'', code:'', kind:'unchanged' };
-          // left row
-          const rowL = document.createElement('div');
-          rowL.className = `drow ${L.kind}`;
-          rowL.style.gridTemplateColumns = '52px 18px 1fr';
-          rowL.style.borderLeftColor = (L.kind === 'removed') ? 'rgba(239,68,68,0.35)' : 'transparent';
-          const lnL = document.createElement('div'); lnL.className='ln'; lnL.textContent = String(i+1);
-          const pmL = document.createElement('div'); pmL.className='pm'; pmL.textContent = L.pm || ' ';
-          const codeL = document.createElement('div'); codeL.className='code'; codeL.innerHTML = sanitizeDiffHtml(syntaxLite(L.code||''));
-          rowL.appendChild(lnL); rowL.appendChild(pmL); rowL.appendChild(codeL);
-          area.appendChild(rowL);
-          // right row
-          const rowR = document.createElement('div');
-          rowR.className = `drow ${R.kind}`;
-          const lnR = document.createElement('div'); lnR.className='ln'; lnR.textContent = String(i+1);
-          const pmR = document.createElement('div'); pmR.className='pm'; pmR.textContent = R.pm || ' ';
-          const codeR = document.createElement('div'); codeR.className='code'; codeR.innerHTML = sanitizeDiffHtml(syntaxLite(R.code||''));
-          rowR.appendChild(lnR); rowR.appendChild(pmR); rowR.appendChild(codeR);
-          area.appendChild(rowR);
-        }
-      }
-
-      b1.addEventListener('click', () => { b1.classList.add('active'); b2.classList.remove('active'); renderUnified(); });
-      b2.addEventListener('click', () => { b2.classList.add('active'); b1.classList.remove('active'); renderSplit(); });
-
       renderUnified();
 
       card.appendChild(tb);
       card.appendChild(area);
       return card;
+    }
+
+    function createActionChipRow(runId, options) {
+      const opts = options || {};
+      const decisionMode = String(opts.decisionMode || 'preview_only');
+      const filesChanged = Number(opts.filesChanged || 0);
+      const canApply = decisionMode === 'safe_to_apply' || decisionMode === 'preview_only';
+
+      const row = document.createElement('div');
+      row.className = 'zone-action-chips';
+      row.dataset.runId = String(runId || '');
+
+      if (filesChanged > 0) {
+        const showDiffChip = document.createElement('button');
+        showDiffChip.type = 'button';
+        showDiffChip.className = 'zone-action-chip';
+        showDiffChip.innerHTML = '<i class="ti" aria-hidden="true">↗</i>Show diff';
+        showDiffChip.addEventListener('click', () => {
+          const group = document.getElementById(`runGroup-${String(runId || '')}`);
+          group?.querySelectorAll('.diff-card.collapsed').forEach((card) => {
+            card.classList.remove('collapsed');
+            const toggle = card.querySelector('.diff-toggle');
+            if (toggle) {
+              toggle.textContent = '˄';
+              toggle.title = 'Collapse';
+            }
+          });
+        });
+        row.appendChild(showDiffChip);
+      }
+
+      if (filesChanged > 0 && canApply) {
+        const applyChip = document.createElement('button');
+        applyChip.type = 'button';
+        applyChip.className = `zone-action-chip ${decisionMode === 'safe_to_apply' ? 'primary' : 'secondary'}`;
+        applyChip.textContent = 'Apply';
+        applyChip.addEventListener('click', () => applyPatches());
+        row.appendChild(applyChip);
+      }
+
+      return row;
     }
 
     // ---- Threads & sidebar rendering ----
@@ -9029,6 +9006,15 @@
           moreB.innerHTML = `<div class="ticon" style="background:var(--blue)"></div><div>+${diffsBlocked.length - maxShowBlocked} more diffs in report</div>`;
           appendToRunGroup(runId, moreB);
         }
+        if (!blockedDiffState.effectiveDiffsEmpty) {
+          const blockedFilesChanged = diffsBlocked.filter((fd) => getFileDiffChangedLineCount(fd) > 0).length;
+          if (blockedFilesChanged > 0) {
+            appendToRunGroup(runId, createActionChipRow(runId, {
+              decisionMode: 'blocked',
+              filesChanged: blockedFilesChanged,
+            }));
+          }
+        }
         scrollChatIfFollowing(runId);
         try {
           const g = document.getElementById(`runGroup-${runId}`);
@@ -9136,6 +9122,15 @@
           appendToRunGroup(runId, renderUndoControl(runId, state.activeRepo.path));
         }
       } catch {}
+      if (!diffState.effectiveDiffsEmpty) {
+        const filesChanged = diffs.filter((fd) => getFileDiffChangedLineCount(fd) > 0).length;
+        if (filesChanged > 0) {
+          appendToRunGroup(runId, createActionChipRow(runId, {
+            decisionMode: decision,
+            filesChanged,
+          }));
+        }
+      }
 
       try {
         if (state.__handoffReportByRun && state.__handoffReportByRun[runId]) {
@@ -9146,9 +9141,6 @@
       if (decision === 'safe_to_apply' && !diffState.effectiveDiffsEmpty) {
         if (patchesAlreadyApplied) {
           showToast('success', '✓ Applied by agent', 1600);
-        } else {
-          showToast('success', 'Applying automatically...', 1100);
-          setTimeout(() => applyPatches({ auto: true, runId }), 800);
         }
       } else {
         if (decision === 'preview_only') {
