@@ -12,3 +12,4 @@ zone-debug.log
 zone-debug.log.*
 zone-debug.log
 zone-debug.log.*
+.claude/settings.local.json
