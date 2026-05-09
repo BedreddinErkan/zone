@@ -362,6 +362,18 @@
     .verify-pill.reason-bad{background:transparent;border-color:rgba(239,68,68,0.38);color:#fca5a5}
     .verify-pill.reason-neutral{background:transparent;border-color:var(--surface-alpha-7);color:var(--text-3)}
     .verify-note{font-size:var(--font-size-base);color:var(--text-3)}
+    .verify-banner.verify-row-flow{
+      display:block;padding:0;margin:var(--space-sm) 0;background:transparent;border:none;border-radius:0;box-shadow:none
+    }
+    .verify-row-flow .verify-row{
+      display:flex;gap:var(--space-xs);align-items:center;flex-wrap:wrap;margin-bottom:var(--space-xs)
+    }
+    .verify-row-flow .verify-pill{
+      padding:2px 8px;font-size:11px;font-family:var(--font-family-mono);border-radius:var(--radius-sm);display:inline-flex;align-items:center
+    }
+    .verify-row-flow .verify-note{
+      font-size:12px;color:var(--text-3);line-height:1.5;margin:0
+    }
     .bubble .edit-btn{position:absolute;top:var(--space-md);right:var(--space-md);width:22px;height:22px;border-radius:var(--radius-sm);border:1px solid var(--surface-alpha-7);background:rgba(0,0,0,0.18);color:#9ca3af;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;transition:opacity .12s ease}
     .bubble.user .edit-btn{background:rgba(0,0,0,0.14);border-color:rgba(255,255,255,0.18)}
     .bubble:hover .edit-btn{opacity:1}
@@ -427,7 +439,14 @@
     }
     .resume-btn:hover{background:#6d28d9;transform:translateY(-1px)}
     .resume-btn:disabled{opacity:.6;cursor:default}
+    .run-group{border-left:0.5px solid var(--border);padding-left:var(--space-md);position:relative;margin-bottom:var(--space-lg)}
     .run-group.resumed-from{opacity:.56;filter:saturate(.72)}
+    .zone-reply-header{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text-3);margin-bottom:var(--space-sm);font-family:var(--font-family-mono)}
+    .zone-reply-header-left{}
+    .zone-reply-header-right{display:flex;align-items:center;gap:var(--space-xs)}
+    .zone-reply-pulse{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--violet)}
+    @keyframes zonePulse{0%,100%{opacity:0.35}50%{opacity:1}}
+    .zone-reply-pulse.active{animation:zonePulse 1.4s ease-in-out infinite}
 
     .turn-summary{flex:1;min-width:0;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .turn-meta{font-size:var(--font-size-xs);color:var(--text-5)}
@@ -1209,6 +1228,7 @@
       branchLoading: false,
       branchDropdownOpen: false
     };
+    state.__durationTickersByRunId = state.__durationTickersByRunId || {};
 
     // === Multi-active-thread Phase 1b ===
     // Source of truth for per-thread run state, per-thread task queues,
@@ -1220,6 +1240,7 @@
     state.eventSourcesByRunId = new Map();   // Map<runId, EventSource>
     state.taskQueuesByThread = new Map();    // Map<threadId, Array<QueuedTask>>
     state.todosByRunId = new Map();          // Map<runId, Array<Todo>>
+    state.summariesByRunId = state.summariesByRunId || {}; // { [runId]: RunSummaryPayload }
 
     // Legacy field shims. Each read logs once per session so we can audit
     // remaining callers in Phase 1b cleanup. Setters route into runsByThread
@@ -1354,6 +1375,25 @@
         if (run && run.runId === runId) return tid;
       }
       return null;
+    }
+
+    function setRunSummaryForRun(runId, progress){
+      const rid = String(runId || progress?.runId || '').trim();
+      if (!rid) return;
+      state.summariesByRunId = state.summariesByRunId || {};
+      state.summariesByRunId[rid] = {
+        filesChanged: Array.isArray(progress?.filesChanged) ? progress.filesChanged : [],
+        toolsUsed: progress?.toolsUsed && typeof progress.toolsUsed === 'object' ? progress.toolsUsed : {},
+        verification: progress?.verification && typeof progress.verification === 'object' ? progress.verification : null,
+        cost: progress?.cost && typeof progress.cost === 'object' ? progress.cost : null,
+      };
+    }
+
+    function getRunSummary(runId){
+      const rid = String(runId || '').trim();
+      if (!rid) return null;
+      state.summariesByRunId = state.summariesByRunId || {};
+      return state.summariesByRunId[rid] || null;
     }
 
     function sanitizeTodoStatus(status){
@@ -2631,9 +2671,9 @@
     function createVerificationBanner(input){
       const model = getVerificationBannerModel(input);
       const el = document.createElement('div');
-      el.className = 'verify-banner';
+      el.className = 'verify-banner verify-row-flow';
       el.innerHTML = `
-        <div class="verify-banner-pills">
+        <div class="verify-row">
           <span class="verify-pill ${escapeHtml(model.decisionClass)}">${escapeHtml(model.decisionLabel)}</span>
           <span class="verify-pill ${escapeHtml(model.reasonClass)}">${escapeHtml(model.reasonLabel)}</span>
         </div>
@@ -3394,6 +3434,60 @@
       g.className = 'run-group';
       g.id = `runGroup-${rid}`;
       return g;
+    }
+
+    function resolveActiveModelLabel(){
+      try {
+        const label = document.querySelector('[data-dropdown="model"] .zone-dropdown-label');
+        const text = String(label?.textContent || '').trim();
+        if (text && text !== '—') return text;
+      } catch {}
+      try {
+        const provider = getActiveProvider();
+        const activeModels = getActiveModelsForActiveProvider();
+        const activeId = String(activeModels?.high || '').trim();
+        const catalog = ZONE_MODEL_CATALOG[provider] || [];
+        const match = catalog.find((m) => String(m.id || '') === activeId);
+        return match?.label || activeId || 'server default';
+      } catch {}
+      return 'unknown';
+    }
+
+    function createZoneReplyHeader(runId, modelLabel) {
+      const header = document.createElement('div');
+      header.className = 'zone-reply-header';
+      header.dataset.runId = String(runId || '');
+      header.innerHTML = `
+        <div class="zone-reply-header-left">Zone · ${escapeHtml(modelLabel || 'unknown')}</div>
+        <div class="zone-reply-header-right">
+          <span class="zone-reply-pulse active"></span>
+          <span class="zone-reply-duration">0s</span>
+        </div>
+      `;
+      return header;
+    }
+
+    function startDurationTicker(runId, startedAtMs) {
+      const rid = String(runId || '');
+      if (!rid || state.__durationTickersByRunId[rid]) return;
+      const tick = () => {
+        const header = document.querySelector(`.zone-reply-header[data-run-id="${CSS.escape(rid)}"]`);
+        const dur = header?.querySelector('.zone-reply-duration');
+        if (!dur) return;
+        const elapsed = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+        dur.textContent = `${elapsed}s`;
+      };
+      tick();
+      state.__durationTickersByRunId[rid] = setInterval(tick, 1000);
+    }
+
+    function stopDurationTicker(runId) {
+      const rid = String(runId || '');
+      const handle = state.__durationTickersByRunId?.[rid];
+      if (handle) { clearInterval(handle); delete state.__durationTickersByRunId[rid]; }
+      const header = document.querySelector(`.zone-reply-header[data-run-id="${CSS.escape(rid)}"]`);
+      const pulse = header?.querySelector('.zone-reply-pulse');
+      if (pulse) pulse.classList.remove('active');
     }
 
     function appendToRunGroup(runId, el){
@@ -4679,6 +4773,7 @@
       const redundantIntentPrefix = 'Task intent:';
       if (renderTitle.toLowerCase().startsWith(redundantIntentPrefix.toLowerCase())) return;
       if (renderTitle === 'Developer patch run started.') return;
+      if (renderTitle === 'Run summary') return;
       // NEVER log streaming deltas as separate lines (stream is rendered in livecode block).
       if (String(message || '').toLowerCase().includes('streaming patch')) return;
       const msgText = String(message || '');
@@ -7456,6 +7551,7 @@
           } catch {}
           g.innerHTML = String(m.html || '');
           container.appendChild(g);
+          g.querySelectorAll('.zone-reply-pulse.active').forEach(el => el.classList.remove('active'));
           return;
         }
         // Legacy restore fallback: collapsed cards.
@@ -7942,6 +8038,7 @@
         progressTypeForMissingBlock === 'chat_done' ||
         progressTypeForMissingBlock === 'chat_response' ||
         progressTypeForMissingBlock === 'iter_cost_update' ||
+        progressTypeForMissingBlock === 'run_summary' ||
         progressTypeForMissingBlock === 'todos_initialized' ||
         progressTypeForMissingBlock === 'todo_status_changed' ||
         progressTypeForMissingBlock === 'todo_revised' ||
@@ -7977,6 +8074,10 @@
 
       if (progress && progressType === 'iter_cost_update') {
         applyIterCostUpdate(progress, runId);
+        return;
+      }
+      if (progress && progressType === 'run_summary') {
+        try { setRunSummaryForRun(runId, progress); } catch {}
         return;
       }
       if (progress && (progressType === 'todos_initialized' || progressType === 'todo_revised')) {
@@ -8098,6 +8199,7 @@
           const g = document.getElementById(`runGroup-${runId}`);
           if (g) g.dataset.runStatus = 'completed';
         } catch {}
+        stopDurationTicker(runId);
         persistRunGroupHtmlToThread(runId, 'completed');
         scrollChatIfFollowing();
         return;
@@ -8181,6 +8283,7 @@
           const g = document.getElementById(`runGroup-${runId}`);
           if (g) g.dataset.runStatus = 'cancelled';
         } catch {}
+        stopDurationTicker(runId);
         try { persistRunGroupHtmlToThread(runId, 'cancelled'); } catch {}
       }
       const placeholderFilePath =
@@ -8707,6 +8810,10 @@
       }
 
       // 2) create empty agent log block
+      const modelLabel = resolveActiveModelLabel();
+      const header = createZoneReplyHeader(runId, modelLabel);
+      appendToRunGroup(runId, header);
+      startDurationTicker(runId, Date.now());
       const lb = createLogBlock(runId);
       appendToRunGroup(runId, lb);
       // Persist immediately so refresh can reconnect mid-run.
@@ -8965,6 +9072,7 @@
           const g = document.getElementById(`runGroup-${runId}`);
           if (g) g.dataset.runStatus = 'completed';
         } catch {}
+        stopDurationTicker(runId);
         persistRunGroupHtmlToThread(runId, 'completed');
         dequeueAndRunNext(_owningThreadId);
         return;
@@ -8985,6 +9093,7 @@
           const g = document.getElementById(`runGroup-${runId}`);
           if (g) g.dataset.runStatus = 'completed';
         } catch {}
+        stopDurationTicker(runId);
         persistRunGroupHtmlToThread(runId, 'completed');
         dequeueAndRunNext(_owningThreadId);
         return;
@@ -9091,6 +9200,7 @@
         const g = document.getElementById(`runGroup-${runId}`);
         if (g) g.dataset.runStatus = 'completed';
       } catch {}
+      stopDurationTicker(runId);
       persistRunGroupHtmlToThread(runId, 'completed');
 
       // If user queued tasks while this run was executing, start next automatically.
