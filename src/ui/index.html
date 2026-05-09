@@ -831,6 +831,11 @@
     .zone-cost-strip-bar{width:70px;height:3px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden}
     .zone-cost-strip-fill{height:100%;background:var(--violet);width:0%;transition:width 0.2s ease-out}
     .zone-cost-strip-text{white-space:nowrap}
+    /* Phase H.7: token-budget warn/alert states. Yellow at ≥80%, red at ≥95%. */
+    .zone-cost-strip.budget-warn .zone-cost-strip-text{color:#d4a85a}
+    .zone-cost-strip.budget-warn .zone-cost-strip-fill{background:#d4a85a}
+    .zone-cost-strip.budget-alert .zone-cost-strip-text{color:#d4534f;font-weight:600}
+    .zone-cost-strip.budget-alert .zone-cost-strip-fill{background:#d4534f}
     @media (max-width:1180px){.zone-cost-strip{display:none!important}}
 
     /* Verification fix loop summary (collapsible) */
@@ -4210,6 +4215,11 @@
       return strip;
     }
 
+    // Phase H.7: matches TOKEN_BUDGET_CAP / WARN / HARD in agentLoop.ts.
+    const ZONE_TOKEN_BUDGET_CAP = 800000;
+    const ZONE_TOKEN_BUDGET_WARN = 0.80;
+    const ZONE_TOKEN_BUDGET_HARD = 0.95;
+
     function updateCostStripFromMeter(meter) {
       const strip = ensureCostStrip();
       if (!meter) { strip.dataset.state = 'hidden'; return; }
@@ -4223,6 +4233,10 @@
       strip.querySelector('.zone-cost-strip-fill').style.width = `${pct}%`;
       strip.querySelector('.zone-cost-strip-text').textContent =
         `${typeof formatCostUsd === 'function' ? formatCostUsd(cumulative) : '$' + cumulative.toFixed(2)}${tokPart} · ${pct}% cached`;
+      // Phase H.7: warn/alert when cumulative tokens approach the per-run cap.
+      const budgetRatio = ZONE_TOKEN_BUDGET_CAP > 0 ? totalTokens / ZONE_TOKEN_BUDGET_CAP : 0;
+      strip.classList.toggle('budget-warn', budgetRatio >= ZONE_TOKEN_BUDGET_WARN && budgetRatio < ZONE_TOKEN_BUDGET_HARD);
+      strip.classList.toggle('budget-alert', budgetRatio >= ZONE_TOKEN_BUDGET_HARD);
       strip.dataset.state = 'visible';
     }
 
@@ -7452,7 +7466,9 @@
       const text = String(msg?.chatResponse || msg?.content || msg?.text || '');
       const summary = String(msg?.summary || text).slice(0, 60);
       const ts = Number(msg?.ts || Date.now());
-      const isInvestigationMaxiter = msg?.finalState === 'max_iterations' && msg?.decisionMode === 'investigation';
+      const isInvestigation = msg?.decisionMode === 'investigation';
+      const isInvestigationMaxiter = msg?.finalState === 'max_iterations' && isInvestigation;
+      const isTokenBudgetExceeded = msg?.finalState === 'token_budget_exceeded' && isInvestigation;
       const wrap = document.createElement('div');
       wrap.className = 'turn-restored';
       wrap.innerHTML = `
@@ -7465,6 +7481,7 @@
           <span class="turn-meta">${escapeHtml(fmtRelative(ts))}</span>
         </div>
         ${isInvestigationMaxiter ? `<div class="toast" style="margin:4px 0 2px;opacity:0.8"><div class="ticon" style="background:var(--blue,#5b8af0)"></div><div>Investigation incomplete — iteration budget reached. Findings below are partial.</div></div>` : ''}
+        ${isTokenBudgetExceeded ? `<div class="toast" style="margin:4px 0 2px;opacity:0.8;border-color:rgba(212,168,90,0.4);background:rgba(212,168,90,0.08)"><div class="ticon" style="background:#d4a85a"></div><div>Token budget reached — findings below are partial.</div></div>` : ''}
         <div class="turn-restored-body"></div>
       `;
       wrap.querySelector('.turn-restored-header')?.addEventListener('click', (e) => toggleRestored(e.currentTarget));
@@ -9165,6 +9182,14 @@
           pill.innerHTML = `<div class="ticon" style="background:var(--blue,#5b8af0)"></div><div>Investigation incomplete — iteration budget reached. Findings below are partial.</div>`;
           appendToRunGroup(runId, pill);
         }
+        // Phase H.7: token-budget graceful exit pill
+        if (result.finalState === 'token_budget_exceeded') {
+          const pill = document.createElement('div');
+          pill.className = 'toast';
+          pill.style.cssText = 'margin:0 0 6px;opacity:0.85;border-color:rgba(212,168,90,0.4);background:rgba(212,168,90,0.08)';
+          pill.innerHTML = `<div class="ticon" style="background:#d4a85a"></div><div>Token budget reached — findings below are partial. Re-dispatch with a more focused scope to continue.</div>`;
+          appendToRunGroup(runId, pill);
+        }
         // Belt-and-suspenders: strip any narration line whose collapsed text
         // matches the final answer (agentLoop now skips narration on the final
         // iter, but remove the duplicate if it slipped through).
@@ -9223,6 +9248,16 @@
         persistRunGroupHtmlToThread(runId, 'completed');
         dequeueAndRunNext(_owningThreadId);
         return;
+      }
+
+      // Phase H.7: patch-flow token-budget graceful exit pill (surfaced
+      // before the verify-banner so the reason for "Preview only" is clear).
+      if (result?.tokenBudgetExceeded) {
+        const pill = document.createElement('div');
+        pill.className = 'toast';
+        pill.style.cssText = 'margin:0 0 6px;opacity:0.9;border-color:rgba(212,168,90,0.4);background:rgba(212,168,90,0.08)';
+        pill.innerHTML = `<div class="ticon" style="background:#d4a85a"></div><div>Token budget reached — agent stopped before completing. Patches above are partial; review carefully.</div>`;
+        appendToRunGroup(runId, pill);
       }
 
       // After a successful patch run, surface the finalRunReport as an assistant bubble.

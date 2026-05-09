@@ -162,6 +162,10 @@ export type LlmPatchFlowResult =
       patchSource?: PatchSource;
       decisionMode?: "preview_only" | "safe_to_apply" | "blocked" | "chat";
       finalState?: "preview_only" | "safe_to_apply" | "blocked" | "chat";
+      /** Phase H.7: agent loop terminated at token-budget hard limit (95%
+       *  of TOKEN_BUDGET_CAP). UI shows "Token budget reached" pill. The
+       *  patch verdict still reflects whatever was produced before exit. */
+      tokenBudgetExceeded?: boolean;
       /** When decisionMode is chat, surfaced to the UI as the assistant message. */
       chatResponse?: string;
       finalExecutionOutcome?:
@@ -4458,6 +4462,9 @@ export async function runLlmPatchFlow(input: {
   provider?: LLMProvider;
 }): Promise<LlmPatchFlowResult> {
   attachRunIdentity({ userId: input.userId, runId: input.runId });
+  // Phase H.7: outer-scope flag survives past the inner block where `loop`
+  // is declared, so the final return can include it for the UI pill.
+  let tokenBudgetExceededAtExit = false;
   logger.info(
     "[zone-flow-entry] runId=%s, ts=%s, lockHeld=%s",
     typeof input.runId === "string" ? input.runId.trim() : "",
@@ -5542,6 +5549,12 @@ const initializeTodosFromPlan = (): void => {
       loop = await runAgentLoop(agentLoopBaseInput);
     }
 
+    // Phase H.7: capture token-budget exit at outer-scope lifetime so the
+    // final return (way down the function) can flag it for the UI pill.
+    if (loop.terminationReason === "token_budget_exceeded") {
+      tokenBudgetExceededAtExit = true;
+    }
+
     filesTouched.push(...(loop.filesModified || []));
 
     const agentLoopHadRunCommandFailure = loop.toolCallLog.some((entry) => {
@@ -5615,13 +5628,26 @@ const initializeTodosFromPlan = (): void => {
     });
     const agentVerificationCommands = collectVerificationCommands(loop.toolCallLog);
 
+    // Phase H.7: surface token-budget exit in the patch flow log so the
+    // [zone-token-budget] traces are easy to grep alongside the run.
+    if (loop.terminationReason === "token_budget_exceeded") {
+      debugLog("[zone-token-budget]", JSON.stringify({
+        mode: "patch",
+        runId: runId || null,
+        outcome: "graceful_exit",
+        summaryPreview: loop.summary.slice(0, 200),
+      }));
+    }
+
     if (runId) {
       finalizeRunTodos(agentDecisionMode === "safe_to_apply" ? "completed" : "skipped");
       emitStructuredProgress({
         type: "agent_loop_complete",
         title: loop.success
           ? "Agent tool loop complete"
-          : "Agent tool loop ended with issues",
+          : loop.terminationReason === "token_budget_exceeded"
+            ? "Agent stopped at token budget"
+            : "Agent tool loop ended with issues",
         detail: loop.summary.slice(0, 4000),
         status: loop.success ? "success" : "warning",
       });
@@ -10704,6 +10730,7 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
     warnings: syncedVisibleWarnings,
     ...(noCodeChangeReason ? { reason: noCodeChangeReason } : {}),
     ...(selectedTargetFile ? { targetFile: selectedTargetFile } : {}),
+    ...(tokenBudgetExceededAtExit ? { tokenBudgetExceeded: true as const } : {}),
     developerConfidence,
     developerRisk: finalDeveloperRisk,
     intentMismatch: {

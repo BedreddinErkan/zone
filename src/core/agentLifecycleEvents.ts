@@ -129,7 +129,8 @@ export type ZoneStructuredProgressEvent = {
     | "command_trusted"
     | "terminal_output"
     | "terminal_done"
-    | "narration";
+    | "narration"
+    | "token_budget_status";
   title: string;
   detail?: string;
   filePath?: string;
@@ -188,6 +189,12 @@ export type ZoneStructuredProgressEvent = {
     /** Cross-file dependency hints (e.g. imports / dependents). */
     warnings?: string[];
   };
+  /** Phase H.7 token-budget tracking — cumulative input+output across the run,
+   *  cap (default 800k), and ratio. Emitted once per iter. UI uses ratio for
+   *  cost-strip warn/alert states and the run terminates when ratio ≥ HARD. */
+  cumulativeTokens?: number;
+  tokenBudgetCap?: number;
+  tokenBudgetRatio?: number;
 };
 
 /** Documentation type for `narration` progress events: a one-line intent

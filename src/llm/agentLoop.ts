@@ -119,6 +119,10 @@ export interface AgentLoopResult {
   error?: string;
   patchValidatedByAgent: boolean;
   verificationReason: VerificationReason;
+  /** Phase H.7: how the loop ended. Used by upstream flows (investigation /
+   *  patch) to surface "Token budget reached" vs "Iteration budget reached"
+   *  distinctly in the UI. Optional for backward-compat with older callers. */
+  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded";
 }
 
 const MAX_SELF_CORRECTION_ATTEMPTS = 5;
@@ -129,6 +133,14 @@ const MAX_SELF_CORRECTION_ATTEMPTS = 5;
 // apply_patch repeat-failure (max 20).
 export const BASE_MAX_ITERATIONS = 15;
 export const ESCALATION_BONUS_ITERATIONS = 5;
+
+// Phase H.7: per-run token budget. ~$0.50/run for typical Claude pricing,
+// leaves ~200k context tampon vs 1M. WARN drives UI cost-strip yellow at 80%;
+// HARD triggers graceful exit at 95% — agent gets one final synthesis call
+// (no tools) and the run returns terminationReason="token_budget_exceeded".
+export const TOKEN_BUDGET_CAP = 800_000;
+export const TOKEN_BUDGET_WARN = 0.8;
+export const TOKEN_BUDGET_HARD = 0.95;
 
 function getZoneToolName(tool: (typeof ZONE_TOOLS)[number]): string {
   return (
@@ -1736,6 +1748,90 @@ Example first call (immediately after task framing):
         );
       }
     } catch {}
+
+    // Phase H.7: per-run token budget. Sums all token categories tracked by
+    // the iter-cost meter (input_uncached + cache_read + cache_write +
+    // output) and compares against TOKEN_BUDGET_CAP. Once usage crosses
+    // TOKEN_BUDGET_HARD (95%), the loop terminates gracefully via a final
+    // no-tools synthesis call.
+    const cumulativeTokens =
+      iterCostAccumulator.input_uncached +
+      iterCostAccumulator.cache_read +
+      iterCostAccumulator.cache_write +
+      iterCostAccumulator.output;
+    const tokenBudgetRatio =
+      TOKEN_BUDGET_CAP > 0 ? cumulativeTokens / TOKEN_BUDGET_CAP : 0;
+    debugLog("[zone-token-budget]", JSON.stringify({
+      iter: iter + 1,
+      cumulativeTokens,
+      cap: TOKEN_BUDGET_CAP,
+      ratio: Number(tokenBudgetRatio.toFixed(3)),
+    }));
+    if (typeof input.runId === "string" && input.runId.trim()) {
+      input.onStructuredEvent?.({
+        type: "token_budget_status",
+        title: "Token budget",
+        cumulativeTokens,
+        tokenBudgetCap: TOKEN_BUDGET_CAP,
+        tokenBudgetRatio,
+        iter: iter + 1,
+        status:
+          tokenBudgetRatio >= TOKEN_BUDGET_HARD
+            ? "error"
+            : tokenBudgetRatio >= TOKEN_BUDGET_WARN
+              ? "warning"
+              : "active",
+      });
+    }
+
+    if (tokenBudgetRatio >= TOKEN_BUDGET_HARD) {
+      input.onProgress?.(
+        `[agent_loop] Token budget reached (${cumulativeTokens}/${TOKEN_BUDGET_CAP}) — synthesizing final answer`
+      );
+      let finalSummary =
+        "Token budget reached before a final answer was produced.";
+      try {
+        const wrapupResponse = await client.createChatCompletion(
+          {
+            model: getModelName("high", client.provider, requestCtx?.modelOverride),
+            messages: [
+              ...responseInput,
+              {
+                role: "user",
+                content:
+                  "You have reached the token budget for this run. " +
+                  "Stop calling tools and synthesize your findings into a final answer " +
+                  "using only the information already gathered. " +
+                  "If insufficient information was gathered, say so explicitly. " +
+                  (isInvestigationMode
+                    ? "Do not mention patches or verification."
+                    : "Mention which steps remain incomplete."),
+              },
+            ],
+          },
+          { signal: input.abortSignal }
+        );
+        const ae = extractResponsesApiOutputText(wrapupResponse);
+        if (ae.ok && ae.text.trim()) finalSummary = ae.text.trim();
+      } catch {
+        // Use fallback summary
+      }
+      debugLog("[zone-token-budget-exit]", JSON.stringify({
+        iter: iter + 1,
+        cumulativeTokens,
+        finalTextLength: finalSummary.length,
+      }));
+      return {
+        success: false,
+        summary: finalSummary,
+        toolCallLog,
+        filesModified: Array.from(filesModified),
+        patchValidatedByAgent: false,
+        verificationReason: "no_verification_attempted",
+        terminationReason: "token_budget_exceeded",
+      };
+    }
+
     throwIfAborted("after_llm");
 
     const assistantContentForProgress = response.choices[0]?.message?.content ?? "";
@@ -2264,6 +2360,7 @@ Example first call (immediately after task framing):
           filesModified: [],
           patchValidatedByAgent: false,
           verificationReason: "no_verification_attempted",
+          terminationReason: "natural_completion",
         };
       }
       const vrMatch = finalText.match(/\[ZONE_VERIFICATION:\s*([\w_]+)\]/i);
@@ -2402,6 +2499,7 @@ Example first call (immediately after task framing):
         filesModified: Array.from(filesModified),
         patchValidatedByAgent,
         verificationReason,
+        terminationReason: "natural_completion",
       };
     }
 
@@ -2439,6 +2537,7 @@ Example first call (immediately after task framing):
       filesModified: [],
       patchValidatedByAgent: false,
       verificationReason: "no_verification_attempted",
+      terminationReason: "max_iterations",
     };
   }
 
@@ -2633,5 +2732,6 @@ Example first call (immediately after task framing):
     filesModified: [...filesModified],
     patchValidatedByAgent,
     verificationReason: finalVerificationReason,
+    terminationReason: "max_iterations",
   };
 }

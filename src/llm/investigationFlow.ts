@@ -8,7 +8,7 @@ import { debugLog } from "../utils/logger.js";
 export type InvestigationFlowResult = {
   ok: true;
   decisionMode: "investigation";
-  finalState?: "max_iterations";
+  finalState?: "max_iterations" | "token_budget_exceeded";
   chatResponse: string;
   responseHtml: string;
   contextFiles: string[];
@@ -157,22 +157,48 @@ export async function runInvestigationFlow(input: {
           ...e,
         } as Partial<ZoneStructuredProgressEvent>);
       }
+      if (e.type === "token_budget_status") {
+        emitStructuredProgress({
+          type: "token_budget_status",
+          title: String(e.title || "Token budget"),
+          status:
+            (e.status as "active" | "warning" | "error" | "success" | undefined) ??
+            "active",
+          cumulativeTokens: typeof e.cumulativeTokens === "number" ? e.cumulativeTokens : undefined,
+          tokenBudgetCap: typeof e.tokenBudgetCap === "number" ? e.tokenBudgetCap : undefined,
+          tokenBudgetRatio: typeof e.tokenBudgetRatio === "number" ? e.tokenBudgetRatio : undefined,
+          iter: typeof e.iter === "number" ? e.iter : undefined,
+        } as Partial<ZoneStructuredProgressEvent>);
+      }
     },
   });
 
-  const hitMaxIter = !loop.success;
+  const terminationReason = loop.terminationReason;
+  const hitTokenBudget = terminationReason === "token_budget_exceeded";
+  const hitMaxIter =
+    terminationReason === "max_iterations" || (!loop.success && !hitTokenBudget);
   const responseText = String(loop.summary || "").trim() || "I could not produce an investigation answer.";
   emitStructuredProgress({
     type: "agent_loop_complete",
-    title: loop.success ? "Investigation complete" : "Investigation ended with partial findings",
+    title: loop.success
+      ? "Investigation complete"
+      : hitTokenBudget
+        ? "Investigation ended at token budget"
+        : "Investigation ended with partial findings",
     detail: responseText.slice(0, 4000),
     status: loop.success ? "success" : "warning",
   });
 
+  const finalState: InvestigationFlowResult["finalState"] = hitTokenBudget
+    ? "token_budget_exceeded"
+    : hitMaxIter
+      ? "max_iterations"
+      : undefined;
+
   return {
     ok: true,
     decisionMode: "investigation",
-    ...(hitMaxIter ? { finalState: "max_iterations" as const } : {}),
+    ...(finalState ? { finalState } : {}),
     chatResponse: responseText,
     responseHtml: renderChatMarkdownToHtml(responseText),
     contextFiles: [...contextFiles].slice(0, 20),
