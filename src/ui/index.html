@@ -1178,6 +1178,7 @@
       <div class="modal-tabs">
         <button class="mtab active" data-stab="usage">Usage</button>
         <button class="mtab" data-stab="keys">API Keys</button>
+        <button class="mtab" data-stab="visual">Visual</button>
       </div>
       <div class="modal-b" id="settingsBody"></div>
     </div>
@@ -9544,6 +9545,7 @@
       document.querySelectorAll('.mtab').forEach(b => b.classList.toggle('active', b.dataset.stab === tab));
       if (tab === 'usage') renderUsageSettings();
       if (tab === 'keys') renderKeysSettings();
+      if (tab === 'visual') renderVisualSettings();
     }
 
     function renderKeysSettings(){
@@ -9748,6 +9750,150 @@
 
       wireProviderRow('openai', validateOpenAIKey);
       wireProviderRow('anthropic', validateAnthropicKey);
+    }
+
+    // Phase I.2: Visual verification settings panel — dev-server URL,
+    // viewport defaults, and a placeholder auto-verify toggle (wired in I.3).
+    function renderVisualSettings(){
+      els.settingsBody.innerHTML = `
+        <div class="apikey-section">
+          <div class="apikey-section-title">Visual verification</div>
+          <div class="apikey-disclaimer" style="margin-bottom:14px">
+            Zone can take screenshots of your app via headless Chromium when the
+            agent calls <code>verify_visual</code>. Make sure your dev server
+            is running before dispatching tasks that may use this feature.
+          </div>
+
+          <div id="vvLoadingState" class="apikey-disclaimer">Loading…</div>
+          <div id="vvFormBody" style="display:none">
+
+            <div class="apikey-field-label">Dev server URL</div>
+            <div class="apikey-input-row">
+              <input id="vvDevUrl" class="apikey-input" type="url"
+                placeholder="http://localhost:3000"
+                autocomplete="off" spellcheck="false" />
+              <button id="vvDevUrlReset" class="apikey-btn-show" type="button" title="Reset to default">Reset</button>
+            </div>
+            <div id="vvDevUrlEnvNote" class="apikey-disclaimer" style="display:none;margin-top:4px"></div>
+
+            <div style="height:14px"></div>
+
+            <div class="apikey-field-label">Default viewport</div>
+            <div class="apikey-input-row" style="gap:10px">
+              <input id="vvViewportW" type="number" min="320" max="3840" step="1"
+                style="width:90px;padding:4px 8px;background:var(--bg-input,#1e1e1e);border:1px solid var(--border,#444);border-radius:4px;color:inherit;font-size:var(--font-size-sm,12px)"
+                aria-label="Viewport width" />
+              <span style="opacity:0.7;font-size:var(--font-size-sm,12px)">×</span>
+              <input id="vvViewportH" type="number" min="240" max="2160" step="1"
+                style="width:90px;padding:4px 8px;background:var(--bg-input,#1e1e1e);border:1px solid var(--border,#444);border-radius:4px;color:inherit;font-size:var(--font-size-sm,12px)"
+                aria-label="Viewport height" />
+              <span style="opacity:0.7;font-size:var(--font-size-sm,12px)">px</span>
+            </div>
+            <div class="apikey-disclaimer" style="margin-top:6px">
+              Used when the agent doesn't pass an explicit viewport. Range
+              320–3840 × 240–2160.
+            </div>
+
+            <div style="height:14px"></div>
+
+            <div class="apikey-field-label">Auto-verify after patch</div>
+            <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer">
+              <input id="vvAutoVerify" type="checkbox" style="margin-top:2px" />
+              <span style="font-size:var(--font-size-sm,12px);line-height:1.45">
+                Always run <code>verify_visual</code> after a patch, regardless
+                of the agent's decision. Default: off — the agent decides when
+                a screenshot is useful.
+                <span style="opacity:0.6;font-style:italic">(Setting persists; behavior wired in a later phase.)</span>
+              </span>
+            </label>
+
+            <div style="height:18px"></div>
+
+            <div style="display:flex;gap:10px;align-items:center">
+              <button id="vvSaveBtn" style="padding:5px 14px;background:var(--violet,#7a5af8);color:#fff;border:none;border-radius:4px;font-size:var(--font-size-sm,12px);cursor:pointer">Save settings</button>
+              <span id="vvStatus" style="font-size:var(--font-size-sm,12px);opacity:.7"></span>
+            </div>
+          </div>
+        </div>
+      `;
+
+      const loadingEl = document.getElementById('vvLoadingState');
+      const formEl = document.getElementById('vvFormBody');
+      const urlInput = document.getElementById('vvDevUrl');
+      const urlEnvNote = document.getElementById('vvDevUrlEnvNote');
+      const resetBtn = document.getElementById('vvDevUrlReset');
+      const wInput = document.getElementById('vvViewportW');
+      const hInput = document.getElementById('vvViewportH');
+      const autoInput = document.getElementById('vvAutoVerify');
+      const saveBtn = document.getElementById('vvSaveBtn');
+      const statusEl = document.getElementById('vvStatus');
+
+      let cachedDefaults = null;
+
+      function applySettings(s){
+        if (urlInput) urlInput.value = String(s.devServerBaseUrl || '');
+        if (wInput) wInput.value = String(s.defaultViewport?.width ?? '');
+        if (hInput) hInput.value = String(s.defaultViewport?.height ?? '');
+        if (autoInput) autoInput.checked = !!s.autoVerifyAfterPatch;
+      }
+
+      fetch('/api/settings/visual-verification').then(r => r.json()).then(data => {
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (formEl) formEl.style.display = '';
+        if (data && data.ok && data.settings) {
+          applySettings(data.settings);
+          cachedDefaults = data.defaults || null;
+          if (data.envOverride && urlEnvNote) {
+            urlEnvNote.textContent =
+              'ⓘ ZONE_DEV_SERVER_URL is set to "' + data.envOverride +
+              '" — the env var takes priority over this setting.';
+            urlEnvNote.style.display = '';
+          }
+        } else {
+          if (statusEl) statusEl.textContent = 'Failed to load.';
+        }
+      }).catch(() => {
+        if (loadingEl) loadingEl.textContent = 'Failed to load settings.';
+      });
+
+      if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+          if (urlInput) urlInput.value = (cachedDefaults?.devServerBaseUrl) || 'http://localhost:3000';
+        });
+      }
+
+      if (saveBtn) {
+        saveBtn.addEventListener('click', () => {
+          const wRaw = parseInt(wInput?.value || '', 10);
+          const hRaw = parseInt(hInput?.value || '', 10);
+          const payload = {
+            devServerBaseUrl: String(urlInput?.value || '').trim(),
+            defaultViewport: {
+              width: Number.isFinite(wRaw) ? wRaw : 1280,
+              height: Number.isFinite(hRaw) ? hRaw : 720,
+            },
+            autoVerifyAfterPatch: !!(autoInput && autoInput.checked),
+          };
+          saveBtn.disabled = true;
+          if (statusEl) statusEl.textContent = 'Saving…';
+          fetch('/api/settings/visual-verification', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          }).then(r => r.json()).then(resp => {
+            if (resp && resp.ok && resp.settings) {
+              applySettings(resp.settings);
+              if (statusEl) statusEl.textContent = '✓ Saved';
+            } else {
+              if (statusEl) statusEl.textContent = 'Error: ' + (resp?.error || 'unknown');
+            }
+          }).catch((err) => {
+            if (statusEl) statusEl.textContent = 'Failed: ' + (err?.message || err);
+          }).finally(() => {
+            saveBtn.disabled = false;
+          });
+        });
+      }
     }
 
     function renderUsageSettings(){

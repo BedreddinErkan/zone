@@ -13,6 +13,12 @@ import { runAgent } from "../core/runAgent.js";
 import { getUsage, getRunCost } from "../usage/usageTracker.js";
 import { loadLimitConfig, saveLimitConfig, checkUsageLimit } from "./usageLimits.js";
 import {
+  loadVisualSettings,
+  saveVisualSettings,
+  getVisualSettingsDefaults,
+} from "../visual/visualSettings.js";
+import { invalidateDevServerCache } from "../visual/devServerProbe.js";
+import {
   isIrrelevantDeveloperContextPath,
   runLlmPatchFlow,
 } from "../core/runLlmPatchFlow.js";
@@ -2101,6 +2107,48 @@ app.put("/api/usage-limits", (req, res) => {
     res.json({ ok: true, dailyLimit: daily, monthlyLimit: monthly });
   } catch (err) {
     res.status(500).json({ ok: false, reason: "save_failed" });
+  }
+});
+
+// Phase I.2: visual verification settings (dev server URL, viewport,
+// auto-verify toggle). Persisted to ~/.zone/visual-verification.json. The
+// devServerProbe cache is invalidated on save so the next verify_visual
+// call picks up the new URL without needing a server restart.
+app.get("/api/settings/visual-verification", (_req, res) => {
+  try {
+    const settings = loadVisualSettings();
+    res.json({
+      ok: true,
+      settings,
+      defaults: getVisualSettingsDefaults(),
+      envOverride:
+        typeof process.env.ZONE_DEV_SERVER_URL === "string" &&
+        process.env.ZONE_DEV_SERVER_URL.trim()
+          ? process.env.ZONE_DEV_SERVER_URL.trim()
+          : null,
+    });
+  } catch (err) {
+    res
+      .status(500)
+      .json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post("/api/settings/visual-verification", (req, res) => {
+  try {
+    const { devServerBaseUrl, defaultViewport, autoVerifyAfterPatch } =
+      req.body ?? {};
+    const saved = saveVisualSettings({
+      devServerBaseUrl,
+      defaultViewport,
+      autoVerifyAfterPatch,
+    });
+    invalidateDevServerCache();
+    res.json({ ok: true, settings: saved });
+  } catch (err) {
+    res
+      .status(400)
+      .json({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
 });
 

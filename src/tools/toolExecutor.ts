@@ -1926,8 +1926,16 @@ export async function executeTool(
         };
       }
 
+      // Phase I.2: when the agent omits viewport, fall back to the user's
+      // configured default from Settings (rather than the hardcoded
+      // 1280x720 in verifyVisual.ts).
+      const viewportForRun =
+        visualInput.viewport && visualInput.viewport.width && visualInput.viewport.height
+          ? visualInput.viewport
+          : config.defaultViewport;
+
       const result = await runVerifyVisual(
-        { ...visualInput, path: visualPath },
+        { ...visualInput, path: visualPath, viewport: viewportForRun },
         {
           devServerBaseUrl: config.baseUrl,
           runId: String(input?.runId || "unknown"),

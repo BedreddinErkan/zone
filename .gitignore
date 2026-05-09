@@ -13,3 +13,6 @@ zone-debug.log.*
 zone-debug.log
 zone-debug.log.*
 .claude/settings.local.json
+
+# Runtime artifacts (verifyVisual screenshots, run-local config)
+.zone/
