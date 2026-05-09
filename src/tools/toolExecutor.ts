@@ -295,6 +295,43 @@ function stagedRead(
   return staging.has(key) ? staging.get(key)! : null;
 }
 
+function formatSearchContextBlock(
+  filePath: string,
+  lines: string[],
+  matchLines: number[]
+): string[] {
+  const sortedMatches = [...new Set(matchLines)]
+    .filter((line) => Number.isFinite(line) && line >= 1)
+    .sort((a, b) => a - b);
+  const blocks: Array<{ start: number; end: number; matches: Set<number> }> = [];
+
+  for (const matchLine of sortedMatches) {
+    const start = Math.max(1, matchLine - 3);
+    const end = Math.min(lines.length, matchLine + 3);
+    const prev = blocks[blocks.length - 1];
+    if (prev && start <= prev.end + 1) {
+      prev.end = Math.max(prev.end, end);
+      prev.matches.add(matchLine);
+    } else {
+      blocks.push({ start, end, matches: new Set([matchLine]) });
+    }
+  }
+
+  return blocks.map((block) => {
+    const blockMatchLines = [...block.matches].sort((a, b) => a - b);
+    const header =
+      block.matches.size === 1
+        ? `${filePath}:${blockMatchLines[0]}`
+        : `${filePath}:${blockMatchLines[0]}-${blockMatchLines[blockMatchLines.length - 1]} (${blockMatchLines.length} matches)`;
+    const context = [];
+    for (let i = block.start; i <= block.end; i += 1) {
+      const marker = block.matches.has(i) ? ">" : " ";
+      context.push(`${marker} ${String(i).padStart(4)}: ${lines[i - 1] ?? ""}`);
+    }
+    return `${header}\n${context.join("\n")}`;
+  });
+}
+
 function stagedWrite(
   staging: Map<string, string> | undefined,
   abs: string,
@@ -1806,10 +1843,11 @@ export async function executeTool(
       const matchCountsByFile = new Map<string, number>();
       const needle = pattern;
       const maxMatches = 500;
+      let totalMatches = 0;
       let capReached = false;
 
       for (const rel of files) {
-        if (matches.length >= maxMatches) {
+        if (totalMatches >= maxMatches) {
           capReached = true;
           break;
         }
@@ -1822,15 +1860,18 @@ export async function executeTool(
           continue;
         }
         const lines = text.split(/\r?\n/);
+        const fileMatchLines: number[] = [];
         for (let i = 0; i < lines.length; i += 1) {
           const line = lines[i] ?? "";
           if (needle && line.includes(needle)) {
-            matches.push(`${rel}:${i + 1}: ${line}`);
+            fileMatchLines.push(i + 1);
             matchCountsByFile.set(rel, (matchCountsByFile.get(rel) ?? 0) + 1);
-            if (matches.length >= maxMatches) break;
+            totalMatches += 1;
+            if (totalMatches >= maxMatches) break;
           }
         }
-        if (matches.length >= maxMatches) {
+        matches.push(...formatSearchContextBlock(rel, lines, fileMatchLines));
+        if (totalMatches >= maxMatches) {
           capReached = true;
         }
       }
@@ -1841,7 +1882,7 @@ export async function executeTool(
         .slice(0, 5);
       const summaryLines = [
         "---",
-        `[search_in_files] Found ${matches.length} matches across ${matchedFileCount} files.`,
+        `[search_in_files] Found ${totalMatches} matches across ${matchedFileCount} files.`,
         "Top files by match count:",
         ...(topFiles.length > 0
           ? topFiles.map(([file, count]) => `  - ${file}: ${count} matches`)
