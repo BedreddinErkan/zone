@@ -677,6 +677,8 @@
     .zone-action-chip.primary{background:var(--violet-bg);border-color:var(--violet-bd);color:var(--text-1)}
     .zone-action-chip.primary:hover{background:var(--violet);color:#fff}
     .zone-action-chip.secondary{}
+    .zone-tools-used{margin-left:auto;font-family:var(--font-family-mono);font-size:11px;color:var(--text-3);white-space:nowrap}
+    @media (max-width:600px){.zone-tools-used{margin-left:0;width:100%;margin-top:var(--space-xs)}}
     /* Zone Undo Tur 2b: per-run revert affordance, sits adjacent to the
        safe_to_apply diff cards. Chip-style to match .diff-toggle. */
     .zone-undo-card{
@@ -1369,6 +1371,12 @@
         verification: progress?.verification && typeof progress.verification === 'object' ? progress.verification : null,
         cost: progress?.cost && typeof progress.cost === 'object' ? progress.cost : null,
       };
+      const group = document.getElementById(`runGroup-${rid}`);
+      const chipRow = group?.querySelector('.zone-action-chips');
+      if (chipRow && !chipRow.querySelector('.zone-tools-used')) {
+        const toolsLine = createToolsUsedLine(rid);
+        if (toolsLine) chipRow.appendChild(toolsLine);
+      }
     }
 
     function getRunSummary(runId){
@@ -5422,6 +5430,25 @@
       return card;
     }
 
+    function createToolsUsedLine(runId) {
+      const rid = String(runId || '');
+      if (!rid) return null;
+      const summary = (typeof getRunSummary === 'function')
+        ? getRunSummary(rid)
+        : (state.summariesByRunId || {})[rid];
+      if (!summary || !summary.toolsUsed || typeof summary.toolsUsed !== 'object') return null;
+
+      const entries = Object.entries(summary.toolsUsed)
+        .filter(([_, count]) => Number(count) > 0)
+        .sort((a, b) => Number(b[1]) - Number(a[1]));
+      if (entries.length === 0) return null;
+
+      const line = document.createElement('span');
+      line.className = 'zone-tools-used';
+      line.textContent = entries.map(([tool, count]) => `${tool} × ${count}`).join(' · ');
+      return line;
+    }
+
     function createActionChipRow(runId, options) {
       const opts = options || {};
       const decisionMode = String(opts.decisionMode || 'preview_only');
@@ -5459,6 +5486,9 @@
         applyChip.addEventListener('click', () => applyPatches());
         row.appendChild(applyChip);
       }
+
+      const toolsLine = createToolsUsedLine(runId);
+      if (toolsLine) row.appendChild(toolsLine);
 
       return row;
     }
