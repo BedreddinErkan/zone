@@ -84,6 +84,7 @@ import {
   clearTrustedCommandsForRun,
   rejectPendingApprovalsForRun,
   resolveCommandApproval,
+  setTrustAllForRun,
 } from "./commandApprovals.js";
 import { decodeProgressStage } from "../core/progressStageCodec.js";
 import { validateLlmOutput } from "../core/validateLlmOutput.js";
@@ -1789,10 +1790,21 @@ app.post("/api/browse-folder", (_req, res) => {
 app.post("/api/approve-command", (req, res) => {
   const approvalId = typeof req.body?.approvalId === "string" ? req.body.approvalId.trim() : "";
   const runId = typeof req.body?.runId === "string" ? req.body.runId.trim() : "";
-  const approved = !!req.body?.approved;
+  const action = typeof req.body?.action === "string" ? req.body.action : "";
+  const approved = action === "approve" || !!req.body?.approved;
   const trust = !!req.body?.trust;
   if (!approvalId || !runId) {
     res.status(400).json({ ok: false, reason: "missing_approval_id_or_run_id" });
+    return;
+  }
+  if (action === "trust_all") {
+    const r = resolveCommandApproval({ approvalId, approved: true, runId });
+    if (!r.ok) {
+      res.status(404).json({ ok: false, reason: r.message || "not_found" });
+      return;
+    }
+    setTrustAllForRun(runId);
+    res.json({ ok: true, action: "trust_all" });
     return;
   }
   const r = resolveCommandApproval({ approvalId, approved, runId, trust });

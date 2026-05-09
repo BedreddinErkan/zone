@@ -68,21 +68,39 @@ type PendingApproval = {
 
 const pendingApprovals = new Map<string, PendingApproval>();
 const trustedCommandsByRunId = new Map<string, Set<string>>();
+const trustAllByRunId = new Set<string>();
+
+export function isTrustAllForRun(runId: string): boolean {
+  const rid = String(runId || "").trim();
+  return rid ? trustAllByRunId.has(rid) : false;
+}
+
+export function setTrustAllForRun(runId: string): void {
+  const rid = String(runId || "").trim();
+  if (rid) trustAllByRunId.add(rid);
+}
+
+export function clearTrustAllForRun(runId: string): void {
+  const rid = String(runId || "").trim();
+  if (rid) trustAllByRunId.delete(rid);
+}
 
 /**
- * Checks the in-memory trusted-command set for a specific runId to see whether
- * this exact trimmed command was previously approved with `trust: true` during
- * the current run.
+ * Checks the in-memory trusted-command state for a specific runId to see
+ * whether this run trusts all commands, or whether this exact trimmed command
+ * was previously approved with `trust: true` during the current run.
  *
  * @param runId Run identifier whose trust map entry should be consulted.
  * @param command Command text to trim and look up in that run-scoped trusted set.
- * @returns `true` when both inputs are non-empty after trimming and the exact
- * command exists in the trusted set for that runId; otherwise `false`.
+ * @returns `true` when both inputs are non-empty after trimming and the run
+ * trusts all commands or the exact command exists in the trusted set for that
+ * runId; otherwise `false`.
  */
 export function isCommandTrusted(runId: string, command: string): boolean {
   const rid = String(runId || "").trim();
   const cmd = String(command || "").trim();
   if (!rid || !cmd) return false;
+  if (isTrustAllForRun(rid)) return true;
   const trusted = trustedCommandsByRunId.get(rid);
   return trusted ? trusted.has(cmd) : false;
 }
@@ -118,9 +136,9 @@ export function clearTrustedCommandsForRun(runId: string): number {
   const rid = String(runId || "").trim();
   if (!rid) return 0;
   const set = trustedCommandsByRunId.get(rid);
-  if (!set) return 0;
-  const n = set.size;
-  trustedCommandsByRunId.delete(rid);
+  const n = set ? set.size : 0;
+  if (set) trustedCommandsByRunId.delete(rid);
+  clearTrustAllForRun(rid);
   return n;
 }
 

@@ -476,8 +476,8 @@
     @media (max-width:1180px){.zone-todo-sidebar{position:static;width:auto;max-height:none;margin:var(--space-lg) 0;box-shadow:none}}
     /* Tur P1-approval: sticky command-approval prompt. Lives inside .inputBar
        directly under the plan sticky, above the chat input. Inherits 760px
-       max-width via `.inputBar > *`. Default focus is Approve; Left/Right
-       toggle, Enter triggers focused, Esc rejects. */
+       max-width via `.inputBar > *`. Default focus is Approve; Y/T/N and
+       Enter/Escape map to Approve/Trust all/Reject. */
     .zone-approval-sticky{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-md) var(--space-lg);margin-bottom:var(--space-md);font-size:var(--font-size-sm);font-family:var(--font-family-sans)}
     .zone-approval-sticky[data-state="hidden"]{display:none}
     .zone-approval-sticky[data-state="visible"]{display:block;animation:zone-approval-slide-up 200ms ease-out}
@@ -485,18 +485,18 @@
     .zone-approval-sticky-header{display:flex;align-items:center;gap:var(--space-xs);color:var(--text-2);font-weight:600;margin-bottom:var(--space-sm);letter-spacing:0.02em}
     .zone-approval-sticky-header .bolt{color:var(--violet-bd, #7c3aed);font-family:var(--font-family-mono)}
     .zone-approval-sticky-command{background:rgba(0,0,0,0.32);border:1px solid var(--border);border-radius:var(--radius-sm);padding:var(--space-sm) var(--space-md);font-family:var(--font-family-mono);font-size:var(--font-size-sm);color:#86efac;margin-bottom:var(--space-md);white-space:pre-wrap;word-break:break-word;max-height:140px;overflow-y:auto}
-    .zone-approval-sticky-actions{display:flex;align-items:center;gap:var(--space-md);flex-wrap:wrap}
-    .zone-approval-sticky-button{padding:var(--space-xs) var(--space-md);border-radius:var(--radius-sm);font-size:var(--font-size-sm);font-weight:500;cursor:pointer;border:1px solid transparent;transition:background var(--transition-fast),border-color var(--transition-fast),outline var(--transition-fast)}
-    .zone-approval-sticky-button[data-action="approve"]{background:var(--violet-bd, #7c3aed);color:#fff}
-    .zone-approval-sticky-button[data-action="approve"]:hover{filter:brightness(1.1)}
-    .zone-approval-sticky-button[data-action="reject"]{background:transparent;color:var(--text-2);border-color:var(--border)}
-    .zone-approval-sticky-button[data-action="reject"]:hover{border-color:var(--border2);color:var(--text-1)}
-    .zone-approval-sticky-button[data-focus="true"]{outline:2px solid var(--violet-bd, #7c3aed);outline-offset:2px}
-    .zone-approval-sticky-button[data-action="reject"][data-focus="true"]{outline-color:var(--text-3)}
-    .zone-approval-sticky-button:focus-visible{outline:2px solid var(--violet-bd, #7c3aed);outline-offset:2px}
-    .zone-approval-sticky-button[disabled]{opacity:0.5;cursor:not-allowed}
-    .zone-approval-sticky-trust{margin-left:auto;display:flex;align-items:center;gap:var(--space-xs);color:var(--text-3);font-size:var(--font-size-sm);cursor:pointer;user-select:none}
-    .zone-approval-sticky-trust input{accent-color:var(--violet-bd, #7c3aed);transform:translateY(1px)}
+    .zone-approval-sticky-actions,.approval-widget{display:flex;align-items:center;gap:var(--space-md);flex-wrap:wrap}
+    .approval-btn{display:inline-flex;align-items:center;gap:var(--space-xs);padding:var(--space-xs) var(--space-md);border-radius:var(--radius-sm);font-size:var(--font-size-sm);font-weight:600;cursor:pointer;border:1px solid transparent;transition:background var(--transition-fast),border-color var(--transition-fast),color var(--transition-fast),outline var(--transition-fast)}
+    .approval-btn.approve{background:var(--violet-bd, #7c3aed);color:#fff}
+    .approval-btn.approve:hover{filter:brightness(1.1)}
+    .approval-btn.trust-all{background:transparent;color:var(--text-2);border-color:var(--border)}
+    .approval-btn.trust-all:hover{border-color:var(--violet-bd, #7c3aed);color:var(--text-1)}
+    .approval-btn.reject{background:transparent;color:#fca5a5;border-color:rgba(248,113,113,0.35)}
+    .approval-btn.reject:hover{border-color:rgba(248,113,113,0.65);color:#fecaca}
+    .approval-btn[data-focus="true"],.approval-btn:focus-visible{outline:2px solid var(--violet-bd, #7c3aed);outline-offset:2px}
+    .approval-btn.reject[data-focus="true"]{outline-color:rgba(248,113,113,0.65)}
+    .approval-btn[disabled]{opacity:0.5;cursor:not-allowed}
+    .approval-btn kbd{display:inline-flex;align-items:center;justify-content:center;min-width:1.35em;height:1.35em;padding:0 0.3em;border:1px solid currentColor;border-radius:var(--radius-xs);font-family:var(--font-family-mono);font-size:0.78em;line-height:1;opacity:0.7}
     .zone-approval-sticky-status{margin-top:var(--space-xs);font-size:var(--font-size-xs);color:var(--text-3)}
     .log-lines{font-family:var(--font-family-mono);font-size:var(--font-size-base);line-height:1.7}
     .log-line{display:flex;gap:var(--space-xl);padding:2px 0;opacity:1;animation:lineIn 150ms ease-out;color:#e0e0e0}
@@ -845,11 +845,8 @@
     .approval-title{display:flex;align-items:center;gap:var(--space-md);color:var(--text-1);font-weight:600;margin-bottom:var(--space-lg)}
     .approval-title .bolt{color:#a78bfa}
     .approval-code{display:block;background:#050505;border:1px solid #2e2e34;border-radius:var(--radius-md);padding:var(--space-lg) var(--space-xl);color:#22c55e;font-family:var(--font-family-mono);font-size:var(--font-size-base);white-space:pre-wrap;word-break:break-word;margin:0 0 var(--space-lg) 0}
-    .approval-actions{display:flex;gap:var(--space-lg);align-items:center}
-    .approval-actions button{border-radius:var(--radius-md);padding:var(--space-md) var(--space-xl);font-size:var(--font-size-base);font-weight:600;border:1px solid transparent;cursor:pointer}
-    .approval-actions button:disabled{opacity:0.6;cursor:not-allowed}
-    .approval-approve{background:var(--color-brand);color:#ffffff}
-    .approval-reject{background:transparent;border-color:#2e2e34;color:#9ca3af}
+    .approval-actions{display:flex;gap:var(--space-md);align-items:center;flex-wrap:wrap}
+    .approval-actions .approval-btn{padding:var(--space-sm) var(--space-md);font-size:var(--font-size-sm)}
     .approval-status{margin-left:auto;color:var(--text-3);font-size:var(--font-size-base)}
 
     /* Inline terminal block */
@@ -3219,6 +3216,7 @@
           </div>
         `;
       }).join('');
+      groupEl.querySelectorAll('.approval-widget').forEach((widget) => cleanupApprovalHotkeys(widget));
       groupEl.innerHTML = `
         <div class="exec-summary-heading">${escapeHtml(describeCategoryHeading(categoryKey, category))}</div>
         <div class="exec-summary-list">${entryHtml}</div>
@@ -3240,50 +3238,63 @@
               widget.dataset.summaryApprovalId = approvalId;
               const prompt = document.createElement('div');
               prompt.className = 'exec-summary-approval-prompt';
-              prompt.textContent = '⏳ Awaiting your approval to run this command';
+              prompt.textContent = 'Awaiting your approval to run this command';
               const actions = document.createElement('div');
-              actions.className = 'approval-actions';
+              actions.className = 'approval-actions approval-widget';
+              actions.dataset.runId = runId;
               const approveBtn = document.createElement('button');
-              approveBtn.className = 'approval-approve';
-              approveBtn.textContent = '✓ Approve';
+              approveBtn.type = 'button';
+              approveBtn.className = 'approval-btn approve';
+              approveBtn.dataset.action = 'approve';
+              approveBtn.title = 'Approve (Y)';
+              approveBtn.innerHTML = '<kbd>Y</kbd> Approve';
+              const trustAllBtn = document.createElement('button');
+              trustAllBtn.type = 'button';
+              trustAllBtn.className = 'approval-btn trust-all';
+              trustAllBtn.dataset.action = 'trust_all';
+              trustAllBtn.title = 'Trust all commands for this run (T)';
+              trustAllBtn.innerHTML = '<kbd>T</kbd> Trust all session';
               const rejectBtn = document.createElement('button');
-              rejectBtn.className = 'approval-reject';
-              rejectBtn.textContent = '✗ Reject';
-              const trustRow = document.createElement('label');
-              trustRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;color:var(--text-3);user-select:none';
-              const trustCb = document.createElement('input');
-              trustCb.type = 'checkbox';
-              trustCb.style.cssText = 'accent-color:#7c3aed;transform:translateY(1px)';
-              const trustTxt = document.createElement('span');
-              trustTxt.textContent = 'Trust this command for this run';
-              trustRow.appendChild(trustCb);
-              trustRow.appendChild(trustTxt);
+              rejectBtn.type = 'button';
+              rejectBtn.className = 'approval-btn reject';
+              rejectBtn.dataset.action = 'reject';
+              rejectBtn.title = 'Reject (N)';
+              rejectBtn.innerHTML = '<kbd>N</kbd> Reject';
               const statusEl = document.createElement('div');
               statusEl.className = 'approval-status';
-              const sendSummaryDecision = async (approved) => {
+              const sendSummaryDecision = async (action) => {
+                const approved = action === 'approve' || action === 'trust_all';
+                cleanupApprovalHotkeys(actions);
                 approveBtn.disabled = true;
+                trustAllBtn.disabled = true;
                 rejectBtn.disabled = true;
-                statusEl.textContent = approved ? 'Approved ✓' : 'Rejected ✗';
+                statusEl.textContent = action === 'trust_all' ? 'Trusting all commands' : (approved ? 'Approved' : 'Rejected');
                 const idx = entry.pendingApprovals.indexOf(approvalId);
                 if (idx !== -1) entry.pendingApprovals.splice(idx, 1);
                 try {
                   await apiFetch('/api/approve-command', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ approvalId, approved: !!approved, runId, trust: !!(approved && trustCb && trustCb.checked) })
+                    body: JSON.stringify({ approvalId, action, approved: !!approved, runId })
                   });
                 } catch {}
                 renderExecutionSummaryCategory(runId, 'run');
               };
-              approveBtn.addEventListener('click', () => { void sendSummaryDecision(true); });
-              rejectBtn.addEventListener('click', () => { void sendSummaryDecision(false); });
+              approveBtn.addEventListener('click', () => { void sendSummaryDecision('approve'); });
+              trustAllBtn.addEventListener('click', () => { void sendSummaryDecision('trust_all'); });
+              rejectBtn.addEventListener('click', () => { void sendSummaryDecision('reject'); });
               actions.appendChild(approveBtn);
+              actions.appendChild(trustAllBtn);
               actions.appendChild(rejectBtn);
               actions.appendChild(statusEl);
               widget.appendChild(prompt);
               widget.appendChild(actions);
-              widget.appendChild(trustRow);
               entryEl.appendChild(widget);
+              attachApprovalHotkeys(actions);
+              setTimeout(() => {
+                if (getActiveApprovalWidget() !== actions) return;
+                try { approveBtn.focus({ preventScroll: true }); } catch { try { approveBtn.focus(); } catch {} }
+              }, 0);
             });
           });
         }
@@ -5779,100 +5790,107 @@
      * Tur P1-approval: ApprovalPrompt — sticky command-approval UI.
      * Replaces the inline "Run this command?" card. One prompt at a time;
      * additional approvals queue. Approve/Reject POST to /api/approve-command
-     * with the same payload shape as the inline path. Command trust is scoped
-     * server-side to the active run and exact command string.
-     * Keyboard: Approve focused by default, Left/Right toggles, Enter triggers,
-     * Esc rejects. Keyboard handler is gated when the chat textarea has focus.
+     * with the same payload shape as the inline path. Trust all is scoped
+     * server-side to the active run.
+     * Keyboard: Approve focused by default; Y/T/N and Enter/Escape trigger the
+     * visible approval widget unless the user is typing in a text field.
      */
     const __zoneApprovalQueue = [];
     let __zoneActiveApproval = null;
+
+    function getActiveApprovalWidget(){
+      const sticky = document.querySelector('#zoneApprovalStickyContainer[data-state="visible"] .approval-widget');
+      if (sticky) return sticky;
+      return document.querySelector('.exec-summary-approval-widget .approval-widget');
+    }
+
+    function cleanupApprovalHotkeys(widget){
+      if (!widget) return;
+      try {
+        if (typeof widget._cleanupHotkeys === 'function') widget._cleanupHotkeys();
+      } catch {}
+      try { widget._cleanupHotkeys = null; } catch {}
+    }
+
+    function attachApprovalHotkeys(widget){
+      if (!widget) return () => {};
+      cleanupApprovalHotkeys(widget);
+      const handler = (e) => {
+        if (!document.body.contains(widget)) {
+          cleanupApprovalHotkeys(widget);
+          return;
+        }
+        if (getActiveApprovalWidget() !== widget) return;
+        const tag = String(document.activeElement?.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea') return;
+        let action = null;
+        if (e.key === 'y' || e.key === 'Y' || e.key === 'Enter') action = 'approve';
+        else if (e.key === 't' || e.key === 'T') action = 'trust_all';
+        else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape') action = 'reject';
+        if (!action) return;
+        e.preventDefault();
+        const btn = widget.querySelector(`[data-action="${action}"]`);
+        if (btn) btn.click();
+      };
+      document.addEventListener('keydown', handler);
+      const cleanup = () => document.removeEventListener('keydown', handler);
+      widget._cleanupHotkeys = cleanup;
+      return cleanup;
+    }
 
     class ZoneApprovalPrompt {
       constructor(containerEl, payload, callbacks){
         this.container = containerEl;
         this.payload = payload;
         this.callbacks = callbacks || {};
-        this.focusedAction = 'approve';
         this._dismissed = false;
         this._render();
-        this._bindKeyboard();
-        this._setFocus('approve');
+        this._hotkeyCleanup = attachApprovalHotkeys(this._widget);
+        this._setFocus(this._approveBtn);
       }
       _render(){
         const cmd = String(this.payload.command || '');
         this.container.innerHTML =
           '<div class="zone-approval-sticky-header"><span class="bolt">$</span><span>Run this command?</span></div>' +
           '<div class="zone-approval-sticky-command">' + escapeHtml('$ ' + cmd) + '</div>' +
-          '<div class="zone-approval-sticky-actions">' +
-            '<button type="button" class="zone-approval-sticky-button" data-action="approve">✓ Approve</button>' +
-            '<button type="button" class="zone-approval-sticky-button" data-action="reject">✗ Reject</button>' +
-            '<label class="zone-approval-sticky-trust">' +
-              '<input type="checkbox" data-role="trust" data-trust />' +
-              '<span>Trust this command for this run</span>' +
-            '</label>' +
+          '<div class="zone-approval-sticky-actions approval-widget" data-run-id="' + escapeHtml(String(this.payload.runId || '')) + '">' +
+            '<button type="button" class="approval-btn approve" data-action="approve" title="Approve (Y)"><kbd>Y</kbd> Approve</button>' +
+            '<button type="button" class="approval-btn trust-all" data-action="trust_all" title="Trust all commands for this run (T)"><kbd>T</kbd> Trust all session</button>' +
+            '<button type="button" class="approval-btn reject" data-action="reject" title="Reject (N)"><kbd>N</kbd> Reject</button>' +
           '</div>' +
           '<div class="zone-approval-sticky-status" data-role="status"></div>';
+        this._widget = this.container.querySelector('.approval-widget');
         this._approveBtn = this.container.querySelector('[data-action="approve"]');
+        this._trustAllBtn = this.container.querySelector('[data-action="trust_all"]');
         this._rejectBtn = this.container.querySelector('[data-action="reject"]');
-        this._trustCb = this.container.querySelector('[data-role="trust"]');
         this._statusEl = this.container.querySelector('[data-role="status"]');
-        this._approveBtn.addEventListener('click', () => {
-          const trustCheckbox = this.container.querySelector('input[data-trust]');
-          const trust = trustCheckbox?.checked === true;
-          this._decide(true, trust);
-        });
-        this._rejectBtn.addEventListener('click', () => { this._decide(false, false); });
+        this._approveBtn.addEventListener('click', () => { this._decide('approve'); });
+        this._trustAllBtn.addEventListener('click', () => { this._decide('trust_all'); });
+        this._rejectBtn.addEventListener('click', () => { this._decide('reject'); });
       }
-      _bindKeyboard(){
-        this._keyHandler = (e) => {
-          // Don't intercept when user is typing in the chat textarea or any other
-          // text field that isn't part of this prompt.
-          const a = document.activeElement;
-          if (a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')){
-            const insidePrompt = this.container.contains(a);
-            if (!insidePrompt) return;
-            // If focus is on our trust checkbox, still let Space toggle it natively.
-            if (a === this._trustCb && (e.key === ' ' || e.key === 'Spacebar')) return;
-          }
-          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight'){
-            e.preventDefault();
-            this._toggleFocus();
-          } else if (e.key === 'Enter'){
-            e.preventDefault();
-            this._decide(this.focusedAction === 'approve');
-          } else if (e.key === 'Escape'){
-            e.preventDefault();
-            this._decide(false, false);
-          }
-        };
-        window.addEventListener('keydown', this._keyHandler, true);
-      }
-      _toggleFocus(){
-        this._setFocus(this.focusedAction === 'approve' ? 'reject' : 'approve');
-      }
-      _setFocus(action){
-        this.focusedAction = action;
-        const btn = action === 'approve' ? this._approveBtn : this._rejectBtn;
+      _setFocus(btn){
         this._approveBtn?.removeAttribute('data-focus');
+        this._trustAllBtn?.removeAttribute('data-focus');
         this._rejectBtn?.removeAttribute('data-focus');
         if (btn){
           btn.setAttribute('data-focus', 'true');
           try { btn.focus({ preventScroll: true }); } catch { try { btn.focus(); } catch {} }
         }
       }
-      _decide(approved, trust = false){
+      _decide(action){
         if (this._dismissed) return;
         this._dismissed = true;
-        const trustChecked = !!(approved && (trust || (this._trustCb && this._trustCb.checked)));
+        const approved = action === 'approve' || action === 'trust_all';
         if (this._approveBtn) this._approveBtn.disabled = true;
+        if (this._trustAllBtn) this._trustAllBtn.disabled = true;
         if (this._rejectBtn) this._rejectBtn.disabled = true;
         if (this.callbacks.onDecide){
-          try { this.callbacks.onDecide(this.payload, !!approved, trustChecked); } catch {}
+          try { this.callbacks.onDecide(this.payload, action, !!approved); } catch {}
         }
         this._teardown();
       }
       _teardown(){
-        try { window.removeEventListener('keydown', this._keyHandler, true); } catch {}
+        cleanupApprovalHotkeys(this._widget);
         const stickyContainer = this.container;
         if (stickyContainer && stickyContainer.id === 'zoneApprovalStickyContainer'){
           stickyContainer.dataset.state = 'hidden';
@@ -5920,7 +5938,7 @@
       } catch {}
       container.dataset.state = approvalIsForActiveThread(payload?.runId) ? 'visible' : 'hidden';
       __zoneActiveApproval = new ZoneApprovalPrompt(container, payload, {
-        onDecide: (p, approved, _trustChecked) => {
+        onDecide: (p, action, approved) => {
           // Mirror the summary-widget cleanup so the per-run summary stops
           // showing the duplicate approval entry once the decision is made.
           try {
@@ -5945,9 +5963,9 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   approvalId: p.approvalId,
+                  action,
                   approved: !!approved,
                   runId: p.runId,
-                  trust: !!_trustChecked,
                 })
               });
             } catch {}
@@ -5981,6 +5999,7 @@
         __zoneApprovalQueue.length = 0;
       }
       if (container && !__zoneActiveApproval){
+        container.querySelectorAll('.approval-widget').forEach((widget) => cleanupApprovalHotkeys(widget));
         container.dataset.state = 'hidden';
         container.innerHTML = '';
       }

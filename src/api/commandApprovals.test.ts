@@ -1,12 +1,15 @@
 import { beforeEach, describe, it, expect } from "vitest";
 import {
   addTrustedCommand,
+  clearTrustAllForRun,
   clearTrustedCommandsForRun,
   isCommandTrusted,
+  isTrustAllForRun,
   isSafeCommand,
   getSafeCommandCategory,
   requestCommandApproval,
   resolveCommandApproval,
+  setTrustAllForRun,
 } from "./commandApprovals";
 
 describe("isSafeCommand", () => {
@@ -164,6 +167,52 @@ describe("trustedCommands per-runId", () => {
     addTrustedCommand("run-1", "");
     expect(isCommandTrusted("", "cmd")).toBe(false);
     expect(isCommandTrusted("run-1", "")).toBe(false);
+  });
+});
+
+describe("trust-all per-runId", () => {
+  beforeEach(() => {
+    clearTrustedCommandsForRun("run-1");
+    clearTrustedCommandsForRun("run-2");
+  });
+
+  it("starts disabled", () => {
+    expect(isTrustAllForRun("run-1")).toBe(false);
+  });
+
+  it("trusts any command after setTrustAllForRun", () => {
+    setTrustAllForRun("run-1");
+    expect(isTrustAllForRun("run-1")).toBe(true);
+    expect(isCommandTrusted("run-1", "anything")).toBe(true);
+  });
+
+  it("clearTrustedCommandsForRun clears trust-all state", () => {
+    setTrustAllForRun("run-1");
+    expect(isCommandTrusted("run-1", "anything")).toBe(true);
+    clearTrustedCommandsForRun("run-1");
+    expect(isTrustAllForRun("run-1")).toBe(false);
+    expect(isCommandTrusted("run-1", "anything")).toBe(false);
+  });
+
+  it("clearTrustAllForRun clears only trust-all state", () => {
+    setTrustAllForRun("run-1");
+    clearTrustAllForRun("run-1");
+    expect(isTrustAllForRun("run-1")).toBe(false);
+    expect(isCommandTrusted("run-1", "anything")).toBe(false);
+  });
+
+  it("does not bleed to another runId", () => {
+    setTrustAllForRun("run-1");
+    expect(isCommandTrusted("run-1", "npm publish")).toBe(true);
+    expect(isCommandTrusted("run-2", "npm publish")).toBe(false);
+  });
+
+  it("coexists independently with exact-string trust on another run", () => {
+    setTrustAllForRun("run-1");
+    addTrustedCommand("run-2", "git push origin main");
+    expect(isCommandTrusted("run-1", "npm publish")).toBe(true);
+    expect(isCommandTrusted("run-2", "git push origin main")).toBe(true);
+    expect(isCommandTrusted("run-2", "npm publish")).toBe(false);
   });
 });
 
