@@ -1789,6 +1789,29 @@ Example first call (immediately after task framing):
           parsedArgs = {};
         }
 
+        if (input.allowedTools && !input.allowedTools.has(name)) {
+          const allowed = [...input.allowedTools];
+          const rejectionMsg =
+            `Tool "${name}" is not allowed in this mode. ` +
+            `Available tools: ${allowed.join(", ")}.`;
+          responseInput.push({
+            role: "tool",
+            tool_call_id: callId,
+            content: rejectionMsg,
+          });
+          toolCallLog.push({
+            tool: name,
+            args: parsedArgs,
+            result: rejectionMsg,
+            success: false,
+          });
+          debugLog("[zone-allowed-tools-reject]", {
+            tool: name,
+            allowed,
+          });
+          continue;
+        }
+
         if (name === "TodoWrite" && input.disableTodoWrite) {
           const rejectionMsg = "TodoWrite rejected: TodoWrite is disabled for this read-only investigation run.";
           responseInput.push({
