@@ -51,7 +51,7 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
             items: {
               type: "object",
               additionalProperties: false,
-              required: ["id", "content", "status"],
+required: ["id", "content", "description", "status"],
               properties: {
                 id: {
                   type: "string",
