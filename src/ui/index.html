@@ -523,6 +523,16 @@
     .log-line.warning .log-msg {
       color: inherit;
     }
+    .cmd-auto-approved-line{align-items:flex-start}
+    .cmd-auto-approved-line .log-msg{display:flex;flex-direction:column;gap:var(--space-xs)}
+    .cmd-auto-approved{display:flex;align-items:center;gap:var(--space-sm);min-height:24px;max-width:100%;padding:2px var(--space-sm);border:1px solid rgba(255,255,255,0.06);border-radius:var(--radius-sm);background:rgba(255,255,255,0.035);font-family:var(--font-family-sans);font-size:12px;line-height:20px;color:var(--text-3)}
+    .cmd-auto-approved .check{flex:0 0 auto;color:#4ade80;font-weight:600}
+    .cmd-auto-approved .label{flex:0 0 auto;color:var(--text-3)}
+    .cmd-auto-approved .cmd-preview{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:0;background:transparent;padding:0;font-family:var(--font-family-mono);font-size:12px;color:#a1a1aa}
+    .cmd-auto-approved .expand-toggle{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:0;border-radius:var(--radius-xs);background:transparent;color:var(--text-3);font-size:13px;line-height:1;cursor:pointer;opacity:0.6;transition:opacity var(--transition-fast),transform var(--transition-fast),background var(--transition-fast)}
+    .cmd-auto-approved .expand-toggle:hover{opacity:1;background:rgba(255,255,255,0.06)}
+    .cmd-auto-approved .expand-toggle[aria-expanded="true"]{transform:rotate(180deg)}
+    .cmd-full{margin:2px 0 0;padding:var(--space-sm) var(--space-md);border:1px solid rgba(255,255,255,0.06);border-radius:var(--radius-sm);background:rgba(0,0,0,0.22);font-family:var(--font-family-mono);font-size:12px;line-height:1.55;color:#a1a1aa;white-space:pre-wrap;word-break:break-word;overflow:auto}
     .log-line.subagent-line{padding-left:24px;border-left:1px solid rgba(167,139,250,.35)}
     .log-line.subagent-line .log-ts{min-width:64px;color:#7c6fb5}
     .subagent-pill{display:inline-flex;align-items:center;border-radius:999px;padding:1px 7px;margin:0 6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.02em}
@@ -4675,6 +4685,75 @@
       if (ctx && !ctx.lineEl) ctx.lineEl = lineEl;
     }
 
+    function commandPreviewLine(command, maxLength = 80) {
+      const singleLine = String(command || '').replace(/\s+/g, ' ').trim();
+      if (singleLine.length <= maxLength) return singleLine;
+      return singleLine.slice(0, Math.max(0, maxLength - 1)).trimEnd() + '…';
+    }
+
+    function appendCommandAutoApprovedLine(logBlock, { timestamp, command }) {
+      if (!logBlock) return;
+      const lines = logBlock.querySelector('.log-lines');
+      if (!lines) return;
+      const prev = lines.querySelector('.log-line.active');
+      if (prev) prev.classList.remove('active');
+
+      const row = document.createElement('div');
+      row.className = 'log-line done cmd-auto-approved-line';
+
+      const ts = document.createElement('div');
+      ts.className = 'log-ts';
+      ts.textContent = timestamp || nowTs();
+
+      const msg = document.createElement('div');
+      msg.className = 'log-msg';
+
+      const compact = document.createElement('div');
+      compact.className = 'cmd-auto-approved';
+
+      const check = document.createElement('span');
+      check.className = 'check';
+      check.textContent = '✓';
+
+      const label = document.createElement('span');
+      label.className = 'label';
+      label.textContent = 'Auto-approved';
+
+      const preview = document.createElement('code');
+      preview.className = 'cmd-preview';
+      preview.textContent = commandPreviewLine(command);
+
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'expand-toggle';
+      toggle.setAttribute('aria-label', 'Show full command');
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.textContent = '⌄';
+
+      const full = document.createElement('pre');
+      full.className = 'cmd-full';
+      full.hidden = true;
+      full.textContent = String(command || '');
+
+      toggle.addEventListener('click', () => {
+        const willExpand = !!full.hidden;
+        full.hidden = !willExpand;
+        toggle.setAttribute('aria-expanded', willExpand ? 'true' : 'false');
+        toggle.setAttribute('aria-label', willExpand ? 'Hide full command' : 'Show full command');
+      });
+
+      compact.appendChild(check);
+      compact.appendChild(label);
+      compact.appendChild(preview);
+      compact.appendChild(toggle);
+      msg.appendChild(compact);
+      msg.appendChild(full);
+      row.appendChild(ts);
+      row.appendChild(msg);
+      lines.appendChild(row);
+      scrollChatIfFollowing(logBlock);
+    }
+
     function appendLogLine(logBlock, { timestamp, message, messageHtml, status, className }){
       if (!logBlock) return;
       // render-only suppression of redundant dispatch/intent echoes
@@ -5954,7 +6033,13 @@
           // Status line in the run log.
           try {
             const lb = document.getElementById('logBlock-' + p.runId);
-            if (lb) appendLogLine(lb, { timestamp: nowTs(), message: (approved ? 'Approved: $ ' : 'Rejected: $ ') + p.command, status: approved ? 'done' : 'warning' });
+            if (lb) {
+              if (action === 'trust_all') {
+                appendCommandAutoApprovedLine(lb, { timestamp: nowTs(), command: p.command });
+              } else {
+                appendLogLine(lb, { timestamp: nowTs(), message: (approved ? 'Approved: $ ' : 'Rejected: $ ') + p.command, status: approved ? 'done' : 'warning' });
+              }
+            }
           } catch {}
           void (async () => {
             try {
@@ -8238,6 +8323,14 @@
         const subagentPrefix = subagentId ? `↳ ${subagentType} ${subagentShort} ` : '';
         const subagentClass = subagentId ? 'subagent-line' : '';
         const subagentMessage = (text) => subagentPrefix ? `${subagentPrefix}${text}` : text;
+
+        if (type === 'command_auto_approved' || type === 'command_trusted') {
+          appendCommandAutoApprovedLine(logBlock, {
+            timestamp: new Date(progress.ts || Date.now()).toLocaleTimeString(),
+            command: String(progress.command || ''),
+          });
+          return;
+        }
 
         if (type === 'handoff_report' && progress.report) {
           state.__handoffReportByRun = state.__handoffReportByRun || {};
