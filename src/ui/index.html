@@ -7452,6 +7452,7 @@
       const text = String(msg?.chatResponse || msg?.content || msg?.text || '');
       const summary = String(msg?.summary || text).slice(0, 60);
       const ts = Number(msg?.ts || Date.now());
+      const isInvestigationMaxiter = msg?.finalState === 'max_iterations' && msg?.decisionMode === 'investigation';
       const wrap = document.createElement('div');
       wrap.className = 'turn-restored';
       wrap.innerHTML = `
@@ -7463,6 +7464,7 @@
           <span class="turn-badge chat">Chat</span>
           <span class="turn-meta">${escapeHtml(fmtRelative(ts))}</span>
         </div>
+        ${isInvestigationMaxiter ? `<div class="toast" style="margin:4px 0 2px;opacity:0.8"><div class="ticon" style="background:var(--blue,#5b8af0)"></div><div>Investigation incomplete — iteration budget reached. Findings below are partial.</div></div>` : ''}
         <div class="turn-restored-body"></div>
       `;
       wrap.querySelector('.turn-restored-header')?.addEventListener('click', (e) => toggleRestored(e.currentTarget));
@@ -9073,6 +9075,7 @@
               type: 'result',
               ts: Date.now(),
               decisionMode: result.decisionMode || result.finalState || 'preview_only',
+              finalState: result.finalState || null,
               verificationReason: normalizeVerificationReason(result.verificationReason || extractTrailingVerificationReason(result.chatResponse || '')) || '',
               fileDiffs: result.fileDiffs || [],
               appliedFiles: (result.applyPatches || []).map(p => p.filePath) || [],
@@ -9154,6 +9157,14 @@
       if (decision === 'investigation') {
         hideEmpty();
         const answerText = String(result.chatResponse || '');
+        // Show informational pill when investigation hit the iteration budget
+        if (result.finalState === 'max_iterations') {
+          const pill = document.createElement('div');
+          pill.className = 'toast';
+          pill.style.cssText = 'margin:0 0 6px;opacity:0.85';
+          pill.innerHTML = `<div class="ticon" style="background:var(--blue,#5b8af0)"></div><div>Investigation incomplete — iteration budget reached. Findings below are partial.</div>`;
+          appendToRunGroup(runId, pill);
+        }
         // Belt-and-suspenders: strip any narration line whose collapsed text
         // matches the final answer (agentLoop now skips narration on the final
         // iter, but remove the duplicate if it slipped through).
@@ -9217,7 +9228,7 @@
       // After a successful patch run, surface the finalRunReport as an assistant bubble.
       // Only show for safe_to_apply / preview_only (chat runs already have their own bubble).
       try {
-        if (decision !== 'chat') {
+        if (decision !== 'chat' && decision !== 'investigation') {
           appendToRunGroup(runId, createVerificationBanner({
             decisionMode: decision,
             verificationReason: result.verificationReason || extractTrailingVerificationReason(result.chatResponse || ''),
@@ -9254,9 +9265,9 @@
         decision === 'safe_to_apply'
           ? { decisionMode: 'safe_to_apply', applied: patchesAlreadyApplied, handoffReport: handoffLive, verificationReason: result.verificationReason }
           : { decisionMode: 'preview_only', patchesAlreadyApplied, handoffReport: handoffLive, verificationReason: result.verificationReason };
-      if (diffState.effectiveDiffsEmpty) {
+      if (diffState.effectiveDiffsEmpty && decision !== 'investigation') {
         appendToRunGroup(runId, createNoChangesIndicator());
-      } else {
+      } else if (!diffState.effectiveDiffsEmpty) {
         diffs.slice(0, maxShow).forEach((fd, i) => {
           const card = renderDiffCard(fd, i, diffs.length, diffToolbarOpts);
           if (card) appendToRunGroup(runId, card);
@@ -9277,7 +9288,7 @@
           appendToRunGroup(runId, renderUndoControl(runId, state.activeRepo.path));
         }
       } catch {}
-      if (!diffState.effectiveDiffsEmpty) {
+      if (!diffState.effectiveDiffsEmpty && decision !== 'investigation') {
         const filesChanged = diffs.filter((fd) => getFileDiffChangedLineCount(fd) > 0).length;
         if (filesChanged > 0) {
           appendToRunGroup(runId, createActionChipRow(runId, {

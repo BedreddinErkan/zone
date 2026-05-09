@@ -8,6 +8,7 @@ import { debugLog } from "../utils/logger.js";
 export type InvestigationFlowResult = {
   ok: true;
   decisionMode: "investigation";
+  finalState?: "max_iterations";
   chatResponse: string;
   responseHtml: string;
   contextFiles: string[];
@@ -147,6 +148,7 @@ export async function runInvestigationFlow(input: {
     },
   });
 
+  const hitMaxIter = !loop.success;
   const responseText = String(loop.summary || "").trim() || "I could not produce an investigation answer.";
   emitStructuredProgress({
     type: "agent_loop_complete",
@@ -158,6 +160,7 @@ export async function runInvestigationFlow(input: {
   return {
     ok: true,
     decisionMode: "investigation",
+    ...(hitMaxIter ? { finalState: "max_iterations" as const } : {}),
     chatResponse: responseText,
     responseHtml: renderChatMarkdownToHtml(responseText),
     contextFiles: [...contextFiles].slice(0, 20),
