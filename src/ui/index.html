@@ -456,7 +456,7 @@
     .turn-badge.blocked{background:#1c0a0a;color:var(--color-error);border-color:#7f1d1d}
     .turn-badge.chat{background:#16101f;color:#a78bfa;border-color:#3b1f6a}
 
-    .log-card{max-width:820px;margin:var(--space-xl) 0;padding:var(--space-xl);border-radius:var(--radius-lg);border:1px solid var(--border);background:var(--surface2)}
+    .log-block-container{max-width:820px;margin:var(--space-md) 0}
     .zone-todo-sidebar{position:fixed;top:92px;right:22px;width:292px;max-height:calc(100vh - 180px);overflow:auto;z-index:32;background:rgba(10,10,15,0.92);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:0 18px 48px rgba(0,0,0,0.28);padding:var(--space-md);backdrop-filter:blur(14px);display:none}
     .zone-todo-sidebar[data-state="visible"]{display:block}
     .zone-todo-header{display:flex;align-items:center;justify-content:space-between;gap:var(--space-sm);margin-bottom:var(--space-sm);color:var(--text-2);font-weight:700}
@@ -498,9 +498,6 @@
     .zone-approval-sticky-trust{margin-left:auto;display:flex;align-items:center;gap:var(--space-xs);color:var(--text-3);font-size:var(--font-size-sm);cursor:pointer;user-select:none}
     .zone-approval-sticky-trust input{accent-color:var(--violet-bd, #7c3aed);transform:translateY(1px)}
     .zone-approval-sticky-status{margin-top:var(--space-xs);font-size:var(--font-size-xs);color:var(--text-3)}
-    .exec-header{display:flex;align-items:center;justify-content:space-between;gap:var(--space-lg);margin-bottom:var(--space-xl)}
-    .exec-header-title{font-size:var(--font-size-base);font-weight:600;color:var(--text-1)}
-    .exec-raw-view{margin-top:var(--space-sm)}
     .log-lines{font-family:var(--font-family-mono);font-size:var(--font-size-base);line-height:1.7}
     .log-line{display:flex;gap:var(--space-xl);padding:2px 0;opacity:1;animation:lineIn 150ms ease-out;color:#e0e0e0}
     @keyframes lineIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
@@ -532,23 +529,19 @@
     .subagent-pill.completed{background:rgba(74,222,128,.14);color:#4ade80}
     .subagent-pill.partial{background:rgba(250,204,21,.14);color:#facc15}
     .subagent-pill.failed{background:rgba(248,113,113,.14);color:#f87171}
+    .log-line.narration-line{font-family:var(--font-family-sans);font-size:13px;color:var(--text-3);padding:6px 0 2px;line-height:1.5}
+    .log-line.narration-line .log-ts{display:none}
+    .log-line.narration-line .log-msg{flex:1;white-space:normal;color:var(--text-3)}
+    .log-line.narration-line .log-msg::after{content:none}
     .log-line.active .log-msg::after{
       content:"";display:inline-block;width:6px;height:13px;background:var(--violet);
       margin-left:var(--space-sm);transform:translateY(2px);animation:blink 1s step-end infinite;
     }
-    .log-card.done .log-line.active .log-msg::after{content:none}
-    .log-card.timeline-collapsed .exec-raw-view{display:none}
-    .timeline-toggle{
-      border:1px solid var(--border);
-      background:var(--surface-alpha-1);
-      color:var(--text-2);
-      border-radius:var(--radius-md);
-      padding:var(--space-xs) var(--space-md);
-      font-size:var(--font-size-sm);
-      cursor:pointer;
-      transition:border-color var(--transition-fast),background var(--transition-fast),color var(--transition-fast)
-    }
-    .timeline-toggle:hover{border-color:var(--border2);background:var(--surface-alpha-2);color:var(--text-1)}
+    .log-block-container.done .log-line.active .log-msg::after{content:none}
+    /* Compat: restored pre-A.7c run groups still contain .log-card card chrome HTML */
+    .run-group.restored .log-card{border:none;background:transparent;padding:0;margin:0}
+    .run-group.restored .exec-header,.run-group.restored .timeline-toggle{display:none}
+    .run-group.restored .exec-raw-view{margin-top:0}
     @keyframes blink{50%{opacity:0}}
     /* ── Run Step Timeline ──────────────────────────────────────────────── */
     .step-timeline{display:flex;flex-direction:column;gap:var(--space-xs);padding:var(--space-sm) 0 2px}
@@ -2833,35 +2826,14 @@
     }
 
     function createLogBlock(runId){
-      const card = document.createElement('div');
-      card.className = 'log-card';
-      card.id = `logBlock-${runId}`;
-      const header = document.createElement('div');
-      header.className = 'exec-header';
-      header.innerHTML = `
-        <div class="exec-header-title">Run timeline</div>
-      `;
-      const toggle = document.createElement('button');
-      toggle.className = 'timeline-toggle';
-      toggle.type = 'button';
-      toggle.textContent = 'Hide timeline';
-      toggle.addEventListener('click', () => {
-        const collapsed = !card.classList.contains('timeline-collapsed');
-        card.classList.toggle('timeline-collapsed', collapsed);
-        toggle.textContent = collapsed ? 'Show timeline' : 'Hide timeline';
-        toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-      });
-      toggle.setAttribute('aria-expanded', 'true');
-      header.appendChild(toggle);
-      const rawView = document.createElement('div');
-      rawView.className = 'exec-raw-view';
+      const container = document.createElement('div');
+      container.className = 'log-block-container';
+      container.id = `logBlock-${runId}`;
       const lines = document.createElement('div');
       lines.className = 'log-lines';
       lines.id = `logLines-${runId}`;
-      rawView.appendChild(lines);
-      card.appendChild(header);
-      card.appendChild(rawView);
-      return card;
+      container.appendChild(lines);
+      return container;
     }
 
     const EXECUTION_VIEW_MODE_KEY = 'zoneExecutionViewMode';
@@ -2909,7 +2881,7 @@
     function applyExecutionViewModeToAll(root){
       const mode = getExecutionViewMode();
       const scope = root instanceof HTMLElement ? root : document;
-      scope.querySelectorAll('.log-card').forEach((card) => applyExecutionViewMode(card, mode));
+      scope.querySelectorAll('.log-block-container').forEach((card) => applyExecutionViewMode(card, mode));
     }
 
     function createEmptyExecutionCategory(){
@@ -8358,6 +8330,21 @@
           }
           return;
         }
+        if (type === 'narration') {
+          const text = String(progress.text || progress.title || '').trim();
+          if (!text || !logBlock) return;
+          state.__lastNarrationByRun = state.__lastNarrationByRun || {};
+          if (state.__lastNarrationByRun[runId] === text) return;
+          state.__lastNarrationByRun[runId] = text;
+          try { finalizeCoalescedLine(runId); } catch {}
+          appendLogLine(logBlock, {
+            timestamp: '',
+            message: text,
+            status: 'narration',
+            className: 'narration-line',
+          });
+          return;
+        }
         if (type === 'planner_result' && progress.planner) {
           renderPlannerCard(logBlock, progress.planner);
           return;
@@ -9071,19 +9058,14 @@
           }));
         }
       } catch {}
-      try {
-        const fr = result && result.finalRunReport ? result.finalRunReport : null;
-        const changes = Array.isArray(fr?.changesMade) ? fr.changesMade.filter(Boolean) : [];
-        if (
-          (decision === 'safe_to_apply' || decision === 'preview_only') &&
-          changes.length > 0
-        ) {
-          const main = changes.map((s) => String(s).trim()).filter(Boolean).join('\n');
-          const text = main;
-          hideEmpty();
-          appendToRunGroup(runId, createBubble(text, 'agent'));
-        }
-      } catch {}
+      // Agent prosa bubble removed (Phase A.7e):
+      // Narration events (A.7a/b) render agent text inline in the timeline
+      // with marker stripping. The bubble path duplicated that content less
+      // cleanly (markers like [step:done:N] leaked through) and produced
+      // duplicate summaries at run completion. If fallback-source notes need
+      // to surface again later (llm_patch_recovered, ast_fallback,
+      // deterministic_fallback), do it via the chip row or verify-row, not
+      // a bubble.
 
       // append diff blocks (first 3)
       const diffs = Array.isArray(result.fileDiffs) ? result.fileDiffs : [];

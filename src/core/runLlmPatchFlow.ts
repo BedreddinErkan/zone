@@ -5611,55 +5611,11 @@ const initializeTodosFromPlan = (): void => {
         status: loop.success ? "success" : "warning",
       });
 
-      // Surface the model's final text (or a clear failure explanation) as a chat bubble in the UI.
-      const summaryTrim = stripVerificationTag(String(loop.summary || ""));
-      const ts = Date.now();
-      if (loop.success && summaryTrim.length > 0) {
-        input.onProgress?.({
-          stage: "agent_loop_complete",
-          progress: {
-            runId,
-            ts,
-            type: "chat_response",
-            title: summaryTrim.slice(0, 16_000),
-            status: "success",
-          },
-        });
-      } else if (loop.success && summaryTrim.length === 0) {
-        input.onProgress?.({
-          stage: "agent_loop_complete",
-          progress: {
-            runId,
-            ts,
-            type: "chat_response",
-            title:
-              "The agent run finished, but the model did not return a text summary. Check the tool log for details.",
-            status: "warning",
-          },
-        });
-      } else {
-        const code = loop.error ?? "agent_loop_failed";
-        const failureTitle =
-          code === "max_iterations_reached"
-            ? `The agent reached the tool-call limit without a final answer. Last note: ${summaryTrim || "(none)"}`.slice(
-                0,
-                16_000
-              )
-            : `Agent run did not complete successfully (${code}). ${summaryTrim || ""}`.trim().slice(
-                0,
-                16_000
-              );
-        input.onProgress?.({
-          stage: "agent_loop_complete",
-          progress: {
-            runId,
-            ts,
-            type: "chat_response",
-            title: failureTitle,
-            status: "error",
-          },
-        });
-      }
+      // Phase A.7e-fix: chat_response bubble removed.
+      // Narration events (A.7a/b) already rendered the agent's final text inline
+      // during the last iteration. Emitting chat_response here duplicated that
+      // content as a second bubble AFTER "Agent finished". The agent_loop_complete
+      // event above (with detail + status) provides failure signal for error cases.
     }
 
     // Zone Undo Tur 2a: capture a snapshot for safe_to_apply runs so the user

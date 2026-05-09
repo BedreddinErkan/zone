@@ -230,9 +230,6 @@ export function buildDeterministicFinalRunReport(
   } else if (input.patchScope.changedFileCount === 0) {
     changesMade.push("No files were changed in the final apply set.");
   } else {
-    changesMade.push(
-      `Edited ${input.patchScope.changedFileCount} file(s): +${input.patchScope.totalAddedLines} / -${input.patchScope.totalRemovedLines} lines (total changed lines: ${input.patchScope.totalChangedLines}).`
-    );
     if (input.patchSource === "llm_patch_recovered") {
       changesMade.push(
         "Strict patch parsing failed initially; Zone recovered a single validated find/replace from the model output."
