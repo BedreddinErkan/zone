@@ -7383,7 +7383,7 @@
       wrap.querySelector('.turn-restored-header')?.addEventListener('click', (e) => toggleRestored(e.currentTarget));
       const body = wrap.querySelector('.turn-restored-files');
       if (body) {
-        if (msg?.verificationReason || msg?.decisionMode) {
+        if ((msg?.verificationReason || msg?.decisionMode) && decision !== 'investigation') {
           body.appendChild(createVerificationBanner({
             decisionMode: msg?.decisionMode,
             verificationReason: msg?.verificationReason,
@@ -7570,7 +7570,7 @@
         // Legacy restore fallback: collapsed cards.
         if (m.type === 'result') {
           const decision = String(m.decisionMode || 'preview_only');
-          if (decision === 'chat') container.appendChild(renderRestoredTurnChat(m));
+          if (decision === 'chat' || decision === 'investigation') container.appendChild(renderRestoredTurnChat(m));
           else container.appendChild(renderRestoredTurnResult(m));
           return;
         }
@@ -8998,7 +8998,10 @@
       renderBgTasks();
 
       if (result && result.cancelled) {
-        appendToRunGroup(runId, createVerificationBanner({ interrupted: true }));
+        const _cancelDm = String((result.decisionMode || result.finalState || result.nextDecision) || '');
+        if (_cancelDm !== 'investigation') {
+          appendToRunGroup(runId, createVerificationBanner({ interrupted: true }));
+        }
         scrollChatIfFollowing(runId);
         dequeueAndRunNext(_owningThreadId);
         return;
