@@ -1412,6 +1412,20 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
         ? input.maxIterations
         : BASE_MAX_ITERATIONS;
   const escalationEnabled = typeof input.maxIterationsOverride !== "number";
+  // Phase H.6: surface the effective budget at loop entry for tracing how
+  // plan-aware overrides propagate through investigation/patch entry points.
+  debugLog("[zone-iter-budget-effective]", JSON.stringify({
+    mode: isInvestigationMode ? "investigation" : "patch",
+    runId: input.runId ?? null,
+    maxIterations: baseMaxIterations,
+    escalationEnabled,
+    source:
+      typeof input.maxIterationsOverride === "number"
+        ? "override"
+        : typeof input.maxIterations === "number"
+          ? "computed"
+          : "default",
+  }));
   let iterationBudget: IterationBudgetState = {
     maxIterationsForRun: baseMaxIterations,
     escalationBonusGranted: false,

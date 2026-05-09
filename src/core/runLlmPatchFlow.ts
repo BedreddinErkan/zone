@@ -93,6 +93,7 @@ import {
   type ZoneStructuredProgressEvent,
 } from "./agentLifecycleEvents.js";
 import { cacheHitRatio, type IterCostUpdatePayload } from "../usage/iterCostMeter.js";
+import { computeWorkerMaxIterations } from "../llm/subagents.js";
 import { getRunCost } from "../usage/usageTracker.js";
 import {
   generateFinalRunReport,
@@ -5459,6 +5460,19 @@ const initializeTodosFromPlan = (): void => {
       },
     } as const;
 
+    // Phase H.6: plan-aware iter budget. Single-step (no plan or trivial
+    // plan) → WORKER_ITER_FLOOR=20. 4-step plan → 32. Capped at 60.
+    // Passed via `maxIterations` (not `maxIterationsOverride`) so the
+    // ESCALATION_BONUS_ITERATIONS logic for repeat apply_patch failures
+    // remains active.
+    const iterBudgetPlanSteps = executionPlan?.steps?.length ?? 1;
+    const iterBudgetComputed = computeWorkerMaxIterations(iterBudgetPlanSteps);
+    debugLog("[zone-iter-budget]", JSON.stringify({
+      mode: "patch",
+      planStepsCount: iterBudgetPlanSteps,
+      computedMax: iterBudgetComputed,
+    }));
+
     const agentLoopBaseInput = {
       task: input.task,
       repoPath: input.repoPath,
@@ -5478,6 +5492,7 @@ const initializeTodosFromPlan = (): void => {
       // buildVerifyDiagnostic can surface candidate culprits when a
       // build/test failure points to a framework-generated path.
       repoFilePaths: developerContextFiles.map((f) => f.path),
+      maxIterations: iterBudgetComputed,
       ...agentLoopCallbacks,
     };
 

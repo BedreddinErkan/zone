@@ -75,8 +75,10 @@ describe("subagent helpers", () => {
   });
 
   it("subagentTypeMaxIterations routes correctly", () => {
-    expect(subagentTypeMaxIterations("worker")).toBe(12);
-    expect(subagentTypeMaxIterations("explore")).toBe(8);
+    // Phase H.6: floor values bumped to provide more headroom under
+    // tool-result compression / lazy-read changes (was 12 worker, 8 explore).
+    expect(subagentTypeMaxIterations("worker")).toBe(20);
+    expect(subagentTypeMaxIterations("explore")).toBe(15);
   });
 
   it("formats a failed worker as a terminal successful Task tool result", () => {

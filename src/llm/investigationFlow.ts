@@ -1,6 +1,6 @@
 import { renderChatMarkdownToHtml } from "./renderChatMarkdown.js";
 import { runAgentLoop } from "./agentLoop.js";
-import { EXPLORE_ALLOWED_TOOLS } from "./subagents.js";
+import { EXPLORE_ALLOWED_TOOLS, computeExploreMaxIterations } from "./subagents.js";
 import type { ToolResult } from "../tools/toolExecutor.js";
 import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import { debugLog } from "../utils/logger.js";
@@ -66,11 +66,23 @@ export async function runInvestigationFlow(input: {
     });
   }
 
+  // Phase H.6: investigation flow has no upstream plan, so steps default to 1
+  // (yields the EXPLORE_ITER_FLOOR of 15 — bumped from prior static 8).
+  const planStepsCount = 1;
+  const computedMax = computeExploreMaxIterations(planStepsCount);
+  debugLog("[zone-iter-budget]", {
+    mode: "investigation",
+    planStepsCount,
+    computedMax,
+    source: "floor-default",
+  });
+
   debugLog("[zone-investigation-flow]", {
     stage: "start",
     runId: runId || null,
     taskPreview: String(input.task || "").slice(0, 160),
     allowedTools: [...EXPLORE_ALLOWED_TOOLS],
+    maxIterations: computedMax,
   });
 
   const loop = await runAgentLoop({
@@ -82,7 +94,7 @@ export async function runInvestigationFlow(input: {
     abortSignal: input.abortSignal,
     mode: "investigation",
     allowedTools: EXPLORE_ALLOWED_TOOLS,
-    maxIterationsOverride: 8,
+    maxIterationsOverride: computedMax,
     disableTodoWrite: true,
     onProgress: (msg: string) => {
       emitStructuredProgress({

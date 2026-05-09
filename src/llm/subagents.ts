@@ -10,7 +10,6 @@ export const WORKER_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   // background-process tools, get_dependencies, etc.
 ]);
 
-export const WORKER_MAX_ITERATIONS = 12;
 export const MAX_SUBAGENT_CALLS_PER_PARENT_RUN = 5;
 export const VALID_SUBAGENT_TYPES = ["worker", "explore"] as const;
 export type SubagentType = (typeof VALID_SUBAGENT_TYPES)[number];
@@ -22,7 +21,35 @@ export const EXPLORE_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   "find_references",
 ]);
 
-export const EXPLORE_MAX_ITERATIONS = 8;
+// Phase H.6: plan-aware iteration budgets. Floor protects single-question
+// runs; ceiling caps unbounded plans; per-step factor scales with plan size.
+export const EXPLORE_ITER_FLOOR = 15;
+export const EXPLORE_ITER_CEILING = 40;
+export const EXPLORE_ITER_PER_STEP = 6;
+
+export const WORKER_ITER_FLOOR = 20;
+export const WORKER_ITER_CEILING = 60;
+export const WORKER_ITER_PER_STEP = 8;
+
+export function computeExploreMaxIterations(planStepsCount: number): number {
+  const steps = Math.max(1, planStepsCount || 1);
+  return Math.min(
+    EXPLORE_ITER_CEILING,
+    Math.max(EXPLORE_ITER_FLOOR, steps * EXPLORE_ITER_PER_STEP)
+  );
+}
+
+export function computeWorkerMaxIterations(planStepsCount: number): number {
+  const steps = Math.max(1, planStepsCount || 1);
+  return Math.min(
+    WORKER_ITER_CEILING,
+    Math.max(WORKER_ITER_FLOOR, steps * WORKER_ITER_PER_STEP)
+  );
+}
+
+// Backward-compat: old constants now equal the plan-unaware floor.
+export const EXPLORE_MAX_ITERATIONS = EXPLORE_ITER_FLOOR;
+export const WORKER_MAX_ITERATIONS = WORKER_ITER_FLOOR;
 
 export function subagentTypeAllowedTools(type: SubagentType): ReadonlySet<string> {
   return type === "explore" ? EXPLORE_ALLOWED_TOOLS : WORKER_ALLOWED_TOOLS;

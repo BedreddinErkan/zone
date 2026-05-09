@@ -3,6 +3,12 @@ import { ZONE_TOOLS } from "../tools/toolDefinitions.js";
 import {
   EXPLORE_ALLOWED_TOOLS,
   EXPLORE_MAX_ITERATIONS,
+  EXPLORE_ITER_FLOOR,
+  EXPLORE_ITER_CEILING,
+  WORKER_ITER_FLOOR,
+  WORKER_ITER_CEILING,
+  computeExploreMaxIterations,
+  computeWorkerMaxIterations,
   formatExploreSubagentSummaryForParent,
   formatExploreSubagentToolResultForParent,
   parseExploreSummary,
@@ -36,8 +42,39 @@ describe("EXPLORE_ALLOWED_TOOLS", () => {
 });
 
 describe("EXPLORE_MAX_ITERATIONS", () => {
-  it("is 8 (narrower than worker's 12)", () => {
-    expect(EXPLORE_MAX_ITERATIONS).toBe(8);
+  it("equals the EXPLORE_ITER_FLOOR (Phase H.6: bumped 8 → 15 plan-unaware floor)", () => {
+    expect(EXPLORE_MAX_ITERATIONS).toBe(15);
+  });
+});
+
+describe("computeExploreMaxIterations (plan-aware)", () => {
+  it("returns floor for single-step plans", () => {
+    expect(computeExploreMaxIterations(1)).toBe(EXPLORE_ITER_FLOOR);
+  });
+  it("scales linearly above the floor", () => {
+    expect(computeExploreMaxIterations(4)).toBe(24); // 4 * 6 = 24
+    expect(computeExploreMaxIterations(5)).toBe(30); // 5 * 6 = 30
+  });
+  it("caps at the ceiling", () => {
+    expect(computeExploreMaxIterations(20)).toBe(EXPLORE_ITER_CEILING);
+  });
+  it("treats 0 / negative / NaN as 1 step (floor)", () => {
+    expect(computeExploreMaxIterations(0)).toBe(EXPLORE_ITER_FLOOR);
+    expect(computeExploreMaxIterations(-3)).toBe(EXPLORE_ITER_FLOOR);
+    expect(computeExploreMaxIterations(NaN)).toBe(EXPLORE_ITER_FLOOR);
+  });
+});
+
+describe("computeWorkerMaxIterations (plan-aware)", () => {
+  it("returns floor for single-step plans", () => {
+    expect(computeWorkerMaxIterations(1)).toBe(WORKER_ITER_FLOOR);
+  });
+  it("scales linearly above the floor", () => {
+    expect(computeWorkerMaxIterations(4)).toBe(32); // 4 * 8 = 32
+    expect(computeWorkerMaxIterations(6)).toBe(48); // 6 * 8 = 48
+  });
+  it("caps at the ceiling", () => {
+    expect(computeWorkerMaxIterations(20)).toBe(WORKER_ITER_CEILING);
   });
 });
 
@@ -192,6 +229,6 @@ describe("subagentTypeAllowedTools / subagentTypeMaxIterations routing", () => {
   });
 
   it("routes explore → EXPLORE_MAX_ITERATIONS", () => {
-    expect(subagentTypeMaxIterations("explore")).toBe(8);
+    expect(subagentTypeMaxIterations("explore")).toBe(15);
   });
 });
