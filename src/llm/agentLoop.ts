@@ -264,6 +264,14 @@ export function assembleAgentSystemPrompt(input: {
     `   apply targeted fix with intent='modify' or intent='delete', re-run tests.\n` +
     `6. When all checks pass (or no tests exist), respond with a concise plain-text summary.\n` +
     `Maximum iterations: ${input.baseMaxIterations} (already enforced -- do not stall).\n\n` +
+    `VISUAL VERIFICATION:\n` +
+    `- Use verify_visual after UI, styling, layout, or user-visible interaction changes.\n` +
+    `- Use it to check page state, form validation, hover/empty/error states, and visual regressions.\n` +
+    `- Do NOT use verify_visual for backend-only changes, comment-only edits, test-only edits, or type/interface-only changes.\n` +
+    `- Hard cap: 5 screenshots per run; 1-2 screenshots is usually enough.\n` +
+    `- Examples:\n` +
+    `  verify_visual({ path: "/", description: "Header should now have dark background", viewport: null, waitFor: null })\n` +
+    `  verify_visual({ path: "/login", description: "Submit button disabled when fields empty", viewport: null, waitFor: "form" })\n\n` +
     `NARRATION (one short line before each tool call):\n` +
     `Before invoking each tool, write one short sentence in plain English describing what you're about to do and why. ` +
     `Examples: "Reading the README to find the existing structure.", "Now patching package.json to add the dev dependency.", "Searching for callers of the renamed function." ` +
@@ -2099,6 +2107,9 @@ Example first call (immediately after task framing):
           onToolCall: input.onToolCall,
           onToolResult: input.onToolResult,
           onStructuredEvent: input.onStructuredEvent,
+          visualScreenshotCount: toolCallLog.filter(
+            (entry) => entry.tool === "verify_visual" && entry.success === true
+          ).length,
         });
         debugLog("[zone-agent-tool-post]", {
           runId: input.runId,

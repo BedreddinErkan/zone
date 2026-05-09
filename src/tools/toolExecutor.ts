@@ -19,6 +19,8 @@ import { sanitizeVerificationEnv, strippedEnvKeys } from "../core/buildEnv.js";
 import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import type { ProjectFramework } from "../repo/detectFramework.js";
 import { generateFileOutline } from "./fileOutline.js";
+import { getDevServerConfig, probeDevServer } from "../visual/devServerProbe.js";
+import { runVerifyVisual, type VerifyVisualInput } from "./verifyVisual.js";
 
 const execAsync = promisify(exec);
 
@@ -37,6 +39,7 @@ const DISPATCHED_TOOLS = new Set([
   "apply_patch",
   "write_file",
   "search_in_files",
+  "verify_visual",
   "find_references",
   "Task",
   "run_command_background",
@@ -85,6 +88,7 @@ export interface ToolResult {
   truncated?: boolean;
   rejectionReason?: string;
   contentLength?: number;
+  metadata?: Record<string, unknown>;
 }
 
 function truncateText(
@@ -446,6 +450,7 @@ export async function executeTool(
     onToolCall?: (name: string, args: Record<string, unknown>) => void;
     onToolResult?: (name: string, result: ToolResult) => void;
     onStructuredEvent?: (evt: unknown) => void;
+    visualScreenshotCount?: number;
   }
 ): Promise<ToolResult> {
   const args = (toolArgs ?? {}) as Record<string, unknown>;
@@ -1903,6 +1908,63 @@ export async function executeTool(
       const out = `${matchSection}\n\n${summaryBlock}`;
       const t = truncateText(out, 4000);
       return { success: true, output: t.text, truncated: t.truncated };
+    }
+
+    if (toolName === "verify_visual") {
+      const visualInput = args as unknown as VerifyVisualInput;
+      const config = getDevServerConfig();
+      const visualPath = String(visualInput.path || "/");
+      onProgress?.(`[tool] Visual verify: ${visualPath}`);
+
+      const reachable = await probeDevServer(config.baseUrl);
+      if (!reachable) {
+        return {
+          success: false,
+          output:
+            `Dev server not reachable at ${config.baseUrl}. Make sure your dev server is running ` +
+            "(e.g. `npm run dev`). Configure URL in Settings -> Visual verification.",
+        };
+      }
+
+      const result = await runVerifyVisual(
+        { ...visualInput, path: visualPath },
+        {
+          devServerBaseUrl: config.baseUrl,
+          runId: String(input?.runId || "unknown"),
+          screenshotCount: Number(input?.visualScreenshotCount || 0),
+        }
+      );
+
+      if (!result.success) {
+        return {
+          success: false,
+          output: `verify_visual failed: ${result.error}`,
+        };
+      }
+
+      const consoleSection =
+        result.consoleErrors && result.consoleErrors.length > 0
+          ? `\n\nConsole errors detected:\n${result.consoleErrors.map((e) => `  - ${e}`).join("\n")}`
+          : "";
+
+      debugLog("[zone-tool-verify-visual]", JSON.stringify({
+        path: visualPath,
+        baseUrl: config.baseUrl,
+        screenshotPath: result.screenshotPath,
+        pageTitle: result.pageTitle,
+        consoleErrorCount: result.consoleErrors?.length ?? 0,
+      }));
+
+      return {
+        success: true,
+        output:
+          `Screenshot taken: ${visualPath} (page title: "${result.pageTitle ?? ""}"). ` +
+          `Saved to ${result.screenshotPath}.${consoleSection}`,
+        metadata: {
+          screenshotPath: result.screenshotPath,
+          pageTitle: result.pageTitle,
+        },
+      };
     }
 
     if (toolName === "find_references") {
