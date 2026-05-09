@@ -24,6 +24,7 @@ import {
   type IterCostAccumulator,
 } from "../usage/iterCostMeter.js";
 import { parseTodoProgressMarkers } from "../core/todoLifecycle.js";
+import { validateTodoWriteArgs } from "../tools/todoWriteValidate.js";
 import {
   executeTool,
   withStagingTempFlush,
@@ -1388,6 +1389,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     success?: boolean;
   }> = [];
   const filesModified = new Set<string>();
+  let todosEmittedThisRun = false;
   let selfCorrectionAttempts = 0;
   const failureHistory = new Map<string, FailureRecord[]>();
   const escalatedFiles = new Set<string>();
@@ -1531,13 +1533,25 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       `3. \`read_background_output { handle: "bg_a3k7q2", since_offset: null, max_bytes: 4096 }\`\n` +
       `4. If output looks done → \`kill_background\`. Else iterate.\n\n`
     : "";
-  const planProgressBlock =
-    input.executionPlan && input.executionPlan.steps.length > 0
-      ? `PLAN PROGRESS MARKERS:\n` +
-        `When you start work on a planned step, prefix your assistant message with \`[step:start:N]\` where N is the 1-based step number. ` +
-        `When you finish a step, prefix your assistant message with \`[step:done:N]\`. ` +
-        `These markers are only for UI progress tracking; continue using tools normally.`
-      : "";
+  const planProgressBlock = `PLAN VISIBILITY (TodoWrite):
+For any task that needs more than one tool call, call \`TodoWrite\` once near the start with 2–6 short steps describing what you intend to do. The list is shown to the user as a live sidebar.
+
+Rules:
+- Send the COMPLETE list every time — it replaces the prior list.
+- Mark exactly ONE step in_progress at any moment.
+- Before you start a step's work, call TodoWrite to flip that step to in_progress.
+- After a step's work succeeds, call TodoWrite to flip it to completed AND flip the next step to in_progress in the SAME call.
+- If you discover the plan was wrong, call TodoWrite again with the revised list.
+
+Skip TodoWrite for one-shot tasks (single read, single patch, trivial Q&A).
+
+Example first call (immediately after task framing):
+  TodoWrite({ todos: [
+    { id: "1", content: "Locate the failing test",         status: "in_progress" },
+    { id: "2", content: "Read the assertion + nearby code", status: "pending" },
+    { id: "3", content: "Patch the bug",                    status: "pending" },
+    { id: "4", content: "Re-run the suite",                 status: "pending" },
+  ]})`;
 
   const systemContent = assembleAgentSystemPrompt({
     agentIntro,
@@ -1742,6 +1756,52 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
               : null,
           command: parsedArgs.command ?? null,
         }));
+
+        if (name === "TodoWrite") {
+          const validation = validateTodoWriteArgs(parsedArgs);
+          if (!validation.ok) {
+            const rejectionMsg = `TodoWrite rejected: ${validation.error}`;
+            responseInput.push({
+              role: "tool",
+              tool_call_id: callId,
+              content: rejectionMsg,
+            });
+            toolCallLog.push({
+              tool: name,
+              args: parsedArgs,
+              result: validation.error,
+              success: false,
+            });
+            input.onToolResult?.(name, {
+              success: false,
+              output: rejectionMsg,
+              error: validation.error,
+            });
+            continue;
+          }
+          const isFirstEmission = !todosEmittedThisRun;
+          todosEmittedThisRun = true;
+          input.onStructuredEvent?.({
+            type: isFirstEmission ? "todos_initialized" : "todo_revised",
+            title: isFirstEmission ? "Plan initialized" : "Plan revised",
+            status: "success",
+            todos: validation.normalized,
+          });
+          const okMsg = `Plan ${isFirstEmission ? "initialized" : "revised"} with ${validation.normalized.length} step(s).`;
+          responseInput.push({
+            role: "tool",
+            tool_call_id: callId,
+            content: okMsg,
+          });
+          toolCallLog.push({
+            tool: name,
+            args: parsedArgs,
+            result: "ok",
+            success: true,
+          });
+          input.onToolResult?.(name, { success: true, output: okMsg });
+          continue;
+        }
 
         if (name === "apply_patch") {
           const targetFilePath =

@@ -5001,7 +5001,8 @@ const initializeTodosFromPlan = (): void => {
         });
         debugLog(`[zone-plan] generated steps=${executionPlan.steps.length} (agent_loop)`);
         debugLog(`[zone-plan] scope=${executionPlan.scopeSummary}`);
-        initializeTodosFromPlan();
+        // Sidebar is seeded by the in-loop TodoWrite tool now; pre-planner only
+        // feeds scopeGuard / evaluatePlanAlignment / orchestrator / finalRunReport.
       } catch (err) {
         console.warn(
           `[zone-plan] skipped (agent_loop): ${err instanceof Error ? err.message : String(err)}`
@@ -5319,6 +5320,7 @@ const initializeTodosFromPlan = (): void => {
           typeof e === "object" &&
           e.type === "todos_initialized"
         ) {
+          if (Array.isArray(e.todos)) runTodos = e.todos as RunTodo[];
           emitStructuredProgress({
             type: "todos_initialized" as any,
             title: String(e.title || "Plan initialized"),
@@ -5331,6 +5333,7 @@ const initializeTodosFromPlan = (): void => {
           typeof e === "object" &&
           e.type === "todo_revised"
         ) {
+          if (Array.isArray(e.todos)) runTodos = e.todos as RunTodo[];
           emitStructuredProgress({
             type: "todo_revised" as any,
             title: String(e.title || "Plan revised"),
@@ -5484,6 +5487,11 @@ const initializeTodosFromPlan = (): void => {
         runId: runId || null,
         stepCount: executionPlan.steps.length,
       }));
+      // Orchestrator owns the sidebar deterministically: seed from the pre-planner's
+      // step list once, then drive transitions via setTodoStatus per step. The
+      // default (non-orchestrator) flow leaves the sidebar empty until the agent
+      // calls TodoWrite in-loop.
+      initializeTodosFromPlan();
       const stepResults: AgentLoopResult[] = [];
       for (let stepIdx = 0; stepIdx < executionPlan.steps.length; stepIdx += 1) {
         if (input.abortSignal?.aborted) {
@@ -6199,7 +6207,8 @@ const initializeTodosFromPlan = (): void => {
     });
     debugLog(`[zone-plan] generated steps=${executionPlan.steps.length}`);
     debugLog(`[zone-plan] scope=${executionPlan.scopeSummary}`);
-    initializeTodosFromPlan();
+    // Sidebar is seeded by the in-loop TodoWrite tool now; pre-planner only
+    // feeds scopeGuard / evaluatePlanAlignment / orchestrator / finalRunReport.
   } catch (err) {
     console.warn(
       `[zone-plan] skipped: ${err instanceof Error ? err.message : String(err)}`

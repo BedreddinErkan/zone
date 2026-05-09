@@ -31,6 +31,54 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "TodoWrite",
+      strict: true,
+      description:
+        "Create or revise the user-facing plan list shown in the sidebar. " +
+        "Call this once near the start of any non-trivial task to lay out 2–6 steps. " +
+        "Call again whenever your plan changes (added discovery, dropped step, status change). " +
+        "Send the COMPLETE list every time — it replaces the prior list. " +
+        "Exactly ONE step may be in_progress at a time; mark a step completed before starting the next.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["todos"],
+        properties: {
+          todos: {
+            type: "array",
+            minItems: 1,
+            maxItems: 12,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id", "content", "status"],
+              properties: {
+                id: {
+                  type: "string",
+                  description: "Stable id you choose. Reuse across calls to update.",
+                },
+                content: {
+                  type: "string",
+                  description: "Short title (≤80 chars).",
+                },
+                description: {
+                  type: ["string", "null"],
+                  description: "Optional one-sentence detail.",
+                },
+                status: {
+                  type: "string",
+                  enum: ["pending", "in_progress", "completed", "skipped"],
+                },
+              },
+            },
+          },
+        },
+      } as Record<string, unknown>,
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "kill_background",
       strict: true,
       description:

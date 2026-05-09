@@ -44,6 +44,10 @@ const DISPATCHED_TOOLS = new Set([
   "kill_background",
   "list_background",
   "update_memory",
+  // TodoWrite is intercepted in the agent loop (no I/O), but must be listed here
+  // so the IIFE startup guard at :51-75 doesn't fail-fast on its presence in
+  // ZONE_TOOLS.
+  "TodoWrite",
 ]);
 
 // Import the definitions lazily to keep the check co-located with the executor.
