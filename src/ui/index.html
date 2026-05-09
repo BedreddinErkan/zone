@@ -836,6 +836,14 @@
     .zone-cost-strip.budget-warn .zone-cost-strip-fill{background:#d4a85a}
     .zone-cost-strip.budget-alert .zone-cost-strip-text{color:#d4534f;font-weight:600}
     .zone-cost-strip.budget-alert .zone-cost-strip-fill{background:#d4534f}
+    .zone-cost-strip.previous-run{opacity:0.55}
+    .zone-cost-strip.previous-run::before{
+      content:"Last run: ";
+      margin-right:6px;
+      font-size:0.85em;
+      opacity:0.7;
+      font-style:italic;
+    }
     @media (max-width:1180px){.zone-cost-strip{display:none!important}}
 
     /* Verification fix loop summary (collapsible) */
@@ -4215,6 +4223,8 @@
       return strip;
     }
 
+    let currentDisplayedRunId = null;
+
     // Phase H.7: matches TOKEN_BUDGET_CAP / WARN / HARD in agentLoop.ts.
     const ZONE_TOKEN_BUDGET_CAP = 800000;
     const ZONE_TOKEN_BUDGET_WARN = 0.80;
@@ -4227,16 +4237,18 @@
       const uncached = Number(meter.totalInputUncached || 0);
       const totalInput = cacheRead + uncached;
       const pct = totalInput > 0 ? Math.round((cacheRead / totalInput) * 100) : 0;
+      const pctLabel = totalInput > 0 ? `${pct}%` : '—%';
       const cumulative = Number(meter.cumulative || 0);
       const totalTokens = uncached + cacheRead + Number(meter.totalCacheWrite || 0) + Number(meter.totalOutput || 0);
-      const tokPart = totalTokens > 0 ? ` · ${formatTokenCount(totalTokens)} tokens` : '';
       strip.querySelector('.zone-cost-strip-fill').style.width = `${pct}%`;
       strip.querySelector('.zone-cost-strip-text').textContent =
-        `${typeof formatCostUsd === 'function' ? formatCostUsd(cumulative) : '$' + cumulative.toFixed(2)}${tokPart} · ${pct}% cached`;
+        `${typeof formatCostUsd === 'function' ? formatCostUsd(cumulative) : '$' + cumulative.toFixed(2)} · ${formatTokenCount(totalTokens)} tokens · ${pctLabel} cached`;
       // Phase H.7: warn/alert when cumulative tokens approach the per-run cap.
       const budgetRatio = ZONE_TOKEN_BUDGET_CAP > 0 ? totalTokens / ZONE_TOKEN_BUDGET_CAP : 0;
-      strip.classList.toggle('budget-warn', budgetRatio >= ZONE_TOKEN_BUDGET_WARN && budgetRatio < ZONE_TOKEN_BUDGET_HARD);
-      strip.classList.toggle('budget-alert', budgetRatio >= ZONE_TOKEN_BUDGET_HARD);
+      const isPreviousRun = !!meter.done;
+      strip.classList.toggle('budget-warn', !isPreviousRun && budgetRatio >= ZONE_TOKEN_BUDGET_WARN && budgetRatio < ZONE_TOKEN_BUDGET_HARD);
+      strip.classList.toggle('budget-alert', !isPreviousRun && budgetRatio >= ZONE_TOKEN_BUDGET_HARD);
+      strip.classList.toggle('previous-run', isPreviousRun);
       strip.dataset.state = 'visible';
     }
 
@@ -4245,13 +4257,68 @@
       if (strip) strip.dataset.state = 'hidden';
     }
 
+    function resetCostStripMetrics(runId) {
+      const meter = ensureCostMeterState(runId);
+      if (!meter) return null;
+      meter.cumulative = 0;
+      meter.perIter = [];
+      meter.cacheHitCumulative = 0;
+      meter.cacheHitThisIter = 0;
+      meter.currentIter = 0;
+      meter.totalIter = 0;
+      meter.totalInputUncached = 0;
+      meter.totalCacheRead = 0;
+      meter.totalCacheWrite = 0;
+      meter.totalOutput = 0;
+      meter.done = false;
+      return meter;
+    }
+
+    function handleCostStripRunStart(runId) {
+      const rid = String(runId || '').trim();
+      if (!rid || rid === currentDisplayedRunId) return;
+      currentDisplayedRunId = rid;
+      const meter = resetCostStripMetrics(rid);
+      const tid = getThreadIdForRunId(rid);
+      const run = tid ? state.runsByThread.get(tid) : null;
+      if (run && meter) run.costMeter = meter;
+      const strip = ensureCostStrip();
+      strip.classList.remove('previous-run', 'budget-warn', 'budget-alert');
+      if (meter) updateCostStripFromMeter(meter);
+    }
+
+    function handleCostStripRunComplete(runId) {
+      const rid = String(runId || '').trim();
+      if (!rid) return;
+      currentDisplayedRunId = rid;
+      const meter = getCostMeterState(rid);
+      if (meter) {
+        meter.done = true;
+        updateCostStripFromMeter(meter);
+        return;
+      }
+      const strip = ensureCostStrip();
+      strip.classList.remove('budget-warn', 'budget-alert');
+      strip.classList.add('previous-run');
+      strip.dataset.state = 'visible';
+    }
+
     function refreshCostStripForActiveRun() {
       const tid = state.activeThreadId;
-      if (!tid || !state.runsByThread.has(tid)) { hideCostStrip(); return; }
+      if (!tid || !state.runsByThread.has(tid)) {
+        if (!currentDisplayedRunId) hideCostStrip();
+        return;
+      }
       const run = state.runsByThread.get(tid);
-      if (!run || !run.runId) { hideCostStrip(); return; }
+      if (!run || !run.runId) {
+        if (!currentDisplayedRunId) hideCostStrip();
+        return;
+      }
       const meter = (state.__costMetersByRunId || {})[String(run.runId)];
-      if (!meter || meter.done) { hideCostStrip(); return; }
+      if (!meter) {
+        if (!currentDisplayedRunId) hideCostStrip();
+        return;
+      }
       updateCostStripFromMeter(meter);
     }
 
@@ -4323,7 +4390,7 @@
         if (Number.isFinite(n) && n >= 0) meter.cumulative = n;
       }
       meter.done = true;
-      refreshCostStripForActiveRun();
+      handleCostStripRunComplete(runId);
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -8138,8 +8205,12 @@
       }
 
       if (lifecycle && runId === state.currentRunId) {
-        if (lifecycleType === 'run_started') updateSendButtonKillMode(true);
+        if (lifecycleType === 'run_started') {
+          handleCostStripRunStart(runId);
+          updateSendButtonKillMode(true);
+        }
         else if (lifecycleType === 'run_completed' || lifecycleType === 'run_cancelled') {
+          handleCostStripRunComplete(runId);
           updateSendButtonKillMode(false);
         }
       }
@@ -8240,9 +8311,7 @@
           if (g) g.dataset.runStatus = 'completed';
         } catch {}
         stopDurationTicker(runId);
-        const meter = (state.__costMetersByRunId || {})[String(runId)];
-        if (meter) meter.done = true;
-        refreshCostStripForActiveRun();
+        handleCostStripRunComplete(runId);
         persistRunGroupHtmlToThread(runId, 'completed');
         scrollChatIfFollowing();
         return;
@@ -8327,9 +8396,7 @@
           if (g) g.dataset.runStatus = 'cancelled';
         } catch {}
         stopDurationTicker(runId);
-        const meter = (state.__costMetersByRunId || {})[String(runId)];
-        if (meter) meter.done = true;
-        refreshCostStripForActiveRun();
+        handleCostStripRunComplete(runId);
         try { persistRunGroupHtmlToThread(runId, 'cancelled'); } catch {}
       }
       const placeholderFilePath =
@@ -8688,6 +8755,7 @@
         runId,
         startedAt: Date.now(),
       });
+      handleCostStripRunStart(runId);
       state.__runIsComplete = state.__runIsComplete || {};
       state.__runIsComplete[runId] = false;
       // Clear any stale streaming UI/state from previous runs.
@@ -9164,9 +9232,7 @@
           if (g) g.dataset.runStatus = 'completed';
         } catch {}
         stopDurationTicker(runId);
-        const meter = (state.__costMetersByRunId || {})[String(runId)];
-        if (meter) meter.done = true;
-        refreshCostStripForActiveRun();
+        handleCostStripRunComplete(runId);
         persistRunGroupHtmlToThread(runId, 'completed');
         dequeueAndRunNext(_owningThreadId);
         return;
@@ -9218,9 +9284,7 @@
           if (g) g.dataset.runStatus = 'completed';
         } catch {}
         stopDurationTicker(runId);
-        const meter = (state.__costMetersByRunId || {})[String(runId)];
-        if (meter) meter.done = true;
-        refreshCostStripForActiveRun();
+        handleCostStripRunComplete(runId);
         persistRunGroupHtmlToThread(runId, 'completed');
         dequeueAndRunNext(_owningThreadId);
         return;
@@ -9242,9 +9306,7 @@
           if (g) g.dataset.runStatus = 'completed';
         } catch {}
         stopDurationTicker(runId);
-        const meter = (state.__costMetersByRunId || {})[String(runId)];
-        if (meter) meter.done = true;
-        refreshCostStripForActiveRun();
+        handleCostStripRunComplete(runId);
         persistRunGroupHtmlToThread(runId, 'completed');
         dequeueAndRunNext(_owningThreadId);
         return;
@@ -9358,9 +9420,7 @@
         if (g) g.dataset.runStatus = 'completed';
       } catch {}
       stopDurationTicker(runId);
-      const meter = (state.__costMetersByRunId || {})[String(runId)];
-      if (meter) meter.done = true;
-      refreshCostStripForActiveRun();
+      handleCostStripRunComplete(runId);
       persistRunGroupHtmlToThread(runId, 'completed');
 
       // If user queued tasks while this run was executing, start next automatically.
