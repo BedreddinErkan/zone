@@ -1733,10 +1733,17 @@ Example first call (immediately after task framing):
       });
     }
 
+    // Extract tool calls first so narration can be skipped on the final iter.
+    // On the final iter (no tool calls) the assistant text IS the answer —
+    // emitting it as narration would duplicate it against the formal
+    // chatResponse / run_completed_with_result bubble rendered by the UI.
+    const toolCalls = extractFunctionCallItems(response);
+
     // Forward the LLM's plain-language text (between tool_calls) as a
     // `narration` event so the UI can interleave intent statements with tool
     // rows. Strip internal bracketed markers (TODO/step/verification/agent_loop)
-    // so they don't bleed into user-facing prose.
+    // so they don't bleed into user-facing prose. Guard toolCalls.length > 0
+    // so the final answer (no tool calls) is never emitted as narration.
     const narrationText = String(assistantContentForProgress)
       .replace(/\[(?:TODO|step|ZONE_VERIFICATION|AGENT_LOOP)[^\]]*\]/gi, "")
       .replace(/\s+/g, " ")
@@ -1746,7 +1753,8 @@ Example first call (immediately after task framing):
       narrationText.length >= 8 &&
       narrationText !== lastNarrationEmitted &&
       typeof input.runId === "string" &&
-      input.runId.trim()
+      input.runId.trim() &&
+      toolCalls.length > 0
     ) {
       lastNarrationEmitted = narrationText;
       input.onStructuredEvent?.({
@@ -1758,7 +1766,6 @@ Example first call (immediately after task framing):
       });
     }
 
-    const toolCalls = extractFunctionCallItems(response);
     if (toolCalls.length > 0) {
       // Push the assistant message with all tool_calls ONCE before processing them.
       // Chat-completions protocol requires the assistant message with tool_calls to

@@ -9139,6 +9139,20 @@
       if (decision === 'investigation') {
         hideEmpty();
         const answerText = String(result.chatResponse || '');
+        // Belt-and-suspenders: strip any narration line whose collapsed text
+        // matches the final answer (agentLoop now skips narration on the final
+        // iter, but remove the duplicate if it slipped through).
+        try {
+          const lb = document.getElementById(`logBlock-${runId}`);
+          if (lb && answerText) {
+            const answerCollapsed = answerText.replace(/\s+/g, ' ').trim().slice(0, 200);
+            lb.querySelectorAll('.narration-line').forEach((el) => {
+              const msgEl = el.querySelector('.log-msg');
+              const lineText = String(msgEl ? msgEl.textContent : '').replace(/\s+/g, ' ').trim();
+              if (lineText && answerCollapsed.startsWith(lineText.slice(0, 80))) el.remove();
+            });
+          }
+        } catch {}
         const bubble = createAgentBubbleFromMarkdown(answerText, {
           runId,
           html: result.responseHtml || '',
