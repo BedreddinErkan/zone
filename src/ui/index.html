@@ -4674,6 +4674,11 @@
 
     function appendLogLine(logBlock, { timestamp, message, messageHtml, status, className }){
       if (!logBlock) return;
+      // render-only suppression of redundant dispatch/intent echoes
+      const renderTitle = String(message || '');
+      const redundantIntentPrefix = 'Task intent:';
+      if (renderTitle.toLowerCase().startsWith(redundantIntentPrefix.toLowerCase())) return;
+      if (renderTitle === 'Developer patch run started.') return;
       // NEVER log streaming deltas as separate lines (stream is rendered in livecode block).
       if (String(message || '').toLowerCase().includes('streaming patch')) return;
       const msgText = String(message || '');
