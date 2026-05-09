@@ -50,6 +50,10 @@ function fallbackMessageType(task: string): ZoneMessageType {
   const normalizedTask = String(task || "").trim();
   if (!normalizedTask) return "question";
 
+  if (shouldPreferQuestionForInformationRequest(normalizedTask)) {
+    return "question";
+  }
+
   if (
     /\b(?:fix|add|remove|delete|refactor|implement|update|change|rename|create|modify|insert|replace)\b/i.test(
       normalizedTask
@@ -67,6 +71,31 @@ function fallbackMessageType(task: string): ZoneMessageType {
   }
 
   return "question";
+}
+
+function shouldPreferQuestionForInformationRequest(task: string): boolean {
+  const normalizedTask = String(task || "").trim();
+  if (!normalizedTask) return false;
+
+  const asksToReceiveInformation =
+    /^(?:please\s+)?(?:trace|explain|describe|summarize|cover|list|walk\s+through)\b/i.test(
+      normalizedTask
+    ) ||
+    /\b(?:how does|what does|where is|where are|which files?|why does|definitions?|behavior|structure|control flow|usages?|end[- ]to[- ]end|pipeline|file:line references?|line references?)\b/i.test(
+      normalizedTask
+    );
+  if (!asksToReceiveInformation) return false;
+
+  const startsWithCodeChange =
+    /^(?:please\s+)?(?:fix|add|remove|delete|refactor|implement|update|change|rename|create|modify|insert|replace)\b/i.test(
+      normalizedTask
+    );
+  const asksForCodeChangeAfterInfo =
+    /\b(?:and|then)\s+(?:fix|add|remove|delete|refactor|implement|update|change|rename|create|modify|insert|replace)\b/i.test(
+      normalizedTask
+    );
+
+  return !startsWithCodeChange && !asksForCodeChangeAfterInfo;
 }
 
 function parseMessageTypeJson(raw: string): ZoneMessageType | null {
@@ -116,9 +145,17 @@ export async function detectMessageType(
     const client = createLLMClient({ apiKey: userApiKey });
     const prompt = [
       "Classify this user message into one of:",
-      "- patch_request: user wants code to be modified",
-      "- question: user wants information about existing code",
-      "- discussion: user wants advice/recommendations",
+      "- patch_request: user wants code to be MODIFIED - add, remove, change, fix, refactor, rename, create",
+      '  Examples: "Add a flag to X", "Refactor Y", "Fix the bug in Z", "Rename A to B"',
+      "  Strong signals: imperative verbs that change files (add, remove, modify, fix, refactor, create, rename, replace, delete, implement)",
+      "- question: user asks ABOUT existing code - definitions, behavior, structure, control flow, usages",
+      "  Strong signals: trace, explain, describe, how does, what does, where is, which files, why does, summarize, cover, list, walk through, end-to-end, pipeline",
+      '  Examples: "Trace the apply_patch flow", "How does X work", "Which files use Y", "Explain the auth flow", "Cover dispatch + validation + execution"',
+      '  IMPORTANT: even if the task lists multiple stages or asks for "exact line references", it remains a question - the deliverable is an explanation, not code changes.',
+      "- discussion: user asks for general advice/recommendations not specific to this codebase",
+      '  Examples: "How should I structure my project", "What\'s the best way to handle X"',
+      "",
+      'Tie-break rule: if the task asks the user to RECEIVE information (a description, a trace, a summary, an explanation, a listing), classify as question - even if it uses imperative verbs like "trace", "list", "cover", "summarize". Only classify as patch_request when the deliverable is a CODE CHANGE the user expects to apply.',
       "",
       'Respond with JSON: { "type": "patch_request|question|discussion" }',
       "",
@@ -135,12 +172,23 @@ export async function detectMessageType(
 
     const extraction = extractResponsesApiOutputText(response);
     const raw = extraction.ok ? extraction.text : "";
-    const messageType = parseMessageTypeJson(raw) ?? fallbackMessageType(normalizedTask);
+    const parsedMessageType = parseMessageTypeJson(raw) ?? fallbackMessageType(normalizedTask);
+    const messageType =
+      parsedMessageType === "patch_request" &&
+      shouldPreferQuestionForInformationRequest(normalizedTask)
+        ? "question"
+        : parsedMessageType;
 
     debugLog("[zone-intent-classify]", {
       taskPreview: normalizedTask.slice(0, 120),
       raw: raw.slice(0, 120),
+      parsedMessageType,
       messageType,
+      intent: shouldUseInvestigationMode(normalizedTask, messageType)
+        ? "investigation"
+        : messageType === "patch_request"
+          ? "execute"
+          : "chat",
     });
 
     return messageType;
@@ -150,6 +198,11 @@ export async function detectMessageType(
       taskPreview: normalizedTask.slice(0, 120),
       error: error instanceof Error ? error.message : String(error),
       messageType,
+      intent: shouldUseInvestigationMode(normalizedTask, messageType)
+        ? "investigation"
+        : messageType === "patch_request"
+          ? "execute"
+          : "chat",
       fallback: true,
     });
     return messageType;
@@ -161,6 +214,15 @@ export async function detectIntent(
   userApiKey?: string,
 ): Promise<ZoneLegacyIntent> {
   const messageType = await detectMessageType(task, userApiKey);
-  if (shouldUseInvestigationMode(task, messageType)) return "investigation";
-  return messageType === "patch_request" ? "execute" : "chat";
+  const intent = shouldUseInvestigationMode(task, messageType)
+    ? "investigation"
+    : messageType === "patch_request"
+      ? "execute"
+      : "chat";
+  debugLog("[zone-intent-classify]", {
+    taskPreview: String(task || "").trim().slice(0, 120),
+    messageType,
+    intent,
+  });
+  return intent;
 }
