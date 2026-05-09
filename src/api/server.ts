@@ -2739,6 +2739,20 @@ app.post("/api/patch", async (req, res) => {
   // Test-related execution is still covered by agentLoopPatterns (npm test, run tests, …).
   const shouldForceExecute = shouldForceExecuteTask(String(task || ""));
 
+  // Pre-register the run buffer BEFORE detectIntent (async LLM call, 300–1500 ms)
+  // so the SSE /api/run-replay/:runId endpoint can accept connections during
+  // intent detection. The frontend opens SSE before POSTing, gets a 404, then
+  // retries once after 600 ms. If detectIntent takes >600 ms (always true for
+  // investigation tasks, which are never short-circuited by shouldForceExecute)
+  // the retry also 404s and SSE is permanently abandoned for this run, causing
+  // the "frozen UI" bug. registerRunStart is idempotent for running buffers.
+  const _preRunId = typeof runId === "string" && runId.trim() ? runId.trim() : "";
+  if (_preRunId) {
+    try {
+      registerRunStart(_preRunId, { task: typeof task === "string" ? task.trim() : undefined });
+    } catch {}
+  }
+
   const intent = shouldForceExecute
     ? "execute"
     : await detectIntent(String(task), userApiKey || undefined);
