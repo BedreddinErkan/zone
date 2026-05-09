@@ -252,7 +252,8 @@ export function assembleAgentSystemPrompt(input: {
     `Before invoking each tool, write one short sentence in plain English describing what you're about to do and why. ` +
     `Examples: "Reading the README to find the existing structure.", "Now patching package.json to add the dev dependency.", "Searching for callers of the renamed function." ` +
     `Keep it to one short line. No bullet points, no markdown headers, no emoji. ` +
-    `This sentence is shown to the user as live narration so they can follow your reasoning.\n\n` +
+    `This sentence is shown to the user as live narration so they can follow your reasoning. ` +
+    `Write each statement only once — do not restate or repeat your summary in the same response.\n\n` +
     `OUTPUT ECONOMY:\n` +
     `- Final response: 60-80 words unless an error/warning needs more detail.\n` +
     `- Include changed files, verification result, and any remaining warning.\n` +
