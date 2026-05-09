@@ -4303,6 +4303,20 @@
       strip.dataset.state = 'visible';
     }
 
+    function updateCostStripFromTokenBudget(event, runId) {
+      const rid = String(event?.runId || runId || '').trim();
+      const strip = document.getElementById('zoneCostStrip');
+      if (!strip || strip.classList.contains('previous-run')) return;
+      if (rid && currentDisplayedRunId && rid !== currentDisplayedRunId) return;
+      const ratioRaw = Number(event?.tokenBudgetRatio);
+      const ratio = Number.isFinite(ratioRaw) ? ratioRaw : 0;
+      const status = String(event?.status || '').toLowerCase();
+      const isAlert = status === 'error' || ratio >= ZONE_TOKEN_BUDGET_HARD;
+      const isWarn = !isAlert && (status === 'warning' || ratio >= ZONE_TOKEN_BUDGET_WARN);
+      strip.classList.toggle('budget-warn', isWarn);
+      strip.classList.toggle('budget-alert', isAlert);
+    }
+
     function refreshCostStripForActiveRun() {
       const tid = state.activeThreadId;
       if (!tid || !state.runsByThread.has(tid)) {
@@ -8145,6 +8159,7 @@
         progressTypeForMissingBlock === 'chat_done' ||
         progressTypeForMissingBlock === 'chat_response' ||
         progressTypeForMissingBlock === 'iter_cost_update' ||
+        progressTypeForMissingBlock === 'token_budget_status' ||
         progressTypeForMissingBlock === 'run_summary' ||
         progressTypeForMissingBlock === 'todos_initialized' ||
         progressTypeForMissingBlock === 'todo_status_changed' ||
@@ -8181,6 +8196,10 @@
 
       if (progress && progressType === 'iter_cost_update') {
         applyIterCostUpdate(progress, runId);
+        return;
+      }
+      if (progress && progressType === 'token_budget_status') {
+        updateCostStripFromTokenBudget(progress, runId);
         return;
       }
       if (progress && progressType === 'run_summary') {
