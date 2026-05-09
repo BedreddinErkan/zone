@@ -3325,38 +3325,12 @@
       const shell = ensureExecutionSummaryShell(logBlock);
       if (!shell) return;
       const summary = ensureExecutionSummaryState(runId);
-      if (!summary.completedAt) {
+      if (!summary.completedAt || summary.validatorCatchCount === 0) {
         shell.final.hidden = true;
         return;
       }
-      const elapsedMs = Math.max(0, Number(summary.completedAt) - Number(summary.startedAt || summary.completedAt));
-      const elapsedSeconds = Math.max(1, Math.round(elapsedMs / 1000));
-      const headParts = [`Run completed in ${elapsedSeconds}s.`];
-      if (summary.validatorCatchCount > 0) {
-        headParts.push(`Validator caught ${summary.validatorCatchCount} broken patch${summary.validatorCatchCount === 1 ? '' : 'es'}.`);
-      }
-      const editEntries = Object.values(summary.categories.edit.entries).sort((a, b) => Number(b.lastTs || 0) - Number(a.lastTs || 0));
-      let fileLine = 'No files were edited.';
-      if (editEntries.length === 1) {
-        const entry = editEntries[0];
-        const changed = entry.successCount > 0;
-        const lastOutcome =
-          entry.lastOutcome === 'reverted'
-            ? 'reverted'
-            : entry.lastOutcome === 'success'
-              ? 'success'
-              : 'no_change';
-        fileLine = `Edited 1 file: ${entry.target} (last attempt: ${lastOutcome}, ${changed ? 'file changed' : 'file unchanged'})`;
-      } else if (editEntries.length > 1) {
-        const changedCount = editEntries.filter((entry) => entry.successCount > 0).length;
-        const unchangedCount = editEntries.length - changedCount;
-        fileLine = `Edited ${editEntries.length} files (${changedCount} changed, ${unchangedCount} unchanged).`;
-      }
       shell.final.hidden = false;
-      shell.final.innerHTML = `
-        <div class="exec-summary-final-line">${escapeHtml(headParts.join(' '))}</div>
-        <div class="exec-summary-final-line muted">${escapeHtml(fileLine)}</div>
-      `;
+      shell.final.innerHTML = `<div class="exec-summary-final-line">Validator caught ${summary.validatorCatchCount} broken patch${summary.validatorCatchCount === 1 ? '' : 'es'}.</div>`;
     }
 
     function recordExecutionSummaryPayload(logBlock, payload, runId){
@@ -9100,13 +9074,12 @@
       try {
         const fr = result && result.finalRunReport ? result.finalRunReport : null;
         const changes = Array.isArray(fr?.changesMade) ? fr.changesMade.filter(Boolean) : [];
-        const nextStep = String(fr?.nextStep || '').trim();
         if (
           (decision === 'safe_to_apply' || decision === 'preview_only') &&
           changes.length > 0
         ) {
           const main = changes.map((s) => String(s).trim()).filter(Boolean).join('\n');
-          const text = nextStep ? `${main}\n\nNext: ${nextStep}` : main;
+          const text = main;
           hideEmpty();
           appendToRunGroup(runId, createBubble(text, 'agent'));
         }
@@ -9174,13 +9147,9 @@
         }
       } else {
         if (decision === 'preview_only') {
-          const lb = document.getElementById(`logBlock-${runId}`);
           if (patchesAlreadyApplied) {
             const vn = result && result.verificationNote ? String(result.verificationNote) : '';
             showToast('warning', vn ? `⚠ ${vn}` : '⚠ Applied but unverified — review diff', 3000);
-            if (lb) appendLogLine(lb, { timestamp: nowTs(), message: vn ? `⚠ ${vn}` : '⚠ Applied but unverified — review diff above', status:'warning' });
-          } else {
-            if (lb) appendLogLine(lb, { timestamp: nowTs(), message: '⚠ Preview only — review diff above', status:'warning' });
           }
         }
       }
