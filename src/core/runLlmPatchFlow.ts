@@ -4317,7 +4317,6 @@ export async function runLlmPatchFlow(input: {
   };
 
  const emitTodos = (type: "todos_initialized" | "todo_revised"): void => {
-  console.log(`[zone-todo-debug] emitTodos called type=${type} runTodos.length=${runTodos.length}`);
   if (runTodos.length === 0) return;
     emitStructuredProgress({
       type,
@@ -4357,10 +4356,8 @@ export async function runLlmPatchFlow(input: {
   };
 
 const initializeTodosFromPlan = (): void => {
-  console.log(`[zone-todo-debug] initializeTodosFromPlan called executionPlan=${executionPlan?.steps?.length ?? 'null'}`);
   if (!executionPlan || executionPlan.steps.length === 0) return;
   runTodos = executionPlanToTodos(executionPlan);
-  console.log(`[zone-todo-debug] runTodos populated count=${runTodos.length}`);
   emitTodos("todos_initialized");
 };
 
