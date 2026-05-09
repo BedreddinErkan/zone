@@ -11,6 +11,7 @@ import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { runAgent } from "../core/runAgent.js";
 import { getUsage, getRunCost } from "../usage/usageTracker.js";
+import { loadLimitConfig, saveLimitConfig, checkUsageLimit } from "./usageLimits.js";
 import {
   isIrrelevantDeveloperContextPath,
   runLlmPatchFlow,
@@ -2077,6 +2078,32 @@ app.get("/api/usage", async (req, res) => {
   }
 });
 
+app.get("/api/usage-limits", (_req, res) => {
+  res.json(loadLimitConfig());
+});
+
+app.put("/api/usage-limits", (req, res) => {
+  const { dailyLimit, monthlyLimit } = req.body ?? {};
+  const daily =
+    dailyLimit === null || dailyLimit === undefined
+      ? null
+      : typeof dailyLimit === "number" && dailyLimit >= 0
+        ? dailyLimit
+        : null;
+  const monthly =
+    monthlyLimit === null || monthlyLimit === undefined
+      ? null
+      : typeof monthlyLimit === "number" && monthlyLimit >= 0
+        ? monthlyLimit
+        : null;
+  try {
+    saveLimitConfig({ dailyLimit: daily, monthlyLimit: monthly });
+    res.json({ ok: true, dailyLimit: daily, monthlyLimit: monthly });
+  } catch (err) {
+    res.status(500).json({ ok: false, reason: "save_failed" });
+  }
+});
+
 app.post("/api/admin/reset-monthly-runs", async (req, res) => {
   const adminSecret =
     typeof process.env.ADMIN_SECRET === "string"
@@ -2751,6 +2778,31 @@ app.post("/api/patch", async (req, res) => {
     try {
       registerRunStart(_preRunId, { task: typeof task === "string" ? task.trim() : undefined });
     } catch {}
+  }
+
+  // Usage limit check — block new runs if the user has exceeded their daily or monthly threshold.
+  try {
+    const [dayUsage, monthUsage] = await Promise.all([
+      getUsage(userId ?? "local-dev", "day"),
+      getUsage(userId ?? "local-dev", "month"),
+    ]);
+    const limitCheck = checkUsageLimit({
+      today: dayUsage.totalCostUsd,
+      thisMonth: monthUsage.totalCostUsd,
+    });
+    if (limitCheck.blocked) {
+      perf.finish("usage limit exceeded");
+      res.status(429).json({
+        ok: false,
+        error: "usage_limit_exceeded",
+        reason: limitCheck.reason,
+        limit: limitCheck.limit,
+        used: limitCheck.used,
+      });
+      return;
+    }
+  } catch {
+    // Non-blocking: if limit check fails (e.g. disk error), allow the run.
   }
 
   const intent = shouldForceExecute

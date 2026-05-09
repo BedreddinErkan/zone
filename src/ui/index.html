@@ -1165,7 +1165,6 @@
       <div class="modal-tabs">
         <button class="mtab active" data-stab="usage">Usage</button>
         <button class="mtab" data-stab="keys">API Keys</button>
-        <button class="mtab" data-stab="memory">Memory</button>
       </div>
       <div class="modal-b" id="settingsBody"></div>
     </div>
@@ -4178,6 +4177,13 @@
       return n < 0.01 ? '<$0.01' : '$' + n.toFixed(2);
     }
 
+    function formatTokenCount(n){
+      const x = Number(n) || 0;
+      if (x >= 1_000_000) return (x / 1_000_000).toFixed(1) + 'M';
+      if (x >= 1_000) return (x / 1_000).toFixed(1) + 'K';
+      return String(x);
+    }
+
     function formatPct(value){
       const n = Number(value);
       const pct = Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n * 100))) : 0;
@@ -4212,9 +4218,11 @@
       const totalInput = cacheRead + uncached;
       const pct = totalInput > 0 ? Math.round((cacheRead / totalInput) * 100) : 0;
       const cumulative = Number(meter.cumulative || 0);
+      const totalTokens = uncached + cacheRead + Number(meter.totalCacheWrite || 0) + Number(meter.totalOutput || 0);
+      const tokPart = totalTokens > 0 ? ` · ${formatTokenCount(totalTokens)} tokens` : '';
       strip.querySelector('.zone-cost-strip-fill').style.width = `${pct}%`;
       strip.querySelector('.zone-cost-strip-text').textContent =
-        `${typeof formatCostUsd === 'function' ? formatCostUsd(cumulative) : '$' + cumulative.toFixed(2)} · ${pct}% cached`;
+        `${typeof formatCostUsd === 'function' ? formatCostUsd(cumulative) : '$' + cumulative.toFixed(2)}${tokPart} · ${pct}% cached`;
       strip.dataset.state = 'visible';
     }
 
@@ -9008,8 +9016,15 @@
       }
 
       if (!result || !result.ok) {
-        const msg = result?.message || result?.reason || 'Run failed';
-        showToast('error', msg, 2400);
+        if (result?.error === 'usage_limit_exceeded') {
+          const label = result.reason === 'daily_limit' ? 'Daily' : 'Monthly';
+          const used = typeof result.used === 'number' ? '$' + result.used.toFixed(2) : '';
+          const limit = typeof result.limit === 'number' ? '$' + result.limit.toFixed(2) : '';
+          showToast('error', `${label} spending limit reached (${used} / ${limit}). Update limits in Settings → Usage.`, 5000);
+        } else {
+          const msg = result?.message || result?.reason || 'Run failed';
+          showToast('error', msg, 2400);
+        }
         scrollChatIfFollowing(runId);
         return;
       }
@@ -9404,7 +9419,6 @@
       document.querySelectorAll('.mtab').forEach(b => b.classList.toggle('active', b.dataset.stab === tab));
       if (tab === 'usage') renderUsageSettings();
       if (tab === 'keys') renderKeysSettings();
-      if (tab === 'memory') renderMemorySettings();
     }
 
     function renderKeysSettings(){
@@ -9424,23 +9438,6 @@
         const serverConfigured = opts.serverConfigured;
         const saved = keys[provider] || '';
         const masked = maskKey(saved);
-        const catalog = ZONE_MODEL_CATALOG[provider] || [];
-        const activeModelsAll = getActiveModels();
-        const activeModels = activeModelsAll[provider] || {};
-        function modelOptions(selectedId) {
-          const opts = ['<option value="">(server default)</option>'];
-          for (const m of catalog) {
-            const sel = m.id === selectedId ? ' selected' : '';
-            opts.push(`<option value="${escapeHtml(m.id)}"${sel}>${escapeHtml(m.label)}</option>`);
-          }
-          return opts.join('');
-        }
-        const highOpt = getModelOption(provider, activeModels.high);
-        const stdOpt = getModelOption(provider, activeModels.standard);
-        const highCost = highOpt && highOpt.costNote ? highOpt.costNote : '';
-        const stdCost = stdOpt && stdOpt.costNote ? stdOpt.costNote : '';
-        const highWorker = highOpt && highOpt.workerSuitable === false ? (highOpt.workerSuitabilityNote || 'Not recommended as Worker subagent') : '';
-        const stdWorker = stdOpt && stdOpt.workerSuitable === false ? (stdOpt.workerSuitabilityNote || 'Not recommended as Worker subagent') : '';
         return `
           <div class="apikey-field-label">${escapeHtml(label)} API Key</div>
           <div class="apikey-input-row">
@@ -9453,28 +9450,18 @@
           </div>
           <div id="apikeyStatus-${provider}" class="apikey-status">${saved ? '<span class="apikey-status success">✓ Saved</span>' : ''}</div>
           ${serverConfigured ? `<div class="apikey-disclaimer">A server-side key is also configured for ${escapeHtml(label)}. Your browser key takes priority when set.</div>` : ''}
-          <div class="model-select-row">
-            <div class="apikey-field-label" style="margin:0">Agent model</div>
-            <select id="modelSelect-${provider}-high">
-              ${modelOptions(activeModels.high || '')}
-            </select>
-            <div id="modelCost-${provider}-high" class="model-cost-warning" style="${highCost ? '' : 'display:none'}">${highCost ? '⚠ ' + escapeHtml(highCost) : ''}</div>
-            <div id="modelWorker-${provider}-high" class="model-cost-warning" style="${highWorker ? '' : 'display:none'}">${highWorker ? '⚠ Worker risk: ' + escapeHtml(highWorker) : ''}</div>
-          </div>
-          <div class="model-select-row">
-            <div class="apikey-field-label" style="margin:0">Planner model</div>
-            <select id="modelSelect-${provider}-standard">
-              ${modelOptions(activeModels.standard || '')}
-            </select>
-            <div id="modelCost-${provider}-standard" class="model-cost-warning" style="${stdCost ? '' : 'display:none'}">${stdCost ? '⚠ ' + escapeHtml(stdCost) : ''}</div>
-            <div id="modelWorker-${provider}-standard" class="model-cost-warning" style="${stdWorker ? '' : 'display:none'}">${stdWorker ? '⚠ Worker risk: ' + escapeHtml(stdWorker) : ''}</div>
-          </div>
         `;
       }
 
       els.settingsBody.innerHTML = `
         <div class="apikey-section">
           <div class="apikey-section-title">API Keys</div>
+
+          <div class="apikey-disclaimer" style="margin-bottom:14px;padding:10px 12px;background:var(--bg-input,#1e1e1e);border-radius:6px;border:1px solid var(--border,#333)">
+            <strong>Recommended:</strong> Use <strong>Anthropic Claude</strong> for best results.
+            Zone is optimized for Claude models — tool use, planning, and agent coordination are significantly more reliable than with OpenAI.
+            OpenAI is supported but may produce lower-quality runs.
+          </div>
 
           <div class="apikey-field-label">Provider</div>
           <div class="apikey-input-row" style="gap:18px">
@@ -9523,45 +9510,12 @@
         });
       });
 
-      function wireModelSelect(provider, tier) {
-        const sel = document.getElementById(`modelSelect-${provider}-${tier}`);
-        const costEl = document.getElementById(`modelCost-${provider}-${tier}`);
-        const workerEl = document.getElementById(`modelWorker-${provider}-${tier}`);
-        if (!sel) return;
-        sel.addEventListener('change', () => {
-          const value = sel.value || '';
-          setActiveModel(provider, tier, value);
-          const opt = getModelOption(provider, value);
-          if (costEl) {
-            if (opt && opt.costNote) {
-              costEl.textContent = '⚠ ' + opt.costNote;
-              costEl.style.display = '';
-            } else {
-              costEl.textContent = '';
-              costEl.style.display = 'none';
-            }
-          }
-          if (workerEl) {
-            if (opt && opt.workerSuitable === false) {
-              workerEl.textContent = '⚠ Worker risk: ' + (opt.workerSuitabilityNote || 'Not recommended as Worker subagent');
-              workerEl.style.display = '';
-            } else {
-              workerEl.textContent = '';
-              workerEl.style.display = 'none';
-            }
-          }
-          updateFooterModelLabel();
-        });
-      }
-
       function wireProviderRow(provider, validateFn) {
         const input = document.getElementById('apikeyInput-' + provider);
         const showBtn = document.getElementById('apikeyShowBtn-' + provider);
         const saveBtn = document.getElementById('apikeySaveBtn-' + provider);
         const clearBtn = document.getElementById('apikeyClearBtn-' + provider);
         const statusEl = document.getElementById('apikeyStatus-' + provider);
-        wireModelSelect(provider, 'high');
-        wireModelSelect(provider, 'standard');
         if (!input || !saveBtn) return;
 
         showBtn.addEventListener('click', () => {
@@ -9677,6 +9631,7 @@
       // pricing.ts rates. Period toggle: day | week | month | all-time.
       let usagePeriod = 'month';
       let usageBreakdownOpen = false;
+      let cachedLimits = { dailyLimit: null, monthlyLimit: null };
       const PROVIDER_LABELS = { anthropic: 'Anthropic', openai: 'OpenAI' };
       const PERIOD_BUTTONS = [
         { key: 'day',   label: 'Today' },
@@ -9771,6 +9726,64 @@
             paintLoaded(data);
           });
         }
+        appendLimitsSection();
+      }
+
+      function appendLimitsSection() {
+        const daily = cachedLimits.dailyLimit != null ? String(cachedLimits.dailyLimit) : '';
+        const monthly = cachedLimits.monthlyLimit != null ? String(cachedLimits.monthlyLimit) : '';
+        const section = document.createElement('div');
+        section.id = 'usageLimitsSection';
+        section.style.cssText = 'margin-top:20px;padding-top:16px;border-top:1px solid var(--border,#333)';
+        section.innerHTML = `
+          <div class="apikey-section-title" style="font-size:var(--font-size-sm,12px);text-transform:uppercase;letter-spacing:.06em;opacity:.6;margin-bottom:10px">Spending Limits</div>
+          <div class="row" style="align-items:center;gap:10px">
+            <div class="k" style="min-width:120px">Daily limit ($)</div>
+            <div class="v" style="flex:1">
+              <input id="usageLimitDaily" type="number" min="0" step="0.01" value="${escapeHtml(daily)}"
+                placeholder="No limit" style="width:100px;padding:4px 8px;background:var(--bg-input,#1e1e1e);border:1px solid var(--border,#444);border-radius:4px;color:inherit;font-size:var(--font-size-sm,12px)" />
+            </div>
+          </div>
+          <div class="row" style="align-items:center;gap:10px;margin-top:6px">
+            <div class="k" style="min-width:120px">Monthly limit ($)</div>
+            <div class="v" style="flex:1">
+              <input id="usageLimitMonthly" type="number" min="0" step="0.01" value="${escapeHtml(monthly)}"
+                placeholder="No limit" style="width:100px;padding:4px 8px;background:var(--bg-input,#1e1e1e);border:1px solid var(--border,#444);border-radius:4px;color:inherit;font-size:var(--font-size-sm,12px)" />
+            </div>
+          </div>
+          <div style="margin-top:10px;display:flex;align-items:center;gap:10px">
+            <button id="usageLimitSave" style="padding:5px 14px;background:var(--violet,#7a5af8);color:#fff;border:none;border-radius:4px;font-size:var(--font-size-sm,12px);cursor:pointer">Save limits</button>
+            <span id="usageLimitStatus" style="font-size:var(--font-size-sm,12px);opacity:.7"></span>
+          </div>
+          <div style="margin-top:6px;font-size:var(--font-size-sm,12px);opacity:.5">Leave blank to disable. Runs will be blocked once the threshold is reached.</div>
+        `;
+        els.settingsBody.appendChild(section);
+        const saveBtn = document.getElementById('usageLimitSave');
+        const statusEl = document.getElementById('usageLimitStatus');
+        if (saveBtn) {
+          saveBtn.addEventListener('click', () => {
+            const dailyVal = parseFloat(document.getElementById('usageLimitDaily').value);
+            const monthlyVal = parseFloat(document.getElementById('usageLimitMonthly').value);
+            const body = {
+              dailyLimit: isFinite(dailyVal) && dailyVal > 0 ? dailyVal : null,
+              monthlyLimit: isFinite(monthlyVal) && monthlyVal > 0 ? monthlyVal : null,
+            };
+            saveBtn.disabled = true;
+            if (statusEl) statusEl.textContent = 'Saving…';
+            fetch('/api/usage-limits', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            }).then(r => r.json()).then(resp => {
+              cachedLimits = body;
+              if (statusEl) statusEl.textContent = resp.ok ? 'Saved' : ('Error: ' + (resp.error || 'unknown'));
+            }).catch(() => {
+              if (statusEl) statusEl.textContent = 'Failed to save';
+            }).finally(() => {
+              saveBtn.disabled = false;
+            });
+          });
+        }
       }
 
       function wirePeriodButtons(){
@@ -9794,6 +9807,14 @@
         const userId = getCurrentUserId();
         const url = '/api/usage?period=' + encodeURIComponent(usagePeriod) +
                     '&userId=' + encodeURIComponent(userId);
+        fetch('/api/usage-limits').then(r => r.json()).then(d => {
+          if (d && ('dailyLimit' in d || 'monthlyLimit' in d)) {
+            cachedLimits = {
+              dailyLimit: typeof d.dailyLimit === 'number' ? d.dailyLimit : null,
+              monthlyLimit: typeof d.monthlyLimit === 'number' ? d.monthlyLimit : null,
+            };
+          }
+        }).catch(() => {});
         fetch(url).then(r => r.json()).then(paintLoaded).catch(() => {
           els.settingsBody.innerHTML = `
             <div class="row"><div class="k">Usage</div><div class="v">Failed to load.</div></div>
@@ -9802,105 +9823,6 @@
       }
 
       loadAndPaint();
-    }
-
-    function renderMemorySettings(){
-      // Project memory: <repo>/.zone/memory.md, written by the agent's
-      // update_memory tool. This tab lists entries and lets the user delete.
-      const repoPath = state.activeRepo?.path || '';
-
-      function paintEmpty(){
-        els.settingsBody.innerHTML = `
-          <div style="margin-bottom:12px">
-            <div style="font-size:var(--font-size-md,13px);color:var(--color-text,#ddd);font-weight:500">Project Memory</div>
-            <div style="font-size:var(--font-size-sm,12px);color:var(--color-text-muted,#888);margin-top:4px">
-              Conventions Zone has learned about your repo. Stored in
-              <code style="font-family:var(--font-mono,monospace);font-size:11px">&lt;repo&gt;/.zone/memory.md</code>
-              — you can commit it to share with your team.
-            </div>
-          </div>
-          <div class="row" style="opacity:0.6;justify-content:center;padding:20px 0">
-            <div class="v" style="text-align:center;font-size:var(--font-size-sm,12px)">No memories yet. Zone will save lessons here as it learns about your project.</div>
-          </div>
-        `;
-      }
-
-      function paintList(entries){
-        const header = `
-          <div style="margin-bottom:12px">
-            <div style="font-size:var(--font-size-md,13px);color:var(--color-text,#ddd);font-weight:500">Project Memory</div>
-            <div style="font-size:var(--font-size-sm,12px);color:var(--color-text-muted,#888);margin-top:4px">
-              Conventions Zone has learned about your repo. Stored in
-              <code style="font-family:var(--font-mono,monospace);font-size:11px">&lt;repo&gt;/.zone/memory.md</code>
-              — you can commit it to share with your team.
-            </div>
-          </div>
-        `;
-        if (!entries.length) {
-          paintEmpty();
-          return;
-        }
-        const rows = entries.map((e, i) => `
-          <div class="row memory-row" data-memory-index="${i}" style="align-items:flex-start;gap:8px">
-            <div class="k" style="font-family:var(--font-mono,monospace);font-size:11px;opacity:0.6;flex:0 0 auto;padding-top:2px">[${escapeHtml(String(e.date || ''))}]</div>
-            <div class="v" style="flex:1 1 auto;text-align:left;white-space:normal;word-break:break-word">${escapeHtml(String(e.text || ''))}</div>
-            <button class="memory-delete-btn" data-memory-delete="${i}" title="Delete this memory" aria-label="Delete this memory" style="flex:0 0 auto;background:transparent;border:none;color:var(--color-text-muted,#888);cursor:pointer;padding:2px 6px;border-radius:var(--radius-sm,6px);font-size:14px;line-height:1">🗑</button>
-          </div>
-        `).join('');
-        els.settingsBody.innerHTML = header + rows;
-        els.settingsBody.querySelectorAll('.memory-delete-btn').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const idxRaw = btn.getAttribute('data-memory-delete');
-            const idx = Number.parseInt(String(idxRaw || ''), 10);
-            if (!Number.isInteger(idx) || idx < 0) return;
-            deleteEntry(idx);
-          });
-        });
-      }
-
-      function paintFailed(){
-        els.settingsBody.innerHTML = `
-          <div class="row"><div class="k">Memory</div><div class="v">Failed to load.</div></div>
-        `;
-      }
-
-      function load(){
-        if (!repoPath) {
-          els.settingsBody.innerHTML = `
-            <div class="row"><div class="k">Memory</div><div class="v">Open a project first.</div></div>
-          `;
-          return;
-        }
-        const url = '/api/memory?repo=' + encodeURIComponent(repoPath);
-        fetch(url)
-          .then(r => r.json())
-          .then(data => {
-            if (!data || data.ok === false) { paintFailed(); return; }
-            paintList(Array.isArray(data.entries) ? data.entries : []);
-          })
-          .catch(paintFailed);
-      }
-
-      function deleteEntry(idx){
-        if (!repoPath) return;
-        const url = '/api/memory/entry?repo=' + encodeURIComponent(repoPath) +
-                    '&index=' + encodeURIComponent(String(idx));
-        fetch(url, { method: 'DELETE' })
-          .then(r => r.json())
-          .then(data => {
-            if (data && data.ok) {
-              try { showToast('info', 'Memory entry deleted', 1600); } catch {}
-              load();
-            } else {
-              try { showToast('error', 'Delete failed', 2000); } catch {}
-            }
-          })
-          .catch(() => {
-            try { showToast('error', 'Delete failed', 2000); } catch {}
-          });
-      }
-
-      load();
     }
 
     // ---- Wiring ----
