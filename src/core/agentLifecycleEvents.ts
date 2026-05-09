@@ -128,7 +128,8 @@ export type ZoneStructuredProgressEvent = {
     | "command_auto_approved"
     | "command_trusted"
     | "terminal_output"
-    | "terminal_done";
+    | "terminal_done"
+    | "narration";
   title: string;
   detail?: string;
   filePath?: string;
@@ -177,6 +178,8 @@ export type ZoneStructuredProgressEvent = {
   responseText?: string;
   responseHtml?: string;
   contextFiles?: string[];
+  /** Plain-text narration emitted by the agent loop between tool calls. */
+  text?: string;
   planner?: {
     changeDescription: string;
     strategy: string;
@@ -185,6 +188,13 @@ export type ZoneStructuredProgressEvent = {
     /** Cross-file dependency hints (e.g. imports / dependents). */
     warnings?: string[];
   };
+};
+
+/** Documentation type for `narration` progress events: a one-line intent
+ * statement the agent emits before invoking each tool. */
+export type NarrationPayload = {
+  text: string;
+  iter?: number;
 };
 
 export function createAgentLifecycleEvent(

@@ -5363,6 +5363,15 @@ const initializeTodosFromPlan = (): void => {
             parentRunId: e.parentRunId,
           } as any);
         }
+        if (e && typeof e === "object" && e.type === "narration") {
+          emitStructuredProgress({
+            type: "narration" as any,
+            title: String(e.title || "").slice(0, 200),
+            text: String(e.text || "").slice(0, 2000),
+            iter: typeof e.iter === "number" ? e.iter : undefined,
+            status: "active",
+          } as any);
+        }
       },
       onProgress: (msg: string) => {
         if (!runId) return;

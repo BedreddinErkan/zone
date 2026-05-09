@@ -248,6 +248,11 @@ export function assembleAgentSystemPrompt(input: {
     `   apply targeted fix with intent='modify' or intent='delete', re-run tests.\n` +
     `6. When all checks pass (or no tests exist), respond with a concise plain-text summary.\n` +
     `Maximum iterations: ${input.baseMaxIterations} (already enforced -- do not stall).\n\n` +
+    `NARRATION (one short line before each tool call):\n` +
+    `Before invoking each tool, write one short sentence in plain English describing what you're about to do and why. ` +
+    `Examples: "Reading the README to find the existing structure.", "Now patching package.json to add the dev dependency.", "Searching for callers of the renamed function." ` +
+    `Keep it to one short line. No bullet points, no markdown headers, no emoji. ` +
+    `This sentence is shown to the user as live narration so they can follow your reasoning.\n\n` +
     `OUTPUT ECONOMY:\n` +
     `- Final response: 60-80 words unless an error/warning needs more detail.\n` +
     `- Include changed files, verification result, and any remaining warning.\n` +
@@ -1577,6 +1582,8 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     }
   };
 
+  let lastNarrationEmitted = "";
+
   for (let iter = 0; iter < iterationBudget.maxIterationsForRun; iter += 1) {
     debugLog("[zone-agent-iter-start]", {
       runId: input.runId,
@@ -1658,6 +1665,31 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
         type: "todo_status_changed",
         todoId: marker.todoId,
         todoStatus: marker.status,
+      });
+    }
+
+    // Forward the LLM's plain-language text (between tool_calls) as a
+    // `narration` event so the UI can interleave intent statements with tool
+    // rows. Strip internal bracketed markers (TODO/step/verification/agent_loop)
+    // so they don't bleed into user-facing prose.
+    const narrationText = String(assistantContentForProgress)
+      .replace(/\[(?:TODO|step|ZONE_VERIFICATION|AGENT_LOOP)[^\]]*\]/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (
+      narrationText &&
+      narrationText.length >= 8 &&
+      narrationText !== lastNarrationEmitted &&
+      typeof input.runId === "string" &&
+      input.runId.trim()
+    ) {
+      lastNarrationEmitted = narrationText;
+      input.onStructuredEvent?.({
+        type: "narration",
+        title: narrationText.slice(0, 200),
+        text: narrationText.slice(0, 2000),
+        iter: iter + 1,
+        status: "active",
       });
     }
 
