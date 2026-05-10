@@ -54,6 +54,8 @@ function simulateLoop(escalationIters) {
 
 const checks = [];
 
+const ESCALATED_CAP = BASE_MAX_ITERATIONS + ESCALATION_BONUS_ITERATIONS;
+
 {
   const result = simulateLoop(new Set());
   const caps = result.progress
@@ -61,7 +63,7 @@ const checks = [];
     .filter((evt) => evt.event === "iteration")
     .map((evt) => evt.iterationCap);
   checks.push(check(
-    "no escalation keeps cap at 10 and exits after 10 iterations",
+    `no escalation keeps cap at BASE (${BASE_MAX_ITERATIONS}) and exits after ${BASE_MAX_ITERATIONS} iterations`,
     result.state.maxIterationsForRun === BASE_MAX_ITERATIONS &&
       caps.every((cap) => cap === BASE_MAX_ITERATIONS) &&
       result.executedIters.length === BASE_MAX_ITERATIONS,
@@ -76,9 +78,9 @@ const checks = [];
     .filter((evt) => evt.event === "iteration" && evt.iter > 5)
     .map((evt) => evt.iterationCap);
   checks.push(check(
-    "escalation changes cap to 15",
-    result.state.maxIterationsForRun === BASE_MAX_ITERATIONS + ESCALATION_BONUS_ITERATIONS &&
-      postEscalationCaps.every((cap) => cap === 15),
+    `escalation raises cap to BASE+BONUS (${ESCALATED_CAP})`,
+    result.state.maxIterationsForRun === ESCALATED_CAP &&
+      postEscalationCaps.every((cap) => cap === ESCALATED_CAP),
     { postEscalationCaps: [...new Set(postEscalationCaps)] }
   ));
 }
@@ -90,26 +92,29 @@ const checks = [];
     .filter((evt) => evt.event === "zone-agent-escalation-bonus-granted");
   checks.push(check(
     "bonus granted only once",
-    grants.length === 1 && result.state.maxIterationsForRun === 15,
+    grants.length === 1 && result.state.maxIterationsForRun === ESCALATED_CAP,
     { grants }
   ));
 }
 
 {
   const result = simulateLoop(new Set([5]));
+  const expectedLast = ESCALATED_CAP - 1;
   checks.push(check(
-    "loop reaches iter 14 when bonus is granted",
-    result.executedIters.includes(14) && result.executedIters.length === 15,
+    `loop reaches iter ${expectedLast} when bonus is granted`,
+    result.executedIters.includes(expectedLast) &&
+      result.executedIters.length === ESCALATED_CAP,
     { lastIter: result.executedIters[result.executedIters.length - 1] }
   ));
 }
 
 {
   const result = simulateLoop(new Set());
+  const expectedLast = BASE_MAX_ITERATIONS - 1;
   checks.push(check(
-    "loop stops at iter 9 without escalation",
-    result.executedIters[result.executedIters.length - 1] === 9 &&
-      !result.executedIters.includes(10),
+    `loop stops at iter ${expectedLast} without escalation`,
+    result.executedIters[result.executedIters.length - 1] === expectedLast &&
+      !result.executedIters.includes(BASE_MAX_ITERATIONS),
     { lastIter: result.executedIters[result.executedIters.length - 1] }
   ));
 }

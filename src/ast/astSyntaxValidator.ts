@@ -81,6 +81,10 @@ function normalizeCommentText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function countBrokenTemplateExpressions(fileContent: string): number {
+  return fileContent.match(/`[^`]*\$\s+\{/g)?.length ?? 0;
+}
+
 export function validateSyntax(
   fileContent: string,
   filePath: string
@@ -107,13 +111,17 @@ export function validateSyntax(
 export function checkSemanticSmells(
   fileContent: string,
   filePath: string,
-  parsedAst?: t.File
+  parsedAst?: t.File,
+  beforeContent?: string
 ): SemanticSmellResult {
   if (!isSupportedScriptExtension(filePath)) {
     return { ok: true };
   }
 
-  if (/`[^`]*\$\s+\{/.test(fileContent)) {
+  const brokenTemplateExpressionCount = countBrokenTemplateExpressions(fileContent);
+  const previousBrokenTemplateExpressionCount =
+    beforeContent === undefined ? 0 : countBrokenTemplateExpressions(beforeContent);
+  if (brokenTemplateExpressionCount > previousBrokenTemplateExpressionCount) {
     return {
       ok: false,
       reason: "broken_template_expression",

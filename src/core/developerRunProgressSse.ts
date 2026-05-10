@@ -1,5 +1,6 @@
 import type { Response } from "express";
 import type { AgentLifecycleEvent, ZoneStructuredProgressEvent } from "./agentLifecycleEvents.js";
+import { getRequestContext } from "../llm/openaiContext.js";
 
 export type DeveloperPatchProgressPayload = {
   stage: string;
@@ -104,6 +105,37 @@ function pushRunEvent(runId: string, payload: DeveloperPatchProgressPayload): vo
   }
 }
 
+export function routeProgressPayloadForRequestContext(
+  runId: string | undefined,
+  payload: DeveloperPatchProgressPayload
+): { runId: string; payload: DeveloperPatchProgressPayload } | null {
+  const rid = String(runId || "").trim();
+  if (!rid) return null;
+  const ctx = getRequestContext();
+  const subagentId = String(ctx?.subagentId || "").trim();
+  const parentRunId = String(ctx?.parentRunId || "").trim();
+  if (!subagentId || !parentRunId) {
+    return { runId: rid, payload };
+  }
+  const subagentType = ctx?.subagentType;
+  const progress = payload.progress
+    ? {
+        ...payload.progress,
+        runId: parentRunId,
+        subagentId,
+        subagentType,
+        parentRunId,
+      }
+    : payload.progress;
+  return {
+    runId: parentRunId,
+    payload: {
+      ...payload,
+      progress,
+    },
+  };
+}
+
 export function attachDeveloperPatchProgressSseClient(
   runId: string,
   res: Response
@@ -129,11 +161,12 @@ export function emitDeveloperPatchProgress(
   runId: string | undefined,
   payload: DeveloperPatchProgressPayload
 ): void {
-  if (!runId) return;
-  pushRunEvent(runId, payload);
-  const listeners = progressStreams.get(runId);
+  const routed = routeProgressPayloadForRequestContext(runId, payload);
+  if (!routed) return;
+  pushRunEvent(routed.runId, routed.payload);
+  const listeners = progressStreams.get(routed.runId);
   if (!listeners) return;
-  const body = JSON.stringify(payload);
+  const body = JSON.stringify(routed.payload);
   const sse = `data: ${body}\n\n`;
   for (const client of listeners) {
     try {

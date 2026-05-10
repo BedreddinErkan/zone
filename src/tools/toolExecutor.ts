@@ -1,4 +1,5 @@
 import { exec } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -14,9 +15,14 @@ import {
   validateSyntax,
 } from "../ast/astSyntaxValidator.js";
 import { checkWriteScope } from "./scopeGuard.js";
+import { sanitizeVerificationEnv, strippedEnvKeys } from "../core/buildEnv.js";
+import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
+import type { ProjectFramework } from "../repo/detectFramework.js";
+import { generateFileOutline } from "./fileOutline.js";
+import { getDevServerConfig, probeDevServer } from "../visual/devServerProbe.js";
+import { runVerifyVisual, type VerifyVisualInput } from "./verifyVisual.js";
 
 const execAsync = promisify(exec);
-const READ_FILE_MAX_CHARS = 150_000;
 
 export type ResolveCwdResult =
   | { ok: true; cwd: string }
@@ -33,12 +39,18 @@ const DISPATCHED_TOOLS = new Set([
   "apply_patch",
   "write_file",
   "search_in_files",
+  "verify_visual",
   "find_references",
+  "Task",
   "run_command_background",
   "read_background_output",
   "kill_background",
   "list_background",
   "update_memory",
+  // TodoWrite is intercepted in the agent loop (no I/O), but must be listed here
+  // so the IIFE startup guard at :51-75 doesn't fail-fast on its presence in
+  // ZONE_TOOLS.
+  "TodoWrite",
 ]);
 
 // Import the definitions lazily to keep the check co-located with the executor.
@@ -75,6 +87,8 @@ export interface ToolResult {
   error?: string;
   truncated?: boolean;
   rejectionReason?: string;
+  contentLength?: number;
+  metadata?: Record<string, unknown>;
 }
 
 function truncateText(
@@ -285,6 +299,43 @@ function stagedRead(
   return staging.has(key) ? staging.get(key)! : null;
 }
 
+function formatSearchContextBlock(
+  filePath: string,
+  lines: string[],
+  matchLines: number[]
+): string[] {
+  const sortedMatches = [...new Set(matchLines)]
+    .filter((line) => Number.isFinite(line) && line >= 1)
+    .sort((a, b) => a - b);
+  const blocks: Array<{ start: number; end: number; matches: Set<number> }> = [];
+
+  for (const matchLine of sortedMatches) {
+    const start = Math.max(1, matchLine - 3);
+    const end = Math.min(lines.length, matchLine + 3);
+    const prev = blocks[blocks.length - 1];
+    if (prev && start <= prev.end + 1) {
+      prev.end = Math.max(prev.end, end);
+      prev.matches.add(matchLine);
+    } else {
+      blocks.push({ start, end, matches: new Set([matchLine]) });
+    }
+  }
+
+  return blocks.map((block) => {
+    const blockMatchLines = [...block.matches].sort((a, b) => a - b);
+    const header =
+      block.matches.size === 1
+        ? `${filePath}:${blockMatchLines[0]}`
+        : `${filePath}:${blockMatchLines[0]}-${blockMatchLines[blockMatchLines.length - 1]} (${blockMatchLines.length} matches)`;
+    const context = [];
+    for (let i = block.start; i <= block.end; i += 1) {
+      const marker = block.matches.has(i) ? ">" : " ";
+      context.push(`${marker} ${String(i).padStart(4)}: ${lines[i - 1] ?? ""}`);
+    }
+    return `${header}\n${context.join("\n")}`;
+  });
+}
+
 function stagedWrite(
   staging: Map<string, string> | undefined,
   abs: string,
@@ -388,11 +439,191 @@ export async function executeTool(
     /** Tur P2-scope: when present, write tools (apply_patch, write_file)
      *  reject paths outside the union of plan.steps[*].filesLikely. */
     executionPlan?: import("../llm/executionPlan.js").ExecutionPlan | null;
+    allowedTools?: ReadonlySet<string>;
+    userId?: string;
+    framework?: ProjectFramework;
+    subagent?: {
+      id: string;
+      type: "worker" | "explore" | "verifier";
+      parentRunId: string;
+    };
+    onToolCall?: (name: string, args: Record<string, unknown>) => void;
+    onToolResult?: (name: string, result: ToolResult) => void;
+    onStructuredEvent?: (evt: unknown) => void;
+    visualScreenshotCount?: number;
+    tokenBudgetBaseTokens?: number;
+    /** L.2: tier-based subagent call cap override. Defaults to MAX_SUBAGENT_CALLS_PER_PARENT_RUN. */
+    maxSubagentCallsOverride?: number;
   }
 ): Promise<ToolResult> {
   const args = (toolArgs ?? {}) as Record<string, unknown>;
 
   try {
+    if (toolName === "Task") {
+      // nested subagent refused: Workers cannot dispatch Task.
+      if (input?.subagent !== undefined) {
+        return {
+          success: false,
+          output:
+            "Nested subagents are not allowed. The Task tool can only be invoked from the top-level agent.",
+        };
+      }
+      if (input?.allowedTools && !input.allowedTools.has(toolName)) {
+        return {
+          success: false,
+          output: `Tool "${toolName}" is not in the allowed set for this run.`,
+        };
+      }
+
+      const parentRunId = input?.runId;
+      if (!parentRunId) {
+        return {
+          success: false,
+          output: "Task tool requires a parent runId in execution context.",
+        };
+      }
+      // TODO(PR 5+): relax this once subagent write-set prediction and
+      // conflict handling can prove the Worker cannot overlap parent edits.
+      if (input?.stagingFiles && input.stagingFiles.size > 0) {
+        return {
+          success: false,
+          output:
+            "Task dispatch is currently not allowed after the parent run has staged uncommitted writes. " +
+            "The parent must flush or discard its current staging set before delegating to a Worker subagent. " +
+            "Continue the work directly in this run.",
+          error: "task_dispatch_blocked_parent_has_staged_writes",
+          rejectionReason: "parent_staged_writes_present",
+        };
+      }
+
+      const {
+        incrementSubagentCallCount,
+        getSubagentCallCount,
+        MAX_SUBAGENT_CALLS_PER_PARENT_RUN,
+        subagentTypeAllowedTools,
+        subagentTypeMaxIterations,
+        VALID_SUBAGENT_TYPES,
+        formatSubagentToolResultForParent,
+        formatExploreSubagentToolResultForParent,
+      } = await import("../llm/subagents.js");
+
+      const effectiveSubagentCap =
+        typeof input?.maxSubagentCallsOverride === "number"
+          ? input.maxSubagentCallsOverride
+          : MAX_SUBAGENT_CALLS_PER_PARENT_RUN;
+      if (getSubagentCallCount(parentRunId) >= effectiveSubagentCap) {
+        return {
+          success: false,
+          output:
+            `Subagent call budget exhausted (${effectiveSubagentCap} per parent run). ` +
+            "Complete remaining work directly without delegation.",
+        };
+      }
+
+      const subagentType = args.subagent_type;
+      const description = args.description;
+      if (!VALID_SUBAGENT_TYPES.includes(subagentType as "worker" | "explore")) {
+        return {
+          success: false,
+          output: `Subagent type "${String(subagentType)}" is not supported. Valid types: ${VALID_SUBAGENT_TYPES.join(", ")}.`,
+        };
+      }
+      const resolvedType = subagentType as "worker" | "explore";
+      if (typeof description !== "string" || !description.trim()) {
+        return {
+          success: false,
+          output: "Task description must be a non-empty string.",
+        };
+      }
+
+      const subagentId = randomUUID();
+      incrementSubagentCallCount(parentRunId);
+
+      input?.onStructuredEvent?.({
+        type: "subagent_started",
+        title: description.trim().slice(0, 80),
+        status: "active",
+        subagentId,
+        subagentType: resolvedType,
+        parentRunId,
+      } satisfies Partial<ZoneStructuredProgressEvent>);
+
+      const { runAgentLoop } = await import("../llm/agentLoop.js");
+      const { withRequestContext } = await import("../llm/openaiContext.js");
+      const subagentResult = await withRequestContext(
+        { subagentId, subagentType: resolvedType, parentRunId },
+        () =>
+          runAgentLoop({
+            task: description.trim(),
+            repoPath: repoPath || process.cwd(),
+            runId: parentRunId,
+            userId: input?.userId,
+            framework: input?.framework,
+            maxIterationsOverride: subagentTypeMaxIterations(resolvedType),
+            allowedTools: subagentTypeAllowedTools(resolvedType),
+            subagent: { id: subagentId, type: resolvedType, parentRunId },
+            parentStagingFiles: resolvedType === "worker" ? input?.stagingFiles : undefined,
+            abortSignal: input?.abortSignal,
+            onProgress,
+            onToolCall: input?.onToolCall,
+            onToolResult: input?.onToolResult,
+            onStructuredEvent: input?.onStructuredEvent,
+            tokenBudgetBaseTokens: input?.tokenBudgetBaseTokens,
+          })
+      );
+
+      const result =
+        resolvedType === "explore"
+          ? formatExploreSubagentToolResultForParent(subagentResult, subagentId, parentRunId)
+          : formatSubagentToolResultForParent(subagentResult, subagentId, parentRunId);
+      let subagentStatus: "completed" | "partial" | "failed" = subagentResult.success
+        ? "completed"
+        : "failed";
+      const defaultTitle = resolvedType === "explore" ? "Explore completed" : "Worker completed";
+      let title = subagentResult.summary || defaultTitle;
+      try {
+        const parsed = JSON.parse(result.output) as {
+          status?: "completed" | "partial" | "failed";
+          summary?: string;
+        };
+        if (
+          parsed.status === "completed" ||
+          parsed.status === "partial" ||
+          parsed.status === "failed"
+        ) {
+          subagentStatus = parsed.status;
+        }
+        if (typeof parsed.summary === "string" && parsed.summary.trim()) {
+          title = parsed.summary.trim();
+        }
+      } catch {
+        // Keep lifecycle reporting best-effort; the tool result still carries the raw summary.
+      }
+      input?.onStructuredEvent?.({
+        type: "subagent_completed",
+        title: title.slice(0, 120),
+        status:
+          subagentStatus === "completed"
+            ? "success"
+            : subagentStatus === "partial"
+              ? "warning"
+              : "error",
+        subagentStatus,
+        subagentId,
+        subagentType: resolvedType,
+        parentRunId,
+      } satisfies Partial<ZoneStructuredProgressEvent>);
+
+      return result;
+    }
+
+    if (input?.allowedTools && !input.allowedTools.has(toolName)) {
+      return {
+        success: false,
+        output: `Tool "${toolName}" is not in the allowed set for this run.`,
+      };
+    }
+
     if (toolName === "run_command") {
       const command = String(args.command ?? "");
       const resolved = resolveRunCommandCwd(args.cwd, repoPath);
@@ -436,13 +667,7 @@ export async function executeTool(
         windowsHide: true,
         maxBuffer: 10 * 1024 * 1024,
         // Build/test commands run by the agent must execute under a clean NODE_ENV.
-        // The parent zone-api process may have NODE_ENV set to "development" via
-        // dotenv or other means; inheriting that breaks Next.js prerender and other
-        // production-mode tooling. Strip it; let npm/next decide the right value.
-        env: (() => {
-          const { NODE_ENV: _drop, ...rest } = process.env;
-          return rest;
-        })(),
+        env: sanitizeVerificationEnv(),
       };
 
       if (process.platform === "win32") {
@@ -462,9 +687,25 @@ export async function executeTool(
         hasAbortSignal: !!input?.abortSignal,
       });
 
-      const { stdout, stderr } = await withStagingTempFlush(input?.stagingFiles, async () => {
-        return await execAsync(command, execOptions);
-      });
+      let stdout = "";
+      let stderr = "";
+      try {
+        const result = await withStagingTempFlush(input?.stagingFiles, async () => {
+          return await execAsync(command, execOptions);
+        });
+        stdout = result.stdout;
+        stderr = result.stderr;
+        console.log(
+          `[zone-verify] cmd="${command.slice(0, 80)}" cwd="${cwd}" exitCode=0 stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
+        );
+      } catch (err) {
+        const code = Number((err as { code?: unknown }).code);
+        const exitCode = Number.isFinite(code) ? code : 1;
+        console.log(
+          `[zone-verify] cmd="${command.slice(0, 80)}" cwd="${cwd}" exitCode=${exitCode} stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
+        );
+        throw err;
+      }
       const combined = [stdout, stderr].filter(Boolean).join("\n");
       const t = truncateText(combined || "(no output)", 4000);
       return { success: true, output: t.text, truncated: t.truncated };
@@ -621,34 +862,109 @@ export async function executeTool(
       onProgress?.(`[tool] Reading: ${filePath}`);
       const abs = path.join(repoPath, filePath);
       const staged = stagedRead(input?.stagingFiles, abs);
-      const content = staged !== null ? staged : fs.readFileSync(abs, "utf8");
-      const chunk = content.slice(0, READ_FILE_MAX_CHARS);
-      const remainingChars = Math.max(content.length - chunk.length, 0);
-      const wasTruncated = remainingChars > 0;
-      const warning = wasTruncated
-        ? `[FILE TRUNCATED — read ${chunk.length} of ${content.length} chars from the start; remaining ${remainingChars} chars NOT shown. The file is too large to read in one call. Use search_in_files to find the section you need, then ask the user to break the task into smaller scopes if necessary.]\n\n`
-        : "";
+      const fullContent = staged !== null ? staged : fs.readFileSync(abs, "utf8");
+      const charCount = fullContent.length;
+      const lineRange = args.lineRange;
 
-      debugLog("[zone-tool-readfile-debug]", JSON.stringify({
-        filePath,
-        fullSize: content.length,
-        returnedChars: chunk.length,
-        wasTruncated,
-        limit: READ_FILE_MAX_CHARS,
-      }));
-      if (wasTruncated) {
-        debugLog("[zone-tool-readfile-truncated]", JSON.stringify({
-          filePath,
-          fullSize: content.length,
-          returnedChars: chunk.length,
-          remainingChars,
-        }));
+      if (lineRange != null && (!Array.isArray(lineRange) || lineRange.length !== 2)) {
+        return {
+          success: false,
+          output: "lineRange must be [startLine, endLine] both integers",
+        };
       }
-      return {
-        success: true,
-        output: warning + chunk,
-        truncated: wasTruncated,
-      };
+
+      if (Array.isArray(lineRange)) {
+        const [startRaw, endRaw] = lineRange.map((n) => Number(n));
+        if (!Number.isFinite(startRaw) || !Number.isFinite(endRaw)) {
+          return {
+            success: false,
+            output: "lineRange must be [startLine, endLine] both integers",
+          };
+        }
+        const lines = fullContent.split("\n");
+        const start = Math.max(1, Math.floor(startRaw));
+        const end = Math.min(lines.length, Math.floor(endRaw));
+        if (start > end) {
+          return {
+            success: false,
+            output: `Invalid lineRange [${start}, ${end}]: start > end`,
+          };
+        }
+        const sliced = lines.slice(start - 1, end).join("\n");
+        debugLog("[zone-tool-readfile-smart]", JSON.stringify({
+          mode: "lineRange",
+          filePath,
+          lineRange: [start, end],
+          totalLines: lines.length,
+          fullSize: charCount,
+          returnedChars: sliced.length,
+        }));
+        return {
+          success: true,
+          output: `[lineRange ${start}-${end} of ${lines.length} total lines from ${filePath}]\n\n${sliced}`,
+          contentLength: sliced.length,
+        };
+      }
+
+      if (charCount <= 30_000) {
+        debugLog("[zone-tool-readfile-smart]", JSON.stringify({
+          mode: "full-small",
+          filePath,
+          fullSize: charCount,
+          returnedChars: charCount,
+        }));
+        return { success: true, output: fullContent, contentLength: charCount };
+      }
+
+      if (charCount <= 100_000) {
+        const lineCount = fullContent.split("\n").length;
+        const hint = `[${filePath}: ${charCount} chars, ${lineCount} lines. For focused reads use lineRange: [start, end].]\n\n`;
+        debugLog("[zone-tool-readfile-smart]", JSON.stringify({
+          mode: "full-medium",
+          filePath,
+          fullSize: charCount,
+          lineCount,
+          returnedChars: hint.length + charCount,
+        }));
+        return {
+          success: true,
+          output: hint + fullContent,
+          contentLength: charCount,
+        };
+      }
+
+      const lines = fullContent.split("\n");
+      const head = lines.slice(0, 100).join("\n");
+      const tail = lines.slice(-50).join("\n");
+      const outline = generateFileOutline(fullContent, filePath);
+      const elidedCount = Math.max(lines.length - 150, 0);
+      const summary = [
+        `[FILE OUTLINE — ${filePath} is ${lines.length} lines, ${charCount} chars.]`,
+        `[Use read_file({ filePath, lineRange: [start, end] }) to read specific sections.]`,
+        "",
+        outline || "[no top-level symbols detected]",
+        "",
+        "─── HEAD: first 100 lines ───",
+        head,
+        "",
+        `─── ${elidedCount} lines elided (use lineRange) ───`,
+        "",
+        "─── TAIL: last 50 lines ───",
+        tail,
+      ].join("\n");
+
+      debugLog(
+        "[zone-tool-readfile-smart]",
+        `[FILE OUTLINE — ${filePath}] ` + JSON.stringify({
+          mode: "outline-large",
+          filePath,
+          fullSize: charCount,
+          lineCount: lines.length,
+          returnedChars: summary.length,
+          elidedLines: elidedCount,
+        })
+      );
+      return { success: true, output: summary, contentLength: summary.length };
     }
 
     if (toolName === "list_files") {
@@ -1314,7 +1630,7 @@ export async function executeTool(
       const syntaxBroken = !validation.ok && validation.reason === "parse_error";
       const smellValidation =
         validation.ok && validation.reason !== "unsupported_extension"
-          ? checkSemanticSmells(outputContent, abs, validation.ast)
+          ? checkSemanticSmells(outputContent, abs, validation.ast, original)
           : { ok: true as const };
       const semanticSmellDetected = !smellValidation.ok;
       debugLog(
@@ -1452,7 +1768,12 @@ export async function executeTool(
       const syntaxBroken = !validation.ok && validation.reason === "parse_error";
       const smellValidation =
         validation.ok && validation.reason !== "unsupported_extension"
-          ? checkSemanticSmells(content, abs, validation.ast)
+          ? checkSemanticSmells(
+              content,
+              abs,
+              validation.ast,
+              fileExists ? originalContent : undefined
+            )
           : { ok: true as const };
       const semanticSmellDetected = !smellValidation.ok;
       debugLog(
@@ -1535,10 +1856,11 @@ export async function executeTool(
       const matchCountsByFile = new Map<string, number>();
       const needle = pattern;
       const maxMatches = 500;
+      let totalMatches = 0;
       let capReached = false;
 
       for (const rel of files) {
-        if (matches.length >= maxMatches) {
+        if (totalMatches >= maxMatches) {
           capReached = true;
           break;
         }
@@ -1551,15 +1873,18 @@ export async function executeTool(
           continue;
         }
         const lines = text.split(/\r?\n/);
+        const fileMatchLines: number[] = [];
         for (let i = 0; i < lines.length; i += 1) {
           const line = lines[i] ?? "";
           if (needle && line.includes(needle)) {
-            matches.push(`${rel}:${i + 1}: ${line}`);
+            fileMatchLines.push(i + 1);
             matchCountsByFile.set(rel, (matchCountsByFile.get(rel) ?? 0) + 1);
-            if (matches.length >= maxMatches) break;
+            totalMatches += 1;
+            if (totalMatches >= maxMatches) break;
           }
         }
-        if (matches.length >= maxMatches) {
+        matches.push(...formatSearchContextBlock(rel, lines, fileMatchLines));
+        if (totalMatches >= maxMatches) {
           capReached = true;
         }
       }
@@ -1570,7 +1895,7 @@ export async function executeTool(
         .slice(0, 5);
       const summaryLines = [
         "---",
-        `[search_in_files] Found ${matches.length} matches across ${matchedFileCount} files.`,
+        `[search_in_files] Found ${totalMatches} matches across ${matchedFileCount} files.`,
         "Top files by match count:",
         ...(topFiles.length > 0
           ? topFiles.map(([file, count]) => `  - ${file}: ${count} matches`)
@@ -1591,6 +1916,75 @@ export async function executeTool(
       const out = `${matchSection}\n\n${summaryBlock}`;
       const t = truncateText(out, 4000);
       return { success: true, output: t.text, truncated: t.truncated };
+    }
+
+    if (toolName === "verify_visual") {
+      const visualInput = args as unknown as VerifyVisualInput;
+      const config = getDevServerConfig();
+      const visualPath = String(visualInput.path || "/");
+      onProgress?.(`[tool] Visual verify: ${visualPath}`);
+
+      const reachable = await probeDevServer(config.baseUrl);
+      if (!reachable) {
+        return {
+          success: false,
+          output:
+            `Dev server not reachable at ${config.baseUrl}. Make sure your dev server is running ` +
+            "(e.g. `npm run dev`). Configure URL in Settings -> Visual verification.",
+        };
+      }
+
+      // Phase I.2: when the agent omits viewport, fall back to the user's
+      // configured default from Settings (rather than the hardcoded
+      // 1280x720 in verifyVisual.ts).
+      const viewportForRun =
+        visualInput.viewport && visualInput.viewport.width && visualInput.viewport.height
+          ? visualInput.viewport
+          : config.defaultViewport;
+
+      const result = await runVerifyVisual(
+        { ...visualInput, path: visualPath, viewport: viewportForRun },
+        {
+          devServerBaseUrl: config.baseUrl,
+          runId: String(input?.runId || "unknown"),
+          screenshotCount: Number(input?.visualScreenshotCount || 0),
+        }
+      );
+
+      if (!result.success) {
+        return {
+          success: false,
+          output: `verify_visual failed: ${result.error}`,
+        };
+      }
+
+      const consoleSection =
+        result.consoleErrors && result.consoleErrors.length > 0
+          ? `\n\nConsole errors detected:\n${result.consoleErrors.map((e) => `  - ${e}`).join("\n")}`
+          : "";
+
+      debugLog("[zone-tool-verify-visual]", JSON.stringify({
+        path: visualPath,
+        baseUrl: config.baseUrl,
+        screenshotPath: result.screenshotPath,
+        pageTitle: result.pageTitle,
+        consoleErrorCount: result.consoleErrors?.length ?? 0,
+      }));
+
+      return {
+        success: true,
+        output:
+          `Screenshot taken: ${visualPath} (page title: "${result.pageTitle ?? ""}"). ` +
+          `Saved to ${result.screenshotPath}.${consoleSection}`,
+        metadata: {
+          screenshotPath: result.screenshotPath,
+          pageTitle: result.pageTitle,
+          path: visualPath,
+          ...(result.consoleErrors && result.consoleErrors.length > 0
+            ? { consoleErrors: result.consoleErrors }
+            : {}),
+        },
+      };
     }
 
     if (toolName === "find_references") {

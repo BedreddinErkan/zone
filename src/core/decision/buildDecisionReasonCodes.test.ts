@@ -25,27 +25,38 @@ describe("buildDecisionReasonCodes", () => {
     expect(result).toContain("BLOCKED_SCHEMA_RISK");
   });
 
-  it("returns preview mass scope and low confidence codes", () => {
+  // Phase J.4: PREVIEW_* codes are no longer emitted — RunAgentMode dropped
+  // the "preview_only" variant after Phase J.1 collapsed soft signals into
+  // safe_to_apply. The codes still exist in REASON_CODE_PRIORITY for legacy
+  // fixture compatibility, but the generator only emits the BLOCKED_* and
+  // SAFE_* families. The two assertions below now check that "preview_only"
+  // mode (passed defensively) yields an empty code set, not the removed
+  // PREVIEW_* names.
+  it("emits no PREVIEW_* codes for the (legacy) preview_only mode", () => {
     const result = buildDecisionReasonCodes({
+      // @ts-expect-error legacy mode no longer in RunAgentMode union
       mode: "preview_only",
       riskScore: 45,
       confidenceScore: 55,
       normalizedSignals: [{ type: "massScope" }]
     });
 
-    expect(result).toContain("PREVIEW_MASS_SCOPE_CHANGE");
-    expect(result).toContain("PREVIEW_LOW_CONFIDENCE");
+    expect(result).not.toContain("PREVIEW_MASS_SCOPE_CHANGE");
+    expect(result).not.toContain("PREVIEW_LOW_CONFIDENCE");
+    expect(result).toEqual([]);
   });
 
-  it("returns preview schema uncertainty code", () => {
+  it("emits no PREVIEW_* code for legacy preview_only with schema signal", () => {
     const result = buildDecisionReasonCodes({
+      // @ts-expect-error legacy mode no longer in RunAgentMode union
       mode: "preview_only",
       riskScore: 30,
       confidenceScore: 60,
       normalizedSignals: [{ type: "schema" }]
     });
 
-    expect(result).toContain("PREVIEW_SCHEMA_UNCERTAINTY");
+    expect(result).not.toContain("PREVIEW_SCHEMA_UNCERTAINTY");
+    expect(result).toEqual([]);
   });
 
   it("returns safe low risk and high confidence codes", () => {

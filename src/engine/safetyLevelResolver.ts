@@ -53,14 +53,19 @@ export function resolveSafetyLevel(
     };
   }
 
+  // Phase J.1: soft signals (intent mismatch, low quality, low confidence)
+  // no longer gate apply — they downgrade to safe_with_review for telemetry,
+  // and runLlmPatchFlow maps both safe_auto_apply and safe_with_review to
+  // decisionMode = "safe_to_apply". Only step 1 / 2 (real security gates)
+  // produce high_risk_blocked.
   if (
     input.intentMismatch?.hasMismatch &&
     (input.intentMismatch.severity === "medium" ||
       input.intentMismatch.severity === "high")
   ) {
-    safetyReasons.push("Intent mismatch requires manual preview.");
+    safetyReasons.push("Intent mismatch suggests human review.");
     return {
-      safetyLevel: "preview_only",
+      safetyLevel: "safe_with_review",
       safetyReasons,
       confidenceAdjusted: Math.min(input.developerConfidence, 70),
     };
@@ -72,12 +77,12 @@ export function resolveSafetyLevel(
     input.developerConfidence < 70
   ) {
     if (qualityScore < PREVIEW_QUALITY_THRESHOLD) {
-      safetyReasons.push("Patch quality score is below the preview threshold.");
+      safetyReasons.push("Patch quality score is below the review threshold.");
     } else {
-      safetyReasons.push("Current decision engine requires preview.");
+      safetyReasons.push("Confidence below the auto-apply threshold.");
     }
     return {
-      safetyLevel: "preview_only",
+      safetyLevel: "safe_with_review",
       safetyReasons,
       confidenceAdjusted: input.developerConfidence,
     };

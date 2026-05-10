@@ -12,3 +12,10 @@ zone-debug.log
 zone-debug.log.*
 zone-debug.log
 zone-debug.log.*
+.claude/settings.local.json
+
+# Runtime artifacts (verifyVisual screenshots, run-local config)
+.zone/
+
+# Sweep output (append-only CSV, not versioned)
+data/sweep-results.csv

@@ -11,9 +11,20 @@ import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { runAgent } from "../core/runAgent.js";
 import { getUsage, getRunCost } from "../usage/usageTracker.js";
+import { loadLimitConfig, saveLimitConfig, checkUsageLimit } from "./usageLimits.js";
+import {
+  loadVisualSettings,
+  saveVisualSettings,
+  getVisualSettingsDefaults,
+} from "../visual/visualSettings.js";
+import { readTierSettings, writeTierSettings } from "../visual/tierSettings.js";
+import { TIER_LIMITS } from "../llm/tierLimits.js";
+import { buildDashboardData } from "./sweepResultsApi.js";
+import { invalidateDevServerCache } from "../visual/devServerProbe.js";
 import {
   isIrrelevantDeveloperContextPath,
   runLlmPatchFlow,
+  toPublicLlmPatchResponse,
 } from "../core/runLlmPatchFlow.js";
 import { parseTaskIntent } from "../core/taskIntentParser.js";
 import { applyLlmPatches } from "../core/applyLlmPatches.js";
@@ -53,8 +64,13 @@ import {
   PROMPT_REFINEMENT_FALLBACK,
   refinePrompt,
 } from "../llm/refinePrompt.js";
-import { detectIntent, detectMessageType } from "../llm/detectIntent.js";
+import {
+  detectIntent,
+  detectMessageType,
+  shouldUseInvestigationMode,
+} from "../llm/detectIntent.js";
 import { getChatResponseWithContext } from "../llm/chatResponse.js";
+import { runInvestigationFlow } from "../llm/investigationFlow.js";
 import {
   appendConversationMessages,
   getUserQuota,
@@ -76,8 +92,10 @@ import {
   registerRunStart,
 } from "../core/developerRunProgressSse.js";
 import {
+  clearTrustedCommandsForRun,
   rejectPendingApprovalsForRun,
   resolveCommandApproval,
+  setTrustAllForRun,
 } from "./commandApprovals.js";
 import { decodeProgressStage } from "../core/progressStageCodec.js";
 import { validateLlmOutput } from "../core/validateLlmOutput.js";
@@ -92,7 +110,7 @@ import {
   type DeveloperPatchJobRequestPayload,
 } from "../jobs/developerPatchJobs.js";
 import {
-  completeActiveRun,
+  completeActiveRun as completeActiveRunRecord,
   getActiveRunsByUser,
   markAllRunningAsInterrupted,
   upsertActiveRun,
@@ -103,6 +121,15 @@ export const app = express();
 /** Active /api/patch runs — cancelled via POST /api/cancel (AbortSignal → runLlmPatchFlow). */
 const activePatchRunAbortControllers = new Map<string, AbortController>();
 const port = Number(process.env.PORT) || 3000;
+
+async function completeActiveRun(runId: string, status: "completed" | "cancelled"): Promise<void> {
+  try {
+    clearTrustedCommandsForRun(runId);
+  } catch {
+    // best-effort
+  }
+  await completeActiveRunRecord(runId, status);
+}
 let startedPort: number | null = null;
 let startPromise: Promise<void> | null = null;
 const zoneUiDir = path.resolve(__dirname, "../ui");
@@ -904,24 +931,18 @@ async function handleBillingSummary(
 
 function getDecisionModeFromResult(
   result: Record<string, unknown>,
-  confidence: number
+  _confidence: number
 ): string {
+  // Phase J.1: trust the upstream-declared decision verbatim. The previous
+  // confidence < 70 / weak-verification → preview_only fallbacks (Bug 46)
+  // are gone — those heuristics no longer gate apply. Real security blocks
+  // come through as result.decisionMode === "blocked"; everything else is
+  // safe_to_apply by default.
   const decisionMode = result["decisionMode"];
   if (typeof decisionMode === "string" && decisionMode.length > 0) {
     return decisionMode;
   }
-  // Bug 46 fix: when verification is weak (agent skipped tests, tests inconclusive,
-  // or unrelated tests failed), do not claim safe_to_apply. Demote to preview_only
-  // so the UI's "Safe to apply" pill matches the underlying verification signal.
-  const verificationReason = String(result["verificationReason"] || "");
-  const verificationLooksWeak =
-    verificationReason === "no_verification_attempted" ||
-    verificationReason === "tests_inconclusive" ||
-    verificationReason === "tests_failed_unrelated" ||
-    verificationReason === "verification_failed_staged" ||
-    verificationReason === "no_changes_made";
-  if (verificationLooksWeak) return "preview_only";
-  return confidence < 70 ? "preview_only" : "safe_to_apply";
+  return "safe_to_apply";
 }
 
 function getTestEngineerUserFacingReason(reason: string): string {
@@ -1249,6 +1270,7 @@ async function runConversationalFlow(input: {
   /** BYOK: user-supplied OpenAI API key forwarded from the browser header. */
   userApiKey?: string;
   lastChangedFiles?: string[];
+  attachments?: import("./imageUpload.js").ImageAttachment[];
 }): Promise<{
   ok: true;
   decisionMode: "chat";
@@ -1281,6 +1303,7 @@ async function runConversationalFlow(input: {
     task: input.task,
     repoPath: input.repoPath,
     lastChangedFiles: input.lastChangedFiles,
+    attachments: input.attachments,
     onChunk: async (delta) => {
       emitProgress(input.runId, {
         stage: "chat_response",
@@ -1649,6 +1672,7 @@ app.post("/api/cancel", (req, res) => {
   try {
     // If a command approval is pending, treat cancel as rejection.
     rejectPendingApprovalsForRun(runId);
+    clearTrustedCommandsForRun(runId);
   } catch {
     // best-effort
   }
@@ -1773,12 +1797,24 @@ app.post("/api/browse-folder", (_req, res) => {
 app.post("/api/approve-command", (req, res) => {
   const approvalId = typeof req.body?.approvalId === "string" ? req.body.approvalId.trim() : "";
   const runId = typeof req.body?.runId === "string" ? req.body.runId.trim() : "";
-  const approved = !!req.body?.approved;
+  const action = typeof req.body?.action === "string" ? req.body.action : "";
+  const approved = action === "approve" || !!req.body?.approved;
+  const trust = !!req.body?.trust;
   if (!approvalId || !runId) {
     res.status(400).json({ ok: false, reason: "missing_approval_id_or_run_id" });
     return;
   }
-  const r = resolveCommandApproval({ approvalId, approved, runId });
+  if (action === "trust_all") {
+    const r = resolveCommandApproval({ approvalId, approved: true, runId });
+    if (!r.ok) {
+      res.status(404).json({ ok: false, reason: r.message || "not_found" });
+      return;
+    }
+    setTrustAllForRun(runId);
+    res.json({ ok: true, action: "trust_all" });
+    return;
+  }
+  const r = resolveCommandApproval({ approvalId, approved, runId, trust });
   if (!r.ok) {
     res.status(404).json({ ok: false, reason: r.message || "not_found" });
     return;
@@ -2046,6 +2082,157 @@ app.get("/api/usage", async (req, res) => {
     errorLog("[zone] /api/usage failed", err);
     res.status(500).json({ ok: false, reason: "usage_read_failed" });
   }
+});
+
+app.get("/api/sweep-results", (_req, res) => {
+  try {
+    res.json(buildDashboardData());
+  } catch (err) {
+    errorLog("[zone] /api/sweep-results failed", err);
+    res.status(500).json({ ok: false, reason: "sweep_results_read_failed" });
+  }
+});
+
+app.get("/api/usage-limits", (_req, res) => {
+  res.json(loadLimitConfig());
+});
+
+app.put("/api/usage-limits", (req, res) => {
+  const { dailyLimit, monthlyLimit } = req.body ?? {};
+  const daily =
+    dailyLimit === null || dailyLimit === undefined
+      ? null
+      : typeof dailyLimit === "number" && dailyLimit >= 0
+        ? dailyLimit
+        : null;
+  const monthly =
+    monthlyLimit === null || monthlyLimit === undefined
+      ? null
+      : typeof monthlyLimit === "number" && monthlyLimit >= 0
+        ? monthlyLimit
+        : null;
+  try {
+    saveLimitConfig({ dailyLimit: daily, monthlyLimit: monthly });
+    res.json({ ok: true, dailyLimit: daily, monthlyLimit: monthly });
+  } catch (err) {
+    res.status(500).json({ ok: false, reason: "save_failed" });
+  }
+});
+
+// Phase I.2: visual verification settings (dev server URL, viewport,
+// auto-verify toggle). Persisted to ~/.zone/visual-verification.json. The
+// devServerProbe cache is invalidated on save so the next verify_visual
+// call picks up the new URL without needing a server restart.
+app.get("/api/settings/visual-verification", (_req, res) => {
+  try {
+    const settings = loadVisualSettings();
+    res.json({
+      ok: true,
+      settings,
+      defaults: getVisualSettingsDefaults(),
+      envOverride:
+        typeof process.env.ZONE_DEV_SERVER_URL === "string" &&
+        process.env.ZONE_DEV_SERVER_URL.trim()
+          ? process.env.ZONE_DEV_SERVER_URL.trim()
+          : null,
+    });
+  } catch (err) {
+    res
+      .status(500)
+      .json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post("/api/settings/visual-verification", (req, res) => {
+  try {
+    const { devServerBaseUrl, defaultViewport, autoVerifyAfterPatch } =
+      req.body ?? {};
+    const saved = saveVisualSettings({
+      devServerBaseUrl,
+      defaultViewport,
+      autoVerifyAfterPatch,
+    });
+    invalidateDevServerCache();
+    res.json({ ok: true, settings: saved });
+  } catch (err) {
+    res
+      .status(400)
+      .json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Phase L.3: per-tier execution limit overrides. Persisted to
+// ~/.zone/tier-limits.json. ZONE_FORCE_TIER env override always takes priority
+// over these settings (testing bypass). taskToolAllowed is system-level and
+// is not surfaced in the response — the UI must not expose it as editable.
+app.get("/api/settings/tier-limits", (_req, res) => {
+  try {
+    const userOverrides = readTierSettings();
+    const merged = (["simple", "medium", "complex"] as const).reduce(
+      (acc, tier) => {
+        const base = TIER_LIMITS[tier];
+        const ov = userOverrides[tier] ?? {};
+        acc[tier] = {
+          taskToolAllowed: base.taskToolAllowed,
+          maxSubagentCalls: ov.maxSubagentCalls ?? base.maxSubagentCalls,
+          tokenBudgetCap: ov.tokenBudgetCap ?? base.tokenBudgetCap,
+          iterCap: ov.iterCap ?? base.iterCap,
+        };
+        return acc;
+      },
+      {} as typeof TIER_LIMITS
+    );
+    res.json({ ok: true, settings: merged, defaults: TIER_LIMITS, userOverrides });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post("/api/settings/tier-limits", (req, res) => {
+  try {
+    const saved = writeTierSettings((req.body as { userOverrides?: unknown })?.userOverrides ?? {});
+    res.json({ ok: true, userOverrides: saved });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post("/api/settings/tier-limits/reset", (_req, res) => {
+  try {
+    writeTierSettings({});
+    res.json({ ok: true, defaults: TIER_LIMITS });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Phase I.5: serve verify_visual / auto-verify screenshots back to the UI for
+// inline thumbnails and the modal viewer. Files are written by runVerifyVisual
+// to <cwd>/.zone/screenshots/<runId>-<timestamp>.png. The strict regex below
+// is the primary path-traversal defense; the resolved-path containment check
+// is defense-in-depth for any future filename mutation.
+const SCREENSHOT_FILENAME_RE = /^[a-z0-9][a-z0-9_-]*\.png$/i;
+app.get("/api/screenshots/:filename", (req, res) => {
+  const filename = String(req.params.filename || "");
+  if (!SCREENSHOT_FILENAME_RE.test(filename)) {
+    res.status(400).json({ ok: false, error: "Invalid filename" });
+    return;
+  }
+  const screenshotsDir = path.join(process.cwd(), ".zone", "screenshots");
+  const fullPath = path.join(screenshotsDir, filename);
+  if (!fullPath.startsWith(screenshotsDir + path.sep)) {
+    res.status(400).json({ ok: false, error: "Invalid path" });
+    return;
+  }
+  fs.access(fullPath, (err) => {
+    if (err) {
+      res.status(404).json({ ok: false, error: "Screenshot not found" });
+      return;
+    }
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.sendFile(fullPath);
+  });
 });
 
 app.post("/api/admin/reset-monthly-runs", async (req, res) => {
@@ -2414,7 +2601,13 @@ app.post("/api/classify-intent", async (req, res) => {
     const messageType = forcedExecute
       ? "patch_request"
       : await detectMessageType(normalizedTask, userApiKey || undefined);
-    const intent = messageType === "patch_request" ? "execute" : "chat";
+    const intent = forcedExecute
+      ? "execute"
+      : shouldUseInvestigationMode(normalizedTask, messageType)
+        ? "investigation"
+        : messageType === "patch_request"
+          ? "execute"
+          : "chat";
 
     res.json({
       ok: true,
@@ -2438,12 +2631,22 @@ app.post("/api/chat", async (req, res) => {
       conversationId,
       threadId,
       lastChangedFiles: rawLastChangedFiles,
+      attachments: rawAttachments,
     } = req.body ?? {};
     const lastChangedFiles = Array.isArray(rawLastChangedFiles)
       ? rawLastChangedFiles.filter(
           (x: unknown): x is string => typeof x === "string" && x.trim().length > 0
         )
       : undefined;
+
+    const { validateAttachments } = await import("./imageUpload.js");
+    const attachValidation = validateAttachments(rawAttachments);
+    if (!attachValidation.ok) {
+      perf.finish("bad request");
+      res.status(400).json({ ok: false, reason: attachValidation.error });
+      return;
+    }
+    const attachments = attachValidation.attachments;
 
     const userId =
       typeof rawUserId === "string" && rawUserId.trim()
@@ -2526,6 +2729,7 @@ app.post("/api/chat", async (req, res) => {
         messageType: conversationalMessageType,
         userApiKey: chatUserApiKey || undefined,
         lastChangedFiles,
+        attachments: attachments.length > 0 ? attachments : undefined,
       });
 
       registerRunComplete(runIdStr, "completed");
@@ -2616,7 +2820,12 @@ app.post("/api/patch", async (req, res) => {
     conversationId,
     lastChangedFiles,
     lastAddedFunctions,
+    forceTier: rawForceTier,
   } = req.body ?? {};
+  const VALID_TIERS = ["simple", "medium", "complex"] as const;
+  const forceTier = typeof rawForceTier === "string" && (VALID_TIERS as readonly string[]).includes(rawForceTier)
+    ? (rawForceTier as "simple" | "medium" | "complex")
+    : undefined;
   debugLog("[debug-mem] received lastChangedFiles:", lastChangedFiles);
   const hostedContext =
     process.env.NODE_ENV === "production"
@@ -2704,9 +2913,162 @@ app.post("/api/patch", async (req, res) => {
   // Test-related execution is still covered by agentLoopPatterns (npm test, run tests, …).
   const shouldForceExecute = shouldForceExecuteTask(String(task || ""));
 
+  // Pre-register the run buffer BEFORE detectIntent (async LLM call, 300–1500 ms)
+  // so the SSE /api/run-replay/:runId endpoint can accept connections during
+  // intent detection. The frontend opens SSE before POSTing, gets a 404, then
+  // retries once after 600 ms. If detectIntent takes >600 ms (always true for
+  // investigation tasks, which are never short-circuited by shouldForceExecute)
+  // the retry also 404s and SSE is permanently abandoned for this run, causing
+  // the "frozen UI" bug. registerRunStart is idempotent for running buffers.
+  const _preRunId = typeof runId === "string" && runId.trim() ? runId.trim() : "";
+  if (_preRunId) {
+    try {
+      registerRunStart(_preRunId, { task: typeof task === "string" ? task.trim() : undefined });
+    } catch {}
+  }
+
+  // Usage limit check — block new runs if the user has exceeded their daily or monthly threshold.
+  try {
+    const [dayUsage, monthUsage] = await Promise.all([
+      getUsage(userId ?? "local-dev", "day"),
+      getUsage(userId ?? "local-dev", "month"),
+    ]);
+    const limitCheck = checkUsageLimit({
+      today: dayUsage.totalCostUsd,
+      thisMonth: monthUsage.totalCostUsd,
+    });
+    if (limitCheck.blocked) {
+      perf.finish("usage limit exceeded");
+      res.status(429).json({
+        ok: false,
+        error: "usage_limit_exceeded",
+        reason: limitCheck.reason,
+        limit: limitCheck.limit,
+        used: limitCheck.used,
+      });
+      return;
+    }
+  } catch {
+    // Non-blocking: if limit check fails (e.g. disk error), allow the run.
+  }
+
   const intent = shouldForceExecute
     ? "execute"
     : await detectIntent(String(task), userApiKey || undefined);
+  if (intent === "investigation") {
+    const investigationRunId =
+      typeof runId === "string" && runId.trim() ? runId.trim() : "";
+    const threadIdForInvestigation =
+      typeof conversationId === "string" && conversationId.trim()
+        ? conversationId.trim()
+        : investigationRunId;
+    let investigationAbort: AbortController | null = null;
+    if (investigationRunId) {
+      investigationAbort = new AbortController();
+      activePatchRunAbortControllers.set(investigationRunId, investigationAbort);
+      try {
+        registerRunStart(investigationRunId, { task: String(task) });
+      } catch {}
+      try {
+        await upsertActiveRun(investigationRunId, {
+          userId,
+          threadId: threadIdForInvestigation,
+          conversationId: threadIdForInvestigation,
+          repoPath: String(repoPath),
+          task: String(task),
+          status: "running",
+          lastChangedFiles: Array.isArray(lastChangedFiles) ? lastChangedFiles : null,
+          lastAddedFunctions: Array.isArray(lastAddedFunctions) ? lastAddedFunctions : null,
+        });
+      } catch (error) {
+        console.warn(
+          "[zone] investigation active run upsert failed",
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+      emitProgress(investigationRunId, {
+        stage: "investigation",
+        lifecycle: createAgentLifecycleEvent({
+          type: "run_started",
+          message: "Investigation started.",
+          stage: "init",
+          status: "active",
+        }),
+      });
+    }
+    try {
+      const result = await runInvestigationFlow({
+        task: String(task),
+        repoPath: String(repoPath),
+        runId: investigationRunId,
+        userId,
+        userApiKey: userApiKey || undefined,
+        abortSignal: investigationAbort?.signal,
+        onProgress: (update) => emitProgress(investigationRunId, update as any),
+      });
+      if (investigationRunId) {
+        registerRunComplete(investigationRunId, "completed");
+        try {
+          await completeActiveRun(investigationRunId, "completed");
+        } catch {}
+      }
+      const confidence = 80;
+      const loggedConversationId = await logRun({
+        userId,
+        role: "developer",
+        task: String(task),
+        repoPath: String(repoPath),
+        decisionMode: "investigation",
+        confidence,
+        executionId: investigationRunId || undefined,
+        creditsUsed: 1,
+        conversationId,
+        changedFiles: [],
+        billingMode,
+        routeName: "/api/patch",
+      }).catch(() => null);
+      if (loggedConversationId) {
+        (result as Record<string, unknown>).conversationId = loggedConversationId;
+      }
+      const costUsd = investigationRunId ? getRunCost(userId ?? "", investigationRunId) : 0;
+      const resultWithCost = { ...(result as Record<string, unknown>), costUsd };
+      if (investigationRunId) {
+        emitProgress(investigationRunId, {
+          stage: "investigation",
+          lifecycle: createAgentLifecycleEvent({
+            type: "run_completed",
+            message: "Investigation completed.",
+            stage: "finalize",
+            status: "success",
+          }),
+          progress: {
+            type: "run_completed_with_result",
+            title: "Investigation completed",
+            status: "success",
+            result: resultWithCost,
+          } as any,
+        });
+      }
+      perf.finish("investigation response sent");
+      res.json(resultWithCost);
+      return;
+    } catch (error) {
+      if (investigationRunId) {
+        registerRunComplete(investigationRunId, "cancelled");
+        try {
+          await completeActiveRun(investigationRunId, "cancelled");
+        } catch {}
+      }
+      perf.finish("investigation failed");
+      res.status(500).json({
+        ok: false,
+        reason: error instanceof Error ? error.message : "investigation_flow_failed",
+      });
+      return;
+    } finally {
+      if (investigationRunId) activePatchRunAbortControllers.delete(investigationRunId);
+    }
+  }
   if (intent === "chat") {
     try {
       emitProgress(runId, {
@@ -2872,6 +3234,8 @@ app.post("/api/patch", async (req, res) => {
       onProgress: (update) => emitProgress(runId, update),
       abortSignal: patchAbort?.signal,
       userApiKey: userApiKey || undefined,
+      provider: byokProvider,
+      forceTier,
     });
     perf.mark("core patch flow complete");
 
@@ -3012,6 +3376,18 @@ app.post("/api/patch", async (req, res) => {
     // After refresh, the original HTTP response is orphaned. Emit the final result via SSE too.
     const finalCostUsd = runIdStr ? getRunCost(userId ?? "", runIdStr) : 0;
     const resultWithCost = { ...(result as Record<string, unknown>), costUsd: finalCostUsd };
+    // Phase J.4: full internal context preserved for [zone-patch-result] log
+    // (debug observability), public response strips heuristic-only fields.
+    const publicResultWithCost = toPublicLlmPatchResponse(resultWithCost);
+    const _resultRecord = resultWithCost as Record<string, unknown>;
+    debugLog("[zone-patch-result]", JSON.stringify({
+      runId: runIdStr || null,
+      decisionMode: _resultRecord.decisionMode,
+      verificationReason: _resultRecord.verificationReason,
+      developerConfidence: _resultRecord.developerConfidence,
+      tokenBudgetExceeded: _resultRecord.tokenBudgetExceeded,
+      rolledBack: _resultRecord.decisionMode === "rolled_back",
+    }));
     try {
       if (runIdStr) {
         emitDeveloperPatchProgress(runIdStr, {
@@ -3022,13 +3398,13 @@ app.post("/api/patch", async (req, res) => {
             type: "run_completed_with_result",
             title: "Run completed",
             status: "success",
-            result: resultWithCost,
+            result: publicResultWithCost,
             costUsd: finalCostUsd,
           } as any,
         });
       }
     } catch {}
-    res.json(resultWithCost);
+    res.json(publicResultWithCost);
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       perf.finish("cancelled");
@@ -3563,7 +3939,15 @@ const loggedConversationId = await logRun({
         (result as Record<string, unknown>).conversationId = loggedConversationId;
       }
     }
-    res.json(result);
+    // Phase J.4: same internal-only stripping as /api/patch.
+    debugLog("[zone-patch-result]", JSON.stringify({
+      route: "/api/test-engineer",
+      runId: typeof runId === "string" ? runId : null,
+      decisionMode: (result as Record<string, unknown>).decisionMode,
+      verificationReason: (result as Record<string, unknown>).verificationReason,
+      developerConfidence: (result as Record<string, unknown>).developerConfidence,
+    }));
+    res.json(toPublicLlmPatchResponse(result as Record<string, unknown>));
   } catch (err) {
     emitProgress(runId, "Ready");
     res.status(500).json({
@@ -3669,7 +4053,14 @@ const result = await runDataAnalystFlow({
         (result as Record<string, unknown>).conversationId = loggedConversationId;
       }
     }
-    res.json(result);
+    // Phase J.4: strip internal-only fields from the public response.
+    debugLog("[zone-patch-result]", JSON.stringify({
+      route: "/api/data-analyst",
+      runId: typeof runId === "string" ? runId : null,
+      decisionMode: (result as Record<string, unknown>).decisionMode,
+      confidence: (result as { confidence?: number }).confidence,
+    }));
+    res.json(toPublicLlmPatchResponse(result as Record<string, unknown>));
   } catch (err) {
     emitProgress(runId, "Ready");
     res.status(500).json({

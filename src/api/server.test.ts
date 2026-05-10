@@ -1132,7 +1132,11 @@ export function LoginForm() {
       expect(supabaseInsertMock).toHaveBeenCalledWith(
         expect.objectContaining({
           role: "data_analyst",
-          decision: "preview_only",
+          // Phase J.1: confidence-based fallback in getDecisionModeFromResult
+          // is gone — confidence 62 no longer downgrades to preview_only.
+          // Without an explicit upstream decisionMode, the default is
+          // safe_to_apply (only "blocked" is non-applicable).
+          decision: "safe_to_apply",
           confidence: 62,
           credits_used: 1,
         })

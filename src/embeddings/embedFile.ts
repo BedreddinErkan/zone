@@ -7,6 +7,9 @@ const MAX_INPUT_CHARS = 24000;
 const MAX_CONTENT_CHARS = 6000;
 const EMBED_TIMEOUT_MS = 30000;
 
+// Per-process memoization: log the skip reason once per provider, then stay silent.
+const _embedSkipLoggedProviders = new Set<string>();
+
 function truncateForEmbedding(text: string, maxChars = MAX_INPUT_CHARS): string {
   const raw = String(text || "");
   if (raw.length <= maxChars) return raw;
@@ -41,10 +44,12 @@ export async function embedText(text: string): Promise<number[] | null> {
   }
 
   if (client.provider !== "openai") {
-    debugLog("[zone-embed-skipped]", {
-      reason: "provider_no_embedding_support",
-      provider: client.provider,
-    });
+    if (!_embedSkipLoggedProviders.has(client.provider)) {
+      _embedSkipLoggedProviders.add(client.provider);
+      console.warn(
+        `[zone-embed] provider=${client.provider} has no embedding support — skipping all subsequent embed requests silently`
+      );
+    }
     return null;
   }
 
@@ -78,10 +83,7 @@ export async function embedText(text: string): Promise<number[] | null> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("not supported by the Anthropic provider")) {
-      debugLog("[zone-embed-skipped]", {
-        reason: "provider_no_embedding_support",
-        provider: client.provider,
-      });
+      // Already logged at provider-check above; stay silent here.
       return null;
     }
     if (message.includes("timed out")) {

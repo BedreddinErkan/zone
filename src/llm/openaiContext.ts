@@ -10,6 +10,10 @@ export interface ZoneRequestContext {
   // Read by the recording LLM client wrapper to attribute usage records.
   userId?: string;
   runId?: string;
+  /** Reserved for subagent attribution in follow-up PRs. */
+  subagentId?: string;
+  subagentType?: "worker" | "explore" | "verifier";
+  parentRunId?: string;
 }
 
 export const zoneRequestContext = new AsyncLocalStorage<ZoneRequestContext>();
@@ -23,6 +27,9 @@ export function getRequestContext(): ZoneRequestContext | undefined {
 }
 
 export function attachRunIdentity(input: { userId?: string; runId?: string }): void {
+  // Deprecated legacy helper. New code should use withRequestContext(...) so
+  // context changes are scoped to the callback instead of mutating the current
+  // AsyncLocalStorage store in place. Kept for existing route/flow callers.
   const store = zoneRequestContext.getStore();
   if (!store) return;
   if (typeof input.userId === "string" && input.userId.trim()) {
@@ -37,12 +44,19 @@ export function withUserApiKey<T>(
   userApiKey: string | undefined,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return zoneRequestContext.run({ userApiKey }, fn);
+  return withRequestContext({ userApiKey }, fn);
 }
 
+/**
+ * Runs `fn` with the given context fields shallow-merged into the current
+ * AsyncLocalStorage store. The previous store is restored automatically when
+ * `fn` resolves or rejects.
+ */
 export function withRequestContext<T>(
-  ctx: ZoneRequestContext,
+  patch: Partial<ZoneRequestContext>,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return zoneRequestContext.run(ctx, fn);
+  const current = getRequestContext() ?? {};
+  const next: ZoneRequestContext = { ...current, ...patch };
+  return zoneRequestContext.run(next, fn);
 }

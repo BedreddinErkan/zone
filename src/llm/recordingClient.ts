@@ -16,18 +16,24 @@ interface UsageBreakdown {
   output: number;
 }
 
-function extractUsage(rawUsage: unknown): UsageBreakdown | null {
+export function extractUsage(rawUsage: unknown): UsageBreakdown | null {
   if (!rawUsage || typeof rawUsage !== "object") return null;
-  const u = rawUsage as Record<string, number | undefined>;
+  const u = rawUsage as Record<string, unknown>;
   const input = Number(u.prompt_tokens ?? u.input_tokens ?? 0) || 0;
   const output = Number(u.completion_tokens ?? u.output_tokens ?? 0) || 0;
   const cacheWrite = Number(u.cache_creation_input_tokens ?? 0) || 0;
-  const cacheRead = Number(u.cache_read_input_tokens ?? 0) || 0;
+  const promptTokenDetails =
+    u.prompt_tokens_details && typeof u.prompt_tokens_details === "object"
+      ? (u.prompt_tokens_details as Record<string, unknown>)
+      : null;
+  const openAiCacheRead = Number(promptTokenDetails?.cached_tokens ?? 0) || 0;
+  const cacheRead = openAiCacheRead || Number(u.cache_read_input_tokens ?? 0) || 0;
   if (input === 0 && output === 0 && cacheWrite === 0 && cacheRead === 0) {
     return null;
   }
+  const inputUncached = openAiCacheRead > 0 ? Math.max(0, input - openAiCacheRead) : input;
   return {
-    input_uncached: input,
+    input_uncached: inputUncached,
     cache_write: cacheWrite,
     cache_read: cacheRead,
     output,
@@ -53,9 +59,15 @@ async function recordFromResponse(
     const ctx = getRequestContext();
     const userId = ctx?.userId?.trim() || "local-dev";
     const runId = ctx?.runId?.trim() || "";
+    const subagentId = ctx?.subagentId?.trim() || undefined;
+    const subagentType = ctx?.subagentType;
+    const parentRunId = ctx?.parentRunId?.trim() || undefined;
     await recordExecution({
       userId,
       runId,
+      subagentId,
+      subagentType,
+      parentRunId,
       provider: toProviderName(provider),
       model: responseModel || fallbackModel,
       ...usage,

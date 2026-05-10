@@ -1,0 +1,84 @@
+// Phase L.3: per-tier execution limit overrides. Persisted to
+// ~/.zone/tier-limits.json, parallel to visual-verification.json from I.2.
+// Default values live in TIER_LIMITS (tierLimits.ts) — this module only
+// stores user-supplied deltas. taskToolAllowed is intentionally absent from
+// the schema: it is a system-level guarantee, not a user preference.
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import type { TaskTier } from "../llm/taskClassifier.js";
+
+export interface PerTierSettings {
+  tokenBudgetCap?: number;
+  iterCap?: number;
+  maxSubagentCalls?: number;
+}
+
+export type TierSettings = Partial<Record<TaskTier, PerTierSettings>>;
+
+const SETTINGS_DIR = join(homedir(), ".zone");
+const SETTINGS_PATH = join(SETTINGS_DIR, "tier-limits.json");
+
+const VALIDATION = {
+  tokenBudgetCap: { min: 10_000, max: 2_000_000 },
+  iterCap: { min: 1, max: 100 },
+  maxSubagentCalls: { min: 0, max: 5 },
+} as const;
+
+const VALID_TIERS: TaskTier[] = ["simple", "medium", "complex"];
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function validateAndSanitize(raw: unknown): TierSettings {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const input = raw as Record<string, unknown>;
+  const result: TierSettings = {};
+
+  for (const tier of VALID_TIERS) {
+    const obj = input[tier];
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) continue;
+    const src = obj as Record<string, unknown>;
+    const tierResult: PerTierSettings = {};
+
+    for (const field of ["tokenBudgetCap", "iterCap", "maxSubagentCalls"] as const) {
+      const raw = src[field];
+      if (raw === undefined || raw === null) continue;
+      const n = Number(raw);
+      if (!Number.isFinite(n)) continue;
+      tierResult[field] = clamp(Math.floor(n), VALIDATION[field].min, VALIDATION[field].max);
+    }
+
+    if (Object.keys(tierResult).length > 0) {
+      result[tier] = tierResult;
+    }
+  }
+
+  return result;
+}
+
+export function getTierSettingsPath(): string {
+  return SETTINGS_PATH;
+}
+
+export function readTierSettings(): TierSettings {
+  try {
+    if (!existsSync(SETTINGS_PATH)) return {};
+    const raw = readFileSync(SETTINGS_PATH, "utf8");
+    return validateAndSanitize(JSON.parse(raw));
+  } catch (err) {
+    console.warn("[zone-tier-settings-read-failed]", String(err));
+    return {};
+  }
+}
+
+export function writeTierSettings(settings: TierSettings): TierSettings {
+  if (!existsSync(SETTINGS_DIR)) {
+    mkdirSync(SETTINGS_DIR, { recursive: true });
+  }
+  const sanitized = validateAndSanitize(settings);
+  writeFileSync(SETTINGS_PATH, JSON.stringify(sanitized, null, 2), "utf8");
+  return sanitized;
+}

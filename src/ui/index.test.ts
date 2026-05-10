@@ -72,11 +72,15 @@ class MockElement {
   id: string;
   style: Record<string, string> = {};
   attributes: Record<string, string> = {};
+  children: MockElement[] = [];
+  parentElement: MockElement | null = null;
   readOnly = false;
   value = "";
   placeholder = "";
   title = "";
   disabled = false;
+  hidden = false;
+  offsetHeight = 0;
   files: Array<{ name?: string; webkitRelativePath?: string }> = [];
   clicked = false;
   dataset: Record<string, string> = {};
@@ -125,6 +129,20 @@ class MockElement {
   set innerHTML(value: string) {
     this.innerHtmlValue = String(value ?? "");
     this.textContentValue = htmlToText(this.innerHtmlValue);
+    this.children = [];
+    const optionRe =
+      /<div\b([^>]*class="[^"]*\bzone-dropdown-option\b[^"]*"[^>]*)>/gi;
+    let match: RegExpExecArray | null;
+    let idx = 0;
+    while ((match = optionRe.exec(this.innerHtmlValue))) {
+      const attr = match[1] || "";
+      const child = new MockElement(`${this.id}-option-${idx}`, "zone-dropdown-option");
+      const valueMatch = attr.match(/\bdata-value="([^"]*)"/i);
+      if (valueMatch) child.dataset.value = valueMatch[1];
+      child.parentElement = this;
+      this.children.push(child);
+      idx += 1;
+    }
   }
 
   click(): void {
@@ -161,6 +179,55 @@ class MockElement {
 
   getAttribute(name: string): string | null {
     return this.attributes[name] ?? null;
+  }
+
+  appendChild(child: MockElement): MockElement {
+    child.parentElement = this;
+    this.children.push(child);
+    return child;
+  }
+
+  remove(): void {
+    if (!this.parentElement) return;
+    this.parentElement.children = this.parentElement.children.filter((child) => child !== this);
+    this.parentElement = null;
+  }
+
+  contains(candidate: unknown): boolean {
+    if (candidate === this) return true;
+    return this.children.some((child) => child.contains(candidate));
+  }
+
+  focus(): void {
+    // no-op for test harness
+  }
+
+  querySelector(selector?: string): MockElement {
+    const found = this.querySelectorAll(selector || "")[0];
+    if (found) return found;
+    const classMatch = selector?.match(/^\.([A-Za-z0-9_-]+)$/);
+    const child = new MockElement(
+      `${this.id}-${classMatch ? classMatch[1] : "query"}`,
+      classMatch ? classMatch[1] : ""
+    );
+    child.parentElement = this;
+    this.children.push(child);
+    return child;
+  }
+
+  querySelectorAll(selector: string): MockElement[] {
+    const classMatch = selector.match(/^\.([A-Za-z0-9_-]+)$/);
+    if (!classMatch) return [];
+    const className = classMatch[1];
+    const results: MockElement[] = [];
+    const visit = (node: MockElement) => {
+      for (const child of node.children) {
+        if (child.classList.contains(className)) results.push(child);
+        visit(child);
+      }
+    };
+    visit(this);
+    return results;
   }
 
   scrollIntoView(): void {
@@ -374,6 +441,18 @@ type UiContext = {
   selectRepoFolder(): Promise<void>;
   handleFolderFallbackChange(input: MockElement): void;
   refreshBillingSummary(): Promise<void>;
+  getEffectiveDiffState(result: unknown): {
+    totalChangedLines: number;
+    allDiffPatchesEmpty: boolean;
+    effectiveDiffsEmpty: boolean;
+  };
+  cacheClass(ratio: number): string;
+  setRun(threadId: string, runState: { runId: string; todos?: unknown[] } | null): void;
+  clearRun(threadId: string): void;
+  activateThread(threadId: string): void;
+  setTodosForRun(runId: string, todos: unknown[]): void;
+  updateTodoStatusForRun(runId: string, todoId: string, status: string): void;
+  renderTodoSidebar(): void;
 };
 
 type UiContextBase = Omit<
@@ -565,6 +644,28 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
   const copyButton = new MockElement("copyBtn", "copy-btn");
 
   const document = {
+    body: ensureElement("body"),
+    addEventListener(type: string, listener: (event?: unknown) => void) {
+      const current = windowListeners.get(`document:${type}`) ?? [];
+      current.push(listener);
+      windowListeners.set(`document:${type}`, current);
+    },
+    removeEventListener(type: string, listener: (event?: unknown) => void) {
+      const current = windowListeners.get(`document:${type}`);
+      if (!current) return;
+      windowListeners.set(
+        `document:${type}`,
+        current.filter((candidate) => candidate !== listener)
+      );
+    },
+    createElement(tagName: string) {
+      return new MockElement(tagName);
+    },
+    createTextNode(text: string) {
+      const node = new MockElement("text");
+      node.textContent = text;
+      return node;
+    },
     getElementById(id: string) {
       return ensureElement(id);
     },
@@ -918,6 +1019,114 @@ describe("UI result summary", () => {
     expect(elements.get("resultSummaryChips").innerHTML).toContain("Warnings: 0");
     expect(elements.get("resultSummaryChips").innerHTML).not.toContain("Framework:");
     expect(elements.get("resultSummaryChips").innerHTML).not.toContain("Complexity:");
+  });
+});
+
+describe("UI no-op diff detection", () => {
+  it("hides apply affordances when failed tests are unrelated but total changed lines are zero", () => {
+    const { context } = buildUiHarness();
+
+    const state = context.getEffectiveDiffState({
+      decisionMode: "safe_to_apply",
+      verificationReason: "tests_failed_unrelated",
+      patchScope: { totalChangedLines: 0 },
+      fileDiffs: [
+        {
+          filePath: "src/example.ts",
+          addedLines: 0,
+          removedLines: 0,
+          diff: [],
+        },
+      ],
+    });
+
+    expect(state.effectiveDiffsEmpty).toBe(true);
+  });
+
+  it("keeps apply affordances available when safe_to_apply has changed lines", () => {
+    const { context } = buildUiHarness();
+
+    const state = context.getEffectiveDiffState({
+      decisionMode: "safe_to_apply",
+      patchScope: { totalChangedLines: 5 },
+      fileDiffs: [
+        {
+          filePath: "src/example.ts",
+          addedLines: 3,
+          removedLines: 2,
+          diff: [
+            { type: "removed", content: "export const value = 1;" },
+            { type: "added", content: "export const value = 2;" },
+          ],
+        },
+      ],
+    });
+
+    expect(state.effectiveDiffsEmpty).toBe(false);
+  });
+
+  it("preserves the no_changes_made no-op path", () => {
+    const { context } = buildUiHarness();
+
+    const state = context.getEffectiveDiffState({
+      decisionMode: "preview_only",
+      verificationReason: "no_changes_made",
+      patchScope: { totalChangedLines: 0 },
+      fileDiffs: [],
+    });
+
+    expect(state.effectiveDiffsEmpty).toBe(true);
+  });
+});
+
+describe("UI cost meter cache colors", () => {
+  it("maps 0%, 50%, and 89% cache-hit states to red/yellow/green classes", () => {
+    const { context } = buildUiHarness();
+
+    expect(context.cacheClass(0)).toBe("cold");
+    expect(context.cacheClass(0.5)).toBe("warm");
+    expect(context.cacheClass(0.89)).toBe("hot");
+  });
+});
+
+describe("UI todo sidebar", () => {
+  it("renders mixed todo statuses with completed plus skipped counter", () => {
+    const { context, elements } = buildUiHarness();
+
+    context.activateThread("thread-1");
+    context.setRun("thread-1", { runId: "run-1" });
+    context.setTodosForRun("run-1", [
+      { id: "todo-0", text: "Read files", status: "completed" },
+      { id: "todo-1", text: "Patch UI", description: "Render sidebar", status: "in_progress" },
+      { id: "todo-2", text: "Skip deploy", filesLikely: ["src/ui/index.html"], status: "skipped" },
+    ]);
+
+    const sidebar = elements.get("zoneTodoSidebar");
+    expect(sidebar.dataset.state).toBe("visible");
+    expect(sidebar.textContent).toContain("2/3");
+    expect(sidebar.textContent).toContain("Read files");
+    expect(sidebar.textContent).toContain("Render sidebar");
+    expect(sidebar.textContent).toContain("src/ui/index.html");
+  });
+
+  it("shows todos for the active thread run and hides for a new run without todos", () => {
+    const { context, elements } = buildUiHarness();
+
+    context.activateThread("thread-1");
+    context.setRun("thread-1", { runId: "run-1" });
+    context.setTodosForRun("run-1", [
+      { id: "todo-0", text: "First thread", status: "completed" },
+    ]);
+    expect(elements.get("zoneTodoSidebar").textContent).toContain("First thread");
+
+    context.setRun("thread-1", { runId: "run-2" });
+    expect(elements.get("zoneTodoSidebar").dataset.state).toBe("hidden");
+
+    context.setTodosForRun("run-2", [
+      { id: "todo-0", text: "Second run", status: "pending" },
+    ]);
+    expect(elements.get("zoneTodoSidebar").textContent).toContain("Second run");
+    expect(elements.get("zoneTodoSidebar").textContent).not.toContain("First thread");
   });
 });
 
@@ -2404,5 +2613,3 @@ describe("UI progress feedback", () => {
     expect(elements.get("progressText").textContent).toBe("⏳ Ready");
   });
 });
-
-

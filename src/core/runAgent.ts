@@ -18,7 +18,12 @@ type RunAgentInput = {
   role?: string;
 };
 
-export type RunAgentMode = "blocked" | "preview_only" | "safe_to_apply";
+// Phase J.4: narrowed from "blocked" | "preview_only" | "safe_to_apply".
+// J.1 collapsed preview_only into safe_to_apply; mapScoreToMode never
+// returns preview_only. Kept the type literal in saved/historical run
+// fixtures via a separate persistence type — runAgent itself only emits
+// the two live values.
+export type RunAgentMode = "blocked" | "safe_to_apply";
 
 type RunAgentTraceNormalizedSignal = {
   type: string;
@@ -91,20 +96,15 @@ export type RunAgentResult = {
   reasonCodes: string[];
 };
 
-function mapScoreToMode(score: number, signals: string[]): RunAgentMode {
+function mapScoreToMode(score: number, _signals: string[]): RunAgentMode {
+  // Phase J.1: confidence/signal heuristics no longer gate apply. Only the
+  // hard high-risk threshold (matches safetyLevelResolver step 2) blocks;
+  // schema / critical_domain / mass_scope signals were previously routed to
+  // preview_only — they now produce safe_to_apply (verification + security
+  // validators handle real failures separately).
   if (score >= 71) {
     return "blocked";
   }
-
-  if (
-    score >= 31 ||
-    signals.includes("schema") ||
-    signals.includes("critical_domain") ||
-    signals.includes("mass_scope")
-  ) {
-    return "preview_only";
-  }
-
   return "safe_to_apply";
 }
 
@@ -117,15 +117,11 @@ function toRiskSeverity(value: string): "low" | "medium" | "high" {
 }
 
 function buildRecommendation(mode: RunAgentMode): string {
-  switch (mode) {
-    case "blocked":
-      return "Do not auto-apply. Manual review is required before making changes.";
-    case "preview_only":
-      return "Preview the patch and verify the affected scope before any apply step.";
-    case "safe_to_apply":
-    default:
-      return "Patch can be applied automatically under current safeguards.";
+  // Phase J.4: dropped the preview_only case after the union narrowed.
+  if (mode === "blocked") {
+    return "Do not auto-apply. Manual review is required before making changes.";
   }
+  return "Patch can be applied automatically under current safeguards.";
 }
 
 function mapNormalizedSignalTypeForReasonCodes(

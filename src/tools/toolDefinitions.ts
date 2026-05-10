@@ -10,8 +10,9 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
     function: {
       name: "run_command",
       strict: true,
+      // P3: output reduction - command results are already returned by the tool.
       description:
-        "Run a shell command in the repo directory. Use for: npm test, npm run build, git status, checking if files exist, etc.",
+        "Run a shell command in the repo directory. Use for: npm test, npm run build, git status, checking if files exist, etc. Do not repeat successful command output in assistant prose.",
       parameters: {
         type: "object",
         properties: {
@@ -24,6 +25,54 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
         },
         required: ["command", "cwd"],
         additionalProperties: false,
+      } as Record<string, unknown>,
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "TodoWrite",
+      strict: true,
+      description:
+        "Create or revise the user-facing plan list shown in the sidebar. " +
+        "Call this once near the start of any non-trivial task to lay out 2–6 steps. " +
+        "Call again whenever your plan changes (added discovery, dropped step, status change). " +
+        "Send the COMPLETE list every time — it replaces the prior list. " +
+        "Exactly ONE step may be in_progress at a time; mark a step completed before starting the next.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["todos"],
+        properties: {
+          todos: {
+            type: "array",
+            minItems: 1,
+            maxItems: 12,
+            items: {
+              type: "object",
+              additionalProperties: false,
+required: ["id", "content", "description", "status"],
+              properties: {
+                id: {
+                  type: "string",
+                  description: "Stable id you choose. Reuse across calls to update.",
+                },
+                content: {
+                  type: "string",
+                  description: "Short title (≤80 chars).",
+                },
+                description: {
+                  type: ["string", "null"],
+                  description: "Optional one-sentence detail.",
+                },
+                status: {
+                  type: "string",
+                  enum: ["pending", "in_progress", "completed", "skipped"],
+                },
+              },
+            },
+          },
+        },
       } as Record<string, unknown>,
     },
   },
@@ -122,13 +171,27 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
     function: {
       name: "read_file",
       strict: true,
-      description: "Read the contents of a file in the repo.",
+      description:
+        "Reads file content. For files >100k chars, returns head + structural outline + tail by default. " +
+        "Use the optional lineRange parameter ([startLine, endLine], 1-indexed, inclusive) for exact " +
+        "ranges of large files. Small files (<30k) return full content unchanged.",
       parameters: {
         type: "object",
         properties: {
-          filePath: { type: "string", description: "Relative path from repo root" },
+          filePath: {
+            type: "string",
+            description: "Path relative to repo root, e.g. 'src/llm/agentLoop.ts'.",
+          },
+          lineRange: {
+            type: ["array", "null"],
+            description:
+              "Optional [startLine, endLine] 1-indexed inclusive. Use for focused reads of large files.",
+            items: { type: "integer" },
+            minItems: 2,
+            maxItems: 2,
+          },
         },
-        required: ["filePath"],
+        required: ["filePath", "lineRange"],
         additionalProperties: false,
       } as Record<string, unknown>,
     },
@@ -159,9 +222,10 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
     function: {
       name: "apply_patch",
       strict: true,
+      // P3: output reduction - keep patch-call turns focused on structured args.
       description:
         "Apply targeted FIND/REPLACE substitutions to an EXISTING file. " +
-        "Always use this instead of write_file when the file already exists.\n\n" +
+        "Always use this instead of write_file when the file already exists. Do not narrate the patch outside the tool arguments.\n\n" +
 
         "## Universal contract (applies to ALL intents)\n" +
         "Each block performs ONE local substitution: the file region matching FIND is replaced verbatim by REPLACE. " +
@@ -332,6 +396,45 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "verify_visual",
+      strict: true,
+      description:
+        "Take a screenshot of a URL on the user's local dev server. Use AFTER making UI-related changes to visually verify your work. Skip for backend-only, comment-only, or non-visual changes. Hard cap: 5 screenshots per run.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          path: {
+            type: "string",
+            description: "Path relative to dev server root, e.g. '/' or '/login' or '/dashboard'.",
+          },
+          description: {
+            type: ["string", "null"],
+            description:
+              "Brief description of what you expect to see, e.g. 'Submit button should be disabled when form invalid'.",
+          },
+          viewport: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            properties: {
+              width: { type: "integer" },
+              height: { type: "integer" },
+            },
+            required: ["width", "height"],
+            description: "Optional viewport size. Default 1280x720.",
+          },
+          waitFor: {
+            type: ["string", "null"],
+            description: "Optional CSS selector to wait for before screenshotting, e.g. '.feed-loaded'.",
+          },
+        },
+        required: ["path", "description", "viewport", "waitFor"],
+      } as Record<string, unknown>,
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "find_references",
       strict: true,
       description:
@@ -355,6 +458,48 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
           },
         },
         required: ["sourceFile", "symbolName"],
+        additionalProperties: false,
+      } as Record<string, unknown>,
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "Task",
+      description:
+        "Delegate a focused, bounded subtask to a subagent running in an isolated context. " +
+        "The subagent returns a structured summary; its detailed work is hidden from your context.\n\n" +
+        "Choose subagent_type based on the nature of the work:\n\n" +
+        "• worker — Use for bounded multi-file implementation tasks where the pattern is clear " +
+        "(e.g., adding a new endpoint with its handler + test, refactoring a function with 3+ call " +
+        "sites, implementing a small new module). Has read/write file access; cannot run commands. " +
+        "Do NOT use for single-line edits or content you can produce in 1-2 steps.\n\n" +
+        "• explore — Use for read-only investigation BEFORE deciding how to implement " +
+        "(e.g., finding all call sites of a function before refactoring, understanding how an " +
+        "existing flow works across 3-5 files, locating the right entry point for a new feature). " +
+        "Returns findings (file:line + relevance notes) plus a high-level summary. " +
+        "Do NOT use for any task that involves file modification.\n\n" +
+        "DO NOT use Task for trivial work that can be done in 1-2 tool calls. " +
+        "DO NOT use Task to escape your iteration budget on tasks you should be doing yourself.",
+      parameters: {
+        type: "object",
+        properties: {
+          subagent_type: {
+            type: "string",
+            enum: ["worker", "explore"],
+            description:
+              "'worker' for implementation tasks (file edits). " +
+              "'explore' for read-only investigation (find, read, summarize — no writes).",
+          },
+          description: {
+            type: "string",
+            description:
+              "A clear, self-contained description of the subtask. The " +
+              "subagent does not see your conversation history, so include " +
+              "all necessary context. Specify expected outcome explicitly.",
+          },
+        },
+        required: ["subagent_type", "description"],
         additionalProperties: false,
       } as Record<string, unknown>,
     },

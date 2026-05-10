@@ -2,7 +2,7 @@
   "name": "zone-api",
   "version": "0.0.1",
   "private": true,
-  "description": "Zone backend API and CLI",
+  "description": "Self-host AI coding agent. Tier-bounded execution, atomic safety, BYOK transparency.",
   "main": "./dist/server.js",
   "exports": {
     ".": "./dist/server.js",
@@ -18,7 +18,9 @@
     "check-types": "tsc --noEmit -p tsconfig.json",
     "serve": "node dist/cli/index.js serve",
     "start": "node dist/cli/index.js serve",
-    "test": "vitest run"
+    "test": "vitest run",
+    "sweep": "npx tsx scripts/sweep.ts",
+    "sweep:dry": "npx tsx scripts/sweep.ts --dry-run"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
@@ -35,6 +37,7 @@
     "express-rate-limit": "^7.5.0",
     "fast-glob": "^3.3.3",
     "openai": "^5.23.2",
+    "playwright": "^1.50.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {

@@ -1,6 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import type { SafeVerificationCommand, SafeVerificationStep } from "./detectVerificationCommand.js";
+import { sanitizeVerificationEnv, strippedEnvKeys } from "./buildEnv.js";
 
 export type RuntimeVerificationResult = {
   attempted: boolean;
@@ -123,12 +124,16 @@ export async function runRuntimeVerification(input: {
       // npm is a cmd/shim that expects shell invocation.
       shell: true,
       windowsHide: true,
+      env: sanitizeVerificationEnv(),
     });
 
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       child.kill();
+      console.log(
+        `[zone-verify] cmd="${input.command!.command.slice(0, 80)}" cwd="${input.repoPath}" exitCode=124 stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
+      );
       resolve({
         attempted: true,
         command: input.command!.command,
@@ -150,6 +155,9 @@ export async function runRuntimeVerification(input: {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      console.log(
+        `[zone-verify] cmd="${input.command!.command.slice(0, 80)}" cwd="${input.repoPath}" exitCode=1 stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
+      );
       resolve({
         attempted: false,
         command: input.command!.command,
@@ -165,6 +173,10 @@ export async function runRuntimeVerification(input: {
       settled = true;
       clearTimeout(timer);
       const status = code === 0 ? "passed" : "failed";
+      const exitCode = typeof code === "number" ? code : 1;
+      console.log(
+        `[zone-verify] cmd="${input.command!.command.slice(0, 80)}" cwd="${input.repoPath}" exitCode=${exitCode} stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
+      );
       resolve({
         attempted: true,
         command: input.command!.command,

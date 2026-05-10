@@ -44,8 +44,11 @@ export type GenerateFinalRunReportInput = {
     rewriteLikeSuspicion?: boolean;
     cssRewriteSuspicion?: boolean;
   };
-  decisionMode: "preview_only" | "safe_to_apply" | "blocked";
-  finalState?: "preview_only" | "safe_to_apply" | "blocked";
+  // Phase J.3: "rolled_back" added — patch was discarded after verification
+  // regressed; the report still renders for inspection (user sees what was
+  // attempted) but no apply happened.
+  decisionMode: "preview_only" | "safe_to_apply" | "blocked" | "rolled_back";
+  finalState?: "preview_only" | "safe_to_apply" | "blocked" | "rolled_back";
   warnings: string[];
   correctness: {
     status: "passed" | "skipped" | "rejected_all";
@@ -230,9 +233,6 @@ export function buildDeterministicFinalRunReport(
   } else if (input.patchScope.changedFileCount === 0) {
     changesMade.push("No files were changed in the final apply set.");
   } else {
-    changesMade.push(
-      `Edited ${input.patchScope.changedFileCount} file(s): +${input.patchScope.totalAddedLines} / -${input.patchScope.totalRemovedLines} lines (total changed lines: ${input.patchScope.totalChangedLines}).`
-    );
     if (input.patchSource === "llm_patch_recovered") {
       changesMade.push(
         "Strict patch parsing failed initially; Zone recovered a single validated find/replace from the model output."

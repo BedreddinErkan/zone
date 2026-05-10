@@ -1,3 +1,6 @@
+import type { VerificationReason } from "../llm/agentLoop.js";
+import type { VerificationCommand } from "./verdictClassifier.js";
+
 export const AGENT_LIFECYCLE_EVENT_TYPES = [
   "run_started",
   "intent_understood",
@@ -20,6 +23,11 @@ export const AGENT_LIFECYCLE_EVENT_TYPES = [
 ] as const;
 
 export type AgentLifecycleEventType = (typeof AGENT_LIFECYCLE_EVENT_TYPES)[number];
+
+export const SUBAGENT_STRUCTURED_PROGRESS_EVENT_TYPES = [
+  "subagent_started",
+  "subagent_completed",
+] as const;
 
 /** Coarse pipeline stage for UI grouping (distinct from legacy progress strings). */
 export type AgentLifecyclePipelineStage =
@@ -58,6 +66,31 @@ export type ZoneHandoffReport = {
   suggestedNextPrompt: string;
 };
 
+export type RunSummaryPayload = {
+  filesChanged: Array<{
+    filePath: string;
+    addedLines: number;
+    removedLines: number;
+  }>;
+  toolsUsed: Record<string, number>;
+  verification: {
+    reason: VerificationReason;
+    note: string;
+    commands: VerificationCommand[];
+    // Phase J.3: "rolled_back" added when post-apply verification regressed;
+    // the run summary still surfaces the verification reason and command log.
+    // Phase J.4: dropped "preview_only" — J.1 collapsed it into safe_to_apply
+    // and the derived value never lands on preview_only anymore.
+    decisionMode: "safe_to_apply" | "rolled_back";
+  };
+  cost: {
+    totalUsd: number;
+    iterCount: number;
+    cacheHitPct: number;
+    avgIterUsd: number;
+  };
+};
+
 /** Rich UI progress payload (SSE); legacy `stage` string remains for older clients. */
 export type ZoneStructuredProgressEvent = {
   runId: string;
@@ -81,42 +114,79 @@ export type ZoneStructuredProgressEvent = {
     | "chat_chunk"
     | "chat_done"
     | "chat_response"
-    | "plan_generated"
-    | "plan_discard"
-    | "plan_step_started"
-    | "plan_step_complete"
+    | "todos_initialized"
+    | "todo_status_changed"
+    | "todo_revised"
     | "patch_stream_delta"
     | "patch_stream_target"
     | "tool_call"
     | "tool_result"
     | "agent_loop_start"
     | "agent_loop_complete"
+    | "run_summary"
+    | "iter_cost_update"
+    | "subagent_started"
+    | "subagent_completed"
     | "handoff_report"
     | "command_approval_required"
+    | "command_auto_approved"
+    | "command_trusted"
     | "terminal_output"
-    | "terminal_done";
+    | "terminal_done"
+    | "narration"
+    | "token_budget_status"
+    | "task_classified"
+    | "tier_constraints_applied";
   title: string;
   detail?: string;
   filePath?: string;
   command?: string;
   status?: "active" | "success" | "warning" | "error";
+  subagentStatus?: "completed" | "partial" | "failed";
+  subagentId?: string;
+  subagentType?: "worker" | "explore" | "verifier";
+  parentRunId?: string;
   stream?: "stdout" | "stderr";
   exitCode?: number;
+  iter?: number;
+  totalIter?: number;
+  iterCost?: number;
+  cumulativeCost?: number;
+  cacheHitThisIter?: number;
+  cacheHitCumulative?: number;
+  input_uncached?: number;
+  cache_write?: number;
+  cache_read?: number;
+  output?: number;
+  total_input_uncached?: number;
+  total_cache_read?: number;
+  total_cache_write?: number;
+  total_output?: number;
+  iter_count?: number;
   approvalId?: string;
-  steps?: Array<{
-    index: number;
+  todos?: Array<{
+    id: string;
     text: string;
-    status: "pending" | "active" | "done";
+    description?: string;
+    filesLikely?: string[];
+    status: "pending" | "in_progress" | "completed" | "skipped";
   }>;
-  stepIndex?: number;
+  todoId?: string;
+  todoStatus?: "pending" | "in_progress" | "completed" | "skipped";
   delta?: string;
   /** True when backend emitted a single fallback delta (not real token streaming). */
   fallback?: boolean;
   targetSymbol?: string;
   report?: ZoneHandoffReport;
+  filesChanged?: RunSummaryPayload["filesChanged"];
+  toolsUsed?: RunSummaryPayload["toolsUsed"];
+  verification?: RunSummaryPayload["verification"];
+  cost?: RunSummaryPayload["cost"];
   responseText?: string;
   responseHtml?: string;
   contextFiles?: string[];
+  /** Plain-text narration emitted by the agent loop between tool calls. */
+  text?: string;
   planner?: {
     changeDescription: string;
     strategy: string;
@@ -125,6 +195,41 @@ export type ZoneStructuredProgressEvent = {
     /** Cross-file dependency hints (e.g. imports / dependents). */
     warnings?: string[];
   };
+  /** Phase H.7 token-budget tracking — cumulative input+output across the run,
+   *  cap (default 800k), and ratio. Emitted once per iter. UI uses ratio for
+   *  cost-strip warn/alert states and the run terminates when ratio ≥ HARD. */
+  cumulativeTokens?: number;
+  tokenBudgetCap?: number;
+  tokenBudgetRatio?: number;
+  breakdown?: {
+    mainAgent?: number;
+    subagents?: number;
+  };
+  /** Phase I.5: tool name + structured metadata for tool_result events whose
+   *  UI render depends on more than the output text (verify_visual surfaces
+   *  the screenshot via metadata.screenshotPath / pageTitle / consoleErrors). */
+  toolName?: string;
+  metadata?: Record<string, unknown>;
+  /** Phase L.1: pre-dispatch task classification. Emitted once per dispatch
+   *  before the agent loop starts so the UI / telemetry can show the predicted
+   *  tier and the classifier's own cost. L.2 will gate tool exposure based on
+   *  this, but in L.1 it is informational only. */
+  tier?: "simple" | "medium" | "complex";
+  estimatedFiles?: number;
+  estimatedIterations?: number;
+  needsSubagent?: boolean;
+  confidence?: number;
+  classifierModel?: string;
+  classifierCostUsd?: number;
+  classifierLatencyMs?: number;
+  fallbackUsed?: boolean;
+};
+
+/** Documentation type for `narration` progress events: a one-line intent
+ * statement the agent emits before invoking each tool. */
+export type NarrationPayload = {
+  text: string;
+  iter?: number;
 };
 
 export function createAgentLifecycleEvent(

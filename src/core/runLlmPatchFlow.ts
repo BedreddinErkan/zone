@@ -31,6 +31,7 @@ import {
   type RuntimeVerificationPlanResult,
 } from "./runRuntimeVerification.js";
 import { getInferenceMode } from "../llm/openaiClient.js";
+import type { LLMProvider } from "../llm/types.js";
 import {
   buildRetryGuidanceFromFailure,
   formatRetryGuidanceBrief,
@@ -51,13 +52,31 @@ import { parseDeveloperPatchText } from "./developerPatchParse.js";
 import { applyLlmPatches } from "./applyLlmPatches.js";
 import { parseTaskIntent, type TaskIntent } from "./taskIntentParser.js";
 import { tryAstPatchFallback } from "./astPatchFallback.js";
-import { runAgentLoop, stripVerificationTag, type AgentLoopResult } from "../llm/agentLoop.js";
+import {
+  runAgentLoop,
+  stripVerificationTag,
+  type AgentLoopResult,
+  type VerificationReason,
+} from "../llm/agentLoop.js";
 import {
   isPlanOrchestrationEnabled,
   buildStepTask,
   aggregateOrchestratorResults,
 } from "./planOrchestrator.js";
-import { collectVerificationCommands } from "./verdictClassifier.js";
+import {
+  completeTodo,
+  executionPlanToTodos,
+  finalizeTodos,
+  findTodoIdForFile,
+  startTodo,
+  todoIdForStepIndex,
+  type RunTodo,
+  type TodoStatus,
+} from "./todoLifecycle.js";
+import {
+  collectVerificationCommands,
+  type VerificationCommand,
+} from "./verdictClassifier.js";
 import { parseVerificationErrorWithRepo as parseVerificationError } from "./parseVerificationError.js";
 import type { PatchPreviewItem, RankedRepoFile } from "../types/agent.js";
 import type { ConversationBillingMode } from "../types/conversation.js";
@@ -69,9 +88,18 @@ import {
   createAgentLifecycleEvent,
   type AgentLifecycleEvent,
   type LlmPatchProgressUpdate,
+  type RunSummaryPayload,
   type ZoneHandoffReport,
   type ZoneStructuredProgressEvent,
 } from "./agentLifecycleEvents.js";
+import { cacheHitRatio, type IterCostUpdatePayload } from "../usage/iterCostMeter.js";
+import { computeWorkerMaxIterations } from "../llm/subagents.js";
+import {
+  classifyTask,
+  type TaskClassification,
+  type TaskTier,
+} from "../llm/taskClassifier.js";
+import { getRunCost } from "../usage/usageTracker.js";
 import {
   generateFinalRunReport,
   type FinalRunReport,
@@ -137,8 +165,28 @@ export type LlmPatchFlowResult =
       };
       reason?: string;
       patchSource?: PatchSource;
-      decisionMode?: "preview_only" | "safe_to_apply" | "blocked" | "chat";
-      finalState?: "preview_only" | "safe_to_apply" | "blocked" | "chat";
+      // Phase J.4: dropped "preview_only" (J.1 collapsed it into safe_to_apply).
+      // The four live values: safe_to_apply (default success), blocked
+      // (security violation), rolled_back (J.3 verification regression),
+      // chat (non-patch conversational flow).
+      decisionMode?: "safe_to_apply" | "blocked" | "chat" | "rolled_back";
+      finalState?: "safe_to_apply" | "blocked" | "chat" | "rolled_back";
+      /** Phase H.7: agent loop terminated at token-budget hard limit (95%
+       *  of TOKEN_BUDGET_CAP). UI shows "Token budget reached" pill. The
+       *  patch verdict still reflects whatever was produced before exit. */
+      tokenBudgetExceeded?: boolean;
+      /** Phase J.3: post-apply verification regressed (patch introduced new
+       *  errors). Staging was discarded; UI shows "Apply rolled back" amber
+       *  banner with the diff for inspection but no undo button. */
+      rolledBackReason?: string;
+      rolledBackErrors?: string[];
+      /** Phase I.3: post-apply auto-verify result. Populated only when the
+       *  user enabled `autoVerifyAfterPatch` in visual settings AND the run
+       *  reached `decisionMode: "safe_to_apply"`. Best-effort — absent on
+       *  rolled_back / blocked / chat / dev-server-unreachable runs. */
+      autoVerifyScreenshot?: string;
+      autoVerifyPageTitle?: string;
+      autoVerifyConsoleErrors?: string[];
       /** When decisionMode is chat, surfaced to the UI as the assistant message. */
       chatResponse?: string;
       finalExecutionOutcome?:
@@ -213,6 +261,57 @@ export type LlmPatchFlowResult =
       finalRunReport?: FinalRunReport;
     };
 
+// Phase J.4: fields kept inside the result shape for log/observability but
+// stripped from the public HTTP response. After J.1 collapsed preview_only
+// into safe_to_apply, none of these gate UI behavior — they live on as
+// internal context for [zone-patch-result] / [zone-decision-mode] traces
+// and the run summary persisted to storage. The CLI doesn't read them.
+const J4_INTERNAL_ONLY_FIELDS = [
+  "developerConfidence",
+  "developerRisk",
+  "intentMismatch",
+  "patchQuality",
+  "patchQualitySummary",
+  "designSystemSignals",
+  "safetyResolution",
+  "microEditProtection",
+  "verificationReason",
+  "verificationNote",
+  "verificationCommands",
+  "verificationStatus",
+  "verification",
+  "runtimeVerification",
+  "verificationAttempts",
+  "repairAttempts",
+  "finalVerificationFailure",
+  "attemptsUsed",
+  "plan",
+  "planAlignment",
+  "finalExecutionOutcome",
+  "resultState",
+  "validationBlocked",
+] as const;
+
+/**
+ * Phase J.4 — return only the public-shape fields to the HTTP client. The
+ * `result` object passed in keeps all its keys for logging upstream; this
+ * helper produces a sibling shape with the heuristic / observability-only
+ * fields removed before `res.json(...)` ships it.
+ *
+ * Failure responses (`ok: false`) are returned untouched — they only carry
+ * `{ ok, reason, lifecycleEvents?, finalRunReport? }` to start with.
+ */
+export function toPublicLlmPatchResponse(
+  result: Record<string, unknown>
+): Record<string, unknown> {
+  if (!result || result.ok !== true) return result;
+  const out: Record<string, unknown> = { ...result };
+  for (const field of J4_INTERNAL_ONLY_FIELDS) {
+    if (field in out) delete out[field];
+  }
+  return out;
+}
+
 type PatchSource =
   | "llm_patch"
   | "llm_patch_recovered"
@@ -239,6 +338,192 @@ export type FileDiff = {
   addedLines: number;
   removedLines: number;
 };
+
+const RUN_SUMMARY_DEFAULT_VERIFICATION_REASON: VerificationReason =
+  "no_verification_attempted";
+
+function deriveAgentVerificationSummary(input: {
+  reason?: VerificationReason | string | null;
+  loopSuccess?: boolean;
+  hadRunCommandFailure?: boolean;
+}): {
+  decisionMode: RunSummaryPayload["verification"]["decisionMode"];
+  note: string;
+} {
+  const reason = String(
+    input.reason || RUN_SUMMARY_DEFAULT_VERIFICATION_REASON
+  ) as VerificationReason;
+  if (reason === "tests_passed") {
+    return { decisionMode: "safe_to_apply", note: "Tests passed" };
+  }
+  if (reason === "tests_skipped_no_infra") {
+    return {
+      decisionMode: "safe_to_apply",
+      note: "Tests skipped (no test infrastructure found)",
+    };
+  }
+  if (reason === "tests_failed_unrelated") {
+    return {
+      decisionMode: "safe_to_apply",
+      note: "Tests had pre-existing failures — not caused by this patch",
+    };
+  }
+  // Phase J.1: confidence/verification heuristics no longer gate apply.
+  // tests_inconclusive / tests_failed_by_patch / loop-with-errors all map
+  // to safe_to_apply now. Real test failures will get a verification rollback
+  // safety net in Phase J.3 (out of scope here). The verdict notes still
+  // surface the agent's findings for the UI/run-summary.
+  if (reason === "tests_inconclusive") {
+    return {
+      decisionMode: "safe_to_apply",
+      note: "Tests inconclusive (environment issue) — review manually",
+    };
+  }
+  if (reason === "tests_failed_by_patch") {
+    return {
+      decisionMode: "safe_to_apply",
+      note: "Tests failed — patch may need revision",
+    };
+  }
+
+  return {
+    decisionMode: "safe_to_apply",
+    note:
+      input.loopSuccess && !input.hadRunCommandFailure
+        ? "Patch applied by agent (no test verification)"
+        : "Agent loop encountered errors during execution",
+  };
+}
+
+function aggregateToolsUsed(
+  toolCallLog?: AgentLoopResult["toolCallLog"] | null
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const entry of Array.isArray(toolCallLog) ? toolCallLog : []) {
+    const tool = String(entry?.tool || "").trim();
+    if (!tool) continue;
+    out[tool] = (out[tool] ?? 0) + 1;
+  }
+  return out;
+}
+
+function deriveRuntimeVerificationReason(
+  verificationStatus?: string | null
+): VerificationReason {
+  if (verificationStatus === "passed") return "tests_passed";
+  if (verificationStatus === "skipped") return "tests_skipped_no_infra";
+  if (verificationStatus === "tooling_issue" || verificationStatus === "timeout") {
+    return "tests_inconclusive";
+  }
+  if (verificationStatus === "code_failed") return "tests_failed_by_patch";
+  return RUN_SUMMARY_DEFAULT_VERIFICATION_REASON;
+}
+
+function deriveRuntimeVerificationNote(input: {
+  verificationStatus?: string | null;
+  runtimeVerificationPlan?: RuntimeVerificationPlanResult | null;
+  runtimeVerification?: RuntimeVerificationResult | null;
+}): string {
+  const summary =
+    String(input.runtimeVerificationPlan?.summary || "").trim() ||
+    String(input.runtimeVerification?.summary || "").trim();
+  if (summary) return summary;
+  if (input.verificationStatus === "passed") return "Runtime verification passed";
+  if (input.verificationStatus === "skipped") return "Runtime verification skipped";
+  if (input.verificationStatus === "tooling_issue") {
+    return "Runtime verification could not complete because of setup/tooling";
+  }
+  if (input.verificationStatus === "timeout") return "Runtime verification timed out";
+  if (input.verificationStatus === "code_failed") return "Runtime verification failed";
+  return "";
+}
+
+function runtimeVerificationCommands(
+  runtimeVerificationPlan?: RuntimeVerificationPlanResult | null
+): VerificationCommand[] {
+  const steps = Array.isArray(runtimeVerificationPlan?.steps)
+    ? runtimeVerificationPlan.steps
+    : [];
+  return steps.flatMap((step) => {
+    const category =
+      step.kind === "typecheck"
+        ? "typecheck"
+        : step.kind === "test"
+          ? "test"
+          : null;
+    if (!category) return [];
+    const outcome =
+      step.status === "passed"
+        ? "passed"
+        : step.status === "failed" || step.status === "timeout"
+          ? "failed"
+          : "unknown";
+    return [
+      {
+        command: String(step.command || "").slice(0, 240),
+        category,
+        outcome,
+      },
+    ];
+  });
+}
+
+function assembleRunSummary(input: {
+  fileDiffs?: Array<Pick<FileDiff, "filePath" | "addedLines" | "removedLines">> | null;
+  toolCallLog?: AgentLoopResult["toolCallLog"] | null;
+  verificationReason?: VerificationReason | string | null;
+  verificationNote?: string | null;
+  verificationCommands?: VerificationCommand[] | null;
+  decisionMode?: "safe_to_apply" | "preview_only" | "blocked" | "chat" | "rolled_back" | null;
+  totalUsd?: number | null;
+  iterCost?: Pick<
+    IterCostUpdatePayload,
+    "iter_count" | "total_input_uncached" | "total_cache_read" | "total_cache_write"
+  > | null;
+}): RunSummaryPayload {
+  const filesChanged = (Array.isArray(input.fileDiffs) ? input.fileDiffs : []).map((fd) => ({
+    filePath: String(fd?.filePath || ""),
+    addedLines: Number(fd?.addedLines ?? 0) || 0,
+    removedLines: Number(fd?.removedLines ?? 0) || 0,
+  }));
+  const reason = String(
+    input.verificationReason || RUN_SUMMARY_DEFAULT_VERIFICATION_REASON
+  ) as VerificationReason;
+  // Phase J.4: RunSummaryPayload.verification.decisionMode narrowed to
+  // "safe_to_apply" | "rolled_back" (no preview_only after J.1's collapse).
+  // Anything that isn't an explicit rolled_back is reported as safe_to_apply
+  // for the structured run summary — the verbose verificationReason / note
+  // alongside still carries the nuance.
+  const decisionMode: "safe_to_apply" | "rolled_back" =
+    input.decisionMode === "rolled_back" ? "rolled_back" : "safe_to_apply";
+  const totalUsd = Number(input.totalUsd ?? 0) || 0;
+  const iterCount = Number(input.iterCost?.iter_count ?? 0) || 0;
+  const cacheHitPct =
+    cacheHitRatio({
+      input_uncached: Number(input.iterCost?.total_input_uncached ?? 0) || 0,
+      cache_write: Number(input.iterCost?.total_cache_write ?? 0) || 0,
+      cache_read: Number(input.iterCost?.total_cache_read ?? 0) || 0,
+    }) * 100;
+
+  return {
+    filesChanged,
+    toolsUsed: aggregateToolsUsed(input.toolCallLog),
+    verification: {
+      reason,
+      note: String(input.verificationNote || ""),
+      commands: Array.isArray(input.verificationCommands)
+        ? input.verificationCommands
+        : [],
+      decisionMode,
+    },
+    cost: {
+      totalUsd,
+      iterCount,
+      cacheHitPct,
+      avgIterUsd: iterCount > 0 ? totalUsd / iterCount : 0,
+    },
+  };
+}
 
 function countJsxTagsDiagnostic(src: string): {
   opens: number;
@@ -492,30 +777,6 @@ function tryApplyExactLineReplacement(opts: {
   const fullContent = lines.join("\n");
   if (fullContent === opts.fileContent) return { ok: false, reason: "no_change" };
   return { ok: true, fullContent };
-}
-
-/**
- * Find the index of the first ExecutionPlan step whose `filesLikely` includes
- * the given file path. Returns null when no step claims the file. Used by the
- * P1 plan-checklist event emitter — replaces the prior monotonic cursor with
- * a truthful file-driven mapping. P1 best-effort: P2 orchestrator will emit
- * explicit stepIndex per step boundary instead of inferring from file activity.
- */
-export function findMatchingStepIndex(
-  executionPlan: { steps?: Array<{ filesLikely?: string[] }> } | null | undefined,
-  filePath: string
-): number | null {
-  if (!executionPlan || !Array.isArray(executionPlan.steps)) return null;
-  if (!filePath) return null;
-  const target = filePath.trim();
-  if (!target) return null;
-  for (let i = 0; i < executionPlan.steps.length; i += 1) {
-    const files = executionPlan.steps[i]?.filesLikely;
-    if (Array.isArray(files) && files.some((f) => f === target)) {
-      return i;
-    }
-  }
-  return null;
 }
 
 /** First line matching `Target file: <path>` (case-insensitive). */
@@ -4276,8 +4537,14 @@ export async function runLlmPatchFlow(input: {
    * Passed through to runAgentLoop → createOpenAIClient so it is used instead of the env var.
    */
   userApiKey?: string;
+  provider?: LLMProvider;
+  /** L.4.1: per-request tier override forwarded from API body. Beats ZONE_FORCE_TIER env. */
+  forceTier?: TaskTier;
 }): Promise<LlmPatchFlowResult> {
   attachRunIdentity({ userId: input.userId, runId: input.runId });
+  // Phase H.7: outer-scope flag survives past the inner block where `loop`
+  // is declared, so the final return can include it for the UI pill.
+  let tokenBudgetExceededAtExit = false;
   logger.info(
     "[zone-flow-entry] runId=%s, ts=%s, lockHeld=%s",
     typeof input.runId === "string" ? input.runId.trim() : "",
@@ -4295,12 +4562,7 @@ export async function runLlmPatchFlow(input: {
   });
   const lifecycleEvents: AgentLifecycleEvent[] = [];
   let executionPlan: ExecutionPlan | null = null;
-  // P1 plan-step bookkeeping. Replaced the prior monotonic cursor with two
-  // sets so we only emit each step's `started` / `complete` event once,
-  // semantically driven by file activity matching `executionPlan.steps[i].filesLikely`.
-  // P2 will replace this with explicit stepIndex emissions from the orchestrator.
-  const planStepsStarted = new Set<number>();
-  const planStepsCompleted = new Set<number>();
+  let runTodos: RunTodo[] = [];
 
   const getMaxContextFiles = (): number => {
     const raw = (process.env.MAX_CONTEXT_FILES ?? "").trim();
@@ -4333,6 +4595,69 @@ export async function runLlmPatchFlow(input: {
     }
   };
 
+  let latestIterCostUpdate: IterCostUpdatePayload | null = null;
+
+ const emitTodos = (type: "todos_initialized" | "todo_revised"): void => {
+  if (runTodos.length === 0) return;
+    emitStructuredProgress({
+      type,
+      title: type === "todo_revised" ? "Plan revised" : "Plan initialized",
+      status: "success",
+      todos: runTodos,
+    });
+  };
+
+  const emitTodoStatus = (todoId: string, todoStatus: TodoStatus): void => {
+    if (!todoId) return;
+    emitStructuredProgress({
+      type: "todo_status_changed",
+      title: "Plan item updated",
+      status: todoStatus === "completed" ? "success" : todoStatus === "skipped" ? "warning" : "active",
+      todoId,
+      todoStatus,
+    });
+  };
+
+  const setTodoStatus = (todoId: string, todoStatus: TodoStatus): void => {
+    if (runTodos.length === 0) return;
+    if (
+      todoStatus !== "pending" &&
+      todoStatus !== "in_progress" &&
+      todoStatus !== "completed" &&
+      todoStatus !== "skipped"
+    ) {
+      return;
+    }
+    const before = runTodos.find((todo) => todo.id === todoId)?.status;
+    if (!before || before === todoStatus) return;
+    if (todoStatus === "in_progress") runTodos = startTodo(runTodos, todoId);
+    else if (todoStatus === "completed") runTodos = completeTodo(runTodos, todoId);
+    else runTodos = runTodos.map((todo) => todo.id === todoId ? { ...todo, status: todoStatus } : todo);
+    emitTodoStatus(todoId, todoStatus);
+  };
+
+const initializeTodosFromPlan = (): void => {
+  if (!executionPlan || executionPlan.steps.length === 0) return;
+  runTodos = executionPlanToTodos(executionPlan);
+  emitTodos("todos_initialized");
+};
+
+  const startTodoForFile = (filePath: string | null | undefined): void => {
+    const todoId = findTodoIdForFile(runTodos, filePath);
+    if (todoId) setTodoStatus(todoId, "in_progress");
+  };
+
+  const finalizeRunTodos = (outcome: "completed" | "skipped"): void => {
+    if (runTodos.length === 0) return;
+    const previous = runTodos;
+    runTodos = finalizeTodos(runTodos, outcome);
+    for (const todo of runTodos) {
+      if (previous.find((prev) => prev.id === todo.id)?.status !== todo.status) {
+        emitTodoStatus(todo.id, todo.status);
+      }
+    }
+  };
+
   const notifyProgress = (
     legacyStage: string,
     lifecycleInput?: Omit<AgentLifecycleEvent, "timestamp">
@@ -4348,79 +4673,6 @@ export async function runLlmPatchFlow(input: {
         // keep progress reporting best-effort
       }
 
-      // P1 plan-step events: file-match driven (truthful). When a lifecycle
-      // event carries a filePath, look up which plan step claims that file
-      // (`step.filesLikely`) and emit `plan_step_started` / `plan_step_complete`
-      // with the explicit stepIndex. No file match → silent (better than lying).
-      // On `run_completed`, cascade-complete any started-but-not-completed step.
-      if (executionPlan && executionPlan.steps.length > 0) {
-        const filePathRaw = (ev as { filePath?: unknown }).filePath;
-        const filePaths =
-          typeof filePathRaw === "string"
-            ? filePathRaw
-                .split(",")
-                .map((p) => p.trim())
-                .filter((p) => p.length > 0)
-            : [];
-
-        const matchedStepIndices = new Set<number>();
-        for (const fp of filePaths) {
-          const idx = findMatchingStepIndex(executionPlan, fp);
-          if (idx !== null) matchedStepIndices.add(idx);
-        }
-
-        const isStartingEvent =
-          ev.type === "file_context_loaded" ||
-          ev.type === "patch_generation_started" ||
-          ev.type === "patch_generated" ||
-          ev.type === "verification_started";
-        const isCompletingEvent =
-          ev.type === "patch_correctness_checked" ||
-          ev.type === "verification_passed" ||
-          ev.type === "verification_failed";
-
-        if (isStartingEvent) {
-          for (const idx of matchedStepIndices) {
-            if (!planStepsStarted.has(idx)) {
-              planStepsStarted.add(idx);
-              emitStructuredProgress({
-                type: "plan_step_started",
-                title: `Plan step ${idx + 1} started`,
-                status: "active",
-                stepIndex: idx,
-              });
-            }
-          }
-        }
-
-        if (isCompletingEvent) {
-          for (const idx of matchedStepIndices) {
-            if (!planStepsCompleted.has(idx)) {
-              planStepsCompleted.add(idx);
-              emitStructuredProgress({
-                type: "plan_step_complete",
-                title: `Plan step ${idx + 1} complete`,
-                status: "success",
-                stepIndex: idx,
-              });
-            }
-          }
-        }
-
-        if (ev.type === "run_completed") {
-          for (const idx of planStepsStarted) {
-            if (!planStepsCompleted.has(idx)) {
-              planStepsCompleted.add(idx);
-              emitStructuredProgress({
-                type: "plan_step_complete",
-                title: `Plan step ${idx + 1} complete`,
-                status: "success",
-                stepIndex: idx,
-              });
-            }
-          }
-        }
-      }
       return;
     }
     try {
@@ -4606,7 +4858,7 @@ export async function runLlmPatchFlow(input: {
         totalRemovedLines: 0,
         totalChangedLines: 0,
       },
-      decisionMode: "preview_only",
+      decisionMode: "safe_to_apply",
       warnings: ["Repository could not be read in this environment."],
       correctness: { status: "skipped", summary: "Run stopped before patch planning." },
       verificationCommandsLabel: null,
@@ -4655,8 +4907,8 @@ export async function runLlmPatchFlow(input: {
           totalRemovedLines: 0,
           totalChangedLines: 0,
         },
-        decisionMode: "preview_only",
-        finalState: "preview_only",
+        decisionMode: "safe_to_apply",
+        finalState: "safe_to_apply",
         warnings: [EXPLICIT_TARGET_NOT_FOUND_WARNING],
         correctness: {
           status: "skipped",
@@ -4677,8 +4929,8 @@ export async function runLlmPatchFlow(input: {
         patchPreview: EXPLICIT_TARGET_NOT_FOUND_WARNING,
         warnings: [EXPLICIT_TARGET_NOT_FOUND_WARNING],
         developerConfidence: 60,
-        decisionMode: "preview_only",
-        finalState: "preview_only",
+        decisionMode: "safe_to_apply",
+        finalState: "safe_to_apply",
         patchSource: "no_patch",
         applyPatches: [],
         patchResults: [],
@@ -4805,7 +5057,7 @@ export async function runLlmPatchFlow(input: {
     // agent_loop doesn't go through plannerStep narrowing, so we use top-N
     // developerContextFiles ranked quickly by rankRelevantFiles for the plan.
     // This is COARSER than plan_full_patch's narrowed plan but provides
-    // enough step structure for the UI checklist + plan_step cursor.
+    // enough step structure for todo display and the scope guard.
     let agentLoopPlanFiles: string[] = [];
     try {
       const ranker = await rankRelevantFiles({
@@ -4832,9 +5084,13 @@ export async function runLlmPatchFlow(input: {
           task: input.task,
           repoSummary: projectSummary,
           relevantFiles: agentLoopPlanFiles,
+          userApiKey: input.userApiKey,
+          provider: input.provider,
         });
         debugLog(`[zone-plan] generated steps=${executionPlan.steps.length} (agent_loop)`);
         debugLog(`[zone-plan] scope=${executionPlan.scopeSummary}`);
+        // Sidebar is seeded by the in-loop TodoWrite tool now; pre-planner only
+        // feeds scopeGuard / evaluatePlanAlignment / orchestrator / finalRunReport.
       } catch (err) {
         console.warn(
           `[zone-plan] skipped (agent_loop): ${err instanceof Error ? err.message : String(err)}`
@@ -4850,87 +5106,7 @@ export async function runLlmPatchFlow(input: {
         isComplexTask,
         branch: "agent_loop",
       });
-      if (isComplexTask && executionPlan) {
-        const planForUi = executionPlan;
-        emitStructuredProgress({
-          type: "plan_generated",
-          title: "Plan generated",
-          detail: planForUi.scopeSummary,
-          status: "success",
-          steps: planForUi.steps.map((step, i) => ({
-            index: i,
-            text: step.description || step.title || String(step),
-            status: "pending",
-          })),
-        });
-      }
-    }
-
-    // Tur P1.6: agent_loop step-cursor. The function-scope cursor at line 4344
-    // listens for plan_full_patch events (`patch_generated`, `verification_*`)
-    // that agent_loop never emits. Agent_loop emits `tool_call` (no filePath)
-    // and `patch_converted` (with filePath, only for write_file). Hook directly
-    // off the tool-call where filePath is in hand.
-    const agentLoopStepsStarted = new Set<number>();
-    const agentLoopStepsCompleted = new Set<number>();
-    // Tur P1.6 fix: track which step the cursor is currently "on" so we only
-    // complete it when the cursor moves to a different step. Emitting started+complete
-    // in the same call (the previous behavior) meant the UI's active state survived
-    // for ~1ms — the mor-halo spinner never rendered.
-    let agentLoopActiveStepIdx: number | null = null;
-
-    const advanceAgentLoopStep = (filePath: string | null | undefined): void => {
-      if (!filePath || !executionPlan || executionPlan.steps.length === 0) return;
-      const idx = findMatchingStepIndex(executionPlan, filePath);
-      if (idx === null) return;
-
-      // Cursor transitioned to a new step → complete the previous one.
-      if (
-        agentLoopActiveStepIdx !== null &&
-        agentLoopActiveStepIdx !== idx &&
-        !agentLoopStepsCompleted.has(agentLoopActiveStepIdx)
-      ) {
-        agentLoopStepsCompleted.add(agentLoopActiveStepIdx);
-        emitStructuredProgress({
-          type: "plan_step_complete",
-          title: `Plan step ${agentLoopActiveStepIdx + 1} complete`,
-          status: "success",
-          stepIndex: agentLoopActiveStepIdx,
-        });
-      }
-
-      if (!agentLoopStepsStarted.has(idx)) {
-        agentLoopStepsStarted.add(idx);
-        emitStructuredProgress({
-          type: "plan_step_started",
-          title: `Plan step ${idx + 1} started`,
-          status: "active",
-          stepIndex: idx,
-        });
-      }
-      agentLoopActiveStepIdx = idx;
-    };
-
-    // Tur P1.7 seed: ensure step 0 emits `plan_step_started` at agent-loop entry,
-    // independent of whether tool calls match step.filesLikely. Plans where steps
-    // lack file hints (command-only steps like "Run npm run build", analysis
-    // steps like "Review build output") would otherwise never trigger any
-    // plan_step_started event, leaving the UI counter pinned at 0/N and the
-    // mor-halo spinner unrendered. Forward-cursor advancement and
-    // run_completed cascade-complete handle subsequent steps.
-    if (
-      executionPlan &&
-      executionPlan.steps.length > 0 &&
-      !agentLoopStepsStarted.has(0)
-    ) {
-      agentLoopStepsStarted.add(0);
-      agentLoopActiveStepIdx = 0;
-      emitStructuredProgress({
-        type: "plan_step_started",
-        title: `Plan step 1 started`,
-        status: "active",
-        stepIndex: 0,
-      });
+      void isComplexTask;
     }
 
     const beforeByFile = new Map<string, string>();
@@ -5164,9 +5340,158 @@ export async function runLlmPatchFlow(input: {
             approvalId: String(e.approvalId || ""),
           } as any);
         }
+        if (e && typeof e === "object" && e.type === "command_auto_approved") {
+          emitStructuredProgress({
+            type: "command_auto_approved" as any,
+            title: "Command auto-approved",
+            status: "success",
+            command: String(e.command || ""),
+            approvalId: String(e.approvalId || ""),
+          } as any);
+        }
+        if (e && typeof e === "object" && e.type === "command_trusted") {
+          emitStructuredProgress({
+            type: "command_trusted" as any,
+            title: "Trusted command auto-approved",
+            status: "success",
+            command: String(e.command || ""),
+            approvalId: String(e.approvalId || ""),
+          } as any);
+        }
+        if (
+          e &&
+          typeof e === "object" &&
+          e.type === "iter_cost_update"
+        ) {
+          latestIterCostUpdate = {
+            type: "iter_cost_update",
+            runId: String((e as { runId?: unknown }).runId ?? input.runId ?? ""),
+            iter: Number(e.iter ?? 0) || 0,
+            totalIter: Number(e.totalIter ?? 0) || 0,
+            iterCost: Number(e.iterCost ?? 0) || 0,
+            cumulativeCost: Number(e.cumulativeCost ?? 0) || 0,
+            cacheHitThisIter: Number(e.cacheHitThisIter ?? 0) || 0,
+            cacheHitCumulative: Number(e.cacheHitCumulative ?? 0) || 0,
+            input_uncached: Number(e.input_uncached ?? 0) || 0,
+            cache_write: Number(e.cache_write ?? 0) || 0,
+            cache_read: Number(e.cache_read ?? 0) || 0,
+            output: Number(e.output ?? 0) || 0,
+            total_input_uncached: Number(e.total_input_uncached ?? 0) || 0,
+            total_cache_read: Number(e.total_cache_read ?? 0) || 0,
+            total_cache_write: Number(e.total_cache_write ?? 0) || 0,
+            total_output: Number(e.total_output ?? 0) || 0,
+            iter_count: Number(e.iter_count ?? 0) || 0,
+          };
+          emitStructuredProgress({
+            type: "iter_cost_update" as any,
+            title: "Cost updated",
+            status: "active",
+            iter: latestIterCostUpdate.iter,
+            totalIter: latestIterCostUpdate.totalIter,
+            iterCost: latestIterCostUpdate.iterCost,
+            cumulativeCost: latestIterCostUpdate.cumulativeCost,
+            cacheHitThisIter: latestIterCostUpdate.cacheHitThisIter,
+            cacheHitCumulative: latestIterCostUpdate.cacheHitCumulative,
+            input_uncached: latestIterCostUpdate.input_uncached,
+            cache_write: latestIterCostUpdate.cache_write,
+            cache_read: latestIterCostUpdate.cache_read,
+            output: latestIterCostUpdate.output,
+            total_input_uncached: latestIterCostUpdate.total_input_uncached,
+            total_cache_read: latestIterCostUpdate.total_cache_read,
+            total_cache_write: latestIterCostUpdate.total_cache_write,
+            total_output: latestIterCostUpdate.total_output,
+            iter_count: latestIterCostUpdate.iter_count,
+          } as any);
+        }
+        if (
+          e &&
+          typeof e === "object" &&
+          e.type === "token_budget_status"
+        ) {
+          emitStructuredProgress({
+            type: "token_budget_status" as any,
+            title: String(e.title || "Token budget"),
+            status:
+              (e.status as "active" | "warning" | "error" | "success" | undefined) ??
+              "active",
+            cumulativeTokens:
+              typeof e.cumulativeTokens === "number" ? e.cumulativeTokens : undefined,
+            tokenBudgetCap:
+              typeof e.tokenBudgetCap === "number" ? e.tokenBudgetCap : undefined,
+            tokenBudgetRatio:
+              typeof e.tokenBudgetRatio === "number" ? e.tokenBudgetRatio : undefined,
+            iter: typeof e.iter === "number" ? e.iter : undefined,
+            breakdown:
+              e.breakdown && typeof e.breakdown === "object"
+                ? e.breakdown
+                : undefined,
+          } as any);
+        }
+        if (
+          e &&
+          typeof e === "object" &&
+          e.type === "todos_initialized"
+        ) {
+          if (Array.isArray(e.todos)) runTodos = e.todos as RunTodo[];
+          emitStructuredProgress({
+            type: "todos_initialized" as any,
+            title: String(e.title || "Plan initialized"),
+            status: "success",
+            todos: e.todos,
+          } as any);
+        }
+        if (
+          e &&
+          typeof e === "object" &&
+          e.type === "todo_revised"
+        ) {
+          if (Array.isArray(e.todos)) runTodos = e.todos as RunTodo[];
+          emitStructuredProgress({
+            type: "todo_revised" as any,
+            title: String(e.title || "Plan revised"),
+            status: "success",
+            todos: e.todos,
+          } as any);
+        }
+        if (
+          e &&
+          typeof e === "object" &&
+          e.type === "todo_status_changed"
+        ) {
+          setTodoStatus(
+            String(e.todoId || ""),
+            String(e.todoStatus || "") as TodoStatus
+          );
+        }
+        if (
+          e &&
+          typeof e === "object" &&
+          (e.type === "subagent_started" || e.type === "subagent_completed")
+        ) {
+          emitStructuredProgress({
+            type: e.type,
+            title: String(e.title || e.type).slice(0, 160),
+            status: e.status,
+            subagentStatus: e.subagentStatus,
+            subagentId: e.subagentId,
+            subagentType: e.subagentType,
+            parentRunId: e.parentRunId,
+          } as any);
+        }
+        if (e && typeof e === "object" && e.type === "narration") {
+          emitStructuredProgress({
+            type: "narration" as any,
+            title: String(e.title || "").slice(0, 200),
+            text: String(e.text || "").slice(0, 2000),
+            iter: typeof e.iter === "number" ? e.iter : undefined,
+            status: "active",
+          } as any);
+        }
       },
       onProgress: (msg: string) => {
         if (!runId) return;
+        // [tool] lines are handled by onToolCall (structured). Skip raw duplicates.
+        if (String(msg || "").startsWith("[tool]")) return;
         emitStructuredProgress({
           type: "tool_call",
           title: String(msg || "").slice(0, 200),
@@ -5235,22 +5560,70 @@ export async function runLlmPatchFlow(input: {
             beforeByFile.set(snapPath, "");
           }
         }
-        // Tur P1.6: advance plan-step cursor on every file-touching tool call.
-        // Skip when the orchestrator is active — it emits explicit step-boundary
-        // events around each iteration instead, and the file-match cursor would
-        // double-fire.
-        if (snapPath && !_planOrchestrationEnabled) advanceAgentLoopStep(snapPath);
+        if (snapPath && !_planOrchestrationEnabled) startTodoForFile(snapPath);
       },
-      onToolResult: (_name: string, result: { output?: string; success?: boolean }) => {
+      onToolResult: (
+        name: string,
+        result: { output?: string; success?: boolean; metadata?: Record<string, unknown> }
+      ) => {
         if (!runId) return;
         emitStructuredProgress({
           type: "tool_result",
+          toolName: name,
           title: String(result.output || "").slice(0, 100) || "tool result",
           detail: String(result.output || "").slice(0, 4000),
           status: result.success ? "success" : "error",
+          // Phase I.5: forward metadata for tools whose UI render needs
+          // structured fields (verify_visual screenshotPath/pageTitle/etc).
+          // Stripped at the SSE boundary if the tool didn't supply any.
+          ...(result.metadata && Object.keys(result.metadata).length > 0
+            ? { metadata: result.metadata }
+            : {}),
         });
       },
     } as const;
+
+    // Phase H.6: plan-aware iter budget. Single-step (no plan or trivial
+    // plan) → WORKER_ITER_FLOOR=6. 4-step plan → 16. Capped at 24. (K.2 tightened)
+    // Passed via `maxIterations` (not `maxIterationsOverride`) so the
+    // ESCALATION_BONUS_ITERATIONS logic for repeat apply_patch failures
+    // remains active.
+    const iterBudgetPlanSteps = executionPlan?.steps?.length ?? 1;
+    const iterBudgetComputed = computeWorkerMaxIterations(iterBudgetPlanSteps);
+    debugLog("[zone-iter-budget]", JSON.stringify({
+      mode: "patch",
+      planStepsCount: iterBudgetPlanSteps,
+      computedMax: iterBudgetComputed,
+    }));
+
+    // Phase L.1: pre-dispatch task classification. Informational only — L.2
+    // will use the result to gate Task tool exposure and L.3 to scale the
+    // token budget. Failure is graceful: a fallback (medium tier) is always
+    // returned so dispatch is never blocked.
+    let taskClassification: TaskClassification | null = null;
+    try {
+      taskClassification = await classifyTask(input.task, {
+        userApiKey: input.userApiKey,
+      });
+      emitStructuredProgress({
+        type: "task_classified",
+        title: "Task classified",
+        status: "active",
+        tier: taskClassification.tier,
+        estimatedFiles: taskClassification.estimatedFiles,
+        estimatedIterations: taskClassification.estimatedIterations,
+        needsSubagent: taskClassification.needsSubagent,
+        confidence: taskClassification.confidence,
+        classifierModel: taskClassification.classifierModel,
+        classifierCostUsd: taskClassification.classifierCostUsd,
+        classifierLatencyMs: taskClassification.classifierLatencyMs,
+        ...(taskClassification.fallbackUsed ? { fallbackUsed: true } : {}),
+      });
+    } catch (err) {
+      // classifyTask already swallows internal errors and returns a fallback,
+      // but defensive against future changes to that contract.
+      debugLog("[zone-task-classifier-unexpected-throw]", String(err));
+    }
 
     const agentLoopBaseInput = {
       task: input.task,
@@ -5271,6 +5644,9 @@ export async function runLlmPatchFlow(input: {
       // buildVerifyDiagnostic can surface candidate culprits when a
       // build/test failure points to a framework-generated path.
       repoFilePaths: developerContextFiles.map((f) => f.path),
+      maxIterations: iterBudgetComputed,
+      taskClassification,
+      forceTier: input.forceTier,
       ...agentLoopCallbacks,
     };
 
@@ -5280,6 +5656,11 @@ export async function runLlmPatchFlow(input: {
         runId: runId || null,
         stepCount: executionPlan.steps.length,
       }));
+      // Orchestrator owns the sidebar deterministically: seed from the pre-planner's
+      // step list once, then drive transitions via setTodoStatus per step. The
+      // default (non-orchestrator) flow leaves the sidebar empty until the agent
+      // calls TodoWrite in-loop.
+      initializeTodosFromPlan();
       const stepResults: AgentLoopResult[] = [];
       for (let stepIdx = 0; stepIdx < executionPlan.steps.length; stepIdx += 1) {
         if (input.abortSignal?.aborted) {
@@ -5292,24 +5673,14 @@ export async function runLlmPatchFlow(input: {
           total: executionPlan.steps.length,
           title: String(step.title || "").slice(0, 120),
         }));
-        emitStructuredProgress({
-          type: "plan_step_started",
-          title: `Plan step ${stepIdx + 1} started`,
-          status: "active",
-          stepIndex: stepIdx,
-        });
+        setTodoStatus(todoIdForStepIndex(stepIdx), "in_progress");
         const stepTask = buildStepTask(input.task, stepIdx, executionPlan);
         const stepResult = await runAgentLoop({
           ...agentLoopBaseInput,
           task: stepTask,
         });
         stepResults.push(stepResult);
-        emitStructuredProgress({
-          type: "plan_step_complete",
-          title: `Plan step ${stepIdx + 1} complete`,
-          status: "success",
-          stepIndex: stepIdx,
-        });
+        setTodoStatus(todoIdForStepIndex(stepIdx), "completed");
         debugLog("[zone-orchestrator] step done", JSON.stringify({
           stepIdx,
           success: stepResult.success,
@@ -5325,6 +5696,12 @@ export async function runLlmPatchFlow(input: {
       loop = await runAgentLoop(agentLoopBaseInput);
     }
 
+    // Phase H.7: capture token-budget exit at outer-scope lifetime so the
+    // final return (way down the function) can flag it for the UI pill.
+    if (loop.terminationReason === "token_budget_exceeded") {
+      tokenBudgetExceededAtExit = true;
+    }
+
     filesTouched.push(...(loop.filesModified || []));
 
     const agentLoopHadRunCommandFailure = loop.toolCallLog.some((entry) => {
@@ -5338,46 +5715,90 @@ export async function runLlmPatchFlow(input: {
       );
     });
 
+    // Phase J.3.1: when staging was discarded by a regression rollback, the
+    // disk is back to pre-apply state and reading "after" from disk would
+    // yield an empty diff. Use the staging snapshot the agent forwarded as
+    // "after" so the UI can show "what was attempted" cards under the
+    // rolled-back banner.
+    const stagingForRolledBack = loop.discardedStaging ?? null;
+    const stagingByRel: Map<string, string> | null = stagingForRolledBack
+      ? new Map(
+          [...stagingForRolledBack.entries()].map(([abs, content]) => [
+            path.relative(input.repoPath, abs).replace(/\\/g, "/"),
+            content,
+          ])
+        )
+      : null;
+
     const fileDiffs: FileDiff[] = filesTouched.map((rel) => {
       const abs = path.join(input.repoPath, rel);
       const before =
         beforeByFile.get(rel) ?? (existsSync(abs) ? readFileSync(abs, "utf8") : "");
-      const after = existsSync(abs) ? readFileSync(abs, "utf8") : "";
+      const after = stagingByRel?.has(rel)
+        ? stagingByRel.get(rel)!
+        : existsSync(abs) ? readFileSync(abs, "utf8") : "";
       const diff = computeFileDiff(before, after);
       const addedLines = diff.filter((l) => l.type === "added").length;
       const removedLines = diff.filter((l) => l.type === "removed").length;
       return { filePath: rel, diff, addedLines, removedLines };
     });
 
+    // Phase J.3.1: also include any staged paths the agent touched but that
+    // didn't get added to filesTouched (some flow combinations only push
+    // filesModified post-flush). Without this, regression diffs go missing
+    // when filesTouched is empty.
+    if (stagingByRel) {
+      for (const [rel, after] of stagingByRel) {
+        if (filesTouched.includes(rel)) continue;
+        const before = beforeByFile.get(rel) ?? "";
+        if (before === after) continue;
+        const diff = computeFileDiff(before, after);
+        const addedLines = diff.filter((l) => l.type === "added").length;
+        const removedLines = diff.filter((l) => l.type === "removed").length;
+        fileDiffs.push({ filePath: rel, diff, addedLines, removedLines });
+      }
+    }
+
     // Use agent's self-reported verification reason to determine safety
     const vr = loop.verificationReason;
-    let agentDecisionMode: "safe_to_apply" | "preview_only";
-    let agentVerificationNote: string;
+    // Phase J.3: when staging-verification regressed, the agentLoop discarded
+    // staging (no permanent flush). Surface this as decisionMode=rolled_back
+    // with the regression reason + error preview so the UI can render the
+    // "Apply rolled back" amber banner. Take precedence over the normal
+    // safe-to-apply / blocked routing.
+    const isVerificationRegressed = vr === "verification_regressed";
+    const rolledBackErrorPreview = isVerificationRegressed
+      ? String(loop.summary || "")
+          .split("```")
+          .filter((part, idx) => idx % 2 === 1)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .join("\n")
+      : "";
+    const rolledBackErrorLines = rolledBackErrorPreview
+      ? rolledBackErrorPreview.split("\n").filter(Boolean).slice(0, 5)
+      : [];
+    const rolledBackReason = isVerificationRegressed
+      ? (() => {
+          const m = String(loop.summary || "").match(
+            /Patch added (\d+) new error\(s\)[^.]*\((\d+) before → (\d+) after\)/
+          );
+          if (m) return `Patch added ${m[1]} new error${m[1] === "1" ? "" : "s"} (${m[2]} → ${m[3]} total)`;
+          return "Verification regressed after apply";
+        })()
+      : "";
 
-    if (vr === "tests_passed") {
-      agentDecisionMode = "safe_to_apply";
-      agentVerificationNote = "Tests passed";
-    } else if (vr === "tests_skipped_no_infra") {
-      agentDecisionMode = "safe_to_apply";
-      agentVerificationNote = "Tests skipped (no test infrastructure found)";
-    } else if (vr === "tests_failed_unrelated") {
-      agentDecisionMode = "safe_to_apply";
-      agentVerificationNote = "Tests had pre-existing failures — not caused by this patch";
-    } else if (vr === "tests_inconclusive") {
-      agentDecisionMode = "preview_only";
-      agentVerificationNote = "Tests inconclusive (environment issue) — review manually";
-    } else if (vr === "tests_failed_by_patch") {
-      agentDecisionMode = "preview_only";
-      agentVerificationNote = "Tests failed — patch may need revision";
-    } else {
-      // no_verification_attempted: fall back to run-command heuristic
-      agentDecisionMode = loop.success && !agentLoopHadRunCommandFailure
-        ? "safe_to_apply"
-        : "preview_only";
-      agentVerificationNote = agentDecisionMode === "safe_to_apply"
-        ? "Patch applied by agent (no test verification)"
-        : "Agent loop encountered errors";
-    }
+    const agentVerificationSummary = deriveAgentVerificationSummary({
+      reason: vr,
+      loopSuccess: loop.success,
+      hadRunCommandFailure: agentLoopHadRunCommandFailure,
+    });
+    const agentDecisionMode = isVerificationRegressed
+      ? "rolled_back"
+      : agentVerificationSummary.decisionMode;
+    const agentVerificationNote = isVerificationRegressed
+      ? "Apply rolled back — verification regressed"
+      : agentVerificationSummary.note;
 
     const warnings: string[] = loop.success ? [] : [`[AGENT_LOOP] ${loop.summary}`];
     if (vr === "tests_inconclusive") {
@@ -5416,84 +5837,37 @@ export async function runLlmPatchFlow(input: {
       finalExecutionOutcome: agentDecisionMode === "safe_to_apply" ? "completed" : "completed_with_issues",
       developerConfidence: 80,
     });
+    const agentVerificationCommands = collectVerificationCommands(loop.toolCallLog);
+
+    // Phase H.7: surface token-budget exit in the patch flow log so the
+    // [zone-token-budget] traces are easy to grep alongside the run.
+    if (loop.terminationReason === "token_budget_exceeded") {
+      debugLog("[zone-token-budget]", JSON.stringify({
+        mode: "patch",
+        runId: runId || null,
+        outcome: "graceful_exit",
+        summaryPreview: loop.summary.slice(0, 200),
+      }));
+    }
 
     if (runId) {
-      // Tur P1.6: cascade-complete any plan steps the cursor never reached
-      // (steps with empty filesLikely, or merged-into-one-patch by the agent).
-      // Mirrors the UI `finalizeRemaining()` so logs and UI agree.
-      // Tur P2.1: skipped when the orchestrator drove explicit per-step events
-      // (it already emitted plan_step_complete for every step it ran).
-      if (executionPlan && executionPlan.steps.length > 0 && !_planOrchestrationEnabled) {
-        for (let i = 0; i < executionPlan.steps.length; i += 1) {
-          if (!agentLoopStepsCompleted.has(i)) {
-            agentLoopStepsCompleted.add(i);
-            emitStructuredProgress({
-              type: "plan_step_complete",
-              title: `Plan step ${i + 1} complete`,
-              status: "success",
-              stepIndex: i,
-            });
-          }
-        }
-      }
+      finalizeRunTodos(agentDecisionMode === "safe_to_apply" ? "completed" : "skipped");
       emitStructuredProgress({
         type: "agent_loop_complete",
         title: loop.success
           ? "Agent tool loop complete"
-          : "Agent tool loop ended with issues",
+          : loop.terminationReason === "token_budget_exceeded"
+            ? "Agent stopped at token budget"
+            : "Agent tool loop ended with issues",
         detail: loop.summary.slice(0, 4000),
         status: loop.success ? "success" : "warning",
       });
 
-      // Surface the model's final text (or a clear failure explanation) as a chat bubble in the UI.
-      const summaryTrim = stripVerificationTag(String(loop.summary || ""));
-      const ts = Date.now();
-      if (loop.success && summaryTrim.length > 0) {
-        input.onProgress?.({
-          stage: "agent_loop_complete",
-          progress: {
-            runId,
-            ts,
-            type: "chat_response",
-            title: summaryTrim.slice(0, 16_000),
-            status: "success",
-          },
-        });
-      } else if (loop.success && summaryTrim.length === 0) {
-        input.onProgress?.({
-          stage: "agent_loop_complete",
-          progress: {
-            runId,
-            ts,
-            type: "chat_response",
-            title:
-              "The agent run finished, but the model did not return a text summary. Check the tool log for details.",
-            status: "warning",
-          },
-        });
-      } else {
-        const code = loop.error ?? "agent_loop_failed";
-        const failureTitle =
-          code === "max_iterations_reached"
-            ? `The agent reached the tool-call limit without a final answer. Last note: ${summaryTrim || "(none)"}`.slice(
-                0,
-                16_000
-              )
-            : `Agent run did not complete successfully (${code}). ${summaryTrim || ""}`.trim().slice(
-                0,
-                16_000
-              );
-        input.onProgress?.({
-          stage: "agent_loop_complete",
-          progress: {
-            runId,
-            ts,
-            type: "chat_response",
-            title: failureTitle,
-            status: "error",
-          },
-        });
-      }
+      // Phase A.7e-fix: chat_response bubble removed.
+      // Narration events (A.7a/b) already rendered the agent's final text inline
+      // during the last iteration. Emitting chat_response here duplicated that
+      // content as a second bubble AFTER "Agent finished". The agent_loop_complete
+      // event above (with detail + status) provides failure signal for error cases.
     }
 
     // Zone Undo Tur 2a: capture a snapshot for safe_to_apply runs so the user
@@ -5560,6 +5934,117 @@ export async function runLlmPatchFlow(input: {
       }
     }
 
+    if (runId) {
+      const summary = assembleRunSummary({
+        fileDiffs,
+        toolCallLog: loop.toolCallLog,
+        verificationReason: vr,
+        verificationNote: agentVerificationNote,
+        verificationCommands: agentVerificationCommands,
+        decisionMode: agentDecisionMode,
+        totalUsd: getRunCost(input.userId ?? "local-dev", runId),
+        iterCost: latestIterCostUpdate,
+      });
+      emitStructuredProgress({
+        type: "run_summary",
+        title: "Run summary",
+        status: "success",
+        ...summary,
+      });
+    }
+
+    if (isVerificationRegressed) {
+      console.warn("[zone-rollback]", JSON.stringify({
+        runId: runId || null,
+        reason: rolledBackReason,
+        errorCount: rolledBackErrorLines.length,
+      }));
+    }
+
+    // Phase I.3: auto-verify after successful apply when toggle is ON.
+    // Best-effort — wrap in try/catch so a Playwright/probe failure never
+    // breaks the patch flow (apply already succeeded). Skipped on
+    // rolled_back / no_patch since stale code is on disk or nothing changed.
+    let autoVerifyFields: {
+      autoVerifyScreenshot?: string;
+      autoVerifyPageTitle?: string;
+      autoVerifyConsoleErrors?: string[];
+    } = {};
+    if (agentDecisionMode === "safe_to_apply" && fileDiffs.length > 0) {
+      try {
+        const { loadVisualSettings } = await import("../visual/visualSettings.js");
+        const settings = loadVisualSettings();
+        if (settings.autoVerifyAfterPatch) {
+          const { getDevServerConfig, probeDevServer } = await import(
+            "../visual/devServerProbe.js"
+          );
+          const config = getDevServerConfig();
+          const reachable = await probeDevServer(config.baseUrl);
+          if (!reachable) {
+            console.log(
+              "[zone-auto-verify-skipped]",
+              JSON.stringify({
+                runId: runId || null,
+                reason: "dev_server_unreachable",
+                baseUrl: config.baseUrl,
+              })
+            );
+          } else {
+            const { runVerifyVisual } = await import("../tools/verifyVisual.js");
+            const verifyResult = await runVerifyVisual(
+              {
+                path: "/",
+                description: `Auto-verify after patch (${fileDiffs.length} file(s) changed)`,
+                viewport: settings.defaultViewport,
+                waitFor: null,
+              },
+              {
+                devServerBaseUrl: config.baseUrl,
+                runId: String(runId || "unknown"),
+                screenshotCount: 0,
+              }
+            );
+            if (verifyResult.success && verifyResult.screenshotPath) {
+              autoVerifyFields = {
+                autoVerifyScreenshot: verifyResult.screenshotPath,
+                ...(verifyResult.pageTitle
+                  ? { autoVerifyPageTitle: verifyResult.pageTitle }
+                  : {}),
+                ...(verifyResult.consoleErrors && verifyResult.consoleErrors.length > 0
+                  ? { autoVerifyConsoleErrors: verifyResult.consoleErrors }
+                  : {}),
+              };
+              console.log(
+                "[zone-auto-verify]",
+                JSON.stringify({
+                  runId: runId || null,
+                  screenshotPath: verifyResult.screenshotPath,
+                  pageTitle: verifyResult.pageTitle ?? null,
+                  consoleErrorCount: verifyResult.consoleErrors?.length ?? 0,
+                })
+              );
+            } else {
+              console.warn(
+                "[zone-auto-verify-failed]",
+                JSON.stringify({
+                  runId: runId || null,
+                  error: verifyResult.error ?? "unknown",
+                })
+              );
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(
+          "[zone-auto-verify-error]",
+          JSON.stringify({
+            runId: runId || null,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        );
+      }
+    }
+
     return {
       ok: true,
       patchPreview: `=== AGENT LOOP SUMMARY ===\n${loop.summary}`,
@@ -5570,9 +6055,16 @@ export async function runLlmPatchFlow(input: {
       patchesAlreadyApplied: fileDiffs.length > 0 && agentDecisionMode === "safe_to_apply",
       verificationReason: vr,
       verificationNote: agentVerificationNote,
-      verificationCommands: collectVerificationCommands(loop.toolCallLog),
+      verificationCommands: agentVerificationCommands,
       decisionMode: agentDecisionMode,
       finalState: agentDecisionMode,
+      ...autoVerifyFields,
+      ...(isVerificationRegressed
+        ? {
+            rolledBackReason,
+            rolledBackErrors: rolledBackErrorLines,
+          }
+        : {}),
       finalExecutionOutcome: agentDecisionMode === "safe_to_apply" ? "completed" : "completed_with_issues",
       applyPatches: [],
       patchResults: [],
@@ -5580,6 +6072,7 @@ export async function runLlmPatchFlow(input: {
       contextFiles: [],
       lifecycleEvents,
       finalRunReport,
+      ...(taskClassification ? { taskClassification } : {}),
     };
   }
 
@@ -6017,9 +6510,13 @@ export async function runLlmPatchFlow(input: {
       task: input.task,
       repoSummary: projectSummary,
       relevantFiles: relevantFiles.map((file) => file.path),
+      userApiKey: input.userApiKey,
+      provider: input.provider,
     });
     debugLog(`[zone-plan] generated steps=${executionPlan.steps.length}`);
     debugLog(`[zone-plan] scope=${executionPlan.scopeSummary}`);
+    // Sidebar is seeded by the in-loop TodoWrite tool now; pre-planner only
+    // feeds scopeGuard / evaluatePlanAlignment / orchestrator / finalRunReport.
   } catch (err) {
     console.warn(
       `[zone-plan] skipped: ${err instanceof Error ? err.message : String(err)}`
@@ -6043,6 +6540,7 @@ export async function runLlmPatchFlow(input: {
         })),
         existingFilesSummary,
         schemaAwareSummary: [],
+        userOpenAiKey: input.userApiKey,
       });
       perf.mark("feature model response received");
     } catch (err) {
@@ -6077,7 +6575,7 @@ export async function runLlmPatchFlow(input: {
           totalRemovedLines: 0,
           totalChangedLines: 0,
         },
-        decisionMode: "preview_only",
+        decisionMode: "safe_to_apply",
         warnings: [`Feature planning failed: ${reason}`],
         correctness: { status: "skipped", summary: "Run stopped during feature planning." },
         verificationCommandsLabel: null,
@@ -6109,20 +6607,7 @@ export async function runLlmPatchFlow(input: {
   });
   /** Tur P1: lowered threshold from "≥4 steps + ≥2 files" to "≥2 steps" so multi-task prompts surface the plan checklist. P2 will remove the gate entirely (always emit, UI decides). */
   const isComplexTask = isComplexTaskPreview;
-  if (isComplexTask && executionPlan) {
-    const planForUi = executionPlan;
-    emitStructuredProgress({
-      type: "plan_generated",
-      title: "Plan generated",
-      detail: planForUi.scopeSummary,
-      status: "success",
-      steps: planForUi.steps.map((step, i) => ({
-        index: i,
-        text: step.description || step.title || String(step),
-        status: "pending",
-      })),
-    });
-  }
+  void isComplexTask;
 
   const planSummaryParts: string[] = [];
   if (executionPlan) {
@@ -6544,7 +7029,7 @@ export async function runLlmPatchFlow(input: {
         totalRemovedLines: 0,
         totalChangedLines: 0,
       },
-      decisionMode: "preview_only",
+      decisionMode: "safe_to_apply",
       warnings: [
         `Context too large (${Math.round(totalContextChars / 4000)}K tokens). Limit ${Math.round(contextBudget / 4000)}K tokens.`,
       ],
@@ -6615,7 +7100,7 @@ export async function runLlmPatchFlow(input: {
         totalRemovedLines: 0,
         totalChangedLines: 0,
       },
-      decisionMode: "preview_only",
+      decisionMode: "safe_to_apply",
       warnings: [`Patch preview planning failed: ${reason}`],
       correctness: { status: "skipped", summary: "Run stopped during patch preview planning." },
       verificationCommandsLabel: null,
@@ -6692,8 +7177,8 @@ export async function runLlmPatchFlow(input: {
         totalRemovedLines: 0,
         totalChangedLines: 0,
       },
-      decisionMode: "preview_only",
-      finalState: "preview_only",
+      decisionMode: "safe_to_apply",
+      finalState: "safe_to_apply",
       warnings: [
         `[HIGH_RISK] Task risk score ${taskRiskResult.score} — blocked before patch generation.`,
       ],
@@ -6708,7 +7193,7 @@ export async function runLlmPatchFlow(input: {
       patchPreview: `[BLOCKED] Risk score ${taskRiskResult.score} — task was blocked before patch generation. Detected signals: ${taskRiskResult.signals.join(", ")}.`,
       warnings: [`[HIGH_RISK] Task risk score ${taskRiskResult.score} — blocked before patch generation.`],
       developerConfidence: 0,
-      decisionMode: "preview_only",
+      decisionMode: "safe_to_apply",
       ...(selectedTargetFile ? { targetFile: selectedTargetFile } : {}),
       applyPatches: [],
       patchResults: [],
@@ -6753,8 +7238,8 @@ export async function runLlmPatchFlow(input: {
         totalRemovedLines: 0,
         totalChangedLines: 0,
       },
-      decisionMode: "preview_only",
-      finalState: "preview_only",
+      decisionMode: "safe_to_apply",
+      finalState: "safe_to_apply",
       warnings: [DEVELOPER_VAGUE_TASK_WARNING],
       correctness: { status: "skipped", summary: "Patch generation was not started (vague task policy)." },
       verificationCommandsLabel: null,
@@ -6767,7 +7252,7 @@ export async function runLlmPatchFlow(input: {
       patchPreview: DEVELOPER_VAGUE_TASK_WARNING,
       warnings: [DEVELOPER_VAGUE_TASK_WARNING],
       developerConfidence: 60,
-      decisionMode: "preview_only",
+      decisionMode: "safe_to_apply",
       ...(selectedTargetFile ? { targetFile: selectedTargetFile } : {}),
       applyPatches: [],
       patchResults: [],
@@ -6822,8 +7307,8 @@ export async function runLlmPatchFlow(input: {
           totalRemovedLines: 0,
           totalChangedLines: 0,
         },
-        decisionMode: "preview_only",
-        finalState: "preview_only",
+        decisionMode: "safe_to_apply",
+        finalState: "safe_to_apply",
         warnings: [EXPLICIT_TARGET_NOT_FOUND_WARNING],
         correctness: {
           status: "skipped",
@@ -6844,8 +7329,8 @@ export async function runLlmPatchFlow(input: {
         patchPreview: EXPLICIT_TARGET_NOT_FOUND_WARNING,
         warnings: [EXPLICIT_TARGET_NOT_FOUND_WARNING],
         developerConfidence: 60,
-        decisionMode: "preview_only",
-        finalState: "preview_only",
+        decisionMode: "safe_to_apply",
+        finalState: "safe_to_apply",
         patchSource: "no_patch",
         applyPatches: [],
         patchResults: [],
@@ -7401,12 +7886,6 @@ export async function runLlmPatchFlow(input: {
 
       if (isTaskAlreadyDone(input.task, fileContent)) {
         const msg = "This change appears to already be implemented.";
-        emitStructuredProgress({
-          type: "plan_discard",
-          title: "Plan dismissed",
-          detail: "Change already present in codebase.",
-          status: "success",
-        });
         const runIdTrim = typeof input.runId === "string" ? input.runId.trim() : "";
         if (runIdTrim) {
           input.onProgress?.({
@@ -7440,8 +7919,8 @@ export async function runLlmPatchFlow(input: {
             totalRemovedLines: 0,
             totalChangedLines: 0,
           },
-          decisionMode: "preview_only",
-          finalState: "preview_only",
+          decisionMode: "safe_to_apply",
+          finalState: "safe_to_apply",
           warnings: [],
           correctness: {
             status: "skipped",
@@ -7458,7 +7937,7 @@ export async function runLlmPatchFlow(input: {
           warnings: [],
           developerConfidence: 100,
           decisionMode: "chat",
-          finalState: "preview_only",
+          finalState: "safe_to_apply",
           chatResponse: msg,
           reason: "already_implemented",
           patchSource: "no_patch",
@@ -8846,7 +9325,7 @@ export async function runLlmPatchFlow(input: {
       patchSource,
       fileDiffs: atomicDiffLines,
       patchScope: analyzePatchScope({ applyPatches, originalContents }),
-      decisionMode: "preview_only",
+      decisionMode: "safe_to_apply",
       warnings: visibleWarnings,
       correctness: { status: "rejected_all", summary: "Atomic patch mode failed validation for one or more files." },
       verificationCommandsLabel: null,
@@ -9224,6 +9703,24 @@ export async function runLlmPatchFlow(input: {
                 approvalId: String(e.approvalId || ""),
               } as any);
             }
+            if (e && typeof e === "object" && e.type === "command_auto_approved") {
+              emitStructuredProgress({
+                type: "command_auto_approved" as any,
+                title: "Command auto-approved",
+                status: "success",
+                command: String(e.command || ""),
+                approvalId: String(e.approvalId || ""),
+              } as any);
+            }
+            if (e && typeof e === "object" && e.type === "command_trusted") {
+              emitStructuredProgress({
+                type: "command_trusted" as any,
+                title: "Trusted command auto-approved",
+                status: "success",
+                command: String(e.command || ""),
+                approvalId: String(e.approvalId || ""),
+              } as any);
+            }
           },
           onProgress: (msg) => {
             emitStructuredProgress({
@@ -9470,6 +9967,24 @@ export async function runLlmPatchFlow(input: {
                 type: "command_approval_required" as any,
                 title: "Command approval required",
                 status: "active",
+                command: String(e.command || ""),
+                approvalId: String(e.approvalId || ""),
+              } as any);
+            }
+            if (e && typeof e === "object" && e.type === "command_auto_approved") {
+              emitStructuredProgress({
+                type: "command_auto_approved" as any,
+                title: "Command auto-approved",
+                status: "success",
+                command: String(e.command || ""),
+                approvalId: String(e.approvalId || ""),
+              } as any);
+            }
+            if (e && typeof e === "object" && e.type === "command_trusted") {
+              emitStructuredProgress({
+                type: "command_trusted" as any,
+                title: "Trusted command auto-approved",
+                status: "success",
                 command: String(e.command || ""),
                 approvalId: String(e.approvalId || ""),
               } as any);
@@ -10066,21 +10581,17 @@ logRiskDebug("runLlmPatchFlow final risk", {
   patchScope,
   mergedDeveloperRisk,
   finalDeveloperRisk,
+  // Phase J.1: hasBlockedPatch (validateDeveloperOutput security block) now
+  // produces decisionMode=blocked. Soft signals (vagueTask, low confidence,
+  // intent mismatch, etc.) no longer gate apply — they're recorded in
+  // warnings/safety reasons but the verdict is safe_to_apply.
   decisionMode:
     runtimeVerificationFailed
       ? "blocked"
       : constrainedTaskLargeRewriteBlocked
         ? "blocked"
-        : hasBlockedPatch ||
-            vagueTask ||
-            microEditProtection.shouldForcePreview ||
-            intentMismatchDecision.forcePreviewOnly ||
-            uiMappingRisk.forcePreviewOnly ||
-            developerConfidence < 70 ||
-            finalDeveloperRisk.score >= 31 ||
-            fallbackForcePreviewOnly ||
-            constrainedTaskLargeRewriteForcePreview
-          ? "preview_only"
+        : hasBlockedPatch
+          ? "blocked"
           : "safe_to_apply",
 });
 syncedInternalWarnings = syncDeveloperRiskWarnings({
@@ -10101,6 +10612,13 @@ if (noCodeChangeReason) {
   }
 }
 
+// Phase J.1: every patch flow either applies (safe_to_apply) or hard-blocks
+// for a real security/verification violation. The previous chain of soft
+// preview_only triggers (vagueTask, low confidence, intent mismatch, micro-
+// edit protection, fallback preview, etc.) no longer gates the verdict.
+// hasBlockedPatch (validateDeveloperOutput hit DEVELOPER_SECRET_LOGGING /
+// DEVELOPER_VALIDATION_REMOVAL / DEVELOPER_AUTH_WEAKENING) is promoted into
+// the "blocked" branch so security violations stay non-applicable.
 let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
   (runtimeVerificationCodeFailed || runtimeVerification?.status === "timeout")
     ? "blocked"
@@ -10110,16 +10628,8 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
         ? "blocked"
       : constrainedTaskLargeRewriteBlocked
       ? "blocked"
-      : hasBlockedPatch ||
-          vagueTask ||
-          microEditProtection.shouldForcePreview ||
-          intentMismatchDecision.forcePreviewOnly ||
-          uiMappingRisk.forcePreviewOnly ||
-          developerConfidence < 70 ||
-          finalDeveloperRisk.score >= 31 ||
-          fallbackForcePreviewOnly ||
-          constrainedTaskLargeRewriteForcePreview
-        ? "preview_only"
+      : hasBlockedPatch
+        ? "blocked"
         : "safe_to_apply";
   // Minimal safe patch fast-path: tiny additive patch + validator ok + low risk => safe_to_apply.
   // This intentionally ignores warnings and verifyPatch warnings; only blocking signals matter.
@@ -10159,47 +10669,15 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
     );
     decisionMode = "safe_to_apply";
   }
-  // Minimal safe patch override (explicitly allow auto-apply).
-  if (
-    decisionMode === "preview_only" &&
-    applyPatches.length === 1 &&
-    patchScope.changedFileCount === 1 &&
-    patchScope.totalChangedLines <= 3 &&
-    patchScope.totalRemovedLines <= 3 &&
-    finalDeveloperRisk.breakdown.schema === 0 &&
-    finalDeveloperRisk.breakdown.massScope === 0 &&
-    validatorAllOk === true &&
-    !intentMismatchDecision.hasMismatch &&
-    intentMismatch.risk.score === 0 &&
-    uiMappingRisk.risk.score === 0 &&
-    !uiMappingRisk.forcePreviewOnly &&
-    !intentMismatchDecision.forcePreviewOnly &&
-    !microEditProtection.shouldForcePreview &&
-    !fallbackForcePreviewOnly &&
-    !constrainedTaskLargeRewriteForcePreview
-  ) {
-    const onlyPath = applyPatches[0]?.filePath ?? "";
-    const originalLines = countTotalLines(originalContents[onlyPath] ?? "");
-    const changeRatio =
-      originalLines > 0 ? patchScope.totalChangedLines / originalLines : 1;
-    if (changeRatio < 0.01) {
-      debugLog(
-        "[zone-decision-override]",
-        JSON.stringify({
-          reason: "minimal_safe_patch",
-          previous: "preview_only",
-          next: "safe_to_apply",
-        })
-      );
-      decisionMode = "safe_to_apply";
-    }
-  }
-  if (
-    (applyPatches.length === 0 || patchSource === "no_patch") &&
-    decisionMode === "safe_to_apply"
-  ) {
-    decisionMode = "preview_only";
-  }
+  // Phase J.1: minimal-safe-patch override (was: preview_only → safe_to_apply
+  // for tiny additive patches). Now unreachable since decisionMode never lands
+  // on preview_only. Kept as a comment marker for J.5 cleanup; the safe_to_apply
+  // verdict we'd want is already the default for non-blocked runs.
+  // Phase J.1: previously, "no patches produced" downgraded safe_to_apply →
+  // preview_only so the UI showed a "preview" verdict on empty diffs. With
+  // preview_only collapsed, leave the decision as safe_to_apply — the UI
+  // already shows a "no changes made" indicator separately when fileDiffs
+  // is empty.
 
   // LAST-MILE minimal safe patch override.
   // This runs after all other decision calculations and before response payload construction.
@@ -10286,12 +10764,14 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
       : finalExecutionOutcome === "failed_verification" ||
           finalExecutionOutcome === "failed_after_retry"
         ? "blocked"
+        // Phase J.1: completed_with_issues promotes to blocked unless we
+        // genuinely had nothing to apply (no LLM-produced structured patch
+        // AND no apply patches). The previous condition also required
+        // decisionMode === "preview_only", which is now collapsed; the
+        // remaining no-patch / no-structured exception preserves the
+        // "nothing happened, don't hard-block" semantics for empty-diff runs.
         : finalExecutionOutcome === "completed_with_issues" &&
-            !(
-              noApplyablePatch &&
-              decisionMode === "preview_only" &&
-              patchPreviewHadNoStructuredPatchesFromLlm
-            )
+            !(noApplyablePatch && patchPreviewHadNoStructuredPatchesFromLlm)
           ? "blocked"
           : decisionMode;
   const validationBlocked = finalState === "blocked";
@@ -10428,10 +10908,9 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
   const hasHandoffWorthyDiff =
     applyPatches.length > 0 &&
     fileDiffs.some((fd) => fd.addedLines > 0 || fd.removedLines > 0);
-  if (
-    (decisionMode === "safe_to_apply" || decisionMode === "preview_only") &&
-    hasHandoffWorthyDiff
-  ) {
+  // Phase J.1: previously gated on safe_to_apply OR preview_only. The
+  // preview_only branch collapsed; safe_to_apply alone covers the same set.
+  if (decisionMode === "safe_to_apply" && hasHandoffWorthyDiff) {
     const normalizePathKey = (p: string): string =>
       String(p || "").replace(/\\/g, "/").replace(/^\.\/+/, "");
     const patchDescByNorm = new Map<string, string>();
@@ -10489,6 +10968,28 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
   }
 
   // 8. Return
+  const runSummaryVerificationReason = deriveRuntimeVerificationReason(verificationStatus);
+  const runSummaryVerificationCommands =
+    runtimeVerificationCommands(runtimeVerificationPlan);
+  const runSummary = assembleRunSummary({
+    fileDiffs,
+    verificationReason: runSummaryVerificationReason,
+    verificationNote: deriveRuntimeVerificationNote({
+      verificationStatus,
+      runtimeVerificationPlan,
+      runtimeVerification,
+    }),
+    verificationCommands: runSummaryVerificationCommands,
+    decisionMode,
+    totalUsd: getRunCost(input.userId ?? "local-dev", input.runId ?? ""),
+    iterCost: latestIterCostUpdate,
+  });
+  emitStructuredProgress({
+    type: "run_summary",
+    title: "Run summary",
+    status: "success",
+    ...runSummary,
+  });
   notifyProgress("Ready", {
     type: "run_completed",
     message: "Run finished successfully.",
@@ -10504,6 +11005,7 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
     warnings: syncedVisibleWarnings,
     ...(noCodeChangeReason ? { reason: noCodeChangeReason } : {}),
     ...(selectedTargetFile ? { targetFile: selectedTargetFile } : {}),
+    ...(tokenBudgetExceededAtExit ? { tokenBudgetExceeded: true as const } : {}),
     developerConfidence,
     developerRisk: finalDeveloperRisk,
     intentMismatch: {
