@@ -199,6 +199,11 @@ export type ZoneStructuredProgressEvent = {
   cumulativeTokens?: number;
   tokenBudgetCap?: number;
   tokenBudgetRatio?: number;
+  /** Phase I.5: tool name + structured metadata for tool_result events whose
+   *  UI render depends on more than the output text (verify_visual surfaces
+   *  the screenshot via metadata.screenshotPath / pageTitle / consoleErrors). */
+  toolName?: string;
+  metadata?: Record<string, unknown>;
 };
 
 /** Documentation type for `narration` progress events: a one-line intent

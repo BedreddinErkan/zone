@@ -1028,6 +1028,36 @@
     .bubble.agent .chat-body {
       color: #d1d5db !important;
     }
+
+    /* Phase I.5 — verify_visual thumbnail + auto-verify block + modal */
+    .verify-visual-result{margin:6px 0 8px;display:flex;flex-direction:column;gap:6px}
+    .verify-visual-thumbnail-wrap{display:inline-flex;flex-direction:column;gap:4px;max-width:360px}
+    .verify-visual-thumbnail{max-width:360px;max-height:240px;width:auto;height:auto;border-radius:4px;cursor:pointer;border:1px solid rgba(255,255,255,0.08);transition:border-color 0.15s, opacity 0.15s;display:block}
+    .verify-visual-thumbnail:hover{border-color:rgba(190,170,230,0.32);opacity:0.92}
+    .verify-visual-caption{display:flex;gap:8px;font-size:0.85em;opacity:0.7;flex-wrap:wrap}
+    .verify-visual-path{font-family:var(--font-family-mono,monospace);color:rgba(190,170,230,0.9)}
+    .verify-visual-title{opacity:0.75;font-style:italic}
+    .verify-visual-console-errors{background:rgba(212,83,79,0.08);border-left:3px solid #d4534f;padding:8px 12px;border-radius:4px;font-size:0.85em;margin-top:6px;max-width:520px}
+    .verify-visual-errors-title{font-weight:600;margin-bottom:4px;color:#d4534f}
+    .verify-visual-console-errors ul{margin:0;padding-left:16px;font-family:var(--font-family-mono,monospace)}
+    .verify-visual-console-errors li{margin:2px 0;word-break:break-word}
+    .verify-visual-error{color:#d4534f;font-style:italic;font-size:0.9em}
+
+    .auto-verify-block{margin-top:8px;padding:10px 12px;background:rgba(120,200,130,0.04);border-left:3px solid rgba(120,200,130,0.4);border-radius:4px}
+    .auto-verify-header{display:flex;gap:8px;align-items:center;margin-bottom:8px;font-size:0.9em}
+    .auto-verify-icon{font-size:14px}
+    .auto-verify-label{font-weight:600;opacity:0.85}
+    .auto-verify-page-title{opacity:0.6;font-style:italic}
+
+    .screenshot-modal{position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;display:flex;align-items:center;justify-content:center}
+    .screenshot-modal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,0.78)}
+    .screenshot-modal-content{position:relative;max-width:92vw;max-height:92vh;background:var(--surface2,#1a1a23);border:1px solid var(--border);border-radius:8px;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);overflow:hidden}
+    .screenshot-modal-header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border)}
+    .screenshot-modal-title{font-size:0.9em;opacity:0.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:80vw}
+    .screenshot-modal-close{background:transparent;border:1px solid var(--border);color:var(--text-1);font-size:18px;line-height:1;cursor:pointer;padding:2px 10px;opacity:0.7;border-radius:4px;transition:opacity 0.15s}
+    .screenshot-modal-close:hover{opacity:1}
+    .screenshot-modal-body{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,0.2)}
+    .screenshot-modal-image{max-width:100%;max-height:calc(92vh - 60px);object-fit:contain;border-radius:4px;display:block}
   </style>
 </head>
 <body>
@@ -5310,6 +5340,111 @@
     // made" pill is replaced by createApplyCompleteIndicator below, which
     // treats empty-diff runs as a successful no-op rather than a warning.
 
+    // Phase I.5: full-size screenshot modal. ESC, backdrop click, and the
+    // close button all dismiss; only one modal can be open at a time.
+    function openScreenshotModal(url, title){
+      const existing = document.querySelector('.screenshot-modal');
+      if (existing) existing.remove();
+      const modal = document.createElement('div');
+      modal.className = 'screenshot-modal';
+      modal.innerHTML = `
+        <div class="screenshot-modal-backdrop"></div>
+        <div class="screenshot-modal-content" role="dialog" aria-modal="true">
+          <div class="screenshot-modal-header">
+            <span class="screenshot-modal-title">${escapeHtml(title || 'Screenshot')}</span>
+            <button class="screenshot-modal-close" aria-label="Close">×</button>
+          </div>
+          <div class="screenshot-modal-body">
+            <img src="${escapeHtml(url)}" class="screenshot-modal-image" alt="${escapeHtml(title || 'Screenshot')}" />
+          </div>
+        </div>
+      `;
+      const onKey = (e) => { if (e.key === 'Escape') close(); };
+      const close = () => {
+        modal.remove();
+        document.removeEventListener('keydown', onKey);
+      };
+      modal.querySelector('.screenshot-modal-backdrop').onclick = close;
+      modal.querySelector('.screenshot-modal-close').onclick = close;
+      document.addEventListener('keydown', onKey);
+      document.body.appendChild(modal);
+    }
+
+    // Phase I.5: inline thumbnail rendering for verify_visual tool results
+    // and the auto-verify block under apply-complete. The screenshot is
+    // streamed by the backend via /api/screenshots/:filename, so we only
+    // need the basename of the disk path.
+    function buildScreenshotUrlFromPath(diskPath){
+      const raw = String(diskPath || '');
+      if (!raw) return '';
+      const base = raw.split(/[\\/]/).filter(Boolean).pop() || '';
+      if (!base) return '';
+      return `/api/screenshots/${encodeURIComponent(base)}`;
+    }
+
+    function createVerifyVisualToolResult(metadata, fallbackPath){
+      const screenshotPath = String(metadata?.screenshotPath || '');
+      const url = buildScreenshotUrlFromPath(screenshotPath);
+      if (!url) return null;
+      const pageTitle = String(metadata?.pageTitle || '').trim();
+      const path = String(metadata?.path || fallbackPath || '/').trim() || '/';
+      const consoleErrors = Array.isArray(metadata?.consoleErrors) ? metadata.consoleErrors : [];
+      const wrap = document.createElement('div');
+      wrap.className = 'verify-visual-result';
+      const captionParts = [
+        `<span class="verify-visual-path">${escapeHtml(path)}</span>`,
+        pageTitle ? `<span class="verify-visual-title">${escapeHtml(pageTitle)}</span>` : '',
+      ].filter(Boolean).join('');
+      const thumbWrap = document.createElement('div');
+      thumbWrap.className = 'verify-visual-thumbnail-wrap';
+      thumbWrap.innerHTML = `
+        <img src="${escapeHtml(url)}" alt="${escapeHtml(pageTitle || 'verify_visual screenshot')}" class="verify-visual-thumbnail" loading="lazy" />
+        <div class="verify-visual-caption">${captionParts}</div>
+      `;
+      const img = thumbWrap.querySelector('img');
+      if (img) img.onclick = () => openScreenshotModal(url, pageTitle || path);
+      wrap.appendChild(thumbWrap);
+      if (consoleErrors.length > 0) {
+        const errs = document.createElement('div');
+        errs.className = 'verify-visual-console-errors';
+        errs.innerHTML = `
+          <div class="verify-visual-errors-title">Console errors detected:</div>
+          <ul>${consoleErrors.map((e) => `<li>${escapeHtml(String(e))}</li>`).join('')}</ul>
+        `;
+        wrap.appendChild(errs);
+      }
+      return wrap;
+    }
+
+    function createAutoVerifyBlock(result){
+      const url = buildScreenshotUrlFromPath(result?.autoVerifyScreenshot);
+      if (!url) return null;
+      const pageTitle = String(result?.autoVerifyPageTitle || '').trim();
+      const consoleErrors = Array.isArray(result?.autoVerifyConsoleErrors) ? result.autoVerifyConsoleErrors : [];
+      const block = document.createElement('div');
+      block.className = 'auto-verify-block';
+      block.innerHTML = `
+        <div class="auto-verify-header">
+          <span class="auto-verify-icon" aria-hidden="true">📸</span>
+          <span class="auto-verify-label">Auto-verified</span>
+          ${pageTitle ? `<span class="auto-verify-page-title">${escapeHtml(pageTitle)}</span>` : ''}
+        </div>
+        <img src="${escapeHtml(url)}" alt="${escapeHtml(pageTitle || 'Auto-verify screenshot')}" class="verify-visual-thumbnail" loading="lazy" />
+      `;
+      const img = block.querySelector('img');
+      if (img) img.onclick = () => openScreenshotModal(url, pageTitle || 'Auto-verify');
+      if (consoleErrors.length > 0) {
+        const errs = document.createElement('div');
+        errs.className = 'verify-visual-console-errors';
+        errs.innerHTML = `
+          <div class="verify-visual-errors-title">Console errors detected:</div>
+          <ul>${consoleErrors.map((e) => `<li>${escapeHtml(String(e))}</li>`).join('')}</ul>
+        `;
+        block.appendChild(errs);
+      }
+      return block;
+    }
+
     // Phase J.2: minimal post-completion indicator. Appears once per run
     // when applyPatches finished successfully but produced no diffs (e.g.
     // agent decided no change was needed, or the change was idempotent).
@@ -8452,6 +8587,23 @@
             lastToolLine.classList.add((progress.status === 'success') ? 'c-done' : 'c-error');
             // Sub-line preview suppressed — main tool line is sufficient signal.
           }
+          // Phase I.5: when the agent calls verify_visual, render the screenshot
+          // inline below the tool line. Click the thumbnail to open a full-size
+          // modal viewer. Failed verify_visual calls fall through to the standard
+          // tool-line error styling above (no thumbnail to render).
+          if (
+            progress.toolName === 'verify_visual' &&
+            progress.status === 'success' &&
+            progress.metadata &&
+            progress.metadata.screenshotPath
+          ) {
+            try {
+              const node = createVerifyVisualToolResult(progress.metadata, null);
+              if (node && logBlock) logBlock.appendChild(node);
+            } catch (err) {
+              console.warn('[zone-ui-verify-visual-render]', err);
+            }
+          }
           return;
         }
         if (type === 'narration') {
@@ -9323,6 +9475,19 @@
         more.className = 'toast';
         more.innerHTML = `<div class="ticon" style="background:var(--blue)"></div><div>+${diffs.length - maxShow} more diffs in report</div>`;
         appendToRunGroup(runId, more);
+      }
+
+      // Phase I.5: auto-verify screenshot block (only when toggle ON +
+      // safe_to_apply branch — backend skips auto-verify on rolled_back /
+      // blocked / chat). Shows under the diff cards so users see the change
+      // first, then visual proof. Click thumbnail → modal full-size viewer.
+      if (decision === 'safe_to_apply' && result && result.autoVerifyScreenshot) {
+        try {
+          const block = createAutoVerifyBlock(result);
+          if (block) appendToRunGroup(runId, block);
+        } catch (err) {
+          console.warn('[zone-ui-auto-verify-render]', err);
+        }
       }
 
       // Zone Undo Tur 2b: per-run revert affordance for safe_to_apply runs.

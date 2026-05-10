@@ -1971,6 +1971,10 @@ export async function executeTool(
         metadata: {
           screenshotPath: result.screenshotPath,
           pageTitle: result.pageTitle,
+          path: visualPath,
+          ...(result.consoleErrors && result.consoleErrors.length > 0
+            ? { consoleErrors: result.consoleErrors }
+            : {}),
         },
       };
     }

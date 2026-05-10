@@ -5529,13 +5529,23 @@ const initializeTodosFromPlan = (): void => {
         }
         if (snapPath && !_planOrchestrationEnabled) startTodoForFile(snapPath);
       },
-      onToolResult: (_name: string, result: { output?: string; success?: boolean }) => {
+      onToolResult: (
+        name: string,
+        result: { output?: string; success?: boolean; metadata?: Record<string, unknown> }
+      ) => {
         if (!runId) return;
         emitStructuredProgress({
           type: "tool_result",
+          toolName: name,
           title: String(result.output || "").slice(0, 100) || "tool result",
           detail: String(result.output || "").slice(0, 4000),
           status: result.success ? "success" : "error",
+          // Phase I.5: forward metadata for tools whose UI render needs
+          // structured fields (verify_visual screenshotPath/pageTitle/etc).
+          // Stripped at the SSE boundary if the tool didn't supply any.
+          ...(result.metadata && Object.keys(result.metadata).length > 0
+            ? { metadata: result.metadata }
+            : {}),
         });
       },
     } as const;

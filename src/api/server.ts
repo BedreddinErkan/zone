@@ -2147,6 +2147,35 @@ app.post("/api/settings/visual-verification", (req, res) => {
   }
 });
 
+// Phase I.5: serve verify_visual / auto-verify screenshots back to the UI for
+// inline thumbnails and the modal viewer. Files are written by runVerifyVisual
+// to <cwd>/.zone/screenshots/<runId>-<timestamp>.png. The strict regex below
+// is the primary path-traversal defense; the resolved-path containment check
+// is defense-in-depth for any future filename mutation.
+const SCREENSHOT_FILENAME_RE = /^[a-z0-9][a-z0-9_-]*\.png$/i;
+app.get("/api/screenshots/:filename", (req, res) => {
+  const filename = String(req.params.filename || "");
+  if (!SCREENSHOT_FILENAME_RE.test(filename)) {
+    res.status(400).json({ ok: false, error: "Invalid filename" });
+    return;
+  }
+  const screenshotsDir = path.join(process.cwd(), ".zone", "screenshots");
+  const fullPath = path.join(screenshotsDir, filename);
+  if (!fullPath.startsWith(screenshotsDir + path.sep)) {
+    res.status(400).json({ ok: false, error: "Invalid path" });
+    return;
+  }
+  fs.access(fullPath, (err) => {
+    if (err) {
+      res.status(404).json({ ok: false, error: "Screenshot not found" });
+      return;
+    }
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.sendFile(fullPath);
+  });
+});
+
 app.post("/api/admin/reset-monthly-runs", async (req, res) => {
   const adminSecret =
     typeof process.env.ADMIN_SECRET === "string"
