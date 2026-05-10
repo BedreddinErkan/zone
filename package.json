@@ -18,7 +18,9 @@
     "check-types": "tsc --noEmit -p tsconfig.json",
     "serve": "node dist/cli/index.js serve",
     "start": "node dist/cli/index.js serve",
-    "test": "vitest run"
+    "test": "vitest run",
+    "sweep": "npx tsx scripts/sweep.ts",
+    "sweep:dry": "npx tsx scripts/sweep.ts --dry-run"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

@@ -1,0 +1,45 @@
+{
+  "tasks": [
+    {
+      "id": "T1-comment-add",
+      "tier_expected": "simple",
+      "description": "Add a single-line comment '// Zone API entry point' directly above the first export statement in src/cli/index.ts",
+      "expected_max_cost_usd": 0.05,
+      "expected_rolled_back": false,
+      "notes": "Minimal single-file, single-line change — canonical simple tier smoke"
+    },
+    {
+      "id": "T2-single-file-rename",
+      "tier_expected": "simple",
+      "description": "In src/utils/logger.ts, rename the local helper function 'truncate' to 'truncateString' and update all calls to it within the same file",
+      "expected_max_cost_usd": 0.05,
+      "expected_rolled_back": false,
+      "notes": "Single-file rename with call-site updates — still simple tier"
+    },
+    {
+      "id": "T3-multi-file-refactor",
+      "tier_expected": "medium",
+      "description": "In src/llm/taskClassifier.ts, extract the inline truncateForLog function to a shared utility in src/utils/logger.ts (export it), then import and use it from taskClassifier.ts",
+      "expected_max_cost_usd": 0.20,
+      "expected_rolled_back": false,
+      "notes": "Two-file change — extract+import; medium tier expected"
+    },
+    {
+      "id": "T4-bprime-rollback",
+      "tier_expected": "complex",
+      "description": "In src/llm/taskClassifier.ts, change the return type of classifyTask so it returns a Promise<TaskClassification | null> instead of Promise<TaskClassification>. Update the function signature and return statements accordingly, but do NOT update callers — the goal is to verify that typecheck fails and the change gets rolled back.",
+      "expected_max_cost_usd": 0.50,
+      "expected_rolled_back": true,
+      "notes": "Deliberate typecheck break — verifies rollback path. Callers in runLlmPatchFlow.ts expect non-null."
+    },
+    {
+      "id": "T5-tier-force-simple",
+      "tier_expected": "complex",
+      "tier_forced": "simple",
+      "description": "In src/llm/taskClassifier.ts, change the return type of classifyTask so it returns a Promise<TaskClassification | null> instead of Promise<TaskClassification>. Update the function signature and return statements accordingly, but do NOT update callers.",
+      "expected_max_cost_usd": 0.05,
+      "expected_rolled_back": true,
+      "notes": "Same complex task as T4 but dispatched with ZONE_FORCE_TIER=simple — Task tool removed, subagents blocked. Tests tier constraint enforcement."
+    }
+  ]
+}

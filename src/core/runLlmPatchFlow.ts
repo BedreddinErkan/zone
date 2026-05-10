@@ -6066,6 +6066,7 @@ const initializeTodosFromPlan = (): void => {
       contextFiles: [],
       lifecycleEvents,
       finalRunReport,
+      ...(taskClassification ? { taskClassification } : {}),
     };
   }
 
