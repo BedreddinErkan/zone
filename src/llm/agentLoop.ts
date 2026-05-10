@@ -104,6 +104,9 @@ export type VerificationReason =
   | 'tests_failed_by_patch'
   | 'no_verification_attempted'
   | 'verification_failed_staged'
+  // Phase J.3: distinguishes "patch introduced new errors" (rolled_back UI)
+  // from "patch had pre-existing errors but didn't regress them" (apply OK).
+  | 'verification_regressed'
   | 'no_changes_made';
 
 export interface AgentLoopResult {
@@ -968,6 +971,58 @@ export function selectVerificationCommand(
   return null;
 }
 
+// Phase J.3: count diagnostic errors in verification output. Used to compare
+// pre-staging baseline vs post-staging output so projects with pre-existing
+// errors don't have every patch blocked.
+function countVerificationErrors(label: string, output: string): number {
+  const text = String(output || "");
+  if (!text) return 0;
+  if (label === "tsc") {
+    // TypeScript: lines like `src/foo.ts(1,5): error TS2304: Cannot find name 'bar'.`
+    const matches = text.match(/error TS\d+:/g);
+    return matches ? matches.length : 0;
+  }
+  if (label === "test") {
+    // Test runner output is heterogeneous; count common failure markers.
+    let count = 0;
+    count += (text.match(/\bFAIL\b/g) || []).length;
+    count += (text.match(/✗/g) || []).length;
+    count += (text.match(/\d+ failed/i) ? 1 : 0);
+    return Math.max(count, text ? 1 : 0);
+  }
+  return text ? 1 : 0;
+}
+
+async function runVerificationCommand(
+  choice: { command: string; timeoutMs: number; label: string },
+  repoPath: string
+): Promise<
+  | { status: "pass"; durationMs: number }
+  | { status: "fail"; durationMs: number; errorPreview: string }
+> {
+  const start = Date.now();
+  try {
+    await execAsync_verify(choice.command, {
+      cwd: repoPath,
+      timeout: choice.timeoutMs,
+      windowsHide: true,
+      maxBuffer: 10 * 1024 * 1024,
+      env: sanitizeVerificationEnv(),
+    });
+    return { status: "pass", durationMs: Date.now() - start };
+  } catch (err) {
+    const stdout = String((err as { stdout?: unknown }).stdout ?? "");
+    const stderr = String((err as { stderr?: unknown }).stderr ?? "");
+    const combined = (stdout + "\n" + stderr).trim();
+    const preview = combined.split("\n").slice(0, 30).join("\n").slice(0, 2000);
+    return {
+      status: "fail",
+      durationMs: Date.now() - start,
+      errorPreview: preview || String((err as Error).message ?? err),
+    };
+  }
+}
+
 export async function runStagingVerification(input: {
   stagingFiles: Map<string, string>;
   repoPath: string;
@@ -977,8 +1032,19 @@ export async function runStagingVerification(input: {
     body: () => Promise<T>
   ) => Promise<T>;
 }): Promise<
-  | { status: "pass"; label: string; durationMs: number }
-  | { status: "fail"; label: string; durationMs: number; errorPreview: string }
+  | { status: "pass"; label: string; durationMs: number; baselineErrorCount?: number; postErrorCount?: number }
+  | {
+      status: "fail";
+      label: string;
+      durationMs: number;
+      errorPreview: string;
+      // Phase J.3: counts let downstream distinguish a regression (post >
+      // baseline) from a pre-existing failure (post <= baseline). Only
+      // populated when we ran a baseline pass after the staged run failed.
+      baselineErrorCount?: number;
+      postErrorCount?: number;
+      regressed?: boolean;
+    }
   | { status: "skipped"; reason: string }
 > {
   if (input.stagingFiles.size === 0) {
@@ -990,8 +1056,11 @@ export async function runStagingVerification(input: {
   }
 
   const start = Date.now();
+  // Run verification against temp-flushed staging.
+  let stagedErr: unknown = null;
+  let stagedExitCode = 0;
   try {
-    const result = await input.withStagingTempFlush(input.stagingFiles, async () => {
+    await input.withStagingTempFlush(input.stagingFiles, async () => {
       return await execAsync_verify(choice.command, {
         cwd: input.repoPath,
         timeout: choice.timeoutMs,
@@ -1000,28 +1069,58 @@ export async function runStagingVerification(input: {
         env: sanitizeVerificationEnv(),
       });
     });
-    void result;
+  } catch (err) {
+    stagedErr = err;
+    const code = Number((err as { code?: unknown }).code);
+    stagedExitCode = Number.isFinite(code) ? code : 1;
+  }
+
+  if (stagedErr === null) {
     console.log(
       `[zone-verify] cmd="${choice.command.slice(0, 80)}" cwd="${input.repoPath}" exitCode=0 stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
     );
     return { status: "pass", label: choice.label, durationMs: Date.now() - start };
-  } catch (err) {
-    const code = Number((err as { code?: unknown }).code);
-    const exitCode = Number.isFinite(code) ? code : 1;
-    console.log(
-      `[zone-verify] cmd="${choice.command.slice(0, 80)}" cwd="${input.repoPath}" exitCode=${exitCode} stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
-    );
-    const stdout = String((err as { stdout?: unknown }).stdout ?? "");
-    const stderr = String((err as { stderr?: unknown }).stderr ?? "");
-    const combined = (stdout + "\n" + stderr).trim();
-    const preview = combined.split("\n").slice(0, 30).join("\n").slice(0, 2000);
-    return {
-      status: "fail",
-      label: choice.label,
-      durationMs: Date.now() - start,
-      errorPreview: preview || String((err as Error).message ?? err),
-    };
   }
+
+  console.log(
+    `[zone-verify] cmd="${choice.command.slice(0, 80)}" cwd="${input.repoPath}" exitCode=${stagedExitCode} stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
+  );
+  const stagedStdout = String((stagedErr as { stdout?: unknown }).stdout ?? "");
+  const stagedStderr = String((stagedErr as { stderr?: unknown }).stderr ?? "");
+  const stagedCombined = (stagedStdout + "\n" + stagedStderr).trim();
+  const stagedPreview =
+    stagedCombined.split("\n").slice(0, 30).join("\n").slice(0, 2000) ||
+    String((stagedErr as Error).message ?? stagedErr);
+  const postErrorCount = countVerificationErrors(choice.label, stagedCombined);
+
+  // Phase J.3: staged run failed. Compare to baseline (no staging). If the
+  // baseline ALSO fails with ≥ the same error count, the patch didn't make
+  // things worse — pre-existing errors shouldn't block apply.
+  const baseline = await runVerificationCommand(choice, input.repoPath);
+  const baselineErrorCount =
+    baseline.status === "fail"
+      ? countVerificationErrors(choice.label, baseline.errorPreview)
+      : 0;
+
+  const regressed = postErrorCount > baselineErrorCount;
+  debugLog("[zone-verify-baseline]", JSON.stringify({
+    label: choice.label,
+    stagedExitCode,
+    baselineStatus: baseline.status,
+    baselineErrorCount,
+    postErrorCount,
+    regressed,
+  }));
+
+  return {
+    status: "fail",
+    label: choice.label,
+    durationMs: Date.now() - start,
+    errorPreview: stagedPreview,
+    baselineErrorCount,
+    postErrorCount,
+    regressed,
+  };
 }
 
 export async function finalizeStaging(input: {
@@ -1035,8 +1134,16 @@ export async function finalizeStaging(input: {
 }): Promise<{
   flushed: boolean;
   verification:
-    | { status: "pass"; label: string; durationMs: number }
-    | { status: "fail"; label: string; durationMs: number; errorPreview: string }
+    | { status: "pass"; label: string; durationMs: number; baselineErrorCount?: number; postErrorCount?: number }
+    | {
+        status: "fail";
+        label: string;
+        durationMs: number;
+        errorPreview: string;
+        baselineErrorCount?: number;
+        postErrorCount?: number;
+        regressed?: boolean;
+      }
     | { status: "skipped"; reason: string };
   filesFlushed: number;
   flushFailures: number;
@@ -1055,16 +1162,38 @@ export async function finalizeStaging(input: {
     reason: "reason" in verification ? verification.reason : null,
     errorPreviewLen:
       verification.status === "fail" ? verification.errorPreview.length : 0,
+    baselineErrorCount:
+      "baselineErrorCount" in verification ? verification.baselineErrorCount : undefined,
+    postErrorCount:
+      "postErrorCount" in verification ? verification.postErrorCount : undefined,
+    regressed:
+      verification.status === "fail" ? verification.regressed : undefined,
   }));
 
-  if (verification.status === "fail") {
+  // Phase J.3: only discard staging when the patch *regressed* verification
+  // (post errors > baseline errors). When the project has pre-existing
+  // errors and the patch didn't add any new ones, allow the flush to proceed
+  // — the user wants their patch even if the codebase has unrelated issues.
+  if (verification.status === "fail" && verification.regressed !== false) {
     const discardedCount = input.stagingFiles.size;
     input.stagingFiles.clear();
     debugLog("[zone-staging-discard]", JSON.stringify({
-      reason: "verification_failed",
+      reason: "verification_regressed",
       discardedCount,
+      baselineErrorCount: verification.baselineErrorCount,
+      postErrorCount: verification.postErrorCount,
     }));
     return { flushed: false, verification, filesFlushed: 0, flushFailures: 0 };
+  }
+
+  if (verification.status === "fail" && verification.regressed === false) {
+    debugLog("[zone-staging-pre-existing-errors]", JSON.stringify({
+      reason: "no_regression",
+      baselineErrorCount: verification.baselineErrorCount,
+      postErrorCount: verification.postErrorCount,
+      label: verification.label,
+    }));
+    // Fall through to flush — patch will apply despite pre-existing errors.
   }
 
   let allUnchanged = true;
@@ -2498,14 +2627,34 @@ Example first call (immediately after task framing):
           };
       let summaryAppendix = "";
       if (finalizeResult.verification.status === "fail") {
-        verificationReason = "verification_failed_staged";
-        patchValidatedByAgent = false;
-        summaryAppendix =
-          "\n\n**Verification failed (" + finalizeResult.verification.label +
-          ", " + finalizeResult.verification.durationMs + "ms).** " +
-          "Changes were NOT applied to disk.\n\n```\n" +
-          finalizeResult.verification.errorPreview +
-          "\n```";
+        // Phase J.3: distinguish regression (patch introduced new errors,
+        // staging discarded, "rolled back" UI) from pre-existing failure
+        // (patch flushed anyway, errors weren't its fault).
+        if (finalizeResult.verification.regressed === false) {
+          verificationReason = "tests_inconclusive";
+          patchValidatedByAgent = false;
+          summaryAppendix =
+            "\n\n**Verification has pre-existing errors** (" +
+            finalizeResult.verification.label +
+            ", " + finalizeResult.verification.durationMs + "ms).\n" +
+            "Patch was applied because it didn't add any new errors " +
+            `(${finalizeResult.verification.postErrorCount ?? "?"} errors before, ` +
+            `${finalizeResult.verification.postErrorCount ?? "?"} errors after).`;
+        } else {
+          verificationReason = "verification_regressed";
+          patchValidatedByAgent = false;
+          const baseline = finalizeResult.verification.baselineErrorCount ?? 0;
+          const post = finalizeResult.verification.postErrorCount ?? 0;
+          summaryAppendix =
+            "\n\n**Apply rolled back — verification regressed** (" +
+            finalizeResult.verification.label +
+            ", " + finalizeResult.verification.durationMs + "ms). " +
+            `Patch added ${Math.max(0, post - baseline)} new error(s) ` +
+            `(${baseline} before → ${post} after).\n\n` +
+            "Disk was restored to pre-apply state.\n\n```\n" +
+            finalizeResult.verification.errorPreview +
+            "\n```";
+        }
       } else if (
         finalizeResult.verification.status === "skipped" &&
         "reason" in finalizeResult.verification &&
@@ -2729,15 +2878,34 @@ Example first call (immediately after task framing):
         flushFailures: 0,
       };
   if (finalizeResult.verification.status === "fail") {
-    finalVerificationReason = "verification_failed_staged";
-    patchValidatedByAgent = false;
-    finalSummary =
-      finalSummary +
-      "\n\n**Verification failed (" + finalizeResult.verification.label +
-      ", " + finalizeResult.verification.durationMs + "ms).** " +
-      "Changes were NOT applied to disk.\n\n```\n" +
-      finalizeResult.verification.errorPreview +
-      "\n```";
+    // Phase J.3: same regressed-vs-pre-existing split as the natural-completion
+    // path above. Pre-existing errors → patch flushes, marker is inconclusive.
+    // Genuine regression → staging discarded, marker is verification_regressed.
+    if (finalizeResult.verification.regressed === false) {
+      finalVerificationReason = "tests_inconclusive";
+      patchValidatedByAgent = false;
+      finalSummary =
+        finalSummary +
+        "\n\n**Verification has pre-existing errors** (" +
+        finalizeResult.verification.label +
+        ", " + finalizeResult.verification.durationMs + "ms). " +
+        "Patch was applied because it didn't add any new errors.";
+    } else {
+      finalVerificationReason = "verification_regressed";
+      patchValidatedByAgent = false;
+      const baseline = finalizeResult.verification.baselineErrorCount ?? 0;
+      const post = finalizeResult.verification.postErrorCount ?? 0;
+      finalSummary =
+        finalSummary +
+        "\n\n**Apply rolled back — verification regressed** (" +
+        finalizeResult.verification.label +
+        ", " + finalizeResult.verification.durationMs + "ms). " +
+        `Patch added ${Math.max(0, post - baseline)} new error(s) ` +
+        `(${baseline} before → ${post} after). Disk restored.\n\n` +
+        "```\n" +
+        finalizeResult.verification.errorPreview +
+        "\n```";
+    }
   } else if (
     finalizeResult.verification.status === "skipped" &&
     "reason" in finalizeResult.verification &&

@@ -160,12 +160,17 @@ export type LlmPatchFlowResult =
       };
       reason?: string;
       patchSource?: PatchSource;
-      decisionMode?: "preview_only" | "safe_to_apply" | "blocked" | "chat";
-      finalState?: "preview_only" | "safe_to_apply" | "blocked" | "chat";
+      decisionMode?: "preview_only" | "safe_to_apply" | "blocked" | "chat" | "rolled_back";
+      finalState?: "preview_only" | "safe_to_apply" | "blocked" | "chat" | "rolled_back";
       /** Phase H.7: agent loop terminated at token-budget hard limit (95%
        *  of TOKEN_BUDGET_CAP). UI shows "Token budget reached" pill. The
        *  patch verdict still reflects whatever was produced before exit. */
       tokenBudgetExceeded?: boolean;
+      /** Phase J.3: post-apply verification regressed (patch introduced new
+       *  errors). Staging was discarded; UI shows "Apply rolled back" amber
+       *  banner with the diff for inspection but no undo button. */
+      rolledBackReason?: string;
+      rolledBackErrors?: string[];
       /** When decisionMode is chat, surfaced to the UI as the assistant message. */
       chatResponse?: string;
       finalExecutionOutcome?:
@@ -402,7 +407,7 @@ function assembleRunSummary(input: {
   verificationReason?: VerificationReason | string | null;
   verificationNote?: string | null;
   verificationCommands?: VerificationCommand[] | null;
-  decisionMode?: "safe_to_apply" | "preview_only" | "blocked" | "chat" | null;
+  decisionMode?: "safe_to_apply" | "preview_only" | "blocked" | "chat" | "rolled_back" | null;
   totalUsd?: number | null;
   iterCost?: Pick<
     IterCostUpdatePayload,
@@ -417,8 +422,17 @@ function assembleRunSummary(input: {
   const reason = String(
     input.verificationReason || RUN_SUMMARY_DEFAULT_VERIFICATION_REASON
   ) as VerificationReason;
+  // Phase J.3: rolled_back is conceptually closer to preview_only here
+  // (no patch was committed) — the structured run summary fans out to
+  // analytics consumers expecting the binary safe_to_apply / preview_only
+  // signal, so map "rolled_back" to "rolled_back" upstream and keep the
+  // legacy two-value summary collapse for everything else.
   const decisionMode =
-    input.decisionMode === "safe_to_apply" ? "safe_to_apply" : "preview_only";
+    input.decisionMode === "safe_to_apply"
+      ? "safe_to_apply"
+      : input.decisionMode === "rolled_back"
+        ? "rolled_back"
+        : "preview_only";
   const totalUsd = Number(input.totalUsd ?? 0) || 0;
   const iterCount = Number(input.iterCost?.iter_count ?? 0) || 0;
   const cacheHitPct =
@@ -5582,13 +5596,44 @@ const initializeTodosFromPlan = (): void => {
 
     // Use agent's self-reported verification reason to determine safety
     const vr = loop.verificationReason;
+    // Phase J.3: when staging-verification regressed, the agentLoop discarded
+    // staging (no permanent flush). Surface this as decisionMode=rolled_back
+    // with the regression reason + error preview so the UI can render the
+    // "Apply rolled back" amber banner. Take precedence over the normal
+    // safe-to-apply / blocked routing.
+    const isVerificationRegressed = vr === "verification_regressed";
+    const rolledBackErrorPreview = isVerificationRegressed
+      ? String(loop.summary || "")
+          .split("```")
+          .filter((part, idx) => idx % 2 === 1)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .join("\n")
+      : "";
+    const rolledBackErrorLines = rolledBackErrorPreview
+      ? rolledBackErrorPreview.split("\n").filter(Boolean).slice(0, 5)
+      : [];
+    const rolledBackReason = isVerificationRegressed
+      ? (() => {
+          const m = String(loop.summary || "").match(
+            /Patch added (\d+) new error\(s\)[^.]*\((\d+) before → (\d+) after\)/
+          );
+          if (m) return `Patch added ${m[1]} new error${m[1] === "1" ? "" : "s"} (${m[2]} → ${m[3]} total)`;
+          return "Verification regressed after apply";
+        })()
+      : "";
+
     const agentVerificationSummary = deriveAgentVerificationSummary({
       reason: vr,
       loopSuccess: loop.success,
       hadRunCommandFailure: agentLoopHadRunCommandFailure,
     });
-    const agentDecisionMode = agentVerificationSummary.decisionMode;
-    const agentVerificationNote = agentVerificationSummary.note;
+    const agentDecisionMode = isVerificationRegressed
+      ? "rolled_back"
+      : agentVerificationSummary.decisionMode;
+    const agentVerificationNote = isVerificationRegressed
+      ? "Apply rolled back — verification regressed"
+      : agentVerificationSummary.note;
 
     const warnings: string[] = loop.success ? [] : [`[AGENT_LOOP] ${loop.summary}`];
     if (vr === "tests_inconclusive") {
@@ -5743,6 +5788,14 @@ const initializeTodosFromPlan = (): void => {
       });
     }
 
+    if (isVerificationRegressed) {
+      console.warn("[zone-rollback]", JSON.stringify({
+        runId: runId || null,
+        reason: rolledBackReason,
+        errorCount: rolledBackErrorLines.length,
+      }));
+    }
+
     return {
       ok: true,
       patchPreview: `=== AGENT LOOP SUMMARY ===\n${loop.summary}`,
@@ -5756,6 +5809,12 @@ const initializeTodosFromPlan = (): void => {
       verificationCommands: agentVerificationCommands,
       decisionMode: agentDecisionMode,
       finalState: agentDecisionMode,
+      ...(isVerificationRegressed
+        ? {
+            rolledBackReason,
+            rolledBackErrors: rolledBackErrorLines,
+          }
+        : {}),
       finalExecutionOutcome: agentDecisionMode === "safe_to_apply" ? "completed" : "completed_with_issues",
       applyPatches: [],
       patchResults: [],

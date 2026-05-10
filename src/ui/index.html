@@ -5299,6 +5299,33 @@
       return el;
     }
 
+    // Phase J.3: amber banner shown when decisionMode === "rolled_back".
+    // Post-apply verification regressed (more typecheck/test errors than
+    // before the patch), so the agent loop discarded staging — the patch
+    // never reached disk permanently. The diff is still rendered below for
+    // inspection ("what was attempted"), but no undo button (rollback was
+    // automatic, there's nothing on disk to undo).
+    function createRolledBackBanner(opts){
+      const reason = String((opts && opts.reason) || 'Verification regressed after apply');
+      const errors = Array.isArray(opts && opts.errors) ? opts.errors.slice(0, 5) : [];
+      const el = document.createElement('div');
+      el.className = 'toast';
+      el.style.cssText = 'margin:6px 0;padding:12px 16px;border-color:rgba(212,168,90,0.45);background:rgba(212,168,90,0.10);align-items:flex-start;display:flex;gap:12px';
+      const errorsHtml = errors.length
+        ? `<ul style="font-family:var(--font-family-mono,monospace);font-size:0.85em;margin:8px 0 6px 0;padding-left:18px;color:var(--text-2)">${errors.map(e => `<li style="margin:2px 0">${escapeHtml(String(e))}</li>`).join('')}</ul>`
+        : '';
+      el.innerHTML = `
+        <div style="font-size:18px;opacity:0.85;line-height:1">⟲</div>
+        <div style="flex:1">
+          <div style="font-weight:600;color:#d4a85a;margin-bottom:4px">Apply rolled back</div>
+          <div style="font-size:var(--font-size-sm,12px);color:var(--text-2);line-height:1.45">${escapeHtml(reason)}</div>
+          ${errorsHtml}
+          <div style="font-size:var(--font-size-sm,12px);color:var(--text-3);margin-top:6px;line-height:1.45">Disk restored to pre-apply state. Inspect the diff below to see what was attempted, then re-dispatch with corrections.</div>
+        </div>
+      `;
+      return el;
+    }
+
     // Phase J.2: red banner shown when decisionMode === "blocked". Replaces
     // the verify-banner-with-blocked-pill render path. Names the security
     // reason directly so users see why the patch was hard-blocked.
@@ -9073,6 +9100,48 @@
           moreB.innerHTML = `<div class="ticon" style="background:var(--blue)"></div><div>+${diffsBlocked.length - maxShowBlocked} more diffs in report</div>`;
           appendToRunGroup(runId, moreB);
         }
+        scrollChatIfFollowing(runId);
+        try {
+          const g = document.getElementById(`runGroup-${runId}`);
+          if (g) g.dataset.runStatus = 'completed';
+        } catch {}
+        stopDurationTicker(runId);
+        handleCostStripRunComplete(runId);
+        persistRunGroupHtmlToThread(runId, 'completed');
+        dequeueAndRunNext(_owningThreadId);
+        return;
+      }
+      // Phase J.3: post-apply verification regressed → staging was discarded
+      // before reaching disk. Show amber banner with reason + top errors,
+      // render diff for inspection ("what was attempted"), no undo button
+      // (rollback was automatic).
+      if (decision === 'rolled_back') {
+        const rolledReason = String(result?.rolledBackReason || result?.verificationNote || 'Verification regressed after apply');
+        const rolledErrors = Array.isArray(result?.rolledBackErrors) ? result.rolledBackErrors : [];
+        appendToRunGroup(runId, createRolledBackBanner({
+          reason: rolledReason,
+          errors: rolledErrors,
+        }));
+
+        // Render diff cards (read-only inspection of what was attempted).
+        const diffsRolled = Array.isArray(result.fileDiffs) ? result.fileDiffs : [];
+        const maxShowRolled = 3;
+        if (diffsRolled.length > 0) {
+          diffsRolled.slice(0, maxShowRolled).forEach((fd, i) => {
+            const card = renderDiffCard(fd, i, diffsRolled.length, {
+              decisionMode: 'rolled_back',
+              applied: false,
+            });
+            if (card) appendToRunGroup(runId, card);
+          });
+          if (diffsRolled.length > maxShowRolled) {
+            const moreR = document.createElement('div');
+            moreR.className = 'toast';
+            moreR.innerHTML = `<div class="ticon" style="background:var(--blue)"></div><div>+${diffsRolled.length - maxShowRolled} more diffs in report</div>`;
+            appendToRunGroup(runId, moreR);
+          }
+        }
+
         scrollChatIfFollowing(runId);
         try {
           const g = document.getElementById(`runGroup-${runId}`);
