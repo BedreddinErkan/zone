@@ -9663,6 +9663,29 @@
       // automatic post-J.1; the diff card carries the file count, and the
       // undo control above (line ~9404) covers the revert affordance.
 
+      // Bug D fix: restore final agent summary as assistant bubble.
+      // Bubble only on safe_to_apply; rolled_back/blocked have banners.
+      if (decision === 'safe_to_apply') {
+        try {
+          const finalText = result.chatResponse
+            || result.finalRunReport?.summary
+            || result.finalRunReport?.text
+            || '';
+          const cleaned = stripTrailingVerificationTag(finalText).trim();
+          if (cleaned.length > 0) {
+            const agBubble = createAgentBubbleFromMarkdown(cleaned, {
+              runId,
+              html: result.responseHtml || '',
+              contextFiles: result.contextFiles || [],
+              userText: findUserTextForRun(runId),
+            });
+            appendToRunGroup(runId, agBubble);
+          }
+        } catch (err) {
+          console.warn('[zone-ui-final-bubble]', err);
+        }
+      }
+
       try {
         if (state.__handoffReportByRun && state.__handoffReportByRun[runId]) {
           delete state.__handoffReportByRun[runId];
