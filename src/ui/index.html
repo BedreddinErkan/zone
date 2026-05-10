@@ -9664,6 +9664,38 @@
         }
       }
 
+      // Bug D-2 fix: agent summary bubble after diffs + auto-verify, before undo.
+      // Root cause: prior block used .summary/.text which don't exist on
+      // FinalRunReport — always '' → bubble never rendered.
+      // Real fields: changesMade[], statusSummary, nextStep.
+      if (decision === 'safe_to_apply' || decision === 'preview_only') {
+        try {
+          const _fr = result && result.finalRunReport ? result.finalRunReport : null;
+          const _bullets = (_fr?.changesMade || [])
+            .map(c => `- ${String(c).trim()}`).filter(Boolean).join('\n');
+          const _status = String(_fr?.statusSummary || '').trim();
+          const _next = String(_fr?.nextStep || '').trim();
+
+          let _bubbleText = '';
+          if (_status) _bubbleText += _status + '\n\n';
+          if (_bullets) _bubbleText += '**Changes:**\n' + _bullets + '\n\n';
+          if (_next) _bubbleText += `**Next:** ${_next}`;
+
+          // Fallback: chatResponse only exists on already-done short-circuit
+          if (!_bubbleText.trim() && result.chatResponse) {
+            _bubbleText = result.chatResponse;
+          }
+
+          const _cleaned = stripTrailingVerificationTag(_bubbleText).trim();
+          if (_cleaned.length > 0) {
+            hideEmpty();
+            appendToRunGroup(runId, createAgentBubbleFromMarkdown(_cleaned, { runId }));
+          }
+        } catch (err) {
+          console.warn('[zone-ui-final-bubble]', err);
+        }
+      }
+
       // Zone Undo Tur 2b: per-run revert affordance for safe_to_apply runs.
       // Hidden on preview_only / blocked / chat. The 404 path covers older
       // runs whose snapshots have been GC'd.
@@ -9672,32 +9704,8 @@
           appendToRunGroup(runId, renderUndoControl(runId, state.activeRepo.path));
         }
       } catch {}
-      // Phase J.2: removed action-chip row (Apply / Revert chips). Apply is
-      // automatic post-J.1; the diff card carries the file count, and the
-      // undo control above (line ~9404) covers the revert affordance.
-
-      // Bug D fix: restore final agent summary as assistant bubble.
-      // Bubble only on safe_to_apply; rolled_back/blocked have banners.
-      if (decision === 'safe_to_apply') {
-        try {
-          const finalText = result.chatResponse
-            || result.finalRunReport?.summary
-            || result.finalRunReport?.text
-            || '';
-          const cleaned = stripTrailingVerificationTag(finalText).trim();
-          if (cleaned.length > 0) {
-            const agBubble = createAgentBubbleFromMarkdown(cleaned, {
-              runId,
-              html: result.responseHtml || '',
-              contextFiles: result.contextFiles || [],
-              userText: findUserTextForRun(runId),
-            });
-            appendToRunGroup(runId, agBubble);
-          }
-        } catch (err) {
-          console.warn('[zone-ui-final-bubble]', err);
-        }
-      }
+      // Phase J.2: removed action-chip row. Apply is automatic post-J.1;
+      // diff card carries file count, undo control above covers revert.
 
       try {
         if (state.__handoffReportByRun && state.__handoffReportByRun[runId]) {
