@@ -4288,16 +4288,23 @@
     function updateCostStripFromTokenBudget(event, runId) {
       const rid = String(event?.runId || runId || '').trim();
       const strip = document.getElementById('zoneCostStrip');
-      if (!strip || strip.classList.contains('previous-run')) return;
+      if (!strip) return;
       if (rid && currentDisplayedRunId && rid !== currentDisplayedRunId) return;
-      const ratioRaw = Number(event?.tokenBudgetRatio);
-      const ratio = Number.isFinite(ratioRaw) ? ratioRaw : 0;
+      // Bug E fix: do NOT gate on previous-run here. The HTTP /api/patch
+      // response races with SSE delivery — handlePatchResult can call
+      // finalizeCostMeter (→ previous-run) before buffered token_budget_status
+      // events (carrying breakdown.subagents > 0) arrive. Allowing the update
+      // regardless lets late SSE events correct the display. warn/alert class
+      // toggling is still skipped for completed runs.
+      const isPreviousRun = strip.classList.contains('previous-run');
       const meter = ensureCostMeterState(rid || currentDisplayedRunId);
       if (meter) {
-        const tokens = readTokenBudgetBreakdown(event);
-        if (tokens.total > 0) meter.totalTokens = tokens.total;
-        meter.mainAgentTokens = tokens.mainAgent;
-        meter.subagentTokens = tokens.subagents;
+        const subagentTokens = event.breakdown?.subagents ?? 0;
+        const totalTokens = event.cumulativeTokens ?? 0;
+        const mainTokens = event.breakdown?.mainAgent ?? totalTokens;
+        if (totalTokens > 0) meter.totalTokens = totalTokens;
+        meter.mainAgentTokens = mainTokens;
+        meter.subagentTokens = subagentTokens;
         const cacheRead = Number(meter.totalCacheRead || 0);
         const uncached = Number(meter.totalInputUncached || 0);
         const totalInput = cacheRead + uncached;
@@ -4305,20 +4312,24 @@
         const pctLabel = totalInput > 0 ? `${pct}%` : '—%';
         setCostStripText(strip, {
           costLabel: typeof formatCostUsd === 'function' ? formatCostUsd(Number(meter.cumulative || 0)) : '$' + Number(meter.cumulative || 0).toFixed(2),
-          totalTokens: tokens.total || meter.totalTokens || 0,
-          mainAgentTokens: tokens.mainAgent,
-          subagentTokens: tokens.subagents,
+          totalTokens: totalTokens || meter.totalTokens || 0,
+          mainAgentTokens: mainTokens,
+          subagentTokens,
           pctLabel,
         });
         const tid = getThreadIdForRunId(meter.runId);
         const run = tid ? state.runsByThread.get(tid) : null;
         if (run) run.costMeter = meter;
       }
-      const status = String(event?.status || '').toLowerCase();
-      const isAlert = status === 'error' || ratio >= ZONE_TOKEN_BUDGET_HARD;
-      const isWarn = !isAlert && (status === 'warning' || ratio >= ZONE_TOKEN_BUDGET_WARN);
-      strip.classList.toggle('budget-warn', isWarn);
-      strip.classList.toggle('budget-alert', isAlert);
+      if (!isPreviousRun) {
+        const ratioRaw = Number(event?.tokenBudgetRatio);
+        const ratio = Number.isFinite(ratioRaw) ? ratioRaw : 0;
+        const status = String(event?.status || '').toLowerCase();
+        const isAlert = status === 'error' || ratio >= ZONE_TOKEN_BUDGET_HARD;
+        const isWarn = !isAlert && (status === 'warning' || ratio >= ZONE_TOKEN_BUDGET_WARN);
+        strip.classList.toggle('budget-warn', isWarn);
+        strip.classList.toggle('budget-alert', isAlert);
+      }
     }
 
     function refreshCostStripForActiveRun() {
