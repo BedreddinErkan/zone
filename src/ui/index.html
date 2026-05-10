@@ -937,7 +937,7 @@
     }
     .branchDropdownItem:hover{background:var(--surface-alpha-2)}
     .branchDropdownItem.current{color:var(--text-1);font-weight:500}
-    .branchDropdownItem.create{color:var(--text-3);border-top:1px solid var(--border);margin-top:var(--space-sm);padding-top:var(--space-md)}
+    .branchDropdownItem.in-use-worktree{opacity:0.45;cursor:not-allowed;pointer-events:none}
     .branchInlineInput{
       display:flex;gap:var(--space-sm);padding:var(--space-sm) var(--space-md);
     }
@@ -6718,25 +6718,6 @@
       return await res.json();
     }
 
-    async function branchApiCreate(repoPath, name, baseBranch){
-      if (isTauriRuntime()) {
-        const core = getTauriCore();
-        if (core?.invoke) {
-          return await core.invoke('create_git_branch', {
-            repo: repoPath,
-            name,
-            baseBranch: baseBranch || null,
-          });
-        }
-      }
-      const res = await apiFetch('/api/branches/create', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ repo: repoPath, name, baseBranch }),
-      });
-      return await res.json();
-    }
-
     async function fetchBranchList(){
       if (!state.activeRepo?.path) {
         state.activeBranch = null;
@@ -6749,7 +6730,7 @@
       try {
         const data = await branchApiList(state.activeRepo.path);
         state.activeBranch = data?.current ?? null;
-        state.branchList = Array.isArray(data?.branches) ? data.branches : [];
+        state.branchList = Array.isArray(data?.branches) ? data.branches : [];  // BranchInfo[]
       } catch (err) {
         state.activeBranch = null;
         state.branchList = [];
@@ -6806,28 +6787,30 @@
       if (!els.branchDropdown) return;
       const dd = els.branchDropdown;
       const html = [];
-      for (const name of state.branchList) {
+      for (const b of state.branchList) {
+        // b is BranchInfo: { name, current, checkedOutAt }
+        const name = typeof b === 'string' ? b : b.name;
+        const checkedOutAt = (b && typeof b === 'object') ? (b.checkedOutAt || null) : null;
         const isCurrent = name === state.activeBranch;
+        const inUse = !isCurrent && !!checkedOutAt;
         const safe = String(name).replace(/[<>"']/g, c => ({'<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        const safeWt = checkedOutAt ? String(checkedOutAt).replace(/[<>"']/g, c => ({'<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) : '';
         html.push(
-          '<div class="branchDropdownItem ' + (isCurrent ? 'current' : '') + '" data-branch="' + safe + '">' +
+          '<div class="branchDropdownItem ' + (isCurrent ? 'current' : '') + (inUse ? ' in-use-worktree' : '') + '"' +
+            ' data-branch="' + safe + '"' +
+            (inUse ? ' title="In use by worktree: ' + safeWt + '"' : '') +
+          '>' +
             (isCurrent ? '✓ ' : '&nbsp;&nbsp;') + safe +
+            (inUse ? ' <span style="opacity:.5;font-size:10px">(worktree)</span>' : '') +
           '</div>'
         );
       }
-      html.push(
-        '<div class="branchDropdownItem create" data-action="create">+ Create new branch...</div>'
-      );
       dd.innerHTML = html.join('');
 
       dd.querySelectorAll('.branchDropdownItem').forEach(item => {
+        if (item.classList.contains('in-use-worktree')) return; // no-op
         item.addEventListener('click', (e) => {
           e.stopPropagation();
-          const action = item.dataset.action;
-          if (action === 'create') {
-            showBranchCreateInput();
-            return;
-          }
           const branch = item.dataset.branch;
           if (branch && branch !== state.activeBranch) {
             doSwitchBranch(branch);
@@ -6836,30 +6819,6 @@
           }
         });
       });
-    }
-
-    function showBranchCreateInput(){
-      els.branchDropdown.innerHTML =
-        '<div class="branchInlineInput">' +
-          '<input type="text" id="branchCreateName" placeholder="branch-name" autocomplete="off">' +
-          '<button id="branchCreateConfirm">Create</button>' +
-          '<button id="branchCreateCancel">Cancel</button>' +
-        '</div>';
-      const wrapper = els.branchDropdown.querySelector('.branchInlineInput');
-      if (wrapper) {
-        wrapper.addEventListener('click', (e) => e.stopPropagation());
-      }
-      positionBranchDropdown();
-      const input = document.getElementById('branchCreateName');
-      const confirm = document.getElementById('branchCreateConfirm');
-      const cancel = document.getElementById('branchCreateCancel');
-      input.focus();
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') doCreateBranch(input.value);
-        if (e.key === 'Escape') closeBranchDropdown();
-      });
-      confirm.addEventListener('click', (e) => { e.stopPropagation(); doCreateBranch(input.value); });
-      cancel.addEventListener('click', (e) => { e.stopPropagation(); renderBranchDropdown(); });
     }
 
     async function doSwitchBranch(branch){
@@ -6871,76 +6830,22 @@
           state.activeBranch = branch;
           renderBranchChip();
         } else {
-          let msg = 'Failed to switch';
+          let msg = 'Failed to switch branch';
           if (data?.error === 'uncommitted_changes') {
             const n = Array.isArray(data.dirtyFiles) ? data.dirtyFiles.length : 0;
             msg = 'Cannot switch: uncommitted changes' + (n > 0 ? ' in ' + n + ' file' + (n === 1 ? '' : 's') : '');
+          } else if (data?.error === 'in_use_by_worktree') {
+            msg = 'Branch is checked out in another worktree' + (data.worktreePath ? ': ' + data.worktreePath : '');
           } else if (data?.error === 'not_found') {
             msg = 'Branch not found: ' + branch;
           } else if (data?.message) {
             msg = data.message;
           }
-          showBranchError(msg);
+          showToast('error', msg, 3500);
         }
       } catch (err) {
-        showBranchError('Network error: ' + (err.message || err));
+        showToast('error', 'Network error switching branch: ' + (err.message || err), 3000);
       }
-    }
-
-    async function doCreateBranch(name){
-      name = String(name || '').trim();
-      if (!name) return;
-      try {
-        const data = await branchApiCreate(state.activeRepo.path, name);
-        if (data && data.ok) {
-          state.activeBranch = data.branch;
-          await fetchBranchList();
-          closeBranchDropdown();
-        } else {
-          let msg = 'Failed to create';
-          if (data?.error === 'exists') msg = 'Branch already exists';
-          else if (data?.error === 'invalid_name') msg = 'Invalid branch name';
-          else if (data?.message) msg = data.message;
-          const inputBox = els.branchDropdown.querySelector('.branchInlineInput');
-          if (inputBox) {
-            let err = els.branchDropdown.querySelector('.branchError');
-            if (!err) {
-              err = document.createElement('div');
-              err.className = 'branchError';
-              els.branchDropdown.insertBefore(err, inputBox);
-            }
-            err.textContent = '⚠ ' + msg;
-          }
-        }
-      } catch (err) {
-        const inputBox = els.branchDropdown.querySelector('.branchInlineInput');
-        if (inputBox) {
-          let errEl = els.branchDropdown.querySelector('.branchError');
-          if (!errEl) {
-            errEl = document.createElement('div');
-            errEl.className = 'branchError';
-            els.branchDropdown.insertBefore(errEl, inputBox);
-          }
-          errEl.textContent = '⚠ Network error';
-        }
-      }
-    }
-
-    function showBranchError(msg){
-      let banner = document.getElementById('branchErrorBanner');
-      if (!banner) {
-        banner = document.createElement('div');
-        banner.id = 'branchErrorBanner';
-        banner.style.cssText = 'position:absolute;font-size:var(--font-size-xs);color:#e57373;background:var(--surface-alpha-2);border:1px solid var(--border);padding:var(--space-sm) var(--space-md);border-radius:var(--radius-md);z-index:50;';
-        document.body.appendChild(banner);
-      }
-      banner.textContent = '⚠ ' + msg;
-      const rect = els.branchChip.getBoundingClientRect();
-      banner.style.left = rect.left + 'px';
-      banner.style.top = (rect.bottom + 6) + 'px';
-      banner.style.display = 'block';
-      clearTimeout(banner._timer);
-      banner._timer = setTimeout(() => { banner.style.display = 'none'; }, 3000);
     }
 
     function openNewThreadDropdown(){
