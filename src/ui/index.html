@@ -311,6 +311,9 @@
 
     .bubble{max-width:720px;margin:var(--space-lg) 0;padding:var(--space-xl);border-radius:var(--radius-lg);border:1px solid var(--border);background:var(--surface2);position:relative}
     .bubble.user{margin-left:auto;background:#3b1f9e;border-color:#2e2e34;color:#ffffff;border-radius:10px 10px 2px 10px}
+    .user-bubble-thumbs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+    .bubble-thumb{width:60px;height:60px;object-fit:cover;border-radius:6px;cursor:pointer;border:1px solid rgba(255,255,255,0.2);transition:opacity 0.15s}
+    .bubble-thumb:hover{opacity:0.82}
     .bubble.agent{margin-right:auto;max-width:85%;background:#0a0a0f;color:var(--text-1);border:1px solid #2e2e34;box-shadow:-2px -2px 0 -1px rgba(59,130,246,0.3);border-radius:10px 2px 10px 10px;padding:18px 20px}
     .bubble .text{font-size:var(--font-size-md);line-height:1.55;white-space:pre-wrap;word-break:break-word}
     .bubble .md{font-size:var(--font-size-md);line-height:1.55;word-break:break-word}
@@ -8946,6 +8949,22 @@
       // 2) append user bubble
       const ub = createBubble(task, 'user');
       ub.dataset.runId = runId;
+      // Render image thumbnails (if any) above the text content.
+      if (state.pendingAttachments && state.pendingAttachments.length > 0) {
+        const thumbStrip = document.createElement('div');
+        thumbStrip.className = 'user-bubble-thumbs';
+        state.pendingAttachments.forEach(function(att) {
+          const thumb = document.createElement('img');
+          thumb.className = 'bubble-thumb';
+          thumb.src = 'data:' + att.mediaType + ';base64,' + att.base64;
+          thumb.alt = 'Attached image';
+          thumb.addEventListener('click', function() {
+            openScreenshotModal(thumb.src, 'Attached image');
+          });
+          thumbStrip.appendChild(thumb);
+        });
+        ub.insertBefore(thumbStrip, ub.firstChild);
+      }
       const editBtn = document.createElement('button');
       editBtn.type = 'button';
       editBtn.className = 'edit-btn';
