@@ -1,4 +1,5 @@
 import type { TaskClassification, TaskTier } from "./taskClassifier.js";
+import { readTierSettings } from "../visual/tierSettings.js";
 
 export interface TierLimits {
   /** Whether the Task (subagent dispatch) tool is allowed. False for simple tier. */
@@ -34,16 +35,32 @@ export const TIER_LIMITS: Record<TaskTier, TierLimits> = {
 
 /**
  * Resolves tier limits from a classification result.
- * ZONE_FORCE_TIER env var overrides the classifier result (for testing).
- * Falls back to medium limits when classification is absent.
+ *
+ * Priority (highest first):
+ *   1. ZONE_FORCE_TIER env var — testing bypass, returns raw TIER_LIMITS entry (no user overrides)
+ *   2. User overrides from ~/.zone/tier-limits.json — merged on top of TIER_LIMITS defaults
+ *   3. TIER_LIMITS defaults — used when no classification or no user override
+ *
+ * taskToolAllowed is NEVER user-overridable — it is a system-level guarantee.
  */
 export function resolveTierLimits(classification?: TaskClassification | null): TierLimits {
   const forceTier = process.env["ZONE_FORCE_TIER"] as TaskTier | undefined;
   if (forceTier && Object.prototype.hasOwnProperty.call(TIER_LIMITS, forceTier)) {
     return TIER_LIMITS[forceTier];
   }
-  if (!classification) {
-    return TIER_LIMITS.medium;
-  }
-  return TIER_LIMITS[classification.tier];
+
+  const tier: TaskTier = classification?.tier ?? "medium";
+  const base = TIER_LIMITS[tier];
+
+  const userSettings = readTierSettings();
+  const userOverride = userSettings[tier];
+
+  if (!userOverride) return base;
+
+  return {
+    taskToolAllowed: base.taskToolAllowed, // system-level — never overridden
+    maxSubagentCalls: userOverride.maxSubagentCalls ?? base.maxSubagentCalls,
+    tokenBudgetCap: userOverride.tokenBudgetCap ?? base.tokenBudgetCap,
+    iterCap: userOverride.iterCap ?? base.iterCap,
+  };
 }

@@ -17,6 +17,8 @@ import {
   saveVisualSettings,
   getVisualSettingsDefaults,
 } from "../visual/visualSettings.js";
+import { readTierSettings, writeTierSettings } from "../visual/tierSettings.js";
+import { TIER_LIMITS } from "../llm/tierLimits.js";
 import { invalidateDevServerCache } from "../visual/devServerProbe.js";
 import {
   isIrrelevantDeveloperContextPath,
@@ -2144,6 +2146,51 @@ app.post("/api/settings/visual-verification", (req, res) => {
     res
       .status(400)
       .json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Phase L.3: per-tier execution limit overrides. Persisted to
+// ~/.zone/tier-limits.json. ZONE_FORCE_TIER env override always takes priority
+// over these settings (testing bypass). taskToolAllowed is system-level and
+// is not surfaced in the response — the UI must not expose it as editable.
+app.get("/api/settings/tier-limits", (_req, res) => {
+  try {
+    const userOverrides = readTierSettings();
+    const merged = (["simple", "medium", "complex"] as const).reduce(
+      (acc, tier) => {
+        const base = TIER_LIMITS[tier];
+        const ov = userOverrides[tier] ?? {};
+        acc[tier] = {
+          taskToolAllowed: base.taskToolAllowed,
+          maxSubagentCalls: ov.maxSubagentCalls ?? base.maxSubagentCalls,
+          tokenBudgetCap: ov.tokenBudgetCap ?? base.tokenBudgetCap,
+          iterCap: ov.iterCap ?? base.iterCap,
+        };
+        return acc;
+      },
+      {} as typeof TIER_LIMITS
+    );
+    res.json({ ok: true, settings: merged, defaults: TIER_LIMITS, userOverrides });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post("/api/settings/tier-limits", (req, res) => {
+  try {
+    const saved = writeTierSettings((req.body as { userOverrides?: unknown })?.userOverrides ?? {});
+    res.json({ ok: true, userOverrides: saved });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post("/api/settings/tier-limits/reset", (_req, res) => {
+  try {
+    writeTierSettings({});
+    res.json({ ok: true, defaults: TIER_LIMITS });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
 });
 

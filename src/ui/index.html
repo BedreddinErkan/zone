@@ -1224,6 +1224,7 @@
         <button class="mtab active" data-stab="usage">Usage</button>
         <button class="mtab" data-stab="keys">API Keys</button>
         <button class="mtab" data-stab="visual">Visual</button>
+        <button class="mtab" data-stab="tier">Tier Limits</button>
       </div>
       <div class="modal-b" id="settingsBody"></div>
     </div>
@@ -9828,6 +9829,7 @@
       if (tab === 'usage') renderUsageSettings();
       if (tab === 'keys') renderKeysSettings();
       if (tab === 'visual') renderVisualSettings();
+      if (tab === 'tier') renderTierSettings();
     }
 
     function renderKeysSettings(){
@@ -10174,6 +10176,154 @@
           }).finally(() => {
             saveBtn.disabled = false;
           });
+        });
+      }
+    }
+
+    // Phase L.3: tier-based execution limit overrides.
+    function renderTierSettings(){
+      const inputStyle = 'width:110px;padding:4px 8px;background:var(--bg-input,#1e1e1e);border:1px solid var(--border,#444);border-radius:4px;color:inherit;font-size:var(--font-size-sm,12px)';
+      const TIERS = [
+        { key: 'simple',  label: 'Simple',  desc: 'Subagent dispatch always disabled — system guarantee.' },
+        { key: 'medium',  label: 'Medium',  desc: 'Up to 1 subagent call by default.' },
+        { key: 'complex', label: 'Complex', desc: 'Up to 2 subagent calls by default. Highest token budget.' },
+      ];
+
+      function tierBlock(tier, label, desc) {
+        const showSubagent = tier !== 'simple';
+        return `
+          <div style="margin-bottom:18px;padding:12px;border:1px solid var(--border,#333);border-radius:6px">
+            <div class="apikey-field-label" style="font-size:0.9em;margin-bottom:6px">${label}</div>
+            <div class="apikey-disclaimer" style="margin-bottom:10px">${desc}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">
+              <label style="display:flex;flex-direction:column;gap:4px;font-size:var(--font-size-sm,12px)">
+                Token budget cap
+                <input id="tl-${tier}-tokenBudgetCap" type="number" min="10000" max="2000000" step="1000"
+                  style="${inputStyle}" aria-label="${label} token budget cap" />
+              </label>
+              <label style="display:flex;flex-direction:column;gap:4px;font-size:var(--font-size-sm,12px)">
+                Iteration cap
+                <input id="tl-${tier}-iterCap" type="number" min="1" max="100"
+                  style="${inputStyle}" aria-label="${label} iteration cap" />
+              </label>
+              ${showSubagent ? `
+              <label style="display:flex;flex-direction:column;gap:4px;font-size:var(--font-size-sm,12px)">
+                Max subagent calls
+                <input id="tl-${tier}-maxSubagentCalls" type="number" min="0" max="5"
+                  style="${inputStyle}" aria-label="${label} max subagent calls" />
+              </label>` : ''}
+            </div>
+          </div>`;
+      }
+
+      els.settingsBody.innerHTML = `
+        <div class="apikey-section">
+          <div class="apikey-section-title">Tier-Based Execution Limits</div>
+          <div class="apikey-disclaimer" style="margin-bottom:14px">
+            Customize per-tier token budgets, iteration caps, and subagent call limits.
+            Inputs show the effective value (default or your saved override).
+            <strong>Simple tier's subagent dispatch is a system-level guarantee and cannot be changed.</strong>
+          </div>
+          <div id="tlLoadingState" class="apikey-disclaimer">Loading…</div>
+          <div id="tlFormBody" style="display:none">
+            ${TIERS.map(t => tierBlock(t.key, t.label, t.desc)).join('')}
+            <div style="display:flex;gap:10px;align-items:center;margin-top:8px">
+              <button id="tlSaveBtn" style="padding:5px 14px;background:var(--violet,#7a5af8);color:#fff;border:none;border-radius:4px;font-size:var(--font-size-sm,12px);cursor:pointer">Save</button>
+              <button id="tlResetBtn" style="padding:5px 14px;background:transparent;color:var(--color-text,#ddd);border:1px solid var(--border,#444);border-radius:4px;font-size:var(--font-size-sm,12px);cursor:pointer">Reset to defaults</button>
+              <span id="tlStatus" style="font-size:var(--font-size-sm,12px);opacity:.7"></span>
+            </div>
+          </div>
+        </div>`;
+
+      const loadingEl = document.getElementById('tlLoadingState');
+      const formEl = document.getElementById('tlFormBody');
+      const saveBtn = document.getElementById('tlSaveBtn');
+      const resetBtn = document.getElementById('tlResetBtn');
+      const statusEl = document.getElementById('tlStatus');
+
+      function getInput(tier, field){ return document.getElementById('tl-' + tier + '-' + field); }
+
+      function applySettings(settings){
+        for (const tier of ['simple','medium','complex']){
+          const s = settings[tier] || {};
+          const tokEl = getInput(tier, 'tokenBudgetCap');
+          const iterEl = getInput(tier, 'iterCap');
+          const subEl = getInput(tier, 'maxSubagentCalls');
+          if (tokEl) tokEl.value = String(s.tokenBudgetCap ?? '');
+          if (iterEl) iterEl.value = String(s.iterCap ?? '');
+          if (subEl) subEl.value = String(s.maxSubagentCalls ?? '');
+        }
+      }
+
+      function collectOverrides(){
+        const result = {};
+        for (const tier of ['simple','medium','complex']){
+          const tokEl = getInput(tier, 'tokenBudgetCap');
+          const iterEl = getInput(tier, 'iterCap');
+          const subEl = getInput(tier, 'maxSubagentCalls');
+          const tierObj = {};
+          const tok = tokEl ? parseInt(tokEl.value, 10) : NaN;
+          const iter = iterEl ? parseInt(iterEl.value, 10) : NaN;
+          const sub = subEl ? parseInt(subEl.value, 10) : NaN;
+          if (Number.isFinite(tok)) tierObj.tokenBudgetCap = tok;
+          if (Number.isFinite(iter)) tierObj.iterCap = iter;
+          if (Number.isFinite(sub)) tierObj.maxSubagentCalls = sub;
+          if (Object.keys(tierObj).length) result[tier] = tierObj;
+        }
+        return result;
+      }
+
+      fetch('/api/settings/tier-limits').then(r => r.json()).then(data => {
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (formEl) formEl.style.display = '';
+        if (data && data.ok && data.settings) {
+          applySettings(data.settings);
+        } else {
+          if (statusEl) statusEl.textContent = 'Failed to load.';
+        }
+      }).catch(() => {
+        if (loadingEl) loadingEl.textContent = 'Failed to load settings.';
+      });
+
+      if (saveBtn) {
+        saveBtn.addEventListener('click', () => {
+          saveBtn.disabled = true;
+          if (statusEl) statusEl.textContent = 'Saving…';
+          fetch('/api/settings/tier-limits', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userOverrides: collectOverrides() }),
+          }).then(r => r.json()).then(resp => {
+            if (resp && resp.ok) {
+              if (statusEl) statusEl.textContent = '✓ Saved';
+            } else {
+              if (statusEl) statusEl.textContent = 'Error: ' + (resp?.error || 'unknown');
+            }
+          }).catch(err => {
+            if (statusEl) statusEl.textContent = 'Failed: ' + (err?.message || err);
+          }).finally(() => {
+            saveBtn.disabled = false;
+          });
+        });
+      }
+
+      if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+          resetBtn.disabled = true;
+          if (statusEl) statusEl.textContent = 'Resetting…';
+          fetch('/api/settings/tier-limits/reset', { method: 'POST' })
+            .then(r => r.json()).then(resp => {
+              if (resp && resp.ok && resp.defaults) {
+                applySettings(resp.defaults);
+                if (statusEl) statusEl.textContent = '✓ Reset to defaults';
+              } else {
+                if (statusEl) statusEl.textContent = 'Error resetting.';
+              }
+            }).catch(err => {
+              if (statusEl) statusEl.textContent = 'Failed: ' + (err?.message || err);
+            }).finally(() => {
+              resetBtn.disabled = false;
+            });
         });
       }
     }
