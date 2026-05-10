@@ -115,7 +115,18 @@ function parseClassifierResponse(text: string): ParsedClassifierResponse {
   if (!cleaned) {
     throw new Error("empty classifier response");
   }
-  const parsed = JSON.parse(cleaned);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let parsed: any;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    // Fallback: extract the first top-level {...} block (handles leading/trailing prose).
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) {
+      throw new Error("no JSON object found in classifier response");
+    }
+    parsed = JSON.parse(match[0]);
+  }
   if (parsed === null || typeof parsed !== "object") {
     throw new Error("classifier response is not an object");
   }
