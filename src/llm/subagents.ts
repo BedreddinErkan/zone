@@ -11,7 +11,7 @@ export const WORKER_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   // background-process tools, get_dependencies, etc.
 ]);
 
-export const MAX_SUBAGENT_CALLS_PER_PARENT_RUN = 5;
+export const MAX_SUBAGENT_CALLS_PER_PARENT_RUN = 2; // K.2: tightened from 5 to 2 (defensive)
 export const VALID_SUBAGENT_TYPES = ["worker", "explore"] as const;
 export type SubagentType = (typeof VALID_SUBAGENT_TYPES)[number];
 
@@ -28,9 +28,9 @@ export const EXPLORE_ITER_FLOOR = 15;
 export const EXPLORE_ITER_CEILING = 40;
 export const EXPLORE_ITER_PER_STEP = 6;
 
-export const WORKER_ITER_FLOOR = 20;
-export const WORKER_ITER_CEILING = 60;
-export const WORKER_ITER_PER_STEP = 8;
+export const WORKER_ITER_FLOOR = 6; // K.2: tightened from 20 → 6
+export const WORKER_ITER_CEILING = 24; // K.2: tightened from 60 → 24
+export const WORKER_ITER_PER_STEP = 4; // K.2: tightened from 8 → 4
 
 export function computeExploreMaxIterations(planStepsCount: number): number {
   const steps = Math.max(1, planStepsCount || 1);
@@ -87,6 +87,7 @@ export interface SubagentSummary {
     | "token_budget_exceeded";
   summary: string;
   tokenUsage: SubagentTokenUsage;
+  costUsd: number;
   filesModified: string[];
   notes?: string;
 }
@@ -205,6 +206,7 @@ export function formatSubagentSummaryForParent(
     status: statusFromAgentResult(result, parsed.status),
     summary: parsed.summary || result.summary || "(no summary)",
     tokenUsage: normalizeTokenUsage(result.tokenUsage),
+    costUsd: result.costUsd ?? 0,
     filesModified:
       parsed.filesModified.length > 0 ? parsed.filesModified : result.filesModified ?? [],
     notes: parsed.notes,
@@ -295,6 +297,7 @@ export function formatExploreSubagentSummaryForParent(
     status: statusFromAgentResult(result, parsed.status),
     summary: parsed.summary || result.summary || "(no summary)",
     tokenUsage: normalizeTokenUsage(result.tokenUsage),
+    costUsd: result.costUsd ?? 0,
     findings: parsed.findings,
   };
   return JSON.stringify(payload);

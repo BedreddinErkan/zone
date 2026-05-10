@@ -70,8 +70,8 @@ describe("computeWorkerMaxIterations (plan-aware)", () => {
     expect(computeWorkerMaxIterations(1)).toBe(WORKER_ITER_FLOOR);
   });
   it("scales linearly above the floor", () => {
-    expect(computeWorkerMaxIterations(4)).toBe(32); // 4 * 8 = 32
-    expect(computeWorkerMaxIterations(6)).toBe(48); // 6 * 8 = 48
+    expect(computeWorkerMaxIterations(4)).toBe(16); // K.2: 4 * 4 = 16
+    expect(computeWorkerMaxIterations(6)).toBe(24); // K.2: 6 * 4 = 24 (hits ceiling)
   });
   it("caps at the ceiling", () => {
     expect(computeWorkerMaxIterations(20)).toBe(WORKER_ITER_CEILING);
@@ -233,6 +233,42 @@ describe("formatExploreSubagentSummaryForParent", () => {
     expect(toolResult.success).toBe(true);
     const parsed = JSON.parse(toolResult.output);
     expect(Array.isArray(parsed.findings)).toBe(true);
+  });
+
+  it("K.6: costUsd is serialized into explore Task tool result", () => {
+    const fakeResult = {
+      success: true,
+      summary: [
+        "FINDINGS:\n- src/foo.ts:12 — entry point",
+        "SUMMARY: Located the entry point.",
+        "STATUS: completed",
+      ].join("\n"),
+      toolCallLog: [],
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted" as const,
+      costUsd: 0.012,
+    };
+
+    const parsed = JSON.parse(
+      formatExploreSubagentSummaryForParent(fakeResult, "explore-k6", "parent-k6")
+    );
+    expect(parsed.costUsd).toBe(0.012);
+    expect(parsed.subagentId).toBe("explore-k6");
+  });
+
+  it("K.6: costUsd defaults to 0 for explore when not provided", () => {
+    const fakeResult = {
+      success: true,
+      summary: "FINDINGS:\n\nSUMMARY: done.\nSTATUS: completed",
+      toolCallLog: [],
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted" as const,
+    };
+
+    const parsed = JSON.parse(formatExploreSubagentSummaryForParent(fakeResult, "explore-no-cost"));
+    expect(parsed.costUsd).toBe(0);
   });
 });
 

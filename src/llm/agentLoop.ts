@@ -27,6 +27,7 @@ import {
   buildIterCostUpdate,
   emptyIterCostAccumulator,
   type IterCostAccumulator,
+  type IterCostUpdatePayload,
 } from "../usage/iterCostMeter.js";
 import { parseTodoProgressMarkers } from "../core/todoLifecycle.js";
 import { validateTodoWriteArgs } from "../tools/todoWriteValidate.js";
@@ -138,6 +139,9 @@ export interface AgentLoopResult {
   /** Per-loop LLM token usage. For subagent loops this is serialized into the
    *  Task tool result so the parent can enforce the combined Phase H.7 cap. */
   tokenUsage?: SubagentTokenUsage;
+  /** Phase K.6: cumulative LLM cost (USD) for this agent loop's own calls.
+   *  Serialized into Task tool result so parent can propagate to cumulativeCost. */
+  costUsd?: number;
   /** Phase J.3.1: staging snapshot captured before rollback discarded it.
    *  Only populated when verificationReason === "verification_regressed".
    *  Keyed by absolute path; values are the content the agent attempted to
@@ -465,7 +469,7 @@ function normalizePatchedPath(filePath: string): string {
   return String(filePath || "").replace(/\\/g, "/").trim();
 }
 
-// â”€â”€â”€ Self-correction routing (Phase Tier-2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Self-correction routing (Phase Tier-2) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 export type SelfCorrectTrigger =
   | "test_failed"
@@ -1891,8 +1895,10 @@ Example first call (immediately after task framing):
   const client = createLLMClient({ apiKey: input.userApiKey });
   const requestCtx = getRequestContext();
   let iterCostAccumulator: IterCostAccumulator = emptyIterCostAccumulator();
+  let lastIterCostPayload: IterCostUpdatePayload | null = null;
   let loopTokenUsage: SubagentTokenUsage = emptySubagentTokenUsage();
   let subagentTokenTotal = 0;
+  let subagentCostTotal = 0;
   const tokenBudgetBaseTokens = cleanTokenNumber(input.tokenBudgetBaseTokens);
   // Usage recording is centralized in RecordingLLMClient (src/llm/recordingClient.ts):
   // every chat completion across the codebase appends one JSONL record. agentLoop
@@ -2007,6 +2013,7 @@ Example first call (immediately after task framing):
       verificationReason: "no_verification_attempted",
       terminationReason: "token_budget_exceeded",
       tokenUsage: currentTokenUsage(),
+      costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
     };
   };
 
@@ -2093,6 +2100,7 @@ Example first call (immediately after task framing):
           previous: iterCostAccumulator,
         });
         iterCostAccumulator = update.accumulator;
+        lastIterCostPayload = update.payload;
         input.onStructuredEvent?.(update.payload);
       }
     } catch (err) {
@@ -2488,6 +2496,25 @@ Example first call (immediately after task framing):
                 return await synthesizeTokenBudgetExit(iter + 1, responseInput);
               }
             }
+            // K.6: subagent cost propagation (parallel to K.3 token propagation above)
+            const subagentCostUsd =
+              typeof parsed.costUsd === "number" && parsed.costUsd > 0 ? parsed.costUsd : 0;
+            if (subagentCostUsd > 0) {
+              subagentCostTotal += subagentCostUsd;
+              log("[zone-subagent-cost-propagated]", JSON.stringify({
+                mainRunId: input.runId,
+                subagentId: parsed.subagentId,
+                subagentCostUsd,
+                mainCumulativeCostAfter: iterCostAccumulator.total_cost + subagentCostTotal,
+              }));
+              if (lastIterCostPayload && typeof input.runId === "string" && input.runId.trim()) {
+                input.onStructuredEvent?.({
+                  ...lastIterCostPayload,
+                  iterCost: 0,
+                  cumulativeCost: iterCostAccumulator.total_cost + subagentCostTotal,
+                });
+              }
+            }
           } catch {
             // Best-effort only. Task summaries are user-visible tool content,
             // but modified-file aggregation should not make the loop fail.
@@ -2503,7 +2530,7 @@ Example first call (immediately after task framing):
         });
       }
 
-      // â”€â”€ Self-correction: failure detected â†’ route to coaching prompt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â"€â"€ Self-correction: failure detected â†’ route to coaching prompt â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       // Each self-correction attempt consumes one iteration toward maxIterations.
       // The selfCorrectionAttempts counter is a SUBSET of total iterations â€”
       // it limits how many times we inject coaching, not how many total iterations run.
@@ -2688,6 +2715,7 @@ Example first call (immediately after task framing):
           verificationReason: "no_verification_attempted",
           terminationReason: "natural_completion",
           tokenUsage: currentTokenUsage(),
+          costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
         };
       }
       const vrMatch = finalText.match(/\[ZONE_VERIFICATION:\s*([\w_]+)\]/i);
@@ -2848,6 +2876,7 @@ Example first call (immediately after task framing):
         verificationReason,
         terminationReason: "natural_completion",
         tokenUsage: currentTokenUsage(),
+        costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
         // Phase J.3.1: forward the staging snapshot so runLlmPatchFlow can
         // render the rolled-back diff. Only meaningful when
         // verificationReason === "verification_regressed".
@@ -2893,6 +2922,7 @@ Example first call (immediately after task framing):
       verificationReason: "no_verification_attempted",
       terminationReason: "max_iterations",
       tokenUsage: currentTokenUsage(),
+      costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
     };
   }
 
@@ -3108,6 +3138,7 @@ Example first call (immediately after task framing):
     verificationReason: finalVerificationReason,
     terminationReason: "max_iterations",
     tokenUsage: currentTokenUsage(),
+    costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
     // Phase J.3.1: forward the staging snapshot for the rolled-back diff
     // when maxiter ended with a regressed-verification rollback.
     ...(finalizeResult.discardedStaging

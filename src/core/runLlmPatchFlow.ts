@@ -5575,7 +5575,7 @@ const initializeTodosFromPlan = (): void => {
     } as const;
 
     // Phase H.6: plan-aware iter budget. Single-step (no plan or trivial
-    // plan) → WORKER_ITER_FLOOR=20. 4-step plan → 32. Capped at 60.
+    // plan) → WORKER_ITER_FLOOR=6. 4-step plan → 16. Capped at 24. (K.2 tightened)
     // Passed via `maxIterations` (not `maxIterationsOverride`) so the
     // ESCALATION_BONUS_ITERATIONS logic for repeat apply_patch failures
     // remains active.

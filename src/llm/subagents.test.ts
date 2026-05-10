@@ -75,9 +75,8 @@ describe("subagent helpers", () => {
   });
 
   it("subagentTypeMaxIterations routes correctly", () => {
-    // Phase H.6: floor values bumped to provide more headroom under
-    // tool-result compression / lazy-read changes (was 12 worker, 8 explore).
-    expect(subagentTypeMaxIterations("worker")).toBe(20);
+    // K.2: worker floor tightened 20 → 6 (defensive cap); explore floor stays 15.
+    expect(subagentTypeMaxIterations("worker")).toBe(6); // K.2: tightened from 20 to 6 (defensive)
     expect(subagentTypeMaxIterations("explore")).toBe(15);
   });
 
@@ -155,5 +154,47 @@ describe("subagent helpers", () => {
         perIter: [],
       },
     });
+  });
+
+  it("K.6: costUsd is serialized into worker Task tool result", () => {
+    const result = formatSubagentToolResultForParent(
+      {
+        success: true,
+        summary: [
+          "SUMMARY: Patched the handler.",
+          "FILES_MODIFIED: src/handler.ts",
+          "STATUS: completed",
+        ].join("\n"),
+        toolCallLog: [],
+        filesModified: ["src/handler.ts"],
+        patchValidatedByAgent: true,
+        verificationReason: "tests_passed",
+        tokenUsage: { input: 50000, output: 5000, cached: 40000, total: 55000 },
+        costUsd: 0.045,
+      },
+      "worker-k6",
+      "parent-run-k6"
+    );
+
+    const parsed = JSON.parse(result.output);
+    expect(parsed.costUsd).toBe(0.045);
+    expect(parsed.subagentId).toBe("worker-k6");
+  });
+
+  it("K.6: costUsd defaults to 0 when not provided by AgentLoopResult", () => {
+    const result = formatSubagentToolResultForParent(
+      {
+        success: true,
+        summary: ["SUMMARY: Done.", "FILES_MODIFIED: none", "STATUS: completed"].join("\n"),
+        toolCallLog: [],
+        filesModified: [],
+        patchValidatedByAgent: false,
+        verificationReason: "no_verification_attempted",
+      },
+      "worker-no-cost",
+      "parent-run-no-cost"
+    );
+
+    expect(JSON.parse(result.output).costUsd).toBe(0);
   });
 });
