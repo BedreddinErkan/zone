@@ -167,6 +167,10 @@ export async function runInvestigationFlow(input: {
           cumulativeTokens: typeof e.cumulativeTokens === "number" ? e.cumulativeTokens : undefined,
           tokenBudgetCap: typeof e.tokenBudgetCap === "number" ? e.tokenBudgetCap : undefined,
           tokenBudgetRatio: typeof e.tokenBudgetRatio === "number" ? e.tokenBudgetRatio : undefined,
+          breakdown:
+            e.breakdown && typeof e.breakdown === "object"
+              ? (e.breakdown as { mainAgent?: number; subagents?: number })
+              : undefined,
           iter: typeof e.iter === "number" ? e.iter : undefined,
         } as Partial<ZoneStructuredProgressEvent>);
       }

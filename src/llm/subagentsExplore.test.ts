@@ -172,14 +172,29 @@ describe("formatExploreSubagentSummaryForParent", () => {
       filesModified: [],
       patchValidatedByAgent: false,
       verificationReason: "no_verification_attempted" as const,
+      tokenUsage: {
+        input: 80,
+        output: 20,
+        cached: 10,
+        total: 100,
+        perIter: [100],
+      },
     };
 
-    const json = formatExploreSubagentSummaryForParent(fakeResult, "explore-1");
+    const json = formatExploreSubagentSummaryForParent(fakeResult, "explore-1", "parent-run-1");
     const parsed = JSON.parse(json);
 
     expect(parsed.subagentId).toBe("explore-1");
+    expect(parsed.parentRunId).toBe("parent-run-1");
     expect(parsed.status).toBe("completed");
     expect(parsed.summary).toBe("Found the entry point.");
+    expect(parsed.tokenUsage).toMatchObject({
+      input: 80,
+      output: 20,
+      cached: 10,
+      total: 100,
+      perIter: [100],
+    });
     expect(Array.isArray(parsed.findings)).toBe(true);
     expect(parsed.findings[0]).toMatchObject({ path: "src/a.ts", line: 10, note: "entry point" });
   });

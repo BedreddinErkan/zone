@@ -95,17 +95,65 @@ describe("subagent helpers", () => {
         filesModified: [],
         patchValidatedByAgent: false,
         verificationReason: "no_verification_attempted",
+        tokenUsage: {
+          input: 100,
+          output: 25,
+          cached: 40,
+          total: 125,
+          perIter: [60, 65],
+        },
       },
-      "worker-1"
+      "worker-1",
+      "parent-run-1"
     );
 
     expect(result.success).toBe(true);
     expect(JSON.parse(result.output)).toMatchObject({
       subagentId: "worker-1",
+      parentRunId: "parent-run-1",
       status: "failed",
       summary: "Worker hit its iteration budget before completing the edit.",
+      tokenUsage: {
+        input: 100,
+        output: 25,
+        cached: 40,
+        total: 125,
+        perIter: [60, 65],
+      },
       filesModified: [],
       notes: "Parent should continue directly instead of spawning another worker.",
+    });
+  });
+
+  it("formats missing token usage as a required zeroed tokenUsage payload", () => {
+    const result = formatSubagentToolResultForParent(
+      {
+        success: true,
+        summary: [
+          "SUMMARY: Completed the delegated edit.",
+          "FILES_MODIFIED: src/App.tsx",
+          "STATUS: success",
+        ].join("\n"),
+        toolCallLog: [],
+        filesModified: ["src/App.tsx"],
+        patchValidatedByAgent: false,
+        verificationReason: "no_verification_attempted",
+      },
+      "worker-2",
+      "parent-run-2"
+    );
+
+    expect(JSON.parse(result.output)).toMatchObject({
+      subagentId: "worker-2",
+      parentRunId: "parent-run-2",
+      status: "completed",
+      tokenUsage: {
+        input: 0,
+        output: 0,
+        cached: 0,
+        total: 0,
+        perIter: [],
+      },
     });
   });
 });

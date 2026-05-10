@@ -5399,6 +5399,30 @@ const initializeTodosFromPlan = (): void => {
         if (
           e &&
           typeof e === "object" &&
+          e.type === "token_budget_status"
+        ) {
+          emitStructuredProgress({
+            type: "token_budget_status" as any,
+            title: String(e.title || "Token budget"),
+            status:
+              (e.status as "active" | "warning" | "error" | "success" | undefined) ??
+              "active",
+            cumulativeTokens:
+              typeof e.cumulativeTokens === "number" ? e.cumulativeTokens : undefined,
+            tokenBudgetCap:
+              typeof e.tokenBudgetCap === "number" ? e.tokenBudgetCap : undefined,
+            tokenBudgetRatio:
+              typeof e.tokenBudgetRatio === "number" ? e.tokenBudgetRatio : undefined,
+            iter: typeof e.iter === "number" ? e.iter : undefined,
+            breakdown:
+              e.breakdown && typeof e.breakdown === "object"
+                ? e.breakdown
+                : undefined,
+          } as any);
+        }
+        if (
+          e &&
+          typeof e === "object" &&
           e.type === "todos_initialized"
         ) {
           if (Array.isArray(e.todos)) runTodos = e.todos as RunTodo[];

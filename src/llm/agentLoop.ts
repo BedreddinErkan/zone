@@ -16,7 +16,12 @@ import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
 import { ZONE_TOOLS } from "../tools/toolDefinitions.js";
-import { resetSubagentCallCount } from "./subagents.js";
+import {
+  emptySubagentTokenUsage,
+  resetSubagentCallCount,
+  type SubagentResult,
+  type SubagentTokenUsage,
+} from "./subagents.js";
 import { extractUsage } from "./recordingClient.js";
 import {
   buildIterCostUpdate,
@@ -94,6 +99,10 @@ export interface AgentLoopInput {
    * map so the top-level parent keeps exclusive flush/discard authority.
    */
   parentStagingFiles?: Map<string, string>;
+  /** Parent cumulative budget at subagent dispatch. Subagent loops add their
+   *  own per-iteration tokens to this base so Phase H.7 is enforced while
+   *  delegated work is still running. */
+  tokenBudgetBaseTokens?: number;
 }
 
 export type VerificationReason =
@@ -126,6 +135,9 @@ export interface AgentLoopResult {
    *  patch) to surface "Token budget reached" vs "Iteration budget reached"
    *  distinctly in the UI. Optional for backward-compat with older callers. */
   terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded";
+  /** Per-loop LLM token usage. For subagent loops this is serialized into the
+   *  Task tool result so the parent can enforce the combined Phase H.7 cap. */
+  tokenUsage?: SubagentTokenUsage;
   /** Phase J.3.1: staging snapshot captured before rollback discarded it.
    *  Only populated when verificationReason === "verification_regressed".
    *  Keyed by absolute path; values are the content the agent attempted to
@@ -150,6 +162,33 @@ export const ESCALATION_BONUS_ITERATIONS = 5;
 export const TOKEN_BUDGET_CAP = 800_000;
 export const TOKEN_BUDGET_WARN = 0.8;
 export const TOKEN_BUDGET_HARD = 0.95;
+
+function cleanTokenNumber(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function extractTokenUsageForBudget(rawUsage: unknown): Omit<SubagentTokenUsage, "perIter"> {
+  if (!rawUsage || typeof rawUsage !== "object") {
+    return { input: 0, output: 0, cached: 0, total: 0 };
+  }
+  const usage = rawUsage as Record<string, unknown>;
+  const promptTokenDetails =
+    usage.prompt_tokens_details && typeof usage.prompt_tokens_details === "object"
+      ? (usage.prompt_tokens_details as Record<string, unknown>)
+      : null;
+  const input = cleanTokenNumber(usage.prompt_tokens ?? usage.input_tokens);
+  const output = cleanTokenNumber(usage.completion_tokens ?? usage.output_tokens);
+  const cached = cleanTokenNumber(
+    promptTokenDetails?.cached_tokens ?? usage.cache_read_input_tokens
+  );
+  return {
+    input,
+    output,
+    cached,
+    total: input + output,
+  };
+}
 
 function getZoneToolName(tool: (typeof ZONE_TOOLS)[number]): string {
   return (
@@ -1844,10 +1883,124 @@ Example first call (immediately after task framing):
   const client = createLLMClient({ apiKey: input.userApiKey });
   const requestCtx = getRequestContext();
   let iterCostAccumulator: IterCostAccumulator = emptyIterCostAccumulator();
+  let loopTokenUsage: SubagentTokenUsage = emptySubagentTokenUsage();
+  let subagentTokenTotal = 0;
+  const tokenBudgetBaseTokens = cleanTokenNumber(input.tokenBudgetBaseTokens);
   // Usage recording is centralized in RecordingLLMClient (src/llm/recordingClient.ts):
   // every chat completion across the codebase appends one JSONL record. agentLoop
   // used to accumulate-then-record-on-exit, but that double-counted with the wrapper
   // and missed every other LLM call site (planner, intent, final report, etc.).
+
+  const mainAgentTokens = (): number =>
+    iterCostAccumulator.input_uncached +
+    iterCostAccumulator.cache_read +
+    iterCostAccumulator.cache_write +
+    iterCostAccumulator.output;
+
+  const cumulativeTokens = (): number =>
+    tokenBudgetBaseTokens + mainAgentTokens() + subagentTokenTotal;
+
+  const currentTokenUsage = (): SubagentTokenUsage => ({
+    input: loopTokenUsage.input,
+    output: loopTokenUsage.output,
+    cached: loopTokenUsage.cached,
+    total: loopTokenUsage.total,
+    perIter: [...(loopTokenUsage.perIter ?? [])],
+  });
+
+  const emitTokenBudgetStatus = (iterNumber: number): number => {
+    const mainTokens = mainAgentTokens();
+    const totalTokens = tokenBudgetBaseTokens + mainTokens + subagentTokenTotal;
+    const breakdown = input.subagent
+      ? {
+          mainAgent: tokenBudgetBaseTokens,
+          subagents: mainTokens + subagentTokenTotal,
+        }
+      : {
+          mainAgent: tokenBudgetBaseTokens + mainTokens,
+          subagents: subagentTokenTotal,
+        };
+    const tokenBudgetRatio =
+      TOKEN_BUDGET_CAP > 0 ? totalTokens / TOKEN_BUDGET_CAP : 0;
+    debugLog("[zone-token-budget]", JSON.stringify({
+      iter: iterNumber,
+      cumulativeTokens: totalTokens,
+      cap: TOKEN_BUDGET_CAP,
+      ratio: Number(tokenBudgetRatio.toFixed(3)),
+      breakdown,
+    }));
+    if (typeof input.runId === "string" && input.runId.trim()) {
+      input.onStructuredEvent?.({
+        type: "token_budget_status",
+        title: "Token budget",
+        cumulativeTokens: totalTokens,
+        tokenBudgetCap: TOKEN_BUDGET_CAP,
+        tokenBudgetRatio,
+        iter: iterNumber,
+        breakdown,
+        status:
+          tokenBudgetRatio >= TOKEN_BUDGET_HARD
+            ? "error"
+            : tokenBudgetRatio >= TOKEN_BUDGET_WARN
+              ? "warning"
+              : "active",
+      });
+    }
+    return tokenBudgetRatio;
+  };
+
+  const synthesizeTokenBudgetExit = async (
+    iterNumber: number,
+    messages: ChatCompletionMessageParam[]
+  ): Promise<AgentLoopResult> => {
+    const tokensAtExit = cumulativeTokens();
+    input.onProgress?.(
+      `[agent_loop] Token budget reached (${tokensAtExit}/${TOKEN_BUDGET_CAP}) — synthesizing final answer`
+    );
+    let finalSummary =
+      "Token budget reached before a final answer was produced.";
+    try {
+      const wrapupResponse = await client.createChatCompletion(
+        {
+          model: getModelName("high", client.provider, requestCtx?.modelOverride),
+          messages: [
+            ...messages,
+            {
+              role: "user",
+              content:
+                "You have reached the token budget for this run. " +
+                "Stop calling tools and synthesize your findings into a final answer " +
+                "using only the information already gathered. " +
+                "If insufficient information was gathered, say so explicitly. " +
+                (isInvestigationMode
+                  ? "Do not mention patches or verification."
+                  : "Mention which steps remain incomplete."),
+            },
+          ],
+        },
+        { signal: input.abortSignal }
+      );
+      const ae = extractResponsesApiOutputText(wrapupResponse);
+      if (ae.ok && ae.text.trim()) finalSummary = ae.text.trim();
+    } catch {
+      // Use fallback summary.
+    }
+    debugLog("[zone-token-budget-exit]", JSON.stringify({
+      iter: iterNumber,
+      cumulativeTokens: tokensAtExit,
+      finalTextLength: finalSummary.length,
+    }));
+    return {
+      success: false,
+      summary: finalSummary,
+      toolCallLog,
+      filesModified: Array.from(filesModified),
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted",
+      terminationReason: "token_budget_exceeded",
+      tokenUsage: currentTokenUsage(),
+    };
+  };
 
   const throwIfAborted = (stage: string): void => {
     if (input.abortSignal?.aborted) {
@@ -1898,8 +2051,28 @@ Example first call (immediately after task framing):
       iter,
       abortAlready: input.abortSignal?.aborted ?? false,
     });
+    const rawUsage = (response as { usage?: unknown }).usage;
+    const tokenUsageThisIter = extractTokenUsageForBudget(rawUsage);
+    if (tokenUsageThisIter.total > 0) {
+      loopTokenUsage = {
+        input: loopTokenUsage.input + tokenUsageThisIter.input,
+        output: loopTokenUsage.output + tokenUsageThisIter.output,
+        cached: loopTokenUsage.cached + tokenUsageThisIter.cached,
+        total: loopTokenUsage.total + tokenUsageThisIter.total,
+        perIter: [...(loopTokenUsage.perIter ?? []), tokenUsageThisIter.total],
+      };
+      if (input.subagent) {
+        log("[zone-worker-token]", JSON.stringify({
+          subagentId: input.subagent.id,
+          parentRunId: input.subagent.parentRunId,
+          iter,
+          iterTotal: tokenUsageThisIter.total,
+          cumulativeTotal: loopTokenUsage.total,
+        }));
+      }
+    }
     try {
-      const usage = extractUsage((response as { usage?: unknown }).usage);
+      const usage = extractUsage(rawUsage);
       const runId = typeof input.runId === "string" ? input.runId.trim() : "";
       if (usage && runId) {
         const update = buildIterCostUpdate({
@@ -1941,82 +2114,10 @@ Example first call (immediately after task framing):
     // output) and compares against TOKEN_BUDGET_CAP. Once usage crosses
     // TOKEN_BUDGET_HARD (95%), the loop terminates gracefully via a final
     // no-tools synthesis call.
-    const cumulativeTokens =
-      iterCostAccumulator.input_uncached +
-      iterCostAccumulator.cache_read +
-      iterCostAccumulator.cache_write +
-      iterCostAccumulator.output;
-    const tokenBudgetRatio =
-      TOKEN_BUDGET_CAP > 0 ? cumulativeTokens / TOKEN_BUDGET_CAP : 0;
-    debugLog("[zone-token-budget]", JSON.stringify({
-      iter: iter + 1,
-      cumulativeTokens,
-      cap: TOKEN_BUDGET_CAP,
-      ratio: Number(tokenBudgetRatio.toFixed(3)),
-    }));
-    if (typeof input.runId === "string" && input.runId.trim()) {
-      input.onStructuredEvent?.({
-        type: "token_budget_status",
-        title: "Token budget",
-        cumulativeTokens,
-        tokenBudgetCap: TOKEN_BUDGET_CAP,
-        tokenBudgetRatio,
-        iter: iter + 1,
-        status:
-          tokenBudgetRatio >= TOKEN_BUDGET_HARD
-            ? "error"
-            : tokenBudgetRatio >= TOKEN_BUDGET_WARN
-              ? "warning"
-              : "active",
-      });
-    }
+    const tokenBudgetRatio = emitTokenBudgetStatus(iter + 1);
 
     if (tokenBudgetRatio >= TOKEN_BUDGET_HARD) {
-      input.onProgress?.(
-        `[agent_loop] Token budget reached (${cumulativeTokens}/${TOKEN_BUDGET_CAP}) — synthesizing final answer`
-      );
-      let finalSummary =
-        "Token budget reached before a final answer was produced.";
-      try {
-        const wrapupResponse = await client.createChatCompletion(
-          {
-            model: getModelName("high", client.provider, requestCtx?.modelOverride),
-            messages: [
-              ...responseInput,
-              {
-                role: "user",
-                content:
-                  "You have reached the token budget for this run. " +
-                  "Stop calling tools and synthesize your findings into a final answer " +
-                  "using only the information already gathered. " +
-                  "If insufficient information was gathered, say so explicitly. " +
-                  (isInvestigationMode
-                    ? "Do not mention patches or verification."
-                    : "Mention which steps remain incomplete."),
-              },
-            ],
-          },
-          { signal: input.abortSignal }
-        );
-        const ae = extractResponsesApiOutputText(wrapupResponse);
-        if (ae.ok && ae.text.trim()) finalSummary = ae.text.trim();
-      } catch {
-        // Use fallback summary
-      }
-      debugLog("[zone-token-budget-exit]", JSON.stringify({
-        iter: iter + 1,
-        cumulativeTokens,
-        finalTextLength: finalSummary.length,
-      }));
-      return {
-        success: false,
-        summary: finalSummary,
-        toolCallLog,
-        filesModified: Array.from(filesModified),
-        patchValidatedByAgent: false,
-        verificationReason: "no_verification_attempted",
-        terminationReason: "token_budget_exceeded",
-      };
+      return await synthesizeTokenBudgetExit(iter + 1, responseInput);
     }
 
     throwIfAborted("after_llm");
@@ -2275,6 +2376,7 @@ Example first call (immediately after task framing):
           onToolCall: input.onToolCall,
           onToolResult: input.onToolResult,
           onStructuredEvent: input.onStructuredEvent,
+          tokenBudgetBaseTokens: name === "Task" ? cumulativeTokens() : undefined,
           visualScreenshotCount: toolCallLog.filter(
             (entry) => entry.tool === "verify_visual" && entry.success === true
           ).length,
@@ -2344,12 +2446,38 @@ Example first call (immediately after task framing):
         }
         if (name === "Task" && result.success) {
           try {
-            const parsed = JSON.parse(result.output) as { filesModified?: unknown };
+            const parsed = JSON.parse(result.output) as Partial<SubagentResult>;
             if (Array.isArray(parsed.filesModified)) {
               for (const filePath of parsed.filesModified) {
                 if (typeof filePath === "string" && filePath.trim()) {
                   filesModified.add(filePath.trim());
                 }
+              }
+            }
+            const tokenUsage = parsed.tokenUsage;
+            const subagentTotal = cleanTokenNumber(tokenUsage?.total);
+            if (subagentTotal > 0) {
+              subagentTokenTotal += subagentTotal;
+              const mainTokensAfter = mainAgentTokens();
+              const cumulativeAfter = mainTokensAfter + subagentTokenTotal;
+              log("[zone-subagent-token-propagated]", JSON.stringify({
+                mainRunId: input.runId,
+                subagentId: parsed.subagentId,
+                subagentTotal,
+                subagentInput: cleanTokenNumber(tokenUsage?.input),
+                subagentOutput: cleanTokenNumber(tokenUsage?.output),
+                mainCumulativeAfter: cumulativeAfter,
+                cap: TOKEN_BUDGET_CAP,
+                ratio: TOKEN_BUDGET_CAP > 0 ? cumulativeAfter / TOKEN_BUDGET_CAP : 0,
+              }));
+              const ratioAfterTask = emitTokenBudgetStatus(iter + 1);
+              if (ratioAfterTask >= TOKEN_BUDGET_HARD) {
+                responseInput.push({
+                  role: "tool",
+                  tool_call_id: callId,
+                  content: result.output,
+                });
+                return await synthesizeTokenBudgetExit(iter + 1, responseInput);
               }
             }
           } catch {
@@ -2551,6 +2679,7 @@ Example first call (immediately after task framing):
           patchValidatedByAgent: false,
           verificationReason: "no_verification_attempted",
           terminationReason: "natural_completion",
+          tokenUsage: currentTokenUsage(),
         };
       }
       const vrMatch = finalText.match(/\[ZONE_VERIFICATION:\s*([\w_]+)\]/i);
@@ -2710,6 +2839,7 @@ Example first call (immediately after task framing):
         patchValidatedByAgent,
         verificationReason,
         terminationReason: "natural_completion",
+        tokenUsage: currentTokenUsage(),
         // Phase J.3.1: forward the staging snapshot so runLlmPatchFlow can
         // render the rolled-back diff. Only meaningful when
         // verificationReason === "verification_regressed".
@@ -2754,6 +2884,7 @@ Example first call (immediately after task framing):
       patchValidatedByAgent: false,
       verificationReason: "no_verification_attempted",
       terminationReason: "max_iterations",
+      tokenUsage: currentTokenUsage(),
     };
   }
 
@@ -2968,6 +3099,7 @@ Example first call (immediately after task framing):
     patchValidatedByAgent,
     verificationReason: finalVerificationReason,
     terminationReason: "max_iterations",
+    tokenUsage: currentTokenUsage(),
     // Phase J.3.1: forward the staging snapshot for the rolled-back diff
     // when maxiter ended with a regressed-verification rollback.
     ...(finalizeResult.discardedStaging

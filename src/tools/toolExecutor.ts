@@ -451,6 +451,7 @@ export async function executeTool(
     onToolResult?: (name: string, result: ToolResult) => void;
     onStructuredEvent?: (evt: unknown) => void;
     visualScreenshotCount?: number;
+    tokenBudgetBaseTokens?: number;
   }
 ): Promise<ToolResult> {
   const args = (toolArgs ?? {}) as Record<string, unknown>;
@@ -561,13 +562,14 @@ export async function executeTool(
             onToolCall: input?.onToolCall,
             onToolResult: input?.onToolResult,
             onStructuredEvent: input?.onStructuredEvent,
+            tokenBudgetBaseTokens: input?.tokenBudgetBaseTokens,
           })
       );
 
       const result =
         resolvedType === "explore"
-          ? formatExploreSubagentToolResultForParent(subagentResult, subagentId)
-          : formatSubagentToolResultForParent(subagentResult, subagentId);
+          ? formatExploreSubagentToolResultForParent(subagentResult, subagentId, parentRunId)
+          : formatSubagentToolResultForParent(subagentResult, subagentId, parentRunId);
       let subagentStatus: "completed" | "partial" | "failed" = subagentResult.success
         ? "completed"
         : "failed";

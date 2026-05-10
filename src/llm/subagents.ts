@@ -78,13 +78,75 @@ export function resetSubagentCallCount(parentRunId: string): void {
 
 export interface SubagentSummary {
   subagentId: string;
-  status: "completed" | "failed" | "partial";
+  parentRunId: string;
+  status:
+    | "completed"
+    | "failed"
+    | "partial"
+    | "max_iterations"
+    | "token_budget_exceeded";
   summary: string;
+  tokenUsage: SubagentTokenUsage;
   filesModified: string[];
   notes?: string;
 }
 
+export interface SubagentTokenUsage {
+  input: number;
+  output: number;
+  cached: number;
+  total: number;
+  perIter?: number[];
+}
+
+export interface SubagentResult extends SubagentSummary {}
+
 const SUMMARY_MAX_CHARS = 500;
+
+export function emptySubagentTokenUsage(): SubagentTokenUsage {
+  return {
+    input: 0,
+    output: 0,
+    cached: 0,
+    total: 0,
+    perIter: [],
+  };
+}
+
+function normalizeTokenUsage(raw: unknown): SubagentTokenUsage {
+  if (!raw || typeof raw !== "object") return emptySubagentTokenUsage();
+  const usage = raw as Record<string, unknown>;
+  const input = Math.max(0, Number(usage.input ?? 0) || 0);
+  const output = Math.max(0, Number(usage.output ?? 0) || 0);
+  const cached = Math.max(0, Number(usage.cached ?? 0) || 0);
+  const total = Math.max(0, Number(usage.total ?? input + output) || 0);
+  const perIter = Array.isArray(usage.perIter)
+    ? usage.perIter
+        .map((value) => Math.max(0, Number(value ?? 0) || 0))
+        .filter((value) => value > 0)
+    : [];
+  return {
+    input,
+    output,
+    cached,
+    total,
+    perIter,
+  };
+}
+
+function statusFromAgentResult(
+  result: AgentLoopResult,
+  parsedStatus: SubagentSummary["status"] | "success"
+): SubagentSummary["status"] {
+  if (result.terminationReason === "token_budget_exceeded") {
+    return "token_budget_exceeded";
+  }
+  if (result.terminationReason === "max_iterations" && !result.success) {
+    return "max_iterations";
+  }
+  if (!result.success) return "failed";
+  return parsedStatus === "success" ? "completed" : parsedStatus;
+}
 
 function truncateSummary(text: string): string {
   const trimmed = String(text || "").trim();
@@ -133,15 +195,16 @@ export function parseWorkerSummary(rawSummary: string): {
 
 export function formatSubagentSummaryForParent(
   result: AgentLoopResult,
-  subagentId: string
+  subagentId: string,
+  parentRunId = ""
 ): string {
   const parsed = parseWorkerSummary(result.summary ?? "");
-  const parsedStatus =
-    parsed.status === "success" ? "completed" : parsed.status;
   const summary: SubagentSummary = {
     subagentId,
-    status: result.success ? parsedStatus : "failed",
+    parentRunId,
+    status: statusFromAgentResult(result, parsed.status),
     summary: parsed.summary || result.summary || "(no summary)",
+    tokenUsage: normalizeTokenUsage(result.tokenUsage),
     filesModified:
       parsed.filesModified.length > 0 ? parsed.filesModified : result.filesModified ?? [],
     notes: parsed.notes,
@@ -151,11 +214,12 @@ export function formatSubagentSummaryForParent(
 
 export function formatSubagentToolResultForParent(
   result: AgentLoopResult,
-  subagentId: string
+  subagentId: string,
+  parentRunId = ""
 ): { success: true; output: string } {
   return {
     success: true,
-    output: formatSubagentSummaryForParent(result, subagentId),
+    output: formatSubagentSummaryForParent(result, subagentId, parentRunId),
   };
 }
 
@@ -221,13 +285,16 @@ export function parseExploreSummary(rawOutput: string): ExploreSummary {
 
 export function formatExploreSubagentSummaryForParent(
   result: AgentLoopResult,
-  subagentId: string
+  subagentId: string,
+  parentRunId = ""
 ): string {
   const parsed = parseExploreSummary(result.summary ?? "");
   const payload = {
     subagentId,
-    status: result.success ? parsed.status : "failed",
+    parentRunId,
+    status: statusFromAgentResult(result, parsed.status),
     summary: parsed.summary || result.summary || "(no summary)",
+    tokenUsage: normalizeTokenUsage(result.tokenUsage),
     findings: parsed.findings,
   };
   return JSON.stringify(payload);
@@ -235,10 +302,11 @@ export function formatExploreSubagentSummaryForParent(
 
 export function formatExploreSubagentToolResultForParent(
   result: AgentLoopResult,
-  subagentId: string
+  subagentId: string,
+  parentRunId = ""
 ): { success: true; output: string } {
   return {
     success: true,
-    output: formatExploreSubagentSummaryForParent(result, subagentId),
+    output: formatExploreSubagentSummaryForParent(result, subagentId, parentRunId),
   };
 }
