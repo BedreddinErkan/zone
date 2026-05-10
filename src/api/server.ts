@@ -21,6 +21,7 @@ import { invalidateDevServerCache } from "../visual/devServerProbe.js";
 import {
   isIrrelevantDeveloperContextPath,
   runLlmPatchFlow,
+  toPublicLlmPatchResponse,
 } from "../core/runLlmPatchFlow.js";
 import { parseTaskIntent } from "../core/taskIntentParser.js";
 import { applyLlmPatches } from "../core/applyLlmPatches.js";
@@ -3270,6 +3271,18 @@ app.post("/api/patch", async (req, res) => {
     // After refresh, the original HTTP response is orphaned. Emit the final result via SSE too.
     const finalCostUsd = runIdStr ? getRunCost(userId ?? "", runIdStr) : 0;
     const resultWithCost = { ...(result as Record<string, unknown>), costUsd: finalCostUsd };
+    // Phase J.4: full internal context preserved for [zone-patch-result] log
+    // (debug observability), public response strips heuristic-only fields.
+    const publicResultWithCost = toPublicLlmPatchResponse(resultWithCost);
+    const _resultRecord = resultWithCost as Record<string, unknown>;
+    debugLog("[zone-patch-result]", JSON.stringify({
+      runId: runIdStr || null,
+      decisionMode: _resultRecord.decisionMode,
+      verificationReason: _resultRecord.verificationReason,
+      developerConfidence: _resultRecord.developerConfidence,
+      tokenBudgetExceeded: _resultRecord.tokenBudgetExceeded,
+      rolledBack: _resultRecord.decisionMode === "rolled_back",
+    }));
     try {
       if (runIdStr) {
         emitDeveloperPatchProgress(runIdStr, {
@@ -3280,13 +3293,13 @@ app.post("/api/patch", async (req, res) => {
             type: "run_completed_with_result",
             title: "Run completed",
             status: "success",
-            result: resultWithCost,
+            result: publicResultWithCost,
             costUsd: finalCostUsd,
           } as any,
         });
       }
     } catch {}
-    res.json(resultWithCost);
+    res.json(publicResultWithCost);
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       perf.finish("cancelled");
@@ -3821,7 +3834,15 @@ const loggedConversationId = await logRun({
         (result as Record<string, unknown>).conversationId = loggedConversationId;
       }
     }
-    res.json(result);
+    // Phase J.4: same internal-only stripping as /api/patch.
+    debugLog("[zone-patch-result]", JSON.stringify({
+      route: "/api/test-engineer",
+      runId: typeof runId === "string" ? runId : null,
+      decisionMode: (result as Record<string, unknown>).decisionMode,
+      verificationReason: (result as Record<string, unknown>).verificationReason,
+      developerConfidence: (result as Record<string, unknown>).developerConfidence,
+    }));
+    res.json(toPublicLlmPatchResponse(result as Record<string, unknown>));
   } catch (err) {
     emitProgress(runId, "Ready");
     res.status(500).json({
@@ -3927,7 +3948,14 @@ const result = await runDataAnalystFlow({
         (result as Record<string, unknown>).conversationId = loggedConversationId;
       }
     }
-    res.json(result);
+    // Phase J.4: strip internal-only fields from the public response.
+    debugLog("[zone-patch-result]", JSON.stringify({
+      route: "/api/data-analyst",
+      runId: typeof runId === "string" ? runId : null,
+      decisionMode: (result as Record<string, unknown>).decisionMode,
+      confidence: (result as { confidence?: number }).confidence,
+    }));
+    res.json(toPublicLlmPatchResponse(result as Record<string, unknown>));
   } catch (err) {
     emitProgress(runId, "Ready");
     res.status(500).json({

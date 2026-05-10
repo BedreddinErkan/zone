@@ -68,9 +68,9 @@ function buildDecisionPath(input: {
 
   path.push(`Total risk score: ${input.riskScore}`);
 
+  // Phase J.4: dropped preview_only entry — RunAgentMode narrowed.
   const modeLabel: Record<RunAgentMode, string> = {
     blocked: "BLOCKED",
-    preview_only: "PREVIEW_ONLY",
     safe_to_apply: "SAFE_TO_APPLY"
   };
 
@@ -117,23 +117,15 @@ function buildDecisionFactors(input: {
   riskScore: number;
   signals: string[];
 }): RunAgentTrace["decisionFactors"] {
+  // Phase J.4: dropped preview_only entry — RunAgentMode narrowed. The
+  // soft-signal triggeredBy logic that fired in the old preview_only path
+  // is gone (signals still surface via reasonCodes / topRisks).
   const thresholdMap: Record<RunAgentMode, number> = {
     blocked: 71,
-    preview_only: 31,
     safe_to_apply: 0
   };
 
-  let triggeredBy: string[];
-
-  if (input.riskScore >= 71) {
-    triggeredBy = ["riskScore"];
-  } else if (input.mode === "preview_only") {
-    triggeredBy = input.signals.filter((signal) =>
-      ["schema", "critical_domain", "mass_scope"].includes(signal)
-    );
-  } else {
-    triggeredBy = [];
-  }
+  const triggeredBy: string[] = input.riskScore >= 71 ? ["riskScore"] : [];
 
   return {
     riskThreshold: thresholdMap[input.mode],

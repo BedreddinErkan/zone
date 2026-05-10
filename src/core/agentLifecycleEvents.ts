@@ -79,7 +79,9 @@ export type RunSummaryPayload = {
     commands: VerificationCommand[];
     // Phase J.3: "rolled_back" added when post-apply verification regressed;
     // the run summary still surfaces the verification reason and command log.
-    decisionMode: "safe_to_apply" | "preview_only" | "rolled_back";
+    // Phase J.4: dropped "preview_only" — J.1 collapsed it into safe_to_apply
+    // and the derived value never lands on preview_only anymore.
+    decisionMode: "safe_to_apply" | "rolled_back";
   };
   cost: {
     totalUsd: number;

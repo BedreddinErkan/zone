@@ -160,8 +160,12 @@ export type LlmPatchFlowResult =
       };
       reason?: string;
       patchSource?: PatchSource;
-      decisionMode?: "preview_only" | "safe_to_apply" | "blocked" | "chat" | "rolled_back";
-      finalState?: "preview_only" | "safe_to_apply" | "blocked" | "chat" | "rolled_back";
+      // Phase J.4: dropped "preview_only" (J.1 collapsed it into safe_to_apply).
+      // The four live values: safe_to_apply (default success), blocked
+      // (security violation), rolled_back (J.3 verification regression),
+      // chat (non-patch conversational flow).
+      decisionMode?: "safe_to_apply" | "blocked" | "chat" | "rolled_back";
+      finalState?: "safe_to_apply" | "blocked" | "chat" | "rolled_back";
       /** Phase H.7: agent loop terminated at token-budget hard limit (95%
        *  of TOKEN_BUDGET_CAP). UI shows "Token budget reached" pill. The
        *  patch verdict still reflects whatever was produced before exit. */
@@ -244,6 +248,57 @@ export type LlmPatchFlowResult =
       lifecycleEvents?: AgentLifecycleEvent[];
       finalRunReport?: FinalRunReport;
     };
+
+// Phase J.4: fields kept inside the result shape for log/observability but
+// stripped from the public HTTP response. After J.1 collapsed preview_only
+// into safe_to_apply, none of these gate UI behavior — they live on as
+// internal context for [zone-patch-result] / [zone-decision-mode] traces
+// and the run summary persisted to storage. The CLI doesn't read them.
+const J4_INTERNAL_ONLY_FIELDS = [
+  "developerConfidence",
+  "developerRisk",
+  "intentMismatch",
+  "patchQuality",
+  "patchQualitySummary",
+  "designSystemSignals",
+  "safetyResolution",
+  "microEditProtection",
+  "verificationReason",
+  "verificationNote",
+  "verificationCommands",
+  "verificationStatus",
+  "verification",
+  "runtimeVerification",
+  "verificationAttempts",
+  "repairAttempts",
+  "finalVerificationFailure",
+  "attemptsUsed",
+  "plan",
+  "planAlignment",
+  "finalExecutionOutcome",
+  "resultState",
+  "validationBlocked",
+] as const;
+
+/**
+ * Phase J.4 — return only the public-shape fields to the HTTP client. The
+ * `result` object passed in keeps all its keys for logging upstream; this
+ * helper produces a sibling shape with the heuristic / observability-only
+ * fields removed before `res.json(...)` ships it.
+ *
+ * Failure responses (`ok: false`) are returned untouched — they only carry
+ * `{ ok, reason, lifecycleEvents?, finalRunReport? }` to start with.
+ */
+export function toPublicLlmPatchResponse(
+  result: Record<string, unknown>
+): Record<string, unknown> {
+  if (!result || result.ok !== true) return result;
+  const out: Record<string, unknown> = { ...result };
+  for (const field of J4_INTERNAL_ONLY_FIELDS) {
+    if (field in out) delete out[field];
+  }
+  return out;
+}
 
 type PatchSource =
   | "llm_patch"
@@ -422,17 +477,13 @@ function assembleRunSummary(input: {
   const reason = String(
     input.verificationReason || RUN_SUMMARY_DEFAULT_VERIFICATION_REASON
   ) as VerificationReason;
-  // Phase J.3: rolled_back is conceptually closer to preview_only here
-  // (no patch was committed) — the structured run summary fans out to
-  // analytics consumers expecting the binary safe_to_apply / preview_only
-  // signal, so map "rolled_back" to "rolled_back" upstream and keep the
-  // legacy two-value summary collapse for everything else.
-  const decisionMode =
-    input.decisionMode === "safe_to_apply"
-      ? "safe_to_apply"
-      : input.decisionMode === "rolled_back"
-        ? "rolled_back"
-        : "preview_only";
+  // Phase J.4: RunSummaryPayload.verification.decisionMode narrowed to
+  // "safe_to_apply" | "rolled_back" (no preview_only after J.1's collapse).
+  // Anything that isn't an explicit rolled_back is reported as safe_to_apply
+  // for the structured run summary — the verbose verificationReason / note
+  // alongside still carries the nuance.
+  const decisionMode: "safe_to_apply" | "rolled_back" =
+    input.decisionMode === "rolled_back" ? "rolled_back" : "safe_to_apply";
   const totalUsd = Number(input.totalUsd ?? 0) || 0;
   const iterCount = Number(input.iterCost?.iter_count ?? 0) || 0;
   const cacheHitPct =

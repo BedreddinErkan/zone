@@ -63,27 +63,10 @@ export function buildDecisionReasonCodes(
     }
   }
 
-  if (input.mode === "preview_only") {
-    if (signalTypes.has("destructive")) {
-      codes.add("PREVIEW_DESTRUCTIVE_SIGNAL");
-    }
-
-    if (signalTypes.has("schema")) {
-      codes.add("PREVIEW_SCHEMA_UNCERTAINTY");
-    }
-
-    if (signalTypes.has("critical")) {
-      codes.add("PREVIEW_CRITICAL_SIGNAL");
-    }
-
-    if (signalTypes.has("massScope")) {
-      codes.add("PREVIEW_MASS_SCOPE_CHANGE");
-    }
-
-    if (input.confidenceScore < 70) {
-      codes.add("PREVIEW_LOW_CONFIDENCE");
-    }
-  }
+  // Phase J.4: removed the preview_only branch — RunAgentMode no longer
+  // includes that variant after the J.1 collapse. The PREVIEW_* reason
+  // codes remain in REASON_CODE_PRIORITY for legacy fixtures but are no
+  // longer emitted by this generator.
 
   if (input.mode === "safe_to_apply") {
     if (signalTypes.has("lowRisk")) {
