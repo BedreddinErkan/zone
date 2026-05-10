@@ -33,17 +33,33 @@ export const TIER_LIMITS: Record<TaskTier, TierLimits> = {
   },
 };
 
+export interface ResolveTierOptions {
+  /** Per-request tier override — takes priority over ZONE_FORCE_TIER env var. */
+  forceTierOverride?: TaskTier;
+}
+
 /**
  * Resolves tier limits from a classification result.
  *
  * Priority (highest first):
- *   1. ZONE_FORCE_TIER env var — testing bypass, returns raw TIER_LIMITS entry (no user overrides)
- *   2. User overrides from ~/.zone/tier-limits.json — merged on top of TIER_LIMITS defaults
- *   3. TIER_LIMITS defaults — used when no classification or no user override
+ *   1. options.forceTierOverride — per-request override (sweep, API caller)
+ *   2. ZONE_FORCE_TIER env var — server-level testing bypass (no user overrides)
+ *   3. User overrides from ~/.zone/tier-limits.json — merged on top of TIER_LIMITS defaults
+ *   4. TIER_LIMITS defaults — used when no classification or no user override
  *
  * taskToolAllowed is NEVER user-overridable — it is a system-level guarantee.
  */
-export function resolveTierLimits(classification?: TaskClassification | null): TierLimits {
+export function resolveTierLimits(
+  classification?: TaskClassification | null,
+  options: ResolveTierOptions = {}
+): TierLimits {
+  if (
+    options.forceTierOverride &&
+    Object.prototype.hasOwnProperty.call(TIER_LIMITS, options.forceTierOverride)
+  ) {
+    return TIER_LIMITS[options.forceTierOverride];
+  }
+
   const forceTier = process.env["ZONE_FORCE_TIER"] as TaskTier | undefined;
   if (forceTier && Object.prototype.hasOwnProperty.call(TIER_LIMITS, forceTier)) {
     return TIER_LIMITS[forceTier];

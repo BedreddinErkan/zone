@@ -2797,7 +2797,12 @@ app.post("/api/patch", async (req, res) => {
     conversationId,
     lastChangedFiles,
     lastAddedFunctions,
+    forceTier: rawForceTier,
   } = req.body ?? {};
+  const VALID_TIERS = ["simple", "medium", "complex"] as const;
+  const forceTier = typeof rawForceTier === "string" && (VALID_TIERS as readonly string[]).includes(rawForceTier)
+    ? (rawForceTier as "simple" | "medium" | "complex")
+    : undefined;
   debugLog("[debug-mem] received lastChangedFiles:", lastChangedFiles);
   const hostedContext =
     process.env.NODE_ENV === "production"
@@ -3207,6 +3212,7 @@ app.post("/api/patch", async (req, res) => {
       abortSignal: patchAbort?.signal,
       userApiKey: userApiKey || undefined,
       provider: byokProvider,
+      forceTier,
     });
     perf.mark("core patch flow complete");
 

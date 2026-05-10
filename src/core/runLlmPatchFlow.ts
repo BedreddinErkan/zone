@@ -97,6 +97,7 @@ import { computeWorkerMaxIterations } from "../llm/subagents.js";
 import {
   classifyTask,
   type TaskClassification,
+  type TaskTier,
 } from "../llm/taskClassifier.js";
 import { getRunCost } from "../usage/usageTracker.js";
 import {
@@ -4537,6 +4538,8 @@ export async function runLlmPatchFlow(input: {
    */
   userApiKey?: string;
   provider?: LLMProvider;
+  /** L.4.1: per-request tier override forwarded from API body. Beats ZONE_FORCE_TIER env. */
+  forceTier?: TaskTier;
 }): Promise<LlmPatchFlowResult> {
   attachRunIdentity({ userId: input.userId, runId: input.runId });
   // Phase H.7: outer-scope flag survives past the inner block where `loop`
@@ -5641,6 +5644,7 @@ const initializeTodosFromPlan = (): void => {
       repoFilePaths: developerContextFiles.map((f) => f.path),
       maxIterations: iterBudgetComputed,
       taskClassification,
+      forceTier: input.forceTier,
       ...agentLoopCallbacks,
     };
 

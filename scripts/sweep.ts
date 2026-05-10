@@ -131,11 +131,12 @@ function evaluateExpected(task: SweepTask, res: PatchResponse, costUsd: number):
 async function dispatchTask(task: SweepTask): Promise<SweepResult> {
   const startTime = Date.now();
 
-  const body = {
+  const body: Record<string, unknown> = {
     task: task.description,
     repoPath: REPO_PATH,
     userId: USER_ID,
     runId: `sweep-${task.id}-${Date.now()}`,
+    ...(task.tier_forced ? { forceTier: task.tier_forced } : {}),
   };
 
   let res: Response;

@@ -22,7 +22,7 @@ import {
   type SubagentResult,
   type SubagentTokenUsage,
 } from "./subagents.js";
-import type { TaskClassification } from "./taskClassifier.js";
+import type { TaskClassification, TaskTier } from "./taskClassifier.js";
 import { resolveTierLimits } from "./tierLimits.js";
 import { extractUsage } from "./recordingClient.js";
 import {
@@ -109,6 +109,8 @@ export interface AgentLoopInput {
   /** L.2: task classification from pre-dispatch classifier. Used to resolve
    *  tier-based tool exposure and budget caps. Absent for subagent loops. */
   taskClassification?: TaskClassification | null;
+  /** L.4.1: per-request tier override from API caller (beats ZONE_FORCE_TIER env). */
+  forceTier?: TaskTier;
 }
 
 export type VerificationReason =
@@ -1756,7 +1758,9 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   // L.2: tier-based tool exposure. Subagent loops skip tier gating — they
   // inherit the parent's constraints via allowedTools / tokenBudgetBaseTokens.
   const isSubagentLoop = input.subagent !== undefined;
-  const tierLimits = isSubagentLoop ? null : resolveTierLimits(input.taskClassification);
+  const tierLimits = isSubagentLoop
+    ? null
+    : resolveTierLimits(input.taskClassification, { forceTierOverride: input.forceTier });
 
   if (tierLimits) {
     if (!tierLimits.taskToolAllowed) {

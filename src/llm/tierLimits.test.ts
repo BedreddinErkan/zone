@@ -104,6 +104,26 @@ describe("resolveTierLimits", () => {
     process.env["ZONE_FORCE_TIER"] = "bogus";
     expect(resolveTierLimits(null)).toBe(TIER_LIMITS.medium);
   });
+
+  it("per-request forceTierOverride beats ZONE_FORCE_TIER env", () => {
+    process.env["ZONE_FORCE_TIER"] = "complex";
+    const limits = resolveTierLimits(makeClassification("medium"), { forceTierOverride: "simple" });
+    expect(limits).toBe(TIER_LIMITS.simple);
+  });
+
+  it("ZONE_FORCE_TIER env is used when no per-request forceTierOverride is set", () => {
+    process.env["ZONE_FORCE_TIER"] = "complex";
+    const limits = resolveTierLimits(makeClassification("medium"));
+    expect(limits).toBe(TIER_LIMITS.complex);
+  });
+
+  it("ignores an invalid forceTierOverride and falls through to env/classification", () => {
+    process.env["ZONE_FORCE_TIER"] = "simple";
+    const limits = resolveTierLimits(makeClassification("medium"), {
+      forceTierOverride: "bogus" as "simple",
+    });
+    expect(limits).toBe(TIER_LIMITS.simple); // env takes over
+  });
 });
 
 describe("L.3: resolveTierLimits with user overrides", () => {
