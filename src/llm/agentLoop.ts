@@ -1766,6 +1766,16 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     if (tierLimits.iterCap < iterationBudget.maxIterationsForRun) {
       iterationBudget = { ...iterationBudget, maxIterationsForRun: tierLimits.iterCap };
     }
+    log("[zone-tier-constraints-applied]", JSON.stringify({
+      runId: input.runId ?? null,
+      tier: input.taskClassification?.tier ?? "medium",
+      taskToolAllowed: tierLimits.taskToolAllowed,
+      maxSubagentCalls: tierLimits.maxSubagentCalls,
+      tokenBudgetCap: tierLimits.tokenBudgetCap,
+      iterCap: tierLimits.iterCap,
+      classificationConfidence: input.taskClassification?.confidence ?? 0,
+      fallbackUsed: input.taskClassification?.fallbackUsed ?? true,
+    }));
     if (typeof input.runId === "string" && input.runId.trim()) {
       input.onStructuredEvent?.({
         type: "tier_constraints_applied",
