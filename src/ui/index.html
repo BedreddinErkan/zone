@@ -345,35 +345,9 @@
     .bubble.agent .chat-typing span:nth-child(2){animation-delay:.15s}
     .bubble.agent .chat-typing span:nth-child(3){animation-delay:.3s}
     @keyframes chatTyping{0%,100%{opacity:.35;transform:translateY(0)}50%{opacity:1;transform:translateY(-2px)}}
-    .verify-banner{
-      display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-lg);margin:var(--space-lg) 0 var(--space-xl);
-      padding:var(--space-xl) var(--space-2xl);border-radius:var(--radius-lg);border:1px solid var(--border);background:var(--surface2)
-    }
-    .verify-banner-pills{display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-md)}
-    .verify-pill{
-      display:inline-flex;align-items:center;padding:5px var(--space-lg);border-radius:var(--radius-pill);
-      font-size:var(--font-size-sm);line-height:1.2;font-weight:600;border:1px solid var(--border);background:var(--surface-alpha-2);color:var(--text-2)
-    }
-    .verify-pill.safe{background:rgba(34,197,94,0.14);border-color:rgba(34,197,94,0.4);color:#86efac}
-    .verify-pill.preview{background:rgba(245,159,11,0.14);border-color:rgba(245,159,11,0.42);color:#fbbf24}
-    .verify-pill.blocked{background:rgba(239,68,68,0.14);border-color:rgba(239,68,68,0.4);color:#fca5a5}
-    .verify-pill.reason-safe{background:transparent;border-color:rgba(34,197,94,0.35);color:#86efac}
-    .verify-pill.reason-warn{background:transparent;border-color:rgba(245,159,11,0.38);color:#fbbf24}
-    .verify-pill.reason-bad{background:transparent;border-color:rgba(239,68,68,0.38);color:#fca5a5}
-    .verify-pill.reason-neutral{background:transparent;border-color:var(--surface-alpha-7);color:var(--text-3)}
-    .verify-note{font-size:var(--font-size-base);color:var(--text-3)}
-    .verify-banner.verify-row-flow{
-      display:block;padding:0;margin:var(--space-sm) 0;background:transparent;border:none;border-radius:0;box-shadow:none
-    }
-    .verify-row-flow .verify-row{
-      display:flex;gap:var(--space-xs);align-items:center;flex-wrap:wrap;margin-bottom:var(--space-xs)
-    }
-    .verify-row-flow .verify-pill{
-      padding:2px 8px;font-size:11px;font-family:var(--font-family-mono);border-radius:var(--radius-sm);display:inline-flex;align-items:center
-    }
-    .verify-row-flow .verify-note{
-      font-size:12px;color:var(--text-3);line-height:1.5;margin:0
-    }
+    /* Phase J.2: removed .verify-banner / .verify-pill* / .verify-row* /
+       .verify-note CSS. The verify-banner UI surface is gone after the
+       preview_only verdict path was collapsed in J.1. */
     .bubble .edit-btn{position:absolute;top:var(--space-md);right:var(--space-md);width:22px;height:22px;border-radius:var(--radius-sm);border:1px solid var(--surface-alpha-7);background:rgba(0,0,0,0.18);color:#9ca3af;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;transition:opacity .12s ease}
     .bubble.user .edit-btn{background:rgba(0,0,0,0.14);border-color:rgba(255,255,255,0.18)}
     .bubble:hover .edit-btn{opacity:1}
@@ -670,18 +644,9 @@
     }
     .diff-toggle:hover{border-color:var(--border2);background:var(--surface-alpha-2);color:var(--text-1)}
     .diff-card.collapsed .diff-toggle{background:var(--surface-alpha-1)}
-    .zone-action-chips{display:flex;gap:var(--space-xs);margin-top:var(--space-sm);align-items:center;flex-wrap:wrap}
-    .zone-action-chip{
-      display:inline-flex;align-items:center;gap:6px;padding:4px 12px;font-size:12px;font-family:var(--font-family-mono);
-      background:transparent;border:0.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text-2);
-      cursor:pointer;transition:background 0.15s ease,border-color 0.15s ease
-    }
-    .zone-action-chip:hover{background:rgba(255,255,255,0.04);border-color:var(--text-3)}
-    .zone-action-chip.primary{background:var(--violet-bg);border-color:var(--violet-bd);color:var(--text-1)}
-    .zone-action-chip.primary:hover{background:var(--violet);color:#fff}
-    .zone-action-chip.secondary{}
-    .zone-tools-used{margin-left:auto;font-family:var(--font-family-mono);font-size:11px;color:var(--text-3);white-space:nowrap}
-    @media (max-width:600px){.zone-tools-used{margin-left:0;width:100%;margin-top:var(--space-xs)}}
+    /* Phase J.2: removed .zone-action-chips / .zone-action-chip* /
+       .zone-tools-used CSS. Apply chip is gone; the diff card and undo
+       control carry the entire post-completion UX. */
     /* Zone Undo Tur 2b: per-run revert affordance, sits adjacent to the
        safe_to_apply diff cards. Chip-style to match .diff-toggle. */
     .zone-undo-card{
@@ -1384,12 +1349,9 @@
         verification: progress?.verification && typeof progress.verification === 'object' ? progress.verification : null,
         cost: progress?.cost && typeof progress.cost === 'object' ? progress.cost : null,
       };
-      const group = document.getElementById(`runGroup-${rid}`);
-      const chipRow = group?.querySelector('.zone-action-chips');
-      if (chipRow && !chipRow.querySelector('.zone-tools-used')) {
-        const toolsLine = createToolsUsedLine(rid);
-        if (toolsLine) chipRow.appendChild(toolsLine);
-      }
+      // Phase J.2: action-chip row removed. Tools-used line is no longer
+      // appended next to the diff; the execution summary panel surfaces this
+      // information instead.
     }
 
     function getRunSummary(runId){
@@ -2555,135 +2517,12 @@
       return raw;
     }
 
-    /**
-     * verdict-fix Tur: refines `tests_skipped_no_infra` / `no_verification_attempted`
-     * banner text based on what the agent actually executed. When the backend
-     * reports "skipped" but the toolCallLog shows the agent ran `npm run build`
-     * or `npx tsc --noEmit`, surface that honestly instead of the misleading
-     * "No test infrastructure found" line. Pure function; safe to test.
-     *
-     * Rules:
-     *   - Build outcome wins over typecheck (more comprehensive).
-     *   - Last command of a category wins (handles agent self-correction loops).
-     *   - Build failed even when "pre-existing" — don't try to second-guess.
-     *   - Returns null when no override applies; caller falls back to default note.
-     */
-    function deriveVerificationBannerOverride(reason, verificationCommands){
-      const cmds = Array.isArray(verificationCommands) ? verificationCommands : [];
-      const eligibleReasons = new Set([
-        'tests_skipped_no_infra',
-        'tests_skipped',
-        'no_verification_attempted',
-        'tests_inconclusive',
-      ]);
-      if (!eligibleReasons.has(reason)) return null;
-      if (cmds.length === 0) return null;
+    // Phase J.2: removed deriveVerificationBannerOverride,
+    // getVerificationBannerModel, and createVerificationBanner. The verify
+    // banner UI surface is gone — completion state is conveyed via the
+    // diff card, undo button, and Apply Complete indicator (success path)
+    // or createBlockedBanner (security violations).
 
-      const lastByCategory = (cat) => {
-        for (let i = cmds.length - 1; i >= 0; i -= 1){
-          if (cmds[i] && cmds[i].category === cat) return cmds[i];
-        }
-        return null;
-      };
-
-      const lastBuild = lastByCategory('build');
-      const lastTypecheck = lastByCategory('typecheck');
-
-      // Build wins.
-      if (lastBuild){
-        if (lastBuild.outcome === 'passed'){
-          return { cls: 'reason-safe', label: 'Build passed', note: 'Agent ran build verification successfully' };
-        }
-        if (lastBuild.outcome === 'failed'){
-          return { cls: 'reason-bad', label: 'Build failed', note: 'Build error reported — review manually' };
-        }
-        return { cls: 'reason-warn', label: 'Build attempted', note: 'Agent ran build but outcome was unclear' };
-      }
-
-      if (lastTypecheck){
-        if (lastTypecheck.outcome === 'passed'){
-          return { cls: 'reason-safe', label: 'Typecheck passed', note: 'Agent verified via typecheck' };
-        }
-        if (lastTypecheck.outcome === 'failed'){
-          return { cls: 'reason-bad', label: 'Typecheck failed', note: 'Review type errors' };
-        }
-        return { cls: 'reason-warn', label: 'Typecheck attempted', note: 'Agent ran typecheck but outcome was unclear' };
-      }
-
-      return null;
-    }
-
-    function getVerificationBannerModel(input){
-      const reason = normalizeVerificationReason(
-        input?.verificationReason || extractTrailingVerificationReason(input?.chatResponse || input?.text || '')
-      );
-      const decision = String(input?.decisionMode || input?.finalState || 'preview_only');
-      if (input?.interrupted) {
-        return {
-          decisionClass: 'preview',
-          decisionLabel: 'Run interrupted',
-          reasonClass: 'reason-neutral',
-          reasonLabel: 'No verification',
-          note: 'Run interrupted — no verification',
-        };
-      }
-      const decisionLabel =
-        decision === 'safe_to_apply' ? 'Safe to apply' :
-        decision === 'blocked' ? 'Blocked' :
-        'Preview only';
-      const decisionClass =
-        decision === 'safe_to_apply' ? 'safe' :
-        decision === 'blocked' ? 'blocked' :
-        'preview';
-      // verdict-fix Tur: prefer the cmd-derived override when applicable.
-      const override = deriveVerificationBannerOverride(reason, input?.verificationCommands);
-      const reasonMeta = override
-        ? override
-        : reason === 'tests_passed'
-          ? { cls: 'reason-safe', label: 'Tests passed', note: decision === 'safe_to_apply' ? 'Ready to merge' : 'Verification passed' }
-          : reason === 'tests_skipped_no_infra'
-            ? { cls: 'reason-warn', label: 'Tests skipped', note: 'No test infrastructure found — review manually' }
-            : reason === 'no_verification_attempted'
-              ? { cls: 'reason-warn', label: 'Not verified', note: 'Agent did not run tests — review manually' }
-              : reason === 'tests_inconclusive'
-                ? { cls: 'reason-warn', label: 'Tests inconclusive', note: 'Review diff before applying' }
-                : reason === 'tests_failed_unrelated'
-                  ? { cls: 'reason-warn', label: 'Tests failed (unrelated)', note: 'Review diff before applying' }
-                  : reason === 'tests_failed_user_code'
-                    ? { cls: 'reason-bad', label: 'Tests failed (user code)', note: 'Do not apply' }
-                    : reason === 'verification_failed_staged'
-                      ? { cls: 'reason-bad', label: 'Verification failed', note: 'Changes were not applied — review error and retry' }
-                      : reason === 'no_changes_made'
-                        ? { cls: 'reason-warn', label: 'No changes made', note: 'Agent attempted but ended with no net changes — review chat' }
-                        : { cls: 'reason-neutral', label: 'Verification: unknown', note: decision === 'blocked' ? 'Do not apply' : 'Review diff before applying' };
-      const note =
-        decision === 'blocked'
-          ? 'Do not apply'
-          : decision === 'safe_to_apply' && reason === 'tests_passed'
-            ? 'Ready to merge'
-            : reasonMeta.note;
-      return {
-        decisionClass,
-        decisionLabel,
-        reasonClass: reasonMeta.cls,
-        reasonLabel: reasonMeta.label,
-        note,
-      };
-    }
-
-    function createVerificationBanner(input){
-      const model = getVerificationBannerModel(input);
-      const el = document.createElement('div');
-      el.className = 'verify-banner verify-row-flow';
-      el.innerHTML = `
-        <div class="verify-row">
-          <span class="verify-pill ${escapeHtml(model.decisionClass)}">${escapeHtml(model.decisionLabel)}</span>
-          <span class="verify-pill ${escapeHtml(model.reasonClass)}">${escapeHtml(model.reasonLabel)}</span>
-        </div>
-        <div class="verify-note">${escapeHtml(model.note)}</div>
-      `;
-      return el;
-    }
 
     function renderChatMarkdown(text, isFinal){
       const normalized = stripTrailingVerificationTag(String(text || '').replace(/\r\n/g, '\n')).trim();
@@ -5440,8 +5279,43 @@
       };
     }
 
-    function createNoChangesIndicator(){
-      return createToast('success', 'No changes made — file content unchanged');
+    // Phase J.2: removed createNoChangesIndicator. The yellow "No changes
+    // made" pill is replaced by createApplyCompleteIndicator below, which
+    // treats empty-diff runs as a successful no-op rather than a warning.
+
+    // Phase J.2: minimal post-completion indicator. Appears once per run
+    // when applyPatches finished successfully but produced no diffs (e.g.
+    // agent decided no change was needed, or the change was idempotent).
+    // Subtle styling — not a verdict pill, just a "the run is done" signal.
+    function createApplyCompleteIndicator(opts){
+      const filesChanged = Number(opts?.filesChanged) || 0;
+      const text = filesChanged > 0
+        ? `Apply complete · ${filesChanged} file${filesChanged === 1 ? '' : 's'} changed`
+        : 'Apply complete · no changes needed';
+      const el = document.createElement('div');
+      el.className = 'toast';
+      el.style.cssText = 'margin:6px 0;opacity:0.7;border-color:rgba(34,197,94,0.28);background:rgba(34,197,94,0.04)';
+      el.innerHTML = `<div class="ticon" style="background:rgba(34,197,94,0.7)"></div><div>${escapeHtml(text)}</div>`;
+      return el;
+    }
+
+    // Phase J.2: red banner shown when decisionMode === "blocked". Replaces
+    // the verify-banner-with-blocked-pill render path. Names the security
+    // reason directly so users see why the patch was hard-blocked.
+    function createBlockedBanner(reason){
+      const el = document.createElement('div');
+      el.className = 'toast error';
+      el.style.cssText = 'margin:6px 0;border-color:rgba(239,68,68,0.45);background:rgba(239,68,68,0.08);align-items:flex-start';
+      const safeReason = escapeHtml(String(reason || 'Blocked for safety'));
+      el.innerHTML = `
+        <div class="ticon" style="background:#ef4444;margin-top:4px"></div>
+        <div>
+          <div style="font-weight:600;color:#fca5a5;margin-bottom:2px">✗ Blocked for safety</div>
+          <div style="font-size:var(--font-size-sm,12px);color:var(--text-2);line-height:1.45">${safeReason}</div>
+          <div style="font-size:var(--font-size-sm,12px);color:var(--text-3);margin-top:4px;line-height:1.45">No changes were applied. Address the issue above and re-dispatch the task.</div>
+        </div>
+      `;
+      return el;
     }
 
     function splitDiffToColumns(diffText){
@@ -5589,49 +5463,11 @@
       return line;
     }
 
-    function createActionChipRow(runId, options) {
-      const opts = options || {};
-      const decisionMode = String(opts.decisionMode || 'preview_only');
-      const filesChanged = Number(opts.filesChanged || 0);
-      const canApply = decisionMode === 'safe_to_apply' || decisionMode === 'preview_only';
-
-      const row = document.createElement('div');
-      row.className = 'zone-action-chips';
-      row.dataset.runId = String(runId || '');
-
-      if (filesChanged > 0) {
-        const showDiffChip = document.createElement('button');
-        showDiffChip.type = 'button';
-        showDiffChip.className = 'zone-action-chip';
-        showDiffChip.innerHTML = '<i class="ti" aria-hidden="true">↗</i>Show diff';
-        showDiffChip.addEventListener('click', () => {
-          const group = document.getElementById(`runGroup-${String(runId || '')}`);
-          group?.querySelectorAll('.diff-card.collapsed').forEach((card) => {
-            card.classList.remove('collapsed');
-            const toggle = card.querySelector('.diff-toggle');
-            if (toggle) {
-              toggle.textContent = '˄';
-              toggle.title = 'Collapse';
-            }
-          });
-        });
-        row.appendChild(showDiffChip);
-      }
-
-      if (filesChanged > 0 && canApply) {
-        const applyChip = document.createElement('button');
-        applyChip.type = 'button';
-        applyChip.className = `zone-action-chip ${decisionMode === 'safe_to_apply' ? 'primary' : 'secondary'}`;
-        applyChip.textContent = 'Apply';
-        applyChip.addEventListener('click', () => applyPatches());
-        row.appendChild(applyChip);
-      }
-
-      const toolsLine = createToolsUsedLine(runId);
-      if (toolsLine) row.appendChild(toolsLine);
-
-      return row;
-    }
+    // Phase J.2: removed createActionChipRow. Apply is automatic post-J.1
+    // (no explicit chip needed). Diff visibility is handled by the diff card
+    // itself, and the undo control above the chip row already provides the
+    // revert affordance. The tools-used line is now folded into the
+    // execution summary panel rather than rendered next to the diff.
 
     // ---- Threads & sidebar rendering ----
     function fmtRelative(ts){
@@ -7487,25 +7323,21 @@
       wrap.querySelector('.turn-restored-header')?.addEventListener('click', (e) => toggleRestored(e.currentTarget));
       const body = wrap.querySelector('.turn-restored-files');
       if (body) {
-        if ((msg?.verificationReason || msg?.decisionMode) && decision !== 'investigation') {
-          body.appendChild(createVerificationBanner({
-            decisionMode: msg?.decisionMode,
-            verificationReason: msg?.verificationReason,
-            verificationCommands: Array.isArray(msg?.verificationCommands) ? msg.verificationCommands : undefined,
-          }));
-        }
+        // Phase J.2: removed verify-banner pill render. Past run state is now
+        // conveyed by the simple status line + diff list + undo control.
         const statusText = document.createElement('div');
         if (decision === 'safe_to_apply') {
           const applied = Array.isArray(msg?.appliedFiles) ? msg.appliedFiles.filter(Boolean) : [];
-          statusText.textContent = applied.length ? `✓ Applied: ${applied.join(', ')}` : '✓ Applied (files unknown)';
+          statusText.textContent = applied.length ? `✓ Applied: ${applied.join(', ')}` : '✓ Applied';
         } else if (decision === 'blocked' || msg?.blocked) {
           statusText.textContent = '✗ Blocked for safety';
-        } else if (decision === 'preview_only') {
-          statusText.textContent = '⚠ Preview only — not applied';
         } else if (decision === 'chat') {
           statusText.textContent = '';
         } else {
-          statusText.textContent = 'Result saved.';
+          // Legacy preview_only or unknown legacy modes from older threads
+          // fall through to the success-style indicator (Phase J.1 collapsed
+          // these into safe_to_apply).
+          statusText.textContent = '✓ Applied';
         }
         if (statusText.textContent) body.appendChild(statusText);
       }
@@ -9113,10 +8945,9 @@
       renderBgTasks();
 
       if (result && result.cancelled) {
-        const _cancelDm = String((result.decisionMode || result.finalState || result.nextDecision) || '');
-        if (_cancelDm !== 'investigation') {
-          appendToRunGroup(runId, createVerificationBanner({ interrupted: true }));
-        }
+        // Phase J.2: removed "interrupted" verification banner. Cancellation
+        // already surfaces via the toast/error log line; the timeline shows
+        // exactly where the run stopped, so the redundant banner is gone.
         scrollChatIfFollowing(runId);
         dequeueAndRunNext(_owningThreadId);
         return;
@@ -9207,22 +9038,27 @@
       }
 
       if (decision === 'blocked') {
-        showToast('error', result?.reason || result?.message || 'Blocked for safety.', 2600);
+        const blockedReason = String(result?.reason || result?.message || 'Blocked for safety').trim();
+        showToast('error', blockedReason || 'Blocked for safety.', 2600);
         const lb = document.getElementById(`logBlock-${runId}`);
         if (lb) appendLogLine(lb, { timestamp: nowTs(), message: '✗ Blocked for safety', status:'error' });
 
+        // Phase J.2: replace verify-banner / no-changes-indicator / action-chip
+        // with a single red banner that names the security reason. No diffs
+        // are applied (the patch was hard-blocked) and no undo button is
+        // shown (there's nothing to undo).
+        appendToRunGroup(runId, createBlockedBanner(blockedReason));
+
         const diffsBlocked = Array.isArray(result.fileDiffs) ? result.fileDiffs : [];
         const blockedDiffState = getEffectiveDiffState(result);
-        const blockedMsg = String(result?.reason || result?.message || '✗ Blocked for safety');
+        const blockedMsg = blockedReason || '✗ Blocked for safety';
         const maxShowBlocked = 3;
         try {
           if (diffsBlocked[0] && diffsBlocked[0].diff && Array.isArray(diffsBlocked[0].diff) && diffsBlocked[0].diff[0]) {
             console.log('[zone-ui][diff-shape]', JSON.stringify(diffsBlocked[0].diff[0]));
           }
         } catch {}
-        if (blockedDiffState.effectiveDiffsEmpty) {
-          appendToRunGroup(runId, createNoChangesIndicator());
-        } else {
+        if (!blockedDiffState.effectiveDiffsEmpty) {
           diffsBlocked.slice(0, maxShowBlocked).forEach((fd, i) => {
             const card = renderDiffCard(fd, i, diffsBlocked.length, {
               decisionMode: 'blocked',
@@ -9236,15 +9072,6 @@
           moreB.className = 'toast';
           moreB.innerHTML = `<div class="ticon" style="background:var(--blue)"></div><div>+${diffsBlocked.length - maxShowBlocked} more diffs in report</div>`;
           appendToRunGroup(runId, moreB);
-        }
-        if (!blockedDiffState.effectiveDiffsEmpty) {
-          const blockedFilesChanged = diffsBlocked.filter((fd) => getFileDiffChangedLineCount(fd) > 0).length;
-          if (blockedFilesChanged > 0) {
-            appendToRunGroup(runId, createActionChipRow(runId, {
-              decisionMode: 'blocked',
-              filesChanged: blockedFilesChanged,
-            }));
-          }
         }
         scrollChatIfFollowing(runId);
         try {
@@ -9342,20 +9169,10 @@
         appendToRunGroup(runId, pill);
       }
 
-      // After a successful patch run, surface the finalRunReport as an assistant bubble.
-      // Only show for safe_to_apply / preview_only (chat runs already have their own bubble).
-      try {
-        if (decision !== 'chat' && decision !== 'investigation') {
-          appendToRunGroup(runId, createVerificationBanner({
-            decisionMode: decision,
-            verificationReason: result.verificationReason || extractTrailingVerificationReason(result.chatResponse || ''),
-            // verdict-fix Tur: pass through the agent's classified verification
-            // commands so the banner can show "Build failed" instead of the
-            // misleading static "Tests skipped — No test infrastructure found".
-            verificationCommands: Array.isArray(result.verificationCommands) ? result.verificationCommands : undefined,
-          }));
-        }
-      } catch {}
+      // Phase J.2: removed verify-banner / verdict pill. After J.1 collapsed
+      // preview_only into safe_to_apply, the verification banner only ever
+      // showed "Safe to apply · Tests skipped" or similar redundant state.
+      // The diff card + undo button now carry the entire post-completion UX.
       // Agent prosa bubble removed (Phase A.7e):
       // Narration events (A.7a/b) render agent text inline in the timeline
       // with marker stripping. The bubble path duplicated that content less
@@ -9383,7 +9200,10 @@
           ? { decisionMode: 'safe_to_apply', applied: patchesAlreadyApplied, handoffReport: handoffLive, verificationReason: result.verificationReason }
           : { decisionMode: 'preview_only', patchesAlreadyApplied, handoffReport: handoffLive, verificationReason: result.verificationReason };
       if (diffState.effectiveDiffsEmpty && decision !== 'investigation') {
-        appendToRunGroup(runId, createNoChangesIndicator());
+        // Phase J.2: replaced "No changes made" yellow pill with a subtle
+        // single-line indicator. Empty-diff is a legitimate success path
+        // (e.g. agent decided no patch was needed) — not a warning.
+        appendToRunGroup(runId, createApplyCompleteIndicator({ filesChanged: 0 }));
       } else if (!diffState.effectiveDiffsEmpty) {
         diffs.slice(0, maxShow).forEach((fd, i) => {
           const card = renderDiffCard(fd, i, diffs.length, diffToolbarOpts);
@@ -9405,15 +9225,9 @@
           appendToRunGroup(runId, renderUndoControl(runId, state.activeRepo.path));
         }
       } catch {}
-      if (!diffState.effectiveDiffsEmpty && decision !== 'investigation') {
-        const filesChanged = diffs.filter((fd) => getFileDiffChangedLineCount(fd) > 0).length;
-        if (filesChanged > 0) {
-          appendToRunGroup(runId, createActionChipRow(runId, {
-            decisionMode: decision,
-            filesChanged,
-          }));
-        }
-      }
+      // Phase J.2: removed action-chip row (Apply / Revert chips). Apply is
+      // automatic post-J.1; the diff card carries the file count, and the
+      // undo control above (line ~9404) covers the revert affordance.
 
       try {
         if (state.__handoffReportByRun && state.__handoffReportByRun[runId]) {
