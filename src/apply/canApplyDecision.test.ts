@@ -52,7 +52,10 @@ describe("canApplyDecision", () => {
 
   // Phase J.1: legacy preview_only inputs (e.g. older serialized runs) still
   // allow apply. The message is unified — no more preview_only-specific copy.
+  // J.5: RunAgentMode was narrowed to "blocked" | "safe_to_apply", so casting
+  // a legacy literal here is intentional regression coverage.
   it("returns confirmed apply eligibility for legacy preview_only mode (Phase J.1)", () => {
+    // @ts-expect-error — legacy literal predates the narrowed RunAgentMode union (Phase J.1/J.4)
     const result = buildRunAgentResult("preview_only");
 
     const eligibility = canApplyDecision(result);

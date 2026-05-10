@@ -99,7 +99,7 @@ describe("runApplyFlow", () => {
     };
 
     const result = await runApplyFlow({
-      result: buildRunAgentResult("preview_only"),
+      result: buildRunAgentResult("safe_to_apply"),
       plan,
       request: { confirm: false }
     });
