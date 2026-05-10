@@ -25,12 +25,12 @@
       "notes": "Two-file addition: new logJson export in logger.ts, used in taskClassifier.ts — stable target, no extractions"
     },
     {
-      "id": "T4-tsconfig-strict-regression",
+      "id": "T4-direct-typecheck-break",
       "tier_expected": "simple",
-      "description": "In tsconfig.json, add `\"noUncheckedIndexedAccess\": true` to the compilerOptions object. Do not modify any source files. This is intentionally a breaking change — the goal is to verify that the typecheck regression (163 new errors across many files) is detected by Zone's staged verification and the change gets rolled back automatically.",
-      "expected_max_cost_usd": 0.10,
+      "description": "Create the file src/utils/typecheck-probe.ts with EXACTLY this content and no other changes:\n\n// Zone L.4 sweep probe — intentional type errors for rollback testing.\n// DO NOT fix the type mismatches below. They exist to test Zone's staged\n// typecheck verification and J.3 atomic rollback pipeline.\nexport const brokenNumber: number = 'this is a string';\nexport const brokenBool: boolean = 42;\nexport function brokenReturn(): string { return 123; }\n\nAll three assignments must remain type-incorrect. Do not change any type annotations or values to make them compatible. This file is a deliberate probe: Zone must detect the 3 typecheck regressions during staged verification and roll back the entire change automatically.",
+      "expected_max_cost_usd": 0.05,
       "expected_rolled_back": true,
-      "notes": "Single tsconfig line that causes 163 tsc errors across the codebase — agent cannot fix all of them; verifies rollback path for multi-file regressions triggered by config changes"
+      "notes": "Deterministic 3-error typecheck break via new file — errors are self-contained, not codebase-dependent; verifies J.3 atomic rollback for staged type regressions"
     },
     {
       "id": "T5-tier-force-simple",
