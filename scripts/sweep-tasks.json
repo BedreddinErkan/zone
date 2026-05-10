@@ -17,20 +17,20 @@
       "notes": "Single-file rename with call-site updates — still simple tier"
     },
     {
-      "id": "T3-multi-file-refactor",
+      "id": "T3-two-file-addition",
       "tier_expected": "medium",
-      "description": "In src/llm/taskClassifier.ts, extract the inline truncateForLog function to a shared utility in src/utils/logger.ts (export it), then import and use it from taskClassifier.ts",
+      "description": "In src/utils/logger.ts, add and export a new function at the end of the file: `export function logJson(tag: string, payload: Record<string, unknown>): void { log(tag, JSON.stringify(payload)); }`. Then in src/llm/taskClassifier.ts, add `logJson` to the existing import from '../utils/logger.js' (which already imports `log`) and replace all calls of the form `log('[zone-task-classified]', JSON.stringify({...}))` with `logJson('[zone-task-classified]', {...})` — remove the JSON.stringify wrapper when switching to logJson. Leave all other log calls (for '[zone-task-classifier-failure]' etc.) unchanged.",
       "expected_max_cost_usd": 0.20,
       "expected_rolled_back": false,
-      "notes": "Two-file change — extract+import; medium tier expected"
+      "notes": "Two-file addition: new logJson export in logger.ts, used in taskClassifier.ts — stable target, no extractions"
     },
     {
-      "id": "T4-bprime-rollback",
-      "tier_expected": "complex",
-      "description": "In src/llm/taskClassifier.ts, change the return type of classifyTask so it returns a Promise<TaskClassification | null> instead of Promise<TaskClassification>. Update the function signature and return statements accordingly, but do NOT update callers — the goal is to verify that typecheck fails and the change gets rolled back.",
-      "expected_max_cost_usd": 0.50,
+      "id": "T4-tsconfig-strict-regression",
+      "tier_expected": "simple",
+      "description": "In tsconfig.json, add `\"noUncheckedIndexedAccess\": true` to the compilerOptions object. Do not modify any source files. This is intentionally a breaking change — the goal is to verify that the typecheck regression (163 new errors across many files) is detected by Zone's staged verification and the change gets rolled back automatically.",
+      "expected_max_cost_usd": 0.10,
       "expected_rolled_back": true,
-      "notes": "Deliberate typecheck break — verifies rollback path. Callers in runLlmPatchFlow.ts expect non-null."
+      "notes": "Single tsconfig line that causes 163 tsc errors across the codebase — agent cannot fix all of them; verifies rollback path for multi-file regressions triggered by config changes"
     },
     {
       "id": "T5-tier-force-simple",
@@ -39,7 +39,7 @@
       "description": "In src/llm/taskClassifier.ts, change the return type of classifyTask so it returns a Promise<TaskClassification | null> instead of Promise<TaskClassification>. Update the function signature and return statements accordingly, but do NOT update callers.",
       "expected_max_cost_usd": 0.05,
       "expected_rolled_back": true,
-      "notes": "Same complex task as T4 but dispatched with ZONE_FORCE_TIER=simple — Task tool removed, subagents blocked. Tests tier constraint enforcement."
+      "notes": "Same complex task as old T4 but dispatched with ZONE_FORCE_TIER=simple — Task tool removed, subagents blocked. Tests tier constraint enforcement."
     }
   ]
 }
