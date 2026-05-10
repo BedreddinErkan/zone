@@ -11,6 +11,7 @@ import {
   subagentTypeAllowedTools,
   subagentTypeMaxIterations,
 } from "./subagents.js";
+import { buildWorkerAgentIntro, buildExploreAgentIntro } from "./agentLoop.js";
 
 describe("subagent helpers", () => {
   it("tracks and resets subagent call budget per parent run", () => {
@@ -196,5 +197,45 @@ describe("subagent helpers", () => {
     );
 
     expect(JSON.parse(result.output).costUsd).toBe(0);
+  });
+});
+
+describe("K.4: subagent prompt no-recursive-dispatch rules", () => {
+  it("worker agentIntro contains TASK TOOL FORBIDDEN", () => {
+    const prompt = buildWorkerAgentIntro();
+    expect(prompt).toMatch(/TASK TOOL FORBIDDEN/);
+  });
+
+  it("worker agentIntro forbids dispatching other subagents", () => {
+    const prompt = buildWorkerAgentIntro();
+    expect(prompt).toMatch(/CANNOT dispatch other subagents/);
+  });
+
+  it("worker agentIntro states recursive dispatch is NEVER appropriate", () => {
+    const prompt = buildWorkerAgentIntro();
+    expect(prompt).toMatch(/Recursive subagent dispatch is NEVER appropriate/);
+  });
+
+  it("explore agentIntro contains TASK TOOL FORBIDDEN", () => {
+    const prompt = buildExploreAgentIntro();
+    expect(prompt).toMatch(/TASK TOOL FORBIDDEN/);
+  });
+
+  it("explore agentIntro forbids dispatching other subagents", () => {
+    const prompt = buildExploreAgentIntro();
+    expect(prompt).toMatch(/CANNOT dispatch other subagents/);
+  });
+
+  it("explore agentIntro states recursive dispatch is NEVER appropriate", () => {
+    const prompt = buildExploreAgentIntro();
+    expect(prompt).toMatch(/Recursive subagent dispatch is NEVER appropriate/);
+  });
+
+  it("Task is absent from WORKER_ALLOWED_TOOLS (defensive by omission)", () => {
+    expect(WORKER_ALLOWED_TOOLS.has("Task")).toBe(false);
+  });
+
+  it("Task is absent from EXPLORE_ALLOWED_TOOLS (defensive by omission)", () => {
+    expect(EXPLORE_ALLOWED_TOOLS.has("Task")).toBe(false);
   });
 });
