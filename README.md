@@ -2,8 +2,6 @@
 
 Self-host AI coding agent. Tier-bounded execution. Atomic safety. BYOK transparency.
 
-> [demo gif — dispatch → diff → auto-verify thumbnail → reply bubble]
-
 [zonecli.dev](https://zonecli.dev)
 
 ## Why Zone
