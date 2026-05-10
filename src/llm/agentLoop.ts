@@ -126,6 +126,12 @@ export interface AgentLoopResult {
    *  patch) to surface "Token budget reached" vs "Iteration budget reached"
    *  distinctly in the UI. Optional for backward-compat with older callers. */
   terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded";
+  /** Phase J.3.1: staging snapshot captured before rollback discarded it.
+   *  Only populated when verificationReason === "verification_regressed".
+   *  Keyed by absolute path; values are the content the agent attempted to
+   *  write. runLlmPatchFlow uses this together with the pre-write
+   *  beforeByFile snapshot to render a "what was attempted" diff card. */
+  discardedStaging?: Map<string, string>;
 }
 
 const MAX_SELF_CORRECTION_ATTEMPTS = 5;
@@ -1147,6 +1153,12 @@ export async function finalizeStaging(input: {
     | { status: "skipped"; reason: string };
   filesFlushed: number;
   flushFailures: number;
+  // Phase J.3.1: when staging is discarded by a regression rollback, return
+  // the staged content as a snapshot so runLlmPatchFlow can render the
+  // "what was attempted" diff under the rolled-back banner. Keyed by the
+  // same absolute paths as input.stagingFiles. Empty/undefined when no
+  // discard happened (pass-through or pre-existing-errors).
+  discardedStaging?: Map<string, string>;
 }> {
   const verification = await runStagingVerification({
     stagingFiles: input.stagingFiles,
@@ -1176,6 +1188,9 @@ export async function finalizeStaging(input: {
   // — the user wants their patch even if the codebase has unrelated issues.
   if (verification.status === "fail" && verification.regressed !== false) {
     const discardedCount = input.stagingFiles.size;
+    // Phase J.3.1: snapshot staged content before clearing so the UI can
+    // render the rolled-back diff. Map<absPath, attemptedContent>.
+    const discardedStaging = new Map<string, string>(input.stagingFiles);
     input.stagingFiles.clear();
     debugLog("[zone-staging-discard]", JSON.stringify({
       reason: "verification_regressed",
@@ -1183,7 +1198,13 @@ export async function finalizeStaging(input: {
       baselineErrorCount: verification.baselineErrorCount,
       postErrorCount: verification.postErrorCount,
     }));
-    return { flushed: false, verification, filesFlushed: 0, flushFailures: 0 };
+    return {
+      flushed: false,
+      verification,
+      filesFlushed: 0,
+      flushFailures: 0,
+      discardedStaging,
+    };
   }
 
   if (verification.status === "fail" && verification.regressed === false) {
@@ -2671,6 +2692,12 @@ Example first call (immediately after task framing):
         patchValidatedByAgent,
         verificationReason,
         terminationReason: "natural_completion",
+        // Phase J.3.1: forward the staging snapshot so runLlmPatchFlow can
+        // render the rolled-back diff. Only meaningful when
+        // verificationReason === "verification_regressed".
+        ...(finalizeResult.discardedStaging
+          ? { discardedStaging: finalizeResult.discardedStaging }
+          : {}),
       };
     }
 
@@ -2923,5 +2950,10 @@ Example first call (immediately after task framing):
     patchValidatedByAgent,
     verificationReason: finalVerificationReason,
     terminationReason: "max_iterations",
+    // Phase J.3.1: forward the staging snapshot for the rolled-back diff
+    // when maxiter ended with a regressed-verification rollback.
+    ...(finalizeResult.discardedStaging
+      ? { discardedStaging: finalizeResult.discardedStaging }
+      : {}),
   };
 }

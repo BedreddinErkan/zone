@@ -5634,16 +5634,49 @@ const initializeTodosFromPlan = (): void => {
       );
     });
 
+    // Phase J.3.1: when staging was discarded by a regression rollback, the
+    // disk is back to pre-apply state and reading "after" from disk would
+    // yield an empty diff. Use the staging snapshot the agent forwarded as
+    // "after" so the UI can show "what was attempted" cards under the
+    // rolled-back banner.
+    const stagingForRolledBack = loop.discardedStaging ?? null;
+    const stagingByRel: Map<string, string> | null = stagingForRolledBack
+      ? new Map(
+          [...stagingForRolledBack.entries()].map(([abs, content]) => [
+            path.relative(input.repoPath, abs).replace(/\\/g, "/"),
+            content,
+          ])
+        )
+      : null;
+
     const fileDiffs: FileDiff[] = filesTouched.map((rel) => {
       const abs = path.join(input.repoPath, rel);
       const before =
         beforeByFile.get(rel) ?? (existsSync(abs) ? readFileSync(abs, "utf8") : "");
-      const after = existsSync(abs) ? readFileSync(abs, "utf8") : "";
+      const after = stagingByRel?.has(rel)
+        ? stagingByRel.get(rel)!
+        : existsSync(abs) ? readFileSync(abs, "utf8") : "";
       const diff = computeFileDiff(before, after);
       const addedLines = diff.filter((l) => l.type === "added").length;
       const removedLines = diff.filter((l) => l.type === "removed").length;
       return { filePath: rel, diff, addedLines, removedLines };
     });
+
+    // Phase J.3.1: also include any staged paths the agent touched but that
+    // didn't get added to filesTouched (some flow combinations only push
+    // filesModified post-flush). Without this, regression diffs go missing
+    // when filesTouched is empty.
+    if (stagingByRel) {
+      for (const [rel, after] of stagingByRel) {
+        if (filesTouched.includes(rel)) continue;
+        const before = beforeByFile.get(rel) ?? "";
+        if (before === after) continue;
+        const diff = computeFileDiff(before, after);
+        const addedLines = diff.filter((l) => l.type === "added").length;
+        const removedLines = diff.filter((l) => l.type === "removed").length;
+        fileDiffs.push({ filePath: rel, diff, addedLines, removedLines });
+      }
+    }
 
     // Use agent's self-reported verification reason to determine safety
     const vr = loop.verificationReason;

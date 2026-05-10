@@ -626,6 +626,33 @@
     .rf-warn-line{font-size:var(--font-size-xs);color:#3f3f46;line-height:1.45;opacity:.92}
 
     .diff-card{max-width:920px;margin:var(--space-sm) 0;border-radius:var(--radius-sm);border:1px solid var(--border);background:transparent;overflow:hidden}
+    /* Phase J.3.1: amber-tinted framing for diffs rendered under the
+       rolled-back banner. The diff data is in-memory (staging snapshot)
+       and never reached disk — frame it as "what was attempted". */
+    .diff-card.diff-card-rolled-back{
+      border-left:3px solid #d4a85a;
+      opacity:0.92;
+      background:rgba(212,168,90,0.03)
+    }
+    .diff-card.diff-card-rolled-back .diff-toolbar{
+      background:rgba(212,168,90,0.04);
+      border-bottom-color:rgba(212,168,90,0.18)
+    }
+    .diff-card.diff-card-rolled-back .file-ico{
+      border-color:rgba(212,168,90,0.55);
+      color:#d4a85a
+    }
+    .diff-attempted-label{
+      font-family:var(--font-family-mono);
+      font-size:var(--font-size-xs);
+      color:#d4a85a;
+      padding:2px 8px;
+      border:1px solid rgba(212,168,90,0.45);
+      border-radius:var(--radius-pill);
+      background:rgba(212,168,90,0.08);
+      white-space:nowrap;
+      letter-spacing:0.02em
+    }
     .diff-toolbar{display:flex;align-items:center;gap:var(--space-md);padding:var(--space-sm) var(--space-md);border-bottom:1px solid var(--border);background:transparent;position:sticky;top:0;z-index:2}
     .file-ico{width:18px;height:18px;border:1px solid rgba(59,130,246,0.55);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--blue);font-size:var(--font-size-sm);flex-shrink:0}
     .diff-fname{flex:1;min-width:0;font-family:var(--font-family-mono);font-size:var(--font-size-base);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -5386,7 +5413,12 @@
       }
 
       const card = document.createElement('div');
-      card.className = 'diff-card collapsed';
+      // Phase J.3.1: amber-tinted "what was attempted" framing when the
+      // diff is from a rolled-back run (staging discarded, disk untouched).
+      const isRolledBack = decisionMode === 'rolled_back' || opts.applied === false;
+      card.className = isRolledBack
+        ? 'diff-card collapsed diff-card-rolled-back'
+        : 'diff-card collapsed';
       card.dataset.filePath = filePath;
 
       const tb = document.createElement('div');
@@ -5401,6 +5433,13 @@
       fn.className = 'diff-fname';
       fn.textContent = filePath;
       tb.appendChild(fn);
+
+      if (isRolledBack && idx === 0) {
+        const attemptedLabel = document.createElement('span');
+        attemptedLabel.className = 'diff-attempted-label';
+        attemptedLabel.textContent = 'attempted (rolled back)';
+        tb.appendChild(attemptedLabel);
+      }
 
       const stat = document.createElement('div');
       stat.className = 'diff-stat';
