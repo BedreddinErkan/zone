@@ -134,7 +134,8 @@ export type ZoneStructuredProgressEvent = {
     | "terminal_output"
     | "terminal_done"
     | "narration"
-    | "token_budget_status";
+    | "token_budget_status"
+    | "task_classified";
   title: string;
   detail?: string;
   filePath?: string;
@@ -208,6 +209,19 @@ export type ZoneStructuredProgressEvent = {
    *  the screenshot via metadata.screenshotPath / pageTitle / consoleErrors). */
   toolName?: string;
   metadata?: Record<string, unknown>;
+  /** Phase L.1: pre-dispatch task classification. Emitted once per dispatch
+   *  before the agent loop starts so the UI / telemetry can show the predicted
+   *  tier and the classifier's own cost. L.2 will gate tool exposure based on
+   *  this, but in L.1 it is informational only. */
+  tier?: "simple" | "medium" | "complex";
+  estimatedFiles?: number;
+  estimatedIterations?: number;
+  needsSubagent?: boolean;
+  confidence?: number;
+  classifierModel?: string;
+  classifierCostUsd?: number;
+  classifierLatencyMs?: number;
+  fallbackUsed?: boolean;
 };
 
 /** Documentation type for `narration` progress events: a one-line intent

@@ -94,6 +94,10 @@ import {
 } from "./agentLifecycleEvents.js";
 import { cacheHitRatio, type IterCostUpdatePayload } from "../usage/iterCostMeter.js";
 import { computeWorkerMaxIterations } from "../llm/subagents.js";
+import {
+  classifyTask,
+  type TaskClassification,
+} from "../llm/taskClassifier.js";
 import { getRunCost } from "../usage/usageTracker.js";
 import {
   generateFinalRunReport,
@@ -5586,6 +5590,35 @@ const initializeTodosFromPlan = (): void => {
       planStepsCount: iterBudgetPlanSteps,
       computedMax: iterBudgetComputed,
     }));
+
+    // Phase L.1: pre-dispatch task classification. Informational only — L.2
+    // will use the result to gate Task tool exposure and L.3 to scale the
+    // token budget. Failure is graceful: a fallback (medium tier) is always
+    // returned so dispatch is never blocked.
+    let taskClassification: TaskClassification | null = null;
+    try {
+      taskClassification = await classifyTask(input.task, {
+        userApiKey: input.userApiKey,
+      });
+      emitStructuredProgress({
+        type: "task_classified",
+        title: "Task classified",
+        status: "active",
+        tier: taskClassification.tier,
+        estimatedFiles: taskClassification.estimatedFiles,
+        estimatedIterations: taskClassification.estimatedIterations,
+        needsSubagent: taskClassification.needsSubagent,
+        confidence: taskClassification.confidence,
+        classifierModel: taskClassification.classifierModel,
+        classifierCostUsd: taskClassification.classifierCostUsd,
+        classifierLatencyMs: taskClassification.classifierLatencyMs,
+        ...(taskClassification.fallbackUsed ? { fallbackUsed: true } : {}),
+      });
+    } catch (err) {
+      // classifyTask already swallows internal errors and returns a fallback,
+      // but defensive against future changes to that contract.
+      debugLog("[zone-task-classifier-unexpected-throw]", String(err));
+    }
 
     const agentLoopBaseInput = {
       task: input.task,
