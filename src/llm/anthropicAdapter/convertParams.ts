@@ -256,11 +256,33 @@ function translateMessages(
 
   for (const msg of messages) {
     if (msg.role === "user") {
-      const text =
-        typeof msg.content === "string"
-          ? msg.content
-          : extractTextFromContentArray(msg.content);
-      out.push({ role: "user", content: text });
+      if (typeof msg.content === "string") {
+        out.push({ role: "user", content: msg.content });
+      } else if (Array.isArray(msg.content)) {
+        const blocks: Anthropic.ContentBlockParam[] = [];
+        for (const block of msg.content) {
+          if (!block || typeof block !== "object" || !("type" in block)) continue;
+          const b = block as { type: unknown; text?: unknown; image_url?: { url?: string } };
+          if (b.type === "text" && typeof b.text === "string") {
+            blocks.push({ type: "text", text: b.text });
+          } else if (b.type === "image_url" && typeof b.image_url?.url === "string") {
+            const match = b.image_url.url.match(/^data:([^;]+);base64,(.+)$/s);
+            if (match) {
+              blocks.push({
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: match[1] as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+                  data: match[2],
+                },
+              });
+            }
+          }
+        }
+        out.push({ role: "user", content: blocks.length > 0 ? blocks : extractTextFromContentArray(msg.content) });
+      } else {
+        out.push({ role: "user", content: "" });
+      }
       continue;
     }
 

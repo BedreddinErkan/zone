@@ -903,7 +903,7 @@
       margin-left: auto;
       margin-right: auto;
     }
-    .inputWrap{border:1px solid var(--border2);background:var(--surface);border-radius:var(--radius-md);padding:var(--space-lg);display:flex;gap:var(--space-lg);align-items:flex-end;transition:border-color var(--transition-base)}
+    .inputWrap{border:1px solid var(--border2);background:var(--surface);border-radius:var(--radius-md);padding:var(--space-lg);display:flex;flex-direction:column;gap:0;align-items:stretch;transition:border-color var(--transition-base)}
     .inputWrap:focus-within{border-color:var(--violet-bd)}
     #taskInput{flex:1;min-width:0;background:transparent;border:none;color:var(--text-1);resize:none;max-height:160px;font-size:var(--font-size-md);line-height:1.55;padding:0}
     #taskInput::placeholder{color:var(--text-4)}
@@ -915,6 +915,11 @@
     .send-btn.send-btn--stop{background:var(--color-error);border-color:rgba(239,68,68,0.65);color:#ffffff}
     .send-btn.send-btn--stop:hover{filter:brightness(1.08)}
     .send-btn-stop-icon{font-size:var(--font-size-sm);line-height:1;font-weight:700;display:block;transform:translateY(0.5px)}
+    .inputWrap-row{display:flex;gap:var(--space-lg);align-items:flex-end}
+    .attach-preview-strip{display:flex;gap:6px;flex-wrap:wrap;padding-bottom:var(--space-sm);border-bottom:1px solid var(--border);margin-bottom:var(--space-sm)}
+    .attach-thumb-wrap{position:relative;width:40px;height:40px;flex-shrink:0}
+    .attach-thumb{width:40px;height:40px;border-radius:4px;object-fit:cover;display:block;border:1px solid var(--border)}
+    .attach-thumb-remove{position:absolute;top:-4px;right:-4px;width:14px;height:14px;border-radius:50%;background:var(--color-error);color:#fff;border:none;cursor:pointer;font-size:9px;display:flex;align-items:center;justify-content:center;line-height:1;padding:0}
     .metaRow{display:flex;justify-content:space-between;align-items:center;margin-top:var(--space-lg);color:var(--text-4);font-size:var(--font-size-sm)}
     .repoChip{display:inline-flex;align-items:center;gap:var(--space-lg);border:1px solid var(--border);background:var(--surface-alpha-1);padding:var(--space-sm) var(--space-lg);border-radius:var(--radius-pill);color:var(--text-2);cursor:pointer;transition:border-color var(--transition-base),background var(--transition-base)}
     .repoChip:hover{border-color:var(--border2);background:var(--surface-alpha-2)}
@@ -1161,19 +1166,23 @@
         <div id="zoneApprovalStickyContainer" class="zone-approval-sticky" data-state="hidden"></div>
         <div class="queueBar" id="queueBar"></div>
         <div class="inputWrap">
-          <textarea id="taskInput" rows="1" placeholder="Ask Zone anything... (Shift+Enter for new line)"></textarea>
-          <div class="inputIcons">
-            <button class="mini-btn" id="attachBtn" title="Attach (soon)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
-              </svg>
-            </button>
-            <button class="send-btn" id="sendBtn" title="Send">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M22 2L11 13"></path>
-                <path d="M22 2L15 22l-4-9-9-4 20-7z"></path>
-              </svg>
-            </button>
+          <div id="attachPreviewStrip" class="attach-preview-strip" style="display:none"></div>
+          <div class="inputWrap-row">
+            <textarea id="taskInput" rows="1" placeholder="Ask Zone anything... (Shift+Enter for new line)"></textarea>
+            <div class="inputIcons">
+              <input type="file" id="attachFileInput" accept="image/*" multiple style="display:none">
+              <button class="mini-btn" id="attachBtn" title="Attach image">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                </svg>
+              </button>
+              <button class="send-btn" id="sendBtn" title="Send">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 2L11 13"></path>
+                  <path d="M22 2L15 22l-4-9-9-4 20-7z"></path>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
         <div class="metaRow">
@@ -1270,7 +1279,8 @@
       activeBranch: null,
       branchList: [],
       branchLoading: false,
-      branchDropdownOpen: false
+      branchDropdownOpen: false,
+      pendingAttachments: []  // [{mediaType, base64}]
     };
     state.__durationTickersByRunId = state.__durationTickersByRunId || {};
 
@@ -1838,6 +1848,9 @@
       emptyState: document.getElementById('emptyState'),
       taskInput: document.getElementById('taskInput'),
       sendBtn: document.getElementById('sendBtn'),
+      attachBtn: document.getElementById('attachBtn'),
+      attachFileInput: document.getElementById('attachFileInput'),
+      attachPreviewStrip: document.getElementById('attachPreviewStrip'),
       repoChip: document.getElementById('repoChip'),
       repoChipName: document.getElementById('repoChipName'),
       branchChip: document.getElementById('branchChip'),
@@ -9068,6 +9081,8 @@
         openSSE(runId);
         try {
           const _chatHeaders = { 'Content-Type': 'application/json', ...buildAuthHeaders() };
+          const _chatAttachments = state.pendingAttachments.slice();
+          clearAttachments();
           const res = await apiFetch('/api/chat', {
             method:'POST',
             headers: _chatHeaders,
@@ -9077,7 +9092,8 @@
               runId,
               userId: effectiveUserId,
               conversationId: state.activeThreadId,
-              threadId: state.activeThreadId
+              threadId: state.activeThreadId,
+              ...(_chatAttachments.length > 0 ? { attachments: _chatAttachments } : {})
             })
           });
           const result = await res.json();
@@ -9688,6 +9704,38 @@
     }
 
     // ---- Input behavior ----
+    function renderAttachPreviewStrip() {
+      const strip = els.attachPreviewStrip;
+      if (!strip) return;
+      strip.innerHTML = '';
+      if (state.pendingAttachments.length === 0) { strip.style.display = 'none'; return; }
+      strip.style.display = 'flex';
+      state.pendingAttachments.forEach(function(att, i) {
+        const wrap = document.createElement('div');
+        wrap.className = 'attach-thumb-wrap';
+        const img = document.createElement('img');
+        img.className = 'attach-thumb';
+        img.src = 'data:' + att.mediaType + ';base64,' + att.base64;
+        img.alt = 'Image ' + (i + 1);
+        const rm = document.createElement('button');
+        rm.className = 'attach-thumb-remove';
+        rm.title = 'Remove';
+        rm.textContent = '×';
+        rm.addEventListener('click', function() {
+          state.pendingAttachments.splice(i, 1);
+          renderAttachPreviewStrip();
+        });
+        wrap.appendChild(img);
+        wrap.appendChild(rm);
+        strip.appendChild(wrap);
+      });
+    }
+
+    function clearAttachments() {
+      state.pendingAttachments = [];
+      renderAttachPreviewStrip();
+    }
+
     function autosizeTextarea(){
       const ta = els.taskInput;
       ta.style.height = 'auto';
@@ -10678,6 +10726,27 @@
         }
         sendMessage(task);
       });
+
+      if (els.attachBtn) {
+        els.attachBtn.addEventListener('click', () => { if (els.attachFileInput) els.attachFileInput.click(); });
+      }
+      if (els.attachFileInput) {
+        els.attachFileInput.addEventListener('change', async function() {
+          const files = Array.from(this.files || []);
+          for (const file of files) {
+            if (state.pendingAttachments.length >= 4) break;
+            if (!file.type.startsWith('image/')) continue;
+            const base64 = await new Promise(resolve => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+              reader.readAsDataURL(file);
+            });
+            if (base64) state.pendingAttachments.push({ mediaType: file.type, base64 });
+          }
+          renderAttachPreviewStrip();
+          this.value = '';
+        });
+      }
 
       els.openSettingsBtn.addEventListener('click', openSettings);
       els.closeSettingsBtn.addEventListener('click', closeSettings);

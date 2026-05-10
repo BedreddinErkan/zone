@@ -1270,6 +1270,7 @@ async function runConversationalFlow(input: {
   /** BYOK: user-supplied OpenAI API key forwarded from the browser header. */
   userApiKey?: string;
   lastChangedFiles?: string[];
+  attachments?: import("./imageUpload.js").ImageAttachment[];
 }): Promise<{
   ok: true;
   decisionMode: "chat";
@@ -1302,6 +1303,7 @@ async function runConversationalFlow(input: {
     task: input.task,
     repoPath: input.repoPath,
     lastChangedFiles: input.lastChangedFiles,
+    attachments: input.attachments,
     onChunk: async (delta) => {
       emitProgress(input.runId, {
         stage: "chat_response",
@@ -2629,12 +2631,22 @@ app.post("/api/chat", async (req, res) => {
       conversationId,
       threadId,
       lastChangedFiles: rawLastChangedFiles,
+      attachments: rawAttachments,
     } = req.body ?? {};
     const lastChangedFiles = Array.isArray(rawLastChangedFiles)
       ? rawLastChangedFiles.filter(
           (x: unknown): x is string => typeof x === "string" && x.trim().length > 0
         )
       : undefined;
+
+    const { validateAttachments } = await import("./imageUpload.js");
+    const attachValidation = validateAttachments(rawAttachments);
+    if (!attachValidation.ok) {
+      perf.finish("bad request");
+      res.status(400).json({ ok: false, reason: attachValidation.error });
+      return;
+    }
+    const attachments = attachValidation.attachments;
 
     const userId =
       typeof rawUserId === "string" && rawUserId.trim()
@@ -2717,6 +2729,7 @@ app.post("/api/chat", async (req, res) => {
         messageType: conversationalMessageType,
         userApiKey: chatUserApiKey || undefined,
         lastChangedFiles,
+        attachments: attachments.length > 0 ? attachments : undefined,
       });
 
       registerRunComplete(runIdStr, "completed");

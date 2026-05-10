@@ -19,6 +19,7 @@ import {
 import { indexRepoFiles } from "../embeddings/indexRepository.js";
 import { renderChatMarkdownToHtml } from "./renderChatMarkdown.js";
 import { readMemory, formatMemoryForPrompt } from "../memory/projectMemory.js";
+import type { ImageAttachment } from "../api/imageUpload.js";
 
 export type ZoneChatContextFile = {
   path: string;
@@ -190,19 +191,40 @@ async function buildChatContext(
   return { contextFiles };
 }
 
+type UserMessageContent =
+  | string
+  | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+
+function buildUserContent(prompt: string, attachments?: ImageAttachment[]): UserMessageContent {
+  if (!attachments || attachments.length === 0) return prompt;
+  return [
+    { type: "text", text: prompt },
+    ...attachments.map((att) => ({
+      type: "image_url" as const,
+      image_url: { url: `data:${att.mediaType};base64,${att.base64}` },
+    })),
+  ];
+}
+
 async function streamChatText(input: {
   prompt: string;
+  attachments?: ImageAttachment[];
   onChunk?: (delta: string) => void | Promise<void>;
 }): Promise<string> {
   const client = createLLMClient();
   const ctx = getRequestContext();
   const model = getModelName("high", client.provider, ctx?.modelOverride);
 
+  const userContent = buildUserContent(input.prompt, input.attachments);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const userMsg: any = { role: "user", content: userContent };
+
   try {
     const stream = await client.createChatCompletionStream({
       model,
       temperature: 0.2,
-      messages: [{ role: "user", content: input.prompt }],
+      messages: [userMsg],
       stream: true,
     });
 
@@ -220,7 +242,7 @@ async function streamChatText(input: {
     const response = await client.createChatCompletion({
       model,
       temperature: 0.2,
-      messages: [{ role: "user", content: input.prompt }],
+      messages: [userMsg],
     });
     const extraction = extractResponsesApiOutputText(response);
     const text = extraction.ok ? extraction.text.trim() : "";
@@ -248,6 +270,7 @@ export async function getChatResponseWithContext(input: {
   repoPath: string;
   onChunk?: (delta: string) => void | Promise<void>;
   lastChangedFiles?: string[];
+  attachments?: ImageAttachment[];
 }): Promise<ZoneChatResponseResult> {
   const normalizedTask = typeof input.task === "string" ? input.task.trim() : "";
   const normalizedRepoPath =
@@ -295,6 +318,7 @@ export async function getChatResponseWithContext(input: {
 
   const responseText = await streamChatText({
     prompt,
+    attachments: input.attachments,
     onChunk: input.onChunk,
   });
 
