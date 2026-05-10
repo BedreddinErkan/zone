@@ -298,4 +298,75 @@ describe("Phase L.1 task classifier", () => {
     expect(secondResult.tier).toBe("complex");
     expect(mocks.createChatCompletion).toHaveBeenCalledTimes(2);
   });
+
+  it("system prompt includes breaking-change and cross-cutting heuristics", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "complex",
+          estimatedFiles: 10,
+          estimatedIterations: 30,
+          needsSubagent: true,
+          confidence: 0.9,
+          reasoning: "breaking change across callers",
+        })
+      )
+    );
+
+    await classifyTask("Change a function signature to break all callers");
+
+    const call = mocks.createChatCompletion.mock.calls[0]?.[0] as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const systemMsg = call.messages.find((m) => m.role === "system")?.content ?? "";
+    expect(systemMsg).toContain("breaking change");
+    expect(systemMsg).toContain("callers");
+    expect(systemMsg).toContain("all instances");
+    expect(systemMsg).toContain("cross-cutting");
+  });
+
+  it("classifies find-N-callers + signature-break task as complex (not simple)", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "complex",
+          estimatedFiles: 10,
+          estimatedIterations: 30,
+          needsSubagent: true,
+          confidence: 0.92,
+          reasoning: "find-and-modify across multiple callers — cross-cutting",
+        })
+      )
+    );
+
+    const result = await classifyTask(
+      "Find any existing exported function in src/core/ called from at least 2 other files. Change its signature to break callers."
+    );
+
+    expect(result.tier).not.toBe("simple");
+    expect(["medium", "complex"]).toContain(result.tier);
+    expect(result.fallbackUsed).toBeUndefined();
+  });
+
+  it("classifies 'all instances across the codebase' task as complex", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "complex",
+          estimatedFiles: 15,
+          estimatedIterations: 35,
+          needsSubagent: true,
+          confidence: 0.88,
+          reasoning: "all instances across codebase — complex scope",
+        })
+      )
+    );
+
+    const result = await classifyTask(
+      "Find and update all instances of the deprecated renderComponent call across the codebase"
+    );
+
+    expect(result.tier).toBe("complex");
+    expect(result.fallbackUsed).toBeUndefined();
+  });
 });

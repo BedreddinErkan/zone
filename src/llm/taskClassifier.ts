@@ -40,7 +40,17 @@ Tier definitions:
 - "medium":  3-8 files, 10-25 iterations, MAY need subagent (max 1).
              Examples: multi-file refactor, new feature in 1-2 modules, config migration.
 - "complex": 9+ files, 25+ iterations, MAY need subagent (max 3).
-             Examples: architecture change, large refactor, cross-cutting concern.
+             Examples: architecture change, large refactor, cross-cutting concern,
+             find-and-modify across N callsites, intentional breaking changes
+             that ripple through callers, multi-investigation tasks.
+
+Classification heuristics:
+- "find X with N callers/usages" → multi-investigation → MEDIUM or COMPLEX
+- "change signature that breaks callers" → cross-cutting → COMPLEX
+- "all instances" / "every X" / "across the codebase" → COMPLEX
+- "intentional break" / "type errors" / "breaking change" → COMPLEX
+- Single file edit with no cross-references → SIMPLE
+- Pure cosmetic change (comment, rename in single file) → SIMPLE
 
 Be conservative: if uncertain, classify UP (medium > simple, complex > medium).
 
