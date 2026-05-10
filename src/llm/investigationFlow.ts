@@ -97,6 +97,8 @@ export async function runInvestigationFlow(input: {
     maxIterationsOverride: computedMax,
     disableTodoWrite: true,
     onProgress: (msg: string) => {
+      // [tool] lines are handled by onToolCall (structured). Skip raw duplicates.
+      if (String(msg || "").startsWith("[tool]")) return;
       emitStructuredProgress({
         type: "tool_call",
         title: String(msg || "").slice(0, 200),

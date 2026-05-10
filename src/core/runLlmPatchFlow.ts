@@ -5490,6 +5490,8 @@ const initializeTodosFromPlan = (): void => {
       },
       onProgress: (msg: string) => {
         if (!runId) return;
+        // [tool] lines are handled by onToolCall (structured). Skip raw duplicates.
+        if (String(msg || "").startsWith("[tool]")) return;
         emitStructuredProgress({
           type: "tool_call",
           title: String(msg || "").slice(0, 200),

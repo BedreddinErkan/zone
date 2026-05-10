@@ -4808,9 +4808,7 @@
         // by appendLogLine but coalescer must not treat them as group-breakers.
         const text = String(humanizedMessage || '');
         const isIgnorableDuplicate =
-          /^\[tool\]\s+(Reading|Patching|Fixing|Listing|Searching|Finding|Running):/i.test(text) ||
-          /^\[tool\]\s+(read_file|write_file|apply_patch|list_files|run_command|search_in_files|find_references|run_command_background|read_background_output|kill_background|list_background)\s*$/i.test(text.trim()) ||
-          /^\[tool\]\s*Spawning background:/i.test(text.trim()) ||
+          /^\[tool\]\s/i.test(text) ||
           /^\{"event":/i.test(text.trim());
 
         if (isIgnorableDuplicate) {
@@ -4950,21 +4948,14 @@
       }
       // Use the simplified version for the rest of the function.
       const finalMessage = simplifiedMessage;
-      // Suppress raw [tool] follow-up lines when humanized version was just emitted.
-      // Pattern: "[tool] Reading: lib/env.ts", "[tool] Patching: proxy.ts", etc.
-      if (/^\[tool\]\s+(Reading|Patching|Fixing|Listing|Searching|Finding|Running):/i.test(finalMessage)) {
+      // Suppress all raw [tool] lines — tool display is handled by the tool_call
+      // event path (humanizeTool → coalescer → ✓ pill). Any [tool] that reaches
+      // appendLogLine is a redundant duplicate from the onProgress callback.
+      if (/^\[tool\]\s/i.test(finalMessage)) {
         return;
       }
       // Suppress raw event JSON dumps that occasionally leak through as messages.
       if (/^\{"event":/.test(finalMessage.trim())) {
-        return;
-      }
-      // Suppress raw [tool] {bare-tool-name} lines without humanization.
-      if (/^\[tool\]\s+(read_file|write_file|apply_patch|list_files|run_command|search_in_files|find_references|run_command_background|read_background_output|kill_background|list_background)\s*$/i.test(finalMessage.trim())) {
-        return;
-      }
-      // Suppress "[tool] Spawning background: ..." onProgress lines (handled by aggregated bg card).
-      if (/^\[tool\]\s*Spawning background:/i.test(finalMessage.trim())) {
         return;
       }
 
