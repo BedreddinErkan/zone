@@ -135,7 +135,8 @@ export type ZoneStructuredProgressEvent = {
     | "terminal_done"
     | "narration"
     | "token_budget_status"
-    | "task_classified";
+    | "task_classified"
+    | "tier_constraints_applied";
   title: string;
   detail?: string;
   filePath?: string;

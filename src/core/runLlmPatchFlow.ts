@@ -5640,6 +5640,7 @@ const initializeTodosFromPlan = (): void => {
       // build/test failure points to a framework-generated path.
       repoFilePaths: developerContextFiles.map((f) => f.path),
       maxIterations: iterBudgetComputed,
+      taskClassification,
       ...agentLoopCallbacks,
     };
 

@@ -452,6 +452,8 @@ export async function executeTool(
     onStructuredEvent?: (evt: unknown) => void;
     visualScreenshotCount?: number;
     tokenBudgetBaseTokens?: number;
+    /** L.2: tier-based subagent call cap override. Defaults to MAX_SUBAGENT_CALLS_PER_PARENT_RUN. */
+    maxSubagentCallsOverride?: number;
   }
 ): Promise<ToolResult> {
   const args = (toolArgs ?? {}) as Record<string, unknown>;
@@ -505,11 +507,15 @@ export async function executeTool(
         formatExploreSubagentToolResultForParent,
       } = await import("../llm/subagents.js");
 
-      if (getSubagentCallCount(parentRunId) >= MAX_SUBAGENT_CALLS_PER_PARENT_RUN) {
+      const effectiveSubagentCap =
+        typeof input?.maxSubagentCallsOverride === "number"
+          ? input.maxSubagentCallsOverride
+          : MAX_SUBAGENT_CALLS_PER_PARENT_RUN;
+      if (getSubagentCallCount(parentRunId) >= effectiveSubagentCap) {
         return {
           success: false,
           output:
-            `Subagent call budget exhausted (${MAX_SUBAGENT_CALLS_PER_PARENT_RUN} per parent run). ` +
+            `Subagent call budget exhausted (${effectiveSubagentCap} per parent run). ` +
             "Complete remaining work directly without delegation.",
         };
       }

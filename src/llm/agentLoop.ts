@@ -22,6 +22,8 @@ import {
   type SubagentResult,
   type SubagentTokenUsage,
 } from "./subagents.js";
+import type { TaskClassification } from "./taskClassifier.js";
+import { resolveTierLimits } from "./tierLimits.js";
 import { extractUsage } from "./recordingClient.js";
 import {
   buildIterCostUpdate,
@@ -104,6 +106,9 @@ export interface AgentLoopInput {
    *  own per-iteration tokens to this base so Phase H.7 is enforced while
    *  delegated work is still running. */
   tokenBudgetBaseTokens?: number;
+  /** L.2: task classification from pre-dispatch classifier. Used to resolve
+   *  tier-based tool exposure and budget caps. Absent for subagent loops. */
+  taskClassification?: TaskClassification | null;
 }
 
 export type VerificationReason =
@@ -1747,6 +1752,35 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   if (input.allowedTools && toolsForLLM.length === 0) {
     throw new Error("AgentLoopInput.allowedTools resolved to zero tools — aborting.");
   }
+
+  // L.2: tier-based tool exposure. Subagent loops skip tier gating — they
+  // inherit the parent's constraints via allowedTools / tokenBudgetBaseTokens.
+  const isSubagentLoop = input.subagent !== undefined;
+  const tierLimits = isSubagentLoop ? null : resolveTierLimits(input.taskClassification);
+
+  if (tierLimits) {
+    if (!tierLimits.taskToolAllowed) {
+      const idx = toolsForLLM.findIndex((t) => getZoneToolName(t) === "Task");
+      if (idx >= 0) toolsForLLM.splice(idx, 1);
+    }
+    if (tierLimits.iterCap < iterationBudget.maxIterationsForRun) {
+      iterationBudget = { ...iterationBudget, maxIterationsForRun: tierLimits.iterCap };
+    }
+    if (typeof input.runId === "string" && input.runId.trim()) {
+      input.onStructuredEvent?.({
+        type: "tier_constraints_applied",
+        title: "Tier constraints applied",
+        status: "active",
+        tier: input.taskClassification?.tier ?? "medium",
+        needsSubagent: tierLimits.taskToolAllowed,
+        tokenBudgetCap: tierLimits.tokenBudgetCap,
+      });
+    }
+  }
+
+  const effectiveTokenBudgetCap = tierLimits?.tokenBudgetCap ?? TOKEN_BUDGET_CAP;
+  const effectiveMaxSubagentCalls = tierLimits?.maxSubagentCalls;
+
   const toolCallLog: Array<{
     tool: string;
     args: Record<string, unknown>;
@@ -1962,11 +1996,11 @@ Example first call (immediately after task framing):
           subagents: subagentTokenTotal,
         };
     const tokenBudgetRatio =
-      TOKEN_BUDGET_CAP > 0 ? totalTokens / TOKEN_BUDGET_CAP : 0;
+      effectiveTokenBudgetCap > 0 ? totalTokens / effectiveTokenBudgetCap : 0;
     debugLog("[zone-token-budget]", JSON.stringify({
       iter: iterNumber,
       cumulativeTokens: totalTokens,
-      cap: TOKEN_BUDGET_CAP,
+      cap: effectiveTokenBudgetCap,
       ratio: Number(tokenBudgetRatio.toFixed(3)),
       breakdown,
     }));
@@ -1975,7 +2009,7 @@ Example first call (immediately after task framing):
         type: "token_budget_status",
         title: "Token budget",
         cumulativeTokens: totalTokens,
-        tokenBudgetCap: TOKEN_BUDGET_CAP,
+        tokenBudgetCap: effectiveTokenBudgetCap,
         tokenBudgetRatio,
         iter: iterNumber,
         breakdown,
@@ -1996,7 +2030,7 @@ Example first call (immediately after task framing):
   ): Promise<AgentLoopResult> => {
     const tokensAtExit = cumulativeTokens();
     input.onProgress?.(
-      `[agent_loop] Token budget reached (${tokensAtExit}/${TOKEN_BUDGET_CAP}) — synthesizing final answer`
+      `[agent_loop] Token budget reached (${tokensAtExit}/${effectiveTokenBudgetCap}) — synthesizing final answer`
     );
     let finalSummary =
       "Token budget reached before a final answer was produced.";
@@ -2420,6 +2454,7 @@ Example first call (immediately after task framing):
           onToolResult: input.onToolResult,
           onStructuredEvent: input.onStructuredEvent,
           tokenBudgetBaseTokens: name === "Task" ? cumulativeTokens() : undefined,
+          maxSubagentCallsOverride: effectiveMaxSubagentCalls ?? undefined,
           visualScreenshotCount: toolCallLog.filter(
             (entry) => entry.tool === "verify_visual" && entry.success === true
           ).length,
@@ -2510,8 +2545,8 @@ Example first call (immediately after task framing):
                 subagentInput: cleanTokenNumber(tokenUsage?.input),
                 subagentOutput: cleanTokenNumber(tokenUsage?.output),
                 mainCumulativeAfter: cumulativeAfter,
-                cap: TOKEN_BUDGET_CAP,
-                ratio: TOKEN_BUDGET_CAP > 0 ? cumulativeAfter / TOKEN_BUDGET_CAP : 0,
+                cap: effectiveTokenBudgetCap,
+                ratio: effectiveTokenBudgetCap > 0 ? cumulativeAfter / effectiveTokenBudgetCap : 0,
               }));
               const ratioAfterTask = emitTokenBudgetStatus(iter + 1);
               if (ratioAfterTask >= TOKEN_BUDGET_HARD) {
