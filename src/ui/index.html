@@ -836,6 +836,29 @@
       opacity:0.7;
       font-style:italic;
     }
+    .subagent-breakdown{
+      font-size:0.82em;
+      opacity:0.6;
+      font-style:italic;
+      margin-left:6px;
+      font-family:var(--font-family-mono);
+    }
+    .zone-cost-strip.previous-run .subagent-breakdown{opacity:0.45}
+    .subagent-token-badge{
+      display:inline-block;
+      background:rgba(190,170,230,0.08);
+      color:rgba(190,170,230,0.85);
+      font-family:var(--font-family-mono);
+      font-size:0.82em;
+      padding:2px 6px;
+      border-radius:3px;
+      margin-left:8px;
+      cursor:help;
+    }
+    .subagent-token-badge:hover{
+      background:rgba(190,170,230,0.15);
+      color:rgba(190,170,230,1);
+    }
     @media (max-width:1180px){.zone-cost-strip{display:none!important}}
 
     /* Verification fix loop summary (collapsible) */
@@ -4094,6 +4117,55 @@
       return String(x);
     }
 
+    function readTokenBudgetBreakdown(event){
+      const breakdown = event && typeof event.breakdown === 'object' ? event.breakdown : null;
+      const mainRaw =
+        breakdown && breakdown.mainAgent != null
+          ? breakdown.mainAgent
+          : breakdown && breakdown.main != null
+            ? breakdown.main
+            : undefined;
+      const subRaw =
+        breakdown && breakdown.subagents != null
+          ? breakdown.subagents
+          : breakdown && breakdown.sub != null
+            ? breakdown.sub
+            : 0;
+      const totalRaw =
+        event && event.cumulativeTokens != null
+          ? event.cumulativeTokens
+          : event && event.totalTokens != null
+            ? event.totalTokens
+            : undefined;
+      const subagents = Math.max(0, Number(subRaw || 0) || 0);
+      const total = Math.max(0, Number(totalRaw || 0) || 0);
+      const mainFallback = Math.max(0, total - subagents);
+      const mainAgent = Math.max(0, Number(mainRaw != null ? mainRaw : mainFallback) || 0);
+      return { total, mainAgent, subagents };
+    }
+
+    function setCostStripText(strip, input){
+      const textEl = strip && strip.querySelector ? strip.querySelector('.zone-cost-strip-text') : null;
+      if (!textEl) return;
+      const totalTokens = Math.max(0, Number(input.totalTokens || 0) || 0);
+      const mainAgent = Math.max(0, Number(input.mainAgentTokens || 0) || 0);
+      const subagents = Math.max(0, Number(input.subagentTokens || 0) || 0);
+      const costLabel = String(input.costLabel || '$0.00');
+      const pctLabel = String(input.pctLabel || '—%');
+      const totalLabel = formatTokenCount(totalTokens);
+      if (subagents > 0) {
+        const mainLabel = formatTokenCount(mainAgent);
+        const subLabel = formatTokenCount(subagents);
+        textEl.innerHTML =
+          `${escapeHtml(costLabel)} · ${escapeHtml(totalLabel)} tokens ` +
+          `<span class="subagent-breakdown" title="Main agent: ${escapeHtml(mainLabel)}, Subagents: ${escapeHtml(subLabel)}">` +
+          `(main ${escapeHtml(mainLabel)} + sub ${escapeHtml(subLabel)})</span>` +
+          ` · ${escapeHtml(pctLabel)} cached`;
+        return;
+      }
+      textEl.textContent = `${costLabel} · ${totalLabel} tokens · ${pctLabel} cached`;
+    }
+
     function formatPct(value){
       const n = Number(value);
       const pct = Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n * 100))) : 0;
@@ -4136,10 +4208,20 @@
       const pct = totalInput > 0 ? Math.round((cacheRead / totalInput) * 100) : 0;
       const pctLabel = totalInput > 0 ? `${pct}%` : '—%';
       const cumulative = Number(meter.cumulative || 0);
-      const totalTokens = uncached + cacheRead + Number(meter.totalCacheWrite || 0) + Number(meter.totalOutput || 0);
+      const meteredTokens = uncached + cacheRead + Number(meter.totalCacheWrite || 0) + Number(meter.totalOutput || 0);
+      const subagentTokens = Math.max(0, Number(meter.subagentTokens || 0) || 0);
+      const mainAgentTokens = Math.max(0, Number(meter.mainAgentTokens || 0) || 0);
+      const totalTokens = subagentTokens > 0
+        ? Math.max(meteredTokens, Number(meter.totalTokens || 0) || 0, mainAgentTokens + subagentTokens)
+        : meteredTokens;
       strip.querySelector('.zone-cost-strip-fill').style.width = `${pct}%`;
-      strip.querySelector('.zone-cost-strip-text').textContent =
-        `${typeof formatCostUsd === 'function' ? formatCostUsd(cumulative) : '$' + cumulative.toFixed(2)} · ${formatTokenCount(totalTokens)} tokens · ${pctLabel} cached`;
+      setCostStripText(strip, {
+        costLabel: typeof formatCostUsd === 'function' ? formatCostUsd(cumulative) : '$' + cumulative.toFixed(2),
+        totalTokens,
+        mainAgentTokens: subagentTokens > 0 ? mainAgentTokens : totalTokens,
+        subagentTokens,
+        pctLabel,
+      });
       // Phase H.7: warn/alert when cumulative tokens approach the per-run cap.
       const budgetRatio = ZONE_TOKEN_BUDGET_CAP > 0 ? totalTokens / ZONE_TOKEN_BUDGET_CAP : 0;
       const isPreviousRun = !!meter.done;
@@ -4167,6 +4249,9 @@
       meter.totalCacheRead = 0;
       meter.totalCacheWrite = 0;
       meter.totalOutput = 0;
+      meter.totalTokens = 0;
+      meter.mainAgentTokens = 0;
+      meter.subagentTokens = 0;
       meter.done = false;
       return meter;
     }
@@ -4207,6 +4292,28 @@
       if (rid && currentDisplayedRunId && rid !== currentDisplayedRunId) return;
       const ratioRaw = Number(event?.tokenBudgetRatio);
       const ratio = Number.isFinite(ratioRaw) ? ratioRaw : 0;
+      const meter = ensureCostMeterState(rid || currentDisplayedRunId);
+      if (meter) {
+        const tokens = readTokenBudgetBreakdown(event);
+        if (tokens.total > 0) meter.totalTokens = tokens.total;
+        meter.mainAgentTokens = tokens.mainAgent;
+        meter.subagentTokens = tokens.subagents;
+        const cacheRead = Number(meter.totalCacheRead || 0);
+        const uncached = Number(meter.totalInputUncached || 0);
+        const totalInput = cacheRead + uncached;
+        const pct = totalInput > 0 ? Math.round((cacheRead / totalInput) * 100) : 0;
+        const pctLabel = totalInput > 0 ? `${pct}%` : '—%';
+        setCostStripText(strip, {
+          costLabel: typeof formatCostUsd === 'function' ? formatCostUsd(Number(meter.cumulative || 0)) : '$' + Number(meter.cumulative || 0).toFixed(2),
+          totalTokens: tokens.total || meter.totalTokens || 0,
+          mainAgentTokens: tokens.mainAgent,
+          subagentTokens: tokens.subagents,
+          pctLabel,
+        });
+        const tid = getThreadIdForRunId(meter.runId);
+        const run = tid ? state.runsByThread.get(tid) : null;
+        if (run) run.costMeter = meter;
+      }
       const status = String(event?.status || '').toLowerCase();
       const isAlert = status === 'error' || ratio >= ZONE_TOKEN_BUDGET_HARD;
       const isWarn = !isAlert && (status === 'warning' || ratio >= ZONE_TOKEN_BUDGET_WARN);
@@ -4257,6 +4364,9 @@
           totalCacheRead: 0,
           totalCacheWrite: 0,
           totalOutput: 0,
+          totalTokens: 0,
+          mainAgentTokens: 0,
+          subagentTokens: 0,
           done: false,
         };
       }
@@ -4288,6 +4398,48 @@
       const run = tid ? state.runsByThread.get(tid) : null;
       if (run) run.costMeter = meter;
       refreshCostStripForActiveRun();
+    }
+
+    function findSubagentDispatchLine(subagentId){
+      const sid = String(subagentId || '').trim();
+      if (!sid) return null;
+      const rows = document.querySelectorAll('.log-line.subagent-line[data-subagent-id]');
+      for (const row of rows) {
+        if (String(row.dataset.subagentId || '') === sid) return row;
+      }
+      return null;
+    }
+
+    function annotateSubagentDispatchTokens(subagentResult){
+      const subagentId = String(subagentResult?.subagentId || '').trim();
+      const tokenUsage = subagentResult && typeof subagentResult.tokenUsage === 'object'
+        ? subagentResult.tokenUsage
+        : null;
+      const total = Math.max(0, Number(tokenUsage?.total || 0) || 0);
+      if (!subagentId || total <= 0) return;
+      const dispatchLine = findSubagentDispatchLine(subagentId);
+      if (!dispatchLine) return;
+      const msg = dispatchLine.querySelector('.log-msg') || dispatchLine;
+      let badge = dispatchLine.querySelector('.subagent-token-badge');
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'subagent-token-badge';
+        msg.appendChild(badge);
+      }
+      const inputTokens = Math.max(0, Number(tokenUsage?.input || 0) || 0);
+      const outputTokens = Math.max(0, Number(tokenUsage?.output || 0) || 0);
+      badge.textContent = `${formatTokenCount(total)} tokens`;
+      badge.title = `${formatTokenCount(inputTokens)} in / ${formatTokenCount(outputTokens)} out`;
+    }
+
+    function maybeAnnotateTaskSubagentResult(progress){
+      if (String(progress?.toolName || '') !== 'Task') return;
+      if (String(progress?.status || '').toLowerCase() !== 'success') return;
+      const raw = String(progress?.detail || progress?.title || '').trim();
+      if (!raw) return;
+      try {
+        annotateSubagentDispatchTokens(JSON.parse(raw));
+      } catch {}
     }
 
     function finalizeCostMeter(runId, result){
@@ -8492,6 +8644,14 @@
             status: 'active',
             className: 'subagent-line c-active'
           });
+          try {
+            const lines = logBlock.querySelectorAll('.log-line.subagent-line');
+            const last = lines[lines.length - 1];
+            if (last && subagentId) {
+              last.dataset.subagentId = subagentId;
+              last.dataset.subagentType = subagentType;
+            }
+          } catch {}
           return;
         }
         if (type === 'subagent_completed') {
@@ -8576,6 +8736,7 @@
           return;
         }
         if (type === 'tool_result') {
+          maybeAnnotateTaskSubagentResult(progress);
           if (typeof handleBgToolResult === 'function' && state.__bgPendingByRun && state.__bgPendingByRun[runId]){
             const detailText = String(progress?.detail || progress?.title || '');
             const status = String(progress?.status || '').toLowerCase();
