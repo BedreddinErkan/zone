@@ -246,14 +246,17 @@ describe("Phase L.1 task classifier", () => {
 
     await classifyTask("error path task");
 
-    const failureLogCall = consoleErrorSpy.mock.calls.find(
+    // L.1 bug-G: failure entry routed to stdout (log) rather than stderr
+    // (errorLog) so it always lands in the same stream as success entries.
+    const failureLogCall = consoleLogSpy.mock.calls.find(
       (call) => String(call[0] ?? "") === "[zone-task-classifier-failure]"
     );
     expect(failureLogCall).toBeDefined();
     const payload = JSON.parse(String(failureLogCall![1]));
     expect(payload).toMatchObject({
-      error: "boom",
+      message: "boom",
       classifierModel: "gpt-5.4-mini",
+      provider: "openai",
     });
   });
 

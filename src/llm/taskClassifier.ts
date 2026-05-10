@@ -1,9 +1,12 @@
 import { createLLMClient } from "./factory.js";
-import { extractResponsesApiOutputText } from "./openaiClient.js";
+import {
+  extractResponsesApiOutputText,
+  formatOpenAiThrownErrorPayload,
+} from "./openaiClient.js";
 import { extractUsage } from "./recordingClient.js";
 import { getRequestContext } from "./openaiContext.js";
 import { totalCost, type ProviderName } from "../usage/pricing.js";
-import { log, errorLog } from "../utils/logger.js";
+import { log } from "../utils/logger.js";
 
 export type TaskTier = "simple" | "medium" | "complex";
 
@@ -57,6 +60,17 @@ const MAX_OUTPUT_TOKENS = 200;
 
 const classificationCache = new Map<string, TaskClassification>();
 
+function truncateForLog(value: unknown, maxChars = 600): string {
+  let s: string;
+  try {
+    s = typeof value === "string" ? value : JSON.stringify(value);
+  } catch {
+    s = String(value);
+  }
+  if (typeof s !== "string") s = String(s);
+  return s.length > maxChars ? `${s.slice(0, maxChars)}…[truncated]` : s;
+}
+
 function hashTask(taskDescription: string): string {
   // Deterministic djb2 hash → base36 string. Produces stable cache keys
   // independent of Node version (no built-in crypto dependency).
@@ -71,7 +85,10 @@ function pickClassifierModel(provider: "openai" | "anthropic"): string {
   // Use the cheapest registered model per provider. claude-haiku-4-5 ~$1/Mtok
   // input, gpt-5.4-mini ~$0.75/Mtok input — well below $0.0005/classification
   // for prompts under ~500 tokens.
-  return provider === "anthropic" ? "claude-haiku-4-5" : "gpt-5.4-mini";
+  if (provider === "anthropic") {
+    return process.env.ZONE_CLASSIFIER_MODEL_ANTHROPIC?.trim() || "claude-haiku-4-5";
+  }
+  return process.env.ZONE_CLASSIFIER_MODEL_OPENAI?.trim() || "gpt-5.4-mini";
 }
 
 interface ParsedClassifierResponse {
@@ -170,7 +187,10 @@ export async function classifyTask(
       client.createChatCompletion({
         model,
         temperature: 0,
-        max_tokens: MAX_OUTPUT_TOKENS,
+        // gpt-5.x mini / reasoning-style models reject `max_tokens` — they
+        // require `max_completion_tokens`. The OpenAI SDK accepts both fields,
+        // so prefer the new spelling everywhere this classifier runs.
+        max_completion_tokens: MAX_OUTPUT_TOKENS,
         messages: [
           { role: "system", content: CLASSIFIER_SYSTEM_PROMPT },
           { role: "user", content: `Task: ${normalized}\n\nClassify this task.` },
@@ -241,16 +261,26 @@ export async function classifyTask(
     return classification;
   } catch (err) {
     if (timeoutHandle) clearTimeout(timeoutHandle);
-    const message = err instanceof Error ? err.message : String(err);
-    errorLog(
+    const errPayload = formatOpenAiThrownErrorPayload(err);
+    const responseData =
+      (err as { response?: { data?: unknown } } | undefined)?.response?.data ??
+      (err as { error?: unknown } | undefined)?.error;
+    log(
       "[zone-task-classifier-failure]",
       JSON.stringify({
-        error: message,
         taskHash: cacheKey,
         classifierModel: model,
+        provider,
+        name: errPayload.name,
+        message: errPayload.message,
+        status: errPayload.status,
+        code: errPayload.code,
+        type: errPayload.type,
+        responseData:
+          responseData === undefined ? undefined : truncateForLog(responseData),
       })
     );
-    const fallback = buildFallback(model, costUsd, startTime, message);
+    const fallback = buildFallback(model, costUsd, startTime, errPayload.message);
     log(
       "[zone-task-classified]",
       JSON.stringify({
