@@ -19,6 +19,7 @@ import {
 } from "../visual/visualSettings.js";
 import { readTierSettings, writeTierSettings } from "../visual/tierSettings.js";
 import { TIER_LIMITS } from "../llm/tierLimits.js";
+import { buildDashboardData } from "./sweepResultsApi.js";
 import { invalidateDevServerCache } from "../visual/devServerProbe.js";
 import {
   isIrrelevantDeveloperContextPath,
@@ -2078,6 +2079,15 @@ app.get("/api/usage", async (req, res) => {
   } catch (err) {
     errorLog("[zone] /api/usage failed", err);
     res.status(500).json({ ok: false, reason: "usage_read_failed" });
+  }
+});
+
+app.get("/api/sweep-results", (_req, res) => {
+  try {
+    res.json(buildDashboardData());
+  } catch (err) {
+    errorLog("[zone] /api/sweep-results failed", err);
+    res.status(500).json({ ok: false, reason: "sweep_results_read_failed" });
   }
 });
 

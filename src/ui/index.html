@@ -1225,6 +1225,7 @@
         <button class="mtab" data-stab="keys">API Keys</button>
         <button class="mtab" data-stab="visual">Visual</button>
         <button class="mtab" data-stab="tier">Tier Limits</button>
+        <button class="mtab" data-stab="variance">Variance</button>
       </div>
       <div class="modal-b" id="settingsBody"></div>
     </div>
@@ -9830,6 +9831,7 @@
       if (tab === 'keys') renderKeysSettings();
       if (tab === 'visual') renderVisualSettings();
       if (tab === 'tier') renderTierSettings();
+      if (tab === 'variance') renderVarianceSettings();
     }
 
     function renderKeysSettings(){
@@ -10526,6 +10528,117 @@
       }
 
       loadAndPaint();
+    }
+
+    function renderVarianceSettings(){
+      const body = els.settingsBody;
+      body.innerHTML = '<div class="row"><div class="k">Loading…</div></div>';
+
+      fetch('/api/sweep-results')
+        .then(r => r.json())
+        .then(d => {
+          if (!d || typeof d.totalRuns !== 'number') {
+            body.innerHTML = '<div class="row"><div class="k">Error</div><div class="v">Failed to parse sweep data.</div></div>';
+            return;
+          }
+
+          const fmt2 = n => (typeof n === 'number' ? n.toFixed(2) : '—');
+          const fmt4 = n => (typeof n === 'number' ? n.toFixed(4) : '—');
+          const fmtPct = n => (typeof n === 'number' ? (n * 100).toFixed(1) + '%' : '—');
+          const fmtMs = n => (typeof n === 'number' ? (n / 1000).toFixed(1) + 's' : '—');
+          const fmtDate = s => { try { return new Date(s).toLocaleString(); } catch { return s; } };
+
+          // ---- Summary row ----
+          const passColor = d.overallPassRate >= 0.8 ? '#4caf50' : d.overallPassRate >= 0.5 ? '#ff9800' : '#f44336';
+
+          // ---- Tier stats table ----
+          const tierRows = (d.tierStats || []).map(t => `
+            <tr>
+              <td>${t.tier}</td>
+              <td>${t.runs}</td>
+              <td style="color:${t.passRate >= 0.8 ? '#4caf50' : t.passRate >= 0.5 ? '#ff9800' : '#f44336'}">${fmtPct(t.passRate)}</td>
+              <td>$${fmt4(t.avgCostUsd)}</td>
+              <td>$${fmt4(t.p50CostUsd)}</td>
+              <td>$${fmt4(t.p95CostUsd)}</td>
+              <td>${fmtMs(t.avgDurationMs)}</td>
+              <td>${fmtPct(t.rollbackRate)}</td>
+              <td>${fmtPct(t.fallbackRate)}</td>
+            </tr>`).join('');
+
+          // ---- Task stats table ----
+          const taskRows = (d.taskStats || []).map(t => `
+            <tr ${t.isOutlier ? 'style="background:rgba(244,67,54,0.08)"' : ''}>
+              <td>${t.taskId}${t.isOutlier ? ' ⚠' : ''}</td>
+              <td>${t.tierExpected}</td>
+              <td>${t.runs}</td>
+              <td style="color:${t.passRate >= 0.8 ? '#4caf50' : t.passRate >= 0.5 ? '#ff9800' : '#f44336'}">${fmtPct(t.passRate)}</td>
+              <td>$${fmt4(t.avgCostUsd)} <span style="opacity:.6">±${fmt4(t.stddevCostUsd)}</span></td>
+              <td>${fmtMs(t.avgDurationMs)} <span style="opacity:.6">±${fmtMs(t.stddevDurationMs)}</span></td>
+              <td>${fmtDate(t.lastSeen)}</td>
+            </tr>`).join('');
+
+          // ---- Recent runs table ----
+          const runRows = (d.recentRuns || []).map(r => `
+            <tr>
+              <td style="font-size:11px;opacity:.7">${fmtDate(r.timestamp)}</td>
+              <td>${r.taskId}</td>
+              <td>${r.tierExpected}</td>
+              <td>${r.tierPredicted}</td>
+              <td>$${fmt4(r.costUsd)}</td>
+              <td>${fmtMs(r.durationMs)}</td>
+              <td>${r.decisionMode}</td>
+              <td style="color:${r.passedExpected ? '#4caf50' : '#f44336'}">${r.passedExpected ? 'PASS' : 'FAIL'}</td>
+              ${r.errorMessage ? `<td style="color:#f44336;font-size:11px">${r.errorMessage.slice(0,60)}</td>` : '<td></td>'}
+            </tr>`).join('');
+
+          const tblStyle = 'width:100%;border-collapse:collapse;font-size:12px;margin-bottom:18px';
+          const thStyle = 'padding:4px 8px;text-align:left;border-bottom:1px solid var(--border,#333);opacity:.7;font-weight:600';
+          const tdStyle = 'padding:4px 8px;border-bottom:1px solid var(--border,#2a2a2a)';
+
+          body.innerHTML = `
+            <style>
+              .var-tbl td { ${tdStyle} }
+              .var-tbl th { ${thStyle} }
+            </style>
+            <div class="row">
+              <div class="k">Total runs</div>
+              <div class="v">${d.totalRuns}</div>
+            </div>
+            <div class="row">
+              <div class="k">Overall pass rate</div>
+              <div class="v" style="color:${passColor}">${fmtPct(d.overallPassRate)}</div>
+            </div>
+            <div class="row"><div class="k" style="font-weight:600;margin-top:8px">Per-tier aggregations</div></div>
+            <table class="var-tbl" style="${tblStyle}">
+              <thead><tr>
+                <th>Tier</th><th>Runs</th><th>Pass%</th>
+                <th>Avg cost</th><th>p50 cost</th><th>p95 cost</th>
+                <th>Avg dur</th><th>Rollback%</th><th>Fallback%</th>
+              </tr></thead>
+              <tbody>${tierRows || '<tr><td colspan="9" style="opacity:.5">No data</td></tr>'}</tbody>
+            </table>
+            <div class="row"><div class="k" style="font-weight:600;margin-top:8px">Per-task variance <span style="opacity:.6;font-weight:400;font-size:11px">(⚠ = cost outlier >2σ)</span></div></div>
+            <table class="var-tbl" style="${tblStyle}">
+              <thead><tr>
+                <th>Task</th><th>Tier</th><th>Runs</th><th>Pass%</th>
+                <th>Avg cost ±σ</th><th>Avg dur ±σ</th><th>Last seen</th>
+              </tr></thead>
+              <tbody>${taskRows || '<tr><td colspan="7" style="opacity:.5">No data</td></tr>'}</tbody>
+            </table>
+            <div class="row"><div class="k" style="font-weight:600;margin-top:8px">Recent runs <span style="opacity:.6;font-weight:400;font-size:11px">(last 50)</span></div></div>
+            <table class="var-tbl" style="${tblStyle}">
+              <thead><tr>
+                <th>Time</th><th>Task</th><th>Exp</th><th>Pred</th>
+                <th>Cost</th><th>Dur</th><th>Mode</th><th>Result</th><th>Error</th>
+              </tr></thead>
+              <tbody>${runRows || '<tr><td colspan="9" style="opacity:.5">No runs yet</td></tr>'}</tbody>
+            </table>
+            <div style="opacity:.4;font-size:11px;margin-top:4px">Generated ${fmtDate(d.generatedAt)}</div>
+          `;
+        })
+        .catch(() => {
+          body.innerHTML = '<div class="row"><div class="k">Error</div><div class="v">Could not reach /api/sweep-results.</div></div>';
+        });
     }
 
     // ---- Wiring ----
