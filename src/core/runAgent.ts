@@ -91,20 +91,15 @@ export type RunAgentResult = {
   reasonCodes: string[];
 };
 
-function mapScoreToMode(score: number, signals: string[]): RunAgentMode {
+function mapScoreToMode(score: number, _signals: string[]): RunAgentMode {
+  // Phase J.1: confidence/signal heuristics no longer gate apply. Only the
+  // hard high-risk threshold (matches safetyLevelResolver step 2) blocks;
+  // schema / critical_domain / mass_scope signals were previously routed to
+  // preview_only — they now produce safe_to_apply (verification + security
+  // validators handle real failures separately).
   if (score >= 71) {
     return "blocked";
   }
-
-  if (
-    score >= 31 ||
-    signals.includes("schema") ||
-    signals.includes("critical_domain") ||
-    signals.includes("mass_scope")
-  ) {
-    return "preview_only";
-  }
-
   return "safe_to_apply";
 }
 

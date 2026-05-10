@@ -296,29 +296,30 @@ function deriveAgentVerificationSummary(input: {
       note: "Tests had pre-existing failures — not caused by this patch",
     };
   }
+  // Phase J.1: confidence/verification heuristics no longer gate apply.
+  // tests_inconclusive / tests_failed_by_patch / loop-with-errors all map
+  // to safe_to_apply now. Real test failures will get a verification rollback
+  // safety net in Phase J.3 (out of scope here). The verdict notes still
+  // surface the agent's findings for the UI/run-summary.
   if (reason === "tests_inconclusive") {
     return {
-      decisionMode: "preview_only",
+      decisionMode: "safe_to_apply",
       note: "Tests inconclusive (environment issue) — review manually",
     };
   }
   if (reason === "tests_failed_by_patch") {
     return {
-      decisionMode: "preview_only",
+      decisionMode: "safe_to_apply",
       note: "Tests failed — patch may need revision",
     };
   }
 
-  const decisionMode =
-    input.loopSuccess && !input.hadRunCommandFailure
-      ? "safe_to_apply"
-      : "preview_only";
   return {
-    decisionMode,
+    decisionMode: "safe_to_apply",
     note:
-      decisionMode === "safe_to_apply"
+      input.loopSuccess && !input.hadRunCommandFailure
         ? "Patch applied by agent (no test verification)"
-        : "Agent loop encountered errors",
+        : "Agent loop encountered errors during execution",
   };
 }
 
@@ -4778,7 +4779,7 @@ const initializeTodosFromPlan = (): void => {
         totalRemovedLines: 0,
         totalChangedLines: 0,
       },
-      decisionMode: "preview_only",
+      decisionMode: "safe_to_apply",
       warnings: ["Repository could not be read in this environment."],
       correctness: { status: "skipped", summary: "Run stopped before patch planning." },
       verificationCommandsLabel: null,
@@ -4827,8 +4828,8 @@ const initializeTodosFromPlan = (): void => {
           totalRemovedLines: 0,
           totalChangedLines: 0,
         },
-        decisionMode: "preview_only",
-        finalState: "preview_only",
+        decisionMode: "safe_to_apply",
+        finalState: "safe_to_apply",
         warnings: [EXPLICIT_TARGET_NOT_FOUND_WARNING],
         correctness: {
           status: "skipped",
@@ -4849,8 +4850,8 @@ const initializeTodosFromPlan = (): void => {
         patchPreview: EXPLICIT_TARGET_NOT_FOUND_WARNING,
         warnings: [EXPLICIT_TARGET_NOT_FOUND_WARNING],
         developerConfidence: 60,
-        decisionMode: "preview_only",
-        finalState: "preview_only",
+        decisionMode: "safe_to_apply",
+        finalState: "safe_to_apply",
         patchSource: "no_patch",
         applyPatches: [],
         patchResults: [],
@@ -6264,7 +6265,7 @@ const initializeTodosFromPlan = (): void => {
           totalRemovedLines: 0,
           totalChangedLines: 0,
         },
-        decisionMode: "preview_only",
+        decisionMode: "safe_to_apply",
         warnings: [`Feature planning failed: ${reason}`],
         correctness: { status: "skipped", summary: "Run stopped during feature planning." },
         verificationCommandsLabel: null,
@@ -6718,7 +6719,7 @@ const initializeTodosFromPlan = (): void => {
         totalRemovedLines: 0,
         totalChangedLines: 0,
       },
-      decisionMode: "preview_only",
+      decisionMode: "safe_to_apply",
       warnings: [
         `Context too large (${Math.round(totalContextChars / 4000)}K tokens). Limit ${Math.round(contextBudget / 4000)}K tokens.`,
       ],
@@ -6789,7 +6790,7 @@ const initializeTodosFromPlan = (): void => {
         totalRemovedLines: 0,
         totalChangedLines: 0,
       },
-      decisionMode: "preview_only",
+      decisionMode: "safe_to_apply",
       warnings: [`Patch preview planning failed: ${reason}`],
       correctness: { status: "skipped", summary: "Run stopped during patch preview planning." },
       verificationCommandsLabel: null,
@@ -6866,8 +6867,8 @@ const initializeTodosFromPlan = (): void => {
         totalRemovedLines: 0,
         totalChangedLines: 0,
       },
-      decisionMode: "preview_only",
-      finalState: "preview_only",
+      decisionMode: "safe_to_apply",
+      finalState: "safe_to_apply",
       warnings: [
         `[HIGH_RISK] Task risk score ${taskRiskResult.score} — blocked before patch generation.`,
       ],
@@ -6882,7 +6883,7 @@ const initializeTodosFromPlan = (): void => {
       patchPreview: `[BLOCKED] Risk score ${taskRiskResult.score} — task was blocked before patch generation. Detected signals: ${taskRiskResult.signals.join(", ")}.`,
       warnings: [`[HIGH_RISK] Task risk score ${taskRiskResult.score} — blocked before patch generation.`],
       developerConfidence: 0,
-      decisionMode: "preview_only",
+      decisionMode: "safe_to_apply",
       ...(selectedTargetFile ? { targetFile: selectedTargetFile } : {}),
       applyPatches: [],
       patchResults: [],
@@ -6927,8 +6928,8 @@ const initializeTodosFromPlan = (): void => {
         totalRemovedLines: 0,
         totalChangedLines: 0,
       },
-      decisionMode: "preview_only",
-      finalState: "preview_only",
+      decisionMode: "safe_to_apply",
+      finalState: "safe_to_apply",
       warnings: [DEVELOPER_VAGUE_TASK_WARNING],
       correctness: { status: "skipped", summary: "Patch generation was not started (vague task policy)." },
       verificationCommandsLabel: null,
@@ -6941,7 +6942,7 @@ const initializeTodosFromPlan = (): void => {
       patchPreview: DEVELOPER_VAGUE_TASK_WARNING,
       warnings: [DEVELOPER_VAGUE_TASK_WARNING],
       developerConfidence: 60,
-      decisionMode: "preview_only",
+      decisionMode: "safe_to_apply",
       ...(selectedTargetFile ? { targetFile: selectedTargetFile } : {}),
       applyPatches: [],
       patchResults: [],
@@ -6996,8 +6997,8 @@ const initializeTodosFromPlan = (): void => {
           totalRemovedLines: 0,
           totalChangedLines: 0,
         },
-        decisionMode: "preview_only",
-        finalState: "preview_only",
+        decisionMode: "safe_to_apply",
+        finalState: "safe_to_apply",
         warnings: [EXPLICIT_TARGET_NOT_FOUND_WARNING],
         correctness: {
           status: "skipped",
@@ -7018,8 +7019,8 @@ const initializeTodosFromPlan = (): void => {
         patchPreview: EXPLICIT_TARGET_NOT_FOUND_WARNING,
         warnings: [EXPLICIT_TARGET_NOT_FOUND_WARNING],
         developerConfidence: 60,
-        decisionMode: "preview_only",
-        finalState: "preview_only",
+        decisionMode: "safe_to_apply",
+        finalState: "safe_to_apply",
         patchSource: "no_patch",
         applyPatches: [],
         patchResults: [],
@@ -7608,8 +7609,8 @@ const initializeTodosFromPlan = (): void => {
             totalRemovedLines: 0,
             totalChangedLines: 0,
           },
-          decisionMode: "preview_only",
-          finalState: "preview_only",
+          decisionMode: "safe_to_apply",
+          finalState: "safe_to_apply",
           warnings: [],
           correctness: {
             status: "skipped",
@@ -7626,7 +7627,7 @@ const initializeTodosFromPlan = (): void => {
           warnings: [],
           developerConfidence: 100,
           decisionMode: "chat",
-          finalState: "preview_only",
+          finalState: "safe_to_apply",
           chatResponse: msg,
           reason: "already_implemented",
           patchSource: "no_patch",
@@ -9014,7 +9015,7 @@ const initializeTodosFromPlan = (): void => {
       patchSource,
       fileDiffs: atomicDiffLines,
       patchScope: analyzePatchScope({ applyPatches, originalContents }),
-      decisionMode: "preview_only",
+      decisionMode: "safe_to_apply",
       warnings: visibleWarnings,
       correctness: { status: "rejected_all", summary: "Atomic patch mode failed validation for one or more files." },
       verificationCommandsLabel: null,
@@ -10270,21 +10271,17 @@ logRiskDebug("runLlmPatchFlow final risk", {
   patchScope,
   mergedDeveloperRisk,
   finalDeveloperRisk,
+  // Phase J.1: hasBlockedPatch (validateDeveloperOutput security block) now
+  // produces decisionMode=blocked. Soft signals (vagueTask, low confidence,
+  // intent mismatch, etc.) no longer gate apply — they're recorded in
+  // warnings/safety reasons but the verdict is safe_to_apply.
   decisionMode:
     runtimeVerificationFailed
       ? "blocked"
       : constrainedTaskLargeRewriteBlocked
         ? "blocked"
-        : hasBlockedPatch ||
-            vagueTask ||
-            microEditProtection.shouldForcePreview ||
-            intentMismatchDecision.forcePreviewOnly ||
-            uiMappingRisk.forcePreviewOnly ||
-            developerConfidence < 70 ||
-            finalDeveloperRisk.score >= 31 ||
-            fallbackForcePreviewOnly ||
-            constrainedTaskLargeRewriteForcePreview
-          ? "preview_only"
+        : hasBlockedPatch
+          ? "blocked"
           : "safe_to_apply",
 });
 syncedInternalWarnings = syncDeveloperRiskWarnings({
@@ -10305,6 +10302,13 @@ if (noCodeChangeReason) {
   }
 }
 
+// Phase J.1: every patch flow either applies (safe_to_apply) or hard-blocks
+// for a real security/verification violation. The previous chain of soft
+// preview_only triggers (vagueTask, low confidence, intent mismatch, micro-
+// edit protection, fallback preview, etc.) no longer gates the verdict.
+// hasBlockedPatch (validateDeveloperOutput hit DEVELOPER_SECRET_LOGGING /
+// DEVELOPER_VALIDATION_REMOVAL / DEVELOPER_AUTH_WEAKENING) is promoted into
+// the "blocked" branch so security violations stay non-applicable.
 let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
   (runtimeVerificationCodeFailed || runtimeVerification?.status === "timeout")
     ? "blocked"
@@ -10314,16 +10318,8 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
         ? "blocked"
       : constrainedTaskLargeRewriteBlocked
       ? "blocked"
-      : hasBlockedPatch ||
-          vagueTask ||
-          microEditProtection.shouldForcePreview ||
-          intentMismatchDecision.forcePreviewOnly ||
-          uiMappingRisk.forcePreviewOnly ||
-          developerConfidence < 70 ||
-          finalDeveloperRisk.score >= 31 ||
-          fallbackForcePreviewOnly ||
-          constrainedTaskLargeRewriteForcePreview
-        ? "preview_only"
+      : hasBlockedPatch
+        ? "blocked"
         : "safe_to_apply";
   // Minimal safe patch fast-path: tiny additive patch + validator ok + low risk => safe_to_apply.
   // This intentionally ignores warnings and verifyPatch warnings; only blocking signals matter.
@@ -10363,47 +10359,15 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
     );
     decisionMode = "safe_to_apply";
   }
-  // Minimal safe patch override (explicitly allow auto-apply).
-  if (
-    decisionMode === "preview_only" &&
-    applyPatches.length === 1 &&
-    patchScope.changedFileCount === 1 &&
-    patchScope.totalChangedLines <= 3 &&
-    patchScope.totalRemovedLines <= 3 &&
-    finalDeveloperRisk.breakdown.schema === 0 &&
-    finalDeveloperRisk.breakdown.massScope === 0 &&
-    validatorAllOk === true &&
-    !intentMismatchDecision.hasMismatch &&
-    intentMismatch.risk.score === 0 &&
-    uiMappingRisk.risk.score === 0 &&
-    !uiMappingRisk.forcePreviewOnly &&
-    !intentMismatchDecision.forcePreviewOnly &&
-    !microEditProtection.shouldForcePreview &&
-    !fallbackForcePreviewOnly &&
-    !constrainedTaskLargeRewriteForcePreview
-  ) {
-    const onlyPath = applyPatches[0]?.filePath ?? "";
-    const originalLines = countTotalLines(originalContents[onlyPath] ?? "");
-    const changeRatio =
-      originalLines > 0 ? patchScope.totalChangedLines / originalLines : 1;
-    if (changeRatio < 0.01) {
-      debugLog(
-        "[zone-decision-override]",
-        JSON.stringify({
-          reason: "minimal_safe_patch",
-          previous: "preview_only",
-          next: "safe_to_apply",
-        })
-      );
-      decisionMode = "safe_to_apply";
-    }
-  }
-  if (
-    (applyPatches.length === 0 || patchSource === "no_patch") &&
-    decisionMode === "safe_to_apply"
-  ) {
-    decisionMode = "preview_only";
-  }
+  // Phase J.1: minimal-safe-patch override (was: preview_only → safe_to_apply
+  // for tiny additive patches). Now unreachable since decisionMode never lands
+  // on preview_only. Kept as a comment marker for J.5 cleanup; the safe_to_apply
+  // verdict we'd want is already the default for non-blocked runs.
+  // Phase J.1: previously, "no patches produced" downgraded safe_to_apply →
+  // preview_only so the UI showed a "preview" verdict on empty diffs. With
+  // preview_only collapsed, leave the decision as safe_to_apply — the UI
+  // already shows a "no changes made" indicator separately when fileDiffs
+  // is empty.
 
   // LAST-MILE minimal safe patch override.
   // This runs after all other decision calculations and before response payload construction.
@@ -10490,12 +10454,14 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
       : finalExecutionOutcome === "failed_verification" ||
           finalExecutionOutcome === "failed_after_retry"
         ? "blocked"
+        // Phase J.1: completed_with_issues promotes to blocked unless we
+        // genuinely had nothing to apply (no LLM-produced structured patch
+        // AND no apply patches). The previous condition also required
+        // decisionMode === "preview_only", which is now collapsed; the
+        // remaining no-patch / no-structured exception preserves the
+        // "nothing happened, don't hard-block" semantics for empty-diff runs.
         : finalExecutionOutcome === "completed_with_issues" &&
-            !(
-              noApplyablePatch &&
-              decisionMode === "preview_only" &&
-              patchPreviewHadNoStructuredPatchesFromLlm
-            )
+            !(noApplyablePatch && patchPreviewHadNoStructuredPatchesFromLlm)
           ? "blocked"
           : decisionMode;
   const validationBlocked = finalState === "blocked";
@@ -10632,10 +10598,9 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
   const hasHandoffWorthyDiff =
     applyPatches.length > 0 &&
     fileDiffs.some((fd) => fd.addedLines > 0 || fd.removedLines > 0);
-  if (
-    (decisionMode === "safe_to_apply" || decisionMode === "preview_only") &&
-    hasHandoffWorthyDiff
-  ) {
+  // Phase J.1: previously gated on safe_to_apply OR preview_only. The
+  // preview_only branch collapsed; safe_to_apply alone covers the same set.
+  if (decisionMode === "safe_to_apply" && hasHandoffWorthyDiff) {
     const normalizePathKey = (p: string): string =>
       String(p || "").replace(/\\/g, "/").replace(/^\.\/+/, "");
     const patchDescByNorm = new Map<string, string>();

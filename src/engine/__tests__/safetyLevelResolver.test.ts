@@ -33,7 +33,11 @@ describe("resolveSafetyLevel", () => {
     );
   });
 
-  it("downgrades mismatch-driven cases to preview_only", () => {
+  // Phase J.1: soft signals (intent mismatch, low quality, low confidence)
+  // no longer gate apply. They downgrade to safe_with_review (informational)
+  // rather than preview_only, and the consumer in runLlmPatchFlow maps
+  // safe_with_review to decisionMode="safe_to_apply".
+  it("downgrades mismatch-driven cases to safe_with_review", () => {
     const result = resolveSafetyLevel(
       buildInput({
         developerConfidence: 55,
@@ -45,9 +49,9 @@ describe("resolveSafetyLevel", () => {
       })
     );
 
-    expect(result.safetyLevel).toBe("preview_only");
+    expect(result.safetyLevel).toBe("safe_with_review");
     expect(result.safetyReasons).toContain(
-      "Intent mismatch requires manual preview."
+      "Intent mismatch suggests human review."
     );
     expect(result.confidenceAdjusted).toBe(55);
   });

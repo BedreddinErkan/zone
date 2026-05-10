@@ -32,17 +32,15 @@ describe("runAgent", () => {
     expect(result.trace.confidenceScore).toBe(result.confidence.score);
   });
 
-  it("returns preview_only for schema-related tasks", async () => {
+  // Phase J.1: schema / critical_domain / mass_scope (single-target) signals
+  // no longer gate apply. They still surface in trace.signals + topRisks for
+  // observability, but the decision is safe_to_apply unless score ≥ 71.
+  it("emits the schema signal but produces safe_to_apply (Phase J.1)", async () => {
     const result = await runAgent({
       task: "add schema migration for treatment timeline"
     });
 
-    expect(result.decision.mode).toBe("preview_only");
-    expect(result.explanation).toContain("PREVIEW ONLY");
-    expect(result.recommendation).toBe(
-      "Preview the patch and verify the affected scope before any apply step."
-    );
-
+    expect(result.decision.mode).toBe("safe_to_apply");
     expect(result.trace).toBeDefined();
     expect(result.trace.signals).toContain("schema");
     expect(result.trace.riskScore).toBe(result.risk.score);
@@ -53,23 +51,23 @@ describe("runAgent", () => {
     });
   });
 
-  it("returns preview_only for critical domain updates", async () => {
+  it("emits the critical_domain signal but produces safe_to_apply (Phase J.1)", async () => {
     const result = await runAgent({
       task: "update payment service logic"
     });
 
-    expect(result.decision.mode).toBe("preview_only");
+    expect(result.decision.mode).toBe("safe_to_apply");
     expect(result.trace).toBeDefined();
     expect(result.trace.signals).toContain("critical_domain");
   });
 
-  it("returns blocked for destructive database tasks", async () => {
+  it("destructive single-target task: signal recorded, decision safe_to_apply (Phase J.1)", async () => {
     const result = await runAgent({
       task: "delete user table from database"
     });
 
     expect(result.task).toBe("delete user table from database");
-    expect(result.decision.mode).toBe("preview_only");
+    expect(result.decision.mode).toBe("safe_to_apply");
     expect(result.risk.score).toBe(70);
 
     expect(result.trace).toBeDefined();
@@ -119,7 +117,7 @@ describe("runAgent", () => {
     });
   });
 
-  it("'purge all cache' → preview_only (mass_scope only = 25)", async () => {
+  it("'purge all cache' → blocked (destructive + mass_scope, score=100)", async () => {
     const result = await runAgent({ task: "purge all cache" });
 
     expect(result.decision.mode).toBe("blocked");
@@ -139,10 +137,12 @@ describe("runAgent", () => {
     });
   });
 
-  it("'delete user session' (tekil) → preview_only, mass_scope yok", async () => {
+  // Phase J.1: single-target destructive tasks no longer route to preview_only.
+  // The destructive signal is still recorded; mass_scope is correctly absent.
+  it("'delete user session' (single target): no mass_scope, decision safe_to_apply (Phase J.1)", async () => {
     const result = await runAgent({ task: "delete user session" });
 
-    expect(result.decision.mode).toBe("preview_only");
+    expect(result.decision.mode).toBe("safe_to_apply");
     expect(result.risk.breakdown.massScope).toBe(0);
     expect(result.topRisks.every((r) => r.title !== "Mass-scope operation")).toBe(true);
 
@@ -180,15 +180,12 @@ describe("runAgent explanation consistency", () => {
     expect(result.explanation).toContain("Why:");
   });
 
-  it('adds a "Why:" line for preview_only results', async () => {
-    const result = await runAgent({
-      task: "update auth schema for all accounts"
-    });
-
-    expect(result.decision.mode).toBe("preview_only");
-    expect(result.reasonCodes.length).toBeGreaterThan(0);
-    expect(result.explanation).toContain("Why:");
-  });
+  // Phase J.1: the previous "preview_only" Why-line test (using auth schema)
+  // is removed — schema-touching tasks now produce safe_to_apply with no
+  // reason codes (confidence drop from schema penalty doesn't trigger
+  // SAFE_HIGH_CONFIDENCE either), which would leave the explanation without
+  // a "Why:" line. The remaining safe_to_apply Why-line test below covers
+  // the case where reason codes ARE generated.
 
   it('adds a "Why:" line for safe_to_apply results', async () => {
     const result = await runAgent({
@@ -201,8 +198,12 @@ describe("runAgent explanation consistency", () => {
   });
 
   it("keeps explanation semantically aligned with reason codes", async () => {
+    // Phase J.1: switched from "drop billing table" (single-target
+    // destructive, now safe_to_apply with 0 reason codes) to a multi-signal
+    // task that crosses the score≥71 threshold and produces blocked +
+    // populated reason codes.
     const result = await runAgent({
-      task: "drop billing table"
+      task: "drop all billing tables and delete every customer record"
     });
 
     expect(result.reasonCodes.length).toBeGreaterThan(0);
@@ -228,15 +229,12 @@ describe("runAgent explanation consistency", () => {
     expect(result.explanation).toContain("Why:");
   });
 
-  it('adds a "Why:" line for preview_only results', async () => {
-    const result = await runAgent({
-      task: "update auth schema for all accounts"
-    });
-
-    expect(result.decision.mode).toBe("preview_only");
-    expect(result.reasonCodes.length).toBeGreaterThan(0);
-    expect(result.explanation).toContain("Why:");
-  });
+  // Phase J.1: the previous "preview_only" Why-line test (using auth schema)
+  // is removed — schema-touching tasks now produce safe_to_apply with no
+  // reason codes (confidence drop from schema penalty doesn't trigger
+  // SAFE_HIGH_CONFIDENCE either), which would leave the explanation without
+  // a "Why:" line. The remaining safe_to_apply Why-line test below covers
+  // the case where reason codes ARE generated.
 
   it('adds a "Why:" line for safe_to_apply results', async () => {
     const result = await runAgent({

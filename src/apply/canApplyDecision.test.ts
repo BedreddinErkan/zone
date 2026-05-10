@@ -50,7 +50,9 @@ describe("canApplyDecision", () => {
     });
   });
 
-  it("returns confirmed apply eligibility for preview_only mode", () => {
+  // Phase J.1: legacy preview_only inputs (e.g. older serialized runs) still
+  // allow apply. The message is unified — no more preview_only-specific copy.
+  it("returns confirmed apply eligibility for legacy preview_only mode (Phase J.1)", () => {
     const result = buildRunAgentResult("preview_only");
 
     const eligibility = canApplyDecision(result);
@@ -58,8 +60,7 @@ describe("canApplyDecision", () => {
     expect(eligibility).toEqual({
       allowed: true,
       strategy: "confirmed_apply",
-      message:
-        "Preview-only decisions may be applied only with explicit confirmation."
+      message: "Decisions may be applied with explicit confirmation."
     });
   });
 
@@ -71,8 +72,7 @@ describe("canApplyDecision", () => {
     expect(eligibility).toEqual({
       allowed: true,
       strategy: "confirmed_apply",
-      message:
-        "Safe-to-apply decisions may be applied with explicit confirmation."
+      message: "Decisions may be applied with explicit confirmation."
     });
   });
 });

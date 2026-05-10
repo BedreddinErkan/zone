@@ -161,8 +161,11 @@ describe("runLlmPatchFlow", () => {
     if (result.ok) {
       expect(result.reason).toBe("explicit_target_not_found");
       expect(result.patchSource).toBe("no_patch");
-      expect(result.decisionMode).toBe("preview_only");
-      expect(result.finalState).toBe("preview_only");
+      // Phase J.1: explicit-target-not-found early return now produces
+      // safe_to_apply (was preview_only). The user-facing signal is the
+      // "no files changed" + warning text, not a verdict downgrade.
+      expect(result.decisionMode).toBe("safe_to_apply");
+      expect(result.finalState).toBe("safe_to_apply");
       expect(result.warnings[0]).toContain("[EXPLICIT_TARGET_NOT_FOUND]");
       expect(result.finalRunReport.title).toBe("Patch generation failed");
       expect(result.finalRunReport.changesMade.join(" ").toLowerCase()).toContain("no files changed");
@@ -1004,7 +1007,11 @@ describe("runLlmPatchFlow", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.decisionMode).toBe("preview_only");
+      // Phase J.1: oversized CSS rewrite for micro-edit task previously
+      // downgraded to preview_only. Intent-mismatch detection still flags it
+      // for the warnings/safetyResolution channel, but the verdict is no
+      // longer gated.
+      expect(result.decisionMode).toBe("safe_to_apply");
       expect(result.intentMismatch).toEqual(
         expect.objectContaining({
           hasMismatch: true,
@@ -1882,7 +1889,12 @@ expect(result.safetyResolution).toEqual(
     if (result.ok) {
       expect(result.patchPreview).toContain("blocked before patch generation");
       expect(result.applyPatches).toEqual([]);
-      expect(result.decisionMode).toBe("preview_only");
+      // Phase J.1: high-risk task score (≥31) previously downgraded to
+      // preview_only via the soft-signal chain. With Phase J.1, the verdict
+      // is safe_to_apply when no security validator hard-blocks; here the
+      // applyPatches array is already empty so nothing is actually applied,
+      // and the warnings/risk channel still surfaces the risk reason.
+      expect(result.decisionMode).toBe("safe_to_apply");
       expect(result.warnings.join("\n")).toMatch(/HIGH_RISK.*Task risk score/);
     }
     expect(planPatchPreviewWithLlmMock).toHaveBeenCalled();
@@ -3373,7 +3385,11 @@ expect(result.safetyResolution).toEqual(
     if (result.ok) {
       expect(result.applyPatches).toHaveLength(1);
       expect(result.patchQualitySummary?.source).toBe("deterministic_fallback");
-      expect(result.decisionMode).toBe("preview_only");
+      // Phase J.1: deterministic-fallback + tooling-issue verification was
+      // previously routed to preview_only (low confidence + soft gate). With
+      // J.1, the verdict is safe_to_apply; verificationStatus and warnings
+      // still tell the user what happened.
+      expect(result.decisionMode).toBe("safe_to_apply");
       expect(result.developerConfidence).toBeLessThanOrEqual(65);
       expect(result.verificationStatus).toBe("tooling_issue");
       expect(result.finalExecutionOutcome).toBe("completed_with_tooling_issue");
@@ -4555,10 +4571,12 @@ export function PatientsPage() {
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.decisionMode).not.toBe("safe_to_apply");
-        // Scope-guard can drop the LLM patch and attempt fallback. If fallback cannot
-        // safely insert, the run remains preview-only with no applied patches.
-        expect(result.decisionMode).toBe("preview_only");
+        // Phase J.1: scope-guard previously downgraded the verdict to
+        // preview_only. Now: scope-guard still drops the LLM patch (so
+        // applyPatches is empty), warnings still surface
+        // [patch_exceeds_minimal_scope], and the verdict reflects "no
+        // changes made" via empty applyPatches rather than a verdict pill.
+        expect(result.decisionMode).toBe("safe_to_apply");
         expect(result.warnings.join("\n")).toContain("[patch_exceeds_minimal_scope]");
         expect(result.applyPatches).toHaveLength(0);
       }

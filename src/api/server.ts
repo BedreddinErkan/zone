@@ -927,24 +927,18 @@ async function handleBillingSummary(
 
 function getDecisionModeFromResult(
   result: Record<string, unknown>,
-  confidence: number
+  _confidence: number
 ): string {
+  // Phase J.1: trust the upstream-declared decision verbatim. The previous
+  // confidence < 70 / weak-verification → preview_only fallbacks (Bug 46)
+  // are gone — those heuristics no longer gate apply. Real security blocks
+  // come through as result.decisionMode === "blocked"; everything else is
+  // safe_to_apply by default.
   const decisionMode = result["decisionMode"];
   if (typeof decisionMode === "string" && decisionMode.length > 0) {
     return decisionMode;
   }
-  // Bug 46 fix: when verification is weak (agent skipped tests, tests inconclusive,
-  // or unrelated tests failed), do not claim safe_to_apply. Demote to preview_only
-  // so the UI's "Safe to apply" pill matches the underlying verification signal.
-  const verificationReason = String(result["verificationReason"] || "");
-  const verificationLooksWeak =
-    verificationReason === "no_verification_attempted" ||
-    verificationReason === "tests_inconclusive" ||
-    verificationReason === "tests_failed_unrelated" ||
-    verificationReason === "verification_failed_staged" ||
-    verificationReason === "no_changes_made";
-  if (verificationLooksWeak) return "preview_only";
-  return confidence < 70 ? "preview_only" : "safe_to_apply";
+  return "safe_to_apply";
 }
 
 function getTestEngineerUserFacingReason(reason: string): string {
