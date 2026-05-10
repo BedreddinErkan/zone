@@ -18,6 +18,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -27,6 +28,12 @@ const API_BASE =
 const REPO_PATH = process.env["ZONE_SWEEP_REPO_PATH"] ?? REPO_ROOT;
 const USER_ID = process.env["ZONE_SWEEP_USER_ID"] ?? "sweep-runner";
 const TASKS_PATH = path.join(__dirname, "sweep-tasks.json");
+
+/** Maps task.project keys to local repo paths for pre-task git reset. */
+const TARGET_REPOS: Record<string, string> = {
+  "zone-api": REPO_PATH,
+  "zone-test": "/home/bedo/zone-test",
+};
 const RESULTS_DIR = path.join(REPO_ROOT, "data");
 const RESULTS_PATH = path.join(RESULTS_DIR, "sweep-results.csv");
 
@@ -38,6 +45,8 @@ interface SweepTask {
   expected_max_cost_usd: number;
   expected_rolled_back?: boolean;
   notes?: string;
+  /** Target repo key in TARGET_REPOS. Defaults to "zone-api" (REPO_PATH) when absent. */
+  project?: string;
 }
 
 interface TaskClassification {
@@ -126,6 +135,22 @@ function evaluateExpected(task: SweepTask, res: PatchResponse, costUsd: number):
     return false;
   }
   return true;
+}
+
+function preTaskCleanup(task: SweepTask): void {
+  const repoPath = task.project ? TARGET_REPOS[task.project] : REPO_PATH;
+  if (repoPath === undefined) {
+    console.warn(`  ⚠ unknown project "${task.project}", skipping git reset`);
+    return;
+  }
+  try {
+    execSync("git reset --hard HEAD", { cwd: repoPath, stdio: "pipe" });
+    execSync("git clean -fd", { cwd: repoPath, stdio: "pipe" });
+    console.log(`  → reset ${task.project ?? "repo"} to clean HEAD`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`  ⚠ git reset failed: ${msg}`);
+  }
 }
 
 async function dispatchTask(task: SweepTask): Promise<SweepResult> {
@@ -227,8 +252,9 @@ async function runSweep(options: { dryRun?: boolean } = {}): Promise<void> {
     console.log(`\n[${task.id}]`);
     console.log(`  "${task.description.slice(0, 100)}${task.description.length > 100 ? "…" : ""}"`);
     if (task.tier_forced) {
-      console.log(`  note: tier_forced=${task.tier_forced} — requires ZONE_FORCE_TIER=${task.tier_forced} server env`);
+      console.log(`  note: tier_forced=${task.tier_forced} (sent as forceTier in request body)`);
     }
+    preTaskCleanup(task);
 
     let result: SweepResult;
     try {
