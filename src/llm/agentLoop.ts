@@ -273,14 +273,32 @@ export function assembleAgentSystemPrompt(input: {
     `   apply targeted fix with intent='modify' or intent='delete', re-run tests.\n` +
     `6. When all checks pass (or no tests exist), respond with a concise plain-text summary.\n` +
     `Maximum iterations: ${input.baseMaxIterations} (already enforced -- do not stall).\n\n` +
-    `VISUAL VERIFICATION:\n` +
-    `- Use verify_visual after UI, styling, layout, or user-visible interaction changes.\n` +
-    `- Use it to check page state, form validation, hover/empty/error states, and visual regressions.\n` +
-    `- Do NOT use verify_visual for backend-only changes, comment-only edits, test-only edits, or type/interface-only changes.\n` +
-    `- Hard cap: 5 screenshots per run; 1-2 screenshots is usually enough.\n` +
-    `- Examples:\n` +
-    `  verify_visual({ path: "/", description: "Header should now have dark background", viewport: null, waitFor: null })\n` +
-    `  verify_visual({ path: "/login", description: "Submit button disabled when fields empty", viewport: null, waitFor: "form" })\n\n` +
+    `VISUAL VERIFICATION (verify_visual):\n` +
+    `Take a screenshot of your changes on the user's local dev server.\n` +
+    `USE for: UI/styling/layout changes, form or interaction state (validation,\n` +
+    `disabled, hover), new components on user-visible pages, regressions a user\n` +
+    `would notice while browsing.\n` +
+    `SKIP for: backend-only edits (API/server/DB), comment-only or rename\n` +
+    `refactors, type/interface-only changes, test files, configs (package.json,\n` +
+    `tsconfig, etc.), build/CI scripts.\n` +
+    `PATH — infer from changed file paths:\n` +
+    `  pages/login.tsx          -> "/login"\n` +
+    `  app/dashboard/page.tsx   -> "/dashboard"\n` +
+    `  components/Header.tsx    -> "/"  (shared chrome shows on every page)\n` +
+    `  src/api/users.ts         -> don't verify (backend-only)\n` +
+    `If multiple pages are affected, pick the most representative. If you can't\n` +
+    `confidently infer a path, default to "/".\n` +
+    `WAITFOR — pass a CSS selector that appears after async data loads, so the\n` +
+    `screenshot waits for real content. Without it the capture fires at\n` +
+    `DOMContentLoaded — fine for static pages, may catch a loading state on\n` +
+    `SSR/CSR pages.\n` +
+    `ECONOMY — 1 screenshot is usually enough. Multi-state only when an\n` +
+    `interaction flow needs proof (e.g., empty form vs. validation error).\n` +
+    `Don't multi-state for simple tweaks (color, spacing, copy).\n` +
+    `Examples:\n` +
+    `  verify_visual({ path: "/", description: "Header should now have dark navy background" })\n` +
+    `  verify_visual({ path: "/login", description: "Submit button disabled when fields empty" })\n` +
+    `  verify_visual({ path: "/dashboard", description: "Stat cards render 4 across", waitFor: ".user-stats-loaded" })\n\n` +
     `NARRATION (one short line before each tool call):\n` +
     `Before invoking each tool, write one short sentence in plain English describing what you're about to do and why. ` +
     `Examples: "Reading the README to find the existing structure.", "Now patching package.json to add the dev dependency.", "Searching for callers of the renamed function." ` +
