@@ -338,6 +338,14 @@ export function assembleAgentSystemPrompt(input: {
     `  verify_visual({ path: "/", description: "Header should now have dark navy background" })\n` +
     `  verify_visual({ path: "/login", description: "Submit button disabled when fields empty" })\n` +
     `  verify_visual({ path: "/dashboard", description: "Stat cards render 4 across", waitFor: ".user-stats-loaded" })\n\n` +
+    `TASK SUBAGENTS (Task):\n` +
+    `Default to single-thread. Use Task only when parallelism clearly saves wall time.\n` +
+    `USE Task ONLY when: 5+ independent investigation steps; different file clusters with no shared state; single-thread would exceed 15 iterations; or multi-candidate exploration benefits from parallelism. Examples: audit security issues in 8+ files; investigate parallel module dependencies.\n` +
+    `DON'T USE Task for: single-file changes; sequential reasoning chains; investigations under 5 files; work that fits in 8 iterations; patch-then-verify cycles; synthetic test scenarios. Most "find X function" tasks fit single-thread.\n` +
+    `COST: each dispatch consumes about 30K-100K extra tokens and can double/triple BYOK cost. Use 0 dispatches unless criteria clearly match.\n` +
+    `ECONOMY: policy caps are MAX_SUBAGENT_CALLS=2 and WORKER_MAX_ITER=6 (numeric enforcement in K.2).\n` +
+    `YES example: "audit deprecated API usage across src/api/* and src/core/* - 12 files, find all sites and propose unified replacement".\n` +
+    `NO examples: "Find a function with multiple callers and break its signature" -> use search_in_files + find_references in the main loop. "Refactor this single component" -> read_file + apply_patch. "Investigate why this test is failing" -> search + read in the main loop.\n\n` +
     `NARRATION (one short line before each tool call):\n` +
     `Before invoking each tool, write one short sentence in plain English describing what you're about to do and why. ` +
     `Examples: "Reading the README to find the existing structure.", "Now patching package.json to add the dev dependency.", "Searching for callers of the renamed function." ` +

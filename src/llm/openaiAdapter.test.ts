@@ -80,6 +80,28 @@ describe("OpenAI prompt cache stability helpers", () => {
     ]);
   });
 
+  it("includes explicit Task subagent usage discipline in the system prompt", () => {
+    const system = assembleAgentSystemPrompt({
+      agentIntro: "You are Zone, an AI code agent.",
+      frameworkLines: [],
+      hasFramework: false,
+      projectMemoryBlock: "",
+      baseMaxIterations: 15,
+      canRunCommand: false,
+      backgroundCommandBlock: "",
+      repoPath: "/workspace/project",
+    });
+
+    expect(system).toContain("TASK SUBAGENTS (Task):");
+    expect(system).toContain("Default to single-thread");
+    expect(system).toMatch(/synthetic test scenarios/i);
+    expect(system).toContain(
+      '"Find a function with multiple callers and break its signature"'
+    );
+    expect(system).toContain("READ_FILE ECONOMY:");
+    expect(system).toContain("VISUAL VERIFICATION (verify_visual):");
+  });
+
   it("builds a bounded per-run prompt cache key", () => {
     expect(buildOpenAIPromptCacheKey("1234567890abcdef-extra")).toBe(
       "zone-run-1234567890abcdef"
