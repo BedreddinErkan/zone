@@ -65,7 +65,11 @@ export async function runVerifyVisual(
     };
   }
 
-  const fullUrl = new URL(input.path || "/", context.devServerBaseUrl).toString();
+  const fullUrl = (() => {
+    const url = new URL(input.path || "/", context.devServerBaseUrl);
+    url.searchParams.set("screenshot", "1");
+    return url.toString();
+  })();
   const consoleErrors: string[] = [];
   let page: Page | null = null;
 
@@ -76,27 +80,6 @@ export async function runVerifyVisual(
     });
 
     await page.emulateMedia({ reducedMotion: "reduce" });
-
-    await page.addInitScript(`
-      (() => {
-        const originalMatchMedia = window.matchMedia;
-        window.matchMedia = function(query) {
-          if (typeof query === 'string' && query.indexOf('prefers-reduced-motion') >= 0) {
-            return {
-              matches: query.indexOf('reduce') >= 0,
-              media: query,
-              onchange: null,
-              addEventListener: function() {},
-              removeEventListener: function() {},
-              addListener: function() {},
-              removeListener: function() {},
-              dispatchEvent: function() { return false; }
-            };
-          }
-          return originalMatchMedia.call(window, query);
-        };
-      })();
-    `);
 
     page.on("pageerror", (err) => consoleErrors.push(`pageerror: ${err.message}`));
     page.on("console", (msg) => {
