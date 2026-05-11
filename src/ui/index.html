@@ -10610,46 +10610,70 @@
           const thStyle = 'padding:4px 8px;text-align:left;border-bottom:1px solid var(--border,#333);opacity:.7;font-weight:600';
           const tdStyle = 'padding:4px 8px;border-bottom:1px solid var(--border,#2a2a2a)';
 
-          body.innerHTML = `
-            <style>
-              .var-tbl td { ${tdStyle} }
-              .var-tbl th { ${thStyle} }
-            </style>
-            <div class="row">
-              <div class="k">Total runs</div>
-              <div class="v">${d.totalRuns}</div>
-            </div>
-            <div class="row">
-              <div class="k">Overall pass rate</div>
-              <div class="v" style="color:${passColor}">${fmtPct(d.overallPassRate)}</div>
-            </div>
-            <div class="row"><div class="k" style="font-weight:600;margin-top:8px">Per-tier aggregations</div></div>
-            <table class="var-tbl" style="${tblStyle}">
-              <thead><tr>
-                <th>Tier</th><th>Runs</th><th>Pass%</th>
-                <th>Avg cost</th><th>p50 cost</th><th>p95 cost</th>
-                <th>Avg dur</th><th>Rollback%</th><th>Fallback%</th>
-              </tr></thead>
-              <tbody>${tierRows || '<tr><td colspan="9" style="opacity:.5">No data</td></tr>'}</tbody>
-            </table>
-            <div class="row"><div class="k" style="font-weight:600;margin-top:8px">Per-task variance <span style="opacity:.6;font-weight:400;font-size:11px">(⚠ = cost outlier >2σ)</span></div></div>
-            <table class="var-tbl" style="${tblStyle}">
-              <thead><tr>
-                <th>Task</th><th>Tier</th><th>Runs</th><th>Pass%</th>
-                <th>Avg cost ±σ</th><th>Avg dur ±σ</th><th>Last seen</th>
-              </tr></thead>
-              <tbody>${taskRows || '<tr><td colspan="7" style="opacity:.5">No data</td></tr>'}</tbody>
-            </table>
-            <div class="row"><div class="k" style="font-weight:600;margin-top:8px">Recent runs <span style="opacity:.6;font-weight:400;font-size:11px">(last 50)</span></div></div>
-            <table class="var-tbl" style="${tblStyle}">
-              <thead><tr>
-                <th>Time</th><th>Task</th><th>Exp</th><th>Pred</th>
-                <th>Cost</th><th>Dur</th><th>Mode</th><th>Result</th><th>Error</th>
-              </tr></thead>
-              <tbody>${runRows || '<tr><td colspan="9" style="opacity:.5">No runs yet</td></tr>'}</tbody>
-            </table>
-            <div style="opacity:.4;font-size:11px;margin-top:4px">Generated ${fmtDate(d.generatedAt)}</div>
-          `;
+          if (d.totalRuns === 0) {
+            body.innerHTML = `
+              <div class="row"><div class="k" style="font-weight:600;font-size:14px">
+                Variance dashboard — coming in the next release
+              </div></div>
+              <div class="row" style="margin-top:8px;line-height:1.5;opacity:.85">
+                Track cost predictability and reliability across repeated task runs.
+                A deterministic sweep replays a benchmark task set across tiers and
+                models, then aggregates the results here.
+              </div>
+              <div class="row" style="margin-top:14px;font-weight:600">What you'll see:</div>
+              <ul style="margin:6px 0 14px 18px;opacity:.85;line-height:1.7">
+                <li>Per-tier cost spread (avg, p50, p95) — budget with confidence</li>
+                <li>Classifier accuracy — auto tier selection match rate</li>
+                <li>Outlier tasks (>2σ cost) — prompt or cap candidates</li>
+                <li>Rollback and fallback rates — reliability signal</li>
+              </ul>
+              <div class="row" style="margin-top:8px;opacity:.6;font-size:12px">
+                Sweep workflow ships in the next release. For now this panel stays empty
+                until results land in data/sweep-results.csv.
+              </div>
+            `;
+          } else {
+            body.innerHTML = `
+              <style>
+                .var-tbl td { ${tdStyle} }
+                .var-tbl th { ${thStyle} }
+              </style>
+              <div class="row">
+                <div class="k">Total runs</div>
+                <div class="v">${d.totalRuns}</div>
+              </div>
+              <div class="row">
+                <div class="k">Overall pass rate</div>
+                <div class="v" style="color:${passColor}">${fmtPct(d.overallPassRate)}</div>
+              </div>
+              <div class="row"><div class="k" style="font-weight:600;margin-top:8px">Per-tier aggregations</div></div>
+              <table class="var-tbl" style="${tblStyle}">
+                <thead><tr>
+                  <th>Tier</th><th>Runs</th><th>Pass%</th>
+                  <th>Avg cost</th><th>p50 cost</th><th>p95 cost</th>
+                  <th>Avg dur</th><th>Rollback%</th><th>Fallback%</th>
+                </tr></thead>
+                <tbody>${tierRows || '<tr><td colspan="9" style="opacity:.5">No data</td></tr>'}</tbody>
+              </table>
+              <div class="row"><div class="k" style="font-weight:600;margin-top:8px">Per-task variance <span style="opacity:.6;font-weight:400;font-size:11px">(⚠ = cost outlier >2σ)</span></div></div>
+              <table class="var-tbl" style="${tblStyle}">
+                <thead><tr>
+                  <th>Task</th><th>Tier</th><th>Runs</th><th>Pass%</th>
+                  <th>Avg cost ±σ</th><th>Avg dur ±σ</th><th>Last seen</th>
+                </tr></thead>
+                <tbody>${taskRows || '<tr><td colspan="7" style="opacity:.5">No data</td></tr>'}</tbody>
+              </table>
+              <div class="row"><div class="k" style="font-weight:600;margin-top:8px">Recent runs <span style="opacity:.6;font-weight:400;font-size:11px">(last 50)</span></div></div>
+              <table class="var-tbl" style="${tblStyle}">
+                <thead><tr>
+                  <th>Time</th><th>Task</th><th>Exp</th><th>Pred</th>
+                  <th>Cost</th><th>Dur</th><th>Mode</th><th>Result</th><th>Error</th>
+                </tr></thead>
+                <tbody>${runRows || '<tr><td colspan="9" style="opacity:.5">No runs yet</td></tr>'}</tbody>
+              </table>
+              <div style="opacity:.4;font-size:11px;margin-top:4px">Generated ${fmtDate(d.generatedAt)}</div>
+            `;
+          }
         })
         .catch(() => {
           body.innerHTML = '<div class="row"><div class="k">Error</div><div class="v">Could not reach /api/sweep-results.</div></div>';
