@@ -16,12 +16,12 @@ Existing coding agents (Cursor, Codex, Claude Code) are powerful but:
 Zone is different:
 
 - **BYOK**: Your OpenAI or Anthropic key. You pay your provider directly — no markup, no subscription floor.
-- **Tier-bounded**: Simple tasks ~$0.005, complex tasks ~$0.15. Per-tier token and iteration caps make cost predictable per dispatch.
+- **Tier-bounded**: Simple tasks from ~$0.001, complex tasks up to ~$5.00 (provider-dependent). Per-tier token and iteration caps make cost predictable per dispatch.
 - **Atomic safety**: Patches stage in memory, typecheck before flush, auto-rollback on failure. Your working tree never enters a half-broken state.
 - **Self-host**: AGPL-3.0. No SaaS lock-in, no telemetry, no vendor dependency beyond your LLM provider.
 - **Web UI**: Browser-based. Use it from anywhere — laptop, remote dev box, tablet — without an editor extension.
 
-Anthropic prompt caching is enabled by default — empirically 50%+ input savings on multi-iter runs (hit ratio reaches 90–96% by iter 3+). A typical Zone run costs $0.05–0.50 depending on tier.
+Anthropic prompt caching is enabled by default — empirically 50%+ input savings on multi-iter runs (hit ratio reaches 90–96% by iter 3+). A typical Zone run costs $0.001–$5.00 depending on provider and tier — see [Cost](#cost) below.
 
 ## Quick start
 
@@ -79,6 +79,28 @@ Click the paperclip → upload PNG / JPEG / WebP / GIF. Limits: ≤5 MB per imag
 ### Variance dashboard
 
 **Settings → Variance** surfaces per-task cost variance, p50/p95 latency, outlier detection (>2σ), and the last 50 runs. Powered by the sweep CSV — useful for catching regressions in token efficiency across versions.
+
+## Cost
+
+Empirical per-task cost by provider × tier (USD), measured from drift sweep runs:
+
+| Provider      | Simple  | Medium | Complex |
+|---------------|---------|--------|---------|
+| gpt-5.4       | $0.005  | $0.05  | $0.20   |
+| gpt-5.4-mini  | $0.001  | $0.01  | $0.05   |
+| Sonnet 4.6    | $0.05   | $0.30  | $1.50   |
+| Haiku 4.5     | $0.01   | $0.05  | $0.20   |
+| Opus 4.7      | $0.20   | $1.00  | $5.00   |
+
+Monthly estimate for ~50 mixed-tier dispatches:
+
+- **gpt-5.4**: ~$5–10
+- **gpt-5.4-mini**: ~$1–3
+- **Sonnet 4.6**: ~$15–30
+- **Haiku 4.5**: ~$3–5
+- **Opus 4.7**: ~$30–80
+
+> Numbers are approximate per-task averages — your variance dashboard shows real history from your runs.
 
 ## What Zone is good at
 
@@ -159,17 +181,17 @@ All keys can also be set through **Settings → API Keys** after first launch �
 
 ## Common workflows
 
-**Add a comment to a file** (tier 1, ~5 sec, ~$0.005)
+**Add a comment to a file** (simple tier, ~5 sec, ~$0.005 on gpt-5.4 / ~$0.05 on Sonnet 4.6)
 ```
 Add a brief header comment to src/utils/files.ts describing what it exports
 ```
 
-**Investigate a failing test** (investigation mode, read-only, ~$0.05)
+**Investigate a failing test** (medium tier, read-only, ~$0.05 on gpt-5.4 / ~$0.30 on Sonnet 4.6)
 ```
 Why is buildDecisionTrace.test.ts failing on case 3?
 ```
 
-**Refactor a function signature** (tier 3 complex, atomic verification, ~$0.15)
+**Refactor a function signature** (complex tier, atomic verification, ~$0.20 on gpt-5.4 / ~$1.50 on Sonnet 4.6)
 ```
 Change normalizeSignals to accept an options object with a strict flag
 ```
