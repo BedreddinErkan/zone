@@ -6,6 +6,23 @@ import { debugLog } from "../utils/logger.js";
 export type ZoneMessageType = "patch_request" | "question" | "discussion";
 export type ZoneLegacyIntent = "execute" | "chat" | "investigation";
 
+// Bug Y: multi-language imperative verbs that strongly signal a patch request.
+// Turkish is SOV — verb at end (yap, ekle, değiştir). English/Spanish verbs at start.
+const PATCH_IMPERATIVE_PATTERN =
+  /(?:^|\s|["'`'])(?:fix|add|remove|delete|refactor|implement|update|change|rename|create|modify|insert|replace|patch|edit|append|prepend|set|make|wrap|move|extract|inline|convert|comment\s*out|uncomment)\b|\b(?:yap|ekle|değiştir|degistir|düzelt|duzelt|oluştur|olustur|sil|kaldır|kaldir|güncelle|guncelle|yaz|ekleyiver|değiştiriver|ekleyebilir|taşı|tasi|yeniden\s+adlandır|yeniden\s+adlandir)\b|\b(?:cambiar|cambia|añadir|anadir|añade|anade|agregar|agrega|arreglar|arregla|crear|crea|eliminar|elimina|borrar|borra|modificar|modifica|reemplazar|reemplaza|actualizar|actualiza|renombrar|renombra)\b/i;
+
+// Question-style cues that should NOT be treated as patch requests even if a
+// verb appears later (TR question particles "mı/mi/mu/mü", question words).
+const NON_IMPERATIVE_QUESTION_PATTERN =
+  /\?\s*$|^\s*(?:why|how|what|where|which|when|who|explain|describe|trace|summarize)\b|\b(?:neden|niye|niçin|nicin|nasıl|nasil|hangi|kim|kaç|kac|ne\s+zaman|açıkla|acikla|anlat|özetle|ozetle)\b|\b(?:mı|mi|mu|mü)\?/i;
+
+export function looksLikePatchImperative(task: string): boolean {
+  const normalized = String(task || "").trim();
+  if (!normalized) return false;
+  if (NON_IMPERATIVE_QUESTION_PATTERN.test(normalized)) return false;
+  return PATCH_IMPERATIVE_PATTERN.test(normalized);
+}
+
 export function shouldUseInvestigationMode(
   task: string,
   messageType: ZoneMessageType
@@ -54,11 +71,7 @@ function fallbackMessageType(task: string): ZoneMessageType {
     return "question";
   }
 
-  if (
-    /\b(?:fix|add|remove|delete|refactor|implement|update|change|rename|create|modify|insert|replace)\b/i.test(
-      normalizedTask
-    )
-  ) {
+  if (looksLikePatchImperative(normalizedTask)) {
     return "patch_request";
   }
 
@@ -173,11 +186,20 @@ export async function detectMessageType(
     const extraction = extractResponsesApiOutputText(response);
     const raw = extraction.ok ? extraction.text : "";
     const parsedMessageType = parseMessageTypeJson(raw) ?? fallbackMessageType(normalizedTask);
-    const messageType =
-      parsedMessageType === "patch_request" &&
-      shouldPreferQuestionForInformationRequest(normalizedTask)
+    const preferQuestion = shouldPreferQuestionForInformationRequest(normalizedTask);
+    let messageType: ZoneMessageType =
+      parsedMessageType === "patch_request" && preferQuestion
         ? "question"
         : parsedMessageType;
+    // Bug Y: override LLM when task is clearly patch-imperative (TR/EN/ES verb +
+    // not a question). Handles non-English imperatives the classifier misses.
+    if (
+      messageType !== "patch_request" &&
+      !preferQuestion &&
+      looksLikePatchImperative(normalizedTask)
+    ) {
+      messageType = "patch_request";
+    }
 
     debugLog("[zone-intent-classify]", {
       taskPreview: normalizedTask.slice(0, 120),
