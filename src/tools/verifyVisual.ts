@@ -23,6 +23,21 @@ const NAV_TIMEOUT_MS = 15_000;
 const WAIT_SELECTOR_TIMEOUT_MS = 5_000;
 export const SCREENSHOT_CAP_PER_RUN = 5;
 
+const CONSOLE_NOISE_PATTERNS: RegExp[] = [
+  /Failed to load resource.*\b(400|404)\b/i,
+  /A tree hydrated but some attributes/i,
+  /hydration[- ]mismatch/i,
+  /\[Fast Refresh\]/i,
+  /Download the React DevTools/i,
+  /bis_register|bis_skin_checked|__processed_/i,
+  /webextension|chrome-extension:|moz-extension:/i,
+  /ResizeObserver loop/i,
+];
+
+function isConsoleNoise(text: string): boolean {
+  return CONSOLE_NOISE_PATTERNS.some((p) => p.test(text));
+}
+
 let browserSingleton: Browser | null = null;
 
 async function getBrowser(): Promise<Browser> {
@@ -81,9 +96,19 @@ export async function runVerifyVisual(
 
     await page.emulateMedia({ reducedMotion: "reduce" });
 
-    page.on("pageerror", (err) => consoleErrors.push(`pageerror: ${err.message}`));
+    page.on("pageerror", (err) => {
+      const message = `pageerror: ${err.message}`;
+      if (!isConsoleNoise(message)) {
+        consoleErrors.push(message);
+      }
+    });
     page.on("console", (msg) => {
-      if (msg.type() === "error") consoleErrors.push(msg.text());
+      if (msg.type() === "error") {
+        const message = msg.text();
+        if (!isConsoleNoise(message)) {
+          consoleErrors.push(message);
+        }
+      }
     });
 
     await page.goto(fullUrl, {
