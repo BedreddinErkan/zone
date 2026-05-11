@@ -82,32 +82,46 @@ export async function runVerifyVisual(
 
     await page.goto(fullUrl, {
       timeout: NAV_TIMEOUT_MS,
-      waitUntil: "domcontentloaded",
+      waitUntil: "load",
     });
 
     if (input.waitFor) {
       await page.waitForSelector(input.waitFor, { timeout: WAIT_SELECTOR_TIMEOUT_MS }).catch(() => null);
     }
 
-    // Trigger scroll-based intersection observers (e.g. IntersectionObserver-driven FadeIn)
-    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)");
-    await page.waitForTimeout(150);
-    await page.evaluate("window.scrollTo(0, 0)");
-    await page.waitForTimeout(150);
+    // Wait for network/JS to settle (hydration likely complete after this)
+    await page.waitForLoadState("networkidle").catch(() => { /* best-effort */ });
 
-    // Wait for opacity:0 styled elements to settle (best-effort, bounded)
+    // Trigger scroll-based intersection observers (now that observers are attached)
+    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)");
+    await page.waitForTimeout(200);
+    await page.evaluate("window.scrollTo(0, 0)");
+    await page.waitForTimeout(200);
+
+    // Class-aware opacity wait via getComputedStyle: catches BOTH inline opacity:0
+    // AND Tailwind opacity-0 / any class-driven opacity mechanism.
+    // Bounded 3s with 200ms polling. Safe fallthrough on timeout.
     try {
       await page.waitForFunction(
-        `!document.querySelector('[style*="opacity: 0"], [style*="opacity:0"]')`,
+        `(() => {
+           const els = document.querySelectorAll('*');
+           for (let i = 0; i < els.length; i++) {
+             const cs = window.getComputedStyle(els[i]);
+             if (cs.opacity === '0' && cs.display !== 'none' && cs.visibility !== 'hidden') {
+               return false;
+             }
+           }
+           return true;
+         })()`,
         undefined,
-        { timeout: 1500 }
+        { timeout: 3000, polling: 200 }
       );
     } catch {
       // safe fallback — proceed to fixed wait below
     }
 
-    // Final safety wait for tail animations / ease curves
-    await page.waitForTimeout(300);
+    // Final tail for ease-curve completion (FadeIn typical 400–600ms)
+    await page.waitForTimeout(500);
 
     await fs.mkdir(SCREENSHOT_DIR, { recursive: true });
     const filename = `${context.runId}-${Date.now()}.png`;
