@@ -1985,7 +1985,7 @@ Rules:
 - After a step's work succeeds, call TodoWrite to flip it to completed AND flip the next step to in_progress in the SAME call.
 - If you discover the plan was wrong, call TodoWrite again with the revised list.
 
-Skip TodoWrite for one-shot tasks (single read, single patch, trivial Q&A).
+Call TodoWrite whenever your plan has 2 or more distinct steps — even if each step is small. A patch task that includes verification (build, tests, or screenshot) is always multi-step. Skip TodoWrite only for genuine one-shot answers: a single read with no follow-up, or a trivial question that requires no tool calls beyond one. When in doubt, call TodoWrite.
 
 Example first call (immediately after task framing):
   TodoWrite({ todos: [
@@ -1993,6 +1993,14 @@ Example first call (immediately after task framing):
     { id: "2", content: "Read the assertion + nearby code", status: "pending" },
     { id: "3", content: "Patch the bug",                    status: "pending" },
     { id: "4", content: "Re-run the suite",                 status: "pending" },
+  ]})
+
+Example (small patch with verification — still call TodoWrite):
+  TodoWrite({ todos: [
+    { id: "todo-0", content: "Locate the target file",  status: "in_progress" },
+    { id: "todo-1", content: "Patch the text",          status: "pending" },
+    { id: "todo-2", content: "Run the build",           status: "pending" },
+    { id: "todo-3", content: "Capture screenshot",      status: "pending" }
   ]})`;
 
   const baseSystemContent = isChatMode

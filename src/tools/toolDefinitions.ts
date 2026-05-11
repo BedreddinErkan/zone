@@ -45,11 +45,9 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
       name: "TodoWrite",
       strict: true,
       description:
-        "Create or revise the user-facing plan list shown in the sidebar. " +
-        "Call this once near the start of any non-trivial task to lay out 2–6 steps. " +
-        "Call again whenever your plan changes (added discovery, dropped step, status change). " +
-        "Send the COMPLETE list every time — it replaces the prior list. " +
-        "Exactly ONE step may be in_progress at a time; mark a step completed before starting the next.",
+        "Plan tracker that surfaces a live sidebar to the user. CALL THIS FIRST " +
+        "for any task involving 2+ steps including verification, builds, or " +
+        "follow-up actions. Skip only for true one-shot single-action requests.",
       parameters: {
         type: "object",
         additionalProperties: false,
