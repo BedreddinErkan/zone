@@ -1,5 +1,16 @@
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
+export const READ_ONLY_TOOLS = [
+  "read_file",
+  "list_files",
+  "search_in_files",
+  "find_references",
+] as const;
+
+export const CHAT_TOOLS = READ_ONLY_TOOLS.filter(
+  (toolName) => toolName === "read_file" || toolName === "list_files"
+);
+
 /**
  * Tool definitions for `client.chat.completions.create`.
  * Shape: { type: "function", function: { name, description, parameters } } - nested under `function`.

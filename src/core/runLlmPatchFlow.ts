@@ -4538,6 +4538,7 @@ export async function runLlmPatchFlow(input: {
    */
   userApiKey?: string;
   provider?: LLMProvider;
+  mode?: "patch";
   /** L.4.1: per-request tier override forwarded from API body. Beats ZONE_FORCE_TIER env. */
   forceTier?: TaskTier;
 }): Promise<LlmPatchFlowResult> {
@@ -5637,6 +5638,7 @@ const initializeTodosFromPlan = (): void => {
       // Settings → Usage tab can show per-user totals. Falls back to
       // "local-dev" inside agentLoop when missing.
       userId: input.userId,
+      mode: input.mode,
       // Tur P2-scope: forward the plan so the tool layer can hard-block
       // writes that fall outside `plan.steps[*].filesLikely`.
       executionPlan,

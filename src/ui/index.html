@@ -923,6 +923,11 @@
     .attach-thumb-wrap{position:relative;width:40px;height:40px;flex-shrink:0}
     .attach-thumb{width:40px;height:40px;border-radius:4px;object-fit:cover;display:block;border:1px solid var(--border)}
     .attach-thumb-remove{position:absolute;top:-4px;right:-4px;width:14px;height:14px;border-radius:50%;background:var(--color-error);color:#fff;border:none;cursor:pointer;font-size:9px;display:flex;align-items:center;justify-content:center;line-height:1;padding:0}
+    .modeRow{display:flex;justify-content:flex-start;align-items:center;margin-top:var(--space-lg)}
+    .modeSegment{display:inline-flex;align-items:center;gap:var(--space-xs);padding:2px;border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--surface-alpha-1)}
+    .modePill{border:1px solid transparent;background:transparent;color:var(--text-3);border-radius:var(--radius-pill);padding:var(--space-sm) var(--space-lg);font-size:var(--font-size-sm);line-height:1;cursor:pointer;transition:background var(--transition-base),border-color var(--transition-base),color var(--transition-base)}
+    .modePill:hover{border-color:var(--border2);color:var(--text-1);background:var(--surface-alpha-2)}
+    .modePill.active{background:var(--color-brand);border-color:var(--violet-bd);color:#fff}
     .metaRow{display:flex;justify-content:space-between;align-items:center;margin-top:var(--space-lg);color:var(--text-4);font-size:var(--font-size-sm)}
     .repoChip{display:inline-flex;align-items:center;gap:var(--space-lg);border:1px solid var(--border);background:var(--surface-alpha-1);padding:var(--space-sm) var(--space-lg);border-radius:var(--radius-pill);color:var(--text-2);cursor:pointer;transition:border-color var(--transition-base),background var(--transition-base)}
     .repoChip:hover{border-color:var(--border2);background:var(--surface-alpha-2)}
@@ -1188,6 +1193,14 @@
             </div>
           </div>
         </div>
+        <div class="modeRow">
+          <div class="modeSegment" id="modeSelector" role="tablist" aria-label="Mode selector">
+            <button class="modePill active" type="button" data-mode="auto" role="tab" aria-selected="true">Auto</button>
+            <button class="modePill" type="button" data-mode="chat" role="tab" aria-selected="false">Chat</button>
+            <button class="modePill" type="button" data-mode="investigate" role="tab" aria-selected="false">Investigate</button>
+            <button class="modePill" type="button" data-mode="patch" role="tab" aria-selected="false">Patch</button>
+          </div>
+        </div>
         <div class="metaRow">
           <div class="repoChip" id="repoChip" title="Cycle project">
             <span class="cdot" aria-hidden="true"></span>
@@ -1283,6 +1296,7 @@
       branchList: [],
       branchLoading: false,
       branchDropdownOpen: false,
+      selectedMode: 'auto',
       pendingAttachments: []  // [{mediaType, base64}]
     };
     state.__durationTickersByRunId = state.__durationTickersByRunId || {};
@@ -1854,6 +1868,7 @@
       attachBtn: document.getElementById('attachBtn'),
       attachFileInput: document.getElementById('attachFileInput'),
       attachPreviewStrip: document.getElementById('attachPreviewStrip'),
+      modeSelector: document.getElementById('modeSelector'),
       repoChip: document.getElementById('repoChip'),
       repoChipName: document.getElementById('repoChipName'),
       branchChip: document.getElementById('branchChip'),
@@ -1872,6 +1887,21 @@
 
     if (els.branchDropdown && els.branchDropdown.parentElement !== document.body) {
       document.body.appendChild(els.branchDropdown);
+    }
+
+    const ZONE_MODES = ['auto', 'chat', 'investigate', 'patch'];
+    function normalizeMode(mode){
+      const normalized = String(mode || '').trim().toLowerCase();
+      return ZONE_MODES.includes(normalized) ? normalized : 'auto';
+    }
+    function setSelectedMode(mode){
+      state.selectedMode = normalizeMode(mode);
+      if (!els.modeSelector) return;
+      els.modeSelector.querySelectorAll('.modePill').forEach((btn) => {
+        const active = String(btn.dataset.mode || '') === state.selectedMode;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
     }
 
     function nowTs(){ return new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' }); }
@@ -8986,6 +9016,7 @@
       thread.messages.push({ type:'user', text: task, ts: Date.now(), runId });
 
       const trimmed = String(task || '').trim();
+      const runMode = normalizeMode(state.selectedMode);
       const isDirectCommand = /^(\$|>|run:)\s+/i.test(trimmed);
       const directCommand = trimmed.replace(/^(\$|>|run:)\s+/i, '').trim();
       const effectiveUserId = getCurrentUserId();
@@ -9052,23 +9083,27 @@
         return;
       }
 
-      let messageType = 'patch_request';
-      let intent = 'execute';
+      let messageType = runMode === 'chat' || runMode === 'investigate' ? 'question' : 'patch_request';
+      let intent = runMode === 'chat' ? 'chat' : runMode === 'investigate' ? 'investigation' : 'execute';
       const classifyStartedAt = Date.now();
-      try {
-        const _classifyHeaders = { 'Content-Type': 'application/json', ...buildAuthHeaders() };
-        const classifyRes = await apiFetch('/api/classify-intent', {
-          method:'POST',
-          headers: _classifyHeaders,
-          body: JSON.stringify({ task })
-        });
-        const classifyBody = await classifyRes.json();
-        messageType = String(classifyBody?.messageType || 'patch_request');
-        intent = String(classifyBody?.intent || (messageType === 'patch_request' ? 'execute' : 'chat'));
-        try { console.log('[send-debug] classify-intent resolved', { messageType, intent, msElapsed: Date.now() - classifyStartedAt }); } catch {}
-      } catch (e) {
-        console.log('[zone-intent-classify] classify request failed', e?.message || e);
-        try { console.log('[send-debug] classify-intent failed', { msElapsed: Date.now() - classifyStartedAt, error: e?.message || String(e) }); } catch {}
+      if (runMode === 'auto') {
+        try {
+          const _classifyHeaders = { 'Content-Type': 'application/json', ...buildAuthHeaders() };
+          const classifyRes = await apiFetch('/api/classify-intent', {
+            method:'POST',
+            headers: _classifyHeaders,
+            body: JSON.stringify({ task })
+          });
+          const classifyBody = await classifyRes.json();
+          messageType = String(classifyBody?.messageType || 'patch_request');
+          intent = String(classifyBody?.intent || (messageType === 'patch_request' ? 'execute' : 'chat'));
+          try { console.log('[send-debug] classify-intent resolved', { messageType, intent, msElapsed: Date.now() - classifyStartedAt }); } catch {}
+        } catch (e) {
+          console.log('[zone-intent-classify] classify request failed', e?.message || e);
+          try { console.log('[send-debug] classify-intent failed', { msElapsed: Date.now() - classifyStartedAt, error: e?.message || String(e) }); } catch {}
+        }
+      } else {
+        try { console.log('[send-debug] explicit mode selected', { mode: runMode, intent }); } catch {}
       }
 
       if (intent === 'chat' || (!intent && (messageType === 'question' || messageType === 'discussion'))) {
@@ -9093,20 +9128,28 @@
           const _chatHeaders = { 'Content-Type': 'application/json', ...buildAuthHeaders() };
           const _chatAttachments = state.pendingAttachments.slice();
           clearAttachments();
-          const res = await apiFetch('/api/chat', {
-            method:'POST',
-            headers: _chatHeaders,
-            body: JSON.stringify({
-              task,
-              repoPath: state.activeRepo.path,
-              runId,
-              userId: effectiveUserId,
-              conversationId: state.activeThreadId,
-              threadId: state.activeThreadId,
-              ...(_chatAttachments.length > 0 ? { attachments: _chatAttachments } : {})
-            })
-          });
-          const result = await res.json();
+          const chatPayload = {
+            task,
+            repoPath: state.activeRepo.path,
+            runId,
+            userId: effectiveUserId,
+            conversationId: state.activeThreadId,
+            threadId: state.activeThreadId,
+            mode: runMode,
+            ...(_chatAttachments.length > 0 ? { attachments: _chatAttachments } : {})
+          };
+          let result;
+          if (runMode === 'auto') {
+            const res = await apiFetch('/api/chat', {
+              method:'POST',
+              headers: _chatHeaders,
+              body: JSON.stringify(chatPayload)
+            });
+            result = await res.json();
+          } else {
+            const _postChatOutcome = await postPatchApi(chatPayload, _chatHeaders);
+            result = _postChatOutcome.body;
+          }
           handlePatchResult(result, runId);
         } catch (e) {
           setRunningUI(false);
@@ -9178,6 +9221,7 @@
           runId,
           userId: effectiveUserId,
           conversationId: state.activeThreadId,
+          mode: runMode,
           lastChangedFiles: Array.isArray(state.__lastChangedFiles) ? state.__lastChangedFiles : [],
           lastAddedFunctions: Array.isArray(state.__lastAddedFunctions) ? state.__lastAddedFunctions : []
         };
@@ -10709,6 +10753,14 @@
 
       els.taskInput.addEventListener('input', autosizeTextarea);
       els.taskInput.addEventListener('keydown', maybeSendFromEnter);
+      if (els.modeSelector) {
+        setSelectedMode(state.selectedMode);
+        els.modeSelector.addEventListener('click', (e) => {
+          const btn = e.target && e.target.closest ? e.target.closest('.modePill') : null;
+          if (!btn) return;
+          setSelectedMode(btn.dataset.mode);
+        });
+      }
       els.sendBtn.addEventListener('click', () => {
         if (els.sendBtn.classList.contains('send-btn--stop')) {
           void cancelActivePatchRun();

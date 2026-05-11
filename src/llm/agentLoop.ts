@@ -15,7 +15,7 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
-import { ZONE_TOOLS } from "../tools/toolDefinitions.js";
+import { CHAT_TOOLS, READ_ONLY_TOOLS, ZONE_TOOLS } from "../tools/toolDefinitions.js";
 import {
   emptySubagentTokenUsage,
   resetSubagentCallCount,
@@ -43,11 +43,14 @@ import type {
   ChatCompletionMessageParam,
   ChatCompletionMessageFunctionToolCall,
 } from "openai/resources/chat/completions";
+import type { Mode } from "../types/mode.js";
+
+type AgentLoopMode = Exclude<Mode, "auto"> | "investigation";
 
 export interface AgentLoopInput {
   task: string;
   repoPath: string;
-  mode?: "patch" | "investigation";
+  mode?: AgentLoopMode;
   runId?: string;
   framework?: ProjectFramework;
   maxIterations?: number; // default: 10
@@ -403,6 +406,53 @@ export function assembleAgentSystemPrompt(input: {
     input.backgroundCommandBlock +
     `Repository path: ${input.repoPath}`
   );
+}
+
+function normalizeAgentLoopMode(mode: AgentLoopInput["mode"]): Exclude<Mode, "auto"> {
+  if (mode === "chat" || mode === "investigate" || mode === "patch") {
+    return mode;
+  }
+  if (mode === "investigation") return "investigate";
+  return "patch";
+}
+
+const MODE_SYSTEM_PROMPT_PREFIX: Record<Exclude<Mode, "auto">, string> = {
+  chat:
+    "MODE: chat. Answer the user's question. Do not modify files or run commands. If the user requests an edit, suggest they switch to patch mode.",
+  investigate:
+    "MODE: investigate. Read code, analyze, answer thoroughly. Do not modify files. Use search tools liberally before answering.",
+  patch:
+    "MODE: patch. The user wants a code change. Plan the edits, apply them via the patch tool, then verify with build and visual screenshot when applicable.",
+};
+
+function modeDefaultAllowedTools(mode: Exclude<Mode, "auto">): ReadonlySet<string> | undefined {
+  if (mode === "chat") return new Set(CHAT_TOOLS);
+  if (mode === "investigate") return new Set(READ_ONLY_TOOLS);
+  return undefined;
+}
+
+function assembleChatSystemPrompt(input: {
+  repoPath: string;
+  projectMemoryBlock: string;
+  baseMaxIterations: number;
+}): string {
+  return [
+    "You are Zone, answering conversationally about the user's codebase.",
+    "",
+    "Rules:",
+    "- Do not modify files.",
+    "- Do not run shell commands.",
+    "- Use read_file and list_files only when code context is needed.",
+    "- If the user asks for an edit, tell them to switch to patch mode.",
+    "- Be concise, but include file references when they help.",
+    "",
+    `Repo path: ${input.repoPath}`,
+    input.projectMemoryBlock,
+    "",
+    `You may use up to ${input.baseMaxIterations} iterations, but stop as soon as you can answer well.`,
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
 }
 
 export function assembleInvestigationSystemPrompt(input: {
@@ -1720,7 +1770,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 }
 
 async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResult> {
-  const isInvestigationMode = input.mode === "investigation";
+  const mode = normalizeAgentLoopMode(input.mode);
+  const hasExplicitMode =
+    input.mode === "chat" || input.mode === "investigate" || input.mode === "patch";
+  const isChatMode = mode === "chat";
+  const isInvestigationMode = mode === "investigate";
+  const isReadOnlyMode = isChatMode || isInvestigationMode;
   const baseMaxIterations =
     typeof input.maxIterationsOverride === "number"
       ? input.maxIterationsOverride
@@ -1731,7 +1786,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   // Phase H.6: surface the effective budget at loop entry for tracing how
   // plan-aware overrides propagate through investigation/patch entry points.
   debugLog("[zone-iter-budget-effective]", JSON.stringify({
-    mode: isInvestigationMode ? "investigation" : "patch",
+    mode,
     runId: input.runId ?? null,
     maxIterations: baseMaxIterations,
     escalationEnabled,
@@ -1746,12 +1801,14 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     maxIterationsForRun: baseMaxIterations,
     escalationBonusGranted: false,
   };
+  const effectiveAllowedTools =
+    input.allowedTools ?? (hasExplicitMode ? modeDefaultAllowedTools(mode) : undefined);
   const toolsForLLM = sortToolsForPromptCache(
-    input.allowedTools
-      ? ZONE_TOOLS.filter((t) => input.allowedTools!.has(getZoneToolName(t)))
+    effectiveAllowedTools
+      ? ZONE_TOOLS.filter((t) => effectiveAllowedTools.has(getZoneToolName(t)))
       : ZONE_TOOLS
   );
-  if (input.allowedTools && toolsForLLM.length === 0) {
+  if (effectiveAllowedTools && toolsForLLM.length === 0) {
     throw new Error("AgentLoopInput.allowedTools resolved to zero tools — aborting.");
   }
 
@@ -1893,7 +1950,9 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
 
   const subagentKind = input.subagent?.type;
   const agentIntro =
-    isInvestigationMode
+    isChatMode
+      ? `You are Zone in chat mode.`
+      : isInvestigationMode
       ? `You are Zone in read-only investigation mode.`
       : subagentKind === "explore"
       ? buildExploreAgentIntro()
@@ -1936,13 +1995,19 @@ Example first call (immediately after task framing):
     { id: "4", content: "Re-run the suite",                 status: "pending" },
   ]})`;
 
-  const systemContent = isInvestigationMode
-    ? assembleInvestigationSystemPrompt({
+  const baseSystemContent = isChatMode
+    ? assembleChatSystemPrompt({
         repoPath: input.repoPath,
         projectMemoryBlock,
         baseMaxIterations,
       })
-    : assembleAgentSystemPrompt({
+    : isInvestigationMode
+      ? assembleInvestigationSystemPrompt({
+        repoPath: input.repoPath,
+        projectMemoryBlock,
+        baseMaxIterations,
+      })
+      : assembleAgentSystemPrompt({
         agentIntro,
         frameworkLines: fwLines,
         hasFramework: !!fw,
@@ -1954,6 +2019,9 @@ Example first call (immediately after task framing):
         repoPath: input.repoPath,
         planProgressBlock,
       });
+  const systemContent = hasExplicitMode
+    ? `${MODE_SYSTEM_PROMPT_PREFIX[mode]}\n\n${baseSystemContent}`
+    : baseSystemContent;
 
   // Chat Completions messages (system + user kickoff).
   const responseInput: ChatCompletionMessageParam[] = [
@@ -2061,7 +2129,7 @@ Example first call (immediately after task framing):
                 "Stop calling tools and synthesize your findings into a final answer " +
                 "using only the information already gathered. " +
                 "If insufficient information was gathered, say so explicitly. " +
-                (isInvestigationMode
+                (isReadOnlyMode
                   ? "Do not mention patches or verification."
                   : "Mention which steps remain incomplete."),
             },
@@ -2285,8 +2353,8 @@ Example first call (immediately after task framing):
           parsedArgs = {};
         }
 
-        if (input.allowedTools && !input.allowedTools.has(name)) {
-          const allowed = [...input.allowedTools];
+        if (effectiveAllowedTools && !effectiveAllowedTools.has(name)) {
+          const allowed = [...effectiveAllowedTools];
           const rejectionMsg =
             `Tool "${name}" is not allowed in this mode. ` +
             `Available tools: ${allowed.join(", ")}.`;
@@ -2460,7 +2528,7 @@ Example first call (immediately after task framing):
           stagingFiles,
           abortSignal: input.abortSignal,
           executionPlan: input.executionPlan ?? null,
-          allowedTools: input.allowedTools,
+          allowedTools: effectiveAllowedTools,
           userId: input.userId,
           framework: input.framework,
           subagent: input.subagent,
@@ -2779,9 +2847,9 @@ Example first call (immediately after task framing):
     }
 
     const extracted = extractResponsesApiOutputText(response);
-    if (extracted.ok && extracted.text.trim()) {
+      if (extracted.ok && extracted.text.trim()) {
       const finalText = extracted.text.trim();
-      if (isInvestigationMode) {
+      if (isReadOnlyMode) {
         return {
           success: true,
           summary: finalText,
@@ -2965,8 +3033,12 @@ Example first call (immediately after task framing):
     // If we got neither tool calls nor text, keep looping (rare).
   }
 
-  if (isInvestigationMode) {
-    input.onProgress?.("[agent_loop] Max iterations reached - requesting final investigation answer");
+  if (isReadOnlyMode) {
+    input.onProgress?.(
+      isChatMode
+        ? "[agent_loop] Max iterations reached - requesting final chat answer"
+        : "[agent_loop] Max iterations reached - requesting final investigation answer"
+    );
     let finalSummary = "Max iterations reached before a final answer was produced.";
     try {
       const assessmentResponse = await client.createChatCompletion({
@@ -2976,7 +3048,9 @@ Example first call (immediately after task framing):
           {
             role: "user",
             content:
-              "You have reached the maximum number of investigation iterations. " +
+              (isChatMode
+                ? "You have reached the maximum number of chat iterations. "
+                : "You have reached the maximum number of investigation iterations. ") +
               "Provide the best clear markdown answer you can from the files and search results already explored. " +
               "Do not call tools. Do not mention patches or verification.",
           },

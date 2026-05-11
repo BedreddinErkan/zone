@@ -1,4 +1,5 @@
 import type { AgentLoopResult } from "./agentLoop.js";
+import { READ_ONLY_TOOLS } from "../tools/toolDefinitions.js";
 
 export const WORKER_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   "read_file",
@@ -15,12 +16,7 @@ export const MAX_SUBAGENT_CALLS_PER_PARENT_RUN = 2; // K.2: tightened from 5 to 
 export const VALID_SUBAGENT_TYPES = ["worker", "explore"] as const;
 export type SubagentType = (typeof VALID_SUBAGENT_TYPES)[number];
 
-export const EXPLORE_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
-  "read_file",
-  "list_files",
-  "search_in_files",
-  "find_references",
-]);
+export const EXPLORE_ALLOWED_TOOLS: ReadonlySet<string> = new Set(READ_ONLY_TOOLS);
 
 // Phase H.6: plan-aware iteration budgets. Floor protects single-question
 // runs; ceiling caps unbounded plans; per-step factor scales with plan size.

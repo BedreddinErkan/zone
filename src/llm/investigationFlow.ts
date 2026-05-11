@@ -1,6 +1,7 @@
 import { renderChatMarkdownToHtml } from "./renderChatMarkdown.js";
 import { runAgentLoop } from "./agentLoop.js";
 import { EXPLORE_ALLOWED_TOOLS, computeExploreMaxIterations } from "./subagents.js";
+import { CHAT_TOOLS } from "../tools/toolDefinitions.js";
 import type { ToolResult } from "../tools/toolExecutor.js";
 import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import { debugLog } from "../utils/logger.js";
@@ -8,6 +9,23 @@ import { debugLog } from "../utils/logger.js";
 export type InvestigationFlowResult = {
   ok: true;
   decisionMode: "investigation";
+  finalState?: "max_iterations" | "token_budget_exceeded";
+  chatResponse: string;
+  responseHtml: string;
+  contextFiles: string[];
+  applyPatches: [];
+  fileDiffs: [];
+  toolCallLog: Array<{
+    tool: string;
+    args: Record<string, unknown>;
+    result: string;
+    success?: boolean;
+  }>;
+};
+
+export type ChatAgentFlowResult = {
+  ok: true;
+  decisionMode: "chat";
   finalState?: "max_iterations" | "token_budget_exceeded";
   chatResponse: string;
   responseHtml: string;
@@ -31,6 +49,7 @@ function filePathFromToolArgs(name: string, args: Record<string, unknown>): stri
 export async function runInvestigationFlow(input: {
   task: string;
   repoPath: string;
+  mode?: "investigate";
   runId?: string;
   userId?: string;
   userApiKey?: string;
@@ -71,7 +90,7 @@ export async function runInvestigationFlow(input: {
   const planStepsCount = 1;
   const computedMax = computeExploreMaxIterations(planStepsCount);
   debugLog("[zone-iter-budget]", {
-    mode: "investigation",
+    mode: input.mode ?? "investigation",
     planStepsCount,
     computedMax,
     source: "floor-default",
@@ -204,6 +223,120 @@ export async function runInvestigationFlow(input: {
   return {
     ok: true,
     decisionMode: "investigation",
+    ...(finalState ? { finalState } : {}),
+    chatResponse: responseText,
+    responseHtml: renderChatMarkdownToHtml(responseText),
+    contextFiles: [...contextFiles].slice(0, 20),
+    applyPatches: [],
+    fileDiffs: [],
+    toolCallLog: loop.toolCallLog,
+  };
+}
+
+export async function runChatAgentFlow(input: {
+  task: string;
+  repoPath: string;
+  runId?: string;
+  userId?: string;
+  userApiKey?: string;
+  abortSignal?: AbortSignal;
+  onProgress?: (update: {
+    stage: string;
+    lifecycle?: unknown;
+    progress?: Partial<ZoneStructuredProgressEvent>;
+  }) => void;
+}): Promise<ChatAgentFlowResult> {
+  const runId = typeof input.runId === "string" ? input.runId.trim() : "";
+  const contextFiles = new Set<string>();
+  const allowedTools: ReadonlySet<string> = new Set(CHAT_TOOLS);
+
+  const emitStructuredProgress = (
+    progress: Partial<ZoneStructuredProgressEvent>
+  ): void => {
+    if (!runId) return;
+    input.onProgress?.({
+      stage: "chat_response",
+      progress: {
+        runId,
+        ts: Date.now(),
+        ...progress,
+      } as Partial<ZoneStructuredProgressEvent>,
+    });
+  };
+
+  if (runId) {
+    emitStructuredProgress({
+      type: "chat_start",
+      title: "Thinking...",
+      status: "active",
+    } as Partial<ZoneStructuredProgressEvent>);
+  }
+
+  const loop = await runAgentLoop({
+    task: input.task,
+    repoPath: input.repoPath,
+    runId: runId || undefined,
+    userId: input.userId,
+    userApiKey: input.userApiKey,
+    abortSignal: input.abortSignal,
+    mode: "chat",
+    allowedTools,
+    maxIterationsOverride: 6,
+    disableTodoWrite: true,
+    onToolCall: (name: string, args: Record<string, unknown>) => {
+      const fp = filePathFromToolArgs(name, args);
+      if (fp) contextFiles.add(fp);
+      emitStructuredProgress({
+        type: "tool_call",
+        title: `[tool] ${name}${fp ? `: ${fp}` : ""}`.slice(0, 240),
+        status: "active",
+      });
+    },
+    onToolResult: (_name: string, result: ToolResult) => {
+      emitStructuredProgress({
+        type: "tool_result",
+        title: String(result.output || "").slice(0, 100) || "tool result",
+        detail: String(result.output || "").slice(0, 4000),
+        status: result.success ? "success" : "error",
+      });
+    },
+    onStructuredEvent: (evt: unknown) => {
+      if (!evt || typeof evt !== "object") return;
+      const e = evt as Record<string, unknown>;
+      if (e.type === "iter_cost_update" || e.type === "token_budget_status") {
+        emitStructuredProgress({
+          type: e.type as ZoneStructuredProgressEvent["type"],
+          title: String(e.title || "Run update"),
+          status:
+            (e.status as "active" | "warning" | "error" | "success" | undefined) ??
+            "active",
+          ...e,
+        } as Partial<ZoneStructuredProgressEvent>);
+      }
+    },
+  });
+
+  const terminationReason = loop.terminationReason;
+  const finalState: ChatAgentFlowResult["finalState"] =
+    terminationReason === "token_budget_exceeded"
+      ? "token_budget_exceeded"
+      : terminationReason === "max_iterations"
+        ? "max_iterations"
+        : undefined;
+  const responseText = String(loop.summary || "").trim() || "I could not produce a response.";
+
+  emitStructuredProgress({
+    type: "chat_done",
+    title: "Response ready",
+    status: loop.success ? "success" : "warning",
+    responseText,
+    responseHtml: renderChatMarkdownToHtml(responseText),
+    contextFiles: [...contextFiles].slice(0, 20),
+  } as Partial<ZoneStructuredProgressEvent>);
+
+  return {
+    ok: true,
+    decisionMode: "chat",
     ...(finalState ? { finalState } : {}),
     chatResponse: responseText,
     responseHtml: renderChatMarkdownToHtml(responseText),

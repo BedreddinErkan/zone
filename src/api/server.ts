@@ -70,7 +70,7 @@ import {
   shouldUseInvestigationMode,
 } from "../llm/detectIntent.js";
 import { getChatResponseWithContext } from "../llm/chatResponse.js";
-import { runInvestigationFlow } from "../llm/investigationFlow.js";
+import { runChatAgentFlow, runInvestigationFlow } from "../llm/investigationFlow.js";
 import {
   appendConversationMessages,
   getUserQuota,
@@ -117,6 +117,7 @@ import {
 } from "../billing/activeRunsRepository.js";
 import { indexRepoFiles } from "../embeddings/indexRepository.js";
 import { LOG_LEVEL, logger, log, debugLog, errorLog } from "../utils/logger.js";
+import { parseMode, type Mode } from "../types/mode.js";
 export const app = express();
 /** Active /api/patch runs — cancelled via POST /api/cancel (AbortSignal → runLlmPatchFlow). */
 const activePatchRunAbortControllers = new Map<string, AbortController>();
@@ -2591,6 +2592,12 @@ function shouldForceExecuteTask(task: string): boolean {
   );
 }
 
+function intentFromExplicitMode(mode: Exclude<Mode, "auto">): "execute" | "chat" | "investigation" {
+  if (mode === "patch") return "execute";
+  if (mode === "investigate") return "investigation";
+  return "chat";
+}
+
 app.post("/api/classify-intent", async (req, res) => {
   const task = typeof req.body?.task === "string" ? req.body.task : "";
   const normalizedTask = task.trim();
@@ -2821,7 +2828,18 @@ app.post("/api/patch", async (req, res) => {
     lastChangedFiles,
     lastAddedFunctions,
     forceTier: rawForceTier,
+    mode: rawMode,
   } = req.body ?? {};
+  const requestedMode = rawMode === undefined ? "auto" : parseMode(rawMode);
+  if (!requestedMode) {
+    perf.finish("bad request");
+    res.status(400).json({
+      ok: false,
+      reason: "invalid_mode",
+      message: "mode must be one of auto, chat, investigate, patch",
+    });
+    return;
+  }
   const VALID_TIERS = ["simple", "medium", "complex"] as const;
   const forceTier = typeof rawForceTier === "string" && (VALID_TIERS as readonly string[]).includes(rawForceTier)
     ? (rawForceTier as "simple" | "medium" | "complex")
@@ -2952,9 +2970,12 @@ app.post("/api/patch", async (req, res) => {
     // Non-blocking: if limit check fails (e.g. disk error), allow the run.
   }
 
-  const intent = shouldForceExecute
-    ? "execute"
-    : await detectIntent(String(task), userApiKey || undefined);
+  const intent =
+    requestedMode === "auto"
+      ? shouldForceExecute
+        ? "execute"
+        : await detectIntent(String(task), userApiKey || undefined)
+      : intentFromExplicitMode(requestedMode);
   if (intent === "investigation") {
     const investigationRunId =
       typeof runId === "string" && runId.trim() ? runId.trim() : "";
@@ -3000,6 +3021,7 @@ app.post("/api/patch", async (req, res) => {
       const result = await runInvestigationFlow({
         task: String(task),
         repoPath: String(repoPath),
+        mode: requestedMode === "investigate" ? "investigate" : undefined,
         runId: investigationRunId,
         userId,
         userApiKey: userApiKey || undefined,
@@ -3084,24 +3106,45 @@ app.post("/api/patch", async (req, res) => {
     } catch {}
 
     const runIdStr = typeof runId === "string" && runId.trim() ? runId.trim() : "";
-    const messageType = await detectMessageType(String(task), userApiKey || undefined);
+    const messageType =
+      requestedMode === "auto"
+        ? await detectMessageType(String(task), userApiKey || undefined)
+        : "question";
     const conversationalMessageType =
       messageType === "discussion" ? "discussion" : "question";
     try {
       if (runIdStr) {
         registerRunStart(runIdStr, { task: String(task) });
       }
-      const result = await runConversationalFlow({
-        task: String(task),
-        repoPath: String(repoPath),
-        runId: runIdStr,
-        userId,
-        conversationId:
-          typeof conversationId === "string" && conversationId.trim()
-            ? conversationId.trim()
-            : runIdStr,
-        messageType: conversationalMessageType,
-      });
+      const result =
+        requestedMode === "chat"
+          ? {
+              ...(await runChatAgentFlow({
+                task: String(task),
+                repoPath: String(repoPath),
+                runId: runIdStr,
+                userId,
+                userApiKey: userApiKey || undefined,
+                onProgress: (update) => emitProgress(runIdStr, update as any),
+              })),
+              messageType: conversationalMessageType,
+              conversationId:
+                typeof conversationId === "string" && conversationId.trim()
+                  ? conversationId.trim()
+                  : runIdStr,
+            }
+          : await runConversationalFlow({
+              task: String(task),
+              repoPath: String(repoPath),
+              runId: runIdStr,
+              userId,
+              conversationId:
+                typeof conversationId === "string" && conversationId.trim()
+                  ? conversationId.trim()
+                  : runIdStr,
+              messageType: conversationalMessageType,
+              lastChangedFiles: Array.isArray(lastChangedFiles) ? lastChangedFiles : undefined,
+            });
       if (runIdStr) {
         registerRunComplete(runIdStr, "completed");
         const detectedChatCost = getRunCost(userId ?? "", runIdStr);
@@ -3235,6 +3278,7 @@ app.post("/api/patch", async (req, res) => {
       abortSignal: patchAbort?.signal,
       userApiKey: userApiKey || undefined,
       provider: byokProvider,
+      mode: requestedMode === "patch" ? "patch" : undefined,
       forceTier,
     });
     perf.mark("core patch flow complete");
