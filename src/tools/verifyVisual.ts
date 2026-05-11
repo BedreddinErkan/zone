@@ -89,6 +89,26 @@ export async function runVerifyVisual(
       await page.waitForSelector(input.waitFor, { timeout: WAIT_SELECTOR_TIMEOUT_MS }).catch(() => null);
     }
 
+    // Trigger scroll-based intersection observers (e.g. IntersectionObserver-driven FadeIn)
+    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)");
+    await page.waitForTimeout(150);
+    await page.evaluate("window.scrollTo(0, 0)");
+    await page.waitForTimeout(150);
+
+    // Wait for opacity:0 styled elements to settle (best-effort, bounded)
+    try {
+      await page.waitForFunction(
+        `!document.querySelector('[style*="opacity: 0"], [style*="opacity:0"]')`,
+        undefined,
+        { timeout: 1500 }
+      );
+    } catch {
+      // safe fallback — proceed to fixed wait below
+    }
+
+    // Final safety wait for tail animations / ease curves
+    await page.waitForTimeout(300);
+
     await fs.mkdir(SCREENSHOT_DIR, { recursive: true });
     const filename = `${context.runId}-${Date.now()}.png`;
     const screenshotPath = path.join(SCREENSHOT_DIR, filename);
