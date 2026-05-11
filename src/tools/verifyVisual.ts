@@ -77,6 +77,27 @@ export async function runVerifyVisual(
 
     await page.emulateMedia({ reducedMotion: "reduce" });
 
+    await page.addInitScript(`
+      (() => {
+        const originalMatchMedia = window.matchMedia;
+        window.matchMedia = function(query) {
+          if (typeof query === 'string' && query.indexOf('prefers-reduced-motion') >= 0) {
+            return {
+              matches: query.indexOf('reduce') >= 0,
+              media: query,
+              onchange: null,
+              addEventListener: function() {},
+              removeEventListener: function() {},
+              addListener: function() {},
+              removeListener: function() {},
+              dispatchEvent: function() { return false; }
+            };
+          }
+          return originalMatchMedia.call(window, query);
+        };
+      })();
+    `);
+
     page.on("pageerror", (err) => consoleErrors.push(`pageerror: ${err.message}`));
     page.on("console", (msg) => {
       if (msg.type() === "error") consoleErrors.push(msg.text());
@@ -92,7 +113,7 @@ export async function runVerifyVisual(
     }
 
     await page.waitForLoadState("networkidle").catch(() => { /* best-effort */ });
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(500);
 
     await fs.mkdir(SCREENSHOT_DIR, { recursive: true });
     const filename = `${context.runId}-${Date.now()}.png`;
