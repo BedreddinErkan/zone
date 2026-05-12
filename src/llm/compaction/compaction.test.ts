@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ContextCompactor } from "./ContextCompactor.js";
 import { classifyTurns } from "./classifyTurns.js";
 import {
@@ -6,11 +6,29 @@ import {
   CompactionExhaustedError,
   type ToolCallRecord,
 } from "./types.js";
+import type { LLMClient } from "../types.js";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import { summarize } from "./summarizer.js";
+
+// Stub the summarizer module so tests never hit the real LLM.
+vi.mock("./summarizer.js");
+
+beforeEach(() => {
+  // Re-apply default implementation after mockReset (vitest.config has mockReset: true).
+  vi.mocked(summarize).mockResolvedValue({ summaryText: "mocked summary" });
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Minimal LLMClient stub — createChatCompletion is never called (summarizer is mocked). */
+const stubClient: LLMClient = {
+  provider: "openai",
+  createChatCompletion: vi.fn(),
+  createChatCompletionStream: vi.fn(),
+  createEmbedding: vi.fn(),
+};
 
 function makeHistory(roles: string[]): ChatCompletionMessageParam[] {
   return roles.map((role) => {
@@ -57,7 +75,7 @@ function makeHistoryWithToolCall(
   return { history, log };
 }
 
-/** Build a compactor that has already been compacted N times via side-channel. */
+/** Build a compactor that has already been compacted N times. */
 async function compactorWithCount(n: number): Promise<ContextCompactor> {
   const c = new ContextCompactor();
   const history: ChatCompletionMessageParam[] = [
@@ -70,12 +88,12 @@ async function compactorWithCount(n: number): Promise<ContextCompactor> {
     { role: "assistant", content: "a5" },
   ];
   for (let i = 0; i < n; i++) {
-    // await is a no-op here (sync in P.1) but ready for P.2 async signature
     await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
       currentUsage: 800_000,
       effectiveCap: 800_000,
+      client: stubClient,
     });
   }
   return c;
@@ -133,6 +151,7 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
       toolCallLog: [],
       currentUsage: 700_000,
       effectiveCap: 800_000,
+      client: stubClient,
     });
     expect(result.compacted).toBe(true);
     expect(result.reason).toBe("compacted");
@@ -155,6 +174,7 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
       toolCallLog: [],
       currentUsage: 800_000,
       effectiveCap: 800_000,
+      client: stubClient,
     });
     expect(result.compacted).toBe(true);
     expect(result.warning).toMatch(/compacted 3 times/);
@@ -170,14 +190,13 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
       { role: "assistant", content: "last-2" },
       { role: "assistant", content: "last-1" },
     ];
-    // Wrap in async arrow so both sync throws (P.1) and async rejections (P.2+)
-    // are caught as a rejected Promise by expect().rejects.
     await expect(async () => {
       await c.checkAndMaybeCompact({
         responseInput: history,
         toolCallLog: [],
         currentUsage: 800_000,
         effectiveCap: 800_000,
+        client: stubClient,
       });
     }).rejects.toThrow(CompactionExhaustedError);
   });
@@ -301,10 +320,6 @@ describe("classifyTurns", () => {
   });
 
   it("same tool called twice with different ids and success values — each resolved independently", () => {
-    // apply_patch called twice: first succeeds (call_a), second fails (call_b).
-    // call_a's tool result should be verbatim (applied_protected_result).
-    // call_b's tool result should be verbatim (rollback_context).
-    // This would have been ambiguous with the old last-occurrence-wins name lookup.
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
@@ -327,10 +342,8 @@ describe("classifyTurns", () => {
       { id: "call_b", tool: "apply_patch", args: {}, result: "error", success: false },
     ];
     const result = classifyTurns(history, log);
-    // idx 3 = call_a tool result → applied_protected_result
     expect(result[3].class).toBe(TurnClass.VERBATIM);
     expect(result[3].reason).toBe("applied_protected_result");
-    // idx 4 = call_b tool result → rollback_context
     expect(result[4].class).toBe(TurnClass.VERBATIM);
     expect(result[4].reason).toBe("rollback_context");
   });

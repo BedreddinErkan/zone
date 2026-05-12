@@ -2894,14 +2894,23 @@ Example (small patch with verification — still call TodoWrite):
         }));
       }
 
-      // P.1: compaction check at safe iteration boundary — after all tool results
+      // P.2: compaction check at safe iteration boundary — after all tool results
       // are pushed to responseInput, before the next LLM call is composed.
-      const compactionResult = compactor.checkAndMaybeCompact({
+      const compactionResult = await compactor.checkAndMaybeCompact({
         responseInput,
         toolCallLog,
         currentUsage: cumulativeTokens(),
         effectiveCap: effectiveTokenBudgetCap,
+        client,
+        runId: input.runId,
       });
+      if (compactionResult.compacted && compactionResult.newResponseInput) {
+        // In-place mutation preserves the array reference held by the outer scope.
+        responseInput.splice(0, responseInput.length, ...compactionResult.newResponseInput);
+        input.onProgress?.(
+          `Context compacted (compaction #${compactor.getCompactionCount()})`
+        );
+      }
       if (compactionResult.warning) {
         input.onProgress?.(compactionResult.warning);
       }

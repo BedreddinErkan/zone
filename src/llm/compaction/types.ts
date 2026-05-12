@@ -1,3 +1,5 @@
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+
 export enum TurnClass {
   VERBATIM = "verbatim",
   CANDIDATE = "candidate",
@@ -11,8 +13,11 @@ export interface ClassifiedTurn {
 
 export interface CompactionResult {
   compacted: boolean;
-  reason?: "under_threshold" | "no_candidates" | "compacted" | "exhausted";
+  reason?: "under_threshold" | "no_candidates" | "compacted"
+         | "exhausted" | "summarizer_failed";
   warning?: string;
+  /** Populated when compacted === true: replacement for responseInput after compaction. */
+  newResponseInput?: ChatCompletionMessageParam[];
 }
 
 /**
