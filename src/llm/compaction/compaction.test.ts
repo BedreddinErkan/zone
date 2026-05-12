@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { ContextCompactor } from "./ContextCompactor.js";
 import { classifyTurns } from "./classifyTurns.js";
 import {
@@ -52,19 +52,17 @@ function makeHistoryWithToolCall(
     { role: "assistant", content: "done" },
   ];
   const log: Array<ToolCallRecord> = [
-    { tool: toolName, args: {}, result: "output", success: toolSuccess },
+    { id: callId, tool: toolName, args: {}, result: "output", success: toolSuccess },
   ];
   return { history, log };
 }
 
 /** Build a compactor that has already been compacted N times via side-channel. */
-function compactorWithCount(n: number): ContextCompactor {
+async function compactorWithCount(n: number): Promise<ContextCompactor> {
   const c = new ContextCompactor();
-  // Drive it past threshold with synthetic history that always has candidates.
   const history: ChatCompletionMessageParam[] = [
     { role: "system", content: "sys" },
     { role: "user", content: "task" },
-    // enough candidate turns in the middle
     { role: "assistant", content: "a1" },
     { role: "assistant", content: "a2" },
     { role: "assistant", content: "a3" },
@@ -72,7 +70,8 @@ function compactorWithCount(n: number): ContextCompactor {
     { role: "assistant", content: "a5" },
   ];
   for (let i = 0; i < n; i++) {
-    c.checkAndMaybeCompact({
+    // await is a no-op here (sync in P.1) but ready for P.2 async signature
+    await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
       currentUsage: 800_000,
@@ -87,9 +86,9 @@ function compactorWithCount(n: number): ContextCompactor {
 // ---------------------------------------------------------------------------
 
 describe("ContextCompactor.checkAndMaybeCompact", () => {
-  it("returns under_threshold when usage < 75% of cap", () => {
+  it("returns under_threshold when usage < 75% of cap", async () => {
     const c = new ContextCompactor();
-    const result = c.checkAndMaybeCompact({
+    const result = await c.checkAndMaybeCompact({
       responseInput: [],
       toolCallLog: [],
       currentUsage: 500_000,
@@ -99,7 +98,7 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
     expect(result.reason).toBe("under_threshold");
   });
 
-  it("returns no_candidates when threshold met but all turns are verbatim", () => {
+  it("returns no_candidates when threshold met but all turns are verbatim", async () => {
     const c = new ContextCompactor();
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
@@ -108,7 +107,7 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
       { role: "user", content: "last-2" },
       { role: "assistant", content: "last-1" },
     ];
-    const result = c.checkAndMaybeCompact({
+    const result = await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
       currentUsage: 700_000,
@@ -118,18 +117,18 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
     expect(result.reason).toBe("no_candidates");
   });
 
-  it("returns compacted and increments count when threshold met and candidates exist", () => {
+  it("returns compacted and increments count when threshold met and candidates exist", async () => {
     const c = new ContextCompactor();
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
-      { role: "assistant", content: "candidate-1" }, // candidate: not recency
+      { role: "assistant", content: "candidate-1" },
       { role: "assistant", content: "candidate-2" },
       { role: "assistant", content: "last-3" },
       { role: "user", content: "last-2" },
       { role: "assistant", content: "last-1" },
     ];
-    const result = c.checkAndMaybeCompact({
+    const result = await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
       currentUsage: 700_000,
@@ -140,8 +139,8 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
     expect(result.warning).toBeUndefined();
   });
 
-  it("emits warning string on 3rd compaction", () => {
-    const c = compactorWithCount(2);
+  it("emits warning string on 3rd compaction", async () => {
+    const c = await compactorWithCount(2);
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
@@ -151,7 +150,7 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
       { role: "assistant", content: "last-2" },
       { role: "assistant", content: "last-1" },
     ];
-    const result = c.checkAndMaybeCompact({
+    const result = await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
       currentUsage: 800_000,
@@ -161,8 +160,8 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
     expect(result.warning).toMatch(/compacted 3 times/);
   });
 
-  it("throws CompactionExhaustedError on 6th call when MAX_COMPACTIONS=5 reached", () => {
-    const c = compactorWithCount(5);
+  it("throws CompactionExhaustedError on 6th call when MAX_COMPACTIONS=5 reached", async () => {
+    const c = await compactorWithCount(5);
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
@@ -171,14 +170,16 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
       { role: "assistant", content: "last-2" },
       { role: "assistant", content: "last-1" },
     ];
-    expect(() =>
-      c.checkAndMaybeCompact({
+    // Wrap in async arrow so both sync throws (P.1) and async rejections (P.2+)
+    // are caught as a rejected Promise by expect().rejects.
+    await expect(async () => {
+      await c.checkAndMaybeCompact({
         responseInput: history,
         toolCallLog: [],
         currentUsage: 800_000,
         effectiveCap: 800_000,
-      })
-    ).toThrow(CompactionExhaustedError);
+      });
+    }).rejects.toThrow(CompactionExhaustedError);
   });
 });
 
@@ -212,8 +213,6 @@ describe("classifyTurns", () => {
   });
 
   it("assistant turn calling apply_patch is verbatim (protected_tool)", () => {
-    // History must be long enough that idx 2 is outside the recency window (last 3).
-    // With 7 turns: recency window covers idx 4,5,6 — idx 2 is a candidate unless protected.
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
@@ -239,31 +238,20 @@ describe("classifyTurns", () => {
   });
 
   it("tool result for apply_patch success is verbatim (applied_protected_result)", () => {
-    const { history, log } = makeHistoryWithToolCall(
-      "apply_patch",
-      "call_patch",
-      true
-    );
-    // history[3] is the tool result, which is NOT in the recency window
-    // (history length is 7, recency window is last 3 = indices 4,5,6)
+    const { history, log } = makeHistoryWithToolCall("apply_patch", "call_patch", true);
     const result = classifyTurns(history, log);
     expect(result[3].class).toBe(TurnClass.VERBATIM);
     expect(result[3].reason).toBe("applied_protected_result");
   });
 
   it("tool result for apply_patch failure is verbatim (rollback_context)", () => {
-    const { history, log } = makeHistoryWithToolCall(
-      "apply_patch",
-      "call_fail",
-      false
-    );
+    const { history, log } = makeHistoryWithToolCall("apply_patch", "call_fail", false);
     const result = classifyTurns(history, log);
     expect(result[3].class).toBe(TurnClass.VERBATIM);
     expect(result[3].reason).toBe("rollback_context");
   });
 
   it("read_file tool_call at index 2 of 10-turn history is a candidate", () => {
-    // 10 turns: [system, user, assistant(read_file), tool, a, u, a, u, a, u]
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
@@ -287,7 +275,7 @@ describe("classifyTurns", () => {
       { role: "user", content: "u4" },
     ];
     const log: Array<ToolCallRecord> = [
-      { tool: "read_file", args: {}, result: "file content", success: true },
+      { id: "call_rf", tool: "read_file", args: {}, result: "file content", success: true },
     ];
     const result = classifyTurns(history, log);
     expect(result[2].class).toBe(TurnClass.CANDIDATE);
@@ -298,7 +286,7 @@ describe("classifyTurns", () => {
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
-      { role: "assistant", content: "just thinking" }, // no tool_calls
+      { role: "assistant", content: "just thinking" },
       { role: "user", content: "ok" },
       { role: "assistant", content: "a3" },
       { role: "user", content: "u3" },
@@ -310,5 +298,40 @@ describe("classifyTurns", () => {
     const result = classifyTurns(history, []);
     expect(result[2].class).toBe(TurnClass.CANDIDATE);
     expect(result[2].reason).toBe("default_candidate");
+  });
+
+  it("same tool called twice with different ids and success values — each resolved independently", () => {
+    // apply_patch called twice: first succeeds (call_a), second fails (call_b).
+    // call_a's tool result should be verbatim (applied_protected_result).
+    // call_b's tool result should be verbatim (rollback_context).
+    // This would have been ambiguous with the old last-occurrence-wins name lookup.
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "call_a", type: "function", function: { name: "apply_patch", arguments: "{}" } },
+          { id: "call_b", type: "function", function: { name: "apply_patch", arguments: "{}" } },
+        ],
+      },
+      { role: "tool", tool_call_id: "call_a", content: "ok" },
+      { role: "tool", tool_call_id: "call_b", content: "error" },
+      { role: "assistant", content: "last-3" },
+      { role: "user", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
+    const log: Array<ToolCallRecord> = [
+      { id: "call_a", tool: "apply_patch", args: {}, result: "ok", success: true },
+      { id: "call_b", tool: "apply_patch", args: {}, result: "error", success: false },
+    ];
+    const result = classifyTurns(history, log);
+    // idx 3 = call_a tool result → applied_protected_result
+    expect(result[3].class).toBe(TurnClass.VERBATIM);
+    expect(result[3].reason).toBe("applied_protected_result");
+    // idx 4 = call_b tool result → rollback_context
+    expect(result[4].class).toBe(TurnClass.VERBATIM);
+    expect(result[4].reason).toBe("rollback_context");
   });
 });

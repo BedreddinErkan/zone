@@ -16,10 +16,11 @@ export interface CompactionResult {
 }
 
 /**
- * Aligned to the existing inline toolCallLog entry shape in runAgentLoopScoped.
- * Field name is `tool` (not `toolName`) — no `rejectionReason` field.
+ * Mirrors the toolCallLog entry shape in runAgentLoopScoped exactly.
+ * `id` is the originating tool_call.id; used for O(1) per-call lookup in classifyTurns.
  */
 export interface ToolCallRecord {
+  id: string;
   tool: string;
   args: Record<string, unknown>;
   result: string;

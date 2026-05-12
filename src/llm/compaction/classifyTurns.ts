@@ -15,37 +15,15 @@ function firstUserIndex(history: ChatCompletionMessageParam[]): number {
 }
 
 /**
- * Build a callId → toolName map by scanning all assistant turns.
- * Used to resolve the tool name for role:"tool" messages without
- * requiring tool_call_id on the log entries.
+ * Build a callId → ToolCallRecord map from the log for O(1) lookup.
+ * Now that log entries carry `id`, this is exact — no name-based ambiguity.
  */
-function buildCallIdToToolName(
-  history: ChatCompletionMessageParam[]
-): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const turn of history) {
-    if (turn.role === "assistant" && turn.tool_calls) {
-      for (const call of turn.tool_calls) {
-        if (call.type === "function") {
-          map.set(call.id, call.function.name);
-        }
-      }
-    }
-  }
-  return map;
-}
-
-/**
- * Build a toolName → last-known success map from the log.
- * Because the log has no tool_call_id, we use last-occurrence-wins
- * per tool name — adequate for P.1 classification.
- */
-function buildToolSuccessMap(
+function buildRecordById(
   toolCallLog: Array<ToolCallRecord>
-): Map<string, boolean | undefined> {
-  const map = new Map<string, boolean | undefined>();
-  for (const entry of toolCallLog) {
-    map.set(entry.tool, entry.success);
+): Map<string, ToolCallRecord> {
+  const map = new Map<string, ToolCallRecord>();
+  for (const rec of toolCallLog) {
+    map.set(rec.id, rec);
   }
   return map;
 }
@@ -56,8 +34,7 @@ export function classifyTurns(
 ): ClassifiedTurn[] {
   const total = history.length;
   const firstUser = firstUserIndex(history);
-  const callIdToName = buildCallIdToToolName(history);
-  const toolSuccess = buildToolSuccessMap(toolCallLog);
+  const recById = buildRecordById(toolCallLog);
 
   return history.map((turn, idx) => {
     // System prompt: always verbatim
@@ -89,19 +66,18 @@ export function classifyTurns(
       }
     }
 
-    // Tool result turn: check if the originating call was protected
+    // Tool result turn: look up the originating log entry by call id.
     if (turn.role === "tool") {
-      const toolName = callIdToName.get(turn.tool_call_id);
-      if (toolName !== undefined) {
-        const success = toolSuccess.get(toolName);
-        if (PROTECTED_TOOLS.has(toolName) && success) {
+      const rec = recById.get(turn.tool_call_id);
+      if (rec !== undefined) {
+        if (PROTECTED_TOOLS.has(rec.tool) && rec.success) {
           return {
             index: idx,
             class: TurnClass.VERBATIM,
             reason: "applied_protected_result",
           };
         }
-        if (toolName === "apply_patch" && !success) {
+        if (rec.tool === "apply_patch" && !rec.success) {
           return {
             index: idx,
             class: TurnClass.VERBATIM,

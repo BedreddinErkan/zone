@@ -134,6 +134,7 @@ export interface AgentLoopResult {
   success: boolean;
   summary: string;
   toolCallLog: Array<{
+    id: string;
     tool: string;
     args: Record<string, unknown>;
     result: string;
@@ -1860,6 +1861,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   const effectiveMaxSubagentCalls = tierLimits?.maxSubagentCalls;
 
   const toolCallLog: Array<{
+    id: string;
     tool: string;
     args: Record<string, unknown>;
     result: string;
@@ -2382,6 +2384,7 @@ Example (small patch with verification — still call TodoWrite):
             content: rejectionMsg,
           });
           toolCallLog.push({
+            id: callId,
             tool: name,
             args: parsedArgs,
             result: rejectionMsg,
@@ -2402,6 +2405,7 @@ Example (small patch with verification — still call TodoWrite):
             content: rejectionMsg,
           });
           toolCallLog.push({
+            id: callId,
             tool: name,
             args: parsedArgs,
             result: rejectionMsg,
@@ -2420,6 +2424,7 @@ Example (small patch with verification — still call TodoWrite):
               content: rejectionMsg,
             });
             toolCallLog.push({
+              id: callId,
               tool: name,
               args: parsedArgs,
               result: validation.error,
@@ -2442,6 +2447,7 @@ Example (small patch with verification — still call TodoWrite):
             content: okMsg,
           });
           toolCallLog.push({
+            id: callId,
             tool: name,
             args: parsedArgs,
             result: "ok",
@@ -2482,6 +2488,7 @@ Example (small patch with verification — still call TodoWrite):
               `Call read_file on ${targetFilePath} first to see the exact current content, ` +
               `then issue apply_patch with FIND lines that match the file verbatim.`;
             toolCallLog.push({
+              id: callId,
               tool: name,
               args: parsedArgs,
               result: syntheticOutput,
@@ -2531,6 +2538,7 @@ Example (small patch with verification — still call TodoWrite):
               reason: "toggle_off",
             }));
             toolCallLog.push({
+              id: callId,
               tool: name,
               args: parsedArgs,
               result: skipMsg,
@@ -2617,6 +2625,7 @@ Example (small patch with verification — still call TodoWrite):
         }
 
         toolCallLog.push({
+          id: callId,
           tool: name,
           args: parsedArgs,
           result: result.output.slice(0, 4000),
