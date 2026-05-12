@@ -44,6 +44,7 @@ import type {
   ChatCompletionMessageFunctionToolCall,
 } from "openai/resources/chat/completions";
 import type { Mode } from "../types/mode.js";
+import { ContextCompactor } from "./compaction/ContextCompactor.js";
 
 type AgentLoopMode = Exclude<Mode, "auto"> | "investigation";
 
@@ -2057,6 +2058,9 @@ Example (small patch with verification — still call TodoWrite):
   let subagentTokenTotal = 0;
   let subagentCostTotal = 0;
   const tokenBudgetBaseTokens = cleanTokenNumber(input.tokenBudgetBaseTokens);
+  // P.1: compaction trigger — fires at the safe iteration boundary after tool results
+  // are processed. No-op in P.1; P.2 replaces the stub with real summarization.
+  const compactor = new ContextCompactor();
   // Usage recording is centralized in RecordingLLMClient (src/llm/recordingClient.ts):
   // every chat completion across the codebase appends one JSONL record. agentLoop
   // used to accumulate-then-record-on-exit, but that double-counted with the wrapper
@@ -2879,6 +2883,18 @@ Example (small patch with verification — still call TodoWrite):
           willRetry: false,
           reason: "self-correction budget exhausted â€” allowing model to summarise",
         }));
+      }
+
+      // P.1: compaction check at safe iteration boundary — after all tool results
+      // are pushed to responseInput, before the next LLM call is composed.
+      const compactionResult = compactor.checkAndMaybeCompact({
+        responseInput,
+        toolCallLog,
+        currentUsage: cumulativeTokens(),
+        effectiveCap: effectiveTokenBudgetCap,
+      });
+      if (compactionResult.warning) {
+        input.onProgress?.(compactionResult.warning);
       }
 
       continue;
