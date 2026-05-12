@@ -348,3 +348,132 @@ describe("classifyTurns", () => {
     expect(result[4].reason).toBe("rollback_context");
   });
 });
+
+// ---------------------------------------------------------------------------
+// compact() structural tests (P.2)
+// ---------------------------------------------------------------------------
+
+describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () => {
+  it("newResponseInput has verbatim turns in order, candidates replaced by one synthetic system turn", async () => {
+    // History: [sys, user, cand1, cand2, verbatim-recency-3, verbatim-recency-2, verbatim-recency-1]
+    // Indices:   0     1     2      3          4                     5                    6
+    // Candidates: idx 2, 3 (not in recency window, not protected)
+    // Verbatim: sys(0), initial_user(1), recency(4,5,6)
+    // Expected newResponseInput: [sys, user, <synthetic>, recency-3, recency-2, recency-1]
+    //   length = 7 - 2 candidates + 1 synthetic = 6
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: "cand1" },
+      { role: "assistant", content: "cand2" },
+      { role: "assistant", content: "recency-3" },
+      { role: "user", content: "recency-2" },
+      { role: "assistant", content: "recency-1" },
+    ];
+
+    const c = new ContextCompactor();
+    const result = await c.checkAndMaybeCompact({
+      responseInput: history,
+      toolCallLog: [],
+      currentUsage: 700_000,
+      effectiveCap: 800_000,
+      client: stubClient,
+    });
+
+    expect(result.compacted).toBe(true);
+    expect(result.newResponseInput).toBeDefined();
+
+    const nr = result.newResponseInput!;
+    // Length: 7 - 2 candidates + 1 synthetic = 6
+    expect(nr).toHaveLength(6);
+    // First two: verbatim system and user
+    expect(nr[0]).toEqual({ role: "system", content: "sys" });
+    expect(nr[1]).toEqual({ role: "user", content: "task" });
+    // Third: synthetic system turn with compacted_history wrapper
+    expect(nr[2].role).toBe("system");
+    expect(typeof nr[2].content).toBe("string");
+    expect((nr[2].content as string)).toMatch(/\[compacted_history\]/);
+    expect((nr[2].content as string)).toMatch(/\[\/compacted_history\]/);
+    expect((nr[2].content as string)).toContain("mocked summary");
+    // Last three: recency turns preserved
+    expect(nr[3]).toEqual({ role: "assistant", content: "recency-3" });
+    expect(nr[4]).toEqual({ role: "user", content: "recency-2" });
+    expect(nr[5]).toEqual({ role: "assistant", content: "recency-1" });
+  });
+
+  it("compactionCount increments only when compacted === true", async () => {
+    const c = new ContextCompactor();
+    expect(c.getCompactionCount()).toBe(0);
+
+    // under_threshold — should not increment
+    await c.checkAndMaybeCompact({
+      responseInput: [],
+      toolCallLog: [],
+      currentUsage: 100_000,
+      effectiveCap: 800_000,
+    });
+    expect(c.getCompactionCount()).toBe(0);
+
+    // no_candidates — should not increment
+    const allVerbatim: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: "last-3" },
+      { role: "user", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
+    await c.checkAndMaybeCompact({
+      responseInput: allVerbatim,
+      toolCallLog: [],
+      currentUsage: 700_000,
+      effectiveCap: 800_000,
+    });
+    expect(c.getCompactionCount()).toBe(0);
+
+    // real compaction — should increment
+    const withCandidates: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: "cand" },
+      { role: "assistant", content: "last-3" },
+      { role: "user", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
+    await c.checkAndMaybeCompact({
+      responseInput: withCandidates,
+      toolCallLog: [],
+      currentUsage: 700_000,
+      effectiveCap: 800_000,
+      client: stubClient,
+    });
+    expect(c.getCompactionCount()).toBe(1);
+  });
+
+  it("summarizer throws → returns summarizer_failed, no newResponseInput", async () => {
+    vi.mocked(summarize).mockRejectedValueOnce(new Error("LLM timeout"));
+
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: "cand" },
+      { role: "assistant", content: "last-3" },
+      { role: "user", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
+
+    const c = new ContextCompactor();
+    const result = await c.checkAndMaybeCompact({
+      responseInput: history,
+      toolCallLog: [],
+      currentUsage: 700_000,
+      effectiveCap: 800_000,
+      client: stubClient,
+    });
+
+    expect(result.compacted).toBe(false);
+    expect(result.reason).toBe("summarizer_failed");
+    expect(result.newResponseInput).toBeUndefined();
+    // Count must not have incremented on failure
+    expect(c.getCompactionCount()).toBe(0);
+  });
+});
