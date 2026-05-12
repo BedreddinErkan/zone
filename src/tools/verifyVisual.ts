@@ -116,6 +116,35 @@ export async function runVerifyVisual(
       waitUntil: "load",
     });
 
+    const hash = new URL(input.path || "/", context.devServerBaseUrl).hash;
+    if (hash && hash.length > 1) {
+      const scrollResult = await page.evaluate(`
+        (function() {
+          var selector = ${JSON.stringify(hash)};
+          var el = document.querySelector(selector);
+          if (!el) return { found: false, scrollY: window.scrollY };
+          var before = window.scrollY;
+          el.scrollIntoView({ behavior: "instant", block: "start" });
+          return {
+            found: true,
+            scrollYBefore: before,
+            scrollYAfter: window.scrollY,
+            elementTop: el.getBoundingClientRect().top,
+            docHeight: document.documentElement.scrollHeight,
+            viewportHeight: window.innerHeight,
+          };
+        })()
+      `).catch((err: unknown) => ({ error: String(err) }));
+
+      console.log("[zone-verify-scroll]", JSON.stringify({
+        runId: context.runId,
+        hash,
+        result: scrollResult,
+      }));
+
+      await page.waitForTimeout(1000);
+    }
+
     if (input.waitFor) {
       await page.waitForSelector(input.waitFor, { timeout: WAIT_SELECTOR_TIMEOUT_MS }).catch(() => null);
     }

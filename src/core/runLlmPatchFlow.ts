@@ -5706,6 +5706,10 @@ const initializeTodosFromPlan = (): void => {
 
     filesTouched.push(...(loop.filesModified || []));
 
+    const agentCalledVerifyVisual = loop.toolCallLog.some(
+      (entry) => entry.tool === "verify_visual" && entry.success === true
+    );
+
     const agentLoopHadRunCommandFailure = loop.toolCallLog.some((entry) => {
       if (entry.tool !== "run_command") return false;
       const r = String(entry.result || "");
@@ -5972,7 +5976,7 @@ const initializeTodosFromPlan = (): void => {
       autoVerifyPageTitle?: string;
       autoVerifyConsoleErrors?: string[];
     } = {};
-    if (agentDecisionMode === "safe_to_apply" && fileDiffs.length > 0) {
+    if (agentDecisionMode === "safe_to_apply" && fileDiffs.length > 0 && !agentCalledVerifyVisual) {
       try {
         const { loadVisualSettings } = await import("../visual/visualSettings.js");
         const settings = loadVisualSettings();
@@ -6045,6 +6049,11 @@ const initializeTodosFromPlan = (): void => {
           })
         );
       }
+    } else if (agentCalledVerifyVisual) {
+      console.log("[zone-auto-verify-skipped]", JSON.stringify({
+        runId: runId || null,
+        reason: "agent_already_verified",
+      }));
     }
 
     return {

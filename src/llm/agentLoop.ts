@@ -351,7 +351,13 @@ export function assembleAgentSystemPrompt(input: {
     `Examples:\n` +
     `  verify_visual({ path: "/", description: "Header should now have dark navy background" })\n` +
     `  verify_visual({ path: "/login", description: "Submit button disabled when fields empty" })\n` +
-    `  verify_visual({ path: "/dashboard", description: "Stat cards render 4 across", waitFor: ".user-stats-loaded" })\n\n` +
+    `  verify_visual({ path: "/dashboard", description: "Stat cards render 4 across", waitFor: ".user-stats-loaded" })\n` +
+    `HASH ANCHORS — when your change is inside a specific page section, pass\n` +
+    `the section's id as a hash anchor so the viewport is positioned there:\n` +
+    `  verify_visual({ path: "/#whats-inside", description: "..." })\n` +
+    `Look for the \`id\` attribute on the section element you modified. If the\n` +
+    `change spans the full page or you're unsure, just pass "/" — the tool now\n` +
+    `captures full-page screenshots so changes below the fold are always visible.\n\n` +
     `TASK SUBAGENTS (Task):\n` +
     `Default to single-thread. Use Task only when parallelism clearly saves wall time.\n` +
     `USE Task ONLY when: 5+ independent investigation steps; different file clusters with no shared state; single-thread would exceed 15 iterations; or multi-candidate exploration benefits from parallelism. Examples: audit security issues in 8+ files; investigate parallel module dependencies.\n` +
@@ -2507,6 +2513,30 @@ Example (small patch with verification — still call TodoWrite):
               iter: iter + 1,
             });
             failureHistory.set(targetFilePath, noReadList);
+            continue;
+          }
+        }
+
+        if (name === "verify_visual") {
+          const { loadVisualSettings } = await import("../visual/visualSettings.js");
+          const visualSettings = loadVisualSettings();
+          if (!visualSettings.autoVerifyAfterPatch) {
+            const skipMsg = "Visual verification is disabled in Settings → Visual.";
+            console.log("[zone-verify-visual-skipped-by-settings]", JSON.stringify({
+              runId: input.runId ?? null,
+              reason: "toggle_off",
+            }));
+            toolCallLog.push({
+              tool: name,
+              args: parsedArgs,
+              result: skipMsg,
+              success: false,
+            });
+            responseInput.push({
+              role: "tool",
+              tool_call_id: callId,
+              content: skipMsg,
+            });
             continue;
           }
         }

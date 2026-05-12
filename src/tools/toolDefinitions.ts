@@ -415,7 +415,7 @@ required: ["id", "content", "description", "status"],
         properties: {
           path: {
             type: "string",
-            description: "Path relative to dev server root, e.g. '/' or '/login' or '/dashboard'.",
+            description: "Path relative to dev server root, e.g. '/', '/login', or '/#whats-inside'. Include a hash anchor like '/#section-id' to scroll to and screenshot a specific page section. Use a hash when verifying changes inside a section that may be below the page fold.",
           },
           description: {
             type: ["string", "null"],

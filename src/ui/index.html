@@ -10097,14 +10097,13 @@
 
             <div style="height:14px"></div>
 
-            <div class="apikey-field-label">Auto-verify after patch</div>
+            <div class="apikey-field-label">Enable visual verification</div>
             <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer">
               <input id="vvAutoVerify" type="checkbox" style="margin-top:2px" />
               <span style="font-size:var(--font-size-sm,12px);line-height:1.45">
-                Always run <code>verify_visual</code> after a patch, regardless
-                of the agent's decision. Default: off — the agent decides when
-                a screenshot is useful.
-                <span style="opacity:0.6;font-style:italic">(Setting persists; behavior wired in a later phase.)</span>
+                Lets the agent take Playwright screenshots via <code>verify_visual</code>,
+                and auto-verifies after every successful patch. Disable for headless
+                or code-only workflows.
               </span>
             </label>
 
