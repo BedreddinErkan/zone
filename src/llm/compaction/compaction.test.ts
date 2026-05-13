@@ -319,6 +319,116 @@ describe("classifyTurns", () => {
     expect(result[2].reason).toBe("default_candidate");
   });
 
+  it("pair propagation: tool_result in recency window makes its assistant call verbatim", () => {
+    // total=6, recency starts at idx 3. idx 2 (assistant+list_files) is CANDIDATE in Pass 1.
+    // idx 3 (tool_result call_1) is VERBATIM by recency. Pass 2 propagates back to idx 2.
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "call_1", type: "function", function: { name: "list_files", arguments: "{}" } },
+        ],
+      },
+      { role: "tool", tool_call_id: "call_1", content: "file list" },
+      { role: "assistant", content: "ok" },
+      { role: "user", content: "next" },
+    ];
+    const result = classifyTurns(history, []);
+    expect(result[2].class).toBe(TurnClass.VERBATIM);
+    expect(result[2].reason).toBe("pair_with_verbatim_tool_result");
+  });
+
+  it("pair propagation: VERBATIM protected_tool assistant makes its tool_result verbatim", () => {
+    // total=7, recency starts at idx 4. idx 2 (apply_patch) is VERBATIM by protected_tool.
+    // idx 3 (tool_result call_1) has no log entry → CANDIDATE in Pass 1.
+    // Pass 2 propagates forward from idx 2 to idx 3.
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "call_1", type: "function", function: { name: "apply_patch", arguments: "{}" } },
+        ],
+      },
+      { role: "tool", tool_call_id: "call_1", content: "applied" },
+      { role: "assistant", content: "good" },
+      { role: "user", content: "next" },
+      { role: "assistant", content: "done" },
+    ];
+    // No log entry — Pass 1 leaves tool_result as CANDIDATE
+    const result = classifyTurns(history, []);
+    expect(result[2].class).toBe(TurnClass.VERBATIM);
+    expect(result[2].reason).toBe("protected_tool");
+    expect(result[3].class).toBe(TurnClass.VERBATIM);
+    expect(result[3].reason).toBe("pair_with_verbatim_tool_call");
+  });
+
+  it("pair propagation: multi-call assistant where one result is in recency — both results and assistant become verbatim", () => {
+    // total=7, recency starts at idx 4.
+    // idx 2: assistant + [call_1, call_2]  → CANDIDATE (Pass 1)
+    // idx 3: tool_result(call_1)           → CANDIDATE (Pass 1, not in recency, no log)
+    // idx 4: tool_result(call_2)           → VERBATIM (recency)
+    // Pass 2 round 1: idx 4 VERBATIM → flips idx 2 to pair_with_verbatim_tool_result
+    // Pass 2 round 2: idx 2 VERBATIM → flips idx 3 to pair_with_verbatim_tool_call
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "call_1", type: "function", function: { name: "list_files", arguments: "{}" } },
+          { id: "call_2", type: "function", function: { name: "read_file", arguments: "{}" } },
+        ],
+      },
+      { role: "tool", tool_call_id: "call_1", content: "files" },
+      { role: "tool", tool_call_id: "call_2", content: "content" },
+      { role: "user", content: "ok" },
+      { role: "assistant", content: "done" },
+    ];
+    const result = classifyTurns(history, []);
+    expect(result[2].class).toBe(TurnClass.VERBATIM);
+    expect(result[2].reason).toBe("pair_with_verbatim_tool_result");
+    expect(result[3].class).toBe(TurnClass.VERBATIM);
+    expect(result[3].reason).toBe("pair_with_verbatim_tool_call");
+    expect(result[4].class).toBe(TurnClass.VERBATIM);
+    expect(result[4].reason).toBe("recency");
+  });
+
+  it("termination: large all-candidate history (20 tool pairs) completes without infinite loop", () => {
+    // 20 tool pairs all outside recency, not protected, not in log → all CANDIDATE.
+    // Pass 2 finds no VERBATIM tool results to propagate, exits after one no-op iteration.
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+    ];
+    for (let i = 0; i < 20; i++) {
+      const callId = `call_${i}`;
+      history.push({
+        role: "assistant",
+        content: null,
+        tool_calls: [{ id: callId, type: "function", function: { name: "list_files", arguments: "{}" } }],
+      });
+      history.push({ role: "tool", tool_call_id: callId, content: "files" });
+    }
+    history.push({ role: "assistant", content: "last-3" });
+    history.push({ role: "user", content: "last-2" });
+    history.push({ role: "assistant", content: "last-1" });
+    // total=45, recency starts at idx 42
+    const result = classifyTurns(history, []);
+    expect(result).toHaveLength(45);
+    expect(result[2].class).toBe(TurnClass.CANDIDATE);   // first pair: assistant
+    expect(result[3].class).toBe(TurnClass.CANDIDATE);   // first pair: tool_result
+    expect(result[40].class).toBe(TurnClass.CANDIDATE);  // last pair (i=19): assistant
+    expect(result[41].class).toBe(TurnClass.CANDIDATE);  // last pair (i=19): tool_result
+    expect(result[42].class).toBe(TurnClass.VERBATIM);   // recency
+  });
+
   it("same tool called twice with different ids and success values — each resolved independently", () => {
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },

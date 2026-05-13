@@ -14,79 +14,103 @@ function firstUserIndex(history: ChatCompletionMessageParam[]): number {
   return history.findIndex((t) => t.role === "user");
 }
 
-/**
- * Build a callId → ToolCallRecord map from the log for O(1) lookup.
- * Now that log entries carry `id`, this is exact — no name-based ambiguity.
- */
-function buildRecordById(
-  toolCallLog: Array<ToolCallRecord>
-): Map<string, ToolCallRecord> {
-  const map = new Map<string, ToolCallRecord>();
-  for (const rec of toolCallLog) {
-    map.set(rec.id, rec);
-  }
-  return map;
-}
-
 export function classifyTurns(
   history: ChatCompletionMessageParam[],
   toolCallLog: Array<ToolCallRecord>
 ): ClassifiedTurn[] {
   const total = history.length;
   const firstUser = firstUserIndex(history);
-  const recById = buildRecordById(toolCallLog);
 
-  return history.map((turn, idx) => {
-    // System prompt: always verbatim
+  const recById = new Map<string, ToolCallRecord>();
+  for (const r of toolCallLog) recById.set(r.id, r);
+
+  // Pass 1: base classification
+  const classified: ClassifiedTurn[] = history.map((turn, idx) => {
     if (turn.role === "system") {
       return { index: idx, class: TurnClass.VERBATIM, reason: "system" };
     }
-
-    // Initial user task: always verbatim
     if (turn.role === "user" && idx === firstUser) {
       return { index: idx, class: TurnClass.VERBATIM, reason: "initial_task" };
     }
-
-    // Recency window: always verbatim
     if (idx >= total - RECENCY_WINDOW) {
       return { index: idx, class: TurnClass.VERBATIM, reason: "recency" };
     }
-
-    // Assistant turn that called a protected tool: verbatim
     if (turn.role === "assistant" && turn.tool_calls?.length) {
       const hasProtected = turn.tool_calls.some(
         (c) => c.type === "function" && PROTECTED_TOOLS.has(c.function.name)
       );
       if (hasProtected) {
-        return {
-          index: idx,
-          class: TurnClass.VERBATIM,
-          reason: "protected_tool",
-        };
+        return { index: idx, class: TurnClass.VERBATIM, reason: "protected_tool" };
       }
     }
-
-    // Tool result turn: look up the originating log entry by call id.
     if (turn.role === "tool") {
       const rec = recById.get(turn.tool_call_id);
       if (rec !== undefined) {
         if (PROTECTED_TOOLS.has(rec.tool) && rec.success) {
-          return {
-            index: idx,
-            class: TurnClass.VERBATIM,
-            reason: "applied_protected_result",
-          };
+          return { index: idx, class: TurnClass.VERBATIM, reason: "applied_protected_result" };
         }
         if (rec.tool === "apply_patch" && !rec.success) {
-          return {
-            index: idx,
-            class: TurnClass.VERBATIM,
-            reason: "rollback_context",
-          };
+          return { index: idx, class: TurnClass.VERBATIM, reason: "rollback_context" };
         }
       }
     }
-
     return { index: idx, class: TurnClass.CANDIDATE, reason: "default_candidate" };
   });
+
+  // Pass 2: pair propagation — ensure no orphan tool_call/tool_result across candidate boundary.
+  // Build callId → assistantIdx and callId → toolResultIdx lookup maps.
+  const callIdToAssistantIdx = new Map<string, number>();
+  const callIdToToolResultIdx = new Map<string, number>();
+  history.forEach((turn, idx) => {
+    if (turn.role === "assistant" && turn.tool_calls?.length) {
+      for (const call of turn.tool_calls) {
+        callIdToAssistantIdx.set(call.id, idx);
+      }
+    }
+    if (turn.role === "tool") {
+      callIdToToolResultIdx.set(turn.tool_call_id, idx);
+    }
+  });
+
+  // Fixed-point loop: each iteration can only flip CANDIDATE → VERBATIM, so it
+  // terminates in at most history.length passes. Safety counter guards against bugs.
+  let changed = true;
+  let safety = history.length + 1;
+  while (changed && safety-- > 0) {
+    changed = false;
+    for (const c of classified) {
+      if (c.class !== TurnClass.VERBATIM) continue;
+      const turn = history[c.index];
+
+      // VERBATIM tool result → its assistant call must also be VERBATIM
+      if (turn.role === "tool") {
+        const aIdx = callIdToAssistantIdx.get(turn.tool_call_id);
+        if (aIdx !== undefined && classified[aIdx].class !== TurnClass.VERBATIM) {
+          classified[aIdx] = {
+            index: aIdx,
+            class: TurnClass.VERBATIM,
+            reason: "pair_with_verbatim_tool_result",
+          };
+          changed = true;
+        }
+      }
+
+      // VERBATIM assistant with tool_calls → all its tool results must also be VERBATIM
+      if (turn.role === "assistant" && turn.tool_calls?.length) {
+        for (const call of turn.tool_calls) {
+          const rIdx = callIdToToolResultIdx.get(call.id);
+          if (rIdx !== undefined && classified[rIdx].class !== TurnClass.VERBATIM) {
+            classified[rIdx] = {
+              index: rIdx,
+              class: TurnClass.VERBATIM,
+              reason: "pair_with_verbatim_tool_call",
+            };
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+
+  return classified;
 }
