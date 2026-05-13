@@ -4,6 +4,7 @@ import {
   resolvePlanApproval,
   rejectPendingPlansForRun,
   validateExecutionPlan,
+  validateRegenerateFeedback,
   type PlanApprovalAction,
 } from "./planApprovals.js";
 import type { ExecutionPlan } from "./executionPlan.js";
@@ -144,6 +145,99 @@ describe("requestPlanApproval / resolvePlanApproval", () => {
     const { result } = await promise;
     expect(result.action).toBe("reject");
     vi.useRealTimers();
+  });
+});
+
+describe("validateRegenerateFeedback", () => {
+  it("rejects non-string input", () => {
+    const r = validateRegenerateFeedback(42);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/string/);
+  });
+
+  it("rejects empty / whitespace-only string", () => {
+    expect(validateRegenerateFeedback("").ok).toBe(false);
+    expect(validateRegenerateFeedback("   ").ok).toBe(false);
+  });
+
+  it("rejects strings longer than 500 characters", () => {
+    const r = validateRegenerateFeedback("x".repeat(501));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/500/);
+  });
+
+  it("accepts a valid feedback string", () => {
+    expect(validateRegenerateFeedback("Please add a rollback step.").ok).toBe(true);
+    expect(validateRegenerateFeedback("x".repeat(500)).ok).toBe(true);
+  });
+});
+
+describe("resolvePlanApproval — regenerate action", () => {
+  it("resolves with userFeedback when action is regenerate", async () => {
+    const { emit, events } = makeEmit();
+    const promise = requestPlanApproval({ runId: "regen1", plan: PLAN, emit: emit as any, timeoutMs: 5000 });
+    const approvalId = String((events[0] as Record<string, unknown>)["approvalId"]);
+    const r = resolvePlanApproval({ approvalId, action: "regenerate", runId: "regen1", userFeedback: "Add rollback step" });
+    expect(r.ok).toBe(true);
+    const { result } = await promise;
+    expect(result.action).toBe("regenerate");
+    if (result.action === "regenerate") expect(result.userFeedback).toBe("Add rollback step");
+  });
+
+  it("trims userFeedback before resolving", async () => {
+    const { emit, events } = makeEmit();
+    const promise = requestPlanApproval({ runId: "regen2", plan: PLAN, emit: emit as any, timeoutMs: 5000 });
+    const approvalId = String((events[0] as Record<string, unknown>)["approvalId"]);
+    resolvePlanApproval({ approvalId, action: "regenerate", runId: "regen2", userFeedback: "  trim me  " });
+    const { result } = await promise;
+    if (result.action === "regenerate") expect(result.userFeedback).toBe("trim me");
+  });
+
+  it("returns error when userFeedback is missing for regenerate", async () => {
+    const { emit, events } = makeEmit();
+    const promise = requestPlanApproval({ runId: "regen3", plan: PLAN, emit: emit as any, timeoutMs: 5000 });
+    const approvalId = String((events[0] as Record<string, unknown>)["approvalId"]);
+    const r = resolvePlanApproval({ approvalId, action: "regenerate", runId: "regen3" });
+    expect(r.ok).toBe(false);
+    // Cleanup
+    resolvePlanApproval({ approvalId, action: "reject", runId: "regen3" });
+    await promise;
+  });
+
+  it("returns error when userFeedback exceeds 500 chars", async () => {
+    const { emit, events } = makeEmit();
+    const promise = requestPlanApproval({ runId: "regen4", plan: PLAN, emit: emit as any, timeoutMs: 5000 });
+    const approvalId = String((events[0] as Record<string, unknown>)["approvalId"]);
+    const r = resolvePlanApproval({ approvalId, action: "regenerate", runId: "regen4", userFeedback: "x".repeat(501) });
+    expect(r.ok).toBe(false);
+    // Cleanup
+    resolvePlanApproval({ approvalId, action: "reject", runId: "regen4" });
+    await promise;
+  });
+});
+
+describe("requestPlanApproval — regenAttempt / maxRegens emitted", () => {
+  it("emits regenAttempt and maxRegens on the plan_ready_for_review event", async () => {
+    const { emit, events } = makeEmit();
+    const promise = requestPlanApproval({
+      runId: "ra1", plan: PLAN, emit: emit as any, timeoutMs: 5000,
+      regenAttempt: 2, maxRegens: 3,
+    });
+    const evt = events[0] as Record<string, unknown>;
+    expect(evt["regenAttempt"]).toBe(2);
+    expect(evt["maxRegens"]).toBe(3);
+    resolvePlanApproval({ approvalId: String(evt["approvalId"]), action: "reject", runId: "ra1" });
+    await promise;
+  });
+
+  it("defaults regenAttempt to 0 and maxRegens to 3 when omitted", async () => {
+    const { emit, events } = makeEmit();
+    const promise = requestPlanApproval({ runId: "ra2", plan: PLAN, emit: emit as any, timeoutMs: 5000 });
+    const evt = events[0] as Record<string, unknown>;
+    expect(evt["regenAttempt"]).toBe(0);
+    expect(evt["maxRegens"]).toBe(3);
+    resolvePlanApproval({ approvalId: String(evt["approvalId"]), action: "reject", runId: "ra2" });
+    await promise;
   });
 });
 
