@@ -4201,6 +4201,8 @@
       const costLabel = String(input.costLabel || '$0.00');
       const pctLabel = String(input.pctLabel || '—%');
       const totalLabel = formatTokenCount(totalTokens);
+      const compactionCount = Number(input.compactionCount || 0) || 0;
+      const compactedSuffix = compactionCount > 0 ? ` · Compacted ${compactionCount}\xd7` : '';
       if (subagents > 0) {
         const mainLabel = formatTokenCount(mainAgent);
         const subLabel = formatTokenCount(subagents);
@@ -4208,10 +4210,11 @@
           `${escapeHtml(costLabel)} · ${escapeHtml(totalLabel)} tokens ` +
           `<span class="subagent-breakdown" title="Main agent: ${escapeHtml(mainLabel)}, Subagents: ${escapeHtml(subLabel)}">` +
           `(main ${escapeHtml(mainLabel)} + sub ${escapeHtml(subLabel)})</span>` +
-          ` · ${escapeHtml(pctLabel)} cached`;
+          ` · ${escapeHtml(pctLabel)} cached` +
+          escapeHtml(compactedSuffix);
         return;
       }
-      textEl.textContent = `${costLabel} · ${totalLabel} tokens · ${pctLabel} cached`;
+      textEl.textContent = `${costLabel} · ${totalLabel} tokens · ${pctLabel} cached${compactedSuffix}`;
     }
 
     function formatPct(value){
@@ -4269,6 +4272,7 @@
         mainAgentTokens: subagentTokens > 0 ? mainAgentTokens : totalTokens,
         subagentTokens,
         pctLabel,
+        compactionCount: meter.compactionCount || 0,
       });
       // Phase H.7: warn/alert when cumulative tokens approach the per-run cap.
       const budgetRatio = ZONE_TOKEN_BUDGET_CAP > 0 ? totalTokens / ZONE_TOKEN_BUDGET_CAP : 0;
@@ -4364,6 +4368,7 @@
           mainAgentTokens: mainTokens,
           subagentTokens,
           pctLabel,
+          compactionCount: meter.compactionCount || 0,
         });
         const tid = getThreadIdForRunId(meter.runId);
         const run = tid ? state.runsByThread.get(tid) : null;
@@ -4426,6 +4431,7 @@
           totalTokens: 0,
           mainAgentTokens: 0,
           subagentTokens: 0,
+          compactionCount: 0,
           done: false,
         };
       }
@@ -8355,6 +8361,33 @@
         try { updateTodoStatusForRun(runId, progress.todoId, progress.todoStatus); } catch {}
         return;
       }
+      if (progress && progressType === 'compaction_status') {
+        const rid = String(progress.runId || runId || '').trim();
+        if (rid) {
+          const meter = ensureCostMeterState(rid);
+          if (meter) {
+            meter.compactionCount = Number(progress.count || 0) || 0;
+            if (rid === currentDisplayedRunId) refreshCostStripForActiveRun();
+          }
+        }
+        return;
+      }
+      if (progress && progressType === 'compaction_exhausted') {
+        const rid = String(progress.runId || runId || '').trim();
+        if (rid) {
+          const lb = document.getElementById(`logBlock-${rid}`);
+          if (lb) {
+            const notice = document.createElement('div');
+            notice.className = 'toast';
+            notice.style.cssText = 'margin:4px 0 2px;opacity:0.9;border-color:rgba(212,168,90,0.4);background:rgba(212,168,90,0.08)';
+            notice.innerHTML = `<div class="ticon" style="background:#d4a85a"></div><div>${escapeHtml(String(progress.message || 'Context exhausted via compaction.'))}</div>`;
+            lb.appendChild(notice);
+          }
+          state.__compactionExhaustedByRun = state.__compactionExhaustedByRun || {};
+          state.__compactionExhaustedByRun[rid] = true;
+        }
+        return;
+      }
 
       recordExecutionSummaryPayload(logBlock, payload, runId);
 
@@ -9326,11 +9359,14 @@
           const used = typeof result.used === 'number' ? '$' + result.used.toFixed(2) : '';
           const limit = typeof result.limit === 'number' ? '$' + result.limit.toFixed(2) : '';
           showToast('error', `${label} spending limit reached (${used} / ${limit}). Update limits in Settings → Usage.`, 5000);
+        } else if (state.__compactionExhaustedByRun?.[runId]) {
+          // Amber notice already shown in log stream — suppress generic toast.
         } else {
           const msg = result?.message || result?.reason || 'Run failed';
           showToast('error', msg, 2400);
         }
         scrollChatIfFollowing(runId);
+        dequeueAndRunNext(_owningThreadId);
         return;
       }
 
@@ -9510,6 +9546,14 @@
           pill.className = 'toast';
           pill.style.cssText = 'margin:0 0 6px;opacity:0.85;border-color:rgba(212,168,90,0.4);background:rgba(212,168,90,0.08)';
           pill.innerHTML = `<div class="ticon" style="background:#d4a85a"></div><div>Token budget reached — findings below are partial. Re-dispatch with a more focused scope to continue.</div>`;
+          appendToRunGroup(runId, pill);
+        }
+        // P.3: compaction-exhausted graceful exit pill
+        if (result.finalState === 'compaction_exhausted') {
+          const pill = document.createElement('div');
+          pill.className = 'toast';
+          pill.style.cssText = 'margin:0 0 6px;opacity:0.85;border-color:rgba(212,168,90,0.4);background:rgba(212,168,90,0.08)';
+          pill.innerHTML = `<div class="ticon" style="background:#d4a85a"></div><div>Context exhausted via compaction — task aborted. Break this task into smaller subtasks to continue.</div>`;
           appendToRunGroup(runId, pill);
         }
         // Belt-and-suspenders: strip any narration line whose collapsed text
