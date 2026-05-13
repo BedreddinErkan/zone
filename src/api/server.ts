@@ -124,7 +124,7 @@ import {
 } from "../billing/activeRunsRepository.js";
 import { indexRepoFiles } from "../embeddings/indexRepository.js";
 import { LOG_LEVEL, logger, log, debugLog, errorLog } from "../utils/logger.js";
-import { parseMode, type Mode } from "../types/mode.js";
+import { parseMode, MODES, type Mode } from "../types/mode.js";
 export const app = express();
 /** Active /api/patch runs — cancelled via POST /api/cancel (AbortSignal → runLlmPatchFlow). */
 const activePatchRunAbortControllers = new Map<string, AbortController>();
@@ -2872,7 +2872,7 @@ app.post("/api/patch", async (req, res) => {
     res.status(400).json({
       ok: false,
       reason: "invalid_mode",
-      message: "mode must be one of auto, chat, investigate, patch",
+      message: `mode must be one of ${MODES.join(", ")}`,
     });
     return;
   }
