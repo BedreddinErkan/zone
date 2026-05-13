@@ -5488,6 +5488,22 @@ const initializeTodosFromPlan = (): void => {
             status: "active",
           } as any);
         }
+        if (e && typeof e === "object" && e.type === "compaction_status") {
+          emitStructuredProgress({
+            type: "compaction_status" as any,
+            title: "Compacting context",
+            status: "active",
+            count: typeof (e as any).count === "number" ? (e as any).count : 0,
+          } as any);
+        }
+        if (e && typeof e === "object" && e.type === "compaction_exhausted") {
+          emitStructuredProgress({
+            type: "compaction_exhausted" as any,
+            title: "Context exhausted",
+            status: "warning",
+            message: String((e as any).message || ""),
+          } as any);
+        }
       },
       onProgress: (msg: string) => {
         if (!runId) return;
@@ -5700,7 +5716,10 @@ const initializeTodosFromPlan = (): void => {
 
     // Phase H.7: capture token-budget exit at outer-scope lifetime so the
     // final return (way down the function) can flag it for the UI pill.
-    if (loop.terminationReason === "token_budget_exceeded") {
+    if (
+      loop.terminationReason === "token_budget_exceeded" ||
+      loop.terminationReason === "compaction_exhausted"
+    ) {
       tokenBudgetExceededAtExit = true;
     }
 
@@ -5849,6 +5868,14 @@ const initializeTodosFromPlan = (): void => {
     // [zone-token-budget] traces are easy to grep alongside the run.
     if (loop.terminationReason === "token_budget_exceeded") {
       debugLog("[zone-token-budget]", JSON.stringify({
+        mode: "patch",
+        runId: runId || null,
+        outcome: "graceful_exit",
+        summaryPreview: loop.summary.slice(0, 200),
+      }));
+    }
+    if (loop.terminationReason === "compaction_exhausted") {
+      debugLog("[zone-compaction-exhausted]", JSON.stringify({
         mode: "patch",
         runId: runId || null,
         outcome: "graceful_exit",

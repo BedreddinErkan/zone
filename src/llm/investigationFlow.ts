@@ -9,7 +9,7 @@ import { debugLog } from "../utils/logger.js";
 export type InvestigationFlowResult = {
   ok: true;
   decisionMode: "investigation";
-  finalState?: "max_iterations" | "token_budget_exceeded";
+  finalState?: "max_iterations" | "token_budget_exceeded" | "compaction_exhausted";
   chatResponse: string;
   responseHtml: string;
   contextFiles: string[];
@@ -26,7 +26,7 @@ export type InvestigationFlowResult = {
 export type ChatAgentFlowResult = {
   ok: true;
   decisionMode: "chat";
-  finalState?: "max_iterations" | "token_budget_exceeded";
+  finalState?: "max_iterations" | "token_budget_exceeded" | "compaction_exhausted";
   chatResponse: string;
   responseHtml: string;
   contextFiles: string[];
@@ -195,30 +195,52 @@ export async function runInvestigationFlow(input: {
           iter: typeof e.iter === "number" ? e.iter : undefined,
         } as Partial<ZoneStructuredProgressEvent>);
       }
+      if (e.type === "compaction_status") {
+        emitStructuredProgress({
+          type: "compaction_status" as any,
+          title: "Compacting context",
+          status: "active",
+          count: typeof e.count === "number" ? e.count : 0,
+        } as any);
+      }
+      if (e.type === "compaction_exhausted") {
+        emitStructuredProgress({
+          type: "compaction_exhausted" as any,
+          title: "Context exhausted",
+          status: "warning",
+          message: String(e.message || ""),
+        } as any);
+      }
     },
   });
 
   const terminationReason = loop.terminationReason;
+  const hitCompactionExhausted = terminationReason === "compaction_exhausted";
   const hitTokenBudget = terminationReason === "token_budget_exceeded";
   const hitMaxIter =
-    terminationReason === "max_iterations" || (!loop.success && !hitTokenBudget);
+    terminationReason === "max_iterations" ||
+    (!loop.success && !hitTokenBudget && !hitCompactionExhausted);
   const responseText = String(loop.summary || "").trim() || "I could not produce an investigation answer.";
   emitStructuredProgress({
     type: "agent_loop_complete",
     title: loop.success
       ? "Investigation complete"
-      : hitTokenBudget
-        ? "Investigation ended at token budget"
-        : "Investigation ended with partial findings",
+      : hitCompactionExhausted
+        ? "Investigation aborted — context exhausted"
+        : hitTokenBudget
+          ? "Investigation ended at token budget"
+          : "Investigation ended with partial findings",
     detail: responseText.slice(0, 4000),
     status: loop.success ? "success" : "warning",
   });
 
-  const finalState: InvestigationFlowResult["finalState"] = hitTokenBudget
-    ? "token_budget_exceeded"
-    : hitMaxIter
-      ? "max_iterations"
-      : undefined;
+  const finalState: InvestigationFlowResult["finalState"] = hitCompactionExhausted
+    ? "compaction_exhausted"
+    : hitTokenBudget
+      ? "token_budget_exceeded"
+      : hitMaxIter
+        ? "max_iterations"
+        : undefined;
 
   return {
     ok: true,

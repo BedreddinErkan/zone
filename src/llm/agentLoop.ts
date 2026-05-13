@@ -45,6 +45,7 @@ import type {
 } from "openai/resources/chat/completions";
 import type { Mode } from "../types/mode.js";
 import { ContextCompactor } from "./compaction/ContextCompactor.js";
+import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
 
 type AgentLoopMode = Exclude<Mode, "auto"> | "investigation";
 
@@ -147,7 +148,7 @@ export interface AgentLoopResult {
   /** Phase H.7: how the loop ended. Used by upstream flows (investigation /
    *  patch) to surface "Token budget reached" vs "Iteration budget reached"
    *  distinctly in the UI. Optional for backward-compat with older callers. */
-  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded";
+  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted";
   /** Per-loop LLM token usage. For subagent loops this is serialized into the
    *  Task tool result so the parent can enforce the combined Phase H.7 cap. */
   tokenUsage?: SubagentTokenUsage;
@@ -2180,6 +2181,32 @@ Example (small patch with verification — still call TodoWrite):
     };
   };
 
+  const synthesizeCompactionExhaustedExit = (
+    iterNumber: number,
+    _messages: ChatCompletionMessageParam[]
+  ): AgentLoopResult => {
+    const msg =
+      "Task aborted: context exhausted via compaction. " +
+      "The conversation has been compacted to its safety limit. " +
+      "To continue, please break this task into smaller subtasks.";
+    debugLog("[zone-compaction-exhausted]", JSON.stringify({
+      iter: iterNumber,
+      runId: input.runId,
+      compactionCount: compactor.getCompactionCount(),
+    }));
+    return {
+      success: false,
+      summary: msg,
+      toolCallLog,
+      filesModified: Array.from(filesModified),
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted",
+      terminationReason: "compaction_exhausted",
+      tokenUsage: currentTokenUsage(),
+      costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+    };
+  };
+
   const throwIfAborted = (stage: string): void => {
     if (input.abortSignal?.aborted) {
       debugLog("[zone-agent-aborted]", {
@@ -2894,22 +2921,37 @@ Example (small patch with verification — still call TodoWrite):
         }));
       }
 
-      // P.2: compaction check at safe iteration boundary — after all tool results
-      // are pushed to responseInput, before the next LLM call is composed.
-      const compactionResult = await compactor.checkAndMaybeCompact({
-        responseInput,
-        toolCallLog,
-        currentUsage: cumulativeTokens(),
-        effectiveCap: effectiveTokenBudgetCap,
-        client,
-        runId: input.runId,
-      });
+      // P.2/P.3: compaction check with graceful exhausted exit.
+      let compactionResult: CompactionResult;
+      try {
+        compactionResult = await compactor.checkAndMaybeCompact({
+          responseInput,
+          toolCallLog,
+          currentUsage: cumulativeTokens(),
+          effectiveCap: effectiveTokenBudgetCap,
+          client,
+          runId: input.runId,
+        });
+      } catch (err) {
+        if (err instanceof CompactionExhaustedError) {
+          input.onStructuredEvent?.({
+            type: "compaction_exhausted",
+            message: "Task aborted: context exhausted via compaction. Break this task into smaller subtasks.",
+          });
+          return synthesizeCompactionExhaustedExit(iter + 1, responseInput);
+        }
+        throw err;
+      }
       if (compactionResult.compacted && compactionResult.newResponseInput) {
         // In-place mutation preserves the array reference held by the outer scope.
         responseInput.splice(0, responseInput.length, ...compactionResult.newResponseInput);
         input.onProgress?.(
           `Context compacted (compaction #${compactor.getCompactionCount()})`
         );
+        input.onStructuredEvent?.({
+          type: "compaction_status",
+          count: compactor.getCompactionCount(),
+        });
       }
       if (compactionResult.warning) {
         input.onProgress?.(compactionResult.warning);

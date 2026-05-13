@@ -69,12 +69,22 @@ export class ContextCompactor {
     const firstCandidateIdx = candidates[0].index;
     const newResponseInput: ChatCompletionMessageParam[] = [];
 
+    // Recurring notice: injected into the synthetic turn starting at the 3rd compaction
+    // so the model knows context is heavily summarized and can recommend subtasks.
+    const nextCount = this.compactionCount + 1;
+    const recurringNotice =
+      nextCount >= this.WARN_AT
+        ? `\n\nNOTE: This task has been compacted ${nextCount} time(s). ` +
+          `Context is heavily summarized. If your next steps don't make clear ` +
+          `progress, recommend the user break this task into smaller subtasks.`
+        : "";
+
     for (let i = 0; i < args.responseInput.length; i++) {
       if (candidateIndices.has(i)) {
         if (i === firstCandidateIdx) {
           newResponseInput.push({
             role: "system",
-            content: `[compacted_history]\n${summaryText}\n[/compacted_history]`,
+            content: `[compacted_history]\n${summaryText}${recurringNotice}\n[/compacted_history]`,
           });
         }
         continue;
