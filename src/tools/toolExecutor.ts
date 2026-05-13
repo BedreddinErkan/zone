@@ -371,6 +371,23 @@ function formatSearchContextBlock(
   });
 }
 
+function prefixLineNumbers(lines: string[], startLine: number): string {
+  return lines
+    .map((line, i) => `${String(startLine + i).padStart(6)}\t${line}`)
+    .join("\n");
+}
+
+// Strip the cat-n style prefix (e.g. "     1\t") that read_file emits on outline/lineRange tiers.
+// Only strips if ALL non-empty lines carry the prefix (all-or-nothing: avoids false positives on
+// files that happen to start with spaces+digits+tab as real code).
+function stripReadFilePrefix(find: string): string {
+  const lines = find.split("\n");
+  const nonEmpty = lines.filter((l) => l !== "");
+  if (nonEmpty.length === 0) return find;
+  if (!nonEmpty.every((l) => /^\s*\d+\t/.test(l))) return find;
+  return lines.map((l) => l.replace(/^\s*\d+\t/, "")).join("\n");
+}
+
 // Module-level cache for ripgrep detection (undefined = not yet checked)
 let _rgPath: string | null | undefined;
 
@@ -1076,23 +1093,24 @@ export async function executeTool(
             output: `Invalid lineRange [${start}, ${end}]: start > end`,
           };
         }
-        const sliced = lines.slice(start - 1, end).join("\n");
+        const slicedLines = lines.slice(start - 1, end);
+        const numberedSlice = prefixLineNumbers(slicedLines, start);
         debugLog("[zone-tool-readfile-smart]", JSON.stringify({
           mode: "lineRange",
           filePath,
           lineRange: [start, end],
           totalLines: lines.length,
           fullSize: charCount,
-          returnedChars: sliced.length,
+          returnedChars: numberedSlice.length,
         }));
         return {
           success: true,
-          output: `[lineRange ${start}-${end} of ${lines.length} total lines from ${filePath}]\n\n${sliced}`,
-          contentLength: sliced.length,
+          output: `[lineRange ${start}-${end} of ${lines.length} total lines from ${filePath}]\n\n${numberedSlice}`,
+          contentLength: numberedSlice.length,
         };
       }
 
-      if (charCount <= 30_000) {
+      if (charCount <= 10_000) {
         debugLog("[zone-tool-readfile-smart]", JSON.stringify({
           mode: "full-small",
           filePath,
@@ -1102,47 +1120,45 @@ export async function executeTool(
         return { success: true, output: fullContent, contentLength: charCount };
       }
 
-      if (charCount <= 100_000) {
-        const lineCount = fullContent.split("\n").length;
-        const hint = `[${filePath}: ${charCount} chars, ${lineCount} lines. For focused reads use lineRange: [start, end].]\n\n`;
-        debugLog("[zone-tool-readfile-smart]", JSON.stringify({
-          mode: "full-medium",
-          filePath,
-          fullSize: charCount,
-          lineCount,
-          returnedChars: hint.length + charCount,
-        }));
-        return {
-          success: true,
-          output: hint + fullContent,
-          contentLength: charCount,
-        };
-      }
-
+      // Files >10K: head + outline + tail with line-number prefixes
       const lines = fullContent.split("\n");
-      const head = lines.slice(0, 100).join("\n");
-      const tail = lines.slice(-50).join("\n");
+      const headCount = Math.min(100, lines.length);
+      const headLines = lines.slice(0, headCount);
+      const tailStartIdx = Math.max(headCount, lines.length - 50);
+      const tailLines = lines.slice(tailStartIdx);
+      const tailStartLine = tailStartIdx + 1;
+      const elidedCount = Math.max(tailStartIdx - headCount, 0);
       const outline = generateFileOutline(fullContent, filePath);
-      const elidedCount = Math.max(lines.length - 150, 0);
-      const summary = [
+      const numberedHead = prefixLineNumbers(headLines, 1);
+
+      const summaryParts = [
         `[FILE OUTLINE — ${filePath} is ${lines.length} lines, ${charCount} chars.]`,
         `[Use read_file({ filePath, lineRange: [start, end] }) to read specific sections.]`,
         "",
         outline || "[no top-level symbols detected]",
         "",
-        "─── HEAD: first 100 lines ───",
-        head,
-        "",
-        `─── ${elidedCount} lines elided (use lineRange) ───`,
-        "",
-        "─── TAIL: last 50 lines ───",
-        tail,
-      ].join("\n");
+        `─── HEAD: lines 1-${headCount} ───`,
+        numberedHead,
+      ];
+
+      if (elidedCount > 0) {
+        summaryParts.push("", `─── ${elidedCount} lines elided (use lineRange) ───`);
+      }
+
+      if (tailLines.length > 0) {
+        summaryParts.push(
+          "",
+          `─── TAIL: lines ${tailStartLine}-${lines.length} ───`,
+          prefixLineNumbers(tailLines, tailStartLine)
+        );
+      }
+
+      const summary = summaryParts.join("\n");
 
       debugLog(
         "[zone-tool-readfile-smart]",
         `[FILE OUTLINE — ${filePath}] ` + JSON.stringify({
-          mode: "outline-large",
+          mode: "outline",
           filePath,
           fullSize: charCount,
           lineCount: lines.length,
@@ -1552,7 +1568,9 @@ export async function executeTool(
           );
         }
 
-        const normalizedFind = block.find.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        const normalizedFind = stripReadFilePrefix(
+          block.find.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+        );
         const normalizedReplace = block.replace
           .replace(/\r\n/g, "\n")
           .replace(/\r/g, "\n");
