@@ -1193,6 +1193,10 @@ export function applyNoInfraVerificationOverride(input: {
   return input.verificationReason;
 }
 
+// Phase Q.4 invariant: runStagingVerification uses its own exec instance and
+// reads err.stdout/err.stderr directly — it never goes through executeTool's
+// run_command handler. truncateCommandOutput therefore does NOT affect
+// pass/fail determination here.
 const execAsync_verify = promisify(exec);
 
 export function selectVerificationCommand(
