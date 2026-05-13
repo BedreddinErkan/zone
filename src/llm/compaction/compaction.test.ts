@@ -559,6 +559,62 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
     expect(c.getCompactionCount()).toBe(1);
   });
 
+  it("recurring notice absent in synthetic turn for 1st and 2nd compaction", async () => {
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: "cand" },
+      { role: "assistant", content: "last-3" },
+      { role: "user", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
+    for (let pass = 1; pass <= 2; pass++) {
+      const c = await compactorWithCount(pass - 1);
+      const result = await c.checkAndMaybeCompact({
+        responseInput: [...history],
+        toolCallLog: [],
+        currentUsage: 700_000,
+        effectiveCap: 800_000,
+        client: stubClient,
+      });
+      const syntheticTurn = result.newResponseInput?.find(
+        (t) => t.role === "system" && typeof t.content === "string" && (t.content as string).includes("[compacted_history]")
+      );
+      expect(syntheticTurn).toBeDefined();
+      expect((syntheticTurn!.content as string)).not.toContain("NOTE:");
+      expect((syntheticTurn!.content as string)).not.toContain("recommend the user break");
+    }
+  });
+
+  it("recurring notice present in synthetic turn for 3rd, 4th, and 5th compaction", async () => {
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: "cand" },
+      { role: "assistant", content: "last-3" },
+      { role: "user", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
+    for (let pass = 3; pass <= 5; pass++) {
+      const c = await compactorWithCount(pass - 1);
+      const result = await c.checkAndMaybeCompact({
+        responseInput: [...history],
+        toolCallLog: [],
+        currentUsage: 700_000,
+        effectiveCap: 800_000,
+        client: stubClient,
+      });
+      const syntheticTurn = result.newResponseInput?.find(
+        (t) => t.role === "system" && typeof t.content === "string" && (t.content as string).includes("[compacted_history]")
+      );
+      expect(syntheticTurn).toBeDefined();
+      const content = syntheticTurn!.content as string;
+      expect(content).toContain(`compacted ${pass} time(s)`);
+      expect(content).toContain("recommend the user break");
+      expect(content).toContain("mocked summary");
+    }
+  });
+
   it("summarizer throws → returns summarizer_failed, no newResponseInput", async () => {
     vi.mocked(summarize).mockRejectedValueOnce(new Error("LLM timeout"));
 
