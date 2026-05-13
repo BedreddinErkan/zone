@@ -48,6 +48,7 @@ import { ContextCompactor } from "./compaction/ContextCompactor.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
 import { hashToolCall, createDetectorState, recordAndDetect } from "./loopDetector.js";
 import { emitTokenBreakdown, emitBreakdownSummary, type BreakdownEvent } from "./tokenBreakdown.js";
+import { pruneStaleReads, emitContextPruned } from "./contextPruner.js";
 
 // "plan" kept as accepted input for backward compat — normalizeAgentLoopMode maps it to "patch"
 type AgentLoopMode = Exclude<Mode, "auto"> | "investigation" | "plan";
@@ -423,6 +424,9 @@ export function assembleAgentSystemPrompt(input: {
     `- Include changed files, verification result, and any remaining warning.\n` +
     `- Omit tables, decorative markdown, and per-file explanations already visible in the diff.\n` +
     `- Do not recap tool output or command logs unless they explain a failure.\n\n` +
+    `ELIDED READS: tool_result blocks marked with "[Earlier read: ...]" had their content\n` +
+    `removed to save context tokens. If you need the content of an elided read, call\n` +
+    `read_file again — it's cheap and will return the current file state.\n\n` +
     `TRUNCATED FILE SECTIONS: If you see a ZONE_CONTEXT_TRUNCATED marker in a file,\n` +
     `part of the file was omitted from the initial context to save space.\n` +
     `- DO NOT include the marker line in any apply_patch FIND block.\n` +
@@ -2232,11 +2236,12 @@ Example (small patch with verification — still call TodoWrite):
     let finalSummary =
       "Token budget reached before a final answer was produced.";
     try {
+      const { pruned: wrapupPruned } = pruneStaleReads(messages);
       const wrapupResponse = await client.createChatCompletion(
         {
           model: getModelName("high", client.provider, requestCtx?.modelOverride),
           messages: [
-            ...messages,
+            ...wrapupPruned,
             {
               role: "user",
               content:
@@ -2367,13 +2372,18 @@ Example (small patch with verification — still call TodoWrite):
       client.provider === "openai" ? buildOpenAIPromptCacheKey(input.runId) : undefined;
     const modelName = getModelName("high", client.provider, requestCtx?.modelOverride);
 
-    // R.1: emit per-call token breakdown before each LLM call.
+    // R.2: prune stale read results from the messages copy sent to the API.
+    // responseInput itself is not mutated — future iterations keep appending.
+    const { pruned: prunedMessages, stats: pruneStats } = pruneStaleReads(responseInput);
+    emitContextPruned({ runId: input.runId ?? "", iter, stats: pruneStats });
+
+    // R.1: emit per-call token breakdown (on the pruned view, which is what the LLM sees).
     const bdEvent = emitTokenBreakdown({
       runId: input.runId ?? "",
       parentRunId: input.subagent?.parentRunId,
       subagentId: input.subagent?.id,
       iter,
-      messages: responseInput,
+      messages: prunedMessages,
       tools: toolsForLLM,
       model: modelName,
     });
@@ -2382,7 +2392,7 @@ Example (small patch with verification — still call TodoWrite):
     const response = await client.createChatCompletion(
       {
         model: modelName,
-        messages: responseInput,
+        messages: prunedMessages,
         tools: toolsForLLM,
         tool_choice: "auto",
         ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),

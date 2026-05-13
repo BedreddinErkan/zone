@@ -17,12 +17,13 @@ import { log } from "../utils/logger.js";
 export type TokenBucket =
   | "system_prompt"        // role:"system" base content
   | "tool_descriptions"    // tool schema definitions in request payload
-  | "repo_manifest"        // "Repository scanned (N files)" block
+  | "repo_manifest"        // "Repository scanned (N files)" block — 0% in standard runs (progress event only, not in LLM messages)
   | "plan_annotations"     // "PLAN ANNOTATIONS" block (Q.6)
   | "import_context"       // "RELATED FILES" import ecosystem block
   | "tool_result_read"     // role:"tool" from read_file / list_directory
   | "tool_result_command"  // role:"tool" from run_command / run_command_background
   | "tool_result_search"   // role:"tool" from search_in_files / search_codebase
+  | "tool_result_task"     // role:"tool" from Task (subagent dispatch result — can be large JSON)
   | "tool_result_other"    // role:"tool" uncategorized
   | "compaction_summary"   // "Context compacted" summary block
   | "assistant_reasoning"  // role:"assistant" text turns (model's previous prose)
@@ -78,6 +79,7 @@ const ALL_BUCKETS: TokenBucket[] = [
   "tool_result_read",
   "tool_result_command",
   "tool_result_search",
+  "tool_result_task",
   "tool_result_other",
   "compaction_summary",
   "assistant_reasoning",
@@ -141,6 +143,7 @@ const SEARCH_TOOL_NAMES = new Set([
   "find_files",
   "grep_codebase",
 ]);
+const TASK_TOOL_NAMES = new Set(["Task"]);
 
 type AnyMessage = {
   role: string;
@@ -332,6 +335,8 @@ export function categorizeMessages(
         addTo(buckets, "tool_result_command", chars);
       } else if (SEARCH_TOOL_NAMES.has(toolName)) {
         addTo(buckets, "tool_result_search", chars);
+      } else if (TASK_TOOL_NAMES.has(toolName)) {
+        addTo(buckets, "tool_result_task", chars);
       } else if (toolName) {
         // Named but not in a specific set
         addTo(buckets, "tool_result_other", chars);
