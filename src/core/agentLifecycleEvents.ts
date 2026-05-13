@@ -169,6 +169,9 @@ export type ZoneStructuredProgressEvent = {
   approvalId?: string;
   /** Plan-review events: the execution plan being reviewed or the approved/edited version. */
   plan?: { objective: string; steps: Array<{ title: string; description: string; filesLikely: string[] }>; riskHints: string[]; scopeSummary: string };
+  /** plan_ready_for_review: which regen iteration this is (0 = first/original) and the cap. */
+  regenAttempt?: number;
+  maxRegens?: number;
   todos?: Array<{
     id: string;
     text: string;

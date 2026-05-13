@@ -101,6 +101,7 @@ import {
   requestPlanApproval,
   resolvePlanApproval,
   rejectPendingPlansForRun,
+  validateRegenerateFeedback,
 } from "../llm/planApprovals.js";
 import { preparePlanContext } from "../core/preparePlanContext.js";
 import { generateExecutionPlan } from "../llm/executionPlan.js";
@@ -1836,21 +1837,30 @@ app.post("/api/approve-plan", (req, res) => {
   const runId = typeof req.body?.runId === "string" ? req.body.runId.trim() : "";
   const action = typeof req.body?.action === "string" ? req.body.action.trim() : "";
   const editedPlan = req.body?.editedPlan;
+  const userFeedback = req.body?.userFeedback;
 
   if (!approvalId || !runId) {
     res.status(400).json({ ok: false, reason: "missing_approval_id_or_run_id" });
     return;
   }
-  if (!["approve", "edit", "reject"].includes(action)) {
+  if (!["approve", "edit", "reject", "regenerate"].includes(action)) {
     res.status(400).json({ ok: false, reason: "invalid_action" });
     return;
+  }
+  if (action === "regenerate") {
+    const feedbackCheck = validateRegenerateFeedback(userFeedback);
+    if (!feedbackCheck.ok) {
+      res.status(400).json({ ok: false, reason: feedbackCheck.reason });
+      return;
+    }
   }
 
   const r = resolvePlanApproval({
     approvalId,
-    action: action as "approve" | "edit" | "reject",
+    action: action as "approve" | "edit" | "reject" | "regenerate",
     runId,
     editedPlan,
+    userFeedback,
   });
   if (!r.ok) {
     res.status(404).json({ ok: false, reason: r.message || "not_found" });
@@ -3296,6 +3306,8 @@ app.post("/api/patch", async (req, res) => {
     }
   }
   // Plan mode: pre-generate plan and wait for user review before starting agent loop.
+  // Supports up to MAX_REGENS regeneration cycles driven by user feedback.
+  const PLAN_MAX_REGENS = 3;
   let preGeneratedPlan: Awaited<ReturnType<typeof generateExecutionPlan>> | undefined;
   if (requestedMode === "plan" && runIdStr) {
     try {
@@ -3305,40 +3317,108 @@ app.post("/api/patch", async (req, res) => {
         repoSummaryOverride: (hostedContext as { repoSummary?: string } | undefined)?.repoSummary,
         userApiKey: userApiKey || undefined,
       });
-      const plan = await generateExecutionPlan({
+      let currentPlan = await generateExecutionPlan({
         task: String(task),
         repoSummary: planContext.projectSummary,
         relevantFiles: planContext.relevantFilePaths,
         userApiKey: userApiKey || undefined,
         provider: byokProvider,
       });
-      const { result: approvalResult } = await requestPlanApproval({
-        runId: runIdStr,
-        plan,
-        emit: (evt) =>
-          emitProgress(runIdStr, {
-            stage: "plan_review",
-            progress: { ...evt, ts: Date.now() } as any,
-          }),
-        abortSignal: patchAbort?.signal,
-      });
-      if (approvalResult.action === "reject") {
-        emitProgress(runIdStr, {
-          stage: "plan_rejected",
-          progress: {
-            runId: runIdStr,
-            ts: Date.now(),
-            type: "plan_rejected",
-            title: "Plan rejected by user",
-            status: "warning",
-          } as any,
+      let regenAttempt = 0;
+
+      planReviewLoop: while (true) {
+        const { result: approvalResult } = await requestPlanApproval({
+          runId: runIdStr,
+          plan: currentPlan,
+          regenAttempt,
+          maxRegens: PLAN_MAX_REGENS,
+          emit: (evt) =>
+            emitProgress(runIdStr, {
+              stage: "plan_review",
+              progress: { ...evt, ts: Date.now() } as any,
+            }),
+          abortSignal: patchAbort?.signal,
         });
-        if (runIdStr) registerRunComplete(runIdStr, "cancelled");
-        perf.finish("plan rejected");
-        res.json({ ok: false, reason: "plan_rejected" });
-        return;
+
+        if (approvalResult.action === "reject") {
+          emitProgress(runIdStr, {
+            stage: "plan_rejected",
+            progress: {
+              runId: runIdStr,
+              ts: Date.now(),
+              type: "plan_rejected",
+              title: "Plan rejected by user",
+              status: "warning",
+            } as any,
+          });
+          if (runIdStr) registerRunComplete(runIdStr, "cancelled");
+          perf.finish("plan rejected");
+          res.json({ ok: false, reason: "plan_rejected" });
+          return;
+        }
+
+        if (approvalResult.action === "approve") {
+          preGeneratedPlan = currentPlan;
+          break planReviewLoop;
+        }
+
+        if (approvalResult.action === "edit") {
+          emitProgress(runIdStr, {
+            stage: "plan_edited",
+            progress: {
+              runId: runIdStr,
+              ts: Date.now(),
+              type: "plan_edited",
+              title: "Plan edited",
+              plan: approvalResult.plan,
+              status: "success",
+            } as any,
+          });
+          preGeneratedPlan = approvalResult.plan;
+          break planReviewLoop;
+        }
+
+        if (approvalResult.action === "regenerate") {
+          regenAttempt += 1;
+          if (regenAttempt > PLAN_MAX_REGENS) {
+            // Defensive — UI should have disabled the button, but enforce server-side too.
+            emitProgress(runIdStr, {
+              stage: "plan_rejected",
+              progress: {
+                runId: runIdStr,
+                ts: Date.now(),
+                type: "plan_rejected",
+                title: "Regeneration limit reached",
+                status: "warning",
+              } as any,
+            });
+            if (runIdStr) registerRunComplete(runIdStr, "cancelled");
+            perf.finish("plan regen limit exceeded");
+            res.json({ ok: false, reason: "plan_regen_limit_exceeded" });
+            return;
+          }
+          const previousPlan = currentPlan;
+          try {
+            currentPlan = await generateExecutionPlan({
+              task: String(task),
+              repoSummary: planContext.projectSummary,
+              relevantFiles: planContext.relevantFilePaths,
+              userApiKey: userApiKey || undefined,
+              provider: byokProvider,
+              previousPlan,
+              userFeedback: approvalResult.userFeedback,
+            });
+          } catch (regenErr) {
+            // Generation failed — don't count this attempt, loop with existing plan.
+            regenAttempt -= 1;
+            console.warn(
+              "[zone-plan] regen generation failed:",
+              regenErr instanceof Error ? regenErr.message : String(regenErr)
+            );
+          }
+          // Loop continues — requestPlanApproval emits new event with new approvalId.
+        }
       }
-      preGeneratedPlan = approvalResult.plan;
     } catch (err) {
       console.warn(
         "[zone-plan] plan-approval gate failed:",

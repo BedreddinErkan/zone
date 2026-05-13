@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type { ExecutionPlan } from "./executionPlan.js";
 
-export type PlanApprovalAction = "approve" | "edit" | "reject";
+export type PlanApprovalAction = "approve" | "edit" | "reject" | "regenerate";
 
 type PendingPlan = {
   runId: string;
@@ -13,7 +13,8 @@ type PendingPlan = {
 export type PlanApprovalResult =
   | { action: "approve"; plan: ExecutionPlan }
   | { action: "edit"; plan: ExecutionPlan }
-  | { action: "reject" };
+  | { action: "reject" }
+  | { action: "regenerate"; userFeedback: string };
 
 const pendingPlans = new Map<string, PendingPlan>();
 
@@ -45,11 +46,15 @@ export function validateExecutionPlan(raw: unknown): ExecutionPlan | null {
 export function requestPlanApproval(input: {
   runId: string;
   plan: ExecutionPlan;
+  regenAttempt?: number;
+  maxRegens?: number;
   emit: (evt: {
     type: "plan_ready_for_review";
     runId: string;
     plan: ExecutionPlan;
     approvalId: string;
+    regenAttempt: number;
+    maxRegens: number;
   }) => void;
   abortSignal?: AbortSignal;
   timeoutMs?: number;
@@ -60,8 +65,10 @@ export function requestPlanApproval(input: {
     typeof input.timeoutMs === "number" && input.timeoutMs > 0
       ? input.timeoutMs
       : 10 * 60 * 1000;
+  const regenAttempt = input.regenAttempt ?? 0;
+  const maxRegens = input.maxRegens ?? 3;
 
-  input.emit({ type: "plan_ready_for_review", runId, plan: input.plan, approvalId });
+  input.emit({ type: "plan_ready_for_review", runId, plan: input.plan, approvalId, regenAttempt, maxRegens });
 
   return new Promise((resolve) => {
     const finish = (result: PlanApprovalResult) => {
@@ -90,11 +97,20 @@ export function requestPlanApproval(input: {
   });
 }
 
+export function validateRegenerateFeedback(feedback: unknown): { ok: true } | { ok: false; reason: string } {
+  if (typeof feedback !== "string") return { ok: false, reason: "userFeedback must be a string" };
+  const trimmed = feedback.trim();
+  if (trimmed.length === 0) return { ok: false, reason: "userFeedback cannot be empty" };
+  if (trimmed.length > 500) return { ok: false, reason: "userFeedback exceeds 500 char limit" };
+  return { ok: true };
+}
+
 export function resolvePlanApproval(input: {
   approvalId: string;
   action: PlanApprovalAction;
   runId: string;
   editedPlan?: unknown;
+  userFeedback?: unknown;
 }): { ok: boolean; message?: string } {
   const approvalId = String(input.approvalId || "").trim();
   const runId = String(input.runId || "").trim();
@@ -111,6 +127,13 @@ export function resolvePlanApproval(input: {
     const edited = validateExecutionPlan(input.editedPlan);
     if (!edited) return { ok: false, message: "invalid_edited_plan" };
     entry.resolve({ action: "edit", plan: edited });
+    return { ok: true };
+  }
+
+  if (input.action === "regenerate") {
+    const feedbackCheck = validateRegenerateFeedback(input.userFeedback);
+    if (!feedbackCheck.ok) return { ok: false, message: feedbackCheck.reason };
+    entry.resolve({ action: "regenerate", userFeedback: (input.userFeedback as string).trim() });
     return { ok: true };
   }
 

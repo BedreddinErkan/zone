@@ -75,6 +75,8 @@ export async function generateExecutionPlan(input: {
   relevantFiles: string[];
   userApiKey?: string;
   provider?: LLMProvider;
+  previousPlan?: ExecutionPlan;
+  userFeedback?: string;
 }): Promise<ExecutionPlan> {
   const client = createLLMClient({
     apiKey: input.userApiKey,
@@ -84,8 +86,20 @@ export async function generateExecutionPlan(input: {
   const model = getModelName("standard", client.provider, ctx?.modelOverride);
   const relevantFiles = input.relevantFiles.slice(0, 8).join("\n") || "(none)";
 
+  // When the user has reviewed a previous plan and provided feedback, prepend
+  // that context so the LLM treats it as the primary revision directive.
+  const feedbackSection =
+    input.previousPlan && input.userFeedback
+      ? `The user reviewed a previous plan and provided this feedback:\n` +
+        `"${input.userFeedback}"\n\n` +
+        `Previous plan:\n${JSON.stringify(input.previousPlan, null, 2)}\n\n` +
+        `Generate a revised plan that addresses the feedback. Preserve what ` +
+        `worked in the previous plan; change only what the feedback requests. ` +
+        `Keep the same JSON shape (objective, steps, riskHints, scopeSummary).\n\n`
+      : "";
+
   const prompt = `
-Create a concise execution plan for a code patch.
+${feedbackSection}Create a concise execution plan for a code patch.
 
 TASK
 ${input.task}
