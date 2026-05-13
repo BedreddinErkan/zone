@@ -366,14 +366,30 @@ export function assembleAgentSystemPrompt(input: {
     `Look for the \`id\` attribute on the section element you modified. If the\n` +
     `change spans the full page or you're unsure, just pass "/" — the tool now\n` +
     `captures full-page screenshots so changes below the fold are always visible.\n\n` +
-    `TASK SUBAGENTS (Task):\n` +
-    `Default to single-thread. Use Task only when parallelism clearly saves wall time.\n` +
-    `USE Task ONLY when: 5+ independent investigation steps; different file clusters with no shared state; single-thread would exceed 15 iterations; or multi-candidate exploration benefits from parallelism. Examples: audit security issues in 8+ files; investigate parallel module dependencies.\n` +
-    `DON'T USE Task for: single-file changes; sequential reasoning chains; investigations under 5 files; work that fits in 8 iterations; patch-then-verify cycles; synthetic test scenarios. Most "find X function" tasks fit single-thread.\n` +
-    `COST: each dispatch consumes about 30K-100K extra tokens and can double/triple BYOK cost. Use 0 dispatches unless criteria clearly match.\n` +
-    `ECONOMY: policy caps are MAX_SUBAGENT_CALLS=2 and WORKER_MAX_ITER=6 (numeric enforcement in K.2).\n` +
-    `YES example: "audit deprecated API usage across src/api/* and src/core/* - 12 files, find all sites and propose unified replacement".\n` +
-    `NO examples: "Find a function with multiple callers and break its signature" -> use search_in_files + find_references in the main loop. "Refactor this single component" -> read_file + apply_patch. "Investigate why this test is failing" -> search + read in the main loop.\n\n` +
+    `TASK SUBAGENTS (Task) — when to dispatch:\n` +
+    `You have the Task tool. Default is single-thread. Spawn a subagent only when the\n` +
+    `work has clear parallel or isolated structure. Hard cap: 2 dispatches per parent\n` +
+    `run (MAX_SUBAGENT_CALLS=2, WORKER_MAX_ITER=6). Spend them on the highest-value work.\n` +
+    `GOOD signals — DO dispatch when:\n` +
+    `  - The current plan step is marked \`subagentEligible: true\` (plan-level hint).\n` +
+    `  - You need to apply the same transformation across 5+ files (multi_file_fanout):\n` +
+    `    rename across files, codemod, repeated find-replace. Worker subagent.\n` +
+    `  - You need pure read-only investigation across the repo with no shared mutation\n` +
+    `    state — "map every caller of X", "list files matching pattern Y". Explore subagent.\n` +
+    `  - A single step would otherwise consume 10+ iterations on its own — delegate it\n` +
+    `    to keep parent context free.\n` +
+    `BAD signals — DON'T dispatch when:\n` +
+    `  - The work is small: 1-2 files, simple edit, fits in 3 main-loop iterations.\n` +
+    `  - You need to maintain shared mutation state across the step.\n` +
+    `  - You're still uncertain about scope — clarify first, then dispatch with intent.\n` +
+    `  - Patch-then-verify cycles, single-component refactors, "find one function" tasks.\n` +
+    `COST: each dispatch adds ~30K-100K tokens. Use 0 dispatches unless criteria clearly match.\n` +
+    `DISPATCH REASON (required in description): start the Task description with one of:\n` +
+    `  "multi_file_fanout: ..." — same edit across many files\n` +
+    `  "exploration: ..."        — pure read-only investigation\n` +
+    `  "long_isolated_step: ..." — single step that needs many iters of its own\n` +
+    `Example: Task({ subagent_type: "worker", description: "multi_file_fanout: rename helper foo to bar across src/api/handlers/* (8 files)" })\n` +
+    `This reason is logged for debugging and helps you justify the dispatch.\n\n` +
     `NARRATION (one short line before each tool call):\n` +
     `Before invoking each tool, write one short sentence in plain English describing what you're about to do and why. ` +
     `Examples: "Reading the README to find the existing structure.", "Now patching package.json to add the dev dependency.", "Searching for callers of the renamed function." ` +
@@ -729,6 +745,21 @@ export function extractErrorLine(output: string): number | null {
   if (!match) return null;
   const parsed = Number.parseInt(match[1], 10);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Phase Q.3: pull a dispatch reason out of a Task description. The agent is
+ * coached (system prompt) to start the description with one of:
+ *   "multi_file_fanout: ..." | "exploration: ..." | "long_isolated_step: ..."
+ * Returns the prefix when matched; otherwise "manual". Logged at dispatch
+ * time for traceability — not used to gate behavior.
+ */
+export function extractDispatchReason(description: unknown): string {
+  if (typeof description !== "string") return "manual";
+  const firstLine = description.split(/\r?\n/, 1)[0]?.trim() ?? "";
+  const m = firstLine.match(/^(multi_file_fanout|exploration|long_isolated_step)\s*:/i);
+  if (m) return m[1].toLowerCase();
+  return "manual";
 }
 
 export function detectRepeatedFailure(
@@ -2528,6 +2559,21 @@ Example (small patch with verification — still call TodoWrite):
               : null,
           command: parsedArgs.command ?? null,
         }));
+
+        // Phase Q.3: log Task dispatch reason for traceability. Extracted
+        // from the first line of the description per agent coaching.
+        if (name === "Task") {
+          const dispatchReason = extractDispatchReason(parsedArgs.description);
+          log("[zone-subagent-dispatched]", JSON.stringify({
+            event: "subagent_dispatched",
+            parentRunId: input.runId ?? null,
+            subagentType: typeof parsedArgs.subagent_type === "string"
+              ? parsedArgs.subagent_type
+              : null,
+            dispatchReason,
+            iter: iter + 1,
+          }));
+        }
 
         if (name === "apply_patch") {
           const targetFilePath =
