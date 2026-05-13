@@ -126,19 +126,41 @@ Rules:
 - Keep scopeSummary under 160 characters.
 - Return JSON only.
 
-Subagent eligibility (Phase Q.3):
-For each step, decide whether it could run as a Task subagent. Set both fields
-or omit both. Mark a step \`subagentEligible: true\` ONLY when it satisfies one
-of these patterns:
+Subagent eligibility (Phase Q.3 / Q.6):
+For each step, decide whether it could run as a Task subagent. Mark a step
+\`subagentEligible: true\` when it satisfies one of these patterns:
 - \`subagentType: "worker"\` — independent multi-file edits, ≥3 files all
-  receiving similar transformations (e.g., rename across files, repeated
-  find-replace, codemods). NOT for a single-file edit, even if complex.
+  receiving similar transformations (rename across files, repeated find-
+  replace, codemods, prop renames). NOT for a single-file edit, even if complex.
 - \`subagentType: "explore"\` — pure read-only investigation that doesn't
-  depend on parent context (e.g., "list every caller of X", "map files
-  matching pattern Y"). NOT for trivial lookups the agent can do in one read.
-For everything else (single-file edits, small changes, work needing shared
-state), omit both fields. Default to omitting — over-marking causes wasted
-dispatches.
+  depend on parent context ("list every caller of X", "map files matching
+  pattern Y", "find all imports of Z"). NOT for trivial lookups the agent can
+  do in one read.
+
+Concrete examples — apply these directly:
+EXAMPLE A — fanout (mark with worker):
+  { "title": "Rename detectFramework to identifyFramework across 5 files",
+    "description": "Apply the same identifier change to every site listed below.",
+    "filesLikely": ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts", "src/e.ts"],
+    "subagentEligible": true, "subagentType": "worker" }
+EXAMPLE B — exploration (mark with explore):
+  { "title": "Map every caller of helperX",
+    "description": "Read all matching files and produce a usage table.",
+    "filesLikely": ["src/**/*.ts"],
+    "subagentEligible": true, "subagentType": "explore" }
+EXAMPLE C — trivial (omit annotation):
+  { "title": "Add JSDoc to function Y",
+    "description": "One short doc comment above the existing function.",
+    "filesLikely": ["src/y.ts"] }
+
+Rules of thumb:
+- filesLikely has ≥3 entries AND the description mentions the same change
+  applied to each → worker. Mark it.
+- filesLikely is one file OR the description describes orchestration work
+  that needs shared state → omit.
+- When in doubt about a clearly multi-file fanout, MARK it. The agent
+  still decides at runtime whether to dispatch — a marked step that the
+  agent declines is free; an unmarked fanout step gets no chance.
 
 JSON shape:
 {
@@ -168,17 +190,27 @@ JSON shape:
   );
   const plan = executionPlanSchema.parse(parsed);
 
-  // Normalize annotation: subagentEligible only sticks when paired with a type.
+  // Phase Q.6: relaxed normalization. If the LLM signals delegatable intent
+  // via either field, fill in the missing one rather than silently dropping
+  // the annotation:
+  //   eligible:true + no type       → infer subagentType="worker" (most common)
+  //   no eligible + type:"worker"   → infer subagentEligible=true
+  //   no eligible + type:"explore"  → infer subagentEligible=true
+  //   eligible:false                → drop both (explicit opt-out)
   const normalizedSteps = plan.steps.map((step) => {
-    const eligible = step.subagentEligible === true;
-    const type = step.subagentType;
-    if (eligible && (type === "worker" || type === "explore")) {
+    const explicitEligibleFalse = step.subagentEligible === false;
+    const rawType = step.subagentType;
+    const typeIsValid = rawType === "worker" || rawType === "explore";
+    const eligibleSignal = step.subagentEligible === true || typeIsValid;
+
+    if (!explicitEligibleFalse && eligibleSignal) {
+      const inferredType: "worker" | "explore" = typeIsValid ? rawType : "worker";
       return {
         title: step.title,
         description: step.description,
         filesLikely: step.filesLikely,
         subagentEligible: true,
-        subagentType: type,
+        subagentType: inferredType,
       };
     }
     return {

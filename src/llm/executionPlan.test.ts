@@ -108,16 +108,16 @@ describe("generateExecutionPlan — Q.3 subagent annotation", () => {
     expect(plan.steps[0].subagentType).toBeUndefined();
   });
 
-  it("normalizes half-set annotation (eligible without type) to no annotation", async () => {
+  it("Q.6: infers subagentType=worker when eligible:true is set without a type", async () => {
     mockPlanResponse({
       objective: "X",
       steps: [
         {
           title: "Step A",
           description: "Some step.",
-          filesLikely: ["a.ts"],
+          filesLikely: ["a.ts", "b.ts", "c.ts"],
           subagentEligible: true,
-          // subagentType intentionally omitted
+          // subagentType intentionally omitted — Q.6 relaxes Q.3 strict drop
         },
       ],
       riskHints: [],
@@ -130,20 +130,46 @@ describe("generateExecutionPlan — Q.3 subagent annotation", () => {
       relevantFiles: [],
     });
 
-    expect(plan.steps[0].subagentEligible).toBeUndefined();
-    expect(plan.steps[0].subagentType).toBeUndefined();
+    expect(plan.steps[0].subagentEligible).toBe(true);
+    expect(plan.steps[0].subagentType).toBe("worker");
   });
 
-  it("normalizes type-without-eligible to no annotation", async () => {
+  it("Q.6: infers subagentEligible=true when only subagentType is set", async () => {
     mockPlanResponse({
       objective: "X",
       steps: [
         {
           title: "Step A",
           description: "Some step.",
-          filesLikely: ["a.ts"],
+          filesLikely: ["a.ts", "b.ts", "c.ts"],
           subagentType: "worker",
-          // subagentEligible intentionally omitted
+          // subagentEligible intentionally omitted — type implies intent
+        },
+      ],
+      riskHints: [],
+      scopeSummary: "S",
+    });
+
+    const plan = await generateExecutionPlan({
+      task: "X",
+      repoSummary: "",
+      relevantFiles: [],
+    });
+
+    expect(plan.steps[0].subagentEligible).toBe(true);
+    expect(plan.steps[0].subagentType).toBe("worker");
+  });
+
+  it("Q.6: explicit subagentEligible=false drops both fields even when type is set", async () => {
+    mockPlanResponse({
+      objective: "X",
+      steps: [
+        {
+          title: "Step A",
+          description: "Explicit opt-out from delegation.",
+          filesLikely: ["a.ts"],
+          subagentEligible: false,
+          subagentType: "worker",
         },
       ],
       riskHints: [],
@@ -180,5 +206,10 @@ describe("generateExecutionPlan — Q.3 subagent annotation", () => {
     expect(prompt).toContain("subagentEligible");
     expect(prompt).toContain("multi-file");
     expect(prompt.toLowerCase()).toContain("read-only");
+    // Q.6: prompt must include concrete in-prompt examples
+    expect(prompt).toContain("EXAMPLE A");
+    expect(prompt).toContain("EXAMPLE B");
+    expect(prompt).toContain("EXAMPLE C");
+    expect(prompt.toLowerCase()).toContain("when in doubt");
   });
 });
