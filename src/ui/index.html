@@ -475,6 +475,23 @@
     .approval-btn[disabled]{opacity:0.5;cursor:not-allowed}
     .approval-btn kbd{display:inline-flex;align-items:center;justify-content:center;min-width:1.35em;height:1.35em;padding:0 0.3em;border:1px solid currentColor;border-radius:var(--radius-xs);font-family:var(--font-family-mono);font-size:0.78em;line-height:1;opacity:0.7}
     .zone-approval-sticky-status{margin-top:var(--space-xs);font-size:var(--font-size-xs);color:var(--text-3)}
+    /* ZonePlanReviewPrompt */
+    .zone-plan-objective{font-size:var(--font-size-base);font-weight:600;color:var(--text-1);line-height:1.4;margin-bottom:var(--space-sm)}
+    .zone-plan-section-label{font-size:var(--font-size-xs);color:var(--text-4);font-weight:600;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:var(--space-xs)}
+    .zone-plan-steps{display:flex;flex-direction:column;gap:var(--space-xs);margin-bottom:var(--space-sm);max-height:200px;overflow-y:auto;padding-right:2px}
+    .zone-plan-step{padding:var(--space-xs) 0}
+    .zone-plan-step-header{display:flex;gap:var(--space-xs);align-items:baseline}
+    .zone-plan-step-num{font-family:var(--font-family-mono);font-size:var(--font-size-xs);color:var(--text-4);min-width:1.6em;flex-shrink:0;line-height:1.5}
+    .zone-plan-step-title{font-weight:600;font-size:var(--font-size-sm);color:var(--text-1);line-height:1.4}
+    .zone-plan-step-body{padding-left:calc(1.6em + var(--space-xs))}
+    .zone-plan-step-desc{font-size:var(--font-size-xs);color:var(--text-3);line-height:1.5;margin-top:1px}
+    .zone-plan-step-files{display:flex;flex-wrap:wrap;gap:3px;margin-top:var(--space-xs)}
+    .zone-plan-step-file{font-family:var(--font-family-mono);font-size:var(--font-size-xs);color:var(--text-4);background:rgba(0,0,0,0.28);border:1px solid var(--border);border-radius:var(--radius-sm);padding:1px 5px;white-space:nowrap}
+    .zone-plan-scope{font-size:var(--font-size-xs);color:var(--text-4);font-style:italic;border-top:1px solid var(--border);padding-top:var(--space-sm);margin-bottom:var(--space-md)}
+    .zone-plan-edit-form{margin-top:var(--space-md)}
+    .zone-plan-edit-error{font-size:var(--font-size-xs);color:#fca5a5;margin-bottom:var(--space-xs);min-height:1em}
+    .zone-plan-edit-textarea{width:100%;box-sizing:border-box;background:rgba(0,0,0,0.32);border:1px solid var(--border);border-radius:var(--radius-sm);padding:var(--space-sm) var(--space-md);font-family:var(--font-family-mono);font-size:var(--font-size-xs);color:var(--text-2);resize:vertical;min-height:120px;line-height:1.5;display:block}
+    .zone-plan-edit-textarea:focus{outline:none;border-color:var(--violet-bd,#3b1f6a)}
     .log-lines{font-family:var(--font-family-mono);font-size:var(--font-size-base);line-height:1.7}
     .log-line{display:flex;gap:var(--space-xl);padding:2px 0;opacity:1;animation:lineIn 150ms ease-out;color:#e0e0e0}
     @keyframes lineIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
@@ -6455,27 +6472,41 @@
       _render(){
         const plan = this.payload.plan || {};
         const steps = Array.isArray(plan.steps) ? plan.steps : [];
-        const stepsHtml = steps.map((s, i) =>
-          '<div class="zone-plan-step"><span class="zone-plan-step-num">' + (i + 1) + '.</span>' +
-          '<span class="zone-plan-step-title">' + escapeHtml(String(s.title || '')) + '</span>' +
-          '<span class="zone-plan-step-desc">' + escapeHtml(String(s.description || '')) + '</span></div>'
-        ).join('');
-        const scope = escapeHtml(String(plan.scopeSummary || ''));
+        const stepsHtml = steps.map((s, i) => {
+          const files = Array.isArray(s.filesLikely) ? s.filesLikely.filter(f => typeof f === 'string' && f) : [];
+          const desc = String(s.description || '').trim();
+          const descHtml = desc ? '<div class="zone-plan-step-desc">' + escapeHtml(desc) + '</div>' : '';
+          const filesHtml = files.length
+            ? '<div class="zone-plan-step-files">' + files.map(f => '<span class="zone-plan-step-file">' + escapeHtml(f) + '</span>').join('') + '</div>'
+            : '';
+          return (
+            '<div class="zone-plan-step">' +
+              '<div class="zone-plan-step-header">' +
+                '<span class="zone-plan-step-num">' + (i + 1) + '.</span>' +
+                '<span class="zone-plan-step-title">' + escapeHtml(String(s.title || '')) + '</span>' +
+              '</div>' +
+              ((descHtml || filesHtml) ? '<div class="zone-plan-step-body">' + descHtml + filesHtml + '</div>' : '') +
+            '</div>'
+          );
+        }).join('');
+        const scope = String(plan.scopeSummary || '').trim();
         this.container.innerHTML =
-          '<div class="zone-approval-sticky-header"><span class="bolt">📋</span><span>Review execution plan</span></div>' +
+          '<div class="zone-approval-sticky-header"><span class="bolt">≡</span><span>Review execution plan</span></div>' +
           '<div class="zone-plan-objective">' + escapeHtml(String(plan.objective || '')) + '</div>' +
+          (steps.length ? '<div class="zone-plan-section-label">Steps</div>' : '') +
           '<div class="zone-plan-steps">' + stepsHtml + '</div>' +
-          (scope ? '<div class="zone-plan-scope">Scope: ' + scope + '</div>' : '') +
+          (scope ? '<div class="zone-plan-scope">' + escapeHtml(scope) + '</div>' : '') +
           '<div class="zone-approval-sticky-actions" data-run-id="' + escapeHtml(String(this.payload.runId || '')) + '">' +
-            '<button type="button" class="approval-btn approve" data-action="approve">Approve</button>' +
-            '<button type="button" class="approval-btn trust-all" data-action="edit">Edit plan</button>' +
+            '<button type="button" class="approval-btn approve" data-action="approve">Approve plan</button>' +
+            '<button type="button" class="approval-btn trust-all" data-action="edit">Edit</button>' +
             '<button type="button" class="approval-btn reject" data-action="reject">Reject</button>' +
           '</div>' +
           '<div class="zone-plan-edit-form" style="display:none">' +
+            '<div class="zone-plan-edit-error" style="display:none"></div>' +
             '<textarea class="zone-plan-edit-textarea" rows="10" spellcheck="false"></textarea>' +
-            '<div style="display:flex;gap:6px;margin-top:6px">' +
-              '<button type="button" class="approval-btn approve zone-plan-edit-submit">Submit edit</button>' +
-              '<button type="button" class="approval-btn reject zone-plan-edit-cancel">Cancel</button>' +
+            '<div class="zone-approval-sticky-actions" style="margin-top:var(--space-sm)">' +
+              '<button type="button" class="approval-btn approve zone-plan-edit-submit">Save edits</button>' +
+              '<button type="button" class="approval-btn trust-all zone-plan-edit-cancel">Cancel</button>' +
             '</div>' +
           '</div>' +
           '<div class="zone-approval-sticky-status" data-role="status"></div>';
@@ -6484,6 +6515,7 @@
         this._rejectBtn = this.container.querySelector('[data-action="reject"]');
         this._editForm = this.container.querySelector('.zone-plan-edit-form');
         this._editTextarea = this.container.querySelector('.zone-plan-edit-textarea');
+        this._editErrorEl = this.container.querySelector('.zone-plan-edit-error');
         this._editSubmit = this.container.querySelector('.zone-plan-edit-submit');
         this._editCancel = this.container.querySelector('.zone-plan-edit-cancel');
         this._statusEl = this.container.querySelector('[data-role="status"]');
@@ -6509,9 +6541,13 @@
         const raw = this._editTextarea ? this._editTextarea.value : '';
         let editedPlan;
         try { editedPlan = JSON.parse(raw); } catch {
-          if (this._statusEl) this._statusEl.textContent = 'Invalid JSON — fix and resubmit.';
+          if (this._editErrorEl) {
+            this._editErrorEl.textContent = 'Invalid JSON — fix and resubmit.';
+            this._editErrorEl.style.display = '';
+          }
           return;
         }
+        if (this._editErrorEl) this._editErrorEl.style.display = 'none';
         this._decide('edit', editedPlan);
       }
       _decide(action, editedPlan){
