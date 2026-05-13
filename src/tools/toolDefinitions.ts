@@ -314,16 +314,43 @@ required: ["id", "content", "description", "status"],
     type: "function",
     function: {
       name: "search_in_files",
-      strict: true,
-      description: "Search for a string pattern across repo files",
+      strict: false,
+      description:
+        "Search for a regex pattern across files in the repo. Prefer this over read_file when locating a symbol, finding usages, or checking presence of a pattern. " +
+        "Supports regex (default) or literal mode, case_insensitive, glob filtering, and output_mode (content | files_with_matches | count). " +
+        "Returns matches with line numbers and context. Max 500 matches.",
       parameters: {
         type: "object",
         properties: {
-          pattern: { type: "string", description: "String to search for" },
+          pattern: { type: "string", description: "Regex pattern (or literal string when literal=true)" },
           fileGlob: {
             type: ["string", "null"],
-            description:
-              "Which files to search (e.g. **/*.js); pass JSON null for default **/*.",
+            description: "File glob filter (e.g. **/*.ts); null = all files.",
+          },
+          literal: {
+            type: ["boolean", "null"],
+            description: "true = treat pattern as literal string (no regex). Default false.",
+          },
+          case_insensitive: {
+            type: ["boolean", "null"],
+            description: "true = case-insensitive match. Default false.",
+          },
+          multiline: {
+            type: ["boolean", "null"],
+            description: "true = enable multiline regex (^ and $ match line boundaries). Default false.",
+          },
+          output_mode: {
+            type: ["string", "null"],
+            enum: ["content", "files_with_matches", "count", null],
+            description: "content (default) = matches with context; files_with_matches = file list only; count = per-file match counts.",
+          },
+          context_lines: {
+            type: ["integer", "null"],
+            description: "Lines of context before/after each match. Default 2. Max 10.",
+          },
+          glob: {
+            type: ["string", "null"],
+            description: "Alias for fileGlob.",
           },
         },
         required: ["pattern", "fileGlob"],
