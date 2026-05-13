@@ -175,6 +175,9 @@ export type LlmPatchFlowResult =
        *  of TOKEN_BUDGET_CAP). UI shows "Token budget reached" pill. The
        *  patch verdict still reflects whatever was produced before exit. */
       tokenBudgetExceeded?: boolean;
+      /** Phase Q.2: agent loop terminated because the same tool was called
+       *  with identical args too many times. UI shows an amber notice. */
+      loopDetected?: { toolName: string; count: number };
       /** Phase J.3: post-apply verification regressed (patch introduced new
        *  errors). Staging was discarded; UI shows "Apply rolled back" amber
        *  banner with the diff for inspection but no undo button. */
@@ -4553,6 +4556,8 @@ export async function runLlmPatchFlow(input: {
   // Phase H.7: outer-scope flag survives past the inner block where `loop`
   // is declared, so the final return can include it for the UI pill.
   let tokenBudgetExceededAtExit = false;
+  // Phase Q.2: same pattern for loop detection exit.
+  let loopDetectedAtExit: { toolName: string; count: number } | undefined;
   logger.info(
     "[zone-flow-entry] runId=%s, ts=%s, lockHeld=%s",
     typeof input.runId === "string" ? input.runId.trim() : "",
@@ -5514,6 +5519,24 @@ const initializeTodosFromPlan = (): void => {
             message: String((e as any).message || ""),
           } as any);
         }
+        if (e && typeof e === "object" && e.type === "loop_warning_emitted") {
+          emitStructuredProgress({
+            type: "loop_warning_emitted",
+            title: String(e.title || "Loop warning"),
+            status: "warning",
+            toolName: String((e as any).toolName || ""),
+            count: typeof (e as any).count === "number" ? (e as any).count : 0,
+          } as any);
+        }
+        if (e && typeof e === "object" && e.type === "loop_detected_terminal") {
+          emitStructuredProgress({
+            type: "loop_detected_terminal",
+            title: String(e.title || "Loop detected"),
+            status: "error",
+            toolName: String((e as any).toolName || ""),
+            count: typeof (e as any).count === "number" ? (e as any).count : 0,
+          } as any);
+        }
       },
       onProgress: (msg: string) => {
         if (!runId) return;
@@ -5732,6 +5755,9 @@ const initializeTodosFromPlan = (): void => {
     ) {
       tokenBudgetExceededAtExit = true;
     }
+    if (loop.terminationReason === "loop_detected" && loop.loopDetected) {
+      loopDetectedAtExit = loop.loopDetected;
+    }
 
     filesTouched.push(...(loop.filesModified || []));
 
@@ -5890,6 +5916,15 @@ const initializeTodosFromPlan = (): void => {
         runId: runId || null,
         outcome: "graceful_exit",
         summaryPreview: loop.summary.slice(0, 200),
+      }));
+    }
+    if (loop.terminationReason === "loop_detected") {
+      debugLog("[zone-loop-detected]", JSON.stringify({
+        mode: "patch",
+        runId: runId || null,
+        outcome: "graceful_exit",
+        toolName: loop.loopDetected?.toolName,
+        count: loop.loopDetected?.count,
       }));
     }
 
@@ -11059,6 +11094,7 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
     ...(noCodeChangeReason ? { reason: noCodeChangeReason } : {}),
     ...(selectedTargetFile ? { targetFile: selectedTargetFile } : {}),
     ...(tokenBudgetExceededAtExit ? { tokenBudgetExceeded: true as const } : {}),
+    ...(loopDetectedAtExit ? { loopDetected: loopDetectedAtExit } : {}),
     developerConfidence,
     developerRisk: finalDeveloperRisk,
     intentMismatch: {
