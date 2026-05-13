@@ -265,55 +265,59 @@ describe("rejectPendingPlansForRun", () => {
 });
 
 describe("shouldRequirePlanApproval", () => {
-  it("defaults to true for patch mode when skipPlanReview is unset", () => {
+  // Opt-in default: plan review is OFF unless enablePlanReview is explicitly true
+  it("defaults to false for patch mode when enablePlanReview is unset", () => {
     const { planApprovalRequired, normalizedMode } = shouldRequirePlanApproval({ rawMode: "patch" });
-    expect(planApprovalRequired).toBe(true);
+    expect(planApprovalRequired).toBe(false);
     expect(normalizedMode).toBe("patch");
   });
 
-  it("defaults to true for patch mode when skipPlanReview is false", () => {
-    const { planApprovalRequired } = shouldRequirePlanApproval({ rawMode: "patch", skipPlanReview: false });
-    expect(planApprovalRequired).toBe(true);
-  });
-
-  it("returns false for patch mode when skipPlanReview is true", () => {
-    const { planApprovalRequired } = shouldRequirePlanApproval({ rawMode: "patch", skipPlanReview: true });
+  it("returns false for patch mode when enablePlanReview is false", () => {
+    const { planApprovalRequired } = shouldRequirePlanApproval({ rawMode: "patch", enablePlanReview: false });
     expect(planApprovalRequired).toBe(false);
   });
 
-  it("does not require approval for chat mode", () => {
-    const { planApprovalRequired } = shouldRequirePlanApproval({ rawMode: "chat" });
+  it("returns true for patch mode when enablePlanReview is true", () => {
+    const { planApprovalRequired } = shouldRequirePlanApproval({ rawMode: "patch", enablePlanReview: true });
+    expect(planApprovalRequired).toBe(true);
+  });
+
+  it("does not require approval for chat mode even when enablePlanReview is true", () => {
+    const { planApprovalRequired } = shouldRequirePlanApproval({ rawMode: "chat", enablePlanReview: true });
     expect(planApprovalRequired).toBe(false);
   });
 
   it("does not require approval for auto mode", () => {
-    const { planApprovalRequired } = shouldRequirePlanApproval({ rawMode: "auto" });
+    const { planApprovalRequired } = shouldRequirePlanApproval({ rawMode: "auto", enablePlanReview: true });
     expect(planApprovalRequired).toBe(false);
   });
 
   it("does not require approval for investigate mode", () => {
-    const { planApprovalRequired } = shouldRequirePlanApproval({ rawMode: "investigate" });
+    const { planApprovalRequired } = shouldRequirePlanApproval({ rawMode: "investigate", enablePlanReview: true });
     expect(planApprovalRequired).toBe(false);
   });
 
+  // Legacy "plan" mode alias — always forces approval
   it("normalizes 'plan' to 'patch' and forces planApprovalRequired true", () => {
     const { planApprovalRequired, normalizedMode } = shouldRequirePlanApproval({ rawMode: "plan" });
     expect(planApprovalRequired).toBe(true);
     expect(normalizedMode).toBe("patch");
   });
 
-  it("forces planApprovalRequired true for 'plan' even when skipPlanReview is true", () => {
+  it("forces planApprovalRequired true for 'plan' even when enablePlanReview is false", () => {
     const { planApprovalRequired, normalizedMode } = shouldRequirePlanApproval({
       rawMode: "plan",
-      skipPlanReview: true,
+      enablePlanReview: false,
     });
     expect(planApprovalRequired).toBe(true);
     expect(normalizedMode).toBe("patch");
   });
 
-  it("explicit planApprovalRequired:false wins over patch-mode auto-set", () => {
+  // Explicit override
+  it("explicit planApprovalRequired:false wins over patch+enablePlanReview:true", () => {
     const { planApprovalRequired } = shouldRequirePlanApproval({
       rawMode: "patch",
+      enablePlanReview: true,
       explicitPlanApprovalRequired: false,
     });
     expect(planApprovalRequired).toBe(false);
@@ -324,6 +328,18 @@ describe("shouldRequirePlanApproval", () => {
       rawMode: "chat",
       explicitPlanApprovalRequired: true,
     });
+    expect(planApprovalRequired).toBe(true);
+  });
+
+  // Legacy skipPlanReview field derivation (done by server.ts caller, tested here via enablePlanReview)
+  it("skipPlanReview:true → enablePlanReview:false → no approval for patch", () => {
+    // server.ts derives enablePlanReview = !skipPlanReview before calling this function
+    const { planApprovalRequired } = shouldRequirePlanApproval({ rawMode: "patch", enablePlanReview: false });
+    expect(planApprovalRequired).toBe(false);
+  });
+
+  it("skipPlanReview:false → enablePlanReview:true → requires approval for patch", () => {
+    const { planApprovalRequired } = shouldRequirePlanApproval({ rawMode: "patch", enablePlanReview: true });
     expect(planApprovalRequired).toBe(true);
   });
 });
