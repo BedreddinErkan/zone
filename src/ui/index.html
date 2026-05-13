@@ -9548,14 +9548,6 @@
           pill.innerHTML = `<div class="ticon" style="background:#d4a85a"></div><div>Token budget reached — findings below are partial. Re-dispatch with a more focused scope to continue.</div>`;
           appendToRunGroup(runId, pill);
         }
-        // P.3: compaction-exhausted graceful exit pill
-        if (result.finalState === 'compaction_exhausted') {
-          const pill = document.createElement('div');
-          pill.className = 'toast';
-          pill.style.cssText = 'margin:0 0 6px;opacity:0.85;border-color:rgba(212,168,90,0.4);background:rgba(212,168,90,0.08)';
-          pill.innerHTML = `<div class="ticon" style="background:#d4a85a"></div><div>Context exhausted via compaction — task aborted. Break this task into smaller subtasks to continue.</div>`;
-          appendToRunGroup(runId, pill);
-        }
         // Belt-and-suspenders: strip any narration line whose collapsed text
         // matches the final answer (agentLoop now skips narration on the final
         // iter, but remove the duplicate if it slipped through).
