@@ -1224,7 +1224,6 @@
             <button class="modePill" type="button" data-mode="chat" role="tab" aria-selected="false">Chat</button>
             <button class="modePill" type="button" data-mode="investigate" role="tab" aria-selected="false">Investigate</button>
             <button class="modePill" type="button" data-mode="patch" role="tab" aria-selected="false">Patch</button>
-            <button class="modePill" type="button" data-mode="plan" role="tab" aria-selected="false">Plan</button>
           </div>
         </div>
         <div class="metaRow">
@@ -1915,7 +1914,7 @@
       document.body.appendChild(els.branchDropdown);
     }
 
-    const ZONE_MODES = ['auto', 'chat', 'investigate', 'patch', 'plan'];
+    const ZONE_MODES = ['auto', 'chat', 'investigate', 'patch'];
     function normalizeMode(mode){
       const normalized = String(mode || '').trim().toLowerCase();
       return ZONE_MODES.includes(normalized) ? normalized : 'auto';

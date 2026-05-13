@@ -4538,7 +4538,12 @@ export async function runLlmPatchFlow(input: {
    */
   userApiKey?: string;
   provider?: LLMProvider;
+  // "plan" kept as backward-compat alias; normalizes to "patch" internally
   mode?: "patch" | "plan";
+  /** When true, the caller has bypassed plan approval. No behavioral effect here —
+   *  the approval gate runs in server.ts before this function is invoked.
+   *  TODO: extend plan-first to investigate mode after Phase D consolidates its plan generation */
+  skipPlanReview?: boolean;
   /** Pre-generated (and pre-approved) plan; skips both generateExecutionPlan call sites. */
   preGeneratedPlan?: ExecutionPlan;
   /** L.4.1: per-request tier override forwarded from API body. Beats ZONE_FORCE_TIER env. */

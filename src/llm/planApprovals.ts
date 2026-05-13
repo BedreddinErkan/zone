@@ -142,6 +142,35 @@ export function resolvePlanApproval(input: {
   return { ok: true };
 }
 
+/**
+ * Determine whether the plan approval gate should run for a given request.
+ *
+ * Priority:
+ *  1. rawMode === "plan" (legacy alias) → always true, skipPlanReview ignored
+ *  2. explicitPlanApprovalRequired (caller override) → use that value
+ *  3. Auto-set: true for "patch" mode unless skipPlanReview
+ *  4. All other modes (chat, investigate, auto) → false
+ */
+export function shouldRequirePlanApproval(opts: {
+  rawMode: unknown;
+  skipPlanReview?: boolean;
+  explicitPlanApprovalRequired?: boolean;
+}): { normalizedMode: unknown; planApprovalRequired: boolean } {
+  const legacyPlanAlias = opts.rawMode === "plan";
+  const normalizedMode = legacyPlanAlias ? "patch" : opts.rawMode;
+
+  if (legacyPlanAlias) {
+    return { normalizedMode, planApprovalRequired: true };
+  }
+
+  if (typeof opts.explicitPlanApprovalRequired === "boolean") {
+    return { normalizedMode, planApprovalRequired: opts.explicitPlanApprovalRequired };
+  }
+
+  const planApprovalRequired = normalizedMode === "patch" && opts.skipPlanReview !== true;
+  return { normalizedMode, planApprovalRequired };
+}
+
 export function rejectPendingPlansForRun(runIdRaw: string): number {
   const runId = String(runIdRaw || "").trim();
   if (!runId) return 0;

@@ -47,7 +47,8 @@ import type { Mode } from "../types/mode.js";
 import { ContextCompactor } from "./compaction/ContextCompactor.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
 
-type AgentLoopMode = Exclude<Mode, "auto"> | "investigation";
+// "plan" kept as accepted input for backward compat — normalizeAgentLoopMode maps it to "patch"
+type AgentLoopMode = Exclude<Mode, "auto"> | "investigation" | "plan";
 
 export interface AgentLoopInput {
   task: string;
@@ -432,8 +433,6 @@ const MODE_SYSTEM_PROMPT_PREFIX: Record<Exclude<Mode, "auto">, string> = {
   investigate:
     "MODE: investigate. Read code, analyze, answer thoroughly. Do not modify files. Use search tools liberally before answering.",
   patch:
-    "MODE: patch. The user wants a code change. Plan the edits, apply them via the patch tool, then verify with build and visual screenshot when applicable.",
-  plan:
     "MODE: patch. The user wants a code change. Plan the edits, apply them via the patch tool, then verify with build and visual screenshot when applicable.",
 };
 

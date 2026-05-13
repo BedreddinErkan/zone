@@ -102,6 +102,7 @@ import {
   resolvePlanApproval,
   rejectPendingPlansForRun,
   validateRegenerateFeedback,
+  shouldRequirePlanApproval,
 } from "../llm/planApprovals.js";
 import { preparePlanContext } from "../core/preparePlanContext.js";
 import { generateExecutionPlan } from "../llm/executionPlan.js";
@@ -2639,7 +2640,7 @@ function shouldForceExecuteTask(task: string): boolean {
 }
 
 function intentFromExplicitMode(mode: Exclude<Mode, "auto">): "execute" | "chat" | "investigation" {
-  if (mode === "patch" || mode === "plan") return "execute";
+  if (mode === "patch") return "execute";
   if (mode === "investigate") return "investigation";
   return "chat";
 }
@@ -2875,8 +2876,19 @@ app.post("/api/patch", async (req, res) => {
     lastAddedFunctions,
     forceTier: rawForceTier,
     mode: rawMode,
+    skipPlanReview: rawSkipPlanReview,
+    planApprovalRequired: rawPlanApprovalRequired,
   } = req.body ?? {};
-  const requestedMode = rawMode === undefined ? "auto" : parseMode(rawMode);
+
+  // Normalize legacy "plan" mode and compute whether plan approval gate should run.
+  // "plan" always forces approval; "patch" requires it unless skipPlanReview is set.
+  const { normalizedMode, planApprovalRequired } = shouldRequirePlanApproval({
+    rawMode,
+    skipPlanReview: rawSkipPlanReview === true,
+    explicitPlanApprovalRequired: typeof rawPlanApprovalRequired === "boolean" ? rawPlanApprovalRequired : undefined,
+  });
+
+  const requestedMode = normalizedMode === undefined ? "auto" : parseMode(normalizedMode);
   if (!requestedMode) {
     perf.finish("bad request");
     res.status(400).json({
@@ -3305,11 +3317,12 @@ app.post("/api/patch", async (req, res) => {
       );
     }
   }
-  // Plan mode: pre-generate plan and wait for user review before starting agent loop.
+  // Plan approval gate: pre-generate plan and wait for user review before starting agent loop.
+  // Triggers when planApprovalRequired is true (patch mode by default, or explicit "plan" alias).
   // Supports up to MAX_REGENS regeneration cycles driven by user feedback.
   const PLAN_MAX_REGENS = 3;
   let preGeneratedPlan: Awaited<ReturnType<typeof generateExecutionPlan>> | undefined;
-  if (requestedMode === "plan" && runIdStr) {
+  if (planApprovalRequired && runIdStr) {
     try {
       const planContext = await preparePlanContext({
         task: String(task),
@@ -3447,7 +3460,7 @@ app.post("/api/patch", async (req, res) => {
       abortSignal: patchAbort?.signal,
       userApiKey: userApiKey || undefined,
       provider: byokProvider,
-      mode: requestedMode === "patch" || requestedMode === "plan" ? "patch" : undefined,
+      mode: requestedMode === "patch" ? "patch" : undefined,
       preGeneratedPlan,
       forceTier,
     });
