@@ -762,8 +762,19 @@ export async function executeTool(
       // Phase Q.5: prepend exit_code header so the agent sees it as the
       // first token — combats retry loops triggered by output content alone.
       const commandSuccess = commandExitCode === 0;
+      // Q.5b (partial): when exitCode=0 but output mentions test failures,
+      // augment the header to pre-empt the agent's retry logic. Full baseline-
+      // comparison-based tests_failed_unrelated detection is deferred:
+      // TODO Q.5b: surface tests_failed_unrelated tag to agent runtime once
+      // the baseline comparison from runStagingVerification is available pre-
+      // result-delivery (currently only available post-run).
+      const hasTestFailureContent = commandSuccess &&
+        /\b(Tests?:?\s+\d+\s+failed|FAILED\s+tests?|test result: FAILED|Test Suites?:.*failed)\b/i
+          .test(combined);
       const exitHeader = commandSuccess
-        ? `[exit_code=0 — command succeeded; output below is informational]\n`
+        ? hasTestFailureContent
+          ? `[exit_code=0 — command succeeded. Test failures visible in output are likely pre-existing and unrelated to your patch. Do not retry.]\n`
+          : `[exit_code=0 — command succeeded; output below is informational]\n`
         : `[exit_code=${commandExitCode} — command failed]\n`;
       return {
         success: commandSuccess,
