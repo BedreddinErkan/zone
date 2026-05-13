@@ -179,7 +179,8 @@ required: ["id", "content", "description", "status"],
       name: "read_file",
       strict: true,
       description:
-        "Read file content. <30k chars returns full content; >100k returns head + outline + tail. Use lineRange [start, end] (1-indexed, inclusive) for exact ranges of large files.",
+        "Read a file. ≤10K chars: full content (no line numbers — safe to copy into apply_patch FIND). " +
+        ">10K: numbered head + outline + tail — use lineRange: [start, end] for the specific region you want to read or patch.",
       parameters: {
         type: "object",
         properties: {
