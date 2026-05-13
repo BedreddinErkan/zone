@@ -287,9 +287,54 @@ describe("shouldRequirePlanApproval", () => {
     expect(planApprovalRequired).toBe(false);
   });
 
-  it("does not require approval for auto mode", () => {
+  it("does not require approval for auto mode without routedAs (intent not yet resolved)", () => {
     const { planApprovalRequired } = shouldRequirePlanApproval({ rawMode: "auto", enablePlanReview: true });
     expect(planApprovalRequired).toBe(false);
+  });
+
+  // Q.7: Auto-mode routed to Patch
+  it("Q.7: requires approval for auto mode when routedAs=patch and enablePlanReview=true", () => {
+    const { planApprovalRequired } = shouldRequirePlanApproval({
+      rawMode: "auto",
+      routedAs: "patch",
+      enablePlanReview: true,
+    });
+    expect(planApprovalRequired).toBe(true);
+  });
+
+  it("Q.7: does NOT require approval for auto+routedAs=patch when enablePlanReview=false", () => {
+    const { planApprovalRequired } = shouldRequirePlanApproval({
+      rawMode: "auto",
+      routedAs: "patch",
+      enablePlanReview: false,
+    });
+    expect(planApprovalRequired).toBe(false);
+  });
+
+  it("Q.7: does NOT require approval for auto+routedAs=patch when enablePlanReview is unset", () => {
+    const { planApprovalRequired } = shouldRequirePlanApproval({
+      rawMode: "auto",
+      routedAs: "patch",
+    });
+    expect(planApprovalRequired).toBe(false);
+  });
+
+  it("Q.7: does NOT require approval for auto routed to chat (routedAs is irrelevant without patch)", () => {
+    // routedAs: "patch" is only set when intent === "execute"; chat routing never sets it
+    const { planApprovalRequired } = shouldRequirePlanApproval({
+      rawMode: "auto",
+      enablePlanReview: true,
+      // routedAs absent — simulating auto→chat routing
+    });
+    expect(planApprovalRequired).toBe(false);
+  });
+
+  it("Q.7: explicit Patch mode still triggers approval (regression guard)", () => {
+    const { planApprovalRequired } = shouldRequirePlanApproval({
+      rawMode: "patch",
+      enablePlanReview: true,
+    });
+    expect(planApprovalRequired).toBe(true);
   });
 
   it("does not require approval for investigate mode", () => {
