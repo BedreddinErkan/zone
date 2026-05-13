@@ -93,6 +93,13 @@ describe("R.3 — Phase Q safety signal preservation", () => {
     const p = basePrompt();
     expect(p).toContain("ELIDED READS");
   });
+
+  it("S.2.1 READ_FILE ECONOMY includes lineRange follow-up nudge after outline", () => {
+    const p = basePrompt();
+    expect(p).toContain("READ_FILE ECONOMY:");
+    expect(p).toContain("FILE OUTLINE");
+    expect(p).toContain("outline alone is insufficient context for editing");
+  });
 });
 
 describe("R.3 — prompt size bounds (regression guard)", () => {
