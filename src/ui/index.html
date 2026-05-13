@@ -8839,6 +8839,22 @@
         }
         return;
       }
+      if (progress && progressType === 'loop_warning_emitted') {
+        const rid = String(progress.runId || runId || '').trim();
+        if (rid) {
+          const lb = document.getElementById(`logBlock-${rid}`);
+          if (lb) {
+            const toolName = escapeHtml(String(progress.toolName || ''));
+            const count = Number(progress.count) || 0;
+            const notice = document.createElement('div');
+            notice.className = 'toast';
+            notice.style.cssText = 'margin:4px 0 2px;opacity:0.9;border-color:rgba(212,168,90,0.3);background:rgba(212,168,90,0.06)';
+            notice.innerHTML = `<div class="ticon" style="background:#d4a85a"></div><div>Loop warning: <code>${toolName}</code> called ${count}× with identical args — agent nudged to try a different approach.</div>`;
+            lb.appendChild(notice);
+          }
+        }
+        return;
+      }
 
       recordExecutionSummaryPayload(logBlock, payload, runId);
 
@@ -10075,6 +10091,15 @@
         pill.className = 'toast';
         pill.style.cssText = 'margin:0 0 6px;opacity:0.9;border-color:rgba(212,168,90,0.4);background:rgba(212,168,90,0.08)';
         pill.innerHTML = `<div class="ticon" style="background:#d4a85a"></div><div>Token budget reached — agent stopped before completing. Patches above are partial; review carefully.</div>`;
+        appendToRunGroup(runId, pill);
+      }
+      // Phase Q.2: loop-detected graceful exit notice.
+      if (result?.loopDetected) {
+        const { toolName, count } = result.loopDetected;
+        const pill = document.createElement('div');
+        pill.className = 'toast';
+        pill.style.cssText = 'margin:0 0 6px;opacity:0.9;border-color:rgba(212,168,90,0.4);background:rgba(212,168,90,0.08)';
+        pill.innerHTML = `<div class="ticon" style="background:#d4a85a"></div><div>Loop detected — <code>${escapeHtml(String(toolName))}</code> was called ${count}× with identical args. Agent stopped. Try rephrasing or narrowing the task.</div>`;
         appendToRunGroup(runId, pill);
       }
 
