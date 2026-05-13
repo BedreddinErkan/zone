@@ -785,6 +785,24 @@ export function classifyFailure(
   return "unknown";
 }
 
+/** S.2.1: map SelfCorrectTrigger to a compact reason string for JSONL diagnostics. */
+export function applyPatchRetryReason(trigger: SelfCorrectTrigger | string): string {
+  switch (trigger) {
+    case "apply_patch_find_not_found": return "find_mismatch";
+    case "apply_patch_multiple_matches": return "multiple_matches";
+    case "apply_patch_semantic_smell": return "semantic_smell";
+    case "apply_patch_syntax_broken_post_write": return "syntax_broken";
+    case "apply_patch_repeated_failure_same_file": return "repeated_failure";
+    case "apply_patch_pre_existing_broken": return "pre_existing_broken";
+    case "apply_patch_scope_not_found": return "scope_not_found";
+    case "apply_patch_replace_shorter_than_find": return "replace_shorter";
+    case "apply_patch_find_block_empty": return "find_block_empty";
+    case "apply_patch_marker_imbalance": return "marker_imbalance";
+    case "apply_patch_no_read_first": return "no_read_first";
+    default: return "unknown";
+  }
+}
+
 /** Return a focused, actionable coaching string for the given trigger. */
 export function buildCoachingPrompt(
   trigger: SelfCorrectTrigger,
@@ -2909,6 +2927,17 @@ Example:
           willRetry: true,
           reason: "routed_coaching_prompt_injected",
         }));
+        // S.2.1: structured JSONL diagnostic for apply_patch retries.
+        if (failedToolName === "apply_patch") {
+          log("[zone-apply-patch-retry]", JSON.stringify({
+            event: "apply_patch_retry",
+            runId: input.runId ?? null,
+            iter: iter + 1,
+            reason: applyPatchRetryReason(routedTrigger),
+            filePath: routedFilePath ?? null,
+            attemptCount: perFileAttempt || selfCorrectionAttempts,
+          }));
+        }
         debugLog("[zone-agent-diagnostic]", JSON.stringify({
           attempt: selfCorrectionAttempts,
           failingFile: diagnostic.parsed?.failingFile ?? null,
