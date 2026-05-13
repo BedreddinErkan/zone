@@ -4344,6 +4344,8 @@
       meter.totalTokens = 0;
       meter.mainAgentTokens = 0;
       meter.subagentTokens = 0;
+      meter.bySource = {};
+      meter.liveSubagentCount = 0;
       meter.done = false;
       return meter;
     }
@@ -4391,12 +4393,21 @@
       const isPreviousRun = strip.classList.contains('previous-run');
       const meter = ensureCostMeterState(rid || currentDisplayedRunId);
       if (meter) {
-        const subagentTokens = event.breakdown?.subagents ?? 0;
-        const totalTokens = event.cumulativeTokens ?? 0;
-        const mainTokens = event.breakdown?.mainAgent ?? totalTokens;
-        if (totalTokens > 0) meter.totalTokens = totalTokens;
-        meter.mainAgentTokens = mainTokens;
-        meter.subagentTokens = subagentTokens;
+        // Bug E (Phase Q.1): per-source breakdown so subagent events don't
+        // clobber parent's authoritative tokens. Parent's breakdown.subagents
+        // already counts COMPLETED subagent tokens; LIVE subagents are added
+        // by aggregateCostMeter using their own totalTokens.
+        const sourceKey = getCostSourceKey(event);
+        const src = ensureCostMeterSource(meter, sourceKey);
+        const subagentTokens = Number(event.breakdown?.subagents ?? 0) || 0;
+        const totalTokens = Number(event.cumulativeTokens ?? 0) || 0;
+        const mainTokens = Number(event.breakdown?.mainAgent ?? totalTokens) || 0;
+        src.totalTokens = totalTokens;
+        src.mainAgentTokens = mainTokens;
+        src.subagentTokens = subagentTokens;
+
+        recomputeAggregateFields(meter);
+
         const cacheRead = Number(meter.totalCacheRead || 0);
         const uncached = Number(meter.totalInputUncached || 0);
         const totalInput = cacheRead + uncached;
@@ -4404,9 +4415,9 @@
         const pctLabel = totalInput > 0 ? `${pct}%` : '—%';
         setCostStripText(strip, {
           costLabel: typeof formatCostUsd === 'function' ? formatCostUsd(Number(meter.cumulative || 0)) : '$' + Number(meter.cumulative || 0).toFixed(2),
-          totalTokens: totalTokens || meter.totalTokens || 0,
-          mainAgentTokens: mainTokens,
-          subagentTokens,
+          totalTokens: meter.totalTokens || 0,
+          mainAgentTokens: meter.mainAgentTokens,
+          subagentTokens: meter.subagentTokens,
           pctLabel,
           compactionCount: meter.compactionCount || 0,
         });
@@ -4473,9 +4484,121 @@
           subagentTokens: 0,
           compactionCount: 0,
           done: false,
+          // Bug E (Phase Q.1): per-source snapshots so subagent events don't clobber
+          // the parent's authoritative totals. Keyed by "parent" or "subagent:<id>".
+          bySource: {},
         };
       }
       return state.__costMetersByRunId[rid];
+    }
+
+    // Bug E (Phase Q.1) — multi-source cost aggregation helpers.
+
+    function getCostSourceKey(progress){
+      const sid = String(progress?.subagentId || '').trim();
+      return sid ? ('subagent:' + sid) : 'parent';
+    }
+
+    function ensureCostMeterSource(meter, sourceKey){
+      if (!meter) return null;
+      if (!meter.bySource) meter.bySource = {};
+      if (!meter.bySource[sourceKey]) {
+        meter.bySource[sourceKey] = {
+          sourceKey,
+          cumulative: 0,
+          totalTokens: 0,
+          mainAgentTokens: 0,
+          subagentTokens: 0,
+          totalInputUncached: 0,
+          totalCacheRead: 0,
+          totalCacheWrite: 0,
+          totalOutput: 0,
+          done: false,
+        };
+      }
+      return meter.bySource[sourceKey];
+    }
+
+    /**
+     * Compute aggregated cost/token totals from per-source snapshots.
+     * Parent's snapshot already includes COMPLETED subagents (backend folds
+     * them into cumulativeCost via subagentCostTotal). LIVE subagents (not yet
+     * marked done by subagent_completed) are summed on top. Cache stats are
+     * summed across all sources since subagent API calls have their own caches.
+     */
+    function aggregateCostMeter(meter){
+      const fallback = {
+        cumulative: Number(meter?.cumulative || 0) || 0,
+        totalTokens: Number(meter?.totalTokens || 0) || 0,
+        mainAgentTokens: Number(meter?.mainAgentTokens || 0) || 0,
+        subagentTokens: Number(meter?.subagentTokens || 0) || 0,
+        totalInputUncached: Number(meter?.totalInputUncached || 0) || 0,
+        totalCacheRead: Number(meter?.totalCacheRead || 0) || 0,
+        totalCacheWrite: Number(meter?.totalCacheWrite || 0) || 0,
+        totalOutput: Number(meter?.totalOutput || 0) || 0,
+        liveSubagentCount: 0,
+      };
+      if (!meter || !meter.bySource || Object.keys(meter.bySource).length === 0) {
+        return fallback;
+      }
+      const parent = meter.bySource['parent'] || {};
+      let cumulative = Number(parent.cumulative || 0) || 0;
+      let totalTokens = Number(parent.totalTokens || 0) || 0;
+      let mainAgentTokens = Number(parent.mainAgentTokens || 0) || 0;
+      let subagentTokens = Number(parent.subagentTokens || 0) || 0;
+      let totalInputUncached = Number(parent.totalInputUncached || 0) || 0;
+      let totalCacheRead = Number(parent.totalCacheRead || 0) || 0;
+      let totalCacheWrite = Number(parent.totalCacheWrite || 0) || 0;
+      let totalOutput = Number(parent.totalOutput || 0) || 0;
+      let liveSubagentCount = 0;
+      for (const key of Object.keys(meter.bySource)) {
+        if (key === 'parent') continue;
+        const src = meter.bySource[key];
+        if (!src || src.done) continue; // completed subagents already folded into parent
+        liveSubagentCount += 1;
+        cumulative += Number(src.cumulative || 0) || 0;
+        const srcTokens = Number(src.totalTokens || 0) || 0;
+        totalTokens += srcTokens;
+        subagentTokens += srcTokens;
+        totalInputUncached += Number(src.totalInputUncached || 0) || 0;
+        totalCacheRead += Number(src.totalCacheRead || 0) || 0;
+        totalCacheWrite += Number(src.totalCacheWrite || 0) || 0;
+        totalOutput += Number(src.totalOutput || 0) || 0;
+      }
+      return {
+        cumulative,
+        totalTokens,
+        mainAgentTokens,
+        subagentTokens,
+        totalInputUncached,
+        totalCacheRead,
+        totalCacheWrite,
+        totalOutput,
+        liveSubagentCount,
+      };
+    }
+
+    function recomputeAggregateFields(meter){
+      if (!meter) return;
+      const agg = aggregateCostMeter(meter);
+      meter.cumulative = agg.cumulative;
+      meter.totalTokens = agg.totalTokens;
+      meter.mainAgentTokens = agg.mainAgentTokens;
+      meter.subagentTokens = agg.subagentTokens;
+      meter.totalInputUncached = agg.totalInputUncached;
+      meter.totalCacheRead = agg.totalCacheRead;
+      meter.totalCacheWrite = agg.totalCacheWrite;
+      meter.totalOutput = agg.totalOutput;
+      meter.liveSubagentCount = agg.liveSubagentCount;
+    }
+
+    function markSubagentCostSourceDone(meter, subagentId){
+      if (!meter || !meter.bySource) return;
+      const key = 'subagent:' + String(subagentId || '').trim();
+      const src = meter.bySource[key];
+      if (!src) return;
+      src.done = true;
+      recomputeAggregateFields(meter);
     }
 
     function applyIterCostUpdate(progress, runId){
@@ -4483,22 +4606,35 @@
       if (!rid) return;
       const meter = ensureCostMeterState(rid);
       if (!meter) return;
-      const iter = Number(progress.iter || 0) || 0;
-      meter.currentIter = iter;
-      meter.totalIter = Number(progress.totalIter || meter.totalIter || 0) || meter.totalIter;
-      meter.cumulative = Number(progress.cumulativeCost || meter.cumulative || 0) || 0;
-      meter.cacheHitThisIter = Number(progress.cacheHitThisIter || 0) || 0;
-      meter.cacheHitCumulative = Number(progress.cacheHitCumulative || 0) || 0;
-      meter.totalInputUncached = Number(progress.total_input_uncached || 0) || 0;
-      meter.totalCacheRead = Number(progress.total_cache_read || 0) || 0;
-      meter.totalCacheWrite = Number(progress.total_cache_write || 0) || 0;
-      meter.totalOutput = Number(progress.total_output || 0) || 0;
-      meter.perIter = Array.isArray(meter.perIter) ? meter.perIter : [];
-      meter.perIter.push({
-        iter,
-        cost: Number(progress.iterCost || 0) || 0,
-        cacheHit: meter.cacheHitThisIter,
-      });
+
+      // Bug E (Phase Q.1): route to per-source slot. Parent and each subagent
+      // write to their own slot so neither clobbers the other; aggregate fields
+      // are recomputed below.
+      const sourceKey = getCostSourceKey(progress);
+      const src = ensureCostMeterSource(meter, sourceKey);
+      src.cumulative = Number(progress.cumulativeCost || 0) || 0;
+      src.totalInputUncached = Number(progress.total_input_uncached || 0) || 0;
+      src.totalCacheRead = Number(progress.total_cache_read || 0) || 0;
+      src.totalCacheWrite = Number(progress.total_cache_write || 0) || 0;
+      src.totalOutput = Number(progress.total_output || 0) || 0;
+
+      // Iter-counter and cache-hit-this-iter only meaningful for the parent loop.
+      if (sourceKey === 'parent') {
+        const iter = Number(progress.iter || 0) || 0;
+        meter.currentIter = iter;
+        meter.totalIter = Number(progress.totalIter || meter.totalIter || 0) || meter.totalIter;
+        meter.cacheHitThisIter = Number(progress.cacheHitThisIter || 0) || 0;
+        meter.cacheHitCumulative = Number(progress.cacheHitCumulative || 0) || 0;
+        meter.perIter = Array.isArray(meter.perIter) ? meter.perIter : [];
+        meter.perIter.push({
+          iter,
+          cost: Number(progress.iterCost || 0) || 0,
+          cacheHit: meter.cacheHitThisIter,
+        });
+      }
+
+      recomputeAggregateFields(meter);
+
       const tid = getThreadIdForRunId(rid);
       const run = tid ? state.runsByThread.get(tid) : null;
       if (run) run.costMeter = meter;
@@ -8959,6 +9095,17 @@
           return;
         }
         if (type === 'subagent_completed') {
+          // Bug E (Phase Q.1): mark this subagent's cost-meter slot as done so it
+          // stops contributing to the LIVE-subagent sum — its final cost will be
+          // folded into the parent's next iter_cost_update via subagentCostTotal.
+          try {
+            const subId = String(progress.subagentId || '').trim();
+            const meter = subId ? getCostMeterState(runId) : null;
+            if (meter && subId) {
+              markSubagentCostSourceDone(meter, subId);
+              refreshCostStripForActiveRun();
+            }
+          } catch {}
           const subStatus = String(progress.subagentStatus || progress.status || 'completed').toLowerCase();
           const safeStatus = /^(completed|partial|failed)$/.test(subStatus) ? subStatus : 'completed';
           const rowStatus = safeStatus === 'completed' ? 'done' : safeStatus === 'partial' ? 'warning' : 'error';
