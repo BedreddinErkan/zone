@@ -487,6 +487,7 @@
     .zone-plan-step-desc{font-size:var(--font-size-xs);color:var(--text-3);line-height:1.5;margin-top:1px}
     .zone-plan-step-files{display:flex;flex-wrap:wrap;gap:3px;margin-top:var(--space-xs)}
     .zone-plan-step-file{font-family:var(--font-family-mono);font-size:var(--font-size-xs);color:var(--text-4);background:rgba(0,0,0,0.28);border:1px solid var(--border);border-radius:var(--radius-sm);padding:1px 5px;white-space:nowrap}
+    .zone-plan-step-delegatable{font-family:var(--font-family-mono);font-size:var(--font-size-xs);color:var(--text-4);opacity:0.75;margin-left:var(--space-xs);letter-spacing:0.01em;cursor:help}
     .zone-plan-scope{font-size:var(--font-size-xs);color:var(--text-4);font-style:italic;border-top:1px solid var(--border);padding-top:var(--space-sm);margin-bottom:var(--space-md)}
     .zone-plan-edit-form{margin-top:var(--space-md)}
     .zone-plan-edit-error{font-size:var(--font-size-xs);color:#fca5a5;margin-bottom:var(--space-xs);min-height:1em}
@@ -6639,11 +6640,16 @@
           const filesHtml = files.length
             ? '<div class="zone-plan-step-files">' + files.map(f => '<span class="zone-plan-step-file">' + escapeHtml(f) + '</span>').join('') + '</div>'
             : '';
+          // Phase Q.3: delegatable badge for subagent-eligible steps.
+          const delegatableBadgeHtml = s.subagentEligible === true
+            ? '<span class="zone-plan-step-delegatable" title="This step may run as a Task subagent — it&apos;s independent and parallelizable.">[delegatable]</span>'
+            : '';
           return (
             '<div class="zone-plan-step">' +
               '<div class="zone-plan-step-header">' +
                 '<span class="zone-plan-step-num">' + (i + 1) + '.</span>' +
                 '<span class="zone-plan-step-title">' + escapeHtml(String(s.title || '')) + '</span>' +
+                delegatableBadgeHtml +
               '</div>' +
               ((descHtml || filesHtml) ? '<div class="zone-plan-step-body">' + descHtml + filesHtml + '</div>' : '') +
             '</div>'
