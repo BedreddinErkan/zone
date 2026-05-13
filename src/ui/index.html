@@ -492,6 +492,13 @@
     .zone-plan-edit-error{font-size:var(--font-size-xs);color:#fca5a5;margin-bottom:var(--space-xs);min-height:1em}
     .zone-plan-edit-textarea{width:100%;box-sizing:border-box;background:rgba(0,0,0,0.32);border:1px solid var(--border);border-radius:var(--radius-sm);padding:var(--space-sm) var(--space-md);font-family:var(--font-family-mono);font-size:var(--font-size-xs);color:var(--text-2);resize:vertical;min-height:120px;line-height:1.5;display:block}
     .zone-plan-edit-textarea:focus{outline:none;border-color:var(--violet-bd,#3b1f6a)}
+    .zone-plan-regen-counter{font-size:var(--font-size-xs);color:var(--text-4);margin-right:auto;align-self:center}
+    .zone-plan-feedback-form{margin-top:var(--space-md)}
+    .zone-plan-feedback-label{display:block;font-size:var(--font-size-xs);color:var(--text-3);margin-bottom:var(--space-xs)}
+    .zone-plan-feedback-error{font-size:var(--font-size-xs);color:#fca5a5;margin-bottom:var(--space-xs);min-height:1em}
+    .zone-plan-feedback-textarea{width:100%;box-sizing:border-box;background:rgba(0,0,0,0.32);border:1px solid var(--border);border-radius:var(--radius-sm);padding:var(--space-sm) var(--space-md);font-family:var(--font-family-sans);font-size:var(--font-size-xs);color:var(--text-2);resize:vertical;line-height:1.5;display:block}
+    .zone-plan-feedback-textarea:focus{outline:none;border-color:var(--violet-bd,#3b1f6a)}
+    .zone-plan-feedback-charcount{font-size:var(--font-size-xs);color:var(--text-4);text-align:right;margin-top:2px}
     .log-lines{font-family:var(--font-family-mono);font-size:var(--font-size-base);line-height:1.7}
     .log-line{display:flex;gap:var(--space-xl);padding:2px 0;opacity:1;animation:lineIn 150ms ease-out;color:#e0e0e0}
     @keyframes lineIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
@@ -6467,6 +6474,9 @@
         this.callbacks = callbacks || {};
         this._dismissed = false;
         this._editMode = false;
+        this._feedbackMode = false;
+        this._regenAttempt = payload.regenAttempt ?? 0;
+        this._maxRegens = payload.maxRegens ?? 3;
         this._render();
       }
       _render(){
@@ -6490,6 +6500,11 @@
           );
         }).join('');
         const scope = String(plan.scopeSummary || '').trim();
+        const regenDisabled = this._regenAttempt >= this._maxRegens;
+        const regenTitle = regenDisabled ? ' title="Regeneration limit reached (' + this._maxRegens + '/' + this._maxRegens + ')"' : '';
+        const regenCounter = this._regenAttempt > 0
+          ? '<span class="zone-plan-regen-counter">' + this._regenAttempt + ' / ' + this._maxRegens + ' regens used</span>'
+          : '';
         this.container.innerHTML =
           '<div class="zone-approval-sticky-header"><span class="bolt">≡</span><span>Review execution plan</span></div>' +
           '<div class="zone-plan-objective">' + escapeHtml(String(plan.objective || '')) + '</div>' +
@@ -6497,8 +6512,10 @@
           '<div class="zone-plan-steps">' + stepsHtml + '</div>' +
           (scope ? '<div class="zone-plan-scope">' + escapeHtml(scope) + '</div>' : '') +
           '<div class="zone-approval-sticky-actions" data-run-id="' + escapeHtml(String(this.payload.runId || '')) + '">' +
+            regenCounter +
             '<button type="button" class="approval-btn approve" data-action="approve">Approve plan</button>' +
             '<button type="button" class="approval-btn trust-all" data-action="edit">Edit</button>' +
+            '<button type="button" class="approval-btn trust-all" data-action="regen"' + (regenDisabled ? ' disabled' : '') + regenTitle + '>Regenerate</button>' +
             '<button type="button" class="approval-btn reject" data-action="reject">Reject</button>' +
           '</div>' +
           '<div class="zone-plan-edit-form" style="display:none">' +
@@ -6509,21 +6526,42 @@
               '<button type="button" class="approval-btn trust-all zone-plan-edit-cancel">Cancel</button>' +
             '</div>' +
           '</div>' +
+          '<div class="zone-plan-feedback-form" style="display:none">' +
+            '<label class="zone-plan-feedback-label">What should change about this plan?</label>' +
+            '<div class="zone-plan-feedback-error" style="display:none"></div>' +
+            '<textarea class="zone-plan-feedback-textarea" rows="3" maxlength="500" spellcheck="false"></textarea>' +
+            '<div class="zone-plan-feedback-charcount">0 / 500</div>' +
+            '<div class="zone-approval-sticky-actions" style="margin-top:var(--space-sm)">' +
+              '<button type="button" class="approval-btn approve zone-plan-regen-submit">Regenerate plan</button>' +
+              '<button type="button" class="approval-btn trust-all zone-plan-regen-cancel">Cancel</button>' +
+            '</div>' +
+          '</div>' +
           '<div class="zone-approval-sticky-status" data-role="status"></div>';
         this._approveBtn = this.container.querySelector('[data-action="approve"]');
         this._editBtn = this.container.querySelector('[data-action="edit"]');
+        this._regenBtn = this.container.querySelector('[data-action="regen"]');
         this._rejectBtn = this.container.querySelector('[data-action="reject"]');
         this._editForm = this.container.querySelector('.zone-plan-edit-form');
         this._editTextarea = this.container.querySelector('.zone-plan-edit-textarea');
         this._editErrorEl = this.container.querySelector('.zone-plan-edit-error');
         this._editSubmit = this.container.querySelector('.zone-plan-edit-submit');
         this._editCancel = this.container.querySelector('.zone-plan-edit-cancel');
+        this._feedbackForm = this.container.querySelector('.zone-plan-feedback-form');
+        this._feedbackTextarea = this.container.querySelector('.zone-plan-feedback-textarea');
+        this._feedbackErrorEl = this.container.querySelector('.zone-plan-feedback-error');
+        this._feedbackCharcount = this.container.querySelector('.zone-plan-feedback-charcount');
+        this._regenSubmit = this.container.querySelector('.zone-plan-regen-submit');
+        this._regenCancel = this.container.querySelector('.zone-plan-regen-cancel');
         this._statusEl = this.container.querySelector('[data-role="status"]');
         this._approveBtn?.addEventListener('click', () => { this._decide('approve'); });
         this._editBtn?.addEventListener('click', () => { this._openEditForm(); });
+        this._regenBtn?.addEventListener('click', () => { this._openFeedbackForm(); });
         this._rejectBtn?.addEventListener('click', () => { this._decide('reject'); });
         this._editSubmit?.addEventListener('click', () => { this._submitEdit(); });
         this._editCancel?.addEventListener('click', () => { this._closeEditForm(); });
+        this._regenSubmit?.addEventListener('click', () => { this._submitRegen(); });
+        this._regenCancel?.addEventListener('click', () => { this._closeFeedbackForm(); });
+        this._feedbackTextarea?.addEventListener('input', () => { this._updateFeedbackCharCount(); });
       }
       _openEditForm(){
         this._editMode = true;
@@ -6550,11 +6588,77 @@
         if (this._editErrorEl) this._editErrorEl.style.display = 'none';
         this._decide('edit', editedPlan);
       }
+      _openFeedbackForm(){
+        this._feedbackMode = true;
+        if (this._feedbackForm) this._feedbackForm.style.display = '';
+        if (this._feedbackErrorEl) this._feedbackErrorEl.style.display = 'none';
+        if (this._feedbackTextarea) {
+          this._feedbackTextarea.value = '';
+          this._updateFeedbackCharCount();
+          try { this._feedbackTextarea.focus(); } catch {}
+        }
+      }
+      _closeFeedbackForm(){
+        this._feedbackMode = false;
+        if (this._feedbackForm) this._feedbackForm.style.display = 'none';
+      }
+      _updateFeedbackCharCount(){
+        const len = this._feedbackTextarea ? this._feedbackTextarea.value.length : 0;
+        if (this._feedbackCharcount) this._feedbackCharcount.textContent = len + ' / 500';
+      }
+      async _submitRegen(){
+        const feedback = this._feedbackTextarea ? this._feedbackTextarea.value.trim() : '';
+        if (!feedback) {
+          if (this._feedbackErrorEl) {
+            this._feedbackErrorEl.textContent = 'Please describe what should change.';
+            this._feedbackErrorEl.style.display = '';
+          }
+          return;
+        }
+        if (this._feedbackErrorEl) this._feedbackErrorEl.style.display = 'none';
+        if (this._regenSubmit) this._regenSubmit.disabled = true;
+        if (this._regenCancel) this._regenCancel.disabled = true;
+        if (this._statusEl) this._statusEl.textContent = 'Regenerating…';
+        try {
+          const resp = await apiFetch('/api/approve-plan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              approvalId: this.payload.approvalId,
+              action: 'regenerate',
+              runId: this.payload.runId,
+              userFeedback: feedback,
+            }),
+          });
+          if (!resp.ok) {
+            const data = await resp.json().catch(() => ({}));
+            const msg = (data && data.error) ? data.error : 'Regeneration failed (' + resp.status + ').';
+            if (this._feedbackErrorEl) {
+              this._feedbackErrorEl.textContent = msg;
+              this._feedbackErrorEl.style.display = '';
+            }
+            if (this._regenSubmit) this._regenSubmit.disabled = false;
+            if (this._regenCancel) this._regenCancel.disabled = false;
+            if (this._statusEl) this._statusEl.textContent = '';
+            return;
+          }
+          // Server will emit a new plan_ready_for_review — handleZonePlanReviewEvent replaces this widget
+        } catch {
+          if (this._feedbackErrorEl) {
+            this._feedbackErrorEl.textContent = 'Network error — please try again.';
+            this._feedbackErrorEl.style.display = '';
+          }
+          if (this._regenSubmit) this._regenSubmit.disabled = false;
+          if (this._regenCancel) this._regenCancel.disabled = false;
+          if (this._statusEl) this._statusEl.textContent = '';
+        }
+      }
       _decide(action, editedPlan){
         if (this._dismissed) return;
         this._dismissed = true;
         if (this._approveBtn) this._approveBtn.disabled = true;
         if (this._editBtn) this._editBtn.disabled = true;
+        if (this._regenBtn) this._regenBtn.disabled = true;
         if (this._rejectBtn) this._rejectBtn.disabled = true;
         if (this.callbacks.onDecide){
           try { this.callbacks.onDecide(this.payload, action, editedPlan); } catch {}
@@ -6588,7 +6692,7 @@
       if (!container) return;
       container.dataset.state = 'visible';
       if (runId) container.dataset.runId = runId;
-      const payload = { approvalId, plan, runId };
+      const payload = { approvalId, plan, runId, regenAttempt: planEvt.regenAttempt ?? 0, maxRegens: planEvt.maxRegens ?? 3 };
       __zoneActivePlanReview = new ZonePlanReviewPrompt(container, payload, {
         onDecide: (p, action, editedPlan) => {
           const lb = document.getElementById('logBlock-' + p.runId);
