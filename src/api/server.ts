@@ -2877,14 +2877,25 @@ app.post("/api/patch", async (req, res) => {
     forceTier: rawForceTier,
     mode: rawMode,
     skipPlanReview: rawSkipPlanReview,
+    enablePlanReview: rawEnablePlanReview,
     planApprovalRequired: rawPlanApprovalRequired,
   } = req.body ?? {};
 
+  // Resolve enablePlanReview: new field takes precedence; legacy skipPlanReview inverts.
+  let enablePlanReview: boolean | undefined;
+  if (typeof rawEnablePlanReview === "boolean") {
+    enablePlanReview = rawEnablePlanReview;
+  } else if (typeof rawSkipPlanReview === "boolean") {
+    // Legacy callers sending skipPlanReview: derive enablePlanReview = !skipPlanReview
+    console.warn("[zone-plan] deprecated: skipPlanReview received; use enablePlanReview instead");
+    enablePlanReview = !rawSkipPlanReview;
+  }
+
   // Normalize legacy "plan" mode and compute whether plan approval gate should run.
-  // "plan" always forces approval; "patch" requires it unless skipPlanReview is set.
+  // Plan-review is opt-in (enablePlanReview must be true); "plan" alias always forces it.
   const { normalizedMode, planApprovalRequired } = shouldRequirePlanApproval({
     rawMode,
-    skipPlanReview: rawSkipPlanReview === true,
+    enablePlanReview,
     explicitPlanApprovalRequired: typeof rawPlanApprovalRequired === "boolean" ? rawPlanApprovalRequired : undefined,
   });
 
@@ -3320,7 +3331,7 @@ app.post("/api/patch", async (req, res) => {
     }
   }
   // Plan approval gate: pre-generate plan and wait for user review before starting agent loop.
-  // Triggers when planApprovalRequired is true (patch mode by default, or explicit "plan" alias).
+  // Triggers when planApprovalRequired is true (opt-in via enablePlanReview, or legacy "plan" alias).
   // Supports up to MAX_REGENS regeneration cycles driven by user feedback.
   const PLAN_MAX_REGENS = 3;
   let preGeneratedPlan: Awaited<ReturnType<typeof generateExecutionPlan>> | undefined;

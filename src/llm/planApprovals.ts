@@ -146,14 +146,17 @@ export function resolvePlanApproval(input: {
  * Determine whether the plan approval gate should run for a given request.
  *
  * Priority:
- *  1. rawMode === "plan" (legacy alias) → always true, skipPlanReview ignored
+ *  1. rawMode === "plan" (legacy alias) → always true, regardless of enablePlanReview
  *  2. explicitPlanApprovalRequired (caller override) → use that value
- *  3. Auto-set: true for "patch" mode unless skipPlanReview
- *  4. All other modes (chat, investigate, auto) → false
+ *  3. Opt-in: true only for "patch" mode AND enablePlanReview === true
+ *  4. All other cases → false (plan-review is opt-in, not default)
+ *
+ * Legacy skipPlanReview field: interpreted as enablePlanReview = !skipPlanReview by the
+ * caller (server.ts) before invoking this function.
  */
 export function shouldRequirePlanApproval(opts: {
   rawMode: unknown;
-  skipPlanReview?: boolean;
+  enablePlanReview?: boolean;
   explicitPlanApprovalRequired?: boolean;
 }): { normalizedMode: unknown; planApprovalRequired: boolean } {
   const legacyPlanAlias = opts.rawMode === "plan";
@@ -167,7 +170,7 @@ export function shouldRequirePlanApproval(opts: {
     return { normalizedMode, planApprovalRequired: opts.explicitPlanApprovalRequired };
   }
 
-  const planApprovalRequired = normalizedMode === "patch" && opts.skipPlanReview !== true;
+  const planApprovalRequired = normalizedMode === "patch" && opts.enablePlanReview === true;
   return { normalizedMode, planApprovalRequired };
 }
 

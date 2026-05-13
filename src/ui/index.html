@@ -1939,7 +1939,20 @@
     const LS_SB_WIDTH = 'zone_sb_width';
     const LS_REPOS = 'zone_repos'; // new UI key (back-compat loader reads old keys too)
     const LS_REPO_HISTORY = 'zone_repo_history'; // old UI key
-    const LS_SKIP_PLAN_REVIEW = 'zone:skipPlanReview';
+    const LS_ENABLE_PLAN_REVIEW = 'zone:enablePlanReview';
+    const LS_SKIP_PLAN_REVIEW_LEGACY = 'zone:skipPlanReview'; // migrate on read → delete
+
+    function getEnablePlanReview(){
+      // One-time migration: if legacy key exists, invert it to the new key and delete old.
+      const legacy = localStorage.getItem(LS_SKIP_PLAN_REVIEW_LEGACY);
+      if (legacy !== null) {
+        const migrated = legacy !== 'true'; // skipPlanReview=true → enablePlanReview=false
+        try { localStorage.setItem(LS_ENABLE_PLAN_REVIEW, migrated ? 'true' : 'false'); } catch {}
+        try { localStorage.removeItem(LS_SKIP_PLAN_REVIEW_LEGACY); } catch {}
+        return migrated;
+      }
+      return localStorage.getItem(LS_ENABLE_PLAN_REVIEW) === 'true';
+    }
     const DEFAULT_SIDEBAR_OPEN_WIDTH = 220;
     const MIN_SIDEBAR_OPEN_WIDTH = 200;
     const MAX_SIDEBAR_OPEN_WIDTH = 480;
@@ -9560,7 +9573,7 @@
           mode: runMode,
           lastChangedFiles: Array.isArray(state.__lastChangedFiles) ? state.__lastChangedFiles : [],
           lastAddedFunctions: Array.isArray(state.__lastAddedFunctions) ? state.__lastAddedFunctions : [],
-          skipPlanReview: localStorage.getItem(LS_SKIP_PLAN_REVIEW) === 'true',
+          enablePlanReview: getEnablePlanReview(),
         };
         state.__sendDebugByRun = state.__sendDebugByRun || {};
         state.__sendDebugByRun[runId] = {
@@ -10191,26 +10204,26 @@
     }
 
     function renderGeneralSettings(){
-      const skipPlanReview = localStorage.getItem(LS_SKIP_PLAN_REVIEW) === 'true';
+      const enablePlanReview = getEnablePlanReview();
       els.settingsBody.innerHTML = `
         <div class="apikey-section">
           <div class="apikey-section-title">General</div>
 
           <div class="apikey-field-label">Plan review</div>
           <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer">
-            <input id="skipPlanReviewChk" type="checkbox" style="margin-top:2px" ${skipPlanReview ? 'checked' : ''} />
+            <input id="enablePlanReviewChk" type="checkbox" style="margin-top:2px" ${enablePlanReview ? 'checked' : ''} />
             <span style="font-size:var(--font-size-sm,12px);line-height:1.45">
-              <strong>Skip plan review for Patch and Investigate modes</strong><br>
-              When enabled, Patch and Investigate run immediately without showing a plan for approval.
-              Use for trusted workflows or CI.
+              <strong>Enable plan review for Patch mode</strong><br>
+              When enabled, Patch tasks pause to show a plan for approval before executing.
+              Useful for complex or destructive changes.
             </span>
           </label>
         </div>
       `;
-      const chk = document.getElementById('skipPlanReviewChk');
+      const chk = document.getElementById('enablePlanReviewChk');
       if (chk) {
         chk.addEventListener('change', () => {
-          try { localStorage.setItem(LS_SKIP_PLAN_REVIEW, chk.checked ? 'true' : 'false'); } catch {}
+          try { localStorage.setItem(LS_ENABLE_PLAN_REVIEW, chk.checked ? 'true' : 'false'); } catch {}
         });
       }
     }
