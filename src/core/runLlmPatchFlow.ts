@@ -4538,7 +4538,9 @@ export async function runLlmPatchFlow(input: {
    */
   userApiKey?: string;
   provider?: LLMProvider;
-  mode?: "patch";
+  mode?: "patch" | "plan";
+  /** Pre-generated (and pre-approved) plan; skips both generateExecutionPlan call sites. */
+  preGeneratedPlan?: ExecutionPlan;
   /** L.4.1: per-request tier override forwarded from API body. Beats ZONE_FORCE_TIER env. */
   forceTier?: TaskTier;
 }): Promise<LlmPatchFlowResult> {
@@ -5079,7 +5081,10 @@ const initializeTodosFromPlan = (): void => {
       );
     }
 
-    if (agentLoopPlanFiles.length > 0) {
+    if (input.preGeneratedPlan) {
+      executionPlan = input.preGeneratedPlan;
+      debugLog(`[zone-plan] using preGeneratedPlan steps=${executionPlan.steps.length} (agent_loop)`);
+    } else if (agentLoopPlanFiles.length > 0) {
       try {
         executionPlan = await generateExecutionPlan({
           task: input.task,
@@ -5654,7 +5659,7 @@ const initializeTodosFromPlan = (): void => {
       // Settings → Usage tab can show per-user totals. Falls back to
       // "local-dev" inside agentLoop when missing.
       userId: input.userId,
-      mode: input.mode,
+      mode: input.mode === "plan" ? "patch" : input.mode,
       // Tur P2-scope: forward the plan so the tool layer can hard-block
       // writes that fall outside `plan.steps[*].filesLikely`.
       executionPlan,
@@ -6543,22 +6548,27 @@ const initializeTodosFromPlan = (): void => {
         : "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n(none)";
     })();
 
-  try {
-    executionPlan = await generateExecutionPlan({
-      task: input.task,
-      repoSummary: projectSummary,
-      relevantFiles: relevantFiles.map((file) => file.path),
-      userApiKey: input.userApiKey,
-      provider: input.provider,
-    });
-    debugLog(`[zone-plan] generated steps=${executionPlan.steps.length}`);
-    debugLog(`[zone-plan] scope=${executionPlan.scopeSummary}`);
-    // Sidebar is seeded by the in-loop TodoWrite tool now; pre-planner only
-    // feeds scopeGuard / evaluatePlanAlignment / orchestrator / finalRunReport.
-  } catch (err) {
-    console.warn(
-      `[zone-plan] skipped: ${err instanceof Error ? err.message : String(err)}`
-    );
+  if (input.preGeneratedPlan) {
+    executionPlan = input.preGeneratedPlan;
+    debugLog(`[zone-plan] using preGeneratedPlan steps=${executionPlan.steps.length}`);
+  } else {
+    try {
+      executionPlan = await generateExecutionPlan({
+        task: input.task,
+        repoSummary: projectSummary,
+        relevantFiles: relevantFiles.map((file) => file.path),
+        userApiKey: input.userApiKey,
+        provider: input.provider,
+      });
+      debugLog(`[zone-plan] generated steps=${executionPlan.steps.length}`);
+      debugLog(`[zone-plan] scope=${executionPlan.scopeSummary}`);
+      // Sidebar is seeded by the in-loop TodoWrite tool now; pre-planner only
+      // feeds scopeGuard / evaluatePlanAlignment / orchestrator / finalRunReport.
+    } catch (err) {
+      console.warn(
+        `[zone-plan] skipped: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
 
   // 4. Plan feature with LLM
