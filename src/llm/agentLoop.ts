@@ -407,6 +407,14 @@ export function assembleAgentSystemPrompt(input: {
     `- read_file({ filePath: "src/big.ts", lineRange: [4900, 5100] })\n` +
     `When you need an exact section of a large file, prefer lineRange over broad reads. ` +
     `Outline + lineRange is much more token-efficient than repeated full-file reads.\n\n` +
+    `INTERPRETING COMMAND OUTPUT:\n` +
+    `Every run_command result starts with a header line: [exit_code=N — ...].\n` +
+    `- exit_code=0 → the command succeeded. DO NOT retry it based on output content alone.\n` +
+    `  Output may contain text like "Tests: N failed" or "warning: ..." from pre-existing\n` +
+    `  failures unrelated to your patch. These are informational, not your responsibility.\n` +
+    `- exit_code≠0 → the command failed. Read the output (especially the tail) for the reason.\n` +
+    `When verifying your own patch, focus only on tests that import or cover the files you\n` +
+    `modified. A failure elsewhere in an unrelated module is not caused by your patch.\n\n` +
     `OUTPUT ECONOMY:\n` +
     `- Final response: 60-80 words unless an error/warning needs more detail.\n` +
     `- Include changed files, verification result, and any remaining warning.\n` +

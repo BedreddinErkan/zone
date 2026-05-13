@@ -83,6 +83,10 @@ const DISPATCHED_TOOLS = new Set([
 
 export interface ToolResult {
   success: boolean;
+  /** Phase Q.5: authoritative exit code for run_command results.
+   *  success === (exitCode === 0); both are set together. Absent for
+   *  non-shell tools. */
+  exitCode?: number;
   output: string;
   error?: string;
   truncated?: boolean;
@@ -719,7 +723,7 @@ export async function executeTool(
 
       let stdout = "";
       let stderr = "";
-      let commandSuccess = true;
+      let commandExitCode = 0;
       try {
         const result = await withStagingTempFlush(input?.stagingFiles, async () => {
           return await execAsync(command, execOptions);
@@ -731,15 +735,14 @@ export async function executeTool(
         );
       } catch (err) {
         const code = Number((err as { code?: unknown }).code);
-        const exitCode = Number.isFinite(code) ? code : 1;
+        commandExitCode = Number.isFinite(code) && code !== 0 ? code : 1;
         console.log(
-          `[zone-verify] cmd="${command.slice(0, 80)}" cwd="${cwd}" exitCode=${exitCode} stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
+          `[zone-verify] cmd="${command.slice(0, 80)}" cwd="${cwd}" exitCode=${commandExitCode} stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
         );
         // Capture stdout/stderr from the exec error so the agent sees actual
         // command output rather than just the Node error message.
         stdout = String((err as { stdout?: unknown }).stdout ?? "");
         stderr = String((err as { stderr?: unknown }).stderr ?? "");
-        commandSuccess = false;
       }
 
       const combined = [stdout, stderr].filter(Boolean).join("\n") || "(no output)";
@@ -755,7 +758,19 @@ export async function executeTool(
           tailLines: COMMAND_OUTPUT_TAIL_LINES,
         }));
       }
-      return { success: commandSuccess, output: ct.truncated, truncated: ct.wasTruncated };
+
+      // Phase Q.5: prepend exit_code header so the agent sees it as the
+      // first token — combats retry loops triggered by output content alone.
+      const commandSuccess = commandExitCode === 0;
+      const exitHeader = commandSuccess
+        ? `[exit_code=0 — command succeeded; output below is informational]\n`
+        : `[exit_code=${commandExitCode} — command failed]\n`;
+      return {
+        success: commandSuccess,
+        exitCode: commandExitCode,
+        output: exitHeader + ct.truncated,
+        truncated: ct.wasTruncated,
+      };
     }
 
     if (toolName === "run_command_background") {
