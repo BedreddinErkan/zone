@@ -148,8 +148,13 @@ export function resolvePlanApproval(input: {
  * Priority:
  *  1. rawMode === "plan" (legacy alias) → always true, regardless of enablePlanReview
  *  2. explicitPlanApprovalRequired (caller override) → use that value
- *  3. Opt-in: true only for "patch" mode AND enablePlanReview === true
+ *  3. Opt-in: true for "patch" mode (or Auto routed to Patch via routedAs) AND
+ *     enablePlanReview === true
  *  4. All other cases → false (plan-review is opt-in, not default)
+ *
+ * Phase Q.7: routedAs — when rawMode === "auto" the caller cannot know the
+ * routed intent at the time of the first call. Pass routedAs: "patch" after
+ * intent resolution to trigger plan-review for Auto-routed Patch dispatches.
  *
  * Legacy skipPlanReview field: interpreted as enablePlanReview = !skipPlanReview by the
  * caller (server.ts) before invoking this function.
@@ -158,6 +163,8 @@ export function shouldRequirePlanApproval(opts: {
   rawMode: unknown;
   enablePlanReview?: boolean;
   explicitPlanApprovalRequired?: boolean;
+  /** Q.7: for Auto-mode tasks routed to Patch after intent detection. */
+  routedAs?: "patch";
 }): { normalizedMode: unknown; planApprovalRequired: boolean } {
   const legacyPlanAlias = opts.rawMode === "plan";
   const normalizedMode = legacyPlanAlias ? "patch" : opts.rawMode;
@@ -170,7 +177,8 @@ export function shouldRequirePlanApproval(opts: {
     return { normalizedMode, planApprovalRequired: opts.explicitPlanApprovalRequired };
   }
 
-  const planApprovalRequired = normalizedMode === "patch" && opts.enablePlanReview === true;
+  const isPatchLike = normalizedMode === "patch" || opts.routedAs === "patch";
+  const planApprovalRequired = isPatchLike && opts.enablePlanReview === true;
   return { normalizedMode, planApprovalRequired };
 }
 

@@ -3332,10 +3332,17 @@ app.post("/api/patch", async (req, res) => {
   }
   // Plan approval gate: pre-generate plan and wait for user review before starting agent loop.
   // Triggers when planApprovalRequired is true (opt-in via enablePlanReview, or legacy "plan" alias).
+  // Phase Q.7: also triggers when mode was "auto" and intent resolved to "execute" (Patch dispatch)
+  // — at the shouldRequirePlanApproval call site above the intent was not yet known.
+  const autoRoutedToPatch = requestedMode === "auto" && intent === "execute";
+  const effectivePlanApprovalRequired =
+    planApprovalRequired ||
+    shouldRequirePlanApproval({ rawMode, enablePlanReview, routedAs: autoRoutedToPatch ? "patch" : undefined })
+      .planApprovalRequired;
   // Supports up to MAX_REGENS regeneration cycles driven by user feedback.
   const PLAN_MAX_REGENS = 3;
   let preGeneratedPlan: Awaited<ReturnType<typeof generateExecutionPlan>> | undefined;
-  if (planApprovalRequired && runIdStr) {
+  if (effectivePlanApprovalRequired && runIdStr) {
     try {
       const planContext = await preparePlanContext({
         task: String(task),
