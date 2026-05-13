@@ -253,6 +253,7 @@ export function assembleAgentSystemPrompt(input: {
   backgroundCommandBlock: string;
   repoPath: string;
   planProgressBlock?: string;
+  planAnnotationsBlock?: string;
 }): string {
   return (
     `${input.agentIntro}\n\n` +
@@ -265,6 +266,7 @@ export function assembleAgentSystemPrompt(input: {
         `(End related files context)\n\n`
       : "") +
     (input.planProgressBlock ? `${input.planProgressBlock}\n\n` : "") +
+    (input.planAnnotationsBlock ? `${input.planAnnotationsBlock}\n\n` : "") +
     `CRITICAL PATCH RULES â€” follow these exactly:\n` +
     `1. To modify an EXISTING file, ALWAYS use apply_patch with --- FIND --- / --- REPLACE --- blocks.\n` +
     `   NEVER use write_file on a file that already exists.\n` +
@@ -768,6 +770,44 @@ export function extractDispatchReason(description: unknown): string {
   const m = firstLine.match(/^(multi_file_fanout|exploration|long_isolated_step)\s*:/i);
   if (m) return m[1].toLowerCase();
   return "manual";
+}
+
+/**
+ * Phase Q.6: render the plan's per-step subagent annotations into a prompt
+ * block. Only renders when at least one step is marked delegatable — keeps
+ * the prompt terse for trivial tasks.
+ *
+ * The block is injected near the start of the system prompt so the agent
+ * can match the runtime hint to the dispatch coaching it sees in TASK
+ * SUBAGENTS. Without this block, the system prompt's "the current plan
+ * step is marked subagentEligible: true" instruction is dead-letter — the
+ * agent has no per-step visibility.
+ */
+export function buildPlanAnnotationsBlock(
+  plan: import("./executionPlan.js").ExecutionPlan | null | undefined
+): string {
+  if (!plan || !Array.isArray(plan.steps)) return "";
+  const delegatableSteps = plan.steps
+    .map((step, idx) => ({ step, idx }))
+    .filter(({ step }) => step.subagentEligible === true && !!step.subagentType);
+  if (delegatableSteps.length === 0) return "";
+
+  const lines: string[] = [
+    "PLAN ANNOTATIONS — delegatable steps in this run:",
+  ];
+  for (const { step, idx } of delegatableSteps) {
+    const files = Array.isArray(step.filesLikely) && step.filesLikely.length > 0
+      ? step.filesLikely.join(", ")
+      : "unknown";
+    lines.push(
+      `- Step ${idx + 1} (${step.subagentType}): ${step.title} — files: ${files}`
+    );
+  }
+  lines.push(
+    "",
+    "When you reach a delegatable step, prefer Task dispatch over inline work — that's why the plan marked it. Use the matching subagent_type (worker for multi-file edits, explore for read-only investigation) and start the description with the dispatch reason prefix (multi_file_fanout / exploration / long_isolated_step)."
+  );
+  return lines.join("\n");
 }
 
 export function detectRepeatedFailure(
@@ -2085,6 +2125,7 @@ Example (small patch with verification — still call TodoWrite):
         backgroundCommandBlock,
         repoPath: input.repoPath,
         planProgressBlock,
+        planAnnotationsBlock: buildPlanAnnotationsBlock(input.executionPlan),
       });
   const systemContent = hasExplicitMode
     ? `${MODE_SYSTEM_PROMPT_PREFIX[mode]}\n\n${baseSystemContent}`
