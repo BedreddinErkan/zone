@@ -151,7 +151,7 @@ describe("assembleAgentSystemPrompt — Q.6 plan annotation injection", () => {
     expect(prompt).toContain("Fanout");
   });
 
-  it("block appears before the CRITICAL PATCH RULES so coaching has priority order", () => {
+  it("block appears before the PATCH RULES so coaching has priority order", () => {
     const plan = makePlan([
       {
         title: "FanoutStep",
@@ -173,7 +173,7 @@ describe("assembleAgentSystemPrompt — Q.6 plan annotation injection", () => {
       planAnnotationsBlock: buildPlanAnnotationsBlock(plan),
     });
     const planAnnIdx = prompt.indexOf("PLAN ANNOTATIONS");
-    const patchRulesIdx = prompt.indexOf("CRITICAL PATCH RULES");
+    const patchRulesIdx = prompt.indexOf("PATCH RULES");
     expect(planAnnIdx).toBeGreaterThan(-1);
     expect(patchRulesIdx).toBeGreaterThan(planAnnIdx);
   });
