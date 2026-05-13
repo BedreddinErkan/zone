@@ -1753,7 +1753,10 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       : typeof input.maxIterations === "number"
         ? input.maxIterations
         : BASE_MAX_ITERATIONS;
-  const escalationEnabled = typeof input.maxIterationsOverride !== "number";
+  // S.2.1: escalation disabled for main (tier-constrained) loops — the tier
+  // iterCap is already the authoritative budget. Escalation remains active only
+  // for subagent loops that bypass tier gating (isSubagentLoop resolved below).
+  let escalationEnabled = typeof input.maxIterationsOverride !== "number";
   // Phase H.6: surface the effective budget at loop entry for tracing how
   // plan-aware overrides propagate through investigation/patch entry points.
   debugLog("[zone-iter-budget-effective]", JSON.stringify({
@@ -1795,9 +1798,14 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       const idx = toolsForLLM.findIndex((t) => getZoneToolName(t) === "Task");
       if (idx >= 0) toolsForLLM.splice(idx, 1);
     }
-    if (tierLimits.iterCap < iterationBudget.maxIterationsForRun) {
-      iterationBudget = { ...iterationBudget, maxIterationsForRun: tierLimits.iterCap };
-    }
+    // S.2.1: iterCap is both floor and ceiling — raise plan-computed budgets that
+    // fall below the tier's minimum, and cap budgets that exceed the tier's maximum.
+    // A 2-step medium-tier plan computes to 8 iters but the tier guarantees 25.
+    iterationBudget = { ...iterationBudget, maxIterationsForRun: tierLimits.iterCap };
+    // Disable escalation: tier iterCap is the authoritative budget; escalation
+    // would REDUCE maxIterationsForRun back to baseMaxIterations+5 (e.g., 8+5=13),
+    // which is lower than the tier cap (e.g., 25) and would cap the loop early.
+    escalationEnabled = false;
     log("[zone-tier-constraints-applied]", JSON.stringify({
       runId: input.runId ?? null,
       tier: input.taskClassification?.tier ?? "medium",
