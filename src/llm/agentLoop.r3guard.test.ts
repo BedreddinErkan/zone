@@ -30,6 +30,7 @@ describe("R.3 — Phase Q safety signal preservation", () => {
     expect(p).toMatch(/exit_code/i);
     expect(p).toContain("INTERPRETING COMMAND OUTPUT");
     expect(p).toContain("exit_code=0");
+    expect(p).toContain("do not run additional commands to verify");
   });
 
   it("Q.6 subagentEligible reference is present in TASK SUBAGENTS section", () => {
