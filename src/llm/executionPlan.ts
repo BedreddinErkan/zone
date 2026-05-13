@@ -10,6 +10,13 @@ export type ExecutionPlan = {
     title: string;
     description: string;
     filesLikely: string[];
+    /** Phase Q.3: hint that this step is independent / parallelizable enough
+     *  to be dispatched as a Task subagent. Informational only — agent still
+     *  decides at runtime whether to actually spawn. */
+    subagentEligible?: boolean;
+    /** Phase Q.3: which subagent kind suits the step. "worker" = isolated
+     *  multi-file edits; "explore" = read-only investigation. */
+    subagentType?: "explore" | "worker";
   }[];
   riskHints: string[];
   scopeSummary: string;
@@ -23,6 +30,8 @@ const executionPlanSchema = z.object({
         title: z.string(),
         description: z.string(),
         filesLikely: z.array(z.string()),
+        subagentEligible: z.boolean().optional(),
+        subagentType: z.enum(["explore", "worker"]).optional(),
       })
     )
     .min(1)
@@ -117,6 +126,20 @@ Rules:
 - Keep scopeSummary under 160 characters.
 - Return JSON only.
 
+Subagent eligibility (Phase Q.3):
+For each step, decide whether it could run as a Task subagent. Set both fields
+or omit both. Mark a step \`subagentEligible: true\` ONLY when it satisfies one
+of these patterns:
+- \`subagentType: "worker"\` — independent multi-file edits, ≥3 files all
+  receiving similar transformations (e.g., rename across files, repeated
+  find-replace, codemods). NOT for a single-file edit, even if complex.
+- \`subagentType: "explore"\` — pure read-only investigation that doesn't
+  depend on parent context (e.g., "list every caller of X", "map files
+  matching pattern Y"). NOT for trivial lookups the agent can do in one read.
+For everything else (single-file edits, small changes, work needing shared
+state), omit both fields. Default to omitting — over-marking causes wasted
+dispatches.
+
 JSON shape:
 {
   "objective": "string",
@@ -124,7 +147,9 @@ JSON shape:
     {
       "title": "string",
       "description": "string",
-      "filesLikely": ["string"]
+      "filesLikely": ["string"],
+      "subagentEligible": true | false,
+      "subagentType": "worker" | "explore"
     }
   ],
   "riskHints": ["string"],
@@ -143,9 +168,29 @@ JSON shape:
   );
   const plan = executionPlanSchema.parse(parsed);
 
+  // Normalize annotation: subagentEligible only sticks when paired with a type.
+  const normalizedSteps = plan.steps.map((step) => {
+    const eligible = step.subagentEligible === true;
+    const type = step.subagentType;
+    if (eligible && (type === "worker" || type === "explore")) {
+      return {
+        title: step.title,
+        description: step.description,
+        filesLikely: step.filesLikely,
+        subagentEligible: true,
+        subagentType: type,
+      };
+    }
+    return {
+      title: step.title,
+      description: step.description,
+      filesLikely: step.filesLikely,
+    };
+  });
+
   return {
     objective: plan.objective,
-    steps: plan.steps,
+    steps: normalizedSteps,
     riskHints: plan.riskHints,
     scopeSummary: plan.scopeSummary,
   };
