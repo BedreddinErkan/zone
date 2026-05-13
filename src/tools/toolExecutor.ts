@@ -336,7 +336,8 @@ function stagedRead(
 function formatSearchContextBlock(
   filePath: string,
   lines: string[],
-  matchLines: number[]
+  matchLines: number[],
+  contextWindow = 3
 ): string[] {
   const sortedMatches = [...new Set(matchLines)]
     .filter((line) => Number.isFinite(line) && line >= 1)
@@ -344,8 +345,8 @@ function formatSearchContextBlock(
   const blocks: Array<{ start: number; end: number; matches: Set<number> }> = [];
 
   for (const matchLine of sortedMatches) {
-    const start = Math.max(1, matchLine - 3);
-    const end = Math.min(lines.length, matchLine + 3);
+    const start = Math.max(1, matchLine - contextWindow);
+    const end = Math.min(lines.length, matchLine + contextWindow);
     const prev = blocks[blocks.length - 1];
     if (prev && start <= prev.end + 1) {
       prev.end = Math.max(prev.end, end);
@@ -368,6 +369,118 @@ function formatSearchContextBlock(
     }
     return `${header}\n${context.join("\n")}`;
   });
+}
+
+// Module-level cache for ripgrep detection (undefined = not yet checked)
+let _rgPath: string | null | undefined;
+
+async function detectRipgrep(): Promise<string | null> {
+  if (_rgPath !== undefined) return _rgPath;
+  try {
+    const { stdout } = await execAsync("which rg");
+    _rgPath = stdout.trim() || null;
+  } catch {
+    _rgPath = null;
+  }
+  return _rgPath;
+}
+
+function parseRgJsonContent(
+  stdout: string,
+  maxMatches: number
+): { success: boolean; output: string; truncated?: boolean } {
+  interface RgData {
+    path?: { text?: string };
+    line_number?: number;
+    lines?: { text?: string };
+  }
+  interface RgEvent {
+    type: string;
+    data: RgData;
+  }
+
+  type LineEntry = { lineNum: number; text: string; isMatch: boolean };
+  const outputBlocks: string[] = [];
+  let currentFile = "";
+  let currentBlock: LineEntry[] = [];
+  let totalMatches = 0;
+  let capReached = false;
+  const matchCountsByFile = new Map<string, number>();
+
+  function flushBlock() {
+    if (!currentBlock.length) return;
+    const matchLineNums = currentBlock.filter((l) => l.isMatch).map((l) => l.lineNum);
+    if (!matchLineNums.length) { currentBlock = []; return; }
+    const header =
+      matchLineNums.length === 1
+        ? `${currentFile}:${matchLineNums[0]}`
+        : `${currentFile}:${matchLineNums[0]}-${matchLineNums[matchLineNums.length - 1]} (${matchLineNums.length} matches)`;
+    const formattedLines = currentBlock.map((l) => {
+      const marker = l.isMatch ? ">" : " ";
+      return `${marker} ${String(l.lineNum).padStart(4)}: ${l.text}`;
+    });
+    outputBlocks.push(`${header}\n${formattedLines.join("\n")}`);
+    currentBlock = [];
+  }
+
+  for (const line of stdout.split("\n")) {
+    if (!line) continue;
+    if (capReached) break;
+    let evt: RgEvent;
+    try { evt = JSON.parse(line) as RgEvent; } catch { continue; }
+
+    if (evt.type === "begin") {
+      flushBlock();
+      currentFile = evt.data.path?.text ?? "";
+      currentBlock = [];
+    } else if (evt.type === "match") {
+      totalMatches++;
+      if (totalMatches > maxMatches) { capReached = true; break; }
+      matchCountsByFile.set(currentFile, (matchCountsByFile.get(currentFile) ?? 0) + 1);
+      currentBlock.push({
+        lineNum: evt.data.line_number ?? 0,
+        text: (evt.data.lines?.text ?? "").replace(/[\r\n]+$/, ""),
+        isMatch: true,
+      });
+    } else if (evt.type === "context") {
+      currentBlock.push({
+        lineNum: evt.data.line_number ?? 0,
+        text: (evt.data.lines?.text ?? "").replace(/[\r\n]+$/, ""),
+        isMatch: false,
+      });
+    } else if (evt.type === "end") {
+      flushBlock();
+    }
+  }
+  flushBlock();
+
+  const matchedFileCount = matchCountsByFile.size;
+  const topFiles = [...matchCountsByFile.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 5);
+  const summaryLines = [
+    "---",
+    `[search_in_files] Found ${totalMatches} matches across ${matchedFileCount} files.`,
+    "Top files by match count:",
+    ...(topFiles.length > 0
+      ? topFiles.map(([f, c]) => `  - ${f}: ${c} matches`)
+      : ["  (none)"]),
+  ];
+  if (capReached) {
+    summaryLines.push(
+      `WARNING: CAP REACHED at ${maxMatches} matches — there may be more results. ` +
+        "Narrow your pattern or add a glob filter for completeness."
+    );
+  }
+  const summaryBlock = summaryLines.join("\n");
+  let matchSection = outputBlocks.length ? outputBlocks.join("\n") : "(no matches)";
+  const summaryBudget = 4000 - summaryBlock.length - 2;
+  if (summaryBudget > 0 && matchSection.length > summaryBudget) {
+    matchSection = truncateText(matchSection, summaryBudget).text;
+  }
+  const out = `${matchSection}\n\n${summaryBlock}`;
+  const t = truncateText(out, 4000);
+  return { success: true, output: t.text, truncated: t.truncated };
 }
 
 function stagedWrite(
@@ -1908,16 +2021,109 @@ export async function executeTool(
 
     if (toolName === "search_in_files") {
       const pattern = String(args.pattern ?? "");
-      const fileGlobRaw = args.fileGlob;
+      const literal = args.literal === true;
+      const caseInsensitive = args.case_insensitive === true;
+      const multiline = args.multiline === true;
+      const rawMode = args.output_mode;
+      const outputMode: "content" | "files_with_matches" | "count" =
+        rawMode === "files_with_matches" || rawMode === "count" ? rawMode : "content";
+      const contextLines =
+        typeof args.context_lines === "number"
+          ? Math.max(0, Math.min(Math.floor(args.context_lines), 10))
+          : 2;
+      // backward compat: fileGlob (old field) or glob (new field)
+      const rawGlob = args.glob ?? args.fileGlob;
       const fileGlob =
-        fileGlobRaw === null ||
-        fileGlobRaw === undefined ||
-        (typeof fileGlobRaw === "string" && fileGlobRaw.trim() === "")
-          ? "**/*"
-          : String(fileGlobRaw);
+        rawGlob === null ||
+        rawGlob === undefined ||
+        (typeof rawGlob === "string" && rawGlob.trim() === "")
+          ? null
+          : String(rawGlob);
+
       onProgress?.(`[tool] Searching: ${pattern}`);
 
-      const files = await fg(fileGlob, {
+      const rgPath = await detectRipgrep();
+
+      if (rgPath) {
+        const rgArgs: string[] = ["--no-messages"];
+        if (literal) rgArgs.push("--fixed-strings");
+        if (caseInsensitive) rgArgs.push("--ignore-case");
+        if (multiline) rgArgs.push("--multiline");
+        if (fileGlob) rgArgs.push("--glob", fileGlob);
+        rgArgs.push("--no-heading", "--color=never");
+
+        if (outputMode === "files_with_matches") {
+          rgArgs.push("--files-with-matches");
+        } else if (outputMode === "count") {
+          rgArgs.push("--count");
+        } else {
+          rgArgs.push("--json", `--context=${contextLines}`);
+        }
+
+        const escapedPattern = pattern.replace(/'/g, "'\\''");
+        const escapedArgs = rgArgs.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
+        const cmd = `'${rgPath}' ${escapedArgs} -- '${escapedPattern}' .`;
+
+        let stdout = "";
+        try {
+          const r = await execAsync(cmd, { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 });
+          stdout = r.stdout;
+        } catch (err: unknown) {
+          const e = err as { code?: number; stdout?: string; stderr?: string };
+          if (e.code === 1) {
+            stdout = e.stdout ?? ""; // exit 1 = no matches
+          } else if (e.code !== undefined) {
+            return { success: false, output: `search_in_files (rg) error: ${e.stderr ?? String(err)}` };
+          } else {
+            return { success: false, output: `search_in_files error: ${String(err)}` };
+          }
+        }
+
+        if (outputMode === "files_with_matches") {
+          const files = stdout.trim() ? stdout.trim().split("\n").filter(Boolean) : [];
+          const body = files.length === 0 ? "(no matches)" : files.join("\n");
+          const summary = `\n---\n[search_in_files] ${files.length} file(s) matched.`;
+          const t = truncateText(body + summary, 4000);
+          return { success: true, output: t.text, truncated: t.truncated };
+        }
+
+        if (outputMode === "count") {
+          const lines = stdout.trim() ? stdout.trim().split("\n").filter(Boolean) : [];
+          const pairs: Array<[string, number]> = [];
+          let total = 0;
+          for (const line of lines) {
+            const lastColon = line.lastIndexOf(":");
+            if (lastColon === -1) continue;
+            const n = parseInt(line.slice(lastColon + 1), 10);
+            if (!isNaN(n)) { pairs.push([line.slice(0, lastColon), n]); total += n; }
+          }
+          pairs.sort((a, b) => b[1] - a[1]);
+          const body = pairs.length === 0 ? "(no matches)" : pairs.map(([f, c]) => `${f}: ${c}`).join("\n");
+          const summary = `\n---\n[search_in_files] ${total} matches across ${pairs.length} file(s).`;
+          const t = truncateText(body + summary, 4000);
+          return { success: true, output: t.text, truncated: t.truncated };
+        }
+
+        return parseRgJsonContent(stdout, 500);
+      }
+
+      // In-process fallback (no ripgrep available)
+      let matcher: (line: string) => boolean;
+      if (literal) {
+        const needle = caseInsensitive ? pattern.toLowerCase() : pattern;
+        matcher = (line) => (caseInsensitive ? line.toLowerCase() : line).includes(needle);
+      } else {
+        let re: RegExp;
+        try {
+          re = new RegExp(pattern, caseInsensitive ? "i" : "");
+        } catch (e) {
+          return { success: false, output: `Invalid regex pattern: ${String(e)}` };
+        }
+        matcher = (line) => re.test(line);
+      }
+
+      const globPattern = fileGlob ?? "**/*";
+      const files = await fg(globPattern, {
         cwd: repoPath,
         dot: false,
         onlyFiles: true,
@@ -1925,41 +2131,61 @@ export async function executeTool(
         ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**"],
       });
 
-      const matches: string[] = [];
+      if (outputMode === "files_with_matches") {
+        const matchedFiles: string[] = [];
+        for (const rel of files) {
+          let text = "";
+          try {
+            const abs = path.join(repoPath, rel);
+            const staged = stagedRead(input?.stagingFiles, abs);
+            text = staged !== null ? staged : fs.readFileSync(abs, "utf8");
+          } catch { continue; }
+          if (text.split(/\r?\n/).some((l) => matcher(l))) matchedFiles.push(rel);
+        }
+        const body = matchedFiles.length === 0 ? "(no matches)" : matchedFiles.join("\n");
+        const summary = `\n---\n[search_in_files] ${matchedFiles.length} file(s) matched.`;
+        const t = truncateText(body + summary, 4000);
+        return { success: true, output: t.text, truncated: t.truncated };
+      }
+
+      const contentMatches: string[] = [];
       const matchCountsByFile = new Map<string, number>();
-      const needle = pattern;
       const maxMatches = 500;
       let totalMatches = 0;
       let capReached = false;
 
       for (const rel of files) {
-        if (totalMatches >= maxMatches) {
-          capReached = true;
-          break;
-        }
+        if (totalMatches >= maxMatches) { capReached = true; break; }
         let text = "";
         try {
           const searchAbs = path.join(repoPath, rel);
           const stagedSearch = stagedRead(input?.stagingFiles, searchAbs);
           text = stagedSearch !== null ? stagedSearch : fs.readFileSync(searchAbs, "utf8");
-        } catch {
-          continue;
-        }
+        } catch { continue; }
+
         const lines = text.split(/\r?\n/);
         const fileMatchLines: number[] = [];
         for (let i = 0; i < lines.length; i += 1) {
-          const line = lines[i] ?? "";
-          if (needle && line.includes(needle)) {
+          if (matcher(lines[i] ?? "")) {
             fileMatchLines.push(i + 1);
             matchCountsByFile.set(rel, (matchCountsByFile.get(rel) ?? 0) + 1);
             totalMatches += 1;
             if (totalMatches >= maxMatches) break;
           }
         }
-        matches.push(...formatSearchContextBlock(rel, lines, fileMatchLines));
-        if (totalMatches >= maxMatches) {
-          capReached = true;
+        if (outputMode !== "count") {
+          contentMatches.push(...formatSearchContextBlock(rel, lines, fileMatchLines, contextLines));
         }
+        if (totalMatches >= maxMatches) capReached = true;
+      }
+
+      if (outputMode === "count") {
+        const pairs = [...matchCountsByFile.entries()].sort((a, b) => b[1] - a[1]);
+        const total = [...matchCountsByFile.values()].reduce((a, b) => a + b, 0);
+        const body = pairs.length === 0 ? "(no matches)" : pairs.map(([f, c]) => `${f}: ${c}`).join("\n");
+        const summary = `\n---\n[search_in_files] ${total} matches across ${pairs.length} file(s).`;
+        const t = truncateText(body + summary, 4000);
+        return { success: true, output: t.text, truncated: t.truncated };
       }
 
       const matchedFileCount = matchCountsByFile.size;
@@ -1976,12 +2202,12 @@ export async function executeTool(
       ];
       if (capReached) {
         summaryLines.push(
-          `WARNING: CAP REACHED at ${maxMatches} matches - there may be more results. ` +
-            "Narrow your pattern (use a more specific string or a fileGlob filter) for completeness."
+          `WARNING: CAP REACHED at ${maxMatches} matches — there may be more results. ` +
+            "Narrow your pattern or add a glob filter for completeness."
         );
       }
       const summaryBlock = summaryLines.join("\n");
-      let matchSection = matches.length ? matches.join("\n") : "(no matches)";
+      let matchSection = contentMatches.length ? contentMatches.join("\n") : "(no matches)";
       const summaryBudget = 4000 - summaryBlock.length - 2;
       if (summaryBudget > 0 && matchSection.length > summaryBudget) {
         matchSection = truncateText(matchSection, summaryBudget).text;
