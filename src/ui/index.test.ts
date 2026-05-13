@@ -1089,6 +1089,133 @@ describe("UI cost meter cache colors", () => {
   });
 });
 
+describe("UI cost meter subagent rollup (Bug E)", () => {
+  function newMeter(context: { ensureCostMeterState: (rid: string) => unknown }): {
+    bySource: Record<string, Record<string, number | boolean>>;
+    cumulative: number;
+    totalTokens: number;
+    mainAgentTokens: number;
+    subagentTokens: number;
+    totalCacheRead: number;
+    totalInputUncached: number;
+  } {
+    const m = context.ensureCostMeterState("run-1") as any;
+    // Tests construct fresh in-meter source snapshots manually so they don't
+    // depend on event-handler side effects (DOM, state.runsByThread).
+    m.bySource = {};
+    return m;
+  }
+
+  it("returns parent-only totals when no subagents", () => {
+    const { context } = buildUiHarness() as any;
+    const meter = newMeter(context);
+    meter.bySource["parent"] = { cumulative: 0.20, totalTokens: 200_000 };
+    const agg = context.aggregateCostMeter(meter);
+    expect(agg.cumulative).toBeCloseTo(0.20, 4);
+    expect(agg.totalTokens).toBe(200_000);
+    expect(agg.liveSubagentCount).toBe(0);
+  });
+
+  it("aggregates parent + one live subagent", () => {
+    const { context } = buildUiHarness() as any;
+    const meter = newMeter(context);
+    meter.bySource["parent"] = { cumulative: 0.20, totalTokens: 200_000 };
+    meter.bySource["subagent:sub-1"] = { cumulative: 0.10, totalTokens: 115_000 };
+    const agg = context.aggregateCostMeter(meter);
+    expect(agg.cumulative).toBeCloseTo(0.30, 4);
+    expect(agg.totalTokens).toBe(315_000);
+    expect(agg.subagentTokens).toBe(115_000);
+    expect(agg.liveSubagentCount).toBe(1);
+  });
+
+  it("aggregates parent + three live subagents", () => {
+    const { context } = buildUiHarness() as any;
+    const meter = newMeter(context);
+    meter.bySource["parent"] = { cumulative: 0.20, totalTokens: 200_000 };
+    meter.bySource["subagent:a"] = { cumulative: 0.05, totalTokens: 50_000 };
+    meter.bySource["subagent:b"] = { cumulative: 0.04, totalTokens: 40_000 };
+    meter.bySource["subagent:c"] = { cumulative: 0.06, totalTokens: 60_000 };
+    const agg = context.aggregateCostMeter(meter);
+    expect(agg.cumulative).toBeCloseTo(0.35, 4);
+    expect(agg.totalTokens).toBe(350_000);
+    expect(agg.liveSubagentCount).toBe(3);
+  });
+
+  it("excludes done subagents (their cost is folded into parent.cumulative)", () => {
+    const { context } = buildUiHarness() as any;
+    const meter = newMeter(context);
+    meter.bySource["parent"] = { cumulative: 0.25, totalTokens: 250_000 }; // includes done sub
+    meter.bySource["subagent:done-1"] = { cumulative: 0.05, totalTokens: 50_000, done: true };
+    meter.bySource["subagent:live-1"] = { cumulative: 0.07, totalTokens: 70_000 };
+    const agg = context.aggregateCostMeter(meter);
+    // 0.25 (parent already includes done sub) + 0.07 (live) = 0.32 — no double-count
+    expect(agg.cumulative).toBeCloseTo(0.32, 4);
+    expect(agg.totalTokens).toBe(320_000);
+    expect(agg.liveSubagentCount).toBe(1);
+  });
+
+  it("markSubagentCostSourceDone flips a live source to done", () => {
+    const { context } = buildUiHarness() as any;
+    const meter = newMeter(context);
+    meter.bySource["parent"] = { cumulative: 0.20, totalTokens: 200_000 };
+    meter.bySource["subagent:x"] = { cumulative: 0.10, totalTokens: 100_000 };
+    expect(context.aggregateCostMeter(meter).cumulative).toBeCloseTo(0.30, 4);
+    context.markSubagentCostSourceDone(meter, "x");
+    expect(meter.bySource["subagent:x"].done).toBe(true);
+    expect(context.aggregateCostMeter(meter).cumulative).toBeCloseTo(0.20, 4);
+  });
+
+  it("sums cache stats across all sources (parent + live subagents)", () => {
+    const { context } = buildUiHarness() as any;
+    const meter = newMeter(context);
+    meter.bySource["parent"] = {
+      cumulative: 0.20,
+      totalTokens: 200_000,
+      totalCacheRead: 80_000,
+      totalInputUncached: 20_000,
+    };
+    meter.bySource["subagent:s"] = {
+      cumulative: 0.05,
+      totalTokens: 50_000,
+      totalCacheRead: 30_000,
+      totalInputUncached: 5_000,
+    };
+    const agg = context.aggregateCostMeter(meter);
+    expect(agg.totalCacheRead).toBe(110_000);
+    expect(agg.totalInputUncached).toBe(25_000);
+  });
+
+  it("does not pollute another runId's meter when subagentId is set", () => {
+    const { context } = buildUiHarness() as any;
+    // Two independent parent runs with their own meters.
+    const meterA = context.ensureCostMeterState("run-A") as any;
+    const meterB = context.ensureCostMeterState("run-B") as any;
+    meterA.bySource = { parent: { cumulative: 0.10, totalTokens: 100_000 } };
+    meterB.bySource = { parent: { cumulative: 0.20, totalTokens: 200_000 } };
+    // Subagent event addressed to run-A only.
+    meterA.bySource["subagent:s1"] = { cumulative: 0.05, totalTokens: 50_000 };
+    expect(context.aggregateCostMeter(meterA).cumulative).toBeCloseTo(0.15, 4);
+    expect(context.aggregateCostMeter(meterB).cumulative).toBeCloseTo(0.20, 4);
+  });
+
+  it("getCostSourceKey returns 'parent' when no subagentId, 'subagent:<id>' when present", () => {
+    const { context } = buildUiHarness() as any;
+    expect(context.getCostSourceKey({ cumulativeCost: 0.1 })).toBe("parent");
+    expect(context.getCostSourceKey({ subagentId: "abc" })).toBe("subagent:abc");
+    expect(context.getCostSourceKey({ subagentId: "" })).toBe("parent");
+  });
+
+  it("ensureCostMeterSource creates a default slot once and reuses it", () => {
+    const { context } = buildUiHarness() as any;
+    const meter = { bySource: {} } as any;
+    const first = context.ensureCostMeterSource(meter, "subagent:x");
+    first.cumulative = 0.12;
+    const second = context.ensureCostMeterSource(meter, "subagent:x");
+    expect(second).toBe(first);
+    expect(second.cumulative).toBeCloseTo(0.12, 4);
+  });
+});
+
 describe("UI todo sidebar", () => {
   it("renders mixed todo statuses with completed plus skipped counter", () => {
     const { context, elements } = buildUiHarness();
