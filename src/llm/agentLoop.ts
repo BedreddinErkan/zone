@@ -47,6 +47,7 @@ import type { Mode } from "../types/mode.js";
 import { ContextCompactor } from "./compaction/ContextCompactor.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
 import { hashToolCall, createDetectorState, recordAndDetect } from "./loopDetector.js";
+import { emitTokenBreakdown, emitBreakdownSummary, type BreakdownEvent } from "./tokenBreakdown.js";
 
 // "plan" kept as accepted input for backward compat — normalizeAgentLoopMode maps it to "patch"
 type AgentLoopMode = Exclude<Mode, "auto"> | "investigation" | "plan";
@@ -2151,6 +2152,8 @@ Example (small patch with verification — still call TodoWrite):
   let subagentTokenTotal = 0;
   let subagentCostTotal = 0;
   const detectorState = createDetectorState();
+  // R.1: accumulate per-call breakdown events for the end-of-run summary.
+  const breakdownEvents: BreakdownEvent[] = [];
   const tokenBudgetBaseTokens = cleanTokenNumber(input.tokenBudgetBaseTokens);
   // P.1: compaction trigger — fires at the safe iteration boundary after tool results
   // are processed. No-op in P.1; P.2 replaces the stub with real summarization.
@@ -2259,6 +2262,7 @@ Example (small patch with verification — still call TodoWrite):
       cumulativeTokens: tokensAtExit,
       finalTextLength: finalSummary.length,
     }));
+    emitRunBreakdownSummary();
     return {
       success: false,
       summary: finalSummary,
@@ -2285,6 +2289,7 @@ Example (small patch with verification — still call TodoWrite):
       runId: input.runId,
       compactionCount: compactor.getCompactionCount(),
     }));
+    emitRunBreakdownSummary();
     return {
       success: false,
       summary: msg,
@@ -2305,6 +2310,7 @@ Example (small patch with verification — still call TodoWrite):
   ): AgentLoopResult => {
     const msg = `Task aborted: loop detected. The agent called \`${toolName}\` with the same arguments ${count} times in a short window. Consider rephrasing the task or restricting scope.`;
     debugLog("[zone-loop-detected]", JSON.stringify({ iter: iterNumber, runId: input.runId, toolName, count }));
+    emitRunBreakdownSummary();
     return {
       success: false,
       summary: msg,
@@ -2317,6 +2323,13 @@ Example (small patch with verification — still call TodoWrite):
       tokenUsage: currentTokenUsage(),
       costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
     };
+  };
+
+  // R.1: emit the run-level summary at every exit path.
+  const emitRunBreakdownSummary = (): void => {
+    if (breakdownEvents.length > 0) {
+      emitBreakdownSummary({ runId: input.runId ?? "", events: breakdownEvents });
+    }
   };
 
   const throwIfAborted = (stage: string): void => {
@@ -2353,6 +2366,19 @@ Example (small patch with verification — still call TodoWrite):
     const promptCacheKey =
       client.provider === "openai" ? buildOpenAIPromptCacheKey(input.runId) : undefined;
     const modelName = getModelName("high", client.provider, requestCtx?.modelOverride);
+
+    // R.1: emit per-call token breakdown before each LLM call.
+    const bdEvent = emitTokenBreakdown({
+      runId: input.runId ?? "",
+      parentRunId: input.subagent?.parentRunId,
+      subagentId: input.subagent?.id,
+      iter,
+      messages: responseInput,
+      tools: toolsForLLM,
+      model: modelName,
+    });
+    breakdownEvents.push(bdEvent);
+
     const response = await client.createChatCompletion(
       {
         model: modelName,
@@ -3217,6 +3243,7 @@ Example (small patch with verification — still call TodoWrite):
         // staging-flush-bug diag: full absolute paths surface symlink/realpath drift
         stagedAbsPaths: Array.from(stagingFiles.keys()),
       }));
+      emitRunBreakdownSummary();
       log("[zone-agent-final-assessment]", JSON.stringify({
         triggeredBy: "natural_completion",
         verificationReason,
@@ -3485,6 +3512,7 @@ Example (small patch with verification — still call TodoWrite):
     stagedFileCount: stagingFiles.size,
     stagedFiles: Array.from(stagingFiles.keys()).map((abs) => path.basename(abs)),
   }));
+  emitRunBreakdownSummary();
   log("[zone-agent-final-assessment]", JSON.stringify({
     triggeredBy: "max_iterations",
     finalVerificationReason,
