@@ -1172,6 +1172,7 @@
       <div class="inputBar">
         <div id="zoneBgStickyContainer"></div>
         <div id="zoneApprovalStickyContainer" class="zone-approval-sticky" data-state="hidden"></div>
+        <div id="zonePlanStickyContainer" class="zone-approval-sticky" data-state="hidden"></div>
         <div class="queueBar" id="queueBar"></div>
         <div class="inputWrap">
           <div id="attachPreviewStrip" class="attach-preview-strip" style="display:none"></div>
@@ -1199,6 +1200,7 @@
             <button class="modePill" type="button" data-mode="chat" role="tab" aria-selected="false">Chat</button>
             <button class="modePill" type="button" data-mode="investigate" role="tab" aria-selected="false">Investigate</button>
             <button class="modePill" type="button" data-mode="patch" role="tab" aria-selected="false">Patch</button>
+            <button class="modePill" type="button" data-mode="plan" role="tab" aria-selected="false">Plan</button>
           </div>
         </div>
         <div class="metaRow">
@@ -1889,7 +1891,7 @@
       document.body.appendChild(els.branchDropdown);
     }
 
-    const ZONE_MODES = ['auto', 'chat', 'investigate', 'patch'];
+    const ZONE_MODES = ['auto', 'chat', 'investigate', 'patch', 'plan'];
     function normalizeMode(mode){
       const normalized = String(mode || '').trim().toLowerCase();
       return ZONE_MODES.includes(normalized) ? normalized : 'auto';
@@ -6439,6 +6441,152 @@
       }
     }
 
+    let __zoneActivePlanReview = null;
+
+    class ZonePlanReviewPrompt {
+      constructor(containerEl, payload, callbacks){
+        this.container = containerEl;
+        this.payload = payload;
+        this.callbacks = callbacks || {};
+        this._dismissed = false;
+        this._editMode = false;
+        this._render();
+      }
+      _render(){
+        const plan = this.payload.plan || {};
+        const steps = Array.isArray(plan.steps) ? plan.steps : [];
+        const stepsHtml = steps.map((s, i) =>
+          '<div class="zone-plan-step"><span class="zone-plan-step-num">' + (i + 1) + '.</span>' +
+          '<span class="zone-plan-step-title">' + escapeHtml(String(s.title || '')) + '</span>' +
+          '<span class="zone-plan-step-desc">' + escapeHtml(String(s.description || '')) + '</span></div>'
+        ).join('');
+        const scope = escapeHtml(String(plan.scopeSummary || ''));
+        this.container.innerHTML =
+          '<div class="zone-approval-sticky-header"><span class="bolt">📋</span><span>Review execution plan</span></div>' +
+          '<div class="zone-plan-objective">' + escapeHtml(String(plan.objective || '')) + '</div>' +
+          '<div class="zone-plan-steps">' + stepsHtml + '</div>' +
+          (scope ? '<div class="zone-plan-scope">Scope: ' + scope + '</div>' : '') +
+          '<div class="zone-approval-sticky-actions" data-run-id="' + escapeHtml(String(this.payload.runId || '')) + '">' +
+            '<button type="button" class="approval-btn approve" data-action="approve">Approve</button>' +
+            '<button type="button" class="approval-btn trust-all" data-action="edit">Edit plan</button>' +
+            '<button type="button" class="approval-btn reject" data-action="reject">Reject</button>' +
+          '</div>' +
+          '<div class="zone-plan-edit-form" style="display:none">' +
+            '<textarea class="zone-plan-edit-textarea" rows="10" spellcheck="false"></textarea>' +
+            '<div style="display:flex;gap:6px;margin-top:6px">' +
+              '<button type="button" class="approval-btn approve zone-plan-edit-submit">Submit edit</button>' +
+              '<button type="button" class="approval-btn reject zone-plan-edit-cancel">Cancel</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="zone-approval-sticky-status" data-role="status"></div>';
+        this._approveBtn = this.container.querySelector('[data-action="approve"]');
+        this._editBtn = this.container.querySelector('[data-action="edit"]');
+        this._rejectBtn = this.container.querySelector('[data-action="reject"]');
+        this._editForm = this.container.querySelector('.zone-plan-edit-form');
+        this._editTextarea = this.container.querySelector('.zone-plan-edit-textarea');
+        this._editSubmit = this.container.querySelector('.zone-plan-edit-submit');
+        this._editCancel = this.container.querySelector('.zone-plan-edit-cancel');
+        this._statusEl = this.container.querySelector('[data-role="status"]');
+        this._approveBtn?.addEventListener('click', () => { this._decide('approve'); });
+        this._editBtn?.addEventListener('click', () => { this._openEditForm(); });
+        this._rejectBtn?.addEventListener('click', () => { this._decide('reject'); });
+        this._editSubmit?.addEventListener('click', () => { this._submitEdit(); });
+        this._editCancel?.addEventListener('click', () => { this._closeEditForm(); });
+      }
+      _openEditForm(){
+        this._editMode = true;
+        if (this._editForm) this._editForm.style.display = '';
+        if (this._editTextarea) {
+          this._editTextarea.value = JSON.stringify(this.payload.plan, null, 2);
+          try { this._editTextarea.focus(); } catch {}
+        }
+      }
+      _closeEditForm(){
+        this._editMode = false;
+        if (this._editForm) this._editForm.style.display = 'none';
+      }
+      _submitEdit(){
+        const raw = this._editTextarea ? this._editTextarea.value : '';
+        let editedPlan;
+        try { editedPlan = JSON.parse(raw); } catch {
+          if (this._statusEl) this._statusEl.textContent = 'Invalid JSON — fix and resubmit.';
+          return;
+        }
+        this._decide('edit', editedPlan);
+      }
+      _decide(action, editedPlan){
+        if (this._dismissed) return;
+        this._dismissed = true;
+        if (this._approveBtn) this._approveBtn.disabled = true;
+        if (this._editBtn) this._editBtn.disabled = true;
+        if (this._rejectBtn) this._rejectBtn.disabled = true;
+        if (this.callbacks.onDecide){
+          try { this.callbacks.onDecide(this.payload, action, editedPlan); } catch {}
+        }
+        this._teardown();
+      }
+      _teardown(){
+        const c = this.container;
+        if (c && c.id === 'zonePlanStickyContainer'){
+          c.dataset.state = 'hidden';
+          c.innerHTML = '';
+          try { delete c.dataset.runId; } catch {}
+        }
+      }
+      forceDismiss(){
+        if (this._dismissed) return;
+        this._dismissed = true;
+        this._teardown();
+      }
+    }
+
+    function handleZonePlanReviewEvent(planEvt, runId, logBlock){
+      const approvalId = String(planEvt.approvalId || '');
+      const plan = planEvt.plan;
+      if (!approvalId || !plan) return;
+      if (__zoneActivePlanReview) {
+        __zoneActivePlanReview.forceDismiss();
+        __zoneActivePlanReview = null;
+      }
+      const container = document.getElementById('zonePlanStickyContainer');
+      if (!container) return;
+      container.dataset.state = 'visible';
+      if (runId) container.dataset.runId = runId;
+      const payload = { approvalId, plan, runId };
+      __zoneActivePlanReview = new ZonePlanReviewPrompt(container, payload, {
+        onDecide: (p, action, editedPlan) => {
+          const lb = document.getElementById('logBlock-' + p.runId);
+          if (lb) {
+            appendLogLine(lb, { timestamp: nowTs(), message: 'Plan ' + action + 'd', status: action === 'reject' ? 'warning' : 'done' });
+          }
+          void (async () => {
+            try {
+              await apiFetch('/api/approve-plan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  approvalId: p.approvalId,
+                  action,
+                  runId: p.runId,
+                  ...(action === 'edit' && editedPlan ? { editedPlan } : {}),
+                }),
+              });
+            } catch {}
+          })();
+          __zoneActivePlanReview = null;
+        },
+      });
+    }
+
+    function dismissZonePlanReviewForRun(runId){
+      if (__zoneActivePlanReview){
+        if (!runId || (__zoneActivePlanReview.payload && __zoneActivePlanReview.payload.runId === runId)){
+          __zoneActivePlanReview.forceDismiss();
+          __zoneActivePlanReview = null;
+        }
+      }
+    }
+
     /**
      * ZoneDropdown — reusable custom <select> replacement (Tur 5a-polish).
      * Replaces native <select> in the footer with a Zone-themed dropdown.
@@ -8361,6 +8509,19 @@
         try { updateTodoStatusForRun(runId, progress.todoId, progress.todoStatus); } catch {}
         return;
       }
+      if (progress && progressType === 'plan_ready_for_review') {
+        try { handleZonePlanReviewEvent(progress, runId, logBlock); } catch (err) { try { console.warn('[zone-plan-review-error]', err); } catch {} }
+        return;
+      }
+      if (progress && progressType === 'plan_rejected') {
+        try { dismissZonePlanReviewForRun(runId); } catch {}
+        if (logBlock) appendLogLine(logBlock, { timestamp: nowTs(), message: 'Plan rejected — run cancelled.', status: 'warning' });
+        return;
+      }
+      if (progress && progressType === 'plan_edited') {
+        try { dismissZonePlanReviewForRun(runId); } catch {}
+        return;
+      }
       if (progress && progressType === 'compaction_status') {
         const rid = String(progress.runId || runId || '').trim();
         if (rid) {
@@ -8580,8 +8741,9 @@
       try { bgHideStickyPanel(runId); } catch {}
         setLogBlockDone(runId);
         setRunningUI(false);
-        // Tur P1-approval: cancelled run → drop any pending sticky approvals for it.
+        // Tur P1-approval: cancelled run → drop any pending sticky approvals and plan reviews for it.
         try { dismissAllZoneApprovalsForRun(runId); } catch {}
+        try { dismissZonePlanReviewForRun(runId); } catch {}
         // After cancellation, drain the OWNING thread's queue (per Phase 1b).
         dequeueAndRunNext(_cancelledThreadId);
         try {
