@@ -46,6 +46,7 @@ import type {
 import type { Mode } from "../types/mode.js";
 import { ContextCompactor } from "./compaction/ContextCompactor.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
+import { hashToolCall, createDetectorState, recordAndDetect } from "./loopDetector.js";
 
 // "plan" kept as accepted input for backward compat — normalizeAgentLoopMode maps it to "patch"
 type AgentLoopMode = Exclude<Mode, "auto"> | "investigation" | "plan";
@@ -149,7 +150,10 @@ export interface AgentLoopResult {
   /** Phase H.7: how the loop ended. Used by upstream flows (investigation /
    *  patch) to surface "Token budget reached" vs "Iteration budget reached"
    *  distinctly in the UI. Optional for backward-compat with older callers. */
-  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted";
+  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected";
+  /** Phase Q.2: populated when terminationReason === "loop_detected". The
+   *  offending tool name + observed count in the sliding-window detector. */
+  loopDetected?: { toolName: string; count: number };
   /** Per-loop LLM token usage. For subagent loops this is serialized into the
    *  Task tool result so the parent can enforce the combined Phase H.7 cap. */
   tokenUsage?: SubagentTokenUsage;
@@ -2062,6 +2066,7 @@ Example (small patch with verification — still call TodoWrite):
   let loopTokenUsage: SubagentTokenUsage = emptySubagentTokenUsage();
   let subagentTokenTotal = 0;
   let subagentCostTotal = 0;
+  const detectorState = createDetectorState();
   const tokenBudgetBaseTokens = cleanTokenNumber(input.tokenBudgetBaseTokens);
   // P.1: compaction trigger — fires at the safe iteration boundary after tool results
   // are processed. No-op in P.1; P.2 replaces the stub with real summarization.
@@ -2204,6 +2209,27 @@ Example (small patch with verification — still call TodoWrite):
       patchValidatedByAgent: false,
       verificationReason: "no_verification_attempted",
       terminationReason: "compaction_exhausted",
+      tokenUsage: currentTokenUsage(),
+      costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+    };
+  };
+
+  const synthesizeLoopDetectedExit = (
+    iterNumber: number,
+    toolName: string,
+    count: number
+  ): AgentLoopResult => {
+    const msg = `Task aborted: loop detected. The agent called \`${toolName}\` with the same arguments ${count} times in a short window. Consider rephrasing the task or restricting scope.`;
+    debugLog("[zone-loop-detected]", JSON.stringify({ iter: iterNumber, runId: input.runId, toolName, count }));
+    return {
+      success: false,
+      summary: msg,
+      toolCallLog,
+      filesModified: Array.from(filesModified),
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted",
+      terminationReason: "loop_detected",
+      loopDetected: { toolName, count },
       tokenUsage: currentTokenUsage(),
       costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
     };
@@ -2752,6 +2778,32 @@ Example (small patch with verification — still call TodoWrite):
           tool_call_id: callId,
           content: result.output,
         });
+
+        // Phase Q.2: runtime loop detection
+        const loopHash = hashToolCall(name, parsedArgs);
+        const loopResult = recordAndDetect(detectorState, loopHash);
+        if (loopResult.status === "warn") {
+          input.onStructuredEvent?.({
+            type: "loop_warning_emitted",
+            toolName: name,
+            count: loopResult.count,
+            title: `Loop warning: \`${name}\` repeated ${loopResult.count}×`,
+            status: "warning",
+          } as Parameters<NonNullable<typeof input.onStructuredEvent>>[0]);
+          responseInput.push({
+            role: "user" as const,
+            content: `Notice: you have called \`${name}\` with the same arguments ${loopResult.count} times in the last few iterations. This suggests a loop. Try a different approach — use a different tool, different scope, ask the user for clarification, or finish with a partial explanation.`,
+          });
+        } else if (loopResult.status === "terminate") {
+          input.onStructuredEvent?.({
+            type: "loop_detected_terminal",
+            toolName: name,
+            count: loopResult.count,
+            title: `Loop detected: \`${name}\` repeated ${loopResult.count}×`,
+            status: "error",
+          } as Parameters<NonNullable<typeof input.onStructuredEvent>>[0]);
+          return synthesizeLoopDetectedExit(iter + 1, name, loopResult.count);
+        }
       }
 
       // â"€â"€ Self-correction: failure detected â†’ route to coaching prompt â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
