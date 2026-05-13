@@ -97,6 +97,13 @@ import {
   resolveCommandApproval,
   setTrustAllForRun,
 } from "./commandApprovals.js";
+import {
+  requestPlanApproval,
+  resolvePlanApproval,
+  rejectPendingPlansForRun,
+} from "../llm/planApprovals.js";
+import { preparePlanContext } from "../core/preparePlanContext.js";
+import { generateExecutionPlan } from "../llm/executionPlan.js";
 import { decodeProgressStage } from "../core/progressStageCodec.js";
 import { validateLlmOutput } from "../core/validateLlmOutput.js";
 import lemonWebhookRouter from "../routes/lemonsqueezyWebhook.js";
@@ -1671,8 +1678,9 @@ app.post("/api/cancel", (req, res) => {
   }
   closeDeveloperPatchProgressSseForRun(runId);
   try {
-    // If a command approval is pending, treat cancel as rejection.
+    // If a command or plan approval is pending, treat cancel as rejection.
     rejectPendingApprovalsForRun(runId);
+    rejectPendingPlansForRun(runId);
     clearTrustedCommandsForRun(runId);
   } catch {
     // best-effort
@@ -1816,6 +1824,34 @@ app.post("/api/approve-command", (req, res) => {
     return;
   }
   const r = resolveCommandApproval({ approvalId, approved, runId, trust });
+  if (!r.ok) {
+    res.status(404).json({ ok: false, reason: r.message || "not_found" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/approve-plan", (req, res) => {
+  const approvalId = typeof req.body?.approvalId === "string" ? req.body.approvalId.trim() : "";
+  const runId = typeof req.body?.runId === "string" ? req.body.runId.trim() : "";
+  const action = typeof req.body?.action === "string" ? req.body.action.trim() : "";
+  const editedPlan = req.body?.editedPlan;
+
+  if (!approvalId || !runId) {
+    res.status(400).json({ ok: false, reason: "missing_approval_id_or_run_id" });
+    return;
+  }
+  if (!["approve", "edit", "reject"].includes(action)) {
+    res.status(400).json({ ok: false, reason: "invalid_action" });
+    return;
+  }
+
+  const r = resolvePlanApproval({
+    approvalId,
+    action: action as "approve" | "edit" | "reject",
+    runId,
+    editedPlan,
+  });
   if (!r.ok) {
     res.status(404).json({ ok: false, reason: r.message || "not_found" });
     return;
@@ -2593,7 +2629,7 @@ function shouldForceExecuteTask(task: string): boolean {
 }
 
 function intentFromExplicitMode(mode: Exclude<Mode, "auto">): "execute" | "chat" | "investigation" {
-  if (mode === "patch") return "execute";
+  if (mode === "patch" || mode === "plan") return "execute";
   if (mode === "investigate") return "investigation";
   return "chat";
 }
@@ -3259,6 +3295,59 @@ app.post("/api/patch", async (req, res) => {
       );
     }
   }
+  // Plan mode: pre-generate plan and wait for user review before starting agent loop.
+  let preGeneratedPlan: Awaited<ReturnType<typeof generateExecutionPlan>> | undefined;
+  if (requestedMode === "plan" && runIdStr) {
+    try {
+      const planContext = await preparePlanContext({
+        task: String(task),
+        repoPath: String(repoPath),
+        repoSummaryOverride: (hostedContext as { repoSummary?: string } | undefined)?.repoSummary,
+        userApiKey: userApiKey || undefined,
+      });
+      const plan = await generateExecutionPlan({
+        task: String(task),
+        repoSummary: planContext.projectSummary,
+        relevantFiles: planContext.relevantFilePaths,
+        userApiKey: userApiKey || undefined,
+        provider: byokProvider,
+      });
+      const { result: approvalResult } = await requestPlanApproval({
+        runId: runIdStr,
+        plan,
+        emit: (evt) =>
+          emitProgress(runIdStr, {
+            stage: "plan_review",
+            progress: { ...evt, ts: Date.now() } as any,
+          }),
+        abortSignal: patchAbort?.signal,
+      });
+      if (approvalResult.action === "reject") {
+        emitProgress(runIdStr, {
+          stage: "plan_rejected",
+          progress: {
+            runId: runIdStr,
+            ts: Date.now(),
+            type: "plan_rejected",
+            title: "Plan rejected by user",
+            status: "warning",
+          } as any,
+        });
+        if (runIdStr) registerRunComplete(runIdStr, "cancelled");
+        perf.finish("plan rejected");
+        res.json({ ok: false, reason: "plan_rejected" });
+        return;
+      }
+      preGeneratedPlan = approvalResult.plan;
+    } catch (err) {
+      console.warn(
+        "[zone-plan] plan-approval gate failed:",
+        err instanceof Error ? err.message : String(err)
+      );
+      // Fall through to normal patch flow without preGeneratedPlan.
+    }
+  }
+
   try {
     logger.info(
       "[patch-handler] reached planner, ms since entry=%d",
@@ -3278,7 +3367,8 @@ app.post("/api/patch", async (req, res) => {
       abortSignal: patchAbort?.signal,
       userApiKey: userApiKey || undefined,
       provider: byokProvider,
-      mode: requestedMode === "patch" ? "patch" : undefined,
+      mode: requestedMode === "patch" || requestedMode === "plan" ? "patch" : undefined,
+      preGeneratedPlan,
       forceTier,
     });
     perf.mark("core patch flow complete");

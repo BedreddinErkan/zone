@@ -136,7 +136,10 @@ export type ZoneStructuredProgressEvent = {
     | "narration"
     | "token_budget_status"
     | "task_classified"
-    | "tier_constraints_applied";
+    | "tier_constraints_applied"
+    | "plan_ready_for_review"
+    | "plan_rejected"
+    | "plan_edited";
   title: string;
   detail?: string;
   filePath?: string;
@@ -164,6 +167,8 @@ export type ZoneStructuredProgressEvent = {
   total_output?: number;
   iter_count?: number;
   approvalId?: string;
+  /** Plan-review events: the execution plan being reviewed or the approved/edited version. */
+  plan?: { objective: string; steps: Array<{ title: string; description: string; filesLikely: string[] }>; riskHints: string[]; scopeSummary: string };
   todos?: Array<{
     id: string;
     text: string;

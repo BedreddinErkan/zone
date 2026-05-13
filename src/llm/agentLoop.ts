@@ -422,6 +422,7 @@ function normalizeAgentLoopMode(mode: AgentLoopInput["mode"]): Exclude<Mode, "au
     return mode;
   }
   if (mode === "investigation") return "investigate";
+  if (mode === "plan") return "patch";
   return "patch";
 }
 
@@ -431,6 +432,8 @@ const MODE_SYSTEM_PROMPT_PREFIX: Record<Exclude<Mode, "auto">, string> = {
   investigate:
     "MODE: investigate. Read code, analyze, answer thoroughly. Do not modify files. Use search tools liberally before answering.",
   patch:
+    "MODE: patch. The user wants a code change. Plan the edits, apply them via the patch tool, then verify with build and visual screenshot when applicable.",
+  plan:
     "MODE: patch. The user wants a code change. Plan the edits, apply them via the patch tool, then verify with build and visual screenshot when applicable.",
 };
 

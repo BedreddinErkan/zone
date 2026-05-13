@@ -1,10 +1,11 @@
-export type Mode = "auto" | "chat" | "investigate" | "patch";
+export type Mode = "auto" | "chat" | "investigate" | "patch" | "plan";
 
 export const MODES: readonly Mode[] = [
   "auto",
   "chat",
   "investigate",
   "patch",
+  "plan",
 ];
 
 export function parseMode(value: unknown): Mode | null {
