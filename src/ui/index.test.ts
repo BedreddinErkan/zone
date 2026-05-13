@@ -2740,3 +2740,108 @@ describe("UI progress feedback", () => {
     expect(elements.get("progressText").textContent).toBe("⏳ Ready");
   });
 });
+
+describe("UI plan-review delegatable badge (Q.3)", () => {
+  function makePlanEvt(steps: Array<{
+    title: string;
+    description: string;
+    filesLikely: string[];
+    subagentEligible?: boolean;
+    subagentType?: "explore" | "worker";
+  }>) {
+    return {
+      approvalId: "approval-q3-1",
+      runId: "run-q3-1",
+      plan: {
+        objective: "Demo plan",
+        steps,
+        riskHints: [],
+        scopeSummary: "Demo",
+      },
+      regenAttempt: 0,
+      maxRegens: 3,
+    };
+  }
+
+  it("renders [delegatable] badge on steps with subagentEligible: true", () => {
+    const { context, elements } = buildUiHarness();
+    const planEvt = makePlanEvt([
+      {
+        title: "Rename helper across handlers",
+        description: "Apply rename to 8 files.",
+        filesLikely: ["src/api/handlers/a.ts"],
+        subagentEligible: true,
+        subagentType: "worker",
+      },
+    ]);
+    (context as unknown as { handleZonePlanReviewEvent: Function }).handleZonePlanReviewEvent(
+      planEvt,
+      "run-q3-1",
+      elements.get("logBlock-run-q3-1")
+    );
+    const container = elements.get("zonePlanStickyContainer");
+    expect(container.innerHTML).toContain("zone-plan-step-delegatable");
+    expect(container.innerHTML).toContain("[delegatable]");
+    // Tooltip surfaced via title attribute
+    expect(container.innerHTML).toContain("Task subagent");
+  });
+
+  it("does NOT render [delegatable] badge when subagentEligible is false or undefined", () => {
+    const { context, elements } = buildUiHarness();
+    const planEvt = makePlanEvt([
+      {
+        title: "Trivial single-file edit",
+        description: "Single line fix.",
+        filesLikely: ["src/foo.ts"],
+        // subagentEligible omitted
+      },
+      {
+        title: "Explicit non-delegatable",
+        description: "Another step.",
+        filesLikely: ["src/bar.ts"],
+        subagentEligible: false,
+      },
+    ]);
+    (context as unknown as { handleZonePlanReviewEvent: Function }).handleZonePlanReviewEvent(
+      planEvt,
+      "run-q3-1",
+      elements.get("logBlock-run-q3-1")
+    );
+    const container = elements.get("zonePlanStickyContainer");
+    expect(container.innerHTML).not.toContain("[delegatable]");
+    expect(container.innerHTML).not.toContain("zone-plan-step-delegatable");
+  });
+
+  it("renders the badge only on eligible step in a mixed plan", () => {
+    const { context, elements } = buildUiHarness();
+    const planEvt = makePlanEvt([
+      {
+        title: "Investigate callers",
+        description: "Read-only.",
+        filesLikely: [],
+        subagentEligible: true,
+        subagentType: "explore",
+      },
+      {
+        title: "Apply final edit",
+        description: "Tiny single-file fix.",
+        filesLikely: ["src/x.ts"],
+      },
+    ]);
+    (context as unknown as { handleZonePlanReviewEvent: Function }).handleZonePlanReviewEvent(
+      planEvt,
+      "run-q3-1",
+      elements.get("logBlock-run-q3-1")
+    );
+    const container = elements.get("zonePlanStickyContainer");
+    const html = container.innerHTML;
+    // Exactly one badge for the eligible step.
+    const matches = html.match(/\[delegatable\]/g);
+    expect(matches?.length).toBe(1);
+    // The eligible step's title precedes the badge in the HTML.
+    const badgeIdx = html.indexOf("[delegatable]");
+    const eligibleTitleIdx = html.indexOf("Investigate callers");
+    expect(eligibleTitleIdx).toBeGreaterThan(-1);
+    expect(badgeIdx).toBeGreaterThan(eligibleTitleIdx);
+  });
+});
