@@ -3075,6 +3075,8 @@ app.post("/api/patch", async (req, res) => {
         }),
       });
     }
+    // TODO: extend plan-first to investigate mode after Phase D investigation flow consolidates plan generation
+    // runInvestigationFlow has its own handler and no preGeneratedPlan input; integration is non-trivial.
     try {
       const result = await runInvestigationFlow({
         task: String(task),
