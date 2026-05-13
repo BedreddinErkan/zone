@@ -99,6 +99,36 @@ function truncateText(
   return { text: text.slice(0, maxChars) + "... [truncated]", truncated: true };
 }
 
+// Phase Q.4: head/tail line truncation for run_command output.
+// Agent context is capped at HEAD_LINES + TAIL_LINES so noisy test output
+// (hundreds of failures) doesn't consume 50-150K tokens. Full output is
+// preserved in the debugLog for post-run analysis.
+export const COMMAND_OUTPUT_HEAD_LINES = 100;
+export const COMMAND_OUTPUT_TAIL_LINES = 50;
+
+export function truncateCommandOutput(output: string): {
+  truncated: string;
+  wasTruncated: boolean;
+  originalLineCount: number;
+} {
+  const lines = output.split("\n");
+  const total = lines.length;
+  if (total <= COMMAND_OUTPUT_HEAD_LINES + COMMAND_OUTPUT_TAIL_LINES) {
+    return { truncated: output, wasTruncated: false, originalLineCount: total };
+  }
+  const head = lines.slice(0, COMMAND_OUTPUT_HEAD_LINES);
+  const tail = lines.slice(-COMMAND_OUTPUT_TAIL_LINES);
+  const elidedCount = total - COMMAND_OUTPUT_HEAD_LINES - COMMAND_OUTPUT_TAIL_LINES;
+  const truncated = [
+    ...head,
+    "",
+    `[... ${elidedCount} lines truncated for context budget ...]`,
+    "",
+    ...tail,
+  ].join("\n");
+  return { truncated, wasTruncated: true, originalLineCount: total };
+}
+
 function safeRelPath(rel: string): string {
   return String(rel || "").replace(/^[\\/]+/, "");
 }
@@ -689,6 +719,7 @@ export async function executeTool(
 
       let stdout = "";
       let stderr = "";
+      let commandSuccess = true;
       try {
         const result = await withStagingTempFlush(input?.stagingFiles, async () => {
           return await execAsync(command, execOptions);
@@ -704,11 +735,27 @@ export async function executeTool(
         console.log(
           `[zone-verify] cmd="${command.slice(0, 80)}" cwd="${cwd}" exitCode=${exitCode} stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
         );
-        throw err;
+        // Capture stdout/stderr from the exec error so the agent sees actual
+        // command output rather than just the Node error message.
+        stdout = String((err as { stdout?: unknown }).stdout ?? "");
+        stderr = String((err as { stderr?: unknown }).stderr ?? "");
+        commandSuccess = false;
       }
-      const combined = [stdout, stderr].filter(Boolean).join("\n");
-      const t = truncateText(combined || "(no output)", 4000);
-      return { success: true, output: t.text, truncated: t.truncated };
+
+      const combined = [stdout, stderr].filter(Boolean).join("\n") || "(no output)";
+
+      // Phase Q.4: line-based head/tail truncation. Full output preserved in
+      // debugLog so post-run analysis can retrieve it.
+      const ct = truncateCommandOutput(combined);
+      if (ct.wasTruncated) {
+        debugLog("[zone-runcmd-truncated]", JSON.stringify({
+          command: command.slice(0, 100),
+          originalLineCount: ct.originalLineCount,
+          headLines: COMMAND_OUTPUT_HEAD_LINES,
+          tailLines: COMMAND_OUTPUT_TAIL_LINES,
+        }));
+      }
+      return { success: commandSuccess, output: ct.truncated, truncated: ct.wasTruncated };
     }
 
     if (toolName === "run_command_background") {
