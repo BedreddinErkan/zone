@@ -618,6 +618,19 @@ export async function executeTool(
     tokenBudgetBaseTokens?: number;
     /** L.2: tier-based subagent call cap override. Defaults to MAX_SUBAGENT_CALLS_PER_PARENT_RUN. */
     maxSubagentCallsOverride?: number;
+    /** Phase V: set of filePaths successfully read_file'd this run. When present,
+     *  apply_patch rejects if the target is not in the set. */
+    filesReadThisRun?: ReadonlySet<string>;
+    /** Phase V: mutable counters accumulated by self-validation hooks. Passed
+     *  by reference so agentLoop can emit a summary at run end. */
+    selfValidationCounts?: {
+      readBeforePatchRejects: number;
+      smartQuoteFixes: number;
+      inlineTsRejects: number;
+      inlineTsApproves: number;
+      inlineTsSkips: number;
+      totalLatencyMs: number;
+    };
   }
 ): Promise<ToolResult> {
   const args = (toolArgs ?? {}) as Record<string, unknown>;
@@ -1217,6 +1230,32 @@ export async function executeTool(
       const intent = intentRaw === "delete" || intentRaw === "modify" ? intentRaw : "add";
       const allowShrink = intent === "delete" || intent === "modify";
       const abs = path.join(repoPath, filePath);
+
+      // Phase V Commit 1: read-before-patch enforcement
+      if (input?.filesReadThisRun !== undefined) {
+        if (!input.filesReadThisRun.has(filePath)) {
+          if (input.selfValidationCounts) input.selfValidationCounts.readBeforePatchRejects += 1;
+          debugLog("[zone-self-validation]", JSON.stringify({
+            rule: "read_before_patch",
+            decision: "rejected",
+            filePath,
+            runId: input.runId ?? null,
+          }));
+          return {
+            success: false,
+            output:
+              `READ_REQUIRED: You must call read_file on ${filePath} before patching. ` +
+              `The file may have changed or you may be assuming the wrong content.`,
+            error: "apply_patch_no_read_first",
+          };
+        }
+        debugLog("[zone-self-validation]", JSON.stringify({
+          rule: "read_before_patch",
+          decision: "approved",
+          filePath,
+          runId: input.runId ?? null,
+        }));
+      }
 
       // Tur P2-scope: hard-block writes that fall outside the active plan's
       // filesLikely union. Independent of the per-file escalation gate below.
