@@ -31,7 +31,7 @@
     :root{
       color-scheme: dark;
       /* Darker backgrounds, higher contrast text (better outdoor readability). */
-      --bg:#050505;
+      --bg:#1a1a2e;
       --surface:#0a0a0f;
       --surface2:#111118;
       --border:#2e2e34;
@@ -967,6 +967,8 @@
     .branchChip:hover{border-color:var(--border2);background:var(--surface-alpha-2)}
     .branchChip.disabled{opacity:0.5;cursor:not-allowed;pointer-events:none}
     .branchChip .branchIcon{color:var(--text-3);font-size:var(--font-size-md)}
+    .preset-badge{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);background:var(--surface-alpha-1);padding:var(--space-sm) var(--space-lg);border-radius:var(--radius-pill);color:var(--text-2);font-size:var(--font-size-sm);cursor:pointer;transition:border-color var(--transition-base),background var(--transition-base);white-space:nowrap}
+    .preset-badge:hover{border-color:var(--violet,#7a5af8);color:var(--violet,#7a5af8)}
     .branchDropdownItem{
       display:flex;align-items:center;gap:var(--space-md);
       padding:var(--space-sm) var(--space-lg);cursor:pointer;
@@ -1239,6 +1241,7 @@
             <span style="color:var(--text-4)">▾</span>
           </div>
           <div class="dropdown" id="branchDropdown" style="position:fixed;z-index:200"></div>
+          <button id="modelPresetBadge" class="preset-badge" title="Model preset — click to open Settings" style="display:none" aria-label="Model preset">⚖ Default</button>
           <div class="footer-meta" id="footerPicker" title="Active provider and agent model">
             <div class="zone-dropdown" data-dropdown="provider">
               <button class="zone-dropdown-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Provider">
@@ -1274,6 +1277,7 @@
       <div class="modal-tabs">
         <button class="mtab active" data-stab="usage">Usage</button>
         <button class="mtab" data-stab="keys">API Keys</button>
+        <button class="mtab" data-stab="model">Model</button>
         <button class="mtab" data-stab="visual">Visual</button>
         <button class="mtab" data-stab="tier">Tier Limits</button>
         <button class="mtab" data-stab="variance">Variance</button>
@@ -7114,12 +7118,62 @@
       } catch {}
     }
 
+    // ── Model preset helpers ──────────────────────────────────────────────────
+    const LS_MODEL_PRESET = 'zone.modelPreset';
+    const PRESET_MODELS = {
+      anthropic: {
+        zone_default: {},
+        speed: { high: 'claude-haiku-4-5', standard: 'claude-haiku-4-5' },
+        quality: { high: 'claude-sonnet-4-6', standard: 'claude-sonnet-4-6' },
+      },
+      openai: {
+        zone_default: {},
+        speed: { high: 'gpt-5.4-mini', standard: 'gpt-5.4-mini' },
+        quality: { high: 'gpt-5.4', standard: 'gpt-5.4' },
+      },
+    };
+    function getActivePreset(){
+      try {
+        const raw = localStorage.getItem(LS_MODEL_PRESET) || '{}';
+        const parsed = JSON.parse(raw);
+        return (parsed && typeof parsed.preset === 'string') ? parsed.preset : 'zone_default';
+      } catch { return 'zone_default'; }
+    }
+    function setActivePreset(preset){
+      try {
+        const raw = localStorage.getItem(LS_MODEL_PRESET) || '{}';
+        const current = JSON.parse(raw);
+        localStorage.setItem(LS_MODEL_PRESET, JSON.stringify({ ...current, preset }));
+      } catch {}
+      updatePresetBadge();
+    }
+    function getPresetTierModels(provider, preset){
+      const table = PRESET_MODELS[provider] || PRESET_MODELS.openai;
+      if (preset === 'custom') return getActiveModels()[provider] || {};
+      return table[preset] || {};
+    }
+
+    const PRESET_BADGE_LABELS = {
+      zone_default: '⚖ Default',
+      speed: '⚡ Speed',
+      quality: '★ Quality',
+      custom: '⚙ Custom',
+    };
+    function updatePresetBadge(){
+      const badge = document.getElementById('modelPresetBadge');
+      if (!badge) return;
+      const preset = getActivePreset();
+      badge.textContent = PRESET_BADGE_LABELS[preset] || '⚖ Default';
+      badge.style.display = 'inline-flex';
+    }
+
     function buildAuthHeaders(){
       const provider = getActiveProvider();
       const key = getActiveApiKey();
       const headers = { 'X-Zone-Provider': provider };
       if (key) headers['X-Zone-LLM-Key'] = key;
-      const models = getActiveModelsForActiveProvider();
+      const preset = getActivePreset();
+      const models = getPresetTierModels(provider, preset);
       if (models.high) headers['X-Zone-LLM-Model-High'] = models.high;
       if (models.standard) headers['X-Zone-LLM-Model-Standard'] = models.standard;
       return headers;
@@ -7144,6 +7198,14 @@
     }
     migrateLegacyApiKey();
     initFooterPickers();
+    // Wire preset badge click → open Settings Model tab
+    (function initPresetBadge(){
+      updatePresetBadge();
+      const badge = document.getElementById('modelPresetBadge');
+      if (badge) {
+        badge.addEventListener('click', () => openSettings('model'));
+      }
+    })();
 
     // ---- Repo management ----
     function ensureRepos(){
@@ -10379,6 +10441,126 @@
       if (tab === 'tier') renderTierSettings();
       if (tab === 'variance') renderVarianceSettings();
       if (tab === 'general') renderGeneralSettings();
+      if (tab === 'model') renderModelSettings();
+    }
+
+    function renderModelSettings(){
+      const provider = getActiveProvider();
+      const currentPreset = getActivePreset();
+      const catalog = ZONE_MODEL_CATALOG[provider] || [];
+      const modelOptions = catalog.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
+      const customModels = getActiveModels()[provider] || {};
+      const PRESETS = [
+        {
+          id: 'zone_default',
+          icon: '⚖',
+          label: 'Zone Default',
+          desc: 'Hybrid: Sonnet plans and agents, Haiku executes workers',
+          cost: '~$0.10–0.12 per typical run',
+        },
+        {
+          id: 'speed',
+          icon: '⚡',
+          label: 'Speed',
+          desc: 'All Haiku 4.5 — fastest and cheapest across all roles',
+          cost: '~$0.05–0.08 per typical run',
+        },
+        {
+          id: 'quality',
+          icon: '★',
+          label: 'Quality',
+          desc: 'All Sonnet 4.6 — deepest reasoning, worker gets Sonnet too',
+          cost: '~$0.15–0.22 per typical run',
+        },
+        {
+          id: 'custom',
+          icon: '⚙',
+          label: 'Custom',
+          desc: 'Choose models manually using the footer dropdowns',
+          cost: 'Cost varies by selection',
+        },
+      ];
+      const radios = PRESETS.map(p => `
+        <label style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:6px;border:1px solid ${currentPreset === p.id ? 'var(--violet,#7a5af8)' : 'var(--border,#333)'};cursor:pointer;margin-bottom:8px;background:${currentPreset === p.id ? 'rgba(122,90,248,.07)' : 'transparent'}" data-preset-label="${p.id}">
+          <input type="radio" name="zoneModelPreset" value="${p.id}" ${currentPreset === p.id ? 'checked' : ''} style="margin-top:3px;accent-color:var(--violet,#7a5af8)">
+          <div>
+            <div style="font-size:var(--font-size-sm,12px);font-weight:600;color:var(--color-text,#ddd)">${p.icon} ${p.label}${p.id === 'zone_default' ? ' <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:var(--violet,#7a5af8);color:#fff;vertical-align:middle">recommended</span>' : ''}</div>
+            <div style="font-size:11px;color:var(--text-3,#888);margin-top:2px">${p.desc}</div>
+            <div style="font-size:11px;color:var(--text-4,#666);margin-top:1px">${p.cost}</div>
+          </div>
+        </label>`).join('');
+      els.settingsBody.innerHTML = `
+        <div class="apikey-section">
+          <div class="apikey-section-title">Model Preset</div>
+          <div class="apikey-disclaimer" style="margin-bottom:14px">
+            Controls which model each agent role uses. Zone Default gives the best cost-quality balance.
+            Switch to Speed for budget runs or Quality for the hardest tasks.
+          </div>
+          <div id="modelPresetRadios">${radios}</div>
+          <div id="modelCustomSection" style="display:${currentPreset === 'custom' ? 'block' : 'none'};margin-top:8px;padding:10px 12px;border:1px solid var(--border,#333);border-radius:6px">
+            <div class="apikey-field-label" style="margin-bottom:8px">Custom model selection</div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap">
+              <label style="display:flex;flex-direction:column;gap:4px;font-size:var(--font-size-sm,12px)">
+                Agent / Planner (high tier)
+                <select id="customModelHigh" style="padding:4px 8px;background:var(--bg-input,#1e1e1e);border:1px solid var(--border,#444);border-radius:4px;color:inherit;font-size:var(--font-size-sm,12px)">
+                  <option value="">(server default)</option>${modelOptions}
+                </select>
+              </label>
+              <label style="display:flex;flex-direction:column;gap:4px;font-size:var(--font-size-sm,12px)">
+                Worker (standard tier)
+                <select id="customModelStandard" style="padding:4px 8px;background:var(--bg-input,#1e1e1e);border:1px solid var(--border,#444);border-radius:4px;color:inherit;font-size:var(--font-size-sm,12px)">
+                  <option value="">(server default)</option>${modelOptions}
+                </select>
+              </label>
+            </div>
+          </div>
+          <div style="margin-top:12px;font-size:11px;color:var(--text-4,#666)">
+            Current effective models for <strong>${provider}</strong>:
+            <span id="effectiveModelDisplay"></span>
+          </div>
+        </div>`;
+      // Populate custom selects
+      const highSel = document.getElementById('customModelHigh');
+      const stdSel = document.getElementById('customModelStandard');
+      if (highSel) highSel.value = customModels.high || '';
+      if (stdSel) stdSel.value = customModels.standard || '';
+      // Update effective model display
+      function refreshEffective(){
+        const el = document.getElementById('effectiveModelDisplay');
+        if (!el) return;
+        const p = getActivePreset();
+        const m = getPresetTierModels(provider, p);
+        el.textContent = ' Agent=' + (m.high || 'server default') + ', Worker=' + (m.standard || 'server default');
+      }
+      refreshEffective();
+      // Radio change handler
+      document.querySelectorAll('input[name="zoneModelPreset"]').forEach(radio => {
+        radio.addEventListener('change', () => {
+          setActivePreset(radio.value);
+          const customSection = document.getElementById('modelCustomSection');
+          if (customSection) customSection.style.display = radio.value === 'custom' ? 'block' : 'none';
+          // Restyle labels
+          document.querySelectorAll('[data-preset-label]').forEach(lbl => {
+            const active = lbl.dataset.presetLabel === radio.value;
+            lbl.style.borderColor = active ? 'var(--violet,#7a5af8)' : 'var(--border,#333)';
+            lbl.style.background = active ? 'rgba(122,90,248,.07)' : 'transparent';
+          });
+          refreshEffective();
+        });
+      });
+      // Custom model selects
+      if (highSel) {
+        highSel.addEventListener('change', () => {
+          setActiveModel(provider, 'high', highSel.value);
+          refreshEffective();
+        });
+      }
+      if (stdSel) {
+        stdSel.addEventListener('change', () => {
+          setActiveModel(provider, 'standard', stdSel.value);
+          refreshEffective();
+        });
+      }
     }
 
     function renderGeneralSettings(){
