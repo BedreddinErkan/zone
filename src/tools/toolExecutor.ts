@@ -2535,13 +2535,18 @@ export async function executeTool(
         }
       }
 
+      const MAX_FIND_REFERENCES_RESULTS = 50;
+      const truncated = consumers.length > MAX_FIND_REFERENCES_RESULTS;
+      const capped = consumers.slice(0, MAX_FIND_REFERENCES_RESULTS);
+
       debugLog("[zone-tool-find-references]", JSON.stringify({
         sourceFile: sourceKey,
         symbolName,
         consumerCount: consumers.length,
+        capped: truncated,
       }));
 
-      if (consumers.length === 0) {
+      if (capped.length === 0) {
         return {
           success: true,
           output: `No files import "${symbolName}" from ${sourceFile}.`,
@@ -2549,9 +2554,9 @@ export async function executeTool(
       }
 
       const lines = [
-        `Found ${consumers.length} file(s) importing "${symbolName}" from ${sourceFile}:`,
+        `Found ${consumers.length} file(s) importing "${symbolName}" from ${sourceFile}${truncated ? ` (showing first ${MAX_FIND_REFERENCES_RESULTS})` : ""}:`,
         "",
-        ...consumers.map((c) =>
+        ...capped.map((c) =>
           c.alias
             ? `  ${c.file}  (imported as: ${c.alias})`
             : `  ${c.file}`
