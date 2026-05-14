@@ -27,6 +27,7 @@ import { resolveTierLimits } from "./tierLimits.js";
 import { extractUsage } from "./recordingClient.js";
 import {
   buildIterCostUpdate,
+  cacheHitRatio,
   emptyIterCostAccumulator,
   type IterCostAccumulator,
   type IterCostUpdatePayload,
@@ -2137,6 +2138,7 @@ Example:
       finalTextLength: finalSummary.length,
     }));
     emitRunBreakdownSummary();
+    emitCacheSummary();
     return {
       success: false,
       summary: finalSummary,
@@ -2164,6 +2166,7 @@ Example:
       compactionCount: compactor.getCompactionCount(),
     }));
     emitRunBreakdownSummary();
+    emitCacheSummary();
     return {
       success: false,
       summary: msg,
@@ -2185,6 +2188,7 @@ Example:
     const msg = `Task aborted: loop detected. The agent called \`${toolName}\` with the same arguments ${count} times in a short window. Consider rephrasing the task or restricting scope.`;
     debugLog("[zone-loop-detected]", JSON.stringify({ iter: iterNumber, runId: input.runId, toolName, count }));
     emitRunBreakdownSummary();
+    emitCacheSummary();
     return {
       success: false,
       summary: msg,
@@ -2204,6 +2208,22 @@ Example:
     if (breakdownEvents.length > 0) {
       emitBreakdownSummary({ runId: input.runId ?? "", events: breakdownEvents });
     }
+  };
+
+  // U.1: emit per-run cache summary at every exit path.
+  const emitCacheSummary = (): void => {
+    if (iterCostAccumulator.cache_read === 0 && iterCostAccumulator.cache_write === 0) return;
+    log("[zone-cache-summary]", JSON.stringify({
+      event: "cache_run_summary",
+      runId: input.runId ?? null,
+      totalIters: iterCostAccumulator.iter_count,
+      totalWrite: iterCostAccumulator.cache_write,
+      totalRead: iterCostAccumulator.cache_read,
+      totalInputUncached: iterCostAccumulator.input_uncached,
+      totalOutput: iterCostAccumulator.output,
+      cacheHitRatio: Number(cacheHitRatio(iterCostAccumulator).toFixed(3)),
+      totalCostUsd: iterCostAccumulator.total_cost,
+    }));
   };
 
   const throwIfAborted = (stage: string): void => {
@@ -2313,24 +2333,22 @@ Example:
     } catch (err) {
       debugLog("[zone-iter-cost-update-failed]", err);
     }
-    // Persistence happens in RecordingLLMClient — this block is debug-only.
-    try {
-      const u = (response as { usage?: Record<string, unknown> }).usage;
-      const promptTokenDetails =
-        u?.prompt_tokens_details && typeof u.prompt_tokens_details === "object"
-          ? (u.prompt_tokens_details as Record<string, unknown>)
-          : null;
-      const write = Number(u?.cache_creation_input_tokens ?? 0) || 0;
-      const read = Number(promptTokenDetails?.cached_tokens ?? u?.cache_read_input_tokens ?? 0) || 0;
-      const input = Number(u?.prompt_tokens ?? 0) || 0;
-      const output = Number(u?.completion_tokens ?? u?.output_tokens ?? 0) || 0;
-      if (write > 0 || read > 0) {
-        const ratio = read + write > 0 ? (read / (read + write + input)).toFixed(2) : "0.00";
-        debugLog(
-          `[zone-cache] iter=${iter + 1} write=${write} read=${read} input_uncached=${input} output=${output} hit_ratio=${ratio}`
-        );
-      }
-    } catch {}
+    // U.1: per-call cache JSONL — always-on when there is cache activity.
+    if (
+      lastIterCostPayload !== null &&
+      (lastIterCostPayload.cache_write > 0 || lastIterCostPayload.cache_read > 0)
+    ) {
+      log("[zone-cache-usage]", JSON.stringify({
+        event: "cache_call_usage",
+        runId: input.runId ?? null,
+        iter: iter + 1,
+        write: lastIterCostPayload.cache_write,
+        read: lastIterCostPayload.cache_read,
+        input_uncached: lastIterCostPayload.input_uncached,
+        output: lastIterCostPayload.output,
+        cacheHitRatio: Number(lastIterCostPayload.cacheHitThisIter.toFixed(3)),
+      }));
+    }
 
     // Phase H.7: per-run token budget. Sums all token categories tracked by
     // the iter-cost meter (input_uncached + cache_read + cache_write +
@@ -3033,6 +3051,8 @@ Example:
       if (extracted.ok && extracted.text.trim()) {
       const finalText = extracted.text.trim();
       if (isReadOnlyMode) {
+        emitRunBreakdownSummary();
+        emitCacheSummary();
         return {
           success: true,
           summary: finalText,
@@ -3134,6 +3154,7 @@ Example:
         stagedAbsPaths: Array.from(stagingFiles.keys()),
       }));
       emitRunBreakdownSummary();
+      emitCacheSummary();
       log("[zone-agent-final-assessment]", JSON.stringify({
         triggeredBy: "natural_completion",
         verificationReason,
@@ -3247,6 +3268,8 @@ Example:
     } catch {
       // Keep the fallback summary.
     }
+    emitRunBreakdownSummary();
+    emitCacheSummary();
     return {
       success: false,
       summary: finalSummary,
@@ -3403,6 +3426,7 @@ Example:
     stagedFiles: Array.from(stagingFiles.keys()).map((abs) => path.basename(abs)),
   }));
   emitRunBreakdownSummary();
+  emitCacheSummary();
   log("[zone-agent-final-assessment]", JSON.stringify({
     triggeredBy: "max_iterations",
     finalVerificationReason,
