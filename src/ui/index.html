@@ -633,8 +633,16 @@
     .stream-diff-line{display:block;font-family:var(--font-family-mono);white-space:pre;padding:0 8px;line-height:1.5}
     .stream-diff-removed{color:#fca5a5;background:rgba(239,68,68,0.08)}
     .stream-diff-added{color:#86efac;background:rgba(34,197,94,0.08)}
-    .tool-stream-block.ts-collapsed .livecode-body{max-height:0;overflow:hidden}
-    .ts-chevron{background:none;border:none;cursor:pointer;color:var(--text-3);font-size:0.7rem;padding:0 4px;line-height:1;margin-left:auto}
+    /* F1.2: collapsed state — header-only 36px row, no body. Animated
+       max-height transition keeps expand/collapse smooth instead of snapping. */
+    .tool-stream-block .livecode-body{transition:max-height 150ms ease}
+    .tool-stream-block.ts-collapsed{min-height:36px;max-height:36px;overflow:hidden}
+    .tool-stream-block.ts-collapsed .livecode-body{max-height:0;padding:0;overflow:hidden}
+    .tool-stream-block .livecode-h{min-height:36px;display:flex;align-items:center;gap:var(--space-xs)}
+    /* F1.2: active streaming block gets a thin violet left border to indicate
+       "agent is writing here right now" — gone once settled/failed/collapsed. */
+    .tool-stream-block:not(.ts-settled):not(.ts-failed):not(.ts-collapsed){border-left:3px solid var(--violet)}
+    .ts-chevron{background:none;border:none;cursor:pointer;color:var(--text-3);font-size:0.7rem;padding:0 4px;line-height:1;margin-left:auto;transition:transform 120ms ease}
     .ts-chevron:hover{color:var(--text-1)}
     /* When streaming owns the block, suppress any dummy animations/lines. */
     .livecode.streaming .livecode-h .label{animation:none;opacity:1}

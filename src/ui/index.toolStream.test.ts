@@ -617,6 +617,26 @@ describe("Phase F1.2 — fixed-height container with internal scroll", () => {
     expect(body.scrollTop).toBe(100);
   });
 
+  it("collapsed block CSS pins height to 36px and hides the body", () => {
+    const css = readFileSync(path.resolve("src/ui/index.html"), "utf8");
+    // 36px header row, body collapsed to 0.
+    expect(css).toMatch(/\.tool-stream-block\.ts-collapsed\{[^}]*max-height:36px/);
+    expect(css).toMatch(/\.tool-stream-block\.ts-collapsed \.livecode-body\{[^}]*max-height:0/);
+  });
+
+  it("active (unsettled, expanded) block gets the violet left border", () => {
+    const css = readFileSync(path.resolve("src/ui/index.html"), "utf8");
+    // Selector excludes settled / failed / collapsed states.
+    expect(css).toMatch(
+      /\.tool-stream-block:not\(\.ts-settled\):not\(\.ts-failed\):not\(\.ts-collapsed\)\{[^}]*border-left:3px solid var\(--violet\)/
+    );
+  });
+
+  it("expand/collapse transition is wired on the body", () => {
+    const css = readFileSync(path.resolve("src/ui/index.html"), "utf8");
+    expect(css).toMatch(/\.tool-stream-block \.livecode-body\{[^}]*transition:max-height/);
+  });
+
   it("auto-scroll resumes when user scrolls back near the bottom", () => {
     const { ctx, ensureEl } = buildHarness();
     const logBlock = ensureEl(`logBlock-${RUN_ID}`);
