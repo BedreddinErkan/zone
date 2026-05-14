@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { assembleInvestigationSystemPrompt } from "./agentLoop.js";
+import { assembleInvestigationSystemPrompt, assembleAgentSystemPrompt } from "./agentLoop.js";
 import { EXPLORE_ALLOWED_TOOLS } from "./subagents.js";
 
 // ── allowedTools enforcement via executeTool ─────────────────────────────────
@@ -62,9 +62,10 @@ describe("assembleInvestigationSystemPrompt", () => {
     baseMaxIterations: 15,
   };
 
-  it("mentions read-only / investigation mode", () => {
+  it("mentions INVESTIGATION mode and read-only", () => {
     const prompt = assembleInvestigationSystemPrompt(baseInput);
-    expect(prompt.toLowerCase()).toMatch(/read-only/);
+    expect(prompt).toContain("INVESTIGATION mode");
+    expect(prompt).toMatch(/read-only/i);
   });
 
   it("lists find_references and search_in_files as available tools", () => {
@@ -81,5 +82,26 @@ describe("assembleInvestigationSystemPrompt", () => {
   it("instructs agent to cite file paths with line numbers", () => {
     const prompt = assembleInvestigationSystemPrompt(baseInput);
     expect(prompt).toMatch(/line number|file path/i);
+  });
+
+  it("contains proactive single-pass directive ('Read 2-3')", () => {
+    const prompt = assembleInvestigationSystemPrompt(baseInput);
+    expect(prompt).toContain("Read 2-3");
+  });
+
+  it("contains anti-dig-deeper directive", () => {
+    const prompt = assembleInvestigationSystemPrompt(baseInput);
+    expect(prompt).toContain("shall I dig deeper?");
+    expect(prompt).toMatch(/Do NOT end/i);
+  });
+
+  it("patch mode prompt does NOT contain the investigation-only directives", () => {
+    const patchPrompt = assembleAgentSystemPrompt({
+      agentIntro: "You are Zone.",
+      frameworkLines: [],
+      projectMemoryBlock: "",
+    });
+    expect(patchPrompt).not.toContain("shall I dig deeper?");
+    expect(patchPrompt).not.toContain("Read 2-3 top hits");
   });
 });
