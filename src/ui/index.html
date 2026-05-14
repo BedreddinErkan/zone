@@ -617,7 +617,11 @@
     /* Dummy livecode typewriter removed; streaming uses <pre>. */
     /* F1: tool-input-stream block — reuses .livecode shell, violet accent on label. */
     .tool-stream-block .livecode-h .label{color:var(--violet);font-weight:500}
-    .tool-stream-block .livecode-body pre{font-size:0.72rem;white-space:pre-wrap;word-break:break-all;max-height:160px;overflow:hidden}
+    /* F1.2: fixed-height stream container with internal scroll so growing
+       patches don't push the rest of the chat downward. */
+    .tool-stream-block{width:100%}
+    .tool-stream-block .livecode-body{max-height:320px;overflow-y:auto;overflow-x:hidden}
+    .tool-stream-block .livecode-body pre{font-size:0.72rem;white-space:pre-wrap;word-break:break-word;max-height:none !important;overflow:visible !important}
     .tool-stream-block.ts-settled .livecode-h .label{color:#4ade80}
     .tool-stream-block.ts-settled .livecode-dot{display:none}
     .tool-stream-block.ts-failed .livecode-h .label{color:#f87171}
@@ -9142,7 +9146,18 @@
           block.appendChild(hdr);
           block.appendChild(body);
           if (logBlock) logBlock.appendChild(block);
-          state.__toolStreamBlocks[blockId] = { el: block, pre, hdr, toolName: toolNameTsd, settled: false, accumJson: '', filePath: '', chevron };
+          // F1.2: track user scroll inside the body. If the user scrolls up
+          // from the bottom, pause auto-scroll so they can read history;
+          // resume once they return to within 16px of the bottom.
+          const bodyEl = body;
+          var bsRef = { userScrolled: false };
+          try {
+            bodyEl.addEventListener('scroll', function() {
+              var atBottom = (bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight) < 16;
+              bsRef.userScrolled = !atBottom;
+            });
+          } catch(e) {}
+          state.__toolStreamBlocks[blockId] = { el: block, pre, body: bodyEl, hdr, toolName: toolNameTsd, settled: false, accumJson: '', filePath: '', chevron, scroll: bsRef };
           scrollChatIfFollowing(runId);
         }
         const bs = state.__toolStreamBlocks[blockId];
@@ -9157,6 +9172,13 @@
           if (extracted.patchRaw) {
             renderToolStreamBody(bs.pre, decodeJsonString(extracted.patchRaw));
           }
+          // F1.2: auto-scroll the internal body to keep the latest line in
+          // view, unless the user has scrolled up to read earlier content.
+          try {
+            if (bs.body && !(bs.scroll && bs.scroll.userScrolled)) {
+              bs.body.scrollTop = bs.body.scrollHeight;
+            }
+          } catch(e) {}
           scrollChatIfFollowing(runId);
         }
         return;

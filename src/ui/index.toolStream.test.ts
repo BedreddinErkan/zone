@@ -39,6 +39,11 @@ class MockElement {
   dataset: Record<string, string> = {};
   children: MockElement[] = [];
   parentElement: MockElement | null = null;
+  // F1.2: scroll properties — defaults to 0, tests can set scrollHeight/clientHeight
+  // to simulate overflowing content and assert scrollTop is advanced.
+  scrollTop = 0;
+  scrollHeight = 0;
+  clientHeight = 0;
   private classListValue: MockClassList;
   private textContentValue = "";
   private innerHtmlValue = "";
@@ -109,6 +114,9 @@ class MockElement {
   getAttribute(name: string) { return this.dataset[name] ?? null; }
   click() {
     for (const fn of (this.eventListeners.get('click') ?? [])) fn();
+  }
+  dispatchScroll() {
+    for (const fn of (this.eventListeners.get('scroll') ?? [])) fn();
   }
   scrollIntoView() {}
   focus() {}
@@ -550,5 +558,84 @@ describe("Phase F1.1 — incremental JSON parsing for typewriter render", () => 
     const blocks = logBlock.querySelectorAll(".tool-stream-block");
     expect(blocks.length).toBe(2);
     expect(blocks[1]!.classList.contains("ts-collapsed")).toBe(false); // new block not collapsed
+  });
+});
+
+describe("Phase F1.2 — fixed-height container with internal scroll", () => {
+  it("body has livecode-body class (CSS pins max-height + overflow-y:auto)", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    sendDelta(ctx, "blk-css1", '{"filePath":"src/a.ts","patch":"--- FIND ---\\nA\\n--- REPLACE ---\\nB"}', true, "", "apply_patch");
+
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    const body = block.querySelectorAll(".livecode-body")[0];
+    expect(body).toBeTruthy();
+    // CSS for .tool-stream-block .livecode-body sets max-height:320px and overflow-y:auto.
+    const css = readFileSync(path.resolve("src/ui/index.html"), "utf8");
+    expect(css).toMatch(/\.tool-stream-block \.livecode-body\{[^}]*max-height:320px/);
+    expect(css).toMatch(/\.tool-stream-block \.livecode-body\{[^}]*overflow-y:auto/);
+  });
+
+  it("streaming auto-scrolls body to bottom on each delta", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    // First delta — create block; body has measurable scrollHeight after content.
+    sendDelta(ctx, "blk-scroll1", '{"filePath":"src/x.ts","patch":"--- FIND ---\\nL1\\nL2\\nL3', true, "", "apply_patch");
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    const body = block.querySelectorAll(".livecode-body")[0]!;
+
+    // Simulate overflowing content + the user is at the bottom.
+    body.scrollHeight = 600;
+    body.clientHeight = 320;
+    body.scrollTop = 0;
+
+    // Send another delta — handler should auto-scroll body to bottom.
+    sendDelta(ctx, "blk-scroll1", '\\n--- REPLACE ---\\nR1\\nR2"}', false, "", "apply_patch");
+
+    expect(body.scrollTop).toBe(body.scrollHeight);
+  });
+
+  it("auto-scroll pauses once the user scrolls away from the bottom", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    sendDelta(ctx, "blk-pause1", '{"filePath":"src/y.ts","patch":"--- FIND ---\\nA', true, "", "apply_patch");
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    const body = block.querySelectorAll(".livecode-body")[0]!;
+
+    // User scrolls up: scrollTop far from scrollHeight - clientHeight → not at bottom.
+    body.scrollHeight = 800;
+    body.clientHeight = 320;
+    body.scrollTop = 100;
+    body.dispatchScroll();
+
+    // Next delta arrives; auto-scroll should NOT advance scrollTop.
+    sendDelta(ctx, "blk-pause1", '\\n--- REPLACE ---\\nB"}', false, "", "apply_patch");
+
+    expect(body.scrollTop).toBe(100);
+  });
+
+  it("auto-scroll resumes when user scrolls back near the bottom", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    sendDelta(ctx, "blk-resume1", '{"filePath":"src/z.ts","patch":"--- FIND ---\\nA', true, "", "apply_patch");
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    const body = block.querySelectorAll(".livecode-body")[0]!;
+
+    body.scrollHeight = 800;
+    body.clientHeight = 320;
+    // First: user scrolls up — auto-scroll paused.
+    body.scrollTop = 100;
+    body.dispatchScroll();
+    // Then: user scrolls back to within 16px of the bottom.
+    body.scrollTop = 800 - 320 - 8;
+    body.dispatchScroll();
+
+    // Next delta auto-scrolls to the bottom again.
+    sendDelta(ctx, "blk-resume1", '\\n--- REPLACE ---\\nB"}', false, "", "apply_patch");
+    expect(body.scrollTop).toBe(body.scrollHeight);
   });
 });
