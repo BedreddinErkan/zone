@@ -715,9 +715,15 @@ export async function executeTool(
       const { runAgentLoop } = await import("../llm/agentLoop.js");
       const { withRequestContext, getRequestContext } = await import("../llm/openaiContext.js");
       const { getModelForRole } = await import("../llm/modelRouting.js");
-      const _provider = getRequestContext()?.provider ?? "openai";
+      const _requestCtx = getRequestContext();
+      const _provider = _requestCtx?.provider ?? "openai";
+      // Preset plumbing: if parent has a modelOverride.standard (e.g. quality preset sends
+      // standard=sonnet), the worker inherits that. Otherwise falls back to role default (Haiku).
+      const _parentStandard = _requestCtx?.modelOverride?.standard;
       const workerModel =
-        resolvedType === "worker" ? getModelForRole("worker", _provider) : undefined;
+        resolvedType === "worker"
+          ? (_parentStandard ?? getModelForRole("worker", _provider))
+          : undefined;
       const subagentResult = await withRequestContext(
         {
           subagentId,
