@@ -2154,7 +2154,9 @@ Example:
       const { pruned: wrapupPruned } = pruneStaleReads(messages);
       const wrapupResponse = await client.createChatCompletion(
         {
-          model: getModelName("high", client.provider, requestCtx?.modelOverride),
+          model: isInvestigationMode
+            ? getModelForRole("investigator", client.provider as "anthropic" | "openai")
+            : getModelName("high", client.provider, requestCtx?.modelOverride),
           messages: [
             ...wrapupPruned,
             {
@@ -2324,7 +2326,9 @@ Example:
     });
     const promptCacheKey =
       client.provider === "openai" ? buildOpenAIPromptCacheKey(input.runId) : undefined;
-    const modelName = getModelName("high", client.provider, requestCtx?.modelOverride);
+    const modelName = isInvestigationMode
+      ? getModelForRole("investigator", client.provider as "anthropic" | "openai")
+      : getModelName("high", client.provider, requestCtx?.modelOverride);
 
     // R.2: prune stale read results from the messages copy sent to the API.
     // responseInput itself is not mutated — future iterations keep appending.
@@ -3376,7 +3380,9 @@ Example:
     let finalSummary = "Max iterations reached before a final answer was produced.";
     try {
       const assessmentResponse = await client.createChatCompletion({
-        model: getModelName("high", client.provider, requestCtx?.modelOverride),
+        model: isInvestigationMode
+          ? getModelForRole("investigator", client.provider as "anthropic" | "openai")
+          : getModelName("high", client.provider, requestCtx?.modelOverride),
         messages: [
           ...responseInput,
           {
