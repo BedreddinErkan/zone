@@ -2023,6 +2023,7 @@ Example:
   const requestCtx = getRequestContext();
   let iterCostAccumulator: IterCostAccumulator = emptyIterCostAccumulator();
   let lastIterCostPayload: IterCostUpdatePayload | null = null;
+  let lastCallModel: string | null = null;
   let loopTokenUsage: SubagentTokenUsage = emptySubagentTokenUsage();
   let subagentTokenTotal = 0;
   let subagentCostTotal = 0;
@@ -2224,6 +2225,7 @@ Example:
     log("[zone-cache-summary]", JSON.stringify({
       event: "cache_run_summary",
       runId: input.runId ?? null,
+      agentModel: lastCallModel,
       totalIters: iterCostAccumulator.iter_count,
       totalWrite: iterCostAccumulator.cache_write,
       totalRead: iterCostAccumulator.cache_read,
@@ -2360,6 +2362,7 @@ Example:
         });
         iterCostAccumulator = update.accumulator;
         lastIterCostPayload = update.payload;
+        lastCallModel = response.model || modelName;
         input.onStructuredEvent?.(update.payload);
       }
     } catch (err) {
@@ -2374,6 +2377,7 @@ Example:
         event: "cache_call_usage",
         runId: input.runId ?? null,
         iter: iter + 1,
+        model: lastCallModel,
         write: lastIterCostPayload.cache_write,
         read: lastIterCostPayload.cache_read,
         input_uncached: lastIterCostPayload.input_uncached,
