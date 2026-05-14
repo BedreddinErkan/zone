@@ -2824,6 +2824,97 @@ app.post("/api/chat", async (req, res) => {
   });
 });
 
+app.post("/api/investigate", async (req, res) => {
+  const perf = startZoneApiPerfRun("/api/investigate");
+  const { apiKey: userApiKey, provider: byokProvider, modelHigh: byokModelHigh, modelStandard: byokModelStandard } =
+    getRequestContextFromHeaders(req);
+  await withRequestContext(
+    { userApiKey: userApiKey || undefined, provider: byokProvider, modelOverride: { high: byokModelHigh, standard: byokModelStandard } },
+    async () => {
+      const { task, repoPath, runId, userId: rawUserId, conversationId } = req.body ?? {};
+      const userId =
+        typeof rawUserId === "string" && rawUserId.trim()
+          ? rawUserId.trim()
+          : process.env.NODE_ENV !== "production"
+            ? "dev-user"
+            : null;
+      const normalizedTask = typeof task === "string" ? task.trim() : "";
+      const normalizedRepoPath = typeof repoPath === "string" ? repoPath.trim() : "";
+      const runIdStr = typeof runId === "string" && runId.trim() ? runId.trim() : "";
+
+      if (!normalizedTask || !normalizedRepoPath) {
+        perf.finish("bad request");
+        res.status(400).json({ ok: false, reason: "task and repoPath are required" });
+        return;
+      }
+      if (!userId) {
+        perf.finish("missing user");
+        res.status(401).json({
+          ok: false,
+          reason: "unauthorized",
+          message: "Missing user session. Please open Zone from your dashboard.",
+        });
+        return;
+      }
+      attachRunIdentity({ userId, runId: runIdStr });
+
+      const authorization = await ensureRunAuthorized(userId, { billingMode: "hosted" });
+      if (!authorization.allowed) {
+        perf.finish("authorization blocked");
+        res.status(authorization.status).json(authorization.body);
+        return;
+      }
+
+      let investigateAbort: AbortController | null = null;
+      if (runIdStr) {
+        investigateAbort = new AbortController();
+        activePatchRunAbortControllers.set(runIdStr, investigateAbort);
+        try { registerRunStart(runIdStr, { task: normalizedTask }); } catch {}
+      }
+
+      try {
+        const result = await runInvestigationFlow({
+          task: normalizedTask,
+          repoPath: normalizedRepoPath,
+          mode: "investigate",
+          runId: runIdStr,
+          userId,
+          userApiKey: userApiKey || undefined,
+          abortSignal: investigateAbort?.signal,
+          onProgress: (update) => emitProgress(runIdStr, update as any),
+        });
+        if (runIdStr) registerRunComplete(runIdStr, "completed");
+        const costUsd = runIdStr ? getRunCost(userId, runIdStr) : 0;
+        await logRun({
+          userId,
+          role: "developer",
+          task: normalizedTask,
+          repoPath: normalizedRepoPath,
+          decisionMode: "investigation",
+          confidence: 80,
+          executionId: runIdStr || undefined,
+          creditsUsed: 1,
+          conversationId: typeof conversationId === "string" ? conversationId : runIdStr,
+          changedFiles: [],
+          billingMode: "hosted",
+          routeName: "/api/investigate",
+        }).catch(() => null);
+        perf.finish("complete");
+        res.json({ ...(result as Record<string, unknown>), costUsd });
+      } catch (error) {
+        if (runIdStr) registerRunComplete(runIdStr, "cancelled");
+        perf.finish("error");
+        res.status(500).json({
+          ok: false,
+          reason: error instanceof Error ? error.message : "investigation_failed",
+        });
+      } finally {
+        if (runIdStr) activePatchRunAbortControllers.delete(runIdStr);
+      }
+    }
+  );
+});
+
 app.post("/api/patch", async (req, res) => {
   const perf = startZoneApiPerfRun("/api/patch");
   perf.mark("route entered");
