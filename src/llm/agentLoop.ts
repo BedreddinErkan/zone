@@ -4,6 +4,7 @@
 } from "./openaiClient.js";
 import { createLLMClient } from "./factory.js";
 import { getRequestContext, withRequestContext } from "./openaiContext.js";
+import { getModelForRole } from "./modelRouting.js";
 import { readMemory, formatMemoryForPrompt } from "../memory/projectMemory.js";
 import { log, debugLog, errorLog } from "../utils/logger.js";
 import { parseVerificationError } from "../core/parseVerificationError.js";
@@ -2571,12 +2572,18 @@ Example:
         // from the first line of the description per agent coaching.
         if (name === "Task") {
           const dispatchReason = extractDispatchReason(parsedArgs.description);
+          const dispatchSubagentType =
+            typeof parsedArgs.subagent_type === "string" ? parsedArgs.subagent_type : null;
+          const dispatchProvider = getRequestContext()?.provider ?? "openai";
+          const dispatchWorkerModel =
+            dispatchSubagentType === "worker"
+              ? getModelForRole("worker", dispatchProvider)
+              : null;
           log("[zone-subagent-dispatched]", JSON.stringify({
             event: "subagent_dispatched",
             parentRunId: input.runId ?? null,
-            subagentType: typeof parsedArgs.subagent_type === "string"
-              ? parsedArgs.subagent_type
-              : null,
+            subagentType: dispatchSubagentType,
+            workerModel: dispatchWorkerModel,
             dispatchReason,
             iter: iter + 1,
           }));

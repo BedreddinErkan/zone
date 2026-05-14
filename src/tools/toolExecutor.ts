@@ -713,9 +713,20 @@ export async function executeTool(
       } satisfies Partial<ZoneStructuredProgressEvent>);
 
       const { runAgentLoop } = await import("../llm/agentLoop.js");
-      const { withRequestContext } = await import("../llm/openaiContext.js");
+      const { withRequestContext, getRequestContext } = await import("../llm/openaiContext.js");
+      const { getModelForRole } = await import("../llm/modelRouting.js");
+      const _provider = getRequestContext()?.provider ?? "openai";
+      const workerModel =
+        resolvedType === "worker" ? getModelForRole("worker", _provider) : undefined;
       const subagentResult = await withRequestContext(
-        { subagentId, subagentType: resolvedType, parentRunId },
+        {
+          subagentId,
+          subagentType: resolvedType,
+          parentRunId,
+          ...(workerModel
+            ? { modelOverride: { high: workerModel, standard: workerModel } }
+            : {}),
+        },
         () =>
           runAgentLoop({
             task: description.trim(),
