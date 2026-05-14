@@ -624,6 +624,9 @@
     .ts-diff-line{display:block;padding:1px 4px;line-height:1.5}
     .ts-del{background:#3f1f1f;color:#fca5a5}
     .ts-add{background:#1f3f1f;color:#86efac}
+    .tool-stream-block.ts-collapsed .livecode-body{max-height:0;overflow:hidden}
+    .ts-chevron{background:none;border:none;cursor:pointer;color:var(--text-3);font-size:0.7rem;padding:0 4px;line-height:1;margin-left:auto}
+    .ts-chevron:hover{color:var(--text-1)}
     /* When streaming owns the block, suppress any dummy animations/lines. */
     .livecode.streaming .livecode-h .label{animation:none;opacity:1}
     .livecode.streaming .livecode-dot{display:none}
@@ -9093,6 +9096,12 @@
         if (!blockId || !delta) return;
         state.__toolStreamBlocks = state.__toolStreamBlocks || {};
         if (isFirstDelta) {
+          // F1.1 C3: auto-collapse any previous unsettled blocks before starting a new one.
+          try {
+            Object.values(state.__toolStreamBlocks).forEach(function(b) {
+              if (!b.settled) b.el.classList.add('ts-collapsed');
+            });
+          } catch(e) {}
           const safeid = blockId.replace(/[^a-zA-Z0-9_-]/g, '_');
           const block = document.createElement('div');
           block.className = 'livecode tool-stream-block';
@@ -9106,8 +9115,13 @@
           const lbl0 = document.createElement('span');
           lbl0.className = 'label';
           lbl0.textContent = titleTsd || '✎ Writing...';
+          const chevron = document.createElement('button');
+          chevron.className = 'ts-chevron';
+          chevron.textContent = '▶';
+          chevron.style.display = 'none';
           hdr.appendChild(dot);
           hdr.appendChild(lbl0);
+          hdr.appendChild(chevron);
           const body = document.createElement('div');
           body.className = 'livecode-body';
           const pre = document.createElement('pre');
@@ -9117,7 +9131,7 @@
           block.appendChild(hdr);
           block.appendChild(body);
           if (logBlock) logBlock.appendChild(block);
-          state.__toolStreamBlocks[blockId] = { el: block, pre, hdr, toolName: toolNameTsd, settled: false, accumJson: '', filePath: '' };
+          state.__toolStreamBlocks[blockId] = { el: block, pre, hdr, toolName: toolNameTsd, settled: false, accumJson: '', filePath: '', chevron };
           scrollChatIfFollowing(runId);
         }
         const bs = state.__toolStreamBlocks[blockId];
@@ -9405,7 +9419,7 @@
             lastToolLine.classList.add((progress.status === 'success') ? 'c-done' : 'c-error');
             // Sub-line preview suppressed — main tool line is sufficient signal.
           }
-          // F1: settle the oldest unsettled tool-stream typewriter block for this tool.
+          // F1/F1.1: settle + collapse the oldest unsettled tool-stream block for this tool.
           try {
             const trToolName = String(progress.toolName || '');
             if ((trToolName === 'apply_patch' || trToolName === 'write_file') && state.__toolStreamBlocks) {
@@ -9414,9 +9428,27 @@
               if (unsettled.length > 0) {
                 const oldest = unsettled[0];
                 oldest.settled = true;
-                oldest.el.classList.add(progress.status === 'success' ? 'ts-settled' : 'ts-failed');
+                const isOk = progress.status === 'success';
+                oldest.el.classList.add(isOk ? 'ts-settled' : 'ts-failed');
+                oldest.el.classList.add('ts-collapsed');
+                var addCnt = 0, delCnt = 0;
+                try { addCnt = oldest.pre.querySelectorAll('.ts-add').length; } catch(e2) {}
+                try { delCnt = oldest.pre.querySelectorAll('.ts-del').length; } catch(e2) {}
+                var statsStr = (addCnt > 0 || delCnt > 0) ? ' (+' + addCnt + ' / -' + delCnt + ')' : '';
+                var fpStr = oldest.filePath || '';
                 const lbl = oldest.hdr ? oldest.hdr.querySelector('.label') : null;
-                if (lbl) lbl.textContent = (progress.status === 'success' ? '✓ Patched' : '✗ Write failed');
+                if (lbl) lbl.textContent = (isOk ? '✓ ' : '✗ ') + (fpStr || 'file') + statsStr;
+                if (oldest.chevron) {
+                  oldest.chevron.style.display = '';
+                  oldest.chevron.textContent = '▶';
+                  var blocEl = oldest.el;
+                  var chev = oldest.chevron;
+                  oldest.chevron.addEventListener('click', function() {
+                    var nowCollapsed = !blocEl.classList.contains('ts-collapsed');
+                    blocEl.classList.toggle('ts-collapsed', nowCollapsed);
+                    chev.textContent = nowCollapsed ? '▶' : '▼';
+                  });
+                }
               }
             }
           } catch(e) {}

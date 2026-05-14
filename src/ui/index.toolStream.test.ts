@@ -42,6 +42,7 @@ class MockElement {
   private classListValue: MockClassList;
   private textContentValue = "";
   private innerHtmlValue = "";
+  private eventListeners = new Map<string, Array<(...args: unknown[]) => void>>();
 
   constructor(id: string, className = "") {
     this.id = id;
@@ -88,11 +89,19 @@ class MockElement {
     this.parentElement.children = this.parentElement.children.filter((c) => c !== this);
     this.parentElement = null;
   }
-  addEventListener() {}
-  removeEventListener() {}
+  addEventListener(type: string, fn: (...args: unknown[]) => void) {
+    if (!this.eventListeners.has(type)) this.eventListeners.set(type, []);
+    this.eventListeners.get(type)!.push(fn);
+  }
+  removeEventListener(type: string, fn: (...args: unknown[]) => void) {
+    const fns = this.eventListeners.get(type) ?? [];
+    this.eventListeners.set(type, fns.filter(f => f !== fn));
+  }
   setAttribute(name: string, value: string) { if (name === "class") this.className = value; }
   getAttribute(name: string) { return this.dataset[name] ?? null; }
-  click() {}
+  click() {
+    for (const fn of (this.eventListeners.get('click') ?? [])) fn();
+  }
   scrollIntoView() {}
   focus() {}
 }
@@ -268,7 +277,8 @@ describe("Phase F1 — UI tool_input_delta rendering", () => {
     expect(block.classList.contains("ts-settled")).toBe(true);
     expect(block.classList.contains("ts-failed")).toBe(false);
     const lbl = block.querySelector(".livecode-h").querySelector(".label");
-    expect(lbl.textContent).toBe("✓ Patched");
+    // F1.1 C3: label now shows filePath instead of generic "Patched"
+    expect(lbl.textContent).toContain("✓");
   });
 
   it("tool_result error → .ts-failed and '✗ Write failed' label", () => {
@@ -286,7 +296,8 @@ describe("Phase F1 — UI tool_input_delta rendering", () => {
     expect(block.classList.contains("ts-failed")).toBe(true);
     expect(block.classList.contains("ts-settled")).toBe(false);
     const lbl = block.querySelector(".livecode-h").querySelector(".label");
-    expect(lbl.textContent).toBe("✗ Write failed");
+    // F1.1 C3: label now shows filePath instead of generic "Write failed"
+    expect(lbl.textContent).toContain("✗");
   });
 
   it("tool_result for non-write tool does not affect tool-stream blocks", () => {
@@ -403,5 +414,76 @@ describe("Phase F1.1 — incremental JSON parsing for typewriter render", () => 
     expect(pre.textContent).toBe("plain text content");
     expect(pre.querySelectorAll(".ts-del").length).toBe(0);
     expect(pre.querySelectorAll(".ts-add").length).toBe(0);
+  });
+
+  // F1.1 Commit 3 — auto-collapse completed blocks
+  it("block collapses on tool_result and shows chevron", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    sendDelta(ctx, "blk-coll1", '{"filePath":"src/g.ts","patch":"<<<<<<< FIND\\nold\\n=======\\nnew\\n>>>>>>> REPLACE"}', true, "", "apply_patch");
+    (ctx as { handleSSEPayload: (p: unknown, r: string) => void }).handleSSEPayload(
+      { stage: "agent_loop", progress: { type: "tool_result", toolName: "apply_patch", status: "success", title: "", detail: "" } },
+      RUN_ID
+    );
+
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    expect(block.classList.contains("ts-collapsed")).toBe(true);
+    expect(block.classList.contains("ts-settled")).toBe(true);
+    // Chevron should be visible after settlement
+    const chevron = block.querySelectorAll(".ts-chevron")[0]!;
+    expect(chevron.style.display).not.toBe("none");
+  });
+
+  it("click on chevron expands the collapsed block", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    sendDelta(ctx, "blk-coll2", '{"filePath":"src/h.ts","patch":"<<<<<<< FIND\\nold\\n=======\\nnew\\n>>>>>>> REPLACE"}', true, "", "apply_patch");
+    (ctx as { handleSSEPayload: (p: unknown, r: string) => void }).handleSSEPayload(
+      { stage: "agent_loop", progress: { type: "tool_result", toolName: "apply_patch", status: "success", title: "", detail: "" } },
+      RUN_ID
+    );
+
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    const chevron = block.querySelectorAll(".ts-chevron")[0]!;
+    chevron.click(); // expand
+    expect(block.classList.contains("ts-collapsed")).toBe(false);
+    expect(chevron.textContent).toBe("▼");
+  });
+
+  it("second chevron click re-collapses the block", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    sendDelta(ctx, "blk-coll3", '{"filePath":"src/i.ts","patch":"<<<<<<< FIND\\nold\\n=======\\nnew\\n>>>>>>> REPLACE"}', true, "", "apply_patch");
+    (ctx as { handleSSEPayload: (p: unknown, r: string) => void }).handleSSEPayload(
+      { stage: "agent_loop", progress: { type: "tool_result", toolName: "apply_patch", status: "success", title: "", detail: "" } },
+      RUN_ID
+    );
+
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    const chevron = block.querySelectorAll(".ts-chevron")[0]!;
+    chevron.click(); // expand
+    chevron.click(); // collapse again
+    expect(block.classList.contains("ts-collapsed")).toBe(true);
+    expect(chevron.textContent).toBe("▶");
+  });
+
+  it("new isFirstDelta auto-collapses previous unsettled blocks", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    // First block starts streaming (not settled yet)
+    sendDelta(ctx, "blk-auto1", '{"filePath":"src/j.ts","patch":"<<<<<<< FIND\\nold\\n=======\\nnew\\n>>>>>>> REPLACE"}', true, "", "apply_patch");
+    const firstBlock = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    expect(firstBlock.classList.contains("ts-collapsed")).toBe(false); // not collapsed yet
+
+    // Second block starts — first should auto-collapse
+    sendDelta(ctx, "blk-auto2", '{"filePath":"src/k.ts","patch":"<<<<<<< FIND\\nold2\\n=======\\nnew2\\n>>>>>>> REPLACE"}', true, "", "apply_patch");
+    expect(firstBlock.classList.contains("ts-collapsed")).toBe(true);  // now auto-collapsed
+    const blocks = logBlock.querySelectorAll(".tool-stream-block");
+    expect(blocks.length).toBe(2);
+    expect(blocks[1]!.classList.contains("ts-collapsed")).toBe(false); // new block not collapsed
   });
 });
