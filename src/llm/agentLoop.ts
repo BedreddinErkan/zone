@@ -302,6 +302,11 @@ export function assembleAgentSystemPrompt(input: {
     `- After a successful apply_patch, do NOT re-read the same file — the patch is already written.\n\n` +
     `PRE-EXISTING BROKEN FILE — when apply_patch returns rejectionReason 'file_already_broken_pre_patch':\n` +
     `The file had a syntax error before your patch. Read it, locate the line/col in the rejection, then write ONE apply_patch that fixes the pre-existing error AND makes your change (pass scope: null — scope resolution cannot work on an unparseable file).\n\n` +
+    `APPLY_ROLLED_BACK — when an apply_patch tool_result begins with the literal line "APPLY_ROLLED_BACK":\n` +
+    `- Your patch was reverted. Disk is at the pre-apply state for every path listed under "Files restored to pre-apply state".\n` +
+    `- Read the error list (file, line, code, message). If you see a line beginning with "Suggested: ", that is a directional hint — usually the patch needs to coordinate edits across more files than you touched.\n` +
+    `- Do NOT use shell commands (sed, awk, python, cat >, etc.) to bypass the rollback. The underlying type/semantic error is real; defeating the rollback via shell leaves the codebase in the same broken state the verifier already caught.\n` +
+    `- Re-investigate (read the files referenced in the errors, identify the missing coordinated edit), then retry with apply_patch or — for ≥3-file coordinated edits — a single Task subagent dispatch.\n\n` +
     `TEST FAILURES — investigate, don't summarize:\n` +
     `- Read the file/line in the error. Decide: caused by your change, or pre-existing?\n` +
     `- Pre-existing: fix if simple, else note as out-of-scope in your final summary.\n` +
