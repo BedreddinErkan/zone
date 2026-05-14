@@ -83,6 +83,11 @@ export interface AgentLoopInput {
     delta: string;
     isFirstDelta: boolean;
     iter: number;
+    /** F1.4: id of the subagent emitting this delta. null/undefined for
+     *  parent-agent streams. Worker subagents share the parent's runId so
+     *  this is how the UI distinguishes "agent is writing" vs "↳ worker N
+     *  is writing" in the side-panel slot. */
+    subagentId?: string | null;
   }) => void;
   abortSignal?: AbortSignal;
   /** Optional import-ecosystem context block built by buildImportContextSummary. Injected by runLlmPatchFlow. */
@@ -2388,7 +2393,10 @@ Example:
     breakdownEvents.push(bdEvent);
 
     // Phase F1: streaming tool-input callbacks for write-class tools.
+    // F1.4: subagent loops tag their stream events with subagentId so the
+    // UI can prefix the slot label as "↳ worker N is writing...".
     const streamStartedBlocks = new Set<string>();
+    const _streamSubagentId = input.subagent?.id ?? null;
     const onToolArgumentsDelta = input.onToolInputStream
       ? (toolCallId: string, toolName: string, argDelta: string) => {
           if (toolName !== "apply_patch" && toolName !== "write_file") return;
@@ -2400,6 +2408,7 @@ Example:
             delta: argDelta,
             isFirstDelta,
             iter: iter + 1,
+            subagentId: _streamSubagentId,
           });
         }
       : undefined;
@@ -2796,6 +2805,11 @@ Example:
           onToolCall: input.onToolCall,
           onToolResult: input.onToolResult,
           onStructuredEvent: input.onStructuredEvent,
+          // F1.4: forward the streaming callback so the Task tool dispatch
+          // can pass it on to the worker subagent's runAgentLoop. Worker
+          // tool-input deltas then flow back through the parent's SSE
+          // channel, tagged with the worker's subagentId.
+          onToolInputStream: input.onToolInputStream,
           tokenBudgetBaseTokens: name === "Task" ? cumulativeTokens() : undefined,
           maxSubagentCallsOverride: effectiveMaxSubagentCalls ?? undefined,
           visualScreenshotCount: toolCallLog.filter(

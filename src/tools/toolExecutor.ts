@@ -631,6 +631,16 @@ export async function executeTool(
     onToolCall?: (name: string, args: Record<string, unknown>) => void;
     onToolResult?: (name: string, result: ToolResult) => void;
     onStructuredEvent?: (evt: unknown) => void;
+    /** F1.4: forwarded to worker subagent's runAgentLoop so worker tool-
+     *  input deltas reach the same SSE stream as the parent's. */
+    onToolInputStream?: (event: {
+      blockId: string;
+      toolName: string;
+      delta: string;
+      isFirstDelta: boolean;
+      iter: number;
+      subagentId?: string | null;
+    }) => void;
     visualScreenshotCount?: number;
     tokenBudgetBaseTokens?: number;
     /** L.2: tier-based subagent call cap override. Defaults to MAX_SUBAGENT_CALLS_PER_PARENT_RUN. */
@@ -779,6 +789,10 @@ export async function executeTool(
             onToolCall: input?.onToolCall,
             onToolResult: input?.onToolResult,
             onStructuredEvent: input?.onStructuredEvent,
+            // F1.4: hand the streaming callback to the worker subagent.
+            // The worker's agentLoop tags each delta with its subagentId
+            // so the UI can render "↳ worker N is writing..." in the slot.
+            onToolInputStream: input?.onToolInputStream,
             tokenBudgetBaseTokens: input?.tokenBudgetBaseTokens,
           })
       );

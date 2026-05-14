@@ -278,3 +278,117 @@ describe("Phase F1 — agentLoop onToolInputStream wiring", () => {
     expect(blockB[0]!.isFirstDelta).toBe(true);
   });
 });
+
+describe("Phase F1.4 — worker subagent tool input streaming", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("parent runs emit deltas with no subagentId (back-compat)", async () => {
+    const streamEvents: Array<{ subagentId?: string | null }> = [];
+    setupTwoTurnRun(makeStreamingApplyPatchMock("tc-parent-1", "src/p.ts"));
+
+    await runAgentLoop({
+      task: "parent patch",
+      repoPath: "/tmp",
+      runId: "run-parent",
+      onToolInputStream: (evt) => streamEvents.push({ subagentId: evt.subagentId }),
+      // No `subagent` field → parent context.
+    });
+
+    expect(streamEvents.length).toBe(3);
+    for (const evt of streamEvents) {
+      // null OR undefined (the property may not be set at all for parents).
+      expect(evt.subagentId == null).toBe(true);
+    }
+  });
+
+  it("worker runs tag every delta with subagentId from the subagent context", async () => {
+    const streamEvents: Array<{ subagentId?: string | null; blockId: string }> = [];
+    setupTwoTurnRun(makeStreamingApplyPatchMock("tc-worker-1", "src/w.ts"));
+
+    await runAgentLoop({
+      task: "worker patch",
+      repoPath: "/tmp",
+      runId: "run-parent-shared",
+      subagent: { id: "w-abc123", type: "worker", parentRunId: "run-parent-shared" },
+      onToolInputStream: (evt) =>
+        streamEvents.push({ subagentId: evt.subagentId, blockId: evt.blockId }),
+    });
+
+    expect(streamEvents.length).toBe(3);
+    for (const evt of streamEvents) {
+      expect(evt.subagentId).toBe("w-abc123");
+    }
+  });
+
+  it("distinct workers carry distinct subagentId values in the same parent process", async () => {
+    // Two independent worker runs (simulating two Task dispatches in one parent run).
+    const allEvents: Array<{ id: string }> = [];
+    setupTwoTurnRun(makeStreamingApplyPatchMock("tc-w1", "src/a.ts"));
+    await runAgentLoop({
+      task: "worker A",
+      repoPath: "/tmp",
+      runId: "run-parent",
+      subagent: { id: "w-A", type: "worker", parentRunId: "run-parent" },
+      onToolInputStream: (evt) => allEvents.push({ id: evt.subagentId ?? "" }),
+    });
+
+    vi.clearAllMocks();
+    setupTwoTurnRun(makeStreamingApplyPatchMock("tc-w2", "src/b.ts"));
+    await runAgentLoop({
+      task: "worker B",
+      repoPath: "/tmp",
+      runId: "run-parent",
+      subagent: { id: "w-B", type: "worker", parentRunId: "run-parent" },
+      onToolInputStream: (evt) => allEvents.push({ id: evt.subagentId ?? "" }),
+    });
+
+    const seen = new Set(allEvents.map((e) => e.id));
+    expect(seen.has("w-A")).toBe(true);
+    expect(seen.has("w-B")).toBe(true);
+    expect(seen.has("")).toBe(false);
+  });
+
+  it("agentLoop forwards onToolInputStream into executeTool's Task-dispatch input", async () => {
+    // Capture the input object passed to executeTool — the field must contain
+    // the same callback the parent provided, so the worker run can rewire it.
+    const capturedInputs: Array<Record<string, unknown>> = [];
+    mocks.executeTool.mockImplementation(
+      async (_name: string, _args: unknown, _repo: string, _onProgress: unknown, inp: unknown) => {
+        capturedInputs.push((inp as Record<string, unknown>) ?? {});
+        return { success: true, output: "ok" };
+      }
+    );
+    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    // Use read_file — apply_patch has a read-first guard that short-circuits
+    // executeTool, while read_file goes straight through. Either way, the
+    // assertion is the same: agentLoop's executeTool input carries
+    // onToolInputStream so the Task dispatch path (which uses this same input)
+    // can forward it to the worker subagent.
+    mocks.createChatCompletion
+      .mockResolvedValueOnce(
+        toolCallResponse("read_file", { filePath: "x.ts" }, "tc-fwd-1")
+      )
+      .mockResolvedValueOnce(textResponse("Done."));
+
+    const streamFn = vi.fn();
+    await runAgentLoop({
+      task: "verify forwarding",
+      repoPath: "/tmp",
+      runId: "run-fwd",
+      onToolInputStream: streamFn,
+    });
+
+    expect(capturedInputs.length).toBeGreaterThanOrEqual(1);
+    // Every executeTool call from agentLoop must carry the streaming callback
+    // so the Task tool dispatch path can hand it to the worker subagent.
+    for (const inp of capturedInputs) {
+      expect(typeof inp.onToolInputStream).toBe("function");
+    }
+  });
+});

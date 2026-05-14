@@ -5356,6 +5356,7 @@ const initializeTodosFromPlan = (): void => {
       delta: string;
       isFirstDelta: boolean;
       iter: number;
+      subagentId?: string | null;
     }): void => {
       const prev = toolStreamState.accumByBlock.get(event.blockId) ?? "";
       const accum = prev + event.delta;
@@ -5365,15 +5366,23 @@ const initializeTodosFromPlan = (): void => {
 
       const fpMatch = accum.match(/"filePath"\s*:\s*"([^"\\]*)"/);
       const fp = fpMatch ? fpMatch[1] : "";
+      // F1.4: subagent-emitted deltas carry the worker id; surface it both
+      // as a discrete `subagentId` field and as a "↳ worker N" title
+      // prefix so the UI slot reflects sub-agent origin.
+      const subId = event.subagentId || "";
+      const subIdShort = subId.slice(0, 6);
+      const parentMark = subId ? `↳ worker ${subIdShort} ` : "";
+      const baseLbl = `✎ Writing${fp ? ` ${fp}` : ""}...`;
       emitStructuredProgress({
         type: "tool_input_delta",
-        title: event.isFirstDelta ? `✎ Writing${fp ? ` ${fp}` : ""}...` : fp ? `✎ Writing ${fp}...` : "",
+        title: parentMark + baseLbl,
         status: "active",
         toolName: event.toolName,
         blockId: event.blockId,
         isFirstDelta: event.isFirstDelta,
         delta: event.delta,
         iter: event.iter,
+        ...(subId ? { subagentId: subId } : {}),
       });
     };
 
