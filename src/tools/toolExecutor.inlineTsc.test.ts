@@ -163,7 +163,10 @@ describe("inline TS syntax validation", () => {
     );
 
     expect(result.success).toBe(false);
-    expect(result.output).toMatch(/SYNTAX_ERROR|TS1005|pre-flush/);
+    // J.4: rejection body now uses the structured APPLY_ROLLED_BACK marker.
+    expect(result.output).toMatch(/^APPLY_ROLLED_BACK\n/);
+    expect(result.output).toContain("TS1005");
+    expect(result.output).toContain("src/broken.ts");
     expect(result.rejectionReason).toBe("inline_ts_syntax_error");
     // File is rolled back to original
     expect(readRepoFile("src/broken.ts")).toBe(original);

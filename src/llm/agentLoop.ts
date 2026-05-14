@@ -34,6 +34,10 @@ import {
   type IterCostUpdatePayload,
 } from "../usage/iterCostMeter.js";
 import { parseTodoProgressMarkers } from "../core/todoLifecycle.js";
+import {
+  buildApplyRolledBackMessage,
+  parseTscErrorPreview,
+} from "./applyRollbackFeedback.js";
 import { validateTodoWriteArgs } from "../tools/todoWriteValidate.js";
 import {
   executeTool,
@@ -3376,17 +3380,35 @@ Example:
         } else {
           verificationReason = "verification_regressed";
           patchValidatedByAgent = false;
-          const baseline = finalizeResult.verification.baselineErrorCount ?? 0;
-          const post = finalizeResult.verification.postErrorCount ?? 0;
-          summaryAppendix =
-            "\n\n**Apply rolled back — verification regressed** (" +
-            finalizeResult.verification.label +
-            ", " + finalizeResult.verification.durationMs + "ms). " +
-            `Patch added ${Math.max(0, post - baseline)} new error(s) ` +
-            `(${baseline} before → ${post} after).\n\n` +
-            "Disk was restored to pre-apply state.\n\n```\n" +
-            finalizeResult.verification.errorPreview +
-            "\n```";
+          // J.4: structured marker block. The freeform markdown body that
+          // lived here pre-J.4 ("**Apply rolled back — verification
+          // regressed**…") is replaced by the APPLY_ROLLED_BACK shape so
+          // downstream consumers (orchestrator, retry agent, telemetry)
+          // can parse it. The label + duration land in telemetry rather
+          // than in the agent-facing message — the agent cares about the
+          // errors, not the toolchain timing.
+          const errors = parseTscErrorPreview(finalizeResult.verification.errorPreview);
+          const restoredFiles = finalizeResult.discardedStaging
+            ? Array.from(finalizeResult.discardedStaging.keys()).map((abs) =>
+                path.relative(input.repoPath, abs) || abs
+              )
+            : [];
+          const rolledBackBody = buildApplyRolledBackMessage({
+            filePath: restoredFiles.length === 1 ? (restoredFiles[0] ?? "<staged file>") : "<multiple>",
+            errors,
+            restoredFiles,
+          });
+          summaryAppendix = "\n\n" + rolledBackBody;
+          log("[zone-apply-rolled-back-feedback]", JSON.stringify({
+            site: "natural_completion",
+            label: finalizeResult.verification.label,
+            durationMs: finalizeResult.verification.durationMs,
+            baselineErrorCount: finalizeResult.verification.baselineErrorCount,
+            postErrorCount: finalizeResult.verification.postErrorCount,
+            errorCount: errors.length,
+            filePathsRestored: restoredFiles,
+            runId: input.runId ?? null,
+          }));
         }
       } else if (
         finalizeResult.verification.status === "skipped" &&
@@ -3650,18 +3672,29 @@ Example:
     } else {
       finalVerificationReason = "verification_regressed";
       patchValidatedByAgent = false;
-      const baseline = finalizeResult.verification.baselineErrorCount ?? 0;
-      const post = finalizeResult.verification.postErrorCount ?? 0;
-      finalSummary =
-        finalSummary +
-        "\n\n**Apply rolled back — verification regressed** (" +
-        finalizeResult.verification.label +
-        ", " + finalizeResult.verification.durationMs + "ms). " +
-        `Patch added ${Math.max(0, post - baseline)} new error(s) ` +
-        `(${baseline} before → ${post} after). Disk restored.\n\n` +
-        "```\n" +
-        finalizeResult.verification.errorPreview +
-        "\n```";
+      // J.4: same structured marker as the natural-completion branch.
+      const errors = parseTscErrorPreview(finalizeResult.verification.errorPreview);
+      const restoredFiles = finalizeResult.discardedStaging
+        ? Array.from(finalizeResult.discardedStaging.keys()).map((abs) =>
+            path.relative(input.repoPath, abs) || abs
+          )
+        : [];
+      const rolledBackBody = buildApplyRolledBackMessage({
+        filePath: restoredFiles.length === 1 ? (restoredFiles[0] ?? "<staged file>") : "<multiple>",
+        errors,
+        restoredFiles,
+      });
+      finalSummary = finalSummary + "\n\n" + rolledBackBody;
+      log("[zone-apply-rolled-back-feedback]", JSON.stringify({
+        site: "max_iterations",
+        label: finalizeResult.verification.label,
+        durationMs: finalizeResult.verification.durationMs,
+        baselineErrorCount: finalizeResult.verification.baselineErrorCount,
+        postErrorCount: finalizeResult.verification.postErrorCount,
+        errorCount: errors.length,
+        filePathsRestored: restoredFiles,
+        runId: input.runId ?? null,
+      }));
     }
   } else if (
     finalizeResult.verification.status === "skipped" &&

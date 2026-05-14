@@ -1994,20 +1994,30 @@ export async function executeTool(
             if (!stagedWrite(input?.stagingFiles, abs, original)) {
               fs.writeFileSync(abs, original, "utf8");
             }
-            const errorLines = (tscOutputForAgent ?? "")
-              .split("\n")
-              .filter((l) => /TS1\d{3}/.test(l))
-              .slice(0, 5)
-              .map((l) => {
-                const m = l.match(/\((\d+),\d+\): error (TS1\d{3}): (.+)/);
-                return m ? `  Line ${m[1]}: ${m[2]} — ${m[3]}` : `  ${l}`;
-              })
-              .join("\n");
+            // J.4: structured rollback feedback. The TS1xxx codes are
+            // syntax-level (single-file) so the cross-file suggestion
+            // heuristic won't fire — the marker + restored-file scope
+            // is what the agent needs to understand the rollback.
+            const { parseTscErrorPreview, buildApplyRolledBackMessage } = await import(
+              "../llm/applyRollbackFeedback.js"
+            );
+            const errors = parseTscErrorPreview(tscOutputForAgent ?? "");
+            const message = buildApplyRolledBackMessage({
+              filePath,
+              errors: errors.filter((e) => e.code.startsWith("TS")) ,
+              restoredFiles: [filePath],
+            });
+            log("[zone-apply-rolled-back-feedback]", JSON.stringify({
+              site: "inline_ts_check",
+              filePath,
+              errorCount: errors.length,
+              filePathsRestored: [filePath],
+              codes: tscErrorCodes,
+              runId: input?.runId ?? null,
+            }));
             return {
               success: false,
-              output:
-                `SYNTAX_ERROR in ${filePath} (caught pre-flush):\n${errorLines}\n` +
-                `Please correct the syntax and retry the patch.`,
+              output: message,
               rejectionReason: "inline_ts_syntax_error",
             };
           }
