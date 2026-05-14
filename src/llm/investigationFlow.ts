@@ -4,7 +4,13 @@ import { EXPLORE_ALLOWED_TOOLS, computeExploreMaxIterations } from "./subagents.
 import { CHAT_TOOLS } from "../tools/toolDefinitions.js";
 import type { ToolResult } from "../tools/toolExecutor.js";
 import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
-import { debugLog } from "../utils/logger.js";
+import { debugLog, log } from "../utils/logger.js";
+
+function countCitations(text: string): number {
+  const matches = text.match(/`[^`]+\.[a-z]+(?::\d+)?`/g) ?? [];
+  const distinct = new Set(matches.map((m) => m.replace(/:\d+`$/, "`")));
+  return distinct.size;
+}
 
 export type InvestigationFlowResult = {
   ok: true;
@@ -241,6 +247,18 @@ export async function runInvestigationFlow(input: {
       : hitMaxIter
         ? "max_iterations"
         : undefined;
+
+  const citationCount = countCitations(responseText);
+  log("[zone-investigation-summary]", JSON.stringify({
+    event: "investigation_summary",
+    runId: runId || null,
+    toolCallCount: loop.toolCallLog.length,
+    totalCostUsd: loop.costUsd ?? 0,
+    citationCount,
+    query: String(input.task || "").slice(0, 100),
+    finalState: finalState ?? "success",
+    ts: new Date().toISOString(),
+  }));
 
   return {
     ok: true,

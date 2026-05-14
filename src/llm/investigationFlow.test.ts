@@ -1,9 +1,9 @@
 /**
- * Phase D tests: runInvestigationFlow — prompt injection, tool-set
- * enforcement, and natural-termination via mocked LLM.
+ * Phase D + D.1 tests: runInvestigationFlow — prompt injection, tool-set
+ * enforcement, natural-termination, and zone-investigation-summary telemetry.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 
 // ── hoisted mocks ─────────────────────────────────────────────────────────────
 
@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
   executeTool: vi.fn(),
   withStagingTempFlush: vi.fn(),
+  log: vi.fn(),
+  debugLog: vi.fn(),
 }));
 
 vi.mock("./factory.js", () => ({
@@ -23,6 +25,12 @@ vi.mock("./factory.js", () => ({
 vi.mock("../tools/toolExecutor.js", () => ({
   executeTool: mocks.executeTool,
   withStagingTempFlush: mocks.withStagingTempFlush,
+}));
+
+vi.mock("../utils/logger.js", () => ({
+  log: mocks.log,
+  debugLog: mocks.debugLog,
+  errorLog: vi.fn(),
 }));
 
 import { runInvestigationFlow } from "./investigationFlow.js";
@@ -162,5 +170,75 @@ describe("runInvestigationFlow — natural termination", () => {
 
     expect(result.applyPatches).toEqual([]);
     expect(result.fileDiffs).toEqual([]);
+  });
+});
+
+// ── telemetry: zone-investigation-summary ────────────────────────────────────
+
+describe("runInvestigationFlow — zone-investigation-summary telemetry (Phase D.1)", () => {
+  beforeEach(() => {
+    mocks.log.mockClear();
+    mocks.executeTool.mockResolvedValue({ success: true, output: "" });
+    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+  });
+
+  it("emits [zone-investigation-summary] log after each run", async () => {
+    mocks.createChatCompletion.mockResolvedValueOnce(
+      textResponse("Found `src/usage/usageTracker.ts:220` and `src/api/server.ts:2790`.")
+    );
+
+    await runInvestigationFlow({
+      task: "which files reference getRunCost?",
+      repoPath: "/tmp/fake-repo",
+      runId: "run-telem-001",
+    });
+
+    const summaryCall = mocks.log.mock.calls.find(
+      (c: unknown[]) => c[0] === "[zone-investigation-summary]"
+    );
+    expect(summaryCall).toBeDefined();
+    const payload = JSON.parse(String(summaryCall![1]));
+    expect(payload.event).toBe("investigation_summary");
+    expect(payload.runId).toBe("run-telem-001");
+    expect(typeof payload.toolCallCount).toBe("number");
+    expect(typeof payload.ts).toBe("string");
+  });
+
+  it("citationCount in summary counts distinct backtick-path references", async () => {
+    mocks.createChatCompletion.mockResolvedValueOnce(
+      textResponse(
+        "## Results\n" +
+        "- `src/usage/usageTracker.ts:220` — definition\n" +
+        "- `src/api/server.ts:2790` — chat route\n" +
+        "- `src/api/server.ts:3126` — investigate route\n" +
+        "- `src/core/runLlmPatchFlow.ts:6023` — patch flow"
+      )
+    );
+
+    await runInvestigationFlow({
+      task: "find getRunCost",
+      repoPath: "/tmp/fake-repo",
+    });
+
+    const summaryCall = mocks.log.mock.calls.find(
+      (c: unknown[]) => c[0] === "[zone-investigation-summary]"
+    );
+    const payload = JSON.parse(String(summaryCall![1]));
+    expect(payload.citationCount).toBeGreaterThanOrEqual(3);
+  });
+
+  it("summary includes query truncated to 100 chars", async () => {
+    const longQuery = "x".repeat(150);
+    mocks.createChatCompletion.mockResolvedValueOnce(
+      textResponse("Nothing found.")
+    );
+
+    await runInvestigationFlow({ task: longQuery, repoPath: "/tmp/fake-repo" });
+
+    const summaryCall = mocks.log.mock.calls.find(
+      (c: unknown[]) => c[0] === "[zone-investigation-summary]"
+    );
+    const payload = JSON.parse(String(summaryCall![1]));
+    expect(payload.query.length).toBeLessThanOrEqual(100);
   });
 });
