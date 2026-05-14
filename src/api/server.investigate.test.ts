@@ -223,3 +223,53 @@ describe("/api/investigate", () => {
     expect(body).not.toHaveProperty("planApprovalRequired");
   });
 });
+
+describe("/api/patch back-compat: mode:'investigate' still routes to investigation flow", () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    setupAuthMocks();
+    process.env.VITEST = "true";
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    delete process.env.ZONE_USER_ID;
+    delete process.env.ZONE_USER_EMAIL;
+    delete process.env.ZONE_DEBUG_FALLBACK_USER_ID;
+    const { app } = await import("./server.js");
+    server = createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const addr = server.address();
+    if (!addr || typeof addr === "string") throw new Error("no address");
+    baseUrl = `http://127.0.0.1:${(addr as { port: number }).port}`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve, reject) =>
+      server.close((err) => (err ? reject(err) : resolve()))
+    );
+  });
+
+  it("POST /api/patch with mode:'investigate' returns investigation result (back-compat)", async () => {
+    runInvestigationFlowMock.mockResolvedValue(INVESTIGATION_RESULT);
+
+    const response = await fetch(`${baseUrl}/api/patch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "which files reference getRunCost?",
+        repoPath: "/home/bedo/zone-api",
+        runId: "run-compat-001",
+        userId: "dev-user",
+        mode: "investigate",
+      }),
+    });
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.decisionMode).toBe("investigation");
+    expect(body.applyPatches).toEqual([]);
+  });
+});

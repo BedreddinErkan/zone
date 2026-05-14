@@ -1794,8 +1794,8 @@
       if (/zone_api_post/i.test(low)) return 'native_unknown';
       return 'unknown';
     }
-    async function postPatchApi(body, headers, signal){
-      const path = '/api/patch';
+    async function postPatchApi(body, headers, signal, pathOverride){
+      const path = pathOverride || '/api/patch';
       const fullUrl = buildApiUrl(path);
       if (isTauriRuntime()) {
         const core = getTauriCore();
@@ -9794,7 +9794,8 @@
       openSSE(runId);
       appendLogLine(lb, { timestamp: nowTs(), message: 'Starting run…', status:'active' });
 
-      // 5) POST /api/patch
+      // 5) POST to route — /api/investigate for investigate mode, /api/patch otherwise
+      const _apiPath = runMode === 'investigate' ? '/api/investigate' : '/api/patch';
       try {
         console.log('[debug-mem] sending lastChangedFiles:', state.__lastChangedFiles);
         console.log('[debug-mem] sending lastAddedFunctions:', state.__lastAddedFunctions);
@@ -9815,9 +9816,9 @@
           fetchStartedAt: Date.now(),
           firstEventLogged: false,
         };
-        try { console.log('[send-debug] BEFORE fetch /api/patch, payload size=' + JSON.stringify(patchPayload).length + ', runId attempted=' + runId); } catch {}
+        try { console.log('[send-debug] BEFORE fetch ' + _apiPath + ', payload size=' + JSON.stringify(patchPayload).length + ', runId attempted=' + runId); } catch {}
         try {
-          console.log('[zone-ui-trigger] /api/patch fetch', {
+          console.log('[zone-ui-trigger] ' + _apiPath + ' fetch', {
             runId,
             triggerSource: 'sendMessage',
             timestamp: new Date().toISOString(),
@@ -9825,9 +9826,9 @@
           });
         } catch {}
         const _patchHeaders = { 'Content-Type': 'application/json', ...buildAuthHeaders() };
-        // Tauri mode goes through zone_api_post (native HTTP); browser mode
-        // hits /api/patch via plain fetch — byte-identical to the prior code.
-        const _postPatchOutcome = await postPatchApi(patchPayload, _patchHeaders);
+        // Investigate mode → /api/investigate (direct, no plan review);
+        // all other modes → /api/patch (back-compat path also handles intent=investigation).
+        const _postPatchOutcome = await postPatchApi(patchPayload, _patchHeaders, undefined, _apiPath);
         const res = _postPatchOutcome.res;
         const result = _postPatchOutcome.body;
         try {
