@@ -1252,15 +1252,6 @@
               </button>
               <div class="zone-dropdown-panel" role="listbox" aria-label="Provider"></div>
             </div>
-            <div class="zone-dropdown" data-dropdown="model">
-              <button class="zone-dropdown-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Agent model">
-                <span class="zone-dropdown-label">—</span>
-                <svg class="zone-dropdown-chevron" viewBox="0 0 12 12" aria-hidden="true">
-                  <path d="M3 5 L6 8 L9 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </button>
-              <div class="zone-dropdown-panel" role="listbox" aria-label="Agent model"></div>
-            </div>
           </div>
         </div>
       </div>
@@ -3420,9 +3411,15 @@
 
     function resolveActiveModelLabel(){
       try {
-        const label = document.querySelector('[data-dropdown="model"] .zone-dropdown-label');
-        const text = String(label?.textContent || '').trim();
-        if (text && text !== '—') return text;
+        const provider = getActiveProvider();
+        const preset = getActivePreset();
+        const models = getPresetTierModels(provider, preset);
+        const catalog = ZONE_MODEL_CATALOG[provider] || [];
+        if (models.high) {
+          const match = catalog.find((m) => String(m.id || '') === models.high);
+          if (match) return match.label;
+          return models.high;
+        }
       } catch {}
       try {
         const provider = getActiveProvider();
@@ -7064,8 +7061,7 @@
 
     function initFooterPickers(){
       const providerRoot = document.querySelector('[data-dropdown="provider"]');
-      const modelRoot = document.querySelector('[data-dropdown="model"]');
-      if (!providerRoot || !modelRoot) return;
+      if (!providerRoot) return;
       if (window._zoneFooterDropdowns) return; // idempotent
 
       const providerDropdown = new ZoneDropdown(providerRoot, {
@@ -7073,7 +7069,7 @@
         onSelect: (value) => {
           const next = value === 'anthropic' ? 'anthropic' : 'openai';
           setActiveProvider(next);
-          refreshFooterModelOptions();
+          updatePresetBadge();
           // Sync Settings panel if it's currently rendered.
           try {
             const radio = document.querySelector('input[name="zoneProviderRadio"][value="' + next + '"]');
@@ -7083,30 +7079,14 @@
           } catch {}
         },
       });
-      const modelDropdown = new ZoneDropdown(modelRoot, {
-        defaultLabel: '(server default)',
-        onSelect: (value) => {
-          const provider = getActiveProvider();
-          setActiveModel(provider, 'high', value);
-          // Sync matching Settings dropdown if it's rendered.
-          try {
-            const settingsSel = document.getElementById('modelSelect-' + provider + '-high');
-            if (settingsSel && settingsSel.value !== value){
-              settingsSel.value = value;
-              settingsSel.dispatchEvent(new Event('change'));
-            }
-          } catch {}
-        },
-      });
 
-      window._zoneFooterDropdowns = { provider: providerDropdown, model: modelDropdown };
+      window._zoneFooterDropdowns = { provider: providerDropdown };
 
       providerDropdown.setOptions([
         { value: 'openai', label: 'OpenAI' },
         { value: 'anthropic', label: 'Anthropic' },
       ]);
       providerDropdown.setValue(getActiveProvider());
-      refreshFooterModelOptions();
     }
 
     function updateFooterModelLabel(){
@@ -7114,7 +7094,7 @@
         const dropdowns = window._zoneFooterDropdowns;
         if (!dropdowns) return;
         dropdowns.provider.setValue(getActiveProvider());
-        refreshFooterModelOptions();
+        updatePresetBadge();
       } catch {}
     }
 
@@ -7159,11 +7139,23 @@
       quality: '★ Quality',
       custom: '⚙ Custom',
     };
+    function getPresetBadgeLabel(preset, provider){
+      if (preset !== 'custom') return PRESET_BADGE_LABELS[preset] || '⚖ Default';
+      // For Custom, show the effective models
+      const models = getActiveModels()[provider] || {};
+      const catalog = ZONE_MODEL_CATALOG[provider] || [];
+      function shortLabel(id){ const m = catalog.find(c => c.id === id); return m ? m.label.replace('Claude ','').replace('GPT-','') : (id || 'default'); }
+      if (models.high || models.standard) {
+        return '⚙ ' + shortLabel(models.high) + (models.standard && models.standard !== models.high ? '/' + shortLabel(models.standard) : '');
+      }
+      return '⚙ Custom';
+    }
     function updatePresetBadge(){
       const badge = document.getElementById('modelPresetBadge');
       if (!badge) return;
       const preset = getActivePreset();
-      badge.textContent = PRESET_BADGE_LABELS[preset] || '⚖ Default';
+      const provider = getActiveProvider();
+      badge.textContent = getPresetBadgeLabel(preset, provider);
       badge.style.display = 'inline-flex';
     }
 
@@ -7197,6 +7189,17 @@
       try { console.log('[zone] migrated legacy zoneOpenAIApiKey → zoneApiKeys.openai'); } catch {}
     }
     migrateLegacyApiKey();
+    // Migrate legacy model picker selections to 'custom' preset on first load.
+    (function migrateLegacyModelPicker(){
+      try {
+        if (localStorage.getItem(LS_MODEL_PRESET)) return; // preset already set
+        const activeModels = getActiveModels();
+        const hasAnyModel = Object.values(activeModels).some(v => v && typeof v === 'object' && (v.high || v.standard));
+        if (hasAnyModel) {
+          localStorage.setItem(LS_MODEL_PRESET, JSON.stringify({ preset: 'custom' }));
+        }
+      } catch {}
+    })();
     initFooterPickers();
     // Wire preset badge click → open Settings Model tab
     (function initPresetBadge(){
