@@ -1926,6 +1926,85 @@ export async function executeTool(
         fs.writeFileSync(abs, outputContent, "utf8");
       }
 
+      // Phase V Commit 3: inline TS syntax check pre-flush.
+      // Runs only in the non-staging path (abs is on disk). In the staging path
+      // the content lives in the Map; Phase J full-project tsc covers it on flush.
+      if (!input?.stagingFiles) {
+        const tsExt = path.extname(abs).toLowerCase();
+        const isTsFile = tsExt === ".ts" || tsExt === ".tsx" || tsExt === ".cts" || tsExt === ".mts";
+        if (isTsFile) {
+          const tscStart = Date.now();
+          let tscDecision: "approved" | "rejected" = "approved";
+          let tscErrorCodes: string[] = [];
+          let tscOutputForAgent: string | null = null;
+          try {
+            await execAsync(
+              `npx tsc --noEmit --moduleResolution bundler --target es2022 --skipLibCheck "${abs}"`,
+              { timeout: 5000 }
+            );
+          } catch (tscErr: unknown) {
+            const stdout = ((tscErr as { stdout?: string }).stdout) ?? "";
+            const ts1Matches = stdout.match(/TS1\d{3}/g) ?? [];
+            if (ts1Matches.length > 0) {
+              tscDecision = "rejected";
+              tscErrorCodes = [...new Set(ts1Matches)];
+              tscOutputForAgent = stdout;
+            }
+            // TS2xxx-only or timeout/other → approve; single-file context can't resolve imports
+          }
+          const tscLatencyMs = Date.now() - tscStart;
+          if (input?.selfValidationCounts) {
+            input.selfValidationCounts.totalLatencyMs += tscLatencyMs;
+            if (tscDecision === "approved") {
+              input.selfValidationCounts.inlineTsApproves += 1;
+            } else {
+              input.selfValidationCounts.inlineTsRejects += 1;
+            }
+          }
+          debugLog("[zone-self-validation]", JSON.stringify({
+            rule: "inline_ts_check",
+            decision: tscDecision,
+            filePath,
+            fileType: tsExt,
+            errorCodes: tscErrorCodes,
+            latencyMs: tscLatencyMs,
+            runId: input?.runId ?? null,
+          }));
+          if (tscDecision === "rejected") {
+            if (!stagedWrite(input?.stagingFiles, abs, original)) {
+              fs.writeFileSync(abs, original, "utf8");
+            }
+            const errorLines = (tscOutputForAgent ?? "")
+              .split("\n")
+              .filter((l) => /TS1\d{3}/.test(l))
+              .slice(0, 5)
+              .map((l) => {
+                const m = l.match(/\((\d+),\d+\): error (TS1\d{3}): (.+)/);
+                return m ? `  Line ${m[1]}: ${m[2]} — ${m[3]}` : `  ${l}`;
+              })
+              .join("\n");
+            return {
+              success: false,
+              output:
+                `SYNTAX_ERROR in ${filePath} (caught pre-flush):\n${errorLines}\n` +
+                `Please correct the syntax and retry the patch.`,
+              rejectionReason: "inline_ts_syntax_error",
+            };
+          }
+        } else {
+          if (input?.selfValidationCounts) input.selfValidationCounts.inlineTsSkips += 1;
+          debugLog("[zone-self-validation]", JSON.stringify({
+            rule: "inline_ts_check",
+            decision: "skipped",
+            filePath,
+            fileType: tsExt,
+            errorCodes: [],
+            latencyMs: 0,
+            runId: input?.runId ?? null,
+          }));
+        }
+      }
+
       // ─── Post-write syntax validation ────────────────────────────────────────
       const validation = validateSyntax(outputContent, abs);
       const syntaxBroken = !validation.ok && validation.reason === "parse_error";
