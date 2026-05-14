@@ -8756,6 +8756,37 @@
       return head ? (head + ' ...') : '...';
     }
 
+    // F1.1: incremental JSON parsing helpers for tool-input typewriter blocks.
+    function decodeJsonString(s) {
+      return s.replace(/\\(["\\\/bfnrt]|u[0-9a-fA-F]{4})/g, function(m, e) {
+        if (e === 'n') return '\n';
+        if (e === 't') return '\t';
+        if (e === 'r') return '\r';
+        if (e === '"') return '"';
+        if (e === '\\') return '\\';
+        if (e === '/') return '/';
+        if (e === 'b') return '\b';
+        if (e === 'f') return '\f';
+        return String.fromCharCode(parseInt(e.slice(1), 16));
+      });
+    }
+    function tryExtractToolStreamFields(accumJson) {
+      var result = { filePath: '', patchRaw: '' };
+      var fpMatch = accumJson.match(/"filePath"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      if (fpMatch) result.filePath = decodeJsonString(fpMatch[1]);
+      var patchMatch = accumJson.match(/"(?:patch|content)"\s*:\s*"([\s\S]*)$/);
+      if (patchMatch) {
+        var raw = patchMatch[1];
+        var completeMatch = raw.match(/^((?:[^"\\]|\\.)*)"[\s\S]*$/);
+        if (completeMatch) {
+          result.patchRaw = completeMatch[1];
+        } else {
+          result.patchRaw = raw.endsWith('\\') ? raw.slice(0, -1) : raw;
+        }
+      }
+      return result;
+    }
+
     function handleSSEPayload(payload, runId){
       const termEvt =
         (payload && payload.progress && (payload.progress.type === 'terminal_output' || payload.progress.type === 'terminal_done'))
@@ -9058,16 +9089,20 @@
           block.appendChild(hdr);
           block.appendChild(body);
           if (logBlock) logBlock.appendChild(block);
-          state.__toolStreamBlocks[blockId] = { el: block, pre, hdr, toolName: toolNameTsd, settled: false };
+          state.__toolStreamBlocks[blockId] = { el: block, pre, hdr, toolName: toolNameTsd, settled: false, accumJson: '', filePath: '' };
           scrollChatIfFollowing(runId);
         }
         const bs = state.__toolStreamBlocks[blockId];
         if (bs && bs.pre) {
-          bs.pre.textContent = (bs.pre.textContent || '') + delta;
-          // Update header label when filePath becomes available.
-          if (titleTsd && bs.hdr) {
-            const lbl = bs.hdr.querySelector('.label');
-            if (lbl) lbl.textContent = titleTsd;
+          bs.accumJson = (bs.accumJson || '') + delta;
+          const extracted = tryExtractToolStreamFields(bs.accumJson);
+          if (extracted.filePath && extracted.filePath !== bs.filePath) {
+            bs.filePath = extracted.filePath;
+            const fpLbl = bs.hdr ? bs.hdr.querySelector('.label') : null;
+            if (fpLbl) fpLbl.textContent = '✎ Writing ' + extracted.filePath + '...';
+          }
+          if (extracted.patchRaw) {
+            bs.pre.textContent = decodeJsonString(extracted.patchRaw);
           }
           scrollChatIfFollowing(runId);
         }

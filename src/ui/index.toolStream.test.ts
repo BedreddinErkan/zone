@@ -221,7 +221,7 @@ describe("Phase F1 — UI tool_input_delta rendering", () => {
     expect(block.dataset.toolName).toBe("apply_patch");
   });
 
-  it("delta events append content to the pre element", () => {
+  it("delta events append decoded patch content to the pre element", () => {
     const { ctx, ensureEl } = buildHarness();
     const logBlock = ensureEl(`logBlock-${RUN_ID}`);
 
@@ -232,21 +232,23 @@ describe("Phase F1 — UI tool_input_delta rendering", () => {
     const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
     const pre = block.querySelectorAll(".ts-code-pre")[0]!;
     expect(pre!.textContent!.length).toBeGreaterThan(0);
-    expect(pre!.textContent).toContain('{"filePath":"src/a.ts"');
+    // F1.1: pre shows decoded patch content, not raw JSON
+    expect(pre!.textContent).toContain("--- FIND ---");
+    expect(pre!.textContent).toContain("--- REPLACE ---");
   });
 
-  it("header label updates to include filePath from title", () => {
+  it("header label updates when filePath value becomes parseable", () => {
     const { ctx, ensureEl } = buildHarness();
     const logBlock = ensureEl(`logBlock-${RUN_ID}`);
 
-    // First delta arrives without filePath in title, second has it.
+    // F1.1: label updates client-side once the full filePath value is extractable.
     sendDelta(ctx, "blk-title", '{"filePath":"', true, "✎ Writing...");
-    sendDelta(ctx, "blk-title", 'src/core/runner.ts', false, "✎ Writing runner.ts...");
+    sendDelta(ctx, "blk-title", 'src/core/runner.ts","patch":"', false, "");
 
     const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
     const hdr = block.querySelector(".livecode-h");
     const lbl = hdr.querySelector(".label");
-    expect(lbl.textContent).toContain("runner.ts");
+    expect(lbl.textContent).toBe("✎ Writing src/core/runner.ts...");
   });
 
   it("tool_result success → .ts-settled and '✓ Patched' label", () => {
@@ -301,5 +303,60 @@ describe("Phase F1 — UI tool_input_delta rendering", () => {
     const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
     expect(block.classList.contains("ts-settled")).toBe(false);
     expect(block.classList.contains("ts-failed")).toBe(false);
+  });
+});
+
+describe("Phase F1.1 — incremental JSON parsing for typewriter render", () => {
+  it("filePath extracted from accumulated JSON updates header label", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    // The closing quote after the filePath value makes it extractable.
+    sendDelta(ctx, "blk-fp1", '{"filePath":"src/utils/files.ts","patch":"', true, "✎ Writing...", "apply_patch");
+
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    const lbl = block.querySelector(".livecode-h").querySelector(".label");
+    expect(lbl.textContent).toBe("✎ Writing src/utils/files.ts...");
+  });
+
+  it("escaped newlines in patch JSON render as real newlines in pre", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    // '\\n' in JS source = literal backslash-n (the JSON escape sequence for newline).
+    sendDelta(ctx, "blk-esc1", '{"filePath":"src/a.ts","patch":"line1\\nline2"}', true, "", "apply_patch");
+
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    const pre = block.querySelectorAll(".ts-code-pre")[0]!;
+    // '\n' in JS source = actual newline U+000A — the decoded result.
+    expect(pre.textContent).toBe("line1\nline2");
+  });
+
+  it("truncated mid-string patch value does not crash and creates the block", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    // Patch value is cut off mid-stream — no closing quote yet.
+    sendDelta(ctx, "blk-trunc1", '{"filePath":"src/b.ts","patch":"partial con', true, "", "apply_patch");
+
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    expect(block).toBeTruthy();
+    // Block exists and pre is present — content may be partial but no crash.
+    const pre = block.querySelectorAll(".ts-code-pre")[0]!;
+    expect(pre).toBeTruthy();
+  });
+
+  it("complete JSON with escaped quote renders decoded patch in pre", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    // '\\n' = literal \n, '\\"' = literal \" — both are JSON escape sequences.
+    sendDelta(ctx, "blk-full1", '{"filePath":"src/c.ts","patch":"old line\\nnew \\"quoted\\" line"}', true, "", "apply_patch");
+
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    const pre = block.querySelectorAll(".ts-code-pre")[0]!;
+    expect(pre.textContent).toContain("old line");
+    expect(pre.textContent.includes("\n")).toBe(true);  // actual newline
+    expect(pre.textContent).toContain('"quoted"');       // decoded backslash-quote
   });
 });
