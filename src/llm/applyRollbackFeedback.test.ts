@@ -6,10 +6,12 @@ import { describe, expect, it } from "vitest";
 import {
   ROLLED_BACK_SUGGESTIONS,
   applyRolledBackMessageHasSuggestion,
+  buildApplyRolledBackMarkerLog,
   buildApplyRolledBackMessage,
   isApplyRolledBackMessage,
   parseTscErrorPreview,
   pickRolledBackSuggestion,
+  pickRolledBackSuggestionCode,
 } from "./applyRollbackFeedback.js";
 
 describe("Phase J.4 — parseTscErrorPreview", () => {
@@ -209,5 +211,135 @@ describe("Phase J.4 C2 — end-to-end heuristic on realistic tsc preview", () =>
   it("applyRolledBackMessageHasSuggestion returns false for non-marker output", () => {
     expect(applyRolledBackMessageHasSuggestion("just a string")).toBe(false);
     expect(applyRolledBackMessageHasSuggestion("")).toBe(false);
+  });
+});
+
+describe("Phase J.4.1 — parseTscErrorPreview hardening for real tsc output", () => {
+  it("parses pretty-format tsc output (path:line:col - error TS####)", () => {
+    // Modern tsc / npm-script wrappers often emit this even when piped.
+    const preview =
+      `src/llm/detectIntent.ts:42:7 - error TS2305: Module '"./detect"' has no exported member 'detectFramework'.\n` +
+      `src/llm/detectIntent.ts:43:11 - error TS2304: Cannot find name 'detectFramework'.`;
+    const rows = parseTscErrorPreview(preview);
+    expect(rows.length).toBe(2);
+    expect(rows[0]).toMatchObject({
+      file: "src/llm/detectIntent.ts",
+      line: 42,
+      col: 7,
+      code: "TS2305",
+    });
+    expect(rows[1]!.code).toBe("TS2304");
+    // The heuristic must fire — this is the J.4.1 dogfood gap.
+    expect(pickRolledBackSuggestion(rows)).toBe(ROLLED_BACK_SUGGESTIONS.get("TS2305")!);
+  });
+
+  it("strips ANSI color codes before parsing pretty output", () => {
+    const esc = String.fromCharCode(0x1b);
+    const RED = `${esc}[91m`;
+    const GREY = `${esc}[90m`;
+    const RESET = `${esc}[0m`;
+    const preview = `${GREY}src/a.ts${RESET}:${RED}12${RESET}:${RED}5${RESET} - ${RED}error${RESET} TS2305: ${RED}missing 'baz'${RESET}`;
+    const rows = parseTscErrorPreview(preview);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.code).toBe("TS2305");
+    expect(rows[0]!.file).toBe("src/a.ts");
+    expect(rows[0]!.message).toContain("missing 'baz'");
+  });
+
+  it("falls back to code-only extraction when file/line/col are unrecognized", () => {
+    // Build wrapper output with no parseable location anchor.
+    const preview = `ERROR in [tsc] - error TS2339: Property 'role' does not exist on type 'User'.`;
+    const rows = parseTscErrorPreview(preview);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.code).toBe("TS2339");
+    // Heuristic still fires via the code-only fallback.
+    expect(pickRolledBackSuggestion(rows)).toBe(ROLLED_BACK_SUGGESTIONS.get("TS2339")!);
+  });
+
+  it("legacy format still parses (back-compat with J.4 C1 fixture)", () => {
+    const preview = `src/foo.ts(12,5): error TS2305: Module '"./bar"' has no exported member 'baz'.`;
+    const rows = parseTscErrorPreview(preview);
+    expect(rows.length).toBe(1);
+    expect(rows[0]).toMatchObject({ code: "TS2305", file: "src/foo.ts", line: 12, col: 5 });
+  });
+
+  it("non-tsc verifier output (vitest summary) still goes to raw-message bucket", () => {
+    const preview = `FAIL src/x.test.ts\n  ✗ adds two numbers\n  Tests: 1 failed, 3 passed`;
+    const rows = parseTscErrorPreview(preview);
+    expect(rows.length).toBe(3);
+    expect(rows.every((r) => r.code === "")).toBe(true);
+  });
+
+  it("pickRolledBackSuggestionCode returns the matched code (not just the suggestion text)", () => {
+    expect(pickRolledBackSuggestionCode([{ code: "TS2305", message: "x" }])).toBe("TS2305");
+    expect(pickRolledBackSuggestionCode([{ code: "TS2304", message: "x" }])).toBe("TS2304");
+    expect(pickRolledBackSuggestionCode([{ code: "TS2339", message: "x" }])).toBe("TS2339");
+    expect(pickRolledBackSuggestionCode([{ code: "TS6133", message: "x" }])).toBeNull();
+    expect(pickRolledBackSuggestionCode([])).toBeNull();
+  });
+});
+
+describe("Phase J.4.1 — buildApplyRolledBackMarkerLog payload shape", () => {
+  it("returns the full diagnostic record with codes, count, and suggestion", () => {
+    const errors = [
+      { code: "TS2305", message: "missing 'baz'", file: "src/a.ts", line: 1, col: 1 },
+      { code: "TS2304", message: "cannot find 'qux'", file: "src/a.ts", line: 2, col: 2 },
+    ];
+    const markerMessage = buildApplyRolledBackMessage({
+      filePath: "src/a.ts",
+      errors,
+      restoredFiles: ["src/a.ts"],
+    });
+    const payload = buildApplyRolledBackMarkerLog({
+      site: "natural_completion",
+      markerMessage,
+      errors,
+      filePathsRestored: ["src/a.ts"],
+      runId: "run-42",
+    });
+    expect(payload.site).toBe("natural_completion");
+    expect(payload.markerPreview.startsWith("APPLY_ROLLED_BACK\n")).toBe(true);
+    expect(payload.markerPreview.length).toBeLessThanOrEqual(200);
+    expect(payload.errorCount).toBe(2);
+    expect(payload.errorCodes).toEqual(["TS2305", "TS2304"]);
+    expect(payload.suggestionApplied).toBe("TS2305");
+    expect(payload.filePathsRestored).toEqual(["src/a.ts"]);
+    expect(payload.runId).toBe("run-42");
+  });
+
+  it("suggestionApplied is null when no heuristic code is present", () => {
+    const errors = [{ code: "TS6133", message: "unused 'foo'" }];
+    const markerMessage = buildApplyRolledBackMessage({
+      filePath: "src/a.ts",
+      errors,
+      restoredFiles: ["src/a.ts"],
+    });
+    const payload = buildApplyRolledBackMarkerLog({
+      site: "max_iter",
+      markerMessage,
+      errors,
+      filePathsRestored: ["src/a.ts"],
+      runId: null,
+    });
+    expect(payload.suggestionApplied).toBeNull();
+    expect(payload.errorCodes).toEqual(["TS6133"]);
+  });
+
+  it("errorCodes dedupes repeated codes and skips empty (non-tsc) rows", () => {
+    const errors = [
+      { code: "TS2305", message: "a" },
+      { code: "TS2305", message: "b" },
+      { code: "", message: "vitest summary line" },
+      { code: "TS2304", message: "c" },
+    ];
+    const payload = buildApplyRolledBackMarkerLog({
+      site: "inline_ts_check",
+      markerMessage: "APPLY_ROLLED_BACK\n…",
+      errors,
+      filePathsRestored: [],
+      runId: null,
+    });
+    expect(payload.errorCodes).toEqual(["TS2305", "TS2304"]);
+    expect(payload.errorCount).toBe(4); // raw count, not dedupe
   });
 });

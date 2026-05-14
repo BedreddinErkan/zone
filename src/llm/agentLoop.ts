@@ -35,6 +35,7 @@ import {
 } from "../usage/iterCostMeter.js";
 import { parseTodoProgressMarkers } from "../core/todoLifecycle.js";
 import {
+  buildApplyRolledBackMarkerLog,
   buildApplyRolledBackMessage,
   parseTscErrorPreview,
 } from "./applyRollbackFeedback.js";
@@ -3414,6 +3415,18 @@ Example:
             filePathsRestored: restoredFiles,
             runId: input.runId ?? null,
           }));
+          // J.4.1: separate grep-friendly marker log so `grep APPLY_ROLLED_BACK`
+          // on the server log surfaces every rollback with the actual codes
+          // and suggestion applied — not just an opaque "feedback" event.
+          log("[zone-apply-rolled-back-marker]", JSON.stringify(
+            buildApplyRolledBackMarkerLog({
+              site: "natural_completion",
+              markerMessage: rolledBackBody,
+              errors,
+              filePathsRestored: restoredFiles,
+              runId: input.runId ?? null,
+            })
+          ));
         }
       } else if (
         finalizeResult.verification.status === "skipped" &&
@@ -3700,6 +3713,16 @@ Example:
         filePathsRestored: restoredFiles,
         runId: input.runId ?? null,
       }));
+      // J.4.1: grep-friendly marker log (see natural-completion branch).
+      log("[zone-apply-rolled-back-marker]", JSON.stringify(
+        buildApplyRolledBackMarkerLog({
+          site: "max_iter",
+          markerMessage: rolledBackBody,
+          errors,
+          filePathsRestored: restoredFiles,
+          runId: input.runId ?? null,
+        })
+      ));
     }
   } else if (
     finalizeResult.verification.status === "skipped" &&

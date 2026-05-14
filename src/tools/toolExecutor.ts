@@ -1998,13 +1998,16 @@ export async function executeTool(
             // syntax-level (single-file) so the cross-file suggestion
             // heuristic won't fire — the marker + restored-file scope
             // is what the agent needs to understand the rollback.
-            const { parseTscErrorPreview, buildApplyRolledBackMessage } = await import(
-              "../llm/applyRollbackFeedback.js"
-            );
+            const {
+              parseTscErrorPreview,
+              buildApplyRolledBackMessage,
+              buildApplyRolledBackMarkerLog,
+            } = await import("../llm/applyRollbackFeedback.js");
             const errors = parseTscErrorPreview(tscOutputForAgent ?? "");
+            const tsErrors = errors.filter((e) => e.code.startsWith("TS"));
             const message = buildApplyRolledBackMessage({
               filePath,
-              errors: errors.filter((e) => e.code.startsWith("TS")) ,
+              errors: tsErrors,
               restoredFiles: [filePath],
             });
             log("[zone-apply-rolled-back-feedback]", JSON.stringify({
@@ -2015,6 +2018,16 @@ export async function executeTool(
               codes: tscErrorCodes,
               runId: input?.runId ?? null,
             }));
+            // J.4.1: grep-friendly marker log with codes + suggestionApplied.
+            log("[zone-apply-rolled-back-marker]", JSON.stringify(
+              buildApplyRolledBackMarkerLog({
+                site: "inline_ts_check",
+                markerMessage: message,
+                errors: tsErrors,
+                filePathsRestored: [filePath],
+                runId: input?.runId ?? null,
+              })
+            ));
             return {
               success: false,
               output: message,

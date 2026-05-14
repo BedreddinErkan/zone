@@ -69,29 +69,88 @@ export function pickRolledBackSuggestion(errors: ReadonlyArray<RolledBackError>)
 }
 
 /**
+ * J.4.1: which heuristic code (if any) produced the suggestion. Returns
+ * the matched error code (e.g. "TS2305") or null when no heuristic
+ * code is present. Used for telemetry so we can see whether a rollback
+ * carried an actionable hint without re-parsing the rendered message.
+ */
+export function pickRolledBackSuggestionCode(
+  errors: ReadonlyArray<RolledBackError>
+): string | null {
+  for (const e of errors) {
+    if (ROLLED_BACK_SUGGESTIONS.has(e.code)) return e.code;
+  }
+  return null;
+}
+
+/**
+ * J.4.1: strip ANSI color/SGR escape sequences. tsc emits coloured
+ * output in some environments (npm script wrappers, FORCE_COLOR,
+ * modern bundler integrations) even when stdout isn't a TTY. The
+ * J.4 (pre-J.4.1) regex didn't account for that, so the codes were
+ * extracted as `code:""` and the heuristic always missed.
+ */
+function stripAnsi(s: string): string {
+  // ANSI/SGR pattern: ESC (0x1B) + \[\ + numeric/; params + terminator letter.
+  // Built dynamically so the source file stays free of literal control chars
+  // (some editors / tooling normalize them away).
+  const esc = String.fromCharCode(0x1b);
+  const ansiPattern = new RegExp(esc + '\\[[0-9;]*[A-Za-z]', 'g');
+  return s.replace(ansiPattern, '');
+}
+
+/**
  * Parse a verification command's error preview into structured rows.
- * Recognizes the tsc default form `<file>(<line>,<col>): error TS####: <message>`.
- * Lines that don't match drop into a `code:"", message:<rawLine>` row so
- * non-tsc verifiers still surface readable output.
+ *
+ * Recognizes BOTH tsc output formats (J.4.1 hardening):
+ *   - Legacy:  `path(line,col): error TS####: <message>`     ← tsc default when piped
+ *   - Pretty:  `path:line:col - error TS####: <message>`     ← tsc --pretty + many wrappers
+ *
+ * Plus an `error TS####:`-anywhere fallback so a code is still extracted
+ * even when the line has unfamiliar prefix/suffix decoration (build
+ * wrappers, indentation, "ERROR in file:" preludes). Lines that match
+ * none of the above drop into a `code:"", message:<rawLine>` row so
+ * non-tsc verifiers (vitest/jest summaries) still surface readable output.
  */
 export function parseTscErrorPreview(preview: string): RolledBackError[] {
   const out: RolledBackError[] = [];
   for (const raw of String(preview ?? "").split(/\r?\n/)) {
-    const line = raw.trim();
+    const line = stripAnsi(raw).trim();
     if (!line) continue;
-    // src/foo.ts(12,5): error TS2305: Module '"./bar"' has no exported member 'baz'.
-    const m = line.match(/^(.+?)\((\d+),(\d+)\):\s*error\s+(TS\d+):\s*(.+)$/);
-    if (m) {
+    // 1) Legacy: src/foo.ts(12,5): error TS2305: Module ... has no exported member 'baz'.
+    const legacy = line.match(/^(.+?)\((\d+),(\d+)\):\s*error\s+(TS\d+):\s*(.+)$/);
+    if (legacy) {
       out.push({
-        file: m[1],
-        line: Number(m[2]),
-        col: Number(m[3]),
-        code: m[4]!,
-        message: m[5]!,
+        file: legacy[1],
+        line: Number(legacy[2]),
+        col: Number(legacy[3]),
+        code: legacy[4]!,
+        message: legacy[5]!,
       });
       continue;
     }
-    // Non-tsc lines (e.g. jest/vitest summary) — surface raw text.
+    // 2) Pretty: src/foo.ts:12:5 - error TS2305: Module ... (note: `-` separator, `:` not `(...)`).
+    //    Anchor the file segment so a stray colon in the message can't be misread as `file:line:col`.
+    const pretty = line.match(/^(\S.+?):(\d+):(\d+)\s*-\s*error\s+(TS\d+):\s*(.+)$/);
+    if (pretty) {
+      out.push({
+        file: pretty[1],
+        line: Number(pretty[2]),
+        col: Number(pretty[3]),
+        code: pretty[4]!,
+        message: pretty[5]!,
+      });
+      continue;
+    }
+    // 3) Fallback: TS code visible anywhere in the line. Captures the code
+    //    even when file/line/col are missing or in an unrecognized shape —
+    //    crucial for the heuristic lookup, which only needs `code`.
+    const codeOnly = line.match(/\berror\s+(TS\d+):?\s*(.*)$/);
+    if (codeOnly) {
+      out.push({ code: codeOnly[1]!, message: codeOnly[2] || line });
+      continue;
+    }
+    // 4) Non-tsc lines (vitest summary, etc.) — surface raw text.
     out.push({ code: "", message: line });
   }
   return out;
@@ -167,4 +226,47 @@ export function isApplyRolledBackMessage(s: string): boolean {
 export function applyRolledBackMessageHasSuggestion(msg: string): boolean {
   if (!isApplyRolledBackMessage(msg)) return false;
   return /\nSuggested: /.test(msg);
+}
+
+/**
+ * J.4.1: shape for the `[zone-apply-rolled-back-marker]` diagnostic log
+ * payload. Centralized so the three rollback callsites
+ * (agentLoop.natural_completion, agentLoop.max_iter,
+ *  toolExecutor.inline_ts_check) emit a consistent record.
+ */
+export interface ApplyRolledBackMarkerLog {
+  /** Where in the loop the rollback originated. */
+  site: "natural_completion" | "max_iter" | "inline_ts_check";
+  /** First 200 chars of the rendered marker — grep-friendly. */
+  markerPreview: string;
+  /** Number of parsed errors. */
+  errorCount: number;
+  /** Distinct TS error codes extracted (e.g. ["TS2305","TS2304"]). */
+  errorCodes: string[];
+  /** The error code that triggered the heuristic suggestion, or null. */
+  suggestionApplied: string | null;
+  /** Files restored to pre-apply state. */
+  filePathsRestored: string[];
+  /** Run id (optional — may be null for synthetic / test contexts). */
+  runId: string | null;
+}
+
+/** Build the diagnostic payload from the message + parsed errors. */
+export function buildApplyRolledBackMarkerLog(input: {
+  site: ApplyRolledBackMarkerLog["site"];
+  markerMessage: string;
+  errors: ReadonlyArray<RolledBackError>;
+  filePathsRestored: ReadonlyArray<string>;
+  runId: string | null;
+}): ApplyRolledBackMarkerLog {
+  const codes = Array.from(new Set(input.errors.map((e) => e.code).filter(Boolean)));
+  return {
+    site: input.site,
+    markerPreview: String(input.markerMessage ?? "").slice(0, 200),
+    errorCount: input.errors.length,
+    errorCodes: codes,
+    suggestionApplied: pickRolledBackSuggestionCode(input.errors),
+    filePathsRestored: [...input.filePathsRestored],
+    runId: input.runId,
+  };
 }
