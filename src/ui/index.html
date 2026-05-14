@@ -626,35 +626,12 @@
       scroll-behavior:smooth;
     }
     /* Dummy livecode typewriter removed; streaming uses <pre>. */
-    /* F1: tool-input-stream block — reuses .livecode shell, violet accent on label. */
-    .tool-stream-block .livecode-h .label{color:var(--violet);font-weight:500}
-    /* F1.2: fixed-height stream container with internal scroll so growing
-       patches don't push the rest of the chat downward. */
-    .tool-stream-block{width:100%}
-    .tool-stream-block .livecode-body{max-height:320px;overflow-y:auto;overflow-x:hidden}
-    .tool-stream-block .livecode-body pre{font-size:0.72rem;white-space:pre-wrap;word-break:break-word;max-height:none !important;overflow:visible !important}
-    .tool-stream-block.ts-settled .livecode-h .label{color:#4ade80}
-    .tool-stream-block.ts-settled .livecode-dot{display:none}
-    .tool-stream-block.ts-failed .livecode-h .label{color:#f87171}
-    .ts-diff-line{display:block;padding:1px 4px;line-height:1.5}
-    .ts-del{background:#3f1f1f;color:#fca5a5}
-    .ts-add{background:#1f3f1f;color:#86efac}
-    /* F1.2: diff render with prefix and softer tints. Lines apply both
-       .stream-diff-* (new) and .ts-del/.ts-add (legacy) class names. */
+    /* F1.3: diff line spans rendered inside the side-panel live-stream slot.
+       Previously F1/F1.1/F1.2 also styled a chat-embedded .tool-stream-block
+       shell — that has been retired; the slot is now the only renderer. */
     .stream-diff-line{display:block;font-family:var(--font-family-mono);white-space:pre;padding:0 8px;line-height:1.5}
     .stream-diff-removed{color:#fca5a5;background:rgba(239,68,68,0.08)}
     .stream-diff-added{color:#86efac;background:rgba(34,197,94,0.08)}
-    /* F1.2: collapsed state — header-only 36px row, no body. Animated
-       max-height transition keeps expand/collapse smooth instead of snapping. */
-    .tool-stream-block .livecode-body{transition:max-height 150ms ease}
-    .tool-stream-block.ts-collapsed{min-height:36px;max-height:36px;overflow:hidden}
-    .tool-stream-block.ts-collapsed .livecode-body{max-height:0;padding:0;overflow:hidden}
-    .tool-stream-block .livecode-h{min-height:36px;display:flex;align-items:center;gap:var(--space-xs)}
-    /* F1.2: active streaming block gets a thin violet left border to indicate
-       "agent is writing here right now" — gone once settled/failed/collapsed. */
-    .tool-stream-block:not(.ts-settled):not(.ts-failed):not(.ts-collapsed){border-left:3px solid var(--violet)}
-    .ts-chevron{background:none;border:none;cursor:pointer;color:var(--text-3);font-size:0.7rem;padding:0 4px;line-height:1;margin-left:auto;transition:transform 120ms ease}
-    .ts-chevron:hover{color:var(--text-1)}
     /* When streaming owns the block, suppress any dummy animations/lines. */
     .livecode.streaming .livecode-h .label{animation:none;opacity:1}
     .livecode.streaming .livecode-dot{display:none}
@@ -8885,11 +8862,12 @@
         // Skip empty trailing lines in find/replace sections to avoid blank rows.
         if (!line.length && j === lines.length - 1) continue;
         var span = document.createElement('span');
-        // Dual class names: new stream-diff-* per F1.2 spec for styling,
-        // legacy ts-del/ts-add kept so the diff-stat counter and tests still match.
+        // F1.3: spans only use the .stream-diff-* class names; the legacy
+        // .ts-del/.ts-add aliases existed for the now-retired chat-embedded
+        // block and its diff-stat counter.
         var isFind = section === 'find';
         span.className = 'stream-diff-line ' +
-          (isFind ? 'stream-diff-removed ts-del' : 'stream-diff-added ts-add');
+          (isFind ? 'stream-diff-removed' : 'stream-diff-added');
         span.textContent = (isFind ? '- ' : '+ ') + line;
         preEl.appendChild(span);
       }
