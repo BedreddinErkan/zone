@@ -98,6 +98,17 @@ export interface AgentLoopInput {
   /** Optional import-ecosystem context block built by buildImportContextSummary. Injected by runLlmPatchFlow. */
   importContextSummary?: string;
   /**
+   * J.5: prior run's final summary, threaded in by runLlmPatchFlow when
+   * the conversation has an `agent_summary` event from a recent rollback.
+   * Capped + marker-preserving truncation is applied at the load site
+   * (extractPriorRunSummary). When non-empty, the agent loop injects a
+   * "PRIOR RUN CONTEXT" framing block above the user task so the agent
+   * reads APPLY_ROLLED_BACK markers from previous attempts before
+   * re-investigating. Empty / undefined → no-op (parent of all existing
+   * agentLoop callsites is unchanged).
+   */
+  priorRunSummary?: string;
+  /**
    * BYOK: user-supplied LLM API key (sent from the browser via X-Zone-LLM-Key header).
    * Takes priority over process.env.OPENAI_API_KEY when present.
    * Never logged â€” only the source ("user" vs "env") is logged.
@@ -308,6 +319,11 @@ export function assembleAgentSystemPrompt(input: {
     `- Read the error list (file, line, code, message). If you see a line beginning with "Suggested: ", that is a directional hint — usually the patch needs to coordinate edits across more files than you touched.\n` +
     `- Do NOT use shell commands (sed, awk, python, cat >, etc.) to bypass the rollback. The underlying type/semantic error is real; defeating the rollback via shell leaves the codebase in the same broken state the verifier already caught.\n` +
     `- Re-investigate (read the files referenced in the errors, identify the missing coordinated edit), then retry with apply_patch or — for ≥3-file coordinated edits — a single Task subagent dispatch.\n\n` +
+    `PRIOR RUN CONTEXT — if the user message begins with "PRIOR RUN CONTEXT — your last attempt in this thread produced this result:":\n` +
+    `- This thread had a previous run; its final summary is the block between that header and "END PRIOR RUN CONTEXT.".\n` +
+    `- If the block contains an APPLY_ROLLED_BACK marker, treat it as your starting point. The error list + restored-file paths there ARE the real obstacle — re-investigate from THOSE specific errors. Do not start a fresh investigation, do not re-derive the task from the user's follow-up wording alone.\n` +
+    `- If the block contains a "Suggested:" line, apply that direction (usually a coordinated multi-file edit via the Task tool for fan-out).\n` +
+    `- The user's actual current task follows the END PRIOR RUN CONTEXT line — combine the two: prior context tells you WHERE the problem is, the user message tells you what they want next.\n\n` +
     `TEST FAILURES — investigate, don't summarize:\n` +
     `- Read the file/line in the error. Decide: caused by your change, or pre-existing?\n` +
     `- Pre-existing: fix if simple, else note as out-of-scope in your final summary.\n` +
@@ -2062,6 +2078,20 @@ Example:
     ? `${MODE_SYSTEM_PROMPT_PREFIX[mode]}\n\n${baseSystemContent}`
     : baseSystemContent;
 
+  // J.5: when a prior run's summary is threaded in, prepend it to the user
+  // message as a labeled framing block. The agent's system prompt
+  // documents the PRIOR RUN CONTEXT convention, so the agent reads
+  // APPLY_ROLLED_BACK markers from previous attempts before investigating.
+  const priorRun = String(input.priorRunSummary ?? "").trim();
+  const userContent = priorRun
+    ? (
+        "PRIOR RUN CONTEXT — your last attempt in this thread produced this result:\n" +
+        priorRun +
+        "\nEND PRIOR RUN CONTEXT.\n\n" +
+        input.task
+      )
+    : input.task;
+
   // Chat Completions messages (system + user kickoff).
   const responseInput: ChatCompletionMessageParam[] = [
     {
@@ -2070,7 +2100,7 @@ Example:
     },
     {
       role: "user",
-      content: input.task,
+      content: userContent,
     },
   ];
 

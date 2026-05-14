@@ -24,6 +24,14 @@ export type RunLogInput = {
   billingMode?: ConversationBillingMode;
   tokensUsed?: number;
   routeName?: string;
+  /**
+   * J.5: the agent's final summary string from the just-completed run.
+   * When present and the run rolled back (decisionMode === "rolled_back"),
+   * we persist a compact {type:"agent_summary"} event into the conversation
+   * so the next run can thread it back into runAgentLoop as priorRunSummary.
+   * Skipped for non-rollback runs to keep the conversation lean.
+   */
+  agentSummary?: string;
 };
 
 function getSupabaseClient(): SupabaseClient | null {
@@ -140,7 +148,7 @@ logBillingDebug("billing inputs before resolver", {
         : randomUUID();
 
     const now = Date.now();
-    const appendMessages = [
+    const appendMessages: unknown[] = [
       {
         type: "user",
         text: input.task,
@@ -159,6 +167,24 @@ logBillingDebug("billing inputs before resolver", {
         executionId: input.executionId ?? null,
       },
     ];
+    // J.5: persist the agent's summary on rollback so the next run can
+    // thread it back into runAgentLoop. Capped + marker-preserving to
+    // keep the conversation row size bounded.
+    if (
+      input.decisionMode === "rolled_back" &&
+      typeof input.agentSummary === "string" &&
+      input.agentSummary.trim()
+    ) {
+      const { truncatePriorRunSummary } = await import(
+        "../llm/applyRollbackFeedback.js"
+      );
+      appendMessages.push({
+        type: "agent_summary",
+        ts: now,
+        decisionMode: input.decisionMode,
+        text: truncatePriorRunSummary(input.agentSummary),
+      });
+    }
 
     conversation = await appendConversationMessages(supabase, {
       userId: effectiveUserId,

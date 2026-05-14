@@ -251,6 +251,74 @@ export interface ApplyRolledBackMarkerLog {
   runId: string | null;
 }
 
+/**
+ * J.5: cross-run summary threading helpers.
+ *
+ * A patch run that ended in a rollback gets its loop.summary persisted to
+ * the conversation as a {type:"agent_summary", text, ts, decisionMode}
+ * event. The next run loads the latest such event and threads it into the
+ * new agentLoop as `priorRunSummary` so the agent reads the prior
+ * APPLY_ROLLED_BACK marker before re-investigating.
+ *
+ * These helpers live alongside the marker code because the
+ * marker-preservation rule is what gives the truncation step its shape.
+ */
+
+/** Soft cap for priorRunSummary injection — keeps prompt overhead bounded. */
+export const PRIOR_RUN_SUMMARY_MAX_BYTES = 2048;
+
+/**
+ * Truncate a prior summary to `PRIOR_RUN_SUMMARY_MAX_BYTES` while
+ * preserving the trailing APPLY_ROLLED_BACK block if present (the
+ * marker is the agent-actionable part).
+ *
+ * Rules:
+ *   - length ≤ cap → return as-is
+ *   - has marker and the *entire* marker block fits → slice so the marker
+ *     starts at offset 0; prepend a short truncation notice
+ *   - has marker but marker block alone exceeds cap → return just the
+ *     marker block trimmed to cap (best-effort; full marker is more
+ *     valuable than the prelude)
+ *   - no marker → keep the tail (last cap bytes); prepend truncation notice
+ */
+export function truncatePriorRunSummary(summary: string): string {
+  const s = String(summary ?? "");
+  if (s.length <= PRIOR_RUN_SUMMARY_MAX_BYTES) return s;
+  const NOTICE = "[…prior summary truncated to most-relevant tail…]\n";
+  const markerIdx = s.lastIndexOf(`${MARKER}\n`);
+  if (markerIdx >= 0) {
+    const markerBlock = s.slice(markerIdx);
+    if (markerBlock.length <= PRIOR_RUN_SUMMARY_MAX_BYTES - NOTICE.length) {
+      return NOTICE + markerBlock;
+    }
+    // Marker alone exceeds cap — return the start of the marker (it's the
+    // important head; the trailing detail is bounded by errors[] anyway).
+    return markerBlock.slice(0, PRIOR_RUN_SUMMARY_MAX_BYTES);
+  }
+  return NOTICE + s.slice(-(PRIOR_RUN_SUMMARY_MAX_BYTES - NOTICE.length));
+}
+
+/**
+ * Scan a persisted conversation's `messages` array (typed-event shape, as
+ * stored by appendConversationMessages) for the most recent
+ * {type: "agent_summary"} event and return its text — empty when none.
+ *
+ * Tolerates absent / malformed entries (returns "" rather than throwing).
+ */
+export function extractPriorRunSummary(messages: unknown): string {
+  if (!Array.isArray(messages)) return "";
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (!m || typeof m !== "object") continue;
+    const obj = m as { type?: unknown; text?: unknown };
+    if (obj.type !== "agent_summary") continue;
+    const text = typeof obj.text === "string" ? obj.text : "";
+    if (!text) return "";
+    return truncatePriorRunSummary(text);
+  }
+  return "";
+}
+
 /** Build the diagnostic payload from the message + parsed errors. */
 export function buildApplyRolledBackMarkerLog(input: {
   site: ApplyRolledBackMarkerLog["site"];

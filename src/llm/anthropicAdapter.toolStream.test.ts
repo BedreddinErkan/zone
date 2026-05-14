@@ -354,6 +354,81 @@ describe("Phase F1.4 — worker subagent tool input streaming", () => {
     expect(seen.has("")).toBe(false);
   });
 
+  it("J.5: priorRunSummary prepends a PRIOR RUN CONTEXT block above the user task", async () => {
+    // Capture the messages array passed to createChatCompletion to assert
+    // the user message is wrapped with the framing block.
+    const capturedMessages: Array<Array<{ role: string; content: string }>> = [];
+    mocks.createChatCompletion.mockImplementation(async (params: unknown) => {
+      const p = params as { messages: Array<{ role: string; content: string }> };
+      capturedMessages.push(p.messages);
+      return textResponse("done");
+    });
+    mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
+    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+
+    await runAgentLoop({
+      task: "Continue: complete the rename.",
+      repoPath: "/tmp",
+      runId: "run-j5-1",
+      priorRunSummary:
+        "APPLY_ROLLED_BACK\nYour apply_patch on src/x.ts was rolled back.\n" +
+        '… Files restored: ["src/x.ts"]\n\nSuggested: the rename is partial; fan-out.',
+    });
+
+    expect(capturedMessages.length).toBeGreaterThanOrEqual(1);
+    const firstMessages = capturedMessages[0]!;
+    const userMsg = firstMessages.find((m) => m.role === "user")!;
+    expect(userMsg.content.startsWith("PRIOR RUN CONTEXT — ")).toBe(true);
+    expect(userMsg.content).toContain("APPLY_ROLLED_BACK\n");
+    expect(userMsg.content).toContain("Suggested: the rename is partial");
+    expect(userMsg.content).toContain("END PRIOR RUN CONTEXT.");
+    // The user's actual task lands after the framing.
+    expect(userMsg.content).toMatch(/END PRIOR RUN CONTEXT\.\n\nContinue: complete the rename\./);
+  });
+
+  it("J.5: omitting priorRunSummary keeps the user task as-is (no framing block)", async () => {
+    const capturedMessages: Array<Array<{ role: string; content: string }>> = [];
+    mocks.createChatCompletion.mockImplementation(async (params: unknown) => {
+      const p = params as { messages: Array<{ role: string; content: string }> };
+      capturedMessages.push(p.messages);
+      return textResponse("done");
+    });
+    mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
+    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+
+    await runAgentLoop({
+      task: "Just a regular task.",
+      repoPath: "/tmp",
+      runId: "run-j5-noop",
+      // No priorRunSummary field.
+    });
+
+    const userMsg = capturedMessages[0]!.find((m) => m.role === "user")!;
+    expect(userMsg.content).toBe("Just a regular task.");
+    expect(userMsg.content).not.toContain("PRIOR RUN CONTEXT");
+  });
+
+  it("J.5: empty-string priorRunSummary is treated as no-op", async () => {
+    const capturedMessages: Array<Array<{ role: string; content: string }>> = [];
+    mocks.createChatCompletion.mockImplementation(async (params: unknown) => {
+      const p = params as { messages: Array<{ role: string; content: string }> };
+      capturedMessages.push(p.messages);
+      return textResponse("done");
+    });
+    mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
+    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+
+    await runAgentLoop({
+      task: "Empty prior summary path.",
+      repoPath: "/tmp",
+      runId: "run-j5-empty",
+      priorRunSummary: "",
+    });
+
+    const userMsg = capturedMessages[0]!.find((m) => m.role === "user")!;
+    expect(userMsg.content).toBe("Empty prior summary path.");
+  });
+
   it("agentLoop forwards onToolInputStream into executeTool's Task-dispatch input", async () => {
     // Capture the input object passed to executeTool — the field must contain
     // the same callback the parent provided, so the worker run can rewire it.

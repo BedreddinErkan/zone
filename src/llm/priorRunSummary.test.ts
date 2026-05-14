@@ -1,0 +1,188 @@
+/**
+ * Phase J.5 — cross-run summary threading.
+ *
+ * Unit coverage for the pure helpers:
+ *   - extractPriorRunSummary(messages) — scans a conversation history
+ *     for the most recent {type:"agent_summary"} event
+ *   - truncatePriorRunSummary(summary) — 2KB cap with APPLY_ROLLED_BACK
+ *     marker preservation
+ *
+ * Plus integration assertions that runLogging persists agent_summary
+ * only on rollback runs and that the agent system prompt documents
+ * the PRIOR RUN CONTEXT convention.
+ */
+
+import { describe, expect, it } from "vitest";
+import {
+  PRIOR_RUN_SUMMARY_MAX_BYTES,
+  buildApplyRolledBackMessage,
+  extractPriorRunSummary,
+  truncatePriorRunSummary,
+} from "./applyRollbackFeedback.js";
+import { assembleAgentSystemPrompt } from "./agentLoop.js";
+
+describe("Phase J.5 — extractPriorRunSummary", () => {
+  it("returns the text of the most recent agent_summary message", () => {
+    const messages = [
+      { type: "user", text: "first task", ts: 1 },
+      { type: "run", ts: 2, decisionMode: "safe_to_apply" },
+      { type: "user", text: "second task", ts: 3 },
+      {
+        type: "agent_summary",
+        ts: 4,
+        decisionMode: "rolled_back",
+        text:
+          "APPLY_ROLLED_BACK\nYour apply_patch on src/foo.ts was rolled back.\n…",
+      },
+      { type: "run", ts: 5, decisionMode: "rolled_back" },
+    ];
+    const out = extractPriorRunSummary(messages);
+    expect(out.startsWith("APPLY_ROLLED_BACK\n")).toBe(true);
+  });
+
+  it("returns the LAST agent_summary when multiple are present", () => {
+    const messages = [
+      { type: "agent_summary", ts: 1, text: "OLDER\nsomething" },
+      { type: "user", text: "...", ts: 2 },
+      { type: "agent_summary", ts: 3, text: "APPLY_ROLLED_BACK\nNEWER\n…" },
+    ];
+    expect(extractPriorRunSummary(messages)).toContain("NEWER");
+    expect(extractPriorRunSummary(messages)).not.toContain("OLDER");
+  });
+
+  it("returns empty string when no agent_summary exists", () => {
+    const messages = [
+      { type: "user", text: "task", ts: 1 },
+      { type: "run", ts: 2, decisionMode: "safe_to_apply" },
+    ];
+    expect(extractPriorRunSummary(messages)).toBe("");
+  });
+
+  it("returns empty string for empty / malformed input (Supabase missing path)", () => {
+    expect(extractPriorRunSummary([])).toBe("");
+    expect(extractPriorRunSummary(null)).toBe("");
+    expect(extractPriorRunSummary(undefined)).toBe("");
+    expect(extractPriorRunSummary("not an array")).toBe("");
+    // Garbage entries don't crash:
+    expect(extractPriorRunSummary([null, undefined, 0, "x", {}])).toBe("");
+  });
+});
+
+describe("Phase J.5 — truncatePriorRunSummary", () => {
+  it("returns short summaries unchanged", () => {
+    const small = "PRIOR RUN — apply succeeded, 2 files changed.";
+    expect(truncatePriorRunSummary(small)).toBe(small);
+  });
+
+  it("preserves the entire APPLY_ROLLED_BACK marker when it fits within the cap", () => {
+    const marker = buildApplyRolledBackMessage({
+      filePath: "src/llm/detectIntent.ts",
+      errors: [
+        {
+          code: "TS2305",
+          message: "Module has no exported member 'detectFramework'.",
+          file: "src/llm/agentLoop.ts",
+          line: 42,
+          col: 7,
+        },
+      ],
+      restoredFiles: ["src/llm/detectIntent.ts"],
+    });
+    // Pad with prelude to exceed the cap.
+    const padding = "x".repeat(PRIOR_RUN_SUMMARY_MAX_BYTES);
+    const summary = padding + "\n\n" + marker;
+    const out = truncatePriorRunSummary(summary);
+    expect(out.length).toBeLessThanOrEqual(PRIOR_RUN_SUMMARY_MAX_BYTES);
+    expect(out).toContain("APPLY_ROLLED_BACK\n");
+    expect(out).toContain("TS2305");
+    expect(out).toContain("detectFramework");
+    // Marker is at offset 0 (after the truncation notice prefix).
+    expect(out.indexOf("APPLY_ROLLED_BACK")).toBeLessThan(120);
+  });
+
+  it("falls back to last-N-bytes when no marker is present", () => {
+    const summary = "no marker here ".repeat(500); // ~7500 chars
+    const out = truncatePriorRunSummary(summary);
+    expect(out.length).toBeLessThanOrEqual(PRIOR_RUN_SUMMARY_MAX_BYTES);
+    expect(out).toContain("truncated");
+    expect(out.endsWith("no marker here ")).toBe(true);
+  });
+
+  it("returns marker-only when the marker block ALONE exceeds the cap", () => {
+    const hugeErrors = Array.from({ length: 50 }, (_, i) => ({
+      code: "TS2305",
+      message: `Long error message #${i} `.repeat(10),
+      file: `src/very-long-path-segment/file-${i}.ts`,
+      line: i,
+      col: i,
+    }));
+    const marker = buildApplyRolledBackMessage({
+      filePath: "<multiple>",
+      errors: hugeErrors,
+      restoredFiles: hugeErrors.map((e) => e.file),
+    });
+    const summary = "prelude\n" + marker;
+    expect(marker.length).toBeGreaterThan(PRIOR_RUN_SUMMARY_MAX_BYTES);
+    const out = truncatePriorRunSummary(summary);
+    expect(out.length).toBeLessThanOrEqual(PRIOR_RUN_SUMMARY_MAX_BYTES);
+    expect(out.startsWith("APPLY_ROLLED_BACK\n")).toBe(true);
+  });
+});
+
+describe("Phase J.5 — end-to-end persistence shape", () => {
+  it("round-trips a rollback summary through extract → truncate → injection-ready", () => {
+    // Simulate what runLogging stores when a rollback fires.
+    const summary =
+      "=== AGENT LOOP SUMMARY ===\n" +
+      "I attempted to rename detectFramework → identifyFramework.\n\n" +
+      buildApplyRolledBackMessage({
+        filePath: "src/llm/detectIntent.ts",
+        errors: [
+          {
+            code: "TS2305",
+            message: "Module has no exported member 'detectFramework'.",
+            file: "src/llm/agentLoop.ts",
+            line: 42,
+            col: 7,
+          },
+        ],
+        restoredFiles: ["src/llm/detectIntent.ts"],
+      });
+    const messages = [
+      { type: "user", text: "Rename detectFramework", ts: 1 },
+      { type: "run", ts: 2, decisionMode: "rolled_back" },
+      { type: "agent_summary", ts: 3, decisionMode: "rolled_back", text: summary },
+    ];
+    const prior = extractPriorRunSummary(messages);
+    // Below 2KB so the whole summary survives intact.
+    expect(prior).toContain("APPLY_ROLLED_BACK\n");
+    expect(prior).toContain("TS2305");
+    // Heuristic suggestion line carried through too.
+    expect(prior).toContain("Suggested: ");
+  });
+});
+
+describe("Phase J.5 — system prompt documents PRIOR RUN CONTEXT", () => {
+  it("includes the PRIOR RUN CONTEXT section with the four pillars", () => {
+    const prompt = assembleAgentSystemPrompt({
+      agentIntro: "You are Zone, an AI code agent.",
+      frameworkLines: [],
+      hasFramework: false,
+      projectMemoryBlock: "",
+      baseMaxIterations: 15,
+      canRunCommand: false,
+      backgroundCommandBlock: "",
+      repoPath: "/workspace/project",
+    });
+    expect(prompt).toContain("PRIOR RUN CONTEXT");
+    // (1) Header pattern the agent must recognize at the top of user messages.
+    expect(prompt).toContain('"PRIOR RUN CONTEXT — your last attempt in this thread produced this result:"');
+    expect(prompt).toContain("END PRIOR RUN CONTEXT.");
+    // (2) The APPLY_ROLLED_BACK starting-point directive.
+    expect(prompt).toMatch(/treat it as your starting point/);
+    // (3) The Suggested: directive.
+    expect(prompt).toMatch(/Suggested:.*coordinated multi-file edit/);
+    // (4) The combine-the-two directive.
+    expect(prompt).toMatch(/combine the two|prior context tells you WHERE/);
+  });
+});

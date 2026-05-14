@@ -1,3 +1,4 @@
+import { extractPriorRunSummary } from "../llm/applyRollbackFeedback.js";
 import { scanRepo } from "../repo/scanRepo.js";
 import { detectProjectStructure } from "../repo/detectProjectStructure.js";
 import { rankRelevantFiles } from "../repo/rankRelevantFiles.js";
@@ -5075,6 +5076,43 @@ const initializeTodosFromPlan = (): void => {
     fileSource,
   }));
 
+  // J.5: load prior-run rollback summary BEFORE we split into the agent_loop
+  // vs planner+agent branches, so both paths can thread it into
+  // runAgentLoop. Best-effort: missing Supabase env / empty thread / no
+  // prior agent_summary event → priorRunSummary stays "". Lives at function
+  // scope so both branches share the same loaded data (no double-fetch).
+  let conversationHistory: unknown[] = [];
+  let priorRunSummary = "";
+  try {
+    const threadId =
+      typeof input.conversationId === "string" ? input.conversationId.trim() : "";
+    const userIdJ5 =
+      typeof input.userId === "string" ? input.userId.trim() : "";
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (threadId && userIdJ5 && url && key) {
+      const supabase: SupabaseClient = createClient(url, key);
+      const history = await getConversationByThreadId(supabase, {
+        userId: userIdJ5,
+        threadId,
+      });
+      const allMessages = Array.isArray(history?.messages) ? history!.messages : [];
+      conversationHistory = allMessages.slice(-10);
+      priorRunSummary = extractPriorRunSummary(allMessages);
+      if (priorRunSummary) {
+        log("[zone-prior-run-summary-loaded]", JSON.stringify({
+          threadId,
+          summaryBytes: priorRunSummary.length,
+          hasMarker: priorRunSummary.includes("APPLY_ROLLED_BACK\n"),
+          runId: typeof input.runId === "string" ? input.runId : null,
+        }));
+      }
+    }
+  } catch {
+    conversationHistory = [];
+    priorRunSummary = "";
+  }
+
   if (_useAgentLoop) {
     const runId = typeof input.runId === "string" ? input.runId.trim() : "";
     if (runId) {
@@ -5766,6 +5804,11 @@ const initializeTodosFromPlan = (): void => {
       maxIterations: iterBudgetComputed,
       taskClassification,
       forceTier: input.forceTier,
+      // J.5: thread the prior run's rollback summary (if any) so the
+      // agent reads APPLY_ROLLED_BACK markers from previous attempts
+      // before re-investigating. Empty string is treated as no-op
+      // inside agentLoop.
+      priorRunSummary,
       ...agentLoopCallbacks,
     };
 
@@ -6531,29 +6574,9 @@ const initializeTodosFromPlan = (): void => {
     status: "active",
   });
 
-  // Multi-turn memory: load the last conversation messages for this thread (best-effort).
-  // Only used for planning; patch generation prompts remain unchanged.
-  let conversationHistory: unknown[] = [];
-  try {
-    const threadId =
-      typeof input.conversationId === "string" ? input.conversationId.trim() : "";
-    const userId =
-      typeof input.userId === "string" ? input.userId.trim() : "";
-    const url = process.env.SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (threadId && userId && url && key) {
-      const supabase: SupabaseClient = createClient(url, key);
-      const history = await getConversationByThreadId(supabase, {
-        userId,
-        threadId,
-      });
-      conversationHistory = Array.isArray(history?.messages)
-        ? history!.messages.slice(-10)
-        : [];
-    }
-  } catch {
-    conversationHistory = [];
-  }
+  // Multi-turn memory: conversationHistory + priorRunSummary loaded earlier
+  // (before the agent_loop branch) so both paths share the same data.
+  // Nothing to do here — variables are already in scope.
 
   const lastChangedFiles =
     Array.isArray(input.lastChangedFiles)

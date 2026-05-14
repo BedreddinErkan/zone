@@ -3683,6 +3683,13 @@ app.post("/api/patch", async (req, res) => {
             : [],
         billingMode,
         routeName: "/api/patch",
+        // J.5: forward the loop summary so runLogging can persist the
+        // APPLY_ROLLED_BACK marker on rollback runs. Skipped server-side
+        // for non-rollback decisionModes.
+        agentSummary:
+          typeof (result as { patchPreview?: unknown }).patchPreview === "string"
+            ? ((result as { patchPreview?: string }).patchPreview as string)
+            : undefined,
       }).catch(() => null);
 
       if (loggedConversationId) {
@@ -3951,6 +3958,11 @@ if (result.applyPatches.length > 0) {
       conversationId,
       billingMode,
       routeName: "/api/dry-run",
+      // J.5: see /api/patch callsite for rationale.
+      agentSummary:
+        typeof (result as { patchPreview?: unknown }).patchPreview === "string"
+          ? ((result as { patchPreview?: string }).patchPreview as string)
+          : undefined,
     }).catch(() => null);
 
   if (loggedConversationId) {
