@@ -110,7 +110,7 @@ import {
   matchSimilarFiles,
 } from "../embeddings/embeddingsRepository.js";
 import { indexRepoFiles } from "../embeddings/indexRepository.js";
-import { logger, debugLog, errorLog } from "../utils/logger.js";
+import { logger, debugLog, errorLog, log } from "../utils/logger.js";
 import { attachRunIdentity } from "../llm/openaiContext.js";
 
 export type LlmPatchFlowResult =
@@ -5342,6 +5342,41 @@ const initializeTodosFromPlan = (): void => {
       process.env["ZONE_PLAN_ORCHESTRATION"]
     );
 
+    // Phase F1: live tool-input streaming state. Tracks accumulated JSON per
+    // block so the filePath can be extracted from the partial payload.
+    const toolStreamState = {
+      accumByBlock: new Map<string, string>(),
+      totalDeltas: 0,
+      totalChars: 0,
+      startTs: Date.now(),
+    };
+    const toolInputStream = (event: {
+      blockId: string;
+      toolName: string;
+      delta: string;
+      isFirstDelta: boolean;
+      iter: number;
+    }): void => {
+      const prev = toolStreamState.accumByBlock.get(event.blockId) ?? "";
+      const accum = prev + event.delta;
+      toolStreamState.accumByBlock.set(event.blockId, accum);
+      toolStreamState.totalDeltas += 1;
+      toolStreamState.totalChars += event.delta.length;
+
+      const fpMatch = accum.match(/"filePath"\s*:\s*"([^"\\]*)"/);
+      const fp = fpMatch ? fpMatch[1] : "";
+      emitStructuredProgress({
+        type: "tool_input_delta",
+        title: event.isFirstDelta ? `✎ Writing${fp ? ` ${fp}` : ""}...` : fp ? `✎ Writing ${fp}...` : "",
+        status: "active",
+        toolName: event.toolName,
+        blockId: event.blockId,
+        isFirstDelta: event.isFirstDelta,
+        delta: event.delta,
+        iter: event.iter,
+      });
+    };
+
     const agentLoopCallbacks = {
       onStructuredEvent: (evt: unknown) => {
         if (!runId) return;
@@ -5631,6 +5666,9 @@ const initializeTodosFromPlan = (): void => {
             : {}),
         });
       },
+      onToolInputStream: runId
+        ? toolInputStream
+        : undefined,
     } as const;
 
     // Phase H.6: plan-aware iter budget. Single-step (no plan or trivial
@@ -5760,6 +5798,17 @@ const initializeTodosFromPlan = (): void => {
     }
 
     filesTouched.push(...(loop.filesModified || []));
+
+    if (toolStreamState.totalDeltas > 0) {
+      log("[zone-tool-stream-summary]", JSON.stringify({
+        event: "tool_stream_summary",
+        runId: runId || null,
+        totalDeltas: toolStreamState.totalDeltas,
+        totalChars: toolStreamState.totalChars,
+        durationMs: Date.now() - toolStreamState.startTs,
+        ts: new Date().toISOString(),
+      }));
+    }
 
     const agentCalledVerifyVisual = loop.toolCallLog.some(
       (entry) => entry.tool === "verify_visual" && entry.success === true

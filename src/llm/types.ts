@@ -14,6 +14,12 @@ export type LLMChatParams =
 export interface LLMRequestOptions {
   /** Abort the in-flight request when this signal fires. */
   signal?: AbortSignal;
+  /**
+   * When provided the Anthropic adapter streams the response internally and
+   * fires this callback for every tool-argument fragment (input_json_delta)
+   * it receives. Ignored by providers that don't support streaming deltas.
+   */
+  onToolArgumentsDelta?: (toolCallId: string, toolName: string, argDelta: string) => void;
 }
 
 export interface LLMClient {

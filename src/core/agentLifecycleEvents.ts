@@ -141,7 +141,8 @@ export type ZoneStructuredProgressEvent = {
     | "plan_rejected"
     | "plan_edited"
     | "loop_warning_emitted"
-    | "loop_detected_terminal";
+    | "loop_detected_terminal"
+    | "tool_input_delta";
   title: string;
   detail?: string;
   filePath?: string;
@@ -220,6 +221,11 @@ export type ZoneStructuredProgressEvent = {
    *  the screenshot via metadata.screenshotPath / pageTitle / consoleErrors). */
   toolName?: string;
   metadata?: Record<string, unknown>;
+  /** Phase F1: live tool-input streaming. Identifies the specific LLM tool call
+   *  block (unique per call, per iteration) and whether this event is the first
+   *  delta seen for that block. */
+  blockId?: string;
+  isFirstDelta?: boolean;
   /** Phase L.1: pre-dispatch task classification. Emitted once per dispatch
    *  before the agent loop starts so the UI / telemetry can show the predicted
    *  tier and the classifier's own cost. L.2 will gate tool exposure based on

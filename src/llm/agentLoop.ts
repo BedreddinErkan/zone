@@ -71,6 +71,19 @@ export interface AgentLoopInput {
   onToolCall?: (name: string, args: Record<string, unknown>) => void;
   onToolResult?: (name: string, result: ToolResult) => void;
   onStructuredEvent?: (evt: unknown) => void;
+  /**
+   * Phase F1: live tool-input streaming. Fires for each argument fragment
+   * emitted by the LLM while generating a write-class tool call (apply_patch,
+   * write_file). The first delta for a given blockId has isFirstDelta=true.
+   * Anthropic provider only; silently ignored for OpenAI.
+   */
+  onToolInputStream?: (event: {
+    blockId: string;
+    toolName: string;
+    delta: string;
+    isFirstDelta: boolean;
+    iter: number;
+  }) => void;
   abortSignal?: AbortSignal;
   /** Optional import-ecosystem context block built by buildImportContextSummary. Injected by runLlmPatchFlow. */
   importContextSummary?: string;
@@ -2374,6 +2387,23 @@ Example:
     });
     breakdownEvents.push(bdEvent);
 
+    // Phase F1: streaming tool-input callbacks for write-class tools.
+    const streamStartedBlocks = new Set<string>();
+    const onToolArgumentsDelta = input.onToolInputStream
+      ? (toolCallId: string, toolName: string, argDelta: string) => {
+          if (toolName !== "apply_patch" && toolName !== "write_file") return;
+          const isFirstDelta = !streamStartedBlocks.has(toolCallId);
+          if (isFirstDelta) streamStartedBlocks.add(toolCallId);
+          input.onToolInputStream!({
+            blockId: toolCallId,
+            toolName,
+            delta: argDelta,
+            isFirstDelta,
+            iter: iter + 1,
+          });
+        }
+      : undefined;
+
     const response = await client.createChatCompletion(
       {
         model: modelName,
@@ -2382,7 +2412,7 @@ Example:
         tool_choice: "auto",
         ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
       },
-      { signal: input.abortSignal }
+      { signal: input.abortSignal, onToolArgumentsDelta }
     );
     debugLog("[zone-agent-llm-post]", {
       runId: input.runId,
