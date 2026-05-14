@@ -92,12 +92,10 @@ describe("OpenAI prompt cache stability helpers", () => {
       repoPath: "/workspace/project",
     });
 
-    expect(system).toContain("TASK SUBAGENTS (Task):");
-    expect(system).toContain("Default to single-thread");
-    expect(system).toMatch(/synthetic test scenarios/i);
-    expect(system).toContain(
-      '"Find a function with multiple callers and break its signature"'
-    );
+    expect(system).toContain("TASK SUBAGENTS (Task) — when to dispatch:");
+    expect(system).toContain("Default is single-thread.");
+    expect(system).toContain("GOOD signals (DO dispatch):");
+    expect(system).toContain("BAD signals (DON'T dispatch):");
     expect(system).toContain("READ_FILE ECONOMY:");
     expect(system).toContain("VISUAL VERIFICATION (verify_visual):");
   });
