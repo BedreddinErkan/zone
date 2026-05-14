@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import fg from "fast-glob";
-import { debugLog, errorLog } from "../utils/logger.js";
+import { debugLog, errorLog, log } from "../utils/logger.js";
 import {
   extractDeclaredSymbols,
   locateSymbol,
@@ -1251,7 +1251,7 @@ export async function executeTool(
       if (input?.filesReadThisRun !== undefined) {
         if (!input.filesReadThisRun.has(filePath)) {
           if (input.selfValidationCounts) input.selfValidationCounts.readBeforePatchRejects += 1;
-          debugLog("[zone-self-validation]", JSON.stringify({
+          log("[zone-self-validation]", JSON.stringify({
             rule: "read_before_patch",
             decision: "rejected",
             filePath,
@@ -1265,7 +1265,7 @@ export async function executeTool(
             error: "apply_patch_no_read_first",
           };
         }
-        debugLog("[zone-self-validation]", JSON.stringify({
+        log("[zone-self-validation]", JSON.stringify({
           rule: "read_before_patch",
           decision: "approved",
           filePath,
@@ -1483,7 +1483,7 @@ export async function executeTool(
         if (input?.selfValidationCounts) {
           input.selfValidationCounts.smartQuoteFixes += sqFindTotal + sqReplaceTotal;
         }
-        debugLog("[zone-self-validation]", JSON.stringify({
+        log("[zone-self-validation]", JSON.stringify({
           rule: "smart_quote_autofix",
           filePath,
           findOccurrences: sqFindTotal,
@@ -1961,7 +1961,7 @@ export async function executeTool(
               input.selfValidationCounts.inlineTsRejects += 1;
             }
           }
-          debugLog("[zone-self-validation]", JSON.stringify({
+          log("[zone-self-validation]", JSON.stringify({
             rule: "inline_ts_check",
             decision: tscDecision,
             filePath,
@@ -1993,7 +1993,7 @@ export async function executeTool(
           }
         } else {
           if (input?.selfValidationCounts) input.selfValidationCounts.inlineTsSkips += 1;
-          debugLog("[zone-self-validation]", JSON.stringify({
+          log("[zone-self-validation]", JSON.stringify({
             rule: "inline_ts_check",
             decision: "skipped",
             filePath,
