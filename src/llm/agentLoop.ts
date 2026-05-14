@@ -3022,6 +3022,29 @@ Example:
             attemptCount: perFileAttempt || selfCorrectionAttempts,
           }));
         }
+        // U.2.C: emit coaching rule trigger for test failures so we can observe
+        // scope-check decisions (in_scope / out_of_scope) in production logs.
+        if (routedTrigger === "test_failed" || routedTrigger === "tool_command_spawn_failure") {
+          const parsedFailingFile = diagnostic.parsed?.failingFile ?? null;
+          const modifiedFiles = Array.from(filesModified);
+          const inScope = parsedFailingFile
+            ? modifiedFiles.some(
+                (f) =>
+                  f === parsedFailingFile ||
+                  f.endsWith("/" + parsedFailingFile) ||
+                  parsedFailingFile.endsWith("/" + f)
+              )
+            : null;
+          log("[zone-coaching-rule]", JSON.stringify({
+            event: "coaching_rule_trigger",
+            runId: input.runId ?? null,
+            iter: iter + 1,
+            rule: "test_failure_scope_check",
+            decision: inScope === null ? "unclear" : inScope ? "in_scope" : "out_of_scope",
+            parsedFailingFile,
+            modifiedFiles,
+          }));
+        }
         debugLog("[zone-agent-diagnostic]", JSON.stringify({
           attempt: selfCorrectionAttempts,
           failingFile: diagnostic.parsed?.failingFile ?? null,
