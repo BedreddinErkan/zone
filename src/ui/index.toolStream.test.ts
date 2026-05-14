@@ -52,8 +52,16 @@ class MockElement {
   get classList() { return this.classListValue; }
   get className() { return this.classListValue.toString(); }
   set className(v: string) { this.classListValue.setFromString(v); }
-  get textContent() { return this.textContentValue; }
-  set textContent(v: string) { this.textContentValue = String(v ?? ""); }
+  get textContent(): string {
+    // DOM-like: when there are children, concatenate their textContent; otherwise own value.
+    if (this.children.length > 0) return this.children.map(c => c.textContent).join("");
+    return this.textContentValue;
+  }
+  set textContent(v: string) {
+    // DOM-like: setting textContent replaces all children with a single text node.
+    this.textContentValue = String(v ?? "");
+    this.children = [];
+  }
   get innerHTML() { return this.innerHtmlValue; }
   set innerHTML(v: string) {
     this.innerHtmlValue = String(v ?? "");
@@ -237,14 +245,16 @@ describe("Phase F1 — UI tool_input_delta rendering", () => {
 
     sendDelta(ctx, "blk-grow", '{"filePath":"src/a.ts"', true, "✎ Writing a.ts...");
     sendDelta(ctx, "blk-grow", ',"patch":"--- FIND ---', false, "✎ Writing a.ts...");
-    sendDelta(ctx, "blk-grow", '\nfoo\n--- REPLACE ---\nbar"}', false, "✎ Writing a.ts...");
+    sendDelta(ctx, "blk-grow", '\\nfoo\\n--- REPLACE ---\\nbar"}', false, "✎ Writing a.ts...");
 
     const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
     const pre = block.querySelectorAll(".ts-code-pre")[0]!;
     expect(pre!.textContent!.length).toBeGreaterThan(0);
-    // F1.1: pre shows decoded patch content, not raw JSON
-    expect(pre!.textContent).toContain("--- FIND ---");
-    expect(pre!.textContent).toContain("--- REPLACE ---");
+    // F1.2: markers are stripped, content rendered with -/+ prefixes
+    expect(pre!.textContent).not.toContain("--- FIND ---");
+    expect(pre!.textContent).not.toContain("--- REPLACE ---");
+    expect(pre!.textContent).toContain("foo");
+    expect(pre!.textContent).toContain("bar");
   });
 
   it("header label updates when filePath value becomes parseable", () => {
@@ -372,13 +382,13 @@ describe("Phase F1.1 — incremental JSON parsing for typewriter render", () => 
     expect(pre.textContent).toContain('"quoted"');       // decoded backslash-quote
   });
 
-  // F1.1 Commit 2 — FIND/REPLACE-aware diff rendering
+  // F1.2 — FIND/REPLACE markers stripped, diff prefix render
   it("FIND/REPLACE patch renders del lines and add lines as separate spans", () => {
     const { ctx, ensureEl } = buildHarness();
     const logBlock = ensureEl(`logBlock-${RUN_ID}`);
 
-    // '\\n' in JS source = literal \n (JSON newline escape sequence).
-    sendDelta(ctx, "blk-diff1", '{"filePath":"src/e.ts","patch":"<<<<<<< FIND\\nold code\\n=======\\nnew code\\n>>>>>>> REPLACE"}', true, "", "apply_patch");
+    // Real apply_patch markers: '--- FIND ---' / '--- REPLACE ---'.
+    sendDelta(ctx, "blk-diff1", '{"filePath":"src/e.ts","patch":"--- FIND ---\\nold code\\n--- REPLACE ---\\nnew code"}', true, "", "apply_patch");
 
     const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
     const pre = block.querySelectorAll(".ts-code-pre")[0]!;
@@ -388,19 +398,26 @@ describe("Phase F1.1 — incremental JSON parsing for typewriter render", () => 
     expect(addLines.length).toBe(1);
     expect(delLines[0]!.textContent).toContain("old code");
     expect(addLines[0]!.textContent).toContain("new code");
+    // F1.2: '-' / '+' prefixes are present
+    expect(delLines[0]!.textContent!.startsWith("- ")).toBe(true);
+    expect(addLines[0]!.textContent!.startsWith("+ ")).toBe(true);
+    // F1.2: marker text itself never appears in the rendered DOM
+    expect(pre.textContent).not.toContain("--- FIND ---");
+    expect(pre.textContent).not.toContain("--- REPLACE ---");
   });
 
   it("add-only patch (empty FIND section) renders only green add lines", () => {
     const { ctx, ensureEl } = buildHarness();
     const logBlock = ensureEl(`logBlock-${RUN_ID}`);
 
-    sendDelta(ctx, "blk-addonly", '{"filePath":"src/f.ts","patch":"<<<<<<< FIND\\n=======\\nnew code here\\n>>>>>>> REPLACE"}', true, "", "apply_patch");
+    sendDelta(ctx, "blk-addonly", '{"filePath":"src/f.ts","patch":"--- FIND ---\\n--- REPLACE ---\\nnew code here"}', true, "", "apply_patch");
 
     const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
     const pre = block.querySelectorAll(".ts-code-pre")[0]!;
     expect(pre.querySelectorAll(".ts-del").length).toBe(0);
     expect(pre.querySelectorAll(".ts-add").length).toBe(1);
     expect(pre.querySelectorAll(".ts-add")[0]!.textContent).toContain("new code here");
+    expect(pre.textContent).not.toContain("--- REPLACE ---");
   });
 
   it("patch with no FIND/REPLACE markers renders as plain text in pre", () => {
@@ -416,12 +433,60 @@ describe("Phase F1.1 — incremental JSON parsing for typewriter render", () => 
     expect(pre.querySelectorAll(".ts-add").length).toBe(0);
   });
 
+  // F1.2 — partial stream upgrades from plain → diff once REPLACE marker arrives
+  it("partial patch missing REPLACE marker renders FIND content as plain", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    // Only --- FIND --- has arrived; --- REPLACE --- still streaming.
+    sendDelta(ctx, "blk-partial", '{"filePath":"src/p.ts","patch":"--- FIND ---\\nfirst line\\nsecond', true, "", "apply_patch");
+
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    const pre = block.querySelectorAll(".ts-code-pre")[0]!;
+    // No diff spans yet — content is still plain text (no upgrade).
+    expect(pre.querySelectorAll(".ts-del").length).toBe(0);
+    expect(pre.querySelectorAll(".ts-add").length).toBe(0);
+    expect(pre.querySelectorAll(".stream-diff-line").length).toBe(0);
+  });
+
+  it("partial patch upgrades to diff render once REPLACE marker arrives", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    // First delta: only FIND marker present.
+    sendDelta(ctx, "blk-upgrade", '{"filePath":"src/u.ts","patch":"--- FIND ---\\nold', true, "", "apply_patch");
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    const pre = block.querySelectorAll(".ts-code-pre")[0]!;
+    expect(pre.querySelectorAll(".stream-diff-line").length).toBe(0);  // still plain
+
+    // Second delta: REPLACE marker + content arrives.
+    sendDelta(ctx, "blk-upgrade", '\\n--- REPLACE ---\\nnew"}', false, "", "apply_patch");
+    // Now upgraded to diff render.
+    expect(pre.querySelectorAll(".ts-del").length).toBe(1);
+    expect(pre.querySelectorAll(".ts-add").length).toBe(1);
+    expect(pre.textContent).not.toContain("--- FIND ---");
+    expect(pre.textContent).not.toContain("--- REPLACE ---");
+  });
+
+  it("diff spans get both new stream-diff-* and legacy ts-del/ts-add class names", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    sendDelta(ctx, "blk-cls", '{"filePath":"src/cls.ts","patch":"--- FIND ---\\nA\\n--- REPLACE ---\\nB"}', true, "", "apply_patch");
+
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    const pre = block.querySelectorAll(".ts-code-pre")[0]!;
+    // Both selectors should match the same element set.
+    expect(pre.querySelectorAll(".stream-diff-removed").length).toBe(pre.querySelectorAll(".ts-del").length);
+    expect(pre.querySelectorAll(".stream-diff-added").length).toBe(pre.querySelectorAll(".ts-add").length);
+  });
+
   // F1.1 Commit 3 — auto-collapse completed blocks
   it("block collapses on tool_result and shows chevron", () => {
     const { ctx, ensureEl } = buildHarness();
     const logBlock = ensureEl(`logBlock-${RUN_ID}`);
 
-    sendDelta(ctx, "blk-coll1", '{"filePath":"src/g.ts","patch":"<<<<<<< FIND\\nold\\n=======\\nnew\\n>>>>>>> REPLACE"}', true, "", "apply_patch");
+    sendDelta(ctx, "blk-coll1", '{"filePath":"src/g.ts","patch":"--- FIND ---\\nold\\n--- REPLACE ---\\nnew"}', true, "", "apply_patch");
     (ctx as { handleSSEPayload: (p: unknown, r: string) => void }).handleSSEPayload(
       { stage: "agent_loop", progress: { type: "tool_result", toolName: "apply_patch", status: "success", title: "", detail: "" } },
       RUN_ID
@@ -439,7 +504,7 @@ describe("Phase F1.1 — incremental JSON parsing for typewriter render", () => 
     const { ctx, ensureEl } = buildHarness();
     const logBlock = ensureEl(`logBlock-${RUN_ID}`);
 
-    sendDelta(ctx, "blk-coll2", '{"filePath":"src/h.ts","patch":"<<<<<<< FIND\\nold\\n=======\\nnew\\n>>>>>>> REPLACE"}', true, "", "apply_patch");
+    sendDelta(ctx, "blk-coll2", '{"filePath":"src/h.ts","patch":"--- FIND ---\\nold\\n--- REPLACE ---\\nnew"}', true, "", "apply_patch");
     (ctx as { handleSSEPayload: (p: unknown, r: string) => void }).handleSSEPayload(
       { stage: "agent_loop", progress: { type: "tool_result", toolName: "apply_patch", status: "success", title: "", detail: "" } },
       RUN_ID
@@ -456,7 +521,7 @@ describe("Phase F1.1 — incremental JSON parsing for typewriter render", () => 
     const { ctx, ensureEl } = buildHarness();
     const logBlock = ensureEl(`logBlock-${RUN_ID}`);
 
-    sendDelta(ctx, "blk-coll3", '{"filePath":"src/i.ts","patch":"<<<<<<< FIND\\nold\\n=======\\nnew\\n>>>>>>> REPLACE"}', true, "", "apply_patch");
+    sendDelta(ctx, "blk-coll3", '{"filePath":"src/i.ts","patch":"--- FIND ---\\nold\\n--- REPLACE ---\\nnew"}', true, "", "apply_patch");
     (ctx as { handleSSEPayload: (p: unknown, r: string) => void }).handleSSEPayload(
       { stage: "agent_loop", progress: { type: "tool_result", toolName: "apply_patch", status: "success", title: "", detail: "" } },
       RUN_ID
@@ -475,12 +540,12 @@ describe("Phase F1.1 — incremental JSON parsing for typewriter render", () => 
     const logBlock = ensureEl(`logBlock-${RUN_ID}`);
 
     // First block starts streaming (not settled yet)
-    sendDelta(ctx, "blk-auto1", '{"filePath":"src/j.ts","patch":"<<<<<<< FIND\\nold\\n=======\\nnew\\n>>>>>>> REPLACE"}', true, "", "apply_patch");
+    sendDelta(ctx, "blk-auto1", '{"filePath":"src/j.ts","patch":"--- FIND ---\\nold\\n--- REPLACE ---\\nnew"}', true, "", "apply_patch");
     const firstBlock = logBlock.querySelectorAll(".tool-stream-block")[0]!;
     expect(firstBlock.classList.contains("ts-collapsed")).toBe(false); // not collapsed yet
 
     // Second block starts — first should auto-collapse
-    sendDelta(ctx, "blk-auto2", '{"filePath":"src/k.ts","patch":"<<<<<<< FIND\\nold2\\n=======\\nnew2\\n>>>>>>> REPLACE"}', true, "", "apply_patch");
+    sendDelta(ctx, "blk-auto2", '{"filePath":"src/k.ts","patch":"--- FIND ---\\nold2\\n--- REPLACE ---\\nnew2"}', true, "", "apply_patch");
     expect(firstBlock.classList.contains("ts-collapsed")).toBe(true);  // now auto-collapsed
     const blocks = logBlock.querySelectorAll(".tool-stream-block");
     expect(blocks.length).toBe(2);
