@@ -2054,6 +2054,15 @@ Example:
   const detectorState = createDetectorState();
   // R.1: accumulate per-call breakdown events for the end-of-run summary.
   const breakdownEvents: BreakdownEvent[] = [];
+  // Phase V: mutable counters for self-validation hooks; passed by reference to executeTool.
+  const selfValidationCounts = {
+    readBeforePatchRejects: 0,
+    smartQuoteFixes: 0,
+    inlineTsRejects: 0,
+    inlineTsApproves: 0,
+    inlineTsSkips: 0,
+    totalLatencyMs: 0,
+  };
   const tokenBudgetBaseTokens = cleanTokenNumber(input.tokenBudgetBaseTokens);
   // P.1: compaction trigger — fires at the safe iteration boundary after tool results
   // are processed. No-op in P.1; P.2 replaces the stub with real summarization.
@@ -2172,6 +2181,7 @@ Example:
     }));
     emitRunBreakdownSummary();
     emitCacheSummary();
+    emitSelfValidationSummary();
     return {
       success: false,
       summary: finalSummary,
@@ -2200,6 +2210,7 @@ Example:
     }));
     emitRunBreakdownSummary();
     emitCacheSummary();
+    emitSelfValidationSummary();
     return {
       success: false,
       summary: msg,
@@ -2222,6 +2233,7 @@ Example:
     debugLog("[zone-loop-detected]", JSON.stringify({ iter: iterNumber, runId: input.runId, toolName, count }));
     emitRunBreakdownSummary();
     emitCacheSummary();
+    emitSelfValidationSummary();
     return {
       success: false,
       summary: msg,
@@ -2257,6 +2269,22 @@ Example:
       totalOutput: iterCostAccumulator.output,
       cacheHitRatio: Number(cacheHitRatio(iterCostAccumulator).toFixed(3)),
       totalCostUsd: iterCostAccumulator.total_cost,
+    }));
+  };
+
+  // Phase V Commit 4: emit per-run self-validation summary at every exit path.
+  const emitSelfValidationSummary = (): void => {
+    const { readBeforePatchRejects, smartQuoteFixes, inlineTsRejects, inlineTsApproves, totalLatencyMs } = selfValidationCounts;
+    if (readBeforePatchRejects + smartQuoteFixes + inlineTsRejects + inlineTsApproves === 0) return;
+    log("[zone-self-validation-summary]", JSON.stringify({
+      runId: input.runId ?? null,
+      readBeforePatchRejects,
+      smartQuoteFixes,
+      inlineTsRejects,
+      inlineTsApproves,
+      inlineTsSkips: selfValidationCounts.inlineTsSkips,
+      totalLatencyMs,
+      ts: new Date().toISOString(),
     }));
   };
 
@@ -2733,6 +2761,7 @@ Example:
           visualScreenshotCount: toolCallLog.filter(
             (entry) => entry.tool === "verify_visual" && entry.success === true
           ).length,
+          selfValidationCounts,
         });
         debugLog("[zone-agent-tool-post]", {
           runId: input.runId,
@@ -3142,6 +3171,7 @@ Example:
       if (isReadOnlyMode) {
         emitRunBreakdownSummary();
         emitCacheSummary();
+        emitSelfValidationSummary();
         return {
           success: true,
           summary: finalText,
@@ -3244,6 +3274,7 @@ Example:
       }));
       emitRunBreakdownSummary();
       emitCacheSummary();
+      emitSelfValidationSummary();
       log("[zone-agent-final-assessment]", JSON.stringify({
         triggeredBy: "natural_completion",
         verificationReason,
@@ -3359,6 +3390,7 @@ Example:
     }
     emitRunBreakdownSummary();
     emitCacheSummary();
+    emitSelfValidationSummary();
     return {
       success: false,
       summary: finalSummary,
@@ -3516,6 +3548,7 @@ Example:
   }));
   emitRunBreakdownSummary();
   emitCacheSummary();
+  emitSelfValidationSummary();
   log("[zone-agent-final-assessment]", JSON.stringify({
     triggeredBy: "max_iterations",
     finalVerificationReason,
