@@ -12,6 +12,8 @@
  * the PRIOR RUN CONTEXT convention.
  */
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   PRIOR_RUN_SUMMARY_MAX_BYTES,
@@ -159,6 +161,84 @@ describe("Phase J.5 — end-to-end persistence shape", () => {
     expect(prior).toContain("TS2305");
     // Heuristic suggestion line carried through too.
     expect(prior).toContain("Suggested: ");
+  });
+});
+
+describe("Phase J.5.2 — production runAgentLoop callsites carry priorRunSummary", () => {
+  // Structural contract test. The J.5.2 brief was triggered by a misleading
+  // diagnostic grep (`grep -B2 -A5 runAgentLoop … | grep priorRunSummary`)
+  // that missed the field because it lives in agentLoopBaseInput, defined
+  // upstream of the callsites' grep window. This test pins the actual
+  // contract — priorRunSummary reaches every USER-FACING runAgentLoop call —
+  // regardless of how the code is refactored.
+  //
+  // Excluded from "user-facing": verifier auto-fix callsites
+  // (~lines 9869, 10134) — J.5 intentionally left those alone since they
+  // run synthetic sub-flows ("fix this broken test"), not user re-prompts.
+
+  const SRC = readFileSync(
+    path.resolve("src/core/runLlmPatchFlow.ts"),
+    "utf8",
+  );
+
+  it("declares priorRunSummary at function scope (hoisted above the _useAgentLoop branch)", () => {
+    expect(SRC).toMatch(/let\s+priorRunSummary\s*=\s*""/);
+    // The load helper is the export from applyRollbackFeedback.
+    expect(SRC).toContain("extractPriorRunSummary(allMessages)");
+  });
+
+  it("agentLoopBaseInput object literal includes priorRunSummary as a field", () => {
+    // Find the agentLoopBaseInput literal and assert priorRunSummary is one
+    // of its fields. Regex-style: anything between the opener and its
+    // closing brace at the same indent that contains the key.
+    const start = SRC.indexOf("const agentLoopBaseInput = {");
+    expect(start).toBeGreaterThan(-1);
+    // Match through to "};\n" at the same scope. Imperfect but adequate —
+    // the literal is small and self-contained in this file.
+    const end = SRC.indexOf("\n    };\n", start);
+    expect(end).toBeGreaterThan(start);
+    const literal = SRC.slice(start, end);
+    expect(literal).toMatch(/^\s*priorRunSummary,?\s*$/m);
+  });
+
+  it("both production runAgentLoop callsites use agentLoopBaseInput (so the field flows through)", () => {
+    // The orchestrator step branch spreads it.
+    expect(SRC).toMatch(/runAgentLoop\(\s*\{\s*\.\.\.agentLoopBaseInput/);
+    // The single-pass branch passes the whole object.
+    expect(SRC).toMatch(/loop = await runAgentLoop\(agentLoopBaseInput\)/);
+  });
+
+  it("AgentLoopInput type accepts priorRunSummary so the wire compiles", () => {
+    const agentLoopSrc = readFileSync(
+      path.resolve("src/llm/agentLoop.ts"),
+      "utf8",
+    );
+    expect(agentLoopSrc).toMatch(/priorRunSummary\?:\s*string;/);
+  });
+
+  it("server.ts forwards result.patchPreview as agentSummary for /api/patch and /api/dry-run", () => {
+    const serverSrc = readFileSync(
+      path.resolve("src/api/server.ts"),
+      "utf8",
+    );
+    // Two callsites: /api/patch (routine), /api/dry-run (preview).
+    // Both must forward the loop's summary so a rollback gets persisted.
+    const forwards = serverSrc.match(/agentSummary:\s*\n?\s*typeof \(result/g);
+    expect(forwards).not.toBeNull();
+    expect((forwards ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("runLogging.ts persists agent_summary ONLY when decisionMode === 'rolled_back'", () => {
+    const runLoggingSrc = readFileSync(
+      path.resolve("src/api/runLogging.ts"),
+      "utf8",
+    );
+    // The conditional gate: persist only on rollback, only when text present.
+    expect(runLoggingSrc).toMatch(
+      /input\.decisionMode\s*===\s*"rolled_back"[\s\S]{0,200}input\.agentSummary/,
+    );
+    // The persisted event shape.
+    expect(runLoggingSrc).toMatch(/type:\s*"agent_summary"/);
   });
 });
 
