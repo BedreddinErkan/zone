@@ -9163,86 +9163,65 @@
       // Do not append log lines for streaming events.
       if (progress && (progressType === 'patch_stream_delta' || progressType === 'patch_stream_target')) return;
 
-      // F1: live tool-input typewriter for apply_patch / write_file.
+      // F1.3: live tool-input typewriter for apply_patch / write_file now
+      // routes to the side-panel slot (#zone-live-stream) instead of the
+      // chat timeline. Single active stream — a new isFirstDelta replaces
+      // the current slot content rather than stacking.
       if (progressType === 'tool_input_delta' && progress) {
         const blockId = String(progress.blockId || '');
         const delta = String(progress.delta || '');
-        const toolNameTsd = String(progress.toolName || '');
-        const isFirstDelta = !!progress.isFirstDelta;
         const titleTsd = String(progress.title || '');
         if (!blockId || !delta) return;
-        state.__toolStreamBlocks = state.__toolStreamBlocks || {};
-        if (isFirstDelta) {
-          // F1.1 C3: auto-collapse any previous unsettled blocks before starting a new one.
+        const isFirstDelta = !!progress.isFirstDelta;
+        const slot = ensureLiveStreamSlot();
+        if (!slot) return;
+        const sidebar = document.getElementById('zoneTodoSidebar');
+        state.__liveStream = state.__liveStream || { blockId: '', accumJson: '', filePath: '' };
+        const newBlock = isFirstDelta || state.__liveStream.blockId !== blockId;
+        if (newBlock) {
+          // Cancel any in-flight fade-out from a prior settle.
+          if (state.__liveStreamFadeTimer) {
+            try { clearTimeout(state.__liveStreamFadeTimer); } catch(e) {}
+            state.__liveStreamFadeTimer = null;
+          }
+          state.__liveStream = { blockId, accumJson: '', filePath: '' };
+          if (sidebar) sidebar.dataset.state = 'visible';
+          slot.dataset.state = 'active';
+          slot.style.opacity = '';
+          const lbl0 = slot.querySelector('.ss-label');
+          if (lbl0) lbl0.textContent = titleTsd || '✎ Writing...';
+          const body0 = slot.querySelector('.ss-body');
+          if (body0) body0.innerHTML = '';
+          // F1.2 C2: track user scroll inside the slot. Pause auto-scroll if
+          // the user scrolls up; resume when within 16px of the bottom.
+          state.__liveStreamScroll = { userScrolled: false };
           try {
-            Object.values(state.__toolStreamBlocks).forEach(function(b) {
-              if (!b.settled) b.el.classList.add('ts-collapsed');
+            const scrollEl = slot;
+            scrollEl.addEventListener('scroll', function() {
+              var atBottom = (scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight) < 16;
+              state.__liveStreamScroll.userScrolled = !atBottom;
             });
           } catch(e) {}
-          const safeid = blockId.replace(/[^a-zA-Z0-9_-]/g, '_');
-          const block = document.createElement('div');
-          block.className = 'livecode tool-stream-block';
-          block.id = 'tsBlock-' + safeid;
-          block.dataset.blockId = blockId;
-          block.dataset.toolName = toolNameTsd;
-          const hdr = document.createElement('div');
-          hdr.className = 'livecode-h';
-          const dot = document.createElement('span');
-          dot.className = 'livecode-dot';
-          const lbl0 = document.createElement('span');
-          lbl0.className = 'label';
-          lbl0.textContent = titleTsd || '✎ Writing...';
-          const chevron = document.createElement('button');
-          chevron.className = 'ts-chevron';
-          chevron.textContent = '▶';
-          chevron.style.display = 'none';
-          hdr.appendChild(dot);
-          hdr.appendChild(lbl0);
-          hdr.appendChild(chevron);
-          const body = document.createElement('div');
-          body.className = 'livecode-body';
-          const pre = document.createElement('pre');
-          pre.id = 'tsCode-' + safeid;
-          pre.className = 'ts-code-pre';
-          body.appendChild(pre);
-          block.appendChild(hdr);
-          block.appendChild(body);
-          if (logBlock) logBlock.appendChild(block);
-          // F1.2: track user scroll inside the body. If the user scrolls up
-          // from the bottom, pause auto-scroll so they can read history;
-          // resume once they return to within 16px of the bottom.
-          const bodyEl = body;
-          var bsRef = { userScrolled: false };
-          try {
-            bodyEl.addEventListener('scroll', function() {
-              var atBottom = (bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight) < 16;
-              bsRef.userScrolled = !atBottom;
-            });
-          } catch(e) {}
-          state.__toolStreamBlocks[blockId] = { el: block, pre, body: bodyEl, hdr, toolName: toolNameTsd, settled: false, accumJson: '', filePath: '', chevron, scroll: bsRef };
-          scrollChatIfFollowing(runId);
         }
-        const bs = state.__toolStreamBlocks[blockId];
-        if (bs && bs.pre) {
-          bs.accumJson = (bs.accumJson || '') + delta;
-          const extracted = tryExtractToolStreamFields(bs.accumJson);
-          if (extracted.filePath && extracted.filePath !== bs.filePath) {
-            bs.filePath = extracted.filePath;
-            const fpLbl = bs.hdr ? bs.hdr.querySelector('.label') : null;
-            if (fpLbl) fpLbl.textContent = '✎ Writing ' + extracted.filePath + '...';
-          }
-          if (extracted.patchRaw) {
-            renderToolStreamBody(bs.pre, decodeJsonString(extracted.patchRaw));
-          }
-          // F1.2: auto-scroll the internal body to keep the latest line in
-          // view, unless the user has scrolled up to read earlier content.
-          try {
-            if (bs.body && !(bs.scroll && bs.scroll.userScrolled)) {
-              bs.body.scrollTop = bs.body.scrollHeight;
-            }
-          } catch(e) {}
-          scrollChatIfFollowing(runId);
+        const ls = state.__liveStream;
+        ls.accumJson = (ls.accumJson || '') + delta;
+        const extracted = tryExtractToolStreamFields(ls.accumJson);
+        if (extracted.filePath && extracted.filePath !== ls.filePath) {
+          ls.filePath = extracted.filePath;
+          const fpLbl = slot.querySelector('.ss-label');
+          if (fpLbl) fpLbl.textContent = '✎ Writing ' + extracted.filePath + '...';
         }
+        const bodyEl = slot.querySelector('.ss-body');
+        if (extracted.patchRaw && bodyEl) {
+          renderToolStreamBody(bodyEl, decodeJsonString(extracted.patchRaw));
+        }
+        // Auto-scroll the slot internal scroll to bottom unless the user
+        // has paged up to read earlier content.
+        try {
+          if (!(state.__liveStreamScroll && state.__liveStreamScroll.userScrolled)) {
+            slot.scrollTop = slot.scrollHeight;
+          }
+        } catch(e) {}
         return;
       }
 
@@ -9277,6 +9256,25 @@
       }
       if (lifecycleType === 'run_completed') {
         try { bgHideStickyPanel(runId); } catch {}
+        // F1.3: defensive clear of the side-panel live-stream slot.
+        // tool_result is the normal path; this catches runs where the final
+        // tool_result didn't fire (cancel, error, early exit) and a slot
+        // would otherwise stay stuck in "Writing..." forever.
+        try {
+          const slot = document.getElementById('zone-live-stream');
+          if (slot && slot.dataset && slot.dataset.state) {
+            if (state.__liveStreamFadeTimer) {
+              try { clearTimeout(state.__liveStreamFadeTimer); } catch(e) {}
+              state.__liveStreamFadeTimer = null;
+            }
+            slot.dataset.state = '';
+            const b = slot.querySelector('.ss-body');
+            if (b) b.innerHTML = '';
+            const l = slot.querySelector('.ss-label');
+            if (l) l.textContent = '';
+            state.__liveStream = { blockId: '', accumJson: '', filePath: '' };
+          }
+        } catch(e) {}
         state.__runIsComplete = state.__runIsComplete || {};
         state.__runIsComplete[runId] = true;
         if (state.__streamFallbackPayload && state.__streamFallbackPayload[runId]) {
@@ -9514,36 +9512,31 @@
             lastToolLine.classList.add((progress.status === 'success') ? 'c-done' : 'c-error');
             // Sub-line preview suppressed — main tool line is sufficient signal.
           }
-          // F1/F1.1: settle + collapse the oldest unsettled tool-stream block for this tool.
+          // F1.3: fade out and hide the side-panel live-stream slot when an
+          // apply_patch / write_file result lands. Chat-side collapse logic
+          // from F1.2 C3 is gone — the chat no longer hosts these blocks.
           try {
             const trToolName = String(progress.toolName || '');
-            if ((trToolName === 'apply_patch' || trToolName === 'write_file') && state.__toolStreamBlocks) {
-              const allBlocks = Object.values(state.__toolStreamBlocks);
-              const unsettled = allBlocks.filter(function(b) { return !b.settled && b.toolName === trToolName; });
-              if (unsettled.length > 0) {
-                const oldest = unsettled[0];
-                oldest.settled = true;
-                const isOk = progress.status === 'success';
-                oldest.el.classList.add(isOk ? 'ts-settled' : 'ts-failed');
-                oldest.el.classList.add('ts-collapsed');
-                var addCnt = 0, delCnt = 0;
-                try { addCnt = oldest.pre.querySelectorAll('.ts-add').length; } catch(e2) {}
-                try { delCnt = oldest.pre.querySelectorAll('.ts-del').length; } catch(e2) {}
-                var statsStr = (addCnt > 0 || delCnt > 0) ? ' (+' + addCnt + ' / -' + delCnt + ')' : '';
-                var fpStr = oldest.filePath || '';
-                const lbl = oldest.hdr ? oldest.hdr.querySelector('.label') : null;
-                if (lbl) lbl.textContent = (isOk ? '✓ ' : '✗ ') + (fpStr || 'file') + statsStr;
-                if (oldest.chevron) {
-                  oldest.chevron.style.display = '';
-                  oldest.chevron.textContent = '▶';
-                  var blocEl = oldest.el;
-                  var chev = oldest.chevron;
-                  oldest.chevron.addEventListener('click', function() {
-                    var nowCollapsed = !blocEl.classList.contains('ts-collapsed');
-                    blocEl.classList.toggle('ts-collapsed', nowCollapsed);
-                    chev.textContent = nowCollapsed ? '▶' : '▼';
-                  });
-                }
+            if (trToolName === 'apply_patch' || trToolName === 'write_file') {
+              const slot = document.getElementById('zone-live-stream');
+              if (slot && slot.dataset && slot.dataset.state === 'active') {
+                slot.dataset.state = 'fading';
+                state.__liveStreamFadeTimer = setTimeout(function() {
+                  slot.dataset.state = '';
+                  const b = slot.querySelector('.ss-body');
+                  if (b) b.innerHTML = '';
+                  const l = slot.querySelector('.ss-label');
+                  if (l) l.textContent = '';
+                  state.__liveStream = { blockId: '', accumJson: '', filePath: '' };
+                  state.__liveStreamFadeTimer = null;
+                  // If no todos either, hide the whole sidebar.
+                  try {
+                    const sb = document.getElementById('zoneTodoSidebar');
+                    const planEl = sb && sb.querySelector('.zone-todo-plan');
+                    const hasTodos = planEl && planEl.innerHTML && planEl.innerHTML.trim().length > 0;
+                    if (sb && !hasTodos) sb.dataset.state = 'hidden';
+                  } catch(e3) {}
+                }, 150);
               }
             }
           } catch(e) {}

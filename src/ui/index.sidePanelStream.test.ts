@@ -263,4 +263,206 @@ describe("Phase F1.3 — C1 side panel slot DOM structure", () => {
   });
 });
 
+function sendDelta(
+  ctx: Record<string, unknown>,
+  blockId: string,
+  delta: string,
+  isFirstDelta: boolean,
+  title = "",
+  toolName = "apply_patch",
+  runId = RUN_ID,
+) {
+  (ctx as { handleSSEPayload: (payload: unknown, runId: string) => void }).handleSSEPayload(
+    {
+      stage: "agent_loop",
+      progress: {
+        type: "tool_input_delta",
+        blockId,
+        delta,
+        isFirstDelta,
+        title,
+        toolName,
+      },
+    },
+    runId,
+  );
+}
+
+function sendToolResult(
+  ctx: Record<string, unknown>,
+  toolName: string,
+  status: "success" | "error" = "success",
+  runId = RUN_ID,
+) {
+  (ctx as { handleSSEPayload: (payload: unknown, runId: string) => void }).handleSSEPayload(
+    {
+      stage: "agent_loop",
+      progress: { type: "tool_result", toolName, status, title: "", detail: "" },
+    },
+    runId,
+  );
+}
+
+function sendRunCompleted(ctx: Record<string, unknown>, runId = RUN_ID) {
+  (ctx as { handleSSEPayload: (payload: unknown, runId: string) => void }).handleSSEPayload(
+    { lifecycle: { type: "run_completed" } },
+    runId,
+  );
+}
+
+describe("Phase F1.3 — C2 streaming routes to side-panel slot", () => {
+  it("first delta reveals slot + sidebar with header derived from title", () => {
+    const { ctx, document } = buildHarness();
+    sendDelta(ctx, "blk-1", '{"filePath":"src/a.ts"', true, "✎ Writing a.ts...");
+    const sidebar = getSidebar(document)!;
+    expect(sidebar.dataset.state).toBe("visible");
+    const slot = sidebar.querySelectorAll(".zone-side-stream-slot")[0]!;
+    expect(slot.dataset.state).toBe("active");
+    const lbl = slot.querySelectorAll(".ss-label")[0]!;
+    // First delta sets the initial title; later deltas overwrite once filePath parses out.
+    expect(lbl.textContent.length).toBeGreaterThan(0);
+  });
+
+  it("label updates to ✎ Writing <filePath>… once filePath value parses", () => {
+    const { ctx, document } = buildHarness();
+    sendDelta(ctx, "blk-fp", '{"filePath":"', true, "✎ Writing...");
+    sendDelta(ctx, "blk-fp", 'src/core/runner.ts","patch":"', false, "");
+    const slot = getSidebar(document)!.querySelectorAll(".zone-side-stream-slot")[0]!;
+    const lbl = slot.querySelectorAll(".ss-label")[0]!;
+    expect(lbl.textContent).toBe("✎ Writing src/core/runner.ts...");
+  });
+
+  it("FIND/REPLACE patch renders -/+ diff inside the slot, markers stripped", () => {
+    const { ctx, document } = buildHarness();
+    sendDelta(
+      ctx,
+      "blk-diff",
+      '{"filePath":"src/d.ts","patch":"--- FIND ---\\nold code\\n--- REPLACE ---\\nnew code"}',
+      true,
+      "",
+      "apply_patch",
+    );
+    const slot = getSidebar(document)!.querySelectorAll(".zone-side-stream-slot")[0]!;
+    const body = slot.querySelectorAll(".ss-body")[0]!;
+    const dels = body.querySelectorAll(".stream-diff-removed");
+    const adds = body.querySelectorAll(".stream-diff-added");
+    expect(dels.length).toBe(1);
+    expect(adds.length).toBe(1);
+    expect(dels[0]!.textContent).toContain("old code");
+    expect(adds[0]!.textContent).toContain("new code");
+    // Marker text itself must not leak into the body.
+    expect(body.textContent).not.toContain("--- FIND ---");
+    expect(body.textContent).not.toContain("--- REPLACE ---");
+  });
+
+  it("tool_result starts the fade (data-state=fading), then clears after 150ms", async () => {
+    const { ctx, document } = buildHarness();
+    sendDelta(
+      ctx,
+      "blk-settle",
+      '{"filePath":"src/x.ts","patch":"--- FIND ---\\nA\\n--- REPLACE ---\\nB"}',
+      true,
+      "",
+      "apply_patch",
+    );
+    const slot = getSidebar(document)!.querySelectorAll(".zone-side-stream-slot")[0]!;
+    expect(slot.dataset.state).toBe("active");
+    sendToolResult(ctx, "apply_patch", "success");
+    expect(slot.dataset.state).toBe("fading");
+    // Wait past the 150ms transition.
+    await new Promise((r) => setTimeout(r, 200));
+    expect(slot.dataset.state).toBe("");
+    const body = slot.querySelectorAll(".ss-body")[0]!;
+    expect(body.innerHTML).toBe("");
+  });
+
+  it("a second isFirstDelta while slot is occupied replaces content immediately", () => {
+    const { ctx, document } = buildHarness();
+    sendDelta(
+      ctx,
+      "blk-A",
+      '{"filePath":"src/A.ts","patch":"--- FIND ---\\nA\\n--- REPLACE ---\\nA2"}',
+      true,
+      "",
+      "apply_patch",
+    );
+    const slot = getSidebar(document)!.querySelectorAll(".zone-side-stream-slot")[0]!;
+    const body = slot.querySelectorAll(".ss-body")[0]!;
+    expect(body.textContent).toContain("A");
+    // New stream starts (no fade) — should overwrite the old content.
+    sendDelta(
+      ctx,
+      "blk-B",
+      '{"filePath":"src/B.ts","patch":"--- FIND ---\\nB\\n--- REPLACE ---\\nB2"}',
+      true,
+      "",
+      "apply_patch",
+    );
+    expect(slot.dataset.state).toBe("active");
+    expect(body.textContent).not.toContain("A2");
+    expect(body.textContent).toContain("B2");
+  });
+
+  it("run_completed defensively clears a stuck slot", () => {
+    const { ctx, document } = buildHarness();
+    sendDelta(
+      ctx,
+      "blk-stuck",
+      '{"filePath":"src/q.ts","patch":"--- FIND ---\\nQ\\n--- REPLACE ---\\nQ2"}',
+      true,
+      "",
+      "apply_patch",
+    );
+    const slot = getSidebar(document)!.querySelectorAll(".zone-side-stream-slot")[0]!;
+    expect(slot.dataset.state).toBe("active");
+    // No tool_result fired — agent_finished arrives directly.
+    sendRunCompleted(ctx);
+    expect(slot.dataset.state).toBe("");
+    const body = slot.querySelectorAll(".ss-body")[0]!;
+    expect(body.innerHTML).toBe("");
+  });
+
+  it("auto-scrolls slot to bottom on each delta when user is at bottom", () => {
+    const { ctx, document } = buildHarness();
+    sendDelta(ctx, "blk-sc", '{"filePath":"src/s.ts","patch":"--- FIND ---\\nA', true, "", "apply_patch");
+    const slot = getSidebar(document)!.querySelectorAll(".zone-side-stream-slot")[0]!;
+    slot.scrollHeight = 600;
+    slot.clientHeight = 320;
+    slot.scrollTop = 0;
+    sendDelta(ctx, "blk-sc", '\\n--- REPLACE ---\\nB"}', false, "", "apply_patch");
+    expect(slot.scrollTop).toBe(slot.scrollHeight);
+  });
+
+  it("auto-scroll pauses once the user scrolls up", () => {
+    const { ctx, document } = buildHarness();
+    sendDelta(ctx, "blk-pause", '{"filePath":"src/p.ts","patch":"--- FIND ---\\nA', true, "", "apply_patch");
+    const slot = getSidebar(document)!.querySelectorAll(".zone-side-stream-slot")[0]!;
+    slot.scrollHeight = 800;
+    slot.clientHeight = 320;
+    slot.scrollTop = 100; // user scrolled up
+    slot.dispatchScroll();
+    sendDelta(ctx, "blk-pause", '\\n--- REPLACE ---\\nB"}', false, "", "apply_patch");
+    expect(slot.scrollTop).toBe(100);
+  });
+
+  it("chat timeline never receives a .tool-stream-block (F1.x widget retired)", () => {
+    const { ctx, ensureEl, document } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+    sendDelta(
+      ctx,
+      "blk-chat",
+      '{"filePath":"src/c.ts","patch":"--- FIND ---\\nA\\n--- REPLACE ---\\nB"}',
+      true,
+      "",
+      "apply_patch",
+    );
+    // Old chat-embedded widget class name — must not appear anywhere in logBlock.
+    expect(logBlock.querySelectorAll(".tool-stream-block").length).toBe(0);
+    expect(logBlock.querySelectorAll(".livecode").length).toBe(0);
+    // Slot got the content instead.
+    const slot = getSidebar(document)!.querySelectorAll(".zone-side-stream-slot")[0]!;
+    expect(slot.dataset.state).toBe("active");
+  });
+});
+
 export { buildHarness, MockElement, RUN_ID, getSidebar };
