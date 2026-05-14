@@ -113,6 +113,25 @@ import { indexRepoFiles } from "../embeddings/indexRepository.js";
 import { logger, debugLog, errorLog, log } from "../utils/logger.js";
 import { attachRunIdentity } from "../llm/openaiContext.js";
 
+/**
+ * F1.4 C3: filter for the runLlmPatchFlow onProgress sink. toolExecutor
+ * emits diagnostic telemetry like
+ *   `{"event":"zone-tool-apply-patch-identity-swap-allowed-as-rename",...}`
+ * via the same onProgress callback that user-visible tool_call titles
+ * flow through. Without filtering, the UI's tool_call renderer surfaces
+ * the raw JSON in the chat. This helper returns true for any onProgress
+ * message that looks like a JSON object with `"event":"zone-..."` — those
+ * payloads stay a side-channel for tests / manual diagnostic readers.
+ *
+ * Exported for unit-test coverage; the runtime callsite is inline above
+ * inside the runAgentLoop input definition.
+ */
+export function isZoneInternalTelemetryProgress(msg: unknown): boolean {
+  const trimmed = String(msg ?? "").trim();
+  if (!trimmed.startsWith("{")) return false;
+  return /"event"\s*:\s*"zone-/.test(trimmed);
+}
+
 export type LlmPatchFlowResult =
   | {
       ok: true;
@@ -5586,6 +5605,8 @@ const initializeTodosFromPlan = (): void => {
         if (!runId) return;
         // [tool] lines are handled by onToolCall (structured). Skip raw duplicates.
         if (String(msg || "").startsWith("[tool]")) return;
+        // F1.4 C3: zone-internal telemetry stays a side-channel.
+        if (isZoneInternalTelemetryProgress(msg)) return;
         emitStructuredProgress({
           type: "tool_call",
           title: String(msg || "").slice(0, 200),
