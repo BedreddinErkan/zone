@@ -615,6 +615,12 @@
       scroll-behavior:smooth;
     }
     /* Dummy livecode typewriter removed; streaming uses <pre>. */
+    /* F1: tool-input-stream block — reuses .livecode shell, violet accent on label. */
+    .tool-stream-block .livecode-h .label{color:var(--violet);font-weight:500}
+    .tool-stream-block .livecode-body pre{font-size:0.72rem;white-space:pre-wrap;word-break:break-all;max-height:160px;overflow:hidden}
+    .tool-stream-block.ts-settled .livecode-h .label{color:#4ade80}
+    .tool-stream-block.ts-settled .livecode-dot{display:none}
+    .tool-stream-block.ts-failed .livecode-h .label{color:#f87171}
     /* When streaming owns the block, suppress any dummy animations/lines. */
     .livecode.streaming .livecode-h .label{animation:none;opacity:1}
     .livecode.streaming .livecode-dot{display:none}
@@ -9018,6 +9024,56 @@
       // Do not append log lines for streaming events.
       if (progress && (progressType === 'patch_stream_delta' || progressType === 'patch_stream_target')) return;
 
+      // F1: live tool-input typewriter for apply_patch / write_file.
+      if (progressType === 'tool_input_delta' && progress) {
+        const blockId = String(progress.blockId || '');
+        const delta = String(progress.delta || '');
+        const toolNameTsd = String(progress.toolName || '');
+        const isFirstDelta = !!progress.isFirstDelta;
+        const titleTsd = String(progress.title || '');
+        if (!blockId || !delta) return;
+        state.__toolStreamBlocks = state.__toolStreamBlocks || {};
+        if (isFirstDelta) {
+          const safeid = blockId.replace(/[^a-zA-Z0-9_-]/g, '_');
+          const block = document.createElement('div');
+          block.className = 'livecode tool-stream-block';
+          block.id = 'tsBlock-' + safeid;
+          block.dataset.blockId = blockId;
+          block.dataset.toolName = toolNameTsd;
+          const hdr = document.createElement('div');
+          hdr.className = 'livecode-h';
+          const dot = document.createElement('span');
+          dot.className = 'livecode-dot';
+          const lbl0 = document.createElement('span');
+          lbl0.className = 'label';
+          lbl0.textContent = titleTsd || '✎ Writing...';
+          hdr.appendChild(dot);
+          hdr.appendChild(lbl0);
+          const body = document.createElement('div');
+          body.className = 'livecode-body';
+          const pre = document.createElement('pre');
+          pre.id = 'tsCode-' + safeid;
+          pre.className = 'ts-code-pre';
+          body.appendChild(pre);
+          block.appendChild(hdr);
+          block.appendChild(body);
+          if (logBlock) logBlock.appendChild(block);
+          state.__toolStreamBlocks[blockId] = { el: block, pre, hdr, toolName: toolNameTsd, settled: false };
+          scrollChatIfFollowing(runId);
+        }
+        const bs = state.__toolStreamBlocks[blockId];
+        if (bs && bs.pre) {
+          bs.pre.textContent = (bs.pre.textContent || '') + delta;
+          // Update header label when filePath becomes available.
+          if (titleTsd && bs.hdr) {
+            const lbl = bs.hdr.querySelector('.label');
+            if (lbl) lbl.textContent = titleTsd;
+          }
+          scrollChatIfFollowing(runId);
+        }
+        return;
+      }
+
       // Plan UI in right panel only (transient). Do not show for chat runs.
       state.__runIsChat = state.__runIsChat || {};
       if (progressType === 'chat_start' || progressType === 'chat_chunk' || progressType === 'chat_done' || progressType === 'chat_response') state.__runIsChat[runId] = true;
@@ -9286,6 +9342,21 @@
             lastToolLine.classList.add((progress.status === 'success') ? 'c-done' : 'c-error');
             // Sub-line preview suppressed — main tool line is sufficient signal.
           }
+          // F1: settle the oldest unsettled tool-stream typewriter block for this tool.
+          try {
+            const trToolName = String(progress.toolName || '');
+            if ((trToolName === 'apply_patch' || trToolName === 'write_file') && state.__toolStreamBlocks) {
+              const allBlocks = Object.values(state.__toolStreamBlocks);
+              const unsettled = allBlocks.filter(function(b) { return !b.settled && b.toolName === trToolName; });
+              if (unsettled.length > 0) {
+                const oldest = unsettled[0];
+                oldest.settled = true;
+                oldest.el.classList.add(progress.status === 'success' ? 'ts-settled' : 'ts-failed');
+                const lbl = oldest.hdr ? oldest.hdr.querySelector('.label') : null;
+                if (lbl) lbl.textContent = (progress.status === 'success' ? '✓ Patched' : '✗ Write failed');
+              }
+            }
+          } catch(e) {}
           // Phase I.5: when the agent calls verify_visual, render the screenshot
           // inline below the tool line. Click the thumbnail to open a full-size
           // modal viewer. Failed verify_visual calls fall through to the standard
