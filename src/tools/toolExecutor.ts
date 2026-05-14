@@ -24,6 +24,22 @@ import { runVerifyVisual, type VerifyVisualInput } from "./verifyVisual.js";
 
 const execAsync = promisify(exec);
 
+// Phase V Commit 2: Unicode curly-quote → ASCII normalization for FIND/REPLACE blocks.
+const SMART_QUOTE_MAP: Record<string, string> = {
+  "“": '"',
+  "”": '"',
+  "‘": "'",
+  "’": "'",
+};
+function normalizeSmartQuotes(s: string): { text: string; count: number } {
+  let count = 0;
+  const text = s.replace(/[“”‘’]/g, (ch) => {
+    count++;
+    return SMART_QUOTE_MAP[ch] ?? ch;
+  });
+  return { text, count };
+}
+
 export type ResolveCwdResult =
   | { ok: true; cwd: string }
   | { ok: false; error: string };
@@ -1424,6 +1440,8 @@ export async function executeTool(
       }
 
       let remaining = patch;
+      let sqFindTotal = 0;
+      let sqReplaceTotal = 0;
       while (remaining.includes(FIND_MARKER)) {
         const findIdx = remaining.indexOf(FIND_MARKER);
         const afterFind = remaining.slice(findIdx + FIND_MARKER.length);
@@ -1435,9 +1453,19 @@ export async function executeTool(
         const replaceContent =
           nextFindIdx === -1 ? afterReplace : afterReplace.slice(0, nextFindIdx);
 
+        // Phase V Commit 2: normalize Unicode curly quotes before FIND matching
+        const { text: normalizedFind, count: sqFind } = normalizeSmartQuotes(
+          findContent.replace(/^\r?\n/, "").replace(/\r?\n$/, "")
+        );
+        const { text: normalizedReplace, count: sqReplace } = normalizeSmartQuotes(
+          replaceContent.replace(/^\r?\n/, "").replace(/\r?\n$/, "")
+        );
+        sqFindTotal += sqFind;
+        sqReplaceTotal += sqReplace;
+
         blocks.push({
-          find: findContent.replace(/^\r?\n/, "").replace(/\r?\n$/, ""),
-          replace: replaceContent.replace(/^\r?\n/, "").replace(/\r?\n$/, ""),
+          find: normalizedFind,
+          replace: normalizedReplace,
         });
         remaining = nextFindIdx === -1 ? "" : afterReplace.slice(nextFindIdx);
       }
@@ -1449,6 +1477,19 @@ export async function executeTool(
             "No valid --- FIND --- / --- REPLACE --- blocks found in patch. " +
             "Format: --- FIND ---\n<exact code>\n--- REPLACE ---\n<code with additions>",
         };
+      }
+
+      if (sqFindTotal + sqReplaceTotal > 0) {
+        if (input?.selfValidationCounts) {
+          input.selfValidationCounts.smartQuoteFixes += sqFindTotal + sqReplaceTotal;
+        }
+        debugLog("[zone-self-validation]", JSON.stringify({
+          rule: "smart_quote_autofix",
+          filePath,
+          findOccurrences: sqFindTotal,
+          replaceOccurrences: sqReplaceTotal,
+          runId: input?.runId ?? null,
+        }));
       }
 
       let currentNormalized = originalWithoutBom.replace(/\r\n/g, "\n");
