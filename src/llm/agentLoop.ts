@@ -2063,6 +2063,9 @@ Example:
     inlineTsSkips: 0,
     totalLatencyMs: 0,
   };
+  // Phase V.1: Set of filePaths successfully read_file'd this run.
+  // Populated after each successful read_file; passed to executeTool for C1 gate.
+  const filesReadThisRun = new Set<string>();
   const tokenBudgetBaseTokens = cleanTokenNumber(input.tokenBudgetBaseTokens);
   // P.1: compaction trigger — fires at the safe iteration boundary after tool results
   // are processed. No-op in P.1; P.2 replaces the stub with real summarization.
@@ -2762,6 +2765,7 @@ Example:
             (entry) => entry.tool === "verify_visual" && entry.success === true
           ).length,
           selfValidationCounts,
+          filesReadThisRun,
         });
         debugLog("[zone-agent-tool-post]", {
           runId: input.runId,
@@ -2803,6 +2807,11 @@ Example:
           result: result.output.slice(0, 4000),
           success: result.success,
         });
+
+        // Phase V.1: track successfully-read file paths for C1 gate in executeTool.
+        if (name === "read_file" && result.success && typeof parsedArgs.filePath === "string" && parsedArgs.filePath) {
+          filesReadThisRun.add(parsedArgs.filePath);
+        }
 
         if (name === "apply_patch" && !result.success) {
           const parsedFilePath =

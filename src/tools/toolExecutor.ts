@@ -1,6 +1,7 @@
 import { exec } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import fg from "fast-glob";
@@ -1926,10 +1927,11 @@ export async function executeTool(
         fs.writeFileSync(abs, outputContent, "utf8");
       }
 
-      // Phase V Commit 3: inline TS syntax check pre-flush.
-      // Runs only in the non-staging path (abs is on disk). In the staging path
-      // the content lives in the Map; Phase J full-project tsc covers it on flush.
-      if (!input?.stagingFiles) {
+      // Phase V Commit 3 (V.1 fix): inline TS syntax check pre-flush.
+      // Always runs for TS files; writes outputContent to a temp file so the
+      // check works in both staging (content in Map, abs is original on disk)
+      // and non-staging (abs already updated) paths.
+      {
         const tsExt = path.extname(abs).toLowerCase();
         const isTsFile = tsExt === ".ts" || tsExt === ".tsx" || tsExt === ".cts" || tsExt === ".mts";
         if (isTsFile) {
@@ -1937,9 +1939,11 @@ export async function executeTool(
           let tscDecision: "approved" | "rejected" = "approved";
           let tscErrorCodes: string[] = [];
           let tscOutputForAgent: string | null = null;
+          const tempTsPath = path.join(os.tmpdir(), `zone-tsc-${randomUUID()}${tsExt}`);
           try {
+            fs.writeFileSync(tempTsPath, outputContent, "utf8");
             await execAsync(
-              `npx tsc --noEmit --moduleResolution bundler --target es2022 --skipLibCheck "${abs}"`,
+              `npx tsc --noEmit --moduleResolution bundler --target es2022 --skipLibCheck "${tempTsPath}"`,
               { timeout: 5000 }
             );
           } catch (tscErr: unknown) {
@@ -1951,6 +1955,8 @@ export async function executeTool(
               tscOutputForAgent = stdout;
             }
             // TS2xxx-only or timeout/other → approve; single-file context can't resolve imports
+          } finally {
+            fs.rmSync(tempTsPath, { force: true });
           }
           const tscLatencyMs = Date.now() - tscStart;
           if (input?.selfValidationCounts) {
@@ -1997,7 +2003,7 @@ export async function executeTool(
             rule: "inline_ts_check",
             decision: "skipped",
             filePath,
-            fileType: tsExt,
+            fileType: path.extname(abs).toLowerCase(),
             errorCodes: [],
             latencyMs: 0,
             runId: input?.runId ?? null,

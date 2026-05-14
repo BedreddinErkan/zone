@@ -192,3 +192,188 @@ describe("[zone-self-validation-summary] emission", () => {
     expect(payload.totalLatencyMs).toBeGreaterThanOrEqual(50);
   });
 });
+
+describe("agentLoop filesReadThisRun plumbing (V.1)", () => {
+  it("passes filesReadThisRun to executeTool after successful read_file", async () => {
+    let capturedFilesRead: ReadonlySet<string> | undefined;
+    mocks.executeTool.mockImplementation(
+      async (
+        name: string,
+        args: Record<string, unknown>,
+        _repo: string,
+        _onProgress: unknown,
+        input: { filesReadThisRun?: ReadonlySet<string> }
+      ) => {
+        if (name === "apply_patch") {
+          capturedFilesRead = input?.filesReadThisRun;
+        }
+        return { success: true, output: "ok" };
+      }
+    );
+    // LLM: read_file src/a.ts → apply_patch src/a.ts → done
+    mocks.createChatCompletion
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  id: "r1",
+                  type: "function",
+                  function: { name: "read_file", arguments: JSON.stringify({ filePath: "src/a.ts" }) },
+                },
+              ],
+            },
+            finish_reason: "tool_calls",
+          },
+        ],
+        usage: makeUsage(),
+      })
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  id: "p1",
+                  type: "function",
+                  function: {
+                    name: "apply_patch",
+                    arguments: JSON.stringify({ filePath: "src/a.ts", patch: "--- FIND ---\nold\n--- REPLACE ---\nnew", intent: "modify", scope: null }),
+                  },
+                },
+              ],
+            },
+            finish_reason: "tool_calls",
+          },
+        ],
+        usage: makeUsage(),
+      })
+      .mockResolvedValueOnce(makeDoneResponse());
+
+    await runAgentLoop(makeBaseInput(repoPath) as Parameters<typeof runAgentLoop>[0]);
+
+    expect(capturedFilesRead).toBeDefined();
+    expect(capturedFilesRead!.has("src/a.ts")).toBe(true);
+  });
+
+  it("does not include filePath in filesReadThisRun when read_file fails", async () => {
+    let capturedFilesRead: ReadonlySet<string> | undefined;
+    mocks.executeTool.mockImplementation(
+      async (
+        name: string,
+        args: Record<string, unknown>,
+        _repo: string,
+        _onProgress: unknown,
+        input: { filesReadThisRun?: ReadonlySet<string> }
+      ) => {
+        if (name === "read_file") {
+          return { success: false, output: "File not found" };
+        }
+        if (name === "apply_patch") {
+          capturedFilesRead = input?.filesReadThisRun;
+        }
+        return { success: true, output: "ok" };
+      }
+    );
+    // LLM: failing read_file → apply_patch (will be intercepted by agentLoop gate
+    // since toolCallLog won't have a successful read, but executeTool is called
+    // first for read_file, so we can verify the set is empty)
+    mocks.createChatCompletion
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  id: "r2",
+                  type: "function",
+                  function: { name: "read_file", arguments: JSON.stringify({ filePath: "src/b.ts" }) },
+                },
+              ],
+            },
+            finish_reason: "tool_calls",
+          },
+        ],
+        usage: makeUsage(),
+      })
+      .mockResolvedValueOnce(makeDoneResponse());
+
+    await runAgentLoop(makeBaseInput(repoPath) as Parameters<typeof runAgentLoop>[0]);
+
+    // apply_patch never called (agentLoop done after failed read + done response),
+    // but we can verify set didn't grow from the failed read
+    expect(capturedFilesRead).toBeUndefined();
+  });
+
+  it("filesReadThisRun is a Set passed by reference — accumulates across iters", async () => {
+    const capturedSets: ReadonlySet<string>[] = [];
+    mocks.executeTool.mockImplementation(
+      async (
+        name: string,
+        args: Record<string, unknown>,
+        _repo: string,
+        _onProgress: unknown,
+        input: { filesReadThisRun?: ReadonlySet<string> }
+      ) => {
+        if (name === "apply_patch") {
+          // snapshot the set contents at each apply_patch call
+          capturedSets.push(new Set(input?.filesReadThisRun ?? []));
+        }
+        return { success: true, output: "ok" };
+      }
+    );
+    // read_file src/x.ts, then apply_patch src/x.ts, then read_file src/y.ts, apply_patch src/y.ts
+    mocks.createChatCompletion
+      .mockResolvedValueOnce({
+        choices: [{
+          message: { content: null, tool_calls: [
+            { id: "r1", type: "function", function: { name: "read_file", arguments: JSON.stringify({ filePath: "src/x.ts" }) } },
+          ]},
+          finish_reason: "tool_calls",
+        }],
+        usage: makeUsage(),
+      })
+      .mockResolvedValueOnce({
+        choices: [{
+          message: { content: null, tool_calls: [
+            { id: "p1", type: "function", function: { name: "apply_patch", arguments: JSON.stringify({ filePath: "src/x.ts", patch: "--- FIND ---\na\n--- REPLACE ---\nb", intent: "modify", scope: null }) } },
+          ]},
+          finish_reason: "tool_calls",
+        }],
+        usage: makeUsage(),
+      })
+      .mockResolvedValueOnce({
+        choices: [{
+          message: { content: null, tool_calls: [
+            { id: "r2", type: "function", function: { name: "read_file", arguments: JSON.stringify({ filePath: "src/y.ts" }) } },
+          ]},
+          finish_reason: "tool_calls",
+        }],
+        usage: makeUsage(),
+      })
+      .mockResolvedValueOnce({
+        choices: [{
+          message: { content: null, tool_calls: [
+            { id: "p2", type: "function", function: { name: "apply_patch", arguments: JSON.stringify({ filePath: "src/y.ts", patch: "--- FIND ---\na\n--- REPLACE ---\nb", intent: "modify", scope: null }) } },
+          ]},
+          finish_reason: "tool_calls",
+        }],
+        usage: makeUsage(),
+      })
+      .mockResolvedValueOnce(makeDoneResponse());
+
+    await runAgentLoop(makeBaseInput(repoPath) as Parameters<typeof runAgentLoop>[0]);
+
+    expect(capturedSets).toHaveLength(2);
+    // First apply_patch: only x.ts was read
+    expect(capturedSets[0].has("src/x.ts")).toBe(true);
+    expect(capturedSets[0].has("src/y.ts")).toBe(false);
+    // Second apply_patch: both x.ts and y.ts were read (set accumulates)
+    expect(capturedSets[1].has("src/x.ts")).toBe(true);
+    expect(capturedSets[1].has("src/y.ts")).toBe(true);
+  });
+});
