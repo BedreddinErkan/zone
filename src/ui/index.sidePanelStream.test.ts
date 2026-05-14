@@ -271,6 +271,7 @@ function sendDelta(
   title = "",
   toolName = "apply_patch",
   runId = RUN_ID,
+  subagentId?: string,
 ) {
   (ctx as { handleSSEPayload: (payload: unknown, runId: string) => void }).handleSSEPayload(
     {
@@ -282,6 +283,7 @@ function sendDelta(
         isFirstDelta,
         title,
         toolName,
+        ...(subagentId ? { subagentId } : {}),
       },
     },
     runId,
@@ -462,6 +464,107 @@ describe("Phase F1.3 — C2 streaming routes to side-panel slot", () => {
     // Slot got the content instead.
     const slot = getSidebar(document)!.querySelectorAll(".zone-side-stream-slot")[0]!;
     expect(slot.dataset.state).toBe("active");
+  });
+});
+
+describe("Phase F1.4 — worker prefix in side-panel slot", () => {
+  it("event with subagentId renders the '↳ worker {id-short}' prefix on the label", () => {
+    const { ctx, document } = buildHarness();
+    sendDelta(
+      ctx,
+      "blk-w1",
+      '{"filePath":"src/w.ts","patch":"--- FIND ---\\nA\\n--- REPLACE ---\\nB"}',
+      true,
+      "↳ worker abc123 ✎ Writing...", // server-side title already prefixed
+      "apply_patch",
+      RUN_ID,
+      "abc1234567",
+    );
+    const sidebar = getSidebar(document)!;
+    const slot = sidebar.querySelectorAll(".zone-side-stream-slot")[0]!;
+    const lbl = slot.querySelectorAll(".ss-label")[0]!;
+    // After filePath parses out, the UI rebuilds the label — must preserve the worker prefix.
+    expect(lbl.textContent.startsWith("↳ worker abc123 ")).toBe(true);
+    expect(lbl.textContent).toContain("Writing src/w.ts");
+  });
+
+  it("event without subagentId keeps the parent label format", () => {
+    const { ctx, document } = buildHarness();
+    sendDelta(
+      ctx,
+      "blk-p1",
+      '{"filePath":"src/p.ts","patch":"--- FIND ---\\nA\\n--- REPLACE ---\\nB"}',
+      true,
+      "✎ Writing...",
+      "apply_patch",
+      RUN_ID,
+      // no subagentId — parent stream
+    );
+    const slot = getSidebar(document)!.querySelectorAll(".zone-side-stream-slot")[0]!;
+    const lbl = slot.querySelectorAll(".ss-label")[0]!;
+    expect(lbl.textContent.startsWith("↳ worker")).toBe(false);
+    expect(lbl.textContent).toBe("✎ Writing src/p.ts...");
+  });
+
+  it("worker → parent → worker sequence transitions without leaking worker prefix into the parent block", () => {
+    const { ctx, document } = buildHarness();
+    // Worker A
+    sendDelta(
+      ctx,
+      "blk-wA",
+      '{"filePath":"src/A.ts","patch":"--- FIND ---\\nA\\n--- REPLACE ---\\nA2"}',
+      true,
+      "",
+      "apply_patch",
+      RUN_ID,
+      "wA-aaaaaa",
+    );
+    const slot = getSidebar(document)!.querySelectorAll(".zone-side-stream-slot")[0]!;
+    let lbl = slot.querySelectorAll(".ss-label")[0]!;
+    expect(lbl.textContent).toContain("↳ worker wA-aaa");
+    expect(lbl.textContent).toContain("src/A.ts");
+
+    // Parent takes over (new isFirstDelta, no subagentId)
+    sendDelta(
+      ctx,
+      "blk-parent",
+      '{"filePath":"src/P.ts","patch":"--- FIND ---\\nP\\n--- REPLACE ---\\nP2"}',
+      true,
+      "✎ Writing...",
+      "apply_patch",
+      RUN_ID,
+    );
+    lbl = slot.querySelectorAll(".ss-label")[0]!;
+    expect(lbl.textContent.startsWith("↳ worker")).toBe(false);
+    expect(lbl.textContent).toContain("src/P.ts");
+
+    // Worker B
+    sendDelta(
+      ctx,
+      "blk-wB",
+      '{"filePath":"src/B.ts","patch":"--- FIND ---\\nB\\n--- REPLACE ---\\nB2"}',
+      true,
+      "",
+      "apply_patch",
+      RUN_ID,
+      "wB-bbbbbb",
+    );
+    lbl = slot.querySelectorAll(".ss-label")[0]!;
+    expect(lbl.textContent).toContain("↳ worker wB-bbb");
+    expect(lbl.textContent).toContain("src/B.ts");
+  });
+
+  it("worker prefix survives intra-stream filePath rebuild (server prefix may be lost in mid-stream rebuilds)", () => {
+    // First delta: title set; no filePath parses yet.
+    const { ctx, document } = buildHarness();
+    sendDelta(ctx, "blk-rebuild", '{"filePath":"', true, "↳ worker xx Writing...", "apply_patch", RUN_ID, "xxxxxxxx");
+    // Second delta: filePath value completes → UI rebuilds label from scratch.
+    sendDelta(ctx, "blk-rebuild", 'src/r.ts","patch":"x"}', false, "", "apply_patch", RUN_ID, "xxxxxxxx");
+    const slot = getSidebar(document)!.querySelectorAll(".zone-side-stream-slot")[0]!;
+    const lbl = slot.querySelectorAll(".ss-label")[0]!;
+    // Rebuild must still carry the worker prefix derived from the stored subagentId.
+    expect(lbl.textContent.startsWith("↳ worker xxxxxx ")).toBe(true);
+    expect(lbl.textContent).toContain("src/r.ts");
   });
 });
 

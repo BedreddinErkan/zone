@@ -9145,16 +9145,19 @@
       // routes to the side-panel slot (#zone-live-stream) instead of the
       // chat timeline. Single active stream — a new isFirstDelta replaces
       // the current slot content rather than stacking.
+      // F1.4: when progress.subagentId is set, the stream originates from a
+      // worker subagent — apply a "↳ worker {id-short} " prefix to the label.
       if (progressType === 'tool_input_delta' && progress) {
         const blockId = String(progress.blockId || '');
         const delta = String(progress.delta || '');
         const titleTsd = String(progress.title || '');
+        const subagentId = String(progress.subagentId || '');
         if (!blockId || !delta) return;
         const isFirstDelta = !!progress.isFirstDelta;
         const slot = ensureLiveStreamSlot();
         if (!slot) return;
         const sidebar = document.getElementById('zoneTodoSidebar');
-        state.__liveStream = state.__liveStream || { blockId: '', accumJson: '', filePath: '' };
+        state.__liveStream = state.__liveStream || { blockId: '', accumJson: '', filePath: '', subagentId: '' };
         const newBlock = isFirstDelta || state.__liveStream.blockId !== blockId;
         if (newBlock) {
           // Cancel any in-flight fade-out from a prior settle.
@@ -9162,7 +9165,7 @@
             try { clearTimeout(state.__liveStreamFadeTimer); } catch(e) {}
             state.__liveStreamFadeTimer = null;
           }
-          state.__liveStream = { blockId, accumJson: '', filePath: '' };
+          state.__liveStream = { blockId, accumJson: '', filePath: '', subagentId };
           if (sidebar) sidebar.dataset.state = 'visible';
           slot.dataset.state = 'active';
           slot.style.opacity = '';
@@ -9187,7 +9190,12 @@
         if (extracted.filePath && extracted.filePath !== ls.filePath) {
           ls.filePath = extracted.filePath;
           const fpLbl = slot.querySelector('.ss-label');
-          if (fpLbl) fpLbl.textContent = '✎ Writing ' + extracted.filePath + '...';
+          if (fpLbl) {
+            // F1.4: keep the "↳ worker {id-short} " prefix on label rebuilds
+            // so the worker origin doesn't disappear once filePath parses.
+            const workerPrefix = ls.subagentId ? ('↳ worker ' + String(ls.subagentId).slice(0, 6) + ' ') : '';
+            fpLbl.textContent = workerPrefix + '✎ Writing ' + extracted.filePath + '...';
+          }
         }
         const bodyEl = slot.querySelector('.ss-body');
         if (extracted.patchRaw && bodyEl) {
