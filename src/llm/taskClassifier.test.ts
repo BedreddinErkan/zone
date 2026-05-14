@@ -212,11 +212,14 @@ describe("Phase L.1 task classifier", () => {
   });
 
   it("emits [zone-task-classified] log entry on success", async () => {
+    // Q.8: estimatedFiles dropped from 4 to 3 so the new
+    // "medium + estimatedFiles >= 4 → needsSubagent=true" rule doesn't
+    // flip needsSubagent and obscure this test's intent (log emission).
     mocks.createChatCompletion.mockResolvedValue(
       buildResponse(
         JSON.stringify({
           tier: "medium",
-          estimatedFiles: 4,
+          estimatedFiles: 3,
           estimatedIterations: 12,
           needsSubagent: false,
           confidence: 0.8,
@@ -233,7 +236,7 @@ describe("Phase L.1 task classifier", () => {
     const payload = JSON.parse(String(successLogCall![1]));
     expect(payload).toMatchObject({
       tier: "medium",
-      estimatedFiles: 4,
+      estimatedFiles: 3,
       needsSubagent: false,
       classifierModel: "gpt-5.4-mini",
     });
@@ -368,5 +371,146 @@ describe("Phase L.1 task classifier", () => {
 
     expect(result.tier).toBe("complex");
     expect(result.fallbackUsed).toBeUndefined();
+  });
+});
+
+describe("Phase Q.8 — complex-tier triggers for multi-file rename", () => {
+  it("Test 4 wording (rename across all 5 files where defined or used) → complex + needsSubagent", async () => {
+    // This is the exact wording that production routed to medium/needsSubagent:false.
+    // Q.8: when the LLM picks complex, needsSubagent is force-derived to true.
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "complex",
+          estimatedFiles: 5,
+          estimatedIterations: 20,
+          needsSubagent: false, // LLM may still say false — override forces true
+          confidence: 0.85,
+          reasoning: "rename across 5 files — def + imports + call sites",
+        })
+      )
+    );
+
+    const result = await classifyTask(
+      "Rename `detectFramework` to `identifyFramework` across all 5 files where it's defined or used"
+    );
+
+    expect(result.tier).toBe("complex");
+    expect(result.estimatedFiles).toBe(5);
+    expect(result.needsSubagent).toBe(true); // derived from tier === complex
+    expect(result.fallbackUsed).toBeUndefined();
+  });
+
+  it("rename across 3 explicitly-listed files → complex", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "complex",
+          estimatedFiles: 3,
+          estimatedIterations: 15,
+          needsSubagent: true,
+          confidence: 0.8,
+          reasoning: "explicit 3-file rename with coordinated edits",
+        })
+      )
+    );
+
+    const result = await classifyTask(
+      "Rename helperA to helperB in src/a.ts, src/b.ts, and src/c.ts"
+    );
+
+    expect(result.tier).toBe("complex");
+    expect(result.needsSubagent).toBe(true);
+  });
+
+  it("rename in only 2 files → stays medium (count below threshold)", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "medium",
+          estimatedFiles: 2,
+          estimatedIterations: 8,
+          needsSubagent: false,
+          confidence: 0.85,
+          reasoning: "small-scope 2-file rename",
+        })
+      )
+    );
+
+    const result = await classifyTask("Rename foo to bar in 2 files");
+
+    expect(result.tier).toBe("medium");
+    // medium + estimatedFiles < 4 → respect LLM's needsSubagent:false
+    expect(result.needsSubagent).toBe(false);
+  });
+
+  it("add new export to 5 files (pure additions, no rename) → medium", async () => {
+    // Pure additions don't require coordinated FIND/REPLACE.
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "medium",
+          estimatedFiles: 5,
+          estimatedIterations: 15,
+          needsSubagent: false, // LLM said no, but override flips it (medium + 5 files)
+          confidence: 0.78,
+          reasoning: "pure additions to 5 modules, no rename coordination",
+        })
+      )
+    );
+
+    const result = await classifyTask(
+      "Add a new helper export to 5 files: src/a.ts, src/b.ts, src/c.ts, src/d.ts, src/e.ts"
+    );
+
+    expect(result.tier).toBe("medium");
+    // Q.8: medium + estimatedFiles >= 4 → needsSubagent forced to true
+    expect(result.needsSubagent).toBe(true);
+  });
+
+  it("needsSubagent auto-derives to true when tier === complex even if LLM says false", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "complex",
+          estimatedFiles: 8,
+          estimatedIterations: 30,
+          needsSubagent: false, // intentionally wrong
+          confidence: 0.9,
+        })
+      )
+    );
+
+    const result = await classifyTask("complex-but-llm-said-no task");
+
+    expect(result.tier).toBe("complex");
+    expect(result.needsSubagent).toBe(true);
+  });
+
+  it("system prompt includes Q.8 rename / multi-file complex triggers", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "complex",
+          estimatedFiles: 5,
+          estimatedIterations: 20,
+          needsSubagent: true,
+          confidence: 0.9,
+        })
+      )
+    );
+
+    await classifyTask("prompt-content audit task");
+
+    const call = mocks.createChatCompletion.mock.calls[0]?.[0] as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const systemMsg = call.messages.find((m) => m.role === "system")?.content ?? "";
+    // Anchors for the Q.8 additions.
+    expect(systemMsg).toContain("COMPLEX tier triggers");
+    expect(systemMsg).toContain("Rename / refactor");
+    expect(systemMsg).toContain("across all N files");
+    expect(systemMsg).toContain("3+ file paths");
+    expect(systemMsg).toContain("Counter-examples");
   });
 });

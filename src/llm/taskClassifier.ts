@@ -52,6 +52,27 @@ Classification heuristics:
 - Single file edit with no cross-references → SIMPLE
 - Pure cosmetic change (comment, rename in single file) → SIMPLE
 
+COMPLEX tier triggers (any one is sufficient):
+- Rename / refactor of a symbol across ≥3 files where its definition +
+  imports + call sites all need coordinated updates
+- Task wording includes "across all N files" / "every reference" /
+  "throughout the codebase" / "in each file" combined with a count ≥3
+- An explicit list of 3+ file paths in the task description, all needing
+  coordinated edits
+- Signature change that ripples through caller files
+- Cross-file API contract changes (rename, signature, return type)
+  affecting ≥3 consumers
+
+When uncertain between medium and complex, prefer complex for tasks involving:
+- "rename" keyword + multi-file scope (≥3 files)
+- "import" + "call site" mentioned together (suggests coordinated cross-file edit)
+- Explicit file list with ≥4 entries
+
+Counter-examples (stay MEDIUM, not COMPLEX):
+- "Add new export to N files" — pure additions don't require coordinated
+  FIND/REPLACE across files
+- "Rename X to Y in 2 files" — count <3, medium scope
+
 Be conservative: if uncertain, classify UP (medium > simple, complex > medium).
 
 Output ONLY valid JSON:
@@ -110,6 +131,26 @@ interface ParsedClassifierResponse {
   reasoning?: string;
 }
 
+/**
+ * Q.8: derive needsSubagent from tier + scope, ignoring the LLM's self-report.
+ * The classifier model often returns `needsSubagent: false` for tasks that
+ * downstream tiering treats as needing parallel work. Enforcing the rule
+ * here closes that gap.
+ *
+ *   - tier === "complex"                            → always true
+ *   - tier === "medium" && estimatedFiles >= 4      → true
+ *   - otherwise                                     → respect the LLM's value
+ */
+function deriveNeedsSubagent(
+  tier: TaskTier,
+  estimatedFiles: number,
+  llmValue: boolean
+): boolean {
+  if (tier === "complex") return true;
+  if (tier === "medium" && estimatedFiles >= 4) return true;
+  return llmValue;
+}
+
 function parseClassifierResponse(text: string): ParsedClassifierResponse {
   const cleaned = text.replace(/```(?:json)?/gi, "").trim();
   if (!cleaned) {
@@ -133,11 +174,13 @@ function parseClassifierResponse(text: string): ParsedClassifierResponse {
   if (!["simple", "medium", "complex"].includes(parsed.tier)) {
     throw new Error(`invalid tier: ${String(parsed.tier)}`);
   }
+  const tier = parsed.tier as TaskTier;
+  const estimatedFiles = Math.max(1, Math.floor(Number(parsed.estimatedFiles) || 1));
   return {
-    tier: parsed.tier as TaskTier,
-    estimatedFiles: Math.max(1, Math.floor(Number(parsed.estimatedFiles) || 1)),
+    tier,
+    estimatedFiles,
     estimatedIterations: Math.max(1, Math.floor(Number(parsed.estimatedIterations) || 10)),
-    needsSubagent: Boolean(parsed.needsSubagent),
+    needsSubagent: deriveNeedsSubagent(tier, estimatedFiles, Boolean(parsed.needsSubagent)),
     confidence: Math.min(1, Math.max(0, Number(parsed.confidence) || 0)),
     reasoning:
       typeof parsed.reasoning === "string" ? parsed.reasoning.slice(0, 200) : undefined,
