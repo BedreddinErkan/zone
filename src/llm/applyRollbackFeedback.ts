@@ -157,3 +157,14 @@ export function buildApplyRolledBackMessage(input: BuildApplyRolledBackInput): s
 export function isApplyRolledBackMessage(s: string): boolean {
   return String(s ?? "").startsWith(`${MARKER}\n`);
 }
+
+/**
+ * J.4 C2: true when the rendered rollback message includes a "Suggested:"
+ * line from the cross-file heuristic. Useful for downstream consumers
+ * (orchestrator, telemetry) that want to gate retry behavior on whether
+ * the agent has an actionable hint vs. needs to investigate from scratch.
+ */
+export function applyRolledBackMessageHasSuggestion(msg: string): boolean {
+  if (!isApplyRolledBackMessage(msg)) return false;
+  return /\nSuggested: /.test(msg);
+}

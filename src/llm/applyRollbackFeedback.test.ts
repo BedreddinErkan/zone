@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ROLLED_BACK_SUGGESTIONS,
+  applyRolledBackMessageHasSuggestion,
   buildApplyRolledBackMessage,
   isApplyRolledBackMessage,
   parseTscErrorPreview,
@@ -155,5 +156,58 @@ describe("Phase J.4 — buildApplyRolledBackMessage (C1 shape)", () => {
     });
     expect(msg).toContain("introduced 0 new error(s):");
     expect(msg).not.toContain("(plus");
+  });
+});
+
+describe("Phase J.4 C2 — end-to-end heuristic on realistic tsc preview", () => {
+  it("partial-rename dogfood scenario produces TS2305 suggestion", () => {
+    // Realistic preview shape from a partial rename: one caller file
+    // still imports the old name, tsc reports TS2305 + a downstream TS2304.
+    const preview =
+      `src/llm/agentLoop.ts(2381,7): error TS2305: Module '"./detect"' has no exported member 'detectFramework'.\n` +
+      `src/llm/agentLoop.ts(2382,17): error TS2304: Cannot find name 'detectFramework'.`;
+    const errors = parseTscErrorPreview(preview);
+    const msg = buildApplyRolledBackMessage({
+      filePath: "src/llm/agentLoop.ts",
+      errors,
+      restoredFiles: ["src/llm/agentLoop.ts"],
+    });
+    expect(applyRolledBackMessageHasSuggestion(msg)).toBe(true);
+    expect(msg).toContain(ROLLED_BACK_SUGGESTIONS.get("TS2305")!);
+    // The Task-tool fan-out hint must surface for the agent — this is the
+    // exact phrase the system prompt teaches the agent to recognize.
+    expect(msg).toContain("Task tool");
+  });
+
+  it("type-mismatch scenario (TS2339) produces the consumer-update suggestion", () => {
+    const preview =
+      `src/users/handlers.ts(45,12): error TS2339: Property 'role' does not exist on type 'User'.`;
+    const errors = parseTscErrorPreview(preview);
+    const msg = buildApplyRolledBackMessage({
+      filePath: "src/users/handlers.ts",
+      errors,
+      restoredFiles: ["src/users/handlers.ts"],
+    });
+    expect(applyRolledBackMessageHasSuggestion(msg)).toBe(true);
+    expect(msg).toContain("type contract changed");
+  });
+
+  it("preview with only TS6133 unused-var errors gets no suggestion", () => {
+    const preview =
+      `src/x.ts(10,7): error TS6133: 'unused' is declared but its value is never read.\n` +
+      `src/x.ts(11,7): error TS6133: 'other' is declared but its value is never read.`;
+    const errors = parseTscErrorPreview(preview);
+    const msg = buildApplyRolledBackMessage({
+      filePath: "src/x.ts",
+      errors,
+      restoredFiles: ["src/x.ts"],
+    });
+    expect(applyRolledBackMessageHasSuggestion(msg)).toBe(false);
+    expect(msg).not.toContain("Suggested:");
+  });
+
+  it("applyRolledBackMessageHasSuggestion returns false for non-marker output", () => {
+    expect(applyRolledBackMessageHasSuggestion("just a string")).toBe(false);
+    expect(applyRolledBackMessageHasSuggestion("")).toBe(false);
   });
 });
