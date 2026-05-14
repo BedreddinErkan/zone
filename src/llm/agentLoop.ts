@@ -585,6 +585,30 @@ const PROVIDER_AGNOSTIC_HARDENING =
   `- Patch attempted, new error revealed → continue investigation OR tests_failed_by_patch\n` +
   `- Multiple patch attempts, root cause is architectural → state the architectural finding with specific file/line evidence`;
 
+// U.2.C: scope-aware variant used for test failures only (not syntax errors).
+// The mandatory apply_patch requirement is gated on whether the failing file
+// is within the scope of the agent's changes. For out-of-scope failures the
+// agent may emit tests_failed_unrelated immediately after citing evidence,
+// without attempting a patch. This prevents wasted iterations on unrelated
+// test infrastructure failures (e.g. jsdom/DOM tests after a utility change).
+const TEST_FAILURE_SCOPE_HARDENING =
+  `\n\n**SCOPE CHECK BEFORE CLAIMING UNRELATED**\n\n` +
+  `STEP 1: Quote the exact failing test file path or assertion from the output.\n` +
+  `STEP 2: Is that file within scope of your changes this run (files you modified or created)?\n\n` +
+  `Scope-IN — the failing file is a file you touched:\n` +
+  `  → You MUST attempt a corrective apply_patch. Read the assertion, form a specific hypothesis, patch, verify.\n` +
+  `  → "I cannot determine the cause" is not acceptable — read the failing line and produce evidence.\n\n` +
+  `Scope-OUT — the failing file is NOT a file you touched this run:\n` +
+  `  → Emit [ZONE_VERIFICATION: tests_failed_unrelated] with the failing file path and a one-line\n` +
+  `    confirmation it is not in your edits. Do NOT attempt to patch files outside your scope.\n\n` +
+  `Cannot extract a failing file path from the output:\n` +
+  `  → Emit [ZONE_VERIFICATION: tests_inconclusive] — do not guess or assume out-of-scope.\n\n` +
+  `Acceptable verdicts after scope check:\n` +
+  `- In-scope, patch resolved → tests_passed\n` +
+  `- In-scope, patch attempted, not resolved → tests_failed_by_patch\n` +
+  `- Out-of-scope, evidence cited → tests_failed_unrelated\n` +
+  `- Cannot determine scope → tests_inconclusive`;
+
 export type FailureRecord = {
   trigger: SelfCorrectTrigger | string;
   errorLine: number | null;
@@ -989,7 +1013,7 @@ export function buildCoachingPrompt(
         `- Cannot tell: emit [ZONE_VERIFICATION: tests_inconclusive].\n` +
         `Avoid blindly re-running the same test command; that consumes attempts without progress.\n` +
         `Next action: classify with evidence; if related, produce a corrective patch.` +
-        PROVIDER_AGNOSTIC_HARDENING
+        TEST_FAILURE_SCOPE_HARDENING
       );
     case "apply_patch_replace_shorter_than_find":
       return (
