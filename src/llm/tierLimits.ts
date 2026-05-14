@@ -27,7 +27,7 @@ export const TIER_LIMITS: Record<TaskTier, TierLimits> = {
   },
   complex: {
     taskToolAllowed: true,
-    maxSubagentCalls: 2,
+    maxSubagentCalls: 4,
     tokenBudgetCap: 800_000,
     iterCap: 40,
   },

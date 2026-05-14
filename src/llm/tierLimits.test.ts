@@ -32,9 +32,9 @@ describe("TIER_LIMITS", () => {
     expect(TIER_LIMITS.medium.iterCap).toBe(25);
   });
 
-  it("complex tier: Task tool allowed, 2 subagent calls, 800k tokens, 40 iter", () => {
+  it("complex tier: Task tool allowed, 4 subagent calls, 800k tokens, 40 iter", () => {
     expect(TIER_LIMITS.complex.taskToolAllowed).toBe(true);
-    expect(TIER_LIMITS.complex.maxSubagentCalls).toBe(2);
+    expect(TIER_LIMITS.complex.maxSubagentCalls).toBe(4);
     expect(TIER_LIMITS.complex.tokenBudgetCap).toBe(800_000);
     expect(TIER_LIMITS.complex.iterCap).toBe(40);
   });
