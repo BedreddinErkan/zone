@@ -621,6 +621,9 @@
     .tool-stream-block.ts-settled .livecode-h .label{color:#4ade80}
     .tool-stream-block.ts-settled .livecode-dot{display:none}
     .tool-stream-block.ts-failed .livecode-h .label{color:#f87171}
+    .ts-diff-line{display:block;padding:1px 4px;line-height:1.5}
+    .ts-del{background:#3f1f1f;color:#fca5a5}
+    .ts-add{background:#1f3f1f;color:#86efac}
     /* When streaming owns the block, suppress any dummy animations/lines. */
     .livecode.streaming .livecode-h .label{animation:none;opacity:1}
     .livecode.streaming .livecode-dot{display:none}
@@ -8786,6 +8789,31 @@
       }
       return result;
     }
+    function renderToolStreamBody(preEl, decodedPatch) {
+      var FIND_MARKER = '<<<<<<< FIND';
+      var SEP_MARKER = '=======';
+      var REPLACE_MARKER = '>>>>>>> REPLACE';
+      var lines = decodedPatch.split('\n');
+      var hasFR = false;
+      for (var i = 0; i < lines.length; i++) {
+        if (lines[i].trim() === FIND_MARKER) { hasFR = true; break; }
+      }
+      if (!hasFR) { preEl.textContent = decodedPatch; return; }
+      preEl.innerHTML = '';
+      var section = 'before';
+      for (var j = 0; j < lines.length; j++) {
+        var line = lines[j];
+        var tr = line.trim();
+        if (tr === FIND_MARKER) { section = 'find'; continue; }
+        if (section === 'find' && tr === SEP_MARKER) { section = 'replace'; continue; }
+        if (tr === REPLACE_MARKER) { section = 'before'; continue; }
+        if (section === 'before') continue;
+        var span = document.createElement('span');
+        span.className = 'ts-diff-line ' + (section === 'find' ? 'ts-del' : 'ts-add');
+        span.textContent = (section === 'find' ? '-' : '+') + ' ' + line;
+        preEl.appendChild(span);
+      }
+    }
 
     function handleSSEPayload(payload, runId){
       const termEvt =
@@ -9102,7 +9130,7 @@
             if (fpLbl) fpLbl.textContent = '✎ Writing ' + extracted.filePath + '...';
           }
           if (extracted.patchRaw) {
-            bs.pre.textContent = decodeJsonString(extracted.patchRaw);
+            renderToolStreamBody(bs.pre, decodeJsonString(extracted.patchRaw));
           }
           scrollChatIfFollowing(runId);
         }

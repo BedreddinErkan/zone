@@ -57,6 +57,7 @@ class MockElement {
   set innerHTML(v: string) {
     this.innerHtmlValue = String(v ?? "");
     this.textContentValue = v.replace(/<[^>]*>/g, "");
+    if (!v) this.children = [];
   }
 
   appendChild(child: MockElement): MockElement {
@@ -358,5 +359,49 @@ describe("Phase F1.1 — incremental JSON parsing for typewriter render", () => 
     expect(pre.textContent).toContain("old line");
     expect(pre.textContent.includes("\n")).toBe(true);  // actual newline
     expect(pre.textContent).toContain('"quoted"');       // decoded backslash-quote
+  });
+
+  // F1.1 Commit 2 — FIND/REPLACE-aware diff rendering
+  it("FIND/REPLACE patch renders del lines and add lines as separate spans", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    // '\\n' in JS source = literal \n (JSON newline escape sequence).
+    sendDelta(ctx, "blk-diff1", '{"filePath":"src/e.ts","patch":"<<<<<<< FIND\\nold code\\n=======\\nnew code\\n>>>>>>> REPLACE"}', true, "", "apply_patch");
+
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    const pre = block.querySelectorAll(".ts-code-pre")[0]!;
+    const delLines = pre.querySelectorAll(".ts-del");
+    const addLines = pre.querySelectorAll(".ts-add");
+    expect(delLines.length).toBe(1);
+    expect(addLines.length).toBe(1);
+    expect(delLines[0]!.textContent).toContain("old code");
+    expect(addLines[0]!.textContent).toContain("new code");
+  });
+
+  it("add-only patch (empty FIND section) renders only green add lines", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    sendDelta(ctx, "blk-addonly", '{"filePath":"src/f.ts","patch":"<<<<<<< FIND\\n=======\\nnew code here\\n>>>>>>> REPLACE"}', true, "", "apply_patch");
+
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    const pre = block.querySelectorAll(".ts-code-pre")[0]!;
+    expect(pre.querySelectorAll(".ts-del").length).toBe(0);
+    expect(pre.querySelectorAll(".ts-add").length).toBe(1);
+    expect(pre.querySelectorAll(".ts-add")[0]!.textContent).toContain("new code here");
+  });
+
+  it("patch with no FIND/REPLACE markers renders as plain text in pre", () => {
+    const { ctx, ensureEl } = buildHarness();
+    const logBlock = ensureEl(`logBlock-${RUN_ID}`);
+
+    sendDelta(ctx, "blk-raw1", '{"filePath":"src/d.ts","patch":"plain text content"}', true, "", "apply_patch");
+
+    const block = logBlock.querySelectorAll(".tool-stream-block")[0]!;
+    const pre = block.querySelectorAll(".ts-code-pre")[0]!;
+    expect(pre.textContent).toBe("plain text content");
+    expect(pre.querySelectorAll(".ts-del").length).toBe(0);
+    expect(pre.querySelectorAll(".ts-add").length).toBe(0);
   });
 });
