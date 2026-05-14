@@ -3,6 +3,8 @@ import {
   getUserQuota,
   appendConversationMessages,
 } from "../billing/conversationRepository.js";
+import { appendFsConversationEvent } from "../core/conversationFilesystemStore.js";
+import { truncatePriorRunSummary } from "../llm/applyRollbackFeedback.js";
 import { resolveBillingAction } from "../billing/resolveBillingAction.js";
 import type {
   ConversationBillingMode,
@@ -56,7 +58,65 @@ function logBillingDebug(message: string, details?: Record<string, unknown>): vo
   console.log(`[zone-billing-debug] ${message}`);
 }
 
+/**
+ * J.5.1: write the rolled-back agent summary to the project-local
+ * filesystem store at <repoPath>/.zone/conversations/<threadId>.jsonl.
+ *
+ * Mirrors the rollback gate inside logRun's Supabase path so both
+ * persistence layers fire on the same conditions:
+ *   decisionMode === "rolled_back" AND agentSummary non-empty
+ * AND a usable threadId (conversationId from the run; validated by the
+ * filesystem store before any path concatenation).
+ *
+ * Emits [zone-persist-attempt] telemetry so the persist + load pair is
+ * grep-discoverable end-to-end. Never throws.
+ */
+async function persistAgentSummaryToFilesystem(
+  input: RunLogInput
+): Promise<void> {
+  if (
+    input.decisionMode !== "rolled_back" ||
+    typeof input.agentSummary !== "string" ||
+    !input.agentSummary.trim() ||
+    typeof input.repoPath !== "string" ||
+    !input.repoPath
+  ) {
+    return;
+  }
+  const threadId =
+    typeof input.conversationId === "string" ? input.conversationId.trim() : "";
+  if (!threadId) return;
+
+  const ts = Date.now();
+  const success = await appendFsConversationEvent({
+    repoPath: input.repoPath,
+    threadId,
+    event: {
+      type: "agent_summary",
+      ts,
+      decisionMode: input.decisionMode,
+      text: truncatePriorRunSummary(input.agentSummary),
+    },
+  });
+  console.log(
+    "[zone-persist-attempt]",
+    JSON.stringify({
+      layer: "filesystem",
+      success,
+      threadId,
+      decisionMode: input.decisionMode,
+      bytes: input.agentSummary.length,
+    })
+  );
+}
+
 export async function logRun(input: RunLogInput): Promise<string | null> {
+  // J.5.1: filesystem-first agent_summary persistence runs BEFORE the
+  // Supabase short-circuit so self-host deployments (no SUPABASE_URL)
+  // still get cross-run rollback threading. Errors are swallowed inside
+  // the helper — never blocks the rest of the run-log flow.
+  await persistAgentSummaryToFilesystem(input);
+
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 

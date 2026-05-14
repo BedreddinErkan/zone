@@ -1,4 +1,5 @@
 import { extractPriorRunSummary } from "../llm/applyRollbackFeedback.js";
+import { readFsConversationEvents } from "./conversationFilesystemStore.js";
 import { scanRepo } from "../repo/scanRepo.js";
 import { detectProjectStructure } from "../repo/detectProjectStructure.js";
 import { rankRelevantFiles } from "../repo/rankRelevantFiles.js";
@@ -5078,39 +5079,76 @@ const initializeTodosFromPlan = (): void => {
 
   // J.5: load prior-run rollback summary BEFORE we split into the agent_loop
   // vs planner+agent branches, so both paths can thread it into
-  // runAgentLoop. Best-effort: missing Supabase env / empty thread / no
-  // prior agent_summary event → priorRunSummary stays "". Lives at function
-  // scope so both branches share the same loaded data (no double-fetch).
+  // runAgentLoop. J.5.1: try Supabase first (faster when available),
+  // fall back to the project-local filesystem store at
+  //   <repoPath>/.zone/conversations/<threadId>.jsonl
+  // which the rolled-back-run logRun wrote unconditionally. Both layers
+  // are graceful — any failure leaves priorRunSummary="".
   let conversationHistory: unknown[] = [];
   let priorRunSummary = "";
+  let priorRunSummarySource: "supabase" | "filesystem" | "none" = "none";
+  let priorRunHistoryEventCount = 0;
+  const threadIdForLoad =
+    typeof input.conversationId === "string" ? input.conversationId.trim() : "";
   try {
-    const threadId =
-      typeof input.conversationId === "string" ? input.conversationId.trim() : "";
     const userIdJ5 =
       typeof input.userId === "string" ? input.userId.trim() : "";
     const url = process.env.SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (threadId && userIdJ5 && url && key) {
+    if (threadIdForLoad && userIdJ5 && url && key) {
       const supabase: SupabaseClient = createClient(url, key);
       const history = await getConversationByThreadId(supabase, {
         userId: userIdJ5,
-        threadId,
+        threadId: threadIdForLoad,
       });
       const allMessages = Array.isArray(history?.messages) ? history!.messages : [];
-      conversationHistory = allMessages.slice(-10);
-      priorRunSummary = extractPriorRunSummary(allMessages);
-      if (priorRunSummary) {
-        log("[zone-prior-run-summary-loaded]", JSON.stringify({
-          threadId,
-          summaryBytes: priorRunSummary.length,
-          hasMarker: priorRunSummary.includes("APPLY_ROLLED_BACK\n"),
-          runId: typeof input.runId === "string" ? input.runId : null,
-        }));
+      if (allMessages.length > 0) {
+        conversationHistory = allMessages.slice(-10);
+        priorRunSummary = extractPriorRunSummary(allMessages);
+        if (priorRunSummary) {
+          priorRunSummarySource = "supabase";
+          priorRunHistoryEventCount = allMessages.length;
+        }
       }
     }
   } catch {
     conversationHistory = [];
     priorRunSummary = "";
+  }
+  // J.5.1: filesystem fallback — runs when Supabase didn't return a
+  // summary (no env, empty thread row, or the prior run was self-host).
+  if (!priorRunSummary && threadIdForLoad && typeof input.repoPath === "string") {
+    try {
+      const fsEvents = readFsConversationEvents({
+        repoPath: input.repoPath,
+        threadId: threadIdForLoad,
+      });
+      if (fsEvents.length > 0) {
+        // Hydrate conversationHistory if Supabase didn't already populate it,
+        // so the planner sees recent user turns even on self-host.
+        if (conversationHistory.length === 0) {
+          conversationHistory = fsEvents.slice(-10);
+        }
+        const candidate = extractPriorRunSummary(fsEvents);
+        if (candidate) {
+          priorRunSummary = candidate;
+          priorRunSummarySource = "filesystem";
+          priorRunHistoryEventCount = fsEvents.length;
+        }
+      }
+    } catch {
+      // Filesystem failures are non-fatal — proceed with empty priorRunSummary.
+    }
+  }
+  if (priorRunSummary) {
+    log("[zone-prior-run-summary-loaded]", JSON.stringify({
+      threadId: threadIdForLoad,
+      summaryBytes: priorRunSummary.length,
+      hasMarker: priorRunSummary.includes("APPLY_ROLLED_BACK\n"),
+      persistenceSource: priorRunSummarySource,
+      historyEventCount: priorRunHistoryEventCount,
+      runId: typeof input.runId === "string" ? input.runId : null,
+    }));
   }
 
   if (_useAgentLoop) {
