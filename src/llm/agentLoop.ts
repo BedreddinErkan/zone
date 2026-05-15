@@ -16,7 +16,7 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
-import { CHAT_TOOLS, READ_ONLY_TOOLS, ZONE_TOOLS } from "../tools/toolDefinitions.js";
+import { AUDIT_ONLY_TOOLS, CHAT_TOOLS, READ_ONLY_TOOLS, ZONE_TOOLS } from "../tools/toolDefinitions.js";
 import {
   emptySubagentTokenUsage,
   resetSubagentCallCount,
@@ -1868,9 +1868,14 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   };
   const effectiveAllowedTools =
     input.allowedTools ?? (hasExplicitMode ? modeDefaultAllowedTools(mode) : undefined);
+  // Phase AS: AUDIT_ONLY_TOOLS (e.g. suggest_scope_change) are only presented
+  // to the LLM when they appear in allowedTools — never in the execute default.
+  const allKnownTools = effectiveAllowedTools
+    ? [...ZONE_TOOLS, ...AUDIT_ONLY_TOOLS]
+    : ZONE_TOOLS;
   const toolsForLLM = sortToolsForPromptCache(
     effectiveAllowedTools
-      ? ZONE_TOOLS.filter((t) => effectiveAllowedTools.has(getZoneToolName(t)))
+      ? allKnownTools.filter((t) => effectiveAllowedTools.has(getZoneToolName(t)))
       : ZONE_TOOLS
   );
   if (effectiveAllowedTools && toolsForLLM.length === 0) {
@@ -2692,6 +2697,60 @@ Example:
             result: "ok",
             success: true,
           });
+          continue;
+        }
+
+        // Phase AS: suggest_scope_change is an audit-only tool that records a
+        // scope mismatch proposal. It emits a structured event (captured by
+        // investigateScope via onStructuredEvent) and returns an ack.
+        if (name === "suggest_scope_change") {
+          const scopeType = parsedArgs["type"];
+          const scopeReason = parsedArgs["reason"];
+          const revisedPlanSummary = parsedArgs["revised_plan_summary"];
+          const missingFiles = Array.isArray(parsedArgs["missing_files"]) ? parsedArgs["missing_files"] as string[] : [];
+          const unnecessaryFiles = Array.isArray(parsedArgs["unnecessary_files"]) ? parsedArgs["unnecessary_files"] as string[] : [];
+
+          const validTypes = ["under_scope", "over_scope", "mixed"];
+          if (!validTypes.includes(String(scopeType)) || !scopeReason || !revisedPlanSummary) {
+            const errMsg = "suggest_scope_change rejected: missing required fields (type, reason, revised_plan_summary).";
+            responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
+            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            continue;
+          }
+
+          if (scopeType === "under_scope" && missingFiles.length === 0) {
+            const errMsg = "suggest_scope_change rejected: missing_files required for under_scope.";
+            responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
+            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            continue;
+          }
+          if (scopeType === "over_scope" && unnecessaryFiles.length === 0) {
+            const errMsg = "suggest_scope_change rejected: unnecessary_files required for over_scope.";
+            responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
+            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            continue;
+          }
+
+          debugLog("[zone-scope-revision-proposed]", JSON.stringify({
+            runId: input.runId || null,
+            type: scopeType,
+            missingCount: missingFiles.length,
+            unnecessaryCount: unnecessaryFiles.length,
+            ts: new Date().toISOString(),
+          }));
+
+          input.onStructuredEvent?.({
+            type: "suggest_scope_change",
+            scopeChangeType: scopeType,
+            reason: String(scopeReason),
+            missingFiles,
+            unnecessaryFiles,
+            revisedPlanSummary: String(revisedPlanSummary),
+          });
+
+          const ackMsg = "Scope change proposal recorded. Investigation can continue.";
+          responseInput.push({ role: "tool", tool_call_id: callId, content: ackMsg });
+          toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: ackMsg, success: true });
           continue;
         }
 

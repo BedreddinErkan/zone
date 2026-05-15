@@ -485,3 +485,49 @@ required: ["id", "content", "description", "status"],
     },
   },
 ];
+
+/**
+ * Phase AS: audit-only tool available during investigateScope() runs.
+ * Not in ZONE_TOOLS — only presented to the LLM when allowedTools includes
+ * "suggest_scope_change" (i.e. AUDIT_ALLOWED_TOOLS).
+ */
+export const AUDIT_ONLY_TOOLS: ChatCompletionTool[] = [
+  {
+    type: "function",
+    function: {
+      name: "suggest_scope_change",
+      description:
+        "Propose narrowing or expanding the approved plan after investigation reveals scope mismatch. Only call when findings show the original plan is materially wrong-sized.",
+      parameters: {
+        type: "object",
+        required: ["reason", "type", "revised_plan_summary"],
+        properties: {
+          reason: {
+            type: "string",
+            description: "1–3 sentence justification grounded in investigation findings.",
+          },
+          type: {
+            type: "string",
+            enum: ["under_scope", "over_scope", "mixed"],
+            description: "Kind of mismatch found.",
+          },
+          missing_files: {
+            type: "array",
+            items: { type: "string" },
+            description: "Files the plan omits but investigation shows are required. Populate for under_scope / mixed.",
+          },
+          unnecessary_files: {
+            type: "array",
+            items: { type: "string" },
+            description: "Files the plan includes but investigation shows are uninvolved. Populate for over_scope / mixed.",
+          },
+          revised_plan_summary: {
+            type: "string",
+            description: "Short revised plan to show in the approval card.",
+          },
+        },
+        additionalProperties: false,
+      } as Record<string, unknown>,
+    },
+  },
+];
