@@ -6692,6 +6692,9 @@
 
     let __zoneActivePlanReview = null;
     let __zoneActiveRevision = null;
+    // Y.0: tracks which runIds had a plan card shown; used by revision card
+    // to detect audit-only context (plan review was off for this run).
+    const __planShownForRun = new Set();
 
     class ZonePlanReviewPrompt {
       constructor(containerEl, payload, callbacks){
@@ -6928,7 +6931,7 @@
       const container = document.getElementById('zonePlanStickyContainer');
       if (!container) return;
       container.dataset.state = 'visible';
-      if (runId) container.dataset.runId = runId;
+      if (runId) { container.dataset.runId = runId; __planShownForRun.add(runId); }
       const payload = { approvalId, plan, runId, regenAttempt: planEvt.regenAttempt ?? 0, maxRegens: planEvt.maxRegens ?? 3 };
       __zoneActivePlanReview = new ZonePlanReviewPrompt(container, payload, {
         onDecide: (p, action, editedPlan, perRunAuditFlag) => {
@@ -7040,6 +7043,11 @@
       if (!container) return;
       container.dataset.state = 'visible';
       if (runId) container.dataset.runId = runId;
+      // Y.0: when plan review was off, the user never saw a plan card — prepend
+      // a log line so they understand why the revision card is appearing.
+      if (runId && !__planShownForRun.has(runId) && logBlock) {
+        try { appendLogLine(logBlock, { timestamp: nowTs(), message: '[Audit found issues] Zone automatically audited scope and found issues requiring review.', status: 'warning' }); } catch {}
+      }
       const payload = {
         revisionId,
         runId,
@@ -9147,7 +9155,20 @@
       }
       if (progress && progressType === 'scope_revision_resolved') {
         try { dismissZoneScopeRevisionForRun(runId); } catch {}
-        if (logBlock) appendLogLine(logBlock, { timestamp: nowTs(), message: progress.revisionDecision === 'approve' ? 'Scope revision approved — executing revised plan.' : 'Scope revision rejected — proceeding with original plan.', status: progress.revisionDecision === 'approve' ? 'success' : 'active' });
+        if (logBlock) {
+          let revMsg, revStatus;
+          if (progress.revisionDecision === 'approve') {
+            revMsg = 'Scope revision approved — executing revised plan.';
+            revStatus = 'success';
+          } else if (progress.revisionDecision === 'auto_apply') {
+            revMsg = 'Minor scope adjustment auto-applied.';
+            revStatus = 'success';
+          } else {
+            revMsg = 'Scope revision rejected — proceeding with original plan.';
+            revStatus = 'active';
+          }
+          appendLogLine(logBlock, { timestamp: nowTs(), message: revMsg, status: revStatus });
+        }
         return;
       }
       if (progress && progressType === 'compaction_status') {
@@ -9386,6 +9407,7 @@
       }
       if (lifecycleType === 'run_completed') {
         try { bgHideStickyPanel(runId); } catch {}
+        try { if (runId) __planShownForRun.delete(runId); } catch {}
         // F1.3: defensive clear of the side-panel live-stream slot.
         // tool_result is the normal path; this catches runs where the final
         // tool_result didn't fire (cancel, error, early exit) and a slot
