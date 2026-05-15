@@ -10686,6 +10686,7 @@
 
     // ---- Settings overlay ----
     let activeSettingsTab = 'usage';
+    let _cachedAutoAudit = true; // server default is true; refreshed async on first settings open
 
     function openSettings(tab){
       els.settingsOverlay.classList.add('open');
@@ -10849,6 +10850,18 @@
             Current effective models for <strong>${provider}</strong>:
             <span id="effectiveModelDisplay"></span>
           </div>
+          <div style="margin-top:20px;border-top:1px solid var(--border,#333);padding-top:14px">
+            <div class="apikey-section-title" style="margin-bottom:8px">Scope Audit</div>
+            <label style="display:flex;gap:8px;align-items:flex-start;cursor:${_modelRunActive ? 'not-allowed' : 'pointer'}">
+              <input id="autoAuditComplexChk" type="checkbox" style="margin-top:2px;accent-color:var(--violet,#7a5af8)" ${_modelRunActive ? 'disabled' : ''}>
+              <span style="font-size:var(--font-size-sm,12px);line-height:1.45;opacity:${_modelRunActive ? '0.5' : '1'}">
+                <strong>Auto-audit scope before complex tasks</strong>
+                <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:var(--violet,#7a5af8);color:#fff;vertical-align:middle;margin-left:4px">recommended</span><br>
+                Zone runs a quick investigation before executing complex-tier tasks and proposes
+                revisions if the plan's scope looks wrong.
+              </span>
+            </label>
+          </div>
         </div>`;
       // Populate custom selects
       const highSel = document.getElementById('customModelHigh');
@@ -10898,6 +10911,31 @@
         stdSel.addEventListener('change', () => {
           setActiveModel(provider, 'standard', stdSel.value);
           refreshEffective();
+        });
+      }
+      // Auto-audit toggle
+      const autoAuditChk = document.getElementById('autoAuditComplexChk');
+      if (autoAuditChk) {
+        autoAuditChk.checked = _cachedAutoAudit;
+        // Refresh from server async on first open (deferred to keep render sync)
+        setTimeout(() => {
+          try {
+            const p = fetch('/api/settings/scope-audit');
+            if (!p || typeof p.then !== 'function') return;
+            p.then(r => r.json()).then(d => {
+              _cachedAutoAudit = d && typeof d.autoAuditComplexTasks === 'boolean' ? d.autoAuditComplexTasks : true;
+              const chk = document.getElementById('autoAuditComplexChk');
+              if (chk) chk.checked = _cachedAutoAudit;
+            }).catch(() => {});
+          } catch {}
+        }, 0);
+        autoAuditChk.addEventListener('change', () => {
+          _cachedAutoAudit = autoAuditChk.checked;
+          fetch('/api/settings/scope-audit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ autoAuditComplexTasks: _cachedAutoAudit })
+          }).catch(() => {});
         });
       }
     }

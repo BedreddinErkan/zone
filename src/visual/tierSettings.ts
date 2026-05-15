@@ -15,6 +15,12 @@ export interface PerTierSettings {
   maxSubagentCalls?: number;
 }
 
+export interface TierSettingsFile {
+  tierSettings?: Partial<Record<TaskTier, PerTierSettings>>;
+  /** Phase AS: auto-run scope investigation before complex task execution. Default true. */
+  autoAuditComplexTasks?: boolean;
+}
+
 export type TierSettings = Partial<Record<TaskTier, PerTierSettings>>;
 
 const SETTINGS_DIR = join(homedir(), ".zone");
@@ -81,4 +87,32 @@ export function writeTierSettings(settings: TierSettings): TierSettings {
   const sanitized = validateAndSanitize(settings);
   writeFileSync(SETTINGS_PATH, JSON.stringify(sanitized, null, 2), "utf8");
   return sanitized;
+}
+
+function readRawFile(): Record<string, unknown> {
+  try {
+    if (!existsSync(SETTINGS_PATH)) return {};
+    return JSON.parse(readFileSync(SETTINGS_PATH, "utf8")) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function writeRawFile(data: Record<string, unknown>): void {
+  if (!existsSync(SETTINGS_DIR)) mkdirSync(SETTINGS_DIR, { recursive: true });
+  writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2), "utf8");
+}
+
+/** Phase AS: reads the autoAuditComplexTasks setting. Defaults to true when absent. */
+export function readAutoAuditSetting(): boolean {
+  const raw = readRawFile();
+  if (typeof raw["autoAuditComplexTasks"] === "boolean") return raw["autoAuditComplexTasks"];
+  return true; // default: on
+}
+
+/** Phase AS: persists the autoAuditComplexTasks setting. */
+export function writeAutoAuditSetting(value: boolean): void {
+  const raw = readRawFile();
+  raw["autoAuditComplexTasks"] = value;
+  writeRawFile(raw);
 }

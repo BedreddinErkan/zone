@@ -17,7 +17,7 @@ import {
   saveVisualSettings,
   getVisualSettingsDefaults,
 } from "../visual/visualSettings.js";
-import { readTierSettings, writeTierSettings } from "../visual/tierSettings.js";
+import { readTierSettings, writeTierSettings, readAutoAuditSetting, writeAutoAuditSetting } from "../visual/tierSettings.js";
 import { TIER_LIMITS } from "../llm/tierLimits.js";
 import { buildDashboardData } from "./sweepResultsApi.js";
 import { invalidateDevServerCache } from "../visual/devServerProbe.js";
@@ -2292,6 +2292,28 @@ app.post("/api/settings/tier-limits/reset", (_req, res) => {
   }
 });
 
+app.get("/api/settings/scope-audit", (_req, res) => {
+  try {
+    res.json({ ok: true, autoAuditComplexTasks: readAutoAuditSetting() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post("/api/settings/scope-audit", (req, res) => {
+  const value = req.body?.autoAuditComplexTasks;
+  if (typeof value !== "boolean") {
+    res.status(400).json({ ok: false, reason: "autoAuditComplexTasks must be a boolean" });
+    return;
+  }
+  try {
+    writeAutoAuditSetting(value);
+    res.json({ ok: true, autoAuditComplexTasks: value });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 // Phase I.5: serve verify_visual / auto-verify screenshots back to the UI for
 // inline thumbnails and the modal viewer. Files are written by runVerifyVisual
 // to <cwd>/.zone/screenshots/<runId>-<timestamp>.png. The strict regex below
@@ -3605,8 +3627,7 @@ app.post("/api/patch", async (req, res) => {
       // classifyTask is self-healing; defensive catch for future contract changes.
     }
 
-    const tierSettings = readTierSettings();
-    const autoAuditComplexTasks = (tierSettings as Record<string, unknown>)["autoAuditComplexTasks"] !== false;
+    const autoAuditComplexTasks = readAutoAuditSetting();
     const perRunAuditFlag = approvedWithPerRunAuditFlag;
     const tier = preClassifiedTask?.tier ?? "medium";
 

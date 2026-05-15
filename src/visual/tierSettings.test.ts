@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
-import { readTierSettings, writeTierSettings, getTierSettingsPath } from "./tierSettings.js";
+import {
+  readTierSettings,
+  writeTierSettings,
+  getTierSettingsPath,
+  readAutoAuditSetting,
+  writeAutoAuditSetting,
+} from "./tierSettings.js";
 
 const SETTINGS_PATH = getTierSettingsPath();
 
@@ -125,5 +131,36 @@ describe("Phase L.3 tierSettings persistence", () => {
     it("returns empty object for non-object input (string)", () => {
       expect(writeTierSettings("bad" as unknown as Record<string, never>)).toEqual({});
     });
+  });
+});
+
+describe("Phase AS: autoAuditComplexTasks persistence", () => {
+  it("readAutoAuditSetting returns true when file does not exist (default on)", () => {
+    expect(readAutoAuditSetting()).toBe(true);
+  });
+
+  it("writeAutoAuditSetting(false) persists and readAutoAuditSetting returns false", () => {
+    writeAutoAuditSetting(false);
+    expect(readAutoAuditSetting()).toBe(false);
+  });
+
+  it("writeAutoAuditSetting(true) persists and readAutoAuditSetting returns true", () => {
+    writeAutoAuditSetting(false);
+    writeAutoAuditSetting(true);
+    expect(readAutoAuditSetting()).toBe(true);
+  });
+
+  it("auto-audit write does not clobber existing tierSettings on disk", () => {
+    writeTierSettings({ medium: { iterCap: 5 } });
+    writeAutoAuditSetting(false);
+    const tiers = readTierSettings();
+    expect(tiers.medium?.iterCap).toBe(5);
+    expect(readAutoAuditSetting()).toBe(false);
+  });
+
+  it("autoAuditComplexTasks absent from file treated as default true", () => {
+    writeTierSettings({ complex: { iterCap: 20 } });
+    // File exists but has no autoAuditComplexTasks key → default true
+    expect(readAutoAuditSetting()).toBe(true);
   });
 });
