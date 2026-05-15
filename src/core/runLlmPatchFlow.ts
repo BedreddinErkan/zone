@@ -5854,6 +5854,9 @@ const initializeTodosFromPlan = (): void => {
       // before re-investigating. Empty string is treated as no-op
       // inside agentLoop.
       priorRunSummary,
+      // Phase X.0 C3: stable per-thread cache key for OpenAI so successive
+      // runs in the same conversation share a cache hit instead of misses.
+      conversationId: typeof input.conversationId === "string" ? input.conversationId : undefined,
       ...agentLoopCallbacks,
     };
 

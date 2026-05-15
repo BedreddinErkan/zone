@@ -131,4 +131,18 @@ describe("OpenAI prompt cache stability helpers", () => {
     );
     expect(buildOpenAIPromptCacheKey("")).toBeUndefined();
   });
+
+  it("prefers conversationId over runId when provided (Phase X.0 C3)", () => {
+    expect(buildOpenAIPromptCacheKey("run-ignored", "AAAAAAAAAAAAAAAA")).toBe(
+      "zone-thread-AAAAAAAAAAAAAAAA"
+    );
+    expect(buildOpenAIPromptCacheKey("run-ignored", "BBBBBBBBBBBBBBBB-extra")).toBe(
+      "zone-thread-BBBBBBBBBBBBBBBB"
+    );
+  });
+
+  it("falls back to runId when conversationId is empty or missing", () => {
+    expect(buildOpenAIPromptCacheKey("run-abc", "")).toBe("zone-run-run-abc");
+    expect(buildOpenAIPromptCacheKey("run-abc", undefined)).toBe("zone-run-run-abc");
+  });
 });

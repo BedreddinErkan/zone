@@ -156,6 +156,13 @@ export interface AgentLoopInput {
   taskClassification?: TaskClassification | null;
   /** L.4.1: per-request tier override from API caller (beats ZONE_FORCE_TIER env). */
   forceTier?: TaskTier;
+  /**
+   * Phase X.0 C3: conversation/thread ID from the HTTP session. When provided,
+   * used as the OpenAI prompt_cache_key prefix instead of runId so successive
+   * runs in the same thread share a stable cache key and get cache hits
+   * rather than misses on every new runId.
+   */
+  conversationId?: string;
 }
 
 export type VerificationReason =
@@ -274,10 +281,15 @@ export function sortToolsForPromptCache<T>(tools: readonly T[]): T[] {
   );
 }
 
-export function buildOpenAIPromptCacheKey(runId: string | undefined): string | undefined {
-  const normalized = typeof runId === "string" ? runId.trim() : "";
+export function buildOpenAIPromptCacheKey(
+  runId: string | undefined,
+  conversationId?: string | undefined
+): string | undefined {
+  const threadId = typeof conversationId === "string" ? conversationId.trim() : "";
+  const normalized = threadId || (typeof runId === "string" ? runId.trim() : "");
   if (!normalized) return undefined;
-  return `zone-run-${normalized.slice(0, 16)}`.slice(0, 64);
+  const prefix = threadId ? "zone-thread" : "zone-run";
+  return `${prefix}-${normalized.slice(0, 16)}`.slice(0, 64);
 }
 
 export function assembleAgentSystemPrompt(input: {
@@ -2389,7 +2401,9 @@ Example:
       abortAlready: input.abortSignal?.aborted ?? false,
     });
     const promptCacheKey =
-      client.provider === "openai" ? buildOpenAIPromptCacheKey(input.runId) : undefined;
+      client.provider === "openai"
+        ? buildOpenAIPromptCacheKey(input.runId, input.conversationId)
+        : undefined;
     const modelName = isInvestigationMode
       ? getModelForRole("investigator", client.provider as "anthropic" | "openai")
       : getModelName("high", client.provider, requestCtx?.modelOverride);
