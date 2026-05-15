@@ -68,6 +68,10 @@ const DISPATCHED_TOOLS = new Set([
   // so the IIFE startup guard at :51-75 doesn't fail-fast on its presence in
   // ZONE_TOOLS.
   "TodoWrite",
+  // suggest_scope_change is handled entirely inside agentLoop (audit no-op guard
+  // + investigation-mode handler, both with `continue`). It never reaches
+  // executeTool — same interception pattern as TodoWrite.
+  "suggest_scope_change",
 ]);
 
 // Import the definitions lazily to keep the check co-located with the executor.

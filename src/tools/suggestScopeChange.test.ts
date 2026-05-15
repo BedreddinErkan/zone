@@ -36,6 +36,7 @@ vi.mock("../utils/logger.js", () => ({
 }));
 
 import { investigateScope } from "../llm/investigationFlow.js";
+import { runAgentLoop } from "../llm/agentLoop.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -158,5 +159,71 @@ describe("suggest_scope_change — handler via investigateScope", () => {
     const result = await investigateScope({ repoPath: "/tmp/fake", query: "check scope" });
     // Run completed; no revision captured (tool was rejected)
     expect(result.agentSuggestedRevision).toBeUndefined();
+  });
+});
+
+// ── no-op guard in patch mode ─────────────────────────────────────────────────
+// suggest_scope_change is intercepted in agentLoop (never reaches executeTool).
+// These tests verify the no-op guard added in Phase X.0 C2/hotfix.
+
+describe("suggest_scope_change — no-op guard in execute mode", () => {
+  beforeEach(() => {
+    mocks.log.mockClear();
+    mocks.debugLog.mockClear();
+    mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
+    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+  });
+
+  it("emits [zone-tool-misuse] debugLog when called in patch mode", async () => {
+    mocks.createChatCompletion
+      .mockResolvedValueOnce(
+        toolCallResponse("suggest_scope_change", {
+          type: "under_scope",
+          reason: "Should be no-op in patch mode.",
+          missing_files: ["src/foo.ts"],
+          revised_plan_summary: "Also patch foo.",
+        })
+      )
+      .mockResolvedValueOnce(textResponse("Done."));
+
+    await runAgentLoop({
+      task: "add a feature",
+      repoPath: "/tmp/fake",
+      mode: "patch",
+    });
+
+    const misuseCall = mocks.debugLog.mock.calls.find(
+      (c: unknown[]) => c[0] === "[zone-tool-misuse]"
+    );
+    expect(misuseCall).toBeDefined();
+    const payload = JSON.parse(String(misuseCall![1]));
+    expect(payload.tool).toBe("suggest_scope_change");
+    expect(payload.mode).toBe("patch");
+  });
+
+  it("does not emit suggest_scope_change structured event in patch mode", async () => {
+    const structuredEvents: unknown[] = [];
+    mocks.createChatCompletion
+      .mockResolvedValueOnce(
+        toolCallResponse("suggest_scope_change", {
+          type: "over_scope",
+          reason: "Unused files in plan.",
+          unnecessary_files: ["src/unused.ts"],
+          revised_plan_summary: "Drop unused file.",
+        })
+      )
+      .mockResolvedValueOnce(textResponse("Done."));
+
+    await runAgentLoop({
+      task: "clean up",
+      repoPath: "/tmp/fake",
+      mode: "patch",
+      onStructuredEvent: (evt) => structuredEvents.push(evt),
+    });
+
+    const revisionEvent = structuredEvents.find(
+      (e) => (e as Record<string, unknown>)["type"] === "suggest_scope_change"
+    );
+    expect(revisionEvent).toBeUndefined();
   });
 });

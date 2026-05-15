@@ -2716,6 +2716,7 @@ Example:
         // Outside investigation mode it is a no-op — the revision workflow only
         // runs during the audit phase; discarding the call here is safe.
         if (name === "suggest_scope_change" && !isInvestigationMode) {
+          debugLog("[zone-tool-misuse]", JSON.stringify({ tool: "suggest_scope_change", mode }));
           const noopMsg = "suggest_scope_change is only active in investigation mode — call ignored.";
           responseInput.push({ role: "tool", tool_call_id: callId, content: noopMsg });
           toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: noopMsg, success: false });
