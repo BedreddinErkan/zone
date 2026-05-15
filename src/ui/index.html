@@ -511,6 +511,12 @@
     .zone-plan-feedback-textarea{width:100%;box-sizing:border-box;background:rgba(0,0,0,0.32);border:1px solid var(--border);border-radius:var(--radius-sm);padding:var(--space-sm) var(--space-md);font-family:var(--font-family-sans);font-size:var(--font-size-xs);color:var(--text-2);resize:vertical;line-height:1.5;display:block}
     .zone-plan-feedback-textarea:focus{outline:none;border-color:var(--violet-bd,#3b1f6a)}
     .zone-plan-feedback-charcount{font-size:var(--font-size-xs);color:var(--text-4);text-align:right;margin-top:2px}
+    /* ZoneScopeRevisionPrompt */
+    .zone-rev-reason{font-size:var(--font-size-sm);color:var(--text-2);line-height:1.5;margin-bottom:var(--space-sm)}
+    .zone-rev-file-group{margin-bottom:var(--space-sm)}
+    .zone-rev-file-group .zone-plan-section-label{margin-bottom:4px}
+    .zone-rev-file-group .zone-rev-files{display:flex;flex-wrap:wrap;gap:3px}
+    .zone-rev-summary{font-size:var(--font-size-xs);color:var(--text-3);line-height:1.5;border-top:1px solid var(--border);padding-top:var(--space-sm);margin-bottom:var(--space-md)}
     .log-lines{font-family:var(--font-family-mono);font-size:var(--font-size-base);line-height:1.7}
     .log-line{display:flex;gap:var(--space-xl);padding:2px 0;opacity:1;animation:lineIn 150ms ease-out;color:#e0e0e0}
     @keyframes lineIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
@@ -6685,6 +6691,7 @@
     }
 
     let __zoneActivePlanReview = null;
+    let __zoneActiveRevision = null;
 
     class ZonePlanReviewPrompt {
       constructor(containerEl, payload, callbacks){
@@ -6736,7 +6743,7 @@
           '<div class="zone-plan-steps">' + stepsHtml + '</div>' +
           (scope ? '<div class="zone-plan-scope">' + escapeHtml(scope) + '</div>' : '') +
           '<label class="zone-plan-audit-row" title="Runs a read-only investigation to verify the plan is correctly sized before execution.">' +
-            '<input type="checkbox" class="zone-plan-audit-checkbox"> ' +
+            '<input type="checkbox" class="zone-plan-audit-checkbox" checked> ' +
             '<span class="zone-plan-audit-label">Audit scope before execute</span>' +
           '</label>' +
           '<div class="zone-approval-sticky-actions" data-run-id="' + escapeHtml(String(this.payload.runId || '')) + '">' +
@@ -6954,6 +6961,115 @@
         if (!runId || (__zoneActivePlanReview.payload && __zoneActivePlanReview.payload.runId === runId)){
           __zoneActivePlanReview.forceDismiss();
           __zoneActivePlanReview = null;
+        }
+      }
+    }
+
+    class ZoneScopeRevisionPrompt {
+      constructor(containerEl, payload, callbacks){
+        this.container = containerEl;
+        this.payload = payload;
+        this.callbacks = callbacks || {};
+        this._dismissed = false;
+        this._render();
+      }
+      _render(){
+        const p = this.payload;
+        const missingFiles = Array.isArray(p.missingFiles) ? p.missingFiles.filter(f => typeof f === 'string' && f) : [];
+        const unnecessaryFiles = Array.isArray(p.unnecessaryFiles) ? p.unnecessaryFiles.filter(f => typeof f === 'string' && f) : [];
+        const missingHtml = missingFiles.length
+          ? '<div class="zone-rev-file-group"><div class="zone-plan-section-label">Missing files</div><div class="zone-rev-files">' +
+            missingFiles.map(f => '<span class="zone-plan-step-file">' + escapeHtml(f) + '</span>').join('') + '</div></div>'
+          : '';
+        const unnecessaryHtml = unnecessaryFiles.length
+          ? '<div class="zone-rev-file-group"><div class="zone-plan-section-label">Unnecessary files</div><div class="zone-rev-files">' +
+            unnecessaryFiles.map(f => '<span class="zone-plan-step-file">' + escapeHtml(f) + '</span>').join('') + '</div></div>'
+          : '';
+        const summaryHtml = String(p.revisedPlanSummary || '').trim()
+          ? '<div class="zone-rev-summary"><div class="zone-plan-section-label">Revised plan</div>' +
+            escapeHtml(String(p.revisedPlanSummary)) + '</div>'
+          : '';
+        this.container.innerHTML =
+          '<div class="zone-approval-sticky-header"><span class="bolt">≡</span><span>Plan needs adjustment</span></div>' +
+          '<div class="zone-rev-reason">' + escapeHtml(String(p.reason || '')) + '</div>' +
+          missingHtml + unnecessaryHtml + summaryHtml +
+          '<div class="zone-approval-sticky-actions" data-run-id="' + escapeHtml(String(p.runId || '')) + '">' +
+            '<button type="button" class="approval-btn approve" data-action="approve">Approve revision</button>' +
+            '<button type="button" class="approval-btn trust-all" data-action="reject">Keep original</button>' +
+          '</div>' +
+          '<div class="zone-approval-sticky-status" data-role="status"></div>';
+        this._approveBtn = this.container.querySelector('[data-action="approve"]');
+        this._rejectBtn = this.container.querySelector('[data-action="reject"]');
+        this._statusEl = this.container.querySelector('[data-role="status"]');
+        this._approveBtn?.addEventListener('click', () => { this._decide('approve'); });
+        this._rejectBtn?.addEventListener('click', () => { this._decide('reject'); });
+      }
+      _decide(decision){
+        if (this._dismissed) return;
+        this._dismissed = true;
+        if (this._approveBtn) this._approveBtn.disabled = true;
+        if (this._rejectBtn) this._rejectBtn.disabled = true;
+        if (this.callbacks.onDecide){
+          try { this.callbacks.onDecide(this.payload, decision); } catch {}
+        }
+        this._teardown();
+      }
+      _teardown(){
+        const c = this.container;
+        if (c && c.id === 'zonePlanStickyContainer'){
+          c.dataset.state = 'hidden';
+          c.innerHTML = '';
+          try { delete c.dataset.runId; } catch {}
+        }
+      }
+      forceDismiss(){
+        if (this._dismissed) return;
+        this._dismissed = true;
+        this._teardown();
+      }
+    }
+
+    function handleZoneScopeRevisionEvent(revEvt, runId, logBlock){
+      const revisionId = String(revEvt.revisionId || '');
+      if (!revisionId) return;
+      if (__zoneActiveRevision) {
+        __zoneActiveRevision.forceDismiss();
+        __zoneActiveRevision = null;
+      }
+      const container = document.getElementById('zonePlanStickyContainer');
+      if (!container) return;
+      container.dataset.state = 'visible';
+      if (runId) container.dataset.runId = runId;
+      const payload = {
+        revisionId,
+        runId,
+        type: String(revEvt.revisionType || ''),
+        reason: String(revEvt.revisionReason || ''),
+        missingFiles: Array.isArray(revEvt.revisionMissingFiles) ? revEvt.revisionMissingFiles : [],
+        unnecessaryFiles: Array.isArray(revEvt.revisionUnnecessaryFiles) ? revEvt.revisionUnnecessaryFiles : [],
+        revisedPlanSummary: String(revEvt.revisionRevisedPlanSummary || ''),
+      };
+      __zoneActiveRevision = new ZoneScopeRevisionPrompt(container, payload, {
+        onDecide: (p, decision) => {
+          void (async () => {
+            try {
+              await apiFetch('/api/approve-revision', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ revisionId: p.revisionId, runId: p.runId, decision }),
+              });
+            } catch {}
+          })();
+          __zoneActiveRevision = null;
+        },
+      });
+    }
+
+    function dismissZoneScopeRevisionForRun(runId){
+      if (__zoneActiveRevision){
+        if (!runId || (__zoneActiveRevision.payload && __zoneActiveRevision.payload.runId === runId)){
+          __zoneActiveRevision.forceDismiss();
+          __zoneActiveRevision = null;
         }
       }
     }
@@ -9025,6 +9141,15 @@
         try { dismissZonePlanReviewForRun(runId); } catch {}
         return;
       }
+      if (progress && progressType === 'scope_revision_proposed') {
+        try { handleZoneScopeRevisionEvent(progress, runId, logBlock); } catch (err) { try { console.warn('[zone-scope-revision-error]', err); } catch {} }
+        return;
+      }
+      if (progress && progressType === 'scope_revision_resolved') {
+        try { dismissZoneScopeRevisionForRun(runId); } catch {}
+        if (logBlock) appendLogLine(logBlock, { timestamp: nowTs(), message: progress.revisionDecision === 'approve' ? 'Scope revision approved — executing revised plan.' : 'Scope revision rejected — proceeding with original plan.', status: progress.revisionDecision === 'approve' ? 'success' : 'active' });
+        return;
+      }
       if (progress && progressType === 'compaction_status') {
         const rid = String(progress.runId || runId || '').trim();
         if (rid) {
@@ -10855,10 +10980,10 @@
             <label style="display:flex;gap:8px;align-items:flex-start;cursor:${_modelRunActive ? 'not-allowed' : 'pointer'}">
               <input id="autoAuditComplexChk" type="checkbox" style="margin-top:2px;accent-color:var(--violet,#7a5af8)" ${_modelRunActive ? 'disabled' : ''}>
               <span style="font-size:var(--font-size-sm,12px);line-height:1.45;opacity:${_modelRunActive ? '0.5' : '1'}">
-                <strong>Auto-audit scope before complex tasks</strong>
+                <strong>Auto-audit before medium/complex tasks</strong>
                 <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:var(--violet,#7a5af8);color:#fff;vertical-align:middle;margin-left:4px">recommended</span><br>
-                Zone runs a quick investigation before executing complex-tier tasks and proposes
-                revisions if the plan's scope looks wrong.
+                Zone runs a quick investigation before executing medium and complex-tier tasks
+                and proposes revisions if the plan's scope looks wrong.
               </span>
             </label>
           </div>
