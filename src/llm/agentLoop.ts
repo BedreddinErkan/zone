@@ -26,6 +26,7 @@ import {
 import type { TaskClassification, TaskTier } from "./taskClassifier.js";
 import { resolveTierLimits } from "./tierLimits.js";
 import { resolveDailyUsdCap } from "./usdCapResolver.js";
+import { loadOrgPolicy } from "./policyLoader.js";
 import { getUsage } from "../usage/usageTracker.js";
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { extractUsage } from "./recordingClient.js";
@@ -1957,13 +1958,25 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   const effectiveTokenBudgetCap = tierLimits?.tokenBudgetCap ?? TOKEN_BUDGET_CAP;
   const effectiveMaxSubagentCalls = tierLimits?.maxSubagentCalls;
 
-  // Phase K.1: daily USD cap gate — only enforced on top-level (non-subagent) runs.
+  // Phase K.1/K.5: daily USD cap gate — only enforced on top-level (non-subagent) runs.
   if (!isSubagentLoop) {
     const userId = typeof input.userId === "string" && input.userId.trim()
       ? input.userId.trim()
       : "local-dev";
+
+    // K.5: load org policy (policy layer is top of resolution chain)
+    const policyResult = loadOrgPolicy(process.env.ZONE_ORG_POLICY_PATH);
+    log("[zone-policy-loaded]", JSON.stringify({
+      runId: input.runId ?? null,
+      ok: policyResult.ok,
+      source: policyResult.ok ? policyResult.source : null,
+      reason: !policyResult.ok ? policyResult.reason : null,
+    }));
+    const policy = policyResult.ok ? policyResult.policy : null;
+
     const capResolution = resolveDailyUsdCap({
       userId,
+      policyValue: policy?.dailyUsdCap,
       userOverride: readDailyUsdCapOverride(),
       envValue: process.env.ZONE_DAILY_USD_CAP,
     });
@@ -1975,6 +1988,29 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       capSource: capResolution.source,
       spentUsd: todayUsage.totalCostUsd,
     }));
+
+    // Log which policy fields were applied vs. deferred to Phase M
+    if (policy) {
+      const appliedFields: string[] = [];
+      const unsupportedFields: string[] = [];
+      if (policy.dailyUsdCap !== undefined) appliedFields.push("dailyUsdCap");
+      for (const f of ["monthlyUsdCap", "allowedTiers", "maxSubagentCallsCap", "autoAuditRequired"] as const) {
+        if (policy[f] !== undefined) unsupportedFields.push(f);
+      }
+      log("[zone-policy-applied]", JSON.stringify({
+        runId: input.runId ?? null,
+        appliedFields,
+        unsupportedFields,
+      }));
+      for (const f of unsupportedFields) {
+        log("[zone-policy-unsupported-field]", JSON.stringify({
+          runId: input.runId ?? null,
+          field: f,
+          note: "schema accepted, enforcement deferred to Phase M",
+        }));
+      }
+    }
+
     if (capResolution.capUsd > 0 && todayUsage.totalCostUsd >= capResolution.capUsd) {
       const msg =
         `Daily USD cap of $${capResolution.capUsd.toFixed(2)} reached ` +

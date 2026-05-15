@@ -49,4 +49,33 @@ describe("resolveDailyUsdCap", () => {
     });
     expect(result).toEqual({ capUsd: 20.0, source: "env" });
   });
+
+  it("policy $5 wins over user_override $20 and env $50", () => {
+    const result = resolveDailyUsdCap({
+      userId: "user-1",
+      policyValue: 5,
+      userOverride: 20,
+      envValue: "50",
+    });
+    expect(result).toEqual({ capUsd: 5, source: "policy" });
+  });
+
+  it("policy 0 (unlimited) overrides everything", () => {
+    const result = resolveDailyUsdCap({
+      userId: "user-1",
+      policyValue: 0,
+      userOverride: 20,
+      envValue: "50",
+    });
+    expect(result).toEqual({ capUsd: 0, source: "policy" });
+  });
+
+  it("no policy → falls through to user_override (regression check)", () => {
+    const result = resolveDailyUsdCap({
+      userId: "user-1",
+      userOverride: 15,
+      envValue: "50",
+    });
+    expect(result).toEqual({ capUsd: 15, source: "user_override" });
+  });
 });
