@@ -174,10 +174,31 @@ OPENAI_API_KEY=sk-...
 ZONE_DEV_SERVER_URL=http://localhost:3000   # visual verification target
 ZONE_ENABLE_MESSAGE_CACHE=1                 # Anthropic prompt caching (default on)
 ZONE_VERBOSE_LOGS=0                         # 1 for diagnostic output
+ZONE_DAILY_USD_CAP=10                       # per-user daily spend cap (USD); 0 = unlimited
+ZONE_ORG_POLICY_PATH=/etc/zone/policy.json  # org-level policy file (K.5)
 PORT=3000
 ```
 
 All keys can also be set through **Settings → API Keys** after first launch — no `.env` file required for personal use.
+
+## Organization Policy (Phase K.5)
+
+Set `ZONE_ORG_POLICY_PATH` to a JSON file path:
+
+```json
+{
+  "dailyUsdCap": 50,
+  "monthlyUsdCap": 1000,
+  "allowedTiers": ["light", "medium"],
+  "maxSubagentCallsCap": 2,
+  "autoAuditRequired": true
+}
+```
+
+Currently enforced: `dailyUsdCap` (takes precedence over per-user and env caps).
+Schema-accepted but not yet enforced (Phase M): `monthlyUsdCap`, `allowedTiers`, `maxSubagentCallsCap`, `autoAuditRequired`.
+
+Policy precedence: policy > per-user (`~/.zone/tier-limits.json`) > env (`ZONE_DAILY_USD_CAP`) > default ($10).
 
 ## Common workflows
 
