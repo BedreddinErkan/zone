@@ -1,4 +1,3 @@
-// Note: API still accepts "plan" as alias for "patch" with planApprovalRequired=true; see shouldRequirePlanApproval
 export type Mode = "auto" | "chat" | "investigate" | "patch";
 
 export const MODES: readonly Mode[] = [

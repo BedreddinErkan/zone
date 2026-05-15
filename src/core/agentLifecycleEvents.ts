@@ -149,7 +149,9 @@ export type ZoneStructuredProgressEvent = {
     | "scope_revision_resolved"
     | "scope_audit_started"
     | "scope_audit_completed"
-    | "scope_audit_skipped";
+    | "scope_audit_skipped"
+    /** Phase Z: plan generation summary emitted inline (replaces plan card). */
+    | "plan_summary";
   title: string;
   detail?: string;
   filePath?: string;
@@ -245,6 +247,9 @@ export type ZoneStructuredProgressEvent = {
   revisionDecision?: "approve" | "reject";
   /** scope_audit_skipped reason */
   skipReason?: string;
+  /** Phase Z: plan_summary fields — deduplicated file list and step count. */
+  planSummaryFiles?: string[];
+  planSummaryStepCount?: number;
   /** Phase L.1: pre-dispatch task classification. Emitted once per dispatch
    *  before the agent loop starts so the UI / telemetry can show the predicted
    *  tier and the classifier's own cost. L.2 will gate tool exposure based on

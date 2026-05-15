@@ -486,31 +486,7 @@
     .approval-btn[disabled]{opacity:0.5;cursor:not-allowed}
     .approval-btn kbd{display:inline-flex;align-items:center;justify-content:center;min-width:1.35em;height:1.35em;padding:0 0.3em;border:1px solid currentColor;border-radius:var(--radius-xs);font-family:var(--font-family-mono);font-size:0.78em;line-height:1;opacity:0.7}
     .zone-approval-sticky-status{margin-top:var(--space-xs);font-size:var(--font-size-xs);color:var(--text-3)}
-    /* ZonePlanReviewPrompt */
-    .zone-plan-objective{font-size:var(--font-size-base);font-weight:600;color:var(--text-1);line-height:1.4;margin-bottom:var(--space-sm)}
     .zone-plan-section-label{font-size:var(--font-size-xs);color:var(--text-4);font-weight:600;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:var(--space-xs)}
-    .zone-plan-steps{display:flex;flex-direction:column;gap:var(--space-xs);margin-bottom:var(--space-sm);max-height:200px;overflow-y:auto;padding-right:2px}
-    .zone-plan-step{padding:var(--space-xs) 0}
-    .zone-plan-step-header{display:flex;gap:var(--space-xs);align-items:baseline}
-    .zone-plan-step-num{font-family:var(--font-family-mono);font-size:var(--font-size-xs);color:var(--text-4);min-width:1.6em;flex-shrink:0;line-height:1.5}
-    .zone-plan-step-title{font-weight:600;font-size:var(--font-size-sm);color:var(--text-1);line-height:1.4}
-    .zone-plan-step-body{padding-left:calc(1.6em + var(--space-xs))}
-    .zone-plan-step-desc{font-size:var(--font-size-xs);color:var(--text-3);line-height:1.5;margin-top:1px}
-    .zone-plan-step-files{display:flex;flex-wrap:wrap;gap:3px;margin-top:var(--space-xs)}
-    .zone-plan-step-file{font-family:var(--font-family-mono);font-size:var(--font-size-xs);color:var(--text-4);background:rgba(0,0,0,0.28);border:1px solid var(--border);border-radius:var(--radius-sm);padding:1px 5px;white-space:nowrap}
-    .zone-plan-step-delegatable{font-family:var(--font-family-mono);font-size:var(--font-size-xs);color:var(--text-4);opacity:0.75;margin-left:var(--space-xs);letter-spacing:0.01em;cursor:help}
-    .zone-plan-scope{font-size:var(--font-size-xs);color:var(--text-4);font-style:italic;border-top:1px solid var(--border);padding-top:var(--space-sm);margin-bottom:var(--space-md)}
-    .zone-plan-edit-form{margin-top:var(--space-md)}
-    .zone-plan-edit-error{font-size:var(--font-size-xs);color:#fca5a5;margin-bottom:var(--space-xs);min-height:1em}
-    .zone-plan-edit-textarea{width:100%;box-sizing:border-box;background:rgba(0,0,0,0.32);border:1px solid var(--border);border-radius:var(--radius-sm);padding:var(--space-sm) var(--space-md);font-family:var(--font-family-mono);font-size:var(--font-size-xs);color:var(--text-2);resize:vertical;min-height:120px;line-height:1.5;display:block}
-    .zone-plan-edit-textarea:focus{outline:none;border-color:var(--violet-bd,#3b1f6a)}
-    .zone-plan-regen-counter{font-size:var(--font-size-xs);color:var(--text-4);margin-right:auto;align-self:center}
-    .zone-plan-feedback-form{margin-top:var(--space-md)}
-    .zone-plan-feedback-label{display:block;font-size:var(--font-size-xs);color:var(--text-3);margin-bottom:var(--space-xs)}
-    .zone-plan-feedback-error{font-size:var(--font-size-xs);color:#fca5a5;margin-bottom:var(--space-xs);min-height:1em}
-    .zone-plan-feedback-textarea{width:100%;box-sizing:border-box;background:rgba(0,0,0,0.32);border:1px solid var(--border);border-radius:var(--radius-sm);padding:var(--space-sm) var(--space-md);font-family:var(--font-family-sans);font-size:var(--font-size-xs);color:var(--text-2);resize:vertical;line-height:1.5;display:block}
-    .zone-plan-feedback-textarea:focus{outline:none;border-color:var(--violet-bd,#3b1f6a)}
-    .zone-plan-feedback-charcount{font-size:var(--font-size-xs);color:var(--text-4);text-align:right;margin-top:2px}
     /* ZoneScopeRevisionPrompt */
     .zone-rev-reason{font-size:var(--font-size-sm);color:var(--text-2);line-height:1.5;margin-bottom:var(--space-sm)}
     .zone-rev-file-group{margin-bottom:var(--space-sm)}
@@ -2002,20 +1978,6 @@
     const LS_SB_WIDTH = 'zone_sb_width';
     const LS_REPOS = 'zone_repos'; // new UI key (back-compat loader reads old keys too)
     const LS_REPO_HISTORY = 'zone_repo_history'; // old UI key
-    const LS_ENABLE_PLAN_REVIEW = 'zone:enablePlanReview';
-    const LS_SKIP_PLAN_REVIEW_LEGACY = 'zone:skipPlanReview'; // migrate on read → delete
-
-    function getEnablePlanReview(){
-      // One-time migration: if legacy key exists, invert it to the new key and delete old.
-      const legacy = localStorage.getItem(LS_SKIP_PLAN_REVIEW_LEGACY);
-      if (legacy !== null) {
-        const migrated = legacy !== 'true'; // skipPlanReview=true → enablePlanReview=false
-        try { localStorage.setItem(LS_ENABLE_PLAN_REVIEW, migrated ? 'true' : 'false'); } catch {}
-        try { localStorage.removeItem(LS_SKIP_PLAN_REVIEW_LEGACY); } catch {}
-        return migrated;
-      }
-      return localStorage.getItem(LS_ENABLE_PLAN_REVIEW) === 'true';
-    }
     const DEFAULT_SIDEBAR_OPEN_WIDTH = 220;
     const MIN_SIDEBAR_OPEN_WIDTH = 200;
     const MAX_SIDEBAR_OPEN_WIDTH = 480;
@@ -6690,283 +6652,7 @@
       }
     }
 
-    let __zoneActivePlanReview = null;
     let __zoneActiveRevision = null;
-    // Y.0: tracks which runIds had a plan card shown; used by revision card
-    // to detect audit-only context (plan review was off for this run).
-    const __planShownForRun = new Set();
-
-    class ZonePlanReviewPrompt {
-      constructor(containerEl, payload, callbacks){
-        this.container = containerEl;
-        this.payload = payload;
-        this.callbacks = callbacks || {};
-        this._dismissed = false;
-        this._editMode = false;
-        this._feedbackMode = false;
-        this._regenAttempt = payload.regenAttempt ?? 0;
-        this._maxRegens = payload.maxRegens ?? 3;
-        this._render();
-      }
-      _render(){
-        const plan = this.payload.plan || {};
-        const steps = Array.isArray(plan.steps) ? plan.steps : [];
-        const stepsHtml = steps.map((s, i) => {
-          const files = Array.isArray(s.filesLikely) ? s.filesLikely.filter(f => typeof f === 'string' && f) : [];
-          const desc = String(s.description || '').trim();
-          const descHtml = desc ? '<div class="zone-plan-step-desc">' + escapeHtml(desc) + '</div>' : '';
-          const filesHtml = files.length
-            ? '<div class="zone-plan-step-files">' + files.map(f => '<span class="zone-plan-step-file">' + escapeHtml(f) + '</span>').join('') + '</div>'
-            : '';
-          // Phase Q.3: delegatable badge for subagent-eligible steps.
-          const delegatableBadgeHtml = s.subagentEligible === true
-            ? '<span class="zone-plan-step-delegatable" title="This step may run as a Task subagent — it&apos;s independent and parallelizable.">[delegatable]</span>'
-            : '';
-          return (
-            '<div class="zone-plan-step">' +
-              '<div class="zone-plan-step-header">' +
-                '<span class="zone-plan-step-num">' + (i + 1) + '.</span>' +
-                '<span class="zone-plan-step-title">' + escapeHtml(String(s.title || '')) + '</span>' +
-                delegatableBadgeHtml +
-              '</div>' +
-              ((descHtml || filesHtml) ? '<div class="zone-plan-step-body">' + descHtml + filesHtml + '</div>' : '') +
-            '</div>'
-          );
-        }).join('');
-        const scope = String(plan.scopeSummary || '').trim();
-        const regenDisabled = this._regenAttempt >= this._maxRegens;
-        const regenTitle = regenDisabled ? ' title="Regeneration limit reached (' + this._maxRegens + '/' + this._maxRegens + ')"' : '';
-        const regenCounter = this._regenAttempt > 0
-          ? '<span class="zone-plan-regen-counter">' + this._regenAttempt + ' / ' + this._maxRegens + ' regens used</span>'
-          : '';
-        this.container.innerHTML =
-          '<div class="zone-approval-sticky-header"><span class="bolt">≡</span><span>Review execution plan</span></div>' +
-          '<div class="zone-plan-objective">' + escapeHtml(String(plan.objective || '')) + '</div>' +
-          (steps.length ? '<div class="zone-plan-section-label">Steps</div>' : '') +
-          '<div class="zone-plan-steps">' + stepsHtml + '</div>' +
-          (scope ? '<div class="zone-plan-scope">' + escapeHtml(scope) + '</div>' : '') +
-          '<label class="zone-plan-audit-row" title="Runs a read-only investigation to verify the plan is correctly sized before execution.">' +
-            '<input type="checkbox" class="zone-plan-audit-checkbox" checked> ' +
-            '<span class="zone-plan-audit-label">Audit scope before execute</span>' +
-          '</label>' +
-          '<div class="zone-approval-sticky-actions" data-run-id="' + escapeHtml(String(this.payload.runId || '')) + '">' +
-            regenCounter +
-            '<button type="button" class="approval-btn approve" data-action="approve">Approve plan</button>' +
-            '<button type="button" class="approval-btn trust-all" data-action="edit">Edit</button>' +
-            '<button type="button" class="approval-btn trust-all" data-action="regen"' + (regenDisabled ? ' disabled' : '') + regenTitle + '>Regenerate</button>' +
-            '<button type="button" class="approval-btn reject" data-action="reject">Reject</button>' +
-          '</div>' +
-          '<div class="zone-plan-edit-form" style="display:none">' +
-            '<div class="zone-plan-edit-error" style="display:none"></div>' +
-            '<textarea class="zone-plan-edit-textarea" rows="10" spellcheck="false"></textarea>' +
-            '<div class="zone-approval-sticky-actions" style="margin-top:var(--space-sm)">' +
-              '<button type="button" class="approval-btn approve zone-plan-edit-submit">Save edits</button>' +
-              '<button type="button" class="approval-btn trust-all zone-plan-edit-cancel">Cancel</button>' +
-            '</div>' +
-          '</div>' +
-          '<div class="zone-plan-feedback-form" style="display:none">' +
-            '<label class="zone-plan-feedback-label">What should change about this plan?</label>' +
-            '<div class="zone-plan-feedback-error" style="display:none"></div>' +
-            '<textarea class="zone-plan-feedback-textarea" rows="3" maxlength="500" spellcheck="false"></textarea>' +
-            '<div class="zone-plan-feedback-charcount">0 / 500</div>' +
-            '<div class="zone-approval-sticky-actions" style="margin-top:var(--space-sm)">' +
-              '<button type="button" class="approval-btn approve zone-plan-regen-submit">Regenerate plan</button>' +
-              '<button type="button" class="approval-btn trust-all zone-plan-regen-cancel">Cancel</button>' +
-            '</div>' +
-          '</div>' +
-          '<div class="zone-approval-sticky-status" data-role="status"></div>';
-        this._approveBtn = this.container.querySelector('[data-action="approve"]');
-        this._editBtn = this.container.querySelector('[data-action="edit"]');
-        this._regenBtn = this.container.querySelector('[data-action="regen"]');
-        this._rejectBtn = this.container.querySelector('[data-action="reject"]');
-        this._auditCheckbox = this.container.querySelector('.zone-plan-audit-checkbox');
-        this._editForm = this.container.querySelector('.zone-plan-edit-form');
-        this._editTextarea = this.container.querySelector('.zone-plan-edit-textarea');
-        this._editErrorEl = this.container.querySelector('.zone-plan-edit-error');
-        this._editSubmit = this.container.querySelector('.zone-plan-edit-submit');
-        this._editCancel = this.container.querySelector('.zone-plan-edit-cancel');
-        this._feedbackForm = this.container.querySelector('.zone-plan-feedback-form');
-        this._feedbackTextarea = this.container.querySelector('.zone-plan-feedback-textarea');
-        this._feedbackErrorEl = this.container.querySelector('.zone-plan-feedback-error');
-        this._feedbackCharcount = this.container.querySelector('.zone-plan-feedback-charcount');
-        this._regenSubmit = this.container.querySelector('.zone-plan-regen-submit');
-        this._regenCancel = this.container.querySelector('.zone-plan-regen-cancel');
-        this._statusEl = this.container.querySelector('[data-role="status"]');
-        this._approveBtn?.addEventListener('click', () => { this._decide('approve'); });
-        this._editBtn?.addEventListener('click', () => { this._openEditForm(); });
-        this._regenBtn?.addEventListener('click', () => { this._openFeedbackForm(); });
-        this._rejectBtn?.addEventListener('click', () => { this._decide('reject'); });
-        this._editSubmit?.addEventListener('click', () => { this._submitEdit(); });
-        this._editCancel?.addEventListener('click', () => { this._closeEditForm(); });
-        this._regenSubmit?.addEventListener('click', () => { this._submitRegen(); });
-        this._regenCancel?.addEventListener('click', () => { this._closeFeedbackForm(); });
-        this._feedbackTextarea?.addEventListener('input', () => { this._updateFeedbackCharCount(); });
-      }
-      _openEditForm(){
-        this._editMode = true;
-        if (this._editForm) this._editForm.style.display = '';
-        if (this._editTextarea) {
-          this._editTextarea.value = JSON.stringify(this.payload.plan, null, 2);
-          try { this._editTextarea.focus(); } catch {}
-        }
-      }
-      _closeEditForm(){
-        this._editMode = false;
-        if (this._editForm) this._editForm.style.display = 'none';
-      }
-      _submitEdit(){
-        const raw = this._editTextarea ? this._editTextarea.value : '';
-        let editedPlan;
-        try { editedPlan = JSON.parse(raw); } catch {
-          if (this._editErrorEl) {
-            this._editErrorEl.textContent = 'Invalid JSON — fix and resubmit.';
-            this._editErrorEl.style.display = '';
-          }
-          return;
-        }
-        if (this._editErrorEl) this._editErrorEl.style.display = 'none';
-        this._decide('edit', editedPlan);
-      }
-      _openFeedbackForm(){
-        this._feedbackMode = true;
-        if (this._feedbackForm) this._feedbackForm.style.display = '';
-        if (this._feedbackErrorEl) this._feedbackErrorEl.style.display = 'none';
-        if (this._feedbackTextarea) {
-          this._feedbackTextarea.value = '';
-          this._updateFeedbackCharCount();
-          try { this._feedbackTextarea.focus(); } catch {}
-        }
-      }
-      _closeFeedbackForm(){
-        this._feedbackMode = false;
-        if (this._feedbackForm) this._feedbackForm.style.display = 'none';
-      }
-      _updateFeedbackCharCount(){
-        const len = this._feedbackTextarea ? this._feedbackTextarea.value.length : 0;
-        if (this._feedbackCharcount) this._feedbackCharcount.textContent = len + ' / 500';
-      }
-      async _submitRegen(){
-        const feedback = this._feedbackTextarea ? this._feedbackTextarea.value.trim() : '';
-        if (!feedback) {
-          if (this._feedbackErrorEl) {
-            this._feedbackErrorEl.textContent = 'Please describe what should change.';
-            this._feedbackErrorEl.style.display = '';
-          }
-          return;
-        }
-        if (this._feedbackErrorEl) this._feedbackErrorEl.style.display = 'none';
-        if (this._regenSubmit) this._regenSubmit.disabled = true;
-        if (this._regenCancel) this._regenCancel.disabled = true;
-        if (this._statusEl) this._statusEl.textContent = 'Regenerating…';
-        try {
-          const resp = await apiFetch('/api/approve-plan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              approvalId: this.payload.approvalId,
-              action: 'regenerate',
-              runId: this.payload.runId,
-              userFeedback: feedback,
-            }),
-          });
-          if (!resp.ok) {
-            const data = await resp.json().catch(() => ({}));
-            const msg = (data && data.error) ? data.error : 'Regeneration failed (' + resp.status + ').';
-            if (this._feedbackErrorEl) {
-              this._feedbackErrorEl.textContent = msg;
-              this._feedbackErrorEl.style.display = '';
-            }
-            if (this._regenSubmit) this._regenSubmit.disabled = false;
-            if (this._regenCancel) this._regenCancel.disabled = false;
-            if (this._statusEl) this._statusEl.textContent = '';
-            return;
-          }
-          // Server will emit a new plan_ready_for_review — handleZonePlanReviewEvent replaces this widget
-        } catch {
-          if (this._feedbackErrorEl) {
-            this._feedbackErrorEl.textContent = 'Network error — please try again.';
-            this._feedbackErrorEl.style.display = '';
-          }
-          if (this._regenSubmit) this._regenSubmit.disabled = false;
-          if (this._regenCancel) this._regenCancel.disabled = false;
-          if (this._statusEl) this._statusEl.textContent = '';
-        }
-      }
-      _decide(action, editedPlan){
-        if (this._dismissed) return;
-        this._dismissed = true;
-        if (this._approveBtn) this._approveBtn.disabled = true;
-        if (this._editBtn) this._editBtn.disabled = true;
-        if (this._regenBtn) this._regenBtn.disabled = true;
-        if (this._rejectBtn) this._rejectBtn.disabled = true;
-        const perRunAuditFlag = action === 'approve' && this._auditCheckbox ? !!this._auditCheckbox.checked : undefined;
-        if (this.callbacks.onDecide){
-          try { this.callbacks.onDecide(this.payload, action, editedPlan, perRunAuditFlag); } catch {}
-        }
-        this._teardown();
-      }
-      _teardown(){
-        const c = this.container;
-        if (c && c.id === 'zonePlanStickyContainer'){
-          c.dataset.state = 'hidden';
-          c.innerHTML = '';
-          try { delete c.dataset.runId; } catch {}
-        }
-      }
-      forceDismiss(){
-        if (this._dismissed) return;
-        this._dismissed = true;
-        this._teardown();
-      }
-    }
-
-    function handleZonePlanReviewEvent(planEvt, runId, logBlock){
-      const approvalId = String(planEvt.approvalId || '');
-      const plan = planEvt.plan;
-      if (!approvalId || !plan) return;
-      if (__zoneActivePlanReview) {
-        __zoneActivePlanReview.forceDismiss();
-        __zoneActivePlanReview = null;
-      }
-      const container = document.getElementById('zonePlanStickyContainer');
-      if (!container) return;
-      container.dataset.state = 'visible';
-      if (runId) { container.dataset.runId = runId; __planShownForRun.add(runId); }
-      const payload = { approvalId, plan, runId, regenAttempt: planEvt.regenAttempt ?? 0, maxRegens: planEvt.maxRegens ?? 3 };
-      __zoneActivePlanReview = new ZonePlanReviewPrompt(container, payload, {
-        onDecide: (p, action, editedPlan, perRunAuditFlag) => {
-          const lb = document.getElementById('logBlock-' + p.runId);
-          if (lb) {
-            appendLogLine(lb, { timestamp: nowTs(), message: 'Plan ' + action + 'd', status: action === 'reject' ? 'warning' : 'done' });
-          }
-          void (async () => {
-            try {
-              await apiFetch('/api/approve-plan', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  approvalId: p.approvalId,
-                  action,
-                  runId: p.runId,
-                  ...(action === 'edit' && editedPlan ? { editedPlan } : {}),
-                  ...(action === 'approve' && typeof perRunAuditFlag === 'boolean' ? { perRunAuditFlag } : {}),
-                }),
-              });
-            } catch {}
-          })();
-          __zoneActivePlanReview = null;
-        },
-      });
-    }
-
-    function dismissZonePlanReviewForRun(runId){
-      if (__zoneActivePlanReview){
-        if (!runId || (__zoneActivePlanReview.payload && __zoneActivePlanReview.payload.runId === runId)){
-          __zoneActivePlanReview.forceDismiss();
-          __zoneActivePlanReview = null;
-        }
-      }
-    }
 
     class ZoneScopeRevisionPrompt {
       constructor(containerEl, payload, callbacks){
@@ -7043,9 +6729,7 @@
       if (!container) return;
       container.dataset.state = 'visible';
       if (runId) container.dataset.runId = runId;
-      // Y.0: when plan review was off, the user never saw a plan card — prepend
-      // a log line so they understand why the revision card is appearing.
-      if (runId && !__planShownForRun.has(runId) && logBlock) {
+      if (logBlock) {
         try { appendLogLine(logBlock, { timestamp: nowTs(), message: '[Audit found issues] Zone automatically audited scope and found issues requiring review.', status: 'warning' }); } catch {}
       }
       const payload = {
@@ -9136,17 +8820,20 @@
         try { updateTodoStatusForRun(runId, progress.todoId, progress.todoStatus); } catch {}
         return;
       }
-      if (progress && progressType === 'plan_ready_for_review') {
-        try { handleZonePlanReviewEvent(progress, runId, logBlock); } catch (err) { try { console.warn('[zone-plan-review-error]', err); } catch {} }
-        return;
-      }
-      if (progress && progressType === 'plan_rejected') {
-        try { dismissZonePlanReviewForRun(runId); } catch {}
-        if (logBlock) appendLogLine(logBlock, { timestamp: nowTs(), message: 'Plan rejected — run cancelled.', status: 'warning' });
-        return;
-      }
-      if (progress && progressType === 'plan_edited') {
-        try { dismissZonePlanReviewForRun(runId); } catch {}
+      if (progress && progressType === 'plan_summary') {
+        if (logBlock) {
+          try {
+            const obj = String(progress.detail || '');
+            const files = Array.isArray(progress.planSummaryFiles) ? progress.planSummaryFiles : [];
+            const stepCount = Number(progress.planSummaryStepCount) || 0;
+            const MAX_FILES = 5;
+            const shown = files.slice(0, MAX_FILES).map(function(f) { return String(f).split('/').pop() || f; });
+            const extra = files.length > MAX_FILES ? ' (+' + (files.length - MAX_FILES) + ' more)' : '';
+            const fileStr = shown.length > 0 ? ' · files: ' + shown.join(', ') + extra : '';
+            const msg = 'Plan: ' + (obj || 'task') + ' · ' + stepCount + ' steps' + fileStr;
+            appendLogLine(logBlock, { timestamp: nowTs(), message: msg, status: 'success' });
+          } catch {}
+        }
         return;
       }
       if (progress && progressType === 'scope_revision_proposed') {
@@ -9407,7 +9094,6 @@
       }
       if (lifecycleType === 'run_completed') {
         try { bgHideStickyPanel(runId); } catch {}
-        try { if (runId) __planShownForRun.delete(runId); } catch {}
         // F1.3: defensive clear of the side-panel live-stream slot.
         // tool_result is the normal path; this catches runs where the final
         // tool_result didn't fire (cancel, error, early exit) and a slot
@@ -9496,9 +9182,8 @@
       try { bgHideStickyPanel(runId); } catch {}
         setLogBlockDone(runId);
         setRunningUI(false);
-        // Tur P1-approval: cancelled run → drop any pending sticky approvals and plan reviews for it.
+        // Cancelled run → drop any pending sticky approvals for it.
         try { dismissAllZoneApprovalsForRun(runId); } catch {}
-        try { dismissZonePlanReviewForRun(runId); } catch {}
         // After cancellation, drain the OWNING thread's queue (per Phase 1b).
         dequeueAndRunNext(_cancelledThreadId);
         try {
@@ -10214,7 +9899,6 @@
           mode: runMode,
           lastChangedFiles: Array.isArray(state.__lastChangedFiles) ? state.__lastChangedFiles : [],
           lastAddedFunctions: Array.isArray(state.__lastAddedFunctions) ? state.__lastAddedFunctions : [],
-          enablePlanReview: getEnablePlanReview(),
         };
         state.__sendDebugByRun = state.__sendDebugByRun || {};
         state.__sendDebugByRun[runId] = {
@@ -11088,28 +10772,7 @@
     }
 
     function renderGeneralSettings(){
-      const enablePlanReview = getEnablePlanReview();
-      els.settingsBody.innerHTML = `
-        <div class="apikey-section">
-          <div class="apikey-section-title">General</div>
-
-          <div class="apikey-field-label">Plan review</div>
-          <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer">
-            <input id="enablePlanReviewChk" type="checkbox" style="margin-top:2px" ${enablePlanReview ? 'checked' : ''} />
-            <span style="font-size:var(--font-size-sm,12px);line-height:1.45">
-              <strong>Enable plan review for Patch tasks</strong><br>
-              When enabled, Patch tasks (explicit or via Auto routing) pause to show a plan
-              for approval before executing. Useful for complex or destructive changes.
-            </span>
-          </label>
-        </div>
-      `;
-      const chk = document.getElementById('enablePlanReviewChk');
-      if (chk) {
-        chk.addEventListener('change', () => {
-          try { localStorage.setItem(LS_ENABLE_PLAN_REVIEW, chk.checked ? 'true' : 'false'); } catch {}
-        });
-      }
+      els.settingsBody.innerHTML = `<div class="apikey-section"><div class="apikey-section-title">General</div></div>`;
     }
 
     function renderKeysSettings(){

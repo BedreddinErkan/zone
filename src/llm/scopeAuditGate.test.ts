@@ -97,16 +97,10 @@ describe("shouldRunAudit — perRunOverride=false always skips non-simple", () =
   });
 });
 
-// Y.0 Commit 2 — audit gate decoupled from plan approval.
-// Previously the outer gate was `if (preGeneratedPlan && runIdStr)`, so audit
-// never fired when plan review was disabled (preGeneratedPlan stayed undefined).
-// After Y.0 Commit 2 the gate is `if (runIdStr)` — shouldRunAudit is the sole
-// decider. perRunOverride stays undefined when plan review is off (no per-run
-// checkbox to set it), so the tests below model that exact scenario.
-describe("shouldRunAudit — plan-review-off context (Y.0 decoupled gate)", () => {
-  it("medium + autoAudit=true + plan-review off → audit fires (perRunOverride=undefined)", () => {
-    // When plan review is disabled, approvedWithPerRunAuditFlag is never set,
-    // so perRunOverride arrives as undefined. Audit must fire on medium tasks.
+// Phase Z — plan review removed; perRunOverride is always undefined.
+// shouldRunAudit is the sole audit decider; autoAuditSetting governs non-simple tiers.
+describe("shouldRunAudit — plan-review-removed context (Phase Z)", () => {
+  it("medium + autoAudit=true → audit fires (perRunOverride always undefined)", () => {
     expect(shouldRunAudit("medium", undefined, true)).toBe(true);
   });
 
@@ -128,27 +122,18 @@ describe("shouldRunAudit — plan-review-off context (Y.0 decoupled gate)", () =
   });
 });
 
-// Y.0 Commit 4 — severity-aware decision matrix.
-// requiresInterrupt = planReviewEnabled || severity === "major"
-// Extracted as a pure helper here; server.ts inlines the same logic.
-function requiresInterrupt(planReviewEnabled: boolean, severity: "minor" | "major"): boolean {
-  return planReviewEnabled || severity === "major";
+// Phase Z — simplified 2-cell decision matrix.
+// requiresInterrupt = severity === "major" (plan review removed; major always interrupts).
+function requiresInterrupt(severity: "minor" | "major"): boolean {
+  return severity === "major";
 }
 
-describe("decision matrix — requiresInterrupt (Y.0 Commit 4)", () => {
-  it("planReview=true + major → interrupt (user already reviewed plan)", () => {
-    expect(requiresInterrupt(true, "major")).toBe(true);
+describe("decision matrix — requiresInterrupt (Phase Z simplified)", () => {
+  it("major → interrupt", () => {
+    expect(requiresInterrupt("major")).toBe(true);
   });
 
-  it("planReview=true + minor → interrupt (plan review on means always show card)", () => {
-    expect(requiresInterrupt(true, "minor")).toBe(true);
-  });
-
-  it("planReview=false + major → interrupt (major always interrupts regardless of review mode)", () => {
-    expect(requiresInterrupt(false, "major")).toBe(true);
-  });
-
-  it("planReview=false + minor → no interrupt (silent auto_apply)", () => {
-    expect(requiresInterrupt(false, "minor")).toBe(false);
+  it("minor → no interrupt (silent auto_apply)", () => {
+    expect(requiresInterrupt("minor")).toBe(false);
   });
 });

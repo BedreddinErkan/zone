@@ -98,13 +98,6 @@ import {
   setTrustAllForRun,
 } from "./commandApprovals.js";
 import {
-  requestPlanApproval,
-  resolvePlanApproval,
-  rejectPendingPlansForRun,
-  validateRegenerateFeedback,
-  shouldRequirePlanApproval,
-} from "../llm/planApprovals.js";
-import {
   resolveRevisionApproval,
   rejectPendingRevisionsForRun,
   requestRevisionApproval,
@@ -1689,9 +1682,8 @@ app.post("/api/cancel", (req, res) => {
   }
   closeDeveloperPatchProgressSseForRun(runId);
   try {
-    // If a command or plan approval is pending, treat cancel as rejection.
+    // If a command or revision approval is pending, treat cancel as rejection.
     rejectPendingApprovalsForRun(runId);
-    rejectPendingPlansForRun(runId);
     rejectPendingRevisionsForRun(runId);
     clearTrustedCommandsForRun(runId);
   } catch {
@@ -1836,45 +1828,6 @@ app.post("/api/approve-command", (req, res) => {
     return;
   }
   const r = resolveCommandApproval({ approvalId, approved, runId, trust });
-  if (!r.ok) {
-    res.status(404).json({ ok: false, reason: r.message || "not_found" });
-    return;
-  }
-  res.json({ ok: true });
-});
-
-app.post("/api/approve-plan", (req, res) => {
-  const approvalId = typeof req.body?.approvalId === "string" ? req.body.approvalId.trim() : "";
-  const runId = typeof req.body?.runId === "string" ? req.body.runId.trim() : "";
-  const action = typeof req.body?.action === "string" ? req.body.action.trim() : "";
-  const editedPlan = req.body?.editedPlan;
-  const userFeedback = req.body?.userFeedback;
-  const perRunAuditFlag = typeof req.body?.perRunAuditFlag === "boolean" ? req.body.perRunAuditFlag : undefined;
-
-  if (!approvalId || !runId) {
-    res.status(400).json({ ok: false, reason: "missing_approval_id_or_run_id" });
-    return;
-  }
-  if (!["approve", "edit", "reject", "regenerate"].includes(action)) {
-    res.status(400).json({ ok: false, reason: "invalid_action" });
-    return;
-  }
-  if (action === "regenerate") {
-    const feedbackCheck = validateRegenerateFeedback(userFeedback);
-    if (!feedbackCheck.ok) {
-      res.status(400).json({ ok: false, reason: feedbackCheck.reason });
-      return;
-    }
-  }
-
-  const r = resolvePlanApproval({
-    approvalId,
-    action: action as "approve" | "edit" | "reject" | "regenerate",
-    runId,
-    editedPlan,
-    userFeedback,
-    perRunAuditFlag,
-  });
   if (!r.ok) {
     res.status(404).json({ ok: false, reason: r.message || "not_found" });
     return;
@@ -3027,30 +2980,9 @@ app.post("/api/patch", async (req, res) => {
     lastAddedFunctions,
     forceTier: rawForceTier,
     mode: rawMode,
-    skipPlanReview: rawSkipPlanReview,
-    enablePlanReview: rawEnablePlanReview,
-    planApprovalRequired: rawPlanApprovalRequired,
   } = req.body ?? {};
 
-  // Resolve enablePlanReview: new field takes precedence; legacy skipPlanReview inverts.
-  let enablePlanReview: boolean | undefined;
-  if (typeof rawEnablePlanReview === "boolean") {
-    enablePlanReview = rawEnablePlanReview;
-  } else if (typeof rawSkipPlanReview === "boolean") {
-    // Legacy callers sending skipPlanReview: derive enablePlanReview = !skipPlanReview
-    console.warn("[zone-plan] deprecated: skipPlanReview received; use enablePlanReview instead");
-    enablePlanReview = !rawSkipPlanReview;
-  }
-
-  // Normalize legacy "plan" mode and compute whether plan approval gate should run.
-  // Plan-review is opt-in (enablePlanReview must be true); "plan" alias always forces it.
-  const { normalizedMode, planApprovalRequired } = shouldRequirePlanApproval({
-    rawMode,
-    enablePlanReview,
-    explicitPlanApprovalRequired: typeof rawPlanApprovalRequired === "boolean" ? rawPlanApprovalRequired : undefined,
-  });
-
-  const requestedMode = normalizedMode === undefined ? "auto" : parseMode(normalizedMode);
+  const requestedMode = rawMode == null ? "auto" : parseMode(rawMode);
   if (!requestedMode) {
     perf.finish("bad request");
     res.status(400).json({
@@ -3481,22 +3413,7 @@ app.post("/api/patch", async (req, res) => {
       );
     }
   }
-  // Plan approval gate: pre-generate plan and wait for user review before starting agent loop.
-  // Triggers when planApprovalRequired is true (opt-in via enablePlanReview, or legacy "plan" alias).
-  // Phase Q.7: also triggers when mode was "auto" and intent resolved to "execute" (Patch dispatch)
-  // — at the shouldRequirePlanApproval call site above the intent was not yet known.
-  const autoRoutedToPatch = requestedMode === "auto" && intent === "execute";
-  const effectivePlanApprovalRequired =
-    planApprovalRequired ||
-    shouldRequirePlanApproval({ rawMode, enablePlanReview, routedAs: autoRoutedToPatch ? "patch" : undefined })
-      .planApprovalRequired;
-  // Supports up to MAX_REGENS regeneration cycles driven by user feedback.
-  const PLAN_MAX_REGENS = 3;
   let preGeneratedPlan: Awaited<ReturnType<typeof generateExecutionPlan>> | undefined;
-  /** Phase AS: captured from plan approval result; undefined = use autoAuditSetting, false = user turned off this run. */
-  let approvedWithPerRunAuditFlag: boolean | undefined = undefined;
-  // Y.0: Plan generation runs unconditionally (gated only on runIdStr) so the
-  // AS audit can access preGeneratedPlan even when plan review is disabled.
   let planContext: Awaited<ReturnType<typeof preparePlanContext>> | undefined;
   if (runIdStr) {
     try {
@@ -3513,6 +3430,20 @@ app.post("/api/patch", async (req, res) => {
         userApiKey: userApiKey || undefined,
         provider: byokProvider,
       });
+      const _planSummaryFiles = Array.from(
+        new Set(preGeneratedPlan.steps.flatMap((s) => s.filesLikely ?? []))
+      );
+      emitProgress(runIdStr, {
+        stage: "plan_summary",
+        progress: {
+          type: "plan_summary",
+          title: "Plan generated",
+          detail: preGeneratedPlan.objective,
+          status: "success",
+          planSummaryFiles: _planSummaryFiles,
+          planSummaryStepCount: preGeneratedPlan.steps.length,
+        } as any,
+      });
     } catch (planGenErr) {
       console.warn(
         "[zone-plan] plan generation failed:",
@@ -3521,115 +3452,7 @@ app.post("/api/patch", async (req, res) => {
       // preGeneratedPlan remains undefined — approval and audit gates will skip.
     }
   }
-  if (effectivePlanApprovalRequired && runIdStr && preGeneratedPlan) {
-    try {
-      let regenAttempt = 0;
-
-      planReviewLoop: while (true) {
-        const { result: approvalResult } = await requestPlanApproval({
-          runId: runIdStr,
-          plan: preGeneratedPlan,
-          regenAttempt,
-          maxRegens: PLAN_MAX_REGENS,
-          emit: (evt) =>
-            emitProgress(runIdStr, {
-              stage: "plan_review",
-              progress: { ...evt, ts: Date.now() } as any,
-            }),
-          abortSignal: patchAbort?.signal,
-        });
-
-        if (approvalResult.action === "reject") {
-          emitProgress(runIdStr, {
-            stage: "plan_rejected",
-            progress: {
-              runId: runIdStr,
-              ts: Date.now(),
-              type: "plan_rejected",
-              title: "Plan rejected by user",
-              status: "warning",
-            } as any,
-          });
-          if (runIdStr) registerRunComplete(runIdStr, "cancelled");
-          perf.finish("plan rejected");
-          res.json({ ok: false, reason: "plan_rejected" });
-          return;
-        }
-
-        if (approvalResult.action === "approve") {
-          approvedWithPerRunAuditFlag = approvalResult.perRunAuditFlag;
-          break planReviewLoop;
-        }
-
-        if (approvalResult.action === "edit") {
-          emitProgress(runIdStr, {
-            stage: "plan_edited",
-            progress: {
-              runId: runIdStr,
-              ts: Date.now(),
-              type: "plan_edited",
-              title: "Plan edited",
-              plan: approvalResult.plan,
-              status: "success",
-            } as any,
-          });
-          preGeneratedPlan = approvalResult.plan;
-          break planReviewLoop;
-        }
-
-        if (approvalResult.action === "regenerate") {
-          regenAttempt += 1;
-          if (regenAttempt > PLAN_MAX_REGENS) {
-            // Defensive — UI should have disabled the button, but enforce server-side too.
-            emitProgress(runIdStr, {
-              stage: "plan_rejected",
-              progress: {
-                runId: runIdStr,
-                ts: Date.now(),
-                type: "plan_rejected",
-                title: "Regeneration limit reached",
-                status: "warning",
-              } as any,
-            });
-            if (runIdStr) registerRunComplete(runIdStr, "cancelled");
-            perf.finish("plan regen limit exceeded");
-            res.json({ ok: false, reason: "plan_regen_limit_exceeded" });
-            return;
-          }
-          const previousPlan = preGeneratedPlan;
-          try {
-            preGeneratedPlan = await generateExecutionPlan({
-              task: String(task),
-              repoSummary: planContext!.projectSummary,
-              relevantFiles: planContext!.relevantFilePaths,
-              userApiKey: userApiKey || undefined,
-              provider: byokProvider,
-              previousPlan,
-              userFeedback: approvalResult.userFeedback,
-            });
-          } catch (regenErr) {
-            // Generation failed — don't count this attempt, loop with existing plan.
-            regenAttempt -= 1;
-            console.warn(
-              "[zone-plan] regen generation failed:",
-              regenErr instanceof Error ? regenErr.message : String(regenErr)
-            );
-          }
-          // Loop continues — requestPlanApproval emits new event with new approvalId.
-        }
-      }
-    } catch (err) {
-      console.warn(
-        "[zone-plan] plan-approval gate failed:",
-        err instanceof Error ? err.message : String(err)
-      );
-      // Fall through to normal patch flow without preGeneratedPlan.
-    }
-  }
-
-  // Y.0: scope audit gate — fires independently of plan approval when
-  // shouldRunAudit returns true. Only requires runIdStr (plan is always
-  // generated above after Commit 1; defensive no_plan path handles failures).
+  // Scope audit gate — fires when shouldRunAudit returns true.
   let preClassifiedTask: TaskClassification | undefined;
   // Phase X.0.1: captured when audit ran without skipping; forwarded to execute agent.
   let auditFindingsForExec: { summary: string; citationCount: number; toolCallCount: number; costUsd: number } | undefined;
@@ -3643,7 +3466,6 @@ app.post("/api/patch", async (req, res) => {
     }
 
     const autoAuditComplexTasks = readAutoAuditSetting();
-    const perRunAuditFlag = approvedWithPerRunAuditFlag;
     const tier = preClassifiedTask?.tier ?? "medium";
 
     function shouldRunAudit(
@@ -3656,7 +3478,7 @@ app.post("/api/patch", async (req, res) => {
       return autoAuditSetting;
     }
 
-    if (shouldRunAudit(tier, perRunAuditFlag, autoAuditComplexTasks)) {
+    if (shouldRunAudit(tier, undefined, autoAuditComplexTasks)) {
       if (!preGeneratedPlan) {
         // Defensive: plan generation failed upstream — audit cannot run without a plan.
         log("[zone-audit-skipped]", JSON.stringify({ runId: runIdStr, reason: "no_plan", ts: new Date().toISOString() }));
@@ -3730,7 +3552,7 @@ app.post("/api/patch", async (req, res) => {
             const mismatchSeverity: "minor" | "major" = agentRevision != null
               ? "major"
               : judgement.severity === "minor" ? "minor" : "major";
-            const requiresInterrupt = effectivePlanApprovalRequired || mismatchSeverity === "major";
+            const requiresInterrupt = mismatchSeverity === "major";
 
             if (requiresInterrupt) {
               const proposal: RevisionProposal = {

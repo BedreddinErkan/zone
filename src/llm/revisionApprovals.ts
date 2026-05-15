@@ -1,6 +1,6 @@
 /**
- * Phase AS: scope revision approval gate — mirrors planApprovals.ts shape.
- * Emitted between plan approval and execute when investigateScope detects
+ * Phase AS: scope revision approval gate.
+ * Emitted between plan generation and execute when investigateScope detects
  * a scope mismatch. User approves or rejects; original plan is unchanged
  * on reject (execution proceeds with the original approved plan).
  */
