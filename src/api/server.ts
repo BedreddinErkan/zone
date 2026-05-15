@@ -3442,6 +3442,7 @@ app.post("/api/patch", async (req, res) => {
           status: "success",
           planSummaryFiles: _planSummaryFiles,
           planSummaryStepCount: preGeneratedPlan.steps.length,
+          // TODO: payload type cleanup — runId/ts injected by emitProgress wrapper
         } as any,
       });
     } catch (planGenErr) {

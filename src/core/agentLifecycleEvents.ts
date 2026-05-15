@@ -138,9 +138,6 @@ export type ZoneStructuredProgressEvent = {
     | "token_budget_status"
     | "task_classified"
     | "tier_constraints_applied"
-    | "plan_ready_for_review"
-    | "plan_rejected"
-    | "plan_edited"
     | "loop_warning_emitted"
     | "loop_detected_terminal"
     | "tool_input_delta"
@@ -179,11 +176,6 @@ export type ZoneStructuredProgressEvent = {
   total_output?: number;
   iter_count?: number;
   approvalId?: string;
-  /** Plan-review events: the execution plan being reviewed or the approved/edited version. */
-  plan?: { objective: string; steps: Array<{ title: string; description: string; filesLikely: string[]; subagentEligible?: boolean; subagentType?: "explore" | "worker" }>; riskHints: string[]; scopeSummary: string };
-  /** plan_ready_for_review: which regen iteration this is (0 = first/original) and the cap. */
-  regenAttempt?: number;
-  maxRegens?: number;
   todos?: Array<{
     id: string;
     text: string;
