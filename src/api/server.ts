@@ -3627,12 +3627,13 @@ app.post("/api/patch", async (req, res) => {
     }
   }
 
-  // Phase AS: scope audit gate — runs after plan approval, before execute.
-  // Only active when (a) a plan was approved and (b) shouldRunAudit returns true.
+  // Y.0: scope audit gate — fires independently of plan approval when
+  // shouldRunAudit returns true. Only requires runIdStr (plan is always
+  // generated above after Commit 1; defensive no_plan path handles failures).
   let preClassifiedTask: TaskClassification | undefined;
   // Phase X.0.1: captured when audit ran without skipping; forwarded to execute agent.
   let auditFindingsForExec: { summary: string; citationCount: number; toolCallCount: number; costUsd: number } | undefined;
-  if (preGeneratedPlan && runIdStr) {
+  if (runIdStr) {
     try {
       // Classify task here so tier is available for audit gating AND to
       // avoid a second classification call inside runLlmPatchFlow.
@@ -3656,7 +3657,11 @@ app.post("/api/patch", async (req, res) => {
     }
 
     if (shouldRunAudit(tier, perRunAuditFlag, autoAuditComplexTasks)) {
-      try {
+      if (!preGeneratedPlan) {
+        // Defensive: plan generation failed upstream — audit cannot run without a plan.
+        log("[zone-audit-skipped]", JSON.stringify({ runId: runIdStr, reason: "no_plan", ts: new Date().toISOString() }));
+      } else {
+        try {
         emitProgress(runIdStr, {
           stage: "scope_revision",
           progress: {
@@ -3779,10 +3784,11 @@ app.post("/api/patch", async (req, res) => {
             } as any,
           });
         }
-      } catch (auditErr) {
-        // Audit failures never block execution — log and continue.
-        console.warn("[zone-scope-audit] audit gate failed:", auditErr instanceof Error ? auditErr.message : String(auditErr));
-      }
+        } catch (auditErr) {
+          // Audit failures never block execution — log and continue.
+          console.warn("[zone-scope-audit] audit gate failed:", auditErr instanceof Error ? auditErr.message : String(auditErr));
+        }
+      } // end else (preGeneratedPlan guard)
     }
   }
 

@@ -96,3 +96,34 @@ describe("shouldRunAudit — perRunOverride=false always skips non-simple", () =
     expect(shouldRunAudit("complex", false, true)).toBe(false);
   });
 });
+
+// Y.0 Commit 2 — audit gate decoupled from plan approval.
+// Previously the outer gate was `if (preGeneratedPlan && runIdStr)`, so audit
+// never fired when plan review was disabled (preGeneratedPlan stayed undefined).
+// After Y.0 Commit 2 the gate is `if (runIdStr)` — shouldRunAudit is the sole
+// decider. perRunOverride stays undefined when plan review is off (no per-run
+// checkbox to set it), so the tests below model that exact scenario.
+describe("shouldRunAudit — plan-review-off context (Y.0 decoupled gate)", () => {
+  it("medium + autoAudit=true + plan-review off → audit fires (perRunOverride=undefined)", () => {
+    // When plan review is disabled, approvedWithPerRunAuditFlag is never set,
+    // so perRunOverride arrives as undefined. Audit must fire on medium tasks.
+    expect(shouldRunAudit("medium", undefined, true)).toBe(true);
+  });
+
+  it("complex + autoAudit=true + plan-review off → audit fires", () => {
+    expect(shouldRunAudit("complex", undefined, true)).toBe(true);
+  });
+
+  it("simple + plan-review off → audit skips regardless of autoAudit", () => {
+    expect(shouldRunAudit("simple", undefined, true)).toBe(false);
+    expect(shouldRunAudit("simple", undefined, false)).toBe(false);
+  });
+
+  it("medium + autoAudit=false + plan-review off → audit skips (global setting governs)", () => {
+    expect(shouldRunAudit("medium", undefined, false)).toBe(false);
+  });
+
+  it("complex + autoAudit=false + plan-review off → audit skips", () => {
+    expect(shouldRunAudit("complex", undefined, false)).toBe(false);
+  });
+});
