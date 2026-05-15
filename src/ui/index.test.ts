@@ -707,6 +707,9 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
       setItem(key: string, value: string) {
         localStorageStore.set(key, value);
       },
+      removeItem(key: string) {
+        localStorageStore.delete(key);
+      },
     },
     navigator: {
       clipboard: {
@@ -2895,5 +2898,271 @@ describe("BYOM.1: provider picker default and persistence", () => {
     ctx.setActiveProvider("openai");
     expect(localStorageStore.get("zoneActiveProvider")).toBe("openai");
     expect(ctx.getActiveProvider()).toBe("openai");
+  });
+});
+
+type ByomCtx = {
+  getApiKeys: () => Record<string, string>;
+  setApiKey: (provider: string, value: string) => void;
+  getActiveApiKey: () => string;
+  getActiveProvider: () => string;
+  setActiveProvider: (p: string) => void;
+  buildAuthHeaders: () => Record<string, string>;
+  openSettings: (tab?: string) => void;
+  closeSettings: () => void;
+  syncSettingsForRunChange: () => void;
+};
+
+describe("BYOM.2: multi-key storage", () => {
+  it("getApiKeys returns empty object when nothing stored", () => {
+    const { context } = buildUiHarness();
+    const ctx = context as unknown as ByomCtx;
+    expect(ctx.getApiKeys()).toEqual({});
+  });
+
+  it("getApiKeys parses the stored zoneApiKeys JSON", () => {
+    const { context } = buildUiHarness({
+      zoneApiKeys: JSON.stringify({ openai: "sk-o1", anthropic: "sk-ant-1" }),
+    });
+    const ctx = context as unknown as ByomCtx;
+    expect(ctx.getApiKeys()).toEqual({ openai: "sk-o1", anthropic: "sk-ant-1" });
+  });
+
+  it("setApiKey persists each provider into its own slot", () => {
+    const { context, localStorageStore } = buildUiHarness();
+    const ctx = context as unknown as ByomCtx;
+    ctx.setApiKey("openai", "sk-openai-key");
+    ctx.setApiKey("anthropic", "sk-ant-anthropic-key");
+    const raw = localStorageStore.get("zoneApiKeys");
+    expect(raw).toBeTruthy();
+    expect(JSON.parse(raw as string)).toEqual({
+      openai: "sk-openai-key",
+      anthropic: "sk-ant-anthropic-key",
+    });
+  });
+
+  it("setApiKey with empty value clears just that provider's slot", () => {
+    const { context, localStorageStore } = buildUiHarness({
+      zoneApiKeys: JSON.stringify({ openai: "sk-o", anthropic: "sk-ant" }),
+    });
+    const ctx = context as unknown as ByomCtx;
+    ctx.setApiKey("openai", "");
+    const raw = localStorageStore.get("zoneApiKeys") as string;
+    expect(JSON.parse(raw)).toEqual({ anthropic: "sk-ant" });
+  });
+
+  it("setApiKey removes localStorage entry entirely when both slots clear", () => {
+    const { context, localStorageStore } = buildUiHarness({
+      zoneApiKeys: JSON.stringify({ openai: "sk-o" }),
+    });
+    const ctx = context as unknown as ByomCtx;
+    ctx.setApiKey("openai", "");
+    expect(localStorageStore.has("zoneApiKeys")).toBe(false);
+  });
+
+  it("setApiKey trims whitespace before storing", () => {
+    const { context } = buildUiHarness();
+    const ctx = context as unknown as ByomCtx;
+    ctx.setApiKey("anthropic", "   sk-ant-spaces   ");
+    expect(ctx.getApiKeys()).toEqual({ anthropic: "sk-ant-spaces" });
+  });
+});
+
+describe("BYOM.2: active-provider key resolver", () => {
+  it("getActiveApiKey returns the anthropic key when active provider is anthropic", () => {
+    const { context } = buildUiHarness({
+      zoneActiveProvider: "anthropic",
+      zoneApiKeys: JSON.stringify({ openai: "sk-o", anthropic: "sk-ant-active" }),
+    });
+    const ctx = context as unknown as ByomCtx;
+    expect(ctx.getActiveApiKey()).toBe("sk-ant-active");
+  });
+
+  it("getActiveApiKey returns the openai key when active provider is openai", () => {
+    const { context } = buildUiHarness({
+      zoneActiveProvider: "openai",
+      zoneApiKeys: JSON.stringify({ openai: "sk-openai-active", anthropic: "sk-ant" }),
+    });
+    const ctx = context as unknown as ByomCtx;
+    expect(ctx.getActiveApiKey()).toBe("sk-openai-active");
+  });
+
+  it("getActiveApiKey returns empty string when active provider has no key", () => {
+    const { context } = buildUiHarness({
+      zoneActiveProvider: "openai",
+      zoneApiKeys: JSON.stringify({ anthropic: "sk-ant-only" }),
+    });
+    const ctx = context as unknown as ByomCtx;
+    expect(ctx.getActiveApiKey()).toBe("");
+  });
+
+  it("switching active provider switches which key getActiveApiKey returns — no manual update", () => {
+    const { context } = buildUiHarness({
+      zoneActiveProvider: "anthropic",
+      zoneApiKeys: JSON.stringify({ openai: "sk-o", anthropic: "sk-ant" }),
+    });
+    const ctx = context as unknown as ByomCtx;
+    expect(ctx.getActiveApiKey()).toBe("sk-ant");
+    ctx.setActiveProvider("openai");
+    expect(ctx.getActiveApiKey()).toBe("sk-o");
+  });
+
+  it("buildAuthHeaders sends X-Zone-LLM-Key matching the active provider's stored key", () => {
+    const { context } = buildUiHarness({
+      zoneActiveProvider: "anthropic",
+      zoneApiKeys: JSON.stringify({ openai: "sk-o", anthropic: "sk-ant-active" }),
+    });
+    const ctx = context as unknown as ByomCtx;
+    const headers = ctx.buildAuthHeaders();
+    expect(headers["X-Zone-Provider"]).toBe("anthropic");
+    expect(headers["X-Zone-LLM-Key"]).toBe("sk-ant-active");
+  });
+
+  it("buildAuthHeaders omits X-Zone-LLM-Key when the active provider has no stored key", () => {
+    const { context } = buildUiHarness({
+      zoneActiveProvider: "openai",
+      zoneApiKeys: JSON.stringify({ anthropic: "sk-ant-only" }),
+    });
+    const ctx = context as unknown as ByomCtx;
+    const headers = ctx.buildAuthHeaders();
+    expect(headers["X-Zone-Provider"]).toBe("openai");
+    expect("X-Zone-LLM-Key" in headers).toBe(false);
+  });
+
+  it("buildAuthHeaders auto-rotates the transmitted key after setActiveProvider", () => {
+    const { context } = buildUiHarness({
+      zoneActiveProvider: "anthropic",
+      zoneApiKeys: JSON.stringify({ openai: "sk-o-rotated", anthropic: "sk-ant" }),
+    });
+    const ctx = context as unknown as ByomCtx;
+    expect(ctx.buildAuthHeaders()["X-Zone-LLM-Key"]).toBe("sk-ant");
+    ctx.setActiveProvider("openai");
+    const next = ctx.buildAuthHeaders();
+    expect(next["X-Zone-Provider"]).toBe("openai");
+    expect(next["X-Zone-LLM-Key"]).toBe("sk-o-rotated");
+  });
+});
+
+describe("BYOM.2: legacy zoneOpenAIApiKey migration", () => {
+  it("migrates legacy zoneOpenAIApiKey into zoneApiKeys.openai on harness load", () => {
+    const { context, localStorageStore } = buildUiHarness({
+      zoneOpenAIApiKey: "sk-legacy-openai",
+    });
+    const ctx = context as unknown as ByomCtx;
+    expect(ctx.getApiKeys()).toEqual({ openai: "sk-legacy-openai" });
+    expect(localStorageStore.has("zoneOpenAIApiKey")).toBe(false);
+  });
+
+  it("migration seeds zoneActiveProvider=openai when absent", () => {
+    const { context, localStorageStore } = buildUiHarness({
+      zoneOpenAIApiKey: "sk-legacy-only",
+    });
+    const ctx = context as unknown as ByomCtx;
+    expect(localStorageStore.get("zoneActiveProvider")).toBe("openai");
+    expect(ctx.getActiveProvider()).toBe("openai");
+  });
+
+  it("migration is a no-op when no legacy key is present (default Anthropic preserved)", () => {
+    const { context, localStorageStore } = buildUiHarness();
+    const ctx = context as unknown as ByomCtx;
+    expect(localStorageStore.has("zoneApiKeys")).toBe(false);
+    expect(ctx.getApiKeys()).toEqual({});
+    expect(ctx.getActiveProvider()).toBe("anthropic");
+  });
+
+  it("migration does NOT overwrite an existing zoneApiKeys.openai slot", () => {
+    const { context } = buildUiHarness({
+      zoneOpenAIApiKey: "sk-legacy-stale",
+      zoneApiKeys: JSON.stringify({ openai: "sk-newer-already-set" }),
+    });
+    const ctx = context as unknown as ByomCtx;
+    expect(ctx.getApiKeys().openai).toBe("sk-newer-already-set");
+  });
+
+  it("migration preserves an already-set zoneActiveProvider", () => {
+    const { context } = buildUiHarness({
+      zoneOpenAIApiKey: "sk-legacy",
+      zoneActiveProvider: "anthropic",
+    });
+    const ctx = context as unknown as ByomCtx;
+    expect(ctx.getActiveProvider()).toBe("anthropic");
+  });
+});
+
+describe("BYOM.2: Settings provider radios run-state gate", () => {
+  it("renderKeysSettings renders OpenAI + Anthropic key inputs simultaneously", () => {
+    const { context, elements } = buildUiHarness({
+      zoneActiveProvider: "anthropic",
+      zoneApiKeys: JSON.stringify({ anthropic: "sk-ant-saved", openai: "sk-o-saved" }),
+    });
+    const ctx = context as unknown as ByomCtx;
+    ctx.openSettings("keys");
+    const html = elements.get("settingsBody").innerHTML;
+    expect(html).toContain('id="apikeyInput-openai"');
+    expect(html).toContain('id="apikeyInput-anthropic"');
+    expect(html).toContain('name="zoneProviderRadio"');
+  });
+
+  it("renderKeysSettings: provider radios are NOT disabled when no run is active", () => {
+    const { context, elements } = buildUiHarness({ zoneActiveProvider: "anthropic" });
+    const ctx = context as unknown as ByomCtx;
+    ctx.openSettings("keys");
+    const html = elements.get("settingsBody").innerHTML;
+    // Both labels render with cursor:pointer and full opacity when not running.
+    expect(html).toContain("cursor:pointer");
+    expect(html).not.toContain('name="zoneProviderRadio" value="openai" checked disabled');
+    expect(html).not.toContain('name="zoneProviderRadio" value="anthropic" checked disabled');
+  });
+
+  it("renderModelSettings: provider radios are NOT disabled when no run is active", () => {
+    const { context, elements } = buildUiHarness({ zoneActiveProvider: "anthropic" });
+    const ctx = context as unknown as ByomCtx;
+    ctx.openSettings("model");
+    const html = elements.get("settingsBody").innerHTML;
+    expect(html).toContain('name="zoneProviderPick"');
+    expect(html).not.toContain('name="zoneProviderPick" value="anthropic" checked  disabled');
+  });
+
+  it("syncSettingsForRunChange is a no-op when the Settings overlay is closed", () => {
+    const { context, elements } = buildUiHarness();
+    const ctx = context as unknown as ByomCtx;
+    // Overlay never opened.
+    const before = elements.get("settingsBody").innerHTML;
+    ctx.syncSettingsForRunChange();
+    expect(elements.get("settingsBody").innerHTML).toBe(before);
+  });
+
+  it("syncSettingsForRunChange re-renders the Keys tab when overlay is open", () => {
+    const { context, elements } = buildUiHarness({ zoneActiveProvider: "anthropic" });
+    const ctx = context as unknown as ByomCtx;
+    ctx.openSettings("keys");
+    // Mutate body to a sentinel; if sync re-renders, sentinel disappears.
+    const body = elements.get("settingsBody");
+    body.innerHTML = "<!-- SENTINEL -->";
+    ctx.syncSettingsForRunChange();
+    expect(body.innerHTML).not.toContain("SENTINEL");
+    expect(body.innerHTML).toContain('name="zoneProviderRadio"');
+  });
+
+  it("syncSettingsForRunChange preserves in-flight Keys-tab input values across re-render", () => {
+    const { context, elements } = buildUiHarness({ zoneActiveProvider: "anthropic" });
+    const ctx = context as unknown as ByomCtx;
+    ctx.openSettings("keys");
+    // Simulate user typing into the OpenAI key input.
+    const input = elements.get("apikeyInput-openai");
+    input.value = "sk-typed-but-not-saved";
+    ctx.syncSettingsForRunChange();
+    // After re-render the input element is the same MockElement (getElementById
+    // returns the cached one); the helper restores its value.
+    expect(elements.get("apikeyInput-openai").value).toBe("sk-typed-but-not-saved");
+  });
+
+  it("syncSettingsForRunChange skips tabs that have no provider radios", () => {
+    const { context, elements } = buildUiHarness();
+    const ctx = context as unknown as ByomCtx;
+    ctx.openSettings("general");
+    const before = elements.get("settingsBody").innerHTML;
+    ctx.syncSettingsForRunChange();
+    expect(elements.get("settingsBody").innerHTML).toBe(before);
   });
 });
