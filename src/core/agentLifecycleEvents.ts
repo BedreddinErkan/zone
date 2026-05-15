@@ -36,6 +36,7 @@ export type AgentLifecyclePipelineStage =
   | "repo"
   | "rank"
   | "plan"
+  | "scope_revision"
   | "context"
   | "patch_preview"
   | "patch_gen"
@@ -142,7 +143,13 @@ export type ZoneStructuredProgressEvent = {
     | "plan_edited"
     | "loop_warning_emitted"
     | "loop_detected_terminal"
-    | "tool_input_delta";
+    | "tool_input_delta"
+    /** Phase AS: scope revision proposal emitted between plan approval and execute. */
+    | "scope_revision_proposed"
+    | "scope_revision_resolved"
+    | "scope_audit_started"
+    | "scope_audit_completed"
+    | "scope_audit_skipped";
   title: string;
   detail?: string;
   filePath?: string;
@@ -226,6 +233,18 @@ export type ZoneStructuredProgressEvent = {
    *  delta seen for that block. */
   blockId?: string;
   isFirstDelta?: boolean;
+  /** Phase AS: scope revision proposal fields on scope_revision_proposed events. */
+  revisionId?: string;
+  revisionType?: "under_scope" | "over_scope" | "mixed";
+  revisionReason?: string;
+  revisionOriginalPlan?: string;
+  revisionRevisedPlanSummary?: string;
+  revisionMissingFiles?: string[];
+  revisionUnnecessaryFiles?: string[];
+  /** scope_revision_resolved: user decision */
+  revisionDecision?: "approve" | "reject";
+  /** scope_audit_skipped reason */
+  skipReason?: string;
   /** Phase L.1: pre-dispatch task classification. Emitted once per dispatch
    *  before the agent loop starts so the UI / telemetry can show the predicted
    *  tier and the classifier's own cost. L.2 will gate tool exposure based on

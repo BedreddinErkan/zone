@@ -104,6 +104,10 @@ import {
   validateRegenerateFeedback,
   shouldRequirePlanApproval,
 } from "../llm/planApprovals.js";
+import {
+  resolveRevisionApproval,
+  rejectPendingRevisionsForRun,
+} from "../llm/revisionApprovals.js";
 import { preparePlanContext } from "../core/preparePlanContext.js";
 import { generateExecutionPlan } from "../llm/executionPlan.js";
 import { decodeProgressStage } from "../core/progressStageCodec.js";
@@ -1683,6 +1687,7 @@ app.post("/api/cancel", (req, res) => {
     // If a command or plan approval is pending, treat cancel as rejection.
     rejectPendingApprovalsForRun(runId);
     rejectPendingPlansForRun(runId);
+    rejectPendingRevisionsForRun(runId);
     clearTrustedCommandsForRun(runId);
   } catch {
     // best-effort
@@ -1862,6 +1867,32 @@ app.post("/api/approve-plan", (req, res) => {
     runId,
     editedPlan,
     userFeedback,
+  });
+  if (!r.ok) {
+    res.status(404).json({ ok: false, reason: r.message || "not_found" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/approve-revision", (req, res) => {
+  const revisionId = typeof req.body?.revisionId === "string" ? req.body.revisionId.trim() : "";
+  const runId = typeof req.body?.runId === "string" ? req.body.runId.trim() : "";
+  const decision = typeof req.body?.decision === "string" ? req.body.decision.trim() : "";
+
+  if (!revisionId || !runId) {
+    res.status(400).json({ ok: false, reason: "missing_revision_id_or_run_id" });
+    return;
+  }
+  if (!["approve", "reject"].includes(decision)) {
+    res.status(400).json({ ok: false, reason: "invalid_decision" });
+    return;
+  }
+
+  const r = resolveRevisionApproval({
+    revisionId,
+    runId,
+    decision: decision as "approve" | "reject",
   });
   if (!r.ok) {
     res.status(404).json({ ok: false, reason: r.message || "not_found" });
