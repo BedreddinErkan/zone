@@ -91,6 +91,7 @@ vi.mock("../core/runAgent.js", () => ({
 vi.mock("../core/runLlmPatchFlow.js", () => ({
   runLlmPatchFlow: runLlmPatchFlowMock,
   isIrrelevantDeveloperContextPath: vi.fn(() => false),
+  toPublicLlmPatchResponse: (result: Record<string, unknown>) => result,
 }));
 
 vi.mock("../core/applyLlmPatches.js", () => ({
