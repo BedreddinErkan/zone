@@ -18,6 +18,12 @@ export type SubagentType = (typeof VALID_SUBAGENT_TYPES)[number];
 
 export const EXPLORE_ALLOWED_TOOLS: ReadonlySet<string> = new Set(READ_ONLY_TOOLS);
 
+/** Phase AS: audit-phase toolset — read-only tools plus suggest_scope_change. */
+export const AUDIT_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
+  ...READ_ONLY_TOOLS,
+  "suggest_scope_change",
+]);
+
 // Phase H.6: plan-aware iteration budgets. Floor protects single-question
 // runs; ceiling caps unbounded plans; per-step factor scales with plan size.
 export const EXPLORE_ITER_FLOOR = 15;

@@ -1,10 +1,212 @@
 import { renderChatMarkdownToHtml } from "./renderChatMarkdown.js";
-import { runAgentLoop } from "./agentLoop.js";
-import { EXPLORE_ALLOWED_TOOLS, computeExploreMaxIterations } from "./subagents.js";
+import { runAgentLoop, TOKEN_BUDGET_CAP } from "./agentLoop.js";
+import { EXPLORE_ALLOWED_TOOLS, AUDIT_ALLOWED_TOOLS, computeExploreMaxIterations } from "./subagents.js";
 import { CHAT_TOOLS } from "../tools/toolDefinitions.js";
 import type { ToolResult } from "../tools/toolExecutor.js";
 import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import { debugLog, log } from "../utils/logger.js";
+
+export interface InvestigateScopeOpts {
+  repoPath: string;
+  query: string;
+  runId?: string;
+  /** Remaining tokens in the parent run. Audit refused if < 50k; capped at 200k. */
+  tokenBudgetRemaining?: number;
+  abortSignal?: AbortSignal;
+  userApiKey?: string;
+  onProgress?: (update: {
+    stage: string;
+    progress?: Partial<ZoneStructuredProgressEvent>;
+  }) => void;
+}
+
+export interface InvestigateScopeResult {
+  findings: string;
+  citations: Array<{ file: string; line?: number }>;
+  toolCallCount: number;
+  tokensUsed: number;
+  costUsd: number;
+  skipped?: boolean;
+  skipReason?: string;
+  /** Set when the investigation agent explicitly called suggest_scope_change. */
+  agentSuggestedRevision?: {
+    type: "under_scope" | "over_scope" | "mixed";
+    reason: string;
+    missingFiles?: string[];
+    unnecessaryFiles?: string[];
+    revisedPlanSummary: string;
+  };
+}
+
+function extractCitations(text: string): Array<{ file: string; line?: number }> {
+  const seen = new Map<string, { file: string; line?: number }>();
+  for (const m of text.matchAll(/`([^`]+\.[a-zA-Z]+(?::(\d+))?)`/g)) {
+    const raw = m[1] ?? "";
+    const colonIdx = raw.lastIndexOf(":");
+    const hasLine = colonIdx > 0 && /^\d+$/.test(raw.slice(colonIdx + 1));
+    const file = hasLine ? raw.slice(0, colonIdx) : raw;
+    const line = hasLine ? parseInt(raw.slice(colonIdx + 1), 10) : undefined;
+    if (!seen.has(file)) seen.set(file, { file, ...(line !== undefined ? { line } : {}) });
+  }
+  return Array.from(seen.values());
+}
+
+const AUDIT_TOKEN_CAP = 200_000;
+const MIN_TOKENS_TO_START = 50_000;
+
+/**
+ * Pure investigation runner for in-process callers (Phase AS scope audit).
+ * Callable from server.ts between plan approval and execute — does not require
+ * an HTTP round-trip to /api/investigate.
+ */
+export async function investigateScope(opts: InvestigateScopeOpts): Promise<InvestigateScopeResult> {
+  const tokenBudgetRemaining = opts.tokenBudgetRemaining ?? Infinity;
+
+  if (isFinite(tokenBudgetRemaining) && tokenBudgetRemaining < MIN_TOKENS_TO_START) {
+    log("[zone-investigation-summary]", JSON.stringify({
+      event: "investigation_summary",
+      runId: opts.runId || null,
+      toolCallCount: 0,
+      totalCostUsd: 0,
+      citationCount: 0,
+      query: String(opts.query || "").slice(0, 100),
+      finalState: "skipped",
+      skipReason: "insufficient_token_budget",
+      ts: new Date().toISOString(),
+    }));
+    return { findings: "", citations: [], toolCallCount: 0, tokensUsed: 0, costUsd: 0, skipped: true, skipReason: "insufficient_token_budget" };
+  }
+
+  const runId = opts.runId ?? "";
+  const contextFiles = new Set<string>();
+  let agentSuggestedRevision: InvestigateScopeResult["agentSuggestedRevision"];
+
+  const emitStructuredProgress = (progress: Partial<ZoneStructuredProgressEvent>): void => {
+    if (!runId) return;
+    opts.onProgress?.({
+      stage: "scope_audit",
+      progress: { runId, ts: Date.now(), ...progress } as Partial<ZoneStructuredProgressEvent>,
+    });
+  };
+
+  if (runId) {
+    emitStructuredProgress({ type: "agent_loop_start", title: "Starting scope investigation", status: "active" });
+  }
+
+  // AS.1: enforce auditCap via tokenBudgetBaseTokens once tier-cap /
+  // TOKEN_BUDGET_CAP alignment is resolved. For AS.0 the iteration cap
+  // (EXPLORE_ITER_FLOOR = 15) naturally bounds audit token spend.
+  const _auditCap = isFinite(tokenBudgetRemaining)
+    ? Math.min(tokenBudgetRemaining, AUDIT_TOKEN_CAP)
+    : AUDIT_TOKEN_CAP;
+  void _auditCap;
+
+  const planStepsCount = 1;
+  const computedMax = computeExploreMaxIterations(planStepsCount);
+
+  const loop = await runAgentLoop({
+    task: opts.query,
+    repoPath: opts.repoPath,
+    runId: runId || undefined,
+    userApiKey: opts.userApiKey,
+    abortSignal: opts.abortSignal,
+    mode: "investigation",
+    allowedTools: AUDIT_ALLOWED_TOOLS,
+    maxIterationsOverride: computedMax,
+    disableTodoWrite: true,
+    onToolCall: (name: string, args: Record<string, unknown>) => {
+      const fp = filePathFromToolArgs(name, args);
+      if (fp) contextFiles.add(fp);
+      emitStructuredProgress({
+        type: "tool_call",
+        title: `[tool] ${name}${fp ? `: ${fp}` : ""}`.slice(0, 240),
+        status: "active",
+      });
+    },
+    onToolResult: (_name: string, result: ToolResult) => {
+      emitStructuredProgress({
+        type: "tool_result",
+        title: String(result.output || "").slice(0, 100) || "tool result",
+        detail: String(result.output || "").slice(0, 4000),
+        status: result.success ? "success" : "error",
+      });
+    },
+    onStructuredEvent: (evt: unknown) => {
+      if (!evt || typeof evt !== "object") return;
+      const e = evt as Record<string, unknown>;
+      if (e["type"] === "suggest_scope_change") {
+        agentSuggestedRevision = {
+          type: e["scopeChangeType"] as "under_scope" | "over_scope" | "mixed",
+          reason: String(e["reason"] || ""),
+          ...(Array.isArray(e["missingFiles"]) ? { missingFiles: e["missingFiles"] as string[] } : {}),
+          ...(Array.isArray(e["unnecessaryFiles"]) ? { unnecessaryFiles: e["unnecessaryFiles"] as string[] } : {}),
+          revisedPlanSummary: String(e["revisedPlanSummary"] || ""),
+        };
+      }
+      if (e["type"] === "narration") {
+        emitStructuredProgress({
+          type: "narration",
+          title: String(e["title"] || "").slice(0, 200),
+          text: String(e["text"] || "").slice(0, 2000),
+          iter: typeof e["iter"] === "number" ? e["iter"] : undefined,
+          status: "active",
+        } as Partial<ZoneStructuredProgressEvent>);
+      }
+      if (e["type"] === "iter_cost_update") {
+        emitStructuredProgress({
+          type: "iter_cost_update",
+          title: String(e["title"] || "Iteration cost"),
+          status: "active",
+          ...e,
+        } as Partial<ZoneStructuredProgressEvent>);
+      }
+      if (e["type"] === "token_budget_status") {
+        emitStructuredProgress({
+          type: "token_budget_status",
+          title: String(e["title"] || "Token budget"),
+          status: (e["status"] as "active" | "warning" | "error" | "success" | undefined) ?? "active",
+          cumulativeTokens: typeof e["cumulativeTokens"] === "number" ? e["cumulativeTokens"] : undefined,
+          tokenBudgetCap: typeof e["tokenBudgetCap"] === "number" ? e["tokenBudgetCap"] : undefined,
+          tokenBudgetRatio: typeof e["tokenBudgetRatio"] === "number" ? e["tokenBudgetRatio"] : undefined,
+          iter: typeof e["iter"] === "number" ? e["iter"] : undefined,
+        } as Partial<ZoneStructuredProgressEvent>);
+      }
+    },
+  });
+
+  const findings = String(loop.summary || "").trim() || "No findings.";
+  const citations = extractCitations(findings);
+  const tokensUsed = loop.tokenUsage?.total ?? 0;
+  const costUsd = loop.costUsd ?? 0;
+  const citationCount = citations.length;
+
+  emitStructuredProgress({
+    type: "agent_loop_complete",
+    title: loop.success ? "Scope investigation complete" : "Scope investigation ended",
+    detail: findings.slice(0, 4000),
+    status: loop.success ? "success" : "warning",
+  });
+
+  log("[zone-investigation-summary]", JSON.stringify({
+    event: "investigation_summary",
+    runId: runId || null,
+    toolCallCount: loop.toolCallLog.length,
+    totalCostUsd: costUsd,
+    citationCount,
+    query: String(opts.query || "").slice(0, 100),
+    finalState: loop.terminationReason ?? "success",
+    ts: new Date().toISOString(),
+  }));
+
+  return {
+    findings,
+    citations,
+    toolCallCount: loop.toolCallLog.length,
+    tokensUsed,
+    costUsd,
+    ...(agentSuggestedRevision ? { agentSuggestedRevision } : {}),
+  };
+}
 
 function countCitations(text: string): number {
   const matches = text.match(/`[^`]+\.[a-z]+(?::\d+)?`/g) ?? [];
