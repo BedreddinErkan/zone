@@ -19,6 +19,8 @@ export interface TierSettingsFile {
   tierSettings?: Partial<Record<TaskTier, PerTierSettings>>;
   /** Phase AS: auto-run scope investigation before complex task execution. Default true. */
   autoAuditComplexTasks?: boolean;
+  /** Phase K.1: per-user daily spend cap (USD). 0 = unlimited. Absent = use env/default. */
+  dailyUsdCapOverride?: number;
 }
 
 export type TierSettings = Partial<Record<TaskTier, PerTierSettings>>;
@@ -114,5 +116,24 @@ export function readAutoAuditSetting(): boolean {
 export function writeAutoAuditSetting(value: boolean): void {
   const raw = readRawFile();
   raw["autoAuditComplexTasks"] = value;
+  writeRawFile(raw);
+}
+
+/** Phase K.1: reads the per-user daily USD cap override. Returns undefined when absent. */
+export function readDailyUsdCapOverride(): number | undefined {
+  const raw = readRawFile();
+  const v = raw["dailyUsdCapOverride"];
+  if (typeof v === "number" && Number.isFinite(v) && v >= 0) return v;
+  return undefined;
+}
+
+/** Phase K.1: persists the daily USD cap override. Pass 0 for unlimited; undefined to clear. */
+export function writeDailyUsdCapOverride(value: number | undefined): void {
+  const raw = readRawFile();
+  if (value === undefined) {
+    delete raw["dailyUsdCapOverride"];
+  } else {
+    raw["dailyUsdCapOverride"] = Math.max(0, value);
+  }
   writeRawFile(raw);
 }

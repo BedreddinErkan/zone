@@ -25,6 +25,9 @@ import {
 } from "./subagents.js";
 import type { TaskClassification, TaskTier } from "./taskClassifier.js";
 import { resolveTierLimits } from "./tierLimits.js";
+import { resolveDailyUsdCap } from "./usdCapResolver.js";
+import { getUsage } from "../usage/usageTracker.js";
+import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { extractUsage } from "./recordingClient.js";
 import {
   buildIterCostUpdate,
@@ -207,7 +210,7 @@ export interface AgentLoopResult {
   /** Phase H.7: how the loop ended. Used by upstream flows (investigation /
    *  patch) to surface "Token budget reached" vs "Iteration budget reached"
    *  distinctly in the UI. Optional for backward-compat with older callers. */
-  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected";
+  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded";
   /** Phase Q.2: populated when terminationReason === "loop_detected". The
    *  offending tool name + observed count in the sliding-window detector. */
   loopDetected?: { toolName: string; count: number };
@@ -1953,6 +1956,41 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
 
   const effectiveTokenBudgetCap = tierLimits?.tokenBudgetCap ?? TOKEN_BUDGET_CAP;
   const effectiveMaxSubagentCalls = tierLimits?.maxSubagentCalls;
+
+  // Phase K.1: daily USD cap gate — only enforced on top-level (non-subagent) runs.
+  if (!isSubagentLoop) {
+    const userId = typeof input.userId === "string" && input.userId.trim()
+      ? input.userId.trim()
+      : "local-dev";
+    const capResolution = resolveDailyUsdCap({
+      userId,
+      userOverride: readDailyUsdCapOverride(),
+      envValue: process.env.ZONE_DAILY_USD_CAP,
+    });
+    const todayUsage = await getUsage(userId, "day");
+    log("[zone-daily-usd-status]", JSON.stringify({
+      runId: input.runId ?? null,
+      userId,
+      capUsd: capResolution.capUsd,
+      capSource: capResolution.source,
+      spentUsd: todayUsage.totalCostUsd,
+    }));
+    if (capResolution.capUsd > 0 && todayUsage.totalCostUsd >= capResolution.capUsd) {
+      const msg =
+        `Daily USD cap of $${capResolution.capUsd.toFixed(2)} reached ` +
+        `(spent $${todayUsage.totalCostUsd.toFixed(4)} today). ` +
+        `Dispatch rejected to stay within budget.`;
+      return {
+        success: false,
+        summary: msg,
+        toolCallLog: [],
+        filesModified: [],
+        patchValidatedByAgent: false,
+        verificationReason: "no_verification_attempted",
+        terminationReason: "daily_usd_cap_exceeded",
+      };
+    }
+  }
 
   const toolCallLog: Array<{
     id: string;
