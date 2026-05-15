@@ -1024,6 +1024,7 @@
     .zone-dropdown-trigger:hover{border-color:var(--border2);background:var(--surface-alpha-3)}
     .zone-dropdown-trigger:focus-visible{border-color:var(--color-brand);background:var(--surface-alpha-3)}
     .zone-dropdown-trigger[aria-expanded="true"]{border-color:var(--color-brand);background:var(--surface-alpha-3)}
+    .zone-dropdown-trigger:disabled{opacity:0.45;cursor:not-allowed;pointer-events:none}
     .zone-dropdown-label{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .zone-dropdown-chevron{width:10px;height:10px;opacity:0.7;transition:transform var(--transition-fast);flex-shrink:0}
     .zone-dropdown-trigger[aria-expanded="true"] .zone-dropdown-chevron{transform:rotate(180deg)}
@@ -2434,6 +2435,9 @@
       renderQueuePanel();
       renderBgTasks();
       renderBranchChip();
+      const _pd = window._zoneFooterDropdowns && window._zoneFooterDropdowns.provider;
+      if (_pd) _pd.setDisabled(!!running, running ? 'Switch provider after run completes' : '');
+      try { syncSettingsForRunChange(); } catch {}
       if (state.isRunning) {
         els.statusBadge.textContent = 'working...';
         els.statusBadge.classList.add('show');
@@ -2527,6 +2531,9 @@
       els.runDot.classList.remove('running');
       els.statusBadge.classList.remove('show','done');
       renderBranchChip();
+      const _pd = window._zoneFooterDropdowns && window._zoneFooterDropdowns.provider;
+      if (_pd) _pd.setDisabled(false);
+      try { syncSettingsForRunChange(); } catch {}
     }
 
     function clearChat(){
@@ -7039,6 +7046,11 @@
         document.removeEventListener('mousedown', this._outsideClickHandler);
         document.removeEventListener('keydown', this._keyboardHandler);
       }
+      setDisabled(disabled, tooltip){
+        this.trigger.disabled = !!disabled;
+        this.trigger.title = disabled ? (tooltip || '') : '';
+        if (disabled) this.close();
+      }
       _moveActive(delta){
         if (!this.options.length) return;
         const n = this.options.length;
@@ -10688,6 +10700,27 @@
       if (tab === 'model') renderModelSettings();
     }
 
+    // BYOM.2 live-sync: Settings → Keys/Model provider radios are gated by
+    // getActiveRun() at render-time only. When a run starts/ends while the
+    // panel is open, re-render the active tab so the disabled state matches.
+    // Preserves any in-progress text typed into the Keys tab inputs.
+    function syncSettingsForRunChange(){
+      if (!els.settingsOverlay || !els.settingsOverlay.classList.contains('open')) return;
+      if (activeSettingsTab !== 'keys' && activeSettingsTab !== 'model') return;
+      const preserved = {};
+      if (activeSettingsTab === 'keys') {
+        ['openai', 'anthropic'].forEach((p) => {
+          const el = document.getElementById('apikeyInput-' + p);
+          if (el && el.value) preserved[p] = el.value;
+        });
+      }
+      renderSettingsTab(activeSettingsTab);
+      Object.keys(preserved).forEach((p) => {
+        const el = document.getElementById('apikeyInput-' + p);
+        if (el) el.value = preserved[p];
+      });
+    }
+
     function renderModelSettings(){
       const provider = getActiveProvider();
       const currentPreset = getActivePreset();
@@ -10762,21 +10795,23 @@
             <div style="font-size:11px;color:var(--text-4,#666);margin-top:1px">${p.cost}</div>
           </div>
         </label>`).join('');
+      const _modelRunActive = !!getActiveRun();
       const providerPicker = `
         <div class="apikey-section-title" style="margin-bottom:8px">Provider</div>
         <div style="display:flex;gap:20px;margin-bottom:8px">
-          <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-size:var(--font-size-sm,12px)">
-            <input type="radio" name="zoneProviderPick" value="anthropic" ${provider === 'anthropic' ? 'checked' : ''} style="accent-color:var(--violet,#7a5af8)">
+          <label style="display:flex;gap:6px;align-items:center;cursor:${_modelRunActive ? 'not-allowed' : 'pointer'};font-size:var(--font-size-sm,12px);opacity:${_modelRunActive ? '0.5' : '1'}">
+            <input type="radio" name="zoneProviderPick" value="anthropic" ${provider === 'anthropic' ? 'checked' : ''} ${_modelRunActive ? 'disabled' : ''} style="accent-color:var(--violet,#7a5af8)">
             Anthropic
           </label>
-          <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-size:var(--font-size-sm,12px)">
-            <input type="radio" name="zoneProviderPick" value="openai" ${provider === 'openai' ? 'checked' : ''} style="accent-color:var(--violet,#7a5af8)">
+          <label style="display:flex;gap:6px;align-items:center;cursor:${_modelRunActive ? 'not-allowed' : 'pointer'};font-size:var(--font-size-sm,12px);opacity:${_modelRunActive ? '0.5' : '1'}">
+            <input type="radio" name="zoneProviderPick" value="openai" ${provider === 'openai' ? 'checked' : ''} ${_modelRunActive ? 'disabled' : ''} style="accent-color:var(--violet,#7a5af8)">
             OpenAI
           </label>
         </div>
-        <div class="apikey-disclaimer" style="margin-bottom:16px">
+        <div class="apikey-disclaimer" style="margin-bottom:${_modelRunActive ? '4px' : '16px'}">
           Anthropic recommended for agentic tasks. OpenAI cheaper for simple completions.
-        </div>`;
+        </div>
+        ${_modelRunActive ? '<div style="font-size:11px;color:var(--color-warning,#e0a000);margin-bottom:12px">Switch provider after run completes.</div>' : ''}`;
       els.settingsBody.innerHTML = `
         <div class="apikey-section">
           ${providerPicker}
@@ -10890,6 +10925,7 @@
       const activeProvider = getActiveProvider();
       const serverHasOpenAIKey = !!((window.__ZONE_PUBLIC_CONFIG__ || {}).serverHasOpenAIKey);
       const serverHasAnthropicKey = !!((window.__ZONE_PUBLIC_CONFIG__ || {}).serverHasAnthropicKey);
+      const _keysRunActive = !!getActiveRun();
 
       function maskKey(k) {
         return k ? k.slice(0, 7) + '•'.repeat(Math.max(0, k.length - 7)) : '';
@@ -10929,17 +10965,18 @@
 
           <div class="apikey-field-label">Provider</div>
           <div class="apikey-input-row" style="gap:18px">
-            <label style="display:flex;gap:6px;align-items:center;cursor:pointer">
-              <input type="radio" name="zoneProviderRadio" value="openai" ${activeProvider === 'openai' ? 'checked' : ''} />
+            <label style="display:flex;gap:6px;align-items:center;cursor:${_keysRunActive ? 'not-allowed' : 'pointer'};opacity:${_keysRunActive ? '0.5' : '1'}">
+              <input type="radio" name="zoneProviderRadio" value="openai" ${activeProvider === 'openai' ? 'checked' : ''} ${_keysRunActive ? 'disabled' : ''} />
               OpenAI
             </label>
-            <label style="display:flex;gap:6px;align-items:center;cursor:pointer">
-              <input type="radio" name="zoneProviderRadio" value="anthropic" ${activeProvider === 'anthropic' ? 'checked' : ''} />
+            <label style="display:flex;gap:6px;align-items:center;cursor:${_keysRunActive ? 'not-allowed' : 'pointer'};opacity:${_keysRunActive ? '0.5' : '1'}">
+              <input type="radio" name="zoneProviderRadio" value="anthropic" ${activeProvider === 'anthropic' ? 'checked' : ''} ${_keysRunActive ? 'disabled' : ''} />
               Anthropic
             </label>
           </div>
           <div class="apikey-disclaimer" style="margin-top:6px">
             Active provider determines which key is used for runs. Both keys can be saved simultaneously.
+            ${_keysRunActive ? '<span style="color:var(--color-warning,#e0a000)"> Switch after run completes.</span>' : ''}
           </div>
 
           <div style="height:14px"></div>
