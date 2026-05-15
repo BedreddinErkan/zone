@@ -3495,27 +3495,40 @@ app.post("/api/patch", async (req, res) => {
   let preGeneratedPlan: Awaited<ReturnType<typeof generateExecutionPlan>> | undefined;
   /** Phase AS: captured from plan approval result; undefined = use autoAuditSetting, false = user turned off this run. */
   let approvedWithPerRunAuditFlag: boolean | undefined = undefined;
-  if (effectivePlanApprovalRequired && runIdStr) {
+  // Y.0: Plan generation runs unconditionally (gated only on runIdStr) so the
+  // AS audit can access preGeneratedPlan even when plan review is disabled.
+  let planContext: Awaited<ReturnType<typeof preparePlanContext>> | undefined;
+  if (runIdStr) {
     try {
-      const planContext = await preparePlanContext({
+      planContext = await preparePlanContext({
         task: String(task),
         repoPath: String(repoPath),
         repoSummaryOverride: (hostedContext as { repoSummary?: string } | undefined)?.repoSummary,
         userApiKey: userApiKey || undefined,
       });
-      let currentPlan = await generateExecutionPlan({
+      preGeneratedPlan = await generateExecutionPlan({
         task: String(task),
         repoSummary: planContext.projectSummary,
         relevantFiles: planContext.relevantFilePaths,
         userApiKey: userApiKey || undefined,
         provider: byokProvider,
       });
+    } catch (planGenErr) {
+      console.warn(
+        "[zone-plan] plan generation failed:",
+        planGenErr instanceof Error ? planGenErr.message : String(planGenErr)
+      );
+      // preGeneratedPlan remains undefined — approval and audit gates will skip.
+    }
+  }
+  if (effectivePlanApprovalRequired && runIdStr && preGeneratedPlan) {
+    try {
       let regenAttempt = 0;
 
       planReviewLoop: while (true) {
         const { result: approvalResult } = await requestPlanApproval({
           runId: runIdStr,
-          plan: currentPlan,
+          plan: preGeneratedPlan,
           regenAttempt,
           maxRegens: PLAN_MAX_REGENS,
           emit: (evt) =>
@@ -3544,7 +3557,6 @@ app.post("/api/patch", async (req, res) => {
         }
 
         if (approvalResult.action === "approve") {
-          preGeneratedPlan = currentPlan;
           approvedWithPerRunAuditFlag = approvalResult.perRunAuditFlag;
           break planReviewLoop;
         }
@@ -3584,12 +3596,12 @@ app.post("/api/patch", async (req, res) => {
             res.json({ ok: false, reason: "plan_regen_limit_exceeded" });
             return;
           }
-          const previousPlan = currentPlan;
+          const previousPlan = preGeneratedPlan;
           try {
-            currentPlan = await generateExecutionPlan({
+            preGeneratedPlan = await generateExecutionPlan({
               task: String(task),
-              repoSummary: planContext.projectSummary,
-              relevantFiles: planContext.relevantFilePaths,
+              repoSummary: planContext!.projectSummary,
+              relevantFiles: planContext!.relevantFilePaths,
               userApiKey: userApiKey || undefined,
               provider: byokProvider,
               previousPlan,
