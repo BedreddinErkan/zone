@@ -400,14 +400,6 @@ function normalizeAgentLoopMode(mode: AgentLoopInput["mode"]): Exclude<Mode, "au
   return "patch";
 }
 
-const MODE_SYSTEM_PROMPT_PREFIX: Record<Exclude<Mode, "auto">, string> = {
-  chat:
-    "MODE: chat. Answer the user's question. Do not modify files or run commands. If the user requests an edit, suggest they switch to patch mode.",
-  investigate:
-    "MODE: investigate. Read code, analyze, answer thoroughly. Do not modify files. Use search tools liberally before answering.",
-  patch:
-    "MODE: patch. The user wants a code change. Plan the edits, apply them via the patch tool, then verify with build and visual screenshot when applicable.",
-};
 
 function modeDefaultAllowedTools(mode: Exclude<Mode, "auto">): ReadonlySet<string> | undefined {
   if (mode === "chat") return new Set(CHAT_TOOLS);
@@ -443,9 +435,22 @@ export function assembleInvestigationSystemPrompt(input: {
   repoPath: string;
   projectMemoryBlock: string;
   baseMaxIterations: number;
+  /** X.0.1: when provided, used as the first line so audit and execute runs
+   *  share a common system-prompt prefix and hit the Anthropic content-addressed
+   *  cache across phase transitions. Without it, the hardcoded investigation
+   *  intro is used (backward-compat for call sites that don't supply it). */
+  agentIntro?: string;
 }): string {
+  const openingLines = input.agentIntro
+    ? [
+        input.agentIntro,
+        "INVESTIGATION mode — read-only tools only.",
+      ]
+    : [
+        "You are Zone, answering a question about the codebase in INVESTIGATION mode. Read-only tools only.",
+      ];
   return [
-    "You are Zone, answering a question about the codebase in INVESTIGATION mode. Read-only tools only.",
+    ...openingLines,
     "",
     "Be proactive in a single pass: search → read 2-3 top hits → synthesize complete answer.",
     "Do not rely on intuition when the repository can be searched.",
@@ -2087,6 +2092,7 @@ Example:
         repoPath: input.repoPath,
         projectMemoryBlock,
         baseMaxIterations,
+        agentIntro,
       })
       : assembleAgentSystemPrompt({
         agentIntro,
@@ -2101,9 +2107,10 @@ Example:
         planProgressBlock,
         planAnnotationsBlock: buildPlanAnnotationsBlock(input.executionPlan),
       });
-  const systemContent = hasExplicitMode
-    ? `${MODE_SYSTEM_PROMPT_PREFIX[mode]}\n\n${baseSystemContent}`
-    : baseSystemContent;
+  // X.0.1: mode prefix relocated out of system head to keep the system prompt
+  // byte-stable across explicit/implicit mode calls. Mode signal is appended
+  // to the user message tail instead; system prompt is always baseSystemContent.
+  const systemContent = baseSystemContent;
 
   // J.5: when a prior run's summary is threaded in, prepend it to the user
   // message as a labeled framing block. The agent's system prompt
@@ -2124,7 +2131,8 @@ Example:
         "\n--- END AUDIT CONTEXT ---\n\n"
       )
     : "";
-  const userContent = priorRun
+  const modeTag = hasExplicitMode ? `\n\n--- mode: ${mode} ---` : "";
+  const userContent = (priorRun
     ? (
         "PRIOR RUN CONTEXT — your last attempt in this thread produced this result:\n" +
         priorRun +
@@ -2132,7 +2140,7 @@ Example:
         auditContextBlock +
         input.task
       )
-    : auditContextBlock + input.task;
+    : auditContextBlock + input.task) + modeTag;
 
   // Chat Completions messages (system + user kickoff).
   const responseInput: ChatCompletionMessageParam[] = [

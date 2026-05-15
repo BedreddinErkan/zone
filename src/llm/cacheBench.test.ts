@@ -1,20 +1,19 @@
 /**
- * Phase X.0 Commit 1 — cache prefix stability bench.
+ * Phase X.0 Commit 1 / X.0.1 Commit 2 — cache prefix stability bench.
  *
  * Asserts that system-prompt assembly functions produce byte-identical output
  * on repeated calls with the same inputs. Any timestamp, Math.random(), or
  * per-invocation dynamic injection would break these tests and invalidate the
  * Anthropic content-addressed prompt cache on every loop iteration.
  *
- * AUDIT→EXECUTE CACHE GAP (documented here, not a failing assertion):
- * assembleInvestigationSystemPrompt and assembleAgentSystemPrompt produce
- * fundamentally different documents — ~30 lines (read-only investigation
- * rules) vs ~90 lines (patch rules, plan visibility, subagent guidance).
- * MODE_SYSTEM_PROMPT_PREFIX (~3 sentences, ~50 tokens) is prepended to both
- * when an explicit mode is set, but it does not create a shared prefix because
- * the remainder diverges entirely. The Anthropic content-addressed cache will
- * never hit across audit→execute phase transitions until the prompt bodies are
- * unified. That unification is tracked in Phase X.1.
+ * AUDIT→EXECUTE CACHE PREFIX (Phase X.0.1 fix):
+ * After X.0.1 Commit 2, both assembleInvestigationSystemPrompt and
+ * assembleAgentSystemPrompt share the same agentIntro as their opening line
+ * when agentIntro is provided. The mode signal moved from the system head
+ * to a trailing "--- mode: X ---" tag in the user message, so the system
+ * prompt is byte-stable across explicit/implicit mode calls. This creates
+ * a shared prefix long enough to benefit from Anthropic content-addressed
+ * caching across audit→execute phase transitions.
  */
 
 import { describe, expect, it } from "vitest";
@@ -34,6 +33,8 @@ const INVESTIGATION_OPTS = {
   repoPath: FIXED_REPO,
   projectMemoryBlock: FIXED_MEMORY,
   baseMaxIterations: FIXED_ITERATIONS,
+  // X.0.1: shared agentIntro enables cache prefix sharing with agent system prompt.
+  agentIntro: "You are Zone, an AI code agent.",
 };
 
 const AGENT_OPTS = {
@@ -157,37 +158,38 @@ describe("cache prefix stability — buildOpenAIPromptCacheKey", () => {
   });
 });
 
-// ── Audit→Execute divergence (documented, not a regression test) ─────────────
+// ── Audit→Execute shared prefix (Phase X.0.1 fix) ────────────────────────────
 //
-// These tests confirm and quantify the cache gap between audit and execute
-// phases. They are informational — if X.1 unifies the system prompt prefix,
-// update them to assert a shared prefix rather than full inequality.
+// After X.0.1 Commit 2, both assembly functions share the same agentIntro as
+// their opening line when agentIntro is supplied. The mode signal moved to
+// the user message tail, so these tests prove a genuine shared system prefix.
 
-describe("audit→execute system prompt divergence (Phase X.1 prerequisite)", () => {
-  it("investigation prompt differs from agent prompt for the same repo/memory", () => {
+describe("audit→execute system prompt shared prefix (Phase X.0.1)", () => {
+  it("investigation and agent prompts share the agentIntro opening line", () => {
     const investigation = assembleInvestigationSystemPrompt(INVESTIGATION_OPTS);
     const agent = assembleAgentSystemPrompt({
       ...AGENT_OPTS,
       projectMemoryBlock: FIXED_MEMORY,
       repoPath: FIXED_REPO,
     });
-    expect(investigation).not.toBe(agent);
+    // Both start with the same agentIntro — Anthropic cache prefix is now shared.
+    expect(investigation.startsWith(INVESTIGATION_OPTS.agentIntro)).toBe(true);
+    expect(agent.startsWith(INVESTIGATION_OPTS.agentIntro)).toBe(true);
   });
 
-  it("investigation prompt opening line differs from agent prompt opening line", () => {
+  it("investigation prompt and agent prompt share the same first line", () => {
     const investigation = assembleInvestigationSystemPrompt(INVESTIGATION_OPTS);
     const agent = assembleAgentSystemPrompt(AGENT_OPTS);
     const invLine1 = investigation.split("\n")[0];
     const agentLine1 = agent.split("\n")[0];
-    // Both begin "You are Zone" but diverge immediately after — no shared prefix
-    // long enough to benefit from Anthropic's content-addressed cache.
-    expect(invLine1).not.toBe(agentLine1);
+    // Same first line = agentIntro: cache prefix is now byte-identical at the start.
+    expect(invLine1).toBe(agentLine1);
   });
 
   it("agent prompt is substantially longer than investigation prompt", () => {
     const investigation = assembleInvestigationSystemPrompt(INVESTIGATION_OPTS);
     const agent = assembleAgentSystemPrompt(AGENT_OPTS);
-    // Document the size ratio so regressions (accidental shrinkage) are visible.
+    // Prompts still differ in size: investigation ~30 lines, agent ~90 lines.
     expect(agent.length).toBeGreaterThan(investigation.length * 1.5);
   });
 });

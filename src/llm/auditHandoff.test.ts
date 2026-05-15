@@ -93,7 +93,9 @@ describe("audit handoff — AUDIT CONTEXT user-message injection", () => {
 
     const userMsg = capturedUserMessage();
     expect(userMsg).not.toContain("--- AUDIT CONTEXT ---");
-    expect(userMsg).toBe("add a feature");
+    // mode tag is present (explicit mode: "patch") but no audit block
+    expect(userMsg).toContain("add a feature");
+    expect(userMsg).not.toContain("Findings:");
   });
 
   it("interpolates cost, toolCallCount, and citationCount correctly", async () => {
