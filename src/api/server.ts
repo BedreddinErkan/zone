@@ -107,7 +107,12 @@ import {
 import {
   resolveRevisionApproval,
   rejectPendingRevisionsForRun,
+  requestRevisionApproval,
+  type RevisionProposal,
 } from "../llm/revisionApprovals.js";
+import { investigateScope } from "../llm/investigationFlow.js";
+import { runScopeJudge } from "../llm/scopeJudge.js";
+import { classifyTask, type TaskClassification } from "../llm/taskClassifier.js";
 import { preparePlanContext } from "../core/preparePlanContext.js";
 import { generateExecutionPlan } from "../llm/executionPlan.js";
 import { decodeProgressStage } from "../core/progressStageCodec.js";
@@ -3583,6 +3588,156 @@ app.post("/api/patch", async (req, res) => {
     }
   }
 
+  // Phase AS: scope audit gate — runs after plan approval, before execute.
+  // Only active when (a) a plan was approved and (b) shouldRunAudit returns true.
+  let preClassifiedTask: TaskClassification | undefined;
+  if (preGeneratedPlan && runIdStr) {
+    try {
+      // Classify task here so tier is available for audit gating AND to
+      // avoid a second classification call inside runLlmPatchFlow.
+      preClassifiedTask = await classifyTask(String(task), { userApiKey: userApiKey || undefined });
+    } catch {
+      // classifyTask is self-healing; defensive catch for future contract changes.
+    }
+
+    const tierSettings = readTierSettings();
+    const autoAuditComplexTasks = (tierSettings as Record<string, unknown>)["autoAuditComplexTasks"] !== false;
+    const perRunAuditFlag = Boolean((preGeneratedPlan as unknown as Record<string, unknown>)["__perRunAuditFlag"]);
+    const tier = preClassifiedTask?.tier ?? "medium";
+
+    function shouldRunAudit(
+      t: typeof tier,
+      perRun: boolean,
+      autoComplex: boolean
+    ): boolean {
+      if (t === "complex" && autoComplex) return true;
+      if (t === "medium" && perRun) return true;
+      return false;
+    }
+
+    if (shouldRunAudit(tier, perRunAuditFlag, autoAuditComplexTasks)) {
+      try {
+        emitProgress(runIdStr, {
+          stage: "scope_revision",
+          progress: {
+            runId: runIdStr,
+            ts: Date.now(),
+            type: "scope_audit_started",
+            title: "Auditing plan scope",
+            status: "active",
+          } as any,
+        });
+
+        const findings = await investigateScope({
+          repoPath: String(repoPath),
+          query: `Audit whether this plan is correctly scoped for the task:\n\n${String(task)}\n\nPlan:\n${preGeneratedPlan.objective}\nSteps: ${preGeneratedPlan.steps.map((s) => s.title).join(", ")}`,
+          runId: runIdStr,
+          userApiKey: userApiKey || undefined,
+          abortSignal: patchAbort?.signal,
+          onProgress: (update) => emitProgress(runIdStr, update as any),
+        });
+
+        if (findings.skipped) {
+          emitProgress(runIdStr, {
+            stage: "scope_revision",
+            progress: {
+              runId: runIdStr,
+              ts: Date.now(),
+              type: "scope_audit_skipped",
+              title: "Scope audit skipped",
+              skipReason: findings.skipReason,
+              status: "warning",
+            } as any,
+          });
+        } else {
+          // Check if agent directly proposed a revision
+          const agentRevision = findings.agentSuggestedRevision;
+          // Also run the LLM judge on the findings
+          const judgement = await runScopeJudge({
+            originalPlan: preGeneratedPlan,
+            findings: findings.findings,
+            taskClassification: preClassifiedTask,
+            runId: runIdStr,
+            userApiKey: userApiKey || undefined,
+          });
+
+          const hasMismatch = agentRevision != null || judgement.mismatch;
+          if (hasMismatch) {
+            const revType = agentRevision?.type ?? judgement.type as "under_scope" | "over_scope" | "mixed";
+            const revReason = agentRevision?.reason ?? judgement.reason;
+            const revSummary = agentRevision?.revisedPlanSummary ?? judgement.revisedPlan ?? "Revised plan — see reason above.";
+            const revMissing = agentRevision?.missingFiles ?? judgement.missingFiles;
+            const revUnnecessary = agentRevision?.unnecessaryFiles ?? judgement.unnecessaryFiles;
+
+            const proposal: RevisionProposal = {
+              runId: runIdStr,
+              type: revType,
+              reason: revReason,
+              originalPlan: preGeneratedPlan.objective,
+              revisedPlanSummary: revSummary,
+              ...(revMissing ? { missingFiles: revMissing } : {}),
+              ...(revUnnecessary ? { unnecessaryFiles: revUnnecessary } : {}),
+            };
+
+            const { decision } = await requestRevisionApproval({
+              proposal,
+              emit: (evt) =>
+                emitProgress(runIdStr, {
+                  stage: "scope_revision",
+                  progress: { ...evt, ts: Date.now() } as any,
+                }),
+              abortSignal: patchAbort?.signal,
+            });
+
+            if (decision === "approve") {
+              log("[zone-scope-revision-approved]", JSON.stringify({ runId: runIdStr, type: revType, ts: new Date().toISOString() }));
+              emitProgress(runIdStr, {
+                stage: "scope_revision",
+                progress: {
+                  runId: runIdStr,
+                  ts: Date.now(),
+                  type: "scope_revision_resolved",
+                  title: "Scope revision approved",
+                  revisionDecision: "approve",
+                  status: "success",
+                } as any,
+              });
+              // Note: revised plan summary is informational; the agent loop
+              // will re-plan from scratch using the updated context.
+            } else {
+              log("[zone-scope-revision-rejected]", JSON.stringify({ runId: runIdStr, type: revType, ts: new Date().toISOString() }));
+              emitProgress(runIdStr, {
+                stage: "scope_revision",
+                progress: {
+                  runId: runIdStr,
+                  ts: Date.now(),
+                  type: "scope_revision_resolved",
+                  title: "Scope revision rejected — proceeding with original plan",
+                  revisionDecision: "reject",
+                  status: "active",
+                } as any,
+              });
+            }
+          }
+
+          emitProgress(runIdStr, {
+            stage: "scope_revision",
+            progress: {
+              runId: runIdStr,
+              ts: Date.now(),
+              type: "scope_audit_completed",
+              title: "Scope audit complete",
+              status: "success",
+            } as any,
+          });
+        }
+      } catch (auditErr) {
+        // Audit failures never block execution — log and continue.
+        console.warn("[zone-scope-audit] audit gate failed:", auditErr instanceof Error ? auditErr.message : String(auditErr));
+      }
+    }
+  }
+
   try {
     logger.info(
       "[patch-handler] reached planner, ms since entry=%d",
@@ -3605,6 +3760,7 @@ app.post("/api/patch", async (req, res) => {
       mode: requestedMode === "patch" ? "patch" : undefined,
       preGeneratedPlan,
       forceTier,
+      preClassifiedTask,
     });
     perf.mark("core patch flow complete");
 

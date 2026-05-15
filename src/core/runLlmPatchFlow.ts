@@ -4572,6 +4572,8 @@ export async function runLlmPatchFlow(input: {
   preGeneratedPlan?: ExecutionPlan;
   /** L.4.1: per-request tier override forwarded from API body. Beats ZONE_FORCE_TIER env. */
   forceTier?: TaskTier;
+  /** Phase AS: pre-computed classification from server.ts audit gate. Skips re-classification. */
+  preClassifiedTask?: TaskClassification;
 }): Promise<LlmPatchFlowResult> {
   attachRunIdentity({ userId: input.userId, runId: input.runId });
   // Phase H.7: outer-scope flag survives past the inner block where `loop`
@@ -5794,11 +5796,20 @@ const initializeTodosFromPlan = (): void => {
     // will use the result to gate Task tool exposure and L.3 to scale the
     // token budget. Failure is graceful: a fallback (medium tier) is always
     // returned so dispatch is never blocked.
-    let taskClassification: TaskClassification | null = null;
-    try {
-      taskClassification = await classifyTask(input.task, {
-        userApiKey: input.userApiKey,
-      });
+    // Phase AS: skip re-classification when the audit gate already ran it.
+    let taskClassification: TaskClassification | null = input.preClassifiedTask ?? null;
+    if (!taskClassification) {
+      try {
+        taskClassification = await classifyTask(input.task, {
+          userApiKey: input.userApiKey,
+        });
+      } catch (err) {
+        // classifyTask already swallows internal errors and returns a fallback,
+        // but defensive against future changes to that contract.
+        debugLog("[zone-task-classifier-unexpected-throw]", String(err));
+      }
+    }
+    if (taskClassification) {
       emitStructuredProgress({
         type: "task_classified",
         title: "Task classified",
@@ -5813,10 +5824,6 @@ const initializeTodosFromPlan = (): void => {
         classifierLatencyMs: taskClassification.classifierLatencyMs,
         ...(taskClassification.fallbackUsed ? { fallbackUsed: true } : {}),
       });
-    } catch (err) {
-      // classifyTask already swallows internal errors and returns a fallback,
-      // but defensive against future changes to that contract.
-      debugLog("[zone-task-classifier-unexpected-throw]", String(err));
     }
 
     const agentLoopBaseInput = {
