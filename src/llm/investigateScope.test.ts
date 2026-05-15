@@ -1,6 +1,7 @@
 /**
  * Phase AS.0 — investigateScope() unit tests.
  * Covers: shape, telemetry, token-budget skip, agent suggest_scope_change passthrough.
+ * Phase AS.0.1: parentTier propagated as taskClassification to audit agentLoop.
  */
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
@@ -8,24 +9,18 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 // ── hoisted mocks ─────────────────────────────────────────────────────────────
 
 const mocks = vi.hoisted(() => ({
-  createChatCompletion: vi.fn(),
-  executeTool: vi.fn(),
-  withStagingTempFlush: vi.fn(),
+  runAgentLoop: vi.fn(),
   log: vi.fn(),
   debugLog: vi.fn(),
 }));
 
-vi.mock("./factory.js", () => ({
-  createLLMClient: vi.fn(() => ({
-    provider: "openai",
-    createChatCompletion: mocks.createChatCompletion,
-  })),
-}));
-
-vi.mock("../tools/toolExecutor.js", () => ({
-  executeTool: mocks.executeTool,
-  withStagingTempFlush: mocks.withStagingTempFlush,
-}));
+vi.mock("./agentLoop.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./agentLoop.js")>();
+  return {
+    ...original,
+    runAgentLoop: mocks.runAgentLoop,
+  };
+});
 
 vi.mock("../utils/logger.js", () => ({
   log: mocks.log,
@@ -37,10 +32,14 @@ import { investigateScope } from "./investigationFlow.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-function textResponse(content: string) {
+function makeLoopResult(summary: string) {
   return {
-    choices: [{ message: { content, tool_calls: null }, finish_reason: "stop" }],
-    usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 },
+    summary,
+    success: true,
+    toolCallLog: [],
+    tokenUsage: { total: 150 },
+    costUsd: 0.001,
+    terminationReason: undefined as string | undefined,
   };
 }
 
@@ -49,13 +48,12 @@ function textResponse(content: string) {
 describe("investigateScope — shape", () => {
   beforeEach(() => {
     mocks.log.mockClear();
-    mocks.executeTool.mockResolvedValue({ success: true, output: "" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    mocks.runAgentLoop.mockClear();
   });
 
   it("returns InvestigateScopeResult shape with findings and citations", async () => {
-    mocks.createChatCompletion.mockResolvedValueOnce(
-      textResponse("Found `src/api/server.ts:3575` and `src/llm/planApprovals.ts:46`.")
+    mocks.runAgentLoop.mockResolvedValueOnce(
+      makeLoopResult("Found `src/api/server.ts:3575` and `src/llm/planApprovals.ts:46`.")
     );
 
     const result = await investigateScope({
@@ -74,8 +72,8 @@ describe("investigateScope — shape", () => {
   });
 
   it("emits [zone-investigation-summary] marker after run", async () => {
-    mocks.createChatCompletion.mockResolvedValueOnce(
-      textResponse("Found `src/llm/taskClassifier.ts:228`.")
+    mocks.runAgentLoop.mockResolvedValueOnce(
+      makeLoopResult("Found `src/llm/taskClassifier.ts:228`.")
     );
 
     await investigateScope({
@@ -99,8 +97,8 @@ describe("investigateScope — shape", () => {
 describe("investigateScope — token budget skip", () => {
   beforeEach(() => {
     mocks.log.mockClear();
-    mocks.executeTool.mockResolvedValue({ success: true, output: "" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    mocks.runAgentLoop.mockClear();
+    mocks.runAgentLoop.mockResolvedValue(makeLoopResult("Nothing found."));
   });
 
   it("returns skipped result when tokenBudgetRemaining < 50k", async () => {
@@ -113,6 +111,7 @@ describe("investigateScope — token budget skip", () => {
     expect(result.skipped).toBe(true);
     expect(result.skipReason).toBe("insufficient_token_budget");
     expect(result.toolCallCount).toBe(0);
+    expect(mocks.runAgentLoop).not.toHaveBeenCalled();
   });
 
   it("emits [zone-investigation-summary] with finalState=skipped when budget is low", async () => {
@@ -133,10 +132,6 @@ describe("investigateScope — token budget skip", () => {
   });
 
   it("proceeds normally when tokenBudgetRemaining >= 50k", async () => {
-    mocks.createChatCompletion.mockResolvedValueOnce(
-      textResponse("Nothing found.")
-    );
-
     const result = await investigateScope({
       repoPath: "/tmp/fake-repo",
       query: "find anything",
@@ -145,18 +140,62 @@ describe("investigateScope — token budget skip", () => {
 
     expect(result.skipped).toBeUndefined();
     expect(typeof result.findings).toBe("string");
+    expect(mocks.runAgentLoop).toHaveBeenCalledOnce();
   });
 
   it("proceeds when tokenBudgetRemaining is not provided (no cap)", async () => {
-    mocks.createChatCompletion.mockResolvedValueOnce(
-      textResponse("No budget constraint applied.")
-    );
-
     const result = await investigateScope({
       repoPath: "/tmp/fake-repo",
       query: "unrestricted query",
     });
 
     expect(result.skipped).toBeUndefined();
+    expect(mocks.runAgentLoop).toHaveBeenCalledOnce();
+  });
+});
+
+describe("investigateScope — parentTier propagation", () => {
+  beforeEach(() => {
+    mocks.log.mockClear();
+    mocks.runAgentLoop.mockClear();
+    mocks.runAgentLoop.mockResolvedValue(makeLoopResult("Audit findings."));
+  });
+
+  it("passes taskClassification with parentTier=complex to agentLoop", async () => {
+    await investigateScope({
+      repoPath: "/tmp/fake-repo",
+      query: "audit scope",
+      runId: "tier-test-001",
+      parentTier: "complex",
+    });
+
+    expect(mocks.runAgentLoop).toHaveBeenCalledOnce();
+    const callArgs = mocks.runAgentLoop.mock.calls[0][0];
+    expect(callArgs.taskClassification).toBeDefined();
+    expect(callArgs.taskClassification.tier).toBe("complex");
+    expect(callArgs.taskClassification.fallbackUsed).toBe(false);
+    expect(callArgs.taskClassification.confidence).toBe(1.0);
+  });
+
+  it("passes taskClassification with parentTier=medium to agentLoop", async () => {
+    await investigateScope({
+      repoPath: "/tmp/fake-repo",
+      query: "audit scope",
+      parentTier: "medium",
+    });
+
+    const callArgs = mocks.runAgentLoop.mock.calls[0][0];
+    expect(callArgs.taskClassification?.tier).toBe("medium");
+    expect(callArgs.taskClassification?.fallbackUsed).toBe(false);
+  });
+
+  it("omits taskClassification when parentTier is not provided", async () => {
+    await investigateScope({
+      repoPath: "/tmp/fake-repo",
+      query: "audit scope",
+    });
+
+    const callArgs = mocks.runAgentLoop.mock.calls[0][0];
+    expect(callArgs.taskClassification).toBeUndefined();
   });
 });

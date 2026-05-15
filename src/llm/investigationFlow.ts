@@ -4,6 +4,7 @@ import { EXPLORE_ALLOWED_TOOLS, AUDIT_ALLOWED_TOOLS, computeExploreMaxIterations
 import { CHAT_TOOLS } from "../tools/toolDefinitions.js";
 import type { ToolResult } from "../tools/toolExecutor.js";
 import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
+import type { TaskTier } from "./taskClassifier.js";
 import { debugLog, log } from "../utils/logger.js";
 
 export interface InvestigateScopeOpts {
@@ -14,6 +15,11 @@ export interface InvestigateScopeOpts {
   tokenBudgetRemaining?: number;
   abortSignal?: AbortSignal;
   userApiKey?: string;
+  /**
+   * Parent run's classified tier. Threaded into the audit agentLoop so
+   * tier-constraints-applied logs the correct tier instead of defaulting to medium.
+   */
+  parentTier?: TaskTier;
   onProgress?: (update: {
     stage: string;
     progress?: Partial<ZoneStructuredProgressEvent>;
@@ -104,6 +110,20 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
   const planStepsCount = 1;
   const computedMax = computeExploreMaxIterations(planStepsCount);
 
+  const parentTaskClassification = opts.parentTier
+    ? {
+        tier: opts.parentTier,
+        confidence: 1.0,
+        fallbackUsed: false,
+        estimatedFiles: 0,
+        estimatedIterations: 0,
+        needsSubagent: false,
+        classifierCostUsd: 0,
+        classifierLatencyMs: 0,
+        classifierModel: "parent",
+      }
+    : undefined;
+
   const loop = await runAgentLoop({
     task: opts.query,
     repoPath: opts.repoPath,
@@ -114,6 +134,7 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
     allowedTools: AUDIT_ALLOWED_TOOLS,
     maxIterationsOverride: computedMax,
     disableTodoWrite: true,
+    ...(parentTaskClassification ? { taskClassification: parentTaskClassification } : {}),
     onToolCall: (name: string, args: Record<string, unknown>) => {
       const fp = filePathFromToolArgs(name, args);
       if (fp) contextFiles.add(fp);
