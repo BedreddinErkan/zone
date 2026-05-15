@@ -1,11 +1,11 @@
 /**
- * Phase AS.0 — suggest_scope_change tool tests.
- * Validates: schema presence in AUDIT_ONLY_TOOLS, tool unavailability outside
- * audit phase (not in ZONE_TOOLS), and handler dispatch via investigateScope.
+ * Phase AS.0 / X.0 — suggest_scope_change tool tests.
+ * Validates: schema presence in ZONE_TOOLS (Phase X.0 unified tool array),
+ * no-op guard outside investigation mode, and handler dispatch via investigateScope.
  */
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { AUDIT_ONLY_TOOLS, ZONE_TOOLS } from "./toolDefinitions.js";
+import { ZONE_TOOLS } from "./toolDefinitions.js";
 
 // ── hoisted mocks ─────────────────────────────────────────────────────────────
 
@@ -62,19 +62,14 @@ function toolCallResponse(name: string, args: Record<string, unknown>, id = "tc-
 // ── schema tests ──────────────────────────────────────────────────────────────
 
 describe("suggest_scope_change — schema", () => {
-  it("is present in AUDIT_ONLY_TOOLS", () => {
-    const tool = AUDIT_ONLY_TOOLS.find((t) => t.function.name === "suggest_scope_change");
+  it("is present in ZONE_TOOLS (Phase X.0: unified tool array)", () => {
+    const tool = ZONE_TOOLS.find((t) => t.function.name === "suggest_scope_change");
     expect(tool).toBeDefined();
     expect(tool!.type).toBe("function");
   });
 
-  it("is NOT present in ZONE_TOOLS (unavailable in execute mode)", () => {
-    const tool = ZONE_TOOLS.find((t) => t.function.name === "suggest_scope_change");
-    expect(tool).toBeUndefined();
-  });
-
   it("schema has required fields: reason, type, revised_plan_summary", () => {
-    const tool = AUDIT_ONLY_TOOLS.find((t) => t.function.name === "suggest_scope_change")!;
+    const tool = ZONE_TOOLS.find((t) => t.function.name === "suggest_scope_change")!;
     const params = tool.function.parameters as Record<string, unknown>;
     const required = params["required"] as string[];
     expect(required).toContain("reason");
@@ -83,7 +78,7 @@ describe("suggest_scope_change — schema", () => {
   });
 
   it("type enum includes under_scope, over_scope, mixed", () => {
-    const tool = AUDIT_ONLY_TOOLS.find((t) => t.function.name === "suggest_scope_change")!;
+    const tool = ZONE_TOOLS.find((t) => t.function.name === "suggest_scope_change")!;
     const props = (tool.function.parameters as Record<string, unknown>)["properties"] as Record<string, unknown>;
     const typeEnum = (props["type"] as Record<string, unknown>)["enum"] as string[];
     expect(typeEnum).toContain("under_scope");

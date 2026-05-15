@@ -484,14 +484,9 @@ required: ["id", "content", "description", "status"],
       } as Record<string, unknown>,
     },
   },
-];
-
-/**
- * Phase AS: audit-only tool available during investigateScope() runs.
- * Not in ZONE_TOOLS — only presented to the LLM when allowedTools includes
- * "suggest_scope_change" (i.e. AUDIT_ALLOWED_TOOLS).
- */
-export const AUDIT_ONLY_TOOLS: ChatCompletionTool[] = [
+  // Phase AS / X.0: audit-gated tool, now in ZONE_TOOLS for unified tool array.
+  // Exposed to the LLM in all modes; agentLoop no-op guards it outside
+  // investigation mode so execute-phase calls are safely discarded.
   {
     type: "function",
     function: {

@@ -16,7 +16,7 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
-import { AUDIT_ONLY_TOOLS, CHAT_TOOLS, READ_ONLY_TOOLS, ZONE_TOOLS } from "../tools/toolDefinitions.js";
+import { CHAT_TOOLS, READ_ONLY_TOOLS, ZONE_TOOLS } from "../tools/toolDefinitions.js";
 import {
   emptySubagentTokenUsage,
   resetSubagentCallCount,
@@ -1868,14 +1868,12 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   };
   const effectiveAllowedTools =
     input.allowedTools ?? (hasExplicitMode ? modeDefaultAllowedTools(mode) : undefined);
-  // Phase AS: AUDIT_ONLY_TOOLS (e.g. suggest_scope_change) are only presented
-  // to the LLM when they appear in allowedTools — never in the execute default.
-  const allKnownTools = effectiveAllowedTools
-    ? [...ZONE_TOOLS, ...AUDIT_ONLY_TOOLS]
-    : ZONE_TOOLS;
+  // Phase X.0: suggest_scope_change is now in ZONE_TOOLS; no separate
+  // AUDIT_ONLY_TOOLS spread needed. The allowedTools filter still restricts
+  // which tools are presented in audit mode (AUDIT_ALLOWED_TOOLS ⊂ ZONE_TOOLS).
   const toolsForLLM = sortToolsForPromptCache(
     effectiveAllowedTools
-      ? allKnownTools.filter((t) => effectiveAllowedTools.has(getZoneToolName(t)))
+      ? ZONE_TOOLS.filter((t) => effectiveAllowedTools.has(getZoneToolName(t)))
       : ZONE_TOOLS
   );
   if (effectiveAllowedTools && toolsForLLM.length === 0) {
@@ -2700,9 +2698,15 @@ Example:
           continue;
         }
 
-        // Phase AS: suggest_scope_change is an audit-only tool that records a
-        // scope mismatch proposal. It emits a structured event (captured by
-        // investigateScope via onStructuredEvent) and returns an ack.
+        // Phase AS: suggest_scope_change records a scope mismatch proposal.
+        // Outside investigation mode it is a no-op — the revision workflow only
+        // runs during the audit phase; discarding the call here is safe.
+        if (name === "suggest_scope_change" && !isInvestigationMode) {
+          const noopMsg = "suggest_scope_change is only active in investigation mode — call ignored.";
+          responseInput.push({ role: "tool", tool_call_id: callId, content: noopMsg });
+          toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: noopMsg, success: false });
+          continue;
+        }
         if (name === "suggest_scope_change") {
           const scopeType = parsedArgs["type"];
           const scopeReason = parsedArgs["reason"];
