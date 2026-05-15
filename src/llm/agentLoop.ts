@@ -163,6 +163,18 @@ export interface AgentLoopInput {
    * rather than misses on every new runId.
    */
   conversationId?: string;
+  /**
+   * Phase X.0.1: distilled findings from the pre-execution scope audit.
+   * When present, injected as an AUDIT CONTEXT block in the user message
+   * so the execute agent skips re-investigating ground the audit covered.
+   * Feature-gated: undefined when no audit ran (simple tasks, audit disabled).
+   */
+  auditFindings?: {
+    summary: string;
+    citationCount: number;
+    toolCallCount: number;
+    costUsd: number;
+  };
 }
 
 export type VerificationReason =
@@ -2098,14 +2110,29 @@ Example:
   // documents the PRIOR RUN CONTEXT convention, so the agent reads
   // APPLY_ROLLED_BACK markers from previous attempts before investigating.
   const priorRun = String(input.priorRunSummary ?? "").trim();
+  // X.0.1: when audit findings are present, inject them after PRIOR RUN CONTEXT
+  // and before the task so the execute agent trusts the audit and does not
+  // re-investigate ground it already covered.
+  const af = input.auditFindings;
+  const auditContextBlock = af
+    ? (
+        "--- AUDIT CONTEXT ---\n" +
+        "An audit phase already investigated this task before execution. Trust its findings and do not re-investigate ground it already covered.\n\n" +
+        `Audit cost: $${af.costUsd.toFixed(4)}, ${af.toolCallCount} tool calls, ${af.citationCount} citations.\n\n` +
+        "Findings:\n" +
+        af.summary +
+        "\n--- END AUDIT CONTEXT ---\n\n"
+      )
+    : "";
   const userContent = priorRun
     ? (
         "PRIOR RUN CONTEXT — your last attempt in this thread produced this result:\n" +
         priorRun +
         "\nEND PRIOR RUN CONTEXT.\n\n" +
+        auditContextBlock +
         input.task
       )
-    : input.task;
+    : auditContextBlock + input.task;
 
   // Chat Completions messages (system + user kickoff).
   const responseInput: ChatCompletionMessageParam[] = [

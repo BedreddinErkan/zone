@@ -4574,6 +4574,14 @@ export async function runLlmPatchFlow(input: {
   forceTier?: TaskTier;
   /** Phase AS: pre-computed classification from server.ts audit gate. Skips re-classification. */
   preClassifiedTask?: TaskClassification;
+  /** Phase X.0.1: distilled findings from the pre-execution scope audit.
+   *  Forwarded to agentLoopBaseInput so the execute agent sees the AUDIT CONTEXT block. */
+  auditFindings?: {
+    summary: string;
+    citationCount: number;
+    toolCallCount: number;
+    costUsd: number;
+  };
 }): Promise<LlmPatchFlowResult> {
   attachRunIdentity({ userId: input.userId, runId: input.runId });
   // Phase H.7: outer-scope flag survives past the inner block where `loop`
@@ -5857,6 +5865,8 @@ const initializeTodosFromPlan = (): void => {
       // Phase X.0 C3: stable per-thread cache key for OpenAI so successive
       // runs in the same conversation share a cache hit instead of misses.
       conversationId: typeof input.conversationId === "string" ? input.conversationId : undefined,
+      // Phase X.0.1: forward audit findings so execute agent skips re-investigation.
+      auditFindings: input.auditFindings,
       ...agentLoopCallbacks,
     };
 

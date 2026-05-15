@@ -3618,6 +3618,8 @@ app.post("/api/patch", async (req, res) => {
   // Phase AS: scope audit gate — runs after plan approval, before execute.
   // Only active when (a) a plan was approved and (b) shouldRunAudit returns true.
   let preClassifiedTask: TaskClassification | undefined;
+  // Phase X.0.1: captured when audit ran without skipping; forwarded to execute agent.
+  let auditFindingsForExec: { summary: string; citationCount: number; toolCallCount: number; costUsd: number } | undefined;
   if (preGeneratedPlan && runIdStr) {
     try {
       // Classify task here so tier is available for audit gating AND to
@@ -3677,6 +3679,13 @@ app.post("/api/patch", async (req, res) => {
             } as any,
           });
         } else {
+          // X.0.1: capture for handoff to execute agent.
+          auditFindingsForExec = {
+            summary: findings.findings.slice(0, 2048),
+            citationCount: findings.citations.length,
+            toolCallCount: findings.toolCallCount,
+            costUsd: findings.costUsd,
+          };
           // Check if agent directly proposed a revision
           const agentRevision = findings.agentSuggestedRevision;
           // Also run the LLM judge on the findings
@@ -3788,6 +3797,7 @@ app.post("/api/patch", async (req, res) => {
       preGeneratedPlan,
       forceTier,
       preClassifiedTask,
+      auditFindings: auditFindingsForExec,
     });
     perf.mark("core patch flow complete");
 
