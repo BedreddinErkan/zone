@@ -35,7 +35,7 @@ const executionPlanSchema = z.object({
       })
     )
     .min(1)
-    .max(6),
+    .max(8),
   riskHints: z.array(z.string()),
   scopeSummary: z.string(),
 });
@@ -120,7 +120,7 @@ RELEVANT FILES
 ${relevantFiles}
 
 Rules:
-- Break the task into 3-6 implementation steps.
+- Break the task into 3-8 implementation steps.
 - Estimate affected files by path/name when possible.
 - Identify risks briefly.
 - Keep scopeSummary under 160 characters.
