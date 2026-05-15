@@ -19,6 +19,9 @@ export interface ScopeJudgement {
   mismatch: boolean;
   type: ScopeMismatchType;
   reason: string;
+  /** Y.0: impact severity when mismatch=true. Fail-safe: missing severity on a
+   *  mismatch defaults to "major" to prevent silent under-interruption. */
+  severity: "none" | "minor" | "major";
   revisedPlan?: string;
   missingFiles?: string[];
   unnecessaryFiles?: string[];
@@ -32,10 +35,18 @@ Decision rubric:
 - "mixed": both under and over scope issues found
 - "none": plan aligns with investigation findings — no revision needed
 
+Severity rubric (applies when mismatch=true):
+- "minor": ≤2 files are missing or unnecessary; the omission or inclusion is low-disruption
+- "major": ≥3 files are missing or unnecessary; OR the qualitative impact is high even with fewer files
+  (e.g. a missing auth guard or a core data-model change). Escalation minor→major is allowed based
+  on qualitative assessment; never downgrade major→minor based on file count alone.
+- "none": always use when mismatch=false
+
 Respond ONLY with valid JSON matching this schema exactly (no prose before or after):
 {
   "mismatch": boolean,
   "type": "under_scope" | "over_scope" | "mixed" | "none",
+  "severity": "none" | "minor" | "major",
   "reason": "1-3 sentences grounded in specific findings",
   "revisedPlan": "Short revised plan text if mismatch=true, omit if false",
   "missingFiles": ["path/to/file.ts"],
@@ -85,10 +96,20 @@ function validateJudgement(raw: unknown): ScopeJudgement {
   const validTypes: ScopeMismatchType[] = ["under_scope", "over_scope", "mixed", "none"];
   const type = j["type"] as ScopeMismatchType;
   if (!validTypes.includes(type)) throw new Error(`Invalid mismatch type: ${type}`);
+  const mismatch = Boolean(j["mismatch"]);
+  const rawSeverity = j["severity"];
+  const validSeverities = ["none", "minor", "major"] as const;
+  const severity: "none" | "minor" | "major" =
+    validSeverities.includes(rawSeverity as "none" | "minor" | "major")
+      ? (rawSeverity as "none" | "minor" | "major")
+      : mismatch
+        ? "major" // fail-safe: missing severity on a real mismatch → assume worst case
+        : "none";
   return {
-    mismatch: Boolean(j["mismatch"]),
+    mismatch,
     type,
     reason: String(j["reason"] || ""),
+    severity,
     ...(typeof j["revisedPlan"] === "string" ? { revisedPlan: j["revisedPlan"] } : {}),
     ...(Array.isArray(j["missingFiles"]) && (j["missingFiles"] as unknown[]).length
       ? { missingFiles: (j["missingFiles"] as unknown[]).map(String) }
@@ -144,6 +165,6 @@ export async function runScopeJudge(input: {
       ts: new Date().toISOString(),
     }));
     // Graceful fallback: no mismatch (proceed with original plan)
-    return { mismatch: false, type: "none", reason: "Judge unavailable — proceeding with original plan." };
+    return { mismatch: false, type: "none", severity: "none", reason: "Judge unavailable — proceeding with original plan." };
   }
 }

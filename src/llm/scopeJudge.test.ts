@@ -165,3 +165,100 @@ describe("runScopeJudge — graceful fallback", () => {
     expect(result.mismatch).toBe(false);
   });
 });
+
+// Y.0 Commit 3 — severity field tests (8 cases).
+describe("runScopeJudge — severity field (Y.0)", () => {
+  beforeEach(() => { mocks.log.mockClear(); mocks.debugLog.mockClear(); });
+
+  it("1 missing file → severity=minor", async () => {
+    mocks.createChatCompletion.mockResolvedValueOnce(
+      llmResponse(JSON.stringify({
+        mismatch: true, type: "under_scope", severity: "minor",
+        reason: "One file missing.", missingFiles: ["src/auth.ts"],
+      }))
+    );
+    const result = await runScopeJudge({ originalPlan: PLAN, findings: "auth.ts needed" });
+    expect(result.severity).toBe("minor");
+    expect(result.mismatch).toBe(true);
+  });
+
+  it("3 missing files → severity=major", async () => {
+    mocks.createChatCompletion.mockResolvedValueOnce(
+      llmResponse(JSON.stringify({
+        mismatch: true, type: "under_scope", severity: "major",
+        reason: "Three files missing.",
+        missingFiles: ["src/a.ts", "src/b.ts", "src/c.ts"],
+      }))
+    );
+    const result = await runScopeJudge({ originalPlan: PLAN, findings: "three files needed" });
+    expect(result.severity).toBe("major");
+  });
+
+  it("no mismatch → severity=none", async () => {
+    mocks.createChatCompletion.mockResolvedValueOnce(
+      llmResponse(JSON.stringify({
+        mismatch: false, type: "none", severity: "none",
+        reason: "Plan looks correct.",
+      }))
+    );
+    const result = await runScopeJudge({ originalPlan: PLAN, findings: "all good" });
+    expect(result.severity).toBe("none");
+    expect(result.mismatch).toBe(false);
+  });
+
+  it("mismatch=true with severity field absent → fail-safe major", async () => {
+    mocks.createChatCompletion.mockResolvedValueOnce(
+      llmResponse(JSON.stringify({
+        mismatch: true, type: "under_scope",
+        reason: "LLM forgot to include severity.",
+        missingFiles: ["src/x.ts"],
+      }))
+    );
+    const result = await runScopeJudge({ originalPlan: PLAN, findings: "x.ts needed" });
+    expect(result.severity).toBe("major");
+  });
+
+  it("mismatch=true with invalid severity string → fail-safe major", async () => {
+    mocks.createChatCompletion.mockResolvedValueOnce(
+      llmResponse(JSON.stringify({
+        mismatch: true, type: "over_scope", severity: "critical",
+        reason: "LLM used an unknown severity label.",
+        unnecessaryFiles: ["src/y.ts"],
+      }))
+    );
+    const result = await runScopeJudge({ originalPlan: PLAN, findings: "y.ts unneeded" });
+    expect(result.severity).toBe("major");
+  });
+
+  it("mismatch=false with severity field absent → defaults to none", async () => {
+    mocks.createChatCompletion.mockResolvedValueOnce(
+      llmResponse(JSON.stringify({
+        mismatch: false, type: "none",
+        reason: "No issues.",
+      }))
+    );
+    const result = await runScopeJudge({ originalPlan: PLAN, findings: "nothing" });
+    expect(result.severity).toBe("none");
+  });
+
+  it("graceful fallback returns severity=none", async () => {
+    mocks.createChatCompletion.mockRejectedValueOnce(new Error("network error"));
+    const result = await runScopeJudge({ originalPlan: PLAN, findings: "anything" });
+    expect(result.severity).toBe("none");
+    expect(result.mismatch).toBe(false);
+  });
+
+  it("over_scope major with 2 unnecessary files passes through as-is", async () => {
+    mocks.createChatCompletion.mockResolvedValueOnce(
+      llmResponse(JSON.stringify({
+        mismatch: true, type: "over_scope", severity: "major",
+        reason: "Qualitatively high-impact even with 2 files — core data model affected.",
+        unnecessaryFiles: ["src/schema.ts", "src/migrations.ts"],
+      }))
+    );
+    const result = await runScopeJudge({ originalPlan: PLAN, findings: "schema unneeded" });
+    // Major overrides despite ≤2 files (qualitative escalation allowed).
+    expect(result.severity).toBe("major");
+    expect(result.unnecessaryFiles).toHaveLength(2);
+  });
+});
