@@ -2845,3 +2845,55 @@ describe("UI plan-review delegatable badge (Q.3)", () => {
     expect(badgeIdx).toBeGreaterThan(eligibleTitleIdx);
   });
 });
+
+describe("BYOM.1: provider picker default and persistence", () => {
+  it("getActiveProvider returns anthropic by default (no localStorage key)", () => {
+    const { context } = buildUiHarness();
+    const getActiveProvider = (context as unknown as { getActiveProvider: () => string })
+      .getActiveProvider;
+    expect(getActiveProvider()).toBe("anthropic");
+  });
+
+  it("getActiveProvider returns openai when zoneActiveProvider=openai is in localStorage", () => {
+    const { context } = buildUiHarness({ zoneActiveProvider: "openai" });
+    const getActiveProvider = (context as unknown as { getActiveProvider: () => string })
+      .getActiveProvider;
+    expect(getActiveProvider()).toBe("openai");
+  });
+
+  it("getActiveProvider returns anthropic when zoneActiveProvider=anthropic is in localStorage", () => {
+    const { context } = buildUiHarness({ zoneActiveProvider: "anthropic" });
+    const getActiveProvider = (context as unknown as { getActiveProvider: () => string })
+      .getActiveProvider;
+    expect(getActiveProvider()).toBe("anthropic");
+  });
+
+  it("buildAuthHeaders sends X-Zone-Provider: anthropic by default", () => {
+    const { context } = buildUiHarness();
+    const buildAuthHeaders = (
+      context as unknown as { buildAuthHeaders: () => Record<string, string> }
+    ).buildAuthHeaders;
+    const headers = buildAuthHeaders();
+    expect(headers["X-Zone-Provider"]).toBe("anthropic");
+  });
+
+  it("buildAuthHeaders sends X-Zone-Provider: openai when provider is openai", () => {
+    const { context } = buildUiHarness({ zoneActiveProvider: "openai" });
+    const buildAuthHeaders = (
+      context as unknown as { buildAuthHeaders: () => Record<string, string> }
+    ).buildAuthHeaders;
+    const headers = buildAuthHeaders();
+    expect(headers["X-Zone-Provider"]).toBe("openai");
+  });
+
+  it("setActiveProvider persists to localStorage and getActiveProvider reads it back", () => {
+    const { context, localStorageStore } = buildUiHarness();
+    const ctx = context as unknown as {
+      getActiveProvider: () => string;
+      setActiveProvider: (p: string) => void;
+    };
+    ctx.setActiveProvider("openai");
+    expect(localStorageStore.get("zoneActiveProvider")).toBe("openai");
+    expect(ctx.getActiveProvider()).toBe("openai");
+  });
+});

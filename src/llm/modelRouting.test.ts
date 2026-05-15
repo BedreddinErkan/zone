@@ -53,6 +53,28 @@ describe("getModelForRole", () => {
   });
 });
 
+describe("getModelForRole — verifier and intent roles (BYOM.1)", () => {
+  it("verifier on anthropic → claude-sonnet-4-6", () => {
+    expect(getModelForRole("verifier", "anthropic")).toBe("claude-sonnet-4-6");
+  });
+
+  it("verifier on openai → gpt-5.4", () => {
+    expect(getModelForRole("verifier", "openai")).toBe("gpt-5.4");
+  });
+
+  it("intent on anthropic → claude-sonnet-4-6", () => {
+    expect(getModelForRole("intent", "anthropic")).toBe("claude-sonnet-4-6");
+  });
+
+  it("intent on openai → gpt-5.4", () => {
+    expect(getModelForRole("intent", "openai")).toBe("gpt-5.4");
+  });
+
+  it("planner on openai → gpt-5.4", () => {
+    expect(getModelForRole("planner", "openai")).toBe("gpt-5.4");
+  });
+});
+
 describe("getModelForRole — investigator role (Phase D.1)", () => {
   it("Zone Default (no override): Anthropic → claude-sonnet-4-6", () => {
     expect(getModelForRole("investigator", "anthropic")).toBe("claude-sonnet-4-6");
