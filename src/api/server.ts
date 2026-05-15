@@ -3722,52 +3722,78 @@ app.post("/api/patch", async (req, res) => {
             const revMissing = agentRevision?.missingFiles ?? judgement.missingFiles;
             const revUnnecessary = agentRevision?.unnecessaryFiles ?? judgement.unnecessaryFiles;
 
-            const proposal: RevisionProposal = {
-              runId: runIdStr,
-              type: revType,
-              reason: revReason,
-              originalPlan: preGeneratedPlan.objective,
-              revisedPlanSummary: revSummary,
-              ...(revMissing ? { missingFiles: revMissing } : {}),
-              ...(revUnnecessary ? { unnecessaryFiles: revUnnecessary } : {}),
-            };
+            // Y.0 decision matrix (2×2 on planReview × severity):
+            //   planReview=true  + any mismatch → requestRevisionApproval (interrupt)
+            //   planReview=false + major        → requestRevisionApproval (interrupt)
+            //   planReview=false + minor        → silent auto_apply (no user prompt)
+            // Agent-suggested revisions always count as major (no severity field on agent tool).
+            const mismatchSeverity: "minor" | "major" = agentRevision != null
+              ? "major"
+              : judgement.severity === "minor" ? "minor" : "major";
+            const requiresInterrupt = effectivePlanApprovalRequired || mismatchSeverity === "major";
 
-            const { decision } = await requestRevisionApproval({
-              proposal,
-              emit: (evt) =>
+            if (requiresInterrupt) {
+              const proposal: RevisionProposal = {
+                runId: runIdStr,
+                type: revType,
+                reason: revReason,
+                originalPlan: preGeneratedPlan.objective,
+                revisedPlanSummary: revSummary,
+                ...(revMissing ? { missingFiles: revMissing } : {}),
+                ...(revUnnecessary ? { unnecessaryFiles: revUnnecessary } : {}),
+              };
+
+              const { decision } = await requestRevisionApproval({
+                proposal,
+                emit: (evt) =>
+                  emitProgress(runIdStr, {
+                    stage: "scope_revision",
+                    progress: { ...evt, ts: Date.now() } as any,
+                  }),
+                abortSignal: patchAbort?.signal,
+              });
+
+              if (decision === "approve") {
+                log("[zone-scope-revision-approved]", JSON.stringify({ runId: runIdStr, type: revType, ts: new Date().toISOString() }));
                 emitProgress(runIdStr, {
                   stage: "scope_revision",
-                  progress: { ...evt, ts: Date.now() } as any,
-                }),
-              abortSignal: patchAbort?.signal,
-            });
-
-            if (decision === "approve") {
-              log("[zone-scope-revision-approved]", JSON.stringify({ runId: runIdStr, type: revType, ts: new Date().toISOString() }));
-              emitProgress(runIdStr, {
-                stage: "scope_revision",
-                progress: {
-                  runId: runIdStr,
-                  ts: Date.now(),
-                  type: "scope_revision_resolved",
-                  title: "Scope revision approved",
-                  revisionDecision: "approve",
-                  status: "success",
-                } as any,
-              });
-              // Note: revised plan summary is informational; the agent loop
-              // will re-plan from scratch using the updated context.
+                  progress: {
+                    runId: runIdStr,
+                    ts: Date.now(),
+                    type: "scope_revision_resolved",
+                    title: "Scope revision approved",
+                    revisionDecision: "approve",
+                    status: "success",
+                  } as any,
+                });
+                // Note: revised plan summary is informational; the agent loop
+                // will re-plan from scratch using the updated context.
+              } else {
+                log("[zone-scope-revision-rejected]", JSON.stringify({ runId: runIdStr, type: revType, ts: new Date().toISOString() }));
+                emitProgress(runIdStr, {
+                  stage: "scope_revision",
+                  progress: {
+                    runId: runIdStr,
+                    ts: Date.now(),
+                    type: "scope_revision_resolved",
+                    title: "Scope revision rejected — proceeding with original plan",
+                    revisionDecision: "reject",
+                    status: "active",
+                  } as any,
+                });
+              }
             } else {
-              log("[zone-scope-revision-rejected]", JSON.stringify({ runId: runIdStr, type: revType, ts: new Date().toISOString() }));
+              // Minor mismatch + plan-review-off → silent auto-apply.
+              log("[zone-scope-auto-apply]", JSON.stringify({ runId: runIdStr, type: revType, severity: "minor", ts: new Date().toISOString() }));
               emitProgress(runIdStr, {
                 stage: "scope_revision",
                 progress: {
                   runId: runIdStr,
                   ts: Date.now(),
                   type: "scope_revision_resolved",
-                  title: "Scope revision rejected — proceeding with original plan",
-                  revisionDecision: "reject",
-                  status: "active",
+                  title: "Scope revision auto-applied (minor)",
+                  revisionDecision: "auto_apply",
+                  status: "success",
                 } as any,
               });
             }

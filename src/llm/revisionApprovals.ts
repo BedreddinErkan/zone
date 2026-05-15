@@ -17,7 +17,9 @@ export interface RevisionProposal {
   unnecessaryFiles?: string[];
 }
 
-export type RevisionDecision = "approve" | "reject";
+/** Y.0: "auto_apply" is emitted when a minor mismatch is silently applied
+ *  (plan review off + severity=minor). UI shows a log line; no user prompt. */
+export type RevisionDecision = "approve" | "reject" | "auto_apply";
 
 type PendingRevision = {
   runId: string;

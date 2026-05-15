@@ -127,3 +127,28 @@ describe("shouldRunAudit — plan-review-off context (Y.0 decoupled gate)", () =
     expect(shouldRunAudit("complex", undefined, false)).toBe(false);
   });
 });
+
+// Y.0 Commit 4 — severity-aware decision matrix.
+// requiresInterrupt = planReviewEnabled || severity === "major"
+// Extracted as a pure helper here; server.ts inlines the same logic.
+function requiresInterrupt(planReviewEnabled: boolean, severity: "minor" | "major"): boolean {
+  return planReviewEnabled || severity === "major";
+}
+
+describe("decision matrix — requiresInterrupt (Y.0 Commit 4)", () => {
+  it("planReview=true + major → interrupt (user already reviewed plan)", () => {
+    expect(requiresInterrupt(true, "major")).toBe(true);
+  });
+
+  it("planReview=true + minor → interrupt (plan review on means always show card)", () => {
+    expect(requiresInterrupt(true, "minor")).toBe(true);
+  });
+
+  it("planReview=false + major → interrupt (major always interrupts regardless of review mode)", () => {
+    expect(requiresInterrupt(false, "major")).toBe(true);
+  });
+
+  it("planReview=false + minor → no interrupt (silent auto_apply)", () => {
+    expect(requiresInterrupt(false, "minor")).toBe(false);
+  });
+});
