@@ -6385,7 +6385,7 @@
     function getActiveProvider(){
       let v;
       try { v = localStorage.getItem('zoneActiveProvider'); } catch {}
-      return v === 'anthropic' ? 'anthropic' : 'openai';
+      return v === 'openai' ? 'openai' : 'anthropic';
     }
     function setActiveProvider(provider){
       if (provider !== 'openai' && provider !== 'anthropic') return;
@@ -7143,8 +7143,8 @@
       window._zoneFooterDropdowns = { provider: providerDropdown };
 
       providerDropdown.setOptions([
-        { value: 'openai', label: 'OpenAI' },
         { value: 'anthropic', label: 'Anthropic' },
+        { value: 'openai', label: 'OpenAI' },
       ]);
       providerDropdown.setValue(getActiveProvider());
     }
@@ -10694,7 +10694,7 @@
       const catalog = ZONE_MODEL_CATALOG[provider] || [];
       const modelOptions = catalog.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
       const customModels = getActiveModels()[provider] || {};
-      const PRESETS = [
+      const PRESETS = provider === 'anthropic' ? [
         {
           id: 'zone_default',
           icon: '⚖',
@@ -10723,6 +10723,35 @@
           desc: 'Choose models manually using the footer dropdowns',
           cost: 'Cost varies by selection',
         },
+      ] : [
+        {
+          id: 'zone_default',
+          icon: '⚖',
+          label: 'Zone Default',
+          desc: 'Hybrid: GPT-5.4 plans and agents, GPT-5.4 mini executes workers',
+          cost: '~$0.08–0.12 per typical run',
+        },
+        {
+          id: 'speed',
+          icon: '⚡',
+          label: 'Speed',
+          desc: 'All GPT-5.4 mini — fastest and cheapest across all roles',
+          cost: '~$0.03–0.06 per typical run',
+        },
+        {
+          id: 'quality',
+          icon: '★',
+          label: 'Quality',
+          desc: 'All GPT-5.4 — maximum capability across all roles',
+          cost: '~$0.12–0.18 per typical run',
+        },
+        {
+          id: 'custom',
+          icon: '⚙',
+          label: 'Custom',
+          desc: 'Choose models manually using the footer dropdowns',
+          cost: 'Cost varies by selection',
+        },
       ];
       const radios = PRESETS.map(p => `
         <label style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:6px;border:1px solid ${currentPreset === p.id ? 'var(--violet,#7a5af8)' : 'var(--border,#333)'};cursor:pointer;margin-bottom:8px;background:${currentPreset === p.id ? 'rgba(122,90,248,.07)' : 'transparent'}" data-preset-label="${p.id}">
@@ -10733,8 +10762,24 @@
             <div style="font-size:11px;color:var(--text-4,#666);margin-top:1px">${p.cost}</div>
           </div>
         </label>`).join('');
+      const providerPicker = `
+        <div class="apikey-section-title" style="margin-bottom:8px">Provider</div>
+        <div style="display:flex;gap:20px;margin-bottom:8px">
+          <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-size:var(--font-size-sm,12px)">
+            <input type="radio" name="zoneProviderPick" value="anthropic" ${provider === 'anthropic' ? 'checked' : ''} style="accent-color:var(--violet,#7a5af8)">
+            Anthropic
+          </label>
+          <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-size:var(--font-size-sm,12px)">
+            <input type="radio" name="zoneProviderPick" value="openai" ${provider === 'openai' ? 'checked' : ''} style="accent-color:var(--violet,#7a5af8)">
+            OpenAI
+          </label>
+        </div>
+        <div class="apikey-disclaimer" style="margin-bottom:16px">
+          Anthropic recommended for agentic tasks. OpenAI cheaper for simple completions.
+        </div>`;
       els.settingsBody.innerHTML = `
         <div class="apikey-section">
+          ${providerPicker}
           <div class="apikey-section-title">Model Preset</div>
           <div class="apikey-disclaimer" style="margin-bottom:14px">
             Controls which model each agent role uses. Zone Default gives the best cost-quality balance.
@@ -10777,6 +10822,14 @@
         el.textContent = ' Agent=' + (m.high || 'server default') + ', Worker=' + (m.standard || 'server default');
       }
       refreshEffective();
+      // Provider picker change handler — re-renders the tab for the new provider
+      document.querySelectorAll('input[name="zoneProviderPick"]').forEach(radio => {
+        radio.addEventListener('change', () => {
+          setActiveProvider(radio.value);
+          updateFooterModelLabel();
+          renderModelSettings();
+        });
+      });
       // Radio change handler
       document.querySelectorAll('input[name="zoneModelPreset"]').forEach(radio => {
         radio.addEventListener('change', () => {
