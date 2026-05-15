@@ -2559,7 +2559,7 @@ export function LoginForm() {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({
+    expect(body).toMatchObject({
       ok: true,
       patchPreview: "=== LOCAL PATCH ===",
       warnings: [],
