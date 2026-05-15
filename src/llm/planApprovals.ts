@@ -11,7 +11,7 @@ type PendingPlan = {
 };
 
 export type PlanApprovalResult =
-  | { action: "approve"; plan: ExecutionPlan }
+  | { action: "approve"; plan: ExecutionPlan; perRunAuditFlag?: boolean }
   | { action: "edit"; plan: ExecutionPlan }
   | { action: "reject" }
   | { action: "regenerate"; userFeedback: string };
@@ -111,6 +111,8 @@ export function resolvePlanApproval(input: {
   runId: string;
   editedPlan?: unknown;
   userFeedback?: unknown;
+  /** Phase AS: per-run audit opt-in sent from plan approval card UI. */
+  perRunAuditFlag?: boolean;
 }): { ok: boolean; message?: string } {
   const approvalId = String(input.approvalId || "").trim();
   const runId = String(input.runId || "").trim();
@@ -138,7 +140,7 @@ export function resolvePlanApproval(input: {
   }
 
   // approve — use original plan
-  entry.resolve({ action: "approve", plan: entry.plan });
+  entry.resolve({ action: "approve", plan: entry.plan, ...(typeof input.perRunAuditFlag === "boolean" ? { perRunAuditFlag: input.perRunAuditFlag } : {}) });
   return { ok: true };
 }
 

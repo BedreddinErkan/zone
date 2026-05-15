@@ -6735,6 +6735,10 @@
           (steps.length ? '<div class="zone-plan-section-label">Steps</div>' : '') +
           '<div class="zone-plan-steps">' + stepsHtml + '</div>' +
           (scope ? '<div class="zone-plan-scope">' + escapeHtml(scope) + '</div>' : '') +
+          '<label class="zone-plan-audit-row" title="Runs a read-only investigation to verify the plan is correctly sized before execution.">' +
+            '<input type="checkbox" class="zone-plan-audit-checkbox"> ' +
+            '<span class="zone-plan-audit-label">Audit scope before execute</span>' +
+          '</label>' +
           '<div class="zone-approval-sticky-actions" data-run-id="' + escapeHtml(String(this.payload.runId || '')) + '">' +
             regenCounter +
             '<button type="button" class="approval-btn approve" data-action="approve">Approve plan</button>' +
@@ -6765,6 +6769,7 @@
         this._editBtn = this.container.querySelector('[data-action="edit"]');
         this._regenBtn = this.container.querySelector('[data-action="regen"]');
         this._rejectBtn = this.container.querySelector('[data-action="reject"]');
+        this._auditCheckbox = this.container.querySelector('.zone-plan-audit-checkbox');
         this._editForm = this.container.querySelector('.zone-plan-edit-form');
         this._editTextarea = this.container.querySelector('.zone-plan-edit-textarea');
         this._editErrorEl = this.container.querySelector('.zone-plan-edit-error');
@@ -6884,8 +6889,9 @@
         if (this._editBtn) this._editBtn.disabled = true;
         if (this._regenBtn) this._regenBtn.disabled = true;
         if (this._rejectBtn) this._rejectBtn.disabled = true;
+        const perRunAuditFlag = action === 'approve' && this._auditCheckbox ? !!this._auditCheckbox.checked : undefined;
         if (this.callbacks.onDecide){
-          try { this.callbacks.onDecide(this.payload, action, editedPlan); } catch {}
+          try { this.callbacks.onDecide(this.payload, action, editedPlan, perRunAuditFlag); } catch {}
         }
         this._teardown();
       }
@@ -6918,7 +6924,7 @@
       if (runId) container.dataset.runId = runId;
       const payload = { approvalId, plan, runId, regenAttempt: planEvt.regenAttempt ?? 0, maxRegens: planEvt.maxRegens ?? 3 };
       __zoneActivePlanReview = new ZonePlanReviewPrompt(container, payload, {
-        onDecide: (p, action, editedPlan) => {
+        onDecide: (p, action, editedPlan, perRunAuditFlag) => {
           const lb = document.getElementById('logBlock-' + p.runId);
           if (lb) {
             appendLogLine(lb, { timestamp: nowTs(), message: 'Plan ' + action + 'd', status: action === 'reject' ? 'warning' : 'done' });
@@ -6933,6 +6939,7 @@
                   action,
                   runId: p.runId,
                   ...(action === 'edit' && editedPlan ? { editedPlan } : {}),
+                  ...(action === 'approve' && typeof perRunAuditFlag === 'boolean' ? { perRunAuditFlag } : {}),
                 }),
               });
             } catch {}

@@ -1849,6 +1849,7 @@ app.post("/api/approve-plan", (req, res) => {
   const action = typeof req.body?.action === "string" ? req.body.action.trim() : "";
   const editedPlan = req.body?.editedPlan;
   const userFeedback = req.body?.userFeedback;
+  const perRunAuditFlag = typeof req.body?.perRunAuditFlag === "boolean" ? req.body.perRunAuditFlag : undefined;
 
   if (!approvalId || !runId) {
     res.status(400).json({ ok: false, reason: "missing_approval_id_or_run_id" });
@@ -1872,6 +1873,7 @@ app.post("/api/approve-plan", (req, res) => {
     runId,
     editedPlan,
     userFeedback,
+    perRunAuditFlag,
   });
   if (!r.ok) {
     res.status(404).json({ ok: false, reason: r.message || "not_found" });
@@ -3469,6 +3471,8 @@ app.post("/api/patch", async (req, res) => {
   // Supports up to MAX_REGENS regeneration cycles driven by user feedback.
   const PLAN_MAX_REGENS = 3;
   let preGeneratedPlan: Awaited<ReturnType<typeof generateExecutionPlan>> | undefined;
+  /** Phase AS: captured from plan approval result; gates medium-tier audit opt-in. */
+  let approvedWithPerRunAuditFlag = false;
   if (effectivePlanApprovalRequired && runIdStr) {
     try {
       const planContext = await preparePlanContext({
@@ -3519,6 +3523,7 @@ app.post("/api/patch", async (req, res) => {
 
         if (approvalResult.action === "approve") {
           preGeneratedPlan = currentPlan;
+          approvedWithPerRunAuditFlag = approvalResult.perRunAuditFlag ?? false;
           break planReviewLoop;
         }
 
@@ -3602,7 +3607,7 @@ app.post("/api/patch", async (req, res) => {
 
     const tierSettings = readTierSettings();
     const autoAuditComplexTasks = (tierSettings as Record<string, unknown>)["autoAuditComplexTasks"] !== false;
-    const perRunAuditFlag = Boolean((preGeneratedPlan as unknown as Record<string, unknown>)["__perRunAuditFlag"]);
+    const perRunAuditFlag = approvedWithPerRunAuditFlag;
     const tier = preClassifiedTask?.tier ?? "medium";
 
     function shouldRunAudit(
