@@ -196,6 +196,10 @@ Why is buildDecisionTrace.test.ts failing on case 3?
 Change normalizeSignals to accept an options object with a strict flag
 ```
 
+## Breaking changes
+
+**Breaking (BYOM):** Default provider switched from OpenAI to Anthropic when no `X-Zone-Provider` header is present. CLI/API consumers that previously relied on the OpenAI default must either set `X-Zone-Provider: openai` explicitly or migrate to `ANTHROPIC_API_KEY`. UI users are unaffected — `buildAuthHeaders()` always sends the explicit header.
+
 ## Troubleshooting
 
 **"Plan 0/5" stuck in chat**
