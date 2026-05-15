@@ -3493,8 +3493,8 @@ app.post("/api/patch", async (req, res) => {
   // Supports up to MAX_REGENS regeneration cycles driven by user feedback.
   const PLAN_MAX_REGENS = 3;
   let preGeneratedPlan: Awaited<ReturnType<typeof generateExecutionPlan>> | undefined;
-  /** Phase AS: captured from plan approval result; gates medium-tier audit opt-in. */
-  let approvedWithPerRunAuditFlag = false;
+  /** Phase AS: captured from plan approval result; undefined = use autoAuditSetting, false = user turned off this run. */
+  let approvedWithPerRunAuditFlag: boolean | undefined = undefined;
   if (effectivePlanApprovalRequired && runIdStr) {
     try {
       const planContext = await preparePlanContext({
@@ -3545,7 +3545,7 @@ app.post("/api/patch", async (req, res) => {
 
         if (approvalResult.action === "approve") {
           preGeneratedPlan = currentPlan;
-          approvedWithPerRunAuditFlag = approvalResult.perRunAuditFlag ?? false;
+          approvedWithPerRunAuditFlag = approvalResult.perRunAuditFlag;
           break planReviewLoop;
         }
 
@@ -3633,12 +3633,12 @@ app.post("/api/patch", async (req, res) => {
 
     function shouldRunAudit(
       t: typeof tier,
-      perRun: boolean,
-      autoComplex: boolean
+      perRunOverride: boolean | undefined,
+      autoAuditSetting: boolean
     ): boolean {
-      if (t === "complex" && autoComplex) return true;
-      if (t === "medium" && perRun) return true;
-      return false;
+      if (t === "simple") return false;
+      if (perRunOverride === false) return false;
+      return autoAuditSetting;
     }
 
     if (shouldRunAudit(tier, perRunAuditFlag, autoAuditComplexTasks)) {
@@ -3660,6 +3660,7 @@ app.post("/api/patch", async (req, res) => {
           runId: runIdStr,
           userApiKey: userApiKey || undefined,
           abortSignal: patchAbort?.signal,
+          parentTier: tier,
           onProgress: (update) => emitProgress(runIdStr, update as any),
         });
 

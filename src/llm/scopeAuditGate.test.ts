@@ -3,6 +3,10 @@
  * Tests shouldRunAudit gating logic and judge integration via unit-level
  * stubs (no HTTP calls). The server.ts wiring is validated structurally;
  * the full E2E path is covered by scopeJudge.test.ts + revisionApprovals.test.ts.
+ *
+ * Phase AS.0.1: audit is now default-on for medium and complex tiers.
+ * perRunOverride semantics: undefined = don't block (use autoAuditSetting),
+ * false = user explicitly turned off this run, true = user explicitly kept on.
  */
 
 import { describe, expect, it } from "vitest";
@@ -11,72 +15,84 @@ import { describe, expect, it } from "vitest";
 // test the same logic here as a standalone helper.
 function shouldRunAudit(
   tier: "simple" | "medium" | "complex",
-  perRunFlag: boolean,
-  autoAuditComplexTasks: boolean
+  perRunOverride: boolean | undefined,
+  autoAuditSetting: boolean
 ): boolean {
-  if (tier === "complex" && autoAuditComplexTasks) return true;
-  if (tier === "medium" && perRunFlag) return true;
-  return false;
+  if (tier === "simple") return false;
+  if (perRunOverride === false) return false;
+  return autoAuditSetting;
 }
 
-describe("shouldRunAudit gating logic", () => {
-  it("complex + autoAudit=true → run audit", () => {
-    expect(shouldRunAudit("complex", false, true)).toBe(true);
+describe("shouldRunAudit — basic tier logic", () => {
+  it("simple → always skip regardless of flags", () => {
+    expect(shouldRunAudit("simple", true, true)).toBe(false);
+    expect(shouldRunAudit("simple", false, true)).toBe(false);
+    expect(shouldRunAudit("simple", undefined, true)).toBe(false);
+    expect(shouldRunAudit("simple", undefined, false)).toBe(false);
   });
 
-  it("complex + autoAudit=false → skip", () => {
-    expect(shouldRunAudit("complex", false, false)).toBe(false);
+  it("medium + autoAudit=true + perRunOverride=undefined → run (default-on)", () => {
+    expect(shouldRunAudit("medium", undefined, true)).toBe(true);
   });
 
-  it("medium + perRunFlag=true → run audit", () => {
-    expect(shouldRunAudit("medium", true, false)).toBe(true);
+  it("medium + autoAudit=true + perRunOverride=true → run", () => {
+    expect(shouldRunAudit("medium", true, true)).toBe(true);
   });
 
-  it("medium + perRunFlag=false + autoAudit=true → skip (auto only for complex)", () => {
+  it("medium + autoAudit=true + perRunOverride=false → skip (user turned off)", () => {
     expect(shouldRunAudit("medium", false, true)).toBe(false);
   });
 
-  it("medium + perRunFlag=false + autoAudit=false → skip", () => {
-    expect(shouldRunAudit("medium", false, false)).toBe(false);
+  it("medium + autoAudit=false + perRunOverride=undefined → skip (global off)", () => {
+    expect(shouldRunAudit("medium", undefined, false)).toBe(false);
   });
 
-  it("simple + any flags → always skip", () => {
-    expect(shouldRunAudit("simple", true, true)).toBe(false);
-    expect(shouldRunAudit("simple", false, false)).toBe(false);
+  it("medium + autoAudit=false + perRunOverride=true → skip (global off wins)", () => {
+    expect(shouldRunAudit("medium", true, false)).toBe(false);
   });
 
-  it("complex + perRunFlag=true + autoAudit=false → skip (perRunFlag only gates medium)", () => {
-    // Per spec: perRunFlag is a medium-tier opt-in; complex is always auto when setting is on.
-    // complex + autoAudit=false + perRunFlag=true → false (neither branch matches)
-    expect(shouldRunAudit("complex", true, false)).toBe(false);
+  it("complex + autoAudit=true + perRunOverride=undefined → run (default-on)", () => {
+    expect(shouldRunAudit("complex", undefined, true)).toBe(true);
+  });
+
+  it("complex + autoAudit=true + perRunOverride=false → skip (user turned off)", () => {
+    expect(shouldRunAudit("complex", false, true)).toBe(false);
+  });
+
+  it("complex + autoAudit=false + perRunOverride=undefined → skip (global off)", () => {
+    expect(shouldRunAudit("complex", undefined, false)).toBe(false);
   });
 });
 
-describe("shouldRunAudit — all tier × setting combinations", () => {
+describe("shouldRunAudit — all tier × setting combinations (perRunOverride=undefined = default behavior)", () => {
   const tiers = ["simple", "medium", "complex"] as const;
+
+  // With perRunOverride=undefined, result is purely autoAuditSetting for non-simple.
   const expected: Record<string, boolean> = {
-    "simple-false-false": false,
-    "simple-false-true": false,
-    "simple-true-false": false,
-    "simple-true-true": false,
-    "medium-false-false": false,
-    "medium-false-true": false,
-    "medium-true-false": true,
-    "medium-true-true": true,
-    "complex-false-false": false,
-    "complex-false-true": true,
-    "complex-true-false": false,
-    "complex-true-true": true,
+    "simple-false": false,
+    "simple-true": false,
+    "medium-false": false,
+    "medium-true": true,
+    "complex-false": false,
+    "complex-true": true,
   };
 
   for (const tier of tiers) {
-    for (const perRun of [false, true]) {
-      for (const autoComplex of [false, true]) {
-        const key = `${tier}-${perRun}-${autoComplex}`;
-        it(`${key} → ${expected[key]}`, () => {
-          expect(shouldRunAudit(tier, perRun, autoComplex)).toBe(expected[key]);
-        });
-      }
+    for (const autoAudit of [false, true]) {
+      const key = `${tier}-${autoAudit}`;
+      it(`${key} → ${expected[key]}`, () => {
+        expect(shouldRunAudit(tier, undefined, autoAudit)).toBe(expected[key]);
+      });
     }
   }
+});
+
+describe("shouldRunAudit — perRunOverride=false always skips non-simple", () => {
+  it("medium + perRunOverride=false → skip even with autoAudit=true", () => {
+    expect(shouldRunAudit("medium", false, true)).toBe(false);
+  });
+
+  it("complex + perRunOverride=false → skip even with autoAudit=true", () => {
+    expect(shouldRunAudit("complex", false, true)).toBe(false);
+  });
 });
