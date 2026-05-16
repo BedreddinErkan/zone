@@ -17,6 +17,10 @@ export interface UsageRecord {
   cache_read: number;
   output: number;
   est_cost_usd: number;
+  /** K.3.C3: total wall-clock duration of the run in ms. Set only on the terminal run-summary record. */
+  latencyMs?: number;
+  /** K.3.C3: why the run ended. Set only on the terminal run-summary record. */
+  terminationReason?: string;
 }
 
 export type UsagePeriod = "day" | "week" | "month" | "all";
@@ -212,6 +216,41 @@ export async function getUsage(
     byProvider: cleanProvider,
     byModel: cleanModel,
   };
+}
+
+/**
+ * K.3.C3: Append a zero-cost run-summary record for a completed top-level run.
+ * Carries `latencyMs` and `terminationReason` without affecting cost/token totals.
+ * Uses sentinel model "__run_summary__" so it does not inflate model breakdowns.
+ * Best-effort — callers must not rely on this completing before returning to the user.
+ */
+export async function recordRunSummary(
+  params: {
+    userId: string;
+    runId: string;
+    latencyMs: number;
+    terminationReason: string;
+  },
+  options?: { storageDir?: string }
+): Promise<void> {
+  const record: UsageRecord = {
+    timestamp: new Date().toISOString(),
+    userId: params.userId,
+    runId: params.runId,
+    provider: "openai",
+    model: "__run_summary__",
+    input_uncached: 0,
+    cache_write: 0,
+    cache_read: 0,
+    output: 0,
+    est_cost_usd: 0,
+    latencyMs: params.latencyMs,
+    terminationReason: params.terminationReason,
+  };
+  const dir = getStorageDir(options?.storageDir);
+  const file = getStorageFile(params.userId, options?.storageDir);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(record) + "\n", "utf8");
 }
 
 // Per-run cost: sum of est_cost_usd across every record with this runId.

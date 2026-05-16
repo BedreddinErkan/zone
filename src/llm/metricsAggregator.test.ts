@@ -232,3 +232,40 @@ describe("aggregateMetrics — latency percentiles", () => {
     expect(result.latencyMs.p95).toBe(200);
   });
 });
+
+describe("K.3.C3 — terminationReason + latencyMs propagated from run-summary records", () => {
+  it("terminationDistribution populated when terminationReason present on runs", () => {
+    const runs: RunRecord[] = [
+      makeRun({ runId: "r1", terminationReason: "natural_completion", latencyMs: 2_000 }),
+      makeRun({ runId: "r2", terminationReason: "natural_completion", latencyMs: 3_500 }),
+      makeRun({ runId: "r3", terminationReason: "max_iterations", latencyMs: 8_000 }),
+      makeRun({ runId: "r4" }), // old record without summary — excluded from distribution
+    ];
+
+    const result = aggregateMetrics({ userId: "u1", period: "day", runs, now: NOW });
+
+    expect(result.terminationDistribution).toEqual({
+      natural_completion: 2,
+      max_iterations: 1,
+    });
+    expect(result.runs).toBe(4); // all 4 counted regardless
+  });
+
+  it("p50 and p95 are non-zero when latencyMs present, old records without it are excluded from stats", () => {
+    const runs: RunRecord[] = [
+      makeRun({ runId: "r1", terminationReason: "natural_completion", latencyMs: 1_200 }),
+      makeRun({ runId: "r2", terminationReason: "daily_usd_cap_exceeded", latencyMs: 50 }),
+      makeRun({ runId: "r3" }), // no latency — excluded from percentile calc
+    ];
+
+    const result = aggregateMetrics({ userId: "u1", period: "day", runs, now: NOW });
+
+    // sorted latencies: [50, 1200]; p50 idx = floor(0.5*1)=0 → 50; p95 idx = 0 → 50
+    expect(result.latencyMs.p50).toBe(50);
+    expect(result.latencyMs.p95).toBe(50);
+    expect(result.terminationDistribution).toEqual({
+      natural_completion: 1,
+      daily_usd_cap_exceeded: 1,
+    });
+  });
+});

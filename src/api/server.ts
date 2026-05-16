@@ -2131,12 +2131,19 @@ const metricsCache = new Map<string, { result: ReturnType<typeof aggregateMetric
 /**
  * Build per-run summaries from raw UsageRecord JSONL.
  * Groups by runId, summing cost + cache tokens so each run appears once.
- * tier/terminationReason/latencyMs are absent from UsageRecord — they default
- * to undefined until run-level telemetry is added (K.3 Commit 3 pending).
+ * latencyMs and terminationReason come from the K.3.C3 terminal run-summary
+ * record (model: "__run_summary__") appended by agentLoop on completion.
  */
 function buildRunRecords(userId: string): RunRecord[] {
   const records = readRecords(userId);
-  const runMap = new Map<string, { costUsd: number; cacheTokens: number; totalTokens: number; ts: number }>();
+  const runMap = new Map<string, {
+    costUsd: number;
+    cacheTokens: number;
+    totalTokens: number;
+    ts: number;
+    latencyMs?: number;
+    terminationReason?: string;
+  }>();
 
   for (const r of records) {
     const key = r.runId || `__anon_${r.timestamp}`;
@@ -2153,12 +2160,17 @@ function buildRunRecords(userId: string): RunRecord[] {
       existing.cacheTokens += cacheTokens;
       existing.totalTokens += tokens;
       if (!Number.isNaN(ts)) existing.ts = Math.min(existing.ts, ts);
+      // Take from whichever record carries them (only the summary record will).
+      if (r.latencyMs !== undefined) existing.latencyMs = r.latencyMs;
+      if (r.terminationReason !== undefined) existing.terminationReason = r.terminationReason;
     } else {
       runMap.set(key, {
         costUsd: r.est_cost_usd || 0,
         cacheTokens,
         totalTokens: tokens,
         ts: Number.isNaN(ts) ? Date.now() : ts,
+        latencyMs: r.latencyMs,
+        terminationReason: r.terminationReason,
       });
     }
   }
@@ -2169,6 +2181,8 @@ function buildRunRecords(userId: string): RunRecord[] {
     cacheTokens: data.cacheTokens,
     totalTokens: data.totalTokens,
     ts: data.ts,
+    latencyMs: data.latencyMs,
+    terminationReason: data.terminationReason,
   }));
 }
 

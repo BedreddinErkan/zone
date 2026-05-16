@@ -27,7 +27,7 @@ import type { TaskClassification, TaskTier } from "./taskClassifier.js";
 import { resolveTierLimits } from "./tierLimits.js";
 import { resolveDailyUsdCap } from "./usdCapResolver.js";
 import { loadOrgPolicy } from "./policyLoader.js";
-import { getUsage } from "../usage/usageTracker.js";
+import { getUsage, recordRunSummary } from "../usage/usageTracker.js";
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { extractUsage } from "./recordingClient.js";
 import {
@@ -1843,6 +1843,7 @@ export function validatePassedClaim(
 }
 
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
+  const runStartTs = Date.now();
   const scopedContext: Parameters<typeof withRequestContext>[0] = {};
   if (typeof input.userId === "string" && input.userId.trim()) {
     scopedContext.userId = input.userId.trim();
@@ -1856,7 +1857,22 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     scopedContext.parentRunId = input.subagent.parentRunId;
   }
   try {
-    return await withRequestContext(scopedContext, () => runAgentLoopScoped(input));
+    const result = await withRequestContext(scopedContext, () => runAgentLoopScoped(input));
+    // K.3.C3: emit terminal run-summary record for top-level runs only.
+    // Best-effort — failure must not affect the caller's result.
+    if (!input.subagent && input.runId) {
+      const userId =
+        typeof input.userId === "string" && input.userId.trim()
+          ? input.userId.trim()
+          : "local-dev";
+      recordRunSummary({
+        userId,
+        runId: input.runId.trim(),
+        latencyMs: Date.now() - runStartTs,
+        terminationReason: result.terminationReason ?? "unknown",
+      }).catch(() => {});
+    }
+    return result;
   } finally {
     if (!input.subagent && input.runId) {
       resetSubagentCallCount(input.runId);

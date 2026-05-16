@@ -220,6 +220,43 @@ describe("/api/metrics", () => {
     expect(body.period).toBe("day");
   });
 
+  it("K.3.C3: terminationDistribution populated when run-summary records present", async () => {
+    // LLM call records (no terminationReason)
+    const llmRecord = makeUsageRecord({ runId: "run_x", est_cost_usd: 0.02 });
+    // Run-summary sentinel records (zero cost, carries terminationReason + latencyMs)
+    const summaryA = makeUsageRecord({
+      runId: "run_x",
+      est_cost_usd: 0,
+      input_uncached: 0,
+      cache_read: 0,
+      output: 0,
+      terminationReason: "natural_completion",
+      latencyMs: 5_000,
+    });
+    const summaryB = makeUsageRecord({
+      runId: "run_y",
+      est_cost_usd: 0.01,
+      terminationReason: "max_iterations",
+      latencyMs: 12_000,
+    });
+    readRecordsMock.mockReturnValue([llmRecord, summaryA, summaryB]);
+
+    const res = await fetch(`${baseUrl}/api/metrics?period=day`);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    // run_x + run_y = 2 distinct runs
+    expect(body.runs).toBe(2);
+    expect(body.terminationDistribution).toEqual({
+      natural_completion: 1,
+      max_iterations: 1,
+    });
+    // p50/p95 from [5000, 12000] → sorted [5000, 12000]
+    // p50: floor(0.5*1)=0 → 5000; p95: floor(0.95*1)=0 → 5000
+    expect(body.latencyMs.p50).toBe(5_000);
+    expect(body.latencyMs.p95).toBe(5_000);
+  });
+
   it("cache hit: second call uses cached result without re-scanning records", async () => {
     readRecordsMock.mockReturnValue([makeUsageRecord()]);
 
