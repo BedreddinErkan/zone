@@ -86,7 +86,8 @@ Output ONLY valid JSON:
 }`;
 
 const DEFAULT_TIMEOUT_MS = 5000;
-const CONFIDENCE_THRESHOLD = 0.5;
+/** Confidence gate: classifier outputs below this threshold are overridden to "medium". */
+export const CLASSIFIER_CONFIDENCE_THRESHOLD = 0.5;
 const MAX_OUTPUT_TOKENS = 200;
 
 const classificationCache = new Map<string, TaskClassification>();
@@ -278,9 +279,20 @@ export async function classifyTask(
 
     const parsed = parseClassifierResponse(extraction.text);
 
-    if (parsed.confidence < CONFIDENCE_THRESHOLD) {
+    if (parsed.confidence < CLASSIFIER_CONFIDENCE_THRESHOLD) {
       const fallback = buildFallback(model, costUsd, startTime, "low confidence");
       classificationCache.set(cacheKey, fallback);
+      if (parsed.tier !== "medium") {
+        log(
+          "[zone-tier-low-confidence-fallback]",
+          JSON.stringify({
+            classifierTier: parsed.tier,
+            forcedTier: "medium",
+            confidence: parsed.confidence,
+            threshold: CLASSIFIER_CONFIDENCE_THRESHOLD,
+          })
+        );
+      }
       log(
         "[zone-task-classified]",
         JSON.stringify({

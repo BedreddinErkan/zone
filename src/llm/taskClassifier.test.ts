@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { classifyTask, clearClassificationCache } from "./taskClassifier.js";
+import {
+  classifyTask,
+  clearClassificationCache,
+  CLASSIFIER_CONFIDENCE_THRESHOLD,
+} from "./taskClassifier.js";
 
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
@@ -512,5 +516,140 @@ describe("Phase Q.8 — complex-tier triggers for multi-file rename", () => {
     expect(systemMsg).toContain("across all N files");
     expect(systemMsg).toContain("3+ file paths");
     expect(systemMsg).toContain("Counter-examples");
+  });
+});
+
+describe("Phase K.2 — confidence gate", () => {
+  it("high confidence (0.92) + complex tier → tier stays complex, no fallback telemetry", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "complex",
+          estimatedFiles: 12,
+          estimatedIterations: 35,
+          needsSubagent: true,
+          confidence: 0.92,
+          reasoning: "cross-cutting refactor",
+        })
+      )
+    );
+
+    const result = await classifyTask("high-confidence complex task");
+
+    expect(result.tier).toBe("complex");
+    expect(result.fallbackUsed).toBeUndefined();
+    const fallbackLogCall = consoleLogSpy.mock.calls.find(
+      (call) => String(call[0] ?? "") === "[zone-tier-low-confidence-fallback]"
+    );
+    expect(fallbackLogCall).toBeUndefined();
+  });
+
+  it("low confidence (0.3) + complex tier → forced to medium + [zone-tier-low-confidence-fallback] emitted", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "complex",
+          estimatedFiles: 10,
+          estimatedIterations: 30,
+          needsSubagent: true,
+          confidence: 0.3,
+          reasoning: "uncertain scope",
+        })
+      )
+    );
+
+    const result = await classifyTask("low-confidence complex task");
+
+    expect(result.tier).toBe("medium");
+    expect(result.fallbackUsed).toBe(true);
+
+    const fallbackLogCall = consoleLogSpy.mock.calls.find(
+      (call) => String(call[0] ?? "") === "[zone-tier-low-confidence-fallback]"
+    );
+    expect(fallbackLogCall).toBeDefined();
+    const payload = JSON.parse(String(fallbackLogCall![1]));
+    expect(payload).toMatchObject({
+      classifierTier: "complex",
+      forcedTier: "medium",
+      confidence: 0.3,
+      threshold: CLASSIFIER_CONFIDENCE_THRESHOLD,
+    });
+  });
+
+  it("low confidence (0.3) + medium tier → stays medium, no [zone-tier-low-confidence-fallback]", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "medium",
+          estimatedFiles: 5,
+          estimatedIterations: 15,
+          needsSubagent: false,
+          confidence: 0.3,
+          reasoning: "uncertain, but medium is already the safe default",
+        })
+      )
+    );
+
+    const result = await classifyTask("low-confidence medium task");
+
+    expect(result.tier).toBe("medium");
+    expect(result.fallbackUsed).toBe(true);
+    // No noise log when falling back to an already-safe tier
+    const fallbackLogCall = consoleLogSpy.mock.calls.find(
+      (call) => String(call[0] ?? "") === "[zone-tier-low-confidence-fallback]"
+    );
+    expect(fallbackLogCall).toBeUndefined();
+  });
+
+  it("confidence exactly at threshold (0.5) → not below threshold, no override", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "simple",
+          estimatedFiles: 1,
+          estimatedIterations: 5,
+          needsSubagent: false,
+          confidence: 0.5,
+          reasoning: "borderline simple",
+        })
+      )
+    );
+
+    const result = await classifyTask("threshold-edge task");
+
+    // 0.5 is NOT below the threshold (< 0.5 is the gate condition), so no fallback
+    expect(result.tier).toBe("simple");
+    expect(result.fallbackUsed).toBeUndefined();
+  });
+
+  it("low confidence (0.3) + simple tier → forced to medium + fallback telemetry emitted", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "simple",
+          estimatedFiles: 1,
+          estimatedIterations: 4,
+          needsSubagent: false,
+          confidence: 0.3,
+          reasoning: "uncertain simple classification",
+        })
+      )
+    );
+
+    const result = await classifyTask("low-confidence simple task");
+
+    expect(result.tier).toBe("medium");
+    expect(result.fallbackUsed).toBe(true);
+
+    const fallbackLogCall = consoleLogSpy.mock.calls.find(
+      (call) => String(call[0] ?? "") === "[zone-tier-low-confidence-fallback]"
+    );
+    expect(fallbackLogCall).toBeDefined();
+    const payload = JSON.parse(String(fallbackLogCall![1]));
+    expect(payload).toMatchObject({
+      classifierTier: "simple",
+      forcedTier: "medium",
+      confidence: 0.3,
+    });
   });
 });
