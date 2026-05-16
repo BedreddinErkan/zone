@@ -2627,4 +2627,77 @@ export function LoginForm() {
     });
     expect(runLlmPatchFlowMock).toHaveBeenCalled();
   });
+
+  describe("K.4 — patch response includes userFacingMessage, canResume, resumeHint", () => {
+    it("tokenBudgetExceeded=true → canResume=true and userFacingMessage mentions ZONE_TIER_TOKEN_CAP", async () => {
+      runLlmPatchFlowMock.mockResolvedValue({
+        ok: true,
+        tokenBudgetExceeded: true,
+        patchPreview: "=== PATCH ===",
+        warnings: [],
+        applyPatches: [],
+        patchResults: [],
+        fileDiffs: [],
+      });
+
+      const response = await fetch(`${baseUrl}/api/patch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: "fix the bug", repoPath: "/tmp/repo", userId: "u1" }),
+      });
+
+      const body = await response.json();
+      expect(response.status).toBe(200);
+      expect(body.canResume).toBe(true);
+      expect(body.userFacingMessage).toContain("ZONE_TIER_TOKEN_CAP");
+      expect(body.resumeHint).toContain("split");
+    });
+
+    it("loop_detected=true → canResume=false and userFacingMessage mentions loop", async () => {
+      runLlmPatchFlowMock.mockResolvedValue({
+        ok: true,
+        loopDetected: true,
+        patchPreview: "=== PATCH ===",
+        warnings: [],
+        applyPatches: [],
+        patchResults: [],
+        fileDiffs: [],
+      });
+
+      const response = await fetch(`${baseUrl}/api/patch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: "fix the bug", repoPath: "/tmp/repo", userId: "u1" }),
+      });
+
+      const body = await response.json();
+      expect(response.status).toBe(200);
+      expect(body.canResume).toBe(false);
+      expect(body.userFacingMessage).toContain("loop");
+      expect(body.resumeHint).toBeNull();
+    });
+
+    it("normal completion → canResume=true and success message", async () => {
+      runLlmPatchFlowMock.mockResolvedValue({
+        ok: true,
+        patchPreview: "=== PATCH ===",
+        warnings: [],
+        applyPatches: [],
+        patchResults: [],
+        fileDiffs: [],
+      });
+
+      const response = await fetch(`${baseUrl}/api/patch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: "fix the bug", repoPath: "/tmp/repo", userId: "u1" }),
+      });
+
+      const body = await response.json();
+      expect(response.status).toBe(200);
+      expect(body.canResume).toBe(true);
+      expect(body.userFacingMessage).toBe("Run completed successfully.");
+      expect(body.resumeHint).toBeNull();
+    });
+  });
 });
