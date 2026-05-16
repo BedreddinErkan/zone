@@ -375,3 +375,290 @@ describe("W.2 — inline Python syntax validation", () => {
     expect(result.success).toBe(true);
   });
 });
+
+// ── W.3 experimental checker helpers ─────────────────────────────────────────
+
+/** Go: which + gofmt succeed */
+function makeExecGoSuccess(): void {
+  execMock.mockImplementation(
+    (_cmd: string, _opts: unknown, callback: (err: null, result: { stdout: string; stderr: string }) => void) => {
+      callback(null, { stdout: "", stderr: "" });
+      return {} as ReturnType<typeof import("node:child_process").exec>;
+    }
+  );
+}
+
+/** Go: which succeeds, gofmt exits non-zero with parse error on stderr */
+function makeExecGoSyntaxError(): void {
+  execMock.mockImplementation(
+    (cmd: string, _opts: unknown, callback: (err: Error | null, result?: { stdout: string; stderr: string }) => void) => {
+      if (typeof cmd === "string" && /^gofmt\b/.test(cmd)) {
+        const stderr = `/tmp/zone-tsc-abc.go:3:1: expected declaration, found 'IDENT' bad\n`;
+        callback(Object.assign(new Error("gofmt failed"), { code: 2, stdout: "", stderr }));
+      } else {
+        callback(null, { stdout: "/usr/bin/gofmt", stderr: "" });
+      }
+      return {} as ReturnType<typeof import("node:child_process").exec>;
+    }
+  );
+}
+
+/** Ruby: which + ruby -c succeed */
+function makeExecRubySuccess(): void {
+  execMock.mockImplementation(
+    (_cmd: string, _opts: unknown, callback: (err: null, result: { stdout: string; stderr: string }) => void) => {
+      callback(null, { stdout: "Syntax OK", stderr: "" });
+      return {} as ReturnType<typeof import("node:child_process").exec>;
+    }
+  );
+}
+
+/** Ruby: which succeeds, ruby -c exits non-zero with SyntaxError on stderr */
+function makeExecRubySyntaxError(): void {
+  execMock.mockImplementation(
+    (cmd: string, _opts: unknown, callback: (err: Error | null, result?: { stdout: string; stderr: string }) => void) => {
+      if (typeof cmd === "string" && /^ruby\b/.test(cmd)) {
+        const stderr = `/tmp/zone-tsc-abc.rb:2: syntax error, unexpected end-of-input (SyntaxError)\n`;
+        callback(Object.assign(new Error("ruby -c failed"), { code: 1, stdout: "", stderr }));
+      } else {
+        callback(null, { stdout: "/usr/bin/ruby", stderr: "" });
+      }
+      return {} as ReturnType<typeof import("node:child_process").exec>;
+    }
+  );
+}
+
+/** Java: which + javac succeed */
+function makeExecJavaSuccess(): void {
+  execMock.mockImplementation(
+    (_cmd: string, _opts: unknown, callback: (err: null, result: { stdout: string; stderr: string }) => void) => {
+      callback(null, { stdout: "", stderr: "" });
+      return {} as ReturnType<typeof import("node:child_process").exec>;
+    }
+  );
+}
+
+/** Java: which succeeds, javac exits non-zero with error on stderr */
+function makeExecJavaSyntaxError(): void {
+  execMock.mockImplementation(
+    (cmd: string, _opts: unknown, callback: (err: Error | null, result?: { stdout: string; stderr: string }) => void) => {
+      if (typeof cmd === "string" && /^javac\b/.test(cmd)) {
+        const stderr = `/tmp/zone-tsc-abc.java:5: error: ';' expected\n`;
+        callback(Object.assign(new Error("javac failed"), { code: 1, stdout: "", stderr }));
+      } else {
+        callback(null, { stdout: "/usr/bin/javac", stderr: "" });
+      }
+      return {} as ReturnType<typeof import("node:child_process").exec>;
+    }
+  );
+}
+
+function setExperimentalCheckers(csv: string): void {
+  process.env.ZONE_EXPERIMENTAL_SYNTAX_CHECKERS = csv;
+}
+
+function clearExperimentalCheckers(): void {
+  delete process.env.ZONE_EXPERIMENTAL_SYNTAX_CHECKERS;
+}
+
+// ── Go tests ──────────────────────────────────────────────────────────────────
+
+describe("W.3 — Go experimental checker", () => {
+  afterEach(() => clearExperimentalCheckers());
+
+  it("disabled by default — .go file approved without invoking gofmt", async () => {
+    makeExecGoSyntaxError(); // would reject if called
+    writeRepoFile("src/main.go", "package main\nfunc main() {}\n");
+
+    const result = await executeTool(
+      "apply_patch",
+      {
+        filePath: "src/main.go",
+        patch: "--- FIND ---\nfunc main() {}\n--- REPLACE ---\nfunc main() { return }",
+        intent: "modify",
+        scope: null,
+      },
+      repoPath, undefined, {}
+    );
+
+    // Experimental gate blocks checker → treat as no checker → approve
+    expect(result.success).toBe(true);
+  });
+
+  it("enabled + valid Go file — patch approved", async () => {
+    setExperimentalCheckers("go");
+    makeExecGoSuccess();
+    writeRepoFile("src/ok.go", "package main\nfunc main() {}\n");
+
+    const result = await executeTool(
+      "apply_patch",
+      {
+        filePath: "src/ok.go",
+        patch: "--- FIND ---\nfunc main() {}\n--- REPLACE ---\nfunc main() { return }",
+        intent: "modify",
+        scope: null,
+      },
+      repoPath, undefined, {}
+    );
+
+    expect(result.success).toBe(true);
+  });
+
+  it("enabled + gofmt parse error — patch rejected and rolled back", async () => {
+    setExperimentalCheckers("go");
+    const original = "package main\nfunc main() {}\n";
+    writeRepoFile("src/broken.go", original);
+    makeExecGoSyntaxError();
+
+    const result = await executeTool(
+      "apply_patch",
+      {
+        filePath: "src/broken.go",
+        patch: "--- FIND ---\nfunc main() {}\n--- REPLACE ---\nfunc main() { bad",
+        intent: "modify",
+        scope: null,
+      },
+      repoPath, undefined, {}
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.output).toMatch(/^APPLY_ROLLED_BACK\n/);
+    expect(result.output).toContain("src/broken.go");
+    expect(result.rejectionReason).toBe("inline_ts_syntax_error");
+    expect(readRepoFile("src/broken.go")).toBe(original);
+  });
+});
+
+// ── Ruby tests ────────────────────────────────────────────────────────────────
+
+describe("W.3 — Ruby experimental checker", () => {
+  afterEach(() => clearExperimentalCheckers());
+
+  it("disabled by default — .rb file approved without invoking ruby -c", async () => {
+    makeExecRubySyntaxError(); // would reject if called
+    writeRepoFile("src/app.rb", "def foo; end\n");
+
+    const result = await executeTool(
+      "apply_patch",
+      {
+        filePath: "src/app.rb",
+        patch: "--- FIND ---\ndef foo; end\n--- REPLACE ---\ndef foo; 1; end",
+        intent: "modify",
+        scope: null,
+      },
+      repoPath, undefined, {}
+    );
+
+    expect(result.success).toBe(true);
+  });
+
+  it("enabled + valid Ruby file — patch approved", async () => {
+    setExperimentalCheckers("rb");
+    makeExecRubySuccess();
+    writeRepoFile("src/ok.rb", "def foo; end\n");
+
+    const result = await executeTool(
+      "apply_patch",
+      {
+        filePath: "src/ok.rb",
+        patch: "--- FIND ---\ndef foo; end\n--- REPLACE ---\ndef foo; 1; end",
+        intent: "modify",
+        scope: null,
+      },
+      repoPath, undefined, {}
+    );
+
+    expect(result.success).toBe(true);
+  });
+
+  it("enabled + ruby -c SyntaxError — patch rejected and rolled back", async () => {
+    setExperimentalCheckers("rb");
+    const original = "def foo; end\n";
+    writeRepoFile("src/broken.rb", original);
+    makeExecRubySyntaxError();
+
+    const result = await executeTool(
+      "apply_patch",
+      {
+        filePath: "src/broken.rb",
+        patch: "--- FIND ---\ndef foo; end\n--- REPLACE ---\ndef foo",
+        intent: "modify",
+        scope: null,
+      },
+      repoPath, undefined, {}
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.output).toMatch(/^APPLY_ROLLED_BACK\n/);
+    expect(result.output).toContain("SyntaxError");
+    expect(result.rejectionReason).toBe("inline_ts_syntax_error");
+    expect(readRepoFile("src/broken.rb")).toBe(original);
+  });
+});
+
+// ── Java tests ────────────────────────────────────────────────────────────────
+
+describe("W.3 — Java experimental checker", () => {
+  afterEach(() => clearExperimentalCheckers());
+
+  it("disabled by default — .java file approved without invoking javac", async () => {
+    makeExecJavaSyntaxError(); // would reject if called
+    writeRepoFile("src/Main.java", "public class Main { public static void main(String[] args) {} }\n");
+
+    const result = await executeTool(
+      "apply_patch",
+      {
+        filePath: "src/Main.java",
+        patch: "--- FIND ---\npublic class Main { public static void main(String[] args) {} }\n--- REPLACE ---\npublic class Main { }",
+        intent: "modify",
+        scope: null,
+      },
+      repoPath, undefined, {}
+    );
+
+    expect(result.success).toBe(true);
+  });
+
+  it("enabled + valid Java file — patch approved", async () => {
+    setExperimentalCheckers("java");
+    makeExecJavaSuccess();
+    writeRepoFile("src/Main.java", "public class Main { public static void main(String[] args) {} }\n");
+
+    const result = await executeTool(
+      "apply_patch",
+      {
+        filePath: "src/Main.java",
+        patch: "--- FIND ---\npublic class Main { public static void main(String[] args) {} }\n--- REPLACE ---\npublic class Main { }",
+        intent: "modify",
+        scope: null,
+      },
+      repoPath, undefined, {}
+    );
+
+    expect(result.success).toBe(true);
+  });
+
+  it("enabled + javac error — patch rejected and rolled back", async () => {
+    setExperimentalCheckers("java");
+    const original = "public class Main { public static void main(String[] args) {} }\n";
+    writeRepoFile("src/Main.java", original);
+    makeExecJavaSyntaxError();
+
+    const result = await executeTool(
+      "apply_patch",
+      {
+        filePath: "src/Main.java",
+        patch: "--- FIND ---\npublic class Main { public static void main(String[] args) {} }\n--- REPLACE ---\npublic class Main {",
+        intent: "modify",
+        scope: null,
+      },
+      repoPath, undefined, {}
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.output).toMatch(/^APPLY_ROLLED_BACK\n/);
+    expect(result.output).toContain("src/Main.java");
+    expect(result.rejectionReason).toBe("inline_ts_syntax_error");
+    expect(readRepoFile("src/Main.java")).toBe(original);
+  });
+});

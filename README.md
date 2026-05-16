@@ -176,8 +176,27 @@ ZONE_ENABLE_MESSAGE_CACHE=1                 # Anthropic prompt caching (default 
 ZONE_VERBOSE_LOGS=0                         # 1 for diagnostic output
 ZONE_DAILY_USD_CAP=10                       # per-user daily spend cap (USD); 0 = unlimited
 ZONE_ORG_POLICY_PATH=/etc/zone/policy.json  # org-level policy file (K.5)
+ZONE_EXPERIMENTAL_SYNTAX_CHECKERS=          # CSV of experimental checker ids (e.g. "go,ruby,java")
 PORT=3000
 ```
+
+### Experimental syntax checkers
+
+Zone validates patched files inline before committing them to disk. TypeScript and Python checkers are first-class (always active). Go, Ruby, and Java checkers are experimental and opt-in:
+
+```bash
+export ZONE_EXPERIMENTAL_SYNTAX_CHECKERS=go,ruby,java
+```
+
+| Lang | Command | Timeout | Notes |
+|------|---------|---------|-------|
+| Go | `gofmt -e` | 5s | AST parse, no link step |
+| Ruby | `ruby -c` | 5s | Parse-only, no execution |
+| Java | `javac` | 10s | JVM warmup; opt-in due to latency |
+
+All checkers use `gracefulSkip:true` — if the binary is absent from PATH, Zone silently approves the patch rather than blocking.
+
+Rust is deliberately omitted: `rustfmt --check` is too narrow as a syntax proxy, and `rustc --emit=metadata` is 3–8s per file. Use `run_command: cargo check` for Rust verification instead.
 
 All keys can also be set through **Settings → API Keys** after first launch — no `.env` file required for personal use.
 

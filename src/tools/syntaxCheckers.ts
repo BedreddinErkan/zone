@@ -1,10 +1,14 @@
 /**
- * W.1/W.2: SYNTAX_CHECKERS table.
+ * W.1–W.3: SYNTAX_CHECKERS table.
  *
  * Single source of truth for per-language inline syntax validation.
  * W.1: TS entry (behaviour-identical refactor of the former hard-coded path).
  * W.2: Python entry (py_compile, first-class).
- * W.3 (future): Go/Ruby/Java experimental entries.
+ * W.3: Go (gofmt), Ruby (ruby -c), Java (javac) — experimental, env-gated.
+ *
+ * Experimental checkers only activate when their id appears in the
+ * ZONE_EXPERIMENTAL_SYNTAX_CHECKERS env var (CSV, e.g. "go,ruby,java").
+ * Omitting the var (default) leaves only first-class checkers active.
  */
 
 import path from "node:path";
@@ -134,6 +138,72 @@ export const SYNTAX_CHECKERS: SyntaxChecker[] = [
     timeoutMs: 5000,
     gracefulSkip: true,
   },
+  // ---------------------------------------------------------------------------
+  // W.3 — experimental checkers (env-gated via ZONE_EXPERIMENTAL_SYNTAX_CHECKERS)
+  // ---------------------------------------------------------------------------
+  {
+    id: "go",
+    extensions: [".go"],
+    status: "experimental",
+    // gofmt -e parses to AST; errors go to stderr, exit 0 even on bad input.
+    // Non-zero exit indicates a fatal parse error; stderr carries the detail.
+    cmdTemplate: (fp) => ({ cmd: "gofmt", args: ["-e", fp] }),
+    availabilityCheck: () => whichCheck("gofmt"),
+    isBlockingError: (errors) => errors.length > 0,
+    parseErrors: (_stdout, stderr, _exitCode) => {
+      // gofmt -e stderr format: <file>:<line>:<col>: <message>
+      const out: ParsedSyntaxError[] = [];
+      const re = /^.+:(\d+):(\d+):\s*(.+)$/gm;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(stderr)) !== null) {
+        out.push({ line: parseInt(m[1], 10), col: parseInt(m[2], 10), message: m[3] });
+      }
+      return out;
+    },
+    timeoutMs: 5000,
+    gracefulSkip: true,
+  },
+  {
+    id: "rb",
+    extensions: [".rb"],
+    status: "experimental",
+    // ruby -c parses without execution; success → "Syntax OK" on stdout; error → stderr
+    cmdTemplate: (fp) => ({ cmd: "ruby", args: ["-c", fp] }),
+    availabilityCheck: () => whichCheck("ruby"),
+    isBlockingError: (errors) => errors.length > 0,
+    parseErrors: (_stdout, stderr, _exitCode) => {
+      // ruby -c error format: <file>:<line>: <message> (SyntaxError)
+      const out: ParsedSyntaxError[] = [];
+      const m = stderr.match(/^.+:(\d+):\s*(.+?)\s*\(SyntaxError\)$/m);
+      if (m) {
+        out.push({ line: parseInt(m[1], 10), code: "SyntaxError", message: m[2] });
+      }
+      return out;
+    },
+    timeoutMs: 5000,
+    gracefulSkip: true,
+  },
+  {
+    id: "java",
+    extensions: [".java"],
+    status: "experimental",
+    // javac -d /tmp prevents .class output in the repo; -Xlint:none narrows to errors
+    cmdTemplate: (fp) => ({ cmd: "javac", args: ["-d", "/tmp/zone-javac-out", "-Xlint:none", fp] }),
+    availabilityCheck: () => whichCheck("javac"),
+    isBlockingError: (errors) => errors.length > 0,
+    parseErrors: (_stdout, stderr, _exitCode) => {
+      // javac error format: <file>:<line>: error: <message>
+      const out: ParsedSyntaxError[] = [];
+      const re = /^.+:(\d+):\s*error:\s*(.+)$/gm;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(stderr)) !== null) {
+        out.push({ line: parseInt(m[1], 10), message: m[2] });
+      }
+      return out;
+    },
+    timeoutMs: 10000,
+    gracefulSkip: true,
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -142,5 +212,15 @@ export const SYNTAX_CHECKERS: SyntaxChecker[] = [
 
 export function findCheckerForFile(filepath: string): SyntaxChecker | null {
   const ext = path.extname(filepath).toLowerCase();
-  return SYNTAX_CHECKERS.find((c) => c.extensions.includes(ext)) ?? null;
+  const checker = SYNTAX_CHECKERS.find((c) => c.extensions.includes(ext));
+  if (!checker) return null;
+
+  // Experimental checkers require opt-in via ZONE_EXPERIMENTAL_SYNTAX_CHECKERS
+  if (checker.status === "experimental") {
+    const csv = process.env.ZONE_EXPERIMENTAL_SYNTAX_CHECKERS ?? "";
+    const enabled = csv.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!enabled.includes(checker.id)) return null;
+  }
+
+  return checker;
 }
