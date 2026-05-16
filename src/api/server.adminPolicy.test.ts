@@ -141,7 +141,7 @@ describe("/api/admin/policy", () => {
   it("GET: 200 with parsed policy when policy file exists", async () => {
     process.env.ADMIN_SECRET = "secret";
     process.env.ZONE_ORG_POLICY_PATH = policyPath;
-    const policy = { dailyUsdCap: 5, allowedTiers: ["light", "medium"] };
+    const policy = { dailyUsdCap: 5, allowedTiers: ["simple", "medium"] };
     fs.writeFileSync(policyPath, JSON.stringify(policy), "utf-8");
 
     const res = await fetch(`${baseUrl}/api/admin/policy`, {
@@ -150,8 +150,19 @@ describe("/api/admin/policy", () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
-    expect(body.policy).toEqual({ dailyUsdCap: 5, allowedTiers: ["light", "medium"] });
+    expect(body.policy).toEqual({ dailyUsdCap: 5, allowedTiers: ["simple", "medium"] });
     expect(body.source).toBe("file");
+  });
+
+  it("GET: 200 + null when ZONE_ORG_POLICY_PATH set but file does not exist", async () => {
+    process.env.ADMIN_SECRET = "secret";
+    process.env.ZONE_ORG_POLICY_PATH = path.join(tmpDir, "nonexistent.json");
+    const res = await fetch(`${baseUrl}/api/admin/policy`, {
+      headers: { "x-admin-secret": "secret" },
+    });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ ok: true, policy: null, source: "missing_file" });
   });
 
   // ── PUT ────────────────────────────────────────────────────────────────────
@@ -196,7 +207,7 @@ describe("/api/admin/policy", () => {
   it("PUT: 200 and GET round-trip returns same policy", async () => {
     process.env.ADMIN_SECRET = "secret";
     process.env.ZONE_ORG_POLICY_PATH = policyPath;
-    const policy = { dailyUsdCap: 20, monthlyUsdCap: 100, allowedTiers: ["light"] as const };
+    const policy = { dailyUsdCap: 20, monthlyUsdCap: 100, allowedTiers: ["simple"] as const };
 
     const putRes = await fetch(`${baseUrl}/api/admin/policy`, {
       method: "PUT",

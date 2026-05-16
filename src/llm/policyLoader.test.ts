@@ -48,7 +48,7 @@ describe("loadOrgPolicy", () => {
     const p = writePolicyFile("full.json", JSON.stringify({
       dailyUsdCap: 50,
       monthlyUsdCap: 1000,
-      allowedTiers: ["light", "medium", "complex"],
+      allowedTiers: ["simple", "medium", "complex"],
       maxSubagentCallsCap: 2,
       autoAuditRequired: true,
     }));
@@ -57,7 +57,7 @@ describe("loadOrgPolicy", () => {
     if (result.ok && result.policy) {
       expect(result.policy.dailyUsdCap).toBe(50);
       expect(result.policy.monthlyUsdCap).toBe(1000);
-      expect(result.policy.allowedTiers).toEqual(["light", "medium", "complex"]);
+      expect(result.policy.allowedTiers).toEqual(["simple", "medium", "complex"]);
       expect(result.policy.maxSubagentCallsCap).toBe(2);
       expect(result.policy.autoAuditRequired).toBe(true);
       expect(result.source).toBe("file");
@@ -86,7 +86,7 @@ describe("loadOrgPolicy", () => {
   });
 
   it("unknown tier in allowedTiers → ok:false schema_invalid", () => {
-    const p = writePolicyFile("tiers.json", JSON.stringify({ allowedTiers: ["light", "ultra"] }));
+    const p = writePolicyFile("tiers.json", JSON.stringify({ allowedTiers: ["simple", "ultra"] }));
     const result = loadOrgPolicy(p);
     expect(result.ok).toBe(false);
     if (!result.ok) {

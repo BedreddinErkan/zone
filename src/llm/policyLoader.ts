@@ -7,7 +7,7 @@ import fs from "node:fs";
 export type OrgPolicy = {
   dailyUsdCap?: number;
   monthlyUsdCap?: number;
-  allowedTiers?: Array<"light" | "medium" | "complex">;
+  allowedTiers?: Array<"simple" | "medium" | "complex">;
   maxSubagentCallsCap?: number;
   autoAuditRequired?: boolean;
 };
@@ -17,7 +17,7 @@ export type PolicyLoadResult =
   | { ok: true; policy: null; source: "absent" }
   | { ok: false; reason: "missing_file" | "parse_error" | "schema_invalid"; detail: string };
 
-const VALID_TIERS = new Set(["light", "medium", "complex"]);
+const VALID_TIERS = new Set(["simple", "medium", "complex"]);
 
 export function validatePolicy(raw: unknown): { valid: true; policy: OrgPolicy } | { valid: false; detail: string } {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {

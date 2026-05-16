@@ -2534,6 +2534,10 @@ app.get("/api/admin/policy", (req, res) => {
 
   const result = loadOrgPolicy(policyPath);
   if (!result.ok) {
+    if (result.reason === "missing_file") {
+      res.json({ ok: true, policy: null, source: "missing_file" });
+      return;
+    }
     res.status(500).json({ ok: false, reason: result.reason, detail: result.detail });
     return;
   }
