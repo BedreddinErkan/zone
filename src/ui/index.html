@@ -1121,6 +1121,13 @@
     .screenshot-modal-close:hover{opacity:1}
     .screenshot-modal-body{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,0.2)}
     .screenshot-modal-image{max-width:100%;max-height:calc(92vh - 60px);object-fit:contain;border-radius:4px;display:block}
+    .metrics-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:14px 0}
+    .metrics-tile{background:var(--surface-alpha-2,rgba(255,255,255,.05));border:1px solid var(--border,#333);border-radius:8px;padding:12px;text-align:center}
+    .metrics-tile-val{font-size:20px;font-family:var(--font-mono,monospace);font-weight:600;color:var(--text-1,#eee);line-height:1.2}
+    .metrics-tile-lbl{font-size:11px;color:var(--text-4,#888);margin-top:4px;text-transform:uppercase;letter-spacing:.05em}
+    .metrics-chart-title{font-size:var(--font-size-sm,12px);font-weight:600;color:var(--text-3,#aaa);margin:14px 0 6px;text-transform:uppercase;letter-spacing:.05em}
+    .metrics-gauge-track{flex:1;max-width:120px;height:6px;border-radius:3px;background:var(--surface-alpha-3,rgba(255,255,255,.08))}
+    .metrics-gauge-fill{height:100%;border-radius:3px;background:var(--violet,#7a5af8);transition:width .3s}
   </style>
 </head>
 <body>
@@ -1273,6 +1280,7 @@
         <button class="mtab" data-stab="tier">Tier Limits</button>
         <button class="mtab" data-stab="variance">Variance</button>
         <button class="mtab" data-stab="general">General</button>
+        <button class="mtab" data-stab="metrics">Metrics</button>
       </div>
       <div class="modal-b" id="settingsBody"></div>
     </div>
@@ -10518,6 +10526,7 @@
     // ---- Settings overlay ----
     let activeSettingsTab = 'usage';
     let _cachedAutoAudit = true; // server default is true; refreshed async on first settings open
+    let _metricsAutoRefreshTimer = null;
 
     function openSettings(tab){
       els.settingsOverlay.classList.add('open');
@@ -10529,6 +10538,10 @@
 
     function renderSettingsTab(tab){
       activeSettingsTab = tab;
+      if (tab !== 'metrics' && _metricsAutoRefreshTimer) {
+        clearInterval(_metricsAutoRefreshTimer);
+        _metricsAutoRefreshTimer = null;
+      }
       document.querySelectorAll('.mtab').forEach(b => b.classList.toggle('active', b.dataset.stab === tab));
       if (tab === 'usage') renderUsageSettings();
       if (tab === 'keys') renderKeysSettings();
@@ -10537,6 +10550,7 @@
       if (tab === 'variance') renderVarianceSettings();
       if (tab === 'general') renderGeneralSettings();
       if (tab === 'model') renderModelSettings();
+      if (tab === 'metrics') renderMetricsSettings();
     }
 
     // BYOM.2 live-sync: Settings → Keys/Model provider radios are gated by
@@ -11606,6 +11620,135 @@
           body.innerHTML = '<div class="row"><div class="k">Error</div><div class="v">Could not reach /api/sweep-results.</div></div>';
         });
     }
+
+    function renderMetricsSettings(){
+      let metricsPeriod = 'week';
+      let lastFetched = null;
+
+      function fmtPct(n){ return typeof n === 'number' ? (n * 100).toFixed(1) + '%' : '—'; }
+      function fmtMs(n){ return typeof n === 'number' ? n + 'ms' : '—'; }
+      function fmtUsd(n){ return typeof n === 'number' ? '$' + n.toFixed(4) : '—'; }
+      function fmtTime(d){ try { return d.toLocaleTimeString(); } catch(e){ return ''; } }
+
+      function getAutoChecked(){
+        const el = document.getElementById('metrics-autorefresh');
+        return el ? el.checked : false;
+      }
+
+      function controlsHtml(lastStr){
+        const opts = ['day','week','month'].map(p =>
+          `<option value="${p}"${p === metricsPeriod ? ' selected' : ''}>${p.charAt(0).toUpperCase()+p.slice(1)}</option>`
+        ).join('');
+        const sel = `<select id="metrics-period" style="padding:3px 8px;background:var(--bg-input,#1e1e1e);border:1px solid var(--border,#444);border-radius:4px;color:inherit;font-size:var(--font-size-sm,12px);cursor:pointer">${opts}</select>`;
+        return `
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+            <label style="font-size:var(--font-size-sm,12px);color:var(--text-3,#aaa)">Period: ${sel}</label>
+            <button id="metrics-refresh" style="padding:3px 10px;background:transparent;border:1px solid var(--border,#444);border-radius:4px;color:inherit;font-size:var(--font-size-sm,12px);cursor:pointer">↻ Refresh</button>
+            <label style="display:flex;align-items:center;gap:5px;font-size:var(--font-size-sm,12px);color:var(--text-3,#aaa);cursor:pointer">
+              <input type="checkbox" id="metrics-autorefresh"> Auto 60s
+            </label>
+            ${lastStr ? `<span style="font-size:11px;color:var(--text-4,#666)">Fetched ${escapeHtml(lastStr)}</span>` : ''}
+          </div>`;
+      }
+
+      function wireControls(){
+        const periodEl = document.getElementById('metrics-period');
+        const refreshBtn = document.getElementById('metrics-refresh');
+        const autoEl = document.getElementById('metrics-autorefresh');
+        if (periodEl) {
+          periodEl.value = metricsPeriod;
+          periodEl.addEventListener('change', () => { metricsPeriod = periodEl.value; load(); });
+        }
+        if (refreshBtn) refreshBtn.addEventListener('click', load);
+        if (autoEl) {
+          autoEl.addEventListener('change', () => {
+            if (autoEl.checked) {
+              if (!_metricsAutoRefreshTimer) _metricsAutoRefreshTimer = setInterval(load, 60_000);
+            } else {
+              clearInterval(_metricsAutoRefreshTimer);
+              _metricsAutoRefreshTimer = null;
+            }
+          });
+        }
+      }
+
+      function paintLoading(){
+        els.settingsBody.innerHTML = `
+          <div class="apikey-section">
+            <div class="apikey-section-title">Metrics</div>
+            ${controlsHtml(lastFetched ? fmtTime(lastFetched) : '')}
+            <div class="metrics-tiles">${Array(7).fill(0).map(() => `
+              <div class="metrics-tile">
+                <div class="skeleton" style="height:22px;width:70px;margin:0 auto"></div>
+                <div class="skeleton" style="height:8px;width:50px;margin:8px auto 0"></div>
+              </div>`).join('')}
+            </div>
+          </div>`;
+        wireControls();
+      }
+
+      function paintStatus(msg){
+        els.settingsBody.innerHTML = `
+          <div class="apikey-section">
+            <div class="apikey-section-title">Metrics</div>
+            ${controlsHtml(lastFetched ? fmtTime(lastFetched) : '')}
+            <div style="color:var(--text-3,#aaa);font-size:var(--font-size-sm,12px);padding:10px 0">${escapeHtml(msg)}</div>
+          </div>`;
+        wireControls();
+      }
+
+      function paint(data){
+        lastFetched = new Date();
+        const tiles = [
+          { val: data.runs,                                          lbl: 'Runs' },
+          { val: fmtUsd(data.usdTotal),                             lbl: 'USD Total' },
+          { val: fmtPct(data.cacheHitRatio),                       lbl: 'Cache Hit' },
+          { val: fmtPct(data.gracefulDegradeRate),                 lbl: 'Degrade Rate' },
+          { val: fmtPct(data.resumableRate),                       lbl: 'Resumable' },
+          { val: fmtMs(data.latencyMs && data.latencyMs.p50),      lbl: 'p50 Latency' },
+          { val: fmtMs(data.latencyMs && data.latencyMs.p95),      lbl: 'p95 Latency' },
+        ];
+        const tilesHtml = tiles.map(t =>
+          `<div class="metrics-tile"><div class="metrics-tile-val">${escapeHtml(String(t.val))}</div><div class="metrics-tile-lbl">${escapeHtml(t.lbl)}</div></div>`
+        ).join('');
+
+        els.settingsBody.innerHTML = `
+          <div class="apikey-section">
+            <div class="apikey-section-title">Metrics</div>
+            ${controlsHtml(fmtTime(lastFetched))}
+            ${data.runs === 0
+              ? `<div style="color:var(--text-4,#888);font-size:var(--font-size-sm,12px);padding:10px 0">No runs in this period.</div>`
+              : `<div class="metrics-tiles">${tilesHtml}</div>`}
+            <div style="opacity:.4;font-size:11px;margin-top:12px">Server cache TTL: 60s · Generated ${escapeHtml(data.generatedAt || '')}</div>
+          </div>`;
+        wireControls();
+      }
+
+      async function load(){
+        const adminSecret = localStorage.getItem('zoneAdminSecret');
+        const headers = {};
+        if (adminSecret) headers['x-admin-secret'] = adminSecret;
+        paintLoading();
+        try {
+          const resp = await fetch('/api/metrics?period=' + encodeURIComponent(metricsPeriod), { headers });
+          if (resp.status === 401) {
+            paintStatus('Admin secret required. Set "zoneAdminSecret" in localStorage to view metrics.');
+            return;
+          }
+          if (!resp.ok) {
+            paintStatus('Error ' + resp.status + ': ' + resp.statusText);
+            return;
+          }
+          const data = await resp.json();
+          paint(data);
+        } catch(err){
+          paintStatus('Fetch failed: ' + ((err && err.message) || 'network error'));
+        }
+      }
+
+      load();
+    }
+
 
     // ---- Wiring ----
     function init(){
