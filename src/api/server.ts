@@ -10,7 +10,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { runAgent } from "../core/runAgent.js";
-import { getUsage, getRunCost } from "../usage/usageTracker.js";
+import { getUsage, getRunCost, readRecords } from "../usage/usageTracker.js";
+import { aggregateMetrics, type RunRecord } from "../llm/metricsAggregator.js";
 import { loadLimitConfig, saveLimitConfig, checkUsageLimit } from "./usageLimits.js";
 import {
   loadVisualSettings,
@@ -2120,6 +2121,106 @@ app.get("/api/usage", async (req, res) => {
   } catch (err) {
     errorLog("[zone] /api/usage failed", err);
     res.status(500).json({ ok: false, reason: "usage_read_failed" });
+  }
+});
+
+// K.3 — /api/metrics endpoint.
+// Keyed on "userId:period". TTL = 60 s.
+const metricsCache = new Map<string, { result: ReturnType<typeof aggregateMetrics>; expiresAt: number }>();
+
+/**
+ * Build per-run summaries from raw UsageRecord JSONL.
+ * Groups by runId, summing cost + cache tokens so each run appears once.
+ * tier/terminationReason/latencyMs are absent from UsageRecord — they default
+ * to undefined until run-level telemetry is added (K.3 Commit 3 pending).
+ */
+function buildRunRecords(userId: string): RunRecord[] {
+  const records = readRecords(userId);
+  const runMap = new Map<string, { costUsd: number; cacheTokens: number; totalTokens: number; ts: number }>();
+
+  for (const r of records) {
+    const key = r.runId || `__anon_${r.timestamp}`;
+    const tokens =
+      (r.input_uncached || 0) +
+      (r.cache_write || 0) +
+      (r.cache_read || 0) +
+      (r.output || 0);
+    const cacheTokens = r.cache_read || 0;
+    const ts = new Date(r.timestamp).getTime();
+    const existing = runMap.get(key);
+    if (existing) {
+      existing.costUsd += r.est_cost_usd || 0;
+      existing.cacheTokens += cacheTokens;
+      existing.totalTokens += tokens;
+      if (!Number.isNaN(ts)) existing.ts = Math.min(existing.ts, ts);
+    } else {
+      runMap.set(key, {
+        costUsd: r.est_cost_usd || 0,
+        cacheTokens,
+        totalTokens: tokens,
+        ts: Number.isNaN(ts) ? Date.now() : ts,
+      });
+    }
+  }
+
+  return Array.from(runMap.entries()).map(([runId, data]) => ({
+    runId,
+    costUsd: data.costUsd,
+    cacheTokens: data.cacheTokens,
+    totalTokens: data.totalTokens,
+    ts: data.ts,
+  }));
+}
+
+const METRICS_VALID_PERIODS = new Set<string>(["day", "week", "month"]);
+const METRICS_CACHE_TTL_MS = 60_000;
+
+// K.3: metrics scrape endpoint. Auth-gated when ADMIN_SECRET is configured;
+// open in self-hosted mode (no ADMIN_SECRET) consistent with /api/usage.
+app.get("/api/metrics", (req, res) => {
+  const adminSecret =
+    typeof process.env.ADMIN_SECRET === "string"
+      ? process.env.ADMIN_SECRET.trim()
+      : "";
+  const providedSecret =
+    typeof req.get("x-admin-secret") === "string"
+      ? req.get("x-admin-secret")!.trim()
+      : "";
+  if (adminSecret && providedSecret !== adminSecret) {
+    res.status(403).json({ ok: false, reason: "unauthorized" });
+    return;
+  }
+
+  const periodRaw =
+    typeof req.query.period === "string" ? req.query.period.trim() : "";
+  if (periodRaw && !METRICS_VALID_PERIODS.has(periodRaw)) {
+    res.status(400).json({ ok: false, reason: "invalid_period" });
+    return;
+  }
+  const period = (METRICS_VALID_PERIODS.has(periodRaw) ? periodRaw : "day") as
+    | "day"
+    | "week"
+    | "month";
+
+  const userIdRaw =
+    typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+  const userId = userIdRaw || "local-dev";
+
+  const cacheKey = `${userId}:${period}`;
+  const cached = metricsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    res.json(cached.result);
+    return;
+  }
+
+  try {
+    const runs = buildRunRecords(userId);
+    const result = aggregateMetrics({ userId, period, runs });
+    metricsCache.set(cacheKey, { result, expiresAt: Date.now() + METRICS_CACHE_TTL_MS });
+    res.json(result);
+  } catch (err) {
+    errorLog("[zone] /api/metrics failed", err);
+    res.status(500).json({ ok: false, reason: "metrics_aggregation_failed" });
   }
 });
 
