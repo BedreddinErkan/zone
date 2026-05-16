@@ -269,3 +269,68 @@ describe("K.3.C3 — terminationReason + latencyMs propagated from run-summary r
     });
   });
 });
+
+describe("K.4 C2 — gracefulDegradeRate + resumableRate", () => {
+  it("returns both rates = 0 when runs is empty", () => {
+    const result = aggregateMetrics({ userId: "u1", period: "day", runs: [], now: NOW });
+    expect(result.gracefulDegradeRate).toBe(0);
+    expect(result.resumableRate).toBe(0);
+  });
+
+  it("returns gracefulDegradeRate=0 and resumableRate=0 when all runs are natural_completion", () => {
+    const runs: RunRecord[] = [
+      makeRun({ runId: "r1", terminationReason: "natural_completion" }),
+      makeRun({ runId: "r2", terminationReason: "natural_completion" }),
+      makeRun({ runId: "r3", terminationReason: "natural_completion" }),
+    ];
+    const result = aggregateMetrics({ userId: "u1", period: "day", runs, now: NOW });
+    expect(result.gracefulDegradeRate).toBe(0);
+    expect(result.resumableRate).toBe(0);
+  });
+
+  it("computes correct rates for 10 mixed runs", () => {
+    // 3 natural + 4 max_iterations (resumable) + 2 daily_usd_cap_exceeded (resumable) + 1 loop_detected (not resumable)
+    const runs: RunRecord[] = [
+      makeRun({ runId: "r1", terminationReason: "natural_completion" }),
+      makeRun({ runId: "r2", terminationReason: "natural_completion" }),
+      makeRun({ runId: "r3", terminationReason: "natural_completion" }),
+      makeRun({ runId: "r4", terminationReason: "max_iterations" }),
+      makeRun({ runId: "r5", terminationReason: "max_iterations" }),
+      makeRun({ runId: "r6", terminationReason: "max_iterations" }),
+      makeRun({ runId: "r7", terminationReason: "max_iterations" }),
+      makeRun({ runId: "r8", terminationReason: "daily_usd_cap_exceeded" }),
+      makeRun({ runId: "r9", terminationReason: "daily_usd_cap_exceeded" }),
+      makeRun({ runId: "r10", terminationReason: "loop_detected" }),
+    ];
+    const result = aggregateMetrics({ userId: "u1", period: "day", runs, now: NOW });
+
+    // degraded = 10 - 3 = 7; gracefulDegradeRate = 7/10 = 0.7
+    expect(result.gracefulDegradeRate).toBe(0.7);
+    // resumable degraded: 4 max_iterations + 2 daily_usd_cap_exceeded = 6; resumableRate = 6/7
+    expect(result.resumableRate).toBe(Math.round((6 / 7) * 1000) / 1000);
+  });
+
+  it("resumableRate=0 when all degraded runs are non-resumable", () => {
+    const runs: RunRecord[] = [
+      makeRun({ runId: "r1", terminationReason: "natural_completion" }),
+      makeRun({ runId: "r2", terminationReason: "loop_detected" }),
+      makeRun({ runId: "r3", terminationReason: "compaction_exhausted" }),
+    ];
+    const result = aggregateMetrics({ userId: "u1", period: "day", runs, now: NOW });
+    expect(result.gracefulDegradeRate).toBeCloseTo(2 / 3, 3);
+    expect(result.resumableRate).toBe(0);
+  });
+
+  it("runs without terminationReason are counted as neither natural nor degraded in distribution but still count toward totalRuns", () => {
+    const runs: RunRecord[] = [
+      makeRun({ runId: "r1" }), // no terminationReason
+      makeRun({ runId: "r2", terminationReason: "max_iterations" }),
+    ];
+    const result = aggregateMetrics({ userId: "u1", period: "day", runs, now: NOW });
+    // totalRuns=2, naturalCount=0, degradedCount=2
+    // but only r2 has a non-natural terminationReason and is resumable
+    expect(result.runs).toBe(2);
+    expect(result.gracefulDegradeRate).toBe(1.0); // 2/2
+    expect(result.resumableRate).toBe(0.5); // 1 resumable / 2 degraded
+  });
+});

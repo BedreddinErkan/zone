@@ -277,4 +277,35 @@ describe("/api/metrics", () => {
     // readRecords called exactly once (second hit used cache)
     expect(readRecordsMock).toHaveBeenCalledTimes(1);
   });
+
+  it("K.4 C2: response carries gracefulDegradeRate and resumableRate fields", async () => {
+    readRecordsMock.mockReturnValue([]);
+
+    const res = await fetch(`${baseUrl}/api/metrics?period=day`);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(typeof body.gracefulDegradeRate).toBe("number");
+    expect(typeof body.resumableRate).toBe("number");
+    // no runs → both zero
+    expect(body.gracefulDegradeRate).toBe(0);
+    expect(body.resumableRate).toBe(0);
+  });
+
+  it("K.4 C2: gracefulDegradeRate and resumableRate computed correctly from termination summary records", async () => {
+    const natural = makeUsageRecord({ runId: "run_a", terminationReason: "natural_completion", est_cost_usd: 0 });
+    const maxIter = makeUsageRecord({ runId: "run_b", terminationReason: "max_iterations", est_cost_usd: 0 });
+    const loop = makeUsageRecord({ runId: "run_c", terminationReason: "loop_detected", est_cost_usd: 0 });
+    readRecordsMock.mockReturnValue([natural, maxIter, loop]);
+
+    const res = await fetch(`${baseUrl}/api/metrics?period=day`);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.runs).toBe(3);
+    // 2 degraded / 3 total = 0.667
+    expect(body.gracefulDegradeRate).toBeCloseTo(2 / 3, 2);
+    // 1 resumable (max_iterations) / 2 degraded = 0.5
+    expect(body.resumableRate).toBe(0.5);
+  });
 });

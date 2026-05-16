@@ -28,6 +28,7 @@ import { resolveTierLimits } from "./tierLimits.js";
 import { resolveDailyUsdCap } from "./usdCapResolver.js";
 import { loadOrgPolicy } from "./policyLoader.js";
 import { getUsage, recordRunSummary } from "../usage/usageTracker.js";
+import { canResumeFromTerminationReason } from "./patchUserFacingReason.js";
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { extractUsage } from "./recordingClient.js";
 import {
@@ -1865,12 +1866,22 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         typeof input.userId === "string" && input.userId.trim()
           ? input.userId.trim()
           : "local-dev";
+      const terminationReason = result.terminationReason ?? "unknown";
       recordRunSummary({
         userId,
         runId: input.runId.trim(),
         latencyMs: Date.now() - runStartTs,
-        terminationReason: result.terminationReason ?? "unknown",
+        terminationReason,
       }).catch(() => {});
+      log("[zone-graceful-degrade]", JSON.stringify({
+        runId: input.runId.trim(),
+        terminationReason,
+        gracefulDegrade: terminationReason !== "natural_completion",
+        canResume: canResumeFromTerminationReason(terminationReason),
+        costUsd: result.costUsd ?? 0,
+        tier: input.taskClassification?.tier ?? null,
+        ts: Date.now(),
+      }));
     }
     return result;
   } finally {

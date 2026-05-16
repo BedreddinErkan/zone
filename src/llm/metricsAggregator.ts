@@ -1,3 +1,5 @@
+import { canResumeFromTerminationReason } from "./patchUserFacingReason.js";
+
 // Tier values match the production TaskTier union ("simple" | "medium" | "complex").
 // Note: policyLoader.ts uses "light" in allowedTiers for future Phase M enforcement;
 // that's a separate schema concern — runtime classifier emits "simple", not "light".
@@ -28,6 +30,10 @@ export type MetricsResponse = {
   terminationDistribution: Record<string, number>;
   cacheHitRatio: number;
   latencyMs: { p50: number; p95: number };
+  /** Fraction of runs in period that did NOT end with natural_completion (0–1). */
+  gracefulDegradeRate: number;
+  /** Fraction of degraded runs that were resumable via canResume (0–1). */
+  resumableRate: number;
   generatedAt: string;
 };
 
@@ -125,9 +131,22 @@ export function aggregateMetrics(input: {
 
   latencies.sort((a, b) => a - b);
 
+  const totalRuns = filtered.length;
+  const naturalCount = terminationDist["natural_completion"] ?? 0;
+  const degradedCount = totalRuns - naturalCount;
+  const gracefulDegradeRate = totalRuns > 0 ? degradedCount / totalRuns : 0;
+
+  const resumableCount = filtered.filter(
+    (r) =>
+      r.terminationReason &&
+      r.terminationReason !== "natural_completion" &&
+      canResumeFromTerminationReason(r.terminationReason)
+  ).length;
+  const resumableRate = degradedCount > 0 ? resumableCount / degradedCount : 0;
+
   return {
     period: input.period,
-    runs: filtered.length,
+    runs: totalRuns,
     usdTotal: round4(totalCost),
     tierDistribution: tierDist,
     terminationDistribution: terminationDist,
@@ -136,6 +155,8 @@ export function aggregateMetrics(input: {
       p50: percentile(latencies, 50),
       p95: percentile(latencies, 95),
     },
+    gracefulDegradeRate: round3(gracefulDegradeRate),
+    resumableRate: round3(resumableRate),
     generatedAt: new Date(now).toISOString(),
   };
 }
