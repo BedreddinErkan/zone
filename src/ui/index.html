@@ -11697,6 +11697,41 @@
         wireControls();
       }
 
+      function barChart(items, title){
+        if (!items.length) return '';
+        const top = items.slice(0, 6);
+        const restCount = items.slice(6).reduce((s, i) => s + i.count, 0);
+        if (restCount > 0) top.push({ label: 'other', count: restCount });
+        const total = top.reduce((s, i) => s + i.count, 0) || 1;
+        const COLORS = ['#7a5af8','#3b82f6','#10b981','#f59e0b','#ef4444','#ec4899','#8b5cf6'];
+        const maxBarW = 190;
+        const rowH = 28;
+        const svgH = top.length * rowH + 4;
+        const bars = top.map((item, i) => {
+          const w = Math.max(2, Math.round((item.count / total) * maxBarW));
+          const y = i * rowH + 4;
+          const pct = ((item.count / total) * 100).toFixed(1);
+          return [
+            `<rect x="90" y="${y}" width="${w}" height="17" fill="${COLORS[i % COLORS.length]}" rx="2"/>`,
+            `<text x="84" y="${y+13}" text-anchor="end" font-size="11" fill="rgba(170,170,170,0.9)">${escapeHtml(item.label)}</text>`,
+            `<text x="${96+w}" y="${y+13}" font-size="11" fill="rgba(170,170,170,0.9)">${item.count} (${pct}%)</text>`,
+          ].join('');
+        }).join('');
+        return `<div class="metrics-chart-title">${escapeHtml(title)}</div>
+          <svg viewBox="0 0 360 ${svgH}" style="display:block;width:100%;max-width:380px;font-family:inherit;overflow:visible;margin-bottom:8px">${bars}</svg>`;
+      }
+
+      function gaugeBar(label, value){
+        const pct = Math.round(Math.min(1, Math.max(0, value || 0)) * 100);
+        return `<div style="margin-bottom:8px">
+          <div style="font-size:11px;color:var(--text-4,#888);margin-bottom:3px">${escapeHtml(label)}</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="metrics-gauge-track" style="width:120px"><div class="metrics-gauge-fill" style="width:${pct}%"></div></div>
+            <span style="font-size:11px;color:var(--text-3,#aaa)">${pct}%</span>
+          </div>
+        </div>`;
+      }
+
       function paint(data){
         lastFetched = new Date();
         const tiles = [
@@ -11712,6 +11747,26 @@
           `<div class="metrics-tile"><div class="metrics-tile-val">${escapeHtml(String(t.val))}</div><div class="metrics-tile-lbl">${escapeHtml(t.lbl)}</div></div>`
         ).join('');
 
+        const tierDist = data.tierDistribution || {};
+        const tierItems = ['simple','medium','complex']
+          .map(t => ({ label: t, count: tierDist[t] || 0 }))
+          .filter(i => i.count > 0);
+
+        const termDist = data.terminationDistribution || {};
+        const termItems = Object.entries(termDist)
+          .map(([label, count]) => ({ label, count }))
+          .sort((a, b) => b.count - a.count);
+
+        const chartsHtml = data.runs > 0 ? `
+          <div style="margin-top:4px;display:grid;grid-template-columns:1fr 1fr;gap:20px;flex-wrap:wrap">
+            <div>${barChart(tierItems, 'Tier Distribution')}</div>
+            <div>${barChart(termItems, 'Termination Distribution')}</div>
+          </div>
+          <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:360px">
+            <div>${gaugeBar('Degrade Rate', data.gracefulDegradeRate)}</div>
+            <div>${gaugeBar('Resumable (of degraded)', data.resumableRate)}</div>
+          </div>` : '';
+
         els.settingsBody.innerHTML = `
           <div class="apikey-section">
             <div class="apikey-section-title">Metrics</div>
@@ -11719,6 +11774,7 @@
             ${data.runs === 0
               ? `<div style="color:var(--text-4,#888);font-size:var(--font-size-sm,12px);padding:10px 0">No runs in this period.</div>`
               : `<div class="metrics-tiles">${tilesHtml}</div>`}
+            ${chartsHtml}
             <div style="opacity:.4;font-size:11px;margin-top:12px">Server cache TTL: 60s · Generated ${escapeHtml(data.generatedAt || '')}</div>
           </div>`;
         wireControls();
