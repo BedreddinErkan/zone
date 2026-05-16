@@ -88,6 +88,25 @@ export function getPatchUserFacingReason(input: {
         resumeHint: "Address the verification failure and retry",
       };
 
+    case "revision_approval_timeout":
+      return {
+        reason: terminationReason,
+        userFacingMessage:
+          "Audit suggested a scope revision; no approval was received within the timeout.",
+        canResume: true,
+        resumeHint:
+          "Set autoApproveRevisions:true in your /api/patch body, or open a GET /api/run-replay/:runId SSE stream before POSTing.",
+      };
+
+    case "revision_rejected":
+      return {
+        reason: terminationReason,
+        userFacingMessage: "The proposed scope revision was rejected.",
+        canResume: true,
+        resumeHint:
+          "Provide a more concrete task spec or accept the revised scope manually.",
+      };
+
     default:
       return {
         reason: terminationReason,

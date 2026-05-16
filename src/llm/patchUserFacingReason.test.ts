@@ -76,6 +76,22 @@ describe("getPatchUserFacingReason", () => {
     expect(out.userFacingMessage).toContain("rolled back");
   });
 
+  it("revision_approval_timeout: canResume=true, resumeHint mentions autoApproveRevisions", () => {
+    const out = getPatchUserFacingReason({ terminationReason: "revision_approval_timeout" });
+    expect(out.canResume).toBe(true);
+    expect(out.userFacingMessage).toContain("scope revision");
+    expect(out.resumeHint).toContain("autoApproveRevisions");
+    expect(out.reason).toBe("revision_approval_timeout");
+  });
+
+  it("revision_rejected: canResume=true, resumeHint mentions concrete task", () => {
+    const out = getPatchUserFacingReason({ terminationReason: "revision_rejected" });
+    expect(out.canResume).toBe(true);
+    expect(out.userFacingMessage).toContain("rejected");
+    expect(out.resumeHint).toBeTruthy();
+    expect(out.reason).toBe("revision_rejected");
+  });
+
   it("unknown reason: canResume=false, message contains the raw reason", () => {
     const out = getPatchUserFacingReason({ terminationReason: "some_unknown_error" });
     expect(out.canResume).toBe(false);
@@ -91,6 +107,8 @@ describe("canResumeFromTerminationReason", () => {
     expect(canResumeFromTerminationReason("token_budget_exceeded")).toBe(true);
     expect(canResumeFromTerminationReason("daily_usd_cap_exceeded")).toBe(true);
     expect(canResumeFromTerminationReason("APPLY_ROLLED_BACK")).toBe(true);
+    expect(canResumeFromTerminationReason("revision_approval_timeout")).toBe(true);
+    expect(canResumeFromTerminationReason("revision_rejected")).toBe(true);
   });
 
   it("returns false for non-resumable reasons", () => {

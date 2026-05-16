@@ -3258,6 +3258,11 @@ app.post("/api/patch", async (req, res) => {
     forceTier: rawForceTier,
     mode: rawMode,
   } = req.body ?? {};
+  const autoApproveRevisions: boolean = req.body?.autoApproveRevisions === true;
+  const revisionApprovalTimeoutMsOverride: number | undefined = (() => {
+    const raw = req.body?.revisionApprovalTimeoutMs;
+    return typeof raw === "number" && raw > 0 ? raw : undefined;
+  })();
 
   const requestedMode = rawMode == null ? "auto" : parseMode(rawMode);
   if (!requestedMode) {
@@ -3744,6 +3749,15 @@ app.post("/api/patch", async (req, res) => {
       // preGeneratedPlan remains undefined — approval and audit gates will skip.
     }
   }
+  // Y.1.2: headless detection — no Accept:text/event-stream header means no SSE listener.
+  const isHeadless: boolean = !(
+    typeof req.headers["accept"] === "string" &&
+    req.headers["accept"].includes("text/event-stream")
+  );
+  // Y.1.1/Y.1.2: set to a non-null value when revision approval times out; causes
+  // early res.json() before runLlmPatchFlow so the caller isn't left hanging.
+  let revisionEarlyExit: { terminationReason: string; proposal: RevisionProposal; revisionId: string } | null = null;
+
   // Scope audit gate — fires when shouldRunAudit returns true.
   let preClassifiedTask: TaskClassification | undefined;
   // Phase X.0.1: captured when audit ran without skipping; forwarded to execute agent.
@@ -3857,7 +3871,7 @@ app.post("/api/patch", async (req, res) => {
                 ...(revUnnecessary ? { unnecessaryFiles: revUnnecessary } : {}),
               };
 
-              const { decision } = await requestRevisionApproval({
+              const { decision, revisionId: approvalRevisionId } = await requestRevisionApproval({
                 proposal,
                 emit: (evt) =>
                   emitProgress(runIdStr, {
@@ -3865,10 +3879,26 @@ app.post("/api/patch", async (req, res) => {
                     progress: { ...evt, ts: Date.now() } as any,
                   }),
                 abortSignal: patchAbort?.signal,
+                autoApprove: autoApproveRevisions,
+                timeoutMs: revisionApprovalTimeoutMsOverride ?? (isHeadless ? 30_000 : 10 * 60 * 1000),
               });
 
-              if (decision === "approve") {
-                log("[zone-scope-revision-approved]", JSON.stringify({ runId: runIdStr, type: revType, ts: new Date().toISOString() }));
+              if (decision === "timeout") {
+                // Y.1.2: headless timeout — record for early exit, skip patch flow.
+                revisionEarlyExit = { terminationReason: "revision_approval_timeout", proposal, revisionId: approvalRevisionId };
+                log("[scope-revision-timeout]", JSON.stringify({
+                  runId: runIdStr,
+                  revisionId: approvalRevisionId,
+                  timeoutMs: revisionApprovalTimeoutMsOverride ?? (isHeadless ? 30_000 : 10 * 60 * 1000),
+                  timeoutSource: revisionApprovalTimeoutMsOverride ? "explicit_override" : isHeadless ? "headless_default" : "ui_default",
+                  ts: new Date().toISOString(),
+                }));
+              } else if (decision === "approve") {
+                if (autoApproveRevisions) {
+                  log("[scope-revision-auto-approved]", JSON.stringify({ runId: runIdStr, type: revType, revisionId: approvalRevisionId, reason: "headless_autoapprove", ts: new Date().toISOString() }));
+                } else {
+                  log("[zone-scope-revision-approved]", JSON.stringify({ runId: runIdStr, type: revType, ts: new Date().toISOString() }));
+                }
                 emitProgress(runIdStr, {
                   stage: "scope_revision",
                   progress: {
@@ -3913,16 +3943,18 @@ app.post("/api/patch", async (req, res) => {
             }
           }
 
-          emitProgress(runIdStr, {
-            stage: "scope_revision",
-            progress: {
-              runId: runIdStr,
-              ts: Date.now(),
-              type: "scope_audit_completed",
-              title: "Scope audit complete",
-              status: "success",
-            } as any,
-          });
+          if (!revisionEarlyExit) {
+            emitProgress(runIdStr, {
+              stage: "scope_revision",
+              progress: {
+                runId: runIdStr,
+                ts: Date.now(),
+                type: "scope_audit_completed",
+                title: "Scope audit complete",
+                status: "success",
+              } as any,
+            });
+          }
         }
         } catch (auditErr) {
           // Audit failures never block execution — log and continue.
@@ -3930,6 +3962,22 @@ app.post("/api/patch", async (req, res) => {
         }
       } // end else (preGeneratedPlan guard)
     }
+  }
+
+  // Y.1.2: revision approval timed out — return before patch flow so headless
+  // callers receive a response instead of waiting indefinitely.
+  if (revisionEarlyExit) {
+    const earlyOutcome = getPatchUserFacingReason({ terminationReason: revisionEarlyExit.terminationReason });
+    res.json({
+      ok: true,
+      terminationReason: revisionEarlyExit.terminationReason,
+      userFacingMessage: earlyOutcome.userFacingMessage,
+      canResume: earlyOutcome.canResume,
+      resumeHint: earlyOutcome.resumeHint,
+      revisionId: revisionEarlyExit.revisionId,
+      revisionProposal: revisionEarlyExit.proposal,
+    });
+    return;
   }
 
   try {

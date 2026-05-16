@@ -87,6 +87,73 @@ describe("requestRevisionApproval + resolveRevisionApproval", () => {
   });
 });
 
+describe("Phase Y.1.1 — autoApprove bypass", () => {
+  it("resolves immediately with 'approve' and no SSE emission when autoApprove=true", async () => {
+    const { emit, events } = makeEmit();
+    const result = await requestRevisionApproval({ proposal: PROPOSAL, emit: emit as any, autoApprove: true });
+    expect(result.decision).toBe("approve");
+    expect(typeof result.revisionId).toBe("string");
+    expect(events).toHaveLength(0);
+  });
+
+  it("autoApprove=false falls through to normal SSE path", async () => {
+    const { emit, events } = makeEmit();
+    const p = requestRevisionApproval({ proposal: PROPOSAL, emit: emit as any, autoApprove: false });
+    await Promise.resolve();
+    expect(events).toHaveLength(1);
+    const rid = (events[0] as Record<string, unknown>)["revisionId"] as string;
+    resolveRevisionApproval({ revisionId: rid, runId: PROPOSAL.runId, decision: "approve" });
+    const result = await p;
+    expect(result.decision).toBe("approve");
+  });
+
+  it("autoApprove=undefined falls through to normal SSE path", async () => {
+    const { emit, events } = makeEmit();
+    const p = requestRevisionApproval({ proposal: PROPOSAL, emit: emit as any });
+    await Promise.resolve();
+    expect(events).toHaveLength(1);
+    const rid = (events[0] as Record<string, unknown>)["revisionId"] as string;
+    resolveRevisionApproval({ revisionId: rid, runId: PROPOSAL.runId, decision: "reject" });
+    await p;
+  });
+});
+
+describe("Phase Y.1.2 — timeout decision", () => {
+  it("resolves with 'timeout' when timeoutMs elapses without approval", async () => {
+    const { emit } = makeEmit();
+    const result = await requestRevisionApproval({ proposal: PROPOSAL, emit: emit as any, timeoutMs: 30 });
+    expect(result.decision).toBe("timeout");
+    expect(typeof result.revisionId).toBe("string");
+  });
+
+  it("abort signal resolves with 'reject' (not 'timeout')", async () => {
+    const { emit } = makeEmit();
+    const ctrl = new AbortController();
+    const p = requestRevisionApproval({ proposal: PROPOSAL, emit: emit as any, timeoutMs: 10_000, abortSignal: ctrl.signal });
+    ctrl.abort();
+    const result = await p;
+    expect(result.decision).toBe("reject");
+  });
+
+  it("explicit client reject resolves with 'reject' (not 'timeout')", async () => {
+    const { emit, events } = makeEmit();
+    const p = requestRevisionApproval({ proposal: PROPOSAL, emit: emit as any, timeoutMs: 10_000 });
+    await Promise.resolve();
+    const rid = (events[0] as Record<string, unknown>)["revisionId"] as string;
+    resolveRevisionApproval({ revisionId: rid, runId: PROPOSAL.runId, decision: "reject" });
+    const result = await p;
+    expect(result.decision).toBe("reject");
+  });
+
+  it("already-aborted signal resolves immediately with 'reject'", async () => {
+    const { emit } = makeEmit();
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const result = await requestRevisionApproval({ proposal: PROPOSAL, emit: emit as any, abortSignal: ctrl.signal });
+    expect(result.decision).toBe("reject");
+  });
+});
+
 describe("rejectPendingRevisionsForRun", () => {
   it("rejects all pending revisions for a run and returns count", async () => {
     const { emit: emit1 } = makeEmit();

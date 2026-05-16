@@ -18,8 +18,10 @@ export interface RevisionProposal {
 }
 
 /** Y.0: "auto_apply" is emitted when a minor mismatch is silently applied
- *  (plan review off + severity=minor). UI shows a log line; no user prompt. */
-export type RevisionDecision = "approve" | "reject" | "auto_apply";
+ *  (plan review off + severity=minor). UI shows a log line; no user prompt.
+ *  Y.1.2: "timeout" is emitted when the approval wait exceeds the configured
+ *  timeout — distinct from "reject" so callers can return revision_approval_timeout. */
+export type RevisionDecision = "approve" | "reject" | "auto_apply" | "timeout";
 
 type PendingRevision = {
   runId: string;
@@ -45,8 +47,15 @@ export function requestRevisionApproval(input: {
   }) => void;
   abortSignal?: AbortSignal;
   timeoutMs?: number;
+  /** Y.1.1: when true, resolve immediately as "approve" without SSE emission or pending state. */
+  autoApprove?: boolean;
 }): Promise<{ revisionId: string; decision: RevisionDecision }> {
   const revisionId = crypto.randomUUID();
+
+  if (input.autoApprove) {
+    return Promise.resolve({ revisionId, decision: "approve" });
+  }
+
   const timeoutMs =
     typeof input.timeoutMs === "number" && input.timeoutMs > 0
       ? input.timeoutMs
@@ -75,7 +84,7 @@ export function requestRevisionApproval(input: {
       resolve({ revisionId, decision });
     };
 
-    const timeout = setTimeout(() => finish("reject"), timeoutMs);
+    const timeout = setTimeout(() => finish("timeout"), timeoutMs);
     pendingRevisions.set(revisionId, { runId: proposal.runId, proposal, resolve: finish, timeout });
 
     if (input.abortSignal) {
