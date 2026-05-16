@@ -204,13 +204,6 @@ export type LlmPatchFlowResult =
        *  banner with the diff for inspection but no undo button. */
       rolledBackReason?: string;
       rolledBackErrors?: string[];
-      /** Phase I.3: post-apply auto-verify result. Populated only when the
-       *  user enabled `autoVerifyAfterPatch` in visual settings AND the run
-       *  reached `decisionMode: "safe_to_apply"`. Best-effort — absent on
-       *  rolled_back / blocked / chat / dev-server-unreachable runs. */
-      autoVerifyScreenshot?: string;
-      autoVerifyPageTitle?: string;
-      autoVerifyConsoleErrors?: string[];
       /** When decisionMode is chat, surfaced to the UI as the assistant message. */
       chatResponse?: string;
       finalExecutionOutcome?:
@@ -5943,10 +5936,6 @@ const initializeTodosFromPlan = (): void => {
       }));
     }
 
-    const agentCalledVerifyVisual = loop.toolCallLog.some(
-      (entry) => entry.tool === "verify_visual" && entry.success === true
-    );
-
     const agentLoopHadRunCommandFailure = loop.toolCallLog.some((entry) => {
       if (entry.tool !== "run_command") return false;
       const r = String(entry.result || "");
@@ -6237,95 +6226,6 @@ const initializeTodosFromPlan = (): void => {
       }));
     }
 
-    // Phase I.3: auto-verify after successful apply when toggle is ON.
-    // Best-effort — wrap in try/catch so a Playwright/probe failure never
-    // breaks the patch flow (apply already succeeded). Skipped on
-    // rolled_back / no_patch since stale code is on disk or nothing changed.
-    let autoVerifyFields: {
-      autoVerifyScreenshot?: string;
-      autoVerifyPageTitle?: string;
-      autoVerifyConsoleErrors?: string[];
-    } = {};
-    if (agentDecisionMode === "safe_to_apply" && fileDiffs.length > 0 && !agentCalledVerifyVisual) {
-      try {
-        const { loadVisualSettings } = await import("../visual/visualSettings.js");
-        const settings = loadVisualSettings();
-        if (settings.autoVerifyAfterPatch) {
-          const { getDevServerConfig, probeDevServer } = await import(
-            "../visual/devServerProbe.js"
-          );
-          const config = getDevServerConfig();
-          const reachable = await probeDevServer(config.baseUrl);
-          if (!reachable) {
-            console.log(
-              "[zone-auto-verify-skipped]",
-              JSON.stringify({
-                runId: runId || null,
-                reason: "dev_server_unreachable",
-                baseUrl: config.baseUrl,
-              })
-            );
-          } else {
-            const { runVerifyVisual } = await import("../tools/verifyVisual.js");
-            const verifyResult = await runVerifyVisual(
-              {
-                path: "/",
-                description: `Auto-verify after patch (${fileDiffs.length} file(s) changed)`,
-                viewport: settings.defaultViewport,
-                waitFor: null,
-              },
-              {
-                devServerBaseUrl: config.baseUrl,
-                runId: String(runId || "unknown"),
-                screenshotCount: 0,
-              }
-            );
-            if (verifyResult.success && verifyResult.screenshotPath) {
-              autoVerifyFields = {
-                autoVerifyScreenshot: verifyResult.screenshotPath,
-                ...(verifyResult.pageTitle
-                  ? { autoVerifyPageTitle: verifyResult.pageTitle }
-                  : {}),
-                ...(verifyResult.consoleErrors && verifyResult.consoleErrors.length > 0
-                  ? { autoVerifyConsoleErrors: verifyResult.consoleErrors }
-                  : {}),
-              };
-              console.log(
-                "[zone-auto-verify]",
-                JSON.stringify({
-                  runId: runId || null,
-                  screenshotPath: verifyResult.screenshotPath,
-                  pageTitle: verifyResult.pageTitle ?? null,
-                  consoleErrorCount: verifyResult.consoleErrors?.length ?? 0,
-                })
-              );
-            } else {
-              console.warn(
-                "[zone-auto-verify-failed]",
-                JSON.stringify({
-                  runId: runId || null,
-                  error: verifyResult.error ?? "unknown",
-                })
-              );
-            }
-          }
-        }
-      } catch (err) {
-        console.warn(
-          "[zone-auto-verify-error]",
-          JSON.stringify({
-            runId: runId || null,
-            error: err instanceof Error ? err.message : String(err),
-          })
-        );
-      }
-    } else if (agentCalledVerifyVisual) {
-      console.log("[zone-auto-verify-skipped]", JSON.stringify({
-        runId: runId || null,
-        reason: "agent_already_verified",
-      }));
-    }
-
     return {
       ok: true,
       patchPreview: `=== AGENT LOOP SUMMARY ===\n${loop.summary}`,
@@ -6339,7 +6239,6 @@ const initializeTodosFromPlan = (): void => {
       verificationCommands: agentVerificationCommands,
       decisionMode: agentDecisionMode,
       finalState: agentDecisionMode,
-      ...autoVerifyFields,
       ...(isVerificationRegressed
         ? {
             rolledBackReason,

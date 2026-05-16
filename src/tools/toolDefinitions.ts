@@ -362,45 +362,6 @@ required: ["id", "content", "description", "status"],
   {
     type: "function",
     function: {
-      name: "verify_visual",
-      strict: true,
-      description:
-        "Screenshot a URL on the user's local dev server, AFTER UI changes. Skip for backend, types, configs, refactors. Cap: 5 per run.",
-      parameters: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          path: {
-            type: "string",
-            description: "Path on the dev server, e.g. '/', '/login', '/#section-id' (hash anchor scrolls to and captures a specific section).",
-          },
-          description: {
-            type: ["string", "null"],
-            description:
-              "Brief description of what you expect to see, e.g. 'Submit button should be disabled when form invalid'.",
-          },
-          viewport: {
-            type: ["object", "null"],
-            additionalProperties: false,
-            properties: {
-              width: { type: "integer" },
-              height: { type: "integer" },
-            },
-            required: ["width", "height"],
-            description: "Optional viewport size. Default 1280x720.",
-          },
-          waitFor: {
-            type: ["string", "null"],
-            description: "Optional CSS selector to wait for before screenshotting, e.g. '.feed-loaded'.",
-          },
-        },
-        required: ["path", "description", "viewport", "waitFor"],
-      } as Record<string, unknown>,
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "find_references",
       strict: true,
       description:

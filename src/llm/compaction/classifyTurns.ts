@@ -4,7 +4,6 @@ import { TurnClass, type ClassifiedTurn, type ToolCallRecord } from "./types.js"
 const PROTECTED_TOOLS = new Set([
   "apply_patch",
   "update_memory",
-  "verify_visual",
   "Task",
 ]);
 

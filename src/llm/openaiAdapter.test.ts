@@ -97,7 +97,6 @@ describe("OpenAI prompt cache stability helpers", () => {
     expect(system).toContain("GOOD signals (DO dispatch):");
     expect(system).toContain("BAD signals (DON'T dispatch):");
     expect(system).toContain("READ_FILE ECONOMY:");
-    expect(system).toContain("VISUAL VERIFICATION (verify_visual):");
   });
 
   it("documents the J.4 APPLY_ROLLED_BACK marker convention", () => {

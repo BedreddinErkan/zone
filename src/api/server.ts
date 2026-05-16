@@ -19,15 +19,8 @@ import { getPatchUserFacingReason } from "../llm/patchUserFacingReason.js";
 import { UpstreamUnavailableError } from "../llm/withExponentialBackoff.js";
 import { routeCapGate } from "../llm/checkDailyCap.js";
 import { loadLimitConfig, saveLimitConfig, checkUsageLimit } from "./usageLimits.js";
-import {
-  loadVisualSettings,
-  saveVisualSettings,
-  getVisualSettingsDefaults,
-} from "../visual/visualSettings.js";
 import { readTierSettings, writeTierSettings, readAutoAuditSetting, writeAutoAuditSetting } from "../visual/tierSettings.js";
 import { TIER_LIMITS } from "../llm/tierLimits.js";
-import { buildDashboardData } from "./sweepResultsApi.js";
-import { invalidateDevServerCache } from "../visual/devServerProbe.js";
 import {
   isIrrelevantDeveloperContextPath,
   runLlmPatchFlow,
@@ -2328,15 +2321,6 @@ app.get("/api/metrics/prometheus", (req, res) => {
   }
 });
 
-app.get("/api/sweep-results", (_req, res) => {
-  try {
-    res.json(buildDashboardData());
-  } catch (err) {
-    errorLog("[zone] /api/sweep-results failed", err);
-    res.status(500).json({ ok: false, reason: "sweep_results_read_failed" });
-  }
-});
-
 app.get("/api/usage-limits", (_req, res) => {
   res.json(loadLimitConfig());
 });
@@ -2360,48 +2344,6 @@ app.put("/api/usage-limits", (req, res) => {
     res.json({ ok: true, dailyLimit: daily, monthlyLimit: monthly });
   } catch (err) {
     res.status(500).json({ ok: false, reason: "save_failed" });
-  }
-});
-
-// Phase I.2: visual verification settings (dev server URL, viewport,
-// auto-verify toggle). Persisted to ~/.zone/visual-verification.json. The
-// devServerProbe cache is invalidated on save so the next verify_visual
-// call picks up the new URL without needing a server restart.
-app.get("/api/settings/visual-verification", (_req, res) => {
-  try {
-    const settings = loadVisualSettings();
-    res.json({
-      ok: true,
-      settings,
-      defaults: getVisualSettingsDefaults(),
-      envOverride:
-        typeof process.env.ZONE_DEV_SERVER_URL === "string" &&
-        process.env.ZONE_DEV_SERVER_URL.trim()
-          ? process.env.ZONE_DEV_SERVER_URL.trim()
-          : null,
-    });
-  } catch (err) {
-    res
-      .status(500)
-      .json({ ok: false, error: err instanceof Error ? err.message : String(err) });
-  }
-});
-
-app.post("/api/settings/visual-verification", (req, res) => {
-  try {
-    const { devServerBaseUrl, defaultViewport, autoVerifyAfterPatch } =
-      req.body ?? {};
-    const saved = saveVisualSettings({
-      devServerBaseUrl,
-      defaultViewport,
-      autoVerifyAfterPatch,
-    });
-    invalidateDevServerCache();
-    res.json({ ok: true, settings: saved });
-  } catch (err) {
-    res
-      .status(400)
-      .json({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
 });
 
@@ -2470,35 +2412,6 @@ app.post("/api/settings/scope-audit", (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
-});
-
-// Phase I.5: serve verify_visual / auto-verify screenshots back to the UI for
-// inline thumbnails and the modal viewer. Files are written by runVerifyVisual
-// to <cwd>/.zone/screenshots/<runId>-<timestamp>.png. The strict regex below
-// is the primary path-traversal defense; the resolved-path containment check
-// is defense-in-depth for any future filename mutation.
-const SCREENSHOT_FILENAME_RE = /^[a-z0-9][a-z0-9_-]*\.png$/i;
-app.get("/api/screenshots/:filename", (req, res) => {
-  const filename = String(req.params.filename || "");
-  if (!SCREENSHOT_FILENAME_RE.test(filename)) {
-    res.status(400).json({ ok: false, error: "Invalid filename" });
-    return;
-  }
-  const screenshotsDir = path.join(process.cwd(), ".zone", "screenshots");
-  const fullPath = path.join(screenshotsDir, filename);
-  if (!fullPath.startsWith(screenshotsDir + path.sep)) {
-    res.status(400).json({ ok: false, error: "Invalid path" });
-    return;
-  }
-  fs.access(fullPath, (err) => {
-    if (err) {
-      res.status(404).json({ ok: false, error: "Screenshot not found" });
-      return;
-    }
-    res.setHeader("Content-Type", "image/png");
-    res.setHeader("Cache-Control", "private, max-age=3600");
-    res.sendFile(fullPath);
-  });
 });
 
 app.post("/api/admin/reset-monthly-runs", async (req, res) => {

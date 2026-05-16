@@ -152,8 +152,8 @@ describe("R.3 — tool description bounds", () => {
         "run_command",
         "run_command_background",
         "search_in_files",
+        "suggest_scope_change",
         "update_memory",
-        "verify_visual",
         "write_file",
       ].sort()
     );

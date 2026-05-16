@@ -360,11 +360,6 @@ export function assembleAgentSystemPrompt(input: {
     `- Your mistake: fix with apply_patch (intent='modify' or 'delete'), re-run tests.\n` +
     `- Only give up after a self-correction attempt.\n\n` +
     `Maximum iterations: ${input.baseMaxIterations} (already enforced — do not stall).\n\n` +
-    `VISUAL VERIFICATION (verify_visual):\n` +
-    `USE for user-visible UI/styling/layout/interaction changes. SKIP for backend, types, configs, tests, refactors.\n` +
-    `PATH: infer from file path (pages/login.tsx → "/login", components/Header.tsx → "/"). If unsure or multi-page, use "/" — full-page screenshots cover content below the fold. For section-specific changes, use a hash anchor (e.g. "/#whats-inside").\n` +
-    `WAITFOR: pass a CSS selector when content loads async, so the capture waits for real content.\n` +
-    `ECONOMY: 1 screenshot is usually enough; multi-state only when the flow needs proof.\n\n` +
     `TASK SUBAGENTS (Task) — when to dispatch:\n` +
     `Default is single-thread. Hard cap: 2 dispatches per parent run (MAX_SUBAGENT_CALLS=2, WORKER_MAX_ITER=6). Each dispatch costs ~30K-100K tokens.\n` +
     `GOOD signals (DO dispatch):\n` +
@@ -3052,31 +3047,6 @@ Example:
           }
         }
 
-        if (name === "verify_visual") {
-          const { loadVisualSettings } = await import("../visual/visualSettings.js");
-          const visualSettings = loadVisualSettings();
-          if (!visualSettings.autoVerifyAfterPatch) {
-            const skipMsg = "Visual verification is disabled in Settings → Visual.";
-            console.log("[zone-verify-visual-skipped-by-settings]", JSON.stringify({
-              runId: input.runId ?? null,
-              reason: "toggle_off",
-            }));
-            toolCallLog.push({
-              id: callId,
-              tool: name,
-              args: parsedArgs,
-              result: skipMsg,
-              success: false,
-            });
-            responseInput.push({
-              role: "tool",
-              tool_call_id: callId,
-              content: skipMsg,
-            });
-            continue;
-          }
-        }
-
         const rid = String(input.runId || "").trim();
         debugLog("[zone-agent-tool-pre]", {
           runId: input.runId,
@@ -3116,9 +3086,6 @@ Example:
           onToolInputStream: input.onToolInputStream,
           tokenBudgetBaseTokens: name === "Task" ? cumulativeTokens() : undefined,
           maxSubagentCallsOverride: effectiveMaxSubagentCalls ?? undefined,
-          visualScreenshotCount: toolCallLog.filter(
-            (entry) => entry.tool === "verify_visual" && entry.success === true
-          ).length,
           selfValidationCounts,
           filesReadThisRun,
         });

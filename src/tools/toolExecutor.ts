@@ -20,8 +20,6 @@ import { sanitizeVerificationEnv, strippedEnvKeys } from "../core/buildEnv.js";
 import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import type { ProjectFramework } from "../repo/detectFramework.js";
 import { generateFileOutline } from "./fileOutline.js";
-import { getDevServerConfig, probeDevServer } from "../visual/devServerProbe.js";
-import { runVerifyVisual, type VerifyVisualInput } from "./verifyVisual.js";
 import { findCheckerForFile } from "./syntaxCheckers.js";
 
 const execAsync = promisify(exec);
@@ -57,7 +55,6 @@ const DISPATCHED_TOOLS = new Set([
   "apply_patch",
   "write_file",
   "search_in_files",
-  "verify_visual",
   "find_references",
   "Task",
   "run_command_background",
@@ -646,7 +643,6 @@ export async function executeTool(
       iter: number;
       subagentId?: string | null;
     }) => void;
-    visualScreenshotCount?: number;
     tokenBudgetBaseTokens?: number;
     /** L.2: tier-based subagent call cap override. Defaults to MAX_SUBAGENT_CALLS_PER_PARENT_RUN. */
     maxSubagentCallsOverride?: number;
@@ -2477,75 +2473,6 @@ export async function executeTool(
       const out = `${matchSection}\n\n${summaryBlock}`;
       const t = truncateText(out, 4000);
       return { success: true, output: t.text, truncated: t.truncated };
-    }
-
-    if (toolName === "verify_visual") {
-      const visualInput = args as unknown as VerifyVisualInput;
-      const config = getDevServerConfig();
-      const visualPath = String(visualInput.path || "/");
-      onProgress?.(`[tool] Visual verify: ${visualPath}`);
-
-      const reachable = await probeDevServer(config.baseUrl);
-      if (!reachable) {
-        return {
-          success: false,
-          output:
-            `Dev server not reachable at ${config.baseUrl}. Make sure your dev server is running ` +
-            "(e.g. `npm run dev`). Configure URL in Settings -> Visual verification.",
-        };
-      }
-
-      // Phase I.2: when the agent omits viewport, fall back to the user's
-      // configured default from Settings (rather than the hardcoded
-      // 1280x720 in verifyVisual.ts).
-      const viewportForRun =
-        visualInput.viewport && visualInput.viewport.width && visualInput.viewport.height
-          ? visualInput.viewport
-          : config.defaultViewport;
-
-      const result = await runVerifyVisual(
-        { ...visualInput, path: visualPath, viewport: viewportForRun },
-        {
-          devServerBaseUrl: config.baseUrl,
-          runId: String(input?.runId || "unknown"),
-          screenshotCount: Number(input?.visualScreenshotCount || 0),
-        }
-      );
-
-      if (!result.success) {
-        return {
-          success: false,
-          output: `verify_visual failed: ${result.error}`,
-        };
-      }
-
-      const consoleSection =
-        result.consoleErrors && result.consoleErrors.length > 0
-          ? `\n\nConsole errors detected:\n${result.consoleErrors.map((e) => `  - ${e}`).join("\n")}`
-          : "";
-
-      debugLog("[zone-tool-verify-visual]", JSON.stringify({
-        path: visualPath,
-        baseUrl: config.baseUrl,
-        screenshotPath: result.screenshotPath,
-        pageTitle: result.pageTitle,
-        consoleErrorCount: result.consoleErrors?.length ?? 0,
-      }));
-
-      return {
-        success: true,
-        output:
-          `Screenshot taken: ${visualPath} (page title: "${result.pageTitle ?? ""}"). ` +
-          `Saved to ${result.screenshotPath}.${consoleSection}`,
-        metadata: {
-          screenshotPath: result.screenshotPath,
-          pageTitle: result.pageTitle,
-          path: visualPath,
-          ...(result.consoleErrors && result.consoleErrors.length > 0
-            ? { consoleErrors: result.consoleErrors }
-            : {}),
-        },
-      };
     }
 
     if (toolName === "find_references") {

@@ -7,7 +7,6 @@ export const WORKER_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   "search_in_files",
   "apply_patch",
   "write_file",
-  "verify_visual",
   // NOTE: deliberately excluded for MVP — run_command, update_memory, Task,
   // background-process tools, get_dependencies, etc.
 ]);
