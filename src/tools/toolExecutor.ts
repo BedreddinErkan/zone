@@ -22,6 +22,7 @@ import type { ProjectFramework } from "../repo/detectFramework.js";
 import { generateFileOutline } from "./fileOutline.js";
 import { getDevServerConfig, probeDevServer } from "../visual/devServerProbe.js";
 import { runVerifyVisual, type VerifyVisualInput } from "./verifyVisual.js";
+import { findCheckerForFile } from "./syntaxCheckers.js";
 
 const execAsync = promisify(exec);
 
@@ -1945,41 +1946,59 @@ export async function executeTool(
         fs.writeFileSync(abs, outputContent, "utf8");
       }
 
-      // Phase V Commit 3 (V.1 fix): inline TS syntax check pre-flush.
-      // Always runs for TS files; writes outputContent to a temp file so the
-      // check works in both staging (content in Map, abs is original on disk)
-      // and non-staging (abs already updated) paths.
+      // W.1: inline syntax check via SYNTAX_CHECKERS table (TS entry only;
+      // Python/Go added in W.2/W.3). Behaviour identical to the former
+      // hard-coded isTsFile path — table lookup just makes the extension set
+      // and checker command configurable without touching this block again.
       {
-        const tsExt = path.extname(abs).toLowerCase();
-        const isTsFile = tsExt === ".ts" || tsExt === ".tsx" || tsExt === ".cts" || tsExt === ".mts";
-        if (isTsFile) {
-          const tscStart = Date.now();
-          let tscDecision: "approved" | "rejected" = "approved";
-          let tscErrorCodes: string[] = [];
-          let tscOutputForAgent: string | null = null;
-          const tempTsPath = path.join(os.tmpdir(), `zone-tsc-${randomUUID()}${tsExt}`);
-          try {
-            fs.writeFileSync(tempTsPath, outputContent, "utf8");
-            await execAsync(
-              `npx tsc --noEmit --moduleResolution bundler --target es2022 --skipLibCheck "${tempTsPath}"`,
-              { timeout: 5000 }
-            );
-          } catch (tscErr: unknown) {
-            const stdout = ((tscErr as { stdout?: string }).stdout) ?? "";
-            const ts1Matches = stdout.match(/TS1\d{3}/g) ?? [];
-            if (ts1Matches.length > 0) {
-              tscDecision = "rejected";
-              tscErrorCodes = [...new Set(ts1Matches)];
-              tscOutputForAgent = stdout;
+        const ext = path.extname(abs).toLowerCase();
+        const checker = findCheckerForFile(abs);
+        if (!checker) {
+          if (input?.selfValidationCounts) input.selfValidationCounts.inlineTsSkips += 1;
+          log("[zone-self-validation]", JSON.stringify({
+            rule: "inline_ts_check",
+            decision: "skipped",
+            filePath,
+            fileType: ext,
+            errorCodes: [],
+            latencyMs: 0,
+            runId: input?.runId ?? null,
+          }));
+        } else {
+          const checkStart = Date.now();
+          let decision: "approved" | "rejected" = "approved";
+          let errorCodes: string[] = [];
+          let rawStdout: string | null = null;
+          const tempPath = path.join(os.tmpdir(), `zone-tsc-${randomUUID()}${ext}`);
+
+          const available = await checker.availabilityCheck();
+          if (available || !checker.gracefulSkip) {
+            const { cmd, args } = checker.cmdTemplate(tempPath);
+            const fullCmd = [cmd, ...args].join(" ");
+            try {
+              fs.writeFileSync(tempPath, outputContent, "utf8");
+              await execAsync(fullCmd, { timeout: checker.timeoutMs });
+            } catch (checkErr: unknown) {
+              const stdout = ((checkErr as { stdout?: string }).stdout) ?? "";
+              const stderr = ((checkErr as { stderr?: string }).stderr) ?? "";
+              const exitCode = ((checkErr as { code?: number }).code) ?? 1;
+              const errors = checker.parseErrors(stdout, stderr, exitCode);
+              if (checker.isBlockingError(errors)) {
+                decision = "rejected";
+                errorCodes = [...new Set(errors.filter((e) => e.code).map((e) => e.code!))];
+                rawStdout = stdout;
+              }
+              // Non-blocking errors (TS2xxx, timeout, ENOENT) → approve
+            } finally {
+              fs.rmSync(tempPath, { force: true });
             }
-            // TS2xxx-only or timeout/other → approve; single-file context can't resolve imports
-          } finally {
-            fs.rmSync(tempTsPath, { force: true });
           }
-          const tscLatencyMs = Date.now() - tscStart;
+          // !available && gracefulSkip → silently approve (decision stays "approved")
+
+          const latencyMs = Date.now() - checkStart;
           if (input?.selfValidationCounts) {
-            input.selfValidationCounts.totalLatencyMs += tscLatencyMs;
-            if (tscDecision === "approved") {
+            input.selfValidationCounts.totalLatencyMs += latencyMs;
+            if (decision === "approved") {
               input.selfValidationCounts.inlineTsApproves += 1;
             } else {
               input.selfValidationCounts.inlineTsRejects += 1;
@@ -1987,27 +2006,26 @@ export async function executeTool(
           }
           log("[zone-self-validation]", JSON.stringify({
             rule: "inline_ts_check",
-            decision: tscDecision,
+            decision,
             filePath,
-            fileType: tsExt,
-            errorCodes: tscErrorCodes,
-            latencyMs: tscLatencyMs,
+            fileType: ext,
+            errorCodes,
+            latencyMs,
             runId: input?.runId ?? null,
           }));
-          if (tscDecision === "rejected") {
+          if (decision === "rejected") {
             if (!stagedWrite(input?.stagingFiles, abs, original)) {
               fs.writeFileSync(abs, original, "utf8");
             }
-            // J.4: structured rollback feedback. The TS1xxx codes are
-            // syntax-level (single-file) so the cross-file suggestion
-            // heuristic won't fire — the marker + restored-file scope
-            // is what the agent needs to understand the rollback.
+            // J.4: structured rollback feedback. parseTscErrorPreview from
+            // applyRollbackFeedback is the single source of truth for rich
+            // error parsing; checker.parseErrors only drives isBlockingError.
             const {
               parseTscErrorPreview,
               buildApplyRolledBackMessage,
               buildApplyRolledBackMarkerLog,
             } = await import("../llm/applyRollbackFeedback.js");
-            const errors = parseTscErrorPreview(tscOutputForAgent ?? "");
+            const errors = parseTscErrorPreview(rawStdout ?? "");
             const tsErrors = errors.filter((e) => e.code.startsWith("TS"));
             const message = buildApplyRolledBackMessage({
               filePath,
@@ -2019,7 +2037,7 @@ export async function executeTool(
               filePath,
               errorCount: errors.length,
               filePathsRestored: [filePath],
-              codes: tscErrorCodes,
+              codes: errorCodes,
               runId: input?.runId ?? null,
             }));
             // J.4.1: grep-friendly marker log with codes + suggestionApplied.
@@ -2038,17 +2056,6 @@ export async function executeTool(
               rejectionReason: "inline_ts_syntax_error",
             };
           }
-        } else {
-          if (input?.selfValidationCounts) input.selfValidationCounts.inlineTsSkips += 1;
-          log("[zone-self-validation]", JSON.stringify({
-            rule: "inline_ts_check",
-            decision: "skipped",
-            filePath,
-            fileType: path.extname(abs).toLowerCase(),
-            errorCodes: [],
-            latencyMs: 0,
-            runId: input?.runId ?? null,
-          }));
         }
       }
 

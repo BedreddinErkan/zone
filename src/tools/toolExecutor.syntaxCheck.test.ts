@@ -1,8 +1,9 @@
 /**
- * Phase V Commit 3: inline TS syntax validation pre-flush.
+ * W.1: SYNTAX_CHECKERS table — TS path integration tests.
+ * Migrated from toolExecutor.inlineTsc.test.ts; test bodies unchanged.
  * After apply_patch writes staged content, if the file is .ts/.tsx/.cts/.mts,
- * a tsc syntax check runs. TS1xxx errors → reject+rollback; TS2xxx → pass;
- * non-TS files → skipped.
+ * a tsc syntax check runs via the SYNTAX_CHECKERS table lookup.
+ * TS1xxx errors → reject+rollback; TS2xxx → pass; non-TS files → skipped.
  */
 
 // ── hoisted exec mock ─────────────────────────────────────────────────────────
