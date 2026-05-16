@@ -309,3 +309,94 @@ describe("/api/metrics", () => {
     expect(body.resumableRate).toBe(0.5);
   });
 });
+
+// ── /api/metrics/prometheus ───────────────────────────────────────────────────
+
+describe("/api/metrics/prometheus", () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    delete process.env.ADMIN_SECRET;
+    readRecordsMock.mockReturnValue([]);
+
+    const { app } = await import("./server.js");
+    server = createServer(app);
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("no address");
+    baseUrl = `http://127.0.0.1:${address.port}`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+    delete process.env.ADMIN_SECRET;
+  });
+
+  it("returns 403 when ADMIN_SECRET is set and x-admin-secret header is missing", async () => {
+    process.env.ADMIN_SECRET = "secret";
+    const res = await fetch(`${baseUrl}/api/metrics/prometheus`);
+    const body = await res.json();
+    expect(res.status).toBe(403);
+    expect(body).toMatchObject({ ok: false, reason: "unauthorized" });
+  });
+
+  it("returns 200 with Prometheus text in self-hosted mode (no ADMIN_SECRET)", async () => {
+    readRecordsMock.mockReturnValue([]);
+    const res = await fetch(`${baseUrl}/api/metrics/prometheus?period=day`);
+    expect(res.status).toBe(200);
+    const ct = res.headers.get("content-type") ?? "";
+    expect(ct).toContain("text/plain");
+    expect(ct).toContain("version=0.0.4");
+    const body = await res.text();
+    expect(body).toContain("# HELP zone_runs ");
+    expect(body).toContain("# TYPE zone_runs gauge");
+    expect(body.endsWith("\n")).toBe(true);
+  });
+
+  it("returns 200 with valid Prometheus body when authenticated", async () => {
+    process.env.ADMIN_SECRET = "my-secret";
+    readRecordsMock.mockReturnValue([makeUsageRecord({ runId: "r1", est_cost_usd: 0.05 })]);
+
+    const res = await fetch(`${baseUrl}/api/metrics/prometheus?period=week`, {
+      headers: { "x-admin-secret": "my-secret" },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain(`zone_runs{period="week"} 1`);
+    expect(body).toContain(`zone_usd_dollars{period="week"} 0.05`);
+    expect(body).toContain(`zone_latency_ms{quantile="0.5",period="week"}`);
+    expect(body).toContain(`zone_latency_ms{quantile="0.95",period="week"}`);
+  });
+
+  it("returns 400 for an unrecognised period value (symmetric with /api/metrics)", async () => {
+    const res = await fetch(`${baseUrl}/api/metrics/prometheus?period=year`);
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body).toMatchObject({ ok: false, reason: "invalid_period" });
+  });
+
+  it("cache hit: second call reuses aggregated result without re-reading records", async () => {
+    readRecordsMock.mockReturnValue([makeUsageRecord({ runId: "r1", est_cost_usd: 0.02 })]);
+
+    const res1 = await fetch(`${baseUrl}/api/metrics/prometheus?period=day&userId=u1`);
+    const body1 = await res1.text();
+
+    // mutate mock — cache hit should still return original result
+    readRecordsMock.mockReturnValue([]);
+
+    const res2 = await fetch(`${baseUrl}/api/metrics/prometheus?period=day&userId=u1`);
+    const body2 = await res2.text();
+
+    expect(res1.status).toBe(200);
+    expect(res2.status).toBe(200);
+    expect(body2).toBe(body1);
+    expect(readRecordsMock).toHaveBeenCalledTimes(1);
+  });
+});

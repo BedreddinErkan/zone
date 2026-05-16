@@ -13,6 +13,7 @@ import { runAgent } from "../core/runAgent.js";
 import { getUsage, getRunCost, readRecords } from "../usage/usageTracker.js";
 import { aggregateMetrics, type RunRecord } from "../llm/metricsAggregator.js";
 import { loadOrgPolicy, validatePolicy } from "../llm/policyLoader.js";
+import { aggregatorToPrometheus } from "../llm/prometheusFormatter.js";
 import { atomicWriteFileSync } from "../utils/atomicWrite.js";
 import { getPatchUserFacingReason } from "../llm/patchUserFacingReason.js";
 import { loadLimitConfig, saveLimitConfig, checkUsageLimit } from "./usageLimits.js";
@@ -2247,6 +2248,58 @@ app.get("/api/metrics", (req, res) => {
     res.json(result);
   } catch (err) {
     errorLog("[zone] /api/metrics failed", err);
+    res.status(500).json({ ok: false, reason: "metrics_aggregation_failed" });
+  }
+});
+
+// L.2: Prometheus text format endpoint. Auth mirrors /api/metrics (Pattern A).
+// Reuses metricsCache — both /api/metrics (JSON) and this endpoint hit the same
+// aggregation result within the 60 s TTL.
+app.get("/api/metrics/prometheus", (req, res) => {
+  const adminSecret =
+    typeof process.env.ADMIN_SECRET === "string"
+      ? process.env.ADMIN_SECRET.trim()
+      : "";
+  const providedSecret =
+    typeof req.get("x-admin-secret") === "string"
+      ? req.get("x-admin-secret")!.trim()
+      : "";
+  if (adminSecret && providedSecret !== adminSecret) {
+    res.status(403).json({ ok: false, reason: "unauthorized" });
+    return;
+  }
+
+  const periodRaw =
+    typeof req.query.period === "string" ? req.query.period.trim() : "";
+  if (periodRaw && !METRICS_VALID_PERIODS.has(periodRaw)) {
+    res.status(400).json({ ok: false, reason: "invalid_period" });
+    return;
+  }
+  const period = (METRICS_VALID_PERIODS.has(periodRaw) ? periodRaw : "day") as
+    | "day"
+    | "week"
+    | "month";
+
+  const userIdRaw =
+    typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+  const userId = userIdRaw || "local-dev";
+
+  const cacheKey = `${userId}:${period}`;
+  const cached = metricsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    res.set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+    res.send(aggregatorToPrometheus(cached.result));
+    return;
+  }
+
+  try {
+    const runs = buildRunRecords(userId);
+    const result = aggregateMetrics({ userId, period, runs });
+    metricsCache.set(cacheKey, { result, expiresAt: Date.now() + METRICS_CACHE_TTL_MS });
+    res.set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+    res.send(aggregatorToPrometheus(result));
+  } catch (err) {
+    errorLog("[zone] /api/metrics/prometheus failed", err);
     res.status(500).json({ ok: false, reason: "metrics_aggregation_failed" });
   }
 });
