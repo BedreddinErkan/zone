@@ -21,6 +21,7 @@ const supabaseConversationCreateSingleMock = vi.fn();
 const supabaseConversationMaybeSingleMock = vi.fn();
 const supabaseConversationUpdateMock = vi.fn();
 const supabaseConversationUpdateSingleMock = vi.fn();
+const supabaseConversationUpsertSingleMock = vi.fn();
 const supabaseRpcMock = vi.fn();
 const createDeveloperPatchJobMock = vi.fn();
 const getDeveloperPatchJobMock = vi.fn();
@@ -60,10 +61,18 @@ const supabaseFromMock = vi.fn((table: string) => {
       insert: supabaseConversationInsertMock,
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            maybeSingle: supabaseConversationMaybeSingleMock,
+          })),
           maybeSingle: supabaseConversationMaybeSingleMock,
         })),
       })),
       update: supabaseConversationUpdateMock,
+      upsert: vi.fn(() => ({
+        select: vi.fn(() => ({
+          single: supabaseConversationUpsertSingleMock,
+        })),
+      })),
     };
   }
   return {
@@ -210,6 +219,18 @@ describe("/api/test-engineer", () => {
         has_free_refinement_been_used: false,
         created_at: "2026-04-13T10:00:00.000Z",
         updated_at: "2026-04-13T10:01:00.000Z",
+      },
+      error: null,
+    });
+    supabaseConversationUpsertSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_123",
+        thread_id: "conv_123",
+        user_id: "clerk_user_123",
+        repo_path: "C:/repo",
+        messages: [],
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:00:00.000Z",
       },
       error: null,
     });
@@ -850,6 +871,18 @@ export function LoginForm() {
       },
       error: null,
     });
+    supabaseConversationUpsertSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_existing",
+        thread_id: "conv_existing",
+        user_id: "clerk_user_123",
+        repo_path: "C:/repo",
+        messages: [],
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:01:00.000Z",
+      },
+      error: null,
+    });
 
     const response = await fetch(`${baseUrl}/api/patch`, {
       method: "POST",
@@ -860,6 +893,7 @@ export function LoginForm() {
         userId: "clerk_user_123",
         conversationId: "conv_existing",
         billingMode: "hosted",
+        mode: "patch",
       }),
     });
 
@@ -923,6 +957,18 @@ export function LoginForm() {
         has_free_refinement_been_used: false,
         created_at: "2026-04-13T10:00:00.000Z",
         updated_at: "2026-04-13T10:01:00.000Z",
+      },
+      error: null,
+    });
+    supabaseConversationUpsertSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_new",
+        thread_id: "conv_new",
+        user_id: "clerk_user_123",
+        repo_path: "C:/repo",
+        messages: [],
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:00:00.000Z",
       },
       error: null,
     });
@@ -993,6 +1039,18 @@ export function LoginForm() {
         has_free_refinement_been_used: false,
         created_at: "2026-04-13T10:00:00.000Z",
         updated_at: "2026-04-13T10:01:00.000Z",
+      },
+      error: null,
+    });
+    supabaseConversationUpsertSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_byok",
+        thread_id: "conv_byok",
+        user_id: "clerk_user_123",
+        repo_path: "C:/repo",
+        messages: [],
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:00:00.000Z",
       },
       error: null,
     });
