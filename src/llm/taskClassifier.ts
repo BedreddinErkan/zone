@@ -239,7 +239,7 @@ export async function classifyTask(
   }
 
   const ctx = getRequestContext();
-  const provider = options.provider ?? ctx?.provider ?? "openai";
+  const provider = options.provider ?? ctx?.provider ?? "anthropic";
   const model = pickClassifierModel(provider);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 

@@ -16,7 +16,7 @@ vi.mock("./factory.js", () => ({
   })),
 }));
 
-function buildResponse(jsonContent: string, model = "gpt-5.4-mini") {
+function buildResponse(jsonContent: string, model = "claude-haiku-4-5") {
   return {
     model,
     choices: [{ message: { content: jsonContent } }],
@@ -66,7 +66,7 @@ describe("Phase L.1 task classifier", () => {
     expect(result.estimatedFiles).toBe(1);
     expect(result.confidence).toBe(0.9);
     expect(result.fallbackUsed).toBeUndefined();
-    expect(result.classifierModel).toBe("gpt-5.4-mini");
+    expect(result.classifierModel).toBe("claude-haiku-4-5");
     expect(result.classifierCostUsd).toBeGreaterThan(0);
     expect(result.classifierLatencyMs).toBeGreaterThanOrEqual(0);
   });
@@ -242,7 +242,7 @@ describe("Phase L.1 task classifier", () => {
       tier: "medium",
       estimatedFiles: 3,
       needsSubagent: false,
-      classifierModel: "gpt-5.4-mini",
+      classifierModel: "claude-haiku-4-5",
     });
     expect(typeof payload.taskHash).toBe("string");
     expect(payload.classifierLatencyMs).toBeGreaterThanOrEqual(0);
@@ -262,8 +262,8 @@ describe("Phase L.1 task classifier", () => {
     const payload = JSON.parse(String(failureLogCall![1]));
     expect(payload).toMatchObject({
       message: "boom",
-      classifierModel: "gpt-5.4-mini",
-      provider: "openai",
+      classifierModel: "claude-haiku-4-5",
+      provider: "anthropic",
     });
   });
 
@@ -491,7 +491,7 @@ describe("Phase Q.8 — complex-tier triggers for multi-file rename", () => {
     expect(result.needsSubagent).toBe(true);
   });
 
-  it("system prompt includes Q.8 rename / multi-file complex triggers", async () => {
+  it("system prompt includes Q.8 rename / multi-file complex triggers (openai path)", async () => {
     mocks.createChatCompletion.mockResolvedValue(
       buildResponse(
         JSON.stringify({
@@ -500,11 +500,12 @@ describe("Phase Q.8 — complex-tier triggers for multi-file rename", () => {
           estimatedIterations: 20,
           needsSubagent: true,
           confidence: 0.9,
-        })
+        }),
+        "gpt-5.4-mini"
       )
     );
 
-    await classifyTask("prompt-content audit task");
+    await classifyTask("prompt-content audit task", { provider: "openai" });
 
     const call = mocks.createChatCompletion.mock.calls[0]?.[0] as {
       messages: Array<{ role: string; content: string }>;
@@ -516,6 +517,100 @@ describe("Phase Q.8 — complex-tier triggers for multi-file rename", () => {
     expect(systemMsg).toContain("across all N files");
     expect(systemMsg).toContain("3+ file paths");
     expect(systemMsg).toContain("Counter-examples");
+  });
+});
+
+describe("Phase BYOM.1.1 — classifier provider routing", () => {
+  it("no provider passed → defaults to anthropic → model claude-haiku-4-5", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "simple",
+          estimatedFiles: 1,
+          estimatedIterations: 5,
+          needsSubagent: false,
+          confidence: 0.9,
+        })
+      )
+    );
+
+    const result = await classifyTask("simple comment add");
+
+    expect(result.classifierModel).toBe("claude-haiku-4-5");
+    expect(result.fallbackUsed).toBeUndefined();
+  });
+
+  it("provider=anthropic explicit → model claude-haiku-4-5", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "medium",
+          estimatedFiles: 3,
+          estimatedIterations: 12,
+          needsSubagent: false,
+          confidence: 0.8,
+        })
+      )
+    );
+
+    const result = await classifyTask("refactor helpers", { provider: "anthropic" });
+
+    expect(result.classifierModel).toBe("claude-haiku-4-5");
+  });
+
+  it("provider=openai explicit → model gpt-5.4-mini", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "medium",
+          estimatedFiles: 3,
+          estimatedIterations: 10,
+          needsSubagent: false,
+          confidence: 0.8,
+        }),
+        "gpt-5.4-mini"
+      )
+    );
+
+    const result = await classifyTask("refactor helpers", { provider: "openai" });
+
+    expect(result.classifierModel).toBe("gpt-5.4-mini");
+  });
+
+  it("explicit provider param wins over request context", async () => {
+    // Even if ctx.provider were openai, explicit options.provider=anthropic takes precedence.
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "simple",
+          estimatedFiles: 1,
+          estimatedIterations: 4,
+          needsSubagent: false,
+          confidence: 0.85,
+        })
+      )
+    );
+
+    // Pass anthropic explicitly — should pick claude-haiku-4-5 regardless of any ctx
+    const result = await classifyTask("explicit override task", { provider: "anthropic" });
+
+    expect(result.classifierModel).toBe("claude-haiku-4-5");
+  });
+
+  it("anthropic failure → fallback emits provider=anthropic in log", async () => {
+    mocks.createChatCompletion.mockRejectedValue(new Error("quota exceeded"));
+
+    await classifyTask("anthropic-only user task");
+
+    const failureLogCall = consoleLogSpy.mock.calls.find(
+      (call) => String(call[0] ?? "") === "[zone-task-classifier-failure]"
+    );
+    expect(failureLogCall).toBeDefined();
+    const payload = JSON.parse(String(failureLogCall![1]));
+    expect(payload).toMatchObject({
+      classifierModel: "claude-haiku-4-5",
+      provider: "anthropic",
+    });
   });
 });
 
