@@ -468,7 +468,7 @@ export function assembleInvestigationSystemPrompt(input: {
     "",
     "Process:",
     "1. Identify what the question asks: definition, usages, control flow, data shape, or design rationale.",
-    "2. Search for relevant terms with search_in_files. Prefer source globs such as `src/**/*.ts` or `src/**/*.{ts,tsx,js,jsx}` before broad `**/*` searches.",
+    "2. Search for relevant terms with search_in_files. Prefer source globs such as `src/**/*.ts`, `src/**/*.py`, or `src/**/*.{ts,tsx,js,jsx}` before broad `**/*` searches.",
     "3. Read 2-3 top hits with read_file. Read related context files when imports or callers matter.",
     "4. If the question is about usages of an identifier, use find_references when you know the exporting source file, and read each relevant call site briefly.",
     "5. Ignore logs, build output, dependency folders, and generated artifacts unless the user specifically asks about them.",
@@ -477,7 +477,7 @@ export function assembleInvestigationSystemPrompt(input: {
     "",
     "Final answer:",
     "- Write clear markdown.",
-    "- Include file paths in backticks, with line numbers where helpful, for example `src/foo.ts:42`.",
+    "- Include file paths in backticks, with line numbers where helpful, for example `src/foo.ts:42` or `src/foo.py:42`.",
     "- Aim for ≥3 distinct file citations when the symbol is non-trivial; if only 1-2 references exist, state that explicitly.",
     "- Use code blocks for short snippets only when they clarify the answer.",
     "- End with a `Summary` section if the answer has multiple parts.",
@@ -1252,7 +1252,7 @@ export function selectVerificationCommand(
   if (framework.language === "typescript") {
     return { command: "npx tsc --noEmit", timeoutMs: 60000, label: "tsc" };
   }
-  if (framework.language === "javascript" && framework.testCommand) {
+  if (framework.testCommand && (framework.language === "javascript" || framework.language === "python")) {
     return { command: framework.testCommand, timeoutMs: 90000, label: "test" };
   }
   return null;
@@ -1271,8 +1271,9 @@ function countVerificationErrors(label: string, output: string): number {
   }
   if (label === "test") {
     // Test runner output is heterogeneous; count common failure markers.
+    // Covers vitest/jest (FAIL, ✗), pytest (FAILED, \d+ failed), and similar.
     let count = 0;
-    count += (text.match(/\bFAIL\b/g) || []).length;
+    count += (text.match(/\bFAIL(ED)?\b/g) || []).length;
     count += (text.match(/✗/g) || []).length;
     count += (text.match(/\d+ failed/i) ? 1 : 0);
     return Math.max(count, text ? 1 : 0);
@@ -2165,7 +2166,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
         : `You are Zone, an AI code agent${fw?.framework ? ` working on a ${fw.framework} project` : ""}.`;
   const canRunCommand = toolsForLLM.some((t) => getZoneToolName(t) === "run_command");
   const backgroundCommandBlock = canRunCommand
-    ? `\nBACKGROUND COMMANDS: for long-lived processes (npm run dev, vite, watchers, tail -f), use \`run_command_background\` — returns a handle so you can keep working. Poll output with \`read_background_output\` (pass since_offset from the prior read to get only new bytes). \`kill_background\` when done; processes are also auto-killed at run end. Poll sparingly (every 2-3 iters, not every iter). One-shot commands (build, test, lint, tsc) → \`run_command\`.\n\n`
+    ? `\nBACKGROUND COMMANDS: for long-lived processes (npm run dev, vite, watchers, tail -f), use \`run_command_background\` — returns a handle so you can keep working. Poll output with \`read_background_output\` (pass since_offset from the prior read to get only new bytes). \`kill_background\` when done; processes are also auto-killed at run end. Poll sparingly (every 2-3 iters, not every iter). One-shot commands (build, test, lint, tsc, pytest) → \`run_command\`.\n\n`
     : "";
   const planProgressBlock = `PLAN VISIBILITY (TodoWrite):
 Call TodoWrite once near the start of any task with 2+ tool calls, with 2-6 short steps. Shown to the user as a live sidebar.
