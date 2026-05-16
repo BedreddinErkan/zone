@@ -1969,6 +1969,8 @@ export async function executeTool(
           let decision: "approved" | "rejected" = "approved";
           let errorCodes: string[] = [];
           let rawStdout: string | null = null;
+          let rawStderr: string | null = null;
+          let checkerParsedErrors: ReturnType<typeof checker.parseErrors> = [];
           const tempPath = path.join(os.tmpdir(), `zone-tsc-${randomUUID()}${ext}`);
 
           const available = await checker.availabilityCheck();
@@ -1987,6 +1989,8 @@ export async function executeTool(
                 decision = "rejected";
                 errorCodes = [...new Set(errors.filter((e) => e.code).map((e) => e.code!))];
                 rawStdout = stdout;
+                rawStderr = stderr;
+                checkerParsedErrors = errors;
               }
               // Non-blocking errors (TS2xxx, timeout, ENOENT) → approve
             } finally {
@@ -2017,19 +2021,29 @@ export async function executeTool(
             if (!stagedWrite(input?.stagingFiles, abs, original)) {
               fs.writeFileSync(abs, original, "utf8");
             }
-            // J.4: structured rollback feedback. parseTscErrorPreview from
-            // applyRollbackFeedback is the single source of truth for rich
-            // error parsing; checker.parseErrors only drives isBlockingError.
+            // J.4: structured rollback feedback.
+            // TS path: parseTscErrorPreview for rich error parsing from stdout.
+            // Python path: convert checkerParsedErrors → RolledBackError[] directly.
             const {
               parseTscErrorPreview,
               buildApplyRolledBackMessage,
               buildApplyRolledBackMarkerLog,
             } = await import("../llm/applyRollbackFeedback.js");
-            const errors = parseTscErrorPreview(rawStdout ?? "");
-            const tsErrors = errors.filter((e) => e.code.startsWith("TS"));
+            let errors: { file?: string; line?: number; col?: number; code: string; message: string }[];
+            if (checker.id === "ts") {
+              errors = parseTscErrorPreview(rawStdout ?? "");
+              errors = errors.filter((e) => e.code.startsWith("TS"));
+            } else {
+              errors = checkerParsedErrors.map((e) => ({
+                file: filePath,
+                line: e.line,
+                code: e.code ?? "",
+                message: e.message,
+              }));
+            }
             const message = buildApplyRolledBackMessage({
               filePath,
-              errors: tsErrors,
+              errors,
               restoredFiles: [filePath],
             });
             log("[zone-apply-rolled-back-feedback]", JSON.stringify({
@@ -2045,7 +2059,7 @@ export async function executeTool(
               buildApplyRolledBackMarkerLog({
                 site: "inline_ts_check",
                 markerMessage: message,
-                errors: tsErrors,
+                errors,
                 filePathsRestored: [filePath],
                 runId: input?.runId ?? null,
               })

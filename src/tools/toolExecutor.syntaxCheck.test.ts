@@ -1,9 +1,7 @@
 /**
- * W.1: SYNTAX_CHECKERS table — TS path integration tests.
- * Migrated from toolExecutor.inlineTsc.test.ts; test bodies unchanged.
- * After apply_patch writes staged content, if the file is .ts/.tsx/.cts/.mts,
- * a tsc syntax check runs via the SYNTAX_CHECKERS table lookup.
- * TS1xxx errors → reject+rollback; TS2xxx → pass; non-TS files → skipped.
+ * W.1/W.2: SYNTAX_CHECKERS table — TS + Python path integration tests.
+ * W.1 (migrated): TS path — TS1xxx errors → reject+rollback; TS2xxx → pass; non-TS files → skipped.
+ * W.2: Python path — py_compile SyntaxError → reject+rollback; python3 unavailable → silently approve.
  */
 
 // ── hoisted exec mock ─────────────────────────────────────────────────────────
@@ -22,6 +20,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { executeTool } from "./toolExecutor.js";
+import { clearAvailabilityCache } from "./syntaxCheckers.js";
 
 let repoPath: string;
 
@@ -87,8 +86,76 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.resetAllMocks();
+  clearAvailabilityCache();
   fs.rmSync(repoPath, { recursive: true, force: true });
 });
+
+// ── Python mock helpers ───────────────────────────────────────────────────────
+
+/** python3 available (which succeeds), py_compile succeeds */
+function makeExecPySuccess(): void {
+  execMock.mockImplementation(
+    (cmd: string, _opts: unknown, callback: (err: null, result: { stdout: string; stderr: string }) => void) => {
+      callback(null, { stdout: "", stderr: "" });
+      return {} as ReturnType<typeof import("node:child_process").exec>;
+    }
+  );
+}
+
+/** python3 available, py_compile fails with SyntaxError */
+function makeExecPySyntaxError(): void {
+  execMock.mockImplementation(
+    (cmd: string, _opts: unknown, callback: (err: Error | null, result?: { stdout: string; stderr: string }) => void) => {
+      if (typeof cmd === "string" && cmd.includes("py_compile")) {
+        const stderr = `  File "/tmp/zone-tsc-abc.py", line 3\n    def foo(\n           ^\nSyntaxError: '(' was never closed\n`;
+        const err = Object.assign(new Error("py_compile failed"), {
+          code: 1,
+          stdout: "",
+          stderr,
+        });
+        callback(err);
+      } else {
+        // which python3 → success
+        callback(null, { stdout: "/usr/bin/python3", stderr: "" });
+      }
+      return {} as ReturnType<typeof import("node:child_process").exec>;
+    }
+  );
+}
+
+/** python3 available, py_compile fails with IndentationError */
+function makeExecPyIndentationError(): void {
+  execMock.mockImplementation(
+    (cmd: string, _opts: unknown, callback: (err: Error | null, result?: { stdout: string; stderr: string }) => void) => {
+      if (typeof cmd === "string" && cmd.includes("py_compile")) {
+        const stderr = `  File "/tmp/zone-tsc-abc.py", line 2\n    \tpass\n    ^\nIndentationError: unexpected indent\n`;
+        const err = Object.assign(new Error("py_compile failed"), {
+          code: 1,
+          stdout: "",
+          stderr,
+        });
+        callback(err);
+      } else {
+        callback(null, { stdout: "/usr/bin/python3", stderr: "" });
+      }
+      return {} as ReturnType<typeof import("node:child_process").exec>;
+    }
+  );
+}
+
+/** python3 not on PATH → which fails → gracefulSkip → silently approve */
+function makeExecPyUnavailable(): void {
+  execMock.mockImplementation(
+    (cmd: string, _opts: unknown, callback: (err: Error | null, result?: { stdout: string; stderr: string }) => void) => {
+      if (typeof cmd === "string" && cmd.includes("which")) {
+        callback(new Error("not found"));
+      } else {
+        callback(null, { stdout: "", stderr: "" });
+      }
+      return {} as ReturnType<typeof import("node:child_process").exec>;
+    }
+  );
+}
 
 describe("inline TS syntax validation", () => {
   it("approves valid TS file — patch applied successfully", async () => {
@@ -190,6 +257,121 @@ describe("inline TS syntax validation", () => {
       {}
     );
     // TS2xxx semantic errors are project-level — single-file check ignores them
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("W.2 — inline Python syntax validation", () => {
+  it("approves valid .py file — patch applied successfully", async () => {
+    makeExecPySuccess();
+    writeRepoFile("src/ok.py", "def foo():\n    return 1\n");
+    const result = await executeTool(
+      "apply_patch",
+      {
+        filePath: "src/ok.py",
+        patch: "--- FIND ---\n    return 1\n--- REPLACE ---\n    return 2",
+        intent: "modify",
+        scope: null,
+      },
+      repoPath,
+      undefined,
+      {}
+    );
+    expect(result.success).toBe(true);
+    expect(readRepoFile("src/ok.py")).toContain("return 2");
+  });
+
+  it("rejects .py file when py_compile returns SyntaxError — rolls back staging", async () => {
+    const original = "def foo():\n    return 1\n";
+    writeRepoFile("src/broken.py", original);
+    makeExecPySyntaxError();
+
+    const result = await executeTool(
+      "apply_patch",
+      {
+        filePath: "src/broken.py",
+        patch: "--- FIND ---\n    return 1\n--- REPLACE ---\n    return 2",
+        intent: "modify",
+        scope: null,
+      },
+      repoPath,
+      undefined,
+      {}
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.output).toMatch(/^APPLY_ROLLED_BACK\n/);
+    expect(result.output).toContain("SyntaxError");
+    expect(result.output).toContain("src/broken.py");
+    expect(result.rejectionReason).toBe("inline_ts_syntax_error");
+    expect(readRepoFile("src/broken.py")).toBe(original);
+  });
+
+  it("rejects .py file with IndentationError — rollback message includes heuristic suggestion", async () => {
+    const original = "def foo():\n    return 1\n";
+    writeRepoFile("src/indent.py", original);
+    makeExecPyIndentationError();
+
+    const result = await executeTool(
+      "apply_patch",
+      {
+        filePath: "src/indent.py",
+        patch: "--- FIND ---\n    return 1\n--- REPLACE ---\n    return 2",
+        intent: "modify",
+        scope: null,
+      },
+      repoPath,
+      undefined,
+      {}
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.output).toMatch(/^APPLY_ROLLED_BACK\n/);
+    expect(result.output).toContain("IndentationError");
+    // Heuristic suggestion should be present for IndentationError
+    expect(result.output).toContain("Suggested:");
+    expect(readRepoFile("src/indent.py")).toBe(original);
+  });
+
+  it("silently approves .py file when python3 is not on PATH (gracefulSkip)", async () => {
+    makeExecPyUnavailable();
+    writeRepoFile("src/nopython.py", "def foo():\n    return 1\n");
+
+    const result = await executeTool(
+      "apply_patch",
+      {
+        filePath: "src/nopython.py",
+        patch: "--- FIND ---\n    return 1\n--- REPLACE ---\n    return 2",
+        intent: "modify",
+        scope: null,
+      },
+      repoPath,
+      undefined,
+      {}
+    );
+
+    // gracefulSkip: python3 unavailable → approve silently
+    expect(result.success).toBe(true);
+    expect(readRepoFile("src/nopython.py")).toContain("return 2");
+  });
+
+  it("skips Python check for .js files — patch proceeds without py_compile", async () => {
+    makeExecPySyntaxError(); // would reject if called for .js
+    writeRepoFile("src/skip.js", "const a = 1;\n");
+
+    const result = await executeTool(
+      "apply_patch",
+      {
+        filePath: "src/skip.js",
+        patch: "--- FIND ---\nconst a = 1;\n--- REPLACE ---\nconst a = 2;",
+        intent: "modify",
+        scope: null,
+      },
+      repoPath,
+      undefined,
+      {}
+    );
+
     expect(result.success).toBe(true);
   });
 });

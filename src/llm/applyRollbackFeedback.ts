@@ -53,6 +53,14 @@ export const ROLLED_BACK_SUGGESTIONS: ReadonlyMap<string, string> = new Map([
     "TS2339",
     "Suggested: type contract changed; update all consumers in the same patch sequence.",
   ],
+  [
+    "IndentationError",
+    "Suggested: fix indentation — Python requires consistent spaces or tabs, not a mix.",
+  ],
+  [
+    "TabError",
+    "Suggested: replace tabs with spaces (or vice versa) — Python cannot mix indentation styles.",
+  ],
 ]);
 
 /**

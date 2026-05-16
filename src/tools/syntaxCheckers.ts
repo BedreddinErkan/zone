@@ -1,9 +1,10 @@
 /**
- * W.1: SYNTAX_CHECKERS table infrastructure.
+ * W.1/W.2: SYNTAX_CHECKERS table.
  *
  * Single source of truth for per-language inline syntax validation.
- * Currently holds the TS entry (behaviour-identical to the former hard-coded
- * isTsFile path in toolExecutor.ts). W.2 adds Python, W.3 adds Go/Ruby/Java.
+ * W.1: TS entry (behaviour-identical refactor of the former hard-coded path).
+ * W.2: Python entry (py_compile, first-class).
+ * W.3 (future): Go/Ruby/Java experimental entries.
  */
 
 import path from "node:path";
@@ -43,6 +44,11 @@ export type SyntaxChecker = {
 // repeated calls in the same process skip the `which` spawn.
 // ---------------------------------------------------------------------------
 const availabilityCache = new Map<string, Promise<boolean>>();
+
+/** Clear the availability cache — test helper only. */
+export function clearAvailabilityCache(): void {
+  availabilityCache.clear();
+}
 
 export function whichCheck(binary: string): Promise<boolean> {
   if (!availabilityCache.has(binary)) {
@@ -102,6 +108,30 @@ export const SYNTAX_CHECKERS: SyntaxChecker[] = [
     },
     timeoutMs: 5000,
     // Matches current silent-approve behavior when tsc/npx is missing.
+    gracefulSkip: true,
+  },
+  {
+    id: "py",
+    extensions: [".py"],
+    status: "first-class",
+    cmdTemplate: (fp) => ({ cmd: "python3", args: ["-m", "py_compile", fp] }),
+    availabilityCheck: () => whichCheck("python3"),
+    // Any parsed error from py_compile is a syntax error — always block.
+    isBlockingError: (errors) => errors.length > 0,
+    parseErrors: (_stdout, stderr, _exitCode) => {
+      const out: ParsedSyntaxError[] = [];
+      const fileLineMatch = stderr.match(/File "([^"]+)", line (\d+)/);
+      const errorMatch = stderr.match(/^(SyntaxError|IndentationError|TabError): (.+)$/m);
+      if (errorMatch) {
+        out.push({
+          line: fileLineMatch ? parseInt(fileLineMatch[2], 10) : undefined,
+          code: errorMatch[1],
+          message: errorMatch[2],
+        });
+      }
+      return out;
+    },
+    timeoutMs: 5000,
     gracefulSkip: true,
   },
 ];
