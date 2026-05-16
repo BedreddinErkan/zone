@@ -5696,7 +5696,27 @@ const initializeTodosFromPlan = (): void => {
         });
       },
       onToolCall: (name: string, args: Record<string, unknown>) => {
-        if (!runId) return;
+        // Snapshot "before" content unconditionally — must precede the !runId
+        // early-return so beforeByFile is always populated even when the
+        // agentLoop fails to add the path to filesModified (Y.2.2 defensive).
+        const snapPath =
+          (name === "write_file" || name === "apply_patch") && typeof args.filePath === "string"
+            ? args.filePath
+            : "";
+        if (snapPath && !beforeByFile.has(snapPath)) {
+          try {
+            const abs = path.join(input.repoPath, snapPath);
+            const before = existsSync(abs) ? readFileSync(abs, "utf8") : "";
+            beforeByFile.set(snapPath, before);
+          } catch {
+            beforeByFile.set(snapPath, "");
+          }
+        }
+
+        if (!runId) {
+          if (snapPath && !_planOrchestrationEnabled) startTodoForFile(snapPath);
+          return;
+        }
         const cmd =
           name === "run_command"
             ? String(args.command ?? "")
@@ -5743,20 +5763,6 @@ const initializeTodosFromPlan = (): void => {
           }, 50);
         }
 
-        // Snapshot "before" content on first write_file or apply_patch.
-        const snapPath =
-          (name === "write_file" || name === "apply_patch") && typeof args.filePath === "string"
-            ? args.filePath
-            : "";
-        if (snapPath && !beforeByFile.has(snapPath)) {
-          try {
-            const abs = path.join(input.repoPath, snapPath);
-            const before = existsSync(abs) ? readFileSync(abs, "utf8") : "";
-            beforeByFile.set(snapPath, before);
-          } catch {
-            beforeByFile.set(snapPath, "");
-          }
-        }
         if (snapPath && !_planOrchestrationEnabled) startTodoForFile(snapPath);
       },
       onToolResult: (
@@ -5994,6 +6000,21 @@ const initializeTodosFromPlan = (): void => {
         const removedLines = diff.filter((l) => l.type === "removed").length;
         fileDiffs.push({ filePath: rel, diff, addedLines, removedLines });
       }
+    }
+
+    // Y.2.2 defensive: recover diffs for any file snapshotted by onToolCall
+    // but absent from filesTouched (i.e., agentLoop skipped filesModified.add).
+    for (const [rel, before] of beforeByFile) {
+      if (fileDiffs.some((d) => d.filePath === rel)) continue;
+      const abs = path.join(input.repoPath, rel);
+      const after = stagingByRel?.has(rel)
+        ? stagingByRel.get(rel)!
+        : existsSync(abs) ? readFileSync(abs, "utf8") : "";
+      if (before === after) continue;
+      const diff = computeFileDiff(before, after);
+      const addedLines = diff.filter((l) => l.type === "added").length;
+      const removedLines = diff.filter((l) => l.type === "removed").length;
+      fileDiffs.push({ filePath: rel, diff, addedLines, removedLines });
     }
 
     // Use agent's self-reported verification reason to determine safety
