@@ -6073,6 +6073,7 @@ const initializeTodosFromPlan = (): void => {
       runtimeVerificationSummary: null,
       finalExecutionOutcome: agentDecisionMode === "safe_to_apply" ? "completed" : "completed_with_issues",
       developerConfidence: 80,
+      terminationReason: loop.terminationReason,
     });
     const agentVerificationCommands = collectVerificationCommands(loop.toolCallLog);
 

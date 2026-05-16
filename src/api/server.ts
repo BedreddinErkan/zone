@@ -16,6 +16,7 @@ import { loadOrgPolicy, validatePolicy } from "../llm/policyLoader.js";
 import { aggregatorToPrometheus } from "../llm/prometheusFormatter.js";
 import { atomicWriteFileSync } from "../utils/atomicWrite.js";
 import { getPatchUserFacingReason } from "../llm/patchUserFacingReason.js";
+import { routeCapGate } from "../llm/checkDailyCap.js";
 import { loadLimitConfig, saveLimitConfig, checkUsageLimit } from "./usageLimits.js";
 import {
   loadVisualSettings,
@@ -3007,6 +3008,19 @@ app.post("/api/chat", async (req, res) => {
       return;
     }
 
+    const _chatCapCheck = await routeCapGate(userId, runIdStr);
+    if (!_chatCapCheck.allowed) {
+      perf.finish("daily cap exceeded");
+      res.status(429).json({
+        ok: false,
+        terminationReason: "daily_usd_cap_exceeded",
+        userFacingMessage: _chatCapCheck.outcome.userFacingMessage,
+        canResume: _chatCapCheck.outcome.canResume,
+        resumeHint: _chatCapCheck.outcome.resumeHint,
+      });
+      return;
+    }
+
     const forcedExecute = shouldForceExecuteTask(normalizedTask);
     const messageType = forcedExecute
       ? "patch_request"
@@ -3125,6 +3139,19 @@ app.post("/api/investigate", async (req, res) => {
       if (!authorization.allowed) {
         perf.finish("authorization blocked");
         res.status(authorization.status).json(authorization.body);
+        return;
+      }
+
+      const _investigateCapCheck = await routeCapGate(userId, runIdStr);
+      if (!_investigateCapCheck.allowed) {
+        perf.finish("daily cap exceeded");
+        res.status(429).json({
+          ok: false,
+          terminationReason: "daily_usd_cap_exceeded",
+          userFacingMessage: _investigateCapCheck.outcome.userFacingMessage,
+          canResume: _investigateCapCheck.outcome.canResume,
+          resumeHint: _investigateCapCheck.outcome.resumeHint,
+        });
         return;
       }
 
@@ -3347,6 +3374,19 @@ app.post("/api/patch", async (req, res) => {
     } catch {}
   }
 
+  const _patchCapCheck = await routeCapGate(userId, typeof runId === "string" && runId.trim() ? runId.trim() : undefined);
+  if (!_patchCapCheck.allowed) {
+    perf.finish("daily cap exceeded");
+    res.status(429).json({
+      ok: false,
+      terminationReason: "daily_usd_cap_exceeded",
+      userFacingMessage: _patchCapCheck.outcome.userFacingMessage,
+      canResume: _patchCapCheck.outcome.canResume,
+      resumeHint: _patchCapCheck.outcome.resumeHint,
+    });
+    return;
+  }
+
   // Usage limit check — block new runs if the user has exceeded their daily or monthly threshold.
   try {
     const [dayUsage, monthUsage] = await Promise.all([
@@ -3510,6 +3550,7 @@ app.post("/api/patch", async (req, res) => {
     } catch {}
 
     const runIdStr = typeof runId === "string" && runId.trim() ? runId.trim() : "";
+    attachRunIdentity({ userId: userId ?? "local-dev", runId: runIdStr });
     const messageType =
       requestedMode === "auto"
         ? await detectMessageType(String(task), userApiKey || undefined)
@@ -4575,6 +4616,20 @@ const authorization = await ensureRunAuthorized(userId, {
     res.status(authorization.status).json(authorization.body);
     return;
   }
+  const _teCapCheck = await routeCapGate(
+    typeof userId === "string" ? userId : "local-dev",
+    typeof runId === "string" && runId.trim() ? runId.trim() : undefined
+  );
+  if (!_teCapCheck.allowed) {
+    res.status(429).json({
+      ok: false,
+      terminationReason: "daily_usd_cap_exceeded",
+      userFacingMessage: _teCapCheck.outcome.userFacingMessage,
+      canResume: _teCapCheck.outcome.canResume,
+      resumeHint: _teCapCheck.outcome.resumeHint,
+    });
+    return;
+  }
   try {
 const result = await runTestEngineerFlow({
   task,
@@ -4690,6 +4745,20 @@ const authorization = await ensureRunAuthorized(userId, {
   billingMode,
 });  if (!authorization.allowed) {
     res.status(authorization.status).json(authorization.body);
+    return;
+  }
+  const _daCapCheck = await routeCapGate(
+    typeof userId === "string" ? userId : "local-dev",
+    typeof runId === "string" && runId.trim() ? runId.trim() : undefined
+  );
+  if (!_daCapCheck.allowed) {
+    res.status(429).json({
+      ok: false,
+      terminationReason: "daily_usd_cap_exceeded",
+      userFacingMessage: _daCapCheck.outcome.userFacingMessage,
+      canResume: _daCapCheck.outcome.canResume,
+      resumeHint: _daCapCheck.outcome.resumeHint,
+    });
     return;
   }
   try {
