@@ -82,5 +82,13 @@ export function aggregatorToPrometheus(metrics: MetricsResponse): string {
     ]),
   );
 
+  blocks.push(
+    block(
+      "zone_llm_retry_rate",
+      "Fraction of runs that triggered at least one LLM retry.",
+      [{ lbl: [["period", p]], value: metrics.retryRate }],
+    ),
+  );
+
   return blocks.join("\n\n") + "\n";
 }

@@ -20,6 +20,8 @@ export type RunRecord = {
   latencyMs?: number;
   /** Unix epoch ms — use earliest record timestamp for the run. */
   ts: number;
+  /** Y.1.6.4: true when at least one LLM retry occurred during this run. */
+  hasRetry?: boolean;
 };
 
 export type MetricsResponse = {
@@ -34,6 +36,8 @@ export type MetricsResponse = {
   gracefulDegradeRate: number;
   /** Fraction of degraded runs that were resumable via canResume (0–1). */
   resumableRate: number;
+  /** Y.1.6.4 K.3: fraction of runs that triggered at least one LLM retry (0–1). */
+  retryRate: number;
   generatedAt: string;
 };
 
@@ -144,6 +148,9 @@ export function aggregateMetrics(input: {
   ).length;
   const resumableRate = degradedCount > 0 ? resumableCount / degradedCount : 0;
 
+  const retryCount = filtered.filter((r) => r.hasRetry).length;
+  const retryRate = totalRuns > 0 ? retryCount / totalRuns : 0;
+
   return {
     period: input.period,
     runs: totalRuns,
@@ -157,6 +164,7 @@ export function aggregateMetrics(input: {
     },
     gracefulDegradeRate: round3(gracefulDegradeRate),
     resumableRate: round3(resumableRate),
+    retryRate: round3(retryRate),
     generatedAt: new Date(now).toISOString(),
   };
 }

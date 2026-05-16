@@ -141,6 +141,8 @@ export type ZoneStructuredProgressEvent = {
     | "loop_warning_emitted"
     | "loop_detected_terminal"
     | "tool_input_delta"
+    /** Y.1.6.3: emitted once per retry sequence when cumulative wait exceeds 5 s. */
+    | "llm_retry_in_progress"
     /** Phase AS: scope revision proposal emitted between plan approval and execute. */
     | "scope_revision_proposed"
     | "scope_revision_resolved"

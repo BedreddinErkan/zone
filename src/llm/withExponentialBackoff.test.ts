@@ -115,4 +115,67 @@ describe("withExponentialBackoff", () => {
     await expect(withExponentialBackoff(fn, {})).rejects.toBe(authErr);
     expect(calls).toBe(1);
   });
+
+  // Y.1.6.3 — llm_retry_in_progress narration threshold tests.
+  // Math.random is stubbed to 0.5 → jitter term = (0.5*2-1)*jitterPct*delay = 0.
+  // 5xx delays: D0=1000, D1=3000, D2=9000 (1000 * 3^attempt).
+  // Pending totals: D0→1000, D0+D1→4000, D0+D1+D2→13000. Threshold = 5000.
+
+  it("Y.1.6.3: does not emit llm_retry_in_progress when total wait stays below 5s (2 retries)", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const serverErr = AnthropicAPIError.generate(500, {}, "err", new Headers());
+    let calls = 0;
+    // fn fails twice then succeeds — totalWaited = D0+D1 = 4000 ≤ 5000
+    const fn = () => {
+      calls++;
+      if (calls <= 2) return Promise.reject(serverErr);
+      return Promise.resolve("ok");
+    };
+    const emit = vi.fn();
+    const p = withExponentialBackoff(fn, { provider: "anthropic", model: "m", emit });
+    await vi.runAllTimersAsync();
+    expect(await p).toBe("ok");
+    expect(emit).not.toHaveBeenCalledWith("llm_retry_in_progress", expect.anything());
+  });
+
+  it("Y.1.6.3: emits llm_retry_in_progress exactly once when total wait crosses 5s (3rd sleep)", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const serverErr = AnthropicAPIError.generate(500, {}, "err", new Headers());
+    // fn always fails → 3 sleeps (D0=1000, D1=3000, D2=9000), then UpstreamUnavailableError.
+    // pendingTotal before D2 = 4000+9000 = 13000 > 5000 → emit fires once.
+    const fn = () => Promise.reject(serverErr);
+    const emit = vi.fn();
+    const p = withExponentialBackoff(fn, { runId: "run-x", provider: "anthropic", model: "m", emit });
+    const assertion = expect(p).rejects.toBeInstanceOf(UpstreamUnavailableError);
+    await vi.runAllTimersAsync();
+    await assertion;
+    const narrationCalls = emit.mock.calls.filter(([evt]) => evt === "llm_retry_in_progress");
+    expect(narrationCalls).toHaveLength(1);
+    const [, payload] = narrationCalls[0]!;
+    expect(payload).toMatchObject({
+      runId: "run-x",
+      provider: "anthropic",
+      errorClass: "5xx",
+    });
+    expect(typeof payload.totalWaitedMs).toBe("number");
+    expect(payload.totalWaitedMs as number).toBeGreaterThan(5000);
+  });
+
+  it("Y.1.6.3: emits llm_retry_in_progress exactly once even when multiple subsequent sleeps would also cross (5xx exhausted)", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const serverErr = AnthropicAPIError.generate(500, {}, "err", new Headers());
+    const fn = () => Promise.reject(serverErr);
+    const emit = vi.fn();
+    const p = withExponentialBackoff(fn, { provider: "anthropic", model: "m", emit });
+    const assertion = expect(p).rejects.toBeInstanceOf(UpstreamUnavailableError);
+    await vi.runAllTimersAsync();
+    await assertion;
+    // Only one llm_retry_in_progress regardless of how many sleeps crossed threshold
+    expect(
+      emit.mock.calls.filter(([evt]) => evt === "llm_retry_in_progress")
+    ).toHaveLength(1);
+  });
 });

@@ -2159,17 +2159,36 @@ function buildRunRecords(userId: string): RunRecord[] {
     ts: number;
     latencyMs?: number;
     terminationReason?: string;
+    hasRetry?: boolean;
   }>();
 
   for (const r of records) {
     const key = r.runId || `__anon_${r.timestamp}`;
+    const ts = new Date(r.timestamp).getTime();
+
+    // Y.1.6.4: retry sentinel — mark run as having retried, skip cost/token accumulation.
+    if (r.model === "__run_retry__") {
+      const existing = runMap.get(key);
+      if (existing) {
+        existing.hasRetry = true;
+      } else {
+        runMap.set(key, {
+          costUsd: 0,
+          cacheTokens: 0,
+          totalTokens: 0,
+          ts: Number.isNaN(ts) ? Date.now() : ts,
+          hasRetry: true,
+        });
+      }
+      continue;
+    }
+
     const tokens =
       (r.input_uncached || 0) +
       (r.cache_write || 0) +
       (r.cache_read || 0) +
       (r.output || 0);
     const cacheTokens = r.cache_read || 0;
-    const ts = new Date(r.timestamp).getTime();
     const existing = runMap.get(key);
     if (existing) {
       existing.costUsd += r.est_cost_usd || 0;
@@ -2199,6 +2218,7 @@ function buildRunRecords(userId: string): RunRecord[] {
     ts: data.ts,
     latencyMs: data.latencyMs,
     terminationReason: data.terminationReason,
+    hasRetry: data.hasRetry,
   }));
 }
 

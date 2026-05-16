@@ -80,12 +80,16 @@ export function classifyError(err: unknown): RetryClassification {
   return { retryable: false, retryClass: "non_retryable" };
 }
 
+const NARRATION_THRESHOLD_MS = 5_000;
+
 export async function withExponentialBackoff<T>(
   fn: () => Promise<T>,
   ctx: RetryContext = {},
 ): Promise<T> {
   const startMs = Date.now();
   let attempt = 0;
+  let totalWaitedMs = 0;
+  let narrationEmitted = false;
 
   for (;;) {
     try {
@@ -122,10 +126,34 @@ export async function withExponentialBackoff<T>(
       }
 
       console.warn(
-        `[zone-retry] attempt=${attempt + 1}/${config.maxAttempts} class=${classification.retryClass} delayMs=${Math.round(delayMs)} provider=${ctx.provider ?? "?"} model=${ctx.model ?? "?"}`
+        `[zone-llm-retry-attempt] attempt=${attempt + 1}/${config.maxAttempts} class=${classification.retryClass} delayMs=${Math.round(delayMs)} provider=${ctx.provider ?? "?"} model=${ctx.model ?? "?"} runId=${ctx.runId ?? "?"}`
       );
 
+      // Y.1.6.4: signal first retry for run-level metric tracking.
+      if (attempt === 0) {
+        ctx.emit?.("zone_llm_retry_started", {
+          runId: ctx.runId ?? null,
+          provider: ctx.provider ?? null,
+          model: ctx.model ?? null,
+        });
+      }
+
+      // Y.1.6.3: emit SSE narration ONCE when cumulative wait will exceed 5 s.
+      const pendingTotal = totalWaitedMs + delayMs;
+      if (!narrationEmitted && pendingTotal > NARRATION_THRESHOLD_MS) {
+        narrationEmitted = true;
+        ctx.emit?.("llm_retry_in_progress", {
+          runId: ctx.runId ?? null,
+          model: ctx.model ?? null,
+          provider: ctx.provider ?? null,
+          attemptIndex: attempt + 1,
+          totalWaitedMs: pendingTotal,
+          errorClass: classification.retryClass as "5xx" | "429" | "network",
+        });
+      }
+
       await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+      totalWaitedMs += delayMs;
       attempt++;
     }
   }

@@ -20,6 +20,13 @@ export interface LLMRequestOptions {
    * it receives. Ignored by providers that don't support streaming deltas.
    */
   onToolArgumentsDelta?: (toolCallId: string, toolName: string, argDelta: string) => void;
+  /**
+   * Y.1.6.3/Y.1.6.4: receives retry lifecycle events emitted by
+   * withExponentialBackoff (zone_llm_retry_started, llm_retry_in_progress).
+   * Threaded from agentLoop so the caller can emit SSE narration and write
+   * per-run retry telemetry without coupling the adapter to the run context.
+   */
+  onRetryEvent?: (event: string, payload: Record<string, unknown>) => void;
 }
 
 export interface LLMClient {

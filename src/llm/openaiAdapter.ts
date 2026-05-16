@@ -24,7 +24,7 @@ export class OpenAIAdapter implements LLMClient {
   ): Promise<ChatCompletion> {
     return withExponentialBackoff(
       () => this.sdk.chat.completions.create(params, { signal: options.signal }),
-      { provider: "openai", model: params.model }
+      { provider: "openai", model: params.model, emit: options.onRetryEvent }
     );
   }
 

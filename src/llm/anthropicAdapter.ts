@@ -44,7 +44,7 @@ export class AnthropicAdapter implements LLMClient {
     }
     const message = await withExponentialBackoff(
       () => this.sdk.messages.create({ ...anthropicParams, stream: false }, { signal: options.signal }),
-      { provider: "anthropic", model: params.model }
+      { provider: "anthropic", model: params.model, emit: options.onRetryEvent }
     );
     return convertResponse(message, { wasJsonMode });
   }

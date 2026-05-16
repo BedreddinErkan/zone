@@ -27,7 +27,7 @@ import type { TaskClassification, TaskTier } from "./taskClassifier.js";
 import { resolveTierLimits } from "./tierLimits.js";
 import { resolveDailyUsdCap } from "./usdCapResolver.js";
 import { loadOrgPolicy } from "./policyLoader.js";
-import { getUsage, recordRunSummary } from "../usage/usageTracker.js";
+import { getUsage, recordRunRetry, recordRunSummary } from "../usage/usageTracker.js";
 import { canResumeFromTerminationReason } from "./patchUserFacingReason.js";
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { extractUsage } from "./recordingClient.js";
@@ -2297,6 +2297,27 @@ Example:
   // call; new messages beyond its length are always taken fresh from responseInput.
   let prevR2BlocksReplaced = 0;
   let prevR2PrunedMessages: ChatCompletionMessageParam[] | null = null;
+  // Y.1.6.3/Y.1.6.4: retry event callback threaded into LLM call options so
+  // withExponentialBackoff can emit SSE narration and record retry telemetry
+  // without coupling the adapter layer to the run context.
+  const onRetryEvent = (event: string, payload: Record<string, unknown>): void => {
+    if (event === "llm_retry_in_progress") {
+      input.onProgress?.(JSON.stringify({
+        type: "llm_retry_in_progress",
+        runId: input.runId ?? null,
+        title: "Upstream API slow, retrying…",
+        status: "active",
+        ...payload,
+      }));
+    } else if (event === "zone_llm_retry_started" && !input.subagent && input.runId) {
+      const userId =
+        typeof input.userId === "string" && input.userId.trim()
+          ? input.userId.trim()
+          : "local-dev";
+      recordRunRetry({ userId, runId: input.runId.trim() }).catch(() => {});
+    }
+  };
+
   // Usage recording is centralized in RecordingLLMClient (src/llm/recordingClient.ts):
   // every chat completion across the codebase appends one JSONL record. agentLoop
   // used to accumulate-then-record-on-exit, but that double-counted with the wrapper
@@ -2624,7 +2645,7 @@ Example:
           tool_choice: "auto",
           ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
         },
-        { signal: input.abortSignal, onToolArgumentsDelta }
+        { signal: input.abortSignal, onToolArgumentsDelta, onRetryEvent }
       );
     } catch (llmErr: unknown) {
       if (llmErr instanceof UpstreamUnavailableError) {

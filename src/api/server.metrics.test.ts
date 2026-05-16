@@ -399,4 +399,56 @@ describe("/api/metrics/prometheus", () => {
     expect(body2).toBe(body1);
     expect(readRecordsMock).toHaveBeenCalledTimes(1);
   });
+
+  // Y.1.6.4 — zone_llm_retry_rate Prometheus gauge tests.
+
+  it("Y.1.6.4: zone_llm_retry_rate = 0.3 when 3 of 10 runs have __run_retry__ sentinel", async () => {
+    // 10 distinct runs; 3 of them have a __run_retry__ sentinel record.
+    const records: UsageRecord[] = [];
+    for (let i = 1; i <= 10; i++) {
+      records.push(makeUsageRecord({ runId: `run_${i}`, est_cost_usd: 0.01 }));
+    }
+    // Add retry sentinels for runs 1, 2, 3
+    for (let i = 1; i <= 3; i++) {
+      records.push(makeUsageRecord({ runId: `run_${i}`, model: "__run_retry__", est_cost_usd: 0 }));
+    }
+    readRecordsMock.mockReturnValue(records);
+
+    const res = await fetch(`${baseUrl}/api/metrics/prometheus?period=day`);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("zone_llm_retry_rate");
+    // 3/10 = 0.3, formatter rounds to 3 decimal places
+    const match = body.match(/zone_llm_retry_rate\{[^}]*\}\s+([\d.]+)/);
+    expect(match).not.toBeNull();
+    expect(parseFloat(match![1]!)).toBeCloseTo(0.3, 5);
+  });
+
+  it("Y.1.6.4: zone_llm_retry_rate = 0 when no runs have retry sentinels", async () => {
+    readRecordsMock.mockReturnValue([
+      makeUsageRecord({ runId: "r1" }),
+      makeUsageRecord({ runId: "r2" }),
+      makeUsageRecord({ runId: "r3" }),
+      makeUsageRecord({ runId: "r4" }),
+      makeUsageRecord({ runId: "r5" }),
+    ]);
+
+    const res = await fetch(`${baseUrl}/api/metrics/prometheus?period=day`);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    const match = body.match(/zone_llm_retry_rate\{[^}]*\}\s+([\d.]+)/);
+    expect(match).not.toBeNull();
+    expect(parseFloat(match![1]!)).toBe(0);
+  });
+
+  it("Y.1.6.4: zone_llm_retry_rate block present in Prometheus output with correct format", async () => {
+    readRecordsMock.mockReturnValue([makeUsageRecord({ runId: "r1" })]);
+
+    const res = await fetch(`${baseUrl}/api/metrics/prometheus?period=day`);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("# HELP zone_llm_retry_rate");
+    expect(body).toContain("# TYPE zone_llm_retry_rate gauge");
+    expect(body).toMatch(/zone_llm_retry_rate\{period="day"\} 0/);
+  });
 });

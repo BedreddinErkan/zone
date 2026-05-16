@@ -253,6 +253,37 @@ export async function recordRunSummary(
   fs.appendFileSync(file, JSON.stringify(record) + "\n", "utf8");
 }
 
+/**
+ * Y.1.6.4: Append a zero-cost retry-sentinel record for a run that triggered
+ * at least one LLM retry. Uses sentinel model "__run_retry__" so buildRunRecords
+ * can detect it and set hasRetry=true without inflating cost/token totals.
+ * Best-effort — callers must not rely on this completing synchronously.
+ */
+export async function recordRunRetry(
+  params: {
+    userId: string;
+    runId: string;
+  },
+  options?: { storageDir?: string }
+): Promise<void> {
+  const record: UsageRecord = {
+    timestamp: new Date().toISOString(),
+    userId: params.userId,
+    runId: params.runId,
+    provider: "openai",
+    model: "__run_retry__",
+    input_uncached: 0,
+    cache_write: 0,
+    cache_read: 0,
+    output: 0,
+    est_cost_usd: 0,
+  };
+  const dir = getStorageDir(options?.storageDir);
+  const file = getStorageFile(params.userId, options?.storageDir);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(record) + "\n", "utf8");
+}
+
 // Per-run cost: sum of est_cost_usd across every record with this runId.
 // Used by the run lifecycle event so the UI can show inline cost next to
 // each completed run.

@@ -9404,6 +9404,16 @@
           }
           return;
         }
+        if (type === 'llm_retry_in_progress') {
+          if (!logBlock) return;
+          appendLogLine(logBlock, {
+            timestamp: '',
+            message: 'Upstream API slow, retrying…',
+            status: 'warning',
+            className: 'narration-line',
+          });
+          return;
+        }
         if (type === 'narration') {
           const text = String(progress.text || progress.title || '').trim();
           if (!text || !logBlock) return;
