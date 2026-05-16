@@ -12,6 +12,9 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { runAgent } from "../core/runAgent.js";
 import { getUsage, getRunCost, readRecords } from "../usage/usageTracker.js";
 import { aggregateMetrics, type RunRecord } from "../llm/metricsAggregator.js";
+import { loadOrgPolicy, validatePolicy } from "../llm/policyLoader.js";
+import { atomicWriteFileSync } from "../utils/atomicWrite.js";
+import { getPatchUserFacingReason } from "../llm/patchUserFacingReason.js";
 import { loadLimitConfig, saveLimitConfig, checkUsageLimit } from "./usageLimits.js";
 import {
   loadVisualSettings,
@@ -983,6 +986,16 @@ function getDataAnalystUserFacingReason(reason: string): string {
   }
 
   return reason;
+}
+
+function derivePatchTerminationReason(result: Record<string, unknown>): string {
+  if (typeof result.terminationReason === "string" && result.terminationReason) {
+    return result.terminationReason;
+  }
+  if (result.loopDetected) return "loop_detected";
+  if (result.tokenBudgetExceeded) return "token_budget_exceeded";
+  if (result.decisionMode === "rolled_back") return "APPLY_ROLLED_BACK";
+  return "natural_completion";
 }
 
 function normalizeSubscriptionStatus(value: unknown): string {
@@ -2442,6 +2455,71 @@ app.post("/api/admin/reset-monthly-runs", async (req, res) => {
   }
 
   res.json({ ok: true });
+});
+
+// L.1: org policy read/write. Pattern B auth — secret always required (write endpoint,
+// never open in self-hosted mode). policyLoader.validatePolicy is the single schema source.
+app.get("/api/admin/policy", (req, res) => {
+  const adminSecret =
+    typeof process.env.ADMIN_SECRET === "string"
+      ? process.env.ADMIN_SECRET.trim()
+      : "";
+  const providedSecret =
+    typeof req.get("x-admin-secret") === "string"
+      ? req.get("x-admin-secret")!.trim()
+      : "";
+  if (!adminSecret || providedSecret !== adminSecret) {
+    res.status(401).json({ ok: false, reason: "unauthorized" });
+    return;
+  }
+
+  const policyPath = process.env.ZONE_ORG_POLICY_PATH?.trim() ?? "";
+  if (!policyPath) {
+    res.json({ ok: true, policy: null, source: "absent" });
+    return;
+  }
+
+  const result = loadOrgPolicy(policyPath);
+  if (!result.ok) {
+    res.status(500).json({ ok: false, reason: result.reason, detail: result.detail });
+    return;
+  }
+  res.json({ ok: true, policy: result.policy, source: result.source });
+});
+
+app.put("/api/admin/policy", (req, res) => {
+  const adminSecret =
+    typeof process.env.ADMIN_SECRET === "string"
+      ? process.env.ADMIN_SECRET.trim()
+      : "";
+  const providedSecret =
+    typeof req.get("x-admin-secret") === "string"
+      ? req.get("x-admin-secret")!.trim()
+      : "";
+  if (!adminSecret || providedSecret !== adminSecret) {
+    res.status(401).json({ ok: false, reason: "unauthorized" });
+    return;
+  }
+
+  const policyPath = process.env.ZONE_ORG_POLICY_PATH?.trim() ?? "";
+  if (!policyPath) {
+    res.status(400).json({ ok: false, reason: "ZONE_ORG_POLICY_PATH_not_set" });
+    return;
+  }
+
+  const validation = validatePolicy(req.body);
+  if (!validation.valid) {
+    res.status(400).json({ ok: false, reason: "schema_invalid", detail: validation.detail });
+    return;
+  }
+
+  try {
+    atomicWriteFileSync(policyPath, JSON.stringify(validation.policy, null, 2));
+    res.json({ ok: true, policy: validation.policy, path: policyPath });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ ok: false, reason: "write_failed", detail });
+  }
 });
 
 app.post("/api/analyze", async (req, res) => {
@@ -3955,7 +4033,14 @@ app.post("/api/patch", async (req, res) => {
         });
       }
     } catch {}
-    res.json(publicResultWithCost);
+    const patchTerminationReason = derivePatchTerminationReason(_resultRecord);
+    const patchOutcome = getPatchUserFacingReason({ terminationReason: patchTerminationReason });
+    res.json({
+      ...publicResultWithCost,
+      userFacingMessage: patchOutcome.userFacingMessage,
+      canResume: patchOutcome.canResume,
+      resumeHint: patchOutcome.resumeHint,
+    });
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       perf.finish("cancelled");

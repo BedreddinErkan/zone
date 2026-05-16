@@ -19,7 +19,7 @@ export type PolicyLoadResult =
 
 const VALID_TIERS = new Set(["light", "medium", "complex"]);
 
-function validatePolicy(raw: unknown): { valid: true; policy: OrgPolicy } | { valid: false; detail: string } {
+export function validatePolicy(raw: unknown): { valid: true; policy: OrgPolicy } | { valid: false; detail: string } {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     return { valid: false, detail: "policy root must be a JSON object" };
   }
