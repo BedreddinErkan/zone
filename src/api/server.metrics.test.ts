@@ -292,6 +292,23 @@ describe("/api/metrics", () => {
     expect(body.resumableRate).toBe(0);
   });
 
+  it("period=all: returns 200 with cumulative data and does not 400", async () => {
+    const oldTs = new Date(2020, 0, 1).toISOString();
+    readRecordsMock.mockReturnValue([
+      makeUsageRecord({ runId: "r1", timestamp: oldTs, est_cost_usd: 0.05 }),
+      makeUsageRecord({ runId: "r2", timestamp: oldTs, est_cost_usd: 0.03 }),
+    ]);
+
+    const res = await fetch(`${baseUrl}/api/metrics?period=all`);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.period).toBe("all");
+    // Both old records included — cumulative, no time filter
+    expect(body.runs).toBe(2);
+    expect(body.usdTotal).toBeCloseTo(0.08, 5);
+  });
+
   it("K.4 C2: gracefulDegradeRate and resumableRate computed correctly from termination summary records", async () => {
     const natural = makeUsageRecord({ runId: "run_a", terminationReason: "natural_completion", est_cost_usd: 0 });
     const maxIter = makeUsageRecord({ runId: "run_b", terminationReason: "max_iterations", est_cost_usd: 0 });
@@ -450,5 +467,22 @@ describe("/api/metrics/prometheus", () => {
     expect(body).toContain("# HELP zone_llm_retry_rate");
     expect(body).toContain("# TYPE zone_llm_retry_rate gauge");
     expect(body).toMatch(/zone_llm_retry_rate\{period="day"\} 0/);
+  });
+
+  // period=all support
+  it("period=all: returns 200 with cumulative data across all records (no time filter)", async () => {
+    // Two records with old timestamps — far outside any day/week/month window.
+    const oldTs = new Date(2020, 0, 1).toISOString();
+    readRecordsMock.mockReturnValue([
+      makeUsageRecord({ runId: "old_1", timestamp: oldTs, est_cost_usd: 0.04 }),
+      makeUsageRecord({ runId: "old_2", timestamp: oldTs, est_cost_usd: 0.06 }),
+    ]);
+
+    const res = await fetch(`${baseUrl}/api/metrics/prometheus?period=all`);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    // Both runs included (no time filter) → 2 runs, $0.10 total
+    expect(body).toMatch(/zone_runs\{period="all"\} 2/);
+    expect(body).toMatch(/zone_usd_dollars\{period="all"\} 0\.1/);
   });
 });

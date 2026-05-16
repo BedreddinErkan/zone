@@ -806,22 +806,22 @@ export async function executeTool(
         resolvedType === "explore"
           ? formatExploreSubagentToolResultForParent(subagentResult, subagentId, parentRunId)
           : formatSubagentToolResultForParent(subagentResult, subagentId, parentRunId);
-      let subagentStatus: "completed" | "partial" | "failed" = subagentResult.success
-        ? "completed"
-        : "failed";
+      let subagentStatus: "completed" | "partial" | "failed" | "max_iterations" =
+        subagentResult.success ? "completed" : "failed";
       const defaultTitle = resolvedType === "explore" ? "Explore completed" : "Worker completed";
       let title = subagentResult.summary || defaultTitle;
       try {
         const parsed = JSON.parse(result.output) as {
-          status?: "completed" | "partial" | "failed";
+          status?: string;
           summary?: string;
         };
         if (
           parsed.status === "completed" ||
           parsed.status === "partial" ||
-          parsed.status === "failed"
+          parsed.status === "failed" ||
+          parsed.status === "max_iterations"
         ) {
-          subagentStatus = parsed.status;
+          subagentStatus = parsed.status as typeof subagentStatus;
         }
         if (typeof parsed.summary === "string" && parsed.summary.trim()) {
           title = parsed.summary.trim();
@@ -835,9 +835,9 @@ export async function executeTool(
         status:
           subagentStatus === "completed"
             ? "success"
-            : subagentStatus === "partial"
-              ? "warning"
-              : "error",
+            : subagentStatus === "failed"
+              ? "error"
+              : "warning",
         subagentStatus,
         subagentId,
         subagentType: resolvedType,

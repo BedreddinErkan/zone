@@ -125,6 +125,41 @@ describe("subagent helpers", () => {
     });
   });
 
+  it("Worker max_iter label: status is max_iterations (not failed) when terminationReason is max_iterations", () => {
+    // A worker that hit its iteration cap gets status "max_iterations" so the UI
+    // can render "ITER CAP" (amber) instead of "FAILED" (red), distinguishing a
+    // tier-limit termination from a genuine failure.
+    const maxIterResult = formatSubagentToolResultForParent(
+      {
+        success: false,
+        summary: "Partial progress made; iteration limit reached before completing.",
+        toolCallLog: [],
+        filesModified: [],
+        patchValidatedByAgent: false,
+        verificationReason: "no_verification_attempted",
+        terminationReason: "max_iterations",
+      },
+      "worker-max",
+      "parent-run-x"
+    );
+    expect(JSON.parse(maxIterResult.output)).toMatchObject({ status: "max_iterations" });
+
+    // Genuine failure (no terminationReason) still emits status "failed".
+    const genuineFailResult = formatSubagentToolResultForParent(
+      {
+        success: false,
+        summary: "Encountered an unexpected error.",
+        toolCallLog: [],
+        filesModified: [],
+        patchValidatedByAgent: false,
+        verificationReason: "no_verification_attempted",
+      },
+      "worker-err",
+      "parent-run-x"
+    );
+    expect(JSON.parse(genuineFailResult.output)).toMatchObject({ status: "failed" });
+  });
+
   it("formats missing token usage as a required zeroed tokenUsage payload", () => {
     const result = formatSubagentToolResultForParent(
       {

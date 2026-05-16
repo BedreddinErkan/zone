@@ -534,6 +534,7 @@
     .subagent-pill.completed{background:rgba(74,222,128,.14);color:#4ade80}
     .subagent-pill.partial{background:rgba(250,204,21,.14);color:#facc15}
     .subagent-pill.failed{background:rgba(248,113,113,.14);color:#f87171}
+    .subagent-pill.max_iterations{background:rgba(251,146,60,.14);color:#fb923c}
     .log-line.narration-line{font-family:var(--font-family-sans);font-size:13px;color:var(--text-3);padding:6px 0 2px;line-height:1.5}
     .log-line.narration-line .log-ts{display:none}
     .log-line.narration-line .log-msg{flex:1;white-space:normal;color:var(--text-3)}
@@ -9265,14 +9266,15 @@
             }
           } catch {}
           const subStatus = String(progress.subagentStatus || progress.status || 'completed').toLowerCase();
-          const safeStatus = /^(completed|partial|failed)$/.test(subStatus) ? subStatus : 'completed';
-          const rowStatus = safeStatus === 'completed' ? 'done' : safeStatus === 'partial' ? 'warning' : 'error';
+          const safeStatus = /^(completed|partial|failed|max_iterations)$/.test(subStatus) ? subStatus : 'completed';
+          const rowStatus = safeStatus === 'completed' ? 'done' : safeStatus === 'failed' ? 'error' : 'warning';
+          const pillLabel = safeStatus === 'max_iterations' ? 'iter cap' : safeStatus;
           const label = `Worker ${subagentShort || ''}`;
           appendLogLine(logBlock, {
             timestamp: new Date(progress.ts || Date.now()).toLocaleTimeString(),
-            message: `${label} ${safeStatus}: ${progTitle || 'completed'}`,
+            message: `${label} ${pillLabel}: ${progTitle || 'completed'}`,
             messageHtml:
-              `${escapeHtml(label)} <span class="subagent-pill ${safeStatus}">${escapeHtml(safeStatus)}</span>: ` +
+              `${escapeHtml(label)} <span class="subagent-pill ${safeStatus}">${escapeHtml(pillLabel)}</span>: ` +
               `${escapeHtml(progTitle || 'completed')}`,
             status: rowStatus,
             className: 'subagent-line'

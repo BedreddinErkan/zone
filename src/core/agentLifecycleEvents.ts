@@ -156,7 +156,7 @@ export type ZoneStructuredProgressEvent = {
   filePath?: string;
   command?: string;
   status?: "active" | "success" | "warning" | "error";
-  subagentStatus?: "completed" | "partial" | "failed";
+  subagentStatus?: "completed" | "partial" | "failed" | "max_iterations";
   subagentId?: string;
   subagentType?: "worker" | "explore" | "verifier";
   parentRunId?: string;

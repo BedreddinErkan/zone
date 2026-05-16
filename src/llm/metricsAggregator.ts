@@ -25,7 +25,7 @@ export type RunRecord = {
 };
 
 export type MetricsResponse = {
-  period: "day" | "week" | "month";
+  period: "day" | "week" | "month" | "all";
   runs: number;
   usdTotal: number;
   tierDistribution: { simple: number; medium: number; complex: number };
@@ -45,8 +45,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
 const MONTH_MS = 30 * DAY_MS;
 
-function periodWindowMs(period: "day" | "week" | "month"): number {
+function periodWindowMs(period: "day" | "week" | "month" | "all"): number {
   switch (period) {
+    case "all":
+      return Infinity;
     case "day":
       return DAY_MS;
     case "week":
@@ -72,7 +74,7 @@ function round3(n: number): number {
 
 export function aggregateMetrics(input: {
   userId: string;
-  period: "day" | "week" | "month";
+  period: "day" | "week" | "month" | "all";
   runs: RunRecord[];
   now?: number;
 }): MetricsResponse {

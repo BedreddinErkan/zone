@@ -2222,7 +2222,7 @@ function buildRunRecords(userId: string): RunRecord[] {
   }));
 }
 
-const METRICS_VALID_PERIODS = new Set<string>(["day", "week", "month"]);
+const METRICS_VALID_PERIODS = new Set<string>(["day", "week", "month", "all"]);
 const METRICS_CACHE_TTL_MS = 60_000;
 
 // K.3: metrics scrape endpoint. Auth-gated when ADMIN_SECRET is configured;
@@ -2250,7 +2250,8 @@ app.get("/api/metrics", (req, res) => {
   const period = (METRICS_VALID_PERIODS.has(periodRaw) ? periodRaw : "day") as
     | "day"
     | "week"
-    | "month";
+    | "month"
+    | "all";
 
   const userIdRaw =
     typeof req.query.userId === "string" ? req.query.userId.trim() : "";
@@ -2300,7 +2301,8 @@ app.get("/api/metrics/prometheus", (req, res) => {
   const period = (METRICS_VALID_PERIODS.has(periodRaw) ? periodRaw : "day") as
     | "day"
     | "week"
-    | "month";
+    | "month"
+    | "all";
 
   const userIdRaw =
     typeof req.query.userId === "string" ? req.query.userId.trim() : "";
