@@ -16,6 +16,7 @@ import { loadOrgPolicy, validatePolicy } from "../llm/policyLoader.js";
 import { aggregatorToPrometheus } from "../llm/prometheusFormatter.js";
 import { atomicWriteFileSync } from "../utils/atomicWrite.js";
 import { getPatchUserFacingReason } from "../llm/patchUserFacingReason.js";
+import { UpstreamUnavailableError } from "../llm/withExponentialBackoff.js";
 import { routeCapGate } from "../llm/checkDailyCap.js";
 import { loadLimitConfig, saveLimitConfig, checkUsageLimit } from "./usageLimits.js";
 import {
@@ -4183,6 +4184,7 @@ app.post("/api/patch", async (req, res) => {
     const patchOutcome = getPatchUserFacingReason({ terminationReason: patchTerminationReason });
     res.json({
       ...publicResultWithCost,
+      terminationReason: patchTerminationReason,
       userFacingMessage: patchOutcome.userFacingMessage,
       canResume: patchOutcome.canResume,
       resumeHint: patchOutcome.resumeHint,
@@ -4245,9 +4247,25 @@ app.post("/api/patch", async (req, res) => {
         error instanceof Error ? error.message : String(error)
       );
     }
+    if (err instanceof UpstreamUnavailableError) {
+      const mapped = getPatchUserFacingReason({ terminationReason: "upstream_unavailable" });
+      res.status(503).json({
+        ok: false,
+        terminationReason: "upstream_unavailable",
+        reason: err.message,
+        userFacingMessage: mapped.userFacingMessage,
+        canResume: mapped.canResume,
+        resumeHint: mapped.resumeHint,
+      });
+      return;
+    }
+    const fallbackMessage = err instanceof Error ? err.message : "patch_flow_failed";
     res.status(500).json({
       ok: false,
-      reason: err instanceof Error ? err.message : "patch_flow_failed",
+      reason: fallbackMessage,
+      userFacingMessage: `Run failed: ${fallbackMessage}`,
+      canResume: false,
+      resumeHint: null,
     });
   } finally {
     if (runIdStr) {
