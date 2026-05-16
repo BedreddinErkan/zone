@@ -3755,6 +3755,13 @@ app.post("/api/patch", async (req, res) => {
     typeof req.headers["accept"] === "string" &&
     req.headers["accept"].includes("text/event-stream")
   );
+  console.log("[api-patch-request-params]", JSON.stringify({
+    runId: runIdStr,
+    threadId: typeof conversationId === "string" ? conversationId.trim() : "",
+    autoApproveRevisions: !!autoApproveRevisions,
+    headless: isHeadless,
+    ts: new Date().toISOString(),
+  }));
   // Y.1.1/Y.1.2: set to a non-null value when revision approval times out; causes
   // early res.json() before runLlmPatchFlow so the caller isn't left hanging.
   let revisionEarlyExit: { terminationReason: string; proposal: RevisionProposal; revisionId: string } | null = null;

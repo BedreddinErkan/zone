@@ -1874,7 +1874,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         runId: input.runId.trim(),
         latencyMs: Date.now() - runStartTs,
         terminationReason,
-      }).catch(() => {});
+      }).catch((e) => {
+        log("[zone-run-summary-write-failed]", JSON.stringify({
+          runId: input.runId,
+          error: e instanceof Error ? e.message : String(e),
+          ts: new Date().toISOString(),
+        }));
+      });
       log("[zone-graceful-degrade]", JSON.stringify({
         runId: input.runId.trim(),
         terminationReason,
