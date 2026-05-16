@@ -92,6 +92,14 @@ describe("getPatchUserFacingReason", () => {
     expect(out.reason).toBe("revision_rejected");
   });
 
+  it("upstream_unavailable: canResume=true, mentions retry", () => {
+    const out = getPatchUserFacingReason({ terminationReason: "upstream_unavailable" });
+    expect(out.canResume).toBe(true);
+    expect(out.userFacingMessage).toContain("unavailable");
+    expect(out.resumeHint).toContain("Retry");
+    expect(out.reason).toBe("upstream_unavailable");
+  });
+
   it("unknown reason: canResume=false, message contains the raw reason", () => {
     const out = getPatchUserFacingReason({ terminationReason: "some_unknown_error" });
     expect(out.canResume).toBe(false);
@@ -109,6 +117,7 @@ describe("canResumeFromTerminationReason", () => {
     expect(canResumeFromTerminationReason("APPLY_ROLLED_BACK")).toBe(true);
     expect(canResumeFromTerminationReason("revision_approval_timeout")).toBe(true);
     expect(canResumeFromTerminationReason("revision_rejected")).toBe(true);
+    expect(canResumeFromTerminationReason("upstream_unavailable")).toBe(true);
   });
 
   it("returns false for non-resumable reasons", () => {

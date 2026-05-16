@@ -107,6 +107,15 @@ export function getPatchUserFacingReason(input: {
           "Provide a more concrete task spec or accept the revised scope manually.",
       };
 
+    case "upstream_unavailable":
+      return {
+        reason: terminationReason,
+        userFacingMessage:
+          "The upstream LLM API was unavailable after retries. Try again later.",
+        canResume: true,
+        resumeHint: "Retry the request; the API may be temporarily degraded.",
+      };
+
     default:
       return {
         reason: terminationReason,

@@ -59,6 +59,7 @@ import type { Mode } from "../types/mode.js";
 import { ContextCompactor } from "./compaction/ContextCompactor.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
 import { hashToolCall, createDetectorState, recordAndDetect } from "./loopDetector.js";
+import { UpstreamUnavailableError } from "./withExponentialBackoff.js";
 import { emitTokenBreakdown, emitBreakdownSummary, type BreakdownEvent } from "./tokenBreakdown.js";
 import { pruneStaleReads, emitContextPruned } from "./contextPruner.js";
 
@@ -212,7 +213,7 @@ export interface AgentLoopResult {
   /** Phase H.7: how the loop ended. Used by upstream flows (investigation /
    *  patch) to surface "Token budget reached" vs "Iteration budget reached"
    *  distinctly in the UI. Optional for backward-compat with older callers. */
-  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded";
+  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded" | "upstream_unavailable";
   /** Phase Q.2: populated when terminationReason === "loop_detected". The
    *  offending tool name + observed count in the sliding-window detector. */
   loopDetected?: { toolName: string; count: number };
@@ -2607,16 +2608,37 @@ Example:
         }
       : undefined;
 
-    const response = await client.createChatCompletion(
-      {
-        model: modelName,
-        messages: prunedMessages,
-        tools: toolsForLLM,
-        tool_choice: "auto",
-        ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
-      },
-      { signal: input.abortSignal, onToolArgumentsDelta }
-    );
+    let response: Awaited<ReturnType<typeof client.createChatCompletion>>;
+    try {
+      response = await client.createChatCompletion(
+        {
+          model: modelName,
+          messages: prunedMessages,
+          tools: toolsForLLM,
+          tool_choice: "auto",
+          ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
+        },
+        { signal: input.abortSignal, onToolArgumentsDelta }
+      );
+    } catch (llmErr: unknown) {
+      if (llmErr instanceof UpstreamUnavailableError) {
+        emitRunBreakdownSummary();
+        emitCacheSummary();
+        emitSelfValidationSummary();
+        return {
+          success: false,
+          summary: "LLM API unavailable after retries.",
+          toolCallLog,
+          filesModified: Array.from(filesModified),
+          patchValidatedByAgent: false,
+          verificationReason: "no_verification_attempted",
+          terminationReason: "upstream_unavailable",
+          tokenUsage: currentTokenUsage(),
+          costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+        };
+      }
+      throw llmErr;
+    }
     debugLog("[zone-agent-llm-post]", {
       runId: input.runId,
       iter,

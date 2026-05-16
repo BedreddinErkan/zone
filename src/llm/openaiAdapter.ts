@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { withExponentialBackoff } from "./withExponentialBackoff.js";
 import type {
   ChatCompletion,
   ChatCompletionChunk,
@@ -12,14 +13,19 @@ export class OpenAIAdapter implements LLMClient {
   private readonly sdk: OpenAI;
 
   constructor(apiKey: string) {
-    this.sdk = new OpenAI({ apiKey });
+    // maxRetries:0 disables the SDK's built-in retry so Zone's own
+    // withExponentialBackoff controls all retry timing and budget.
+    this.sdk = new OpenAI({ apiKey, maxRetries: 0 });
   }
 
   async createChatCompletion(
     params: ChatCompletionCreateParamsNonStreaming,
     options: LLMRequestOptions = {}
   ): Promise<ChatCompletion> {
-    return this.sdk.chat.completions.create(params, { signal: options.signal });
+    return withExponentialBackoff(
+      () => this.sdk.chat.completions.create(params, { signal: options.signal }),
+      { provider: "openai", model: params.model }
+    );
   }
 
   async createChatCompletionStream(

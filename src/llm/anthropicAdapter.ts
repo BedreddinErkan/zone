@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { withExponentialBackoff } from "./withExponentialBackoff.js";
 import type {
   ChatCompletion,
   ChatCompletionChunk,
@@ -19,12 +20,12 @@ export class AnthropicAdapter implements LLMClient {
     // agent-loop-stability Tur: SDK default timeout (~100s) was killing long
     // agent investigations mid-iteration. 10 minutes covers the worst-case
     // multi-step build-fix flow (15 iters × ~30s/iter = 7.5 min, with slack).
-    // maxRetries 2 covers transient network blips without stretching the wall
-    // clock for real failures.
+    // maxRetries:0 disables the SDK's built-in retry so Zone's own
+    // withExponentialBackoff controls all retry timing and budget.
     this.sdk = new Anthropic({
       apiKey,
       timeout: 600_000,
-      maxRetries: 2,
+      maxRetries: 0,
     });
   }
 
@@ -41,12 +42,9 @@ export class AnthropicAdapter implements LLMClient {
     if (warnings.length > 0) {
       for (const w of warnings) console.warn(`[zone-anthropic] ${w}`);
     }
-    const message = await this.sdk.messages.create(
-      {
-        ...anthropicParams,
-        stream: false,
-      },
-      { signal: options.signal }
+    const message = await withExponentialBackoff(
+      () => this.sdk.messages.create({ ...anthropicParams, stream: false }, { signal: options.signal }),
+      { provider: "anthropic", model: params.model }
     );
     return convertResponse(message, { wasJsonMode });
   }
