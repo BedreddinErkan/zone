@@ -10814,6 +10814,7 @@
               placeholder="${saved ? masked : placeholder}"
               autocomplete="off" spellcheck="false" />
             <button id="apikeyShowBtn-${provider}" class="apikey-btn-show" type="button">Show</button>
+            <button id="apikeyCopyBtn-${provider}" class="apikey-btn-show" type="button" style="${saved ? '' : 'display:none'}">Copy</button>
             <button id="apikeySaveBtn-${provider}" class="apikey-btn-save" type="button">Save</button>
             <button id="apikeyClearBtn-${provider}" class="apikey-btn-show" type="button" style="${saved ? '' : 'display:none'}">Clear</button>
           </div>
@@ -10883,6 +10884,7 @@
       function wireProviderRow(provider, validateFn) {
         const input = document.getElementById('apikeyInput-' + provider);
         const showBtn = document.getElementById('apikeyShowBtn-' + provider);
+        const copyBtn = document.getElementById('apikeyCopyBtn-' + provider);
         const saveBtn = document.getElementById('apikeySaveBtn-' + provider);
         const clearBtn = document.getElementById('apikeyClearBtn-' + provider);
         const statusEl = document.getElementById('apikeyStatus-' + provider);
@@ -10890,9 +10892,41 @@
 
         showBtn.addEventListener('click', () => {
           const isPassword = input.type === 'password';
-          input.type = isPassword ? 'text' : 'password';
-          showBtn.textContent = isPassword ? 'Hide' : 'Show';
+          if (isPassword) {
+            const savedKey = getApiKeys()[provider] || '';
+            if (savedKey) input.value = savedKey;
+            input.type = 'text';
+            showBtn.textContent = 'Hide';
+          } else {
+            const savedKey = getApiKeys()[provider] || '';
+            input.value = '';
+            input.placeholder = savedKey ? maskKey(savedKey) : (provider === 'anthropic' ? 'sk-ant-…' : 'sk-…');
+            input.type = 'password';
+            showBtn.textContent = 'Show';
+          }
         });
+
+        if (copyBtn) {
+          copyBtn.addEventListener('click', async () => {
+            const key = getApiKeys()[provider] || input.value || '';
+            if (!key) return;
+            try {
+              await navigator.clipboard.writeText(key);
+            } catch {
+              const tmp = document.createElement('textarea');
+              tmp.value = key;
+              tmp.style.position = 'fixed';
+              tmp.style.opacity = '0';
+              document.body.appendChild(tmp);
+              tmp.select();
+              document.execCommand('copy');
+              document.body.removeChild(tmp);
+            }
+            const orig = copyBtn.textContent;
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => { copyBtn.textContent = orig; }, 1500);
+          });
+        }
 
         clearBtn.addEventListener('click', () => {
           setApiKey(provider, '');                              // empty save deletes the entry
@@ -10900,6 +10934,7 @@
           input.placeholder = provider === 'anthropic' ? 'sk-ant-…' : 'sk-…';
           statusEl.innerHTML = '<span class="apikey-status">Cleared</span>';
           clearBtn.style.display = 'none';
+          if (copyBtn) copyBtn.style.display = 'none';
         });
 
         saveBtn.addEventListener('click', async () => {
@@ -10910,6 +10945,7 @@
             input.placeholder = provider === 'anthropic' ? 'sk-ant-…' : 'sk-…';
             statusEl.innerHTML = '<span class="apikey-status">Cleared</span>';
             clearBtn.style.display = 'none';
+            if (copyBtn) copyBtn.style.display = 'none';
             return;
           }
           const key = rawKey.replace(/\s+/g, '');
@@ -10923,6 +10959,7 @@
               input.value = '';
               input.placeholder = maskKey(key);
               clearBtn.style.display = '';
+              if (copyBtn) copyBtn.style.display = '';
             } else if (result.status === 'invalid') {
               statusEl.innerHTML = '<span class="apikey-status error">✗ ' + escapeHtml(result.message || 'Invalid key') + '</span>';
             } else {
@@ -10931,6 +10968,7 @@
               input.value = '';
               input.placeholder = maskKey(key);
               clearBtn.style.display = '';
+              if (copyBtn) copyBtn.style.display = '';
             }
           } catch (e) {
             setApiKey(provider, key);
@@ -10938,6 +10976,7 @@
             input.value = '';
             input.placeholder = maskKey(key);
             clearBtn.style.display = '';
+            if (copyBtn) copyBtn.style.display = '';
           } finally {
             saveBtn.disabled = false;
           }
