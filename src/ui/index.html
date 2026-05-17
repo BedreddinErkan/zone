@@ -649,6 +649,9 @@
     .run-format-tabs .fmt-tab.active{color:var(--zone-fg,#e5e7eb);border-bottom-color:var(--zone-accent,#7c3aed)}
     @media(max-width:600px){.run-format-tabs .fmt-tab .label-full{display:none}.run-format-tabs .fmt-tab .label-short{display:inline}}
     @media(min-width:601px){.run-format-tabs .fmt-tab .label-short{display:none}}
+    .run-format-tabs .copy-btn{margin-left:auto;cursor:pointer;background:transparent;border:1px solid var(--zone-border,rgba(255,255,255,0.1));border-radius:6px;padding:4px 10px;font-size:13px;color:var(--zone-muted-fg);display:inline-flex;align-items:center;gap:4px}
+    .run-format-tabs .copy-btn:hover{color:var(--zone-fg);background:var(--zone-hover-bg,rgba(255,255,255,0.05))}
+    @media(max-width:600px){.run-format-tabs .copy-btn .label{display:none}}
     .turn-restored .livecode{max-height:140px}
     .turn-restored .livecode-body{max-height:120px}
 
@@ -10123,6 +10126,8 @@
 
     // UI.6: build the inline tab-row switcher below the summary bubble.
     // Returns the row element. Wires click handlers that swap bubble chat-body content in place.
+    let _lastFormatCopyFn = null;
+
     function buildRunFormatSwitcher(structured, ctx, bubbleEl, initialFmt) {
       const FORMAT_DEFS = [
         { id: 'brief',    full: 'Brief',    short: 'B'  },
@@ -10134,6 +10139,7 @@
       const row = document.createElement('div');
       row.className = 'run-format-tabs';
       row.setAttribute('role', 'tablist');
+      let currentFmt = initialFmt;
       for (const def of FORMAT_DEFS) {
         const tab = document.createElement('button');
         tab.className = 'fmt-tab' + (def.id === initialFmt ? ' active' : '');
@@ -10153,9 +10159,25 @@
           }
           tab.classList.add('active');
           tab.setAttribute('aria-selected', 'true');
+          currentFmt = def.id;
         });
         row.appendChild(tab);
       }
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'copy-btn';
+      copyBtn.type = 'button';
+      copyBtn.setAttribute('aria-label', 'Copy current format');
+      copyBtn.innerHTML = '📋 <span class="label">Copy</span>';
+      const doCopyFormat = function() {
+        const fmtDef = FORMAT_DEFS.find(d => d.id === currentFmt) || FORMAT_DEFS[0];
+        const formatted = applyRunFormat(currentFmt, structured, ctx);
+        writeClipboardText(formatted)
+          .then(ok => showToast(ok ? 'success' : 'error', ok ? 'Copied as ' + fmtDef.full : 'Copy failed — select and copy manually', ok ? 1500 : 2000))
+          .catch(() => showToast('error', 'Copy failed — select and copy manually', 2000));
+      };
+      copyBtn.addEventListener('click', doCopyFormat);
+      row.appendChild(copyBtn);
+      _lastFormatCopyFn = doCopyFormat;
       return row;
     }
 
@@ -11998,6 +12020,14 @@
         if (e.target === els.settingsOverlay) closeSettings();
       });
       document.querySelectorAll('.mtab').forEach(b => b.addEventListener('click', () => renderSettingsTab(b.dataset.stab)));
+
+      document.addEventListener('keydown', function(e) {
+        if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.key.toLowerCase() !== 'c') return;
+        const activeTag = String(document.activeElement?.tagName || '').toLowerCase();
+        if (activeTag === 'input' || activeTag === 'textarea') return;
+        e.preventDefault();
+        if (typeof _lastFormatCopyFn === 'function') _lastFormatCopyFn();
+      });
 
       autosizeTextarea();
       setIdleUI();

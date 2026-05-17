@@ -773,6 +773,7 @@ function buildUiHarness(initialLocalStorage: Record<string, string> = {}) {
     context: context as UiContext,
     elements: { get: ensureElement },
     localStorageStore,
+    windowListeners,
     roleButtons: {
       developer: developerRoleButton,
       testEngineer: testEngineerRoleButton,
@@ -3224,7 +3225,7 @@ describe("UI.6: format switcher — parse, switch, default format", () => {
     expect(fn("error", "upstream_unavailable")).toBe("brief");
   });
 
-  it("buildRunFormatSwitcher creates row with run-format-tabs class and 5 tab children", () => {
+  it("buildRunFormatSwitcher creates row with run-format-tabs class, 5 tab children, and a copy button", () => {
     const { context } = buildUiHarness();
     const parseFn = (context as unknown as Ctx6).parseAgentSummary;
     const ctxFn = (context as unknown as Ctx6).getRunSummaryContext;
@@ -3234,7 +3235,8 @@ describe("UI.6: format switcher — parse, switch, default format", () => {
     const bubbleEl = { querySelector: () => ({ innerHTML: "" }), querySelectorAll: () => [] };
     const row = switcherFn(s, ctx, bubbleEl, "detailed");
     expect(row.className).toContain("run-format-tabs");
-    expect(row.children.length).toBe(5);
+    expect(row.children.length).toBe(6);
+    expect(row.children[5].className).toContain("copy-btn");
   });
 
   it("buildRunFormatSwitcher marks the initial format tab as active", () => {
@@ -3261,5 +3263,65 @@ describe("UI.6: format switcher — parse, switch, default format", () => {
     const result = applyFn("brief", s, ctx);
     expect(result).not.toContain("\n");
     expect(result).toContain("✅");
+  });
+
+  it("copy button click calls navigator.clipboard.writeText with active format output", async () => {
+    const { context } = buildUiHarness();
+    const writeText = vi.fn(() => Promise.resolve());
+    (context.navigator.clipboard as unknown as { writeText: (t: string) => Promise<void> }).writeText = writeText;
+    const parseFn = (context as unknown as Ctx6).parseAgentSummary;
+    const ctxFn = (context as unknown as Ctx6).getRunSummaryContext;
+    const switcherFn = (context as unknown as Ctx6).buildRunFormatSwitcher;
+    const applyFn = (context as unknown as Ctx6).applyRunFormat;
+    const s = parseFn(WELL_FORMED);
+    const ctx = ctxFn(SUCCESS_RESULT);
+    const bubbleEl = { querySelector: () => ({ innerHTML: "" }), querySelectorAll: () => [] };
+    const row = switcherFn(s, ctx, bubbleEl, "pr");
+    const copyBtn = row.children[5];
+    copyBtn.click();
+    await new Promise(r => setTimeout(r, 0));
+    expect(writeText).toHaveBeenCalledWith(applyFn("pr", s, ctx));
+  });
+
+  it("copy button click shows 'Copied as {FormatName}' toast", async () => {
+    const { context, elements } = buildUiHarness();
+    const parseFn = (context as unknown as Ctx6).parseAgentSummary;
+    const ctxFn = (context as unknown as Ctx6).getRunSummaryContext;
+    const switcherFn = (context as unknown as Ctx6).buildRunFormatSwitcher;
+    const s = parseFn(WELL_FORMED);
+    const ctx = ctxFn(SUCCESS_RESULT);
+    const bubbleEl = { querySelector: () => ({ innerHTML: "" }), querySelectorAll: () => [] };
+    const row = switcherFn(s, ctx, bubbleEl, "slack");
+    const copyBtn = row.children[5];
+    copyBtn.click();
+    await new Promise(r => setTimeout(r, 0));
+    const chatArea = elements.get("chatArea");
+    const toastChildren = chatArea.children.filter(c => c.className.includes("toast"));
+    expect(toastChildren.length).toBeGreaterThan(0);
+    const lastToast = toastChildren[toastChildren.length - 1];
+    // toast structure: children[0] = ticon, children[1] = text div
+    const toastText = lastToast.children[1]?.textContent ?? lastToast.textContent;
+    expect(toastText).toContain("Copied as Slack");
+  });
+
+  it("Cmd/Ctrl+Shift+C keyboard shortcut triggers clipboard write for most recent format switcher", async () => {
+    const { context, windowListeners } = buildUiHarness();
+    const writeText = vi.fn(() => Promise.resolve());
+    (context.navigator.clipboard as unknown as { writeText: (t: string) => Promise<void> }).writeText = writeText;
+    const parseFn = (context as unknown as Ctx6).parseAgentSummary;
+    const ctxFn = (context as unknown as Ctx6).getRunSummaryContext;
+    const switcherFn = (context as unknown as Ctx6).buildRunFormatSwitcher;
+    const s = parseFn(WELL_FORMED);
+    const ctx = ctxFn(SUCCESS_RESULT);
+    const bubbleEl = { querySelector: () => ({ innerHTML: "" }), querySelectorAll: () => [] };
+    switcherFn(s, ctx, bubbleEl, "brief");
+    const keydownListeners = windowListeners.get("document:keydown") ?? [];
+    const prevented: boolean[] = [];
+    for (const listener of keydownListeners) {
+      listener({ key: "c", ctrlKey: true, shiftKey: true, metaKey: false, preventDefault: () => prevented.push(true) });
+    }
+    await new Promise(r => setTimeout(r, 0));
+    expect(writeText).toHaveBeenCalled();
+    expect(prevented.length).toBeGreaterThan(0);
   });
 });
