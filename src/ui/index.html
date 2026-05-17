@@ -636,28 +636,13 @@
     .livecode-static .livecode-body pre{animation:none}
     @keyframes livecodeStaticReveal{0%{opacity:.55}40%{opacity:1}100%{opacity:1}}
     .livecode-static .livecode-body{animation:livecodeStaticReveal 1.1s ease forwards}
-    /* UI.4.2: state-aware final run card */
-    .run-final-card{margin:6px 0 8px;border-radius:var(--radius-lg,8px);border:1px solid var(--border);overflow:hidden;font-size:13px}
-    .run-final-card-headline{display:flex;align-items:flex-start;gap:8px;padding:10px 12px 6px;font-weight:500;line-height:1.4}
-    .run-final-card-icon{flex-shrink:0;font-size:13px;margin-top:1px}
-    .run-final-card-metrics{padding:0 12px 8px;font-size:11px;color:var(--muted,rgba(255,255,255,0.45));letter-spacing:0.02em}
-    .run-final-card-section{padding:0 12px 8px;border-top:1px solid var(--border-subtle,rgba(255,255,255,0.06))}
-    .run-final-card-section summary{cursor:pointer;padding:6px 0;font-size:12px;color:var(--muted);user-select:none;list-style:none;display:flex;align-items:center;gap:4px}
-    .run-final-card-section summary::-webkit-details-marker{display:none}
-    .run-final-card-section summary::before{content:'▶';font-size:9px;transition:transform .15s}
-    .run-final-card-section[open] summary::before{transform:rotate(90deg)}
-    .run-final-card-section-body{padding:4px 0 2px;font-size:12px}
-    .run-final-card-section-body .md{margin:0}
-    .run-final-card-section-body .md p{margin:2px 0}
-    .run-final-card-section-body .md ul,.run-final-card-section-body .md ol{margin:2px 0;padding-left:18px}
-    .run-final-card--success{border-left:3px solid #22c55e;background:rgba(34,197,94,0.05)}
-    .run-final-card--success .run-final-card-icon{color:#22c55e}
-    .run-final-card--warning{border-left:3px solid #d4a85a;background:rgba(212,168,90,0.05)}
-    .run-final-card--warning .run-final-card-icon{color:#d4a85a}
-    .run-final-card--error{border-left:3px solid #ef4444;background:rgba(239,68,68,0.05)}
-    .run-final-card--error .run-final-card-icon{color:#ef4444}
-    .run-final-card--neutral{border-left:3px solid #5b8af0;background:rgba(91,138,240,0.05)}
-    .run-final-card--neutral .run-final-card-icon{color:#5b8af0}
+    /* UI.5: inline prose run completion */
+    .run-status-line{display:flex;align-items:center;gap:8px;margin:12px 0 4px;font-size:14px}
+    .run-status-line.category-success{color:var(--zone-success-fg,#4ade80)}
+    .run-status-line.category-warning{color:var(--zone-warning-fg,#fbbf24)}
+    .run-status-line.category-error{color:var(--zone-error-fg,#ef4444)}
+    .run-status-line.category-neutral{color:var(--zone-muted-fg,#6b7280)}
+    .run-next-hint{font-style:italic;font-size:13px;color:var(--zone-muted-fg,#6b7280);margin:0 0 12px}
     .turn-restored .livecode{max-height:140px}
     .turn-restored .livecode-body{max-height:120px}
 
@@ -9238,6 +9223,13 @@
             status: ok ? 'done' : 'warning',
             className: subagentClass
           });
+          // UI.5: capture summary text for inline prose bubble at run end.
+          // Use summaryPreview if present (test-injectable), fall back to detail.
+          const _cap = String(progress.summaryPreview || progress.detail || '').trim();
+          if (_cap && !subagentId) {
+            state.__agentSummaryByRun = state.__agentSummaryByRun || {};
+            state.__agentSummaryByRun[runId] = _cap;
+          }
           return;
         }
 
@@ -9890,57 +9882,51 @@
       }
     }
 
-    // UI.4.2: build a state-aware final run card from the patch result.
-    function createFinalRunCard(result) {
+    // UI.5: build agent summary bubble — returns null when summaryText is empty.
+    function buildRunSummaryBubble(summaryText, runId) {
+      try {
+        const cleaned = summaryText ? stripTrailingVerificationTag(String(summaryText)).trim() : '';
+        if (!cleaned) return null;
+        return createAgentBubbleFromMarkdown(cleaned, { runId: runId || null });
+      } catch(err) {
+        console.warn('[zone-ui-run-summary]', err);
+        return null;
+      }
+    }
+
+    // UI.5: inline status line — {icon} {K.4 userFacingMessage} · N files · $cost · X% cached
+    function createRunStatusLine(result) {
       try {
         const terminationReason = String(result?.terminationReason || '');
-        // Default to 'success' for safe_to_apply runs with no terminationReason.
-        const effectiveReason = terminationReason || 'natural_completion';
-        const category = getRunCategory(effectiveReason);
-        const userFacingMsg = String(result?.userFacingMessage || '').trim() ||
-          (terminationReason ? `Run ended (${escapeHtml(terminationReason)})` : 'Run complete');
-        const fr = result?.finalRunReport || null;
-
-        const ICONS = { success: '✓', warning: '⚠', error: '✗', neutral: 'ℹ' };
+        const category = getRunCategory(terminationReason || 'natural_completion');
+        const ICONS = { success: '✓', warning: '⚠', error: '✗', neutral: '⏸' };
         const icon = ICONS[category] || '✓';
-
-        const filesCount = Array.isArray(fr?.filesChanged)
-          ? fr.filesChanged.length
-          : (Array.isArray(result?.fileDiffs) ? result.fileDiffs.length : 0);
-        const costStr = typeof result?.costUsd === 'number' ? `$${result.costUsd.toFixed(2)}` : null;
-        const metricParts = [filesCount === 1 ? '1 file' : `${filesCount} files`];
+        const msg = String(result?.userFacingMessage || '').trim() || 'Run complete';
+        const filesCount = Array.isArray(result?.fileDiffs) ? result.fileDiffs.length : 0;
+        const costStr = typeof result?.costUsd === 'number' ? '$' + result.costUsd.toFixed(2) : null;
+        const cachePct = typeof result?.cacheHitPct === 'number' ? Math.round(result.cacheHitPct) + '% cached' : null;
+        const metricParts = [filesCount === 1 ? '1 file' : filesCount + ' files'];
         if (costStr) metricParts.push(costStr);
-
-        const changesMade = Array.isArray(fr?.changesMade) ? fr.changesMade.filter(Boolean) : [];
-        const nextStep = String(fr?.nextStep || '').trim();
-
-        let sectionsHtml = '';
-        if (changesMade.length > 0) {
-          const bullets = changesMade.map(function(c){ return '- ' + String(c).trim(); }).join('\n');
-          sectionsHtml += '<details class="run-final-card-section" open>' +
-            '<summary>What changed</summary>' +
-            '<div class="run-final-card-section-body">' + renderChatMarkdown(bullets, true) + '</div>' +
-            '</details>';
-        }
-        if (nextStep) {
-          sectionsHtml += '<details class="run-final-card-section">' +
-            '<summary>Next step</summary>' +
-            '<div class="run-final-card-section-body">' + renderChatMarkdown(nextStep, true) + '</div>' +
-            '</details>';
-        }
-
-        const card = document.createElement('div');
-        card.className = 'run-final-card run-final-card--' + category;
-        card.innerHTML =
-          '<div class="run-final-card-headline">' +
-            '<span class="run-final-card-icon">' + escapeHtml(icon) + '</span>' +
-            '<span class="run-final-card-msg">' + escapeHtml(userFacingMsg) + '</span>' +
-          '</div>' +
-          '<div class="run-final-card-metrics">' + escapeHtml(metricParts.join(' · ')) + '</div>' +
-          sectionsHtml;
-        return card;
+        if (cachePct) metricParts.push(cachePct);
+        const el = document.createElement('div');
+        el.className = 'run-status-line category-' + category;
+        el.innerHTML = escapeHtml(icon) + ' ' + escapeHtml(msg) + ' · ' + escapeHtml(metricParts.join(' · '));
+        return el;
       } catch(err) {
-        console.warn('[zone-ui-final-card]', err);
+        console.warn('[zone-ui-status-line]', err);
+        return null;
+      }
+    }
+
+    // UI.5: italic Next hint — null when canResume false or resumeHint absent.
+    function createRunNextHint(result) {
+      try {
+        if (!result?.canResume || !result?.resumeHint) return null;
+        const el = document.createElement('div');
+        el.className = 'run-next-hint';
+        el.textContent = 'Next: ' + String(result.resumeHint);
+        return el;
+      } catch(err) {
         return null;
       }
     }
@@ -10320,16 +10306,25 @@
       }
 
 
-      // UI.4.2: state-aware final run card (replaces plain agent bubble).
+      // UI.5: inline prose run completion — summary bubble + status line + next hint
       if (decision === 'safe_to_apply' || decision === 'preview_only') {
         try {
-          const _card = createFinalRunCard(result);
-          if (_card) {
+          // Summary bubble: captured agent summary or statusSummary fallback
+          const _summaryText = (state.__agentSummaryByRun && state.__agentSummaryByRun[runId])
+            || String(result?.finalRunReport?.statusSummary || '').trim();
+          const _bubble = buildRunSummaryBubble(_summaryText, runId);
+          if (_bubble) {
             hideEmpty();
-            appendToRunGroup(runId, _card);
+            appendToRunGroup(runId, _bubble);
           }
+          // Inline status line
+          const _statusLine = createRunStatusLine(result);
+          if (_statusLine) appendToRunGroup(runId, _statusLine);
+          // Next hint (only when canResume + resumeHint)
+          const _hint = createRunNextHint(result);
+          if (_hint) appendToRunGroup(runId, _hint);
         } catch (err) {
-          console.warn('[zone-ui-final-card]', err);
+          console.warn('[zone-ui-final-prose]', err);
         }
       }
 

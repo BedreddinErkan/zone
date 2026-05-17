@@ -3110,61 +3110,59 @@ describe("UI.3.c: retry rich render — formatRetryLine composes errorClass + de
   });
 });
 
-type FinalCardResult = {
+type RunResultLike = {
   terminationReason?: string;
   userFacingMessage?: string;
+  canResume?: boolean;
+  resumeHint?: string | null;
   costUsd?: number;
+  cacheHitPct?: number;
   fileDiffs?: Array<{ filePath: string }>;
-  finalRunReport?: {
-    filesChanged?: Array<{ path: string }>;
-    changesMade?: string[];
-    nextStep?: string;
-  };
 };
 
-describe("UI.4.2: createFinalRunCard — state-aware run card", () => {
-  function getCreateFinalRunCard(harness: ReturnType<typeof buildUiHarness>) {
-    return (harness.context as unknown as {
-      createFinalRunCard: (r: FinalCardResult) => { className: string; innerHTML: string } | null;
-    }).createFinalRunCard;
-  }
+describe("UI.5: inline prose run completion", () => {
+  type Ctx = {
+    buildRunSummaryBubble: (text: string, runId?: string) => { className: string; innerHTML: string } | null;
+    createRunStatusLine: (r: RunResultLike) => { className: string; innerHTML: string } | null;
+    createRunNextHint: (r: RunResultLike) => { className: string; textContent: string } | null;
+  };
 
-  it("natural_completion → card has run-final-card--success class", () => {
-    const { context: _ } = buildUiHarness();
-    const fn = getCreateFinalRunCard(buildUiHarness());
-    const card = fn({ terminationReason: "natural_completion", userFacingMessage: "Run completed successfully." });
-    expect(card).not.toBeNull();
-    expect(card!.className).toContain("run-final-card--success");
+  it("buildRunSummaryBubble returns bubble.agent element containing summary text", () => {
+    const { context } = buildUiHarness();
+    const fn = (context as unknown as Ctx).buildRunSummaryBubble;
+    const el = fn("Added group and pluck utilities to the utils module.");
+    expect(el).not.toBeNull();
+    expect(el!.className).toContain("bubble");
+    expect(el!.className).toContain("agent");
+    expect(el!.innerHTML).toContain("Added group and pluck utilities");
   });
 
-  it("max_iterations → card has run-final-card--warning class", () => {
-    const fn = getCreateFinalRunCard(buildUiHarness());
-    const card = fn({ terminationReason: "max_iterations", userFacingMessage: "Hit max iteration limit." });
-    expect(card!.className).toContain("run-final-card--warning");
+  it("buildRunSummaryBubble returns null when summary text is empty or whitespace", () => {
+    const { context } = buildUiHarness();
+    const fn = (context as unknown as Ctx).buildRunSummaryBubble;
+    expect(fn("")).toBeNull();
+    expect(fn("   ")).toBeNull();
   });
 
-  it("upstream_unavailable → card has run-final-card--error class", () => {
-    const fn = getCreateFinalRunCard(buildUiHarness());
-    const card = fn({ terminationReason: "upstream_unavailable", userFacingMessage: "Upstream LLM unavailable." });
-    expect(card!.className).toContain("run-final-card--error");
-  });
-
-  it("revision_rejected → card has run-final-card--neutral class", () => {
-    const fn = getCreateFinalRunCard(buildUiHarness());
-    const card = fn({ terminationReason: "revision_rejected", userFacingMessage: "Scope revision rejected." });
-    expect(card!.className).toContain("run-final-card--neutral");
-  });
-
-  it("nextStep from finalRunReport is rendered in card body", () => {
-    const fn = getCreateFinalRunCard(buildUiHarness());
-    const card = fn({
-      terminationReason: "natural_completion",
-      userFacingMessage: "Run completed successfully.",
-      finalRunReport: {
-        changesMade: [],
-        nextStep: "Review the diff and merge when ready.",
-      },
+  it("createRunStatusLine has category-warning class and userFacingMessage for max_iterations", () => {
+    const { context } = buildUiHarness();
+    const fn = (context as unknown as Ctx).createRunStatusLine;
+    const el = fn({
+      terminationReason: "max_iterations",
+      userFacingMessage: "Hit max iteration limit (25/25). Narrow the task or split.",
     });
-    expect(card!.innerHTML).toContain("Review the diff and merge when ready.");
+    expect(el!.className).toContain("run-status-line");
+    expect(el!.className).toContain("category-warning");
+    expect(el!.innerHTML).toContain("Hit max iteration limit");
+  });
+
+  it("createRunNextHint returns run-next-hint element when canResume=true; null when canResume=false", () => {
+    const { context } = buildUiHarness();
+    const fn = (context as unknown as Ctx).createRunNextHint;
+    const hint = fn({ canResume: true, resumeHint: "Try a more focused follow-up task" });
+    expect(hint!.className).toContain("run-next-hint");
+    expect(hint!.textContent).toContain("Try a more focused follow-up task");
+    const noHint = fn({ canResume: false, resumeHint: "Some hint" });
+    expect(noHint).toBeNull();
   });
 });
