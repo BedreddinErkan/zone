@@ -2,20 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   createConversation,
-  getConversationById,
-  updateConversation,
+  getConversationByThreadId,
+  upsertConversation,
 } from "./conversationRepository.js";
 
 function createConversationRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: "conv_123",
     user_id: "user_123",
-    mode: "hosted",
+    thread_id: "thread_123",
     repo_path: "C:/repo",
-    role: "developer",
-    charged_run_count: 0,
-    refinement_count: 0,
-    has_free_refinement_been_used: false,
+    messages: [],
     created_at: "2026-04-13T10:00:00.000Z",
     updated_at: "2026-04-13T10:00:00.000Z",
     ...overrides,
@@ -35,32 +32,26 @@ describe("conversationRepository", () => {
 
     const result = await createConversation(supabase, {
       userId: "user_123",
-      mode: "hosted",
+      threadId: "thread_123",
       repoPath: "C:/repo",
-      role: "developer",
+      messages: [],
     });
 
     expect(from).toHaveBeenCalledWith("conversations");
     expect(insert).toHaveBeenCalledWith(
       expect.objectContaining({
         user_id: "user_123",
-        mode: "hosted",
+        thread_id: "thread_123",
         repo_path: "C:/repo",
-        role: "developer",
-        charged_run_count: 0,
-        refinement_count: 0,
-        has_free_refinement_been_used: false,
+        messages: [],
       })
     );
     expect(result).toEqual({
       id: "conv_123",
       userId: "user_123",
-      mode: "hosted",
+      threadId: "thread_123",
       repoPath: "C:/repo",
-      role: "developer",
-      chargedRunCount: 0,
-      refinementCount: 0,
-      hasFreeRefinementBeenUsed: false,
+      messages: [],
       createdAt: "2026-04-13T10:00:00.000Z",
       updatedAt: "2026-04-13T10:00:00.000Z",
     });
@@ -70,29 +61,30 @@ describe("conversationRepository", () => {
     const maybeSingle = vi.fn().mockResolvedValue({
       data: createConversationRow({
         id: "conv_lookup",
-        charged_run_count: 2,
-        refinement_count: 1,
-        has_free_refinement_been_used: true,
+        thread_id: "thread_lookup",
+        messages: [{ role: "user", content: "hello" }],
       }),
       error: null,
     });
-    const eq = vi.fn(() => ({ maybeSingle }));
-    const select = vi.fn(() => ({ eq }));
+    const eq2 = vi.fn(() => ({ maybeSingle }));
+    const eq1 = vi.fn(() => ({ eq: eq2 }));
+    const select = vi.fn(() => ({ eq: eq1 }));
     const from = vi.fn(() => ({ select }));
     const supabase = { from } as unknown as SupabaseClient;
 
-    const result = await getConversationById(supabase, "conv_lookup");
+    const result = await getConversationByThreadId(supabase, {
+      userId: "user_123",
+      threadId: "thread_lookup",
+    });
 
-    expect(eq).toHaveBeenCalledWith("id", "conv_lookup");
+    expect(eq1).toHaveBeenCalledWith("user_id", "user_123");
+    expect(eq2).toHaveBeenCalledWith("thread_id", "thread_lookup");
     expect(result).toEqual({
       id: "conv_lookup",
       userId: "user_123",
-      mode: "hosted",
+      threadId: "thread_lookup",
       repoPath: "C:/repo",
-      role: "developer",
-      chargedRunCount: 2,
-      refinementCount: 1,
-      hasFreeRefinementBeenUsed: true,
+      messages: [{ role: "user", content: "hello" }],
       createdAt: "2026-04-13T10:00:00.000Z",
       updatedAt: "2026-04-13T10:00:00.000Z",
     });
@@ -102,42 +94,39 @@ describe("conversationRepository", () => {
     const single = vi.fn().mockResolvedValue({
       data: createConversationRow({
         id: "conv_update",
-        charged_run_count: 3,
-        refinement_count: 2,
-        has_free_refinement_been_used: true,
+        thread_id: "thread_update",
+        messages: [{ role: "assistant", content: "hi" }],
         updated_at: "2026-04-13T11:00:00.000Z",
       }),
       error: null,
     });
     const select = vi.fn(() => ({ single }));
-    const eq = vi.fn(() => ({ select }));
-    const update = vi.fn(() => ({ eq }));
-    const from = vi.fn(() => ({ update }));
+    const upsertFn = vi.fn(() => ({ select }));
+    const from = vi.fn(() => ({ upsert: upsertFn }));
     const supabase = { from } as unknown as SupabaseClient;
 
-    const result = await updateConversation(supabase, "conv_update", {
-      chargedRunCount: 3,
-      refinementCount: 2,
-      hasFreeRefinementBeenUsed: true,
+    const result = await upsertConversation(supabase, {
+      userId: "user_123",
+      threadId: "thread_update",
+      repoPath: "C:/repo",
+      messages: [{ role: "assistant", content: "hi" }],
     });
 
-    expect(update).toHaveBeenCalledWith(
+    expect(upsertFn).toHaveBeenCalledWith(
       expect.objectContaining({
-        charged_run_count: 3,
-        refinement_count: 2,
-        has_free_refinement_been_used: true,
-      })
+        user_id: "user_123",
+        thread_id: "thread_update",
+        repo_path: "C:/repo",
+        messages: [{ role: "assistant", content: "hi" }],
+      }),
+      { onConflict: "user_id,thread_id" }
     );
-    expect(eq).toHaveBeenCalledWith("id", "conv_update");
     expect(result).toEqual({
       id: "conv_update",
       userId: "user_123",
-      mode: "hosted",
+      threadId: "thread_update",
       repoPath: "C:/repo",
-      role: "developer",
-      chargedRunCount: 3,
-      refinementCount: 2,
-      hasFreeRefinementBeenUsed: true,
+      messages: [{ role: "assistant", content: "hi" }],
       createdAt: "2026-04-13T10:00:00.000Z",
       updatedAt: "2026-04-13T11:00:00.000Z",
     });
