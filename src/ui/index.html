@@ -338,6 +338,18 @@
     .bubble.agent .inline-code{background:#1a1a20;padding:2px var(--space-sm);border-radius:4px;font-family:var(--font-family-mono);font-size:.9em;color:#a78bfa}
     .bubble.agent .chat-body a{color:#93c5fd;text-decoration:none}
     .bubble.agent .chat-body a:hover{text-decoration:underline}
+    .bubble.agent .chat-body h1,.bubble.agent .chat-body h2{margin:18px 0 var(--space-md);line-height:1.35;color:#f3f4f6;font-weight:600}
+    .bubble.agent .chat-body h1{font-size:1.1em}
+    .bubble.agent .chat-body h2{font-size:1.05em}
+    .bubble.agent .chat-body h1:first-child,.bubble.agent .chat-body h2:first-child{margin-top:0}
+    .bubble.agent .chat-body ol{margin:0 0 var(--space-xl);padding-left:20px;line-height:1.5}
+    .bubble.agent .chat-body table{border-collapse:collapse;margin:var(--space-md) 0;font-size:var(--font-size-sm);max-width:100%;display:block;overflow-x:auto}
+    .bubble.agent .chat-body th,.bubble.agent .chat-body td{border:1px solid #2e2e34;padding:4px 10px;text-align:left}
+    .bubble.agent .chat-body th{background:#111116;font-weight:600;color:#f3f4f6}
+    .bubble.agent .chat-body tr:nth-child(even) td{background:rgba(255,255,255,0.03)}
+    .bubble.agent .chat-body pre{background:#050505;border:1px solid #2e2e34;border-radius:var(--radius-md);padding:var(--space-xl) var(--space-2xl);margin:var(--space-lg) 0;overflow-x:auto}
+    .bubble.agent .chat-body pre code{background:transparent;padding:0;display:block;color:#e5e7eb;line-height:1.5}
+    .bubble.agent .chat-body :not(pre)>code{background:#1a1a20;padding:2px var(--space-sm);border-radius:4px;font-size:.9em;color:#a78bfa}
     .bubble.agent .chat-footer{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-xl);margin-top:18px;padding-top:var(--space-2xl);border-top:1px solid #1a1a20}
     .bubble.agent .chat-pills{display:flex;flex-wrap:wrap;gap:var(--space-sm)}
     .bubble.agent .chat-pill{display:inline-flex;align-items:center;padding:3px var(--space-md);border-radius:var(--radius-pill);background:var(--surface-alpha-3);border:1px solid var(--surface-alpha-5);color:#9ca3af;font-size:var(--font-size-sm);line-height:1.2}
@@ -1267,6 +1279,9 @@
       <div class="modal-b" id="settingsBody"></div>
     </div>
   </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@18.0.3/lib/marked.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.4/dist/purify.min.js"></script>
 
   <script>
     // ---- Config ingestion (supports both new and existing server injections) ----
@@ -2739,50 +2754,14 @@
         }
       }
 
-      const extracted = extractChatCodeBlocks(mainText);
-      const lines = extracted.text.split('\n');
-      const blocks = [];
-      let i = 0;
-      while (i < lines.length) {
-        const line = String(lines[i] || '');
-        if (!line.trim()) { i += 1; continue; }
-
-        if (/^\u0000CODEBLOCK\d+\u0000$/.test(line.trim())) {
-          blocks.push(line.trim());
-          i += 1;
-          continue;
-        }
-
-        if (/^\s*-\s+/.test(line)) {
-          const items = [];
-          while (i < lines.length && /^\s*-\s+/.test(String(lines[i] || ''))) {
-            items.push(`<li>${renderChatInline(String(lines[i] || '').replace(/^\s*-\s+/, ''))}</li>`);
-            i += 1;
-          }
-          blocks.push(`<ul>${items.join('')}</ul>`);
-          continue;
-        }
-
-        if (/^\s*#{1,6}\s+/.test(line)) {
-          blocks.push(`<h3>${renderChatInline(line.replace(/^\s*#{1,6}\s+/, ''))}</h3>`);
-          i += 1;
-          continue;
-        }
-
-        const paragraphLines = [];
-        while (
-          i < lines.length &&
-          String(lines[i] || '').trim() &&
-          !/^\u0000CODEBLOCK\d+\u0000$/.test(String(lines[i] || '').trim()) &&
-          !/^\s*-\s+/.test(String(lines[i] || '')) &&
-          !/^\s*#{1,6}\s+/.test(String(lines[i] || ''))
-        ) {
-          paragraphLines.push(String(lines[i] || ''));
-          i += 1;
-        }
-        blocks.push(`<p>${paragraphLines.map((part) => renderChatInline(part)).join('<br>')}</p>`);
+      let parsed;
+      try {
+        const rawHtml = (typeof marked !== 'undefined' && marked.parse) ? marked.parse(mainText) : escapeHtml(mainText);
+        parsed = (typeof DOMPurify !== 'undefined' && DOMPurify.sanitize) ? DOMPurify.sanitize(rawHtml) : rawHtml;
+      } catch(_e) {
+        parsed = '<p>' + escapeHtml(mainText) + '</p>';
       }
-      return `<div class="md">${restoreChatCodeBlocks(blocks.join(''), extracted.codeBlocks)}${trailingCodeHtml}</div>`;
+      return `<div class="md">${parsed}${trailingCodeHtml}</div>`;
     }
 
     function createZoneBubbleIcon(){
