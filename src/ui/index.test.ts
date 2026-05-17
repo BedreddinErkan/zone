@@ -3062,3 +3062,50 @@ describe("BYOM.2: Settings provider radios run-state gate", () => {
     expect(elements.get("settingsBody").innerHTML).toBe(before);
   });
 });
+
+describe("UI.3.a: model label header shows main agent model, not classifier", () => {
+  it("resolveActiveModelLabel returns Sonnet 4.6 (Default) for anthropic + zone_default", () => {
+    const { context } = buildUiHarness();
+    const fn = (context as unknown as { resolveActiveModelLabel: () => string })
+      .resolveActiveModelLabel;
+    expect(fn()).toBe("Sonnet 4.6 (Default)");
+  });
+
+  it("resolveActiveModelLabel ignores zoneActiveModels when preset is explicitly zone_default", () => {
+    const { context } = buildUiHarness({
+      // Explicitly pin preset to zone_default so migration doesn't flip it to 'custom'
+      "zone.modelPreset": JSON.stringify({ preset: "zone_default" }),
+      zoneActiveModels: JSON.stringify({ anthropic: { high: "claude-haiku-4-5" } }),
+    });
+    const fn = (context as unknown as { resolveActiveModelLabel: () => string })
+      .resolveActiveModelLabel;
+    // zone_default uses catalog recommended model, not localStorage value
+    expect(fn()).toBe("Sonnet 4.6 (Default)");
+  });
+});
+
+describe("UI.3.b: streaming diff persistence CSS hold animation", () => {
+  it("livecode-static body has livecodeStaticReveal animation for hold-on-transition", () => {
+    const html = readFileSync(path.resolve("src/ui/index.html"), "utf8");
+    expect(html).toContain("livecodeStaticReveal");
+    expect(html).toContain(".livecode-static .livecode-body");
+  });
+});
+
+describe("UI.3.c: retry rich render — formatRetryLine composes errorClass + delay + attempt", () => {
+  it("formatRetryLine formats 5xx with delayMs and attempt indices", () => {
+    const { context } = buildUiHarness();
+    const fn = (context as unknown as { formatRetryLine: (p: Record<string, unknown>) => string })
+      .formatRetryLine;
+    const result = fn({ errorClass: "5xx", delayMs: 1200, attemptIndex: 2, maxAttempts: 3 });
+    expect(result).toBe("Retry 2/3 · 5xx · wait 1.2s");
+  });
+
+  it("formatRetryLine formats 429 with rounded delay", () => {
+    const { context } = buildUiHarness();
+    const fn = (context as unknown as { formatRetryLine: (p: Record<string, unknown>) => string })
+      .formatRetryLine;
+    const result = fn({ errorClass: "429", delayMs: 5000, attemptIndex: 1, maxAttempts: 4 });
+    expect(result).toBe("Retry 1/4 · 429 · wait 5.0s");
+  });
+});

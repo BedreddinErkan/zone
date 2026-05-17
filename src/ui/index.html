@@ -634,6 +634,8 @@
     .livecode-static .livecode-dot{display:none}
     .livecode-static .sd-cursor{display:none!important}
     .livecode-static .livecode-body pre{animation:none}
+    @keyframes livecodeStaticReveal{0%{opacity:.55}40%{opacity:1}100%{opacity:1}}
+    .livecode-static .livecode-body{animation:livecodeStaticReveal 1.1s ease forwards}
     .turn-restored .livecode{max-height:140px}
     .turn-restored .livecode-body{max-height:120px}
 
@@ -3417,21 +3419,27 @@
       try {
         const provider = getActiveProvider();
         const preset = getActivePreset();
-        const models = getPresetTierModels(provider, preset);
         const catalog = ZONE_MODEL_CATALOG[provider] || [];
-        if (models.high) {
-          const match = catalog.find((m) => String(m.id || '') === models.high);
-          if (match) return match.label;
-          return models.high;
+        let modelId = null;
+        if (preset === 'zone_default') {
+          // Server decides; show catalog's recommended high-tier model (not localStorage)
+          const rec = catalog.find((m) => m.recommendedTier === 'high');
+          modelId = rec ? rec.id : null;
+        } else if (preset === 'custom') {
+          const active = getActiveModelsForActiveProvider();
+          modelId = (active && active.high) ? active.high : null;
+        } else {
+          const models = getPresetTierModels(provider, preset);
+          modelId = (models && models.high) ? models.high : null;
         }
-      } catch {}
-      try {
-        const provider = getActiveProvider();
-        const activeModels = getActiveModelsForActiveProvider();
-        const activeId = String(activeModels?.high || '').trim();
-        const catalog = ZONE_MODEL_CATALOG[provider] || [];
-        const match = catalog.find((m) => String(m.id || '') === activeId);
-        return match?.label || activeId || 'server default';
+        const match = modelId ? catalog.find((m) => String(m.id || '') === modelId) : null;
+        const fullLabel = match ? match.label : (modelId || 'server default');
+        // Short label: strip "Claude " prefix for compact display
+        const shortLabel = fullLabel.replace(/^Claude /, '');
+        // Preset display name: strip leading emoji/symbol and whitespace
+        const badgeRaw = PRESET_BADGE_LABELS[preset] || 'Default';
+        const presetName = badgeRaw.replace(/^[^\w]+/, '').trim();
+        return `${shortLabel} (${presetName})`;
       } catch {}
       return 'unknown';
     }
@@ -4962,6 +4970,19 @@
       if (/repeated failure/i.test(r)) return 'repeated failures';
       if (/blocked escalated/i.test(r)) return 'a blocked file';
       return 'an issue';
+    }
+
+    // UI.3.c: compose rich retry line from per-attempt llm_retry_in_progress payload.
+    function formatRetryLine(progress) {
+      const cls = String(progress.errorClass || '').trim();
+      const delayS = progress.delayMs != null ? (Number(progress.delayMs) / 1000).toFixed(1) + 's' : '';
+      const attempt = progress.attemptIndex != null ? Number(progress.attemptIndex) : '';
+      const max = progress.maxAttempts != null ? Number(progress.maxAttempts) : '';
+      const parts = ['Retry'];
+      if (attempt && max) parts.push(`${attempt}/${max}`);
+      if (cls) parts.push(`· ${cls}`);
+      if (delayS) parts.push(`· wait ${delayS}`);
+      return parts.join(' ');
     }
 
     // ── Tool line coalescer ─────────────────────────────────────────────
@@ -9276,12 +9297,21 @@
         }
         if (type === 'llm_retry_in_progress') {
           if (!logBlock) return;
-          appendLogLine(logBlock, {
-            timestamp: '',
-            message: 'Upstream API slow, retrying…',
-            status: 'warning',
-            className: 'narration-line',
-          });
+          if (progress.isPerAttempt) {
+            appendLogLine(logBlock, {
+              timestamp: '',
+              message: formatRetryLine(progress),
+              status: 'warning',
+              className: 'narration-line',
+            });
+          } else {
+            appendLogLine(logBlock, {
+              timestamp: '',
+              message: 'Upstream API slow, retrying…',
+              status: 'warning',
+              className: 'narration-line',
+            });
+          }
           return;
         }
         if (type === 'narration') {

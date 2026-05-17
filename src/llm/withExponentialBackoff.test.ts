@@ -179,3 +179,46 @@ describe("withExponentialBackoff", () => {
     ).toHaveLength(1);
   });
 });
+
+describe("UI.3.c: zone_llm_retry_attempt per-attempt event", () => {
+  it("emits zone_llm_retry_attempt on each retry attempt with attemptIndex, errorClass, and delayMs", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const serverErr = AnthropicAPIError.generate(500, {}, "err", new Headers());
+    let callCount = 0;
+    const fn = () => {
+      callCount++;
+      if (callCount < 3) return Promise.reject(serverErr);
+      return Promise.resolve("ok");
+    };
+    const emit = vi.fn();
+    const p = withExponentialBackoff(fn, { runId: "run-y", provider: "anthropic", model: "m", emit });
+    const assertion = expect(p).resolves.toBe("ok");
+    await vi.runAllTimersAsync();
+    await assertion;
+    const attemptCalls = emit.mock.calls.filter(([evt]) => evt === "zone_llm_retry_attempt");
+    expect(attemptCalls).toHaveLength(2);
+    const [, p1] = attemptCalls[0]!;
+    expect(p1).toMatchObject({ runId: "run-y", provider: "anthropic", errorClass: "5xx", attemptIndex: 1 });
+    expect(typeof (p1 as Record<string, unknown>).delayMs).toBe("number");
+    const [, p2] = attemptCalls[1]!;
+    expect((p2 as Record<string, unknown>).attemptIndex).toBe(2);
+  });
+
+  it("zone_llm_retry_attempt fires independently from Y.1.6.3 llm_retry_in_progress threshold", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const serverErr = AnthropicAPIError.generate(500, {}, "err", new Headers());
+    const fn = () => Promise.reject(serverErr);
+    const emit = vi.fn();
+    const p = withExponentialBackoff(fn, { provider: "anthropic", model: "m", emit });
+    const assertion = expect(p).rejects.toBeInstanceOf(UpstreamUnavailableError);
+    await vi.runAllTimersAsync();
+    await assertion;
+    // zone_llm_retry_attempt fires for every attempt; llm_retry_in_progress fires only once (Y.1.6.3)
+    const attemptCalls = emit.mock.calls.filter(([evt]) => evt === "zone_llm_retry_attempt");
+    const narrationCalls = emit.mock.calls.filter(([evt]) => evt === "llm_retry_in_progress");
+    expect(attemptCalls.length).toBeGreaterThan(1); // one per retry attempt
+    expect(narrationCalls).toHaveLength(1);          // Y.1.6.3 unchanged
+  });
+});

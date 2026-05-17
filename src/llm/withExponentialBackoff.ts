@@ -138,6 +138,17 @@ export async function withExponentialBackoff<T>(
         });
       }
 
+      // UI.3.c: per-attempt structured event for rich UI display (reuses [zone-llm-retry-attempt] info).
+      ctx.emit?.("zone_llm_retry_attempt", {
+        runId: ctx.runId ?? null,
+        provider: ctx.provider ?? null,
+        model: ctx.model ?? null,
+        attemptIndex: attempt + 1,
+        maxAttempts: config.maxAttempts,
+        errorClass: classification.retryClass,
+        delayMs: Math.round(delayMs),
+      });
+
       // Y.1.6.3: emit SSE narration ONCE when cumulative wait will exceed 5 s.
       const pendingTotal = totalWaitedMs + delayMs;
       if (!narrationEmitted && pendingTotal > NARRATION_THRESHOLD_MS) {

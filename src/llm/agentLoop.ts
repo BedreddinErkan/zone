@@ -2304,6 +2304,16 @@ Example:
         status: "active",
         ...payload,
       }));
+    } else if (event === "zone_llm_retry_attempt") {
+      // UI.3.c: forward per-attempt retry info as llm_retry_in_progress with isPerAttempt flag.
+      input.onProgress?.(JSON.stringify({
+        type: "llm_retry_in_progress",
+        runId: input.runId ?? null,
+        title: "LLM retry",
+        status: "warning",
+        isPerAttempt: true,
+        ...payload,
+      }));
     } else if (event === "zone_llm_retry_started" && !input.subagent && input.runId) {
       const userId =
         typeof input.userId === "string" && input.userId.trim()
