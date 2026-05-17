@@ -375,7 +375,51 @@ export function assembleAgentSystemPrompt(input: {
     `SEARCH FIRST: for symbol/pattern queries (find a function call, find usages, locate a definition), use search_in_files BEFORE read_file. search_in_files now supports regex, output_mode, and context_lines. Reading entire files to find a single symbol is the most common wasteful pattern.\n\n` +
     `READ_FILE ECONOMY: ≤10K chars returns full content (no line-number prefix — safe to copy into FIND). >10K returns numbered head (lines 1-100) + outline + numbered tail — use lineRange: [start, end] (1-indexed inclusive) to read the specific region before patching. When you receive a FILE OUTLINE (file too large for full read), your next action MUST be read_file with lineRange covering the symbol or region you need — the outline alone is insufficient context for editing.\n\n` +
     `INTERPRETING COMMAND OUTPUT: every run_command result starts with [exit_code=N — ...]. exit_code=0 ⇒ success — DO NOT retry based on output text (e.g. "Tests: N failed" may be pre-existing failures unrelated to your patch). exit_code≠0 ⇒ failure — read the tail for the reason. When verifying your own patch, focus only on tests that cover files you modified. If a command exited 0, do not run additional commands to verify or investigate its output. Trust the exit code as final and move on.\n\n` +
-    `OUTPUT ECONOMY: final response 60-80 words unless an error needs more. Include changed files, verification result, any remaining warning. Omit tables, decorative markdown, and content already visible in the diff or in tool output.\n\n` +
+    `FINAL SUMMARY (required — write this as your last response):\n` +
+    `Structure your final response as exactly four sections in this order. Do not add any other headings.\n\n` +
+    `## What changed\n` +
+    `One bullet per logical change (max 120 chars each). Reference files with inline backticks, e.g. \`src/foo.ts\`. Write "(none)" if no patches were applied.\n\n` +
+    `## Why\n` +
+    `One or two sentences. Explain the user-visible behavior, bug, or goal the change addresses. Do not restate the task verbatim.\n\n` +
+    `## Tests\n` +
+    `One line using exactly one of: tests_passed, tests_failed_unrelated, tests_failed_by_patch, tests_inconclusive, tests_skipped_no_infra, not_run. Include the command when tests ran, e.g. "tests_passed (npm test -- foo)".\n\n` +
+    `## Notes\n` +
+    `Optional. Include only when there is a remaining warning, an out-of-scope item, or a concrete follow-up. Omit the heading entirely when empty.\n\n` +
+    `FORBIDDEN in the summary:\n` +
+    `- Triple-backtick code fences or diffs — the UI already shows the diff cards above your summary\n` +
+    `- File contents, patches, or FIND/REPLACE blocks\n` +
+    `- Filler phrases like "I have successfully completed..." or "In conclusion..."\n` +
+    `- Extra headings beyond the four above\n` +
+    `- Tables or decorative markdown\n` +
+    `Token budget: 150-300 tokens; hard cap 900 characters.\n\n` +
+    `EXAMPLES:\n\n` +
+    `[Example 1 — natural_completion]\n` +
+    `## What changed\n` +
+    `- Added \`omit<T, K>\` utility to \`src/utils/omit.ts\` with type-safe key removal\n` +
+    `- Updated barrel export in \`src/utils/index.ts\`\n\n` +
+    `## Why\n` +
+    `Completes the symmetry with the existing \`pick\` utility; both share the same generic signature pattern.\n\n` +
+    `## Tests\n` +
+    `tests_passed (npm test -- omit, 4 scenarios)\n\n` +
+    `[Example 2 — max_iterations]\n` +
+    `## What changed\n` +
+    `- Added \`group\` and \`pluck\` utilities to \`src/utils/collections.ts\`\n` +
+    `- Tests added but barrel export update not completed\n\n` +
+    `## Why\n` +
+    `Plan called for both utilities plus barrel update and call-site refactor; iteration limit hit before all steps finished.\n\n` +
+    `## Tests\n` +
+    `not_run (iteration cap reached before verification step)\n\n` +
+    `## Notes\n` +
+    `Plan step "Update src/utils/index.ts barrel" did not complete. Hand-off to a follow-up run recommended.\n\n` +
+    `[Example 3 — APPLY_ROLLED_BACK]\n` +
+    `## What changed\n` +
+    `- Attempted to refactor \`src/auth/session.ts\` to use the new TokenProvider interface\n\n` +
+    `## Why\n` +
+    `Switching session storage from cookie to header would unblock the upcoming SSO work.\n\n` +
+    `## Tests\n` +
+    `tests_failed_by_patch (tsc: TS2305 — module './tokenProvider' has no exported member 'TokenProvider')\n\n` +
+    `## Notes\n` +
+    `APPLY_ROLLED_BACK. The TokenProvider type must be defined in a prior run before this refactor can land.\n\n` +
     `ELIDED READS: tool_result blocks marked "[Earlier read: ...]" had their content removed to save context. Call read_file again if you need it.\n\n` +
     `TRUNCATED FILE SECTIONS: if you see a ZONE_CONTEXT_TRUNCATED marker, part of the file was omitted. Do NOT include the marker line in any apply_patch FIND block; use read_file with lineRange on the same path to fetch the hidden section. Only generate FIND blocks from lines you have fully read.\n\n` +
     `FINAL ASSESSMENT (required) — include exactly one tag on its own line in your final response:\n` +
@@ -427,6 +471,7 @@ function assembleChatSystemPrompt(input: {
     input.projectMemoryBlock,
     "",
     `You may use up to ${input.baseMaxIterations} iterations, but stop as soon as you can answer well.`,
+    `FINAL SUMMARY: End with a brief 2-3 sentence prose summary of your answer. No code blocks (unless a snippet clarifies the point), no section headers.`,
   ]
     .filter((line) => line !== "")
     .join("\n");
@@ -479,6 +524,7 @@ export function assembleInvestigationSystemPrompt(input: {
     "- End with a `Summary` section if the answer has multiple parts.",
     "",
     "Do NOT end with offers to continue ('shall I dig deeper?', 'would you like me to explore further?', etc.) — the user already asked the question. Deliver the full answer now.",
+    "FINAL SUMMARY: End with a brief 2-3 sentence prose summary of your findings. No code blocks, no markdown section headers beyond what the answer requires.",
     "Do not write or modify code. Do not run commands. Do not call TodoWrite. Do not produce patches.",
     `Maximum iterations: ${input.baseMaxIterations} (already enforced; be targeted).`,
     `Repository path: ${input.repoPath}`,

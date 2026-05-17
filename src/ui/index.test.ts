@@ -3166,3 +3166,100 @@ describe("UI.5: inline prose run completion", () => {
     expect(noHint).toBeNull();
   });
 });
+
+describe("UI.6: format switcher — parse, switch, default format", () => {
+  type Ctx6 = {
+    parseAgentSummary: (raw: string) => { what: string; why: string; tests: string; notes: string; isStructured: boolean; raw: string };
+    getRunSummaryContext: (result: Record<string, unknown>) => { category: string; terminationReason: string; filesChanged: unknown[]; costUsd: number | null; cacheHitPct: number | null; userFacingMessage: string };
+    defaultFormatFor: (category: string, terminationReason: string) => string;
+    buildRunFormatSwitcher: (structured: unknown, ctx: unknown, bubbleEl: unknown, initialFmt: string) => { className: string; children: Array<{ className: string; attributes: Record<string, string> }> };
+    buildRunSummaryBubble: (text: string, runId?: string) => { className: string; innerHTML: string } | null;
+    applyRunFormat: (fmtId: string, structured: unknown, ctx: unknown) => string;
+  };
+
+  const WELL_FORMED = `## What changed\n- Added omit utility to src/utils/omit.ts\n\n## Why\nCompletes the symmetry with pick.\n\n## Tests\ntests_passed (npm test)\n\n## Notes\nNone.`;
+
+  const SUCCESS_RESULT = {
+    terminationReason: "natural_completion",
+    userFacingMessage: "Run completed successfully",
+    fileDiffs: [
+      { filePath: "src/utils/omit.ts", addedLines: 12, removedLines: 0 },
+    ],
+    costUsd: 0.42,
+    cacheHitPct: 71,
+  };
+
+  it("parseAgentSummary returns isStructured: true for 4-section input", () => {
+    const { context } = buildUiHarness();
+    const fn = (context as unknown as Ctx6).parseAgentSummary;
+    const s = fn(WELL_FORMED);
+    expect(s.isStructured).toBe(true);
+    expect(s.what).toContain("omit");
+    expect(s.tests).toContain("tests_passed");
+  });
+
+  it("parseAgentSummary returns isStructured: false for unstructured input", () => {
+    const { context } = buildUiHarness();
+    const fn = (context as unknown as Ctx6).parseAgentSummary;
+    const s = fn("Some prose summary without sections.");
+    expect(s.isStructured).toBe(false);
+    expect(s.what).toContain("Some prose summary");
+  });
+
+  it("defaultFormatFor returns 'detailed' for natural_completion", () => {
+    const { context } = buildUiHarness();
+    const fn = (context as unknown as Ctx6).defaultFormatFor;
+    expect(fn("success", "natural_completion")).toBe("detailed");
+  });
+
+  it("defaultFormatFor returns 'prompt' for max_iterations", () => {
+    const { context } = buildUiHarness();
+    const fn = (context as unknown as Ctx6).defaultFormatFor;
+    expect(fn("warning", "max_iterations")).toBe("prompt");
+  });
+
+  it("defaultFormatFor returns 'brief' for upstream_unavailable", () => {
+    const { context } = buildUiHarness();
+    const fn = (context as unknown as Ctx6).defaultFormatFor;
+    expect(fn("error", "upstream_unavailable")).toBe("brief");
+  });
+
+  it("buildRunFormatSwitcher creates row with run-format-tabs class and 5 tab children", () => {
+    const { context } = buildUiHarness();
+    const parseFn = (context as unknown as Ctx6).parseAgentSummary;
+    const ctxFn = (context as unknown as Ctx6).getRunSummaryContext;
+    const switcherFn = (context as unknown as Ctx6).buildRunFormatSwitcher;
+    const s = parseFn(WELL_FORMED);
+    const ctx = ctxFn(SUCCESS_RESULT);
+    const bubbleEl = { querySelector: () => ({ innerHTML: "" }), querySelectorAll: () => [] };
+    const row = switcherFn(s, ctx, bubbleEl, "detailed");
+    expect(row.className).toContain("run-format-tabs");
+    expect(row.children.length).toBe(5);
+  });
+
+  it("buildRunFormatSwitcher marks the initial format tab as active", () => {
+    const { context } = buildUiHarness();
+    const parseFn = (context as unknown as Ctx6).parseAgentSummary;
+    const ctxFn = (context as unknown as Ctx6).getRunSummaryContext;
+    const switcherFn = (context as unknown as Ctx6).buildRunFormatSwitcher;
+    const s = parseFn(WELL_FORMED);
+    const ctx = ctxFn(SUCCESS_RESULT);
+    const bubbleEl = { querySelector: () => ({ innerHTML: "" }), querySelectorAll: () => [] };
+    const row = switcherFn(s, ctx, bubbleEl, "pr");
+    const activeTabs = row.children.filter(c => c.className.includes("active"));
+    expect(activeTabs.length).toBe(1);
+    expect(activeTabs[0].attributes["aria-label"]).toContain("PR");
+  });
+
+  it("applyRunFormat brief output is a single line with emoji and metrics", () => {
+    const { context } = buildUiHarness();
+    const parseFn = (context as unknown as Ctx6).parseAgentSummary;
+    const ctxFn = (context as unknown as Ctx6).getRunSummaryContext;
+    const applyFn = (context as unknown as Ctx6).applyRunFormat;
+    const s = parseFn(WELL_FORMED);
+    const ctx = ctxFn(SUCCESS_RESULT);
+    const result = applyFn("brief", s, ctx);
+    expect(result).not.toContain("\n");
+    expect(result).toContain("✅");
+  });
+});

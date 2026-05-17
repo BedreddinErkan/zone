@@ -643,6 +643,12 @@
     .run-status-line.category-error{color:var(--zone-error-fg,#ef4444)}
     .run-status-line.category-neutral{color:var(--zone-muted-fg,#6b7280)}
     .run-next-hint{font-style:italic;font-size:13px;color:var(--zone-muted-fg,#6b7280);margin:0 0 12px}
+    .run-format-tabs{display:flex;align-items:center;gap:12px;margin:4px 0 8px;font-size:13px;flex-wrap:wrap}
+    .run-format-tabs .fmt-tab{cursor:pointer;padding:2px 0;color:var(--zone-muted-fg,#6b7280);background:none;border:none;border-bottom:1.5px solid transparent;font-size:13px;font-family:inherit;letter-spacing:0}
+    .run-format-tabs .fmt-tab:hover{color:var(--zone-fg,#e5e7eb)}
+    .run-format-tabs .fmt-tab.active{color:var(--zone-fg,#e5e7eb);border-bottom-color:var(--zone-accent,#7c3aed)}
+    @media(max-width:600px){.run-format-tabs .fmt-tab .label-full{display:none}.run-format-tabs .fmt-tab .label-short{display:inline}}
+    @media(min-width:601px){.run-format-tabs .fmt-tab .label-short{display:none}}
     .turn-restored .livecode{max-height:140px}
     .turn-restored .livecode-body{max-height:120px}
 
@@ -9931,6 +9937,228 @@
       }
     }
 
+    // UI.6: parse agent's structured summary into sections.
+    function parseAgentSummary(rawDetail) {
+      const raw = String(rawDetail || '');
+      const cleaned = raw.replace(/\[ZONE_VERIFICATION:[^\]]*\]/g, '').trim();
+      const SECTION_NAMES = ['what changed', 'why', 'tests', 'notes'];
+      const sectionContent = {};
+      let currentKey = null;
+      for (const line of cleaned.split('\n')) {
+        const m = line.match(/^##\s+(.+?)\s*$/i);
+        if (m) {
+          const name = m[1].toLowerCase().trim();
+          if (SECTION_NAMES.includes(name)) { currentKey = name; sectionContent[currentKey] = []; continue; }
+        }
+        if (currentKey !== null) sectionContent[currentKey].push(line);
+      }
+      const isStructured = Object.keys(sectionContent).length >= 2;
+      if (!isStructured) return { what: cleaned, why: '', tests: '', notes: '', isStructured: false, raw };
+      return {
+        what: (sectionContent['what changed'] || []).join('\n').trim(),
+        why: (sectionContent['why'] || []).join('\n').trim(),
+        tests: (sectionContent['tests'] || []).join('\n').trim(),
+        notes: (sectionContent['notes'] || []).join('\n').trim(),
+        isStructured: true, raw,
+      };
+    }
+
+    // UI.6: category → emoji map.
+    function runSummaryCategoryEmoji(category) {
+      if (category === 'success') return '✅';
+      if (category === 'warning') return '⚠️';
+      if (category === 'error') return '🔴';
+      return 'ℹ️';
+    }
+
+    // UI.6: metrics footer string.
+    function runSummaryMetrics(ctx) {
+      const n = (ctx.filesChanged || []).length;
+      const parts = [n === 1 ? '1 file' : n + ' files'];
+      if (ctx.costUsd != null) parts.push('$' + ctx.costUsd.toFixed(2));
+      if (ctx.cacheHitPct != null) parts.push(Math.round(ctx.cacheHitPct) + '% cached');
+      return parts.join(' · ');
+    }
+
+    // UI.6: Brief format — single-line, emoji + first bullet + metrics.
+    function formatSummaryBrief(s, ctx) {
+      const emoji = runSummaryCategoryEmoji(ctx.category);
+      const metrics = runSummaryMetrics(ctx);
+      if (!s.isStructured) {
+        const plain = s.raw.replace(/```[\s\S]*?```/g, '').replace(/\n+/g, ' ').trim();
+        const snippet = plain.length > 220 ? plain.slice(0, 217) + '…' : plain;
+        return emoji + ' ' + snippet + ' · ' + metrics;
+      }
+      const firstLine = s.what.split('\n')[0].replace(/^-\s+/, '').trim();
+      const truncated = firstLine.length > 100 ? firstLine.slice(0, 97) + '…' : firstLine;
+      return emoji + ' ' + truncated + ' · ' + metrics;
+    }
+
+    // UI.6: Detailed format — full sections + metrics footer.
+    function formatSummaryDetailed(s, ctx) {
+      const footer = '*' + runSummaryMetrics(ctx) + ' · ' + ctx.category + '*';
+      if (!s.isStructured) return s.raw + '\n\n---\n' + footer;
+      const lines = [
+        '## What changed', s.what || '(none)', '',
+        '## Why', s.why || '(not specified)', '',
+        '## Tests', s.tests || 'not_run',
+      ];
+      if (s.notes) lines.push('', '## Notes', s.notes);
+      lines.push('', '---', footer);
+      return lines.join('\n');
+    }
+
+    // UI.6: PR Description format — GitHub-flavored markdown.
+    function formatSummaryPR(s, ctx) {
+      const MAX_INLINE = 3;
+      const files = ctx.filesChanged || [];
+      const fileLines = files.map(f => '- `' + f.path + '` (+' + f.added + '/-' + f.removed + ')');
+      let changesBlock;
+      if (fileLines.length === 0) {
+        changesBlock = '_None._';
+      } else if (fileLines.length <= MAX_INLINE) {
+        changesBlock = fileLines.join('\n');
+      } else {
+        const head = fileLines.slice(0, MAX_INLINE).join('\n');
+        const rest = fileLines.slice(MAX_INLINE).join('\n');
+        changesBlock = head + '\n<details><summary>' + (fileLines.length - MAX_INLINE) + ' more files</summary>\n\n' + rest + '\n</details>';
+      }
+      const summary = s.isStructured ? (s.why || s.what) : s.raw;
+      const tests = s.isStructured ? s.tests : '';
+      const notes = s.isStructured ? s.notes : '';
+      const testPassed = /tests_passed|passed/i.test(tests);
+      const testCheckbox = tests ? '- [' + (testPassed ? 'x' : ' ') + '] ' + tests : '- [ ] Run tests and verify';
+      const statusPrefix = ctx.category === 'success' ? '✅' : ctx.category === 'warning' ? '⚠' : '✗';
+      const lines = [
+        '## Summary', '', summary, '',
+        '## Changes', '', changesBlock, '',
+        '## Test plan', '', testCheckbox,
+      ];
+      if (notes) lines.push('', '## Notes', '', notes);
+      lines.push('', statusPrefix + ' ' + ctx.userFacingMessage);
+      return lines.join('\n');
+    }
+
+    // UI.6: Slack format — mrkdwn-friendly, emoji bullets, no ## headers.
+    function formatSummarySlack(s, ctx) {
+      const emoji = runSummaryCategoryEmoji(ctx.category);
+      const metrics = runSummaryMetrics(ctx);
+      const header = emoji + ' *' + ctx.userFacingMessage + '* — ' + metrics;
+      if (!s.isStructured) {
+        const plain = s.raw.replace(/^#{1,3}\s+(.+)$/gm, '*$1*').replace(/```[\s\S]*?```/g, '`<code block>`');
+        return header + '\n\n' + plain.trim();
+      }
+      const lines = [header, ''];
+      const bullets = s.what.split('\n').map(l => l.replace(/^-\s+/, '').trim()).filter(Boolean).map(l => '• ' + l);
+      if (bullets.length > 0) { lines.push(...bullets); lines.push(''); }
+      if (s.tests) lines.push('*Tests:* ' + s.tests);
+      if (s.notes) lines.push('', '_Note: ' + s.notes + '_');
+      return lines.join('\n');
+    }
+
+    // UI.6: Prompt format — paste-ready handoff to another AI.
+    function formatSummaryPrompt(s, ctx) {
+      if (ctx.category === 'error' && (ctx.filesChanged || []).length === 0) {
+        const lines = ['A run was halted before any code change.', '', '**Status:** ' + ctx.userFacingMessage];
+        if (s.isStructured && s.notes) lines.push('', '**Notes:** ' + s.notes);
+        lines.push('', '## What I need from you', '[INSERT FOLLOWUP TASK HERE]');
+        return lines.join('\n');
+      }
+      const lines = [
+        'I just ran a coding agent and it ended with status: **' + ctx.category + '** (' + ctx.terminationReason + ').',
+        '', '## What was done', s.isStructured ? s.what : s.raw, '',
+      ];
+      if (s.isStructured && s.why) lines.push('## Why', s.why, '');
+      const files = ctx.filesChanged || [];
+      if (files.length > 0) {
+        lines.push('## Files changed');
+        for (const f of files) lines.push('- `' + f.path + '` (+' + f.added + '/-' + f.removed + ')');
+        lines.push('');
+      }
+      lines.push('## Tests', s.isStructured ? (s.tests || 'not_run') : 'not_run', '');
+      const notes = s.isStructured ? s.notes : '';
+      lines.push('## Notes / Open items', notes || '(none)', '');
+      if (ctx.category === 'warning' || ctx.category === 'error') lines.push('> Do not re-do the work above. Start from the current repo state.', '');
+      lines.push('## What I need from you', '[INSERT FOLLOWUP TASK HERE]');
+      return lines.join('\n');
+    }
+
+    // UI.6: apply format transformer by id.
+    function applyRunFormat(fmtId, structured, ctx) {
+      switch (fmtId) {
+        case 'brief':    return formatSummaryBrief(structured, ctx);
+        case 'pr':       return formatSummaryPR(structured, ctx);
+        case 'slack':    return formatSummarySlack(structured, ctx);
+        case 'prompt':   return formatSummaryPrompt(structured, ctx);
+        default:         return formatSummaryDetailed(structured, ctx);
+      }
+    }
+
+    // UI.6: default format per termination reason / category.
+    function defaultFormatFor(category, terminationReason) {
+      switch (String(terminationReason || '')) {
+        case 'natural_completion': return 'detailed';
+        case 'max_iterations': case 'token_budget_exceeded': case 'compaction_exhausted': return 'prompt';
+        case 'APPLY_ROLLED_BACK': return 'detailed';
+        case 'upstream_unavailable': case 'loop_detected': case 'daily_usd_cap_exceeded':
+        case 'revision_approval_timeout': case 'revision_rejected': return 'brief';
+        default: return category === 'success' ? 'detailed' : 'brief';
+      }
+    }
+
+    // UI.6: build RunSummaryContext from patch result.
+    function getRunSummaryContext(result) {
+      const terminationReason = String(result?.terminationReason || 'natural_completion');
+      return {
+        terminationReason,
+        category: getRunCategory(terminationReason),
+        filesChanged: (result?.fileDiffs || []).map(function(d) {
+          return { path: String(d.filePath || d.path || ''), added: d.addedLines || 0, removed: d.removedLines || 0 };
+        }),
+        costUsd: typeof result?.costUsd === 'number' ? result.costUsd : null,
+        cacheHitPct: typeof result?.cacheHitPct === 'number' ? result.cacheHitPct : null,
+        userFacingMessage: String(result?.userFacingMessage || 'Run complete'),
+      };
+    }
+
+    // UI.6: build the inline tab-row switcher below the summary bubble.
+    // Returns the row element. Wires click handlers that swap bubble chat-body content in place.
+    function buildRunFormatSwitcher(structured, ctx, bubbleEl, initialFmt) {
+      const FORMAT_DEFS = [
+        { id: 'brief',    full: 'Brief',    short: 'B'  },
+        { id: 'detailed', full: 'Detailed', short: 'D'  },
+        { id: 'pr',       full: 'PR',       short: 'P'  },
+        { id: 'slack',    full: 'Slack',    short: 'S'  },
+        { id: 'prompt',   full: 'Prompt',   short: 'Pr' },
+      ];
+      const row = document.createElement('div');
+      row.className = 'run-format-tabs';
+      row.setAttribute('role', 'tablist');
+      for (const def of FORMAT_DEFS) {
+        const tab = document.createElement('button');
+        tab.className = 'fmt-tab' + (def.id === initialFmt ? ' active' : '');
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('aria-selected', def.id === initialFmt ? 'true' : 'false');
+        tab.setAttribute('aria-label', def.full + ' format');
+        tab.innerHTML = '<span class="label-full">' + escapeHtml(def.full) + '</span><span class="label-short">' + escapeHtml(def.short) + '</span>';
+        tab.addEventListener('click', function() {
+          const formatted = applyRunFormat(def.id, structured, ctx);
+          try {
+            const body = bubbleEl.querySelector('.chat-body');
+            if (body) body.innerHTML = renderChatMarkdown(formatted, true);
+          } catch(e) { /* ignore */ }
+          for (const t of row.querySelectorAll('.fmt-tab')) {
+            t.classList.remove('active');
+            t.setAttribute('aria-selected', 'false');
+          }
+          tab.classList.add('active');
+          tab.setAttribute('aria-selected', 'true');
+        });
+        row.appendChild(tab);
+      }
+      return row;
+    }
+
     function handlePatchResult(result, runId){
       // Idempotent: replay SSE may deliver the final result even if the original fetch returns too.
       state.__runResultProcessed = state.__runResultProcessed || new Set();
@@ -10306,16 +10534,31 @@
       }
 
 
-      // UI.5: inline prose run completion — summary bubble + status line + next hint
+      // UI.6: inline prose run completion — format-aware summary bubble + switcher tabs + status line + next hint
       if (decision === 'safe_to_apply' || decision === 'preview_only') {
         try {
-          // Summary bubble: captured agent summary or statusSummary fallback
+          // Summary text: captured agent summary or statusSummary fallback
           const _summaryText = (state.__agentSummaryByRun && state.__agentSummaryByRun[runId])
             || String(result?.finalRunReport?.statusSummary || '').trim();
-          const _bubble = buildRunSummaryBubble(_summaryText, runId);
-          if (_bubble) {
-            hideEmpty();
-            appendToRunGroup(runId, _bubble);
+          if (_summaryText) {
+            // Parse structured summary + determine default format
+            const _ctx = getRunSummaryContext(result);
+            const _structured = parseAgentSummary(_summaryText);
+            const _defaultFmt = defaultFormatFor(_ctx.category, _ctx.terminationReason);
+            // Render bubble with default-format text
+            const _displayText = applyRunFormat(_defaultFmt, _structured, _ctx);
+            const _bubble = buildRunSummaryBubble(_displayText, runId);
+            if (_bubble) {
+              hideEmpty();
+              appendToRunGroup(runId, _bubble);
+              // Format switcher tab row (always shown when summary present in patch mode)
+              try {
+                const _switcher = buildRunFormatSwitcher(_structured, _ctx, _bubble, _defaultFmt);
+                appendToRunGroup(runId, _switcher);
+              } catch(swErr) {
+                console.warn('[zone-ui-format-switcher]', swErr);
+              }
+            }
           }
           // Inline status line
           const _statusLine = createRunStatusLine(result);
