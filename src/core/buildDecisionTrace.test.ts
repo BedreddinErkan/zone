@@ -268,12 +268,14 @@ describe("buildDecisionTrace – decisionPath", () => {
     ]);
   });
 
-  it("produces correct full path for preview_only decision", () => {
+  // Phase J: preview_only was collapsed into safe_to_apply; schema signals
+  // now route to safe_to_apply. Test updated to reflect current mode set.
+  it("produces correct full path for safe_to_apply decision (schema signal)", () => {
     const trace = buildDecisionTrace({
       signals: ["schema"],
       riskScore: 25,
       confidenceScore: 75,
-      mode: "preview_only",
+      mode: "safe_to_apply",
       confidenceBreakdown: {
         ...emptyBreakdown,
         schemaPenalty: -25
@@ -284,7 +286,7 @@ describe("buildDecisionTrace – decisionPath", () => {
       "Detected schema signal",
       "Applied schema penalty: -25",
       "Total risk score: 25",
-      "Mapped to PREVIEW_ONLY mode"
+      "Mapped to SAFE_TO_APPLY mode"
     ]);
   });
 
@@ -351,16 +353,18 @@ describe("buildDecisionTrace – decisionFactors", () => {
     expect(trace.decisionFactors.riskThreshold).toBe(71);
   });
 
-  it("sets riskThreshold 31 for preview_only mode", () => {
+  // Phase J: preview_only was collapsed into safe_to_apply; the threshold
+  // for the soft-gate (31) no longer exists. safe_to_apply maps to 0.
+  it("sets riskThreshold 0 for safe_to_apply mode (was 31 for preview_only before Phase J)", () => {
     const trace = buildDecisionTrace({
       signals: ["schema"],
       riskScore: 35,
       confidenceScore: 65,
-      mode: "preview_only",
+      mode: "safe_to_apply",
       confidenceBreakdown: emptyBreakdown
     });
 
-    expect(trace.decisionFactors.riskThreshold).toBe(31);
+    expect(trace.decisionFactors.riskThreshold).toBe(0);
   });
 
   it("sets riskThreshold 0 for safe_to_apply mode", () => {
@@ -387,18 +391,20 @@ describe("buildDecisionTrace – decisionFactors", () => {
     expect(trace.decisionFactors.triggeredBy).toEqual(["riskScore"]);
   });
 
-  it("triggeredBy includes signal names when score < 71 but signals force preview", () => {
+  // Phase J: preview_only was collapsed into safe_to_apply; the soft-signal
+  // triggeredBy path (signals forcing preview) no longer exists. When score
+  // < 71 and mode is safe_to_apply, triggeredBy is empty.
+  it("triggeredBy is empty when score < 71 and mode is safe_to_apply (was preview_only signal-forced before Phase J)", () => {
     const trace = buildDecisionTrace({
       signals: ["schema", "mass_scope"],
       riskScore: 50,
       confidenceScore: 50,
-      mode: "preview_only",
+      mode: "safe_to_apply",
       confidenceBreakdown: emptyBreakdown
     });
 
-    expect(trace.decisionFactors.triggeredBy).toContain("schema");
-    expect(trace.decisionFactors.triggeredBy).toContain("mass_scope");
     expect(trace.decisionFactors.triggeredBy).not.toContain("riskScore");
+    expect(trace.decisionFactors.triggeredBy).toHaveLength(0);
   });
 
   it("triggeredBy is empty for safe_to_apply", () => {
