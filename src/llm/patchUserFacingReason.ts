@@ -1,8 +1,11 @@
+export type PatchTerminationCategory = "success" | "warning" | "error" | "neutral";
+
 export type PatchTerminationOutcome = {
   reason: string;
   userFacingMessage: string;
   canResume: boolean;
   resumeHint: string | null;
+  category: PatchTerminationCategory;
 };
 
 export function getPatchUserFacingReason(input: {
@@ -23,6 +26,7 @@ export function getPatchUserFacingReason(input: {
         userFacingMessage: "Run completed successfully.",
         canResume: true,
         resumeHint: null,
+        category: "success",
       };
 
     case "max_iterations": {
@@ -35,6 +39,7 @@ export function getPatchUserFacingReason(input: {
         userFacingMessage: `Hit max iteration limit${iterPart}. Narrow the task or split.`,
         canResume: true,
         resumeHint: "Try a more focused follow-up task",
+        category: "warning",
       };
     }
 
@@ -45,6 +50,7 @@ export function getPatchUserFacingReason(input: {
           "Token budget exceeded. Consider raising ZONE_TIER_TOKEN_CAP or splitting the task.",
         canResume: true,
         resumeHint: "Raise token cap or split task",
+        category: "warning",
       };
 
     case "daily_usd_cap_exceeded": {
@@ -58,6 +64,7 @@ export function getPatchUserFacingReason(input: {
         userFacingMessage: `Daily USD cap reached${budgetPart}. Resets at midnight UTC.`,
         canResume: true,
         resumeHint: "Raise ZONE_DAILY_USD_CAP or wait for reset",
+        category: "warning",
       };
     }
 
@@ -68,6 +75,7 @@ export function getPatchUserFacingReason(input: {
           "Context compaction limit reached. Break into smaller subtasks.",
         canResume: false,
         resumeHint: null,
+        category: "error",
       };
 
     case "loop_detected":
@@ -77,6 +85,7 @@ export function getPatchUserFacingReason(input: {
           "Detected a loop in agent actions. Halted to prevent unbounded execution.",
         canResume: false,
         resumeHint: null,
+        category: "error",
       };
 
     case "APPLY_ROLLED_BACK":
@@ -86,6 +95,7 @@ export function getPatchUserFacingReason(input: {
           "Patch applied but verification failed; changes rolled back.",
         canResume: true,
         resumeHint: "Address the verification failure and retry",
+        category: "error",
       };
 
     case "revision_approval_timeout":
@@ -96,6 +106,7 @@ export function getPatchUserFacingReason(input: {
         canResume: true,
         resumeHint:
           "Set autoApproveRevisions:true in your /api/patch body, or open a GET /api/run-replay/:runId SSE stream before POSTing.",
+        category: "neutral",
       };
 
     case "revision_rejected":
@@ -105,6 +116,7 @@ export function getPatchUserFacingReason(input: {
         canResume: true,
         resumeHint:
           "Provide a more concrete task spec or accept the revised scope manually.",
+        category: "neutral",
       };
 
     case "upstream_unavailable":
@@ -114,6 +126,7 @@ export function getPatchUserFacingReason(input: {
           "The upstream LLM API was unavailable after retries. Try again later.",
         canResume: true,
         resumeHint: "Retry the request; the API may be temporarily degraded.",
+        category: "error",
       };
 
     default:
@@ -122,6 +135,7 @@ export function getPatchUserFacingReason(input: {
         userFacingMessage: `Run ended unexpectedly (${terminationReason}).`,
         canResume: false,
         resumeHint: null,
+        category: "error",
       };
   }
 }

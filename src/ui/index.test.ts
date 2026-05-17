@@ -3109,3 +3109,62 @@ describe("UI.3.c: retry rich render — formatRetryLine composes errorClass + de
     expect(result).toBe("Retry 1/4 · 429 · wait 5.0s");
   });
 });
+
+type FinalCardResult = {
+  terminationReason?: string;
+  userFacingMessage?: string;
+  costUsd?: number;
+  fileDiffs?: Array<{ filePath: string }>;
+  finalRunReport?: {
+    filesChanged?: Array<{ path: string }>;
+    changesMade?: string[];
+    nextStep?: string;
+  };
+};
+
+describe("UI.4.2: createFinalRunCard — state-aware run card", () => {
+  function getCreateFinalRunCard(harness: ReturnType<typeof buildUiHarness>) {
+    return (harness.context as unknown as {
+      createFinalRunCard: (r: FinalCardResult) => { className: string; innerHTML: string } | null;
+    }).createFinalRunCard;
+  }
+
+  it("natural_completion → card has run-final-card--success class", () => {
+    const { context: _ } = buildUiHarness();
+    const fn = getCreateFinalRunCard(buildUiHarness());
+    const card = fn({ terminationReason: "natural_completion", userFacingMessage: "Run completed successfully." });
+    expect(card).not.toBeNull();
+    expect(card!.className).toContain("run-final-card--success");
+  });
+
+  it("max_iterations → card has run-final-card--warning class", () => {
+    const fn = getCreateFinalRunCard(buildUiHarness());
+    const card = fn({ terminationReason: "max_iterations", userFacingMessage: "Hit max iteration limit." });
+    expect(card!.className).toContain("run-final-card--warning");
+  });
+
+  it("upstream_unavailable → card has run-final-card--error class", () => {
+    const fn = getCreateFinalRunCard(buildUiHarness());
+    const card = fn({ terminationReason: "upstream_unavailable", userFacingMessage: "Upstream LLM unavailable." });
+    expect(card!.className).toContain("run-final-card--error");
+  });
+
+  it("revision_rejected → card has run-final-card--neutral class", () => {
+    const fn = getCreateFinalRunCard(buildUiHarness());
+    const card = fn({ terminationReason: "revision_rejected", userFacingMessage: "Scope revision rejected." });
+    expect(card!.className).toContain("run-final-card--neutral");
+  });
+
+  it("nextStep from finalRunReport is rendered in card body", () => {
+    const fn = getCreateFinalRunCard(buildUiHarness());
+    const card = fn({
+      terminationReason: "natural_completion",
+      userFacingMessage: "Run completed successfully.",
+      finalRunReport: {
+        changesMade: [],
+        nextStep: "Review the diff and merge when ready.",
+      },
+    });
+    expect(card!.innerHTML).toContain("Review the diff and merge when ready.");
+  });
+});

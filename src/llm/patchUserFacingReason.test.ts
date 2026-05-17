@@ -108,6 +108,28 @@ describe("getPatchUserFacingReason", () => {
   });
 });
 
+describe("UI.4.1: category field", () => {
+  it("natural_completion → category 'success'", () => {
+    const out = getPatchUserFacingReason({ terminationReason: "natural_completion" });
+    expect(out.category).toBe("success");
+  });
+
+  it("max_iterations → category 'warning'", () => {
+    const out = getPatchUserFacingReason({ terminationReason: "max_iterations" });
+    expect(out.category).toBe("warning");
+  });
+
+  it("upstream_unavailable → category 'error'", () => {
+    const out = getPatchUserFacingReason({ terminationReason: "upstream_unavailable" });
+    expect(out.category).toBe("error");
+  });
+
+  it("revision_rejected → category 'neutral'", () => {
+    const out = getPatchUserFacingReason({ terminationReason: "revision_rejected" });
+    expect(out.category).toBe("neutral");
+  });
+});
+
 describe("canResumeFromTerminationReason", () => {
   it("returns true for resumable reasons", () => {
     expect(canResumeFromTerminationReason("natural_completion")).toBe(true);
