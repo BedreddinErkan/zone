@@ -890,7 +890,8 @@ export async function executeTool(
         env: NodeJS.ProcessEnv;
       } = {
         cwd,
-        timeout: 30000,
+        // Full vitest suites take 65-100s through exec; 30s was killing them (D5).
+        timeout: 120000,
         windowsHide: true,
         maxBuffer: 10 * 1024 * 1024,
         // Build/test commands run by the agent must execute under a clean NODE_ENV.
