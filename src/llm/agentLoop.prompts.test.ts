@@ -39,6 +39,17 @@ describe('UI.6.1: patch prompt FINAL SUMMARY block', () => {
   });
 });
 
+describe('D1: VERIFIER SHELL DISCIPLINE block in patch prompt', () => {
+  it('contains VERIFIER SHELL DISCIPLINE header, PRIORITY RULE, and both few-shot examples', () => {
+    const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
+    expect(prompt).toContain('VERIFIER SHELL DISCIPLINE');
+    expect(prompt).toContain('PRIORITY RULE');
+    expect(prompt).toContain('Example A');
+    expect(prompt).toContain('Example B');
+    expect(prompt).toContain('no matches found');
+  });
+});
+
 describe('UI.6.1: investigation prompt slim FINAL SUMMARY variant', () => {
   it('contains slim FINAL SUMMARY line without structured section contract', () => {
     const prompt = assembleInvestigationSystemPrompt({

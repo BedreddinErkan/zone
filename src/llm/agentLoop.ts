@@ -375,6 +375,24 @@ export function assembleAgentSystemPrompt(input: {
     `SEARCH FIRST: for symbol/pattern queries (find a function call, find usages, locate a definition), use search_in_files BEFORE read_file. search_in_files now supports regex, output_mode, and context_lines. Reading entire files to find a single symbol is the most common wasteful pattern.\n\n` +
     `READ_FILE ECONOMY: ≤10K chars returns full content (no line-number prefix — safe to copy into FIND). >10K returns numbered head (lines 1-100) + outline + numbered tail — use lineRange: [start, end] (1-indexed inclusive) to read the specific region before patching. When you receive a FILE OUTLINE (file too large for full read), your next action MUST be read_file with lineRange covering the symbol or region you need — the outline alone is insufficient context for editing.\n\n` +
     `INTERPRETING COMMAND OUTPUT: every run_command result starts with [exit_code=N — ...]. exit_code=0 ⇒ success — DO NOT retry based on output text (e.g. "Tests: N failed" may be pre-existing failures unrelated to your patch). exit_code≠0 ⇒ failure — read the tail for the reason. When verifying your own patch, focus only on tests that cover files you modified. If a command exited 0, do not run additional commands to verify or investigate its output. Trust the exit code as final and move on.\n\n` +
+    `VERIFIER SHELL DISCIPLINE — pipe exit code semantics:\n` +
+    `Some shell patterns produce non-zero exit codes that are NOT real failures:\n` +
+    `1. \`grep PATTERN | wc -l\` — grep returns exit 1 when no matches found; the pipeline exits 1 even though wc -l succeeded with count "0".\n` +
+    `2. \`grep -c PATTERN\` — returns count directly without piping; exits 1 if no match, BUT the count is in stdout regardless.\n\n` +
+    `DEFENSIVE PATTERNS for counting:\n` +
+    `✓ \`command 2>&1 | grep -c " FAIL" || echo 0\` — grep -c returns count; \`|| echo 0\` swallows the 1-exit when no match.\n` +
+    `✓ Separate verification — run target test directly first to confirm pass, then check full suite for regression count. Do NOT conflate the two.\n` +
+    `✗ Avoid: \`grep " FAIL" | wc -l\` — pipe will return 1 on grep no-match.\n\n` +
+    `PRIORITY RULE: If \`npx vitest run path/to/target.test.ts\` returned exit 0, your fix is verified. A downstream pipe noise (regression count) is secondary — do NOT retry the fix based on pipe noise.\n\n` +
+    `Few-shot examples:\n` +
+    `[Example A — target passes, regression count noise (pipe noise scenario)]\n` +
+    `[shell] npx vitest run src/billing/conversationRepository.test.ts 2>&1 → exitCode=0\n` +
+    `[agent] Target test passed. Check regression count defensively.\n` +
+    `[shell] npx vitest run 2>&1 | grep -c " FAIL" || echo 0 → 59\n` +
+    `[agent] 62 → 59, baseline improved. Fix verified, no retry needed.\n\n` +
+    `[Example B — real test failure, not pipe noise]\n` +
+    `[shell] npx vitest run path/to/changed.test.ts 2>&1 → exitCode=1, "Tests 2 failed | 3 passed"\n` +
+    `[agent] Real failure in target. Inspect output for cause, then retry the fix.\n\n` +
     `FINAL SUMMARY (required — write this as your last response):\n` +
     `Structure your final response as exactly four sections in this order. Do not add any other headings.\n\n` +
     `## What changed\n` +

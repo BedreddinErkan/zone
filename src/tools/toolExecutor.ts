@@ -21,6 +21,7 @@ import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.j
 import type { ProjectFramework } from "../repo/detectFramework.js";
 import { generateFileOutline } from "./fileOutline.js";
 import { findCheckerForFile } from "./syntaxCheckers.js";
+import { classifyShellExit } from "./classifyShellExit.js";
 
 const execAsync = promisify(exec);
 
@@ -963,11 +964,20 @@ export async function executeTool(
       const hasTestFailureContent = commandSuccess &&
         /\b(Tests?:?\s+\d+\s+failed|FAILED\s+tests?|test result: FAILED|Test Suites?:.*failed)\b/i
           .test(combined);
-      const exitHeader = commandSuccess
-        ? hasTestFailureContent
+      let exitHeader: string;
+      if (commandSuccess) {
+        exitHeader = hasTestFailureContent
           ? `[exit_code=0 — command succeeded. Test failures visible in output are likely pre-existing and unrelated to your patch. Do not retry.]\n`
-          : `[exit_code=0 — command succeeded; output below is informational]\n`
-        : `[exit_code=${commandExitCode} — command failed]\n`;
+          : `[exit_code=0 — command succeeded; output below is informational]\n`;
+      } else {
+        const heuristic = classifyShellExit(commandExitCode, stdout, command);
+        if (heuristic.classification === 'likely_no_matches') {
+          console.log(`[zone-verify-pipe-heuristic] classification=likely_no_matches cmd="${command.slice(0, 80)}"`);
+          exitHeader = `[exit_code=${commandExitCode} — command failed]\n[zone-verify-classification] likely_no_matches\n[zone-verify-hint] ${heuristic.hint}\n`;
+        } else {
+          exitHeader = `[exit_code=${commandExitCode} — command failed]\n`;
+        }
+      }
       return {
         success: commandSuccess,
         exitCode: commandExitCode,
