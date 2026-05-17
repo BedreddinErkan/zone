@@ -19,6 +19,7 @@ import { getPatchUserFacingReason } from "../llm/patchUserFacingReason.js";
 import { UpstreamUnavailableError } from "../llm/withExponentialBackoff.js";
 import { routeCapGate } from "../llm/checkDailyCap.js";
 import { loadLimitConfig, saveLimitConfig, checkUsageLimit } from "./usageLimits.js";
+import { loadRepoRegistry, addRepo as addRepoEntry, removeRepo as removeRepoEntry } from "./repos.js";
 import { readTierSettings, writeTierSettings, readAutoAuditSetting, writeAutoAuditSetting } from "../visual/tierSettings.js";
 import { TIER_LIMITS } from "../llm/tierLimits.js";
 import {
@@ -416,6 +417,7 @@ function renderZoneUiHtml(): string {
       typeof process.env.OPENAI_API_KEY === "string" &&
       process.env.OPENAI_API_KEY.trim()
     ),
+    repos: (() => { try { return loadRepoRegistry(); } catch { return []; } })(),
   })};window.currentUser=window.currentUser||${JSON.stringify(currentUser)};</script>`;
   return readZoneUiHtmlTemplate().replace("</head>", `${configScript}</head>`);
 }
@@ -1815,6 +1817,38 @@ app.post("/api/browse-folder", (_req, res) => {
       res.json({ ok: false, error: "Folder picker unavailable on this system" });
     }
   }
+});
+
+app.get("/api/repos", (_req, res) => {
+  try {
+    res.json(loadRepoRegistry());
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.post("/api/repos", async (req, res) => {
+  const label = typeof req.body?.label === "string" ? req.body.label.trim() : "";
+  const repoPath = typeof req.body?.path === "string" ? req.body.path.trim() : "";
+  if (!repoPath) {
+    return res.status(400).json({ ok: false, error: "path required" });
+  }
+  const result = await addRepoEntry(label, repoPath);
+  if (!result.ok) {
+    return res.status(400).json(result);
+  }
+  res.json(result);
+});
+
+app.delete("/api/repos/:id", (req, res) => {
+  const result = removeRepoEntry(req.params.id);
+  if (!result.ok && result.error === "Not found") {
+    return res.status(404).json(result);
+  }
+  if (!result.ok) {
+    return res.status(400).json(result);
+  }
+  res.json(result);
 });
 
 app.post("/api/approve-command", (req, res) => {

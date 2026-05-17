@@ -167,6 +167,9 @@
     .repo-form .browsebtn:hover{border-color:rgba(255,255,255,0.22);background:rgba(255,255,255,0.07)}
     .repo-form .browsebtn:disabled{opacity:.5;cursor:default}
     .repo-form-error{color:var(--color-error);font-size:var(--font-size-sm);padding:var(--space-xs) 2px 0;grid-column:1/-1}
+    .repo-remove-btn{opacity:0;margin-left:auto;cursor:pointer;background:transparent;border:none;color:var(--text-4);font-size:13px;padding:2px 6px;border-radius:4px;flex-shrink:0}
+    .repo-row:hover .repo-remove-btn{opacity:1}
+    .repo-row:hover .repo-remove-btn:hover{color:var(--color-error,#ef4444)}
 
     .tabs{display:flex;padding:var(--space-lg) var(--space-xl) var(--space-md);gap:var(--space-xl);border-bottom:1px solid var(--border)}
     .tab{border:none;background:transparent;color:var(--text-3);font-size:var(--font-size-base);padding:var(--space-sm) 0;position:relative}
@@ -7255,6 +7258,27 @@
             <div class="repo-path">${escapeHtml(r.path || '')}</div>
           </span>
         `;
+        if (!r.isDefault) {
+          const removeBtn = document.createElement('button');
+          removeBtn.type = 'button';
+          removeBtn.className = 'repo-remove-btn';
+          removeBtn.textContent = '✕';
+          removeBtn.title = 'Remove project';
+          removeBtn.setAttribute('aria-label', 'Remove ' + (r.name || 'project'));
+          removeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.repos = (Array.isArray(state.repos) ? state.repos : []).filter(rr => rr.path !== r.path);
+            window.ZONE_REPOS = state.repos;
+            try { localStorage.setItem(LS_REPOS, JSON.stringify(state.repos)); } catch {}
+            if (r.id) apiFetch('/api/repos/' + encodeURIComponent(r.id), { method: 'DELETE' }).catch(() => {});
+            if (state.activeRepo && state.activeRepo.path === r.path) {
+              state.activeRepo = state.repos[0] || null;
+              els.repoChipName.textContent = state.activeRepo?.name || 'No project';
+            }
+            renderRepoDropdown();
+          });
+          row.appendChild(removeBtn);
+        }
         row.addEventListener('click', () => {
           state.activeRepo = r;
           closeNewThreadDropdown();
@@ -7279,6 +7303,10 @@
         browseBtn.textContent = 'Browse…';
         browseBtn.title = 'Open system folder picker';
 
+        const labelInput = document.createElement('input');
+        labelInput.type = 'text';
+        labelInput.placeholder = 'Label  e.g. zone-api-dogfood';
+        labelInput.className = 'repo-form-label';
         const input = document.createElement('input');
         input.type = 'text';
         input.placeholder = 'Project path  e.g. C:\\Users\\...';
@@ -7332,7 +7360,8 @@
             return;
           }
 
-          const project = normalizeRepoRecord({ id: crypto.randomUUID(), path: raw, createdAt: Date.now() });
+          const customLabel = String(labelInput.value || '').trim() || null;
+          const project = normalizeRepoRecord({ id: crypto.randomUUID(), path: raw, name: customLabel || undefined, createdAt: Date.now() });
           if (!project) return;
           state.repos.push(project);
           state.activeRepo = project;
@@ -7341,6 +7370,9 @@
           // Persist — zone_repos only going forward
           console.log('[zone-add-repo] saving to localStorage');
           try { localStorage.setItem(LS_REPOS, JSON.stringify(state.repos)); } catch {}
+
+          // Sync to backend (fire-and-forget)
+          apiFetch('/api/repos', { method: 'POST', body: JSON.stringify({ label: project.name, path: raw }), headers: { 'Content-Type': 'application/json' } }).catch(() => {});
 
           state.__addingProject = false;
           state.__addingProjectMode = '';
@@ -7407,10 +7439,15 @@
           if (e.key === 'Escape') { e.preventDefault(); cancelAdd(); }
           if (e.key === 'Enter') { e.preventDefault(); doAdd(); }
         });
+        labelInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') { e.preventDefault(); cancelAdd(); }
+          if (e.key === 'Enter') { e.preventDefault(); doAdd(); }
+        });
         input.addEventListener('input', () => { state.__addingProjectValue = input.value; });
         addBtn.addEventListener('click', doAdd);
 
         wrap.appendChild(browseBtn);
+        wrap.appendChild(labelInput);
         wrap.appendChild(input);
         wrap.appendChild(addBtn);
         els.repoDropdownList.appendChild(wrap);
@@ -7422,8 +7459,8 @@
         addRow.innerHTML = `
           <span class="dot"></span>
           <span class="repo-meta">
-            <div class="repo-title">Add project</div>
-            <div class="repo-path">Add a project path</div>
+            <div class="repo-title">+ Add custom path…</div>
+            <div class="repo-path">Add a git worktree or custom project path</div>
           </span>
         `;
         addRow.addEventListener('click', (e) => {

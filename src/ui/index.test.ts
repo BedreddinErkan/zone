@@ -148,7 +148,7 @@ class MockElement {
   click(): void {
     this.clicked = true;
     for (const listener of this.listeners.get("click") ?? []) {
-      listener({ target: this });
+      listener({ target: this, stopPropagation: () => {}, preventDefault: () => {} });
     }
   }
 
@@ -3323,5 +3323,38 @@ describe("UI.6: format switcher — parse, switch, default format", () => {
     await new Promise(r => setTimeout(r, 0));
     expect(writeText).toHaveBeenCalled();
     expect(prevented.length).toBeGreaterThan(0);
+  });
+});
+
+describe("D6: repo dropdown — custom path support", () => {
+  it("repo dropdown renders '+ Add custom path' entry at bottom of list", () => {
+    const { elements } = buildUiHarness();
+    const list = elements.get("repoDropdownList");
+    // With empty state.repos, list has: [sep, addRow]
+    const addRow = list.children[list.children.length - 1];
+    expect(addRow).toBeTruthy();
+    expect(addRow.textContent).toContain("+ Add custom path");
+  });
+
+  it("clicking add row shows inline dialog with label and path inputs", () => {
+    const { elements } = buildUiHarness();
+    const list = elements.get("repoDropdownList");
+    // With empty repos: list.children = [sep, addRow]
+    const addRow = list.children[list.children.length - 1];
+    addRow.click(); // triggers state.__addingProject = true + re-render
+    // After re-render: list.children = [sep, form-wrap]
+    // form-wrap.children = [browseBtn, labelInput, input, addBtn]
+    const inputs: MockElement[] = [];
+    function collect(node: MockElement) {
+      for (const child of node.children) {
+        if ((child as unknown as { type?: string }).type === "text") inputs.push(child);
+        collect(child);
+      }
+    }
+    collect(list);
+    expect(inputs.length).toBeGreaterThanOrEqual(2);
+    const placeholders = inputs.map(inp => inp.placeholder);
+    expect(placeholders.some(p => /label/i.test(p))).toBe(true);
+    expect(placeholders.some(p => /path/i.test(p))).toBe(true);
   });
 });
