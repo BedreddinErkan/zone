@@ -74,6 +74,7 @@ describe("assembleAgentSystemPrompt — Q.3 Task coaching", () => {
     expect(prompt).toContain("multi_file_fanout");
     expect(prompt).toContain("exploration");
     expect(prompt).toContain("long_isolated_step");
+    expect(prompt).toContain("focused_diagnosis");
     expect(prompt).toContain("DISPATCH REASON");
   });
 
@@ -105,5 +106,21 @@ describe("assembleAgentSystemPrompt — Q.3 Task coaching", () => {
       repoPath: "/tmp/repo",
     });
     expect(prompt).toContain("MAX_SUBAGENT_CALLS=2");
+  });
+
+  it("Step D: focused_diagnosis GOOD signal is present in the active prompt path", () => {
+    const prompt = assembleAgentSystemPrompt({
+      agentIntro: "You are Zone, an autonomous coding agent.",
+      frameworkLines: [],
+      hasFramework: false,
+      projectMemoryBlock: "",
+      baseMaxIterations: 25,
+      canRunCommand: false,
+      backgroundCommandBlock: "",
+      repoPath: "/tmp/repo",
+    });
+    expect(prompt).toContain("focused_diagnosis");
+    expect(prompt).toContain("Verifier rolled back your patch");
+    expect(prompt).toContain("environment archaeology");
   });
 });

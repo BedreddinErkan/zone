@@ -394,8 +394,9 @@ export function assembleAgentSystemPrompt(input: {
     `- Same transformation across 5+ files (multi_file_fanout): rename, codemod. Worker.\n` +
     `- Pure read-only investigation across the repo (exploration): "map all callers of X". Explore.\n` +
     `- A single step that would otherwise consume 10+ parent iterations (long_isolated_step).\n` +
+    `- Verifier rolled back your patch AND you have spent ≥2 iterations on the rollback recovery AND the diagnosis requires reading 3+ files outside your patched scope (e.g., tsconfig + vitest config + jest setup; module resolution config + package.json + lockfile; build pipeline + bundler config): dispatch ONE explore subagent with a narrow question scoped to the environment investigation. Worker returns scoped findings; you apply them without burning your iter budget on environment archaeology (focused_diagnosis).\n` +
     `BAD signals (DON'T dispatch): 1-2 file edits, shared mutation state, uncertain scope, patch-then-verify cycles.\n` +
-    `DISPATCH REASON (required): prefix description with "multi_file_fanout: ...", "exploration: ...", or "long_isolated_step: ...". Example: Task({ subagent_type: "worker", description: "multi_file_fanout: rename foo→bar across src/api/handlers/* (8 files)" }).\n\n` +
+    `DISPATCH REASON (required): prefix description with "multi_file_fanout: ...", "exploration: ...", "long_isolated_step: ...", or "focused_diagnosis: ...". Example: Task({ subagent_type: "worker", description: "multi_file_fanout: rename foo→bar across src/api/handlers/* (8 files)" }).\n\n` +
     `NARRATION: before each tool call, write one short sentence in plain English describing what you're about to do and why. ` +
     `Examples: "Reading the README to find the existing structure.", "Patching package.json to add the dev dependency.", "Searching for callers of the renamed function." ` +
     `One line, no bullets, no markdown headers, no emoji. Shown as live narration. Don't repeat in the final summary.\n\n` +
@@ -607,7 +608,7 @@ export function buildWorkerAgentIntro(): string {
     `- You CANNOT delegate further (no nested subagents).\n` +
     `- You CANNOT update project memory or run shell commands.\n` +
     `- Stay focused on the delegated subtask. Do not expand scope.\n` +
-    `- Iteration budget is limited (12 iterations). Be decisive.\n\n` +
+    `- Iteration budget is limited (6 iterations). Be decisive.\n\n` +
     `TASK TOOL FORBIDDEN\n` +
     `You are a SUBAGENT. You CANNOT dispatch other subagents via the Task tool.\n` +
     `Task tool is BLOCKED in your context (defensive: even if visible, do not call).\n` +
@@ -635,7 +636,7 @@ export function buildExploreAgentIntro(): string {
     `- READ-ONLY. You have access to read_file, list_files, search_in_files, find_references only.\n` +
     `- You CANNOT modify files, run commands, delegate further, or update memory.\n` +
     `- Keep findings concise: file:line + one-sentence note per entry. Do NOT dump raw file contents.\n` +
-    `- Iteration budget is limited (8 iterations). Be targeted — search first, read selectively.\n` +
+    `- Iteration budget is limited (15 iterations). Be targeted — search first, read selectively.\n` +
     `- If the task requires modifications, return STATUS: failed with an explanation in SUMMARY.\n\n` +
     `TASK TOOL FORBIDDEN\n` +
     `You are a SUBAGENT. You CANNOT dispatch other subagents via the Task tool.\n` +
