@@ -44,6 +44,19 @@ Tier definitions:
              find-and-modify across N callsites, intentional breaking changes
              that ripple through callers, multi-investigation tasks.
 
+Two scopes matter:
+- Edit scope: files that will be modified
+- Investigation scope: files that must be read/understood before editing
+
+A task with single-file edit scope can have multi-module investigation
+scope. Both raise complexity. Tier accounts for the LARGER of the two.
+
+Test-fix examples:
+- "Fix typo in existing test assertion" → SIMPLE (single file, no investigation)
+- "Fix stale tests after Phase X refactor" → MEDIUM (single edit, multi-module investigation: refactor context required)
+- "Update fixtures to match new behavior in 3 modules" → MEDIUM (single edit, cross-module investigation)
+- "Fix failing tests in src/cli/index.test.ts referencing outdated format flag handling" → MEDIUM (test fix requires reading implementation + related routing logic)
+
 Classification heuristics:
 - "find X with N callers/usages" → multi-investigation → MEDIUM or COMPLEX
 - "change signature that breaks callers" → cross-cutting → COMPLEX
@@ -51,6 +64,14 @@ Classification heuristics:
 - "intentional break" / "type errors" / "breaking change" → COMPLEX
 - Single file edit with no cross-references → SIMPLE
 - Pure cosmetic change (comment, rename in single file) → SIMPLE
+- Test fix tasks (filename matches *.test.ts or task mentions "tests") default to
+  MEDIUM unless the task is clearly a trivial assertion typo. Reason: test fixes
+  typically require reading the implementation under test plus related modules to
+  understand the correct expected behavior.
+- Signal words that raise tier by one: "stale", "outdated", "refactor",
+  "Phase J/K/L/AS/D/...", "recent change", "after refactor". Task framing
+  suggesting "implementation is correct, tests are stale" should NOT be trusted
+  — verify by reading the implementation first.
 
 COMPLEX tier triggers (any one is sufficient):
 - Rename / refactor of a symbol across ≥3 files where its definition +

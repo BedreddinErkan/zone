@@ -748,3 +748,223 @@ describe("Phase K.2 — confidence gate", () => {
     });
   });
 });
+
+describe("Phase D4 — investigation-scope classifier tuning", () => {
+  it("system prompt includes investigation-scope distinction and test-fix heuristics", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "medium",
+          estimatedFiles: 2,
+          estimatedIterations: 12,
+          needsSubagent: false,
+          confidence: 0.8,
+          reasoning: "test fix requiring investigation",
+        })
+      )
+    );
+
+    await classifyTask("Fix stale tests in src/core/buildDecisionTrace.test.ts");
+
+    const call = mocks.createChatCompletion.mock.calls[0]?.[0] as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const systemMsg = call.messages.find((m) => m.role === "system")?.content ?? "";
+
+    // Addition 1: investigation-scope distinction
+    expect(systemMsg).toContain("Edit scope");
+    expect(systemMsg).toContain("Investigation scope");
+    expect(systemMsg).toContain("LARGER of the two");
+
+    // Addition 2: test-fix few-shot examples
+    expect(systemMsg).toContain("Test-fix examples");
+    expect(systemMsg).toContain("Fix stale tests after Phase X refactor");
+
+    // Addition 3: heuristics
+    expect(systemMsg).toContain("*.test.ts");
+    expect(systemMsg).toContain("stale");
+    expect(systemMsg).toContain("implementation is correct, tests are stale");
+  });
+
+  // Dogfood regression: 3 real tasks that mis-classified as simple pre-D4
+  it("cli-test-fix → medium (was simple, c=0.95 before D4)", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "medium",
+          estimatedFiles: 3,
+          estimatedIterations: 14,
+          needsSubagent: false,
+          confidence: 0.8,
+          reasoning: "test fix requires reading impl + routing logic",
+        })
+      )
+    );
+
+    const result = await classifyTask(
+      "Fix the failing tests in src/cli/index.test.ts. Multiple tests reference outdated --format flag handling for json/trace/verbose modes. The implementation is correct; tests are stale."
+    );
+
+    expect(result.tier).toBe("medium");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.7);
+    expect(result.fallbackUsed).toBeUndefined();
+  });
+
+  it("billing-test-fix → medium (was simple before D4)", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "medium",
+          estimatedFiles: 2,
+          estimatedIterations: 12,
+          needsSubagent: false,
+          confidence: 0.75,
+          reasoning: "test fix requires reading repository implementation",
+        })
+      )
+    );
+
+    const result = await classifyTask(
+      "Fix 3 failing tests in src/billing/conversationRepository.test.ts"
+    );
+
+    expect(result.tier).toBe("medium");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.7);
+    expect(result.fallbackUsed).toBeUndefined();
+  });
+
+  it("buildDecisionTrace-test-fix → medium (was simple before D4)", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "medium",
+          estimatedFiles: 3,
+          estimatedIterations: 14,
+          needsSubagent: false,
+          confidence: 0.82,
+          reasoning: "stale test fix — requires Phase J refactor investigation",
+        })
+      )
+    );
+
+    const result = await classifyTask(
+      "Fix stale tests in src/core/buildDecisionTrace.test.ts"
+    );
+
+    expect(result.tier).toBe("medium");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.7);
+    expect(result.fallbackUsed).toBeUndefined();
+  });
+
+  // No-regress: trivially simple tasks must stay simple
+  it("Fix typo in a single source file → simple", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "simple",
+          estimatedFiles: 1,
+          estimatedIterations: 3,
+          needsSubagent: false,
+          confidence: 0.95,
+          reasoning: "single-file typo fix, no investigation needed",
+        })
+      )
+    );
+
+    const result = await classifyTask("Fix typo in src/utils/format.ts line 42");
+
+    expect(result.tier).toBe("simple");
+    expect(result.fallbackUsed).toBeUndefined();
+  });
+
+  it("Single-occurrence rename in one file → simple", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "simple",
+          estimatedFiles: 1,
+          estimatedIterations: 4,
+          needsSubagent: false,
+          confidence: 0.92,
+          reasoning: "single-file rename, one occurrence",
+        })
+      )
+    );
+
+    const result = await classifyTask(
+      "Rename foo to bar in src/single.ts (single occurrence)"
+    );
+
+    expect(result.tier).toBe("simple");
+    expect(result.fallbackUsed).toBeUndefined();
+  });
+
+  it("Add JSDoc comment to one function → simple", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "simple",
+          estimatedFiles: 1,
+          estimatedIterations: 3,
+          needsSubagent: false,
+          confidence: 0.97,
+          reasoning: "pure cosmetic addition, one file",
+        })
+      )
+    );
+
+    const result = await classifyTask(
+      "Add JSDoc comment to publicFn in src/api/health.ts"
+    );
+
+    expect(result.tier).toBe("simple");
+    expect(result.fallbackUsed).toBeUndefined();
+  });
+
+  // No-regress: complex tasks must stay complex
+  it("Rename class across 8 modules → complex", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "complex",
+          estimatedFiles: 8,
+          estimatedIterations: 30,
+          needsSubagent: true,
+          confidence: 0.9,
+          reasoning: "rename across 8 modules — coordinated definition + imports + call sites",
+        })
+      )
+    );
+
+    const result = await classifyTask(
+      "Rename DBConnection class across all 8 modules in src/db/"
+    );
+
+    expect(result.tier).toBe("complex");
+    expect(result.needsSubagent).toBe(true);
+    expect(result.fallbackUsed).toBeUndefined();
+  });
+
+  it("Refactor function signature affecting 5 callers → complex", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "complex",
+          estimatedFiles: 6,
+          estimatedIterations: 25,
+          needsSubagent: true,
+          confidence: 0.88,
+          reasoning: "signature change rippling through 5 callers — cross-cutting",
+        })
+      )
+    );
+
+    const result = await classifyTask(
+      "Refactor signature of getUserId() affecting 5 callers"
+    );
+
+    expect(result.tier).toBe("complex");
+    expect(result.needsSubagent).toBe(true);
+    expect(result.fallbackUsed).toBeUndefined();
+  });
+});
