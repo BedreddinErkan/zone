@@ -185,6 +185,11 @@ export interface AgentLoopInput {
     severity?: "none" | "minor" | "major";
     citations?: Array<{ file: string; line?: number }>;
     filesAlreadyRead?: string[];
+    // Step C: structured Phase 1 output fields
+    rootCause?: string;
+    fixInstruction?: string;
+    filesToEdit?: string[];
+    evidence?: string;
   };
   /**
    * Phase D-S1: when set, caps the Phase 2 iteration budget to
@@ -518,6 +523,17 @@ function assembleChatSystemPrompt(input: {
     .join("\n");
 }
 
+// Step C Lever A: module-level const — no per-run interpolation, cache-safe.
+const INVESTIGATION_OUTPUT_FORMAT = `At the end of your investigation, output a JSON block fenced with \`\`\`json containing exactly these fields:
+{
+  "rootCause": "<one sentence — root cause or key gap this task must address>",
+  "fixInstruction": "<one actionable verb phrase for the execute agent — what to do, not what to investigate>",
+  "filesToEdit": ["<file path>"],
+  "evidence": "<key file:line citations that support the above>",
+  "complete": true
+}
+Place the JSON block as the LAST item in your response, after the prose summary.`;
+
 export function assembleInvestigationSystemPrompt(input: {
   repoPath: string;
   projectMemoryBlock: string;
@@ -543,10 +559,12 @@ export function assembleInvestigationSystemPrompt(input: {
     "Do not rely on intuition when the repository can be searched.",
     "",
     "Tools available:",
-    "- read_file: <30k chars returns full content; 30-100k returns full content with a lineRange hint; >100k returns head 100 + outline + tail 50. Use lineRange: [start, end] for exact large-file sections.",
+    "- read_file: ≤10K chars returns full content; >10K returns head 100 lines + file outline + tail 50 lines. Use lineRange to read exact sections from outline hits.",
     "- list_files",
     "- search_in_files",
     "- find_references",
+    "",
+    "SEARCH FIRST: Use search_in_files to locate symbols before reading files. Reading an entire file for a single symbol wastes iterations.",
     "",
     "Process:",
     "1. Identify what the question asks: definition, usages, control flow, data shape, or design rationale.",
@@ -570,6 +588,8 @@ export function assembleInvestigationSystemPrompt(input: {
     `Maximum iterations: ${input.baseMaxIterations} (already enforced; be targeted).`,
     `Repository path: ${input.repoPath}`,
     ...(input.projectMemoryBlock ? ["", input.projectMemoryBlock] : []),
+    "",
+    INVESTIGATION_OUTPUT_FORMAT,
   ].join("\n");
 }
 
@@ -2340,6 +2360,23 @@ Example:
       lines.push("");
       lines.push("Cited evidence:");
       for (const c of af.citations) lines.push(`- ${c.file}${c.line !== undefined ? `:${c.line}` : ""}`);
+    }
+    if (af.rootCause) {
+      lines.push("");
+      lines.push(`Root cause: ${af.rootCause}`);
+    }
+    if (af.fixInstruction) {
+      lines.push("");
+      lines.push(`Fix instruction: ${af.fixInstruction}`);
+    }
+    if (af.filesToEdit && af.filesToEdit.length > 0) {
+      lines.push("");
+      lines.push("Files to edit:");
+      for (const f of af.filesToEdit) lines.push(`- ${f}`);
+    }
+    if (af.evidence) {
+      lines.push("");
+      lines.push(`Evidence: ${af.evidence}`);
     }
     lines.push("");
     lines.push("Findings:");

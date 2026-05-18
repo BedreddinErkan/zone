@@ -4550,6 +4550,11 @@ export type PhaseSplitAuditFindings = {
   severity?: "none" | "minor" | "major";
   citations?: Array<{ file: string; line?: number }>;
   filesAlreadyRead?: string[];
+  // Step C: structured Phase 1 output fields
+  rootCause?: string;
+  fixInstruction?: string;
+  filesToEdit?: string[];
+  evidence?: string;
 };
 
 /** Phase D-S1: result of the investigation phase (Phase 1) in a split run. */
@@ -4619,6 +4624,10 @@ export async function runPhaseSplitInvestigation(opts: {
       costUsd: phase1Result.costUsd,
       ...(phase1Result.citations.length ? { citations: phase1Result.citations } : {}),
       ...(phase1Result.filesAlreadyRead?.length ? { filesAlreadyRead: phase1Result.filesAlreadyRead } : {}),
+      ...(phase1Result.rootCause ? { rootCause: phase1Result.rootCause } : {}),
+      ...(phase1Result.fixInstruction ? { fixInstruction: phase1Result.fixInstruction } : {}),
+      ...(phase1Result.filesToEdit?.length ? { filesToEdit: phase1Result.filesToEdit } : {}),
+      ...(phase1Result.evidence ? { evidence: phase1Result.evidence } : {}),
     };
   }
 

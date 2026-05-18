@@ -285,6 +285,52 @@ describe("audit handoff — Step B structured AUDIT CONTEXT", () => {
     expect(sysMsg).not.toContain("=== AUDIT CONTEXT IS AUTHORITATIVE ===");
   });
 
+  it("renders rootCause, fixInstruction, filesToEdit, and evidence when provided", async () => {
+    await runAgentLoop({
+      task: "patch the auth",
+      repoPath: "/tmp/fake",
+      mode: "patch",
+      auditFindings: {
+        summary: "Auth gap found.",
+        citationCount: 1,
+        toolCallCount: 3,
+        costUsd: 0.01,
+        rootCause: "middleware missing from admin router",
+        fixInstruction: "Add authMiddleware to admin router",
+        filesToEdit: ["src/routes/admin.ts", "src/routes/user.ts"],
+        evidence: "`src/routes/admin.ts:14`",
+      },
+    });
+
+    const userMsg = capturedUserMessage();
+    expect(userMsg).toContain("Root cause: middleware missing from admin router");
+    expect(userMsg).toContain("Fix instruction: Add authMiddleware to admin router");
+    expect(userMsg).toContain("Files to edit:");
+    expect(userMsg).toContain("- src/routes/admin.ts");
+    expect(userMsg).toContain("- src/routes/user.ts");
+    expect(userMsg).toContain("Evidence: `src/routes/admin.ts:14`");
+  });
+
+  it("omits Step C sections when only legacy fields are set", async () => {
+    await runAgentLoop({
+      task: "fix bug",
+      repoPath: "/tmp/fake",
+      mode: "patch",
+      auditFindings: {
+        summary: "Found a bug.",
+        citationCount: 1,
+        toolCallCount: 2,
+        costUsd: 0.005,
+      },
+    });
+
+    const userMsg = capturedUserMessage();
+    expect(userMsg).not.toContain("Root cause:");
+    expect(userMsg).not.toContain("Fix instruction:");
+    expect(userMsg).not.toContain("Files to edit:");
+    expect(userMsg).not.toContain("Evidence:");
+  });
+
   it("assembleAgentSystemPrompt without auditFindings is byte-identical regardless of param presence", () => {
     const baseArgs = {
       agentIntro: "You are a coding agent.",

@@ -61,13 +61,13 @@ describe("Phase D-S1 — per-phase iter caps in TIER_LIMITS", () => {
     expect(TIER_LIMITS.simple.phase2Cap).toBe(15);
   });
 
-  it("medium tier: phase1Cap=8, phase2Cap=20", () => {
-    expect(TIER_LIMITS.medium.phase1Cap).toBe(8);
+  it("medium tier: phase1Cap=6, phase2Cap=20", () => {
+    expect(TIER_LIMITS.medium.phase1Cap).toBe(6);
     expect(TIER_LIMITS.medium.phase2Cap).toBe(20);
   });
 
-  it("complex tier: phase1Cap=12, phase2Cap=30", () => {
-    expect(TIER_LIMITS.complex.phase1Cap).toBe(12);
+  it("complex tier: phase1Cap=8, phase2Cap=30", () => {
+    expect(TIER_LIMITS.complex.phase1Cap).toBe(8);
     expect(TIER_LIMITS.complex.phase2Cap).toBe(30);
   });
 });
@@ -325,6 +325,57 @@ describe("Phase D-S1 — approval policy", () => {
 
     expect(result.auditFindings).toBeUndefined();
     expect(result.approvalDecision).toBe("reject");
+  });
+});
+
+// ── Test 8b: Step C — structured Phase 1 output forwarded to auditFindings ────
+
+describe("Phase D-S1 — Step C: structured Phase 1 output forwarded", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requestRevisionApproval.mockResolvedValue({ revisionId: "rev-1", decision: "approve" });
+  });
+
+  it("forwards rootCause and fixInstruction when Phase 1 returns them", async () => {
+    mocks.investigateScope.mockResolvedValue({
+      ...makeInvestigateResult(),
+      rootCause: "auth middleware not applied to admin routes",
+      fixInstruction: "Add authMiddleware to router.use('/admin', ...)",
+      filesToEdit: ["src/routes/admin.ts"],
+      evidence: "`src/routes/admin.ts:14` — router defined without auth guard",
+    });
+    const emitProgress = vi.fn();
+
+    const result = await runPhaseSplitInvestigation({
+      task: "Fix auth gap",
+      repoPath: "/repo",
+      tier: "medium",
+      tierLimits: TIER_LIMITS.medium,
+      emitProgress,
+    });
+
+    expect(result.auditFindings?.rootCause).toBe("auth middleware not applied to admin routes");
+    expect(result.auditFindings?.fixInstruction).toBe("Add authMiddleware to router.use('/admin', ...)");
+    expect(result.auditFindings?.filesToEdit).toEqual(["src/routes/admin.ts"]);
+    expect(result.auditFindings?.evidence).toBe("`src/routes/admin.ts:14` — router defined without auth guard");
+  });
+
+  it("omits Step C fields from auditFindings when Phase 1 does not return them", async () => {
+    mocks.investigateScope.mockResolvedValue(makeInvestigateResult());
+    const emitProgress = vi.fn();
+
+    const result = await runPhaseSplitInvestigation({
+      task: "Investigate codebase",
+      repoPath: "/repo",
+      tier: "medium",
+      tierLimits: TIER_LIMITS.medium,
+      emitProgress,
+    });
+
+    expect(result.auditFindings?.rootCause).toBeUndefined();
+    expect(result.auditFindings?.fixInstruction).toBeUndefined();
+    expect(result.auditFindings?.filesToEdit).toBeUndefined();
+    expect(result.auditFindings?.evidence).toBeUndefined();
   });
 });
 

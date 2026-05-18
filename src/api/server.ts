@@ -3749,6 +3749,10 @@ app.post("/api/patch", async (req, res) => {
     severity?: "none" | "minor" | "major";
     citations?: Array<{ file: string; line?: number }>;
     filesAlreadyRead?: string[];
+    rootCause?: string;
+    fixInstruction?: string;
+    filesToEdit?: string[];
+    evidence?: string;
   } | undefined;
   if (runIdStr) {
     try {
@@ -3820,6 +3824,10 @@ app.post("/api/patch", async (req, res) => {
             costUsd: findings.costUsd,
             ...(findings.citations.length ? { citations: findings.citations } : {}),
             ...(findings.filesAlreadyRead?.length ? { filesAlreadyRead: findings.filesAlreadyRead } : {}),
+            ...(findings.rootCause ? { rootCause: findings.rootCause } : {}),
+            ...(findings.fixInstruction ? { fixInstruction: findings.fixInstruction } : {}),
+            ...(findings.filesToEdit?.length ? { filesToEdit: findings.filesToEdit } : {}),
+            ...(findings.evidence ? { evidence: findings.evidence } : {}),
           };
           // Check if agent directly proposed a revision
           const agentRevision = findings.agentSuggestedRevision;

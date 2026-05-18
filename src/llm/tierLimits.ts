@@ -38,7 +38,7 @@ export const TIER_LIMITS: Record<TaskTier, TierLimits> = {
     maxSubagentCalls: 1,
     tokenBudgetCap: 600_000,
     iterCap: 25,
-    phase1Cap: 8,
+    phase1Cap: 6,
     phase2Cap: 20,
   },
   complex: {
@@ -46,7 +46,7 @@ export const TIER_LIMITS: Record<TaskTier, TierLimits> = {
     maxSubagentCalls: 4,
     tokenBudgetCap: 800_000,
     iterCap: 40,
-    phase1Cap: 12,
+    phase1Cap: 8,
     phase2Cap: 30,
   },
 };

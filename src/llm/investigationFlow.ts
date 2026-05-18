@@ -50,6 +50,11 @@ export interface InvestigateScopeResult {
   };
   /** Deduped list of files read during investigation — for auditFindings handoff to Phase 2. */
   filesAlreadyRead?: string[];
+  // Step C: structured Phase 1 output extracted from the INVESTIGATION_OUTPUT_FORMAT JSON block.
+  rootCause?: string;
+  fixInstruction?: string;
+  filesToEdit?: string[];
+  evidence?: string;
 }
 
 function extractCitations(text: string): Array<{ file: string; line?: number }> {
@@ -67,6 +72,36 @@ function extractCitations(text: string): Array<{ file: string; line?: number }> 
 
 const AUDIT_TOKEN_CAP = 200_000;
 const MIN_TOKENS_TO_START = 50_000;
+
+/**
+ * Step C: Extracts structured fields from the INVESTIGATION_OUTPUT_FORMAT JSON
+ * block appended by Phase 1. Never throws — returns {} on any parse failure.
+ */
+export function extractPhase1Findings(summary: string): {
+  rootCause?: string;
+  fixInstruction?: string;
+  filesToEdit?: string[];
+  evidence?: string;
+} {
+  try {
+    const blocks = [...summary.matchAll(/```json\s*([\s\S]*?)\s*```/g)];
+    if (blocks.length === 0) return {};
+    const inner = blocks[blocks.length - 1]![1] ?? "";
+    const parsed: unknown = JSON.parse(inner);
+    if (typeof parsed !== "object" || parsed === null) return {};
+    const p = parsed as Record<string, unknown>;
+    return {
+      ...(typeof p["rootCause"] === "string" ? { rootCause: p["rootCause"] } : {}),
+      ...(typeof p["fixInstruction"] === "string" ? { fixInstruction: p["fixInstruction"] } : {}),
+      ...(Array.isArray(p["filesToEdit"]) && (p["filesToEdit"] as unknown[]).every((f) => typeof f === "string")
+        ? { filesToEdit: p["filesToEdit"] as string[] }
+        : {}),
+      ...(typeof p["evidence"] === "string" ? { evidence: p["evidence"] } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
 
 /**
  * Pure investigation runner for in-process callers (Phase AS scope audit).
@@ -236,6 +271,8 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
     ),
   ];
 
+  const phase1Structured = extractPhase1Findings(findings);
+
   return {
     findings,
     citations,
@@ -244,6 +281,7 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
     costUsd,
     ...(agentSuggestedRevision ? { agentSuggestedRevision } : {}),
     ...(filesAlreadyRead.length ? { filesAlreadyRead } : {}),
+    ...phase1Structured,
   };
 }
 
