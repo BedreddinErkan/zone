@@ -2397,6 +2397,8 @@ app.get("/api/settings/tier-limits", (_req, res) => {
           maxSubagentCalls: ov.maxSubagentCalls ?? base.maxSubagentCalls,
           tokenBudgetCap: ov.tokenBudgetCap ?? base.tokenBudgetCap,
           iterCap: ov.iterCap ?? base.iterCap,
+          phase1Cap: base.phase1Cap,
+          phase2Cap: base.phase2Cap,
         };
         return acc;
       },

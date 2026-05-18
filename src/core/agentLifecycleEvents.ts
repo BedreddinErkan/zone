@@ -150,7 +150,9 @@ export type ZoneStructuredProgressEvent = {
     | "scope_audit_completed"
     | "scope_audit_skipped"
     /** Phase Z: plan generation summary emitted inline (replaces plan card). */
-    | "plan_summary";
+    | "plan_summary"
+    /** Phase D-S1: emitted exactly once when Phase 1 (investigation) hands off to Phase 2 (execution). */
+    | "phase_changed";
   title: string;
   detail?: string;
   filePath?: string;
@@ -244,6 +246,9 @@ export type ZoneStructuredProgressEvent = {
   /** Phase Z: plan_summary fields — deduplicated file list and step count. */
   planSummaryFiles?: string[];
   planSummaryStepCount?: number;
+  /** Phase D-S1: phase_changed event fields. phase=2 means Phase 1 is done, Phase 2 starting. */
+  phase?: number;
+  remainingTokenBudget?: number;
   /** Phase L.1: pre-dispatch task classification. Emitted once per dispatch
    *  before the agent loop starts so the UI / telemetry can show the predicted
    *  tier and the classifier's own cost. L.2 will gate tool exposure based on

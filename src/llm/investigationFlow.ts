@@ -20,6 +20,12 @@ export interface InvestigateScopeOpts {
    * tier-constraints-applied logs the correct tier instead of defaulting to medium.
    */
   parentTier?: TaskTier;
+  /**
+   * Phase D-S1: hard iteration cap for Phase 1 of a phase-split run.
+   * When set, overrides computeExploreMaxIterations(1)=15 so Phase 1 stays
+   * within its allocated budget and leaves capacity for Phase 2.
+   */
+  maxIterationsOverride?: number;
   onProgress?: (update: {
     stage: string;
     progress?: Partial<ZoneStructuredProgressEvent>;
@@ -108,7 +114,8 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
   void _auditCap;
 
   const planStepsCount = 1;
-  const computedMax = computeExploreMaxIterations(planStepsCount);
+  // Phase D-S1: respect caller's phase1Cap when set; otherwise use explore floor.
+  const computedMax = opts.maxIterationsOverride ?? computeExploreMaxIterations(planStepsCount);
 
   const parentTaskClassification = opts.parentTier
     ? {

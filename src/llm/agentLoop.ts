@@ -181,6 +181,12 @@ export interface AgentLoopInput {
     toolCallCount: number;
     costUsd: number;
   };
+  /**
+   * Phase D-S1: when set, caps the Phase 2 iteration budget to
+   * Math.min(tierLimits.iterCap, phase2IterCapOverride) so Phase 2 of a
+   * phase-split run stays within its allocated share of the tier budget.
+   */
+  phase2IterCapOverride?: number;
 }
 
 export type VerificationReason =
@@ -213,7 +219,7 @@ export interface AgentLoopResult {
   /** Phase H.7: how the loop ended. Used by upstream flows (investigation /
    *  patch) to surface "Token budget reached" vs "Iteration budget reached"
    *  distinctly in the UI. Optional for backward-compat with older callers. */
-  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded" | "upstream_unavailable";
+  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded" | "upstream_unavailable" | "phase1_handoff";
   /** Phase Q.2: populated when terminationReason === "loop_detected". The
    *  offending tool name + observed count in the sliding-window detector. */
   loopDetected?: { toolName: string; count: number };
@@ -2022,7 +2028,12 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     // S.2.1: iterCap is both floor and ceiling — raise plan-computed budgets that
     // fall below the tier's minimum, and cap budgets that exceed the tier's maximum.
     // A 2-step medium-tier plan computes to 8 iters but the tier guarantees 25.
-    iterationBudget = { ...iterationBudget, maxIterationsForRun: tierLimits.iterCap };
+    // Phase D-S1: phase2IterCapOverride further constrains Phase 2 of a split run.
+    const effectiveIterCap =
+      typeof input.phase2IterCapOverride === "number"
+        ? Math.min(tierLimits.iterCap, input.phase2IterCapOverride)
+        : tierLimits.iterCap;
+    iterationBudget = { ...iterationBudget, maxIterationsForRun: effectiveIterCap };
     // Disable escalation: tier iterCap is the authoritative budget; escalation
     // would REDUCE maxIterationsForRun back to baseMaxIterations+5 (e.g., 8+5=13),
     // which is lower than the tier cap (e.g., 25) and would cap the loop early.
@@ -2033,7 +2044,8 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       taskToolAllowed: tierLimits.taskToolAllowed,
       maxSubagentCalls: tierLimits.maxSubagentCalls,
       tokenBudgetCap: tierLimits.tokenBudgetCap,
-      iterCap: tierLimits.iterCap,
+      iterCap: effectiveIterCap,
+      ...(typeof input.phase2IterCapOverride === "number" ? { phase2IterCapOverride: input.phase2IterCapOverride } : {}),
       classificationConfidence: input.taskClassification?.confidence ?? 0,
       fallbackUsed: input.taskClassification?.fallbackUsed ?? true,
     }));
@@ -2045,6 +2057,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
         tier: input.taskClassification?.tier ?? "medium",
         needsSubagent: tierLimits.taskToolAllowed,
         tokenBudgetCap: tierLimits.tokenBudgetCap,
+        iterCap: effectiveIterCap,
       });
     }
   }

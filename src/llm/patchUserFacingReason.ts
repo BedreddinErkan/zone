@@ -98,6 +98,15 @@ export function getPatchUserFacingReason(input: {
         category: "error",
       };
 
+    case "phase1_handoff":
+      return {
+        reason: terminationReason,
+        userFacingMessage: "Investigation complete. Proceeding to execution phase.",
+        canResume: true,
+        resumeHint: null,
+        category: "success",
+      };
+
     case "revision_approval_timeout":
       return {
         reason: terminationReason,
