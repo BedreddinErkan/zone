@@ -48,6 +48,8 @@ export interface InvestigateScopeResult {
     unnecessaryFiles?: string[];
     revisedPlanSummary: string;
   };
+  /** Deduped list of files read during investigation — for auditFindings handoff to Phase 2. */
+  filesAlreadyRead?: string[];
 }
 
 function extractCitations(text: string): Array<{ file: string; line?: number }> {
@@ -226,6 +228,14 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
     ts: new Date().toISOString(),
   }));
 
+  const filesAlreadyRead = [
+    ...new Set(
+      loop.toolCallLog
+        .filter((tc) => tc.tool === "read_file" && typeof tc.args["filePath"] === "string")
+        .map((tc) => tc.args["filePath"] as string)
+    ),
+  ];
+
   return {
     findings,
     citations,
@@ -233,6 +243,7 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
     tokensUsed,
     costUsd,
     ...(agentSuggestedRevision ? { agentSuggestedRevision } : {}),
+    ...(filesAlreadyRead.length ? { filesAlreadyRead } : {}),
   };
 }
 

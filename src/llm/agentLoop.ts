@@ -180,6 +180,11 @@ export interface AgentLoopInput {
     citationCount: number;
     toolCallCount: number;
     costUsd: number;
+    // Step B: structured fields for richer AUDIT CONTEXT render
+    scopeVerdict?: "under_scope" | "over_scope" | "mixed" | "none";
+    severity?: "none" | "minor" | "major";
+    citations?: Array<{ file: string; line?: number }>;
+    filesAlreadyRead?: string[];
   };
   /**
    * Phase D-S1: when set, caps the Phase 2 iteration budget to
@@ -316,6 +321,15 @@ export function buildOpenAIPromptCacheKey(
   return `${prefix}-${normalized.slice(0, 16)}`.slice(0, 64);
 }
 
+/** Step B: stable module-level directive for Phase 2 when AUDIT CONTEXT is present.
+ *  No ${...} interpolation — per-run data lives in the user-message AUDIT CONTEXT block. */
+const TRUST_PHASE1_DIRECTIVE =
+  `=== AUDIT CONTEXT IS AUTHORITATIVE ===\n` +
+  `A prior investigation phase analyzed this task and produced the AUDIT CONTEXT block in the user message. Its findings — verdict, severity, cited files, files-already-investigated, and summary — are authoritative.\n\n` +
+  `Execute the implied fix. Do not re-read files listed under "Files already investigated" unless your direct observations contradict the audit's evidence. One targeted read_file for verification is allowed; broad search_in_files or find_references over the same surface is wasted work and counts against your iteration budget.\n\n` +
+  `If the AUDIT CONTEXT block is empty or internally contradictory, fall back to standard investigation. Otherwise trust it.\n` +
+  `=== END AUDIT CONTEXT GUIDANCE ===`;
+
 export function assembleAgentSystemPrompt(input: {
   agentIntro: string;
   frameworkLines: string[];
@@ -328,6 +342,8 @@ export function assembleAgentSystemPrompt(input: {
   repoPath: string;
   planProgressBlock?: string;
   planAnnotationsBlock?: string;
+  /** Step B: when set, appends TRUST_PHASE1_DIRECTIVE before the repo path line. */
+  auditFindings?: unknown;
 }): string {
   return (
     `${input.agentIntro}\n\n` +
@@ -456,6 +472,7 @@ export function assembleAgentSystemPrompt(input: {
       ? `When running commands, use the correct package manager and commands above.\n`
       : "") +
     input.backgroundCommandBlock +
+    (input.auditFindings ? `${TRUST_PHASE1_DIRECTIVE}\n\n` : "") +
     `Repository path: ${input.repoPath}`
   );
 }
@@ -2287,6 +2304,7 @@ Example:
         repoPath: input.repoPath,
         planProgressBlock,
         planAnnotationsBlock: buildPlanAnnotationsBlock(input.executionPlan),
+        auditFindings: input.auditFindings,
       });
   // X.0.1: mode prefix relocated out of system head to keep the system prompt
   // byte-stable across explicit/implicit mode calls. Mode signal is appended
@@ -2302,16 +2320,33 @@ Example:
   // and before the task so the execute agent trusts the audit and does not
   // re-investigate ground it already covered.
   const af = input.auditFindings;
-  const auditContextBlock = af
-    ? (
-        "--- AUDIT CONTEXT ---\n" +
-        "An audit phase already investigated this task before execution. Trust its findings and do not re-investigate ground it already covered.\n\n" +
-        `Audit cost: $${af.costUsd.toFixed(4)}, ${af.toolCallCount} tool calls, ${af.citationCount} citations.\n\n` +
-        "Findings:\n" +
-        af.summary +
-        "\n--- END AUDIT CONTEXT ---\n\n"
-      )
-    : "";
+  let auditContextBlock = "";
+  if (af) {
+    const lines: string[] = [
+      "--- AUDIT CONTEXT ---",
+      "An audit phase has already investigated this task. The structured findings below are authoritative.",
+      "",
+      `Metadata: cost=$${af.costUsd.toFixed(4)}, tool_calls=${af.toolCallCount}, citations=${af.citationCount}`,
+    ];
+    if (af.scopeVerdict) {
+      lines.push(`Verdict: ${af.scopeVerdict} | Severity: ${af.severity ?? "none"}`);
+    }
+    if (af.filesAlreadyRead && af.filesAlreadyRead.length > 0) {
+      lines.push("");
+      lines.push("Files already investigated (do not re-read unless directly contradicted by other evidence):");
+      for (const f of af.filesAlreadyRead) lines.push(`- ${f}`);
+    }
+    if (af.citations && af.citations.length > 0) {
+      lines.push("");
+      lines.push("Cited evidence:");
+      for (const c of af.citations) lines.push(`- ${c.file}${c.line !== undefined ? `:${c.line}` : ""}`);
+    }
+    lines.push("");
+    lines.push("Findings:");
+    lines.push(af.summary);
+    lines.push("--- END AUDIT CONTEXT ---");
+    auditContextBlock = lines.join("\n") + "\n\n";
+  }
   const modeTag = hasExplicitMode ? `\n\n--- mode: ${mode} ---` : "";
   const userContent = (priorRun
     ? (

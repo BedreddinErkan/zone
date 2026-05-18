@@ -3740,7 +3740,16 @@ app.post("/api/patch", async (req, res) => {
   // Scope audit gate — fires when shouldRunAudit returns true.
   let preClassifiedTask: TaskClassification | undefined;
   // Phase X.0.1: captured when audit ran without skipping; forwarded to execute agent.
-  let auditFindingsForExec: { summary: string; citationCount: number; toolCallCount: number; costUsd: number } | undefined;
+  let auditFindingsForExec: {
+    summary: string;
+    citationCount: number;
+    toolCallCount: number;
+    costUsd: number;
+    scopeVerdict?: "under_scope" | "over_scope" | "mixed" | "none";
+    severity?: "none" | "minor" | "major";
+    citations?: Array<{ file: string; line?: number }>;
+    filesAlreadyRead?: string[];
+  } | undefined;
   if (runIdStr) {
     try {
       // Classify task here so tier is available for audit gating AND to
@@ -3809,6 +3818,8 @@ app.post("/api/patch", async (req, res) => {
             citationCount: findings.citations.length,
             toolCallCount: findings.toolCallCount,
             costUsd: findings.costUsd,
+            ...(findings.citations.length ? { citations: findings.citations } : {}),
+            ...(findings.filesAlreadyRead?.length ? { filesAlreadyRead: findings.filesAlreadyRead } : {}),
           };
           // Check if agent directly proposed a revision
           const agentRevision = findings.agentSuggestedRevision;
@@ -3820,6 +3831,9 @@ app.post("/api/patch", async (req, res) => {
             runId: runIdStr,
             userApiKey: userApiKey || undefined,
           });
+          // Step B: populate scopeVerdict/severity from judge result
+          auditFindingsForExec.scopeVerdict = judgement.type;
+          auditFindingsForExec.severity = judgement.severity;
 
           const hasMismatch = agentRevision != null || judgement.mismatch;
           if (hasMismatch) {

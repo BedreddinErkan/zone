@@ -4545,6 +4545,11 @@ export type PhaseSplitAuditFindings = {
   citationCount: number;
   toolCallCount: number;
   costUsd: number;
+  // Step B: structured fields for richer Phase 2 AUDIT CONTEXT render
+  scopeVerdict?: "under_scope" | "over_scope" | "mixed" | "none";
+  severity?: "none" | "minor" | "major";
+  citations?: Array<{ file: string; line?: number }>;
+  filesAlreadyRead?: string[];
 };
 
 /** Phase D-S1: result of the investigation phase (Phase 1) in a split run. */
@@ -4612,6 +4617,8 @@ export async function runPhaseSplitInvestigation(opts: {
       citationCount: phase1Result.citations.length,
       toolCallCount: phase1Result.toolCallCount,
       costUsd: phase1Result.costUsd,
+      ...(phase1Result.citations.length ? { citations: phase1Result.citations } : {}),
+      ...(phase1Result.filesAlreadyRead?.length ? { filesAlreadyRead: phase1Result.filesAlreadyRead } : {}),
     };
   }
 
