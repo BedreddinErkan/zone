@@ -22,6 +22,7 @@ import type { ProjectFramework } from "../repo/detectFramework.js";
 import { generateFileOutline } from "./fileOutline.js";
 import { findCheckerForFile } from "./syntaxCheckers.js";
 import { classifyShellExit } from "./classifyShellExit.js";
+import { validateRunEnvironment } from "./runEnvironment.js";
 
 const execAsync = promisify(exec);
 
@@ -866,6 +867,20 @@ export async function executeTool(
 
       if (isBlockedCommand(command)) {
         return { success: false, output: "Command blocked for safety" };
+      }
+
+      // D7: fail fast when the working directory is missing dependencies so the
+      // agent gets a clear diagnosis instead of a cryptic "module not found" after
+      // wasting an iteration.
+      const envCheck = validateRunEnvironment(cwd, command);
+      if (!envCheck.valid) {
+        return {
+          success: false,
+          output: `[zone-env-precondition] ${envCheck.issue}. ${envCheck.hint ?? ""}`.trimEnd(),
+        };
+      }
+      if (envCheck.issue) {
+        console.log(`[zone-env-precondition-warn] ${envCheck.issue}`);
       }
 
       if (input?.runId && input?.onApprovalRequired) {
