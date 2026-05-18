@@ -76,4 +76,33 @@ More prose.
 \`\`\``;
     expect(extractPhase1Findings(summary)).toEqual({});
   });
+
+  it("parses complete: false and preserves the investigate-further fixInstruction", () => {
+    const summary = `
+Insufficient evidence found in the iteration budget.
+
+\`\`\`json
+{
+  "rootCause": "could not locate the failing call site",
+  "fixInstruction": "investigate further: search for callers of parseToken in src/auth",
+  "filesToEdit": [],
+  "evidence": "src/auth/token.ts:12",
+  "complete": false
+}
+\`\`\``;
+    const result = extractPhase1Findings(summary);
+    expect(result.rootCause).toBe("could not locate the failing call site");
+    expect(result.fixInstruction).toBe("investigate further: search for callers of parseToken in src/auth");
+    expect(result.complete).toBe(false);
+  });
+
+  it("does not reject complete: false — extractor accepts any boolean", () => {
+    const summary = `
+\`\`\`json
+{ "rootCause": "partial", "fixInstruction": "investigate further: check X", "filesToEdit": [], "evidence": "none", "complete": false }
+\`\`\``;
+    const result = extractPhase1Findings(summary);
+    expect(result.complete).toBe(false);
+    expect(result.rootCause).toBe("partial");
+  });
 });

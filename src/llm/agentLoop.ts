@@ -527,12 +527,16 @@ function assembleChatSystemPrompt(input: {
 const INVESTIGATION_OUTPUT_FORMAT = `At the end of your investigation, output a JSON block fenced with \`\`\`json containing exactly these fields:
 {
   "rootCause": "<one sentence — root cause or key gap this task must address>",
-  "fixInstruction": "<one actionable verb phrase for the execute agent — what to do, not what to investigate>",
+  "fixInstruction": "<one actionable verb phrase for the execute agent — what to do. If you cannot produce a concrete fix instruction within the iteration budget, write 'investigate further: <specific topic>' and set complete to false.>",
   "filesToEdit": ["<file path>"],
   "evidence": "<key file:line citations that support the above>",
-  "complete": true
+  "complete": true | false
 }
-Place the JSON block as the LAST item in your response, after the prose summary.`;
+
+Set \`complete: true\` only when \`fixInstruction\` is a paste-ready imperative.
+Set \`complete: false\` (and use the 'investigate further' instruction) when evidence is insufficient — Phase 2 will then decide whether to continue investigation or surface the partial finding to the user.
+
+The JSON block must be the LAST item in your response, after the prose summary. ANY iteration may be your last — if you are at the iteration budget, emit the JSON now even if complete=false.`;
 
 export function assembleInvestigationSystemPrompt(input: {
   repoPath: string;
@@ -580,7 +584,6 @@ export function assembleInvestigationSystemPrompt(input: {
     "- Include file paths in backticks, with line numbers where helpful, for example `src/foo.ts:42` or `src/foo.py:42`.",
     "- Aim for ≥3 distinct file citations when the symbol is non-trivial; if only 1-2 references exist, state that explicitly.",
     "- Use code blocks for short snippets only when they clarify the answer.",
-    "- End with a `Summary` section if the answer has multiple parts.",
     "",
     "Do NOT end with offers to continue ('shall I dig deeper?', 'would you like me to explore further?', etc.) — the user already asked the question. Deliver the full answer now.",
     "FINAL SUMMARY: End with a brief 2-3 sentence prose summary of your findings. No code blocks, no markdown section headers beyond what the answer requires.",

@@ -82,6 +82,7 @@ export function extractPhase1Findings(summary: string): {
   fixInstruction?: string;
   filesToEdit?: string[];
   evidence?: string;
+  complete?: boolean;
 } {
   try {
     const blocks = [...summary.matchAll(/```json\s*([\s\S]*?)\s*```/g)];
@@ -97,6 +98,7 @@ export function extractPhase1Findings(summary: string): {
         ? { filesToEdit: p["filesToEdit"] as string[] }
         : {}),
       ...(typeof p["evidence"] === "string" ? { evidence: p["evidence"] } : {}),
+      ...(typeof p["complete"] === "boolean" ? { complete: p["complete"] } : {}),
     };
   } catch {
     return {};

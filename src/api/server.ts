@@ -3800,6 +3800,7 @@ app.post("/api/patch", async (req, res) => {
           userApiKey: userApiKey || undefined,
           abortSignal: patchAbort?.signal,
           parentTier: tier,
+          maxIterationsOverride: TIER_LIMITS[tier].phase1Cap,
           onProgress: (update) => emitProgress(runIdStr, update as any),
         });
 
