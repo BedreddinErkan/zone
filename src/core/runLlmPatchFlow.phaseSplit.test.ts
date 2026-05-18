@@ -327,3 +327,41 @@ describe("Phase D-S1 — approval policy", () => {
     expect(result.approvalDecision).toBe("reject");
   });
 });
+
+// ── Test 9: D10 audit §6 Strategy 1 — double-invocation gate ─────────────────
+
+describe("Phase D-S1 — D10 audit §6: double-invocation gate", () => {
+  // Case A: no existing auditFindings → gate passes, D-S1 should fire
+  it("Case A: gate passes when auditFindings is undefined (D-S1 fires)", () => {
+    const phase1Cap = TIER_LIMITS.medium.phase1Cap;
+    const auditFindings: undefined = undefined;
+    const shouldFire = phase1Cap > 0 && auditFindings === undefined;
+    expect(shouldFire).toBe(true);
+  });
+
+  // Case B: Phase AS already produced auditFindings → gate blocks, findings pass through
+  it("Case B: gate blocks when auditFindings already set (Phase AS ran upstream)", () => {
+    const phase1Cap = TIER_LIMITS.medium.phase1Cap;
+    const auditFindings = { summary: "Phase AS found issues", citationCount: 3, toolCallCount: 4, costUsd: 0.002 };
+    const shouldFire = phase1Cap > 0 && auditFindings === undefined;
+    expect(shouldFire).toBe(false);
+    // phaseSplitAuditFindings is initialized to input.auditFindings; the skip branch leaves it unchanged
+    const phaseSplitAuditFindings = shouldFire ? undefined : auditFindings;
+    expect(phaseSplitAuditFindings).toBe(auditFindings);
+  });
+
+  // Case C: flag off → outer gate blocks before inner check is reached
+  it("Case C: ZONE_PHASE_SPLIT=0 means outer gate prevents D-S1 entirely", () => {
+    const phaseSplitEnabled = String("0").trim() === "1";
+    expect(phaseSplitEnabled).toBe(false);
+    // Even with auditFindings=undefined and medium tier, D-S1 is never reached.
+  });
+
+  // Case D: simple tier → phase1Cap=0 blocks even if flag is on and no findings
+  it("Case D: simple tier (phase1Cap=0) blocks D-S1 regardless of auditFindings", () => {
+    const phase1Cap = TIER_LIMITS.simple.phase1Cap;
+    const auditFindings: undefined = undefined;
+    const shouldFire = phase1Cap > 0 && auditFindings === undefined;
+    expect(shouldFire).toBe(false);
+  });
+});

@@ -5985,7 +5985,8 @@ const initializeTodosFromPlan = (): void => {
       const splitTierLimits = resolveTierLimits(taskClassification, {
         forceTierOverride: input.forceTier,
       });
-      if (splitTierLimits.phase1Cap > 0) {
+      // D10 audit §6 Strategy 1: skip D-S1 when Phase AS already produced auditFindings upstream
+      if (splitTierLimits.phase1Cap > 0 && input.auditFindings === undefined) {
         try {
           const splitResult = await runPhaseSplitInvestigation({
             task: input.task,
@@ -6005,6 +6006,15 @@ const initializeTodosFromPlan = (): void => {
           debugLog("[zone-phase-split-outer-error]", String(err));
           // Fall back to single-phase path silently.
         }
+      } else if (splitTierLimits.phase1Cap > 0 && input.auditFindings !== undefined) {
+        log("[zone-d-s1-skip-audit-already-ran]", JSON.stringify({
+          event: "d-s1-skip-audit-already-ran",
+          runId: runId || null,
+          tier: taskClassification.tier,
+          phaseAsCost: input.auditFindings.costUsd,
+          phaseAsToolCalls: input.auditFindings.toolCallCount,
+          ts: new Date().toISOString(),
+        }));
       }
     }
 
