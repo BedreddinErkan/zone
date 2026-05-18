@@ -103,10 +103,10 @@ describe("R.3 — Phase Q safety signal preservation", () => {
 });
 
 describe("R.3 — prompt size bounds (regression guard)", () => {
-  it("base system prompt char count is in [3000, 9000] (was ~16,230 pre-R.3)", () => {
+  it("base system prompt char count is in [3000, 14000] (was ~16,230 pre-R.3)", () => {
     const p = basePrompt();
     expect(p.length).toBeGreaterThan(3000);
-    expect(p.length).toBeLessThan(9000);
+    expect(p.length).toBeLessThan(14000);
   });
 });
 

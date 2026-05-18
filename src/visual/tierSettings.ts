@@ -1,8 +1,7 @@
 // Phase L.3: per-tier execution limit overrides. Persisted to
 // ~/.zone/tier-limits.json, parallel to visual-verification.json from I.2.
 // Default values live in TIER_LIMITS (tierLimits.ts) — this module only
-// stores user-supplied deltas. taskToolAllowed is intentionally absent from
-// the schema: it is a system-level guarantee, not a user preference.
+// stores user-supplied deltas.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -11,7 +10,7 @@ import type { TaskTier } from "../llm/taskClassifier.js";
 
 export interface PerTierSettings {
   tokenBudgetCap?: number;
-  iterCap?: number;
+  softIterWarn?: number;
   maxSubagentCalls?: number;
 }
 
@@ -30,7 +29,7 @@ const SETTINGS_PATH = join(SETTINGS_DIR, "tier-limits.json");
 
 const VALIDATION = {
   tokenBudgetCap: { min: 10_000, max: 2_000_000 },
-  iterCap: { min: 1, max: 100 },
+  softIterWarn: { min: 1, max: 100 },
   maxSubagentCalls: { min: 0, max: 5 },
 } as const;
 
@@ -51,7 +50,7 @@ function validateAndSanitize(raw: unknown): TierSettings {
     const src = obj as Record<string, unknown>;
     const tierResult: PerTierSettings = {};
 
-    for (const field of ["tokenBudgetCap", "iterCap", "maxSubagentCalls"] as const) {
+    for (const field of ["tokenBudgetCap", "softIterWarn", "maxSubagentCalls"] as const) {
       const raw = src[field];
       if (raw === undefined || raw === null) continue;
       const n = Number(raw);

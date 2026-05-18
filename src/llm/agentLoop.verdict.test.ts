@@ -12,8 +12,6 @@ afterEach(() => {
 
 describe("agent loop framework-aware verdicts", () => {
   it("infers tests_skipped_no_infra when a patch was applied without runnable tests", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
     const result = inferVerificationFromLog(
       [
         {
@@ -27,9 +25,6 @@ describe("agent loop framework-aware verdicts", () => {
     );
 
     expect(result).toBe("tests_skipped_no_infra");
-    expect(
-      logSpy.mock.calls.filter(([message]) => message === "[zone-agent-no-infra-verdict]")
-    ).toHaveLength(1);
   });
 
   it("keeps infra errors inconclusive when a runnable test command exists", () => {
@@ -80,8 +75,6 @@ describe("agent loop framework-aware verdicts", () => {
   });
 
   it("overrides a natural-completion inconclusive self-tag to skipped when no infra exists", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
     const result = applyNoInfraVerificationOverride({
       verificationReason: "tests_inconclusive",
       framework: { hasTests: false, testFilesDetected: true },
@@ -90,9 +83,6 @@ describe("agent loop framework-aware verdicts", () => {
     });
 
     expect(result).toBe("tests_skipped_no_infra");
-    expect(
-      logSpy.mock.calls.filter(([message]) => message === "[zone-agent-no-infra-override]")
-    ).toHaveLength(1);
   });
 
   it("preserves a natural-completion patch-failure self-tag when no infra exists", () => {

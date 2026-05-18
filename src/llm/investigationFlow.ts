@@ -153,7 +153,6 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
   void _auditCap;
 
   const planStepsCount = 1;
-  // Phase D-S1: respect caller's phase1Cap when set; otherwise use explore floor.
   const computedMax = opts.maxIterationsOverride ?? computeExploreMaxIterations(planStepsCount);
 
   const parentTaskClassification = opts.parentTier
@@ -163,7 +162,6 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
         fallbackUsed: false,
         estimatedFiles: 0,
         estimatedIterations: 0,
-        needsSubagent: false,
         classifierCostUsd: 0,
         classifierLatencyMs: 0,
         classifierModel: "parent",

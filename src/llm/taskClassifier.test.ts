@@ -62,7 +62,6 @@ describe("Phase L.1 task classifier", () => {
     const result = await classifyTask("Add a comment above the export in src/foo.ts");
 
     expect(result.tier).toBe("simple");
-    expect(result.needsSubagent).toBe(false);
     expect(result.estimatedFiles).toBe(1);
     expect(result.confidence).toBe(0.9);
     expect(result.fallbackUsed).toBeUndefined();
@@ -89,7 +88,6 @@ describe("Phase L.1 task classifier", () => {
 
     expect(result.tier).toBe("medium");
     expect(result.estimatedFiles).toBe(5);
-    expect(result.needsSubagent).toBe(true);
     expect(result.fallbackUsed).toBeUndefined();
   });
 
@@ -241,7 +239,6 @@ describe("Phase L.1 task classifier", () => {
     expect(payload).toMatchObject({
       tier: "medium",
       estimatedFiles: 3,
-      needsSubagent: false,
       classifierModel: "claude-haiku-4-5",
     });
     expect(typeof payload.taskHash).toBe("string");
@@ -379,16 +376,13 @@ describe("Phase L.1 task classifier", () => {
 });
 
 describe("Phase Q.8 — complex-tier triggers for multi-file rename", () => {
-  it("Test 4 wording (rename across all 5 files where defined or used) → complex + needsSubagent", async () => {
-    // This is the exact wording that production routed to medium/needsSubagent:false.
-    // Q.8: when the LLM picks complex, needsSubagent is force-derived to true.
+  it("rename across 5 files → complex", async () => {
     mocks.createChatCompletion.mockResolvedValue(
       buildResponse(
         JSON.stringify({
           tier: "complex",
           estimatedFiles: 5,
           estimatedIterations: 20,
-          needsSubagent: false, // LLM may still say false — override forces true
           confidence: 0.85,
           reasoning: "rename across 5 files — def + imports + call sites",
         })
@@ -401,7 +395,6 @@ describe("Phase Q.8 — complex-tier triggers for multi-file rename", () => {
 
     expect(result.tier).toBe("complex");
     expect(result.estimatedFiles).toBe(5);
-    expect(result.needsSubagent).toBe(true); // derived from tier === complex
     expect(result.fallbackUsed).toBeUndefined();
   });
 
@@ -412,7 +405,6 @@ describe("Phase Q.8 — complex-tier triggers for multi-file rename", () => {
           tier: "complex",
           estimatedFiles: 3,
           estimatedIterations: 15,
-          needsSubagent: true,
           confidence: 0.8,
           reasoning: "explicit 3-file rename with coordinated edits",
         })
@@ -424,7 +416,6 @@ describe("Phase Q.8 — complex-tier triggers for multi-file rename", () => {
     );
 
     expect(result.tier).toBe("complex");
-    expect(result.needsSubagent).toBe(true);
   });
 
   it("rename in only 2 files → stays medium (count below threshold)", async () => {
@@ -434,7 +425,6 @@ describe("Phase Q.8 — complex-tier triggers for multi-file rename", () => {
           tier: "medium",
           estimatedFiles: 2,
           estimatedIterations: 8,
-          needsSubagent: false,
           confidence: 0.85,
           reasoning: "small-scope 2-file rename",
         })
@@ -444,19 +434,15 @@ describe("Phase Q.8 — complex-tier triggers for multi-file rename", () => {
     const result = await classifyTask("Rename foo to bar in 2 files");
 
     expect(result.tier).toBe("medium");
-    // medium + estimatedFiles < 4 → respect LLM's needsSubagent:false
-    expect(result.needsSubagent).toBe(false);
   });
 
   it("add new export to 5 files (pure additions, no rename) → medium", async () => {
-    // Pure additions don't require coordinated FIND/REPLACE.
     mocks.createChatCompletion.mockResolvedValue(
       buildResponse(
         JSON.stringify({
           tier: "medium",
           estimatedFiles: 5,
           estimatedIterations: 15,
-          needsSubagent: false, // LLM said no, but override flips it (medium + 5 files)
           confidence: 0.78,
           reasoning: "pure additions to 5 modules, no rename coordination",
         })
@@ -468,27 +454,6 @@ describe("Phase Q.8 — complex-tier triggers for multi-file rename", () => {
     );
 
     expect(result.tier).toBe("medium");
-    // Q.8: medium + estimatedFiles >= 4 → needsSubagent forced to true
-    expect(result.needsSubagent).toBe(true);
-  });
-
-  it("needsSubagent auto-derives to true when tier === complex even if LLM says false", async () => {
-    mocks.createChatCompletion.mockResolvedValue(
-      buildResponse(
-        JSON.stringify({
-          tier: "complex",
-          estimatedFiles: 8,
-          estimatedIterations: 30,
-          needsSubagent: false, // intentionally wrong
-          confidence: 0.9,
-        })
-      )
-    );
-
-    const result = await classifyTask("complex-but-llm-said-no task");
-
-    expect(result.tier).toBe("complex");
-    expect(result.needsSubagent).toBe(true);
   });
 
   it("system prompt includes Q.8 rename / multi-file complex triggers (openai path)", async () => {
@@ -941,7 +906,6 @@ describe("Phase D4 — investigation-scope classifier tuning", () => {
     );
 
     expect(result.tier).toBe("complex");
-    expect(result.needsSubagent).toBe(true);
     expect(result.fallbackUsed).toBeUndefined();
   });
 
@@ -964,7 +928,6 @@ describe("Phase D4 — investigation-scope classifier tuning", () => {
     );
 
     expect(result.tier).toBe("complex");
-    expect(result.needsSubagent).toBe(true);
     expect(result.fallbackUsed).toBeUndefined();
   });
 });

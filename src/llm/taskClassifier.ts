@@ -14,7 +14,6 @@ export interface TaskClassification {
   tier: TaskTier;
   estimatedFiles: number;
   estimatedIterations: number;
-  needsSubagent: boolean;
   /** 0.0-1.0 — model self-reported. Below CONFIDENCE_THRESHOLD triggers fallback. */
   confidence: number;
   reasoning?: string;
@@ -101,7 +100,6 @@ Output ONLY valid JSON:
   "tier": "simple" | "medium" | "complex",
   "estimatedFiles": <integer>,
   "estimatedIterations": <integer>,
-  "needsSubagent": <boolean>,
   "confidence": <0.0-1.0>,
   "reasoning": "<one short sentence>"
 }`;
@@ -148,29 +146,8 @@ interface ParsedClassifierResponse {
   tier: TaskTier;
   estimatedFiles: number;
   estimatedIterations: number;
-  needsSubagent: boolean;
   confidence: number;
   reasoning?: string;
-}
-
-/**
- * Q.8: derive needsSubagent from tier + scope, ignoring the LLM's self-report.
- * The classifier model often returns `needsSubagent: false` for tasks that
- * downstream tiering treats as needing parallel work. Enforcing the rule
- * here closes that gap.
- *
- *   - tier === "complex"                            → always true
- *   - tier === "medium" && estimatedFiles >= 4      → true
- *   - otherwise                                     → respect the LLM's value
- */
-function deriveNeedsSubagent(
-  tier: TaskTier,
-  estimatedFiles: number,
-  llmValue: boolean
-): boolean {
-  if (tier === "complex") return true;
-  if (tier === "medium" && estimatedFiles >= 4) return true;
-  return llmValue;
 }
 
 function parseClassifierResponse(text: string): ParsedClassifierResponse {
@@ -202,7 +179,6 @@ function parseClassifierResponse(text: string): ParsedClassifierResponse {
     tier,
     estimatedFiles,
     estimatedIterations: Math.max(1, Math.floor(Number(parsed.estimatedIterations) || 10)),
-    needsSubagent: deriveNeedsSubagent(tier, estimatedFiles, Boolean(parsed.needsSubagent)),
     confidence: Math.min(1, Math.max(0, Number(parsed.confidence) || 0)),
     reasoning:
       typeof parsed.reasoning === "string" ? parsed.reasoning.slice(0, 200) : undefined,
@@ -219,7 +195,6 @@ function buildFallback(
     tier: "medium",
     estimatedFiles: 5,
     estimatedIterations: 15,
-    needsSubagent: false,
     confidence: 0,
     reasoning: `classifier fallback: ${reason}`,
     classifierCostUsd: costUsd,
@@ -347,7 +322,6 @@ export async function classifyTask(
         tier: classification.tier,
         estimatedFiles: classification.estimatedFiles,
         estimatedIterations: classification.estimatedIterations,
-        needsSubagent: classification.needsSubagent,
         confidence: classification.confidence,
         classifierModel: classification.classifierModel,
         classifierCostUsd: classification.classifierCostUsd,

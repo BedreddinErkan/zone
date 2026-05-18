@@ -9,7 +9,6 @@ function makeClassification(tier: "simple" | "medium" | "complex"): TaskClassifi
     tier,
     estimatedFiles: 1,
     estimatedIterations: 5,
-    needsSubagent: tier !== "simple",
     confidence: 0.9,
     classifierCostUsd: 0.001,
     classifierLatencyMs: 50,
@@ -18,25 +17,25 @@ function makeClassification(tier: "simple" | "medium" | "complex"): TaskClassifi
 }
 
 describe("TIER_LIMITS", () => {
-  it("simple tier: Task tool disallowed, 0 subagent calls, 400k tokens, 15 iter", () => {
-    expect(TIER_LIMITS.simple.taskToolAllowed).toBe(false);
+  it("simple tier: 0 subagent calls, 400k tokens, softIterWarn=15, auditIterCap=0", () => {
     expect(TIER_LIMITS.simple.maxSubagentCalls).toBe(0);
     expect(TIER_LIMITS.simple.tokenBudgetCap).toBe(400_000);
-    expect(TIER_LIMITS.simple.iterCap).toBe(15);
+    expect(TIER_LIMITS.simple.softIterWarn).toBe(15);
+    expect(TIER_LIMITS.simple.auditIterCap).toBe(0);
   });
 
-  it("medium tier: Task tool allowed, 1 subagent call, 600k tokens, 25 iter", () => {
-    expect(TIER_LIMITS.medium.taskToolAllowed).toBe(true);
+  it("medium tier: 1 subagent call, 600k tokens, softIterWarn=25, auditIterCap=6", () => {
     expect(TIER_LIMITS.medium.maxSubagentCalls).toBe(1);
     expect(TIER_LIMITS.medium.tokenBudgetCap).toBe(600_000);
-    expect(TIER_LIMITS.medium.iterCap).toBe(25);
+    expect(TIER_LIMITS.medium.softIterWarn).toBe(25);
+    expect(TIER_LIMITS.medium.auditIterCap).toBe(6);
   });
 
-  it("complex tier: Task tool allowed, 4 subagent calls, 800k tokens, 40 iter", () => {
-    expect(TIER_LIMITS.complex.taskToolAllowed).toBe(true);
+  it("complex tier: 4 subagent calls, 800k tokens, softIterWarn=40, auditIterCap=8", () => {
     expect(TIER_LIMITS.complex.maxSubagentCalls).toBe(4);
     expect(TIER_LIMITS.complex.tokenBudgetCap).toBe(800_000);
-    expect(TIER_LIMITS.complex.iterCap).toBe(40);
+    expect(TIER_LIMITS.complex.softIterWarn).toBe(40);
+    expect(TIER_LIMITS.complex.auditIterCap).toBe(8);
   });
 });
 
@@ -151,17 +150,10 @@ describe("L.3: resolveTierLimits with user overrides", () => {
     expect(limits.tokenBudgetCap).toBe(100_000);
   });
 
-  it("preserves taskToolAllowed=false for simple tier regardless of overrides", () => {
-    writeTierSettings({ simple: { tokenBudgetCap: 100_000, iterCap: 8 } });
-    const limits = resolveTierLimits(makeClassification("simple"));
-    expect(limits.taskToolAllowed).toBe(false);
-  });
-
-  it("applies user iterCap override for medium tier", () => {
-    writeTierSettings({ medium: { iterCap: 18 } });
+  it("applies user softIterWarn override for medium tier", () => {
+    writeTierSettings({ medium: { softIterWarn: 18 } });
     const limits = resolveTierLimits(makeClassification("medium"));
-    expect(limits.iterCap).toBe(18);
-    expect(limits.taskToolAllowed).toBe(true);
+    expect(limits.softIterWarn).toBe(18);
   });
 
   it("applies user maxSubagentCalls override for complex tier", () => {
@@ -176,7 +168,7 @@ describe("L.3: resolveTierLimits with user overrides", () => {
   });
 
   it("ZONE_FORCE_TIER skips user overrides entirely", () => {
-    writeTierSettings({ simple: { tokenBudgetCap: 100_000, iterCap: 5 } });
+    writeTierSettings({ simple: { tokenBudgetCap: 100_000, softIterWarn: 5 } });
     process.env["ZONE_FORCE_TIER"] = "simple";
     const limits = resolveTierLimits(makeClassification("complex"));
     // Returns raw TIER_LIMITS.simple — not the user override.
@@ -185,10 +177,16 @@ describe("L.3: resolveTierLimits with user overrides", () => {
   });
 
   it("partial override: only specified fields are overridden", () => {
-    writeTierSettings({ medium: { iterCap: 30 } });
+    writeTierSettings({ medium: { softIterWarn: 30 } });
     const limits = resolveTierLimits(makeClassification("medium"));
-    expect(limits.iterCap).toBe(30);
+    expect(limits.softIterWarn).toBe(30);
     expect(limits.tokenBudgetCap).toBe(TIER_LIMITS.medium.tokenBudgetCap);
     expect(limits.maxSubagentCalls).toBe(TIER_LIMITS.medium.maxSubagentCalls);
+  });
+
+  it("auditIterCap is system-level and not user-overridable", () => {
+    writeTierSettings({ medium: { softIterWarn: 18 } });
+    const limits = resolveTierLimits(makeClassification("medium"));
+    expect(limits.auditIterCap).toBe(TIER_LIMITS.medium.auditIterCap);
   });
 });

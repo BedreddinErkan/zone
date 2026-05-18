@@ -256,7 +256,6 @@ export type ZoneStructuredProgressEvent = {
   tier?: "simple" | "medium" | "complex";
   estimatedFiles?: number;
   estimatedIterations?: number;
-  needsSubagent?: boolean;
   confidence?: number;
   classifierModel?: string;
   classifierCostUsd?: number;

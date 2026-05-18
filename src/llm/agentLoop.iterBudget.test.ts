@@ -1,7 +1,8 @@
 /**
- * S.2.1 Commit 2: tier iterCap is used as both floor and ceiling.
- * A 1-step plan computes maxIterations=6 (WORKER_ITER_FLOOR), but the
- * tier iterCap (simple=15, medium=25) must raise it to the full tier budget.
+ * Phase E — softIterWarn replaces iterCap hard cap.
+ * - maxIterationsForRun is set to softIterWarn * 3 (safety ceiling).
+ * - A soft-warn message is injected at iter === softIterWarn.
+ * - Subagent loops bypass tier limits and use plan-computed budgets.
  */
 
 import fs from "node:fs";
@@ -74,7 +75,6 @@ function makeClassification(tier: "simple" | "medium" | "complex"): TaskClassifi
     tier,
     estimatedFiles: 1,
     estimatedIterations: 1,
-    needsSubagent: tier !== "simple",
     confidence: 0.9,
     classifierCostUsd: 0.001,
     classifierLatencyMs: 50,
@@ -97,32 +97,38 @@ afterEach(() => {
   fs.rmSync(repoPath, { recursive: true, force: true });
 });
 
-describe("S.2.1 — tier iterCap as floor and ceiling", () => {
-  it("simple-tier plan-computed budget (1 step → 6) is raised to iterCap=15", async () => {
+describe("Phase E — softIterWarn ceiling (softIterWarn * 3)", () => {
+  it("simple-tier ceiling is softIterWarn * 3 = 45; exits via safety ceiling", async () => {
     let callCount = 0;
     mocks.createChatCompletion.mockImplementation(async () => {
       callCount += 1;
-      // Vary filePath each iteration so the loop detector doesn't fire before max_iterations
+      // Vary filePath each iteration so the loop detector doesn't fire before the ceiling
       return makeReadFileCall(`tc-${callCount}`, `src/file_${callCount}.ts`);
     });
 
     const result = await runAgentLoop({
       task: "read a file",
       repoPath,
-      maxIterations: 1, // plan-computed budget from a 1-step plan (WORKER_ITER_FLOOR=6 → effectively 1 here)
+      maxIterations: 1, // plan-computed budget — tier raises it to softIterWarn * 3
       taskClassification: makeClassification("simple"),
     });
 
-    expect(result.terminationReason).toBe("max_iterations");
-    // Should have run the full simple-tier iterCap=15 iterations, not just 1
-    expect(result.toolCallLog.length).toBeGreaterThanOrEqual(TIER_LIMITS.simple.iterCap - 1);
+    // Safety ceiling exit now returns token_budget_exceeded
+    expect(result.terminationReason).toBe("token_budget_exceeded");
+    // Should have run the full simple-tier ceiling (softIterWarn * 3 = 45)
+    const expectedCeiling = TIER_LIMITS.simple.softIterWarn * 3;
+    expect(result.toolCallLog.length).toBeGreaterThanOrEqual(expectedCeiling - 2);
   });
 
-  it("medium-tier plan-computed budget (2 steps → 8) is raised to iterCap=25", async () => {
+  it("medium-tier ceiling is softIterWarn * 3 = 75; plan-computed budget is raised", async () => {
     let callCount = 0;
+    // Exit after softIterWarn iterations with a done response so the test isn't too slow
     mocks.createChatCompletion.mockImplementation(async () => {
       callCount += 1;
-      return makeReadFileCall(`tc-${callCount}`, `src/file_${callCount}.ts`);
+      if (callCount <= TIER_LIMITS.medium.softIterWarn) {
+        return makeReadFileCall(`tc-${callCount}`, `src/file_${callCount}.ts`);
+      }
+      return makeDoneResponse("[ZONE_VERIFICATION: tests_skipped_no_infra] Done.");
     });
 
     const result = await runAgentLoop({
@@ -132,12 +138,12 @@ describe("S.2.1 — tier iterCap as floor and ceiling", () => {
       taskClassification: makeClassification("medium"),
     });
 
-    expect(result.terminationReason).toBe("max_iterations");
-    // Should run the full medium-tier iterCap=25, not just 8
-    expect(result.toolCallLog.length).toBeGreaterThanOrEqual(15);
+    // Ran past the plan-computed 8, ended at natural completion after softIterWarn+1 iters
+    expect(result.terminationReason).toBe("natural_completion");
+    expect(result.toolCallLog.length).toBeGreaterThanOrEqual(TIER_LIMITS.medium.softIterWarn - 1);
   });
 
-  it("plan budget that EXCEEDS iterCap is capped down (ceiling still works)", async () => {
+  it("high maxIterations input is not reduced below softIterWarn * 3", async () => {
     let callCount = 0;
     mocks.createChatCompletion.mockImplementation(async () => {
       callCount += 1;
@@ -148,12 +154,13 @@ describe("S.2.1 — tier iterCap as floor and ceiling", () => {
     const result = await runAgentLoop({
       task: "read a file",
       repoPath,
-      maxIterations: 100, // far above any tier cap
-      taskClassification: makeClassification("simple"), // iterCap=15
+      maxIterations: 100, // far above simple softIterWarn * 3 = 45
+      taskClassification: makeClassification("simple"),
     });
 
-    // Loop should end at iterCap=15, not go to 100
-    expect(result.toolCallLog.length).toBeLessThanOrEqual(TIER_LIMITS.simple.iterCap + 2);
+    // Loop ends via natural completion after 21 iterations (20 tool + 1 done)
+    expect(result.terminationReason).toBe("natural_completion");
+    expect(result.toolCallLog.length).toBeLessThanOrEqual(22);
   });
 
   it("subagent loop (no tier limits) uses the plan-computed budget directly", async () => {
@@ -170,7 +177,8 @@ describe("S.2.1 — tier iterCap as floor and ceiling", () => {
       subagent: { id: "sub-1", type: "explore", parentRunId: "parent-1" },
     });
 
-    expect(result.terminationReason).toBe("max_iterations");
+    // Subagent hits safety ceiling at 3 iters (no tier limits applied)
+    expect(result.terminationReason).toBe("token_budget_exceeded");
     // Subagent should respect its own override (3), not be raised to any tier cap
     expect(result.toolCallLog.length).toBeLessThanOrEqual(5);
   });

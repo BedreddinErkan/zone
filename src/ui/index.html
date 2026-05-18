@@ -11386,9 +11386,9 @@
                   style="${inputStyle}" aria-label="${label} token budget cap" />
               </label>
               <label style="display:flex;flex-direction:column;gap:4px;font-size:var(--font-size-sm,12px)">
-                Iteration cap
-                <input id="tl-${tier}-iterCap" type="number" min="1" max="100"
-                  style="${inputStyle}" aria-label="${label} iteration cap" />
+                Soft iteration warning
+                <input id="tl-${tier}-softIterWarn" type="number" min="1" max="100"
+                  style="${inputStyle}" aria-label="${label} soft iteration warning" />
               </label>
               ${showSubagent ? `
               <label style="display:flex;flex-direction:column;gap:4px;font-size:var(--font-size-sm,12px)">
@@ -11431,10 +11431,10 @@
         for (const tier of ['simple','medium','complex']){
           const s = settings[tier] || {};
           const tokEl = getInput(tier, 'tokenBudgetCap');
-          const iterEl = getInput(tier, 'iterCap');
+          const iterEl = getInput(tier, 'softIterWarn');
           const subEl = getInput(tier, 'maxSubagentCalls');
           if (tokEl) tokEl.value = String(s.tokenBudgetCap ?? '');
-          if (iterEl) iterEl.value = String(s.iterCap ?? '');
+          if (iterEl) iterEl.value = String(s.softIterWarn ?? '');
           if (subEl) subEl.value = String(s.maxSubagentCalls ?? '');
         }
       }
@@ -11443,14 +11443,14 @@
         const result = {};
         for (const tier of ['simple','medium','complex']){
           const tokEl = getInput(tier, 'tokenBudgetCap');
-          const iterEl = getInput(tier, 'iterCap');
+          const iterEl = getInput(tier, 'softIterWarn');
           const subEl = getInput(tier, 'maxSubagentCalls');
           const tierObj = {};
           const tok = tokEl ? parseInt(tokEl.value, 10) : NaN;
           const iter = iterEl ? parseInt(iterEl.value, 10) : NaN;
           const sub = subEl ? parseInt(subEl.value, 10) : NaN;
           if (Number.isFinite(tok)) tierObj.tokenBudgetCap = tok;
-          if (Number.isFinite(iter)) tierObj.iterCap = iter;
+          if (Number.isFinite(iter)) tierObj.softIterWarn = iter;
           if (Number.isFinite(sub)) tierObj.maxSubagentCalls = sub;
           if (Object.keys(tierObj).length) result[tier] = tierObj;
         }

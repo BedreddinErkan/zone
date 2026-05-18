@@ -191,12 +191,6 @@ export interface AgentLoopInput {
     filesToEdit?: string[];
     evidence?: string;
   };
-  /**
-   * Phase D-S1: when set, caps the Phase 2 iteration budget to
-   * Math.min(tierLimits.iterCap, phase2IterCapOverride) so Phase 2 of a
-   * phase-split run stays within its allocated share of the tier budget.
-   */
-  phase2IterCapOverride?: number;
 }
 
 export type VerificationReason =
@@ -386,7 +380,7 @@ export function assembleAgentSystemPrompt(input: {
     `- Pre-existing: fix if simple, else note as out-of-scope in your final summary.\n` +
     `- Your mistake: fix with apply_patch (intent='modify' or 'delete'), re-run tests.\n` +
     `- Only give up after a self-correction attempt.\n\n` +
-    `Maximum iterations: ${input.baseMaxIterations} (already enforced — do not stall).\n\n` +
+    `Operate efficiently — the cost ceiling terminates the run; avoid redundant reads and retries.\n\n` +
     `TASK SUBAGENTS (Task) — when to dispatch:\n` +
     `Default is single-thread. Hard cap: 2 dispatches per parent run (MAX_SUBAGENT_CALLS=2, WORKER_MAX_ITER=6). Each dispatch costs ~30K-100K tokens.\n` +
     `GOOD signals (DO dispatch):\n` +
@@ -2061,32 +2055,21 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     ? null
     : resolveTierLimits(input.taskClassification, { forceTierOverride: input.forceTier });
 
+  let softIterWarnThreshold: number | undefined;
+  let softWarnInjected = false;
   if (tierLimits) {
-    if (!tierLimits.taskToolAllowed) {
-      const idx = toolsForLLM.findIndex((t) => getZoneToolName(t) === "Task");
-      if (idx >= 0) toolsForLLM.splice(idx, 1);
-    }
-    // S.2.1: iterCap is both floor and ceiling — raise plan-computed budgets that
-    // fall below the tier's minimum, and cap budgets that exceed the tier's maximum.
-    // A 2-step medium-tier plan computes to 8 iters but the tier guarantees 25.
-    // Phase D-S1: phase2IterCapOverride further constrains Phase 2 of a split run.
-    const effectiveIterCap =
-      typeof input.phase2IterCapOverride === "number"
-        ? Math.min(tierLimits.iterCap, input.phase2IterCapOverride)
-        : tierLimits.iterCap;
-    iterationBudget = { ...iterationBudget, maxIterationsForRun: effectiveIterCap };
-    // Disable escalation: tier iterCap is the authoritative budget; escalation
-    // would REDUCE maxIterationsForRun back to baseMaxIterations+5 (e.g., 8+5=13),
-    // which is lower than the tier cap (e.g., 25) and would cap the loop early.
+    const effectiveSoftIterWarn = tierLimits.softIterWarn;
+    softIterWarnThreshold = effectiveSoftIterWarn;
+    // Soft warn replaces hard-cap: loop runs up to 3× the warn threshold;
+    // tokenBudgetCap is the real terminator. Escalation disabled since tier is authoritative.
+    iterationBudget = { ...iterationBudget, maxIterationsForRun: effectiveSoftIterWarn * 3 };
     escalationEnabled = false;
     log("[zone-tier-constraints-applied]", JSON.stringify({
       runId: input.runId ?? null,
       tier: input.taskClassification?.tier ?? "medium",
-      taskToolAllowed: tierLimits.taskToolAllowed,
       maxSubagentCalls: tierLimits.maxSubagentCalls,
       tokenBudgetCap: tierLimits.tokenBudgetCap,
-      iterCap: effectiveIterCap,
-      ...(typeof input.phase2IterCapOverride === "number" ? { phase2IterCapOverride: input.phase2IterCapOverride } : {}),
+      softIterWarn: effectiveSoftIterWarn,
       classificationConfidence: input.taskClassification?.confidence ?? 0,
       fallbackUsed: input.taskClassification?.fallbackUsed ?? true,
     }));
@@ -2096,9 +2079,8 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
         title: "Tier constraints applied",
         status: "active",
         tier: input.taskClassification?.tier ?? "medium",
-        needsSubagent: tierLimits.taskToolAllowed,
         tokenBudgetCap: tierLimits.tokenBudgetCap,
-        iterCap: effectiveIterCap,
+        softIterWarn: effectiveSoftIterWarn,
       });
     }
   }
@@ -2717,6 +2699,15 @@ Example:
     input.onProgress?.(
       `[agent_loop] Iteration ${iter + 1}/${iterationBudget.maxIterationsForRun}`
     );
+
+    if (softIterWarnThreshold !== undefined && iter >= softIterWarnThreshold && !softWarnInjected) {
+      softWarnInjected = true;
+      responseInput.push({
+        role: "user",
+        content: `[ZONE_ITER_SOFT_WARN] You have used ${iter} iterations. The cost ceiling will terminate this run — wrap up your work and write a final summary now.`,
+      });
+      log("[zone-iter-soft-warn-injected]", JSON.stringify({ iter, softIterWarnThreshold, runId: input.runId ?? null }));
+    }
 
     debugLog("[zone-agent-llm-pre]", {
       runId: input.runId,
@@ -4164,11 +4155,11 @@ Example:
     filesModified: [...filesModified],
     patchValidatedByAgent,
     verificationReason: finalVerificationReason,
-    terminationReason: "max_iterations",
+    terminationReason: "token_budget_exceeded",
     tokenUsage: currentTokenUsage(),
     costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
     // Phase J.3.1: forward the staging snapshot for the rolled-back diff
-    // when maxiter ended with a regressed-verification rollback.
+    // when safety-ceiling exit ended with a regressed-verification rollback.
     ...(finalizeResult.discardedStaging
       ? { discardedStaging: finalizeResult.discardedStaging }
       : {}),

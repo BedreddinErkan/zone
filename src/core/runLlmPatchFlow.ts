@@ -4539,156 +4539,6 @@ function selectRankedContextPathsWithinCap(
   return ordered;
 }
 
-/** Phase D-S1: audit findings produced by the investigation phase. */
-export type PhaseSplitAuditFindings = {
-  summary: string;
-  citationCount: number;
-  toolCallCount: number;
-  costUsd: number;
-  // Step B: structured fields for richer Phase 2 AUDIT CONTEXT render
-  scopeVerdict?: "under_scope" | "over_scope" | "mixed" | "none";
-  severity?: "none" | "minor" | "major";
-  citations?: Array<{ file: string; line?: number }>;
-  filesAlreadyRead?: string[];
-  // Step C: structured Phase 1 output fields
-  rootCause?: string;
-  fixInstruction?: string;
-  filesToEdit?: string[];
-  evidence?: string;
-};
-
-/** Phase D-S1: result of the investigation phase (Phase 1) in a split run. */
-export type PhaseSplitResult = {
-  auditFindings?: PhaseSplitAuditFindings;
-  phase1TokensUsed: number;
-  skipped: boolean;
-  approvalDecision?: RevisionDecision;
-};
-
-/**
- * Phase D-S1: runs the investigation phase (Phase 1) of a phase-split task.
- *
- * Callable independently for testing. In production, runLlmPatchFlow calls
- * this when ZONE_PHASE_SPLIT=1 and tier ≥ medium (phase1Cap > 0).
- *
- * Medium tier: auto-proceeds to Phase 2 (no user review).
- * Complex tier: emits scope_revision_proposed and waits for user approval.
- * Emits exactly one phase_changed event on completion.
- */
-export async function runPhaseSplitInvestigation(opts: {
-  task: string;
-  repoPath: string;
-  tier: import("../llm/taskClassifier.js").TaskTier;
-  tierLimits: TierLimits;
-  runId?: string;
-  userApiKey?: string;
-  abortSignal?: AbortSignal;
-  emitProgress: (evt: Omit<ZoneStructuredProgressEvent, "runId" | "ts">) => void;
-}): Promise<PhaseSplitResult> {
-  const phase1TokenBudget = Math.floor(opts.tierLimits.tokenBudgetCap * 0.30);
-
-  let phase1Result;
-  try {
-    phase1Result = await investigateScope({
-      repoPath: opts.repoPath,
-      query: opts.task,
-      runId: opts.runId,
-      userApiKey: opts.userApiKey,
-      abortSignal: opts.abortSignal,
-      tokenBudgetRemaining: phase1TokenBudget,
-      maxIterationsOverride: opts.tierLimits.phase1Cap,
-      onProgress: (update) => {
-        if (update.progress) {
-          opts.emitProgress(update.progress as Omit<ZoneStructuredProgressEvent, "runId" | "ts">);
-        }
-      },
-    });
-  } catch (err) {
-    debugLog("[zone-phase-split-investigation-error]", String(err));
-    opts.emitProgress({
-      type: "phase_changed",
-      title: "Phase 2: executing changes",
-      status: "active",
-      phase: 2,
-      remainingTokenBudget: opts.tierLimits.tokenBudgetCap,
-    });
-    return { phase1TokensUsed: 0, skipped: true };
-  }
-
-  let auditFindings: PhaseSplitAuditFindings | undefined;
-  if (!phase1Result.skipped && phase1Result.findings) {
-    auditFindings = {
-      summary: phase1Result.findings.slice(0, 2048),
-      citationCount: phase1Result.citations.length,
-      toolCallCount: phase1Result.toolCallCount,
-      costUsd: phase1Result.costUsd,
-      ...(phase1Result.citations.length ? { citations: phase1Result.citations } : {}),
-      ...(phase1Result.filesAlreadyRead?.length ? { filesAlreadyRead: phase1Result.filesAlreadyRead } : {}),
-      ...(phase1Result.rootCause ? { rootCause: phase1Result.rootCause } : {}),
-      ...(phase1Result.fixInstruction ? { fixInstruction: phase1Result.fixInstruction } : {}),
-      ...(phase1Result.filesToEdit?.length ? { filesToEdit: phase1Result.filesToEdit } : {}),
-      ...(phase1Result.evidence ? { evidence: phase1Result.evidence } : {}),
-    };
-  }
-
-  const remainingBudget = opts.tierLimits.tokenBudgetCap - phase1Result.tokensUsed;
-  let approvalDecision: RevisionDecision | undefined;
-
-  // Complex tier: ask user to review Phase 1 findings before proceeding.
-  // Medium tier: auto-proceed (avoid cache TTL expiry on interactive review).
-  if (opts.tier === "complex" && auditFindings) {
-    try {
-      const { revisionId, decision } = await requestRevisionApproval({
-        proposal: {
-          runId: opts.runId ?? "",
-          type: "under_scope",
-          reason: "Phase 1 investigation complete. Review findings before execution.",
-          originalPlan: opts.task.slice(0, 500),
-          revisedPlanSummary: auditFindings.summary.slice(0, 500),
-        },
-        emit: (evt) => {
-          opts.emitProgress({
-            type: "scope_revision_proposed",
-            title: "Phase 1 findings ready for review",
-            status: "active",
-            revisionId: evt.revisionId,
-            revisionType: evt.revisionType,
-            revisionReason: evt.revisionReason,
-            revisionOriginalPlan: evt.revisionOriginalPlan,
-            revisionRevisedPlanSummary: evt.revisionRevisedPlanSummary,
-          });
-        },
-        abortSignal: opts.abortSignal,
-        autoApprove: false,
-      });
-      void revisionId;
-      approvalDecision = decision;
-      // Rejection: fall back to single-phase (don't inject findings).
-      if (decision === "reject" || decision === "timeout") {
-        auditFindings = undefined;
-      }
-    } catch (err) {
-      debugLog("[zone-phase-split-approval-error]", String(err));
-      auditFindings = undefined;
-    }
-  }
-
-  opts.emitProgress({
-    type: "phase_changed",
-    title: "Phase 2: executing changes",
-    status: "active",
-    phase: 2,
-    remainingTokenBudget: remainingBudget,
-  });
-
-  return {
-    auditFindings,
-    phase1TokensUsed: phase1Result.tokensUsed,
-    skipped: phase1Result.skipped ?? false,
-    approvalDecision,
-  };
-}
-
 export async function runLlmPatchFlow(input: {
   task: string;
   repoPath: string;
@@ -5976,62 +5826,12 @@ const initializeTodosFromPlan = (): void => {
         tier: taskClassification.tier,
         estimatedFiles: taskClassification.estimatedFiles,
         estimatedIterations: taskClassification.estimatedIterations,
-        needsSubagent: taskClassification.needsSubagent,
         confidence: taskClassification.confidence,
         classifierModel: taskClassification.classifierModel,
         classifierCostUsd: taskClassification.classifierCostUsd,
         classifierLatencyMs: taskClassification.classifierLatencyMs,
         ...(taskClassification.fallbackUsed ? { fallbackUsed: true } : {}),
       });
-    }
-
-    // Phase D-S1: when ZONE_PHASE_SPLIT=1 and tier ≥ medium, run investigation
-    // (Phase 1) in isolation before the main execute loop (Phase 2). Simple tier
-    // and phase1Cap=0 both skip to the single-phase legacy path.
-    const phaseSplitEnabled =
-      String(process.env["ZONE_PHASE_SPLIT"] || "0").trim() === "1";
-    let phaseSplitAuditFindings: typeof input.auditFindings = input.auditFindings;
-    let phaseSplitPhase2IterCap: number | undefined;
-
-    if (
-      phaseSplitEnabled &&
-      taskClassification &&
-      taskClassification.tier !== "simple"
-    ) {
-      const splitTierLimits = resolveTierLimits(taskClassification, {
-        forceTierOverride: input.forceTier,
-      });
-      // D10 audit §6 Strategy 1: skip D-S1 when Phase AS already produced auditFindings upstream
-      if (splitTierLimits.phase1Cap > 0 && input.auditFindings === undefined) {
-        try {
-          const splitResult = await runPhaseSplitInvestigation({
-            task: input.task,
-            repoPath: input.repoPath,
-            tier: taskClassification.tier,
-            tierLimits: splitTierLimits,
-            runId: runId || undefined,
-            userApiKey: input.userApiKey,
-            abortSignal: input.abortSignal,
-            emitProgress: (evt) => emitStructuredProgress(evt),
-          });
-          if (splitResult.auditFindings) {
-            phaseSplitAuditFindings = splitResult.auditFindings;
-          }
-          phaseSplitPhase2IterCap = splitTierLimits.phase2Cap;
-        } catch (err) {
-          debugLog("[zone-phase-split-outer-error]", String(err));
-          // Fall back to single-phase path silently.
-        }
-      } else if (splitTierLimits.phase1Cap > 0 && input.auditFindings !== undefined) {
-        log("[zone-d-s1-skip-audit-already-ran]", JSON.stringify({
-          event: "d-s1-skip-audit-already-ran",
-          runId: runId || null,
-          tier: taskClassification.tier,
-          phaseAsCost: input.auditFindings.costUsd,
-          phaseAsToolCalls: input.auditFindings.toolCallCount,
-          ts: new Date().toISOString(),
-        }));
-      }
     }
 
     const agentLoopBaseInput = {
@@ -6066,13 +5866,7 @@ const initializeTodosFromPlan = (): void => {
       // runs in the same conversation share a cache hit instead of misses.
       conversationId: typeof input.conversationId === "string" ? input.conversationId : undefined,
       // Phase X.0.1: forward audit findings so execute agent skips re-investigation.
-      // Phase D-S1: phaseSplitAuditFindings supersedes input.auditFindings when
-      // phase split ran (it merges Phase 1 findings; falls back to input.auditFindings).
-      auditFindings: phaseSplitAuditFindings,
-      // Phase D-S1: cap Phase 2 iterations to phase2Cap when split is active.
-      ...(phaseSplitPhase2IterCap !== undefined
-        ? { phase2IterCapOverride: phaseSplitPhase2IterCap }
-        : {}),
+      auditFindings: input.auditFindings,
       ...agentLoopCallbacks,
     };
 

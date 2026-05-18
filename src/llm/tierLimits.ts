@@ -2,52 +2,35 @@ import type { TaskClassification, TaskTier } from "./taskClassifier.js";
 import { readTierSettings } from "../visual/tierSettings.js";
 
 export interface TierLimits {
-  /** Whether the Task (subagent dispatch) tool is allowed. False for simple tier. */
-  taskToolAllowed: boolean;
-  /** Maximum subagent calls allowed per parent run. 0 when taskToolAllowed is false. */
+  /** Maximum subagent calls allowed per parent run. */
   maxSubagentCalls: number;
   /** Per-run token budget cap in tokens. Replaces the global TOKEN_BUDGET_CAP. */
   tokenBudgetCap: number;
-  /** Hard ceiling applied on top of plan-aware iter computation. */
-  iterCap: number;
-  /**
-   * Phase D-S1: iteration cap for Phase 1 (investigation) of a phase-split run.
-   * 0 means simple tier — Phase 1 is skipped, single-phase legacy path used.
-   * Not user-overridable (system-level guarantee).
-   */
-  phase1Cap: number;
-  /**
-   * Phase D-S1: iteration cap for Phase 2 (execution) of a phase-split run.
-   * Applied as Math.min(iterCap, phase2Cap) by agentLoop when phase2IterCapOverride is set.
-   * Not user-overridable (system-level guarantee).
-   */
-  phase2Cap: number;
+  /** Soft iteration warning threshold. Agent receives a wrap-up prompt at this iteration;
+   *  the cost ceiling (tokenBudgetCap) is the actual hard stop. */
+  softIterWarn: number;
+  /** Phase AS: iteration cap for the scope audit investigation. System-level, not user-overridable. */
+  auditIterCap: number;
 }
 
 export const TIER_LIMITS: Record<TaskTier, TierLimits> = {
   simple: {
-    taskToolAllowed: false,
     maxSubagentCalls: 0,
     tokenBudgetCap: 400_000,
-    iterCap: 15,
-    phase1Cap: 0,
-    phase2Cap: 15,
+    softIterWarn: 15,
+    auditIterCap: 0,
   },
   medium: {
-    taskToolAllowed: true,
     maxSubagentCalls: 1,
     tokenBudgetCap: 600_000,
-    iterCap: 25,
-    phase1Cap: 6,
-    phase2Cap: 20,
+    softIterWarn: 25,
+    auditIterCap: 6,
   },
   complex: {
-    taskToolAllowed: true,
     maxSubagentCalls: 4,
     tokenBudgetCap: 800_000,
-    iterCap: 40,
-    phase1Cap: 8,
-    phase2Cap: 30,
+    softIterWarn: 40,
+    auditIterCap: 8,
   },
 };
 
@@ -64,8 +47,6 @@ export interface ResolveTierOptions {
  *   2. ZONE_FORCE_TIER env var — server-level testing bypass (no user overrides)
  *   3. User overrides from ~/.zone/tier-limits.json — merged on top of TIER_LIMITS defaults
  *   4. TIER_LIMITS defaults — used when no classification or no user override
- *
- * taskToolAllowed is NEVER user-overridable — it is a system-level guarantee.
  */
 export function resolveTierLimits(
   classification?: TaskClassification | null,
@@ -92,11 +73,9 @@ export function resolveTierLimits(
   if (!userOverride) return base;
 
   return {
-    taskToolAllowed: base.taskToolAllowed, // system-level — never overridden
     maxSubagentCalls: userOverride.maxSubagentCalls ?? base.maxSubagentCalls,
     tokenBudgetCap: userOverride.tokenBudgetCap ?? base.tokenBudgetCap,
-    iterCap: userOverride.iterCap ?? base.iterCap,
-    phase1Cap: base.phase1Cap, // system-level — never overridden
-    phase2Cap: base.phase2Cap, // system-level — never overridden
+    softIterWarn: userOverride.softIterWarn ?? base.softIterWarn,
+    auditIterCap: base.auditIterCap, // system-level — never overridden
   };
 }

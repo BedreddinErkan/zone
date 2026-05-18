@@ -2383,8 +2383,7 @@ app.put("/api/usage-limits", (req, res) => {
 
 // Phase L.3: per-tier execution limit overrides. Persisted to
 // ~/.zone/tier-limits.json. ZONE_FORCE_TIER env override always takes priority
-// over these settings (testing bypass). taskToolAllowed is system-level and
-// is not surfaced in the response — the UI must not expose it as editable.
+// over these settings (testing bypass).
 app.get("/api/settings/tier-limits", (_req, res) => {
   try {
     const userOverrides = readTierSettings();
@@ -2393,12 +2392,10 @@ app.get("/api/settings/tier-limits", (_req, res) => {
         const base = TIER_LIMITS[tier];
         const ov = userOverrides[tier] ?? {};
         acc[tier] = {
-          taskToolAllowed: base.taskToolAllowed,
           maxSubagentCalls: ov.maxSubagentCalls ?? base.maxSubagentCalls,
           tokenBudgetCap: ov.tokenBudgetCap ?? base.tokenBudgetCap,
-          iterCap: ov.iterCap ?? base.iterCap,
-          phase1Cap: base.phase1Cap,
-          phase2Cap: base.phase2Cap,
+          softIterWarn: ov.softIterWarn ?? base.softIterWarn,
+          auditIterCap: base.auditIterCap,
         };
         return acc;
       },
@@ -3800,7 +3797,7 @@ app.post("/api/patch", async (req, res) => {
           userApiKey: userApiKey || undefined,
           abortSignal: patchAbort?.signal,
           parentTier: tier,
-          maxIterationsOverride: TIER_LIMITS[tier].phase1Cap,
+          maxIterationsOverride: TIER_LIMITS[tier].auditIterCap,
           onProgress: (update) => emitProgress(runIdStr, update as any),
         });
 
