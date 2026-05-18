@@ -6,7 +6,13 @@ const mockLog = vi.fn();
 const mockError = vi.fn();
 const mockWriteFile = vi.fn();
 const mockMkdir = vi.fn();
-
+vi.mock("../core/runLlmPatchFlow.js", () => ({
+  runLlmPatchFlow: vi.fn().mockResolvedValue({
+    ok: true,
+    patchPreview: "",
+    applyPatches: []
+  })
+}));
 vi.mock("node:fs", () => {
   return {
     promises: {
