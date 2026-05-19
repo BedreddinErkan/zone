@@ -3790,7 +3790,7 @@ app.post("/api/patch", async (req, res) => {
     if (auditDecision.shouldRun) {
       if (!preGeneratedPlan) {
         // Defensive: plan generation failed upstream — audit cannot run without a plan.
-        log("[zone-audit-skipped]", JSON.stringify({ runId: runIdStr, reason: "no_plan", ts: new Date().toISOString() }));
+        log("[zone-audit-skipped]", JSON.stringify({ runId: runIdStr, tier, auditMode, reason: "no_plan", ts: new Date().toISOString() }));
       } else {
         try {
         emitProgress(runIdStr, {
