@@ -199,3 +199,46 @@ describe("investigateScope — parentTier propagation", () => {
     expect(callArgs.taskClassification).toBeUndefined();
   });
 });
+
+describe("investigateScope — lane field (Phase O)", () => {
+  beforeEach(() => {
+    mocks.log.mockClear();
+    mocks.runAgentLoop.mockClear();
+    mocks.runAgentLoop.mockResolvedValue(makeLoopResult("Audit findings."));
+  });
+
+  it("passes lane:'audit' to runAgentLoop so telemetry can distinguish audit vs main", async () => {
+    await investigateScope({
+      repoPath: "/tmp/fake-repo",
+      query: "audit scope for lane test",
+      runId: "lane-test-001",
+    });
+
+    expect(mocks.runAgentLoop).toHaveBeenCalledOnce();
+    const callArgs = mocks.runAgentLoop.mock.calls[0][0];
+    expect(callArgs.lane).toBe("audit");
+  });
+
+  it("emits agent_loop_start with lane:'audit' distinct from main agent lane", async () => {
+    const emittedEvents: Array<{ type: string; lane?: string }> = [];
+    await investigateScope({
+      repoPath: "/tmp/fake-repo",
+      query: "audit scope for event lane test",
+      runId: "lane-event-001",
+      onProgress: (update) => {
+        if (update.progress && typeof update.progress === "object") {
+          const p = update.progress as Record<string, unknown>;
+          emittedEvents.push({ type: String(p["type"] || ""), lane: p["lane"] as string | undefined });
+        }
+      },
+    });
+
+    const startEvent = emittedEvents.find((e) => e.type === "agent_loop_start");
+    expect(startEvent).toBeDefined();
+    expect(startEvent!.lane).toBe("audit");
+
+    const completeEvent = emittedEvents.find((e) => e.type === "agent_loop_complete");
+    expect(completeEvent).toBeDefined();
+    expect(completeEvent!.lane).toBe("audit");
+  });
+});

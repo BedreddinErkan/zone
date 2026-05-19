@@ -141,7 +141,7 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
   };
 
   if (runId) {
-    emitStructuredProgress({ type: "agent_loop_start", title: "Starting scope investigation", status: "active" });
+    emitStructuredProgress({ type: "agent_loop_start", title: "Starting scope investigation", status: "active", lane: "audit" });
   }
 
   // AS.1: enforce auditCap via tokenBudgetBaseTokens once tier-cap /
@@ -178,6 +178,7 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
     allowedTools: AUDIT_ALLOWED_TOOLS,
     maxIterationsOverride: computedMax,
     disableTodoWrite: true,
+    lane: "audit",
     ...(parentTaskClassification ? { taskClassification: parentTaskClassification } : {}),
     onToolCall: (name: string, args: Record<string, unknown>) => {
       const fp = filePathFromToolArgs(name, args);
@@ -250,6 +251,7 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
     title: loop.success ? "Scope investigation complete" : "Scope investigation ended",
     detail: findings.slice(0, 4000),
     status: loop.success ? "success" : "warning",
+    lane: "audit",
   });
 
   log("[zone-investigation-summary]", JSON.stringify({

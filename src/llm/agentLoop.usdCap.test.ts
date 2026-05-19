@@ -15,6 +15,13 @@ const mocks = vi.hoisted(() => ({
   withStagingTempFlush: vi.fn(),
   getUsage: vi.fn(),
   readDailyUsdCapOverride: vi.fn<() => number | undefined>(),
+  log: vi.fn(),
+}));
+
+vi.mock("../utils/logger.js", () => ({
+  log: mocks.log,
+  debugLog: vi.fn(),
+  errorLog: vi.fn(),
 }));
 
 vi.mock("./factory.js", () => ({
@@ -33,6 +40,8 @@ vi.mock("../usage/usageTracker.js", () => ({
   getUsage: mocks.getUsage,
   recordExecution: vi.fn(),
   readRecords: vi.fn(() => []),
+  recordRunSummary: vi.fn(async () => undefined),
+  recordRunRetry: vi.fn(async () => undefined),
 }));
 
 vi.mock("../visual/tierSettings.js", () => ({
@@ -79,6 +88,7 @@ beforeEach(() => {
   mocks.withStagingTempFlush.mockReset();
   mocks.getUsage.mockReset();
   mocks.readDailyUsdCapOverride.mockReset();
+  mocks.log.mockReset();
   mocks.withStagingTempFlush.mockImplementation(async (fn: () => Promise<void>) => fn());
   mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
   // Default: no user override, no ZONE_DAILY_USD_CAP env
@@ -154,5 +164,53 @@ describe("K.1 — daily USD cap gate", () => {
     expect(result.terminationReason).not.toBe("daily_usd_cap_exceeded");
     // gate skipped means getUsage was never called for cap enforcement
     expect(mocks.getUsage).not.toHaveBeenCalled();
+  });
+});
+
+describe("Phase O (Patch B) — zone-graceful-degrade pre-check suppression", () => {
+  it("does NOT emit [zone-graceful-degrade] when costUsd=0 (pre-check cap block, run never started)", async () => {
+    // Cap is set, spend is at cap — daily_usd_cap_exceeded before any LLM call
+    process.env.ZONE_DAILY_USD_CAP = "5";
+    mocks.getUsage.mockResolvedValue(makeUsageAggregate(5.0));
+
+    const result = await runAgentLoop({
+      task: "blocked by cap",
+      repoPath,
+      runId: "cap-precheck-run-1",
+      userId: "user-1",
+    });
+
+    expect(result.terminationReason).toBe("daily_usd_cap_exceeded");
+    expect(result.costUsd ?? 0).toBe(0);
+
+    // Pre-check fires with costUsd=0 and canResume=true — this is NOT a graceful degrade,
+    // the run never incurred any cost. The emit must be suppressed.
+    const degradeCalls = mocks.log.mock.calls.filter(
+      (c: unknown[]) => c[0] === "[zone-graceful-degrade]"
+    );
+    expect(degradeCalls).toHaveLength(0);
+  });
+
+  it("DOES emit [zone-graceful-degrade] for mid-run exhaustion (costUsd > 0)", async () => {
+    // Spend under cap at dispatch time, LLM runs and completes normally
+    process.env.ZONE_DAILY_USD_CAP = "10";
+    mocks.getUsage.mockResolvedValue(makeUsageAggregate(1.0));
+    mocks.createChatCompletion.mockResolvedValue(makeDoneResponse());
+
+    await runAgentLoop({
+      task: "run that succeeds",
+      repoPath,
+      runId: "natural-complete-run-1",
+      userId: "user-1",
+    });
+
+    // natural_completion terminates gracefulDegrade=false but costUsd > 0 so emit fires
+    const degradeCalls = mocks.log.mock.calls.filter(
+      (c: unknown[]) => c[0] === "[zone-graceful-degrade]"
+    );
+    expect(degradeCalls).toHaveLength(1);
+    const payload = JSON.parse(String(degradeCalls[0][1]));
+    expect(payload.terminationReason).toBe("natural_completion");
+    expect(payload.runId).toBe("natural-complete-run-1");
   });
 });

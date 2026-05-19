@@ -169,6 +169,11 @@ export interface AgentLoopInput {
    * rather than misses on every new runId.
    */
   conversationId?: string;
+  /** Phase O: lane identifier forwarded from the audit caller so telemetry and
+   *  UI can distinguish the scope audit mini-agent from the main patch agent.
+   *  "audit" = investigateScope(); "main" or absent = primary agent loop.
+   */
+  lane?: "main" | "audit";
   /**
    * Phase X.0.1: distilled findings from the pre-execution scope audit.
    * When present, injected as an AUDIT CONTEXT block in the user message
@@ -2041,15 +2046,20 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           ts: new Date().toISOString(),
         }));
       });
-      log("[zone-graceful-degrade]", JSON.stringify({
-        runId: input.runId.trim(),
-        terminationReason,
-        gracefulDegrade: terminationReason !== "natural_completion",
-        canResume: canResumeFromTerminationReason(terminationReason),
-        costUsd: result.costUsd ?? 0,
-        tier: input.taskClassification?.tier ?? null,
-        ts: Date.now(),
-      }));
+      // Pre-check warning fires before any LLM cost is incurred and the run continues.
+      // Suppressing here avoids implying graceful_degrade in telemetry/UI when no degradation is happening.
+      const costUsd = result.costUsd ?? 0;
+      if (!(costUsd === 0 && terminationReason === "daily_usd_cap_exceeded")) {
+        log("[zone-graceful-degrade]", JSON.stringify({
+          runId: input.runId.trim(),
+          terminationReason,
+          gracefulDegrade: terminationReason !== "natural_completion",
+          canResume: canResumeFromTerminationReason(terminationReason),
+          costUsd,
+          tier: input.taskClassification?.tier ?? null,
+          ts: Date.now(),
+        }));
+      }
     }
     return result;
   } finally {

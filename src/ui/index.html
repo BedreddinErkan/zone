@@ -9253,19 +9253,21 @@
         }
 
         if (type === 'agent_loop_start' || /starting agent tool loop/i.test(progTitle)) {
+          const isAuditLane = progress.lane === 'audit';
           appendLogLine(logBlock, {
             timestamp: new Date(progress.ts || Date.now()).toLocaleTimeString(),
-            message: subagentMessage(subagentId ? 'Worker working...' : 'Agent working...'),
+            message: isAuditLane ? 'Auditor working...' : subagentMessage(subagentId ? 'Worker working...' : 'Agent working...'),
             status: 'active',
-            className: subagentClass
+            className: isAuditLane ? 'audit-lane-line' : subagentClass
           });
           return;
         }
         if (type === 'agent_loop_complete') {
           const ok = (progress.status === 'success');
+          const isAuditLane = progress.lane === 'audit';
           appendLogLine(logBlock, {
             timestamp: new Date(progress.ts || Date.now()).toLocaleTimeString(),
-            message: subagentMessage(subagentId ? 'Worker finished' : 'Agent finished'),
+            message: isAuditLane ? 'Audit pass' : subagentMessage(subagentId ? 'Worker finished' : 'Agent finished'),
             status: ok ? 'done' : 'warning',
             className: subagentClass
           });
