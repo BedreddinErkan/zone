@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { TaskTier } from "../llm/taskClassifier.js";
+import { type AuditMode, DEFAULT_AUDIT_MODE } from "../llm/auditMode.js";
 
 export interface PerTierSettings {
   tokenBudgetCap?: number;
@@ -18,6 +19,8 @@ export interface TierSettingsFile {
   tierSettings?: Partial<Record<TaskTier, PerTierSettings>>;
   /** Phase AS: auto-run scope investigation before complex task execution. Default true. */
   autoAuditComplexTasks?: boolean;
+  /** Phase H: audit mode. "auto" skips simple tasks; "always" audits all; "on_demand" audits only when explicitRequest=true. */
+  auditMode?: AuditMode;
   /** Phase K.1: per-user daily spend cap (USD). 0 = unlimited. Absent = use env/default. */
   dailyUsdCapOverride?: number;
 }
@@ -115,6 +118,21 @@ export function readAutoAuditSetting(): boolean {
 export function writeAutoAuditSetting(value: boolean): void {
   const raw = readRawFile();
   raw["autoAuditComplexTasks"] = value;
+  writeRawFile(raw);
+}
+
+/** Phase H: reads the auditMode setting. Defaults to DEFAULT_AUDIT_MODE when absent. */
+export function readAuditModeSetting(): AuditMode {
+  const raw = readRawFile();
+  const v = raw["auditMode"];
+  if (v === "auto" || v === "always" || v === "on_demand") return v;
+  return DEFAULT_AUDIT_MODE;
+}
+
+/** Phase H: persists the auditMode setting. */
+export function writeAuditModeSetting(mode: AuditMode): void {
+  const raw = readRawFile();
+  raw["auditMode"] = mode;
   writeRawFile(raw);
 }
 

@@ -20,7 +20,8 @@ import { UpstreamUnavailableError } from "../llm/withExponentialBackoff.js";
 import { routeCapGate } from "../llm/checkDailyCap.js";
 import { loadLimitConfig, saveLimitConfig, checkUsageLimit } from "./usageLimits.js";
 import { loadRepoRegistry, addRepo as addRepoEntry, removeRepo as removeRepoEntry } from "./repos.js";
-import { readTierSettings, writeTierSettings, readAutoAuditSetting, writeAutoAuditSetting } from "../visual/tierSettings.js";
+import { readTierSettings, writeTierSettings, readAutoAuditSetting, writeAutoAuditSetting, readAuditModeSetting, writeAuditModeSetting } from "../visual/tierSettings.js";
+import { shouldRunAudit as computeAuditDecision, type AuditMode, DEFAULT_AUDIT_MODE } from "../llm/auditMode.js";
 import { TIER_LIMITS } from "../llm/tierLimits.js";
 import {
   isIrrelevantDeveloperContextPath,
@@ -2427,21 +2428,36 @@ app.post("/api/settings/tier-limits/reset", (_req, res) => {
 
 app.get("/api/settings/scope-audit", (_req, res) => {
   try {
-    res.json({ ok: true, autoAuditComplexTasks: readAutoAuditSetting() });
+    res.json({
+      ok: true,
+      autoAuditComplexTasks: readAutoAuditSetting(),
+      auditMode: readAuditModeSetting(),
+    });
   } catch (err) {
     res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
 });
 
 app.post("/api/settings/scope-audit", (req, res) => {
-  const value = req.body?.autoAuditComplexTasks;
-  if (typeof value !== "boolean") {
-    res.status(400).json({ ok: false, reason: "autoAuditComplexTasks must be a boolean" });
-    return;
-  }
   try {
+    // Phase H: accept auditMode as primary field; keep autoAuditComplexTasks for backward compat.
+    if (req.body?.auditMode !== undefined) {
+      const mode = req.body.auditMode;
+      if (mode !== "auto" && mode !== "always" && mode !== "on_demand") {
+        res.status(400).json({ ok: false, reason: "auditMode must be 'auto', 'always', or 'on_demand'" });
+        return;
+      }
+      writeAuditModeSetting(mode as AuditMode);
+      res.json({ ok: true, auditMode: mode, autoAuditComplexTasks: readAutoAuditSetting() });
+      return;
+    }
+    const value = req.body?.autoAuditComplexTasks;
+    if (typeof value !== "boolean") {
+      res.status(400).json({ ok: false, reason: "autoAuditComplexTasks must be a boolean, or provide auditMode" });
+      return;
+    }
     writeAutoAuditSetting(value);
-    res.json({ ok: true, autoAuditComplexTasks: value });
+    res.json({ ok: true, autoAuditComplexTasks: value, auditMode: readAuditModeSetting() });
   } catch (err) {
     res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
@@ -3760,20 +3776,18 @@ app.post("/api/patch", async (req, res) => {
       // classifyTask is self-healing; defensive catch for future contract changes.
     }
 
-    const autoAuditComplexTasks = readAutoAuditSetting();
     const tier = preClassifiedTask?.tier ?? "medium";
+    // Phase H: per-request auditMode override, then persisted setting, then default.
+    const auditMode: AuditMode =
+      (req.body?.auditMode === "auto" || req.body?.auditMode === "always" || req.body?.auditMode === "on_demand"
+        ? req.body.auditMode as AuditMode
+        : undefined)
+      ?? readAuditModeSetting();
+    const explicitAuditRequest = req.body?.forceAudit === true;
 
-    function shouldRunAudit(
-      t: typeof tier,
-      perRunOverride: boolean | undefined,
-      autoAuditSetting: boolean
-    ): boolean {
-      if (t === "simple") return false;
-      if (perRunOverride === false) return false;
-      return autoAuditSetting;
-    }
+    const auditDecision = computeAuditDecision({ tier, auditMode, explicitRequest: explicitAuditRequest });
 
-    if (shouldRunAudit(tier, undefined, autoAuditComplexTasks)) {
+    if (auditDecision.shouldRun) {
       if (!preGeneratedPlan) {
         // Defensive: plan generation failed upstream — audit cannot run without a plan.
         log("[zone-audit-skipped]", JSON.stringify({ runId: runIdStr, reason: "no_plan", ts: new Date().toISOString() }));
@@ -3961,6 +3975,15 @@ app.post("/api/patch", async (req, res) => {
           console.warn("[zone-scope-audit] audit gate failed:", auditErr instanceof Error ? auditErr.message : String(auditErr));
         }
       } // end else (preGeneratedPlan guard)
+    } else {
+      // Phase H: audit skipped by auditMode gate.
+      log("[zone-audit-skipped]", JSON.stringify({
+        runId: runIdStr,
+        tier,
+        auditMode,
+        reason: auditDecision.reason,
+        ts: new Date().toISOString(),
+      }));
     }
   }
 
