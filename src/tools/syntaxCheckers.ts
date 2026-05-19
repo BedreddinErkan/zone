@@ -79,11 +79,16 @@ export const SYNTAX_CHECKERS: SyntaxChecker[] = [
     status: "first-class",
     cmdTemplate: (fp) => ({
       cmd: "npx",
-      // Last arg is already quoted so the joined shell string matches the
-      // former hard-coded invocation exactly.
+      // NOTE: --module ESNext is intentionally permissive — repo tsconfig uses
+      // Node16, but Node16 enforces explicit .js extensions on relative imports,
+      // which generates TS2xxx noise on single-file checks. ESNext + bundler is
+      // the "permissive but realistic" pairing for inline syntax verification.
+      // Do not change to match repo tsconfig. See Phase I audit 2026-05-19 Lane 0.D.
       args: [
         "tsc",
         "--noEmit",
+        "--module",
+        "ESNext",
         "--moduleResolution",
         "bundler",
         "--target",

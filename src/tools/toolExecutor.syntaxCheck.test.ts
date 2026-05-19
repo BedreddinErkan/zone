@@ -157,6 +157,52 @@ function makeExecPyUnavailable(): void {
   );
 }
 
+describe("Lane 0.D — inline TS check ESNext flag regression", () => {
+  it("tsc invocation includes --module ESNext flag", async () => {
+    let capturedCmd: string | null = null;
+    execMock.mockImplementation(
+      (cmd: string, _opts: unknown, callback: (err: null, result: { stdout: string; stderr: string }) => void) => {
+        if (typeof cmd === "string" && cmd.includes("tsc")) capturedCmd = cmd;
+        callback(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof import("node:child_process").exec>;
+      }
+    );
+    writeRepoFile("src/esm.ts", "export const x = 1;\n");
+    await executeTool(
+      "apply_patch",
+      { filePath: "src/esm.ts", patch: "--- FIND ---\nexport const x = 1;\n--- REPLACE ---\nexport const x = 2;", intent: "modify", scope: null },
+      repoPath, undefined, {}
+    );
+    expect(capturedCmd).not.toBeNull();
+    expect(capturedCmd).toContain("--module");
+    expect(capturedCmd).toContain("ESNext");
+  });
+
+  it("approves .ts file when tsc returns only TS2307 + TS2339 (module resolution noise, as seen in run 0d0106f9)", async () => {
+    execMock.mockImplementation(
+      (cmd: string, _opts: unknown, callback: (err: Error | null, result?: { stdout: string; stderr: string }) => void) => {
+        if (typeof cmd === "string" && cmd.includes("tsc")) {
+          callback(Object.assign(new Error("tsc"), {
+            code: 1,
+            stdout: "tmp.ts(1,1): error TS2307: Cannot find module './config.js'.\ntmp.ts(5,3): error TS2339: Property 'x' does not exist.\n",
+            stderr: "",
+          }));
+        } else {
+          callback(null, { stdout: "", stderr: "" });
+        }
+        return {} as ReturnType<typeof import("node:child_process").exec>;
+      }
+    );
+    writeRepoFile("src/modfile.ts", "const x = 1;\n");
+    const result = await executeTool(
+      "apply_patch",
+      { filePath: "src/modfile.ts", patch: "--- FIND ---\nconst x = 1;\n--- REPLACE ---\nconst x = 2;", intent: "modify", scope: null },
+      repoPath, undefined, {}
+    );
+    expect(result.success).toBe(true);
+  });
+});
+
 describe("inline TS syntax validation", () => {
   it("approves valid TS file — patch applied successfully", async () => {
     makeExecSuccess();
