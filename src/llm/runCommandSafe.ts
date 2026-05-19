@@ -51,7 +51,7 @@ const BLACKLIST_PATTERNS: RegExp[] = [
   /\bchmod\s/,
   /\bchown\s/,
   // Redirects / pipes-to-write
-  />\s*\S/,
+  />\s*[^&]/,  // block write redirects (> file, >> file) but allow fd merges (2>&1, 1>&2)
   />>\s*\S/,
   /\btee\s/,
   // Package mutations

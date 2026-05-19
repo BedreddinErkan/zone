@@ -74,6 +74,30 @@ describe("checkCommandSafe", () => {
     });
   });
 
+  describe("blacklist — stderr/fd merge should be allowed (Phase G.1)", () => {
+    it.each([
+      "npm test 2>&1",
+      "npm test 2>&1 | tail -100",
+      "npm test 2>&1 | grep FAIL",
+      "tsc --noEmit 2>&1",
+      "npx vitest run src/foo.test.ts 2>&1 | tail -200",
+      "git log 1>&2",
+      "tsc --noEmit 2>&-",
+    ])("allows fd merge: %s", (cmd) => {
+      expect(checkCommandSafe(cmd).safe).toBe(true);
+    });
+  });
+
+  describe("blacklist — write redirects still blocked (regression check)", () => {
+    it.each([
+      "echo hello > /tmp/file",
+      "cat data >> log.txt",
+      "ls > /dev/null",
+    ])("blocks write redirect: %s", (cmd) => {
+      expect(checkCommandSafe(cmd).safe).toBe(false);
+    });
+  });
+
   describe("blacklist — package mutations blocked", () => {
     it.each([
       "npm install lodash",
