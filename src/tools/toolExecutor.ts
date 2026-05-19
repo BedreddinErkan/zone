@@ -1,5 +1,5 @@
 import { exec } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -41,6 +41,31 @@ function normalizeSmartQuotes(s: string): { text: string; count: number } {
     return SMART_QUOTE_MAP[ch] ?? ch;
   });
   return { text, count };
+}
+
+// Lever 4.A: outline memoization. Key = "filePath:contentHash" (first 16 hex chars of sha256).
+// Prevents regenerating 6-8KB outline on repeat reads of an unchanged large file.
+const outlineCache = new Map<string, {
+  outline: string;
+  contentHash: string;
+  generatedAt: number;
+  filePath: string;
+}>();
+const OUTLINE_CACHE_MAX = 50;
+
+function hashContent(content: string): string {
+  return createHash("sha256").update(content).digest("hex").slice(0, 16);
+}
+
+function evictOutlineCacheForFile(filePath: string): void {
+  for (const key of outlineCache.keys()) {
+    if (key.startsWith(`${filePath}:`)) outlineCache.delete(key);
+  }
+}
+
+/** Exported for test isolation only — do not call in production code. */
+export function clearOutlineCacheForTest(): void {
+  outlineCache.clear();
 }
 
 export type ResolveCwdResult =
@@ -1282,6 +1307,27 @@ export async function executeTool(
       const tailLines = lines.slice(tailStartIdx);
       const tailStartLine = tailStartIdx + 1;
       const elidedCount = Math.max(tailStartIdx - headCount, 0);
+
+      // Lever 4.A: serve stub when content hash matches a prior read in this process.
+      const contentHash = hashContent(fullContent);
+      const cacheKey = `${filePath}:${contentHash}`;
+      const cachedOutline = outlineCache.get(cacheKey);
+      if (cachedOutline) {
+        const stub =
+          `[Outline cache HIT — ${filePath} content is unchanged since last read. ` +
+          `The full FILE OUTLINE was returned in a prior read_file result in this conversation. ` +
+          `Scroll up or check the file-read manifest to find it. ` +
+          `To read specific line ranges use read_file({ filePath, lineRange: [start, end] }).]`;
+        log("[zone-outline-cache]", JSON.stringify({
+          event: "hit",
+          filePath,
+          contentHash,
+          savedChars: cachedOutline.outline.length,
+          stubChars: stub.length,
+        }));
+        return { success: true, output: stub, contentLength: stub.length };
+      }
+
       const outline = generateFileOutline(fullContent, filePath);
       const numberedHead = prefixLineNumbers(headLines, 1);
 
@@ -1308,6 +1354,19 @@ export async function executeTool(
       }
 
       const summary = summaryParts.join("\n");
+
+      // Lever 4.A: store outline in cache; evict oldest entry if over cap.
+      outlineCache.set(cacheKey, { outline: outline || "", contentHash, generatedAt: Date.now(), filePath });
+      if (outlineCache.size > OUTLINE_CACHE_MAX) {
+        const oldest = [...outlineCache.entries()].sort((a, b) => a[1].generatedAt - b[1].generatedAt)[0];
+        if (oldest) outlineCache.delete(oldest[0]);
+      }
+      log("[zone-outline-cache]", JSON.stringify({
+        event: "miss",
+        filePath,
+        contentHash,
+        generatedChars: (outline || "").length,
+      }));
 
       debugLog(
         "[zone-tool-readfile-smart]",
@@ -2033,6 +2092,7 @@ export async function executeTool(
       if (!stagedWrite(input?.stagingFiles, abs, outputContent)) {
         fs.writeFileSync(abs, outputContent, "utf8");
       }
+      evictOutlineCacheForFile(filePath); // Lever 4.A: clear stale outline cache entry
 
       // W.1: inline syntax check via SYNTAX_CHECKERS table (TS entry only;
       // Python/Go added in W.2/W.3). Behaviour identical to the former
