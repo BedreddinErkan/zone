@@ -204,6 +204,11 @@ export type VerificationReason =
   // Phase J.3: distinguishes "patch introduced new errors" (rolled_back UI)
   // from "patch had pre-existing errors but didn't regress them" (apply OK).
   | 'verification_regressed'
+  // Phase F.2: warn-mode regression — patches flushed to disk, errors surfaced
+  // as warnings. Distinct from 'verification_regressed' (rollback) so that
+  // downstream isVerificationRegressed strict-equals check does NOT trigger
+  // decisionMode='rolled_back' UI banner.
+  | 'verification_warnings'
   | 'no_changes_made';
 
 export interface AgentLoopResult {
@@ -3950,7 +3955,7 @@ Example:
           ));
         } else {
           // Phase F warn mode: patches on disk, surface errors as warnings.
-          verificationReason = "verification_regressed";
+          verificationReason = "verification_warnings"; // Phase F.2 warn-mode: patches on disk; reason distinguishes from true rollback so downstream UI doesn't claim disk-restore.
           patchValidatedByAgent = false;
           const errors = parseTscErrorPreview(finalizeResult.verification.errorPreview);
           summaryAppendix = "\n\n" + buildVerificationWarningsMessage({
@@ -4262,7 +4267,7 @@ Example:
       ));
     } else {
       // Phase F warn mode: patches on disk, surface errors as warnings.
-      finalVerificationReason = "verification_regressed";
+      finalVerificationReason = "verification_warnings"; // Phase F.2 warn-mode: patches on disk; reason distinguishes from true rollback so downstream UI doesn't claim disk-restore.
       patchValidatedByAgent = false;
       const errors = parseTscErrorPreview(finalizeResult.verification.errorPreview);
       finalSummary = finalSummary + "\n\n" + buildVerificationWarningsMessage({
