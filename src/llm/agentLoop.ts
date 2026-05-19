@@ -521,6 +521,26 @@ function assembleChatSystemPrompt(input: {
     .join("\n");
 }
 
+// Phase G: Phase 1 runtime-grounding heuristic — appended after INVESTIGATION_OUTPUT_FORMAT.
+// Module-level const: no per-run interpolation, cache-safe.
+const PHASE1_RUNTIME_HEURISTIC = `INVESTIGATION HEURISTIC — RUNTIME GROUNDING:
+
+When the task mentions failing tests, build errors, runtime exceptions, or \
+"why is X broken", your FIRST action should be to reproduce the failure using \
+run_command_readonly. Examples:
+
+- "Fix failing tests in foo.test.ts" → \`npx vitest run path/to/foo.test.ts\` \
+first, read actual error output, THEN form hypothesis.
+- "Build fails after refactor" → \`tsc --noEmit\` first.
+- "Test crashes intermittently" → run multiple times, observe pattern.
+
+Static code analysis without runtime observation produces non-deterministic \
+diagnoses. Your fixInstruction must be grounded in the actual error message, \
+not in what the code "should" be doing.
+
+If the task does not involve runtime behavior (e.g., "rename function X across \
+the codebase"), skip the runtime step and proceed with reads + searches.`;
+
 // Step C Lever A: module-level const — no per-run interpolation, cache-safe.
 const INVESTIGATION_OUTPUT_FORMAT = `At the end of your investigation, output a JSON block fenced with \`\`\`json containing exactly these fields:
 {
@@ -565,6 +585,7 @@ export function assembleInvestigationSystemPrompt(input: {
     "- list_files",
     "- search_in_files",
     "- find_references",
+    "- run_command_readonly: run failing tests, typecheck, lint, or read-only git inspection. Whitelisted commands only (e.g. 'npx vitest run path/to/test.ts', 'tsc --noEmit', 'git diff'). Output truncated to head 100 + tail 50 lines. Blocked: mutations, network writes, package installs, shell substitution.",
     "",
     "SEARCH FIRST: Use search_in_files to locate symbols before reading files. Reading an entire file for a single symbol wastes iterations.",
     "",
@@ -585,12 +606,14 @@ export function assembleInvestigationSystemPrompt(input: {
     "",
     "Do NOT end with offers to continue ('shall I dig deeper?', 'would you like me to explore further?', etc.) — the user already asked the question. Deliver the full answer now.",
     "FINAL SUMMARY: End with a brief 2-3 sentence prose summary of your findings. No code blocks, no markdown section headers beyond what the answer requires.",
-    "Do not write or modify code. Do not run commands. Do not call TodoWrite. Do not produce patches.",
+    "Do not write or modify code. Do not call run_command (full shell). Do not call TodoWrite. Do not produce patches.",
     `Maximum iterations: ${input.baseMaxIterations} (already enforced; be targeted).`,
     `Repository path: ${input.repoPath}`,
     ...(input.projectMemoryBlock ? ["", input.projectMemoryBlock] : []),
     "",
     INVESTIGATION_OUTPUT_FORMAT,
+    "",
+    PHASE1_RUNTIME_HEURISTIC,
   ].join("\n");
 }
 

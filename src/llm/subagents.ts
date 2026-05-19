@@ -17,10 +17,11 @@ export type SubagentType = (typeof VALID_SUBAGENT_TYPES)[number];
 
 export const EXPLORE_ALLOWED_TOOLS: ReadonlySet<string> = new Set(READ_ONLY_TOOLS);
 
-/** Phase AS: audit-phase toolset — read-only tools plus suggest_scope_change. */
+/** Phase AS: audit-phase toolset — read-only tools, suggest_scope_change, and run_command_readonly. */
 export const AUDIT_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   ...READ_ONLY_TOOLS,
   "suggest_scope_change",
+  "run_command_readonly", // Phase G: reproduce failing tests, run typecheck, inspect runtime behavior
 ]);
 
 // Phase H.6: plan-aware iteration budgets. Floor protects single-question

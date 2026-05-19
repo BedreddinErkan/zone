@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ZONE_TOOLS } from "../tools/toolDefinitions.js";
 import {
+  AUDIT_ALLOWED_TOOLS,
   EXPLORE_ALLOWED_TOOLS,
   WORKER_ALLOWED_TOOLS,
   formatSubagentToolResultForParent,
@@ -272,5 +273,17 @@ describe("K.4: subagent prompt no-recursive-dispatch rules", () => {
 
   it("Task is absent from EXPLORE_ALLOWED_TOOLS (defensive by omission)", () => {
     expect(EXPLORE_ALLOWED_TOOLS.has("Task")).toBe(false);
+  });
+
+  it("Phase G: AUDIT_ALLOWED_TOOLS includes run_command_readonly", () => {
+    expect(AUDIT_ALLOWED_TOOLS.has("run_command_readonly")).toBe(true);
+  });
+
+  it("Phase G: EXPLORE_ALLOWED_TOOLS does NOT include run_command_readonly (deferred)", () => {
+    expect(EXPLORE_ALLOWED_TOOLS.has("run_command_readonly")).toBe(false);
+  });
+
+  it("Phase G: WORKER_ALLOWED_TOOLS does NOT include run_command_readonly (deferred)", () => {
+    expect(WORKER_ALLOWED_TOOLS.has("run_command_readonly")).toBe(false);
   });
 });

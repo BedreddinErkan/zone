@@ -23,6 +23,7 @@ import { generateFileOutline } from "./fileOutline.js";
 import { findCheckerForFile } from "./syntaxCheckers.js";
 import { classifyShellExit } from "./classifyShellExit.js";
 import { validateRunEnvironment } from "./runEnvironment.js";
+import { checkCommandSafe } from "../llm/runCommandSafe.js";
 
 const execAsync = promisify(exec);
 
@@ -68,6 +69,7 @@ const DISPATCHED_TOOLS = new Set([
   // so the IIFE startup guard at :51-75 doesn't fail-fast on its presence in
   // ZONE_TOOLS.
   "TodoWrite",
+  "run_command_readonly",
   // suggest_scope_change is handled entirely inside agentLoop (audit no-op guard
   // + investigation-mode handler, both with `continue`). It never reaches
   // executeTool — same interception pattern as TodoWrite.
@@ -852,6 +854,67 @@ export async function executeTool(
       return {
         success: false,
         output: `Tool "${toolName}" is not in the allowed set for this run.`,
+      };
+    }
+
+    if (toolName === "run_command_readonly") {
+      const command = String(args.command ?? "").trim();
+      const safety = checkCommandSafe(command);
+
+      if (!safety.safe) {
+        log("[zone-run-command-readonly-blocked]", JSON.stringify({
+          runId: input?.runId ?? null,
+          command: command.slice(0, 200),
+          reason: safety.reason,
+        }));
+        return {
+          success: false,
+          output: `Command blocked: ${safety.reason}. Use only whitelisted read-only commands.`,
+        };
+      }
+
+      let stdout = "";
+      let stderr = "";
+      let commandExitCode = 0;
+      const startMs = Date.now();
+      try {
+        const result = await execAsync(command, {
+          cwd: repoPath,
+          env: sanitizeVerificationEnv(),
+          timeout: 120_000,
+          maxBuffer: 10 * 1024 * 1024,
+          shell: "/bin/bash",
+        });
+        stdout = result.stdout;
+        stderr = result.stderr;
+      } catch (err) {
+        const code = Number((err as { code?: unknown }).code);
+        commandExitCode = Number.isFinite(code) && code !== 0 ? code : 1;
+        stdout = String((err as { stdout?: unknown }).stdout ?? "");
+        stderr = String((err as { stderr?: unknown }).stderr ?? "");
+      }
+      const durationMs = Date.now() - startMs;
+
+      log("[zone-run-command-readonly]", JSON.stringify({
+        runId: input?.runId ?? null,
+        command: command.slice(0, 200),
+        success: commandExitCode === 0,
+        durationMs,
+        exitCode: commandExitCode,
+        stdoutLength: stdout.length,
+        stderrLength: stderr.length,
+      }));
+
+      const combined = [stdout, stderr].filter(Boolean).join("\n") || "(no output)";
+      const ct = truncateCommandOutput(combined);
+      const exitHeader = commandExitCode === 0
+        ? `[exit_code=0 — command succeeded; output below is informational]\n`
+        : `[exit_code=${commandExitCode} — command failed]\n`;
+      return {
+        success: commandExitCode === 0,
+        exitCode: commandExitCode,
+        output: exitHeader + ct.truncated,
+        truncated: ct.wasTruncated,
       };
     }
 

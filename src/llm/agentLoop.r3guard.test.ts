@@ -152,6 +152,7 @@ describe("R.3 — tool description bounds", () => {
         "revert_patch",
         "run_command",
         "run_command_background",
+        "run_command_readonly",
         "search_in_files",
         "suggest_scope_change",
         "update_memory",
