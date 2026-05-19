@@ -257,6 +257,7 @@ export const ESCALATION_BONUS_ITERATIONS = 5;
 export const TOKEN_BUDGET_CAP = 800_000;
 export const TOKEN_BUDGET_WARN = 0.8;
 export const TOKEN_BUDGET_HARD = 0.95;
+export const TOKEN_BUDGET_MID_WARN = 0.70;
 
 function cleanTokenNumber(value: unknown): number {
   const n = Number(value);
@@ -2111,6 +2112,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
 
   let softIterWarnThreshold: number | undefined;
   let softWarnInjected = false;
+  let midWarnInjected = false;
   if (tierLimits) {
     const effectiveSoftIterWarn = tierLimits.softIterWarn;
     softIterWarnThreshold = effectiveSoftIterWarn;
@@ -2763,6 +2765,30 @@ Example:
         content: `[ZONE_ITER_SOFT_WARN] You have used ${iter} iterations. The cost ceiling will terminate this run — wrap up your work and write a final summary now.`,
       });
       log("[zone-iter-soft-warn-injected]", JSON.stringify({ iter, softIterWarnThreshold, runId: input.runId ?? null }));
+    }
+
+    // Phase I Lane 2.1: one-shot mid-run budget pressure injection at 70%.
+    // Fires before the LLM call so the agent has agency to converge (write
+    // pending deliverables) rather than continue expanding. Independent of the
+    // 80% UI warn and 95% hard exit — those remain unchanged.
+    if (!midWarnInjected && effectiveTokenBudgetCap > 0 &&
+        cumulativeTokens() / effectiveTokenBudgetCap >= TOKEN_BUDGET_MID_WARN) {
+      midWarnInjected = true;
+      const midWarnRatio = cumulativeTokens() / effectiveTokenBudgetCap;
+      responseInput.push({
+        role: "user",
+        content:
+          "You are at 70% of token budget. Pause expansive reads. " +
+          "If a primary deliverable (e.g., test file requested in the original task) is not yet " +
+          "written, write it now even if implementation is incomplete. Remaining iterations should " +
+          "converge, not explore.",
+      });
+      log("[zone-token-budget-mid-warn]", JSON.stringify({
+        runId: input.runId ?? null,
+        iter,
+        tokenRatio: Number(midWarnRatio.toFixed(3)),
+        ts: new Date().toISOString(),
+      }));
     }
 
     debugLog("[zone-agent-llm-pre]", {
