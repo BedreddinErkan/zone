@@ -954,6 +954,32 @@ describe("buildFileReadManifest — per-iter manifest (E.3)", () => {
     expect(injectedContent).toContain("src/api/server.ts");
   });
 
+  it("T.1b: structuredEntries expose totalReads, topFile, topCount for telemetry", () => {
+    // Two reads of the same file (same range) — readCount should be 2.
+    const responseInput = makeReadInput([
+      { callId: "s1", filePath: "src/api/router.ts", lineRange: [1, 50] },
+      { callId: "s2", filePath: "src/api/router.ts", lineRange: [1, 50] },
+      { callId: "s3", filePath: "src/api/other.ts" },
+    ]);
+    const classified = classifyTurns(responseInput, []);
+    const { entryCount, structuredEntries } = buildFileReadManifest(responseInput, classified);
+    expect(entryCount).toBe(2); // 2 distinct files
+
+    const totalReads = structuredEntries.reduce((s, e) => s + e.readCount, 0);
+    expect(typeof totalReads).toBe("number");
+    expect(totalReads).toBeGreaterThanOrEqual(entryCount); // totalReads >= entryCount always
+
+    const topEntry = structuredEntries.reduce(
+      (best, e) => (e.readCount > (best?.readCount ?? 0) ? e : best),
+      structuredEntries[0],
+    );
+    expect(topEntry).toBeDefined();
+    expect(topEntry.filePath).toBe("src/api/router.ts"); // most-read file
+    expect(typeof topEntry.readCount).toBe("number");
+    expect(topEntry.readCount).toBeGreaterThanOrEqual(1);
+    expect(topEntry.lineRange).toBe("lines 1-50");
+  });
+
   it("T.2: manifest NOT injected (entryCount === 0) when responseInput has no read_file calls", () => {
     const responseInput: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },

@@ -22,10 +22,16 @@ const MANIFEST_MAX_ENTRIES = 20;
  *
  * VERBATIM/PINNED reads are excluded — they remain visible in context already.
  */
+export interface ManifestEntry {
+  filePath: string;
+  readCount: number;  // total reads across all ranges for this file
+  lineRange: string;  // "outline" if no range, else "lines S-E" of most-read range
+}
+
 export function buildFileReadManifest(
   responseInput: ChatCompletionMessageParam[],
   classified: ClassifiedTurn[]
-): { manifest: string; truncated: boolean; entryCount: number } {
+): { manifest: string; truncated: boolean; entryCount: number; structuredEntries: ManifestEntry[] } {
   // Build callId → {filePath, lineRange} by parsing assistant tool_call args in responseInput.
   const readCallArgs = new Map<string, { filePath: string; lineRange: [number, number] | null }>();
   for (const msg of responseInput) {
@@ -80,7 +86,7 @@ export function buildFileReadManifest(
   const finalEntries = allEntries.slice(0, MANIFEST_MAX_ENTRIES);
 
   if (finalEntries.length === 0) {
-    return { manifest: "", truncated: false, entryCount: 0 };
+    return { manifest: "", truncated: false, entryCount: 0, structuredEntries: [] };
   }
 
   const lines = finalEntries.map((e) => {
@@ -99,7 +105,19 @@ export function buildFileReadManifest(
     manifest += `\n(... ${allEntries.length - MANIFEST_MAX_ENTRIES} more entries truncated)`;
   }
 
-  return { manifest, truncated, entryCount: finalEntries.length };
+  // Build structured entries for telemetry: per-file total readCount + dominant lineRange.
+  const structuredEntries: ManifestEntry[] = finalEntries.map((e) => {
+    const totalReadCount = e.ranges.reduce((s, r) => s + r.readCount, 0);
+    // Pick the range with the highest readCount as the representative lineRange.
+    const topRange = e.ranges.reduce((best, r) => (r.readCount > best.readCount ? r : best), e.ranges[0]);
+    const lineRange =
+      topRange.startLine !== null && topRange.endLine !== null
+        ? `lines ${topRange.startLine}-${topRange.endLine}`
+        : "outline";
+    return { filePath: e.path, readCount: totalReadCount, lineRange };
+  });
+
+  return { manifest, truncated, entryCount: finalEntries.length, structuredEntries };
 }
 
 export class ContextCompactor {

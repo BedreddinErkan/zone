@@ -2855,11 +2855,20 @@ Example:
     // injection pattern as softIterWarn / midWarn for prefix-cache stability.
     {
       const classified = classifyTurns(responseInput, toolCallLog);
-      const { manifest, entryCount } = buildFileReadManifest(responseInput, classified);
+      const { manifest, entryCount, structuredEntries } = buildFileReadManifest(responseInput, classified);
       if (entryCount > 0) {
+        const totalReads = structuredEntries.reduce((s, e) => s + e.readCount, 0);
+        const topEntry = structuredEntries.reduce(
+          (best, e) => (e.readCount > (best?.readCount ?? 0) ? e : best),
+          structuredEntries[0] as (typeof structuredEntries)[0] | undefined,
+        );
         log("[zone-file-manifest-injected]", JSON.stringify({
           iter: iter + 1,
           entryCount,
+          totalReads,
+          topFile: topEntry?.filePath ?? null,
+          topCount: topEntry?.readCount ?? 1,
+          topLineRange: topEntry?.lineRange ?? "outline",
           runId: input.runId ?? null,
         }));
         prunedMessages = [
