@@ -3,12 +3,16 @@ import type { ChatCompletionMessageParam } from "openai/resources/chat/completio
 export enum TurnClass {
   VERBATIM = "verbatim",
   CANDIDATE = "candidate",
+  PINNED = "pinned",   // stronger than VERBATIM — never summarized, surfaced in telemetry
 }
+
+export type PinReason = "audit_artifact" | "recent_failure" | "protected_tool";
 
 export interface ClassifiedTurn {
   index: number;
   class: TurnClass;
   reason: string;
+  pinReason?: PinReason;
 }
 
 export interface CompactionResult {
