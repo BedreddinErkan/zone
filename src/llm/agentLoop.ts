@@ -56,8 +56,9 @@ import type {
   ChatCompletionMessageFunctionToolCall,
 } from "openai/resources/chat/completions";
 import type { Mode } from "../types/mode.js";
-import { ContextCompactor } from "./compaction/ContextCompactor.js";
+import { ContextCompactor, buildFileReadManifest } from "./compaction/ContextCompactor.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
+import { classifyTurns } from "./compaction/classifyTurns.js";
 import { hashToolCall, createDetectorState, recordAndDetect } from "./loopDetector.js";
 import { UpstreamUnavailableError } from "./withExponentialBackoff.js";
 import { emitTokenBreakdown, emitBreakdownSummary, type BreakdownEvent } from "./tokenBreakdown.js";
@@ -2846,6 +2847,32 @@ Example:
       prunedMessages = freshlyPruned;
       prevR2BlocksReplaced = pruneStats.blocksReplaced;
       prevR2PrunedMessages = freshlyPruned;
+    }
+
+    // E.3: per-iter file-read manifest injection. Appended to prunedMessages (not
+    // responseInput) so it does not accumulate across iterations. Only emitted when
+    // the run has actually read at least one file. Follows the same user-message
+    // injection pattern as softIterWarn / midWarn for prefix-cache stability.
+    {
+      const classified = classifyTurns(responseInput, toolCallLog);
+      const { manifest, entryCount } = buildFileReadManifest(responseInput, classified);
+      if (entryCount > 0) {
+        log("[zone-file-manifest-injected]", JSON.stringify({
+          iter: iter + 1,
+          entryCount,
+          runId: input.runId ?? null,
+        }));
+        prunedMessages = [
+          ...prunedMessages,
+          {
+            role: "user" as const,
+            content:
+              `## Files already read this run\n${manifest}\n\n` +
+              `Re-read ONLY if the file was modified since your last read.\n` +
+              `Reference prior content by line number instead of re-reading.`,
+          },
+        ];
+      }
     }
 
     // R.1: emit per-call token breakdown (on the pruned view, which is what the LLM sees).

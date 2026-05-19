@@ -901,3 +901,90 @@ describe("Phase J.4 — Tiered summary prompts", () => {
     expect(result.summaryTier).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// T.1, T.2, T.4: E.3 per-iter file-read manifest (buildFileReadManifest)
+// ---------------------------------------------------------------------------
+
+describe("buildFileReadManifest — per-iter manifest (E.3)", () => {
+  /** Build a responseInput that contains N read_file assistant+tool_result pairs. */
+  function makeReadInput(
+    reads: Array<{ callId: string; filePath: string; lineRange?: [number, number] }>
+  ): ChatCompletionMessageParam[] {
+    const msgs: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+    ];
+    for (const { callId, filePath, lineRange } of reads) {
+      const args: Record<string, unknown> = { filePath };
+      if (lineRange) args["lineRange"] = lineRange;
+      msgs.push({
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: callId,
+            type: "function",
+            function: { name: "read_file", arguments: JSON.stringify(args) },
+          },
+        ],
+      } as ChatCompletionMessageParam);
+      msgs.push({ role: "tool", tool_call_id: callId, content: "file content" } as ChatCompletionMessageParam);
+    }
+    // Add recency-guard messages so earlier reads become CANDIDATE
+    msgs.push({ role: "assistant", content: "summary" });
+    msgs.push({ role: "user", content: "next step" });
+    msgs.push({ role: "assistant", content: "done" });
+    return msgs;
+  }
+
+  it("T.1: manifest injected (entryCount > 0) when responseInput has read_file calls", () => {
+    const responseInput = makeReadInput([
+      { callId: "r1", filePath: "src/api/server.ts" },
+    ]);
+    const classified = classifyTurns(responseInput, []);
+    const { manifest, entryCount } = buildFileReadManifest(responseInput, classified);
+    expect(entryCount).toBeGreaterThan(0);
+    // The manifest header should match the "## Files already read this run" injection format
+    const injectedContent =
+      `## Files already read this run\n${manifest}\n\n` +
+      `Re-read ONLY if the file was modified since your last read.\n` +
+      `Reference prior content by line number instead of re-reading.`;
+    expect(injectedContent).toContain("## Files already read this run");
+    expect(injectedContent).toContain("src/api/server.ts");
+  });
+
+  it("T.2: manifest NOT injected (entryCount === 0) when responseInput has no read_file calls", () => {
+    const responseInput: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "c1",
+            type: "function",
+            function: { name: "apply_patch", arguments: JSON.stringify({ patch: "..." }) },
+          },
+        ],
+      } as ChatCompletionMessageParam,
+      { role: "tool", tool_call_id: "c1", content: "patched" } as ChatCompletionMessageParam,
+      { role: "assistant", content: "done" },
+    ];
+    const classified = classifyTurns(responseInput, []);
+    const { entryCount } = buildFileReadManifest(responseInput, classified);
+    expect(entryCount).toBe(0);
+  });
+
+  it("T.4: buildFileReadManifest includes lineRange in entry when read had explicit range", () => {
+    const responseInput = makeReadInput([
+      { callId: "lr1", filePath: "src/api/server.ts", lineRange: [10, 50] },
+    ]);
+    const classified = classifyTurns(responseInput, []);
+    const { manifest, entryCount } = buildFileReadManifest(responseInput, classified);
+    expect(entryCount).toBe(1);
+    expect(manifest).toContain("lines 10-50");
+    expect(manifest).toContain("src/api/server.ts");
+  });
+});

@@ -115,7 +115,7 @@ describe("pruneStaleReads — placeholder content", () => {
     expect(content).toMatch(/src\/call-0\.ts/);
     expect(content).toMatch(/lines/);
     expect(content).toMatch(/bytes/);
-    expect(content).toMatch(/Re-read if needed/);
+    expect(content).toMatch(/Re-read ONLY if/);
   });
 
   it("placeholder for missing filePath arg uses fallback format", () => {
@@ -277,5 +277,23 @@ describe("emitContextPruned", () => {
     expect(parsed["iter"]).toBe(7);
     expect(parsed["charsSaved"]).toBe(800);
     expect(parsed["blocksKept"]).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T.3: E.2 placeholder sharpening
+// ---------------------------------------------------------------------------
+
+describe("makeSummaryPlaceholder — sharpened text (E.2)", () => {
+  it("T.3: placeholder text contains 'Re-read ONLY if' and NOT 'Re-read if needed'", () => {
+    const msgs = buildNReadIters(4);
+    const { pruned } = pruneStaleReads(msgs, 2);
+    const toolMsg = pruned.find(
+      (m) => m.role === "tool" && (m as { tool_call_id?: string }).tool_call_id === "call-0"
+    );
+    expect(toolMsg).toBeDefined();
+    const content = (toolMsg as { content?: string }).content ?? "";
+    expect(content).toMatch(/Re-read ONLY if the file changed since this iter/);
+    expect(content).not.toMatch(/Re-read if needed/);
   });
 });

@@ -84,9 +84,9 @@ function makeSummaryPlaceholder(meta: CallMeta | undefined, content: string): st
       : meta.filePath
     : null;
   if (location) {
-    return `[Earlier read: ${location} — ${lineCount} lines, ${byteCount} bytes. Content elided to save tokens. Re-read if needed.]`;
+    return `[Earlier read: ${location} — ${lineCount} lines, ${byteCount} bytes. Content elided to save tokens. Re-read ONLY if the file changed since this iter; otherwise reference by line number from the manifest above.]`;
   }
-  return `[Earlier read result — ${lineCount} lines, ${byteCount} bytes. Content elided to save tokens. Re-read if needed.]`;
+  return `[Earlier read result — ${lineCount} lines, ${byteCount} bytes. Content elided to save tokens. Re-read ONLY if the file changed since this iter; otherwise reference by line number from the manifest above.]`;
 }
 
 /**
