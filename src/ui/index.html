@@ -9260,6 +9260,11 @@
             status: 'active',
             className: isAuditLane ? 'audit-lane-line' : subagentClass
           });
+          if (progress.lane !== 'audit') {
+            // isRunning / button-state flip for main-lane start only.
+            // Audit-lane agent_loop_start must not toggle the send button —
+            // the main run is still active and the UI should stay in Stop mode.
+          }
           return;
         }
         if (type === 'agent_loop_complete') {
@@ -9271,12 +9276,16 @@
             status: ok ? 'done' : 'warning',
             className: subagentClass
           });
-          // UI.5: capture summary text for inline prose bubble at run end.
-          // Use summaryPreview if present (test-injectable), fall back to detail.
-          const _cap = String(progress.summaryPreview || progress.detail || '').trim();
-          if (_cap && !subagentId) {
-            state.__agentSummaryByRun = state.__agentSummaryByRun || {};
-            state.__agentSummaryByRun[runId] = _cap;
+          if (progress.lane !== 'audit') {
+            // UI.5: capture summary text for inline prose bubble at run end.
+            // Use summaryPreview if present (test-injectable), fall back to detail.
+            // Guard: audit-lane complete must not flip isRunning/button state or
+            // overwrite the main agent summary — the main run is still in progress.
+            const _cap = String(progress.summaryPreview || progress.detail || '').trim();
+            if (_cap && !subagentId) {
+              state.__agentSummaryByRun = state.__agentSummaryByRun || {};
+              state.__agentSummaryByRun[runId] = _cap;
+            }
           }
           return;
         }
