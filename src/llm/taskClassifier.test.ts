@@ -931,3 +931,199 @@ describe("Phase D4 — investigation-scope classifier tuning", () => {
     expect(result.fallbackUsed).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase Q.8 update — Large-file classifier trigger
+// ---------------------------------------------------------------------------
+
+describe("Phase Q.8 update — Large-file classifier trigger", () => {
+  function simpleResponse() {
+    return buildResponse(
+      JSON.stringify({
+        tier: "simple",
+        estimatedFiles: 1,
+        estimatedIterations: 5,
+        confidence: 0.9,
+        reasoning: "single file edit",
+      })
+    );
+  }
+
+  it("bumps simple → medium when target file > 2000 LOC", async () => {
+    mocks.createChatCompletion.mockResolvedValue(simpleResponse());
+
+    const result = await classifyTask(
+      "Add a /api/version endpoint to src/api/server.ts",
+      { targetFiles: ["src/api/server.ts"], _fileLineCounter: () => 4910 }
+    );
+
+    expect(result.tier).toBe("medium");
+  });
+
+  it("does not downgrade complex → medium for large files (no downgrade)", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "complex",
+          estimatedFiles: 10,
+          estimatedIterations: 30,
+          confidence: 0.9,
+          reasoning: "cross-cutting change",
+        })
+      )
+    );
+
+    const result = await classifyTask(
+      "Refactor entire codebase architecture",
+      { targetFiles: ["src/small.ts"], _fileLineCounter: () => 50 }
+    );
+
+    expect(result.tier).toBe("complex");
+  });
+
+  it("does not bump medium (bump is simple-only)", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "medium",
+          estimatedFiles: 3,
+          estimatedIterations: 12,
+          confidence: 0.9,
+          reasoning: "multi-file feature",
+        })
+      )
+    );
+
+    const result = await classifyTask(
+      "Add feature touching src/api/server.ts and two others",
+      { targetFiles: ["src/api/server.ts"], _fileLineCounter: () => 4910 }
+    );
+
+    expect(result.tier).toBe("medium");  // already medium, not bumped further
+  });
+
+  it("handles non-existent file gracefully — no bump (new file creation)", async () => {
+    mocks.createChatCompletion.mockResolvedValue(simpleResponse());
+
+    const result = await classifyTask(
+      "Create src/new-feature.ts with a new class",
+      { targetFiles: ["src/new-feature.ts"], _fileLineCounter: () => 0 }
+    );
+
+    expect(result.tier).toBe("simple");
+  });
+
+  it("does not bump when file is under threshold", async () => {
+    mocks.createChatCompletion.mockResolvedValue(simpleResponse());
+
+    const result = await classifyTask(
+      "Fix typo in src/utils/helper.ts",
+      { targetFiles: ["src/utils/helper.ts"], _fileLineCounter: () => 500 }
+    );
+
+    expect(result.tier).toBe("simple");
+  });
+
+  it("bumps when exactly at threshold+1 (boundary check)", async () => {
+    mocks.createChatCompletion.mockResolvedValue(simpleResponse());
+
+    const result = await classifyTask(
+      "Edit src/boundary.ts",
+      { targetFiles: ["src/boundary.ts"], _fileLineCounter: () => 2001, skipCache: true }
+    );
+
+    expect(result.tier).toBe("medium");
+  });
+
+  it("does not bump when exactly at threshold (boundary check)", async () => {
+    mocks.createChatCompletion.mockResolvedValue(simpleResponse());
+
+    const result = await classifyTask(
+      "Edit src/exact.ts",
+      { targetFiles: ["src/exact.ts"], _fileLineCounter: () => 2000, skipCache: true }
+    );
+
+    expect(result.tier).toBe("simple");
+  });
+
+  it("respects ZONE_LARGE_FILE_LOC env override", async () => {
+    process.env.ZONE_LARGE_FILE_LOC = "500";
+    try {
+      mocks.createChatCompletion.mockResolvedValue(simpleResponse());
+
+      const result = await classifyTask(
+        "Edit src/medium-size.ts with custom threshold",
+        { targetFiles: ["src/medium-size.ts"], _fileLineCounter: () => 600, skipCache: true }
+      );
+
+      expect(result.tier).toBe("medium");  // 600 > custom threshold 500
+    } finally {
+      delete process.env.ZONE_LARGE_FILE_LOC;
+    }
+  });
+
+  it("no bump below custom ZONE_LARGE_FILE_LOC", async () => {
+    process.env.ZONE_LARGE_FILE_LOC = "500";
+    try {
+      mocks.createChatCompletion.mockResolvedValue(simpleResponse());
+
+      const result = await classifyTask(
+        "Edit src/under-custom-threshold.ts",
+        { targetFiles: ["src/under-custom-threshold.ts"], _fileLineCounter: () => 499, skipCache: true }
+      );
+
+      expect(result.tier).toBe("simple");
+    } finally {
+      delete process.env.ZONE_LARGE_FILE_LOC;
+    }
+  });
+
+  it("extracts file paths from task description when targetFiles not provided", async () => {
+    mocks.createChatCompletion.mockResolvedValue(simpleResponse());
+
+    const result = await classifyTask(
+      "Add an endpoint to src/api/server.ts that reads package.json",
+      {
+        // No targetFiles — extracted from description text
+        _fileLineCounter: (path) => (path.includes("server.ts") ? 4910 : 0),
+        skipCache: true,
+      }
+    );
+
+    expect(result.tier).toBe("medium");
+  });
+
+  it("emits [zone-tier-bumped] telemetry when bump fires", async () => {
+    mocks.createChatCompletion.mockResolvedValue(simpleResponse());
+
+    await classifyTask(
+      "Edit the large file for tier-bumped telemetry test",
+      { targetFiles: ["src/server.ts"], _fileLineCounter: () => 5000, skipCache: true }
+    );
+
+    const bumpLog = consoleLogSpy.mock.calls.find(
+      (call) => String(call[0] ?? "") === "[zone-tier-bumped]"
+    );
+    expect(bumpLog).toBeDefined();
+    const payload = JSON.parse(bumpLog![1] as string) as Record<string, unknown>;
+    expect(payload.fromTier).toBe("simple");
+    expect(payload.toTier).toBe("medium");
+    expect(payload.reason).toBe("large_file_threshold");
+    expect(payload.lineCount).toBe(5000);
+    expect(payload.filePath).toBe("src/server.ts");
+  });
+
+  it("does not emit [zone-tier-bumped] when no bump occurs", async () => {
+    mocks.createChatCompletion.mockResolvedValue(simpleResponse());
+
+    await classifyTask(
+      "Small edit to src/tiny.ts no-bump test",
+      { targetFiles: ["src/tiny.ts"], _fileLineCounter: () => 100, skipCache: true }
+    );
+
+    const bumpLog = consoleLogSpy.mock.calls.find(
+      (call) => String(call[0] ?? "") === "[zone-tier-bumped]"
+    );
+    expect(bumpLog).toBeUndefined();
+  });
+});

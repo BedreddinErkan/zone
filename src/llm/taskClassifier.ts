@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import { createLLMClient } from "./factory.js";
 import {
   extractResponsesApiOutputText,
@@ -29,6 +31,15 @@ export interface ClassifyTaskOptions {
   skipCache?: boolean;
   /** Test hook: override the 5s timeout. */
   timeoutMs?: number;
+  /**
+   * Explicit list of files the task will touch. When provided, used for the
+   * Q.8 large-file bump instead of paths extracted from the task description.
+   */
+  targetFiles?: string[];
+  /** Repo root for resolving relative targetFiles paths. Defaults to process.cwd(). */
+  repoRoot?: string;
+  /** Test hook: override file line counting to avoid real fs access. */
+  _fileLineCounter?: (filePath: string) => number;
 }
 
 const CLASSIFIER_SYSTEM_PROMPT = `You classify coding tasks for a tier-based execution system.
@@ -121,6 +132,47 @@ function truncateForLog(value: unknown, maxChars = 600): string {
   if (typeof s !== "string") s = String(s);
   return s.length > maxChars ? `${s.slice(0, maxChars)}…[truncated]` : s;
 }
+
+// Q.8 large-file trigger helpers -----------------------------------------------
+
+// Matches relative file paths mentioned in task descriptions, e.g. src/api/server.ts
+const FILE_PATH_REGEX = /\b(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|go|py|rs|java|json|yaml|yml|md)\b/g;
+
+function extractFilePaths(text: string): string[] {
+  const matches = text.match(FILE_PATH_REGEX);
+  return matches ? [...new Set(matches)] : [];
+}
+
+function safeFileLineCount(filePath: string, repoRoot: string): number {
+  try {
+    const fullPath = resolvePath(repoRoot, filePath);
+    if (!existsSync(fullPath)) return 0;
+    const content = readFileSync(fullPath, "utf-8");
+    return content.split("\n").length;
+  } catch {
+    return 0;
+  }
+}
+
+function bumpForLargeFiles(
+  tier: TaskTier,
+  targetFiles: string[],
+  repoRoot: string,
+  fileLineCounter?: (filePath: string) => number
+): { tier: TaskTier; bumpedFile?: string; bumpedLineCount?: number } {
+  if (tier !== "simple" || targetFiles.length === 0) return { tier };
+  const threshold = Number(process.env.ZONE_LARGE_FILE_LOC ?? 2000);
+  const getLineCount = fileLineCounter ?? ((f) => safeFileLineCount(f, repoRoot));
+  for (const filePath of targetFiles) {
+    const lineCount = getLineCount(filePath);
+    if (lineCount > threshold) {
+      return { tier: "medium", bumpedFile: filePath, bumpedLineCount: lineCount };
+    }
+  }
+  return { tier };
+}
+
+// -------------------------------------------------------------------------------
 
 function hashTask(taskDescription: string): string {
   // Deterministic djb2 hash → base36 string. Produces stable cache keys
@@ -274,6 +326,26 @@ export async function classifyTask(
     }
 
     const parsed = parseClassifierResponse(extraction.text);
+
+    // Q.8 large-file trigger: bump simple → medium if any target file exceeds threshold.
+    // Applied before the confidence gate so a bumped tier is reflected in the fallback path too.
+    const targetFiles = options.targetFiles ?? extractFilePaths(normalized);
+    const repoRoot = options.repoRoot ?? process.cwd();
+    const bumpResult = bumpForLargeFiles(parsed.tier, targetFiles, repoRoot, options._fileLineCounter);
+    if (bumpResult.bumpedFile !== undefined) {
+      parsed.tier = bumpResult.tier;
+      log("[zone-tier-bumped]", JSON.stringify({
+        event: "tier_bumped",
+        taskHash: cacheKey,
+        fromTier: "simple",
+        toTier: "medium",
+        reason: "large_file_threshold",
+        filePath: bumpResult.bumpedFile,
+        lineCount: bumpResult.bumpedLineCount,
+        threshold: Number(process.env.ZONE_LARGE_FILE_LOC ?? 2000),
+        ts: new Date().toISOString(),
+      }));
+    }
 
     if (parsed.confidence < CLASSIFIER_CONFIDENCE_THRESHOLD) {
       const fallback = buildFallback(model, costUsd, startTime, "low confidence");
