@@ -3785,7 +3785,14 @@ app.post("/api/patch", async (req, res) => {
       ?? readAuditModeSetting();
     const explicitAuditRequest = req.body?.forceAudit === true;
 
-    const auditDecision = computeAuditDecision({ tier, auditMode, explicitRequest: explicitAuditRequest });
+    const auditDecision = computeAuditDecision({
+      tier,
+      auditMode,
+      explicitRequest: explicitAuditRequest,
+      plan: preGeneratedPlan ?? null,
+      classification: preClassifiedTask ?? null,
+      runId: runIdStr,
+    });
 
     if (auditDecision.shouldRun) {
       if (!preGeneratedPlan) {
@@ -3793,6 +3800,15 @@ app.post("/api/patch", async (req, res) => {
         log("[zone-audit-skipped]", JSON.stringify({ runId: runIdStr, tier, auditMode, reason: "no_plan", ts: new Date().toISOString() }));
       } else {
         try {
+        // Phase O cost-opt: downgrade audit investigator to Haiku 4.5 to reduce
+        // scope-audit cost from ~$0.13 (Sonnet 4.6) to ~$0.04 per task.
+        const AUDIT_INVESTIGATOR_MODEL = "claude-haiku-4-5";
+        log("[zone-audit-model-downgrade]", JSON.stringify({
+          model: AUDIT_INVESTIGATOR_MODEL,
+          runId: runIdStr,
+          tier,
+          ts: new Date().toISOString(),
+        }));
         emitProgress(runIdStr, {
           stage: "scope_revision",
           progress: {
@@ -3813,6 +3829,7 @@ app.post("/api/patch", async (req, res) => {
           parentTier: tier,
           maxIterationsOverride: TIER_LIMITS[tier].auditIterCap,
           onProgress: (update) => emitProgress(runIdStr, update as any),
+          investigatorModel: AUDIT_INVESTIGATOR_MODEL,
         });
 
         if (findings.skipped) {

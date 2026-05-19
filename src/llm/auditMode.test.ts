@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_AUDIT_MODE, shouldRunAudit } from "./auditMode.js";
+import { DEFAULT_AUDIT_MODE, isLowRiskPlan, shouldRunAudit } from "./auditMode.js";
+import type { ExecutionPlan } from "./executionPlan.js";
+import type { TaskClassification } from "./taskClassifier.js";
 
 describe("shouldRunAudit", () => {
   describe("auditMode=auto", () => {
@@ -67,5 +69,159 @@ describe("shouldRunAudit", () => {
     it("default is auto", () => {
       expect(DEFAULT_AUDIT_MODE).toBe("auto");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isLowRiskPlan + shouldRunAudit low-risk skip (Phase O cost-opt)
+// ---------------------------------------------------------------------------
+
+function makePlan(overrides: Partial<ExecutionPlan> = {}): ExecutionPlan {
+  return {
+    objective: "Add a log line to server startup",
+    steps: [
+      {
+        title: "Edit server.ts",
+        description: "Add console.log at startup",
+        filesLikely: ["src/api/server.ts"],
+        subagentEligible: false,
+      },
+    ],
+    riskHints: [],
+    scopeSummary: "Single file edit, no cross-cutting concerns.",
+    ...overrides,
+  };
+}
+
+function makeClassification(overrides: Partial<TaskClassification> = {}): TaskClassification {
+  return {
+    tier: "medium",
+    estimatedFiles: 1,
+    estimatedIterations: 8,
+    confidence: 0.9,
+    reasoning: "single file change",
+    classifierCostUsd: 0.0001,
+    classifierLatencyMs: 200,
+    classifierModel: "claude-haiku-4-5",
+    ...overrides,
+  };
+}
+
+describe("isLowRiskPlan", () => {
+  it("T.1 returns true for ≤2 file non-complex plan with no rename", () => {
+    const plan = makePlan({
+      steps: [
+        { title: "Edit A", description: "d", filesLikely: ["src/a.ts"], subagentEligible: false },
+        { title: "Edit B", description: "d", filesLikely: ["src/b.ts"], subagentEligible: false },
+      ],
+    });
+    const cls = makeClassification({ tier: "medium" });
+    expect(isLowRiskPlan(plan, cls)).toBe(true);
+  });
+
+  it("T.2 returns false for ≥3 file plan", () => {
+    const plan = makePlan({
+      steps: [
+        {
+          title: "Multi-file",
+          description: "d",
+          filesLikely: ["src/a.ts", "src/b.ts", "src/c.ts"],
+          subagentEligible: false,
+        },
+      ],
+    });
+    const cls = makeClassification({ tier: "medium" });
+    expect(isLowRiskPlan(plan, cls)).toBe(false);
+  });
+
+  it("T.3 returns false for tier=complex regardless of file count", () => {
+    const plan = makePlan();
+    const cls = makeClassification({ tier: "complex" });
+    expect(isLowRiskPlan(plan, cls)).toBe(false);
+  });
+
+  it("returns false when a step is subagentEligible (fanout signal)", () => {
+    const plan = makePlan({
+      steps: [
+        { title: "Edit A", description: "d", filesLikely: ["src/a.ts"], subagentEligible: true },
+      ],
+    });
+    const cls = makeClassification({ tier: "medium" });
+    expect(isLowRiskPlan(plan, cls)).toBe(false);
+  });
+
+  it("returns false when plan objective contains rename verb", () => {
+    const plan = makePlan({ objective: "Rename the function foo to bar" });
+    const cls = makeClassification({ tier: "medium" });
+    expect(isLowRiskPlan(plan, cls)).toBe(false);
+  });
+
+  it("returns false when plan objective contains move verb", () => {
+    const plan = makePlan({ objective: "Move auth logic from utils to middleware" });
+    const cls = makeClassification({ tier: "medium" });
+    expect(isLowRiskPlan(plan, cls)).toBe(false);
+  });
+});
+
+describe("shouldRunAudit — low-risk plan skip (Phase O)", () => {
+  it("T.4 shouldRunAudit returns false (skip) when isLowRiskPlan is true in auto mode", () => {
+    const plan = makePlan();
+    const cls = makeClassification({ tier: "medium" });
+    const result = shouldRunAudit({
+      tier: "medium",
+      auditMode: "auto",
+      plan,
+      classification: cls,
+    });
+    expect(result.shouldRun).toBe(false);
+    expect(result.reason).toBe("low_risk_plan");
+  });
+
+  it("explicitRequest bypasses low-risk-plan skip", () => {
+    const plan = makePlan();
+    const cls = makeClassification({ tier: "medium" });
+    const result = shouldRunAudit({
+      tier: "medium",
+      auditMode: "auto",
+      plan,
+      classification: cls,
+      explicitRequest: true,
+    });
+    expect(result.shouldRun).toBe(true);
+    expect(result.reason).toContain("explicit");
+  });
+
+  it("auditMode=always bypasses low-risk-plan skip", () => {
+    const plan = makePlan();
+    const cls = makeClassification({ tier: "medium" });
+    const result = shouldRunAudit({
+      tier: "medium",
+      auditMode: "always",
+      plan,
+      classification: cls,
+    });
+    expect(result.shouldRun).toBe(true);
+    expect(result.reason).toContain("always");
+  });
+
+  it("high-risk plan (3 files) still runs audit in auto mode", () => {
+    const plan = makePlan({
+      steps: [
+        {
+          title: "Multi-file",
+          description: "d",
+          filesLikely: ["src/a.ts", "src/b.ts", "src/c.ts"],
+          subagentEligible: false,
+        },
+      ],
+    });
+    const cls = makeClassification({ tier: "medium" });
+    const result = shouldRunAudit({
+      tier: "medium",
+      auditMode: "auto",
+      plan,
+      classification: cls,
+    });
+    expect(result.shouldRun).toBe(true);
   });
 });
