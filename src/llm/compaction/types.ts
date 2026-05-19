@@ -22,6 +22,17 @@ export interface CompactionResult {
   warning?: string;
   /** Populated when compacted === true: replacement for responseInput after compaction. */
   newResponseInput?: ChatCompletionMessageParam[];
+  // J.1/J.2 telemetry — populated when compacted === true
+  pinnedStats?: {
+    audit_artifact: number;
+    recent_failure: number;
+  };
+  verbatimCount?: number;
+  candidatesSummarized?: number;
+  // J.3 telemetry
+  manifestStats?: { entries: number; truncated: boolean };
+  // J.4 telemetry
+  summaryTier?: 1 | 2 | 3;
 }
 
 /**

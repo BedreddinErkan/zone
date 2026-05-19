@@ -1,17 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ContextCompactor } from "./ContextCompactor.js";
+import { ContextCompactor, buildFileReadManifest } from "./ContextCompactor.js";
 import { classifyTurns } from "./classifyTurns.js";
 import {
   TurnClass,
   CompactionExhaustedError,
+  type ClassifiedTurn,
   type ToolCallRecord,
 } from "./types.js";
 import type { LLMClient } from "../types.js";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
-import { summarize } from "./summarizer.js";
+import { summarize, buildSummarizationPrompt } from "./summarizer.js";
 
-// Stub the summarizer module so tests never hit the real LLM.
-vi.mock("./summarizer.js");
+// Stub only the async summarize function; keep buildSummarizationPrompt real.
+vi.mock("./summarizer.js", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("./summarizer.js")>();
+  return { ...mod, summarize: vi.fn() };
+});
 
 beforeEach(() => {
   // Re-apply default implementation after mockReset (vitest.config has mockReset: true).
@@ -641,5 +645,259 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
     expect(result.newResponseInput).toBeUndefined();
     // Count must not have incremented on failure
     expect(c.getCompactionCount()).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase J.3 — File-read manifest (buildFileReadManifest)
+// ---------------------------------------------------------------------------
+
+// Helper: build assistant+tool pairs for read_file calls
+function makeReadFileTurns(
+  reads: Array<{ path: string; startLine: number; endLine: number }>
+): ChatCompletionMessageParam[] {
+  const turns: ChatCompletionMessageParam[] = [];
+  for (const [i, r] of reads.entries()) {
+    const id = `call_rf_${i}`;
+    turns.push({
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id,
+          type: "function",
+          function: {
+            name: "read_file",
+            arguments: JSON.stringify({ filePath: r.path, lineRange: [r.startLine, r.endLine] }),
+          },
+        },
+      ],
+    });
+    turns.push({ role: "tool", tool_call_id: id, content: "file content" });
+  }
+  return turns;
+}
+
+function allCandidateClassifications(turns: ChatCompletionMessageParam[]): ClassifiedTurn[] {
+  return turns.map((_, i) => ({ index: i, class: TurnClass.CANDIDATE, reason: "candidate" }));
+}
+
+describe("Phase J.3 — buildFileReadManifest", () => {
+  it("aggregates read_file results into manifest", () => {
+    const turns = makeReadFileTurns([
+      { path: "src/foo.ts", startLine: 1, endLine: 100 },
+      { path: "src/bar.ts", startLine: 50, endLine: 150 },
+    ]);
+    const result = buildFileReadManifest(turns, allCandidateClassifications(turns));
+    expect(result.manifest).toContain("src/foo.ts lines 1-100");
+    expect(result.manifest).toContain("src/bar.ts lines 50-150");
+    expect(result.entryCount).toBe(2);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("dedupes same-range reads into 'read Nx' notation", () => {
+    const turns = makeReadFileTurns([
+      { path: "src/foo.ts", startLine: 1, endLine: 100 },
+      { path: "src/foo.ts", startLine: 1, endLine: 100 },
+    ]);
+    const result = buildFileReadManifest(turns, allCandidateClassifications(turns));
+    expect(result.manifest).toContain("(read 2x)");
+    const fileLines = result.manifest.split("\n").filter((l) => l.includes("src/foo.ts"));
+    expect(fileLines).toHaveLength(1);  // one manifest line for the file
+  });
+
+  it("keeps distinct ranges for the same file as separate entries", () => {
+    const turns = makeReadFileTurns([
+      { path: "src/foo.ts", startLine: 1, endLine: 100 },
+      { path: "src/foo.ts", startLine: 200, endLine: 400 },
+    ]);
+    const result = buildFileReadManifest(turns, allCandidateClassifications(turns));
+    expect(result.manifest).toContain("lines 1-100");
+    expect(result.manifest).toContain("lines 200-400");
+    expect(result.entryCount).toBe(1);  // one path entry, two ranges on the same line
+  });
+
+  it("caps manifest at MANIFEST_MAX_ENTRIES (20)", () => {
+    const reads = Array.from({ length: 25 }, (_, i) => ({
+      path: `src/file${i}.ts`,
+      startLine: 1,
+      endLine: 10,
+    }));
+    const turns = makeReadFileTurns(reads);
+    const result = buildFileReadManifest(turns, allCandidateClassifications(turns));
+    expect(result.truncated).toBe(true);
+    expect(result.entryCount).toBe(20);
+    expect(result.manifest).toContain("5 more entries truncated");
+  });
+
+  it("returns empty manifest when no read_file CANDIDATE results", () => {
+    const turns: ChatCompletionMessageParam[] = [
+      { role: "assistant", content: "just thinking" },
+      { role: "user", content: "ok" },
+    ];
+    const result = buildFileReadManifest(turns, allCandidateClassifications(turns));
+    expect(result.manifest).toBe("");
+    expect(result.entryCount).toBe(0);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("excludes VERBATIM reads from manifest (they're in context already)", () => {
+    const turns = makeReadFileTurns([{ path: "src/foo.ts", startLine: 1, endLine: 100 }]);
+    // Classify all turns as VERBATIM
+    const verbatimClassifications: ClassifiedTurn[] = turns.map((_, i) => ({
+      index: i,
+      class: TurnClass.VERBATIM,
+      reason: "recency",
+    }));
+    const result = buildFileReadManifest(turns, verbatimClassifications);
+    expect(result.entryCount).toBe(0);
+    expect(result.manifest).toBe("");
+  });
+
+  it("excludes PINNED reads from manifest (they're in context already)", () => {
+    const turns = makeReadFileTurns([{ path: "src/pinned.ts", startLine: 1, endLine: 50 }]);
+    const pinnedClassifications: ClassifiedTurn[] = turns.map((_, i) => ({
+      index: i,
+      class: TurnClass.PINNED,
+      reason: "audit_artifact",
+      pinReason: "audit_artifact" as const,
+    }));
+    const result = buildFileReadManifest(turns, pinnedClassifications);
+    expect(result.entryCount).toBe(0);
+  });
+
+  it("manifest is injected into compacted_history synthetic turn", async () => {
+    const readTurns = makeReadFileTurns([{ path: "src/server.ts", startLine: 1, endLine: 200 }]);
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      ...readTurns,                          // 2,3 — CANDIDATE read_file pair
+      { role: "assistant", content: "last-3" },
+      { role: "user", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
+    const c = new ContextCompactor();
+    const result = await c.checkAndMaybeCompact({
+      responseInput: history,
+      toolCallLog: [],
+      currentUsage: 700_000,
+      effectiveCap: 800_000,
+      client: stubClient,
+    });
+    expect(result.compacted).toBe(true);
+    const synth = result.newResponseInput?.find(
+      (t) => t.role === "system" && typeof t.content === "string" && (t.content as string).includes("[compacted_history]")
+    );
+    expect(synth).toBeDefined();
+    const content = synth!.content as string;
+    expect(content).toContain("src/server.ts lines 1-200");
+    expect(content).toContain("mocked summary");
+    // manifest appears before summary
+    expect(content.indexOf("src/server.ts")).toBeLessThan(content.indexOf("mocked summary"));
+  });
+
+  it("manifest stats surfaced in CompactionResult", async () => {
+    const readTurns = makeReadFileTurns([{ path: "src/foo.ts", startLine: 1, endLine: 50 }]);
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      ...readTurns,
+      { role: "assistant", content: "last-3" },
+      { role: "user", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
+    const c = new ContextCompactor();
+    const result = await c.checkAndMaybeCompact({
+      responseInput: history,
+      toolCallLog: [],
+      currentUsage: 700_000,
+      effectiveCap: 800_000,
+      client: stubClient,
+    });
+    expect(result.manifestStats?.entries).toBe(1);
+    expect(result.manifestStats?.truncated).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase J.4 — Tiered summary prompts (buildSummarizationPrompt)
+// ---------------------------------------------------------------------------
+
+describe("Phase J.4 — Tiered summary prompts", () => {
+  it("tier 1 (compactions 1-2) uses full task-shaped prompt (~1500 tokens)", () => {
+    expect(buildSummarizationPrompt([], 1)).toContain("~1500 tokens");
+    expect(buildSummarizationPrompt([], 2)).toContain("~1500 tokens");
+  });
+
+  it("tier 2 (compactions 3-4) uses structured bullet prompt with required headers", () => {
+    const p3 = buildSummarizationPrompt([], 3);
+    expect(p3).toContain("## Task");
+    expect(p3).toContain("## Files touched");
+    expect(p3).toContain("## Recent failures");
+    expect(p3).toContain("## Open questions");
+    expect(p3).toContain("~800 tokens");
+
+    const p4 = buildSummarizationPrompt([], 4);
+    expect(p4).toContain("## Task");
+    expect(p4).toContain("~800 tokens");
+  });
+
+  it("tier 3 (compaction 5) uses minimal three-section prompt", () => {
+    const p = buildSummarizationPrompt([], 5);
+    expect(p).toContain("≤500 tokens");
+    expect(p).toContain("## Last failure");
+    expect(p).toContain("## Open question");
+  });
+
+  it("prompt length is monotonically shorter across tiers", () => {
+    const t1 = buildSummarizationPrompt([], 1).length;
+    const t2 = buildSummarizationPrompt([], 3).length;
+    const t3 = buildSummarizationPrompt([], 5).length;
+    expect(t2).toBeLessThan(t1);
+    expect(t3).toBeLessThan(t2);
+  });
+
+  it("compactionDepth passed to summarize via SummarizerInput (integration)", async () => {
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: "cand" },
+      { role: "assistant", content: "last-3" },
+      { role: "user", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
+    const c = new ContextCompactor();
+    await c.checkAndMaybeCompact({
+      responseInput: history,
+      toolCallLog: [],
+      currentUsage: 700_000,
+      effectiveCap: 800_000,
+      client: stubClient,
+    });
+    // Verify summarize was called with compactionDepth: 1 (first compaction)
+    expect(vi.mocked(summarize)).toHaveBeenCalledWith(
+      expect.objectContaining({ compactionDepth: 1 })
+    );
+  });
+
+  it("summaryTier surfaced in CompactionResult", async () => {
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: "cand" },
+      { role: "assistant", content: "last-3" },
+      { role: "user", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
+    // compaction count 0 → first compaction → nextCount 1 → tier 1
+    const c = new ContextCompactor();
+    const result = await c.checkAndMaybeCompact({
+      responseInput: history,
+      toolCallLog: [],
+      currentUsage: 700_000,
+      effectiveCap: 800_000,
+      client: stubClient,
+    });
+    expect(result.summaryTier).toBe(1);
   });
 });

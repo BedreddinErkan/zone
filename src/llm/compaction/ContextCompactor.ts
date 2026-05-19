@@ -5,9 +5,102 @@ import { summarize } from "./summarizer.js";
 import {
   TurnClass,
   CompactionExhaustedError,
+  type ClassifiedTurn,
   type CompactionResult,
   type ToolCallRecord,
 } from "./types.js";
+
+const MANIFEST_MAX_ENTRIES = 20;
+
+/**
+ * Build a deterministic file-read manifest from CANDIDATE tool turns (J.3).
+ *
+ * Scans assistant messages in responseInput for read_file tool_calls, correlates
+ * with CANDIDATE tool result turns, and aggregates path+lineRange pairs.
+ * Deduplicates same-range reads into "read Nx" notation.
+ * Caps at MANIFEST_MAX_ENTRIES with truncation notice.
+ *
+ * VERBATIM/PINNED reads are excluded — they remain visible in context already.
+ */
+export function buildFileReadManifest(
+  responseInput: ChatCompletionMessageParam[],
+  classified: ClassifiedTurn[]
+): { manifest: string; truncated: boolean; entryCount: number } {
+  // Build callId → {filePath, lineRange} by parsing assistant tool_call args in responseInput.
+  const readCallArgs = new Map<string, { filePath: string; lineRange: [number, number] | null }>();
+  for (const msg of responseInput) {
+    if (msg.role !== "assistant") continue;
+    const toolCalls = (msg as { tool_calls?: unknown[] }).tool_calls;
+    if (!Array.isArray(toolCalls)) continue;
+    for (const tc of toolCalls) {
+      if (!tc || typeof tc !== "object") continue;
+      const typed = tc as { id?: string; type?: string; function?: { name?: string; arguments?: string } };
+      if (typed.type !== "function" || typed.function?.name !== "read_file" || !typed.id) continue;
+      try {
+        const args = JSON.parse(typed.function.arguments ?? "{}") as Record<string, unknown>;
+        if (typeof args.filePath !== "string") continue;
+        const lr = Array.isArray(args.lineRange) && args.lineRange.length === 2
+          ? [args.lineRange[0] as number, args.lineRange[1] as number] as [number, number]
+          : null;
+        readCallArgs.set(typed.id, { filePath: args.filePath, lineRange: lr });
+      } catch {
+        // skip malformed arguments JSON
+      }
+    }
+  }
+
+  interface RangeEntry { startLine: number | null; endLine: number | null; readCount: number; }
+  const entries = new Map<string, { path: string; ranges: RangeEntry[] }>();
+
+  for (let i = 0; i < responseInput.length; i++) {
+    if (classified[i]?.class !== TurnClass.CANDIDATE) continue;
+    const turn = responseInput[i];
+    if (turn.role !== "tool") continue;
+    const toolCallId = (turn as { tool_call_id?: string }).tool_call_id;
+    if (!toolCallId) continue;
+    const readInfo = readCallArgs.get(toolCallId);
+    if (!readInfo) continue;
+
+    const { filePath, lineRange } = readInfo;
+    const startLine = lineRange?.[0] ?? null;
+    const endLine = lineRange?.[1] ?? null;
+
+    if (!entries.has(filePath)) entries.set(filePath, { path: filePath, ranges: [] });
+    const entry = entries.get(filePath)!;
+    const existing = entry.ranges.find((r) => r.startLine === startLine && r.endLine === endLine);
+    if (existing) {
+      existing.readCount++;
+    } else {
+      entry.ranges.push({ startLine, endLine, readCount: 1 });
+    }
+  }
+
+  const allEntries = Array.from(entries.values());
+  const truncated = allEntries.length > MANIFEST_MAX_ENTRIES;
+  const finalEntries = allEntries.slice(0, MANIFEST_MAX_ENTRIES);
+
+  if (finalEntries.length === 0) {
+    return { manifest: "", truncated: false, entryCount: 0 };
+  }
+
+  const lines = finalEntries.map((e) => {
+    const rangeStrs = e.ranges.map((r) => {
+      if (r.startLine !== null && r.endLine !== null) {
+        const range = `lines ${r.startLine}-${r.endLine}`;
+        return r.readCount > 1 ? `${range} (read ${r.readCount}x)` : range;
+      }
+      return r.readCount > 1 ? `(full file, read ${r.readCount}x)` : "(full file)";
+    });
+    return `- ${e.path} ${rangeStrs.join(", ")}`;
+  });
+
+  let manifest = "Files read earlier this session (compacted from history):\n" + lines.join("\n");
+  if (truncated) {
+    manifest += `\n(... ${allEntries.length - MANIFEST_MAX_ENTRIES} more entries truncated)`;
+  }
+
+  return { manifest, truncated, entryCount: finalEntries.length };
+}
 
 export class ContextCompactor {
   private compactionCount = 0;
@@ -44,9 +137,14 @@ export class ContextCompactor {
     }
 
     if (!args.client) {
-      // No client provided — graceful degrade (used by tests without mocking).
       return { compacted: false, reason: "summarizer_failed" };
     }
+
+    const nextCount = this.compactionCount + 1;
+
+    // J.3: build deterministic file-read manifest from CANDIDATE reads before summarizing
+    const { manifest, truncated: manifestTruncated, entryCount } =
+      buildFileReadManifest(args.responseInput, classified);
 
     let summaryText: string;
     try {
@@ -55,23 +153,19 @@ export class ContextCompactor {
         totalCandidates: candidates.length,
         client: args.client,
         runId: args.runId,
+        compactionDepth: nextCount,   // J.4: tiered prompt
       });
       summaryText = output.summaryText;
     } catch {
-      // Graceful degrade — parent loop continues, will hit token cap eventually.
       return { compacted: false, reason: "summarizer_failed" };
     }
 
-    // Build newResponseInput: verbatim turns preserved in order;
-    // all candidate positions replaced by ONE synthetic system turn
-    // at the position of the first candidate.
+    // Build newResponseInput: verbatim/pinned turns preserved in order;
+    // all candidate positions replaced by ONE synthetic system turn at the first candidate.
     const candidateIndices = new Set(candidates.map((c) => c.index));
     const firstCandidateIdx = candidates[0].index;
     const newResponseInput: ChatCompletionMessageParam[] = [];
 
-    // Recurring notice: injected into the synthetic turn starting at the 3rd compaction
-    // so the model knows context is heavily summarized and can recommend subtasks.
-    const nextCount = this.compactionCount + 1;
     const recurringNotice =
       nextCount >= this.WARN_AT
         ? `\n\nNOTE: This task has been compacted ${nextCount} time(s). ` +
@@ -79,12 +173,15 @@ export class ContextCompactor {
           `progress, recommend the user break this task into smaller subtasks.`
         : "";
 
+    // J.3: manifest block prepended to summary in the synthetic system turn
+    const manifestBlock = manifest ? `${manifest}\n\n` : "";
+
     for (let i = 0; i < args.responseInput.length; i++) {
       if (candidateIndices.has(i)) {
         if (i === firstCandidateIdx) {
           newResponseInput.push({
             role: "system",
-            content: `[compacted_history]\n${summaryText}${recurringNotice}\n[/compacted_history]`,
+            content: `[compacted_history]\n${manifestBlock}${summaryText}${recurringNotice}\n[/compacted_history]`,
           });
         }
         continue;
@@ -93,11 +190,23 @@ export class ContextCompactor {
     }
 
     this.compactionCount += 1;
+
+    // J.1/J.2/J.3/J.4 telemetry stats (payload-only; callers can read what they need)
+    const summaryTier = (nextCount <= 2 ? 1 : nextCount <= 4 ? 2 : 3) as 1 | 2 | 3;
     const result: CompactionResult = {
       compacted: true,
       reason: "compacted",
       newResponseInput,
+      pinnedStats: {
+        audit_artifact: classified.filter((c) => c.pinReason === "audit_artifact").length,
+        recent_failure: classified.filter((c) => c.pinReason === "recent_failure").length,
+      },
+      verbatimCount: classified.filter((c) => c.class === TurnClass.VERBATIM).length,
+      candidatesSummarized: candidates.length,
+      manifestStats: { entries: entryCount, truncated: manifestTruncated },
+      summaryTier,
     };
+
     if (this.compactionCount === this.WARN_AT) {
       result.warning =
         "Task has compacted 3 times. Context heavily " +
