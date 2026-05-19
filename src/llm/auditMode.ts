@@ -25,9 +25,13 @@ export function isLowRiskPlan(
 ): boolean {
   if (!plan || !classification) return false;
 
-  // Condition 1: ≤ 2 distinct files across all plan steps.
+  // Condition 1: ≤ 3 distinct files across all plan steps (all referenced,
+  // including read-only). Threshold is intentionally permissive — false
+  // negatives (running audit on a 4-file mostly-read task) are acceptable
+  // because the audit subagent is Haiku-downgraded to ~$0.04.
+  // Option A chosen over adding an intent field to PlanStep (deferred to Lever 2).
   const allFiles = new Set(plan.steps.flatMap((s) => s.filesLikely ?? []));
-  if (allFiles.size > 2) return false;
+  if (allFiles.size > 3) return false;
 
   // Condition 2: tier is not complex.
   if (classification.tier === "complex") return false;

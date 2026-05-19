@@ -119,19 +119,33 @@ describe("isLowRiskPlan", () => {
     expect(isLowRiskPlan(plan, cls)).toBe(true);
   });
 
-  it("T.2 returns false for ≥3 file plan", () => {
+  it("T.2 returns false for ≥4 file plan", () => {
     const plan = makePlan({
       steps: [
         {
           title: "Multi-file",
           description: "d",
-          filesLikely: ["src/a.ts", "src/b.ts", "src/c.ts"],
+          filesLikely: ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"],
           subagentEligible: false,
         },
       ],
     });
     const cls = makeClassification({ tier: "medium" });
     expect(isLowRiskPlan(plan, cls)).toBe(false);
+  });
+
+  it("returns true for 3-file plan with mixed read/edit (run 25f18cb3 shape)", () => {
+    // package.json read-only + server.ts edit + server.test.ts edit = 3 total.
+    // Previously failed the ≤2 threshold; now passes at ≤3.
+    const plan = makePlan({
+      steps: [
+        { title: "Read package.json", description: "check version", filesLikely: ["package.json"], subagentEligible: false },
+        { title: "Edit server.ts", description: "add route", filesLikely: ["src/api/server.ts"], subagentEligible: false },
+        { title: "Edit server.test.ts", description: "add test", filesLikely: ["src/api/server.test.ts"], subagentEligible: false },
+      ],
+    });
+    const cls = makeClassification({ tier: "medium" });
+    expect(isLowRiskPlan(plan, cls)).toBe(true);
   });
 
   it("T.3 returns false for tier=complex regardless of file count", () => {
@@ -204,13 +218,13 @@ describe("shouldRunAudit — low-risk plan skip (Phase O)", () => {
     expect(result.reason).toContain("always");
   });
 
-  it("high-risk plan (3 files) still runs audit in auto mode", () => {
+  it("high-risk plan (4 files) still runs audit in auto mode", () => {
     const plan = makePlan({
       steps: [
         {
           title: "Multi-file",
           description: "d",
-          filesLikely: ["src/a.ts", "src/b.ts", "src/c.ts"],
+          filesLikely: ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"],
           subagentEligible: false,
         },
       ],
