@@ -107,7 +107,8 @@ import {
 import { investigateScope } from "../llm/investigationFlow.js";
 import { runScopeJudge } from "../llm/scopeJudge.js";
 import { classifyTask, type TaskClassification } from "../llm/taskClassifier.js";
-import { generateExecutionPlan, type ExecutionPlan } from "../llm/executionPlan.js";
+import { preparePlanContext } from "../core/preparePlanContext.js";
+import { generateExecutionPlan } from "../llm/executionPlan.js";
 import { decodeProgressStage } from "../core/progressStageCodec.js";
 import { validateLlmOutput } from "../core/validateLlmOutput.js";
 import lemonWebhookRouter from "../routes/lemonsqueezyWebhook.js";
@@ -3677,9 +3678,46 @@ app.post("/api/patch", async (req, res) => {
       );
     }
   }
-  // Phase F: plan now absorbed from Phase 1 audit output (INVESTIGATION_OUTPUT_FORMAT plan field).
-  // generateExecutionPlan stays in codebase as dead code — Phase H will reactivate as opt-in fallback.
-  let preGeneratedPlan: ExecutionPlan | undefined;
+  let preGeneratedPlan: Awaited<ReturnType<typeof generateExecutionPlan>> | undefined;
+  let planContext: Awaited<ReturnType<typeof preparePlanContext>> | undefined;
+  if (runIdStr) {
+    try {
+      planContext = await preparePlanContext({
+        task: String(task),
+        repoPath: String(repoPath),
+        repoSummaryOverride: (hostedContext as { repoSummary?: string } | undefined)?.repoSummary,
+        userApiKey: userApiKey || undefined,
+      });
+      preGeneratedPlan = await generateExecutionPlan({
+        task: String(task),
+        repoSummary: planContext.projectSummary,
+        relevantFiles: planContext.relevantFilePaths,
+        userApiKey: userApiKey || undefined,
+        provider: byokProvider,
+      });
+      const _planSummaryFiles = Array.from(
+        new Set(preGeneratedPlan.steps.flatMap((s) => s.filesLikely ?? []))
+      );
+      emitProgress(runIdStr, {
+        stage: "plan_summary",
+        progress: {
+          type: "plan_summary",
+          title: "Plan generated",
+          detail: preGeneratedPlan.objective,
+          status: "success",
+          planSummaryFiles: _planSummaryFiles,
+          planSummaryStepCount: preGeneratedPlan.steps.length,
+          // TODO: payload type cleanup — runId/ts injected by emitProgress wrapper
+        } as any,
+      });
+    } catch (planGenErr) {
+      console.warn(
+        "[zone-plan] plan generation failed:",
+        planGenErr instanceof Error ? planGenErr.message : String(planGenErr)
+      );
+      // preGeneratedPlan remains undefined — approval and audit gates will skip.
+    }
+  }
   // Y.1.2: headless detection — no Accept:text/event-stream header means no SSE listener.
   const isHeadless: boolean = !(
     typeof req.headers["accept"] === "string" &&
@@ -3736,7 +3774,11 @@ app.post("/api/patch", async (req, res) => {
     }
 
     if (shouldRunAudit(tier, undefined, autoAuditComplexTasks)) {
-      try {
+      if (!preGeneratedPlan) {
+        // Defensive: plan generation failed upstream — audit cannot run without a plan.
+        log("[zone-audit-skipped]", JSON.stringify({ runId: runIdStr, reason: "no_plan", ts: new Date().toISOString() }));
+      } else {
+        try {
         emitProgress(runIdStr, {
           stage: "scope_revision",
           progress: {
@@ -3750,7 +3792,7 @@ app.post("/api/patch", async (req, res) => {
 
         const findings = await investigateScope({
           repoPath: String(repoPath),
-          query: `Investigate and plan the following task:\n\n${String(task)}`,
+          query: `Audit whether this plan is correctly scoped for the task:\n\n${String(task)}\n\nPlan:\n${preGeneratedPlan.objective}\nSteps: ${preGeneratedPlan.steps.map((s) => s.title).join(", ")}`,
           runId: runIdStr,
           userApiKey: userApiKey || undefined,
           abortSignal: patchAbort?.signal,
@@ -3786,51 +3828,22 @@ app.post("/api/patch", async (req, res) => {
             ...(findings.evidence ? { evidence: findings.evidence } : {}),
           };
 
-          // Phase F: absorb plan from Phase 1 output, emit plan_summary SSE.
-          if (findings.plan) {
-            preGeneratedPlan = {
-              objective: findings.plan.objective,
-              steps: findings.plan.steps.map((s) => ({
-                title: s.description.slice(0, 80),
-                description: s.description,
-                filesLikely: [],
-                ...(s.subagentEligible !== undefined ? { subagentEligible: s.subagentEligible } : {}),
-                ...(s.subagentType ? { subagentType: s.subagentType } : {}),
-              })),
-              riskHints: findings.plan.riskHints ?? [],
-              scopeSummary: "",
-            };
-            emitProgress(runIdStr, {
-              stage: "plan_summary",
-              progress: {
-                type: "plan_summary",
-                title: "Plan ready",
-                detail: preGeneratedPlan.objective,
-                status: "success",
-                planSummaryFiles: [],
-                planSummaryStepCount: preGeneratedPlan.steps.length,
-              } as any,
-            });
-          }
-
           // Check if agent directly proposed a revision
           const agentRevision = findings.agentSuggestedRevision;
-          // Run scope judge only when we have an absorbed plan to compare against.
-          const judgement = preGeneratedPlan
-            ? await runScopeJudge({
-                originalPlan: preGeneratedPlan,
-                findings: findings.findings,
-                taskClassification: preClassifiedTask,
-                runId: runIdStr,
-                userApiKey: userApiKey || undefined,
-              })
-            : { type: "none" as const, mismatch: false, severity: "none" as const, reason: "", revisedPlan: null, missingFiles: undefined, unnecessaryFiles: undefined };
+          // Also run the LLM judge on the findings
+          const judgement = await runScopeJudge({
+            originalPlan: preGeneratedPlan,
+            findings: findings.findings,
+            taskClassification: preClassifiedTask,
+            runId: runIdStr,
+            userApiKey: userApiKey || undefined,
+          });
           // Step B: populate scopeVerdict/severity from judge result
           auditFindingsForExec.scopeVerdict = judgement.type;
           auditFindingsForExec.severity = judgement.severity;
 
           const hasMismatch = agentRevision != null || judgement.mismatch;
-          if (hasMismatch && preGeneratedPlan) {
+          if (hasMismatch) {
             const revType = agentRevision?.type ?? judgement.type as "under_scope" | "over_scope" | "mixed";
             const revReason = agentRevision?.reason ?? judgement.reason;
             const revSummary = agentRevision?.revisedPlanSummary ?? judgement.revisedPlan ?? "Revised plan — see reason above.";
@@ -3947,6 +3960,7 @@ app.post("/api/patch", async (req, res) => {
           // Audit failures never block execution — log and continue.
           console.warn("[zone-scope-audit] audit gate failed:", auditErr instanceof Error ? auditErr.message : String(auditErr));
         }
+      } // end else (preGeneratedPlan guard)
     }
   }
 

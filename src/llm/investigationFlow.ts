@@ -7,17 +7,6 @@ import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.j
 import type { TaskTier } from "./taskClassifier.js";
 import { debugLog, log } from "../utils/logger.js";
 
-/** Phase F: absorbed execution plan emitted by Phase 1's INVESTIGATION_OUTPUT_FORMAT. */
-export interface Phase1Plan {
-  objective: string;
-  steps: Array<{
-    description: string;
-    subagentEligible?: boolean;
-    subagentType?: "worker" | "explore";
-  }>;
-  riskHints?: string[];
-}
-
 export interface InvestigateScopeOpts {
   repoPath: string;
   query: string;
@@ -66,8 +55,6 @@ export interface InvestigateScopeResult {
   fixInstruction?: string;
   filesToEdit?: string[];
   evidence?: string;
-  // Phase F: absorbed execution plan from Phase 1 JSON output.
-  plan?: Phase1Plan;
 }
 
 function extractCitations(text: string): Array<{ file: string; line?: number }> {
@@ -96,7 +83,6 @@ export function extractPhase1Findings(summary: string): {
   filesToEdit?: string[];
   evidence?: string;
   complete?: boolean;
-  plan?: Phase1Plan;
 } {
   try {
     const blocks = [...summary.matchAll(/```json\s*([\s\S]*?)\s*```/g)];
@@ -105,32 +91,6 @@ export function extractPhase1Findings(summary: string): {
     const parsed: unknown = JSON.parse(inner);
     if (typeof parsed !== "object" || parsed === null) return {};
     const p = parsed as Record<string, unknown>;
-
-    let plan: Phase1Plan | undefined;
-    const rawPlan = p["plan"];
-    if (rawPlan && typeof rawPlan === "object" && !Array.isArray(rawPlan)) {
-      const rp = rawPlan as Record<string, unknown>;
-      if (typeof rp["objective"] === "string" && Array.isArray(rp["steps"])) {
-        const steps = (rp["steps"] as unknown[]).flatMap((s) => {
-          if (typeof s !== "object" || s === null) return [];
-          const rs = s as Record<string, unknown>;
-          if (typeof rs["description"] !== "string") return [];
-          return [{
-            description: rs["description"],
-            ...(typeof rs["subagentEligible"] === "boolean" ? { subagentEligible: rs["subagentEligible"] } : {}),
-            ...(rs["subagentType"] === "worker" || rs["subagentType"] === "explore" ? { subagentType: rs["subagentType"] as "worker" | "explore" } : {}),
-          }];
-        });
-        plan = {
-          objective: rp["objective"],
-          steps,
-          ...(Array.isArray(rp["riskHints"]) && (rp["riskHints"] as unknown[]).every((r) => typeof r === "string")
-            ? { riskHints: rp["riskHints"] as string[] }
-            : {}),
-        };
-      }
-    }
-
     return {
       ...(typeof p["rootCause"] === "string" ? { rootCause: p["rootCause"] } : {}),
       ...(typeof p["fixInstruction"] === "string" ? { fixInstruction: p["fixInstruction"] } : {}),
@@ -139,7 +99,6 @@ export function extractPhase1Findings(summary: string): {
         : {}),
       ...(typeof p["evidence"] === "string" ? { evidence: p["evidence"] } : {}),
       ...(typeof p["complete"] === "boolean" ? { complete: p["complete"] } : {}),
-      ...(plan ? { plan } : {}),
     };
   } catch {
     return {};

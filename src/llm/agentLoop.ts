@@ -534,11 +534,7 @@ const INVESTIGATION_OUTPUT_FORMAT = `At the end of your investigation, output a 
 Set \`complete: true\` only when \`fixInstruction\` is a paste-ready imperative.
 Set \`complete: false\` (and use the 'investigate further' instruction) when evidence is insufficient — Phase 2 will then decide whether to continue investigation or surface the partial finding to the user.
 
-The JSON block must be the LAST item in your response, after the prose summary. ANY iteration may be your last — if you are at the iteration budget, emit the JSON now even if complete=false.
-
-Additionally include a "plan" field with 3-8 steps for the execute phase:
-  "plan": { "objective": "<one sentence>", "steps": [{"description": "<step>", "subagentEligible": false}], "riskHints": ["<risk>"] }
-Set subagentEligible:true for steps covering 5+ files or long isolated operations. plan replaces the legacy pre-audit plan generation.`;
+The JSON block must be the LAST item in your response, after the prose summary. ANY iteration may be your last — if you are at the iteration budget, emit the JSON now even if complete=false.`;
 
 export function assembleInvestigationSystemPrompt(input: {
   repoPath: string;
