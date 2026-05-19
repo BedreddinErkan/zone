@@ -1126,4 +1126,111 @@ describe("Phase Q.8 update — Large-file classifier trigger", () => {
     );
     expect(bumpLog).toBeUndefined();
   });
+
+  it("emits [zone-tier-bump-skipped] when candidate file returns 0 lines (not found on disk)", async () => {
+    mocks.createChatCompletion.mockResolvedValue(simpleResponse());
+
+    await classifyTask(
+      "Edit nonexistent src/api/ghost.ts file",
+      { targetFiles: ["src/api/ghost.ts"], _fileLineCounter: () => 0, skipCache: true }
+    );
+
+    const skipLog = consoleLogSpy.mock.calls.find(
+      (call) => String(call[0] ?? "") === "[zone-tier-bump-skipped]"
+    );
+    expect(skipLog).toBeDefined();
+    const payload = JSON.parse(skipLog![1] as string) as Record<string, unknown>;
+    expect(payload.event).toBe("tier_bump_skipped");
+    expect(payload.tier).toBe("simple");
+    expect(payload.candidateCount).toBe(1);
+    const candidates = payload.candidates as Array<{ path: string; lineCount: number; exists: boolean }>;
+    expect(candidates[0].path).toBe("src/api/ghost.ts");
+    expect(candidates[0].lineCount).toBe(0);
+    expect(candidates[0].exists).toBe(false);
+  });
+
+  it("classifyTask cache hit re-runs bump and upgrades stale entries", async () => {
+    const taskText = "Edit the caching-bump-test file src/api/cache-bump-test.ts (unique q8 cache_rerun)";
+
+    // First call: file is small → caches tier=simple
+    mocks.createChatCompletion.mockResolvedValue(simpleResponse());
+    const first = await classifyTask(taskText, {
+      targetFiles: ["src/api/cache-bump-test.ts"],
+      _fileLineCounter: () => 100,
+    });
+    expect(first.tier).toBe("simple");
+
+    consoleLogSpy.mockClear();
+
+    // Second call: same task description (cache hit), but file is now large
+    const second = await classifyTask(taskText, {
+      targetFiles: ["src/api/cache-bump-test.ts"],
+      _fileLineCounter: () => 5000,
+    });
+    expect(second.tier).toBe("medium");
+
+    const bumpLog = consoleLogSpy.mock.calls.find(
+      (call) => String(call[0] ?? "") === "[zone-tier-bumped]"
+    );
+    expect(bumpLog).toBeDefined();
+    const payload = JSON.parse(bumpLog![1] as string) as Record<string, unknown>;
+    expect(payload.source).toBe("cache_rerun");
+    expect(payload.fromTier).toBe("simple");
+    expect(payload.toTier).toBe("medium");
+
+    // Cache must store the upgraded tier
+    const third = await classifyTask(taskText, {
+      targetFiles: ["src/api/cache-bump-test.ts"],
+      _fileLineCounter: () => 5000,
+    });
+    expect(third.tier).toBe("medium");
+  });
+
+  it("fresh-path [zone-tier-bumped] emit includes source: 'fresh'", async () => {
+    mocks.createChatCompletion.mockResolvedValue(simpleResponse());
+
+    await classifyTask(
+      "Fresh bump source tag test src/api/fresh-source-unique.ts",
+      { targetFiles: ["src/api/fresh-source-unique.ts"], _fileLineCounter: () => 5000, skipCache: true }
+    );
+
+    const bumpLog = consoleLogSpy.mock.calls.find(
+      (call) => String(call[0] ?? "") === "[zone-tier-bumped]"
+    );
+    expect(bumpLog).toBeDefined();
+    const payload = JSON.parse(bumpLog![1] as string) as Record<string, unknown>;
+    expect(payload.source).toBe("fresh");
+  });
+
+  it("bumpForLargeFiles does NOT emit skipped when targetFiles empty or tier non-simple", async () => {
+    // tier=medium, non-empty targetFiles → no emit of either kind
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(JSON.stringify({ tier: "medium", estimatedFiles: 2, estimatedIterations: 10, confidence: 0.9 }))
+    );
+    await classifyTask(
+      "Medium tier task no bump emit src/api/medium-gate-unique.ts",
+      { targetFiles: ["src/api/medium-gate-unique.ts"], _fileLineCounter: () => 5000, skipCache: true }
+    );
+    const skipMedium = consoleLogSpy.mock.calls.find(
+      (call) => String(call[0] ?? "") === "[zone-tier-bump-skipped]"
+    );
+    expect(skipMedium).toBeUndefined();
+
+    consoleLogSpy.mockClear();
+
+    // tier=simple, empty targetFiles → no emit of either kind
+    mocks.createChatCompletion.mockResolvedValue(simpleResponse());
+    await classifyTask(
+      "Simple tier no-files bump-gate unique task",
+      { targetFiles: [], skipCache: true }
+    );
+    const skipEmpty = consoleLogSpy.mock.calls.find(
+      (call) => String(call[0] ?? "") === "[zone-tier-bump-skipped]"
+    );
+    expect(skipEmpty).toBeUndefined();
+    const bumpEmpty = consoleLogSpy.mock.calls.find(
+      (call) => String(call[0] ?? "") === "[zone-tier-bumped]"
+    );
+    expect(bumpEmpty).toBeUndefined();
+  });
 });

@@ -5811,6 +5811,7 @@ const initializeTodosFromPlan = (): void => {
       try {
         taskClassification = await classifyTask(input.task, {
           userApiKey: input.userApiKey,
+          repoRoot: path.resolve(__dirname, "../.."),
         });
       } catch (err) {
         // classifyTask already swallows internal errors and returns a fallback,

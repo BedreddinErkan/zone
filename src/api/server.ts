@@ -3771,7 +3771,7 @@ app.post("/api/patch", async (req, res) => {
     try {
       // Classify task here so tier is available for audit gating AND to
       // avoid a second classification call inside runLlmPatchFlow.
-      preClassifiedTask = await classifyTask(String(task), { userApiKey: userApiKey || undefined });
+      preClassifiedTask = await classifyTask(String(task), { userApiKey: userApiKey || undefined, repoRoot: path.resolve(__dirname, "../..") });
     } catch {
       // classifyTask is self-healing; defensive catch for future contract changes.
     }

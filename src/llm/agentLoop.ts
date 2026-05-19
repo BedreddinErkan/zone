@@ -3748,6 +3748,11 @@ Example:
         input.onProgress?.(
           `Context compacted (compaction #${compactor.getCompactionCount()})`
         );
+        log("[zone-compaction-status]", JSON.stringify({
+          event: "compaction_status",
+          count: compactor.getCompactionCount(),
+          reason: compactionResult.reason ?? "success",
+        }));
         input.onStructuredEvent?.({
           type: "compaction_status",
           count: compactor.getCompactionCount(),

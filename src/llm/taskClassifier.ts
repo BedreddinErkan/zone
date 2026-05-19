@@ -169,6 +169,18 @@ function bumpForLargeFiles(
       return { tier: "medium", bumpedFile: filePath, bumpedLineCount: lineCount };
     }
   }
+  log("[zone-tier-bump-skipped]", JSON.stringify({
+    event: "tier_bump_skipped",
+    tier,
+    candidateCount: targetFiles.length,
+    candidates: targetFiles.map((f) => ({
+      path: f,
+      lineCount: getLineCount(f),
+      exists: existsSync(resolvePath(repoRoot, f)),
+    })),
+    threshold,
+    repoRoot,
+  }));
   return { tier };
 }
 
@@ -283,7 +295,31 @@ export async function classifyTask(
   const cacheKey = hashTask(normalized);
 
   if (!options.skipCache && classificationCache.has(cacheKey)) {
-    return classificationCache.get(cacheKey)!;
+    const cached = classificationCache.get(cacheKey)!;
+    // Re-run large-file bump against cached result so stale pre-Q.8 entries
+    // (or any cache populated before file grew past threshold) get upgraded.
+    const targetFiles = options.targetFiles ?? extractFilePaths(normalized);
+    const repoRoot = options.repoRoot ?? process.cwd();
+    const bumpResult = bumpForLargeFiles(
+      cached.tier,
+      targetFiles,
+      repoRoot,
+      options._fileLineCounter
+    );
+    if (bumpResult.bumpedFile !== undefined && bumpResult.tier !== cached.tier) {
+      log("[zone-tier-bumped]", JSON.stringify({
+        event: "tier_bumped",
+        fromTier: cached.tier,
+        toTier: bumpResult.tier,
+        filePath: bumpResult.bumpedFile,
+        lineCount: bumpResult.bumpedLineCount,
+        source: "cache_rerun",
+      }));
+      const upgraded = { ...cached, tier: bumpResult.tier };
+      classificationCache.set(cacheKey, upgraded);
+      return upgraded;
+    }
+    return cached;
   }
 
   const ctx = getRequestContext();
@@ -344,6 +380,7 @@ export async function classifyTask(
         lineCount: bumpResult.bumpedLineCount,
         threshold: Number(process.env.ZONE_LARGE_FILE_LOC ?? 2000),
         ts: new Date().toISOString(),
+        source: "fresh",
       }));
     }
 
