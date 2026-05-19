@@ -72,6 +72,9 @@ const DISPATCHED_TOOLS = new Set([
   // + investigation-mode handler, both with `continue`). It never reaches
   // executeTool — same interception pattern as TodoWrite.
   "suggest_scope_change",
+  // revert_patch is intercepted in agentLoop (removes file from stagingFiles so
+  // finalizeStaging won't flush it). It never reaches executeTool.
+  "revert_patch",
 ]);
 
 // Import the definitions lazily to keep the check co-located with the executor.

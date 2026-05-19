@@ -486,4 +486,24 @@ required: ["id", "content", "description", "status"],
       } as Record<string, unknown>,
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "revert_patch",
+      strict: true,
+      description:
+        "Undo a file's changes from this run, restoring it to pre-run state. Only valid for files you modified in this run.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "Relative path of the file to revert.",
+          },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      } as Record<string, unknown>,
+    },
+  },
 ];

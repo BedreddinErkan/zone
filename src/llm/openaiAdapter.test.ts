@@ -119,9 +119,9 @@ describe("OpenAI prompt cache stability helpers", () => {
     expect(system).toContain('Suggested: ');
     // The shell-hack prohibition is the key dogfood-derived guidance:
     // pre-J.4 the agent escalated to sed/python/cat to defeat rollbacks.
-    expect(system).toMatch(/Do NOT use shell commands.*sed.*python/);
-    // Coordinated-edit retry path: apply_patch or Task subagent for ≥3 files.
-    expect(system).toMatch(/Task subagent dispatch/);
+    expect(system).toMatch(/Do NOT use shell commands/);
+    // Coordinated-edit retry path: apply_patch or Task for ≥3-file edits.
+    expect(system).toMatch(/apply_patch or Task/);
   });
 
   it("builds a bounded per-run prompt cache key", () => {

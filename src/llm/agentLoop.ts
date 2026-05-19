@@ -365,16 +365,19 @@ export function assembleAgentSystemPrompt(input: {
     `- After a successful apply_patch, do NOT re-read the same file — the patch is already written.\n\n` +
     `PRE-EXISTING BROKEN FILE — when apply_patch returns rejectionReason 'file_already_broken_pre_patch':\n` +
     `The file had a syntax error before your patch. Read it, locate the line/col in the rejection, then write ONE apply_patch that fixes the pre-existing error AND makes your change (pass scope: null — scope resolution cannot work on an unparseable file).\n\n` +
-    `APPLY_ROLLED_BACK — when an apply_patch tool_result begins with the literal line "APPLY_ROLLED_BACK":\n` +
-    `- Your patch was reverted. Disk is at the pre-apply state for every path listed under "Files restored to pre-apply state".\n` +
-    `- Read the error list (file, line, code, message). If you see a line beginning with "Suggested: ", that is a directional hint — usually the patch needs to coordinate edits across more files than you touched.\n` +
-    `- Do NOT use shell commands (sed, awk, python, cat >, etc.) to bypass the rollback. The underlying type/semantic error is real; defeating the rollback via shell leaves the codebase in the same broken state the verifier already caught.\n` +
-    `- Re-investigate (read the files referenced in the errors, identify the missing coordinated edit), then retry with apply_patch or — for ≥3-file coordinated edits — a single Task subagent dispatch.\n\n` +
+    `APPLY_ROLLED_BACK — when apply_patch returns a result beginning with "APPLY_ROLLED_BACK":\n` +
+    `- Patch reverted — disk is at pre-apply state for paths listed under "Files restored to pre-apply state".\n` +
+    `- Read the error list. "Suggested: " lines are hints for coordinated multi-file edits.\n` +
+    `- Do NOT use shell commands to bypass. Re-investigate, then retry with apply_patch or Task (≥3-file edits).\n\n` +
+    `VERIFICATION WARNINGS — when a run summary contains a "VERIFICATION WARNINGS" block:\n` +
+    `- Your patches are on disk. The verifier found new errors your changes introduced.\n` +
+    `- Options: (a) read error locations and patch to fix; (b) call revert_patch({path}) to undo specific files; (c) accept if errors are pre-existing or out-of-scope.\n` +
+    `- revert_patch({path: "<rel-path>"}) restores a file to its pre-run state without deleting other changes.\n\n` +
     `PRIOR RUN CONTEXT — if the user message begins with "PRIOR RUN CONTEXT — your last attempt in this thread produced this result:":\n` +
-    `- This thread had a previous run; its final summary is the block between that header and "END PRIOR RUN CONTEXT.".\n` +
-    `- If the block contains an APPLY_ROLLED_BACK marker, treat it as your starting point. The error list + restored-file paths there ARE the real obstacle — re-investigate from THOSE specific errors. Do not start a fresh investigation, do not re-derive the task from the user's follow-up wording alone.\n` +
-    `- If the block contains a "Suggested:" line, apply that direction (usually a coordinated multi-file edit via the Task tool for fan-out).\n` +
-    `- The user's actual current task follows the END PRIOR RUN CONTEXT line — combine the two: prior context tells you WHERE the problem is, the user message tells you what they want next.\n\n` +
+    `- This thread had a previous run; its final summary is between that header and "END PRIOR RUN CONTEXT.".\n` +
+    `- If the block contains APPLY_ROLLED_BACK or VERIFICATION WARNINGS, start from those errors — re-investigate from those specific locations.\n` +
+    `- If the block contains "Suggested: ", apply that direction (coordinated multi-file edit via Task).\n` +
+    `- The user's current task follows END PRIOR RUN CONTEXT — combine: prior context = WHERE the problem is.\n\n` +
     `TEST FAILURES — investigate, don't summarize:\n` +
     `- Read the file/line in the error. Decide: caused by your change, or pre-existing?\n` +
     `- Pre-existing: fix if simple, else note as out-of-scope in your final summary.\n` +
@@ -531,7 +534,11 @@ const INVESTIGATION_OUTPUT_FORMAT = `At the end of your investigation, output a 
 Set \`complete: true\` only when \`fixInstruction\` is a paste-ready imperative.
 Set \`complete: false\` (and use the 'investigate further' instruction) when evidence is insufficient — Phase 2 will then decide whether to continue investigation or surface the partial finding to the user.
 
-The JSON block must be the LAST item in your response, after the prose summary. ANY iteration may be your last — if you are at the iteration budget, emit the JSON now even if complete=false.`;
+The JSON block must be the LAST item in your response, after the prose summary. ANY iteration may be your last — if you are at the iteration budget, emit the JSON now even if complete=false.
+
+Additionally include a "plan" field with 3-8 steps for the execute phase:
+  "plan": { "objective": "<one sentence>", "steps": [{"description": "<step>", "subagentEligible": false}], "riskHints": ["<risk>"] }
+Set subagentEligible:true for steps covering 5+ files or long isolated operations. plan replaces the legacy pre-audit plan generation.`;
 
 export function assembleInvestigationSystemPrompt(input: {
   repoPath: string;
@@ -1512,6 +1519,25 @@ export async function runStagingVerification(input: {
   };
 }
 
+/** Phase F: formats post-loop verification regression as WARN text (patches stay on disk). */
+function buildVerificationWarningsMessage(opts: {
+  errors: Array<{ file?: string; line?: number; col?: number; code: string; message: string }>;
+  filesFlushed: number;
+  baselineErrorCount?: number;
+  postErrorCount?: number;
+}): string {
+  const header = `VERIFICATION WARNINGS — patches applied (${opts.filesFlushed} file${opts.filesFlushed !== 1 ? "s" : ""}), new errors detected.`;
+  const counts =
+    opts.baselineErrorCount !== undefined && opts.postErrorCount !== undefined
+      ? `Errors: ${opts.postErrorCount} (baseline was ${opts.baselineErrorCount}).`
+      : "";
+  const errorLines = opts.errors.slice(0, 20).map((e) => {
+    const loc = e.file ? `${e.file}${e.line !== undefined ? `:${e.line}` : ""}` : "";
+    return `  ${loc ? `${loc} ` : ""}[${e.code}] ${e.message}`;
+  });
+  return [header, ...(counts ? [counts] : []), ...(errorLines.length ? ["Errors:", ...errorLines] : [])].join("\n");
+}
+
 export async function finalizeStaging(input: {
   stagingFiles: Map<string, string>;
   repoPath: string;
@@ -1520,6 +1546,9 @@ export async function finalizeStaging(input: {
     staging: Map<string, string>,
     body: () => Promise<T>
   ) => Promise<T>;
+  /** Phase F: "warn" (default) keeps patches on disk and surfaces errors as warnings.
+   *  "rollback" restores pre-Phase-F behavior: staging discarded when regression detected. */
+  verifyMode?: "warn" | "rollback";
 }): Promise<{
   flushed: boolean;
   verification:
@@ -1565,29 +1594,35 @@ export async function finalizeStaging(input: {
       verification.status === "fail" ? verification.regressed : undefined,
   }));
 
-  // Phase J.3: only discard staging when the patch *regressed* verification
-  // (post errors > baseline errors). When the project has pre-existing
-  // errors and the patch didn't add any new ones, allow the flush to proceed
-  // — the user wants their patch even if the codebase has unrelated issues.
+  // Phase J.3 / Phase F: when verification regresses:
+  //   - rollback mode (ZONE_VERIFY_MODE=rollback): discard staging, restore disk.
+  //   - warn mode (default): skip discard, fall through to flush — patches stay on
+  //     disk; agentLoop surfaces errors as VERIFICATION WARNINGS in the summary.
   if (verification.status === "fail" && verification.regressed !== false) {
-    const discardedCount = input.stagingFiles.size;
-    // Phase J.3.1: snapshot staged content before clearing so the UI can
-    // render the rolled-back diff. Map<absPath, attemptedContent>.
-    const discardedStaging = new Map<string, string>(input.stagingFiles);
-    input.stagingFiles.clear();
-    debugLog("[zone-staging-discard]", JSON.stringify({
-      reason: "verification_regressed",
-      discardedCount,
+    if ((input.verifyMode ?? "warn") === "rollback") {
+      const discardedCount = input.stagingFiles.size;
+      const discardedStaging = new Map<string, string>(input.stagingFiles);
+      input.stagingFiles.clear();
+      debugLog("[zone-staging-discard]", JSON.stringify({
+        reason: "verification_regressed",
+        discardedCount,
+        baselineErrorCount: verification.baselineErrorCount,
+        postErrorCount: verification.postErrorCount,
+      }));
+      return {
+        flushed: false,
+        verification,
+        filesFlushed: 0,
+        flushFailures: 0,
+        discardedStaging,
+      };
+    }
+    // warn mode: fall through — flush proceeds, errors surface in summary.
+    debugLog("[zone-staging-warn-mode]", JSON.stringify({
+      reason: "verification_regressed_warn_mode",
       baselineErrorCount: verification.baselineErrorCount,
       postErrorCount: verification.postErrorCount,
     }));
-    return {
-      flushed: false,
-      verification,
-      filesFlushed: 0,
-      flushFailures: 0,
-      discardedStaging,
-    };
   }
 
   if (verification.status === "fail" && verification.regressed === false) {
@@ -2166,6 +2201,8 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     success?: boolean;
   }> = [];
   const filesModified = new Set<string>();
+  // Phase F: default "warn" — patches stay on disk when regression detected; "rollback" restores legacy behavior.
+  const verifyMode: "warn" | "rollback" = process.env["ZONE_VERIFY_MODE"] === "rollback" ? "rollback" : "warn";
   let todosEmittedThisRun = false;
   let selfCorrectionAttempts = 0;
   const failureHistory = new Map<string, FailureRecord[]>();
@@ -3108,6 +3145,34 @@ Example:
           continue;
         }
 
+        // Phase F: revert_patch — agent-initiated file revert. Removes the file
+        // from stagingFiles so finalizeStaging won't flush new content to disk;
+        // original disk content (pre-run state) is preserved automatically.
+        if (name === "revert_patch") {
+          const rawPath = typeof parsedArgs["path"] === "string" ? parsedArgs["path"] : null;
+          if (!rawPath) {
+            const errMsg = "revert_patch rejected: missing required field 'path'.";
+            responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
+            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            continue;
+          }
+          const relPath = rawPath.replace(/^[\\/]+/, "");
+          const abs = path.resolve(path.join(input.repoPath, relPath));
+          if (!stagingFiles.has(abs)) {
+            const errMsg = `revert_patch rejected: '${relPath}' was not modified in this run.`;
+            responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
+            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            continue;
+          }
+          stagingFiles.delete(abs);
+          filesModified.delete(relPath);
+          log("[zone-revert-patch-invoked]", JSON.stringify({ runId: input.runId ?? null, path: relPath, success: true }));
+          const revertOkMsg = `Reverted: '${relPath}' restored to its pre-run state.`;
+          responseInput.push({ role: "tool", tool_call_id: callId, content: revertOkMsg });
+          toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: revertOkMsg, success: true });
+          continue;
+        }
+
         input.onToolCall?.(name, parsedArgs);
 
         // Diagnostic: log every tool call before execution
@@ -3773,6 +3838,7 @@ Example:
             repoPath: input.repoPath,
             framework: input.framework,
             withStagingTempFlush,
+            verifyMode,
           })
         : {
             flushed: false,
@@ -3798,16 +3864,9 @@ Example:
             "Patch was applied because it didn't add any new errors " +
             `(${finalizeResult.verification.postErrorCount ?? "?"} errors before, ` +
             `${finalizeResult.verification.postErrorCount ?? "?"} errors after).`;
-        } else {
+        } else if (verifyMode === "rollback") {
           verificationReason = "verification_regressed";
           patchValidatedByAgent = false;
-          // J.4: structured marker block. The freeform markdown body that
-          // lived here pre-J.4 ("**Apply rolled back — verification
-          // regressed**…") is replaced by the APPLY_ROLLED_BACK shape so
-          // downstream consumers (orchestrator, retry agent, telemetry)
-          // can parse it. The label + duration land in telemetry rather
-          // than in the agent-facing message — the agent cares about the
-          // errors, not the toolchain timing.
           const errors = parseTscErrorPreview(finalizeResult.verification.errorPreview);
           const restoredFiles = finalizeResult.discardedStaging
             ? Array.from(finalizeResult.discardedStaging.keys()).map((abs) =>
@@ -3830,9 +3889,6 @@ Example:
             filePathsRestored: restoredFiles,
             runId: input.runId ?? null,
           }));
-          // J.4.1: separate grep-friendly marker log so `grep APPLY_ROLLED_BACK`
-          // on the server log surfaces every rollback with the actual codes
-          // and suggestion applied — not just an opaque "feedback" event.
           log("[zone-apply-rolled-back-marker]", JSON.stringify(
             buildApplyRolledBackMarkerLog({
               site: "natural_completion",
@@ -3842,6 +3898,26 @@ Example:
               runId: input.runId ?? null,
             })
           ));
+        } else {
+          // Phase F warn mode: patches on disk, surface errors as warnings.
+          verificationReason = "verification_regressed";
+          patchValidatedByAgent = false;
+          const errors = parseTscErrorPreview(finalizeResult.verification.errorPreview);
+          summaryAppendix = "\n\n" + buildVerificationWarningsMessage({
+            errors,
+            filesFlushed: finalizeResult.filesFlushed,
+            baselineErrorCount: finalizeResult.verification.baselineErrorCount,
+            postErrorCount: finalizeResult.verification.postErrorCount,
+          });
+          log("[zone-verify-warn-surfaced]", JSON.stringify({
+            site: "natural_completion",
+            label: finalizeResult.verification.label,
+            durationMs: finalizeResult.verification.durationMs,
+            baselineErrorCount: finalizeResult.verification.baselineErrorCount,
+            postErrorCount: finalizeResult.verification.postErrorCount,
+            errorCount: errors.length,
+            runId: input.runId ?? null,
+          }));
         }
       } else if (
         finalizeResult.verification.status === "skipped" &&
@@ -4079,6 +4155,7 @@ Example:
         repoPath: input.repoPath,
         framework: input.framework,
         withStagingTempFlush,
+        verifyMode,
       })
     : {
         flushed: false,
@@ -4090,9 +4167,6 @@ Example:
         flushFailures: 0,
       };
   if (finalizeResult.verification.status === "fail") {
-    // Phase J.3: same regressed-vs-pre-existing split as the natural-completion
-    // path above. Pre-existing errors → patch flushes, marker is inconclusive.
-    // Genuine regression → staging discarded, marker is verification_regressed.
     if (finalizeResult.verification.regressed === false) {
       finalVerificationReason = "tests_inconclusive";
       patchValidatedByAgent = false;
@@ -4102,10 +4176,9 @@ Example:
         finalizeResult.verification.label +
         ", " + finalizeResult.verification.durationMs + "ms). " +
         "Patch was applied because it didn't add any new errors.";
-    } else {
+    } else if (verifyMode === "rollback") {
       finalVerificationReason = "verification_regressed";
       patchValidatedByAgent = false;
-      // J.4: same structured marker as the natural-completion branch.
       const errors = parseTscErrorPreview(finalizeResult.verification.errorPreview);
       const restoredFiles = finalizeResult.discardedStaging
         ? Array.from(finalizeResult.discardedStaging.keys()).map((abs) =>
@@ -4128,7 +4201,6 @@ Example:
         filePathsRestored: restoredFiles,
         runId: input.runId ?? null,
       }));
-      // J.4.1: grep-friendly marker log (see natural-completion branch).
       log("[zone-apply-rolled-back-marker]", JSON.stringify(
         buildApplyRolledBackMarkerLog({
           site: "max_iter",
@@ -4138,6 +4210,26 @@ Example:
           runId: input.runId ?? null,
         })
       ));
+    } else {
+      // Phase F warn mode: patches on disk, surface errors as warnings.
+      finalVerificationReason = "verification_regressed";
+      patchValidatedByAgent = false;
+      const errors = parseTscErrorPreview(finalizeResult.verification.errorPreview);
+      finalSummary = finalSummary + "\n\n" + buildVerificationWarningsMessage({
+        errors,
+        filesFlushed: finalizeResult.filesFlushed,
+        baselineErrorCount: finalizeResult.verification.baselineErrorCount,
+        postErrorCount: finalizeResult.verification.postErrorCount,
+      });
+      log("[zone-verify-warn-surfaced]", JSON.stringify({
+        site: "token_budget_exceeded",
+        label: finalizeResult.verification.label,
+        durationMs: finalizeResult.verification.durationMs,
+        baselineErrorCount: finalizeResult.verification.baselineErrorCount,
+        postErrorCount: finalizeResult.verification.postErrorCount,
+        errorCount: errors.length,
+        runId: input.runId ?? null,
+      }));
     }
   } else if (
     finalizeResult.verification.status === "skipped" &&

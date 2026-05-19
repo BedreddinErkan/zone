@@ -258,11 +258,11 @@ describe("Phase J.5 — system prompt documents PRIOR RUN CONTEXT", () => {
     // (1) Header pattern the agent must recognize at the top of user messages.
     expect(prompt).toContain('"PRIOR RUN CONTEXT — your last attempt in this thread produced this result:"');
     expect(prompt).toContain("END PRIOR RUN CONTEXT.");
-    // (2) The APPLY_ROLLED_BACK starting-point directive.
-    expect(prompt).toMatch(/treat it as your starting point/);
+    // (2) The APPLY_ROLLED_BACK / VERIFICATION WARNINGS starting-point directive.
+    expect(prompt).toMatch(/start from those errors|re-investigate from those specific/);
     // (3) The Suggested: directive.
     expect(prompt).toMatch(/Suggested:.*coordinated multi-file edit/);
-    // (4) The combine-the-two directive.
-    expect(prompt).toMatch(/combine the two|prior context tells you WHERE/);
+    // (4) The combine-the-two directive (Phase F: "prior context = WHERE the problem is").
+    expect(prompt).toMatch(/combine.*prior context|prior context.*WHERE/);
   });
 });
