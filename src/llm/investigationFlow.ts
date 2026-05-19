@@ -30,13 +30,6 @@ export interface InvestigateScopeOpts {
     stage: string;
     progress?: Partial<ZoneStructuredProgressEvent>;
   }) => void;
-  /**
-   * Phase O cost-opt: explicit model ID for the audit investigator role.
-   * When set, overrides the provider default (claude-sonnet-4-6 / gpt-5.4)
-   * so lower-risk audits can run on a cheaper model (e.g. claude-haiku-4-5).
-   * Only the investigator role is overridden; worker/planner roles are unaffected.
-   */
-  investigatorModel?: string;
 }
 
 export interface InvestigateScopeResult {
@@ -187,7 +180,6 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
     disableTodoWrite: true,
     lane: "audit",
     ...(parentTaskClassification ? { taskClassification: parentTaskClassification } : {}),
-    ...(opts.investigatorModel ? { modelRoleOverride: { investigator: opts.investigatorModel } } : {}),
     onToolCall: (name: string, args: Record<string, unknown>) => {
       const fp = filePathFromToolArgs(name, args);
       if (fp) contextFiles.add(fp);

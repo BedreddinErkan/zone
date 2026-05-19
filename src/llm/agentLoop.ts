@@ -176,13 +176,6 @@ export interface AgentLoopInput {
    */
   lane?: "main" | "audit";
   /**
-   * Phase O cost-opt: per-role model overrides for this loop invocation.
-   * When set, overrides the provider-default from getModelForRole for the
-   * specified role(s). Currently used to downgrade the audit investigator to
-   * Haiku 4.5 when the scope audit runs on a low-to-medium-risk plan.
-   */
-  modelRoleOverride?: Partial<import("./modelRouting.js").RoleModelMapping>;
-  /**
    * Phase X.0.1: distilled findings from the pre-execution scope audit.
    * When present, injected as an AUDIT CONTEXT block in the user message
    * so the execute agent skips re-investigating ground the audit covered.
@@ -2617,7 +2610,7 @@ Example:
       const wrapupResponse = await client.createChatCompletion(
         {
           model: isInvestigationMode
-            ? getModelForRole("investigator", client.provider as "anthropic" | "openai", input.modelRoleOverride)
+            ? getModelForRole("investigator", client.provider as "anthropic" | "openai")
             : getModelName("high", client.provider, requestCtx?.modelOverride),
           messages: [
             ...wrapupPruned,
@@ -2824,7 +2817,7 @@ Example:
         ? buildOpenAIPromptCacheKey(input.runId, input.conversationId)
         : undefined;
     const modelName = isInvestigationMode
-      ? getModelForRole("investigator", client.provider as "anthropic" | "openai", input.modelRoleOverride)
+      ? getModelForRole("investigator", client.provider as "anthropic" | "openai")
       : getModelName("high", client.provider, requestCtx?.modelOverride);
 
     // R.2: prune stale read results from the messages copy sent to the API.
@@ -4067,7 +4060,7 @@ Example:
     try {
       const assessmentResponse = await client.createChatCompletion({
         model: isInvestigationMode
-          ? getModelForRole("investigator", client.provider as "anthropic" | "openai", input.modelRoleOverride)
+          ? getModelForRole("investigator", client.provider as "anthropic" | "openai")
           : getModelName("high", client.provider, requestCtx?.modelOverride),
         messages: [
           ...responseInput,
