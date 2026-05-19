@@ -2198,6 +2198,32 @@ export async function executeTool(
         };
       }
       if (semanticSmellDetected) {
+        const smellIsPreExisting =
+          smellValidation.baselineDetected === true &&
+          smellValidation.baselineCategory === smellValidation.reason;
+        log("[zone-semantic-smell-detected]", JSON.stringify({
+          filePath,
+          category: smellValidation.reason ?? null,
+          baselineDetected: smellValidation.baselineDetected ?? false,
+          willSuppress: smellIsPreExisting,
+          runId: input?.runId ?? null,
+        }));
+        if (smellIsPreExisting) {
+          log("[zone-semantic-smell-baseline]", JSON.stringify({
+            event: "semantic_smell_baseline_match",
+            filePath,
+            category: smellValidation.reason,
+            action: "suppressed",
+            baselineSnippet: (smellValidation.details ?? "").slice(0, 200),
+            currentSnippet: (smellValidation.details ?? "").slice(0, 200),
+            runId: input?.runId ?? null,
+          }));
+          // Pre-existing smell — patch is already on disk/staging; accept it.
+          return {
+            success: true,
+            output: `Patch applied: ${blocks.length} block(s) in ${filePath}`,
+          };
+        }
         if (!stagedWrite(input?.stagingFiles, abs, original)) {
           fs.writeFileSync(abs, original, "utf8");
         }
@@ -2326,6 +2352,35 @@ export async function executeTool(
           reverted: syntaxBroken || semanticSmellDetected,
         })
       );
+
+      if (semanticSmellDetected) {
+        const smellIsPreExisting =
+          smellValidation.baselineDetected === true &&
+          smellValidation.baselineCategory === smellValidation.reason;
+        log("[zone-semantic-smell-detected]", JSON.stringify({
+          filePath,
+          category: smellValidation.reason ?? null,
+          baselineDetected: smellValidation.baselineDetected ?? false,
+          willSuppress: smellIsPreExisting,
+          runId: input?.runId ?? null,
+        }));
+        if (smellIsPreExisting) {
+          log("[zone-semantic-smell-baseline]", JSON.stringify({
+            event: "semantic_smell_baseline_match",
+            filePath,
+            category: smellValidation.reason,
+            action: "suppressed",
+            baselineSnippet: (smellValidation.details ?? "").slice(0, 200),
+            currentSnippet: (smellValidation.details ?? "").slice(0, 200),
+            runId: input?.runId ?? null,
+          }));
+          // Pre-existing smell — file is already on disk/staging; accept it.
+          return {
+            success: true,
+            output: `File written: ${filePath} (${content.length} chars)`,
+          };
+        }
+      }
 
       if (syntaxBroken || semanticSmellDetected) {
         if (fileExists) {

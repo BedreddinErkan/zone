@@ -61,6 +61,55 @@ describe("checkSemanticSmells template expression tolerance", () => {
   });
 });
 
+describe("duplicate_import_statement baseline-diff suppression", () => {
+  it("T.1 detects duplicate import in post-apply content alone (no baseline match → no suppression)", () => {
+    // before: single import from 'x'; after: agent added a second import from same module
+    const before = "import a from 'x';";
+    const after = "import a from 'x';\nimport { helper } from 'x';";
+    const result = checkedSmells(after, before);
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "duplicate_import_statement",
+      baselineDetected: false,
+    });
+    expect(result.baselineCategory).toBeUndefined();
+  });
+
+  it("T.2 suppresses when duplicate import was pre-existing in before content", () => {
+    // both before and after have duplicate imports from 'x'; agent only added a function
+    const before = "import a from 'x';\nimport b from 'x';";
+    const after = "import a from 'x';\nimport b from 'x';\nfunction newRoute() {}";
+    const result = checkedSmells(after, before);
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "duplicate_import_statement",
+      baselineDetected: true,
+      baselineCategory: "duplicate_import_statement",
+    });
+  });
+
+  it("T.3 no suppression when duplicate_import category differs from duplicate_function_def", () => {
+    // before has duplicate_import_statement; after introduces both duplicate import AND duplicate adjacent JSDoc
+    // This test verifies that category matching is required; function_def is not a real smell category
+    // so we use a scenario where before has the dup import but after introduces a *new* dup import
+    // from a *different* module (no baseline match for that module → no suppression).
+    const before = "import a from 'x';\nimport b from 'x';"; // dup from 'x'
+    const after = "import a from 'y';\nimport b from 'y';"; // dup from 'y' — different module
+    const result = checkedSmells(after, before);
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "duplicate_import_statement",
+      baselineDetected: false, // 'y' was not duplicated in before
+    });
+  });
+
+  it("T.4 backward compat: no priorContent → behaves exactly as before (no new fields on clean file)", () => {
+    const after = "import a from 'x';\nconst b = 1;";
+    const result = checkedSmells(after);
+    expect(result).toEqual({ ok: true });
+  });
+});
+
 describe("apply_patch semantic smell failure repetition", () => {
   it("detects two consecutive concrete smell triggers on the same file", () => {
     const history = new Map<string, FailureRecord[]>();
