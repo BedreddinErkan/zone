@@ -2848,6 +2848,16 @@ Example:
       prevR2BlocksReplaced = pruneStats.blocksReplaced;
       prevR2PrunedMessages = freshlyPruned;
     }
+    log("[zone-r2-shim]", JSON.stringify({
+      iter: iter + 1,
+      runId: input.runId ?? null,
+      branch: pruneStats.blocksReplaced > prevR2BlocksReplaced ? "fallback" : "refresh",
+      blocksReplaced: pruneStats.blocksReplaced,
+      prevBlocksReplaced: prevR2BlocksReplaced,
+      responseInputLen: responseInput.length,
+      prunedMessagesLen: prunedMessages.length,
+      prevPrunedMessagesLen: prevR2PrunedMessages?.length ?? 0,
+    }));
 
     // E.3: per-iter file-read manifest injection. Appended to prunedMessages (not
     // responseInput) so it does not accumulate across iterations. Only emitted when
@@ -2882,6 +2892,40 @@ Example:
           },
         ];
       }
+    }
+
+    // Opus forensic E.1: env-gated per-iter content hash probe for cache-bust diagnosis.
+    // Set ZONE_DEBUG_CACHE_PROBE=1 to enable. No-op otherwise.
+    if (process.env["ZONE_DEBUG_CACHE_PROBE"] === "1") {
+      const hashMsg = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 12);
+      const msgs = prunedMessages;
+      const perMessageHashes = msgs.slice(0, 5).map((m, i) => ({
+        idx: i,
+        role: m.role,
+        contentHash: hashMsg(JSON.stringify(m.content)),
+        contentLen: JSON.stringify(m.content).length,
+      }));
+      const rollingHashes: Record<string, string> = {};
+      let cumulative = "";
+      for (let i = 0; i < msgs.length; i++) {
+        cumulative += JSON.stringify(msgs[i]) + "|";
+        if (i === 0 || i === 1 || i === 3 || i === msgs.length - 1) {
+          rollingHashes[`upTo${i}`] = hashMsg(cumulative);
+        }
+      }
+      const toolResultMsgCount = msgs.filter((m) =>
+        Array.isArray(m.content) &&
+        (m.content as Array<{ type?: string }>).some((b) => b?.type === "tool_result")
+      ).length;
+      log("[zone-cache-probe]", JSON.stringify({
+        iter: iter + 1,
+        runId: input.runId ?? null,
+        messageCount: msgs.length,
+        toolResultMsgCount,
+        perMessageHashes,
+        rollingHashes,
+        prevR2BlocksReplaced,
+      }));
     }
 
     // R.1: emit per-call token breakdown (on the pruned view, which is what the LLM sees).
