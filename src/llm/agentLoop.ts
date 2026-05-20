@@ -3821,18 +3821,22 @@ Example:
         input.onProgress?.(
           `[agent_loop] Failure detected (${routedTrigger}) â€” self-correction attempt ${selfCorrectionAttempts}/${MAX_SELF_CORRECTION_ATTEMPTS}`
         );
-        responseInput.push({
-          role: "user",
-          content:
-            `[Zone coaching â€” attempt ${selfCorrectionAttempts} of ${MAX_SELF_CORRECTION_ATTEMPTS}]\n` +
-            diagnosticText + `\n\n` +
-            coachingText +
-            `\n\nRecent failure context:\n` +
-            `- Tool: ${failedToolName}\n` +
-            `- Error preview (first 300 chars): ${failedToolOutput.slice(0, 300)}\n` +
-            `You have ${remaining} retry attempt${remaining === 1 ? "" : "s"} remaining. ` +
-            `After that the run will halt with the current state.`,
-        });
+        const coachingAppend =
+          `\n\n[Zone coaching â€” attempt ${selfCorrectionAttempts} of ${MAX_SELF_CORRECTION_ATTEMPTS}]\n` +
+          diagnosticText + `\n\n` +
+          coachingText +
+          `\n\nRecent failure context:\n` +
+          `- Tool: ${failedToolName}\n` +
+          `- Error preview (first 300 chars): ${failedToolOutput.slice(0, 300)}\n` +
+          `You have ${remaining} retry attempt${remaining === 1 ? "" : "s"} remaining. ` +
+          `After that the run will halt with the current state.`;
+        for (let ci = responseInput.length - 1; ci >= 0; ci--) {
+          const m = responseInput[ci];
+          if (m.role === "tool") {
+            m.content = (typeof m.content === "string" ? m.content : "") + coachingAppend;
+            break;
+          }
+        }
       } else if (failureDetected) {
         // Budget exhausted â€” log and let the model produce its final summary naturally.
         const routedTrigger = repeatPattern
