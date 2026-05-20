@@ -25,7 +25,7 @@ export const SIMPLE_ADD_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
   skipPlanSSE: true,
   skipAudit: true,
   iterCap: 5,
-  coachingBudget: 1,
+  coachingBudget: 2,
   allowSubagentDispatch: false,
   allowScopeRevision: false,
   preserveSyntaxChecker: true,
