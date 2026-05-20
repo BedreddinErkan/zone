@@ -2894,36 +2894,81 @@ Example:
       }
     }
 
-    // Opus forensic E.1: env-gated per-iter content hash probe for cache-bust diagnosis.
+    // Opus forensic E.2: env-gated per-iter content hash probe for cache-bust diagnosis.
+    // v2 (replaces v1 7d9b469): every message hashed + manifest position + marker location.
     // Set ZONE_DEBUG_CACHE_PROBE=1 to enable. No-op otherwise.
     if (process.env["ZONE_DEBUG_CACHE_PROBE"] === "1") {
       const hashMsg = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 12);
+      const estTokens = (s: string) => Math.ceil(s.length / 4);
       const msgs = prunedMessages;
-      const perMessageHashes = msgs.slice(0, 5).map((m, i) => ({
-        idx: i,
-        role: m.role,
-        contentHash: hashMsg(JSON.stringify(m.content)),
-        contentLen: JSON.stringify(m.content).length,
-      }));
+
+      let cumulativeChars = 0;
+      let cumulativeTokens = 0;
+      const allMessageHashes = msgs.map((m, i) => {
+        const serialized = JSON.stringify(m);
+        const charLen = serialized.length;
+        const tokens = estTokens(serialized);
+        cumulativeChars += charLen;
+        cumulativeTokens += tokens;
+        return {
+          idx: i,
+          role: m.role,
+          contentHash: hashMsg(JSON.stringify(m.content)),
+          fullHash: hashMsg(serialized),
+          charLen,
+          estTokens: tokens,
+          cumulativeTokens,
+        };
+      });
+
+      const manifestIdx = msgs.findIndex((m) => {
+        if (m.role !== "user") return false;
+        const c = m.content;
+        const text = Array.isArray(c)
+          ? (c as Array<{ text?: string }>).map((b) => b?.text ?? "").join("")
+          : typeof c === "string" ? c : "";
+        return text.includes("Files already read this run");
+      });
+      const manifestInfo = manifestIdx >= 0 ? {
+        idx: manifestIdx,
+        isLast: manifestIdx === msgs.length - 1,
+        cumulativeTokensAtManifest: allMessageHashes[manifestIdx]?.cumulativeTokens,
+        manifestContentHash: allMessageHashes[manifestIdx]?.contentHash,
+      } : { idx: -1, missing: true };
+
       const rollingHashes: Record<string, string> = {};
-      let cumulative = "";
+      let rolling = "";
       for (let i = 0; i < msgs.length; i++) {
-        cumulative += JSON.stringify(msgs[i]) + "|";
-        if (i === 0 || i === 1 || i === 3 || i === msgs.length - 1) {
-          rollingHashes[`upTo${i}`] = hashMsg(cumulative);
-        }
+        rolling += JSON.stringify(msgs[i]) + "|";
+        rollingHashes[`upTo${i}`] = hashMsg(rolling);
       }
+
+      let lastUserIdx = -1;
+      for (let i = msgs.length - 1; i >= 0; i -= 1) {
+        if (msgs[i].role === "user") { lastUserIdx = i; break; }
+      }
+      const markerInfo = {
+        lastUserIdx,
+        markerEqualsManifest: lastUserIdx === manifestIdx,
+        cumulativeTokensAtMarker: allMessageHashes[lastUserIdx]?.cumulativeTokens,
+      };
+
       const toolResultMsgCount = msgs.filter((m) =>
         Array.isArray(m.content) &&
         (m.content as Array<{ type?: string }>).some((b) => b?.type === "tool_result")
       ).length;
-      log("[zone-cache-probe]", JSON.stringify({
+
+      log("[zone-cache-probe-v2]", JSON.stringify({
         iter: iter + 1,
         runId: input.runId ?? null,
         messageCount: msgs.length,
+        cumulativeTokens,
+        cumulativeChars,
         toolResultMsgCount,
-        perMessageHashes,
+        allMessageHashes,
         rollingHashes,
+        manifestInfo,
+        markerInfo,
         prevR2BlocksReplaced,
       }));
     }

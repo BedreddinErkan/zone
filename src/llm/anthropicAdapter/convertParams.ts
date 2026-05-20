@@ -5,6 +5,7 @@ import type {
   ChatCompletionTool,
   ChatCompletionToolChoiceOption,
 } from "openai/resources/chat/completions";
+import { log } from "../../utils/logger.js";
 
 const JSON_MODE_INSTRUCTION = [
   "You must respond with a single valid JSON object only.",
@@ -194,6 +195,18 @@ export function convertParams(
           }
           return msg;
         });
+
+        // Opus forensic E.2: log actual marker placement so probe-v2 emits
+        // can be joined against where Anthropic sees the cache_control.
+        if (process.env["ZONE_DEBUG_CACHE_PROBE"] === "1") {
+          const targetMsg = messagesForRequest[lastUserIdx];
+          log("[zone-cache-marker-placed]", JSON.stringify({
+            markerOnIdx: lastUserIdx,
+            markerOnRole: targetMsg?.role ?? "unknown",
+            contentBlockCount: Array.isArray(targetMsg?.content) ? targetMsg.content.length : 1,
+            totalMessages: messagesForRequest.length,
+          }));
+        }
       }
     }
   }
