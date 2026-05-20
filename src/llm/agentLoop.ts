@@ -23,7 +23,7 @@ import {
   type SubagentResult,
   type SubagentTokenUsage,
 } from "./subagents.js";
-import type { TaskClassification, TaskTier } from "./taskClassifier.js";
+import type { TaskArchetype, TaskClassification, TaskTier } from "./taskClassifier.js";
 import { resolveTierLimits } from "./tierLimits.js";
 import { resolveDailyUsdCap } from "./usdCapResolver.js";
 import { loadOrgPolicy } from "./policyLoader.js";
@@ -79,6 +79,10 @@ export interface AgentLoopInput {
    * bonus logic is disabled so restricted runtimes stay bounded.
    */
   maxIterationsOverride?: number;
+  coachingBudgetOverride?: number;
+  excludeTools?: ReadonlySet<string>;
+  pipelineApplied?: boolean;
+  originalArchetype?: TaskArchetype;
   onProgress?: (msg: string) => void;
   onToolCall?: (name: string, args: Record<string, unknown>) => void;
   onToolResult?: (name: string, result: ToolResult) => void;
@@ -253,6 +257,12 @@ export interface AgentLoopResult {
    *  write. runLlmPatchFlow uses this together with the pre-write
    *  beforeByFile snapshot to render a "what was attempted" diff card. */
   discardedStaging?: Map<string, string>;
+  /** L5.1b-2: soft promotion. Non-null when the dispatcher fired a promotion
+   *  mid-run (iter_cap / rollback_x2 / coaching_exhausted). Null on all
+   *  non-promoted runs including default env (pipelineApplied=false). */
+  promotedFromArchetype?: TaskArchetype | null;
+  promotionTrigger?: "iter_cap" | "rollback_x2" | "coaching_exhausted" | null;
+  promotedAtIter?: number | null;
 }
 
 const MAX_SELF_CORRECTION_ATTEMPTS = 5;
@@ -2075,6 +2085,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         finalIter: result.iterCount ?? null,
         finalCostUsd: costUsd,
         success: terminationReason === "natural_completion",
+        pipelineApplied: input.pipelineApplied ?? false,
+        promotedFrom: result.promotedFromArchetype ?? null,
+        promotionTrigger: result.promotionTrigger ?? null,
+        promotedAtIter: result.promotedAtIter ?? null,
       }));
     }
     return result;
@@ -2102,6 +2116,18 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   // iterCap is already the authoritative budget. Escalation remains active only
   // for subagent loops that bypass tier gating (isSubagentLoop resolved below).
   let escalationEnabled = typeof input.maxIterationsOverride !== "number";
+  let effectiveMaxCoachingAttempts =
+    input.coachingBudgetOverride ?? MAX_SELF_CORRECTION_ATTEMPTS;
+  // L5.1b-2: soft promotion state — all null on non-dispatcher runs
+  let promotedFromArchetype: TaskArchetype | null = null;
+  let promotionTrigger: "iter_cap" | "rollback_x2" | "coaching_exhausted" | null = null;
+  let promotedAtIter: number | null = null;
+  let rollbackCount = 0;
+  let coachingBudgetExhausted = false;
+  const inputIterCap: number | null =
+    input.pipelineApplied === true && typeof input.maxIterationsOverride === "number"
+      ? input.maxIterationsOverride
+      : null;
   // Phase H.6: surface the effective budget at loop entry for tracing how
   // plan-aware overrides propagate through investigation/patch entry points.
   debugLog("[zone-iter-budget-effective]", JSON.stringify({
@@ -2126,9 +2152,11 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   // AUDIT_ONLY_TOOLS spread needed. The allowedTools filter still restricts
   // which tools are presented in audit mode (AUDIT_ALLOWED_TOOLS ⊂ ZONE_TOOLS).
   const toolsForLLM = sortToolsForPromptCache(
-    effectiveAllowedTools
-      ? ZONE_TOOLS.filter((t) => effectiveAllowedTools.has(getZoneToolName(t)))
-      : ZONE_TOOLS
+    ZONE_TOOLS.filter((t) => {
+      const name = getZoneToolName(t);
+      if (input.excludeTools?.has(name)) return false;
+      return effectiveAllowedTools ? effectiveAllowedTools.has(name) : true;
+    })
   );
   if (effectiveAllowedTools && toolsForLLM.length === 0) {
     throw new Error("AgentLoopInput.allowedTools resolved to zero tools — aborting.");
@@ -2242,6 +2270,9 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
         verificationReason: "no_verification_attempted",
         terminationReason: "daily_usd_cap_exceeded",
         iterCount: 0,
+        promotedFromArchetype: null,
+        promotionTrigger: null,
+        promotedAtIter: null,
       };
     }
   }
@@ -3085,6 +3116,9 @@ Example:
           tokenUsage: currentTokenUsage(),
           costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
           iterCount: iter + 1,
+          promotedFromArchetype,
+          promotionTrigger,
+          promotedAtIter,
         };
       }
       throw llmErr;
@@ -3161,7 +3195,7 @@ Example:
     const tokenBudgetRatio = emitTokenBudgetStatus(iter + 1);
 
     if (tokenBudgetRatio >= TOKEN_BUDGET_HARD) {
-      return await synthesizeTokenBudgetExit(iter + 1, responseInput);
+      return { ...await synthesizeTokenBudgetExit(iter + 1, responseInput), promotedFromArchetype, promotionTrigger, promotedAtIter };
     }
 
     throwIfAborted("after_llm");
@@ -3607,6 +3641,11 @@ Example:
           list.push({ trigger, errorLine, patchHash, iter: iter + 1 });
           failureHistory.set(filePath, list);
         }
+        // L5.1b-2: count mid-loop rollbacks for rollback_x2 promotion trigger
+        if (name === "apply_patch" && typeof result.output === "string" &&
+            result.output.startsWith("APPLY_ROLLED_BACK")) {
+          rollbackCount += 1;
+        }
 
         if (
           (name === "write_file" || name === "apply_patch") &&
@@ -3647,7 +3686,7 @@ Example:
                   tool_call_id: callId,
                   content: result.output,
                 });
-                return await synthesizeTokenBudgetExit(iter + 1, responseInput);
+                return { ...await synthesizeTokenBudgetExit(iter + 1, responseInput), promotedFromArchetype, promotionTrigger, promotedAtIter };
               }
             }
             // K.6: subagent cost propagation (parallel to K.3 token propagation above)
@@ -3706,7 +3745,7 @@ Example:
             title: `Loop detected: \`${name}\` repeated ${loopResult.count}×`,
             status: "error",
           } as Parameters<NonNullable<typeof input.onStructuredEvent>>[0]);
-          return synthesizeLoopDetectedExit(iter + 1, name, loopResult.count);
+          return { ...synthesizeLoopDetectedExit(iter + 1, name, loopResult.count), promotedFromArchetype, promotionTrigger, promotedAtIter };
         }
       }
 
@@ -3732,7 +3771,7 @@ Example:
       const failedFilePath = failedToolName === "apply_patch" ? failedToolFilePath : null;
       const pickedFromBackupSweep =
         repeatPattern !== null && repeatPattern.filePath !== failedToolFilePath;
-      if (failureDetected && selfCorrectionAttempts < MAX_SELF_CORRECTION_ATTEMPTS) {
+      if (failureDetected && selfCorrectionAttempts < effectiveMaxCoachingAttempts) {
         selfCorrectionAttempts += 1;
         let routedTrigger: SelfCorrectTrigger;
         if (repeatPattern) {
@@ -3809,13 +3848,13 @@ Example:
             parsedFailingFile: diagnostic.parsed?.failingFile ?? null,
           }
         );
-        const remaining = MAX_SELF_CORRECTION_ATTEMPTS - selfCorrectionAttempts;
+        const remaining = effectiveMaxCoachingAttempts - selfCorrectionAttempts;
         debugLog("[zone-agent-self-correct]", JSON.stringify({
           iter: iter + 1,
           trigger: failedToolName === "run_command" ? "test_failed" : failedToolName,
           routedTrigger,
           selfCorrectionAttempt: selfCorrectionAttempts,
-          maxAttempts: MAX_SELF_CORRECTION_ATTEMPTS,
+          maxAttempts: effectiveMaxCoachingAttempts,
           filePath: routedFilePath,
           perFileAttempt,
           detectedRepeatedFailure: repeatPattern !== null,
@@ -3871,10 +3910,10 @@ Example:
           candidatesPreview: diagnostic.candidates.slice(0, 5),
         }));
         input.onProgress?.(
-          `[agent_loop] Failure detected (${routedTrigger}) â€” self-correction attempt ${selfCorrectionAttempts}/${MAX_SELF_CORRECTION_ATTEMPTS}`
+          `[agent_loop] Failure detected (${routedTrigger}) â€” self-correction attempt ${selfCorrectionAttempts}/${effectiveMaxCoachingAttempts}`
         );
         const coachingAppend =
-          `\n\n[Zone coaching â€” attempt ${selfCorrectionAttempts} of ${MAX_SELF_CORRECTION_ATTEMPTS}]\n` +
+          `\n\n[Zone coaching â€” attempt ${selfCorrectionAttempts} of ${effectiveMaxCoachingAttempts}]\n` +
           diagnosticText + `\n\n` +
           coachingText +
           `\n\nRecent failure context:\n` +
@@ -3890,7 +3929,8 @@ Example:
           }
         }
       } else if (failureDetected) {
-        // Budget exhausted â€” log and let the model produce its final summary naturally.
+        // Budget exhausted — log and let the model produce its final summary naturally.
+        coachingBudgetExhausted = true; // L5.1b-2: promotion signal
         const routedTrigger = repeatPattern
           ? "apply_patch_repeated_failure_same_file"
           : classifyFailure(failedToolName, failedToolOutput, failedToolError);
@@ -3903,7 +3943,7 @@ Example:
           trigger: failedToolName === "run_command" ? "test_failed" : failedToolName,
           routedTrigger,
           selfCorrectionAttempt: selfCorrectionAttempts,
-          maxAttempts: MAX_SELF_CORRECTION_ATTEMPTS,
+          maxAttempts: effectiveMaxCoachingAttempts,
           filePath: routedFilePath,
           perFileAttempt,
           detectedRepeatedFailure: repeatPattern !== null,
@@ -3934,7 +3974,7 @@ Example:
             type: "compaction_exhausted",
             message: "Task aborted: context exhausted via compaction. Break this task into smaller subtasks.",
           });
-          return synthesizeCompactionExhaustedExit(iter + 1, responseInput);
+          return { ...synthesizeCompactionExhaustedExit(iter + 1, responseInput), promotedFromArchetype, promotionTrigger, promotedAtIter };
         }
         throw err;
       }
@@ -3958,6 +3998,37 @@ Example:
         input.onProgress?.(compactionResult.warning);
       }
 
+      // L5.1b-2: soft promotion check — one-shot, only when dispatcher is active
+      const _isPromotable = input.pipelineApplied === true
+        && input.originalArchetype != null
+        && promotedFromArchetype === null;
+      if (_isPromotable) {
+        const _firePromotion = (trigger: NonNullable<typeof promotionTrigger>) => {
+          promotedFromArchetype = input.originalArchetype!;
+          promotionTrigger = trigger;
+          promotedAtIter = iter + 1;
+          iterationBudget = {
+            ...iterationBudget,
+            maxIterationsForRun: input.maxIterations ?? BASE_MAX_ITERATIONS,
+          };
+          effectiveMaxCoachingAttempts = MAX_SELF_CORRECTION_ATTEMPTS;
+          log("[zone-archetype-promoted]", JSON.stringify({
+            runId: input.runId ?? null,
+            fromArchetype: promotedFromArchetype,
+            toArchetype: "complex_multi_file",
+            atIter: promotedAtIter,
+            trigger: promotionTrigger,
+          }));
+        };
+        if (inputIterCap !== null && iter + 1 >= inputIterCap) {
+          _firePromotion("iter_cap");
+        } else if (iter >= 1 && rollbackCount >= 2) {
+          _firePromotion("rollback_x2");
+        } else if (coachingBudgetExhausted && failureDetected) {
+          _firePromotion("coaching_exhausted");
+        }
+      }
+
       continue;
     }
 
@@ -3979,6 +4050,9 @@ Example:
           tokenUsage: currentTokenUsage(),
           costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
           iterCount: iter + 1,
+          promotedFromArchetype,
+          promotionTrigger,
+          promotedAtIter,
         };
       }
       const vrMatch = finalText.match(/\[ZONE_VERIFICATION:\s*([\w_]+)\]/i);
@@ -4185,6 +4259,9 @@ Example:
         tokenUsage: currentTokenUsage(),
         costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
         iterCount: iter + 1,
+        promotedFromArchetype,
+        promotionTrigger,
+        promotedAtIter,
         // Phase J.3.1: forward the staging snapshot so runLlmPatchFlow can
         // render the rolled-back diff. Only meaningful when
         // verificationReason === "verification_regressed".
@@ -4243,6 +4320,9 @@ Example:
       tokenUsage: currentTokenUsage(),
       costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
       iterCount: completedIterCount,
+      promotedFromArchetype,
+      promotionTrigger,
+      promotedAtIter,
     };
   }
 
@@ -4500,6 +4580,9 @@ Example:
     tokenUsage: currentTokenUsage(),
     costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
     iterCount: completedIterCount,
+    promotedFromArchetype,
+    promotionTrigger,
+    promotedAtIter,
     // Phase J.3.1: forward the staging snapshot for the rolled-back diff
     // when safety-ceiling exit ended with a regressed-verification rollback.
     ...(finalizeResult.discardedStaging

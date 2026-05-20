@@ -24,6 +24,10 @@ import { readTierSettings, writeTierSettings, readAutoAuditSetting, writeAutoAud
 import { shouldRunAudit as computeAuditDecision, type AuditMode, DEFAULT_AUDIT_MODE } from "../llm/auditMode.js";
 import { TIER_LIMITS } from "../llm/tierLimits.js";
 import {
+  buildPipelineConfig,
+  readArchetypeFlagsFromEnv,
+} from "../llm/archetypeDispatcher.js";
+import {
   isIrrelevantDeveloperContextPath,
   runLlmPatchFlow,
   toPublicLlmPatchResponse,
@@ -3696,42 +3700,62 @@ app.post("/api/patch", async (req, res) => {
   }
   let preGeneratedPlan: Awaited<ReturnType<typeof generateExecutionPlan>> | undefined;
   let planContext: Awaited<ReturnType<typeof preparePlanContext>> | undefined;
+  // L5.1b-3: declared here so both if(runIdStr) blocks share the same binding
+  let preClassifiedTask: TaskClassification | undefined;
+  let _serverPipelineCfg: ReturnType<typeof buildPipelineConfig> = null;
   if (runIdStr) {
+    // L5.1b-3: classify first so _serverPipelineCfg is available to gate plan-gen
     try {
-      planContext = await preparePlanContext({
-        task: String(task),
-        repoPath: String(repoPath),
-        repoSummaryOverride: (hostedContext as { repoSummary?: string } | undefined)?.repoSummary,
+      preClassifiedTask = await classifyTask(String(task), {
         userApiKey: userApiKey || undefined,
+        repoRoot: path.resolve(__dirname, "../.."),
       });
-      preGeneratedPlan = await generateExecutionPlan({
-        task: String(task),
-        repoSummary: planContext.projectSummary,
-        relevantFiles: planContext.relevantFilePaths,
-        userApiKey: userApiKey || undefined,
-        provider: byokProvider,
-      });
-      const _planSummaryFiles = Array.from(
-        new Set(preGeneratedPlan.steps.flatMap((s) => s.filesLikely ?? []))
-      );
-      emitProgress(runIdStr, {
-        stage: "plan_summary",
-        progress: {
-          type: "plan_summary",
-          title: "Plan generated",
-          detail: preGeneratedPlan.objective,
-          status: "success",
-          planSummaryFiles: _planSummaryFiles,
-          planSummaryStepCount: preGeneratedPlan.steps.length,
-          // TODO: payload type cleanup — runId/ts injected by emitProgress wrapper
-        } as any,
-      });
-    } catch (planGenErr) {
-      console.warn(
-        "[zone-plan] plan generation failed:",
-        planGenErr instanceof Error ? planGenErr.message : String(planGenErr)
-      );
-      // preGeneratedPlan remains undefined — approval and audit gates will skip.
+    } catch {
+      // classifyTask is self-healing; defensive catch for future contract changes.
+    }
+    const _serverArchetypeFlags = readArchetypeFlagsFromEnv();
+    _serverPipelineCfg = preClassifiedTask
+      ? buildPipelineConfig(preClassifiedTask.archetype, _serverArchetypeFlags)
+      : null;
+    if (!_serverPipelineCfg?.skipPlan) {
+      try {
+        planContext = await preparePlanContext({
+          task: String(task),
+          repoPath: String(repoPath),
+          repoSummaryOverride: (hostedContext as { repoSummary?: string } | undefined)?.repoSummary,
+          userApiKey: userApiKey || undefined,
+        });
+        preGeneratedPlan = await generateExecutionPlan({
+          task: String(task),
+          repoSummary: planContext.projectSummary,
+          relevantFiles: planContext.relevantFilePaths,
+          userApiKey: userApiKey || undefined,
+          provider: byokProvider,
+        });
+        if (!_serverPipelineCfg?.skipPlanSSE) {
+          const _planSummaryFiles = Array.from(
+            new Set(preGeneratedPlan.steps.flatMap((s) => s.filesLikely ?? []))
+          );
+          emitProgress(runIdStr, {
+            stage: "plan_summary",
+            progress: {
+              type: "plan_summary",
+              title: "Plan generated",
+              detail: preGeneratedPlan.objective,
+              status: "success",
+              planSummaryFiles: _planSummaryFiles,
+              planSummaryStepCount: preGeneratedPlan.steps.length,
+              // TODO: payload type cleanup — runId/ts injected by emitProgress wrapper
+            } as any,
+          });
+        }
+      } catch (planGenErr) {
+        console.warn(
+          "[zone-plan] plan generation failed:",
+          planGenErr instanceof Error ? planGenErr.message : String(planGenErr)
+        );
+        // preGeneratedPlan remains undefined — approval and audit gates will skip.
+      }
     }
   }
   // Y.1.2: headless detection — no Accept:text/event-stream header means no SSE listener.
@@ -3751,7 +3775,7 @@ app.post("/api/patch", async (req, res) => {
   let revisionEarlyExit: { terminationReason: string; proposal: RevisionProposal; revisionId: string } | null = null;
 
   // Scope audit gate — fires when shouldRunAudit returns true.
-  let preClassifiedTask: TaskClassification | undefined;
+  // preClassifiedTask and _serverPipelineCfg are assigned above in the plan-gen block.
   // Phase X.0.1: captured when audit ran without skipping; forwarded to execute agent.
   let auditFindingsForExec: {
     summary: string;
@@ -3768,14 +3792,6 @@ app.post("/api/patch", async (req, res) => {
     evidence?: string;
   } | undefined;
   if (runIdStr) {
-    try {
-      // Classify task here so tier is available for audit gating AND to
-      // avoid a second classification call inside runLlmPatchFlow.
-      preClassifiedTask = await classifyTask(String(task), { userApiKey: userApiKey || undefined, repoRoot: path.resolve(__dirname, "../..") });
-    } catch {
-      // classifyTask is self-healing; defensive catch for future contract changes.
-    }
-
     const tier = preClassifiedTask?.tier ?? "medium";
     // Phase H: per-request auditMode override, then persisted setting, then default.
     const auditMode: AuditMode =
@@ -3794,7 +3810,9 @@ app.post("/api/patch", async (req, res) => {
       runId: runIdStr,
     });
 
-    if (auditDecision.shouldRun) {
+    if (auditDecision.shouldRun
+        && !_serverPipelineCfg?.skipAudit
+        && !_serverPipelineCfg?.skipPhase1) {
       if (!preGeneratedPlan) {
         // Defensive: plan generation failed upstream — audit cannot run without a plan.
         log("[zone-audit-skipped]", JSON.stringify({ runId: runIdStr, tier, auditMode, reason: "no_plan", ts: new Date().toISOString() }));
@@ -4036,6 +4054,15 @@ app.post("/api/patch", async (req, res) => {
       auditFindings: auditFindingsForExec,
     });
     perf.mark("core patch flow complete");
+
+    // L5.1b-2: log soft promotion for observability (pre-run audit was already skipped)
+    if (result.ok && (result as { promotedFromArchetype?: unknown }).promotedFromArchetype != null) {
+      log("[zone-archetype-promoted-server]", JSON.stringify({
+        runId: runIdStr,
+        promotedFrom: (result as { promotedFromArchetype: unknown }).promotedFromArchetype,
+        toArchetype: "complex_multi_file",
+      }));
+    }
 
     // Best-effort: extract newly added function names from added diff lines.
     try {

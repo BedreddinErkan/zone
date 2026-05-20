@@ -98,9 +98,15 @@ import { cacheHitRatio, type IterCostUpdatePayload } from "../usage/iterCostMete
 import { computeWorkerMaxIterations } from "../llm/subagents.js";
 import {
   classifyTask,
+  type TaskArchetype,
   type TaskClassification,
   type TaskTier,
 } from "../llm/taskClassifier.js";
+import {
+  buildPipelineConfig,
+  readArchetypeFlagsFromEnv,
+  type PipelineConfig,
+} from "../llm/archetypeDispatcher.js";
 import { getRunCost } from "../usage/usageTracker.js";
 import {
   generateFinalRunReport,
@@ -205,6 +211,8 @@ export type LlmPatchFlowResult =
       /** Phase Q.2: agent loop terminated because the same tool was called
        *  with identical args too many times. UI shows an amber notice. */
       loopDetected?: { toolName: string; count: number };
+      /** L5.1b-2: non-null when the dispatcher soft-promoted this run mid-loop. */
+      promotedFromArchetype?: TaskArchetype | null;
       /** Phase J.3: post-apply verification regressed (patch introduced new
        *  errors). Staging was discarded; UI shows "Apply rolled back" amber
        *  banner with the diff for inspection but no undo button. */
@@ -5156,6 +5164,11 @@ const initializeTodosFromPlan = (): void => {
     }));
   }
 
+  // L5.1b-1: dispatcher config — null until classifier runs inside _useAgentLoop.
+  // Path 2 (legacy) always sees null → no behavioral change.
+  let pipelineCfg: PipelineConfig | null = null;
+  let _dispatcherExcludeTools: ReadonlySet<string> | undefined = undefined;
+
   if (_useAgentLoop) {
     const runId = typeof input.runId === "string" ? input.runId.trim() : "";
     if (runId) {
@@ -5194,7 +5207,7 @@ const initializeTodosFromPlan = (): void => {
     if (input.preGeneratedPlan) {
       executionPlan = input.preGeneratedPlan;
       debugLog(`[zone-plan] using preGeneratedPlan steps=${executionPlan.steps.length} (agent_loop)`);
-    } else if (agentLoopPlanFiles.length > 0) {
+    } else if (!(pipelineCfg as PipelineConfig | null)?.skipPlan && agentLoopPlanFiles.length > 0) {
       try {
         executionPlan = await generateExecutionPlan({
           task: input.task,
@@ -5835,6 +5848,18 @@ const initializeTodosFromPlan = (): void => {
       });
     }
 
+    const _archetypeFlags = readArchetypeFlagsFromEnv();
+    pipelineCfg = taskClassification
+      ? buildPipelineConfig(taskClassification.archetype, _archetypeFlags)
+      : null;
+    _dispatcherExcludeTools = (() => {
+      if (!pipelineCfg) return undefined;
+      const s = new Set<string>();
+      if (!pipelineCfg.allowSubagentDispatch) s.add("Task");
+      if (!pipelineCfg.allowScopeRevision) s.add("suggest_scope_change");
+      return s.size > 0 ? s : undefined;
+    })();
+
     const agentLoopBaseInput = {
       task: input.task,
       repoPath: input.repoPath,
@@ -5869,6 +5894,13 @@ const initializeTodosFromPlan = (): void => {
       // Phase X.0.1: forward audit findings so execute agent skips re-investigation.
       auditFindings: input.auditFindings,
       ...agentLoopCallbacks,
+      ...(pipelineCfg && {
+        maxIterationsOverride: pipelineCfg.iterCap,
+        coachingBudgetOverride: pipelineCfg.coachingBudget,
+        pipelineApplied: true,
+        originalArchetype: taskClassification?.archetype,
+        ...(_dispatcherExcludeTools && { excludeTools: _dispatcherExcludeTools }),
+      }),
     };
 
     let loop: AgentLoopResult;
@@ -6259,6 +6291,7 @@ const initializeTodosFromPlan = (): void => {
       lifecycleEvents,
       finalRunReport,
       ...(taskClassification ? { taskClassification } : {}),
+      promotedFromArchetype: loop.promotedFromArchetype ?? null,
     };
   }
 
@@ -6674,7 +6707,7 @@ const initializeTodosFromPlan = (): void => {
   if (input.preGeneratedPlan) {
     executionPlan = input.preGeneratedPlan;
     debugLog(`[zone-plan] using preGeneratedPlan steps=${executionPlan.steps.length}`);
-  } else {
+  } else if (!(pipelineCfg as PipelineConfig | null)?.skipPlan) {
     try {
       executionPlan = await generateExecutionPlan({
         task: input.task,
@@ -6697,7 +6730,7 @@ const initializeTodosFromPlan = (): void => {
   // 4. Plan feature with LLM
   reportProgress("Planning feature...");
   let llmPlan: Awaited<ReturnType<typeof planFeatureWithLlm>> | null = null;
-  if (!input.hostedContext) {
+  if (!(pipelineCfg as PipelineConfig | null)?.skipPlan && !input.hostedContext) {
     try {
       perf.mark("feature model call start");
       llmPlan = await planFeatureWithLlm({
@@ -6789,15 +6822,17 @@ const initializeTodosFromPlan = (): void => {
   if (llmPlan?.suggestedFiles?.length) {
     planSummaryParts.push(`${llmPlan.suggestedFiles.length} suggested context file(s) from feature plan`);
   }
-  notifyProgress("Planning feature...", {
-    type: "plan_created",
-    message:
-      planSummaryParts.length > 0
-        ? `Planning complete (${planSummaryParts.join(" · ")}).`
-        : "Planning complete (execution + feature context ready).",
-    stage: "plan",
-    status: executionPlan ? "execution_plan" : "feature_skipped",
-  });
+  if (!(pipelineCfg as PipelineConfig | null)?.skipPlanSSE) {
+    notifyProgress("Planning feature...", {
+      type: "plan_created",
+      message:
+        planSummaryParts.length > 0
+          ? `Planning complete (${planSummaryParts.join(" · ")}).`
+          : "Planning complete (execution + feature context ready).",
+      stage: "plan",
+      status: executionPlan ? "execution_plan" : "feature_skipped",
+    });
+  }
 
   const explicitTargetForceContentByPath = new Map<string, string>();
 
