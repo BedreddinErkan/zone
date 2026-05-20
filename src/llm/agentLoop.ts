@@ -2971,6 +2971,36 @@ Example:
         markerInfo,
         prevR2BlocksReplaced,
       }));
+
+      // Chain emit: one entry per message so log consumers can binary-search
+      // the first divergence position between iter N and N+1 without unpacking
+      // the full rollingHashes blob. Reuses already-computed allMessageHashes
+      // and rollingHashes — no redundant JSON.stringify.
+      // ANALYSIS PROTOCOL:
+      // 1. Group [zone-cache-probe-chain] events by runId, then by iter.
+      // 2. For consecutive iters (N, N+1), walk msgIdx ascending and find
+      //    the lowest msgIdx where cumHash differs. That's the byte-
+      //    divergence position.
+      // 3. Cross-reference with [zone-cache-usage] cache_read for iter N+1:
+      //    - If cache_read >> system+tools floor (3879): partial prefix match worked
+      //    - If cache_read ≈ 3879 (floor): full bust, prefix unreachable
+      // 4. Correlate msgCount with bust events to test 20-block lookback
+      //    hypothesis. If bust ALWAYS coincides with msgCount crossing
+      //    ~20 (regardless of divergence position), the lookback window
+      //    hypothesis is confirmed.
+      let chainCumLen = 0;
+      for (let n = 0; n < msgs.length; n++) {
+        chainCumLen += (allMessageHashes[n]?.charLen ?? 0) + 1; // +1 for "|" separator
+        log("[zone-cache-probe-chain]", JSON.stringify({
+          iter: iter + 1,
+          runId: input.runId ?? null,
+          msgIdx: n,
+          role: msgs[n]?.role,
+          cumHash: rollingHashes[`upTo${n}`],
+          cumLen: chainCumLen,
+          msgCount: msgs.length,
+        }));
+      }
     }
 
     // R.1: emit per-call token breakdown (on the pruned view, which is what the LLM sees).
