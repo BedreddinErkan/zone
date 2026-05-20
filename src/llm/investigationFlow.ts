@@ -165,6 +165,8 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
         classifierCostUsd: 0,
         classifierLatencyMs: 0,
         classifierModel: "parent",
+        archetype: "investigation" as const,
+        archetypeConfidence: 1.0,
       }
     : undefined;
 

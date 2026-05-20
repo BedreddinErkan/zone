@@ -12,6 +12,15 @@ import { log } from "../utils/logger.js";
 
 export type TaskTier = "simple" | "medium" | "complex";
 
+export type TaskArchetype =
+  | "simple_add"
+  | "targeted_fix"
+  | "refactor"
+  | "debug"
+  | "investigation"
+  | "question"
+  | "complex_multi_file";
+
 export interface TaskClassification {
   tier: TaskTier;
   estimatedFiles: number;
@@ -23,6 +32,8 @@ export interface TaskClassification {
   classifierLatencyMs: number;
   classifierModel: string;
   fallbackUsed?: boolean;
+  archetype: TaskArchetype;
+  archetypeConfidence: number;
 }
 
 export interface ClassifyTaskOptions {
@@ -112,13 +123,48 @@ Output ONLY valid JSON:
   "estimatedFiles": <integer>,
   "estimatedIterations": <integer>,
   "confidence": <0.0-1.0>,
-  "reasoning": "<one short sentence>"
-}`;
+  "reasoning": "<one short sentence>",
+  "archetype": "simple_add" | "targeted_fix" | "refactor" | "debug" | "investigation" | "question" | "complex_multi_file",
+  "archetypeConfidence": <0.0-1.0>
+}
+
+ARCHETYPE CLASSIFICATION (orthogonal to tier):
+Classify the task into one of 7 archetypes by intent shape:
+
+- simple_add: Additive new code (endpoint, function, type, component), typically 1-2 files.
+  No investigation needed because new code doesn't exist yet.
+  Keywords: "add", "create", "new", "expose".
+
+- targeted_fix: Bug fix in 1-2 known files. The buggy code MUST be read before patching.
+  Keywords: "fix", error messages, specific file paths with line numbers.
+
+- refactor: Mechanical rename/restructure across >=3 files. Behavior preserved, structure changed.
+  Keywords: "rename", "extract", "consolidate", "across all", "everywhere".
+
+- debug: Investigate-then-fix a failure. Reproduction required.
+  Keywords: "failing test", "why does X break", "exit code N", "throws error", "returns 500".
+
+- investigation: Read-only "why does X work this way" or "walk me through Y". No code change requested.
+  Keywords: "why", "how does", "walk me through", "explain the".
+
+- question: Pure Q&A. No files involved. Conceptual or strategic.
+  Keywords: "what's the difference", "should I use", general comparisons without code reference.
+
+- complex_multi_file: NEW feature spanning >=3 files (NOT a rename). Multiple components mentioned.
+  Default fallback when uncertain.
+  Keywords: "implement", "build", "add support for" + multiple nouns.
+
+Boundary rules:
+- "Add X" + 1 file = simple_add (not complex_multi_file).
+- "Rename X to Y" = refactor (not complex_multi_file), regardless of file count.
+- "Failing test" + "fix" = debug (not targeted_fix). Reproduction matters.
+- When uncertain between targeted_fix and debug: debug if failure repro needed, targeted_fix if bug is already pinpointed.
+- When uncertain between any narrow archetype and complex_multi_file: pick complex_multi_file (safer).`;
 
 const DEFAULT_TIMEOUT_MS = 5000;
 /** Confidence gate: classifier outputs below this threshold are overridden to "medium". */
 export const CLASSIFIER_CONFIDENCE_THRESHOLD = 0.5;
-const MAX_OUTPUT_TOKENS = 200;
+const MAX_OUTPUT_TOKENS = 300;
 
 const classificationCache = new Map<string, TaskClassification>();
 
@@ -212,6 +258,8 @@ interface ParsedClassifierResponse {
   estimatedIterations: number;
   confidence: number;
   reasoning?: string;
+  archetype: TaskArchetype;
+  archetypeConfidence: number;
 }
 
 function parseClassifierResponse(text: string): ParsedClassifierResponse {
@@ -239,6 +287,16 @@ function parseClassifierResponse(text: string): ParsedClassifierResponse {
   }
   const tier = parsed.tier as TaskTier;
   const estimatedFiles = Math.max(1, Math.floor(Number(parsed.estimatedFiles) || 1));
+  const VALID_ARCHETYPES: readonly string[] = [
+    "simple_add", "targeted_fix", "refactor", "debug",
+    "investigation", "question", "complex_multi_file",
+  ];
+  const rawArchetype = parsed.archetype;
+  const archetypeConfidence = Math.min(1, Math.max(0, Number(parsed.archetypeConfidence) || 0));
+  const archetype: TaskArchetype =
+    typeof rawArchetype === "string" && VALID_ARCHETYPES.includes(rawArchetype)
+      ? (rawArchetype as TaskArchetype)
+      : "complex_multi_file";
   return {
     tier,
     estimatedFiles,
@@ -246,6 +304,8 @@ function parseClassifierResponse(text: string): ParsedClassifierResponse {
     confidence: Math.min(1, Math.max(0, Number(parsed.confidence) || 0)),
     reasoning:
       typeof parsed.reasoning === "string" ? parsed.reasoning.slice(0, 200) : undefined,
+    archetype,
+    archetypeConfidence,
   };
 }
 
@@ -265,6 +325,8 @@ function buildFallback(
     classifierLatencyMs: Date.now() - startTime,
     classifierModel: model,
     fallbackUsed: true,
+    archetype: "complex_multi_file",
+    archetypeConfidence: 0,
   };
 }
 
@@ -382,6 +444,19 @@ export async function classifyTask(
         ts: new Date().toISOString(),
         source: "fresh",
       }));
+    }
+
+    if (parsed.archetypeConfidence < CLASSIFIER_CONFIDENCE_THRESHOLD && parsed.archetype !== "complex_multi_file") {
+      log(
+        "[zone-archetype-low-confidence-fallback]",
+        JSON.stringify({
+          classifierArchetype: parsed.archetype,
+          forcedArchetype: "complex_multi_file",
+          archetypeConfidence: parsed.archetypeConfidence,
+          threshold: CLASSIFIER_CONFIDENCE_THRESHOLD,
+        })
+      );
+      parsed.archetype = "complex_multi_file";
     }
 
     if (parsed.confidence < CLASSIFIER_CONFIDENCE_THRESHOLD) {

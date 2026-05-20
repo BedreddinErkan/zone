@@ -244,6 +244,9 @@ export interface AgentLoopResult {
   /** Phase K.6: cumulative LLM cost (USD) for this agent loop's own calls.
    *  Serialized into Task tool result so parent can propagate to cumulativeCost. */
   costUsd?: number;
+  /** L5.0: number of for-loop iterations completed. Used by [zone-archetype] telemetry
+   *  to measure iter inflation across archetypes. 0 = run rejected before first iter. */
+  iterCount?: number;
   /** Phase J.3.1: staging snapshot captured before rollback discarded it.
    *  Only populated when verificationReason === "verification_regressed".
    *  Keyed by absolute path; values are the content the agent attempted to
@@ -2061,6 +2064,18 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           ts: Date.now(),
         }));
       }
+      log("[zone-archetype]", JSON.stringify({
+        runId: input.runId.trim(),
+        archetype: input.taskClassification?.archetype ?? null,
+        archetypeConfidence: input.taskClassification?.archetypeConfidence ?? null,
+        classifierCostUsd: input.taskClassification?.classifierCostUsd ?? 0,
+        tier: input.taskClassification?.tier ?? null,
+        fallbackUsed: input.taskClassification?.fallbackUsed ?? false,
+        userOverride: null,
+        finalIter: result.iterCount ?? null,
+        finalCostUsd: costUsd,
+        success: terminationReason === "natural_completion",
+      }));
     }
     return result;
   } finally {
@@ -2226,6 +2241,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
         patchValidatedByAgent: false,
         verificationReason: "no_verification_attempted",
         terminationReason: "daily_usd_cap_exceeded",
+        iterCount: 0,
       };
     }
   }
@@ -2652,6 +2668,7 @@ Example:
       terminationReason: "token_budget_exceeded",
       tokenUsage: currentTokenUsage(),
       costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+      iterCount: iterNumber + 1,
     };
   };
 
@@ -2681,6 +2698,7 @@ Example:
       terminationReason: "compaction_exhausted",
       tokenUsage: currentTokenUsage(),
       costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+      iterCount: iterNumber + 1,
     };
   };
 
@@ -2705,6 +2723,7 @@ Example:
       loopDetected: { toolName, count },
       tokenUsage: currentTokenUsage(),
       costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+      iterCount: iterNumber + 1,
     };
   };
 
@@ -2760,8 +2779,10 @@ Example:
   };
 
   let lastNarrationEmitted = "";
+  let completedIterCount = 0;
 
   for (let iter = 0; iter < iterationBudget.maxIterationsForRun; iter += 1) {
+    completedIterCount = iter + 1;
     debugLog("[zone-agent-iter-start]", {
       runId: input.runId,
       iter,
@@ -3063,6 +3084,7 @@ Example:
           terminationReason: "upstream_unavailable",
           tokenUsage: currentTokenUsage(),
           costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+          iterCount: iter + 1,
         };
       }
       throw llmErr;
@@ -3956,6 +3978,7 @@ Example:
           terminationReason: "natural_completion",
           tokenUsage: currentTokenUsage(),
           costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+          iterCount: iter + 1,
         };
       }
       const vrMatch = finalText.match(/\[ZONE_VERIFICATION:\s*([\w_]+)\]/i);
@@ -4161,6 +4184,7 @@ Example:
         terminationReason: "natural_completion",
         tokenUsage: currentTokenUsage(),
         costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+        iterCount: iter + 1,
         // Phase J.3.1: forward the staging snapshot so runLlmPatchFlow can
         // render the rolled-back diff. Only meaningful when
         // verificationReason === "verification_regressed".
@@ -4218,6 +4242,7 @@ Example:
       terminationReason: "max_iterations",
       tokenUsage: currentTokenUsage(),
       costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+      iterCount: completedIterCount,
     };
   }
 
@@ -4474,6 +4499,7 @@ Example:
     terminationReason: "token_budget_exceeded",
     tokenUsage: currentTokenUsage(),
     costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+    iterCount: completedIterCount,
     // Phase J.3.1: forward the staging snapshot for the rolled-back diff
     // when safety-ceiling exit ended with a regressed-verification rollback.
     ...(finalizeResult.discardedStaging
