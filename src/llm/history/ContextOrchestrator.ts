@@ -7,6 +7,7 @@ import {
   type ProcessorContext,
   runProcessorPipeline,
 } from "./types.js";
+import { R2ShimProcessor } from "./R2ShimProcessor.js";
 
 // ── buildProcessorFromConfig ──────────────────────────────────────────────────
 // Factory: creates a HistoryProcessor instance from a ProcessorConfig.
@@ -15,10 +16,11 @@ import {
 function buildProcessorFromConfig(config: ProcessorConfig): HistoryProcessor {
   switch (config.kind) {
     case "r2_shim":
+      return new R2ShimProcessor(config);
     case "manifest_injection":
     case "polling_window":
     case "budget_reduction":
-      // Processors are implemented in later commits (C2–C5).
+      // Processors are implemented in later commits (C3–C5).
       // Until then, each config maps to a no-op passthrough placeholder.
       return {
         config,
@@ -75,7 +77,7 @@ export function buildDefaultOrchestrator(
   extraConfigs?: ProcessorConfig[],
 ): ContextOrchestrator {
   const defaultConfigs: ProcessorConfig[] = [
-    // C2: { kind: "r2_shim", freshIterWindow: 2, useU1CacheAwareShim: true },
+    { kind: "r2_shim", freshIterWindow: 2, useU1CacheAwareShim: true },
     // C3: { kind: "manifest_injection", maxEntries: 20 },
     // C5: polling_window / budget_reduction added here behind env flags
   ];

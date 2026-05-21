@@ -64,7 +64,8 @@ import { classifyTurns } from "./compaction/classifyTurns.js";
 import { hashToolCall, createDetectorState, recordAndDetect } from "./loopDetector.js";
 import { UpstreamUnavailableError } from "./withExponentialBackoff.js";
 import { emitTokenBreakdown, emitBreakdownSummary, type BreakdownEvent } from "./tokenBreakdown.js";
-import { pruneStaleReads, emitContextPruned } from "./contextPruner.js";
+import { pruneStaleReads } from "./contextPruner.js";
+import { buildDefaultOrchestrator } from "./history/ContextOrchestrator.js";
 import {
   runPreIterationHooks,
   runPostToolUseHooks,
@@ -2583,13 +2584,7 @@ Example:
   // P.1: compaction trigger — fires at the safe iteration boundary after tool results
   // are processed. No-op in P.1; P.2 replaces the stub with real summarization.
   const compactor = new ContextCompactor();
-  // U.1 Commit 3: cache-aware R.2 pruning. When R.2 would newly prune messages
-  // (blocksReplaced increases), reusing the prior pruning state preserves the
-  // Anthropic prefix cache — avoiding a cache miss that costs more than the token
-  // savings from pruning. prevR2PrunedMessages is the pruned array from the last
-  // call; new messages beyond its length are always taken fresh from responseInput.
-  let prevR2BlocksReplaced = 0;
-  let prevR2PrunedMessages: ChatCompletionMessageParam[] | null = null;
+  const _historyOrchestrator = buildDefaultOrchestrator(input.processors);
   // Y.1.6.3/Y.1.6.4: retry event callback threaded into LLM call options so
   // withExponentialBackoff can emit SSE narration and record retry telemetry
   // without coupling the adapter layer to the run context.
@@ -2988,46 +2983,20 @@ Example:
       `[agent_loop] Iteration ${iter + 1}/${iterationBudget.maxIterationsForRun}`
     );
 
-    // R.2: prune stale read results from the messages copy sent to the API.
-    // responseInput itself is not mutated — future iterations keep appending.
-    // R.2 runs FIRST so prunedMessages is available to all pre-iter hooks (including
-    // file-read-manifest at priority 90, which appends to prunedMessages).
-    const { pruned: freshlyPruned, stats: pruneStats } = pruneStaleReads(responseInput);
-    emitContextPruned({ runId: input.runId ?? "", iter, stats: pruneStats });
-
-    // U.1 Commit 3: if new pruning would change the prefix, preserve the last stable
-    // pruned state and only append genuinely new messages. This keeps the Anthropic
-    // prefix cache intact (hitting the last cached state) at the cost of sending a
-    // few extra tokens for the not-yet-pruned messages.
-    let prunedMessages: ChatCompletionMessageParam[];
-    if (pruneStats.blocksReplaced > prevR2BlocksReplaced && prevR2PrunedMessages !== null) {
-      const newCount = responseInput.length - prevR2PrunedMessages.length;
-      prunedMessages = newCount > 0
-        ? [...prevR2PrunedMessages, ...responseInput.slice(-newCount)]
-        : prevR2PrunedMessages;
-      log("[zone-cache-r2-skip]", JSON.stringify({
-        event: "cache_r2_skip",
-        runId: input.runId ?? null,
-        iter: iter + 1,
-        prevBlocks: prevR2BlocksReplaced,
-        newBlocks: pruneStats.blocksReplaced,
-        newMessages: newCount,
-      }));
-    } else {
-      prunedMessages = freshlyPruned;
-      prevR2BlocksReplaced = pruneStats.blocksReplaced;
-      prevR2PrunedMessages = freshlyPruned;
-    }
-    log("[zone-r2-shim]", JSON.stringify({
-      iter: iter + 1,
+    // R.2 + U.1: HistoryProcessor pipeline (R2ShimProcessor handles stale read pruning
+    // and cache-aware prefix preservation). Runs FIRST so prunedMessages is available
+    // to all pre-iter hooks (including file-read-manifest at priority 90).
+    const _pipelineResult = _historyOrchestrator.assemble({
+      responseInput,
+      toolCallLog,
+      iter,
       runId: input.runId ?? null,
-      branch: pruneStats.blocksReplaced > prevR2BlocksReplaced ? "fallback" : "refresh",
-      blocksReplaced: pruneStats.blocksReplaced,
-      prevBlocksReplaced: prevR2BlocksReplaced,
-      responseInputLen: responseInput.length,
-      prunedMessagesLen: prunedMessages.length,
-      prevPrunedMessagesLen: prevR2PrunedMessages?.length ?? 0,
-    }));
+      emit: (level, marker, payload) => {
+        if (level === "log") log(marker, JSON.stringify(payload));
+        else debugLog(marker, JSON.stringify(payload));
+      },
+    });
+    let prunedMessages = _pipelineResult.messages;
 
     // Gap 1 pre-iteration runner — sites 1-3 all migrated to internal hooks.
     // R.2 runs first (above) so prunedMessages has the pruned state when hooks fire.
@@ -3149,7 +3118,6 @@ Example:
         rollingHashes,
         manifestInfo,
         markerInfo,
-        prevR2BlocksReplaced,
       }));
 
       // Chain emit: one entry per message so log consumers can binary-search
