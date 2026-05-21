@@ -347,9 +347,9 @@ describe("L5.2 wrong archetype for targeted_fix pipeline", () => {
 });
 
 describe("L5.2 iterCap constant shape", () => {
-  it("TARGETED_FIX_PIPELINE.iterCap=15, SIMPLE_ADD_PIPELINE.iterCap=5", async () => {
+  it("TARGETED_FIX_PIPELINE.iterCap=6, SIMPLE_ADD_PIPELINE.iterCap=5", async () => {
     const { TARGETED_FIX_PIPELINE, SIMPLE_ADD_PIPELINE } = await import("../llm/archetypeDispatcher.js");
-    expect(TARGETED_FIX_PIPELINE.iterCap).toBe(15);
+    expect(TARGETED_FIX_PIPELINE.iterCap).toBe(6);
     expect(SIMPLE_ADD_PIPELINE.iterCap).toBe(5);
   });
 });
