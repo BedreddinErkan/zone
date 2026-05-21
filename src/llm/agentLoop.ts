@@ -2873,7 +2873,36 @@ Example:
       };
     },
   };
-  const _internalPreIterHooks: PreIterationHook[] = [softIterWarnHook];
+  const midBudgetWarnHook: PreIterationHook = {
+    name: "mid-budget-warn",
+    priority: 20,
+    shouldRun: (ctx) => (
+      !midWarnInjected &&
+      effectiveTokenBudgetCap > 0 &&
+      ctx.cumulativeTokens / effectiveTokenBudgetCap >= TOKEN_BUDGET_MID_WARN
+    ),
+    run: (ctx) => {
+      midWarnInjected = true;
+      const ratio = ctx.cumulativeTokens / effectiveTokenBudgetCap;
+      ctx.emit("log", "[zone-token-budget-mid-warn]", {
+        runId: ctx.runId,
+        iter: ctx.iter,
+        tokenRatio: Number(ratio.toFixed(3)),
+        ts: new Date().toISOString(),
+      });
+      return {
+        kind: "appendContext",
+        content:
+          "\n\nYou are at 70% of token budget. Pause expansive reads. " +
+          "If a primary deliverable (e.g., test file requested in the original task) is not yet " +
+          "written, write it now even if implementation is incomplete. Remaining iterations should " +
+          "converge, not explore.",
+        target: "responseInput",
+        mode: "append-to-tool",
+      };
+    },
+  };
+  const _internalPreIterHooks: PreIterationHook[] = [softIterWarnHook, midBudgetWarnHook];
 
   for (let iter = 0; iter < iterationBudget.maxIterationsForRun; iter += 1) {
     completedIterCount = iter + 1;
@@ -2895,7 +2924,7 @@ Example:
     // is never read by those hooks — it's only passed through the context for completeness.
     let prunedMessages: ChatCompletionMessageParam[] = responseInput;
 
-    // Gap 1 pre-iteration runner — site 1 (soft-iter-warn) migrated; sites 2-3 still inline below.
+    // Gap 1 pre-iteration runner — sites 1-2 (soft-iter-warn, mid-budget-warn) migrated; site 3 still inline below.
     {
       const _allPreHooks = [..._internalPreIterHooks, ...(input.hooks?.preIteration ?? [])];
       const preCtx: PreIterationContext = {
@@ -2924,39 +2953,6 @@ Example:
           terminationReason: "hook_blocked", promotedFromArchetype, promotionTrigger, promotedAtIter };
       }
       applyAppendOps(preMutations.appendOps, responseInput, () => prunedMessages, (msgs) => { prunedMessages = msgs; });
-    }
-
-    // Phase I Lane 2.1: one-shot mid-run budget pressure injection at 70%.
-    // Fires before the LLM call so the agent has agency to converge (write
-    // pending deliverables) rather than continue expanding. Independent of the
-    // 80% UI warn and 95% hard exit — those remain unchanged.
-    if (!midWarnInjected && effectiveTokenBudgetCap > 0 &&
-        cumulativeTokens() / effectiveTokenBudgetCap >= TOKEN_BUDGET_MID_WARN) {
-      midWarnInjected = true;
-      const midWarnRatio = cumulativeTokens() / effectiveTokenBudgetCap;
-      const midWarnAppend =
-        "\n\nYou are at 70% of token budget. Pause expansive reads. " +
-        "If a primary deliverable (e.g., test file requested in the original task) is not yet " +
-        "written, write it now even if implementation is incomplete. Remaining iterations should " +
-        "converge, not explore.";
-      let appended = false;
-      for (let ci = responseInput.length - 1; ci >= 0; ci--) {
-        const m = responseInput[ci];
-        if (m.role === "tool") {
-          m.content = (typeof m.content === "string" ? m.content : "") + midWarnAppend;
-          appended = true;
-          break;
-        }
-      }
-      if (!appended) {
-        responseInput.push({ role: "user", content: midWarnAppend });
-      }
-      log("[zone-token-budget-mid-warn]", JSON.stringify({
-        runId: input.runId ?? null,
-        iter,
-        tokenRatio: Number(midWarnRatio.toFixed(3)),
-        ts: new Date().toISOString(),
-      }));
     }
 
     debugLog("[zone-agent-llm-pre]", {
