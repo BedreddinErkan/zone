@@ -9,6 +9,8 @@ import {
 } from "./types.js";
 import { R2ShimProcessor } from "./R2ShimProcessor.js";
 import { ManifestInjectionProcessor } from "./ManifestInjectionProcessor.js";
+import { PollingWindowProcessor } from "./PollingWindowProcessor.js";
+import { BudgetReductionProcessor } from "./BudgetReductionProcessor.js";
 
 // ── buildProcessorFromConfig ──────────────────────────────────────────────────
 // Factory: creates a HistoryProcessor instance from a ProcessorConfig.
@@ -21,15 +23,9 @@ function buildProcessorFromConfig(config: ProcessorConfig): HistoryProcessor {
     case "manifest_injection":
       return new ManifestInjectionProcessor(config);
     case "polling_window":
+      return new PollingWindowProcessor(config);
     case "budget_reduction":
-      // Processors are implemented in later commits (C3–C5).
-      // Until then, each config maps to a no-op passthrough placeholder.
-      return {
-        config,
-        name: config.kind,
-        priority: 100,
-        process: (_messages) => ({ kind: "passthrough" }),
-      };
+      return new BudgetReductionProcessor(config);
   }
 }
 
@@ -81,7 +77,12 @@ export function buildDefaultOrchestrator(
   const defaultConfigs: ProcessorConfig[] = [
     { kind: "r2_shim", freshIterWindow: 2, useU1CacheAwareShim: true },
     { kind: "manifest_injection", maxEntries: 20 },
-    // C5: polling_window / budget_reduction added here behind env flags
   ];
+  if (process.env["ZONE_HISTORY_PIPELINE_POLLING"] === "1") {
+    defaultConfigs.push({ kind: "polling_window", everyKSteps: 5, keepLastN: 3 });
+  }
+  if (process.env["ZONE_HISTORY_PIPELINE_BUDGET"] === "1") {
+    defaultConfigs.push({ kind: "budget_reduction", maxCharsPerToolResult: 32000 });
+  }
   return new ContextOrchestrator([...defaultConfigs, ...(extraConfigs ?? [])]);
 }
