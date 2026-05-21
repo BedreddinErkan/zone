@@ -9,10 +9,23 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 // ── hoisted mocks ─────────────────────────────────────────────────────────────
 
-const mocks = vi.hoisted(() => ({
-  createChatCompletion: vi.fn(),
+import { resetToolExecutorMock } from "../test/fixtures/toolExecutorMock.js";
+
+const toolExecutorMock = vi.hoisted(() => ({
   executeTool: vi.fn(),
   withStagingTempFlush: vi.fn(),
+  clearCommandCacheForRun: vi.fn(),
+  clearCommandCacheForTest: vi.fn(),
+  clearOutlineCacheForTest: vi.fn(),
+  isMemoizableCommand: vi.fn(),
+  computeCommandFingerprint: vi.fn(),
+  truncateCommandOutput: vi.fn(),
+  resolveAgentPath: vi.fn(),
+  resolveRunCommandCwd: vi.fn(),
+}));
+
+const mocks = vi.hoisted(() => ({
+  createChatCompletion: vi.fn(),
   log: vi.fn(),
   debugLog: vi.fn(),
   getUsage: vi.fn(),
@@ -26,11 +39,7 @@ vi.mock("./factory.js", () => ({
   })),
 }));
 
-vi.mock("../tools/toolExecutor.js", () => ({
-  clearCommandCacheForRun: vi.fn(() => undefined),
-  executeTool: mocks.executeTool,
-  withStagingTempFlush: mocks.withStagingTempFlush,
-}));
+vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
 vi.mock("../utils/logger.js", () => ({
   log: mocks.log,
@@ -101,9 +110,8 @@ function capturedSystemMessage(): string {
 
 describe("audit handoff — AUDIT CONTEXT user-message injection", () => {
   beforeEach(() => {
+    resetToolExecutorMock(toolExecutorMock);
     mocks.createChatCompletion.mockClear();
-    mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
     mocks.createChatCompletion.mockResolvedValue(textResponse("Done."));
     mocks.getUsage.mockResolvedValue(makeUsageAggregate(0));
     mocks.readDailyUsdCapOverride.mockReturnValue(undefined);
@@ -201,9 +209,8 @@ describe("audit handoff — AUDIT CONTEXT user-message injection", () => {
 
 describe("audit handoff — Step B structured AUDIT CONTEXT", () => {
   beforeEach(() => {
+    resetToolExecutorMock(toolExecutorMock);
     mocks.createChatCompletion.mockClear();
-    mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
     mocks.createChatCompletion.mockResolvedValue(textResponse("Done."));
     mocks.getUsage.mockResolvedValue(makeUsageAggregate(0));
     mocks.readDailyUsdCapOverride.mockReturnValue(undefined);

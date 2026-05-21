@@ -10,13 +10,25 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetToolExecutorMock } from "../test/fixtures/toolExecutorMock.js";
 
 // ── hoisted mocks ─────────────────────────────────────────────────────────────
 
-const mocks = vi.hoisted(() => ({
-  createChatCompletion: vi.fn(),
+const toolExecutorMock = vi.hoisted(() => ({
   executeTool: vi.fn(),
   withStagingTempFlush: vi.fn(),
+  clearCommandCacheForRun: vi.fn(),
+  clearCommandCacheForTest: vi.fn(),
+  clearOutlineCacheForTest: vi.fn(),
+  isMemoizableCommand: vi.fn(),
+  computeCommandFingerprint: vi.fn(),
+  truncateCommandOutput: vi.fn(),
+  resolveAgentPath: vi.fn(),
+  resolveRunCommandCwd: vi.fn(),
+}));
+
+const mocks = vi.hoisted(() => ({
+  createChatCompletion: vi.fn(),
   pruneStaleReads: vi.fn(),
   emitContextPruned: vi.fn(),
   log: vi.fn(),
@@ -29,11 +41,7 @@ vi.mock("./factory.js", () => ({
   })),
 }));
 
-vi.mock("../tools/toolExecutor.js", () => ({
-  clearCommandCacheForRun: vi.fn(() => undefined),
-  executeTool: mocks.executeTool,
-  withStagingTempFlush: mocks.withStagingTempFlush,
-}));
+vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
 vi.mock("./contextPruner.js", () => ({
   pruneStaleReads: mocks.pruneStaleReads,
@@ -94,20 +102,18 @@ let repoPath: string;
 
 beforeEach(() => {
   repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "zone-subagent-budget-gate-"));
+  resetToolExecutorMock(toolExecutorMock);
   mocks.createChatCompletion.mockReset();
-  mocks.executeTool.mockReset();
-  mocks.withStagingTempFlush.mockReset();
   mocks.pruneStaleReads.mockReset();
   mocks.emitContextPruned.mockReset();
   mocks.log.mockReset();
 
-  mocks.withStagingTempFlush.mockImplementation(async (fn: () => Promise<void>) => fn());
   mocks.pruneStaleReads.mockImplementation((msgs: unknown[]) => ({
     pruned: msgs,
     stats: { blocksReplaced: 0, charsSaved: 0, blocksKept: (msgs as unknown[]).length },
   }));
   mocks.emitContextPruned.mockImplementation(() => {});
-  mocks.executeTool.mockResolvedValue({ success: true, output: "" });
+  toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "" });
 });
 
 afterEach(() => {
@@ -154,7 +160,7 @@ describe("Subagent budget gate — toolset exclusion and log timing (Q.3)", () =
       if (callCount === 1) return makeTaskResponse("tc-1");
       return makeDoneResponse("[ZONE_VERIFICATION: no_verification_attempted]");
     });
-    mocks.executeTool.mockImplementation(async (name: string) => {
+    toolExecutorMock.executeTool.mockImplementation(async (name: string) => {
       if (name === "Task")
         return { success: false, output: "Subagent call limit reached (0/0 used)" };
       return { success: true, output: "" };

@@ -9,13 +9,25 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetToolExecutorMock } from "../test/fixtures/toolExecutorMock.js";
 
 // ── hoisted mocks ────────────────────────────────────────────────────────────
 
-const mocks = vi.hoisted(() => ({
-  createChatCompletion: vi.fn(),
+const toolExecutorMock = vi.hoisted(() => ({
   executeTool: vi.fn(),
   withStagingTempFlush: vi.fn(),
+  clearCommandCacheForRun: vi.fn(),
+  clearCommandCacheForTest: vi.fn(),
+  clearOutlineCacheForTest: vi.fn(),
+  isMemoizableCommand: vi.fn(),
+  computeCommandFingerprint: vi.fn(),
+  truncateCommandOutput: vi.fn(),
+  resolveAgentPath: vi.fn(),
+  resolveRunCommandCwd: vi.fn(),
+}));
+
+const mocks = vi.hoisted(() => ({
+  createChatCompletion: vi.fn(),
 }));
 
 vi.mock("./factory.js", () => ({
@@ -25,11 +37,7 @@ vi.mock("./factory.js", () => ({
   })),
 }));
 
-vi.mock("../tools/toolExecutor.js", () => ({
-  clearCommandCacheForRun: vi.fn(() => undefined),
-  executeTool: mocks.executeTool,
-  withStagingTempFlush: mocks.withStagingTempFlush,
-}));
+vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
 import { runAgentLoop } from "./agentLoop.js";
 import { TIER_LIMITS } from "./tierLimits.js";
@@ -87,11 +95,9 @@ let repoPath: string;
 
 beforeEach(() => {
   repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "zone-iter-budget-"));
+  resetToolExecutorMock(toolExecutorMock);
   mocks.createChatCompletion.mockReset();
-  mocks.executeTool.mockReset();
-  mocks.withStagingTempFlush.mockReset();
-  mocks.withStagingTempFlush.mockImplementation(async (fn: () => Promise<void>) => fn());
-  mocks.executeTool.mockResolvedValue({ success: true, output: "file content" });
+  toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "file content" });
 });
 
 afterEach(() => {

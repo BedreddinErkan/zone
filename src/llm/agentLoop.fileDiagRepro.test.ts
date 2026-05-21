@@ -15,13 +15,25 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetToolExecutorMock } from "../test/fixtures/toolExecutorMock.js";
 
 // ── hoisted mocks ─────────────────────────────────────────────────────────────
 
-const mocks = vi.hoisted(() => ({
-  createChatCompletion: vi.fn(),
+const toolExecutorMock = vi.hoisted(() => ({
   executeTool: vi.fn(),
   withStagingTempFlush: vi.fn(),
+  clearCommandCacheForRun: vi.fn(),
+  clearCommandCacheForTest: vi.fn(),
+  clearOutlineCacheForTest: vi.fn(),
+  isMemoizableCommand: vi.fn(),
+  computeCommandFingerprint: vi.fn(),
+  truncateCommandOutput: vi.fn(),
+  resolveAgentPath: vi.fn(),
+  resolveRunCommandCwd: vi.fn(),
+}));
+
+const mocks = vi.hoisted(() => ({
+  createChatCompletion: vi.fn(),
   recordRunSummary: vi.fn(),
   getUsage: vi.fn(),
   readDailyUsdCapOverride: vi.fn<() => number | undefined>(),
@@ -34,11 +46,7 @@ vi.mock("./factory.js", () => ({
   })),
 }));
 
-vi.mock("../tools/toolExecutor.js", () => ({
-  clearCommandCacheForRun: vi.fn(() => undefined),
-  executeTool: mocks.executeTool,
-  withStagingTempFlush: mocks.withStagingTempFlush,
-}));
+vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
 vi.mock("../usage/usageTracker.js", () => ({
   getUsage: mocks.getUsage,
@@ -133,14 +141,12 @@ beforeEach(() => {
   repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "zone-y22-repro-"));
   fs.writeFileSync(path.join(repoPath, FILE_REL), FILE_BEFORE, "utf8");
 
+  resetToolExecutorMock(toolExecutorMock);
   mocks.createChatCompletion.mockReset();
-  mocks.executeTool.mockReset();
-  mocks.withStagingTempFlush.mockReset();
   mocks.recordRunSummary.mockReset();
   mocks.getUsage.mockReset();
   mocks.readDailyUsdCapOverride.mockReset();
 
-  mocks.withStagingTempFlush.mockImplementation(async (fn: () => Promise<void>) => fn());
   mocks.recordRunSummary.mockResolvedValue(undefined);
   mocks.readDailyUsdCapOverride.mockReturnValue(0);
   mocks.getUsage.mockResolvedValue({
@@ -167,7 +173,7 @@ describe("Y.2.2 — apply_patch tracking pipeline", () => {
       return makeDoneResponse();
     });
 
-    mocks.executeTool.mockImplementation(async (toolName: string) => {
+    toolExecutorMock.executeTool.mockImplementation(async (toolName: string) => {
       if (toolName === "read_file") return { success: true, output: FILE_BEFORE };
       if (toolName === "apply_patch") return { success: true, output: "Patch applied." };
       return { success: true, output: "" };
@@ -196,7 +202,7 @@ describe("Y.2.2 — apply_patch tracking pipeline", () => {
       return makeDoneResponse();
     });
 
-    mocks.executeTool.mockImplementation(async (toolName: string) => {
+    toolExecutorMock.executeTool.mockImplementation(async (toolName: string) => {
       if (toolName === "read_file") return { success: true, output: FILE_BEFORE };
       if (toolName === "apply_patch") return { success: true, output: "Patch applied." };
       return { success: true, output: "" };
@@ -233,7 +239,7 @@ describe("Y.2.2 — apply_patch tracking pipeline", () => {
       return makeDoneResponse();
     });
 
-    mocks.executeTool.mockImplementation(
+    toolExecutorMock.executeTool.mockImplementation(
       async (toolName: string, _args: unknown, repoPathArg: string) => {
         if (toolName === "read_file") return { success: true, output: FILE_BEFORE };
         if (toolName === "apply_patch") {

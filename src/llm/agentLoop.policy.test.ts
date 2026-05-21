@@ -6,13 +6,25 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetToolExecutorMock } from "../test/fixtures/toolExecutorMock.js";
 
 // ── hoisted mocks ────────────────────────────────────────────────────────────
 
-const mocks = vi.hoisted(() => ({
-  createChatCompletion: vi.fn(),
+const toolExecutorMock = vi.hoisted(() => ({
   executeTool: vi.fn(),
   withStagingTempFlush: vi.fn(),
+  clearCommandCacheForRun: vi.fn(),
+  clearCommandCacheForTest: vi.fn(),
+  clearOutlineCacheForTest: vi.fn(),
+  isMemoizableCommand: vi.fn(),
+  computeCommandFingerprint: vi.fn(),
+  truncateCommandOutput: vi.fn(),
+  resolveAgentPath: vi.fn(),
+  resolveRunCommandCwd: vi.fn(),
+}));
+
+const mocks = vi.hoisted(() => ({
+  createChatCompletion: vi.fn(),
   getUsage: vi.fn(),
   readDailyUsdCapOverride: vi.fn<() => number | undefined>(),
 }));
@@ -24,11 +36,7 @@ vi.mock("./factory.js", () => ({
   })),
 }));
 
-vi.mock("../tools/toolExecutor.js", () => ({
-  clearCommandCacheForRun: vi.fn(() => undefined),
-  executeTool: mocks.executeTool,
-  withStagingTempFlush: mocks.withStagingTempFlush,
-}));
+vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
 vi.mock("../usage/usageTracker.js", () => ({
   getUsage: mocks.getUsage,
@@ -74,13 +82,10 @@ let tmpDir: string;
 beforeEach(() => {
   repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "zone-policy-loop-"));
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "zone-policy-files-"));
+  resetToolExecutorMock(toolExecutorMock);
   mocks.createChatCompletion.mockReset();
-  mocks.executeTool.mockReset();
-  mocks.withStagingTempFlush.mockReset();
   mocks.getUsage.mockReset();
   mocks.readDailyUsdCapOverride.mockReset();
-  mocks.withStagingTempFlush.mockImplementation(async (fn: () => Promise<void>) => fn());
-  mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
   mocks.readDailyUsdCapOverride.mockReturnValue(undefined);
   delete process.env.ZONE_ORG_POLICY_PATH;
   delete process.env.ZONE_DAILY_USD_CAP;

@@ -15,10 +15,23 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  createChatCompletion: vi.fn(),
+import { resetToolExecutorMock } from "../test/fixtures/toolExecutorMock.js";
+
+const toolExecutorMock = vi.hoisted(() => ({
   executeTool: vi.fn(),
   withStagingTempFlush: vi.fn(),
+  clearCommandCacheForRun: vi.fn(),
+  clearCommandCacheForTest: vi.fn(),
+  clearOutlineCacheForTest: vi.fn(),
+  isMemoizableCommand: vi.fn(),
+  computeCommandFingerprint: vi.fn(),
+  truncateCommandOutput: vi.fn(),
+  resolveAgentPath: vi.fn(),
+  resolveRunCommandCwd: vi.fn(),
+}));
+
+const mocks = vi.hoisted(() => ({
+  createChatCompletion: vi.fn(),
   pruneStaleReads: vi.fn(),
   emitContextPruned: vi.fn(),
 }));
@@ -30,11 +43,7 @@ vi.mock("./factory.js", () => ({
   })),
 }));
 
-vi.mock("../tools/toolExecutor.js", () => ({
-  clearCommandCacheForRun: vi.fn(() => undefined),
-  executeTool: mocks.executeTool,
-  withStagingTempFlush: mocks.withStagingTempFlush,
-}));
+vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
 vi.mock("./contextPruner.js", () => ({
   pruneStaleReads: mocks.pruneStaleReads,
@@ -77,19 +86,17 @@ let repoPath: string;
 
 beforeEach(() => {
   repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "zone-cache-stability-"));
+  resetToolExecutorMock(toolExecutorMock);
   mocks.createChatCompletion.mockReset();
-  mocks.executeTool.mockReset();
-  mocks.withStagingTempFlush.mockReset();
   mocks.pruneStaleReads.mockReset();
   mocks.emitContextPruned.mockReset();
 
-  mocks.withStagingTempFlush.mockImplementation(async (fn: () => Promise<void>) => fn());
   mocks.pruneStaleReads.mockImplementation((msgs: unknown[]) => ({
     pruned: msgs,
     stats: { blocksReplaced: 0, charsSaved: 0, blocksKept: (msgs as unknown[]).length },
   }));
   mocks.emitContextPruned.mockImplementation(() => {});
-  mocks.executeTool.mockImplementation(async (name: string) => {
+  toolExecutorMock.executeTool.mockImplementation(async (name: string) => {
     if (name === "run_command")
       return {
         success: false,
@@ -155,7 +162,7 @@ describe("Cache stability — coaching and loop-warning injection", () => {
     });
     // run_command succeeds → failureDetected=false → no coaching → only loop
     // warning fires at count=3.
-    mocks.executeTool.mockImplementation(async () => ({
+    toolExecutorMock.executeTool.mockImplementation(async () => ({
       success: true,
       exitCode: 0,
       output: "ok",

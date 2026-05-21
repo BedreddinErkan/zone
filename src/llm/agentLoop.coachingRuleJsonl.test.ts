@@ -10,13 +10,25 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetToolExecutorMock } from "../test/fixtures/toolExecutorMock.js";
 
 // ── hoisted mocks ────────────────────────────────────────────────────────────
 
-const mocks = vi.hoisted(() => ({
-  createChatCompletion: vi.fn(),
+const toolExecutorMock = vi.hoisted(() => ({
   executeTool: vi.fn(),
   withStagingTempFlush: vi.fn(),
+  clearCommandCacheForRun: vi.fn(),
+  clearCommandCacheForTest: vi.fn(),
+  clearOutlineCacheForTest: vi.fn(),
+  isMemoizableCommand: vi.fn(),
+  computeCommandFingerprint: vi.fn(),
+  truncateCommandOutput: vi.fn(),
+  resolveAgentPath: vi.fn(),
+  resolveRunCommandCwd: vi.fn(),
+}));
+
+const mocks = vi.hoisted(() => ({
+  createChatCompletion: vi.fn(),
   pruneStaleReads: vi.fn(),
   emitContextPruned: vi.fn(),
   log: vi.fn(),
@@ -29,11 +41,7 @@ vi.mock("./factory.js", () => ({
   })),
 }));
 
-vi.mock("../tools/toolExecutor.js", () => ({
-  clearCommandCacheForRun: vi.fn(() => undefined),
-  executeTool: mocks.executeTool,
-  withStagingTempFlush: mocks.withStagingTempFlush,
-}));
+vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
 vi.mock("./contextPruner.js", () => ({
   pruneStaleReads: mocks.pruneStaleReads,
@@ -115,20 +123,18 @@ let repoPath: string;
 
 beforeEach(() => {
   repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "zone-coaching-jsonl-"));
+  resetToolExecutorMock(toolExecutorMock);
   mocks.createChatCompletion.mockReset();
-  mocks.executeTool.mockReset();
-  mocks.withStagingTempFlush.mockReset();
   mocks.pruneStaleReads.mockReset();
   mocks.emitContextPruned.mockReset();
   mocks.log.mockReset();
 
-  mocks.withStagingTempFlush.mockImplementation(async (fn: () => Promise<void>) => fn());
   mocks.pruneStaleReads.mockImplementation((msgs: unknown[]) => ({
     pruned: msgs,
     stats: { blocksReplaced: 0, charsSaved: 0, blocksKept: msgs.length },
   }));
   mocks.emitContextPruned.mockImplementation(() => {});
-  mocks.executeTool.mockImplementation(async (name: string) => {
+  toolExecutorMock.executeTool.mockImplementation(async (name: string) => {
     if (name === "apply_patch") return { success: true, output: "patched" };
     return { success: true, output: "" };
   });
@@ -143,7 +149,7 @@ describe("U.2.C Commit 3 — [zone-coaching-rule] JSONL", () => {
     // Agent patches src/utils/isMonorepo.ts, but test fails in src/ui/Button.test.ts
     const failOutput =
       "[exit_code=1] FAIL src/ui/Button.test.ts\n● Button > renders\n  AssertionError at src/ui/Button.test.ts:42";
-    mocks.executeTool.mockImplementation(async (name: string) => {
+    toolExecutorMock.executeTool.mockImplementation(async (name: string) => {
       if (name === "apply_patch") return { success: true, output: "patched" };
       if (name === "run_command") return { success: false, exitCode: 1, output: failOutput };
       return { success: true, output: "" };
@@ -179,7 +185,7 @@ describe("U.2.C Commit 3 — [zone-coaching-rule] JSONL", () => {
   it("emits decision=unclear when no failing file can be parsed from output", async () => {
     const vagueOutput =
       "[exit_code=1] Error: some vague failure without a file path\n  at unknown location";
-    mocks.executeTool.mockImplementation(async (name: string) => {
+    toolExecutorMock.executeTool.mockImplementation(async (name: string) => {
       if (name === "run_command") return { success: false, exitCode: 1, output: vagueOutput };
       return { success: true, output: "" };
     });
@@ -209,7 +215,7 @@ describe("U.2.C Commit 3 — [zone-coaching-rule] JSONL", () => {
   it("includes modifiedFiles array and iter in the JSONL payload", async () => {
     const failOutput =
       "[exit_code=1] FAIL src/ui/Widget.test.ts\n● Widget > mounts\n  at src/ui/Widget.test.ts:15";
-    mocks.executeTool.mockImplementation(async (name: string) => {
+    toolExecutorMock.executeTool.mockImplementation(async (name: string) => {
       if (name === "run_command") return { success: false, exitCode: 1, output: failOutput };
       return { success: true, output: "" };
     });
