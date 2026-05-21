@@ -2932,10 +2932,10 @@ Example:
       prevPrunedMessagesLen: prevR2PrunedMessages?.length ?? 0,
     }));
 
-    // E.3: per-iter file-read manifest injection. Appended to prunedMessages (not
-    // responseInput) so it does not accumulate across iterations. Only emitted when
-    // the run has actually read at least one file. Follows the same user-message
-    // injection pattern as softIterWarn / midWarn for prefix-cache stability.
+    // E.3: per-iter file-read manifest injection. Pattern A — concat into last
+    // role:"tool" of prunedMessages so Anthropic's last-user-message cache
+    // breakpoint stays anchored on the original task (msgIdx 1). Fallback push
+    // role:"user" only at iter 1 before any tool call exists.
     {
       const classified = classifyTurns(responseInput, toolCallLog);
       const { manifest, entryCount, structuredEntries } = buildFileReadManifest(responseInput, classified);
@@ -2954,16 +2954,33 @@ Example:
           topLineRange: topEntry?.lineRange ?? "outline",
           runId: input.runId ?? null,
         }));
-        prunedMessages = [
-          ...prunedMessages,
-          {
-            role: "user" as const,
-            content:
-              `## Files already read this run\n${manifest}\n\n` +
-              `Re-read ONLY if the file was modified since your last read.\n` +
-              `Reference prior content by line number instead of re-reading.`,
-          },
-        ];
+        const manifestText =
+          `## Files already read this run\n${manifest}\n\n` +
+          `Re-read ONLY if the file was modified since your last read.\n` +
+          `Reference prior content by line number instead of re-reading.`;
+        let manifestAppended = false;
+        for (let mi = prunedMessages.length - 1; mi >= 0; mi--) {
+          const pm = prunedMessages[mi];
+          if (pm.role === "tool") {
+            prunedMessages = [...prunedMessages];
+            prunedMessages[mi] = {
+              ...pm,
+              content:
+                typeof pm.content === "string"
+                  ? `${pm.content}\n\n${manifestText}`
+                  : pm.content,
+            };
+            manifestAppended = true;
+            break;
+          }
+        }
+        if (!manifestAppended) {
+          // Fallback: iter 1 before any tool result exists.
+          prunedMessages = [
+            ...prunedMessages,
+            { role: "user" as const, content: manifestText },
+          ];
+        }
       }
     }
 
