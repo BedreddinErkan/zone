@@ -19,6 +19,7 @@
     "serve": "node dist/cli/index.js serve",
     "start": "node dist/cli/index.js serve",
     "test": "vitest run",
+    "test:l3": "vitest run src/llm/taskClassifier.archetype.test.ts",
     "sweep": "npx tsx scripts/sweep.ts",
     "sweep:dry": "npx tsx scripts/sweep.ts --dry-run"
   },
