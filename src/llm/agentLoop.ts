@@ -69,6 +69,9 @@ import {
   runPreIterationHooks,
   runPostToolUseHooks,
   applyAppendOps,
+  type PreIterationHook,
+  type PreIterationContext,
+  type PostToolUseContext,
 } from "../hooks/postToolUseHook.js";
 
 // "plan" kept as accepted input for backward compat — normalizeAgentLoopMode maps it to "patch"
@@ -2844,6 +2847,34 @@ Example:
   let lastNarrationEmitted = "";
   let completedIterCount = 0;
 
+  // Gap 1: internal pre-iteration hooks. Populated as each site is migrated (commits 2-4).
+  // These close over the loop's mutable let bindings (softWarnInjected, midWarnInjected, etc.)
+  // so each hook can read/write them directly without an explicit mutation return.
+  const softIterWarnHook: PreIterationHook = {
+    name: "soft-iter-warn",
+    priority: 10,
+    shouldRun: (ctx) => (
+      softIterWarnThreshold !== undefined &&
+      ctx.iter >= softIterWarnThreshold &&
+      !softWarnInjected
+    ),
+    run: (ctx) => {
+      softWarnInjected = true;
+      ctx.emit("log", "[zone-iter-soft-warn-injected]", {
+        iter: ctx.iter,
+        softIterWarnThreshold,
+        runId: ctx.runId,
+      });
+      return {
+        kind: "appendContext",
+        content: `\n\n[ZONE_ITER_SOFT_WARN] You have used ${ctx.iter} iterations. The cost ceiling will terminate this run — wrap up your work and write a final summary now.`,
+        target: "responseInput",
+        mode: "append-to-tool",
+      };
+    },
+  };
+  const _internalPreIterHooks: PreIterationHook[] = [softIterWarnHook];
+
   for (let iter = 0; iter < iterationBudget.maxIterationsForRun; iter += 1) {
     completedIterCount = iter + 1;
     debugLog("[zone-agent-iter-start]", {
@@ -2858,22 +2889,41 @@ Example:
       `[agent_loop] Iteration ${iter + 1}/${iterationBudget.maxIterationsForRun}`
     );
 
-    if (softIterWarnThreshold !== undefined && iter >= softIterWarnThreshold && !softWarnInjected) {
-      softWarnInjected = true;
-      const softWarnAppend = `\n\n[ZONE_ITER_SOFT_WARN] You have used ${iter} iterations. The cost ceiling will terminate this run — wrap up your work and write a final summary now.`;
-      let appended = false;
-      for (let ci = responseInput.length - 1; ci >= 0; ci--) {
-        const m = responseInput[ci];
-        if (m.role === "tool") {
-          m.content = (typeof m.content === "string" ? m.content : "") + softWarnAppend;
-          appended = true;
-          break;
-        }
+    // Declare prunedMessages here (hoisted from R.2 block) so the pre-iter runner can reference it.
+    // Initialized to responseInput as placeholder; R.2 reassigns it to the pruned copy below.
+    // Hooks at priority <90 (pre-R.2 sites) only append to responseInput, so the pre-R.2 value here
+    // is never read by those hooks — it's only passed through the context for completeness.
+    let prunedMessages: ChatCompletionMessageParam[] = responseInput;
+
+    // Gap 1 pre-iteration runner — site 1 (soft-iter-warn) migrated; sites 2-3 still inline below.
+    {
+      const _allPreHooks = [..._internalPreIterHooks, ...(input.hooks?.preIteration ?? [])];
+      const preCtx: PreIterationContext = {
+        iter,
+        runId: input.runId ?? null,
+        responseInput,
+        prunedMessages,
+        iterationBudget,
+        cumulativeTokens: cumulativeTokens(),
+        effectiveTokenBudgetCap,
+        softWarnInjected,
+        midWarnInjected,
+        emit: (level, marker, payload) => {
+          if (level === "log") log(marker, JSON.stringify(payload));
+          else debugLog(marker, JSON.stringify(payload));
+        },
+      };
+      const preMutations = runPreIterationHooks(_allPreHooks, preCtx, (marker, payload) => log(marker, JSON.stringify(payload)));
+      if (preMutations.blocked) {
+        const msg = `Task aborted: pre-iteration hook blocked the run. Reason: ${preMutations.blockReason ?? "unspecified"}`;
+        emitRunBreakdownSummary();
+        emitCacheSummary();
+        emitSelfValidationSummary();
+        return { success: false, summary: msg, toolCallLog, filesModified: Array.from(filesModified),
+          patchValidatedByAgent: false, verificationReason: "no_verification_attempted",
+          terminationReason: "hook_blocked", promotedFromArchetype, promotionTrigger, promotedAtIter };
       }
-      if (!appended) {
-        responseInput.push({ role: "user", content: softWarnAppend });
-      }
-      log("[zone-iter-soft-warn-injected]", JSON.stringify({ iter, softIterWarnThreshold, runId: input.runId ?? null }));
+      applyAppendOps(preMutations.appendOps, responseInput, () => prunedMessages, (msgs) => { prunedMessages = msgs; });
     }
 
     // Phase I Lane 2.1: one-shot mid-run budget pressure injection at 70%.
@@ -2931,7 +2981,6 @@ Example:
     // pruned state and only append genuinely new messages. This keeps the Anthropic
     // prefix cache intact (hitting the last cached state) at the cost of sending a
     // few extra tokens for the not-yet-pruned messages.
-    let prunedMessages: ChatCompletionMessageParam[];
     if (pruneStats.blocksReplaced > prevR2BlocksReplaced && prevR2PrunedMessages !== null) {
       const newCount = responseInput.length - prevR2PrunedMessages.length;
       prunedMessages = newCount > 0
@@ -2994,39 +3043,6 @@ Example:
           },
         ];
       }
-    }
-
-    // Gap 1: external caller pre-iteration hooks (internal hooks wired in commits 2-6).
-    // Called after all current inline pre-iter sites so external hooks always see the
-    // fully-prepared prunedMessages state (post-R.2 + E.3 manifest).
-    if (input.hooks?.preIteration?.length) {
-      const preHookEmit = (marker: string, payload: object) => log(marker, JSON.stringify(payload));
-      const preCtx: import("../hooks/postToolUseHook.js").PreIterationContext = {
-        iter,
-        runId: input.runId ?? null,
-        responseInput,
-        prunedMessages,
-        iterationBudget,
-        cumulativeTokens: cumulativeTokens(),
-        effectiveTokenBudgetCap,
-        softWarnInjected,
-        midWarnInjected,
-        emit: (level, marker, payload) => {
-          if (level === "log") log(marker, JSON.stringify(payload));
-          else debugLog(marker, JSON.stringify(payload));
-        },
-      };
-      const preMutations = runPreIterationHooks(input.hooks.preIteration, preCtx, preHookEmit);
-      if (preMutations.blocked) {
-        const msg = `Task aborted: pre-iteration hook blocked the run. Reason: ${preMutations.blockReason ?? "unspecified"}`;
-        emitRunBreakdownSummary();
-        emitCacheSummary();
-        emitSelfValidationSummary();
-        return { success: false, summary: msg, toolCallLog, filesModified: Array.from(filesModified),
-          patchValidatedByAgent: false, verificationReason: "no_verification_attempted",
-          terminationReason: "hook_blocked", promotedFromArchetype, promotionTrigger, promotedAtIter };
-      }
-      applyAppendOps(preMutations.appendOps, responseInput, () => prunedMessages, (msgs) => { prunedMessages = msgs; });
     }
 
     // Opus forensic E.2: env-gated per-iter content hash probe for cache-bust diagnosis.
