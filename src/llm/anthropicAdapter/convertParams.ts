@@ -5,7 +5,7 @@ import type {
   ChatCompletionTool,
   ChatCompletionToolChoiceOption,
 } from "openai/resources/chat/completions";
-import { log } from "../../utils/logger.js";
+import { applyMessageCacheBreakpoint2 } from "./cacheControlHelpers.js";
 
 const JSON_MODE_INSTRUCTION = [
   "You must respond with a single valid JSON object only.",
@@ -142,74 +142,9 @@ export function convertParams(
       .trim()
       .toLowerCase() !== "0";
 
-  let messagesForRequest: Anthropic.MessageParam[] = messages;
-
-  if (messageCacheEnabled && cacheEligible && messages.length > 0) {
-    // Find the index of the LAST user message (a tool_result-bearing user
-    // message also counts — what matters is "user" role).
-    let lastUserIdx = -1;
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      if (messages[i].role === "user") {
-        lastUserIdx = i;
-        break;
-      }
-    }
-
-    if (lastUserIdx >= 0) {
-      // Skip the trivial single-tiny-user-message case (no reuse expected).
-      const isFirstAndTiny =
-        lastUserIdx === 0 &&
-        messages.length === 1 &&
-        typeof messages[0].content === "string" &&
-        messages[0].content.length < 500;
-
-      if (!isFirstAndTiny) {
-        messagesForRequest = messages.map((msg, i) => {
-          if (i !== lastUserIdx) return msg;
-
-          // user.content can be string or content-block array.
-          // To attach cache_control we need an array with at least one block,
-          // and we attach to the LAST block of that array.
-          if (typeof msg.content === "string") {
-            return {
-              ...msg,
-              content: [
-                {
-                  type: "text" as const,
-                  text: msg.content,
-                  cache_control: { type: "ephemeral" as const },
-                },
-              ],
-            };
-          }
-          if (Array.isArray(msg.content) && msg.content.length > 0) {
-            const lastBlockIdx = msg.content.length - 1;
-            return {
-              ...msg,
-              content: msg.content.map((block, bi) =>
-                bi === lastBlockIdx
-                  ? ({ ...block, cache_control: { type: "ephemeral" } } as typeof block)
-                  : block
-              ),
-            };
-          }
-          return msg;
-        });
-
-        // Opus forensic E.2: log actual marker placement so probe-v2 emits
-        // can be joined against where Anthropic sees the cache_control.
-        if (process.env["ZONE_DEBUG_CACHE_PROBE"] === "1") {
-          const targetMsg = messagesForRequest[lastUserIdx];
-          log("[zone-cache-marker-placed]", JSON.stringify({
-            markerOnIdx: lastUserIdx,
-            markerOnRole: targetMsg?.role ?? "unknown",
-            contentBlockCount: Array.isArray(targetMsg?.content) ? targetMsg.content.length : 1,
-            totalMessages: messagesForRequest.length,
-          }));
-        }
-      }
-    }
-  }
+  const messagesForRequest = applyMessageCacheBreakpoint2(messages, {
+    enabled: messageCacheEnabled && cacheEligible,
+  });
 
   const params: Anthropic.MessageCreateParams = {
     model: input.model,
