@@ -144,7 +144,7 @@ describe("agentLoop loop detection (Q.2)", () => {
     expect(terminal?.count).toBe(TERMINATE_THRESHOLD);
   });
 
-  it("injects a coaching user-turn message when the warn threshold is reached", async () => {
+  it("appends loop-warning to role:tool when the warn threshold is reached", async () => {
     for (let i = 0; i < TERMINATE_THRESHOLD + 2; i += 1) {
       mocks.createChatCompletion.mockResolvedValueOnce(makeReadFileCall(`call-${i}`));
     }
@@ -157,19 +157,20 @@ describe("agentLoop loop detection (Q.2)", () => {
       maxIterations: 20,
     });
 
-    // After the warn threshold is hit, a coaching message is injected into
-    // responseInput so the next LLM call includes it.  The subsequent
-    // createChatCompletion call receives messages that contain the coaching text.
+    // After the warn threshold is hit, the warning text is appended to the
+    // preceding role:"tool" message (not pushed as a standalone role:"user"
+    // turn) so that assistant-tool alternation is preserved and the Anthropic
+    // prefix cache is not busted.
     const calls = mocks.createChatCompletion.mock.calls as Array<[{ messages: Array<{ role: string; content: string }> }]>;
     const allMessages = calls.flatMap(([req]) => req.messages ?? []);
-    const coachingMsg = allMessages.find(
+    const warnMsg = allMessages.find(
       (m) =>
-        m.role === "user" &&
+        m.role === "tool" &&
         typeof m.content === "string" &&
         m.content.includes("same arguments") &&
         m.content.includes("loop")
     );
-    expect(coachingMsg).toBeDefined();
+    expect(warnMsg).toBeDefined();
   });
 
   it("does NOT trigger for distinct tool calls even when count exceeds TERMINATE_THRESHOLD", async () => {

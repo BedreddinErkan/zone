@@ -2828,10 +2828,19 @@ Example:
 
     if (softIterWarnThreshold !== undefined && iter >= softIterWarnThreshold && !softWarnInjected) {
       softWarnInjected = true;
-      responseInput.push({
-        role: "user",
-        content: `[ZONE_ITER_SOFT_WARN] You have used ${iter} iterations. The cost ceiling will terminate this run — wrap up your work and write a final summary now.`,
-      });
+      const softWarnAppend = `\n\n[ZONE_ITER_SOFT_WARN] You have used ${iter} iterations. The cost ceiling will terminate this run — wrap up your work and write a final summary now.`;
+      let appended = false;
+      for (let ci = responseInput.length - 1; ci >= 0; ci--) {
+        const m = responseInput[ci];
+        if (m.role === "tool") {
+          m.content = (typeof m.content === "string" ? m.content : "") + softWarnAppend;
+          appended = true;
+          break;
+        }
+      }
+      if (!appended) {
+        responseInput.push({ role: "user", content: softWarnAppend });
+      }
       log("[zone-iter-soft-warn-injected]", JSON.stringify({ iter, softIterWarnThreshold, runId: input.runId ?? null }));
     }
 
@@ -2843,14 +2852,23 @@ Example:
         cumulativeTokens() / effectiveTokenBudgetCap >= TOKEN_BUDGET_MID_WARN) {
       midWarnInjected = true;
       const midWarnRatio = cumulativeTokens() / effectiveTokenBudgetCap;
-      responseInput.push({
-        role: "user",
-        content:
-          "You are at 70% of token budget. Pause expansive reads. " +
-          "If a primary deliverable (e.g., test file requested in the original task) is not yet " +
-          "written, write it now even if implementation is incomplete. Remaining iterations should " +
-          "converge, not explore.",
-      });
+      const midWarnAppend =
+        "\n\nYou are at 70% of token budget. Pause expansive reads. " +
+        "If a primary deliverable (e.g., test file requested in the original task) is not yet " +
+        "written, write it now even if implementation is incomplete. Remaining iterations should " +
+        "converge, not explore.";
+      let appended = false;
+      for (let ci = responseInput.length - 1; ci >= 0; ci--) {
+        const m = responseInput[ci];
+        if (m.role === "tool") {
+          m.content = (typeof m.content === "string" ? m.content : "") + midWarnAppend;
+          appended = true;
+          break;
+        }
+      }
+      if (!appended) {
+        responseInput.push({ role: "user", content: midWarnAppend });
+      }
       log("[zone-token-budget-mid-warn]", JSON.stringify({
         runId: input.runId ?? null,
         iter,
@@ -3733,10 +3751,20 @@ Example:
             title: `Loop warning: \`${name}\` repeated ${loopResult.count}×`,
             status: "warning",
           } as Parameters<NonNullable<typeof input.onStructuredEvent>>[0]);
-          responseInput.push({
-            role: "user" as const,
-            content: `Notice: you have called \`${name}\` with the same arguments ${loopResult.count} times in the last few iterations. This suggests a loop. Try a different approach — use a different tool, different scope, ask the user for clarification, or finish with a partial explanation.`,
-          });
+          const loopWarnAppend =
+            `\n\n[Zone loop-warning]\nNotice: you have called \`${name}\` with the same arguments ${loopResult.count} times in the last few iterations. This suggests a loop. Try a different approach — use a different tool, different scope, ask the user for clarification, or finish with a partial explanation.`;
+          let appended = false;
+          for (let ci = responseInput.length - 1; ci >= 0; ci--) {
+            const m = responseInput[ci];
+            if (m.role === "tool") {
+              m.content = (typeof m.content === "string" ? m.content : "") + loopWarnAppend;
+              appended = true;
+              break;
+            }
+          }
+          if (!appended) {
+            responseInput.push({ role: "user" as const, content: loopWarnAppend });
+          }
         } else if (loopResult.status === "terminate") {
           input.onStructuredEvent?.({
             type: "loop_detected_terminal",
