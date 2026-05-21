@@ -441,6 +441,10 @@ export function assembleAgentSystemPrompt(input: {
     `SEARCH FIRST: for symbol/pattern queries (find a function call, find usages, locate a definition), use search_in_files BEFORE read_file. search_in_files now supports regex, output_mode, and context_lines. Reading entire files to find a single symbol is the most common wasteful pattern.\n\n` +
     `READ_FILE ECONOMY: ≤10K chars returns full content (no line-number prefix — safe to copy into FIND). >10K returns numbered head (lines 1-100) + outline + numbered tail — use lineRange: [start, end] (1-indexed inclusive) to read the specific region before patching. When you receive a FILE OUTLINE (file too large for full read), your next action MUST be read_file with lineRange covering the symbol or region you need — the outline alone is insufficient context for editing.\n\n` +
     `INTERPRETING COMMAND OUTPUT: every run_command result starts with [exit_code=N — ...]. exit_code=0 ⇒ success — DO NOT retry based on output text (e.g. "Tests: N failed" may be pre-existing failures unrelated to your patch). exit_code≠0 ⇒ failure — read the tail for the reason. When verifying your own patch, focus only on tests that cover files you modified. If a command exited 0, do not run additional commands to verify or investigate its output. Trust the exit code as final and move on.\n\n` +
+    // @protected-until 2026-08-18 (commit 472efc9, post-mortem pipe-noise retry fix)
+    // @do-not-trim-without behavioral test sweep + 2 weeks dogfood quiet on pipe-retry incidents
+    // @migration-path: Gap 5 — PostToolUseHook { kind:"block", name:"verifier-pipe-noise" }
+    //   requires a model-intent classifier to detect retry intent. Defer until Gap 5.
     `VERIFIER SHELL DISCIPLINE — pipe exit code semantics:\n` +
     `Some shell patterns produce non-zero exit codes that are NOT real failures:\n` +
     `1. \`grep PATTERN | wc -l\` — grep returns exit 1 when no matches found; the pipeline exits 1 even though wc -l succeeded with count "0".\n` +
