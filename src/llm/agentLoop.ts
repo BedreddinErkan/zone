@@ -65,6 +65,11 @@ import { hashToolCall, createDetectorState, recordAndDetect } from "./loopDetect
 import { UpstreamUnavailableError } from "./withExponentialBackoff.js";
 import { emitTokenBreakdown, emitBreakdownSummary, type BreakdownEvent } from "./tokenBreakdown.js";
 import { pruneStaleReads, emitContextPruned } from "./contextPruner.js";
+import {
+  runPreIterationHooks,
+  runPostToolUseHooks,
+  applyAppendOps,
+} from "../hooks/postToolUseHook.js";
 
 // "plan" kept as accepted input for backward compat — normalizeAgentLoopMode maps it to "patch"
 type AgentLoopMode = Exclude<Mode, "auto"> | "investigation" | "plan";
@@ -203,6 +208,11 @@ export interface AgentLoopInput {
     filesToEdit?: string[];
     evidence?: string;
   };
+  /** Gap 1: per-run hook registrations. Hooks are synchronous and scoped to this run only. */
+  hooks?: {
+    preIteration?: import("../hooks/postToolUseHook.js").PreIterationHook[];
+    postToolUse?: import("../hooks/postToolUseHook.js").PostToolUseHook[];
+  };
 }
 
 export type VerificationReason =
@@ -240,7 +250,7 @@ export interface AgentLoopResult {
   /** Phase H.7: how the loop ended. Used by upstream flows (investigation /
    *  patch) to surface "Token budget reached" vs "Iteration budget reached"
    *  distinctly in the UI. Optional for backward-compat with older callers. */
-  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded" | "upstream_unavailable" | "phase1_handoff";
+  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded" | "upstream_unavailable" | "phase1_handoff" | "hook_blocked";
   /** Phase Q.2: populated when terminationReason === "loop_detected". The
    *  offending tool name + observed count in the sliding-window detector. */
   loopDetected?: { toolName: string; count: number };
@@ -2986,6 +2996,39 @@ Example:
       }
     }
 
+    // Gap 1: external caller pre-iteration hooks (internal hooks wired in commits 2-6).
+    // Called after all current inline pre-iter sites so external hooks always see the
+    // fully-prepared prunedMessages state (post-R.2 + E.3 manifest).
+    if (input.hooks?.preIteration?.length) {
+      const preHookEmit = (marker: string, payload: object) => log(marker, JSON.stringify(payload));
+      const preCtx: import("../hooks/postToolUseHook.js").PreIterationContext = {
+        iter,
+        runId: input.runId ?? null,
+        responseInput,
+        prunedMessages,
+        iterationBudget,
+        cumulativeTokens: cumulativeTokens(),
+        effectiveTokenBudgetCap,
+        softWarnInjected,
+        midWarnInjected,
+        emit: (level, marker, payload) => {
+          if (level === "log") log(marker, JSON.stringify(payload));
+          else debugLog(marker, JSON.stringify(payload));
+        },
+      };
+      const preMutations = runPreIterationHooks(input.hooks.preIteration, preCtx, preHookEmit);
+      if (preMutations.blocked) {
+        const msg = `Task aborted: pre-iteration hook blocked the run. Reason: ${preMutations.blockReason ?? "unspecified"}`;
+        emitRunBreakdownSummary();
+        emitCacheSummary();
+        emitSelfValidationSummary();
+        return { success: false, summary: msg, toolCallLog, filesModified: Array.from(filesModified),
+          patchValidatedByAgent: false, verificationReason: "no_verification_attempted",
+          terminationReason: "hook_blocked", promotedFromArchetype, promotionTrigger, promotedAtIter };
+      }
+      applyAppendOps(preMutations.appendOps, responseInput, () => prunedMessages, (msgs) => { prunedMessages = msgs; });
+    }
+
     // Opus forensic E.2: env-gated per-iter content hash probe for cache-bust diagnosis.
     // v2 (replaces v1 7d9b469): every message hashed + manifest position + marker location.
     // Set ZONE_DEBUG_CACHE_PROBE=1 to enable. No-op otherwise.
@@ -3796,6 +3839,44 @@ Example:
             status: "error",
           } as Parameters<NonNullable<typeof input.onStructuredEvent>>[0]);
           return { ...synthesizeLoopDetectedExit(iter + 1, name, loopResult.count), promotedFromArchetype, promotionTrigger, promotedAtIter };
+        }
+
+        // Gap 1: external caller post-tool-use hooks (internal hooks wired in commits 5-6).
+        if (input.hooks?.postToolUse?.length) {
+          const postHookEmit = (marker: string, payload: object) => log(marker, JSON.stringify(payload));
+          const postCtx: import("../hooks/postToolUseHook.js").PostToolUseContext = {
+            iter,
+            runId: input.runId ?? null,
+            toolName: name,
+            toolArgs: parsedArgs,
+            toolCallId: callId,
+            toolResult: result,
+            responseInput,
+            loopDetectorState: { count: loopResult.count, status: loopResult.status },
+            selfCorrectionAttempts,
+            effectiveMaxCoachingAttempts,
+            emit: (level, marker, payload) => {
+              if (level === "log") log(marker, JSON.stringify(payload));
+              else debugLog(marker, JSON.stringify(payload));
+            },
+          };
+          const postMutations = runPostToolUseHooks(input.hooks.postToolUse, postCtx, postHookEmit);
+          if (postMutations.blocked) {
+            const msg = `Task aborted: post-tool-use hook blocked the run. Reason: ${postMutations.blockReason ?? "unspecified"}`;
+            emitRunBreakdownSummary();
+            emitCacheSummary();
+            emitSelfValidationSummary();
+            return { success: false, summary: msg, toolCallLog, filesModified: Array.from(filesModified),
+              patchValidatedByAgent: false, verificationReason: "no_verification_attempted",
+              terminationReason: "hook_blocked", promotedFromArchetype, promotionTrigger, promotedAtIter };
+          }
+          if (postMutations.mutatedOutput !== undefined) {
+            const lastMsg = responseInput[responseInput.length - 1];
+            if (lastMsg?.role === "tool" && lastMsg.tool_call_id === callId) {
+              lastMsg.content = postMutations.mutatedOutput;
+            }
+          }
+          applyAppendOps(postMutations.appendOps, responseInput, () => prunedMessages, (msgs) => { prunedMessages = msgs; });
         }
       }
 
