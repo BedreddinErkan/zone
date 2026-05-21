@@ -2148,6 +2148,15 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   };
   const effectiveAllowedTools =
     input.allowedTools ?? (hasExplicitMode ? modeDefaultAllowedTools(mode) : undefined);
+  // L.2: tier-based tool exposure. Subagent loops skip tier gating — they
+  // inherit the parent's constraints via allowedTools / tokenBudgetBaseTokens.
+  const isSubagentLoop = input.subagent !== undefined;
+  const tierLimits = isSubagentLoop
+    ? null
+    : resolveTierLimits(input.taskClassification, { forceTierOverride: input.forceTier });
+  // Zero-budget tiers (simple): hide Task from the LLM toolset so the agent
+  // never calls it and gets rejected deep in executeTool.
+  const taskBlockedByBudget = (tierLimits?.maxSubagentCalls ?? Infinity) === 0;
   // Phase X.0: suggest_scope_change is now in ZONE_TOOLS; no separate
   // AUDIT_ONLY_TOOLS spread needed. The allowedTools filter still restricts
   // which tools are presented in audit mode (AUDIT_ALLOWED_TOOLS ⊂ ZONE_TOOLS).
@@ -2155,19 +2164,13 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     ZONE_TOOLS.filter((t) => {
       const name = getZoneToolName(t);
       if (input.excludeTools?.has(name)) return false;
+      if (taskBlockedByBudget && name === "Task") return false;
       return effectiveAllowedTools ? effectiveAllowedTools.has(name) : true;
     })
   );
   if (effectiveAllowedTools && toolsForLLM.length === 0) {
     throw new Error("AgentLoopInput.allowedTools resolved to zero tools — aborting.");
   }
-
-  // L.2: tier-based tool exposure. Subagent loops skip tier gating — they
-  // inherit the parent's constraints via allowedTools / tokenBudgetBaseTokens.
-  const isSubagentLoop = input.subagent !== undefined;
-  const tierLimits = isSubagentLoop
-    ? null
-    : resolveTierLimits(input.taskClassification, { forceTierOverride: input.forceTier });
 
   let softIterWarnThreshold: number | undefined;
   let softWarnInjected = false;
@@ -3480,27 +3483,6 @@ Example:
           command: parsedArgs.command ?? null,
         }));
 
-        // Phase Q.3: log Task dispatch reason for traceability. Extracted
-        // from the first line of the description per agent coaching.
-        if (name === "Task") {
-          const dispatchReason = extractDispatchReason(parsedArgs.description);
-          const dispatchSubagentType =
-            typeof parsedArgs.subagent_type === "string" ? parsedArgs.subagent_type : null;
-          const dispatchProvider = getRequestContext()?.provider ?? "openai";
-          const dispatchWorkerModel =
-            dispatchSubagentType === "worker"
-              ? getModelForRole("worker", dispatchProvider)
-              : null;
-          log("[zone-subagent-dispatched]", JSON.stringify({
-            event: "subagent_dispatched",
-            parentRunId: input.runId ?? null,
-            subagentType: dispatchSubagentType,
-            workerModel: dispatchWorkerModel,
-            dispatchReason,
-            iter: iter + 1,
-          }));
-        }
-
         if (name === "apply_patch") {
           const targetFilePath =
             typeof parsedArgs.filePath === "string" ? parsedArgs.filePath : null;
@@ -3605,6 +3587,27 @@ Example:
         });
         throwIfAborted("after_tool");
         input.onToolResult?.(name, result);
+
+        // Phase Q.3: log Task dispatch only after executeTool confirms success —
+        // the budget gate in toolExecutor may block the call (success:false).
+        if (name === "Task" && result.success) {
+          const dispatchReason = extractDispatchReason(parsedArgs.description);
+          const dispatchSubagentType =
+            typeof parsedArgs.subagent_type === "string" ? parsedArgs.subagent_type : null;
+          const dispatchProvider = getRequestContext()?.provider ?? "openai";
+          const dispatchWorkerModel =
+            dispatchSubagentType === "worker"
+              ? getModelForRole("worker", dispatchProvider)
+              : null;
+          log("[zone-subagent-dispatched]", JSON.stringify({
+            event: "subagent_dispatched",
+            parentRunId: input.runId ?? null,
+            subagentType: dispatchSubagentType,
+            workerModel: dispatchWorkerModel,
+            dispatchReason,
+            iter: iter + 1,
+          }));
+        }
 
         // Diagnostic: log every tool result after execution
         debugLog("[zone-agent-tool-result]", JSON.stringify({
