@@ -7,6 +7,7 @@ import { getRequestContext, withRequestContext } from "./openaiContext.js";
 import { getModelForRole } from "./modelRouting.js";
 import { readMemory, formatMemoryForPrompt } from "../memory/projectMemory.js";
 import { log, debugLog, errorLog } from "../utils/logger.js";
+import { writeCacheLog } from "../utils/commandCacheLog.js";
 import { parseVerificationError } from "../core/parseVerificationError.js";
 import { sanitizeVerificationEnv, strippedEnvKeys } from "../core/buildEnv.js";
 import { buildVerifyDiagnostic } from "../core/buildVerifyDiagnostic.js";
@@ -2105,6 +2106,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           totalSavedMs: commandCacheSnapshot.savedMs,
           cacheSize: commandCacheSnapshot.entries.size,
         }));
+        writeCacheLog(input.repoPath, "[zone-command-cache-summary]", {
+          runId: input.runId,
+          totalHits: commandCacheSnapshot.hits,
+          totalMisses: commandCacheSnapshot.misses,
+          totalSavedMs: commandCacheSnapshot.savedMs,
+          cacheSize: commandCacheSnapshot.entries.size,
+        });
       }
     }
   }

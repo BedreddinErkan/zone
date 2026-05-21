@@ -6,6 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import fg from "fast-glob";
 import { debugLog, errorLog, log } from "../utils/logger.js";
+import { writeCacheLog } from "../utils/commandCacheLog.js";
 import {
   extractDeclaredSymbols,
   locateSymbol,
@@ -1111,6 +1112,13 @@ export async function executeTool(
               prevDurationMs: cached.durationMs,
               cumulativeHits: runCache.hits,
             }));
+            writeCacheLog(repoPath, "[zone-command-cache-hit]", {
+              runId: effectiveRunId,
+              command: command.slice(0, 80),
+              fingerprint,
+              prevDurationMs: cached.durationMs,
+              cumulativeHits: runCache.hits,
+            });
             return { exitCode: cached.exitCode, stdout: cached.stdout, stderr: cached.stderr };
           }
         }
@@ -1151,6 +1159,13 @@ export async function executeTool(
             durationMs,
             cumulativeMisses: runCache.misses,
           }));
+          writeCacheLog(repoPath, "[zone-command-cache-miss]", {
+            runId: effectiveRunId,
+            command: command.slice(0, 80),
+            fingerprint,
+            durationMs,
+            cumulativeMisses: runCache.misses,
+          });
         }
         return { exitCode, stdout, stderr };
       })();
