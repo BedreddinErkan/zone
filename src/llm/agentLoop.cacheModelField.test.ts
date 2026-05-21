@@ -28,6 +28,7 @@ vi.mock("./factory.js", () => ({
 }));
 
 vi.mock("../tools/toolExecutor.js", () => ({
+  clearCommandCacheForRun: vi.fn(() => undefined),
   executeTool: mocks.executeTool,
   withStagingTempFlush: mocks.withStagingTempFlush,
 }));
