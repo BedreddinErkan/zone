@@ -39,7 +39,7 @@ export const TARGETED_FIX_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
   skipPlan: true,
   skipPlanSSE: true,
   skipAudit: true,
-  iterCap: 8,                  // SIMPLE_ADD = 5; +3 covers read+patch+verify+refix without early promote
+  iterCap: 6,                  // SIMPLE_ADD = 5; +1 for post-patch verify headroom
   coachingBudget: 2,
   allowSubagentDispatch: false,
   allowScopeRevision: false,
