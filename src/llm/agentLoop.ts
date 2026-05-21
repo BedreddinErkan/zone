@@ -70,6 +70,7 @@ import {
   runPostToolUseHooks,
   applyAppendOps,
   type PreIterationHook,
+  type PostToolUseHook,
   type PreIterationContext,
   type PostToolUseContext,
 } from "../hooks/postToolUseHook.js";
@@ -2942,6 +2943,31 @@ Example:
   };
   const _internalPreIterHooks: PreIterationHook[] = [softIterWarnHook, midBudgetWarnHook, fileReadManifestHook];
 
+  // Gap 1: internal post-tool-use hooks. Commit 5: LoopDetectorHook (warn case only).
+  // The terminate case remains inline — it needs an early return from the outer function,
+  // which HookResult cannot express without losing the loopDetected metadata.
+  const loopDetectorHook: PostToolUseHook = {
+    name: "loop-detector",
+    priority: 10,
+    shouldRun: (ctx) => ctx.loopDetectorState.status === "warn",
+    run: (ctx) => {
+      input.onStructuredEvent?.({
+        type: "loop_warning_emitted",
+        toolName: ctx.toolName,
+        count: ctx.loopDetectorState.count,
+        title: `Loop warning: \`${ctx.toolName}\` repeated ${ctx.loopDetectorState.count}×`,
+        status: "warning",
+      } as Parameters<NonNullable<typeof input.onStructuredEvent>>[0]);
+      return {
+        kind: "appendContext",
+        content: `\n\n[Zone loop-warning]\nNotice: you have called \`${ctx.toolName}\` with the same arguments ${ctx.loopDetectorState.count} times in the last few iterations. This suggests a loop. Try a different approach — use a different tool, different scope, ask the user for clarification, or finish with a partial explanation.`,
+        target: "responseInput",
+        mode: "append-to-tool",
+      };
+    },
+  };
+  const _internalPostToolUseHooks: PostToolUseHook[] = [loopDetectorHook];
+
   for (let iter = 0; iter < iterationBudget.maxIterationsForRun; iter += 1) {
     completedIterCount = iter + 1;
     debugLog("[zone-agent-iter-start]", {
@@ -3821,29 +3847,8 @@ Example:
         // Phase Q.2: runtime loop detection
         const loopHash = hashToolCall(name, parsedArgs);
         const loopResult = recordAndDetect(detectorState, loopHash);
-        if (loopResult.status === "warn") {
-          input.onStructuredEvent?.({
-            type: "loop_warning_emitted",
-            toolName: name,
-            count: loopResult.count,
-            title: `Loop warning: \`${name}\` repeated ${loopResult.count}×`,
-            status: "warning",
-          } as Parameters<NonNullable<typeof input.onStructuredEvent>>[0]);
-          const loopWarnAppend =
-            `\n\n[Zone loop-warning]\nNotice: you have called \`${name}\` with the same arguments ${loopResult.count} times in the last few iterations. This suggests a loop. Try a different approach — use a different tool, different scope, ask the user for clarification, or finish with a partial explanation.`;
-          let appended = false;
-          for (let ci = responseInput.length - 1; ci >= 0; ci--) {
-            const m = responseInput[ci];
-            if (m.role === "tool") {
-              m.content = (typeof m.content === "string" ? m.content : "") + loopWarnAppend;
-              appended = true;
-              break;
-            }
-          }
-          if (!appended) {
-            responseInput.push({ role: "user" as const, content: loopWarnAppend });
-          }
-        } else if (loopResult.status === "terminate") {
+        // "terminate" stays inline — needs early return; can't be expressed via HookResult.
+        if (loopResult.status === "terminate") {
           input.onStructuredEvent?.({
             type: "loop_detected_terminal",
             toolName: name,
@@ -3854,10 +3859,10 @@ Example:
           return { ...synthesizeLoopDetectedExit(iter + 1, name, loopResult.count), promotedFromArchetype, promotionTrigger, promotedAtIter };
         }
 
-        // Gap 1: external caller post-tool-use hooks (internal hooks wired in commits 5-6).
-        if (input.hooks?.postToolUse?.length) {
-          const postHookEmit = (marker: string, payload: object) => log(marker, JSON.stringify(payload));
-          const postCtx: import("../hooks/postToolUseHook.js").PostToolUseContext = {
+        // Gap 1 post-tool-use runner — site 5 (loop-detector warn) migrated to LoopDetectorHook.
+        {
+          const _allPostHooks = [..._internalPostToolUseHooks, ...(input.hooks?.postToolUse ?? [])];
+          const postCtx: PostToolUseContext = {
             iter,
             runId: input.runId ?? null,
             toolName: name,
@@ -3873,7 +3878,7 @@ Example:
               else debugLog(marker, JSON.stringify(payload));
             },
           };
-          const postMutations = runPostToolUseHooks(input.hooks.postToolUse, postCtx, postHookEmit);
+          const postMutations = runPostToolUseHooks(_allPostHooks, postCtx, (marker, payload) => log(marker, JSON.stringify(payload)));
           if (postMutations.blocked) {
             const msg = `Task aborted: post-tool-use hook blocked the run. Reason: ${postMutations.blockReason ?? "unspecified"}`;
             emitRunBreakdownSummary();
