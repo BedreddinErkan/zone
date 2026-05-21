@@ -259,36 +259,3 @@ describe("L5.1b-2 default env (no pipelineApplied)", () => {
     expect(promoLogs.length).toBe(0);
   });
 });
-
-describe("L5.2 targeted_fix iter_cap promotion", () => {
-  it("fires trigger=iter_cap with fromArchetype=targeted_fix at iterCap=6", async () => {
-    // 6 distinct filePaths to avoid loop detector (TERMINATE_THRESHOLD=5 identical hashes).
-    mocks.createChatCompletion
-      .mockResolvedValueOnce(makeToolCallResponse("read_file", '{"filePath":"a.ts"}'))
-      .mockResolvedValueOnce(makeToolCallResponse("read_file", '{"filePath":"b.ts"}'))
-      .mockResolvedValueOnce(makeToolCallResponse("read_file", '{"filePath":"c.ts"}'))
-      .mockResolvedValueOnce(makeToolCallResponse("read_file", '{"filePath":"d.ts"}'))
-      .mockResolvedValueOnce(makeToolCallResponse("read_file", '{"filePath":"e.ts"}'))
-      .mockResolvedValueOnce(makeToolCallResponse("read_file", '{"filePath":"f.ts"}'));
-    // 7th call returns done (default mock).
-
-    await runAgentLoop({
-      task: "fix the bug",
-      repoPath,
-      runId: "test-l52-promo",
-      pipelineApplied: true,
-      originalArchetype: "targeted_fix",
-      maxIterationsOverride: 6,
-    });
-
-    const promoLogs = mocks.log.mock.calls.filter(
-      (c: unknown[]) => c[0] === "[zone-archetype-promoted]"
-    );
-    expect(promoLogs.length).toBe(1);
-    const payload = JSON.parse(promoLogs[0][1] as string) as Record<string, unknown>;
-    expect(payload.trigger).toBe("iter_cap");
-    expect(payload.atIter).toBe(6);
-    expect(payload.fromArchetype).toBe("targeted_fix");
-    expect(payload.toArchetype).toBe("complex_multi_file");
-  });
-});

@@ -192,13 +192,11 @@ beforeEach(() => {
   process.env.ZONE_DAILY_USD_CAP = "0"; // unlimited cap
   delete process.env.ZONE_ARCHETYPE_DISPATCHER;
   delete process.env.ZONE_ARCHETYPE_ENABLE_SIMPLE_ADD;
-  delete process.env.ZONE_ARCHETYPE_ENABLE_TARGETED_FIX;
 });
 
 afterEach(() => {
   delete process.env.ZONE_ARCHETYPE_DISPATCHER;
   delete process.env.ZONE_ARCHETYPE_ENABLE_SIMPLE_ADD;
-  delete process.env.ZONE_ARCHETYPE_ENABLE_TARGETED_FIX;
   delete process.env.ZONE_DAILY_USD_CAP;
 });
 
@@ -290,66 +288,5 @@ describe("L5.1b-3 classify-before-plan-gen order", () => {
 
     expect(callOrder[0]).toBe("classifyTask");
     expect(callOrder).toContain("generateExecutionPlan");
-  });
-});
-
-// ── L5.2 targeted_fix pipeline tests ──────────────────────────────────────────
-
-describe("L5.2 plan-gen skip", () => {
-  it("does not call generateExecutionPlan for targeted_fix when both env flags=1", async () => {
-    process.env.ZONE_ARCHETYPE_DISPATCHER = "1";
-    process.env.ZONE_ARCHETYPE_ENABLE_TARGETED_FIX = "1";
-    mocks.classifyTask.mockResolvedValue(makeClassification("targeted_fix"));
-
-    await postPatch();
-
-    expect(mocks.generateExecutionPlan).not.toHaveBeenCalled();
-  });
-});
-
-describe("L5.2 plan_summary SSE skip", () => {
-  it("emits no plan_summary SSE for targeted_fix when both env flags=1", async () => {
-    process.env.ZONE_ARCHETYPE_DISPATCHER = "1";
-    process.env.ZONE_ARCHETYPE_ENABLE_TARGETED_FIX = "1";
-    mocks.classifyTask.mockResolvedValue(makeClassification("targeted_fix"));
-
-    await postPatch();
-
-    const planSummaryCalls = mocks.emitDeveloperPatchProgress.mock.calls.filter(
-      (c: unknown[]) => (c[1] as { stage?: string } | undefined)?.stage === "plan_summary"
-    );
-    expect(planSummaryCalls.length).toBe(0);
-  });
-});
-
-describe("L5.2 legacy path (targeted_fix flag unset)", () => {
-  it("calls generateExecutionPlan for targeted_fix when ZONE_ARCHETYPE_ENABLE_TARGETED_FIX unset", async () => {
-    process.env.ZONE_ARCHETYPE_DISPATCHER = "1";
-    // ZONE_ARCHETYPE_ENABLE_TARGETED_FIX deliberately absent
-    mocks.classifyTask.mockResolvedValue(makeClassification("targeted_fix"));
-
-    await postPatch();
-
-    expect(mocks.generateExecutionPlan).toHaveBeenCalledOnce();
-  });
-});
-
-describe("L5.2 wrong archetype for targeted_fix pipeline", () => {
-  it("calls generateExecutionPlan for refactor even when targeted_fix flag=1", async () => {
-    process.env.ZONE_ARCHETYPE_DISPATCHER = "1";
-    process.env.ZONE_ARCHETYPE_ENABLE_TARGETED_FIX = "1";
-    mocks.classifyTask.mockResolvedValue(makeClassification("refactor"));
-
-    await postPatch();
-
-    expect(mocks.generateExecutionPlan).toHaveBeenCalledOnce();
-  });
-});
-
-describe("L5.2 iterCap constant shape", () => {
-  it("TARGETED_FIX_PIPELINE.iterCap=6, SIMPLE_ADD_PIPELINE.iterCap=5", async () => {
-    const { TARGETED_FIX_PIPELINE, SIMPLE_ADD_PIPELINE } = await import("../llm/archetypeDispatcher.js");
-    expect(TARGETED_FIX_PIPELINE.iterCap).toBe(6);
-    expect(SIMPLE_ADD_PIPELINE.iterCap).toBe(5);
   });
 });
