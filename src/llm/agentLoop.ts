@@ -217,6 +217,8 @@ export interface AgentLoopInput {
     preIteration?: import("../hooks/postToolUseHook.js").PreIterationHook[];
     postToolUse?: import("../hooks/postToolUseHook.js").PostToolUseHook[];
   };
+  /** Gap 3: additional HistoryProcessor configs appended to the default pipeline. */
+  processors?: import("./history/types.js").ProcessorConfig[];
 }
 
 export type VerificationReason =
