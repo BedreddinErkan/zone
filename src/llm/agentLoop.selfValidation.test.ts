@@ -9,12 +9,25 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { resetToolExecutorMock } from "../test/fixtures/toolExecutorMock.js";
+
 // ── hoisted mocks ────────────────────────────────────────────────────────────
+
+const toolExecutorMock = vi.hoisted(() => ({
+  executeTool: vi.fn(),
+  withStagingTempFlush: vi.fn(),
+  clearCommandCacheForRun: vi.fn(),
+  clearCommandCacheForTest: vi.fn(),
+  clearOutlineCacheForTest: vi.fn(),
+  isMemoizableCommand: vi.fn(),
+  computeCommandFingerprint: vi.fn(),
+  truncateCommandOutput: vi.fn(),
+  resolveAgentPath: vi.fn(),
+  resolveRunCommandCwd: vi.fn(),
+}));
 
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
-  executeTool: vi.fn(),
-  withStagingTempFlush: vi.fn(),
   log: vi.fn(),
 }));
 
@@ -25,11 +38,7 @@ vi.mock("./factory.js", () => ({
   })),
 }));
 
-vi.mock("../tools/toolExecutor.js", () => ({
-  clearCommandCacheForRun: vi.fn(() => undefined),
-  executeTool: mocks.executeTool,
-  withStagingTempFlush: mocks.withStagingTempFlush,
-}));
+vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
 vi.mock("../utils/logger.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../utils/logger.js")>();
@@ -69,9 +78,7 @@ let repoPath: string;
 
 beforeEach(() => {
   repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "zone-sv-sum-"));
-  mocks.withStagingTempFlush.mockImplementation(
-    (_staging: unknown, body: () => Promise<unknown>) => body()
-  );
+  resetToolExecutorMock(toolExecutorMock);
 });
 
 afterEach(() => {
@@ -92,7 +99,7 @@ describe("[zone-self-validation-summary] emission", () => {
   it("emits summary with incremented counts when toolExecutor reports rejects", async () => {
     // Simulate a run where executeTool mutates selfValidationCounts:
     // read-before-patch fires once, then agent reads and patches successfully.
-    mocks.executeTool.mockImplementation(
+    toolExecutorMock.executeTool.mockImplementation(
       async (
         _name: string,
         _args: Record<string, unknown>,
@@ -144,7 +151,7 @@ describe("[zone-self-validation-summary] emission", () => {
 
   it("aggregates latency from multiple apply_patch tsc checks across iterations", async () => {
     let callCount = 0;
-    mocks.executeTool.mockImplementation(
+    toolExecutorMock.executeTool.mockImplementation(
       async (
         _name: string,
         _args: Record<string, unknown>,
@@ -197,7 +204,7 @@ describe("[zone-self-validation-summary] emission", () => {
 describe("agentLoop filesReadThisRun plumbing (V.1)", () => {
   it("passes filesReadThisRun to executeTool after successful read_file", async () => {
     let capturedFilesRead: ReadonlySet<string> | undefined;
-    mocks.executeTool.mockImplementation(
+    toolExecutorMock.executeTool.mockImplementation(
       async (
         name: string,
         args: Record<string, unknown>,
@@ -262,7 +269,7 @@ describe("agentLoop filesReadThisRun plumbing (V.1)", () => {
 
   it("does not include filePath in filesReadThisRun when read_file fails", async () => {
     let capturedFilesRead: ReadonlySet<string> | undefined;
-    mocks.executeTool.mockImplementation(
+    toolExecutorMock.executeTool.mockImplementation(
       async (
         name: string,
         args: Record<string, unknown>,
@@ -312,7 +319,7 @@ describe("agentLoop filesReadThisRun plumbing (V.1)", () => {
 
   it("filesReadThisRun is a Set passed by reference — accumulates across iters", async () => {
     const capturedSets: ReadonlySet<string>[] = [];
-    mocks.executeTool.mockImplementation(
+    toolExecutorMock.executeTool.mockImplementation(
       async (
         name: string,
         args: Record<string, unknown>,

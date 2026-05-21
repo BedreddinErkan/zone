@@ -2,11 +2,23 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetToolExecutorMock } from "../test/fixtures/toolExecutorMock.js";
+
+const toolExecutorMock = vi.hoisted(() => ({
+  executeTool: vi.fn(),
+  withStagingTempFlush: vi.fn(),
+  clearCommandCacheForRun: vi.fn(),
+  clearCommandCacheForTest: vi.fn(),
+  clearOutlineCacheForTest: vi.fn(),
+  isMemoizableCommand: vi.fn(),
+  computeCommandFingerprint: vi.fn(),
+  truncateCommandOutput: vi.fn(),
+  resolveAgentPath: vi.fn(),
+  resolveRunCommandCwd: vi.fn(),
+}));
 
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
-  executeTool: vi.fn(),
-  withStagingTempFlush: vi.fn(),
   log: vi.fn(),
 }));
 
@@ -17,11 +29,7 @@ vi.mock("./factory.js", () => ({
   })),
 }));
 
-vi.mock("../tools/toolExecutor.js", () => ({
-  clearCommandCacheForRun: vi.fn(() => undefined),
-  executeTool: mocks.executeTool,
-  withStagingTempFlush: mocks.withStagingTempFlush,
-}));
+vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
 vi.mock("../utils/logger.js", () => ({
   log: mocks.log,
@@ -59,12 +67,9 @@ let repoPath: string;
 
 beforeEach(() => {
   repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "zone-promotion-"));
+  resetToolExecutorMock(toolExecutorMock);
   mocks.createChatCompletion.mockReset();
-  mocks.executeTool.mockReset();
-  mocks.withStagingTempFlush.mockReset();
   mocks.log.mockReset();
-  mocks.withStagingTempFlush.mockImplementation(async (fn: () => Promise<void>) => fn());
-  mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
   mocks.createChatCompletion.mockResolvedValue(makeDoneResponse());
 });
 
@@ -114,7 +119,7 @@ describe("L5.1b-2 rollback_x2 promotion trigger", () => {
       .mockResolvedValueOnce(makeToolCallResponse("apply_patch", '{"filePath":"x.ts","blocks":[]}', "call_3"));
     // 4th call returns done (default)
 
-    mocks.executeTool.mockImplementation(async (name: string) => {
+    toolExecutorMock.executeTool.mockImplementation(async (name: string) => {
       if (name === "apply_patch") {
         return { success: true, output: "APPLY_ROLLED_BACK: test rollback" };
       }
@@ -149,7 +154,7 @@ describe("L5.1b-2 coaching_exhausted promotion trigger", () => {
       .mockResolvedValueOnce(patchResp); // iter=1: fail → exhausted → promotion
     // 3rd call returns done (default)
 
-    mocks.executeTool.mockResolvedValue({ success: false, output: "test patch error" });
+    toolExecutorMock.executeTool.mockResolvedValue({ success: false, output: "test patch error" });
 
     await runAgentLoop({
       task: "add a helper function",
@@ -241,7 +246,7 @@ describe("L5.1b-2 default env (no pipelineApplied)", () => {
       .mockResolvedValueOnce(makeToolCallResponse("apply_patch", '{"filePath":"x.ts","blocks":[]}', "c2"))
       .mockResolvedValueOnce(makeToolCallResponse("apply_patch", '{"filePath":"x.ts","blocks":[]}', "c3"));
 
-    mocks.executeTool.mockImplementation(async (name: string) => {
+    toolExecutorMock.executeTool.mockImplementation(async (name: string) => {
       if (name === "apply_patch") {
         return { success: true, output: "APPLY_ROLLED_BACK: no pipeline" };
       }
