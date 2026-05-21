@@ -68,6 +68,79 @@ export function clearOutlineCacheForTest(): void {
   outlineCache.clear();
 }
 
+// --- Command memoization (Phase 2) ---
+
+const MEMOIZABLE_COMMAND_PATTERNS: RegExp[] = [
+  /^npm\s+(run\s+)?test\b/,
+  /^npm\s+run\s+typecheck\b/,
+  /^npm\s+run\s+build\b/,
+  /^npx\s+tsc\b/,
+  /^tsc\b/,
+  /^npx\s+vitest\b/,
+  /^vitest\b/,
+];
+
+export function isMemoizableCommand(cmd: string): boolean {
+  return MEMOIZABLE_COMMAND_PATTERNS.some((p) => p.test(cmd.trim()));
+}
+
+export function computeCommandFingerprint(
+  cmd: string,
+  stagingFiles: Map<string, string> | undefined,
+): string {
+  const sortedEntries = Array.from((stagingFiles ?? new Map()).entries()).sort(
+    ([a], [b]) => a.localeCompare(b),
+  );
+  const stagingHash = createHash("sha256")
+    .update(JSON.stringify(sortedEntries))
+    .digest("hex")
+    .slice(0, 16);
+  return createHash("sha256")
+    .update(`${cmd.trim()}|${stagingHash}`)
+    .digest("hex")
+    .slice(0, 16);
+}
+
+interface CommandCacheEntry {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  timestamp: number;
+}
+
+interface PerRunCache {
+  entries: Map<string, CommandCacheEntry>;
+  hits: number;
+  misses: number;
+  savedMs: number;
+}
+
+const runCommandCaches = new Map<string, PerRunCache>();
+
+function getOrCreateRunCache(runId: string): PerRunCache {
+  if (!runCommandCaches.has(runId)) {
+    runCommandCaches.set(runId, {
+      entries: new Map(),
+      hits: 0,
+      misses: 0,
+      savedMs: 0,
+    });
+  }
+  return runCommandCaches.get(runId)!;
+}
+
+export function clearCommandCacheForRun(runId: string): PerRunCache | undefined {
+  const cache = runCommandCaches.get(runId);
+  runCommandCaches.delete(runId);
+  return cache;
+}
+
+/** Exported for test isolation only — do not call in production code. */
+export function clearCommandCacheForTest(): void {
+  runCommandCaches.clear();
+}
+
 export type ResolveCwdResult =
   | { ok: true; cwd: string }
   | { ok: false; error: string };
@@ -1021,29 +1094,66 @@ export async function executeTool(
         hasAbortSignal: !!input?.abortSignal,
       });
 
-      let stdout = "";
-      let stderr = "";
-      let commandExitCode = 0;
-      try {
-        const result = await withStagingTempFlush(input?.stagingFiles, async () => {
-          return await execAsync(command, execOptions);
-        });
-        stdout = result.stdout;
-        stderr = result.stderr;
-        console.log(
-          `[zone-verify] cmd="${command.slice(0, 80)}" cwd="${cwd}" exitCode=0 stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
-        );
-      } catch (err) {
-        const code = Number((err as { code?: unknown }).code);
-        commandExitCode = Number.isFinite(code) && code !== 0 ? code : 1;
-        console.log(
-          `[zone-verify] cmd="${command.slice(0, 80)}" cwd="${cwd}" exitCode=${commandExitCode} stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
-        );
-        // Capture stdout/stderr from the exec error so the agent sees actual
-        // command output rather than just the Node error message.
-        stdout = String((err as { stdout?: unknown }).stdout ?? "");
-        stderr = String((err as { stderr?: unknown }).stderr ?? "");
-      }
+      const effectiveRunId = input?.subagent?.parentRunId ?? input?.runId ?? "anon";
+      const memoizable = isMemoizableCommand(command);
+      const { exitCode: commandExitCode, stdout, stderr } = await (async () => {
+        if (memoizable) {
+          const runCache = getOrCreateRunCache(effectiveRunId);
+          const fingerprint = computeCommandFingerprint(command, input?.stagingFiles);
+          const cached = runCache.entries.get(fingerprint);
+          if (cached) {
+            runCache.hits++;
+            runCache.savedMs += cached.durationMs;
+            log("[zone-command-cache-hit]", JSON.stringify({
+              runId: effectiveRunId,
+              command: command.slice(0, 80),
+              fingerprint,
+              prevDurationMs: cached.durationMs,
+              cumulativeHits: runCache.hits,
+            }));
+            return { exitCode: cached.exitCode, stdout: cached.stdout, stderr: cached.stderr };
+          }
+        }
+        let stdout = "";
+        let stderr = "";
+        let exitCode = 0;
+        const t0 = Date.now();
+        try {
+          const result = await withStagingTempFlush(input?.stagingFiles, async () => {
+            return await execAsync(command, execOptions);
+          });
+          stdout = result.stdout;
+          stderr = result.stderr;
+          console.log(
+            `[zone-verify] cmd="${command.slice(0, 80)}" cwd="${cwd}" exitCode=0 stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
+          );
+        } catch (err) {
+          const code = Number((err as { code?: unknown }).code);
+          exitCode = Number.isFinite(code) && code !== 0 ? code : 1;
+          console.log(
+            `[zone-verify] cmd="${command.slice(0, 80)}" cwd="${cwd}" exitCode=${exitCode} stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
+          );
+          // Capture stdout/stderr from the exec error so the agent sees actual
+          // command output rather than just the Node error message.
+          stdout = String((err as { stdout?: unknown }).stdout ?? "");
+          stderr = String((err as { stderr?: unknown }).stderr ?? "");
+        }
+        const durationMs = Date.now() - t0;
+        if (memoizable) {
+          const runCache = getOrCreateRunCache(effectiveRunId);
+          const fingerprint = computeCommandFingerprint(command, input?.stagingFiles);
+          runCache.entries.set(fingerprint, { exitCode, stdout, stderr, durationMs, timestamp: Date.now() });
+          runCache.misses++;
+          log("[zone-command-cache-miss]", JSON.stringify({
+            runId: effectiveRunId,
+            command: command.slice(0, 80),
+            fingerprint,
+            durationMs,
+            cumulativeMisses: runCache.misses,
+          }));
+        }
+        return { exitCode, stdout, stderr };
+      })();
 
       const combined = [stdout, stderr].filter(Boolean).join("\n") || "(no output)";
 

@@ -48,6 +48,7 @@ import { validateTodoWriteArgs } from "../tools/todoWriteValidate.js";
 import {
   executeTool,
   withStagingTempFlush,
+  clearCommandCacheForRun,
   type ToolResult,
 } from "../tools/toolExecutor.js";
 import type { ProjectFramework } from "../repo/detectFramework.js";
@@ -2095,6 +2096,16 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   } finally {
     if (!input.subagent && input.runId) {
       resetSubagentCallCount(input.runId);
+      const commandCacheSnapshot = clearCommandCacheForRun(input.runId);
+      if (commandCacheSnapshot && (commandCacheSnapshot.hits > 0 || commandCacheSnapshot.misses > 0)) {
+        log("[zone-command-cache-summary]", JSON.stringify({
+          runId: input.runId,
+          totalHits: commandCacheSnapshot.hits,
+          totalMisses: commandCacheSnapshot.misses,
+          totalSavedMs: commandCacheSnapshot.savedMs,
+          cacheSize: commandCacheSnapshot.entries.size,
+        }));
+      }
     }
   }
 }
