@@ -11,12 +11,25 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { resetToolExecutorMock } from "../test/fixtures/toolExecutorMock.js";
+
 // ── hoisted mocks ────────────────────────────────────────────────────────────
+
+const toolExecutorMock = vi.hoisted(() => ({
+  executeTool: vi.fn(),
+  withStagingTempFlush: vi.fn(),
+  clearCommandCacheForRun: vi.fn(),
+  clearCommandCacheForTest: vi.fn(),
+  clearOutlineCacheForTest: vi.fn(),
+  isMemoizableCommand: vi.fn(),
+  computeCommandFingerprint: vi.fn(),
+  truncateCommandOutput: vi.fn(),
+  resolveAgentPath: vi.fn(),
+  resolveRunCommandCwd: vi.fn(),
+}));
 
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
-  executeTool: vi.fn(),
-  withStagingTempFlush: vi.fn(),
 }));
 
 vi.mock("./factory.js", () => ({
@@ -26,11 +39,7 @@ vi.mock("./factory.js", () => ({
   })),
 }));
 
-vi.mock("../tools/toolExecutor.js", () => ({
-  clearCommandCacheForRun: vi.fn(() => undefined),
-  executeTool: mocks.executeTool,
-  withStagingTempFlush: mocks.withStagingTempFlush,
-}));
+vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
 // ── import under test ────────────────────────────────────────────────────────
 
@@ -81,9 +90,9 @@ let repoPath: string;
 
 beforeEach(() => {
   repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "zone-loop-detect-"));
-  vi.clearAllMocks();
-  mocks.executeTool.mockResolvedValue({ success: true, output: "// file content" });
-  mocks.withStagingTempFlush.mockResolvedValue(undefined);
+  resetToolExecutorMock(toolExecutorMock);
+  toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "// file content" });
+  toolExecutorMock.withStagingTempFlush.mockResolvedValue(undefined);
 });
 
 afterEach(() => {

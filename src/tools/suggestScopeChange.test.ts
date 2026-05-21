@@ -7,12 +7,25 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { ZONE_TOOLS } from "./toolDefinitions.js";
 
+import { resetToolExecutorMock } from "../test/fixtures/toolExecutorMock.js";
+
 // ── hoisted mocks ─────────────────────────────────────────────────────────────
+
+const toolExecutorMock = vi.hoisted(() => ({
+  executeTool: vi.fn(),
+  withStagingTempFlush: vi.fn(),
+  clearCommandCacheForRun: vi.fn(),
+  clearCommandCacheForTest: vi.fn(),
+  clearOutlineCacheForTest: vi.fn(),
+  isMemoizableCommand: vi.fn(),
+  computeCommandFingerprint: vi.fn(),
+  truncateCommandOutput: vi.fn(),
+  resolveAgentPath: vi.fn(),
+  resolveRunCommandCwd: vi.fn(),
+}));
 
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
-  executeTool: vi.fn(),
-  withStagingTempFlush: vi.fn(),
   log: vi.fn(),
   debugLog: vi.fn(),
 }));
@@ -24,10 +37,7 @@ vi.mock("../llm/factory.js", () => ({
   })),
 }));
 
-vi.mock("./toolExecutor.js", () => ({
-  executeTool: mocks.executeTool,
-  withStagingTempFlush: mocks.withStagingTempFlush,
-}));
+vi.mock("./toolExecutor.js", () => toolExecutorMock);
 
 vi.mock("../utils/logger.js", () => ({
   log: mocks.log,
@@ -94,8 +104,7 @@ describe("suggest_scope_change — handler via investigateScope", () => {
   beforeEach(() => {
     mocks.log.mockClear();
     mocks.debugLog.mockClear();
-    mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    resetToolExecutorMock(toolExecutorMock);
   });
 
   it("captures agentSuggestedRevision when agent calls suggest_scope_change", async () => {
@@ -170,8 +179,7 @@ describe("suggest_scope_change — no-op guard in execute mode", () => {
   beforeEach(() => {
     mocks.log.mockClear();
     mocks.debugLog.mockClear();
-    mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    resetToolExecutorMock(toolExecutorMock);
   });
 
   it("emits [zone-tool-misuse] debugLog when called in patch mode", async () => {

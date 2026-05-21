@@ -5,12 +5,25 @@
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
+import { resetToolExecutorMock } from "../test/fixtures/toolExecutorMock.js";
+
 // ── hoisted mocks ─────────────────────────────────────────────────────────────
+
+const toolExecutorMock = vi.hoisted(() => ({
+  executeTool: vi.fn(),
+  withStagingTempFlush: vi.fn(),
+  clearCommandCacheForRun: vi.fn(),
+  clearCommandCacheForTest: vi.fn(),
+  clearOutlineCacheForTest: vi.fn(),
+  isMemoizableCommand: vi.fn(),
+  computeCommandFingerprint: vi.fn(),
+  truncateCommandOutput: vi.fn(),
+  resolveAgentPath: vi.fn(),
+  resolveRunCommandCwd: vi.fn(),
+}));
 
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
-  executeTool: vi.fn(),
-  withStagingTempFlush: vi.fn(),
   log: vi.fn(),
   debugLog: vi.fn(),
 }));
@@ -22,11 +35,7 @@ vi.mock("./factory.js", () => ({
   })),
 }));
 
-vi.mock("../tools/toolExecutor.js", () => ({
-  clearCommandCacheForRun: vi.fn(() => undefined),
-  executeTool: mocks.executeTool,
-  withStagingTempFlush: mocks.withStagingTempFlush,
-}));
+vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
 vi.mock("../utils/logger.js", () => ({
   log: mocks.log,
@@ -78,8 +87,8 @@ describe("runInvestigationFlow — prompt injection", () => {
     mocks.createChatCompletion.mockResolvedValueOnce(
       textResponse("## Answer\nFound nothing notable.")
     );
-    mocks.executeTool.mockResolvedValue({ success: true, output: "" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "" });
+    toolExecutorMock.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
 
     await runInvestigationFlow({
       task: "Test prompt injection",
@@ -97,8 +106,8 @@ describe("runInvestigationFlow — prompt injection", () => {
     mocks.createChatCompletion.mockResolvedValueOnce(
       textResponse("## Answer\nNothing to report.")
     );
-    mocks.executeTool.mockResolvedValue({ success: true, output: "" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "" });
+    toolExecutorMock.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
 
     await runInvestigationFlow({
       task: "Test tool exclusion in prompt",
@@ -120,8 +129,8 @@ describe("runInvestigationFlow — natural termination", () => {
         "## getRunCost References\n\n- `src/usage/usageTracker.ts:220`\n- `src/api/server.ts:2790`\n- `src/api/server.ts:3126`"
       )
     );
-    mocks.executeTool.mockResolvedValue({ success: true, output: "" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "" });
+    toolExecutorMock.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
 
     const result = await runInvestigationFlow({
       task: "which files reference getRunCost?",
@@ -143,8 +152,8 @@ describe("runInvestigationFlow — natural termination", () => {
       .mockResolvedValueOnce(
         textResponse("## Answer\n- `src/usage/usageTracker.ts:220` — definition\n- `src/api/server.ts:2790`")
       );
-    mocks.executeTool.mockResolvedValue({ success: true, output: "src/usage/usageTracker.ts:220: export function getRunCost..." });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "src/usage/usageTracker.ts:220: export function getRunCost..." });
+    toolExecutorMock.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
 
     const result = await runInvestigationFlow({
       task: "which files reference getRunCost?",
@@ -161,8 +170,8 @@ describe("runInvestigationFlow — natural termination", () => {
     mocks.createChatCompletion.mockResolvedValueOnce(
       textResponse("## Summary\nNo files found.")
     );
-    mocks.executeTool.mockResolvedValue({ success: true, output: "" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "" });
+    toolExecutorMock.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
 
     const result = await runInvestigationFlow({
       task: "Find any file",
@@ -178,9 +187,10 @@ describe("runInvestigationFlow — natural termination", () => {
 
 describe("runInvestigationFlow — zone-investigation-summary telemetry (Phase D.1)", () => {
   beforeEach(() => {
+    resetToolExecutorMock(toolExecutorMock);
     mocks.log.mockClear();
-    mocks.executeTool.mockResolvedValue({ success: true, output: "" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "" });
+    toolExecutorMock.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
   });
 
   it("emits [zone-investigation-summary] log after each run", async () => {

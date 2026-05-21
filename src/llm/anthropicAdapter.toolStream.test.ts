@@ -15,12 +15,25 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { resetToolExecutorMock } from "../test/fixtures/toolExecutorMock.js";
+
 // ── hoisted mocks ─────────────────────────────────────────────────────────────
+
+const toolExecutorMock = vi.hoisted(() => ({
+  executeTool: vi.fn(),
+  withStagingTempFlush: vi.fn(),
+  clearCommandCacheForRun: vi.fn(),
+  clearCommandCacheForTest: vi.fn(),
+  clearOutlineCacheForTest: vi.fn(),
+  isMemoizableCommand: vi.fn(),
+  computeCommandFingerprint: vi.fn(),
+  truncateCommandOutput: vi.fn(),
+  resolveAgentPath: vi.fn(),
+  resolveRunCommandCwd: vi.fn(),
+}));
 
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
-  executeTool: vi.fn(),
-  withStagingTempFlush: vi.fn(),
   log: vi.fn(),
 }));
 
@@ -31,11 +44,7 @@ vi.mock("./factory.js", () => ({
   })),
 }));
 
-vi.mock("../tools/toolExecutor.js", () => ({
-  clearCommandCacheForRun: vi.fn(() => undefined),
-  executeTool: mocks.executeTool,
-  withStagingTempFlush: mocks.withStagingTempFlush,
-}));
+vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
 vi.mock("../utils/logger.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../utils/logger.js")>();
@@ -106,8 +115,8 @@ function setupTwoTurnRun(firstCallMock: ReturnType<typeof vi.fn>) {
   mocks.createChatCompletion
     .mockImplementationOnce(firstCallMock)
     .mockResolvedValueOnce(textResponse("Done."));
-  mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
-  mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+  toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "ok" });
+  toolExecutorMock.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -116,6 +125,7 @@ describe("Phase F1 — agentLoop onToolInputStream wiring", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    resetToolExecutorMock(toolExecutorMock);
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -127,8 +137,8 @@ describe("Phase F1 — agentLoop onToolInputStream wiring", () => {
       capturedOptions.push(options as { onToolArgumentsDelta?: unknown });
       return textResponse("Done.");
     });
-    mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "ok" });
+    toolExecutorMock.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
 
     await runAgentLoop({
       task: "test",
@@ -147,8 +157,8 @@ describe("Phase F1 — agentLoop onToolInputStream wiring", () => {
       capturedOptions.push(options as { onToolArgumentsDelta?: unknown });
       return textResponse("Done.");
     });
-    mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "ok" });
+    toolExecutorMock.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
 
     await runAgentLoop({ task: "test", repoPath: "/tmp" });
 
@@ -264,8 +274,8 @@ describe("Phase F1 — agentLoop onToolInputStream wiring", () => {
     mocks.createChatCompletion
       .mockImplementationOnce(twoCallsMock)
       .mockResolvedValueOnce(textResponse("All done."));
-    mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "ok" });
+    toolExecutorMock.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
 
     await runAgentLoop({
       task: "patch two files",
@@ -284,6 +294,7 @@ describe("Phase F1.4 — worker subagent tool input streaming", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    resetToolExecutorMock(toolExecutorMock);
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -364,8 +375,8 @@ describe("Phase F1.4 — worker subagent tool input streaming", () => {
       capturedMessages.push(p.messages);
       return textResponse("done");
     });
-    mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "ok" });
+    toolExecutorMock.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
 
     await runAgentLoop({
       task: "Continue: complete the rename.",
@@ -394,8 +405,8 @@ describe("Phase F1.4 — worker subagent tool input streaming", () => {
       capturedMessages.push(p.messages);
       return textResponse("done");
     });
-    mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "ok" });
+    toolExecutorMock.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
 
     await runAgentLoop({
       task: "Just a regular task.",
@@ -416,8 +427,8 @@ describe("Phase F1.4 — worker subagent tool input streaming", () => {
       capturedMessages.push(p.messages);
       return textResponse("done");
     });
-    mocks.executeTool.mockResolvedValue({ success: true, output: "ok" });
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "ok" });
+    toolExecutorMock.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
 
     await runAgentLoop({
       task: "Empty prior summary path.",
@@ -434,13 +445,13 @@ describe("Phase F1.4 — worker subagent tool input streaming", () => {
     // Capture the input object passed to executeTool — the field must contain
     // the same callback the parent provided, so the worker run can rewire it.
     const capturedInputs: Array<Record<string, unknown>> = [];
-    mocks.executeTool.mockImplementation(
+    toolExecutorMock.executeTool.mockImplementation(
       async (_name: string, _args: unknown, _repo: string, _onProgress: unknown, inp: unknown) => {
         capturedInputs.push((inp as Record<string, unknown>) ?? {});
         return { success: true, output: "ok" };
       }
     );
-    mocks.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+    toolExecutorMock.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
     // Use read_file — apply_patch has a read-first guard that short-circuits
     // executeTool, while read_file goes straight through. Either way, the
     // assertion is the same: agentLoop's executeTool input carries
