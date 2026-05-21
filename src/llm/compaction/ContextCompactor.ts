@@ -10,7 +10,7 @@ import {
   type ToolCallRecord,
 } from "./types.js";
 
-const MANIFEST_MAX_ENTRIES = 20;
+export const MANIFEST_MAX_ENTRIES = 20;
 
 /**
  * Build a deterministic file-read manifest from CANDIDATE tool turns (J.3).
@@ -81,7 +81,14 @@ export function buildFileReadManifest(
     }
   }
 
-  const allEntries = Array.from(entries.values());
+  // Alphabetical sort before slice for deterministic top-N selection.
+  // Manifest text serializes only file paths — no read counts, no line ranges,
+  // no truncation footer. Keeps the manifest hash invariant across re-reads of
+  // the same file set (cache breakpoint #2 stability). `truncated` boolean still
+  // returned for telemetry; per-file readCount + lineRange still in structuredEntries.
+  const allEntries = Array.from(entries.values()).sort((a, b) =>
+    a.path.localeCompare(b.path)
+  );
   const truncated = allEntries.length > MANIFEST_MAX_ENTRIES;
   const finalEntries = allEntries.slice(0, MANIFEST_MAX_ENTRIES);
 
@@ -89,21 +96,9 @@ export function buildFileReadManifest(
     return { manifest: "", truncated: false, entryCount: 0, structuredEntries: [] };
   }
 
-  const lines = finalEntries.map((e) => {
-    const rangeStrs = e.ranges.map((r) => {
-      if (r.startLine !== null && r.endLine !== null) {
-        const range = `lines ${r.startLine}-${r.endLine}`;
-        return r.readCount > 1 ? `${range} (read ${r.readCount}x)` : range;
-      }
-      return r.readCount > 1 ? `(full file, read ${r.readCount}x)` : "(full file)";
-    });
-    return `- ${e.path} ${rangeStrs.join(", ")}`;
-  });
-
-  let manifest = "Files read earlier this session (compacted from history):\n" + lines.join("\n");
-  if (truncated) {
-    manifest += `\n(... ${allEntries.length - MANIFEST_MAX_ENTRIES} more entries truncated)`;
-  }
+  const lines = finalEntries.map((e) => `- ${e.path}`);
+  const manifest =
+    "Files read earlier this session (re-read only if modified):\n" + lines.join("\n");
 
   // Build structured entries for telemetry: per-file total readCount + dominant lineRange.
   const structuredEntries: ManifestEntry[] = finalEntries.map((e) => {

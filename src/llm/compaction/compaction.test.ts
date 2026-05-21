@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ContextCompactor, buildFileReadManifest } from "./ContextCompactor.js";
+import { ContextCompactor, buildFileReadManifest, MANIFEST_MAX_ENTRIES } from "./ContextCompactor.js";
 import { classifyTurns } from "./classifyTurns.js";
 import {
   TurnClass,
@@ -689,32 +689,36 @@ describe("Phase J.3 — buildFileReadManifest", () => {
       { path: "src/bar.ts", startLine: 50, endLine: 150 },
     ]);
     const result = buildFileReadManifest(turns, allCandidateClassifications(turns));
-    expect(result.manifest).toContain("src/foo.ts lines 1-100");
-    expect(result.manifest).toContain("src/bar.ts lines 50-150");
+    expect(result.manifest).toContain("- src/foo.ts");
+    expect(result.manifest).toContain("- src/bar.ts");
     expect(result.entryCount).toBe(2);
     expect(result.truncated).toBe(false);
   });
 
-  it("dedupes same-range reads into 'read Nx' notation", () => {
+  it("dedupes same-file reads into single manifest entry", () => {
     const turns = makeReadFileTurns([
       { path: "src/foo.ts", startLine: 1, endLine: 100 },
       { path: "src/foo.ts", startLine: 1, endLine: 100 },
     ]);
     const result = buildFileReadManifest(turns, allCandidateClassifications(turns));
-    expect(result.manifest).toContain("(read 2x)");
+    // read count tracked in structuredEntries (not in manifest text)
+    expect(result.structuredEntries.find((e) => e.filePath === "src/foo.ts")?.readCount).toBe(2);
     const fileLines = result.manifest.split("\n").filter((l) => l.includes("src/foo.ts"));
     expect(fileLines).toHaveLength(1);  // one manifest line for the file
   });
 
-  it("keeps distinct ranges for the same file as separate entries", () => {
+  it("aggregates distinct ranges of the same file into one manifest entry", () => {
     const turns = makeReadFileTurns([
       { path: "src/foo.ts", startLine: 1, endLine: 100 },
       { path: "src/foo.ts", startLine: 200, endLine: 400 },
     ]);
     const result = buildFileReadManifest(turns, allCandidateClassifications(turns));
-    expect(result.manifest).toContain("lines 1-100");
-    expect(result.manifest).toContain("lines 200-400");
-    expect(result.entryCount).toBe(1);  // one path entry, two ranges on the same line
+    // both ranges tracked in structuredEntries dominant lineRange
+    expect(result.structuredEntries.find((e) => e.filePath === "src/foo.ts")).toBeDefined();
+    // manifest has exactly one entry for the file path
+    const fileLines = result.manifest.split("\n").filter((l) => l.includes("src/foo.ts"));
+    expect(fileLines).toHaveLength(1);
+    expect(result.entryCount).toBe(1);  // one path entry, two ranges aggregated
   });
 
   it("caps manifest at MANIFEST_MAX_ENTRIES (20)", () => {
@@ -727,7 +731,9 @@ describe("Phase J.3 — buildFileReadManifest", () => {
     const result = buildFileReadManifest(turns, allCandidateClassifications(turns));
     expect(result.truncated).toBe(true);
     expect(result.entryCount).toBe(20);
-    expect(result.manifest).toContain("5 more entries truncated");
+    // truncation footer removed from manifest text (Plan B stable formatter)
+    expect(result.manifest).not.toContain("truncated");
+    expect(result.manifest).not.toContain("more entries");
   });
 
   it("returns empty manifest when no read_file CANDIDATE results", () => {
@@ -790,7 +796,7 @@ describe("Phase J.3 — buildFileReadManifest", () => {
     );
     expect(synth).toBeDefined();
     const content = synth!.content as string;
-    expect(content).toContain("src/server.ts lines 1-200");
+    expect(content).toContain("- src/server.ts");
     expect(content).toContain("mocked summary");
     // manifest appears before summary
     expect(content.indexOf("src/server.ts")).toBeLessThan(content.indexOf("mocked summary"));
@@ -1003,14 +1009,80 @@ describe("buildFileReadManifest — per-iter manifest (E.3)", () => {
     expect(entryCount).toBe(0);
   });
 
-  it("T.4: buildFileReadManifest includes lineRange in entry when read had explicit range", () => {
+  it("T.4: buildFileReadManifest includes lineRange in structuredEntries when read had explicit range", () => {
     const responseInput = makeReadInput([
       { callId: "lr1", filePath: "src/api/server.ts", lineRange: [10, 50] },
     ]);
     const classified = classifyTurns(responseInput, []);
-    const { manifest, entryCount } = buildFileReadManifest(responseInput, classified);
+    const { manifest, entryCount, structuredEntries } = buildFileReadManifest(responseInput, classified);
     expect(entryCount).toBe(1);
-    expect(manifest).toContain("lines 10-50");
+    // lineRange in structuredEntries (not in manifest text — Plan B stable formatter)
+    expect(structuredEntries.find((e) => e.filePath === "src/api/server.ts")?.lineRange).toContain("10-50");
     expect(manifest).toContain("src/api/server.ts");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Plan B — buildFileReadManifest stable formatter (cache breakpoint #2)
+// ---------------------------------------------------------------------------
+
+describe("buildFileReadManifest — Plan B stable formatter (cache breakpoint #2)", () => {
+  it("manifest text is byte-identical when same file is re-read with different ranges", () => {
+    const turns1 = makeReadFileTurns([
+      { path: "src/foo.ts", startLine: 1, endLine: 100 },
+    ]);
+    const turns5 = makeReadFileTurns([
+      { path: "src/foo.ts", startLine: 1, endLine: 50 },
+      { path: "src/foo.ts", startLine: 51, endLine: 100 },
+      { path: "src/foo.ts", startLine: 200, endLine: 300 },
+      { path: "src/foo.ts", startLine: 400, endLine: 500 },
+      { path: "src/foo.ts", startLine: 700, endLine: 800 },
+    ]);
+    const r1 = buildFileReadManifest(turns1, allCandidateClassifications(turns1));
+    const r5 = buildFileReadManifest(turns5, allCandidateClassifications(turns5));
+    expect(r1.manifest).toBe(r5.manifest);
+    expect(r5.structuredEntries[0]?.readCount).toBe(5);
+  });
+
+  it("manifest changes only when a genuinely new file path is added", () => {
+    const tFoo = makeReadFileTurns([{ path: "src/foo.ts", startLine: 1, endLine: 100 }]);
+    const tFooBar = makeReadFileTurns([
+      { path: "src/foo.ts", startLine: 1, endLine: 100 },
+      { path: "src/bar.ts", startLine: 1, endLine: 50 },
+    ]);
+    const rFoo = buildFileReadManifest(tFoo, allCandidateClassifications(tFoo));
+    const rFooBar = buildFileReadManifest(tFooBar, allCandidateClassifications(tFooBar));
+    expect(rFoo.manifest).not.toBe(rFooBar.manifest);
+    // alphabetical order — bar before foo
+    expect(rFooBar.manifest.indexOf("src/bar.ts")).toBeLessThan(
+      rFooBar.manifest.indexOf("src/foo.ts")
+    );
+  });
+
+  it("no truncation footer in manifest text — truncated flag still set", () => {
+    const reads = Array.from({ length: MANIFEST_MAX_ENTRIES + 5 }, (_, i) => ({
+      path: `src/file${String(i).padStart(2, "0")}.ts`,
+      startLine: 1,
+      endLine: 10,
+    }));
+    const turns = makeReadFileTurns(reads);
+    const result = buildFileReadManifest(turns, allCandidateClassifications(turns));
+    expect(result.manifest).not.toContain("truncated");
+    expect(result.manifest).not.toContain("more entries");
+    expect(result.truncated).toBe(true);
+    expect(result.entryCount).toBe(MANIFEST_MAX_ENTRIES);
+  });
+
+  it("manifest entries are sorted alphabetically", () => {
+    const turns = makeReadFileTurns([
+      { path: "src/z_last.ts", startLine: 1, endLine: 10 },
+      { path: "src/a_first.ts", startLine: 1, endLine: 10 },
+      { path: "src/m_middle.ts", startLine: 1, endLine: 10 },
+    ]);
+    const result = buildFileReadManifest(turns, allCandidateClassifications(turns));
+    const lines = result.manifest.split("\n").filter((l) => l.startsWith("- "));
+    expect(lines[0]).toContain("a_first");
+    expect(lines[1]).toContain("m_middle");
+    expect(lines[2]).toContain("z_last");
   });
 });
