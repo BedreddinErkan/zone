@@ -58,9 +58,8 @@ import type {
   ChatCompletionMessageFunctionToolCall,
 } from "openai/resources/chat/completions";
 import type { Mode } from "../types/mode.js";
-import { ContextCompactor, buildFileReadManifest } from "./compaction/ContextCompactor.js";
+import { ContextCompactor } from "./compaction/ContextCompactor.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
-import { classifyTurns } from "./compaction/classifyTurns.js";
 import { hashToolCall, createDetectorState, recordAndDetect } from "./loopDetector.js";
 import { UpstreamUnavailableError } from "./withExponentialBackoff.js";
 import { emitTokenBreakdown, emitBreakdownSummary, type BreakdownEvent } from "./tokenBreakdown.js";
@@ -2904,45 +2903,7 @@ Example:
       };
     },
   };
-  const fileReadManifestHook: PreIterationHook = {
-    name: "file-read-manifest",
-    priority: 90,
-    run: (ctx) => {
-      const classified = classifyTurns(
-        ctx.responseInput as ChatCompletionMessageParam[],
-        toolCallLog
-      );
-      const { manifest, entryCount, structuredEntries } = buildFileReadManifest(
-        ctx.responseInput as ChatCompletionMessageParam[],
-        classified
-      );
-      if (entryCount === 0) return { kind: "passthrough" };
-      const totalReads = structuredEntries.reduce((s, e) => s + e.readCount, 0);
-      const topEntry = structuredEntries.reduce(
-        (best, e) => (e.readCount > (best?.readCount ?? 0) ? e : best),
-        structuredEntries[0] as (typeof structuredEntries)[0] | undefined,
-      );
-      ctx.emit("log", "[zone-file-manifest-injected]", {
-        iter: ctx.iter + 1,
-        entryCount,
-        totalReads,
-        topFile: topEntry?.filePath ?? null,
-        topCount: topEntry?.readCount ?? 1,
-        topLineRange: topEntry?.lineRange ?? "outline",
-        runId: ctx.runId,
-      });
-      return {
-        kind: "appendContext",
-        content:
-          `## Files already read this run\n${manifest}\n\n` +
-          `Re-read ONLY if the file was modified since your last read.\n` +
-          `Reference prior content by line number instead of re-reading.`,
-        target: "prunedMessages",
-        mode: "push-user",
-      };
-    },
-  };
-  const _internalPreIterHooks: PreIterationHook[] = [softIterWarnHook, midBudgetWarnHook, fileReadManifestHook];
+  const _internalPreIterHooks: PreIterationHook[] = [softIterWarnHook, midBudgetWarnHook];
 
   // Gap 1: internal post-tool-use hooks. Commit 5: LoopDetectorHook (warn case only).
   // The terminate case remains inline — it needs an early return from the outer function,
