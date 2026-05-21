@@ -1,22 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
   SIMPLE_ADD_PIPELINE,
+  TARGETED_FIX_PIPELINE,
   buildPipelineConfig,
   readArchetypeFlagsFromEnv,
 } from "./archetypeDispatcher.js";
 
 describe("readArchetypeFlagsFromEnv", () => {
-  it("returns both false when env is empty", () => {
+  it("returns all false when env is empty", () => {
     expect(readArchetypeFlagsFromEnv({})).toEqual({
       dispatcherEnabled: false,
       simpleAddEnabled: false,
+      targetedFixEnabled: false,
     });
   });
 
   it("returns dispatcherEnabled true when ZONE_ARCHETYPE_DISPATCHER=1", () => {
     expect(
       readArchetypeFlagsFromEnv({ ZONE_ARCHETYPE_DISPATCHER: "1" }),
-    ).toEqual({ dispatcherEnabled: true, simpleAddEnabled: false });
+    ).toEqual({ dispatcherEnabled: true, simpleAddEnabled: false, targetedFixEnabled: false });
   });
 
   it("returns both true when both flags are '1'", () => {
@@ -25,7 +27,7 @@ describe("readArchetypeFlagsFromEnv", () => {
         ZONE_ARCHETYPE_DISPATCHER: "1",
         ZONE_ARCHETYPE_ENABLE_SIMPLE_ADD: "1",
       }),
-    ).toEqual({ dispatcherEnabled: true, simpleAddEnabled: true });
+    ).toEqual({ dispatcherEnabled: true, simpleAddEnabled: true, targetedFixEnabled: false });
   });
 
   it("rejects 'true' literal — only '1' enables the flag", () => {
@@ -42,6 +44,7 @@ describe("buildPipelineConfig", () => {
       buildPipelineConfig("simple_add", {
         dispatcherEnabled: false,
         simpleAddEnabled: false,
+        targetedFixEnabled: false,
       }),
     ).toBeNull();
   });
@@ -51,6 +54,7 @@ describe("buildPipelineConfig", () => {
       buildPipelineConfig("simple_add", {
         dispatcherEnabled: true,
         simpleAddEnabled: false,
+        targetedFixEnabled: false,
       }),
     ).toBeNull();
   });
@@ -59,6 +63,7 @@ describe("buildPipelineConfig", () => {
     const result = buildPipelineConfig("simple_add", {
       dispatcherEnabled: true,
       simpleAddEnabled: true,
+      targetedFixEnabled: false,
     });
     expect(result).toEqual(SIMPLE_ADD_PIPELINE);
   });
@@ -67,15 +72,17 @@ describe("buildPipelineConfig", () => {
     const result = buildPipelineConfig("simple_add", {
       dispatcherEnabled: true,
       simpleAddEnabled: true,
+      targetedFixEnabled: false,
     });
     expect(result).not.toBe(SIMPLE_ADD_PIPELINE);
   });
 
-  it("returns null for targeted_fix even when both flags true (L5.2+ not wired)", () => {
+  it("returns null for targeted_fix when targetedFixEnabled flag off", () => {
     expect(
       buildPipelineConfig("targeted_fix", {
         dispatcherEnabled: true,
         simpleAddEnabled: true,
+        targetedFixEnabled: false,
       }),
     ).toBeNull();
   });
@@ -85,6 +92,7 @@ describe("buildPipelineConfig", () => {
       buildPipelineConfig("complex_multi_file", {
         dispatcherEnabled: true,
         simpleAddEnabled: true,
+        targetedFixEnabled: false,
       }),
     ).toBeNull();
   });
@@ -94,7 +102,55 @@ describe("buildPipelineConfig", () => {
       buildPipelineConfig("investigation", {
         dispatcherEnabled: true,
         simpleAddEnabled: true,
+        targetedFixEnabled: false,
       }),
     ).toBeNull();
+  });
+
+  it("L5.2: returns TARGETED_FIX_PIPELINE shape when dispatcher and targetedFix flags true", () => {
+    const result = buildPipelineConfig("targeted_fix", {
+      dispatcherEnabled: true,
+      simpleAddEnabled: false,
+      targetedFixEnabled: true,
+    });
+    expect(result).toEqual(TARGETED_FIX_PIPELINE);
+  });
+
+  it("L5.2: returns null for targeted_fix when targetedFixEnabled is false", () => {
+    expect(
+      buildPipelineConfig("targeted_fix", {
+        dispatcherEnabled: true,
+        simpleAddEnabled: true,
+        targetedFixEnabled: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("L5.2: returns fresh object reference for TARGETED_FIX_PIPELINE", () => {
+    const result = buildPipelineConfig("targeted_fix", {
+      dispatcherEnabled: true,
+      simpleAddEnabled: false,
+      targetedFixEnabled: true,
+    });
+    expect(result).not.toBe(TARGETED_FIX_PIPELINE);
+  });
+
+  it("L5.2: refactor archetype with targetedFixEnabled=true returns null", () => {
+    expect(
+      buildPipelineConfig("refactor", {
+        dispatcherEnabled: true,
+        simpleAddEnabled: false,
+        targetedFixEnabled: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("L5.2: simple_add still routes correctly when both pipeline flags are true", () => {
+    const result = buildPipelineConfig("simple_add", {
+      dispatcherEnabled: true,
+      simpleAddEnabled: true,
+      targetedFixEnabled: true,
+    });
+    expect(result).toEqual(SIMPLE_ADD_PIPELINE);
   });
 });
