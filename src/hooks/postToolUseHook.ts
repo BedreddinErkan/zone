@@ -234,7 +234,12 @@ export function applyAppendOps(
         }
       }
       if (!appended && op.target === "responseInput") {
-        responseInput.push({ role: "user", content: op.content });
+        const newMsg: ChatCompletionMessageParam = { role: "user", content: op.content };
+        responseInput.push(newMsg);
+        // Also push to prunedMessages: it may have been built from responseInput before
+        // this hook ran (R.2 runs before the pre-iter runner), so the new message would
+        // otherwise be invisible to the LLM in the current iteration.
+        setPrunedMessages([...getPrunedMessages(), newMsg]);
       } else if (!appended && op.target === "prunedMessages") {
         setPrunedMessages([...getPrunedMessages(), { role: "user", content: op.content }]);
       }

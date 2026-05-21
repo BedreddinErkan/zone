@@ -2902,7 +2902,45 @@ Example:
       };
     },
   };
-  const _internalPreIterHooks: PreIterationHook[] = [softIterWarnHook, midBudgetWarnHook];
+  const fileReadManifestHook: PreIterationHook = {
+    name: "file-read-manifest",
+    priority: 90,
+    run: (ctx) => {
+      const classified = classifyTurns(
+        ctx.responseInput as ChatCompletionMessageParam[],
+        toolCallLog
+      );
+      const { manifest, entryCount, structuredEntries } = buildFileReadManifest(
+        ctx.responseInput as ChatCompletionMessageParam[],
+        classified
+      );
+      if (entryCount === 0) return { kind: "passthrough" };
+      const totalReads = structuredEntries.reduce((s, e) => s + e.readCount, 0);
+      const topEntry = structuredEntries.reduce(
+        (best, e) => (e.readCount > (best?.readCount ?? 0) ? e : best),
+        structuredEntries[0] as (typeof structuredEntries)[0] | undefined,
+      );
+      ctx.emit("log", "[zone-file-manifest-injected]", {
+        iter: ctx.iter + 1,
+        entryCount,
+        totalReads,
+        topFile: topEntry?.filePath ?? null,
+        topCount: topEntry?.readCount ?? 1,
+        topLineRange: topEntry?.lineRange ?? "outline",
+        runId: ctx.runId,
+      });
+      return {
+        kind: "appendContext",
+        content:
+          `## Files already read this run\n${manifest}\n\n` +
+          `Re-read ONLY if the file was modified since your last read.\n` +
+          `Reference prior content by line number instead of re-reading.`,
+        target: "prunedMessages",
+        mode: "push-user",
+      };
+    },
+  };
+  const _internalPreIterHooks: PreIterationHook[] = [softIterWarnHook, midBudgetWarnHook, fileReadManifestHook];
 
   for (let iter = 0; iter < iterationBudget.maxIterationsForRun; iter += 1) {
     completedIterCount = iter + 1;
@@ -2918,13 +2956,49 @@ Example:
       `[agent_loop] Iteration ${iter + 1}/${iterationBudget.maxIterationsForRun}`
     );
 
-    // Declare prunedMessages here (hoisted from R.2 block) so the pre-iter runner can reference it.
-    // Initialized to responseInput as placeholder; R.2 reassigns it to the pruned copy below.
-    // Hooks at priority <90 (pre-R.2 sites) only append to responseInput, so the pre-R.2 value here
-    // is never read by those hooks — it's only passed through the context for completeness.
-    let prunedMessages: ChatCompletionMessageParam[] = responseInput;
+    // R.2: prune stale read results from the messages copy sent to the API.
+    // responseInput itself is not mutated — future iterations keep appending.
+    // R.2 runs FIRST so prunedMessages is available to all pre-iter hooks (including
+    // file-read-manifest at priority 90, which appends to prunedMessages).
+    const { pruned: freshlyPruned, stats: pruneStats } = pruneStaleReads(responseInput);
+    emitContextPruned({ runId: input.runId ?? "", iter, stats: pruneStats });
 
-    // Gap 1 pre-iteration runner — sites 1-2 (soft-iter-warn, mid-budget-warn) migrated; site 3 still inline below.
+    // U.1 Commit 3: if new pruning would change the prefix, preserve the last stable
+    // pruned state and only append genuinely new messages. This keeps the Anthropic
+    // prefix cache intact (hitting the last cached state) at the cost of sending a
+    // few extra tokens for the not-yet-pruned messages.
+    let prunedMessages: ChatCompletionMessageParam[];
+    if (pruneStats.blocksReplaced > prevR2BlocksReplaced && prevR2PrunedMessages !== null) {
+      const newCount = responseInput.length - prevR2PrunedMessages.length;
+      prunedMessages = newCount > 0
+        ? [...prevR2PrunedMessages, ...responseInput.slice(-newCount)]
+        : prevR2PrunedMessages;
+      log("[zone-cache-r2-skip]", JSON.stringify({
+        event: "cache_r2_skip",
+        runId: input.runId ?? null,
+        iter: iter + 1,
+        prevBlocks: prevR2BlocksReplaced,
+        newBlocks: pruneStats.blocksReplaced,
+        newMessages: newCount,
+      }));
+    } else {
+      prunedMessages = freshlyPruned;
+      prevR2BlocksReplaced = pruneStats.blocksReplaced;
+      prevR2PrunedMessages = freshlyPruned;
+    }
+    log("[zone-r2-shim]", JSON.stringify({
+      iter: iter + 1,
+      runId: input.runId ?? null,
+      branch: pruneStats.blocksReplaced > prevR2BlocksReplaced ? "fallback" : "refresh",
+      blocksReplaced: pruneStats.blocksReplaced,
+      prevBlocksReplaced: prevR2BlocksReplaced,
+      responseInputLen: responseInput.length,
+      prunedMessagesLen: prunedMessages.length,
+      prevPrunedMessagesLen: prevR2PrunedMessages?.length ?? 0,
+    }));
+
+    // Gap 1 pre-iteration runner — sites 1-3 all migrated to internal hooks.
+    // R.2 runs first (above) so prunedMessages has the pruned state when hooks fire.
     {
       const _allPreHooks = [..._internalPreIterHooks, ...(input.hooks?.preIteration ?? [])];
       const preCtx: PreIterationContext = {
@@ -2967,79 +3041,6 @@ Example:
     const modelName = isInvestigationMode
       ? getModelForRole("investigator", client.provider as "anthropic" | "openai")
       : getModelName("high", client.provider, requestCtx?.modelOverride);
-
-    // R.2: prune stale read results from the messages copy sent to the API.
-    // responseInput itself is not mutated — future iterations keep appending.
-    const { pruned: freshlyPruned, stats: pruneStats } = pruneStaleReads(responseInput);
-    emitContextPruned({ runId: input.runId ?? "", iter, stats: pruneStats });
-
-    // U.1 Commit 3: if new pruning would change the prefix, preserve the last stable
-    // pruned state and only append genuinely new messages. This keeps the Anthropic
-    // prefix cache intact (hitting the last cached state) at the cost of sending a
-    // few extra tokens for the not-yet-pruned messages.
-    if (pruneStats.blocksReplaced > prevR2BlocksReplaced && prevR2PrunedMessages !== null) {
-      const newCount = responseInput.length - prevR2PrunedMessages.length;
-      prunedMessages = newCount > 0
-        ? [...prevR2PrunedMessages, ...responseInput.slice(-newCount)]
-        : prevR2PrunedMessages;
-      log("[zone-cache-r2-skip]", JSON.stringify({
-        event: "cache_r2_skip",
-        runId: input.runId ?? null,
-        iter: iter + 1,
-        prevBlocks: prevR2BlocksReplaced,
-        newBlocks: pruneStats.blocksReplaced,
-        newMessages: newCount,
-      }));
-    } else {
-      prunedMessages = freshlyPruned;
-      prevR2BlocksReplaced = pruneStats.blocksReplaced;
-      prevR2PrunedMessages = freshlyPruned;
-    }
-    log("[zone-r2-shim]", JSON.stringify({
-      iter: iter + 1,
-      runId: input.runId ?? null,
-      branch: pruneStats.blocksReplaced > prevR2BlocksReplaced ? "fallback" : "refresh",
-      blocksReplaced: pruneStats.blocksReplaced,
-      prevBlocksReplaced: prevR2BlocksReplaced,
-      responseInputLen: responseInput.length,
-      prunedMessagesLen: prunedMessages.length,
-      prevPrunedMessagesLen: prevR2PrunedMessages?.length ?? 0,
-    }));
-
-    // E.3: per-iter file-read manifest injection. Appended to prunedMessages (not
-    // responseInput) so it does not accumulate across iterations. Only emitted when
-    // the run has actually read at least one file. Follows the same user-message
-    // injection pattern as softIterWarn / midWarn for prefix-cache stability.
-    {
-      const classified = classifyTurns(responseInput, toolCallLog);
-      const { manifest, entryCount, structuredEntries } = buildFileReadManifest(responseInput, classified);
-      if (entryCount > 0) {
-        const totalReads = structuredEntries.reduce((s, e) => s + e.readCount, 0);
-        const topEntry = structuredEntries.reduce(
-          (best, e) => (e.readCount > (best?.readCount ?? 0) ? e : best),
-          structuredEntries[0] as (typeof structuredEntries)[0] | undefined,
-        );
-        log("[zone-file-manifest-injected]", JSON.stringify({
-          iter: iter + 1,
-          entryCount,
-          totalReads,
-          topFile: topEntry?.filePath ?? null,
-          topCount: topEntry?.readCount ?? 1,
-          topLineRange: topEntry?.lineRange ?? "outline",
-          runId: input.runId ?? null,
-        }));
-        prunedMessages = [
-          ...prunedMessages,
-          {
-            role: "user" as const,
-            content:
-              `## Files already read this run\n${manifest}\n\n` +
-              `Re-read ONLY if the file was modified since your last read.\n` +
-              `Reference prior content by line number instead of re-reading.`,
-          },
-        ];
-      }
-    }
 
     // Opus forensic E.2: env-gated per-iter content hash probe for cache-bust diagnosis.
     // v2 (replaces v1 7d9b469): every message hashed + manifest position + marker location.
