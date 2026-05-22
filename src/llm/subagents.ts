@@ -54,6 +54,7 @@ export function computeWorkerMaxIterations(planStepsCount: number): number {
 export const EXPLORE_MAX_ITERATIONS = EXPLORE_ITER_FLOOR;
 export const WORKER_MAX_ITERATIONS = WORKER_ITER_FLOOR;
 
+/** @deprecated Use resolveSubagentCapabilityFilter from subagentDispatch.ts instead. */
 export function subagentTypeAllowedTools(type: SubagentType): ReadonlySet<string> {
   return type === "explore" ? EXPLORE_ALLOWED_TOOLS : WORKER_ALLOWED_TOOLS;
 }

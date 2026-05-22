@@ -811,7 +811,6 @@ export async function executeTool(
         incrementSubagentCallCount,
         getSubagentCallCount,
         MAX_SUBAGENT_CALLS_PER_PARENT_RUN,
-        subagentTypeAllowedTools,
         subagentTypeMaxIterations,
         VALID_SUBAGENT_TYPES,
         formatSubagentToolResultForParent,
@@ -889,9 +888,7 @@ export async function executeTool(
             userId: input?.userId,
             framework: input?.framework,
             maxIterationsOverride: subagentTypeMaxIterations(resolvedType),
-            ...(resolvedType === "explore"
-              ? { capabilityFilter: resolveSubagentCapabilityFilter("explore") }
-              : { allowedTools: subagentTypeAllowedTools("worker") }),
+            capabilityFilter: resolveSubagentCapabilityFilter(resolvedType),
             subagent: { id: subagentId, type: resolvedType, parentRunId },
             parentStagingFiles: resolvedType === "worker" ? input?.stagingFiles : undefined,
             abortSignal: input?.abortSignal,
