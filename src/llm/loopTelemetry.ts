@@ -83,6 +83,8 @@ export interface TierConstraintsData {
   softIterWarn: number;
   classificationConfidence: number;
   fallbackUsed: boolean;
+  /** Set only when a tier-derived tool subset is active (B.2). Omitted for complex / subagent loops. */
+  toolSubsetSize?: number;
 }
 
 export function emitTierConstraints(data: TierConstraintsData): void {

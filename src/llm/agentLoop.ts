@@ -61,6 +61,7 @@ import { buildDefaultOrchestrator } from "./history/ContextOrchestrator.js";
 import type { Capability, CapabilityFilter } from "../tools/capabilities.js";
 import { resolveToolList } from "../tools/toolRegistry.js";
 import { allowedToolsToFilter } from "../tools/capabilityCompat.js";
+import { tierToolFilter } from "../tools/tierToolSubsets.js";
 import {
   runPreIterationHooks,
   runPostToolUseHooks,
@@ -1469,14 +1470,21 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     maxIterationsForRun: baseMaxIterations,
     escalationBonusGranted: false,
   };
-  // Gap 6: resolve capability filter. Precedence: capabilityFilter > allowedTools (shim) > mode default.
-  const effectiveFilter: CapabilityFilter | undefined =
-    input.capabilityFilter
-    ?? (input.allowedTools ? allowedToolsToFilter(input.allowedTools) : undefined)
-    ?? (hasExplicitMode ? modeDefaultFilter(mode) : undefined);
   // L.2: tier-based tool exposure. Subagent loops skip tier gating — they
   // inherit the parent's constraints via capabilityFilter / tokenBudgetBaseTokens.
   const isSubagentLoop = input.subagent !== undefined;
+  // Phase 5 B.2: derive a tier-appropriate tool subset when no explicit
+  // capabilityFilter is set. complex tier → undefined (full toolset unchanged).
+  const tierFilterFromClassifier = (!isSubagentLoop && input.taskClassification?.tier)
+    ? tierToolFilter(input.taskClassification.tier)
+    : undefined;
+  // Gap 6: resolve capability filter.
+  // Precedence: capabilityFilter > tier-derived > allowedTools (shim) > mode default.
+  const effectiveFilter: CapabilityFilter | undefined =
+    input.capabilityFilter
+    ?? tierFilterFromClassifier
+    ?? (input.allowedTools ? allowedToolsToFilter(input.allowedTools) : undefined)
+    ?? (hasExplicitMode ? modeDefaultFilter(mode) : undefined);
   const tierLimits = isSubagentLoop
     ? null
     : resolveTierLimits(input.taskClassification, { forceTierOverride: input.forceTier });
@@ -1519,6 +1527,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       softIterWarn: effectiveSoftIterWarn,
       classificationConfidence: input.taskClassification?.confidence ?? 0,
       fallbackUsed: input.taskClassification?.fallbackUsed ?? true,
+      toolSubsetSize: tierFilterFromClassifier ? toolsForLLM.length : undefined,
     });
     if (typeof input.runId === "string" && input.runId.trim()) {
       input.onStructuredEvent?.({
