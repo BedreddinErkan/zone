@@ -29,6 +29,14 @@ const REPO_PATH = process.env["ZONE_SWEEP_REPO_PATH"] ?? REPO_ROOT;
 const USER_ID = process.env["ZONE_SWEEP_USER_ID"] ?? "sweep-runner";
 const TASKS_PATH = path.join(__dirname, "sweep-tasks.json");
 
+function parseIntFlag(name: string, defaultVal: number): number {
+  const arg = process.argv.find((a) => a.startsWith(`${name}=`));
+  if (!arg) return defaultVal;
+  const n = parseInt(arg.slice(name.length + 1), 10);
+  return Number.isFinite(n) && n > 0 ? n : defaultVal;
+}
+const TASK_TIMEOUT_S = parseIntFlag("--task-timeout", 1200);
+
 /** Maps task.project keys to local repo paths for pre-task git reset. */
 const TARGET_REPOS: Record<string, string> = {
   "zone-api": REPO_PATH,
@@ -37,7 +45,7 @@ const TARGET_REPOS: Record<string, string> = {
 const RESULTS_DIR = path.join(REPO_ROOT, "data");
 const RESULTS_PATH = path.join(RESULTS_DIR, "sweep-results.csv");
 
-interface SweepTask {
+export interface SweepTask {
   id: string;
   tier_expected: string;
   tier_forced?: string;
@@ -153,16 +161,23 @@ function preTaskCleanup(task: SweepTask): void {
   }
 }
 
-async function dispatchTask(task: SweepTask): Promise<SweepResult> {
+export async function dispatchTask(
+  task: SweepTask,
+  timeoutMs: number = TASK_TIMEOUT_S * 1000
+): Promise<SweepResult> {
   const startTime = Date.now();
+  const runId = `sweep-${task.id}-${Date.now()}`;
 
   const body: Record<string, unknown> = {
     task: task.description,
     repoPath: REPO_PATH,
     userId: USER_ID,
-    runId: `sweep-${task.id}-${Date.now()}`,
+    runId,
     ...(task.tier_forced ? { forceTier: task.tier_forced } : {}),
   };
+
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
   let res: Response;
   try {
@@ -170,11 +185,20 @@ async function dispatchTask(task: SweepTask): Promise<SweepResult> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
   } catch (fetchErr) {
+    clearTimeout(timeoutHandle);
+    if (controller.signal.aborted) {
+      throw new Error(
+        `task ${task.id} timed out after ${timeoutMs / 1000}s — server may still have completed; ` +
+          `check /tmp/server-*.log [zone-archetype] runId=${runId}`
+      );
+    }
     const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
     throw new Error(`fetch failed: ${msg}. Is the server running at ${API_BASE}?`);
   }
+  clearTimeout(timeoutHandle);
 
   const durationMs = Date.now() - startTime;
 
@@ -227,6 +251,7 @@ async function runSweep(options: { dryRun?: boolean } = {}): Promise<void> {
   console.log(`  repo:    ${REPO_PATH}`);
   console.log(`  output:  ${RESULTS_PATH}`);
   console.log(`  dry-run: ${options.dryRun ?? false}`);
+  console.log(`  timeout: ${TASK_TIMEOUT_S}s per task`);
   if (process.env["ZONE_FORCE_TIER"]) {
     console.log(`  ZONE_FORCE_TIER: ${process.env["ZONE_FORCE_TIER"]}`);
   }
@@ -288,19 +313,20 @@ async function runSweep(options: { dryRun?: boolean } = {}): Promise<void> {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`  ✗ ERROR  ${msg}`);
+      const isTimeout = msg.includes("timed out after");
+      console.error(`  ✗ ${isTimeout ? "TIMEOUT" : "ERROR"}  ${msg}`);
       const errResult: SweepResult = {
         timestamp: new Date().toISOString(),
         taskId: task.id,
         tierExpected: task.tier_expected,
         tierForced: task.tier_forced ?? "",
-        tierPredicted: "error",
+        tierPredicted: isTimeout ? "timeout" : "error",
         classificationConfidence: 0,
         classifierModel: "",
         fallbackUsed: false,
         costUsd: 0,
         durationMs: 0,
-        decisionMode: "error",
+        decisionMode: isTimeout ? "timeout" : "error",
         rolledBack: false,
         filesChanged: 0,
         passedExpected: false,
@@ -322,8 +348,10 @@ async function runSweep(options: { dryRun?: boolean } = {}): Promise<void> {
   }
 }
 
-const dryRun = process.argv.includes("--dry-run");
-runSweep({ dryRun }).catch((err) => {
-  console.error("Sweep failed:", err instanceof Error ? err.message : String(err));
-  process.exit(1);
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const dryRun = process.argv.includes("--dry-run");
+  runSweep({ dryRun }).catch((err) => {
+    console.error("Sweep failed:", err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
+}
