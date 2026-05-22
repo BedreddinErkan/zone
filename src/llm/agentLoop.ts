@@ -18,10 +18,6 @@ import {
   type SubagentTokenUsage,
 } from "./subagents.js";
 import {
-  logSubagentDispatched,
-  handleSubagentResult,
-} from "./subagentDispatch.js";
-import {
   emitArchetype,
   emitArchetypePromoted,
   emitCacheUsage,
@@ -87,6 +83,7 @@ import {
 } from "./verification/index.js";
 import { finalizeRun } from "./runCompletion/index.js";
 import { TokenBudgetMeter } from "./tokenBudget/TokenBudgetMeter.js";
+import { handleToolResult, type ToolEventContext } from "./toolEventHandler/index.js";
 
 // "plan" kept as accepted input for backward compat — normalizeAgentLoopMode maps it to "patch"
 type AgentLoopMode = Exclude<Mode, "auto"> | "investigation" | "plan";
@@ -979,7 +976,7 @@ export function detectRepeatedFailure(
   return null;
 }
 
-function extractSemanticSmellName(errorPreview: string): string {
+export function extractSemanticSmellName(errorPreview: string): string {
   const match = String(errorPreview || "").match(/smell detected was:\s*([a-z_]+)/i);
   return match?.[1]?.toLowerCase() ?? "unknown";
 }
@@ -2548,12 +2545,40 @@ Example:
         content: assistantContent,
         tool_calls: toolCalls,
       });
-      let failureDetected = false;
-      let failedToolName = "";
-      let failedToolOutput = "";
-      let failedToolError = "";
-      let failedToolFilePath: string | null = null;
-      const failedFilesThisIter = new Set<string>();
+      const toolEventCtx: ToolEventContext = {
+        toolCallLog,
+        filesModified,
+        filesReadThisRun,
+        failureHistory,
+        responseInput,
+        failedFilesThisIter: new Set(),
+        failureDetected: false,
+        failedToolName: "",
+        failedToolOutput: "",
+        failedToolError: "",
+        failedToolFilePath: null,
+        rollbackCount,
+        lastLoopResult: null,
+      };
+      const toolEventDeps = {
+        budget,
+        iter,
+        runId: input.runId,
+        effectiveTokenBudgetCap,
+        tokenBudgetHardThreshold: TOKEN_BUDGET_HARD,
+        detectorState,
+        throwIfAborted,
+        onStructuredEvent: input.onStructuredEvent,
+        onToolResult: input.onToolResult,
+        synthesizeTokenBudgetExit,
+        synthesizeLoopDetectedExit,
+        classifyFailure,
+        extractSemanticSmellName,
+        extractErrorLine,
+        hashPatchBlocks,
+        hashToolCall,
+        recordAndDetect,
+      };
 
       for (const call of toolCalls) {
         const name = call.function.name;
@@ -2779,15 +2804,15 @@ Example:
               tool_call_id: callId,
               content: syntheticOutput,
             });
-            failureDetected = true;
-            failedToolName = name;
-            failedToolOutput = syntheticOutput;
-            failedToolError = "apply_patch_no_read_first";
-            failedToolFilePath = targetFilePath;
+            toolEventCtx.failureDetected = true;
+            toolEventCtx.failedToolName = name;
+            toolEventCtx.failedToolOutput = syntheticOutput;
+            toolEventCtx.failedToolError = "apply_patch_no_read_first";
+            toolEventCtx.failedToolFilePath = targetFilePath;
             // Mirror the same failure tracking that real apply_patch failures get.
             // Without this, backup sweep / repeat detection never sees the blocked file
             // and the agent can drift to other files without returning.
-            failedFilesThisIter.add(targetFilePath);
+            toolEventCtx.failedFilesThisIter.add(targetFilePath);
             const noReadTrigger = classifyFailure(
               name,
               syntheticOutput,
@@ -2855,133 +2880,12 @@ Example:
           tool: name,
           abortAlready: input.abortSignal?.aborted ?? false,
         });
-        throwIfAborted("after_tool");
-        input.onToolResult?.(name, result);
-
-        // Phase Q.3: log Task dispatch only after executeTool confirms success —
-        // the budget gate in toolExecutor may block the call (success:false).
-        if (name === "Task" && result.success) {
-          logSubagentDispatched(parsedArgs, input.runId, iter);
+        const toolEvent = await handleToolResult(name, parsedArgs, callId, result, toolEventCtx, toolEventDeps);
+        rollbackCount = toolEventCtx.rollbackCount;
+        if (toolEvent.kind === "early_exit") {
+          return { ...toolEvent.exit, promotedFromArchetype, promotionTrigger, promotedAtIter };
         }
-
-        // Diagnostic: log every tool result after execution
-        debugLog("[zone-agent-tool-result]", JSON.stringify({
-          iter: iter + 1,
-          tool: name,
-          success: result.success,
-          outputPreview: result.output.slice(0, 300),
-          error: result.error ?? null,
-        }));
-
-        // Detect failures from any tool â€” feeds coaching-prompt router.
-        // All tools: failure iff result.success === false (exit code for run_command,
-        // explicit success bool for others). Output-content heuristics removed â€”
-        // they produced false positives on passing Next.js builds whose stderr
-        // contains tokens like "_global-error" or "FAIL".
-        const toolFailed = !result.success;
-        if (toolFailed) {
-          failureDetected = true;
-          failedToolName = name;
-          failedToolOutput = result.output;
-          failedToolError = result.error ?? "";
-          failedToolFilePath =
-            typeof parsedArgs.filePath === "string" ? parsedArgs.filePath : null;
-        }
-
-        toolCallLog.push({
-          id: callId,
-          tool: name,
-          args: parsedArgs,
-          result: result.output.slice(0, 4000),
-          success: result.success,
-        });
-
-        // Phase V.1: track successfully-read file paths for C1 gate in executeTool.
-        if (name === "read_file" && result.success && typeof parsedArgs.filePath === "string" && parsedArgs.filePath) {
-          filesReadThisRun.add(parsedArgs.filePath);
-        }
-
-        if (name === "apply_patch" && !result.success) {
-          const parsedFilePath =
-            typeof parsedArgs.filePath === "string" ? parsedArgs.filePath : null;
-          if (parsedFilePath) failedFilesThisIter.add(parsedFilePath);
-          const filePath = parsedFilePath ?? "unknown";
-          const classifiedTrigger = classifyFailure(name, result.output, result.error);
-          const trigger =
-            classifiedTrigger === "apply_patch_semantic_smell"
-              ? extractSemanticSmellName(result.output)
-              : classifiedTrigger;
-          const errorLine = extractErrorLine(result.output);
-          const patchHash = hashPatchBlocks(parsedArgs);
-          const list = failureHistory.get(filePath) ?? [];
-          list.push({ trigger, errorLine, patchHash, iter: iter + 1 });
-          failureHistory.set(filePath, list);
-        }
-        // L5.1b-2: count mid-loop rollbacks for rollback_x2 promotion trigger
-        if (name === "apply_patch" && typeof result.output === "string" &&
-            result.output.startsWith("APPLY_ROLLED_BACK")) {
-          rollbackCount += 1;
-        }
-
-        if (
-          (name === "write_file" || name === "apply_patch") &&
-          parsedArgs.filePath != null
-        ) {
-          filesModified.add(String(parsedArgs.filePath));
-        }
-        if (name === "Task" && result.success) {
-          // K.3 / K.6: aggregate filesModified, propagate token and cost accumulators.
-          const sdResult = handleSubagentResult({
-            result, iterNumber: iter, runId: input.runId,
-            onStructuredEvent: input.onStructuredEvent, filesModified,
-            subagentTokenTotal: budget.subagentTokenTotal,
-            subagentCostTotal: budget.subagentCostTotal,
-            mainAgentTokens: () => budget.mainAgentTokens,
-            effectiveTokenBudgetCap,
-            iterCostAccumulator: budget.iterCostAccumulator,
-            lastIterCostPayload: budget.lastIterCostPayload,
-          });
-          if (sdResult.subagentTokenDelta > 0) {
-            const { ratio: ratioAfterTask } = budget.recordSubagentResult(
-              { tokens: sdResult.subagentTokenDelta, cost: sdResult.subagentCostDelta },
-              iter + 1,
-              input.onStructuredEvent
-            );
-            if (ratioAfterTask >= TOKEN_BUDGET_HARD) {
-              responseInput.push({
-                role: "tool",
-                tool_call_id: callId,
-                content: result.output,
-              });
-              return { ...await synthesizeTokenBudgetExit(iter + 1, responseInput), promotedFromArchetype, promotionTrigger, promotedAtIter };
-            }
-          } else {
-            budget.recordSubagentCostOnly(sdResult.subagentCostDelta);
-          }
-        }
-
-        // Chat Completions: each tool_call gets one matching role:"tool" reply.
-        // The assistant message with tool_calls was pushed before the loop.
-        responseInput.push({
-          role: "tool",
-          tool_call_id: callId,
-          content: result.output,
-        });
-
-        // Phase Q.2: runtime loop detection
-        const loopHash = hashToolCall(name, parsedArgs);
-        const loopResult = recordAndDetect(detectorState, loopHash);
-        // "terminate" stays inline — needs early return; can't be expressed via HookResult.
-        if (loopResult.status === "terminate") {
-          input.onStructuredEvent?.({
-            type: "loop_detected_terminal",
-            toolName: name,
-            count: loopResult.count,
-            title: `Loop detected: \`${name}\` repeated ${loopResult.count}×`,
-            status: "error",
-          } as Parameters<NonNullable<typeof input.onStructuredEvent>>[0]);
-          return { ...synthesizeLoopDetectedExit(iter + 1, name, loopResult.count), promotedFromArchetype, promotionTrigger, promotedAtIter };
-        }
+        const loopResult = toolEventCtx.lastLoopResult ?? { status: "ok" as const, count: 0 };
 
         // Gap 1 post-tool-use runner — site 5 (loop-detector warn) migrated to LoopDetectorHook.
         {
@@ -3022,6 +2926,14 @@ Example:
         }
       }
 
+      const {
+        failureDetected,
+        failedToolName,
+        failedToolOutput,
+        failedToolError,
+        failedToolFilePath,
+        failedFilesThisIter,
+      } = toolEventCtx;
       // â"€â"€ Self-correction: failure detected â†’ route to coaching prompt â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       // Each self-correction attempt consumes one iteration toward maxIterations.
       // The selfCorrectionAttempts counter is a SUBSET of total iterations â€”

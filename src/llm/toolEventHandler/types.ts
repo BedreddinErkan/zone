@@ -29,6 +29,7 @@ export interface ToolEventContext {
   failedToolError: string;
   failedToolFilePath: string | null;
   rollbackCount: number;
+  lastLoopResult: { status: "ok" | "warn" | "terminate"; count: number } | null;
 }
 
 export type ToolEventResult =

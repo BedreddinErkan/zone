@@ -127,6 +127,7 @@ export async function handleToolResult(
   // Step 12: loop detection
   const loopHash = deps.hashToolCall(name, parsedArgs);
   const loopResult = deps.recordAndDetect(deps.detectorState, loopHash);
+  ctx.lastLoopResult = loopResult;
   if (loopResult.status === "terminate") {
     deps.onStructuredEvent?.({
       type: "loop_detected_terminal",

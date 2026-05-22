@@ -26,6 +26,7 @@ function makeCtx(overrides?: Partial<ToolEventContext>): ToolEventContext {
     failedToolError: "",
     failedToolFilePath: null,
     rollbackCount: 0,
+    lastLoopResult: null,
     ...overrides,
   };
 }
