@@ -2,6 +2,7 @@ import { renderChatMarkdownToHtml } from "./renderChatMarkdown.js";
 import { runAgentLoop, TOKEN_BUDGET_CAP } from "./agentLoop.js";
 import { EXPLORE_ALLOWED_TOOLS, AUDIT_ALLOWED_TOOLS, computeExploreMaxIterations } from "./subagents.js";
 import { CHAT_TOOLS } from "../tools/toolDefinitions.js";
+import type { Capability } from "../tools/capabilities.js";
 import type { ToolResult } from "../tools/toolExecutor.js";
 import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import type { TaskTier } from "./taskClassifier.js";
@@ -401,9 +402,8 @@ export async function runInvestigationFlow(input: {
     userApiKey: input.userApiKey,
     abortSignal: input.abortSignal,
     mode: "investigation",
-    allowedTools: EXPLORE_ALLOWED_TOOLS,
+    capabilityFilter: { allow: new Set<Capability>(["fs.read"]) },
     maxIterationsOverride: computedMax,
-    disableTodoWrite: true,
     onProgress: (msg: string) => {
       // [tool] lines are handled by onToolCall (structured). Skip raw duplicates.
       if (String(msg || "").startsWith("[tool]")) return;

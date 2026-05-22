@@ -817,6 +817,7 @@ export async function executeTool(
         formatSubagentToolResultForParent,
         formatExploreSubagentToolResultForParent,
       } = await import("../llm/subagents.js");
+      const { resolveSubagentCapabilityFilter } = await import("../llm/subagentDispatch.js");
 
       const effectiveSubagentCap =
         typeof input?.maxSubagentCallsOverride === "number"
@@ -888,7 +889,9 @@ export async function executeTool(
             userId: input?.userId,
             framework: input?.framework,
             maxIterationsOverride: subagentTypeMaxIterations(resolvedType),
-            allowedTools: subagentTypeAllowedTools(resolvedType),
+            ...(resolvedType === "explore"
+              ? { capabilityFilter: resolveSubagentCapabilityFilter("explore") }
+              : { allowedTools: subagentTypeAllowedTools("worker") }),
             subagent: { id: subagentId, type: resolvedType, parentRunId },
             parentStagingFiles: resolvedType === "worker" ? input?.stagingFiles : undefined,
             abortSignal: input?.abortSignal,

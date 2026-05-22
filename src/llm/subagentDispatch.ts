@@ -7,6 +7,27 @@ import type {
   IterCostUpdatePayload,
 } from "../usage/iterCostMeter.js";
 import type { SubagentResult } from "./subagents.js";
+import { WORKER_ALLOWED_TOOLS } from "./subagents.js";
+import type { CapabilityFilter, Capability } from "../tools/capabilities.js";
+
+/**
+ * Resolves a Task tool subagent_type to the CapabilityFilter for that subagent's
+ * runAgentLoop call. Centralizes worker/explore mapping away from toolExecutor.ts.
+ * Gap 6.B: worker will move to {allow: ["fs.read","fs.write"]} once find_references
+ * expansion is validated — for now verbatim match of WORKER_ALLOWED_TOOLS.
+ */
+export function resolveSubagentCapabilityFilter(
+  subagentType: "worker" | "explore" | "verifier"
+): CapabilityFilter {
+  switch (subagentType) {
+    case "explore":
+      return { allow: new Set<Capability>(["fs.read"]) };
+    case "worker":
+      return { allowToolNames: new Set(WORKER_ALLOWED_TOOLS) };
+    case "verifier":
+      return { allow: new Set<Capability>(["fs.read", "shell.exec"]) };
+  }
+}
 
 export function extractDispatchReason(description: unknown): string {
   if (typeof description !== "string") return "manual";
