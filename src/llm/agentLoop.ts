@@ -14,7 +14,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { CHAT_TOOLS, READ_ONLY_TOOLS, ZONE_TOOLS } from "../tools/toolDefinitions.js";
 import {
-  emptySubagentTokenUsage,
   resetSubagentCallCount,
   type SubagentTokenUsage,
 } from "./subagents.js";
@@ -37,14 +36,7 @@ import { loadOrgPolicy } from "./policyLoader.js";
 import { getUsage, recordRunRetry, recordRunSummary } from "../usage/usageTracker.js";
 import { canResumeFromTerminationReason } from "./patchUserFacingReason.js";
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
-import { extractUsage } from "./recordingClient.js";
-import {
-  buildIterCostUpdate,
-  cacheHitRatio,
-  emptyIterCostAccumulator,
-  type IterCostAccumulator,
-  type IterCostUpdatePayload,
-} from "../usage/iterCostMeter.js";
+import { cacheHitRatio } from "../usage/iterCostMeter.js";
 import { parseTodoProgressMarkers } from "../core/todoLifecycle.js";
 import {
   buildApplyRolledBackMessage,
@@ -94,6 +86,7 @@ import {
   applyNoInfraVerificationOverride,
 } from "./verification/index.js";
 import { finalizeRun } from "./runCompletion/index.js";
+import { TokenBudgetMeter } from "./tokenBudget/TokenBudgetMeter.js";
 
 // "plan" kept as accepted input for backward compat — normalizeAgentLoopMode maps it to "patch"
 type AgentLoopMode = Exclude<Mode, "auto"> | "investigation" | "plan";
@@ -1857,12 +1850,12 @@ Example:
 
   const client = createLLMClient({ apiKey: input.userApiKey });
   const requestCtx = getRequestContext();
-  let iterCostAccumulator: IterCostAccumulator = emptyIterCostAccumulator();
-  let lastIterCostPayload: IterCostUpdatePayload | null = null;
-  let lastCallModel: string | null = null;
-  let loopTokenUsage: SubagentTokenUsage = emptySubagentTokenUsage();
-  let subagentTokenTotal = 0;
-  let subagentCostTotal = 0;
+  const budget = new TokenBudgetMeter({
+    baseTokens: cleanTokenNumber(input.tokenBudgetBaseTokens),
+    cap: effectiveTokenBudgetCap,
+    isSubagentLoop: !!input.subagent,
+    runId: typeof input.runId === "string" ? input.runId.trim() : "",
+  });
   const detectorState = createDetectorState();
   // R.1: accumulate per-call breakdown events for the end-of-run summary.
   const breakdownEvents: BreakdownEvent[] = [];
@@ -1878,7 +1871,6 @@ Example:
   // Phase V.1: Set of filePaths successfully read_file'd this run.
   // Populated after each successful read_file; passed to executeTool for C1 gate.
   const filesReadThisRun = new Set<string>();
-  const tokenBudgetBaseTokens = cleanTokenNumber(input.tokenBudgetBaseTokens);
   // P.1: compaction trigger — fires at the safe iteration boundary after tool results
   // are processed. No-op in P.1; P.2 replaces the stub with real summarization.
   const compactor = new ContextCompactor();
@@ -1914,74 +1906,11 @@ Example:
     }
   };
 
-  // Usage recording is centralized in RecordingLLMClient (src/llm/recordingClient.ts):
-  // every chat completion across the codebase appends one JSONL record. agentLoop
-  // used to accumulate-then-record-on-exit, but that double-counted with the wrapper
-  // and missed every other LLM call site (planner, intent, final report, etc.).
-
-  const mainAgentTokens = (): number =>
-    iterCostAccumulator.input_uncached +
-    iterCostAccumulator.cache_read +
-    iterCostAccumulator.cache_write +
-    iterCostAccumulator.output;
-
-  const cumulativeTokens = (): number =>
-    tokenBudgetBaseTokens + mainAgentTokens() + subagentTokenTotal;
-
-  const currentTokenUsage = (): SubagentTokenUsage => ({
-    input: loopTokenUsage.input,
-    output: loopTokenUsage.output,
-    cached: loopTokenUsage.cached,
-    total: loopTokenUsage.total,
-    perIter: [...(loopTokenUsage.perIter ?? [])],
-  });
-
-  const emitTokenBudgetStatus = (iterNumber: number): number => {
-    const mainTokens = mainAgentTokens();
-    const totalTokens = tokenBudgetBaseTokens + mainTokens + subagentTokenTotal;
-    const breakdown = input.subagent
-      ? {
-          mainAgent: tokenBudgetBaseTokens,
-          subagents: mainTokens + subagentTokenTotal,
-        }
-      : {
-          mainAgent: tokenBudgetBaseTokens + mainTokens,
-          subagents: subagentTokenTotal,
-        };
-    const tokenBudgetRatio =
-      effectiveTokenBudgetCap > 0 ? totalTokens / effectiveTokenBudgetCap : 0;
-    debugLog("[zone-token-budget]", JSON.stringify({
-      iter: iterNumber,
-      cumulativeTokens: totalTokens,
-      cap: effectiveTokenBudgetCap,
-      ratio: Number(tokenBudgetRatio.toFixed(3)),
-      breakdown,
-    }));
-    if (typeof input.runId === "string" && input.runId.trim()) {
-      input.onStructuredEvent?.({
-        type: "token_budget_status",
-        title: "Token budget",
-        cumulativeTokens: totalTokens,
-        tokenBudgetCap: effectiveTokenBudgetCap,
-        tokenBudgetRatio,
-        iter: iterNumber,
-        breakdown,
-        status:
-          tokenBudgetRatio >= TOKEN_BUDGET_HARD
-            ? "error"
-            : tokenBudgetRatio >= TOKEN_BUDGET_WARN
-              ? "warning"
-              : "active",
-      });
-    }
-    return tokenBudgetRatio;
-  };
-
   const synthesizeTokenBudgetExit = async (
     iterNumber: number,
     messages: ChatCompletionMessageParam[]
   ): Promise<AgentLoopResult> => {
-    const tokensAtExit = cumulativeTokens();
+    const tokensAtExit = budget.cumulativeTokens;
     input.onProgress?.(
       `[agent_loop] Token budget reached (${tokensAtExit}/${effectiveTokenBudgetCap}) — synthesizing final answer`
     );
@@ -2032,8 +1961,8 @@ Example:
       patchValidatedByAgent: false,
       verificationReason: "no_verification_attempted",
       terminationReason: "token_budget_exceeded",
-      tokenUsage: currentTokenUsage(),
-      costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+      tokenUsage: budget.tokenUsage,
+      costUsd: budget.snapshot().costUsd,
       iterCount: iterNumber + 1,
     };
   };
@@ -2062,8 +1991,8 @@ Example:
       patchValidatedByAgent: false,
       verificationReason: "no_verification_attempted",
       terminationReason: "compaction_exhausted",
-      tokenUsage: currentTokenUsage(),
-      costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+      tokenUsage: budget.tokenUsage,
+      costUsd: budget.snapshot().costUsd,
       iterCount: iterNumber + 1,
     };
   };
@@ -2087,8 +2016,8 @@ Example:
       verificationReason: "no_verification_attempted",
       terminationReason: "loop_detected",
       loopDetected: { toolName, count },
-      tokenUsage: currentTokenUsage(),
-      costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+      tokenUsage: budget.tokenUsage,
+      costUsd: budget.snapshot().costUsd,
       iterCount: iterNumber + 1,
     };
   };
@@ -2102,18 +2031,19 @@ Example:
 
   // U.1: emit per-run cache summary at every exit path.
   const emitCacheSummary = (): void => {
-    if (iterCostAccumulator.cache_read === 0 && iterCostAccumulator.cache_write === 0) return;
+    const acc = budget.iterCostAccumulator;
+    if (acc.cache_read === 0 && acc.cache_write === 0) return;
     log("[zone-cache-summary]", JSON.stringify({
       event: "cache_run_summary",
       runId: input.runId ?? null,
-      agentModel: lastCallModel,
-      totalIters: iterCostAccumulator.iter_count,
-      totalWrite: iterCostAccumulator.cache_write,
-      totalRead: iterCostAccumulator.cache_read,
-      totalInputUncached: iterCostAccumulator.input_uncached,
-      totalOutput: iterCostAccumulator.output,
-      cacheHitRatio: Number(cacheHitRatio(iterCostAccumulator).toFixed(3)),
-      totalCostUsd: iterCostAccumulator.total_cost,
+      agentModel: budget.lastCallModel,
+      totalIters: acc.iter_count,
+      totalWrite: acc.cache_write,
+      totalRead: acc.cache_read,
+      totalInputUncached: acc.input_uncached,
+      totalOutput: acc.output,
+      cacheHitRatio: Number(cacheHitRatio(acc).toFixed(3)),
+      totalCostUsd: acc.total_cost,
     }));
   };
 
@@ -2304,7 +2234,7 @@ Example:
         responseInput,
         prunedMessages,
         iterationBudget,
-        cumulativeTokens: cumulativeTokens(),
+        cumulativeTokens: budget.cumulativeTokens,
         effectiveTokenBudgetCap,
         softWarnInjected,
         midWarnInjected,
@@ -2505,8 +2435,8 @@ Example:
           patchValidatedByAgent: false,
           verificationReason: "no_verification_attempted",
           terminationReason: "upstream_unavailable",
-          tokenUsage: currentTokenUsage(),
-          costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+          tokenUsage: budget.tokenUsage,
+          costUsd: budget.snapshot().costUsd,
           iterCount: iter + 1,
           promotedFromArchetype,
           promotionTrigger,
@@ -2521,60 +2451,35 @@ Example:
       abortAlready: input.abortSignal?.aborted ?? false,
     });
     const rawUsage = (response as { usage?: unknown }).usage;
-    const tokenUsageThisIter = extractTokenUsageForBudget(rawUsage);
-    if (tokenUsageThisIter.total > 0) {
-      loopTokenUsage = {
-        input: loopTokenUsage.input + tokenUsageThisIter.input,
-        output: loopTokenUsage.output + tokenUsageThisIter.output,
-        cached: loopTokenUsage.cached + tokenUsageThisIter.cached,
-        total: loopTokenUsage.total + tokenUsageThisIter.total,
-        perIter: [...(loopTokenUsage.perIter ?? []), tokenUsageThisIter.total],
-      };
-      if (input.subagent) {
-        log("[zone-worker-token]", JSON.stringify({
-          subagentId: input.subagent.id,
-          parentRunId: input.subagent.parentRunId,
-          iter,
-          iterTotal: tokenUsageThisIter.total,
-          cumulativeTotal: loopTokenUsage.total,
-        }));
-      }
-    }
-    try {
-      const usage = extractUsage(rawUsage);
-      const runId = typeof input.runId === "string" ? input.runId.trim() : "";
-      if (usage && runId) {
-        const update = buildIterCostUpdate({
-          runId,
-          iter: iter + 1,
-          totalIter: iterationBudget.maxIterationsForRun,
-          provider: client.provider,
-          model: response.model || modelName,
-          current: usage,
-          previous: iterCostAccumulator,
-        });
-        iterCostAccumulator = update.accumulator;
-        lastIterCostPayload = update.payload;
-        lastCallModel = response.model || modelName;
-        input.onStructuredEvent?.(update.payload);
-      }
-    } catch (err) {
-      debugLog("[zone-iter-cost-update-failed]", err);
+    budget.recordLLMCall({
+      rawUsage,
+      iter: iter + 1,
+      totalIter: iterationBudget.maxIterationsForRun,
+      provider: client.provider,
+      model: response.model || modelName,
+      onStructuredEvent: input.onStructuredEvent,
+    });
+    if (input.subagent && budget.lastIterTokenTotal > 0) {
+      log("[zone-worker-token]", JSON.stringify({
+        subagentId: input.subagent.id,
+        parentRunId: input.subagent.parentRunId,
+        iter,
+        iterTotal: budget.lastIterTokenTotal,
+        cumulativeTotal: budget.tokenUsage.total,
+      }));
     }
     // U.1: per-call cache JSONL — always-on when there is cache activity.
-    if (
-      lastIterCostPayload !== null &&
-      (lastIterCostPayload.cache_write > 0 || lastIterCostPayload.cache_read > 0)
-    ) {
+    const _lip = budget.lastIterCostPayload;
+    if (_lip !== null && (_lip.cache_write > 0 || _lip.cache_read > 0)) {
       emitCacheUsage({
         runId: input.runId ?? null,
         iter: iter + 1,
-        model: lastCallModel,
-        write: lastIterCostPayload.cache_write,
-        read: lastIterCostPayload.cache_read,
-        input_uncached: lastIterCostPayload.input_uncached,
-        output: lastIterCostPayload.output,
-        cacheHitRatio: Number(lastIterCostPayload.cacheHitThisIter.toFixed(3)),
+        model: budget.lastCallModel,
+        write: _lip.cache_write,
+        read: _lip.cache_read,
+        input_uncached: _lip.input_uncached,
+        output: _lip.output,
+        cacheHitRatio: Number(_lip.cacheHitThisIter.toFixed(3)),
       });
     }
 
@@ -2583,7 +2488,7 @@ Example:
     // output) and compares against TOKEN_BUDGET_CAP. Once usage crosses
     // TOKEN_BUDGET_HARD (95%), the loop terminates gracefully via a final
     // no-tools synthesis call.
-    const tokenBudgetRatio = emitTokenBudgetStatus(iter + 1);
+    const tokenBudgetRatio = budget.emitStatus(iter + 1, input.onStructuredEvent);
 
     if (tokenBudgetRatio >= TOKEN_BUDGET_HARD) {
       return { ...await synthesizeTokenBudgetExit(iter + 1, responseInput), promotedFromArchetype, promotionTrigger, promotedAtIter };
@@ -2939,7 +2844,7 @@ Example:
           // tool-input deltas then flow back through the parent's SSE
           // channel, tagged with the worker's subagentId.
           onToolInputStream: input.onToolInputStream,
-          tokenBudgetBaseTokens: name === "Task" ? cumulativeTokens() : undefined,
+          tokenBudgetBaseTokens: name === "Task" ? budget.cumulativeTokens : undefined,
           maxSubagentCallsOverride: effectiveMaxSubagentCalls ?? undefined,
           selfValidationCounts,
           filesReadThisRun,
@@ -3026,17 +2931,22 @@ Example:
         }
         if (name === "Task" && result.success) {
           // K.3 / K.6: aggregate filesModified, propagate token and cost accumulators.
-          // subagentTokenTotal must be updated BEFORE emitTokenBudgetStatus so the
-          // closure reads the correct cumulative value.
           const sdResult = handleSubagentResult({
             result, iterNumber: iter, runId: input.runId,
             onStructuredEvent: input.onStructuredEvent, filesModified,
-            subagentTokenTotal, subagentCostTotal, mainAgentTokens,
-            effectiveTokenBudgetCap, iterCostAccumulator, lastIterCostPayload,
+            subagentTokenTotal: budget.subagentTokenTotal,
+            subagentCostTotal: budget.subagentCostTotal,
+            mainAgentTokens: () => budget.mainAgentTokens,
+            effectiveTokenBudgetCap,
+            iterCostAccumulator: budget.iterCostAccumulator,
+            lastIterCostPayload: budget.lastIterCostPayload,
           });
           if (sdResult.subagentTokenDelta > 0) {
-            subagentTokenTotal += sdResult.subagentTokenDelta;
-            const ratioAfterTask = emitTokenBudgetStatus(iter + 1);
+            const { ratio: ratioAfterTask } = budget.recordSubagentResult(
+              { tokens: sdResult.subagentTokenDelta, cost: sdResult.subagentCostDelta },
+              iter + 1,
+              input.onStructuredEvent
+            );
             if (ratioAfterTask >= TOKEN_BUDGET_HARD) {
               responseInput.push({
                 role: "tool",
@@ -3045,8 +2955,9 @@ Example:
               });
               return { ...await synthesizeTokenBudgetExit(iter + 1, responseInput), promotedFromArchetype, promotionTrigger, promotedAtIter };
             }
+          } else {
+            budget.recordSubagentCostOnly(sdResult.subagentCostDelta);
           }
-          subagentCostTotal += sdResult.subagentCostDelta;
         }
 
         // Chat Completions: each tool_call gets one matching role:"tool" reply.
@@ -3324,7 +3235,7 @@ Example:
         compactionResult = await compactor.checkAndMaybeCompact({
           responseInput,
           toolCallLog,
-          currentUsage: cumulativeTokens(),
+          currentUsage: budget.cumulativeTokens,
           effectiveCap: effectiveTokenBudgetCap,
           client,
           runId: input.runId,
@@ -3409,8 +3320,8 @@ Example:
         framework: input.framework,
         repoPath: input.repoPath,
         iterCount: iter + 1,
-        costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
-        tokenUsage: currentTokenUsage(),
+        costUsd: budget.snapshot().costUsd,
+        tokenUsage: budget.tokenUsage,
         promotedFromArchetype,
         promotionTrigger,
         promotedAtIter,
@@ -3471,8 +3382,8 @@ Example:
       framework: input.framework,
       repoPath: input.repoPath,
       iterCount: completedIterCount,
-      costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
-      tokenUsage: currentTokenUsage(),
+      costUsd: budget.snapshot().costUsd,
+      tokenUsage: budget.tokenUsage,
       promotedFromArchetype,
       promotionTrigger,
       promotedAtIter,
@@ -3549,8 +3460,8 @@ Example:
     framework: input.framework,
     repoPath: input.repoPath,
     iterCount: completedIterCount,
-    costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
-    tokenUsage: currentTokenUsage(),
+    costUsd: budget.snapshot().costUsd,
+    tokenUsage: budget.tokenUsage,
     promotedFromArchetype,
     promotionTrigger,
     promotedAtIter,
