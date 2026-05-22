@@ -7,6 +7,44 @@ function normalizePatchedPath(filePath: string): string {
   return String(filePath || "").replace(/\\/g, "/").trim();
 }
 
+/**
+ * Pure: determines whether a verification failure represents a regression
+ * (patch introduced new errors) or pre-existing errors (baseline already had them).
+ */
+export function classifyVerificationResult(
+  postErrorCount: number,
+  baselineErrorCount: number
+): { regressed: boolean; isPreExisting: boolean } {
+  const regressed = postErrorCount > baselineErrorCount;
+  const isPreExisting = baselineErrorCount > 0 && !regressed;
+  return { regressed, isPreExisting };
+}
+
+type FinalizeBranch =
+  | "applied"
+  | "applied_with_warnings"
+  | "rolled_back"
+  | "pre_existing_errors"
+  | "skipped_no_command"
+  | "no_change";
+
+/**
+ * Pure: maps a verification result + mode to the appropriate finalize branch label.
+ * Used by the verifyAndFinalize composer to select the VerifyOutcome variant.
+ */
+export function deriveFinalizeBranch(
+  verifyResult: { status: "pass" | "fail" | "skipped"; regressed?: boolean; reason?: string },
+  verifyMode: "warn" | "rollback"
+): FinalizeBranch {
+  if (verifyResult.status === "pass") return "applied";
+  if (verifyResult.status === "skipped") {
+    return verifyResult.reason === "no_changes_made" ? "no_change" : "skipped_no_command";
+  }
+  // fail
+  if (verifyResult.regressed === false) return "pre_existing_errors";
+  return verifyMode === "rollback" ? "rolled_back" : "applied_with_warnings";
+}
+
 export function applyNoInfraVerificationOverride(input: {
   verificationReason: VerificationReason;
   framework?: { hasTests: boolean; testFilesDetected: boolean };

@@ -1,4 +1,6 @@
 export type { VerificationReason } from "./verificationReason.js";
+export type { ParsedError, VerifyDetail, VerifyOutcome, VerifyAndFinalizeInput } from "./types.js";
+export { classifyVerificationResult, deriveFinalizeBranch } from "./classify.js";
 export { didApplyPatch } from "./logUtils.js";
 export { selectVerificationCommand, runVerificationCommand } from "./command.js";
 export {
