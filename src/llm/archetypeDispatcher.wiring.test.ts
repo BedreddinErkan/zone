@@ -62,12 +62,12 @@ afterEach(() => {
   fs.rmSync(repoPath, { recursive: true, force: true });
 });
 
-describe("L5.1b-1 excludeTools wiring", () => {
+describe("L5.1b-1 excludeToolNames wiring (via capabilityFilter)", () => {
   it("removes Task and suggest_scope_change from the LLM tool list when both excluded", async () => {
     await runAgentLoop({
       task: "add a helper function",
       repoPath,
-      excludeTools: new Set(["Task", "suggest_scope_change"]),
+      capabilityFilter: { excludeToolNames: new Set(["Task", "suggest_scope_change"]) },
     });
     const toolNames = (
       mocks.createChatCompletion.mock.calls[0][0].tools as Array<{
@@ -78,7 +78,7 @@ describe("L5.1b-1 excludeTools wiring", () => {
     expect(toolNames).not.toContain("suggest_scope_change");
   });
 
-  it("preserves Task and suggest_scope_change in legacy mode (no excludeTools)", async () => {
+  it("preserves Task and suggest_scope_change in legacy mode (no capabilityFilter)", async () => {
     await runAgentLoop({ task: "add a helper function", repoPath });
     const toolNames = (
       mocks.createChatCompletion.mock.calls[0][0].tools as Array<{
@@ -93,7 +93,7 @@ describe("L5.1b-1 excludeTools wiring", () => {
     await runAgentLoop({
       task: "add a helper function",
       repoPath,
-      excludeTools: new Set(["Task"]),
+      capabilityFilter: { excludeToolNames: new Set(["Task"]) },
     });
     const toolNames = (
       mocks.createChatCompletion.mock.calls[0][0].tools as Array<{

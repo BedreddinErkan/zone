@@ -5899,7 +5899,9 @@ const initializeTodosFromPlan = (): void => {
         coachingBudgetOverride: pipelineCfg.coachingBudget,
         pipelineApplied: true,
         originalArchetype: taskClassification?.archetype,
-        ...(_dispatcherExcludeTools && { excludeTools: _dispatcherExcludeTools }),
+        ...(_dispatcherExcludeTools && {
+          capabilityFilter: { excludeToolNames: _dispatcherExcludeTools },
+        }),
       }),
     };
 
