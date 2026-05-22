@@ -96,6 +96,7 @@ import {
   validateUnrelatedClaim,
   validatePassedClaim,
   applyNoInfraVerificationOverride,
+  verifyAndFinalize,
 } from "./verification/index.js";
 import { didApplyPatch } from "./verification/logUtils.js";
 
@@ -3541,98 +3542,67 @@ Example:
         inferredFrom: vrMatch ? "tag" : "heuristic",
         summaryPreview: finalText.slice(0, 200),
       });
-      const finalizeResult = ownsStagingFiles
-        ? await finalizeStaging({
-            stagingFiles,
-            repoPath: input.repoPath,
-            framework: input.framework,
-            withStagingTempFlush,
-            verifyMode,
-          })
-        : {
-            flushed: false,
-            verification: {
-              status: "skipped" as const,
-              reason: "subagent_deferred_to_parent",
-            },
-            filesFlushed: 0,
-            flushFailures: 0,
-          };
+      const outcome = await verifyAndFinalize({
+        stagingFiles,
+        repoPath: input.repoPath,
+        framework: input.framework,
+        withStagingTempFlush,
+        verifyMode,
+        ownsStagingFiles,
+      });
       let summaryAppendix = "";
-      if (finalizeResult.verification.status === "fail") {
-        // Phase J.3: distinguish regression (patch introduced new errors,
-        // staging discarded, "rolled back" UI) from pre-existing failure
-        // (patch flushed anyway, errors weren't its fault).
-        if (finalizeResult.verification.regressed === false) {
+      switch (outcome.kind) {
+        case "no_change":
+          verificationReason = "no_changes_made";
+          patchValidatedByAgent = false;
+          break;
+        case "pre_existing_errors":
           verificationReason = "tests_inconclusive";
           patchValidatedByAgent = false;
-          summaryAppendix =
-            "\n\n**Verification has pre-existing errors** (" +
-            finalizeResult.verification.label +
-            ", " + finalizeResult.verification.durationMs + "ms).\n" +
-            "Patch was applied because it didn't add any new errors " +
-            `(${finalizeResult.verification.postErrorCount ?? "?"} errors before, ` +
-            `${finalizeResult.verification.postErrorCount ?? "?"} errors after).`;
-        } else if (verifyMode === "rollback") {
+          summaryAppendix = outcome.appendix;
+          break;
+        case "rolled_back":
           verificationReason = "verification_regressed";
           patchValidatedByAgent = false;
-          const errors = parseTscErrorPreview(finalizeResult.verification.errorPreview);
-          const restoredFiles = finalizeResult.discardedStaging
-            ? Array.from(finalizeResult.discardedStaging.keys()).map((abs) =>
-                path.relative(input.repoPath, abs) || abs
-              )
-            : [];
-          const rolledBackBody = buildApplyRolledBackMessage({
-            filePath: restoredFiles.length === 1 ? (restoredFiles[0] ?? "<staged file>") : "<multiple>",
-            errors,
-            restoredFiles,
-          });
-          summaryAppendix = "\n\n" + rolledBackBody;
+          summaryAppendix = outcome.appendix;
           emitApplyRolledBackFeedback({
             site: "natural_completion",
-            label: finalizeResult.verification.label,
-            durationMs: finalizeResult.verification.durationMs,
-            baselineErrorCount: finalizeResult.verification.baselineErrorCount,
-            postErrorCount: finalizeResult.verification.postErrorCount,
-            errorCount: errors.length,
-            filePathsRestored: restoredFiles,
+            label: outcome.verification.label,
+            durationMs: outcome.verification.durationMs,
+            baselineErrorCount: outcome.verification.baselineErrorCount,
+            postErrorCount: outcome.verification.postErrorCount,
+            errorCount: outcome.errors.length,
+            filePathsRestored: outcome.restoredFiles,
             runId: input.runId ?? null,
           });
           emitApplyRolledBackMarker({
             site: "natural_completion",
-            markerMessage: rolledBackBody,
-            errors,
-            filePathsRestored: restoredFiles,
+            markerMessage: outcome.appendix.trimStart(),
+            errors: outcome.errors,
+            filePathsRestored: outcome.restoredFiles,
             runId: input.runId ?? null,
           });
-        } else {
-          // Phase F warn mode: patches on disk, surface errors as warnings.
-          verificationReason = "verification_warnings"; // Phase F.2 warn-mode: patches on disk; reason distinguishes from true rollback so downstream UI doesn't claim disk-restore.
+          break;
+        case "applied_with_warnings":
+          // Phase F.2 warn-mode: patches on disk; reason distinguishes from true rollback
+          // so downstream UI doesn't claim disk-restore.
+          verificationReason = "verification_warnings";
           patchValidatedByAgent = false;
-          const errors = parseTscErrorPreview(finalizeResult.verification.errorPreview);
-          summaryAppendix = "\n\n" + buildVerificationWarningsMessage({
-            errors,
-            filesFlushed: finalizeResult.filesFlushed,
-            baselineErrorCount: finalizeResult.verification.baselineErrorCount,
-            postErrorCount: finalizeResult.verification.postErrorCount,
-          });
+          summaryAppendix = outcome.appendix;
           emitVerifyWarnSurfaced({
             site: "natural_completion",
-            label: finalizeResult.verification.label,
-            durationMs: finalizeResult.verification.durationMs,
-            baselineErrorCount: finalizeResult.verification.baselineErrorCount,
-            postErrorCount: finalizeResult.verification.postErrorCount,
-            errorCount: errors.length,
+            label: outcome.verification.label,
+            durationMs: outcome.verification.durationMs,
+            baselineErrorCount: outcome.verification.baselineErrorCount,
+            postErrorCount: outcome.verification.postErrorCount,
+            errorCount: outcome.errors.length,
             runId: input.runId ?? null,
           });
-        }
-      } else if (
-        finalizeResult.verification.status === "skipped" &&
-        "reason" in finalizeResult.verification &&
-        finalizeResult.verification.reason === "no_changes_made"
-      ) {
-        verificationReason = "no_changes_made";
-        patchValidatedByAgent = false;
+          break;
+        case "applied":
+        case "skipped":
+          // verificationReason already set by the pre-finalize chain; no override needed
+          break;
       }
       return {
         success: true,
@@ -3651,8 +3621,8 @@ Example:
         // Phase J.3.1: forward the staging snapshot so runLlmPatchFlow can
         // render the rolled-back diff. Only meaningful when
         // verificationReason === "verification_regressed".
-        ...(finalizeResult.discardedStaging
-          ? { discardedStaging: finalizeResult.discardedStaging }
+        ...(outcome.kind === "rolled_back"
+          ? { discardedStaging: outcome.discardedStaging }
           : {}),
       };
     }
@@ -3864,93 +3834,66 @@ Example:
     patchValidatedByAgent,
   });
 
-  const finalizeResult = ownsStagingFiles
-    ? await finalizeStaging({
-        stagingFiles,
-        repoPath: input.repoPath,
-        framework: input.framework,
-        withStagingTempFlush,
-        verifyMode,
-      })
-    : {
-        flushed: false,
-        verification: {
-          status: "skipped" as const,
-          reason: "subagent_deferred_to_parent",
-        },
-        filesFlushed: 0,
-        flushFailures: 0,
-      };
-  if (finalizeResult.verification.status === "fail") {
-    if (finalizeResult.verification.regressed === false) {
+  const outcome = await verifyAndFinalize({
+    stagingFiles,
+    repoPath: input.repoPath,
+    framework: input.framework,
+    withStagingTempFlush,
+    verifyMode,
+    ownsStagingFiles,
+  });
+  switch (outcome.kind) {
+    case "no_change":
+      finalVerificationReason = "no_changes_made";
+      patchValidatedByAgent = false;
+      break;
+    case "pre_existing_errors":
       finalVerificationReason = "tests_inconclusive";
       patchValidatedByAgent = false;
-      finalSummary =
-        finalSummary +
-        "\n\n**Verification has pre-existing errors** (" +
-        finalizeResult.verification.label +
-        ", " + finalizeResult.verification.durationMs + "ms). " +
-        "Patch was applied because it didn't add any new errors.";
-    } else if (verifyMode === "rollback") {
+      finalSummary = finalSummary + outcome.appendix;
+      break;
+    case "rolled_back":
       finalVerificationReason = "verification_regressed";
       patchValidatedByAgent = false;
-      const errors = parseTscErrorPreview(finalizeResult.verification.errorPreview);
-      const restoredFiles = finalizeResult.discardedStaging
-        ? Array.from(finalizeResult.discardedStaging.keys()).map((abs) =>
-            path.relative(input.repoPath, abs) || abs
-          )
-        : [];
-      const rolledBackBody = buildApplyRolledBackMessage({
-        filePath: restoredFiles.length === 1 ? (restoredFiles[0] ?? "<staged file>") : "<multiple>",
-        errors,
-        restoredFiles,
-      });
-      finalSummary = finalSummary + "\n\n" + rolledBackBody;
+      finalSummary = finalSummary + outcome.appendix;
       emitApplyRolledBackFeedback({
         site: "max_iterations",
-        label: finalizeResult.verification.label,
-        durationMs: finalizeResult.verification.durationMs,
-        baselineErrorCount: finalizeResult.verification.baselineErrorCount,
-        postErrorCount: finalizeResult.verification.postErrorCount,
-        errorCount: errors.length,
-        filePathsRestored: restoredFiles,
+        label: outcome.verification.label,
+        durationMs: outcome.verification.durationMs,
+        baselineErrorCount: outcome.verification.baselineErrorCount,
+        postErrorCount: outcome.verification.postErrorCount,
+        errorCount: outcome.errors.length,
+        filePathsRestored: outcome.restoredFiles,
         runId: input.runId ?? null,
       });
       emitApplyRolledBackMarker({
         site: "max_iter",
-        markerMessage: rolledBackBody,
-        errors,
-        filePathsRestored: restoredFiles,
+        markerMessage: outcome.appendix.trimStart(),
+        errors: outcome.errors,
+        filePathsRestored: outcome.restoredFiles,
         runId: input.runId ?? null,
       });
-    } else {
-      // Phase F warn mode: patches on disk, surface errors as warnings.
-      finalVerificationReason = "verification_warnings"; // Phase F.2 warn-mode: patches on disk; reason distinguishes from true rollback so downstream UI doesn't claim disk-restore.
+      break;
+    case "applied_with_warnings":
+      // Phase F.2 warn-mode: patches on disk; reason distinguishes from true rollback
+      // so downstream UI doesn't claim disk-restore.
+      finalVerificationReason = "verification_warnings";
       patchValidatedByAgent = false;
-      const errors = parseTscErrorPreview(finalizeResult.verification.errorPreview);
-      finalSummary = finalSummary + "\n\n" + buildVerificationWarningsMessage({
-        errors,
-        filesFlushed: finalizeResult.filesFlushed,
-        baselineErrorCount: finalizeResult.verification.baselineErrorCount,
-        postErrorCount: finalizeResult.verification.postErrorCount,
-      });
+      finalSummary = finalSummary + outcome.appendix;
       emitVerifyWarnSurfaced({
         site: "token_budget_exceeded",
-        label: finalizeResult.verification.label,
-        durationMs: finalizeResult.verification.durationMs,
-        baselineErrorCount: finalizeResult.verification.baselineErrorCount,
-        postErrorCount: finalizeResult.verification.postErrorCount,
-        errorCount: errors.length,
+        label: outcome.verification.label,
+        durationMs: outcome.verification.durationMs,
+        baselineErrorCount: outcome.verification.baselineErrorCount,
+        postErrorCount: outcome.verification.postErrorCount,
+        errorCount: outcome.errors.length,
         runId: input.runId ?? null,
       });
-    }
-  } else if (
-    finalizeResult.verification.status === "skipped" &&
-    "reason" in finalizeResult.verification &&
-    finalizeResult.verification.reason === "no_changes_made"
-  ) {
-    finalVerificationReason = "no_changes_made";
-    patchValidatedByAgent = false;
+      break;
+    case "applied":
+    case "skipped":
+      // finalVerificationReason already set by the pre-finalize chain; no override needed
+      break;
   }
 
   return {
@@ -3969,8 +3912,8 @@ Example:
     promotedAtIter,
     // Phase J.3.1: forward the staging snapshot for the rolled-back diff
     // when safety-ceiling exit ended with a regressed-verification rollback.
-    ...(finalizeResult.discardedStaging
-      ? { discardedStaging: finalizeResult.discardedStaging }
+    ...(outcome.kind === "rolled_back"
+      ? { discardedStaging: outcome.discardedStaging }
       : {}),
   };
 }
