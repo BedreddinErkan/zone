@@ -4,3 +4,4 @@ export type {
   CoachingControllerOpts,
   CoachingDeps,
 } from "./types.js";
+export { CoachingController } from "./CoachingController.js";
