@@ -7,7 +7,6 @@ import { getRequestContext, withRequestContext } from "./openaiContext.js";
 import { getModelForRole } from "./modelRouting.js";
 import { readMemory, formatMemoryForPrompt } from "../memory/projectMemory.js";
 import { log, debugLog, errorLog } from "../utils/logger.js";
-import { writeCacheLog } from "../utils/commandCacheLog.js";
 import { parseVerificationError } from "../core/parseVerificationError.js";
 import { sanitizeVerificationEnv, strippedEnvKeys } from "../core/buildEnv.js";
 import { buildVerifyDiagnostic } from "../core/buildVerifyDiagnostic.js";
@@ -27,6 +26,18 @@ import {
   logSubagentDispatched,
   handleSubagentResult,
 } from "./subagentDispatch.js";
+import {
+  emitArchetype,
+  emitArchetypePromoted,
+  emitCacheUsage,
+  emitTierConstraints,
+  emitCoachingRule,
+  emitCommandCacheSummary,
+  emitApplyRolledBackFeedback,
+  emitApplyRolledBackMarker,
+  emitVerifyWarnSurfaced,
+  emitAgentFinalAssessment,
+} from "./loopTelemetry.js";
 import type { TaskArchetype, TaskClassification, TaskTier } from "./taskClassifier.js";
 import { resolveTierLimits } from "./tierLimits.js";
 import { resolveDailyUsdCap } from "./usdCapResolver.js";
@@ -44,7 +55,6 @@ import {
 } from "../usage/iterCostMeter.js";
 import { parseTodoProgressMarkers } from "../core/todoLifecycle.js";
 import {
-  buildApplyRolledBackMarkerLog,
   buildApplyRolledBackMessage,
   parseTscErrorPreview,
 } from "./applyRollbackFeedback.js";
@@ -2088,7 +2098,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           ts: Date.now(),
         }));
       }
-      log("[zone-archetype]", JSON.stringify({
+      emitArchetype({
         runId: input.runId.trim(),
         archetype: input.taskClassification?.archetype ?? null,
         archetypeConfidence: input.taskClassification?.archetypeConfidence ?? null,
@@ -2103,7 +2113,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         promotedFrom: result.promotedFromArchetype ?? null,
         promotionTrigger: result.promotionTrigger ?? null,
         promotedAtIter: result.promotedAtIter ?? null,
-      }));
+      });
     }
     return result;
   } finally {
@@ -2111,14 +2121,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       resetSubagentCallCount(input.runId);
       const commandCacheSnapshot = clearCommandCacheForRun(input.runId);
       if (commandCacheSnapshot && (commandCacheSnapshot.hits > 0 || commandCacheSnapshot.misses > 0)) {
-        log("[zone-command-cache-summary]", JSON.stringify({
-          runId: input.runId,
-          totalHits: commandCacheSnapshot.hits,
-          totalMisses: commandCacheSnapshot.misses,
-          totalSavedMs: commandCacheSnapshot.savedMs,
-          cacheSize: commandCacheSnapshot.entries.size,
-        }));
-        writeCacheLog(input.repoPath, "[zone-command-cache-summary]", {
+        emitCommandCacheSummary(input.repoPath, {
           runId: input.runId,
           totalHits: commandCacheSnapshot.hits,
           totalMisses: commandCacheSnapshot.misses,
@@ -2213,7 +2216,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     // tokenBudgetCap is the real terminator. Escalation disabled since tier is authoritative.
     iterationBudget = { ...iterationBudget, maxIterationsForRun: effectiveSoftIterWarn * 3 };
     escalationEnabled = false;
-    log("[zone-tier-constraints-applied]", JSON.stringify({
+    emitTierConstraints({
       runId: input.runId ?? null,
       tier: input.taskClassification?.tier ?? "medium",
       maxSubagentCalls: tierLimits.maxSubagentCalls,
@@ -2221,7 +2224,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       softIterWarn: effectiveSoftIterWarn,
       classificationConfidence: input.taskClassification?.confidence ?? 0,
       fallbackUsed: input.taskClassification?.fallbackUsed ?? true,
-    }));
+    });
     if (typeof input.runId === "string" && input.runId.trim()) {
       input.onStructuredEvent?.({
         type: "tier_constraints_applied",
@@ -3223,8 +3226,7 @@ Example:
       lastIterCostPayload !== null &&
       (lastIterCostPayload.cache_write > 0 || lastIterCostPayload.cache_read > 0)
     ) {
-      log("[zone-cache-usage]", JSON.stringify({
-        event: "cache_call_usage",
+      emitCacheUsage({
         runId: input.runId ?? null,
         iter: iter + 1,
         model: lastCallModel,
@@ -3233,7 +3235,7 @@ Example:
         input_uncached: lastIterCostPayload.input_uncached,
         output: lastIterCostPayload.output,
         cacheHitRatio: Number(lastIterCostPayload.cacheHitThisIter.toFixed(3)),
-      }));
+      });
     }
 
     // Phase H.7: per-run token budget. Sums all token categories tracked by
@@ -3915,15 +3917,14 @@ Example:
                   parsedFailingFile.endsWith("/" + f)
               )
             : null;
-          log("[zone-coaching-rule]", JSON.stringify({
-            event: "coaching_rule_trigger",
+          emitCoachingRule({
             runId: input.runId ?? null,
             iter: iter + 1,
             rule: "test_failure_scope_check",
             decision: inScope === null ? "unclear" : inScope ? "in_scope" : "out_of_scope",
             parsedFailingFile,
             modifiedFiles,
-          }));
+          });
         }
         debugLog("[zone-agent-diagnostic]", JSON.stringify({
           attempt: selfCorrectionAttempts,
@@ -4037,13 +4038,13 @@ Example:
             maxIterationsForRun: input.maxIterations ?? BASE_MAX_ITERATIONS,
           };
           effectiveMaxCoachingAttempts = MAX_SELF_CORRECTION_ATTEMPTS;
-          log("[zone-archetype-promoted]", JSON.stringify({
+          emitArchetypePromoted({
             runId: input.runId ?? null,
             fromArchetype: promotedFromArchetype,
             toArchetype: "complex_multi_file",
             atIter: promotedAtIter,
             trigger: promotionTrigger,
-          }));
+          });
         };
         if (inputIterCap !== null && iter + 1 >= inputIterCap) {
           _firePromotion("iter_cap");
@@ -4171,13 +4172,13 @@ Example:
       emitRunBreakdownSummary();
       emitCacheSummary();
       emitSelfValidationSummary();
-      log("[zone-agent-final-assessment]", JSON.stringify({
+      emitAgentFinalAssessment({
         triggeredBy: "natural_completion",
         verificationReason,
         patchValidatedByAgent,
         inferredFrom: vrMatch ? "tag" : "heuristic",
         summaryPreview: finalText.slice(0, 200),
-      }));
+      });
       const finalizeResult = ownsStagingFiles
         ? await finalizeStaging({
             stagingFiles,
@@ -4225,7 +4226,7 @@ Example:
             restoredFiles,
           });
           summaryAppendix = "\n\n" + rolledBackBody;
-          log("[zone-apply-rolled-back-feedback]", JSON.stringify({
+          emitApplyRolledBackFeedback({
             site: "natural_completion",
             label: finalizeResult.verification.label,
             durationMs: finalizeResult.verification.durationMs,
@@ -4234,16 +4235,14 @@ Example:
             errorCount: errors.length,
             filePathsRestored: restoredFiles,
             runId: input.runId ?? null,
-          }));
-          log("[zone-apply-rolled-back-marker]", JSON.stringify(
-            buildApplyRolledBackMarkerLog({
-              site: "natural_completion",
-              markerMessage: rolledBackBody,
-              errors,
-              filePathsRestored: restoredFiles,
-              runId: input.runId ?? null,
-            })
-          ));
+          });
+          emitApplyRolledBackMarker({
+            site: "natural_completion",
+            markerMessage: rolledBackBody,
+            errors,
+            filePathsRestored: restoredFiles,
+            runId: input.runId ?? null,
+          });
         } else {
           // Phase F warn mode: patches on disk, surface errors as warnings.
           verificationReason = "verification_warnings"; // Phase F.2 warn-mode: patches on disk; reason distinguishes from true rollback so downstream UI doesn't claim disk-restore.
@@ -4255,7 +4254,7 @@ Example:
             baselineErrorCount: finalizeResult.verification.baselineErrorCount,
             postErrorCount: finalizeResult.verification.postErrorCount,
           });
-          log("[zone-verify-warn-surfaced]", JSON.stringify({
+          emitVerifyWarnSurfaced({
             site: "natural_completion",
             label: finalizeResult.verification.label,
             durationMs: finalizeResult.verification.durationMs,
@@ -4263,7 +4262,7 @@ Example:
             postErrorCount: finalizeResult.verification.postErrorCount,
             errorCount: errors.length,
             runId: input.runId ?? null,
-          }));
+          });
         }
       } else if (
         finalizeResult.verification.status === "skipped" &&
@@ -4496,12 +4495,12 @@ Example:
   emitRunBreakdownSummary();
   emitCacheSummary();
   emitSelfValidationSummary();
-  log("[zone-agent-final-assessment]", JSON.stringify({
+  emitAgentFinalAssessment({
     triggeredBy: "max_iterations",
     finalVerificationReason,
     inferredFrom,
     patchValidatedByAgent,
-  }));
+  });
 
   const finalizeResult = ownsStagingFiles
     ? await finalizeStaging({
@@ -4545,7 +4544,7 @@ Example:
         restoredFiles,
       });
       finalSummary = finalSummary + "\n\n" + rolledBackBody;
-      log("[zone-apply-rolled-back-feedback]", JSON.stringify({
+      emitApplyRolledBackFeedback({
         site: "max_iterations",
         label: finalizeResult.verification.label,
         durationMs: finalizeResult.verification.durationMs,
@@ -4554,16 +4553,14 @@ Example:
         errorCount: errors.length,
         filePathsRestored: restoredFiles,
         runId: input.runId ?? null,
-      }));
-      log("[zone-apply-rolled-back-marker]", JSON.stringify(
-        buildApplyRolledBackMarkerLog({
-          site: "max_iter",
-          markerMessage: rolledBackBody,
-          errors,
-          filePathsRestored: restoredFiles,
-          runId: input.runId ?? null,
-        })
-      ));
+      });
+      emitApplyRolledBackMarker({
+        site: "max_iter",
+        markerMessage: rolledBackBody,
+        errors,
+        filePathsRestored: restoredFiles,
+        runId: input.runId ?? null,
+      });
     } else {
       // Phase F warn mode: patches on disk, surface errors as warnings.
       finalVerificationReason = "verification_warnings"; // Phase F.2 warn-mode: patches on disk; reason distinguishes from true rollback so downstream UI doesn't claim disk-restore.
@@ -4575,7 +4572,7 @@ Example:
         baselineErrorCount: finalizeResult.verification.baselineErrorCount,
         postErrorCount: finalizeResult.verification.postErrorCount,
       });
-      log("[zone-verify-warn-surfaced]", JSON.stringify({
+      emitVerifyWarnSurfaced({
         site: "token_budget_exceeded",
         label: finalizeResult.verification.label,
         durationMs: finalizeResult.verification.durationMs,
@@ -4583,7 +4580,7 @@ Example:
         postErrorCount: finalizeResult.verification.postErrorCount,
         errorCount: errors.length,
         runId: input.runId ?? null,
-      }));
+      });
     }
   } else if (
     finalizeResult.verification.status === "skipped" &&
