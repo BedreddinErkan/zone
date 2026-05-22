@@ -22,6 +22,7 @@ import {
   emitArchetypePromoted,
   emitCacheUsage,
   emitTierConstraints,
+  emitTierArchetypeMismatch,
   emitCoachingRule,
   emitCommandCacheSummary,
 } from "./loopTelemetry.js";
@@ -1480,11 +1481,22 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     : undefined;
   // Gap 6: resolve capability filter.
   // Precedence: capabilityFilter > tier-derived > allowedTools (shim) > mode default.
-  const effectiveFilter: CapabilityFilter | undefined =
+  // Changed to `let` so forced_tier_blocking promotion can relax it mid-run (B.3).
+  let effectiveFilter: CapabilityFilter | undefined =
     input.capabilityFilter
     ?? tierFilterFromClassifier
     ?? (input.allowedTools ? allowedToolsToFilter(input.allowedTools) : undefined)
     ?? (hasExplicitMode ? modeDefaultFilter(mode) : undefined);
+  // Phase 6.A Branch B: detect forceTier="simple" applied to archetypes that
+  // need search/navigation tools (targeted_fix, refactor, debug, complex_multi_file).
+  const ARCHETYPES_NEEDING_EXPLORATION = new Set<string>([
+    "targeted_fix", "refactor", "complex_multi_file", "debug",
+  ]);
+  const tierArchetypeMismatch =
+    !isSubagentLoop &&
+    input.forceTier === "simple" &&
+    !!input.taskClassification?.archetype &&
+    ARCHETYPES_NEEDING_EXPLORATION.has(input.taskClassification.archetype);
   const tierLimits = isSubagentLoop
     ? null
     : resolveTierLimits(input.taskClassification, { forceTierOverride: input.forceTier });
@@ -1494,7 +1506,8 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   // Phase X.0 / Gap 6: resolveToolList applies the capability filter; the
   // excludeTools and taskBlockedByBudget gates are applied on top.
   const resolvedTools = resolveToolList(effectiveFilter);
-  const toolsForLLM = sortToolsForPromptCache(
+  // `let` so forced_tier_blocking promotion can re-compute with relaxed filter (B.3).
+  let toolsForLLM = sortToolsForPromptCache(
     resolvedTools
       .filter((t) => {
         if (input.excludeTools?.has(t.name)) return false;
@@ -1507,7 +1520,8 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     throw new Error("AgentLoopInput capabilityFilter (or allowedTools) resolved to zero tools — aborting.");
   }
   // Flat name set forwarded to executeTool for runtime enforcement.
-  const effectiveAllowedSet: ReadonlySet<string> = new Set(toolsForLLM.map(getZoneToolName));
+  // `let` so forced_tier_blocking promotion can update it alongside toolsForLLM (B.3).
+  let effectiveAllowedSet: ReadonlySet<string> = new Set(toolsForLLM.map(getZoneToolName));
 
   let softIterWarnThreshold: number | undefined;
   let softWarnInjected = false;
@@ -1529,6 +1543,22 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       fallbackUsed: input.taskClassification?.fallbackUsed ?? true,
       toolSubsetSize: tierFilterFromClassifier ? toolsForLLM.length : undefined,
     });
+    if (tierArchetypeMismatch && input.taskClassification) {
+      const simpleSet = new Set(["read_file", "write_file", "apply_patch", "run_command"]);
+      const allToolNames = [
+        "read_file","write_file","apply_patch","run_command",
+        "search_in_files","list_files","find_references","TodoWrite",
+        "suggest_scope_change","create_plan","update_plan","get_plan",
+        "Task","run_tests","get_file_outline","revert_patch","analyze_code",
+      ];
+      emitTierArchetypeMismatch({
+        runId: input.runId ?? null,
+        forcedTier: "simple",
+        classifiedArchetype: input.taskClassification.archetype,
+        archetypeConfidence: input.taskClassification.archetypeConfidence ?? 0,
+        blockedTools: allToolNames.filter((t) => !simpleSet.has(t)),
+      });
+    }
     if (typeof input.runId === "string" && input.runId.trim()) {
       input.onStructuredEvent?.({
         type: "tier_constraints_applied",
