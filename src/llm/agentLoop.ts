@@ -97,6 +97,8 @@ import {
   validatePassedClaim,
   applyNoInfraVerificationOverride,
   verifyAndFinalize,
+  parseVerificationTag,
+  stripVerificationTag,
 } from "./verification/index.js";
 import { didApplyPatch } from "./verification/logUtils.js";
 
@@ -1316,28 +1318,6 @@ function extractFunctionCallItems(
   return calls;
 }
 
-/** Parse a [ZONE_VERIFICATION: <reason>] tag from text. */
-function parseVerificationTag(text: string): VerificationReason | null {
-  const m = String(text || "").match(/\[ZONE_VERIFICATION:\s*([\w_]+)\]/i);
-  if (!m) return null;
-  const raw = m[1].toLowerCase();
-  const valid: VerificationReason[] = [
-    'tests_passed', 'tests_skipped_no_infra', 'tests_inconclusive',
-    'tests_failed_unrelated', 'tests_failed_by_patch', 'no_verification_attempted',
-    'verification_failed_staged',
-    'no_changes_made',
-  ];
-  return (valid as string[]).includes(raw) ? (raw as VerificationReason) : null;
-}
-
-/** Remove any [ZONE_VERIFICATION: <reason>] tag (and the whitespace/newlines around it) from text. */
-export function stripVerificationTag(text: string): string {
-  return String(text || "")
-    .replace(/\s*\[ZONE_VERIFICATION:\s*[\w_]+\]\s*/gi, " ")
-    .replace(/[ \t]+/g, " ")
-    .replace(/ *\n */g, "\n")
-    .trim();
-}
 
 /** Check whether the agent has read or written this file earlier in the current run.
  * A subsequent successful apply_patch/write_file on the same file does NOT invalidate

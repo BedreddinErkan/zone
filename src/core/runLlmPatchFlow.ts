@@ -56,10 +56,10 @@ import { parseTaskIntent, type TaskIntent } from "./taskIntentParser.js";
 import { tryAstPatchFallback } from "./astPatchFallback.js";
 import {
   runAgentLoop,
-  stripVerificationTag,
   type AgentLoopResult,
   type VerificationReason,
 } from "../llm/agentLoop.js";
+import { stripVerificationTag } from "../llm/verification/index.js";
 import {
   isPlanOrchestrationEnabled,
   buildStepTask,

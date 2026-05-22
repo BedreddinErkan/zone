@@ -14,4 +14,6 @@ export {
   inferVerificationFromLog,
   validateUnrelatedClaim,
   validatePassedClaim,
+  parseVerificationTag,
+  stripVerificationTag,
 } from "./classify.js";

@@ -3,6 +3,29 @@ import { parseVerificationError } from "../../core/parseVerificationError.js";
 import { didApplyPatch } from "./logUtils.js";
 import type { VerificationReason } from "./verificationReason.js";
 
+/** Parse a [ZONE_VERIFICATION: <reason>] tag from text. Returns null if absent or unknown. */
+export function parseVerificationTag(text: string): VerificationReason | null {
+  const m = String(text || "").match(/\[ZONE_VERIFICATION:\s*([\w_]+)\]/i);
+  if (!m) return null;
+  const raw = m[1].toLowerCase();
+  const valid: VerificationReason[] = [
+    "tests_passed", "tests_skipped_no_infra", "tests_inconclusive",
+    "tests_failed_unrelated", "tests_failed_by_patch", "no_verification_attempted",
+    "verification_failed_staged",
+    "no_changes_made",
+  ];
+  return (valid as string[]).includes(raw) ? (raw as VerificationReason) : null;
+}
+
+/** Remove any [ZONE_VERIFICATION: <reason>] tag (and surrounding whitespace/newlines) from text. */
+export function stripVerificationTag(text: string): string {
+  return String(text || "")
+    .replace(/\s*\[ZONE_VERIFICATION:\s*[\w_]+\]\s*/gi, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .trim();
+}
+
 function normalizePatchedPath(filePath: string): string {
   return String(filePath || "").replace(/\\/g, "/").trim();
 }
