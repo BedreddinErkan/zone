@@ -275,7 +275,7 @@ export interface AgentLoopResult {
    *  mid-run (iter_cap / rollback_x2 / coaching_exhausted). Null on all
    *  non-promoted runs including default env (pipelineApplied=false). */
   promotedFromArchetype?: TaskArchetype | null;
-  promotionTrigger?: "iter_cap" | "rollback_x2" | "coaching_exhausted" | null;
+  promotionTrigger?: "iter_cap" | "rollback_x2" | "coaching_exhausted" | "forced_tier_blocking" | null;
   promotedAtIter?: number | null;
 }
 
@@ -1445,7 +1445,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     input.coachingBudgetOverride ?? MAX_SELF_CORRECTION_ATTEMPTS;
   // L5.1b-2: soft promotion state — all null on non-dispatcher runs
   let promotedFromArchetype: TaskArchetype | null = null;
-  let promotionTrigger: "iter_cap" | "rollback_x2" | "coaching_exhausted" | null = null;
+  let promotionTrigger: "iter_cap" | "rollback_x2" | "coaching_exhausted" | "forced_tier_blocking" | null = null;
   let promotedAtIter: number | null = null;
   let rollbackCount = 0;
   let coachingBudgetExhausted = false;
@@ -3092,6 +3092,47 @@ Example:
           _firePromotion("rollback_x2");
         } else if (coachingBudgetExhausted && failureDetected) {
           _firePromotion("coaching_exhausted");
+        }
+      }
+
+      // Phase 6.A Branch B — forced_tier_blocking: tool-only promotion.
+      // Separate from _isPromotable (does not require pipelineApplied).
+      // Fires when forceTier=simple blocked exploration, the agent has been
+      // retrying with failures, and it has re-read the same file ≥3 times.
+      const _isForcedTierEligible =
+        !isSubagentLoop &&
+        tierArchetypeMismatch &&
+        promotedFromArchetype === null;  // one-shot guard shared with dispatcher promotions
+      if (_isForcedTierEligible) {
+        const hasRepeatReads = [...filesReadCountThisRun.values()].some((c) => c >= 3);
+        if (failureDetected && iter >= 2 && hasRepeatReads) {
+          promotedFromArchetype = input.taskClassification?.archetype ?? null;
+          promotionTrigger = "forced_tier_blocking";
+          promotedAtIter = iter + 1;
+          // Tool-only promotion: do NOT relax iterationBudget or effectiveMaxCoachingAttempts.
+          // Relax effectiveFilter and recompute toolsForLLM / effectiveAllowedSet so the
+          // LLM sees the full toolset starting from the next iteration.
+          effectiveFilter =
+            input.capabilityFilter
+            ?? (input.allowedTools ? allowedToolsToFilter(input.allowedTools) : undefined)
+            ?? (hasExplicitMode ? modeDefaultFilter(mode) : undefined);
+          toolsForLLM = sortToolsForPromptCache(
+            resolveToolList(effectiveFilter)
+              .filter((t) => {
+                if (input.excludeTools?.has(t.name)) return false;
+                if (taskBlockedByBudget && t.name === "Task") return false;
+                return true;
+              })
+              .map((t) => t.definition)
+          );
+          effectiveAllowedSet = new Set(toolsForLLM.map(getZoneToolName));
+          emitArchetypePromoted({
+            runId: input.runId ?? null,
+            fromArchetype: promotedFromArchetype,
+            toArchetype: "complex_multi_file",
+            atIter: promotedAtIter,
+            trigger: "forced_tier_blocking",
+          });
         }
       }
 

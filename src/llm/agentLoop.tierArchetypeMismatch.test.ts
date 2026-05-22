@@ -163,13 +163,11 @@ describe("tier-archetype mismatch detection (Phase 6.A Branch B)", () => {
   });
 });
 
-// B.3 tests added in Commit B.3 after forced_tier_blocking promotion implemented.
-
 // ---------------------------------------------------------------------------
-// PLACEHOLDER: forced_tier_blocking promotion trigger tests (B.3)
+// B.3: forced_tier_blocking promotion trigger
 // ---------------------------------------------------------------------------
 
-describe.skip("forced_tier_blocking promotion trigger (Phase 6.A Branch B)", () => {
+describe("forced_tier_blocking promotion trigger (Phase 6.A Branch B)", () => {
   function promotionLogs(logMock: typeof mocks.log) {
     return logMock.mock.calls.filter((c: unknown[]) => c[0] === "[zone-archetype-promoted]");
   }
