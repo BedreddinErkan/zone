@@ -10,6 +10,8 @@ import {
 import type { LLMClient } from "../types.js";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { summarize, buildSummarizationPrompt } from "./summarizer.js";
+import { ManifestInjectionProcessor } from "../history/ManifestInjectionProcessor.js";
+import type { ProcessorContext } from "../history/types.js";
 
 // Stub only the async summarize function; keep buildSummarizationPrompt real.
 vi.mock("./summarizer.js", async (importOriginal) => {
@@ -730,7 +732,7 @@ describe("Phase J.3 — buildFileReadManifest", () => {
     const turns = makeReadFileTurns(reads);
     const result = buildFileReadManifest(turns, allCandidateClassifications(turns));
     expect(result.truncated).toBe(true);
-    expect(result.entryCount).toBe(20);
+    expect(result.entryCount).toBe(MANIFEST_MAX_ENTRIES);
     // truncation footer removed from manifest text (Plan B stable formatter)
     expect(result.manifest).not.toContain("truncated");
     expect(result.manifest).not.toContain("more entries");
@@ -1084,5 +1086,182 @@ describe("buildFileReadManifest — Plan B stable formatter (cache breakpoint #2
     expect(lines[0]).toContain("a_first");
     expect(lines[1]).toContain("m_middle");
     expect(lines[2]).toContain("z_last");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 6.A — LRU eviction cap (MANIFEST_MAX_ENTRIES = 8)
+// ---------------------------------------------------------------------------
+
+describe("buildFileReadManifest — LRU eviction cap (Phase 6.A)", () => {
+  it("T.cap-stable: exactly MANIFEST_MAX_ENTRIES files — capped:false, all present", () => {
+    const reads = Array.from({ length: MANIFEST_MAX_ENTRIES }, (_, i) => ({
+      path: `src/file${i}.ts`,
+      startLine: 1,
+      endLine: 10,
+    }));
+    const turns = makeReadFileTurns(reads);
+    const result = buildFileReadManifest(turns, allCandidateClassifications(turns));
+    expect(result.capped).toBe(false);
+    expect(result.entryCount).toBe(MANIFEST_MAX_ENTRIES);
+    for (let i = 0; i < MANIFEST_MAX_ENTRIES; i++) {
+      expect(result.manifest).toContain(`src/file${i}.ts`);
+    }
+  });
+
+  it("T.eviction: oldest-read file evicted when MANIFEST_MAX_ENTRIES+1 files read", () => {
+    // a-oldest.ts is read first; 8 newer files follow — a-oldest.ts must be evicted
+    const reads = [
+      { path: "src/a-oldest.ts", startLine: 1, endLine: 10 },
+      ...Array.from({ length: MANIFEST_MAX_ENTRIES }, (_, i) => ({
+        path: `src/b-newer-${i}.ts`,
+        startLine: 1,
+        endLine: 10,
+      })),
+    ];
+    const turns = makeReadFileTurns(reads);
+    const result = buildFileReadManifest(turns, allCandidateClassifications(turns));
+    expect(result.capped).toBe(true);
+    expect(result.entryCount).toBe(MANIFEST_MAX_ENTRIES);
+    expect(result.manifest).not.toContain("a-oldest.ts");
+    for (let i = 0; i < MANIFEST_MAX_ENTRIES; i++) {
+      expect(result.manifest).toContain(`b-newer-${i}.ts`);
+    }
+  });
+
+  it("T.freshness: re-reading an existing file does not grow the set past cap", () => {
+    const reads = [
+      ...Array.from({ length: MANIFEST_MAX_ENTRIES }, (_, i) => ({
+        path: `src/file${i}.ts`,
+        startLine: 1,
+        endLine: 10,
+      })),
+      // re-read file0 with a different range — still only MANIFEST_MAX_ENTRIES unique files
+      { path: "src/file0.ts", startLine: 50, endLine: 100 },
+    ];
+    const turns = makeReadFileTurns(reads);
+    const result = buildFileReadManifest(turns, allCandidateClassifications(turns));
+    expect(result.capped).toBe(false);
+    expect(result.entryCount).toBe(MANIFEST_MAX_ENTRIES);
+    expect(result.manifest).toContain("src/file0.ts");
+  });
+
+  it("T.bytes: same input produces byte-identical manifest on repeated calls", () => {
+    const reads = Array.from({ length: MANIFEST_MAX_ENTRIES }, (_, i) => ({
+      path: `src/stable${i}.ts`,
+      startLine: 1,
+      endLine: 10,
+    }));
+    const turns = makeReadFileTurns(reads);
+    const r1 = buildFileReadManifest(turns, allCandidateClassifications(turns));
+    const r2 = buildFileReadManifest(turns, allCandidateClassifications(turns));
+    expect(r1.manifest).toBe(r2.manifest);
+    expect(r1.capped).toBe(r2.capped);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 6.A — ManifestInjectionProcessor [zone-manifest-set-growth] telemetry
+// ---------------------------------------------------------------------------
+
+describe("ManifestInjectionProcessor — [zone-manifest-set-growth] telemetry (Phase 6.A)", () => {
+  function makeCtx(emitFn: ProcessorContext["emit"]): ProcessorContext {
+    return { iter: 0, runId: "test-run", toolCallLog: [], pollingState: new Map(), emit: emitFn };
+  }
+
+  function makeProc() {
+    return new ManifestInjectionProcessor({ kind: "manifest_injection" });
+  }
+
+  function growthCalls(emitMock: ReturnType<typeof vi.fn>) {
+    return emitMock.mock.calls.filter((c) => c[1] === "[zone-manifest-set-growth]");
+  }
+
+  // classifyTurns marks turns as CANDIDATE only when there are recency-guard
+  // messages after the reads. Wrap bare read turns with system/user header and
+  // trailing assistant/user/assistant so classifyTurns sees them as older reads.
+  function withGuards(inner: ChatCompletionMessageParam[]): ChatCompletionMessageParam[] {
+    return [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      ...inner,
+      { role: "assistant", content: "summary" },
+      { role: "user", content: "next step" },
+      { role: "assistant", content: "done" },
+    ];
+  }
+
+  it("T.first-call: no [zone-manifest-set-growth] emission on first iteration", () => {
+    const emit = vi.fn();
+    const proc = makeProc();
+    const turns = withGuards(makeReadFileTurns([{ path: "src/a.ts", startLine: 1, endLine: 10 }]));
+    proc.process(turns, makeCtx(emit));
+    expect(growthCalls(emit)).toHaveLength(0);
+  });
+
+  it("T.same-set: no emission when second call sees identical file set", () => {
+    const emit = vi.fn();
+    const proc = makeProc();
+    const turns = withGuards(makeReadFileTurns([{ path: "src/a.ts", startLine: 1, endLine: 10 }]));
+    proc.process(turns, makeCtx(emit));
+    emit.mockClear();
+    proc.process(turns, makeCtx(emit));
+    expect(growthCalls(emit)).toHaveLength(0);
+  });
+
+  it("T.add-file: emits with addedFiles when a new file joins within cap", () => {
+    const emit = vi.fn();
+    const proc = makeProc();
+    const turns1 = withGuards(makeReadFileTurns([
+      { path: "src/a.ts", startLine: 1, endLine: 10 },
+      { path: "src/b.ts", startLine: 1, endLine: 10 },
+    ]));
+    proc.process(turns1, makeCtx(emit));
+    emit.mockClear();
+    const turns2 = withGuards(makeReadFileTurns([
+      { path: "src/a.ts", startLine: 1, endLine: 10 },
+      { path: "src/b.ts", startLine: 1, endLine: 10 },
+      { path: "src/c.ts", startLine: 1, endLine: 10 },
+    ]));
+    proc.process(turns2, makeCtx(emit));
+    const calls = growthCalls(emit);
+    expect(calls).toHaveLength(1);
+    const payload = calls[0][2] as { addedFiles: string[]; droppedFiles: string[]; cappedAtMax: boolean };
+    expect(payload.addedFiles).toContain("src/c.ts");
+    expect(payload.droppedFiles).toHaveLength(0);
+    expect(payload.cappedAtMax).toBe(false);
+  });
+
+  it("T.at-cap: emits with droppedFiles + cappedAtMax:true when cap evicts oldest", () => {
+    const emit = vi.fn();
+    const proc = makeProc();
+    // Establish MANIFEST_MAX_ENTRIES files — oldest is a-oldest.ts (read first)
+    const reads8 = [
+      { path: "src/a-oldest.ts", startLine: 1, endLine: 10 },
+      ...Array.from({ length: MANIFEST_MAX_ENTRIES - 1 }, (_, i) => ({
+        path: `src/z-file${i}.ts`,
+        startLine: 1,
+        endLine: 10,
+      })),
+    ];
+    proc.process(withGuards(makeReadFileTurns(reads8)), makeCtx(emit));
+    emit.mockClear();
+    // Second call: same 8 files PLUS one new file — cap fires, a-oldest.ts evicted
+    const reads9 = [
+      { path: "src/a-oldest.ts", startLine: 1, endLine: 10 },
+      ...Array.from({ length: MANIFEST_MAX_ENTRIES - 1 }, (_, i) => ({
+        path: `src/z-file${i}.ts`,
+        startLine: 1,
+        endLine: 10,
+      })),
+      { path: "src/new.ts", startLine: 1, endLine: 10 },
+    ];
+    proc.process(withGuards(makeReadFileTurns(reads9)), makeCtx(emit));
+    const calls = growthCalls(emit);
+    expect(calls).toHaveLength(1);
+    const payload = calls[0][2] as { addedFiles: string[]; droppedFiles: string[]; cappedAtMax: boolean };
+    expect(payload.addedFiles).toContain("src/new.ts");
+    expect(payload.droppedFiles).toContain("src/a-oldest.ts");
+    expect(payload.cappedAtMax).toBe(true);
   });
 });

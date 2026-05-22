@@ -10,7 +10,7 @@ import {
   type ToolCallRecord,
 } from "./types.js";
 
-export const MANIFEST_MAX_ENTRIES = 20;
+export const MANIFEST_MAX_ENTRIES = 8;
 
 /**
  * Build a deterministic file-read manifest from CANDIDATE tool turns (J.3).
@@ -31,7 +31,7 @@ export interface ManifestEntry {
 export function buildFileReadManifest(
   responseInput: ChatCompletionMessageParam[],
   classified: ClassifiedTurn[]
-): { manifest: string; truncated: boolean; entryCount: number; structuredEntries: ManifestEntry[] } {
+): { manifest: string; truncated: boolean; entryCount: number; structuredEntries: ManifestEntry[]; capped: boolean } {
   // Build callId → {filePath, lineRange} by parsing assistant tool_call args in responseInput.
   const readCallArgs = new Map<string, { filePath: string; lineRange: [number, number] | null }>();
   for (const msg of responseInput) {
@@ -57,6 +57,7 @@ export function buildFileReadManifest(
 
   interface RangeEntry { startLine: number | null; endLine: number | null; readCount: number; }
   const entries = new Map<string, { path: string; ranges: RangeEntry[] }>();
+  const lastSeen = new Map<string, number>();
 
   for (let i = 0; i < responseInput.length; i++) {
     if (classified[i]?.class !== TurnClass.CANDIDATE) continue;
@@ -79,21 +80,26 @@ export function buildFileReadManifest(
     } else {
       entry.ranges.push({ startLine, endLine, readCount: 1 });
     }
+    lastSeen.set(filePath, i);
   }
 
-  // Alphabetical sort before slice for deterministic top-N selection.
-  // Manifest text serializes only file paths — no read counts, no line ranges,
-  // no truncation footer. Keeps the manifest hash invariant across re-reads of
-  // the same file set (cache breakpoint #2 stability). `truncated` boolean still
-  // returned for telemetry; per-file readCount + lineRange still in structuredEntries.
-  const allEntries = Array.from(entries.values()).sort((a, b) =>
-    a.path.localeCompare(b.path)
-  );
-  const truncated = allEntries.length > MANIFEST_MAX_ENTRIES;
-  const finalEntries = allEntries.slice(0, MANIFEST_MAX_ENTRIES);
+  // LRU eviction: when more than MANIFEST_MAX_ENTRIES distinct files have been read,
+  // evict the oldest-read file (lowest responseInput message index in lastSeen) so the
+  // manifest set size stays bounded and Anthropic cache breakpoint #2 stabilizes.
+  // Alphabetical re-sort AFTER eviction preserves byte-stable manifest text.
+  // `truncated` preserved for call-site compatibility (maps 1:1 to `capped`).
+  const allEntries = Array.from(entries.values());
+  const capped = allEntries.length > MANIFEST_MAX_ENTRIES;
+  if (capped) {
+    allEntries.sort((a, b) => (lastSeen.get(b.path) ?? 0) - (lastSeen.get(a.path) ?? 0));
+    allEntries.splice(MANIFEST_MAX_ENTRIES);
+  }
+  allEntries.sort((a, b) => a.path.localeCompare(b.path));
+  const truncated = capped;
+  const finalEntries = allEntries;
 
   if (finalEntries.length === 0) {
-    return { manifest: "", truncated: false, entryCount: 0, structuredEntries: [] };
+    return { manifest: "", truncated: false, entryCount: 0, structuredEntries: [], capped: false };
   }
 
   const lines = finalEntries.map((e) => `- ${e.path}`);
@@ -112,7 +118,7 @@ export function buildFileReadManifest(
     return { filePath: e.path, readCount: totalReadCount, lineRange };
   });
 
-  return { manifest, truncated, entryCount: finalEntries.length, structuredEntries };
+  return { manifest, truncated, entryCount: finalEntries.length, structuredEntries, capped };
 }
 
 export class ContextCompactor {

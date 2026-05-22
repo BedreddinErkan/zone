@@ -226,6 +226,26 @@ export function emitAgentFinalAssessment(data: AgentFinalAssessmentData): void {
 }
 
 // ---------------------------------------------------------------------------
+// emitManifestSetGrowth — [zone-manifest-set-growth]
+// Emitted by ManifestInjectionProcessor when the file-read manifest entry set
+// changes between iterations (file added or evicted by LRU cap, Phase 6.A).
+// ---------------------------------------------------------------------------
+
+export interface ManifestSetGrowthData {
+  runId: string | null | undefined;
+  iter: number;
+  prevEntryCount: number;
+  newEntryCount: number;
+  addedFiles: string[];
+  droppedFiles: string[];
+  cappedAtMax: boolean;
+}
+
+export function emitManifestSetGrowth(data: ManifestSetGrowthData): void {
+  log("[zone-manifest-set-growth]", JSON.stringify(data));
+}
+
+// ---------------------------------------------------------------------------
 // Re-export IterCostUpdatePayload for callers that spread lastIterCostPayload
 // but also need the type without an extra import.
 // ---------------------------------------------------------------------------
