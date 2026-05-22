@@ -5075,7 +5075,7 @@ const initializeTodosFromPlan = (): void => {
   // Agentic tool loop execution mode (tool calling + direct writes).
   const _useAgentLoop = shouldUseAgentLoop(input.task);
   const _forceFlowEnv = String(process.env["ZONE_FORCE_FLOW"] || "").trim().toLowerCase() || null;
-  debugLog("[zone-flow-branch]", JSON.stringify({
+  log("[zone-flow-branch]", JSON.stringify({
     branch: _useAgentLoop ? "agent_loop" : "plan_full_patch",
     task: input.task.slice(0, 200),
     reason: _forceFlowEnv
