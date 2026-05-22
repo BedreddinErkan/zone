@@ -1,0 +1,375 @@
+import { vi, describe, it, expect, beforeEach } from "vitest";
+
+vi.mock("../subagentDispatch.js", () => ({
+  handleSubagentResult: vi.fn(),
+  logSubagentDispatched: vi.fn(),
+}));
+
+import { handleToolResult } from "./handleToolResult.js";
+import type { ToolEventContext, HandleToolResultDeps } from "./types.js";
+import type { Mock } from "vitest";
+import { handleSubagentResult } from "../subagentDispatch.js";
+
+const mockHandleSubagentResult = handleSubagentResult as Mock;
+
+function makeCtx(overrides?: Partial<ToolEventContext>): ToolEventContext {
+  return {
+    toolCallLog: [],
+    filesModified: new Set(),
+    filesReadThisRun: new Set(),
+    failureHistory: new Map(),
+    responseInput: [],
+    failedFilesThisIter: new Set(),
+    failureDetected: false,
+    failedToolName: "",
+    failedToolOutput: "",
+    failedToolError: "",
+    failedToolFilePath: null,
+    rollbackCount: 0,
+    ...overrides,
+  };
+}
+
+function makeDeps(overrides?: Partial<HandleToolResultDeps>): HandleToolResultDeps {
+  const budget = {
+    recordSubagentResult: vi.fn().mockReturnValue({ ratio: 0.1 }),
+    recordSubagentCostOnly: vi.fn(),
+    subagentTokenTotal: 0,
+    subagentCostTotal: 0,
+    mainAgentTokens: 0,
+    iterCostAccumulator: { total_cost: 0 } as never,
+    lastIterCostPayload: null,
+  };
+  return {
+    budget: budget as never,
+    iter: 0,
+    runId: "run-1",
+    effectiveTokenBudgetCap: 100_000,
+    tokenBudgetHardThreshold: 0.95,
+    detectorState: { window: [] },
+    throwIfAborted: vi.fn(),
+    onStructuredEvent: vi.fn(),
+    onToolResult: vi.fn(),
+    synthesizeTokenBudgetExit: vi.fn().mockResolvedValue({
+      success: false,
+      terminationReason: "token_budget_exceeded",
+      summary: "budget exceeded",
+      toolCallLog: [],
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted",
+    }),
+    synthesizeLoopDetectedExit: vi.fn().mockReturnValue({
+      success: false,
+      terminationReason: "loop_detected",
+      summary: "loop detected",
+      toolCallLog: [],
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted",
+      loopDetected: { toolName: "run_command", count: 5 },
+    }),
+    classifyFailure: vi.fn().mockReturnValue("generic_failure"),
+    extractSemanticSmellName: vi.fn().mockReturnValue("unknown"),
+    extractErrorLine: vi.fn().mockReturnValue(null),
+    hashPatchBlocks: vi.fn().mockReturnValue("hash-patch"),
+    hashToolCall: vi.fn().mockReturnValue("hash-tool"),
+    recordAndDetect: vi.fn().mockReturnValue({ status: "ok", count: 1 }),
+    ...overrides,
+  };
+}
+
+const SUCCESS_RESULT = { output: "ok", success: true };
+const FAILURE_RESULT = { output: "Error: something failed", success: false, error: "something failed" };
+
+describe("handleToolResult", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockHandleSubagentResult.mockReturnValue({ subagentTokenDelta: 0, subagentCostDelta: 0 });
+  });
+
+  describe("normal flow", () => {
+    it("returns {kind:'continue'} for a successful run_command", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      const result = await handleToolResult("run_command", {}, "call-1", SUCCESS_RESULT, ctx, deps);
+      expect(result.kind).toBe("continue");
+    });
+
+    it("pushes to toolCallLog with correct shape", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      const longOutput = "x".repeat(5000);
+      await handleToolResult("run_command", { cmd: "npm test" }, "call-1", { output: longOutput, success: true }, ctx, deps);
+      expect(ctx.toolCallLog).toHaveLength(1);
+      expect(ctx.toolCallLog[0]).toEqual({
+        id: "call-1",
+        tool: "run_command",
+        args: { cmd: "npm test" },
+        result: longOutput.slice(0, 4000),
+        success: true,
+      });
+    });
+
+    it("calls throwIfAborted and onToolResult early in the call", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      const order: string[] = [];
+      (deps.throwIfAborted as Mock).mockImplementation(() => order.push("aborted"));
+      (deps.onToolResult as Mock).mockImplementation(() => order.push("toolResult"));
+      await handleToolResult("run_command", {}, "c1", SUCCESS_RESULT, ctx, deps);
+      expect(order).toContain("aborted");
+      expect(order).toContain("toolResult");
+      expect(order.indexOf("aborted")).toBeLessThan(order.indexOf("toolResult") + 1);
+    });
+  });
+
+  describe("read_file", () => {
+    it("adds filePath to filesReadThisRun on success", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      await handleToolResult("read_file", { filePath: "src/foo.ts" }, "c1", SUCCESS_RESULT, ctx, deps);
+      expect(ctx.filesReadThisRun.has("src/foo.ts")).toBe(true);
+    });
+
+    it("does NOT add filePath to filesReadThisRun on failure", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      await handleToolResult("read_file", { filePath: "src/foo.ts" }, "c1", FAILURE_RESULT, ctx, deps);
+      expect(ctx.filesReadThisRun.has("src/foo.ts")).toBe(false);
+    });
+  });
+
+  describe("apply_patch failure", () => {
+    it("sets failure flags when apply_patch fails", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      await handleToolResult(
+        "apply_patch",
+        { filePath: "src/bar.ts" },
+        "c1",
+        { output: "Error: patch rejected", success: false, error: "patch rejected" },
+        ctx,
+        deps
+      );
+      expect(ctx.failureDetected).toBe(true);
+      expect(ctx.failedToolName).toBe("apply_patch");
+      expect(ctx.failedToolOutput).toBe("Error: patch rejected");
+      expect(ctx.failedToolError).toBe("patch rejected");
+      expect(ctx.failedToolFilePath).toBe("src/bar.ts");
+    });
+
+    it("adds filePath to failedFilesThisIter and failureHistory on apply_patch failure", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      await handleToolResult(
+        "apply_patch",
+        { filePath: "src/baz.ts" },
+        "c1",
+        { output: "Error: conflict", success: false },
+        ctx,
+        deps
+      );
+      expect(ctx.failedFilesThisIter.has("src/baz.ts")).toBe(true);
+      expect(ctx.failureHistory.has("src/baz.ts")).toBe(true);
+      const entries = ctx.failureHistory.get("src/baz.ts")!;
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({ iter: 1 }); // iter+1
+    });
+  });
+
+  describe("apply_patch APPLY_ROLLED_BACK", () => {
+    it("increments rollbackCount when output starts with APPLY_ROLLED_BACK", async () => {
+      const ctx = makeCtx({ rollbackCount: 2 });
+      const deps = makeDeps();
+      await handleToolResult(
+        "apply_patch",
+        { filePath: "src/x.ts" },
+        "c1",
+        { output: "APPLY_ROLLED_BACK: tests regressed", success: false },
+        ctx,
+        deps
+      );
+      expect(ctx.rollbackCount).toBe(3);
+    });
+
+    it("does NOT increment rollbackCount for regular apply_patch failure", async () => {
+      const ctx = makeCtx({ rollbackCount: 1 });
+      const deps = makeDeps();
+      await handleToolResult(
+        "apply_patch",
+        { filePath: "src/x.ts" },
+        "c1",
+        { output: "Error: file not found", success: false },
+        ctx,
+        deps
+      );
+      expect(ctx.rollbackCount).toBe(1);
+    });
+  });
+
+  describe("filesModified", () => {
+    it("adds filePath to filesModified for write_file success", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      await handleToolResult("write_file", { filePath: "src/new.ts" }, "c1", SUCCESS_RESULT, ctx, deps);
+      expect(ctx.filesModified.has("src/new.ts")).toBe(true);
+    });
+
+    it("adds filePath to filesModified for apply_patch success", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      await handleToolResult("apply_patch", { filePath: "src/existing.ts" }, "c1", SUCCESS_RESULT, ctx, deps);
+      expect(ctx.filesModified.has("src/existing.ts")).toBe(true);
+    });
+  });
+
+  describe("Task tool", () => {
+    it("returns {kind:'continue'} when subagent token ratio stays below threshold", async () => {
+      mockHandleSubagentResult.mockReturnValue({ subagentTokenDelta: 5000, subagentCostDelta: 0.01 });
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      (deps.budget.recordSubagentResult as Mock).mockReturnValue({ ratio: 0.5 });
+      const result = await handleToolResult(
+        "Task",
+        { prompt: "do something" },
+        "c1",
+        { output: JSON.stringify({ filesModified: [], tokenUsage: { total: 5000 } }), success: true },
+        ctx,
+        deps
+      );
+      expect(result.kind).toBe("continue");
+    });
+
+    it("returns {kind:'early_exit'} when subagent token ratio exceeds hard threshold", async () => {
+      mockHandleSubagentResult.mockReturnValue({ subagentTokenDelta: 95_000, subagentCostDelta: 1.0 });
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      (deps.budget.recordSubagentResult as Mock).mockReturnValue({ ratio: 0.97 });
+      const result = await handleToolResult(
+        "Task",
+        { prompt: "big task" },
+        "c1",
+        { output: JSON.stringify({ filesModified: [], tokenUsage: { total: 95_000 } }), success: true },
+        ctx,
+        deps
+      );
+      expect(result.kind).toBe("early_exit");
+      if (result.kind === "early_exit") {
+        expect(result.exit.terminationReason).toBe("token_budget_exceeded");
+      }
+    });
+
+    it("calls recordSubagentCostOnly (not recordSubagentResult) when subagentTokenDelta is 0", async () => {
+      mockHandleSubagentResult.mockReturnValue({ subagentTokenDelta: 0, subagentCostDelta: 0.05 });
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      await handleToolResult(
+        "Task",
+        { prompt: "zero tokens" },
+        "c1",
+        { output: JSON.stringify({ filesModified: [] }), success: true },
+        ctx,
+        deps
+      );
+      expect(deps.budget.recordSubagentCostOnly).toHaveBeenCalledWith(0.05);
+      expect(deps.budget.recordSubagentResult).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("loop detector", () => {
+    it("returns {kind:'early_exit'} when recordAndDetect returns terminate", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps({
+        recordAndDetect: vi.fn().mockReturnValue({ status: "terminate", count: 5 }),
+      });
+      const result = await handleToolResult("run_command", { cmd: "npm test" }, "c1", SUCCESS_RESULT, ctx, deps);
+      expect(result.kind).toBe("early_exit");
+      if (result.kind === "early_exit") {
+        expect(result.exit.terminationReason).toBe("loop_detected");
+      }
+    });
+
+    it("emits loop_detected_terminal SSE event on terminate", async () => {
+      const ctx = makeCtx();
+      const onStructuredEvent = vi.fn();
+      const deps = makeDeps({
+        recordAndDetect: vi.fn().mockReturnValue({ status: "terminate", count: 5 }),
+        onStructuredEvent,
+      });
+      await handleToolResult("run_command", {}, "c1", SUCCESS_RESULT, ctx, deps);
+      expect(onStructuredEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "loop_detected_terminal" })
+      );
+    });
+
+    it("returns {kind:'continue'} when recordAndDetect returns ok", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps({
+        recordAndDetect: vi.fn().mockReturnValue({ status: "ok", count: 1 }),
+      });
+      const result = await handleToolResult("run_command", {}, "c1", SUCCESS_RESULT, ctx, deps);
+      expect(result.kind).toBe("continue");
+    });
+  });
+
+  describe("ordering invariant", () => {
+    it("failure flags set BEFORE responseInput.push", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      let failureDetectedAtPush = false;
+      const origPush = ctx.responseInput.push.bind(ctx.responseInput);
+      ctx.responseInput.push = (...args) => {
+        failureDetectedAtPush = ctx.failureDetected;
+        return origPush(...args);
+      };
+      await handleToolResult(
+        "run_command",
+        {},
+        "c1",
+        FAILURE_RESULT,
+        ctx,
+        deps
+      );
+      expect(failureDetectedAtPush).toBe(true);
+    });
+
+    it("responseInput.push called exactly once per non-early-exit call", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      const pushSpy = vi.spyOn(ctx.responseInput, "push");
+      await handleToolResult("run_command", {}, "c1", SUCCESS_RESULT, ctx, deps);
+      expect(pushSpy).toHaveBeenCalledOnce();
+    });
+
+    it("early_exit from token budget: responseInput push happens before exit (for tool reply)", async () => {
+      mockHandleSubagentResult.mockReturnValue({ subagentTokenDelta: 95_000, subagentCostDelta: 0 });
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      (deps.budget.recordSubagentResult as Mock).mockReturnValue({ ratio: 0.99 });
+      let responseInputLenAtSynthesize = -1;
+      (deps.synthesizeTokenBudgetExit as Mock).mockImplementation(async (_iter, messages) => {
+        responseInputLenAtSynthesize = messages.length;
+        return {
+          success: false,
+          terminationReason: "token_budget_exceeded",
+          summary: "budget",
+          toolCallLog: [],
+          filesModified: [],
+          patchValidatedByAgent: false,
+          verificationReason: "no_verification_attempted",
+        };
+      });
+      await handleToolResult(
+        "Task",
+        { prompt: "big" },
+        "c1",
+        { output: JSON.stringify({ filesModified: [], tokenUsage: { total: 95_000 } }), success: true },
+        ctx,
+        deps
+      );
+      // synthesizeTokenBudgetExit receives messages that include the tool reply
+      expect(responseInputLenAtSynthesize).toBeGreaterThan(0);
+    });
+  });
+});

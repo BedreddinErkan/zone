@@ -5,3 +5,4 @@ export type {
   FailureSignal,
   HandleToolResultDeps,
 } from "./types.js";
+export { handleToolResult } from "./handleToolResult.js";
