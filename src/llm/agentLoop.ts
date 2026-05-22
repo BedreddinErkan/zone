@@ -29,10 +29,6 @@ import {
   emitTierConstraints,
   emitCoachingRule,
   emitCommandCacheSummary,
-  emitApplyRolledBackFeedback,
-  emitApplyRolledBackMarker,
-  emitVerifyWarnSurfaced,
-  emitAgentFinalAssessment,
 } from "./loopTelemetry.js";
 import type { TaskArchetype, TaskClassification, TaskTier } from "./taskClassifier.js";
 import { resolveTierLimits } from "./tierLimits.js";
@@ -96,11 +92,8 @@ import {
   validateUnrelatedClaim,
   validatePassedClaim,
   applyNoInfraVerificationOverride,
-  verifyAndFinalize,
-  parseVerificationTag,
-  stripVerificationTag,
 } from "./verification/index.js";
-import { didApplyPatch } from "./verification/logUtils.js";
+import { finalizeRun } from "./runCompletion/index.js";
 
 // "plan" kept as accepted input for backward compat — normalizeAgentLoopMode maps it to "patch"
 type AgentLoopMode = Exclude<Mode, "auto"> | "investigation" | "plan";
@@ -3402,209 +3395,33 @@ Example:
     }
 
     const extracted = extractResponsesApiOutputText(response);
-      if (extracted.ok && extracted.text.trim()) {
-      const finalText = extracted.text.trim();
-      if (isReadOnlyMode) {
-        emitRunBreakdownSummary();
-        emitCacheSummary();
-        emitSelfValidationSummary();
-        return {
-          success: true,
-          summary: finalText,
-          toolCallLog,
-          filesModified: [],
-          patchValidatedByAgent: false,
-          verificationReason: "no_verification_attempted",
-          terminationReason: "natural_completion",
-          tokenUsage: currentTokenUsage(),
-          costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
-          iterCount: iter + 1,
-          promotedFromArchetype,
-          promotionTrigger,
-          promotedAtIter,
-        };
-      }
-      const vrMatch = finalText.match(/\[ZONE_VERIFICATION:\s*([\w_]+)\]/i);
-      const vrRaw = vrMatch ? vrMatch[1].toLowerCase() : 'no_verification_attempted';
-      const validReasons: VerificationReason[] = [
-        'tests_passed', 'tests_skipped_no_infra', 'tests_inconclusive',
-        'tests_failed_unrelated', 'tests_failed_by_patch', 'no_verification_attempted',
-        'verification_failed_staged',
-        'no_changes_made',
-      ];
-      let verificationReason: VerificationReason =
-        (validReasons as string[]).includes(vrRaw)
-          ? (vrRaw as VerificationReason)
-          : 'no_verification_attempted';
-      if (verificationReason === "tests_passed") {
-        const passedValidation = validatePassedClaim(
-          toolCallLog,
-          input.framework ? { hasTests: input.framework.hasTests } : undefined
-        );
-        if (!passedValidation.accept) {
-          verificationReason = passedValidation.demoteTo ?? "tests_inconclusive";
-          input.onProgress?.(JSON.stringify({
-            event: "zone-agent-verdict-override",
-            triggeredBy: "natural_completion",
-            originalVerdict: "tests_passed",
-            overriddenTo: verificationReason,
-            reason: passedValidation.reason,
-          }));
-          debugLog("[zone-agent-verdict-override]", JSON.stringify({
-            triggeredBy: "natural_completion",
-            originalVerdict: "tests_passed",
-            overriddenTo: verificationReason,
-            reason: passedValidation.reason,
-          }));
-        }
-      }
-      if (verificationReason === "tests_failed_unrelated") {
-        const verdictValidation = validateUnrelatedClaim({
-          log: toolCallLog,
-          patchedFilePaths: Array.from(filesModified),
-          framework: input.framework
-            ? { hasTests: input.framework.hasTests }
-            : undefined,
-        });
-        if (!verdictValidation.accept) {
-          verificationReason = verdictValidation.demoteTo ?? "tests_inconclusive";
-          debugLog("[zone-agent-verdict-override]", JSON.stringify({
-            triggeredBy: "natural_completion",
-            originalVerdict: "tests_failed_unrelated",
-            overriddenTo: verdictValidation.demoteTo,
-            reason: verdictValidation.reason,
-          }));
-        } else if (
-          verdictValidation.reason &&
-          /resolved by a later successful run_command/i.test(verdictValidation.reason)
-        ) {
-          // Bug 44b: failure was demonstrably resolved by a later successful
-          // run_command. Promote the verdict from `tests_failed_unrelated` to
-          // `tests_passed` so the UI doesn't render a "tests failed" chip
-          // alongside a "safe to apply" badge.
-          verificationReason = "tests_passed";
-          debugLog("[zone-agent-verdict-promote]", JSON.stringify({
-            triggeredBy: "natural_completion",
-            originalVerdict: "tests_failed_unrelated",
-            promotedTo: "tests_passed",
-            reason: verdictValidation.reason,
-          }));
-        }
-      }
-      verificationReason = applyNoInfraVerificationOverride({
-        verificationReason,
-        framework: input.framework
-          ? {
-              hasTests: input.framework.hasTests,
-              testFilesDetected: input.framework.testFilesDetected,
-            }
-          : undefined,
-        patchApplied: didApplyPatch(toolCallLog),
-        triggeredBy: "natural_completion",
-      });
-      let patchValidatedByAgent =
-        verificationReason === 'tests_passed' ||
-        verificationReason === 'tests_skipped_no_infra' ||
-        verificationReason === 'tests_failed_unrelated';
-      debugLog("[zone-staging-state]", JSON.stringify({
-        stagedFileCount: stagingFiles.size,
-        stagedFiles: Array.from(stagingFiles.keys()).map((abs) => path.basename(abs)),
-        // staging-flush-bug diag: full absolute paths surface symlink/realpath drift
-        stagedAbsPaths: Array.from(stagingFiles.keys()),
-      }));
-      emitRunBreakdownSummary();
-      emitCacheSummary();
-      emitSelfValidationSummary();
-      emitAgentFinalAssessment({
-        triggeredBy: "natural_completion",
-        verificationReason,
-        patchValidatedByAgent,
-        inferredFrom: vrMatch ? "tag" : "heuristic",
-        summaryPreview: finalText.slice(0, 200),
-      });
-      const outcome = await verifyAndFinalize({
+    if (extracted.ok && extracted.text.trim()) {
+      return await finalizeRun({
+        trigger: "natural_completion",
+        finalText: extracted.text.trim(),
+        isReadOnlyMode,
+        toolCallLog,
+        filesModified,
         stagingFiles,
-        repoPath: input.repoPath,
-        framework: input.framework,
+        ownsStagingFiles,
         withStagingTempFlush,
         verifyMode,
-        ownsStagingFiles,
-      });
-      let summaryAppendix = "";
-      switch (outcome.kind) {
-        case "no_change":
-          verificationReason = "no_changes_made";
-          patchValidatedByAgent = false;
-          break;
-        case "pre_existing_errors":
-          verificationReason = "tests_inconclusive";
-          patchValidatedByAgent = false;
-          summaryAppendix = outcome.appendix;
-          break;
-        case "rolled_back":
-          verificationReason = "verification_regressed";
-          patchValidatedByAgent = false;
-          summaryAppendix = outcome.appendix;
-          emitApplyRolledBackFeedback({
-            site: "natural_completion",
-            label: outcome.verification.label,
-            durationMs: outcome.verification.durationMs,
-            baselineErrorCount: outcome.verification.baselineErrorCount,
-            postErrorCount: outcome.verification.postErrorCount,
-            errorCount: outcome.errors.length,
-            filePathsRestored: outcome.restoredFiles,
-            runId: input.runId ?? null,
-          });
-          emitApplyRolledBackMarker({
-            site: "natural_completion",
-            markerMessage: outcome.appendix.trimStart(),
-            errors: outcome.errors,
-            filePathsRestored: outcome.restoredFiles,
-            runId: input.runId ?? null,
-          });
-          break;
-        case "applied_with_warnings":
-          // Phase F.2 warn-mode: patches on disk; reason distinguishes from true rollback
-          // so downstream UI doesn't claim disk-restore.
-          verificationReason = "verification_warnings";
-          patchValidatedByAgent = false;
-          summaryAppendix = outcome.appendix;
-          emitVerifyWarnSurfaced({
-            site: "natural_completion",
-            label: outcome.verification.label,
-            durationMs: outcome.verification.durationMs,
-            baselineErrorCount: outcome.verification.baselineErrorCount,
-            postErrorCount: outcome.verification.postErrorCount,
-            errorCount: outcome.errors.length,
-            runId: input.runId ?? null,
-          });
-          break;
-        case "applied":
-        case "skipped":
-          // verificationReason already set by the pre-finalize chain; no override needed
-          break;
-      }
-      return {
-        success: true,
-        summary: finalText + summaryAppendix,
-        toolCallLog,
-        filesModified: Array.from(filesModified),
-        patchValidatedByAgent,
-        verificationReason,
-        terminationReason: "natural_completion",
-        tokenUsage: currentTokenUsage(),
-        costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+        framework: input.framework,
+        repoPath: input.repoPath,
         iterCount: iter + 1,
+        costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+        tokenUsage: currentTokenUsage(),
         promotedFromArchetype,
         promotionTrigger,
         promotedAtIter,
-        // Phase J.3.1: forward the staging snapshot so runLlmPatchFlow can
-        // render the rolled-back diff. Only meaningful when
-        // verificationReason === "verification_regressed".
-        ...(outcome.kind === "rolled_back"
-          ? { discardedStaging: outcome.discardedStaging }
-          : {}),
-      };
+        onProgress: input.onProgress,
+        runId: input.runId,
+        emit: {
+          runBreakdownSummary: emitRunBreakdownSummary,
+          cacheSummary: emitCacheSummary,
+          selfValidationSummary: emitSelfValidationSummary,
+        },
+      });
     }
 
     // If we got neither tool calls nor text, keep looping (rare).
@@ -3642,38 +3459,35 @@ Example:
     } catch {
       // Keep the fallback summary.
     }
-    emitRunBreakdownSummary();
-    emitCacheSummary();
-    emitSelfValidationSummary();
-    return {
-      success: false,
-      summary: finalSummary,
+    return await finalizeRun({
+      trigger: "max_iterations_readonly",
+      finalText: finalSummary,
       toolCallLog,
-      filesModified: [],
-      patchValidatedByAgent: false,
-      verificationReason: "no_verification_attempted",
-      terminationReason: "max_iterations",
-      tokenUsage: currentTokenUsage(),
-      costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+      filesModified,
+      stagingFiles,
+      ownsStagingFiles,
+      withStagingTempFlush,
+      verifyMode,
+      framework: input.framework,
+      repoPath: input.repoPath,
       iterCount: completedIterCount,
+      costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+      tokenUsage: currentTokenUsage(),
       promotedFromArchetype,
       promotionTrigger,
       promotedAtIter,
-    };
+      onProgress: input.onProgress,
+      runId: input.runId,
+      emit: {
+        runBreakdownSummary: emitRunBreakdownSummary,
+        cacheSummary: emitCacheSummary,
+        selfValidationSummary: emitSelfValidationSummary,
+      },
+    });
   }
 
   // Max iterations hit â€” request one final no-tool assessment call
   input.onProgress?.("[agent_loop] Max iterations reached â€” requesting final assessment");
-  let finalVerificationReason: VerificationReason = inferVerificationFromLog(
-    toolCallLog,
-    input.framework
-      ? {
-          hasTests: input.framework.hasTests,
-          testFilesDetected: input.framework.testFilesDetected,
-        }
-      : undefined
-  );
-  let inferredFrom: "tag" | "heuristic" = "heuristic";
   let finalSummary = "Max iterations reached";
   const grantedBonus = iterationBudget.escalationBonusGranted
     ? ` (including ${ESCALATION_BONUS_ITERATIONS} bonus iterations granted after escalation)`
@@ -3718,182 +3532,34 @@ Example:
     const ae = extractResponsesApiOutputText(assessmentResponse);
       if (ae.ok && ae.text.trim()) {
         finalSummary = ae.text.trim();
-        const tagged = parseVerificationTag(finalSummary);
-        if (tagged) {
-          // Strip the tag from the text so downstream consumers (CLI, web UI) don't display it.
-          finalSummary = stripVerificationTag(finalSummary);
-          finalVerificationReason = tagged;
-          inferredFrom = "tag";
-          if (finalVerificationReason === "tests_passed") {
-            const passedValidation = validatePassedClaim(
-              toolCallLog,
-              input.framework ? { hasTests: input.framework.hasTests } : undefined
-            );
-            if (!passedValidation.accept) {
-              finalVerificationReason =
-                passedValidation.demoteTo ?? "tests_inconclusive";
-              input.onProgress?.(JSON.stringify({
-                event: "zone-agent-verdict-override",
-                triggeredBy: "max_iterations",
-                originalVerdict: "tests_passed",
-                overriddenTo: finalVerificationReason,
-                reason: passedValidation.reason,
-              }));
-              debugLog("[zone-agent-verdict-override]", JSON.stringify({
-                triggeredBy: "max_iterations",
-                originalVerdict: "tests_passed",
-                overriddenTo: finalVerificationReason,
-                reason: passedValidation.reason,
-              }));
-            }
-          }
-          if (finalVerificationReason === "tests_failed_unrelated") {
-            const verdictValidation = validateUnrelatedClaim({
-              log: toolCallLog,
-              patchedFilePaths: Array.from(filesModified),
-              framework: input.framework
-                ? { hasTests: input.framework.hasTests }
-                : undefined,
-            });
-            if (!verdictValidation.accept) {
-              finalVerificationReason =
-                verdictValidation.demoteTo ?? "tests_inconclusive";
-              debugLog("[zone-agent-verdict-override]", JSON.stringify({
-                triggeredBy: "max_iterations",
-                originalVerdict: "tests_failed_unrelated",
-                overriddenTo: verdictValidation.demoteTo,
-                reason: verdictValidation.reason,
-              }));
-            } else if (
-              verdictValidation.reason &&
-              /resolved by a later successful run_command/i.test(verdictValidation.reason)
-            ) {
-              // Bug 44b: see natural_completion site for rationale.
-              finalVerificationReason = "tests_passed";
-              debugLog("[zone-agent-verdict-promote]", JSON.stringify({
-                triggeredBy: "max_iterations",
-                originalVerdict: "tests_failed_unrelated",
-                promotedTo: "tests_passed",
-                reason: verdictValidation.reason,
-              }));
-            }
-          }
-        }
-        finalVerificationReason = applyNoInfraVerificationOverride({
-          verificationReason: finalVerificationReason,
-          framework: input.framework
-            ? {
-                hasTests: input.framework.hasTests,
-                testFilesDetected: input.framework.testFilesDetected,
-              }
-            : undefined,
-          patchApplied: didApplyPatch(toolCallLog),
-          triggeredBy: "max_iterations",
-        });
       }
   } catch {
     // Best-effort â€” fall through with heuristic
   }
 
-  let patchValidatedByAgent =
-    finalVerificationReason === "tests_passed" ||
-    finalVerificationReason === "tests_skipped_no_infra" ||
-    finalVerificationReason === "tests_failed_unrelated";
-
-  debugLog("[zone-staging-state]", JSON.stringify({
-    stagedFileCount: stagingFiles.size,
-    stagedFiles: Array.from(stagingFiles.keys()).map((abs) => path.basename(abs)),
-  }));
-  emitRunBreakdownSummary();
-  emitCacheSummary();
-  emitSelfValidationSummary();
-  emitAgentFinalAssessment({
-    triggeredBy: "max_iterations",
-    finalVerificationReason,
-    inferredFrom,
-    patchValidatedByAgent,
-  });
-
-  const outcome = await verifyAndFinalize({
+  return await finalizeRun({
+    trigger: "max_iterations",
+    finalText: finalSummary,
+    toolCallLog,
+    filesModified,
     stagingFiles,
-    repoPath: input.repoPath,
-    framework: input.framework,
+    ownsStagingFiles,
     withStagingTempFlush,
     verifyMode,
-    ownsStagingFiles,
-  });
-  switch (outcome.kind) {
-    case "no_change":
-      finalVerificationReason = "no_changes_made";
-      patchValidatedByAgent = false;
-      break;
-    case "pre_existing_errors":
-      finalVerificationReason = "tests_inconclusive";
-      patchValidatedByAgent = false;
-      finalSummary = finalSummary + outcome.appendix;
-      break;
-    case "rolled_back":
-      finalVerificationReason = "verification_regressed";
-      patchValidatedByAgent = false;
-      finalSummary = finalSummary + outcome.appendix;
-      emitApplyRolledBackFeedback({
-        site: "max_iterations",
-        label: outcome.verification.label,
-        durationMs: outcome.verification.durationMs,
-        baselineErrorCount: outcome.verification.baselineErrorCount,
-        postErrorCount: outcome.verification.postErrorCount,
-        errorCount: outcome.errors.length,
-        filePathsRestored: outcome.restoredFiles,
-        runId: input.runId ?? null,
-      });
-      emitApplyRolledBackMarker({
-        site: "max_iter",
-        markerMessage: outcome.appendix.trimStart(),
-        errors: outcome.errors,
-        filePathsRestored: outcome.restoredFiles,
-        runId: input.runId ?? null,
-      });
-      break;
-    case "applied_with_warnings":
-      // Phase F.2 warn-mode: patches on disk; reason distinguishes from true rollback
-      // so downstream UI doesn't claim disk-restore.
-      finalVerificationReason = "verification_warnings";
-      patchValidatedByAgent = false;
-      finalSummary = finalSummary + outcome.appendix;
-      emitVerifyWarnSurfaced({
-        site: "token_budget_exceeded",
-        label: outcome.verification.label,
-        durationMs: outcome.verification.durationMs,
-        baselineErrorCount: outcome.verification.baselineErrorCount,
-        postErrorCount: outcome.verification.postErrorCount,
-        errorCount: outcome.errors.length,
-        runId: input.runId ?? null,
-      });
-      break;
-    case "applied":
-    case "skipped":
-      // finalVerificationReason already set by the pre-finalize chain; no override needed
-      break;
-  }
-
-  return {
-    success: false,
-    summary: finalSummary,
-    toolCallLog,
-    filesModified: [...filesModified],
-    patchValidatedByAgent,
-    verificationReason: finalVerificationReason,
-    terminationReason: "token_budget_exceeded",
-    tokenUsage: currentTokenUsage(),
-    costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+    framework: input.framework,
+    repoPath: input.repoPath,
     iterCount: completedIterCount,
+    costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+    tokenUsage: currentTokenUsage(),
     promotedFromArchetype,
     promotionTrigger,
     promotedAtIter,
-    // Phase J.3.1: forward the staging snapshot for the rolled-back diff
-    // when safety-ceiling exit ended with a regressed-verification rollback.
-    ...(outcome.kind === "rolled_back"
-      ? { discardedStaging: outcome.discardedStaging }
-      : {}),
-  };
+    onProgress: input.onProgress,
+    runId: input.runId,
+    emit: {
+      runBreakdownSummary: emitRunBreakdownSummary,
+      cacheSummary: emitCacheSummary,
+      selfValidationSummary: emitSelfValidationSummary,
+    },
+  });
 }
