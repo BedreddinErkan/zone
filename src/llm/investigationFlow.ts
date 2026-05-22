@@ -178,9 +178,8 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
     userApiKey: opts.userApiKey,
     abortSignal: opts.abortSignal,
     mode: "investigation",
-    allowedTools: AUDIT_ALLOWED_TOOLS,
+    capabilityFilter: { allowToolNames: new Set([...AUDIT_ALLOWED_TOOLS]) },
     maxIterationsOverride: computedMax,
-    disableTodoWrite: true,
     lane: "audit",
     ...(parentTaskClassification ? { taskClassification: parentTaskClassification } : {}),
     onToolCall: (name: string, args: Record<string, unknown>) => {
@@ -571,8 +570,6 @@ export async function runChatAgentFlow(input: {
 }): Promise<ChatAgentFlowResult> {
   const runId = typeof input.runId === "string" ? input.runId.trim() : "";
   const contextFiles = new Set<string>();
-  const allowedTools: ReadonlySet<string> = new Set(CHAT_TOOLS);
-
   const emitStructuredProgress = (
     progress: Partial<ZoneStructuredProgressEvent>
   ): void => {
@@ -603,9 +600,8 @@ export async function runChatAgentFlow(input: {
     userApiKey: input.userApiKey,
     abortSignal: input.abortSignal,
     mode: "chat",
-    allowedTools,
+    capabilityFilter: { allowToolNames: new Set(CHAT_TOOLS) },
     maxIterationsOverride: 6,
-    disableTodoWrite: true,
     onToolCall: (name: string, args: Record<string, unknown>) => {
       const fp = filePathFromToolArgs(name, args);
       if (fp) contextFiles.add(fp);

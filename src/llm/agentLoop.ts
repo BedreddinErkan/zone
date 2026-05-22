@@ -172,8 +172,6 @@ export interface AgentLoopInput {
   allowedTools?: ReadonlySet<string>;
   /** Declarative capability-based tool filter. Takes precedence over allowedTools. */
   capabilityFilter?: CapabilityFilter;
-  /** Suppress TodoWrite's sidebar meta-tool path for read-only modes. */
-  disableTodoWrite?: boolean;
   /**
    * Optional subagent metadata reserved for the Task tool follow-up. Setting
    * this does not change behavior beyond allowedTools enforcement.
@@ -2940,25 +2938,24 @@ Example:
   /**
    * Main agent iteration loop.
    *
-   * Inner loop (for each tool call in the LLM response) has 13 early-exit
+   * Inner loop (for each tool call in the LLM response) has 12 early-exit
    * `continue` sites that skip to the next tool call. Each is labelled
    * // [INNER-LOOP: <reason>] on the line above its `continue` statement.
    *
    * Site | Label                  | Meaning
    * -----+------------------------+------------------------------------------
    *  1   | ALLOWED_TOOLS_REJECT   | Tool filtered by effectiveAllowedTools
-   *  2   | TODOWRITE_DISABLED     | TodoWrite blocked (read-only mode)
-   *  3   | TODOWRITE_INVALID      | TodoWrite args failed validation
-   *  4   | TODOWRITE_HANDLED      | TodoWrite processed; push reply + continue
-   *  5   | SCOPE_CHANGE_NOOP      | suggest_scope_change outside investigation
-   *  6   | SCOPE_CHANGE_INVALID   | Missing required fields (type/reason/plan)
-   *  7   | SCOPE_CHANGE_NO_FILES  | under_scope/over_scope missing file lists
-   *  8   | SCOPE_CHANGE_NO_FILES  | (second variant — over_scope)
-   *  9   | SCOPE_CHANGE_HANDLED   | suggest_scope_change recorded; continue
-   * 10   | REVERT_PATCH_INVALID   | revert_patch missing 'path' argument
-   * 11   | REVERT_PATCH_NOT_STAGED| File not in stagingFiles (wasn't modified)
-   * 12   | REVERT_PATCH_OK        | Revert succeeded; continue
-   * 13   | APPLY_PATCH_NO_READ    | apply_patch before read_file on target file
+   *  2   | TODOWRITE_INVALID      | TodoWrite args failed validation
+   *  3   | TODOWRITE_HANDLED      | TodoWrite processed; push reply + continue
+   *  4   | SCOPE_CHANGE_NOOP      | suggest_scope_change outside investigation
+   *  5   | SCOPE_CHANGE_INVALID   | Missing required fields (type/reason/plan)
+   *  6   | SCOPE_CHANGE_NO_FILES  | under_scope/over_scope missing file lists
+   *  7   | SCOPE_CHANGE_NO_FILES  | (second variant — over_scope)
+   *  8   | SCOPE_CHANGE_HANDLED   | suggest_scope_change recorded; continue
+   *  9   | REVERT_PATCH_INVALID   | revert_patch missing 'path' argument
+   * 10   | REVERT_PATCH_NOT_STAGED| File not in stagingFiles (wasn't modified)
+   * 11   | REVERT_PATCH_OK        | Revert succeeded; continue
+   * 12   | APPLY_PATCH_NO_READ    | apply_patch before read_file on target file
    *
    * Outer loop has 1 `continue` site (ITER_TOOLS_PROCESSED) at the end of the
    * `if (toolCalls.length > 0)` branch to advance to the next iteration.
@@ -3394,24 +3391,6 @@ Example:
             allowed,
           });
           // [INNER-LOOP: ALLOWED_TOOLS_REJECT]
-          continue;
-        }
-
-        if (name === "TodoWrite" && input.disableTodoWrite) {
-          const rejectionMsg = "TodoWrite rejected: TodoWrite is disabled for this read-only investigation run.";
-          responseInput.push({
-            role: "tool",
-            tool_call_id: callId,
-            content: rejectionMsg,
-          });
-          toolCallLog.push({
-            id: callId,
-            tool: name,
-            args: parsedArgs,
-            result: rejectionMsg,
-            success: false,
-          });
-          // [INNER-LOOP: TODOWRITE_DISABLED]
           continue;
         }
 
