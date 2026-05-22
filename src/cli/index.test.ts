@@ -6,12 +6,9 @@ const mockLog = vi.fn();
 const mockError = vi.fn();
 const mockWriteFile = vi.fn();
 const mockMkdir = vi.fn();
+const runLlmPatchFlowMock = vi.fn();
 vi.mock("../core/runLlmPatchFlow.js", () => ({
-  runLlmPatchFlow: vi.fn().mockResolvedValue({
-    ok: true,
-    patchPreview: "",
-    applyPatches: []
-  })
+  runLlmPatchFlow: runLlmPatchFlowMock,
 }));
 vi.mock("node:fs", () => {
   return {
@@ -78,6 +75,9 @@ describe("runCliWithOptions", () => {
 
     mockWriteFile.mockResolvedValue(undefined);
     mockMkdir.mockResolvedValue(undefined);
+    // Default: unknown-intent tasks route through runLlmPatchFlow; ok:false keeps
+    // patchSection = generatedPatchPlanPreview so output assertions still hold
+    runLlmPatchFlowMock.mockResolvedValue({ ok: false, reason: "task_classified_inline" });
 
     vi.stubGlobal("console", {
       log: mockLog,

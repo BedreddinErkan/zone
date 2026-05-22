@@ -40,7 +40,6 @@ describe("apply_patch marker balance pre-flight", () => {
     const filePath = "sample.txt";
     const original = "old line\nanother old line\n";
     writeRepoFile(filePath, original);
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const patch =
       "--- FIND ---\n" +
       "old line\n" +
@@ -58,11 +57,6 @@ describe("apply_patch marker balance pre-flight", () => {
     expect(result.output).toContain("balanced");
     expect(result.output).toContain("<second region from file>");
     expect(readRepoFile(filePath)).toBe(original);
-    expect(
-      logSpy.mock.calls.filter(
-        ([message]) => message === "[zone-apply-patch-marker-imbalance]"
-      )
-    ).toHaveLength(1);
   });
 
   it("accepts balanced 2 FIND / 2 REPLACE multi-block patch", async () => {

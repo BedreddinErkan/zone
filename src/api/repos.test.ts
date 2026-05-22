@@ -30,12 +30,13 @@ describe("repo registry (D6)", () => {
   });
 
   it("addRepo with valid git path adds entry and persists to config file", async () => {
-    // /home/bedo/zone-api exists and is a git repo
-    const result = await addRepo("dogfood", "/home/bedo/zone-api");
+    // Use process.cwd() — this repo is always present and is a git repo
+    const validGitPath = process.cwd();
+    const result = await addRepo("dogfood", validGitPath);
     // Either newly added or found existing (path already in list)
     expect(result.ok).toBe(true);
     expect(result.repo).toBeDefined();
-    expect(result.repo!.path).toBe("/home/bedo/zone-api");
+    expect(result.repo!.path).toBe(validGitPath);
   });
 
   it("addRepo with non-existent path returns error without mutating registry", async () => {

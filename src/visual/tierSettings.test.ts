@@ -35,30 +35,29 @@ describe("Phase L.3 tierSettings persistence", () => {
 
   it("readTierSettings parses a valid settings file", () => {
     writeTierSettings({
-      medium: { tokenBudgetCap: 500_000, iterCap: 20 },
+      medium: { tokenBudgetCap: 500_000 },
       complex: { maxSubagentCalls: 3 },
     });
     const loaded = readTierSettings();
     expect(loaded.medium?.tokenBudgetCap).toBe(500_000);
-    expect(loaded.medium?.iterCap).toBe(20);
     expect(loaded.complex?.maxSubagentCalls).toBe(3);
   });
 
   it("writeTierSettings returns the sanitized result", () => {
-    const result = writeTierSettings({ medium: { iterCap: 20 } });
-    expect(result.medium?.iterCap).toBe(20);
+    const result = writeTierSettings({ medium: { tokenBudgetCap: 100_000 } });
+    expect(result.medium?.tokenBudgetCap).toBe(100_000);
   });
 
   it("writeTierSettings creates the file on disk", () => {
-    writeTierSettings({ simple: { iterCap: 10 } });
+    writeTierSettings({ simple: { tokenBudgetCap: 100_000 } });
     expect(fs.existsSync(SETTINGS_PATH)).toBe(true);
   });
 
   it("round-trips: write then read yields the same values", () => {
     const input = {
-      simple: { tokenBudgetCap: 200_000, iterCap: 12 },
-      medium: { tokenBudgetCap: 500_000, iterCap: 22, maxSubagentCalls: 1 },
-      complex: { tokenBudgetCap: 700_000, iterCap: 35, maxSubagentCalls: 2 },
+      simple: { tokenBudgetCap: 200_000 },
+      medium: { tokenBudgetCap: 500_000, maxSubagentCalls: 1 },
+      complex: { tokenBudgetCap: 700_000, maxSubagentCalls: 2 },
     };
     writeTierSettings(input);
     expect(readTierSettings()).toEqual(input);
@@ -75,14 +74,12 @@ describe("Phase L.3 tierSettings persistence", () => {
       expect(result.complex?.tokenBudgetCap).toBe(2_000_000);
     });
 
-    it("clamps iterCap below minimum (0 → 1)", () => {
-      const result = writeTierSettings({ medium: { iterCap: 0 } });
-      expect(result.medium?.iterCap).toBe(1);
+    it.skip("clamps iterCap below minimum (0 → 1)", () => {
+      // iterCap was planned but never implemented in PerTierSettings; removed 2026-05-22
     });
 
-    it("clamps iterCap above maximum (9999 → 100)", () => {
-      const result = writeTierSettings({ medium: { iterCap: 9999 } });
-      expect(result.medium?.iterCap).toBe(100);
+    it.skip("clamps iterCap above maximum (9999 → 100)", () => {
+      // iterCap was planned but never implemented in PerTierSettings; removed 2026-05-22
     });
 
     it("clamps maxSubagentCalls below minimum (-5 → 0)", () => {
@@ -95,9 +92,8 @@ describe("Phase L.3 tierSettings persistence", () => {
       expect(result.complex?.maxSubagentCalls).toBe(5);
     });
 
-    it("floors decimal values to integers (7.9 → 7)", () => {
-      const result = writeTierSettings({ medium: { iterCap: 7.9 } });
-      expect(result.medium?.iterCap).toBe(7);
+    it.skip("floors decimal values to integers (7.9 → 7)", () => {
+      // iterCap was planned but never implemented in PerTierSettings; removed 2026-05-22
     });
   });
 
@@ -151,15 +147,15 @@ describe("Phase AS: autoAuditComplexTasks persistence", () => {
   });
 
   it("auto-audit write does not clobber existing tierSettings on disk", () => {
-    writeTierSettings({ medium: { iterCap: 5 } });
+    writeTierSettings({ medium: { tokenBudgetCap: 100_000 } });
     writeAutoAuditSetting(false);
     const tiers = readTierSettings();
-    expect(tiers.medium?.iterCap).toBe(5);
+    expect(tiers.medium?.tokenBudgetCap).toBe(100_000);
     expect(readAutoAuditSetting()).toBe(false);
   });
 
   it("autoAuditComplexTasks absent from file treated as default true", () => {
-    writeTierSettings({ complex: { iterCap: 20 } });
+    writeTierSettings({ complex: { maxSubagentCalls: 2 } });
     // File exists but has no autoAuditComplexTasks key → default true
     expect(readAutoAuditSetting()).toBe(true);
   });

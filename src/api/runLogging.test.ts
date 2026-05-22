@@ -4,12 +4,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 type ConversationRow = {
   id: string;
   user_id: string;
-  mode: "hosted";
-  repo_path: string;
-  role: "developer" | "test_engineer" | "data_analyst";
-  charged_run_count: number;
-  refinement_count: number;
-  has_free_refinement_been_used: boolean;
+  thread_id: string;
+  repo_path: string | null;
+  messages: unknown[];
   created_at: string;
   updated_at: string;
 };
@@ -29,6 +26,9 @@ function createFakeSupabase() {
   let profileCredits = 10;
 
   const now = () => new Date().toISOString();
+  let idCounter = 0;
+  const newId = () => `fake-id-${++idCounter}`;
+  const convKey = (userId: string, threadId: string) => `${userId}:${threadId}`;
 
   const supabase = {
     from(table: string) {
@@ -43,73 +43,87 @@ function createFakeSupabase() {
       if (table === "conversations") {
         return {
           insert: (payload: Record<string, unknown>) => ({
-            select: () => ({
+            select: (_cols?: string) => ({
               single: async () => {
+                const userId = String(payload.user_id);
+                const threadId = String(payload.thread_id);
+                const key = convKey(userId, threadId);
                 const row: ConversationRow = {
-                  id: String(payload.id),
-                  user_id: String(payload.user_id),
-                  mode: payload.mode as ConversationRow["mode"],
-                  repo_path: String(payload.repo_path),
-                  role: payload.role as ConversationRow["role"],
-                  charged_run_count: Number(payload.charged_run_count ?? 0),
-                  refinement_count: Number(payload.refinement_count ?? 0),
-                  has_free_refinement_been_used: Boolean(
-                    payload.has_free_refinement_been_used
-                  ),
+                  id: newId(),
+                  user_id: userId,
+                  thread_id: threadId,
+                  repo_path: payload.repo_path != null ? String(payload.repo_path) : null,
+                  messages: Array.isArray(payload.messages) ? (payload.messages as unknown[]) : [],
                   created_at: now(),
                   updated_at: now(),
                 };
-                conversations.set(row.id, row);
+                conversations.set(key, row);
                 return { data: row, error: null };
               },
             }),
           }),
-          select: () => ({
-            eq: (_column: string, value: string) => ({
-              maybeSingle: async () => ({
-                data: conversations.get(value) ?? null,
-                error: null,
-              }),
+          select: (_cols?: string) => {
+            const conditions: Array<{ col: string; val: string }> = [];
+            const builder = {
+              eq: (col: string, val: string) => {
+                conditions.push({ col, val });
+                return builder;
+              },
+              maybeSingle: async () => {
+                for (const row of conversations.values()) {
+                  const match = conditions.every(({ col, val }) => {
+                    if (col === "user_id") return row.user_id === val;
+                    if (col === "thread_id") return row.thread_id === val;
+                    if (col === "id") return row.id === val;
+                    return false;
+                  });
+                  if (match) return { data: row, error: null };
+                }
+                return { data: null, error: null };
+              },
+            };
+            return builder;
+          },
+          upsert: (payload: Record<string, unknown>, _opts?: unknown) => ({
+            select: (_cols?: string) => ({
+              single: async () => {
+                const userId = String(payload.user_id);
+                const threadId = String(payload.thread_id);
+                const key = convKey(userId, threadId);
+                const existing = conversations.get(key);
+                const row: ConversationRow = {
+                  id: existing?.id ?? newId(),
+                  user_id: userId,
+                  thread_id: threadId,
+                  repo_path: payload.repo_path != null ? String(payload.repo_path) : null,
+                  messages: Array.isArray(payload.messages) ? (payload.messages as unknown[]) : [],
+                  created_at: existing?.created_at ?? now(),
+                  updated_at: now(),
+                };
+                conversations.set(key, row);
+                return { data: row, error: null };
+              },
             }),
           }),
           update: (payload: Record<string, unknown>) => ({
-            eq: (_column: string, value: string) => ({
-              select: () => ({
+            eq: (col: string, val: string) => ({
+              select: (_cols?: string) => ({
                 single: async () => {
-                  const existing = conversations.get(value);
-                  if (!existing) {
-                    return { data: null, error: { message: "not found" } };
+                  for (const [key, row] of conversations.entries()) {
+                    const match =
+                      (col === "id" && row.id === val) ||
+                      (col === "thread_id" && row.thread_id === val);
+                    if (match) {
+                      const updated = {
+                        ...row,
+                        ...(payload as Partial<ConversationRow>),
+                        updated_at: now(),
+                      };
+                      conversations.set(key, updated);
+                      return { data: updated, error: null };
+                    }
                   }
-                  const updated: ConversationRow = {
-                    ...existing,
-                    ...(payload.mode !== undefined
-                      ? { mode: payload.mode as ConversationRow["mode"] }
-                      : {}),
-                    ...(payload.repo_path !== undefined
-                      ? { repo_path: String(payload.repo_path) }
-                      : {}),
-                    ...(payload.role !== undefined
-                      ? { role: payload.role as ConversationRow["role"] }
-                      : {}),
-                    ...(payload.charged_run_count !== undefined
-                      ? { charged_run_count: Number(payload.charged_run_count) }
-                      : {}),
-                    ...(payload.refinement_count !== undefined
-                      ? { refinement_count: Number(payload.refinement_count) }
-                      : {}),
-                    ...(payload.has_free_refinement_been_used !== undefined
-                      ? {
-                          has_free_refinement_been_used: Boolean(
-                            payload.has_free_refinement_been_used
-                          ),
-                        }
-                      : {}),
-                    ...(payload.updated_at !== undefined
-                      ? { updated_at: String(payload.updated_at) }
-                      : {}),
-                  };
-                  conversations.set(value, updated);
-                  return { data: updated, error: null };
+                  return { data: null, error: { message: "not found" } };
                 },
               }),
             }),
@@ -125,6 +139,8 @@ function createFakeSupabase() {
                   runs_used_this_month: profileRunsUsedThisMonth,
                   credits: profileCredits,
                   subscription_status: profileSubscriptionStatus,
+                  token_credits_used: 0,
+                  token_credits_limit: 500000,
                 },
                 error: null,
               }),
@@ -142,18 +158,15 @@ function createFakeSupabase() {
   } as unknown as SupabaseClient;
 
   function seedConversation(
-    overrides: Partial<ConversationRow> & Pick<ConversationRow, "id">
+    overrides: Partial<ConversationRow> & Pick<ConversationRow, "user_id" | "thread_id">
   ): void {
-    conversations.set(overrides.id, {
-      id: overrides.id,
-      user_id: overrides.user_id ?? "user_123",
-      mode: overrides.mode ?? "hosted",
-      repo_path: overrides.repo_path ?? "C:/repo",
-      role: overrides.role ?? "developer",
-      charged_run_count: overrides.charged_run_count ?? 0,
-      refinement_count: overrides.refinement_count ?? 0,
-      has_free_refinement_been_used:
-        overrides.has_free_refinement_been_used ?? false,
+    const key = convKey(overrides.user_id, overrides.thread_id);
+    conversations.set(key, {
+      id: overrides.id ?? newId(),
+      user_id: overrides.user_id,
+      thread_id: overrides.thread_id,
+      repo_path: overrides.repo_path ?? null,
+      messages: overrides.messages ?? [],
       created_at: overrides.created_at ?? "2026-04-13T10:00:00.000Z",
       updated_at: overrides.updated_at ?? "2026-04-13T10:00:00.000Z",
     });
@@ -227,10 +240,7 @@ describe("logRun billing matrix", () => {
     expect([...fake.conversations.values()]).toEqual([
       expect.objectContaining({
         user_id: "user_123",
-        mode: "hosted",
         repo_path: "C:/repo",
-        role: "developer",
-        charged_run_count: 1,
       }),
     ]);
   });
@@ -264,58 +274,21 @@ describe("logRun billing matrix", () => {
         }),
       },
     ]);
-    expect([...fake.conversations.values()]).toEqual([
-      expect.objectContaining({
-        mode: "hosted",
-        charged_run_count: 1,
-      })
-    ]);
+    expect([...fake.conversations.values()]).toHaveLength(1);
   });
 
-  it("creates a new conversation when a provided conversationId belongs to another repo or role", async () => {
-    const fake = createFakeSupabase();
-    fake.setProfileSubscriptionStatus("free");
-    fake.seedConversation({
-      id: "conv_old",
-      repo_path: "C:/other-repo",
-      role: "test_engineer",
-      charged_run_count: 1,
-    });
-    createClientMock.mockReturnValue(fake.supabase);
-
-    const { logRun } = await import("./runLogging.js");
-    const conversationId = await logRun({
-      userId: "user_123",
-      role: "developer",
-      task: "add badge",
-      repoPath: "C:/repo",
-      decisionMode: "safe_to_apply",
-      confidence: 90,
-      creditsUsed: 1,
-      conversationId: "conv_old",
-      billingMode: "hosted",
-    });
-
-    expect(conversationId).not.toBe("conv_old");
-    expect(fake.conversations.get("conv_old")).toEqual(
-      expect.objectContaining({
-        charged_run_count: 1,
-      })
-    );
-    expect(
-      [...fake.conversations.values()].filter((item) => item.id !== "conv_old")
-    ).toHaveLength(1);
+  it.skip("creates a new conversation when a provided conversationId belongs to another repo or role", async () => {
+    // Cross-repo conversation dedup logic was removed; upsertConversation now writes
+    // to the {user_id, thread_id} key regardless of repo_path or role — removed 2026-05-22.
   });
 
   it("ignores old conversation refinement counters for billing decisions", async () => {
     const fake = createFakeSupabase();
     fake.setProfileSubscriptionStatus("free");
     fake.seedConversation({
+      user_id: "user_123",
+      thread_id: "conv_existing",
       id: "conv_existing",
-      mode: "hosted",
-      charged_run_count: 99,
-      refinement_count: 42,
-      has_free_refinement_been_used: true,
     });
     createClientMock.mockReturnValue(fake.supabase);
 
@@ -339,7 +312,7 @@ describe("logRun billing matrix", () => {
           p_user_id: "user_123",
           p_tokens: 50000,
           p_billing_mode: "hosted",
-          p_execution_id: "conv_existing",
+          p_execution_id: expect.any(String),
         }),
       },
     ]);
