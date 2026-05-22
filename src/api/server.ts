@@ -10,17 +10,23 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { runAgent } from "../core/runAgent.js";
-import { getUsage, getRunCost } from "../usage/usageTracker.js";
+import { getUsage, getRunCost, readRecords } from "../usage/usageTracker.js";
+import { aggregateMetrics, type RunRecord } from "../llm/metricsAggregator.js";
+import { loadOrgPolicy, validatePolicy } from "../llm/policyLoader.js";
+import { aggregatorToPrometheus } from "../llm/prometheusFormatter.js";
+import { atomicWriteFileSync } from "../utils/atomicWrite.js";
+import { getPatchUserFacingReason } from "../llm/patchUserFacingReason.js";
+import { UpstreamUnavailableError } from "../llm/withExponentialBackoff.js";
+import { routeCapGate } from "../llm/checkDailyCap.js";
 import { loadLimitConfig, saveLimitConfig, checkUsageLimit } from "./usageLimits.js";
-import {
-  loadVisualSettings,
-  saveVisualSettings,
-  getVisualSettingsDefaults,
-} from "../visual/visualSettings.js";
-import { readTierSettings, writeTierSettings } from "../visual/tierSettings.js";
+import { loadRepoRegistry, addRepo as addRepoEntry, removeRepo as removeRepoEntry } from "./repos.js";
+import { readTierSettings, writeTierSettings, readAutoAuditSetting, writeAutoAuditSetting, readAuditModeSetting, writeAuditModeSetting } from "../visual/tierSettings.js";
+import { shouldRunAudit as computeAuditDecision, type AuditMode, DEFAULT_AUDIT_MODE } from "../llm/auditMode.js";
 import { TIER_LIMITS } from "../llm/tierLimits.js";
-import { buildDashboardData } from "./sweepResultsApi.js";
-import { invalidateDevServerCache } from "../visual/devServerProbe.js";
+import {
+  buildPipelineConfig,
+  readArchetypeFlagsFromEnv,
+} from "../llm/archetypeDispatcher.js";
 import {
   isIrrelevantDeveloperContextPath,
   runLlmPatchFlow,
@@ -97,6 +103,17 @@ import {
   resolveCommandApproval,
   setTrustAllForRun,
 } from "./commandApprovals.js";
+import {
+  resolveRevisionApproval,
+  rejectPendingRevisionsForRun,
+  requestRevisionApproval,
+  type RevisionProposal,
+} from "../llm/revisionApprovals.js";
+import { investigateScope } from "../llm/investigationFlow.js";
+import { runScopeJudge } from "../llm/scopeJudge.js";
+import { classifyTask, type TaskClassification } from "../llm/taskClassifier.js";
+import { preparePlanContext } from "../core/preparePlanContext.js";
+import { generateExecutionPlan } from "../llm/executionPlan.js";
 import { decodeProgressStage } from "../core/progressStageCodec.js";
 import { validateLlmOutput } from "../core/validateLlmOutput.js";
 import lemonWebhookRouter from "../routes/lemonsqueezyWebhook.js";
@@ -117,7 +134,7 @@ import {
 } from "../billing/activeRunsRepository.js";
 import { indexRepoFiles } from "../embeddings/indexRepository.js";
 import { LOG_LEVEL, logger, log, debugLog, errorLog } from "../utils/logger.js";
-import { parseMode, type Mode } from "../types/mode.js";
+import { parseMode, MODES, type Mode } from "../types/mode.js";
 export const app = express();
 /** Active /api/patch runs — cancelled via POST /api/cancel (AbortSignal → runLlmPatchFlow). */
 const activePatchRunAbortControllers = new Map<string, AbortController>();
@@ -405,6 +422,7 @@ function renderZoneUiHtml(): string {
       typeof process.env.OPENAI_API_KEY === "string" &&
       process.env.OPENAI_API_KEY.trim()
     ),
+    repos: (() => { try { return loadRepoRegistry(); } catch { return []; } })(),
   })};window.currentUser=window.currentUser||${JSON.stringify(currentUser)};</script>`;
   return readZoneUiHtmlTemplate().replace("</head>", `${configScript}</head>`);
 }
@@ -971,6 +989,16 @@ function getDataAnalystUserFacingReason(reason: string): string {
   }
 
   return reason;
+}
+
+function derivePatchTerminationReason(result: Record<string, unknown>): string {
+  if (typeof result.terminationReason === "string" && result.terminationReason) {
+    return result.terminationReason;
+  }
+  if (result.loopDetected) return "loop_detected";
+  if (result.tokenBudgetExceeded) return "token_budget_exceeded";
+  if (result.decisionMode === "rolled_back") return "APPLY_ROLLED_BACK";
+  return "natural_completion";
 }
 
 function normalizeSubscriptionStatus(value: unknown): string {
@@ -1671,8 +1699,9 @@ app.post("/api/cancel", (req, res) => {
   }
   closeDeveloperPatchProgressSseForRun(runId);
   try {
-    // If a command approval is pending, treat cancel as rejection.
+    // If a command or revision approval is pending, treat cancel as rejection.
     rejectPendingApprovalsForRun(runId);
+    rejectPendingRevisionsForRun(runId);
     clearTrustedCommandsForRun(runId);
   } catch {
     // best-effort
@@ -1795,6 +1824,38 @@ app.post("/api/browse-folder", (_req, res) => {
   }
 });
 
+app.get("/api/repos", (_req, res) => {
+  try {
+    res.json(loadRepoRegistry());
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.post("/api/repos", async (req, res) => {
+  const label = typeof req.body?.label === "string" ? req.body.label.trim() : "";
+  const repoPath = typeof req.body?.path === "string" ? req.body.path.trim() : "";
+  if (!repoPath) {
+    return res.status(400).json({ ok: false, error: "path required" });
+  }
+  const result = await addRepoEntry(label, repoPath);
+  if (!result.ok) {
+    return res.status(400).json(result);
+  }
+  res.json(result);
+});
+
+app.delete("/api/repos/:id", (req, res) => {
+  const result = removeRepoEntry(req.params.id);
+  if (!result.ok && result.error === "Not found") {
+    return res.status(404).json(result);
+  }
+  if (!result.ok) {
+    return res.status(400).json(result);
+  }
+  res.json(result);
+});
+
 app.post("/api/approve-command", (req, res) => {
   const approvalId = typeof req.body?.approvalId === "string" ? req.body.approvalId.trim() : "";
   const runId = typeof req.body?.runId === "string" ? req.body.runId.trim() : "";
@@ -1816,6 +1877,32 @@ app.post("/api/approve-command", (req, res) => {
     return;
   }
   const r = resolveCommandApproval({ approvalId, approved, runId, trust });
+  if (!r.ok) {
+    res.status(404).json({ ok: false, reason: r.message || "not_found" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/approve-revision", (req, res) => {
+  const revisionId = typeof req.body?.revisionId === "string" ? req.body.revisionId.trim() : "";
+  const runId = typeof req.body?.runId === "string" ? req.body.runId.trim() : "";
+  const decision = typeof req.body?.decision === "string" ? req.body.decision.trim() : "";
+
+  if (!revisionId || !runId) {
+    res.status(400).json({ ok: false, reason: "missing_revision_id_or_run_id" });
+    return;
+  }
+  if (!["approve", "reject"].includes(decision)) {
+    res.status(400).json({ ok: false, reason: "invalid_decision" });
+    return;
+  }
+
+  const r = resolveRevisionApproval({
+    revisionId,
+    runId,
+    decision: decision as "approve" | "reject",
+  });
   if (!r.ok) {
     res.status(404).json({ ok: false, reason: r.message || "not_found" });
     return;
@@ -2085,12 +2172,191 @@ app.get("/api/usage", async (req, res) => {
   }
 });
 
-app.get("/api/sweep-results", (_req, res) => {
+// K.3 — /api/metrics endpoint.
+// Keyed on "userId:period". TTL = 60 s.
+const metricsCache = new Map<string, { result: ReturnType<typeof aggregateMetrics>; expiresAt: number }>();
+
+/**
+ * Build per-run summaries from raw UsageRecord JSONL.
+ * Groups by runId, summing cost + cache tokens so each run appears once.
+ * latencyMs and terminationReason come from the K.3.C3 terminal run-summary
+ * record (model: "__run_summary__") appended by agentLoop on completion.
+ */
+function buildRunRecords(userId: string): RunRecord[] {
+  const records = readRecords(userId);
+  const runMap = new Map<string, {
+    costUsd: number;
+    cacheTokens: number;
+    totalTokens: number;
+    ts: number;
+    latencyMs?: number;
+    terminationReason?: string;
+    hasRetry?: boolean;
+  }>();
+
+  for (const r of records) {
+    const key = r.runId || `__anon_${r.timestamp}`;
+    const ts = new Date(r.timestamp).getTime();
+
+    // Y.1.6.4: retry sentinel — mark run as having retried, skip cost/token accumulation.
+    if (r.model === "__run_retry__") {
+      const existing = runMap.get(key);
+      if (existing) {
+        existing.hasRetry = true;
+      } else {
+        runMap.set(key, {
+          costUsd: 0,
+          cacheTokens: 0,
+          totalTokens: 0,
+          ts: Number.isNaN(ts) ? Date.now() : ts,
+          hasRetry: true,
+        });
+      }
+      continue;
+    }
+
+    const tokens =
+      (r.input_uncached || 0) +
+      (r.cache_write || 0) +
+      (r.cache_read || 0) +
+      (r.output || 0);
+    const cacheTokens = r.cache_read || 0;
+    const existing = runMap.get(key);
+    if (existing) {
+      existing.costUsd += r.est_cost_usd || 0;
+      existing.cacheTokens += cacheTokens;
+      existing.totalTokens += tokens;
+      if (!Number.isNaN(ts)) existing.ts = Math.min(existing.ts, ts);
+      // Take from whichever record carries them (only the summary record will).
+      if (r.latencyMs !== undefined) existing.latencyMs = r.latencyMs;
+      if (r.terminationReason !== undefined) existing.terminationReason = r.terminationReason;
+    } else {
+      runMap.set(key, {
+        costUsd: r.est_cost_usd || 0,
+        cacheTokens,
+        totalTokens: tokens,
+        ts: Number.isNaN(ts) ? Date.now() : ts,
+        latencyMs: r.latencyMs,
+        terminationReason: r.terminationReason,
+      });
+    }
+  }
+
+  return Array.from(runMap.entries()).map(([runId, data]) => ({
+    runId,
+    costUsd: data.costUsd,
+    cacheTokens: data.cacheTokens,
+    totalTokens: data.totalTokens,
+    ts: data.ts,
+    latencyMs: data.latencyMs,
+    terminationReason: data.terminationReason,
+    hasRetry: data.hasRetry,
+  }));
+}
+
+const METRICS_VALID_PERIODS = new Set<string>(["day", "week", "month", "all"]);
+const METRICS_CACHE_TTL_MS = 60_000;
+
+// K.3: metrics scrape endpoint. Auth-gated when ADMIN_SECRET is configured;
+// open in self-hosted mode (no ADMIN_SECRET) consistent with /api/usage.
+app.get("/api/metrics", (req, res) => {
+  const adminSecret =
+    typeof process.env.ADMIN_SECRET === "string"
+      ? process.env.ADMIN_SECRET.trim()
+      : "";
+  const providedSecret =
+    typeof req.get("x-admin-secret") === "string"
+      ? req.get("x-admin-secret")!.trim()
+      : "";
+  if (adminSecret && providedSecret !== adminSecret) {
+    res.status(403).json({ ok: false, reason: "unauthorized" });
+    return;
+  }
+
+  const periodRaw =
+    typeof req.query.period === "string" ? req.query.period.trim() : "";
+  if (periodRaw && !METRICS_VALID_PERIODS.has(periodRaw)) {
+    res.status(400).json({ ok: false, reason: "invalid_period" });
+    return;
+  }
+  const period = (METRICS_VALID_PERIODS.has(periodRaw) ? periodRaw : "day") as
+    | "day"
+    | "week"
+    | "month"
+    | "all";
+
+  const userIdRaw =
+    typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+  const userId = userIdRaw || "local-dev";
+
+  const cacheKey = `${userId}:${period}`;
+  const cached = metricsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    res.json(cached.result);
+    return;
+  }
+
   try {
-    res.json(buildDashboardData());
+    const runs = buildRunRecords(userId);
+    const result = aggregateMetrics({ userId, period, runs });
+    metricsCache.set(cacheKey, { result, expiresAt: Date.now() + METRICS_CACHE_TTL_MS });
+    res.json(result);
   } catch (err) {
-    errorLog("[zone] /api/sweep-results failed", err);
-    res.status(500).json({ ok: false, reason: "sweep_results_read_failed" });
+    errorLog("[zone] /api/metrics failed", err);
+    res.status(500).json({ ok: false, reason: "metrics_aggregation_failed" });
+  }
+});
+
+// L.2: Prometheus text format endpoint. Auth mirrors /api/metrics (Pattern A).
+// Reuses metricsCache — both /api/metrics (JSON) and this endpoint hit the same
+// aggregation result within the 60 s TTL.
+app.get("/api/metrics/prometheus", (req, res) => {
+  const adminSecret =
+    typeof process.env.ADMIN_SECRET === "string"
+      ? process.env.ADMIN_SECRET.trim()
+      : "";
+  const providedSecret =
+    typeof req.get("x-admin-secret") === "string"
+      ? req.get("x-admin-secret")!.trim()
+      : "";
+  if (adminSecret && providedSecret !== adminSecret) {
+    res.status(403).json({ ok: false, reason: "unauthorized" });
+    return;
+  }
+
+  const periodRaw =
+    typeof req.query.period === "string" ? req.query.period.trim() : "";
+  if (periodRaw && !METRICS_VALID_PERIODS.has(periodRaw)) {
+    res.status(400).json({ ok: false, reason: "invalid_period" });
+    return;
+  }
+  const period = (METRICS_VALID_PERIODS.has(periodRaw) ? periodRaw : "day") as
+    | "day"
+    | "week"
+    | "month"
+    | "all";
+
+  const userIdRaw =
+    typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+  const userId = userIdRaw || "local-dev";
+
+  const cacheKey = `${userId}:${period}`;
+  const cached = metricsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    res.set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+    res.send(aggregatorToPrometheus(cached.result));
+    return;
+  }
+
+  try {
+    const runs = buildRunRecords(userId);
+    const result = aggregateMetrics({ userId, period, runs });
+    metricsCache.set(cacheKey, { result, expiresAt: Date.now() + METRICS_CACHE_TTL_MS });
+    res.set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+    res.send(aggregatorToPrometheus(result));
+  } catch (err) {
+    errorLog("[zone] /api/metrics/prometheus failed", err);
+    res.status(500).json({ ok: false, reason: "metrics_aggregation_failed" });
   }
 });
 
@@ -2120,52 +2386,9 @@ app.put("/api/usage-limits", (req, res) => {
   }
 });
 
-// Phase I.2: visual verification settings (dev server URL, viewport,
-// auto-verify toggle). Persisted to ~/.zone/visual-verification.json. The
-// devServerProbe cache is invalidated on save so the next verify_visual
-// call picks up the new URL without needing a server restart.
-app.get("/api/settings/visual-verification", (_req, res) => {
-  try {
-    const settings = loadVisualSettings();
-    res.json({
-      ok: true,
-      settings,
-      defaults: getVisualSettingsDefaults(),
-      envOverride:
-        typeof process.env.ZONE_DEV_SERVER_URL === "string" &&
-        process.env.ZONE_DEV_SERVER_URL.trim()
-          ? process.env.ZONE_DEV_SERVER_URL.trim()
-          : null,
-    });
-  } catch (err) {
-    res
-      .status(500)
-      .json({ ok: false, error: err instanceof Error ? err.message : String(err) });
-  }
-});
-
-app.post("/api/settings/visual-verification", (req, res) => {
-  try {
-    const { devServerBaseUrl, defaultViewport, autoVerifyAfterPatch } =
-      req.body ?? {};
-    const saved = saveVisualSettings({
-      devServerBaseUrl,
-      defaultViewport,
-      autoVerifyAfterPatch,
-    });
-    invalidateDevServerCache();
-    res.json({ ok: true, settings: saved });
-  } catch (err) {
-    res
-      .status(400)
-      .json({ ok: false, error: err instanceof Error ? err.message : String(err) });
-  }
-});
-
 // Phase L.3: per-tier execution limit overrides. Persisted to
 // ~/.zone/tier-limits.json. ZONE_FORCE_TIER env override always takes priority
-// over these settings (testing bypass). taskToolAllowed is system-level and
-// is not surfaced in the response — the UI must not expose it as editable.
+// over these settings (testing bypass).
 app.get("/api/settings/tier-limits", (_req, res) => {
   try {
     const userOverrides = readTierSettings();
@@ -2174,10 +2397,10 @@ app.get("/api/settings/tier-limits", (_req, res) => {
         const base = TIER_LIMITS[tier];
         const ov = userOverrides[tier] ?? {};
         acc[tier] = {
-          taskToolAllowed: base.taskToolAllowed,
           maxSubagentCalls: ov.maxSubagentCalls ?? base.maxSubagentCalls,
           tokenBudgetCap: ov.tokenBudgetCap ?? base.tokenBudgetCap,
-          iterCap: ov.iterCap ?? base.iterCap,
+          softIterWarn: ov.softIterWarn ?? base.softIterWarn,
+          auditIterCap: base.auditIterCap,
         };
         return acc;
       },
@@ -2207,33 +2430,41 @@ app.post("/api/settings/tier-limits/reset", (_req, res) => {
   }
 });
 
-// Phase I.5: serve verify_visual / auto-verify screenshots back to the UI for
-// inline thumbnails and the modal viewer. Files are written by runVerifyVisual
-// to <cwd>/.zone/screenshots/<runId>-<timestamp>.png. The strict regex below
-// is the primary path-traversal defense; the resolved-path containment check
-// is defense-in-depth for any future filename mutation.
-const SCREENSHOT_FILENAME_RE = /^[a-z0-9][a-z0-9_-]*\.png$/i;
-app.get("/api/screenshots/:filename", (req, res) => {
-  const filename = String(req.params.filename || "");
-  if (!SCREENSHOT_FILENAME_RE.test(filename)) {
-    res.status(400).json({ ok: false, error: "Invalid filename" });
-    return;
+app.get("/api/settings/scope-audit", (_req, res) => {
+  try {
+    res.json({
+      ok: true,
+      autoAuditComplexTasks: readAutoAuditSetting(),
+      auditMode: readAuditModeSetting(),
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
-  const screenshotsDir = path.join(process.cwd(), ".zone", "screenshots");
-  const fullPath = path.join(screenshotsDir, filename);
-  if (!fullPath.startsWith(screenshotsDir + path.sep)) {
-    res.status(400).json({ ok: false, error: "Invalid path" });
-    return;
-  }
-  fs.access(fullPath, (err) => {
-    if (err) {
-      res.status(404).json({ ok: false, error: "Screenshot not found" });
+});
+
+app.post("/api/settings/scope-audit", (req, res) => {
+  try {
+    // Phase H: accept auditMode as primary field; keep autoAuditComplexTasks for backward compat.
+    if (req.body?.auditMode !== undefined) {
+      const mode = req.body.auditMode;
+      if (mode !== "auto" && mode !== "always" && mode !== "on_demand") {
+        res.status(400).json({ ok: false, reason: "auditMode must be 'auto', 'always', or 'on_demand'" });
+        return;
+      }
+      writeAuditModeSetting(mode as AuditMode);
+      res.json({ ok: true, auditMode: mode, autoAuditComplexTasks: readAutoAuditSetting() });
       return;
     }
-    res.setHeader("Content-Type", "image/png");
-    res.setHeader("Cache-Control", "private, max-age=3600");
-    res.sendFile(fullPath);
-  });
+    const value = req.body?.autoAuditComplexTasks;
+    if (typeof value !== "boolean") {
+      res.status(400).json({ ok: false, reason: "autoAuditComplexTasks must be a boolean, or provide auditMode" });
+      return;
+    }
+    writeAutoAuditSetting(value);
+    res.json({ ok: true, autoAuditComplexTasks: value, auditMode: readAuditModeSetting() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 app.post("/api/admin/reset-monthly-runs", async (req, res) => {
@@ -2267,6 +2498,75 @@ app.post("/api/admin/reset-monthly-runs", async (req, res) => {
   }
 
   res.json({ ok: true });
+});
+
+// L.1: org policy read/write. Pattern B auth — secret always required (write endpoint,
+// never open in self-hosted mode). policyLoader.validatePolicy is the single schema source.
+app.get("/api/admin/policy", (req, res) => {
+  const adminSecret =
+    typeof process.env.ADMIN_SECRET === "string"
+      ? process.env.ADMIN_SECRET.trim()
+      : "";
+  const providedSecret =
+    typeof req.get("x-admin-secret") === "string"
+      ? req.get("x-admin-secret")!.trim()
+      : "";
+  if (!adminSecret || providedSecret !== adminSecret) {
+    res.status(401).json({ ok: false, reason: "unauthorized" });
+    return;
+  }
+
+  const policyPath = process.env.ZONE_ORG_POLICY_PATH?.trim() ?? "";
+  if (!policyPath) {
+    res.json({ ok: true, policy: null, source: "absent" });
+    return;
+  }
+
+  const result = loadOrgPolicy(policyPath);
+  if (!result.ok) {
+    if (result.reason === "missing_file") {
+      res.json({ ok: true, policy: null, source: "missing_file" });
+      return;
+    }
+    res.status(500).json({ ok: false, reason: result.reason, detail: result.detail });
+    return;
+  }
+  res.json({ ok: true, policy: result.policy, source: result.source });
+});
+
+app.put("/api/admin/policy", (req, res) => {
+  const adminSecret =
+    typeof process.env.ADMIN_SECRET === "string"
+      ? process.env.ADMIN_SECRET.trim()
+      : "";
+  const providedSecret =
+    typeof req.get("x-admin-secret") === "string"
+      ? req.get("x-admin-secret")!.trim()
+      : "";
+  if (!adminSecret || providedSecret !== adminSecret) {
+    res.status(401).json({ ok: false, reason: "unauthorized" });
+    return;
+  }
+
+  const policyPath = process.env.ZONE_ORG_POLICY_PATH?.trim() ?? "";
+  if (!policyPath) {
+    res.status(400).json({ ok: false, reason: "ZONE_ORG_POLICY_PATH_not_set" });
+    return;
+  }
+
+  const validation = validatePolicy(req.body);
+  if (!validation.valid) {
+    res.status(400).json({ ok: false, reason: "schema_invalid", detail: validation.detail });
+    return;
+  }
+
+  try {
+    atomicWriteFileSync(policyPath, JSON.stringify(validation.policy, null, 2));
+    res.json({ ok: true, policy: validation.policy, path: policyPath });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ ok: false, reason: "write_failed", detail });
+  }
 });
 
 app.post("/api/analyze", async (req, res) => {
@@ -2697,6 +2997,19 @@ app.post("/api/chat", async (req, res) => {
       return;
     }
 
+    const _chatCapCheck = await routeCapGate(userId, runIdStr);
+    if (!_chatCapCheck.allowed) {
+      perf.finish("daily cap exceeded");
+      res.status(429).json({
+        ok: false,
+        terminationReason: "daily_usd_cap_exceeded",
+        userFacingMessage: _chatCapCheck.outcome.userFacingMessage,
+        canResume: _chatCapCheck.outcome.canResume,
+        resumeHint: _chatCapCheck.outcome.resumeHint,
+      });
+      return;
+    }
+
     const forcedExecute = shouldForceExecuteTask(normalizedTask);
     const messageType = forcedExecute
       ? "patch_request"
@@ -2777,6 +3090,110 @@ app.post("/api/chat", async (req, res) => {
   });
 });
 
+app.post("/api/investigate", async (req, res) => {
+  const perf = startZoneApiPerfRun("/api/investigate");
+  const { apiKey: userApiKey, provider: byokProvider, modelHigh: byokModelHigh, modelStandard: byokModelStandard } =
+    getRequestContextFromHeaders(req);
+  await withRequestContext(
+    { userApiKey: userApiKey || undefined, provider: byokProvider, modelOverride: { high: byokModelHigh, standard: byokModelStandard } },
+    async () => {
+      const { task, repoPath, runId, userId: rawUserId, conversationId } = req.body ?? {};
+      const userId =
+        typeof rawUserId === "string" && rawUserId.trim()
+          ? rawUserId.trim()
+          : process.env.NODE_ENV !== "production"
+            ? "dev-user"
+            : null;
+      const normalizedTask = typeof task === "string" ? task.trim() : "";
+      const normalizedRepoPath = typeof repoPath === "string" ? repoPath.trim() : "";
+      const runIdStr = typeof runId === "string" && runId.trim() ? runId.trim() : "";
+
+      if (!normalizedTask || !normalizedRepoPath) {
+        perf.finish("bad request");
+        res.status(400).json({ ok: false, reason: "task and repoPath are required" });
+        return;
+      }
+      if (!userId) {
+        perf.finish("missing user");
+        res.status(401).json({
+          ok: false,
+          reason: "unauthorized",
+          message: "Missing user session. Please open Zone from your dashboard.",
+        });
+        return;
+      }
+      attachRunIdentity({ userId, runId: runIdStr });
+
+      const authorization = await ensureRunAuthorized(userId, { billingMode: "hosted" });
+      if (!authorization.allowed) {
+        perf.finish("authorization blocked");
+        res.status(authorization.status).json(authorization.body);
+        return;
+      }
+
+      const _investigateCapCheck = await routeCapGate(userId, runIdStr);
+      if (!_investigateCapCheck.allowed) {
+        perf.finish("daily cap exceeded");
+        res.status(429).json({
+          ok: false,
+          terminationReason: "daily_usd_cap_exceeded",
+          userFacingMessage: _investigateCapCheck.outcome.userFacingMessage,
+          canResume: _investigateCapCheck.outcome.canResume,
+          resumeHint: _investigateCapCheck.outcome.resumeHint,
+        });
+        return;
+      }
+
+      let investigateAbort: AbortController | null = null;
+      if (runIdStr) {
+        investigateAbort = new AbortController();
+        activePatchRunAbortControllers.set(runIdStr, investigateAbort);
+        try { registerRunStart(runIdStr, { task: normalizedTask }); } catch {}
+      }
+
+      try {
+        const result = await runInvestigationFlow({
+          task: normalizedTask,
+          repoPath: normalizedRepoPath,
+          mode: "investigate",
+          runId: runIdStr,
+          userId,
+          userApiKey: userApiKey || undefined,
+          abortSignal: investigateAbort?.signal,
+          onProgress: (update) => emitProgress(runIdStr, update as any),
+        });
+        if (runIdStr) registerRunComplete(runIdStr, "completed");
+        const costUsd = runIdStr ? getRunCost(userId, runIdStr) : 0;
+        await logRun({
+          userId,
+          role: "developer",
+          task: normalizedTask,
+          repoPath: normalizedRepoPath,
+          decisionMode: "investigation",
+          confidence: 80,
+          executionId: runIdStr || undefined,
+          creditsUsed: 1,
+          conversationId: typeof conversationId === "string" ? conversationId : runIdStr,
+          changedFiles: [],
+          billingMode: "hosted",
+          routeName: "/api/investigate",
+        }).catch(() => null);
+        perf.finish("complete");
+        res.json({ ...(result as Record<string, unknown>), costUsd });
+      } catch (error) {
+        if (runIdStr) registerRunComplete(runIdStr, "cancelled");
+        perf.finish("error");
+        res.status(500).json({
+          ok: false,
+          reason: error instanceof Error ? error.message : "investigation_failed",
+        });
+      } finally {
+        if (runIdStr) activePatchRunAbortControllers.delete(runIdStr);
+      }
+    }
+  );
+});
+
 app.post("/api/patch", async (req, res) => {
   const perf = startZoneApiPerfRun("/api/patch");
   perf.mark("route entered");
@@ -2830,13 +3247,19 @@ app.post("/api/patch", async (req, res) => {
     forceTier: rawForceTier,
     mode: rawMode,
   } = req.body ?? {};
-  const requestedMode = rawMode === undefined ? "auto" : parseMode(rawMode);
+  const autoApproveRevisions: boolean = req.body?.autoApproveRevisions === true;
+  const revisionApprovalTimeoutMsOverride: number | undefined = (() => {
+    const raw = req.body?.revisionApprovalTimeoutMs;
+    return typeof raw === "number" && raw > 0 ? raw : undefined;
+  })();
+
+  const requestedMode = rawMode == null ? "auto" : parseMode(rawMode);
   if (!requestedMode) {
     perf.finish("bad request");
     res.status(400).json({
       ok: false,
       reason: "invalid_mode",
-      message: "mode must be one of auto, chat, investigate, patch",
+      message: `mode must be one of ${MODES.join(", ")}`,
     });
     return;
   }
@@ -2945,6 +3368,19 @@ app.post("/api/patch", async (req, res) => {
     } catch {}
   }
 
+  const _patchCapCheck = await routeCapGate(userId, typeof runId === "string" && runId.trim() ? runId.trim() : undefined);
+  if (!_patchCapCheck.allowed) {
+    perf.finish("daily cap exceeded");
+    res.status(429).json({
+      ok: false,
+      terminationReason: "daily_usd_cap_exceeded",
+      userFacingMessage: _patchCapCheck.outcome.userFacingMessage,
+      canResume: _patchCapCheck.outcome.canResume,
+      resumeHint: _patchCapCheck.outcome.resumeHint,
+    });
+    return;
+  }
+
   // Usage limit check — block new runs if the user has exceeded their daily or monthly threshold.
   try {
     const [dayUsage, monthUsage] = await Promise.all([
@@ -3017,6 +3453,8 @@ app.post("/api/patch", async (req, res) => {
         }),
       });
     }
+    // TODO: extend plan-first to investigate mode after Phase D investigation flow consolidates plan generation
+    // runInvestigationFlow has its own handler and no preGeneratedPlan input; integration is non-trivial.
     try {
       const result = await runInvestigationFlow({
         task: String(task),
@@ -3106,6 +3544,7 @@ app.post("/api/patch", async (req, res) => {
     } catch {}
 
     const runIdStr = typeof runId === "string" && runId.trim() ? runId.trim() : "";
+    attachRunIdentity({ userId: userId ?? "local-dev", runId: runIdStr });
     const messageType =
       requestedMode === "auto"
         ? await detectMessageType(String(task), userApiKey || undefined)
@@ -3259,6 +3698,336 @@ app.post("/api/patch", async (req, res) => {
       );
     }
   }
+  let preGeneratedPlan: Awaited<ReturnType<typeof generateExecutionPlan>> | undefined;
+  let planContext: Awaited<ReturnType<typeof preparePlanContext>> | undefined;
+  // L5.1b-3: declared here so both if(runIdStr) blocks share the same binding
+  let preClassifiedTask: TaskClassification | undefined;
+  let _serverPipelineCfg: ReturnType<typeof buildPipelineConfig> = null;
+  if (runIdStr) {
+    // L5.1b-3: classify first so _serverPipelineCfg is available to gate plan-gen
+    try {
+      preClassifiedTask = await classifyTask(String(task), {
+        userApiKey: userApiKey || undefined,
+        repoRoot: path.resolve(__dirname, "../.."),
+      });
+    } catch {
+      // classifyTask is self-healing; defensive catch for future contract changes.
+    }
+    const _serverArchetypeFlags = readArchetypeFlagsFromEnv();
+    _serverPipelineCfg = preClassifiedTask
+      ? buildPipelineConfig(preClassifiedTask.archetype, _serverArchetypeFlags)
+      : null;
+    if (!_serverPipelineCfg?.skipPlan) {
+      try {
+        planContext = await preparePlanContext({
+          task: String(task),
+          repoPath: String(repoPath),
+          repoSummaryOverride: (hostedContext as { repoSummary?: string } | undefined)?.repoSummary,
+          userApiKey: userApiKey || undefined,
+        });
+        preGeneratedPlan = await generateExecutionPlan({
+          task: String(task),
+          repoSummary: planContext.projectSummary,
+          relevantFiles: planContext.relevantFilePaths,
+          userApiKey: userApiKey || undefined,
+          provider: byokProvider,
+        });
+        if (!_serverPipelineCfg?.skipPlanSSE) {
+          const _planSummaryFiles = Array.from(
+            new Set(preGeneratedPlan.steps.flatMap((s) => s.filesLikely ?? []))
+          );
+          emitProgress(runIdStr, {
+            stage: "plan_summary",
+            progress: {
+              type: "plan_summary",
+              title: "Plan generated",
+              detail: preGeneratedPlan.objective,
+              status: "success",
+              planSummaryFiles: _planSummaryFiles,
+              planSummaryStepCount: preGeneratedPlan.steps.length,
+              // TODO: payload type cleanup — runId/ts injected by emitProgress wrapper
+            } as any,
+          });
+        }
+      } catch (planGenErr) {
+        console.warn(
+          "[zone-plan] plan generation failed:",
+          planGenErr instanceof Error ? planGenErr.message : String(planGenErr)
+        );
+        // preGeneratedPlan remains undefined — approval and audit gates will skip.
+      }
+    }
+  }
+  // Y.1.2: headless detection — no Accept:text/event-stream header means no SSE listener.
+  const isHeadless: boolean = !(
+    typeof req.headers["accept"] === "string" &&
+    req.headers["accept"].includes("text/event-stream")
+  );
+  console.log("[api-patch-request-params]", JSON.stringify({
+    runId: runIdStr,
+    threadId: typeof conversationId === "string" ? conversationId.trim() : "",
+    autoApproveRevisions: !!autoApproveRevisions,
+    headless: isHeadless,
+    ts: new Date().toISOString(),
+  }));
+  // Y.1.1/Y.1.2: set to a non-null value when revision approval times out; causes
+  // early res.json() before runLlmPatchFlow so the caller isn't left hanging.
+  let revisionEarlyExit: { terminationReason: string; proposal: RevisionProposal; revisionId: string } | null = null;
+
+  // Scope audit gate — fires when shouldRunAudit returns true.
+  // preClassifiedTask and _serverPipelineCfg are assigned above in the plan-gen block.
+  // Phase X.0.1: captured when audit ran without skipping; forwarded to execute agent.
+  let auditFindingsForExec: {
+    summary: string;
+    citationCount: number;
+    toolCallCount: number;
+    costUsd: number;
+    scopeVerdict?: "under_scope" | "over_scope" | "mixed" | "none";
+    severity?: "none" | "minor" | "major";
+    citations?: Array<{ file: string; line?: number }>;
+    filesAlreadyRead?: string[];
+    rootCause?: string;
+    fixInstruction?: string;
+    filesToEdit?: string[];
+    evidence?: string;
+  } | undefined;
+  if (runIdStr) {
+    const tier = preClassifiedTask?.tier ?? "medium";
+    // Phase H: per-request auditMode override, then persisted setting, then default.
+    const auditMode: AuditMode =
+      (req.body?.auditMode === "auto" || req.body?.auditMode === "always" || req.body?.auditMode === "on_demand"
+        ? req.body.auditMode as AuditMode
+        : undefined)
+      ?? readAuditModeSetting();
+    const explicitAuditRequest = req.body?.forceAudit === true;
+
+    const auditDecision = computeAuditDecision({
+      tier,
+      auditMode,
+      explicitRequest: explicitAuditRequest,
+      plan: preGeneratedPlan ?? null,
+      classification: preClassifiedTask ?? null,
+      runId: runIdStr,
+    });
+
+    if (auditDecision.shouldRun
+        && !_serverPipelineCfg?.skipAudit
+        && !_serverPipelineCfg?.skipPhase1) {
+      if (!preGeneratedPlan) {
+        // Defensive: plan generation failed upstream — audit cannot run without a plan.
+        log("[zone-audit-skipped]", JSON.stringify({ runId: runIdStr, tier, auditMode, reason: "no_plan", ts: new Date().toISOString() }));
+      } else {
+        try {
+        emitProgress(runIdStr, {
+          stage: "scope_revision",
+          progress: {
+            runId: runIdStr,
+            ts: Date.now(),
+            type: "scope_audit_started",
+            title: "Auditing plan scope",
+            status: "active",
+          } as any,
+        });
+
+        const findings = await investigateScope({
+          repoPath: String(repoPath),
+          query: `Audit whether this plan is correctly scoped for the task:\n\n${String(task)}\n\nPlan:\n${preGeneratedPlan.objective}\nSteps: ${preGeneratedPlan.steps.map((s) => s.title).join(", ")}`,
+          runId: runIdStr,
+          userApiKey: userApiKey || undefined,
+          abortSignal: patchAbort?.signal,
+          parentTier: tier,
+          maxIterationsOverride: TIER_LIMITS[tier].auditIterCap,
+          onProgress: (update) => emitProgress(runIdStr, update as any),
+        });
+
+        if (findings.skipped) {
+          emitProgress(runIdStr, {
+            stage: "scope_revision",
+            progress: {
+              runId: runIdStr,
+              ts: Date.now(),
+              type: "scope_audit_skipped",
+              title: "Scope audit skipped",
+              skipReason: findings.skipReason,
+              status: "warning",
+            } as any,
+          });
+        } else {
+          // X.0.1: capture for handoff to execute agent.
+          auditFindingsForExec = {
+            summary: findings.findings.slice(0, 2048),
+            citationCount: findings.citations.length,
+            toolCallCount: findings.toolCallCount,
+            costUsd: findings.costUsd,
+            ...(findings.citations.length ? { citations: findings.citations } : {}),
+            ...(findings.filesAlreadyRead?.length ? { filesAlreadyRead: findings.filesAlreadyRead } : {}),
+            ...(findings.rootCause ? { rootCause: findings.rootCause } : {}),
+            ...(findings.fixInstruction ? { fixInstruction: findings.fixInstruction } : {}),
+            ...(findings.filesToEdit?.length ? { filesToEdit: findings.filesToEdit } : {}),
+            ...(findings.evidence ? { evidence: findings.evidence } : {}),
+          };
+
+          // Check if agent directly proposed a revision
+          const agentRevision = findings.agentSuggestedRevision;
+          // Also run the LLM judge on the findings
+          const judgement = await runScopeJudge({
+            originalPlan: preGeneratedPlan,
+            findings: findings.findings,
+            taskClassification: preClassifiedTask,
+            runId: runIdStr,
+            userApiKey: userApiKey || undefined,
+          });
+          // Step B: populate scopeVerdict/severity from judge result
+          auditFindingsForExec.scopeVerdict = judgement.type;
+          auditFindingsForExec.severity = judgement.severity;
+
+          const hasMismatch = agentRevision != null || judgement.mismatch;
+          if (hasMismatch) {
+            const revType = agentRevision?.type ?? judgement.type as "under_scope" | "over_scope" | "mixed";
+            const revReason = agentRevision?.reason ?? judgement.reason;
+            const revSummary = agentRevision?.revisedPlanSummary ?? judgement.revisedPlan ?? "Revised plan — see reason above.";
+            const revMissing = agentRevision?.missingFiles ?? judgement.missingFiles;
+            const revUnnecessary = agentRevision?.unnecessaryFiles ?? judgement.unnecessaryFiles;
+
+            // Y.0 decision matrix (2×2 on planReview × severity):
+            //   planReview=true  + any mismatch → requestRevisionApproval (interrupt)
+            //   planReview=false + major        → requestRevisionApproval (interrupt)
+            //   planReview=false + minor        → silent auto_apply (no user prompt)
+            // Agent-suggested revisions always count as major (no severity field on agent tool).
+            const mismatchSeverity: "minor" | "major" = agentRevision != null
+              ? "major"
+              : judgement.severity === "minor" ? "minor" : "major";
+            const requiresInterrupt = mismatchSeverity === "major";
+
+            if (requiresInterrupt) {
+              const proposal: RevisionProposal = {
+                runId: runIdStr,
+                type: revType,
+                reason: revReason,
+                originalPlan: preGeneratedPlan.objective,
+                revisedPlanSummary: revSummary,
+                ...(revMissing ? { missingFiles: revMissing } : {}),
+                ...(revUnnecessary ? { unnecessaryFiles: revUnnecessary } : {}),
+              };
+
+              const { decision, revisionId: approvalRevisionId } = await requestRevisionApproval({
+                proposal,
+                emit: (evt) =>
+                  emitProgress(runIdStr, {
+                    stage: "scope_revision",
+                    progress: { ...evt, ts: Date.now() } as any,
+                  }),
+                abortSignal: patchAbort?.signal,
+                autoApprove: autoApproveRevisions,
+                timeoutMs: revisionApprovalTimeoutMsOverride ?? (isHeadless ? 30_000 : 10 * 60 * 1000),
+              });
+
+              if (decision === "timeout") {
+                // Y.1.2: headless timeout — record for early exit, skip patch flow.
+                revisionEarlyExit = { terminationReason: "revision_approval_timeout", proposal, revisionId: approvalRevisionId };
+                log("[scope-revision-timeout]", JSON.stringify({
+                  runId: runIdStr,
+                  revisionId: approvalRevisionId,
+                  timeoutMs: revisionApprovalTimeoutMsOverride ?? (isHeadless ? 30_000 : 10 * 60 * 1000),
+                  timeoutSource: revisionApprovalTimeoutMsOverride ? "explicit_override" : isHeadless ? "headless_default" : "ui_default",
+                  ts: new Date().toISOString(),
+                }));
+              } else if (decision === "approve") {
+                if (autoApproveRevisions) {
+                  log("[scope-revision-auto-approved]", JSON.stringify({ runId: runIdStr, type: revType, revisionId: approvalRevisionId, reason: "headless_autoapprove", ts: new Date().toISOString() }));
+                } else {
+                  log("[zone-scope-revision-approved]", JSON.stringify({ runId: runIdStr, type: revType, ts: new Date().toISOString() }));
+                }
+                emitProgress(runIdStr, {
+                  stage: "scope_revision",
+                  progress: {
+                    runId: runIdStr,
+                    ts: Date.now(),
+                    type: "scope_revision_resolved",
+                    title: "Scope revision approved",
+                    revisionDecision: "approve",
+                    status: "success",
+                  } as any,
+                });
+                // Note: revised plan summary is informational; the agent loop
+                // will re-plan from scratch using the updated context.
+              } else {
+                log("[zone-scope-revision-rejected]", JSON.stringify({ runId: runIdStr, type: revType, ts: new Date().toISOString() }));
+                emitProgress(runIdStr, {
+                  stage: "scope_revision",
+                  progress: {
+                    runId: runIdStr,
+                    ts: Date.now(),
+                    type: "scope_revision_resolved",
+                    title: "Scope revision rejected — proceeding with original plan",
+                    revisionDecision: "reject",
+                    status: "active",
+                  } as any,
+                });
+              }
+            } else {
+              // Minor mismatch + plan-review-off → silent auto-apply.
+              log("[zone-scope-auto-apply]", JSON.stringify({ runId: runIdStr, type: revType, severity: "minor", ts: new Date().toISOString() }));
+              emitProgress(runIdStr, {
+                stage: "scope_revision",
+                progress: {
+                  runId: runIdStr,
+                  ts: Date.now(),
+                  type: "scope_revision_resolved",
+                  title: "Scope revision auto-applied (minor)",
+                  revisionDecision: "auto_apply",
+                  status: "success",
+                } as any,
+              });
+            }
+          }
+
+          if (!revisionEarlyExit) {
+            emitProgress(runIdStr, {
+              stage: "scope_revision",
+              progress: {
+                runId: runIdStr,
+                ts: Date.now(),
+                type: "scope_audit_completed",
+                title: "Scope audit complete",
+                status: "success",
+              } as any,
+            });
+          }
+        }
+        } catch (auditErr) {
+          // Audit failures never block execution — log and continue.
+          console.warn("[zone-scope-audit] audit gate failed:", auditErr instanceof Error ? auditErr.message : String(auditErr));
+        }
+      } // end else (preGeneratedPlan guard)
+    } else {
+      // Phase H: audit skipped by auditMode gate.
+      log("[zone-audit-skipped]", JSON.stringify({
+        runId: runIdStr,
+        tier,
+        auditMode,
+        reason: auditDecision.reason,
+        ts: new Date().toISOString(),
+      }));
+    }
+  }
+
+  // Y.1.2: revision approval timed out — return before patch flow so headless
+  // callers receive a response instead of waiting indefinitely.
+  if (revisionEarlyExit) {
+    const earlyOutcome = getPatchUserFacingReason({ terminationReason: revisionEarlyExit.terminationReason });
+    res.json({
+      ok: true,
+      terminationReason: revisionEarlyExit.terminationReason,
+      userFacingMessage: earlyOutcome.userFacingMessage,
+      canResume: earlyOutcome.canResume,
+      resumeHint: earlyOutcome.resumeHint,
+      revisionId: revisionEarlyExit.revisionId,
+      revisionProposal: revisionEarlyExit.proposal,
+    });
+    return;
+  }
+
   try {
     logger.info(
       "[patch-handler] reached planner, ms since entry=%d",
@@ -3279,9 +4048,21 @@ app.post("/api/patch", async (req, res) => {
       userApiKey: userApiKey || undefined,
       provider: byokProvider,
       mode: requestedMode === "patch" ? "patch" : undefined,
+      preGeneratedPlan,
       forceTier,
+      preClassifiedTask,
+      auditFindings: auditFindingsForExec,
     });
     perf.mark("core patch flow complete");
+
+    // L5.1b-2: log soft promotion for observability (pre-run audit was already skipped)
+    if (result.ok && (result as { promotedFromArchetype?: unknown }).promotedFromArchetype != null) {
+      log("[zone-archetype-promoted-server]", JSON.stringify({
+        runId: runIdStr,
+        promotedFrom: (result as { promotedFromArchetype: unknown }).promotedFromArchetype,
+        toArchetype: "complex_multi_file",
+      }));
+    }
 
     // Best-effort: extract newly added function names from added diff lines.
     try {
@@ -3389,6 +4170,13 @@ app.post("/api/patch", async (req, res) => {
             : [],
         billingMode,
         routeName: "/api/patch",
+        // J.5: forward the loop summary so runLogging can persist the
+        // APPLY_ROLLED_BACK marker on rollback runs. Skipped server-side
+        // for non-rollback decisionModes.
+        agentSummary:
+          typeof (result as { patchPreview?: unknown }).patchPreview === "string"
+            ? ((result as { patchPreview?: string }).patchPreview as string)
+            : undefined,
       }).catch(() => null);
 
       if (loggedConversationId) {
@@ -3448,7 +4236,15 @@ app.post("/api/patch", async (req, res) => {
         });
       }
     } catch {}
-    res.json(publicResultWithCost);
+    const patchTerminationReason = derivePatchTerminationReason(_resultRecord);
+    const patchOutcome = getPatchUserFacingReason({ terminationReason: patchTerminationReason });
+    res.json({
+      ...publicResultWithCost,
+      terminationReason: patchTerminationReason,
+      userFacingMessage: patchOutcome.userFacingMessage,
+      canResume: patchOutcome.canResume,
+      resumeHint: patchOutcome.resumeHint,
+    });
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       perf.finish("cancelled");
@@ -3507,9 +4303,25 @@ app.post("/api/patch", async (req, res) => {
         error instanceof Error ? error.message : String(error)
       );
     }
+    if (err instanceof UpstreamUnavailableError) {
+      const mapped = getPatchUserFacingReason({ terminationReason: "upstream_unavailable" });
+      res.status(503).json({
+        ok: false,
+        terminationReason: "upstream_unavailable",
+        reason: err.message,
+        userFacingMessage: mapped.userFacingMessage,
+        canResume: mapped.canResume,
+        resumeHint: mapped.resumeHint,
+      });
+      return;
+    }
+    const fallbackMessage = err instanceof Error ? err.message : "patch_flow_failed";
     res.status(500).json({
       ok: false,
-      reason: err instanceof Error ? err.message : "patch_flow_failed",
+      reason: fallbackMessage,
+      userFacingMessage: `Run failed: ${fallbackMessage}`,
+      canResume: false,
+      resumeHint: null,
     });
   } finally {
     if (runIdStr) {
@@ -3657,6 +4469,11 @@ if (result.applyPatches.length > 0) {
       conversationId,
       billingMode,
       routeName: "/api/dry-run",
+      // J.5: see /api/patch callsite for rationale.
+      agentSummary:
+        typeof (result as { patchPreview?: unknown }).patchPreview === "string"
+          ? ((result as { patchPreview?: string }).patchPreview as string)
+          : undefined,
     }).catch(() => null);
 
   if (loggedConversationId) {
@@ -3921,6 +4738,20 @@ const authorization = await ensureRunAuthorized(userId, {
     res.status(authorization.status).json(authorization.body);
     return;
   }
+  const _teCapCheck = await routeCapGate(
+    typeof userId === "string" ? userId : "local-dev",
+    typeof runId === "string" && runId.trim() ? runId.trim() : undefined
+  );
+  if (!_teCapCheck.allowed) {
+    res.status(429).json({
+      ok: false,
+      terminationReason: "daily_usd_cap_exceeded",
+      userFacingMessage: _teCapCheck.outcome.userFacingMessage,
+      canResume: _teCapCheck.outcome.canResume,
+      resumeHint: _teCapCheck.outcome.resumeHint,
+    });
+    return;
+  }
   try {
 const result = await runTestEngineerFlow({
   task,
@@ -4036,6 +4867,20 @@ const authorization = await ensureRunAuthorized(userId, {
   billingMode,
 });  if (!authorization.allowed) {
     res.status(authorization.status).json(authorization.body);
+    return;
+  }
+  const _daCapCheck = await routeCapGate(
+    typeof userId === "string" ? userId : "local-dev",
+    typeof runId === "string" && runId.trim() ? runId.trim() : undefined
+  );
+  if (!_daCapCheck.allowed) {
+    res.status(429).json({
+      ok: false,
+      terminationReason: "daily_usd_cap_exceeded",
+      userFacingMessage: _daCapCheck.outcome.userFacingMessage,
+      canResume: _daCapCheck.outcome.canResume,
+      resumeHint: _daCapCheck.outcome.resumeHint,
+    });
     return;
   }
   try {

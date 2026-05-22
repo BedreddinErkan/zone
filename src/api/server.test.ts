@@ -21,6 +21,7 @@ const supabaseConversationCreateSingleMock = vi.fn();
 const supabaseConversationMaybeSingleMock = vi.fn();
 const supabaseConversationUpdateMock = vi.fn();
 const supabaseConversationUpdateSingleMock = vi.fn();
+const supabaseConversationUpsertSingleMock = vi.fn();
 const supabaseRpcMock = vi.fn();
 const createDeveloperPatchJobMock = vi.fn();
 const getDeveloperPatchJobMock = vi.fn();
@@ -60,10 +61,18 @@ const supabaseFromMock = vi.fn((table: string) => {
       insert: supabaseConversationInsertMock,
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            maybeSingle: supabaseConversationMaybeSingleMock,
+          })),
           maybeSingle: supabaseConversationMaybeSingleMock,
         })),
       })),
       update: supabaseConversationUpdateMock,
+      upsert: vi.fn(() => ({
+        select: vi.fn(() => ({
+          single: supabaseConversationUpsertSingleMock,
+        })),
+      })),
     };
   }
   return {
@@ -91,6 +100,7 @@ vi.mock("../core/runAgent.js", () => ({
 vi.mock("../core/runLlmPatchFlow.js", () => ({
   runLlmPatchFlow: runLlmPatchFlowMock,
   isIrrelevantDeveloperContextPath: vi.fn(() => false),
+  toPublicLlmPatchResponse: (result: Record<string, unknown>) => result,
 }));
 
 vi.mock("../core/applyLlmPatches.js", () => ({
@@ -209,6 +219,18 @@ describe("/api/test-engineer", () => {
         has_free_refinement_been_used: false,
         created_at: "2026-04-13T10:00:00.000Z",
         updated_at: "2026-04-13T10:01:00.000Z",
+      },
+      error: null,
+    });
+    supabaseConversationUpsertSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_123",
+        thread_id: "conv_123",
+        user_id: "clerk_user_123",
+        repo_path: "C:/repo",
+        messages: [],
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:00:00.000Z",
       },
       error: null,
     });
@@ -849,6 +871,18 @@ export function LoginForm() {
       },
       error: null,
     });
+    supabaseConversationUpsertSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_existing",
+        thread_id: "conv_existing",
+        user_id: "clerk_user_123",
+        repo_path: "C:/repo",
+        messages: [],
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:01:00.000Z",
+      },
+      error: null,
+    });
 
     const response = await fetch(`${baseUrl}/api/patch`, {
       method: "POST",
@@ -859,6 +893,7 @@ export function LoginForm() {
         userId: "clerk_user_123",
         conversationId: "conv_existing",
         billingMode: "hosted",
+        mode: "patch",
       }),
     });
 
@@ -922,6 +957,18 @@ export function LoginForm() {
         has_free_refinement_been_used: false,
         created_at: "2026-04-13T10:00:00.000Z",
         updated_at: "2026-04-13T10:01:00.000Z",
+      },
+      error: null,
+    });
+    supabaseConversationUpsertSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_new",
+        thread_id: "conv_new",
+        user_id: "clerk_user_123",
+        repo_path: "C:/repo",
+        messages: [],
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:00:00.000Z",
       },
       error: null,
     });
@@ -992,6 +1039,18 @@ export function LoginForm() {
         has_free_refinement_been_used: false,
         created_at: "2026-04-13T10:00:00.000Z",
         updated_at: "2026-04-13T10:01:00.000Z",
+      },
+      error: null,
+    });
+    supabaseConversationUpsertSingleMock.mockResolvedValue({
+      data: {
+        id: "conv_byok",
+        thread_id: "conv_byok",
+        user_id: "clerk_user_123",
+        repo_path: "C:/repo",
+        messages: [],
+        created_at: "2026-04-13T10:00:00.000Z",
+        updated_at: "2026-04-13T10:00:00.000Z",
       },
       error: null,
     });
@@ -2558,7 +2617,7 @@ export function LoginForm() {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({
+    expect(body).toMatchObject({
       ok: true,
       patchPreview: "=== LOCAL PATCH ===",
       warnings: [],
@@ -2567,5 +2626,78 @@ export function LoginForm() {
       fileDiffs: [],
     });
     expect(runLlmPatchFlowMock).toHaveBeenCalled();
+  });
+
+  describe("K.4 — patch response includes userFacingMessage, canResume, resumeHint", () => {
+    it("tokenBudgetExceeded=true → canResume=true and userFacingMessage mentions ZONE_TIER_TOKEN_CAP", async () => {
+      runLlmPatchFlowMock.mockResolvedValue({
+        ok: true,
+        tokenBudgetExceeded: true,
+        patchPreview: "=== PATCH ===",
+        warnings: [],
+        applyPatches: [],
+        patchResults: [],
+        fileDiffs: [],
+      });
+
+      const response = await fetch(`${baseUrl}/api/patch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: "fix the bug", repoPath: "/tmp/repo", userId: "u1" }),
+      });
+
+      const body = await response.json();
+      expect(response.status).toBe(200);
+      expect(body.canResume).toBe(true);
+      expect(body.userFacingMessage).toContain("ZONE_TIER_TOKEN_CAP");
+      expect(body.resumeHint).toContain("split");
+    });
+
+    it("loop_detected=true → canResume=false and userFacingMessage mentions loop", async () => {
+      runLlmPatchFlowMock.mockResolvedValue({
+        ok: true,
+        loopDetected: true,
+        patchPreview: "=== PATCH ===",
+        warnings: [],
+        applyPatches: [],
+        patchResults: [],
+        fileDiffs: [],
+      });
+
+      const response = await fetch(`${baseUrl}/api/patch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: "fix the bug", repoPath: "/tmp/repo", userId: "u1" }),
+      });
+
+      const body = await response.json();
+      expect(response.status).toBe(200);
+      expect(body.canResume).toBe(false);
+      expect(body.userFacingMessage).toContain("loop");
+      expect(body.resumeHint).toBeNull();
+    });
+
+    it("normal completion → canResume=true and success message", async () => {
+      runLlmPatchFlowMock.mockResolvedValue({
+        ok: true,
+        patchPreview: "=== PATCH ===",
+        warnings: [],
+        applyPatches: [],
+        patchResults: [],
+        fileDiffs: [],
+      });
+
+      const response = await fetch(`${baseUrl}/api/patch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: "fix the bug", repoPath: "/tmp/repo", userId: "u1" }),
+      });
+
+      const body = await response.json();
+      expect(response.status).toBe(200);
+      expect(body.canResume).toBe(true);
+      expect(body.userFacingMessage).toBe("Run completed successfully.");
+      expect(body.resumeHint).toBeNull();
+    });
   });
 });

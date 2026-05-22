@@ -26,7 +26,7 @@ export function createLLMClient(options: LLMClientResolveOptions = {}): LLMClien
  * Resolve the active provider with this precedence:
  *   1. options.provider (explicit caller override)
  *   2. zoneRequestContext.provider (set per-request from headers / BYOM)
- *   3. "openai" (default)
+ *   3. "anthropic" (default)
  *
  * The Tur 2 ZONE_PROVIDER env backdoor was retired in Tur 5a once the UI
  * provider selector + request-context plumbing became the source of truth.
@@ -37,7 +37,7 @@ function resolveProvider(
 ): LLMProvider {
   if (explicit) return explicit;
   if (contextProvider) return contextProvider;
-  return "openai";
+  return "anthropic";
 }
 
 function resolveOpenAIApiKey(explicit?: string, contextKey?: string): string {

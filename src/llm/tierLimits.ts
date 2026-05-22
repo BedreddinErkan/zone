@@ -2,34 +2,35 @@ import type { TaskClassification, TaskTier } from "./taskClassifier.js";
 import { readTierSettings } from "../visual/tierSettings.js";
 
 export interface TierLimits {
-  /** Whether the Task (subagent dispatch) tool is allowed. False for simple tier. */
-  taskToolAllowed: boolean;
-  /** Maximum subagent calls allowed per parent run. 0 when taskToolAllowed is false. */
+  /** Maximum subagent calls allowed per parent run. */
   maxSubagentCalls: number;
   /** Per-run token budget cap in tokens. Replaces the global TOKEN_BUDGET_CAP. */
   tokenBudgetCap: number;
-  /** Hard ceiling applied on top of plan-aware iter computation. */
-  iterCap: number;
+  /** Soft iteration warning threshold. Agent receives a wrap-up prompt at this iteration;
+   *  the cost ceiling (tokenBudgetCap) is the actual hard stop. */
+  softIterWarn: number;
+  /** Phase AS: iteration cap for the scope audit investigation. System-level, not user-overridable. */
+  auditIterCap: number;
 }
 
 export const TIER_LIMITS: Record<TaskTier, TierLimits> = {
   simple: {
-    taskToolAllowed: false,
     maxSubagentCalls: 0,
     tokenBudgetCap: 400_000,
-    iterCap: 15,
+    softIterWarn: 15,
+    auditIterCap: 0,
   },
   medium: {
-    taskToolAllowed: true,
     maxSubagentCalls: 1,
     tokenBudgetCap: 600_000,
-    iterCap: 25,
+    softIterWarn: 25,
+    auditIterCap: 6,
   },
   complex: {
-    taskToolAllowed: true,
-    maxSubagentCalls: 2,
+    maxSubagentCalls: 4,
     tokenBudgetCap: 800_000,
-    iterCap: 40,
+    softIterWarn: 40,
+    auditIterCap: 8,
   },
 };
 
@@ -46,8 +47,6 @@ export interface ResolveTierOptions {
  *   2. ZONE_FORCE_TIER env var — server-level testing bypass (no user overrides)
  *   3. User overrides from ~/.zone/tier-limits.json — merged on top of TIER_LIMITS defaults
  *   4. TIER_LIMITS defaults — used when no classification or no user override
- *
- * taskToolAllowed is NEVER user-overridable — it is a system-level guarantee.
  */
 export function resolveTierLimits(
   classification?: TaskClassification | null,
@@ -74,9 +73,9 @@ export function resolveTierLimits(
   if (!userOverride) return base;
 
   return {
-    taskToolAllowed: base.taskToolAllowed, // system-level — never overridden
     maxSubagentCalls: userOverride.maxSubagentCalls ?? base.maxSubagentCalls,
     tokenBudgetCap: userOverride.tokenBudgetCap ?? base.tokenBudgetCap,
-    iterCap: userOverride.iterCap ?? base.iterCap,
+    softIterWarn: userOverride.softIterWarn ?? base.softIterWarn,
+    auditIterCap: base.auditIterCap, // system-level — never overridden
   };
 }

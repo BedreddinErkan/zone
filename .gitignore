@@ -19,3 +19,4 @@ zone-debug.log.*
 
 # Sweep output (append-only CSV, not versioned)
 data/sweep-results.csv
+CLAUDE.md

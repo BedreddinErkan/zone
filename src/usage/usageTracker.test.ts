@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { extractUsage } from "../llm/recordingClient.js";
-import { getRunCost, getUsage, readRecords, recordExecution } from "./usageTracker.js";
+import { getRunCost, getUsage, readRecords, recordExecution, recordRunSummary } from "./usageTracker.js";
 
 let storageDir: string;
 
@@ -66,6 +66,43 @@ describe("usageTracker subagent telemetry compatibility", () => {
       parentRunId: "run-1",
     });
     expect(getRunCost("user-1", "run-1", { storageDir })).toBe(rec.est_cost_usd);
+  });
+
+  it("K.3.C3: recordRunSummary round-trips latencyMs + terminationReason through JSONL", async () => {
+    await recordRunSummary(
+      { userId: "user-1", runId: "run-99", latencyMs: 4_200, terminationReason: "natural_completion" },
+      { storageDir }
+    );
+
+    const records = readRecords("user-1", { storageDir });
+    expect(records).toHaveLength(1);
+    expect(records[0]?.latencyMs).toBe(4_200);
+    expect(records[0]?.terminationReason).toBe("natural_completion");
+    // Zero-cost sentinel must not pollute aggregates
+    expect(records[0]?.est_cost_usd).toBe(0);
+    expect(records[0]?.input_uncached).toBe(0);
+  });
+
+  it("K.3.C3: recordRunSummary does not inflate run count or token totals", async () => {
+    // A real LLM call record
+    await recordExecution(
+      { userId: "user-1", runId: "run-99", provider: "openai", model: "gpt-5.4-mini",
+        input_uncached: 200, cache_write: 0, cache_read: 50, output: 30 },
+      { storageDir }
+    );
+    // Terminal summary record for the same run
+    await recordRunSummary(
+      { userId: "user-1", runId: "run-99", latencyMs: 3_000, terminationReason: "max_iterations" },
+      { storageDir }
+    );
+
+    const usage = await getUsage("user-1", "all", { storageDir });
+    // Two JSONL records but same runId → 1 run counted
+    expect(usage.totalRuns).toBe(1);
+    // Only real record's tokens count: 200+0+50+30 = 280
+    expect(usage.totalTokens).toBe(280);
+    // Summary record's est_cost_usd = 0 — total must not go negative
+    expect(usage.totalCostUsd).toBeGreaterThanOrEqual(0);
   });
 
   it("maps OpenAI prompt_tokens_details.cached_tokens to cache_read", async () => {

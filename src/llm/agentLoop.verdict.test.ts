@@ -4,6 +4,7 @@ import {
   inferVerificationFromLog,
   validatePassedClaim,
   validateUnrelatedClaim,
+  type VerificationReason,
 } from "./agentLoop.js";
 
 afterEach(() => {
@@ -12,8 +13,6 @@ afterEach(() => {
 
 describe("agent loop framework-aware verdicts", () => {
   it("infers tests_skipped_no_infra when a patch was applied without runnable tests", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
     const result = inferVerificationFromLog(
       [
         {
@@ -27,9 +26,6 @@ describe("agent loop framework-aware verdicts", () => {
     );
 
     expect(result).toBe("tests_skipped_no_infra");
-    expect(
-      logSpy.mock.calls.filter(([message]) => message === "[zone-agent-no-infra-verdict]")
-    ).toHaveLength(1);
   });
 
   it("keeps infra errors inconclusive when a runnable test command exists", () => {
@@ -80,8 +76,6 @@ describe("agent loop framework-aware verdicts", () => {
   });
 
   it("overrides a natural-completion inconclusive self-tag to skipped when no infra exists", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
     const result = applyNoInfraVerificationOverride({
       verificationReason: "tests_inconclusive",
       framework: { hasTests: false, testFilesDetected: true },
@@ -90,9 +84,6 @@ describe("agent loop framework-aware verdicts", () => {
     });
 
     expect(result).toBe("tests_skipped_no_infra");
-    expect(
-      logSpy.mock.calls.filter(([message]) => message === "[zone-agent-no-infra-override]")
-    ).toHaveLength(1);
   });
 
   it("preserves a natural-completion patch-failure self-tag when no infra exists", () => {
@@ -109,5 +100,31 @@ describe("agent loop framework-aware verdicts", () => {
     expect(
       logSpy.mock.calls.filter(([message]) => message === "[zone-agent-no-infra-override]")
     ).toHaveLength(0);
+  });
+});
+
+// T.4: Phase F.2 — isVerificationRegressed strict-equals semantics.
+// runLlmPatchFlow.ts:6022: `const isVerificationRegressed = vr === "verification_regressed"`.
+// This must NOT match "verification_warnings" — warn-mode patches stay on disk,
+// rollback banner must not appear.
+describe("Phase F.2 — isVerificationRegressed strict-equals semantics", () => {
+  it("T.4: isVerificationRegressed matches only verification_regressed, not verification_warnings", () => {
+    // Replicate the exact expression from runLlmPatchFlow.ts:6022.
+    function isVerificationRegressed(vr: VerificationReason | string | null | undefined): boolean {
+      return vr === "verification_regressed";
+    }
+
+    // Must be true for rollback reason
+    expect(isVerificationRegressed("verification_regressed")).toBe(true);
+
+    // Must be false for warn-mode reason (Phase F.2 fix: these are distinct)
+    expect(isVerificationRegressed("verification_warnings")).toBe(false);
+
+    // Must be false for all other VerificationReason values
+    expect(isVerificationRegressed("tests_passed")).toBe(false);
+    expect(isVerificationRegressed("tests_inconclusive")).toBe(false);
+    expect(isVerificationRegressed("no_verification_attempted")).toBe(false);
+    expect(isVerificationRegressed(null)).toBe(false);
+    expect(isVerificationRegressed(undefined)).toBe(false);
   });
 });

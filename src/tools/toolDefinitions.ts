@@ -45,9 +45,7 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
       name: "TodoWrite",
       strict: true,
       description:
-        "Plan tracker that surfaces a live sidebar to the user. CALL THIS FIRST " +
-        "for any task involving 2+ steps including verification, builds, or " +
-        "follow-up actions. Skip only for true one-shot single-action requests.",
+        "Plan tracker shown to the user as a live sidebar. Call FIRST for any 2+ step task (incl. verification/builds). Skip only for true one-shot requests.",
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -128,7 +126,7 @@ required: ["id", "content", "description", "status"],
       name: "read_background_output",
       strict: true,
       description:
-        "Read accumulated stdout+stderr from a background process. Pass `since_offset` from a previous read to get only new output. The first call should pass null. Returns at most max_bytes (default 8192). If the process exited, eof is true and exit_code is set.",
+        "Read stdout+stderr from a background process. Pass since_offset from the previous read (or null on first call). Returns up to max_bytes (default 8192). eof=true when the process exited.",
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -154,7 +152,7 @@ required: ["id", "content", "description", "status"],
       name: "run_command_background",
       strict: true,
       description:
-        "Spawn a long-running command (dev server, watcher, file syncer) and return a handle immediately. Use this for processes that don't terminate on their own — `npm run dev`, `pytest --watch`, `next dev`. For one-shot commands (build, test once, lint), use `run_command` instead. Poll the output with `read_background_output`. Always `kill_background` when done — but processes are also auto-killed at run end. Poll sparingly: every 2–3 iterations, not every iteration.",
+        "Spawn a long-running command (npm run dev, watchers, next dev) and return a handle. Use run_command for one-shot commands. Poll with read_background_output; kill_background when done.",
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -181,9 +179,8 @@ required: ["id", "content", "description", "status"],
       name: "read_file",
       strict: true,
       description:
-        "Reads file content. For files >100k chars, returns head + structural outline + tail by default. " +
-        "Use the optional lineRange parameter ([startLine, endLine], 1-indexed, inclusive) for exact " +
-        "ranges of large files. Small files (<30k) return full content unchanged.",
+        "Read a file. ≤10K chars: full content (no line numbers — safe to copy into apply_patch FIND). " +
+        ">10K: numbered head + outline + tail — use lineRange: [start, end] for the specific region you want to read or patch.",
       parameters: {
         type: "object",
         properties: {
@@ -231,72 +228,13 @@ required: ["id", "content", "description", "status"],
     function: {
       name: "apply_patch",
       strict: true,
-      // P3: output reduction - keep patch-call turns focused on structured args.
       description:
-        "Apply targeted FIND/REPLACE substitutions to an EXISTING file. " +
-        "Always use this instead of write_file when the file already exists. Do not narrate the patch outside the tool arguments.\n\n" +
-
-        "## Universal contract (applies to ALL intents)\n" +
-        "Each block performs ONE local substitution: the file region matching FIND is replaced verbatim by REPLACE. " +
-        "Nothing else changes. There are no implicit edits, no cross-references between blocks.\n\n" +
-
-        "REPLACE must be the literal text you want to appear in place of FIND. " +
-        "It must NOT contain code copied from elsewhere in the file. " +
-        "If you need to change two separated regions, use TWO blocks (see multi-block example below) - never compress two edits into one block.\n\n" +
-
-        "Keep FIND small and unique: 1-5 lines around the change point. " +
-        "Copy FIND verbatim from read_file output (whitespace and line endings matter).\n\n" +
-
-        "## Format\n" +
-        "--- FIND ---\n<exact lines from the file>\n--- REPLACE ---\n<replacement lines>\n\n" +
-        "Multiple blocks in one patch arg are allowed and encouraged when several locations in the same file need editing - they apply in order, atomically.\n\n" +
-
-        "## intent parameter\n" +
-        "  'add'    - inserting new code. REPLACE must contain every FIND line plus your additions, in order.\n" +
-        "  'modify' - editing existing code. REPLACE replaces FIND verbatim; line counts may differ.\n" +
-        "  'delete' - removing code. REPLACE may be shorter than FIND, including empty.\n" +
-        "intent controls line-count guards only. The 'one local substitution' rule above applies regardless.\n\n" +
-
-        "## Examples\n\n" +
-
-        "### Example 1 - single edit (intent='modify')\n" +
-        "Goal: rename a function in its declaration.\n" +
-        "--- FIND ---\n" +
-        "export const hasClerkEnv = () =>\n" +
-        "--- REPLACE ---\n" +
-        "export const isClerkConfigured = () =>\n\n" +
-
-        "### Example 2 - TWO edits in one file (multi-block, intent='modify')\n" +
-        "Goal: rename an import AND its callsite in the same file. " +
-        "Use TWO blocks. Do NOT collapse them into one block.\n" +
-        "--- FIND ---\n" +
-        "import { hasClerkEnv } from \"@/lib/env\";\n" +
-        "--- REPLACE ---\n" +
-        "import { isClerkConfigured } from \"@/lib/env\";\n" +
-        "--- FIND ---\n" +
-        "  if (!hasClerkEnv()) {\n" +
-        "--- REPLACE ---\n" +
-        "  if (!isClerkConfigured()) {\n\n" +
-
-        "### Anti-example - DO NOT DO THIS\n" +
-        "Wrong: compressing the import edit and the callsite edit into a single block.\n" +
-        "--- FIND ---\n" +
-        "import { hasClerkEnv } from \"@/lib/env\";\n" +
-        "--- REPLACE ---\n" +
-        "import { isClerkConfigured } from \"@/lib/env\";\n\n" +
-        "  if (!isClerkConfigured()) {\n" +
-        "This is invalid because REPLACE contains a line (the if-statement) that is NOT a substitution of the FIND content - it lives elsewhere in the file. The patch will be rejected and the file reverted.\n\n" +
-
-        "### Example 3 - insertion (intent='add')\n" +
-        "Goal: add a new export below an existing one.\n" +
-        "--- FIND ---\n" +
-        "export const hasClerkSecretKey = () =>\n" +
-        "  Boolean(readEnv(\"CLERK_SECRET_KEY\"));\n" +
-        "--- REPLACE ---\n" +
-        "export const hasClerkSecretKey = () =>\n" +
-        "  Boolean(readEnv(\"CLERK_SECRET_KEY\"));\n\n" +
-        "export const hasClerkUrl = () =>\n" +
-        "  Boolean(readEnv(\"CLERK_URL\"));",
+        "FIND/REPLACE substitutions on an EXISTING file (use write_file only for new files). " +
+        "Each block: --- FIND --- <verbatim lines, 1-5, unique in file> --- REPLACE --- <new lines>. " +
+        "REPLACE is the literal text replacing FIND — never copy in code from elsewhere; for two separated edits use TWO blocks. " +
+        "Anti-example: putting an import-line edit AND its callsite edit in one block is rejected because REPLACE then contains a line that wasn't in FIND. " +
+        "Multi-block patches apply atomically in order. " +
+        "intent: 'add' (REPLACE = FIND + additions, default), 'modify' (REPLACE replaces FIND, line counts may differ), 'delete' (REPLACE shorter than FIND, may be empty).",
       parameters: {
         type: "object",
         properties: {
@@ -322,15 +260,7 @@ required: ["id", "content", "description", "status"],
           scope: {
             type: ["object", "null"],
             description:
-              "Scope (optional). USE ONLY when ALL of the following are true:\n" +
-              "- The FIND string appears multiple times in the file AND you need to disambiguate which occurrence.\n" +
-              "- The target location is inside a NAMED function or class declaration (e.g., function getUser(), class UserService, async function updateLead()).\n\n" +
-              "DO NOT use scope when:\n" +
-              "- The FIND string is a unique import statement, top-level export, or appears only once in the file.\n" +
-              "- The target is inside an arrow-function const (e.g., const handleClick = () => {}).\n" +
-              "- The target is inside a default export (e.g., export default function Page()). Default exports register with kind export_default, NOT as a named function.\n" +
-              "- The target is inside a React component or callback whose name is just a variable binding.\n\n" +
-              "When in doubt, OMIT scope. The patch will still be precise if the FIND string is sufficiently unique.",
+              "Optional, pass null by default. Use ONLY when FIND occurs multiple times AND the target is inside a NAMED function/class. Do NOT use for unique FIND strings, arrow-function consts, default exports, or React components.",
             properties: {
               symbolName: {
                 type: "string",
@@ -385,16 +315,43 @@ required: ["id", "content", "description", "status"],
     type: "function",
     function: {
       name: "search_in_files",
-      strict: true,
-      description: "Search for a string pattern across repo files",
+      strict: false,
+      description:
+        "Search for a regex pattern across files in the repo. Prefer this over read_file when locating a symbol, finding usages, or checking presence of a pattern. " +
+        "Supports regex (default) or literal mode, case_insensitive, glob filtering, and output_mode (content | files_with_matches | count). " +
+        "Returns matches with line numbers and context. Max 500 matches.",
       parameters: {
         type: "object",
         properties: {
-          pattern: { type: "string", description: "String to search for" },
+          pattern: { type: "string", description: "Regex pattern (or literal string when literal=true)" },
           fileGlob: {
             type: ["string", "null"],
-            description:
-              "Which files to search (e.g. **/*.js); pass JSON null for default **/*.",
+            description: "File glob filter (e.g. **/*.ts); null = all files.",
+          },
+          literal: {
+            type: ["boolean", "null"],
+            description: "true = treat pattern as literal string (no regex). Default false.",
+          },
+          case_insensitive: {
+            type: ["boolean", "null"],
+            description: "true = case-insensitive match. Default false.",
+          },
+          multiline: {
+            type: ["boolean", "null"],
+            description: "true = enable multiline regex (^ and $ match line boundaries). Default false.",
+          },
+          output_mode: {
+            type: ["string", "null"],
+            enum: ["content", "files_with_matches", "count", null],
+            description: "content (default) = matches with context; files_with_matches = file list only; count = per-file match counts.",
+          },
+          context_lines: {
+            type: ["integer", "null"],
+            description: "Lines of context before/after each match. Default 2. Max 10.",
+          },
+          glob: {
+            type: ["string", "null"],
+            description: "Alias for fileGlob.",
           },
         },
         required: ["pattern", "fileGlob"],
@@ -405,52 +362,10 @@ required: ["id", "content", "description", "status"],
   {
     type: "function",
     function: {
-      name: "verify_visual",
-      strict: true,
-      description:
-        "Take a screenshot of a URL on the user's local dev server. Use AFTER making UI-related changes to visually verify your work. Skip for backend-only, comment-only, or non-visual changes. Hard cap: 5 screenshots per run.",
-      parameters: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          path: {
-            type: "string",
-            description: "Path relative to dev server root, e.g. '/', '/login', or '/#whats-inside'. Include a hash anchor like '/#section-id' to scroll to and screenshot a specific page section. Use a hash when verifying changes inside a section that may be below the page fold.",
-          },
-          description: {
-            type: ["string", "null"],
-            description:
-              "Brief description of what you expect to see, e.g. 'Submit button should be disabled when form invalid'.",
-          },
-          viewport: {
-            type: ["object", "null"],
-            additionalProperties: false,
-            properties: {
-              width: { type: "integer" },
-              height: { type: "integer" },
-            },
-            required: ["width", "height"],
-            description: "Optional viewport size. Default 1280x720.",
-          },
-          waitFor: {
-            type: ["string", "null"],
-            description: "Optional CSS selector to wait for before screenshotting, e.g. '.feed-loaded'.",
-          },
-        },
-        required: ["path", "description", "viewport", "waitFor"],
-      } as Record<string, unknown>,
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "find_references",
       strict: true,
       description:
-        "Find all files that import a specific symbol from a source file. " +
-        "Uses the project's import graph (AST-based), not text search. " +
-        "Use this for cross-file refactors (rename, signature change, etc.) to ensure " +
-        "you find every callsite. More accurate than search_in_files for symbols.",
+        "Find all files that import a specific symbol (AST-based, resolves aliases). More accurate than search_in_files for cross-file refactors.",
       parameters: {
         type: "object",
         properties: {
@@ -476,20 +391,10 @@ required: ["id", "content", "description", "status"],
     function: {
       name: "Task",
       description:
-        "Delegate a focused, bounded subtask to a subagent running in an isolated context. " +
-        "The subagent returns a structured summary; its detailed work is hidden from your context.\n\n" +
-        "Choose subagent_type based on the nature of the work:\n\n" +
-        "• worker — Use for bounded multi-file implementation tasks where the pattern is clear " +
-        "(e.g., adding a new endpoint with its handler + test, refactoring a function with 3+ call " +
-        "sites, implementing a small new module). Has read/write file access; cannot run commands. " +
-        "Do NOT use for single-line edits or content you can produce in 1-2 steps.\n\n" +
-        "• explore — Use for read-only investigation BEFORE deciding how to implement " +
-        "(e.g., finding all call sites of a function before refactoring, understanding how an " +
-        "existing flow works across 3-5 files, locating the right entry point for a new feature). " +
-        "Returns findings (file:line + relevance notes) plus a high-level summary. " +
-        "Do NOT use for any task that involves file modification.\n\n" +
-        "DO NOT use Task for trivial work that can be done in 1-2 tool calls. " +
-        "DO NOT use Task to escape your iteration budget on tasks you should be doing yourself.",
+        "Delegate a bounded subtask to an isolated subagent. Returns a structured summary; detailed work hidden from your context. " +
+        "worker = bounded multi-file implementation (read+write, no commands). " +
+        "explore = read-only investigation, returns file:line findings + summary. " +
+        "Only use when the task is non-trivial; see the TASK SUBAGENTS section in the system prompt for the dispatch criteria.",
       parameters: {
         type: "object",
         properties: {
@@ -519,11 +424,7 @@ required: ["id", "content", "description", "status"],
       name: "update_memory",
       strict: true,
       description:
-        "Save a project-specific convention or lesson you've learned that would be useful in future Zone sessions on this repo. " +
-        "Use sparingly — only for non-obvious things specific to THIS project that you couldn't infer from package.json, tsconfig, or directory structure. " +
-        "Examples of good entries: 'API routes all live in src/api/server.ts', 'We use shadcn/ui for components'. " +
-        "Examples of bad entries: 'This is a TypeScript project' (obvious from tsconfig.json), 'Files are in src/' (obvious from listing). " +
-        "At most one call per session — pick the single most valuable convention if any.",
+        "Save a non-obvious project convention for future Zone sessions. Use sparingly — only for things you couldn't infer from package.json/tsconfig/structure. Good: 'API routes live in src/api/server.ts'. Bad: 'This is a TypeScript project'. At most one call per session.",
       parameters: {
         type: "object",
         properties: {
@@ -540,6 +441,88 @@ required: ["id", "content", "description", "status"],
           },
         },
         required: ["entry", "reason"],
+        additionalProperties: false,
+      } as Record<string, unknown>,
+    },
+  },
+  // Phase AS / X.0: audit-gated tool, now in ZONE_TOOLS for unified tool array.
+  // Exposed to the LLM in all modes; agentLoop no-op guards it outside
+  // investigation mode so execute-phase calls are safely discarded.
+  {
+    type: "function",
+    function: {
+      name: "suggest_scope_change",
+      description:
+        "Propose narrowing or expanding the approved plan after investigation reveals scope mismatch. Only call when findings show the original plan is materially wrong-sized.",
+      parameters: {
+        type: "object",
+        required: ["reason", "type", "revised_plan_summary"],
+        properties: {
+          reason: {
+            type: "string",
+            description: "1–3 sentence justification grounded in investigation findings.",
+          },
+          type: {
+            type: "string",
+            enum: ["under_scope", "over_scope", "mixed"],
+            description: "Kind of mismatch found.",
+          },
+          missing_files: {
+            type: "array",
+            items: { type: "string" },
+            description: "Files the plan omits but investigation shows are required. Populate for under_scope / mixed.",
+          },
+          unnecessary_files: {
+            type: "array",
+            items: { type: "string" },
+            description: "Files the plan includes but investigation shows are uninvolved. Populate for over_scope / mixed.",
+          },
+          revised_plan_summary: {
+            type: "string",
+            description: "Short revised plan to show in the approval card.",
+          },
+        },
+        additionalProperties: false,
+      } as Record<string, unknown>,
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "run_command_readonly",
+      strict: true,
+      description:
+        "Execute a read-only shell command from a strict whitelist (test runners, type checks, lint, read-only git/filesystem inspection). Use this to reproduce failing tests, see actual error messages, run typecheck, or inspect git state. Output truncated to head 100 + tail 50 lines. Timeout: 120s. Blocked: file mutations, network mutations, package installs, shell substitution, chain operators, sudo.",
+      parameters: {
+        type: "object",
+        properties: {
+          command: {
+            type: "string",
+            description:
+              "The command to run. Must match a whitelist prefix (e.g. 'npx vitest run path/to/test.ts', 'tsc --noEmit', 'git diff'). No shell substitution, no chain operators.",
+          },
+        },
+        required: ["command"],
+        additionalProperties: false,
+      } as Record<string, unknown>,
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "revert_patch",
+      strict: true,
+      description:
+        "Undo a file's changes from this run, restoring it to pre-run state. Only valid for files you modified in this run.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "Relative path of the file to revert.",
+          },
+        },
+        required: ["path"],
         additionalProperties: false,
       } as Record<string, unknown>,
     },

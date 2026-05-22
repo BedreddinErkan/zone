@@ -5,6 +5,7 @@ import type {
   ChatCompletionTool,
   ChatCompletionToolChoiceOption,
 } from "openai/resources/chat/completions";
+import { applyMessageCacheBreakpoint2 } from "./cacheControlHelpers.js";
 
 const JSON_MODE_INSTRUCTION = [
   "You must respond with a single valid JSON object only.",
@@ -30,6 +31,8 @@ const JSON_MODE_INSTRUCTION = [
 const CACHE_MIN_CHARS = 8200;
 
 function isCacheEligible(systemText: string, tools: Anthropic.Tool[] | undefined): boolean {
+  // System alone clears the 2048-token minimum: eligible even without tools.
+  if (systemText.length >= CACHE_MIN_CHARS) return true;
   if (!tools || tools.length === 0) return false;
   const toolsChars = tools.reduce((sum, t) => {
     const desc = typeof t.description === "string" ? t.description.length : 0;
@@ -98,31 +101,35 @@ export function convertParams(
 
   const stop_sequences = normalizeStopSequences(input.stop);
 
-  // Prompt caching: when the system+tools prefix is large enough to clear the
-  // 2048-token minimum, attach cache_control to the last tool. Anthropic's
-  // prefix-ladder caches everything before AND including that block — so this
-  // single marker covers the entire tools array AND the system prompt with one
-  // breakpoint. Cache hits cost 10% of base input, write cost 1.25x (5min TTL).
+  // Prompt caching: attach cache_control to the stable prefix so Anthropic can
+  // reuse it across iterations. Cache hits cost 10% of base input, write 1.25x
+  // (5-min TTL). Two strategies depending on whether tools are present:
+  //   • tools present: last-tool breakpoint covers system+tools (no separate system breakpoint needed).
+  //   • no tools (synthesis calls): system block gets cache_control directly.
   const cacheEligible = isCacheEligible(finalSystem || "", tools);
   let systemForRequest: Anthropic.MessageCreateParams["system"] = finalSystem || undefined;
   let toolsForRequest = tools;
 
-  if (cacheEligible && tools && tools.length > 0) {
-    // Convert system from string to array form so we can attach cache_control
-    // (defense in depth — even though only the tools breakpoint is currently
-    // active, structuring system as an array keeps a future second breakpoint
-    // a one-line change).
-    if (finalSystem) {
+  if (cacheEligible) {
+    if (tools && tools.length > 0) {
+      // Convert system to array form (defense in depth for a future 2nd breakpoint).
+      if (finalSystem) {
+        systemForRequest = [
+          { type: "text", text: finalSystem },
+        ];
+      }
+      // Attach cache_control to the last tool; covers system + all tools.
+      toolsForRequest = tools.map((t, i) =>
+        i === tools.length - 1
+          ? { ...t, cache_control: { type: "ephemeral" } }
+          : t
+      );
+    } else if (finalSystem) {
+      // No tools (synthesis/chat calls): cache the system block directly.
       systemForRequest = [
-        { type: "text", text: finalSystem },
+        { type: "text", text: finalSystem, cache_control: { type: "ephemeral" } },
       ];
     }
-    // Attach cache_control to the last tool. SDK type allows it on Tool blocks.
-    toolsForRequest = tools.map((t, i) =>
-      i === tools.length - 1
-        ? { ...t, cache_control: { type: "ephemeral" } }
-        : t
-    );
   }
 
   // Tur prompt-caching-2: second breakpoint on the LAST user message (default
@@ -135,62 +142,9 @@ export function convertParams(
       .trim()
       .toLowerCase() !== "0";
 
-  let messagesForRequest: Anthropic.MessageParam[] = messages;
-
-  if (messageCacheEnabled && cacheEligible && messages.length > 0) {
-    // Find the index of the LAST user message (a tool_result-bearing user
-    // message also counts — what matters is "user" role).
-    let lastUserIdx = -1;
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      if (messages[i].role === "user") {
-        lastUserIdx = i;
-        break;
-      }
-    }
-
-    if (lastUserIdx >= 0) {
-      // Skip the trivial single-tiny-user-message case (no reuse expected).
-      const isFirstAndTiny =
-        lastUserIdx === 0 &&
-        messages.length === 1 &&
-        typeof messages[0].content === "string" &&
-        messages[0].content.length < 500;
-
-      if (!isFirstAndTiny) {
-        messagesForRequest = messages.map((msg, i) => {
-          if (i !== lastUserIdx) return msg;
-
-          // user.content can be string or content-block array.
-          // To attach cache_control we need an array with at least one block,
-          // and we attach to the LAST block of that array.
-          if (typeof msg.content === "string") {
-            return {
-              ...msg,
-              content: [
-                {
-                  type: "text" as const,
-                  text: msg.content,
-                  cache_control: { type: "ephemeral" as const },
-                },
-              ],
-            };
-          }
-          if (Array.isArray(msg.content) && msg.content.length > 0) {
-            const lastBlockIdx = msg.content.length - 1;
-            return {
-              ...msg,
-              content: msg.content.map((block, bi) =>
-                bi === lastBlockIdx
-                  ? ({ ...block, cache_control: { type: "ephemeral" } } as typeof block)
-                  : block
-              ),
-            };
-          }
-          return msg;
-        });
-      }
-    }
-  }
+  const messagesForRequest = applyMessageCacheBreakpoint2(messages, {
+    enabled: messageCacheEnabled && cacheEligible,
+  });
 
   const params: Anthropic.MessageCreateParams = {
     model: input.model,

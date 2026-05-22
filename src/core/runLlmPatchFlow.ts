@@ -1,3 +1,5 @@
+import { extractPriorRunSummary } from "../llm/applyRollbackFeedback.js";
+import { readFsConversationEvents } from "./conversationFilesystemStore.js";
 import { scanRepo } from "../repo/scanRepo.js";
 import { detectProjectStructure } from "../repo/detectProjectStructure.js";
 import { rankRelevantFiles } from "../repo/rankRelevantFiles.js";
@@ -54,10 +56,10 @@ import { parseTaskIntent, type TaskIntent } from "./taskIntentParser.js";
 import { tryAstPatchFallback } from "./astPatchFallback.js";
 import {
   runAgentLoop,
-  stripVerificationTag,
   type AgentLoopResult,
   type VerificationReason,
 } from "../llm/agentLoop.js";
+import { stripVerificationTag } from "../llm/verification/index.js";
 import {
   isPlanOrchestrationEnabled,
   buildStepTask,
@@ -96,9 +98,15 @@ import { cacheHitRatio, type IterCostUpdatePayload } from "../usage/iterCostMete
 import { computeWorkerMaxIterations } from "../llm/subagents.js";
 import {
   classifyTask,
+  type TaskArchetype,
   type TaskClassification,
   type TaskTier,
 } from "../llm/taskClassifier.js";
+import {
+  buildPipelineConfig,
+  readArchetypeFlagsFromEnv,
+  type PipelineConfig,
+} from "../llm/archetypeDispatcher.js";
 import { getRunCost } from "../usage/usageTracker.js";
 import {
   generateFinalRunReport,
@@ -110,8 +118,33 @@ import {
   matchSimilarFiles,
 } from "../embeddings/embeddingsRepository.js";
 import { indexRepoFiles } from "../embeddings/indexRepository.js";
-import { logger, debugLog, errorLog } from "../utils/logger.js";
+import { logger, debugLog, errorLog, log } from "../utils/logger.js";
 import { attachRunIdentity } from "../llm/openaiContext.js";
+import { investigateScope } from "../llm/investigationFlow.js";
+import { resolveTierLimits, type TierLimits } from "../llm/tierLimits.js";
+import {
+  requestRevisionApproval,
+  type RevisionDecision,
+} from "../llm/revisionApprovals.js";
+
+/**
+ * F1.4 C3: filter for the runLlmPatchFlow onProgress sink. toolExecutor
+ * emits diagnostic telemetry like
+ *   `{"event":"zone-tool-apply-patch-identity-swap-allowed-as-rename",...}`
+ * via the same onProgress callback that user-visible tool_call titles
+ * flow through. Without filtering, the UI's tool_call renderer surfaces
+ * the raw JSON in the chat. This helper returns true for any onProgress
+ * message that looks like a JSON object with `"event":"zone-..."` — those
+ * payloads stay a side-channel for tests / manual diagnostic readers.
+ *
+ * Exported for unit-test coverage; the runtime callsite is inline above
+ * inside the runAgentLoop input definition.
+ */
+export function isZoneInternalTelemetryProgress(msg: unknown): boolean {
+  const trimmed = String(msg ?? "").trim();
+  if (!trimmed.startsWith("{")) return false;
+  return /"event"\s*:\s*"zone-/.test(trimmed);
+}
 
 export type LlmPatchFlowResult =
   | {
@@ -175,18 +208,16 @@ export type LlmPatchFlowResult =
        *  of TOKEN_BUDGET_CAP). UI shows "Token budget reached" pill. The
        *  patch verdict still reflects whatever was produced before exit. */
       tokenBudgetExceeded?: boolean;
+      /** Phase Q.2: agent loop terminated because the same tool was called
+       *  with identical args too many times. UI shows an amber notice. */
+      loopDetected?: { toolName: string; count: number };
+      /** L5.1b-2: non-null when the dispatcher soft-promoted this run mid-loop. */
+      promotedFromArchetype?: TaskArchetype | null;
       /** Phase J.3: post-apply verification regressed (patch introduced new
        *  errors). Staging was discarded; UI shows "Apply rolled back" amber
        *  banner with the diff for inspection but no undo button. */
       rolledBackReason?: string;
       rolledBackErrors?: string[];
-      /** Phase I.3: post-apply auto-verify result. Populated only when the
-       *  user enabled `autoVerifyAfterPatch` in visual settings AND the run
-       *  reached `decisionMode: "safe_to_apply"`. Best-effort — absent on
-       *  rolled_back / blocked / chat / dev-server-unreachable runs. */
-      autoVerifyScreenshot?: string;
-      autoVerifyPageTitle?: string;
-      autoVerifyConsoleErrors?: string[];
       /** When decisionMode is chat, surfaced to the UI as the assistant message. */
       chatResponse?: string;
       finalExecutionOutcome?:
@@ -4538,14 +4569,29 @@ export async function runLlmPatchFlow(input: {
    */
   userApiKey?: string;
   provider?: LLMProvider;
-  mode?: "patch";
+  // "plan" kept as backward-compat alias; normalizes to "patch" internally
+  mode?: "patch" | "plan";
+  /** Pre-generated (and pre-approved) plan; skips both generateExecutionPlan call sites. */
+  preGeneratedPlan?: ExecutionPlan;
   /** L.4.1: per-request tier override forwarded from API body. Beats ZONE_FORCE_TIER env. */
   forceTier?: TaskTier;
+  /** Phase AS: pre-computed classification from server.ts audit gate. Skips re-classification. */
+  preClassifiedTask?: TaskClassification;
+  /** Phase X.0.1: distilled findings from the pre-execution scope audit.
+   *  Forwarded to agentLoopBaseInput so the execute agent sees the AUDIT CONTEXT block. */
+  auditFindings?: {
+    summary: string;
+    citationCount: number;
+    toolCallCount: number;
+    costUsd: number;
+  };
 }): Promise<LlmPatchFlowResult> {
   attachRunIdentity({ userId: input.userId, runId: input.runId });
   // Phase H.7: outer-scope flag survives past the inner block where `loop`
   // is declared, so the final return can include it for the UI pill.
   let tokenBudgetExceededAtExit = false;
+  // Phase Q.2: same pattern for loop detection exit.
+  let loopDetectedAtExit: { toolName: string; count: number } | undefined;
   logger.info(
     "[zone-flow-entry] runId=%s, ts=%s, lockHeld=%s",
     typeof input.runId === "string" ? input.runId.trim() : "",
@@ -5029,7 +5075,7 @@ const initializeTodosFromPlan = (): void => {
   // Agentic tool loop execution mode (tool calling + direct writes).
   const _useAgentLoop = shouldUseAgentLoop(input.task);
   const _forceFlowEnv = String(process.env["ZONE_FORCE_FLOW"] || "").trim().toLowerCase() || null;
-  debugLog("[zone-flow-branch]", JSON.stringify({
+  log("[zone-flow-branch]", JSON.stringify({
     branch: _useAgentLoop ? "agent_loop" : "plan_full_patch",
     task: input.task.slice(0, 200),
     reason: _forceFlowEnv
@@ -5043,6 +5089,85 @@ const initializeTodosFromPlan = (): void => {
     repoPathLooksLocal,
     fileSource,
   }));
+
+  // J.5: load prior-run rollback summary BEFORE we split into the agent_loop
+  // vs planner+agent branches, so both paths can thread it into
+  // runAgentLoop. J.5.1: try Supabase first (faster when available),
+  // fall back to the project-local filesystem store at
+  //   <repoPath>/.zone/conversations/<threadId>.jsonl
+  // which the rolled-back-run logRun wrote unconditionally. Both layers
+  // are graceful — any failure leaves priorRunSummary="".
+  let conversationHistory: unknown[] = [];
+  let priorRunSummary = "";
+  let priorRunSummarySource: "supabase" | "filesystem" | "none" = "none";
+  let priorRunHistoryEventCount = 0;
+  const threadIdForLoad =
+    typeof input.conversationId === "string" ? input.conversationId.trim() : "";
+  try {
+    const userIdJ5 =
+      typeof input.userId === "string" ? input.userId.trim() : "";
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (threadIdForLoad && userIdJ5 && url && key) {
+      const supabase: SupabaseClient = createClient(url, key);
+      const history = await getConversationByThreadId(supabase, {
+        userId: userIdJ5,
+        threadId: threadIdForLoad,
+      });
+      const allMessages = Array.isArray(history?.messages) ? history!.messages : [];
+      if (allMessages.length > 0) {
+        conversationHistory = allMessages.slice(-10);
+        priorRunSummary = extractPriorRunSummary(allMessages);
+        if (priorRunSummary) {
+          priorRunSummarySource = "supabase";
+          priorRunHistoryEventCount = allMessages.length;
+        }
+      }
+    }
+  } catch {
+    conversationHistory = [];
+    priorRunSummary = "";
+  }
+  // J.5.1: filesystem fallback — runs when Supabase didn't return a
+  // summary (no env, empty thread row, or the prior run was self-host).
+  if (!priorRunSummary && threadIdForLoad && typeof input.repoPath === "string") {
+    try {
+      const fsEvents = readFsConversationEvents({
+        repoPath: input.repoPath,
+        threadId: threadIdForLoad,
+      });
+      if (fsEvents.length > 0) {
+        // Hydrate conversationHistory if Supabase didn't already populate it,
+        // so the planner sees recent user turns even on self-host.
+        if (conversationHistory.length === 0) {
+          conversationHistory = fsEvents.slice(-10);
+        }
+        const candidate = extractPriorRunSummary(fsEvents);
+        if (candidate) {
+          priorRunSummary = candidate;
+          priorRunSummarySource = "filesystem";
+          priorRunHistoryEventCount = fsEvents.length;
+        }
+      }
+    } catch {
+      // Filesystem failures are non-fatal — proceed with empty priorRunSummary.
+    }
+  }
+  if (priorRunSummary) {
+    log("[zone-prior-run-summary-loaded]", JSON.stringify({
+      threadId: threadIdForLoad,
+      summaryBytes: priorRunSummary.length,
+      hasMarker: priorRunSummary.includes("APPLY_ROLLED_BACK\n"),
+      persistenceSource: priorRunSummarySource,
+      historyEventCount: priorRunHistoryEventCount,
+      runId: typeof input.runId === "string" ? input.runId : null,
+    }));
+  }
+
+  // L5.1b-1: dispatcher config — null until classifier runs inside _useAgentLoop.
+  // Path 2 (legacy) always sees null → no behavioral change.
+  let pipelineCfg: PipelineConfig | null = null;
+  let _dispatcherExcludeTools: ReadonlySet<string> | undefined = undefined;
 
   if (_useAgentLoop) {
     const runId = typeof input.runId === "string" ? input.runId.trim() : "";
@@ -5079,7 +5204,10 @@ const initializeTodosFromPlan = (): void => {
       );
     }
 
-    if (agentLoopPlanFiles.length > 0) {
+    if (input.preGeneratedPlan) {
+      executionPlan = input.preGeneratedPlan;
+      debugLog(`[zone-plan] using preGeneratedPlan steps=${executionPlan.steps.length} (agent_loop)`);
+    } else if (!(pipelineCfg as PipelineConfig | null)?.skipPlan && agentLoopPlanFiles.length > 0) {
       try {
         executionPlan = await generateExecutionPlan({
           task: input.task,
@@ -5327,6 +5455,50 @@ const initializeTodosFromPlan = (): void => {
       process.env["ZONE_PLAN_ORCHESTRATION"]
     );
 
+    // Phase F1: live tool-input streaming state. Tracks accumulated JSON per
+    // block so the filePath can be extracted from the partial payload.
+    const toolStreamState = {
+      accumByBlock: new Map<string, string>(),
+      totalDeltas: 0,
+      totalChars: 0,
+      startTs: Date.now(),
+    };
+    const toolInputStream = (event: {
+      blockId: string;
+      toolName: string;
+      delta: string;
+      isFirstDelta: boolean;
+      iter: number;
+      subagentId?: string | null;
+    }): void => {
+      const prev = toolStreamState.accumByBlock.get(event.blockId) ?? "";
+      const accum = prev + event.delta;
+      toolStreamState.accumByBlock.set(event.blockId, accum);
+      toolStreamState.totalDeltas += 1;
+      toolStreamState.totalChars += event.delta.length;
+
+      const fpMatch = accum.match(/"filePath"\s*:\s*"([^"\\]*)"/);
+      const fp = fpMatch ? fpMatch[1] : "";
+      // F1.4: subagent-emitted deltas carry the worker id; surface it both
+      // as a discrete `subagentId` field and as a "↳ worker N" title
+      // prefix so the UI slot reflects sub-agent origin.
+      const subId = event.subagentId || "";
+      const subIdShort = subId.slice(0, 6);
+      const parentMark = subId ? `↳ worker ${subIdShort} ` : "";
+      const baseLbl = `✎ Writing${fp ? ` ${fp}` : ""}...`;
+      emitStructuredProgress({
+        type: "tool_input_delta",
+        title: parentMark + baseLbl,
+        status: "active",
+        toolName: event.toolName,
+        blockId: event.blockId,
+        isFirstDelta: event.isFirstDelta,
+        delta: event.delta,
+        iter: event.iter,
+        ...(subId ? { subagentId: subId } : {}),
+      });
+    };
+
     const agentLoopCallbacks = {
       onStructuredEvent: (evt: unknown) => {
         if (!runId) return;
@@ -5488,11 +5660,47 @@ const initializeTodosFromPlan = (): void => {
             status: "active",
           } as any);
         }
+        if (e && typeof e === "object" && e.type === "compaction_status") {
+          emitStructuredProgress({
+            type: "compaction_status" as any,
+            title: "Compacting context",
+            status: "active",
+            count: typeof (e as any).count === "number" ? (e as any).count : 0,
+          } as any);
+        }
+        if (e && typeof e === "object" && e.type === "compaction_exhausted") {
+          emitStructuredProgress({
+            type: "compaction_exhausted" as any,
+            title: "Context exhausted",
+            status: "warning",
+            message: String((e as any).message || ""),
+          } as any);
+        }
+        if (e && typeof e === "object" && e.type === "loop_warning_emitted") {
+          emitStructuredProgress({
+            type: "loop_warning_emitted",
+            title: String(e.title || "Loop warning"),
+            status: "warning",
+            toolName: String((e as any).toolName || ""),
+            count: typeof (e as any).count === "number" ? (e as any).count : 0,
+          } as any);
+        }
+        if (e && typeof e === "object" && e.type === "loop_detected_terminal") {
+          emitStructuredProgress({
+            type: "loop_detected_terminal",
+            title: String(e.title || "Loop detected"),
+            status: "error",
+            toolName: String((e as any).toolName || ""),
+            count: typeof (e as any).count === "number" ? (e as any).count : 0,
+          } as any);
+        }
       },
       onProgress: (msg: string) => {
         if (!runId) return;
         // [tool] lines are handled by onToolCall (structured). Skip raw duplicates.
         if (String(msg || "").startsWith("[tool]")) return;
+        // F1.4 C3: zone-internal telemetry stays a side-channel.
+        if (isZoneInternalTelemetryProgress(msg)) return;
         emitStructuredProgress({
           type: "tool_call",
           title: String(msg || "").slice(0, 200),
@@ -5500,7 +5708,27 @@ const initializeTodosFromPlan = (): void => {
         });
       },
       onToolCall: (name: string, args: Record<string, unknown>) => {
-        if (!runId) return;
+        // Snapshot "before" content unconditionally — must precede the !runId
+        // early-return so beforeByFile is always populated even when the
+        // agentLoop fails to add the path to filesModified (Y.2.2 defensive).
+        const snapPath =
+          (name === "write_file" || name === "apply_patch") && typeof args.filePath === "string"
+            ? args.filePath
+            : "";
+        if (snapPath && !beforeByFile.has(snapPath)) {
+          try {
+            const abs = path.join(input.repoPath, snapPath);
+            const before = existsSync(abs) ? readFileSync(abs, "utf8") : "";
+            beforeByFile.set(snapPath, before);
+          } catch {
+            beforeByFile.set(snapPath, "");
+          }
+        }
+
+        if (!runId) {
+          if (snapPath && !_planOrchestrationEnabled) startTodoForFile(snapPath);
+          return;
+        }
         const cmd =
           name === "run_command"
             ? String(args.command ?? "")
@@ -5547,20 +5775,6 @@ const initializeTodosFromPlan = (): void => {
           }, 50);
         }
 
-        // Snapshot "before" content on first write_file or apply_patch.
-        const snapPath =
-          (name === "write_file" || name === "apply_patch") && typeof args.filePath === "string"
-            ? args.filePath
-            : "";
-        if (snapPath && !beforeByFile.has(snapPath)) {
-          try {
-            const abs = path.join(input.repoPath, snapPath);
-            const before = existsSync(abs) ? readFileSync(abs, "utf8") : "";
-            beforeByFile.set(snapPath, before);
-          } catch {
-            beforeByFile.set(snapPath, "");
-          }
-        }
         if (snapPath && !_planOrchestrationEnabled) startTodoForFile(snapPath);
       },
       onToolResult: (
@@ -5582,6 +5796,9 @@ const initializeTodosFromPlan = (): void => {
             : {}),
         });
       },
+      onToolInputStream: runId
+        ? toolInputStream
+        : undefined,
     } as const;
 
     // Phase H.6: plan-aware iter budget. Single-step (no plan or trivial
@@ -5601,11 +5818,21 @@ const initializeTodosFromPlan = (): void => {
     // will use the result to gate Task tool exposure and L.3 to scale the
     // token budget. Failure is graceful: a fallback (medium tier) is always
     // returned so dispatch is never blocked.
-    let taskClassification: TaskClassification | null = null;
-    try {
-      taskClassification = await classifyTask(input.task, {
-        userApiKey: input.userApiKey,
-      });
+    // Phase AS: skip re-classification when the audit gate already ran it.
+    let taskClassification: TaskClassification | null = input.preClassifiedTask ?? null;
+    if (!taskClassification) {
+      try {
+        taskClassification = await classifyTask(input.task, {
+          userApiKey: input.userApiKey,
+          repoRoot: path.resolve(__dirname, "../.."),
+        });
+      } catch (err) {
+        // classifyTask already swallows internal errors and returns a fallback,
+        // but defensive against future changes to that contract.
+        debugLog("[zone-task-classifier-unexpected-throw]", String(err));
+      }
+    }
+    if (taskClassification) {
       emitStructuredProgress({
         type: "task_classified",
         title: "Task classified",
@@ -5613,18 +5840,25 @@ const initializeTodosFromPlan = (): void => {
         tier: taskClassification.tier,
         estimatedFiles: taskClassification.estimatedFiles,
         estimatedIterations: taskClassification.estimatedIterations,
-        needsSubagent: taskClassification.needsSubagent,
         confidence: taskClassification.confidence,
         classifierModel: taskClassification.classifierModel,
         classifierCostUsd: taskClassification.classifierCostUsd,
         classifierLatencyMs: taskClassification.classifierLatencyMs,
         ...(taskClassification.fallbackUsed ? { fallbackUsed: true } : {}),
       });
-    } catch (err) {
-      // classifyTask already swallows internal errors and returns a fallback,
-      // but defensive against future changes to that contract.
-      debugLog("[zone-task-classifier-unexpected-throw]", String(err));
     }
+
+    const _archetypeFlags = readArchetypeFlagsFromEnv();
+    pipelineCfg = taskClassification
+      ? buildPipelineConfig(taskClassification.archetype, _archetypeFlags)
+      : null;
+    _dispatcherExcludeTools = (() => {
+      if (!pipelineCfg) return undefined;
+      const s = new Set<string>();
+      if (!pipelineCfg.allowSubagentDispatch) s.add("Task");
+      if (!pipelineCfg.allowScopeRevision) s.add("suggest_scope_change");
+      return s.size > 0 ? s : undefined;
+    })();
 
     const agentLoopBaseInput = {
       task: input.task,
@@ -5638,7 +5872,7 @@ const initializeTodosFromPlan = (): void => {
       // Settings → Usage tab can show per-user totals. Falls back to
       // "local-dev" inside agentLoop when missing.
       userId: input.userId,
-      mode: input.mode,
+      mode: input.mode === "plan" ? "patch" : input.mode,
       // Tur P2-scope: forward the plan so the tool layer can hard-block
       // writes that fall outside `plan.steps[*].filesLikely`.
       executionPlan,
@@ -5649,7 +5883,26 @@ const initializeTodosFromPlan = (): void => {
       maxIterations: iterBudgetComputed,
       taskClassification,
       forceTier: input.forceTier,
+      // J.5: thread the prior run's rollback summary (if any) so the
+      // agent reads APPLY_ROLLED_BACK markers from previous attempts
+      // before re-investigating. Empty string is treated as no-op
+      // inside agentLoop.
+      priorRunSummary,
+      // Phase X.0 C3: stable per-thread cache key for OpenAI so successive
+      // runs in the same conversation share a cache hit instead of misses.
+      conversationId: typeof input.conversationId === "string" ? input.conversationId : undefined,
+      // Phase X.0.1: forward audit findings so execute agent skips re-investigation.
+      auditFindings: input.auditFindings,
       ...agentLoopCallbacks,
+      ...(pipelineCfg && {
+        maxIterationsOverride: pipelineCfg.iterCap,
+        coachingBudgetOverride: pipelineCfg.coachingBudget,
+        pipelineApplied: true,
+        originalArchetype: taskClassification?.archetype,
+        ...(_dispatcherExcludeTools && {
+          capabilityFilter: { excludeToolNames: _dispatcherExcludeTools },
+        }),
+      }),
     };
 
     let loop: AgentLoopResult;
@@ -5700,15 +5953,28 @@ const initializeTodosFromPlan = (): void => {
 
     // Phase H.7: capture token-budget exit at outer-scope lifetime so the
     // final return (way down the function) can flag it for the UI pill.
-    if (loop.terminationReason === "token_budget_exceeded") {
+    if (
+      loop.terminationReason === "token_budget_exceeded" ||
+      loop.terminationReason === "compaction_exhausted"
+    ) {
       tokenBudgetExceededAtExit = true;
+    }
+    if (loop.terminationReason === "loop_detected" && loop.loopDetected) {
+      loopDetectedAtExit = loop.loopDetected;
     }
 
     filesTouched.push(...(loop.filesModified || []));
 
-    const agentCalledVerifyVisual = loop.toolCallLog.some(
-      (entry) => entry.tool === "verify_visual" && entry.success === true
-    );
+    if (toolStreamState.totalDeltas > 0) {
+      log("[zone-tool-stream-summary]", JSON.stringify({
+        event: "tool_stream_summary",
+        runId: runId || null,
+        totalDeltas: toolStreamState.totalDeltas,
+        totalChars: toolStreamState.totalChars,
+        durationMs: Date.now() - toolStreamState.startTs,
+        ts: new Date().toISOString(),
+      }));
+    }
 
     const agentLoopHadRunCommandFailure = loop.toolCallLog.some((entry) => {
       if (entry.tool !== "run_command") return false;
@@ -5763,6 +6029,21 @@ const initializeTodosFromPlan = (): void => {
         const removedLines = diff.filter((l) => l.type === "removed").length;
         fileDiffs.push({ filePath: rel, diff, addedLines, removedLines });
       }
+    }
+
+    // Y.2.2 defensive: recover diffs for any file snapshotted by onToolCall
+    // but absent from filesTouched (i.e., agentLoop skipped filesModified.add).
+    for (const [rel, before] of beforeByFile) {
+      if (fileDiffs.some((d) => d.filePath === rel)) continue;
+      const abs = path.join(input.repoPath, rel);
+      const after = stagingByRel?.has(rel)
+        ? stagingByRel.get(rel)!
+        : existsSync(abs) ? readFileSync(abs, "utf8") : "";
+      if (before === after) continue;
+      const diff = computeFileDiff(before, after);
+      const addedLines = diff.filter((l) => l.type === "added").length;
+      const removedLines = diff.filter((l) => l.type === "removed").length;
+      fileDiffs.push({ filePath: rel, diff, addedLines, removedLines });
     }
 
     // Use agent's self-reported verification reason to determine safety
@@ -5842,6 +6123,7 @@ const initializeTodosFromPlan = (): void => {
       runtimeVerificationSummary: null,
       finalExecutionOutcome: agentDecisionMode === "safe_to_apply" ? "completed" : "completed_with_issues",
       developerConfidence: 80,
+      terminationReason: loop.terminationReason,
     });
     const agentVerificationCommands = collectVerificationCommands(loop.toolCallLog);
 
@@ -5853,6 +6135,23 @@ const initializeTodosFromPlan = (): void => {
         runId: runId || null,
         outcome: "graceful_exit",
         summaryPreview: loop.summary.slice(0, 200),
+      }));
+    }
+    if (loop.terminationReason === "compaction_exhausted") {
+      debugLog("[zone-compaction-exhausted]", JSON.stringify({
+        mode: "patch",
+        runId: runId || null,
+        outcome: "graceful_exit",
+        summaryPreview: loop.summary.slice(0, 200),
+      }));
+    }
+    if (loop.terminationReason === "loop_detected") {
+      debugLog("[zone-loop-detected]", JSON.stringify({
+        mode: "patch",
+        runId: runId || null,
+        outcome: "graceful_exit",
+        toolName: loop.loopDetected?.toolName,
+        count: loop.loopDetected?.count,
       }));
     }
 
@@ -5967,95 +6266,6 @@ const initializeTodosFromPlan = (): void => {
       }));
     }
 
-    // Phase I.3: auto-verify after successful apply when toggle is ON.
-    // Best-effort — wrap in try/catch so a Playwright/probe failure never
-    // breaks the patch flow (apply already succeeded). Skipped on
-    // rolled_back / no_patch since stale code is on disk or nothing changed.
-    let autoVerifyFields: {
-      autoVerifyScreenshot?: string;
-      autoVerifyPageTitle?: string;
-      autoVerifyConsoleErrors?: string[];
-    } = {};
-    if (agentDecisionMode === "safe_to_apply" && fileDiffs.length > 0 && !agentCalledVerifyVisual) {
-      try {
-        const { loadVisualSettings } = await import("../visual/visualSettings.js");
-        const settings = loadVisualSettings();
-        if (settings.autoVerifyAfterPatch) {
-          const { getDevServerConfig, probeDevServer } = await import(
-            "../visual/devServerProbe.js"
-          );
-          const config = getDevServerConfig();
-          const reachable = await probeDevServer(config.baseUrl);
-          if (!reachable) {
-            console.log(
-              "[zone-auto-verify-skipped]",
-              JSON.stringify({
-                runId: runId || null,
-                reason: "dev_server_unreachable",
-                baseUrl: config.baseUrl,
-              })
-            );
-          } else {
-            const { runVerifyVisual } = await import("../tools/verifyVisual.js");
-            const verifyResult = await runVerifyVisual(
-              {
-                path: "/",
-                description: `Auto-verify after patch (${fileDiffs.length} file(s) changed)`,
-                viewport: settings.defaultViewport,
-                waitFor: null,
-              },
-              {
-                devServerBaseUrl: config.baseUrl,
-                runId: String(runId || "unknown"),
-                screenshotCount: 0,
-              }
-            );
-            if (verifyResult.success && verifyResult.screenshotPath) {
-              autoVerifyFields = {
-                autoVerifyScreenshot: verifyResult.screenshotPath,
-                ...(verifyResult.pageTitle
-                  ? { autoVerifyPageTitle: verifyResult.pageTitle }
-                  : {}),
-                ...(verifyResult.consoleErrors && verifyResult.consoleErrors.length > 0
-                  ? { autoVerifyConsoleErrors: verifyResult.consoleErrors }
-                  : {}),
-              };
-              console.log(
-                "[zone-auto-verify]",
-                JSON.stringify({
-                  runId: runId || null,
-                  screenshotPath: verifyResult.screenshotPath,
-                  pageTitle: verifyResult.pageTitle ?? null,
-                  consoleErrorCount: verifyResult.consoleErrors?.length ?? 0,
-                })
-              );
-            } else {
-              console.warn(
-                "[zone-auto-verify-failed]",
-                JSON.stringify({
-                  runId: runId || null,
-                  error: verifyResult.error ?? "unknown",
-                })
-              );
-            }
-          }
-        }
-      } catch (err) {
-        console.warn(
-          "[zone-auto-verify-error]",
-          JSON.stringify({
-            runId: runId || null,
-            error: err instanceof Error ? err.message : String(err),
-          })
-        );
-      }
-    } else if (agentCalledVerifyVisual) {
-      console.log("[zone-auto-verify-skipped]", JSON.stringify({
-        runId: runId || null,
-        reason: "agent_already_verified",
-      }));
-    }
-
     return {
       ok: true,
       patchPreview: `=== AGENT LOOP SUMMARY ===\n${loop.summary}`,
@@ -6069,7 +6279,6 @@ const initializeTodosFromPlan = (): void => {
       verificationCommands: agentVerificationCommands,
       decisionMode: agentDecisionMode,
       finalState: agentDecisionMode,
-      ...autoVerifyFields,
       ...(isVerificationRegressed
         ? {
             rolledBackReason,
@@ -6084,6 +6293,7 @@ const initializeTodosFromPlan = (): void => {
       lifecycleEvents,
       finalRunReport,
       ...(taskClassification ? { taskClassification } : {}),
+      promotedFromArchetype: loop.promotedFromArchetype ?? null,
     };
   }
 
@@ -6380,29 +6590,9 @@ const initializeTodosFromPlan = (): void => {
     status: "active",
   });
 
-  // Multi-turn memory: load the last conversation messages for this thread (best-effort).
-  // Only used for planning; patch generation prompts remain unchanged.
-  let conversationHistory: unknown[] = [];
-  try {
-    const threadId =
-      typeof input.conversationId === "string" ? input.conversationId.trim() : "";
-    const userId =
-      typeof input.userId === "string" ? input.userId.trim() : "";
-    const url = process.env.SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (threadId && userId && url && key) {
-      const supabase: SupabaseClient = createClient(url, key);
-      const history = await getConversationByThreadId(supabase, {
-        userId,
-        threadId,
-      });
-      conversationHistory = Array.isArray(history?.messages)
-        ? history!.messages.slice(-10)
-        : [];
-    }
-  } catch {
-    conversationHistory = [];
-  }
+  // Multi-turn memory: conversationHistory + priorRunSummary loaded earlier
+  // (before the agent_loop branch) so both paths share the same data.
+  // Nothing to do here — variables are already in scope.
 
   const lastChangedFiles =
     Array.isArray(input.lastChangedFiles)
@@ -6516,28 +6706,33 @@ const initializeTodosFromPlan = (): void => {
         : "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n(none)";
     })();
 
-  try {
-    executionPlan = await generateExecutionPlan({
-      task: input.task,
-      repoSummary: projectSummary,
-      relevantFiles: relevantFiles.map((file) => file.path),
-      userApiKey: input.userApiKey,
-      provider: input.provider,
-    });
-    debugLog(`[zone-plan] generated steps=${executionPlan.steps.length}`);
-    debugLog(`[zone-plan] scope=${executionPlan.scopeSummary}`);
-    // Sidebar is seeded by the in-loop TodoWrite tool now; pre-planner only
-    // feeds scopeGuard / evaluatePlanAlignment / orchestrator / finalRunReport.
-  } catch (err) {
-    console.warn(
-      `[zone-plan] skipped: ${err instanceof Error ? err.message : String(err)}`
-    );
+  if (input.preGeneratedPlan) {
+    executionPlan = input.preGeneratedPlan;
+    debugLog(`[zone-plan] using preGeneratedPlan steps=${executionPlan.steps.length}`);
+  } else if (!(pipelineCfg as PipelineConfig | null)?.skipPlan) {
+    try {
+      executionPlan = await generateExecutionPlan({
+        task: input.task,
+        repoSummary: projectSummary,
+        relevantFiles: relevantFiles.map((file) => file.path),
+        userApiKey: input.userApiKey,
+        provider: input.provider,
+      });
+      debugLog(`[zone-plan] generated steps=${executionPlan.steps.length}`);
+      debugLog(`[zone-plan] scope=${executionPlan.scopeSummary}`);
+      // Sidebar is seeded by the in-loop TodoWrite tool now; pre-planner only
+      // feeds scopeGuard / evaluatePlanAlignment / orchestrator / finalRunReport.
+    } catch (err) {
+      console.warn(
+        `[zone-plan] skipped: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
 
   // 4. Plan feature with LLM
   reportProgress("Planning feature...");
   let llmPlan: Awaited<ReturnType<typeof planFeatureWithLlm>> | null = null;
-  if (!input.hostedContext) {
+  if (!(pipelineCfg as PipelineConfig | null)?.skipPlan && !input.hostedContext) {
     try {
       perf.mark("feature model call start");
       llmPlan = await planFeatureWithLlm({
@@ -6629,15 +6824,17 @@ const initializeTodosFromPlan = (): void => {
   if (llmPlan?.suggestedFiles?.length) {
     planSummaryParts.push(`${llmPlan.suggestedFiles.length} suggested context file(s) from feature plan`);
   }
-  notifyProgress("Planning feature...", {
-    type: "plan_created",
-    message:
-      planSummaryParts.length > 0
-        ? `Planning complete (${planSummaryParts.join(" · ")}).`
-        : "Planning complete (execution + feature context ready).",
-    stage: "plan",
-    status: executionPlan ? "execution_plan" : "feature_skipped",
-  });
+  if (!(pipelineCfg as PipelineConfig | null)?.skipPlanSSE) {
+    notifyProgress("Planning feature...", {
+      type: "plan_created",
+      message:
+        planSummaryParts.length > 0
+          ? `Planning complete (${planSummaryParts.join(" · ")}).`
+          : "Planning complete (execution + feature context ready).",
+      stage: "plan",
+      status: executionPlan ? "execution_plan" : "feature_skipped",
+    });
+  }
 
   const explicitTargetForceContentByPath = new Map<string, string>();
 
@@ -11017,6 +11214,7 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
     ...(noCodeChangeReason ? { reason: noCodeChangeReason } : {}),
     ...(selectedTargetFile ? { targetFile: selectedTargetFile } : {}),
     ...(tokenBudgetExceededAtExit ? { tokenBudgetExceeded: true as const } : {}),
+    ...(loopDetectedAtExit ? { loopDetected: loopDetectedAtExit } : {}),
     developerConfidence,
     developerRisk: finalDeveloperRisk,
     intentMismatch: {

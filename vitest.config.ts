@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    exclude: ["src/llm/taskClassifier.archetype.test.ts"],
     clearMocks: true,
     restoreMocks: true,
     mockReset: true,

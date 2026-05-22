@@ -7,7 +7,6 @@ export const WORKER_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   "search_in_files",
   "apply_patch",
   "write_file",
-  "verify_visual",
   // NOTE: deliberately excluded for MVP — run_command, update_memory, Task,
   // background-process tools, get_dependencies, etc.
 ]);
@@ -17,6 +16,13 @@ export const VALID_SUBAGENT_TYPES = ["worker", "explore"] as const;
 export type SubagentType = (typeof VALID_SUBAGENT_TYPES)[number];
 
 export const EXPLORE_ALLOWED_TOOLS: ReadonlySet<string> = new Set(READ_ONLY_TOOLS);
+
+/** Phase AS: audit-phase toolset — read-only tools, suggest_scope_change, and run_command_readonly. */
+export const AUDIT_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
+  ...READ_ONLY_TOOLS,
+  "suggest_scope_change",
+  "run_command_readonly", // Phase G: reproduce failing tests, run typecheck, inspect runtime behavior
+]);
 
 // Phase H.6: plan-aware iteration budgets. Floor protects single-question
 // runs; ceiling caps unbounded plans; per-step factor scales with plan size.
@@ -48,6 +54,7 @@ export function computeWorkerMaxIterations(planStepsCount: number): number {
 export const EXPLORE_MAX_ITERATIONS = EXPLORE_ITER_FLOOR;
 export const WORKER_MAX_ITERATIONS = WORKER_ITER_FLOOR;
 
+/** @deprecated Use resolveSubagentCapabilityFilter from subagentDispatch.ts instead. */
 export function subagentTypeAllowedTools(type: SubagentType): ReadonlySet<string> {
   return type === "explore" ? EXPLORE_ALLOWED_TOOLS : WORKER_ALLOWED_TOOLS;
 }

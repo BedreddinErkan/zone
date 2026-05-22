@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RepoFile } from "../../types/project.js";
 import { computeFileDiff } from "../runLlmPatchFlow.js";
 
@@ -10,6 +10,8 @@ const {
   planFeatureWithLlmMock,
   planPatchPreviewWithLlmMock,
   planFullPatchWithLlmMock,
+  runAgentLoopMock,
+  classifyTaskMock,
 } = vi.hoisted(() => ({
   scanRepoMock: vi.fn(),
   detectProjectStructureMock: vi.fn(),
@@ -18,6 +20,8 @@ const {
   planFeatureWithLlmMock: vi.fn(),
   planPatchPreviewWithLlmMock: vi.fn(),
   planFullPatchWithLlmMock: vi.fn(),
+  runAgentLoopMock: vi.fn(),
+  classifyTaskMock: vi.fn(),
 }));
 
 vi.mock("../../repo/scanRepo.js", () => ({
@@ -46,6 +50,16 @@ vi.mock("../../llm/planPatchPreview.js", () => ({
 
 vi.mock("../../llm/planFullPatch.js", () => ({
   planFullPatchWithLlm: planFullPatchWithLlmMock,
+}));
+
+vi.mock("../../llm/agentLoop.js", () => ({
+  runAgentLoop: runAgentLoopMock,
+  stripVerificationTag: vi.fn((s: string) => s),
+}));
+
+vi.mock("../../llm/taskClassifier.js", () => ({
+  classifyTask: classifyTaskMock,
+  CLASSIFIER_CONFIDENCE_THRESHOLD: 0.5,
 }));
 
 function buildRepoFile(
@@ -91,7 +105,32 @@ describe("computeFileDiff", () => {
 
 describe("dryRun flow", () => {
   beforeEach(() => {
+    process.env["ZONE_FORCE_FLOW"] = "plan_full_patch";
     vi.clearAllMocks();
+    classifyTaskMock.mockResolvedValue({
+      tier: "medium",
+      archetype: "complex_multi_file",
+      confidence: 0,
+      archetypeConfidence: 0,
+      fallbackUsed: true,
+    });
+    runAgentLoopMock.mockResolvedValue({
+      success: true,
+      summary: "mock agent loop",
+      toolCallLog: [],
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "tests_inconclusive",
+      terminationReason: "natural_completion",
+      iterCount: 1,
+      promotedFromArchetype: null,
+      promotionTrigger: null,
+      promotedAtIter: null,
+    });
+  });
+
+  afterEach(() => {
+    delete process.env["ZONE_FORCE_FLOW"];
   });
 
   it("populates fileDiffs in dryRun mode without writing files", async () => {

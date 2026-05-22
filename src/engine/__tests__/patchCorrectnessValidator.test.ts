@@ -70,14 +70,16 @@ describe("validatePatchCorrectness", () => {
   });
 
   it("no-op: identical before/after blocks with no_op_patch", () => {
+    // no_op_patch now fires only when rawDiffCounts.addedLines===0 AND removedLines===0.
+    // Removing a comment changes a line (1 removed, 1 added) → no longer treated as no-op.
     const result = validatePatchCorrectness(
       buildInput({
         originalContent: "export const x = 1; // comment\n",
         updatedContent: "export const x = 1;\n",
       })
     );
-    expect(result.ok).toBe(false);
-    expect(result.blocking.some((i) => i.code === "no_op_patch")).toBe(true);
+    expect(result.ok).toBe(true);
+    expect(result.blocking.some((i) => i.code === "no_op_patch")).toBe(false);
   });
 
   it("broken setter: setSuccess(\"\" if (...) blocks", () => {

@@ -174,10 +174,50 @@ OPENAI_API_KEY=sk-...
 ZONE_DEV_SERVER_URL=http://localhost:3000   # visual verification target
 ZONE_ENABLE_MESSAGE_CACHE=1                 # Anthropic prompt caching (default on)
 ZONE_VERBOSE_LOGS=0                         # 1 for diagnostic output
+ZONE_DAILY_USD_CAP=10                       # per-user daily spend cap (USD); 0 = unlimited
+ZONE_ORG_POLICY_PATH=/etc/zone/policy.json  # org-level policy file (K.5)
+ZONE_EXPERIMENTAL_SYNTAX_CHECKERS=          # CSV of experimental checker ids (e.g. "go,ruby,java")
 PORT=3000
 ```
 
+### Experimental syntax checkers
+
+Zone validates patched files inline before committing them to disk. TypeScript and Python checkers are first-class (always active). Go, Ruby, and Java checkers are experimental and opt-in:
+
+```bash
+export ZONE_EXPERIMENTAL_SYNTAX_CHECKERS=go,ruby,java
+```
+
+| Lang | Command | Timeout | Notes |
+|------|---------|---------|-------|
+| Go | `gofmt -e` | 5s | AST parse, no link step |
+| Ruby | `ruby -c` | 5s | Parse-only, no execution |
+| Java | `javac` | 10s | JVM warmup; opt-in due to latency |
+
+All checkers use `gracefulSkip:true` — if the binary is absent from PATH, Zone silently approves the patch rather than blocking.
+
+Rust is deliberately omitted: `rustfmt --check` is too narrow as a syntax proxy, and `rustc --emit=metadata` is 3–8s per file. Use `run_command: cargo check` for Rust verification instead.
+
 All keys can also be set through **Settings → API Keys** after first launch — no `.env` file required for personal use.
+
+## Organization Policy (Phase K.5)
+
+Set `ZONE_ORG_POLICY_PATH` to a JSON file path:
+
+```json
+{
+  "dailyUsdCap": 50,
+  "monthlyUsdCap": 1000,
+  "allowedTiers": ["light", "medium"],
+  "maxSubagentCallsCap": 2,
+  "autoAuditRequired": true
+}
+```
+
+Currently enforced: `dailyUsdCap` (takes precedence over per-user and env caps).
+Schema-accepted but not yet enforced (Phase M): `monthlyUsdCap`, `allowedTiers`, `maxSubagentCallsCap`, `autoAuditRequired`.
+
+Policy precedence: policy > per-user (`~/.zone/tier-limits.json`) > env (`ZONE_DAILY_USD_CAP`) > default ($10).
 
 ## Common workflows
 
@@ -195,6 +235,10 @@ Why is buildDecisionTrace.test.ts failing on case 3?
 ```
 Change normalizeSignals to accept an options object with a strict flag
 ```
+
+## Breaking changes
+
+**Breaking (BYOM):** Default provider switched from OpenAI to Anthropic when no `X-Zone-Provider` header is present. CLI/API consumers that previously relied on the OpenAI default must either set `X-Zone-Provider: openai` explicitly or migrate to `ANTHROPIC_API_KEY`. UI users are unaffected — `buildAuthHeaders()` always sends the explicit header.
 
 ## Troubleshooting
 

@@ -24,6 +24,10 @@ export interface SemanticSmellResult {
   ok: boolean;
   reason?: SemanticSmellReason;
   details?: string;
+  /** True when the same smell category was already present in beforeContent
+   *  (pre-apply state). Callers use this to suppress retry for pre-existing smells. */
+  baselineDetected?: boolean;
+  baselineCategory?: SemanticSmellReason;
 }
 
 type DuplicateJsxAttributeInfo = {
@@ -182,10 +186,32 @@ export function checkSemanticSmells(
     const sourceValue = node.source.value;
     if (typeof sourceValue !== "string") continue;
     if (seenImports.has(sourceValue)) {
+      // Baseline-diff: check if the same duplicate was already in beforeContent.
+      let baselineDetected = false;
+      if (beforeContent !== undefined) {
+        try {
+          const beforeAst = parseJsFamily(beforeContent);
+          const beforeSeen = new Set<string>();
+          for (const beforeNode of beforeAst.program.body) {
+            if (!t.isImportDeclaration(beforeNode)) continue;
+            const beforeSource = beforeNode.source.value;
+            if (typeof beforeSource !== "string") continue;
+            if (beforeSeen.has(beforeSource) && beforeSource === sourceValue) {
+              baselineDetected = true;
+              break;
+            }
+            beforeSeen.add(beforeSource);
+          }
+        } catch {
+          // If beforeContent is unparseable, conservatively don't suppress.
+        }
+      }
       return {
         ok: false,
         reason: "duplicate_import_statement",
         details: `Two top-level import statements both import from '${sourceValue}'.`,
+        baselineDetected,
+        baselineCategory: baselineDetected ? "duplicate_import_statement" : undefined,
       };
     }
     seenImports.add(sourceValue);

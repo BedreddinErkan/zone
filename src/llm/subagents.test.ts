@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ZONE_TOOLS } from "../tools/toolDefinitions.js";
 import {
+  AUDIT_ALLOWED_TOOLS,
   EXPLORE_ALLOWED_TOOLS,
   WORKER_ALLOWED_TOOLS,
   formatSubagentToolResultForParent,
@@ -125,6 +126,41 @@ describe("subagent helpers", () => {
     });
   });
 
+  it("Worker max_iter label: status is max_iterations (not failed) when terminationReason is max_iterations", () => {
+    // A worker that hit its iteration cap gets status "max_iterations" so the UI
+    // can render "ITER CAP" (amber) instead of "FAILED" (red), distinguishing a
+    // tier-limit termination from a genuine failure.
+    const maxIterResult = formatSubagentToolResultForParent(
+      {
+        success: false,
+        summary: "Partial progress made; iteration limit reached before completing.",
+        toolCallLog: [],
+        filesModified: [],
+        patchValidatedByAgent: false,
+        verificationReason: "no_verification_attempted",
+        terminationReason: "max_iterations",
+      },
+      "worker-max",
+      "parent-run-x"
+    );
+    expect(JSON.parse(maxIterResult.output)).toMatchObject({ status: "max_iterations" });
+
+    // Genuine failure (no terminationReason) still emits status "failed".
+    const genuineFailResult = formatSubagentToolResultForParent(
+      {
+        success: false,
+        summary: "Encountered an unexpected error.",
+        toolCallLog: [],
+        filesModified: [],
+        patchValidatedByAgent: false,
+        verificationReason: "no_verification_attempted",
+      },
+      "worker-err",
+      "parent-run-x"
+    );
+    expect(JSON.parse(genuineFailResult.output)).toMatchObject({ status: "failed" });
+  });
+
   it("formats missing token usage as a required zeroed tokenUsage payload", () => {
     const result = formatSubagentToolResultForParent(
       {
@@ -237,5 +273,17 @@ describe("K.4: subagent prompt no-recursive-dispatch rules", () => {
 
   it("Task is absent from EXPLORE_ALLOWED_TOOLS (defensive by omission)", () => {
     expect(EXPLORE_ALLOWED_TOOLS.has("Task")).toBe(false);
+  });
+
+  it("Phase G: AUDIT_ALLOWED_TOOLS includes run_command_readonly", () => {
+    expect(AUDIT_ALLOWED_TOOLS.has("run_command_readonly")).toBe(true);
+  });
+
+  it("Phase G: EXPLORE_ALLOWED_TOOLS does NOT include run_command_readonly (deferred)", () => {
+    expect(EXPLORE_ALLOWED_TOOLS.has("run_command_readonly")).toBe(false);
+  });
+
+  it("Phase G: WORKER_ALLOWED_TOOLS does NOT include run_command_readonly (deferred)", () => {
+    expect(WORKER_ALLOWED_TOOLS.has("run_command_readonly")).toBe(false);
   });
 });

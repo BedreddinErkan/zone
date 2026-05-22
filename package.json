@@ -19,6 +19,7 @@
     "serve": "node dist/cli/index.js serve",
     "start": "node dist/cli/index.js serve",
     "test": "vitest run",
+    "test:l3": "vitest run src/llm/taskClassifier.archetype.test.ts",
     "sweep": "npx tsx scripts/sweep.ts",
     "sweep:dry": "npx tsx scripts/sweep.ts --dry-run"
   },
@@ -37,7 +38,6 @@
     "express-rate-limit": "^7.5.0",
     "fast-glob": "^3.3.3",
     "openai": "^5.23.2",
-    "playwright": "^1.50.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
@@ -47,6 +47,8 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.1",
     "@types/node": "^22.13.10",
+    "dompurify": "^3.4.4",
+    "marked": "^18.0.3",
     "typescript": "^5.9.3",
     "vitest": "^2.1.9"
   },

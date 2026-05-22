@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RepoFile } from "../types/project.js";
 
 const scanRepoMock = vi.fn();
@@ -8,6 +8,8 @@ const readProjectFilesMock = vi.fn();
 const planFeatureWithLlmMock = vi.fn();
 const planPatchPreviewWithLlmMock = vi.fn();
 const planFullPatchWithLlmMock = vi.fn();
+const runAgentLoopMock = vi.fn();
+const classifyTaskMock = vi.fn();
 
 vi.mock("../repo/scanRepo.js", () => ({ scanRepo: scanRepoMock }));
 vi.mock("../repo/detectProjectStructure.js", () => ({ detectProjectStructure: detectProjectStructureMock }));
@@ -16,6 +18,16 @@ vi.mock("../repo/readProjectFiles.js", () => ({ readProjectFiles: readProjectFil
 vi.mock("../llm/planFeature.js", () => ({ planFeatureWithLlm: planFeatureWithLlmMock }));
 vi.mock("../llm/planPatchPreview.js", () => ({ planPatchPreviewWithLlm: planPatchPreviewWithLlmMock }));
 vi.mock("../llm/planFullPatch.js", () => ({ planFullPatchWithLlm: planFullPatchWithLlmMock }));
+
+vi.mock("../llm/agentLoop.js", () => ({
+  runAgentLoop: runAgentLoopMock,
+  stripVerificationTag: vi.fn((s: string) => s),
+}));
+
+vi.mock("../llm/taskClassifier.js", () => ({
+  classifyTask: classifyTaskMock,
+  CLASSIFIER_CONFIDENCE_THRESHOLD: 0.5,
+}));
 
 // Ensure runtime verification doesn't interfere.
 vi.mock("./runRuntimeVerification.js", () => ({
@@ -66,7 +78,32 @@ function buildRepoFile(
 
 describe("runLlmPatchFlow minimal-safe last-mile override", () => {
   beforeEach(() => {
+    process.env["ZONE_FORCE_FLOW"] = "plan_full_patch";
     vi.clearAllMocks();
+    classifyTaskMock.mockResolvedValue({
+      tier: "medium",
+      archetype: "complex_multi_file",
+      confidence: 0,
+      archetypeConfidence: 0,
+      fallbackUsed: true,
+    });
+    runAgentLoopMock.mockResolvedValue({
+      success: true,
+      summary: "mock agent loop",
+      toolCallLog: [],
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "tests_inconclusive",
+      terminationReason: "natural_completion",
+      iterCount: 1,
+      promotedFromArchetype: null,
+      promotionTrigger: null,
+      promotedAtIter: null,
+    });
+  });
+
+  afterEach(() => {
+    delete process.env["ZONE_FORCE_FLOW"];
   });
 
   it("forces safe_to_apply for 1-line validated minimal patch even if earlier gates produced preview_only", async () => {

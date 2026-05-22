@@ -4,38 +4,45 @@
 } from "./openaiClient.js";
 import { createLLMClient } from "./factory.js";
 import { getRequestContext, withRequestContext } from "./openaiContext.js";
+import { getModelForRole } from "./modelRouting.js";
 import { readMemory, formatMemoryForPrompt } from "../memory/projectMemory.js";
 import { log, debugLog, errorLog } from "../utils/logger.js";
-import { parseVerificationError } from "../core/parseVerificationError.js";
-import { sanitizeVerificationEnv, strippedEnvKeys } from "../core/buildEnv.js";
 import { buildVerifyDiagnostic } from "../core/buildVerifyDiagnostic.js";
 import { maybeExpandScopeForVerifyDiagnostic } from "../tools/scopeGuard.js";
 import { createHash } from "node:crypto";
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
 import { CHAT_TOOLS, READ_ONLY_TOOLS, ZONE_TOOLS } from "../tools/toolDefinitions.js";
 import {
-  emptySubagentTokenUsage,
   resetSubagentCallCount,
-  type SubagentResult,
   type SubagentTokenUsage,
 } from "./subagents.js";
-import type { TaskClassification, TaskTier } from "./taskClassifier.js";
-import { resolveTierLimits } from "./tierLimits.js";
-import { extractUsage } from "./recordingClient.js";
 import {
-  buildIterCostUpdate,
-  emptyIterCostAccumulator,
-  type IterCostAccumulator,
-  type IterCostUpdatePayload,
-} from "../usage/iterCostMeter.js";
+  emitArchetype,
+  emitArchetypePromoted,
+  emitCacheUsage,
+  emitTierConstraints,
+  emitCoachingRule,
+  emitCommandCacheSummary,
+} from "./loopTelemetry.js";
+import type { TaskArchetype, TaskClassification, TaskTier } from "./taskClassifier.js";
+import { resolveTierLimits } from "./tierLimits.js";
+import { resolveDailyUsdCap } from "./usdCapResolver.js";
+import { loadOrgPolicy } from "./policyLoader.js";
+import { getUsage, recordRunRetry, recordRunSummary } from "../usage/usageTracker.js";
+import { canResumeFromTerminationReason } from "./patchUserFacingReason.js";
+import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
+import { cacheHitRatio } from "../usage/iterCostMeter.js";
 import { parseTodoProgressMarkers } from "../core/todoLifecycle.js";
+import {
+  buildApplyRolledBackMessage,
+  parseTscErrorPreview,
+} from "./applyRollbackFeedback.js";
 import { validateTodoWriteArgs } from "../tools/todoWriteValidate.js";
 import {
   executeTool,
   withStagingTempFlush,
+  clearCommandCacheForRun,
   type ToolResult,
 } from "../tools/toolExecutor.js";
 import type { ProjectFramework } from "../repo/detectFramework.js";
@@ -44,8 +51,43 @@ import type {
   ChatCompletionMessageFunctionToolCall,
 } from "openai/resources/chat/completions";
 import type { Mode } from "../types/mode.js";
+import { ContextCompactor } from "./compaction/ContextCompactor.js";
+import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
+import { hashToolCall, createDetectorState, recordAndDetect } from "./loopDetector.js";
+import { UpstreamUnavailableError } from "./withExponentialBackoff.js";
+import { emitTokenBreakdown, emitBreakdownSummary, type BreakdownEvent } from "./tokenBreakdown.js";
+import { pruneStaleReads } from "./contextPruner.js";
+import { buildDefaultOrchestrator } from "./history/ContextOrchestrator.js";
+import type { Capability, CapabilityFilter } from "../tools/capabilities.js";
+import { resolveToolList } from "../tools/toolRegistry.js";
+import { allowedToolsToFilter } from "../tools/capabilityCompat.js";
+import {
+  runPreIterationHooks,
+  runPostToolUseHooks,
+  applyAppendOps,
+  type PreIterationHook,
+  type PostToolUseHook,
+  type PreIterationContext,
+  type PostToolUseContext,
+} from "../hooks/postToolUseHook.js";
+import type { VerificationReason } from "./verification/verificationReason.js";
+import {
+  selectVerificationCommand,
+  runStagingVerification,
+  buildVerificationWarningsMessage,
+  finalizeStaging,
+  inferVerificationFromLog,
+  validateUnrelatedClaim,
+  validatePassedClaim,
+  applyNoInfraVerificationOverride,
+} from "./verification/index.js";
+import { finalizeRun } from "./runCompletion/index.js";
+import { TokenBudgetMeter } from "./tokenBudget/TokenBudgetMeter.js";
+import { handleToolResult, type ToolEventContext } from "./toolEventHandler/index.js";
+import { CoachingController, type FailureContext } from "./coaching/index.js";
 
-type AgentLoopMode = Exclude<Mode, "auto"> | "investigation";
+// "plan" kept as accepted input for backward compat — normalizeAgentLoopMode maps it to "patch"
+type AgentLoopMode = Exclude<Mode, "auto"> | "investigation" | "plan";
 
 export interface AgentLoopInput {
   task: string;
@@ -59,13 +101,46 @@ export interface AgentLoopInput {
    * bonus logic is disabled so restricted runtimes stay bounded.
    */
   maxIterationsOverride?: number;
+  coachingBudgetOverride?: number;
+  excludeTools?: ReadonlySet<string>;
+  pipelineApplied?: boolean;
+  originalArchetype?: TaskArchetype;
   onProgress?: (msg: string) => void;
   onToolCall?: (name: string, args: Record<string, unknown>) => void;
   onToolResult?: (name: string, result: ToolResult) => void;
   onStructuredEvent?: (evt: unknown) => void;
+  /**
+   * Phase F1: live tool-input streaming. Fires for each argument fragment
+   * emitted by the LLM while generating a write-class tool call (apply_patch,
+   * write_file). The first delta for a given blockId has isFirstDelta=true.
+   * Anthropic provider only; silently ignored for OpenAI.
+   */
+  onToolInputStream?: (event: {
+    blockId: string;
+    toolName: string;
+    delta: string;
+    isFirstDelta: boolean;
+    iter: number;
+    /** F1.4: id of the subagent emitting this delta. null/undefined for
+     *  parent-agent streams. Worker subagents share the parent's runId so
+     *  this is how the UI distinguishes "agent is writing" vs "↳ worker N
+     *  is writing" in the side-panel slot. */
+    subagentId?: string | null;
+  }) => void;
   abortSignal?: AbortSignal;
   /** Optional import-ecosystem context block built by buildImportContextSummary. Injected by runLlmPatchFlow. */
   importContextSummary?: string;
+  /**
+   * J.5: prior run's final summary, threaded in by runLlmPatchFlow when
+   * the conversation has an `agent_summary` event from a recent rollback.
+   * Capped + marker-preserving truncation is applied at the load site
+   * (extractPriorRunSummary). When non-empty, the agent loop injects a
+   * "PRIOR RUN CONTEXT" framing block above the user task so the agent
+   * reads APPLY_ROLLED_BACK markers from previous attempts before
+   * re-investigating. Empty / undefined → no-op (parent of all existing
+   * agentLoop callsites is unchanged).
+   */
+  priorRunSummary?: string;
   /**
    * BYOK: user-supplied LLM API key (sent from the browser via X-Zone-LLM-Key header).
    * Takes priority over process.env.OPENAI_API_KEY when present.
@@ -87,10 +162,11 @@ export interface AgentLoopInput {
    * Optional tool whitelist. If provided, only tools whose name appears in this
    * set are exposed to the LLM and accepted by the executor. If undefined,
    * defaults to the full ZONE_TOOLS set.
+   * @deprecated — use capabilityFilter instead.
    */
   allowedTools?: ReadonlySet<string>;
-  /** Suppress TodoWrite's sidebar meta-tool path for read-only modes. */
-  disableTodoWrite?: boolean;
+  /** Declarative capability-based tool filter. Takes precedence over allowedTools. */
+  capabilityFilter?: CapabilityFilter;
   /**
    * Optional subagent metadata reserved for the Task tool follow-up. Setting
    * this does not change behavior beyond allowedTools enforcement.
@@ -114,25 +190,54 @@ export interface AgentLoopInput {
   taskClassification?: TaskClassification | null;
   /** L.4.1: per-request tier override from API caller (beats ZONE_FORCE_TIER env). */
   forceTier?: TaskTier;
+  /**
+   * Phase X.0 C3: conversation/thread ID from the HTTP session. When provided,
+   * used as the OpenAI prompt_cache_key prefix instead of runId so successive
+   * runs in the same thread share a stable cache key and get cache hits
+   * rather than misses on every new runId.
+   */
+  conversationId?: string;
+  /** Phase O: lane identifier forwarded from the audit caller so telemetry and
+   *  UI can distinguish the scope audit mini-agent from the main patch agent.
+   *  "audit" = investigateScope(); "main" or absent = primary agent loop.
+   */
+  lane?: "main" | "audit";
+  /**
+   * Phase X.0.1: distilled findings from the pre-execution scope audit.
+   * When present, injected as an AUDIT CONTEXT block in the user message
+   * so the execute agent skips re-investigating ground the audit covered.
+   * Feature-gated: undefined when no audit ran (simple tasks, audit disabled).
+   */
+  auditFindings?: {
+    summary: string;
+    citationCount: number;
+    toolCallCount: number;
+    costUsd: number;
+    // Step B: structured fields for richer AUDIT CONTEXT render
+    scopeVerdict?: "under_scope" | "over_scope" | "mixed" | "none";
+    severity?: "none" | "minor" | "major";
+    citations?: Array<{ file: string; line?: number }>;
+    filesAlreadyRead?: string[];
+    // Step C: structured Phase 1 output fields
+    rootCause?: string;
+    fixInstruction?: string;
+    filesToEdit?: string[];
+    evidence?: string;
+  };
+  /** Gap 1: per-run hook registrations. Hooks are synchronous and scoped to this run only. */
+  hooks?: {
+    preIteration?: import("../hooks/postToolUseHook.js").PreIterationHook[];
+    postToolUse?: import("../hooks/postToolUseHook.js").PostToolUseHook[];
+  };
+  /** Gap 3: additional HistoryProcessor configs appended to the default pipeline. */
+  processors?: import("./history/types.js").ProcessorConfig[];
 }
-
-export type VerificationReason =
-  | 'tests_passed'
-  | 'tests_skipped_no_infra'
-  | 'tests_inconclusive'
-  | 'tests_failed_unrelated'
-  | 'tests_failed_by_patch'
-  | 'no_verification_attempted'
-  | 'verification_failed_staged'
-  // Phase J.3: distinguishes "patch introduced new errors" (rolled_back UI)
-  // from "patch had pre-existing errors but didn't regress them" (apply OK).
-  | 'verification_regressed'
-  | 'no_changes_made';
 
 export interface AgentLoopResult {
   success: boolean;
   summary: string;
   toolCallLog: Array<{
+    id: string;
     tool: string;
     args: Record<string, unknown>;
     result: string;
@@ -145,19 +250,31 @@ export interface AgentLoopResult {
   /** Phase H.7: how the loop ended. Used by upstream flows (investigation /
    *  patch) to surface "Token budget reached" vs "Iteration budget reached"
    *  distinctly in the UI. Optional for backward-compat with older callers. */
-  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded";
+  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded" | "upstream_unavailable" | "phase1_handoff" | "hook_blocked";
+  /** Phase Q.2: populated when terminationReason === "loop_detected". The
+   *  offending tool name + observed count in the sliding-window detector. */
+  loopDetected?: { toolName: string; count: number };
   /** Per-loop LLM token usage. For subagent loops this is serialized into the
    *  Task tool result so the parent can enforce the combined Phase H.7 cap. */
   tokenUsage?: SubagentTokenUsage;
   /** Phase K.6: cumulative LLM cost (USD) for this agent loop's own calls.
    *  Serialized into Task tool result so parent can propagate to cumulativeCost. */
   costUsd?: number;
+  /** L5.0: number of for-loop iterations completed. Used by [zone-archetype] telemetry
+   *  to measure iter inflation across archetypes. 0 = run rejected before first iter. */
+  iterCount?: number;
   /** Phase J.3.1: staging snapshot captured before rollback discarded it.
    *  Only populated when verificationReason === "verification_regressed".
    *  Keyed by absolute path; values are the content the agent attempted to
    *  write. runLlmPatchFlow uses this together with the pre-write
    *  beforeByFile snapshot to render a "what was attempted" diff card. */
   discardedStaging?: Map<string, string>;
+  /** L5.1b-2: soft promotion. Non-null when the dispatcher fired a promotion
+   *  mid-run (iter_cap / rollback_x2 / coaching_exhausted). Null on all
+   *  non-promoted runs including default env (pipelineApplied=false). */
+  promotedFromArchetype?: TaskArchetype | null;
+  promotionTrigger?: "iter_cap" | "rollback_x2" | "coaching_exhausted" | null;
+  promotedAtIter?: number | null;
 }
 
 const MAX_SELF_CORRECTION_ATTEMPTS = 5;
@@ -176,6 +293,7 @@ export const ESCALATION_BONUS_ITERATIONS = 5;
 export const TOKEN_BUDGET_CAP = 800_000;
 export const TOKEN_BUDGET_WARN = 0.8;
 export const TOKEN_BUDGET_HARD = 0.95;
+export const TOKEN_BUDGET_MID_WARN = 0.70;
 
 function cleanTokenNumber(value: unknown): number {
   const n = Number(value);
@@ -228,11 +346,25 @@ export function sortToolsForPromptCache<T>(tools: readonly T[]): T[] {
   );
 }
 
-export function buildOpenAIPromptCacheKey(runId: string | undefined): string | undefined {
-  const normalized = typeof runId === "string" ? runId.trim() : "";
+export function buildOpenAIPromptCacheKey(
+  runId: string | undefined,
+  conversationId?: string | undefined
+): string | undefined {
+  const threadId = typeof conversationId === "string" ? conversationId.trim() : "";
+  const normalized = threadId || (typeof runId === "string" ? runId.trim() : "");
   if (!normalized) return undefined;
-  return `zone-run-${normalized.slice(0, 16)}`.slice(0, 64);
+  const prefix = threadId ? "zone-thread" : "zone-run";
+  return `${prefix}-${normalized.slice(0, 16)}`.slice(0, 64);
 }
+
+/** Step B: stable module-level directive for Phase 2 when AUDIT CONTEXT is present.
+ *  No ${...} interpolation — per-run data lives in the user-message AUDIT CONTEXT block. */
+const TRUST_PHASE1_DIRECTIVE =
+  `=== AUDIT CONTEXT IS AUTHORITATIVE ===\n` +
+  `A prior investigation phase analyzed this task and produced the AUDIT CONTEXT block in the user message. Its findings — verdict, severity, cited files, files-already-investigated, and summary — are authoritative.\n\n` +
+  `Execute the implied fix. Do not re-read files listed under "Files already investigated" unless your direct observations contradict the audit's evidence. One targeted read_file for verification is allowed; broad search_in_files or find_references over the same surface is wasted work and counts against your iteration budget.\n\n` +
+  `If the AUDIT CONTEXT block is empty or internally contradictory, fall back to standard investigation. Otherwise trust it.\n` +
+  `=== END AUDIT CONTEXT GUIDANCE ===`;
 
 export function assembleAgentSystemPrompt(input: {
   agentIntro: string;
@@ -245,171 +377,146 @@ export function assembleAgentSystemPrompt(input: {
   backgroundCommandBlock: string;
   repoPath: string;
   planProgressBlock?: string;
+  planAnnotationsBlock?: string;
+  /** Step B: when set, appends TRUST_PHASE1_DIRECTIVE before the repo path line. */
+  auditFindings?: unknown;
 }): string {
   return (
     `${input.agentIntro}\n\n` +
     (input.hasFramework ? `${input.frameworkLines.join("\n")}\n\n` : "") +
     (input.projectMemoryBlock ? `${input.projectMemoryBlock}\n\n` : "") +
     (input.importContextSummary
-      ? `RELATED FILES (read-only context for planning â€” call read_file for full content):\n` +
-        `This block lists the primary file's import ecosystem. Use it to anticipate what other files might need updating, but do NOT assume contents â€” call read_file when you need to actually edit.\n` +
+      ? `RELATED FILES (read-only context for planning — call read_file for full content):\n` +
         input.importContextSummary + `\n` +
         `(End related files context)\n\n`
       : "") +
     (input.planProgressBlock ? `${input.planProgressBlock}\n\n` : "") +
-    `CRITICAL PATCH RULES â€” follow these exactly:\n` +
-    `1. To modify an EXISTING file, ALWAYS use apply_patch with --- FIND --- / --- REPLACE --- blocks.\n` +
-    `   NEVER use write_file on a file that already exists.\n` +
-    `2. write_file is ONLY for creating brand-new files that do not exist yet.\n` +
-    `3. When using apply_patch:\n` +
-    `   - Read the file first with read_file, then copy the exact lines verbatim into FIND.\n` +
-    `   - FIND must match exactly once in the file (include enough context to be unique).\n` +
-    `   - REPLACE must contain EVERY line from FIND, plus your additions/changes.\n` +
-    `   - If REPLACE has fewer lines than FIND, the patch is INVALID and will be rejected.\n` +
-    `   - Keep FIND small (1-5 lines) â€” just the immediate anchor around your insertion point.\n` +
-    `4. DO NOT remove or modify any code that the user did not ask to change.\n` +
-    `   Preserve every existing line unless deletion was explicitly requested.\n` +
-    `5. MINIMUM CHANGE PRINCIPLE â€” REPLACE must be the smallest possible diff:\n` +
-    `   - For intent='add': REPLACE = every line from FIND verbatim, then your new line(s) appended.\n` +
-    `     CORRECT: FIND has 3 lines â†’ REPLACE has those exact 3 lines + 1 new line = 4 lines total.\n` +
-    `     WRONG: REPLACE contains lines that were NOT in FIND (copies of other code in the file).\n` +
-    `   - For intent='modify': REPLACE = the edited version of FIND lines only. Do NOT pull in\n` +
-    `     surrounding lines that are already in the file.\n` +
-    `   - For intent='delete': REPLACE = only the lines you want to keep from FIND (can be empty).\n` +
-    `     Use this when removing duplicate or incorrect code.\n` +
-    `SCOPE PARAMETER â€” use sparingly, not by default:\n` +
-    `- USE scope ONLY when ALL of the following are true:\n` +
-    `  1. The FIND string appears multiple times in the file and you need to disambiguate.\n` +
-    `  2. The target location is inside a NAMED function or class declaration.\n` +
-    `- DO NOT use scope when the FIND string is a unique import statement, top-level export,\n` +
-    `  or otherwise appears only once in the file.\n` +
-    `- DO NOT use scope for arrow-function consts such as \`const handleClick = () => {}\`.\n` +
-    `- DO NOT use scope for default exports like \`export default function Page()\`.\n` +
-    `  Default exports register as \`__default__\`, not as the visible function name.\n` +
-    `- DO NOT use scope for React components or callbacks whose "name" is just a variable binding.\n` +
-    `- When in doubt, OMIT scope. A sufficiently unique FIND string is safer than guessing a symbol.\n\n` +
-    `PRE-EXISTING BROKEN FILE â€” when apply_patch returns rejectionReason 'file_already_broken_pre_patch':\n` +
-    `- The file had a syntax error BEFORE your patch ran. Your patch did not cause it.\n` +
-    `- Do NOT retry the same patch â€” it will fail again.\n` +
-    `- Do NOT keep incrementing your iteration count trying the same approach.\n` +
-    `- Recovery steps:\n` +
-    `  1. Call read_file on the broken file.\n` +
-    `  2. Find the syntax error at the line/col shown in the rejection message.\n` +
-    `  3. Write ONE apply_patch that fixes the pre-existing syntax error AND makes\n` +
-    `     your intended change in the same FIND/REPLACE block.\n` +
-    `  4. Pass scope: null â€” scope resolution cannot work on an unparseable file.\n` +
-    `  5. After the patch succeeds, verify with run_command (e.g. tsc --noEmit or npm test).\n\n` +
-    `TEST FAILURE RULES â€” follow these exactly:\n` +
-    `6. When tests fail, DO NOT give up and summarise. Investigate first.\n` +
-    `   - Use read_file on the file and line number mentioned in the error.\n` +
-    `   - Determine: is the error caused by YOUR recent change, or is it pre-existing?\n` +
-    `   - Pre-existing issue: fix it if it is simple and safe; otherwise note it as out-of-scope\n` +
-    `     and respond with a summary that includes a warning about the pre-existing issue.\n` +
-    `   - Your own mistake: fix it with apply_patch (use intent='modify' to edit lines,\n` +
-    `     intent='delete' to remove duplicate/incorrect code), then re-run tests.\n` +
-    `7. Only give up if self-correction has been attempted and the issue is too complex to fix\n` +
-    `   without expanding the original task scope.\n\n` +
-    `WORKFLOW for every patch task:\n` +
-    `1. Start with the most likely target file. Use search_in_files to locate it by\n` +
-    `   function/class name, then read_file to load the full content before editing.\n` +
-    `1b. You do NOT need to re-read a file after a successful apply_patch â€” the patch\n` +
-    `    has already been written to disk.\n` +
-    `2. search_in_files to locate the target function, class, or code region.\n` +
-    `2. read_file to view the full surrounding context before making any change.\n` +
-    `3. apply_patch with the correct intent:\n` +
-    `   - intent='add'     (default) -- inserting new lines; REPLACE = FIND + additions.\n` +
-    `   - intent='modify'  -- editing existing lines; REPLACE = edited version of FIND.\n` +
-    `   - intent='delete'  -- removing lines; REPLACE may be shorter than FIND.\n` +
-    `   Use write_file ONLY for brand-new files that do not exist yet.\n` +
-    `4. run_command to verify (run the test suite if one exists).\n` +
-    `5. If tests fail: read_file at the error location, determine cause,\n` +
-    `   apply targeted fix with intent='modify' or intent='delete', re-run tests.\n` +
-    `6. When all checks pass (or no tests exist), respond with a concise plain-text summary.\n` +
-    `Maximum iterations: ${input.baseMaxIterations} (already enforced -- do not stall).\n\n` +
-    `VISUAL VERIFICATION (verify_visual):\n` +
-    `Take a screenshot of your changes on the user's local dev server.\n` +
-    `USE for: UI/styling/layout changes, form or interaction state (validation,\n` +
-    `disabled, hover), new components on user-visible pages, regressions a user\n` +
-    `would notice while browsing.\n` +
-    `SKIP for: backend-only edits (API/server/DB), comment-only or rename\n` +
-    `refactors, type/interface-only changes, test files, configs (package.json,\n` +
-    `tsconfig, etc.), build/CI scripts.\n` +
-    `PATH — infer from changed file paths:\n` +
-    `  pages/login.tsx          -> "/login"\n` +
-    `  app/dashboard/page.tsx   -> "/dashboard"\n` +
-    `  components/Header.tsx    -> "/"  (shared chrome shows on every page)\n` +
-    `  src/api/users.ts         -> don't verify (backend-only)\n` +
-    `If multiple pages are affected, pick the most representative. If you can't\n` +
-    `confidently infer a path, default to "/".\n` +
-    `WAITFOR — pass a CSS selector that appears after async data loads, so the\n` +
-    `screenshot waits for real content. Without it the capture fires at\n` +
-    `DOMContentLoaded — fine for static pages, may catch a loading state on\n` +
-    `SSR/CSR pages.\n` +
-    `ECONOMY — 1 screenshot is usually enough. Multi-state only when an\n` +
-    `interaction flow needs proof (e.g., empty form vs. validation error).\n` +
-    `Don't multi-state for simple tweaks (color, spacing, copy).\n` +
-    `Examples:\n` +
-    `  verify_visual({ path: "/", description: "Header should now have dark navy background" })\n` +
-    `  verify_visual({ path: "/login", description: "Submit button disabled when fields empty" })\n` +
-    `  verify_visual({ path: "/dashboard", description: "Stat cards render 4 across", waitFor: ".user-stats-loaded" })\n` +
-    `HASH ANCHORS — when your change is inside a specific page section, pass\n` +
-    `the section's id as a hash anchor so the viewport is positioned there:\n` +
-    `  verify_visual({ path: "/#whats-inside", description: "..." })\n` +
-    `Look for the \`id\` attribute on the section element you modified. If the\n` +
-    `change spans the full page or you're unsure, just pass "/" — the tool now\n` +
-    `captures full-page screenshots so changes below the fold are always visible.\n\n` +
-    `TASK SUBAGENTS (Task):\n` +
-    `Default to single-thread. Use Task only when parallelism clearly saves wall time.\n` +
-    `USE Task ONLY when: 5+ independent investigation steps; different file clusters with no shared state; single-thread would exceed 15 iterations; or multi-candidate exploration benefits from parallelism. Examples: audit security issues in 8+ files; investigate parallel module dependencies.\n` +
-    `DON'T USE Task for: single-file changes; sequential reasoning chains; investigations under 5 files; work that fits in 8 iterations; patch-then-verify cycles; synthetic test scenarios. Most "find X function" tasks fit single-thread.\n` +
-    `COST: each dispatch consumes about 30K-100K extra tokens and can double/triple BYOK cost. Use 0 dispatches unless criteria clearly match.\n` +
-    `ECONOMY: policy caps are MAX_SUBAGENT_CALLS=2 and WORKER_MAX_ITER=6 (numeric enforcement in K.2).\n` +
-    `YES example: "audit deprecated API usage across src/api/* and src/core/* - 12 files, find all sites and propose unified replacement".\n` +
-    `NO examples: "Find a function with multiple callers and break its signature" -> use search_in_files + find_references in the main loop. "Refactor this single component" -> read_file + apply_patch. "Investigate why this test is failing" -> search + read in the main loop.\n\n` +
-    `NARRATION (one short line before each tool call):\n` +
-    `Before invoking each tool, write one short sentence in plain English describing what you're about to do and why. ` +
-    `Examples: "Reading the README to find the existing structure.", "Now patching package.json to add the dev dependency.", "Searching for callers of the renamed function." ` +
-    `Keep it to one short line. No bullet points, no markdown headers, no emoji. ` +
-    `This sentence is shown to the user as live narration so they can follow your reasoning. ` +
-    `Write each statement only once — do not restate or repeat your summary in the same response.\n\n` +
-    `READ_FILE ECONOMY:\n` +
-    `read_file behavior depends on file size:\n` +
-    `- <30k chars: full content.\n` +
-    `- 30-100k chars: full content with a hint to use lineRange.\n` +
-    `- >100k chars: first 100 lines + structural outline + last 50 lines.\n` +
-    `Examples:\n` +
-    `- read_file({ filePath: "src/foo.ts", lineRange: null })\n` +
-    `- read_file({ filePath: "src/big.ts", lineRange: null })\n` +
-    `- read_file({ filePath: "src/big.ts", lineRange: [4900, 5100] })\n` +
-    `When you need an exact section of a large file, prefer lineRange over broad reads. ` +
-    `Outline + lineRange is much more token-efficient than repeated full-file reads.\n\n` +
-    `OUTPUT ECONOMY:\n` +
-    `- Final response: 60-80 words unless an error/warning needs more detail.\n` +
-    `- Include changed files, verification result, and any remaining warning.\n` +
-    `- Omit tables, decorative markdown, and per-file explanations already visible in the diff.\n` +
-    `- Do not recap tool output or command logs unless they explain a failure.\n\n` +
-    `TRUNCATED FILE SECTIONS: If you see a ZONE_CONTEXT_TRUNCATED marker in a file,\n` +
-    `part of the file was omitted from the initial context to save space.\n` +
-    `- DO NOT include the marker line in any apply_patch FIND block.\n` +
-    `- Use read_file with lineRange on the same path to fetch the hidden section.\n` +
-    `- Only generate FIND blocks from lines you have fully read.\n\n` +
-    `FINAL ASSESSMENT (required): When your work is complete, include exactly one of these\n` +
-    `tags on its own line in your final response:\n` +
-    `  [ZONE_VERIFICATION: tests_passed]           -- suite ran and all tests passed\n` +
-    `  [ZONE_VERIFICATION: tests_skipped_no_infra] -- no test script/framework found\n` +
-    `  [ZONE_VERIFICATION: tests_inconclusive]     -- infra issue prevented tests (wrong\n` +
-    `    command, missing deps, port conflict, ENOENT, etc.) -- patch itself is likely correct\n` +
-    `  [ZONE_VERIFICATION: tests_failed_unrelated] -- tests failed but failure is pre-existing,\n` +
-    `    not caused by your patch\n` +
-    `  [ZONE_VERIFICATION: tests_failed_by_patch]  -- tests failed because of your patch\n` +
-    `    (you MUST attempt to fix it before marking complete)\n` +
-    `Use tests_inconclusive for: 'missing script', 'command not found', 'ENOENT', port\n` +
-    `conflicts, or any environment issue that prevented the suite from running at all.\n` +
-    `Use tests_failed_by_patch ONLY when the error clearly points at code you changed.\n\n` +
+    (input.planAnnotationsBlock ? `${input.planAnnotationsBlock}\n\n` : "") +
+    `PATCH RULES:\n` +
+    `- apply_patch for EXISTING files; write_file ONLY for new files.\n` +
+    `- FIND: copy verbatim from read_file output, 1-5 lines, unique in the file.\n` +
+    `- REPLACE: one local substitution of FIND. Never copy in code from elsewhere in the file — use a second block instead.\n` +
+    `- intent='add' (default, REPLACE = FIND + additions), 'modify' (REPLACE = edited FIND), 'delete' (REPLACE shorter than FIND, may be empty).\n` +
+    `- MINIMUM CHANGE: preserve every existing line the user didn't ask to change.\n` +
+    `- scope: OMIT by default. Only set when FIND occurs multiple times AND the target is inside a NAMED function/class. Never for arrow-const, default exports, or React components.\n` +
+    `- After a successful apply_patch, do NOT re-read the same file — the patch is already written.\n\n` +
+    `PRE-EXISTING BROKEN FILE — when apply_patch returns rejectionReason 'file_already_broken_pre_patch':\n` +
+    `The file had a syntax error before your patch. Read it, locate the line/col in the rejection, then write ONE apply_patch that fixes the pre-existing error AND makes your change (pass scope: null — scope resolution cannot work on an unparseable file).\n\n` +
+    `APPLY_ROLLED_BACK — when apply_patch returns a result beginning with "APPLY_ROLLED_BACK":\n` +
+    `- Patch reverted — disk is at pre-apply state for paths listed under "Files restored to pre-apply state".\n` +
+    `- Read the error list. "Suggested: " lines are hints for coordinated multi-file edits.\n` +
+    `- Do NOT use shell commands to bypass. Re-investigate, then retry with apply_patch or Task (≥3-file edits).\n\n` +
+    `VERIFICATION WARNINGS — when a run summary contains a "VERIFICATION WARNINGS" block:\n` +
+    `- Your patches are on disk. The verifier found new errors your changes introduced.\n` +
+    `- Options: (a) read error locations and patch to fix; (b) call revert_patch({path}) to undo specific files; (c) accept if errors are pre-existing or out-of-scope.\n` +
+    `- revert_patch({path: "<rel-path>"}) restores a file to its pre-run state without deleting other changes.\n\n` +
+    `PRIOR RUN CONTEXT — if the user message begins with "PRIOR RUN CONTEXT — your last attempt in this thread produced this result:":\n` +
+    `- This thread had a previous run; its final summary is between that header and "END PRIOR RUN CONTEXT.".\n` +
+    `- If the block contains APPLY_ROLLED_BACK or VERIFICATION WARNINGS, start from those errors — re-investigate from those specific locations.\n` +
+    `- If the block contains "Suggested: ", apply that direction (coordinated multi-file edit via Task).\n` +
+    `- The user's current task follows END PRIOR RUN CONTEXT — combine: prior context = WHERE the problem is.\n\n` +
+    `TEST FAILURES — investigate, don't summarize:\n` +
+    `- Read the file/line in the error. Decide: caused by your change, or pre-existing?\n` +
+    `- Pre-existing: fix if simple, else note as out-of-scope in your final summary.\n` +
+    `- Your mistake: fix with apply_patch (intent='modify' or 'delete'), re-run tests.\n` +
+    `- Only give up after a self-correction attempt.\n\n` +
+    `Operate efficiently — the cost ceiling terminates the run; avoid redundant reads and retries.\n\n` +
+    `TASK SUBAGENTS (Task) — when to dispatch:\n` +
+    `Default is single-thread. Hard cap: 2 dispatches per parent run (MAX_SUBAGENT_CALLS=2, WORKER_MAX_ITER=6). Each dispatch costs ~30K-100K tokens.\n` +
+    `GOOD signals (DO dispatch):\n` +
+    `- Current plan step is marked \`subagentEligible: true\` (consult the plan-annotations block above when present).\n` +
+    `- Same transformation across 5+ files (multi_file_fanout): rename, codemod. Worker.\n` +
+    `- Pure read-only investigation across the repo (exploration): "map all callers of X". Explore.\n` +
+    `- A single step that would otherwise consume 10+ parent iterations (long_isolated_step).\n` +
+    `- Verifier rolled back your patch AND you have spent ≥2 iterations on the rollback recovery AND the diagnosis requires reading 3+ files outside your patched scope (e.g., tsconfig + vitest config + jest setup; module resolution config + package.json + lockfile; build pipeline + bundler config): dispatch ONE explore subagent with a narrow question scoped to the environment investigation. Worker returns scoped findings; you apply them without burning your iter budget on environment archaeology (focused_diagnosis).\n` +
+    `BAD signals (DON'T dispatch): 1-2 file edits, shared mutation state, uncertain scope, patch-then-verify cycles.\n` +
+    `DISPATCH REASON (required): prefix description with "multi_file_fanout: ...", "exploration: ...", "long_isolated_step: ...", or "focused_diagnosis: ...". Example: Task({ subagent_type: "worker", description: "multi_file_fanout: rename foo→bar across src/api/handlers/* (8 files)" }).\n\n` +
+    `NARRATION: before each tool call, write one short sentence in plain English describing what you're about to do and why. ` +
+    `Examples: "Reading the README to find the existing structure.", "Patching package.json to add the dev dependency.", "Searching for callers of the renamed function." ` +
+    `One line, no bullets, no markdown headers, no emoji. Shown as live narration. Don't repeat in the final summary.\n\n` +
+    `SEARCH FIRST: for symbol/pattern queries (find a function call, find usages, locate a definition), use search_in_files BEFORE read_file. search_in_files now supports regex, output_mode, and context_lines. Reading entire files to find a single symbol is the most common wasteful pattern.\n\n` +
+    `READ_FILE ECONOMY: ≤10K chars returns full content (no line-number prefix — safe to copy into FIND). >10K returns numbered head (lines 1-100) + outline + numbered tail — use lineRange: [start, end] (1-indexed inclusive) to read the specific region before patching. When you receive a FILE OUTLINE (file too large for full read), your next action MUST be read_file with lineRange covering the symbol or region you need — the outline alone is insufficient context for editing.\n\n` +
+    `INTERPRETING COMMAND OUTPUT: every run_command result starts with [exit_code=N — ...]. exit_code=0 ⇒ success — DO NOT retry based on output text (e.g. "Tests: N failed" may be pre-existing failures unrelated to your patch). exit_code≠0 ⇒ failure — read the tail for the reason. When verifying your own patch, focus only on tests that cover files you modified. If a command exited 0, do not run additional commands to verify or investigate its output. Trust the exit code as final and move on.\n\n` +
+    // @protected-until 2026-08-18 (commit 472efc9, post-mortem pipe-noise retry fix)
+    // @do-not-trim-without behavioral test sweep + 2 weeks dogfood quiet on pipe-retry incidents
+    // @migration-path: Gap 5 — PostToolUseHook { kind:"block", name:"verifier-pipe-noise" }
+    //   requires a model-intent classifier to detect retry intent. Defer until Gap 5.
+    `VERIFIER SHELL DISCIPLINE — pipe exit code semantics:\n` +
+    `Some shell patterns produce non-zero exit codes that are NOT real failures:\n` +
+    `1. \`grep PATTERN | wc -l\` — grep returns exit 1 when no matches found; the pipeline exits 1 even though wc -l succeeded with count "0".\n` +
+    `2. \`grep -c PATTERN\` — returns count directly without piping; exits 1 if no match, BUT the count is in stdout regardless.\n\n` +
+    `DEFENSIVE PATTERNS for counting:\n` +
+    `✓ \`command 2>&1 | grep -c " FAIL" || echo 0\` — grep -c returns count; \`|| echo 0\` swallows the 1-exit when no match.\n` +
+    `✓ Separate verification — run target test directly first to confirm pass, then check full suite for regression count. Do NOT conflate the two.\n` +
+    `✗ Avoid: \`grep " FAIL" | wc -l\` — pipe will return 1 on grep no-match.\n\n` +
+    `PRIORITY RULE: If \`npx vitest run path/to/target.test.ts\` returned exit 0, your fix is verified. A downstream pipe noise (regression count) is secondary — do NOT retry the fix based on pipe noise.\n\n` +
+    `Few-shot examples:\n` +
+    `[Example A — target passes, regression count noise (pipe noise scenario)]\n` +
+    `[shell] npx vitest run src/billing/conversationRepository.test.ts 2>&1 → exitCode=0\n` +
+    `[agent] Target test passed. Check regression count defensively.\n` +
+    `[shell] npx vitest run 2>&1 | grep -c " FAIL" || echo 0 → 59\n` +
+    `[agent] 62 → 59, baseline improved. Fix verified, no retry needed.\n\n` +
+    `[Example B — real test failure, not pipe noise]\n` +
+    `[shell] npx vitest run path/to/changed.test.ts 2>&1 → exitCode=1, "Tests 2 failed | 3 passed"\n` +
+    `[agent] Real failure in target. Inspect output for cause, then retry the fix.\n\n` +
+    `FINAL SUMMARY (required — write this as your last response):\n` +
+    `Structure your final response as exactly four sections in this order. Do not add any other headings.\n\n` +
+    `## What changed\n` +
+    `One bullet per logical change (max 120 chars each). Reference files with inline backticks, e.g. \`src/foo.ts\`. Write "(none)" if no patches were applied.\n\n` +
+    `## Why\n` +
+    `One or two sentences. Explain the user-visible behavior, bug, or goal the change addresses. Do not restate the task verbatim.\n\n` +
+    `## Tests\n` +
+    `One line using exactly one of: tests_passed, tests_failed_unrelated, tests_failed_by_patch, tests_inconclusive, tests_skipped_no_infra, not_run. Include the command when tests ran, e.g. "tests_passed (npm test -- foo)".\n\n` +
+    `## Notes\n` +
+    `Optional. Include only when there is a remaining warning, an out-of-scope item, or a concrete follow-up. Omit the heading entirely when empty.\n\n` +
+    `FORBIDDEN in the summary:\n` +
+    `- Triple-backtick code fences or diffs — the UI already shows the diff cards above your summary\n` +
+    `- File contents, patches, or FIND/REPLACE blocks\n` +
+    `- Filler phrases like "I have successfully completed..." or "In conclusion..."\n` +
+    `- Extra headings beyond the four above\n` +
+    `- Tables or decorative markdown\n` +
+    `Token budget: 150-300 tokens; hard cap 900 characters.\n\n` +
+    `EXAMPLES:\n\n` +
+    `[Example 1 — natural_completion]\n` +
+    `## What changed\n` +
+    `- Added \`omit<T, K>\` utility to \`src/utils/omit.ts\` with type-safe key removal\n` +
+    `- Updated barrel export in \`src/utils/index.ts\`\n\n` +
+    `## Why\n` +
+    `Completes the symmetry with the existing \`pick\` utility; both share the same generic signature pattern.\n\n` +
+    `## Tests\n` +
+    `tests_passed (npm test -- omit, 4 scenarios)\n\n` +
+    `[Example 2 — max_iterations]\n` +
+    `## What changed\n` +
+    `- Added \`group\` and \`pluck\` utilities to \`src/utils/collections.ts\`\n` +
+    `- Tests added but barrel export update not completed\n\n` +
+    `## Why\n` +
+    `Plan called for both utilities plus barrel update and call-site refactor; iteration limit hit before all steps finished.\n\n` +
+    `## Tests\n` +
+    `not_run (iteration cap reached before verification step)\n\n` +
+    `## Notes\n` +
+    `Plan step "Update src/utils/index.ts barrel" did not complete. Hand-off to a follow-up run recommended.\n\n` +
+    `[Example 3 — APPLY_ROLLED_BACK]\n` +
+    `## What changed\n` +
+    `- Attempted to refactor \`src/auth/session.ts\` to use the new TokenProvider interface\n\n` +
+    `## Why\n` +
+    `Switching session storage from cookie to header would unblock the upcoming SSO work.\n\n` +
+    `## Tests\n` +
+    `tests_failed_by_patch (tsc: TS2305 — module './tokenProvider' has no exported member 'TokenProvider')\n\n` +
+    `## Notes\n` +
+    `APPLY_ROLLED_BACK. The TokenProvider type must be defined in a prior run before this refactor can land.\n\n` +
+    `ELIDED READS: tool_result blocks marked "[Earlier read: ...]" had their content removed to save context. Call read_file again if you need it.\n\n` +
+    `TRUNCATED FILE SECTIONS: if you see a ZONE_CONTEXT_TRUNCATED marker, part of the file was omitted. Do NOT include the marker line in any apply_patch FIND block; use read_file with lineRange on the same path to fetch the hidden section. Only generate FIND blocks from lines you have fully read.\n\n` +
+    `FINAL ASSESSMENT (required) — include exactly one tag on its own line in your final response:\n` +
+    `  [ZONE_VERIFICATION: tests_passed]           — suite ran, all passed\n` +
+    `  [ZONE_VERIFICATION: tests_skipped_no_infra] — no test script/framework found\n` +
+    `  [ZONE_VERIFICATION: tests_inconclusive]     — environment/infra issue prevented tests (missing script, command not found, ENOENT, port conflict); patch likely correct\n` +
+    `  [ZONE_VERIFICATION: tests_failed_unrelated] — tests failed but failure is pre-existing\n` +
+    `  [ZONE_VERIFICATION: tests_failed_by_patch]  — tests failed because of your patch (you MUST attempt to fix before marking complete)\n\n` +
     (input.hasFramework && input.canRunCommand
       ? `When running commands, use the correct package manager and commands above.\n`
       : "") +
     input.backgroundCommandBlock +
+    (input.auditFindings ? `${TRUST_PHASE1_DIRECTIVE}\n\n` : "") +
     `Repository path: ${input.repoPath}`
   );
 }
@@ -419,21 +526,14 @@ function normalizeAgentLoopMode(mode: AgentLoopInput["mode"]): Exclude<Mode, "au
     return mode;
   }
   if (mode === "investigation") return "investigate";
+  if (mode === "plan") return "patch";
   return "patch";
 }
 
-const MODE_SYSTEM_PROMPT_PREFIX: Record<Exclude<Mode, "auto">, string> = {
-  chat:
-    "MODE: chat. Answer the user's question. Do not modify files or run commands. If the user requests an edit, suggest they switch to patch mode.",
-  investigate:
-    "MODE: investigate. Read code, analyze, answer thoroughly. Do not modify files. Use search tools liberally before answering.",
-  patch:
-    "MODE: patch. The user wants a code change. Plan the edits, apply them via the patch tool, then verify with build and visual screenshot when applicable.",
-};
 
-function modeDefaultAllowedTools(mode: Exclude<Mode, "auto">): ReadonlySet<string> | undefined {
-  if (mode === "chat") return new Set(CHAT_TOOLS);
-  if (mode === "investigate") return new Set(READ_ONLY_TOOLS);
+function modeDefaultFilter(mode: Exclude<Mode, "auto">): CapabilityFilter | undefined {
+  if (mode === "chat") return { allowToolNames: new Set(CHAT_TOOLS) };
+  if (mode === "investigate") return { allow: new Set<Capability>(["fs.read"]) };
   return undefined;
 }
 
@@ -456,31 +556,84 @@ function assembleChatSystemPrompt(input: {
     input.projectMemoryBlock,
     "",
     `You may use up to ${input.baseMaxIterations} iterations, but stop as soon as you can answer well.`,
+    `FINAL SUMMARY: End with a brief 2-3 sentence prose summary of your answer. No code blocks (unless a snippet clarifies the point), no section headers.`,
   ]
     .filter((line) => line !== "")
     .join("\n");
 }
 
+// Phase G: Phase 1 runtime-grounding heuristic — appended after INVESTIGATION_OUTPUT_FORMAT.
+// Module-level const: no per-run interpolation, cache-safe.
+const PHASE1_RUNTIME_HEURISTIC = `INVESTIGATION HEURISTIC — RUNTIME GROUNDING:
+
+When the task mentions failing tests, build errors, runtime exceptions, or \
+"why is X broken", your FIRST action should be to reproduce the failure using \
+run_command_readonly. Examples:
+
+- "Fix failing tests in foo.test.ts" → \`npx vitest run path/to/foo.test.ts\` \
+first, read actual error output, THEN form hypothesis.
+- "Build fails after refactor" → \`tsc --noEmit\` first.
+- "Test crashes intermittently" → run multiple times, observe pattern.
+
+Static code analysis without runtime observation produces non-deterministic \
+diagnoses. Your fixInstruction must be grounded in the actual error message, \
+not in what the code "should" be doing.
+
+If the task does not involve runtime behavior (e.g., "rename function X across \
+the codebase"), skip the runtime step and proceed with reads + searches.`;
+
+// Step C Lever A: module-level const — no per-run interpolation, cache-safe.
+const INVESTIGATION_OUTPUT_FORMAT = `At the end of your investigation, output a JSON block fenced with \`\`\`json containing exactly these fields:
+{
+  "rootCause": "<one sentence — root cause or key gap this task must address>",
+  "fixInstruction": "<one actionable verb phrase for the execute agent — what to do. If you cannot produce a concrete fix instruction within the iteration budget, write 'investigate further: <specific topic>' and set complete to false.>",
+  "filesToEdit": ["<file path>"],
+  "evidence": "<key file:line citations that support the above>",
+  "complete": true | false
+}
+
+Set \`complete: true\` only when \`fixInstruction\` is a paste-ready imperative.
+Set \`complete: false\` (and use the 'investigate further' instruction) when evidence is insufficient — Phase 2 will then decide whether to continue investigation or surface the partial finding to the user.
+
+The JSON block must be the LAST item in your response, after the prose summary. ANY iteration may be your last — if you are at the iteration budget, emit the JSON now even if complete=false.`;
+
 export function assembleInvestigationSystemPrompt(input: {
   repoPath: string;
   projectMemoryBlock: string;
   baseMaxIterations: number;
+  /** X.0.1: when provided, used as the first line so audit and execute runs
+   *  share a common system-prompt prefix and hit the Anthropic content-addressed
+   *  cache across phase transitions. Without it, the hardcoded investigation
+   *  intro is used (backward-compat for call sites that don't supply it). */
+  agentIntro?: string;
 }): string {
+  const openingLines = input.agentIntro
+    ? [
+        input.agentIntro,
+        "INVESTIGATION mode — read-only tools only.",
+      ]
+    : [
+        "You are Zone, answering a question about the codebase in INVESTIGATION mode. Read-only tools only.",
+      ];
   return [
-    "You are Zone, answering a question about the codebase in read-only investigation mode.",
+    ...openingLines,
     "",
-    "Use the available tools to explore before answering. Do not rely on intuition when the repository can be searched.",
+    "Be proactive in a single pass: search → read 2-3 top hits → synthesize complete answer.",
+    "Do not rely on intuition when the repository can be searched.",
     "",
     "Tools available:",
-    "- read_file: <30k chars returns full content; 30-100k returns full content with a lineRange hint; >100k returns head 100 + outline + tail 50. Use lineRange: [start, end] for exact large-file sections.",
+    "- read_file: ≤10K chars returns full content; >10K returns head 100 lines + file outline + tail 50 lines. Use lineRange to read exact sections from outline hits.",
     "- list_files",
     "- search_in_files",
     "- find_references",
+    "- run_command_readonly: run failing tests, typecheck, lint, or read-only git inspection. Whitelisted commands only (e.g. 'npx vitest run path/to/test.ts', 'tsc --noEmit', 'git diff'). Output truncated to head 100 + tail 50 lines. Blocked: mutations, network writes, package installs, shell substitution.",
+    "",
+    "SEARCH FIRST: Use search_in_files to locate symbols before reading files. Reading an entire file for a single symbol wastes iterations.",
     "",
     "Process:",
     "1. Identify what the question asks: definition, usages, control flow, data shape, or design rationale.",
-    "2. Search for relevant terms with search_in_files. Prefer source globs such as `src/**/*.ts` or `src/**/*.{ts,tsx,js,jsx}` before broad `**/*` searches.",
-    "3. Read the most important matches with read_file. Read related context files when imports or callers matter.",
+    "2. Search for relevant terms with search_in_files. Prefer source globs such as `src/**/*.ts`, `src/**/*.py`, or `src/**/*.{ts,tsx,js,jsx}` before broad `**/*` searches.",
+    "3. Read 2-3 top hits with read_file. Read related context files when imports or callers matter.",
     "4. If the question is about usages of an identifier, use find_references when you know the exporting source file, and read each relevant call site briefly.",
     "5. Ignore logs, build output, dependency folders, and generated artifacts unless the user specifically asks about them.",
     "6. If the search results show a short list of source call-site files, read each source file before answering.",
@@ -488,14 +641,20 @@ export function assembleInvestigationSystemPrompt(input: {
     "",
     "Final answer:",
     "- Write clear markdown.",
-    "- Include file paths in backticks, with line numbers where helpful, for example `src/foo.ts:42`.",
+    "- Include file paths in backticks, with line numbers where helpful, for example `src/foo.ts:42` or `src/foo.py:42`.",
+    "- Aim for ≥3 distinct file citations when the symbol is non-trivial; if only 1-2 references exist, state that explicitly.",
     "- Use code blocks for short snippets only when they clarify the answer.",
-    "- End with a `Summary` section if the answer has multiple parts.",
     "",
-    "Do not write or modify code. Do not run commands. Do not call TodoWrite. Do not produce patches.",
+    "Do NOT end with offers to continue ('shall I dig deeper?', 'would you like me to explore further?', etc.) — the user already asked the question. Deliver the full answer now.",
+    "FINAL SUMMARY: End with a brief 2-3 sentence prose summary of your findings. No code blocks, no markdown section headers beyond what the answer requires.",
+    "Do not write or modify code. Do not call run_command (full shell). Do not call TodoWrite. Do not produce patches.",
     `Maximum iterations: ${input.baseMaxIterations} (already enforced; be targeted).`,
     `Repository path: ${input.repoPath}`,
     ...(input.projectMemoryBlock ? ["", input.projectMemoryBlock] : []),
+    "",
+    INVESTIGATION_OUTPUT_FORMAT,
+    "",
+    PHASE1_RUNTIME_HEURISTIC,
   ].join("\n");
 }
 
@@ -510,7 +669,7 @@ export function buildWorkerAgentIntro(): string {
     `- You CANNOT delegate further (no nested subagents).\n` +
     `- You CANNOT update project memory or run shell commands.\n` +
     `- Stay focused on the delegated subtask. Do not expand scope.\n` +
-    `- Iteration budget is limited (12 iterations). Be decisive.\n\n` +
+    `- Iteration budget is limited (6 iterations). Be decisive.\n\n` +
     `TASK TOOL FORBIDDEN\n` +
     `You are a SUBAGENT. You CANNOT dispatch other subagents via the Task tool.\n` +
     `Task tool is BLOCKED in your context (defensive: even if visible, do not call).\n` +
@@ -538,7 +697,7 @@ export function buildExploreAgentIntro(): string {
     `- READ-ONLY. You have access to read_file, list_files, search_in_files, find_references only.\n` +
     `- You CANNOT modify files, run commands, delegate further, or update memory.\n` +
     `- Keep findings concise: file:line + one-sentence note per entry. Do NOT dump raw file contents.\n` +
-    `- Iteration budget is limited (8 iterations). Be targeted — search first, read selectively.\n` +
+    `- Iteration budget is limited (15 iterations). Be targeted — search first, read selectively.\n` +
     `- If the task requires modifications, return STATUS: failed with an explanation in SUMMARY.\n\n` +
     `TASK TOOL FORBIDDEN\n` +
     `You are a SUBAGENT. You CANNOT dispatch other subagents via the Task tool.\n` +
@@ -585,10 +744,6 @@ export function maybeGrantEscalationBonus(
     currentIter,
   }));
   return nextState;
-}
-
-function normalizePatchedPath(filePath: string): string {
-  return String(filePath || "").replace(/\\/g, "/").trim();
 }
 
 // â"€â"€â"€ Self-correction routing (Phase Tier-2) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -675,6 +830,30 @@ const PROVIDER_AGNOSTIC_HARDENING =
   `- Patch attempted, new error revealed → continue investigation OR tests_failed_by_patch\n` +
   `- Multiple patch attempts, root cause is architectural → state the architectural finding with specific file/line evidence`;
 
+// U.2.C: scope-aware variant used for test failures only (not syntax errors).
+// The mandatory apply_patch requirement is gated on whether the failing file
+// is within the scope of the agent's changes. For out-of-scope failures the
+// agent may emit tests_failed_unrelated immediately after citing evidence,
+// without attempting a patch. This prevents wasted iterations on unrelated
+// test infrastructure failures (e.g. jsdom/DOM tests after a utility change).
+const TEST_FAILURE_SCOPE_HARDENING =
+  `\n\n**SCOPE CHECK BEFORE CLAIMING UNRELATED**\n\n` +
+  `STEP 1: Quote the exact failing test file path or assertion from the output.\n` +
+  `STEP 2: Is that file within scope of your changes this run (files you modified or created)?\n\n` +
+  `Scope-IN — the failing file is a file you touched:\n` +
+  `  → You MUST attempt a corrective apply_patch. Read the assertion, form a specific hypothesis, patch, verify.\n` +
+  `  → "I cannot determine the cause" is not acceptable — read the failing line and produce evidence.\n\n` +
+  `Scope-OUT — the failing file is NOT a file you touched this run:\n` +
+  `  → Emit [ZONE_VERIFICATION: tests_failed_unrelated] with the failing file path and a one-line\n` +
+  `    confirmation it is not in your edits. Do NOT attempt to patch files outside your scope.\n\n` +
+  `Cannot extract a failing file path from the output:\n` +
+  `  → Emit [ZONE_VERIFICATION: tests_inconclusive] — do not guess or assume out-of-scope.\n\n` +
+  `Acceptable verdicts after scope check:\n` +
+  `- In-scope, patch resolved → tests_passed\n` +
+  `- In-scope, patch attempted, not resolved → tests_failed_by_patch\n` +
+  `- Out-of-scope, evidence cited → tests_failed_unrelated\n` +
+  `- Cannot determine scope → tests_inconclusive`;
+
 export type FailureRecord = {
   trigger: SelfCorrectTrigger | string;
   errorLine: number | null;
@@ -722,6 +901,48 @@ export function extractErrorLine(output: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+// Re-exported from subagentDispatch.ts (moved in Seq 4) — kept here so existing
+// importers (agentLoop.dispatch.test.ts) don't need path changes.
+export { extractDispatchReason } from "./subagentDispatch.js";
+
+/**
+ * Phase Q.6: render the plan's per-step subagent annotations into a prompt
+ * block. Only renders when at least one step is marked delegatable — keeps
+ * the prompt terse for trivial tasks.
+ *
+ * The block is injected near the start of the system prompt so the agent
+ * can match the runtime hint to the dispatch coaching it sees in TASK
+ * SUBAGENTS. Without this block, the system prompt's "the current plan
+ * step is marked subagentEligible: true" instruction is dead-letter — the
+ * agent has no per-step visibility.
+ */
+export function buildPlanAnnotationsBlock(
+  plan: import("./executionPlan.js").ExecutionPlan | null | undefined
+): string {
+  if (!plan || !Array.isArray(plan.steps)) return "";
+  const delegatableSteps = plan.steps
+    .map((step, idx) => ({ step, idx }))
+    .filter(({ step }) => step.subagentEligible === true && !!step.subagentType);
+  if (delegatableSteps.length === 0) return "";
+
+  const lines: string[] = [
+    "PLAN ANNOTATIONS — delegatable steps in this run:",
+  ];
+  for (const { step, idx } of delegatableSteps) {
+    const files = Array.isArray(step.filesLikely) && step.filesLikely.length > 0
+      ? step.filesLikely.join(", ")
+      : "unknown";
+    lines.push(
+      `- Step ${idx + 1} (${step.subagentType}): ${step.title} — files: ${files}`
+    );
+  }
+  lines.push(
+    "",
+    "When you reach a delegatable step, prefer Task dispatch over inline work — that's why the plan marked it. Use the matching subagent_type (worker for multi-file edits, explore for read-only investigation) and start the description with the dispatch reason prefix (multi_file_fanout / exploration / long_isolated_step)."
+  );
+  return lines.join("\n");
+}
+
 export function detectRepeatedFailure(
   failureHistory: Map<string, FailureRecord[]>,
   targetFilePath: string | null
@@ -756,7 +977,7 @@ export function detectRepeatedFailure(
   return null;
 }
 
-function extractSemanticSmellName(errorPreview: string): string {
+export function extractSemanticSmellName(errorPreview: string): string {
   const match = String(errorPreview || "").match(/smell detected was:\s*([a-z_]+)/i);
   return match?.[1]?.toLowerCase() ?? "unknown";
 }
@@ -822,6 +1043,24 @@ export function classifyFailure(
   }
   if (/enoent.*no such file/i.test(text)) return "tool_path_enoent";
   return "unknown";
+}
+
+/** S.2.1: map SelfCorrectTrigger to a compact reason string for JSONL diagnostics. */
+export function applyPatchRetryReason(trigger: SelfCorrectTrigger | string): string {
+  switch (trigger) {
+    case "apply_patch_find_not_found": return "find_mismatch";
+    case "apply_patch_multiple_matches": return "multiple_matches";
+    case "apply_patch_semantic_smell": return "semantic_smell";
+    case "apply_patch_syntax_broken_post_write": return "syntax_broken";
+    case "apply_patch_repeated_failure_same_file": return "repeated_failure";
+    case "apply_patch_pre_existing_broken": return "pre_existing_broken";
+    case "apply_patch_scope_not_found": return "scope_not_found";
+    case "apply_patch_replace_shorter_than_find": return "replace_shorter";
+    case "apply_patch_find_block_empty": return "find_block_empty";
+    case "apply_patch_marker_imbalance": return "marker_imbalance";
+    case "apply_patch_no_read_first": return "no_read_first";
+    default: return "unknown";
+  }
 }
 
 /** Return a focused, actionable coaching string for the given trigger. */
@@ -1008,7 +1247,7 @@ export function buildCoachingPrompt(
         `- Cannot tell: emit [ZONE_VERIFICATION: tests_inconclusive].\n` +
         `Avoid blindly re-running the same test command; that consumes attempts without progress.\n` +
         `Next action: classify with evidence; if related, produce a corrective patch.` +
-        PROVIDER_AGNOSTIC_HARDENING
+        TEST_FAILURE_SCOPE_HARDENING
       );
     case "apply_patch_replace_shorter_than_find":
       return (
@@ -1063,45 +1302,6 @@ function extractFunctionCallItems(
   return calls;
 }
 
-/** Parse a [ZONE_VERIFICATION: <reason>] tag from text. */
-function parseVerificationTag(text: string): VerificationReason | null {
-  const m = String(text || "").match(/\[ZONE_VERIFICATION:\s*([\w_]+)\]/i);
-  if (!m) return null;
-  const raw = m[1].toLowerCase();
-  const valid: VerificationReason[] = [
-    'tests_passed', 'tests_skipped_no_infra', 'tests_inconclusive',
-    'tests_failed_unrelated', 'tests_failed_by_patch', 'no_verification_attempted',
-    'verification_failed_staged',
-    'no_changes_made',
-  ];
-  return (valid as string[]).includes(raw) ? (raw as VerificationReason) : null;
-}
-
-/** Remove any [ZONE_VERIFICATION: <reason>] tag (and the whitespace/newlines around it) from text. */
-export function stripVerificationTag(text: string): string {
-  return String(text || "")
-    .replace(/\s*\[ZONE_VERIFICATION:\s*[\w_]+\]\s*/gi, " ")
-    .replace(/[ \t]+/g, " ")
-    .replace(/ *\n */g, "\n")
-    .trim();
-}
-
-function didApplyPatch(
-  log: Array<{
-    tool: string;
-    args: Record<string, unknown>;
-    result: string;
-    success?: boolean;
-  }>
-): boolean {
-  return log.some(
-    (e) =>
-      (e.tool === "apply_patch" || e.tool === "write_file") &&
-      !String(e.result || "").toLowerCase().includes("error") &&
-      !String(e.result || "").toLowerCase().includes("not found") &&
-      !String(e.result || "").toLowerCase().includes("fail")
-  );
-}
 
 /** Check whether the agent has read or written this file earlier in the current run.
  * A subsequent successful apply_patch/write_file on the same file does NOT invalidate
@@ -1125,635 +1325,20 @@ function wasFileReadOrWritten(
   return false;
 }
 
-export function applyNoInfraVerificationOverride(input: {
-  verificationReason: VerificationReason;
-  framework?: { hasTests: boolean; testFilesDetected: boolean };
-  patchApplied: boolean;
-  triggeredBy: "natural_completion" | "max_iterations";
-}): VerificationReason {
-  if (
-    input.framework &&
-    !input.framework.hasTests &&
-    input.patchApplied &&
-    (input.verificationReason === "tests_inconclusive" ||
-      input.verificationReason === "no_verification_attempted")
-  ) {
-    debugLog("[zone-agent-no-infra-override]", JSON.stringify({
-      triggeredBy: input.triggeredBy,
-      originalVerdict: input.verificationReason,
-      overriddenTo: "tests_skipped_no_infra",
-      reason: "framework has no runnable tests; downgraded inconclusive/no-verification to skipped",
-      hasTests: false,
-      testFilesDetected: input.framework.testFilesDetected,
-      patchApplied: true,
-    }));
-    return "tests_skipped_no_infra";
-  }
-
-  return input.verificationReason;
-}
-
-const execAsync_verify = promisify(exec);
-
-export function selectVerificationCommand(
-  framework: { language?: string; testCommand?: string } | undefined
-): { command: string; timeoutMs: number; label: string } | null {
-  if (!framework) return null;
-  if (framework.language === "typescript") {
-    return { command: "npx tsc --noEmit", timeoutMs: 60000, label: "tsc" };
-  }
-  if (framework.language === "javascript" && framework.testCommand) {
-    return { command: framework.testCommand, timeoutMs: 90000, label: "test" };
-  }
-  return null;
-}
-
-// Phase J.3: count diagnostic errors in verification output. Used to compare
-// pre-staging baseline vs post-staging output so projects with pre-existing
-// errors don't have every patch blocked.
-function countVerificationErrors(label: string, output: string): number {
-  const text = String(output || "");
-  if (!text) return 0;
-  if (label === "tsc") {
-    // TypeScript: lines like `src/foo.ts(1,5): error TS2304: Cannot find name 'bar'.`
-    const matches = text.match(/error TS\d+:/g);
-    return matches ? matches.length : 0;
-  }
-  if (label === "test") {
-    // Test runner output is heterogeneous; count common failure markers.
-    let count = 0;
-    count += (text.match(/\bFAIL\b/g) || []).length;
-    count += (text.match(/✗/g) || []).length;
-    count += (text.match(/\d+ failed/i) ? 1 : 0);
-    return Math.max(count, text ? 1 : 0);
-  }
-  return text ? 1 : 0;
-}
-
-async function runVerificationCommand(
-  choice: { command: string; timeoutMs: number; label: string },
-  repoPath: string
-): Promise<
-  | { status: "pass"; durationMs: number }
-  | { status: "fail"; durationMs: number; errorPreview: string }
-> {
-  const start = Date.now();
-  try {
-    await execAsync_verify(choice.command, {
-      cwd: repoPath,
-      timeout: choice.timeoutMs,
-      windowsHide: true,
-      maxBuffer: 10 * 1024 * 1024,
-      env: sanitizeVerificationEnv(),
-    });
-    return { status: "pass", durationMs: Date.now() - start };
-  } catch (err) {
-    const stdout = String((err as { stdout?: unknown }).stdout ?? "");
-    const stderr = String((err as { stderr?: unknown }).stderr ?? "");
-    const combined = (stdout + "\n" + stderr).trim();
-    const preview = combined.split("\n").slice(0, 30).join("\n").slice(0, 2000);
-    return {
-      status: "fail",
-      durationMs: Date.now() - start,
-      errorPreview: preview || String((err as Error).message ?? err),
-    };
-  }
-}
-
-export async function runStagingVerification(input: {
-  stagingFiles: Map<string, string>;
-  repoPath: string;
-  framework: { language?: string; testCommand?: string } | undefined;
-  withStagingTempFlush: <T>(
-    staging: Map<string, string>,
-    body: () => Promise<T>
-  ) => Promise<T>;
-}): Promise<
-  | { status: "pass"; label: string; durationMs: number; baselineErrorCount?: number; postErrorCount?: number }
-  | {
-      status: "fail";
-      label: string;
-      durationMs: number;
-      errorPreview: string;
-      // Phase J.3: counts let downstream distinguish a regression (post >
-      // baseline) from a pre-existing failure (post <= baseline). Only
-      // populated when we ran a baseline pass after the staged run failed.
-      baselineErrorCount?: number;
-      postErrorCount?: number;
-      regressed?: boolean;
-    }
-  | { status: "skipped"; reason: string }
-> {
-  if (input.stagingFiles.size === 0) {
-    return { status: "skipped", reason: "no_staged_files" };
-  }
-  const choice = selectVerificationCommand(input.framework);
-  if (!choice) {
-    return { status: "skipped", reason: "no_command_for_framework" };
-  }
-
-  const start = Date.now();
-  // Run verification against temp-flushed staging.
-  let stagedErr: unknown = null;
-  let stagedExitCode = 0;
-  try {
-    await input.withStagingTempFlush(input.stagingFiles, async () => {
-      return await execAsync_verify(choice.command, {
-        cwd: input.repoPath,
-        timeout: choice.timeoutMs,
-        windowsHide: true,
-        maxBuffer: 10 * 1024 * 1024,
-        env: sanitizeVerificationEnv(),
-      });
-    });
-  } catch (err) {
-    stagedErr = err;
-    const code = Number((err as { code?: unknown }).code);
-    stagedExitCode = Number.isFinite(code) ? code : 1;
-  }
-
-  if (stagedErr === null) {
-    console.log(
-      `[zone-verify] cmd="${choice.command.slice(0, 80)}" cwd="${input.repoPath}" exitCode=0 stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
-    );
-    return { status: "pass", label: choice.label, durationMs: Date.now() - start };
-  }
-
-  console.log(
-    `[zone-verify] cmd="${choice.command.slice(0, 80)}" cwd="${input.repoPath}" exitCode=${stagedExitCode} stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
-  );
-  const stagedStdout = String((stagedErr as { stdout?: unknown }).stdout ?? "");
-  const stagedStderr = String((stagedErr as { stderr?: unknown }).stderr ?? "");
-  const stagedCombined = (stagedStdout + "\n" + stagedStderr).trim();
-  const stagedPreview =
-    stagedCombined.split("\n").slice(0, 30).join("\n").slice(0, 2000) ||
-    String((stagedErr as Error).message ?? stagedErr);
-  const postErrorCount = countVerificationErrors(choice.label, stagedCombined);
-
-  // Phase J.3: staged run failed. Compare to baseline (no staging). If the
-  // baseline ALSO fails with ≥ the same error count, the patch didn't make
-  // things worse — pre-existing errors shouldn't block apply.
-  const baseline = await runVerificationCommand(choice, input.repoPath);
-  const baselineErrorCount =
-    baseline.status === "fail"
-      ? countVerificationErrors(choice.label, baseline.errorPreview)
-      : 0;
-
-  const regressed = postErrorCount > baselineErrorCount;
-  debugLog("[zone-verify-baseline]", JSON.stringify({
-    label: choice.label,
-    stagedExitCode,
-    baselineStatus: baseline.status,
-    baselineErrorCount,
-    postErrorCount,
-    regressed,
-  }));
-
-  return {
-    status: "fail",
-    label: choice.label,
-    durationMs: Date.now() - start,
-    errorPreview: stagedPreview,
-    baselineErrorCount,
-    postErrorCount,
-    regressed,
-  };
-}
-
-export async function finalizeStaging(input: {
-  stagingFiles: Map<string, string>;
-  repoPath: string;
-  framework: { language?: string; testCommand?: string } | undefined;
-  withStagingTempFlush: <T>(
-    staging: Map<string, string>,
-    body: () => Promise<T>
-  ) => Promise<T>;
-}): Promise<{
-  flushed: boolean;
-  verification:
-    | { status: "pass"; label: string; durationMs: number; baselineErrorCount?: number; postErrorCount?: number }
-    | {
-        status: "fail";
-        label: string;
-        durationMs: number;
-        errorPreview: string;
-        baselineErrorCount?: number;
-        postErrorCount?: number;
-        regressed?: boolean;
-      }
-    | { status: "skipped"; reason: string };
-  filesFlushed: number;
-  flushFailures: number;
-  // Phase J.3.1: when staging is discarded by a regression rollback, return
-  // the staged content as a snapshot so runLlmPatchFlow can render the
-  // "what was attempted" diff under the rolled-back banner. Keyed by the
-  // same absolute paths as input.stagingFiles. Empty/undefined when no
-  // discard happened (pass-through or pre-existing-errors).
-  discardedStaging?: Map<string, string>;
-}> {
-  const verification = await runStagingVerification({
-    stagingFiles: input.stagingFiles,
-    repoPath: input.repoPath,
-    framework: input.framework,
-    withStagingTempFlush: input.withStagingTempFlush,
-  });
-
-  debugLog("[zone-staging-verification]", JSON.stringify({
-    status: verification.status,
-    label: "label" in verification ? verification.label : null,
-    durationMs: "durationMs" in verification ? verification.durationMs : null,
-    reason: "reason" in verification ? verification.reason : null,
-    errorPreviewLen:
-      verification.status === "fail" ? verification.errorPreview.length : 0,
-    baselineErrorCount:
-      "baselineErrorCount" in verification ? verification.baselineErrorCount : undefined,
-    postErrorCount:
-      "postErrorCount" in verification ? verification.postErrorCount : undefined,
-    regressed:
-      verification.status === "fail" ? verification.regressed : undefined,
-  }));
-
-  // Phase J.3: only discard staging when the patch *regressed* verification
-  // (post errors > baseline errors). When the project has pre-existing
-  // errors and the patch didn't add any new ones, allow the flush to proceed
-  // — the user wants their patch even if the codebase has unrelated issues.
-  if (verification.status === "fail" && verification.regressed !== false) {
-    const discardedCount = input.stagingFiles.size;
-    // Phase J.3.1: snapshot staged content before clearing so the UI can
-    // render the rolled-back diff. Map<absPath, attemptedContent>.
-    const discardedStaging = new Map<string, string>(input.stagingFiles);
-    input.stagingFiles.clear();
-    debugLog("[zone-staging-discard]", JSON.stringify({
-      reason: "verification_regressed",
-      discardedCount,
-      baselineErrorCount: verification.baselineErrorCount,
-      postErrorCount: verification.postErrorCount,
-    }));
-    return {
-      flushed: false,
-      verification,
-      filesFlushed: 0,
-      flushFailures: 0,
-      discardedStaging,
-    };
-  }
-
-  if (verification.status === "fail" && verification.regressed === false) {
-    debugLog("[zone-staging-pre-existing-errors]", JSON.stringify({
-      reason: "no_regression",
-      baselineErrorCount: verification.baselineErrorCount,
-      postErrorCount: verification.postErrorCount,
-      label: verification.label,
-    }));
-    // Fall through to flush — patch will apply despite pre-existing errors.
-  }
-
-  let allUnchanged = true;
-  let comparedCount = 0;
-  for (const [abs, content] of input.stagingFiles) {
-    comparedCount++;
-    let diskContent: string | null = null;
-    try {
-      diskContent = fs.readFileSync(abs, "utf8");
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === "ENOENT") {
-        diskContent = null;
-        allUnchanged = false;
-        break;
-      }
-      allUnchanged = false;
-      break;
-    }
-    if (diskContent !== content) {
-      allUnchanged = false;
-      break;
-    }
-  }
-
-  if (allUnchanged && comparedCount > 0) {
-    debugLog("[zone-staging-noop]", JSON.stringify({
-      stagedCount: input.stagingFiles.size,
-      comparedCount,
-    }));
-    return {
-      flushed: false,
-      verification: { status: "skipped", reason: "no_changes_made" },
-      filesFlushed: 0,
-      flushFailures: 0,
-    };
-  }
-
-  // staging-flush-bug Tur: filesFlushed previously incremented immediately
-  // after fs.writeFileSync regardless of whether disk actually persisted the
-  // content. The smoke for run 71133d8f saw [zone-staging-flush] report 2
-  // files written but on-disk mtime was unchanged — the log was lying. The
-  // counter now reflects VERIFIED writes (re-read disk content matches
-  // staging). Per-file [zone-staging-flush-write] logs surface mtime
-  // before/after and content-match status to catch any future regression.
-  let filesFlushed = 0;
-  let flushFailures = 0;
-  for (const [abs, content] of input.stagingFiles) {
-    let mtimeBefore: number | null = null;
-    try {
-      mtimeBefore = fs.statSync(abs).mtimeMs;
-    } catch {
-      mtimeBefore = null;
-    }
-    try {
-      fs.writeFileSync(abs, content, "utf8");
-      let mtimeAfter: number | null = null;
-      try {
-        mtimeAfter = fs.statSync(abs).mtimeMs;
-      } catch {
-        mtimeAfter = null;
-      }
-      let diskContentMatches = false;
-      try {
-        diskContentMatches = fs.readFileSync(abs, "utf8") === content;
-      } catch {
-        diskContentMatches = false;
-      }
-      debugLog("[zone-staging-flush-write]", JSON.stringify({
-        filePath: abs,
-        bytesWritten: content.length,
-        mtimeBefore,
-        mtimeAfter,
-        changed: mtimeBefore !== mtimeAfter,
-        diskContentMatches,
-      }));
-      if (diskContentMatches) {
-        filesFlushed++;
-      } else {
-        flushFailures++;
-        errorLog("[zone-staging-flush-error]", {
-          filePath: abs,
-          error: "post_write_content_mismatch",
-          bytesExpected: content.length,
-        });
-      }
-    } catch (err) {
-      flushFailures++;
-      errorLog("[zone-staging-flush-error]", {
-        filePath: abs,
-        error: String((err as Error).message ?? err),
-      });
-    }
-  }
-  // Final integrity sweep: re-read all files at the moment we emit the
-  // [zone-staging-flush] log. If a downstream restore overwrites any of our
-  // writes between the per-file write and this point, postFlushMismatches
-  // will be > 0 and surface the bug visibly.
-  let postFlushMismatches = 0;
-  for (const [abs, content] of input.stagingFiles) {
-    try {
-      if (fs.readFileSync(abs, "utf8") !== content) postFlushMismatches++;
-    } catch {
-      postFlushMismatches++;
-    }
-  }
-  debugLog("[zone-staging-flush]", JSON.stringify({
-    filesFlushed,
-    failures: flushFailures,
-    totalStaged: input.stagingFiles.size,
-    postFlushMismatches,
-  }));
-  return { flushed: true, verification, filesFlushed, flushFailures };
-}
-
-/** Infer verification reason from the tool call log when the agent gave no tag. */
-export function inferVerificationFromLog(
-  log: Array<{
-    tool: string;
-    args: Record<string, unknown>;
-    result: string;
-    success?: boolean;
-  }>,
-  framework?: { hasTests: boolean; testFilesDetected: boolean }
-): VerificationReason {
-  const patchApplied = didApplyPatch(log);
-  if (framework && !framework.hasTests && patchApplied) {
-    debugLog("[zone-agent-no-infra-verdict]", JSON.stringify({
-      reason: "tests_skipped_no_infra",
-      hasTests: false,
-      testFilesDetected: framework.testFilesDetected,
-      patchApplied: true,
-    }));
-    return "tests_skipped_no_infra";
-  }
-  const hasInfraError = log.some(
-    (e) =>
-      e.tool === "run_command" &&
-      /spawn.*enoent|enoent.*cmd\.exe|missing script|command not found|cannot find/i.test(
-        String(e.result || "")
-      )
-  );
-  const testsRan = log.some(
-    (e) => e.tool === "run_command" && /\bpassed\b|\b\d+ pass/i.test(String(e.result || ""))
-  );
-  if (patchApplied && testsRan) return "tests_passed";
-  if (patchApplied && hasInfraError) return "tests_inconclusive";
-  if (!patchApplied) return "tests_failed_by_patch";
-  return "no_verification_attempted";
-}
-
-export function validateUnrelatedClaim(input: {
-  log: Array<{
-    tool: string;
-    args: Record<string, unknown>;
-    result: string;
-    success?: boolean;
-  }>;
-  patchedFilePaths: string[];
-  framework?: { hasTests: boolean };
-}): { accept: boolean; demoteTo?: VerificationReason; reason: string } {
-  const noInfraDemote: VerificationReason =
-    input.framework && !input.framework.hasTests
-      ? "tests_skipped_no_infra"
-      : "tests_inconclusive";
-  const anyRunCommand = input.log.some((entry) => entry.tool === "run_command");
-  const looksLikePassingRunCommand = (output: string): boolean => {
-    const text = String(output || "");
-    return (
-      /\ball tests passed\b/i.test(text) ||
-      /\b0 failed\b/i.test(text) ||
-      /\b\d+\s+passed\b.*\b0\s+failed\b/i.test(text)
-    );
-  };
-  const isRunCommandFailure = (entry: {
-    tool: string;
-    result: string;
-    success?: boolean;
-  }): boolean => {
-    if (entry.tool !== "run_command") return false;
-    return entry.success === false;
-  };
-  const failingRunCommand = [...input.log]
-    .reverse()
-    .find(
-      (entry) =>
-        isRunCommandFailure(entry) &&
-        !looksLikePassingRunCommand(String(entry.result || ""))
-    );
-
-  // Bug 44: stale-failure resolution check.
-  // If a failing run_command was followed by a successful run_command,
-  // the failure was resolved by a subsequent patch+retry. The agent's
-  // `tests_failed_unrelated` claim might still be technically wrong (the
-  // failure was related to their patch path), but it should not be demoted
-  // to `tests_failed_by_patch` because the file is no longer failing.
-  // This handles the canonical "agent encountered a build error, fixed it,
-  // re-ran build, build passed" sequence.
-  if (failingRunCommand) {
-    const failingIdx = input.log.indexOf(failingRunCommand);
-    const succeededAfter = input.log.slice(failingIdx + 1).some(
-      (entry) => entry.tool === "run_command" && entry.success === true
-    );
-    if (succeededAfter) {
-      return {
-        accept: true,
-        reason:
-          "failing run_command was resolved by a later successful run_command — verification effectively passed",
-      };
-    }
-  }
-
-  if (!anyRunCommand) {
-    return {
-      accept: false,
-      demoteTo: noInfraDemote,
-      reason:
-        "no run_command in log â€” agent claimed test failure without ever running tests",
-    };
-  }
-
-  if (!failingRunCommand) {
-    return {
-      accept: true,
-      reason:
-        "run_command(s) executed but none look like failure â€” accepting agent classification",
-    };
-  }
-
-  const verificationError = parseVerificationError(
-    String(failingRunCommand.result || ""),
-    input.patchedFilePaths
-  );
-  const failingOutput = String(failingRunCommand.result || "");
-  const normalizedPatched = input.patchedFilePaths.map(normalizePatchedPath);
-  const failingFile = normalizePatchedPath(verificationError.failingFile ?? "");
-  const failingFileIsPatched =
-    !!failingFile &&
-    normalizedPatched.some(
-      (patchedFilePath) =>
-        patchedFilePath === failingFile || failingFile.endsWith(patchedFilePath)
-    );
-
-  if (verificationError.isPreExisting === true) {
-    return {
-      accept: true,
-      reason: "parser confirms pre-existing/tooling",
-    };
-  }
-
-  if (
-    !failingFile &&
-    /npm warn|deprecated|warning:/i.test(failingOutput) &&
-    !/command failed:/i.test(failingOutput)
-  ) {
-    return {
-      accept: true,
-      reason: "warning-only output without a failing file path is treated as tooling noise",
-    };
-  }
-
-  if (failingFileIsPatched) {
-    return {
-      accept: false,
-      demoteTo: "tests_failed_by_patch",
-      reason:
-        "failing file is in patchedFilePaths â€” agent's unrelated claim rejected",
-    };
-  }
-
-  if (failingFile) {
-    return {
-      accept: true,
-      reason: "parser extracted failing file outside patchedFilePaths",
-    };
-  }
-
-  return {
-    accept: false,
-    demoteTo: noInfraDemote,
-    reason:
-      "cannot verify unrelated claim â€” no failing file extracted or evidence ambiguous",
-  };
-}
-
-export function validatePassedClaim(
-  toolCallLog: Array<{
-    tool: string;
-    args: Record<string, unknown>;
-    result: string;
-    success?: boolean;
-  }>,
-  framework?: { hasTests: boolean }
-): { accept: boolean; demoteTo?: VerificationReason; reason: string } {
-  const noInfraDemote: VerificationReason =
-    framework && !framework.hasTests
-      ? "tests_skipped_no_infra"
-      : "tests_inconclusive";
-  const runCommands = toolCallLog.filter((entry) => entry.tool === "run_command");
-
-  if (runCommands.length === 0) {
-    return {
-      accept: false,
-      demoteTo: framework && !framework.hasTests
-        ? "tests_skipped_no_infra"
-        : "no_verification_attempted",
-      reason: "agent claimed tests passed without ever running tests",
-    };
-  }
-
-  const hasSuccessPattern = runCommands.some((entry) => {
-    const output = String(entry.result || "");
-    return (
-      /\b\d+\s+pass(?:ed|ing)\b/i.test(output) ||
-      /\bTests:\s+.*passed/i.test(output) ||
-      /\bOK\s*\(\d+\s+tests?\)/i.test(output) ||
-      /(?:✓|✔)\s+\d+\s+tests?\s+passed/i.test(output) ||
-      /===\s+\d+\s+passed/i.test(output) ||
-      /All tests passed/i.test(output)
-    );
-  });
-
-  if (!hasSuccessPattern) {
-    const anyFailed = runCommands.some((entry) => entry.success === false);
-    if (anyFailed) {
-      return {
-        accept: false,
-        demoteTo: noInfraDemote,
-        reason:
-          "agent claimed passed but at least one run_command failed and no success pattern matched",
-      };
-    }
-
-    return {
-      accept: false,
-      demoteTo: noInfraDemote,
-      reason:
-        "agent claimed passed but no test-success pattern detected in any run_command output",
-    };
-  }
-
-  return {
-    accept: true,
-    reason: "test success pattern detected in run_command output",
-  };
-}
+// Re-export verification API for backward compat (existing test files import from agentLoop.ts)
+export {
+  selectVerificationCommand,
+  runStagingVerification,
+  finalizeStaging,
+  inferVerificationFromLog,
+  validateUnrelatedClaim,
+  validatePassedClaim,
+  applyNoInfraVerificationOverride,
+};
+export type { VerificationReason };
 
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
+  const runStartTs = Date.now();
   const scopedContext: Parameters<typeof withRequestContext>[0] = {};
   if (typeof input.userId === "string" && input.userId.trim()) {
     scopedContext.userId = input.userId.trim();
@@ -1767,10 +1352,72 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     scopedContext.parentRunId = input.subagent.parentRunId;
   }
   try {
-    return await withRequestContext(scopedContext, () => runAgentLoopScoped(input));
+    const result = await withRequestContext(scopedContext, () => runAgentLoopScoped(input));
+    // K.3.C3: emit terminal run-summary record for top-level runs only.
+    // Best-effort — failure must not affect the caller's result.
+    if (!input.subagent && input.runId) {
+      const userId =
+        typeof input.userId === "string" && input.userId.trim()
+          ? input.userId.trim()
+          : "local-dev";
+      const terminationReason = result.terminationReason ?? "unknown";
+      recordRunSummary({
+        userId,
+        runId: input.runId.trim(),
+        latencyMs: Date.now() - runStartTs,
+        terminationReason,
+      }).catch((e) => {
+        log("[zone-run-summary-write-failed]", JSON.stringify({
+          runId: input.runId,
+          error: e instanceof Error ? e.message : String(e),
+          ts: new Date().toISOString(),
+        }));
+      });
+      // Pre-check warning fires before any LLM cost is incurred and the run continues.
+      // Suppressing here avoids implying graceful_degrade in telemetry/UI when no degradation is happening.
+      const costUsd = result.costUsd ?? 0;
+      if (!(costUsd === 0 && terminationReason === "daily_usd_cap_exceeded")) {
+        log("[zone-graceful-degrade]", JSON.stringify({
+          runId: input.runId.trim(),
+          terminationReason,
+          gracefulDegrade: terminationReason !== "natural_completion",
+          canResume: canResumeFromTerminationReason(terminationReason),
+          costUsd,
+          tier: input.taskClassification?.tier ?? null,
+          ts: Date.now(),
+        }));
+      }
+      emitArchetype({
+        runId: input.runId.trim(),
+        archetype: input.taskClassification?.archetype ?? null,
+        archetypeConfidence: input.taskClassification?.archetypeConfidence ?? null,
+        classifierCostUsd: input.taskClassification?.classifierCostUsd ?? 0,
+        tier: input.taskClassification?.tier ?? null,
+        fallbackUsed: input.taskClassification?.fallbackUsed ?? false,
+        userOverride: null,
+        finalIter: result.iterCount ?? null,
+        finalCostUsd: costUsd,
+        success: terminationReason === "natural_completion",
+        pipelineApplied: input.pipelineApplied ?? false,
+        promotedFrom: result.promotedFromArchetype ?? null,
+        promotionTrigger: result.promotionTrigger ?? null,
+        promotedAtIter: result.promotedAtIter ?? null,
+      });
+    }
+    return result;
   } finally {
     if (!input.subagent && input.runId) {
       resetSubagentCallCount(input.runId);
+      const commandCacheSnapshot = clearCommandCacheForRun(input.runId);
+      if (commandCacheSnapshot && (commandCacheSnapshot.hits > 0 || commandCacheSnapshot.misses > 0)) {
+        emitCommandCacheSummary(input.repoPath, {
+          runId: input.runId,
+          totalHits: commandCacheSnapshot.hits,
+          totalMisses: commandCacheSnapshot.misses,
+          totalSavedMs: commandCacheSnapshot.savedMs,
+          cacheSize: commandCacheSnapshot.entries.size,
+        });
+      }
     }
   }
 }
@@ -1788,7 +1435,22 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       : typeof input.maxIterations === "number"
         ? input.maxIterations
         : BASE_MAX_ITERATIONS;
-  const escalationEnabled = typeof input.maxIterationsOverride !== "number";
+  // S.2.1: escalation disabled for main (tier-constrained) loops — the tier
+  // iterCap is already the authoritative budget. Escalation remains active only
+  // for subagent loops that bypass tier gating (isSubagentLoop resolved below).
+  let escalationEnabled = typeof input.maxIterationsOverride !== "number";
+  let effectiveMaxCoachingAttempts =
+    input.coachingBudgetOverride ?? MAX_SELF_CORRECTION_ATTEMPTS;
+  // L5.1b-2: soft promotion state — all null on non-dispatcher runs
+  let promotedFromArchetype: TaskArchetype | null = null;
+  let promotionTrigger: "iter_cap" | "rollback_x2" | "coaching_exhausted" | null = null;
+  let promotedAtIter: number | null = null;
+  let rollbackCount = 0;
+  let coachingBudgetExhausted = false;
+  const inputIterCap: number | null =
+    input.pipelineApplied === true && typeof input.maxIterationsOverride === "number"
+      ? input.maxIterationsOverride
+      : null;
   // Phase H.6: surface the effective budget at loop entry for tracing how
   // plan-aware overrides propagate through investigation/patch entry points.
   debugLog("[zone-iter-budget-effective]", JSON.stringify({
@@ -1807,50 +1469,65 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     maxIterationsForRun: baseMaxIterations,
     escalationBonusGranted: false,
   };
-  const effectiveAllowedTools =
-    input.allowedTools ?? (hasExplicitMode ? modeDefaultAllowedTools(mode) : undefined);
-  const toolsForLLM = sortToolsForPromptCache(
-    effectiveAllowedTools
-      ? ZONE_TOOLS.filter((t) => effectiveAllowedTools.has(getZoneToolName(t)))
-      : ZONE_TOOLS
-  );
-  if (effectiveAllowedTools && toolsForLLM.length === 0) {
-    throw new Error("AgentLoopInput.allowedTools resolved to zero tools — aborting.");
-  }
-
+  // Gap 6: resolve capability filter. Precedence: capabilityFilter > allowedTools (shim) > mode default.
+  const effectiveFilter: CapabilityFilter | undefined =
+    input.capabilityFilter
+    ?? (input.allowedTools ? allowedToolsToFilter(input.allowedTools) : undefined)
+    ?? (hasExplicitMode ? modeDefaultFilter(mode) : undefined);
   // L.2: tier-based tool exposure. Subagent loops skip tier gating — they
-  // inherit the parent's constraints via allowedTools / tokenBudgetBaseTokens.
+  // inherit the parent's constraints via capabilityFilter / tokenBudgetBaseTokens.
   const isSubagentLoop = input.subagent !== undefined;
   const tierLimits = isSubagentLoop
     ? null
     : resolveTierLimits(input.taskClassification, { forceTierOverride: input.forceTier });
+  // Zero-budget tiers (simple): hide Task from the LLM toolset so the agent
+  // never calls it and gets rejected deep in executeTool.
+  const taskBlockedByBudget = (tierLimits?.maxSubagentCalls ?? Infinity) === 0;
+  // Phase X.0 / Gap 6: resolveToolList applies the capability filter; the
+  // excludeTools and taskBlockedByBudget gates are applied on top.
+  const resolvedTools = resolveToolList(effectiveFilter);
+  const toolsForLLM = sortToolsForPromptCache(
+    resolvedTools
+      .filter((t) => {
+        if (input.excludeTools?.has(t.name)) return false;
+        if (taskBlockedByBudget && t.name === "Task") return false;
+        return true;
+      })
+      .map((t) => t.definition)
+  );
+  if (effectiveFilter && toolsForLLM.length === 0) {
+    throw new Error("AgentLoopInput capabilityFilter (or allowedTools) resolved to zero tools — aborting.");
+  }
+  // Flat name set forwarded to executeTool for runtime enforcement.
+  const effectiveAllowedSet: ReadonlySet<string> = new Set(toolsForLLM.map(getZoneToolName));
 
+  let softIterWarnThreshold: number | undefined;
+  let softWarnInjected = false;
+  let midWarnInjected = false;
   if (tierLimits) {
-    if (!tierLimits.taskToolAllowed) {
-      const idx = toolsForLLM.findIndex((t) => getZoneToolName(t) === "Task");
-      if (idx >= 0) toolsForLLM.splice(idx, 1);
-    }
-    if (tierLimits.iterCap < iterationBudget.maxIterationsForRun) {
-      iterationBudget = { ...iterationBudget, maxIterationsForRun: tierLimits.iterCap };
-    }
-    log("[zone-tier-constraints-applied]", JSON.stringify({
+    const effectiveSoftIterWarn = tierLimits.softIterWarn;
+    softIterWarnThreshold = effectiveSoftIterWarn;
+    // Soft warn replaces hard-cap: loop runs up to 3× the warn threshold;
+    // tokenBudgetCap is the real terminator. Escalation disabled since tier is authoritative.
+    iterationBudget = { ...iterationBudget, maxIterationsForRun: effectiveSoftIterWarn * 3 };
+    escalationEnabled = false;
+    emitTierConstraints({
       runId: input.runId ?? null,
       tier: input.taskClassification?.tier ?? "medium",
-      taskToolAllowed: tierLimits.taskToolAllowed,
       maxSubagentCalls: tierLimits.maxSubagentCalls,
       tokenBudgetCap: tierLimits.tokenBudgetCap,
-      iterCap: tierLimits.iterCap,
+      softIterWarn: effectiveSoftIterWarn,
       classificationConfidence: input.taskClassification?.confidence ?? 0,
       fallbackUsed: input.taskClassification?.fallbackUsed ?? true,
-    }));
+    });
     if (typeof input.runId === "string" && input.runId.trim()) {
       input.onStructuredEvent?.({
         type: "tier_constraints_applied",
         title: "Tier constraints applied",
         status: "active",
         tier: input.taskClassification?.tier ?? "medium",
-        needsSubagent: tierLimits.taskToolAllowed,
         tokenBudgetCap: tierLimits.tokenBudgetCap,
+        softIterWarn: effectiveSoftIterWarn,
       });
     }
   }
@@ -1858,17 +1535,112 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   const effectiveTokenBudgetCap = tierLimits?.tokenBudgetCap ?? TOKEN_BUDGET_CAP;
   const effectiveMaxSubagentCalls = tierLimits?.maxSubagentCalls;
 
+  // Phase K.1/K.5: daily USD cap gate — only enforced on top-level (non-subagent) runs.
+  if (!isSubagentLoop) {
+    const userId = typeof input.userId === "string" && input.userId.trim()
+      ? input.userId.trim()
+      : "local-dev";
+
+    // K.5: load org policy (policy layer is top of resolution chain)
+    const policyResult = loadOrgPolicy(process.env.ZONE_ORG_POLICY_PATH);
+    log("[zone-policy-loaded]", JSON.stringify({
+      runId: input.runId ?? null,
+      ok: policyResult.ok,
+      source: policyResult.ok ? policyResult.source : null,
+      reason: !policyResult.ok ? policyResult.reason : null,
+    }));
+    const policy = policyResult.ok ? policyResult.policy : null;
+
+    const capResolution = resolveDailyUsdCap({
+      userId,
+      policyValue: policy?.dailyUsdCap,
+      userOverride: readDailyUsdCapOverride(),
+      envValue: process.env.ZONE_DAILY_USD_CAP,
+    });
+    const todayUsage = await getUsage(userId, "day");
+    log("[zone-daily-usd-status]", JSON.stringify({
+      runId: input.runId ?? null,
+      userId,
+      capUsd: capResolution.capUsd,
+      capSource: capResolution.source,
+      spentUsd: todayUsage.totalCostUsd,
+    }));
+
+    // Log which policy fields were applied vs. deferred to Phase M
+    if (policy) {
+      const appliedFields: string[] = [];
+      const unsupportedFields: string[] = [];
+      if (policy.dailyUsdCap !== undefined) appliedFields.push("dailyUsdCap");
+      for (const f of ["monthlyUsdCap", "allowedTiers", "maxSubagentCallsCap", "autoAuditRequired"] as const) {
+        if (policy[f] !== undefined) unsupportedFields.push(f);
+      }
+      log("[zone-policy-applied]", JSON.stringify({
+        runId: input.runId ?? null,
+        appliedFields,
+        unsupportedFields,
+      }));
+      for (const f of unsupportedFields) {
+        log("[zone-policy-unsupported-field]", JSON.stringify({
+          runId: input.runId ?? null,
+          field: f,
+          note: "schema accepted, enforcement deferred to Phase M",
+        }));
+      }
+    }
+
+    if (capResolution.capUsd > 0 && todayUsage.totalCostUsd >= capResolution.capUsd) {
+      const msg =
+        `Daily USD cap of $${capResolution.capUsd.toFixed(2)} reached ` +
+        `(spent $${todayUsage.totalCostUsd.toFixed(4)} today). ` +
+        `Dispatch rejected to stay within budget.`;
+      return {
+        success: false,
+        summary: msg,
+        toolCallLog: [],
+        filesModified: [],
+        patchValidatedByAgent: false,
+        verificationReason: "no_verification_attempted",
+        terminationReason: "daily_usd_cap_exceeded",
+        iterCount: 0,
+        promotedFromArchetype: null,
+        promotionTrigger: null,
+        promotedAtIter: null,
+      };
+    }
+  }
+
   const toolCallLog: Array<{
+    id: string;
     tool: string;
     args: Record<string, unknown>;
     result: string;
     success?: boolean;
   }> = [];
   const filesModified = new Set<string>();
+  // Phase F: default "warn" — patches stay on disk when regression detected; "rollback" restores legacy behavior.
+  const verifyMode: "warn" | "rollback" = process.env["ZONE_VERIFY_MODE"] === "rollback" ? "rollback" : "warn";
   let todosEmittedThisRun = false;
-  let selfCorrectionAttempts = 0;
   const failureHistory = new Map<string, FailureRecord[]>();
   const escalatedFiles = new Set<string>();
+  const coachingController = new CoachingController(
+    {
+      escalationEnabled,
+      baseMaxIterations,
+      escalatedFiles,
+      runId: input.runId,
+      onProgress: input.onProgress,
+    },
+    {
+      detectRepeatedFailure,
+      maybeGrantEscalationBonus,
+      buildCoachingPrompt,
+      buildVerifyDiagnostic,
+      maybeExpandScopeForVerifyDiagnostic,
+      applyPatchRetryReason,
+      classifyFailure,
+      emitCoachingRule,
+    }
+  );
   // Tur 1: in-memory staging. Writes go here instead of disk during the loop;
   // reads fall back to staging first, disk second. Top-level loops own flushing;
   // subagents share the parent map and must not flush independently.
@@ -1967,46 +1739,21 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
         : `You are Zone, an AI code agent${fw?.framework ? ` working on a ${fw.framework} project` : ""}.`;
   const canRunCommand = toolsForLLM.some((t) => getZoneToolName(t) === "run_command");
   const backgroundCommandBlock = canRunCommand
-    ? `\n## Background commands\n` +
-      `For long-running commands (dev servers, watchers, anything that doesn't exit on its own), use \`run_command_background\` instead of \`run_command\`. ` +
-      `This returns a handle immediately so you can keep working. Read the output later with \`read_background_output\` (passing the previous \`new_offset\` to get only new bytes). ` +
-      `Kill with \`kill_background\` when done — processes are also auto-killed when the run ends.\n\n` +
-      `Heuristic:\n` +
-      `- Long-lived (npm run dev, vite, next dev, pytest --watch, tail -f) → \`run_command_background\`\n` +
-      `- One-shot (npm run build, npm test, eslint, tsc --noEmit) → \`run_command\`\n\n` +
-      `Poll sparingly. Calling \`read_background_output\` every iteration wastes tokens. Read once after a few iterations of other work, or right before you need the result.\n\n` +
-      `Example:\n` +
-      `1. \`run_command_background\` → handle "bg_a3k7q2"\n` +
-      `2. read_file / apply_patch / etc. (a few iterations)\n` +
-      `3. \`read_background_output { handle: "bg_a3k7q2", since_offset: null, max_bytes: 4096 }\`\n` +
-      `4. If output looks done → \`kill_background\`. Else iterate.\n\n`
+    ? `\nBACKGROUND COMMANDS: for long-lived processes (npm run dev, vite, watchers, tail -f), use \`run_command_background\` — returns a handle so you can keep working. Poll output with \`read_background_output\` (pass since_offset from the prior read to get only new bytes). \`kill_background\` when done; processes are also auto-killed at run end. Poll sparingly (every 2-3 iters, not every iter). One-shot commands (build, test, lint, tsc, pytest) → \`run_command\`.\n\n`
     : "";
   const planProgressBlock = `PLAN VISIBILITY (TodoWrite):
-For any task that needs more than one tool call, call \`TodoWrite\` once near the start with 2–6 short steps describing what you intend to do. The list is shown to the user as a live sidebar.
-
+Call TodoWrite once near the start of any task with 2+ tool calls, with 2-6 short steps. Shown to the user as a live sidebar.
 Rules:
-- Send the COMPLETE list every time — it replaces the prior list.
-- Mark exactly ONE step in_progress at any moment.
-- Before you start a step's work, call TodoWrite to flip that step to in_progress.
-- After a step's work succeeds, call TodoWrite to flip it to completed AND flip the next step to in_progress in the SAME call.
-- If you discover the plan was wrong, call TodoWrite again with the revised list.
-
-Call TodoWrite whenever your plan has 2 or more distinct steps — even if each step is small. A patch task that includes verification (build, tests, or screenshot) is always multi-step. Skip TodoWrite only for genuine one-shot answers: a single read with no follow-up, or a trivial question that requires no tool calls beyond one. When in doubt, call TodoWrite.
-
-Example first call (immediately after task framing):
+- Send the COMPLETE list every call — it replaces the prior list.
+- Exactly ONE step in_progress at any moment.
+- Before starting a step, flip it to in_progress. After it succeeds, flip it to completed AND the next to in_progress in the SAME call.
+- If the plan changes, call TodoWrite again with the revised list.
+A patch task with verification (build/tests/screenshot) is always multi-step — call TodoWrite. Skip only for genuine one-shot answers.
+Example:
   TodoWrite({ todos: [
-    { id: "1", content: "Locate the failing test",         status: "in_progress" },
-    { id: "2", content: "Read the assertion + nearby code", status: "pending" },
-    { id: "3", content: "Patch the bug",                    status: "pending" },
-    { id: "4", content: "Re-run the suite",                 status: "pending" },
-  ]})
-
-Example (small patch with verification — still call TodoWrite):
-  TodoWrite({ todos: [
-    { id: "todo-0", content: "Locate the target file",  status: "in_progress" },
-    { id: "todo-1", content: "Patch the text",          status: "pending" },
-    { id: "todo-2", content: "Run the build",           status: "pending" },
-    { id: "todo-3", content: "Capture screenshot",      status: "pending" }
+    { id: "1", content: "Locate the failing test", status: "in_progress" },
+    { id: "2", content: "Patch the bug", status: "pending" },
+    { id: "3", content: "Re-run the suite", status: "pending" },
   ]})`;
 
   const baseSystemContent = isChatMode
@@ -2020,6 +1767,7 @@ Example (small patch with verification — still call TodoWrite):
         repoPath: input.repoPath,
         projectMemoryBlock,
         baseMaxIterations,
+        agentIntro,
       })
       : assembleAgentSystemPrompt({
         agentIntro,
@@ -2032,10 +1780,77 @@ Example (small patch with verification — still call TodoWrite):
         backgroundCommandBlock,
         repoPath: input.repoPath,
         planProgressBlock,
+        planAnnotationsBlock: buildPlanAnnotationsBlock(input.executionPlan),
+        auditFindings: input.auditFindings,
       });
-  const systemContent = hasExplicitMode
-    ? `${MODE_SYSTEM_PROMPT_PREFIX[mode]}\n\n${baseSystemContent}`
-    : baseSystemContent;
+  // X.0.1: mode prefix relocated out of system head to keep the system prompt
+  // byte-stable across explicit/implicit mode calls. Mode signal is appended
+  // to the user message tail instead; system prompt is always baseSystemContent.
+  const systemContent = baseSystemContent;
+
+  // J.5: when a prior run's summary is threaded in, prepend it to the user
+  // message as a labeled framing block. The agent's system prompt
+  // documents the PRIOR RUN CONTEXT convention, so the agent reads
+  // APPLY_ROLLED_BACK markers from previous attempts before investigating.
+  const priorRun = String(input.priorRunSummary ?? "").trim();
+  // X.0.1: when audit findings are present, inject them after PRIOR RUN CONTEXT
+  // and before the task so the execute agent trusts the audit and does not
+  // re-investigate ground it already covered.
+  const af = input.auditFindings;
+  let auditContextBlock = "";
+  if (af) {
+    const lines: string[] = [
+      "--- AUDIT CONTEXT ---",
+      "An audit phase has already investigated this task. The structured findings below are authoritative.",
+      "",
+      `Metadata: cost=$${af.costUsd.toFixed(4)}, tool_calls=${af.toolCallCount}, citations=${af.citationCount}`,
+    ];
+    if (af.scopeVerdict) {
+      lines.push(`Verdict: ${af.scopeVerdict} | Severity: ${af.severity ?? "none"}`);
+    }
+    if (af.filesAlreadyRead && af.filesAlreadyRead.length > 0) {
+      lines.push("");
+      lines.push("Files already investigated (do not re-read unless directly contradicted by other evidence):");
+      for (const f of af.filesAlreadyRead) lines.push(`- ${f}`);
+    }
+    if (af.citations && af.citations.length > 0) {
+      lines.push("");
+      lines.push("Cited evidence:");
+      for (const c of af.citations) lines.push(`- ${c.file}${c.line !== undefined ? `:${c.line}` : ""}`);
+    }
+    if (af.rootCause) {
+      lines.push("");
+      lines.push(`Root cause: ${af.rootCause}`);
+    }
+    if (af.fixInstruction) {
+      lines.push("");
+      lines.push(`Fix instruction: ${af.fixInstruction}`);
+    }
+    if (af.filesToEdit && af.filesToEdit.length > 0) {
+      lines.push("");
+      lines.push("Files to edit:");
+      for (const f of af.filesToEdit) lines.push(`- ${f}`);
+    }
+    if (af.evidence) {
+      lines.push("");
+      lines.push(`Evidence: ${af.evidence}`);
+    }
+    lines.push("");
+    lines.push("Findings:");
+    lines.push(af.summary);
+    lines.push("--- END AUDIT CONTEXT ---");
+    auditContextBlock = lines.join("\n") + "\n\n";
+  }
+  const modeTag = hasExplicitMode ? `\n\n--- mode: ${mode} ---` : "";
+  const userContent = (priorRun
+    ? (
+        "PRIOR RUN CONTEXT — your last attempt in this thread produced this result:\n" +
+        priorRun +
+        "\nEND PRIOR RUN CONTEXT.\n\n" +
+        auditContextBlock +
+        input.task
+      )
+    : auditContextBlock + input.task) + modeTag;
 
   // Chat Completions messages (system + user kickoff).
   const responseInput: ChatCompletionMessageParam[] = [
@@ -2045,97 +1860,87 @@ Example (small patch with verification — still call TodoWrite):
     },
     {
       role: "user",
-      content: input.task,
+      content: userContent,
     },
   ];
 
   const client = createLLMClient({ apiKey: input.userApiKey });
   const requestCtx = getRequestContext();
-  let iterCostAccumulator: IterCostAccumulator = emptyIterCostAccumulator();
-  let lastIterCostPayload: IterCostUpdatePayload | null = null;
-  let loopTokenUsage: SubagentTokenUsage = emptySubagentTokenUsage();
-  let subagentTokenTotal = 0;
-  let subagentCostTotal = 0;
-  const tokenBudgetBaseTokens = cleanTokenNumber(input.tokenBudgetBaseTokens);
-  // Usage recording is centralized in RecordingLLMClient (src/llm/recordingClient.ts):
-  // every chat completion across the codebase appends one JSONL record. agentLoop
-  // used to accumulate-then-record-on-exit, but that double-counted with the wrapper
-  // and missed every other LLM call site (planner, intent, final report, etc.).
-
-  const mainAgentTokens = (): number =>
-    iterCostAccumulator.input_uncached +
-    iterCostAccumulator.cache_read +
-    iterCostAccumulator.cache_write +
-    iterCostAccumulator.output;
-
-  const cumulativeTokens = (): number =>
-    tokenBudgetBaseTokens + mainAgentTokens() + subagentTokenTotal;
-
-  const currentTokenUsage = (): SubagentTokenUsage => ({
-    input: loopTokenUsage.input,
-    output: loopTokenUsage.output,
-    cached: loopTokenUsage.cached,
-    total: loopTokenUsage.total,
-    perIter: [...(loopTokenUsage.perIter ?? [])],
+  const budget = new TokenBudgetMeter({
+    baseTokens: cleanTokenNumber(input.tokenBudgetBaseTokens),
+    cap: effectiveTokenBudgetCap,
+    isSubagentLoop: !!input.subagent,
+    runId: typeof input.runId === "string" ? input.runId.trim() : "",
   });
-
-  const emitTokenBudgetStatus = (iterNumber: number): number => {
-    const mainTokens = mainAgentTokens();
-    const totalTokens = tokenBudgetBaseTokens + mainTokens + subagentTokenTotal;
-    const breakdown = input.subagent
-      ? {
-          mainAgent: tokenBudgetBaseTokens,
-          subagents: mainTokens + subagentTokenTotal,
-        }
-      : {
-          mainAgent: tokenBudgetBaseTokens + mainTokens,
-          subagents: subagentTokenTotal,
-        };
-    const tokenBudgetRatio =
-      effectiveTokenBudgetCap > 0 ? totalTokens / effectiveTokenBudgetCap : 0;
-    debugLog("[zone-token-budget]", JSON.stringify({
-      iter: iterNumber,
-      cumulativeTokens: totalTokens,
-      cap: effectiveTokenBudgetCap,
-      ratio: Number(tokenBudgetRatio.toFixed(3)),
-      breakdown,
-    }));
-    if (typeof input.runId === "string" && input.runId.trim()) {
-      input.onStructuredEvent?.({
-        type: "token_budget_status",
-        title: "Token budget",
-        cumulativeTokens: totalTokens,
-        tokenBudgetCap: effectiveTokenBudgetCap,
-        tokenBudgetRatio,
-        iter: iterNumber,
-        breakdown,
-        status:
-          tokenBudgetRatio >= TOKEN_BUDGET_HARD
-            ? "error"
-            : tokenBudgetRatio >= TOKEN_BUDGET_WARN
-              ? "warning"
-              : "active",
-      });
+  const detectorState = createDetectorState();
+  // R.1: accumulate per-call breakdown events for the end-of-run summary.
+  const breakdownEvents: BreakdownEvent[] = [];
+  // Phase V: mutable counters for self-validation hooks; passed by reference to executeTool.
+  const selfValidationCounts = {
+    readBeforePatchRejects: 0,
+    smartQuoteFixes: 0,
+    inlineTsRejects: 0,
+    inlineTsApproves: 0,
+    inlineTsSkips: 0,
+    totalLatencyMs: 0,
+  };
+  // Phase V.1: Set of filePaths successfully read_file'd this run.
+  // Populated after each successful read_file; passed to executeTool for C1 gate.
+  const filesReadThisRun = new Set<string>();
+  // P.1: compaction trigger — fires at the safe iteration boundary after tool results
+  // are processed. No-op in P.1; P.2 replaces the stub with real summarization.
+  const compactor = new ContextCompactor();
+  const _historyOrchestrator = buildDefaultOrchestrator(input.processors);
+  // Y.1.6.3/Y.1.6.4: retry event callback threaded into LLM call options so
+  // withExponentialBackoff can emit SSE narration and record retry telemetry
+  // without coupling the adapter layer to the run context.
+  const onRetryEvent = (event: string, payload: Record<string, unknown>): void => {
+    if (event === "llm_retry_in_progress") {
+      input.onProgress?.(JSON.stringify({
+        type: "llm_retry_in_progress",
+        runId: input.runId ?? null,
+        title: "Upstream API slow, retrying…",
+        status: "active",
+        ...payload,
+      }));
+    } else if (event === "zone_llm_retry_attempt") {
+      // UI.3.c: forward per-attempt retry info as llm_retry_in_progress with isPerAttempt flag.
+      input.onProgress?.(JSON.stringify({
+        type: "llm_retry_in_progress",
+        runId: input.runId ?? null,
+        title: "LLM retry",
+        status: "warning",
+        isPerAttempt: true,
+        ...payload,
+      }));
+    } else if (event === "zone_llm_retry_started" && !input.subagent && input.runId) {
+      const userId =
+        typeof input.userId === "string" && input.userId.trim()
+          ? input.userId.trim()
+          : "local-dev";
+      recordRunRetry({ userId, runId: input.runId.trim() }).catch(() => {});
     }
-    return tokenBudgetRatio;
   };
 
   const synthesizeTokenBudgetExit = async (
     iterNumber: number,
     messages: ChatCompletionMessageParam[]
   ): Promise<AgentLoopResult> => {
-    const tokensAtExit = cumulativeTokens();
+    const tokensAtExit = budget.cumulativeTokens;
     input.onProgress?.(
       `[agent_loop] Token budget reached (${tokensAtExit}/${effectiveTokenBudgetCap}) — synthesizing final answer`
     );
     let finalSummary =
       "Token budget reached before a final answer was produced.";
     try {
+      const { pruned: wrapupPruned } = pruneStaleReads(messages);
       const wrapupResponse = await client.createChatCompletion(
         {
-          model: getModelName("high", client.provider, requestCtx?.modelOverride),
+          model: isInvestigationMode
+            ? getModelForRole("investigator", client.provider as "anthropic" | "openai")
+            : getModelName("high", client.provider, requestCtx?.modelOverride),
           messages: [
-            ...messages,
+            ...wrapupPruned,
             {
               role: "user",
               content:
@@ -2161,6 +1966,9 @@ Example (small patch with verification — still call TodoWrite):
       cumulativeTokens: tokensAtExit,
       finalTextLength: finalSummary.length,
     }));
+    emitRunBreakdownSummary();
+    emitCacheSummary();
+    emitSelfValidationSummary();
     return {
       success: false,
       summary: finalSummary,
@@ -2169,9 +1977,106 @@ Example (small patch with verification — still call TodoWrite):
       patchValidatedByAgent: false,
       verificationReason: "no_verification_attempted",
       terminationReason: "token_budget_exceeded",
-      tokenUsage: currentTokenUsage(),
-      costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
+      tokenUsage: budget.tokenUsage,
+      costUsd: budget.snapshot().costUsd,
+      iterCount: iterNumber + 1,
     };
+  };
+
+  const synthesizeCompactionExhaustedExit = (
+    iterNumber: number,
+    _messages: ChatCompletionMessageParam[]
+  ): AgentLoopResult => {
+    const msg =
+      "Task aborted: context exhausted via compaction. " +
+      "The conversation has been compacted to its safety limit. " +
+      "To continue, please break this task into smaller subtasks.";
+    debugLog("[zone-compaction-exhausted]", JSON.stringify({
+      iter: iterNumber,
+      runId: input.runId,
+      compactionCount: compactor.getCompactionCount(),
+    }));
+    emitRunBreakdownSummary();
+    emitCacheSummary();
+    emitSelfValidationSummary();
+    return {
+      success: false,
+      summary: msg,
+      toolCallLog,
+      filesModified: Array.from(filesModified),
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted",
+      terminationReason: "compaction_exhausted",
+      tokenUsage: budget.tokenUsage,
+      costUsd: budget.snapshot().costUsd,
+      iterCount: iterNumber + 1,
+    };
+  };
+
+  const synthesizeLoopDetectedExit = (
+    iterNumber: number,
+    toolName: string,
+    count: number
+  ): AgentLoopResult => {
+    const msg = `Task aborted: loop detected. The agent called \`${toolName}\` with the same arguments ${count} times in a short window. Consider rephrasing the task or restricting scope.`;
+    debugLog("[zone-loop-detected]", JSON.stringify({ iter: iterNumber, runId: input.runId, toolName, count }));
+    emitRunBreakdownSummary();
+    emitCacheSummary();
+    emitSelfValidationSummary();
+    return {
+      success: false,
+      summary: msg,
+      toolCallLog,
+      filesModified: Array.from(filesModified),
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted",
+      terminationReason: "loop_detected",
+      loopDetected: { toolName, count },
+      tokenUsage: budget.tokenUsage,
+      costUsd: budget.snapshot().costUsd,
+      iterCount: iterNumber + 1,
+    };
+  };
+
+  // R.1: emit the run-level summary at every exit path.
+  const emitRunBreakdownSummary = (): void => {
+    if (breakdownEvents.length > 0) {
+      emitBreakdownSummary({ runId: input.runId ?? "", events: breakdownEvents });
+    }
+  };
+
+  // U.1: emit per-run cache summary at every exit path.
+  const emitCacheSummary = (): void => {
+    const acc = budget.iterCostAccumulator;
+    if (acc.cache_read === 0 && acc.cache_write === 0) return;
+    log("[zone-cache-summary]", JSON.stringify({
+      event: "cache_run_summary",
+      runId: input.runId ?? null,
+      agentModel: budget.lastCallModel,
+      totalIters: acc.iter_count,
+      totalWrite: acc.cache_write,
+      totalRead: acc.cache_read,
+      totalInputUncached: acc.input_uncached,
+      totalOutput: acc.output,
+      cacheHitRatio: Number(cacheHitRatio(acc).toFixed(3)),
+      totalCostUsd: acc.total_cost,
+    }));
+  };
+
+  // Phase V Commit 4: emit per-run self-validation summary at every exit path.
+  const emitSelfValidationSummary = (): void => {
+    const { readBeforePatchRejects, smartQuoteFixes, inlineTsRejects, inlineTsApproves, totalLatencyMs } = selfValidationCounts;
+    if (readBeforePatchRejects + smartQuoteFixes + inlineTsRejects + inlineTsApproves === 0) return;
+    log("[zone-self-validation-summary]", JSON.stringify({
+      runId: input.runId ?? null,
+      readBeforePatchRejects,
+      smartQuoteFixes,
+      inlineTsRejects,
+      inlineTsApproves,
+      inlineTsSkips: selfValidationCounts.inlineTsSkips,
+      totalLatencyMs,
+      ts: new Date().toISOString(),
+    }));
   };
 
   const throwIfAborted = (stage: string): void => {
@@ -2186,8 +2091,128 @@ Example (small patch with verification — still call TodoWrite):
   };
 
   let lastNarrationEmitted = "";
+  let completedIterCount = 0;
 
+  // Gap 1: internal pre-iteration hooks. Populated as each site is migrated (commits 2-4).
+  // These close over the loop's mutable let bindings (softWarnInjected, midWarnInjected, etc.)
+  // so each hook can read/write them directly without an explicit mutation return.
+  const softIterWarnHook: PreIterationHook = {
+    name: "soft-iter-warn",
+    priority: 10,
+    shouldRun: (ctx) => (
+      softIterWarnThreshold !== undefined &&
+      ctx.iter >= softIterWarnThreshold &&
+      !softWarnInjected
+    ),
+    run: (ctx) => {
+      softWarnInjected = true;
+      ctx.emit("log", "[zone-iter-soft-warn-injected]", {
+        iter: ctx.iter,
+        softIterWarnThreshold,
+        runId: ctx.runId,
+      });
+      return {
+        kind: "appendContext",
+        content: `\n\n[ZONE_ITER_SOFT_WARN] You have used ${ctx.iter} iterations. The cost ceiling will terminate this run — wrap up your work and write a final summary now.`,
+        target: "responseInput",
+        mode: "append-to-tool",
+      };
+    },
+  };
+  const midBudgetWarnHook: PreIterationHook = {
+    name: "mid-budget-warn",
+    priority: 20,
+    shouldRun: (ctx) => (
+      !midWarnInjected &&
+      effectiveTokenBudgetCap > 0 &&
+      ctx.cumulativeTokens / effectiveTokenBudgetCap >= TOKEN_BUDGET_MID_WARN
+    ),
+    run: (ctx) => {
+      midWarnInjected = true;
+      const ratio = ctx.cumulativeTokens / effectiveTokenBudgetCap;
+      ctx.emit("log", "[zone-token-budget-mid-warn]", {
+        runId: ctx.runId,
+        iter: ctx.iter,
+        tokenRatio: Number(ratio.toFixed(3)),
+        ts: new Date().toISOString(),
+      });
+      return {
+        kind: "appendContext",
+        content:
+          "\n\nYou are at 70% of token budget. Pause expansive reads. " +
+          "If a primary deliverable (e.g., test file requested in the original task) is not yet " +
+          "written, write it now even if implementation is incomplete. Remaining iterations should " +
+          "converge, not explore.",
+        target: "responseInput",
+        mode: "append-to-tool",
+      };
+    },
+  };
+  const _internalPreIterHooks: PreIterationHook[] = [softIterWarnHook, midBudgetWarnHook];
+
+  // Gap 1: internal post-tool-use hooks. Commit 5: LoopDetectorHook (warn case only).
+  // The terminate case remains inline — it needs an early return from the outer function,
+  // which HookResult cannot express without losing the loopDetected metadata.
+  const loopDetectorHook: PostToolUseHook = {
+    name: "loop-detector",
+    priority: 10,
+    shouldRun: (ctx) => ctx.loopDetectorState.status === "warn",
+    run: (ctx) => {
+      input.onStructuredEvent?.({
+        type: "loop_warning_emitted",
+        toolName: ctx.toolName,
+        count: ctx.loopDetectorState.count,
+        title: `Loop warning: \`${ctx.toolName}\` repeated ${ctx.loopDetectorState.count}×`,
+        status: "warning",
+      } as Parameters<NonNullable<typeof input.onStructuredEvent>>[0]);
+      return {
+        kind: "appendContext",
+        content: `\n\n[Zone loop-warning]\nNotice: you have called \`${ctx.toolName}\` with the same arguments ${ctx.loopDetectorState.count} times in the last few iterations. This suggests a loop. Try a different approach — use a different tool, different scope, ask the user for clarification, or finish with a partial explanation.`,
+        target: "responseInput",
+        mode: "append-to-tool",
+      };
+    },
+  };
+  const _internalPostToolUseHooks: PostToolUseHook[] = [loopDetectorHook];
+
+  /**
+   * Main agent iteration loop.
+   *
+   * Inner loop (for each tool call in the LLM response) has 12 early-exit
+   * `continue` sites that skip to the next tool call. Each is labelled
+   * // [INNER-LOOP: <reason>] on the line above its `continue` statement.
+   *
+   * Site | Label                  | Meaning
+   * -----+------------------------+------------------------------------------
+   *  1   | ALLOWED_TOOLS_REJECT   | Tool filtered by effectiveAllowedTools
+   *  2   | TODOWRITE_INVALID      | TodoWrite args failed validation
+   *  3   | TODOWRITE_HANDLED      | TodoWrite processed; push reply + continue
+   *  4   | SCOPE_CHANGE_NOOP      | suggest_scope_change outside investigation
+   *  5   | SCOPE_CHANGE_INVALID   | Missing required fields (type/reason/plan)
+   *  6   | SCOPE_CHANGE_NO_FILES  | under_scope/over_scope missing file lists
+   *  7   | SCOPE_CHANGE_NO_FILES  | (second variant — over_scope)
+   *  8   | SCOPE_CHANGE_HANDLED   | suggest_scope_change recorded; continue
+   *  9   | REVERT_PATCH_INVALID   | revert_patch missing 'path' argument
+   * 10   | REVERT_PATCH_NOT_STAGED| File not in stagingFiles (wasn't modified)
+   * 11   | REVERT_PATCH_OK        | Revert succeeded; continue
+   * 12   | APPLY_PATCH_NO_READ    | apply_patch before read_file on target file
+   *
+   * Outer loop has 1 `continue` site (ITER_TOOLS_PROCESSED) at the end of the
+   * `if (toolCalls.length > 0)` branch to advance to the next iteration.
+   *
+   * Termination (return, not continue):
+   * - ABORT_SIGNAL       throwIfAborted() throughout
+   * - HOOK_BLOCK         pre-iter or post-tool hook returned { block: true }
+   * - TOKEN_BUDGET_SOFT  cumulativeTokens ≥ TOKEN_BUDGET_HARD pre-LLM-call
+   * - TOKEN_BUDGET_TASK  subagent token propagation crosses TOKEN_BUDGET_HARD
+   * - COMPACTION_RESTART compaction succeeded; re-enter with fresh context
+   * - COMPACTION_FAIL    CompactionExhaustedError; terminationReason set
+   * - DAILY_USD_CAP      checkDailyCap() rejected
+   * - LOOP_DETECTED      recordAndDetect TERMINATE threshold hit
+   * - MAX_ITERATIONS     loop exits naturally (iter reaches iterationBudget)
+   */
   for (let iter = 0; iter < iterationBudget.maxIterationsForRun; iter += 1) {
+    completedIterCount = iter + 1;
     debugLog("[zone-agent-iter-start]", {
       runId: input.runId,
       iter,
@@ -2200,97 +2225,289 @@ Example (small patch with verification — still call TodoWrite):
       `[agent_loop] Iteration ${iter + 1}/${iterationBudget.maxIterationsForRun}`
     );
 
+    // R.2 + U.1: HistoryProcessor pipeline (R2ShimProcessor handles stale read pruning
+    // and cache-aware prefix preservation). Runs FIRST so prunedMessages is available
+    // to all pre-iter hooks (including file-read-manifest at priority 90).
+    const _pipelineResult = _historyOrchestrator.assemble({
+      responseInput,
+      toolCallLog,
+      iter,
+      runId: input.runId ?? null,
+      emit: (level, marker, payload) => {
+        if (level === "log") log(marker, JSON.stringify(payload));
+        else debugLog(marker, JSON.stringify(payload));
+      },
+    });
+    let prunedMessages = _pipelineResult.messages;
+
+    // Gap 1 pre-iteration runner — sites 1-3 all migrated to internal hooks.
+    // R.2 runs first (above) so prunedMessages has the pruned state when hooks fire.
+    {
+      const _allPreHooks = [..._internalPreIterHooks, ...(input.hooks?.preIteration ?? [])];
+      const preCtx: PreIterationContext = {
+        iter,
+        runId: input.runId ?? null,
+        responseInput,
+        prunedMessages,
+        iterationBudget,
+        cumulativeTokens: budget.cumulativeTokens,
+        effectiveTokenBudgetCap,
+        softWarnInjected,
+        midWarnInjected,
+        emit: (level, marker, payload) => {
+          if (level === "log") log(marker, JSON.stringify(payload));
+          else debugLog(marker, JSON.stringify(payload));
+        },
+      };
+      const preMutations = runPreIterationHooks(_allPreHooks, preCtx, (marker, payload) => log(marker, JSON.stringify(payload)));
+      if (preMutations.blocked) {
+        const msg = `Task aborted: pre-iteration hook blocked the run. Reason: ${preMutations.blockReason ?? "unspecified"}`;
+        emitRunBreakdownSummary();
+        emitCacheSummary();
+        emitSelfValidationSummary();
+        return { success: false, summary: msg, toolCallLog, filesModified: Array.from(filesModified),
+          patchValidatedByAgent: false, verificationReason: "no_verification_attempted",
+          terminationReason: "hook_blocked", promotedFromArchetype, promotionTrigger, promotedAtIter };
+      }
+      applyAppendOps(preMutations.appendOps, responseInput, () => prunedMessages, (msgs) => { prunedMessages = msgs; });
+    }
+
     debugLog("[zone-agent-llm-pre]", {
       runId: input.runId,
       iter,
       abortAlready: input.abortSignal?.aborted ?? false,
     });
     const promptCacheKey =
-      client.provider === "openai" ? buildOpenAIPromptCacheKey(input.runId) : undefined;
-    const modelName = getModelName("high", client.provider, requestCtx?.modelOverride);
-    const response = await client.createChatCompletion(
-      {
-        model: modelName,
-        messages: responseInput,
-        tools: toolsForLLM,
-        tool_choice: "auto",
-        ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
-      },
-      { signal: input.abortSignal }
-    );
+      client.provider === "openai"
+        ? buildOpenAIPromptCacheKey(input.runId, input.conversationId)
+        : undefined;
+    const modelName = isInvestigationMode
+      ? getModelForRole("investigator", client.provider as "anthropic" | "openai")
+      : getModelName("high", client.provider, requestCtx?.modelOverride);
+
+    // Opus forensic E.2: env-gated per-iter content hash probe for cache-bust diagnosis.
+    // v2 (replaces v1 7d9b469): every message hashed + manifest position + marker location.
+    // Set ZONE_DEBUG_CACHE_PROBE=1 to enable. No-op otherwise.
+    if (process.env["ZONE_DEBUG_CACHE_PROBE"] === "1") {
+      const hashMsg = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 12);
+      const estTokens = (s: string) => Math.ceil(s.length / 4);
+      const msgs = prunedMessages;
+
+      let cumulativeChars = 0;
+      let cumulativeTokens = 0;
+      const allMessageHashes = msgs.map((m, i) => {
+        const serialized = JSON.stringify(m);
+        const charLen = serialized.length;
+        const tokens = estTokens(serialized);
+        cumulativeChars += charLen;
+        cumulativeTokens += tokens;
+        return {
+          idx: i,
+          role: m.role,
+          contentHash: hashMsg(JSON.stringify(m.content)),
+          fullHash: hashMsg(serialized),
+          charLen,
+          estTokens: tokens,
+          cumulativeTokens,
+        };
+      });
+
+      const manifestIdx = msgs.findIndex((m) => {
+        if (m.role !== "user") return false;
+        const c = m.content;
+        const text = Array.isArray(c)
+          ? (c as Array<{ text?: string }>).map((b) => b?.text ?? "").join("")
+          : typeof c === "string" ? c : "";
+        return text.includes("Files already read this run");
+      });
+      const manifestInfo = manifestIdx >= 0 ? {
+        idx: manifestIdx,
+        isLast: manifestIdx === msgs.length - 1,
+        cumulativeTokensAtManifest: allMessageHashes[manifestIdx]?.cumulativeTokens,
+        manifestContentHash: allMessageHashes[manifestIdx]?.contentHash,
+      } : { idx: -1, missing: true };
+
+      const rollingHashes: Record<string, string> = {};
+      let rolling = "";
+      for (let i = 0; i < msgs.length; i++) {
+        rolling += JSON.stringify(msgs[i]) + "|";
+        rollingHashes[`upTo${i}`] = hashMsg(rolling);
+      }
+
+      let lastUserIdx = -1;
+      for (let i = msgs.length - 1; i >= 0; i -= 1) {
+        if (msgs[i].role === "user") { lastUserIdx = i; break; }
+      }
+      const markerInfo = {
+        lastUserIdx,
+        markerEqualsManifest: lastUserIdx === manifestIdx,
+        cumulativeTokensAtMarker: allMessageHashes[lastUserIdx]?.cumulativeTokens,
+      };
+
+      const toolResultMsgCount = msgs.filter((m) =>
+        Array.isArray(m.content) &&
+        (m.content as Array<{ type?: string }>).some((b) => b?.type === "tool_result")
+      ).length;
+
+      log("[zone-cache-probe-v2]", JSON.stringify({
+        iter: iter + 1,
+        runId: input.runId ?? null,
+        messageCount: msgs.length,
+        cumulativeTokens,
+        cumulativeChars,
+        toolResultMsgCount,
+        allMessageHashes,
+        rollingHashes,
+        manifestInfo,
+        markerInfo,
+      }));
+
+      // Chain emit: one entry per message so log consumers can binary-search
+      // the first divergence position between iter N and N+1 without unpacking
+      // the full rollingHashes blob. Reuses already-computed allMessageHashes
+      // and rollingHashes — no redundant JSON.stringify.
+      // ANALYSIS PROTOCOL:
+      // 1. Group [zone-cache-probe-chain] events by runId, then by iter.
+      // 2. For consecutive iters (N, N+1), walk msgIdx ascending and find
+      //    the lowest msgIdx where cumHash differs. That's the byte-
+      //    divergence position.
+      // 3. Cross-reference with [zone-cache-usage] cache_read for iter N+1:
+      //    - If cache_read >> system+tools floor (3879): partial prefix match worked
+      //    - If cache_read ≈ 3879 (floor): full bust, prefix unreachable
+      // 4. Correlate msgCount with bust events to test 20-block lookback
+      //    hypothesis. If bust ALWAYS coincides with msgCount crossing
+      //    ~20 (regardless of divergence position), the lookback window
+      //    hypothesis is confirmed.
+      let chainCumLen = 0;
+      for (let n = 0; n < msgs.length; n++) {
+        chainCumLen += (allMessageHashes[n]?.charLen ?? 0) + 1; // +1 for "|" separator
+        log("[zone-cache-probe-chain]", JSON.stringify({
+          iter: iter + 1,
+          runId: input.runId ?? null,
+          msgIdx: n,
+          role: msgs[n]?.role,
+          cumHash: rollingHashes[`upTo${n}`],
+          cumLen: chainCumLen,
+          msgCount: msgs.length,
+        }));
+      }
+    }
+
+    // R.1: emit per-call token breakdown (on the pruned view, which is what the LLM sees).
+    const bdEvent = emitTokenBreakdown({
+      runId: input.runId ?? "",
+      parentRunId: input.subagent?.parentRunId,
+      subagentId: input.subagent?.id,
+      iter,
+      messages: prunedMessages,
+      tools: toolsForLLM,
+      model: modelName,
+    });
+    breakdownEvents.push(bdEvent);
+
+    // Phase F1: streaming tool-input callbacks for write-class tools.
+    // F1.4: subagent loops tag their stream events with subagentId so the
+    // UI can prefix the slot label as "↳ worker N is writing...".
+    const streamStartedBlocks = new Set<string>();
+    const _streamSubagentId = input.subagent?.id ?? null;
+    const onToolArgumentsDelta = input.onToolInputStream
+      ? (toolCallId: string, toolName: string, argDelta: string) => {
+          if (toolName !== "apply_patch" && toolName !== "write_file") return;
+          const isFirstDelta = !streamStartedBlocks.has(toolCallId);
+          if (isFirstDelta) streamStartedBlocks.add(toolCallId);
+          input.onToolInputStream!({
+            blockId: toolCallId,
+            toolName,
+            delta: argDelta,
+            isFirstDelta,
+            iter: iter + 1,
+            subagentId: _streamSubagentId,
+          });
+        }
+      : undefined;
+
+    let response: Awaited<ReturnType<typeof client.createChatCompletion>>;
+    try {
+      response = await client.createChatCompletion(
+        {
+          model: modelName,
+          messages: prunedMessages,
+          tools: toolsForLLM,
+          tool_choice: "auto",
+          ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
+        },
+        { signal: input.abortSignal, onToolArgumentsDelta, onRetryEvent }
+      );
+    } catch (llmErr: unknown) {
+      if (llmErr instanceof UpstreamUnavailableError) {
+        emitRunBreakdownSummary();
+        emitCacheSummary();
+        emitSelfValidationSummary();
+        return {
+          success: false,
+          summary: "LLM API unavailable after retries.",
+          toolCallLog,
+          filesModified: Array.from(filesModified),
+          patchValidatedByAgent: false,
+          verificationReason: "no_verification_attempted",
+          terminationReason: "upstream_unavailable",
+          tokenUsage: budget.tokenUsage,
+          costUsd: budget.snapshot().costUsd,
+          iterCount: iter + 1,
+          promotedFromArchetype,
+          promotionTrigger,
+          promotedAtIter,
+        };
+      }
+      throw llmErr;
+    }
     debugLog("[zone-agent-llm-post]", {
       runId: input.runId,
       iter,
       abortAlready: input.abortSignal?.aborted ?? false,
     });
     const rawUsage = (response as { usage?: unknown }).usage;
-    const tokenUsageThisIter = extractTokenUsageForBudget(rawUsage);
-    if (tokenUsageThisIter.total > 0) {
-      loopTokenUsage = {
-        input: loopTokenUsage.input + tokenUsageThisIter.input,
-        output: loopTokenUsage.output + tokenUsageThisIter.output,
-        cached: loopTokenUsage.cached + tokenUsageThisIter.cached,
-        total: loopTokenUsage.total + tokenUsageThisIter.total,
-        perIter: [...(loopTokenUsage.perIter ?? []), tokenUsageThisIter.total],
-      };
-      if (input.subagent) {
-        log("[zone-worker-token]", JSON.stringify({
-          subagentId: input.subagent.id,
-          parentRunId: input.subagent.parentRunId,
-          iter,
-          iterTotal: tokenUsageThisIter.total,
-          cumulativeTotal: loopTokenUsage.total,
-        }));
-      }
+    budget.recordLLMCall({
+      rawUsage,
+      iter: iter + 1,
+      totalIter: iterationBudget.maxIterationsForRun,
+      provider: client.provider,
+      model: response.model || modelName,
+      onStructuredEvent: input.onStructuredEvent,
+    });
+    if (input.subagent && budget.lastIterTokenTotal > 0) {
+      log("[zone-worker-token]", JSON.stringify({
+        subagentId: input.subagent.id,
+        parentRunId: input.subagent.parentRunId,
+        iter,
+        iterTotal: budget.lastIterTokenTotal,
+        cumulativeTotal: budget.tokenUsage.total,
+      }));
     }
-    try {
-      const usage = extractUsage(rawUsage);
-      const runId = typeof input.runId === "string" ? input.runId.trim() : "";
-      if (usage && runId) {
-        const update = buildIterCostUpdate({
-          runId,
-          iter: iter + 1,
-          totalIter: iterationBudget.maxIterationsForRun,
-          provider: client.provider,
-          model: response.model || modelName,
-          current: usage,
-          previous: iterCostAccumulator,
-        });
-        iterCostAccumulator = update.accumulator;
-        lastIterCostPayload = update.payload;
-        input.onStructuredEvent?.(update.payload);
-      }
-    } catch (err) {
-      debugLog("[zone-iter-cost-update-failed]", err);
+    // U.1: per-call cache JSONL — always-on when there is cache activity.
+    const _lip = budget.lastIterCostPayload;
+    if (_lip !== null && (_lip.cache_write > 0 || _lip.cache_read > 0)) {
+      emitCacheUsage({
+        runId: input.runId ?? null,
+        iter: iter + 1,
+        model: budget.lastCallModel,
+        write: _lip.cache_write,
+        read: _lip.cache_read,
+        input_uncached: _lip.input_uncached,
+        output: _lip.output,
+        cacheHitRatio: Number(_lip.cacheHitThisIter.toFixed(3)),
+      });
     }
-    // Persistence happens in RecordingLLMClient — this block is debug-only.
-    try {
-      const u = (response as { usage?: Record<string, unknown> }).usage;
-      const promptTokenDetails =
-        u?.prompt_tokens_details && typeof u.prompt_tokens_details === "object"
-          ? (u.prompt_tokens_details as Record<string, unknown>)
-          : null;
-      const write = Number(u?.cache_creation_input_tokens ?? 0) || 0;
-      const read = Number(promptTokenDetails?.cached_tokens ?? u?.cache_read_input_tokens ?? 0) || 0;
-      const input = Number(u?.prompt_tokens ?? 0) || 0;
-      const output = Number(u?.completion_tokens ?? u?.output_tokens ?? 0) || 0;
-      if (write > 0 || read > 0) {
-        const ratio = read + write > 0 ? (read / (read + write + input)).toFixed(2) : "0.00";
-        debugLog(
-          `[zone-cache] iter=${iter + 1} write=${write} read=${read} input_uncached=${input} output=${output} hit_ratio=${ratio}`
-        );
-      }
-    } catch {}
 
     // Phase H.7: per-run token budget. Sums all token categories tracked by
     // the iter-cost meter (input_uncached + cache_read + cache_write +
     // output) and compares against TOKEN_BUDGET_CAP. Once usage crosses
     // TOKEN_BUDGET_HARD (95%), the loop terminates gracefully via a final
     // no-tools synthesis call.
-    const tokenBudgetRatio = emitTokenBudgetStatus(iter + 1);
+    const tokenBudgetRatio = budget.emitStatus(iter + 1, input.onStructuredEvent);
 
     if (tokenBudgetRatio >= TOKEN_BUDGET_HARD) {
-      return await synthesizeTokenBudgetExit(iter + 1, responseInput);
+      return { ...await synthesizeTokenBudgetExit(iter + 1, responseInput), promotedFromArchetype, promotionTrigger, promotedAtIter };
     }
 
     throwIfAborted("after_llm");
@@ -2347,12 +2564,40 @@ Example (small patch with verification — still call TodoWrite):
         content: assistantContent,
         tool_calls: toolCalls,
       });
-      let failureDetected = false;
-      let failedToolName = "";
-      let failedToolOutput = "";
-      let failedToolError = "";
-      let failedToolFilePath: string | null = null;
-      const failedFilesThisIter = new Set<string>();
+      const toolEventCtx: ToolEventContext = {
+        toolCallLog,
+        filesModified,
+        filesReadThisRun,
+        failureHistory,
+        responseInput,
+        failedFilesThisIter: new Set(),
+        failureDetected: false,
+        failedToolName: "",
+        failedToolOutput: "",
+        failedToolError: "",
+        failedToolFilePath: null,
+        rollbackCount,
+        lastLoopResult: null,
+      };
+      const toolEventDeps = {
+        budget,
+        iter,
+        runId: input.runId,
+        effectiveTokenBudgetCap,
+        tokenBudgetHardThreshold: TOKEN_BUDGET_HARD,
+        detectorState,
+        throwIfAborted,
+        onStructuredEvent: input.onStructuredEvent,
+        onToolResult: input.onToolResult,
+        synthesizeTokenBudgetExit,
+        synthesizeLoopDetectedExit,
+        classifyFailure,
+        extractSemanticSmellName,
+        extractErrorLine,
+        hashPatchBlocks,
+        hashToolCall,
+        recordAndDetect,
+      };
 
       for (const call of toolCalls) {
         const name = call.function.name;
@@ -2367,8 +2612,8 @@ Example (small patch with verification — still call TodoWrite):
           parsedArgs = {};
         }
 
-        if (effectiveAllowedTools && !effectiveAllowedTools.has(name)) {
-          const allowed = [...effectiveAllowedTools];
+        if (effectiveAllowedSet.size > 0 && !effectiveAllowedSet.has(name)) {
+          const allowed = [...effectiveAllowedSet];
           const rejectionMsg =
             `Tool "${name}" is not allowed in this mode. ` +
             `Available tools: ${allowed.join(", ")}.`;
@@ -2378,6 +2623,7 @@ Example (small patch with verification — still call TodoWrite):
             content: rejectionMsg,
           });
           toolCallLog.push({
+            id: callId,
             tool: name,
             args: parsedArgs,
             result: rejectionMsg,
@@ -2387,22 +2633,7 @@ Example (small patch with verification — still call TodoWrite):
             tool: name,
             allowed,
           });
-          continue;
-        }
-
-        if (name === "TodoWrite" && input.disableTodoWrite) {
-          const rejectionMsg = "TodoWrite rejected: TodoWrite is disabled for this read-only investigation run.";
-          responseInput.push({
-            role: "tool",
-            tool_call_id: callId,
-            content: rejectionMsg,
-          });
-          toolCallLog.push({
-            tool: name,
-            args: parsedArgs,
-            result: rejectionMsg,
-            success: false,
-          });
+          // [INNER-LOOP: ALLOWED_TOOLS_REJECT]
           continue;
         }
 
@@ -2416,11 +2647,13 @@ Example (small patch with verification — still call TodoWrite):
               content: rejectionMsg,
             });
             toolCallLog.push({
+              id: callId,
               tool: name,
               args: parsedArgs,
               result: validation.error,
               success: false,
             });
+            // [INNER-LOOP: TODOWRITE_INVALID]
             continue;
           }
           const isFirstEmission = !todosEmittedThisRun;
@@ -2438,11 +2671,110 @@ Example (small patch with verification — still call TodoWrite):
             content: okMsg,
           });
           toolCallLog.push({
+            id: callId,
             tool: name,
             args: parsedArgs,
             result: "ok",
             success: true,
           });
+          // [INNER-LOOP: TODOWRITE_HANDLED]
+          continue;
+        }
+
+        // Phase AS: suggest_scope_change records a scope mismatch proposal.
+        // Outside investigation mode it is a no-op — the revision workflow only
+        // runs during the audit phase; discarding the call here is safe.
+        if (name === "suggest_scope_change" && !isInvestigationMode) {
+          debugLog("[zone-tool-misuse]", JSON.stringify({ tool: "suggest_scope_change", mode }));
+          const noopMsg = "suggest_scope_change is only active in investigation mode — call ignored.";
+          responseInput.push({ role: "tool", tool_call_id: callId, content: noopMsg });
+          toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: noopMsg, success: false });
+          // [INNER-LOOP: SCOPE_CHANGE_NOOP]
+          continue;
+        }
+        if (name === "suggest_scope_change") {
+          const scopeType = parsedArgs["type"];
+          const scopeReason = parsedArgs["reason"];
+          const revisedPlanSummary = parsedArgs["revised_plan_summary"];
+          const missingFiles = Array.isArray(parsedArgs["missing_files"]) ? parsedArgs["missing_files"] as string[] : [];
+          const unnecessaryFiles = Array.isArray(parsedArgs["unnecessary_files"]) ? parsedArgs["unnecessary_files"] as string[] : [];
+
+          const validTypes = ["under_scope", "over_scope", "mixed"];
+          if (!validTypes.includes(String(scopeType)) || !scopeReason || !revisedPlanSummary) {
+            const errMsg = "suggest_scope_change rejected: missing required fields (type, reason, revised_plan_summary).";
+            responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
+            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            // [INNER-LOOP: SCOPE_CHANGE_INVALID]
+            continue;
+          }
+
+          if (scopeType === "under_scope" && missingFiles.length === 0) {
+            const errMsg = "suggest_scope_change rejected: missing_files required for under_scope.";
+            responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
+            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            // [INNER-LOOP: SCOPE_CHANGE_NO_FILES]
+            continue;
+          }
+          if (scopeType === "over_scope" && unnecessaryFiles.length === 0) {
+            const errMsg = "suggest_scope_change rejected: unnecessary_files required for over_scope.";
+            responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
+            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            // [INNER-LOOP: SCOPE_CHANGE_NO_FILES]
+            continue;
+          }
+
+          debugLog("[zone-scope-revision-proposed]", JSON.stringify({
+            runId: input.runId || null,
+            type: scopeType,
+            missingCount: missingFiles.length,
+            unnecessaryCount: unnecessaryFiles.length,
+            ts: new Date().toISOString(),
+          }));
+
+          input.onStructuredEvent?.({
+            type: "suggest_scope_change",
+            scopeChangeType: scopeType,
+            reason: String(scopeReason),
+            missingFiles,
+            unnecessaryFiles,
+            revisedPlanSummary: String(revisedPlanSummary),
+          });
+
+          const ackMsg = "Scope change proposal recorded. Investigation can continue.";
+          responseInput.push({ role: "tool", tool_call_id: callId, content: ackMsg });
+          toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: ackMsg, success: true });
+          // [INNER-LOOP: SCOPE_CHANGE_HANDLED]
+          continue;
+        }
+
+        // Phase F: revert_patch — agent-initiated file revert. Removes the file
+        // from stagingFiles so finalizeStaging won't flush new content to disk;
+        // original disk content (pre-run state) is preserved automatically.
+        if (name === "revert_patch") {
+          const rawPath = typeof parsedArgs["path"] === "string" ? parsedArgs["path"] : null;
+          if (!rawPath) {
+            const errMsg = "revert_patch rejected: missing required field 'path'.";
+            responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
+            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            // [INNER-LOOP: REVERT_PATCH_INVALID]
+            continue;
+          }
+          const relPath = rawPath.replace(/^[\\/]+/, "");
+          const abs = path.resolve(path.join(input.repoPath, relPath));
+          if (!stagingFiles.has(abs)) {
+            const errMsg = `revert_patch rejected: '${relPath}' was not modified in this run.`;
+            responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
+            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            // [INNER-LOOP: REVERT_PATCH_NOT_STAGED]
+            continue;
+          }
+          stagingFiles.delete(abs);
+          filesModified.delete(relPath);
+          log("[zone-revert-patch-invoked]", JSON.stringify({ runId: input.runId ?? null, path: relPath, success: true }));
+          const revertOkMsg = `Reverted: '${relPath}' restored to its pre-run state.`;
+          responseInput.push({ role: "tool", tool_call_id: callId, content: revertOkMsg });
+          toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: revertOkMsg, success: true });
+          // [INNER-LOOP: REVERT_PATCH_OK]
           continue;
         }
 
@@ -2478,6 +2810,7 @@ Example (small patch with verification — still call TodoWrite):
               `Call read_file on ${targetFilePath} first to see the exact current content, ` +
               `then issue apply_patch with FIND lines that match the file verbatim.`;
             toolCallLog.push({
+              id: callId,
               tool: name,
               args: parsedArgs,
               result: syntheticOutput,
@@ -2490,15 +2823,15 @@ Example (small patch with verification — still call TodoWrite):
               tool_call_id: callId,
               content: syntheticOutput,
             });
-            failureDetected = true;
-            failedToolName = name;
-            failedToolOutput = syntheticOutput;
-            failedToolError = "apply_patch_no_read_first";
-            failedToolFilePath = targetFilePath;
+            toolEventCtx.failureDetected = true;
+            toolEventCtx.failedToolName = name;
+            toolEventCtx.failedToolOutput = syntheticOutput;
+            toolEventCtx.failedToolError = "apply_patch_no_read_first";
+            toolEventCtx.failedToolFilePath = targetFilePath;
             // Mirror the same failure tracking that real apply_patch failures get.
             // Without this, backup sweep / repeat detection never sees the blocked file
             // and the agent can drift to other files without returning.
-            failedFilesThisIter.add(targetFilePath);
+            toolEventCtx.failedFilesThisIter.add(targetFilePath);
             const noReadTrigger = classifyFailure(
               name,
               syntheticOutput,
@@ -2513,30 +2846,7 @@ Example (small patch with verification — still call TodoWrite):
               iter: iter + 1,
             });
             failureHistory.set(targetFilePath, noReadList);
-            continue;
-          }
-        }
-
-        if (name === "verify_visual") {
-          const { loadVisualSettings } = await import("../visual/visualSettings.js");
-          const visualSettings = loadVisualSettings();
-          if (!visualSettings.autoVerifyAfterPatch) {
-            const skipMsg = "Visual verification is disabled in Settings → Visual.";
-            console.log("[zone-verify-visual-skipped-by-settings]", JSON.stringify({
-              runId: input.runId ?? null,
-              reason: "toggle_off",
-            }));
-            toolCallLog.push({
-              tool: name,
-              args: parsedArgs,
-              result: skipMsg,
-              success: false,
-            });
-            responseInput.push({
-              role: "tool",
-              tool_call_id: callId,
-              content: skipMsg,
-            });
+            // [INNER-LOOP: APPLY_PATCH_NO_READ]
             continue;
           }
         }
@@ -2566,18 +2876,22 @@ Example (small patch with verification — still call TodoWrite):
           stagingFiles,
           abortSignal: input.abortSignal,
           executionPlan: input.executionPlan ?? null,
-          allowedTools: effectiveAllowedTools,
+          allowedTools: effectiveAllowedSet,
           userId: input.userId,
           framework: input.framework,
           subagent: input.subagent,
           onToolCall: input.onToolCall,
           onToolResult: input.onToolResult,
           onStructuredEvent: input.onStructuredEvent,
-          tokenBudgetBaseTokens: name === "Task" ? cumulativeTokens() : undefined,
+          // F1.4: forward the streaming callback so the Task tool dispatch
+          // can pass it on to the worker subagent's runAgentLoop. Worker
+          // tool-input deltas then flow back through the parent's SSE
+          // channel, tagged with the worker's subagentId.
+          onToolInputStream: input.onToolInputStream,
+          tokenBudgetBaseTokens: name === "Task" ? budget.cumulativeTokens : undefined,
           maxSubagentCallsOverride: effectiveMaxSubagentCalls ?? undefined,
-          visualScreenshotCount: toolCallLog.filter(
-            (entry) => entry.tool === "verify_visual" && entry.success === true
-          ).length,
+          selfValidationCounts,
+          filesReadThisRun,
         });
         debugLog("[zone-agent-tool-post]", {
           runId: input.runId,
@@ -2585,487 +2899,192 @@ Example (small patch with verification — still call TodoWrite):
           tool: name,
           abortAlready: input.abortSignal?.aborted ?? false,
         });
-        throwIfAborted("after_tool");
-        input.onToolResult?.(name, result);
-
-        // Diagnostic: log every tool result after execution
-        debugLog("[zone-agent-tool-result]", JSON.stringify({
-          iter: iter + 1,
-          tool: name,
-          success: result.success,
-          outputPreview: result.output.slice(0, 300),
-          error: result.error ?? null,
-        }));
-
-        // Detect failures from any tool â€” feeds coaching-prompt router.
-        // All tools: failure iff result.success === false (exit code for run_command,
-        // explicit success bool for others). Output-content heuristics removed â€”
-        // they produced false positives on passing Next.js builds whose stderr
-        // contains tokens like "_global-error" or "FAIL".
-        const toolFailed = !result.success;
-        if (toolFailed) {
-          failureDetected = true;
-          failedToolName = name;
-          failedToolOutput = result.output;
-          failedToolError = result.error ?? "";
-          failedToolFilePath =
-            typeof parsedArgs.filePath === "string" ? parsedArgs.filePath : null;
+        const toolEvent = await handleToolResult(name, parsedArgs, callId, result, toolEventCtx, toolEventDeps);
+        rollbackCount = toolEventCtx.rollbackCount;
+        if (toolEvent.kind === "early_exit") {
+          return { ...toolEvent.exit, promotedFromArchetype, promotionTrigger, promotedAtIter };
         }
+        const loopResult = toolEventCtx.lastLoopResult ?? { status: "ok" as const, count: 0 };
 
-        toolCallLog.push({
-          tool: name,
-          args: parsedArgs,
-          result: result.output.slice(0, 4000),
-          success: result.success,
-        });
-
-        if (name === "apply_patch" && !result.success) {
-          const parsedFilePath =
-            typeof parsedArgs.filePath === "string" ? parsedArgs.filePath : null;
-          if (parsedFilePath) failedFilesThisIter.add(parsedFilePath);
-          const filePath = parsedFilePath ?? "unknown";
-          const classifiedTrigger = classifyFailure(name, result.output, result.error);
-          const trigger =
-            classifiedTrigger === "apply_patch_semantic_smell"
-              ? extractSemanticSmellName(result.output)
-              : classifiedTrigger;
-          const errorLine = extractErrorLine(result.output);
-          const patchHash = hashPatchBlocks(parsedArgs);
-          const list = failureHistory.get(filePath) ?? [];
-          list.push({ trigger, errorLine, patchHash, iter: iter + 1 });
-          failureHistory.set(filePath, list);
-        }
-
-        if (
-          (name === "write_file" || name === "apply_patch") &&
-          parsedArgs.filePath != null
-        ) {
-          filesModified.add(String(parsedArgs.filePath));
-        }
-        if (name === "Task" && result.success) {
-          try {
-            const parsed = JSON.parse(result.output) as Partial<SubagentResult>;
-            if (Array.isArray(parsed.filesModified)) {
-              for (const filePath of parsed.filesModified) {
-                if (typeof filePath === "string" && filePath.trim()) {
-                  filesModified.add(filePath.trim());
-                }
-              }
-            }
-            const tokenUsage = parsed.tokenUsage;
-            const subagentTotal = cleanTokenNumber(tokenUsage?.total);
-            if (subagentTotal > 0) {
-              subagentTokenTotal += subagentTotal;
-              const mainTokensAfter = mainAgentTokens();
-              const cumulativeAfter = mainTokensAfter + subagentTokenTotal;
-              log("[zone-subagent-token-propagated]", JSON.stringify({
-                mainRunId: input.runId,
-                subagentId: parsed.subagentId,
-                subagentTotal,
-                subagentInput: cleanTokenNumber(tokenUsage?.input),
-                subagentOutput: cleanTokenNumber(tokenUsage?.output),
-                mainCumulativeAfter: cumulativeAfter,
-                cap: effectiveTokenBudgetCap,
-                ratio: effectiveTokenBudgetCap > 0 ? cumulativeAfter / effectiveTokenBudgetCap : 0,
-              }));
-              const ratioAfterTask = emitTokenBudgetStatus(iter + 1);
-              if (ratioAfterTask >= TOKEN_BUDGET_HARD) {
-                responseInput.push({
-                  role: "tool",
-                  tool_call_id: callId,
-                  content: result.output,
-                });
-                return await synthesizeTokenBudgetExit(iter + 1, responseInput);
-              }
-            }
-            // K.6: subagent cost propagation (parallel to K.3 token propagation above)
-            const subagentCostUsd =
-              typeof parsed.costUsd === "number" && parsed.costUsd > 0 ? parsed.costUsd : 0;
-            if (subagentCostUsd > 0) {
-              subagentCostTotal += subagentCostUsd;
-              log("[zone-subagent-cost-propagated]", JSON.stringify({
-                mainRunId: input.runId,
-                subagentId: parsed.subagentId,
-                subagentCostUsd,
-                mainCumulativeCostAfter: iterCostAccumulator.total_cost + subagentCostTotal,
-              }));
-              if (lastIterCostPayload && typeof input.runId === "string" && input.runId.trim()) {
-                input.onStructuredEvent?.({
-                  ...lastIterCostPayload,
-                  iterCost: 0,
-                  cumulativeCost: iterCostAccumulator.total_cost + subagentCostTotal,
-                });
-              }
-            }
-          } catch {
-            // Best-effort only. Task summaries are user-visible tool content,
-            // but modified-file aggregation should not make the loop fail.
-          }
-        }
-
-        // Chat Completions: each tool_call gets one matching role:"tool" reply.
-        // The assistant message with tool_calls was pushed before the loop.
-        responseInput.push({
-          role: "tool",
-          tool_call_id: callId,
-          content: result.output,
-        });
-      }
-
-      // â"€â"€ Self-correction: failure detected â†’ route to coaching prompt â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-      // Each self-correction attempt consumes one iteration toward maxIterations.
-      // The selfCorrectionAttempts counter is a SUBSET of total iterations â€”
-      // it limits how many times we inject coaching, not how many total iterations run.
-      // This way a long but successful run won't hit the coaching budget.
-      let repeatPattern: { filePath: string; reason: string } | null = null;
-      if (failureDetected && failedToolName === "apply_patch") {
-        repeatPattern = detectRepeatedFailure(failureHistory, failedToolFilePath);
-        if (!repeatPattern) {
-          for (const filePath of failedFilesThisIter) {
-            if (filePath === failedToolFilePath) continue;
-            const candidate = detectRepeatedFailure(failureHistory, filePath);
-            if (candidate) {
-              repeatPattern = candidate;
-              break;
-            }
-          }
-        }
-      }
-      const failedFilePath = failedToolName === "apply_patch" ? failedToolFilePath : null;
-      const pickedFromBackupSweep =
-        repeatPattern !== null && repeatPattern.filePath !== failedToolFilePath;
-      if (failureDetected && selfCorrectionAttempts < MAX_SELF_CORRECTION_ATTEMPTS) {
-        selfCorrectionAttempts += 1;
-        let routedTrigger: SelfCorrectTrigger;
-        if (repeatPattern) {
-          routedTrigger = "apply_patch_repeated_failure_same_file";
-          escalatedFiles.add(repeatPattern.filePath);
-          input.onProgress?.(JSON.stringify({
-            event: "zone-agent-repeat-detected",
-            filePath: repeatPattern.filePath,
-            reason: repeatPattern.reason,
-            attempts: failureHistory.get(repeatPattern.filePath)?.length ?? 0,
-          }));
-          if (escalationEnabled) {
-            iterationBudget = maybeGrantEscalationBonus(
-              iterationBudget,
-              escalatedFiles.size,
-              iter,
-              input.onProgress,
-              baseMaxIterations
-            );
-          }
-        } else {
-          routedTrigger = classifyFailure(failedToolName, failedToolOutput, failedToolError);
-        }
-        const routedFilePath = repeatPattern?.filePath ?? failedFilePath;
-        const perFileAttempt = routedFilePath
-          ? failureHistory.get(routedFilePath)?.length ?? 0
-          : 0;
-        // agent-persistence Tur: build a structured diagnostic prelude
-        // (parsed failingFile/line/errorType + generated-path indicator +
-        // candidate culprits) and inject it ABOVE the coaching directives.
-        // Generated-path detection also flips the test_failed coaching into
-        // its mandatory-investigation variant inside buildCoachingPrompt.
-        const diagnostic = buildVerifyDiagnostic({
-          failedToolOutput,
-          filesModified: Array.from(filesModified),
-          filesInRepo: Array.isArray(input.repoFilePaths) ? input.repoFilePaths : [],
-          framework: input.framework
-            ? { framework: input.framework.framework, language: input.framework.language }
-            : null,
-          attemptCount: selfCorrectionAttempts,
-        });
-        // scope-expansion Tur: when the diagnostic parser pinned a concrete
-        // user-source failing file, expand the plan's covered set so the
-        // agent's next apply_patch can land. Mutates plan in-place; persists
-        // for the rest of this run (and across orchestrator step boundaries
-        // because the plan reference is shared).
-        const scopeExpansion = maybeExpandScopeForVerifyDiagnostic(
-          input.executionPlan ?? null,
-          diagnostic,
-          input.repoPath
-        );
-        let diagnosticText = diagnostic.text;
-        if (scopeExpansion.expanded && scopeExpansion.addedFile) {
-          diagnosticText +=
-            `\n\n**Scope expanded**: \`${scopeExpansion.addedFile}\` has been added to the writable scope ` +
-            `for this run because the verification parser pinned it as the failing file. Apply your patch directly.`;
-          debugLog("[zone-scope-expanded]", JSON.stringify({
+        // Gap 1 post-tool-use runner — site 5 (loop-detector warn) migrated to LoopDetectorHook.
+        {
+          const _allPostHooks = [..._internalPostToolUseHooks, ...(input.hooks?.postToolUse ?? [])];
+          const postCtx: PostToolUseContext = {
+            iter,
             runId: input.runId ?? null,
-            addedFile: scopeExpansion.addedFile,
-            reason: scopeExpansion.reason,
-            parsedFailingFile: diagnostic.parsed?.failingFile ?? null,
-            parsedErrorType: diagnostic.parsed?.errorType ?? null,
-            attempt: selfCorrectionAttempts,
-          }));
-        }
-        const coachingText = buildCoachingPrompt(
-          routedTrigger,
-          failedToolOutput,
-          toolCallLog,
-          {
-            attemptCount: perFileAttempt || selfCorrectionAttempts,
-            filePath: routedFilePath ?? undefined,
-            generatedPathDetected: diagnostic.generatedPathDetected,
-            parsedFailingFile: diagnostic.parsed?.failingFile ?? null,
+            toolName: name,
+            toolArgs: parsedArgs,
+            toolCallId: callId,
+            toolResult: result,
+            responseInput,
+            loopDetectorState: { count: loopResult.count, status: loopResult.status },
+            selfCorrectionAttempts: coachingController.attempts,
+            effectiveMaxCoachingAttempts,
+            emit: (level, marker, payload) => {
+              if (level === "log") log(marker, JSON.stringify(payload));
+              else debugLog(marker, JSON.stringify(payload));
+            },
+          };
+          const postMutations = runPostToolUseHooks(_allPostHooks, postCtx, (marker, payload) => log(marker, JSON.stringify(payload)));
+          if (postMutations.blocked) {
+            const msg = `Task aborted: post-tool-use hook blocked the run. Reason: ${postMutations.blockReason ?? "unspecified"}`;
+            emitRunBreakdownSummary();
+            emitCacheSummary();
+            emitSelfValidationSummary();
+            return { success: false, summary: msg, toolCallLog, filesModified: Array.from(filesModified),
+              patchValidatedByAgent: false, verificationReason: "no_verification_attempted",
+              terminationReason: "hook_blocked", promotedFromArchetype, promotionTrigger, promotedAtIter };
           }
-        );
-        const remaining = MAX_SELF_CORRECTION_ATTEMPTS - selfCorrectionAttempts;
-        debugLog("[zone-agent-self-correct]", JSON.stringify({
-          iter: iter + 1,
-          trigger: failedToolName === "run_command" ? "test_failed" : failedToolName,
-          routedTrigger,
-          selfCorrectionAttempt: selfCorrectionAttempts,
-          maxAttempts: MAX_SELF_CORRECTION_ATTEMPTS,
-          filePath: routedFilePath,
-          perFileAttempt,
-          detectedRepeatedFailure: repeatPattern !== null,
-          repeatReason: repeatPattern?.reason ?? null,
-          iterationCap: iterationBudget.maxIterationsForRun,
-          failedFilesThisIterCount: failedFilesThisIter.size,
-          pickedFromBackupSweep,
-          errorPreview: failedToolOutput.slice(0, 200),
-          willRetry: true,
-          reason: "routed_coaching_prompt_injected",
-        }));
-        debugLog("[zone-agent-diagnostic]", JSON.stringify({
-          attempt: selfCorrectionAttempts,
-          failingFile: diagnostic.parsed?.failingFile ?? null,
-          failingLine: diagnostic.parsed?.failingLine ?? null,
-          errorType: diagnostic.parsed?.errorType ?? null,
-          generatedPathDetected: diagnostic.generatedPathDetected,
-          candidateCount: diagnostic.candidates.length,
-          candidatesPreview: diagnostic.candidates.slice(0, 5),
-        }));
-        input.onProgress?.(
-          `[agent_loop] Failure detected (${routedTrigger}) â€” self-correction attempt ${selfCorrectionAttempts}/${MAX_SELF_CORRECTION_ATTEMPTS}`
-        );
-        responseInput.push({
-          role: "user",
-          content:
-            `[Zone coaching â€” attempt ${selfCorrectionAttempts} of ${MAX_SELF_CORRECTION_ATTEMPTS}]\n` +
-            diagnosticText + `\n\n` +
-            coachingText +
-            `\n\nRecent failure context:\n` +
-            `- Tool: ${failedToolName}\n` +
-            `- Error preview (first 300 chars): ${failedToolOutput.slice(0, 300)}\n` +
-            `You have ${remaining} retry attempt${remaining === 1 ? "" : "s"} remaining. ` +
-            `After that the run will halt with the current state.`,
-        });
-      } else if (failureDetected) {
-        // Budget exhausted â€” log and let the model produce its final summary naturally.
-        const routedTrigger = repeatPattern
-          ? "apply_patch_repeated_failure_same_file"
-          : classifyFailure(failedToolName, failedToolOutput, failedToolError);
-        const routedFilePath = repeatPattern?.filePath ?? failedFilePath;
-        const perFileAttempt = routedFilePath
-          ? failureHistory.get(routedFilePath)?.length ?? 0
-          : 0;
-        debugLog("[zone-agent-self-correct]", JSON.stringify({
-          iter: iter + 1,
-          trigger: failedToolName === "run_command" ? "test_failed" : failedToolName,
-          routedTrigger,
-          selfCorrectionAttempt: selfCorrectionAttempts,
-          maxAttempts: MAX_SELF_CORRECTION_ATTEMPTS,
-          filePath: routedFilePath,
-          perFileAttempt,
-          detectedRepeatedFailure: repeatPattern !== null,
-          repeatReason: repeatPattern?.reason ?? null,
-          iterationCap: iterationBudget.maxIterationsForRun,
-          failedFilesThisIterCount: failedFilesThisIter.size,
-          pickedFromBackupSweep,
-          errorPreview: failedToolOutput.slice(0, 200),
-          willRetry: false,
-          reason: "self-correction budget exhausted â€” allowing model to summarise",
-        }));
+          if (postMutations.mutatedOutput !== undefined) {
+            const lastMsg = responseInput[responseInput.length - 1];
+            if (lastMsg?.role === "tool" && lastMsg.tool_call_id === callId) {
+              lastMsg.content = postMutations.mutatedOutput;
+            }
+          }
+          applyAppendOps(postMutations.appendOps, responseInput, () => prunedMessages, (msgs) => { prunedMessages = msgs; });
+        }
       }
 
+      const {
+        failureDetected,
+        failedToolName,
+        failedToolOutput,
+        failedToolError,
+        failedToolFilePath,
+        failedFilesThisIter,
+      } = toolEventCtx;
+      // ── Self-correction: failure detected → CoachingController ──────────────────
+      const coachingCtx: FailureContext = {
+        signal: { failureDetected, failedToolName, failedToolOutput, failedToolError, failedToolFilePath, failedFilesThisIter },
+        iter,
+        failureHistory,
+        toolCallLog,
+        filesModified,
+        repoFilePaths: Array.isArray(input.repoFilePaths) ? input.repoFilePaths : undefined,
+        framework: input.framework ?? null,
+        executionPlan: input.executionPlan ?? null,
+        repoPath: input.repoPath,
+        currentBudget: iterationBudget,
+        maxAttempts: effectiveMaxCoachingAttempts,
+      };
+      const coachingDecision = coachingController.routeFailure(coachingCtx);
+      if (coachingDecision.kind === "coach") {
+        // Pattern A append — STAYS IN LOOP (cache invariant must remain visible here)
+        for (let ci = responseInput.length - 1; ci >= 0; ci--) {
+          const m = responseInput[ci];
+          if (m.role === "tool") {
+            m.content = (typeof m.content === "string" ? m.content : "") + coachingDecision.coachingAppend;
+            break;
+          }
+        }
+        if (coachingDecision.newIterationBudget) iterationBudget = coachingDecision.newIterationBudget;
+      }
+      if (coachingController.budgetExhausted) coachingBudgetExhausted = true;
+
+      // P.2/P.3: compaction check with graceful exhausted exit.
+      let compactionResult: CompactionResult;
+      try {
+        compactionResult = await compactor.checkAndMaybeCompact({
+          responseInput,
+          toolCallLog,
+          currentUsage: budget.cumulativeTokens,
+          effectiveCap: effectiveTokenBudgetCap,
+          client,
+          runId: input.runId,
+        });
+      } catch (err) {
+        if (err instanceof CompactionExhaustedError) {
+          input.onStructuredEvent?.({
+            type: "compaction_exhausted",
+            message: "Task aborted: context exhausted via compaction. Break this task into smaller subtasks.",
+          });
+          return { ...synthesizeCompactionExhaustedExit(iter + 1, responseInput), promotedFromArchetype, promotionTrigger, promotedAtIter };
+        }
+        throw err;
+      }
+      if (compactionResult.compacted && compactionResult.newResponseInput) {
+        // In-place mutation preserves the array reference held by the outer scope.
+        responseInput.splice(0, responseInput.length, ...compactionResult.newResponseInput);
+        input.onProgress?.(
+          `Context compacted (compaction #${compactor.getCompactionCount()})`
+        );
+        log("[zone-compaction-status]", JSON.stringify({
+          event: "compaction_status",
+          count: compactor.getCompactionCount(),
+          reason: compactionResult.reason ?? "success",
+        }));
+        input.onStructuredEvent?.({
+          type: "compaction_status",
+          count: compactor.getCompactionCount(),
+        });
+      }
+      if (compactionResult.warning) {
+        input.onProgress?.(compactionResult.warning);
+      }
+
+      // L5.1b-2: soft promotion check — one-shot, only when dispatcher is active
+      const _isPromotable = input.pipelineApplied === true
+        && input.originalArchetype != null
+        && promotedFromArchetype === null;
+      if (_isPromotable) {
+        const _firePromotion = (trigger: NonNullable<typeof promotionTrigger>) => {
+          promotedFromArchetype = input.originalArchetype!;
+          promotionTrigger = trigger;
+          promotedAtIter = iter + 1;
+          iterationBudget = {
+            ...iterationBudget,
+            maxIterationsForRun: input.maxIterations ?? BASE_MAX_ITERATIONS,
+          };
+          effectiveMaxCoachingAttempts = MAX_SELF_CORRECTION_ATTEMPTS;
+          emitArchetypePromoted({
+            runId: input.runId ?? null,
+            fromArchetype: promotedFromArchetype,
+            toArchetype: "complex_multi_file",
+            atIter: promotedAtIter,
+            trigger: promotionTrigger,
+          });
+        };
+        if (inputIterCap !== null && iter + 1 >= inputIterCap) {
+          _firePromotion("iter_cap");
+        } else if (iter >= 1 && rollbackCount >= 2) {
+          _firePromotion("rollback_x2");
+        } else if (coachingBudgetExhausted && failureDetected) {
+          _firePromotion("coaching_exhausted");
+        }
+      }
+
+      // [OUTER-LOOP: ITER_TOOLS_PROCESSED]
       continue;
     }
 
     const extracted = extractResponsesApiOutputText(response);
-      if (extracted.ok && extracted.text.trim()) {
-      const finalText = extracted.text.trim();
-      if (isReadOnlyMode) {
-        return {
-          success: true,
-          summary: finalText,
-          toolCallLog,
-          filesModified: [],
-          patchValidatedByAgent: false,
-          verificationReason: "no_verification_attempted",
-          terminationReason: "natural_completion",
-          tokenUsage: currentTokenUsage(),
-          costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
-        };
-      }
-      const vrMatch = finalText.match(/\[ZONE_VERIFICATION:\s*([\w_]+)\]/i);
-      const vrRaw = vrMatch ? vrMatch[1].toLowerCase() : 'no_verification_attempted';
-      const validReasons: VerificationReason[] = [
-        'tests_passed', 'tests_skipped_no_infra', 'tests_inconclusive',
-        'tests_failed_unrelated', 'tests_failed_by_patch', 'no_verification_attempted',
-        'verification_failed_staged',
-        'no_changes_made',
-      ];
-      let verificationReason: VerificationReason =
-        (validReasons as string[]).includes(vrRaw)
-          ? (vrRaw as VerificationReason)
-          : 'no_verification_attempted';
-      if (verificationReason === "tests_passed") {
-        const passedValidation = validatePassedClaim(
-          toolCallLog,
-          input.framework ? { hasTests: input.framework.hasTests } : undefined
-        );
-        if (!passedValidation.accept) {
-          verificationReason = passedValidation.demoteTo ?? "tests_inconclusive";
-          input.onProgress?.(JSON.stringify({
-            event: "zone-agent-verdict-override",
-            triggeredBy: "natural_completion",
-            originalVerdict: "tests_passed",
-            overriddenTo: verificationReason,
-            reason: passedValidation.reason,
-          }));
-          debugLog("[zone-agent-verdict-override]", JSON.stringify({
-            triggeredBy: "natural_completion",
-            originalVerdict: "tests_passed",
-            overriddenTo: verificationReason,
-            reason: passedValidation.reason,
-          }));
-        }
-      }
-      if (verificationReason === "tests_failed_unrelated") {
-        const verdictValidation = validateUnrelatedClaim({
-          log: toolCallLog,
-          patchedFilePaths: Array.from(filesModified),
-          framework: input.framework
-            ? { hasTests: input.framework.hasTests }
-            : undefined,
-        });
-        if (!verdictValidation.accept) {
-          verificationReason = verdictValidation.demoteTo ?? "tests_inconclusive";
-          debugLog("[zone-agent-verdict-override]", JSON.stringify({
-            triggeredBy: "natural_completion",
-            originalVerdict: "tests_failed_unrelated",
-            overriddenTo: verdictValidation.demoteTo,
-            reason: verdictValidation.reason,
-          }));
-        } else if (
-          verdictValidation.reason &&
-          /resolved by a later successful run_command/i.test(verdictValidation.reason)
-        ) {
-          // Bug 44b: failure was demonstrably resolved by a later successful
-          // run_command. Promote the verdict from `tests_failed_unrelated` to
-          // `tests_passed` so the UI doesn't render a "tests failed" chip
-          // alongside a "safe to apply" badge.
-          verificationReason = "tests_passed";
-          debugLog("[zone-agent-verdict-promote]", JSON.stringify({
-            triggeredBy: "natural_completion",
-            originalVerdict: "tests_failed_unrelated",
-            promotedTo: "tests_passed",
-            reason: verdictValidation.reason,
-          }));
-        }
-      }
-      verificationReason = applyNoInfraVerificationOverride({
-        verificationReason,
-        framework: input.framework
-          ? {
-              hasTests: input.framework.hasTests,
-              testFilesDetected: input.framework.testFilesDetected,
-            }
-          : undefined,
-        patchApplied: didApplyPatch(toolCallLog),
-        triggeredBy: "natural_completion",
-      });
-      let patchValidatedByAgent =
-        verificationReason === 'tests_passed' ||
-        verificationReason === 'tests_skipped_no_infra' ||
-        verificationReason === 'tests_failed_unrelated';
-      debugLog("[zone-staging-state]", JSON.stringify({
-        stagedFileCount: stagingFiles.size,
-        stagedFiles: Array.from(stagingFiles.keys()).map((abs) => path.basename(abs)),
-        // staging-flush-bug diag: full absolute paths surface symlink/realpath drift
-        stagedAbsPaths: Array.from(stagingFiles.keys()),
-      }));
-      log("[zone-agent-final-assessment]", JSON.stringify({
-        triggeredBy: "natural_completion",
-        verificationReason,
-        patchValidatedByAgent,
-        inferredFrom: vrMatch ? "tag" : "heuristic",
-        summaryPreview: finalText.slice(0, 200),
-      }));
-      const finalizeResult = ownsStagingFiles
-        ? await finalizeStaging({
-            stagingFiles,
-            repoPath: input.repoPath,
-            framework: input.framework,
-            withStagingTempFlush,
-          })
-        : {
-            flushed: false,
-            verification: {
-              status: "skipped" as const,
-              reason: "subagent_deferred_to_parent",
-            },
-            filesFlushed: 0,
-            flushFailures: 0,
-          };
-      let summaryAppendix = "";
-      if (finalizeResult.verification.status === "fail") {
-        // Phase J.3: distinguish regression (patch introduced new errors,
-        // staging discarded, "rolled back" UI) from pre-existing failure
-        // (patch flushed anyway, errors weren't its fault).
-        if (finalizeResult.verification.regressed === false) {
-          verificationReason = "tests_inconclusive";
-          patchValidatedByAgent = false;
-          summaryAppendix =
-            "\n\n**Verification has pre-existing errors** (" +
-            finalizeResult.verification.label +
-            ", " + finalizeResult.verification.durationMs + "ms).\n" +
-            "Patch was applied because it didn't add any new errors " +
-            `(${finalizeResult.verification.postErrorCount ?? "?"} errors before, ` +
-            `${finalizeResult.verification.postErrorCount ?? "?"} errors after).`;
-        } else {
-          verificationReason = "verification_regressed";
-          patchValidatedByAgent = false;
-          const baseline = finalizeResult.verification.baselineErrorCount ?? 0;
-          const post = finalizeResult.verification.postErrorCount ?? 0;
-          summaryAppendix =
-            "\n\n**Apply rolled back — verification regressed** (" +
-            finalizeResult.verification.label +
-            ", " + finalizeResult.verification.durationMs + "ms). " +
-            `Patch added ${Math.max(0, post - baseline)} new error(s) ` +
-            `(${baseline} before → ${post} after).\n\n` +
-            "Disk was restored to pre-apply state.\n\n```\n" +
-            finalizeResult.verification.errorPreview +
-            "\n```";
-        }
-      } else if (
-        finalizeResult.verification.status === "skipped" &&
-        "reason" in finalizeResult.verification &&
-        finalizeResult.verification.reason === "no_changes_made"
-      ) {
-        verificationReason = "no_changes_made";
-        patchValidatedByAgent = false;
-      }
-      return {
-        success: true,
-        summary: finalText + summaryAppendix,
+    if (extracted.ok && extracted.text.trim()) {
+      return await finalizeRun({
+        trigger: "natural_completion",
+        finalText: extracted.text.trim(),
+        isReadOnlyMode,
         toolCallLog,
-        filesModified: Array.from(filesModified),
-        patchValidatedByAgent,
-        verificationReason,
-        terminationReason: "natural_completion",
-        tokenUsage: currentTokenUsage(),
-        costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
-        // Phase J.3.1: forward the staging snapshot so runLlmPatchFlow can
-        // render the rolled-back diff. Only meaningful when
-        // verificationReason === "verification_regressed".
-        ...(finalizeResult.discardedStaging
-          ? { discardedStaging: finalizeResult.discardedStaging }
-          : {}),
-      };
+        filesModified,
+        stagingFiles,
+        ownsStagingFiles,
+        withStagingTempFlush,
+        verifyMode,
+        framework: input.framework,
+        repoPath: input.repoPath,
+        iterCount: iter + 1,
+        costUsd: budget.snapshot().costUsd,
+        tokenUsage: budget.tokenUsage,
+        promotedFromArchetype,
+        promotionTrigger,
+        promotedAtIter,
+        onProgress: input.onProgress,
+        runId: input.runId,
+        emit: {
+          runBreakdownSummary: emitRunBreakdownSummary,
+          cacheSummary: emitCacheSummary,
+          selfValidationSummary: emitSelfValidationSummary,
+        },
+      });
     }
 
     // If we got neither tool calls nor text, keep looping (rare).
@@ -3080,7 +3099,9 @@ Example (small patch with verification — still call TodoWrite):
     let finalSummary = "Max iterations reached before a final answer was produced.";
     try {
       const assessmentResponse = await client.createChatCompletion({
-        model: getModelName("high", client.provider, requestCtx?.modelOverride),
+        model: isInvestigationMode
+          ? getModelForRole("investigator", client.provider as "anthropic" | "openai")
+          : getModelName("high", client.provider, requestCtx?.modelOverride),
         messages: [
           ...responseInput,
           {
@@ -3101,31 +3122,35 @@ Example (small patch with verification — still call TodoWrite):
     } catch {
       // Keep the fallback summary.
     }
-    return {
-      success: false,
-      summary: finalSummary,
+    return await finalizeRun({
+      trigger: "max_iterations_readonly",
+      finalText: finalSummary,
       toolCallLog,
-      filesModified: [],
-      patchValidatedByAgent: false,
-      verificationReason: "no_verification_attempted",
-      terminationReason: "max_iterations",
-      tokenUsage: currentTokenUsage(),
-      costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
-    };
+      filesModified,
+      stagingFiles,
+      ownsStagingFiles,
+      withStagingTempFlush,
+      verifyMode,
+      framework: input.framework,
+      repoPath: input.repoPath,
+      iterCount: completedIterCount,
+      costUsd: budget.snapshot().costUsd,
+      tokenUsage: budget.tokenUsage,
+      promotedFromArchetype,
+      promotionTrigger,
+      promotedAtIter,
+      onProgress: input.onProgress,
+      runId: input.runId,
+      emit: {
+        runBreakdownSummary: emitRunBreakdownSummary,
+        cacheSummary: emitCacheSummary,
+        selfValidationSummary: emitSelfValidationSummary,
+      },
+    });
   }
 
   // Max iterations hit â€” request one final no-tool assessment call
   input.onProgress?.("[agent_loop] Max iterations reached â€” requesting final assessment");
-  let finalVerificationReason: VerificationReason = inferVerificationFromLog(
-    toolCallLog,
-    input.framework
-      ? {
-          hasTests: input.framework.hasTests,
-          testFilesDetected: input.framework.testFilesDetected,
-        }
-      : undefined
-  );
-  let inferredFrom: "tag" | "heuristic" = "heuristic";
   let finalSummary = "Max iterations reached";
   const grantedBonus = iterationBudget.escalationBonusGranted
     ? ` (including ${ESCALATION_BONUS_ITERATIONS} bonus iterations granted after escalation)`
@@ -3170,167 +3195,34 @@ Example (small patch with verification — still call TodoWrite):
     const ae = extractResponsesApiOutputText(assessmentResponse);
       if (ae.ok && ae.text.trim()) {
         finalSummary = ae.text.trim();
-        const tagged = parseVerificationTag(finalSummary);
-        if (tagged) {
-          // Strip the tag from the text so downstream consumers (CLI, web UI) don't display it.
-          finalSummary = stripVerificationTag(finalSummary);
-          finalVerificationReason = tagged;
-          inferredFrom = "tag";
-          if (finalVerificationReason === "tests_passed") {
-            const passedValidation = validatePassedClaim(
-              toolCallLog,
-              input.framework ? { hasTests: input.framework.hasTests } : undefined
-            );
-            if (!passedValidation.accept) {
-              finalVerificationReason =
-                passedValidation.demoteTo ?? "tests_inconclusive";
-              input.onProgress?.(JSON.stringify({
-                event: "zone-agent-verdict-override",
-                triggeredBy: "max_iterations",
-                originalVerdict: "tests_passed",
-                overriddenTo: finalVerificationReason,
-                reason: passedValidation.reason,
-              }));
-              debugLog("[zone-agent-verdict-override]", JSON.stringify({
-                triggeredBy: "max_iterations",
-                originalVerdict: "tests_passed",
-                overriddenTo: finalVerificationReason,
-                reason: passedValidation.reason,
-              }));
-            }
-          }
-          if (finalVerificationReason === "tests_failed_unrelated") {
-            const verdictValidation = validateUnrelatedClaim({
-              log: toolCallLog,
-              patchedFilePaths: Array.from(filesModified),
-              framework: input.framework
-                ? { hasTests: input.framework.hasTests }
-                : undefined,
-            });
-            if (!verdictValidation.accept) {
-              finalVerificationReason =
-                verdictValidation.demoteTo ?? "tests_inconclusive";
-              debugLog("[zone-agent-verdict-override]", JSON.stringify({
-                triggeredBy: "max_iterations",
-                originalVerdict: "tests_failed_unrelated",
-                overriddenTo: verdictValidation.demoteTo,
-                reason: verdictValidation.reason,
-              }));
-            } else if (
-              verdictValidation.reason &&
-              /resolved by a later successful run_command/i.test(verdictValidation.reason)
-            ) {
-              // Bug 44b: see natural_completion site for rationale.
-              finalVerificationReason = "tests_passed";
-              debugLog("[zone-agent-verdict-promote]", JSON.stringify({
-                triggeredBy: "max_iterations",
-                originalVerdict: "tests_failed_unrelated",
-                promotedTo: "tests_passed",
-                reason: verdictValidation.reason,
-              }));
-            }
-          }
-        }
-        finalVerificationReason = applyNoInfraVerificationOverride({
-          verificationReason: finalVerificationReason,
-          framework: input.framework
-            ? {
-                hasTests: input.framework.hasTests,
-                testFilesDetected: input.framework.testFilesDetected,
-              }
-            : undefined,
-          patchApplied: didApplyPatch(toolCallLog),
-          triggeredBy: "max_iterations",
-        });
       }
   } catch {
     // Best-effort â€” fall through with heuristic
   }
 
-  let patchValidatedByAgent =
-    finalVerificationReason === "tests_passed" ||
-    finalVerificationReason === "tests_skipped_no_infra" ||
-    finalVerificationReason === "tests_failed_unrelated";
-
-  debugLog("[zone-staging-state]", JSON.stringify({
-    stagedFileCount: stagingFiles.size,
-    stagedFiles: Array.from(stagingFiles.keys()).map((abs) => path.basename(abs)),
-  }));
-  log("[zone-agent-final-assessment]", JSON.stringify({
-    triggeredBy: "max_iterations",
-    finalVerificationReason,
-    inferredFrom,
-    patchValidatedByAgent,
-  }));
-
-  const finalizeResult = ownsStagingFiles
-    ? await finalizeStaging({
-        stagingFiles,
-        repoPath: input.repoPath,
-        framework: input.framework,
-        withStagingTempFlush,
-      })
-    : {
-        flushed: false,
-        verification: {
-          status: "skipped" as const,
-          reason: "subagent_deferred_to_parent",
-        },
-        filesFlushed: 0,
-        flushFailures: 0,
-      };
-  if (finalizeResult.verification.status === "fail") {
-    // Phase J.3: same regressed-vs-pre-existing split as the natural-completion
-    // path above. Pre-existing errors → patch flushes, marker is inconclusive.
-    // Genuine regression → staging discarded, marker is verification_regressed.
-    if (finalizeResult.verification.regressed === false) {
-      finalVerificationReason = "tests_inconclusive";
-      patchValidatedByAgent = false;
-      finalSummary =
-        finalSummary +
-        "\n\n**Verification has pre-existing errors** (" +
-        finalizeResult.verification.label +
-        ", " + finalizeResult.verification.durationMs + "ms). " +
-        "Patch was applied because it didn't add any new errors.";
-    } else {
-      finalVerificationReason = "verification_regressed";
-      patchValidatedByAgent = false;
-      const baseline = finalizeResult.verification.baselineErrorCount ?? 0;
-      const post = finalizeResult.verification.postErrorCount ?? 0;
-      finalSummary =
-        finalSummary +
-        "\n\n**Apply rolled back — verification regressed** (" +
-        finalizeResult.verification.label +
-        ", " + finalizeResult.verification.durationMs + "ms). " +
-        `Patch added ${Math.max(0, post - baseline)} new error(s) ` +
-        `(${baseline} before → ${post} after). Disk restored.\n\n` +
-        "```\n" +
-        finalizeResult.verification.errorPreview +
-        "\n```";
-    }
-  } else if (
-    finalizeResult.verification.status === "skipped" &&
-    "reason" in finalizeResult.verification &&
-    finalizeResult.verification.reason === "no_changes_made"
-  ) {
-    finalVerificationReason = "no_changes_made";
-    patchValidatedByAgent = false;
-  }
-
-  return {
-    success: false,
-    summary: finalSummary,
+  return await finalizeRun({
+    trigger: "max_iterations",
+    finalText: finalSummary,
     toolCallLog,
-    filesModified: [...filesModified],
-    patchValidatedByAgent,
-    verificationReason: finalVerificationReason,
-    terminationReason: "max_iterations",
-    tokenUsage: currentTokenUsage(),
-    costUsd: iterCostAccumulator.total_cost + subagentCostTotal,
-    // Phase J.3.1: forward the staging snapshot for the rolled-back diff
-    // when maxiter ended with a regressed-verification rollback.
-    ...(finalizeResult.discardedStaging
-      ? { discardedStaging: finalizeResult.discardedStaging }
-      : {}),
-  };
+    filesModified,
+    stagingFiles,
+    ownsStagingFiles,
+    withStagingTempFlush,
+    verifyMode,
+    framework: input.framework,
+    repoPath: input.repoPath,
+    iterCount: completedIterCount,
+    costUsd: budget.snapshot().costUsd,
+    tokenUsage: budget.tokenUsage,
+    promotedFromArchetype,
+    promotionTrigger,
+    promotedAtIter,
+    onProgress: input.onProgress,
+    runId: input.runId,
+    emit: {
+      runBreakdownSummary: emitRunBreakdownSummary,
+      cacheSummary: emitCacheSummary,
+      selfValidationSummary: emitSelfValidationSummary,
+    },
+  });
 }

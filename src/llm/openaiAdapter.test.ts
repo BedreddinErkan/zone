@@ -92,14 +92,36 @@ describe("OpenAI prompt cache stability helpers", () => {
       repoPath: "/workspace/project",
     });
 
-    expect(system).toContain("TASK SUBAGENTS (Task):");
-    expect(system).toContain("Default to single-thread");
-    expect(system).toMatch(/synthetic test scenarios/i);
-    expect(system).toContain(
-      '"Find a function with multiple callers and break its signature"'
-    );
+    expect(system).toContain("TASK SUBAGENTS (Task) — when to dispatch:");
+    expect(system).toContain("Default is single-thread.");
+    expect(system).toContain("GOOD signals (DO dispatch):");
+    expect(system).toContain("BAD signals (DON'T dispatch):");
     expect(system).toContain("READ_FILE ECONOMY:");
-    expect(system).toContain("VISUAL VERIFICATION (verify_visual):");
+  });
+
+  it("documents the J.4 APPLY_ROLLED_BACK marker convention", () => {
+    const system = assembleAgentSystemPrompt({
+      agentIntro: "You are Zone, an AI code agent.",
+      frameworkLines: [],
+      hasFramework: false,
+      projectMemoryBlock: "",
+      baseMaxIterations: 15,
+      canRunCommand: false,
+      backgroundCommandBlock: "",
+      repoPath: "/workspace/project",
+    });
+
+    // Marker name appears, and the agent gets the four pillars of the contract:
+    // (1) what the marker means, (2) where to read the restored-file scope,
+    // (3) the suggestion hint convention, (4) the shell-hack prohibition.
+    expect(system).toContain("APPLY_ROLLED_BACK");
+    expect(system).toContain('Files restored to pre-apply state');
+    expect(system).toContain('Suggested: ');
+    // The shell-hack prohibition is the key dogfood-derived guidance:
+    // pre-J.4 the agent escalated to sed/python/cat to defeat rollbacks.
+    expect(system).toMatch(/Do NOT use shell commands/);
+    // Coordinated-edit retry path: apply_patch or Task for ≥3-file edits.
+    expect(system).toMatch(/apply_patch or Task/);
   });
 
   it("builds a bounded per-run prompt cache key", () => {
@@ -107,5 +129,19 @@ describe("OpenAI prompt cache stability helpers", () => {
       "zone-run-1234567890abcdef"
     );
     expect(buildOpenAIPromptCacheKey("")).toBeUndefined();
+  });
+
+  it("prefers conversationId over runId when provided (Phase X.0 C3)", () => {
+    expect(buildOpenAIPromptCacheKey("run-ignored", "AAAAAAAAAAAAAAAA")).toBe(
+      "zone-thread-AAAAAAAAAAAAAAAA"
+    );
+    expect(buildOpenAIPromptCacheKey("run-ignored", "BBBBBBBBBBBBBBBB-extra")).toBe(
+      "zone-thread-BBBBBBBBBBBBBBBB"
+    );
+  });
+
+  it("falls back to runId when conversationId is empty or missing", () => {
+    expect(buildOpenAIPromptCacheKey("run-abc", "")).toBe("zone-run-run-abc");
+    expect(buildOpenAIPromptCacheKey("run-abc", undefined)).toBe("zone-run-run-abc");
   });
 });

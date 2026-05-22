@@ -65,6 +65,12 @@ export type GenerateFinalRunReportInput = {
     code: "explicit_target_not_found";
     missingPath: string;
   };
+  /**
+   * agentLoop termination reason. Static report (no LLM call) is returned for
+   * cap/budget/loop/compaction exits — there is nothing to summarize for runs
+   * that never reached normal execution.
+   */
+  terminationReason?: string;
 };
 
 const finalRunReportSchema = z.object({
@@ -449,9 +455,19 @@ ${payload}
   return sanitized;
 }
 
+const STATIC_REPORT_REASONS = new Set([
+  "daily_usd_cap_exceeded",
+  "token_budget_exceeded",
+  "loop_detected",
+  "compaction_exhausted",
+]);
+
 export async function generateFinalRunReport(
   input: GenerateFinalRunReportInput
 ): Promise<FinalRunReport> {
+  if (input.terminationReason && STATIC_REPORT_REASONS.has(input.terminationReason)) {
+    return buildDeterministicFinalRunReport(input);
+  }
   const fallback = buildDeterministicFinalRunReport(input);
   if (input.terminalAbort?.code === "explicit_target_not_found") {
     return fallback;

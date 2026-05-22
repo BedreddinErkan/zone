@@ -36,6 +36,7 @@ export type AgentLifecyclePipelineStage =
   | "repo"
   | "rank"
   | "plan"
+  | "scope_revision"
   | "context"
   | "patch_preview"
   | "patch_gen"
@@ -136,13 +137,28 @@ export type ZoneStructuredProgressEvent = {
     | "narration"
     | "token_budget_status"
     | "task_classified"
-    | "tier_constraints_applied";
+    | "tier_constraints_applied"
+    | "loop_warning_emitted"
+    | "loop_detected_terminal"
+    | "tool_input_delta"
+    /** Y.1.6.3: emitted once per retry sequence when cumulative wait exceeds 5 s. */
+    | "llm_retry_in_progress"
+    /** Phase AS: scope revision proposal emitted between plan approval and execute. */
+    | "scope_revision_proposed"
+    | "scope_revision_resolved"
+    | "scope_audit_started"
+    | "scope_audit_completed"
+    | "scope_audit_skipped"
+    /** Phase Z: plan generation summary emitted inline (replaces plan card). */
+    | "plan_summary"
+    /** Phase D-S1: emitted exactly once when Phase 1 (investigation) hands off to Phase 2 (execution). */
+    | "phase_changed";
   title: string;
   detail?: string;
   filePath?: string;
   command?: string;
   status?: "active" | "success" | "warning" | "error";
-  subagentStatus?: "completed" | "partial" | "failed";
+  subagentStatus?: "completed" | "partial" | "failed" | "max_iterations";
   subagentId?: string;
   subagentType?: "worker" | "explore" | "verifier";
   parentRunId?: string;
@@ -210,6 +226,33 @@ export type ZoneStructuredProgressEvent = {
    *  the screenshot via metadata.screenshotPath / pageTitle / consoleErrors). */
   toolName?: string;
   metadata?: Record<string, unknown>;
+  /** Phase F1: live tool-input streaming. Identifies the specific LLM tool call
+   *  block (unique per call, per iteration) and whether this event is the first
+   *  delta seen for that block. */
+  blockId?: string;
+  isFirstDelta?: boolean;
+  /** Phase AS: scope revision proposal fields on scope_revision_proposed events. */
+  revisionId?: string;
+  revisionType?: "under_scope" | "over_scope" | "mixed";
+  revisionReason?: string;
+  revisionOriginalPlan?: string;
+  revisionRevisedPlanSummary?: string;
+  revisionMissingFiles?: string[];
+  revisionUnnecessaryFiles?: string[];
+  /** scope_revision_resolved: user decision */
+  revisionDecision?: "approve" | "reject";
+  /** scope_audit_skipped reason */
+  skipReason?: string;
+  /** Phase O: identifies which agent lane emitted this event. "audit" = scope
+   *  audit mini-agent running investigateScope(); "main" = primary patch/investigate
+   *  agent. Absent for events that predate lane tagging. */
+  lane?: "main" | "audit";
+  /** Phase Z: plan_summary fields — deduplicated file list and step count. */
+  planSummaryFiles?: string[];
+  planSummaryStepCount?: number;
+  /** Phase D-S1: phase_changed event fields. phase=2 means Phase 1 is done, Phase 2 starting. */
+  phase?: number;
+  remainingTokenBudget?: number;
   /** Phase L.1: pre-dispatch task classification. Emitted once per dispatch
    *  before the agent loop starts so the UI / telemetry can show the predicted
    *  tier and the classifier's own cost. L.2 will gate tool exposure based on
@@ -217,7 +260,6 @@ export type ZoneStructuredProgressEvent = {
   tier?: "simple" | "medium" | "complex";
   estimatedFiles?: number;
   estimatedIterations?: number;
-  needsSubagent?: boolean;
   confidence?: number;
   classifierModel?: string;
   classifierCostUsd?: number;

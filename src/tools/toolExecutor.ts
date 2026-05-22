@@ -1,10 +1,12 @@
 import { exec } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import fg from "fast-glob";
-import { debugLog, errorLog } from "../utils/logger.js";
+import { debugLog, errorLog, log } from "../utils/logger.js";
+import { writeCacheLog } from "../utils/commandCacheLog.js";
 import {
   extractDeclaredSymbols,
   locateSymbol,
@@ -19,10 +21,126 @@ import { sanitizeVerificationEnv, strippedEnvKeys } from "../core/buildEnv.js";
 import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import type { ProjectFramework } from "../repo/detectFramework.js";
 import { generateFileOutline } from "./fileOutline.js";
-import { getDevServerConfig, probeDevServer } from "../visual/devServerProbe.js";
-import { runVerifyVisual, type VerifyVisualInput } from "./verifyVisual.js";
+import { findCheckerForFile } from "./syntaxCheckers.js";
+import { classifyShellExit } from "./classifyShellExit.js";
+import { validateRunEnvironment } from "./runEnvironment.js";
+import { checkCommandSafe } from "../llm/runCommandSafe.js";
 
 const execAsync = promisify(exec);
+
+// Phase V Commit 2: Unicode curly-quote → ASCII normalization for FIND/REPLACE blocks.
+const SMART_QUOTE_MAP: Record<string, string> = {
+  "“": '"',
+  "”": '"',
+  "‘": "'",
+  "’": "'",
+};
+function normalizeSmartQuotes(s: string): { text: string; count: number } {
+  let count = 0;
+  const text = s.replace(/[“”‘’]/g, (ch) => {
+    count++;
+    return SMART_QUOTE_MAP[ch] ?? ch;
+  });
+  return { text, count };
+}
+
+// Lever 4.A: outline memoization. Key = "filePath:contentHash" (first 16 hex chars of sha256).
+// Prevents regenerating 6-8KB outline on repeat reads of an unchanged large file.
+const outlineCache = new Map<string, {
+  outline: string;
+  contentHash: string;
+  generatedAt: number;
+  filePath: string;
+}>();
+const OUTLINE_CACHE_MAX = 50;
+
+function hashContent(content: string): string {
+  return createHash("sha256").update(content).digest("hex").slice(0, 16);
+}
+
+function evictOutlineCacheForFile(filePath: string): void {
+  for (const key of outlineCache.keys()) {
+    if (key.startsWith(`${filePath}:`)) outlineCache.delete(key);
+  }
+}
+
+/** Exported for test isolation only — do not call in production code. */
+export function clearOutlineCacheForTest(): void {
+  outlineCache.clear();
+}
+
+// --- Command memoization (Phase 2) ---
+
+const MEMOIZABLE_COMMAND_PATTERNS: RegExp[] = [
+  /^npm\s+(run\s+)?test\b/,
+  /^npm\s+run\s+typecheck\b/,
+  /^npm\s+run\s+build\b/,
+  /^npx\s+tsc\b/,
+  /^tsc\b/,
+  /^npx\s+vitest\b/,
+  /^vitest\b/,
+];
+
+export function isMemoizableCommand(cmd: string): boolean {
+  return MEMOIZABLE_COMMAND_PATTERNS.some((p) => p.test(cmd.trim()));
+}
+
+export function computeCommandFingerprint(
+  cmd: string,
+  stagingFiles: Map<string, string> | undefined,
+): string {
+  const sortedEntries = Array.from((stagingFiles ?? new Map()).entries()).sort(
+    ([a], [b]) => a.localeCompare(b),
+  );
+  const stagingHash = createHash("sha256")
+    .update(JSON.stringify(sortedEntries))
+    .digest("hex")
+    .slice(0, 16);
+  return createHash("sha256")
+    .update(`${cmd.trim()}|${stagingHash}`)
+    .digest("hex")
+    .slice(0, 16);
+}
+
+interface CommandCacheEntry {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  timestamp: number;
+}
+
+interface PerRunCache {
+  entries: Map<string, CommandCacheEntry>;
+  hits: number;
+  misses: number;
+  savedMs: number;
+}
+
+const runCommandCaches = new Map<string, PerRunCache>();
+
+function getOrCreateRunCache(runId: string): PerRunCache {
+  if (!runCommandCaches.has(runId)) {
+    runCommandCaches.set(runId, {
+      entries: new Map(),
+      hits: 0,
+      misses: 0,
+      savedMs: 0,
+    });
+  }
+  return runCommandCaches.get(runId)!;
+}
+
+export function clearCommandCacheForRun(runId: string): PerRunCache | undefined {
+  const cache = runCommandCaches.get(runId);
+  runCommandCaches.delete(runId);
+  return cache;
+}
+
+/** Exported for test isolation only — do not call in production code. */
+export function clearCommandCacheForTest(): void {
+  runCommandCaches.clear();
+}
 
 export type ResolveCwdResult =
   | { ok: true; cwd: string }
@@ -39,7 +157,6 @@ const DISPATCHED_TOOLS = new Set([
   "apply_patch",
   "write_file",
   "search_in_files",
-  "verify_visual",
   "find_references",
   "Task",
   "run_command_background",
@@ -51,6 +168,14 @@ const DISPATCHED_TOOLS = new Set([
   // so the IIFE startup guard at :51-75 doesn't fail-fast on its presence in
   // ZONE_TOOLS.
   "TodoWrite",
+  "run_command_readonly",
+  // suggest_scope_change is handled entirely inside agentLoop (audit no-op guard
+  // + investigation-mode handler, both with `continue`). It never reaches
+  // executeTool — same interception pattern as TodoWrite.
+  "suggest_scope_change",
+  // revert_patch is intercepted in agentLoop (removes file from stagingFiles so
+  // finalizeStaging won't flush it). It never reaches executeTool.
+  "revert_patch",
 ]);
 
 // Import the definitions lazily to keep the check co-located with the executor.
@@ -83,6 +208,10 @@ const DISPATCHED_TOOLS = new Set([
 
 export interface ToolResult {
   success: boolean;
+  /** Phase Q.5: authoritative exit code for run_command results.
+   *  success === (exitCode === 0); both are set together. Absent for
+   *  non-shell tools. */
+  exitCode?: number;
   output: string;
   error?: string;
   truncated?: boolean;
@@ -97,6 +226,36 @@ function truncateText(
 ): { text: string; truncated: boolean } {
   if (text.length <= maxChars) return { text, truncated: false };
   return { text: text.slice(0, maxChars) + "... [truncated]", truncated: true };
+}
+
+// Phase Q.4: head/tail line truncation for run_command output.
+// Agent context is capped at HEAD_LINES + TAIL_LINES so noisy test output
+// (hundreds of failures) doesn't consume 50-150K tokens. Full output is
+// preserved in the debugLog for post-run analysis.
+export const COMMAND_OUTPUT_HEAD_LINES = 100;
+export const COMMAND_OUTPUT_TAIL_LINES = 50;
+
+export function truncateCommandOutput(output: string): {
+  truncated: string;
+  wasTruncated: boolean;
+  originalLineCount: number;
+} {
+  const lines = output.split("\n");
+  const total = lines.length;
+  if (total <= COMMAND_OUTPUT_HEAD_LINES + COMMAND_OUTPUT_TAIL_LINES) {
+    return { truncated: output, wasTruncated: false, originalLineCount: total };
+  }
+  const head = lines.slice(0, COMMAND_OUTPUT_HEAD_LINES);
+  const tail = lines.slice(-COMMAND_OUTPUT_TAIL_LINES);
+  const elidedCount = total - COMMAND_OUTPUT_HEAD_LINES - COMMAND_OUTPUT_TAIL_LINES;
+  const truncated = [
+    ...head,
+    "",
+    `[... ${elidedCount} lines truncated for context budget ...]`,
+    "",
+    ...tail,
+  ].join("\n");
+  return { truncated, wasTruncated: true, originalLineCount: total };
 }
 
 function safeRelPath(rel: string): string {
@@ -302,7 +461,8 @@ function stagedRead(
 function formatSearchContextBlock(
   filePath: string,
   lines: string[],
-  matchLines: number[]
+  matchLines: number[],
+  contextWindow = 3
 ): string[] {
   const sortedMatches = [...new Set(matchLines)]
     .filter((line) => Number.isFinite(line) && line >= 1)
@@ -310,8 +470,8 @@ function formatSearchContextBlock(
   const blocks: Array<{ start: number; end: number; matches: Set<number> }> = [];
 
   for (const matchLine of sortedMatches) {
-    const start = Math.max(1, matchLine - 3);
-    const end = Math.min(lines.length, matchLine + 3);
+    const start = Math.max(1, matchLine - contextWindow);
+    const end = Math.min(lines.length, matchLine + contextWindow);
     const prev = blocks[blocks.length - 1];
     if (prev && start <= prev.end + 1) {
       prev.end = Math.max(prev.end, end);
@@ -334,6 +494,135 @@ function formatSearchContextBlock(
     }
     return `${header}\n${context.join("\n")}`;
   });
+}
+
+function prefixLineNumbers(lines: string[], startLine: number): string {
+  return lines
+    .map((line, i) => `${String(startLine + i).padStart(6)}\t${line}`)
+    .join("\n");
+}
+
+// Strip the cat-n style prefix (e.g. "     1\t") that read_file emits on outline/lineRange tiers.
+// Only strips if ALL non-empty lines carry the prefix (all-or-nothing: avoids false positives on
+// files that happen to start with spaces+digits+tab as real code).
+function stripReadFilePrefix(find: string): string {
+  const lines = find.split("\n");
+  const nonEmpty = lines.filter((l) => l !== "");
+  if (nonEmpty.length === 0) return find;
+  if (!nonEmpty.every((l) => /^\s*\d+\t/.test(l))) return find;
+  return lines.map((l) => l.replace(/^\s*\d+\t/, "")).join("\n");
+}
+
+// Module-level cache for ripgrep detection (undefined = not yet checked)
+let _rgPath: string | null | undefined;
+
+async function detectRipgrep(): Promise<string | null> {
+  if (_rgPath !== undefined) return _rgPath;
+  try {
+    const { stdout } = await execAsync("which rg");
+    _rgPath = stdout.trim() || null;
+  } catch {
+    _rgPath = null;
+  }
+  return _rgPath;
+}
+
+function parseRgJsonContent(
+  stdout: string,
+  maxMatches: number
+): { success: boolean; output: string; truncated?: boolean } {
+  interface RgData {
+    path?: { text?: string };
+    line_number?: number;
+    lines?: { text?: string };
+  }
+  interface RgEvent {
+    type: string;
+    data: RgData;
+  }
+
+  type LineEntry = { lineNum: number; text: string; isMatch: boolean };
+  const outputBlocks: string[] = [];
+  let currentFile = "";
+  let currentBlock: LineEntry[] = [];
+  let totalMatches = 0;
+  let capReached = false;
+  const matchCountsByFile = new Map<string, number>();
+
+  function flushBlock() {
+    if (!currentBlock.length) return;
+    const matchLineNums = currentBlock.filter((l) => l.isMatch).map((l) => l.lineNum);
+    if (!matchLineNums.length) { currentBlock = []; return; }
+    const header =
+      matchLineNums.length === 1
+        ? `${currentFile}:${matchLineNums[0]}`
+        : `${currentFile}:${matchLineNums[0]}-${matchLineNums[matchLineNums.length - 1]} (${matchLineNums.length} matches)`;
+    const formattedLines = currentBlock.map((l) => {
+      const marker = l.isMatch ? ">" : " ";
+      return `${marker} ${String(l.lineNum).padStart(4)}: ${l.text}`;
+    });
+    outputBlocks.push(`${header}\n${formattedLines.join("\n")}`);
+    currentBlock = [];
+  }
+
+  for (const line of stdout.split("\n")) {
+    if (!line) continue;
+    if (capReached) break;
+    let evt: RgEvent;
+    try { evt = JSON.parse(line) as RgEvent; } catch { continue; }
+
+    if (evt.type === "begin") {
+      flushBlock();
+      currentFile = evt.data.path?.text ?? "";
+      currentBlock = [];
+    } else if (evt.type === "match") {
+      totalMatches++;
+      if (totalMatches > maxMatches) { capReached = true; break; }
+      matchCountsByFile.set(currentFile, (matchCountsByFile.get(currentFile) ?? 0) + 1);
+      currentBlock.push({
+        lineNum: evt.data.line_number ?? 0,
+        text: (evt.data.lines?.text ?? "").replace(/[\r\n]+$/, ""),
+        isMatch: true,
+      });
+    } else if (evt.type === "context") {
+      currentBlock.push({
+        lineNum: evt.data.line_number ?? 0,
+        text: (evt.data.lines?.text ?? "").replace(/[\r\n]+$/, ""),
+        isMatch: false,
+      });
+    } else if (evt.type === "end") {
+      flushBlock();
+    }
+  }
+  flushBlock();
+
+  const matchedFileCount = matchCountsByFile.size;
+  const topFiles = [...matchCountsByFile.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 5);
+  const summaryLines = [
+    "---",
+    `[search_in_files] Found ${totalMatches} matches across ${matchedFileCount} files.`,
+    "Top files by match count:",
+    ...(topFiles.length > 0
+      ? topFiles.map(([f, c]) => `  - ${f}: ${c} matches`)
+      : ["  (none)"]),
+  ];
+  if (capReached) {
+    summaryLines.push(
+      `WARNING: CAP REACHED at ${maxMatches} matches — there may be more results. ` +
+        "Narrow your pattern or add a glob filter for completeness."
+    );
+  }
+  const summaryBlock = summaryLines.join("\n");
+  let matchSection = outputBlocks.length ? outputBlocks.join("\n") : "(no matches)";
+  const summaryBudget = 4000 - summaryBlock.length - 2;
+  if (summaryBudget > 0 && matchSection.length > summaryBudget) {
+    matchSection = truncateText(matchSection, summaryBudget).text;
+  }
+  const out = `${matchSection}\n\n${summaryBlock}`;
+  const t = truncateText(out, 4000);
+  return { success: true, output: t.text, truncated: t.truncated };
 }
 
 function stagedWrite(
@@ -450,10 +739,32 @@ export async function executeTool(
     onToolCall?: (name: string, args: Record<string, unknown>) => void;
     onToolResult?: (name: string, result: ToolResult) => void;
     onStructuredEvent?: (evt: unknown) => void;
-    visualScreenshotCount?: number;
+    /** F1.4: forwarded to worker subagent's runAgentLoop so worker tool-
+     *  input deltas reach the same SSE stream as the parent's. */
+    onToolInputStream?: (event: {
+      blockId: string;
+      toolName: string;
+      delta: string;
+      isFirstDelta: boolean;
+      iter: number;
+      subagentId?: string | null;
+    }) => void;
     tokenBudgetBaseTokens?: number;
     /** L.2: tier-based subagent call cap override. Defaults to MAX_SUBAGENT_CALLS_PER_PARENT_RUN. */
     maxSubagentCallsOverride?: number;
+    /** Phase V: set of filePaths successfully read_file'd this run. When present,
+     *  apply_patch rejects if the target is not in the set. */
+    filesReadThisRun?: ReadonlySet<string>;
+    /** Phase V: mutable counters accumulated by self-validation hooks. Passed
+     *  by reference so agentLoop can emit a summary at run end. */
+    selfValidationCounts?: {
+      readBeforePatchRejects: number;
+      smartQuoteFixes: number;
+      inlineTsRejects: number;
+      inlineTsApproves: number;
+      inlineTsSkips: number;
+      totalLatencyMs: number;
+    };
   }
 ): Promise<ToolResult> {
   const args = (toolArgs ?? {}) as Record<string, unknown>;
@@ -500,12 +811,12 @@ export async function executeTool(
         incrementSubagentCallCount,
         getSubagentCallCount,
         MAX_SUBAGENT_CALLS_PER_PARENT_RUN,
-        subagentTypeAllowedTools,
         subagentTypeMaxIterations,
         VALID_SUBAGENT_TYPES,
         formatSubagentToolResultForParent,
         formatExploreSubagentToolResultForParent,
       } = await import("../llm/subagents.js");
+      const { resolveSubagentCapabilityFilter } = await import("../llm/subagentDispatch.js");
 
       const effectiveSubagentCap =
         typeof input?.maxSubagentCallsOverride === "number"
@@ -549,9 +860,26 @@ export async function executeTool(
       } satisfies Partial<ZoneStructuredProgressEvent>);
 
       const { runAgentLoop } = await import("../llm/agentLoop.js");
-      const { withRequestContext } = await import("../llm/openaiContext.js");
+      const { withRequestContext, getRequestContext } = await import("../llm/openaiContext.js");
+      const { getModelForRole } = await import("../llm/modelRouting.js");
+      const _requestCtx = getRequestContext();
+      const _provider = _requestCtx?.provider ?? "openai";
+      // Preset plumbing: if parent has a modelOverride.standard (e.g. quality preset sends
+      // standard=sonnet), the worker inherits that. Otherwise falls back to role default (Haiku).
+      const _parentStandard = _requestCtx?.modelOverride?.standard;
+      const workerModel =
+        resolvedType === "worker"
+          ? (_parentStandard ?? getModelForRole("worker", _provider))
+          : undefined;
       const subagentResult = await withRequestContext(
-        { subagentId, subagentType: resolvedType, parentRunId },
+        {
+          subagentId,
+          subagentType: resolvedType,
+          parentRunId,
+          ...(workerModel
+            ? { modelOverride: { high: workerModel, standard: workerModel } }
+            : {}),
+        },
         () =>
           runAgentLoop({
             task: description.trim(),
@@ -560,7 +888,7 @@ export async function executeTool(
             userId: input?.userId,
             framework: input?.framework,
             maxIterationsOverride: subagentTypeMaxIterations(resolvedType),
-            allowedTools: subagentTypeAllowedTools(resolvedType),
+            capabilityFilter: resolveSubagentCapabilityFilter(resolvedType),
             subagent: { id: subagentId, type: resolvedType, parentRunId },
             parentStagingFiles: resolvedType === "worker" ? input?.stagingFiles : undefined,
             abortSignal: input?.abortSignal,
@@ -568,6 +896,10 @@ export async function executeTool(
             onToolCall: input?.onToolCall,
             onToolResult: input?.onToolResult,
             onStructuredEvent: input?.onStructuredEvent,
+            // F1.4: hand the streaming callback to the worker subagent.
+            // The worker's agentLoop tags each delta with its subagentId
+            // so the UI can render "↳ worker N is writing..." in the slot.
+            onToolInputStream: input?.onToolInputStream,
             tokenBudgetBaseTokens: input?.tokenBudgetBaseTokens,
           })
       );
@@ -576,22 +908,22 @@ export async function executeTool(
         resolvedType === "explore"
           ? formatExploreSubagentToolResultForParent(subagentResult, subagentId, parentRunId)
           : formatSubagentToolResultForParent(subagentResult, subagentId, parentRunId);
-      let subagentStatus: "completed" | "partial" | "failed" = subagentResult.success
-        ? "completed"
-        : "failed";
+      let subagentStatus: "completed" | "partial" | "failed" | "max_iterations" =
+        subagentResult.success ? "completed" : "failed";
       const defaultTitle = resolvedType === "explore" ? "Explore completed" : "Worker completed";
       let title = subagentResult.summary || defaultTitle;
       try {
         const parsed = JSON.parse(result.output) as {
-          status?: "completed" | "partial" | "failed";
+          status?: string;
           summary?: string;
         };
         if (
           parsed.status === "completed" ||
           parsed.status === "partial" ||
-          parsed.status === "failed"
+          parsed.status === "failed" ||
+          parsed.status === "max_iterations"
         ) {
-          subagentStatus = parsed.status;
+          subagentStatus = parsed.status as typeof subagentStatus;
         }
         if (typeof parsed.summary === "string" && parsed.summary.trim()) {
           title = parsed.summary.trim();
@@ -605,9 +937,9 @@ export async function executeTool(
         status:
           subagentStatus === "completed"
             ? "success"
-            : subagentStatus === "partial"
-              ? "warning"
-              : "error",
+            : subagentStatus === "failed"
+              ? "error"
+              : "warning",
         subagentStatus,
         subagentId,
         subagentType: resolvedType,
@@ -621,6 +953,67 @@ export async function executeTool(
       return {
         success: false,
         output: `Tool "${toolName}" is not in the allowed set for this run.`,
+      };
+    }
+
+    if (toolName === "run_command_readonly") {
+      const command = String(args.command ?? "").trim();
+      const safety = checkCommandSafe(command);
+
+      if (!safety.safe) {
+        log("[zone-run-command-readonly-blocked]", JSON.stringify({
+          runId: input?.runId ?? null,
+          command: command.slice(0, 200),
+          reason: safety.reason,
+        }));
+        return {
+          success: false,
+          output: `Command blocked: ${safety.reason}. Use only whitelisted read-only commands.`,
+        };
+      }
+
+      let stdout = "";
+      let stderr = "";
+      let commandExitCode = 0;
+      const startMs = Date.now();
+      try {
+        const result = await execAsync(command, {
+          cwd: repoPath,
+          env: sanitizeVerificationEnv(),
+          timeout: 120_000,
+          maxBuffer: 10 * 1024 * 1024,
+          shell: "/bin/bash",
+        });
+        stdout = result.stdout;
+        stderr = result.stderr;
+      } catch (err) {
+        const code = Number((err as { code?: unknown }).code);
+        commandExitCode = Number.isFinite(code) && code !== 0 ? code : 1;
+        stdout = String((err as { stdout?: unknown }).stdout ?? "");
+        stderr = String((err as { stderr?: unknown }).stderr ?? "");
+      }
+      const durationMs = Date.now() - startMs;
+
+      log("[zone-run-command-readonly]", JSON.stringify({
+        runId: input?.runId ?? null,
+        command: command.slice(0, 200),
+        success: commandExitCode === 0,
+        durationMs,
+        exitCode: commandExitCode,
+        stdoutLength: stdout.length,
+        stderrLength: stderr.length,
+      }));
+
+      const combined = [stdout, stderr].filter(Boolean).join("\n") || "(no output)";
+      const ct = truncateCommandOutput(combined);
+      const exitHeader = commandExitCode === 0
+        ? `[exit_code=0 — command succeeded; output below is informational]\n`
+        : `[exit_code=${commandExitCode} — command failed]\n`;
+      return {
+        success: commandExitCode === 0,
+        exitCode: commandExitCode,
+        output: exitHeader + ct.truncated,
+        truncated: ct.wasTruncated,
       };
     }
 
@@ -639,6 +1032,20 @@ export async function executeTool(
 
       if (isBlockedCommand(command)) {
         return { success: false, output: "Command blocked for safety" };
+      }
+
+      // D7: fail fast when the working directory is missing dependencies so the
+      // agent gets a clear diagnosis instead of a cryptic "module not found" after
+      // wasting an iteration.
+      const envCheck = validateRunEnvironment(cwd, command);
+      if (!envCheck.valid) {
+        return {
+          success: false,
+          output: `[zone-env-precondition] ${envCheck.issue}. ${envCheck.hint ?? ""}`.trimEnd(),
+        };
+      }
+      if (envCheck.issue) {
+        console.log(`[zone-env-precondition-warn] ${envCheck.issue}`);
       }
 
       if (input?.runId && input?.onApprovalRequired) {
@@ -663,7 +1070,8 @@ export async function executeTool(
         env: NodeJS.ProcessEnv;
       } = {
         cwd,
-        timeout: 30000,
+        // Full vitest suites take 65-100s through exec; 30s was killing them (D5).
+        timeout: 120000,
         windowsHide: true,
         maxBuffer: 10 * 1024 * 1024,
         // Build/test commands run by the agent must execute under a clean NODE_ENV.
@@ -687,28 +1095,127 @@ export async function executeTool(
         hasAbortSignal: !!input?.abortSignal,
       });
 
-      let stdout = "";
-      let stderr = "";
-      try {
-        const result = await withStagingTempFlush(input?.stagingFiles, async () => {
-          return await execAsync(command, execOptions);
-        });
-        stdout = result.stdout;
-        stderr = result.stderr;
-        console.log(
-          `[zone-verify] cmd="${command.slice(0, 80)}" cwd="${cwd}" exitCode=0 stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
-        );
-      } catch (err) {
-        const code = Number((err as { code?: unknown }).code);
-        const exitCode = Number.isFinite(code) ? code : 1;
-        console.log(
-          `[zone-verify] cmd="${command.slice(0, 80)}" cwd="${cwd}" exitCode=${exitCode} stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
-        );
-        throw err;
+      const effectiveRunId = input?.subagent?.parentRunId ?? input?.runId ?? "anon";
+      const memoizable = isMemoizableCommand(command);
+      const { exitCode: commandExitCode, stdout, stderr } = await (async () => {
+        if (memoizable) {
+          const runCache = getOrCreateRunCache(effectiveRunId);
+          const fingerprint = computeCommandFingerprint(command, input?.stagingFiles);
+          const cached = runCache.entries.get(fingerprint);
+          if (cached) {
+            runCache.hits++;
+            runCache.savedMs += cached.durationMs;
+            log("[zone-command-cache-hit]", JSON.stringify({
+              runId: effectiveRunId,
+              command: command.slice(0, 80),
+              fingerprint,
+              prevDurationMs: cached.durationMs,
+              cumulativeHits: runCache.hits,
+            }));
+            writeCacheLog(repoPath, "[zone-command-cache-hit]", {
+              runId: effectiveRunId,
+              command: command.slice(0, 80),
+              fingerprint,
+              prevDurationMs: cached.durationMs,
+              cumulativeHits: runCache.hits,
+            });
+            return { exitCode: cached.exitCode, stdout: cached.stdout, stderr: cached.stderr };
+          }
+        }
+        let stdout = "";
+        let stderr = "";
+        let exitCode = 0;
+        const t0 = Date.now();
+        try {
+          const result = await withStagingTempFlush(input?.stagingFiles, async () => {
+            return await execAsync(command, execOptions);
+          });
+          stdout = result.stdout;
+          stderr = result.stderr;
+          console.log(
+            `[zone-verify] cmd="${command.slice(0, 80)}" cwd="${cwd}" exitCode=0 stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
+          );
+        } catch (err) {
+          const code = Number((err as { code?: unknown }).code);
+          exitCode = Number.isFinite(code) && code !== 0 ? code : 1;
+          console.log(
+            `[zone-verify] cmd="${command.slice(0, 80)}" cwd="${cwd}" exitCode=${exitCode} stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`
+          );
+          // Capture stdout/stderr from the exec error so the agent sees actual
+          // command output rather than just the Node error message.
+          stdout = String((err as { stdout?: unknown }).stdout ?? "");
+          stderr = String((err as { stderr?: unknown }).stderr ?? "");
+        }
+        const durationMs = Date.now() - t0;
+        if (memoizable) {
+          const runCache = getOrCreateRunCache(effectiveRunId);
+          const fingerprint = computeCommandFingerprint(command, input?.stagingFiles);
+          runCache.entries.set(fingerprint, { exitCode, stdout, stderr, durationMs, timestamp: Date.now() });
+          runCache.misses++;
+          log("[zone-command-cache-miss]", JSON.stringify({
+            runId: effectiveRunId,
+            command: command.slice(0, 80),
+            fingerprint,
+            durationMs,
+            cumulativeMisses: runCache.misses,
+          }));
+          writeCacheLog(repoPath, "[zone-command-cache-miss]", {
+            runId: effectiveRunId,
+            command: command.slice(0, 80),
+            fingerprint,
+            durationMs,
+            cumulativeMisses: runCache.misses,
+          });
+        }
+        return { exitCode, stdout, stderr };
+      })();
+
+      const combined = [stdout, stderr].filter(Boolean).join("\n") || "(no output)";
+
+      // Phase Q.4: line-based head/tail truncation. Full output preserved in
+      // debugLog so post-run analysis can retrieve it.
+      const ct = truncateCommandOutput(combined);
+      if (ct.wasTruncated) {
+        debugLog("[zone-runcmd-truncated]", JSON.stringify({
+          command: command.slice(0, 100),
+          originalLineCount: ct.originalLineCount,
+          headLines: COMMAND_OUTPUT_HEAD_LINES,
+          tailLines: COMMAND_OUTPUT_TAIL_LINES,
+        }));
       }
-      const combined = [stdout, stderr].filter(Boolean).join("\n");
-      const t = truncateText(combined || "(no output)", 4000);
-      return { success: true, output: t.text, truncated: t.truncated };
+
+      // Phase Q.5: prepend exit_code header so the agent sees it as the
+      // first token — combats retry loops triggered by output content alone.
+      const commandSuccess = commandExitCode === 0;
+      // Q.5b (partial): when exitCode=0 but output mentions test failures,
+      // augment the header to pre-empt the agent's retry logic. Full baseline-
+      // comparison-based tests_failed_unrelated detection is deferred:
+      // TODO Q.5b: surface tests_failed_unrelated tag to agent runtime once
+      // the baseline comparison from runStagingVerification is available pre-
+      // result-delivery (currently only available post-run).
+      const hasTestFailureContent = commandSuccess &&
+        /\b(Tests?:?\s+\d+\s+failed|FAILED\s+tests?|test result: FAILED|Test Suites?:.*failed)\b/i
+          .test(combined);
+      let exitHeader: string;
+      if (commandSuccess) {
+        exitHeader = hasTestFailureContent
+          ? `[exit_code=0 — command succeeded. Test failures visible in output are likely pre-existing and unrelated to your patch. Do not retry.]\n`
+          : `[exit_code=0 — command succeeded; output below is informational]\n`;
+      } else {
+        const heuristic = classifyShellExit(commandExitCode, stdout, command);
+        if (heuristic.classification === 'likely_no_matches') {
+          console.log(`[zone-verify-pipe-heuristic] classification=likely_no_matches cmd="${command.slice(0, 80)}"`);
+          exitHeader = `[exit_code=${commandExitCode} — command failed]\n[zone-verify-classification] likely_no_matches\n[zone-verify-hint] ${heuristic.hint}\n`;
+        } else {
+          exitHeader = `[exit_code=${commandExitCode} — command failed]\n`;
+        }
+      }
+      return {
+        success: commandSuccess,
+        exitCode: commandExitCode,
+        output: exitHeader + ct.truncated,
+        truncated: ct.wasTruncated,
+      };
     }
 
     if (toolName === "run_command_background") {
@@ -890,23 +1397,24 @@ export async function executeTool(
             output: `Invalid lineRange [${start}, ${end}]: start > end`,
           };
         }
-        const sliced = lines.slice(start - 1, end).join("\n");
+        const slicedLines = lines.slice(start - 1, end);
+        const numberedSlice = prefixLineNumbers(slicedLines, start);
         debugLog("[zone-tool-readfile-smart]", JSON.stringify({
           mode: "lineRange",
           filePath,
           lineRange: [start, end],
           totalLines: lines.length,
           fullSize: charCount,
-          returnedChars: sliced.length,
+          returnedChars: numberedSlice.length,
         }));
         return {
           success: true,
-          output: `[lineRange ${start}-${end} of ${lines.length} total lines from ${filePath}]\n\n${sliced}`,
-          contentLength: sliced.length,
+          output: `[lineRange ${start}-${end} of ${lines.length} total lines from ${filePath}]\n\n${numberedSlice}`,
+          contentLength: numberedSlice.length,
         };
       }
 
-      if (charCount <= 30_000) {
+      if (charCount <= 10_000) {
         debugLog("[zone-tool-readfile-smart]", JSON.stringify({
           mode: "full-small",
           filePath,
@@ -916,47 +1424,79 @@ export async function executeTool(
         return { success: true, output: fullContent, contentLength: charCount };
       }
 
-      if (charCount <= 100_000) {
-        const lineCount = fullContent.split("\n").length;
-        const hint = `[${filePath}: ${charCount} chars, ${lineCount} lines. For focused reads use lineRange: [start, end].]\n\n`;
-        debugLog("[zone-tool-readfile-smart]", JSON.stringify({
-          mode: "full-medium",
+      // Files >10K: head + outline + tail with line-number prefixes
+      const lines = fullContent.split("\n");
+      const headCount = Math.min(100, lines.length);
+      const headLines = lines.slice(0, headCount);
+      const tailStartIdx = Math.max(headCount, lines.length - 50);
+      const tailLines = lines.slice(tailStartIdx);
+      const tailStartLine = tailStartIdx + 1;
+      const elidedCount = Math.max(tailStartIdx - headCount, 0);
+
+      // Lever 4.A: serve stub when content hash matches a prior read in this process.
+      const contentHash = hashContent(fullContent);
+      const cacheKey = `${filePath}:${contentHash}`;
+      const cachedOutline = outlineCache.get(cacheKey);
+      if (cachedOutline) {
+        const stub =
+          `[Outline cache HIT — ${filePath} content is unchanged since last read. ` +
+          `The full FILE OUTLINE was returned in a prior read_file result in this conversation. ` +
+          `Scroll up or check the file-read manifest to find it. ` +
+          `To read specific line ranges use read_file({ filePath, lineRange: [start, end] }).]`;
+        log("[zone-outline-cache]", JSON.stringify({
+          event: "hit",
           filePath,
-          fullSize: charCount,
-          lineCount,
-          returnedChars: hint.length + charCount,
+          contentHash,
+          savedChars: cachedOutline.outline.length,
+          stubChars: stub.length,
         }));
-        return {
-          success: true,
-          output: hint + fullContent,
-          contentLength: charCount,
-        };
+        return { success: true, output: stub, contentLength: stub.length };
       }
 
-      const lines = fullContent.split("\n");
-      const head = lines.slice(0, 100).join("\n");
-      const tail = lines.slice(-50).join("\n");
       const outline = generateFileOutline(fullContent, filePath);
-      const elidedCount = Math.max(lines.length - 150, 0);
-      const summary = [
+      const numberedHead = prefixLineNumbers(headLines, 1);
+
+      const summaryParts = [
         `[FILE OUTLINE — ${filePath} is ${lines.length} lines, ${charCount} chars.]`,
         `[Use read_file({ filePath, lineRange: [start, end] }) to read specific sections.]`,
         "",
         outline || "[no top-level symbols detected]",
         "",
-        "─── HEAD: first 100 lines ───",
-        head,
-        "",
-        `─── ${elidedCount} lines elided (use lineRange) ───`,
-        "",
-        "─── TAIL: last 50 lines ───",
-        tail,
-      ].join("\n");
+        `─── HEAD: lines 1-${headCount} ───`,
+        numberedHead,
+      ];
+
+      if (elidedCount > 0) {
+        summaryParts.push("", `─── ${elidedCount} lines elided (use lineRange) ───`);
+      }
+
+      if (tailLines.length > 0) {
+        summaryParts.push(
+          "",
+          `─── TAIL: lines ${tailStartLine}-${lines.length} ───`,
+          prefixLineNumbers(tailLines, tailStartLine)
+        );
+      }
+
+      const summary = summaryParts.join("\n");
+
+      // Lever 4.A: store outline in cache; evict oldest entry if over cap.
+      outlineCache.set(cacheKey, { outline: outline || "", contentHash, generatedAt: Date.now(), filePath });
+      if (outlineCache.size > OUTLINE_CACHE_MAX) {
+        const oldest = [...outlineCache.entries()].sort((a, b) => a[1].generatedAt - b[1].generatedAt)[0];
+        if (oldest) outlineCache.delete(oldest[0]);
+      }
+      log("[zone-outline-cache]", JSON.stringify({
+        event: "miss",
+        filePath,
+        contentHash,
+        generatedChars: (outline || "").length,
+      }));
 
       debugLog(
         "[zone-tool-readfile-smart]",
         `[FILE OUTLINE — ${filePath}] ` + JSON.stringify({
-          mode: "outline-large",
+          mode: "outline",
           filePath,
           fullSize: charCount,
           lineCount: lines.length,
@@ -998,6 +1538,32 @@ export async function executeTool(
       const intent = intentRaw === "delete" || intentRaw === "modify" ? intentRaw : "add";
       const allowShrink = intent === "delete" || intent === "modify";
       const abs = path.join(repoPath, filePath);
+
+      // Phase V Commit 1: read-before-patch enforcement
+      if (input?.filesReadThisRun !== undefined) {
+        if (!input.filesReadThisRun.has(filePath)) {
+          if (input.selfValidationCounts) input.selfValidationCounts.readBeforePatchRejects += 1;
+          log("[zone-self-validation]", JSON.stringify({
+            rule: "read_before_patch",
+            decision: "rejected",
+            filePath,
+            runId: input.runId ?? null,
+          }));
+          return {
+            success: false,
+            output:
+              `READ_REQUIRED: You must call read_file on ${filePath} before patching. ` +
+              `The file may have changed or you may be assuming the wrong content.`,
+            error: "apply_patch_no_read_first",
+          };
+        }
+        log("[zone-self-validation]", JSON.stringify({
+          rule: "read_before_patch",
+          decision: "approved",
+          filePath,
+          runId: input.runId ?? null,
+        }));
+      }
 
       // Tur P2-scope: hard-block writes that fall outside the active plan's
       // filesLikely union. Independent of the per-file escalation gate below.
@@ -1166,6 +1732,8 @@ export async function executeTool(
       }
 
       let remaining = patch;
+      let sqFindTotal = 0;
+      let sqReplaceTotal = 0;
       while (remaining.includes(FIND_MARKER)) {
         const findIdx = remaining.indexOf(FIND_MARKER);
         const afterFind = remaining.slice(findIdx + FIND_MARKER.length);
@@ -1177,9 +1745,19 @@ export async function executeTool(
         const replaceContent =
           nextFindIdx === -1 ? afterReplace : afterReplace.slice(0, nextFindIdx);
 
+        // Phase V Commit 2: normalize Unicode curly quotes before FIND matching
+        const { text: normalizedFind, count: sqFind } = normalizeSmartQuotes(
+          findContent.replace(/^\r?\n/, "").replace(/\r?\n$/, "")
+        );
+        const { text: normalizedReplace, count: sqReplace } = normalizeSmartQuotes(
+          replaceContent.replace(/^\r?\n/, "").replace(/\r?\n$/, "")
+        );
+        sqFindTotal += sqFind;
+        sqReplaceTotal += sqReplace;
+
         blocks.push({
-          find: findContent.replace(/^\r?\n/, "").replace(/\r?\n$/, ""),
-          replace: replaceContent.replace(/^\r?\n/, "").replace(/\r?\n$/, ""),
+          find: normalizedFind,
+          replace: normalizedReplace,
         });
         remaining = nextFindIdx === -1 ? "" : afterReplace.slice(nextFindIdx);
       }
@@ -1191,6 +1769,19 @@ export async function executeTool(
             "No valid --- FIND --- / --- REPLACE --- blocks found in patch. " +
             "Format: --- FIND ---\n<exact code>\n--- REPLACE ---\n<code with additions>",
         };
+      }
+
+      if (sqFindTotal + sqReplaceTotal > 0) {
+        if (input?.selfValidationCounts) {
+          input.selfValidationCounts.smartQuoteFixes += sqFindTotal + sqReplaceTotal;
+        }
+        log("[zone-self-validation]", JSON.stringify({
+          rule: "smart_quote_autofix",
+          filePath,
+          findOccurrences: sqFindTotal,
+          replaceOccurrences: sqReplaceTotal,
+          runId: input?.runId ?? null,
+        }));
       }
 
       let currentNormalized = originalWithoutBom.replace(/\r\n/g, "\n");
@@ -1366,7 +1957,9 @@ export async function executeTool(
           );
         }
 
-        const normalizedFind = block.find.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        const normalizedFind = stripReadFilePrefix(
+          block.find.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+        );
         const normalizedReplace = block.replace
           .replace(/\r\n/g, "\n")
           .replace(/\r/g, "\n");
@@ -1624,6 +2217,134 @@ export async function executeTool(
       if (!stagedWrite(input?.stagingFiles, abs, outputContent)) {
         fs.writeFileSync(abs, outputContent, "utf8");
       }
+      evictOutlineCacheForFile(filePath); // Lever 4.A: clear stale outline cache entry
+
+      // W.1: inline syntax check via SYNTAX_CHECKERS table (TS entry only;
+      // Python/Go added in W.2/W.3). Behaviour identical to the former
+      // hard-coded isTsFile path — table lookup just makes the extension set
+      // and checker command configurable without touching this block again.
+      {
+        const ext = path.extname(abs).toLowerCase();
+        const checker = findCheckerForFile(abs);
+        if (!checker) {
+          if (input?.selfValidationCounts) input.selfValidationCounts.inlineTsSkips += 1;
+          log("[zone-self-validation]", JSON.stringify({
+            rule: "inline_ts_check",
+            decision: "skipped",
+            filePath,
+            fileType: ext,
+            errorCodes: [],
+            latencyMs: 0,
+            runId: input?.runId ?? null,
+          }));
+        } else {
+          const checkStart = Date.now();
+          let decision: "approved" | "rejected" = "approved";
+          let errorCodes: string[] = [];
+          let rawStdout: string | null = null;
+          let rawStderr: string | null = null;
+          let checkerParsedErrors: ReturnType<typeof checker.parseErrors> = [];
+          const tempPath = path.join(os.tmpdir(), `zone-tsc-${randomUUID()}${ext}`);
+
+          const available = await checker.availabilityCheck();
+          if (available || !checker.gracefulSkip) {
+            const { cmd, args } = checker.cmdTemplate(tempPath);
+            const fullCmd = [cmd, ...args].join(" ");
+            try {
+              fs.writeFileSync(tempPath, outputContent, "utf8");
+              await execAsync(fullCmd, { timeout: checker.timeoutMs });
+            } catch (checkErr: unknown) {
+              const stdout = ((checkErr as { stdout?: string }).stdout) ?? "";
+              const stderr = ((checkErr as { stderr?: string }).stderr) ?? "";
+              const exitCode = ((checkErr as { code?: number }).code) ?? 1;
+              const errors = checker.parseErrors(stdout, stderr, exitCode);
+              if (checker.isBlockingError(errors)) {
+                decision = "rejected";
+                errorCodes = [...new Set(errors.filter((e) => e.code).map((e) => e.code!))];
+                rawStdout = stdout;
+                rawStderr = stderr;
+                checkerParsedErrors = errors;
+              }
+              // Non-blocking errors (TS2xxx, timeout, ENOENT) → approve
+            } finally {
+              fs.rmSync(tempPath, { force: true });
+            }
+          }
+          // !available && gracefulSkip → silently approve (decision stays "approved")
+
+          const latencyMs = Date.now() - checkStart;
+          if (input?.selfValidationCounts) {
+            input.selfValidationCounts.totalLatencyMs += latencyMs;
+            if (decision === "approved") {
+              input.selfValidationCounts.inlineTsApproves += 1;
+            } else {
+              input.selfValidationCounts.inlineTsRejects += 1;
+            }
+          }
+          log("[zone-self-validation]", JSON.stringify({
+            rule: "inline_ts_check",
+            decision,
+            filePath,
+            fileType: ext,
+            errorCodes,
+            latencyMs,
+            runId: input?.runId ?? null,
+          }));
+          if (decision === "rejected") {
+            if (!stagedWrite(input?.stagingFiles, abs, original)) {
+              fs.writeFileSync(abs, original, "utf8");
+            }
+            // J.4: structured rollback feedback.
+            // TS path: parseTscErrorPreview for rich error parsing from stdout.
+            // Python path: convert checkerParsedErrors → RolledBackError[] directly.
+            const {
+              parseTscErrorPreview,
+              buildApplyRolledBackMessage,
+              buildApplyRolledBackMarkerLog,
+            } = await import("../llm/applyRollbackFeedback.js");
+            let errors: { file?: string; line?: number; col?: number; code: string; message: string }[];
+            if (checker.id === "ts") {
+              errors = parseTscErrorPreview(rawStdout ?? "");
+              errors = errors.filter((e) => e.code.startsWith("TS"));
+            } else {
+              errors = checkerParsedErrors.map((e) => ({
+                file: filePath,
+                line: e.line,
+                code: e.code ?? "",
+                message: e.message,
+              }));
+            }
+            const message = buildApplyRolledBackMessage({
+              filePath,
+              errors,
+              restoredFiles: [filePath],
+            });
+            log("[zone-apply-rolled-back-feedback]", JSON.stringify({
+              site: "inline_ts_check",
+              filePath,
+              errorCount: errors.length,
+              filePathsRestored: [filePath],
+              codes: errorCodes,
+              runId: input?.runId ?? null,
+            }));
+            // J.4.1: grep-friendly marker log with codes + suggestionApplied.
+            log("[zone-apply-rolled-back-marker]", JSON.stringify(
+              buildApplyRolledBackMarkerLog({
+                site: "inline_ts_check",
+                markerMessage: message,
+                errors,
+                filePathsRestored: [filePath],
+                runId: input?.runId ?? null,
+              })
+            ));
+            return {
+              success: false,
+              output: message,
+              rejectionReason: "inline_ts_syntax_error",
+            };
+          }
+        }
+      }
 
       // ─── Post-write syntax validation ────────────────────────────────────────
       const validation = validateSyntax(outputContent, abs);
@@ -1662,6 +2383,32 @@ export async function executeTool(
         };
       }
       if (semanticSmellDetected) {
+        const smellIsPreExisting =
+          smellValidation.baselineDetected === true &&
+          smellValidation.baselineCategory === smellValidation.reason;
+        log("[zone-semantic-smell-detected]", JSON.stringify({
+          filePath,
+          category: smellValidation.reason ?? null,
+          baselineDetected: smellValidation.baselineDetected ?? false,
+          willSuppress: smellIsPreExisting,
+          runId: input?.runId ?? null,
+        }));
+        if (smellIsPreExisting) {
+          log("[zone-semantic-smell-baseline]", JSON.stringify({
+            event: "semantic_smell_baseline_match",
+            filePath,
+            category: smellValidation.reason,
+            action: "suppressed",
+            baselineSnippet: (smellValidation.details ?? "").slice(0, 200),
+            currentSnippet: (smellValidation.details ?? "").slice(0, 200),
+            runId: input?.runId ?? null,
+          }));
+          // Pre-existing smell — patch is already on disk/staging; accept it.
+          return {
+            success: true,
+            output: `Patch applied: ${blocks.length} block(s) in ${filePath}`,
+          };
+        }
         if (!stagedWrite(input?.stagingFiles, abs, original)) {
           fs.writeFileSync(abs, original, "utf8");
         }
@@ -1791,6 +2538,35 @@ export async function executeTool(
         })
       );
 
+      if (semanticSmellDetected) {
+        const smellIsPreExisting =
+          smellValidation.baselineDetected === true &&
+          smellValidation.baselineCategory === smellValidation.reason;
+        log("[zone-semantic-smell-detected]", JSON.stringify({
+          filePath,
+          category: smellValidation.reason ?? null,
+          baselineDetected: smellValidation.baselineDetected ?? false,
+          willSuppress: smellIsPreExisting,
+          runId: input?.runId ?? null,
+        }));
+        if (smellIsPreExisting) {
+          log("[zone-semantic-smell-baseline]", JSON.stringify({
+            event: "semantic_smell_baseline_match",
+            filePath,
+            category: smellValidation.reason,
+            action: "suppressed",
+            baselineSnippet: (smellValidation.details ?? "").slice(0, 200),
+            currentSnippet: (smellValidation.details ?? "").slice(0, 200),
+            runId: input?.runId ?? null,
+          }));
+          // Pre-existing smell — file is already on disk/staging; accept it.
+          return {
+            success: true,
+            output: `File written: ${filePath} (${content.length} chars)`,
+          };
+        }
+      }
+
       if (syntaxBroken || semanticSmellDetected) {
         if (fileExists) {
           if (!stagedWrite(input?.stagingFiles, abs, originalContent)) {
@@ -1835,16 +2611,109 @@ export async function executeTool(
 
     if (toolName === "search_in_files") {
       const pattern = String(args.pattern ?? "");
-      const fileGlobRaw = args.fileGlob;
+      const literal = args.literal === true;
+      const caseInsensitive = args.case_insensitive === true;
+      const multiline = args.multiline === true;
+      const rawMode = args.output_mode;
+      const outputMode: "content" | "files_with_matches" | "count" =
+        rawMode === "files_with_matches" || rawMode === "count" ? rawMode : "content";
+      const contextLines =
+        typeof args.context_lines === "number"
+          ? Math.max(0, Math.min(Math.floor(args.context_lines), 10))
+          : 2;
+      // backward compat: fileGlob (old field) or glob (new field)
+      const rawGlob = args.glob ?? args.fileGlob;
       const fileGlob =
-        fileGlobRaw === null ||
-        fileGlobRaw === undefined ||
-        (typeof fileGlobRaw === "string" && fileGlobRaw.trim() === "")
-          ? "**/*"
-          : String(fileGlobRaw);
+        rawGlob === null ||
+        rawGlob === undefined ||
+        (typeof rawGlob === "string" && rawGlob.trim() === "")
+          ? null
+          : String(rawGlob);
+
       onProgress?.(`[tool] Searching: ${pattern}`);
 
-      const files = await fg(fileGlob, {
+      const rgPath = await detectRipgrep();
+
+      if (rgPath) {
+        const rgArgs: string[] = ["--no-messages"];
+        if (literal) rgArgs.push("--fixed-strings");
+        if (caseInsensitive) rgArgs.push("--ignore-case");
+        if (multiline) rgArgs.push("--multiline");
+        if (fileGlob) rgArgs.push("--glob", fileGlob);
+        rgArgs.push("--no-heading", "--color=never");
+
+        if (outputMode === "files_with_matches") {
+          rgArgs.push("--files-with-matches");
+        } else if (outputMode === "count") {
+          rgArgs.push("--count");
+        } else {
+          rgArgs.push("--json", `--context=${contextLines}`);
+        }
+
+        const escapedPattern = pattern.replace(/'/g, "'\\''");
+        const escapedArgs = rgArgs.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
+        const cmd = `'${rgPath}' ${escapedArgs} -- '${escapedPattern}' .`;
+
+        let stdout = "";
+        try {
+          const r = await execAsync(cmd, { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 });
+          stdout = r.stdout;
+        } catch (err: unknown) {
+          const e = err as { code?: number; stdout?: string; stderr?: string };
+          if (e.code === 1) {
+            stdout = e.stdout ?? ""; // exit 1 = no matches
+          } else if (e.code !== undefined) {
+            return { success: false, output: `search_in_files (rg) error: ${e.stderr ?? String(err)}` };
+          } else {
+            return { success: false, output: `search_in_files error: ${String(err)}` };
+          }
+        }
+
+        if (outputMode === "files_with_matches") {
+          const files = stdout.trim() ? stdout.trim().split("\n").filter(Boolean) : [];
+          const body = files.length === 0 ? "(no matches)" : files.join("\n");
+          const summary = `\n---\n[search_in_files] ${files.length} file(s) matched.`;
+          const t = truncateText(body + summary, 4000);
+          return { success: true, output: t.text, truncated: t.truncated };
+        }
+
+        if (outputMode === "count") {
+          const lines = stdout.trim() ? stdout.trim().split("\n").filter(Boolean) : [];
+          const pairs: Array<[string, number]> = [];
+          let total = 0;
+          for (const line of lines) {
+            const lastColon = line.lastIndexOf(":");
+            if (lastColon === -1) continue;
+            const n = parseInt(line.slice(lastColon + 1), 10);
+            if (!isNaN(n)) { pairs.push([line.slice(0, lastColon), n]); total += n; }
+          }
+          pairs.sort((a, b) => b[1] - a[1]);
+          const body = pairs.length === 0 ? "(no matches)" : pairs.map(([f, c]) => `${f}: ${c}`).join("\n");
+          const summary = `\n---\n[search_in_files] ${total} matches across ${pairs.length} file(s).`;
+          const t = truncateText(body + summary, 4000);
+          return { success: true, output: t.text, truncated: t.truncated };
+        }
+
+        return parseRgJsonContent(stdout, 500);
+      }
+
+      // In-process fallback (no ripgrep available)
+      let matcher: (line: string) => boolean;
+      if (literal) {
+        const needle = caseInsensitive ? pattern.toLowerCase() : pattern;
+        matcher = (line) => (caseInsensitive ? line.toLowerCase() : line).includes(needle);
+      } else {
+        let re: RegExp;
+        try {
+          re = new RegExp(pattern, caseInsensitive ? "i" : "");
+        } catch (e) {
+          return { success: false, output: `Invalid regex pattern: ${String(e)}` };
+        }
+        matcher = (line) => re.test(line);
+      }
+
+      const globPattern = fileGlob ?? "**/*";
+      const files = await fg(globPattern, {
         cwd: repoPath,
         dot: false,
         onlyFiles: true,
@@ -1852,41 +2721,61 @@ export async function executeTool(
         ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**"],
       });
 
-      const matches: string[] = [];
+      if (outputMode === "files_with_matches") {
+        const matchedFiles: string[] = [];
+        for (const rel of files) {
+          let text = "";
+          try {
+            const abs = path.join(repoPath, rel);
+            const staged = stagedRead(input?.stagingFiles, abs);
+            text = staged !== null ? staged : fs.readFileSync(abs, "utf8");
+          } catch { continue; }
+          if (text.split(/\r?\n/).some((l) => matcher(l))) matchedFiles.push(rel);
+        }
+        const body = matchedFiles.length === 0 ? "(no matches)" : matchedFiles.join("\n");
+        const summary = `\n---\n[search_in_files] ${matchedFiles.length} file(s) matched.`;
+        const t = truncateText(body + summary, 4000);
+        return { success: true, output: t.text, truncated: t.truncated };
+      }
+
+      const contentMatches: string[] = [];
       const matchCountsByFile = new Map<string, number>();
-      const needle = pattern;
       const maxMatches = 500;
       let totalMatches = 0;
       let capReached = false;
 
       for (const rel of files) {
-        if (totalMatches >= maxMatches) {
-          capReached = true;
-          break;
-        }
+        if (totalMatches >= maxMatches) { capReached = true; break; }
         let text = "";
         try {
           const searchAbs = path.join(repoPath, rel);
           const stagedSearch = stagedRead(input?.stagingFiles, searchAbs);
           text = stagedSearch !== null ? stagedSearch : fs.readFileSync(searchAbs, "utf8");
-        } catch {
-          continue;
-        }
+        } catch { continue; }
+
         const lines = text.split(/\r?\n/);
         const fileMatchLines: number[] = [];
         for (let i = 0; i < lines.length; i += 1) {
-          const line = lines[i] ?? "";
-          if (needle && line.includes(needle)) {
+          if (matcher(lines[i] ?? "")) {
             fileMatchLines.push(i + 1);
             matchCountsByFile.set(rel, (matchCountsByFile.get(rel) ?? 0) + 1);
             totalMatches += 1;
             if (totalMatches >= maxMatches) break;
           }
         }
-        matches.push(...formatSearchContextBlock(rel, lines, fileMatchLines));
-        if (totalMatches >= maxMatches) {
-          capReached = true;
+        if (outputMode !== "count") {
+          contentMatches.push(...formatSearchContextBlock(rel, lines, fileMatchLines, contextLines));
         }
+        if (totalMatches >= maxMatches) capReached = true;
+      }
+
+      if (outputMode === "count") {
+        const pairs = [...matchCountsByFile.entries()].sort((a, b) => b[1] - a[1]);
+        const total = [...matchCountsByFile.values()].reduce((a, b) => a + b, 0);
+        const body = pairs.length === 0 ? "(no matches)" : pairs.map(([f, c]) => `${f}: ${c}`).join("\n");
+        const summary = `\n---\n[search_in_files] ${total} matches across ${pairs.length} file(s).`;
+        const t = truncateText(body + summary, 4000);
+        return { success: true, output: t.text, truncated: t.truncated };
       }
 
       const matchedFileCount = matchCountsByFile.size;
@@ -1903,12 +2792,12 @@ export async function executeTool(
       ];
       if (capReached) {
         summaryLines.push(
-          `WARNING: CAP REACHED at ${maxMatches} matches - there may be more results. ` +
-            "Narrow your pattern (use a more specific string or a fileGlob filter) for completeness."
+          `WARNING: CAP REACHED at ${maxMatches} matches — there may be more results. ` +
+            "Narrow your pattern or add a glob filter for completeness."
         );
       }
       const summaryBlock = summaryLines.join("\n");
-      let matchSection = matches.length ? matches.join("\n") : "(no matches)";
+      let matchSection = contentMatches.length ? contentMatches.join("\n") : "(no matches)";
       const summaryBudget = 4000 - summaryBlock.length - 2;
       if (summaryBudget > 0 && matchSection.length > summaryBudget) {
         matchSection = truncateText(matchSection, summaryBudget).text;
@@ -1916,75 +2805,6 @@ export async function executeTool(
       const out = `${matchSection}\n\n${summaryBlock}`;
       const t = truncateText(out, 4000);
       return { success: true, output: t.text, truncated: t.truncated };
-    }
-
-    if (toolName === "verify_visual") {
-      const visualInput = args as unknown as VerifyVisualInput;
-      const config = getDevServerConfig();
-      const visualPath = String(visualInput.path || "/");
-      onProgress?.(`[tool] Visual verify: ${visualPath}`);
-
-      const reachable = await probeDevServer(config.baseUrl);
-      if (!reachable) {
-        return {
-          success: false,
-          output:
-            `Dev server not reachable at ${config.baseUrl}. Make sure your dev server is running ` +
-            "(e.g. `npm run dev`). Configure URL in Settings -> Visual verification.",
-        };
-      }
-
-      // Phase I.2: when the agent omits viewport, fall back to the user's
-      // configured default from Settings (rather than the hardcoded
-      // 1280x720 in verifyVisual.ts).
-      const viewportForRun =
-        visualInput.viewport && visualInput.viewport.width && visualInput.viewport.height
-          ? visualInput.viewport
-          : config.defaultViewport;
-
-      const result = await runVerifyVisual(
-        { ...visualInput, path: visualPath, viewport: viewportForRun },
-        {
-          devServerBaseUrl: config.baseUrl,
-          runId: String(input?.runId || "unknown"),
-          screenshotCount: Number(input?.visualScreenshotCount || 0),
-        }
-      );
-
-      if (!result.success) {
-        return {
-          success: false,
-          output: `verify_visual failed: ${result.error}`,
-        };
-      }
-
-      const consoleSection =
-        result.consoleErrors && result.consoleErrors.length > 0
-          ? `\n\nConsole errors detected:\n${result.consoleErrors.map((e) => `  - ${e}`).join("\n")}`
-          : "";
-
-      debugLog("[zone-tool-verify-visual]", JSON.stringify({
-        path: visualPath,
-        baseUrl: config.baseUrl,
-        screenshotPath: result.screenshotPath,
-        pageTitle: result.pageTitle,
-        consoleErrorCount: result.consoleErrors?.length ?? 0,
-      }));
-
-      return {
-        success: true,
-        output:
-          `Screenshot taken: ${visualPath} (page title: "${result.pageTitle ?? ""}"). ` +
-          `Saved to ${result.screenshotPath}.${consoleSection}`,
-        metadata: {
-          screenshotPath: result.screenshotPath,
-          pageTitle: result.pageTitle,
-          path: visualPath,
-          ...(result.consoleErrors && result.consoleErrors.length > 0
-            ? { consoleErrors: result.consoleErrors }
-            : {}),
-        },
-      };
     }
 
     if (toolName === "find_references") {
@@ -2036,13 +2856,18 @@ export async function executeTool(
         }
       }
 
+      const MAX_FIND_REFERENCES_RESULTS = 50;
+      const truncated = consumers.length > MAX_FIND_REFERENCES_RESULTS;
+      const capped = consumers.slice(0, MAX_FIND_REFERENCES_RESULTS);
+
       debugLog("[zone-tool-find-references]", JSON.stringify({
         sourceFile: sourceKey,
         symbolName,
         consumerCount: consumers.length,
+        capped: truncated,
       }));
 
-      if (consumers.length === 0) {
+      if (capped.length === 0) {
         return {
           success: true,
           output: `No files import "${symbolName}" from ${sourceFile}.`,
@@ -2050,9 +2875,9 @@ export async function executeTool(
       }
 
       const lines = [
-        `Found ${consumers.length} file(s) importing "${symbolName}" from ${sourceFile}:`,
+        `Found ${consumers.length} file(s) importing "${symbolName}" from ${sourceFile}${truncated ? ` (showing first ${MAX_FIND_REFERENCES_RESULTS})` : ""}:`,
         "",
-        ...consumers.map((c) =>
+        ...capped.map((c) =>
           c.alias
             ? `  ${c.file}  (imported as: ${c.alias})`
             : `  ${c.file}`
