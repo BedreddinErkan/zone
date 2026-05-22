@@ -2925,6 +2925,43 @@ Example:
   };
   const _internalPostToolUseHooks: PostToolUseHook[] = [loopDetectorHook];
 
+  /**
+   * Main agent iteration loop.
+   *
+   * Inner loop (for each tool call in the LLM response) has 13 early-exit
+   * `continue` sites that skip to the next tool call. Each is labelled
+   * // [INNER-LOOP: <reason>] on the line above its `continue` statement.
+   *
+   * Site | Label                  | Meaning
+   * -----+------------------------+------------------------------------------
+   *  1   | ALLOWED_TOOLS_REJECT   | Tool filtered by effectiveAllowedTools
+   *  2   | TODOWRITE_DISABLED     | TodoWrite blocked (read-only mode)
+   *  3   | TODOWRITE_INVALID      | TodoWrite args failed validation
+   *  4   | TODOWRITE_HANDLED      | TodoWrite processed; push reply + continue
+   *  5   | SCOPE_CHANGE_NOOP      | suggest_scope_change outside investigation
+   *  6   | SCOPE_CHANGE_INVALID   | Missing required fields (type/reason/plan)
+   *  7   | SCOPE_CHANGE_NO_FILES  | under_scope/over_scope missing file lists
+   *  8   | SCOPE_CHANGE_NO_FILES  | (second variant — over_scope)
+   *  9   | SCOPE_CHANGE_HANDLED   | suggest_scope_change recorded; continue
+   * 10   | REVERT_PATCH_INVALID   | revert_patch missing 'path' argument
+   * 11   | REVERT_PATCH_NOT_STAGED| File not in stagingFiles (wasn't modified)
+   * 12   | REVERT_PATCH_OK        | Revert succeeded; continue
+   * 13   | APPLY_PATCH_NO_READ    | apply_patch before read_file on target file
+   *
+   * Outer loop has 1 `continue` site (ITER_TOOLS_PROCESSED) at the end of the
+   * `if (toolCalls.length > 0)` branch to advance to the next iteration.
+   *
+   * Termination (return, not continue):
+   * - ABORT_SIGNAL       throwIfAborted() throughout
+   * - HOOK_BLOCK         pre-iter or post-tool hook returned { block: true }
+   * - TOKEN_BUDGET_SOFT  cumulativeTokens ≥ TOKEN_BUDGET_HARD pre-LLM-call
+   * - TOKEN_BUDGET_TASK  subagent token propagation crosses TOKEN_BUDGET_HARD
+   * - COMPACTION_RESTART compaction succeeded; re-enter with fresh context
+   * - COMPACTION_FAIL    CompactionExhaustedError; terminationReason set
+   * - DAILY_USD_CAP      checkDailyCap() rejected
+   * - LOOP_DETECTED      recordAndDetect TERMINATE threshold hit
+   * - MAX_ITERATIONS     loop exits naturally (iter reaches iterationBudget)
+   */
   for (let iter = 0; iter < iterationBudget.maxIterationsForRun; iter += 1) {
     completedIterCount = iter + 1;
     debugLog("[zone-agent-iter-start]", {
@@ -3344,6 +3381,7 @@ Example:
             tool: name,
             allowed,
           });
+          // [INNER-LOOP: ALLOWED_TOOLS_REJECT]
           continue;
         }
 
@@ -3361,6 +3399,7 @@ Example:
             result: rejectionMsg,
             success: false,
           });
+          // [INNER-LOOP: TODOWRITE_DISABLED]
           continue;
         }
 
@@ -3380,6 +3419,7 @@ Example:
               result: validation.error,
               success: false,
             });
+            // [INNER-LOOP: TODOWRITE_INVALID]
             continue;
           }
           const isFirstEmission = !todosEmittedThisRun;
@@ -3403,6 +3443,7 @@ Example:
             result: "ok",
             success: true,
           });
+          // [INNER-LOOP: TODOWRITE_HANDLED]
           continue;
         }
 
@@ -3414,6 +3455,7 @@ Example:
           const noopMsg = "suggest_scope_change is only active in investigation mode — call ignored.";
           responseInput.push({ role: "tool", tool_call_id: callId, content: noopMsg });
           toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: noopMsg, success: false });
+          // [INNER-LOOP: SCOPE_CHANGE_NOOP]
           continue;
         }
         if (name === "suggest_scope_change") {
@@ -3428,6 +3470,7 @@ Example:
             const errMsg = "suggest_scope_change rejected: missing required fields (type, reason, revised_plan_summary).";
             responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
             toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            // [INNER-LOOP: SCOPE_CHANGE_INVALID]
             continue;
           }
 
@@ -3435,12 +3478,14 @@ Example:
             const errMsg = "suggest_scope_change rejected: missing_files required for under_scope.";
             responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
             toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            // [INNER-LOOP: SCOPE_CHANGE_NO_FILES]
             continue;
           }
           if (scopeType === "over_scope" && unnecessaryFiles.length === 0) {
             const errMsg = "suggest_scope_change rejected: unnecessary_files required for over_scope.";
             responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
             toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            // [INNER-LOOP: SCOPE_CHANGE_NO_FILES]
             continue;
           }
 
@@ -3464,6 +3509,7 @@ Example:
           const ackMsg = "Scope change proposal recorded. Investigation can continue.";
           responseInput.push({ role: "tool", tool_call_id: callId, content: ackMsg });
           toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: ackMsg, success: true });
+          // [INNER-LOOP: SCOPE_CHANGE_HANDLED]
           continue;
         }
 
@@ -3476,6 +3522,7 @@ Example:
             const errMsg = "revert_patch rejected: missing required field 'path'.";
             responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
             toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            // [INNER-LOOP: REVERT_PATCH_INVALID]
             continue;
           }
           const relPath = rawPath.replace(/^[\\/]+/, "");
@@ -3484,6 +3531,7 @@ Example:
             const errMsg = `revert_patch rejected: '${relPath}' was not modified in this run.`;
             responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
             toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            // [INNER-LOOP: REVERT_PATCH_NOT_STAGED]
             continue;
           }
           stagingFiles.delete(abs);
@@ -3492,6 +3540,7 @@ Example:
           const revertOkMsg = `Reverted: '${relPath}' restored to its pre-run state.`;
           responseInput.push({ role: "tool", tool_call_id: callId, content: revertOkMsg });
           toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: revertOkMsg, success: true });
+          // [INNER-LOOP: REVERT_PATCH_OK]
           continue;
         }
 
@@ -3563,6 +3612,7 @@ Example:
               iter: iter + 1,
             });
             failureHistory.set(targetFilePath, noReadList);
+            // [INNER-LOOP: APPLY_PATCH_NO_READ]
             continue;
           }
         }
@@ -4055,6 +4105,7 @@ Example:
         }
       }
 
+      // [OUTER-LOOP: ITER_TOOLS_PROCESSED]
       continue;
     }
 
