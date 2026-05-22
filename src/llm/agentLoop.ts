@@ -78,6 +78,9 @@ import { UpstreamUnavailableError } from "./withExponentialBackoff.js";
 import { emitTokenBreakdown, emitBreakdownSummary, type BreakdownEvent } from "./tokenBreakdown.js";
 import { pruneStaleReads } from "./contextPruner.js";
 import { buildDefaultOrchestrator } from "./history/ContextOrchestrator.js";
+import type { Capability, CapabilityFilter } from "../tools/capabilities.js";
+import { resolveToolList } from "../tools/toolRegistry.js";
+import { allowedToolsToFilter } from "../tools/capabilityCompat.js";
 import {
   runPreIterationHooks,
   runPostToolUseHooks,
@@ -164,8 +167,11 @@ export interface AgentLoopInput {
    * Optional tool whitelist. If provided, only tools whose name appears in this
    * set are exposed to the LLM and accepted by the executor. If undefined,
    * defaults to the full ZONE_TOOLS set.
+   * @deprecated — use capabilityFilter instead.
    */
   allowedTools?: ReadonlySet<string>;
+  /** Declarative capability-based tool filter. Takes precedence over allowedTools. */
+  capabilityFilter?: CapabilityFilter;
   /** Suppress TodoWrite's sidebar meta-tool path for read-only modes. */
   disableTodoWrite?: boolean;
   /**
@@ -550,9 +556,9 @@ function normalizeAgentLoopMode(mode: AgentLoopInput["mode"]): Exclude<Mode, "au
 }
 
 
-function modeDefaultAllowedTools(mode: Exclude<Mode, "auto">): ReadonlySet<string> | undefined {
-  if (mode === "chat") return new Set(CHAT_TOOLS);
-  if (mode === "investigate") return new Set(READ_ONLY_TOOLS);
+function modeDefaultFilter(mode: Exclude<Mode, "auto">): CapabilityFilter | undefined {
+  if (mode === "chat") return { allowToolNames: new Set(CHAT_TOOLS) };
+  if (mode === "investigate") return { allow: new Set<Capability>(["fs.read"]) };
   return undefined;
 }
 
@@ -2180,10 +2186,13 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     maxIterationsForRun: baseMaxIterations,
     escalationBonusGranted: false,
   };
-  const effectiveAllowedTools =
-    input.allowedTools ?? (hasExplicitMode ? modeDefaultAllowedTools(mode) : undefined);
+  // Gap 6: resolve capability filter. Precedence: capabilityFilter > allowedTools (shim) > mode default.
+  const effectiveFilter: CapabilityFilter | undefined =
+    input.capabilityFilter
+    ?? (input.allowedTools ? allowedToolsToFilter(input.allowedTools) : undefined)
+    ?? (hasExplicitMode ? modeDefaultFilter(mode) : undefined);
   // L.2: tier-based tool exposure. Subagent loops skip tier gating — they
-  // inherit the parent's constraints via allowedTools / tokenBudgetBaseTokens.
+  // inherit the parent's constraints via capabilityFilter / tokenBudgetBaseTokens.
   const isSubagentLoop = input.subagent !== undefined;
   const tierLimits = isSubagentLoop
     ? null
@@ -2191,20 +2200,23 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   // Zero-budget tiers (simple): hide Task from the LLM toolset so the agent
   // never calls it and gets rejected deep in executeTool.
   const taskBlockedByBudget = (tierLimits?.maxSubagentCalls ?? Infinity) === 0;
-  // Phase X.0: suggest_scope_change is now in ZONE_TOOLS; no separate
-  // AUDIT_ONLY_TOOLS spread needed. The allowedTools filter still restricts
-  // which tools are presented in audit mode (AUDIT_ALLOWED_TOOLS ⊂ ZONE_TOOLS).
+  // Phase X.0 / Gap 6: resolveToolList applies the capability filter; the
+  // excludeTools and taskBlockedByBudget gates are applied on top.
+  const resolvedTools = resolveToolList(effectiveFilter);
   const toolsForLLM = sortToolsForPromptCache(
-    ZONE_TOOLS.filter((t) => {
-      const name = getZoneToolName(t);
-      if (input.excludeTools?.has(name)) return false;
-      if (taskBlockedByBudget && name === "Task") return false;
-      return effectiveAllowedTools ? effectiveAllowedTools.has(name) : true;
-    })
+    resolvedTools
+      .filter((t) => {
+        if (input.excludeTools?.has(t.name)) return false;
+        if (taskBlockedByBudget && t.name === "Task") return false;
+        return true;
+      })
+      .map((t) => t.definition)
   );
-  if (effectiveAllowedTools && toolsForLLM.length === 0) {
-    throw new Error("AgentLoopInput.allowedTools resolved to zero tools — aborting.");
+  if (effectiveFilter && toolsForLLM.length === 0) {
+    throw new Error("AgentLoopInput capabilityFilter (or allowedTools) resolved to zero tools — aborting.");
   }
+  // Flat name set forwarded to executeTool for runtime enforcement.
+  const effectiveAllowedSet: ReadonlySet<string> = new Set(toolsForLLM.map(getZoneToolName));
 
   let softIterWarnThreshold: number | undefined;
   let softWarnInjected = false;
@@ -3360,8 +3372,8 @@ Example:
           parsedArgs = {};
         }
 
-        if (effectiveAllowedTools && !effectiveAllowedTools.has(name)) {
-          const allowed = [...effectiveAllowedTools];
+        if (effectiveAllowedSet.size > 0 && !effectiveAllowedSet.has(name)) {
+          const allowed = [...effectiveAllowedSet];
           const rejectionMsg =
             `Tool "${name}" is not allowed in this mode. ` +
             `Available tools: ${allowed.join(", ")}.`;
@@ -3642,7 +3654,7 @@ Example:
           stagingFiles,
           abortSignal: input.abortSignal,
           executionPlan: input.executionPlan ?? null,
-          allowedTools: effectiveAllowedTools,
+          allowedTools: effectiveAllowedSet,
           userId: input.userId,
           framework: input.framework,
           subagent: input.subagent,
