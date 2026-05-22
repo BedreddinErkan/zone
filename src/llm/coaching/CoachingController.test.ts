@@ -243,3 +243,44 @@ describe("CoachingController — exhausted branch", () => {
     expect(ctrl.budgetExhausted).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// B.2: repeat-read counter integration (Phase 6.A Branch B)
+// ---------------------------------------------------------------------------
+
+describe("repeat-read counter integration (Phase 6.A Branch B)", () => {
+  it("T.5: coachingAppend includes file path when read count >= 3", () => {
+    const ctrl = new CoachingController(makeOpts(), makeDeps());
+    const filesReadCountThisRun = new Map([["src/foo.ts", 3]]);
+    const result = ctrl.routeFailure(makeCtx({ filesReadCountThisRun }));
+    expect(result.kind).toBe("coach");
+    if (result.kind === "coach") {
+      expect(result.coachingAppend).toContain("src/foo.ts");
+      expect(result.coachingAppend).toContain("read 3x");
+    }
+  });
+
+  it("T.6: no repeat-read notice when all files read fewer than 3 times", () => {
+    const ctrl = new CoachingController(makeOpts(), makeDeps());
+    const filesReadCountThisRun = new Map([
+      ["src/a.ts", 1],
+      ["src/b.ts", 2],
+      ["src/c.ts", 1],
+    ]);
+    const result = ctrl.routeFailure(makeCtx({ filesReadCountThisRun }));
+    expect(result.kind).toBe("coach");
+    if (result.kind === "coach") {
+      expect(result.coachingAppend).not.toContain("re-read the following files many times");
+    }
+  });
+
+  it("T.7: no repeat-read notice when filesReadCountThisRun is absent (backward compat)", () => {
+    const ctrl = new CoachingController(makeOpts(), makeDeps());
+    // No filesReadCountThisRun in ctx (optional field absent)
+    const result = ctrl.routeFailure(makeCtx());
+    expect(result.kind).toBe("coach");
+    if (result.kind === "coach") {
+      expect(result.coachingAppend).not.toContain("re-read the following files many times");
+    }
+  });
+});

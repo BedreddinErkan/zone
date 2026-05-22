@@ -22,6 +22,7 @@ import {
   emitArchetypePromoted,
   emitCacheUsage,
   emitTierConstraints,
+  emitTierArchetypeMismatch,
   emitCoachingRule,
   emitCommandCacheSummary,
 } from "./loopTelemetry.js";
@@ -274,7 +275,7 @@ export interface AgentLoopResult {
    *  mid-run (iter_cap / rollback_x2 / coaching_exhausted). Null on all
    *  non-promoted runs including default env (pipelineApplied=false). */
   promotedFromArchetype?: TaskArchetype | null;
-  promotionTrigger?: "iter_cap" | "rollback_x2" | "coaching_exhausted" | null;
+  promotionTrigger?: "iter_cap" | "rollback_x2" | "coaching_exhausted" | "forced_tier_blocking" | null;
   promotedAtIter?: number | null;
 }
 
@@ -1444,7 +1445,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     input.coachingBudgetOverride ?? MAX_SELF_CORRECTION_ATTEMPTS;
   // L5.1b-2: soft promotion state — all null on non-dispatcher runs
   let promotedFromArchetype: TaskArchetype | null = null;
-  let promotionTrigger: "iter_cap" | "rollback_x2" | "coaching_exhausted" | null = null;
+  let promotionTrigger: "iter_cap" | "rollback_x2" | "coaching_exhausted" | "forced_tier_blocking" | null = null;
   let promotedAtIter: number | null = null;
   let rollbackCount = 0;
   let coachingBudgetExhausted = false;
@@ -1480,11 +1481,22 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     : undefined;
   // Gap 6: resolve capability filter.
   // Precedence: capabilityFilter > tier-derived > allowedTools (shim) > mode default.
-  const effectiveFilter: CapabilityFilter | undefined =
+  // Changed to `let` so forced_tier_blocking promotion can relax it mid-run (B.3).
+  let effectiveFilter: CapabilityFilter | undefined =
     input.capabilityFilter
     ?? tierFilterFromClassifier
     ?? (input.allowedTools ? allowedToolsToFilter(input.allowedTools) : undefined)
     ?? (hasExplicitMode ? modeDefaultFilter(mode) : undefined);
+  // Phase 6.A Branch B: detect forceTier="simple" applied to archetypes that
+  // need search/navigation tools (targeted_fix, refactor, debug, complex_multi_file).
+  const ARCHETYPES_NEEDING_EXPLORATION = new Set<string>([
+    "targeted_fix", "refactor", "complex_multi_file", "debug",
+  ]);
+  const tierArchetypeMismatch =
+    !isSubagentLoop &&
+    input.forceTier === "simple" &&
+    !!input.taskClassification?.archetype &&
+    ARCHETYPES_NEEDING_EXPLORATION.has(input.taskClassification.archetype);
   const tierLimits = isSubagentLoop
     ? null
     : resolveTierLimits(input.taskClassification, { forceTierOverride: input.forceTier });
@@ -1494,7 +1506,8 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   // Phase X.0 / Gap 6: resolveToolList applies the capability filter; the
   // excludeTools and taskBlockedByBudget gates are applied on top.
   const resolvedTools = resolveToolList(effectiveFilter);
-  const toolsForLLM = sortToolsForPromptCache(
+  // `let` so forced_tier_blocking promotion can re-compute with relaxed filter (B.3).
+  let toolsForLLM = sortToolsForPromptCache(
     resolvedTools
       .filter((t) => {
         if (input.excludeTools?.has(t.name)) return false;
@@ -1507,7 +1520,8 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
     throw new Error("AgentLoopInput capabilityFilter (or allowedTools) resolved to zero tools — aborting.");
   }
   // Flat name set forwarded to executeTool for runtime enforcement.
-  const effectiveAllowedSet: ReadonlySet<string> = new Set(toolsForLLM.map(getZoneToolName));
+  // `let` so forced_tier_blocking promotion can update it alongside toolsForLLM (B.3).
+  let effectiveAllowedSet: ReadonlySet<string> = new Set(toolsForLLM.map(getZoneToolName));
 
   let softIterWarnThreshold: number | undefined;
   let softWarnInjected = false;
@@ -1529,6 +1543,22 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       fallbackUsed: input.taskClassification?.fallbackUsed ?? true,
       toolSubsetSize: tierFilterFromClassifier ? toolsForLLM.length : undefined,
     });
+    if (tierArchetypeMismatch && input.taskClassification) {
+      const simpleSet = new Set(["read_file", "write_file", "apply_patch", "run_command"]);
+      const allToolNames = [
+        "read_file","write_file","apply_patch","run_command",
+        "search_in_files","list_files","find_references","TodoWrite",
+        "suggest_scope_change","create_plan","update_plan","get_plan",
+        "Task","run_tests","get_file_outline","revert_patch","analyze_code",
+      ];
+      emitTierArchetypeMismatch({
+        runId: input.runId ?? null,
+        forcedTier: "simple",
+        classifiedArchetype: input.taskClassification.archetype,
+        archetypeConfidence: input.taskClassification.archetypeConfidence ?? 0,
+        blockedTools: allToolNames.filter((t) => !simpleSet.has(t)),
+      });
+    }
     if (typeof input.runId === "string" && input.runId.trim()) {
       input.onStructuredEvent?.({
         type: "tier_constraints_applied",
@@ -1896,6 +1926,7 @@ Example:
   // Phase V.1: Set of filePaths successfully read_file'd this run.
   // Populated after each successful read_file; passed to executeTool for C1 gate.
   const filesReadThisRun = new Set<string>();
+  const filesReadCountThisRun = new Map<string, number>();
   // P.1: compaction trigger — fires at the safe iteration boundary after tool results
   // are processed. No-op in P.1; P.2 replaces the stub with real summarization.
   const compactor = new ContextCompactor();
@@ -2577,6 +2608,7 @@ Example:
         toolCallLog,
         filesModified,
         filesReadThisRun,
+        filesReadCountThisRun,
         failureHistory,
         responseInput,
         failedFilesThisIter: new Set(),
@@ -2969,6 +3001,7 @@ Example:
         failureHistory,
         toolCallLog,
         filesModified,
+        filesReadCountThisRun,
         repoFilePaths: Array.isArray(input.repoFilePaths) ? input.repoFilePaths : undefined,
         framework: input.framework ?? null,
         executionPlan: input.executionPlan ?? null,
@@ -3059,6 +3092,47 @@ Example:
           _firePromotion("rollback_x2");
         } else if (coachingBudgetExhausted && failureDetected) {
           _firePromotion("coaching_exhausted");
+        }
+      }
+
+      // Phase 6.A Branch B — forced_tier_blocking: tool-only promotion.
+      // Separate from _isPromotable (does not require pipelineApplied).
+      // Fires when forceTier=simple blocked exploration, the agent has been
+      // retrying with failures, and it has re-read the same file ≥3 times.
+      const _isForcedTierEligible =
+        !isSubagentLoop &&
+        tierArchetypeMismatch &&
+        promotedFromArchetype === null;  // one-shot guard shared with dispatcher promotions
+      if (_isForcedTierEligible) {
+        const hasRepeatReads = [...filesReadCountThisRun.values()].some((c) => c >= 3);
+        if (failureDetected && iter >= 2 && hasRepeatReads) {
+          promotedFromArchetype = input.taskClassification?.archetype ?? null;
+          promotionTrigger = "forced_tier_blocking";
+          promotedAtIter = iter + 1;
+          // Tool-only promotion: do NOT relax iterationBudget or effectiveMaxCoachingAttempts.
+          // Relax effectiveFilter and recompute toolsForLLM / effectiveAllowedSet so the
+          // LLM sees the full toolset starting from the next iteration.
+          effectiveFilter =
+            input.capabilityFilter
+            ?? (input.allowedTools ? allowedToolsToFilter(input.allowedTools) : undefined)
+            ?? (hasExplicitMode ? modeDefaultFilter(mode) : undefined);
+          toolsForLLM = sortToolsForPromptCache(
+            resolveToolList(effectiveFilter)
+              .filter((t) => {
+                if (input.excludeTools?.has(t.name)) return false;
+                if (taskBlockedByBudget && t.name === "Task") return false;
+                return true;
+              })
+              .map((t) => t.definition)
+          );
+          effectiveAllowedSet = new Set(toolsForLLM.map(getZoneToolName));
+          emitArchetypePromoted({
+            runId: input.runId ?? null,
+            fromArchetype: promotedFromArchetype,
+            toArchetype: "complex_multi_file",
+            atIter: promotedAtIter,
+            trigger: "forced_tier_blocking",
+          });
         }
       }
 

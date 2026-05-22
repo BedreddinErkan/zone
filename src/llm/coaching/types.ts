@@ -16,6 +16,7 @@ export interface FailureContext {
   failureHistory: Map<string, FailureRecord[]>;
   toolCallLog: ToolCallLogEntry[];
   filesModified: Set<string>;
+  filesReadCountThisRun?: Map<string, number>;
   repoFilePaths?: readonly string[];
   framework?: ProjectFramework | null;
   executionPlan?: ExecutionPlan | null;

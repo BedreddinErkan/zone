@@ -43,7 +43,7 @@ export interface ArchetypePromotedData {
   fromArchetype: TaskArchetype | null;
   toArchetype: "complex_multi_file";
   atIter: number | null;
-  trigger: "iter_cap" | "rollback_x2" | "coaching_exhausted" | null;
+  trigger: "iter_cap" | "rollback_x2" | "coaching_exhausted" | "forced_tier_blocking" | null;
 }
 
 export function emitArchetypePromoted(data: ArchetypePromotedData): void {
@@ -89,6 +89,24 @@ export interface TierConstraintsData {
 
 export function emitTierConstraints(data: TierConstraintsData): void {
   log("[zone-tier-constraints-applied]", JSON.stringify(data));
+}
+
+// ---------------------------------------------------------------------------
+// emitTierArchetypeMismatch — [zone-tier-archetype-mismatch]
+// Emitted once per run when forceTier="simple" conflicts with a classified
+// archetype that requires search/navigation tools.
+// ---------------------------------------------------------------------------
+
+export interface TierArchetypeMismatchData {
+  runId: string | null | undefined;
+  forcedTier: string;
+  classifiedArchetype: string;
+  archetypeConfidence: number;
+  blockedTools: string[];
+}
+
+export function emitTierArchetypeMismatch(data: TierArchetypeMismatchData): void {
+  log("[zone-tier-archetype-mismatch]", JSON.stringify(data));
 }
 
 // ---------------------------------------------------------------------------

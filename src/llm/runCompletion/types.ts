@@ -35,7 +35,7 @@ export interface FinalizeRunInput {
   tokenUsage: SubagentTokenUsage;
 
   promotedFromArchetype?: TaskArchetype | null;
-  promotionTrigger?: "iter_cap" | "rollback_x2" | "coaching_exhausted" | null;
+  promotionTrigger?: "iter_cap" | "rollback_x2" | "coaching_exhausted" | "forced_tier_blocking" | null;
   promotedAtIter?: number | null;
 
   emit: {
