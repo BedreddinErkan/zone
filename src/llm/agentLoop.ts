@@ -84,6 +84,7 @@ import {
 import { finalizeRun } from "./runCompletion/index.js";
 import { TokenBudgetMeter } from "./tokenBudget/TokenBudgetMeter.js";
 import { handleToolResult, type ToolEventContext } from "./toolEventHandler/index.js";
+import { CoachingController, type FailureContext } from "./coaching/index.js";
 
 // "plan" kept as accepted input for backward compat — normalizeAgentLoopMode maps it to "patch"
 type AgentLoopMode = Exclude<Mode, "auto"> | "investigation" | "plan";
@@ -1619,9 +1620,27 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   // Phase F: default "warn" — patches stay on disk when regression detected; "rollback" restores legacy behavior.
   const verifyMode: "warn" | "rollback" = process.env["ZONE_VERIFY_MODE"] === "rollback" ? "rollback" : "warn";
   let todosEmittedThisRun = false;
-  let selfCorrectionAttempts = 0;
   const failureHistory = new Map<string, FailureRecord[]>();
   const escalatedFiles = new Set<string>();
+  const coachingController = new CoachingController(
+    {
+      escalationEnabled,
+      baseMaxIterations,
+      escalatedFiles,
+      runId: input.runId,
+      onProgress: input.onProgress,
+    },
+    {
+      detectRepeatedFailure,
+      maybeGrantEscalationBonus,
+      buildCoachingPrompt,
+      buildVerifyDiagnostic,
+      maybeExpandScopeForVerifyDiagnostic,
+      applyPatchRetryReason,
+      classifyFailure,
+      emitCoachingRule,
+    }
+  );
   // Tur 1: in-memory staging. Writes go here instead of disk during the loop;
   // reads fall back to staging first, disk second. Top-level loops own flushing;
   // subagents share the parent map and must not flush independently.
@@ -2899,7 +2918,7 @@ Example:
             toolResult: result,
             responseInput,
             loopDetectorState: { count: loopResult.count, status: loopResult.status },
-            selfCorrectionAttempts,
+            selfCorrectionAttempts: coachingController.attempts,
             effectiveMaxCoachingAttempts,
             emit: (level, marker, payload) => {
               if (level === "log") log(marker, JSON.stringify(payload));
@@ -2934,212 +2953,33 @@ Example:
         failedToolFilePath,
         failedFilesThisIter,
       } = toolEventCtx;
-      // â"€â"€ Self-correction: failure detected â†’ route to coaching prompt â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-      // Each self-correction attempt consumes one iteration toward maxIterations.
-      // The selfCorrectionAttempts counter is a SUBSET of total iterations â€”
-      // it limits how many times we inject coaching, not how many total iterations run.
-      // This way a long but successful run won't hit the coaching budget.
-      let repeatPattern: { filePath: string; reason: string } | null = null;
-      if (failureDetected && failedToolName === "apply_patch") {
-        repeatPattern = detectRepeatedFailure(failureHistory, failedToolFilePath);
-        if (!repeatPattern) {
-          for (const filePath of failedFilesThisIter) {
-            if (filePath === failedToolFilePath) continue;
-            const candidate = detectRepeatedFailure(failureHistory, filePath);
-            if (candidate) {
-              repeatPattern = candidate;
-              break;
-            }
-          }
-        }
-      }
-      const failedFilePath = failedToolName === "apply_patch" ? failedToolFilePath : null;
-      const pickedFromBackupSweep =
-        repeatPattern !== null && repeatPattern.filePath !== failedToolFilePath;
-      if (failureDetected && selfCorrectionAttempts < effectiveMaxCoachingAttempts) {
-        selfCorrectionAttempts += 1;
-        let routedTrigger: SelfCorrectTrigger;
-        if (repeatPattern) {
-          routedTrigger = "apply_patch_repeated_failure_same_file";
-          escalatedFiles.add(repeatPattern.filePath);
-          input.onProgress?.(JSON.stringify({
-            event: "zone-agent-repeat-detected",
-            filePath: repeatPattern.filePath,
-            reason: repeatPattern.reason,
-            attempts: failureHistory.get(repeatPattern.filePath)?.length ?? 0,
-          }));
-          if (escalationEnabled) {
-            iterationBudget = maybeGrantEscalationBonus(
-              iterationBudget,
-              escalatedFiles.size,
-              iter,
-              input.onProgress,
-              baseMaxIterations
-            );
-          }
-        } else {
-          routedTrigger = classifyFailure(failedToolName, failedToolOutput, failedToolError);
-        }
-        const routedFilePath = repeatPattern?.filePath ?? failedFilePath;
-        const perFileAttempt = routedFilePath
-          ? failureHistory.get(routedFilePath)?.length ?? 0
-          : 0;
-        // agent-persistence Tur: build a structured diagnostic prelude
-        // (parsed failingFile/line/errorType + generated-path indicator +
-        // candidate culprits) and inject it ABOVE the coaching directives.
-        // Generated-path detection also flips the test_failed coaching into
-        // its mandatory-investigation variant inside buildCoachingPrompt.
-        const diagnostic = buildVerifyDiagnostic({
-          failedToolOutput,
-          filesModified: Array.from(filesModified),
-          filesInRepo: Array.isArray(input.repoFilePaths) ? input.repoFilePaths : [],
-          framework: input.framework
-            ? { framework: input.framework.framework, language: input.framework.language }
-            : null,
-          attemptCount: selfCorrectionAttempts,
-        });
-        // scope-expansion Tur: when the diagnostic parser pinned a concrete
-        // user-source failing file, expand the plan's covered set so the
-        // agent's next apply_patch can land. Mutates plan in-place; persists
-        // for the rest of this run (and across orchestrator step boundaries
-        // because the plan reference is shared).
-        const scopeExpansion = maybeExpandScopeForVerifyDiagnostic(
-          input.executionPlan ?? null,
-          diagnostic,
-          input.repoPath
-        );
-        let diagnosticText = diagnostic.text;
-        if (scopeExpansion.expanded && scopeExpansion.addedFile) {
-          diagnosticText +=
-            `\n\n**Scope expanded**: \`${scopeExpansion.addedFile}\` has been added to the writable scope ` +
-            `for this run because the verification parser pinned it as the failing file. Apply your patch directly.`;
-          debugLog("[zone-scope-expanded]", JSON.stringify({
-            runId: input.runId ?? null,
-            addedFile: scopeExpansion.addedFile,
-            reason: scopeExpansion.reason,
-            parsedFailingFile: diagnostic.parsed?.failingFile ?? null,
-            parsedErrorType: diagnostic.parsed?.errorType ?? null,
-            attempt: selfCorrectionAttempts,
-          }));
-        }
-        const coachingText = buildCoachingPrompt(
-          routedTrigger,
-          failedToolOutput,
-          toolCallLog,
-          {
-            attemptCount: perFileAttempt || selfCorrectionAttempts,
-            filePath: routedFilePath ?? undefined,
-            generatedPathDetected: diagnostic.generatedPathDetected,
-            parsedFailingFile: diagnostic.parsed?.failingFile ?? null,
-          }
-        );
-        const remaining = effectiveMaxCoachingAttempts - selfCorrectionAttempts;
-        debugLog("[zone-agent-self-correct]", JSON.stringify({
-          iter: iter + 1,
-          trigger: failedToolName === "run_command" ? "test_failed" : failedToolName,
-          routedTrigger,
-          selfCorrectionAttempt: selfCorrectionAttempts,
-          maxAttempts: effectiveMaxCoachingAttempts,
-          filePath: routedFilePath,
-          perFileAttempt,
-          detectedRepeatedFailure: repeatPattern !== null,
-          repeatReason: repeatPattern?.reason ?? null,
-          iterationCap: iterationBudget.maxIterationsForRun,
-          failedFilesThisIterCount: failedFilesThisIter.size,
-          pickedFromBackupSweep,
-          errorPreview: failedToolOutput.slice(0, 200),
-          willRetry: true,
-          reason: "routed_coaching_prompt_injected",
-        }));
-        // S.2.1: structured JSONL diagnostic for apply_patch retries.
-        if (failedToolName === "apply_patch") {
-          log("[zone-apply-patch-retry]", JSON.stringify({
-            event: "apply_patch_retry",
-            runId: input.runId ?? null,
-            iter: iter + 1,
-            reason: applyPatchRetryReason(routedTrigger),
-            filePath: routedFilePath ?? null,
-            attemptCount: perFileAttempt || selfCorrectionAttempts,
-          }));
-        }
-        // U.2.C: emit coaching rule trigger for test failures so we can observe
-        // scope-check decisions (in_scope / out_of_scope) in production logs.
-        if (routedTrigger === "test_failed" || routedTrigger === "tool_command_spawn_failure") {
-          const parsedFailingFile = diagnostic.parsed?.failingFile ?? null;
-          const modifiedFiles = Array.from(filesModified);
-          const inScope = parsedFailingFile
-            ? modifiedFiles.some(
-                (f) =>
-                  f === parsedFailingFile ||
-                  f.endsWith("/" + parsedFailingFile) ||
-                  parsedFailingFile.endsWith("/" + f)
-              )
-            : null;
-          emitCoachingRule({
-            runId: input.runId ?? null,
-            iter: iter + 1,
-            rule: "test_failure_scope_check",
-            decision: inScope === null ? "unclear" : inScope ? "in_scope" : "out_of_scope",
-            parsedFailingFile,
-            modifiedFiles,
-          });
-        }
-        debugLog("[zone-agent-diagnostic]", JSON.stringify({
-          attempt: selfCorrectionAttempts,
-          failingFile: diagnostic.parsed?.failingFile ?? null,
-          failingLine: diagnostic.parsed?.failingLine ?? null,
-          errorType: diagnostic.parsed?.errorType ?? null,
-          generatedPathDetected: diagnostic.generatedPathDetected,
-          candidateCount: diagnostic.candidates.length,
-          candidatesPreview: diagnostic.candidates.slice(0, 5),
-        }));
-        input.onProgress?.(
-          `[agent_loop] Failure detected (${routedTrigger}) â€” self-correction attempt ${selfCorrectionAttempts}/${effectiveMaxCoachingAttempts}`
-        );
-        const coachingAppend =
-          `\n\n[Zone coaching â€” attempt ${selfCorrectionAttempts} of ${effectiveMaxCoachingAttempts}]\n` +
-          diagnosticText + `\n\n` +
-          coachingText +
-          `\n\nRecent failure context:\n` +
-          `- Tool: ${failedToolName}\n` +
-          `- Error preview (first 300 chars): ${failedToolOutput.slice(0, 300)}\n` +
-          `You have ${remaining} retry attempt${remaining === 1 ? "" : "s"} remaining. ` +
-          `After that the run will halt with the current state.`;
+      // ── Self-correction: failure detected → CoachingController ──────────────────
+      const coachingCtx: FailureContext = {
+        signal: { failureDetected, failedToolName, failedToolOutput, failedToolError, failedToolFilePath, failedFilesThisIter },
+        iter,
+        failureHistory,
+        toolCallLog,
+        filesModified,
+        repoFilePaths: Array.isArray(input.repoFilePaths) ? input.repoFilePaths : undefined,
+        framework: input.framework ?? null,
+        executionPlan: input.executionPlan ?? null,
+        repoPath: input.repoPath,
+        currentBudget: iterationBudget,
+        maxAttempts: effectiveMaxCoachingAttempts,
+      };
+      const coachingDecision = coachingController.routeFailure(coachingCtx);
+      if (coachingDecision.kind === "coach") {
+        // Pattern A append — STAYS IN LOOP (cache invariant must remain visible here)
         for (let ci = responseInput.length - 1; ci >= 0; ci--) {
           const m = responseInput[ci];
           if (m.role === "tool") {
-            m.content = (typeof m.content === "string" ? m.content : "") + coachingAppend;
+            m.content = (typeof m.content === "string" ? m.content : "") + coachingDecision.coachingAppend;
             break;
           }
         }
-      } else if (failureDetected) {
-        // Budget exhausted — log and let the model produce its final summary naturally.
-        coachingBudgetExhausted = true; // L5.1b-2: promotion signal
-        const routedTrigger = repeatPattern
-          ? "apply_patch_repeated_failure_same_file"
-          : classifyFailure(failedToolName, failedToolOutput, failedToolError);
-        const routedFilePath = repeatPattern?.filePath ?? failedFilePath;
-        const perFileAttempt = routedFilePath
-          ? failureHistory.get(routedFilePath)?.length ?? 0
-          : 0;
-        debugLog("[zone-agent-self-correct]", JSON.stringify({
-          iter: iter + 1,
-          trigger: failedToolName === "run_command" ? "test_failed" : failedToolName,
-          routedTrigger,
-          selfCorrectionAttempt: selfCorrectionAttempts,
-          maxAttempts: effectiveMaxCoachingAttempts,
-          filePath: routedFilePath,
-          perFileAttempt,
-          detectedRepeatedFailure: repeatPattern !== null,
-          repeatReason: repeatPattern?.reason ?? null,
-          iterationCap: iterationBudget.maxIterationsForRun,
-          failedFilesThisIterCount: failedFilesThisIter.size,
-          pickedFromBackupSweep,
-          errorPreview: failedToolOutput.slice(0, 200),
-          willRetry: false,
-          reason: "self-correction budget exhausted â€” allowing model to summarise",
-        }));
+        if (coachingDecision.newIterationBudget) iterationBudget = coachingDecision.newIterationBudget;
       }
+      if (coachingController.budgetExhausted) coachingBudgetExhausted = true;
 
       // P.2/P.3: compaction check with graceful exhausted exit.
       let compactionResult: CompactionResult;
