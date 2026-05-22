@@ -21,9 +21,12 @@ import { CHAT_TOOLS, READ_ONLY_TOOLS, ZONE_TOOLS } from "../tools/toolDefinition
 import {
   emptySubagentTokenUsage,
   resetSubagentCallCount,
-  type SubagentResult,
   type SubagentTokenUsage,
 } from "./subagents.js";
+import {
+  logSubagentDispatched,
+  handleSubagentResult,
+} from "./subagentDispatch.js";
 import type { TaskArchetype, TaskClassification, TaskTier } from "./taskClassifier.js";
 import { resolveTierLimits } from "./tierLimits.js";
 import { resolveDailyUsdCap } from "./usdCapResolver.js";
@@ -911,20 +914,9 @@ export function extractErrorLine(output: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-/**
- * Phase Q.3: pull a dispatch reason out of a Task description. The agent is
- * coached (system prompt) to start the description with one of:
- *   "multi_file_fanout: ..." | "exploration: ..." | "long_isolated_step: ..."
- * Returns the prefix when matched; otherwise "manual". Logged at dispatch
- * time for traceability — not used to gate behavior.
- */
-export function extractDispatchReason(description: unknown): string {
-  if (typeof description !== "string") return "manual";
-  const firstLine = description.split(/\r?\n/, 1)[0]?.trim() ?? "";
-  const m = firstLine.match(/^(multi_file_fanout|exploration|long_isolated_step)\s*:/i);
-  if (m) return m[1].toLowerCase();
-  return "manual";
-}
+// Re-exported from subagentDispatch.ts (moved in Seq 4) — kept here so existing
+// importers (agentLoop.dispatch.test.ts) don't need path changes.
+export { extractDispatchReason } from "./subagentDispatch.js";
 
 /**
  * Phase Q.6: render the plan's per-step subagent annotations into a prompt
@@ -3627,22 +3619,7 @@ Example:
         // Phase Q.3: log Task dispatch only after executeTool confirms success —
         // the budget gate in toolExecutor may block the call (success:false).
         if (name === "Task" && result.success) {
-          const dispatchReason = extractDispatchReason(parsedArgs.description);
-          const dispatchSubagentType =
-            typeof parsedArgs.subagent_type === "string" ? parsedArgs.subagent_type : null;
-          const dispatchProvider = getRequestContext()?.provider ?? "openai";
-          const dispatchWorkerModel =
-            dispatchSubagentType === "worker"
-              ? getModelForRole("worker", dispatchProvider)
-              : null;
-          log("[zone-subagent-dispatched]", JSON.stringify({
-            event: "subagent_dispatched",
-            parentRunId: input.runId ?? null,
-            subagentType: dispatchSubagentType,
-            workerModel: dispatchWorkerModel,
-            dispatchReason,
-            iter: iter + 1,
-          }));
+          logSubagentDispatched(parsedArgs, input.runId, iter);
         }
 
         // Diagnostic: log every tool result after execution
@@ -3711,64 +3688,28 @@ Example:
           filesModified.add(String(parsedArgs.filePath));
         }
         if (name === "Task" && result.success) {
-          try {
-            const parsed = JSON.parse(result.output) as Partial<SubagentResult>;
-            if (Array.isArray(parsed.filesModified)) {
-              for (const filePath of parsed.filesModified) {
-                if (typeof filePath === "string" && filePath.trim()) {
-                  filesModified.add(filePath.trim());
-                }
-              }
+          // K.3 / K.6: aggregate filesModified, propagate token and cost accumulators.
+          // subagentTokenTotal must be updated BEFORE emitTokenBudgetStatus so the
+          // closure reads the correct cumulative value.
+          const sdResult = handleSubagentResult({
+            result, iterNumber: iter, runId: input.runId,
+            onStructuredEvent: input.onStructuredEvent, filesModified,
+            subagentTokenTotal, subagentCostTotal, mainAgentTokens,
+            effectiveTokenBudgetCap, iterCostAccumulator, lastIterCostPayload,
+          });
+          if (sdResult.subagentTokenDelta > 0) {
+            subagentTokenTotal += sdResult.subagentTokenDelta;
+            const ratioAfterTask = emitTokenBudgetStatus(iter + 1);
+            if (ratioAfterTask >= TOKEN_BUDGET_HARD) {
+              responseInput.push({
+                role: "tool",
+                tool_call_id: callId,
+                content: result.output,
+              });
+              return { ...await synthesizeTokenBudgetExit(iter + 1, responseInput), promotedFromArchetype, promotionTrigger, promotedAtIter };
             }
-            const tokenUsage = parsed.tokenUsage;
-            const subagentTotal = cleanTokenNumber(tokenUsage?.total);
-            if (subagentTotal > 0) {
-              subagentTokenTotal += subagentTotal;
-              const mainTokensAfter = mainAgentTokens();
-              const cumulativeAfter = mainTokensAfter + subagentTokenTotal;
-              log("[zone-subagent-token-propagated]", JSON.stringify({
-                mainRunId: input.runId,
-                subagentId: parsed.subagentId,
-                subagentTotal,
-                subagentInput: cleanTokenNumber(tokenUsage?.input),
-                subagentOutput: cleanTokenNumber(tokenUsage?.output),
-                mainCumulativeAfter: cumulativeAfter,
-                cap: effectiveTokenBudgetCap,
-                ratio: effectiveTokenBudgetCap > 0 ? cumulativeAfter / effectiveTokenBudgetCap : 0,
-              }));
-              const ratioAfterTask = emitTokenBudgetStatus(iter + 1);
-              if (ratioAfterTask >= TOKEN_BUDGET_HARD) {
-                responseInput.push({
-                  role: "tool",
-                  tool_call_id: callId,
-                  content: result.output,
-                });
-                return { ...await synthesizeTokenBudgetExit(iter + 1, responseInput), promotedFromArchetype, promotionTrigger, promotedAtIter };
-              }
-            }
-            // K.6: subagent cost propagation (parallel to K.3 token propagation above)
-            const subagentCostUsd =
-              typeof parsed.costUsd === "number" && parsed.costUsd > 0 ? parsed.costUsd : 0;
-            if (subagentCostUsd > 0) {
-              subagentCostTotal += subagentCostUsd;
-              log("[zone-subagent-cost-propagated]", JSON.stringify({
-                mainRunId: input.runId,
-                subagentId: parsed.subagentId,
-                subagentCostUsd,
-                mainCumulativeCostAfter: iterCostAccumulator.total_cost + subagentCostTotal,
-              }));
-              if (lastIterCostPayload && typeof input.runId === "string" && input.runId.trim()) {
-                input.onStructuredEvent?.({
-                  ...lastIterCostPayload,
-                  iterCost: 0,
-                  cumulativeCost: iterCostAccumulator.total_cost + subagentCostTotal,
-                });
-              }
-            }
-          } catch {
-            // Best-effort only. Task summaries are user-visible tool content,
-            // but modified-file aggregation should not make the loop fail.
           }
+          subagentCostTotal += sdResult.subagentCostDelta;
         }
 
         // Chat Completions: each tool_call gets one matching role:"tool" reply.
