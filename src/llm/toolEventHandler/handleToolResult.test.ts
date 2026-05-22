@@ -17,6 +17,7 @@ function makeCtx(overrides?: Partial<ToolEventContext>): ToolEventContext {
     toolCallLog: [],
     filesModified: new Set(),
     filesReadThisRun: new Set(),
+    filesReadCountThisRun: new Map(),
     failureHistory: new Map(),
     responseInput: [],
     failedFilesThisIter: new Set(),

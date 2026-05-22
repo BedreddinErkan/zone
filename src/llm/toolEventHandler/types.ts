@@ -18,6 +18,7 @@ export interface ToolEventContext {
   toolCallLog: ToolCallLogEntry[];
   filesModified: Set<string>;
   filesReadThisRun: Set<string>;
+  filesReadCountThisRun: Map<string, number>;
   failureHistory: Map<string, FailureRecord[]>;
   responseInput: ChatCompletionMessageParam[];
   failedFilesThisIter: Set<string>;

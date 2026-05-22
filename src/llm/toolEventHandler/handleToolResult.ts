@@ -48,9 +48,13 @@ export async function handleToolResult(
     success: result.success,
   });
 
-  // Step 6: filesReadThisRun
+  // Step 6: filesReadThisRun + filesReadCountThisRun
   if (name === "read_file" && result.success && typeof parsedArgs.filePath === "string" && parsedArgs.filePath) {
     ctx.filesReadThisRun.add(parsedArgs.filePath);
+    ctx.filesReadCountThisRun.set(
+      parsedArgs.filePath,
+      (ctx.filesReadCountThisRun.get(parsedArgs.filePath) ?? 0) + 1,
+    );
   }
 
   // Step 7: apply_patch failure → failureHistory + failedFilesThisIter

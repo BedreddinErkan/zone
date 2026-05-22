@@ -189,6 +189,16 @@ export class CoachingController {
         `[agent_loop] Failure detected (${routedTrigger}) — self-correction attempt ${this._attempts}/${ctx.maxAttempts}`
       );
 
+      const repeatReads = ctx.filesReadCountThisRun
+        ? [...ctx.filesReadCountThisRun.entries()]
+            .filter(([, count]) => count >= 3)
+            .map(([p, count]) => `${p} (read ${count}x)`)
+        : [];
+      const repeatReadNotice = repeatReads.length > 0
+        ? `\n\nNOTE: You have re-read the following files many times — ` +
+          `this suggests you may be missing a search/navigation tool: ${repeatReads.join(", ")}`
+        : "";
+
       const coachingAppend =
         `\n\n[Zone coaching — attempt ${this._attempts} of ${ctx.maxAttempts}]\n` +
         diagnosticText + `\n\n` +
@@ -197,7 +207,8 @@ export class CoachingController {
         `- Tool: ${signal.failedToolName}\n` +
         `- Error preview (first 300 chars): ${signal.failedToolOutput.slice(0, 300)}\n` +
         `You have ${remaining} retry attempt${remaining === 1 ? "" : "s"} remaining. ` +
-        `After that the run will halt with the current state.`;
+        `After that the run will halt with the current state.` +
+        repeatReadNotice;
 
       return {
         kind: "coach",

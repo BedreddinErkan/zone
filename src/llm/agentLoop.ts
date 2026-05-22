@@ -1926,6 +1926,7 @@ Example:
   // Phase V.1: Set of filePaths successfully read_file'd this run.
   // Populated after each successful read_file; passed to executeTool for C1 gate.
   const filesReadThisRun = new Set<string>();
+  const filesReadCountThisRun = new Map<string, number>();
   // P.1: compaction trigger — fires at the safe iteration boundary after tool results
   // are processed. No-op in P.1; P.2 replaces the stub with real summarization.
   const compactor = new ContextCompactor();
@@ -2607,6 +2608,7 @@ Example:
         toolCallLog,
         filesModified,
         filesReadThisRun,
+        filesReadCountThisRun,
         failureHistory,
         responseInput,
         failedFilesThisIter: new Set(),
@@ -2999,6 +3001,7 @@ Example:
         failureHistory,
         toolCallLog,
         filesModified,
+        filesReadCountThisRun,
         repoFilePaths: Array.isArray(input.repoFilePaths) ? input.repoFilePaths : undefined,
         framework: input.framework ?? null,
         executionPlan: input.executionPlan ?? null,
