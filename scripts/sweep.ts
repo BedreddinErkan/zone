@@ -19,8 +19,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
+import { Agent } from "undici";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const sweepDispatcher = new Agent({ bodyTimeout: 0, headersTimeout: 0, keepAliveTimeout: 1_000 });
 const REPO_ROOT = path.resolve(__dirname, "..");
 
 const API_BASE =
@@ -186,6 +189,8 @@ export async function dispatchTask(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: controller.signal,
+      // @ts-expect-error — Node 26 fetch accepts undici dispatcher; not in lib.dom types
+      dispatcher: sweepDispatcher,
     });
   } catch (fetchErr) {
     clearTimeout(timeoutHandle);
