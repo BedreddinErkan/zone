@@ -45,7 +45,7 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
       name: "TodoWrite",
       strict: true,
       description:
-        "Plan tracker shown to the user as a live sidebar. Call FIRST for any 2+ step task (incl. verification/builds). Skip only for true one-shot requests.",
+        "Live plan sidebar. Call FIRST for any 2+ step task. Skip for true one-shot requests only.",
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -229,12 +229,11 @@ required: ["id", "content", "description", "status"],
       name: "apply_patch",
       strict: true,
       description:
-        "FIND/REPLACE substitutions on an EXISTING file (use write_file only for new files). " +
-        "Each block: --- FIND --- <verbatim lines, 1-5, unique in file> --- REPLACE --- <new lines>. " +
-        "REPLACE is the literal text replacing FIND — never copy in code from elsewhere; for two separated edits use TWO blocks. " +
-        "Anti-example: putting an import-line edit AND its callsite edit in one block is rejected because REPLACE then contains a line that wasn't in FIND. " +
-        "Multi-block patches apply atomically in order. " +
-        "intent: 'add' (REPLACE = FIND + additions, default), 'modify' (REPLACE replaces FIND, line counts may differ), 'delete' (REPLACE shorter than FIND, may be empty).",
+        "Patch an EXISTING file (write_file for new files). " +
+        "Format: --- FIND --- <verbatim lines, unique> --- REPLACE --- <new content>. " +
+        "FIND must match exactly — re-read if unsure. " +
+        "Two edits → two blocks; all blocks apply atomically. " +
+        "intent: 'add' (default)|'modify'|'delete'.",
       parameters: {
         type: "object",
         properties: {
@@ -317,9 +316,8 @@ required: ["id", "content", "description", "status"],
       name: "search_in_files",
       strict: false,
       description:
-        "Search for a regex pattern across files in the repo. Prefer this over read_file when locating a symbol, finding usages, or checking presence of a pattern. " +
-        "Supports regex (default) or literal mode, case_insensitive, glob filtering, and output_mode (content | files_with_matches | count). " +
-        "Returns matches with line numbers and context. Max 500 matches.",
+        "Regex search across files. Prefer over read_file for symbols or usage. " +
+        "Modes: content (default), files_with_matches, count. Supports literal, case_insensitive, glob, context_lines. Max 500 matches.",
       parameters: {
         type: "object",
         properties: {
@@ -391,10 +389,9 @@ required: ["id", "content", "description", "status"],
     function: {
       name: "Task",
       description:
-        "Delegate a bounded subtask to an isolated subagent. Returns a structured summary; detailed work hidden from your context. " +
-        "worker = bounded multi-file implementation (read+write, no commands). " +
-        "explore = read-only investigation, returns file:line findings + summary. " +
-        "Only use when the task is non-trivial; see the TASK SUBAGENTS section in the system prompt for the dispatch criteria.",
+        "Delegate to subagent. worker: multi-file impl (read+write). " +
+        "explore: read-only investigation (file:line findings). " +
+        "Only for non-trivial tasks.",
       parameters: {
         type: "object",
         properties: {
@@ -453,7 +450,7 @@ required: ["id", "content", "description", "status"],
     function: {
       name: "suggest_scope_change",
       description:
-        "Propose narrowing or expanding the approved plan after investigation reveals scope mismatch. Only call when findings show the original plan is materially wrong-sized.",
+        "Correct plan scope when investigation reveals wrong-sizing (under_scope/over_scope). Only call with concrete findings.",
       parameters: {
         type: "object",
         required: ["reason", "type", "revised_plan_summary"],
