@@ -416,4 +416,30 @@ describe("TUI.2 transcript rendering", () => {
     expect(lastFrame() ?? "").toContain("The answer is: 42 files exist under src/cli/.");
     unmount();
   });
+
+  it("renders all transcript entry kinds without Static (post-TUI.5.3)", async () => {
+    const bus = createEventBus();
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="list files" />);
+
+    bus.emit("tool_call", makeEvt("tool_call", {
+      title: "[tool] run_command: find .",
+    }));
+    bus.emit("tool_result", makeEvt("tool_result", {
+      toolName: "run_command",
+      title: "[tool] run_command: find .",
+      detail: "file1.ts\nfile2.ts",
+      status: "success",
+    }));
+    bus.emit("agent_loop_complete", makeEvt("agent_loop_complete", {
+      detail: "Found 2 files in directory",
+      iter_count: 2,
+      cumulativeCost: 0.01,
+    }));
+    await wait(50);
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("run_command");
+    expect(frame).toContain("Found 2 files");
+    unmount();
+  });
 });

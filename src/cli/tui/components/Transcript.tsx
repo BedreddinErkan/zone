@@ -1,4 +1,4 @@
-import { Box, Static, Text } from "ink";
+import { Box, Text } from "ink";
 import { useStore, type TranscriptEntry } from "../store.js";
 import { AssistantTurn } from "./AssistantTurn.js";
 import { ToolCall } from "./ToolCall.js";
@@ -50,9 +50,7 @@ export function Transcript(): React.ReactElement {
 
   return (
     <Box flexDirection="column">
-      <Static key={state.transcriptGeneration} items={state.transcript.map((entry, index) => ({ entry, index }))}>
-        {(item) => renderEntry(item.entry, item.index)}
-      </Static>
+      {state.transcript.map((entry, index) => renderEntry(entry, index))}
       {liveToolCall && (
         <Box justifyContent="space-between">
           <Text color="cyan">{"  "}{liveToolCall.toolName}  {truncate(liveToolCall.args, 50)}</Text>
