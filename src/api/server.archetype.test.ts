@@ -190,7 +190,7 @@ beforeEach(() => {
   });
   mocks.getRunCost.mockReturnValue(0);
   process.env.ZONE_DAILY_USD_CAP = "0"; // unlimited cap
-  delete process.env.ZONE_ARCHETYPE_DISPATCHER;
+  process.env.ZONE_ARCHETYPE_DISPATCHER = "0"; // TUI.5.7: explicit off — unset now means ON
   delete process.env.ZONE_ARCHETYPE_ENABLE_SIMPLE_ADD;
 });
 
@@ -244,9 +244,9 @@ describe("L5.1b-3 plan_summary SSE skip", () => {
   });
 });
 
-describe("L5.1b-3 legacy path (env unset)", () => {
-  it("calls generateExecutionPlan when dispatcher env flags are absent", async () => {
-    // both flags unset → buildPipelineConfig returns null → skipPlan=undefined → plan gen runs
+describe("L5.1b-3 legacy path (dispatcher disabled)", () => {
+  it("calls generateExecutionPlan when dispatcher is disabled", async () => {
+    // dispatcher disabled (ZONE_ARCHETYPE_DISPATCHER=0 from beforeEach) → buildPipelineConfig returns null → skipPlan=undefined → plan gen runs
 
     await postPatch();
 

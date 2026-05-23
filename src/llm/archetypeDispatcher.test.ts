@@ -6,35 +6,47 @@ import {
 } from "./archetypeDispatcher.js";
 
 describe("readArchetypeFlagsFromEnv", () => {
-  it("returns both false when env is empty", () => {
+  it("returns defaults when env is empty (dispatcher/question/investigation ON, simpleAdd OFF)", () => {
     expect(readArchetypeFlagsFromEnv({})).toEqual({
-      dispatcherEnabled: false,
+      dispatcherEnabled: true,
       simpleAddEnabled: false,
-      questionEnabled: false,
-      investigationEnabled: false,
+      questionEnabled: true,
+      investigationEnabled: true,
     });
   });
 
   it("returns dispatcherEnabled true when ZONE_ARCHETYPE_DISPATCHER=1", () => {
     expect(
       readArchetypeFlagsFromEnv({ ZONE_ARCHETYPE_DISPATCHER: "1" }),
-    ).toEqual({ dispatcherEnabled: true, simpleAddEnabled: false, questionEnabled: false, investigationEnabled: false });
+    ).toEqual({ dispatcherEnabled: true, simpleAddEnabled: false, questionEnabled: true, investigationEnabled: true });
   });
 
-  it("returns both true when both flags are '1'", () => {
+  it("returns all-true when dispatcher and simpleAdd flags are '1'", () => {
     expect(
       readArchetypeFlagsFromEnv({
         ZONE_ARCHETYPE_DISPATCHER: "1",
         ZONE_ARCHETYPE_ENABLE_SIMPLE_ADD: "1",
       }),
-    ).toEqual({ dispatcherEnabled: true, simpleAddEnabled: true, questionEnabled: false, investigationEnabled: false });
+    ).toEqual({ dispatcherEnabled: true, simpleAddEnabled: true, questionEnabled: true, investigationEnabled: true });
   });
 
-  it("rejects 'true' literal — only '1' enables the flag", () => {
+  it("accepts any non-'0' value — only '0' disables the flag", () => {
     const flags = readArchetypeFlagsFromEnv({
       ZONE_ARCHETYPE_DISPATCHER: "true",
     });
-    expect(flags.dispatcherEnabled).toBe(false);
+    expect(flags.dispatcherEnabled).toBe(true);
+  });
+
+  it("returns dispatcherEnabled false when ZONE_ARCHETYPE_DISPATCHER=0", () => {
+    expect(readArchetypeFlagsFromEnv({ ZONE_ARCHETYPE_DISPATCHER: "0" }).dispatcherEnabled).toBe(false);
+  });
+
+  it("returns questionEnabled false when ZONE_ARCHETYPE_ENABLE_QUESTION=0", () => {
+    expect(readArchetypeFlagsFromEnv({ ZONE_ARCHETYPE_ENABLE_QUESTION: "0" }).questionEnabled).toBe(false);
+  });
+
+  it("returns investigationEnabled false when ZONE_ARCHETYPE_ENABLE_INVESTIGATION=0", () => {
+    expect(readArchetypeFlagsFromEnv({ ZONE_ARCHETYPE_ENABLE_INVESTIGATION: "0" }).investigationEnabled).toBe(false);
   });
 });
 

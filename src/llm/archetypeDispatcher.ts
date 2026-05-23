@@ -16,10 +16,10 @@ export interface PipelineConfig {
 }
 
 export interface ArchetypeFlags {
-  dispatcherEnabled: boolean;    // ZONE_ARCHETYPE_DISPATCHER === '1'
-  simpleAddEnabled: boolean;     // ZONE_ARCHETYPE_ENABLE_SIMPLE_ADD === '1'
-  questionEnabled: boolean;      // ZONE_ARCHETYPE_ENABLE_QUESTION === '1'
-  investigationEnabled: boolean; // ZONE_ARCHETYPE_ENABLE_INVESTIGATION === '1'
+  dispatcherEnabled: boolean;    // ZONE_ARCHETYPE_DISPATCHER !== '0' (default ON — TUI.5.7)
+  simpleAddEnabled: boolean;     // ZONE_ARCHETYPE_ENABLE_SIMPLE_ADD === '1' (opt-in)
+  questionEnabled: boolean;      // ZONE_ARCHETYPE_ENABLE_QUESTION !== '0' (default ON — TUI.5.7)
+  investigationEnabled: boolean; // ZONE_ARCHETYPE_ENABLE_INVESTIGATION !== '0' (default ON — TUI.5.7)
 }
 
 export const SIMPLE_ADD_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
@@ -55,10 +55,10 @@ export function readArchetypeFlagsFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): ArchetypeFlags {
   return {
-    dispatcherEnabled: env["ZONE_ARCHETYPE_DISPATCHER"] === "1",
+    dispatcherEnabled: env["ZONE_ARCHETYPE_DISPATCHER"] !== "0",
     simpleAddEnabled: env["ZONE_ARCHETYPE_ENABLE_SIMPLE_ADD"] === "1",
-    questionEnabled: env["ZONE_ARCHETYPE_ENABLE_QUESTION"] === "1",
-    investigationEnabled: env["ZONE_ARCHETYPE_ENABLE_INVESTIGATION"] === "1",
+    questionEnabled: env["ZONE_ARCHETYPE_ENABLE_QUESTION"] !== "0",
+    investigationEnabled: env["ZONE_ARCHETYPE_ENABLE_INVESTIGATION"] !== "0",
   };
 }
 
