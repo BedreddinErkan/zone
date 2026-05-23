@@ -41,6 +41,11 @@ function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement 
 
 export function Transcript(): React.ReactElement {
   const { state } = useStore();
+  // TEMP probe — Opus audit round 2, remove in TUI.5.4
+  console.error("[probe-transcript-render]", JSON.stringify({
+    len: state.transcript.length,
+    kinds: state.transcript.map(e => e.kind),
+  }));
   const liveToolCall = state.liveTail.currentToolCall;
 
   return (

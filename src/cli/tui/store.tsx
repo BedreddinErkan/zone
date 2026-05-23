@@ -139,6 +139,12 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
       };
 
     case "TOOL_RESULT_PUSH": {
+      // TEMP probe — Opus audit round 2, remove in TUI.5.4
+      console.error("[probe-reducer-tool-result-push]", JSON.stringify({
+        transcriptLenBefore: state.transcript.length,
+        hasCurrentTc: !!state.liveTail.currentToolCall,
+        tcToolName: state.liveTail.currentToolCall?.toolName,
+      }));
       const tc = state.liveTail.currentToolCall;
       if (!tc) return state;
       // Always append a fresh entry. Ink's <Static> renders each index once and
@@ -205,12 +211,22 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
       };
 
     case "USER_PROMPT":
+      // TEMP probe — Opus audit round 2, remove in TUI.5.4
+      console.error("[probe-reducer-user-prompt]", JSON.stringify({
+        transcriptLenBefore: state.transcript.length,
+        text: action.text.slice(0, 40),
+      }));
       return {
         ...state,
         transcript: [...state.transcript, { kind: "user_prompt", text: action.text }],
       };
 
     case "ASSISTANT_FINAL":
+      // TEMP probe — Opus audit round 2, remove in TUI.5.4
+      console.error("[probe-reducer-assistant-final]", JSON.stringify({
+        transcriptLenBefore: state.transcript.length,
+        textLen: action.text.length,
+      }));
       return {
         ...state,
         transcript: [...state.transcript, { kind: "assistant_final", text: action.text }],

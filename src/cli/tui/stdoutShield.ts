@@ -17,6 +17,11 @@ export function applyStdoutInterception(): () => void {
     const s =
       typeof chunk === "string" ? chunk : (chunk as Buffer | null)?.toString?.() ?? "";
     if (TELEMETRY_RE.test(s.trimStart()) || RESULT_LINE_RE.test(s)) {
+      // TEMP probe — Opus audit round 2, remove in TUI.5.4
+      console.error("[probe-stdout-shield-filter]", JSON.stringify({
+        reason: TELEMETRY_RE.test(s.trimStart()) ? "TELEMETRY" : "RESULT_LINE",
+        preview: s.slice(0, 60),
+      }));
       if (process.env.ZONE_TUI_DEBUG === "1") {
         return (process.stderr.write as (...args: unknown[]) => boolean)(s, enc, cb);
       }
