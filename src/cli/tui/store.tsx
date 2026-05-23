@@ -139,18 +139,9 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
     case "TOOL_RESULT_PUSH": {
       const tc = state.liveTail.currentToolCall;
       if (!tc) return state;
-      const existing = [...state.transcript].reverse().find(
-        (e): e is Extract<TranscriptEntry, { kind: "tool_call" }> =>
-          e.kind === "tool_call" && e.toolName === tc.toolName && e.args === tc.args
-      );
-      if (existing) {
-        const updated = state.transcript.map((e: TranscriptEntry) =>
-          e === existing
-            ? { ...existing, results: [...existing.results, { ok: action.ok, detail: action.detail, ...(action.blocked ? { blocked: true as const } : {}) }] }
-            : e
-        );
-        return { ...state, transcript: updated };
-      }
+      // Always append a fresh entry. Ink's <Static> renders each index once and
+      // never re-renders existing items, so updating in-place would make repeated
+      // approvals of the same command invisible. One entry per call is correct.
       const entry: TranscriptEntry = {
         kind: "tool_call",
         toolName: tc.toolName,

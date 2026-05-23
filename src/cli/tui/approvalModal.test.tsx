@@ -178,6 +178,42 @@ describe("TUI.4.4 approval modal", () => {
     unmount();
   });
 
+  // T.8: repeated Y on the same command creates two visible entries
+  it("T.8: Y on second approval of same command creates new visible entry", async () => {
+    const bus = createEventBus();
+    const { lastFrame, stdin, unmount } = render(<App bus={bus} initialPrompt="test" />);
+
+    // First approval
+    bus.emit("tool_call", makeEvt("tool_call", { title: "[tool] run_command: find src" }));
+    bus.emit("command_approval_required", makeEvt("command_approval_required", {
+      approvalId: "a1",
+      command: "find src",
+    }));
+    await wait(50);
+    stdin.write("y");
+    await wait(50);
+    bus.emit("tool_result", makeEvt("tool_result", { toolName: "run_command", status: "success", detail: "src/foo.ts" }));
+    await wait(50);
+    expect(lastFrame()).toContain("src/foo.ts");
+
+    // Second approval — same command
+    bus.emit("tool_call", makeEvt("tool_call", { title: "[tool] run_command: find src" }));
+    bus.emit("command_approval_required", makeEvt("command_approval_required", {
+      approvalId: "a2",
+      command: "find src",
+    }));
+    await wait(50);
+    stdin.write("y");
+    await wait(50);
+    bus.emit("tool_result", makeEvt("tool_result", { toolName: "run_command", status: "success", detail: "src/bar.ts" }));
+    await wait(50);
+
+    // Both results visible (two separate entries)
+    expect(lastFrame()).toContain("src/foo.ts");
+    expect(lastFrame()).toContain("src/bar.ts");
+    unmount();
+  });
+
   // T.7: Esc does NOT abort the run when modal is active
   it("T.7: Esc does not abort running task when modal is active", async () => {
     const bus = createEventBus();
