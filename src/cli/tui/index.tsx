@@ -129,7 +129,7 @@ export async function runTui(
         onSubmit={onSubmit}
       />
     </ErrorBoundary>,
-    { exitOnCtrlC: false, alternateScreen: true }
+    { exitOnCtrlC: false, alternateScreen: false }
   );
 
   // Single path: wait for explicit exit (Ctrl+C → \x03 in useInput → useApp.exit())
