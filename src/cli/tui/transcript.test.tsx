@@ -213,7 +213,7 @@ describe("TUI.2 transcript rendering", () => {
     expect(resolveCommandApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: "appr-1", approved: false })
     );
-    expect(lastFrame()).toContain("Auto-rejected");
+    expect(lastFrame()).toContain("auto-rejected");
     unmount();
   });
 

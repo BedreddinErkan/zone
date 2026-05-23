@@ -185,8 +185,6 @@ export function requestCommandApproval(input: {
     return Promise.resolve({ approvalId, approved: true });
   }
 
-  input.emit({ type: "command_approval_required", runId, command, approvalId });
-
   return new Promise((resolve) => {
     const finish = (approved: boolean) => {
       const entry = pendingApprovals.get(approvalId);
@@ -217,6 +215,9 @@ export function requestCommandApproval(input: {
         input.abortSignal.addEventListener("abort", onAbort, { once: true });
       } catch {}
     }
+
+    // Emit LAST — synchronous resolvers (e.g. TUI bus) find the registered entry.
+    input.emit({ type: "command_approval_required", runId, command, approvalId });
   });
 }
 

@@ -105,6 +105,23 @@ describe("requestCommandApproval", () => {
     ]);
   });
 
+  it("resolves immediately when emit handler synchronously resolves (sync-bus regression)", async () => {
+    const events: unknown[] = [];
+    const promise = requestCommandApproval({
+      runId: "sync-bus-run",
+      command: "find . -type f | sort",
+      emit: (evt) => {
+        events.push(evt);
+        if (evt.type === "command_approval_required") {
+          resolveCommandApproval({ approvalId: evt.approvalId, approved: false, runId: evt.runId });
+        }
+      },
+    });
+    const result = await promise;
+    expect(result.approved).toBe(false);
+    expect(events).toHaveLength(1);
+  });
+
   it("keeps unsafe commands on the explicit approval path", async () => {
     const events: unknown[] = [];
     const result = await requestCommandApproval({

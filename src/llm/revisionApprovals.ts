@@ -62,18 +62,6 @@ export function requestRevisionApproval(input: {
       : 10 * 60 * 1000;
   const { proposal } = input;
 
-  input.emit({
-    type: "scope_revision_proposed",
-    runId: proposal.runId,
-    revisionId,
-    revisionType: proposal.type,
-    revisionReason: proposal.reason,
-    revisionOriginalPlan: proposal.originalPlan,
-    revisionRevisedPlanSummary: proposal.revisedPlanSummary,
-    ...(proposal.missingFiles ? { revisionMissingFiles: proposal.missingFiles } : {}),
-    ...(proposal.unnecessaryFiles ? { revisionUnnecessaryFiles: proposal.unnecessaryFiles } : {}),
-  });
-
   return new Promise((resolve) => {
     const finish = (decision: RevisionDecision) => {
       const entry = pendingRevisions.get(revisionId);
@@ -98,6 +86,19 @@ export function requestRevisionApproval(input: {
       };
       try { input.abortSignal.addEventListener("abort", onAbort, { once: true }); } catch {}
     }
+
+    // Emit LAST — synchronous resolvers (e.g. TUI bus) find the registered entry.
+    input.emit({
+      type: "scope_revision_proposed",
+      runId: proposal.runId,
+      revisionId,
+      revisionType: proposal.type,
+      revisionReason: proposal.reason,
+      revisionOriginalPlan: proposal.originalPlan,
+      revisionRevisedPlanSummary: proposal.revisedPlanSummary,
+      ...(proposal.missingFiles ? { revisionMissingFiles: proposal.missingFiles } : {}),
+      ...(proposal.unnecessaryFiles ? { revisionUnnecessaryFiles: proposal.unnecessaryFiles } : {}),
+    });
   });
 }
 

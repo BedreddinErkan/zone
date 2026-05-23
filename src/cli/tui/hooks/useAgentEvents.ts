@@ -138,7 +138,7 @@ export function useAgentEvents(bus: EventBus | undefined, dispatch: Dispatch<Sto
       }
       dispatch({
         type: "ERROR_LINE",
-        text: "⚠ Command approval required — TUI modal arrives in TUI.3. Auto-rejected.",
+        text: "⚠ Command approval required — auto-rejected (approval UI not yet implemented).",
       });
     }
 
@@ -148,7 +148,7 @@ export function useAgentEvents(bus: EventBus | undefined, dispatch: Dispatch<Sto
       }
       dispatch({
         type: "ERROR_LINE",
-        text: "⚠ Scope revision proposed — auto-rejected. Use zone -p for headless.",
+        text: "⚠ Scope revision proposed — auto-rejected.",
       });
     }
 
