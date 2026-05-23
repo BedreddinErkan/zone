@@ -36,7 +36,8 @@ The `serve` script runs the *built* CLI, not source. If you change `src/api/`, `
 Browser UI → Express server → agent loop → provider adapters + tool executor + atomic patch flow. All progress streams back over SSE on `/api/progress`.
 
 **Entry points**
-- `src/cli/index.ts` — CLI (commander). `serve` boots the Express server defined in `src/api/server.ts`. `src/server.ts` is a thin bootstrap that also loads `~/.zone/config.json` for CLI auth.
+- `src/cli/index.ts` — CLI (commander). `serve` boots the Express server defined in `src/api/server.ts`. `src/server.ts` is a thin bootstrap that also loads `~/.zone/config.json` for CLI auth. **TUI/headless fork (TUI.1):** `isHeadless = options.print === true || !process.stdout.isTTY`; if headless → `runHeadless()`; if TTY + positional task or no `--task` → `runTui()`; if TTY + `--task` → legacy `runCliWithOptions()`.
+- `src/cli/tui/index.tsx` — Ink-based TUI entry point (`runTui(initialPrompt, opts)`). Render call uses `{ exitOnCtrlC: false, alternateScreen: true }` — `alternateScreen` is required to isolate Ink's frame buffer from raw stdout writes. **TUI.2.5 telemetry isolation:** a `process.stdout.write` monkey-patch installed before `render()` swallows any chunk whose trimmed content matches `^\[zone-[a-z-]+\]` (all structured telemetry from the agent-loop modules running inline in the same process). `ZONE_TUI_DEBUG=1` routes those lines to stderr instead of discarding them. Components live in `src/cli/tui/components/`; `src/cli/eventBus.ts` bridges `runOneShotInner` progress callbacks to the Ink component tree via the event bus.
 - `src/api/server.ts` — All HTTP routes. Most important: `POST /api/chat` (investigation flow), `POST /api/patch` (atomic patch flow), `GET /api/progress` (SSE), `POST /api/approve-command` (resolves a pending `run_command` approval), `POST /api/cancel`.
 
 **Agent loop and providers**

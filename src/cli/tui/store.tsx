@@ -23,33 +23,47 @@ export type TranscriptEntry =
   | { kind: "assistant"; text: string }
   | { kind: "tool_call"; toolName: string; args: string; results: { ok: boolean; detail: string }[] }
   | { kind: "error"; text: string }
-  | { kind: "phase_marker"; phase: string }
-  | { kind: "run_summary"; text: string };
+  | { kind: "phase_marker"; phase: string };
 
-export type StatusBar = {
+export type StatusBarState = {
   iter: number;
   costUsd: number;
+  capUsd: number;
   model: string;
   tokenBudgetRatio: number;
 };
+
+export type RunState = "idle" | "running" | "done" | "aborted";
 
 export type StoreState = {
   transcript: TranscriptEntry[];
   liveTail: LiveTailState;
   spinner: { active: boolean; label: string } | null;
-  statusBar: StatusBar;
+  statusBar: StatusBarState;
+  runState: RunState;
+  runStartMs?: number;
   toastQueue: ToastEntry[];
   modalStack: ModalEntry[];
 };
 
-const initialState: StoreState = {
-  transcript: [],
-  liveTail: { narrationBuffer: "", currentToolCall: null },
-  spinner: null,
-  statusBar: { iter: 0, costUsd: 0, model: "", tokenBudgetRatio: 0 },
-  toastQueue: [],
-  modalStack: [],
-};
+function buildInitialState(initialValues?: { model: string; capUsd: number }): StoreState {
+  return {
+    transcript: [],
+    liveTail: { narrationBuffer: "", currentToolCall: null },
+    spinner: null,
+    statusBar: {
+      iter: 0,
+      costUsd: 0,
+      capUsd: initialValues?.capUsd ?? 10,
+      model: initialValues?.model ?? "",
+      tokenBudgetRatio: 0,
+    },
+    runState: "idle",
+    runStartMs: undefined,
+    toastQueue: [],
+    modalStack: [],
+  };
+}
 
 export type StoreAction =
   | { type: "SPINNER_START"; label: string }
@@ -64,13 +78,19 @@ export type StoreAction =
   | { type: "TOAST_PUSH"; entry: ToastEntry }
   | { type: "TOAST_POP" }
   | { type: "PHASE_MARKER"; phase: string }
-  | { type: "RUN_SUMMARY"; text: string }
-  | { type: "ERROR_LINE"; text: string };
+  | { type: "ERROR_LINE"; text: string }
+  | { type: "RUN_DONE" }
+  | { type: "RUN_ABORTED" };
 
 function reducer(state: StoreState, action: StoreAction): StoreState {
   switch (action.type) {
     case "SPINNER_START":
-      return { ...state, spinner: { active: true, label: action.label } };
+      return {
+        ...state,
+        spinner: { active: true, label: action.label },
+        runState: "running",
+        runStartMs: state.runStartMs ?? Date.now(),
+      };
     case "SPINNER_UPDATE":
       return { ...state, spinner: { active: true, label: action.label } };
     case "SPINNER_STOP":
@@ -157,17 +177,17 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
         transcript: [...state.transcript, { kind: "phase_marker", phase: action.phase }],
       };
 
-    case "RUN_SUMMARY":
-      return {
-        ...state,
-        transcript: [...state.transcript, { kind: "run_summary", text: action.text }],
-      };
-
     case "ERROR_LINE":
       return {
         ...state,
         transcript: [...state.transcript, { kind: "error", text: action.text }],
       };
+
+    case "RUN_DONE":
+      return { ...state, spinner: null, runState: "done" };
+
+    case "RUN_ABORTED":
+      return { ...state, spinner: null, runState: "aborted" };
 
     default:
       return state;
@@ -182,8 +202,16 @@ export function useStore(): { state: StoreState; dispatch: Dispatch<StoreAction>
   return ctx;
 }
 
-export function StoreProvider({ children }: { children: React.ReactNode }): React.ReactElement {
-  const [state, dispatch] = useReducer(reducer, initialState);
+export function StoreProvider({
+  children,
+  initialValues,
+}: {
+  children: React.ReactNode;
+  initialValues?: { model: string; capUsd: number };
+}): React.ReactElement {
+  const [state, dispatch] = useReducer(reducer, undefined, () =>
+    buildInitialState(initialValues)
+  );
   return (
     <StoreContext.Provider value={{ state, dispatch }}>
       {children}

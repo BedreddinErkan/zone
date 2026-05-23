@@ -77,7 +77,7 @@ describe("TUI.2 transcript rendering", () => {
     bus.emit("tool_call", makeEvt("tool_call", { toolName: "read_file", detail: "src/foo.ts" }));
     await wait(50);
 
-    expect(lastFrame()).toContain("▸");
+    // live tool call shows "  toolName  args" (no ▸ prefix)
     expect(lastFrame()).toContain("read_file");
     unmount();
   });
@@ -107,15 +107,17 @@ describe("TUI.2 transcript rendering", () => {
     unmount();
   });
 
-  it("agent_loop_complete shows run summary", async () => {
+  it("agent_loop_complete transitions runState to done", async () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} />);
 
+    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
     bus.emit("agent_loop_complete", makeEvt("agent_loop_complete", { iter_count: 3, cumulativeCost: 0.0123 }));
     await wait(50);
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("Done");
+    // StatusBar transitions to "done" state
+    expect(frame).toContain("done");
     unmount();
   });
 
@@ -124,7 +126,7 @@ describe("TUI.2 transcript rendering", () => {
     const { lastFrame, unmount } = render(<App bus={bus} />);
 
     bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
-    await wait(600); // wait for 500ms spinner label debounce
+    await wait(50); // no label debounce — spinner shows immediately
 
     const frame = lastFrame() ?? "";
     expect(frame).toContain("Starting");
@@ -168,6 +170,8 @@ describe("TUI.2 transcript rendering", () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} />);
 
+    // Start the run so StatusBar shows running state with iter/cost
+    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
     bus.emit("iter_cost_update", makeEvt("iter_cost_update", { iter: 5, cumulativeCost: 0.0567 }));
     await wait(50);
 
@@ -229,6 +233,18 @@ describe("TUI.2 transcript rendering", () => {
     unmount();
   });
 
+  it("ErrorLine shows ⚠ prefix", async () => {
+    const bus = createEventBus();
+    const { lastFrame, unmount } = render(<App bus={bus} />);
+
+    bus.emit("patch_rejected", makeEvt("patch_rejected", { title: "Conflict found" }));
+    await wait(50);
+
+    expect(lastFrame()).toContain("⚠");
+    expect(lastFrame()).toContain("Conflict found");
+    unmount();
+  });
+
   it("terminal_done with non-zero exit shows failure result", async () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} />);
@@ -263,13 +279,13 @@ describe("TUI.2 transcript rendering", () => {
     unmount();
   });
 
-  it("StatusBar renders model placeholder", () => {
+  it("StatusBar renders idle state initially", () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} />);
 
     const frame = lastFrame() ?? "";
-    // StatusBar should render iter 0 initially
-    expect(frame).toContain("iter 0");
+    expect(frame).toContain("idle");
+    expect(frame).toContain("ctrl+c to exit");
     unmount();
   });
 });

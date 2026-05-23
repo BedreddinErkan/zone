@@ -4,7 +4,10 @@ import { AssistantTurn } from "./AssistantTurn.js";
 import { ToolCall } from "./ToolCall.js";
 import { ErrorLine } from "./ErrorLine.js";
 import { IterMarker } from "./IterMarker.js";
-import { RunSummary } from "./RunSummary.js";
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
 
 function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement {
   switch (entry.kind) {
@@ -20,8 +23,6 @@ function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement 
       return <ErrorLine key={index} text={entry.text} />;
     case "phase_marker":
       return <IterMarker key={index} phase={entry.phase} />;
-    case "run_summary":
-      return <RunSummary key={index} text={entry.text} />;
   }
 }
 
@@ -35,7 +36,10 @@ export function Transcript(): React.ReactElement {
         {(item) => renderEntry(item.entry, item.index)}
       </Static>
       {liveToolCall && (
-        <Text color="cyan">{`▸ ${liveToolCall.toolName}(${liveToolCall.args.length > 60 ? liveToolCall.args.slice(0, 57) + "..." : liveToolCall.args})`}</Text>
+        <Box justifyContent="space-between">
+          <Text color="cyan">{"  "}{liveToolCall.toolName}  {truncate(liveToolCall.args, 50)}</Text>
+          <Text dimColor>…</Text>
+        </Box>
       )}
       <AssistantTurn />
     </Box>

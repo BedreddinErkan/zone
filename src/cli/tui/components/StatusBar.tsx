@@ -1,25 +1,61 @@
 import { Box, Text } from "ink";
-import { useStore } from "../store.js";
-import { classifyTokenBudgetStatus } from "../../../core/eventProcessors.js";
+import { useStore, type RunState } from "../store.js";
+
+function leftText(
+  runState: RunState,
+  iter: number,
+  costUsd: number,
+  model: string,
+  elapsedSec: string | null
+): string {
+  const m = model || "default";
+  switch (runState) {
+    case "idle":
+      return `idle · ${m} · perm: default`;
+    case "running":
+      return `iter ${iter} · $${costUsd.toFixed(4)} · ${m} · perm: default`;
+    case "done":
+      return `done · $${costUsd.toFixed(4)} · ${iter} iter${elapsedSec ? ` · ${elapsedSec}s` : ""} · ${m}`;
+    case "aborted":
+      return `aborted · iter ${iter} · $${costUsd.toFixed(4)} · ${m}`;
+  }
+}
+
+function rightHint(runState: RunState): string {
+  switch (runState) {
+    case "running":
+      return "esc abort";
+    case "done":
+      return "any key exit";
+    default:
+      return "ctrl+c to exit";
+  }
+}
 
 export function StatusBar(): React.ReactElement {
   const { state } = useStore();
   const { iter, costUsd, model, tokenBudgetRatio } = state.statusBar;
-  const status = classifyTokenBudgetStatus(tokenBudgetRatio);
+  const { runState, runStartMs } = state;
 
-  const color = status === "critical" ? "red" : status === "warning" ? "yellow" : undefined;
+  const elapsedSec =
+    runState === "done" && runStartMs != null
+      ? ((Date.now() - runStartMs) / 1000).toFixed(1)
+      : null;
 
-  const parts = [
-    `iter ${iter}`,
-    `$${costUsd.toFixed(4)}`,
-    model || "default",
-  ];
+  const tokenColor =
+    tokenBudgetRatio >= 0.9 ? "red" : tokenBudgetRatio >= 0.7 ? "yellow" : undefined;
+
+  const cols = process.stdout.columns ?? 80;
+  const sep = "─".repeat(cols);
 
   return (
-    <Box>
-      <Text dimColor>[</Text>
-      <Text color={color}>{parts.join(" · ")}</Text>
-      <Text dimColor>]</Text>
+    <Box flexDirection="column">
+      <Text dimColor>{sep}</Text>
+      <Box justifyContent="space-between" paddingX={1}>
+        <Text color={tokenColor}>{leftText(runState, iter, costUsd, model, elapsedSec)}</Text>
+        <Text dimColor>{rightHint(runState)}</Text>
+      </Box>
+      <Text dimColor>{sep}</Text>
     </Box>
   );
 }

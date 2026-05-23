@@ -6,18 +6,31 @@ import type { CliFlags } from "../config.js";
 import { loadCliConfig, validateCliConfig } from "../config.js";
 import { runOneShotInner } from "../dispatch.js";
 import { createEventBus } from "../eventBus.js";
+import { applyStdoutInterception } from "./stdoutShield.js";
 import type { LlmPatchProgressUpdate } from "../../core/agentLifecycleEvents.js";
 
 export async function runTui(
   initialPrompt: string | undefined,
   opts: CliFlags
 ): Promise<void> {
+  // Shield must be the very first action — before loadCliConfig can emit anything.
+  // Covers SIGINT/SIGTERM paths via process.on("exit") so the original write fn
+  // is always restored before the process terminates.
+  const restoreStdout = applyStdoutInterception();
+  process.on("exit", restoreStdout);
+
   const config = loadCliConfig(opts);
-  try {
-    validateCliConfig(config);
-  } catch (err) {
-    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
-    process.exit(1);
+
+  // Validate API key only when we're about to make API calls.
+  // In no-args (idle) mode the TUI renders without a pending task — defer validation.
+  if (initialPrompt !== undefined) {
+    try {
+      validateCliConfig(config);
+    } catch (err) {
+      restoreStdout();
+      process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    }
   }
 
   let instance: ReturnType<typeof render> | undefined;
@@ -53,9 +66,14 @@ export async function runTui(
 
   instance = render(
     <ErrorBoundary onCrash={onCrash}>
-      <App initialPrompt={initialPrompt} bus={bus} />
+      <App
+        initialPrompt={initialPrompt}
+        bus={bus}
+        initialModel={config.model}
+        capUsd={config.dailyUsdCap}
+      />
     </ErrorBoundary>,
-    { exitOnCtrlC: false }
+    { exitOnCtrlC: false, alternateScreen: true }
   );
 
   if (initialPrompt) {
@@ -70,11 +88,15 @@ export async function runTui(
     try {
       await runOneShotInner(initialPrompt, config, runId, { externalAc, onProgress });
     } catch {
-      // errors surfaced via eventBus in TUI.2; placeholder swallows for now
+      // errors surfaced via eventBus; placeholder swallows for now
     } finally {
+      // Hold briefly so user can see the final done/aborted state before alt-screen clears
+      await new Promise<void>((resolve) => setTimeout(resolve, 1500));
       instance.unmount();
+      restoreStdout();
     }
   } else {
     await instance.waitUntilExit();
+    restoreStdout();
   }
 }

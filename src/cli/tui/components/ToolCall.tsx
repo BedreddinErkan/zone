@@ -11,27 +11,24 @@ interface ToolCallProps {
   results: ToolResultEntry[];
 }
 
-export function ToolCall({ toolName, args, results }: ToolCallProps): React.ReactElement {
-  const truncatedArgs = args.length > 60 ? args.slice(0, 57) + "..." : args;
-
-  return (
-    <Box flexDirection="column">
-      <Text color="cyan">{`▸ ${toolName}(${truncatedArgs})`}</Text>
-      {results.map((r, i) => (
-        <Box key={i} marginLeft={2}>
-          <Text color={r.ok ? "green" : "red"}>{r.ok ? "✓" : "✗"} </Text>
-          <Text dimColor>{r.detail}</Text>
-        </Box>
-      ))}
-    </Box>
-  );
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
-export function ToolResult({ ok, detail }: ToolResultEntry): React.ReactElement {
+export function ToolCall({ toolName, args, results }: ToolCallProps): React.ReactElement {
+  const truncatedArgs = truncate(args, 50);
+  const lastResult = results[results.length - 1];
+
   return (
-    <Box marginLeft={2}>
-      <Text color={ok ? "green" : "red"}>{ok ? "✓" : "✗"} </Text>
-      <Text dimColor>{detail}</Text>
+    <Box justifyContent="space-between">
+      <Text color="cyan">{"  "}{toolName}  {truncatedArgs}</Text>
+      {lastResult != null ? (
+        <Text color={lastResult.ok ? "green" : "red"}>
+          {lastResult.ok ? "✓" : "✗"} {lastResult.detail}
+        </Text>
+      ) : (
+        <Text dimColor>…</Text>
+      )}
     </Box>
   );
 }

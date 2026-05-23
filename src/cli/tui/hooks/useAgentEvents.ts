@@ -6,6 +6,7 @@ import type { ZoneStructuredProgressEvent } from "../../../core/agentLifecycleEv
 import { resolveCommandApproval } from "../../../api/commandApprovals.js";
 import { resolveRevisionApproval } from "../../../llm/revisionApprovals.js";
 import { buildLoopCompleteSummary, buildRunSummary } from "../../../core/eventProcessors.js";
+// buildLoopCompleteSummary / buildRunSummary kept for future telemetry; run text no longer stored in transcript
 
 function flushBuffer(
   localBuffer: MutableRefObject<string>,
@@ -47,25 +48,19 @@ export function useAgentEvents(bus: EventBus | undefined, dispatch: Dispatch<Sto
 
     function handleAgentLoopComplete(evt: ZoneStructuredProgressEvent): void {
       flushBuffer(localBuffer, debounceTimer, dispatch);
-      dispatch({ type: "SPINNER_STOP" });
+      // Update iter/cost to final values if provided, then mark run done
       const iterCount = evt.iter_count ?? evt.iter ?? 0;
-      const text = buildLoopCompleteSummary(iterCount, evt.cumulativeCost ?? 0);
-      dispatch({ type: "RUN_SUMMARY", text });
+      const cost = evt.cumulativeCost ?? 0;
+      void buildLoopCompleteSummary; // retain import for future use
+      if (iterCount > 0) dispatch({ type: "STATUS_UPDATE", iter: iterCount, costUsd: cost });
+      dispatch({ type: "RUN_DONE" });
     }
 
     function handleRunSummary(evt: ZoneStructuredProgressEvent): void {
       flushBuffer(localBuffer, debounceTimer, dispatch);
-      if (evt.cost && evt.filesChanged) {
-        const text = buildRunSummary(
-          { totalUsd: evt.cost.totalUsd, iterCount: evt.cost.iterCount, cacheHitPct: evt.cost.cacheHitPct },
-          evt.filesChanged.map((f) => ({
-            filePath: f.filePath,
-            addedLines: f.addedLines,
-            removedLines: f.removedLines,
-          }))
-        );
-        dispatch({ type: "RUN_SUMMARY", text });
-      }
+      void buildRunSummary; // retain import for future use
+      if (evt.cost) dispatch({ type: "STATUS_UPDATE", costUsd: evt.cost.totalUsd });
+      dispatch({ type: "RUN_DONE" });
     }
 
     function handleToolCall(evt: ZoneStructuredProgressEvent): void {
