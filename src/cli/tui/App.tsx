@@ -9,6 +9,7 @@ import { StatusBar } from "./components/StatusBar.js";
 import { Toast } from "./components/Toast.js";
 import { Composer } from "./components/Composer.js";
 import { ApprovalModal } from "./components/ApprovalModal.js";
+import { PermissionsView } from "./components/PermissionsView.js";
 import type { EventBus } from "../eventBus.js";
 
 interface AppProps {
@@ -55,7 +56,7 @@ function AppInner({ bus, initialPrompt, onSubmit }: AppInnerProps): React.ReactE
       return;
     }
     // Esc — abort running task only; never exit TUI. Skip when approval modal is active.
-    if (key.escape && state.runState === "running" && state.pendingApproval === null) {
+    if (key.escape && state.runState === "running" && state.pendingApproval === null && state.modalView === "none") {
       runAcRef.current?.abort();
       dispatch({ type: "RUN_ABORTED" });
     }
@@ -84,6 +85,7 @@ function AppInner({ bus, initialPrompt, onSubmit }: AppInnerProps): React.ReactE
           dispatch={dispatch}
         />
       )}
+      {state.modalView === "permissions" && <PermissionsView />}
       <Composer onSubmit={handleComposerSubmit} onExit={exit} />
       <StatusBar />
     </Box>

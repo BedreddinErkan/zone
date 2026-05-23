@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp, rm } from "node:fs/promises";
-import { loadDiskTrust, addDiskTrustPrefix, diskTrustPrefixes } from "./diskTrust.js";
+import { loadDiskTrust, addDiskTrustPrefix, removeDiskTrustPrefix, diskTrustPrefixes } from "./diskTrust.js";
 
 describe("diskTrust", () => {
   let tmp: string;
@@ -32,6 +32,21 @@ describe("diskTrust", () => {
     await addDiskTrustPrefix(tmp, "find");
     await addDiskTrustPrefix(tmp, "grep");
     expect(diskTrustPrefixes(await loadDiskTrust(tmp))).toEqual(["find", "grep"]);
+  });
+
+  it("removeDiskTrustPrefix removes named prefix", async () => {
+    await addDiskTrustPrefix(tmp, "find");
+    await addDiskTrustPrefix(tmp, "ls");
+    await removeDiskTrustPrefix(tmp, "find");
+    const store = await loadDiskTrust(tmp);
+    expect(store.trustedPrefixes).toHaveLength(1);
+    expect(store.trustedPrefixes[0].prefix).toBe("ls");
+  });
+
+  it("removeDiskTrustPrefix is no-op for missing prefix", async () => {
+    await addDiskTrustPrefix(tmp, "find");
+    await removeDiskTrustPrefix(tmp, "nonexistent");
+    expect((await loadDiskTrust(tmp)).trustedPrefixes).toHaveLength(1);
   });
 
   it("loadDiskTrust returns empty on corrupt file", async () => {

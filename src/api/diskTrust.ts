@@ -47,6 +47,12 @@ export async function addDiskTrustPrefix(
   await saveDiskTrust(cwd, store);
 }
 
+export async function removeDiskTrustPrefix(cwd: string, prefix: string): Promise<void> {
+  const store = await loadDiskTrust(cwd);
+  store.trustedPrefixes = store.trustedPrefixes.filter(e => e.prefix !== prefix);
+  await saveDiskTrust(cwd, store);
+}
+
 export function diskTrustPrefixes(store: DiskTrustFile): string[] {
   return store.trustedPrefixes.map(e => e.prefix);
 }

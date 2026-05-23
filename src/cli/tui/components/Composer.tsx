@@ -2,6 +2,7 @@ import { Box, Text, useInput, usePaste } from "ink";
 import { useState, useEffect } from "react";
 import fg from "fast-glob";
 import { useStore } from "../store.js";
+import { loadDiskTrust } from "../../../api/diskTrust.js";
 
 const MAX_HISTORY = 50;
 
@@ -16,10 +17,11 @@ interface SlashCommand {
 }
 
 const SLASH_COMMANDS: SlashCommand[] = [
-  { name: "/help",  desc: "Show key bindings and commands" },
-  { name: "/exit",  desc: "Exit zone" },
-  { name: "/clear", desc: "Clear transcript" },
-  { name: "/cost",  desc: "Show session cost" },
+  { name: "/help",        desc: "Show key bindings and commands" },
+  { name: "/exit",        desc: "Exit zone" },
+  { name: "/clear",       desc: "Clear transcript" },
+  { name: "/cost",        desc: "Show session cost" },
+  { name: "/permissions", desc: "View and remove trusted command prefixes" },
 ];
 
 const HELP_LINES = [
@@ -31,7 +33,7 @@ const HELP_LINES = [
   "  ↑/↓         navigate history (when input empty)",
   "  ←/→ Home End  cursor movement",
   "Slash commands:",
-  "  /help  /clear  /cost  /exit",
+  "  /help  /clear  /cost  /exit  /permissions",
 ];
 
 function renderBuffer(buf: string, pos: number): string {
@@ -113,6 +115,11 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
         });
         break;
       }
+      case "/permissions":
+        void loadDiskTrust(process.cwd()).then(store => {
+          dispatch({ type: "PERMISSIONS_OPEN", list: store.trustedPrefixes });
+        });
+        break;
     }
   }
 
@@ -136,8 +143,8 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
   }
 
   useInput((input, key) => {
-    // Block all input when the approval modal is active
-    if (state.pendingApproval !== null) return;
+    // Block all input when approval modal or permissions view is active
+    if (state.pendingApproval !== null || state.modalView !== "none") return;
 
     // ── @ file-completion palette — available whenever palette is open ──
     if (atPaletteOpen && atFiles.length > 0) {
@@ -295,7 +302,7 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
   });
 
   usePaste((text) => {
-    if (state.pendingApproval !== null) return;
+    if (state.pendingApproval !== null || state.modalView !== "none") return;
     if (disabled && !(buffer.startsWith("/") || (!buffer && text.startsWith("/")))) return;
     const newBuf = buffer.slice(0, cursorPos) + text + buffer.slice(cursorPos);
     setBuffer(newBuf);

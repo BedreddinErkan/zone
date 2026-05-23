@@ -1,4 +1,5 @@
 import { createContext, useContext, useReducer, type Dispatch } from "react";
+import type { DiskTrustEntry } from "../../api/diskTrust.js";
 
 export type ToastEntry = {
   id: string;
@@ -50,6 +51,9 @@ export type StoreState = {
   modalStack: ModalEntry[];
   pendingApproval: { approvalId: string; runId: string; command: string } | null;
   sessionTrustedPrefixes: string[];
+  modalView: "none" | "permissions";
+  permissionsList: DiskTrustEntry[];
+  permissionsSelectedIndex: number;
 };
 
 function buildInitialState(initialValues?: { model: string; capUsd: number; trustedPrefixes?: string[] }): StoreState {
@@ -72,6 +76,9 @@ function buildInitialState(initialValues?: { model: string; capUsd: number; trus
     modalStack: [],
     pendingApproval: null,
     sessionTrustedPrefixes: initialValues?.trustedPrefixes ?? [],
+    modalView: "none",
+    permissionsList: [],
+    permissionsSelectedIndex: 0,
   };
 }
 
@@ -96,7 +103,11 @@ export type StoreAction =
   | { type: "TRANSCRIPT_CLEAR" }
   | { type: "PENDING_APPROVAL_SET"; approvalId: string; runId: string; command: string }
   | { type: "PENDING_APPROVAL_RESOLVED" }
-  | { type: "SESSION_TRUST_PREFIX"; prefix: string };
+  | { type: "SESSION_TRUST_PREFIX"; prefix: string }
+  | { type: "PERMISSIONS_OPEN"; list: DiskTrustEntry[] }
+  | { type: "PERMISSIONS_CLOSE" }
+  | { type: "PERMISSIONS_NAV"; direction: "up" | "down" }
+  | { type: "PERMISSIONS_REMOVE_SELECTED" };
 
 function reducer(state: StoreState, action: StoreAction): StoreState {
   switch (action.type) {
@@ -230,6 +241,35 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
 
     case "SESSION_TRUST_PREFIX":
       return { ...state, sessionTrustedPrefixes: [...state.sessionTrustedPrefixes, action.prefix] };
+
+    case "PERMISSIONS_OPEN":
+      return { ...state, modalView: "permissions", permissionsList: action.list, permissionsSelectedIndex: 0 };
+
+    case "PERMISSIONS_CLOSE":
+      return { ...state, modalView: "none" };
+
+    case "PERMISSIONS_NAV": {
+      const len = state.permissionsList.length;
+      if (len === 0) return state;
+      const next = action.direction === "up"
+        ? Math.max(0, state.permissionsSelectedIndex - 1)
+        : Math.min(len - 1, state.permissionsSelectedIndex + 1);
+      return { ...state, permissionsSelectedIndex: next };
+    }
+
+    case "PERMISSIONS_REMOVE_SELECTED": {
+      const idx = state.permissionsSelectedIndex;
+      const removed = state.permissionsList[idx];
+      if (!removed) return state;
+      const newList = state.permissionsList.filter((_, i) => i !== idx);
+      const newIdx = Math.min(idx, Math.max(0, newList.length - 1));
+      return {
+        ...state,
+        permissionsList: newList,
+        permissionsSelectedIndex: newIdx,
+        sessionTrustedPrefixes: state.sessionTrustedPrefixes.filter(p => p !== removed.prefix),
+      };
+    }
 
     default:
       return state;
