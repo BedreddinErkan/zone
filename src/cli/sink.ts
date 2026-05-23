@@ -3,12 +3,15 @@ import type {
   ZoneStructuredProgressEvent,
 } from "../core/agentLifecycleEvents.js";
 import type { Spinner } from "./spinner.js";
+import { promptCommandApproval, promptScopeRevision } from "./approvals.js";
 
 export interface CliSinkOptions {
   verbose: boolean;
   quiet: boolean;
   noColor: boolean;
   isTTY: boolean;
+  autoApprove?: boolean;
+  noRevision?: boolean;
 }
 
 export interface CliSink {
@@ -163,15 +166,25 @@ export function buildCliSink(opts: CliSinkOptions, spinner: Spinner): CliSink {
         if (!quiet) out(`${green}  ✓${reset} ${dim}Scope audit complete${reset}`);
         break;
 
-      case "command_approval_required":
-        // CLI.0.3 will wire actual readline prompt via approvals.ts
-        if (!quiet) {
-          out(
-            `${yellow}⚠ Command approval required: ${evt.command ?? evt.title}${reset}`
-          );
-          out(`${dim}  (use --yes to auto-approve)${reset}`);
+      case "command_approval_required": {
+        const approvalId = evt.approvalId;
+        const command = evt.command ?? evt.title ?? "";
+        const runId = evt.runId;
+        if (approvalId) {
+          void promptCommandApproval(approvalId, command, runId, {
+            autoApprove: opts.autoApprove ?? false,
+            noRevision: opts.noRevision ?? false,
+            isTTY,
+            noColor,
+          }, spinner).catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            out(`${red}error: command approval failed: ${msg}${reset}`);
+          });
+        } else if (!quiet) {
+          out(`${yellow}⚠ Command approval required: ${command}${reset}`);
         }
         break;
+      }
 
       case "command_auto_approved":
         if (!quiet) out(`${dim}  ✓ auto-approved (safe)${reset}`);
@@ -191,13 +204,25 @@ export function buildCliSink(opts: CliSinkOptions, spinner: Spinner): CliSink {
         }
         break;
 
-      case "scope_revision_proposed":
-        // CLI.0.3 will wire readline prompt via approvals.ts
-        if (!quiet) {
-          out(`${yellow}⚠ Scope revision proposed: ${evt.detail ?? evt.title}${reset}`);
-          out(`${dim}  (use --yes to approve, --no-revision to reject)${reset}`);
+      case "scope_revision_proposed": {
+        const revisionId = evt.revisionId;
+        const summary = evt.detail ?? evt.revisionRevisedPlanSummary ?? evt.title ?? "";
+        const runId = evt.runId;
+        if (revisionId) {
+          void promptScopeRevision(revisionId, summary, runId, {
+            autoApprove: opts.autoApprove ?? false,
+            noRevision: opts.noRevision ?? false,
+            isTTY,
+            noColor,
+          }, spinner).catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            out(`${red}error: scope revision failed: ${msg}${reset}`);
+          });
+        } else if (!quiet) {
+          out(`${yellow}⚠ Scope revision proposed: ${summary}${reset}`);
         }
         break;
+      }
 
       case "scope_revision_resolved":
         if (!quiet) out(`${dim}  Scope revision: ${evt.detail ?? evt.revisionDecision ?? "resolved"}${reset}`);

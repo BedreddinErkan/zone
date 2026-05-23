@@ -4,6 +4,7 @@ import {
   rejectPendingApprovalsForRun,
   clearTrustedCommandsForRun,
 } from "../api/commandApprovals.js";
+import { rejectPendingRevisionsForRun } from "../llm/revisionApprovals.js";
 import { loadCliConfig, validateCliConfig, type CliConfig, type CliFlags } from "./config.js";
 import { createSpinner } from "./spinner.js";
 import { buildCliSink } from "./sink.js";
@@ -23,12 +24,15 @@ export async function runOneShotInner(
       quiet: config.quiet,
       noColor: config.noColor,
       isTTY: process.stdout.isTTY === true,
+      autoApprove: config.autoApprove,
+      noRevision: config.noRevision,
     },
     spinner
   );
 
   const sigintHandler = (): void => {
     rejectPendingApprovalsForRun(runId);
+    rejectPendingRevisionsForRun(runId);
     clearTrustedCommandsForRun(runId);
     ac.abort();
   };
@@ -54,6 +58,7 @@ export async function runOneShotInner(
   } finally {
     process.off("SIGINT", sigintHandler);
     rejectPendingApprovalsForRun(runId);
+    rejectPendingRevisionsForRun(runId);
     clearTrustedCommandsForRun(runId);
     spinner.stop();
   }
