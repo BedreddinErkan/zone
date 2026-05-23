@@ -3104,7 +3104,7 @@ Example:
         tierArchetypeMismatch &&
         promotedFromArchetype === null;  // one-shot guard shared with dispatcher promotions
       if (_isForcedTierEligible) {
-        const hasRepeatReads = [...filesReadCountThisRun.values()].some((c) => c >= 3);
+        const hasRepeatReads = [...filesReadCountThisRun.values()].some((c) => c >= 2);
         if (failureDetected && iter >= 2 && hasRepeatReads) {
           promotedFromArchetype = input.taskClassification?.archetype ?? null;
           promotionTrigger = "forced_tier_blocking";
