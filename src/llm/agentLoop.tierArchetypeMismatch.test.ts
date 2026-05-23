@@ -234,8 +234,8 @@ describe("forced_tier_blocking promotion trigger (Phase 6.A Branch B)", () => {
     }).length).toBe(0);
   });
 
-  it("T.10: no promotion when repeat-read count < 3 (only 2 reads per file)", async () => {
-    // Read same file twice (not 3×), then fail — should NOT promote
+  it("T.10: promotion fires when file read 2 times (threshold=2)", async () => {
+    // Read same file twice (threshold=2), then fail at iter>=2 — should promote
     mocks.createChatCompletion
       .mockResolvedValueOnce(makeToolCallResponse("read_file", '{"filePath":"src/foo.ts"}', "c1"))
       .mockResolvedValueOnce(makeToolCallResponse("read_file", '{"filePath":"src/foo.ts"}', "c2"))
@@ -253,6 +253,38 @@ describe("forced_tier_blocking promotion trigger (Phase 6.A Branch B)", () => {
       task: "fix the failing test",
       repoPath,
       runId: "test-forced-promo-3",
+      forceTier: "simple",
+      taskClassification: makeClassification({ archetype: "targeted_fix", tier: "simple" }),
+    });
+
+    const ftbLogs = promotionLogs(mocks.log).filter((c: unknown[]) => {
+      const p = JSON.parse(c[1] as string) as Record<string, unknown>;
+      return p.trigger === "forced_tier_blocking";
+    });
+    expect(ftbLogs.length).toBe(1);
+  });
+
+  it("T.10b: no promotion when all files read only once (below threshold)", async () => {
+    // Read 4 different files once each, then fail — count=1 per file, never >= 2
+    mocks.createChatCompletion
+      .mockResolvedValueOnce(makeToolCallResponse("read_file", '{"filePath":"src/a.ts"}', "c1"))
+      .mockResolvedValueOnce(makeToolCallResponse("read_file", '{"filePath":"src/b.ts"}', "c2"))
+      .mockResolvedValueOnce(makeToolCallResponse("read_file", '{"filePath":"src/c.ts"}', "c3"))
+      .mockResolvedValueOnce(makeToolCallResponse("read_file", '{"filePath":"src/d.ts"}', "c4"))
+      .mockResolvedValueOnce(makeToolCallResponse("apply_patch", '{"filePath":"src/a.ts","blocks":[]}', "c5"))
+      .mockResolvedValueOnce(makeToolCallResponse("apply_patch", '{"filePath":"src/a.ts","blocks":[]}', "c6"));
+
+    toolExecutorMock.executeTool.mockImplementation(async (name: string) => {
+      if (name === "apply_patch") {
+        return { success: false, output: "patch rejected" };
+      }
+      return { success: true, output: "ok" };
+    });
+
+    await runAgentLoop({
+      task: "fix the failing test",
+      repoPath,
+      runId: "test-forced-promo-3b",
       forceTier: "simple",
       taskClassification: makeClassification({ archetype: "targeted_fix", tier: "simple" }),
     });
