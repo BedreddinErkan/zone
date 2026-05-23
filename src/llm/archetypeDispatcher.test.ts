@@ -10,13 +10,15 @@ describe("readArchetypeFlagsFromEnv", () => {
     expect(readArchetypeFlagsFromEnv({})).toEqual({
       dispatcherEnabled: false,
       simpleAddEnabled: false,
+      questionEnabled: false,
+      investigationEnabled: false,
     });
   });
 
   it("returns dispatcherEnabled true when ZONE_ARCHETYPE_DISPATCHER=1", () => {
     expect(
       readArchetypeFlagsFromEnv({ ZONE_ARCHETYPE_DISPATCHER: "1" }),
-    ).toEqual({ dispatcherEnabled: true, simpleAddEnabled: false });
+    ).toEqual({ dispatcherEnabled: true, simpleAddEnabled: false, questionEnabled: false, investigationEnabled: false });
   });
 
   it("returns both true when both flags are '1'", () => {
@@ -25,7 +27,7 @@ describe("readArchetypeFlagsFromEnv", () => {
         ZONE_ARCHETYPE_DISPATCHER: "1",
         ZONE_ARCHETYPE_ENABLE_SIMPLE_ADD: "1",
       }),
-    ).toEqual({ dispatcherEnabled: true, simpleAddEnabled: true });
+    ).toEqual({ dispatcherEnabled: true, simpleAddEnabled: true, questionEnabled: false, investigationEnabled: false });
   });
 
   it("rejects 'true' literal — only '1' enables the flag", () => {

@@ -389,10 +389,11 @@ export function assembleAgentSystemPrompt(input: {
     `${input.agentIntro}\n\n` +
     (input.archetype === "question" || input.archetype === "investigation"
       ? `Q&A / LISTING MODE:\n` +
-        `- Use ONE shell command (run_command) to answer filesystem or enumeration queries.\n` +
+        `- Use ONE shell command via run_command (e.g. find . -name "*.ts" -type f | sort, ls -la, grep -rn pattern src/) to answer the query.\n` +
+        `- For enumeration: PREFER find ... -type f | sort — returns the FULL accurate listing. Do NOT use list_files (truncates) or search_in_files (paginates).\n` +
         `- Do NOT read source files unless the user explicitly asks for context.\n` +
-        `- Final response: command output plus a one-sentence summary.\n` +
-        `- Iteration budget is 3 — one command, one confirmation, one summary.\n\n`
+        `- Final response: full command output plus a one-sentence summary.\n` +
+        `- Iteration budget is 3 — one command, optional confirmation, one summary.\n\n`
       : "") +
     (input.hasFramework ? `${input.frameworkLines.join("\n")}\n\n` : "") +
     (input.projectMemoryBlock ? `${input.projectMemoryBlock}\n\n` : "") +

@@ -5861,6 +5861,7 @@ const initializeTodosFromPlan = (): void => {
       if (!pipelineCfg.allowScopeRevision) s.add("suggest_scope_change");
       if (pipelineCfg.readOnlyPipeline) {
         for (const t of ["apply_patch", "write_file", "revert_patch", "TodoWrite"]) s.add(t);
+        for (const t of ["list_files", "search_in_files", "find_references"]) s.add(t);
       }
       return s.size > 0 ? s : undefined;
     })();
