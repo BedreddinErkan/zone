@@ -153,18 +153,21 @@ export function useAgentEvents(
     }
 
     function handleCommandApproval(evt: ZoneStructuredProgressEvent): void {
+      process.stderr.write(`[probe-handle-command-approval] received approvalId="${String(evt.approvalId ?? "")}" command="${evt.command ?? evt.title ?? ""}"\n`);
       if (!evt.approvalId) return;
       const command = evt.command ?? evt.title ?? "";
       const prefixes = trustedPrefixesRef.current ?? [];
       const trusted = prefixes.some(
         p => command.trim() === p || command.trim().startsWith(p + " ")
       );
+      process.stderr.write(`[probe-handle-command-approval] trusted=${trusted} prefixCount=${prefixes.length}\n`);
       if (trusted) {
         resolveCommandApproval({ approvalId: evt.approvalId, runId: evt.runId ?? "", approved: true });
         return;
       }
       flushBuffer(localBuffer, debounceTimer, dispatch);
       dispatch({ type: "PENDING_APPROVAL_SET", approvalId: evt.approvalId, runId: evt.runId ?? "", command });
+      process.stderr.write(`[probe-handle-command-approval] dispatched PENDING_APPROVAL_SET\n`);
     }
 
     function handleRevisionProposed(evt: ZoneStructuredProgressEvent): void {

@@ -46,6 +46,10 @@ function AppInner({ bus, initialPrompt, onSubmit }: AppInnerProps): React.ReactE
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    process.stderr.write(`[probe-app-modal-decision] pendingApproval=${state.pendingApproval !== null ? `SET command="${state.pendingApproval.command}"` : "NULL"}\n`);
+  }, [state.pendingApproval]);
+
   // Anchor stdin so Ink doesn't auto-unmount via beforeExit when the event loop empties.
   useInput((input, key) => {
     // Ctrl+C — always exit. In TTY raw mode, SIGINT never fires; \x03 arrives here instead.
