@@ -50,6 +50,7 @@ import { runTestEngineerFlow } from "../roles/runTestEngineerFlow.js";
 import { runDataAnalystFlow } from "../roles/runDataAnalystFlow.js";
 import { checkConfidenceGate, renderConfidenceGateBlock } from "../core/confidenceGate.js";
 import { runOneShotFromCli } from "./dispatch.js";
+import { runRepl } from "./repl.js";
 const execFileAsync = promisify(execFile);
 const ANSI_ENABLED = process.env.VITEST !== "true" && process.env.NO_COLOR !== "1";
 const CLI_LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
@@ -1374,19 +1375,27 @@ export async function run(): Promise<void> {
 
   const options = program.opts<CliOptions>();
 
-  // CLI.0 agent-loop path: positional task arg → in-process runLlmPatchFlow
+  const cliFlags = {
+    model: options.model,
+    repo: options.repo,
+    forceTier: options.forceTier,
+    yes: options.yes,
+    noRevision: options.noRevision,
+    verbose: options.verbose,
+    noColor: options.noColor,
+  };
+
+  // CLI.0 agent-loop path: positional task arg → one-shot; no arg → REPL
   const positionalTask = program.args[0]?.trim();
   if (positionalTask) {
-    await runOneShotFromCli(positionalTask, {
-      model: options.model,
-      repo: options.repo,
-      forceTier: options.forceTier,
-      yes: options.yes,
-      noRevision: options.noRevision,
-      verbose: options.verbose,
-      noColor: options.noColor,
-    });
+    await runOneShotFromCli(positionalTask, cliFlags);
     return; // runOneShotFromCli calls process.exit internally
+  }
+
+  // If no legacy --task flag, launch REPL; otherwise fall through to legacy path
+  if (!options.task) {
+    await runRepl(cliFlags);
+    return;
   }
 
   const exitCode = await runCliWithOptions(options);

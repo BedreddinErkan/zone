@@ -9,13 +9,20 @@ import { loadCliConfig, validateCliConfig, type CliConfig, type CliFlags } from 
 import { createSpinner } from "./spinner.js";
 import { buildCliSink } from "./sink.js";
 
+export interface OneShotOpts {
+  conversationId?: string;
+  /** When provided (REPL mode), the caller manages AbortController and SIGINT — no internal handler. */
+  externalAc?: AbortController;
+}
+
 /** Core one-shot runner. Returns the flow result — does NOT call process.exit. */
 export async function runOneShotInner(
   task: string,
   config: CliConfig,
-  runId: string
+  runId: string,
+  opts: OneShotOpts = {}
 ): Promise<LlmPatchFlowResult> {
-  const ac = new AbortController();
+  const ac = opts.externalAc ?? new AbortController();
 
   const spinner = createSpinner(process.stdout.isTTY === true, config.noColor);
   const sink = buildCliSink(
@@ -30,13 +37,17 @@ export async function runOneShotInner(
     spinner
   );
 
-  const sigintHandler = (): void => {
-    rejectPendingApprovalsForRun(runId);
-    rejectPendingRevisionsForRun(runId);
-    clearTrustedCommandsForRun(runId);
-    ac.abort();
-  };
-  process.once("SIGINT", sigintHandler);
+  // Only register an internal SIGINT handler when not in REPL (REPL manages its own).
+  let sigintHandler: (() => void) | null = null;
+  if (!opts.externalAc) {
+    sigintHandler = (): void => {
+      rejectPendingApprovalsForRun(runId);
+      rejectPendingRevisionsForRun(runId);
+      clearTrustedCommandsForRun(runId);
+      ac.abort();
+    };
+    process.once("SIGINT", sigintHandler);
+  }
 
   try {
     const userApiKey =
@@ -46,6 +57,7 @@ export async function runOneShotInner(
       task,
       repoPath: config.repoPath,
       runId,
+      conversationId: opts.conversationId,
       onProgress: sink.onProgress,
       abortSignal: ac.signal,
       userApiKey,
@@ -56,7 +68,7 @@ export async function runOneShotInner(
 
     return result;
   } finally {
-    process.off("SIGINT", sigintHandler);
+    if (sigintHandler) process.off("SIGINT", sigintHandler);
     rejectPendingApprovalsForRun(runId);
     rejectPendingRevisionsForRun(runId);
     clearTrustedCommandsForRun(runId);
