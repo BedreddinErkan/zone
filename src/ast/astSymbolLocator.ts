@@ -1,6 +1,6 @@
 import path from "node:path";
 import { parse } from "@babel/parser";
-import traverseModule, { type NodePath } from "@babel/traverse";
+import traverseModule, { type NodePath, type TraverseOptions } from "@babel/traverse";
 import type * as t from "@babel/types";
 
 export type SymbolKind =
@@ -55,12 +55,8 @@ type Candidate = {
   source: string;
 };
 
-const traverse =
-  (
-    traverseModule as unknown as {
-      default?: typeof traverseModule;
-    }
-  ).default ?? traverseModule;
+const traverse = ((traverseModule as unknown as { default?: unknown }).default ?? traverseModule) as
+  (parent: t.Node, opts?: TraverseOptions) => void;
 
 function isSupportedScriptExtension(filePath: string): boolean {
   const ext = path.extname(String(filePath || "")).toLowerCase();

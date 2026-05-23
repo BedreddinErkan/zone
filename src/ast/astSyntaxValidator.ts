@@ -1,6 +1,6 @@
 import path from "node:path";
 import { parse, type ParserPlugin } from "@babel/parser";
-import traverseModule from "@babel/traverse";
+import traverseModule, { type TraverseOptions } from "@babel/traverse";
 import * as t from "@babel/types";
 
 export interface SyntaxValidationResult {
@@ -40,12 +40,8 @@ type InlineStylePseudoClassInfo = {
   line?: number;
 };
 
-const traverse =
-  (
-    traverseModule as unknown as {
-      default?: typeof traverseModule;
-    }
-  ).default ?? traverseModule;
+const traverse = ((traverseModule as unknown as { default?: unknown }).default ?? traverseModule) as
+  (parent: t.Node, opts?: TraverseOptions) => void;
 
 const BABEL_PLUGINS: ParserPlugin[] = [
   "jsx",

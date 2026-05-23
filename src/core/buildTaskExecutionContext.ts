@@ -1,7 +1,7 @@
-import { parseTaskIntent } from "./taskIntentParser";
-import { selectRelevantBlocks } from "./selectRelevantBlocks";
-import { analyzePatchRisk } from "./patchRiskAnalyzer";
-import { validateSuggestedArchitecture } from "./validateSuggestedArchitecture";
+import { parseTaskIntent } from "./taskIntentParser.js";
+import { selectRelevantBlocks } from "./selectRelevantBlocks.js";
+import { analyzePatchRisk } from "./patchRiskAnalyzer.js";
+import { validateSuggestedArchitecture } from "./validateSuggestedArchitecture.js";
 import { loadSchemaSnapshot } from "../repo/loadSchemaSnapshot.js";
 import { analyzeProjectPatterns } from "../repo/analyzeProjectPatterns.js";
 import { detectResourceStorage } from "./detectResourceStorage.js";

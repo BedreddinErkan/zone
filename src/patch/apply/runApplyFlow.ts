@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import type { PatchPlan } from "../conversion/generatedPlanConversionTypes";
+import type { PatchPlan } from "../conversion/generatedPlanConversionTypes.js";
 import type {
   ApplyFlowResult,
   ApplyOperationResult
-} from "../applyFlowTypes";
+} from "../applyFlowTypes.js";
 
 export function runApplyFlow(
   patchPlan: PatchPlan,

@@ -178,33 +178,27 @@ const DISPATCHED_TOOLS = new Set([
   "revert_patch",
 ]);
 
-// Import the definitions lazily to keep the check co-located with the executor.
-// We do a synchronous inline require so the guard runs before any server code.
-(function verifyToolDispatch() {
-  // Dynamically import the definitions at runtime to avoid a circular reference
-  // at compile time.  If the module isn't compiled yet this is a no-op.
-  let defs: Array<{ function: { name: string } }>;
+// Startup guard: every toolDefinitions entry must have an executor dispatch branch.
+// Dynamically import to avoid circular references at compile time; no-op if dist not built.
+{
+  let defs: Array<{ function: { name: string } }> | undefined;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    defs = (
-      require("./toolDefinitions.js") as {
-        ZONE_TOOLS: Array<{ function: { name: string } }>;
-      }
-    ).ZONE_TOOLS;
+    defs = ((await import("./toolDefinitions.js")) as { ZONE_TOOLS: Array<{ function: { name: string } }> }).ZONE_TOOLS;
   } catch {
     // dist/ not built yet — skip guard during source-only runs
-    return;
   }
-  for (const tool of defs) {
-    const name = tool.function?.name;
-    if (!DISPATCHED_TOOLS.has(name)) {
-      throw new Error(
-        `FATAL: Tool '${name}' is defined in toolDefinitions but has no executor dispatch. ` +
-          `Add a 'if (toolName === "${name}") { ... }' branch to executeTool().`
-      );
+  if (defs) {
+    for (const tool of defs) {
+      const name = tool.function?.name;
+      if (!DISPATCHED_TOOLS.has(name)) {
+        throw new Error(
+          `FATAL: Tool '${name}' is defined in toolDefinitions but has no executor dispatch. ` +
+            `Add a 'if (toolName === "${name}") { ... }' branch to executeTool().`
+        );
+      }
     }
   }
-})();
+}
 
 export interface ToolResult {
   success: boolean;

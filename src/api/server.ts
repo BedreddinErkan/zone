@@ -8,6 +8,8 @@ import { exec, execSync } from "node:child_process";
 import fs, { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { runAgent } from "../core/runAgent.js";
 import { getUsage, getRunCost, readRecords } from "../usage/usageTracker.js";

@@ -42,25 +42,26 @@ export const BUILTIN_TOOL_CAPS: Record<string, ReadonlyArray<Capability>> = {
 };
 
 // Startup guard: every ZONE_TOOLS entry must have a capability mapping.
-(function verifyBuiltinCapsCoverage() {
-  let defs: Array<{ function: { name: string } }>;
+{
+  let defs: Array<{ function: { name: string } }> | undefined;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    defs = (require("./toolDefinitions.js") as { ZONE_TOOLS: typeof defs }).ZONE_TOOLS;
+    defs = ((await import("./toolDefinitions.js")) as { ZONE_TOOLS: Array<{ function: { name: string } }> }).ZONE_TOOLS;
   } catch {
-    return; // dist/ not built yet — skip during source-only runs
+    // dist/ not built yet — skip during source-only runs
   }
-  const missing: string[] = [];
-  for (const tool of defs) {
-    const name = tool.function?.name;
-    if (name && !(name in BUILTIN_TOOL_CAPS)) {
-      missing.push(name);
+  if (defs) {
+    const missing: string[] = [];
+    for (const tool of defs) {
+      const name = tool.function?.name;
+      if (name && !(name in BUILTIN_TOOL_CAPS)) {
+        missing.push(name);
+      }
+    }
+    if (missing.length > 0) {
+      throw new Error(
+        `[builtinCapabilities] Missing capability mapping for tool(s): ${missing.join(", ")}. ` +
+        `Add an entry to BUILTIN_TOOL_CAPS in src/tools/builtinCapabilities.ts.`
+      );
     }
   }
-  if (missing.length > 0) {
-    throw new Error(
-      `[builtinCapabilities] Missing capability mapping for tool(s): ${missing.join(", ")}. ` +
-      `Add an entry to BUILTIN_TOOL_CAPS in src/tools/builtinCapabilities.ts.`
-    );
-  }
-})();
+}

@@ -35,11 +35,8 @@ function loadCliAuthConfig(): void {
 
 loadCliAuthConfig();
 
-// Load the API server synchronously so this wrapper stays compatible with CJS startup.
-// `zone serve` imports this file through the current CommonJS-oriented serve path.
-// Using require here avoids top-level await while preserving the same startup behavior.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const apiServer = require("./api/server.js") as typeof import("./api/server.js");
+// Top-level await loads the server after loadCliAuthConfig() sets env vars (ordering preserved).
+const apiServer = await import("./api/server.js") as typeof import("./api/server.js");
 
 export const app = apiServer.app;
 export const startServer = apiServer.startServer;

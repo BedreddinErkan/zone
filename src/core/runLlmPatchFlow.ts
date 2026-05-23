@@ -9,6 +9,8 @@ import { extractSymbolContext } from "../ast/extractSymbolContext.js";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { planFeatureWithLlm } from "../llm/planFeature.js";
 import { planPatchPreviewWithLlm } from "../llm/planPatchPreview.js";
 import { planFullPatchWithLlm } from "../llm/planFullPatch.js";

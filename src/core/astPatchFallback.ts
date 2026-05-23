@@ -1,6 +1,10 @@
 import { parse } from "@babel/parser";
-import traverse, { type NodePath } from "@babel/traverse";
-import generate from "@babel/generator";
+import _traverseImport, { type NodePath } from "@babel/traverse";
+import _generateImport from "@babel/generator";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const traverse = ((_traverseImport as unknown as { default?: unknown }).default ?? _traverseImport) as any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const generate = ((_generateImport as unknown as { default?: unknown }).default ?? _generateImport) as any;
 import * as t from "@babel/types";
 import { debugLog } from "../utils/logger.js";
 

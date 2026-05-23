@@ -1,4 +1,4 @@
-import type { TaskIntent } from "./taskIntentParser";
+import type { TaskIntent } from "./taskIntentParser.js";
 
 export function getIntentAwareScoreBoost(
   filePath: string,

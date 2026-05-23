@@ -2,9 +2,12 @@
   "name": "zone-api",
   "version": "0.0.1",
   "private": true,
+  "type": "module",
   "description": "Self-host AI coding agent. Tier-bounded execution, atomic safety, BYOK transparency.",
   "main": "./dist/server.js",
-  "bin": { "zone": "./dist/cli/index.js" },
+  "bin": {
+    "zone": "./dist/cli/index.js"
+  },
   "exports": {
     ".": "./dist/server.js",
     "./flow": "./dist/core/runLlmPatchFlow.js",
@@ -39,7 +42,12 @@
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
     "fast-glob": "^3.3.3",
+    "ink": "^7.0.3",
+    "ink-select-input": "^6.2.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
     "openai": "^5.23.2",
+    "react": "^19.2.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
@@ -49,7 +57,10 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.1",
     "@types/node": "^22.13.10",
+    "@types/react": "^19.2.0",
+    "@vitejs/plugin-react": "^4.7.0",
     "dompurify": "^3.4.4",
+    "ink-testing-library": "^4.0.0",
     "marked": "^18.0.3",
     "typescript": "^5.9.3",
     "undici": "^8.3.0",

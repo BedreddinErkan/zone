@@ -1,4 +1,4 @@
-import type { RiskBreakdown, RiskScoreDetails } from "./types/risk";
+import type { RiskBreakdown, RiskScoreDetails } from "./types/risk.js";
 
 type ComputeRiskScoreDetailsInput = {
   task: string;
