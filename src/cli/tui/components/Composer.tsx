@@ -122,9 +122,7 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
   }
 
   useInput((input, key) => {
-    if (disabled) return;
-
-    // Palette navigation
+    // ── Slash-command path — always available, even during a running task ──
     if (paletteOpen && filteredCommands.length > 0) {
       if (key.upArrow) {
         setPaletteIdx((i) => Math.max(0, i - 1));
@@ -146,13 +144,42 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
         return;
       }
     }
+    if (key.return && SLASH_COMMANDS.some((c) => c.name === buffer)) {
+      executeSlashCommand(buffer);
+      return;
+    }
 
-    // Exact slash command on Enter
-    if (key.return) {
-      if (SLASH_COMMANDS.some((c) => c.name === buffer)) {
-        executeSlashCommand(buffer);
+    // ── During a run: only slash-buffer editing allowed ──
+    if (disabled) {
+      if (key.escape) {
+        setBuffer("");
+        setCursorPos(0);
+        setHistoryIdx(-1);
         return;
       }
+      if (key.backspace || key.delete) {
+        if (cursorPos > 0) {
+          const newBuf = buffer.slice(0, cursorPos - 1) + buffer.slice(cursorPos);
+          setBuffer(newBuf);
+          setCursorPos(cursorPos - 1);
+          setHistoryIdx(-1);
+        }
+        return;
+      }
+      if (input && !key.ctrl && !key.meta && input.charCodeAt(0) >= 32) {
+        if (buffer === "" || buffer.startsWith("/")) {
+          const newBuf = buffer.slice(0, cursorPos) + input + buffer.slice(cursorPos);
+          setBuffer(newBuf);
+          setCursorPos(cursorPos + input.length);
+          setHistoryIdx(-1);
+          if (paletteOpen) setPaletteIdx(0);
+        }
+      }
+      return;
+    }
+
+    // ── Full input path (only when not running) ──
+    if (key.return) {
       // Multiline: trailing backslash → insert newline
       if (buffer.endsWith("\\")) {
         const newBuf = buffer.slice(0, -1) + "\n";
@@ -238,12 +265,12 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
   });
 
   usePaste((text) => {
-    if (disabled) return;
+    if (disabled && !(buffer.startsWith("/") || (!buffer && text.startsWith("/")))) return;
     const newBuf = buffer.slice(0, cursorPos) + text + buffer.slice(cursorPos);
     setBuffer(newBuf);
     setCursorPos(cursorPos + text.length);
     setHistoryIdx(-1);
-  }, { isActive: !disabled });
+  }, { isActive: true });
 
   const borderColor = disabled ? "gray" : "white";
   const displayBuffer = disabled ? buffer : renderBuffer(buffer, cursorPos);

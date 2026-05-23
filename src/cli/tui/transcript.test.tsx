@@ -269,6 +269,35 @@ describe("TUI.2 transcript rendering", () => {
     unmount();
   });
 
+  it("spurious tool_call events (no toolName, non-[tool] title) do not open indicator", async () => {
+    const bus = createEventBus();
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+
+    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
+    bus.emit("tool_call", makeEvt("tool_call", { title: "[agent_loop] Iteration 2/24" }));
+    await wait(50);
+
+    expect(lastFrame()).not.toContain("[agent_loop]");
+    unmount();
+  });
+
+  it("agent_loop_complete clears orphaned live indicator", async () => {
+    const bus = createEventBus();
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+
+    bus.emit("tool_call", makeEvt("tool_call", { toolName: "list_files", detail: "src/cli/tui" }));
+    await wait(50);
+    expect(lastFrame()).toContain("list_files");
+
+    bus.emit("agent_loop_complete", makeEvt("agent_loop_complete"));
+    await wait(50);
+
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("list_files");
+    expect(frame).toContain("done");
+    unmount();
+  });
+
   it("Header renders cwd", () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);

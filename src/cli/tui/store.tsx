@@ -189,10 +189,20 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
       };
 
     case "RUN_DONE":
-      return { ...state, spinner: null, runState: "done" };
+      return {
+        ...state,
+        spinner: null,
+        runState: "done",
+        liveTail: { ...state.liveTail, currentToolCall: null },
+      };
 
     case "RUN_ABORTED":
-      return { ...state, spinner: null, runState: "aborted" };
+      return {
+        ...state,
+        spinner: null,
+        runState: "aborted",
+        liveTail: { ...state.liveTail, currentToolCall: null },
+      };
 
     case "USER_PROMPT":
       return {

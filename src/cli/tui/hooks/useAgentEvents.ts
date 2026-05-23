@@ -64,8 +64,12 @@ export function useAgentEvents(bus: EventBus | undefined, dispatch: Dispatch<Sto
     }
 
     function handleToolCall(evt: ZoneStructuredProgressEvent): void {
+      const title = evt.title ?? "";
+      // Skip spurious progress strings (e.g. "[agent_loop] Iteration N/24"):
+      // real tool calls either carry toolName or have a "[tool]"-prefixed title
+      if (!evt.toolName && !title.startsWith("[tool]")) return;
       flushBuffer(localBuffer, debounceTimer, dispatch);
-      dispatch({ type: "TOOL_CALL_OPEN", toolName: evt.toolName ?? evt.title ?? "", args: evt.detail ?? "" });
+      dispatch({ type: "TOOL_CALL_OPEN", toolName: evt.toolName ?? title, args: evt.detail ?? "" });
     }
 
     function handleToolResult(evt: ZoneStructuredProgressEvent): void {
