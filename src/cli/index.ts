@@ -49,8 +49,7 @@ import {
 import { runTestEngineerFlow } from "../roles/runTestEngineerFlow.js";
 import { runDataAnalystFlow } from "../roles/runDataAnalystFlow.js";
 import { checkConfidenceGate, renderConfidenceGateBlock } from "../core/confidenceGate.js";
-import { runOneShotFromCli } from "./dispatch.js";
-import { runRepl } from "./repl.js";
+import { runHeadless, runOneShotFromCli } from "./dispatch.js";
 const execFileAsync = promisify(execFile);
 const ANSI_ENABLED = process.env.VITEST !== "true" && process.env.NO_COLOR !== "1";
 const CLI_LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
@@ -83,6 +82,17 @@ type CliOptions = {
   yes?: boolean;
   noRevision?: boolean;
   noColor?: boolean;
+  // TUI.1 new flags
+  print?: boolean;
+  continue?: boolean;
+  resume?: string;
+  name?: string;
+  outputFormat?: string;
+  maxTurns?: number;
+  maxBudgetUsd?: number;
+  permissionMode?: string;
+  addDir?: string[];
+  forkSession?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -1316,7 +1326,17 @@ export async function run(): Promise<void> {
     .description(
       "Zone — AI Code Agent: deterministic, explainable, safe"
     )
-    .argument("[task]", "Task to run in-process via agent loop (omit for REPL)")
+    .argument("[query...]", "Task or initial prompt (omit for interactive TUI)")
+    .option("-p, --print", "Headless one-shot mode (non-interactive, no TUI)")
+    .option("-c, --continue", "Resume most recent session (coming in TUI.6)")
+    .option("-r, --resume <id>", "Resume session by ID (coming in TUI.6)")
+    .option("-n, --name <name>", "Name this session (stored for TUI.6)")
+    .option("--output-format <fmt>", "Output format: text | json", "text")
+    .option("--max-turns <n>", "Maximum agent turns", parseInt)
+    .option("--max-budget-usd <n>", "Maximum spend in USD", parseFloat)
+    .option("--permission-mode <mode>", "Permission mode (wired in TUI.4)")
+    .option("--add-dir <path...>", "Additional writable root directories")
+    .option("--fork-session", "Fork current session (coming in TUI.6)")
     .option("--task <text>", "Task or change request to analyze [deprecated: use positional arg]")
     .option("--repo <path>", "Target repository path", process.cwd())
     .option("-m, --model <id>", "Model override (e.g. claude-sonnet-4-6)")
@@ -1365,7 +1385,9 @@ export async function run(): Promise<void> {
       DEFAULT_RESULT_PATH
     )
       .option("--role <role>", "Agent role: developer | test_engineer | data_analyst")
-    .allowExcessArguments(false);
+    // Registering an action prevents Commander from calling unknownCommand() for
+    // positional args that don't match a subcommand name. Actual routing runs after parseAsync.
+    .action(() => { /* routing handled below */ });
 
   await program.parseAsync(process.argv);
 
@@ -1385,21 +1407,34 @@ export async function run(): Promise<void> {
     noColor: options.noColor,
   };
 
-  // TUI.0 entry-point fork: headless (--print / non-TTY) → one-shot; interactive → TUI
-  const positionalTask = program.args[0]?.trim();
-  const isHeadless = !!(options as Record<string, unknown>).print || !process.stdout.isTTY;
-  if (isHeadless || positionalTask) {
-    if (isHeadless) {
-      await runOneShotFromCli(positionalTask ?? options.task ?? "", cliFlags);
-      return;
-    }
-    // Interactive with positional arg: boot TUI (full wire-up in TUI.1)
+  // TUI.1 entry-point fork
+  const queryArgs = program.args as string[];
+  const positionalTask = queryArgs.length > 0 ? queryArgs.join(" ").trim() : undefined;
+  const outputFormat = (options.outputFormat === "json" ? "json" : "text") as "text" | "json";
+
+  // Placeholder guards for deferred session features
+  if (options.continue) {
+    process.stderr.write("error: session resume coming in TUI.6\n");
+    process.exit(1);
+  }
+  if (options.resume) {
+    process.stderr.write("error: session resume coming in TUI.6\n");
+    process.exit(1);
+  }
+
+  const isHeadless = options.print === true || !process.stdout.isTTY;
+
+  if (isHeadless) {
+    await runHeadless(positionalTask ?? options.task ?? "", cliFlags, { outputFormat });
+    return;
+  }
+
+  if (positionalTask) {
     const { runTui } = await import("./tui/index.js");
     await runTui(positionalTask, cliFlags);
     return;
   }
 
-  // No positional arg, interactive: boot TUI REPL
   if (!options.task) {
     const { runTui } = await import("./tui/index.js");
     await runTui(undefined, cliFlags);

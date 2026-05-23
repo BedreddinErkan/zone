@@ -6,13 +6,15 @@ import {
 } from "../api/commandApprovals.js";
 import { rejectPendingRevisionsForRun } from "../llm/revisionApprovals.js";
 import { loadCliConfig, validateCliConfig, type CliConfig, type CliFlags } from "./config.js";
-import { createSpinner } from "./spinner.js";
-import { buildCliSink } from "./sink.js";
+import { createSpinner, buildCliSink } from "./sink.js";
+import type { LlmPatchProgressUpdate } from "../core/agentLifecycleEvents.js";
 
 export interface OneShotOpts {
   conversationId?: string;
-  /** When provided (REPL mode), the caller manages AbortController and SIGINT — no internal handler. */
+  /** When provided (TUI/REPL mode), the caller manages AbortController and SIGINT. */
   externalAc?: AbortController;
+  /** Custom progress callback; when provided, the built-in sink is bypassed. */
+  onProgress?: (update: LlmPatchProgressUpdate) => void;
 }
 
 /** Core one-shot runner. Returns the flow result — does NOT call process.exit. */
@@ -36,8 +38,9 @@ export async function runOneShotInner(
     },
     spinner
   );
+  const progressCallback = opts.onProgress ?? sink.onProgress;
 
-  // Only register an internal SIGINT handler when not in REPL (REPL manages its own).
+  // Only register an internal SIGINT handler when caller doesn't manage AbortController.
   let sigintHandler: (() => void) | null = null;
   if (!opts.externalAc) {
     sigintHandler = (): void => {
@@ -58,7 +61,7 @@ export async function runOneShotInner(
       repoPath: config.repoPath,
       runId,
       conversationId: opts.conversationId,
-      onProgress: sink.onProgress,
+      onProgress: progressCallback,
       abortSignal: ac.signal,
       userApiKey,
       provider: config.provider,
@@ -96,10 +99,15 @@ function printResult(result: LlmPatchFlowResult, noColor: boolean): void {
   }
 }
 
-/** CLI entry-point for one-shot: loads config, validates, runs, exits. */
-export async function runOneShotFromCli(
+export interface HeadlessOpts {
+  outputFormat?: "text" | "json";
+}
+
+/** CLI entry-point for headless one-shot: loads config, validates, runs, exits. */
+export async function runHeadless(
   task: string,
-  flags: Partial<CliFlags>
+  flags: Partial<CliFlags>,
+  headlessOpts: HeadlessOpts = {}
 ): Promise<void> {
   const config = loadCliConfig(flags);
 
@@ -111,21 +119,52 @@ export async function runOneShotFromCli(
   }
 
   const runId = randomUUID();
+  const startMs = Date.now();
   let result: LlmPatchFlowResult;
 
+  const isJson = headlessOpts.outputFormat === "json";
+
   try {
-    result = await runOneShotInner(task, config, runId);
+    if (isJson) {
+      // Suppress all sink output; we'll emit a single JSON envelope at end.
+      const nullSink = { onProgress: () => undefined };
+      const ac = new AbortController();
+      process.once("SIGINT", () => { rejectPendingApprovalsForRun(runId); rejectPendingRevisionsForRun(runId); clearTrustedCommandsForRun(runId); ac.abort(); });
+      const userApiKey = config.provider === "openai" ? config.openaiApiKey : config.anthropicApiKey;
+      result = await runLlmPatchFlow({ task, repoPath: config.repoPath, runId, onProgress: nullSink.onProgress, abortSignal: ac.signal, userApiKey, provider: config.provider, forceTier: config.forceTier, mode: "patch" }).finally(() => { rejectPendingApprovalsForRun(runId); rejectPendingRevisionsForRun(runId); clearTrustedCommandsForRun(runId); });
+    } else {
+      result = await runOneShotInner(task, config, runId);
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("AbortError") || msg.includes("aborted")) {
-      process.stderr.write("\nAborted.\n");
-      process.exit(130); // SIGINT convention
+      if (isJson) process.stdout.write(JSON.stringify({ success: false, exit_code: 130, error: "aborted" }) + "\n");
+      else process.stderr.write("\nAborted.\n");
+      process.exit(130);
     }
-    process.stderr.write(`\nerror: ${msg}\n`);
+    if (isJson) process.stdout.write(JSON.stringify({ success: false, exit_code: 1, error: msg }) + "\n");
+    else process.stderr.write(`\nerror: ${msg}\n`);
     process.exit(1);
   }
 
-  printResult(result, config.noColor);
   const success = "ok" in result && result.ok === true;
+
+  if (isJson) {
+    const envelope = {
+      success,
+      exit_code: success ? 0 : 1,
+      cost_usd: ("costUsd" in result ? result.costUsd : null) ?? null,
+      duration_ms: Date.now() - startMs,
+      turn_count: ("iterCount" in result ? result.iterCount : null) ?? null,
+      summary: ("decisionMode" in result ? result.decisionMode : null) ?? ("finalState" in result ? result.finalState : null) ?? null,
+    };
+    process.stdout.write(JSON.stringify(envelope) + "\n");
+  } else {
+    printResult(result, config.noColor);
+  }
+
   process.exit(success ? 0 : 1);
 }
+
+/** @deprecated Use runHeadless instead. */
+export const runOneShotFromCli = runHeadless;

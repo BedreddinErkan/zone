@@ -5,7 +5,7 @@ import {
 import {
   resolveRevisionApproval,
 } from "../llm/revisionApprovals.js";
-import type { Spinner } from "./spinner.js";
+import type { Spinner } from "./sink.js";
 
 export interface ApprovalOpts {
   autoApprove: boolean;
