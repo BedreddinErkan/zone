@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 interface ToolResultEntry {
   ok: boolean;
   detail: string;
+  blocked?: true;
 }
 
 interface ToolCallProps {
@@ -23,9 +24,13 @@ export function ToolCall({ toolName, args, results }: ToolCallProps): React.Reac
     <Box justifyContent="space-between">
       <Text color="cyan">{"  "}{toolName}  {truncatedArgs}</Text>
       {lastResult != null ? (
-        <Text color={lastResult.ok ? "green" : "red"}>
-          {lastResult.ok ? "✓" : "✗"} {lastResult.detail}
-        </Text>
+        lastResult.blocked ? (
+          <Text color="yellow">⚠ blocked</Text>
+        ) : (
+          <Text color={lastResult.ok ? "green" : "red"}>
+            {lastResult.ok ? "✓" : "✗"} {lastResult.detail}
+          </Text>
+        )
       ) : (
         <Text dimColor>…</Text>
       )}

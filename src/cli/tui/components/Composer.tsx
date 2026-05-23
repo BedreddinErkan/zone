@@ -122,6 +122,9 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
   }
 
   useInput((input, key) => {
+    // Block all input when the approval modal is active
+    if (state.pendingApproval !== null) return;
+
     // ── Slash-command path — always available, even during a running task ──
     if (paletteOpen && filteredCommands.length > 0) {
       if (key.upArrow) {
@@ -265,6 +268,7 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
   });
 
   usePaste((text) => {
+    if (state.pendingApproval !== null) return;
     if (disabled && !(buffer.startsWith("/") || (!buffer && text.startsWith("/")))) return;
     const newBuf = buffer.slice(0, cursorPos) + text + buffer.slice(cursorPos);
     setBuffer(newBuf);

@@ -21,7 +21,7 @@ export type LiveTailState = {
 
 export type TranscriptEntry =
   | { kind: "assistant"; text: string }
-  | { kind: "tool_call"; toolName: string; args: string; results: { ok: boolean; detail: string }[] }
+  | { kind: "tool_call"; toolName: string; args: string; results: { ok: boolean; detail: string; blocked?: true }[] }
   | { kind: "error"; text: string }
   | { kind: "phase_marker"; phase: string }
   | { kind: "user_prompt"; text: string };
@@ -46,6 +46,8 @@ export type StoreState = {
   runStartMs?: number;
   toastQueue: ToastEntry[];
   modalStack: ModalEntry[];
+  pendingApproval: { approvalId: string; runId: string; command: string } | null;
+  sessionTrustedPrefixes: string[];
 };
 
 function buildInitialState(initialValues?: { model: string; capUsd: number }): StoreState {
@@ -65,6 +67,8 @@ function buildInitialState(initialValues?: { model: string; capUsd: number }): S
     runStartMs: undefined,
     toastQueue: [],
     modalStack: [],
+    pendingApproval: null,
+    sessionTrustedPrefixes: [],
   };
 }
 
@@ -75,7 +79,7 @@ export type StoreAction =
   | { type: "NARRATION_APPEND"; text: string }
   | { type: "FLUSH_NARRATION" }
   | { type: "TOOL_CALL_OPEN"; toolName: string; args: string }
-  | { type: "TOOL_RESULT_PUSH"; ok: boolean; detail: string }
+  | { type: "TOOL_RESULT_PUSH"; ok: boolean; detail: string; blocked?: true }
   | { type: "TOOL_CALL_CLOSE" }
   | { type: "STATUS_UPDATE"; iter?: number; costUsd?: number; tokenBudgetRatio?: number }
   | { type: "TOAST_PUSH"; entry: ToastEntry }
@@ -85,7 +89,10 @@ export type StoreAction =
   | { type: "RUN_DONE" }
   | { type: "RUN_ABORTED" }
   | { type: "USER_PROMPT"; text: string }
-  | { type: "TRANSCRIPT_CLEAR" };
+  | { type: "TRANSCRIPT_CLEAR" }
+  | { type: "PENDING_APPROVAL_SET"; approvalId: string; runId: string; command: string }
+  | { type: "PENDING_APPROVAL_RESOLVED" }
+  | { type: "SESSION_TRUST_PREFIX"; prefix: string };
 
 function reducer(state: StoreState, action: StoreAction): StoreState {
   switch (action.type) {
@@ -139,7 +146,7 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
       if (existing) {
         const updated = state.transcript.map((e: TranscriptEntry) =>
           e === existing
-            ? { ...existing, results: [...existing.results, { ok: action.ok, detail: action.detail }] }
+            ? { ...existing, results: [...existing.results, { ok: action.ok, detail: action.detail, ...(action.blocked ? { blocked: true as const } : {}) }] }
             : e
         );
         return { ...state, transcript: updated };
@@ -148,7 +155,7 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
         kind: "tool_call",
         toolName: tc.toolName,
         args: tc.args,
-        results: [{ ok: action.ok, detail: action.detail }],
+        results: [{ ok: action.ok, detail: action.detail, ...(action.blocked ? { blocked: true as const } : {}) }],
       };
       return { ...state, transcript: [...state.transcript, entry] };
     }
@@ -212,6 +219,15 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
 
     case "TRANSCRIPT_CLEAR":
       return { ...state, transcript: [], transcriptGeneration: state.transcriptGeneration + 1 };
+
+    case "PENDING_APPROVAL_SET":
+      return { ...state, pendingApproval: { approvalId: action.approvalId, runId: action.runId, command: action.command } };
+
+    case "PENDING_APPROVAL_RESOLVED":
+      return { ...state, pendingApproval: null };
+
+    case "SESSION_TRUST_PREFIX":
+      return { ...state, sessionTrustedPrefixes: [...state.sessionTrustedPrefixes, action.prefix] };
 
     default:
       return state;

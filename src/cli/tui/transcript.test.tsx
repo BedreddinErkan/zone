@@ -202,18 +202,21 @@ describe("TUI.2 transcript rendering", () => {
     unmount();
   });
 
-  it("command_approval_required auto-rejects and shows ErrorLine", async () => {
+  it("command_approval_required shows approval modal instead of auto-rejecting", async () => {
     const { resolveCommandApproval } = await import("../../api/commandApprovals.js");
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
-    bus.emit("command_approval_required", makeEvt("command_approval_required", { approvalId: "appr-1" }));
+    bus.emit("command_approval_required", makeEvt("command_approval_required", {
+      approvalId: "appr-1",
+      command: "find src -type f",
+    }));
     await wait(50);
 
-    expect(resolveCommandApproval).toHaveBeenCalledWith(
-      expect.objectContaining({ approvalId: "appr-1", approved: false })
-    );
-    expect(lastFrame()).toContain("auto-rejected");
+    // Modal shows — resolveCommandApproval NOT called yet (waiting for user input)
+    expect(resolveCommandApproval).not.toHaveBeenCalled();
+    expect(lastFrame()).toContain("Command approval required");
+    expect(lastFrame()).toContain("find src -type f");
     unmount();
   });
 
@@ -295,6 +298,49 @@ describe("TUI.2 transcript rendering", () => {
     const frame = lastFrame() ?? "";
     expect(frame).not.toContain("list_files");
     expect(frame).toContain("done");
+    unmount();
+  });
+
+  it("[tool] title parsed into clean toolName + args (no [tool] prefix in output)", async () => {
+    const bus = createEventBus();
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+
+    bus.emit("tool_call", makeEvt("tool_call", { title: "[tool] read_file: src/foo.ts" }));
+    await wait(50);
+
+    const frame = lastFrame() ?? "";
+    // Live indicator should show the clean parsed name, not the full "[tool] ..." string
+    expect(frame).toContain("read_file");
+    expect(frame).not.toContain("[tool]");
+    unmount();
+  });
+
+  it("tool_call + tool_result produces transcript entry with clean toolName", async () => {
+    const bus = createEventBus();
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+
+    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
+    bus.emit("tool_call", makeEvt("tool_call", { title: "[tool] read_file: src/cli/tui/App.tsx" }));
+    bus.emit("tool_result", makeEvt("tool_result", { toolName: "read_file", status: "success", detail: "42 lines" }));
+    await wait(50);
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("read_file");
+    expect(frame).toContain("src/cli/tui/App.tsx");
+    expect(frame).not.toContain("[tool]");
+    unmount();
+  });
+
+  it("[tool] title with no ': ' separator (tool with no args) uses full name", async () => {
+    const bus = createEventBus();
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+
+    bus.emit("tool_call", makeEvt("tool_call", { title: "[tool] list_files" }));
+    await wait(50);
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("list_files");
+    expect(frame).not.toContain("[tool]");
     unmount();
   });
 

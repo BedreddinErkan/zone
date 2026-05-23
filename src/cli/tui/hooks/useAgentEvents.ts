@@ -1,4 +1,4 @@
-import { useEffect, useRef, type Dispatch, type MutableRefObject } from "react";
+import { useEffect, useRef, type Dispatch, type MutableRefObject, type RefObject } from "react";
 import { randomUUID } from "node:crypto";
 import type { EventBus } from "../../eventBus.js";
 import type { StoreAction } from "../store.js";
@@ -23,7 +23,11 @@ function flushBuffer(
   }
 }
 
-export function useAgentEvents(bus: EventBus | undefined, dispatch: Dispatch<StoreAction>): void {
+export function useAgentEvents(
+  bus: EventBus | undefined,
+  dispatch: Dispatch<StoreAction>,
+  trustedPrefixesRef: RefObject<string[]> = { current: [] }
+): void {
   const localBuffer = useRef("");
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -69,7 +73,21 @@ export function useAgentEvents(bus: EventBus | undefined, dispatch: Dispatch<Sto
       // real tool calls either carry toolName or have a "[tool]"-prefixed title
       if (!evt.toolName && !title.startsWith("[tool]")) return;
       flushBuffer(localBuffer, debounceTimer, dispatch);
-      dispatch({ type: "TOOL_CALL_OPEN", toolName: evt.toolName ?? title, args: evt.detail ?? "" });
+      // onToolCall embeds tool name and args in title as "[tool] name: cmd".
+      // Parse it so Transcript renders "read_file  src/foo.ts  ✓" not "[tool] read_file: src/foo.ts  ✓".
+      let toolName = evt.toolName ?? title;
+      let args = evt.detail ?? "";
+      if (!evt.toolName && title.startsWith("[tool] ")) {
+        const stripped = title.slice(7);
+        const sep = stripped.indexOf(": ");
+        if (sep !== -1) {
+          toolName = stripped.slice(0, sep);
+          args = stripped.slice(sep + 2);
+        } else {
+          toolName = stripped;
+        }
+      }
+      dispatch({ type: "TOOL_CALL_OPEN", toolName, args });
     }
 
     function handleToolResult(evt: ZoneStructuredProgressEvent): void {
@@ -133,13 +151,18 @@ export function useAgentEvents(bus: EventBus | undefined, dispatch: Dispatch<Sto
     }
 
     function handleCommandApproval(evt: ZoneStructuredProgressEvent): void {
-      if (evt.approvalId) {
-        resolveCommandApproval({ approvalId: evt.approvalId, approved: false, runId: evt.runId });
+      if (!evt.approvalId) return;
+      const command = evt.command ?? evt.title ?? "";
+      const prefixes = trustedPrefixesRef.current ?? [];
+      const trusted = prefixes.some(
+        p => command.trim() === p || command.trim().startsWith(p + " ")
+      );
+      if (trusted) {
+        resolveCommandApproval({ approvalId: evt.approvalId, runId: evt.runId ?? "", approved: true });
+        return;
       }
-      dispatch({
-        type: "ERROR_LINE",
-        text: "⚠ Command approval required — auto-rejected (approval UI not yet implemented).",
-      });
+      flushBuffer(localBuffer, debounceTimer, dispatch);
+      dispatch({ type: "PENDING_APPROVAL_SET", approvalId: evt.approvalId, runId: evt.runId ?? "", command });
     }
 
     function handleRevisionProposed(evt: ZoneStructuredProgressEvent): void {

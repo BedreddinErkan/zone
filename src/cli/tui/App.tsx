@@ -8,6 +8,7 @@ import { Spinner } from "./components/Spinner.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { Toast } from "./components/Toast.js";
 import { Composer } from "./components/Composer.js";
+import { ApprovalModal } from "./components/ApprovalModal.js";
 import type { EventBus } from "../eventBus.js";
 
 interface AppProps {
@@ -28,6 +29,10 @@ function AppInner({ bus, initialPrompt, onSubmit }: AppInnerProps): React.ReactE
   const { exit } = useApp();
   const { state, dispatch } = useStore();
   const runAcRef = useRef<AbortController | null>(null);
+  const sessionTrustedPrefixesRef = useRef<string[]>(state.sessionTrustedPrefixes);
+  useEffect(() => {
+    sessionTrustedPrefixesRef.current = state.sessionTrustedPrefixes;
+  }, [state.sessionTrustedPrefixes]);
 
   // Start the initial run exactly once on mount if a prompt was provided at launch.
   useEffect(() => {
@@ -48,14 +53,14 @@ function AppInner({ bus, initialPrompt, onSubmit }: AppInnerProps): React.ReactE
       exit();
       return;
     }
-    // Esc — abort running task only; never exit TUI.
-    if (key.escape && state.runState === "running") {
+    // Esc — abort running task only; never exit TUI. Skip when approval modal is active.
+    if (key.escape && state.runState === "running" && state.pendingApproval === null) {
       runAcRef.current?.abort();
       dispatch({ type: "RUN_ABORTED" });
     }
   });
 
-  useAgentEvents(bus, dispatch);
+  useAgentEvents(bus, dispatch, sessionTrustedPrefixesRef);
 
   const handleComposerSubmit = (text: string, ac: AbortController): void => {
     runAcRef.current = ac;
@@ -70,6 +75,14 @@ function AppInner({ bus, initialPrompt, onSubmit }: AppInnerProps): React.ReactE
         <Spinner />
       </Box>
       {state.toastQueue.length > 0 && <Toast toast={state.toastQueue[0]} />}
+      {state.pendingApproval !== null && (
+        <ApprovalModal
+          approvalId={state.pendingApproval.approvalId}
+          runId={state.pendingApproval.runId}
+          command={state.pendingApproval.command}
+          dispatch={dispatch}
+        />
+      )}
       <Composer onSubmit={handleComposerSubmit} onExit={exit} />
       <StatusBar />
     </Box>
