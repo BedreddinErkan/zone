@@ -49,6 +49,7 @@ import {
 import { runTestEngineerFlow } from "../roles/runTestEngineerFlow.js";
 import { runDataAnalystFlow } from "../roles/runDataAnalystFlow.js";
 import { checkConfidenceGate, renderConfidenceGateBlock } from "../core/confidenceGate.js";
+import { runOneShotFromCli } from "./dispatch.js";
 const execFileAsync = promisify(execFile);
 const ANSI_ENABLED = process.env.VITEST !== "true" && process.env.NO_COLOR !== "1";
 const CLI_LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
@@ -75,7 +76,12 @@ type CliOptions = {
   patchPlan?: string;
   useGeneratedPatchPlan?: boolean;
   role?: string;
-
+  // CLI.0 agent-loop path options
+  model?: string;
+  forceTier?: string;
+  yes?: boolean;
+  noRevision?: boolean;
+  noColor?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -1309,8 +1315,14 @@ export async function run(): Promise<void> {
     .description(
       "Zone — AI Code Agent: deterministic, explainable, safe"
     )
-    .option("--task <text>", "Task or change request to analyze")
+    .argument("[task]", "Task to run in-process via agent loop (omit for REPL)")
+    .option("--task <text>", "Task or change request to analyze [deprecated: use positional arg]")
     .option("--repo <path>", "Target repository path", process.cwd())
+    .option("-m, --model <id>", "Model override (e.g. claude-sonnet-4-6)")
+    .option("--force-tier <tier>", "Force classification tier: simple | medium | complex")
+    .option("--yes", "Auto-approve all run_command calls and scope revisions")
+    .option("--no-revision", "Reject all scope revisions automatically")
+    .option("--no-color", "Disable ANSI colors")
     .option("--ci", "Enable CI mode")
     .option("--verbose", "Enable verbose logs")
     .option("--trace", "Show decision trace in output")
@@ -1361,6 +1373,22 @@ export async function run(): Promise<void> {
   }
 
   const options = program.opts<CliOptions>();
+
+  // CLI.0 agent-loop path: positional task arg → in-process runLlmPatchFlow
+  const positionalTask = program.args[0]?.trim();
+  if (positionalTask) {
+    await runOneShotFromCli(positionalTask, {
+      model: options.model,
+      repo: options.repo,
+      forceTier: options.forceTier,
+      yes: options.yes,
+      noRevision: options.noRevision,
+      verbose: options.verbose,
+      noColor: options.noColor,
+    });
+    return; // runOneShotFromCli calls process.exit internally
+  }
+
   const exitCode = await runCliWithOptions(options);
   process.exit(exitCode);
 }
