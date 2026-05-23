@@ -1,0 +1,291 @@
+import type {
+  LlmPatchProgressUpdate,
+  ZoneStructuredProgressEvent,
+} from "../core/agentLifecycleEvents.js";
+import type { Spinner } from "./spinner.js";
+
+export interface CliSinkOptions {
+  verbose: boolean;
+  quiet: boolean;
+  noColor: boolean;
+  isTTY: boolean;
+}
+
+export interface CliSink {
+  onProgress: (update: LlmPatchProgressUpdate) => void;
+}
+
+export function buildCliSink(opts: CliSinkOptions, spinner: Spinner): CliSink {
+  const { verbose, quiet, noColor, isTTY } = opts;
+
+  const dim = noColor ? "" : "\x1b[2m";
+  const cyan = noColor ? "" : "\x1b[36m";
+  const green = noColor ? "" : "\x1b[32m";
+  const yellow = noColor ? "" : "\x1b[33m";
+  const red = noColor ? "" : "\x1b[31m";
+  const bold = noColor ? "" : "\x1b[1m";
+  const reset = noColor ? "" : "\x1b[0m";
+
+  function out(line: string): void {
+    process.stdout.write(line + "\n");
+  }
+
+  function handleStructuredEvent(evt: ZoneStructuredProgressEvent): void {
+    const type = evt.type;
+
+    switch (type) {
+      case "agent_loop_start":
+        if (!quiet) spinner.start("Starting...");
+        break;
+
+      case "agent_loop_complete": {
+        const iter = evt.iter_count ?? evt.iter ?? 0;
+        const cost =
+          evt.cumulativeCost != null ? `$${evt.cumulativeCost.toFixed(4)}` : "";
+        const summary = [
+          iter > 0 ? `${iter}it` : null,
+          cost || null,
+        ]
+          .filter(Boolean)
+          .join(" / ");
+        spinner.succeed(summary ? `Done — ${summary}` : "Done");
+        break;
+      }
+
+      case "narration":
+        if (!quiet && evt.text) {
+          spinner.stop();
+          out(`${evt.text}`);
+        }
+        break;
+
+      case "tool_call":
+        if (!quiet) {
+          spinner.stop();
+          const label = evt.title ?? evt.command ?? evt.filePath ?? "tool";
+          out(`${cyan}▸${reset} ${label}`);
+        }
+        break;
+
+      case "tool_result":
+        if (!quiet) {
+          const ok = evt.status === "success" || evt.status === "active";
+          const prefix = ok ? `${green}  ✓${reset}` : `${red}  ✗${reset}`;
+          if (evt.detail) out(`${prefix} ${dim}${evt.detail}${reset}`);
+        }
+        break;
+
+      case "reading_file":
+        if (!quiet && verbose) {
+          out(`${dim}  reading ${evt.filePath ?? evt.title}${reset}`);
+        }
+        break;
+
+      case "ranking_context":
+        spinner.update("Ranking context...");
+        break;
+
+      case "generating_patch":
+        spinner.update("Generating patch...");
+        break;
+
+      case "verification":
+      case "verification_investigating":
+      case "verification_fixing":
+        spinner.update("Verifying...");
+        break;
+
+      case "verification_fixed":
+        if (!quiet) out(`${green}  ✓${reset} ${dim}Verification fixed${reset}`);
+        break;
+
+      case "patch_converted":
+        if (!quiet) out(`${green}  ✓${reset} ${dim}Patch validated${reset}`);
+        break;
+
+      case "patch_rejected":
+        out(`${red}  ✗${reset} Patch rejected${evt.detail ? `: ${evt.detail}` : ""}`);
+        break;
+
+      case "iter_cost_update":
+        if (isTTY && !quiet && evt.iter != null && evt.cumulativeCost != null) {
+          const line = `${dim}  iter ${evt.iter} · $${evt.cumulativeCost.toFixed(4)}${reset}`;
+          if (verbose) out(line);
+        }
+        break;
+
+      case "token_budget_status": {
+        const ratio = evt.tokenBudgetRatio ?? 0;
+        if (ratio >= 0.9) {
+          out(`${red}${bold}⚠ Token budget critical (${Math.round(ratio * 100)}%)${reset}`);
+        } else if (ratio >= 0.7) {
+          out(`${yellow}⚠ Token budget at ${Math.round(ratio * 100)}%${reset}`);
+        }
+        break;
+      }
+
+      case "loop_warning_emitted":
+        out(
+          `${yellow}⚠ Possible loop${evt.detail ? ` — ${evt.detail}` : ""}${reset}`
+        );
+        break;
+
+      case "loop_detected_terminal":
+        spinner.fail("Loop detected — aborting");
+        break;
+
+      case "llm_retry_in_progress":
+        spinner.update(`Retrying${evt.detail ? ` (${evt.detail})` : ""}...`);
+        break;
+
+      case "task_classified":
+        if (!quiet) {
+          const tier = evt.tier ?? "";
+          const detail = evt.detail ?? "";
+          const parts = [tier, detail].filter(Boolean).join(", ");
+          out(`${dim}[${parts || evt.title}]${reset}`);
+        }
+        break;
+
+      case "tier_constraints_applied":
+        if (verbose) out(`${dim}[tier constraints applied]${reset}`);
+        break;
+
+      case "scope_audit_started":
+        if (!quiet) spinner.update("Auditing scope...");
+        break;
+
+      case "scope_audit_skipped":
+        if (verbose) out(`${dim}(scope audit skipped${evt.detail ? `: ${evt.detail}` : ""})${reset}`);
+        break;
+
+      case "scope_audit_completed":
+        if (!quiet) out(`${green}  ✓${reset} ${dim}Scope audit complete${reset}`);
+        break;
+
+      case "command_approval_required":
+        // CLI.0.3 will wire actual readline prompt via approvals.ts
+        if (!quiet) {
+          out(
+            `${yellow}⚠ Command approval required: ${evt.command ?? evt.title}${reset}`
+          );
+          out(`${dim}  (use --yes to auto-approve)${reset}`);
+        }
+        break;
+
+      case "command_auto_approved":
+        if (!quiet) out(`${dim}  ✓ auto-approved (safe)${reset}`);
+        break;
+
+      case "command_trusted":
+        if (!quiet) out(`${dim}  ✓ trusted${reset}`);
+        break;
+
+      case "terminal_output":
+        if (!quiet && evt.detail) process.stdout.write(evt.detail);
+        break;
+
+      case "terminal_done":
+        if (!quiet && evt.exitCode != null && evt.exitCode !== 0) {
+          out(`${red}  exit ${evt.exitCode}${reset}`);
+        }
+        break;
+
+      case "scope_revision_proposed":
+        // CLI.0.3 will wire readline prompt via approvals.ts
+        if (!quiet) {
+          out(`${yellow}⚠ Scope revision proposed: ${evt.detail ?? evt.title}${reset}`);
+          out(`${dim}  (use --yes to approve, --no-revision to reject)${reset}`);
+        }
+        break;
+
+      case "scope_revision_resolved":
+        if (!quiet) out(`${dim}  Scope revision: ${evt.detail ?? evt.revisionDecision ?? "resolved"}${reset}`);
+        break;
+
+      case "plan_summary":
+        if (!quiet && evt.planSummaryFiles?.length) {
+          out(`${dim}Plan: ${evt.planSummaryFiles.join(", ")}${reset}`);
+        }
+        break;
+
+      case "phase_changed":
+        if (!quiet) out(`${dim}── Phase ${evt.phase ?? ""} ──${reset}`);
+        break;
+
+      case "subagent_started":
+        if (!quiet) out(`${dim}  ↳ subagent started${reset}`);
+        break;
+
+      case "subagent_completed":
+        if (!quiet) {
+          const status = evt.subagentStatus ?? "done";
+          out(`${dim}  ↳ subagent ${status}${reset}`);
+        }
+        break;
+
+      case "handoff_report":
+        if (!quiet && evt.report?.summary) out(evt.report.summary);
+        break;
+
+      case "run_summary":
+        if (!quiet && evt.cost) {
+          const { totalUsd, iterCount, cacheHitPct } = evt.cost;
+          out(
+            `\n${bold}Run summary${reset}: $${totalUsd.toFixed(4)} · ${iterCount} iter · ${Math.round(cacheHitPct)}% cache hit`
+          );
+        }
+        if (!quiet && evt.filesChanged?.length) {
+          for (const f of evt.filesChanged) {
+            out(`  ${dim}${f.filePath}  +${f.addedLines} -${f.removedLines}${reset}`);
+          }
+        }
+        break;
+
+      case "chat_chunk":
+      case "chat_response":
+        if (!quiet && evt.text) process.stdout.write(evt.text);
+        break;
+
+      case "chat_start":
+      case "chat_done":
+        break;
+
+      case "patch_stream_delta":
+      case "patch_stream_target":
+      case "tool_input_delta":
+      case "todos_initialized":
+      case "todo_status_changed":
+      case "todo_revised":
+      case "context_ready":
+      case "planner_result":
+      case "fallback":
+      case "fallback_success":
+      case "validated":
+        break;
+
+      default:
+        if (verbose) out(`${dim}[unhandled] type=${type}${reset}`);
+        break;
+    }
+  }
+
+  return {
+    onProgress(update: LlmPatchProgressUpdate): void {
+      if (typeof update === "string") {
+        if (update) spinner.update(update);
+        return;
+      }
+
+      const evt = update.progress;
+      if (evt) {
+        handleStructuredEvent(evt);
+        return;
+      }
+
+      if (!quiet && update.stage) {
+        spinner.update(update.stage);
+      }
+    },
+  };
+}
