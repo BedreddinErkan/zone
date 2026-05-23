@@ -74,6 +74,18 @@ export async function runTui(
       await runOneShotInner(prompt, config, runId, { externalAc: ac, onProgress });
     } catch {
       // errors surfaced via eventBus progress events
+    } finally {
+      // Safety net: if runLlmPatchFlow threw before emitting agent_loop_complete,
+      // runState would stay "running" forever. Aborted runs are handled by
+      // App.tsx Esc handler (RUN_ABORTED dispatch) — skip those.
+      if (!ac.signal.aborted) {
+        bus.emit("agent_loop_complete", {
+          runId,
+          ts: Date.now(),
+          type: "agent_loop_complete",
+          title: "Run ended",
+        });
+      }
     }
   };
 

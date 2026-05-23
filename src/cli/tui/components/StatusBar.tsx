@@ -3,7 +3,6 @@ import { useStore, type RunState } from "../store.js";
 
 function leftText(
   runState: RunState,
-  iter: number,
   costUsd: number,
   model: string,
   elapsedSec: string | null
@@ -13,11 +12,11 @@ function leftText(
     case "idle":
       return `idle · ${m} · perm: default`;
     case "running":
-      return `iter ${iter} · $${costUsd.toFixed(4)} · ${m} · perm: default`;
+      return `$${costUsd.toFixed(4)} · ${m} · perm: default`;
     case "done":
-      return `done · $${costUsd.toFixed(4)} · ${iter} iter${elapsedSec ? ` · ${elapsedSec}s` : ""} · ${m}`;
+      return `done · $${costUsd.toFixed(4)}${elapsedSec ? ` · ${elapsedSec}s` : ""} · ${m}`;
     case "aborted":
-      return `aborted · iter ${iter} · $${costUsd.toFixed(4)} · ${m}`;
+      return `aborted · $${costUsd.toFixed(4)} · ${m}`;
   }
 }
 
@@ -32,7 +31,7 @@ function rightHint(runState: RunState): string {
 
 export function StatusBar(): React.ReactElement {
   const { state } = useStore();
-  const { iter, costUsd, model, tokenBudgetRatio } = state.statusBar;
+  const { costUsd, model, tokenBudgetRatio } = state.statusBar;
   const { runState, runStartMs } = state;
 
   const elapsedSec =
@@ -50,7 +49,7 @@ export function StatusBar(): React.ReactElement {
     <Box flexDirection="column">
       <Text dimColor>{sep}</Text>
       <Box justifyContent="space-between" paddingX={1}>
-        <Text color={tokenColor}>{leftText(runState, iter, costUsd, model, elapsedSec)}</Text>
+        <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec)}</Text>
         <Text dimColor>{rightHint(runState)}</Text>
       </Box>
       <Text dimColor>{sep}</Text>

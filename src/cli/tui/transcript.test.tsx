@@ -129,7 +129,7 @@ describe("TUI.2 transcript rendering", () => {
     await wait(50); // no label debounce — spinner shows immediately
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("Starting");
+    expect(frame).toContain("Z"); // spinner icon shown when active (label removed in TUI.4.1)
     unmount();
   });
 
@@ -176,8 +176,7 @@ describe("TUI.2 transcript rendering", () => {
     await wait(50);
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("iter 5");
-    expect(frame).toContain("0.0567");
+    expect(frame).toContain("0.0567"); // cost displayed; iter count removed in TUI.4.1
     unmount();
   });
 

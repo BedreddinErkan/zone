@@ -1,4 +1,4 @@
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, usePaste } from "ink";
 import { useState } from "react";
 import { useStore } from "../store.js";
 
@@ -67,7 +67,7 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
   const [historyIdx, setHistoryIdx] = useState(-1);   // -1 = live input
   const [paletteIdx, setPaletteIdx] = useState(0);
 
-  const paletteOpen = buffer.startsWith("/") && buffer.length > 1;
+  const paletteOpen = buffer.startsWith("/");
   const paletteFilter = paletteOpen ? buffer.slice(1).toLowerCase() : "";
   const filteredCommands = SLASH_COMMANDS.filter((c) =>
     c.name.slice(1).startsWith(paletteFilter)
@@ -236,6 +236,14 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
       if (paletteOpen) setPaletteIdx(0);
     }
   });
+
+  usePaste((text) => {
+    if (disabled) return;
+    const newBuf = buffer.slice(0, cursorPos) + text + buffer.slice(cursorPos);
+    setBuffer(newBuf);
+    setCursorPos(cursorPos + text.length);
+    setHistoryIdx(-1);
+  }, { isActive: !disabled });
 
   const borderColor = disabled ? "gray" : "white";
   const displayBuffer = disabled ? buffer : renderBuffer(buffer, cursorPos);

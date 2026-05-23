@@ -12,7 +12,6 @@ export function Spinner(): React.ReactElement | null {
     <Text>
       <Text bold color="cyan">Z</Text>
       <InkSpinner type="dots" />
-      {" "}{spinnerState.label}
     </Text>
   );
 }
