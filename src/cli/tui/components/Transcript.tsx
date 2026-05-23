@@ -30,6 +30,12 @@ function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement 
           <Text>{entry.text}</Text>
         </Box>
       );
+    case "assistant_final":
+      return (
+        <Box key={index} flexDirection="column" marginTop={1} marginBottom={1}>
+          <Text>{entry.text}</Text>
+        </Box>
+      );
   }
 }
 

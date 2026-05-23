@@ -57,6 +57,8 @@ export function useAgentEvents(
       const cost = evt.cumulativeCost ?? 0;
       void buildLoopCompleteSummary; // retain import for future use
       if (iterCount > 0) dispatch({ type: "STATUS_UPDATE", iter: iterCount, costUsd: cost });
+      const detail = (evt as { detail?: string }).detail ?? "";
+      if (detail.trim()) dispatch({ type: "ASSISTANT_FINAL", text: detail.trim() });
       dispatch({ type: "RUN_DONE" });
     }
 
@@ -72,6 +74,8 @@ export function useAgentEvents(
       // Skip spurious progress strings (e.g. "[agent_loop] Iteration N/24"):
       // real tool calls either carry toolName or have a "[tool]"-prefixed title
       if (!evt.toolName && !title.startsWith("[tool]")) return;
+      // TEMP probe — Opus audit Step 8, remove in TUI.5.4
+      console.error("[probe-handle-toolcall]", JSON.stringify({ toolName: evt.toolName, title: title.slice(0, 60) }));
       flushBuffer(localBuffer, debounceTimer, dispatch);
       // onToolCall embeds tool name and args in title as "[tool] name: cmd".
       // Parse it so Transcript renders "read_file  src/foo.ts  ✓" not "[tool] read_file: src/foo.ts  ✓".
@@ -91,6 +95,8 @@ export function useAgentEvents(
     }
 
     function handleToolResult(evt: ZoneStructuredProgressEvent): void {
+      // TEMP probe — Opus audit Step 8, remove in TUI.5.4
+      console.error("[probe-handle-toolresult]", JSON.stringify({ status: evt.status, detail: (evt.detail ?? "").slice(0, 60) }));
       dispatch({ type: "TOOL_RESULT_PUSH", ok: evt.status !== "error", detail: evt.detail ?? evt.title ?? "" });
       dispatch({ type: "TOOL_CALL_CLOSE" });
     }

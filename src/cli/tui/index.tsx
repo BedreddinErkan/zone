@@ -92,7 +92,11 @@ export async function runTui(
     const onProgress = (update: LlmPatchProgressUpdate): void => {
       if (typeof update === "string") return;
       const evt = update.progress;
-      if (evt) bus.emit(evt.type, evt);
+      if (evt) {
+        // TEMP probe — Opus audit Step 8, remove in TUI.5.4
+        console.error("[probe-tui-bus]", JSON.stringify({ type: evt.type, title: (evt.title ?? "").slice(0, 60), hasDetail: !!(evt as Record<string, unknown>).detail }));
+        bus.emit(evt.type, evt);
+      }
     };
     try {
       await runOneShotInner(prompt, config, runId, { externalAc: ac, onProgress });

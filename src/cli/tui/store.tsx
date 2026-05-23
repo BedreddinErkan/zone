@@ -24,7 +24,8 @@ export type TranscriptEntry =
   | { kind: "tool_call"; toolName: string; args: string; results: { ok: boolean; detail: string; blocked?: true }[] }
   | { kind: "error"; text: string }
   | { kind: "phase_marker"; phase: string }
-  | { kind: "user_prompt"; text: string };
+  | { kind: "user_prompt"; text: string }
+  | { kind: "assistant_final"; text: string };
 
 export type StatusBarState = {
   iter: number;
@@ -89,6 +90,7 @@ export type StoreAction =
   | { type: "RUN_DONE" }
   | { type: "RUN_ABORTED" }
   | { type: "USER_PROMPT"; text: string }
+  | { type: "ASSISTANT_FINAL"; text: string }
   | { type: "TRANSCRIPT_CLEAR" }
   | { type: "PENDING_APPROVAL_SET"; approvalId: string; runId: string; command: string }
   | { type: "PENDING_APPROVAL_RESOLVED" }
@@ -206,6 +208,12 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
       return {
         ...state,
         transcript: [...state.transcript, { kind: "user_prompt", text: action.text }],
+      };
+
+    case "ASSISTANT_FINAL":
+      return {
+        ...state,
+        transcript: [...state.transcript, { kind: "assistant_final", text: action.text }],
       };
 
     case "TRANSCRIPT_CLEAR":

@@ -401,4 +401,19 @@ describe("TUI.2 transcript rendering", () => {
     expect(frame).toContain("/help for commands");
     unmount();
   });
+
+  it("agent_loop_complete with detail dispatches ASSISTANT_FINAL and renders summary", async () => {
+    const bus = createEventBus();
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test" />);
+
+    bus.emit("agent_loop_complete", makeEvt("agent_loop_complete", {
+      detail: "The answer is: 42 files exist under src/cli/.",
+      iter_count: 3,
+      cumulativeCost: 0.0437,
+    }));
+    await wait(50);
+
+    expect(lastFrame() ?? "").toContain("The answer is: 42 files exist under src/cli/.");
+    unmount();
+  });
 });

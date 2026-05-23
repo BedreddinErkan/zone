@@ -216,6 +216,8 @@ export function requestCommandApproval(input: {
       } catch {}
     }
 
+    // TEMP probe — Opus audit Step 8, remove in TUI.5.4
+    console.error("[probe-approval-emit]", JSON.stringify({ runId, command: command.slice(0, 60), approvalId }));
     // Emit LAST — synchronous resolvers (e.g. TUI bus) find the registered entry.
     input.emit({ type: "command_approval_required", runId, command, approvalId });
   });
