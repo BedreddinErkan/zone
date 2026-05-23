@@ -6,14 +6,14 @@ import { createEventBus } from "../eventBus.js";
 import React from "react";
 
 describe("TUI.0 foundation", () => {
-  it("renders Zone (TUI) placeholder", () => {
+  it("renders Zone placeholder", () => {
     const { lastFrame } = render(<App />);
-    expect(lastFrame()).toContain("Zone (TUI)");
+    expect(lastFrame()).toContain("Zone");
   });
 
   it("renders with initialPrompt without error", () => {
     const { lastFrame } = render(<App initialPrompt="hi" />);
-    expect(lastFrame()).toContain("Zone (TUI)");
+    expect(lastFrame()).toContain("Zone");
   });
 
   it("unmounts cleanly", () => {

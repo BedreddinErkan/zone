@@ -1,14 +1,29 @@
-import { Box, Text } from "ink";
-import { StoreProvider } from "./store.js";
+import { Box } from "ink";
+import { StoreProvider, useStore } from "./store.js";
+import { useAgentEvents } from "./hooks/useAgentEvents.js";
+import { Header } from "./components/Header.js";
+import { Transcript } from "./components/Transcript.js";
+import { Spinner } from "./components/Spinner.js";
+import { StatusBar } from "./components/StatusBar.js";
+import { Toast } from "./components/Toast.js";
+import type { EventBus } from "../eventBus.js";
 
 interface AppProps {
   initialPrompt?: string;
+  bus?: EventBus;
 }
 
-function AppInner(_props: AppProps): React.ReactElement {
+function AppInner({ bus }: { bus: EventBus | undefined }): React.ReactElement {
+  const { state, dispatch } = useStore();
+  useAgentEvents(bus, dispatch);
+
   return (
     <Box flexDirection="column">
-      <Text>Zone (TUI)</Text>
+      <Header />
+      <Transcript />
+      <Spinner />
+      <StatusBar />
+      {state.toastQueue.length > 0 && <Toast toast={state.toastQueue[0]} />}
     </Box>
   );
 }
@@ -16,7 +31,7 @@ function AppInner(_props: AppProps): React.ReactElement {
 export function App(props: AppProps): React.ReactElement {
   return (
     <StoreProvider>
-      <AppInner initialPrompt={props.initialPrompt} />
+      <AppInner bus={props.bus} />
     </StoreProvider>
   );
 }

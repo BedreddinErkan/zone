@@ -49,15 +49,16 @@ export async function runTui(
     process.exit(1);
   });
 
+  const bus = createEventBus();
+
   instance = render(
     <ErrorBoundary onCrash={onCrash}>
-      <App initialPrompt={initialPrompt} />
+      <App initialPrompt={initialPrompt} bus={bus} />
     </ErrorBoundary>,
     { exitOnCtrlC: false }
   );
 
   if (initialPrompt) {
-    const bus = createEventBus();
     const runId = randomUUID();
 
     const onProgress = (update: LlmPatchProgressUpdate): void => {
