@@ -38,9 +38,19 @@ const ARCHETYPE_CORPUS: Array<{
   { task: "How does Phase AS audit decide between 'major' and 'minor' severity?", expected: "investigation" },
   { task: "Walk me through what happens when the daily USD cap is reached mid-run", expected: "investigation" },
 
-  // question (2)
+  // question (12)
   { task: "What's the difference between Anthropic and OpenAI prompt caching in terms of cost economics?", expected: "question" },
   { task: "Should I use Sonnet or Opus for agentic coding tasks?", expected: "question" },
+  { task: "List all TypeScript files in src/llm/", expected: "question" },
+  { task: "Show all test files matching **/*.test.ts", expected: "question" },
+  { task: "Which files in src/ import from taskClassifier.ts?", expected: "question" },
+  { task: "Find all .ts files that export a default function", expected: "question" },
+  { task: "How many source files are in src/llm/?", expected: "question" },
+  { task: "Enumerate all files that reference ZONE_ARCHETYPE_DISPATCHER", expected: "question" },
+  { task: "What files are in src/cli/tui/components/?", expected: "question" },
+  { task: "List all test files for the agentLoop module", expected: "question" },
+  { task: "Find all *.test.ts files that import from archetypeDispatcher", expected: "question" },
+  { task: "Show me which src/ files export a PipelineConfig type", expected: "question" },
 
   // complex_multi_file (6)
   { task: "Add a 'Replay' feature: users can re-run a previous task with the same inputs. Needs UI button, /api/replay endpoint, run state restoration, telemetry", expected: "complex_multi_file" },
@@ -52,7 +62,7 @@ const ARCHETYPE_CORPUS: Array<{
 ];
 
 describe("classifier archetype accuracy", () => {
-  it("achieves >=80% on labeled 30-task corpus", async () => {
+  it("achieves >=80% on labeled 40-task corpus", async () => {
     clearClassificationCache();
 
     const results: Array<{

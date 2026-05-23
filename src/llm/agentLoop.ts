@@ -382,9 +382,18 @@ export function assembleAgentSystemPrompt(input: {
   planAnnotationsBlock?: string;
   /** Step B: when set, appends TRUST_PHASE1_DIRECTIVE before the repo path line. */
   auditFindings?: unknown;
+  /** When "question" or "investigation", prepends a Q&A/Listing mode preamble. */
+  archetype?: string;
 }): string {
   return (
     `${input.agentIntro}\n\n` +
+    (input.archetype === "question" || input.archetype === "investigation"
+      ? `Q&A / LISTING MODE:\n` +
+        `- Use ONE shell command (run_command) to answer filesystem or enumeration queries.\n` +
+        `- Do NOT read source files unless the user explicitly asks for context.\n` +
+        `- Final response: command output plus a one-sentence summary.\n` +
+        `- Iteration budget is 3 — one command, one confirmation, one summary.\n\n`
+      : "") +
     (input.hasFramework ? `${input.frameworkLines.join("\n")}\n\n` : "") +
     (input.projectMemoryBlock ? `${input.projectMemoryBlock}\n\n` : "") +
     (input.importContextSummary
@@ -1821,6 +1830,7 @@ Example:
         planProgressBlock,
         planAnnotationsBlock: buildPlanAnnotationsBlock(input.executionPlan),
         auditFindings: input.auditFindings,
+        archetype: input.taskClassification?.archetype,
       });
   // X.0.1: mode prefix relocated out of system head to keep the system prompt
   // byte-stable across explicit/implicit mode calls. Mode signal is appended

@@ -147,8 +147,9 @@ Classify the task into one of 7 archetypes by intent shape:
 - investigation: Read-only "why does X work this way" or "walk me through Y". No code change requested.
   Keywords: "why", "how does", "walk me through", "explain the".
 
-- question: Pure Q&A. No files involved. Conceptual or strategic.
-  Keywords: "what's the difference", "should I use", general comparisons without code reference.
+- question: Pure Q&A, listing/enumeration, or filesystem queries. No code change requested.
+  Keywords: "what's the difference", "should I use", "list", "show all", "what files",
+  "which files", "enumerate", "find all", "how many", glob patterns (*.ts, **/*.ts).
 
 - complex_multi_file: NEW feature spanning >=3 files (NOT a rename). Multiple components mentioned.
   Default fallback when uncertain.
@@ -159,7 +160,8 @@ Boundary rules:
 - "Rename X to Y" = refactor (not complex_multi_file), regardless of file count.
 - "Failing test" + "fix" = debug (not targeted_fix). Reproduction matters.
 - When uncertain between targeted_fix and debug: debug if failure repro needed, targeted_fix if bug is already pinpointed.
-- When uncertain between any narrow archetype and complex_multi_file: pick complex_multi_file (safer).`;
+- When uncertain between any narrow archetype and complex_multi_file: pick complex_multi_file (safer).
+- "list / enumerate / show all" + filesystem scope = question (NOT complex_multi_file).`;
 
 const DEFAULT_TIMEOUT_MS = 5000;
 /** Confidence gate: classifier outputs below this threshold are overridden to "medium". */
