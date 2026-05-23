@@ -26,7 +26,7 @@ export function Header(): React.ReactElement {
 
   return (
     <Box borderStyle="round" flexDirection="column" paddingX={1}>
-      <Text>Zone v{version}</Text>
+      <Text><Text bold color="cyan">[Z]</Text> Zone v{version}</Text>
       <Text dimColor>{cwd}{branch ? ` · ${branch}` : ""}</Text>
       <Text>
         <Text bold>{model || "default"}</Text>

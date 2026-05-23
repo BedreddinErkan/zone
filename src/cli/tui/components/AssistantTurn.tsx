@@ -9,6 +9,7 @@ export function AssistantTurn(): React.ReactElement | null {
 
   return (
     <Box>
+      <Text color="cyan">◆ </Text>
       <Text>{text}</Text>
     </Box>
   );

@@ -1,5 +1,6 @@
 import { Box, Text, useInput, usePaste } from "ink";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import fg from "fast-glob";
 import { useStore } from "../store.js";
 
 const MAX_HISTORY = 50;
@@ -66,9 +67,22 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
   const [history, setHistory] = useState<string[]>([]);
   const [historyIdx, setHistoryIdx] = useState(-1);   // -1 = live input
   const [paletteIdx, setPaletteIdx] = useState(0);
+  const [atFiles, setAtFiles] = useState<string[]>([]);
+  const [atIdx, setAtIdx] = useState(0);
 
+  const atPaletteOpen = buffer.startsWith("@") && !buffer.slice(1).includes(" ");
   const paletteOpen = buffer.startsWith("/");
   const paletteFilter = paletteOpen ? buffer.slice(1).toLowerCase() : "";
+
+  useEffect(() => {
+    if (!atPaletteOpen) { setAtFiles([]); return; }
+    const query = buffer.slice(1);
+    const pattern = query ? `**/*${query}*` : "**/*";
+    fg(pattern, { cwd: process.cwd(), ignore: ["**/node_modules/**", "**/.git/**"], onlyFiles: true, dot: false, suppressErrors: true })
+      .then(files => { setAtFiles(files.slice(0, 20)); setAtIdx(0); })
+      .catch(() => setAtFiles([]));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [atPaletteOpen, buffer]);
   const filteredCommands = SLASH_COMMANDS.filter((c) =>
     c.name.slice(1).startsWith(paletteFilter)
   );
@@ -124,6 +138,19 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
   useInput((input, key) => {
     // Block all input when the approval modal is active
     if (state.pendingApproval !== null) return;
+
+    // ── @ file-completion palette — available whenever palette is open ──
+    if (atPaletteOpen && atFiles.length > 0) {
+      if (key.upArrow) { setAtIdx(i => Math.max(0, i - 1)); return; }
+      if (key.downArrow) { setAtIdx(i => Math.min(atFiles.length - 1, i + 1)); return; }
+      if (key.return || key.tab) {
+        const selected = atFiles[atIdx];
+        if (selected) { setBuffer(selected); setCursorPos(selected.length); }
+        setAtFiles([]);
+        return;
+      }
+      if (key.escape) { setAtFiles([]); return; }
+    }
 
     // ── Slash-command path — always available, even during a running task ──
     if (paletteOpen && filteredCommands.length > 0) {
@@ -281,6 +308,13 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
 
   return (
     <Box flexDirection="column">
+      {atPaletteOpen && atFiles.length > 0 && (
+        <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
+          {atFiles.map((f, i) => (
+            <Text key={f} color={i === atIdx ? "cyan" : undefined}>{f}</Text>
+          ))}
+        </Box>
+      )}
       {paletteOpen && filteredCommands.length > 0 && (
         <SlashCommandPalette commands={filteredCommands} selectedIdx={paletteIdx} />
       )}

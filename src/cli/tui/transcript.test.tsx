@@ -344,6 +344,45 @@ describe("TUI.2 transcript rendering", () => {
     unmount();
   });
 
+  it("narration text has ◆ prefix", async () => {
+    const bus = createEventBus();
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+
+    bus.emit("narration", makeEvt("narration", { text: "Thinking deeply" }));
+    await wait(250);
+
+    expect(lastFrame()).toContain("◆");
+    expect(lastFrame()).toContain("Thinking deeply");
+    unmount();
+  });
+
+  it("tool_result with 5-line detail shows 3-line preview + … 2 more", async () => {
+    const bus = createEventBus();
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+
+    bus.emit("tool_call", makeEvt("tool_call", { toolName: "run_command", detail: "" }));
+    bus.emit("tool_result", makeEvt("tool_result", {
+      status: "success",
+      detail: "line1\nline2\nline3\nline4\nline5",
+    }));
+    await wait(50);
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("line1");
+    expect(frame).toContain("line3");
+    expect(frame).toContain("… 2 more");
+    expect(frame).not.toContain("line5");
+    unmount();
+  });
+
+  it("Header renders [Z] logo", () => {
+    const bus = createEventBus();
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+
+    expect(lastFrame()).toContain("[Z]");
+    unmount();
+  });
+
   it("Header renders cwd", () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);

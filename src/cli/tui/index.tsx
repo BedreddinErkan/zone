@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import { render } from "ink";
+
+const execAsync = promisify(exec);
 import { App } from "./App.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import type { CliFlags } from "../config.js";
@@ -65,6 +69,26 @@ export async function runTui(
 
   const runPrompt = async (prompt: string, ac: AbortController): Promise<void> => {
     const runId = randomUUID();
+
+    // ! shell escape — run cmd directly without LLM; results appear as a tool entry
+    if (prompt.startsWith("!")) {
+      const cmd = prompt.slice(1).trim();
+      if (!cmd) return;
+      const ts = Date.now();
+      bus.emit("tool_call", { runId, ts, type: "tool_call", title: `[tool] shell: ${cmd}` });
+      try {
+        const { stdout, stderr } = await execAsync(cmd, { cwd: process.cwd(), timeout: 30_000 });
+        const out = [stdout, stderr].filter(Boolean).join("\n").trim() || "(no output)";
+        bus.emit("tool_result", { runId, ts: Date.now(), type: "tool_result",
+          toolName: "shell", title: out.slice(0, 100), detail: out, status: "success" });
+      } catch (err: unknown) {
+        const out = err instanceof Error ? err.message : String(err);
+        bus.emit("tool_result", { runId, ts: Date.now(), type: "tool_result",
+          toolName: "shell", title: out.slice(0, 100), detail: out, status: "error" });
+      }
+      return;
+    }
+
     const onProgress = (update: LlmPatchProgressUpdate): void => {
       if (typeof update === "string") return;
       const evt = update.progress;
