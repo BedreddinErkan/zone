@@ -23,6 +23,13 @@ function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement 
       return <ErrorLine key={index} text={entry.text} />;
     case "phase_marker":
       return <IterMarker key={index} phase={entry.phase} />;
+    case "user_prompt":
+      return (
+        <Box key={index}>
+          <Text color="cyan">▸ </Text>
+          <Text>{entry.text}</Text>
+        </Box>
+      );
   }
 }
 
@@ -32,7 +39,7 @@ export function Transcript(): React.ReactElement {
 
   return (
     <Box flexDirection="column">
-      <Static items={state.transcript.map((entry, index) => ({ entry, index }))}>
+      <Static key={state.transcriptGeneration} items={state.transcript.map((entry, index) => ({ entry, index }))}>
         {(item) => renderEntry(item.entry, item.index)}
       </Static>
       {liveToolCall && (

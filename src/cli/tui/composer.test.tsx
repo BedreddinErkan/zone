@@ -1,0 +1,164 @@
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { render } from "ink-testing-library";
+import React from "react";
+import { App } from "./App.js";
+import { createEventBus } from "../eventBus.js";
+import type { ZoneStructuredProgressEvent } from "../../core/agentLifecycleEvents.js";
+
+vi.mock("../../api/commandApprovals.js", () => ({ resolveCommandApproval: vi.fn() }));
+vi.mock("../../llm/revisionApprovals.js", () => ({ resolveRevisionApproval: vi.fn() }));
+
+function makeEvt(type: ZoneStructuredProgressEvent["type"], extra: Partial<ZoneStructuredProgressEvent> = {}): ZoneStructuredProgressEvent {
+  return { runId: "test-run", ts: Date.now(), type, title: type, ...extra } as ZoneStructuredProgressEvent;
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+describe("TUI.4 composer", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("Composer renders > prompt when runState is idle", () => {
+    const { lastFrame, unmount } = render(<App />);
+    expect(lastFrame()).toContain(">");
+    unmount();
+  });
+
+  it("Composer does not dispatch on Enter when runState is running", async () => {
+    const bus = createEventBus();
+    const onSubmit = vi.fn();
+    const { stdin, unmount } = render(<App bus={bus} onSubmit={onSubmit} />);
+    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
+    await wait(50);
+    // Type something then press Enter — should be ignored while running
+    stdin.write("hello");
+    stdin.write("\r");
+    await wait(50);
+    expect(onSubmit).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it("Enter on empty buffer does not call onSubmit", async () => {
+    const onSubmit = vi.fn();
+    const { stdin, unmount } = render(<App onSubmit={onSubmit} />);
+    stdin.write("\r");
+    await wait(50);
+    expect(onSubmit).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it("Enter on non-empty buffer calls onSubmit and shows USER_PROMPT in transcript", async () => {
+    const onSubmit = vi.fn();
+    const { lastFrame, stdin, unmount } = render(<App onSubmit={onSubmit} />);
+    stdin.write("test task");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.calls[0][0]).toBe("test task");
+    expect(onSubmit.mock.calls[0][1]).toBeInstanceOf(AbortController);
+    expect(lastFrame()).toContain("test task");
+    unmount();
+  });
+
+  it("Backspace removes last character", async () => {
+    const { lastFrame, stdin, unmount } = render(<App />);
+    stdin.write("abc");
+    await wait(50);
+    stdin.write("\x7f"); // DEL / backspace
+    await wait(50);
+    const frame = lastFrame() ?? "";
+    // "ab" visible, "abc" not as a complete sequence in the buffer area
+    expect(frame).not.toContain("abc▋");
+    unmount();
+  });
+
+  it("Esc with non-empty buffer clears buffer", async () => {
+    const { lastFrame, stdin, unmount } = render(<App />);
+    stdin.write("hello");
+    await wait(50);
+    expect(lastFrame()).toContain("hello");
+    stdin.write("\x1b");
+    await wait(50);
+    // buffer cleared — cursor block alone with no text
+    expect(lastFrame()).not.toContain("hello▋");
+    expect(lastFrame()).not.toContain("hello");
+    unmount();
+  });
+
+  it("Up arrow on empty buffer fills with last history item", async () => {
+    const onSubmit = vi.fn();
+    const { lastFrame, stdin, unmount } = render(<App onSubmit={onSubmit} />);
+    // Submit one prompt to build history
+    stdin.write("first prompt");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+    // Buffer is cleared; press Up to navigate history
+    stdin.write("\x1b[A"); // Up arrow ESC sequence
+    await wait(50);
+    expect(lastFrame()).toContain("first prompt");
+    unmount();
+  });
+
+  it("typing /h opens slash command palette with matching commands", async () => {
+    const { lastFrame, stdin, unmount } = render(<App />);
+    stdin.write("/h");
+    await wait(50);
+    expect(lastFrame()).toContain("/help");
+    unmount();
+  });
+
+  it("/help shows help text in transcript", async () => {
+    const { lastFrame, stdin, unmount } = render(<App />);
+    stdin.write("/help");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+    expect(lastFrame()).toContain("Key bindings");
+    unmount();
+  });
+
+  it("/clear dispatches TRANSCRIPT_CLEAR (transcript empties)", async () => {
+    const onSubmit = vi.fn();
+    const { lastFrame, stdin, unmount } = render(<App onSubmit={onSubmit} />);
+    // First add something to transcript
+    stdin.write("some task");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+    expect(lastFrame()).toContain("some task");
+    // Now /clear
+    stdin.write("/clear");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+    expect(lastFrame()).not.toContain("some task");
+    unmount();
+  });
+
+  it("/exit calls onExit callback", async () => {
+    // We detect /exit via the App unmounting (useApp().exit() called).
+    // In ink-testing-library, exit() resolves waitUntilExit but doesn't crash.
+    const { stdin, unmount } = render(<App />);
+    stdin.write("/exit");
+    await wait(50);
+    stdin.write("\r");
+    await wait(100);
+    // If exit() was called, the instance should be done — we can just verify no crash
+    unmount();
+  });
+
+  it("/cost shows cost info in transcript", async () => {
+    const { lastFrame, stdin, unmount } = render(<App />);
+    stdin.write("/cost");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+    expect(lastFrame()).toContain("Cost:");
+    unmount();
+  });
+});

@@ -25,10 +25,8 @@ function rightHint(runState: RunState): string {
   switch (runState) {
     case "running":
       return "esc abort";
-    case "done":
-      return "any key exit";
     default:
-      return "ctrl+c to exit";
+      return "/help for commands";
   }
 }
 

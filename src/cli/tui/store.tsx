@@ -23,7 +23,8 @@ export type TranscriptEntry =
   | { kind: "assistant"; text: string }
   | { kind: "tool_call"; toolName: string; args: string; results: { ok: boolean; detail: string }[] }
   | { kind: "error"; text: string }
-  | { kind: "phase_marker"; phase: string };
+  | { kind: "phase_marker"; phase: string }
+  | { kind: "user_prompt"; text: string };
 
 export type StatusBarState = {
   iter: number;
@@ -37,6 +38,7 @@ export type RunState = "idle" | "running" | "done" | "aborted";
 
 export type StoreState = {
   transcript: TranscriptEntry[];
+  transcriptGeneration: number;  // incremented on TRANSCRIPT_CLEAR to force remount
   liveTail: LiveTailState;
   spinner: { active: boolean; label: string } | null;
   statusBar: StatusBarState;
@@ -49,6 +51,7 @@ export type StoreState = {
 function buildInitialState(initialValues?: { model: string; capUsd: number }): StoreState {
   return {
     transcript: [],
+    transcriptGeneration: 0,
     liveTail: { narrationBuffer: "", currentToolCall: null },
     spinner: null,
     statusBar: {
@@ -80,7 +83,9 @@ export type StoreAction =
   | { type: "PHASE_MARKER"; phase: string }
   | { type: "ERROR_LINE"; text: string }
   | { type: "RUN_DONE" }
-  | { type: "RUN_ABORTED" };
+  | { type: "RUN_ABORTED" }
+  | { type: "USER_PROMPT"; text: string }
+  | { type: "TRANSCRIPT_CLEAR" };
 
 function reducer(state: StoreState, action: StoreAction): StoreState {
   switch (action.type) {
@@ -188,6 +193,15 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
 
     case "RUN_ABORTED":
       return { ...state, spinner: null, runState: "aborted" };
+
+    case "USER_PROMPT":
+      return {
+        ...state,
+        transcript: [...state.transcript, { kind: "user_prompt", text: action.text }],
+      };
+
+    case "TRANSCRIPT_CLEAR":
+      return { ...state, transcript: [], transcriptGeneration: state.transcriptGeneration + 1 };
 
     default:
       return state;

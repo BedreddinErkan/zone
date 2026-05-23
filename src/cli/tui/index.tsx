@@ -34,20 +34,19 @@ export async function runTui(
   }
 
   let instance: ReturnType<typeof render> | undefined;
-  const externalAc = new AbortController();
 
   function onCrash(error: Error): void {
     instance?.unmount();
     throw error;
   }
 
+  // Fallback signal handlers — in TTY raw mode Ctrl+C arrives as \x03 in useInput, not SIGINT.
+  // These fire in non-TTY contexts (pipes, test runners that send real signals).
   process.on("SIGINT", () => {
-    externalAc.abort();
     instance?.unmount();
     process.exit(130);
   });
   process.on("SIGTERM", () => {
-    externalAc.abort();
     instance?.unmount();
     process.exit(143);
   });
@@ -64,6 +63,24 @@ export async function runTui(
 
   const bus = createEventBus();
 
+  const runPrompt = async (prompt: string, ac: AbortController): Promise<void> => {
+    const runId = randomUUID();
+    const onProgress = (update: LlmPatchProgressUpdate): void => {
+      if (typeof update === "string") return;
+      const evt = update.progress;
+      if (evt) bus.emit(evt.type, evt);
+    };
+    try {
+      await runOneShotInner(prompt, config, runId, { externalAc: ac, onProgress });
+    } catch {
+      // errors surfaced via eventBus progress events
+    }
+  };
+
+  const onSubmit = (prompt: string, ac: AbortController): void => {
+    void runPrompt(prompt, ac);
+  };
+
   instance = render(
     <ErrorBoundary onCrash={onCrash}>
       <App
@@ -71,33 +88,13 @@ export async function runTui(
         bus={bus}
         initialModel={config.model}
         capUsd={config.dailyUsdCap}
-        externalAc={externalAc}
+        onSubmit={onSubmit}
       />
     </ErrorBoundary>,
     { exitOnCtrlC: false, alternateScreen: true }
   );
 
-  if (initialPrompt) {
-    const runId = randomUUID();
-
-    const onProgress = (update: LlmPatchProgressUpdate): void => {
-      if (typeof update === "string") return;
-      const evt = update.progress;
-      if (evt) bus.emit(evt.type, evt);
-    };
-
-    try {
-      await runOneShotInner(initialPrompt, config, runId, { externalAc, onProgress });
-    } catch {
-      // errors surfaced via eventBus; placeholder swallows for now
-    } finally {
-      // Hold briefly so user can see the final done/aborted state before alt-screen clears
-      await new Promise<void>((resolve) => setTimeout(resolve, 1500));
-      instance.unmount();
-      restoreStdout();
-    }
-  } else {
-    await instance.waitUntilExit();
-    restoreStdout();
-  }
+  // Single path: wait for explicit exit (Ctrl+C → \x03 in useInput → useApp.exit())
+  await instance.waitUntilExit();
+  restoreStdout();
 }

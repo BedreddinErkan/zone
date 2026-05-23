@@ -285,7 +285,7 @@ describe("TUI.2 transcript rendering", () => {
 
     const frame = lastFrame() ?? "";
     expect(frame).toContain("idle");
-    expect(frame).toContain("ctrl+c to exit");
+    expect(frame).toContain("/help for commands");
     unmount();
   });
 });

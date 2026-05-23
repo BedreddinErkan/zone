@@ -64,32 +64,28 @@ describe("TUI.0 foundation", () => {
     expect(handler.mock.calls[0][0]).toMatchObject({ type: "narration", text: "hello" });
   });
 
-  it("Esc in idle state does not call abort", () => {
-    const externalAc = new AbortController();
-    const spy = vi.spyOn(externalAc, "abort");
-    const { stdin, unmount } = render(<App externalAc={externalAc} />);
+  it("Esc in idle state leaves runState unchanged", () => {
+    const { lastFrame, stdin, unmount } = render(<App />);
     stdin.write("\x1b");
-    expect(spy).not.toHaveBeenCalled();
+    // StatusBar shows "idle" text; no transition to aborted/done
+    expect(lastFrame()).toContain("idle");
     unmount();
   });
 
-  it("Esc in running state calls abort and transitions to aborted", async () => {
+  it("Esc in running state transitions to aborted", async () => {
     const bus = createEventBus();
-    const externalAc = new AbortController();
-    const spy = vi.spyOn(externalAc, "abort");
-    const { lastFrame, stdin, unmount } = render(<App bus={bus} externalAc={externalAc} />);
+    const { lastFrame, stdin, unmount } = render(<App bus={bus} />);
     bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
     await wait(50);
     stdin.write("\x1b");
     await wait(50);
-    expect(spy).toHaveBeenCalledOnce();
     expect(lastFrame()).toContain("aborted");
     unmount();
   });
 
-  it("State 1 renders Welcome message when no initialPrompt", () => {
+  it("Composer renders when no initialPrompt (shows > prompt)", () => {
     const { lastFrame, unmount } = render(<App />);
-    expect(lastFrame()).toContain("Welcome to Zone.");
+    expect(lastFrame()).toContain(">");
     unmount();
   });
 });
