@@ -12,7 +12,6 @@ interface Props {
 }
 
 export function ApprovalModal({ approvalId, runId, command, dispatch }: Props): React.ReactElement {
-  process.stderr.write(`[probe-modal-render] ApprovalModal rendering command="${command}"\n`);
   useInput((input, key) => {
     const ch = input.toLowerCase();
     if (ch === "y") {

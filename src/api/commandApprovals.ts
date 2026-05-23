@@ -160,7 +160,6 @@ export function requestCommandApproval(input: {
   const timeoutMs =
     typeof input.timeoutMs === "number" && input.timeoutMs > 0 ? input.timeoutMs : 5 * 60 * 1000;
 
-  process.stderr.write(`[probe-approval-promise-setup] command="${command}" isSafe=${isSafeCommand(command)} isTrusted=${isCommandTrusted(runId, command)}\n`);
   if (isSafeCommand(command)) {
     // Emit transparency event so UI timeline can show what was auto-approved
     try {
@@ -195,7 +194,6 @@ export function requestCommandApproval(input: {
         } catch {}
         pendingApprovals.delete(approvalId);
       }
-      process.stderr.write(`[probe-approval-resolved] approvalId=${approvalId} approved=${approved}\n`);
       resolve({ approvalId, approved });
     };
 
@@ -219,7 +217,6 @@ export function requestCommandApproval(input: {
     }
 
     // Emit LAST — synchronous resolvers (e.g. TUI bus) find the registered entry.
-    process.stderr.write(`[probe-approval-promise-setup] emitting command_approval_required approvalId=${approvalId}\n`);
     input.emit({ type: "command_approval_required", runId, command, approvalId });
   });
 }
