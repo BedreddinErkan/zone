@@ -1385,16 +1385,24 @@ export async function run(): Promise<void> {
     noColor: options.noColor,
   };
 
-  // CLI.0 agent-loop path: positional task arg → one-shot; no arg → REPL
+  // TUI.0 entry-point fork: headless (--print / non-TTY) → one-shot; interactive → TUI
   const positionalTask = program.args[0]?.trim();
-  if (positionalTask) {
-    await runOneShotFromCli(positionalTask, cliFlags);
-    return; // runOneShotFromCli calls process.exit internally
+  const isHeadless = !!(options as Record<string, unknown>).print || !process.stdout.isTTY;
+  if (isHeadless || positionalTask) {
+    if (isHeadless) {
+      await runOneShotFromCli(positionalTask ?? options.task ?? "", cliFlags);
+      return;
+    }
+    // Interactive with positional arg: boot TUI (full wire-up in TUI.1)
+    const { runTui } = await import("./tui/index.js");
+    await runTui(positionalTask, cliFlags);
+    return;
   }
 
-  // If no legacy --task flag, launch REPL; otherwise fall through to legacy path
+  // No positional arg, interactive: boot TUI REPL
   if (!options.task) {
-    await runRepl(cliFlags);
+    const { runTui } = await import("./tui/index.js");
+    await runTui(undefined, cliFlags);
     return;
   }
 
