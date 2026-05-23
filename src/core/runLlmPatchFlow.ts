@@ -5737,8 +5737,6 @@ const initializeTodosFromPlan = (): void => {
             : name === "read_file" || name === "write_file"
               ? String(args.filePath ?? "")
               : "";
-        // TEMP probe — Opus audit Step 8, remove in TUI.5.4
-        console.error("[probe-emit-toolcall]", JSON.stringify({ name, runId, cmdLen: cmd?.length ?? 0 }));
         emitStructuredProgress({
           type: "tool_call",
           title: `[tool] ${name}${cmd ? `: ${cmd}` : ""}`.slice(0, 240),
