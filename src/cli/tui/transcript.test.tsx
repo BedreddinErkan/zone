@@ -23,7 +23,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("renders without crash when bus is provided", () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
     expect(lastFrame()).toBeDefined();
     unmount();
   });
@@ -36,7 +36,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("narration event renders text in AssistantTurn after debounce", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("narration", makeEvt("narration", { text: "Analyzing the codebase" }));
     await wait(250);
@@ -47,7 +47,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("chat_chunk events accumulate in AssistantTurn", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("chat_chunk", makeEvt("chat_chunk", { delta: "Hello " }));
     bus.emit("chat_chunk", makeEvt("chat_chunk", { delta: "world" }));
@@ -59,7 +59,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("10 rapid chat_chunk events coalesce into one dispatch (debounce)", async () => {
     const bus = createEventBus();
-    const { unmount } = render(<App bus={bus} />);
+    const { unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     for (let i = 0; i < 10; i++) {
       bus.emit("chat_chunk", makeEvt("chat_chunk", { delta: `chunk${i} ` }));
@@ -72,7 +72,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("tool_call event opens a tool call entry", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("tool_call", makeEvt("tool_call", { toolName: "read_file", detail: "src/foo.ts" }));
     await wait(50);
@@ -84,7 +84,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("tool_result renders check mark and detail", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("tool_call", makeEvt("tool_call", { toolName: "write_file", detail: "" }));
     bus.emit("tool_result", makeEvt("tool_result", { status: "success", detail: "written 42 bytes" }));
@@ -97,7 +97,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("tool_result with error status shows failure mark", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("tool_call", makeEvt("tool_call", { toolName: "apply_patch", detail: "" }));
     bus.emit("tool_result", makeEvt("tool_result", { status: "error", detail: "patch failed" }));
@@ -109,7 +109,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("agent_loop_complete transitions runState to done", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
     bus.emit("agent_loop_complete", makeEvt("agent_loop_complete", { iter_count: 3, cumulativeCost: 0.0123 }));
@@ -123,7 +123,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("agent_loop_start activates spinner", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
     await wait(50); // no label debounce — spinner shows immediately
@@ -135,7 +135,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("phase_changed renders IterMarker", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("phase_changed", makeEvt("phase_changed", { phase: 2 }));
     await wait(50);
@@ -146,7 +146,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("patch_rejected renders ErrorLine", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("patch_rejected", makeEvt("patch_rejected", { title: "Patch was rejected" }));
     await wait(50);
@@ -157,7 +157,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("loop_warning_emitted shows Toast", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("loop_warning_emitted", makeEvt("loop_warning_emitted", { title: "Loop detected — warning" }));
     await wait(50);
@@ -168,7 +168,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("iter_cost_update updates StatusBar iter and cost", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     // Start the run so StatusBar shows running state with iter/cost
     bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
@@ -183,7 +183,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("token_budget_status critical pushes Toast", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("token_budget_status", makeEvt("token_budget_status", { tokenBudgetRatio: 0.95 }));
     await wait(50);
@@ -194,7 +194,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("token_budget_status warning pushes warning Toast", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("token_budget_status", makeEvt("token_budget_status", { tokenBudgetRatio: 0.75 }));
     await wait(50);
@@ -206,7 +206,7 @@ describe("TUI.2 transcript rendering", () => {
   it("command_approval_required auto-rejects and shows ErrorLine", async () => {
     const { resolveCommandApproval } = await import("../../api/commandApprovals.js");
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("command_approval_required", makeEvt("command_approval_required", { approvalId: "appr-1" }));
     await wait(50);
@@ -221,7 +221,7 @@ describe("TUI.2 transcript rendering", () => {
   it("scope_revision_proposed auto-rejects and shows ErrorLine", async () => {
     const { resolveRevisionApproval } = await import("../../llm/revisionApprovals.js");
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("scope_revision_proposed", makeEvt("scope_revision_proposed", { revisionId: "rev-1" }));
     await wait(50);
@@ -235,7 +235,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("ErrorLine shows ⚠ prefix", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("patch_rejected", makeEvt("patch_rejected", { title: "Conflict found" }));
     await wait(50);
@@ -247,7 +247,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("terminal_done with non-zero exit shows failure result", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("tool_call", makeEvt("tool_call", { toolName: "run_command", detail: "npm test" }));
     bus.emit("terminal_done", makeEvt("terminal_done", { exitCode: 1 }));
@@ -259,7 +259,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("terminal_done with exit 0 does not push result", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("tool_call", makeEvt("tool_call", { toolName: "run_command", detail: "npm test" }));
     bus.emit("terminal_done", makeEvt("terminal_done", { exitCode: 0 }));
@@ -272,7 +272,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("Header renders cwd", () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     const frame = lastFrame() ?? "";
     expect(frame).toContain(process.cwd());
@@ -281,7 +281,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("StatusBar renders idle state initially", () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     const frame = lastFrame() ?? "";
     expect(frame).toContain("idle");

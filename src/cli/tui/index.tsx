@@ -71,6 +71,7 @@ export async function runTui(
         bus={bus}
         initialModel={config.model}
         capUsd={config.dailyUsdCap}
+        externalAc={externalAc}
       />
     </ErrorBoundary>,
     { exitOnCtrlC: false, alternateScreen: true }

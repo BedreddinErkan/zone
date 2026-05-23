@@ -4,6 +4,15 @@ import { App } from "./App.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { createEventBus } from "../eventBus.js";
 import React from "react";
+import type { ZoneStructuredProgressEvent } from "../../core/agentLifecycleEvents.js";
+
+function makeEvt(type: ZoneStructuredProgressEvent["type"], extra: Partial<ZoneStructuredProgressEvent> = {}): ZoneStructuredProgressEvent {
+  return { runId: "test-run", ts: Date.now(), type, title: type, ...extra } as ZoneStructuredProgressEvent;
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 describe("TUI.0 foundation", () => {
   it("renders Zone placeholder", () => {
@@ -53,5 +62,34 @@ describe("TUI.0 foundation", () => {
 
     expect(handler).toHaveBeenCalledOnce();
     expect(handler.mock.calls[0][0]).toMatchObject({ type: "narration", text: "hello" });
+  });
+
+  it("Esc in idle state does not call abort", () => {
+    const externalAc = new AbortController();
+    const spy = vi.spyOn(externalAc, "abort");
+    const { stdin, unmount } = render(<App externalAc={externalAc} />);
+    stdin.write("\x1b");
+    expect(spy).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it("Esc in running state calls abort and transitions to aborted", async () => {
+    const bus = createEventBus();
+    const externalAc = new AbortController();
+    const spy = vi.spyOn(externalAc, "abort");
+    const { lastFrame, stdin, unmount } = render(<App bus={bus} externalAc={externalAc} />);
+    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
+    await wait(50);
+    stdin.write("\x1b");
+    await wait(50);
+    expect(spy).toHaveBeenCalledOnce();
+    expect(lastFrame()).toContain("aborted");
+    unmount();
+  });
+
+  it("State 1 renders Welcome message when no initialPrompt", () => {
+    const { lastFrame, unmount } = render(<App />);
+    expect(lastFrame()).toContain("Welcome to Zone.");
+    unmount();
   });
 });
