@@ -118,7 +118,7 @@ export function useAgentEvents(
 
     function handleTokenBudget(evt: ZoneStructuredProgressEvent): void {
       const ratio = evt.tokenBudgetRatio ?? 0;
-      dispatch({ type: "STATUS_UPDATE", tokenBudgetRatio: ratio });
+      dispatch({ type: "STATUS_UPDATE", tokenBudgetRatio: ratio, ...(evt.cumulativeTokens != null ? { tokens: evt.cumulativeTokens } : {}) });
       if (ratio >= 0.7) {
         dispatch({
           type: "TOAST_PUSH",

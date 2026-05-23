@@ -1,22 +1,30 @@
 import { Box, Text } from "ink";
 import { useStore, type RunState } from "../store.js";
 
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
 function leftText(
   runState: RunState,
   costUsd: number,
   model: string,
-  elapsedSec: string | null
+  elapsedSec: string | null,
+  cumulativeTokens: number,
 ): string {
   const m = model || "default";
+  const tokStr = cumulativeTokens > 0 ? ` (${formatTokens(cumulativeTokens)} tok)` : "";
   switch (runState) {
     case "idle":
       return `idle · ${m} · perm: default`;
     case "running":
-      return `$${costUsd.toFixed(4)} · ${m} · perm: default`;
+      return `$${costUsd.toFixed(4)}${tokStr} · ${m} · perm: default`;
     case "done":
-      return `done · $${costUsd.toFixed(4)}${elapsedSec ? ` · ${elapsedSec}s` : ""} · ${m}`;
+      return `done · $${costUsd.toFixed(4)}${tokStr}${elapsedSec ? ` · ${elapsedSec}s` : ""} · ${m}`;
     case "aborted":
-      return `aborted · $${costUsd.toFixed(4)} · ${m}`;
+      return `aborted · $${costUsd.toFixed(4)}${tokStr} · ${m}`;
   }
 }
 
@@ -31,7 +39,7 @@ function rightHint(runState: RunState): string {
 
 export function StatusBar(): React.ReactElement {
   const { state } = useStore();
-  const { costUsd, model, tokenBudgetRatio } = state.statusBar;
+  const { costUsd, model, tokenBudgetRatio, cumulativeTokens } = state.statusBar;
   const { runState, runStartMs } = state;
 
   const elapsedSec =
@@ -49,7 +57,7 @@ export function StatusBar(): React.ReactElement {
     <Box flexDirection="column">
       <Text dimColor>{sep}</Text>
       <Box justifyContent="space-between" paddingX={1}>
-        <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec)}</Text>
+        <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec, cumulativeTokens)}</Text>
         <Text dimColor>{rightHint(runState)}</Text>
       </Box>
       <Text dimColor>{sep}</Text>

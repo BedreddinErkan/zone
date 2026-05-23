@@ -33,6 +33,7 @@ export type StatusBarState = {
   capUsd: number;
   model: string;
   tokenBudgetRatio: number;
+  cumulativeTokens: number;
 };
 
 export type RunState = "idle" | "running" | "done" | "aborted";
@@ -63,6 +64,7 @@ function buildInitialState(initialValues?: { model: string; capUsd: number; trus
       capUsd: initialValues?.capUsd ?? 10,
       model: initialValues?.model ?? "",
       tokenBudgetRatio: 0,
+      cumulativeTokens: 0,
     },
     runState: "idle",
     runStartMs: undefined,
@@ -82,7 +84,7 @@ export type StoreAction =
   | { type: "TOOL_CALL_OPEN"; toolName: string; args: string }
   | { type: "TOOL_RESULT_PUSH"; ok: boolean; detail: string; blocked?: true }
   | { type: "TOOL_CALL_CLOSE" }
-  | { type: "STATUS_UPDATE"; iter?: number; costUsd?: number; tokenBudgetRatio?: number }
+  | { type: "STATUS_UPDATE"; iter?: number; costUsd?: number; tokenBudgetRatio?: number; tokens?: number }
   | { type: "TOAST_PUSH"; entry: ToastEntry }
   | { type: "TOAST_POP" }
   | { type: "PHASE_MARKER"; phase: string }
@@ -167,6 +169,7 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
           ...(action.iter != null ? { iter: action.iter } : {}),
           ...(action.costUsd != null ? { costUsd: action.costUsd } : {}),
           ...(action.tokenBudgetRatio != null ? { tokenBudgetRatio: action.tokenBudgetRatio } : {}),
+          ...(action.tokens != null ? { cumulativeTokens: action.tokens } : {}),
         },
       };
 
