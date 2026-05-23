@@ -4,6 +4,7 @@
   "private": true,
   "description": "Self-host AI coding agent. Tier-bounded execution, atomic safety, BYOK transparency.",
   "main": "./dist/server.js",
+  "bin": { "zone": "./dist/cli/index.js" },
   "exports": {
     ".": "./dist/server.js",
     "./flow": "./dist/core/runLlmPatchFlow.js",
@@ -14,6 +15,7 @@
   "scripts": {
     "copy-ui": "node scripts/sync-zone-ui.cjs",
     "build": "node node_modules/typescript/bin/tsc -p tsconfig.json && node scripts/sync-zone-ui.cjs",
+    "postbuild": "chmod +x dist/cli/index.js",
     "typecheck": "tsc --noEmit",
     "check-types": "tsc --noEmit -p tsconfig.json",
     "serve": "node dist/cli/index.js serve",
