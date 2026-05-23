@@ -17,6 +17,7 @@ interface AppProps {
   initialModel?: string;
   capUsd?: number;
   onSubmit?: (prompt: string, ac: AbortController) => void;
+  initialTrustedPrefixes?: string[];
 }
 
 interface AppInnerProps {
@@ -89,9 +90,9 @@ function AppInner({ bus, initialPrompt, onSubmit }: AppInnerProps): React.ReactE
   );
 }
 
-export function App({ initialPrompt, bus, initialModel, capUsd, onSubmit }: AppProps): React.ReactElement {
+export function App({ initialPrompt, bus, initialModel, capUsd, onSubmit, initialTrustedPrefixes }: AppProps): React.ReactElement {
   return (
-    <StoreProvider initialValues={initialModel != null ? { model: initialModel, capUsd: capUsd ?? 10 } : undefined}>
+    <StoreProvider initialValues={{ model: initialModel ?? "", capUsd: capUsd ?? 10, trustedPrefixes: initialTrustedPrefixes ?? [] }}>
       <AppInner bus={bus} initialPrompt={initialPrompt} onSubmit={onSubmit} />
     </StoreProvider>
   );

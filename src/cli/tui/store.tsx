@@ -51,7 +51,7 @@ export type StoreState = {
   sessionTrustedPrefixes: string[];
 };
 
-function buildInitialState(initialValues?: { model: string; capUsd: number }): StoreState {
+function buildInitialState(initialValues?: { model: string; capUsd: number; trustedPrefixes?: string[] }): StoreState {
   return {
     transcript: [],
     transcriptGeneration: 0,
@@ -69,7 +69,7 @@ function buildInitialState(initialValues?: { model: string; capUsd: number }): S
     toastQueue: [],
     modalStack: [],
     pendingApproval: null,
-    sessionTrustedPrefixes: [],
+    sessionTrustedPrefixes: initialValues?.trustedPrefixes ?? [],
   };
 }
 
@@ -246,7 +246,7 @@ export function StoreProvider({
   initialValues,
 }: {
   children: React.ReactNode;
-  initialValues?: { model: string; capUsd: number };
+  initialValues?: { model: string; capUsd: number; trustedPrefixes?: string[] };
 }): React.ReactElement {
   const [state, dispatch] = useReducer(reducer, undefined, () =>
     buildInitialState(initialValues)

@@ -1,6 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import type { Dispatch } from "react";
 import { resolveCommandApproval } from "../../../api/commandApprovals.js";
+import { addDiskTrustPrefix } from "../../../api/diskTrust.js";
 import type { StoreAction } from "../store.js";
 
 interface Props {
@@ -27,6 +28,7 @@ export function ApprovalModal({ approvalId, runId, command, dispatch }: Props): 
     } else if (ch === "t") {
       const prefix = command.trim().split(/\s+/)[0] ?? command.trim();
       dispatch({ type: "SESSION_TRUST_PREFIX", prefix });
+      void addDiskTrustPrefix(process.cwd(), prefix);
       resolveCommandApproval({ approvalId, runId, approved: true });
       dispatch({ type: "PENDING_APPROVAL_RESOLVED" });
     }

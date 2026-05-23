@@ -12,6 +12,7 @@ import { runOneShotInner } from "../dispatch.js";
 import { createEventBus } from "../eventBus.js";
 import { applyStdoutInterception } from "./stdoutShield.js";
 import type { LlmPatchProgressUpdate } from "../../core/agentLifecycleEvents.js";
+import { loadDiskTrust, diskTrustPrefixes } from "../../api/diskTrust.js";
 
 export async function runTui(
   initialPrompt: string | undefined,
@@ -24,6 +25,13 @@ export async function runTui(
   process.on("exit", restoreStdout);
 
   const config = loadCliConfig(opts);
+
+  let initialTrustedPrefixes: string[] = [];
+  try {
+    initialTrustedPrefixes = diskTrustPrefixes(await loadDiskTrust(process.cwd()));
+  } catch {
+    // non-critical — start with empty trust
+  }
 
   // Validate API key only when we're about to make API calls.
   // In no-args (idle) mode the TUI renders without a pending task — defer validation.
@@ -127,6 +135,7 @@ export async function runTui(
         initialModel={config.model}
         capUsd={config.dailyUsdCap}
         onSubmit={onSubmit}
+        initialTrustedPrefixes={initialTrustedPrefixes}
       />
     </ErrorBoundary>,
     { exitOnCtrlC: false, alternateScreen: false }
