@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import fg from "fast-glob";
 import { useStore } from "../store.js";
 import { loadDiskTrust } from "../../../api/diskTrust.js";
+import { loadDiskKeys } from "../../../api/diskKeys.js";
 
 const MAX_HISTORY = 50;
 
@@ -22,6 +23,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/clear",       desc: "Clear transcript" },
   { name: "/cost",        desc: "Show session cost" },
   { name: "/permissions", desc: "View and remove trusted command prefixes" },
+  { name: "/keys",        desc: "Manage API keys (BYOK)" },
 ];
 
 const HELP_LINES = [
@@ -33,7 +35,7 @@ const HELP_LINES = [
   "  ↑/↓         navigate history (when input empty)",
   "  ←/→ Home End  cursor movement",
   "Slash commands:",
-  "  /help  /clear  /cost  /exit  /permissions",
+  "  /help  /clear  /cost  /exit  /permissions  /keys",
 ];
 
 function renderBuffer(buf: string, pos: number): string {
@@ -118,6 +120,11 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
       case "/permissions":
         void loadDiskTrust(process.cwd()).then(store => {
           dispatch({ type: "PERMISSIONS_OPEN", list: store.trustedPrefixes });
+        });
+        break;
+      case "/keys":
+        void loadDiskKeys(process.cwd()).then(store => {
+          dispatch({ type: "KEYS_OPEN", list: store.keys });
         });
         break;
     }

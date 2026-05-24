@@ -10,6 +10,7 @@ import { Toast } from "./components/Toast.js";
 import { Composer } from "./components/Composer.js";
 import { ApprovalModal } from "./components/ApprovalModal.js";
 import { PermissionsView } from "./components/PermissionsView.js";
+import { ApiKeysView } from "./components/ApiKeysView.js";
 import type { EventBus } from "../eventBus.js";
 
 interface AppProps {
@@ -86,6 +87,7 @@ function AppInner({ bus, initialPrompt, onSubmit }: AppInnerProps): React.ReactE
         />
       )}
       {state.modalView === "permissions" && <PermissionsView />}
+      {state.modalView === "keys" && <ApiKeysView />}
       <Composer onSubmit={handleComposerSubmit} onExit={exit} />
       <StatusBar />
     </Box>
