@@ -43,14 +43,25 @@ export function Transcript(): React.ReactElement {
   const { state } = useStore();
   const liveToolCall = state.liveTail.currentToolCall;
 
+  const cols = process.stdout.columns ?? 80;
+  const innerWidth = Math.max(20, cols - 4);
+
   return (
     <Box flexDirection="column">
       {state.transcript.map((entry, index) => renderEntry(entry, index))}
       {liveToolCall && (
-        <Box justifyContent="space-between">
-          <Text color="cyan">{"  "}{liveToolCall.toolName}  {truncate(liveToolCall.args, 50)}</Text>
-          <Text dimColor>…</Text>
-        </Box>
+        cols < 60 ? (
+          <Text color="cyan">
+            {"  "}{liveToolCall.toolName}
+            {"  "}{truncate(liveToolCall.args, Math.max(5, innerWidth - liveToolCall.toolName.length - 7))}
+            {"  …"}
+          </Text>
+        ) : (
+          <Box justifyContent="space-between">
+            <Text color="cyan">{"  "}{liveToolCall.toolName}  {truncate(liveToolCall.args, 50)}</Text>
+            <Text dimColor>…</Text>
+          </Box>
+        )
       )}
     </Box>
   );

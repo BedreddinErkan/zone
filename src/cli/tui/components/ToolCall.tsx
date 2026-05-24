@@ -23,9 +23,39 @@ function previewDetail(detail: string): { preview: string; moreLines: number } {
 }
 
 export function ToolCall({ toolName, args, results }: ToolCallProps): React.ReactElement {
-  const truncatedArgs = truncate(args, 50);
   const lastResult = results[results.length - 1];
 
+  const cols = process.stdout.columns ?? 80;
+  const innerWidth = Math.max(20, cols - 4);
+  const narrow = cols < 60;
+
+  if (narrow) {
+    const narrowArgsMax = Math.max(10, innerWidth - toolName.length - 4);
+    const narrowPreviewMax = Math.max(0, innerWidth - 6);
+    return (
+      <Box flexDirection="column">
+        <Text color="cyan">{"  "}{toolName}  {truncate(args, narrowArgsMax)}</Text>
+        {lastResult != null ? (
+          lastResult.blocked ? (
+            <Text>{"    "}<Text color="yellow">⚠ blocked</Text></Text>
+          ) : (() => {
+            const { preview, moreLines } = previewDetail(lastResult.detail);
+            const shortPreview = truncate(preview, narrowPreviewMax);
+            return (
+              <Text>{"    "}<Text color={lastResult.ok ? "green" : "red"}>
+                {lastResult.ok ? "✓" : "✗"}{shortPreview ? ` ${shortPreview}` : ""}{moreLines > 0 ? ` … ${moreLines} more` : ""}
+              </Text></Text>
+            );
+          })()
+        ) : (
+          <Text>{"    "}<Text dimColor>…</Text></Text>
+        )}
+      </Box>
+    );
+  }
+
+  // Wide layout — pixel-identical to pre-change
+  const truncatedArgs = truncate(args, 50);
   return (
     <Box justifyContent="space-between">
       <Text color="cyan">{"  "}{toolName}  {truncatedArgs}</Text>
