@@ -25,6 +25,7 @@ import { findCheckerForFile } from "./syntaxCheckers.js";
 import { classifyShellExit } from "./classifyShellExit.js";
 import { validateRunEnvironment } from "./runEnvironment.js";
 import { checkCommandSafe } from "../llm/runCommandSafe.js";
+import { MEMORY_WARN_THRESHOLD_BYTES } from "../memory/constants.js";
 
 const execAsync = promisify(exec);
 
@@ -2909,9 +2910,17 @@ export async function executeTool(
         `[zone-memory] entry added: "${saved.text}" — reason: ${reason}`
       );
       onProgress?.(`[tool] Saved memory: ${saved.text}`);
+      let sizeWarning = "";
+      try {
+        const { stat } = await import("node:fs/promises");
+        const { size } = await stat(path.join(repoPath, ".zone", "memory.md"));
+        if (size > MEMORY_WARN_THRESHOLD_BYTES) {
+          sizeWarning = "\n\n⚠️ Memory exceeds 40K chars; consider trimming.";
+        }
+      } catch { /* stat may fail on fresh install */ }
       return {
         success: true,
-        output: `Saved to project memory:\n  - [${saved.date}] ${saved.text}\n\nThis convention will be injected into future Zone agent prompts on this repo.`,
+        output: `Saved to project memory:\n  - [${saved.date}] ${saved.text}\n\nThis convention will be injected into future Zone agent prompts on this repo.${sizeWarning}`,
       };
     }
 

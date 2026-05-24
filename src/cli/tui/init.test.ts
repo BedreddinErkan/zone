@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { stripTrailingCodeBlock } from "./init.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
@@ -80,5 +81,25 @@ describe("runInit", () => {
     expect(content).toContain("<!-- ZONE_INIT_BEGIN -->");
     expect(content).toContain("## Project");
     expect(texts().some(t => t.toLowerCase().includes("short") || t.toLowerCase().includes("review"))).toBe(true);
+  });
+});
+
+describe("stripTrailingCodeBlock", () => {
+  it("T1: removes trailing ```json code block", () => {
+    const input = "line1\nline2\n```json\n{\"x\":1}\n```";
+    expect(stripTrailingCodeBlock(input)).toBe("line1\nline2");
+  });
+
+  it("T2: leaves clean string unchanged", () => {
+    const s = "line1\nline2\n- bullet";
+    expect(stripTrailingCodeBlock(s)).toBe(s);
+  });
+
+  it("T3: preserves interim code block, strips only trailing one", () => {
+    const input =
+      "intro\n```bash\nnpm test\n```\nsome text\n```json\n{\"x\":1}\n```";
+    const result = stripTrailingCodeBlock(input);
+    expect(result).toContain("```bash\nnpm test\n```");
+    expect(result).not.toContain("```json");
   });
 });

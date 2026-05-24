@@ -8,6 +8,10 @@ import { runInvestigationFlow } from "../../llm/investigationFlow.js";
 
 const MEMORY_PATH_RELATIVE = join(".zone", "memory.md");
 
+export function stripTrailingCodeBlock(text: string): string {
+  return text.replace(/\n```[a-zA-Z]*\n((?:(?!```)[\s\S])*)\n```\s*$/, "");
+}
+
 const INIT_PROMPT = `You are analyzing a software project to produce a structured project memory file.
 
 Read these files in order:
@@ -81,7 +85,8 @@ export async function runInit(cwd: string, dispatch: Dispatch<StoreAction>): Pro
 
   try {
     await fs.mkdir(join(cwd, ".zone"), { recursive: true });
-    const content = `<!-- ZONE_INIT_BEGIN -->\n${chatResponse.trimEnd()}\n<!-- ZONE_INIT_END -->\n`;
+    const cleaned = stripTrailingCodeBlock(chatResponse).trimEnd();
+    const content = `<!-- ZONE_INIT_BEGIN -->\n${cleaned}\n<!-- ZONE_INIT_END -->\n`;
     await fs.writeFile(memoryPath, content, "utf-8");
     const lines = chatResponse.split("\n").length;
     const suffix = lines < 20

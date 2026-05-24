@@ -1,0 +1,1 @@
+export const MEMORY_WARN_THRESHOLD_BYTES = 40 * 1024;

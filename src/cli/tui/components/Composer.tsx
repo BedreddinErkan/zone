@@ -6,6 +6,7 @@ import { loadDiskTrust } from "../../../api/diskTrust.js";
 import { loadDiskKeys } from "../../../api/diskKeys.js";
 import { listSessionsMeta } from "../../../api/diskSessions.js";
 import { runInit } from "../init.js";
+import { readMemoryAndShow } from "../memory.js";
 
 const MAX_HISTORY = 50;
 
@@ -28,6 +29,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/keys",        desc: "Manage API keys (BYOK)" },
   { name: "/sessions",   desc: "Browse and resume past sessions" },
   { name: "/init",       desc: "Scaffold .zone/memory.md by analyzing repo" },
+  { name: "/memory",     desc: "Show .zone/memory.md" },
   { name: "/model",      desc: "Choose AI model" },
   { name: "/effort",     desc: "Set reasoning effort (low/medium/high)" },
   { name: "/metrics",   desc: "View run telemetry KPIs" },
@@ -43,7 +45,7 @@ const HELP_LINES = [
   "  ↑/↓         navigate history (when input empty)",
   "  ←/→ Home End  cursor movement",
   "Slash commands:",
-  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init  /model  /effort  /metrics  /limits",
+  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init  /memory  /model  /effort  /metrics  /limits",
 ];
 
 function renderBuffer(buf: string, pos: number): string {
@@ -153,6 +155,9 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
           break;
         }
         void runInit(process.cwd(), dispatch);
+        break;
+      case "/memory":
+        void readMemoryAndShow(process.cwd(), dispatch);
         break;
       case "/model":
         if (state.runState !== "idle") {
