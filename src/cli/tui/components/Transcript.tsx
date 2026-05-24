@@ -1,6 +1,5 @@
 import { Box, Text } from "ink";
 import { useStore, type TranscriptEntry } from "../store.js";
-import { AssistantTurn } from "./AssistantTurn.js";
 import { ToolCall } from "./ToolCall.js";
 import { ErrorLine } from "./ErrorLine.js";
 import { IterMarker } from "./IterMarker.js";
@@ -11,9 +10,10 @@ function truncate(s: string, max: number): string {
 
 function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement {
   switch (entry.kind) {
-    case "assistant":
+    case "narration":
       return (
         <Box key={index}>
+          <Text color="cyan">◆ </Text>
           <Text>{entry.text}</Text>
         </Box>
       );
@@ -52,7 +52,6 @@ export function Transcript(): React.ReactElement {
           <Text dimColor>…</Text>
         </Box>
       )}
-      <AssistantTurn />
     </Box>
   );
 }

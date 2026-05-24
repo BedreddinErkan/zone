@@ -1,5 +1,7 @@
 import { createContext, useContext, useReducer, type Dispatch } from "react";
+import { randomUUID } from "node:crypto";
 import type { DiskTrustEntry } from "../../api/diskTrust.js";
+import type { DiskApiKey, ApiKeyProvider } from "../../api/diskKeys.js";
 
 export type ToastEntry = {
   id: string;
@@ -16,12 +18,11 @@ export type ModalEntry = {
 };
 
 export type LiveTailState = {
-  narrationBuffer: string;
   currentToolCall: { toolName: string; args: string } | null;
 };
 
 export type TranscriptEntry =
-  | { kind: "assistant"; text: string }
+  | { kind: "narration"; text: string }
   | { kind: "tool_call"; toolName: string; args: string; results: { ok: boolean; detail: string; blocked?: true }[] }
   | { kind: "error"; text: string }
   | { kind: "phase_marker"; phase: string }
@@ -41,7 +42,9 @@ export type RunState = "idle" | "running" | "done" | "aborted";
 
 export type StoreState = {
   transcript: TranscriptEntry[];
-  transcriptGeneration: number;  // incremented on TRANSCRIPT_CLEAR to force remount
+  sessionId: string;
+  sessionStartedAt: string;
+  isResumed: boolean;
   liveTail: LiveTailState;
   spinner: { active: boolean; label: string } | null;
   statusBar: StatusBarState;
@@ -51,16 +54,30 @@ export type StoreState = {
   modalStack: ModalEntry[];
   pendingApproval: { approvalId: string; runId: string; command: string } | null;
   sessionTrustedPrefixes: string[];
-  modalView: "none" | "permissions";
+  modalView: "none" | "permissions" | "keys";
   permissionsList: DiskTrustEntry[];
   permissionsSelectedIndex: number;
+  keysList: DiskApiKey[];
+  keysSelectedIndex: number;
+  keysEditMode: "view" | "select-provider" | "input" | "confirm-delete";
+  keysEditInput: string;
+  keysEditProvider: ApiKeyProvider | null;
 };
 
-function buildInitialState(initialValues?: { model: string; capUsd: number; trustedPrefixes?: string[] }): StoreState {
+function buildInitialState(initialValues?: {
+  model: string;
+  capUsd: number;
+  trustedPrefixes?: string[];
+  resumedTranscript?: TranscriptEntry[];
+  resumedSessionId?: string;
+  resumedStartedAt?: string;
+}): StoreState {
   return {
-    transcript: [],
-    transcriptGeneration: 0,
-    liveTail: { narrationBuffer: "", currentToolCall: null },
+    transcript: initialValues?.resumedTranscript ?? [],
+    sessionId: initialValues?.resumedSessionId ?? randomUUID(),
+    sessionStartedAt: initialValues?.resumedStartedAt ?? new Date().toISOString(),
+    isResumed: !!initialValues?.resumedTranscript,
+    liveTail: { currentToolCall: null },
     spinner: null,
     statusBar: {
       iter: 0,
@@ -79,6 +96,11 @@ function buildInitialState(initialValues?: { model: string; capUsd: number; trus
     modalView: "none",
     permissionsList: [],
     permissionsSelectedIndex: 0,
+    keysList: [],
+    keysSelectedIndex: 0,
+    keysEditMode: "view",
+    keysEditInput: "",
+    keysEditProvider: null,
   };
 }
 
@@ -86,8 +108,7 @@ export type StoreAction =
   | { type: "SPINNER_START"; label: string }
   | { type: "SPINNER_UPDATE"; label: string }
   | { type: "SPINNER_STOP" }
-  | { type: "NARRATION_APPEND"; text: string }
-  | { type: "FLUSH_NARRATION" }
+  | { type: "TRANSCRIPT_APPEND_NARRATION"; text: string }
   | { type: "TOOL_CALL_OPEN"; toolName: string; args: string }
   | { type: "TOOL_RESULT_PUSH"; ok: boolean; detail: string; blocked?: true }
   | { type: "TOOL_CALL_CLOSE" }
@@ -107,7 +128,18 @@ export type StoreAction =
   | { type: "PERMISSIONS_OPEN"; list: DiskTrustEntry[] }
   | { type: "PERMISSIONS_CLOSE" }
   | { type: "PERMISSIONS_NAV"; direction: "up" | "down" }
-  | { type: "PERMISSIONS_REMOVE_SELECTED" };
+  | { type: "PERMISSIONS_REMOVE_SELECTED" }
+  | { type: "KEYS_OPEN"; list: DiskApiKey[] }
+  | { type: "KEYS_CLOSE" }
+  | { type: "KEYS_NAV"; direction: "up" | "down" }
+  | { type: "KEYS_START_ADD" }
+  | { type: "KEYS_START_EDIT"; provider: ApiKeyProvider }
+  | { type: "KEYS_PROVIDER_SELECTED"; provider: ApiKeyProvider }
+  | { type: "KEYS_INPUT_CHAR"; ch: string }
+  | { type: "KEYS_INPUT_BACKSPACE" }
+  | { type: "KEYS_INPUT_CANCEL" }
+  | { type: "KEYS_START_DELETE" }
+  | { type: "KEYS_DELETE_CANCELED" };
 
 function reducer(state: StoreState, action: StoreAction): StoreState {
   switch (action.type) {
@@ -122,25 +154,6 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
       return { ...state, spinner: { active: true, label: action.label } };
     case "SPINNER_STOP":
       return { ...state, spinner: null };
-
-    case "NARRATION_APPEND":
-      return {
-        ...state,
-        liveTail: {
-          ...state.liveTail,
-          narrationBuffer: state.liveTail.narrationBuffer + action.text,
-        },
-      };
-
-    case "FLUSH_NARRATION": {
-      if (!state.liveTail.narrationBuffer) return state;
-      const entry: TranscriptEntry = { kind: "assistant", text: state.liveTail.narrationBuffer };
-      return {
-        ...state,
-        transcript: [...state.transcript, entry],
-        liveTail: { ...state.liveTail, narrationBuffer: "" },
-      };
-    }
 
     case "TOOL_CALL_OPEN":
       return {
@@ -231,7 +244,7 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
       };
 
     case "TRANSCRIPT_CLEAR":
-      return { ...state, transcript: [], transcriptGeneration: state.transcriptGeneration + 1 };
+      return { ...state, transcript: [] };
 
     case "PENDING_APPROVAL_SET":
       return { ...state, pendingApproval: { approvalId: action.approvalId, runId: action.runId, command: action.command } };
@@ -271,6 +284,58 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
       };
     }
 
+    case "KEYS_OPEN":
+      return { ...state, modalView: "keys", keysList: action.list, keysSelectedIndex: 0, keysEditMode: "view", keysEditInput: "", keysEditProvider: null };
+
+    case "KEYS_CLOSE":
+      return { ...state, modalView: "none" };
+
+    case "KEYS_NAV": {
+      const len = state.keysList.length;
+      if (len === 0) return state;
+      const next = action.direction === "up"
+        ? Math.max(0, state.keysSelectedIndex - 1)
+        : Math.min(len - 1, state.keysSelectedIndex + 1);
+      return { ...state, keysSelectedIndex: next };
+    }
+
+    case "KEYS_START_ADD":
+      return { ...state, keysEditMode: "select-provider", keysEditInput: "", keysEditProvider: null };
+
+    case "KEYS_START_EDIT":
+      return { ...state, keysEditMode: "input", keysEditProvider: action.provider, keysEditInput: "" };
+
+    case "KEYS_PROVIDER_SELECTED":
+      return { ...state, keysEditMode: "input", keysEditProvider: action.provider, keysEditInput: "" };
+
+    case "KEYS_INPUT_CHAR":
+      return { ...state, keysEditInput: state.keysEditInput + action.ch };
+
+    case "KEYS_INPUT_BACKSPACE":
+      return { ...state, keysEditInput: state.keysEditInput.slice(0, -1) };
+
+    case "KEYS_INPUT_CANCEL":
+      return { ...state, keysEditMode: "view", keysEditInput: "", keysEditProvider: null };
+
+    case "KEYS_START_DELETE": {
+      const entry = state.keysList[state.keysSelectedIndex];
+      if (!entry) return state;
+      return { ...state, keysEditMode: "confirm-delete", keysEditProvider: entry.provider };
+    }
+
+    case "KEYS_DELETE_CANCELED":
+      return { ...state, keysEditMode: "view", keysEditProvider: null };
+
+    case "TRANSCRIPT_APPEND_NARRATION": {
+      if (!action.text) return state;
+      const last = state.transcript[state.transcript.length - 1];
+      if (last?.kind === "narration") {
+        const updated: TranscriptEntry = { kind: "narration", text: last.text + action.text };
+        return { ...state, transcript: [...state.transcript.slice(0, -1), updated] };
+      }
+      return { ...state, transcript: [...state.transcript, { kind: "narration", text: action.text }] };
+    }
+
     default:
       return state;
   }
@@ -289,7 +354,14 @@ export function StoreProvider({
   initialValues,
 }: {
   children: React.ReactNode;
-  initialValues?: { model: string; capUsd: number; trustedPrefixes?: string[] };
+  initialValues?: {
+    model: string;
+    capUsd: number;
+    trustedPrefixes?: string[];
+    resumedTranscript?: TranscriptEntry[];
+    resumedSessionId?: string;
+    resumedStartedAt?: string;
+  };
 }): React.ReactElement {
   const [state, dispatch] = useReducer(reducer, undefined, () =>
     buildInitialState(initialValues)

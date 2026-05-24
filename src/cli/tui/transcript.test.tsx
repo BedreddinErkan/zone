@@ -34,7 +34,7 @@ describe("TUI.2 transcript rendering", () => {
     unmount();
   });
 
-  it("narration event renders text in AssistantTurn after debounce", async () => {
+  it("narration event renders text in transcript after debounce", async () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
@@ -45,7 +45,7 @@ describe("TUI.2 transcript rendering", () => {
     unmount();
   });
 
-  it("chat_chunk events accumulate in AssistantTurn", async () => {
+  it("chat_chunk events accumulate in transcript", async () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 

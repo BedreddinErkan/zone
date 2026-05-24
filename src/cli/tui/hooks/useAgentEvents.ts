@@ -18,7 +18,7 @@ function flushBuffer(
     debounceTimer.current = null;
   }
   if (localBuffer.current) {
-    dispatch({ type: "NARRATION_APPEND", text: localBuffer.current });
+    dispatch({ type: "TRANSCRIPT_APPEND_NARRATION", text: localBuffer.current });
     localBuffer.current = "";
   }
 }
@@ -40,7 +40,7 @@ export function useAgentEvents(
       localBuffer.current += text;
       if (debounceTimer.current !== null) clearTimeout(debounceTimer.current);
       debounceTimer.current = setTimeout(() => {
-        dispatch({ type: "NARRATION_APPEND", text: localBuffer.current });
+        dispatch({ type: "TRANSCRIPT_APPEND_NARRATION", text: localBuffer.current });
         localBuffer.current = "";
         debounceTimer.current = null;
       }, 200);
