@@ -3,6 +3,9 @@ import { randomUUID } from "node:crypto";
 import type { DiskTrustEntry } from "../../api/diskTrust.js";
 import type { DiskApiKey, ApiKeyProvider } from "../../api/diskKeys.js";
 import type { DiskSession, SessionMeta } from "../../api/diskSessions.js";
+import type { TuiMode } from "../dispatch.js";
+
+export type { TuiMode };
 
 export type ToastEntry = {
   id: string;
@@ -55,7 +58,18 @@ export type StoreState = {
   modalStack: ModalEntry[];
   pendingApproval: { approvalId: string; runId: string; command: string } | null;
   sessionTrustedPrefixes: string[];
-  modalView: "none" | "permissions" | "keys" | "sessions";
+  mode: TuiMode;
+  planProposal: {
+    revisionId: string;
+    runId: string;
+    revisionType: "under_scope" | "over_scope" | "mixed";
+    revisionReason: string;
+    originalPlan: string;
+    revisedPlanSummary: string;
+    missingFiles?: string[];
+    unnecessaryFiles?: string[];
+  } | null;
+  modalView: "none" | "permissions" | "keys" | "sessions" | "plan";
   permissionsList: DiskTrustEntry[];
   permissionsSelectedIndex: number;
   keysList: DiskApiKey[];
@@ -67,7 +81,7 @@ export type StoreState = {
   sessionsSelectedIndex: number;
 };
 
-function buildInitialState(initialValues?: {
+export function buildInitialState(initialValues?: {
   model: string;
   capUsd: number;
   trustedPrefixes?: string[];
@@ -96,6 +110,8 @@ function buildInitialState(initialValues?: {
     modalStack: [],
     pendingApproval: null,
     sessionTrustedPrefixes: initialValues?.trustedPrefixes ?? [],
+    mode: "normal",
+    planProposal: null,
     modalView: "none",
     permissionsList: [],
     permissionsSelectedIndex: 0,
@@ -148,9 +164,22 @@ export type StoreAction =
   | { type: "SESSIONS_OPEN"; list: SessionMeta[] }
   | { type: "SESSIONS_CLOSE" }
   | { type: "SESSIONS_NAV"; direction: "up" | "down" }
-  | { type: "SESSION_RESUME"; session: DiskSession };
+  | { type: "SESSION_RESUME"; session: DiskSession }
+  | { type: "MODE_CYCLE" }
+  | {
+      type: "PLAN_PROPOSED";
+      revisionId: string;
+      runId: string;
+      revisionType: "under_scope" | "over_scope" | "mixed";
+      revisionReason: string;
+      originalPlan: string;
+      revisedPlanSummary: string;
+      missingFiles?: string[];
+      unnecessaryFiles?: string[];
+    }
+  | { type: "PLAN_RESOLVED" };
 
-function reducer(state: StoreState, action: StoreAction): StoreState {
+export function reducer(state: StoreState, action: StoreAction): StoreState {
   switch (action.type) {
     case "SPINNER_START":
       return {
@@ -363,6 +392,34 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
         modalView: "none",
         statusBar: { ...state.statusBar, costUsd: 0, iter: 0 },
       };
+
+    case "MODE_CYCLE":
+      if (state.modalView !== "none" || state.pendingApproval !== null) return state;
+      return {
+        ...state,
+        mode: state.mode === "normal" ? "autoAccept"
+            : state.mode === "autoAccept" ? "plan"
+            : "normal",
+      };
+
+    case "PLAN_PROPOSED":
+      return {
+        ...state,
+        modalView: "plan",
+        planProposal: {
+          revisionId: action.revisionId,
+          runId: action.runId,
+          revisionType: action.revisionType,
+          revisionReason: action.revisionReason,
+          originalPlan: action.originalPlan,
+          revisedPlanSummary: action.revisedPlanSummary,
+          ...(action.missingFiles ? { missingFiles: action.missingFiles } : {}),
+          ...(action.unnecessaryFiles ? { unnecessaryFiles: action.unnecessaryFiles } : {}),
+        },
+      };
+
+    case "PLAN_RESOLVED":
+      return { ...state, modalView: "none", planProposal: null };
 
     case "TRANSCRIPT_APPEND_NARRATION": {
       if (!action.text) return state;

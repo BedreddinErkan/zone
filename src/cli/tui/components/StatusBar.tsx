@@ -1,5 +1,5 @@
 import { Box, Text } from "ink";
-import { useStore, type RunState } from "../store.js";
+import { useStore, type RunState, type TuiMode } from "../store.js";
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -37,10 +37,16 @@ function rightHint(runState: RunState): string {
   }
 }
 
+function modePill(m: TuiMode, narrow: boolean): string | null {
+  if (m === "normal") return null;
+  if (narrow) return m === "autoAccept" ? "[A]" : "[P]";
+  return m === "autoAccept" ? "auto" : "plan";
+}
+
 export function StatusBar(): React.ReactElement {
   const { state } = useStore();
   const { costUsd, model, tokenBudgetRatio, cumulativeTokens } = state.statusBar;
-  const { runState, runStartMs } = state;
+  const { runState, runStartMs, mode } = state;
 
   const elapsedSec =
     runState === "done" && runStartMs != null
@@ -52,12 +58,16 @@ export function StatusBar(): React.ReactElement {
 
   const cols = process.stdout.columns ?? 80;
   const sep = "─".repeat(cols);
+  const narrow = cols < 60;
+  const pill = modePill(mode, narrow);
+  const pillColor: "yellow" | "cyan" = mode === "autoAccept" ? "yellow" : "cyan";
 
   return (
     <Box flexDirection="column">
       <Text dimColor>{sep}</Text>
       <Box justifyContent="space-between" paddingX={1}>
         <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec, cumulativeTokens)}</Text>
+        {pill ? <Text color={pillColor}>{pill}</Text> : null}
         <Text dimColor>{rightHint(runState)}</Text>
       </Box>
       <Text dimColor>{sep}</Text>

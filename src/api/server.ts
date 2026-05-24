@@ -108,11 +108,9 @@ import {
 import {
   resolveRevisionApproval,
   rejectPendingRevisionsForRun,
-  requestRevisionApproval,
   type RevisionProposal,
 } from "../llm/revisionApprovals.js";
-import { investigateScope } from "../llm/investigationFlow.js";
-import { runScopeJudge } from "../llm/scopeJudge.js";
+import { runAuditPipeline, type AuditFindingsForExec } from "../llm/auditPipeline.js";
 import { classifyTask, type TaskClassification } from "../llm/taskClassifier.js";
 import { preparePlanContext } from "../core/preparePlanContext.js";
 import { generateExecutionPlan } from "../llm/executionPlan.js";
@@ -3776,23 +3774,8 @@ app.post("/api/patch", async (req, res) => {
   // early res.json() before runLlmPatchFlow so the caller isn't left hanging.
   let revisionEarlyExit: { terminationReason: string; proposal: RevisionProposal; revisionId: string } | null = null;
 
-  // Scope audit gate — fires when shouldRunAudit returns true.
-  // preClassifiedTask and _serverPipelineCfg are assigned above in the plan-gen block.
-  // Phase X.0.1: captured when audit ran without skipping; forwarded to execute agent.
-  let auditFindingsForExec: {
-    summary: string;
-    citationCount: number;
-    toolCallCount: number;
-    costUsd: number;
-    scopeVerdict?: "under_scope" | "over_scope" | "mixed" | "none";
-    severity?: "none" | "minor" | "major";
-    citations?: Array<{ file: string; line?: number }>;
-    filesAlreadyRead?: string[];
-    rootCause?: string;
-    fixInstruction?: string;
-    filesToEdit?: string[];
-    evidence?: string;
-  } | undefined;
+  // Scope audit gate — Phase X.0.1: captured when audit ran; forwarded to execute agent.
+  let auditFindingsForExec: AuditFindingsForExec | undefined;
   if (runIdStr) {
     const tier = preClassifiedTask?.tier ?? "medium";
     // Phase H: per-request auditMode override, then persisted setting, then default.
@@ -3803,215 +3786,25 @@ app.post("/api/patch", async (req, res) => {
       ?? readAuditModeSetting();
     const explicitAuditRequest = req.body?.forceAudit === true;
 
-    const auditDecision = computeAuditDecision({
+    const auditResult = await runAuditPipeline({
+      task: String(task),
+      repoPath: String(repoPath),
+      runId: runIdStr,
       tier,
       auditMode,
-      explicitRequest: explicitAuditRequest,
-      plan: preGeneratedPlan ?? null,
-      classification: preClassifiedTask ?? null,
-      runId: runIdStr,
+      forceAudit: explicitAuditRequest,
+      preClassifiedTask,
+      preGeneratedPlan,
+      userApiKey: userApiKey || undefined,
+      emit: (update) => emitProgress(runIdStr, update as any),
+      abortSignal: patchAbort?.signal,
+      timeoutMs: revisionApprovalTimeoutMsOverride ?? (isHeadless ? 30_000 : 10 * 60 * 1000),
+      autoApprove: autoApproveRevisions,
+      isHeadless,
+      pipelineCfg: _serverPipelineCfg,
     });
-
-    if (auditDecision.shouldRun
-        && !_serverPipelineCfg?.skipAudit
-        && !_serverPipelineCfg?.skipPhase1) {
-      if (!preGeneratedPlan) {
-        // Defensive: plan generation failed upstream — audit cannot run without a plan.
-        log("[zone-audit-skipped]", JSON.stringify({ runId: runIdStr, tier, auditMode, reason: "no_plan", ts: new Date().toISOString() }));
-      } else {
-        try {
-        emitProgress(runIdStr, {
-          stage: "scope_revision",
-          progress: {
-            runId: runIdStr,
-            ts: Date.now(),
-            type: "scope_audit_started",
-            title: "Auditing plan scope",
-            status: "active",
-          } as any,
-        });
-
-        const findings = await investigateScope({
-          repoPath: String(repoPath),
-          query: `Audit whether this plan is correctly scoped for the task:\n\n${String(task)}\n\nPlan:\n${preGeneratedPlan.objective}\nSteps: ${preGeneratedPlan.steps.map((s) => s.title).join(", ")}`,
-          runId: runIdStr,
-          userApiKey: userApiKey || undefined,
-          abortSignal: patchAbort?.signal,
-          parentTier: tier,
-          maxIterationsOverride: TIER_LIMITS[tier].auditIterCap,
-          onProgress: (update) => emitProgress(runIdStr, update as any),
-        });
-
-        if (findings.skipped) {
-          emitProgress(runIdStr, {
-            stage: "scope_revision",
-            progress: {
-              runId: runIdStr,
-              ts: Date.now(),
-              type: "scope_audit_skipped",
-              title: "Scope audit skipped",
-              skipReason: findings.skipReason,
-              status: "warning",
-            } as any,
-          });
-        } else {
-          // X.0.1: capture for handoff to execute agent.
-          auditFindingsForExec = {
-            summary: findings.findings.slice(0, 2048),
-            citationCount: findings.citations.length,
-            toolCallCount: findings.toolCallCount,
-            costUsd: findings.costUsd,
-            ...(findings.citations.length ? { citations: findings.citations } : {}),
-            ...(findings.filesAlreadyRead?.length ? { filesAlreadyRead: findings.filesAlreadyRead } : {}),
-            ...(findings.rootCause ? { rootCause: findings.rootCause } : {}),
-            ...(findings.fixInstruction ? { fixInstruction: findings.fixInstruction } : {}),
-            ...(findings.filesToEdit?.length ? { filesToEdit: findings.filesToEdit } : {}),
-            ...(findings.evidence ? { evidence: findings.evidence } : {}),
-          };
-
-          // Check if agent directly proposed a revision
-          const agentRevision = findings.agentSuggestedRevision;
-          // Also run the LLM judge on the findings
-          const judgement = await runScopeJudge({
-            originalPlan: preGeneratedPlan,
-            findings: findings.findings,
-            taskClassification: preClassifiedTask,
-            runId: runIdStr,
-            userApiKey: userApiKey || undefined,
-          });
-          // Step B: populate scopeVerdict/severity from judge result
-          auditFindingsForExec.scopeVerdict = judgement.type;
-          auditFindingsForExec.severity = judgement.severity;
-
-          const hasMismatch = agentRevision != null || judgement.mismatch;
-          if (hasMismatch) {
-            const revType = agentRevision?.type ?? judgement.type as "under_scope" | "over_scope" | "mixed";
-            const revReason = agentRevision?.reason ?? judgement.reason;
-            const revSummary = agentRevision?.revisedPlanSummary ?? judgement.revisedPlan ?? "Revised plan — see reason above.";
-            const revMissing = agentRevision?.missingFiles ?? judgement.missingFiles;
-            const revUnnecessary = agentRevision?.unnecessaryFiles ?? judgement.unnecessaryFiles;
-
-            // Y.0 decision matrix (2×2 on planReview × severity):
-            //   planReview=true  + any mismatch → requestRevisionApproval (interrupt)
-            //   planReview=false + major        → requestRevisionApproval (interrupt)
-            //   planReview=false + minor        → silent auto_apply (no user prompt)
-            // Agent-suggested revisions always count as major (no severity field on agent tool).
-            const mismatchSeverity: "minor" | "major" = agentRevision != null
-              ? "major"
-              : judgement.severity === "minor" ? "minor" : "major";
-            const requiresInterrupt = mismatchSeverity === "major";
-
-            if (requiresInterrupt) {
-              const proposal: RevisionProposal = {
-                runId: runIdStr,
-                type: revType,
-                reason: revReason,
-                originalPlan: preGeneratedPlan.objective,
-                revisedPlanSummary: revSummary,
-                ...(revMissing ? { missingFiles: revMissing } : {}),
-                ...(revUnnecessary ? { unnecessaryFiles: revUnnecessary } : {}),
-              };
-
-              const { decision, revisionId: approvalRevisionId } = await requestRevisionApproval({
-                proposal,
-                emit: (evt) =>
-                  emitProgress(runIdStr, {
-                    stage: "scope_revision",
-                    progress: { ...evt, ts: Date.now() } as any,
-                  }),
-                abortSignal: patchAbort?.signal,
-                autoApprove: autoApproveRevisions,
-                timeoutMs: revisionApprovalTimeoutMsOverride ?? (isHeadless ? 30_000 : 10 * 60 * 1000),
-              });
-
-              if (decision === "timeout") {
-                // Y.1.2: headless timeout — record for early exit, skip patch flow.
-                revisionEarlyExit = { terminationReason: "revision_approval_timeout", proposal, revisionId: approvalRevisionId };
-                log("[scope-revision-timeout]", JSON.stringify({
-                  runId: runIdStr,
-                  revisionId: approvalRevisionId,
-                  timeoutMs: revisionApprovalTimeoutMsOverride ?? (isHeadless ? 30_000 : 10 * 60 * 1000),
-                  timeoutSource: revisionApprovalTimeoutMsOverride ? "explicit_override" : isHeadless ? "headless_default" : "ui_default",
-                  ts: new Date().toISOString(),
-                }));
-              } else if (decision === "approve") {
-                if (autoApproveRevisions) {
-                  log("[scope-revision-auto-approved]", JSON.stringify({ runId: runIdStr, type: revType, revisionId: approvalRevisionId, reason: "headless_autoapprove", ts: new Date().toISOString() }));
-                } else {
-                  log("[zone-scope-revision-approved]", JSON.stringify({ runId: runIdStr, type: revType, ts: new Date().toISOString() }));
-                }
-                emitProgress(runIdStr, {
-                  stage: "scope_revision",
-                  progress: {
-                    runId: runIdStr,
-                    ts: Date.now(),
-                    type: "scope_revision_resolved",
-                    title: "Scope revision approved",
-                    revisionDecision: "approve",
-                    status: "success",
-                  } as any,
-                });
-                // Note: revised plan summary is informational; the agent loop
-                // will re-plan from scratch using the updated context.
-              } else {
-                log("[zone-scope-revision-rejected]", JSON.stringify({ runId: runIdStr, type: revType, ts: new Date().toISOString() }));
-                emitProgress(runIdStr, {
-                  stage: "scope_revision",
-                  progress: {
-                    runId: runIdStr,
-                    ts: Date.now(),
-                    type: "scope_revision_resolved",
-                    title: "Scope revision rejected — proceeding with original plan",
-                    revisionDecision: "reject",
-                    status: "active",
-                  } as any,
-                });
-              }
-            } else {
-              // Minor mismatch + plan-review-off → silent auto-apply.
-              log("[zone-scope-auto-apply]", JSON.stringify({ runId: runIdStr, type: revType, severity: "minor", ts: new Date().toISOString() }));
-              emitProgress(runIdStr, {
-                stage: "scope_revision",
-                progress: {
-                  runId: runIdStr,
-                  ts: Date.now(),
-                  type: "scope_revision_resolved",
-                  title: "Scope revision auto-applied (minor)",
-                  revisionDecision: "auto_apply",
-                  status: "success",
-                } as any,
-              });
-            }
-          }
-
-          if (!revisionEarlyExit) {
-            emitProgress(runIdStr, {
-              stage: "scope_revision",
-              progress: {
-                runId: runIdStr,
-                ts: Date.now(),
-                type: "scope_audit_completed",
-                title: "Scope audit complete",
-                status: "success",
-              } as any,
-            });
-          }
-        }
-        } catch (auditErr) {
-          // Audit failures never block execution — log and continue.
-          console.warn("[zone-scope-audit] audit gate failed:", auditErr instanceof Error ? auditErr.message : String(auditErr));
-        }
-      } // end else (preGeneratedPlan guard)
-    } else {
-      // Phase H: audit skipped by auditMode gate.
-      log("[zone-audit-skipped]", JSON.stringify({
-        runId: runIdStr,
-        tier,
-        auditMode,
-        reason: auditDecision.reason,
-        ts: new Date().toISOString(),
-      }));
-    }
+    auditFindingsForExec = auditResult.auditFindings;
+    revisionEarlyExit = auditResult.earlyExit ?? null;
   }
 
   // Y.1.2: revision approval timed out — return before patch flow so headless

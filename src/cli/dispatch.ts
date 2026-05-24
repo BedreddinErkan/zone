@@ -8,6 +8,12 @@ import { rejectPendingRevisionsForRun } from "../llm/revisionApprovals.js";
 import { loadCliConfig, validateCliConfig, type CliConfig, type CliFlags } from "./config.js";
 import { createSpinner, buildCliSink } from "./sink.js";
 import type { LlmPatchProgressUpdate } from "../core/agentLifecycleEvents.js";
+import { preparePlanContext } from "../core/preparePlanContext.js";
+import { generateExecutionPlan } from "../llm/executionPlan.js";
+import { runAuditPipeline } from "../llm/auditPipeline.js";
+import { readAuditModeSetting } from "../visual/tierSettings.js";
+
+export type TuiMode = "normal" | "autoAccept" | "plan";
 
 export interface OneShotOpts {
   conversationId?: string;
@@ -15,6 +21,7 @@ export interface OneShotOpts {
   externalAc?: AbortController;
   /** Custom progress callback; when provided, the built-in sink is bypassed. */
   onProgress?: (update: LlmPatchProgressUpdate) => void;
+  mode?: TuiMode;
 }
 
 /** Core one-shot runner. Returns the flow result — does NOT call process.exit. */
@@ -26,19 +33,65 @@ export async function runOneShotInner(
 ): Promise<LlmPatchFlowResult> {
   const ac = opts.externalAc ?? new AbortController();
 
-  const spinner = createSpinner(process.stdout.isTTY === true, config.noColor);
+  const effectiveConfig = opts.mode === "autoAccept"
+    ? { ...config, autoApprove: true }
+    : config;
+
+  const spinner = createSpinner(process.stdout.isTTY === true, effectiveConfig.noColor);
   const sink = buildCliSink(
     {
-      verbose: config.verbose,
-      quiet: config.quiet,
-      noColor: config.noColor,
+      verbose: effectiveConfig.verbose,
+      quiet: effectiveConfig.quiet,
+      noColor: effectiveConfig.noColor,
       isTTY: process.stdout.isTTY === true,
-      autoApprove: config.autoApprove,
-      noRevision: config.noRevision,
+      autoApprove: effectiveConfig.autoApprove,
+      noRevision: effectiveConfig.noRevision,
     },
     spinner
   );
   const progressCallback = opts.onProgress ?? sink.onProgress;
+
+  if (opts.mode === "plan") {
+    const planUserApiKey = effectiveConfig.provider === "openai"
+      ? effectiveConfig.openaiApiKey
+      : effectiveConfig.anthropicApiKey;
+
+    let preGeneratedPlan: Awaited<ReturnType<typeof generateExecutionPlan>> | undefined;
+    try {
+      const planCtx = await preparePlanContext({
+        task,
+        repoPath: effectiveConfig.repoPath,
+        userApiKey: planUserApiKey,
+      });
+      preGeneratedPlan = await generateExecutionPlan({
+        task,
+        repoSummary: planCtx.projectSummary,
+        relevantFiles: planCtx.relevantFilePaths,
+        userApiKey: planUserApiKey,
+      });
+    } catch { /* plan gen failure — audit will skip gracefully */ }
+
+    const auditResult = await runAuditPipeline({
+      task,
+      repoPath: effectiveConfig.repoPath,
+      runId,
+      tier: "medium",
+      auditMode: readAuditModeSetting(),
+      forceAudit: true,
+      preGeneratedPlan,
+      userApiKey: planUserApiKey,
+      emit: (update) => progressCallback(update as unknown as LlmPatchProgressUpdate),
+      abortSignal: ac.signal,
+      timeoutMs: 10 * 60 * 1000,
+      autoApprove: false,
+      isHeadless: false,
+    });
+
+    if (auditResult.revisionDecision === "reject") {
+      ac.abort();
+      return { ok: false as const, reason: "plan_rejected_by_user" } as unknown as LlmPatchFlowResult;
+    }
+  }
 
   // Only register an internal SIGINT handler when caller doesn't manage AbortController.
   let sigintHandler: (() => void) | null = null;
@@ -53,19 +106,20 @@ export async function runOneShotInner(
   }
 
   try {
-    const userApiKey =
-      config.provider === "openai" ? config.openaiApiKey : config.anthropicApiKey;
+    const userApiKey = effectiveConfig.provider === "openai"
+      ? effectiveConfig.openaiApiKey
+      : effectiveConfig.anthropicApiKey;
 
     const result = await runLlmPatchFlow({
       task,
-      repoPath: config.repoPath,
+      repoPath: effectiveConfig.repoPath,
       runId,
       conversationId: opts.conversationId,
       onProgress: progressCallback,
       abortSignal: ac.signal,
       userApiKey,
-      provider: config.provider,
-      forceTier: config.forceTier,
+      provider: effectiveConfig.provider,
+      forceTier: effectiveConfig.forceTier,
       mode: "patch",
     });
 

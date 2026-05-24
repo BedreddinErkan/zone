@@ -8,7 +8,7 @@ import { App } from "./App.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import type { CliFlags } from "../config.js";
 import { loadCliConfig, validateCliConfig } from "../config.js";
-import { runOneShotInner } from "../dispatch.js";
+import { runOneShotInner, type TuiMode } from "../dispatch.js";
 import { createEventBus } from "../eventBus.js";
 import { applyStdoutInterception } from "./stdoutShield.js";
 import type { LlmPatchProgressUpdate } from "../../core/agentLifecycleEvents.js";
@@ -133,7 +133,7 @@ export async function runTui(
 
   const bus = createEventBus();
 
-  const runPrompt = async (prompt: string, ac: AbortController): Promise<void> => {
+  const runPrompt = async (prompt: string, ac: AbortController, mode: TuiMode = "normal"): Promise<void> => {
     const runId = randomUUID();
 
     // ! shell escape — run cmd directly without LLM; results appear as a tool entry
@@ -163,7 +163,7 @@ export async function runTui(
       }
     };
     try {
-      await runOneShotInner(prompt, config, runId, { externalAc: ac, onProgress });
+      await runOneShotInner(prompt, config, runId, { externalAc: ac, onProgress, mode });
     } catch {
       // errors surfaced via eventBus progress events
     } finally {
@@ -181,8 +181,8 @@ export async function runTui(
     }
   };
 
-  const onSubmit = (prompt: string, ac: AbortController): void => {
-    void runPrompt(prompt, ac);
+  const onSubmit = (prompt: string, ac: AbortController, mode: TuiMode): void => {
+    void runPrompt(prompt, ac, mode);
   };
 
   instance = render(

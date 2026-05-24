@@ -5,6 +5,12 @@ const mockRunLlmPatchFlow = vi.hoisted(() => vi.fn());
 const mockRejectPendingApprovalsForRun = vi.hoisted(() => vi.fn().mockReturnValue(0));
 const mockRejectPendingRevisionsForRun = vi.hoisted(() => vi.fn().mockReturnValue(0));
 const mockClearTrustedCommandsForRun = vi.hoisted(() => vi.fn().mockReturnValue(0));
+const mockBuildCliSink = vi.hoisted(() => vi.fn(() => ({ onProgress: vi.fn() })));
+const mockCreateSpinner = vi.hoisted(() => vi.fn(() => ({ stop: vi.fn() })));
+const mockRunAuditPipeline = vi.hoisted(() => vi.fn());
+const mockPreparePlanContext = vi.hoisted(() => vi.fn());
+const mockGenerateExecutionPlan = vi.hoisted(() => vi.fn());
+const mockReadAuditModeSetting = vi.hoisted(() => vi.fn(() => "auto"));
 
 vi.mock("../core/runLlmPatchFlow.js", () => ({
   runLlmPatchFlow: mockRunLlmPatchFlow,
@@ -16,6 +22,14 @@ vi.mock("../api/commandApprovals.js", () => ({
 vi.mock("../llm/revisionApprovals.js", () => ({
   rejectPendingRevisionsForRun: mockRejectPendingRevisionsForRun,
 }));
+vi.mock("./sink.js", () => ({
+  buildCliSink: mockBuildCliSink,
+  createSpinner: mockCreateSpinner,
+}));
+vi.mock("../llm/auditPipeline.js", () => ({ runAuditPipeline: mockRunAuditPipeline }));
+vi.mock("../core/preparePlanContext.js", () => ({ preparePlanContext: mockPreparePlanContext }));
+vi.mock("../llm/executionPlan.js", () => ({ generateExecutionPlan: mockGenerateExecutionPlan }));
+vi.mock("../visual/tierSettings.js", () => ({ readAuditModeSetting: mockReadAuditModeSetting }));
 
 // Import after mocks are registered
 import { runOneShotInner, runOneShotFromCli } from "./dispatch.js";
@@ -47,11 +61,22 @@ const BASE_CONFIG = {
   noColor: true,
 };
 
+const FAKE_PLAN = {
+  objective: "Add feature X",
+  steps: [{ title: "Read files", filesLikely: [], subagentEligible: false }],
+};
+
 beforeEach(() => {
   mockRunLlmPatchFlow.mockReset();
   mockRejectPendingApprovalsForRun.mockClear();
   mockRejectPendingRevisionsForRun.mockClear();
   mockClearTrustedCommandsForRun.mockClear();
+  mockBuildCliSink.mockReturnValue({ onProgress: vi.fn() });
+  mockCreateSpinner.mockReturnValue({ stop: vi.fn() });
+  mockRunAuditPipeline.mockResolvedValue({ auditFindings: undefined, revisionDecision: undefined, earlyExit: null });
+  mockPreparePlanContext.mockResolvedValue({ projectSummary: "A TS project", relevantFilePaths: [] });
+  mockGenerateExecutionPlan.mockResolvedValue(FAKE_PLAN);
+  mockReadAuditModeSetting.mockReturnValue("auto");
   // Suppress stdout/stderr in tests
   vi.spyOn(process.stdout, "write").mockReturnValue(true);
   vi.spyOn(process.stderr, "write").mockReturnValue(true);
@@ -182,5 +207,45 @@ describe("runOneShotFromCli — process.exit behavior", () => {
     ).rejects.toThrow("exit:1");
 
     expect(mockExit).toHaveBeenCalledWith(1);
+  });
+});
+
+describe("runOneShotInner — mode wiring", () => {
+  it("autoAccept passes autoApprove:true to buildCliSink", async () => {
+    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
+    await runOneShotInner("do something", BASE_CONFIG, "run-m1", {
+      mode: "autoAccept",
+      externalAc: new AbortController(),
+    });
+    const sinkCallArg = mockBuildCliSink.mock.calls[0]![0] as Record<string, unknown>;
+    expect(sinkCallArg.autoApprove).toBe(true);
+    expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
+  });
+
+  it("plan mode calls runAuditPipeline with forceAudit:true before runLlmPatchFlow", async () => {
+    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
+    await runOneShotInner("do something", BASE_CONFIG, "run-m2", {
+      mode: "plan",
+      externalAc: new AbortController(),
+    });
+    expect(mockRunAuditPipeline).toHaveBeenCalledOnce();
+    expect(mockRunAuditPipeline.mock.calls[0]![0].forceAudit).toBe(true);
+    expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
+  });
+
+  it("plan mode + reject: ac.abort() called, runLlmPatchFlow not called, ok:false", async () => {
+    mockRunAuditPipeline.mockResolvedValueOnce({
+      auditFindings: undefined,
+      revisionDecision: "reject",
+      earlyExit: null,
+    });
+    const ac = new AbortController();
+    const result = await runOneShotInner("do something", BASE_CONFIG, "run-m3", {
+      mode: "plan",
+      externalAc: ac,
+    });
+    expect(ac.signal.aborted).toBe(true);
+    expect(mockRunLlmPatchFlow).not.toHaveBeenCalled();
+    expect((result as any).ok).toBe(false);
   });
 });

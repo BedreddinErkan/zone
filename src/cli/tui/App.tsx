@@ -12,16 +12,18 @@ import { ApprovalModal } from "./components/ApprovalModal.js";
 import { PermissionsView } from "./components/PermissionsView.js";
 import { ApiKeysView } from "./components/ApiKeysView.js";
 import { SessionsModal } from "./components/SessionsModal.js";
+import { PlanModal } from "./components/PlanModal.js";
+import { resolveCommandApproval } from "../../api/commandApprovals.js";
 import type { EventBus } from "../eventBus.js";
 import type { DiskSession } from "../../api/diskSessions.js";
-import type { StoreState } from "./store.js";
+import type { StoreState, TuiMode } from "./store.js";
 
 interface AppProps {
   initialPrompt?: string;
   bus?: EventBus;
   initialModel?: string;
   capUsd?: number;
-  onSubmit?: (prompt: string, ac: AbortController) => void;
+  onSubmit?: (prompt: string, ac: AbortController, mode: TuiMode) => void;
   initialTrustedPrefixes?: string[];
   resumedSession?: DiskSession;
   onStateChange?: (state: StoreState) => void;
@@ -30,7 +32,7 @@ interface AppProps {
 interface AppInnerProps {
   bus: EventBus | undefined;
   initialPrompt: string | undefined;
-  onSubmit: ((prompt: string, ac: AbortController) => void) | undefined;
+  onSubmit: ((prompt: string, ac: AbortController, mode: TuiMode) => void) | undefined;
   onStateChange: ((state: StoreState) => void) | undefined;
 }
 
@@ -42,6 +44,8 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange }: AppInnerProps
   useEffect(() => {
     sessionTrustedPrefixesRef.current = state.sessionTrustedPrefixes;
   }, [state.sessionTrustedPrefixes]);
+  const modeRef = useRef<TuiMode>(state.mode);
+  useEffect(() => { modeRef.current = state.mode; }, [state.mode]);
   useEffect(() => {
     onStateChange?.(state);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -53,10 +57,18 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange }: AppInnerProps
       const ac = new AbortController();
       runAcRef.current = ac;
       dispatch({ type: "USER_PROMPT", text: initialPrompt });
-      onSubmit(initialPrompt, ac);
+      onSubmit(initialPrompt, ac, "normal");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // autoAccept: resolve pending command approvals automatically
+  useEffect(() => {
+    if (state.mode !== "autoAccept" || state.pendingApproval === null) return;
+    const { approvalId, runId } = state.pendingApproval;
+    resolveCommandApproval({ approvalId, runId, approved: true });
+    dispatch({ type: "PENDING_APPROVAL_RESOLVED" });
+  }, [state.pendingApproval, state.mode]);
 
   // Anchor stdin so Ink doesn't auto-unmount via beforeExit when the event loop empties.
   useInput((input, key) => {
@@ -66,6 +78,11 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange }: AppInnerProps
       exit();
       return;
     }
+    // Shift+Tab — cycle mode (normal → autoAccept → plan → normal)
+    if (key.shift && key.tab) {
+      dispatch({ type: "MODE_CYCLE" });
+      return;
+    }
     // Esc — abort running task only; never exit TUI. Skip when approval modal is active.
     if (key.escape && state.runState === "running" && state.pendingApproval === null && state.modalView === "none") {
       runAcRef.current?.abort();
@@ -73,11 +90,11 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange }: AppInnerProps
     }
   });
 
-  useAgentEvents(bus, dispatch, sessionTrustedPrefixesRef);
+  useAgentEvents(bus, dispatch, sessionTrustedPrefixesRef, modeRef);
 
   const handleComposerSubmit = (text: string, ac: AbortController): void => {
     runAcRef.current = ac;
-    onSubmit?.(text, ac);
+    onSubmit?.(text, ac, state.mode);
   };
 
   return (
@@ -99,6 +116,9 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange }: AppInnerProps
       {state.modalView === "permissions" && <PermissionsView />}
       {state.modalView === "keys" && <ApiKeysView />}
       {state.modalView === "sessions" && <SessionsModal />}
+      {state.planProposal !== null && (
+        <PlanModal proposal={state.planProposal} dispatch={dispatch} />
+      )}
       <Composer onSubmit={handleComposerSubmit} onExit={exit} />
       <StatusBar />
     </Box>

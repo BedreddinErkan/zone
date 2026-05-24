@@ -1,7 +1,7 @@
 import { useEffect, useRef, type Dispatch, type MutableRefObject, type RefObject } from "react";
 import { randomUUID } from "node:crypto";
 import type { EventBus } from "../../eventBus.js";
-import type { StoreAction } from "../store.js";
+import type { StoreAction, TuiMode } from "../store.js";
 import type { ZoneStructuredProgressEvent } from "../../../core/agentLifecycleEvents.js";
 import { resolveCommandApproval } from "../../../api/commandApprovals.js";
 import { resolveRevisionApproval } from "../../../llm/revisionApprovals.js";
@@ -26,7 +26,8 @@ function flushBuffer(
 export function useAgentEvents(
   bus: EventBus | undefined,
   dispatch: Dispatch<StoreAction>,
-  trustedPrefixesRef: RefObject<string[]> = { current: [] }
+  trustedPrefixesRef: RefObject<string[]> = { current: [] },
+  modeRef: RefObject<TuiMode> = { current: "normal" }
 ): void {
   const localBuffer = useRef("");
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -168,13 +169,26 @@ export function useAgentEvents(
     }
 
     function handleRevisionProposed(evt: ZoneStructuredProgressEvent): void {
-      if (evt.revisionId) {
-        resolveRevisionApproval({ revisionId: evt.revisionId, runId: evt.runId, decision: "reject" });
+      if (modeRef.current === "plan") {
+        dispatch({
+          type: "PLAN_PROPOSED",
+          revisionId: (evt as any).revisionId ?? "",
+          runId: (evt as any).runId ?? "",
+          revisionType: (evt as any).revisionType ?? "mixed",
+          revisionReason: (evt as any).revisionReason ?? "",
+          originalPlan: (evt as any).revisionOriginalPlan ?? "",
+          revisedPlanSummary: (evt as any).revisionRevisedPlanSummary ?? "",
+          ...((evt as any).revisionMissingFiles
+            ? { missingFiles: (evt as any).revisionMissingFiles } : {}),
+          ...((evt as any).revisionUnnecessaryFiles
+            ? { unnecessaryFiles: (evt as any).revisionUnnecessaryFiles } : {}),
+        });
+      } else {
+        if (evt.revisionId) {
+          resolveRevisionApproval({ revisionId: evt.revisionId, runId: evt.runId, decision: "reject" });
+        }
+        dispatch({ type: "ERROR_LINE", text: "⚠ Scope revision proposed — auto-rejected." });
       }
-      dispatch({
-        type: "ERROR_LINE",
-        text: "⚠ Scope revision proposed — auto-rejected.",
-      });
     }
 
     bus.on("agent_loop_start", handleAgentLoopStart);
