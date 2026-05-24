@@ -190,3 +190,28 @@ describe("LIMITS_MODAL_OPEN / CLOSE / APPLY", () => {
   });
 });
 
+describe("TRANSCRIPT_APPEND_NARRATION / NARRATION_COMMIT", () => {
+  it("TRANSCRIPT_APPEND_NARRATION accumulates in liveTail.narrationBuffer without touching transcript", () => {
+    const s0 = buildInitialState({});
+    const s1 = reducer(s0, { type: "TRANSCRIPT_APPEND_NARRATION", text: "hello " });
+    const s2 = reducer(s1, { type: "TRANSCRIPT_APPEND_NARRATION", text: "world" });
+    expect(s2.liveTail.narrationBuffer).toBe("hello world");
+    expect(s2.transcript).toHaveLength(0);
+  });
+
+  it("NARRATION_COMMIT flushes narrationBuffer to transcript and clears it", () => {
+    const s0 = buildInitialState({});
+    const s1 = reducer(s0, { type: "TRANSCRIPT_APPEND_NARRATION", text: "hello" });
+    const s2 = reducer(s1, { type: "NARRATION_COMMIT" });
+    expect(s2.transcript).toHaveLength(1);
+    expect(s2.transcript[0]).toEqual({ kind: "narration", text: "hello" });
+    expect(s2.liveTail.narrationBuffer).toBe("");
+  });
+
+  it("NARRATION_COMMIT on empty buffer returns same state reference", () => {
+    const s0 = buildInitialState({});
+    const s1 = reducer(s0, { type: "NARRATION_COMMIT" });
+    expect(s1).toBe(s0);
+  });
+});
+

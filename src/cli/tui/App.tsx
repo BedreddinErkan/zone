@@ -103,6 +103,7 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }:
     // Esc — abort running task only; never exit TUI. Skip when approval modal is active.
     if (key.escape && state.runState === "running" && state.pendingApproval === null && state.modalView === "none") {
       runAcRef.current?.abort();
+      dispatch({ type: "NARRATION_COMMIT" });
       dispatch({ type: "RUN_ABORTED" });
     }
   });

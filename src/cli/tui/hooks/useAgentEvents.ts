@@ -53,6 +53,7 @@ export function useAgentEvents(
 
     function handleAgentLoopComplete(evt: ZoneStructuredProgressEvent): void {
       flushBuffer(localBuffer, debounceTimer, dispatch);
+      dispatch({ type: "NARRATION_COMMIT" });
       // Update iter/cost to final values if provided, then mark run done
       const iterCount = evt.iter_count ?? evt.iter ?? 0;
       const cost = evt.cumulativeCost ?? 0;
@@ -65,6 +66,7 @@ export function useAgentEvents(
 
     function handleRunSummary(evt: ZoneStructuredProgressEvent): void {
       flushBuffer(localBuffer, debounceTimer, dispatch);
+      dispatch({ type: "NARRATION_COMMIT" });
       void buildRunSummary; // retain import for future use
       if (evt.cost) dispatch({ type: "STATUS_UPDATE", costUsd: evt.cost.totalUsd });
       dispatch({ type: "RUN_DONE" });
@@ -76,6 +78,7 @@ export function useAgentEvents(
       // real tool calls either carry toolName or have a "[tool]"-prefixed title
       if (!evt.toolName && !title.startsWith("[tool]")) return;
       flushBuffer(localBuffer, debounceTimer, dispatch);
+      dispatch({ type: "NARRATION_COMMIT" });
       // onToolCall embeds tool name and args in title as "[tool] name: cmd".
       // Parse it so Transcript renders "read_file  src/foo.ts  ✓" not "[tool] read_file: src/foo.ts  ✓".
       let toolName = evt.toolName ?? title;

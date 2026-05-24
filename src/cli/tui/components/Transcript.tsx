@@ -42,6 +42,7 @@ function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement 
 export function Transcript(): React.ReactElement {
   const { state } = useStore();
   const liveToolCall = state.liveTail.currentToolCall;
+  const liveNarration = state.liveTail.narrationBuffer;
 
   const cols = process.stdout.columns ?? 80;
   const innerWidth = Math.max(20, cols - 4);
@@ -49,6 +50,12 @@ export function Transcript(): React.ReactElement {
   return (
     <Box flexDirection="column">
       {state.transcript.map((entry, index) => renderEntry(entry, index))}
+      {liveNarration && (
+        <Box>
+          <Text color="cyan">◆ </Text>
+          <Text>{liveNarration}</Text>
+        </Box>
+      )}
       {liveToolCall && (
         cols < 60 ? (
           <Text color="cyan">

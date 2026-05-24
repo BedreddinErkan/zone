@@ -26,6 +26,7 @@ export type ModalEntry = {
 
 export type LiveTailState = {
   currentToolCall: { toolName: string; args: string } | null;
+  narrationBuffer: string;
 };
 
 export type TranscriptEntry =
@@ -101,7 +102,7 @@ export function buildInitialState(initialValues?: {
     sessionId: initialValues?.resumedSessionId ?? randomUUID(),
     sessionStartedAt: initialValues?.resumedStartedAt ?? new Date().toISOString(),
     isResumed: !!initialValues?.resumedTranscript,
-    liveTail: { currentToolCall: null },
+    liveTail: { currentToolCall: null, narrationBuffer: "" },
     spinner: null,
     statusBar: {
       iter: 0,
@@ -200,7 +201,8 @@ export type StoreAction =
       missingFiles?: string[];
       unnecessaryFiles?: string[];
     }
-  | { type: "PLAN_RESOLVED" };
+  | { type: "PLAN_RESOLVED" }
+  | { type: "NARRATION_COMMIT" };
 
 export function reducer(state: StoreState, action: StoreAction): StoreState {
   switch (action.type) {
@@ -409,7 +411,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         sessionId: action.session.sessionId,
         sessionStartedAt: action.session.startedAt,
         isResumed: true,
-        liveTail: { currentToolCall: null },
+        liveTail: { currentToolCall: null, narrationBuffer: "" },
         spinner: null,
         runState: "idle",
         modalView: "none",
@@ -444,14 +446,19 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     case "PLAN_RESOLVED":
       return { ...state, modalView: "none", planProposal: null };
 
-    case "TRANSCRIPT_APPEND_NARRATION": {
+    case "TRANSCRIPT_APPEND_NARRATION":
       if (!action.text) return state;
+      return { ...state, liveTail: { ...state.liveTail, narrationBuffer: state.liveTail.narrationBuffer + action.text } };
+
+    case "NARRATION_COMMIT": {
+      const { narrationBuffer } = state.liveTail;
+      if (!narrationBuffer) return state;
       const last = state.transcript[state.transcript.length - 1];
-      if (last?.kind === "narration") {
-        const updated: TranscriptEntry = { kind: "narration", text: last.text + action.text };
-        return { ...state, transcript: [...state.transcript.slice(0, -1), updated] };
-      }
-      return { ...state, transcript: [...state.transcript, { kind: "narration", text: action.text }] };
+      const narEntry: TranscriptEntry = { kind: "narration", text: narrationBuffer };
+      const newTranscript = last?.kind === "narration"
+        ? [...state.transcript.slice(0, -1), { kind: "narration" as const, text: last.text + narrationBuffer }]
+        : [...state.transcript, narEntry];
+      return { ...state, transcript: newTranscript, liveTail: { ...state.liveTail, narrationBuffer: "" } };
     }
 
     case "MODEL_MODAL_OPEN":
