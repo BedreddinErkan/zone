@@ -24,17 +24,33 @@ export function Header(): React.ReactElement {
   const { state } = useStore();
   const { model, costUsd, capUsd } = state.statusBar;
 
+  const cols = process.stdout.columns ?? 80;
+  const innerWidth = Math.max(10, cols - 4);
+  const narrow = cols < 60;
+
+  const cwdFull = cwd + (branch ? ` · ${branch}` : "");
+  const cwdLabel = cwdFull.length <= innerWidth
+    ? cwdFull
+    : `…${cwdFull.slice(-(innerWidth - 1))}`;
+
+  const modelLabel = model || "default";
+  const budgetSuffix = `${capUsd.toFixed(2)}${costUsd > 0 ? ` · used $${costUsd.toFixed(2)}` : ""}`;
+
   return (
     <Box borderStyle="round" flexDirection="column" paddingX={1}>
-      <Text><Text bold color="cyan">[Z]</Text> Zone v{version}{state.isResumed ? <Text dimColor> (resumed)</Text> : null}</Text>
-      <Text dimColor>{cwd}{branch ? ` · ${branch}` : ""}</Text>
-      <Text>
-        <Text bold>{model || "default"}</Text>
-        <Text dimColor>
-          {" · cap $"}{capUsd.toFixed(2)}
-          {costUsd > 0 ? ` · used $${costUsd.toFixed(2)}` : ""}
+      <Text><Text bold color="cyan">[Z]</Text>{" Zone v"}{version}{state.isResumed ? <Text dimColor> (resumed)</Text> : null}</Text>
+      <Text dimColor>{cwdLabel}</Text>
+      {narrow ? (
+        <>
+          <Text bold>{modelLabel.length > innerWidth ? modelLabel.slice(0, innerWidth - 1) + "…" : modelLabel}</Text>
+          <Text dimColor>{"cap $"}{budgetSuffix}</Text>
+        </>
+      ) : (
+        <Text>
+          <Text bold>{modelLabel}</Text>
+          <Text dimColor>{" · cap $"}{budgetSuffix}</Text>
         </Text>
-      </Text>
+      )}
     </Box>
   );
 }
