@@ -31,6 +31,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/model",      desc: "Choose AI model" },
   { name: "/effort",     desc: "Set reasoning effort (low/medium/high)" },
   { name: "/metrics",   desc: "View run telemetry KPIs" },
+  { name: "/limits",   desc: "Set daily USD cap" },
 ];
 
 const HELP_LINES = [
@@ -42,7 +43,7 @@ const HELP_LINES = [
   "  ↑/↓         navigate history (when input empty)",
   "  ←/→ Home End  cursor movement",
   "Slash commands:",
-  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init  /model  /effort  /metrics",
+  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init  /model  /effort  /metrics  /limits",
 ];
 
 function renderBuffer(buf: string, pos: number): string {
@@ -169,6 +170,13 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
         break;
       case "/metrics":
         dispatch({ type: "METRICS_MODAL_OPEN" });
+        break;
+      case "/limits":
+        if (state.runState !== "idle") {
+          dispatch({ type: "USER_PROMPT", text: "Cannot change /limits while a run is in progress." });
+          break;
+        }
+        dispatch({ type: "LIMITS_MODAL_OPEN" });
         break;
     }
   }

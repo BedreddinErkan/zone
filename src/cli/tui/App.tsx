@@ -16,6 +16,7 @@ import { PlanModal } from "./components/PlanModal.js";
 import { ModelModal } from "./components/ModelModal.js";
 import { EffortModal } from "./components/EffortModal.js";
 import { MetricsModal } from "./components/MetricsModal.js";
+import { LimitsModal } from "./components/LimitsModal.js";
 import { resolveCommandApproval } from "../../api/commandApprovals.js";
 import type { EventBus } from "../eventBus.js";
 import type { DiskSession } from "../../api/diskSessions.js";
@@ -135,6 +136,7 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }:
       {state.modalView === "model" && <ModelModal dispatch={dispatch} />}
       {state.modalView === "effort" && <EffortModal dispatch={dispatch} />}
       {state.modalView === "metrics" && <MetricsModal />}
+      {state.modalView === "limits" && <LimitsModal />}
       {state.planProposal !== null && (
         <PlanModal proposal={state.planProposal} dispatch={dispatch} />
       )}

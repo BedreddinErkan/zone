@@ -168,3 +168,25 @@ describe("METRICS_MODAL_OPEN / CLOSE", () => {
   });
 });
 
+describe("LIMITS_MODAL_OPEN / CLOSE / APPLY", () => {
+  it("LIMITS_MODAL_OPEN sets modalView to limits", () => {
+    const s = reducer(initialState(), { type: "LIMITS_MODAL_OPEN" });
+    expect(s.modalView).toBe("limits");
+  });
+
+  it("LIMITS_MODAL_CLOSE returns modalView to none", () => {
+    const s = reducer(
+      { ...initialState(), modalView: "limits" as const },
+      { type: "LIMITS_MODAL_CLOSE" },
+    );
+    expect(s.modalView).toBe("none");
+  });
+
+  it("LIMITS_APPLY updates statusBar.capUsd and closes modal", () => {
+    const base = { ...initialState(), modalView: "limits" as const };
+    const s = reducer(base, { type: "LIMITS_APPLY", capUsd: 25 });
+    expect(s.statusBar.capUsd).toBe(25);
+    expect(s.modalView).toBe("none");
+  });
+});
+

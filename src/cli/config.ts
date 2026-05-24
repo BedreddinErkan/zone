@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import type { LLMProvider } from "../llm/types.js";
 import type { TaskTier } from "../llm/taskClassifier.js";
 import type { EffortLevel } from "../llm/modelRegistry.js";
+import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 
 export interface CliConfig {
   model: string;
@@ -91,7 +92,8 @@ export function loadCliConfig(
   const dailyUsdCap = (() => {
     const envRaw = envStr("ZONE_DAILY_USD_CAP");
     const envVal = envRaw ? Number(envRaw) : undefined;
-    return envVal ?? file.dailyUsdCap ?? 10;
+    const tierOverride = readDailyUsdCapOverride();
+    return envVal ?? tierOverride ?? file.dailyUsdCap ?? 10;
   })();
 
   const repoPath =

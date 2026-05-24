@@ -1,8 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { loadCliConfig, validateCliConfig } from "./config.js";
+import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 
 // We inject the configFile directly via the optional _configFile param to
 // avoid mocking the filesystem; env var tests use vi.stubEnv for isolation.
+
+vi.mock("../visual/tierSettings.js", () => ({
+  readDailyUsdCapOverride: vi.fn(),
+}));
 
 describe("loadCliConfig — defaults", () => {
   it("applies built-in defaults when nothing else is set", () => {
@@ -205,5 +210,24 @@ describe("validateCliConfig", () => {
         noColor: false,
       })
     ).not.toThrow();
+  });
+});
+
+describe("loadCliConfig — tier-limits override (TUI.7.I Phase A)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("T1: readDailyUsdCapOverride value 25 used when env not set", () => {
+    vi.mocked(readDailyUsdCapOverride).mockReturnValue(25);
+    const cfg = loadCliConfig({}, {});
+    expect(cfg.dailyUsdCap).toBe(25);
+  });
+
+  it("T2: ZONE_DAILY_USD_CAP env wins over tier-limits override", () => {
+    vi.stubEnv("ZONE_DAILY_USD_CAP", "30");
+    vi.mocked(readDailyUsdCapOverride).mockReturnValue(25);
+    const cfg = loadCliConfig({}, {});
+    expect(cfg.dailyUsdCap).toBe(30);
   });
 });
