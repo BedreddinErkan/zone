@@ -12,6 +12,8 @@ import { ApprovalModal } from "./components/ApprovalModal.js";
 import { PermissionsView } from "./components/PermissionsView.js";
 import { ApiKeysView } from "./components/ApiKeysView.js";
 import type { EventBus } from "../eventBus.js";
+import type { DiskSession } from "../../api/diskSessions.js";
+import type { StoreState } from "./store.js";
 
 interface AppProps {
   initialPrompt?: string;
@@ -20,15 +22,18 @@ interface AppProps {
   capUsd?: number;
   onSubmit?: (prompt: string, ac: AbortController) => void;
   initialTrustedPrefixes?: string[];
+  resumedSession?: DiskSession;
+  onStateChange?: (state: StoreState) => void;
 }
 
 interface AppInnerProps {
   bus: EventBus | undefined;
   initialPrompt: string | undefined;
   onSubmit: ((prompt: string, ac: AbortController) => void) | undefined;
+  onStateChange: ((state: StoreState) => void) | undefined;
 }
 
-function AppInner({ bus, initialPrompt, onSubmit }: AppInnerProps): React.ReactElement {
+function AppInner({ bus, initialPrompt, onSubmit, onStateChange }: AppInnerProps): React.ReactElement {
   const { exit } = useApp();
   const { state, dispatch } = useStore();
   const runAcRef = useRef<AbortController | null>(null);
@@ -36,6 +41,10 @@ function AppInner({ bus, initialPrompt, onSubmit }: AppInnerProps): React.ReactE
   useEffect(() => {
     sessionTrustedPrefixesRef.current = state.sessionTrustedPrefixes;
   }, [state.sessionTrustedPrefixes]);
+  useEffect(() => {
+    onStateChange?.(state);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
 
   // Start the initial run exactly once on mount if a prompt was provided at launch.
   useEffect(() => {
@@ -94,10 +103,17 @@ function AppInner({ bus, initialPrompt, onSubmit }: AppInnerProps): React.ReactE
   );
 }
 
-export function App({ initialPrompt, bus, initialModel, capUsd, onSubmit, initialTrustedPrefixes }: AppProps): React.ReactElement {
+export function App({ initialPrompt, bus, initialModel, capUsd, onSubmit, initialTrustedPrefixes, resumedSession, onStateChange }: AppProps): React.ReactElement {
   return (
-    <StoreProvider initialValues={{ model: initialModel ?? "", capUsd: capUsd ?? 10, trustedPrefixes: initialTrustedPrefixes ?? [] }}>
-      <AppInner bus={bus} initialPrompt={initialPrompt} onSubmit={onSubmit} />
+    <StoreProvider initialValues={{
+      model: initialModel ?? "",
+      capUsd: capUsd ?? 10,
+      trustedPrefixes: initialTrustedPrefixes ?? [],
+      resumedTranscript: resumedSession?.transcript,
+      resumedSessionId: resumedSession?.sessionId,
+      resumedStartedAt: resumedSession?.startedAt,
+    }}>
+      <AppInner bus={bus} initialPrompt={initialPrompt} onSubmit={onSubmit} onStateChange={onStateChange} />
     </StoreProvider>
   );
 }

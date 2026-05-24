@@ -13,6 +13,9 @@ import { createEventBus } from "../eventBus.js";
 import { applyStdoutInterception } from "./stdoutShield.js";
 import type { LlmPatchProgressUpdate } from "../../core/agentLifecycleEvents.js";
 import { loadDiskTrust, diskTrustPrefixes } from "../../api/diskTrust.js";
+import { loadDiskKeys } from "../../api/diskKeys.js";
+import { saveSession, pruneOldSessions, loadLastSession, type DiskSession } from "../../api/diskSessions.js";
+import type { StoreState } from "./store.js";
 
 export async function runTui(
   initialPrompt: string | undefined,
@@ -24,6 +27,8 @@ export async function runTui(
   const restoreStdout = applyStdoutInterception();
   process.on("exit", restoreStdout);
 
+  const storeCapture: { state: StoreState | null } = { state: null };
+
   const config = loadCliConfig(opts);
 
   let initialTrustedPrefixes: string[] = [];
@@ -31,6 +36,28 @@ export async function runTui(
     initialTrustedPrefixes = diskTrustPrefixes(await loadDiskTrust(process.cwd()));
   } catch {
     // non-critical — start with empty trust
+  }
+
+  try {
+    const diskKeysStore = await loadDiskKeys(process.cwd());
+    if (!config.anthropicApiKey) {
+      config.anthropicApiKey = diskKeysStore.keys.find(k => k.provider === "anthropic")?.key;
+    }
+    if (!config.openaiApiKey) {
+      config.openaiApiKey = diskKeysStore.keys.find(k => k.provider === "openai")?.key;
+    }
+  } catch { /* non-critical */ }
+
+  let resumedSession: DiskSession | null = null;
+  if (opts.resume) {
+    try {
+      resumedSession = await loadLastSession(process.cwd());
+      if (!resumedSession) {
+        process.stderr.write("No prior session found in this directory; starting fresh.\n");
+      }
+    } catch (err) {
+      process.stderr.write(`Resume failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   }
 
   // Validate API key only when we're about to make API calls.
@@ -52,15 +79,46 @@ export async function runTui(
     throw error;
   }
 
+  function buildDiskSession(state: StoreState): DiskSession {
+    return {
+      version: 1,
+      sessionId: state.sessionId,
+      startedAt: state.sessionStartedAt,
+      lastActivityAt: new Date().toISOString(),
+      cwd: process.cwd(),
+      model: state.statusBar.model,
+      transcript: state.transcript,
+      totalCostUsd: state.statusBar.costUsd,
+      totalTokens: state.statusBar.cumulativeTokens,
+      totalElapsedMs: Date.now() - new Date(state.sessionStartedAt).getTime(),
+    };
+  }
+
   // Fallback signal handlers — in TTY raw mode Ctrl+C arrives as \x03 in useInput, not SIGINT.
   // These fire in non-TTY contexts (pipes, test runners that send real signals).
   process.on("SIGINT", () => {
     instance?.unmount();
-    process.exit(130);
+    const s = storeCapture.state;
+    if (s && s.transcript.length > 0) {
+      void saveSession(process.cwd(), buildDiskSession(s))
+        .then(() => pruneOldSessions(process.cwd()))
+        .catch(() => {})
+        .finally(() => process.exit(130));
+    } else {
+      process.exit(130);
+    }
   });
   process.on("SIGTERM", () => {
     instance?.unmount();
-    process.exit(143);
+    const s = storeCapture.state;
+    if (s && s.transcript.length > 0) {
+      void saveSession(process.cwd(), buildDiskSession(s))
+        .then(() => pruneOldSessions(process.cwd()))
+        .catch(() => {})
+        .finally(() => process.exit(143));
+    } else {
+      process.exit(143);
+    }
   });
   process.on("uncaughtException", (err) => {
     instance?.unmount();
@@ -136,6 +194,8 @@ export async function runTui(
         capUsd={config.dailyUsdCap}
         onSubmit={onSubmit}
         initialTrustedPrefixes={initialTrustedPrefixes}
+        resumedSession={resumedSession ?? undefined}
+        onStateChange={(s) => { storeCapture.state = s; }}
       />
     </ErrorBoundary>,
     { exitOnCtrlC: false, alternateScreen: false }
@@ -143,5 +203,14 @@ export async function runTui(
 
   // Single path: wait for explicit exit (Ctrl+C → \x03 in useInput → useApp.exit())
   await instance.waitUntilExit();
+
+  const finalState = storeCapture.state;
+  if (finalState && finalState.transcript.length > 0) {
+    try {
+      await saveSession(process.cwd(), buildDiskSession(finalState));
+      await pruneOldSessions(process.cwd());
+    } catch { /* non-critical */ }
+  }
+
   restoreStdout();
 }
