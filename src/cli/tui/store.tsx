@@ -72,7 +72,7 @@ export type StoreState = {
     missingFiles?: string[];
     unnecessaryFiles?: string[];
   } | null;
-  modalView: "none" | "permissions" | "keys" | "sessions" | "plan" | "model" | "effort";
+  modalView: "none" | "permissions" | "keys" | "sessions" | "plan" | "model" | "effort" | "metrics";
   modelSettings: DiskModelSettings | null;
   modelSelectedIndex: number;
   effortSelectedIndex: number;
@@ -184,6 +184,8 @@ export type StoreAction =
   | { type: "EFFORT_MODAL_CLOSE" }
   | { type: "EFFORT_APPLY"; effort: EffortLevel }
   | { type: "EFFORT_NAV"; direction: "up" | "down" }
+  | { type: "METRICS_MODAL_OPEN" }
+  | { type: "METRICS_MODAL_CLOSE" }
   | {
       type: "PLAN_PROPOSED";
       revisionId: string;
@@ -479,6 +481,12 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return { ...state, modalView: "effort" };
 
     case "EFFORT_MODAL_CLOSE":
+      return { ...state, modalView: "none" };
+
+    case "METRICS_MODAL_OPEN":
+      return { ...state, modalView: "metrics" };
+
+    case "METRICS_MODAL_CLOSE":
       return { ...state, modalView: "none" };
 
     case "EFFORT_APPLY": {

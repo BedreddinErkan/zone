@@ -4,8 +4,13 @@
  * are covered in server.metrics.test.ts.
  */
 
-import { describe, expect, it } from "vitest";
-import { aggregateMetrics, type RunRecord } from "./metricsAggregator.js";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { aggregateMetrics, buildRunRecords, type RunRecord } from "./metricsAggregator.js";
+import type { UsageRecord } from "../usage/usageTracker.js";
+
+vi.mock("../usage/usageTracker.js", () => ({
+  readRecords: vi.fn(() => [] as UsageRecord[]),
+}));
 
 const NOW = 1_700_000_000_000; // fixed epoch for deterministic period windows
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -332,5 +337,64 @@ describe("K.4 C2 — gracefulDegradeRate + resumableRate", () => {
     expect(result.runs).toBe(2);
     expect(result.gracefulDegradeRate).toBe(1.0); // 2/2
     expect(result.resumableRate).toBe(0.5); // 1 resumable / 2 degraded
+  });
+});
+
+// Phase A extraction parity: buildRunRecords now lives in metricsAggregator.ts.
+// These tests lock the extraction against the original server.ts behavior.
+import { readRecords } from "../usage/usageTracker.js";
+
+function makeRecord(overrides: Partial<UsageRecord>): UsageRecord {
+  return {
+    timestamp: new Date(1_700_000_000_000).toISOString(),
+    userId: "local-dev",
+    runId: "r1",
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
+    input_uncached: 500,
+    cache_write: 0,
+    cache_read: 0,
+    output: 100,
+    est_cost_usd: 0.05,
+    ...overrides,
+  };
+}
+
+describe("buildRunRecords — extraction parity", () => {
+  beforeEach(() => {
+    vi.mocked(readRecords).mockReturnValue([]);
+  });
+
+  it("T1: empty JSONL → empty RunRecord array", () => {
+    const result = buildRunRecords("local-dev");
+    expect(result).toEqual([]);
+  });
+
+  it("T2: run-summary sentinel extracts latencyMs + terminationReason", () => {
+    const cost = makeRecord({});
+    const summary = makeRecord({
+      model: "__run_summary__",
+      input_uncached: 0, cache_write: 0, cache_read: 0, output: 0, est_cost_usd: 0,
+      latencyMs: 9000,
+      terminationReason: "natural_completion",
+    });
+    vi.mocked(readRecords).mockReturnValue([cost, summary]);
+    const result = buildRunRecords("local-dev");
+    expect(result).toHaveLength(1);
+    expect(result[0]!.latencyMs).toBe(9000);
+    expect(result[0]!.terminationReason).toBe("natural_completion");
+    expect(result[0]!.costUsd).toBeCloseTo(0.05);
+  });
+
+  it("T3: retry sentinel sets hasRetry: true on the run", () => {
+    const cost = makeRecord({});
+    const retry = makeRecord({
+      model: "__run_retry__",
+      input_uncached: 0, cache_write: 0, cache_read: 0, output: 0, est_cost_usd: 0,
+    });
+    vi.mocked(readRecords).mockReturnValue([cost, retry]);
+    const result = buildRunRecords("local-dev");
+    expect(result).toHaveLength(1);
+    expect(result[0]!.hasRetry).toBe(true);
   });
 });

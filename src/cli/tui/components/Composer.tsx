@@ -30,6 +30,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/init",       desc: "Scaffold .zone/memory.md by analyzing repo" },
   { name: "/model",      desc: "Choose AI model" },
   { name: "/effort",     desc: "Set reasoning effort (low/medium/high)" },
+  { name: "/metrics",   desc: "View run telemetry KPIs" },
 ];
 
 const HELP_LINES = [
@@ -41,7 +42,7 @@ const HELP_LINES = [
   "  ↑/↓         navigate history (when input empty)",
   "  ←/→ Home End  cursor movement",
   "Slash commands:",
-  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init  /model  /effort",
+  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init  /model  /effort  /metrics",
 ];
 
 function renderBuffer(buf: string, pos: number): string {
@@ -165,6 +166,9 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
           break;
         }
         dispatch({ type: "EFFORT_MODAL_OPEN" });
+        break;
+      case "/metrics":
+        dispatch({ type: "METRICS_MODAL_OPEN" });
         break;
     }
   }

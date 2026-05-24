@@ -153,3 +153,18 @@ describe("MODEL / EFFORT actions", () => {
   });
 });
 
+describe("METRICS_MODAL_OPEN / CLOSE", () => {
+  it("METRICS_MODAL_OPEN sets modalView to metrics", () => {
+    const s = reducer(initialState(), { type: "METRICS_MODAL_OPEN" });
+    expect(s.modalView).toBe("metrics");
+  });
+
+  it("METRICS_MODAL_CLOSE returns modalView to none", () => {
+    const s = reducer(
+      { ...initialState(), modalView: "metrics" as const },
+      { type: "METRICS_MODAL_CLOSE" },
+    );
+    expect(s.modalView).toBe("none");
+  });
+});
+

@@ -12,8 +12,8 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { runAgent } from "../core/runAgent.js";
-import { getUsage, getRunCost, readRecords } from "../usage/usageTracker.js";
-import { aggregateMetrics, type RunRecord } from "../llm/metricsAggregator.js";
+import { getUsage, getRunCost } from "../usage/usageTracker.js";
+import { aggregateMetrics, buildRunRecords, type RunRecord } from "../llm/metricsAggregator.js";
 import { loadOrgPolicy, validatePolicy } from "../llm/policyLoader.js";
 import { aggregatorToPrometheus } from "../llm/prometheusFormatter.js";
 import { atomicWriteFileSync } from "../utils/atomicWrite.js";
@@ -2175,84 +2175,6 @@ app.get("/api/usage", async (req, res) => {
 // K.3 — /api/metrics endpoint.
 // Keyed on "userId:period". TTL = 60 s.
 const metricsCache = new Map<string, { result: ReturnType<typeof aggregateMetrics>; expiresAt: number }>();
-
-/**
- * Build per-run summaries from raw UsageRecord JSONL.
- * Groups by runId, summing cost + cache tokens so each run appears once.
- * latencyMs and terminationReason come from the K.3.C3 terminal run-summary
- * record (model: "__run_summary__") appended by agentLoop on completion.
- */
-function buildRunRecords(userId: string): RunRecord[] {
-  const records = readRecords(userId);
-  const runMap = new Map<string, {
-    costUsd: number;
-    cacheTokens: number;
-    totalTokens: number;
-    ts: number;
-    latencyMs?: number;
-    terminationReason?: string;
-    hasRetry?: boolean;
-  }>();
-
-  for (const r of records) {
-    const key = r.runId || `__anon_${r.timestamp}`;
-    const ts = new Date(r.timestamp).getTime();
-
-    // Y.1.6.4: retry sentinel — mark run as having retried, skip cost/token accumulation.
-    if (r.model === "__run_retry__") {
-      const existing = runMap.get(key);
-      if (existing) {
-        existing.hasRetry = true;
-      } else {
-        runMap.set(key, {
-          costUsd: 0,
-          cacheTokens: 0,
-          totalTokens: 0,
-          ts: Number.isNaN(ts) ? Date.now() : ts,
-          hasRetry: true,
-        });
-      }
-      continue;
-    }
-
-    const tokens =
-      (r.input_uncached || 0) +
-      (r.cache_write || 0) +
-      (r.cache_read || 0) +
-      (r.output || 0);
-    const cacheTokens = r.cache_read || 0;
-    const existing = runMap.get(key);
-    if (existing) {
-      existing.costUsd += r.est_cost_usd || 0;
-      existing.cacheTokens += cacheTokens;
-      existing.totalTokens += tokens;
-      if (!Number.isNaN(ts)) existing.ts = Math.min(existing.ts, ts);
-      // Take from whichever record carries them (only the summary record will).
-      if (r.latencyMs !== undefined) existing.latencyMs = r.latencyMs;
-      if (r.terminationReason !== undefined) existing.terminationReason = r.terminationReason;
-    } else {
-      runMap.set(key, {
-        costUsd: r.est_cost_usd || 0,
-        cacheTokens,
-        totalTokens: tokens,
-        ts: Number.isNaN(ts) ? Date.now() : ts,
-        latencyMs: r.latencyMs,
-        terminationReason: r.terminationReason,
-      });
-    }
-  }
-
-  return Array.from(runMap.entries()).map(([runId, data]) => ({
-    runId,
-    costUsd: data.costUsd,
-    cacheTokens: data.cacheTokens,
-    totalTokens: data.totalTokens,
-    ts: data.ts,
-    latencyMs: data.latencyMs,
-    terminationReason: data.terminationReason,
-    hasRetry: data.hasRetry,
-  }));
-}
 
 const METRICS_VALID_PERIODS = new Set<string>(["day", "week", "month", "all"]);
 const METRICS_CACHE_TTL_MS = 60_000;
