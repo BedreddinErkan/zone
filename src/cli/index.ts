@@ -85,7 +85,7 @@ type CliOptions = {
   // TUI.1 new flags
   print?: boolean;
   continue?: boolean;
-  resume?: string;
+  resume?: boolean;
   name?: string;
   outputFormat?: string;
   maxTurns?: number;
@@ -1329,7 +1329,7 @@ export async function run(): Promise<void> {
     .argument("[query...]", "Task or initial prompt (omit for interactive TUI)")
     .option("-p, --print", "Headless one-shot mode (non-interactive, no TUI)")
     .option("-c, --continue", "Resume most recent session (coming in TUI.6)")
-    .option("-r, --resume <id>", "Resume session by ID (coming in TUI.6)")
+    .option("-r, --resume", "Resume most recent session")
     .option("-n, --name <name>", "Name this session (stored for TUI.6)")
     .option("--output-format <fmt>", "Output format: text | json", "text")
     .option("--max-turns <n>", "Maximum agent turns", parseInt)
@@ -1405,6 +1405,7 @@ export async function run(): Promise<void> {
     noRevision: options.noRevision,
     verbose: options.verbose,
     noColor: options.noColor,
+    resume: options.resume as boolean | undefined,
   };
 
   // TUI.1 entry-point fork
@@ -1412,12 +1413,8 @@ export async function run(): Promise<void> {
   const positionalTask = queryArgs.length > 0 ? queryArgs.join(" ").trim() : undefined;
   const outputFormat = (options.outputFormat === "json" ? "json" : "text") as "text" | "json";
 
-  // Placeholder guards for deferred session features
+  // Placeholder guard for --continue (TUI.7 picks-by-id)
   if (options.continue) {
-    process.stderr.write("error: session resume coming in TUI.6\n");
-    process.exit(1);
-  }
-  if (options.resume) {
     process.stderr.write("error: session resume coming in TUI.6\n");
     process.exit(1);
   }

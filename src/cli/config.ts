@@ -29,6 +29,7 @@ export interface CliFlags {
   verbose?: boolean;
   quiet?: boolean;
   noColor?: boolean;
+  resume?: boolean;
 }
 
 type ZoneConfigFile = {
