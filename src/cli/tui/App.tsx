@@ -11,6 +11,7 @@ import { Composer } from "./components/Composer.js";
 import { ApprovalModal } from "./components/ApprovalModal.js";
 import { PermissionsView } from "./components/PermissionsView.js";
 import { ApiKeysView } from "./components/ApiKeysView.js";
+import { SessionsModal } from "./components/SessionsModal.js";
 import type { EventBus } from "../eventBus.js";
 import type { DiskSession } from "../../api/diskSessions.js";
 import type { StoreState } from "./store.js";
@@ -97,6 +98,7 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange }: AppInnerProps
       )}
       {state.modalView === "permissions" && <PermissionsView />}
       {state.modalView === "keys" && <ApiKeysView />}
+      {state.modalView === "sessions" && <SessionsModal />}
       <Composer onSubmit={handleComposerSubmit} onExit={exit} />
       <StatusBar />
     </Box>

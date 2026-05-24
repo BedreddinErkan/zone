@@ -4,6 +4,7 @@ import fg from "fast-glob";
 import { useStore } from "../store.js";
 import { loadDiskTrust } from "../../../api/diskTrust.js";
 import { loadDiskKeys } from "../../../api/diskKeys.js";
+import { listSessionsMeta } from "../../../api/diskSessions.js";
 
 const MAX_HISTORY = 50;
 
@@ -24,6 +25,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/cost",        desc: "Show session cost" },
   { name: "/permissions", desc: "View and remove trusted command prefixes" },
   { name: "/keys",        desc: "Manage API keys (BYOK)" },
+  { name: "/sessions",   desc: "Browse and resume past sessions" },
 ];
 
 const HELP_LINES = [
@@ -35,7 +37,7 @@ const HELP_LINES = [
   "  ↑/↓         navigate history (when input empty)",
   "  ←/→ Home End  cursor movement",
   "Slash commands:",
-  "  /help  /clear  /cost  /exit  /permissions  /keys",
+  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions",
 ];
 
 function renderBuffer(buf: string, pos: number): string {
@@ -125,6 +127,18 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
       case "/keys":
         void loadDiskKeys(process.cwd()).then(store => {
           dispatch({ type: "KEYS_OPEN", list: store.keys });
+        });
+        break;
+      case "/sessions":
+        if (state.runState !== "idle") {
+          dispatch({
+            type: "USER_PROMPT",
+            text: "Cannot switch sessions while a run is in progress; press Esc to abort first",
+          });
+          break;
+        }
+        void listSessionsMeta(process.cwd()).then(list => {
+          dispatch({ type: "SESSIONS_OPEN", list });
         });
         break;
     }

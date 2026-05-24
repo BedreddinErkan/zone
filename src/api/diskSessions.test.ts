@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { mkdtemp, rm } from "node:fs/promises";
 import {
   saveSession, listSessions, loadSession, loadLastSession,
-  pruneOldSessions, type DiskSession,
+  pruneOldSessions, listSessionsMeta, type DiskSession,
 } from "./diskSessions.js";
 
 const baseSession: DiskSession = {
@@ -60,5 +60,57 @@ describe("diskSessions", () => {
 
   it("loadLastSession returns null when no sessions", async () => {
     expect(await loadLastSession(tmp)).toBeNull();
+  });
+
+  describe("listSessionsMeta", () => {
+    it("returns empty array when no sessions dir", async () => {
+      expect(await listSessionsMeta(tmp)).toEqual([]);
+    });
+
+    it("returns SessionMeta for each session, newest first", async () => {
+      const s1: DiskSession = {
+        ...baseSession,
+        sessionId: "id-older",
+        transcript: [
+          { kind: "user_prompt", text: "first task" },
+          { kind: "user_prompt", text: "second task" },
+        ],
+        totalCostUsd: 0.02,
+        model: "claude-haiku-4-5",
+      };
+      const s2: DiskSession = {
+        ...baseSession,
+        sessionId: "id-newer",
+        transcript: [{ kind: "user_prompt", text: "newer task" }],
+        totalCostUsd: 0.07,
+        model: "claude-sonnet-4-6",
+      };
+      await saveSession(tmp, s1);
+      await new Promise(r => setTimeout(r, 15));
+      await saveSession(tmp, s2);
+
+      const metas = await listSessionsMeta(tmp);
+      expect(metas).toHaveLength(2);
+      expect(metas[0].sessionId).toBe("id-newer");
+      expect(metas[0].firstUserMessage).toBe("newer task");
+      expect(metas[0].messageCount).toBe(1);
+      expect(metas[0].totalCostUsd).toBe(0.07);
+      expect(metas[1].sessionId).toBe("id-older");
+      expect(metas[1].firstUserMessage).toBe("first task");
+      expect(metas[1].messageCount).toBe(2);
+    });
+
+    it("skips corrupt files and returns valid entries", async () => {
+      const { join } = await import("node:path");
+      const { mkdir, writeFile } = await import("node:fs/promises");
+      const dir = join(tmp, ".zone/sessions");
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "2026-01-01T00-00-00-000Z-corrupt.json"), "not json", "utf-8");
+      await saveSession(tmp, { ...baseSession, sessionId: "id-valid" });
+
+      const metas = await listSessionsMeta(tmp);
+      expect(metas).toHaveLength(1);
+      expect(metas[0].sessionId).toBe("id-valid");
+    });
   });
 });

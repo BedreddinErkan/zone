@@ -88,3 +88,39 @@ export async function pruneOldSessions(cwd: string, keep: number = MAX_SESSIONS)
 export function newSessionId(): string {
   return randomUUID();
 }
+
+export interface SessionMeta {
+  filename: string;
+  sessionId: string;
+  startedAt: string;
+  model: string;
+  totalCostUsd: number;
+  firstUserMessage: string;
+  messageCount: number;
+}
+
+export async function listSessionsMeta(cwd: string, limit = 50): Promise<SessionMeta[]> {
+  const filenames = await listSessions(cwd);
+  const results: SessionMeta[] = [];
+  for (const filename of filenames.slice(0, limit)) {
+    try {
+      const session = await loadSession(cwd, filename);
+      if (!session) continue;
+      const userMessages = session.transcript.filter(
+        (e): e is Extract<typeof e, { kind: "user_prompt" }> => e.kind === "user_prompt"
+      );
+      results.push({
+        filename,
+        sessionId: session.sessionId,
+        startedAt: session.startedAt,
+        model: session.model,
+        totalCostUsd: session.totalCostUsd,
+        firstUserMessage: userMessages[0]?.text ?? "",
+        messageCount: userMessages.length,
+      });
+    } catch {
+      // skip corrupt or unreadable files
+    }
+  }
+  return results;
+}

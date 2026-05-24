@@ -2,6 +2,7 @@ import { createContext, useContext, useReducer, type Dispatch } from "react";
 import { randomUUID } from "node:crypto";
 import type { DiskTrustEntry } from "../../api/diskTrust.js";
 import type { DiskApiKey, ApiKeyProvider } from "../../api/diskKeys.js";
+import type { DiskSession, SessionMeta } from "../../api/diskSessions.js";
 
 export type ToastEntry = {
   id: string;
@@ -54,7 +55,7 @@ export type StoreState = {
   modalStack: ModalEntry[];
   pendingApproval: { approvalId: string; runId: string; command: string } | null;
   sessionTrustedPrefixes: string[];
-  modalView: "none" | "permissions" | "keys";
+  modalView: "none" | "permissions" | "keys" | "sessions";
   permissionsList: DiskTrustEntry[];
   permissionsSelectedIndex: number;
   keysList: DiskApiKey[];
@@ -62,6 +63,8 @@ export type StoreState = {
   keysEditMode: "view" | "select-provider" | "input" | "confirm-delete";
   keysEditInput: string;
   keysEditProvider: ApiKeyProvider | null;
+  sessionsList: SessionMeta[];
+  sessionsSelectedIndex: number;
 };
 
 function buildInitialState(initialValues?: {
@@ -101,6 +104,8 @@ function buildInitialState(initialValues?: {
     keysEditMode: "view",
     keysEditInput: "",
     keysEditProvider: null,
+    sessionsList: [],
+    sessionsSelectedIndex: 0,
   };
 }
 
@@ -139,7 +144,11 @@ export type StoreAction =
   | { type: "KEYS_INPUT_BACKSPACE" }
   | { type: "KEYS_INPUT_CANCEL" }
   | { type: "KEYS_START_DELETE" }
-  | { type: "KEYS_DELETE_CANCELED" };
+  | { type: "KEYS_DELETE_CANCELED" }
+  | { type: "SESSIONS_OPEN"; list: SessionMeta[] }
+  | { type: "SESSIONS_CLOSE" }
+  | { type: "SESSIONS_NAV"; direction: "up" | "down" }
+  | { type: "SESSION_RESUME"; session: DiskSession };
 
 function reducer(state: StoreState, action: StoreAction): StoreState {
   switch (action.type) {
@@ -325,6 +334,35 @@ function reducer(state: StoreState, action: StoreAction): StoreState {
 
     case "KEYS_DELETE_CANCELED":
       return { ...state, keysEditMode: "view", keysEditProvider: null };
+
+    case "SESSIONS_OPEN":
+      return { ...state, modalView: "sessions", sessionsList: action.list, sessionsSelectedIndex: 0 };
+
+    case "SESSIONS_CLOSE":
+      return { ...state, modalView: "none" };
+
+    case "SESSIONS_NAV": {
+      const len = state.sessionsList.length;
+      if (len === 0) return state;
+      const next = action.direction === "up"
+        ? Math.max(0, state.sessionsSelectedIndex - 1)
+        : Math.min(len - 1, state.sessionsSelectedIndex + 1);
+      return { ...state, sessionsSelectedIndex: next };
+    }
+
+    case "SESSION_RESUME":
+      return {
+        ...state,
+        transcript: action.session.transcript,
+        sessionId: action.session.sessionId,
+        sessionStartedAt: action.session.startedAt,
+        isResumed: true,
+        liveTail: { currentToolCall: null },
+        spinner: null,
+        runState: "idle",
+        modalView: "none",
+        statusBar: { ...state.statusBar, costUsd: 0, iter: 0 },
+      };
 
     case "TRANSCRIPT_APPEND_NARRATION": {
       if (!action.text) return state;
