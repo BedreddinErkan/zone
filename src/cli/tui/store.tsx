@@ -4,6 +4,9 @@ import type { DiskTrustEntry } from "../../api/diskTrust.js";
 import type { DiskApiKey, ApiKeyProvider } from "../../api/diskKeys.js";
 import type { DiskSession, SessionMeta } from "../../api/diskSessions.js";
 import type { TuiMode } from "../dispatch.js";
+import type { DiskModelSettings } from "../../api/diskModel.js";
+import { supportsEffort } from "../../llm/modelRegistry.js";
+import type { EffortLevel } from "../../llm/modelRegistry.js";
 
 export type { TuiMode };
 
@@ -69,7 +72,10 @@ export type StoreState = {
     missingFiles?: string[];
     unnecessaryFiles?: string[];
   } | null;
-  modalView: "none" | "permissions" | "keys" | "sessions" | "plan";
+  modalView: "none" | "permissions" | "keys" | "sessions" | "plan" | "model" | "effort";
+  modelSettings: DiskModelSettings | null;
+  modelSelectedIndex: number;
+  effortSelectedIndex: number;
   permissionsList: DiskTrustEntry[];
   permissionsSelectedIndex: number;
   keysList: DiskApiKey[];
@@ -88,6 +94,7 @@ export function buildInitialState(initialValues?: {
   resumedTranscript?: TranscriptEntry[];
   resumedSessionId?: string;
   resumedStartedAt?: string;
+  modelSettings?: DiskModelSettings | null;
 }): StoreState {
   return {
     transcript: initialValues?.resumedTranscript ?? [],
@@ -100,7 +107,7 @@ export function buildInitialState(initialValues?: {
       iter: 0,
       costUsd: 0,
       capUsd: initialValues?.capUsd ?? 10,
-      model: initialValues?.model ?? "",
+      model: initialValues?.modelSettings?.model ?? initialValues?.model ?? "",
       tokenBudgetRatio: 0,
       cumulativeTokens: 0,
     },
@@ -113,6 +120,9 @@ export function buildInitialState(initialValues?: {
     mode: "normal",
     planProposal: null,
     modalView: "none",
+    modelSettings: initialValues?.modelSettings ?? null,
+    modelSelectedIndex: 0,
+    effortSelectedIndex: 1,
     permissionsList: [],
     permissionsSelectedIndex: 0,
     keysList: [],
@@ -166,6 +176,14 @@ export type StoreAction =
   | { type: "SESSIONS_NAV"; direction: "up" | "down" }
   | { type: "SESSION_RESUME"; session: DiskSession }
   | { type: "MODE_CYCLE" }
+  | { type: "MODEL_MODAL_OPEN" }
+  | { type: "MODEL_MODAL_CLOSE" }
+  | { type: "MODEL_APPLY"; settings: DiskModelSettings }
+  | { type: "MODEL_NAV"; direction: "up" | "down"; count: number }
+  | { type: "EFFORT_MODAL_OPEN" }
+  | { type: "EFFORT_MODAL_CLOSE" }
+  | { type: "EFFORT_APPLY"; effort: EffortLevel }
+  | { type: "EFFORT_NAV"; direction: "up" | "down" }
   | {
       type: "PLAN_PROPOSED";
       revisionId: string;
@@ -431,6 +449,53 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return { ...state, transcript: [...state.transcript, { kind: "narration", text: action.text }] };
     }
 
+    case "MODEL_MODAL_OPEN":
+      return { ...state, modalView: "model" };
+
+    case "MODEL_MODAL_CLOSE":
+      return { ...state, modalView: "none" };
+
+    case "MODEL_APPLY": {
+      const effortToKeep = supportsEffort(action.settings.model)
+        ? action.settings.effort
+        : undefined;
+      const settings = { ...action.settings, effort: effortToKeep };
+      return {
+        ...state,
+        modelSettings: settings,
+        statusBar: { ...state.statusBar, model: settings.model },
+        modalView: "none",
+      };
+    }
+
+    case "MODEL_NAV": {
+      const next = action.direction === "up"
+        ? Math.max(0, state.modelSelectedIndex - 1)
+        : Math.min(action.count - 1, state.modelSelectedIndex + 1);
+      return { ...state, modelSelectedIndex: next };
+    }
+
+    case "EFFORT_MODAL_OPEN":
+      return { ...state, modalView: "effort" };
+
+    case "EFFORT_MODAL_CLOSE":
+      return { ...state, modalView: "none" };
+
+    case "EFFORT_APPLY": {
+      const updated: DiskModelSettings = state.modelSettings
+        ? { ...state.modelSettings, effort: action.effort, updatedAt: new Date().toISOString() }
+        : { version: 2, model: "claude-sonnet-4-6", provider: "anthropic", effort: action.effort, updatedAt: new Date().toISOString() };
+      return { ...state, modelSettings: updated, modalView: "none" };
+    }
+
+    case "EFFORT_NAV": {
+      const EFFORT_COUNT = 3;
+      const next = action.direction === "up"
+        ? Math.max(0, state.effortSelectedIndex - 1)
+        : Math.min(EFFORT_COUNT - 1, state.effortSelectedIndex + 1);
+      return { ...state, effortSelectedIndex: next };
+    }
+
     default:
       return state;
   }
@@ -456,6 +521,7 @@ export function StoreProvider({
     resumedTranscript?: TranscriptEntry[];
     resumedSessionId?: string;
     resumedStartedAt?: string;
+    modelSettings?: DiskModelSettings | null;
   };
 }): React.ReactElement {
   const [state, dispatch] = useReducer(reducer, undefined, () =>

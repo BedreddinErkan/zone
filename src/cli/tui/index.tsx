@@ -15,6 +15,7 @@ import type { LlmPatchProgressUpdate } from "../../core/agentLifecycleEvents.js"
 import { loadDiskTrust, diskTrustPrefixes } from "../../api/diskTrust.js";
 import { loadDiskKeys } from "../../api/diskKeys.js";
 import { saveSession, pruneOldSessions, loadLastSession, type DiskSession } from "../../api/diskSessions.js";
+import { loadDiskModel, type DiskModelSettings } from "../../api/diskModel.js";
 import type { StoreState } from "./store.js";
 
 export async function runTui(
@@ -45,6 +46,16 @@ export async function runTui(
     }
     if (!config.openaiApiKey) {
       config.openaiApiKey = diskKeysStore.keys.find(k => k.provider === "openai")?.key;
+    }
+  } catch { /* non-critical */ }
+
+  let diskModelSettings: DiskModelSettings | null = null;
+  try {
+    diskModelSettings = await loadDiskModel(process.cwd());
+    if (diskModelSettings) {
+      config.model = diskModelSettings.model;
+      config.provider = diskModelSettings.provider as typeof config.provider;
+      config.effort = diskModelSettings.effort;
     }
   } catch { /* non-critical */ }
 
@@ -196,6 +207,12 @@ export async function runTui(
         initialTrustedPrefixes={initialTrustedPrefixes}
         resumedSession={resumedSession ?? undefined}
         onStateChange={(s) => { storeCapture.state = s; }}
+        initialModelSettings={diskModelSettings}
+        onModelApply={(model, provider, effort) => {
+          config.model = model;
+          config.provider = provider as typeof config.provider;
+          config.effort = effort;
+        }}
       />
     </ErrorBoundary>,
     { exitOnCtrlC: false, alternateScreen: false }

@@ -4,8 +4,10 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
   ChatCompletionCreateParamsStreaming,
 } from "openai/resources/chat/completions";
+import type { EffortLevel } from "./modelRegistry.js";
 
 export type LLMProvider = "openai" | "anthropic";
+export type { EffortLevel };
 
 export type LLMChatParams =
   | ChatCompletionCreateParamsNonStreaming
@@ -27,6 +29,8 @@ export interface LLMRequestOptions {
    * per-run retry telemetry without coupling the adapter to the run context.
    */
   onRetryEvent?: (event: string, payload: Record<string, unknown>) => void;
+  /** TUI.7.G: user-selected reasoning effort level; applied by each adapter when the model supports it. */
+  effort?: EffortLevel;
 }
 
 export interface LLMClient {

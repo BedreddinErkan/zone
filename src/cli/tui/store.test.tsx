@@ -89,3 +89,67 @@ describe("PLAN_PROPOSED / PLAN_RESOLVED", () => {
     expect(s.mode).toBe("normal"); // unchanged
   });
 });
+
+describe("MODEL / EFFORT actions", () => {
+  it("MODEL_MODAL_OPEN sets modalView to 'model'", () => {
+    const s = reducer(initialState(), { type: "MODEL_MODAL_OPEN" });
+    expect(s.modalView).toBe("model");
+  });
+
+  it("MODEL_APPLY updates modelSettings, statusBar.model, and closes modal", () => {
+    const settings = {
+      version: 2 as const,
+      model: "claude-opus-4-7",
+      provider: "anthropic" as const,
+      effort: "high" as const,
+      updatedAt: "2026-05-24T00:00:00.000Z",
+    };
+    const s = reducer(
+      { ...initialState(), modalView: "model" as const },
+      { type: "MODEL_APPLY", settings }
+    );
+    expect(s.modelSettings?.model).toBe("claude-opus-4-7");
+    expect(s.modelSettings?.provider).toBe("anthropic");
+    expect(s.statusBar.model).toBe("claude-opus-4-7");
+    expect(s.modalView).toBe("none");
+  });
+
+  it("MODEL_APPLY clears effort when new model does not support it (haiku)", () => {
+    const base = {
+      ...initialState(),
+      modelSettings: {
+        version: 2 as const,
+        model: "claude-sonnet-4-6",
+        provider: "anthropic" as const,
+        effort: "high" as const,
+        updatedAt: "2026-05-24T00:00:00.000Z",
+      },
+    };
+    const settings = {
+      version: 2 as const,
+      model: "claude-haiku-4-5",
+      provider: "anthropic" as const,
+      effort: "high" as const,
+      updatedAt: "2026-05-24T00:00:00.000Z",
+    };
+    const s = reducer(base, { type: "MODEL_APPLY", settings });
+    expect(s.modelSettings?.model).toBe("claude-haiku-4-5");
+    expect(s.modelSettings?.effort).toBeUndefined();
+  });
+
+  it("EFFORT_APPLY saves effort regardless of whether current model supports it", () => {
+    const base = {
+      ...initialState(),
+      modelSettings: {
+        version: 2 as const,
+        model: "claude-haiku-4-5",
+        provider: "anthropic" as const,
+        updatedAt: "2026-05-24T00:00:00.000Z",
+      },
+    };
+    const s = reducer(base, { type: "EFFORT_APPLY", effort: "high" });
+    expect(s.modelSettings?.effort).toBe("high");
+    expect(s.modalView).toBe("none");
+  });
+});
+

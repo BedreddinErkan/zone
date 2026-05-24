@@ -27,7 +27,9 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/permissions", desc: "View and remove trusted command prefixes" },
   { name: "/keys",        desc: "Manage API keys (BYOK)" },
   { name: "/sessions",   desc: "Browse and resume past sessions" },
-  { name: "/init",      desc: "Scaffold .zone/memory.md by analyzing repo" },
+  { name: "/init",       desc: "Scaffold .zone/memory.md by analyzing repo" },
+  { name: "/model",      desc: "Choose AI model" },
+  { name: "/effort",     desc: "Set reasoning effort (low/medium/high)" },
 ];
 
 const HELP_LINES = [
@@ -39,7 +41,7 @@ const HELP_LINES = [
   "  ↑/↓         navigate history (when input empty)",
   "  ←/→ Home End  cursor movement",
   "Slash commands:",
-  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init",
+  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init  /model  /effort",
 ];
 
 function renderBuffer(buf: string, pos: number): string {
@@ -149,6 +151,20 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
           break;
         }
         void runInit(process.cwd(), dispatch);
+        break;
+      case "/model":
+        if (state.runState !== "idle") {
+          dispatch({ type: "USER_PROMPT", text: "Cannot change /model while a run is in progress." });
+          break;
+        }
+        dispatch({ type: "MODEL_MODAL_OPEN" });
+        break;
+      case "/effort":
+        if (state.runState !== "idle") {
+          dispatch({ type: "USER_PROMPT", text: "Cannot change /effort while a run is in progress." });
+          break;
+        }
+        dispatch({ type: "EFFORT_MODAL_OPEN" });
         break;
     }
   }

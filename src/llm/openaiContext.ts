@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { LLMProvider } from "./types.js";
+import type { LLMProvider, EffortLevel } from "./types.js";
 
 export interface ZoneRequestContext {
   userApiKey?: string;
@@ -14,6 +14,8 @@ export interface ZoneRequestContext {
   subagentId?: string;
   subagentType?: "worker" | "explore" | "verifier";
   parentRunId?: string;
+  /** TUI.7.G: user-selected reasoning effort; threaded to adapter via agentLoop. */
+  effort?: EffortLevel;
 }
 
 export const zoneRequestContext = new AsyncLocalStorage<ZoneRequestContext>();

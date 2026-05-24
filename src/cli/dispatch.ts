@@ -12,6 +12,7 @@ import { preparePlanContext } from "../core/preparePlanContext.js";
 import { generateExecutionPlan } from "../llm/executionPlan.js";
 import { runAuditPipeline } from "../llm/auditPipeline.js";
 import { readAuditModeSetting } from "../visual/tierSettings.js";
+import { withRequestContext } from "../llm/openaiContext.js";
 
 export type TuiMode = "normal" | "autoAccept" | "plan";
 
@@ -110,18 +111,24 @@ export async function runOneShotInner(
       ? effectiveConfig.openaiApiKey
       : effectiveConfig.anthropicApiKey;
 
-    const result = await runLlmPatchFlow({
-      task,
-      repoPath: effectiveConfig.repoPath,
-      runId,
-      conversationId: opts.conversationId,
-      onProgress: progressCallback,
-      abortSignal: ac.signal,
-      userApiKey,
-      provider: effectiveConfig.provider,
-      forceTier: effectiveConfig.forceTier,
-      mode: "patch",
-    });
+    const result = await withRequestContext(
+      {
+        modelOverride: { high: effectiveConfig.model, standard: effectiveConfig.model },
+        effort: effectiveConfig.effort,
+      },
+      () => runLlmPatchFlow({
+        task,
+        repoPath: effectiveConfig.repoPath,
+        runId,
+        conversationId: opts.conversationId,
+        onProgress: progressCallback,
+        abortSignal: ac.signal,
+        userApiKey,
+        provider: effectiveConfig.provider,
+        forceTier: effectiveConfig.forceTier,
+        mode: "patch",
+      })
+    );
 
     return result;
   } finally {

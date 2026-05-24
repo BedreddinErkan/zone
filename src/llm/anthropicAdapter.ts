@@ -38,7 +38,7 @@ export class AnthropicAdapter implements LLMClient {
     }
     const wasJsonMode =
       params.response_format?.type === "json_object";
-    const { params: anthropicParams, warnings } = convertParams(params);
+    const { params: anthropicParams, warnings } = convertParams(params, { effort: options.effort });
     if (warnings.length > 0) {
       for (const w of warnings) console.warn(`[zone-anthropic] ${w}`);
     }
@@ -53,7 +53,7 @@ export class AnthropicAdapter implements LLMClient {
     params: ChatCompletionCreateParamsNonStreaming,
     options: LLMRequestOptions
   ): Promise<ChatCompletion> {
-    const { params: anthropicParams, warnings } = convertParams(params);
+    const { params: anthropicParams, warnings } = convertParams(params, { effort: options.effort });
     if (warnings.length > 0) {
       for (const w of warnings) console.warn(`[zone-anthropic] ${w}`);
     }

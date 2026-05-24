@@ -2487,7 +2487,7 @@ Example:
           tool_choice: "auto",
           ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
         },
-        { signal: input.abortSignal, onToolArgumentsDelta, onRetryEvent }
+        { signal: input.abortSignal, onToolArgumentsDelta, onRetryEvent, effort: requestCtx?.effort }
       );
     } catch (llmErr: unknown) {
       if (llmErr instanceof UpstreamUnavailableError) {

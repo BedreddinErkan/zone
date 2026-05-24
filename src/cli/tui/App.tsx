@@ -13,9 +13,13 @@ import { PermissionsView } from "./components/PermissionsView.js";
 import { ApiKeysView } from "./components/ApiKeysView.js";
 import { SessionsModal } from "./components/SessionsModal.js";
 import { PlanModal } from "./components/PlanModal.js";
+import { ModelModal } from "./components/ModelModal.js";
+import { EffortModal } from "./components/EffortModal.js";
 import { resolveCommandApproval } from "../../api/commandApprovals.js";
 import type { EventBus } from "../eventBus.js";
 import type { DiskSession } from "../../api/diskSessions.js";
+import type { DiskModelSettings } from "../../api/diskModel.js";
+import type { EffortLevel } from "../../llm/modelRegistry.js";
 import type { StoreState, TuiMode } from "./store.js";
 
 interface AppProps {
@@ -27,6 +31,8 @@ interface AppProps {
   initialTrustedPrefixes?: string[];
   resumedSession?: DiskSession;
   onStateChange?: (state: StoreState) => void;
+  initialModelSettings?: DiskModelSettings | null;
+  onModelApply?: (model: string, provider: "anthropic" | "openai", effort?: EffortLevel) => void;
 }
 
 interface AppInnerProps {
@@ -34,9 +40,10 @@ interface AppInnerProps {
   initialPrompt: string | undefined;
   onSubmit: ((prompt: string, ac: AbortController, mode: TuiMode) => void) | undefined;
   onStateChange: ((state: StoreState) => void) | undefined;
+  onModelApply: ((model: string, provider: "anthropic" | "openai", effort?: EffortLevel) => void) | undefined;
 }
 
-function AppInner({ bus, initialPrompt, onSubmit, onStateChange }: AppInnerProps): React.ReactElement {
+function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }: AppInnerProps): React.ReactElement {
   const { exit } = useApp();
   const { state, dispatch } = useStore();
   const runAcRef = useRef<AbortController | null>(null);
@@ -50,6 +57,14 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange }: AppInnerProps
     onStateChange?.(state);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
+
+  // Propagate model/effort selection back to the live config so next run uses the selected model.
+  useEffect(() => {
+    if (state.modelSettings) {
+      onModelApply?.(state.modelSettings.model, state.modelSettings.provider, state.modelSettings.effort);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.modelSettings]);
 
   // Start the initial run exactly once on mount if a prompt was provided at launch.
   useEffect(() => {
@@ -116,6 +131,8 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange }: AppInnerProps
       {state.modalView === "permissions" && <PermissionsView />}
       {state.modalView === "keys" && <ApiKeysView />}
       {state.modalView === "sessions" && <SessionsModal />}
+      {state.modalView === "model" && <ModelModal dispatch={dispatch} />}
+      {state.modalView === "effort" && <EffortModal dispatch={dispatch} />}
       {state.planProposal !== null && (
         <PlanModal proposal={state.planProposal} dispatch={dispatch} />
       )}
@@ -125,7 +142,7 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange }: AppInnerProps
   );
 }
 
-export function App({ initialPrompt, bus, initialModel, capUsd, onSubmit, initialTrustedPrefixes, resumedSession, onStateChange }: AppProps): React.ReactElement {
+export function App({ initialPrompt, bus, initialModel, capUsd, onSubmit, initialTrustedPrefixes, resumedSession, onStateChange, initialModelSettings, onModelApply }: AppProps): React.ReactElement {
   return (
     <StoreProvider initialValues={{
       model: initialModel ?? "",
@@ -134,8 +151,9 @@ export function App({ initialPrompt, bus, initialModel, capUsd, onSubmit, initia
       resumedTranscript: resumedSession?.transcript,
       resumedSessionId: resumedSession?.sessionId,
       resumedStartedAt: resumedSession?.startedAt,
+      modelSettings: initialModelSettings,
     }}>
-      <AppInner bus={bus} initialPrompt={initialPrompt} onSubmit={onSubmit} onStateChange={onStateChange} />
+      <AppInner bus={bus} initialPrompt={initialPrompt} onSubmit={onSubmit} onStateChange={onStateChange} onModelApply={onModelApply} />
     </StoreProvider>
   );
 }

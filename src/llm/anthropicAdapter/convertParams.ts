@@ -6,6 +6,14 @@ import type {
   ChatCompletionToolChoiceOption,
 } from "openai/resources/chat/completions";
 import { applyMessageCacheBreakpoint2 } from "./cacheControlHelpers.js";
+import { supportsEffort } from "../modelRegistry.js";
+import type { EffortLevel } from "../modelRegistry.js";
+
+const EFFORT_BUDGET_MAP: Record<EffortLevel, number> = { low: 1024, medium: 8192, high: 32000 };
+
+export interface ConvertParamsExtras {
+  effort?: EffortLevel;
+}
 
 const JSON_MODE_INSTRUCTION = [
   "You must respond with a single valid JSON object only.",
@@ -60,7 +68,8 @@ export interface ConvertParamsResult {
 }
 
 export function convertParams(
-  input: ChatCompletionCreateParams
+  input: ChatCompletionCreateParams,
+  extras?: ConvertParamsExtras
 ): ConvertParamsResult {
   const warnings: string[] = [];
 
@@ -146,16 +155,29 @@ export function convertParams(
     enabled: messageCacheEnabled && cacheEligible,
   });
 
+  // TUI.7.G: extended thinking — only for models that support it.
+  // When enabled: temperature must be 1 (omit field), stop_sequences not allowed,
+  // max_tokens must exceed budget_tokens (add 2048 output margin).
+  const thinkingBudget =
+    extras?.effort && supportsEffort(input.model)
+      ? EFFORT_BUDGET_MAP[extras.effort]
+      : undefined;
+
+  const effectiveMaxTokens = thinkingBudget
+    ? Math.max(max_tokens, thinkingBudget + 2048)
+    : max_tokens;
+
   const params: Anthropic.MessageCreateParams = {
     model: input.model,
-    max_tokens,
+    max_tokens: effectiveMaxTokens,
     messages: messagesForRequest,
     ...(systemForRequest ? { system: systemForRequest } : {}),
-    ...(temperature !== undefined ? { temperature } : {}),
+    ...(!thinkingBudget && temperature !== undefined ? { temperature } : {}),
     ...(typeof input.top_p === "number" ? { top_p: input.top_p } : {}),
-    ...(stop_sequences ? { stop_sequences } : {}),
+    ...(!thinkingBudget && stop_sequences ? { stop_sequences } : {}),
     ...(toolsForRequest ? { tools: toolsForRequest } : {}),
     ...(tool_choice ? { tool_choice } : {}),
+    ...(thinkingBudget ? { thinking: { type: "enabled" as const, budget_tokens: thinkingBudget } } : {}),
   };
 
   return { params, warnings };

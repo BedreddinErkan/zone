@@ -7,6 +7,7 @@ import type {
   ChatCompletionCreateParamsStreaming,
 } from "openai/resources/chat/completions";
 import type { LLMClient, LLMRequestOptions } from "./types.js";
+import { supportsEffort } from "./modelRegistry.js";
 
 export class OpenAIAdapter implements LLMClient {
   readonly provider = "openai" as const;
@@ -22,8 +23,12 @@ export class OpenAIAdapter implements LLMClient {
     params: ChatCompletionCreateParamsNonStreaming,
     options: LLMRequestOptions = {}
   ): Promise<ChatCompletion> {
+    const resolvedParams =
+      options.effort && supportsEffort(params.model)
+        ? { ...params, reasoning_effort: options.effort }
+        : params;
     return withExponentialBackoff(
-      () => this.sdk.chat.completions.create(params, { signal: options.signal }),
+      () => this.sdk.chat.completions.create(resolvedParams, { signal: options.signal }),
       { provider: "openai", model: params.model, emit: options.onRetryEvent }
     );
   }

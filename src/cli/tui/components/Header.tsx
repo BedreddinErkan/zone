@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { Box, Text } from "ink";
 import { useStore } from "../store.js";
+import { supportsEffort } from "../../../llm/modelRegistry.js";
 
 const _require = createRequire(import.meta.url);
 const { version } = _require("../../../../package.json") as { version: string };
@@ -34,6 +35,10 @@ export function Header(): React.ReactElement {
     : `…${cwdFull.slice(-(innerWidth - 1))}`;
 
   const modelLabel = model || "default";
+  const effort = state.modelSettings?.effort;
+  const effortGlyph = !narrow && effort && supportsEffort(modelLabel)
+    ? effort === "low" ? " · ↓" : effort === "medium" ? " · ↕" : " · ↑"
+    : "";
   const budgetSuffix = `${capUsd.toFixed(2)}${costUsd > 0 ? ` · used $${costUsd.toFixed(2)}` : ""}`;
 
   return (
@@ -48,6 +53,7 @@ export function Header(): React.ReactElement {
       ) : (
         <Text>
           <Text bold>{modelLabel}</Text>
+          {effortGlyph ? <Text dimColor>{effortGlyph}</Text> : null}
           <Text dimColor>{" · cap $"}{budgetSuffix}</Text>
         </Text>
       )}

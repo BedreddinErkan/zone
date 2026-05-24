@@ -3,6 +3,7 @@ import path from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import type { LLMProvider } from "../llm/types.js";
 import type { TaskTier } from "../llm/taskClassifier.js";
+import type { EffortLevel } from "../llm/modelRegistry.js";
 
 export interface CliConfig {
   model: string;
@@ -17,6 +18,7 @@ export interface CliConfig {
   verbose: boolean;
   quiet: boolean;
   noColor: boolean;
+  effort?: EffortLevel;
 }
 
 export interface CliFlags {
