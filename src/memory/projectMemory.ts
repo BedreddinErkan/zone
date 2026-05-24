@@ -20,6 +20,13 @@ const FILE_HEADER = [
 
 const ENTRY_LINE_RE = /^-\s+\[(\d{4}-\d{2}-\d{2})\]\s+(.*)$/;
 
+const INIT_BLOCK_RE = /<!-- ZONE_INIT_BEGIN -->([\s\S]*?)<!-- ZONE_INIT_END -->/;
+
+function extractInitBlock(raw: string): string | null {
+  const m = INIT_BLOCK_RE.exec(raw);
+  return m ? `<!-- ZONE_INIT_BEGIN -->${m[1]}<!-- ZONE_INIT_END -->` : null;
+}
+
 function memoryFilePath(repoPath: string): string {
   return path.join(repoPath, MEMORY_RELATIVE_PATH);
 }
@@ -45,8 +52,12 @@ function parseEntries(raw: string): MemoryEntry[] {
   return entries;
 }
 
-function renderFile(entries: MemoryEntry[]): string {
+function renderFile(entries: MemoryEntry[], initBlock?: string | null): string {
   const lines: string[] = [FILE_HEADER];
+  if (initBlock) {
+    lines.push(initBlock);
+    lines.push("");
+  }
   for (const e of entries) {
     lines.push(`- [${e.date}] ${e.text}`);
   }
@@ -75,6 +86,17 @@ export async function appendMemory(
   const trimmed = String(text || "").trim().replace(/\s+/g, " ");
   if (!trimmed) throw new Error("appendMemory: entry text is empty");
 
+  const filePath = memoryFilePath(repoPath);
+
+  // Preserve ZONE_INIT block if present
+  let initBlock: string | null = null;
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    initBlock = extractInitBlock(raw);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+
   const existing = await readMemory(repoPath);
   const entry: MemoryEntry = {
     date: todayUtc(),
@@ -88,9 +110,8 @@ export async function appendMemory(
       ? next.slice(next.length - MEMORY_MAX_ENTRIES)
       : next;
 
-  const filePath = memoryFilePath(repoPath);
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, renderFile(trimmedList), "utf8");
+  await fs.writeFile(filePath, renderFile(trimmedList, initBlock), "utf8");
   return entry;
 }
 
@@ -105,7 +126,12 @@ export async function deleteMemoryEntry(
   const next = existing.slice();
   next.splice(index, 1);
   const filePath = memoryFilePath(repoPath);
-  await fs.writeFile(filePath, renderFile(next), "utf8");
+  let initBlock: string | null = null;
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    initBlock = extractInitBlock(raw);
+  } catch { /* file gone is fine */ }
+  await fs.writeFile(filePath, renderFile(next, initBlock), "utf8");
   return true;
 }
 

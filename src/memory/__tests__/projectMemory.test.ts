@@ -11,6 +11,8 @@ import {
   type MemoryEntry,
 } from "../projectMemory.js";
 
+const INIT_BLOCK = "<!-- ZONE_INIT_BEGIN -->\n## Project\nZone.\n<!-- ZONE_INIT_END -->";
+
 let tempRepo: string;
 
 beforeEach(() => {
@@ -108,6 +110,23 @@ describe("deleteMemoryEntry", () => {
     expect(ok).toBe(false);
     const remaining = await readMemory(tempRepo);
     expect(remaining.map((e) => e.text)).toEqual(["only"]);
+  });
+});
+
+describe("appendMemory preserves ZONE_INIT block", () => {
+  it("preserves ZONE_INIT block written by /init across appendMemory rewrites", async () => {
+    const dir = path.join(tempRepo, ".zone");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "memory.md"), INIT_BLOCK + "\n", "utf-8");
+
+    await appendMemory(tempRepo, "first lesson learned");
+
+    const raw = fs.readFileSync(path.join(dir, "memory.md"), "utf-8");
+    expect(raw).toContain("<!-- ZONE_INIT_BEGIN -->");
+    expect(raw).toContain("## Project");
+    expect(raw).toContain("<!-- ZONE_INIT_END -->");
+    expect(raw).toContain("- [");
+    expect(raw).toContain("first lesson learned");
   });
 });
 

@@ -5,6 +5,7 @@ import { useStore } from "../store.js";
 import { loadDiskTrust } from "../../../api/diskTrust.js";
 import { loadDiskKeys } from "../../../api/diskKeys.js";
 import { listSessionsMeta } from "../../../api/diskSessions.js";
+import { runInit } from "../init.js";
 
 const MAX_HISTORY = 50;
 
@@ -26,6 +27,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/permissions", desc: "View and remove trusted command prefixes" },
   { name: "/keys",        desc: "Manage API keys (BYOK)" },
   { name: "/sessions",   desc: "Browse and resume past sessions" },
+  { name: "/init",      desc: "Scaffold .zone/memory.md by analyzing repo" },
 ];
 
 const HELP_LINES = [
@@ -37,7 +39,7 @@ const HELP_LINES = [
   "  ↑/↓         navigate history (when input empty)",
   "  ←/→ Home End  cursor movement",
   "Slash commands:",
-  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions",
+  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init",
 ];
 
 function renderBuffer(buf: string, pos: number): string {
@@ -140,6 +142,13 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
         void listSessionsMeta(process.cwd()).then(list => {
           dispatch({ type: "SESSIONS_OPEN", list });
         });
+        break;
+      case "/init":
+        if (state.runState !== "idle") {
+          dispatch({ type: "USER_PROMPT", text: "Cannot /init while a run is in progress." });
+          break;
+        }
+        void runInit(process.cwd(), dispatch);
         break;
     }
   }
