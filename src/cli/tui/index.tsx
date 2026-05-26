@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { exec } from "node:child_process";
+import { exec, execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { render } from "ink";
 
@@ -17,6 +18,35 @@ import { loadDiskKeys } from "../../api/diskKeys.js";
 import { saveSession, pruneOldSessions, loadLastSession, type DiskSession } from "../../api/diskSessions.js";
 import { loadDiskModel, type DiskModelSettings } from "../../api/diskModel.js";
 import type { StoreState } from "./store.js";
+
+const _bannerRequire = createRequire(import.meta.url);
+const { version: _zoneVersion } = _bannerRequire("../../../package.json") as { version: string };
+
+function _getGitBranch(): string {
+  try {
+    return execFileSync("git", ["branch", "--show-current"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch { return ""; }
+}
+
+function writeBannerToStdout(opts: { model?: string; capUsd?: number; isResumed: boolean }): void {
+  const RESET = "\x1b[0m";
+  const CYAN_BOLD = "\x1b[36;1m";
+  const BOLD = "\x1b[1m";
+  const DIM = "\x1b[2m";
+  const cwd = process.cwd();
+  const branch = _getGitBranch();
+  const cwdBranch = branch ? `${cwd} · ${branch}` : cwd;
+  const model = opts.model || "default";
+  const cap = (opts.capUsd ?? 10).toFixed(2);
+  const resumed = opts.isResumed ? ` ${DIM}(resumed)${RESET}` : "";
+  process.stdout.write(
+    `${CYAN_BOLD}[Z]${RESET} ${BOLD}Zone v${_zoneVersion}${RESET}${resumed}\n` +
+    `${DIM}${cwdBranch}${RESET}\n` +
+    `${BOLD}${model}${RESET} ${DIM}· cap $${cap}${RESET}\n\n`
+  );
+}
 
 export async function runTui(
   initialPrompt: string | undefined,
@@ -195,6 +225,10 @@ export async function runTui(
   const onSubmit = (prompt: string, ac: AbortController, mode: TuiMode): void => {
     void runPrompt(prompt, ac, mode);
   };
+
+  if (process.env.ZONE_EXPERIMENTAL_STATIC === "1") {
+    writeBannerToStdout({ model: config.model, capUsd: config.dailyUsdCap, isResumed: !!resumedSession });
+  }
 
   instance = render(
     <ErrorBoundary onCrash={onCrash}>

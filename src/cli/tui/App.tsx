@@ -1,4 +1,4 @@
-import { Box, Static, Text, useInput, useApp } from "ink";
+import { Box, Text, useInput, useApp } from "ink";
 import { useEffect, useRef } from "react";
 import { StoreProvider, useStore } from "./store.js";
 import { useAgentEvents } from "./hooks/useAgentEvents.js";
@@ -144,9 +144,6 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }:
   if (useStaticGate) {
     return (
       <Box flexDirection="column">
-        <Static items={["banner"]}>
-          {(item) => <Header key={item} />}
-        </Static>
         <Box paddingX={2}>
           <Transcript />
         </Box>
