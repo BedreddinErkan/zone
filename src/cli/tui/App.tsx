@@ -145,7 +145,7 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }:
     return (
       <Box flexDirection="column">
         <Static items={["banner"]}>
-          {() => <Header />}
+          {(item) => <Header key={item} />}
         </Static>
         <Box paddingX={2}>
           <Transcript />
