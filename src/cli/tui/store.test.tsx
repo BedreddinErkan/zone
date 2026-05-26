@@ -222,3 +222,51 @@ describe("buildInitialState", () => {
   });
 });
 
+describe("SESSION_RESUME", () => {
+  const mockSession = {
+    sessionId: "new-session-id",
+    startedAt: "2026-01-01T00:00:00.000Z",
+    transcript: [{ kind: "narration" as const, text: "resumed entry" }],
+  };
+
+  it("replaces transcript with resumed session", () => {
+    const s = { ...initialState(), transcript: [{ kind: "narration" as const, text: "old" }] };
+    const next = reducer(s, { type: "SESSION_RESUME", session: mockSession });
+    expect(next.transcript).toEqual(mockSession.transcript);
+  });
+
+  it("increments transcriptGeneration", () => {
+    const s = { ...initialState(), transcriptGeneration: 3 };
+    const next = reducer(s, { type: "SESSION_RESUME", session: mockSession });
+    expect(next.transcriptGeneration).toBe(4);
+  });
+
+  it("clears liveTail on resume", () => {
+    const s = {
+      ...initialState(),
+      liveTail: { currentToolCall: { toolName: "read_file", args: "foo.ts" }, narrationBuffer: "partial" },
+    };
+    const next = reducer(s, { type: "SESSION_RESUME", session: mockSession });
+    expect(next.liveTail.currentToolCall).toBeNull();
+    expect(next.liveTail.narrationBuffer).toBe("");
+  });
+});
+
+describe("SESSIONS_OPEN deduplication", () => {
+  it("removes duplicate sessionIds before storing", () => {
+    const makeMeta = (sessionId: string) => ({
+      filename: `${sessionId}.json`,
+      sessionId,
+      startedAt: "",
+      model: "",
+      totalCostUsd: 0,
+      firstUserMessage: "",
+      messageCount: 0,
+    });
+    const list = [makeMeta("abc"), makeMeta("abc"), makeMeta("def")];
+    const next = reducer(initialState(), { type: "SESSIONS_OPEN", list });
+    expect(next.sessionsList).toHaveLength(2);
+    expect(next.sessionsList.map(s => s.sessionId)).toEqual(["abc", "def"]);
+  });
+});
+

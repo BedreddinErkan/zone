@@ -391,8 +391,15 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     case "KEYS_DELETE_CANCELED":
       return { ...state, keysEditMode: "view", keysEditProvider: null };
 
-    case "SESSIONS_OPEN":
-      return { ...state, modalView: "sessions", sessionsList: action.list, sessionsSelectedIndex: 0 };
+    case "SESSIONS_OPEN": {
+      const seen = new Set<string>();
+      const deduped = action.list.filter(s => {
+        if (seen.has(s.sessionId)) return false;
+        seen.add(s.sessionId);
+        return true;
+      });
+      return { ...state, modalView: "sessions", sessionsList: deduped, sessionsSelectedIndex: 0 };
+    }
 
     case "SESSIONS_CLOSE":
       return { ...state, modalView: "none" };
@@ -418,6 +425,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         runState: "idle",
         modalView: "none",
         statusBar: { ...state.statusBar, costUsd: 0, iter: 0 },
+        transcriptGeneration: state.transcriptGeneration + 1,
       };
 
     case "MODE_CYCLE":
