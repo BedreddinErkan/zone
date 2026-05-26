@@ -15,14 +15,14 @@ function wait(ms: number): Promise<void> {
 }
 
 describe("TUI.0 foundation", () => {
-  it("renders Zone placeholder", () => {
+  it("renders idle state initially", () => {
     const { lastFrame } = render(<App />);
-    expect(lastFrame()).toContain("Zone");
+    expect(lastFrame()).toContain("idle");
   });
 
   it("renders with initialPrompt without error", () => {
     const { lastFrame } = render(<App initialPrompt="hi" />);
-    expect(lastFrame()).toContain("Zone");
+    expect(lastFrame()).toBeDefined();
   });
 
   it("unmounts cleanly", () => {
@@ -89,16 +89,10 @@ describe("TUI.0 foundation", () => {
     unmount();
   });
 
-  it("gate-on layout: renders without crash when ZONE_EXPERIMENTAL_STATIC=1", () => {
-    const original = process.env.ZONE_EXPERIMENTAL_STATIC;
-    process.env.ZONE_EXPERIMENTAL_STATIC = "1";
-    try {
-      const bus = createEventBus();
-      const { lastFrame, unmount } = render(<App bus={bus} />);
-      expect(lastFrame()).toBeDefined();
-      unmount();
-    } finally {
-      process.env.ZONE_EXPERIMENTAL_STATIC = original;
-    }
+  it("renders without crash (Option B single-path layout)", () => {
+    const bus = createEventBus();
+    const { lastFrame, unmount } = render(<App bus={bus} />);
+    expect(lastFrame()).toBeDefined();
+    unmount();
   });
 });

@@ -3,6 +3,7 @@ import { render } from "ink-testing-library";
 import React from "react";
 import { App } from "./App.js";
 import { createEventBus } from "../eventBus.js";
+import { renderTranscript } from "./__fixtures__/staticHarness.js"; // resolves to staticHarness.tsx
 import type { ZoneStructuredProgressEvent } from "../../core/agentLifecycleEvents.js";
 
 vi.mock("../../api/commandApprovals.js", () => ({ resolveCommandApproval: vi.fn() }));
@@ -41,6 +42,7 @@ describe("TUI.2 transcript rendering", () => {
     bus.emit("narration", makeEvt("narration", { text: "Analyzing the codebase" }));
     await wait(250);
 
+    // Narration stays in liveTail.narrationBuffer until NARRATION_COMMIT — visible in dynamic frame
     expect(lastFrame()).toContain("Analyzing the codebase");
     unmount();
   });
@@ -70,40 +72,41 @@ describe("TUI.2 transcript rendering", () => {
     unmount();
   });
 
-  it("tool_call event opens a tool call entry", async () => {
+  it("tool_call event opens live indicator in dynamic frame", async () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("tool_call", makeEvt("tool_call", { toolName: "read_file", detail: "src/foo.ts" }));
     await wait(50);
 
-    // live tool call shows "  toolName  args" (no ▸ prefix)
+    // live tool call indicator is in the dynamic frame
     expect(lastFrame()).toContain("read_file");
     unmount();
   });
 
   it("tool_result renders check mark and detail", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+    const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("tool_call", makeEvt("tool_call", { toolName: "write_file", detail: "" }));
     bus.emit("tool_result", makeEvt("tool_result", { status: "success", detail: "written 42 bytes" }));
     await wait(50);
 
-    expect(lastFrame()).toContain("✓");
-    expect(lastFrame()).toContain("written 42 bytes");
+    // tool_result commits the entry to transcript (Static) — check all frames
+    expect(frames.some(f => f?.includes("✓"))).toBe(true);
+    expect(frames.some(f => f?.includes("written 42 bytes"))).toBe(true);
     unmount();
   });
 
   it("tool_result with error status shows failure mark", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+    const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("tool_call", makeEvt("tool_call", { toolName: "apply_patch", detail: "" }));
     bus.emit("tool_result", makeEvt("tool_result", { status: "error", detail: "patch failed" }));
     await wait(50);
 
-    expect(lastFrame()).toContain("✗");
+    expect(frames.some(f => f?.includes("✗"))).toBe(true);
     unmount();
   });
 
@@ -116,7 +119,7 @@ describe("TUI.2 transcript rendering", () => {
     await wait(50);
 
     const frame = lastFrame() ?? "";
-    // StatusBar transitions to "done" state
+    // StatusBar transitions to "done" state — in dynamic frame
     expect(frame).toContain("done");
     unmount();
   });
@@ -135,23 +138,23 @@ describe("TUI.2 transcript rendering", () => {
 
   it("phase_changed renders IterMarker", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+    const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("phase_changed", makeEvt("phase_changed", { phase: 2 }));
     await wait(50);
 
-    expect(lastFrame()).toContain("── Phase 2 ──");
+    expect(frames.some(f => f?.includes("── Phase 2 ──"))).toBe(true);
     unmount();
   });
 
   it("patch_rejected renders ErrorLine", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+    const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("patch_rejected", makeEvt("patch_rejected", { title: "Patch was rejected" }));
     await wait(50);
 
-    expect(lastFrame()).toContain("Patch was rejected");
+    expect(frames.some(f => f?.includes("Patch was rejected"))).toBe(true);
     unmount();
   });
 
@@ -223,7 +226,7 @@ describe("TUI.2 transcript rendering", () => {
   it("scope_revision_proposed auto-rejects and shows ErrorLine", async () => {
     const { resolveRevisionApproval } = await import("../../llm/revisionApprovals.js");
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+    const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("scope_revision_proposed", makeEvt("scope_revision_proposed", { revisionId: "rev-1" }));
     await wait(50);
@@ -231,44 +234,44 @@ describe("TUI.2 transcript rendering", () => {
     expect(resolveRevisionApproval).toHaveBeenCalledWith(
       expect.objectContaining({ revisionId: "rev-1", decision: "reject" })
     );
-    expect(lastFrame()).toContain("auto-rejected");
+    expect(frames.some(f => f?.includes("auto-rejected"))).toBe(true);
     unmount();
   });
 
   it("ErrorLine shows ⚠ prefix", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+    const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("patch_rejected", makeEvt("patch_rejected", { title: "Conflict found" }));
     await wait(50);
 
-    expect(lastFrame()).toContain("⚠");
-    expect(lastFrame()).toContain("Conflict found");
+    expect(frames.some(f => f?.includes("⚠"))).toBe(true);
+    expect(frames.some(f => f?.includes("Conflict found"))).toBe(true);
     unmount();
   });
 
   it("terminal_done with non-zero exit shows failure result", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+    const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("tool_call", makeEvt("tool_call", { toolName: "run_command", detail: "npm test" }));
     bus.emit("terminal_done", makeEvt("terminal_done", { exitCode: 1 }));
     await wait(50);
 
-    expect(lastFrame()).toContain("exit 1");
+    expect(frames.some(f => f?.includes("exit 1"))).toBe(true);
     unmount();
   });
 
   it("terminal_done with exit 0 does not push result", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+    const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("tool_call", makeEvt("tool_call", { toolName: "run_command", detail: "npm test" }));
     bus.emit("terminal_done", makeEvt("terminal_done", { exitCode: 0 }));
     await wait(50);
 
-    // tool call entry visible (has ▸) but no exit code text
-    expect(lastFrame()).not.toContain("exit 0");
+    // tool call entry visible but no exit code text in any frame
+    expect(frames.some(f => f?.includes("exit 0"))).toBe(false);
     unmount();
   });
 
@@ -317,17 +320,16 @@ describe("TUI.2 transcript rendering", () => {
 
   it("tool_call + tool_result produces transcript entry with clean toolName", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+    const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
     bus.emit("tool_call", makeEvt("tool_call", { title: "[tool] read_file: src/cli/tui/App.tsx" }));
     bus.emit("tool_result", makeEvt("tool_result", { toolName: "read_file", status: "success", detail: "42 lines" }));
     await wait(50);
 
-    const frame = lastFrame() ?? "";
-    expect(frame).toContain("read_file");
-    expect(frame).toContain("src/cli/tui/App.tsx");
-    expect(frame).not.toContain("[tool]");
+    expect(frames.some(f => f?.includes("read_file"))).toBe(true);
+    expect(frames.some(f => f?.includes("src/cli/tui/App.tsx"))).toBe(true);
+    expect(frames.every(f => !f?.includes("[tool]"))).toBe(true);
     unmount();
   });
 
@@ -351,6 +353,7 @@ describe("TUI.2 transcript rendering", () => {
     bus.emit("narration", makeEvt("narration", { text: "Thinking deeply" }));
     await wait(250);
 
+    // Narration in liveTail.narrationBuffer renders as live ◆ in dynamic frame
     expect(lastFrame()).toContain("◆");
     expect(lastFrame()).toContain("Thinking deeply");
     unmount();
@@ -358,7 +361,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("tool_result with 5-line detail shows 3-line preview + … 2 more", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+    const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("tool_call", makeEvt("tool_call", { toolName: "run_command", detail: "" }));
     bus.emit("tool_result", makeEvt("tool_result", {
@@ -367,28 +370,10 @@ describe("TUI.2 transcript rendering", () => {
     }));
     await wait(50);
 
-    const frame = lastFrame() ?? "";
-    expect(frame).toContain("line1");
-    expect(frame).toContain("line3");
-    expect(frame).toContain("… 2 more");
-    expect(frame).not.toContain("line5");
-    unmount();
-  });
-
-  it("Header renders [Z] logo", () => {
-    const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
-
-    expect(lastFrame()).toContain("[Z]");
-    unmount();
-  });
-
-  it("Header renders cwd", () => {
-    const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
-
-    const frame = lastFrame() ?? "";
-    expect(frame).toContain(process.cwd());
+    expect(frames.some(f => f?.includes("line1"))).toBe(true);
+    expect(frames.some(f => f?.includes("line3"))).toBe(true);
+    expect(frames.some(f => f?.includes("… 2 more"))).toBe(true);
+    expect(frames.every(f => !f?.includes("line5"))).toBe(true);
     unmount();
   });
 
@@ -404,7 +389,7 @@ describe("TUI.2 transcript rendering", () => {
 
   it("agent_loop_complete with detail dispatches ASSISTANT_FINAL and renders summary", async () => {
     const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test" />);
+    const { frames, unmount } = render(<App bus={bus} initialPrompt="test" />);
 
     bus.emit("agent_loop_complete", makeEvt("agent_loop_complete", {
       detail: "The answer is: 42 files exist under src/cli/.",
@@ -413,50 +398,60 @@ describe("TUI.2 transcript rendering", () => {
     }));
     await wait(50);
 
-    expect(lastFrame() ?? "").toContain("The answer is: 42 files exist under src/cli/.");
+    expect(frames.some(f => f?.includes("The answer is: 42 files exist under src/cli/."))).toBe(true);
     unmount();
   });
+});
 
-  it("renders all transcript entry kinds without Static (post-TUI.5.3)", async () => {
-    const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="list files" />);
-
-    bus.emit("tool_call", makeEvt("tool_call", {
-      title: "[tool] run_command: find .",
-    }));
-    bus.emit("tool_result", makeEvt("tool_result", {
-      toolName: "run_command",
-      title: "[tool] run_command: find .",
-      detail: "file1.ts\nfile2.ts",
-      status: "success",
-    }));
-    bus.emit("agent_loop_complete", makeEvt("agent_loop_complete", {
-      detail: "Found 2 files in directory",
-      iter_count: 2,
-      cumulativeCost: 0.01,
-    }));
-    await wait(50);
-
-    const frame = lastFrame() ?? "";
-    expect(frame).toContain("run_command");
-    expect(frame).toContain("Found 2 files");
-    unmount();
+describe("Transcript harness — entry kinds", () => {
+  it("narration renders with ◆ prefix", () => {
+    const h = renderTranscript([{ kind: "narration", text: "Analysis complete" }]);
+    expect(h.anyFrameContains("◆")).toBe(true);
+    expect(h.anyFrameContains("Analysis complete")).toBe(true);
+    h.unmount();
   });
 
-  // TODO: ink-testing-library lastFrame() does not capture Static-flushed scrollback;
-  // full harness comes in graduation phase (custom __fixtures__/staticHarness.ts)
-  it.skip("renders committed entries via Static when ZONE_EXPERIMENTAL_STATIC=1", async () => {
-    const original = process.env.ZONE_EXPERIMENTAL_STATIC;
-    process.env.ZONE_EXPERIMENTAL_STATIC = "1";
-    try {
-      const bus = createEventBus();
-      const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
-      bus.emit("narration", makeEvt("narration", { text: "Static path entry" }));
-      await wait(250);
-      expect(lastFrame()).toContain("Static path entry");
-      unmount();
-    } finally {
-      process.env.ZONE_EXPERIMENTAL_STATIC = original;
-    }
+  it("user_prompt renders with ▸ and bold text", () => {
+    const h = renderTranscript([{ kind: "user_prompt", text: "fix the bug" }]);
+    expect(h.anyFrameContains("▸")).toBe(true);
+    expect(h.anyFrameContains("fix the bug")).toBe(true);
+    h.unmount();
+  });
+
+  it("assistant_final renders body text", () => {
+    const h = renderTranscript([{ kind: "assistant_final", text: "Done. Two files changed." }]);
+    expect(h.anyFrameContains("Done. Two files changed.")).toBe(true);
+    h.unmount();
+  });
+
+  it("error entry renders ⚠ prefix", () => {
+    const h = renderTranscript([{ kind: "error", text: "Patch rejected" }]);
+    expect(h.anyFrameContains("⚠")).toBe(true);
+    expect(h.anyFrameContains("Patch rejected")).toBe(true);
+    h.unmount();
+  });
+
+  it("phase_marker renders phase label", () => {
+    const h = renderTranscript([{ kind: "phase_marker", phase: "Phase 2" }]);
+    expect(h.anyFrameContains("Phase 2")).toBe(true);
+    h.unmount();
+  });
+
+  it("tool_call entry renders toolName", () => {
+    const h = renderTranscript([{
+      kind: "tool_call",
+      toolName: "read_file",
+      args: "src/foo.ts",
+      results: [{ ok: true, detail: "42 lines" }],
+    }]);
+    expect(h.anyFrameContains("read_file")).toBe(true);
+    h.unmount();
+  });
+
+  it("empty transcript produces no committed content in any frame", () => {
+    const h = renderTranscript([]);
+    expect(h.anyFrameContains("◆")).toBe(false);
+    expect(h.anyFrameContains("⚠")).toBe(false);
+    h.unmount();
   });
 });

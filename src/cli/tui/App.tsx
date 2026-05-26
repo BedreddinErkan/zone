@@ -2,7 +2,6 @@ import { Box, Text, useInput, useApp } from "ink";
 import { useEffect, useRef } from "react";
 import { StoreProvider, useStore } from "./store.js";
 import { useAgentEvents } from "./hooks/useAgentEvents.js";
-import { Header } from "./components/Header.js";
 import { Transcript } from "./components/Transcript.js";
 import { Spinner } from "./components/Spinner.js";
 import { StatusBar } from "./components/StatusBar.js";
@@ -115,8 +114,6 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }:
     onSubmit?.(text, ac, state.mode);
   };
 
-  const useStaticGate = process.env.ZONE_EXPERIMENTAL_STATIC === "1";
-
   const modals = (
     <>
       {state.toastQueue.length > 0 && <Toast toast={state.toastQueue[0]} />}
@@ -141,27 +138,12 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }:
     </>
   );
 
-  if (useStaticGate) {
-    return (
-      <Box flexDirection="column">
-        <Box paddingX={2}>
-          <Transcript />
-        </Box>
-        <Spinner />
-        {modals}
-        <Composer onSubmit={handleComposerSubmit} onExit={exit} />
-        <StatusBar />
-      </Box>
-    );
-  }
-
   return (
-    <Box flexDirection="column" height={process.stdout.rows ?? 24}>
-      <Header />
-      <Box flexDirection="column" flexGrow={1} paddingX={2}>
+    <Box flexDirection="column">
+      <Box paddingX={2}>
         <Transcript />
-        <Spinner />
       </Box>
+      <Spinner />
       {modals}
       <Composer onSubmit={handleComposerSubmit} onExit={exit} />
       <StatusBar />

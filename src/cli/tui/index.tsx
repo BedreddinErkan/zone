@@ -226,9 +226,7 @@ export async function runTui(
     void runPrompt(prompt, ac, mode);
   };
 
-  if (process.env.ZONE_EXPERIMENTAL_STATIC === "1") {
-    writeBannerToStdout({ model: config.model, capUsd: config.dailyUsdCap, isResumed: !!resumedSession });
-  }
+  writeBannerToStdout({ model: config.model, capUsd: config.dailyUsdCap, isResumed: !!resumedSession });
 
   instance = render(
     <ErrorBoundary onCrash={onCrash}>
