@@ -215,3 +215,10 @@ describe("TRANSCRIPT_APPEND_NARRATION / NARRATION_COMMIT", () => {
   });
 });
 
+describe("buildInitialState", () => {
+  it("includes transcriptGeneration: 0", () => {
+    const state = buildInitialState({});
+    expect(state.transcriptGeneration).toBe(0);
+  });
+});
+

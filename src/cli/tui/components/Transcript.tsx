@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, Static, Text } from "ink";
 import { useStore, type TranscriptEntry } from "../store.js";
 import { ToolCall } from "./ToolCall.js";
 import { ErrorLine } from "./ErrorLine.js";
@@ -43,13 +43,25 @@ export function Transcript(): React.ReactElement {
   const { state } = useStore();
   const liveToolCall = state.liveTail.currentToolCall;
   const liveNarration = state.liveTail.narrationBuffer;
+  const useStaticGate = process.env.ZONE_EXPERIMENTAL_STATIC === "1";
 
   const cols = process.stdout.columns ?? 80;
   const innerWidth = Math.max(20, cols - 4);
 
   return (
     <Box flexDirection="column">
-      {state.transcript.map((entry, index) => renderEntry(entry, index))}
+      {useStaticGate ? (
+        <Static
+          key={state.transcriptGeneration}
+          items={state.transcript.map((entry, index) => ({ entry, index }))}
+        >
+          {(item: { entry: TranscriptEntry; index: number }) =>
+            renderEntry(item.entry, item.index)
+          }
+        </Static>
+      ) : (
+        state.transcript.map((entry, index) => renderEntry(entry, index))
+      )}
       {liveNarration && (
         <Box>
           <Text color="cyan">◆ </Text>

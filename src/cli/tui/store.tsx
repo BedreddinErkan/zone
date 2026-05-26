@@ -86,6 +86,7 @@ export type StoreState = {
   keysEditProvider: ApiKeyProvider | null;
   sessionsList: SessionMeta[];
   sessionsSelectedIndex: number;
+  transcriptGeneration: number;
 };
 
 export function buildInitialState(initialValues?: {
@@ -133,6 +134,7 @@ export function buildInitialState(initialValues?: {
     keysEditProvider: null,
     sessionsList: [],
     sessionsSelectedIndex: 0,
+    transcriptGeneration: 0,
   };
 }
 

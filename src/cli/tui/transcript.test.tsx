@@ -442,4 +442,21 @@ describe("TUI.2 transcript rendering", () => {
     expect(frame).toContain("Found 2 files");
     unmount();
   });
+
+  // TODO: ink-testing-library lastFrame() does not capture Static-flushed scrollback;
+  // full harness comes in graduation phase (custom __fixtures__/staticHarness.ts)
+  it.skip("renders committed entries via Static when ZONE_EXPERIMENTAL_STATIC=1", async () => {
+    const original = process.env.ZONE_EXPERIMENTAL_STATIC;
+    process.env.ZONE_EXPERIMENTAL_STATIC = "1";
+    try {
+      const bus = createEventBus();
+      const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+      bus.emit("narration", makeEvt("narration", { text: "Static path entry" }));
+      await wait(250);
+      expect(lastFrame()).toContain("Static path entry");
+      unmount();
+    } finally {
+      process.env.ZONE_EXPERIMENTAL_STATIC = original;
+    }
+  });
 });
