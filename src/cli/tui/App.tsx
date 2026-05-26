@@ -115,13 +115,10 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }:
     onSubmit?.(text, ac, state.mode);
   };
 
-  return (
-    <Box flexDirection="column" height={process.stdout.rows ?? 24}>
-      <Header />
-      <Box flexDirection="column" flexGrow={1} paddingX={2}>
-        <Transcript />
-        <Spinner />
-      </Box>
+  const useStaticGate = process.env.ZONE_EXPERIMENTAL_STATIC === "1";
+
+  const modals = (
+    <>
       {state.toastQueue.length > 0 && <Toast toast={state.toastQueue[0]} />}
       {state.pendingApproval !== null && (
         <ApprovalModal
@@ -141,6 +138,32 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }:
       {state.planProposal !== null && (
         <PlanModal proposal={state.planProposal} dispatch={dispatch} />
       )}
+    </>
+  );
+
+  if (useStaticGate) {
+    return (
+      <Box flexDirection="column">
+        <Header />
+        <Box paddingX={2}>
+          <Transcript />
+        </Box>
+        <Spinner />
+        {modals}
+        <Composer onSubmit={handleComposerSubmit} onExit={exit} />
+        <StatusBar />
+      </Box>
+    );
+  }
+
+  return (
+    <Box flexDirection="column" height={process.stdout.rows ?? 24}>
+      <Header />
+      <Box flexDirection="column" flexGrow={1} paddingX={2}>
+        <Transcript />
+        <Spinner />
+      </Box>
+      {modals}
       <Composer onSubmit={handleComposerSubmit} onExit={exit} />
       <StatusBar />
     </Box>

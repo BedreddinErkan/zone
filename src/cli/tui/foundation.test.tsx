@@ -88,4 +88,17 @@ describe("TUI.0 foundation", () => {
     expect(lastFrame()).toContain(">");
     unmount();
   });
+
+  it("gate-on layout: renders without crash when ZONE_EXPERIMENTAL_STATIC=1", () => {
+    const original = process.env.ZONE_EXPERIMENTAL_STATIC;
+    process.env.ZONE_EXPERIMENTAL_STATIC = "1";
+    try {
+      const bus = createEventBus();
+      const { lastFrame, unmount } = render(<App bus={bus} />);
+      expect(lastFrame()).toBeDefined();
+      unmount();
+    } finally {
+      process.env.ZONE_EXPERIMENTAL_STATIC = original;
+    }
+  });
 });
