@@ -3,10 +3,7 @@ import { useStore, type TranscriptEntry } from "../store.js";
 import { ToolCall } from "./ToolCall.js";
 import { ErrorLine } from "./ErrorLine.js";
 import { IterMarker } from "./IterMarker.js";
-
-function truncate(s: string, max: number): string {
-  return s.length > max ? s.slice(0, max - 1) + "…" : s;
-}
+import { getToolDisplayName, formatToolArgs } from "./toolCallFormat.js";
 
 function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement {
   switch (entry.kind) {
@@ -43,8 +40,6 @@ export function Transcript(): React.ReactElement {
   const { state } = useStore();
   const liveToolCall = state.liveTail.currentToolCall;
   const liveNarration = state.liveTail.narrationBuffer;
-  const cols = process.stdout.columns ?? 80;
-  const innerWidth = Math.max(20, cols - 4);
 
   return (
     <Box flexDirection="column">
@@ -63,18 +58,7 @@ export function Transcript(): React.ReactElement {
         </Box>
       )}
       {liveToolCall && (
-        cols < 60 ? (
-          <Text color="cyan">
-            {"  "}{liveToolCall.toolName}
-            {"  "}{truncate(liveToolCall.args, Math.max(5, innerWidth - liveToolCall.toolName.length - 7))}
-            {"  …"}
-          </Text>
-        ) : (
-          <Box justifyContent="space-between">
-            <Text color="cyan">{"  "}{liveToolCall.toolName}  {truncate(liveToolCall.args, 50)}</Text>
-            <Text dimColor>…</Text>
-          </Box>
-        )
+        <Text dimColor>○ {getToolDisplayName(liveToolCall.toolName)}({formatToolArgs(liveToolCall.toolName, liveToolCall.args)})</Text>
       )}
     </Box>
   );

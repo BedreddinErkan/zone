@@ -94,7 +94,7 @@ describe("TUI.4.4 approval modal", () => {
     );
     expect(lastFrame()).not.toContain("Command approval required");
     // Blocked indicator should appear in transcript
-    expect(lastFrame()).toContain("⚠ blocked");
+    expect(lastFrame()).toContain("blocked");
     unmount();
   });
 

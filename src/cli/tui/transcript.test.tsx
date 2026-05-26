@@ -80,7 +80,7 @@ describe("TUI.2 transcript rendering", () => {
     await wait(50);
 
     // live tool call indicator is in the dynamic frame
-    expect(lastFrame()).toContain("read_file");
+    expect(lastFrame()).toContain("Read(");
     unmount();
   });
 
@@ -93,7 +93,7 @@ describe("TUI.2 transcript rendering", () => {
     await wait(50);
 
     // tool_result commits the entry to transcript (Static) — check all frames
-    expect(frames.some(f => f?.includes("✓"))).toBe(true);
+    expect(frames.some(f => f?.includes("●"))).toBe(true);
     expect(frames.some(f => f?.includes("written 42 bytes"))).toBe(true);
     unmount();
   });
@@ -294,13 +294,13 @@ describe("TUI.2 transcript rendering", () => {
 
     bus.emit("tool_call", makeEvt("tool_call", { toolName: "list_files", detail: "src/cli/tui" }));
     await wait(50);
-    expect(lastFrame()).toContain("list_files");
+    expect(lastFrame()).toContain("LS(");
 
     bus.emit("agent_loop_complete", makeEvt("agent_loop_complete"));
     await wait(50);
 
     const frame = lastFrame() ?? "";
-    expect(frame).not.toContain("list_files");
+    expect(frame).not.toContain("LS(");
     expect(frame).toContain("done");
     unmount();
   });
@@ -313,8 +313,8 @@ describe("TUI.2 transcript rendering", () => {
     await wait(50);
 
     const frame = lastFrame() ?? "";
-    // Live indicator should show the clean parsed name, not the full "[tool] ..." string
-    expect(frame).toContain("read_file");
+    // Live indicator should show the display name, not the raw tool name or "[tool] ..." string
+    expect(frame).toContain("Read(");
     expect(frame).not.toContain("[tool]");
     unmount();
   });
@@ -328,7 +328,7 @@ describe("TUI.2 transcript rendering", () => {
     bus.emit("tool_result", makeEvt("tool_result", { toolName: "read_file", status: "success", detail: "42 lines" }));
     await wait(50);
 
-    expect(frames.some(f => f?.includes("read_file"))).toBe(true);
+    expect(frames.some(f => f?.includes("Read("))).toBe(true);
     expect(frames.some(f => f?.includes("src/cli/tui/App.tsx"))).toBe(true);
     expect(frames.every(f => !f?.includes("[tool]"))).toBe(true);
     unmount();
@@ -342,7 +342,7 @@ describe("TUI.2 transcript rendering", () => {
     await wait(50);
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("list_files");
+    expect(frame).toContain("LS(");
     expect(frame).not.toContain("[tool]");
     unmount();
   });
@@ -360,7 +360,7 @@ describe("TUI.2 transcript rendering", () => {
     unmount();
   });
 
-  it("tool_result with 5-line detail shows 3-line preview + … 2 more", async () => {
+  it("tool_result with 5-line detail shows first-line preview only", async () => {
     const bus = createEventBus();
     const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
@@ -372,8 +372,8 @@ describe("TUI.2 transcript rendering", () => {
     await wait(50);
 
     expect(frames.some(f => f?.includes("line1"))).toBe(true);
-    expect(frames.some(f => f?.includes("line3"))).toBe(true);
-    expect(frames.some(f => f?.includes("… 2 more"))).toBe(true);
+    expect(frames.every(f => !f?.includes("line3"))).toBe(true);
+    expect(frames.every(f => !f?.includes("… 2 more"))).toBe(true);
     expect(frames.every(f => !f?.includes("line5"))).toBe(true);
     unmount();
   });
@@ -438,14 +438,15 @@ describe("Transcript harness — entry kinds", () => {
     h.unmount();
   });
 
-  it("tool_call entry renders toolName", () => {
+  it("tool_call entry renders display name and args", () => {
     const h = renderTranscript([{
       kind: "tool_call",
       toolName: "read_file",
       args: "src/foo.ts",
       results: [{ ok: true, detail: "42 lines" }],
     }]);
-    expect(h.anyFrameContains("read_file")).toBe(true);
+    expect(h.anyFrameContains("Read(")).toBe(true);
+    expect(h.anyFrameContains("src/foo.ts")).toBe(true);
     h.unmount();
   });
 
