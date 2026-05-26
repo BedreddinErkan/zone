@@ -32,7 +32,7 @@ function _getGitBranch(): string {
 
 function writeBannerToStdout(opts: { model?: string; capUsd?: number; isResumed: boolean }): void {
   const RESET = "\x1b[0m";
-  const CYAN_BOLD = "\x1b[36;1m";
+  const MAGENTA_BOLD = "\x1b[35;1m";
   const BOLD = "\x1b[1m";
   const DIM = "\x1b[2m";
   const cwd = process.cwd();
@@ -42,9 +42,8 @@ function writeBannerToStdout(opts: { model?: string; capUsd?: number; isResumed:
   const cap = (opts.capUsd ?? 10).toFixed(2);
   const resumed = opts.isResumed ? ` ${DIM}(resumed)${RESET}` : "";
   process.stdout.write(
-    `${CYAN_BOLD}[Z]${RESET} ${BOLD}Zone v${_zoneVersion}${RESET}${resumed}\n` +
-    `${DIM}${cwdBranch}${RESET}\n` +
-    `${BOLD}${model}${RESET} ${DIM}· cap $${cap}${RESET}\n\n`
+    `${MAGENTA_BOLD}✦${RESET}  ${BOLD}Zone v${_zoneVersion}${RESET}${resumed}  ${DIM}${cwdBranch}${RESET}\n` +
+    `   ${BOLD}${model}${RESET} ${DIM}· cap $${cap}${RESET}\n\n`
   );
 }
 

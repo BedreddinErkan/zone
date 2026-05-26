@@ -132,7 +132,8 @@ describe("TUI.2 transcript rendering", () => {
     await wait(50); // no label debounce — spinner shows immediately
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("Z"); // spinner icon shown when active (label removed in TUI.4.1)
+    const anyStarFrame = ["✦", "✧", "✶", "✷", "✸", "✹", "✺"].some((f) => frame.includes(f));
+    expect(anyStarFrame).toBe(true); // star frame shown when active
     unmount();
   });
 

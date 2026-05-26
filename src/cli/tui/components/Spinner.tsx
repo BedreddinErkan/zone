@@ -1,17 +1,21 @@
+import React, { useState, useEffect } from "react";
 import { Text } from "ink";
-import InkSpinner from "ink-spinner";
 import { useStore } from "../store.js";
+
+const FRAMES = ["✦", "✧", "✶", "✷", "✸", "✹", "✺", "✶"];
+const FRAME_MS = 100;
 
 export function Spinner(): React.ReactElement | null {
   const { state } = useStore();
-  const spinnerState = state.spinner;
+  const [frame, setFrame] = useState(0);
 
-  if (!spinnerState?.active) return null;
+  useEffect(() => {
+    if (!state.spinner?.active) return;
+    const id = setInterval(() => setFrame((f) => (f + 1) % FRAMES.length), FRAME_MS);
+    return () => clearInterval(id);
+  }, [state.spinner?.active]);
 
-  return (
-    <Text>
-      <Text bold color="cyan">Z</Text>
-      <InkSpinner type="dots" />
-    </Text>
-  );
+  if (!state.spinner?.active) return null;
+
+  return <Text bold color="magenta">{FRAMES[frame]}</Text>;
 }
