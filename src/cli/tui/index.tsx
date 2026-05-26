@@ -42,8 +42,8 @@ function writeBannerToStdout(opts: { model?: string; capUsd?: number; isResumed:
   const cap = (opts.capUsd ?? 10).toFixed(2);
   const resumed = opts.isResumed ? ` ${DIM}(resumed)${RESET}` : "";
   process.stdout.write(
-    `${MAGENTA_BOLD}✦${RESET}  ${BOLD}Zone v${_zoneVersion}${RESET}${resumed}  ${DIM}${cwdBranch}${RESET}\n` +
-    `   ${BOLD}${model}${RESET} ${DIM}· cap $${cap}${RESET}\n\n`
+    `${MAGENTA_BOLD}✦${RESET}  ${MAGENTA_BOLD}Zone v${_zoneVersion}${RESET}${resumed}  ${DIM}${cwdBranch}${RESET}\n` +
+    `   ${BOLD}${model}${RESET} ${DIM}· cap $${cap}${RESET}\n\n\n`
   );
 }
 

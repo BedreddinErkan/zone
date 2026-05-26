@@ -153,3 +153,25 @@ describe("formatPreview", () => {
     expect(formatPreview({ ok: false, detail: "   \n  \n" })).toBeNull();
   });
 });
+
+describe("formatPreview meta filter", () => {
+  it("skips [exit_code=0 — ...] line and returns first real line", () => {
+    const r = { ok: true, detail: "[exit_code=0 — command succeeded; output below is informational]\nreal output" };
+    expect(formatPreview(r)).toBe("real output");
+  });
+
+  it("skips [zone-...] lines and returns first non-meta line", () => {
+    const r = { ok: false, detail: "[exit_code=1 — command failed]\n[zone-verify-classification] likely_no_matches\nERR: actual error" };
+    expect(formatPreview(r)).toBe("ERR: actual error");
+  });
+
+  it("returns null when only meta lines present", () => {
+    const r = { ok: true, detail: "[exit_code=0 — command succeeded; output below is informational]" };
+    expect(formatPreview(r)).toBeNull();
+  });
+
+  it("passes through non-meta lines unchanged", () => {
+    const r = { ok: true, detail: "regular output line" };
+    expect(formatPreview(r)).toBe("regular output line");
+  });
+});

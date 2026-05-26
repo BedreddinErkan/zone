@@ -34,24 +34,34 @@ export function ToolCall({ toolName, args, results }: ToolCallProps): React.Reac
   const inlineMsg =
     lastResult && (!lastResult.ok || lastResult.blocked) ? formatPreview(lastResult) : null;
 
+  let secondLine: string | null = null;
+  let secondLineColor: "red" | "yellow" | undefined = undefined;
+  if (lastResult?.blocked) {
+    secondLine = inlineMsg ? `blocked: ${inlineMsg}` : "blocked";
+    secondLineColor = "yellow";
+  } else if (lastResult && !lastResult.ok) {
+    secondLine = inlineMsg;
+    secondLineColor = "red";
+  } else {
+    secondLine = successPreview;
+  }
+
   return (
     <Box flexDirection="column">
       <Box>
         <Text color={glyph.color}>{glyph.icon} </Text>
         <Text>{display}({formattedArgs})</Text>
-        {lastResult?.blocked && (
-          <Text color="yellow"> blocked{inlineMsg ? `: ${inlineMsg}` : ""}</Text>
-        )}
-        {lastResult && !lastResult.ok && !lastResult.blocked && inlineMsg && (
-          <Text color="red"> {inlineMsg}</Text>
-        )}
         {lastResult?.ok && !lastResult.blocked && metadata && (
           <Text dimColor> {metadata}</Text>
         )}
       </Box>
-      {successPreview && (
+      {secondLine && (
         <Box paddingLeft={2}>
-          <Text dimColor>{successPreview}</Text>
+          {secondLineColor ? (
+            <Text color={secondLineColor}>└ {secondLine}</Text>
+          ) : (
+            <Text dimColor>└ {secondLine}</Text>
+          )}
         </Box>
       )}
     </Box>

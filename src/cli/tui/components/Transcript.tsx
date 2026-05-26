@@ -7,24 +7,36 @@ import { getToolDisplayName, formatToolArgs } from "./toolCallFormat.js";
 
 function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement {
   switch (entry.kind) {
-    case "narration":
+    case "narration": {
+      const lines = entry.text.split("\n");
       return (
-        <Box key={index}>
-          <Text color="cyan">◆ </Text>
-          <Text>{entry.text}</Text>
+        <Box key={index} flexDirection="column">
+          {lines.map((line, i) => (
+            <Box key={i}>
+              {i === 0 ? <Text color="cyan">{"◆ "}</Text> : <Text>{"  "}</Text>}
+              <Box flexGrow={1}>
+                <Text>{line}</Text>
+              </Box>
+            </Box>
+          ))}
         </Box>
       );
+    }
     case "tool_call":
-      return <ToolCall key={index} toolName={entry.toolName} args={entry.args} results={entry.results} />;
+      return (
+        <Box key={index} marginTop={1}>
+          <ToolCall toolName={entry.toolName} args={entry.args} results={entry.results} />
+        </Box>
+      );
     case "error":
       return <ErrorLine key={index} text={entry.text} />;
     case "phase_marker":
       return <IterMarker key={index} phase={entry.phase} />;
     case "user_prompt":
       return (
-        <Box key={index} borderStyle="round" borderColor="cyan" paddingX={1} marginTop={1} marginBottom={1}>
-          <Text bold color="cyan">▸ </Text>
-          <Text bold>{entry.text}</Text>
+        <Box key={index} marginTop={1}>
+          <Text dimColor>{">"} </Text>
+          <Text>{entry.text}</Text>
         </Box>
       );
     case "assistant_final":
@@ -53,8 +65,10 @@ export function Transcript(): React.ReactElement {
       </Static>
       {liveNarration && (
         <Box>
-          <Text color="cyan">◆ </Text>
-          <Text>{liveNarration}</Text>
+          <Text color="cyan">{"◆ "}</Text>
+          <Box flexGrow={1}>
+            <Text>{liveNarration}</Text>
+          </Box>
         </Box>
       )}
       {liveToolCall && (

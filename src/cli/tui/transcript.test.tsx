@@ -412,9 +412,9 @@ describe("Transcript harness — entry kinds", () => {
     h.unmount();
   });
 
-  it("user_prompt renders with ▸ and bold text", () => {
+  it("user_prompt renders inline with > prefix", () => {
     const h = renderTranscript([{ kind: "user_prompt", text: "fix the bug" }]);
-    expect(h.anyFrameContains("▸")).toBe(true);
+    expect(h.anyFrameContains(">")).toBe(true);
     expect(h.anyFrameContains("fix the bug")).toBe(true);
     h.unmount();
   });
@@ -447,6 +447,14 @@ describe("Transcript harness — entry kinds", () => {
     }]);
     expect(h.anyFrameContains("Read(")).toBe(true);
     expect(h.anyFrameContains("src/foo.ts")).toBe(true);
+    h.unmount();
+  });
+
+  it("narration with newlines renders continuation lines", () => {
+    const h = renderTranscript([{ kind: "narration", text: "line one\nline two" }]);
+    expect(h.anyFrameContains("◆")).toBe(true);
+    expect(h.anyFrameContains("line one")).toBe(true);
+    expect(h.anyFrameContains("line two")).toBe(true);
     h.unmount();
   });
 

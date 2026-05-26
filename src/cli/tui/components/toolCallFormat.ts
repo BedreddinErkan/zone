@@ -65,8 +65,14 @@ export function formatMetadata(toolName: string, lastResult: ToolResult | null):
   return null;
 }
 
+const META_LINE_REGEX = /^\[exit_code=|^\[zone-/;
+
 export function formatPreview(lastResult: ToolResult, maxWidth = 80): string | null {
-  const first = lastResult.detail.split("\n").find((l) => l.trim().length > 0) ?? "";
-  if (!first) return null;
+  const lines = lastResult.detail
+    .split("\n")
+    .filter((l) => l.trim().length > 0)
+    .filter((l) => !META_LINE_REGEX.test(l.trim()));
+  if (lines.length === 0) return null;
+  const first = lines[0]!.trim();
   return first.length > maxWidth ? first.slice(0, maxWidth - 1) + "…" : first;
 }
