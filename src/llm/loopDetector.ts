@@ -4,14 +4,14 @@
  * Sliding-window detector that catches an agent calling the same tool with
  * the same arguments repeatedly mid-run. Two response layers:
  *  - count === WARN_THRESHOLD (3): warn the model via injected context message
- *  - count >= TERMINATE_THRESHOLD (5): graceful exit, no further LLM call
+ *  - count >= TERMINATE_THRESHOLD (4): graceful exit, no further LLM call
  *
  * Pure functions; caller (agentLoop) owns the DetectorState per-run.
  */
 
 export const WINDOW_SIZE = 8;
 export const WARN_THRESHOLD = 3;
-export const TERMINATE_THRESHOLD = 5;
+export const TERMINATE_THRESHOLD = 4;
 
 export type DetectorStatus = "ok" | "warn" | "terminate";
 

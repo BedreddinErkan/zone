@@ -84,12 +84,12 @@ function midWarnLogs() {
 }
 
 // effectiveTokenBudgetCap with no taskClassification = TIER_LIMITS.medium.tokenBudgetCap = 600_000
-// TOKEN_BUDGET_MID_WARN = 0.70 → threshold = 420_000
+// TOKEN_BUDGET_MID_WARN = 0.50 → threshold = 300_000
 const CAP = 600_000;
-const THRESHOLD = Math.floor(CAP * 0.70) + 1; // 420_001
+const THRESHOLD = Math.floor(CAP * 0.50) + 1; // 300_001
 
-describe("Phase I Lane 2.1 — 70% token budget mid-warn injection", () => {
-  it("does NOT emit mid-warn when tokenBudgetBaseTokens is below 70% threshold", async () => {
+describe("Phase I Lane 2.1 — 50% token budget mid-warn injection", () => {
+  it("does NOT emit mid-warn when tokenBudgetBaseTokens is below 50% threshold", async () => {
     await runAgentLoop({
       task: "below-threshold task",
       repoPath,
@@ -111,7 +111,7 @@ describe("Phase I Lane 2.1 — 70% token budget mid-warn injection", () => {
     expect(midWarnLogs()).toHaveLength(1);
   });
 
-  it("mid-warn log payload contains runId and tokenRatio >= 0.70", async () => {
+  it("mid-warn log payload contains runId and tokenRatio >= 0.50", async () => {
     await runAgentLoop({
       task: "payload check",
       repoPath,
@@ -123,7 +123,7 @@ describe("Phase I Lane 2.1 — 70% token budget mid-warn injection", () => {
     expect(logs).toHaveLength(1);
     const payload = JSON.parse(logs[0][1] as string);
     expect(payload.runId).toBe("test-payload");
-    expect(payload.tokenRatio).toBeGreaterThanOrEqual(0.70);
+    expect(payload.tokenRatio).toBeGreaterThanOrEqual(0.50);
     expect(typeof payload.iter).toBe("number");
     expect(typeof payload.ts).toBe("string");
   });

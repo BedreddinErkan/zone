@@ -73,7 +73,7 @@ function makeDeps(overrides?: Partial<HandleToolResultDeps>): HandleToolResultDe
       filesModified: [],
       patchValidatedByAgent: false,
       verificationReason: "no_verification_attempted",
-      loopDetected: { toolName: "run_command", count: 5 },
+      loopDetected: { toolName: "run_command", count: 4 },
     }),
     classifyFailure: vi.fn().mockReturnValue("generic_failure"),
     extractSemanticSmellName: vi.fn().mockReturnValue("unknown"),
@@ -149,7 +149,7 @@ describe("handleToolResult parity — loop-detected early exit", () => {
   it("exit.success === false, terminationReason === loop_detected", async () => {
     const ctx = makeCtx();
     const deps = makeDeps({
-      recordAndDetect: vi.fn().mockReturnValue({ status: "terminate", count: 5 }),
+      recordAndDetect: vi.fn().mockReturnValue({ status: "terminate", count: 4 }),
     });
     const result = await handleToolResult("run_command", { cmd: "npm test" }, "c1", { output: "ok", success: true }, ctx, deps);
     expect(result.kind).toBe("early_exit");
@@ -169,14 +169,14 @@ describe("handleToolResult parity — loop-detected early exit", () => {
       filesModified: [],
       patchValidatedByAgent: false,
       verificationReason: "no_verification_attempted",
-      loopDetected: { toolName: "apply_patch", count: 5 },
+      loopDetected: { toolName: "apply_patch", count: 4 },
     });
     const deps = makeDeps({
-      recordAndDetect: vi.fn().mockReturnValue({ status: "terminate", count: 5 }),
+      recordAndDetect: vi.fn().mockReturnValue({ status: "terminate", count: 4 }),
       synthesizeLoopDetectedExit: synthesize,
     });
     await handleToolResult("apply_patch", { filePath: "src/foo.ts" }, "c1", { output: "ok", success: true }, ctx, deps);
-    expect(synthesize).toHaveBeenCalledWith(1, "apply_patch", 5);
+    expect(synthesize).toHaveBeenCalledWith(1, "apply_patch", 4);
   });
 });
 

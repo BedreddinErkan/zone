@@ -297,7 +297,7 @@ export const ESCALATION_BONUS_ITERATIONS = 5;
 export const TOKEN_BUDGET_CAP = 800_000;
 export const TOKEN_BUDGET_WARN = 0.8;
 export const TOKEN_BUDGET_HARD = 0.95;
-export const TOKEN_BUDGET_MID_WARN = 0.70;
+export const TOKEN_BUDGET_MID_WARN = 0.50;
 
 function cleanTokenNumber(value: unknown): number {
   const n = Number(value);

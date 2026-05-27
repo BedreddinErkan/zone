@@ -57,12 +57,12 @@ describe("recordAndDetect", () => {
     expect(recordAndDetect(state, h)).toEqual({ status: "warn", count: 3 });
   });
 
-  it("returns ok at count 4 (between warn and terminate, don't re-warn)", () => {
+  it("returns terminate at count 4 (new threshold boundary)", () => {
     const state = createDetectorState();
     const h = hashToolCall("read_file", { filePath: "a.ts" });
     for (let i = 0; i < 3; i += 1) recordAndDetect(state, h); // 1..3
     const fourth = recordAndDetect(state, h);
-    expect(fourth).toEqual({ status: "ok", count: 4 });
+    expect(fourth).toEqual({ status: "terminate", count: 4 });
   });
 
   it("returns terminate at the fifth identical call", () => {
@@ -94,7 +94,7 @@ describe("recordAndDetect", () => {
     expect(recordAndDetect(state, target).count).toBe(1);
   });
 
-  it("mixed sequence A,A,B,A,A → 4th A is warn (count=3 in window)", () => {
+  it("mixed sequence A,A,B,A,A → 3rd A warns, 4th A terminates (new threshold=4)", () => {
     const state = createDetectorState();
     const A = hashToolCall("read_file", { filePath: "a.ts" });
     const B = hashToolCall("read_file", { filePath: "b.ts" });
@@ -103,7 +103,7 @@ describe("recordAndDetect", () => {
     expect(recordAndDetect(state, B).status).toBe("ok"); // A=2, B=1
     expect(recordAndDetect(state, A).status).toBe("warn"); // A=3, B=1
     const last = recordAndDetect(state, A); // A=4
-    expect(last.status).toBe("ok");
+    expect(last.status).toBe("terminate");
     expect(last.count).toBe(4);
   });
 
@@ -128,13 +128,14 @@ describe("recordAndDetect", () => {
     }
   });
 
-  it("emits terminate even after the warn signal — count rises past TERMINATE_THRESHOLD", () => {
+  it("emits terminate even after the warn signal — count rises to TERMINATE_THRESHOLD", () => {
     const state = createDetectorState();
     const h = hashToolCall("read_file", { filePath: "a.ts" });
     const seen: string[] = [];
     for (let i = 0; i < 6; i += 1) {
       seen.push(recordAndDetect(state, h).status);
     }
-    expect(seen).toEqual(["ok", "ok", "warn", "ok", "terminate", "terminate"]);
+    // count: 1→ok, 2→ok, 3→warn, 4→terminate (new threshold), 5→terminate, 6→terminate
+    expect(seen).toEqual(["ok", "ok", "warn", "terminate", "terminate", "terminate"]);
   });
 });
