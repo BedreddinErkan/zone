@@ -1556,6 +1556,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   let softIterWarnThreshold: number | undefined;
   let softWarnInjected = false;
   let midWarnInjected = false;
+  let chainSaturationWarnInjected = false;
   if (tierLimits) {
     const effectiveSoftIterWarn = tierLimits.softIterWarn;
     softIterWarnThreshold = effectiveSoftIterWarn;
@@ -2219,7 +2220,39 @@ Example:
       };
     },
   };
-  const _internalPreIterHooks: PreIterationHook[] = [softIterWarnHook, midBudgetWarnHook];
+  // CE.4.1.b: chain-saturation pre-iter hook (priority 30)
+  // Fires at iter>=6 with 0 successful apply_patch. NUDGE wording (not COMMAND).
+  // Scope: patch mode only — Q&A and investigation archetypes excluded via closure guard.
+  const chainSaturationWarnHook: PreIterationHook = {
+    name: "chain-saturation-warn",
+    priority: 30,
+    shouldRun: (ctx) => (
+      !chainSaturationWarnInjected &&
+      ctx.iter >= 6 &&
+      !isReadOnlyMode &&
+      input.originalArchetype !== "question" &&
+      input.originalArchetype !== "investigation" &&
+      toolCallLog.filter(e => e.tool === "apply_patch" && e.success === true).length === 0
+    ),
+    run: (ctx) => {
+      chainSaturationWarnInjected = true;
+      const content =
+        `\n\n[ZONE_CHAIN_SATURATION] You have used ${ctx.iter} iterations without a ` +
+        `successful apply_patch. You should now either:\n` +
+        `(a) Apply a patch implementing your best current hypothesis. Imperfect is ` +
+        `acceptable; scope-revision tools handle misjudged scope mid-run.\n` +
+        `(b) Write the FINAL SUMMARY and exit if the task does not require code changes.\n` +
+        `Do NOT continue investigating without committing to an action.`;
+      ctx.emit("log", "[zone-chain-saturation-warn]", {
+        iter: ctx.iter,
+        runId: ctx.runId,
+        archetype: input.originalArchetype ?? null,
+        content,
+      });
+      return { kind: "appendContext", content, target: "responseInput", mode: "append-to-tool" };
+    },
+  };
+  const _internalPreIterHooks: PreIterationHook[] = [softIterWarnHook, midBudgetWarnHook, chainSaturationWarnHook];
 
   // Gap 1: internal post-tool-use hooks. Commit 5: LoopDetectorHook (warn case only).
   // The terminate case remains inline — it needs an early return from the outer function,
