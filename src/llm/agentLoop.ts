@@ -496,25 +496,9 @@ export function assembleAgentSystemPrompt(input: {
     `Completes the symmetry with the existing \`pick\` utility; both share the same generic signature pattern.\n\n` +
     `## Tests\n` +
     `tests_passed (npm test -- omit, 4 scenarios)\n\n` +
-    `[Example 2 — max_iterations]\n` +
-    `## What changed\n` +
-    `- Added \`group\` and \`pluck\` utilities to \`src/utils/collections.ts\`\n` +
-    `- Tests added but barrel export update not completed\n\n` +
-    `## Why\n` +
-    `Plan called for both utilities plus barrel update and call-site refactor; iteration limit hit before all steps finished.\n\n` +
-    `## Tests\n` +
-    `not_run (iteration cap reached before verification step)\n\n` +
-    `## Notes\n` +
-    `Plan step "Update src/utils/index.ts barrel" did not complete. Hand-off to a follow-up run recommended.\n\n` +
-    `[Example 3 — APPLY_ROLLED_BACK]\n` +
-    `## What changed\n` +
-    `- Attempted to refactor \`src/auth/session.ts\` to use the new TokenProvider interface\n\n` +
-    `## Why\n` +
-    `Switching session storage from cookie to header would unblock the upcoming SSO work.\n\n` +
-    `## Tests\n` +
-    `tests_failed_by_patch (tsc: TS2305 — module './tokenProvider' has no exported member 'TokenProvider')\n\n` +
-    `## Notes\n` +
-    `APPLY_ROLLED_BACK. The TokenProvider type must be defined in a prior run before this refactor can land.\n\n` +
+    // CE.2.1.b: Example 2 (max_iterations) + Example 3 (APPLY_ROLLED_BACK) moved to archive.
+    // Low fire-rate (≤5% each). Reference only; full text in .zone/audits/final-summary-recovery-examples.md
+    `[Recovery-mode examples (APPLY_ROLLED_BACK, max_iterations) → .zone/audits/final-summary-recovery-examples.md]\n\n` +
     `ELIDED READS: tool_result blocks marked "[Earlier read: ...]" had their content removed to save context. Call read_file again if you need it.\n\n` +
     `TRUNCATED FILE SECTIONS: if you see a ZONE_CONTEXT_TRUNCATED marker, part of the file was omitted. Do NOT include the marker line in any apply_patch FIND block; use read_file with lineRange on the same path to fetch the hidden section. Only generate FIND blocks from lines you have fully read.\n\n` +
     `FINAL ASSESSMENT (required) — include exactly one tag on its own line in your final response:\n` +

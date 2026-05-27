@@ -30,12 +30,30 @@ describe('UI.6.1: patch prompt FINAL SUMMARY block', () => {
     expect(prompt).toContain('Triple-backtick code fences');
   });
 
-  it('includes few-shot examples covering success, max_iterations, and APPLY_ROLLED_BACK', () => {
+  it('includes natural_completion example and reference to recovery-mode examples', () => {
     const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
     expect(prompt).toContain('Example 1');
-    expect(prompt).toContain('Example 2');
-    expect(prompt).toContain('Example 3');
-    expect(prompt).toContain('APPLY_ROLLED_BACK');
+    expect(prompt).toContain('APPLY_ROLLED_BACK'); // reference line contains keyword
+    expect(prompt).toContain('final-summary-recovery-examples.md');
+  });
+
+  // CE.2.1.b: Examples 2 + 3 moved to .zone/audits/final-summary-recovery-examples.md
+  it('CE.2.1.b: Example 2 body not present in patch prompt', () => {
+    const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
+    expect(prompt).not.toContain('Example 2');
+  });
+
+  it('CE.2.1.b: Example 3 body not present in patch prompt', () => {
+    const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
+    expect(prompt).not.toContain('Example 3');
+  });
+
+  it('CE.2.1.b: EXAMPLES section < 600 chars after reduction', () => {
+    const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
+    const examplesStart = prompt.indexOf('EXAMPLES:');
+    const examplesEnd = prompt.indexOf('ELIDED READS:');
+    const examplesSection = prompt.slice(examplesStart, examplesEnd);
+    expect(examplesSection.length).toBeLessThan(600);
   });
 });
 
