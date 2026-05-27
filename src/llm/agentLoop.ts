@@ -807,6 +807,13 @@ const PRE_EXISTING_BROKEN_COACHING_PROMPT =
 //   3. "Pre-existing/unrelated" verdicts without any investigation
 // Sonnet 4.5 already complies with all three rules; the directives are
 // imperative-form so they don't regress Sonnet but force OpenAI compliance.
+/** Models confirmed to exhibit comment-out-as-fix and duplicate-import patterns.
+ *  CE.4.1.g / CE.4.1.g.1. Add entries only when dogfood evidence confirms the pattern. */
+const HARDENING_TARGETS = new Set<string>([
+  "gpt-4o",
+  "gpt-4o-mini",
+  "gpt-4-turbo",
+]);
 const PROVIDER_AGNOSTIC_HARDENING =
   `\n\n**REMOVING CODE MEANS DELETING IT**\n\n` +
   `If a line of code is causing an error and the fix is to remove it:\n` +
@@ -1155,7 +1162,7 @@ export function buildCoachingPrompt(
         SYNTAX_BROKEN_POST_WRITE_COACHING_PROMPT +
         // CE.4.1.g: gpt-4o exhibits comment-out-as-fix + duplicate-import patterns;
         // Sonnet/Opus do not — gate to avoid wasting ~1877 bytes on Anthropic runs.
-        (!options?.model || options.model.startsWith("gpt-") ? PROVIDER_AGNOSTIC_HARDENING : "")
+        (!options?.model || HARDENING_TARGETS.has(options.model) ? PROVIDER_AGNOSTIC_HARDENING : "")
       );
       return (
         `Your patch was applied but produced invalid syntax â€” the file was reverted to its pre-patch state.\n` +
@@ -1260,7 +1267,7 @@ export function buildCoachingPrompt(
           `cite which files you read and what you ruled out.\n\n` +
           `Next action: read the candidate files now, then form a hypothesis.` +
           // CE.4.1.g: gated to gpt-4o family only (see apply_patch_syntax_broken_post_write)
-          (!options?.model || options.model.startsWith("gpt-") ? PROVIDER_AGNOSTIC_HARDENING : "")
+          (!options?.model || HARDENING_TARGETS.has(options.model) ? PROVIDER_AGNOSTIC_HARDENING : "")
         );
       }
       return (

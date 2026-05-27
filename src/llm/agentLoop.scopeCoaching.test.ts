@@ -109,4 +109,45 @@ describe("CE.4.1.g — PROVIDER_AGNOSTIC_HARDENING model gating", () => {
     );
     expect(prompt).toContain(MARKER);
   });
+
+  // CE.4.1.g.1 boundary tests — whitelist is explicit, not prefix-based
+  it("gpt-5.4 → does NOT contain (not in HARDENING_TARGETS)", () => {
+    const prompt = buildCoachingPrompt(
+      "apply_patch_syntax_broken_post_write",
+      "syntax error",
+      [],
+      { model: "gpt-5.4" }
+    );
+    expect(prompt).not.toContain(MARKER);
+  });
+
+  it("gpt-5.4-mini → does NOT contain (not in HARDENING_TARGETS)", () => {
+    const prompt = buildCoachingPrompt(
+      "apply_patch_syntax_broken_post_write",
+      "syntax error",
+      [],
+      { model: "gpt-5.4-mini" }
+    );
+    expect(prompt).not.toContain(MARKER);
+  });
+
+  it("gpt-4-turbo → contains (whitelist member, regression guard)", () => {
+    const prompt = buildCoachingPrompt(
+      "apply_patch_syntax_broken_post_write",
+      "syntax error",
+      [],
+      { model: "gpt-4-turbo" }
+    );
+    expect(prompt).toContain(MARKER);
+  });
+
+  it("claude-haiku-4-5 → does NOT contain (Anthropic family default exclude)", () => {
+    const prompt = buildCoachingPrompt(
+      "apply_patch_syntax_broken_post_write",
+      "syntax error",
+      [],
+      { model: "claude-haiku-4-5" }
+    );
+    expect(prompt).not.toContain(MARKER);
+  });
 });
