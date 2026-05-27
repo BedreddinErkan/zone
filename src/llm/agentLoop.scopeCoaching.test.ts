@@ -52,3 +52,61 @@ describe("U.2.C — scope-aware coaching for test failures", () => {
     expect(prompt).toContain("confirmation it is not in your edits");
   });
 });
+
+// CE.4.1.g — PROVIDER_AGNOSTIC_HARDENING model gating
+// The block (~1877 bytes, unique marker: "REMOVING CODE MEANS DELETING IT") is included
+// for gpt-4o family (comment-out-as-fix / duplicate-import patterns) and excluded for
+// Anthropic models. Absent model (null/undefined) → include for backward compat.
+describe("CE.4.1.g — PROVIDER_AGNOSTIC_HARDENING model gating", () => {
+  const MARKER = "REMOVING CODE MEANS DELETING IT";
+
+  it("gpt-4o-mini + syntax_broken → contains PROVIDER_AGNOSTIC_HARDENING", () => {
+    const prompt = buildCoachingPrompt(
+      "apply_patch_syntax_broken_post_write",
+      "syntax error",
+      [],
+      { model: "gpt-4o-mini" }
+    );
+    expect(prompt).toContain(MARKER);
+  });
+
+  it("claude-sonnet-4-6 + syntax_broken → does NOT contain PROVIDER_AGNOSTIC_HARDENING", () => {
+    const prompt = buildCoachingPrompt(
+      "apply_patch_syntax_broken_post_write",
+      "syntax error",
+      [],
+      { model: "claude-sonnet-4-6" }
+    );
+    expect(prompt).not.toContain(MARKER);
+  });
+
+  it("gpt-4o + test_failed + generatedPathDetected → contains PROVIDER_AGNOSTIC_HARDENING", () => {
+    const prompt = buildCoachingPrompt(
+      "test_failed",
+      "npm test exited 1",
+      [],
+      { generatedPathDetected: true, model: "gpt-4o" }
+    );
+    expect(prompt).toContain(MARKER);
+  });
+
+  it("claude-opus-4-7 + test_failed + generatedPathDetected → does NOT contain", () => {
+    const prompt = buildCoachingPrompt(
+      "test_failed",
+      "npm test exited 1",
+      [],
+      { generatedPathDetected: true, model: "claude-opus-4-7" }
+    );
+    expect(prompt).not.toContain(MARKER);
+  });
+
+  it("undefined model + syntax_broken → contains (backward compat)", () => {
+    const prompt = buildCoachingPrompt(
+      "apply_patch_syntax_broken_post_write",
+      "syntax error",
+      [],
+      {}
+    );
+    expect(prompt).toContain(MARKER);
+  });
+});

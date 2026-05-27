@@ -23,6 +23,10 @@ export interface FailureContext {
   repoPath?: string;
   currentBudget: IterationBudgetState;
   maxAttempts: number;
+  /** Active model name (e.g. "claude-sonnet-4-6", "gpt-4o"). Used to gate
+   *  provider-specific coaching appendices (CE.4.1.g). Absent in tests
+   *  that don't thread a model — absence = include (backward compat). */
+  modelId?: string;
 }
 
 export type CoachingDecision =
@@ -64,6 +68,9 @@ export interface CoachingDeps {
       filePath?: string;
       generatedPathDetected?: boolean;
       parsedFailingFile?: string | null;
+      /** Active model — used to gate provider-specific appendices (CE.4.1.g).
+       *  Absent = include (backward compat for tests and legacy callers). */
+      model?: string;
     }
   ) => string;
   buildVerifyDiagnostic: (input: VerifyDiagnosticInput) => VerifyDiagnostic;

@@ -1093,6 +1093,9 @@ export function buildCoachingPrompt(
     /** Optional parsed failing path, surfaced inside the coaching text
      *  so the agent doesn't have to re-extract it from raw output. */
     parsedFailingFile?: string | null;
+    /** Active model name — used to gate provider-specific coaching appendices.
+     *  Absent/null → include (backward compat). CE.4.1.g. */
+    model?: string;
   }
 ): string {
   const attemptCount = options?.attemptCount ?? 2;
@@ -1148,7 +1151,12 @@ export function buildCoachingPrompt(
       );
     }
     case "apply_patch_syntax_broken_post_write":
-      return SYNTAX_BROKEN_POST_WRITE_COACHING_PROMPT + PROVIDER_AGNOSTIC_HARDENING;
+      return (
+        SYNTAX_BROKEN_POST_WRITE_COACHING_PROMPT +
+        // CE.4.1.g: gpt-4o exhibits comment-out-as-fix + duplicate-import patterns;
+        // Sonnet/Opus do not — gate to avoid wasting ~1877 bytes on Anthropic runs.
+        (!options?.model || options.model.startsWith("gpt-") ? PROVIDER_AGNOSTIC_HARDENING : "")
+      );
       return (
         `Your patch was applied but produced invalid syntax â€” the file was reverted to its pre-patch state.\n` +
         `This means your REPLACE block has a bug: missing brace, semicolon, paren, comma, or malformed statement.\n` +
@@ -1251,7 +1259,8 @@ export function buildCoachingPrompt(
           `- [ZONE_VERIFICATION: tests_inconclusive] â€” investigated thoroughly but couldn't isolate cause; ` +
           `cite which files you read and what you ruled out.\n\n` +
           `Next action: read the candidate files now, then form a hypothesis.` +
-          PROVIDER_AGNOSTIC_HARDENING
+          // CE.4.1.g: gated to gpt-4o family only (see apply_patch_syntax_broken_post_write)
+          (!options?.model || options.model.startsWith("gpt-") ? PROVIDER_AGNOSTIC_HARDENING : "")
         );
       }
       return (
@@ -3066,6 +3075,7 @@ Example:
         repoPath: input.repoPath,
         currentBudget: iterationBudget,
         maxAttempts: effectiveMaxCoachingAttempts,
+        modelId: modelName, // CE.4.1.g: gates PROVIDER_AGNOSTIC_HARDENING to gpt-4o family
       };
       const coachingDecision = coachingController.routeFailure(coachingCtx);
       if (coachingDecision.kind === "coach") {

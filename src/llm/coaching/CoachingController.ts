@@ -120,6 +120,7 @@ export class CoachingController {
           filePath: routedFilePath ?? undefined,
           generatedPathDetected: diagnostic.generatedPathDetected,
           parsedFailingFile: diagnostic.parsed?.failingFile ?? null,
+          model: ctx.modelId, // CE.4.1.g: thread model for PROVIDER_AGNOSTIC_HARDENING gating
         }
       );
 
