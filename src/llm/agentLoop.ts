@@ -399,7 +399,11 @@ export function assembleAgentSystemPrompt(input: {
       : `BREVITY RULES (read once, apply always):\n\n` +
         `Default to action over explanation. Tools speak louder than narration.\n` +
         `Before opening a 4th read_file or search_in_files in a row, ask: "do I have enough to act?" If yes, act.\n` +
-        `A final summary is the only place to be thorough. Mid-run narration: one short sentence.\n\n`) +
+        `A final summary is the only place to be thorough. Mid-run narration: one short sentence.\n\n` +
+        `EFFICIENCY CONTRACT:\n` +
+        `Cost ceiling: $0.50 typical / $1.00 hard. Each LLM call costs ~$0.05.\n` +
+        `Read counter: every read_file ≥1.5KB tokens. 5+ reads of the same file is a smell.\n` +
+        `Iter counter: you have a finite iteration budget (typically 10-15). After ~70% of your budget, you should be patching not exploring.\n\n`) +
     (input.hasFramework ? `${input.frameworkLines.join("\n")}\n\n` : "") +
     (input.projectMemoryBlock ? `${input.projectMemoryBlock}\n\n` : "") +
     (input.importContextSummary
@@ -437,7 +441,6 @@ export function assembleAgentSystemPrompt(input: {
     `- Pre-existing: fix if simple, else note as out-of-scope in your final summary.\n` +
     `- Your mistake: fix with apply_patch (intent='modify' or 'delete'), re-run tests.\n` +
     `- Only give up after a self-correction attempt.\n\n` +
-    `Operate efficiently — the cost ceiling terminates the run; avoid redundant reads and retries.\n\n` +
     `TASK SUBAGENTS (Task) — dispatch cap: 2/run (WORKER_MAX_ITER=6).\n` +
     `GOOD signals: step marked \`subagentEligible: true\` (check plan-annotations block); same change across 5+ files (multi_file_fanout: rename, codemod, Worker); step requiring 10+ parent iterations (long_isolated_step: complex extraction/migration).\n` +
     `BAD signals (stay single-thread): 1-2 file edits, line-edit task, shared mutation state, uncertain scope, patch-then-verify cycles.\n` +
