@@ -157,3 +157,60 @@ describe("L5.1b-2 promotion telemetry propagation", () => {
     expect(payload.promotedAtIter).toBeNull();
   });
 });
+
+describe("CE.4.1.a: targeted_fix pipeline soft promotion (L5.1b-2)", () => {
+  it("emits [zone-archetype-promoted] trigger:iter_cap and records promotedFrom in [zone-archetype]", async () => {
+    // The promotion check (agentLoop.ts:3099) runs inside the tool-call processing
+    // branch (after inner loop, before [OUTER-LOOP: ITER_TOOLS_PROCESSED] continue).
+    // It is NOT reached when the LLM returns a text-only Done response (that path
+    // exits via extractResponsesApiOutputText → finalizeRun directly).
+    // Setup: first response makes one read_file tool call (routes into tool-call branch),
+    // second returns Done. With maxIterationsOverride:1, iter_cap fires at iter 0
+    // (0+1 ≥ 1), then the outer loop continues to iter 1 where Done is returned.
+    mocks.createChatCompletion
+      .mockResolvedValueOnce({
+        choices: [{
+          message: {
+            content: null,
+            tool_calls: [{
+              id: "call_rc1",
+              type: "function",
+              function: {
+                name: "read_file",
+                arguments: JSON.stringify({ filePath: "src/foo.ts" }),
+              },
+            }],
+          },
+          finish_reason: "tool_calls",
+        }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      })
+      .mockResolvedValue(makeDoneResponse());
+
+    await runAgentLoop({
+      task: "fix bug in src/foo.ts",
+      repoPath,
+      runId: "test-ce-4-1-a-promo",
+      pipelineApplied: true,
+      originalArchetype: "targeted_fix",
+      maxIterationsOverride: 1,
+    });
+
+    const promotedLogs = mocks.log.mock.calls.filter(
+      (c: unknown[]) => c[0] === "[zone-archetype-promoted]"
+    );
+    expect(promotedLogs.length).toBe(1);
+    const promotedPayload = JSON.parse(promotedLogs[0][1] as string) as Record<string, unknown>;
+    expect(promotedPayload.trigger).toBe("iter_cap");
+    expect(promotedPayload.fromArchetype).toBe("targeted_fix");
+    expect(promotedPayload.toArchetype).toBe("complex_multi_file");
+
+    const archetypeLogs = mocks.log.mock.calls.filter(
+      (c: unknown[]) => c[0] === "[zone-archetype]"
+    );
+    expect(archetypeLogs.length).toBe(1);
+    const archetypePayload = JSON.parse(archetypeLogs[0][1] as string) as Record<string, unknown>;
+    expect(archetypePayload.promotedFrom).toBe("targeted_fix");
+    expect(archetypePayload.promotionTrigger).toBe("iter_cap");
+  });
+});
