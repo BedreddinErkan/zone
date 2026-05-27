@@ -777,6 +777,7 @@ export type SelfCorrectTrigger =
   | "apply_patch_no_read_first"
   | "tool_command_spawn_failure"
   | "tool_path_enoent"
+  | "read_file_nonexistent"
   | "unknown";
 
 const SYNTAX_BROKEN_POST_WRITE_COACHING_PROMPT =
@@ -1055,6 +1056,8 @@ export function classifyFailure(
     if (/test_failed|tests? failed|failed assertion|expect\(/i.test(text)) return "test_failed";
     return "test_failed"; // generic command failure during test phase
   }
+  // CE.4.1.e: read_file ENOENT → noop-read trigger (intercept before generic catch-all)
+  if (toolName === "read_file" && /enoent/i.test(text)) return "read_file_nonexistent";
   if (/enoent.*no such file/i.test(text)) return "tool_path_enoent";
   return "unknown";
 }
@@ -1212,6 +1215,14 @@ export function buildCoachingPrompt(
         `- Use a path RELATIVE to the repo root (e.g. 'server/controllers/foo.js' not 'C:\\Users\\...\\foo.js').\n` +
         `- If you must use absolute, double-check the executor isn't prepending cwd.\n` +
         `Next action: re-issue the call with a repo-relative path.`
+      );
+    case "read_file_nonexistent":
+      return (
+        `The file you tried to read does not exist. This is NOT an investigation cue — stop and do one of:\n` +
+        `(a) Recompute the path from the user's request (did you guess a filename?).\n` +
+        `(b) If this is a generated file, look at its source instead.\n` +
+        `(c) If the task references a file that simply does not exist, say so in the FINAL SUMMARY and exit.\n` +
+        `Do NOT spiral into "why doesn't this file exist?" investigation.`
       );
     case "test_failed":
       if (options?.generatedPathDetected) {
