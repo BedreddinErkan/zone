@@ -4,6 +4,7 @@ import { ToolCall } from "./ToolCall.js";
 import { ErrorLine } from "./ErrorLine.js";
 import { IterMarker } from "./IterMarker.js";
 import { getToolDisplayName, formatToolArgs } from "./toolCallFormat.js";
+import { MarkdownText } from "./MarkdownText.js";
 
 function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement {
   switch (entry.kind) {
@@ -41,7 +42,7 @@ function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement 
     case "assistant_final":
       return (
         <Box key={index} flexDirection="column" marginTop={1} marginBottom={1}>
-          <Text>{entry.text}</Text>
+          <MarkdownText text={entry.text} />
         </Box>
       );
   }

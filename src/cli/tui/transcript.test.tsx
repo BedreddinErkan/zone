@@ -425,6 +425,22 @@ describe("Transcript harness — entry kinds", () => {
     h.unmount();
   });
 
+  it("TUI.10.C: assistant_final with ## heading renders section name without ## prefix", () => {
+    const text = "## What changed\n- Added utility\n\n## Why\nPlan required it.";
+    const h = renderTranscript([{ kind: "assistant_final", text }]);
+    expect(h.anyFrameContains("What changed")).toBe(true);
+    expect(h.anyFrameContains("##")).toBe(false);
+    h.unmount();
+  });
+
+  it("TUI.10.C: assistant_final with bullet list renders • instead of - prefix", () => {
+    const text = "## What changed\n- Added `group` utility\n- Tests added";
+    const h = renderTranscript([{ kind: "assistant_final", text }]);
+    expect(h.anyFrameContains("•")).toBe(true);
+    expect(h.anyFrameContains("Added")).toBe(true);
+    h.unmount();
+  });
+
   it("error entry renders ⚠ prefix", () => {
     const h = renderTranscript([{ kind: "error", text: "Patch rejected" }]);
     expect(h.anyFrameContains("⚠")).toBe(true);
