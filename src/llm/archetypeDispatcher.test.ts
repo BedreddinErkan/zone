@@ -171,3 +171,40 @@ describe("CE.4.1.a: per-archetype iter caps", () => {
     ).toBeNull();
   });
 });
+
+describe("CE.4.1.f: per-archetype coachingBudget tuning", () => {
+  const ALL_ON = {
+    dispatcherEnabled: true,
+    simpleAddEnabled: true,
+    questionEnabled: true,
+    investigationEnabled: true,
+    targetedFixEnabled: true,
+    refactorEnabled: true,
+  };
+
+  it("TARGETED_FIX_PIPELINE.coachingBudget === 3", () => {
+    expect(TARGETED_FIX_PIPELINE.coachingBudget).toBe(3);
+  });
+
+  it("REFACTOR_PIPELINE.coachingBudget === 4", () => {
+    expect(REFACTOR_PIPELINE.coachingBudget).toBe(4);
+  });
+
+  it("SIMPLE_ADD_PIPELINE.coachingBudget === 2 (regression guard — unchanged)", () => {
+    expect(SIMPLE_ADD_PIPELINE.coachingBudget).toBe(2);
+  });
+
+  it("QUESTION_PIPELINE.coachingBudget === 0 (regression guard — unchanged)", () => {
+    expect(QUESTION_PIPELINE.coachingBudget).toBe(0);
+  });
+
+  it("buildPipelineConfig targeted_fix returns coachingBudget:3", () => {
+    const result = buildPipelineConfig("targeted_fix", ALL_ON);
+    expect(result?.coachingBudget).toBe(3);
+  });
+
+  it("buildPipelineConfig refactor returns coachingBudget:4", () => {
+    const result = buildPipelineConfig("refactor", ALL_ON);
+    expect(result?.coachingBudget).toBe(4);
+  });
+});

@@ -54,15 +54,15 @@ export const QUESTION_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
 });
 
 // CE.4.1.a: per-archetype iter caps — targeted_fix (10) and refactor (12)
-// coachingBudget:5 = MAX_SELF_CORRECTION_ATTEMPTS; per-archetype coaching deferred to CE.4.1.f
-// Soft promotion (L5.1b-2) provides escalation via coaching_exhausted/iter_cap/rollback_x2 triggers
+// CE.4.1.f: per-archetype coachingBudget — targeted_fix:3, refactor:4 (complex_multi_file/debug→5 via null fallback)
+// Lower budget fires coaching_exhausted soft promotion earlier; L5.1b-2 absorbs via relaxation.
 export const TARGETED_FIX_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
   skipPhase1: false,
   skipPlan: false,
   skipPlanSSE: false,
   skipAudit: false,
   iterCap: 10,
-  coachingBudget: 5,
+  coachingBudget: 3,
   allowSubagentDispatch: true,
   allowScopeRevision: true,
   preserveSyntaxChecker: true,
@@ -76,7 +76,7 @@ export const REFACTOR_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
   skipPlanSSE: false,
   skipAudit: false,
   iterCap: 12,
-  coachingBudget: 5,
+  coachingBudget: 4,
   allowSubagentDispatch: true,
   allowScopeRevision: true,
   preserveSyntaxChecker: true,
