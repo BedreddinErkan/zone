@@ -1,5 +1,6 @@
 import { debugLog } from "../../utils/logger.js";
 import { handleSubagentResult, logSubagentDispatched } from "../subagentDispatch.js";
+import { emitToolResultSize } from "../loopTelemetry.js";
 import type { ToolResult } from "../../tools/toolExecutor.js";
 import type { ToolEventContext, ToolEventResult, HandleToolResultDeps } from "./types.js";
 
@@ -113,6 +114,13 @@ export async function handleToolResult(
           tool_call_id: callId,
           content: result.output,
         });
+        emitToolResultSize({
+          runId: deps.runId ?? "anon",
+          tool: name,
+          bytes: Buffer.byteLength(result.output, "utf8"),
+          callId,
+          iter: deps.iter,
+        });
         const exit = await deps.synthesizeTokenBudgetExit(deps.iter + 1, ctx.responseInput);
         return { kind: "early_exit", exit };
       }
@@ -126,6 +134,13 @@ export async function handleToolResult(
     role: "tool",
     tool_call_id: callId,
     content: result.output,
+  });
+  emitToolResultSize({
+    runId: deps.runId ?? "anon",
+    tool: name,
+    bytes: Buffer.byteLength(result.output, "utf8"),
+    callId,
+    iter: deps.iter,
   });
 
   // Step 12: loop detection

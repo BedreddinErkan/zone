@@ -25,7 +25,9 @@ import {
   emitTierArchetypeMismatch,
   emitCoachingRule,
   emitCommandCacheSummary,
+  emitToolResultSummary,
 } from "./loopTelemetry.js";
+import { getAndClearToolResultSummary } from "./toolResultSizeTracker.js";
 import type { TaskArchetype, TaskClassification, TaskTier } from "./taskClassifier.js";
 import { resolveTierLimits } from "./tierLimits.js";
 import { resolveDailyUsdCap } from "./usdCapResolver.js";
@@ -1429,6 +1431,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           totalSavedMs: commandCacheSnapshot.savedMs,
           cacheSize: commandCacheSnapshot.entries.size,
         });
+      }
+      const sizeSummary = getAndClearToolResultSummary(input.runId);
+      if (sizeSummary && sizeSummary.totalResults > 0) {
+        emitToolResultSummary({ runId: input.runId, ...sizeSummary });
       }
     }
   }

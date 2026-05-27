@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
 vi.mock("../subagentDispatch.js", () => ({
   handleSubagentResult: vi.fn(),
@@ -9,6 +9,10 @@ import { handleToolResult } from "./handleToolResult.js";
 import type { ToolEventContext, HandleToolResultDeps } from "./types.js";
 import type { Mock } from "vitest";
 import { handleSubagentResult } from "../subagentDispatch.js";
+import {
+  getAndClearToolResultSummary,
+  clearToolResultSizeTrackerForTest,
+} from "../toolResultSizeTracker.js";
 
 const mockHandleSubagentResult = handleSubagentResult as Mock;
 
@@ -88,6 +92,7 @@ describe("handleToolResult", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockHandleSubagentResult.mockReturnValue({ subagentTokenDelta: 0, subagentCostDelta: 0 });
+    clearToolResultSizeTrackerForTest();
   });
 
   describe("normal flow", () => {
@@ -372,6 +377,22 @@ describe("handleToolResult", () => {
       );
       // synthesizeTokenBudgetExit receives messages that include the tool reply
       expect(responseInputLenAtSynthesize).toBeGreaterThan(0);
+    });
+  });
+
+  describe("tool result size telemetry", () => {
+    afterEach(() => clearToolResultSizeTrackerForTest());
+
+    it("records byte size in tracker for a successful tool result push", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      const output = "hello world";
+      await handleToolResult("run_command", {}, "cid1", { output, success: true }, ctx, deps);
+      const s = getAndClearToolResultSummary(deps.runId ?? "anon")!;
+      expect(s).not.toBeNull();
+      expect(s.totalResults).toBe(1);
+      expect(s.perTool["run_command"]).toBeDefined();
+      expect(s.perTool["run_command"].bytes).toBe(Buffer.byteLength(output, "utf8"));
     });
   });
 });

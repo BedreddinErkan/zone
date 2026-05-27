@@ -1,5 +1,6 @@
 import { log } from "../utils/logger.js";
 import { writeCacheLog } from "../utils/commandCacheLog.js";
+import { recordToolResultSize } from "./toolResultSizeTracker.js";
 import {
   buildApplyRolledBackMarkerLog,
   type RolledBackError,
@@ -261,6 +262,43 @@ export interface ManifestSetGrowthData {
 
 export function emitManifestSetGrowth(data: ManifestSetGrowthData): void {
   log("[zone-manifest-set-growth]", JSON.stringify(data));
+}
+
+// ---------------------------------------------------------------------------
+// emitToolResultSize — [zone-tool-result-size]
+// Emitted per tool-result push. Also feeds the per-run accumulator so
+// emitToolResultSummary can aggregate at run close without rescanning
+// responseInput (which is in the inner scoped function's scope).
+// ---------------------------------------------------------------------------
+
+export interface ToolResultSizeData {
+  runId: string;
+  tool: string;
+  bytes: number;
+  callId: string;
+  iter: number;
+}
+
+export function emitToolResultSize(opts: ToolResultSizeData): void {
+  recordToolResultSize(opts.runId, opts.tool, opts.bytes);
+  log("[zone-tool-result-size]", JSON.stringify(opts));
+}
+
+// ---------------------------------------------------------------------------
+// emitToolResultSummary — [zone-tool-result-summary]
+// Emitted once per top-level run in the finally block. Data sourced from
+// getAndClearToolResultSummary (clears the accumulator as a side effect).
+// ---------------------------------------------------------------------------
+
+export interface ToolResultSummaryData {
+  runId: string;
+  totalResults: number;
+  totalBytes: number;
+  perTool: Record<string, { count: number; bytes: number }>;
+}
+
+export function emitToolResultSummary(opts: ToolResultSummaryData): void {
+  log("[zone-tool-result-summary]", JSON.stringify(opts));
 }
 
 // ---------------------------------------------------------------------------
