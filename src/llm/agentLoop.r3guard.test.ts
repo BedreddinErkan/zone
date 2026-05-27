@@ -39,17 +39,16 @@ describe("R.3 — Phase Q safety signal preservation", () => {
     expect(p).toContain("subagentEligible");
   });
 
-  it("Q.3 all three dispatch reason prefixes are present", () => {
+  it("Q.3 dispatch reason prefixes are present", () => {
     const p = basePrompt();
     expect(p).toContain("multi_file_fanout");
-    expect(p).toContain("exploration");
     expect(p).toContain("long_isolated_step");
     expect(p).toContain("DISPATCH REASON");
   });
 
-  it("Q.3 MAX_SUBAGENT_CALLS=2 cap reminder is present", () => {
+  it("Q.3 dispatch cap reminder is present", () => {
     const p = basePrompt();
-    expect(p).toContain("MAX_SUBAGENT_CALLS=2");
+    expect(p).toContain("dispatch cap: 2/run");
   });
 
   it("Q.5b all five ZONE_VERIFICATION verdicts are present", () => {

@@ -72,10 +72,14 @@ describe("assembleAgentSystemPrompt — Q.3 Task coaching", () => {
     expect(prompt).toContain("TASK SUBAGENTS");
     expect(prompt).toContain("subagentEligible");
     expect(prompt).toContain("multi_file_fanout");
-    expect(prompt).toContain("exploration");
     expect(prompt).toContain("long_isolated_step");
-    expect(prompt).toContain("focused_diagnosis");
     expect(prompt).toContain("DISPATCH REASON");
+
+    // CE.2.1.c: block compressed to ~607 bytes (was ~1618)
+    const blockStart = prompt.indexOf("TASK SUBAGENTS");
+    const blockEnd = prompt.indexOf("\n\n", blockStart);
+    const taskSubagentsBlock = prompt.slice(blockStart, blockEnd);
+    expect(taskSubagentsBlock.length).toBeLessThan(800);
   });
 
   it("documents the GOOD and BAD dispatch signals", () => {
@@ -94,7 +98,7 @@ describe("assembleAgentSystemPrompt — Q.3 Task coaching", () => {
     expect(prompt).toContain("BAD signals");
   });
 
-  it("retains the MAX_SUBAGENT_CALLS=2 cap reminder", () => {
+  it("retains dispatch cap reminder", () => {
     const prompt = assembleAgentSystemPrompt({
       agentIntro: "You are Zone, an autonomous coding agent.",
       frameworkLines: [],
@@ -105,22 +109,6 @@ describe("assembleAgentSystemPrompt — Q.3 Task coaching", () => {
       backgroundCommandBlock: "",
       repoPath: "/tmp/repo",
     });
-    expect(prompt).toContain("MAX_SUBAGENT_CALLS=2");
-  });
-
-  it("Step D: focused_diagnosis GOOD signal is present in the active prompt path", () => {
-    const prompt = assembleAgentSystemPrompt({
-      agentIntro: "You are Zone, an autonomous coding agent.",
-      frameworkLines: [],
-      hasFramework: false,
-      projectMemoryBlock: "",
-      baseMaxIterations: 25,
-      canRunCommand: false,
-      backgroundCommandBlock: "",
-      repoPath: "/tmp/repo",
-    });
-    expect(prompt).toContain("focused_diagnosis");
-    expect(prompt).toContain("Verifier rolled back your patch");
-    expect(prompt).toContain("environment archaeology");
+    expect(prompt).toContain("dispatch cap: 2/run");
   });
 });

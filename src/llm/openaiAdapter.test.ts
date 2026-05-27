@@ -92,10 +92,9 @@ describe("OpenAI prompt cache stability helpers", () => {
       repoPath: "/workspace/project",
     });
 
-    expect(system).toContain("TASK SUBAGENTS (Task) — when to dispatch:");
-    expect(system).toContain("Default is single-thread.");
-    expect(system).toContain("GOOD signals (DO dispatch):");
-    expect(system).toContain("BAD signals (DON'T dispatch):");
+    expect(system).toContain("TASK SUBAGENTS");
+    expect(system).toContain("GOOD signals");
+    expect(system).toContain("BAD signals");
     expect(system).toContain("READ_FILE ECONOMY:");
   });
 

@@ -438,16 +438,10 @@ export function assembleAgentSystemPrompt(input: {
     `- Your mistake: fix with apply_patch (intent='modify' or 'delete'), re-run tests.\n` +
     `- Only give up after a self-correction attempt.\n\n` +
     `Operate efficiently — the cost ceiling terminates the run; avoid redundant reads and retries.\n\n` +
-    `TASK SUBAGENTS (Task) — when to dispatch:\n` +
-    `Default is single-thread. Hard cap: 2 dispatches per parent run (MAX_SUBAGENT_CALLS=2, WORKER_MAX_ITER=6). Each dispatch costs ~30K-100K tokens.\n` +
-    `GOOD signals (DO dispatch):\n` +
-    `- Current plan step is marked \`subagentEligible: true\` (consult the plan-annotations block above when present).\n` +
-    `- Same transformation across 5+ files (multi_file_fanout): rename, codemod. Worker.\n` +
-    `- Pure read-only investigation across the repo (exploration): "map all callers of X". Explore.\n` +
-    `- A single step that would otherwise consume 10+ parent iterations (long_isolated_step).\n` +
-    `- Verifier rolled back your patch AND you have spent ≥2 iterations on the rollback recovery AND the diagnosis requires reading 3+ files outside your patched scope (e.g., tsconfig + vitest config + jest setup; module resolution config + package.json + lockfile; build pipeline + bundler config): dispatch ONE explore subagent with a narrow question scoped to the environment investigation. Worker returns scoped findings; you apply them without burning your iter budget on environment archaeology (focused_diagnosis).\n` +
-    `BAD signals (DON'T dispatch): 1-2 file edits, shared mutation state, uncertain scope, patch-then-verify cycles.\n` +
-    `DISPATCH REASON (required): prefix description with "multi_file_fanout: ...", "exploration: ...", "long_isolated_step: ...", or "focused_diagnosis: ...". Example: Task({ subagent_type: "worker", description: "multi_file_fanout: rename foo→bar across src/api/handlers/* (8 files)" }).\n\n` +
+    `TASK SUBAGENTS (Task) — dispatch cap: 2/run (WORKER_MAX_ITER=6).\n` +
+    `GOOD signals: step marked \`subagentEligible: true\` (check plan-annotations block); same change across 5+ files (multi_file_fanout: rename, codemod, Worker); step requiring 10+ parent iterations (long_isolated_step: complex extraction/migration).\n` +
+    `BAD signals (stay single-thread): 1-2 file edits, line-edit task, shared mutation state, uncertain scope, patch-then-verify cycles.\n` +
+    `DISPATCH REASON required — prefix Task description: "multi_file_fanout: rename foo→bar in src/api/ (8 files)" or "long_isolated_step: extract auth module".\n\n` +
     `NARRATION: before each tool call, write one short sentence in plain English describing what you're about to do and why. ` +
     `Examples: "Reading the README to find the existing structure.", "Patching package.json to add the dev dependency.", "Searching for callers of the renamed function." ` +
     `One line, no bullets, no markdown headers, no emoji. Shown as live narration. Don't repeat in the final summary.\n\n` +
