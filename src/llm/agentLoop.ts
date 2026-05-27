@@ -396,7 +396,10 @@ export function assembleAgentSystemPrompt(input: {
         `- Do NOT read source files unless the user explicitly asks for context.\n` +
         `- Final response: full command output plus a one-sentence summary.\n` +
         `- Iteration budget is 3 — one command, optional confirmation, one summary.\n\n`
-      : "") +
+      : `BREVITY RULES (read once, apply always):\n\n` +
+        `Default to action over explanation. Tools speak louder than narration.\n` +
+        `Before opening a 4th read_file or search_in_files in a row, ask: "do I have enough to act?" If yes, act.\n` +
+        `A final summary is the only place to be thorough. Mid-run narration: one short sentence.\n\n`) +
     (input.hasFramework ? `${input.frameworkLines.join("\n")}\n\n` : "") +
     (input.projectMemoryBlock ? `${input.projectMemoryBlock}\n\n` : "") +
     (input.importContextSummary
