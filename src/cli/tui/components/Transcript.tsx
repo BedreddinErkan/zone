@@ -34,9 +34,10 @@ function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement 
       return <IterMarker key={index} phase={entry.phase} />;
     case "user_prompt":
       return (
-        <Box key={index} marginTop={1}>
-          <Text dimColor>{">"} </Text>
-          <Text>{entry.text}</Text>
+        <Box key={index} borderStyle="round" borderColor="cyan"
+             paddingX={1} marginTop={1} marginBottom={1}>
+          <Text bold color="cyan">{"▸ "}</Text>
+          <Text bold>{entry.text}</Text>
         </Box>
       );
     case "assistant_final":

@@ -412,9 +412,9 @@ describe("Transcript harness — entry kinds", () => {
     h.unmount();
   });
 
-  it("user_prompt renders inline with > prefix", () => {
+  it("user_prompt renders with bordered cyan box and ▸ prefix", () => {
     const h = renderTranscript([{ kind: "user_prompt", text: "fix the bug" }]);
-    expect(h.anyFrameContains(">")).toBe(true);
+    expect(h.anyFrameContains("▸")).toBe(true);
     expect(h.anyFrameContains("fix the bug")).toBe(true);
     h.unmount();
   });
