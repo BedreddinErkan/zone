@@ -458,6 +458,15 @@ describe("Transcript harness — entry kinds", () => {
     h.unmount();
   });
 
+  it("long narration text renders without narrow-column wrap", () => {
+    const longText = "Analyzing codebase structure to understand patterns and dependencies before making changes";
+    const h = renderTranscript([{ kind: "narration", text: longText }]);
+    const frame = h.lastFrame() ?? "";
+    const longestLineLen = frame.split("\n").reduce((max, l) => Math.max(max, l.length), 0);
+    expect(longestLineLen).toBeGreaterThan(20);
+    h.unmount();
+  });
+
   it("empty transcript produces no committed content in any frame", () => {
     const h = renderTranscript([]);
     expect(h.anyFrameContains("◆")).toBe(false);

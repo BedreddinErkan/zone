@@ -5731,12 +5731,33 @@ const initializeTodosFromPlan = (): void => {
           if (snapPath && !_planOrchestrationEnabled) startTodoForFile(snapPath);
           return;
         }
-        const cmd =
-          name === "run_command"
-            ? String(args.command ?? "")
-            : name === "read_file" || name === "write_file"
-              ? String(args.filePath ?? "")
-              : "";
+        const cmd = (() => {
+          switch (name) {
+            case "run_command":
+            case "run_command_background":
+            case "run_command_readonly":
+              return String(args.command ?? "");
+            case "read_file":
+            case "apply_patch":
+            case "write_file":
+              return String(args.filePath ?? "");
+            case "list_files":
+              return String(args.dirPath ?? "");
+            case "search_in_files":
+              return String(args.pattern ?? "");
+            case "find_references":
+              return String(args.symbolName ?? args.sourceFile ?? "");
+            case "Task":
+              return String(args.description ?? "").slice(0, 50);
+            case "suggest_scope_change":
+              return String(args.reason ?? "").slice(0, 50);
+            case "kill_background":
+            case "read_background_output":
+              return String(args.handle ?? "");
+            default:
+              return "";
+          }
+        })();
         emitStructuredProgress({
           type: "tool_call",
           title: `[tool] ${name}${cmd ? `: ${cmd}` : ""}`.slice(0, 240),

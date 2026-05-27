@@ -14,9 +14,7 @@ function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement 
           {lines.map((line, i) => (
             <Box key={i}>
               {i === 0 ? <Text color="cyan">{"◆ "}</Text> : <Text>{"  "}</Text>}
-              <Box flexGrow={1}>
-                <Text>{line}</Text>
-              </Box>
+              <Text>{line}</Text>
             </Box>
           ))}
         </Box>
@@ -67,9 +65,7 @@ export function Transcript(): React.ReactElement {
       {liveNarration && (
         <Box>
           <Text color="cyan">{"◆ "}</Text>
-          <Box flexGrow={1}>
-            <Text>{liveNarration}</Text>
-          </Box>
+          <Text>{liveNarration}</Text>
         </Box>
       )}
       {liveToolCall && (
