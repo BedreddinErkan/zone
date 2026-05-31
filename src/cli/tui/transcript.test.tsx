@@ -479,7 +479,21 @@ describe("Transcript harness — entry kinds", () => {
     const h = renderTranscript([{ kind: "narration", text: longText }]);
     const frame = h.lastFrame() ?? "";
     const longestLineLen = frame.split("\n").reduce((max, l) => Math.max(max, l.length), 0);
-    expect(longestLineLen).toBeGreaterThan(20);
+    expect(longestLineLen).toBeGreaterThan(80);
+    h.unmount();
+  });
+
+  it("near-overflow narration line renders no ghost row (Yoga flex-shrink guard)", () => {
+    // "◆ " (2) + 98-char content = 100 chars in a 100-char terminal row (overflow=0 → boundary case)
+    // With word-break space so wrapping fires at word boundary, same pattern as composer.border.test.tsx test 3
+    const longLine = "N".repeat(49) + " " + "N".repeat(48); // 98 chars
+    const h = renderTranscript([{ kind: "narration", text: longLine }]);
+    const frame = h.lastFrame() ?? "";
+    const lines = frame.trimEnd().split("\n");
+    const ghostRows = lines.filter((l) => l.trim() === "");
+    expect(ghostRows).toHaveLength(0);
+    const contentLines = lines.filter((l) => l.includes("N"));
+    expect(contentLines.length).toBeGreaterThanOrEqual(1);
     h.unmount();
   });
 
