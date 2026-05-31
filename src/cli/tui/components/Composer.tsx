@@ -390,10 +390,12 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
       )}
       <Box borderStyle="round" borderColor={borderColor} paddingX={1}>
         <Text dimColor={disabled}>{disabled ? "  " : "> "}</Text>
-        <Text dimColor={disabled}>{displayBuffer}</Text>
-        {!disabled && !buffer && (
-          <Text dimColor>{"Type a task or /help"}</Text>
-        )}
+        <Box flexGrow={1}>
+          <Text dimColor={disabled}>{displayBuffer}</Text>
+          {!disabled && !buffer && (
+            <Text dimColor>{"Type a task or /help"}</Text>
+          )}
+        </Box>
       </Box>
     </Box>
   );
