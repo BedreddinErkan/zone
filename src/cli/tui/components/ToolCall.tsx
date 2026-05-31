@@ -9,6 +9,9 @@ import {
   formatPreview,
 } from "./toolCallFormat.js";
 import { DiffView } from "./DiffView.js";
+import { CommandTail } from "./CommandTail.js";
+
+const BASH_TOOLS = new Set(["run_command", "run_command_background", "run_command_readonly"]);
 
 interface ToolResultEntry {
   ok: boolean;
@@ -24,6 +27,7 @@ interface ToolCallProps {
 }
 
 export function ToolCall({ toolName, args, results, patch }: ToolCallProps): React.ReactElement {
+  const isBash = BASH_TOOLS.has(toolName);
   const lastResult = results[results.length - 1] ?? null;
   const display = getToolDisplayName(toolName);
   const formattedArgs = formatToolArgs(toolName, args);
@@ -42,10 +46,10 @@ export function ToolCall({ toolName, args, results, patch }: ToolCallProps): Rea
     secondLine = inlineMsg ? `blocked: ${inlineMsg}` : "blocked";
     secondLineColor = "yellow";
   } else if (lastResult && !lastResult.ok) {
-    secondLine = inlineMsg;
-    secondLineColor = "red";
+    secondLine = isBash ? null : inlineMsg;
+    secondLineColor = isBash ? undefined : "red";
   } else {
-    secondLine = (toolName === "apply_patch" && patch) ? null : successPreview;
+    secondLine = (toolName === "apply_patch" && patch) || isBash ? null : successPreview;
   }
 
   return (
@@ -69,6 +73,11 @@ export function ToolCall({ toolName, args, results, patch }: ToolCallProps): Rea
       {toolName === "apply_patch" && patch && lastResult?.ok && !lastResult.blocked && (
         <Box paddingLeft={2}>
           <DiffView patch={patch} />
+        </Box>
+      )}
+      {isBash && lastResult && !lastResult.blocked && (
+        <Box paddingLeft={2}>
+          <CommandTail detail={lastResult.detail} ok={lastResult.ok} />
         </Box>
       )}
     </Box>

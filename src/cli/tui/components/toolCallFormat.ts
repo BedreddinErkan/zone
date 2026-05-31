@@ -57,6 +57,8 @@ export function formatMetadata(toolName: string, lastResult: ToolResult | null):
   if (!lastResult?.ok || lastResult.blocked) return null;
   const lines = lastResult.detail.split("\n").filter((l) => l.trim().length > 0);
   if (toolName === "read_file") {
+    const rangeMatch = lastResult.detail.match(/^\[lineRange (\d+)-(\d+) of (\d+) total/);
+    if (rangeMatch) return `lines ${rangeMatch[1]}-${rangeMatch[2]} of ${rangeMatch[3]}`;
     return `${lines.length} line${lines.length === 1 ? "" : "s"}`;
   }
   if (toolName === "list_files") {

@@ -360,7 +360,7 @@ describe("TUI.2 transcript rendering", () => {
     unmount();
   });
 
-  it("tool_result with 5-line detail shows first-line preview only", async () => {
+  it("run_command tool_result shows CommandTail last-3 lines, not first line", async () => {
     const bus = createEventBus();
     const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
@@ -371,10 +371,10 @@ describe("TUI.2 transcript rendering", () => {
     }));
     await wait(50);
 
-    expect(frames.some(f => f?.includes("line1"))).toBe(true);
-    expect(frames.every(f => !f?.includes("line3"))).toBe(true);
-    expect(frames.every(f => !f?.includes("… 2 more"))).toBe(true);
-    expect(frames.every(f => !f?.includes("line5"))).toBe(true);
+    // CommandTail shows last 3 lines (line3, line4, line5) — first line no longer shown
+    expect(frames.some(f => f?.includes("line3"))).toBe(true);
+    expect(frames.some(f => f?.includes("line5"))).toBe(true);
+    expect(frames.every(f => !f?.includes("line1"))).toBe(true);
     unmount();
   });
 
@@ -501,6 +501,19 @@ describe("Transcript harness — entry kinds", () => {
     const h = renderTranscript([]);
     expect(h.anyFrameContains("◆")).toBe(false);
     expect(h.anyFrameContains("⚠")).toBe(false);
+    h.unmount();
+  });
+
+  it("TUI.10.J: run_command tool_call with output renders last lines via CommandTail", () => {
+    const detail = "[exit_code=0 — command succeeded]\nRunning tests\nTests 42 passed | 0 skipped";
+    const h = renderTranscript([{
+      kind: "tool_call",
+      toolName: "run_command",
+      args: "npm test",
+      results: [{ ok: true, detail }],
+    }]);
+    expect(h.anyFrameContains("Tests 42 passed")).toBe(true);
+    expect(h.anyFrameContains("[exit_code")).toBe(false);
     h.unmount();
   });
 
