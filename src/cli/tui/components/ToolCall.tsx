@@ -8,6 +8,7 @@ import {
   formatMetadata,
   formatPreview,
 } from "./toolCallFormat.js";
+import { DiffView } from "./DiffView.js";
 
 interface ToolResultEntry {
   ok: boolean;
@@ -19,9 +20,10 @@ interface ToolCallProps {
   toolName: string;
   args: string;
   results: ToolResultEntry[];
+  patch?: string;
 }
 
-export function ToolCall({ toolName, args, results }: ToolCallProps): React.ReactElement {
+export function ToolCall({ toolName, args, results, patch }: ToolCallProps): React.ReactElement {
   const lastResult = results[results.length - 1] ?? null;
   const display = getToolDisplayName(toolName);
   const formattedArgs = formatToolArgs(toolName, args);
@@ -43,7 +45,7 @@ export function ToolCall({ toolName, args, results }: ToolCallProps): React.Reac
     secondLine = inlineMsg;
     secondLineColor = "red";
   } else {
-    secondLine = successPreview;
+    secondLine = (toolName === "apply_patch" && patch) ? null : successPreview;
   }
 
   return (
@@ -62,6 +64,11 @@ export function ToolCall({ toolName, args, results }: ToolCallProps): React.Reac
           ) : (
             <Text dimColor>└ {secondLine}</Text>
           )}
+        </Box>
+      )}
+      {toolName === "apply_patch" && patch && lastResult?.ok && !lastResult.blocked && (
+        <Box paddingLeft={2}>
+          <DiffView patch={patch} />
         </Box>
       )}
     </Box>

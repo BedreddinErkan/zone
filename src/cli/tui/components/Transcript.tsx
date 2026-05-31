@@ -26,7 +26,7 @@ function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement 
     case "tool_call":
       return (
         <Box key={index} marginTop={1}>
-          <ToolCall toolName={entry.toolName} args={entry.args} results={entry.results} />
+          <ToolCall toolName={entry.toolName} args={entry.args} results={entry.results} patch={entry.patch} />
         </Box>
       );
     case "error":

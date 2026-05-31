@@ -93,7 +93,7 @@ export function useAgentEvents(
           toolName = stripped;
         }
       }
-      dispatch({ type: "TOOL_CALL_OPEN", toolName, args });
+      dispatch({ type: "TOOL_CALL_OPEN", toolName, args, patch: evt.patch });
     }
 
     function handleToolResult(evt: ZoneStructuredProgressEvent): void {

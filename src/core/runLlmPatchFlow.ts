@@ -5762,6 +5762,7 @@ const initializeTodosFromPlan = (): void => {
           type: "tool_call",
           title: `[tool] ${name}${cmd ? `: ${cmd}` : ""}`.slice(0, 240),
           status: "active",
+          ...(name === "apply_patch" && args.patch ? { patch: String(args.patch) } : {}),
         });
 
         // Agent loop write_file: emit a fallback streaming patch preview so the chat livecode block shows content.

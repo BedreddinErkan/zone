@@ -225,6 +225,8 @@ export type ZoneStructuredProgressEvent = {
    *  UI render depends on more than the output text (verify_visual surfaces
    *  the screenshot via metadata.screenshotPath / pageTitle / consoleErrors). */
   toolName?: string;
+  /** TUI.10.I: patch content for apply_patch tool calls; used for inline diff display. */
+  patch?: string;
   metadata?: Record<string, unknown>;
   /** Phase F1: live tool-input streaming. Identifies the specific LLM tool call
    *  block (unique per call, per iteration) and whether this event is the first

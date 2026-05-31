@@ -25,13 +25,13 @@ export type ModalEntry = {
 };
 
 export type LiveTailState = {
-  currentToolCall: { toolName: string; args: string } | null;
+  currentToolCall: { toolName: string; args: string; patch?: string } | null;
   narrationBuffer: string;
 };
 
 export type TranscriptEntry =
   | { kind: "narration"; text: string }
-  | { kind: "tool_call"; toolName: string; args: string; results: { ok: boolean; detail: string; blocked?: true }[] }
+  | { kind: "tool_call"; toolName: string; args: string; patch?: string; results: { ok: boolean; detail: string; blocked?: true }[] }
   | { kind: "error"; text: string }
   | { kind: "phase_marker"; phase: string }
   | { kind: "user_prompt"; text: string }
@@ -143,7 +143,7 @@ export type StoreAction =
   | { type: "SPINNER_UPDATE"; label: string }
   | { type: "SPINNER_STOP" }
   | { type: "TRANSCRIPT_APPEND_NARRATION"; text: string }
-  | { type: "TOOL_CALL_OPEN"; toolName: string; args: string }
+  | { type: "TOOL_CALL_OPEN"; toolName: string; args: string; patch?: string }
   | { type: "TOOL_RESULT_PUSH"; ok: boolean; detail: string; blocked?: true }
   | { type: "TOOL_CALL_CLOSE" }
   | { type: "STATUS_UPDATE"; iter?: number; costUsd?: number; tokenBudgetRatio?: number; tokens?: number }
@@ -225,7 +225,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         ...state,
         liveTail: {
           ...state.liveTail,
-          currentToolCall: { toolName: action.toolName, args: action.args },
+          currentToolCall: { toolName: action.toolName, args: action.args, patch: action.patch },
         },
       };
 
@@ -239,6 +239,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         kind: "tool_call",
         toolName: tc.toolName,
         args: tc.args,
+        ...(tc.patch ? { patch: tc.patch } : {}),
         results: [{ ok: action.ok, detail: action.detail, ...(action.blocked ? { blocked: true as const } : {}) }],
       };
       return { ...state, transcript: [...state.transcript, entry] };

@@ -503,4 +503,20 @@ describe("Transcript harness — entry kinds", () => {
     expect(h.anyFrameContains("⚠")).toBe(false);
     h.unmount();
   });
+
+  it("tool_call entry with patch renders inline diff (+/− lines)", () => {
+    const patch = `--- FIND ---\nconst old = 1;\n--- REPLACE ---\nconst newVal = 2;`;
+    const h = renderTranscript([{
+      kind: "tool_call",
+      toolName: "apply_patch",
+      args: "src/foo.ts",
+      patch,
+      results: [{ ok: true, detail: "Patch applied: 1 block(s) in src/foo.ts" }],
+    }]);
+    expect(h.anyFrameContains("- ")).toBe(true);
+    expect(h.anyFrameContains("+ ")).toBe(true);
+    expect(h.anyFrameContains("const old = 1")).toBe(true);
+    expect(h.anyFrameContains("const newVal = 2")).toBe(true);
+    h.unmount();
+  });
 });
