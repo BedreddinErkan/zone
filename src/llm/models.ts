@@ -42,6 +42,11 @@ export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {
       recommendedTier: "standard",
     },
     {
+      id: "claude-opus-4-8",
+      label: "Claude Opus 4.8",
+      costNote: "Frontier model — ~1.7× Sonnet output cost; verify usage budget",
+    },
+    {
       id: "claude-opus-4-7",
       label: "Claude Opus 4.7",
       costNote: "Frontier model — ~1.7× Sonnet output cost; verify usage budget",
