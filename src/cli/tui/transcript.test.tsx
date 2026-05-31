@@ -3,7 +3,7 @@ import { render } from "ink-testing-library";
 import React from "react";
 import { App } from "./App.js";
 import { createEventBus } from "../eventBus.js";
-import { renderTranscript } from "./__fixtures__/staticHarness.js"; // resolves to staticHarness.tsx
+import { renderTranscript, renderTranscriptAt } from "./__fixtures__/staticHarness.js"; // resolves to staticHarness.tsx
 import type { ZoneStructuredProgressEvent } from "../../core/agentLifecycleEvents.js";
 
 vi.mock("../../api/commandApprovals.js", () => ({ resolveCommandApproval: vi.fn() }));
@@ -530,6 +530,63 @@ describe("Transcript harness — entry kinds", () => {
     expect(h.anyFrameContains("+ ")).toBe(true);
     expect(h.anyFrameContains("const old = 1")).toBe(true);
     expect(h.anyFrameContains("const newVal = 2")).toBe(true);
+    h.unmount();
+  });
+});
+
+describe("TUI.10.H.1 — committed narration width at non-100 columns (squeeze regression)", () => {
+  // These tests use renderTranscriptAt (Ink render directly) to bypass ink-testing-library's
+  // hardcoded columns=100. The bug: Static position:absolute → shrink-to-fit width → committed
+  // narration rows constrained to content-sized container → short text wraps at ~15 chars.
+
+  it("columns=80: short narration renders on one line (full string verbatim)", () => {
+    const h = renderTranscriptAt(
+      [{ kind: "narration", text: "Now running the test suite." }],
+      80,
+    );
+    expect(h.anyFrameContains("Now running the test suite.")).toBe(true);
+    h.unmount();
+  });
+
+  it("columns=60: short narration still renders on one line", () => {
+    const h = renderTranscriptAt(
+      [{ kind: "narration", text: "Now running the test suite." }],
+      60,
+    );
+    expect(h.anyFrameContains("Now running the test suite.")).toBe(true);
+    h.unmount();
+  });
+
+  it("columns=80: asymmetry regression — [long_narration, tool_call, short_narration] both appear", () => {
+    // Reproduces the original failure: first narration full-width, subsequent (after tool call) squeezed.
+    const h = renderTranscriptAt(
+      [
+        {
+          kind: "narration",
+          text: "Reading the Spinner component to understand its current structure before adding the JSDoc.",
+        },
+        {
+          kind: "tool_call",
+          toolName: "read_file",
+          args: "src/cli/tui/components/Spinner.tsx",
+          results: [{ ok: true, detail: "42 lines" }],
+        },
+        { kind: "narration", text: "Now running the test suite." },
+      ],
+      80,
+    );
+    // Short narration must appear verbatim (not split by wrapping to ~15 chars)
+    expect(h.anyFrameContains("Now running the test suite.")).toBe(true);
+    h.unmount();
+  });
+
+  it("columns=80: multi-line narration each line appears verbatim", () => {
+    const h = renderTranscriptAt(
+      [{ kind: "narration", text: "First line of narration.\nSecond line here." }],
+      80,
+    );
+    expect(h.anyFrameContains("First line of narration.")).toBe(true);
+    expect(h.anyFrameContains("Second line here.")).toBe(true);
     h.unmount();
   });
 });

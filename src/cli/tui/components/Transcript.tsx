@@ -1,4 +1,4 @@
-import { Box, Static, Text } from "ink";
+import { Box, Static, Text, useStdout } from "ink";
 import { useStore, type TranscriptEntry } from "../store.js";
 import { ToolCall } from "./ToolCall.js";
 import { ErrorLine } from "./ErrorLine.js";
@@ -52,6 +52,7 @@ function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement 
 
 export function Transcript(): React.ReactElement {
   const { state } = useStore();
+  const { stdout } = useStdout();
   const liveToolCall = state.liveTail.currentToolCall;
   const liveNarration = state.liveTail.narrationBuffer;
 
@@ -60,6 +61,7 @@ export function Transcript(): React.ReactElement {
       <Static
         key={state.transcriptGeneration}
         items={state.transcript.map((entry, index) => ({ entry, index }))}
+        style={{ width: stdout.columns ?? 80 }}
       >
         {(item: { entry: TranscriptEntry; index: number }) =>
           renderEntry(item.entry, item.index)
