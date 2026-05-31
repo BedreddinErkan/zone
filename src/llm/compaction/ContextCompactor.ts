@@ -125,7 +125,12 @@ export class ContextCompactor {
   private compactionCount = 0;
   private readonly MAX_COMPACTIONS = 5;
   private readonly WARN_AT = 3;
-  private readonly THRESHOLD_RATIO = 0.75;
+  private get THRESHOLD_RATIO(): number {
+    const raw = process.env["ZONE_COMPACTION_TEST_RATIO"];
+    if (raw === undefined) return 0.75;
+    const r = parseFloat(raw);
+    return Number.isFinite(r) && r > 0 && r < 1 ? r : 0.75;
+  }
 
   getCompactionCount(): number {
     return this.compactionCount;
@@ -138,6 +143,7 @@ export class ContextCompactor {
     effectiveCap: number;
     client?: LLMClient;
     runId?: string | undefined;
+    onCompactionStarted?: (count: number) => void;
   }): Promise<CompactionResult> {
     if (args.currentUsage < args.effectiveCap * this.THRESHOLD_RATIO) {
       return { compacted: false, reason: "under_threshold" };
@@ -167,6 +173,8 @@ export class ContextCompactor {
     // J.3: build deterministic file-read manifest from CANDIDATE reads before summarizing
     const { manifest, truncated: manifestTruncated, entryCount } =
       buildFileReadManifest(args.responseInput, classified);
+
+    args.onCompactionStarted?.(nextCount);
 
     let summaryText: string;
     try {

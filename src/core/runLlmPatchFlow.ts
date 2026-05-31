@@ -5662,6 +5662,14 @@ const initializeTodosFromPlan = (): void => {
             status: "active",
           } as any);
         }
+        if (e && typeof e === "object" && e.type === "compaction_started") {
+          emitStructuredProgress({
+            type: "compaction_started",
+            title: "Compacting context",
+            status: "active",
+            count: typeof e.count === "number" ? e.count : 0,
+          });
+        }
         if (e && typeof e === "object" && e.type === "compaction_status") {
           emitStructuredProgress({
             type: "compaction_status",

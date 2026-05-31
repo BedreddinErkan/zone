@@ -3095,6 +3095,8 @@ Example:
           effectiveCap: effectiveTokenBudgetCap,
           client,
           runId: input.runId,
+          onCompactionStarted: (count) =>
+            input.onStructuredEvent?.({ type: "compaction_started", count }),
         });
       } catch (err) {
         if (err instanceof CompactionExhaustedError) {

@@ -1325,3 +1325,70 @@ describe("Compact.2 — CompactionResult token delta", () => {
     expect(result.savedTokens).toBeUndefined();
   });
 });
+
+describe("Compact.3-A — onCompactionStarted callback", () => {
+  it("fires with the compaction count before summarize is called", async () => {
+    const c = new ContextCompactor();
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: "a1" },
+      { role: "assistant", content: "a2" },
+      { role: "assistant", content: "a3" },
+      { role: "assistant", content: "a4" },
+      { role: "assistant", content: "a5" },
+    ];
+    const calls: number[] = [];
+    const result = await c.checkAndMaybeCompact({
+      responseInput: history,
+      toolCallLog: [],
+      currentUsage: 800_000,
+      effectiveCap: 800_000,
+      client: stubClient,
+      onCompactionStarted: (count) => { calls.push(count); },
+    });
+    expect(result.compacted).toBe(true);
+    expect(calls).toEqual([1]);
+  });
+});
+
+describe("Compact.3-C — ZONE_COMPACTION_TEST_RATIO threshold override", () => {
+  it("triggers compaction at 60% usage when override is 0.5", async () => {
+    vi.stubEnv("ZONE_COMPACTION_TEST_RATIO", "0.5");
+    const c = new ContextCompactor();
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: "a1" },
+      { role: "assistant", content: "a2" },
+      { role: "assistant", content: "a3" },
+      { role: "assistant", content: "a4" },
+      { role: "assistant", content: "a5" },
+    ];
+    // 60% of cap — below 0.75 default, above 0.5 override → should compact
+    const result = await c.checkAndMaybeCompact({
+      responseInput: history,
+      toolCallLog: [],
+      currentUsage: 480_000,
+      effectiveCap: 800_000,
+      client: stubClient,
+    });
+    vi.unstubAllEnvs();
+    expect(result.compacted).toBe(true);
+  });
+
+  it("invalid value falls back to 0.75 — no silent compaction disable", async () => {
+    vi.stubEnv("ZONE_COMPACTION_TEST_RATIO", "foo");
+    const c = new ContextCompactor();
+    // 60% of cap — under 0.75 fallback threshold
+    const result = await c.checkAndMaybeCompact({
+      responseInput: [],
+      toolCallLog: [],
+      currentUsage: 480_000,
+      effectiveCap: 800_000,
+    });
+    vi.unstubAllEnvs();
+    expect(result.compacted).toBe(false);
+    expect(result.reason).toBe("under_threshold");
+  });
+});

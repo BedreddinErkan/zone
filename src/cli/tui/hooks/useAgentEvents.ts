@@ -8,6 +8,55 @@ import { resolveRevisionApproval } from "../../../llm/revisionApprovals.js";
 import { buildLoopCompleteSummary, buildRunSummary } from "../../../core/eventProcessors.js";
 // buildLoopCompleteSummary / buildRunSummary kept for future telemetry; run text no longer stored in transcript
 
+export function formatCompactionNarration(opts: {
+  tokensBefore: number;
+  tokensAfter: number;
+  savedTokens: number;
+  count: number;
+}): string {
+  const { tokensBefore, tokensAfter, savedTokens, count } = opts;
+  const pct = tokensBefore > 0 ? Math.round((savedTokens / tokensBefore) * 100) : 0;
+  const k = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+  return `Context compacted: ~${k(tokensBefore)} → ~${k(tokensAfter)} tokens (−${pct}%, #${count})`;
+}
+
+export function handleCompactionStarted(
+  _evt: ZoneStructuredProgressEvent,
+  dispatch: Dispatch<StoreAction>
+): void {
+  dispatch({ type: "SPINNER_UPDATE", label: "Compacting context…" });
+}
+
+export function handleCompactionStatus(
+  evt: ZoneStructuredProgressEvent,
+  dispatch: Dispatch<StoreAction>
+): void {
+  dispatch({ type: "SPINNER_STOP" });
+  const text = formatCompactionNarration({
+    tokensBefore: evt.tokensBefore ?? 0,
+    tokensAfter: evt.tokensAfter ?? 0,
+    savedTokens: evt.savedTokens ?? 0,
+    count: evt.count ?? 0,
+  });
+  dispatch({ type: "TRANSCRIPT_APPEND_NARRATION", text });
+  dispatch({ type: "NARRATION_COMMIT" });
+}
+
+export function handleCompactionExhausted(
+  evt: ZoneStructuredProgressEvent,
+  dispatch: Dispatch<StoreAction>
+): void {
+  dispatch({ type: "SPINNER_STOP" });
+  dispatch({
+    type: "TOAST_PUSH",
+    entry: {
+      id: randomUUID(),
+      message: evt.message ?? "Context exhausted. Break this task into subtasks.",
+      level: "warning",
+    },
+  });
+}
+
 function flushBuffer(
   localBuffer: MutableRefObject<string>,
   debounceTimer: MutableRefObject<ReturnType<typeof setTimeout> | null>,
@@ -221,6 +270,13 @@ export function useAgentEvents(
     bus.on("command_approval_required", handleCommandApproval);
     bus.on("scope_revision_proposed", handleRevisionProposed);
 
+    const onStarted   = (evt: ZoneStructuredProgressEvent) => handleCompactionStarted(evt, dispatch);
+    const onStatus    = (evt: ZoneStructuredProgressEvent) => handleCompactionStatus(evt, dispatch);
+    const onExhausted = (evt: ZoneStructuredProgressEvent) => handleCompactionExhausted(evt, dispatch);
+    bus.on("compaction_started",  onStarted);
+    bus.on("compaction_status",   onStatus);
+    bus.on("compaction_exhausted", onExhausted);
+
     return () => {
       if (debounceTimer.current !== null) {
         clearTimeout(debounceTimer.current);
@@ -252,6 +308,9 @@ export function useAgentEvents(
       bus.off("loop_detected_terminal", handleLoopDetected);
       bus.off("command_approval_required", handleCommandApproval);
       bus.off("scope_revision_proposed", handleRevisionProposed);
+      bus.off("compaction_started",  onStarted);
+      bus.off("compaction_status",   onStatus);
+      bus.off("compaction_exhausted", onExhausted);
     };
   }, [bus, dispatch]);
 }
