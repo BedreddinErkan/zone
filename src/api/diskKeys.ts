@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { join, dirname } from "node:path";
 
-export type ApiKeyProvider = "anthropic" | "openai";
+export type ApiKeyProvider = "anthropic" | "openai" | "gemini";
 
 export interface DiskApiKey {
   provider: ApiKeyProvider;

@@ -8,6 +8,8 @@ describe("modelRegistry", () => {
     expect(getProviderForModel("claude-opus-4-7")).toBe("anthropic");
     expect(getProviderForModel("gpt-5.4")).toBe("openai");
     expect(getProviderForModel("gpt-5.4-mini")).toBe("openai");
+    expect(getProviderForModel("gemini-3.5-flash")).toBe("gemini");
+    expect(getProviderForModel("gemini-3.1-pro")).toBe("gemini");
     expect(getProviderForModel("unknown-model")).toBe("anthropic");  // fallback
   });
 
@@ -15,6 +17,8 @@ describe("modelRegistry", () => {
     expect(supportsEffort("claude-sonnet-4-6")).toBe(true);
     expect(supportsEffort("claude-opus-4-8")).toBe(true);
     expect(supportsEffort("claude-opus-4-7")).toBe(true);
+    expect(supportsEffort("gemini-3.5-flash")).toBe(false);  // not added to EFFORT_SUPPORTED_MODELS (unverified)
+    expect(supportsEffort("gemini-3.1-pro")).toBe(false);
     expect(supportsEffort("claude-sonnet-4-5")).toBe(true);
     expect(supportsEffort("claude-haiku-4-5")).toBe(false);
     expect(supportsEffort("gpt-5.4")).toBe(true);

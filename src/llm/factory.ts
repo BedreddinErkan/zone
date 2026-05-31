@@ -4,6 +4,8 @@ import { AnthropicAdapter } from "./anthropicAdapter.js";
 import { getRequestContext } from "./openaiContext.js";
 import { RecordingLLMClient } from "./recordingClient.js";
 
+export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/";
+
 export function createLLMClient(options: LLMClientResolveOptions = {}): LLMClient {
   const ctx = getRequestContext();
   const provider = resolveProvider(options.provider, ctx?.provider);
@@ -15,6 +17,10 @@ export function createLLMClient(options: LLMClientResolveOptions = {}): LLMClien
   } else if (provider === "anthropic") {
     const apiKey = resolveAnthropicApiKey(options.apiKey, ctx?.userApiKey);
     inner = new AnthropicAdapter(apiKey);
+  } else if (provider === "gemini") {
+    if (!process.env.ZONE_GEMINI_ENABLE) throw new Error(`Unsupported provider: ${provider}`);
+    const apiKey = resolveGeminiApiKey(options.apiKey, ctx?.userApiKey);
+    inner = new OpenAIAdapter(apiKey, GEMINI_BASE_URL, "gemini");
   } else {
     throw new Error(`Unsupported provider: ${provider}`);
   }
@@ -92,6 +98,34 @@ function resolveAnthropicApiKey(explicit?: string, contextKey?: string): string 
 
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY is missing for anthropic provider.");
+  }
+
+  return apiKey;
+}
+
+function resolveGeminiApiKey(explicit?: string, contextKey?: string): string {
+  const trimmedExplicit =
+    typeof explicit === "string" && explicit.trim() ? explicit.trim() : "";
+  const trimmedContext =
+    typeof contextKey === "string" && contextKey.trim() ? contextKey.trim() : "";
+  const envKey =
+    typeof process.env.GEMINI_API_KEY === "string" && process.env.GEMINI_API_KEY.trim()
+      ? process.env.GEMINI_API_KEY.trim()
+      : "";
+
+  const apiKey = trimmedExplicit || trimmedContext || envKey;
+  const source = trimmedExplicit
+    ? "explicit"
+    : trimmedContext
+      ? "user"
+      : envKey
+        ? "env"
+        : "none";
+
+  console.log(`[zone] llm key source=${source} provider=gemini`);
+
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is missing for gemini provider.");
   }
 
   return apiKey;

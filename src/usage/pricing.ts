@@ -5,7 +5,7 @@
 // cache_write=0 reflects that.
 
 export type TokenType = "input_uncached" | "cache_write" | "cache_read" | "output";
-export type ProviderName = "anthropic" | "openai";
+export type ProviderName = "anthropic" | "openai" | "gemini";
 
 export interface ModelRates {
   input: number;
@@ -30,6 +30,12 @@ export const PRICING_USD_PER_MTOK: Record<ProviderName, Record<string, ModelRate
     "gpt-5.4-nano": { input: 0.20, output: 1.25, cache_read: 0.02, cache_write: 0 },
     "gpt-4o":       { input: 2.50, output: 10, cache_read: 1.25, cache_write: 0 },
     "gpt-4o-mini":  { input: 0.15, output: 0.60, cache_read: 0.075, cache_write: 0 },
+  },
+  gemini: {
+    // cache_write=0: Gemini implicit caching; write side not separately billed via OpenAI-compat API.
+    // gemini-3.1-pro: conservative flat rate (>200K tier); tiered pricing deferred to Gemini.6.
+    "gemini-3.5-flash": { input: 1.5, output: 9,  cache_read: 0.15, cache_write: 0 },
+    "gemini-3.1-pro":   { input: 4,   output: 18, cache_read: 0.20, cache_write: 0 },
   },
 };
 

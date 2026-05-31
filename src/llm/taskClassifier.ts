@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { createLLMClient } from "./factory.js";
+import type { LLMProvider } from "./types.js";
 import {
   extractResponsesApiOutputText,
   formatOpenAiThrownErrorPayload,
@@ -244,12 +245,15 @@ function hashTask(taskDescription: string): string {
   return (hash >>> 0).toString(36);
 }
 
-function pickClassifierModel(provider: "openai" | "anthropic"): string {
+function pickClassifierModel(provider: LLMProvider): string {
   // Use the cheapest registered model per provider. claude-haiku-4-5 ~$1/Mtok
   // input, gpt-5.4-mini ~$0.75/Mtok input — well below $0.0005/classification
   // for prompts under ~500 tokens.
   if (provider === "anthropic") {
     return process.env.ZONE_CLASSIFIER_MODEL_ANTHROPIC?.trim() || "claude-haiku-4-5";
+  }
+  if (provider === "gemini") {
+    return process.env.ZONE_CLASSIFIER_MODEL_GEMINI?.trim() || "gemini-3.5-flash";
   }
   return process.env.ZONE_CLASSIFIER_MODEL_OPENAI?.trim() || "gpt-5.4-mini";
 }
@@ -334,12 +338,14 @@ function buildFallback(
 
 function computeResponseCost(
   response: unknown,
-  provider: "openai" | "anthropic",
+  provider: LLMProvider,
   fallbackModel: string
 ): number {
   const usage = extractUsage((response as { usage?: unknown })?.usage);
   if (!usage) return 0;
-  const providerName: ProviderName = provider === "anthropic" ? "anthropic" : "openai";
+  const providerName: ProviderName = provider === "anthropic" ? "anthropic"
+    : provider === "gemini" ? "gemini"
+    : "openai";
   const responseModel =
     (response as { model?: string })?.model || fallbackModel;
   return totalCost(providerName, responseModel, {

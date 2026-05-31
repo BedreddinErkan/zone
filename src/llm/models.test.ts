@@ -34,6 +34,14 @@ describe("MODEL_CATALOG", () => {
     expect(isValidModelId("openai", "")).toBe(false);
   });
 
+  it("isValidModelId recognizes gemini-3.5-flash (always registered)", () => {
+    expect(isValidModelId("gemini", "gemini-3.5-flash")).toBe(true);
+  });
+
+  it("isValidModelId recognizes gemini-3.1-pro (always registered)", () => {
+    expect(isValidModelId("gemini", "gemini-3.1-pro")).toBe(true);
+  });
+
   it("getDefaultModelForTier returns recommendedTier model", () => {
     expect(getDefaultModelForTier("openai", "high")).toBe("gpt-5.4");
     expect(getDefaultModelForTier("openai", "standard")).toBe("gpt-5.4-mini");

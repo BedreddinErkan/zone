@@ -450,6 +450,7 @@ export function getRequestContextFromHeaders(req: express.Request): {
       : "";
   const provider: LLMProvider | undefined =
     providerRaw === "openai" || providerRaw === "anthropic"
+    || (providerRaw === "gemini" && !!process.env.ZONE_GEMINI_ENABLE)
       ? (providerRaw as LLMProvider)
       : undefined;
 

@@ -39,6 +39,15 @@ describe("diskKeys", () => {
     expect(store.keys[0].provider).toBe("openai");
   });
 
+  it("gemini key: setDiskKey + loadDiskKeys round-trip", async () => {
+    await setDiskKey(tmp, "gemini", "AIzaSy-test123456789012345678");
+    const store = await loadDiskKeys(tmp);
+    const entry = store.keys.find(k => k.provider === "gemini");
+    expect(entry?.key).toBe("AIzaSy-test123456789012345678");
+    expect(entry?.provider).toBe("gemini");
+    expect(entry?.addedAt).toMatch(/^\d{4}-/);
+  });
+
   it("maskKey masks middle of long keys", () => {
     expect(maskKey("sk-ant-api03XXXAAAA")).toBe("sk-ant-***AAAA");
     expect(maskKey("short")).toBe("***");

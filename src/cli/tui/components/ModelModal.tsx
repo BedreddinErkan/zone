@@ -16,7 +16,10 @@ export function ModelModal({ dispatch }: Props): React.ReactElement {
   const cols = process.stdout.columns ?? 80;
   const narrow = cols < 60;
   const currentModelId = state.modelSettings?.model ?? getDefaultModelId();
-  const count = USER_FACING_MODELS.length;
+  const visibleModels = USER_FACING_MODELS.filter(
+    m => m.provider !== "gemini" || !!process.env.ZONE_GEMINI_ENABLE
+  );
+  const count = visibleModels.length;
 
   useInput((_input, key) => {
     if (key.escape) {
@@ -26,7 +29,7 @@ export function ModelModal({ dispatch }: Props): React.ReactElement {
     } else if (key.downArrow) {
       dispatch({ type: "MODEL_NAV", direction: "down", count });
     } else if (key.return) {
-      const entry = USER_FACING_MODELS[sel];
+      const entry = visibleModels[sel];
       if (entry) {
         const settings: DiskModelSettings = {
           version: 2,
@@ -45,10 +48,12 @@ export function ModelModal({ dispatch }: Props): React.ReactElement {
   const rows: React.ReactElement[] = [];
   let lastProvider: string | null = null;
 
-  USER_FACING_MODELS.forEach((m, flatIdx) => {
+  visibleModels.forEach((m, flatIdx) => {
     if (m.provider !== lastProvider) {
       lastProvider = m.provider;
-      const sectionLabel = m.provider === "anthropic" ? "Anthropic" : "OpenAI";
+      const sectionLabel = m.provider === "anthropic" ? "Anthropic"
+        : m.provider === "gemini" ? "Gemini"
+        : "OpenAI";
       rows.push(
         <Text key={`hdr-${m.provider}`} bold color="white"> {sectionLabel}</Text>
       );

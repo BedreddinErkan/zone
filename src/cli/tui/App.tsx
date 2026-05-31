@@ -33,7 +33,7 @@ interface AppProps {
   resumedSession?: DiskSession;
   onStateChange?: (state: StoreState) => void;
   initialModelSettings?: DiskModelSettings | null;
-  onModelApply?: (model: string, provider: "anthropic" | "openai", effort?: EffortLevel) => void;
+  onModelApply?: (model: string, provider: "anthropic" | "openai" | "gemini", effort?: EffortLevel) => void;
 }
 
 interface AppInnerProps {
@@ -41,7 +41,7 @@ interface AppInnerProps {
   initialPrompt: string | undefined;
   onSubmit: ((prompt: string, ac: AbortController, mode: TuiMode) => void) | undefined;
   onStateChange: ((state: StoreState) => void) | undefined;
-  onModelApply: ((model: string, provider: "anthropic" | "openai", effort?: EffortLevel) => void) | undefined;
+  onModelApply: ((model: string, provider: "anthropic" | "openai" | "gemini", effort?: EffortLevel) => void) | undefined;
 }
 
 function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }: AppInnerProps): React.ReactElement {

@@ -6,17 +6,18 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
   ChatCompletionCreateParamsStreaming,
 } from "openai/resources/chat/completions";
-import type { LLMClient, LLMRequestOptions } from "./types.js";
+import type { LLMClient, LLMProvider, LLMRequestOptions } from "./types.js";
 import { supportsEffort } from "./modelRegistry.js";
 
 export class OpenAIAdapter implements LLMClient {
-  readonly provider = "openai" as const;
+  readonly provider: LLMProvider;
   private readonly sdk: OpenAI;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, baseUrl?: string, provider: LLMProvider = "openai") {
     // maxRetries:0 disables the SDK's built-in retry so Zone's own
     // withExponentialBackoff controls all retry timing and budget.
-    this.sdk = new OpenAI({ apiKey, maxRetries: 0 });
+    this.sdk = new OpenAI({ apiKey, baseURL: baseUrl, maxRetries: 0 });
+    this.provider = provider;
   }
 
   async createChatCompletion(
@@ -29,7 +30,7 @@ export class OpenAIAdapter implements LLMClient {
         : params;
     return withExponentialBackoff(
       () => this.sdk.chat.completions.create(resolvedParams, { signal: options.signal }),
-      { provider: "openai", model: params.model, emit: options.onRetryEvent }
+      { provider: this.provider, model: params.model, emit: options.onRetryEvent }
     );
   }
 
