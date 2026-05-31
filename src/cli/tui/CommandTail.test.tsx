@@ -36,17 +36,17 @@ describe("TUI.10.J CommandTail", () => {
     expect(frame).toContain("two");
   });
 
-  it("all-meta output ([exit_code=…]) renders null / no content", () => {
+  it("all-meta output (silent success) shows ✓ indicator", () => {
     const detail = "[exit_code=0 — command succeeded; output below is informational]\n[zone-something]";
     const { lastFrame } = render(<CommandTail detail={detail} ok={true} />);
     const frame = lastFrame() ?? "";
-    expect(frame.trim()).toBe("");
+    expect(frame).toContain("✓");
   });
 
-  it("empty detail renders null / no content", () => {
+  it("empty detail shows ✓ indicator", () => {
     const { lastFrame } = render(<CommandTail detail="" ok={true} />);
     const frame = lastFrame() ?? "";
-    expect(frame.trim()).toBe("");
+    expect(frame).toContain("✓");
   });
 
   it("ok=false shows more tail lines than ok=true for same detail", () => {
@@ -66,6 +66,41 @@ describe("TUI.10.J CommandTail", () => {
     expect(frame).toContain("Tests 5 passed");
     expect(frame).not.toContain("[exit_code");
     expect(frame).not.toContain("[zone-");
+  });
+});
+
+describe("TUI.10.J.1 CommandTail exit-status indicator", () => {
+  it("success shows ✓ indicator before tail lines", () => {
+    const detail = "[exit_code=0 — command succeeded]\nsome output line";
+    const { lastFrame } = render(<CommandTail detail={detail} ok={true} />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("✓");
+    expect(frame).toContain("some output line");
+    // indicator appears on earlier line than tail content
+    expect(frame.indexOf("✓")).toBeLessThan(frame.indexOf("some output line"));
+  });
+
+  it("failure shows ✗ exit N indicator with exit code from detail", () => {
+    const detail = "[exit_code=1 — command failed]\nerror: something went wrong";
+    const { lastFrame } = render(<CommandTail detail={detail} ok={false} />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("✗ exit 1");
+    expect(frame).toContain("error: something went wrong");
+  });
+
+  it("silent success (only meta lines) shows ✓ with no tail content", () => {
+    const detail = "[exit_code=0 — command succeeded]";
+    const { lastFrame } = render(<CommandTail detail={detail} ok={true} />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("✓");
+    expect(frame).not.toContain("[exit_code");
+  });
+
+  it("failure with no parseable exit code shows ✗ without number", () => {
+    const { lastFrame } = render(<CommandTail detail="error output" ok={false} />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("✗");
+    expect(frame).not.toContain("exit");
   });
 });
 
