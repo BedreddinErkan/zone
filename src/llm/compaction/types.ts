@@ -33,6 +33,10 @@ export interface CompactionResult {
   manifestStats?: { entries: number; truncated: boolean };
   // J.4 telemetry
   summaryTier?: 1 | 2 | 3;
+  // Compact.2: context-window token estimates (chars/4 heuristic). Populated when compacted === true.
+  tokensBefore?: number;
+  tokensAfter?: number;
+  savedTokens?: number;
 }
 
 /**

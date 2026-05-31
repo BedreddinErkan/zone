@@ -152,7 +152,12 @@ export type ZoneStructuredProgressEvent = {
     /** Phase Z: plan generation summary emitted inline (replaces plan card). */
     | "plan_summary"
     /** Phase D-S1: emitted exactly once when Phase 1 (investigation) hands off to Phase 2 (execution). */
-    | "phase_changed";
+    | "phase_changed"
+    /** Compact.1: compaction lifecycle events. compaction_started is typed but not yet emitted
+     *  (wired in Compact.3 together with the TUI spinner consumer). */
+    | "compaction_started"
+    | "compaction_status"
+    | "compaction_exhausted";
   title: string;
   detail?: string;
   filePath?: string;
@@ -255,6 +260,15 @@ export type ZoneStructuredProgressEvent = {
   /** Phase D-S1: phase_changed event fields. phase=2 means Phase 1 is done, Phase 2 starting. */
   phase?: number;
   remainingTokenBudget?: number;
+  /** Compact.1+2: compaction event fields.
+   *  count: compaction sequence number (1–5).
+   *  message: user-visible reason on compaction_exhausted.
+   *  tokensBefore/tokensAfter/savedTokens: chars/4 context-window estimates on compaction_status. */
+  count?: number;
+  message?: string;
+  tokensBefore?: number;
+  tokensAfter?: number;
+  savedTokens?: number;
   /** Phase L.1: pre-dispatch task classification. Emitted once per dispatch
    *  before the agent loop starts so the UI / telemetry can show the predicted
    *  tier and the classifier's own cost. L.2 will gate tool exposure based on

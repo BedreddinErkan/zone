@@ -5664,19 +5664,22 @@ const initializeTodosFromPlan = (): void => {
         }
         if (e && typeof e === "object" && e.type === "compaction_status") {
           emitStructuredProgress({
-            type: "compaction_status" as any,
+            type: "compaction_status",
             title: "Compacting context",
             status: "active",
-            count: typeof (e as any).count === "number" ? (e as any).count : 0,
-          } as any);
+            count: typeof e.count === "number" ? e.count : 0,
+            tokensBefore: typeof e.tokensBefore === "number" ? e.tokensBefore : undefined,
+            tokensAfter: typeof e.tokensAfter === "number" ? e.tokensAfter : undefined,
+            savedTokens: typeof e.savedTokens === "number" ? e.savedTokens : undefined,
+          });
         }
         if (e && typeof e === "object" && e.type === "compaction_exhausted") {
           emitStructuredProgress({
-            type: "compaction_exhausted" as any,
+            type: "compaction_exhausted",
             title: "Context exhausted",
             status: "warning",
-            message: String((e as any).message || ""),
-          } as any);
+            message: typeof e.message === "string" ? e.message : "",
+          });
         }
         if (e && typeof e === "object" && e.type === "loop_warning_emitted") {
           emitStructuredProgress({

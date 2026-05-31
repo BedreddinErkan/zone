@@ -161,6 +161,9 @@ export class ContextCompactor {
 
     const nextCount = this.compactionCount + 1;
 
+    // Compact.2: snapshot context-window size before compaction (chars/4 heuristic)
+    const tokensBefore = Math.round(JSON.stringify(args.responseInput).length / 4);
+
     // J.3: build deterministic file-read manifest from CANDIDATE reads before summarizing
     const { manifest, truncated: manifestTruncated, entryCount } =
       buildFileReadManifest(args.responseInput, classified);
@@ -210,6 +213,10 @@ export class ContextCompactor {
 
     this.compactionCount += 1;
 
+    // Compact.2: measure post-compaction context size and compute delta
+    const tokensAfter = Math.round(JSON.stringify(newResponseInput).length / 4);
+    const savedTokens = Math.max(0, tokensBefore - tokensAfter);
+
     // J.1/J.2/J.3/J.4 telemetry stats (payload-only; callers can read what they need)
     const summaryTier = (nextCount <= 2 ? 1 : nextCount <= 4 ? 2 : 3) as 1 | 2 | 3;
     const result: CompactionResult = {
@@ -224,6 +231,9 @@ export class ContextCompactor {
       candidatesSummarized: candidates.length,
       manifestStats: { entries: entryCount, truncated: manifestTruncated },
       summaryTier,
+      tokensBefore,
+      tokensAfter,
+      savedTokens,
     };
 
     if (this.compactionCount === this.WARN_AT) {

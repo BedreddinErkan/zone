@@ -3120,6 +3120,9 @@ Example:
         input.onStructuredEvent?.({
           type: "compaction_status",
           count: compactor.getCompactionCount(),
+          tokensBefore: compactionResult.tokensBefore,
+          tokensAfter: compactionResult.tokensAfter,
+          savedTokens: compactionResult.savedTokens,
         });
       }
       if (compactionResult.warning) {

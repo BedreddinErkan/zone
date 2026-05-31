@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { ZoneStructuredProgressEvent } from "../../core/agentLifecycleEvents.js";
 import { ContextCompactor, buildFileReadManifest, MANIFEST_MAX_ENTRIES } from "./ContextCompactor.js";
 import { classifyTurns } from "./classifyTurns.js";
 import {
@@ -1263,5 +1264,64 @@ describe("ManifestInjectionProcessor — [zone-manifest-set-growth] telemetry (P
     expect(payload.addedFiles).toContain("src/new.ts");
     expect(payload.droppedFiles).toContain("src/a-oldest.ts");
     expect(payload.cappedAtMax).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Compact.1 + Compact.2 — event typing + token delta
+// ---------------------------------------------------------------------------
+
+describe("Compact.1 — compaction event types in ZoneStructuredProgressEvent union", () => {
+  it("compaction_status, compaction_exhausted, compaction_started are valid type literals", () => {
+    // These assignments would be TypeScript compile errors if the types were absent.
+    const _s: ZoneStructuredProgressEvent["type"] = "compaction_status";
+    const _e: ZoneStructuredProgressEvent["type"] = "compaction_exhausted";
+    const _b: ZoneStructuredProgressEvent["type"] = "compaction_started";
+    expect(_s).toBe("compaction_status");
+    expect(_e).toBe("compaction_exhausted");
+    expect(_b).toBe("compaction_started");
+  });
+});
+
+describe("Compact.2 — CompactionResult token delta", () => {
+  const history: ChatCompletionMessageParam[] = [
+    { role: "system", content: "sys" },
+    { role: "user", content: "task" },
+    { role: "assistant", content: "cand" },
+    { role: "assistant", content: "last-3" },
+    { role: "user", content: "last-2" },
+    { role: "assistant", content: "last-1" },
+  ];
+
+  it("tokensBefore/tokensAfter/savedTokens present and satisfy the delta formula when compacted", async () => {
+    const c = new ContextCompactor();
+    const result = await c.checkAndMaybeCompact({
+      responseInput: history,
+      toolCallLog: [],
+      currentUsage: 700_000,
+      effectiveCap: 800_000,
+      client: stubClient,
+    });
+    expect(result.compacted).toBe(true);
+    expect(typeof result.tokensBefore).toBe("number");
+    expect(typeof result.tokensAfter).toBe("number");
+    expect(typeof result.savedTokens).toBe("number");
+    expect(result.tokensBefore!).toBeGreaterThan(0);
+    expect(result.tokensAfter!).toBeGreaterThan(0);
+    expect(result.savedTokens).toBe(Math.max(0, result.tokensBefore! - result.tokensAfter!));
+  });
+
+  it("token fields absent when compaction does not fire (under_threshold)", async () => {
+    const c = new ContextCompactor();
+    const result = await c.checkAndMaybeCompact({
+      responseInput: [],
+      toolCallLog: [],
+      currentUsage: 100_000,
+      effectiveCap: 800_000,
+    });
+    expect(result.compacted).toBe(false);
+    expect(result.tokensBefore).toBeUndefined();
+    expect(result.tokensAfter).toBeUndefined();
+    expect(result.savedTokens).toBeUndefined();
   });
 });
