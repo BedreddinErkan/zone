@@ -98,8 +98,8 @@ async function compactorWithCount(n: number): Promise<ContextCompactor> {
     await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
-      currentUsage: 800_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 160_000,
+      contextWindowLimit: 200_000,
       client: stubClient,
     });
   }
@@ -116,8 +116,8 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
     const result = await c.checkAndMaybeCompact({
       responseInput: [],
       toolCallLog: [],
-      currentUsage: 500_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 10_000,
+      contextWindowLimit: 200_000,
     });
     expect(result.compacted).toBe(false);
     expect(result.reason).toBe("under_threshold");
@@ -135,8 +135,8 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
     const result = await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
-      currentUsage: 700_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 160_000,
+      contextWindowLimit: 200_000,
     });
     expect(result.compacted).toBe(false);
     expect(result.reason).toBe("no_candidates");
@@ -156,13 +156,30 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
     const result = await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
-      currentUsage: 700_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 160_000,
+      contextWindowLimit: 200_000,
       client: stubClient,
     });
     expect(result.compacted).toBe(true);
     expect(result.reason).toBe("compacted");
     expect(result.warning).toBeUndefined();
+  });
+
+  it("Compact.0: triggers when responseInput chars/4 >= contextWindow × threshold", async () => {
+    const c = new ContextCompactor();
+    const history = makeHistory(["system", "user", "assistant", "tool",
+                                  "assistant", "tool", "assistant"]);
+    const size = Math.round(JSON.stringify(history).length / 4);
+    // Set limit so size is just above 75%: limit = floor(size / 0.76)
+    const contextWindowLimit = Math.floor(size / 0.76);
+    const result = await c.checkAndMaybeCompact({
+      responseInput: history,
+      toolCallLog: [],
+      currentContextTokens: size,
+      contextWindowLimit,
+      client: stubClient,
+    });
+    expect(result.compacted).toBe(true);
   });
 
   it("emits warning string on 3rd compaction", async () => {
@@ -179,8 +196,8 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
     const result = await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
-      currentUsage: 800_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 160_000,
+      contextWindowLimit: 200_000,
       client: stubClient,
     });
     expect(result.compacted).toBe(true);
@@ -201,8 +218,8 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
       await c.checkAndMaybeCompact({
         responseInput: history,
         toolCallLog: [],
-        currentUsage: 800_000,
-        effectiveCap: 800_000,
+        currentContextTokens: 160_000,
+        contextWindowLimit: 200_000,
         client: stubClient,
       });
     }).rejects.toThrow(CompactionExhaustedError);
@@ -492,8 +509,8 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
     const result = await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
-      currentUsage: 700_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 160_000,
+      contextWindowLimit: 200_000,
       client: stubClient,
     });
 
@@ -526,8 +543,8 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
     await c.checkAndMaybeCompact({
       responseInput: [],
       toolCallLog: [],
-      currentUsage: 100_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 10_000,
+      contextWindowLimit: 200_000,
     });
     expect(c.getCompactionCount()).toBe(0);
 
@@ -542,8 +559,8 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
     await c.checkAndMaybeCompact({
       responseInput: allVerbatim,
       toolCallLog: [],
-      currentUsage: 700_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 160_000,
+      contextWindowLimit: 200_000,
     });
     expect(c.getCompactionCount()).toBe(0);
 
@@ -559,8 +576,8 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
     await c.checkAndMaybeCompact({
       responseInput: withCandidates,
       toolCallLog: [],
-      currentUsage: 700_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 160_000,
+      contextWindowLimit: 200_000,
       client: stubClient,
     });
     expect(c.getCompactionCount()).toBe(1);
@@ -580,8 +597,8 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
       const result = await c.checkAndMaybeCompact({
         responseInput: [...history],
         toolCallLog: [],
-        currentUsage: 700_000,
-        effectiveCap: 800_000,
+        currentContextTokens: 160_000,
+        contextWindowLimit: 200_000,
         client: stubClient,
       });
       const syntheticTurn = result.newResponseInput?.find(
@@ -607,8 +624,8 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
       const result = await c.checkAndMaybeCompact({
         responseInput: [...history],
         toolCallLog: [],
-        currentUsage: 700_000,
-        effectiveCap: 800_000,
+        currentContextTokens: 160_000,
+        contextWindowLimit: 200_000,
         client: stubClient,
       });
       const syntheticTurn = result.newResponseInput?.find(
@@ -638,8 +655,8 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
     const result = await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
-      currentUsage: 700_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 160_000,
+      contextWindowLimit: 200_000,
       client: stubClient,
     });
 
@@ -789,8 +806,8 @@ describe("Phase J.3 — buildFileReadManifest", () => {
     const result = await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
-      currentUsage: 700_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 160_000,
+      contextWindowLimit: 200_000,
       client: stubClient,
     });
     expect(result.compacted).toBe(true);
@@ -819,8 +836,8 @@ describe("Phase J.3 — buildFileReadManifest", () => {
     const result = await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
-      currentUsage: 700_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 160_000,
+      contextWindowLimit: 200_000,
       client: stubClient,
     });
     expect(result.manifestStats?.entries).toBe(1);
@@ -879,8 +896,8 @@ describe("Phase J.4 — Tiered summary prompts", () => {
     await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
-      currentUsage: 700_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 160_000,
+      contextWindowLimit: 200_000,
       client: stubClient,
     });
     // Verify summarize was called with compactionDepth: 1 (first compaction)
@@ -903,8 +920,8 @@ describe("Phase J.4 — Tiered summary prompts", () => {
     const result = await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
-      currentUsage: 700_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 160_000,
+      contextWindowLimit: 200_000,
       client: stubClient,
     });
     expect(result.summaryTier).toBe(1);
@@ -1298,8 +1315,8 @@ describe("Compact.2 — CompactionResult token delta", () => {
     const result = await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
-      currentUsage: 700_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 160_000,
+      contextWindowLimit: 200_000,
       client: stubClient,
     });
     expect(result.compacted).toBe(true);
@@ -1316,8 +1333,8 @@ describe("Compact.2 — CompactionResult token delta", () => {
     const result = await c.checkAndMaybeCompact({
       responseInput: [],
       toolCallLog: [],
-      currentUsage: 100_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 10_000,
+      contextWindowLimit: 200_000,
     });
     expect(result.compacted).toBe(false);
     expect(result.tokensBefore).toBeUndefined();
@@ -1342,8 +1359,8 @@ describe("Compact.3-A — onCompactionStarted callback", () => {
     const result = await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
-      currentUsage: 800_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 160_000,
+      contextWindowLimit: 200_000,
       client: stubClient,
       onCompactionStarted: (count) => { calls.push(count); },
     });
@@ -1369,8 +1386,8 @@ describe("Compact.3-C — ZONE_COMPACTION_TEST_RATIO threshold override", () => 
     const result = await c.checkAndMaybeCompact({
       responseInput: history,
       toolCallLog: [],
-      currentUsage: 480_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 120_000,
+      contextWindowLimit: 200_000,
       client: stubClient,
     });
     vi.unstubAllEnvs();
@@ -1384,8 +1401,8 @@ describe("Compact.3-C — ZONE_COMPACTION_TEST_RATIO threshold override", () => 
     const result = await c.checkAndMaybeCompact({
       responseInput: [],
       toolCallLog: [],
-      currentUsage: 480_000,
-      effectiveCap: 800_000,
+      currentContextTokens: 120_000,
+      contextWindowLimit: 200_000,
     });
     vi.unstubAllEnvs();
     expect(result.compacted).toBe(false);

@@ -77,3 +77,35 @@ export function getDefaultModelForTier(
   if (recommended) return recommended.id;
   return catalog[0]?.id ?? "";
 }
+
+export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  // Anthropic — Claude 4.x: all 1M context windows
+  "claude-opus-4-8":   1_000_000,
+  "claude-opus-4-7":   1_000_000,
+  "claude-sonnet-4-6": 1_000_000,
+  "claude-sonnet-4-5": 1_000_000,
+  "claude-haiku-4-5":    200_000,
+  // OpenAI — 128k conservative for GPT-5.x; exact values vary by release
+  "gpt-5.4":             128_000,
+  "gpt-5.4-mini":        128_000,
+  "gpt-5.5":             128_000,
+  "gpt-5.4-nano":        128_000,
+  "gpt-4o":              128_000,
+  "gpt-4o-mini":         128_000,
+  // Gemini
+  "gemini-3.5-flash":  1_000_000,
+  "gemini-3.1-pro":    2_000_000,
+};
+
+/** Returns the model's context-window limit in tokens (chars/4 heuristic scale).
+ *  Exact match first; then longest-prefix match (handles snapshot-suffixed IDs like
+ *  "claude-sonnet-4-6-20260219"); falls back to 200k — conservative, never silently
+ *  disables compaction. */
+export function getContextWindow(modelId: string): number {
+  if (modelId in MODEL_CONTEXT_WINDOWS) return MODEL_CONTEXT_WINDOWS[modelId];
+  let best = "";
+  for (const key of Object.keys(MODEL_CONTEXT_WINDOWS)) {
+    if (modelId.startsWith(key) && key.length > best.length) best = key;
+  }
+  return best ? MODEL_CONTEXT_WINDOWS[best] : 200_000;
+}

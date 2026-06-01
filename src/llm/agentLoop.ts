@@ -55,6 +55,7 @@ import type {
 } from "openai/resources/chat/completions";
 import type { Mode } from "../types/mode.js";
 import { ContextCompactor } from "./compaction/ContextCompactor.js";
+import { getContextWindow } from "./models.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
 import { hashToolCall, createDetectorState, recordAndDetect } from "./loopDetector.js";
 import { UpstreamUnavailableError } from "./withExponentialBackoff.js";
@@ -3088,11 +3089,14 @@ Example:
       // P.2/P.3: compaction check with graceful exhausted exit.
       let compactionResult: CompactionResult;
       try {
+        // Compact.0: trigger on context-window fullness, not cumulative billing
+        const currentContextTokens = Math.round(JSON.stringify(responseInput).length / 4);
+        const contextWindowLimit = getContextWindow(modelName);
         compactionResult = await compactor.checkAndMaybeCompact({
           responseInput,
           toolCallLog,
-          currentUsage: budget.cumulativeTokens,
-          effectiveCap: effectiveTokenBudgetCap,
+          currentContextTokens,
+          contextWindowLimit,
           client,
           runId: input.runId,
           onCompactionStarted: (count) =>

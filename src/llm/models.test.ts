@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MODEL_CATALOG, isValidModelId, getDefaultModelForTier } from "./models.js";
+import { MODEL_CATALOG, isValidModelId, getDefaultModelForTier, MODEL_CONTEXT_WINDOWS, getContextWindow } from "./models.js";
 
 describe("MODEL_CATALOG", () => {
   it("gpt-4o-mini has workerSuitable: false", () => {
@@ -47,5 +47,38 @@ describe("MODEL_CATALOG", () => {
     expect(getDefaultModelForTier("openai", "standard")).toBe("gpt-5.4-mini");
     expect(getDefaultModelForTier("anthropic", "high")).toBe("claude-sonnet-4-6");
     expect(getDefaultModelForTier("anthropic", "standard")).toBe("claude-haiku-4-5");
+  });
+});
+
+describe("getContextWindow + MODEL_CONTEXT_WINDOWS", () => {
+  it("returns correct window for known Claude models", () => {
+    expect(getContextWindow("claude-opus-4-8")).toBe(1_000_000);
+    expect(getContextWindow("claude-opus-4-7")).toBe(1_000_000);
+    expect(getContextWindow("claude-sonnet-4-6")).toBe(1_000_000);
+    expect(getContextWindow("claude-haiku-4-5")).toBe(200_000);
+  });
+
+  it("returns correct window for known OpenAI + Gemini models", () => {
+    expect(getContextWindow("gpt-4o")).toBe(128_000);
+    expect(getContextWindow("gpt-4o-mini")).toBe(128_000);
+    expect(getContextWindow("gemini-3.5-flash")).toBe(1_000_000);
+    expect(getContextWindow("gemini-3.1-pro")).toBe(2_000_000);
+  });
+
+  it("snapshot-suffix tolerant: resolves via longest-prefix match", () => {
+    expect(getContextWindow("claude-sonnet-4-6-20260219")).toBe(1_000_000);
+    expect(getContextWindow("claude-haiku-4-5-20251001")).toBe(200_000);
+    expect(getContextWindow("gpt-4o-20260101")).toBe(128_000);
+  });
+
+  it("unknown model falls back to conservative 200k default", () => {
+    expect(getContextWindow("unknown-model-xyz")).toBe(200_000);
+    expect(getContextWindow("")).toBe(200_000);
+  });
+
+  it("every model in MODEL_CATALOG has an entry in MODEL_CONTEXT_WINDOWS", () => {
+    const allModelIds = Object.values(MODEL_CATALOG).flat().map((m) => m.id);
+    const missing = allModelIds.filter((id) => !(id in MODEL_CONTEXT_WINDOWS));
+    expect(missing).toEqual([]);
   });
 });

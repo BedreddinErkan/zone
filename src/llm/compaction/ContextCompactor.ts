@@ -139,13 +139,15 @@ export class ContextCompactor {
   async checkAndMaybeCompact(args: {
     responseInput: ChatCompletionMessageParam[];
     toolCallLog: Array<ToolCallRecord>;
-    currentUsage: number;
-    effectiveCap: number;
+    /** chars/4 estimate of the current responseInput size — NOT cumulative billing tokens. */
+    currentContextTokens: number;
+    /** Model's context-window limit in tokens (NOT the tier billing cap). */
+    contextWindowLimit: number;
     client?: LLMClient;
     runId?: string | undefined;
     onCompactionStarted?: (count: number) => void;
   }): Promise<CompactionResult> {
-    if (args.currentUsage < args.effectiveCap * this.THRESHOLD_RATIO) {
+    if (args.currentContextTokens < args.contextWindowLimit * this.THRESHOLD_RATIO) {
       return { compacted: false, reason: "under_threshold" };
     }
 
