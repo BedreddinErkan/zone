@@ -5689,6 +5689,13 @@ const initializeTodosFromPlan = (): void => {
             message: typeof e.message === "string" ? e.message : "",
           });
         }
+        if (e && typeof e === "object" && e.type === "compaction_overflow_warning") {
+          emitStructuredProgress({
+            type: "compaction_overflow_warning",
+            title: "Context window full — no compactable history",
+            status: "warning",
+          });
+        }
         if (e && typeof e === "object" && e.type === "loop_warning_emitted") {
           emitStructuredProgress({
             type: "loop_warning_emitted",

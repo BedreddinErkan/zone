@@ -37,6 +37,11 @@ const stubClient: LLMClient = {
   createEmbedding: vi.fn(),
 };
 
+// candidateTokens must be >= 4500 to pass the Compact.0.1 skip-guard:
+// projectedSavings = candidateTokens - SUMMARY_OUTPUT_BUDGET(1500) >= MIN_MEANINGFUL_SAVINGS(3000)
+// 20k chars / 4 = 5000 tok → 5000 - 1500 = 3500 >= 3000 ✓
+const BIG_CANDIDATE = "x".repeat(20_000);
+
 function makeHistory(roles: string[]): ChatCompletionMessageParam[] {
   return roles.map((role) => {
     if (role === "system") return { role: "system", content: "sys" };
@@ -88,8 +93,8 @@ async function compactorWithCount(n: number): Promise<ContextCompactor> {
   const history: ChatCompletionMessageParam[] = [
     { role: "system", content: "sys" },
     { role: "user", content: "task" },
-    { role: "assistant", content: "a1" },
-    { role: "assistant", content: "a2" },
+    { role: "assistant", content: BIG_CANDIDATE },  // candidate — must pass Compact.0.1 skip-guard
+    { role: "assistant", content: BIG_CANDIDATE },  // candidate
     { role: "assistant", content: "a3" },
     { role: "assistant", content: "a4" },
     { role: "assistant", content: "a5" },
@@ -147,8 +152,8 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
-      { role: "assistant", content: "candidate-1" },
-      { role: "assistant", content: "candidate-2" },
+      { role: "assistant", content: BIG_CANDIDATE },
+      { role: "assistant", content: BIG_CANDIDATE },
       { role: "assistant", content: "last-3" },
       { role: "user", content: "last-2" },
       { role: "assistant", content: "last-1" },
@@ -167,8 +172,15 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
 
   it("Compact.0: triggers when responseInput chars/4 >= contextWindow × threshold", async () => {
     const c = new ContextCompactor();
-    const history = makeHistory(["system", "user", "assistant", "tool",
-                                  "assistant", "tool", "assistant"]);
+    // Large candidate so the skip-guard (Compact.0.1) also passes
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: BIG_CANDIDATE },  // candidate
+      { role: "assistant", content: "last-3" },
+      { role: "user", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
     const size = Math.round(JSON.stringify(history).length / 4);
     // Set limit so size is just above 75%: limit = floor(size / 0.76)
     const contextWindowLimit = Math.floor(size / 0.76);
@@ -187,8 +199,8 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
-      { role: "assistant", content: "c1" },
-      { role: "assistant", content: "c2" },
+      { role: "assistant", content: BIG_CANDIDATE },
+      { role: "assistant", content: BIG_CANDIDATE },
       { role: "assistant", content: "c3" },
       { role: "assistant", content: "last-2" },
       { role: "assistant", content: "last-1" },
@@ -223,6 +235,117 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
         client: stubClient,
       });
     }).rejects.toThrow(CompactionExhaustedError);
+  });
+
+  // Compact.0.1: candidate-mass skip-guard tests
+  it("Compact.0.1: returns insufficient_candidate_mass when projected savings too small", async () => {
+    const c = new ContextCompactor();
+    // One tiny candidate (falls outside recency window of last 3) — too small to save after
+    // SUMMARY_OUTPUT_BUDGET=1500 tok headroom; trigger fires but skip-guard returns early.
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: "tiny-candidate" },  // CANDIDATE — small → skip-guard fires
+      { role: "assistant", content: "last-3" },
+      { role: "user", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
+    const size = Math.round(JSON.stringify(history).length / 4);
+    // Put context at 80% full so threshold fires
+    const contextWindowLimit = Math.floor(size / 0.81);
+    const result = await c.checkAndMaybeCompact({
+      responseInput: history,
+      toolCallLog: [],
+      currentContextTokens: size,
+      contextWindowLimit,
+      client: stubClient,
+    });
+    expect(result.compacted).toBe(false);
+    expect(result.reason).toBe("insufficient_candidate_mass");
+  });
+
+  it("Compact.0.1: compactionCount NOT bumped on skip", async () => {
+    const c = new ContextCompactor();
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: "a1" },
+      { role: "assistant", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
+    const size = Math.round(JSON.stringify(history).length / 4);
+    const contextWindowLimit = Math.floor(size / 0.81);
+    await c.checkAndMaybeCompact({ responseInput: history, toolCallLog: [], currentContextTokens: size, contextWindowLimit, client: stubClient });
+    await c.checkAndMaybeCompact({ responseInput: history, toolCallLog: [], currentContextTokens: size, contextWindowLimit, client: stubClient });
+    expect(c.getCompactionCount()).toBe(0);
+  });
+
+  it("Compact.0.1: summarize spy NOT called on skip", async () => {
+    const c = new ContextCompactor();
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: "a1" },
+      { role: "assistant", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
+    const size = Math.round(JSON.stringify(history).length / 4);
+    const contextWindowLimit = Math.floor(size / 0.81);
+    await c.checkAndMaybeCompact({ responseInput: history, toolCallLog: [], currentContextTokens: size, contextWindowLimit, client: stubClient });
+    expect(vi.mocked(summarize)).not.toHaveBeenCalled();
+  });
+
+  it("Compact.0.1: real-mass candidates still compact normally", async () => {
+    const c = new ContextCompactor();
+    // Pad candidate messages so candidateTokens > SUMMARY_OUTPUT_BUDGET(1500) + MIN_MEANINGFUL_SAVINGS(3000).
+    // Need >4500 tok = >18000 chars of candidate content.
+    const bigContent = "x".repeat(20000);
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: bigContent },  // candidate
+      { role: "assistant", content: "last-3" },
+      { role: "user", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
+    const size = Math.round(JSON.stringify(history).length / 4);
+    const contextWindowLimit = Math.floor(size / 0.81);
+    const result = await c.checkAndMaybeCompact({
+      responseInput: history,
+      toolCallLog: [],
+      currentContextTokens: size,
+      contextWindowLimit,
+      client: stubClient,
+    });
+    expect(result.compacted).toBe(true);
+  });
+
+  it("Compact.0.1: overflow warning fires exactly once across repeated skips", async () => {
+    const c = new ContextCompactor();
+    // One tiny candidate so skip-guard fires; context at or above limit so overflow triggers.
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: "tiny-candidate" },  // CANDIDATE — small → skip-guard fires
+      { role: "assistant", content: "last-3" },
+      { role: "user", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
+    const size = Math.round(JSON.stringify(history).length / 4);
+    // currentContextTokens >= contextWindowLimit triggers the overflow-warning branch
+    const contextWindowLimit = size - 1;
+    const onOverflowWarning = vi.fn();
+    for (let i = 0; i < 3; i++) {
+      await c.checkAndMaybeCompact({
+        responseInput: history,
+        toolCallLog: [],
+        currentContextTokens: size,
+        contextWindowLimit,
+        client: stubClient,
+        onOverflowWarning,
+      });
+    }
+    expect(onOverflowWarning).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -498,8 +621,8 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
-      { role: "assistant", content: "cand1" },
-      { role: "assistant", content: "cand2" },
+      { role: "assistant", content: BIG_CANDIDATE },
+      { role: "assistant", content: BIG_CANDIDATE },
       { role: "assistant", content: "recency-3" },
       { role: "user", content: "recency-2" },
       { role: "assistant", content: "recency-1" },
@@ -568,7 +691,7 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
     const withCandidates: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
-      { role: "assistant", content: "cand" },
+      { role: "assistant", content: BIG_CANDIDATE },
       { role: "assistant", content: "last-3" },
       { role: "user", content: "last-2" },
       { role: "assistant", content: "last-1" },
@@ -587,7 +710,7 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
-      { role: "assistant", content: "cand" },
+      { role: "assistant", content: BIG_CANDIDATE },
       { role: "assistant", content: "last-3" },
       { role: "user", content: "last-2" },
       { role: "assistant", content: "last-1" },
@@ -614,7 +737,7 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
-      { role: "assistant", content: "cand" },
+      { role: "assistant", content: BIG_CANDIDATE },
       { role: "assistant", content: "last-3" },
       { role: "user", content: "last-2" },
       { role: "assistant", content: "last-1" },
@@ -645,7 +768,7 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
-      { role: "assistant", content: "cand" },
+      { role: "assistant", content: BIG_CANDIDATE },
       { role: "assistant", content: "last-3" },
       { role: "user", content: "last-2" },
       { role: "assistant", content: "last-1" },
@@ -797,7 +920,8 @@ describe("Phase J.3 — buildFileReadManifest", () => {
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
-      ...readTurns,                          // 2,3 — CANDIDATE read_file pair
+      { role: "assistant", content: BIG_CANDIDATE },  // ensure skip-guard passes
+      ...readTurns,                          // CANDIDATE read_file pair
       { role: "assistant", content: "last-3" },
       { role: "user", content: "last-2" },
       { role: "assistant", content: "last-1" },
@@ -827,6 +951,7 @@ describe("Phase J.3 — buildFileReadManifest", () => {
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
+      { role: "assistant", content: BIG_CANDIDATE },  // ensure skip-guard passes
       ...readTurns,
       { role: "assistant", content: "last-3" },
       { role: "user", content: "last-2" },
@@ -887,7 +1012,7 @@ describe("Phase J.4 — Tiered summary prompts", () => {
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
-      { role: "assistant", content: "cand" },
+      { role: "assistant", content: BIG_CANDIDATE },
       { role: "assistant", content: "last-3" },
       { role: "user", content: "last-2" },
       { role: "assistant", content: "last-1" },
@@ -910,7 +1035,7 @@ describe("Phase J.4 — Tiered summary prompts", () => {
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
-      { role: "assistant", content: "cand" },
+      { role: "assistant", content: BIG_CANDIDATE },
       { role: "assistant", content: "last-3" },
       { role: "user", content: "last-2" },
       { role: "assistant", content: "last-1" },
@@ -1304,7 +1429,7 @@ describe("Compact.2 — CompactionResult token delta", () => {
   const history: ChatCompletionMessageParam[] = [
     { role: "system", content: "sys" },
     { role: "user", content: "task" },
-    { role: "assistant", content: "cand" },
+    { role: "assistant", content: BIG_CANDIDATE },
     { role: "assistant", content: "last-3" },
     { role: "user", content: "last-2" },
     { role: "assistant", content: "last-1" },
@@ -1349,8 +1474,8 @@ describe("Compact.3-A — onCompactionStarted callback", () => {
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
-      { role: "assistant", content: "a1" },
-      { role: "assistant", content: "a2" },
+      { role: "assistant", content: BIG_CANDIDATE },
+      { role: "assistant", content: BIG_CANDIDATE },
       { role: "assistant", content: "a3" },
       { role: "assistant", content: "a4" },
       { role: "assistant", content: "a5" },
@@ -1376,8 +1501,8 @@ describe("Compact.3-C — ZONE_COMPACTION_TEST_RATIO threshold override", () => 
     const history: ChatCompletionMessageParam[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "task" },
-      { role: "assistant", content: "a1" },
-      { role: "assistant", content: "a2" },
+      { role: "assistant", content: BIG_CANDIDATE },
+      { role: "assistant", content: BIG_CANDIDATE },
       { role: "assistant", content: "a3" },
       { role: "assistant", content: "a4" },
       { role: "assistant", content: "a5" },

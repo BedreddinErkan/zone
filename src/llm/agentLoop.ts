@@ -3101,6 +3101,8 @@ Example:
           runId: input.runId,
           onCompactionStarted: (count) =>
             input.onStructuredEvent?.({ type: "compaction_started", count }),
+          onOverflowWarning: () =>
+            input.onStructuredEvent?.({ type: "compaction_overflow_warning" }),
         });
       } catch (err) {
         if (err instanceof CompactionExhaustedError) {

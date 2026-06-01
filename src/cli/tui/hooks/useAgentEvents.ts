@@ -57,6 +57,21 @@ export function handleCompactionExhausted(
   });
 }
 
+export function handleCompactionOverflow(
+  _evt: unknown,
+  dispatch: Dispatch<StoreAction>
+): void {
+  dispatch({ type: "SPINNER_STOP" });
+  dispatch({
+    type: "TOAST_PUSH",
+    entry: {
+      id: randomUUID(),
+      message: "Context window full — no history to compact",
+      level: "warning",
+    },
+  });
+}
+
 function flushBuffer(
   localBuffer: MutableRefObject<string>,
   debounceTimer: MutableRefObject<ReturnType<typeof setTimeout> | null>,
@@ -273,9 +288,11 @@ export function useAgentEvents(
     const onStarted   = (evt: ZoneStructuredProgressEvent) => handleCompactionStarted(evt, dispatch);
     const onStatus    = (evt: ZoneStructuredProgressEvent) => handleCompactionStatus(evt, dispatch);
     const onExhausted = (evt: ZoneStructuredProgressEvent) => handleCompactionExhausted(evt, dispatch);
-    bus.on("compaction_started",  onStarted);
-    bus.on("compaction_status",   onStatus);
-    bus.on("compaction_exhausted", onExhausted);
+    const onOverflow  = (evt: unknown) => handleCompactionOverflow(evt, dispatch);
+    bus.on("compaction_started",          onStarted);
+    bus.on("compaction_status",           onStatus);
+    bus.on("compaction_exhausted",        onExhausted);
+    bus.on("compaction_overflow_warning", onOverflow);
 
     return () => {
       if (debounceTimer.current !== null) {
@@ -308,9 +325,10 @@ export function useAgentEvents(
       bus.off("loop_detected_terminal", handleLoopDetected);
       bus.off("command_approval_required", handleCommandApproval);
       bus.off("scope_revision_proposed", handleRevisionProposed);
-      bus.off("compaction_started",  onStarted);
-      bus.off("compaction_status",   onStatus);
-      bus.off("compaction_exhausted", onExhausted);
+      bus.off("compaction_started",          onStarted);
+      bus.off("compaction_status",           onStatus);
+      bus.off("compaction_exhausted",        onExhausted);
+      bus.off("compaction_overflow_warning", onOverflow);
     };
   }, [bus, dispatch]);
 }

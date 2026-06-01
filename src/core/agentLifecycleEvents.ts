@@ -157,7 +157,8 @@ export type ZoneStructuredProgressEvent = {
      *  (wired in Compact.3 together with the TUI spinner consumer). */
     | "compaction_started"
     | "compaction_status"
-    | "compaction_exhausted";
+    | "compaction_exhausted"
+    | "compaction_overflow_warning";
   title: string;
   detail?: string;
   filePath?: string;

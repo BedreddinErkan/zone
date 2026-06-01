@@ -18,7 +18,7 @@ export interface ClassifiedTurn {
 export interface CompactionResult {
   compacted: boolean;
   reason?: "under_threshold" | "no_candidates" | "compacted"
-         | "exhausted" | "summarizer_failed";
+         | "exhausted" | "summarizer_failed" | "insufficient_candidate_mass";
   warning?: string;
   /** Populated when compacted === true: replacement for responseInput after compaction. */
   newResponseInput?: ChatCompletionMessageParam[];

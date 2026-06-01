@@ -6,6 +6,7 @@ import {
   handleCompactionStarted,
   handleCompactionStatus,
   handleCompactionExhausted,
+  handleCompactionOverflow,
 } from "./useAgentEvents.js";
 
 function capture(): { calls: StoreAction[]; dispatch: (a: StoreAction) => void } {
@@ -63,6 +64,19 @@ describe("Compact.3: handlers", () => {
       type: "TOAST_PUSH",
       entry: {
         message: "Context exhausted. Break this task into subtasks.",
+        level: "warning",
+      },
+    });
+  });
+
+  it("handleCompactionOverflow dispatches SPINNER_STOP + TOAST_PUSH(warning)", () => {
+    const { calls, dispatch } = capture();
+    handleCompactionOverflow({}, dispatch);
+    expect(calls[0]).toEqual({ type: "SPINNER_STOP" });
+    expect(calls[1]).toMatchObject({
+      type: "TOAST_PUSH",
+      entry: {
+        message: "Context window full — no history to compact",
         level: "warning",
       },
     });

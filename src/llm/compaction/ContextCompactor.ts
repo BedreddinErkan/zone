@@ -125,6 +125,7 @@ export class ContextCompactor {
   private compactionCount = 0;
   private readonly MAX_COMPACTIONS = 5;
   private readonly WARN_AT = 3;
+  private _overflowWarnEmitted = false;
   private get THRESHOLD_RATIO(): number {
     const raw = process.env["ZONE_COMPACTION_TEST_RATIO"];
     if (raw === undefined) return 0.75;
@@ -146,6 +147,8 @@ export class ContextCompactor {
     client?: LLMClient;
     runId?: string | undefined;
     onCompactionStarted?: (count: number) => void;
+    /** Called once per run when context is full but no candidate history is worth compacting. */
+    onOverflowWarning?: () => void;
   }): Promise<CompactionResult> {
     if (args.currentContextTokens < args.contextWindowLimit * this.THRESHOLD_RATIO) {
       return { compacted: false, reason: "under_threshold" };
@@ -161,6 +164,29 @@ export class ContextCompactor {
     const candidates = classified.filter((c) => c.class === TurnClass.CANDIDATE);
     if (candidates.length === 0) {
       return { compacted: false, reason: "no_candidates" };
+    }
+
+    // Compact.0.1: skip-guard — don't call summarize() if projected savings are negligible.
+    // projectedSavings = candidateTokens minus a conservative summary output budget (1500 tok).
+    // If net savings < MIN_MEANINGFUL_SAVINGS (3000 tok), return without bumping compactionCount,
+    // avoiding −0% receipts and the loop-to-exhaust spiral.
+    const candidateChars = candidates.reduce(
+      (sum, c) => sum + JSON.stringify(args.responseInput[c.index]).length,
+      0
+    );
+    const candidateTokens = Math.round(candidateChars / 4);
+    const SUMMARY_OUTPUT_BUDGET = 1500;
+    const MIN_MEANINGFUL_SAVINGS = 3000;
+    const projectedSavings = candidateTokens - SUMMARY_OUTPUT_BUDGET;
+    if (projectedSavings < MIN_MEANINGFUL_SAVINGS) {
+      console.log(
+        `[zone-compaction-skipped] candidateTokens=${candidateTokens} projectedSavings=${projectedSavings}`
+      );
+      if (!this._overflowWarnEmitted && args.currentContextTokens >= args.contextWindowLimit) {
+        this._overflowWarnEmitted = true;
+        args.onOverflowWarning?.();
+      }
+      return { compacted: false, reason: "insufficient_candidate_mass" };
     }
 
     if (!args.client) {
