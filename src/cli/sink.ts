@@ -101,7 +101,17 @@ export function buildCliSink(opts: CliSinkOptions, spinner: Spinner): CliSink {
         ]
           .filter(Boolean)
           .join(" / ");
-        spinner.succeed(summary ? `Done — ${summary}` : "Done");
+
+        const detail = (evt as { detail?: string }).detail ?? "";
+        if (detail.trim()) {
+          process.stdout.write(detail.trim() + "\n");
+        }
+
+        if (quiet) {
+          if (summary) process.stderr.write(`Done — ${summary}\n`);
+        } else {
+          spinner.succeed(summary ? `Done — ${summary}` : "Done");
+        }
         break;
       }
 

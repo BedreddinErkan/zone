@@ -13,6 +13,7 @@ import { generateExecutionPlan } from "../llm/executionPlan.js";
 import { runAuditPipeline } from "../llm/auditPipeline.js";
 import { readAuditModeSetting } from "../visual/tierSettings.js";
 import { withRequestContext } from "../llm/openaiContext.js";
+import { applyStdoutInterception } from "./tui/stdoutShield.js";
 
 export type TuiMode = "normal" | "autoAccept" | "plan";
 
@@ -143,7 +144,17 @@ export async function runOneShotInner(
   }
 }
 
-function printResult(result: LlmPatchFlowResult, noColor: boolean): void {
+function printResult(result: LlmPatchFlowResult, noColor: boolean, quiet: boolean): void {
+  if (quiet) {
+    if (!("ok" in result && result.ok)) {
+      const reason = ("reason" in result && result.reason) ? `: ${result.reason}` : "";
+      process.stderr.write(`error: task did not complete${reason}\n`);
+    } else if (result.warnings?.length) {
+      for (const w of result.warnings) process.stderr.write(`warning: ${w}\n`);
+    }
+    return;
+  }
+
   const green = noColor ? "" : "\x1b[32m";
   const red = noColor ? "" : "\x1b[31m";
   const dim = noColor ? "" : "\x1b[2m";
@@ -174,10 +185,17 @@ export async function runHeadless(
   headlessOpts: HeadlessOpts = {}
 ): Promise<void> {
   const config = loadCliConfig(flags);
+  const isJson = headlessOpts.outputFormat === "json";
+
+  // Swallow [zone-*] telemetry lines in headless text mode; ZONE_VERBOSE_LOGS=1
+  // reroutes them to stderr instead. JSON mode emits a single envelope — no shield needed.
+  const restoreStdout = isJson ? (): void => {} : applyStdoutInterception();
+  process.once("exit", restoreStdout);
 
   try {
     validateCliConfig(config);
   } catch (err) {
+    restoreStdout();
     process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
     process.exit(1);
   }
@@ -185,8 +203,6 @@ export async function runHeadless(
   const runId = randomUUID();
   const startMs = Date.now();
   let result: LlmPatchFlowResult;
-
-  const isJson = headlessOpts.outputFormat === "json";
 
   try {
     if (isJson) {
@@ -224,7 +240,7 @@ export async function runHeadless(
     };
     process.stdout.write(JSON.stringify(envelope) + "\n");
   } else {
-    printResult(result, config.noColor);
+    printResult(result, config.noColor, config.quiet);
   }
 
   process.exit(success ? 0 : 1);

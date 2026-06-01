@@ -17,7 +17,7 @@ export function applyStdoutInterception(): () => void {
     const s =
       typeof chunk === "string" ? chunk : (chunk as Buffer | null)?.toString?.() ?? "";
     if (TELEMETRY_RE.test(s.trimStart()) || RESULT_LINE_RE.test(s)) {
-      if (process.env.ZONE_TUI_DEBUG === "1") {
+      if (process.env.ZONE_TUI_DEBUG === "1" || process.env.ZONE_VERBOSE_LOGS === "1") {
         return (process.stderr.write as (...args: unknown[]) => boolean)(s, enc, cb);
       }
       if (typeof cb === "function") (cb as () => void)();

@@ -1397,6 +1397,7 @@ export async function run(): Promise<void> {
 
   const options = program.opts<CliOptions>();
 
+  const isHeadless = options.print === true || !process.stdout.isTTY;
   const cliFlags = {
     model: options.model,
     repo: options.repo,
@@ -1404,6 +1405,7 @@ export async function run(): Promise<void> {
     yes: options.yes,
     noRevision: options.noRevision,
     verbose: options.verbose,
+    quiet: isHeadless,
     noColor: options.noColor,
     resume: options.resume as boolean | undefined,
   };
@@ -1418,8 +1420,6 @@ export async function run(): Promise<void> {
     process.stderr.write("error: session resume coming in TUI.6\n");
     process.exit(1);
   }
-
-  const isHeadless = options.print === true || !process.stdout.isTTY;
 
   if (isHeadless) {
     await runHeadless(positionalTask ?? options.task ?? "", cliFlags, { outputFormat });
