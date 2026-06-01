@@ -57,6 +57,7 @@ import type { Mode } from "../types/mode.js";
 import { ContextCompactor } from "./compaction/ContextCompactor.js";
 import { getContextWindow } from "./models.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
+import type { LLMProvider } from "./types.js";
 import { hashToolCall, createDetectorState, recordAndDetect } from "./loopDetector.js";
 import { UpstreamUnavailableError } from "./withExponentialBackoff.js";
 import { emitTokenBreakdown, emitBreakdownSummary, type BreakdownEvent } from "./tokenBreakdown.js";
@@ -149,9 +150,12 @@ export interface AgentLoopInput {
   /**
    * BYOK: user-supplied LLM API key (sent from the browser via X-Zone-LLM-Key header).
    * Takes priority over process.env.OPENAI_API_KEY when present.
-   * Never logged â€” only the source ("user" vs "env") is logged.
+   * Never logged â€” only the source (“user” vs “env”) is logged.
    */
   userApiKey?: string;
+  /** LLM provider to use for this run. When set, passed to createLLMClient so the
+   *  agent loop uses the correct provider instead of relying solely on context. */
+  provider?: LLMProvider;
   /** Tur P2-scope: when present, write tools reject paths outside the
    *  union of plan.steps[*].filesLikely. Forwarded into executeTool. */
   executionPlan?: import("./executionPlan.js").ExecutionPlan | null;
@@ -1933,7 +1937,7 @@ Example:
     },
   ];
 
-  const client = createLLMClient({ apiKey: input.userApiKey });
+  const client = createLLMClient({ apiKey: input.userApiKey, provider: input.provider });
   const requestCtx = getRequestContext();
   const budget = new TokenBudgetMeter({
     baseTokens: cleanTokenNumber(input.tokenBudgetBaseTokens),

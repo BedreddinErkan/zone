@@ -53,9 +53,10 @@ export async function runOneShotInner(
   const progressCallback = opts.onProgress ?? sink.onProgress;
 
   if (opts.mode === "plan") {
-    const planUserApiKey = effectiveConfig.provider === "openai"
-      ? effectiveConfig.openaiApiKey
-      : effectiveConfig.anthropicApiKey;
+    const planUserApiKey =
+      effectiveConfig.provider === "openai"  ? effectiveConfig.openaiApiKey  :
+      effectiveConfig.provider === "gemini"  ? effectiveConfig.geminiApiKey  :
+                                               effectiveConfig.anthropicApiKey;
 
     let preGeneratedPlan: Awaited<ReturnType<typeof generateExecutionPlan>> | undefined;
     try {
@@ -107,12 +108,14 @@ export async function runOneShotInner(
   }
 
   try {
-    const userApiKey = effectiveConfig.provider === "openai"
-      ? effectiveConfig.openaiApiKey
-      : effectiveConfig.anthropicApiKey;
+    const userApiKey =
+      effectiveConfig.provider === "openai"  ? effectiveConfig.openaiApiKey  :
+      effectiveConfig.provider === "gemini"  ? effectiveConfig.geminiApiKey  :
+                                               effectiveConfig.anthropicApiKey;
 
     const result = await withRequestContext(
       {
+        provider: effectiveConfig.provider,
         modelOverride: { high: effectiveConfig.model, standard: effectiveConfig.model },
         effort: effectiveConfig.effort,
       },

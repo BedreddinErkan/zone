@@ -5,12 +5,14 @@ import type { LLMProvider } from "../llm/types.js";
 import type { TaskTier } from "../llm/taskClassifier.js";
 import type { EffortLevel } from "../llm/modelRegistry.js";
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
+import { loadDiskModelSync } from "../api/diskModel.js";
 
 export interface CliConfig {
   model: string;
   provider: LLMProvider;
   anthropicApiKey?: string;
   openaiApiKey?: string;
+  geminiApiKey?: string;
   dailyUsdCap: number;
   repoPath: string;
   forceTier?: TaskTier;
@@ -42,6 +44,7 @@ type ZoneConfigFile = {
   defaultProvider?: string;
   anthropicApiKey?: string;
   openaiApiKey?: string;
+  geminiApiKey?: string;
   dailyUsdCap?: number;
 };
 
@@ -76,19 +79,23 @@ export function loadCliConfig(
   _configFile?: ZoneConfigFile
 ): CliConfig {
   const file = _configFile ?? readZoneConfigFile();
+  const repoPath = flags.repo ?? envStr("ZONE_REPO_PATH") ?? process.cwd();
+  const diskModel = loadDiskModelSync(repoPath);
 
   const model =
     flags.model ??
     envStr("ZONE_MODEL") ??
+    diskModel?.model ??
     file.defaultModel ??
     "claude-sonnet-4-6";
 
   const provider = resolveProvider(
-    flags.provider ?? envStr("ZONE_PROVIDER") ?? file.defaultProvider
+    flags.provider ?? envStr("ZONE_PROVIDER") ?? diskModel?.provider ?? file.defaultProvider
   );
 
   const anthropicApiKey = envStr("ANTHROPIC_API_KEY") ?? file.anthropicApiKey;
   const openaiApiKey = envStr("OPENAI_API_KEY") ?? file.openaiApiKey;
+  const geminiApiKey = envStr("GEMINI_API_KEY") ?? file.geminiApiKey;
 
   const dailyUsdCap = (() => {
     const envRaw = envStr("ZONE_DAILY_USD_CAP");
@@ -96,9 +103,6 @@ export function loadCliConfig(
     const tierOverride = readDailyUsdCapOverride();
     return envVal ?? tierOverride ?? file.dailyUsdCap ?? 10;
   })();
-
-  const repoPath =
-    flags.repo ?? envStr("ZONE_REPO_PATH") ?? process.cwd();
 
   const forceTier = resolveForceTier(
     flags.forceTier ?? envStr("ZONE_FORCE_TIER")
@@ -109,6 +113,7 @@ export function loadCliConfig(
     provider,
     anthropicApiKey,
     openaiApiKey,
+    geminiApiKey,
     dailyUsdCap,
     repoPath,
     forceTier,
@@ -122,10 +127,14 @@ export function loadCliConfig(
 
 export function validateCliConfig(cfg: CliConfig): void {
   const key =
-    cfg.provider === "openai" ? cfg.openaiApiKey : cfg.anthropicApiKey;
+    cfg.provider === "openai"  ? cfg.openaiApiKey  :
+    cfg.provider === "gemini"  ? cfg.geminiApiKey  :
+                                 cfg.anthropicApiKey;
   if (!key) {
     const envVar =
-      cfg.provider === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
+      cfg.provider === "openai"  ? "OPENAI_API_KEY"  :
+      cfg.provider === "gemini"  ? "GEMINI_API_KEY"  :
+                                   "ANTHROPIC_API_KEY";
     throw new Error(
       `No API key found for provider "${cfg.provider}". ` +
         `Set ${envVar} or run "zone login" to configure.`

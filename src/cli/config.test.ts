@@ -1,12 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { loadCliConfig, validateCliConfig } from "./config.js";
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
+import { loadDiskModelSync } from "../api/diskModel.js";
 
 // We inject the configFile directly via the optional _configFile param to
 // avoid mocking the filesystem; env var tests use vi.stubEnv for isolation.
 
 vi.mock("../visual/tierSettings.js", () => ({
   readDailyUsdCapOverride: vi.fn(),
+}));
+
+vi.mock("../api/diskModel.js", () => ({
+  loadDiskModelSync: vi.fn().mockReturnValue(null),
 }));
 
 describe("loadCliConfig — defaults", () => {
@@ -229,5 +234,83 @@ describe("loadCliConfig — tier-limits override (TUI.7.I Phase A)", () => {
     vi.mocked(readDailyUsdCapOverride).mockReturnValue(25);
     const cfg = loadCliConfig({}, {});
     expect(cfg.dailyUsdCap).toBe(30);
+  });
+});
+
+describe("loadCliConfig — per-repo disk model precedence (Bug E fix)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.mocked(loadDiskModelSync).mockReturnValue(null);
+  });
+
+  it("disk model takes precedence over global config file for model and provider", () => {
+    vi.stubEnv("ZONE_GEMINI_ENABLE", "1");
+    vi.mocked(loadDiskModelSync).mockReturnValue({
+      version: 2,
+      model: "gemini-3.5-flash",
+      provider: "gemini",
+      updatedAt: "2026-06-01T00:00:00Z",
+    });
+    const cfg = loadCliConfig({}, { defaultModel: "claude-sonnet-4-6", defaultProvider: "anthropic" });
+    expect(cfg.model).toBe("gemini-3.5-flash");
+    expect(cfg.provider).toBe("gemini");
+  });
+
+  it("env var still beats disk model for model", () => {
+    vi.stubEnv("ZONE_MODEL", "gpt-5.4");
+    vi.mocked(loadDiskModelSync).mockReturnValue({
+      version: 2,
+      model: "gemini-3.5-flash",
+      provider: "gemini",
+      updatedAt: "2026-06-01T00:00:00Z",
+    });
+    const cfg = loadCliConfig({}, {});
+    expect(cfg.model).toBe("gpt-5.4");
+  });
+
+  it("GEMINI_API_KEY env var populates geminiApiKey", () => {
+    vi.stubEnv("GEMINI_API_KEY", "gem-test-key");
+    const cfg = loadCliConfig({}, {});
+    expect(cfg.geminiApiKey).toBe("gem-test-key");
+  });
+});
+
+describe("validateCliConfig — gemini provider (Bug E' fix)", () => {
+  it("throws when gemini provider and no geminiApiKey", () => {
+    expect(() =>
+      validateCliConfig({
+        model: "gemini-3.5-flash",
+        provider: "gemini",
+        anthropicApiKey: undefined,
+        openaiApiKey: undefined,
+        geminiApiKey: undefined,
+        dailyUsdCap: 10,
+        repoPath: "/tmp",
+        autoApprove: false,
+        noRevision: false,
+        verbose: false,
+        quiet: false,
+        noColor: false,
+      })
+    ).toThrow("GEMINI_API_KEY");
+  });
+
+  it("does not throw when geminiApiKey is present", () => {
+    expect(() =>
+      validateCliConfig({
+        model: "gemini-3.5-flash",
+        provider: "gemini",
+        anthropicApiKey: undefined,
+        openaiApiKey: undefined,
+        geminiApiKey: "gem-abc",
+        dailyUsdCap: 10,
+        repoPath: "/tmp",
+        autoApprove: false,
+        noRevision: false,
+        verbose: false,
+        quiet: false,
+        noColor: false,
+      })
+    ).not.toThrow();
   });
 });

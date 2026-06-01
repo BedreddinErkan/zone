@@ -5866,6 +5866,7 @@ const initializeTodosFromPlan = (): void => {
       try {
         taskClassification = await classifyTask(input.task, {
           userApiKey: input.userApiKey,
+          provider: input.provider,
           repoRoot: path.resolve(__dirname, "../.."),
         });
       } catch (err) {
@@ -5914,6 +5915,7 @@ const initializeTodosFromPlan = (): void => {
       importContextSummary: _importContextSummary,
       abortSignal: input.abortSignal,
       userApiKey: input.userApiKey,
+      provider: input.provider,
       // Usage-tracker Tur: attribute spend to the requesting user so the
       // Settings → Usage tab can show per-user totals. Falls back to
       // "local-dev" inside agentLoop when missing.

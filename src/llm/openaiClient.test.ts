@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   buildEmptyModelResponseDetailsLine,
   extractResponsesApiOutputText,
   formatResponsesTextExtractionFailure,
   getResponsesApiDiagnosticSnapshot,
+  getModelName,
 } from "./openaiClient.js";
 
 describe("extractResponsesApiOutputText", () => {
@@ -57,6 +58,34 @@ describe("extractResponsesApiOutputText", () => {
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe("incomplete");
+  });
+});
+
+describe("getModelName — gemini branch (Bug A fix)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("returns gemini-3.5-flash for standard tier", () => {
+    expect(getModelName("standard", "gemini", undefined)).toBe("gemini-3.5-flash");
+  });
+
+  it("returns gemini-3.1-pro for high tier", () => {
+    expect(getModelName("high", "gemini", undefined)).toBe("gemini-3.1-pro");
+  });
+
+  it("ZONE_GEMINI_MODEL env var takes precedence over catalog default", () => {
+    vi.stubEnv("ZONE_GEMINI_MODEL", "gemini-custom-model");
+    expect(getModelName("standard", "gemini", undefined)).toBe("gemini-custom-model");
+  });
+
+  it("invalid claude-* override for gemini warns and falls back to catalog default, not gpt-5.4-mini", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = getModelName("standard", "gemini", { standard: "claude-sonnet-4-6" });
+    expect(result).toBe("gemini-3.5-flash");
+    expect(result).not.toBe("gpt-5.4-mini");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ignoring invalid model override"));
+    warnSpy.mockRestore();
   });
 });
 

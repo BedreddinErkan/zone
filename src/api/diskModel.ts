@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 export type EffortLevel = "low" | "medium" | "high";
@@ -27,6 +28,17 @@ export async function loadDiskModel(cwd: string): Promise<DiskModelSettings | nu
     return parsed as DiskModelSettings;
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    return null;
+  }
+}
+
+export function loadDiskModelSync(cwd: string): DiskModelSettings | null {
+  const p = modelPath(cwd);
+  try {
+    const parsed = JSON.parse(readFileSync(p, "utf-8")) as { version?: unknown };
+    if (parsed.version !== 2) return null;
+    return parsed as DiskModelSettings;
+  } catch {
     return null;
   }
 }

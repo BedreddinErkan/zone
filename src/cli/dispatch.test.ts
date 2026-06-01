@@ -51,6 +51,7 @@ const BASE_CONFIG = {
   provider: "anthropic" as const,
   anthropicApiKey: "sk-ant-test",
   openaiApiKey: undefined,
+  geminiApiKey: undefined,
   dailyUsdCap: 10,
   repoPath: "/tmp/test-repo",
   forceTier: undefined,
@@ -125,6 +126,32 @@ describe("runOneShotInner — happy path", () => {
     const call = mockRunLlmPatchFlow.mock.calls[0][0] as Record<string, unknown>;
     expect(call.userApiKey).toBe("sk-openai-test");
     expect(call.provider).toBe("openai");
+  });
+
+  it("uses geminiApiKey when provider=gemini (Bug E' fix)", async () => {
+    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
+    await runOneShotInner(
+      "task",
+      { ...BASE_CONFIG, provider: "gemini", geminiApiKey: "gem-test-key" },
+      "run-6"
+    );
+    const call = mockRunLlmPatchFlow.mock.calls[0][0] as Record<string, unknown>;
+    expect(call.userApiKey).toBe("gem-test-key");
+    expect(call.provider).toBe("gemini");
+  });
+
+  it("threads provider into withRequestContext so context-driven callers see gemini (Bug B fix)", async () => {
+    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
+    await runOneShotInner(
+      "task",
+      { ...BASE_CONFIG, provider: "gemini", geminiApiKey: "gem-test-key" },
+      "run-7"
+    );
+    // withRequestContext is not mocked — the real one is used. The provider must
+    // reach runLlmPatchFlow as the first positional arg; downstream callers
+    // (classifier, agentLoop) inherit it from the context store.
+    const call = mockRunLlmPatchFlow.mock.calls[0][0] as Record<string, unknown>;
+    expect(call.provider).toBe("gemini");
   });
 });
 

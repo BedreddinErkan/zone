@@ -38,7 +38,7 @@ export interface TaskClassification {
 }
 
 export interface ClassifyTaskOptions {
-  provider?: "openai" | "anthropic";
+  provider?: LLMProvider;
   userApiKey?: string;
   skipCache?: boolean;
   /** Test hook: override the 5s timeout. */

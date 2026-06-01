@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { getRequestUserApiKey } from "./openaiContext.js";
 import type { LLMProvider } from "./types.js";
-import { isValidModelId } from "./models.js";
+import { isValidModelId, getDefaultModelForTier } from "./models.js";
 
 export type ZoneInferenceMode = "hosted" | "local";
 
@@ -97,6 +97,10 @@ export function getModelName(
       return process.env.ZONE_ANTHROPIC_MODEL_HIGH ?? "claude-sonnet-4-6";
     }
     return process.env.ZONE_ANTHROPIC_MODEL ?? "claude-haiku-4-5";
+  }
+
+  if (provider === "gemini") {
+    return process.env.ZONE_GEMINI_MODEL ?? getDefaultModelForTier("gemini", tier);
   }
 
   if (tier === "high") {
