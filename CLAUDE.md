@@ -115,6 +115,16 @@ Browser UI → Express server → agent loop → provider adapters + tool execut
 
 - **Compaction (Phase P, `src/llm/compaction/`):** `ContextCompactor.ts` orchestrates, `classifyTurns.ts` decides survivors, `summarizer.ts` produces the placeholder.
 
+  **Three orthogonal gates (Compact.0 + Compact.0.1):**
+  1. **Compaction trigger (Compact.0):** `chars/4(responseInput) >= getContextWindow(model) × 0.75` — fires on context-window fullness, NOT cumulative billing. `getContextWindow` in `models.ts`: exact match → longest-prefix (handles snapshot-suffixed IDs like `claude-sonnet-4-6-20260219`) → 200k conservative default. Override: `ZONE_COMPACTION_TEST_RATIO` (NaN-safe; falls back to 0.75).
+  2. **Skip-guard (Compact.0.1):** after `classifyTurns`, before `summarize()` — `projectedSavings = candidateTokens − SUMMARY_OUTPUT_BUDGET(1500) < MIN_MEANINGFUL_SAVINGS(3000)` → return `insufficient_candidate_mass` without calling the LLM or bumping `compactionCount`. Eliminates −0% receipts and the loop-to-exhaust spiral (MAX_COMPACTIONS=5 hit via repeated useless compactions). When skip fires AND `currentContextTokens >= contextWindowLimit`, `onOverflowWarning` fires once per run (guarded by `_overflowWarnEmitted` flag) → amber TUI toast via `handleCompactionOverflow`.
+  3. **Iter-cost gate:** tier token budget (`effectiveTokenBudgetCap`) — unchanged.
+  4. **Spend gate:** daily USD cap (`checkDailyCap.ts`) — unchanged.
+
+  **TUI compaction events (Compact.3):** `compaction_started` → spinner; `compaction_status` → narration (`~Xk → ~Yk tokens (−N%, #count)`); `compaction_exhausted` → amber toast; `compaction_overflow_warning` → amber toast. All four wired in `useAgentEvents.ts` with named-const `bus.on/off` (inline lambdas break reference equality on cleanup). Handlers exported as pure functions for unit tests (`useAgentEvents.compaction.test.ts`). `compaction_overflow_warning` is in the `ZoneStructuredProgressEvent` type union (`agentLifecycleEvents.ts`).
+
+  **Test pattern for histories that must compact:** candidates need `≥4500` tokens (`projectedSavings ≥ 3000`) to pass the skip-guard. Use `BIG_CANDIDATE = "x".repeat(20_000)` (5000 tok) for any history turn expected to be a compacted candidate. Histories with tiny candidates now correctly return `insufficient_candidate_mass` — this is intentional behavior.
+
 ### Tier classification — read this before changing it
 
 - `src/llm/taskClassifier.ts` classifies tasks into `simple`/`medium`/`complex` before dispatch, gating token budget, iteration cap, and subagent quota. **Deterministic by design:** temperature 0, no PRNG, djb2-hashed in-process cache, low-confidence (`<0.5`) always falls back to `medium`. See `docs/determinism.md`. The confidence threshold is a module-level constant, not user-configurable.
