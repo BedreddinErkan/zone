@@ -2247,11 +2247,11 @@ Example:
     shouldRun: (ctx) => (
       !midWarnInjected &&
       effectiveTokenBudgetCap > 0 &&
-      ctx.cumulativeTokens / effectiveTokenBudgetCap >= TOKEN_BUDGET_MID_WARN
+      ctx.effectiveCumulativeTokens / effectiveTokenBudgetCap >= TOKEN_BUDGET_MID_WARN
     ),
     run: (ctx) => {
       midWarnInjected = true;
-      const ratio = ctx.cumulativeTokens / effectiveTokenBudgetCap;
+      const ratio = ctx.effectiveCumulativeTokens / effectiveTokenBudgetCap;
       ctx.emit("log", "[zone-token-budget-mid-warn]", {
         runId: ctx.runId,
         iter: ctx.iter,
@@ -2357,7 +2357,7 @@ Example:
    * Termination (return, not continue):
    * - ABORT_SIGNAL       throwIfAborted() throughout
    * - HOOK_BLOCK         pre-iter or post-tool hook returned { block: true }
-   * - TOKEN_BUDGET_SOFT  cumulativeTokens ≥ TOKEN_BUDGET_HARD pre-LLM-call
+   * - TOKEN_BUDGET_SOFT  tokenBudgetRatio ≥ TOKEN_BUDGET_HARD post-LLM-call (via emitStatus)
    * - TOKEN_BUDGET_TASK  subagent token propagation crosses TOKEN_BUDGET_HARD
    * - COMPACTION_RESTART compaction succeeded; re-enter with fresh context
    * - COMPACTION_FAIL    CompactionExhaustedError; terminationReason set
@@ -2405,6 +2405,7 @@ Example:
         prunedMessages,
         iterationBudget,
         cumulativeTokens: budget.cumulativeTokens,
+        effectiveCumulativeTokens: budget.effectiveCumulativeTokens,
         effectiveTokenBudgetCap,
         softWarnInjected,
         midWarnInjected,

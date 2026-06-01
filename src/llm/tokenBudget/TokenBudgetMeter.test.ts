@@ -491,5 +491,18 @@ describe("TokenBudgetMeter", () => {
       const ratio = meter.emitStatus(1);
       expect(ratio).toBeCloseTo(54_000 / cap, 4);
     });
+
+    it("effectiveCumulativeTokens includes baseTokens + discounted cache_read", () => {
+      const meter = new TokenBudgetMeter({ baseTokens: 5_000, cap: 800_000, isSubagentLoop: false, runId: "r1" });
+      meter.recordLLMCall({
+        rawUsage: makeRawUsage(300, 600, 70_000, 0),
+        iter: 0, totalIter: 15, provider: "anthropic", model: "claude-sonnet-4-6",
+      });
+      // effective = 5_000 (base) + 300 (input_uncached) + round(70_000×0.1) + 600 (output)
+      //           = 5_000 + 300 + 7_000 + 600 = 12_900
+      expect(meter.effectiveCumulativeTokens).toBe(12_900);
+      // raw cumulativeTokens includes full cache_read
+      expect(meter.cumulativeTokens).toBe(5_000 + 300 + 70_000 + 600); // 75_900
+    });
   });
 });

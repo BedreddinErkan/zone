@@ -198,6 +198,10 @@ export class TokenBudgetMeter {
     return this._baseTokens + this.mainAgentTokens + this._subagentTokenTotal;
   }
 
+  get effectiveCumulativeTokens(): number {
+    return this._baseTokens + this.budgetAgentTokens + this._subagentTokenTotal;
+  }
+
   get tokenUsage(): SubagentTokenUsage {
     return {
       input: this._loopTokenUsage.input,
