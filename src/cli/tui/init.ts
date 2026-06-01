@@ -67,7 +67,7 @@ export async function runInit(cwd: string, dispatch: Dispatch<StoreAction>): Pro
 
   let chatResponse: string;
   try {
-    const diskKeys = await loadDiskKeys(cwd);
+    const diskKeys = await loadDiskKeys();
     const apiKey = diskKeys.keys.find(k => k.provider === "anthropic")?.key ?? process.env.ANTHROPIC_API_KEY;
     const result = await runInvestigationFlow({
       task: INIT_PROMPT,
@@ -92,6 +92,22 @@ export async function runInit(cwd: string, dispatch: Dispatch<StoreAction>): Pro
     const suffix = lines < 20
       ? " Response was short — review and expand .zone/memory.md manually."
       : "";
+    // BYOK4: ensure .zone/ is gitignored in the target repo
+    try {
+      const gitignorePath = join(cwd, ".gitignore");
+      let existing: string | null = null;
+      try {
+        existing = await fs.readFile(gitignorePath, "utf-8");
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+        // file absent — do nothing
+      }
+      if (existing !== null && !/^\.zone\/?$/m.test(existing)) {
+        const append = existing.endsWith("\n") ? ".zone/\n" : "\n.zone/\n";
+        await fs.appendFile(gitignorePath, append, "utf-8");
+        console.log("[zone-init-gitignore-updated] appended .zone/ to .gitignore");
+      }
+    } catch { /* non-fatal — gitignore update must not block init success */ }
     dispatch({ type: "USER_PROMPT", text: `Created .zone/memory.md (${lines} lines). Use /memory to view, or edit directly.${suffix}` });
   } catch (err) {
     dispatch({ type: "USER_PROMPT", text: `init: failed to write memory.md: ${(err as Error).message}` });

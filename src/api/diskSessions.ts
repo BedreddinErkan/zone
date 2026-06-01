@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import type { TranscriptEntry } from "../cli/tui/store.js";
 
@@ -16,15 +17,21 @@ export interface DiskSession {
   totalElapsedMs: number;
 }
 
-const SESSIONS_DIR = ".zone/sessions";
 const MAX_SESSIONS = 30;
 
-function sessionsDir(cwd: string): string {
-  return join(cwd, SESSIONS_DIR);
+let _sessionsDirOverride: string | null = null;
+
+/** For test isolation only — redirect where sessions are stored. */
+export function _setSessionsDirForTest(p: string | null): void {
+  _sessionsDirOverride = p;
 }
 
-function sessionFilePath(cwd: string, filename: string): string {
-  return join(sessionsDir(cwd), filename);
+function sessionsDir(): string {
+  return _sessionsDirOverride ?? join(homedir(), ".zone", "sessions");
+}
+
+function sessionFilePath(filename: string): string {
+  return join(sessionsDir(), filename);
 }
 
 function makeFilename(sessionId: string): string {
@@ -32,21 +39,21 @@ function makeFilename(sessionId: string): string {
   return `${ts}-${sessionId.slice(0, 8)}.json`;
 }
 
-export async function saveSession(cwd: string, session: DiskSession): Promise<string> {
-  const dir = sessionsDir(cwd);
+export async function saveSession(_cwd: string, session: DiskSession): Promise<string> {
+  const dir = sessionsDir();
   await fs.mkdir(dir, { recursive: true });
   const filename = makeFilename(session.sessionId);
-  const path = sessionFilePath(cwd, filename);
-  const tmp = `${path}.tmp`;
+  const p = sessionFilePath(filename);
+  const tmp = `${p}.tmp`;
   await fs.writeFile(tmp, JSON.stringify(session, null, 2), "utf-8");
-  await fs.rename(tmp, path);
-  try { await fs.chmod(path, 0o600); } catch { /* best effort */ }
+  await fs.rename(tmp, p);
+  try { await fs.chmod(p, 0o600); } catch { /* best effort */ }
   return filename;
 }
 
-export async function listSessions(cwd: string): Promise<string[]> {
+export async function listSessions(_cwd: string): Promise<string[]> {
   try {
-    const files = await fs.readdir(sessionsDir(cwd));
+    const files = await fs.readdir(sessionsDir());
     return files
       .filter(f => f.endsWith(".json") && !f.endsWith(".tmp"))
       .sort()
@@ -57,9 +64,9 @@ export async function listSessions(cwd: string): Promise<string[]> {
   }
 }
 
-export async function loadSession(cwd: string, filename: string): Promise<DiskSession | null> {
+export async function loadSession(_cwd: string, filename: string): Promise<DiskSession | null> {
   try {
-    const raw = await fs.readFile(sessionFilePath(cwd, filename), "utf-8");
+    const raw = await fs.readFile(sessionFilePath(filename), "utf-8");
     const parsed = JSON.parse(raw) as DiskSession;
     if (parsed.version !== 1) return null;
     return parsed;
@@ -80,7 +87,7 @@ export async function pruneOldSessions(cwd: string, keep: number = MAX_SESSIONS)
   if (list.length <= keep) return 0;
   const toRemove = list.slice(keep);
   await Promise.all(toRemove.map(f =>
-    fs.unlink(sessionFilePath(cwd, f)).catch(() => {})
+    fs.unlink(sessionFilePath(f)).catch(() => {})
   ));
   return toRemove.length;
 }

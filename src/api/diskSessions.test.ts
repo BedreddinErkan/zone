@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import {
   saveSession, listSessions, loadSession, loadLastSession,
-  pruneOldSessions, listSessionsMeta, type DiskSession,
+  pruneOldSessions, listSessionsMeta, _setSessionsDirForTest, type DiskSession,
 } from "./diskSessions.js";
 
 const baseSession: DiskSession = {
@@ -22,8 +22,14 @@ const baseSession: DiskSession = {
 
 describe("diskSessions", () => {
   let tmp: string;
-  beforeEach(async () => { tmp = await mkdtemp(join(tmpdir(), "zone-sessions-")); });
-  afterEach(async () => { await rm(tmp, { recursive: true, force: true }); });
+  beforeEach(async () => {
+    tmp = await mkdtemp(join(tmpdir(), "zone-sessions-"));
+    _setSessionsDirForTest(join(tmp, ".zone", "sessions"));
+  });
+  afterEach(async () => {
+    _setSessionsDirForTest(null);
+    await rm(tmp, { recursive: true, force: true });
+  });
 
   it("saveSession + loadSession round-trips", async () => {
     const filename = await saveSession(tmp, baseSession);
@@ -101,8 +107,6 @@ describe("diskSessions", () => {
     });
 
     it("skips corrupt files and returns valid entries", async () => {
-      const { join } = await import("node:path");
-      const { mkdir, writeFile } = await import("node:fs/promises");
       const dir = join(tmp, ".zone/sessions");
       await mkdir(dir, { recursive: true });
       await writeFile(join(dir, "2026-01-01T00-00-00-000Z-corrupt.json"), "not json", "utf-8");

@@ -69,7 +69,7 @@ export async function runTui(
   }
 
   try {
-    const diskKeysStore = await loadDiskKeys(process.cwd());
+    const diskKeysStore = await loadDiskKeys();
     if (!config.anthropicApiKey) {
       config.anthropicApiKey = diskKeysStore.keys.find(k => k.provider === "anthropic")?.key;
     }

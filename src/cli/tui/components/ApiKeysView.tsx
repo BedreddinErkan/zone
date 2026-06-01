@@ -8,7 +8,7 @@ export function ApiKeysView(): React.ReactElement {
           keysEditInput: editInput, keysEditProvider: editProvider } = state;
 
   const refresh = (): void => {
-    void loadDiskKeys(process.cwd()).then(store => {
+    void loadDiskKeys().then(store => {
       dispatch({ type: "KEYS_OPEN", list: store.keys });
     });
   };
@@ -34,7 +34,7 @@ export function ApiKeysView(): React.ReactElement {
       if (key.escape) { dispatch({ type: "KEYS_INPUT_CANCEL" }); return; }
       if (key.return) {
         if (editInput.trim() && editProvider) {
-          void setDiskKey(process.cwd(), editProvider, editInput.trim()).then(refresh);
+          void setDiskKey(editProvider, editInput.trim()).then(refresh);
         } else {
           dispatch({ type: "KEYS_INPUT_CANCEL" });
         }
@@ -47,7 +47,7 @@ export function ApiKeysView(): React.ReactElement {
     } else if (mode === "confirm-delete") {
       if (key.escape || input === "n" || input === "N") { dispatch({ type: "KEYS_DELETE_CANCELED" }); return; }
       if (input === "y" || input === "Y") {
-        if (editProvider) void removeDiskKey(process.cwd(), editProvider).then(refresh);
+        if (editProvider) void removeDiskKey(editProvider).then(refresh);
         return;
       }
     }
@@ -64,7 +64,7 @@ export function ApiKeysView(): React.ReactElement {
       <Text bold color="yellow">API Keys</Text>
       {mode === "view" && (
         <>
-          <Text dimColor>Keys (.zone/keys.json):</Text>
+          <Text dimColor>Keys (~/.zone/keys.json):</Text>
           <Box height={1} />
           {list.length === 0 ? (
             <Text dimColor>No keys. N to add one.</Text>

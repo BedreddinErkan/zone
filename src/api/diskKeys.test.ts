@@ -1,21 +1,27 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { mkdtemp, rm } from "node:fs/promises";
-import { loadDiskKeys, setDiskKey, removeDiskKey, maskKey } from "./diskKeys.js";
+import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { loadDiskKeys, setDiskKey, removeDiskKey, maskKey, _setKeysFilePathForTest } from "./diskKeys.js";
 
 describe("diskKeys", () => {
   let tmp: string;
-  beforeEach(async () => { tmp = await mkdtemp(join(tmpdir(), "zone-keys-")); });
-  afterEach(async () => { await rm(tmp, { recursive: true, force: true }); });
+  beforeEach(async () => {
+    tmp = await mkdtemp(join(tmpdir(), "zone-keys-"));
+    _setKeysFilePathForTest(join(tmp, "keys.json"));
+  });
+  afterEach(async () => {
+    _setKeysFilePathForTest(null);
+    await rm(tmp, { recursive: true, force: true });
+  });
 
   it("loadDiskKeys returns empty when file missing", async () => {
-    expect(await loadDiskKeys(tmp)).toEqual({ version: 1, keys: [] });
+    expect(await loadDiskKeys()).toEqual({ version: 1, keys: [] });
   });
 
   it("setDiskKey adds a new key", async () => {
-    await setDiskKey(tmp, "anthropic", "sk-ant-test123456789");
-    const store = await loadDiskKeys(tmp);
+    await setDiskKey("anthropic", "sk-ant-test123456789");
+    const store = await loadDiskKeys();
     expect(store.keys).toHaveLength(1);
     expect(store.keys[0].provider).toBe("anthropic");
     expect(store.keys[0].key).toBe("sk-ant-test123456789");
@@ -23,25 +29,25 @@ describe("diskKeys", () => {
   });
 
   it("setDiskKey overwrites existing key for same provider", async () => {
-    await setDiskKey(tmp, "anthropic", "sk-ant-first00000000");
-    await setDiskKey(tmp, "anthropic", "sk-ant-second0000000");
-    const store = await loadDiskKeys(tmp);
+    await setDiskKey("anthropic", "sk-ant-first00000000");
+    await setDiskKey("anthropic", "sk-ant-second0000000");
+    const store = await loadDiskKeys();
     expect(store.keys).toHaveLength(1);
     expect(store.keys[0].key).toBe("sk-ant-second0000000");
   });
 
   it("removeDiskKey removes the named provider", async () => {
-    await setDiskKey(tmp, "anthropic", "sk-ant-test123456789");
-    await setDiskKey(tmp, "openai", "sk-openai-test123456");
-    await removeDiskKey(tmp, "anthropic");
-    const store = await loadDiskKeys(tmp);
+    await setDiskKey("anthropic", "sk-ant-test123456789");
+    await setDiskKey("openai", "sk-openai-test123456");
+    await removeDiskKey("anthropic");
+    const store = await loadDiskKeys();
     expect(store.keys).toHaveLength(1);
     expect(store.keys[0].provider).toBe("openai");
   });
 
   it("gemini key: setDiskKey + loadDiskKeys round-trip", async () => {
-    await setDiskKey(tmp, "gemini", "AIzaSy-test123456789012345678");
-    const store = await loadDiskKeys(tmp);
+    await setDiskKey("gemini", "AIzaSy-test123456789012345678");
+    const store = await loadDiskKeys();
     const entry = store.keys.find(k => k.provider === "gemini");
     expect(entry?.key).toBe("AIzaSy-test123456789012345678");
     expect(entry?.provider).toBe("gemini");
@@ -49,15 +55,64 @@ describe("diskKeys", () => {
   });
 
   it("setDiskKey rejects key with non-ASCII characters", async () => {
-    await expect(setDiskKey(tmp, "gemini", "AIzaSy—bad")).rejects.toThrow(/non-ASCII character at byte/);
+    await expect(setDiskKey("gemini", "AIzaSy—bad")).rejects.toThrow(/non-ASCII character at byte/);
   });
 
   it("setDiskKey rejects placeholder key starting with '<'", async () => {
-    await expect(setDiskKey(tmp, "anthropic", "<your key here>")).rejects.toThrow(/placeholder/);
+    await expect(setDiskKey("anthropic", "<your key here>")).rejects.toThrow(/placeholder/);
   });
 
   it("maskKey masks middle of long keys", () => {
     expect(maskKey("sk-ant-api03XXXAAAA")).toBe("sk-ant-***AAAA");
     expect(maskKey("short")).toBe("***");
+  });
+});
+
+describe("diskKeys — migration from legacy .zone/keys.json", () => {
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await mkdtemp(join(tmpdir(), "zone-keys-migrate-"));
+    // home path = tmp/home.json; legacy path = tmp/legacy.json
+    _setKeysFilePathForTest(join(tmp, "home.json"), join(tmp, "legacy.json"));
+  });
+
+  afterEach(async () => {
+    _setKeysFilePathForTest(null);
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("migrates legacy keys to home path on first load", async () => {
+    const legacyStore = { version: 1 as const, keys: [{ provider: "anthropic" as const, key: "sk-ant-migrated0000", addedAt: "2026-01-01T00:00:00.000Z" }] };
+    await writeFile(join(tmp, "legacy.json"), JSON.stringify(legacyStore, null, 2), "utf-8");
+
+    const result = await loadDiskKeys();
+    expect(result.keys).toHaveLength(1);
+    expect(result.keys[0].key).toBe("sk-ant-migrated0000");
+
+    // home path now has the key
+    const homeStore = await loadDiskKeys();
+    expect(homeStore.keys[0].key).toBe("sk-ant-migrated0000");
+  });
+
+  it("migration is idempotent — second load reads from home, not legacy", async () => {
+    const legacyStore = { version: 1 as const, keys: [{ provider: "openai" as const, key: "sk-openai-migrate0", addedAt: "2026-01-01T00:00:00.000Z" }] };
+    await writeFile(join(tmp, "legacy.json"), JSON.stringify(legacyStore, null, 2), "utf-8");
+
+    await loadDiskKeys(); // first: migrates
+    // Overwrite home with a different value to confirm second load uses home
+    await setDiskKey("openai", "sk-openai-updated0");
+    const second = await loadDiskKeys();
+    expect(second.keys[0].key).toBe("sk-openai-updated0");
+  });
+
+  it("returns empty when no home and no legacy file exist", async () => {
+    expect(await loadDiskKeys()).toEqual({ version: 1, keys: [] });
+  });
+
+  it("skips corrupt legacy file without throwing", async () => {
+    await mkdir(join(tmp, "zone-corrupt"), { recursive: true });
+    await writeFile(join(tmp, "legacy.json"), "not valid json", "utf-8");
+    expect(await loadDiskKeys()).toEqual({ version: 1, keys: [] });
   });
 });

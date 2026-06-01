@@ -133,7 +133,7 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
         });
         break;
       case "/keys":
-        void loadDiskKeys(process.cwd()).then(store => {
+        void loadDiskKeys().then(store => {
           dispatch({ type: "KEYS_OPEN", list: store.keys });
         });
         break;

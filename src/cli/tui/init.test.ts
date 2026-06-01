@@ -84,6 +84,52 @@ describe("runInit", () => {
   });
 });
 
+describe("BYOK4 — runInit appends .zone/ to .gitignore", () => {
+  let tmp: string;
+  let dispatch: Dispatch<StoreAction>;
+
+  beforeEach(async () => {
+    tmp = await mkdtemp(join(tmpdir(), "zone-init-gi-"));
+    dispatch = () => {};
+    vi.mocked(loadDiskKeys).mockResolvedValue({ keys: [] } as never);
+    vi.mocked(runInvestigationFlow).mockResolvedValue({
+      ok: true as const,
+      decisionMode: "investigation" as const,
+      chatResponse: Array.from({ length: 25 }, (_, i) => `line ${i}`).join("\n"),
+      responseHtml: "",
+      contextFiles: [],
+      applyPatches: [] as never[],
+      fileDiffs: [] as never[],
+      toolCallLog: [],
+    });
+  });
+
+  afterEach(async () => {
+    await rm(tmp, { recursive: true, force: true });
+    vi.clearAllMocks();
+  });
+
+  it("appends .zone/ to existing .gitignore that lacks it", async () => {
+    await writeFile(join(tmp, ".gitignore"), "node_modules/\ndist/\n", "utf-8");
+    await runInit(tmp, dispatch);
+    const content = await readFile(join(tmp, ".gitignore"), "utf-8");
+    expect(content).toContain(".zone/");
+  });
+
+  it("is idempotent — does not duplicate .zone/ if already present", async () => {
+    await writeFile(join(tmp, ".gitignore"), "node_modules/\n.zone/\ndist/\n", "utf-8");
+    await runInit(tmp, dispatch);
+    const content = await readFile(join(tmp, ".gitignore"), "utf-8");
+    const matches = content.match(/^\.zone\/$/gm);
+    expect(matches).toHaveLength(1);
+  });
+
+  it("does not create .gitignore when absent", async () => {
+    await runInit(tmp, dispatch);
+    await expect(readFile(join(tmp, ".gitignore"), "utf-8")).rejects.toThrow(/ENOENT/);
+  });
+});
+
 describe("stripTrailingCodeBlock", () => {
   it("T1: removes trailing ```json code block", () => {
     const input = "line1\nline2\n```json\n{\"x\":1}\n```";

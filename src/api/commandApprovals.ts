@@ -38,6 +38,18 @@ export function getSafeCommandCategory(command: string): string | null {
   if (!trimmed) return null;
   if (/[&|;`$()<>]/.test(trimmed)) return null;
 
+  // BYOK2: block sensitive-path arguments even for whitelisted prefixes
+  if (
+    /(?:^|\s)\.env(\s|$)/.test(trimmed) ||
+    /(?:^|\s)\.env\.(?!example(?:\s|$))/.test(trimmed) ||
+    /\.zone[/\\]keys\.json/.test(trimmed) ||
+    /\.zone[/\\]sessions/.test(trimmed) ||
+    /(?:^|\s)[\w./]*\.(pem|key)(\s|$)/.test(trimmed) ||
+    /(?:^|\s)(id_rsa|credentials)(\s|$)/.test(trimmed)
+  ) {
+    return null;
+  }
+
   for (const [category, prefixes] of Object.entries(SAFE_COMMAND_PREFIXES)) {
     if (prefixes.some(prefix => trimmed === prefix || trimmed.startsWith(prefix + " "))) {
       return category;

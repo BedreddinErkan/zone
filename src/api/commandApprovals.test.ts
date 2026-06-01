@@ -82,6 +82,36 @@ describe("getSafeCommandCategory", () => {
     expect(getSafeCommandCategory("ls && rm -rf /")).toBeNull();
     expect(getSafeCommandCategory("   ")).toBeNull();
   });
+
+  describe("BYOK2 sensitive-path blocking", () => {
+    it("blocks cat .env", () => {
+      expect(getSafeCommandCategory("cat .env")).toBeNull();
+    });
+
+    it("blocks head .env", () => {
+      expect(getSafeCommandCategory("head .env")).toBeNull();
+    });
+
+    it("blocks cat .env.local", () => {
+      expect(getSafeCommandCategory("cat .env.local")).toBeNull();
+    });
+
+    it("blocks cat .env.production", () => {
+      expect(getSafeCommandCategory("cat .env.production")).toBeNull();
+    });
+
+    it("does NOT block cat .env.example", () => {
+      expect(getSafeCommandCategory("cat .env.example")).toBe("readonly");
+    });
+
+    it("does NOT block cat src/main.ts (regression)", () => {
+      expect(getSafeCommandCategory("cat src/main.ts")).toBe("readonly");
+    });
+
+    it("does NOT block cat package.json (regression)", () => {
+      expect(getSafeCommandCategory("cat package.json")).toBe("readonly");
+    });
+  });
 });
 
 describe("requestCommandApproval", () => {

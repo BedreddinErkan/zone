@@ -1361,6 +1361,16 @@ export async function executeTool(
 
     if (toolName === "read_file") {
       const filePath = resolveAgentPath(String(args.filePath || ""), repoPath, "read_file");
+      // BYOK2: block reads of sensitive files
+      const _rfBasename = path.basename(filePath);
+      const _isEnvSecret = _rfBasename === ".env" || (_rfBasename.startsWith(".env.") && _rfBasename !== ".env.example");
+      if (
+        _isEnvSecret ||
+        /\.zone[/\\]keys\.json$/.test(filePath) ||
+        /\.zone[/\\]sessions[/\\]/.test(filePath)
+      ) {
+        return { success: false, output: `read_file_blocked_sensitive_path: reading ${filePath} is not allowed for security reasons.` };
+      }
       onProgress?.(`[tool] Reading: ${filePath}`);
       const abs = path.join(repoPath, filePath);
       const staged = stagedRead(input?.stagingFiles, abs);

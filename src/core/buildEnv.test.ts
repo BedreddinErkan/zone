@@ -41,4 +41,41 @@ describe("buildEnv", () => {
     ]);
     expect(strippedEnvKeys({ PATH: "/usr/bin" })).toEqual([]);
   });
+
+  it("strips BYOK API key env vars", () => {
+    const env = sanitizeVerificationEnv({
+      PATH: "/usr/bin",
+      ANTHROPIC_API_KEY: "sk-ant-secret",
+      OPENAI_API_KEY: "sk-openai-secret",
+      GEMINI_API_KEY: "AIzaSy-secret",
+      MY_SECRET: "top-secret",
+      MY_TOKEN: "tok-abc",
+      GITHUB_TOKEN: "ghp-abc",
+      GH_TOKEN: "ghp-def",
+    });
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.GEMINI_API_KEY).toBeUndefined();
+    expect(env.MY_SECRET).toBeUndefined();
+    expect(env.MY_TOKEN).toBeUndefined();
+    expect(env.GITHUB_TOKEN).toBeUndefined();
+    expect(env.GH_TOKEN).toBeUndefined();
+    expect(env.PATH).toBe("/usr/bin");
+  });
+
+  it("strippedEnvKeys reports all stripped keys including secrets", () => {
+    const keys = strippedEnvKeys({
+      NODE_ENV: "test",
+      ANTHROPIC_API_KEY: "x",
+      MY_SECRET: "y",
+      GITHUB_TOKEN: "z",
+      PATH: "/usr/bin",
+    });
+    expect(keys).toContain("NODE_ENV");
+    expect(keys).toContain("ANTHROPIC_API_KEY");
+    expect(keys).toContain("MY_SECRET");
+    expect(keys).toContain("GITHUB_TOKEN");
+    expect(keys).not.toContain("PATH");
+    expect(keys).toHaveLength(4);
+  });
 });
