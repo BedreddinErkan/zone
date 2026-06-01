@@ -422,6 +422,7 @@ export function assembleAgentSystemPrompt(input: {
     `- apply_patch for EXISTING files; write_file ONLY for new files.\n` +
     `- FIND: copy verbatim from read_file output, 1-5 lines, unique in the file.\n` +
     `- REPLACE: one local substitution of FIND. Never copy in code from elsewhere in the file — use a second block instead.\n` +
+    `- Same file, N edits: batch all into ONE apply_patch call with N blocks (rename 8 occurrences → 1 call, not 8 calls).\n` +
     `- intent='add' (default, REPLACE = FIND + additions), 'modify' (REPLACE = edited FIND), 'delete' (REPLACE shorter than FIND, may be empty).\n` +
     `- MINIMUM CHANGE: preserve every existing line the user didn't ask to change.\n` +
     `- scope: OMIT by default. Only set when FIND occurs multiple times AND the target is inside a NAMED function/class. Never for arrow-const, default exports, or React components.\n` +

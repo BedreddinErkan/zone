@@ -232,7 +232,7 @@ required: ["id", "content", "description", "status"],
         "Patch an EXISTING file (write_file for new files). " +
         "Format: --- FIND --- <verbatim lines, unique> --- REPLACE --- <new content>. " +
         "FIND must match exactly — re-read if unsure. " +
-        "Two edits → two blocks; all blocks apply atomically. " +
+        "N edits to a file → ONE call with N blocks; all blocks apply atomically. " +
         "intent: 'add' (default)|'modify'|'delete'.",
       parameters: {
         type: "object",
@@ -246,7 +246,8 @@ required: ["id", "content", "description", "status"],
             description:
               "One or more --- FIND --- / --- REPLACE --- blocks. " +
               "Each block does exactly one local substitution. " +
-              "Use multiple blocks (concatenated in the same patch string) when several locations need editing - never compress unrelated edits into a single block.",
+              "Same-file edits (rename, codemod): emit ALL blocks in ONE call — never split same-file edits across multiple apply_patch calls. " +
+              "Never compress unrelated edits into a single block.",
           },
           intent: {
             type: ["string", "null"],
