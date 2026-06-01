@@ -3,6 +3,7 @@ import type {
   ZoneStructuredProgressEvent,
 } from "../core/agentLifecycleEvents.js";
 import { promptCommandApproval, promptScopeRevision } from "./approvals.js";
+import { formatCompactionNarration } from "../core/compactionNarration.js";
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const FRAME_INTERVAL_MS = 80;
@@ -286,6 +287,36 @@ export function buildCliSink(opts: CliSinkOptions, spinner: Spinner): CliSink {
       case "phase_changed":
         if (!quiet) out(`${dim}── Phase ${evt.phase ?? ""} ──${reset}`);
         break;
+
+      case "compaction_started":
+        if (!quiet && verbose) out(`${dim}  Compacting context…${reset}`);
+        break;
+
+      case "compaction_status": {
+        const text = formatCompactionNarration({
+          tokensBefore: evt.tokensBefore ?? 0,
+          tokensAfter:  evt.tokensAfter  ?? 0,
+          savedTokens:  evt.savedTokens  ?? 0,
+          count:        evt.count        ?? 0,
+        });
+        if (quiet) process.stderr.write(text + "\n");
+        else out(text);
+        break;
+      }
+
+      case "compaction_exhausted": {
+        const line = `${yellow}⚠ Compaction exhausted — context may overflow. Break this task into subtasks.${reset}`;
+        if (quiet) process.stderr.write(line + "\n");
+        else out(line);
+        break;
+      }
+
+      case "compaction_overflow_warning": {
+        const line = `${yellow}⚠ Context window full — no compactable history. Consider breaking into subtasks.${reset}`;
+        if (quiet) process.stderr.write(line + "\n");
+        else out(line);
+        break;
+      }
 
       case "subagent_started":
         if (!quiet) out(`${dim}  ↳ subagent started${reset}`);

@@ -7,18 +7,9 @@ import { resolveCommandApproval } from "../../../api/commandApprovals.js";
 import { resolveRevisionApproval } from "../../../llm/revisionApprovals.js";
 import { buildLoopCompleteSummary, buildRunSummary } from "../../../core/eventProcessors.js";
 // buildLoopCompleteSummary / buildRunSummary kept for future telemetry; run text no longer stored in transcript
-
-export function formatCompactionNarration(opts: {
-  tokensBefore: number;
-  tokensAfter: number;
-  savedTokens: number;
-  count: number;
-}): string {
-  const { tokensBefore, tokensAfter, savedTokens, count } = opts;
-  const pct = tokensBefore > 0 ? Math.round((savedTokens / tokensBefore) * 100) : 0;
-  const k = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
-  return `Context compacted: ~${k(tokensBefore)} → ~${k(tokensAfter)} tokens (−${pct}%, #${count})`;
-}
+import { formatCompactionNarration } from "../../../core/compactionNarration.js";
+// re-exported so existing callers importing it from this module continue to work
+export { formatCompactionNarration };
 
 export function handleCompactionStarted(
   _evt: ZoneStructuredProgressEvent,

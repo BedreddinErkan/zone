@@ -280,3 +280,82 @@ describe("buildCliSink — run_summary", () => {
     expect(all).toContain("3 iter");
   });
 });
+
+describe("buildCliSink — compaction events (Compact.4)", () => {
+  it("compaction_started: no output in non-verbose mode", () => {
+    const sink = buildCliSink(SILENT_OPTS, spinner);
+    sink.onProgress({ stage: "", progress: makeEvt("compaction_started", { count: 1 }) });
+    expect(output.join("")).toBe("");
+  });
+
+  it("compaction_started: dim progress line in verbose mode", () => {
+    const sink = buildCliSink(VERBOSE_OPTS, spinner);
+    sink.onProgress({ stage: "", progress: makeEvt("compaction_started", { count: 1 }) });
+    expect(output.join("")).toContain("Compacting context");
+  });
+
+  it("compaction_status: formatted line on stdout in non-quiet mode", () => {
+    const sink = buildCliSink(SILENT_OPTS, spinner);
+    sink.onProgress({
+      stage: "",
+      progress: makeEvt("compaction_status", {
+        count: 2, tokensBefore: 50000, tokensAfter: 15000, savedTokens: 35000,
+      }),
+    });
+    expect(output.join("")).toContain("Context compacted: ~50k → ~15k tokens (−70%, #2)");
+  });
+
+  it("compaction_status: routes to stderr in quiet mode (stdout stays clean)", () => {
+    const errChunks: string[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((c: string | Uint8Array) => {
+      errChunks.push(typeof c === "string" ? c : ""); return true;
+    });
+    const sink = buildCliSink(QUIET_OPTS, spinner);
+    sink.onProgress({
+      stage: "",
+      progress: makeEvt("compaction_status", {
+        count: 1, tokensBefore: 30000, tokensAfter: 28000, savedTokens: 2000,
+      }),
+    });
+    expect(output.join("")).toBe("");
+    expect(errChunks.join("")).toContain("Context compacted");
+  });
+
+  it("compaction_exhausted: warning line with ⚠ on stdout", () => {
+    const sink = buildCliSink(SILENT_OPTS, spinner);
+    sink.onProgress({ stage: "", progress: makeEvt("compaction_exhausted") });
+    const all = output.join("");
+    expect(all).toContain("⚠");
+    expect(all).toContain("exhausted");
+  });
+
+  it("compaction_exhausted: routes to stderr in quiet mode", () => {
+    const errChunks: string[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((c: string | Uint8Array) => {
+      errChunks.push(typeof c === "string" ? c : ""); return true;
+    });
+    const sink = buildCliSink(QUIET_OPTS, spinner);
+    sink.onProgress({ stage: "", progress: makeEvt("compaction_exhausted") });
+    expect(output.join("")).toBe("");
+    expect(errChunks.join("")).toContain("exhausted");
+  });
+
+  it("compaction_overflow_warning: warning line with ⚠ on stdout", () => {
+    const sink = buildCliSink(SILENT_OPTS, spinner);
+    sink.onProgress({ stage: "", progress: makeEvt("compaction_overflow_warning") });
+    const all = output.join("");
+    expect(all).toContain("⚠");
+    expect(all).toContain("full");
+  });
+
+  it("compaction_overflow_warning: routes to stderr in quiet mode", () => {
+    const errChunks: string[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((c: string | Uint8Array) => {
+      errChunks.push(typeof c === "string" ? c : ""); return true;
+    });
+    const sink = buildCliSink(QUIET_OPTS, spinner);
+    sink.onProgress({ stage: "", progress: makeEvt("compaction_overflow_warning") });
+    expect(output.join("")).toBe("");
+    expect(errChunks.join("")).toContain("full");
+  });
+});
