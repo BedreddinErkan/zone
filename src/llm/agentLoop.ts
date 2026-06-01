@@ -1594,7 +1594,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       tokenBudgetCap: tierLimits.tokenBudgetCap,
       softIterWarn: effectiveSoftIterWarn,
       classificationConfidence: input.taskClassification?.confidence ?? 0,
-      fallbackUsed: input.taskClassification?.fallbackUsed ?? true,
+      fallbackUsed: input.taskClassification?.fallbackUsed ?? false,
       toolSubsetSize: tierFilterFromClassifier ? toolsForLLM.length : undefined,
     });
     if (tierArchetypeMismatch && input.taskClassification) {

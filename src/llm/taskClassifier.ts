@@ -503,6 +503,7 @@ export async function classifyTask(
       classifierCostUsd: costUsd,
       classifierLatencyMs: Date.now() - startTime,
       classifierModel: model,
+      fallbackUsed: false,
     };
 
     classificationCache.set(cacheKey, classification);

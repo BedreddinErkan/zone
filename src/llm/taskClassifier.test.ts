@@ -64,7 +64,7 @@ describe("Phase L.1 task classifier", () => {
     expect(result.tier).toBe("simple");
     expect(result.estimatedFiles).toBe(1);
     expect(result.confidence).toBe(0.9);
-    expect(result.fallbackUsed).toBeUndefined();
+    expect(result.fallbackUsed).toBe(false);
     expect(result.classifierModel).toBe("claude-haiku-4-5");
     expect(result.classifierCostUsd).toBeGreaterThan(0);
     expect(result.classifierLatencyMs).toBeGreaterThanOrEqual(0);
@@ -88,7 +88,7 @@ describe("Phase L.1 task classifier", () => {
 
     expect(result.tier).toBe("medium");
     expect(result.estimatedFiles).toBe(5);
-    expect(result.fallbackUsed).toBeUndefined();
+    expect(result.fallbackUsed).toBe(false);
   });
 
   it("classifies a complex task correctly", async () => {
@@ -349,7 +349,7 @@ describe("Phase L.1 task classifier", () => {
 
     expect(result.tier).not.toBe("simple");
     expect(["medium", "complex"]).toContain(result.tier);
-    expect(result.fallbackUsed).toBeUndefined();
+    expect(result.fallbackUsed).toBe(false);
   });
 
   it("classifies 'all instances across the codebase' task as complex", async () => {
@@ -371,7 +371,7 @@ describe("Phase L.1 task classifier", () => {
     );
 
     expect(result.tier).toBe("complex");
-    expect(result.fallbackUsed).toBeUndefined();
+    expect(result.fallbackUsed).toBe(false);
   });
 });
 
@@ -395,7 +395,7 @@ describe("Phase Q.8 — complex-tier triggers for multi-file rename", () => {
 
     expect(result.tier).toBe("complex");
     expect(result.estimatedFiles).toBe(5);
-    expect(result.fallbackUsed).toBeUndefined();
+    expect(result.fallbackUsed).toBe(false);
   });
 
   it("rename across 3 explicitly-listed files → complex", async () => {
@@ -502,7 +502,7 @@ describe("Phase BYOM.1.1 — classifier provider routing", () => {
     const result = await classifyTask("simple comment add");
 
     expect(result.classifierModel).toBe("claude-haiku-4-5");
-    expect(result.fallbackUsed).toBeUndefined();
+    expect(result.fallbackUsed).toBe(false);
   });
 
   it("provider=anthropic explicit → model claude-haiku-4-5", async () => {
@@ -597,7 +597,7 @@ describe("Phase K.2 — confidence gate", () => {
     const result = await classifyTask("high-confidence complex task");
 
     expect(result.tier).toBe("complex");
-    expect(result.fallbackUsed).toBeUndefined();
+    expect(result.fallbackUsed).toBe(false);
     const fallbackLogCall = consoleLogSpy.mock.calls.find(
       (call) => String(call[0] ?? "") === "[zone-tier-low-confidence-fallback]"
     );
@@ -679,7 +679,7 @@ describe("Phase K.2 — confidence gate", () => {
 
     // 0.5 is NOT below the threshold (< 0.5 is the gate condition), so no fallback
     expect(result.tier).toBe("simple");
-    expect(result.fallbackUsed).toBeUndefined();
+    expect(result.fallbackUsed).toBe(false);
   });
 
   it("low confidence (0.3) + simple tier → forced to medium + fallback telemetry emitted", async () => {
@@ -772,7 +772,7 @@ describe("Phase D4 — investigation-scope classifier tuning", () => {
 
     expect(result.tier).toBe("medium");
     expect(result.confidence).toBeGreaterThanOrEqual(0.7);
-    expect(result.fallbackUsed).toBeUndefined();
+    expect(result.fallbackUsed).toBe(false);
   });
 
   it("billing-test-fix → medium (was simple before D4)", async () => {
@@ -795,7 +795,7 @@ describe("Phase D4 — investigation-scope classifier tuning", () => {
 
     expect(result.tier).toBe("medium");
     expect(result.confidence).toBeGreaterThanOrEqual(0.7);
-    expect(result.fallbackUsed).toBeUndefined();
+    expect(result.fallbackUsed).toBe(false);
   });
 
   it("buildDecisionTrace-test-fix → medium (was simple before D4)", async () => {
@@ -818,7 +818,7 @@ describe("Phase D4 — investigation-scope classifier tuning", () => {
 
     expect(result.tier).toBe("medium");
     expect(result.confidence).toBeGreaterThanOrEqual(0.7);
-    expect(result.fallbackUsed).toBeUndefined();
+    expect(result.fallbackUsed).toBe(false);
   });
 
   // No-regress: trivially simple tasks must stay simple
@@ -839,7 +839,7 @@ describe("Phase D4 — investigation-scope classifier tuning", () => {
     const result = await classifyTask("Fix typo in src/utils/format.ts line 42");
 
     expect(result.tier).toBe("simple");
-    expect(result.fallbackUsed).toBeUndefined();
+    expect(result.fallbackUsed).toBe(false);
   });
 
   it("Single-occurrence rename in one file → simple", async () => {
@@ -861,7 +861,7 @@ describe("Phase D4 — investigation-scope classifier tuning", () => {
     );
 
     expect(result.tier).toBe("simple");
-    expect(result.fallbackUsed).toBeUndefined();
+    expect(result.fallbackUsed).toBe(false);
   });
 
   it("Add JSDoc comment to one function → simple", async () => {
@@ -883,7 +883,7 @@ describe("Phase D4 — investigation-scope classifier tuning", () => {
     );
 
     expect(result.tier).toBe("simple");
-    expect(result.fallbackUsed).toBeUndefined();
+    expect(result.fallbackUsed).toBe(false);
   });
 
   // No-regress: complex tasks must stay complex
@@ -906,7 +906,7 @@ describe("Phase D4 — investigation-scope classifier tuning", () => {
     );
 
     expect(result.tier).toBe("complex");
-    expect(result.fallbackUsed).toBeUndefined();
+    expect(result.fallbackUsed).toBe(false);
   });
 
   it("Refactor function signature affecting 5 callers → complex", async () => {
@@ -928,7 +928,7 @@ describe("Phase D4 — investigation-scope classifier tuning", () => {
     );
 
     expect(result.tier).toBe("complex");
-    expect(result.fallbackUsed).toBeUndefined();
+    expect(result.fallbackUsed).toBe(false);
   });
 });
 
