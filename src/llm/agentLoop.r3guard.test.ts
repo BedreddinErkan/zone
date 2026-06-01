@@ -146,6 +146,7 @@ describe("R.3 — tool description bounds", () => {
         "kill_background",
         "list_background",
         "list_files",
+        "multi_edit",
         "read_background_output",
         "read_file",
         "revert_patch",

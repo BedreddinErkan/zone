@@ -16,6 +16,7 @@ export const BUILTIN_TOOL_CAPS: Record<string, ReadonlyArray<Capability>> = {
 
   // ── fs.read + fs.write tools ────────────────────────────────────────────
   apply_patch:        ["fs.read", "fs.write"],
+  multi_edit:         ["fs.read", "fs.write"],
   write_file:         ["fs.read", "fs.write"],
 
   // ── shell tools (may also read/write via shell) ──────────────────────────

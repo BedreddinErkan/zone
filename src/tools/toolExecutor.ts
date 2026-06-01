@@ -165,6 +165,7 @@ const DISPATCHED_TOOLS = new Set([
   "kill_background",
   "list_background",
   "update_memory",
+  "multi_edit",
   // TodoWrite is intercepted in the agent loop (no I/O), but must be listed here
   // so the IIFE startup guard at :51-75 doesn't fail-fast on its presence in
   // ZONE_TOOLS.
@@ -442,6 +443,10 @@ function countCrlfsBefore(s: string, offset: number): number {
     }
   }
   return count;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function stagedRead(
@@ -2964,6 +2969,72 @@ export async function executeTool(
       return {
         success: true,
         output: `Saved to project memory:\n  - [${saved.date}] ${saved.text}\n\nThis convention will be injected into future Zone agent prompts on this repo.${sizeWarning}`,
+      };
+    }
+
+    if (toolName === "multi_edit") {
+      const files = Array.isArray(args.files) ? (args.files as string[]) : [];
+      const find = String(args.find ?? "");
+      const replace = String(args.replace ?? "");
+      const wholeWord = args.wholeWord !== false; // default true
+
+      if (!find) {
+        return { success: false, output: "multi_edit: find string must be non-empty." };
+      }
+      if (files.length === 0) {
+        return { success: false, output: "multi_edit: files array must be non-empty." };
+      }
+
+      const escaped = escapeRegex(find);
+      const pattern = new RegExp(wholeWord ? `\\b${escaped}\\b` : escaped, "g");
+
+      const perFile: Array<{ path: string; count: number }> = [];
+      let totalReplacements = 0;
+
+      for (const relPath of files) {
+        const filePath = resolveAgentPath(String(relPath), repoPath, "multi_edit");
+        const abs = path.join(repoPath, filePath);
+
+        let content: string;
+        try {
+          content = stagedRead(input?.stagingFiles, abs) ?? fs.readFileSync(abs, "utf8");
+        } catch {
+          perFile.push({ path: filePath, count: -1 });
+          continue;
+        }
+
+        const matches = content.match(pattern);
+        const count = matches ? matches.length : 0;
+
+        if (count > 0) {
+          const newContent = content.replace(pattern, replace);
+          stagedWrite(input?.stagingFiles, abs, newContent);
+        }
+
+        perFile.push({ path: filePath, count });
+        totalReplacements += count;
+      }
+
+      const notFound = perFile.filter((f) => f.count === 0);
+      const missing = perFile.filter((f) => f.count === -1);
+
+      return {
+        success: true,
+        output:
+          `multi_edit: ${totalReplacements} replacement(s) across ${perFile.length} file(s).\n` +
+          perFile
+            .map((f) =>
+              f.count === -1
+                ? `  [NOT FOUND] ${f.path}`
+                : `  ${f.path}: ${f.count} replacement(s)`
+            )
+            .join("\n") +
+          (notFound.length > 0
+            ? `\nNote: "${find}" was not found in: ${notFound.map((f) => f.path).join(", ")}`
+            : "") +
+          (missing.length > 0
+            ? `\nWarning: could not read: ${missing.map((f) => f.path).join(", ")}`
+            : ""),
       };
     }
 

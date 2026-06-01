@@ -6,6 +6,7 @@ export const SIMPLE_TIER_TOOLS: ReadonlySet<string> = new Set([
   "read_file",
   "write_file",
   "apply_patch",
+  "multi_edit",
   "run_command",
 ]);
 
@@ -14,6 +15,7 @@ export const MEDIUM_TIER_TOOLS: ReadonlySet<string> = new Set([
   "read_file",
   "write_file",
   "apply_patch",
+  "multi_edit",
   "run_command",
   "search_in_files",
   "list_files",

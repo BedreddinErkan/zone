@@ -294,6 +294,45 @@ required: ["id", "content", "description", "status"],
   {
     type: "function",
     function: {
+      name: "multi_edit",
+      strict: true,
+      description:
+        "Exact-string find/replace across one or more files in ONE call. " +
+        "Use for renames and codemods: supply find/replace strings and the file list — " +
+        "the tool reads each file fully and replaces all occurrences atomically via staging. " +
+        "wholeWord (default true) adds \\b boundaries — protects compound identifiers. " +
+        "Returns per-file replacement counts; count=0 for a file means find was not present.",
+      parameters: {
+        type: "object",
+        properties: {
+          files: {
+            type: "array",
+            items: { type: "string" },
+            description: "Relative paths from repo root.",
+          },
+          find: {
+            type: "string",
+            description: "Exact string to find (not a regex).",
+          },
+          replace: {
+            type: "string",
+            description: "Replacement string.",
+          },
+          wholeWord: {
+            type: ["boolean", "null"],
+            description:
+              "true (default): only match at identifier boundaries (\\b) — safe for symbol renames. " +
+              "false: literal substring replace-all.",
+          },
+        },
+        required: ["files", "find", "replace", "wholeWord"],
+        additionalProperties: false,
+      } as Record<string, unknown>,
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "write_file",
       strict: true,
       description:
