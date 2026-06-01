@@ -12,6 +12,9 @@ import type { ProviderName } from "../../usage/pricing.js";
 // Mirrors agentLoop.ts module-level constants — do not change independently.
 const TOKEN_BUDGET_HARD = 0.95;
 const TOKEN_BUDGET_WARN = 0.8;
+// Anthropic cache reads cost ~10× less than fresh input. The budget ratio uses this
+// discount so a cache-heavy run burns capacity proportionally to actual spend, not raw tokens.
+const CACHE_READ_BUDGET_DISCOUNT = 0.1;
 
 function extractTokenUsageForBudget(
   rawUsage: unknown
@@ -125,6 +128,9 @@ export class TokenBudgetMeter {
   emitStatus(iterNumber: number, onStructuredEvent?: (e: unknown) => void): number {
     const mainTokens = this.mainAgentTokens;
     const totalTokens = this._baseTokens + mainTokens + this._subagentTokenTotal;
+    // Effective budget discounts cache_read by 10× so cache-heavy runs consume capacity
+    // proportionally to actual cost, not raw token count.
+    const effectiveTokens = this._baseTokens + this.budgetAgentTokens + this._subagentTokenTotal;
     const breakdown = this._isSubagentLoop
       ? {
           mainAgent: this._baseTokens,
@@ -134,12 +140,13 @@ export class TokenBudgetMeter {
           mainAgent: this._baseTokens + mainTokens,
           subagents: this._subagentTokenTotal,
         };
-    const tokenBudgetRatio = this._cap > 0 ? totalTokens / this._cap : 0;
+    const tokenBudgetRatio = this._cap > 0 ? effectiveTokens / this._cap : 0;
     debugLog(
       "[zone-token-budget]",
       JSON.stringify({
         iter: iterNumber,
         cumulativeTokens: totalTokens,
+        effectiveBudgetTokens: effectiveTokens,
         cap: this._cap,
         ratio: Number(tokenBudgetRatio.toFixed(3)),
         breakdown,
@@ -171,6 +178,19 @@ export class TokenBudgetMeter {
       this._iterCostAccumulator.cache_read +
       this._iterCostAccumulator.cache_write +
       this._iterCostAccumulator.output
+    );
+  }
+
+  // Cache-discounted token count for the budget cap check.
+  // input_uncached = Anthropic's input_tokens = truly uncached (excludes cache_read/write).
+  // Only cache_read is discounted 10×; uncached input and cache_write stay at full weight.
+  get budgetAgentTokens(): number {
+    const acc = this._iterCostAccumulator;
+    return (
+      acc.input_uncached +
+      acc.cache_write +
+      Math.round(acc.cache_read * CACHE_READ_BUDGET_DISCOUNT) +
+      acc.output
     );
   }
 

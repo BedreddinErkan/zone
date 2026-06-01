@@ -431,4 +431,65 @@ describe("TokenBudgetMeter", () => {
       expect(meter.iterCostAccumulator.iter_count).toBe(2);
     });
   });
+
+  describe("cache-aware budget ratio", () => {
+    // input_tokens in Anthropic's API = truly uncached (not total).
+    // makeRawUsage(input, output, cacheRead, cacheWrite) — input = truly uncached.
+    // effectiveBudget = input_uncached + cache_write + round(cache_read * 0.1) + output.
+
+    it("heavy-cache: ratio uses discounted budget, raw cumulativeTokens unchanged", () => {
+      const cap = 800_000;
+      const meter = new TokenBudgetMeter({ baseTokens: 0, cap, isSubagentLoop: false, runId: "r" });
+      const spy = vi.fn();
+      meter.recordLLMCall({
+        rawUsage: makeRawUsage(10_000, 5_000, 90_000, 0),
+        iter: 1, totalIter: 15, provider: "anthropic",
+        model: "claude-sonnet-4-6", onStructuredEvent: spy,
+      });
+      // effective = 10K + 0 + round(90K*0.1) + 5K = 10K+9K+5K = 24K
+      const ratio = meter.emitStatus(1);
+      expect(ratio).toBeCloseTo(24_000 / cap, 4);
+      // raw total = truly_uncached + cache_read + output = 10K+90K+5K = 105K
+      expect(meter.cumulativeTokens).toBe(105_000);
+    });
+
+    it("no-cache: effective budget equals raw total (regression — unchanged for pure new work)", () => {
+      const cap = 800_000;
+      const meter = new TokenBudgetMeter({ baseTokens: 0, cap, isSubagentLoop: false, runId: "r" });
+      meter.recordLLMCall({
+        rawUsage: makeRawUsage(100_000, 5_000, 0, 0),
+        iter: 1, totalIter: 15, provider: "anthropic", model: "claude-sonnet-4-6",
+      });
+      // effective = 100K + 0 + 0 + 5K = 105K = raw total
+      const ratio = meter.emitStatus(1);
+      expect(ratio).toBeCloseTo(105_000 / cap, 4);
+      expect(meter.cumulativeTokens).toBe(105_000);
+    });
+
+    it("cap fires on effective tokens, not raw — 94%-cache run with raw > cap survives", () => {
+      const cap = 60_000;
+      const meter = new TokenBudgetMeter({ baseTokens: 0, cap, isSubagentLoop: false, runId: "r" });
+      // raw = 300 + 70_000 + 600 = 70_900 > cap
+      // effective = 300 + 0 + round(70_000*0.1) + 600 = 300+7_000+600 = 7_900 << cap*0.95
+      meter.recordLLMCall({
+        rawUsage: makeRawUsage(300, 600, 70_000, 0),
+        iter: 1, totalIter: 15, provider: "anthropic", model: "claude-sonnet-4-6",
+      });
+      const ratio = meter.emitStatus(1);
+      expect(meter.cumulativeTokens).toBeGreaterThan(cap); // raw exceeds cap
+      expect(ratio).toBeLessThan(0.95);                    // effective does NOT trigger budget exit
+    });
+
+    it("cache_write counted once at full weight (not discounted)", () => {
+      const cap = 800_000;
+      const meter = new TokenBudgetMeter({ baseTokens: 0, cap, isSubagentLoop: false, runId: "r" });
+      meter.recordLLMCall({
+        rawUsage: makeRawUsage(10_000, 5_000, 90_000, 30_000),
+        iter: 1, totalIter: 15, provider: "anthropic", model: "claude-sonnet-4-6",
+      });
+      // effective = 10K + 30K + round(90K*0.1) + 5K = 10K+30K+9K+5K = 54K
+      const ratio = meter.emitStatus(1);
+      expect(ratio).toBeCloseTo(54_000 / cap, 4);
+    });
+  });
 });
