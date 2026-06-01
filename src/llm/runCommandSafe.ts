@@ -75,7 +75,9 @@ const BLACKLIST_PATTERNS: RegExp[] = [
   /\|\|\s*\S/,
   // Pipe to anything other than safe read utilities.
   // The whitespace is inside the lookahead to prevent zero-width matches at the space before the utility name.
-  /\|(?!\s*(?:head|tail|grep|rg|wc|less|more|cat|jq)(?:\s|$))/,
+  /\|(?!\s*(?:head|tail|grep|rg|wc|less|more|cat|jq|sort|uniq|cut|column)(?:\s|$))/,
+  // sort -o/-output writes to a file without '>'; block it independently of the redirect guard
+  /\bsort\b[^|]*(\s-o(\s|=|$)|--output)/,
   // Privilege escalation
   /\bsudo\b/,
   /\bsu\b/,

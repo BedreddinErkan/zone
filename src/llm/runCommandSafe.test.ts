@@ -48,6 +48,28 @@ describe("checkCommandSafe", () => {
     ])("allows piped: %s", (cmd) => {
       expect(checkCommandSafe(cmd).safe).toBe(true);
     });
+
+    it("allows pipe to sort", () => {
+      expect(checkCommandSafe("find . -type f | sort").safe).toBe(true);
+      expect(checkCommandSafe("ls -la | sort").safe).toBe(true);
+    });
+
+    it("allows pipe to uniq", () => {
+      expect(checkCommandSafe("ls -la | uniq").safe).toBe(true);
+    });
+
+    it("allows pipe to cut", () => {
+      expect(checkCommandSafe("ls -la | cut -d' ' -f1").safe).toBe(true);
+    });
+
+    it("allows pipe to column", () => {
+      expect(checkCommandSafe("ls -la | column -t").safe).toBe(true);
+    });
+
+    it("blocks sort -o output flag", () => {
+      expect(checkCommandSafe("echo x | sort -o /tmp/evil").safe).toBe(false);
+      expect(checkCommandSafe("cat file | sort --output=/tmp/evil").safe).toBe(false);
+    });
   });
 
   describe("blacklist — mutations blocked", () => {
