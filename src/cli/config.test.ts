@@ -157,8 +157,13 @@ describe("loadCliConfig — config file precedence", () => {
   });
 
   it("unknown provider string → falls back to anthropic", () => {
-    const cfg = loadCliConfig({}, { defaultProvider: "gemini" });
+    const cfg = loadCliConfig({}, { defaultProvider: "grok" as never });
     expect(cfg.provider).toBe("anthropic");
+  });
+
+  it("gemini provider string → resolves to gemini", () => {
+    const cfg = loadCliConfig({}, { defaultProvider: "gemini" });
+    expect(cfg.provider).toBe("gemini");
   });
 });
 
@@ -244,7 +249,6 @@ describe("loadCliConfig — per-repo disk model precedence (Bug E fix)", () => {
   });
 
   it("disk model takes precedence over global config file for model and provider", () => {
-    vi.stubEnv("ZONE_GEMINI_ENABLE", "1");
     vi.mocked(loadDiskModelSync).mockReturnValue({
       version: 2,
       model: "gemini-3.5-flash",

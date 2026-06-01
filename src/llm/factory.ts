@@ -18,7 +18,6 @@ export function createLLMClient(options: LLMClientResolveOptions = {}): LLMClien
     const apiKey = resolveAnthropicApiKey(options.apiKey, ctx?.userApiKey);
     inner = new AnthropicAdapter(apiKey);
   } else if (provider === "gemini") {
-    if (!process.env.ZONE_GEMINI_ENABLE) throw new Error(`Unsupported provider: ${provider}`);
     const apiKey = resolveGeminiApiKey(options.apiKey, ctx?.userApiKey);
     inner = new OpenAIAdapter(apiKey, GEMINI_BASE_URL, "gemini");
   } else {

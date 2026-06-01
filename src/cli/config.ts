@@ -65,7 +65,7 @@ function envStr(key: string): string | undefined {
 
 function resolveProvider(value: string | undefined): LLMProvider {
   if (value === "openai") return "openai";
-  if (value === "gemini" && process.env.ZONE_GEMINI_ENABLE) return "gemini";
+  if (value === "gemini") return "gemini";
   return "anthropic";
 }
 

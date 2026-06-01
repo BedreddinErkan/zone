@@ -29,7 +29,7 @@ export function ApiKeysView(): React.ReactElement {
       if (key.escape) { dispatch({ type: "KEYS_INPUT_CANCEL" }); return; }
       if (input === "a" || input === "A") { dispatch({ type: "KEYS_PROVIDER_SELECTED", provider: "anthropic" }); return; }
       if (input === "o" || input === "O") { dispatch({ type: "KEYS_PROVIDER_SELECTED", provider: "openai" }); return; }
-      if ((input === "g" || input === "G") && process.env.ZONE_GEMINI_ENABLE) { dispatch({ type: "KEYS_PROVIDER_SELECTED", provider: "gemini" }); return; }
+      if (input === "g" || input === "G") { dispatch({ type: "KEYS_PROVIDER_SELECTED", provider: "gemini" }); return; }
     } else if (mode === "input") {
       if (key.escape) { dispatch({ type: "KEYS_INPUT_CANCEL" }); return; }
       if (key.return) {
@@ -84,7 +84,7 @@ export function ApiKeysView(): React.ReactElement {
       {mode === "select-provider" && (
         <>
           <Box height={1} />
-          <Text>Select provider: <Text color="cyan">[A]</Text>nthropic  <Text color="cyan">[O]</Text>penAI{process.env.ZONE_GEMINI_ENABLE ? <Text>  <Text color="cyan">[G]</Text>emini</Text> : null}  Esc cancel</Text>
+          <Text>Select provider: <Text color="cyan">[A]</Text>nthropic  <Text color="cyan">[O]</Text>penAI  <Text color="cyan">[G]</Text>emini<Text dimColor> (experimental)</Text>  Esc cancel</Text>
         </>
       )}
       {mode === "input" && (

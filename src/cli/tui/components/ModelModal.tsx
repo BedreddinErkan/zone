@@ -16,9 +16,7 @@ export function ModelModal({ dispatch }: Props): React.ReactElement {
   const cols = process.stdout.columns ?? 80;
   const narrow = cols < 60;
   const currentModelId = state.modelSettings?.model ?? getDefaultModelId();
-  const visibleModels = USER_FACING_MODELS.filter(
-    m => m.provider !== "gemini" || !!process.env.ZONE_GEMINI_ENABLE
-  );
+  const visibleModels = USER_FACING_MODELS;
   const count = visibleModels.length;
 
   useInput((_input, key) => {
@@ -67,6 +65,7 @@ export function ModelModal({ dispatch }: Props): React.ReactElement {
     rows.push(
       <Box key={m.id} backgroundColor={bg}>
         <Text color={selected ? "white" : undefined}>{label}</Text>
+        {m.provider === "gemini" && <Text dimColor> (exp)</Text>}
       </Box>
     );
   });

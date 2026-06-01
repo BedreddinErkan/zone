@@ -449,8 +449,7 @@ export function getRequestContextFromHeaders(req: express.Request): {
       ? req.headers["x-zone-provider"].trim().toLowerCase()
       : "";
   const provider: LLMProvider | undefined =
-    providerRaw === "openai" || providerRaw === "anthropic"
-    || (providerRaw === "gemini" && !!process.env.ZONE_GEMINI_ENABLE)
+    providerRaw === "openai" || providerRaw === "anthropic" || providerRaw === "gemini"
       ? (providerRaw as LLMProvider)
       : undefined;
 
