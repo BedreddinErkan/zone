@@ -16,7 +16,7 @@ import {
   checkSemanticSmells,
   validateSyntax,
 } from "../ast/astSyntaxValidator.js";
-import { checkWriteScope } from "./scopeGuard.js";
+import { checkWriteScope, maybeExpandScopeForSymbolMatch } from "./scopeGuard.js";
 import { sanitizeVerificationEnv, strippedEnvKeys } from "../core/buildEnv.js";
 import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import type { ProjectFramework } from "../repo/detectFramework.js";
@@ -723,6 +723,8 @@ export async function executeTool(
     /** Tur P2-scope: when present, write tools (apply_patch, write_file)
      *  reject paths outside the union of plan.steps[*].filesLikely. */
     executionPlan?: import("../llm/executionPlan.js").ExecutionPlan | null;
+    /** Task archetype — used by symbol-grounded scope-expansion heuristic. */
+    archetype?: string;
     allowedTools?: ReadonlySet<string>;
     userId?: string;
     framework?: ProjectFramework;
@@ -1586,6 +1588,20 @@ export async function executeTool(
             filePath,
             reason: "out_of_plan_scope",
           }));
+          const symExpansion = await maybeExpandScopeForSymbolMatch(
+            input?.executionPlan, filePath, repoPath, input?.archetype
+          );
+          if (symExpansion.expanded) {
+            debugLog("[zone-scope-expanded-symbol]", JSON.stringify({
+              tool: "apply_patch", filePath,
+              addedFile: symExpansion.addedFile, reason: symExpansion.reason,
+            }));
+            return {
+              success: false,
+              output: `Scope expanded: "${filePath}" added to writable scope (${symExpansion.reason}). Retry this apply_patch immediately.`,
+              error: "apply_patch_scope_expanded_retry",
+            };
+          }
           return {
             success: false,
             output: scopeError,
@@ -2459,6 +2475,20 @@ export async function executeTool(
             filePath,
             reason: "out_of_plan_scope",
           }));
+          const symExpansion = await maybeExpandScopeForSymbolMatch(
+            input?.executionPlan, filePath, repoPath, input?.archetype
+          );
+          if (symExpansion.expanded) {
+            debugLog("[zone-scope-expanded-symbol]", JSON.stringify({
+              tool: "write_file", filePath,
+              addedFile: symExpansion.addedFile, reason: symExpansion.reason,
+            }));
+            return {
+              success: false,
+              output: `Scope expanded: "${filePath}" added to writable scope (${symExpansion.reason}). Retry this write_file immediately.`,
+              error: "write_file_scope_expanded_retry",
+            };
+          }
           return {
             success: false,
             output: scopeError,

@@ -507,5 +507,29 @@ describe("handleToolResult", () => {
       expect(terminalEvent).toBeDefined();
       expect((terminalEvent as { blockedCount?: number }).blockedCount).toBe(5);
     });
+
+    it("fires across iteration boundary: 4 blocks in iter N + 1 block in iter N+1 = early_exit", async () => {
+      // Simulate iter N: 4 blocks accumulate
+      const ctx1 = makeCtx();
+      const deps = makeDeps();
+      for (let i = 0; i < 4; i++) {
+        const r = await handleToolResult(
+          "apply_patch", { filePath: "src/store.tsx" }, `c${i}`, SCOPE_BLOCK_APPLY, ctx1, deps
+        );
+        expect(r.kind).toBe("continue");
+      }
+      expect(ctx1.consecutiveScopeBlocks).toBe(4);
+
+      // Simulate iter N+1: new toolEventCtx seeded from outer var (mirrors the agentLoop writeback fix)
+      const ctx2 = makeCtx();
+      ctx2.consecutiveScopeBlocks = ctx1.consecutiveScopeBlocks;
+      const result = await handleToolResult(
+        "apply_patch", { filePath: "src/store.tsx" }, "c4", SCOPE_BLOCK_APPLY, ctx2, deps
+      );
+      expect(result.kind).toBe("early_exit");
+      if (result.kind === "early_exit") {
+        expect(result.exit.terminationReason).toBe("scope_block_circuit_breaker");
+      }
+    });
   });
 });

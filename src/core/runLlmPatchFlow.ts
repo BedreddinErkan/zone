@@ -5217,6 +5217,7 @@ const initializeTodosFromPlan = (): void => {
           relevantFiles: agentLoopPlanFiles,
           userApiKey: input.userApiKey,
           provider: input.provider,
+          archetype: (input.preClassifiedTask?.archetype as string | undefined),
         });
         debugLog(`[zone-plan] generated steps=${executionPlan.steps.length} (agent_loop)`);
         debugLog(`[zone-plan] scope=${executionPlan.scopeSummary}`);
@@ -6765,6 +6766,7 @@ const initializeTodosFromPlan = (): void => {
         relevantFiles: relevantFiles.map((file) => file.path),
         userApiKey: input.userApiKey,
         provider: input.provider,
+        archetype: (input.preClassifiedTask?.archetype as string | undefined),
       });
       debugLog(`[zone-plan] generated steps=${executionPlan.steps.length}`);
       debugLog(`[zone-plan] scope=${executionPlan.scopeSummary}`);

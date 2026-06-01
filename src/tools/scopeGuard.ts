@@ -1,5 +1,10 @@
+import { execFile } from "node:child_process";
+import * as path from "node:path";
+import { promisify } from "node:util";
 import type { ExecutionPlan } from "../llm/executionPlan.js";
 import type { VerifyDiagnostic } from "../core/buildVerifyDiagnostic.js";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Plan-based write-scope guard (Tur P2-scope).
@@ -200,5 +205,84 @@ export function maybeExpandScopeForVerifyDiagnostic(
     expanded: true,
     addedFile: normalized,
     reason: `verify_diagnostic_failing_file:${errorType}`,
+  };
+}
+
+const SYMBOL_STOP = new Set([
+  "const", "class", "async", "await", "return", "import", "export",
+  "function", "interface", "string", "number", "boolean", "object", "array",
+  "refactor", "rename", "across", "codebase", "update", "change", "every",
+  "where", "files", "should", "using", "every", "replace", "apply",
+]);
+
+function extractPlanSymbols(text: string): string[] {
+  const raw = text.match(/\b[A-Za-z][A-Za-z0-9_]{4,}\b/g) ?? [];
+  const seen = new Set<string>();
+  return raw
+    .filter(t => !SYMBOL_STOP.has(t.toLowerCase()) && !seen.has(t) && seen.add(t))
+    .slice(0, 10);
+}
+
+/**
+ * For refactor/complex_multi_file tasks: when a write is scope-blocked, check whether
+ * the blocked file actually contains a symbol mentioned in the plan objective. If so,
+ * add it to scope (same mutation as maybeExpandScopeForVerifyDiagnostic) so the agent
+ * can retry immediately. Fails safe — returns expanded:false on any rg error.
+ */
+export async function maybeExpandScopeForSymbolMatch(
+  executionPlan: ExecutionPlan | null | undefined,
+  blockedFilePath: string,
+  repoPath: string | undefined,
+  archetype: string | undefined,
+): Promise<ScopeExpansionResult> {
+  if (archetype !== "refactor" && archetype !== "complex_multi_file") {
+    return { expanded: false, addedFile: null, reason: "archetype_not_refactor" };
+  }
+  if (!executionPlan?.steps?.length) {
+    return { expanded: false, addedFile: null, reason: "no_plan" };
+  }
+  const symbols = extractPlanSymbols(
+    `${executionPlan.objective} ${executionPlan.scopeSummary}`
+  );
+  if (symbols.length === 0) {
+    return { expanded: false, addedFile: null, reason: "no_symbols_in_plan" };
+  }
+
+  const absPath = repoPath ? path.join(repoPath, blockedFilePath) : blockedFilePath;
+  const pattern = symbols.join("|");
+  try {
+    // rg exits 0 (no throw) when a match is found, exits 1 (throws) when no match
+    await execFileAsync("rg", ["--quiet", pattern, absPath]);
+  } catch (err) {
+    const code = (err as { code?: number }).code;
+    if (code === 1) {
+      return { expanded: false, addedFile: null, reason: "symbol_not_in_file" };
+    }
+    // rg unavailable or other error — fail safe, do not expand
+    return { expanded: false, addedFile: null, reason: "rg_unavailable" };
+  }
+
+  const normalized = normalizePath(blockedFilePath, repoPath);
+  if (!normalized || normalized === OUT_OF_REPO_MARKER) {
+    return { expanded: false, addedFile: null, reason: "path_outside_repo" };
+  }
+  for (const step of executionPlan.steps) {
+    const list = (step as { filesLikely?: unknown }).filesLikely;
+    if (Array.isArray(list) && list.map(f => normalizePath(String(f), repoPath)).includes(normalized)) {
+      return { expanded: false, addedFile: null, reason: "already_in_scope" };
+    }
+  }
+
+  const target = executionPlan.steps[0];
+  if (!target) return { expanded: false, addedFile: null, reason: "plan_has_no_steps" };
+  if (!Array.isArray((target as { filesLikely?: unknown }).filesLikely)) {
+    (target as { filesLikely: string[] }).filesLikely = [];
+  }
+  (target as { filesLikely: string[] }).filesLikely.push(normalized);
+
+  return {
+    expanded: true,
+    addedFile: normalized,
+    reason: `symbol_match:${symbols.slice(0, 3).join(",")}`,
   };
 }

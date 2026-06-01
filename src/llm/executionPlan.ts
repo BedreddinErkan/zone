@@ -86,6 +86,8 @@ export async function generateExecutionPlan(input: {
   provider?: LLMProvider;
   previousPlan?: ExecutionPlan;
   userFeedback?: string;
+  /** Task archetype — tightens the filesLikely rule for refactor/rename tasks. */
+  archetype?: string;
 }): Promise<ExecutionPlan> {
   const client = createLLMClient({
     apiKey: input.userApiKey,
@@ -122,7 +124,7 @@ ${relevantFiles}
 Rules:
 - Break the task into 3-8 implementation steps.
 - Estimate affected files by path/name when possible.
-- For \`filesLikely\`, copy paths VERBATIM from the RELEVANT FILES list above when the file is clearly affected by the step. Never alter or guess extensions (.ts vs .tsx, .js vs .jsx, etc.). Only estimate a path when no matching file appears in RELEVANT FILES.
+- For \`filesLikely\`, copy paths VERBATIM from the RELEVANT FILES list above when the file is clearly affected by the step. Never alter or guess extensions (.ts vs .tsx, .js vs .jsx, etc.). ${input.archetype === "refactor" || input.archetype === "complex_multi_file" ? "Do NOT estimate or invent paths — if a file is not in RELEVANT FILES, omit it from filesLikely and note the gap in the step description." : "Only estimate a path when no matching file appears in RELEVANT FILES."}
 - Identify risks briefly.
 - Keep scopeSummary under 160 characters.
 - Return JSON only.

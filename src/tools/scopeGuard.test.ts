@@ -1,5 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { checkWriteScope } from "./scopeGuard.js";
+import { describe, it, expect, afterEach } from "vitest";
+import { writeFile, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, basename } from "node:path";
+import { randomBytes } from "node:crypto";
+import { checkWriteScope, maybeExpandScopeForSymbolMatch } from "./scopeGuard.js";
 import type { ExecutionPlan } from "../llm/executionPlan.js";
 
 function makePlan(filesLikely: string[]): ExecutionPlan {
@@ -103,5 +107,120 @@ describe("checkWriteScope", () => {
       expect(msg).not.toBeNull();
       expect(msg).toMatch(/and 1 more/);
     });
+  });
+});
+
+describe("maybeExpandScopeForSymbolMatch", () => {
+  const tmpFiles: string[] = [];
+
+  async function makeTmpFile(content: string): Promise<string> {
+    const name = join(tmpdir(), `scopeGuard-test-${randomBytes(6).toString("hex")}.ts`);
+    await writeFile(name, content, "utf-8");
+    tmpFiles.push(name);
+    return name;
+  }
+
+  afterEach(async () => {
+    for (const f of tmpFiles.splice(0)) {
+      await unlink(f).catch(() => {});
+    }
+  });
+
+  function makeRefactorPlan(objective: string): ExecutionPlan {
+    return {
+      objective,
+      steps: [{ title: "rename", description: "apply rename", filesLikely: ["src/a.ts"] }],
+      riskHints: [],
+      scopeSummary: "",
+    };
+  }
+
+  it("expands scope when blocked file contains a plan symbol (refactor archetype)", async () => {
+    const tmpFile = await makeTmpFile(
+      "export function cumulativeTokens() { return 0; }\n"
+    );
+    const repoPath = tmpdir();
+    const relPath = basename(tmpFile);
+    const plan = makeRefactorPlan("rename cumulativeTokens across codebase");
+    const result = await maybeExpandScopeForSymbolMatch(
+      plan, relPath, repoPath, "refactor"
+    );
+    expect(result.expanded).toBe(true);
+    expect(result.addedFile).toBe(relPath);
+    expect(result.reason).toMatch(/symbol_match/);
+    expect((plan.steps[0] as { filesLikely: string[] }).filesLikely).toContain(relPath);
+  });
+
+  it("does not expand when blocked file does not contain any plan symbol", async () => {
+    const tmpFile = await makeTmpFile(
+      "export function unrelatedFunction() { return 42; }\n"
+    );
+    const repoPath = tmpdir();
+    const plan = makeRefactorPlan("rename cumulativeTokens across codebase");
+    const result = await maybeExpandScopeForSymbolMatch(
+      plan, basename(tmpFile), repoPath, "refactor"
+    );
+    expect(result.expanded).toBe(false);
+    expect(result.reason).toBe("symbol_not_in_file");
+  });
+
+  it("does not expand for non-refactor archetype (targeted_fix)", async () => {
+    const tmpFile = await makeTmpFile(
+      "export const cumulativeTokens = 0;\n"
+    );
+    const repoPath = tmpdir();
+    const plan = makeRefactorPlan("rename cumulativeTokens across codebase");
+    const result = await maybeExpandScopeForSymbolMatch(
+      plan, basename(tmpFile), repoPath, "targeted_fix"
+    );
+    expect(result.expanded).toBe(false);
+    expect(result.reason).toBe("archetype_not_refactor");
+  });
+
+  it("also expands for complex_multi_file archetype", async () => {
+    const tmpFile = await makeTmpFile(
+      "import { cumulativeTokens } from './store';\n"
+    );
+    const repoPath = tmpdir();
+    const plan = makeRefactorPlan("rename cumulativeTokens across codebase");
+    const result = await maybeExpandScopeForSymbolMatch(
+      plan, basename(tmpFile), repoPath, "complex_multi_file"
+    );
+    expect(result.expanded).toBe(true);
+  });
+
+  it("does not throw when file does not exist — fails safe", async () => {
+    const plan = makeRefactorPlan("rename cumulativeTokens across codebase");
+    const result = await maybeExpandScopeForSymbolMatch(
+      plan, "nonexistent-file-xyz.ts", tmpdir(), "refactor"
+    );
+    expect(result.expanded).toBe(false);
+  });
+
+  it("does not expand when plan is null", async () => {
+    const result = await maybeExpandScopeForSymbolMatch(
+      null, "src/a.ts", undefined, "refactor"
+    );
+    expect(result.expanded).toBe(false);
+    expect(result.reason).toBe("no_plan");
+  });
+
+  it("does not expand when file is already in scope", async () => {
+    const tmpFile = await makeTmpFile(
+      "export const cumulativeTokens = 0;\n"
+    );
+    const repoPath = tmpdir();
+    const relPath = basename(tmpFile);
+    const plan: ExecutionPlan = {
+      objective: "rename cumulativeTokens across codebase",
+      steps: [{ title: "rename", description: "apply rename", filesLikely: [relPath] }],
+      riskHints: [],
+      scopeSummary: "",
+    };
+    const result = await maybeExpandScopeForSymbolMatch(
+      plan, relPath, repoPath, "refactor"
+    );
+    expect(result.expanded).toBe(false);
+    expect(result.reason).toBe("already_in_scope");
   });
 });

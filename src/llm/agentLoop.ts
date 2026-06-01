@@ -1480,6 +1480,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   let promotionTrigger: "iter_cap" | "rollback_x2" | "coaching_exhausted" | "forced_tier_blocking" | null = null;
   let promotedAtIter: number | null = null;
   let rollbackCount = 0;
+  let consecutiveScopeBlocks = 0;
   let coachingBudgetExhausted = false;
   const inputIterCap: number | null =
     input.pipelineApplied === true && typeof input.maxIterationsOverride === "number"
@@ -2714,7 +2715,7 @@ Example:
         failedToolFilePath: null,
         rollbackCount,
         lastLoopResult: null,
-        consecutiveScopeBlocks: 0,
+        consecutiveScopeBlocks,
       };
       const toolEventDeps = {
         budget,
@@ -3014,6 +3015,7 @@ Example:
           stagingFiles,
           abortSignal: input.abortSignal,
           executionPlan: input.executionPlan ?? null,
+          archetype: input.taskClassification?.archetype,
           allowedTools: effectiveAllowedSet,
           userId: input.userId,
           framework: input.framework,
@@ -3039,6 +3041,7 @@ Example:
         });
         const toolEvent = await handleToolResult(name, parsedArgs, callId, result, toolEventCtx, toolEventDeps);
         rollbackCount = toolEventCtx.rollbackCount;
+        consecutiveScopeBlocks = toolEventCtx.consecutiveScopeBlocks;
         if (toolEvent.kind === "early_exit") {
           return { ...toolEvent.exit, promotedFromArchetype, promotionTrigger, promotedAtIter };
         }
