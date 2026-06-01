@@ -143,6 +143,52 @@ export async function handleToolResult(
     iter: deps.iter,
   });
 
+  // Step 11.5: scope-block circuit breaker
+  // Counts consecutive write attempts blocked by the plan scope guard. Resets
+  // on any successful write. At 3 blocks a coaching nudge is appended (Pattern A);
+  // at 5 the run is force-terminated to prevent budget exhaustion on a bad plan.
+  {
+    const isScopeBlock =
+      !result.success &&
+      (result.error === "apply_patch_blocked_out_of_plan_scope" ||
+       result.error === "write_file_blocked_out_of_plan_scope");
+    const isSuccessfulWrite =
+      result.success && (name === "apply_patch" || name === "write_file");
+
+    if (isScopeBlock) {
+      ctx.consecutiveScopeBlocks += 1;
+
+      if (ctx.consecutiveScopeBlocks === 3) {
+        // Pattern A: append coaching nudge to the role:tool message just pushed in step 11
+        const last = ctx.responseInput[ctx.responseInput.length - 1];
+        if (last?.role === "tool" && typeof last.content === "string") {
+          last.content +=
+            `\n\n[SCOPE-BLOCK COACHING — ${ctx.consecutiveScopeBlocks} consecutive blocks]\n` +
+            `Your plan's filesLikely paths do not match the files that need editing ` +
+            `(likely an extension mismatch such as .ts vs .tsx, or a stale path). ` +
+            `Do NOT retry the same blocked path. Either work within the already-allowed ` +
+            `scope, or end the run with a FINAL SUMMARY explaining the mismatch.`;
+        }
+      }
+
+      if (ctx.consecutiveScopeBlocks >= 5) {
+        deps.onStructuredEvent?.({
+          type: "scope_block_circuit_terminal",
+          blockedCount: ctx.consecutiveScopeBlocks,
+          title: `Scope-block circuit breaker: write blocked ${ctx.consecutiveScopeBlocks}× consecutively`,
+          status: "error",
+        });
+        return {
+          kind: "early_exit",
+          exit: deps.synthesizeScopeBlockExit(deps.iter + 1, ctx.consecutiveScopeBlocks),
+        };
+      }
+    }
+    if (isSuccessfulWrite) {
+      ctx.consecutiveScopeBlocks = 0;
+    }
+  }
+
   // Step 12: loop detection
   const loopHash = deps.hashToolCall(name, parsedArgs);
   const loopResult = deps.recordAndDetect(deps.detectorState, loopHash);

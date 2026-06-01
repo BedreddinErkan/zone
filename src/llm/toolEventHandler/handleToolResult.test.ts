@@ -32,6 +32,7 @@ function makeCtx(overrides?: Partial<ToolEventContext>): ToolEventContext {
     failedToolFilePath: null,
     rollbackCount: 0,
     lastLoopResult: null,
+    consecutiveScopeBlocks: 0,
     ...overrides,
   };
 }
@@ -74,6 +75,15 @@ function makeDeps(overrides?: Partial<HandleToolResultDeps>): HandleToolResultDe
       patchValidatedByAgent: false,
       verificationReason: "no_verification_attempted",
       loopDetected: { toolName: "run_command", count: 4 },
+    }),
+    synthesizeScopeBlockExit: vi.fn().mockReturnValue({
+      success: false,
+      terminationReason: "scope_block_circuit_breaker",
+      summary: "scope block circuit breaker",
+      toolCallLog: [],
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted",
     }),
     classifyFailure: vi.fn().mockReturnValue("generic_failure"),
     extractSemanticSmellName: vi.fn().mockReturnValue("unknown"),
@@ -393,6 +403,109 @@ describe("handleToolResult", () => {
       expect(s.totalResults).toBe(1);
       expect(s.perTool["run_command"]).toBeDefined();
       expect(s.perTool["run_command"].bytes).toBe(Buffer.byteLength(output, "utf8"));
+    });
+  });
+
+  describe("scope-block circuit breaker", () => {
+    const SCOPE_BLOCK_APPLY = {
+      output: 'Write blocked: "src/store.tsx" is outside the planned scope.',
+      success: false,
+      error: "apply_patch_blocked_out_of_plan_scope",
+    };
+    const SCOPE_BLOCK_WRITE = {
+      output: 'Write blocked: "src/store.tsx" is outside the planned scope.',
+      success: false,
+      error: "write_file_blocked_out_of_plan_scope",
+    };
+    const WRITE_SUCCESS = { output: "Patch applied: 1 block(s)", success: true };
+
+    it("does not terminate before 5 consecutive scope blocks", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      for (let i = 0; i < 4; i++) {
+        const result = await handleToolResult(
+          "apply_patch", { filePath: "src/store.tsx" }, `c${i}`, SCOPE_BLOCK_APPLY, ctx, deps
+        );
+        expect(result.kind).toBe("continue");
+      }
+      expect(ctx.consecutiveScopeBlocks).toBe(4);
+    });
+
+    it("appends coaching nudge to the last responseInput entry at the 3rd block", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      for (let i = 0; i < 3; i++) {
+        await handleToolResult(
+          "apply_patch", { filePath: "src/store.tsx" }, `c${i}`, SCOPE_BLOCK_APPLY, ctx, deps
+        );
+      }
+      const last = ctx.responseInput[ctx.responseInput.length - 1];
+      expect(last?.role).toBe("tool");
+      expect(typeof last?.content).toBe("string");
+      expect((last?.content as string)).toContain("SCOPE-BLOCK COACHING");
+      expect((last?.content as string)).toContain("extension mismatch");
+    });
+
+    it("returns early_exit with scope_block_circuit_breaker at 5 consecutive blocks", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      let result: Awaited<ReturnType<typeof handleToolResult>> = { kind: "continue" };
+      for (let i = 0; i < 5; i++) {
+        result = await handleToolResult(
+          "apply_patch", { filePath: "src/store.tsx" }, `c${i}`, SCOPE_BLOCK_APPLY, ctx, deps
+        );
+      }
+      expect(result.kind).toBe("early_exit");
+      if (result.kind === "early_exit") {
+        expect(result.exit.terminationReason).toBe("scope_block_circuit_breaker");
+      }
+      expect(deps.synthesizeScopeBlockExit).toHaveBeenCalledOnce();
+    });
+
+    it("write_file scope block counts the same as apply_patch scope block", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      let result: Awaited<ReturnType<typeof handleToolResult>> = { kind: "continue" };
+      for (let i = 0; i < 5; i++) {
+        result = await handleToolResult(
+          "write_file", { filePath: "src/store.tsx" }, `c${i}`, SCOPE_BLOCK_WRITE, ctx, deps
+        );
+      }
+      expect(result.kind).toBe("early_exit");
+      if (result.kind === "early_exit") {
+        expect(result.exit.terminationReason).toBe("scope_block_circuit_breaker");
+      }
+    });
+
+    it("resets counter to 0 on a successful write, preventing premature termination", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      // 4 blocks, then a success, then 4 more — never reaches 5 consecutive
+      for (let i = 0; i < 4; i++) {
+        await handleToolResult("apply_patch", { filePath: "src/store.tsx" }, `c${i}`, SCOPE_BLOCK_APPLY, ctx, deps);
+      }
+      expect(ctx.consecutiveScopeBlocks).toBe(4);
+      await handleToolResult("apply_patch", { filePath: "src/ok.ts" }, "ok", WRITE_SUCCESS, ctx, deps);
+      expect(ctx.consecutiveScopeBlocks).toBe(0);
+      for (let i = 0; i < 4; i++) {
+        const r = await handleToolResult("apply_patch", { filePath: "src/store.tsx" }, `d${i}`, SCOPE_BLOCK_APPLY, ctx, deps);
+        expect(r.kind).toBe("continue");
+      }
+      expect(ctx.consecutiveScopeBlocks).toBe(4);
+    });
+
+    it("emits scope_block_circuit_terminal structured event at terminate", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      for (let i = 0; i < 5; i++) {
+        await handleToolResult("apply_patch", { filePath: "src/store.tsx" }, `c${i}`, SCOPE_BLOCK_APPLY, ctx, deps);
+      }
+      const eventCalls = (deps.onStructuredEvent as ReturnType<typeof vi.fn>).mock.calls;
+      const terminalEvent = eventCalls.map((c: unknown[]) => c[0]).find(
+        (e: unknown) => (e as { type?: string }).type === "scope_block_circuit_terminal"
+      );
+      expect(terminalEvent).toBeDefined();
+      expect((terminalEvent as { blockedCount?: number }).blockedCount).toBe(5);
     });
   });
 });

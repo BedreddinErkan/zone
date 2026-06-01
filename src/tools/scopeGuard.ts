@@ -50,6 +50,27 @@ export function checkWriteScope(
 
   if (allowedFiles.has(target)) return null;
 
+  // TS/JS extension-family tolerance: the plan LLM may list store.ts when the
+  // real file is store.tsx (or vice-versa). Accept a write if the target shares
+  // the same directory+stem with any allowed file, provided both extensions belong
+  // to the TypeScript/JavaScript family. Cross-family paths (.py, .json, etc.)
+  // still require exact match.
+  const TS_JS_FAMILY = new Set(["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"]);
+  const targetDot = target.lastIndexOf(".");
+  if (targetDot !== -1) {
+    const targetExt = target.slice(targetDot + 1);
+    if (TS_JS_FAMILY.has(targetExt)) {
+      const targetStem = target.slice(0, targetDot); // e.g. "src/cli/tui/store"
+      for (const allowed of allowedFiles) {
+        const aDot = allowed.lastIndexOf(".");
+        if (aDot === -1) continue;
+        if (TS_JS_FAMILY.has(allowed.slice(aDot + 1)) && allowed.slice(0, aDot) === targetStem) {
+          return null;
+        }
+      }
+    }
+  }
+
   const planScope = Array.from(allowedFiles).slice(0, 5).join(", ");
   const more = allowedFiles.size > 5 ? ` (and ${allowedFiles.size - 5} more)` : "";
   return (

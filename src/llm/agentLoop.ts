@@ -255,7 +255,7 @@ export interface AgentLoopResult {
   /** Phase H.7: how the loop ended. Used by upstream flows (investigation /
    *  patch) to surface "Token budget reached" vs "Iteration budget reached"
    *  distinctly in the UI. Optional for backward-compat with older callers. */
-  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded" | "upstream_unavailable" | "phase1_handoff" | "hook_blocked";
+  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded" | "upstream_unavailable" | "phase1_handoff" | "hook_blocked" | "scope_block_circuit_breaker";
   /** Phase Q.2: populated when terminationReason === "loop_detected". The
    *  offending tool name + observed count in the sliding-window detector. */
   loopDetected?: { toolName: string; count: number };
@@ -2108,6 +2108,35 @@ Example:
     };
   };
 
+  const synthesizeScopeBlockCircuitBreakerExit = (
+    iterNumber: number,
+    blockedCount: number
+  ): AgentLoopResult => {
+    const msg =
+      `Task aborted: ${blockedCount} consecutive write attempts were blocked by the scope guard. ` +
+      `The plan's filesLikely paths do not match the files the agent is trying to edit ` +
+      `(likely an extension mismatch such as .ts vs .tsx). ` +
+      `Retry the task with the correct file paths, or widen the plan scope.`;
+    debugLog("[zone-scope-block-circuit]", JSON.stringify({
+      iter: iterNumber, runId: input.runId, blockedCount, ts: new Date().toISOString(),
+    }));
+    emitRunBreakdownSummary();
+    emitCacheSummary();
+    emitSelfValidationSummary();
+    return {
+      success: false,
+      summary: msg,
+      toolCallLog,
+      filesModified: Array.from(filesModified),
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted",
+      terminationReason: "scope_block_circuit_breaker",
+      tokenUsage: budget.tokenUsage,
+      costUsd: budget.snapshot().costUsd,
+      iterCount: iterNumber + 1,
+    };
+  };
+
   // R.1: emit the run-level summary at every exit path.
   const emitRunBreakdownSummary = (): void => {
     if (breakdownEvents.length > 0) {
@@ -2681,6 +2710,7 @@ Example:
         failedToolFilePath: null,
         rollbackCount,
         lastLoopResult: null,
+        consecutiveScopeBlocks: 0,
       };
       const toolEventDeps = {
         budget,
@@ -2694,6 +2724,7 @@ Example:
         onToolResult: input.onToolResult,
         synthesizeTokenBudgetExit,
         synthesizeLoopDetectedExit,
+        synthesizeScopeBlockExit: synthesizeScopeBlockCircuitBreakerExit,
         classifyFailure,
         extractSemanticSmellName,
         extractErrorLine,

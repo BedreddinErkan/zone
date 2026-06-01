@@ -31,6 +31,8 @@ export interface ToolEventContext {
   failedToolFilePath: string | null;
   rollbackCount: number;
   lastLoopResult: { status: "ok" | "warn" | "terminate"; count: number } | null;
+  /** Consecutive scope-blocked write attempts (apply_patch or write_file). Reset on any successful write. */
+  consecutiveScopeBlocks: number;
 }
 
 export type ToolEventResult =
@@ -59,6 +61,7 @@ export interface HandleToolResultDeps {
   onToolResult: ((name: string, result: ToolResult) => void) | undefined;
   synthesizeTokenBudgetExit: (iter: number, messages: ChatCompletionMessageParam[]) => Promise<AgentLoopResult>;
   synthesizeLoopDetectedExit: (iter: number, toolName: string, count: number) => AgentLoopResult;
+  synthesizeScopeBlockExit: (iter: number, blockedCount: number) => AgentLoopResult;
   classifyFailure: (toolName: string, output: string, error: string | undefined) => string;
   extractSemanticSmellName: (output: string) => string;
   extractErrorLine: (output: string) => number | null;

@@ -122,6 +122,7 @@ ${relevantFiles}
 Rules:
 - Break the task into 3-8 implementation steps.
 - Estimate affected files by path/name when possible.
+- For \`filesLikely\`, copy paths VERBATIM from the RELEVANT FILES list above when the file is clearly affected by the step. Never alter or guess extensions (.ts vs .tsx, .js vs .jsx, etc.). Only estimate a path when no matching file appears in RELEVANT FILES.
 - Identify risks briefly.
 - Keep scopeSummary under 160 characters.
 - Return JSON only.

@@ -32,6 +32,7 @@ function makeCtx(overrides?: Partial<ToolEventContext>): ToolEventContext {
     failedToolFilePath: null,
     rollbackCount: 0,
     lastLoopResult: null,
+    consecutiveScopeBlocks: 0,
     ...overrides,
   };
 }
@@ -74,6 +75,15 @@ function makeDeps(overrides?: Partial<HandleToolResultDeps>): HandleToolResultDe
       patchValidatedByAgent: false,
       verificationReason: "no_verification_attempted",
       loopDetected: { toolName: "run_command", count: 4 },
+    }),
+    synthesizeScopeBlockExit: vi.fn().mockReturnValue({
+      success: false,
+      terminationReason: "scope_block_circuit_breaker",
+      summary: "scope block circuit breaker",
+      toolCallLog: [],
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted",
     }),
     classifyFailure: vi.fn().mockReturnValue("generic_failure"),
     extractSemanticSmellName: vi.fn().mockReturnValue("unknown"),

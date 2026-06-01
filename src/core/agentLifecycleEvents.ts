@@ -158,12 +158,16 @@ export type ZoneStructuredProgressEvent = {
     | "compaction_started"
     | "compaction_status"
     | "compaction_exhausted"
-    | "compaction_overflow_warning";
+    | "compaction_overflow_warning"
+    /** Scope-block circuit breaker: emitted when consecutive scope-blocked writes reach the terminate threshold. */
+    | "scope_block_circuit_terminal";
   title: string;
   detail?: string;
   filePath?: string;
   command?: string;
   status?: "active" | "success" | "warning" | "error";
+  /** scope_block_circuit_terminal: number of consecutive scope-blocked writes that triggered the breaker. */
+  blockedCount?: number;
   subagentStatus?: "completed" | "partial" | "failed" | "max_iterations";
   subagentId?: string;
   subagentType?: "worker" | "explore" | "verifier";
