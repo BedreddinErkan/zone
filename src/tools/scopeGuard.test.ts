@@ -108,6 +108,28 @@ describe("checkWriteScope", () => {
       expect(msg).toMatch(/and 1 more/);
     });
   });
+
+  describe("archetype bypass", () => {
+    it("allows any write for refactor archetype regardless of plan", () => {
+      const plan = makePlan(["src/a.ts"]);
+      expect(checkWriteScope("src/completely/unrelated.ts", plan, undefined, "refactor")).toBeNull();
+    });
+
+    it("allows any write for complex_multi_file archetype regardless of plan", () => {
+      const plan = makePlan(["src/a.ts"]);
+      expect(checkWriteScope("src/completely/unrelated.ts", plan, undefined, "complex_multi_file")).toBeNull();
+    });
+
+    it("still blocks out-of-scope write for targeted_fix archetype", () => {
+      const plan = makePlan(["src/a.ts"]);
+      expect(checkWriteScope("src/b.ts", plan, undefined, "targeted_fix")).toMatch(/outside the planned scope/);
+    });
+
+    it("still blocks out-of-scope write when archetype is undefined", () => {
+      const plan = makePlan(["src/a.ts"]);
+      expect(checkWriteScope("src/b.ts", plan)).toMatch(/outside the planned scope/);
+    });
+  });
 });
 
 describe("maybeExpandScopeForSymbolMatch", () => {

@@ -23,8 +23,12 @@ const execFileAsync = promisify(execFile);
 export function checkWriteScope(
   filePath: string,
   executionPlan: ExecutionPlan | null | undefined,
-  repoPath?: string
+  repoPath?: string,
+  archetype?: string,
 ): string | null {
+  if (archetype === "refactor" || archetype === "complex_multi_file") {
+    return null;
+  }
   if (!executionPlan || !Array.isArray(executionPlan.steps) || executionPlan.steps.length === 0) {
     return null;
   }

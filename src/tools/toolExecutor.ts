@@ -1575,7 +1575,7 @@ export async function executeTool(
       // Tur P2-scope: hard-block writes that fall outside the active plan's
       // filesLikely union. Independent of the per-file escalation gate below.
       {
-        const scopeError = checkWriteScope(filePath, input?.executionPlan ?? null, repoPath);
+        const scopeError = checkWriteScope(filePath, input?.executionPlan ?? null, repoPath, input?.archetype);
         if (scopeError) {
           onProgress?.(JSON.stringify({
             event: "zone-scope-block",
@@ -2462,7 +2462,7 @@ export async function executeTool(
       // bypass — escalation lives in a different layer and only allows the
       // shrink-guard to be skipped for files already known to need a rewrite.
       {
-        const scopeError = checkWriteScope(filePath, input?.executionPlan ?? null, repoPath);
+        const scopeError = checkWriteScope(filePath, input?.executionPlan ?? null, repoPath, input?.archetype);
         if (scopeError) {
           onProgress?.(JSON.stringify({
             event: "zone-scope-block",
