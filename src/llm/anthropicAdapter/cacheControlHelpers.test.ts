@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import type Anthropic from "@anthropic-ai/sdk";
-import { applyMessageCacheBreakpoint2 } from "./cacheControlHelpers.js";
+import { applyMessageCacheBreakpoint2, MANIFEST_CONTENT_PREFIX } from "./cacheControlHelpers.js";
 
 function userMsg(content: string | Anthropic.MessageParam["content"]): Anthropic.MessageParam {
   return { role: "user", content } as Anthropic.MessageParam;
@@ -114,5 +114,69 @@ describe("applyMessageCacheBreakpoint2", () => {
     } finally {
       logSpy.mockRestore();
     }
+  });
+});
+
+describe("applyMessageCacheBreakpoint2 — manifest skip (Fix A)", () => {
+  function manifestMsg(): Anthropic.MessageParam {
+    return {
+      role: "user",
+      content: `${MANIFEST_CONTENT_PREFIX}\nfoo.ts (2 reads)\n\nRe-read ONLY if modified.\nReference prior content by line number.`,
+    };
+  }
+
+  function toolResultMsg(id: string): Anthropic.MessageParam {
+    return {
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: id, content: "ok" } as unknown as Anthropic.ContentBlockParam,
+      ],
+    };
+  }
+
+  it("[..., tool_result_batch, manifest] → marker on tool_result_batch, NOT manifest", () => {
+    const msgs: Anthropic.MessageParam[] = [
+      userMsg("initial task"),
+      assistantMsg("thinking..."),
+      toolResultMsg("t1"),
+      manifestMsg(),
+    ];
+    const result = applyMessageCacheBreakpoint2(msgs, { enabled: true });
+    // tool_result_batch at index 2 must have the marker
+    const toolBatch = result[2].content as Array<{ cache_control?: unknown }>;
+    expect(toolBatch[toolBatch.length - 1]?.cache_control).toEqual({ type: "ephemeral" });
+    // manifest at index 3 must NOT have the marker
+    const manifestContent = result[3].content;
+    if (Array.isArray(manifestContent)) {
+      const blocks = manifestContent as Array<{ cache_control?: unknown }>;
+      expect(blocks[blocks.length - 1]?.cache_control).toBeUndefined();
+    } else {
+      // still a string → no cache_control applied (string content means unchanged)
+      expect(typeof manifestContent).toBe("string");
+      expect(result[3]).toBe(msgs[3]);
+    }
+  });
+
+  it("[..., real_user_prompt, tool_results] → marker stays on tool_results (last non-manifest)", () => {
+    const msgs: Anthropic.MessageParam[] = [
+      userMsg("initial"),
+      assistantMsg("..."),
+      toolResultMsg("t1"),
+    ];
+    const result = applyMessageCacheBreakpoint2(msgs, { enabled: true });
+    const toolBatch = result[2].content as Array<{ cache_control?: unknown }>;
+    expect(toolBatch[toolBatch.length - 1]?.cache_control).toEqual({ type: "ephemeral" });
+  });
+
+  it("manifest-only → falls back to marking manifest (no crash, first iter before tool calls)", () => {
+    const msgs: Anthropic.MessageParam[] = [manifestMsg()];
+    // Must not throw; marker must be placed somewhere (the manifest itself as fallback)
+    const result = applyMessageCacheBreakpoint2(msgs, { enabled: true });
+    expect(result).not.toBe(msgs); // something was changed
+    const content = result[0].content;
+    // string was converted to block with cache_control
+    expect(Array.isArray(content)).toBe(true);
+    const blocks = content as Array<{ cache_control?: unknown }>;
+    expect(blocks[blocks.length - 1]?.cache_control).toEqual({ type: "ephemeral" });
   });
 });
