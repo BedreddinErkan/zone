@@ -269,3 +269,40 @@ describe("search_in_files — no matches (S.1)", () => {
     expect(result.output).toContain("(no matches)");
   });
 });
+
+describe("search_in_files — staging awareness (Fix 2)", () => {
+  it("finds content in staged file not present on disk", async () => {
+    const stagingFiles = new Map<string, string>();
+    const absPath = path.join(repoPath, "staged_only.ts");
+    stagingFiles.set(absPath, "export const STAGED_SENTINEL_9x7 = true;");
+
+    const result = await executeTool(
+      "search_in_files",
+      { pattern: "STAGED_SENTINEL_9x7" },
+      repoPath,
+      undefined,
+      { stagingFiles }
+    );
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("STAGED_SENTINEL_9x7");
+    expect(fs.existsSync(absPath)).toBe(false);
+  });
+
+  it("finds updated content in staged version of an existing file", async () => {
+    const stagingFiles = new Map<string, string>();
+    const absPath = path.join(repoPath, "alpha.ts");
+    const original = fs.readFileSync(absPath, "utf8");
+    stagingFiles.set(absPath, original + "\nconst STAGED_UPDATED_9x8 = 99;");
+
+    const result = await executeTool(
+      "search_in_files",
+      { pattern: "STAGED_UPDATED_9x8" },
+      repoPath,
+      undefined,
+      { stagingFiles }
+    );
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("STAGED_UPDATED_9x8");
+    expect(fs.readFileSync(absPath, "utf8")).toBe(original);
+  });
+});

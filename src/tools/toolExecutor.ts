@@ -1525,6 +1525,7 @@ export async function executeTool(
           : String(patternRaw);
       onProgress?.(`[tool] Listing: ${dirPath}`);
       const absDir = path.join(repoPath, dirPath);
+      // Not staging-aware: fast-glob reads disk; staged new files are not visible here.
       const entries = await fg(pattern, {
         cwd: absDir,
         dot: false,
@@ -2427,7 +2428,7 @@ export async function executeTool(
           // Pre-existing smell — patch is already on disk/staging; accept it.
           return {
             success: true,
-            output: `Patch applied: ${blocks.length} block(s) in ${filePath}`,
+            output: `Patch staged: ${blocks.length} block(s) in ${filePath}`,
           };
         }
         if (!stagedWrite(input?.stagingFiles, abs, original)) {
@@ -2448,7 +2449,7 @@ export async function executeTool(
 
       return {
         success: true,
-        output: `Patch applied: ${blocks.length} block(s) in ${filePath}`,
+        output: `Patch staged: ${blocks.length} block(s) in ${filePath}`,
       };
     }
 
@@ -2597,7 +2598,7 @@ export async function executeTool(
           // Pre-existing smell — file is already on disk/staging; accept it.
           return {
             success: true,
-            output: `File written: ${filePath} (${content.length} chars)`,
+            output: `File staged: ${filePath} (${content.length} chars)`,
           };
         }
       }
@@ -2691,7 +2692,9 @@ export async function executeTool(
 
         let stdout = "";
         try {
-          const r = await execAsync(cmd, { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 });
+          const r = await withStagingTempFlush(input?.stagingFiles, async () =>
+            execAsync(cmd, { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 })
+          );
           stdout = r.stdout;
         } catch (err: unknown) {
           const e = err as { code?: number; stdout?: string; stderr?: string };
@@ -2861,7 +2864,7 @@ export async function executeTool(
         ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**"],
       });
 
-      const graph = await buildDependencyGraph(repoPath, allFiles);
+      const graph = await buildDependencyGraph(repoPath, allFiles, input?.stagingFiles);
       const sourceKey = sourceFile.replace(/\\/g, "/");
       const sourceNode = graph.nodes.get(sourceKey);
 

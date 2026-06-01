@@ -92,9 +92,10 @@ function cacheKey(repoPath: string, files: string[], aliasConfig: PathAliasConfi
   return h.digest("hex").slice(0, 32);
 }
 
-function readHeadLines(abs: string, maxLines: number): string {
+function readHeadLines(abs: string, maxLines: number, stagingFiles?: Map<string, string>): string {
   try {
-    const buf = fs.readFileSync(abs, "utf8");
+    const staged = stagingFiles?.get(path.resolve(abs));
+    const buf = staged !== undefined ? staged : fs.readFileSync(abs, "utf8");
     const lines = buf.split(/\r?\n/);
     return lines.slice(0, maxLines).join("\n");
   } catch {
@@ -433,14 +434,18 @@ function assignDepths(nodes: Map<string, DependencyNode>, entryPoints: string[])
 
 export async function buildDependencyGraph(
   repoPath: string,
-  files: string[]
+  files: string[],
+  stagingFiles?: Map<string, string>,
 ): Promise<DependencyGraph> {
   const aliasConfig = parseTsconfigPaths(repoPath);
   const key = cacheKey(repoPath, files, aliasConfig);
   const now = Date.now();
-  const hit = CACHE.get(key);
-  if (hit && now - hit.ts < TTL_MS) {
-    return hit.graph;
+  // Skip cache when staging is active — staged content is not reflected in the cache key
+  if (!stagingFiles?.size) {
+    const hit = CACHE.get(key);
+    if (hit && now - hit.ts < TTL_MS) {
+      return hit.graph;
+    }
   }
 
   const posixFiles = files.map(posix);
@@ -457,7 +462,7 @@ export async function buildDependencyGraph(
     if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue;
 
     analyzed += 1;
-    const head = readHeadLines(abs, MAX_LINES);
+    const head = readHeadLines(abs, MAX_LINES, stagingFiles);
     let resolvedImports: string[] = [];
     let exports: string[] = [];
     // importedSymbolsBySource populated only for JS/TS files below

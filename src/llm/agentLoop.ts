@@ -1367,6 +1367,24 @@ export {
 };
 export type { VerificationReason };
 
+/** Flush staged writes to disk on error-exit paths that bypass finalizeRun.
+ *  Uses verifyMode:"warn" — partial work must persist even if tsc finds issues.
+ *  framework:undefined skips running the test command (run already failed). */
+async function persistStagingOnError(
+  stagingFiles: Map<string, string>,
+  ownsStagingFiles: boolean,
+  repoPath: string,
+): Promise<void> {
+  if (!ownsStagingFiles || stagingFiles.size === 0) return;
+  await finalizeStaging({
+    stagingFiles,
+    repoPath,
+    framework: undefined,
+    withStagingTempFlush,
+    verifyMode: "warn",
+  });
+}
+
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
   const runStartTs = Date.now();
   const scopedContext: Parameters<typeof withRequestContext>[0] = {};
@@ -2643,6 +2661,7 @@ Example:
     const tokenBudgetRatio = budget.emitStatus(iter + 1, input.onStructuredEvent);
 
     if (tokenBudgetRatio >= TOKEN_BUDGET_HARD) {
+      await persistStagingOnError(stagingFiles, ownsStagingFiles, input.repoPath);
       return { ...await synthesizeTokenBudgetExit(iter + 1, responseInput), promotedFromArchetype, promotionTrigger, promotedAtIter };
     }
 
@@ -3043,6 +3062,7 @@ Example:
         rollbackCount = toolEventCtx.rollbackCount;
         consecutiveScopeBlocks = toolEventCtx.consecutiveScopeBlocks;
         if (toolEvent.kind === "early_exit") {
+          await persistStagingOnError(stagingFiles, ownsStagingFiles, input.repoPath);
           return { ...toolEvent.exit, promotedFromArchetype, promotionTrigger, promotedAtIter };
         }
         const loopResult = toolEventCtx.lastLoopResult ?? { status: "ok" as const, count: 0 };
@@ -3148,6 +3168,7 @@ Example:
             type: "compaction_exhausted",
             message: "Task aborted: context exhausted via compaction. Break this task into smaller subtasks.",
           });
+          await persistStagingOnError(stagingFiles, ownsStagingFiles, input.repoPath);
           return { ...synthesizeCompactionExhaustedExit(iter + 1, responseInput), promotedFromArchetype, promotionTrigger, promotedAtIter };
         }
         throw err;

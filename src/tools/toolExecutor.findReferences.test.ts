@@ -108,3 +108,41 @@ describe("find_references", () => {
     expect(result.output).toMatch(/symbolName is required/);
   });
 });
+
+describe("find_references — staging awareness (Fix 3)", () => {
+  it("finds importer that only exists in staged content", async () => {
+    writeTs("src/service.ts", "export function targetFn() { return 0; }");
+    writeTs("src/consumer.ts", "export const x = 1;"); // no import on disk
+
+    const stagingFiles = new Map<string, string>();
+    stagingFiles.set(
+      path.resolve(repoPath, "src/consumer.ts"),
+      `import { targetFn } from "./service";\nexport const x = targetFn();`
+    );
+
+    const result = await executeTool(
+      "find_references",
+      { sourceFile: "src/service.ts", symbolName: "targetFn" },
+      repoPath,
+      undefined,
+      { stagingFiles }
+    );
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("src/consumer.ts");
+  });
+
+  it("uses disk content when no staging (regression: baseline unchanged)", async () => {
+    writeTs("src/service.ts", "export function targetFn() { return 0; }");
+    writeTs("src/consumer.ts", "export const x = 1;"); // no import on disk, no staging
+
+    const result = await executeTool(
+      "find_references",
+      { sourceFile: "src/service.ts", symbolName: "targetFn" },
+      repoPath,
+      undefined,
+      undefined
+    );
+    expect(result.success).toBe(true);
+    expect(result.output).toMatch(/No files import/);
+  });
+});
