@@ -46,6 +46,26 @@ function resolveProvider(
   return "anthropic";
 }
 
+function assertApiKeyCharset(key: string, provider: "openai" | "anthropic" | "gemini"): void {
+  const examples: Record<string, string> = { openai: "sk-…", anthropic: "sk-ant-…", gemini: "AIzaSy…" };
+  if (key.startsWith("<")) {
+    throw new Error(
+      `${provider.toUpperCase()} API key looks like a placeholder ("<…>"). ` +
+      `Set a real key (e.g. ${examples[provider]}) or run \`zone login\`.`
+    );
+  }
+  for (let i = 0; i < key.length; i++) {
+    const cp = key.charCodeAt(i);
+    if (cp < 0x20 || cp > 0x7e) {
+      throw new Error(
+        `${provider.toUpperCase()} API key contains a non-ASCII character at byte ${i} ` +
+        `(U+${cp.toString(16).toUpperCase().padStart(4, "0")}) — likely a placeholder. ` +
+        `Set a real key (e.g. ${examples[provider]}) or run \`zone login\`.`
+      );
+    }
+  }
+}
+
 function resolveOpenAIApiKey(explicit?: string, contextKey?: string): string {
   const trimmedExplicit =
     typeof explicit === "string" && explicit.trim() ? explicit.trim() : "";
@@ -71,6 +91,7 @@ function resolveOpenAIApiKey(explicit?: string, contextKey?: string): string {
     throw new Error("OPENAI_API_KEY is missing for openai provider.");
   }
 
+  assertApiKeyCharset(apiKey, "openai");
   return apiKey;
 }
 
@@ -100,6 +121,7 @@ function resolveAnthropicApiKey(explicit?: string, contextKey?: string): string 
     throw new Error("ANTHROPIC_API_KEY is missing for anthropic provider.");
   }
 
+  assertApiKeyCharset(apiKey, "anthropic");
   return apiKey;
 }
 
@@ -128,5 +150,6 @@ function resolveGeminiApiKey(explicit?: string, contextKey?: string): string {
     throw new Error("GEMINI_API_KEY is missing for gemini provider.");
   }
 
+  assertApiKeyCharset(apiKey, "gemini");
   return apiKey;
 }

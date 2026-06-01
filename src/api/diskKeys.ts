@@ -40,6 +40,18 @@ async function saveDiskKeys(cwd: string, store: DiskKeysFile): Promise<void> {
 }
 
 export async function setDiskKey(cwd: string, provider: ApiKeyProvider, key: string): Promise<void> {
+  if (key.startsWith("<")) {
+    throw new Error(`${provider} API key looks like a placeholder ("<…>") — set a real key.`);
+  }
+  for (let i = 0; i < key.length; i++) {
+    const cp = key.charCodeAt(i);
+    if (cp < 0x20 || cp > 0x7e) {
+      throw new Error(
+        `${provider} API key contains a non-ASCII character at byte ${i} ` +
+        `(U+${cp.toString(16).toUpperCase().padStart(4, "0")}) — likely a placeholder, not a real key.`
+      );
+    }
+  }
   const store = await loadDiskKeys(cwd);
   const idx = store.keys.findIndex(k => k.provider === provider);
   const entry: DiskApiKey = { provider, key, addedAt: new Date().toISOString() };

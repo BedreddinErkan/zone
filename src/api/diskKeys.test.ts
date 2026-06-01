@@ -48,6 +48,14 @@ describe("diskKeys", () => {
     expect(entry?.addedAt).toMatch(/^\d{4}-/);
   });
 
+  it("setDiskKey rejects key with non-ASCII characters", async () => {
+    await expect(setDiskKey(tmp, "gemini", "AIzaSy—bad")).rejects.toThrow(/non-ASCII character at byte/);
+  });
+
+  it("setDiskKey rejects placeholder key starting with '<'", async () => {
+    await expect(setDiskKey(tmp, "anthropic", "<your key here>")).rejects.toThrow(/placeholder/);
+  });
+
   it("maskKey masks middle of long keys", () => {
     expect(maskKey("sk-ant-api03XXXAAAA")).toBe("sk-ant-***AAAA");
     expect(maskKey("short")).toBe("***");
