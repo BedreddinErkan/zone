@@ -95,7 +95,9 @@ export function convertParams(
   const max_tokens =
     typeof input.max_tokens === "number" && input.max_tokens > 0
       ? input.max_tokens
-      : DEFAULT_MAX_TOKENS;
+      : typeof input.max_completion_tokens === "number" && input.max_completion_tokens > 0
+        ? input.max_completion_tokens
+        : DEFAULT_MAX_TOKENS;
 
   const temperature =
     typeof input.temperature === "number"
