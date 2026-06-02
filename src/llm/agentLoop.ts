@@ -2591,6 +2591,7 @@ Example:
           messages: prunedMessages,
           tools: toolsForLLM,
           tool_choice: "auto",
+          max_tokens: 16384,
           ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
         },
         { signal: input.abortSignal, onToolArgumentsDelta, onRetryEvent, effort: requestCtx?.effort }
@@ -2765,12 +2766,28 @@ Example:
         const callId = call.id;
         const argsString = call.function.arguments ?? "";
         let parsedArgs: Record<string, unknown> = {};
+        let _argsParseFailed = false;
         try {
           parsedArgs = argsString
             ? (JSON.parse(argsString) as Record<string, unknown>)
             : {};
         } catch {
-          parsedArgs = {};
+          _argsParseFailed = true;
+          debugLog("[zone-tool-args-parse-failed]", JSON.stringify({
+            tool: name,
+            argsLen: argsString.length,
+            argsPreview: argsString.slice(0, 120),
+          }));
+        }
+        if (_argsParseFailed) {
+          const truncMsg =
+            `TOOL_ARGS_TRUNCATED: your ${name} call's arguments did not parse — the tool_use was likely ` +
+            `truncated because the output was too large. Re-issue as smaller/split calls ` +
+            `(for a large file, patch one region per call), not one big multi-block call.`;
+          responseInput.push({ role: "tool", tool_call_id: callId, content: truncMsg });
+          toolCallLog.push({ id: callId, tool: name, args: {}, result: truncMsg, success: false });
+          // [INNER-LOOP: ARGS_PARSE_FAILED]
+          continue;
         }
 
         if (effectiveAllowedSet.size > 0 && !effectiveAllowedSet.has(name)) {
