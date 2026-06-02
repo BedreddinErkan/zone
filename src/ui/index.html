@@ -36,7 +36,7 @@
     @font-face { font-family:'IBM Plex Sans'; font-weight:600; font-display:swap; src:url('/fonts/IBMPlexSans-600.woff2') format('woff2'); }
     :root{
       color-scheme: dark;
-      --bg:#101513;
+      --bg:#141a17;
       --surface:#181e1a;
       --surface2:#1e241f;
       --border:#262f29;
@@ -64,7 +64,7 @@
       --amber-dim:#9d8a58;
       --amber-glow:rgba(224,197,133,0.08);
       --red-bg:rgba(221,144,144,0.07);
-      --bg-input:#131916;
+      --bg-input:#171d1a;
       /* semantic aliases */
       --color-success:var(--green);
       --color-error:var(--red);
@@ -183,9 +183,9 @@
     .repo-row:hover .repo-remove-btn{opacity:1}
     .repo-row:hover .repo-remove-btn:hover{color:var(--color-error,#ef4444)}
 
-    .tabs{display:flex;padding:var(--space-lg) var(--space-xl) var(--space-md);gap:var(--space-xl);border-bottom:1px solid var(--border)}
-    .tab{border:none;background:transparent;color:var(--text-3);font-size:var(--font-size-base);padding:var(--space-sm) 0;position:relative}
-    .tab.active{color:var(--violet)}
+    .tabs{display:flex;padding:var(--space-md) var(--space-xl) var(--space-sm);gap:var(--space-xl);border-bottom:1px solid var(--border)}
+    .tab{border:none;background:transparent;color:var(--muted);font-size:10px;padding:var(--space-sm) 0;position:relative;opacity:0.8}
+    .tab.active{color:var(--text-2);opacity:1}
     .tab.active::after{content:"";position:absolute;left:0;right:0;bottom:-var(--space-md);height:2px;background:var(--violet);border-radius:var(--radius-pill)}
     .left-scroll{flex:1;overflow:auto;padding:var(--space-lg) var(--space-md) var(--space-xl)}
     .settings-label{white-space:nowrap}
@@ -215,12 +215,12 @@
 
     .group{margin-bottom:var(--space-lg)}
     .group-h{
-      width:100%;display:flex;align-items:center;gap:var(--space-lg);padding:var(--space-lg);border-radius:var(--radius-lg);
-      border:1px solid transparent;background:transparent;color:var(--text-2);text-align:left;
+      width:100%;display:flex;align-items:center;gap:var(--space-lg);padding:var(--space-md) var(--space-lg);border-radius:var(--radius-lg);
+      border:1px solid transparent;background:transparent;color:var(--muted);font-size:11px;text-align:left;
       transition:border-color var(--transition-base),background var(--transition-base),color var(--transition-base);
     }
-    .group-h:hover{border-color:var(--border2);background:var(--surface-alpha-2);color:var(--text-1)}
-    .badge{font-size:var(--font-size-sm);color:var(--text-3);border:1px solid var(--border);padding:2px var(--space-md);border-radius:var(--radius-pill);background:var(--surface-alpha-1)}
+    .group-h:hover{border-color:var(--border2);background:var(--surface-alpha-2);color:var(--text-2)}
+    .badge{font-size:10px;color:var(--text-4);border:1px solid var(--border);padding:1px var(--space-md);border-radius:var(--radius-pill);background:var(--surface-alpha-1)}
     .chev{margin-left:auto;transition:transform var(--transition-base);color:var(--text-4)}
     .group.open .chev{transform:rotate(90deg)}
     .gbtn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:var(--radius-sm);border:1px solid transparent;background:transparent;color:var(--text-4);padding:0}
@@ -321,8 +321,12 @@
     }
     .empty{height:100%;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--text-3);padding:40px}
     .empty .logo{width:54px;height:54px;margin:0 auto var(--space-xl);display:flex;align-items:center;justify-content:center;border-radius:14px;border:1px solid var(--violet-bd);background:var(--violet-bg);color:var(--violet)}
-    .empty h2{margin:0 0 var(--space-md);font-size:18px;color:var(--text-1)}
+    .empty h2{margin:0 0 var(--space-md);font-size:20px;color:var(--text-1);font-weight:600}
     .empty p{margin:0;font-size:var(--font-size-md);color:var(--text-3)}
+    .empty-hint{font-size:12px;color:var(--muted);margin:4px 0 20px!important}
+    .empty-chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+    .empty-chip{padding:6px 14px;background:var(--surface);border:1px solid var(--border2);border-radius:2px;color:var(--text-1);font-size:12px;cursor:pointer;transition:border-color var(--transition-base),color var(--transition-base)}
+    .empty-chip:hover{border-color:var(--green-dim);color:var(--green)}
 
     .bubble{max-width:720px;margin:var(--space-lg) 0;padding:var(--space-xl);border-radius:var(--radius-lg);border:1px solid var(--border);background:var(--surface2);position:relative}
     .bubble.user{margin-left:0;background:transparent;border:none;color:var(--text);border-radius:0;padding-left:0}
@@ -1242,8 +1246,13 @@
                 <path d="M10 26 H3 V19" stroke="#e0c585" stroke-width="1.6" opacity="0.5"/>
               </svg>
             </div>
-            <h2>What would you like to build?</h2>
-            <p>Pick a project and ask Zone anything.</p>
+            <h2>What should Zone build?</h2>
+            <p class="empty-hint">type a task · / for commands · ⇧⇥ to switch mode</p>
+            <div class="empty-chips">
+              <button class="empty-chip" data-prompt="Explain the architecture of this repo">Explore repo</button>
+              <button class="empty-chip" data-prompt="Find and fix failing tests">Fix tests</button>
+              <button class="empty-chip" data-prompt="Refactor to improve readability">Refactor</button>
+            </div>
           </div>
         </div>
       </div>
@@ -11959,6 +11968,16 @@
       if (els.bgTasksHeader) {
         els.bgTasksHeader.addEventListener('click', toggleBgTasks);
       }
+
+      document.addEventListener('click', (e) => {
+        const chip = e.target && e.target.closest ? e.target.closest('.empty-chip') : null;
+        if (!chip) return;
+        const prompt = chip.dataset && chip.dataset.prompt;
+        if (!prompt) return;
+        els.taskInput.value = prompt;
+        autosizeTextarea();
+        els.taskInput.focus();
+      });
 
       els.taskInput.addEventListener('input', () => {
         autosizeTextarea();
