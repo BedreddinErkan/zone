@@ -53,12 +53,6 @@ export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {
     },
     { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5", costNote: "Legacy — Sonnet 4.6 recommended" },
   ],
-  gemini: [
-    { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash",
-      costNote: "Fast and cost-efficient — $1.5/$9 per MTok", recommendedTier: "standard" },
-    { id: "gemini-3.1-pro",   label: "Gemini 3.1 Pro",
-      costNote: "Frontier — 2M context, $4/$18 per MTok (conservative flat)", recommendedTier: "high" },
-  ],
 };
 
 export function isValidModelId(provider: LLMProvider, modelId: string): boolean {
@@ -92,9 +86,6 @@ export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   "gpt-5.4-nano":        128_000,
   "gpt-4o":              128_000,
   "gpt-4o-mini":         128_000,
-  // Gemini
-  "gemini-3.5-flash":  1_000_000,
-  "gemini-3.1-pro":    2_000_000,
 };
 
 /** Returns the model's context-window limit in tokens (chars/4 heuristic scale).

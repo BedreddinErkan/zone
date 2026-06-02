@@ -30,20 +30,17 @@ function _getGitBranch(): string {
   } catch { return ""; }
 }
 
-function writeBannerToStdout(opts: { model?: string; capUsd?: number; isResumed: boolean }): void {
+function writeBannerToStdout(opts: { isResumed: boolean }): void {
   const RESET = "\x1b[0m";
   const MAGENTA_BOLD = "\x1b[35;1m";
-  const BOLD = "\x1b[1m";
   const DIM = "\x1b[2m";
   const cwd = process.cwd();
   const branch = _getGitBranch();
   const cwdBranch = branch ? `${cwd} · ${branch}` : cwd;
-  const model = opts.model || "default";
-  const cap = (opts.capUsd ?? 10).toFixed(2);
   const resumed = opts.isResumed ? ` ${DIM}(resumed)${RESET}` : "";
+  // Model and cap are shown by the reactive <Header> component — not repeated here.
   process.stdout.write(
-    `${MAGENTA_BOLD}✦${RESET}  ${MAGENTA_BOLD}Zone v${_zoneVersion}${RESET}${resumed}  ${DIM}${cwdBranch}${RESET}\n` +
-    `   ${BOLD}${model}${RESET} ${DIM}· cap $${cap}${RESET}\n\n\n`
+    `${MAGENTA_BOLD}✦${RESET}  ${MAGENTA_BOLD}Zone v${_zoneVersion}${RESET}${resumed}  ${DIM}${cwdBranch}${RESET}\n\n`
   );
 }
 
@@ -204,8 +201,15 @@ export async function runTui(
     };
     try {
       await runOneShotInner(prompt, config, runId, { externalAc: ac, onProgress, mode });
-    } catch {
-      // errors surfaced via eventBus progress events
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      bus.emit("narration", {
+        runId,
+        ts: Date.now(),
+        type: "narration",
+        title: "run error",
+        text: `[zone] run error (provider=${config.provider} model=${config.model}): ${msg}`,
+      });
     } finally {
       // Safety net: if runLlmPatchFlow threw before emitting agent_loop_complete,
       // runState would stay "running" forever. Aborted runs are handled by
@@ -225,7 +229,7 @@ export async function runTui(
     void runPrompt(prompt, ac, mode);
   };
 
-  writeBannerToStdout({ model: config.model, capUsd: config.dailyUsdCap, isResumed: !!resumedSession });
+  writeBannerToStdout({ isResumed: !!resumedSession });
 
   instance = render(
     <ErrorBoundary onCrash={onCrash}>

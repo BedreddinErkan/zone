@@ -7,7 +7,7 @@ export type EffortLevel = "low" | "medium" | "high";
 export interface DiskModelSettings {
   version: 2;
   model: string;
-  provider: "anthropic" | "openai" | "gemini";
+  provider: "anthropic" | "openai";
   effort?: EffortLevel;
   updatedAt: string;
 }

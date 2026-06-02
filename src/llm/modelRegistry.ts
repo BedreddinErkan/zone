@@ -6,7 +6,7 @@ export type EffortLevel = "low" | "medium" | "high";
 export interface ModelEntry {
   id: string;
   displayName: string;
-  provider: "anthropic" | "openai" | "gemini";
+  provider: "anthropic" | "openai";
   supportsEffort: boolean;
   costNote?: string;
 }
@@ -30,7 +30,7 @@ function buildModels(): readonly ModelEntry[] {
       result.push({
         id: m.id,
         displayName: m.label,
-        provider: provider as "anthropic" | "openai" | "gemini",
+        provider: provider as "anthropic" | "openai",
         supportsEffort: EFFORT_SUPPORTED_MODELS.has(m.id),
         costNote: m.costNote,
       });
@@ -41,7 +41,7 @@ function buildModels(): readonly ModelEntry[] {
 
 export const USER_FACING_MODELS: readonly ModelEntry[] = buildModels();
 
-export function getProviderForModel(id: string): "anthropic" | "openai" | "gemini" {
+export function getProviderForModel(id: string): "anthropic" | "openai" {
   const entry = USER_FACING_MODELS.find((m) => m.id === id);
   return entry?.provider ?? "anthropic";
 }

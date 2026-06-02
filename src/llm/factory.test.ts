@@ -24,7 +24,6 @@ vi.mock("./recordingClient.js", () => ({
   },
 }));
 
-const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/";
 
 describe("resolveProvider — 3-level precedence", () => {
   beforeEach(() => {
@@ -71,7 +70,6 @@ describe("API key charset validation", () => {
   afterEach(() => {
     delete process.env.OPENAI_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;
-    delete process.env.GEMINI_API_KEY;
   });
 
   it("openai: throws on em-dash in key", async () => {
@@ -110,47 +108,4 @@ describe("API key charset validation", () => {
     expect(() => createLLMClient({ provider: "anthropic" })).not.toThrow();
   });
 
-  it("gemini: throws on em-dash in key (the original bug)", async () => {
-    process.env.GEMINI_API_KEY = "AIzaSy—placeholderğı";
-    const { createLLMClient } = await import("./factory.js");
-    expect(() => createLLMClient({ provider: "gemini" })).toThrow(/non-ASCII character at byte/);
-  });
-
-  it("gemini: throws on placeholder key (<…>)", async () => {
-    process.env.GEMINI_API_KEY = "<Gemini key here>";
-    const { createLLMClient } = await import("./factory.js");
-    expect(() => createLLMClient({ provider: "gemini" })).toThrow(/placeholder/);
-  });
-
-  it("gemini: valid ASCII key passes", async () => {
-    process.env.GEMINI_API_KEY = "gk-test-gemini-key";
-    const { createLLMClient } = await import("./factory.js");
-    expect(() => createLLMClient({ provider: "gemini" })).not.toThrow();
-  });
-});
-
-describe("Gemini client creation", () => {
-  beforeEach(() => {
-    vi.resetModules();
-    openaiCtorMock.mockClear();
-    anthropicCtorMock.mockClear();
-    process.env.GEMINI_API_KEY = "gk-test-gemini-key";
-  });
-
-  afterEach(() => {
-    delete process.env.GEMINI_API_KEY;
-  });
-
-  it("constructs OpenAIAdapter with Gemini base_url and 'gemini' provider", async () => {
-    const { createLLMClient } = await import("./factory.js");
-    createLLMClient({ provider: "gemini" });
-    expect(openaiCtorMock).toHaveBeenCalledWith("gk-test-gemini-key", GEMINI_BASE_URL, "gemini");
-    expect(anthropicCtorMock).not.toHaveBeenCalled();
-  });
-
-  it("without GEMINI_API_KEY: throws missing key error", async () => {
-    delete process.env.GEMINI_API_KEY;
-    const { createLLMClient } = await import("./factory.js");
-    expect(() => createLLMClient({ provider: "gemini" })).toThrow("GEMINI_API_KEY is missing");
-  });
 });

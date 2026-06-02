@@ -34,13 +34,6 @@ describe("MODEL_CATALOG", () => {
     expect(isValidModelId("openai", "")).toBe(false);
   });
 
-  it("isValidModelId recognizes gemini-3.5-flash (always registered)", () => {
-    expect(isValidModelId("gemini", "gemini-3.5-flash")).toBe(true);
-  });
-
-  it("isValidModelId recognizes gemini-3.1-pro (always registered)", () => {
-    expect(isValidModelId("gemini", "gemini-3.1-pro")).toBe(true);
-  });
 
   it("getDefaultModelForTier returns recommendedTier model", () => {
     expect(getDefaultModelForTier("openai", "high")).toBe("gpt-5.4");
@@ -58,11 +51,9 @@ describe("getContextWindow + MODEL_CONTEXT_WINDOWS", () => {
     expect(getContextWindow("claude-haiku-4-5")).toBe(200_000);
   });
 
-  it("returns correct window for known OpenAI + Gemini models", () => {
+  it("returns correct window for known OpenAI models", () => {
     expect(getContextWindow("gpt-4o")).toBe(128_000);
     expect(getContextWindow("gpt-4o-mini")).toBe(128_000);
-    expect(getContextWindow("gemini-3.5-flash")).toBe(1_000_000);
-    expect(getContextWindow("gemini-3.1-pro")).toBe(2_000_000);
   });
 
   it("snapshot-suffix tolerant: resolves via longest-prefix match", () => {

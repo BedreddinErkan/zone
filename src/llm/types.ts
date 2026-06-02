@@ -6,7 +6,7 @@ import type {
 } from "openai/resources/chat/completions";
 import type { EffortLevel } from "./modelRegistry.js";
 
-export type LLMProvider = "openai" | "anthropic" | "gemini";
+export type LLMProvider = "openai" | "anthropic";
 export type { EffortLevel };
 
 export type LLMChatParams =

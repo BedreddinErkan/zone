@@ -7,7 +7,7 @@ export type ModelRole =
   | "intent"
   | "investigator";
 
-export type RoutingProvider = "anthropic" | "openai" | "gemini";
+export type RoutingProvider = "anthropic" | "openai";
 
 export interface RoleModelMapping {
   planner: string;
@@ -43,24 +43,11 @@ const OPENAI_DEFAULTS: RoleModelMapping = {
   investigator: "gpt-5.4",
 };
 
-const GEMINI_DEFAULTS: RoleModelMapping = {
-  planner:      "gemini-3.5-flash",
-  agent:        "gemini-3.5-flash",
-  worker:       "gemini-3.5-flash",
-  verifier:     "gemini-3.5-flash",
-  classifier:   "gemini-3.5-flash",
-  intent:       "gemini-3.5-flash",
-  investigator: "gemini-3.5-flash",
-};
-
 export function getModelForRole(
   role: ModelRole,
   provider: RoutingProvider,
   override?: Partial<RoleModelMapping>
 ): string {
-  const defaults =
-    provider === "anthropic" ? ANTHROPIC_DEFAULTS
-    : provider === "gemini" ? GEMINI_DEFAULTS
-    : OPENAI_DEFAULTS;
+  const defaults = provider === "anthropic" ? ANTHROPIC_DEFAULTS : OPENAI_DEFAULTS;
   return override?.[role] ?? defaults[role];
 }

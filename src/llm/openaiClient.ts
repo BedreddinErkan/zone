@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { getRequestUserApiKey } from "./openaiContext.js";
 import type { LLMProvider } from "./types.js";
-import { isValidModelId, getDefaultModelForTier } from "./models.js";
+import { isValidModelId } from "./models.js";
 
 export type ZoneInferenceMode = "hosted" | "local";
 
@@ -85,11 +85,9 @@ export function getModelName(
       ? tier === "high"
         ? process.env.ZONE_ANTHROPIC_MODEL_HIGH ?? "claude-sonnet-4-6"
         : process.env.ZONE_ANTHROPIC_MODEL ?? "claude-haiku-4-5"
-      : provider === "gemini"
-        ? process.env.ZONE_GEMINI_MODEL ?? getDefaultModelForTier("gemini", tier)
-        : tier === "high"
-          ? process.env.ZONE_LLM_MODEL_HIGH ?? process.env.OPENAI_MODEL ?? "gpt-5.4"
-          : process.env.ZONE_LLM_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-5.4-mini";
+      : tier === "high"
+        ? process.env.ZONE_LLM_MODEL_HIGH ?? process.env.OPENAI_MODEL ?? "gpt-5.4"
+        : process.env.ZONE_LLM_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-5.4-mini";
 
   if (override) {
     const candidate = tier === "high" ? override.high : override.standard;

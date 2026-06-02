@@ -17,6 +17,7 @@ import { ModelModal } from "./components/ModelModal.js";
 import { EffortModal } from "./components/EffortModal.js";
 import { MetricsModal } from "./components/MetricsModal.js";
 import { LimitsModal } from "./components/LimitsModal.js";
+import { Header } from "./components/Header.js";
 import { resolveCommandApproval } from "../../api/commandApprovals.js";
 import { resolvePlanApproval } from "../../llm/planApprovals.js";
 import type { EventBus } from "../eventBus.js";
@@ -35,7 +36,7 @@ interface AppProps {
   resumedSession?: DiskSession;
   onStateChange?: (state: StoreState) => void;
   initialModelSettings?: DiskModelSettings | null;
-  onModelApply?: (model: string, provider: "anthropic" | "openai" | "gemini", effort?: EffortLevel) => void;
+  onModelApply?: (model: string, provider: "anthropic" | "openai", effort?: EffortLevel) => void;
 }
 
 interface AppInnerProps {
@@ -43,7 +44,7 @@ interface AppInnerProps {
   initialPrompt: string | undefined;
   onSubmit: ((prompt: string, ac: AbortController, mode: TuiMode) => void) | undefined;
   onStateChange: ((state: StoreState) => void) | undefined;
-  onModelApply: ((model: string, provider: "anthropic" | "openai" | "gemini", effort?: EffortLevel) => void) | undefined;
+  onModelApply: ((model: string, provider: "anthropic" | "openai", effort?: EffortLevel) => void) | undefined;
 }
 
 function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }: AppInnerProps): React.ReactElement {
@@ -153,6 +154,7 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }:
 
   return (
     <Box flexDirection="column">
+      <Header />
       <Box paddingX={2}>
         <Transcript />
       </Box>

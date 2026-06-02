@@ -45,17 +45,8 @@ describe("diskKeys", () => {
     expect(store.keys[0].provider).toBe("openai");
   });
 
-  it("gemini key: setDiskKey + loadDiskKeys round-trip", async () => {
-    await setDiskKey("gemini", "AIzaSy-test123456789012345678");
-    const store = await loadDiskKeys();
-    const entry = store.keys.find(k => k.provider === "gemini");
-    expect(entry?.key).toBe("AIzaSy-test123456789012345678");
-    expect(entry?.provider).toBe("gemini");
-    expect(entry?.addedAt).toMatch(/^\d{4}-/);
-  });
-
   it("setDiskKey rejects key with non-ASCII characters", async () => {
-    await expect(setDiskKey("gemini", "AIzaSy—bad")).rejects.toThrow(/non-ASCII character at byte/);
+    await expect(setDiskKey("anthropic", "sk-ant—bad")).rejects.toThrow(/non-ASCII character at byte/);
   });
 
   it("setDiskKey rejects placeholder key starting with '<'", async () => {

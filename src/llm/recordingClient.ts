@@ -42,7 +42,6 @@ export function extractUsage(rawUsage: unknown): UsageBreakdown | null {
 
 function toProviderName(provider: LLMProvider): ProviderName {
   if (provider === "anthropic") return "anthropic";
-  if (provider === "gemini") return "gemini";
   return "openai";
 }
 
@@ -110,7 +109,7 @@ export class RecordingLLMClient implements LLMClient {
     // For OpenAI, opt into final-chunk usage. The Anthropic adapter emits a
     // synthetic final chunk with `usage` already populated (see convertStream).
     const augmented: ChatCompletionCreateParamsStreaming =
-      this.provider === "openai" || this.provider === "gemini"
+      this.provider === "openai"
         ? {
             ...params,
             stream_options: {

@@ -61,31 +61,36 @@ describe("extractResponsesApiOutputText", () => {
   });
 });
 
-describe("getModelName — gemini branch (Bug A fix)", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
+describe("getModelName — cross-provider override rejection (924285f regression guard)", () => {
+  // This block guards the loud-rejection / no-silent-swap behavior that 924285f
+  // restored. Previously a cross-provider override (provider=openai + model=claude-*)
+  // silently fell back to the openai default with no user-visible signal. The fix
+  // warns and names the fallback target so the user can never believe Claude ran
+  // when OpenAI ran. These tests pin that behavior for the remaining providers.
 
-  it("returns gemini-3.5-flash for standard tier", () => {
-    expect(getModelName("standard", "gemini", undefined)).toBe("gemini-3.5-flash");
-  });
-
-  it("returns gemini-3.1-pro for high tier", () => {
-    expect(getModelName("high", "gemini", undefined)).toBe("gemini-3.1-pro");
-  });
-
-  it("ZONE_GEMINI_MODEL env var takes precedence over catalog default", () => {
-    vi.stubEnv("ZONE_GEMINI_MODEL", "gemini-custom-model");
-    expect(getModelName("standard", "gemini", undefined)).toBe("gemini-custom-model");
-  });
-
-  it("invalid claude-* override for gemini warns and falls back to catalog default, not gpt-5.4-mini", () => {
+  it("invalid claude-* override for openai warns and falls back to openai standard default", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const result = getModelName("standard", "gemini", { standard: "claude-sonnet-4-6" });
-    expect(result).toBe("gemini-3.5-flash");
-    expect(result).not.toBe("gpt-5.4-mini");
+    const result = getModelName("standard", "openai", { standard: "claude-sonnet-4-6" });
+    expect(result).toBe("gpt-5.4-mini");
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("is not valid for provider"));
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("falling back to gemini-3.5-flash"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("falling back to gpt-5.4-mini"));
+    warnSpy.mockRestore();
+  });
+
+  it("invalid gpt-* override for anthropic warns and falls back to anthropic high default", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = getModelName("high", "anthropic", { high: "gpt-5.4" });
+    expect(result).toBe("claude-sonnet-4-6");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("is not valid for provider"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("falling back to claude-sonnet-4-6"));
+    warnSpy.mockRestore();
+  });
+
+  it("valid same-provider override is accepted without warning", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = getModelName("high", "openai", { high: "gpt-5.4" });
+    expect(result).toBe("gpt-5.4");
+    expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 });

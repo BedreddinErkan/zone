@@ -49,9 +49,7 @@ export function ModelModal({ dispatch }: Props): React.ReactElement {
   visibleModels.forEach((m, flatIdx) => {
     if (m.provider !== lastProvider) {
       lastProvider = m.provider;
-      const sectionLabel = m.provider === "anthropic" ? "Anthropic"
-        : m.provider === "gemini" ? "Gemini"
-        : "OpenAI";
+      const sectionLabel = m.provider === "anthropic" ? "Anthropic" : "OpenAI";
       rows.push(
         <Text key={`hdr-${m.provider}`} bold color="white"> {sectionLabel}</Text>
       );
@@ -65,7 +63,6 @@ export function ModelModal({ dispatch }: Props): React.ReactElement {
     rows.push(
       <Box key={m.id} backgroundColor={bg}>
         <Text color={selected ? "white" : undefined}>{label}</Text>
-        {m.provider === "gemini" && <Text dimColor> (exp)</Text>}
       </Box>
     );
   });

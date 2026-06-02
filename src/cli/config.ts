@@ -12,7 +12,6 @@ export interface CliConfig {
   provider: LLMProvider;
   anthropicApiKey?: string;
   openaiApiKey?: string;
-  geminiApiKey?: string;
   dailyUsdCap: number;
   repoPath: string;
   forceTier?: TaskTier;
@@ -44,7 +43,6 @@ type ZoneConfigFile = {
   defaultProvider?: string;
   anthropicApiKey?: string;
   openaiApiKey?: string;
-  geminiApiKey?: string;
   dailyUsdCap?: number;
 };
 
@@ -65,7 +63,6 @@ function envStr(key: string): string | undefined {
 
 function resolveProvider(value: string | undefined): LLMProvider {
   if (value === "openai") return "openai";
-  if (value === "gemini") return "gemini";
   return "anthropic";
 }
 
@@ -111,7 +108,6 @@ export function loadCliConfig(
 
   const anthropicApiKey = envStr("ANTHROPIC_API_KEY") ?? file.anthropicApiKey;
   const openaiApiKey = envStr("OPENAI_API_KEY") ?? file.openaiApiKey;
-  const geminiApiKey = envStr("GEMINI_API_KEY") ?? file.geminiApiKey;
 
   const dailyUsdCap = (() => {
     const envRaw = envStr("ZONE_DAILY_USD_CAP");
@@ -129,7 +125,6 @@ export function loadCliConfig(
     provider,
     anthropicApiKey,
     openaiApiKey,
-    geminiApiKey,
     dailyUsdCap,
     repoPath,
     forceTier,
@@ -142,15 +137,9 @@ export function loadCliConfig(
 }
 
 export function validateCliConfig(cfg: CliConfig): void {
-  const key =
-    cfg.provider === "openai"  ? cfg.openaiApiKey  :
-    cfg.provider === "gemini"  ? cfg.geminiApiKey  :
-                                 cfg.anthropicApiKey;
+  const key = cfg.provider === "openai" ? cfg.openaiApiKey : cfg.anthropicApiKey;
   if (!key) {
-    const envVar =
-      cfg.provider === "openai"  ? "OPENAI_API_KEY"  :
-      cfg.provider === "gemini"  ? "GEMINI_API_KEY"  :
-                                   "ANTHROPIC_API_KEY";
+    const envVar = cfg.provider === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
     throw new Error(
       `No API key found for provider "${cfg.provider}". ` +
         `Set ${envVar} or run "zone login" to configure.`

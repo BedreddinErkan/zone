@@ -252,9 +252,6 @@ function pickClassifierModel(provider: LLMProvider): string {
   if (provider === "anthropic") {
     return process.env.ZONE_CLASSIFIER_MODEL_ANTHROPIC?.trim() || "claude-haiku-4-5";
   }
-  if (provider === "gemini") {
-    return process.env.ZONE_CLASSIFIER_MODEL_GEMINI?.trim() || "gemini-3.5-flash";
-  }
   return process.env.ZONE_CLASSIFIER_MODEL_OPENAI?.trim() || "gpt-5.4-mini";
 }
 
@@ -360,9 +357,7 @@ function computeResponseCost(
 ): number {
   const usage = extractUsage((response as { usage?: unknown })?.usage);
   if (!usage) return 0;
-  const providerName: ProviderName = provider === "anthropic" ? "anthropic"
-    : provider === "gemini" ? "gemini"
-    : "openai";
+  const providerName: ProviderName = provider === "anthropic" ? "anthropic" : "openai";
   const responseModel =
     (response as { model?: string })?.model || fallbackModel;
   return totalCost(providerName, responseModel, {

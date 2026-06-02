@@ -24,10 +24,19 @@ export class OpenAIAdapter implements LLMClient {
     params: ChatCompletionCreateParamsNonStreaming,
     options: LLMRequestOptions = {}
   ): Promise<ChatCompletion> {
-    const resolvedParams =
+    const withEffort: ChatCompletionCreateParamsNonStreaming =
       options.effort && supportsEffort(params.model)
         ? { ...params, reasoning_effort: options.effort }
         : params;
+    // gpt-5.x reasoning models reject `max_tokens`; translate to `max_completion_tokens`
+    // so call-sites can use the conventional spelling — mirrors Anthropic's convertParams.
+    const { max_tokens, ...rest } = withEffort;
+    const resolvedParams: ChatCompletionCreateParamsNonStreaming = {
+      ...rest,
+      ...(typeof max_tokens === "number" && rest.max_completion_tokens == null
+          ? { max_completion_tokens: max_tokens }
+          : max_tokens != null ? { max_tokens } : {}),
+    };
     return withExponentialBackoff(
       () => this.sdk.chat.completions.create(resolvedParams, { signal: options.signal }),
       { provider: this.provider, model: params.model, emit: options.onRetryEvent }
@@ -38,7 +47,19 @@ export class OpenAIAdapter implements LLMClient {
     params: ChatCompletionCreateParamsStreaming,
     options: LLMRequestOptions = {}
   ): Promise<AsyncIterable<ChatCompletionChunk>> {
-    return this.sdk.chat.completions.create(params, { signal: options.signal });
+    const { max_tokens, ...rest } = params;
+    const resolvedParams: ChatCompletionCreateParamsStreaming = {
+      ...rest,
+      ...(typeof max_tokens === "number" && rest.max_completion_tokens == null
+          ? { max_completion_tokens: max_tokens }
+          : max_tokens != null ? { max_tokens } : {}),
+    };
+    // Also add retry parity with the sync path (stream creation is the retryable part;
+    // mid-stream errors remain the consumer's responsibility).
+    return withExponentialBackoff(
+      () => this.sdk.chat.completions.create(resolvedParams, { signal: options.signal }),
+      { provider: this.provider, model: params.model, emit: options.onRetryEvent }
+    ) as Promise<AsyncIterable<ChatCompletionChunk>>;
   }
 
   async createEmbedding(

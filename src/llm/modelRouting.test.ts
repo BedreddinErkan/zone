@@ -109,25 +109,3 @@ describe("getModelForRole — investigator role (Phase D.1)", () => {
   });
 });
 
-describe("getModelForRole — gemini defaults (GEMINI_DEFAULTS)", () => {
-  it("agent on gemini → gemini-3.5-flash", () => {
-    expect(getModelForRole("agent", "gemini")).toBe("gemini-3.5-flash");
-  });
-  it("worker on gemini → gemini-3.5-flash", () => {
-    expect(getModelForRole("worker", "gemini")).toBe("gemini-3.5-flash");
-  });
-  it("planner on gemini → gemini-3.5-flash", () => {
-    expect(getModelForRole("planner", "gemini")).toBe("gemini-3.5-flash");
-  });
-  it("investigator on gemini → gemini-3.5-flash", () => {
-    expect(getModelForRole("investigator", "gemini")).toBe("gemini-3.5-flash");
-  });
-  it("classifier on gemini → gemini-3.5-flash", () => {
-    expect(getModelForRole("classifier", "gemini")).toBe("gemini-3.5-flash");
-  });
-  it("gemini override takes precedence", () => {
-    expect(
-      getModelForRole("agent", "gemini", { agent: "gemini-3.1-pro" })
-    ).toBe("gemini-3.1-pro");
-  });
-});

@@ -1309,12 +1309,6 @@ describe("BYOM.1: provider picker default and persistence", () => {
     expect(getActiveProvider()).toBe("anthropic");
   });
 
-  it("getActiveProvider returns gemini when zoneActiveProvider=gemini is in localStorage", () => {
-    const { context } = buildUiHarness({ zoneActiveProvider: "gemini" });
-    const getActiveProvider = (context as unknown as { getActiveProvider: () => string })
-      .getActiveProvider;
-    expect(getActiveProvider()).toBe("gemini");
-  });
 
   it("buildAuthHeaders sends X-Zone-Provider: anthropic by default", () => {
     const { context } = buildUiHarness();
@@ -1334,14 +1328,6 @@ describe("BYOM.1: provider picker default and persistence", () => {
     expect(headers["X-Zone-Provider"]).toBe("openai");
   });
 
-  it("buildAuthHeaders sends X-Zone-Provider: gemini when provider is gemini", () => {
-    const { context } = buildUiHarness({ zoneActiveProvider: "gemini" });
-    const buildAuthHeaders = (
-      context as unknown as { buildAuthHeaders: () => Record<string, string> }
-    ).buildAuthHeaders;
-    const headers = buildAuthHeaders();
-    expect(headers["X-Zone-Provider"]).toBe("gemini");
-  });
 
   it("setActiveProvider persists to localStorage and getActiveProvider reads it back", () => {
     const { context, localStorageStore } = buildUiHarness();
@@ -1354,16 +1340,7 @@ describe("BYOM.1: provider picker default and persistence", () => {
     expect(ctx.getActiveProvider()).toBe("openai");
   });
 
-  it("setActiveProvider accepts gemini and getActiveProvider reads it back", () => {
-    const { context, localStorageStore } = buildUiHarness();
-    const ctx = context as unknown as {
-      getActiveProvider: () => string;
-      setActiveProvider: (p: string) => void;
-    };
-    ctx.setActiveProvider("gemini");
-    expect(localStorageStore.get("zoneActiveProvider")).toBe("gemini");
-    expect(ctx.getActiveProvider()).toBe("gemini");
-  });
+
 });
 
 type ByomCtx = {
@@ -1544,36 +1521,7 @@ describe("BYOM.2: active-provider key resolver", () => {
   });
 });
 
-describe("P.3: Gemini provider round-trip", () => {
-  it("setActiveProvider gemini → getActiveProvider returns gemini → headers carry gemini model", () => {
-    const { context } = buildUiHarness({
-      zoneActiveProvider: "gemini",
-      zoneApiKeys: JSON.stringify({ gemini: "AIza-test-key" }),
-      zoneActiveModels: JSON.stringify({ gemini: { high: "gemini-3.1-pro" } }),
-    });
-    const ctx = context as unknown as ByomCtx;
-    expect(ctx.getActiveProvider()).toBe("gemini");
-    const headers = ctx.buildAuthHeaders();
-    expect(headers["X-Zone-Provider"]).toBe("gemini");
-    expect(headers["X-Zone-LLM-Key"]).toBe("AIza-test-key");
-    expect(headers["X-Zone-LLM-Model-High"]).toBe("gemini-3.1-pro");
-  });
-
-  it("getActivePrimary returns null when no model stored for provider", () => {
-    const { context } = buildUiHarness({ zoneActiveProvider: "gemini" });
-    const ctx = context as unknown as ByomCtx;
-    expect(ctx.getActivePrimary("gemini")).toBeNull();
-  });
-
-  it("setActivePrimary/getActivePrimary round-trip for gemini", () => {
-    const { context } = buildUiHarness({ zoneActiveProvider: "gemini" });
-    const ctx = context as unknown as ByomCtx;
-    ctx.setActivePrimary("gemini", "gemini-3.5-flash");
-    expect(ctx.getActivePrimary("gemini")).toBe("gemini-3.5-flash");
-    const headers = ctx.buildAuthHeaders();
-    expect(headers["X-Zone-LLM-Model-High"]).toBe("gemini-3.5-flash");
-  });
-
+describe("P.3: provider round-trip", () => {
   it("setActivePrimary/getActivePrimary round-trip for anthropic", () => {
     const { context } = buildUiHarness({ zoneActiveProvider: "anthropic" });
     const ctx = context as unknown as ByomCtx;

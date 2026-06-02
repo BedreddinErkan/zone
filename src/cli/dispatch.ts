@@ -60,9 +60,8 @@ export async function runOneShotInner(
 
   if (opts.mode === "plan") {
     const planUserApiKey =
-      effectiveConfig.provider === "openai"  ? effectiveConfig.openaiApiKey  :
-      effectiveConfig.provider === "gemini"  ? effectiveConfig.geminiApiKey  :
-                                               effectiveConfig.anthropicApiKey;
+      effectiveConfig.provider === "openai" ? effectiveConfig.openaiApiKey :
+                                             effectiveConfig.anthropicApiKey;
 
     let preGeneratedPlan: ExecutionPlan | undefined;
     try {
@@ -156,9 +155,8 @@ export async function runOneShotInner(
 
   try {
     const userApiKey =
-      effectiveConfig.provider === "openai"  ? effectiveConfig.openaiApiKey  :
-      effectiveConfig.provider === "gemini"  ? effectiveConfig.geminiApiKey  :
-                                               effectiveConfig.anthropicApiKey;
+      effectiveConfig.provider === "openai" ? effectiveConfig.openaiApiKey :
+                                             effectiveConfig.anthropicApiKey;
 
     const result = await withRequestContext(
       {

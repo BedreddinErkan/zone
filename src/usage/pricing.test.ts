@@ -1,29 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { costFor } from "./pricing.js";
 
-describe("pricing — gemini", () => {
-  it("gemini-3.5-flash: input $1.5/MTok", () => {
-    expect(costFor("gemini", "gemini-3.5-flash", "input_uncached", 1_000_000)).toBe(1.5);
-  });
-  it("gemini-3.5-flash: output $9/MTok", () => {
-    expect(costFor("gemini", "gemini-3.5-flash", "output", 1_000_000)).toBe(9);
-  });
-  it("gemini-3.5-flash: cache_read $0.15/MTok", () => {
-    expect(costFor("gemini", "gemini-3.5-flash", "cache_read", 1_000_000)).toBe(0.15);
-  });
-  it("gemini-3.5-flash: cache_write $0 (implicit)", () => {
-    expect(costFor("gemini", "gemini-3.5-flash", "cache_write", 1_000_000)).toBe(0);
-  });
-  it("gemini-3.1-pro: input $4/MTok (conservative flat)", () => {
-    expect(costFor("gemini", "gemini-3.1-pro", "input_uncached", 1_000_000)).toBe(4);
-  });
-  it("gemini-3.1-pro: output $18/MTok", () => {
-    expect(costFor("gemini", "gemini-3.1-pro", "output", 1_000_000)).toBe(18);
-  });
-  it("gemini-3.1-pro: cache_read $0.20/MTok", () => {
-    expect(costFor("gemini", "gemini-3.1-pro", "cache_read", 1_000_000)).toBe(0.20);
-  });
-});
 
 describe("pricing — claude-opus-4-8", () => {
   it("input $5/MTok", () => {

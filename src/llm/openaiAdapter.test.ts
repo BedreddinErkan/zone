@@ -1,10 +1,101 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 import {
   assembleAgentSystemPrompt,
   buildOpenAIPromptCacheKey,
   sortToolsForPromptCache,
 } from "./agentLoop.js";
+
+// ─── Adapter completion-parity tests ─────────────────────────────────────────
+// Regression guard for the HTTP 400 "unsupported_parameter" bug:
+// gpt-5.x reasoning models reject `max_tokens`; the adapter must translate it
+// to `max_completion_tokens` before hitting the SDK — on BOTH sync and stream.
+
+const sdkCreateMock = vi.fn();
+vi.mock("openai", () => ({
+  default: class FakeOpenAI {
+    chat = { completions: { create: sdkCreateMock } };
+  },
+}));
+vi.mock("./withExponentialBackoff.js", () => ({
+  withExponentialBackoff: vi.fn(async (fn: () => Promise<unknown>) => fn()),
+}));
+vi.mock("./modelRegistry.js", () => ({
+  supportsEffort: vi.fn().mockReturnValue(false),
+}));
+
+import { OpenAIAdapter } from "./openaiAdapter.js";
+
+const FAKE_COMPLETION = {
+  id: "chatcmpl-test", model: "gpt-5.4-2026-03-05",
+  choices: [{ message: { content: "hi", tool_calls: null }, finish_reason: "stop" }],
+  usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+};
+const FAKE_STREAM: AsyncIterable<unknown> = {
+  [Symbol.asyncIterator]: async function* () {
+    yield { choices: [], model: "gpt-5.4", usage: null };
+  },
+};
+
+describe("OpenAIAdapter — normalizeTokenParam (sync path)", () => {
+  beforeEach(() => { sdkCreateMock.mockReset(); });
+
+  it("max_tokens → max_completion_tokens when max_completion_tokens absent", async () => {
+    sdkCreateMock.mockResolvedValueOnce(FAKE_COMPLETION);
+    await new OpenAIAdapter("sk-test").createChatCompletion({
+      model: "gpt-5.4", messages: [{ role: "user", content: "hi" }], max_tokens: 16384,
+    });
+    const [p] = sdkCreateMock.mock.calls[0] as [Record<string, unknown>];
+    expect(p["max_completion_tokens"]).toBe(16384);
+    expect("max_tokens" in p).toBe(false);
+  });
+
+  it("max_completion_tokens already set → passes through, no duplication", async () => {
+    sdkCreateMock.mockResolvedValueOnce(FAKE_COMPLETION);
+    await new OpenAIAdapter("sk-test").createChatCompletion({
+      model: "gpt-5.4", messages: [{ role: "user", content: "hi" }], max_completion_tokens: 512,
+    });
+    const [p] = sdkCreateMock.mock.calls[0] as [Record<string, unknown>];
+    expect(p["max_completion_tokens"]).toBe(512);
+    expect("max_tokens" in p).toBe(false);
+  });
+
+  it("no token param → passes through without adding either field", async () => {
+    sdkCreateMock.mockResolvedValueOnce(FAKE_COMPLETION);
+    await new OpenAIAdapter("sk-test").createChatCompletion({
+      model: "gpt-5.4", messages: [{ role: "user", content: "hi" }],
+    });
+    const [p] = sdkCreateMock.mock.calls[0] as [Record<string, unknown>];
+    expect("max_tokens" in p).toBe(false);
+    expect("max_completion_tokens" in p).toBe(false);
+  });
+});
+
+describe("OpenAIAdapter — normalizeTokenParam (stream path)", () => {
+  beforeEach(() => { sdkCreateMock.mockReset(); });
+
+  it("max_tokens → max_completion_tokens on the streaming path", async () => {
+    sdkCreateMock.mockResolvedValueOnce(FAKE_STREAM);
+    await new OpenAIAdapter("sk-test").createChatCompletionStream({
+      model: "gpt-5.4", messages: [{ role: "user", content: "hi" }],
+      stream: true, max_tokens: 8192,
+    });
+    const [p] = sdkCreateMock.mock.calls[0] as [Record<string, unknown>];
+    expect(p["max_completion_tokens"]).toBe(8192);
+    expect("max_tokens" in p).toBe(false);
+  });
+
+  it("streaming: max_completion_tokens already set → passes through unchanged", async () => {
+    sdkCreateMock.mockResolvedValueOnce(FAKE_STREAM);
+    await new OpenAIAdapter("sk-test").createChatCompletionStream({
+      model: "gpt-5.4", messages: [{ role: "user", content: "hi" }],
+      stream: true, max_completion_tokens: 256,
+    });
+    const [p] = sdkCreateMock.mock.calls[0] as [Record<string, unknown>];
+    expect(p["max_completion_tokens"]).toBe(256);
+    expect("max_tokens" in p).toBe(false);
+  });
+});
 
 function makeTool(name: string): ChatCompletionTool {
   return {

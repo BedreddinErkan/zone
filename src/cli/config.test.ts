@@ -161,10 +161,7 @@ describe("loadCliConfig — config file precedence", () => {
     expect(cfg.provider).toBe("anthropic");
   });
 
-  it("gemini provider string → resolves to gemini", () => {
-    const cfg = loadCliConfig({}, { defaultProvider: "gemini" });
-    expect(cfg.provider).toBe("gemini");
-  });
+
 });
 
 describe("validateCliConfig", () => {
@@ -251,70 +248,25 @@ describe("loadCliConfig — per-repo disk model precedence (Bug E fix)", () => {
   it("disk model takes precedence over global config file for model and provider", () => {
     vi.mocked(loadDiskModelSync).mockReturnValue({
       version: 2,
-      model: "gemini-3.5-flash",
-      provider: "gemini",
+      model: "gpt-5.4",
+      provider: "openai",
       updatedAt: "2026-06-01T00:00:00Z",
     });
     const cfg = loadCliConfig({}, { defaultModel: "claude-sonnet-4-6", defaultProvider: "anthropic" });
-    expect(cfg.model).toBe("gemini-3.5-flash");
-    expect(cfg.provider).toBe("gemini");
+    expect(cfg.model).toBe("gpt-5.4");
+    expect(cfg.provider).toBe("openai");
   });
 
   it("env var still beats disk model for model", () => {
-    vi.stubEnv("ZONE_MODEL", "gpt-5.4");
+    vi.stubEnv("ZONE_MODEL", "claude-sonnet-4-6");
     vi.mocked(loadDiskModelSync).mockReturnValue({
       version: 2,
-      model: "gemini-3.5-flash",
-      provider: "gemini",
+      model: "gpt-5.4",
+      provider: "openai",
       updatedAt: "2026-06-01T00:00:00Z",
     });
     const cfg = loadCliConfig({}, {});
-    expect(cfg.model).toBe("gpt-5.4");
-  });
-
-  it("GEMINI_API_KEY env var populates geminiApiKey", () => {
-    vi.stubEnv("GEMINI_API_KEY", "gem-test-key");
-    const cfg = loadCliConfig({}, {});
-    expect(cfg.geminiApiKey).toBe("gem-test-key");
+    expect(cfg.model).toBe("claude-sonnet-4-6");
   });
 });
 
-describe("validateCliConfig — gemini provider (Bug E' fix)", () => {
-  it("throws when gemini provider and no geminiApiKey", () => {
-    expect(() =>
-      validateCliConfig({
-        model: "gemini-3.5-flash",
-        provider: "gemini",
-        anthropicApiKey: undefined,
-        openaiApiKey: undefined,
-        geminiApiKey: undefined,
-        dailyUsdCap: 10,
-        repoPath: "/tmp",
-        autoApprove: false,
-        noRevision: false,
-        verbose: false,
-        quiet: false,
-        noColor: false,
-      })
-    ).toThrow("GEMINI_API_KEY");
-  });
-
-  it("does not throw when geminiApiKey is present", () => {
-    expect(() =>
-      validateCliConfig({
-        model: "gemini-3.5-flash",
-        provider: "gemini",
-        anthropicApiKey: undefined,
-        openaiApiKey: undefined,
-        geminiApiKey: "gem-abc",
-        dailyUsdCap: 10,
-        repoPath: "/tmp",
-        autoApprove: false,
-        noRevision: false,
-        verbose: false,
-        quiet: false,
-        noColor: false,
-      })
-    ).not.toThrow();
-  });
-});
