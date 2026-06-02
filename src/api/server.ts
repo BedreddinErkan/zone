@@ -2820,6 +2820,36 @@ function intentFromExplicitMode(mode: Exclude<Mode, "auto">): "execute" | "chat"
   return "chat";
 }
 
+app.post("/api/init", async (req, res) => {
+  const repoPath = typeof req.body?.repoPath === "string" ? req.body.repoPath : process.cwd();
+  try {
+    const { runInitFlow } = await import("../memory/initFlow.js");
+    const result = await runInitFlow(repoPath);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, message: `init error: ${err instanceof Error ? err.message : String(err)}` });
+  }
+});
+
+app.get("/api/memory", async (req, res) => {
+  const repoPath = typeof req.query?.repoPath === "string" ? req.query.repoPath : process.cwd();
+  try {
+    const { readMemory, MEMORY_RELATIVE_PATH } = await import("../memory/projectMemory.js");
+    const { promises: fs } = await import("node:fs");
+    const { join } = await import("node:path");
+    const memPath = join(repoPath, MEMORY_RELATIVE_PATH);
+    let content: string;
+    try {
+      content = await fs.readFile(memPath, "utf-8");
+    } catch {
+      content = "";
+    }
+    res.json({ content });
+  } catch (err) {
+    res.status(500).json({ content: "", error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 app.post("/api/classify-intent", async (req, res) => {
   const task = typeof req.body?.task === "string" ? req.body.task : "";
   const normalizedTask = task.trim();
