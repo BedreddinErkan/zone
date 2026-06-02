@@ -17,7 +17,6 @@ import { ModelModal } from "./components/ModelModal.js";
 import { EffortModal } from "./components/EffortModal.js";
 import { MetricsModal } from "./components/MetricsModal.js";
 import { LimitsModal } from "./components/LimitsModal.js";
-import { Header } from "./components/Header.js";
 import { resolveCommandApproval } from "../../api/commandApprovals.js";
 import { resolvePlanApproval } from "../../llm/planApprovals.js";
 import type { EventBus } from "../eventBus.js";
@@ -154,7 +153,6 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }:
 
   return (
     <Box flexDirection="column">
-      <Header />
       <Box paddingX={2}>
         <Transcript />
       </Box>

@@ -45,7 +45,7 @@ function modePill(m: TuiMode, narrow: boolean): string | null {
 
 export function StatusBar(): React.ReactElement {
   const { state } = useStore();
-  const { costUsd, model, tokenBudgetRatio, cumulativeTokens } = state.statusBar;
+  const { costUsd, model, tokenBudgetRatio, cumulativeTokens, capUsd } = state.statusBar;
   const { runState, runStartMs, mode } = state;
 
   const elapsedSec =
@@ -62,6 +62,10 @@ export function StatusBar(): React.ReactElement {
   const pill = modePill(mode, narrow);
   const pillColor: "yellow" | "cyan" = mode === "autoAccept" ? "yellow" : "cyan";
 
+  const modelLabel = model || "default";
+  const usedStr = costUsd > 0 ? ` · used $${costUsd.toFixed(2)}` : "";
+  const badgeLine = `${modelLabel}${usedStr} · cap $${(capUsd ?? 10).toFixed(2)}`;
+
   return (
     <Box flexDirection="column">
       <Text dimColor>{sep}</Text>
@@ -69,6 +73,9 @@ export function StatusBar(): React.ReactElement {
         <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec, cumulativeTokens)}</Text>
         {pill ? <Text color={pillColor}>{pill}</Text> : null}
         <Text dimColor>{rightHint(runState)}</Text>
+      </Box>
+      <Box paddingX={1}>
+        <Text dimColor>{badgeLine}</Text>
       </Box>
       <Text dimColor>{sep}</Text>
     </Box>
