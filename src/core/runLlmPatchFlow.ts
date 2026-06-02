@@ -5773,6 +5773,12 @@ const initializeTodosFromPlan = (): void => {
             case "kill_background":
             case "read_background_output":
               return String(args.handle ?? "");
+            case "multi_edit": {
+              const files = (args.files as string[]) ?? [];
+              const find = String(args.find ?? "").slice(0, 40);
+              const fileList = files.slice(0, 2).join(", ") + (files.length > 2 ? ` +${files.length - 2}` : "");
+              return `${files.length} files · find="${find}"${fileList ? ` · ${fileList}` : ""}`;
+            }
             default:
               return "";
           }

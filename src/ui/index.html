@@ -732,7 +732,7 @@
       letter-spacing:0.02em
     }
     .diff-toolbar{display:flex;align-items:center;gap:var(--space-md);padding:var(--space-sm) var(--space-md);border-bottom:1px solid var(--border);background:transparent;position:sticky;top:0;z-index:2}
-    .file-ico{width:18px;height:18px;border:1px solid rgba(59,130,246,0.55);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--blue);font-size:var(--font-size-sm);flex-shrink:0}
+    .file-ico{width:18px;height:18px;border:1px solid rgba(127,212,164,0.45);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--green);font-size:var(--font-size-sm);flex-shrink:0}
     .diff-fname{flex:1;min-width:0;font-family:var(--font-family-mono);font-size:var(--font-size-base);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .diff-stat{font-family:var(--font-family-mono);font-size:var(--font-size-xs);color:var(--text-3);white-space:nowrap}
     .diff-copy{
@@ -889,10 +889,12 @@
     .kw{color:var(--violet)} .fn{color:var(--blue)} .str{color:var(--green)}
 
     .toast{max-width:720px;margin:var(--space-xl) 0;border:1px solid var(--border);background:rgba(0,0,0,0.14);padding:var(--space-lg) var(--space-xl);border-radius:var(--radius-lg);display:flex;align-items:center;gap:var(--space-lg);color:var(--text-2)}
-    .toast.success{border-color:rgba(34,197,94,0.35);background:rgba(34,197,94,0.07);color:var(--text-1)}
-    .toast.error{border-color:rgba(239,68,68,0.35);background:rgba(239,68,68,0.07);color:var(--text-1)}
+    .toast.success{border-color:rgba(127,212,164,0.35);background:var(--green-bg);color:var(--text-1)}
+    .toast.error{border-color:rgba(221,144,144,0.35);background:var(--red-bg);color:var(--text-1)}
+    .toast.warn{border-color:rgba(224,197,133,0.45);background:var(--amber-glow);color:var(--text-1)}
     .ticon{width:10px;height:10px;border-radius:var(--radius-pill);background:var(--color-success)}
     .toast.error .ticon{background:var(--color-error)}
+    .toast.warn .ticon{background:var(--amber-dim)}
     .zone-cost-strip{
       position:fixed;top:64px;right:22px;font-family:var(--font-family-mono);font-size:11px;color:var(--text-3);
       display:flex;align-items:center;gap:10px;z-index:31;pointer-events:none
@@ -5866,15 +5868,15 @@
       const reason = String((opts && opts.reason) || 'Verification regressed after apply');
       const errors = Array.isArray(opts && opts.errors) ? opts.errors.slice(0, 5) : [];
       const el = document.createElement('div');
-      el.className = 'toast';
-      el.style.cssText = 'margin:6px 0;padding:12px 16px;border-color:rgba(212,168,90,0.45);background:rgba(212,168,90,0.10);align-items:flex-start;display:flex;gap:12px';
+      el.className = 'toast warn';
+      el.style.cssText = 'margin:6px 0;padding:12px 16px;align-items:flex-start;display:flex;gap:12px';
       const errorsHtml = errors.length
         ? `<ul style="font-family:var(--font-family-mono,monospace);font-size:0.85em;margin:8px 0 6px 0;padding-left:18px;color:var(--text-2)">${errors.map(e => `<li style="margin:2px 0">${escapeHtml(String(e))}</li>`).join('')}</ul>`
         : '';
       el.innerHTML = `
         <div style="font-size:18px;opacity:0.85;line-height:1">⟲</div>
         <div style="flex:1">
-          <div style="font-weight:600;color:#d4a85a;margin-bottom:4px">Apply rolled back</div>
+          <div style="font-weight:600;color:var(--amber-dim);margin-bottom:4px">Apply rolled back</div>
           <div style="font-size:var(--font-size-sm,12px);color:var(--text-2);line-height:1.45">${escapeHtml(reason)}</div>
           ${errorsHtml}
           <div style="font-size:var(--font-size-sm,12px);color:var(--text-3);margin-top:6px;line-height:1.45">Disk restored to pre-apply state. Inspect the diff below to see what was attempted, then re-dispatch with corrections.</div>
@@ -5889,12 +5891,12 @@
     function createBlockedBanner(reason){
       const el = document.createElement('div');
       el.className = 'toast error';
-      el.style.cssText = 'margin:6px 0;border-color:rgba(239,68,68,0.45);background:rgba(239,68,68,0.08);align-items:flex-start';
+      el.style.cssText = 'margin:6px 0;align-items:flex-start';
       const safeReason = escapeHtml(String(reason || 'Blocked for safety'));
       el.innerHTML = `
-        <div class="ticon" style="background:#ef4444;margin-top:4px"></div>
+        <div class="ticon" style="background:var(--color-error);margin-top:4px"></div>
         <div>
-          <div style="font-weight:600;color:#fca5a5;margin-bottom:2px">✗ Blocked for safety</div>
+          <div style="font-weight:600;color:var(--red);margin-bottom:2px">✗ Blocked for safety</div>
           <div style="font-size:var(--font-size-sm,12px);color:var(--text-2);line-height:1.45">${safeReason}</div>
           <div style="font-size:var(--font-size-sm,12px);color:var(--text-3);margin-top:4px;line-height:1.45">No changes were applied. Address the issue above and re-dispatch the task.</div>
         </div>
@@ -8113,8 +8115,8 @@
           <span class="turn-badge chat">Chat</span>
           <span class="turn-meta">${escapeHtml(fmtRelative(ts))}</span>
         </div>
-        ${isInvestigationMaxiter ? `<div class="toast" style="margin:4px 0 2px;opacity:0.8"><div class="ticon" style="background:var(--blue,#5b8af0)"></div><div>Investigation incomplete — iteration budget reached. Findings below are partial.</div></div>` : ''}
-        ${isTokenBudgetExceeded ? `<div class="toast" style="margin:4px 0 2px;opacity:0.8;border-color:rgba(212,168,90,0.4);background:rgba(212,168,90,0.08)"><div class="ticon" style="background:#d4a85a"></div><div>Token budget reached — findings below are partial.</div></div>` : ''}
+        ${isInvestigationMaxiter ? `<div class="toast" style="margin:4px 0 2px;opacity:0.8"><div class="ticon" style="background:var(--green-dim)"></div><div>Investigation incomplete — iteration budget reached. Findings below are partial.</div></div>` : ''}
+        ${isTokenBudgetExceeded ? `<div class="toast warn" style="margin:4px 0 2px;opacity:0.8"><div class="ticon" style="background:var(--amber-dim)"></div><div>Token budget reached — findings below are partial.</div></div>` : ''}
         <div class="turn-restored-body"></div>
       `;
       wrap.querySelector('.turn-restored-header')?.addEventListener('click', (e) => toggleRestored(e.currentTarget));
@@ -8884,9 +8886,9 @@
           const lb = document.getElementById(`logBlock-${rid}`);
           if (lb) {
             const notice = document.createElement('div');
-            notice.className = 'toast';
-            notice.style.cssText = 'margin:4px 0 2px;opacity:0.9;border-color:rgba(212,168,90,0.4);background:rgba(212,168,90,0.08)';
-            notice.innerHTML = `<div class="ticon" style="background:#d4a85a"></div><div>${escapeHtml(String(progress.message || 'Context exhausted via compaction.'))}</div>`;
+            notice.className = 'toast warn';
+            notice.style.cssText = 'margin:4px 0 2px;opacity:0.9';
+            notice.innerHTML = `<div class="ticon"></div><div>${escapeHtml(String(progress.message || 'Context exhausted via compaction.'))}</div>`;
             lb.appendChild(notice);
           }
           state.__compactionExhaustedByRun = state.__compactionExhaustedByRun || {};
@@ -8902,9 +8904,9 @@
             const toolName = escapeHtml(String(progress.toolName || ''));
             const count = Number(progress.count) || 0;
             const notice = document.createElement('div');
-            notice.className = 'toast';
-            notice.style.cssText = 'margin:4px 0 2px;opacity:0.9;border-color:rgba(212,168,90,0.3);background:rgba(212,168,90,0.06)';
-            notice.innerHTML = `<div class="ticon" style="background:#d4a85a"></div><div>Loop warning: <code>${toolName}</code> called ${count}× with identical args — agent nudged to try a different approach.</div>`;
+            notice.className = 'toast warn';
+            notice.style.cssText = 'margin:4px 0 2px;opacity:0.9';
+            notice.innerHTML = `<div class="ticon"></div><div>Loop warning: <code>${toolName}</code> called ${count}× with identical args — agent nudged to try a different approach.</div>`;
             lb.appendChild(notice);
           }
         }
