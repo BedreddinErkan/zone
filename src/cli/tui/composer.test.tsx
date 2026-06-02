@@ -162,4 +162,51 @@ describe("TUI.4 composer", () => {
     expect(lastFrame()).toContain("Cost:");
     unmount();
   });
+
+  // Regression: slash-command gates must use === "running", not !== "idle".
+  // After a run completes (runState="done") or is aborted (runState="aborted"),
+  // gated commands (/model /effort /sessions /init /limits) must be allowed.
+  it("/model is blocked while running but allowed after completion (runState=done)", async () => {
+    const bus = createEventBus();
+    const { lastFrame, stdin, unmount } = render(<App bus={bus} />);
+
+    // Start run → runState="running"
+    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
+    await wait(50);
+    stdin.write("/model");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+    expect(lastFrame()).toContain("Cannot change /model while a run is in progress.");
+
+    // Complete run → runState="done"
+    bus.emit("agent_loop_complete", makeEvt("agent_loop_complete"));
+    await wait(50);
+    stdin.write("/model");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+    // Modal must open — the model selection UI is present
+    expect(lastFrame()).toContain("↑↓ navigate · Enter select · Esc cancel");
+    unmount();
+  });
+
+  it("/model is allowed after run is aborted (runState=aborted)", async () => {
+    const bus = createEventBus();
+    const { lastFrame, stdin, unmount } = render(<App bus={bus} />);
+
+    // Start then abort
+    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
+    await wait(50);
+    stdin.write("\x1b"); // Esc → RUN_ABORTED
+    await wait(50);
+
+    stdin.write("/model");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+    // Modal must open — the model selection UI is present
+    expect(lastFrame()).toContain("↑↓ navigate · Enter select · Esc cancel");
+    unmount();
+  });
 });

@@ -138,7 +138,7 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
         });
         break;
       case "/sessions":
-        if (state.runState !== "idle") {
+        if (disabled) {
           dispatch({
             type: "USER_PROMPT",
             text: "Cannot switch sessions while a run is in progress; press Esc to abort first",
@@ -150,7 +150,7 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
         });
         break;
       case "/init":
-        if (state.runState !== "idle") {
+        if (disabled) {
           dispatch({ type: "USER_PROMPT", text: "Cannot /init while a run is in progress." });
           break;
         }
@@ -160,14 +160,14 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
         void readMemoryAndShow(process.cwd(), dispatch);
         break;
       case "/model":
-        if (state.runState !== "idle") {
+        if (disabled) {
           dispatch({ type: "USER_PROMPT", text: "Cannot change /model while a run is in progress." });
           break;
         }
         dispatch({ type: "MODEL_MODAL_OPEN" });
         break;
       case "/effort":
-        if (state.runState !== "idle") {
+        if (disabled) {
           dispatch({ type: "USER_PROMPT", text: "Cannot change /effort while a run is in progress." });
           break;
         }
@@ -177,7 +177,7 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
         dispatch({ type: "METRICS_MODAL_OPEN" });
         break;
       case "/limits":
-        if (state.runState !== "idle") {
+        if (disabled) {
           dispatch({ type: "USER_PROMPT", text: "Cannot change /limits while a run is in progress." });
           break;
         }
