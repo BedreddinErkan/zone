@@ -1,4 +1,4 @@
-import { vi, describe, it, expect } from "vitest";
+import { vi, describe, it, expect, afterEach } from "vitest";
 import { TokenBudgetMeter } from "./TokenBudgetMeter.js";
 
 function makeRawUsage(
@@ -503,6 +503,50 @@ describe("TokenBudgetMeter", () => {
       expect(meter.effectiveCumulativeTokens).toBe(12_900);
       // raw cumulativeTokens includes full cache_read
       expect(meter.cumulativeTokens).toBe(5_000 + 300 + 70_000 + 600); // 75_900
+    });
+  });
+
+  describe("ZONE_CACHE_READ_BUDGET_DISCOUNT env knob", () => {
+    afterEach(() => {
+      delete process.env["ZONE_CACHE_READ_BUDGET_DISCOUNT"];
+    });
+
+    it("absent env → default 0.1 (byte-identical to hardcoded behavior)", () => {
+      delete process.env["ZONE_CACHE_READ_BUDGET_DISCOUNT"];
+      const cap = 800_000;
+      const meter = new TokenBudgetMeter({ baseTokens: 0, cap, isSubagentLoop: false, runId: "r" });
+      meter.recordLLMCall({
+        rawUsage: makeRawUsage(10_000, 5_000, 90_000, 0),
+        iter: 1, totalIter: 15, provider: "anthropic", model: "claude-sonnet-4-6",
+      });
+      // effective = 10K + 0 + round(90K*0.1) + 5K = 24K (same as hardcoded 0.1)
+      expect(meter.emitStatus(1)).toBeCloseTo(24_000 / cap, 4);
+    });
+
+    it("ZONE_CACHE_READ_BUDGET_DISCOUNT=0.25 raises effective budget consumption for cache_read", () => {
+      process.env["ZONE_CACHE_READ_BUDGET_DISCOUNT"] = "0.25";
+      const cap = 800_000;
+      const meter = new TokenBudgetMeter({ baseTokens: 0, cap, isSubagentLoop: false, runId: "r" });
+      meter.recordLLMCall({
+        rawUsage: makeRawUsage(10_000, 5_000, 90_000, 0),
+        iter: 1, totalIter: 15, provider: "anthropic", model: "claude-sonnet-4-6",
+      });
+      // effective = 10K + 0 + round(90K*0.25) + 5K = 10K+22.5K+5K = 37.5K
+      expect(meter.emitStatus(1)).toBeCloseTo(37_500 / cap, 4);
+      // higher than the 0.1 default (24K/800K)
+      expect(meter.emitStatus(1)).toBeGreaterThan(24_000 / cap);
+    });
+
+    it("invalid/NaN ZONE_CACHE_READ_BUDGET_DISCOUNT falls back to 0.1", () => {
+      process.env["ZONE_CACHE_READ_BUDGET_DISCOUNT"] = "not-a-number";
+      const cap = 800_000;
+      const meter = new TokenBudgetMeter({ baseTokens: 0, cap, isSubagentLoop: false, runId: "r" });
+      meter.recordLLMCall({
+        rawUsage: makeRawUsage(10_000, 5_000, 90_000, 0),
+        iter: 1, totalIter: 15, provider: "anthropic", model: "claude-sonnet-4-6",
+      });
+      // NaN → fallback 0.1 → effective = 24K (same as default)
+      expect(meter.emitStatus(1)).toBeCloseTo(24_000 / cap, 4);
     });
   });
 });

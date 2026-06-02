@@ -12,9 +12,6 @@ import type { ProviderName } from "../../usage/pricing.js";
 // Mirrors agentLoop.ts module-level constants — do not change independently.
 const TOKEN_BUDGET_HARD = 0.95;
 const TOKEN_BUDGET_WARN = 0.8;
-// Anthropic cache reads cost ~10× less than fresh input. The budget ratio uses this
-// discount so a cache-heavy run burns capacity proportionally to actual spend, not raw tokens.
-const CACHE_READ_BUDGET_DISCOUNT = 0.1;
 
 function extractTokenUsageForBudget(
   rawUsage: unknown
@@ -183,13 +180,24 @@ export class TokenBudgetMeter {
 
   // Cache-discounted token count for the budget cap check.
   // input_uncached = Anthropic's input_tokens = truly uncached (excludes cache_read/write).
-  // Only cache_read is discounted 10×; uncached input and cache_write stay at full weight.
+  // Only cache_read is discounted; uncached input and cache_write stay at full weight.
+  // ZONE_CACHE_READ_BUDGET_DISCOUNT (default 0.1): raise to terminate cache-healthy inflated
+  // runs earlier (e.g. 0.25 → cap fires ~iter 20-30 instead of never on a 65-iter run).
+  // DO NOT touch the `total` field in extractTokenUsageForBudget — that is the reporting
+  // total, not the cap path. Unset or invalid value falls back to 0.1 (today's behavior).
+  private get cacheReadBudgetDiscount(): number {
+    const raw = process.env["ZONE_CACHE_READ_BUDGET_DISCOUNT"];
+    if (raw === undefined) return 0.1;
+    const r = parseFloat(raw);
+    return Number.isFinite(r) && r >= 0 && r <= 1 ? r : 0.1;
+  }
+
   get budgetAgentTokens(): number {
     const acc = this._iterCostAccumulator;
     return (
       acc.input_uncached +
       acc.cache_write +
-      Math.round(acc.cache_read * CACHE_READ_BUDGET_DISCOUNT) +
+      Math.round(acc.cache_read * this.cacheReadBudgetDiscount) +
       acc.output
     );
   }
