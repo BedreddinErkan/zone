@@ -999,6 +999,9 @@
     #runModeChip{font-size:10px;color:var(--muted);padding:2px 8px;border:1px solid var(--border);border-radius:2px;margin:6px 0 0;cursor:default;user-select:none;display:inline-block;align-self:flex-start;letter-spacing:0.02em}
     #runModeChip.mode-plan{color:var(--amber);border-color:var(--amber-dim)}
     #runModeChip.mode-read{color:var(--green-dim);border-color:var(--green-dim)}
+    #slashPalette{position:absolute;bottom:100%;left:18px;right:18px;z-index:7;background:var(--surface);border:1px solid var(--border2);border-radius:2px;max-height:220px;overflow-y:auto;box-shadow:0 -4px 16px rgba(0,0,0,0.3)}
+    .slash-item{padding:7px 12px;cursor:pointer;font-size:13px;color:var(--text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .slash-item:hover,.slash-item-active{background:var(--surface2);color:var(--green)}
     .metaRow{display:flex;justify-content:space-between;align-items:center;margin-top:var(--space-lg);color:var(--text-4);font-size:var(--font-size-sm)}
     .repoChip{display:inline-flex;align-items:center;gap:var(--space-lg);border:1px solid var(--border);background:var(--surface-alpha-1);padding:var(--space-sm) var(--space-lg);border-radius:var(--radius-pill);color:var(--text-2);cursor:pointer;transition:border-color var(--transition-base),background var(--transition-base)}
     .repoChip:hover{border-color:var(--border2);background:var(--surface-alpha-2)}
@@ -1250,6 +1253,7 @@
         <div id="zoneApprovalStickyContainer" class="zone-approval-sticky" data-state="hidden"></div>
         <div id="zonePlanStickyContainer" class="zone-approval-sticky" data-state="hidden"></div>
         <div class="queueBar" id="queueBar"></div>
+        <div id="slashPalette" style="display:none"></div>
         <div class="inputWrap">
           <div id="attachPreviewStrip" class="attach-preview-strip" style="display:none"></div>
           <div class="inputWrap-row">
@@ -2008,6 +2012,112 @@
       state.runMode = order[(idx + 1) % order.length];
       const chip = document.getElementById('runModeChip');
       if (chip) { chip.textContent = labels[state.runMode]; chip.className = classes[state.runMode]; }
+    }
+
+    // ---- Slash palette ----
+    const SLASH_COMMANDS = [
+      { cmd: '/keys',    label: '/keys — manage API keys',           action: () => openSettings('keys') },
+      { cmd: '/model',   label: '/model — switch model',             action: () => openSettings('model') },
+      { cmd: '/metrics', label: '/metrics — view run metrics',       action: () => openSettings('metrics') },
+      { cmd: '/clear',   label: '/clear — clear this chat',          action: slashClear },
+      { cmd: '/help',    label: '/help — show help',                 action: slashHelp },
+      { cmd: '/chat',    label: '/chat — direct chat (no patch flow)', action: slashChat },
+      { cmd: '/init',    label: '/init — initialize project memory', action: slashInit },
+      { cmd: '/memory',  label: '/memory — view project memory',     action: slashMemory },
+    ];
+    let _slashOpen = false;
+    let _slashIdx = 0;
+
+    function _slashMatches(filter) {
+      return SLASH_COMMANDS.filter(c => c.cmd.startsWith(filter));
+    }
+
+    function openSlashPalette(filter) {
+      const palette = document.getElementById('slashPalette');
+      if (!palette) return;
+      const matches = _slashMatches(filter);
+      if (!matches.length) { closeSlashPalette(); return; }
+      _slashIdx = Math.min(_slashIdx, matches.length - 1);
+      palette.innerHTML = matches.map((c, i) =>
+        `<div class="slash-item${i === _slashIdx ? ' slash-item-active' : ''}" data-idx="${i}">${c.label}</div>`
+      ).join('');
+      palette.style.display = 'block';
+      _slashOpen = true;
+    }
+
+    function closeSlashPalette() {
+      const palette = document.getElementById('slashPalette');
+      if (palette) palette.style.display = 'none';
+      _slashOpen = false;
+      _slashIdx = 0;
+    }
+
+    function execSlashCommand(filter) {
+      const matches = _slashMatches(filter);
+      const cmd = matches[_slashIdx];
+      if (!cmd) return;
+      const rawInput = els.taskInput.value;
+      closeSlashPalette();
+      els.taskInput.value = '';
+      autosizeTextarea();
+      cmd.action(rawInput);
+    }
+
+    function slashClear(_rawInput) {
+      const threadId = state.activeThreadId;
+      if (!threadId) return;
+      const area = document.querySelector(`.thread-chat-area[data-thread-id="${threadId}"]`);
+      if (area) area.innerHTML = '';
+    }
+
+    function slashHelp(_rawInput) {
+      const area = document.querySelector(`.thread-chat-area[data-thread-id="${state.activeThreadId}"]`);
+      if (!area) return;
+      const el = document.createElement('div');
+      el.className = 'bubble agent';
+      el.innerHTML = '<b>Zone slash commands</b><br>' +
+        SLASH_COMMANDS.map(c => `<code>${c.cmd}</code> — ${c.label.split(' — ')[1]}`).join('<br>') +
+        '<br><br><b>Tips:</b> Shift+Tab cycles Auto/Plan/Read mode · Shift+Enter for newline';
+      area.appendChild(el);
+      scrollChatIfFollowing();
+    }
+
+    function slashChat(_rawInput) {
+      // Set a one-shot flag: next task submission goes to /api/chat directly.
+      state._chatOnce = true;
+      els.taskInput.focus();
+      els.taskInput.placeholder = '💬 Chat mode — type your message…';
+    }
+
+    function slashInit(_rawInput) {
+      appendSlashStatus('⚙ Initializing project memory…');
+      apiFetch('/api/init', { method: 'POST', headers: { 'Content-Type': 'application/json', ...buildAuthHeaders() }, body: JSON.stringify({ repoPath: state.activeRepo?.path }) })
+        .then(r => r.json()).then(d => appendSlashStatus(d.message || (d.ok ? '✓ Initialized' : '✗ Init failed')))
+        .catch(e => appendSlashStatus('✗ Init failed: ' + (e?.message || e)));
+    }
+
+    function slashMemory(_rawInput) {
+      apiFetch('/api/memory?' + new URLSearchParams({ repoPath: state.activeRepo?.path || '' }), { headers: buildAuthHeaders() })
+        .then(r => r.json()).then(d => {
+          const area = document.querySelector(`.thread-chat-area[data-thread-id="${state.activeThreadId}"]`);
+          if (!area) return;
+          const el = document.createElement('div');
+          el.className = 'bubble agent';
+          el.style.whiteSpace = 'pre-wrap';
+          el.textContent = d.content || '(no project memory — run /init first)';
+          area.appendChild(el);
+          scrollChatIfFollowing();
+        }).catch(e => appendSlashStatus('✗ Memory fetch failed: ' + (e?.message || e)));
+    }
+
+    function appendSlashStatus(msg) {
+      const area = document.querySelector(`.thread-chat-area[data-thread-id="${state.activeThreadId}"]`);
+      if (!area) return;
+      const el = document.createElement('div');
+      el.className = 'bubble agent';
+      el.textContent = msg;
+      area.appendChild(el);
+      scrollChatIfFollowing();
     }
 
     // ---- Storage ----
@@ -9770,9 +9880,11 @@
         return;
       }
 
-      // runMode: 'auto' → /api/patch (server classifier decides); 'plan' → /api/patch + requestPlan; 'read' → /api/investigate
+      // runMode: 'auto' → /api/patch (server classifier decides); 'plan' → /api/patch + forceAudit; 'read' → /api/investigate
+      // state._chatOnce: set by /chat slash command — routes one message to /api/chat
       const messageType = runMode === 'read' ? 'question' : 'patch_request';
-      const intent = runMode === 'read' ? 'investigation' : 'execute';
+      let intent = runMode === 'read' ? 'investigation' : 'execute';
+      if (state._chatOnce) { intent = 'chat'; state._chatOnce = false; els.taskInput.placeholder = 'Ask Zone anything... (Shift+Enter for new line)'; }
 
       if (intent === 'chat' || (!intent && (messageType === 'question' || messageType === 'discussion'))) {
         hideEmpty();
@@ -10766,6 +10878,7 @@
     function maybeSendFromEnter(e){
       if (e.isComposing) return;
       if (e.key === 'Enter' && !e.shiftKey) {
+        if (_slashOpen) { e.preventDefault(); execSlashCommand(els.taskInput.value); return; }
         e.preventDefault();
         const task = String(els.taskInput.value || '').trim();
         if (!task) {
@@ -11847,10 +11960,25 @@
         els.bgTasksHeader.addEventListener('click', toggleBgTasks);
       }
 
-      els.taskInput.addEventListener('input', autosizeTextarea);
+      els.taskInput.addEventListener('input', () => {
+        autosizeTextarea();
+        const val = els.taskInput.value;
+        if (val === '/' || (val.startsWith('/') && !val.includes(' ') && els.taskInput.selectionStart === val.length)) {
+          openSlashPalette(val);
+        } else {
+          closeSlashPalette();
+        }
+      });
       els.taskInput.addEventListener('keydown', maybeSendFromEnter);
       els.taskInput.addEventListener('keydown', (e) => {
         if (e.isComposing) return;
+        if (_slashOpen) {
+          const matches = _slashMatches(els.taskInput.value);
+          if (e.key === 'ArrowDown') { e.preventDefault(); _slashIdx = Math.min(_slashIdx + 1, matches.length - 1); openSlashPalette(els.taskInput.value); return; }
+          if (e.key === 'ArrowUp')   { e.preventDefault(); _slashIdx = Math.max(_slashIdx - 1, 0); openSlashPalette(els.taskInput.value); return; }
+          if (e.key === 'Escape')    { closeSlashPalette(); return; }
+          // Enter is handled by maybeSendFromEnter which calls execSlashCommand when _slashOpen
+        }
         if (e.key !== 'Tab' || !e.shiftKey) return;
         e.preventDefault();
         cycleRunMode();
