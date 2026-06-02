@@ -77,7 +77,7 @@ export async function runOneShotInner(
         relevantFiles: planCtx.relevantFilePaths,
         userApiKey: planUserApiKey,
       });
-    } catch { /* plan gen failure — fall through without a pre-generated plan */ }
+    } catch (e) { console.error("[zone-plan-gen-failed]", e); }
 
     if (process.env["ZONE_PLAN_APPROVAL_CYCLE"] === "1") {
       // NEW PATH: show "Ready to code?" modal — no forced audit.
@@ -91,7 +91,7 @@ export async function runOneShotInner(
               objective: preGeneratedPlan.objective,
               steps: preGeneratedPlan.steps,
             },
-            emit: (evt) => progressCallback(evt as unknown as LlmPatchProgressUpdate),
+            emit: (evt) => progressCallback({ stage: evt.type, progress: evt } as unknown as LlmPatchProgressUpdate),
             abortSignal: ac.signal,
             autoApprove: effectiveConfig.autoApprove,
           });
