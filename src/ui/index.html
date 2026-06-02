@@ -177,8 +177,8 @@
     .repo-form{display:flex;gap:var(--space-md);align-items:center;padding:var(--space-md);border-radius:var(--radius-lg);border:1px solid var(--surface-alpha-6);background:rgba(0,0,0,0.10)}
     .repo-form input{flex:1;min-width:0;background:var(--surface-alpha-2);border:1px solid var(--surface-alpha-6);border-radius:var(--radius-lg);padding:var(--space-lg) var(--space-lg);color:var(--text-1);outline:none;font-size:var(--font-size-base)}
     .repo-form input::placeholder{color:var(--text-5)}
-    .repo-form .addbtn{background:rgba(124,58,237,0.18);border:1px solid rgba(124,58,237,0.45);color:var(--violet);padding:var(--space-lg) var(--space-xl);border-radius:var(--radius-lg);font-size:var(--font-size-base);font-weight:700;cursor:pointer}
-    .repo-form .addbtn:hover{border-color:rgba(124,58,237,0.70);background:rgba(124,58,237,0.22)}
+    .repo-form .addbtn{background:rgba(127,212,164,0.18);border:1px solid rgba(127,212,164,0.45);color:var(--violet);padding:var(--space-lg) var(--space-xl);border-radius:var(--radius-lg);font-size:var(--font-size-base);font-weight:700;cursor:pointer}
+    .repo-form .addbtn:hover{border-color:rgba(127,212,164,0.70);background:rgba(127,212,164,0.22)}
     .repo-form .browsebtn{background:var(--surface-alpha-3);border:1px solid var(--surface-alpha-7);color:var(--text-3);padding:var(--space-lg) 11px;border-radius:var(--radius-lg);font-size:var(--font-size-base);font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0}
     .repo-form .browsebtn:hover{border-color:rgba(255,255,255,0.22);background:rgba(255,255,255,0.07)}
     .repo-form .browsebtn:disabled{opacity:.5;cursor:default}
@@ -234,8 +234,8 @@
     .gconfirm{display:inline-flex;align-items:center;gap:var(--space-sm);margin-left:auto;color:var(--text-4);font-size:var(--font-size-sm)}
     .gconfirm .q{color:var(--text-3)}
     .gconfirm .y,.gconfirm .n{border:1px solid var(--border);background:transparent;color:var(--text-2);border-radius:var(--radius-md);padding:var(--space-xs) var(--space-md);font-size:var(--font-size-sm)}
-    .gconfirm .y{border-color:rgba(124,58,237,0.45);color:var(--violet)}
-    .gconfirm .y:hover{border-color:rgba(124,58,237,0.70);background:rgba(124,58,237,0.16)}
+    .gconfirm .y{border-color:rgba(127,212,164,0.45);color:var(--violet)}
+    .gconfirm .y:hover{border-color:rgba(127,212,164,0.70);background:rgba(127,212,164,0.16)}
     .gconfirm .n:hover{border-color:var(--border2);background:var(--surface-alpha-2);color:var(--text-1)}
     .threads{display:none;padding:var(--space-xs) 2px var(--space-md)}
     .group.open .threads{display:block}
@@ -311,7 +311,7 @@
     }
     .run-dot{width:10px;height:10px;border-radius:var(--radius-pill);background:var(--surface-alpha-7)}
     .run-dot.running{background:var(--violet);animation:dotPulse 1.2s ease-in-out infinite}
-    @keyframes dotPulse{0%,100%{box-shadow:0 0 0 0 rgba(124,58,237,0.0);opacity:.85}50%{box-shadow:0 0 0 8px rgba(124,58,237,0.10);opacity:1}}
+    @keyframes dotPulse{0%,100%{box-shadow:0 0 0 0 rgba(127,212,164,0.0);opacity:.85}50%{box-shadow:0 0 0 8px rgba(127,212,164,0.10);opacity:1}}
     .thread-title{flex:1;min-width:0;font-weight:700;font-size:var(--font-size-md);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .status-badge{display:none;border:1px solid var(--violet-bd);background:var(--violet-bg);color:var(--violet);padding:5px var(--space-lg);border-radius:var(--radius-pill);font-size:var(--font-size-sm)}
     .status-badge.show{display:inline-flex}
@@ -608,7 +608,7 @@
     }
     .livecode-h{
       display:flex;align-items:center;gap:var(--space-md);padding:var(--space-xs) var(--space-md);
-      border-bottom:1px solid var(--surface-alpha-5);background:rgba(124,58,237,0.06);
+      border-bottom:1px solid var(--surface-alpha-5);background:rgba(127,212,164,0.06);
       font-family:var(--font-family-sans);font-size:var(--font-size-sm);color:var(--text-2)
     }
     .livecode-h .label{animation:liveHdr 1.0s ease-in-out infinite}
@@ -617,7 +617,7 @@
       width:8px;height:8px;border-radius:var(--radius-pill);background:var(--violet);
       animation:liveDot 1.1s ease-in-out infinite
     }
-    @keyframes liveDot{0%,100%{opacity:.55;box-shadow:0 0 0 0 rgba(124,58,237,0.0)}50%{opacity:1;box-shadow:0 0 0 8px rgba(124,58,237,0.10)}}
+    @keyframes liveDot{0%,100%{opacity:.55;box-shadow:0 0 0 0 rgba(127,212,164,0.0)}50%{opacity:1;box-shadow:0 0 0 8px rgba(127,212,164,0.10)}}
     .livecode-body{
       padding:var(--space-xs) var(--space-md);font-family:var(--font-family-mono);font-size:var(--font-size-base);line-height:1.4;
       max-height:120px;
@@ -10945,7 +10945,7 @@
         },
       ];
       const radios = PRESETS.map(p => `
-        <label style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:6px;border:1px solid ${currentPreset === p.id ? 'var(--violet,#7a5af8)' : 'var(--border,#333)'};cursor:pointer;margin-bottom:8px;background:${currentPreset === p.id ? 'rgba(122,90,248,.07)' : 'transparent'}" data-preset-label="${p.id}">
+        <label style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:6px;border:1px solid ${currentPreset === p.id ? 'var(--violet,#7a5af8)' : 'var(--border,#333)'};cursor:pointer;margin-bottom:8px;background:${currentPreset === p.id ? 'rgba(127,212,164,.07)' : 'transparent'}" data-preset-label="${p.id}">
           <input type="radio" name="zoneModelPreset" value="${p.id}" ${currentPreset === p.id ? 'checked' : ''} style="margin-top:3px;accent-color:var(--violet,#7a5af8)">
           <div>
             <div style="font-size:var(--font-size-sm,12px);font-weight:600;color:var(--color-text,#ddd)">${p.icon} ${p.label}${p.id === 'zone_default' ? ' <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:var(--violet,#7a5af8);color:#fff;vertical-align:middle">recommended</span>' : ''}</div>
@@ -11045,7 +11045,7 @@
           document.querySelectorAll('[data-preset-label]').forEach(lbl => {
             const active = lbl.dataset.presetLabel === radio.value;
             lbl.style.borderColor = active ? 'var(--violet,#7a5af8)' : 'var(--border,#333)';
-            lbl.style.background = active ? 'rgba(122,90,248,.07)' : 'transparent';
+            lbl.style.background = active ? 'rgba(127,212,164,.07)' : 'transparent';
           });
           refreshEffective();
         });
