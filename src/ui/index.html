@@ -5,9 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Zone</title>
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
   <script>
     // Inline logo as a base64 data URI so the desktop bundle (which
@@ -28,6 +25,14 @@
   </script>
 
   <style>
+    @font-face { font-family:'IBM Plex Mono'; font-weight:300; font-display:swap; src:url('/fonts/IBMPlexMono-300.woff2') format('woff2'); }
+    @font-face { font-family:'IBM Plex Mono'; font-weight:400; font-display:swap; src:url('/fonts/IBMPlexMono-400.woff2') format('woff2'); }
+    @font-face { font-family:'IBM Plex Mono'; font-weight:500; font-display:swap; src:url('/fonts/IBMPlexMono-500.woff2') format('woff2'); }
+    @font-face { font-family:'IBM Plex Mono'; font-weight:600; font-display:swap; src:url('/fonts/IBMPlexMono-600.woff2') format('woff2'); }
+    @font-face { font-family:'IBM Plex Mono'; font-weight:700; font-display:swap; src:url('/fonts/IBMPlexMono-700.woff2') format('woff2'); }
+    @font-face { font-family:'IBM Plex Sans'; font-weight:400; font-display:swap; src:url('/fonts/IBMPlexSans-400.woff2') format('woff2'); }
+    @font-face { font-family:'IBM Plex Sans'; font-weight:500; font-display:swap; src:url('/fonts/IBMPlexSans-500.woff2') format('woff2'); }
+    @font-face { font-family:'IBM Plex Sans'; font-weight:600; font-display:swap; src:url('/fonts/IBMPlexSans-600.woff2') format('woff2'); }
     :root{
       color-scheme: dark;
       /* Darker backgrounds, higher contrast text (better outdoor readability). */
@@ -1301,8 +1306,8 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/marked@18.0.3/lib/marked.umd.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.4/dist/purify.min.js"></script>
+  <script src="/vendor/marked.min.js"></script>
+  <script src="/vendor/dompurify.min.js"></script>
 
   <script>
     // ---- Config ingestion (supports both new and existing server injections) ----
