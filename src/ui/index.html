@@ -36,15 +36,15 @@
     @font-face { font-family:'IBM Plex Sans'; font-weight:600; font-display:swap; src:url('/fonts/IBMPlexSans-600.woff2') format('woff2'); }
     :root{
       color-scheme: dark;
-      --bg:#0e1412;
-      --surface:#121815;
-      --surface2:#171e1a;
-      --border:#1e2722;
-      --border2:#2a342e;
-      --text:#d6ded8;
-      --muted:#96a39a;
-      --text-1:#e8ede9;
-      --text-2:#d6ded8;
+      --bg:#101513;
+      --surface:#181e1a;
+      --surface2:#1e241f;
+      --border:#262f29;
+      --border2:#323c36;
+      --text:#e2e8e3;
+      --muted:#9fada4;
+      --text-1:#eef2ee;
+      --text-2:#e2e8e3;
       --text-3:#96a39a;
       --text-4:#647168;
       --text-5:#3f4a42;
@@ -64,7 +64,7 @@
       --amber-dim:#9d8a58;
       --amber-glow:rgba(224,197,133,0.08);
       --red-bg:rgba(221,144,144,0.07);
-      --bg-input:#111714;
+      --bg-input:#131916;
       /* semantic aliases */
       --color-success:var(--green);
       --color-error:var(--red);
@@ -103,12 +103,8 @@
     body{
       margin:0;overflow:hidden;min-width:900px;
       background:var(--bg);
-      background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);
-      background-size:64px 64px;
       color:var(--text-1);font-family:var(--font-family-sans);
     }
-    body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 80% 60% at 30% 0%,var(--green-glow),transparent 70%);pointer-events:none;z-index:0;}
-    body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent 0px,transparent 3px,rgba(0,0,0,0.08) 3px,rgba(0,0,0,0.08) 4px);opacity:0.5;pointer-events:none;z-index:999;}
     #appRoot{position:relative;z-index:1;}
     button,textarea,input{font:inherit}
     button{cursor:pointer}
@@ -1325,7 +1321,6 @@
         <button class="mtab" data-stab="usage">Usage</button>
         <button class="mtab" data-stab="keys">Keys</button>
         <button class="mtab" data-stab="model">Model</button>
-        <button class="mtab" data-stab="tier">Limits</button>
         <button class="mtab" data-stab="metrics">Metrics</button>
       </div>
       <div class="modal-b" id="settingsBody"></div>
@@ -10853,7 +10848,6 @@
       if (tab === 'general') renderGeneralSettings();
       if (tab === 'usage') renderUsageSettings();
       if (tab === 'keys') renderKeysSettings();
-      if (tab === 'tier') renderTierSettings();
       if (tab === 'model') renderModelSettings();
       if (tab === 'metrics') renderMetricsSettings();
     }
@@ -11132,7 +11126,6 @@
           <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
             <button class="gen-link-btn" data-tab="keys">Manage API keys →</button>
             <button class="gen-link-btn" data-tab="model">Change model →</button>
-            <button class="gen-link-btn" data-tab="tier">Adjust tier limits →</button>
           </div>
         </div>
       `;
@@ -11403,156 +11396,6 @@
 
       wireProviderRow('openai', validateOpenAIKey);
       wireProviderRow('anthropic', validateAnthropicKey);
-    }
-
-    // Phase I.2: Visual verification settings panel — dev-server URL,
-    // viewport defaults, and a placeholder auto-verify toggle (wired in I.3).
-    // Phase L.3: tier-based execution limit overrides.
-    function renderTierSettings(){
-      const inputStyle = 'width:110px;padding:4px 8px;background:var(--bg-input,#1e1e1e);border:1px solid var(--border,#444);border-radius:4px;color:inherit;font-size:var(--font-size-sm,12px)';
-      const TIERS = [
-        { key: 'simple',  label: 'Simple',  desc: 'Subagent dispatch always disabled — system guarantee.' },
-        { key: 'medium',  label: 'Medium',  desc: 'Up to 1 subagent call by default.' },
-        { key: 'complex', label: 'Complex', desc: 'Up to 2 subagent calls by default. Highest token budget.' },
-      ];
-
-      function tierBlock(tier, label, desc) {
-        const showSubagent = tier !== 'simple';
-        return `
-          <div style="margin-bottom:18px;padding:12px;border:1px solid var(--border,#333);border-radius:6px">
-            <div class="apikey-field-label" style="font-size:0.9em;margin-bottom:6px">${label}</div>
-            <div class="apikey-disclaimer" style="margin-bottom:10px">${desc}</div>
-            <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">
-              <label style="display:flex;flex-direction:column;gap:4px;font-size:var(--font-size-sm,12px)">
-                Token budget cap
-                <input id="tl-${tier}-tokenBudgetCap" type="number" min="10000" max="2000000" step="1000"
-                  style="${inputStyle}" aria-label="${label} token budget cap" />
-              </label>
-              <label style="display:flex;flex-direction:column;gap:4px;font-size:var(--font-size-sm,12px)">
-                Soft iteration warning
-                <input id="tl-${tier}-softIterWarn" type="number" min="1" max="100"
-                  style="${inputStyle}" aria-label="${label} soft iteration warning" />
-              </label>
-              ${showSubagent ? `
-              <label style="display:flex;flex-direction:column;gap:4px;font-size:var(--font-size-sm,12px)">
-                Max subagent calls
-                <input id="tl-${tier}-maxSubagentCalls" type="number" min="0" max="5"
-                  style="${inputStyle}" aria-label="${label} max subagent calls" />
-              </label>` : ''}
-            </div>
-          </div>`;
-      }
-
-      els.settingsBody.innerHTML = `
-        <div class="apikey-section">
-          <div class="apikey-section-title">Tier-Based Execution Limits</div>
-          <div class="apikey-disclaimer" style="margin-bottom:14px">
-            Customize per-tier token budgets, iteration caps, and subagent call limits.
-            Inputs show the effective value (default or your saved override).
-            <strong>Simple tier's subagent dispatch is a system-level guarantee and cannot be changed.</strong>
-          </div>
-          <div id="tlLoadingState" class="apikey-disclaimer">Loading…</div>
-          <div id="tlFormBody" style="display:none">
-            ${TIERS.map(t => tierBlock(t.key, t.label, t.desc)).join('')}
-            <div style="display:flex;gap:10px;align-items:center;margin-top:8px">
-              <button id="tlSaveBtn" style="padding:5px 14px;background:var(--violet,#7a5af8);color:#fff;border:none;border-radius:4px;font-size:var(--font-size-sm,12px);cursor:pointer">Save</button>
-              <button id="tlResetBtn" style="padding:5px 14px;background:transparent;color:var(--color-text,#ddd);border:1px solid var(--border,#444);border-radius:4px;font-size:var(--font-size-sm,12px);cursor:pointer">Reset to defaults</button>
-              <span id="tlStatus" style="font-size:var(--font-size-sm,12px);opacity:.7"></span>
-            </div>
-          </div>
-        </div>`;
-
-      const loadingEl = document.getElementById('tlLoadingState');
-      const formEl = document.getElementById('tlFormBody');
-      const saveBtn = document.getElementById('tlSaveBtn');
-      const resetBtn = document.getElementById('tlResetBtn');
-      const statusEl = document.getElementById('tlStatus');
-
-      function getInput(tier, field){ return document.getElementById('tl-' + tier + '-' + field); }
-
-      function applySettings(settings){
-        for (const tier of ['simple','medium','complex']){
-          const s = settings[tier] || {};
-          const tokEl = getInput(tier, 'tokenBudgetCap');
-          const iterEl = getInput(tier, 'softIterWarn');
-          const subEl = getInput(tier, 'maxSubagentCalls');
-          if (tokEl) tokEl.value = String(s.tokenBudgetCap ?? '');
-          if (iterEl) iterEl.value = String(s.softIterWarn ?? '');
-          if (subEl) subEl.value = String(s.maxSubagentCalls ?? '');
-        }
-      }
-
-      function collectOverrides(){
-        const result = {};
-        for (const tier of ['simple','medium','complex']){
-          const tokEl = getInput(tier, 'tokenBudgetCap');
-          const iterEl = getInput(tier, 'softIterWarn');
-          const subEl = getInput(tier, 'maxSubagentCalls');
-          const tierObj = {};
-          const tok = tokEl ? parseInt(tokEl.value, 10) : NaN;
-          const iter = iterEl ? parseInt(iterEl.value, 10) : NaN;
-          const sub = subEl ? parseInt(subEl.value, 10) : NaN;
-          if (Number.isFinite(tok)) tierObj.tokenBudgetCap = tok;
-          if (Number.isFinite(iter)) tierObj.softIterWarn = iter;
-          if (Number.isFinite(sub)) tierObj.maxSubagentCalls = sub;
-          if (Object.keys(tierObj).length) result[tier] = tierObj;
-        }
-        return result;
-      }
-
-      fetch('/api/settings/tier-limits').then(r => r.json()).then(data => {
-        if (loadingEl) loadingEl.style.display = 'none';
-        if (formEl) formEl.style.display = '';
-        if (data && data.ok && data.settings) {
-          applySettings(data.settings);
-        } else {
-          if (statusEl) statusEl.textContent = 'Failed to load.';
-        }
-      }).catch(() => {
-        if (loadingEl) loadingEl.textContent = 'Failed to load settings.';
-      });
-
-      if (saveBtn) {
-        saveBtn.addEventListener('click', () => {
-          saveBtn.disabled = true;
-          if (statusEl) statusEl.textContent = 'Saving…';
-          fetch('/api/settings/tier-limits', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userOverrides: collectOverrides() }),
-          }).then(r => r.json()).then(resp => {
-            if (resp && resp.ok) {
-              if (statusEl) statusEl.textContent = '✓ Saved';
-            } else {
-              if (statusEl) statusEl.textContent = 'Error: ' + (resp?.error || 'unknown');
-            }
-          }).catch(err => {
-            if (statusEl) statusEl.textContent = 'Failed: ' + (err?.message || err);
-          }).finally(() => {
-            saveBtn.disabled = false;
-          });
-        });
-      }
-
-      if (resetBtn) {
-        resetBtn.addEventListener('click', () => {
-          resetBtn.disabled = true;
-          if (statusEl) statusEl.textContent = 'Resetting…';
-          fetch('/api/settings/tier-limits/reset', { method: 'POST' })
-            .then(r => r.json()).then(resp => {
-              if (resp && resp.ok && resp.defaults) {
-                applySettings(resp.defaults);
-                if (statusEl) statusEl.textContent = '✓ Reset to defaults';
-              } else {
-                if (statusEl) statusEl.textContent = 'Error resetting.';
-              }
-            }).catch(err => {
-              if (statusEl) statusEl.textContent = 'Failed: ' + (err?.message || err);
-            }).finally(() => {
-              resetBtn.disabled = false;
-            });
-        });
-      }
     }
 
     function renderUsageSettings(){
