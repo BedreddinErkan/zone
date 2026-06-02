@@ -3568,28 +3568,22 @@
     function resolveActiveModelLabel(){
       try {
         const provider = getActiveProvider();
-        const preset = getActivePreset();
+        const primary = getActivePrimary(provider);
         const catalog = ZONE_MODEL_CATALOG[provider] || [];
-        let modelId = null;
-        if (preset === 'zone_default') {
-          // Server decides; show catalog's recommended high-tier model (not localStorage)
+        let modelId;
+        if (primary) {
+          modelId = primary;
+        } else {
+          // No explicit primary — server uses catalog's recommended high-tier model
           const rec = catalog.find((m) => m.recommendedTier === 'high');
           modelId = rec ? rec.id : null;
-        } else if (preset === 'custom') {
-          const active = getActiveModelsForActiveProvider();
-          modelId = (active && active.high) ? active.high : null;
-        } else {
-          const models = getPresetTierModels(provider, preset);
-          modelId = (models && models.high) ? models.high : null;
         }
         const match = modelId ? catalog.find((m) => String(m.id || '') === modelId) : null;
         const fullLabel = match ? match.label : (modelId || 'server default');
         // Short label: strip "Claude " prefix for compact display
         const shortLabel = fullLabel.replace(/^Claude /, '');
-        // Preset display name: strip leading emoji/symbol and whitespace
-        const badgeRaw = PRESET_BADGE_LABELS[preset] || 'Default';
-        const presetName = badgeRaw.replace(/^[^\w]+/, '').trim();
-        return `${shortLabel} (${presetName})`;
+        if (!primary) return shortLabel + ' (Default)';
+        return shortLabel;
       } catch {}
       return 'unknown';
     }
@@ -6436,10 +6430,12 @@
     function getActiveProvider(){
       let v;
       try { v = localStorage.getItem('zoneActiveProvider'); } catch {}
-      return v === 'openai' ? 'openai' : 'anthropic';
+      if (v === 'openai') return 'openai';
+      if (v === 'gemini') return 'gemini';
+      return 'anthropic';
     }
     function setActiveProvider(provider){
-      if (provider !== 'openai' && provider !== 'anthropic') return;
+      if (provider !== 'openai' && provider !== 'anthropic' && provider !== 'gemini') return;
       try { localStorage.setItem('zoneActiveProvider', provider); } catch {}
     }
     function getActiveApiKey(){
@@ -6464,6 +6460,10 @@
         { id: 'claude-opus-4-7', label: 'Claude Opus 4.7', costNote: 'Frontier model — ~1.7× Sonnet output cost; verify usage budget' },
         { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', costNote: 'Legacy — Sonnet 4.6 recommended' },
       ],
+      gemini: [
+        { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', costNote: 'Frontier — 2M context, $4/$18 per MTok', recommendedTier: 'high' },
+        { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', costNote: 'Fast and cost-efficient — $1.5/$9 per MTok', recommendedTier: 'standard' },
+      ],
     };
     function getModelOption(provider, modelId){
       if (!modelId) return null;
@@ -6480,7 +6480,7 @@
       }
     }
     function setActiveModel(provider, tier, modelId){
-      if (provider !== 'openai' && provider !== 'anthropic') return;
+      if (provider !== 'openai' && provider !== 'anthropic' && provider !== 'gemini') return;
       if (tier !== 'high' && tier !== 'standard') return;
       const all = getActiveModels();
       all[provider] = all[provider] || {};
@@ -6503,6 +6503,13 @@
       const provider = getActiveProvider();
       const all = getActiveModels();
       return all[provider] || {};
+    }
+    function getActivePrimary(provider){
+      const all = getActiveModels();
+      return (all[provider] && all[provider].high) ? all[provider].high : null;
+    }
+    function setActivePrimary(provider, modelId){
+      setActiveModel(provider, 'high', modelId || '');
     }
     /**
      * Tur P1-approval: ApprovalPrompt — sticky command-approval UI.
@@ -7031,15 +7038,16 @@
       const providerDropdown = new ZoneDropdown(providerRoot, {
         defaultLabel: 'Provider',
         onSelect: (value) => {
-          const next = value === 'anthropic' ? 'anthropic' : 'openai';
+          const next = value === 'openai' ? 'openai' : value === 'gemini' ? 'gemini' : 'anthropic';
           setActiveProvider(next);
-          updatePresetBadge();
+          updateModelBadge();
           // Sync Settings panel if it's currently rendered.
           try {
             const radio = document.querySelector('input[name="zoneProviderRadio"][value="' + next + '"]');
             if (radio) radio.checked = true;
             const line = document.getElementById('apikeyActiveLine');
-            if (line) line.textContent = 'ⓘ Active provider: ' + (next === 'anthropic' ? 'Anthropic' : 'OpenAI');
+            const pLabel = next === 'anthropic' ? 'Anthropic' : next === 'openai' ? 'OpenAI' : 'Gemini';
+            if (line) line.textContent = 'ⓘ Active provider: ' + pLabel;
           } catch {}
         },
       });
@@ -7049,6 +7057,7 @@
       providerDropdown.setOptions([
         { value: 'anthropic', label: 'Anthropic' },
         { value: 'openai', label: 'OpenAI' },
+        { value: 'gemini', label: 'Gemini' },
       ]);
       providerDropdown.setValue(getActiveProvider());
     }
@@ -7058,68 +7067,26 @@
         const dropdowns = window._zoneFooterDropdowns;
         if (!dropdowns) return;
         dropdowns.provider.setValue(getActiveProvider());
-        updatePresetBadge();
+        updateModelBadge();
       } catch {}
     }
 
-    // ── Model preset helpers ──────────────────────────────────────────────────
-    const LS_MODEL_PRESET = 'zone.modelPreset';
-    const PRESET_MODELS = {
-      anthropic: {
-        zone_default: {},
-        speed: { high: 'claude-haiku-4-5', standard: 'claude-haiku-4-5' },
-        quality: { high: 'claude-sonnet-4-6', standard: 'claude-sonnet-4-6' },
-      },
-      openai: {
-        zone_default: {},
-        speed: { high: 'gpt-5.4-mini', standard: 'gpt-5.4-mini' },
-        quality: { high: 'gpt-5.4', standard: 'gpt-5.4' },
-      },
-    };
-    function getActivePreset(){
-      try {
-        const raw = localStorage.getItem(LS_MODEL_PRESET) || '{}';
-        const parsed = JSON.parse(raw);
-        return (parsed && typeof parsed.preset === 'string') ? parsed.preset : 'zone_default';
-      } catch { return 'zone_default'; }
-    }
-    function setActivePreset(preset){
-      try {
-        const raw = localStorage.getItem(LS_MODEL_PRESET) || '{}';
-        const current = JSON.parse(raw);
-        localStorage.setItem(LS_MODEL_PRESET, JSON.stringify({ ...current, preset }));
-      } catch {}
-      updatePresetBadge();
-    }
-    function getPresetTierModels(provider, preset){
-      const table = PRESET_MODELS[provider] || PRESET_MODELS.openai;
-      if (preset === 'custom') return getActiveModels()[provider] || {};
-      return table[preset] || {};
-    }
-
-    const PRESET_BADGE_LABELS = {
-      zone_default: '⚖ Default',
-      speed: '⚡ Speed',
-      quality: '★ Quality',
-      custom: '⚙ Custom',
-    };
-    function getPresetBadgeLabel(preset, provider){
-      if (preset !== 'custom') return PRESET_BADGE_LABELS[preset] || '⚖ Default';
-      // For Custom, show the effective models
-      const models = getActiveModels()[provider] || {};
-      const catalog = ZONE_MODEL_CATALOG[provider] || [];
-      function shortLabel(id){ const m = catalog.find(c => c.id === id); return m ? m.label.replace('Claude ','').replace('GPT-','') : (id || 'default'); }
-      if (models.high || models.standard) {
-        return '⚙ ' + shortLabel(models.high) + (models.standard && models.standard !== models.high ? '/' + shortLabel(models.standard) : '');
-      }
-      return '⚙ Custom';
-    }
-    function updatePresetBadge(){
+    // ── Primary model badge + auth helpers ───────────────────────────────────
+    function updateModelBadge(){
       const badge = document.getElementById('modelPresetBadge');
       if (!badge) return;
-      const preset = getActivePreset();
       const provider = getActiveProvider();
-      badge.textContent = getPresetBadgeLabel(preset, provider);
+      const primary = getActivePrimary(provider);
+      const catalog = ZONE_MODEL_CATALOG[provider] || [];
+      let label;
+      if (primary) {
+        const model = catalog.find(m => m.id === primary);
+        label = model ? model.label : primary;
+      } else {
+        const rec = catalog.find(m => m.recommendedTier === 'high');
+        label = rec ? rec.label : 'Default';
+      }
+      badge.textContent = label;
       badge.style.display = 'inline-flex';
     }
 
@@ -7128,9 +7095,9 @@
       const key = getActiveApiKey();
       const headers = { 'X-Zone-Provider': provider };
       if (key) headers['X-Zone-LLM-Key'] = key;
-      const preset = getActivePreset();
-      const models = getPresetTierModels(provider, preset);
-      if (models.high) headers['X-Zone-LLM-Model-High'] = models.high;
+      const primary = getActivePrimary(provider);
+      if (primary) headers['X-Zone-LLM-Model-High'] = primary;
+      const models = getActiveModels()[provider] || {};
       if (models.standard) headers['X-Zone-LLM-Model-Standard'] = models.standard;
       return headers;
     }
@@ -7153,21 +7120,10 @@
       try { console.log('[zone] migrated legacy zoneOpenAIApiKey → zoneApiKeys.openai'); } catch {}
     }
     migrateLegacyApiKey();
-    // Migrate legacy model picker selections to 'custom' preset on first load.
-    (function migrateLegacyModelPicker(){
-      try {
-        if (localStorage.getItem(LS_MODEL_PRESET)) return; // preset already set
-        const activeModels = getActiveModels();
-        const hasAnyModel = Object.values(activeModels).some(v => v && typeof v === 'object' && (v.high || v.standard));
-        if (hasAnyModel) {
-          localStorage.setItem(LS_MODEL_PRESET, JSON.stringify({ preset: 'custom' }));
-        }
-      } catch {}
-    })();
     initFooterPickers();
-    // Wire preset badge click → open Settings Model tab
-    (function initPresetBadge(){
-      updatePresetBadge();
+    // Wire model badge click → open Settings Model tab
+    (function initModelBadge(){
+      updateModelBadge();
       const badge = document.getElementById('modelPresetBadge');
       if (badge) {
         badge.addEventListener('click', () => openSettings('model'));
@@ -10968,82 +10924,14 @@
 
     function renderModelSettings(){
       const provider = getActiveProvider();
-      const currentPreset = getActivePreset();
       const catalog = ZONE_MODEL_CATALOG[provider] || [];
-      const modelOptions = catalog.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
-      const customModels = getActiveModels()[provider] || {};
-      const PRESETS = provider === 'anthropic' ? [
-        {
-          id: 'zone_default',
-          icon: '⚖',
-          label: 'Zone Default',
-          desc: 'Hybrid: Sonnet plans and agents, Haiku executes workers',
-          cost: '~$0.10–0.12 per typical run',
-        },
-        {
-          id: 'speed',
-          icon: '⚡',
-          label: 'Speed',
-          desc: 'All Haiku 4.5 — fastest and cheapest across all roles',
-          cost: '~$0.05–0.08 per typical run',
-        },
-        {
-          id: 'quality',
-          icon: '★',
-          label: 'Quality',
-          desc: 'All Sonnet 4.6 — deepest reasoning, worker gets Sonnet too',
-          cost: '~$0.15–0.22 per typical run',
-        },
-        {
-          id: 'custom',
-          icon: '⚙',
-          label: 'Custom',
-          desc: 'Choose models manually using the footer dropdowns',
-          cost: 'Cost varies by selection',
-        },
-      ] : [
-        {
-          id: 'zone_default',
-          icon: '⚖',
-          label: 'Zone Default',
-          desc: 'Hybrid: GPT-5.4 plans and agents, GPT-5.4 mini executes workers',
-          cost: '~$0.08–0.12 per typical run',
-        },
-        {
-          id: 'speed',
-          icon: '⚡',
-          label: 'Speed',
-          desc: 'All GPT-5.4 mini — fastest and cheapest across all roles',
-          cost: '~$0.03–0.06 per typical run',
-        },
-        {
-          id: 'quality',
-          icon: '★',
-          label: 'Quality',
-          desc: 'All GPT-5.4 — maximum capability across all roles',
-          cost: '~$0.12–0.18 per typical run',
-        },
-        {
-          id: 'custom',
-          icon: '⚙',
-          label: 'Custom',
-          desc: 'Choose models manually using the footer dropdowns',
-          cost: 'Cost varies by selection',
-        },
-      ];
-      const radios = PRESETS.map(p => `
-        <label style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:6px;border:1px solid ${currentPreset === p.id ? 'var(--violet,#7a5af8)' : 'var(--border,#333)'};cursor:pointer;margin-bottom:8px;background:${currentPreset === p.id ? 'rgba(127,212,164,.07)' : 'transparent'}" data-preset-label="${p.id}">
-          <input type="radio" name="zoneModelPreset" value="${p.id}" ${currentPreset === p.id ? 'checked' : ''} style="margin-top:3px;accent-color:var(--violet,#7a5af8)">
-          <div>
-            <div style="font-size:var(--font-size-sm,12px);font-weight:600;color:var(--color-text,#ddd)">${p.icon} ${p.label}${p.id === 'zone_default' ? ' <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:var(--violet,#7a5af8);color:#fff;vertical-align:middle">recommended</span>' : ''}</div>
-            <div style="font-size:11px;color:var(--text-3,#888);margin-top:2px">${p.desc}</div>
-            <div style="font-size:11px;color:var(--text-4,#666);margin-top:1px">${p.cost}</div>
-          </div>
-        </label>`).join('');
+      const currentModels = getActiveModels()[provider] || {};
+      const currentPrimary = getActivePrimary(provider);
+      const modelOptions = catalog.map(m => `<option value="${m.id}"${m.costNote ? ` title="${m.costNote}"` : ''}>${m.label}${m.costNote ? ' — ' + m.costNote : ''}</option>`).join('');
       const _modelRunActive = !!getActiveRun();
       const providerPicker = `
         <div class="apikey-section-title" style="margin-bottom:8px">Provider</div>
-        <div style="display:flex;gap:20px;margin-bottom:8px">
+        <div style="display:flex;gap:20px;margin-bottom:8px;flex-wrap:wrap">
           <label style="display:flex;gap:6px;align-items:center;cursor:${_modelRunActive ? 'not-allowed' : 'pointer'};font-size:var(--font-size-sm,12px);opacity:${_modelRunActive ? '0.5' : '1'}">
             <input type="radio" name="zoneProviderPick" value="anthropic" ${provider === 'anthropic' ? 'checked' : ''} ${_modelRunActive ? 'disabled' : ''} style="accent-color:var(--violet,#7a5af8)">
             Anthropic
@@ -11052,40 +10940,44 @@
             <input type="radio" name="zoneProviderPick" value="openai" ${provider === 'openai' ? 'checked' : ''} ${_modelRunActive ? 'disabled' : ''} style="accent-color:var(--violet,#7a5af8)">
             OpenAI
           </label>
+          <label style="display:flex;gap:6px;align-items:center;cursor:${_modelRunActive ? 'not-allowed' : 'pointer'};font-size:var(--font-size-sm,12px);opacity:${_modelRunActive ? '0.5' : '1'}">
+            <input type="radio" name="zoneProviderPick" value="gemini" ${provider === 'gemini' ? 'checked' : ''} ${_modelRunActive ? 'disabled' : ''} style="accent-color:var(--violet,#7a5af8)">
+            Gemini
+          </label>
         </div>
         <div class="apikey-disclaimer" style="margin-bottom:${_modelRunActive ? '4px' : '16px'}">
-          Anthropic recommended for agentic tasks. OpenAI cheaper for simple completions.
+          Anthropic recommended for agentic tasks. OpenAI and Gemini also supported.
         </div>
         ${_modelRunActive ? '<div style="font-size:11px;color:var(--color-warning,#e0a000);margin-bottom:12px">Switch provider after run completes.</div>' : ''}`;
       els.settingsBody.innerHTML = `
         <div class="apikey-section">
           ${providerPicker}
-          <div class="apikey-section-title">Model Preset</div>
-          <div class="apikey-disclaimer" style="margin-bottom:14px">
-            Controls which model each agent role uses. Zone Default gives the best cost-quality balance.
-            Switch to Speed for budget runs or Quality for the hardest tasks.
+          <div class="apikey-section-title">Primary Model</div>
+          <div class="apikey-disclaimer" style="margin-bottom:10px">
+            Agent model used for planning, reasoning, and task execution.
+            Leave blank to use the server default.
           </div>
-          <div id="modelPresetRadios">${radios}</div>
-          <div id="modelCustomSection" style="display:${currentPreset === 'custom' ? 'block' : 'none'};margin-top:8px;padding:10px 12px;border:1px solid var(--border,#333);border-radius:6px">
-            <div class="apikey-field-label" style="margin-bottom:8px">Custom model selection</div>
-            <div style="display:flex;gap:12px;flex-wrap:wrap">
-              <label style="display:flex;flex-direction:column;gap:4px;font-size:var(--font-size-sm,12px)">
-                Agent / Planner (high tier)
-                <select id="customModelHigh" style="padding:4px 8px;background:var(--bg-input,#1e1e1e);border:1px solid var(--border,#444);border-radius:4px;color:inherit;font-size:var(--font-size-sm,12px)">
-                  <option value="">(server default)</option>${modelOptions}
-                </select>
-              </label>
-              <label style="display:flex;flex-direction:column;gap:4px;font-size:var(--font-size-sm,12px)">
-                Worker (standard tier)
-                <select id="customModelStandard" style="padding:4px 8px;background:var(--bg-input,#1e1e1e);border:1px solid var(--border,#444);border-radius:4px;color:inherit;font-size:var(--font-size-sm,12px)">
-                  <option value="">(server default)</option>${modelOptions}
-                </select>
-              </label>
+          <div style="margin-bottom:16px">
+            <select id="primaryModelSelect" style="width:100%;padding:6px 8px;background:var(--bg-input,#1e1e1e);border:1px solid var(--border,#444);border-radius:4px;color:inherit;font-size:var(--font-size-sm,12px)">
+              <option value="">(server default)</option>
+              ${modelOptions}
+            </select>
+          </div>
+          <details id="advancedModelDetails" style="margin-bottom:16px">
+            <summary style="cursor:pointer;font-size:var(--font-size-sm,12px);color:var(--text-3,#888);user-select:none;margin-bottom:8px">Advanced: Worker model</summary>
+            <div style="padding:10px 12px;border:1px solid var(--border,#333);border-radius:6px">
+              <div class="apikey-field-label" style="margin-bottom:6px">Worker model (sub-tasks)</div>
+              <select id="workerModelSelect" style="width:100%;padding:6px 8px;background:var(--bg-input,#1e1e1e);border:1px solid var(--border,#444);border-radius:4px;color:inherit;font-size:var(--font-size-sm,12px)">
+                <option value="">(auto — server default)</option>
+                ${modelOptions}
+              </select>
+              <div class="apikey-disclaimer" style="margin-top:6px">
+                Runs sub-tasks dispatched by the agent. Leave blank for automatic (Haiku 4.5 for Anthropic, GPT-5.4 mini for OpenAI).
+              </div>
             </div>
-          </div>
+          </details>
           <div style="margin-top:12px;font-size:11px;color:var(--text-4,#666)">
-            Current effective models for <strong>${provider}</strong>:
-            <span id="effectiveModelDisplay"></span>
+            Effective: Agent=<span id="effectiveModelDisplay"></span>
           </div>
           <div style="margin-top:20px;border-top:1px solid var(--border,#333);padding-top:14px">
             <div class="apikey-section-title" style="margin-bottom:8px">Scope Audit</div>
@@ -11100,18 +10992,18 @@
             </label>
           </div>
         </div>`;
-      // Populate custom selects
-      const highSel = document.getElementById('customModelHigh');
-      const stdSel = document.getElementById('customModelStandard');
-      if (highSel) highSel.value = customModels.high || '';
-      if (stdSel) stdSel.value = customModels.standard || '';
+      // Populate selects
+      const primarySel = document.getElementById('primaryModelSelect');
+      const workerSel = document.getElementById('workerModelSelect');
+      if (primarySel) primarySel.value = currentPrimary || '';
+      if (workerSel) workerSel.value = currentModels.standard || '';
       // Update effective model display
       function refreshEffective(){
         const el = document.getElementById('effectiveModelDisplay');
         if (!el) return;
-        const p = getActivePreset();
-        const m = getPresetTierModels(provider, p);
-        el.textContent = ' Agent=' + (m.high || 'server default') + ', Worker=' + (m.standard || 'server default');
+        const p = getActivePrimary(provider);
+        const w = (getActiveModels()[provider] || {}).standard;
+        el.textContent = (p || 'server default') + ', Worker=' + (w || 'server default');
       }
       refreshEffective();
       // Provider picker change handler — re-renders the tab for the new provider
@@ -11122,31 +11014,18 @@
           renderModelSettings();
         });
       });
-      // Radio change handler
-      document.querySelectorAll('input[name="zoneModelPreset"]').forEach(radio => {
-        radio.addEventListener('change', () => {
-          setActivePreset(radio.value);
-          const customSection = document.getElementById('modelCustomSection');
-          if (customSection) customSection.style.display = radio.value === 'custom' ? 'block' : 'none';
-          // Restyle labels
-          document.querySelectorAll('[data-preset-label]').forEach(lbl => {
-            const active = lbl.dataset.presetLabel === radio.value;
-            lbl.style.borderColor = active ? 'var(--violet,#7a5af8)' : 'var(--border,#333)';
-            lbl.style.background = active ? 'rgba(127,212,164,.07)' : 'transparent';
-          });
-          refreshEffective();
-        });
-      });
-      // Custom model selects
-      if (highSel) {
-        highSel.addEventListener('change', () => {
-          setActiveModel(provider, 'high', highSel.value);
+      // Primary model select
+      if (primarySel) {
+        primarySel.addEventListener('change', () => {
+          setActivePrimary(provider, primarySel.value);
+          updateModelBadge();
           refreshEffective();
         });
       }
-      if (stdSel) {
-        stdSel.addEventListener('change', () => {
-          setActiveModel(provider, 'standard', stdSel.value);
+      // Worker model select
+      if (workerSel) {
+        workerSel.addEventListener('change', () => {
+          setActiveModel(provider, 'standard', workerSel.value);
           refreshEffective();
         });
       }
@@ -11179,25 +11058,23 @@
 
     function renderGeneralSettings(){
       const provider = getActiveProvider();
-      const providerLabel = provider === 'anthropic' ? 'Anthropic' : 'OpenAI';
+      const providerLabel = provider === 'anthropic' ? 'Anthropic' : provider === 'openai' ? 'OpenAI' : 'Gemini';
       const keys = getApiKeys();
+      const cfg = window.__ZONE_PUBLIC_CONFIG__ || {};
       const serverHasKey = provider === 'anthropic'
-        ? !!((window.__ZONE_PUBLIC_CONFIG__ || {}).serverHasAnthropicKey)
-        : !!((window.__ZONE_PUBLIC_CONFIG__ || {}).serverHasOpenAIKey);
+        ? !!cfg.serverHasAnthropicKey
+        : provider === 'openai'
+          ? !!cfg.serverHasOpenAIKey
+          : !!cfg.serverHasGeminiKey;
       const hasKey = !!(keys[provider] || serverHasKey);
       const keyStatus = hasKey
         ? `<span class="apikey-status success" style="font-size:var(--font-size-sm)">✓ Present</span>`
         : `<span class="apikey-status error" style="font-size:var(--font-size-sm)">✗ Missing</span>`;
 
       const catalog = ZONE_MODEL_CATALOG[provider] || [];
-      const customModels = getActiveModels()[provider] || {};
-      const activePreset = getActivePreset();
-      let modelLabel = activePreset && activePreset !== 'custom' ? activePreset.replace(/_/g,' ') : '';
-      if (!modelLabel && customModels.customModel) {
-        const found = catalog.find(m => m.id === customModels.customModel);
-        modelLabel = found ? found.label : customModels.customModel;
-      }
-      if (!modelLabel) modelLabel = '—';
+      const primary = getActivePrimary(provider);
+      const found = primary ? catalog.find(m => m.id === primary) : null;
+      const modelLabel = found ? found.label : (primary || '—');
 
       els.settingsBody.innerHTML = `
         <div class="apikey-section">
@@ -11205,7 +11082,7 @@
 
           <div class="apikey-field-label" style="margin-top:4px">Account</div>
           <div class="row"><div class="k">Provider</div><div class="v">${escapeHtml(providerLabel)}</div></div>
-          <div class="row"><div class="k">Model preset</div><div class="v">${escapeHtml(modelLabel)}</div></div>
+          <div class="row"><div class="k">Agent model</div><div class="v">${escapeHtml(modelLabel)}</div></div>
           <div class="row"><div class="k">API key</div><div class="v">${keyStatus}</div></div>
 
           <div class="apikey-field-label" style="margin-top:16px">Today's usage</div>
@@ -11287,11 +11164,11 @@
           <div class="apikey-disclaimer" style="margin-bottom:14px;padding:10px 12px;background:var(--bg-input,#1e1e1e);border-radius:6px;border:1px solid var(--border,#333)">
             <strong>Recommended:</strong> Use <strong>Anthropic Claude</strong> for best results.
             Zone is optimized for Claude models — tool use, planning, and agent coordination are significantly more reliable than with OpenAI.
-            OpenAI is supported but may produce lower-quality runs.
+            OpenAI and Gemini are also supported.
           </div>
 
           <div class="apikey-field-label">Provider</div>
-          <div class="apikey-input-row" style="gap:18px">
+          <div class="apikey-input-row" style="gap:18px;flex-wrap:wrap">
             <label style="display:flex;gap:6px;align-items:center;cursor:${_keysRunActive ? 'not-allowed' : 'pointer'};opacity:${_keysRunActive ? '0.5' : '1'}">
               <input type="radio" name="zoneProviderRadio" value="openai" ${activeProvider === 'openai' ? 'checked' : ''} ${_keysRunActive ? 'disabled' : ''} />
               OpenAI
@@ -11300,9 +11177,13 @@
               <input type="radio" name="zoneProviderRadio" value="anthropic" ${activeProvider === 'anthropic' ? 'checked' : ''} ${_keysRunActive ? 'disabled' : ''} />
               Anthropic
             </label>
+            <label style="display:flex;gap:6px;align-items:center;cursor:${_keysRunActive ? 'not-allowed' : 'pointer'};opacity:${_keysRunActive ? '0.5' : '1'}">
+              <input type="radio" name="zoneProviderRadio" value="gemini" ${activeProvider === 'gemini' ? 'checked' : ''} ${_keysRunActive ? 'disabled' : ''} />
+              Gemini
+            </label>
           </div>
           <div class="apikey-disclaimer" style="margin-top:6px">
-            Active provider determines which key is used for runs. Both keys can be saved simultaneously.
+            Active provider determines which key is used for runs. All keys can be saved simultaneously.
             ${_keysRunActive ? '<span style="color:var(--color-warning,#e0a000)"> Switch after run completes.</span>' : ''}
           </div>
 
@@ -11316,8 +11197,12 @@
 
           <div style="height:14px"></div>
 
+          ${providerSection({ provider: 'gemini', label: 'Gemini', placeholder: 'AIza…', serverConfigured: !!(window.__ZONE_PUBLIC_CONFIG__ || {}).serverHasGeminiKey })}
+
+          <div style="height:14px"></div>
+
           <div class="apikey-disclaimer">
-            <div id="apikeyActiveLine">ⓘ Active provider: ${escapeHtml(activeProvider === 'anthropic' ? 'Anthropic' : 'OpenAI')}</div>
+            <div id="apikeyActiveLine">ⓘ Active provider: ${escapeHtml(activeProvider === 'anthropic' ? 'Anthropic' : activeProvider === 'openai' ? 'OpenAI' : 'Gemini')}</div>
             <br>
             ⓘ Your keys are stored in your browser (localStorage). Zone never sends them
             to any server other than the selected provider's API.
@@ -11330,10 +11215,11 @@
       radios.forEach((r) => {
         r.addEventListener('change', () => {
           if (!r.checked) return;
-          const next = r.value === 'anthropic' ? 'anthropic' : 'openai';
+          const next = r.value === 'openai' ? 'openai' : r.value === 'gemini' ? 'gemini' : 'anthropic';
           setActiveProvider(next);
           const line = document.getElementById('apikeyActiveLine');
-          if (line) line.textContent = 'ⓘ Active provider: ' + (next === 'anthropic' ? 'Anthropic' : 'OpenAI');
+          const pLabel = next === 'anthropic' ? 'Anthropic' : next === 'openai' ? 'OpenAI' : 'Gemini';
+          if (line) line.textContent = 'ⓘ Active provider: ' + pLabel;
           updateFooterModelLabel();
         });
       });
