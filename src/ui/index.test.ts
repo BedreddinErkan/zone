@@ -1309,6 +1309,13 @@ describe("BYOM.1: provider picker default and persistence", () => {
     expect(getActiveProvider()).toBe("anthropic");
   });
 
+  it("getActiveProvider returns gemini when zoneActiveProvider=gemini is in localStorage", () => {
+    const { context } = buildUiHarness({ zoneActiveProvider: "gemini" });
+    const getActiveProvider = (context as unknown as { getActiveProvider: () => string })
+      .getActiveProvider;
+    expect(getActiveProvider()).toBe("gemini");
+  });
+
   it("buildAuthHeaders sends X-Zone-Provider: anthropic by default", () => {
     const { context } = buildUiHarness();
     const buildAuthHeaders = (
@@ -1327,6 +1334,15 @@ describe("BYOM.1: provider picker default and persistence", () => {
     expect(headers["X-Zone-Provider"]).toBe("openai");
   });
 
+  it("buildAuthHeaders sends X-Zone-Provider: gemini when provider is gemini", () => {
+    const { context } = buildUiHarness({ zoneActiveProvider: "gemini" });
+    const buildAuthHeaders = (
+      context as unknown as { buildAuthHeaders: () => Record<string, string> }
+    ).buildAuthHeaders;
+    const headers = buildAuthHeaders();
+    expect(headers["X-Zone-Provider"]).toBe("gemini");
+  });
+
   it("setActiveProvider persists to localStorage and getActiveProvider reads it back", () => {
     const { context, localStorageStore } = buildUiHarness();
     const ctx = context as unknown as {
@@ -1337,6 +1353,17 @@ describe("BYOM.1: provider picker default and persistence", () => {
     expect(localStorageStore.get("zoneActiveProvider")).toBe("openai");
     expect(ctx.getActiveProvider()).toBe("openai");
   });
+
+  it("setActiveProvider accepts gemini and getActiveProvider reads it back", () => {
+    const { context, localStorageStore } = buildUiHarness();
+    const ctx = context as unknown as {
+      getActiveProvider: () => string;
+      setActiveProvider: (p: string) => void;
+    };
+    ctx.setActiveProvider("gemini");
+    expect(localStorageStore.get("zoneActiveProvider")).toBe("gemini");
+    expect(ctx.getActiveProvider()).toBe("gemini");
+  });
 });
 
 type ByomCtx = {
@@ -1345,6 +1372,8 @@ type ByomCtx = {
   getActiveApiKey: () => string;
   getActiveProvider: () => string;
   setActiveProvider: (p: string) => void;
+  getActivePrimary: (provider: string) => string | null;
+  setActivePrimary: (provider: string, modelId: string) => void;
   buildAuthHeaders: () => Record<string, string>;
   openSettings: (tab?: string) => void;
   closeSettings: () => void;
@@ -1479,6 +1508,91 @@ describe("BYOM.2: active-provider key resolver", () => {
     expect(next["X-Zone-Provider"]).toBe("openai");
     expect(next["X-Zone-LLM-Key"]).toBe("sk-o-rotated");
   });
+
+  it("buildAuthHeaders sends X-Zone-LLM-Model-High when a primary model is stored", () => {
+    const { context } = buildUiHarness({
+      zoneActiveProvider: "anthropic",
+      zoneActiveModels: JSON.stringify({ anthropic: { high: "claude-opus-4-7" } }),
+    });
+    const ctx = context as unknown as ByomCtx;
+    const headers = ctx.buildAuthHeaders();
+    expect(headers["X-Zone-LLM-Model-High"]).toBe("claude-opus-4-7");
+  });
+
+  it("buildAuthHeaders omits X-Zone-LLM-Model-High when no primary model is stored", () => {
+    const { context } = buildUiHarness({ zoneActiveProvider: "anthropic" });
+    const ctx = context as unknown as ByomCtx;
+    const headers = ctx.buildAuthHeaders();
+    expect("X-Zone-LLM-Model-High" in headers).toBe(false);
+  });
+
+  it("buildAuthHeaders sends X-Zone-LLM-Model-Standard when a worker model is stored", () => {
+    const { context } = buildUiHarness({
+      zoneActiveProvider: "anthropic",
+      zoneActiveModels: JSON.stringify({ anthropic: { standard: "claude-haiku-4-5" } }),
+    });
+    const ctx = context as unknown as ByomCtx;
+    const headers = ctx.buildAuthHeaders();
+    expect(headers["X-Zone-LLM-Model-Standard"]).toBe("claude-haiku-4-5");
+  });
+
+  it("buildAuthHeaders omits X-Zone-LLM-Model-Standard when no worker model is stored", () => {
+    const { context } = buildUiHarness({ zoneActiveProvider: "anthropic" });
+    const ctx = context as unknown as ByomCtx;
+    const headers = ctx.buildAuthHeaders();
+    expect("X-Zone-LLM-Model-Standard" in headers).toBe(false);
+  });
+});
+
+describe("P.3: Gemini provider round-trip", () => {
+  it("setActiveProvider gemini → getActiveProvider returns gemini → headers carry gemini model", () => {
+    const { context } = buildUiHarness({
+      zoneActiveProvider: "gemini",
+      zoneApiKeys: JSON.stringify({ gemini: "AIza-test-key" }),
+      zoneActiveModels: JSON.stringify({ gemini: { high: "gemini-3.1-pro" } }),
+    });
+    const ctx = context as unknown as ByomCtx;
+    expect(ctx.getActiveProvider()).toBe("gemini");
+    const headers = ctx.buildAuthHeaders();
+    expect(headers["X-Zone-Provider"]).toBe("gemini");
+    expect(headers["X-Zone-LLM-Key"]).toBe("AIza-test-key");
+    expect(headers["X-Zone-LLM-Model-High"]).toBe("gemini-3.1-pro");
+  });
+
+  it("getActivePrimary returns null when no model stored for provider", () => {
+    const { context } = buildUiHarness({ zoneActiveProvider: "gemini" });
+    const ctx = context as unknown as ByomCtx;
+    expect(ctx.getActivePrimary("gemini")).toBeNull();
+  });
+
+  it("setActivePrimary/getActivePrimary round-trip for gemini", () => {
+    const { context } = buildUiHarness({ zoneActiveProvider: "gemini" });
+    const ctx = context as unknown as ByomCtx;
+    ctx.setActivePrimary("gemini", "gemini-3.5-flash");
+    expect(ctx.getActivePrimary("gemini")).toBe("gemini-3.5-flash");
+    const headers = ctx.buildAuthHeaders();
+    expect(headers["X-Zone-LLM-Model-High"]).toBe("gemini-3.5-flash");
+  });
+
+  it("setActivePrimary/getActivePrimary round-trip for anthropic", () => {
+    const { context } = buildUiHarness({ zoneActiveProvider: "anthropic" });
+    const ctx = context as unknown as ByomCtx;
+    ctx.setActivePrimary("anthropic", "claude-opus-4-8");
+    expect(ctx.getActivePrimary("anthropic")).toBe("claude-opus-4-8");
+    const headers = ctx.buildAuthHeaders();
+    expect(headers["X-Zone-LLM-Model-High"]).toBe("claude-opus-4-8");
+  });
+
+  it("setActivePrimary with empty string clears stored model (omits header)", () => {
+    const { context } = buildUiHarness({
+      zoneActiveProvider: "anthropic",
+      zoneActiveModels: JSON.stringify({ anthropic: { high: "claude-opus-4-7" } }),
+    });
+    const ctx = context as unknown as ByomCtx;
+    ctx.setActivePrimary("anthropic", "");
+    expect(ctx.getActivePrimary("anthropic")).toBeNull();
+    expect("X-Zone-LLM-Model-High" in ctx.buildAuthHeaders()).toBe(false);
+  });
 });
 
 describe("BYOM.2: legacy zoneOpenAIApiKey migration", () => {
@@ -1607,23 +1721,31 @@ describe("BYOM.2: Settings provider radios run-state gate", () => {
 });
 
 describe("UI.3.a: model label header shows main agent model, not classifier", () => {
-  it("resolveActiveModelLabel returns Sonnet 4.6 (Default) for anthropic + zone_default", () => {
+  it("resolveActiveModelLabel returns Sonnet 4.6 (Default) when no primary is stored", () => {
     const { context } = buildUiHarness();
     const fn = (context as unknown as { resolveActiveModelLabel: () => string })
       .resolveActiveModelLabel;
     expect(fn()).toBe("Sonnet 4.6 (Default)");
   });
 
-  it("resolveActiveModelLabel ignores zoneActiveModels when preset is explicitly zone_default", () => {
+  it("resolveActiveModelLabel returns stored primary model label when one is set", () => {
     const { context } = buildUiHarness({
-      // Explicitly pin preset to zone_default so migration doesn't flip it to 'custom'
-      "zone.modelPreset": JSON.stringify({ preset: "zone_default" }),
       zoneActiveModels: JSON.stringify({ anthropic: { high: "claude-haiku-4-5" } }),
     });
     const fn = (context as unknown as { resolveActiveModelLabel: () => string })
       .resolveActiveModelLabel;
-    // zone_default uses catalog recommended model, not localStorage value
-    expect(fn()).toBe("Sonnet 4.6 (Default)");
+    // Primary is stored → show model name without "(Default)" suffix
+    expect(fn()).toBe("Haiku 4.5");
+  });
+
+  it("resolveActiveModelLabel returns full label for OpenAI primary model", () => {
+    const { context } = buildUiHarness({
+      zoneActiveProvider: "openai",
+      zoneActiveModels: JSON.stringify({ openai: { high: "gpt-5.5" } }),
+    });
+    const fn = (context as unknown as { resolveActiveModelLabel: () => string })
+      .resolveActiveModelLabel;
+    expect(fn()).toBe("GPT-5.5");
   });
 });
 
