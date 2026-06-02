@@ -267,4 +267,126 @@ describe("CE.4.1.b: chain-saturation pre-iter hook", () => {
     );
     expect(logs.length).toBe(1);
   });
+
+  it("does NOT fire when multi_edit succeeded (ZONE_SATURATION_COUNT_MULTIEDIT default on)", async () => {
+    // multi_edit (success=true) at iter 0 → counted as a successful edit → hook suppressed
+    toolExecutorMock.executeTool.mockResolvedValueOnce({
+      success: true,
+      output: "multi_edit: 3 replacement(s) across 1 file(s).\n  src/a.ts: 3 replacement(s)",
+    });
+    mocks.createChatCompletion.mockResolvedValueOnce({
+      choices: [{
+        message: {
+          content: null,
+          tool_calls: [{
+            id: "call_me",
+            type: "function",
+            function: {
+              name: "multi_edit",
+              arguments: JSON.stringify({ files: ["src/a.ts"], find: "foo", replace: "bar" }),
+            },
+          }],
+        },
+        finish_reason: "tool_calls",
+      }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    });
+    const FILES = ["src/b.ts", "src/c.ts", "src/d.ts", "src/e.ts", "src/f.ts"];
+    for (const f of FILES) {
+      mocks.createChatCompletion.mockResolvedValueOnce(makeReadFileResponse(f));
+    }
+    mocks.createChatCompletion.mockResolvedValue(makeDoneResponse());
+
+    delete process.env["ZONE_SATURATION_COUNT_MULTIEDIT"];
+    await runAgentLoop({ task: "rename all foos", repoPath, runId: "test-csat-9" });
+
+    const logs = mocks.log.mock.calls.filter(
+      (c: unknown[]) => c[0] === "[zone-chain-saturation-warn]",
+    );
+    expect(logs.length).toBe(0);
+  });
+
+  it("DOES fire when ZONE_SATURATION_COUNT_MULTIEDIT=0 even with successful multi_edit", async () => {
+    // env=0 restores apply_patch-only counting → multi_edit not counted → hook fires at iter 6
+    toolExecutorMock.executeTool.mockResolvedValueOnce({
+      success: true,
+      output: "multi_edit: 3 replacement(s) across 1 file(s).\n  src/a.ts: 3 replacement(s)",
+    });
+    mocks.createChatCompletion.mockResolvedValueOnce({
+      choices: [{
+        message: {
+          content: null,
+          tool_calls: [{
+            id: "call_me2",
+            type: "function",
+            function: {
+              name: "multi_edit",
+              arguments: JSON.stringify({ files: ["src/a.ts"], find: "foo", replace: "bar" }),
+            },
+          }],
+        },
+        finish_reason: "tool_calls",
+      }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    });
+    const FILES = ["src/b.ts", "src/c.ts", "src/d.ts", "src/e.ts", "src/f.ts"];
+    for (const f of FILES) {
+      mocks.createChatCompletion.mockResolvedValueOnce(makeReadFileResponse(f));
+    }
+    mocks.createChatCompletion.mockResolvedValue(makeDoneResponse());
+
+    process.env["ZONE_SATURATION_COUNT_MULTIEDIT"] = "0";
+    try {
+      await runAgentLoop({ task: "rename all foos", repoPath, runId: "test-csat-10" });
+    } finally {
+      delete process.env["ZONE_SATURATION_COUNT_MULTIEDIT"];
+    }
+
+    const logs = mocks.log.mock.calls.filter(
+      (c: unknown[]) => c[0] === "[zone-chain-saturation-warn]",
+    );
+    expect(logs.length).toBe(1);
+  });
+
+  it("fires with zero-replacement multi_edit (success:true, 0 replacements — edge case documented)", async () => {
+    // multi_edit returns success:true even when totalReplacements===0 (toolExecutor.ts:3035).
+    // A no-op multi_edit therefore SUPPRESSES the nudge — this test documents that behavior.
+    // toolCallLog only stores {tool, success}; filtering by replacement count is not available
+    // without changing the log structure.
+    toolExecutorMock.executeTool.mockResolvedValueOnce({
+      success: true,
+      output: "multi_edit: 0 replacement(s) across 1 file(s).\n  [NOT FOUND] src/a.ts",
+    });
+    mocks.createChatCompletion.mockResolvedValueOnce({
+      choices: [{
+        message: {
+          content: null,
+          tool_calls: [{
+            id: "call_me3",
+            type: "function",
+            function: {
+              name: "multi_edit",
+              arguments: JSON.stringify({ files: ["src/a.ts"], find: "nonexistent", replace: "bar" }),
+            },
+          }],
+        },
+        finish_reason: "tool_calls",
+      }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    });
+    const FILES = ["src/b.ts", "src/c.ts", "src/d.ts", "src/e.ts", "src/f.ts"];
+    for (const f of FILES) {
+      mocks.createChatCompletion.mockResolvedValueOnce(makeReadFileResponse(f));
+    }
+    mocks.createChatCompletion.mockResolvedValue(makeDoneResponse());
+
+    delete process.env["ZONE_SATURATION_COUNT_MULTIEDIT"];
+    await runAgentLoop({ task: "rename all foos", repoPath, runId: "test-csat-11" });
+
+    const logs = mocks.log.mock.calls.filter(
+      (c: unknown[]) => c[0] === "[zone-chain-saturation-warn]",
+    );
+    // zero-replacement multi_edit currently counts as successful — nudge suppressed
+    expect(logs.length).toBe(0);
+  });
 });

@@ -1580,6 +1580,11 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   let softWarnInjected = false;
   let midWarnInjected = false;
   let chainSaturationWarnInjected = false;
+  // ZONE_SATURATION_COUNT_MULTIEDIT (default on): count multi_edit successes alongside apply_patch.
+  // Set =0 to restore apply_patch-only counting (legacy behavior).
+  // Note: multi_edit returns success:true even with 0 replacements (toolExecutor.ts:3035);
+  // a no-op multi_edit will therefore suppress this nudge — documented edge case.
+  const saturationCountMultiEdit = process.env["ZONE_SATURATION_COUNT_MULTIEDIT"] !== "0";
   if (tierLimits) {
     const effectiveSoftIterWarn = tierLimits.softIterWarn;
     softIterWarnThreshold = effectiveSoftIterWarn;
@@ -2284,7 +2289,10 @@ Example:
       !isReadOnlyMode &&
       input.originalArchetype !== "question" &&
       input.originalArchetype !== "investigation" &&
-      toolCallLog.filter(e => e.tool === "apply_patch" && e.success === true).length === 0
+      toolCallLog.filter(e =>
+        (e.tool === "apply_patch" || (saturationCountMultiEdit && e.tool === "multi_edit")) &&
+        e.success === true
+      ).length === 0
     ),
     run: (ctx) => {
       chainSaturationWarnInjected = true;
