@@ -1552,6 +1552,18 @@ export async function executeTool(
       const allowShrink = intent === "delete" || intent === "modify";
       const abs = path.join(repoPath, filePath);
 
+      // B.1: guard empty filePath — stops the loop before read-before-patch enforcement
+      if (!filePath.trim()) {
+        return {
+          success: false,
+          output:
+            `MISSING_ARG: apply_patch requires a non-empty filePath (relative path to the file). ` +
+            `Your call arrived with no filePath and likely no patch body. ` +
+            `Re-issue with filePath set and the FIND/REPLACE blocks included — or use multi_edit for cross-file edits.`,
+          error: "apply_patch_missing_filepath",
+        };
+      }
+
       // Phase V Commit 1: read-before-patch enforcement
       if (input?.filesReadThisRun !== undefined) {
         if (!input.filesReadThisRun.has(filePath)) {
@@ -1565,7 +1577,9 @@ export async function executeTool(
           return {
             success: false,
             output:
-              `READ_REQUIRED: You must call read_file on ${filePath} before patching. ` +
+              `READ_REQUIRED: filePath='${filePath}'. ` +
+              `You have read this run: [${[...input.filesReadThisRun].join(", ") || "(none)"}]. ` +
+              `Call read_file on that exact path before patching. ` +
               `The file may have changed or you may be assuming the wrong content.`,
             error: "apply_patch_no_read_first",
           };

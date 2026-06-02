@@ -2966,9 +2966,11 @@ Example:
               iter: iter + 1,
               blocked: true,
             }));
+            const readSoFar = filesReadThisRun.size > 0 ? [...filesReadThisRun].join(", ") : "(none)";
             const syntheticOutput =
-              `Block 1: You haven't read this file yet in this run. ` +
-              `Call read_file on ${targetFilePath} first to see the exact current content, ` +
+              `Block 1: You haven't read '${targetFilePath}' yet in this run. ` +
+              `Files read so far: [${readSoFar}]. ` +
+              `Call read_file on '${targetFilePath}' first to see the exact current content, ` +
               `then issue apply_patch with FIND lines that match the file verbatim.`;
             toolCallLog.push({
               id: callId,
@@ -3007,6 +3009,19 @@ Example:
               iter: iter + 1,
             });
             failureHistory.set(targetFilePath, noReadList);
+            // C.1: feed the pre-exec reject into the loop detector (handleToolResult is skipped via continue)
+            const preExecHash = hashToolCall(name, parsedArgs);
+            const preExecLoopResult = recordAndDetect(detectorState, preExecHash);
+            if (preExecLoopResult.status === "terminate") {
+              input.onStructuredEvent?.({
+                type: "loop_detected_terminal",
+                toolName: name,
+                count: preExecLoopResult.count,
+                title: `Loop detected: \`${name}\` repeated ${preExecLoopResult.count}×`,
+                status: "error",
+              });
+              return synthesizeLoopDetectedExit(iter + 1, name, preExecLoopResult.count);
+            }
             // [INNER-LOOP: APPLY_PATCH_NO_READ]
             continue;
           }
