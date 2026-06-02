@@ -35,74 +35,80 @@
     @font-face { font-family:'IBM Plex Sans'; font-weight:600; font-display:swap; src:url('/fonts/IBMPlexSans-600.woff2') format('woff2'); }
     :root{
       color-scheme: dark;
-      /* Darker backgrounds, higher contrast text (better outdoor readability). */
-      --bg:#050505;
-      --surface:#0a0a0f;
-      --surface2:#111118;
-      --border:#2e2e34;
-      --border2:#3e3e44;
-      --text:#e5e7eb;
-      --muted:#6b7280;
-      --text-1:#f0f0f0;
-      --text-2:#d0d0d0;
-      --text-3:#b0b0b0;
-      --text-4:#888888;
-      --text-5:#6f6f76;
-
-      /* Accent colors unchanged. */
-      --violet:#7c3aed; --violet-bg:#16101f; --violet-bd:#3b1f6a;
-      --blue:#3b82f6; --green:#22c55e; --red:#ef4444; --amber:#f59e0b;
-
-      /* Semantic role aliases. */
+      --bg:#0e1412;
+      --surface:#121815;
+      --surface2:#171e1a;
+      --border:#1e2722;
+      --border2:#2a342e;
+      --text:#d6ded8;
+      --muted:#96a39a;
+      --text-1:#e8ede9;
+      --text-2:#d6ded8;
+      --text-3:#96a39a;
+      --text-4:#647168;
+      --text-5:#3f4a42;
+      /* violet/blue aliased to green — no purple anywhere */
+      --violet:#7fd4a4;
+      --violet-bg:rgba(127,212,164,0.06);
+      --violet-bd:#1e2722;
+      --blue:#7fd4a4;
+      /* core palette */
+      --green:#7fd4a4;
+      --red:#dd9090;
+      --amber:#e0c585;
+      /* extended palette */
+      --green-dim:#4d8f6d;
+      --green-glow:rgba(127,212,164,0.09);
+      --green-bg:rgba(127,212,164,0.06);
+      --amber-dim:#9d8a58;
+      --amber-glow:rgba(224,197,133,0.08);
+      --red-bg:rgba(221,144,144,0.07);
+      --bg-input:#111714;
+      /* semantic aliases */
       --color-success:var(--green);
       --color-error:var(--red);
       --color-warning:var(--amber);
-      --color-info:var(--blue);
-      --color-brand:var(--violet);
-
-      /* White-on-dark surface overlay scale. */
-      --surface-alpha-1:rgb(255 255 255 / 0.02);
-      --surface-alpha-2:rgb(255 255 255 / 0.03);
-      --surface-alpha-3:rgb(255 255 255 / 0.04);
-      --surface-alpha-4:rgb(255 255 255 / 0.06);
-      --surface-alpha-5:rgb(255 255 255 / 0.08);
-      --surface-alpha-6:rgb(255 255 255 / 0.10);
-      --surface-alpha-7:rgb(255 255 255 / 0.12);
-
-      /* Spacing scale. */
-      --space-xs:4px;
-      --space-sm:6px;
-      --space-md:8px;
-      --space-lg:10px;
-      --space-xl:12px;
-      --space-2xl:14px;
-
-      /* Border radius scale. */
-      --radius-sm:6px;
-      --radius-md:8px;
-      --radius-lg:10px;
-      --radius-pill:999px;
-
-      /* Typography. */
-      --font-size-xs:10px;
-      --font-size-sm:11px;
-      --font-size-base:12px;
-      --font-size-md:13px;
-      --font-family-sans:'IBM Plex Sans', system-ui, sans-serif;
-      --font-family-mono:'JetBrains Mono', 'Fira Code', monospace;
-
-      /* Motion. */
-      --transition-fast:150ms ease;
-      --transition-base:180ms ease;
-      --transition-slow:220ms ease;
+      --color-info:var(--green-dim);
+      --color-brand:var(--green);
+      /* zone-* aliases — were undefined, fallbacks were live purple/grey */
+      --zone-accent:var(--green);
+      --zone-fg:var(--text-1);
+      --zone-muted-fg:var(--muted);
+      --zone-border:var(--border);
+      --zone-hover-bg:var(--surface-alpha-3);
+      --zone-success-fg:var(--green);
+      --zone-warning-fg:var(--amber);
+      --zone-error-fg:var(--red);
+      /* --font-mono alias (metrics + JS-generated HTML) */
+      --font-mono:var(--font-family-mono);
+      /* surface alpha — green-tinted */
+      --surface-alpha-1:rgb(127 212 164 / 0.02);
+      --surface-alpha-2:rgb(127 212 164 / 0.03);
+      --surface-alpha-3:rgb(127 212 164 / 0.04);
+      --surface-alpha-4:rgb(127 212 164 / 0.06);
+      --surface-alpha-5:rgb(127 212 164 / 0.08);
+      --surface-alpha-6:rgb(127 212 164 / 0.10);
+      --surface-alpha-7:rgb(127 212 164 / 0.12);
+      --space-xs:4px;--space-sm:6px;--space-md:8px;
+      --space-lg:10px;--space-xl:12px;--space-2xl:14px;
+      --radius-sm:0px;--radius-md:0px;--radius-lg:0px;--radius-pill:2px;
+      --font-size-xs:10px;--font-size-sm:11px;--font-size-base:12px;--font-size-md:13px;
+      --font-family-sans:'IBM Plex Sans',system-ui,sans-serif;
+      --font-family-mono:'IBM Plex Mono','JetBrains Mono',monospace;
+      --transition-fast:150ms ease;--transition-base:180ms ease;--transition-slow:220ms ease;
     }
     *{box-sizing:border-box}
     html,body{height:100%}
     body{
-      margin:0; overflow:hidden; min-width:900px;
-      background:var(--bg); color:var(--text-1);
-      font-family:var(--font-family-sans);
+      margin:0;overflow:hidden;min-width:900px;
+      background:var(--bg);
+      background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);
+      background-size:64px 64px;
+      color:var(--text-1);font-family:var(--font-family-sans);
     }
+    body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 80% 60% at 30% 0%,var(--green-glow),transparent 70%);pointer-events:none;z-index:0;}
+    body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent 0px,transparent 3px,rgba(0,0,0,0.08) 3px,rgba(0,0,0,0.08) 4px);opacity:0.5;pointer-events:none;z-index:999;}
+    #appRoot{position:relative;z-index:1;}
     button,textarea,input{font:inherit}
     button{cursor:pointer}
     button:focus,textarea:focus{outline:none}
