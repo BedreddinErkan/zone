@@ -9823,6 +9823,8 @@
 
       const trimmed = String(task || '').trim();
       const runMode = state.runMode;
+      // Map UI runMode → server's mode enum (auto|chat|investigate|patch)
+      const serverMode = runMode === 'plan' ? 'patch' : runMode === 'read' ? 'investigate' : 'auto';
       const isDirectCommand = /^(\$|>|run:)\s+/i.test(trimmed);
       const directCommand = trimmed.replace(/^(\$|>|run:)\s+/i, '').trim();
       const effectiveUserId = getCurrentUserId();
@@ -9924,7 +9926,7 @@
             userId: effectiveUserId,
             conversationId: state.activeThreadId,
             threadId: state.activeThreadId,
-            mode: runMode,
+            mode: 'chat',
             ...(_chatAttachments.length > 0 ? { attachments: _chatAttachments } : {})
           };
           let result;
@@ -10011,7 +10013,7 @@
           runId,
           userId: effectiveUserId,
           conversationId: state.activeThreadId,
-          mode: runMode,
+          mode: serverMode,
           forceAudit: runMode === 'plan',
           lastChangedFiles: Array.isArray(state.__lastChangedFiles) ? state.__lastChangedFiles : [],
           lastAddedFunctions: Array.isArray(state.__lastAddedFunctions) ? state.__lastAddedFunctions : [],
