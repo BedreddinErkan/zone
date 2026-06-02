@@ -1,8 +1,8 @@
 /**
- * U.2.B Commit 4: preset plumbing through worker dispatch.
+ * U.2.B Commit 4: model-override plumbing through worker dispatch.
  *
  * Worker should inherit the parent's modelOverride.standard when set
- * (quality/speed presets), falling back to getModelForRole default (zone_default).
+ * (explicit override), falling back to getModelForRole default (no override).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -50,7 +50,7 @@ vi.mock("../llm/subagents.js", () => ({
 import { executeTool } from "./toolExecutor.js";
 
 const REPO_PATH = "/tmp/repo";
-const PARENT_RUN_ID = "parent-preset-test";
+const PARENT_RUN_ID = "parent-override-test";
 
 function makeSubagentResult() {
   return {
@@ -97,8 +97,8 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("U.2.B — preset plumbing through worker dispatch", () => {
-  it("quality preset: parent modelOverride.standard=sonnet → worker gets Sonnet 4.6", async () => {
+describe("U.2.B — model-override plumbing through worker dispatch", () => {
+  it("explicit sonnet override: parent modelOverride.standard=sonnet → worker gets Sonnet 4.6", async () => {
     mocks.getRequestContext.mockReturnValue({
       provider: "anthropic",
       modelOverride: { high: "claude-sonnet-4-6", standard: "claude-sonnet-4-6" },
@@ -108,7 +108,7 @@ describe("U.2.B — preset plumbing through worker dispatch", () => {
 
     await executeTool(
       "Task",
-      { subagent_type: "worker", description: "Reason: quality preset\nDo work." },
+      { subagent_type: "worker", description: "Do work." },
       REPO_PATH,
       undefined,
       { runId: PARENT_RUN_ID }
@@ -126,13 +126,13 @@ describe("U.2.B — preset plumbing through worker dispatch", () => {
     expect(mocks.getModelForRole).not.toHaveBeenCalledWith("worker", "anthropic");
   });
 
-  it("zone_default: no parent modelOverride → worker falls back to getModelForRole (Haiku 4.5)", async () => {
+  it("no override: no parent modelOverride → worker falls back to getModelForRole (Haiku 4.5)", async () => {
     mocks.getRequestContext.mockReturnValue({ provider: "anthropic" });
     mocks.getModelForRole.mockReturnValue("claude-haiku-4-5");
 
     await executeTool(
       "Task",
-      { subagent_type: "worker", description: "Reason: zone_default\nDo work." },
+      { subagent_type: "worker", description: "Do work." },
       REPO_PATH,
       undefined,
       { runId: PARENT_RUN_ID }
@@ -149,7 +149,7 @@ describe("U.2.B — preset plumbing through worker dispatch", () => {
     });
   });
 
-  it("speed preset: parent modelOverride.standard=haiku → worker gets Haiku (same as zone_default but explicit)", async () => {
+  it("explicit haiku override: parent modelOverride.standard=haiku → worker gets Haiku (same as default but explicit)", async () => {
     mocks.getRequestContext.mockReturnValue({
       provider: "anthropic",
       modelOverride: { high: "claude-haiku-4-5", standard: "claude-haiku-4-5" },
@@ -157,7 +157,7 @@ describe("U.2.B — preset plumbing through worker dispatch", () => {
 
     await executeTool(
       "Task",
-      { subagent_type: "worker", description: "Reason: speed preset\nDo work." },
+      { subagent_type: "worker", description: "Do work." },
       REPO_PATH,
       undefined,
       { runId: PARENT_RUN_ID }
@@ -175,8 +175,7 @@ describe("U.2.B — preset plumbing through worker dispatch", () => {
     expect(mocks.getModelForRole).not.toHaveBeenCalledWith("worker", "anthropic");
   });
 
-  it("[zone-subagent-dispatched] workerModel reflects the preset's worker model", async () => {
-    // quality preset scenario
+  it("[zone-subagent-dispatched] workerModel reflects the explicit worker model override", async () => {
     mocks.getRequestContext.mockReturnValue({
       provider: "anthropic",
       modelOverride: { high: "claude-sonnet-4-6", standard: "claude-sonnet-4-6" },
@@ -184,7 +183,7 @@ describe("U.2.B — preset plumbing through worker dispatch", () => {
 
     await executeTool(
       "Task",
-      { subagent_type: "worker", description: "Reason: quality\nDo work." },
+      { subagent_type: "worker", description: "Do work." },
       REPO_PATH,
       undefined,
       { runId: PARENT_RUN_ID }
