@@ -315,6 +315,23 @@ function parseClassifierResponse(text: string): ParsedClassifierResponse {
   };
 }
 
+// ZONE_FALLBACK_ARCHETYPE (default 'refactor'): archetype to use when the classifier
+// times out or errors. 'refactor' yields REFACTOR_PIPELINE (iterCap:12, coachingBudget:4)
+// via archetypeDispatcher.ts, and sets pipelineApplied=true which enables the
+// soft-promotion gate at agentLoop.ts:3235 (_isPromotable requires pipelineApplied===true).
+// The lever is iterCap + promotion gate — NOT multi_edit steering, which is archetype-agnostic
+// (agentLoop.ts:426). Requires ZONE_ARCHETYPE_ENABLE_REFACTOR !== "0" (default) for the
+// refactor pipeline to resolve; if disabled, dispatcher returns null — same as today.
+// Set ZONE_FALLBACK_ARCHETYPE=complex_multi_file to restore legacy behavior exactly.
+const VALID_FALLBACK_ARCHETYPES: readonly string[] = [
+  "simple_add", "targeted_fix", "refactor", "debug",
+  "investigation", "question", "complex_multi_file",
+];
+function getFallbackArchetype(): TaskArchetype {
+  const raw = process.env["ZONE_FALLBACK_ARCHETYPE"];
+  return (raw && VALID_FALLBACK_ARCHETYPES.includes(raw) ? raw : "refactor") as TaskArchetype;
+}
+
 function buildFallback(
   model: string,
   costUsd: number,
@@ -331,7 +348,7 @@ function buildFallback(
     classifierLatencyMs: Date.now() - startTime,
     classifierModel: model,
     fallbackUsed: true,
-    archetype: "complex_multi_file",
+    archetype: getFallbackArchetype(),
     archetypeConfidence: 0,
   };
 }

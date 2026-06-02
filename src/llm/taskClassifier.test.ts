@@ -172,6 +172,36 @@ describe("Phase L.1 task classifier", () => {
     expect(result.fallbackUsed).toBe(true);
   });
 
+  describe("ZONE_FALLBACK_ARCHETYPE env gate", () => {
+    afterEach(() => {
+      delete process.env["ZONE_FALLBACK_ARCHETYPE"];
+    });
+
+    it("fallback (error) returns archetype='refactor' by default (ZONE_FALLBACK_ARCHETYPE unset)", async () => {
+      delete process.env["ZONE_FALLBACK_ARCHETYPE"];
+      mocks.createChatCompletion.mockRejectedValue(new Error("api_unavailable"));
+      const result = await classifyTask("rename all occurrences of foo to bar");
+      expect(result.archetype).toBe("refactor");
+      expect(result.fallbackUsed).toBe(true);
+    });
+
+    it("fallback respects ZONE_FALLBACK_ARCHETYPE=complex_multi_file (legacy restore)", async () => {
+      process.env["ZONE_FALLBACK_ARCHETYPE"] = "complex_multi_file";
+      mocks.createChatCompletion.mockRejectedValue(new Error("api_unavailable"));
+      const result = await classifyTask("large multi-file refactor");
+      expect(result.archetype).toBe("complex_multi_file");
+      expect(result.fallbackUsed).toBe(true);
+    });
+
+    it("fallback ignores invalid ZONE_FALLBACK_ARCHETYPE and falls back to refactor", async () => {
+      process.env["ZONE_FALLBACK_ARCHETYPE"] = "invalid_value";
+      mocks.createChatCompletion.mockRejectedValue(new Error("api_unavailable"));
+      const result = await classifyTask("some task");
+      expect(result.archetype).toBe("refactor");
+      expect(result.fallbackUsed).toBe(true);
+    });
+  });
+
   it("caches classification by task description hash", async () => {
     mocks.createChatCompletion.mockResolvedValue(
       buildResponse(
