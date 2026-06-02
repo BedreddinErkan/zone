@@ -84,7 +84,8 @@ describe("getModelName — gemini branch (Bug A fix)", () => {
     const result = getModelName("standard", "gemini", { standard: "claude-sonnet-4-6" });
     expect(result).toBe("gemini-3.5-flash");
     expect(result).not.toBe("gpt-5.4-mini");
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ignoring invalid model override"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("is not valid for provider"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("falling back to gemini-3.5-flash"));
     warnSpy.mockRestore();
   });
 });

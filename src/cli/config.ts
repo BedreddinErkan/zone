@@ -3,7 +3,7 @@ import path from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import type { LLMProvider } from "../llm/types.js";
 import type { TaskTier } from "../llm/taskClassifier.js";
-import type { EffortLevel } from "../llm/modelRegistry.js";
+import { getProviderForModel, isKnownModelId, type EffortLevel } from "../llm/modelRegistry.js";
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { loadDiskModelSync } from "../api/diskModel.js";
 
@@ -82,16 +82,32 @@ export function loadCliConfig(
   const repoPath = flags.repo ?? envStr("ZONE_REPO_PATH") ?? process.cwd();
   const diskModel = loadDiskModelSync(repoPath);
 
-  const model =
-    flags.model ??
-    envStr("ZONE_MODEL") ??
-    diskModel?.model ??
-    file.defaultModel ??
-    "claude-sonnet-4-6";
+  const explicitModel =
+    flags.model ?? envStr("ZONE_MODEL") ?? diskModel?.model ?? file.defaultModel;
+  const model = explicitModel ?? "claude-sonnet-4-6";
 
-  const provider = resolveProvider(
-    flags.provider ?? envStr("ZONE_PROVIDER") ?? diskModel?.provider ?? file.defaultProvider
-  );
+  const explicitProvider =
+    flags.provider ?? envStr("ZONE_PROVIDER") ?? diskModel?.provider ?? file.defaultProvider;
+
+  // Single source of truth for {provider, model}: an explicitly chosen catalog
+  // model authoritatively determines its provider. These two used to resolve
+  // from independent fallback chains, so `ZONE_MODEL=gemini-3.5-flash` with no
+  // provider silently kept the anthropic default — the badge showed Gemini while
+  // getModelName rejected the cross-provider override and the loop ran Claude.
+  // A known model now pins the provider; an explicit provider that contradicts
+  // it is overridden (loudly) to match the model the user actually picked.
+  let provider: LLMProvider;
+  if (explicitModel && isKnownModelId(explicitModel)) {
+    provider = getProviderForModel(explicitModel);
+    if (explicitProvider && resolveProvider(explicitProvider) !== provider) {
+      console.warn(
+        `[zone] provider "${explicitProvider}" conflicts with model "${explicitModel}" ` +
+          `(${provider}); using ${provider} to match the selected model.`
+      );
+    }
+  } else {
+    provider = resolveProvider(explicitProvider);
+  }
 
   const anthropicApiKey = envStr("ANTHROPIC_API_KEY") ?? file.anthropicApiKey;
   const openaiApiKey = envStr("OPENAI_API_KEY") ?? file.openaiApiKey;

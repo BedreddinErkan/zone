@@ -70,12 +70,14 @@ export async function runOneShotInner(
         task,
         repoPath: effectiveConfig.repoPath,
         userApiKey: planUserApiKey,
+        provider: effectiveConfig.provider,
       });
       preGeneratedPlan = await generateExecutionPlan({
         task,
         repoSummary: planCtx.projectSummary,
         relevantFiles: planCtx.relevantFilePaths,
         userApiKey: planUserApiKey,
+        provider: effectiveConfig.provider,
       });
     } catch (e) { console.error("[zone-plan-gen-failed]", e); }
 

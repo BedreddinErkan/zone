@@ -2037,7 +2037,7 @@ Example:
       const wrapupResponse = await client.createChatCompletion(
         {
           model: isInvestigationMode
-            ? getModelForRole("investigator", client.provider as "anthropic" | "openai")
+            ? getModelForRole("investigator", client.provider)
             : getModelName("high", client.provider, requestCtx?.modelOverride),
           messages: [
             ...wrapupPruned,
@@ -2447,7 +2447,7 @@ Example:
         ? buildOpenAIPromptCacheKey(input.runId, input.conversationId)
         : undefined;
     const modelName = isInvestigationMode
-      ? getModelForRole("investigator", client.provider as "anthropic" | "openai")
+      ? getModelForRole("investigator", client.provider)
       : getModelName("high", client.provider, requestCtx?.modelOverride);
 
     // Opus forensic E.2: env-gated per-iter content hash probe for cache-bust diagnosis.
@@ -3358,7 +3358,7 @@ Example:
     try {
       const assessmentResponse = await client.createChatCompletion({
         model: isInvestigationMode
-          ? getModelForRole("investigator", client.provider as "anthropic" | "openai")
+          ? getModelForRole("investigator", client.provider)
           : getModelName("high", client.provider, requestCtx?.modelOverride),
         messages: [
           ...responseInput,

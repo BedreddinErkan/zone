@@ -53,3 +53,11 @@ export function supportsEffort(id: string): boolean {
 export function getDefaultModelId(): string {
   return "claude-sonnet-4-6";
 }
+
+/** True when `id` is an exact match for a catalog model (any provider). Unlike
+ *  getProviderForModel (which defaults unknown ids to "anthropic"), this lets
+ *  callers distinguish a known catalog id from an unknown/custom/snapshot id —
+ *  e.g. to decide whether the model can authoritatively pin its provider. */
+export function isKnownModelId(id: string): boolean {
+  return USER_FACING_MODELS.some((m) => m.id === id);
+}

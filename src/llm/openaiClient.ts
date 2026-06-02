@@ -80,33 +80,38 @@ export function getModelName(
   provider: LLMProvider = "openai",
   override?: ZoneModelOverride
 ): string {
+  const providerDefault =
+    provider === "anthropic"
+      ? tier === "high"
+        ? process.env.ZONE_ANTHROPIC_MODEL_HIGH ?? "claude-sonnet-4-6"
+        : process.env.ZONE_ANTHROPIC_MODEL ?? "claude-haiku-4-5"
+      : provider === "gemini"
+        ? process.env.ZONE_GEMINI_MODEL ?? getDefaultModelForTier("gemini", tier)
+        : tier === "high"
+          ? process.env.ZONE_LLM_MODEL_HIGH ?? process.env.OPENAI_MODEL ?? "gpt-5.4"
+          : process.env.ZONE_LLM_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-5.4-mini";
+
   if (override) {
     const candidate = tier === "high" ? override.high : override.standard;
     if (candidate && isValidModelId(provider, candidate)) {
       return candidate;
     }
     if (candidate && !isValidModelId(provider, candidate)) {
+      // A cross-provider override means the caller's {provider, model} disagree
+      // (e.g. provider="anthropic" with model="gemini-3.5-flash"). We do NOT
+      // silently swap providers — we fall back to THIS provider's default, but
+      // surface the swap loudly so a run can never appear to use the selected
+      // model while actually running another. (Stderr — not a [zone-*] stdout
+      // line — so the TUI stdoutShield does not swallow it.)
       console.warn(
-        `[zone] ignoring invalid model override "${candidate}" for provider=${provider} tier=${tier}; falling back to default.`
+        `[zone] model override "${candidate}" is not valid for provider="${provider}" ` +
+          `(tier=${tier}); falling back to ${providerDefault}. ` +
+          `Check --model / --provider / .zone/model.json consistency.`
       );
     }
   }
 
-  if (provider === "anthropic") {
-    if (tier === "high") {
-      return process.env.ZONE_ANTHROPIC_MODEL_HIGH ?? "claude-sonnet-4-6";
-    }
-    return process.env.ZONE_ANTHROPIC_MODEL ?? "claude-haiku-4-5";
-  }
-
-  if (provider === "gemini") {
-    return process.env.ZONE_GEMINI_MODEL ?? getDefaultModelForTier("gemini", tier);
-  }
-
-  if (tier === "high") {
-    return process.env.ZONE_LLM_MODEL_HIGH ?? process.env.OPENAI_MODEL ?? "gpt-5.4";
-  }
-  return process.env.ZONE_LLM_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-5.4-mini";
+  return providerDefault;
 }
 
 export type ZoneResponsesTextExtraction =
