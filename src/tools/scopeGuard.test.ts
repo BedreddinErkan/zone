@@ -130,6 +130,37 @@ describe("checkWriteScope", () => {
       expect(checkWriteScope("src/b.ts", plan)).toMatch(/outside the planned scope/);
     });
   });
+
+  describe(".zone/ internal directory exemption", () => {
+    const plan = makePlan(["src/foo.ts"]);
+    const repoPath = "/tmp/myrepo";
+
+    it("allows write to .zone/todo.json even when plan covers only user files", () => {
+      expect(checkWriteScope(".zone/todo.json", plan, repoPath)).toBeNull();
+    });
+
+    it("allows write to .zone/memory.md", () => {
+      expect(checkWriteScope(".zone/memory.md", plan, repoPath)).toBeNull();
+    });
+
+    it("allows write to .zone/ (the directory itself)", () => {
+      expect(checkWriteScope(".zone", plan, repoPath)).toBeNull();
+    });
+
+    it("blocks a '.zone/../src/evil.ts' traversal path — does NOT exempt files outside .zone/", () => {
+      // .zone/../src/evil.ts resolves to /tmp/myrepo/src/evil.ts which is outside .zone/
+      const result = checkWriteScope(".zone/../src/evil.ts", plan, repoPath);
+      // src/evil.ts is not in the plan (plan has src/foo.ts), so it must be blocked
+      expect(result).toMatch(/outside the planned scope/);
+    });
+
+    it("traversal path .zone/../src/foo.ts is blocked even though resolved path is in plan", () => {
+      // normalizePath does not collapse ".." in relative paths, so ".zone/../src/foo.ts"
+      // is neither exempted by the .zone/ rule (resolves outside .zone/) nor matched
+      // by the plan's "src/foo.ts" entry (different string). Traversal paths are always blocked.
+      expect(checkWriteScope(".zone/../src/foo.ts", plan, repoPath)).toMatch(/outside the planned scope/);
+    });
+  });
 });
 
 describe("maybeExpandScopeForSymbolMatch", () => {

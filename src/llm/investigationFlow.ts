@@ -6,6 +6,7 @@ import type { Capability } from "../tools/capabilities.js";
 import type { ToolResult } from "../tools/toolExecutor.js";
 import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import type { TaskTier } from "./taskClassifier.js";
+import type { LLMProvider } from "./types.js";
 import { debugLog, log } from "../utils/logger.js";
 
 export interface InvestigateScopeOpts {
@@ -16,6 +17,8 @@ export interface InvestigateScopeOpts {
   tokenBudgetRemaining?: number;
   abortSignal?: AbortSignal;
   userApiKey?: string;
+  /** Provider to use for the investigation (inherits from the parent run). */
+  provider?: LLMProvider;
   /**
    * Parent run's classified tier. Threaded into the audit agentLoop so
    * tier-constraints-applied logs the correct tier instead of defaulting to medium.
@@ -176,6 +179,7 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
     repoPath: opts.repoPath,
     runId: runId || undefined,
     userApiKey: opts.userApiKey,
+    provider: opts.provider,
     abortSignal: opts.abortSignal,
     mode: "investigation",
     capabilityFilter: { allowToolNames: new Set([...AUDIT_ALLOWED_TOOLS]) },

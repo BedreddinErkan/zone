@@ -29,6 +29,16 @@ export function checkWriteScope(
   if (archetype === "refactor" || archetype === "complex_multi_file") {
     return null;
   }
+
+  // Zone's own .zone/ bookkeeping directory is never subject to plan-scope checks.
+  // Use path.resolve to handle ".." traversal (e.g. ".zone/../src/evil.ts" must stay blocked).
+  {
+    const base = repoPath ?? process.cwd();
+    const absFile = path.resolve(base, String(filePath ?? ""));
+    const absZone = path.resolve(base, ".zone");
+    if (absFile === absZone || absFile.startsWith(absZone + path.sep)) return null;
+  }
+
   if (!executionPlan || !Array.isArray(executionPlan.steps) || executionPlan.steps.length === 0) {
     return null;
   }

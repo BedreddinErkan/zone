@@ -17,6 +17,7 @@ import { generateExecutionPlan } from "./executionPlan.js";
 import { log } from "../utils/logger.js";
 import type { TaskClassification, TaskTier } from "./taskClassifier.js";
 import type { buildPipelineConfig } from "./archetypeDispatcher.js";
+import type { LLMProvider } from "./types.js";
 
 export interface AuditFindingsForExec {
   summary: string;
@@ -44,6 +45,8 @@ export interface AuditPipelineInput {
   preClassifiedTask?: TaskClassification | null;
   preGeneratedPlan?: Awaited<ReturnType<typeof generateExecutionPlan>> | null;
   userApiKey?: string;
+  /** Provider to use for the sub-investigation (inherits from the parent run). */
+  provider?: LLMProvider;
   /** Callback for all audit lifecycle events + sub-investigation progress. */
   emit: (update: { stage: string; progress?: unknown }) => void;
   abortSignal?: AbortSignal;
@@ -123,6 +126,7 @@ export async function runAuditPipeline(input: AuditPipelineInput): Promise<Audit
       query: `Audit whether this plan is correctly scoped for the task:\n\n${input.task}\n\nPlan:\n${preGeneratedPlan.objective}\nSteps: ${preGeneratedPlan.steps.map((s) => s.title).join(", ")}`,
       runId,
       userApiKey: input.userApiKey,
+      provider: input.provider,
       abortSignal: input.abortSignal,
       parentTier: tier,
       maxIterationsOverride: TIER_LIMITS[tier].auditIterCap,

@@ -127,6 +127,7 @@ export async function runOneShotInner(
         forceAudit: true,
         preGeneratedPlan,
         userApiKey: planUserApiKey,
+        provider: effectiveConfig.provider,
         emit: (update) => progressCallback(update as unknown as LlmPatchProgressUpdate),
         abortSignal: ac.signal,
         timeoutMs: 10 * 60 * 1000,

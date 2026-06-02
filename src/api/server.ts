@@ -3748,6 +3748,7 @@ app.post("/api/patch", async (req, res) => {
       preClassifiedTask,
       preGeneratedPlan,
       userApiKey: userApiKey || undefined,
+      provider: byokProvider,
       emit: (update) => emitProgress(runIdStr, update as any),
       abortSignal: patchAbort?.signal,
       timeoutMs: revisionApprovalTimeoutMsOverride ?? (isHeadless ? 30_000 : 10 * 60 * 1000),
