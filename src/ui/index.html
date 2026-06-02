@@ -996,6 +996,9 @@
     .attach-thumb-wrap{position:relative;width:40px;height:40px;flex-shrink:0}
     .attach-thumb{width:40px;height:40px;border-radius:4px;object-fit:cover;display:block;border:1px solid var(--border)}
     .attach-thumb-remove{position:absolute;top:-4px;right:-4px;width:14px;height:14px;border-radius:50%;background:var(--color-error);color:var(--bg);border:none;cursor:pointer;font-size:9px;display:flex;align-items:center;justify-content:center;line-height:1;padding:0}
+    #runModeChip{font-size:10px;color:var(--muted);padding:2px 8px;border:1px solid var(--border);border-radius:2px;margin:6px 0 0;cursor:default;user-select:none;display:inline-block;align-self:flex-start;letter-spacing:0.02em}
+    #runModeChip.mode-plan{color:var(--amber);border-color:var(--amber-dim)}
+    #runModeChip.mode-read{color:var(--green-dim);border-color:var(--green-dim)}
     .metaRow{display:flex;justify-content:space-between;align-items:center;margin-top:var(--space-lg);color:var(--text-4);font-size:var(--font-size-sm)}
     .repoChip{display:inline-flex;align-items:center;gap:var(--space-lg);border:1px solid var(--border);background:var(--surface-alpha-1);padding:var(--space-sm) var(--space-lg);border-radius:var(--radius-pill);color:var(--text-2);cursor:pointer;transition:border-color var(--transition-base),background var(--transition-base)}
     .repoChip:hover{border-color:var(--border2);background:var(--surface-alpha-2)}
@@ -1266,6 +1269,7 @@
               </button>
             </div>
           </div>
+          <div id="runModeChip" title="Shift+Tab to cycle mode">⚡ Auto</div>
         </div>
         <div class="metaRow">
           <div class="repoChip" id="repoChip" title="Cycle project">
@@ -1995,6 +1999,16 @@
 
     function nowTs(){ return new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' }); }
     function clamp(n,min,max){ return Math.max(min, Math.min(max, n)); }
+
+    function cycleRunMode() {
+      const order = ['auto','plan','read'];
+      const labels = {auto:'⚡ Auto', plan:'📋 Plan', read:'👁 Read'};
+      const classes = {auto:'', plan:'mode-plan', read:'mode-read'};
+      const idx = order.indexOf(state.runMode);
+      state.runMode = order[(idx + 1) % order.length];
+      const chip = document.getElementById('runModeChip');
+      if (chip) { chip.textContent = labels[state.runMode]; chip.className = classes[state.runMode]; }
+    }
 
     // ---- Storage ----
     const LS_THREADS = 'zone_threads';
@@ -9877,6 +9891,7 @@
           userId: effectiveUserId,
           conversationId: state.activeThreadId,
           mode: runMode,
+          forceAudit: runMode === 'plan',
           lastChangedFiles: Array.isArray(state.__lastChangedFiles) ? state.__lastChangedFiles : [],
           lastAddedFunctions: Array.isArray(state.__lastAddedFunctions) ? state.__lastAddedFunctions : [],
         };
@@ -11834,6 +11849,12 @@
 
       els.taskInput.addEventListener('input', autosizeTextarea);
       els.taskInput.addEventListener('keydown', maybeSendFromEnter);
+      els.taskInput.addEventListener('keydown', (e) => {
+        if (e.isComposing) return;
+        if (e.key !== 'Tab' || !e.shiftKey) return;
+        e.preventDefault();
+        cycleRunMode();
+      });
       els.sendBtn.addEventListener('click', () => {
         if (els.sendBtn.classList.contains('send-btn--stop')) {
           void cancelActivePatchRun();
