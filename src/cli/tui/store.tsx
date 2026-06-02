@@ -73,7 +73,13 @@ export type StoreState = {
     missingFiles?: string[];
     unnecessaryFiles?: string[];
   } | null;
-  modalView: "none" | "permissions" | "keys" | "sessions" | "plan" | "model" | "effort" | "metrics" | "limits";
+  modalView: "none" | "permissions" | "keys" | "sessions" | "plan" | "model" | "effort" | "metrics" | "limits" | "plan_ready";
+  planReadyProposal: {
+    planId: string;
+    runId: string;
+    objective: string;
+    steps: Array<{ title: string; description: string; filesLikely: string[] }>;
+  } | null;
   modelSettings: DiskModelSettings | null;
   modelSelectedIndex: number;
   effortSelectedIndex: number;
@@ -121,6 +127,7 @@ export function buildInitialState(initialValues?: {
     sessionTrustedPrefixes: initialValues?.trustedPrefixes ?? [],
     mode: "normal",
     planProposal: null,
+    planReadyProposal: null,
     modalView: "none",
     modelSettings: initialValues?.modelSettings ?? null,
     modelSelectedIndex: 0,
@@ -204,6 +211,14 @@ export type StoreAction =
       unnecessaryFiles?: string[];
     }
   | { type: "PLAN_RESOLVED" }
+  | {
+      type: "PLAN_READY_PROPOSED";
+      planId: string;
+      runId: string;
+      objective: string;
+      steps: Array<{ title: string; description: string; filesLikely: string[] }>;
+    }
+  | { type: "PLAN_READY_RESOLVED" }
   | { type: "NARRATION_COMMIT" };
 
 export function reducer(state: StoreState, action: StoreAction): StoreState {
@@ -425,6 +440,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         spinner: null,
         runState: "idle",
         modalView: "none",
+        planReadyProposal: null,
         statusBar: { ...state.statusBar, costUsd: 0, iter: 0 },
         transcriptGeneration: state.transcriptGeneration + 1,
       };
@@ -456,6 +472,21 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
 
     case "PLAN_RESOLVED":
       return { ...state, modalView: "none", planProposal: null };
+
+    case "PLAN_READY_PROPOSED":
+      return {
+        ...state,
+        modalView: "plan_ready",
+        planReadyProposal: {
+          planId: action.planId,
+          runId: action.runId,
+          objective: action.objective,
+          steps: action.steps,
+        },
+      };
+
+    case "PLAN_READY_RESOLVED":
+      return { ...state, modalView: "none", planReadyProposal: null };
 
     case "TRANSCRIPT_APPEND_NARRATION":
       if (!action.text) return state;

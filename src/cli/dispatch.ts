@@ -3,8 +3,11 @@ import { runLlmPatchFlow, type LlmPatchFlowResult } from "../core/runLlmPatchFlo
 import {
   rejectPendingApprovalsForRun,
   clearTrustedCommandsForRun,
+  setTrustAllForRun,
 } from "../api/commandApprovals.js";
 import { rejectPendingRevisionsForRun } from "../llm/revisionApprovals.js";
+import { requestPlanApproval, rejectPendingPlansForRun } from "../llm/planApprovals.js";
+import type { ExecutionPlan } from "../llm/executionPlan.js";
 import { loadCliConfig, validateCliConfig, type CliConfig, type CliFlags } from "./config.js";
 import { createSpinner, buildCliSink } from "./sink.js";
 import type { LlmPatchProgressUpdate } from "../core/agentLifecycleEvents.js";
@@ -53,13 +56,15 @@ export async function runOneShotInner(
   );
   const progressCallback = opts.onProgress ?? sink.onProgress;
 
+  let planForExecution: ExecutionPlan | undefined;
+
   if (opts.mode === "plan") {
     const planUserApiKey =
       effectiveConfig.provider === "openai"  ? effectiveConfig.openaiApiKey  :
       effectiveConfig.provider === "gemini"  ? effectiveConfig.geminiApiKey  :
                                                effectiveConfig.anthropicApiKey;
 
-    let preGeneratedPlan: Awaited<ReturnType<typeof generateExecutionPlan>> | undefined;
+    let preGeneratedPlan: ExecutionPlan | undefined;
     try {
       const planCtx = await preparePlanContext({
         task,
@@ -72,27 +77,66 @@ export async function runOneShotInner(
         relevantFiles: planCtx.relevantFilePaths,
         userApiKey: planUserApiKey,
       });
-    } catch { /* plan gen failure — audit will skip gracefully */ }
+    } catch { /* plan gen failure — fall through without a pre-generated plan */ }
 
-    const auditResult = await runAuditPipeline({
-      task,
-      repoPath: effectiveConfig.repoPath,
-      runId,
-      tier: "medium",
-      auditMode: readAuditModeSetting(),
-      forceAudit: true,
-      preGeneratedPlan,
-      userApiKey: planUserApiKey,
-      emit: (update) => progressCallback(update as unknown as LlmPatchProgressUpdate),
-      abortSignal: ac.signal,
-      timeoutMs: 10 * 60 * 1000,
-      autoApprove: false,
-      isHeadless: false,
-    });
+    if (process.env["ZONE_PLAN_APPROVAL_CYCLE"] === "1") {
+      // NEW PATH: show "Ready to code?" modal — no forced audit.
+      if (preGeneratedPlan) {
+        let looping = true;
+        while (looping) {
+          const result = await requestPlanApproval({
+            proposal: {
+              runId,
+              planId: randomUUID(),
+              objective: preGeneratedPlan.objective,
+              steps: preGeneratedPlan.steps,
+            },
+            emit: (evt) => progressCallback(evt as unknown as LlmPatchProgressUpdate),
+            abortSignal: ac.signal,
+            autoApprove: effectiveConfig.autoApprove,
+          });
+          switch (result.decision) {
+            case "reject":
+            case "timeout":
+              ac.abort();
+              return { ok: false as const, reason: "plan_rejected_by_user" } as unknown as LlmPatchFlowResult;
+            case "refine":
+            case "feedback":
+              // Phase 1 stub: re-show same plan
+              continue;
+            case "accept_all":
+              setTrustAllForRun(runId);
+              looping = false;
+              break;
+            case "manual":
+            default:
+              looping = false;
+          }
+        }
+        planForExecution = preGeneratedPlan;
+      }
+    } else {
+      // OLD PATH: forceAudit + PlanModal A/R (unchanged)
+      const auditResult = await runAuditPipeline({
+        task,
+        repoPath: effectiveConfig.repoPath,
+        runId,
+        tier: "medium",
+        auditMode: readAuditModeSetting(),
+        forceAudit: true,
+        preGeneratedPlan,
+        userApiKey: planUserApiKey,
+        emit: (update) => progressCallback(update as unknown as LlmPatchProgressUpdate),
+        abortSignal: ac.signal,
+        timeoutMs: 10 * 60 * 1000,
+        autoApprove: false,
+        isHeadless: false,
+      });
 
-    if (auditResult.revisionDecision === "reject") {
-      ac.abort();
-      return { ok: false as const, reason: "plan_rejected_by_user" } as unknown as LlmPatchFlowResult;
+      if (auditResult.revisionDecision === "reject") {
+        ac.abort();
+        return { ok: false as const, reason: "plan_rejected_by_user" } as unknown as LlmPatchFlowResult;
+      }
     }
   }
 
@@ -131,6 +175,7 @@ export async function runOneShotInner(
         provider: effectiveConfig.provider,
         forceTier: effectiveConfig.forceTier,
         mode: "patch",
+        preGeneratedPlan: planForExecution,
       })
     );
 
@@ -139,6 +184,7 @@ export async function runOneShotInner(
     if (sigintHandler) process.off("SIGINT", sigintHandler);
     rejectPendingApprovalsForRun(runId);
     rejectPendingRevisionsForRun(runId);
+    rejectPendingPlansForRun(runId);
     clearTrustedCommandsForRun(runId);
     spinner.stop();
   }

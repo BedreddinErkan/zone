@@ -226,6 +226,21 @@ export function useAgentEvents(
       dispatch({ type: "PENDING_APPROVAL_SET", approvalId: evt.approvalId, runId: evt.runId ?? "", command });
     }
 
+    function handlePlanReadyForApproval(evt: ZoneStructuredProgressEvent): void {
+      if (!evt.planId) return;
+      let steps: Array<{ title: string; description: string; filesLikely: string[] }> = [];
+      try {
+        if (evt.planStepsJson) steps = JSON.parse(evt.planStepsJson);
+      } catch { /* malformed JSON — render with empty steps */ }
+      dispatch({
+        type: "PLAN_READY_PROPOSED",
+        planId: evt.planId,
+        runId: evt.runId,
+        objective: evt.planObjective ?? "",
+        steps,
+      });
+    }
+
     function handleRevisionProposed(evt: ZoneStructuredProgressEvent): void {
       if (modeRef.current === "plan") {
         dispatch({
@@ -249,6 +264,8 @@ export function useAgentEvents(
       }
     }
 
+    const handlePlanReady = handlePlanReadyForApproval;
+    bus.on("plan_ready_for_approval", handlePlanReady);
     bus.on("agent_loop_start", handleAgentLoopStart);
     bus.on("agent_loop_complete", handleAgentLoopComplete);
     bus.on("run_summary", handleRunSummary);
@@ -290,6 +307,7 @@ export function useAgentEvents(
         clearTimeout(debounceTimer.current);
         debounceTimer.current = null;
       }
+      bus.off("plan_ready_for_approval", handlePlanReady);
       bus.off("agent_loop_start", handleAgentLoopStart);
       bus.off("agent_loop_complete", handleAgentLoopComplete);
       bus.off("run_summary", handleRunSummary);

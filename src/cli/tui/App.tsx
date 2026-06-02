@@ -12,11 +12,13 @@ import { PermissionsView } from "./components/PermissionsView.js";
 import { ApiKeysView } from "./components/ApiKeysView.js";
 import { SessionsModal } from "./components/SessionsModal.js";
 import { PlanModal } from "./components/PlanModal.js";
+import { PlanReadyModal } from "./components/PlanReadyModal.js";
 import { ModelModal } from "./components/ModelModal.js";
 import { EffortModal } from "./components/EffortModal.js";
 import { MetricsModal } from "./components/MetricsModal.js";
 import { LimitsModal } from "./components/LimitsModal.js";
 import { resolveCommandApproval } from "../../api/commandApprovals.js";
+import { resolvePlanApproval } from "../../llm/planApprovals.js";
 import type { EventBus } from "../eventBus.js";
 import type { DiskSession } from "../../api/diskSessions.js";
 import type { DiskModelSettings } from "../../api/diskModel.js";
@@ -86,6 +88,14 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }:
     dispatch({ type: "PENDING_APPROVAL_RESOLVED" });
   }, [state.pendingApproval, state.mode]);
 
+  // autoAccept: resolve plan-ready approval as "accept_all" automatically
+  useEffect(() => {
+    if (state.mode !== "autoAccept" || state.planReadyProposal === null) return;
+    const { planId, runId } = state.planReadyProposal;
+    resolvePlanApproval({ planId, runId, decision: "accept_all" });
+    dispatch({ type: "PLAN_READY_RESOLVED" });
+  }, [state.planReadyProposal, state.mode]);
+
   // Anchor stdin so Ink doesn't auto-unmount via beforeExit when the event loop empties.
   useInput((input, key) => {
     // Ctrl+C — always exit. In TTY raw mode, SIGINT never fires; \x03 arrives here instead.
@@ -134,6 +144,9 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }:
       {state.modalView === "limits" && <LimitsModal />}
       {state.planProposal !== null && (
         <PlanModal proposal={state.planProposal} dispatch={dispatch} />
+      )}
+      {state.planReadyProposal !== null && (
+        <PlanReadyModal proposal={state.planReadyProposal} dispatch={dispatch} />
       )}
     </>
   );

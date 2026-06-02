@@ -160,7 +160,9 @@ export type ZoneStructuredProgressEvent = {
     | "compaction_exhausted"
     | "compaction_overflow_warning"
     /** Scope-block circuit breaker: emitted when consecutive scope-blocked writes reach the terminate threshold. */
-    | "scope_block_circuit_terminal";
+    | "scope_block_circuit_terminal"
+    /** Plan-ready approval gate (ZONE_PLAN_APPROVAL_CYCLE=1): emitted after plan generation. */
+    | "plan_ready_for_approval";
   title: string;
   detail?: string;
   filePath?: string;
@@ -286,6 +288,10 @@ export type ZoneStructuredProgressEvent = {
   classifierCostUsd?: number;
   classifierLatencyMs?: number;
   fallbackUsed?: boolean;
+  /** plan_ready_for_approval: plan approval gate fields (ZONE_PLAN_APPROVAL_CYCLE=1). */
+  planId?: string;
+  planObjective?: string;
+  planStepsJson?: string;
 };
 
 /** Documentation type for `narration` progress events: a one-line intent

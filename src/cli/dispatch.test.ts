@@ -4,7 +4,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockRunLlmPatchFlow = vi.hoisted(() => vi.fn());
 const mockRejectPendingApprovalsForRun = vi.hoisted(() => vi.fn().mockReturnValue(0));
 const mockRejectPendingRevisionsForRun = vi.hoisted(() => vi.fn().mockReturnValue(0));
+const mockRejectPendingPlansForRun = vi.hoisted(() => vi.fn().mockReturnValue(0));
+const mockRequestPlanApproval = vi.hoisted(() => vi.fn());
 const mockClearTrustedCommandsForRun = vi.hoisted(() => vi.fn().mockReturnValue(0));
+const mockSetTrustAllForRun = vi.hoisted(() => vi.fn());
 const mockBuildCliSink = vi.hoisted(() => vi.fn(() => ({ onProgress: vi.fn() })));
 const mockCreateSpinner = vi.hoisted(() => vi.fn(() => ({ stop: vi.fn() })));
 const mockRunAuditPipeline = vi.hoisted(() => vi.fn());
@@ -18,9 +21,14 @@ vi.mock("../core/runLlmPatchFlow.js", () => ({
 vi.mock("../api/commandApprovals.js", () => ({
   rejectPendingApprovalsForRun: mockRejectPendingApprovalsForRun,
   clearTrustedCommandsForRun: mockClearTrustedCommandsForRun,
+  setTrustAllForRun: mockSetTrustAllForRun,
 }));
 vi.mock("../llm/revisionApprovals.js", () => ({
   rejectPendingRevisionsForRun: mockRejectPendingRevisionsForRun,
+}));
+vi.mock("../llm/planApprovals.js", () => ({
+  requestPlanApproval: mockRequestPlanApproval,
+  rejectPendingPlansForRun: mockRejectPendingPlansForRun,
 }));
 vi.mock("./sink.js", () => ({
   buildCliSink: mockBuildCliSink,
@@ -71,7 +79,11 @@ beforeEach(() => {
   mockRunLlmPatchFlow.mockReset();
   mockRejectPendingApprovalsForRun.mockClear();
   mockRejectPendingRevisionsForRun.mockClear();
+  mockRejectPendingPlansForRun.mockClear();
+  mockRequestPlanApproval.mockReset();
+  mockSetTrustAllForRun.mockClear();
   mockClearTrustedCommandsForRun.mockClear();
+  delete process.env["ZONE_PLAN_APPROVAL_CYCLE"];
   mockBuildCliSink.mockReturnValue({ onProgress: vi.fn() });
   mockCreateSpinner.mockReturnValue({ stop: vi.fn() });
   mockRunAuditPipeline.mockResolvedValue({ auditFindings: undefined, revisionDecision: undefined, earlyExit: null });
@@ -274,5 +286,100 @@ describe("runOneShotInner — mode wiring", () => {
     expect(ac.signal.aborted).toBe(true);
     expect(mockRunLlmPatchFlow).not.toHaveBeenCalled();
     expect((result as any).ok).toBe(false);
+  });
+});
+
+describe("runOneShotInner — ZONE_PLAN_APPROVAL_CYCLE flag", () => {
+  it("flag OFF: plan mode still calls runAuditPipeline with forceAudit:true (parity)", async () => {
+    // flag is unset (cleared in beforeEach)
+    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
+    await runOneShotInner("do something", BASE_CONFIG, "run-flag-off", {
+      mode: "plan",
+      externalAc: new AbortController(),
+    });
+    expect(mockRunAuditPipeline).toHaveBeenCalledOnce();
+    expect(mockRunAuditPipeline.mock.calls[0]![0].forceAudit).toBe(true);
+    expect(mockRequestPlanApproval).not.toHaveBeenCalled();
+    expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
+  });
+
+  it("flag ON: requestPlanApproval called, runAuditPipeline NOT called", async () => {
+    process.env["ZONE_PLAN_APPROVAL_CYCLE"] = "1";
+    mockRequestPlanApproval.mockResolvedValueOnce({ planId: "p1", decision: "accept_all" });
+    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
+    await runOneShotInner("do something", BASE_CONFIG, "run-flag-on", {
+      mode: "plan",
+      externalAc: new AbortController(),
+    });
+    expect(mockRunAuditPipeline).not.toHaveBeenCalled();
+    expect(mockRequestPlanApproval).toHaveBeenCalledOnce();
+    expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
+  });
+
+  it("flag ON + accept_all: setTrustAllForRun called, preGeneratedPlan threaded to runLlmPatchFlow", async () => {
+    process.env["ZONE_PLAN_APPROVAL_CYCLE"] = "1";
+    mockRequestPlanApproval.mockResolvedValueOnce({ planId: "p2", decision: "accept_all" });
+    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
+    await runOneShotInner("do something", BASE_CONFIG, "run-accept-all", {
+      mode: "plan",
+      externalAc: new AbortController(),
+    });
+    expect(mockSetTrustAllForRun).toHaveBeenCalledWith("run-accept-all");
+    const flowCall = mockRunLlmPatchFlow.mock.calls[0]![0] as Record<string, unknown>;
+    expect(flowCall["preGeneratedPlan"]).toBeDefined();
+    expect((flowCall["preGeneratedPlan"] as any).objective).toBe(FAKE_PLAN.objective);
+  });
+
+  it("flag ON + manual: setTrustAllForRun NOT called, runLlmPatchFlow called", async () => {
+    process.env["ZONE_PLAN_APPROVAL_CYCLE"] = "1";
+    mockRequestPlanApproval.mockResolvedValueOnce({ planId: "p3", decision: "manual" });
+    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
+    await runOneShotInner("do something", BASE_CONFIG, "run-manual", {
+      mode: "plan",
+      externalAc: new AbortController(),
+    });
+    expect(mockSetTrustAllForRun).not.toHaveBeenCalled();
+    expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
+  });
+
+  it("flag ON + reject: ac.abort(), runLlmPatchFlow NOT called, ok:false", async () => {
+    process.env["ZONE_PLAN_APPROVAL_CYCLE"] = "1";
+    mockRequestPlanApproval.mockResolvedValueOnce({ planId: "p4", decision: "reject" });
+    const ac = new AbortController();
+    const result = await runOneShotInner("do something", BASE_CONFIG, "run-reject", {
+      mode: "plan",
+      externalAc: ac,
+    });
+    expect(ac.signal.aborted).toBe(true);
+    expect(mockRunLlmPatchFlow).not.toHaveBeenCalled();
+    expect((result as any).ok).toBe(false);
+  });
+
+  it("flag ON + refine then accept_all: requestPlanApproval called twice (stub loop)", async () => {
+    process.env["ZONE_PLAN_APPROVAL_CYCLE"] = "1";
+    mockRequestPlanApproval
+      .mockResolvedValueOnce({ planId: "p5a", decision: "refine" })
+      .mockResolvedValueOnce({ planId: "p5b", decision: "accept_all" });
+    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
+    await runOneShotInner("do something", BASE_CONFIG, "run-refine", {
+      mode: "plan",
+      externalAc: new AbortController(),
+    });
+    expect(mockRequestPlanApproval).toHaveBeenCalledTimes(2);
+    expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
+  });
+
+  it("flag ON: preGeneratedPlan NOT threaded when plan gen fails", async () => {
+    process.env["ZONE_PLAN_APPROVAL_CYCLE"] = "1";
+    mockGenerateExecutionPlan.mockRejectedValueOnce(new Error("plan gen failed"));
+    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
+    await runOneShotInner("do something", BASE_CONFIG, "run-no-plan", {
+      mode: "plan",
+      externalAc: new AbortController(),
+    });
+    // No approval modal shown (no plan to show), goes straight to execution
+    expect(mockRequestPlanApproval).not.toHaveBeenCalled();
+    const flowCall = mockRunLlmPatchFlow.mock.calls[0]![0] as Record<string, unknown>;
+    expect(flowCall["preGeneratedPlan"]).toBeUndefined();
   });
 });

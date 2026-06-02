@@ -9,6 +9,7 @@ vi.mock("../../api/commandApprovals.js", () => ({
   resolveCommandApproval: vi.fn().mockReturnValue({ ok: true }),
 }));
 vi.mock("../../llm/revisionApprovals.js", () => ({ resolveRevisionApproval: vi.fn() }));
+vi.mock("../../llm/planApprovals.js", () => ({ resolvePlanApproval: vi.fn().mockReturnValue({ ok: true }) }));
 
 function makeEvt(type: ZoneStructuredProgressEvent["type"], extra: Partial<ZoneStructuredProgressEvent> = {}): ZoneStructuredProgressEvent {
   return { runId: "test-run", ts: Date.now(), type, title: type, ...extra } as ZoneStructuredProgressEvent;
@@ -241,6 +242,113 @@ describe("TUI.4.4 approval modal", () => {
     // Run is still running (not aborted) — modal Esc ≠ run abort
     const frame = lastFrame() ?? "";
     expect(frame).not.toContain("aborted");
+    unmount();
+  });
+});
+
+describe("PlanReadyModal", () => {
+  let resolvePlanApproval: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    ({ resolvePlanApproval } = await import("../../llm/planApprovals.js") as any);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const PLAN_STEPS = JSON.stringify([
+    { title: "Read relevant files", description: "Understand scope", filesLikely: ["src/foo.ts", "src/bar.ts"] },
+    { title: "Implement feature", description: "Write the code", filesLikely: ["src/baz.ts"] },
+  ]);
+
+  it("renders objective and steps on plan_ready_for_approval", async () => {
+    const bus = createEventBus();
+    const { lastFrame, unmount } = render(<App bus={bus} />);
+
+    bus.emit("plan_ready_for_approval", makeEvt("plan_ready_for_approval", {
+      planId: "plan-test-1",
+      runId: "test-run",
+      planObjective: "Add feature X to the codebase.",
+      planStepsJson: PLAN_STEPS,
+    }));
+    await new Promise(r => setTimeout(r, 50));
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Ready to code?");
+    expect(frame).toContain("Add feature X to the codebase.");
+    expect(frame).toContain("Read relevant files");
+    expect(frame).toContain("[1]");
+    unmount();
+  });
+
+  it("key 1 resolves as accept_all and closes modal", async () => {
+    const bus = createEventBus();
+    const { lastFrame, stdin, unmount } = render(<App bus={bus} />);
+
+    bus.emit("plan_ready_for_approval", makeEvt("plan_ready_for_approval", {
+      planId: "plan-test-2",
+      runId: "test-run",
+      planObjective: "Fix bug.",
+      planStepsJson: PLAN_STEPS,
+    }));
+    await new Promise(r => setTimeout(r, 50));
+    expect(lastFrame()).toContain("Ready to code?");
+
+    stdin.write("1");
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(resolvePlanApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ planId: "plan-test-2", decision: "accept_all" })
+    );
+    expect(lastFrame()).not.toContain("Ready to code?");
+    unmount();
+  });
+
+  it("key 2 resolves as manual and closes modal", async () => {
+    const bus = createEventBus();
+    const { lastFrame, stdin, unmount } = render(<App bus={bus} />);
+
+    bus.emit("plan_ready_for_approval", makeEvt("plan_ready_for_approval", {
+      planId: "plan-test-3",
+      runId: "test-run",
+      planObjective: "Refactor something.",
+      planStepsJson: PLAN_STEPS,
+    }));
+    await new Promise(r => setTimeout(r, 50));
+
+    stdin.write("2");
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(resolvePlanApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ planId: "plan-test-3", decision: "manual" })
+    );
+    expect(lastFrame()).not.toContain("Ready to code?");
+    unmount();
+  });
+
+  it("Esc resolves as reject, closes modal, and transitions to aborted", async () => {
+    const bus = createEventBus();
+    const { lastFrame, stdin, unmount } = render(<App bus={bus} />);
+
+    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
+    bus.emit("plan_ready_for_approval", makeEvt("plan_ready_for_approval", {
+      planId: "plan-test-4",
+      runId: "test-run",
+      planObjective: "Something.",
+      planStepsJson: PLAN_STEPS,
+    }));
+    await new Promise(r => setTimeout(r, 50));
+    expect(lastFrame()).toContain("Ready to code?");
+
+    stdin.write("\x1b");
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(resolvePlanApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ planId: "plan-test-4", decision: "reject" })
+    );
+    expect(lastFrame()).not.toContain("Ready to code?");
+    expect(lastFrame()).toContain("aborted");
     unmount();
   });
 });

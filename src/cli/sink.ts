@@ -3,6 +3,7 @@ import type {
   ZoneStructuredProgressEvent,
 } from "../core/agentLifecycleEvents.js";
 import { promptCommandApproval, promptScopeRevision } from "./approvals.js";
+import { resolvePlanApproval } from "../llm/planApprovals.js";
 import { formatCompactionNarration } from "../core/compactionNarration.js";
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -287,6 +288,19 @@ export function buildCliSink(opts: CliSinkOptions, spinner: Spinner): CliSink {
       case "scope_revision_resolved":
         if (!quiet) out(`${dim}  Scope revision: ${evt.detail ?? evt.revisionDecision ?? "resolved"}${reset}`);
         break;
+
+      case "plan_ready_for_approval": {
+        const planId = evt.planId;
+        const runId = evt.runId;
+        if (!planId) break;
+        if (opts.autoApprove) {
+          resolvePlanApproval({ planId, runId, decision: "accept_all" });
+        } else {
+          if (!quiet) out(`${yellow}⚠ Plan approval requires interactive (TUI) mode. Use --yes to auto-accept.${reset}\n`);
+          resolvePlanApproval({ planId, runId, decision: "reject" });
+        }
+        break;
+      }
 
       case "plan_summary":
         if (!quiet && evt.planSummaryFiles?.length) {
