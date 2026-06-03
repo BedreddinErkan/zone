@@ -1106,7 +1106,9 @@ export function buildCoachingPrompt(
       return (
         "You tried to apply_patch a file you haven't read in this run. " +
         "Call read_file FIRST to see the exact lines, then write apply_patch with FIND " +
-        "blocks that match verbatim (whitespace included). Don't guess from prior knowledge of similar projects."
+        "blocks that match verbatim (whitespace included). Don't guess from prior knowledge of similar projects. " +
+        "Alternatively, for each region: multi_edit({files:[filePath], find:\"exact text\", replace:\"new text\"}) " +
+        "reads each file internally and needs no prior read_file call."
       );
     case "apply_patch_find_not_found":
       return (
@@ -2317,24 +2319,39 @@ Example:
   // Gap 1: internal post-tool-use hooks. Commit 5: LoopDetectorHook (warn case only).
   // The terminate case remains inline — it needs an early return from the outer function,
   // which HookResult cannot express without losing the loopDetected metadata.
+
+  // Shared helper: fire loop_warning_emitted event + Pattern A append onto the last role:"tool"
+  // message in responseInput. Called from loopDetectorHook (normal path) and from the C1
+  // pre-exec reject path (which bypasses handleToolResult / PostToolUse runners entirely).
+  const emitLoopWarn = (toolName: string, count: number, message: string): void => {
+    input.onStructuredEvent?.({
+      type: "loop_warning_emitted",
+      toolName,
+      count,
+      title: `Loop warning: \`${toolName}\` repeated ${count}×`,
+      status: "warning",
+    } as Parameters<NonNullable<typeof input.onStructuredEvent>>[0]);
+    for (let ci = responseInput.length - 1; ci >= 0; ci--) {
+      const m = responseInput[ci];
+      if (m.role === "tool") {
+        m.content = (typeof m.content === "string" ? m.content : "") + message;
+        break;
+      }
+    }
+  };
+
   const loopDetectorHook: PostToolUseHook = {
     name: "loop-detector",
     priority: 10,
     shouldRun: (ctx) => ctx.loopDetectorState.status === "warn",
     run: (ctx) => {
-      input.onStructuredEvent?.({
-        type: "loop_warning_emitted",
-        toolName: ctx.toolName,
-        count: ctx.loopDetectorState.count,
-        title: `Loop warning: \`${ctx.toolName}\` repeated ${ctx.loopDetectorState.count}×`,
-        status: "warning",
-      } as Parameters<NonNullable<typeof input.onStructuredEvent>>[0]);
-      return {
-        kind: "appendContext",
-        content: `\n\n[Zone loop-warning]\nNotice: you have called \`${ctx.toolName}\` with the same arguments ${ctx.loopDetectorState.count} times in the last few iterations. This suggests a loop. Try a different approach — use a different tool, different scope, ask the user for clarification, or finish with a partial explanation.`,
-        target: "responseInput",
-        mode: "append-to-tool",
-      };
+      const msg =
+        `\n\n[Zone loop-warning]\nNotice: you have called \`${ctx.toolName}\` with the same arguments ` +
+        `${ctx.loopDetectorState.count} times in the last few iterations. This suggests a loop. ` +
+        `Try a different approach — use a different tool, different scope, ask the user for clarification, ` +
+        `or finish with a partial explanation.`;
+      emitLoopWarn(ctx.toolName, ctx.loopDetectorState.count, msg);
+      return { kind: "passthrough" };
     },
   };
   const _internalPostToolUseHooks: PostToolUseHook[] = [loopDetectorHook];
@@ -3046,6 +3063,18 @@ Example:
                 status: "error",
               });
               return synthesizeLoopDetectedExit(iter + 1, name, preExecLoopResult.count);
+            }
+            // Deliver the WARN nudge at count===WARN_THRESHOLD before terminal at count===TERMINATE_THRESHOLD.
+            // The normal path fires this via the PostToolUse hook, but that runner is bypassed here.
+            if (preExecLoopResult.status === "warn") {
+              const warnMsg =
+                `\n\n[Zone loop-warning]\nNotice: you have called \`${name}\` with the same arguments ` +
+                `${preExecLoopResult.count} times without reading '${targetFilePath}' first. ` +
+                `For each region you want to edit, call ` +
+                `multi_edit({files:['${targetFilePath}'], find:"exact text of that region", replace:"new text"}) ` +
+                `— it reads staged content internally and needs no prior read_file call. ` +
+                `Or call read_file on '${targetFilePath}' first, then retry apply_patch with FIND text that matches verbatim.`;
+              emitLoopWarn(name, preExecLoopResult.count, warnMsg);
             }
             // [INNER-LOOP: APPLY_PATCH_NO_READ]
             continue;

@@ -48,6 +48,33 @@ import { TERMINATE_THRESHOLD, WARN_THRESHOLD } from "./loopDetector.js";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
+function makeApplyPatchCall(id: string) {
+  return {
+    choices: [
+      {
+        message: {
+          content: null,
+          tool_calls: [
+            {
+              id,
+              type: "function",
+              function: {
+                name: "apply_patch",
+                arguments: JSON.stringify({
+                  filePath: "src/target.ts",
+                  patch: "--- FIND ---\nconst x = 1;\n--- REPLACE ---\nconst x = 2;",
+                }),
+              },
+            },
+          ],
+        },
+        finish_reason: "tool_calls",
+      },
+    ],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+  };
+}
+
 function makeReadFileCall(id: string) {
   return {
     choices: [
@@ -181,6 +208,53 @@ describe("agentLoop loop detection (Q.2)", () => {
         m.content.includes("loop")
     );
     expect(warnMsg).toBeDefined();
+  });
+
+  it("C1 pre-exec warn: loop-warning appended to role:tool on 3rd identical no-read-first apply_patch", async () => {
+    // C1 (read-before-patch) fires pre-exec for apply_patch on an unread file.
+    // The PostToolUse hook runner is bypassed via `continue`, so the warn nudge
+    // must be injected directly in the C1 block. Verify it fires at WARN_THRESHOLD
+    // and contains the multi_edit guidance, before TERMINATE_THRESHOLD aborts.
+    for (let i = 0; i < TERMINATE_THRESHOLD; i += 1) {
+      mocks.createChatCompletion.mockResolvedValueOnce(makeApplyPatchCall(`ap-call-${i}`));
+    }
+
+    const events: Array<{ type: string; count?: number }> = [];
+    await runAgentLoop({
+      task: "patch the file",
+      repoPath,
+      mode: "patch",
+      maxIterations: 20,
+      onStructuredEvent: (evt) => {
+        const e = evt as { type?: string; count?: number };
+        if (e.type === "loop_warning_emitted" || e.type === "loop_detected_terminal") {
+          events.push({ type: String(e.type), count: e.count });
+        }
+      },
+    });
+
+    // loop_warning_emitted must fire at count === WARN_THRESHOLD
+    const warning = events.find((e) => e.type === "loop_warning_emitted");
+    expect(warning).toBeDefined();
+    expect(warning?.count).toBe(WARN_THRESHOLD);
+
+    // The warn text must appear in a role:"tool" message sent to the LLM
+    // (appended to the synthetic C1 rejection reply in responseInput).
+    const calls = mocks.createChatCompletion.mock.calls as Array<[{ messages: Array<{ role: string; content: unknown }> }]>;
+    const allMessages = calls.flatMap(([req]) => req.messages ?? []);
+    const warnMsg = allMessages.find(
+      (m) =>
+        m.role === "tool" &&
+        typeof m.content === "string" &&
+        m.content.includes("[Zone loop-warning]") &&
+        m.content.includes("multi_edit"),
+    );
+    expect(warnMsg).toBeDefined();
+
+    // Run terminates via loop_detected at TERMINATE_THRESHOLD
+    const terminal = events.find((e) => e.type === "loop_detected_terminal");
+    expect(terminal).toBeDefined();
+    expect(terminal?.count).toBe(TERMINATE_THRESHOLD);
   });
 
   it("does NOT trigger for distinct tool calls even when count exceeds TERMINATE_THRESHOLD", async () => {

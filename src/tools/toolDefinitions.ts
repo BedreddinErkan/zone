@@ -297,8 +297,10 @@ required: ["id", "content", "description", "status"],
       name: "multi_edit",
       strict: true,
       description:
-        "Exact-string find/replace across one or more files in ONE call. " +
-        "Use for renames and codemods: supply find/replace strings and the file list — " +
+        "Exact-string find/replace in ONE call: one find/replace pair applied across all listed files. " +
+        "Use for renames, codemods, or editing a region within a single large file (call once per region — " +
+        "each call reads staged content, so successive calls see prior edits). " +
+        "Supply find/replace strings and the file list — " +
         "the tool reads each file fully and replaces all occurrences atomically via staging. " +
         "wholeWord (default true) adds \\b boundaries — protects compound identifiers. " +
         "Returns per-file replacement counts; count=0 for a file means find was not present.",

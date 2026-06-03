@@ -1559,7 +1559,9 @@ export async function executeTool(
           output:
             `MISSING_ARG: apply_patch requires a non-empty filePath (relative path to the file). ` +
             `Your call arrived with no filePath and likely no patch body. ` +
-            `Re-issue with filePath set and the FIND/REPLACE blocks included — or use multi_edit for cross-file edits.`,
+            `Re-issue with filePath set and the FIND/REPLACE blocks included ` +
+            `— or call multi_edit({files:[filePath], find:"exact text", replace:"new text"}) for each region ` +
+            `(reads staged content internally; no read_file call required first).`,
           error: "apply_patch_missing_filepath",
         };
       }
@@ -1580,7 +1582,9 @@ export async function executeTool(
               `READ_REQUIRED: filePath='${filePath}'. ` +
               `You have read this run: [${[...input.filesReadThisRun].join(", ") || "(none)"}]. ` +
               `Call read_file on that exact path before patching. ` +
-              `The file may have changed or you may be assuming the wrong content.`,
+              `The file may have changed or you may be assuming the wrong content. ` +
+              `For each region to edit, multi_edit({files:['${filePath}'], find:"exact text", replace:"new text"}) ` +
+              `reads staged content internally and needs no prior read_file call.`,
             error: "apply_patch_no_read_first",
           };
         }
