@@ -94,7 +94,7 @@ beforeEach(() => {
   mockPreparePlanContext.mockResolvedValue({ projectSummary: "A TS project", relevantFilePaths: [] });
   mockGenerateExecutionPlan.mockResolvedValue(FAKE_PLAN);
   mockReadAuditModeSetting.mockReturnValue("auto");
-  mockLoadDiskModelSync.mockReturnValue(null);  // default → "quick"
+  mockLoadDiskModelSync.mockReturnValue(null);  // default → "investigate"
   mockRunPlanInvestigation.mockResolvedValue(FAKE_PLAN);
   // Suppress stdout/stderr in tests
   vi.spyOn(process.stdout, "write").mockReturnValue(true);
@@ -320,9 +320,8 @@ describe("runOneShotInner — plan mode paths", () => {
     expect((result as any).ok).toBe(false);
   });
 
-  it("refine then accept_all: requestPlanApproval called twice, generateExecutionPlan called twice with cached context", async () => {
+  it("refine then accept_all: requestPlanApproval called twice, generateExecutionPlan called once for re-plan", async () => {
     mockGenerateExecutionPlan
-      .mockResolvedValueOnce(FAKE_PLAN)
       .mockResolvedValueOnce(REVISED_PLAN);
     mockRequestPlanApproval
       .mockResolvedValueOnce({ planId: "p5a", decision: "refine" })
@@ -333,16 +332,15 @@ describe("runOneShotInner — plan mode paths", () => {
       externalAc: new AbortController(),
     });
     expect(mockRequestPlanApproval).toHaveBeenCalledTimes(2);
-    expect(mockGenerateExecutionPlan).toHaveBeenCalledTimes(2);
-    const secondCall = mockGenerateExecutionPlan.mock.calls[1]![0] as Record<string, unknown>;
-    expect(secondCall["previousPlan"]).toEqual(FAKE_PLAN);
+    expect(mockGenerateExecutionPlan).toHaveBeenCalledOnce();
+    const replanCall = mockGenerateExecutionPlan.mock.calls[0]![0] as Record<string, unknown>;
+    expect(replanCall["previousPlan"]).toEqual(FAKE_PLAN);
     expect(mockPreparePlanContext).toHaveBeenCalledOnce(); // cached — NOT re-called for re-plan
     expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
   });
 
-  it("feedback: generateExecutionPlan called twice, second with previousPlan+userFeedback, runLlmPatchFlow gets revised plan", async () => {
+  it("feedback: generateExecutionPlan called once for re-plan with previousPlan+userFeedback, runLlmPatchFlow gets revised plan", async () => {
     mockGenerateExecutionPlan
-      .mockResolvedValueOnce(FAKE_PLAN)
       .mockResolvedValueOnce(REVISED_PLAN);
     mockRequestPlanApproval
       .mockResolvedValueOnce({ planId: "p-fb1", decision: "feedback", feedback: "please add tests" })
@@ -353,10 +351,10 @@ describe("runOneShotInner — plan mode paths", () => {
       externalAc: new AbortController(),
     });
     expect(mockPreparePlanContext).toHaveBeenCalledOnce(); // cached, not re-investigated
-    expect(mockGenerateExecutionPlan).toHaveBeenCalledTimes(2);
-    const secondCall = mockGenerateExecutionPlan.mock.calls[1]![0] as Record<string, unknown>;
-    expect(secondCall["previousPlan"]).toEqual(FAKE_PLAN);
-    expect(secondCall["userFeedback"]).toBe("please add tests");
+    expect(mockGenerateExecutionPlan).toHaveBeenCalledOnce();
+    const replanCall = mockGenerateExecutionPlan.mock.calls[0]![0] as Record<string, unknown>;
+    expect(replanCall["previousPlan"]).toEqual(FAKE_PLAN);
+    expect(replanCall["userFeedback"]).toBe("please add tests");
     expect(mockRequestPlanApproval).toHaveBeenCalledTimes(2);
     const flowCall = mockRunLlmPatchFlow.mock.calls[0]![0] as Record<string, unknown>;
     expect((flowCall["preGeneratedPlan"] as any).objective).toBe(REVISED_PLAN.objective);
@@ -364,7 +362,6 @@ describe("runOneShotInner — plan mode paths", () => {
 
   it("approve_with_feedback: re-plans once then executes without re-showing modal", async () => {
     mockGenerateExecutionPlan
-      .mockResolvedValueOnce(FAKE_PLAN)
       .mockResolvedValueOnce(REVISED_PLAN);
     mockRequestPlanApproval.mockResolvedValueOnce({ planId: "p-awf", decision: "approve_with_feedback", feedback: "be concise" });
     mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
@@ -372,25 +369,25 @@ describe("runOneShotInner — plan mode paths", () => {
       mode: "plan",
       externalAc: new AbortController(),
     });
-    expect(mockGenerateExecutionPlan).toHaveBeenCalledTimes(2);
-    const secondCall = mockGenerateExecutionPlan.mock.calls[1]![0] as Record<string, unknown>;
-    expect(secondCall["userFeedback"]).toBe("be concise");
+    expect(mockGenerateExecutionPlan).toHaveBeenCalledOnce();
+    const replanCall = mockGenerateExecutionPlan.mock.calls[0]![0] as Record<string, unknown>;
+    expect(replanCall["userFeedback"]).toBe("be concise");
     expect(mockRequestPlanApproval).toHaveBeenCalledOnce(); // NOT re-shown after approve_with_feedback
     const flowCall = mockRunLlmPatchFlow.mock.calls[0]![0] as Record<string, unknown>;
     expect((flowCall["preGeneratedPlan"] as any).objective).toBe(REVISED_PLAN.objective);
   });
 
-  it("preGeneratedPlan NOT threaded when plan gen fails", async () => {
-    mockGenerateExecutionPlan.mockRejectedValueOnce(new Error("plan gen failed"));
-    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
-    await runOneShotInner("do something", BASE_CONFIG, "run-no-plan", {
+  it("plan gen failure in plan mode: abort, runLlmPatchFlow NOT called", async () => {
+    mockRunPlanInvestigation.mockRejectedValueOnce(new Error("plan gen failed"));
+    const ac = new AbortController();
+    const result = await runOneShotInner("do something", BASE_CONFIG, "run-no-plan", {
       mode: "plan",
-      externalAc: new AbortController(),
+      externalAc: ac,
     });
-    // No approval modal shown (no plan to show), goes straight to execution
     expect(mockRequestPlanApproval).not.toHaveBeenCalled();
-    const flowCall = mockRunLlmPatchFlow.mock.calls[0]![0] as Record<string, unknown>;
-    expect(flowCall["preGeneratedPlan"]).toBeUndefined();
+    expect(mockRunLlmPatchFlow).not.toHaveBeenCalled();
+    expect(ac.signal.aborted).toBe(true);
+    expect((result as any).ok).toBe(false);
   });
 
   it("ZONE_PLAN_LEGACY_AUDIT=1: runAuditPipeline called with forceAudit:true, requestPlanApproval NOT called", async () => {
@@ -462,13 +459,13 @@ describe("runOneShotInner — planDepth routing", () => {
     expect(mockRunPlanInvestigation).not.toHaveBeenCalled();
   });
 
-  it("planDepth undefined (null disk settings) defaults to quick path", async () => {
+  it("planDepth undefined (null disk settings) defaults to investigate path", async () => {
     mockLoadDiskModelSync.mockReturnValue(null);
     mockRequestPlanApproval.mockResolvedValueOnce({ planId: "p3", decision: "accept_all" });
     mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
     await runOneShotInner("refactor x", PLAN_CONFIG, "run-default-1", { mode: "plan", externalAc: AC() });
-    expect(mockGenerateExecutionPlan).toHaveBeenCalledOnce();
-    expect(mockRunPlanInvestigation).not.toHaveBeenCalled();
+    expect(mockRunPlanInvestigation).toHaveBeenCalledOnce();
+    expect(mockGenerateExecutionPlan).not.toHaveBeenCalled();
   });
 
   it("investigate: progressCallback is threaded into runPlanInvestigation", async () => {

@@ -98,7 +98,7 @@ export async function runOneShotInner(
       planCtxRelevantFiles = planCtx.relevantFilePaths;
 
       const diskSettings = loadDiskModelSync(effectiveConfig.repoPath);
-      const planDepth = diskSettings?.planDepth ?? "quick";
+      const planDepth = diskSettings?.planDepth ?? "investigate";
 
       if (planDepth === "investigate") {
         // Phase 2b: bounded read-only investigation → ExecutionPlan.
@@ -154,10 +154,11 @@ export async function runOneShotInner(
           runId,
           ts: Date.now(),
           title: "Plan generation failed",
-          text: "Plan generation failed — proceeding without a plan.",
+          text: "Plan generation failed — cannot proceed in plan mode without a plan.",
         },
       });
-      // Graceful fallback: no plan approval shown, execution continues unplanned.
+      ac.abort();
+      return { ok: false as const, reason: "plan_gen_failed" } as unknown as LlmPatchFlowResult;
     }
 
     if (process.env["ZONE_PLAN_LEGACY_AUDIT"] === "1") {
