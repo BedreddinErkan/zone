@@ -23,6 +23,7 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<AgentLoopRes
   if (trigger === "max_iterations_readonly") {
     emit.runBreakdownSummary();
     emit.cacheSummary();
+    emit.webSearchSummary();
     emit.selfValidationSummary();
     return {
       success: false,
@@ -44,6 +45,7 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<AgentLoopRes
   if (trigger === "natural_completion" && isReadOnlyMode) {
     emit.runBreakdownSummary();
     emit.cacheSummary();
+    emit.webSearchSummary();
     emit.selfValidationSummary();
     return {
       success: true,
@@ -81,6 +83,7 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<AgentLoopRes
   // Telemetry before I/O boundary
   emit.runBreakdownSummary();
   emit.cacheSummary();
+  emit.webSearchSummary();
   emit.selfValidationSummary();
   if (trigger === "natural_completion") {
     emitAgentFinalAssessment({

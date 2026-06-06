@@ -56,6 +56,7 @@ function makeEmit() {
     runBreakdownSummary: vi.fn(),
     cacheSummary: vi.fn(),
     selfValidationSummary: vi.fn(),
+    webSearchSummary: vi.fn(),
   };
 }
 
@@ -214,6 +215,40 @@ describe("finalizeRun — parity tests", () => {
       });
       const result = await finalizeRun(input);
       expect(result.discardedStaging).toBeUndefined();
+    });
+  });
+
+  describe("emit.webSearchSummary called on all terminal paths", () => {
+    it("natural_completion (readOnly): calls webSearchSummary", async () => {
+      const input = makeInput({ trigger: "natural_completion", isReadOnlyMode: true, finalText: "x" });
+      await finalizeRun(input);
+      expect((input.emit as ReturnType<typeof makeEmit>).webSearchSummary).toHaveBeenCalledOnce();
+    });
+
+    it("max_iterations_readonly: calls webSearchSummary", async () => {
+      const input = makeInput({ trigger: "max_iterations_readonly", finalText: "x" });
+      await finalizeRun(input);
+      expect((input.emit as ReturnType<typeof makeEmit>).webSearchSummary).toHaveBeenCalledOnce();
+    });
+
+    it("natural_completion (non-readOnly): calls webSearchSummary", async () => {
+      const input = makeInput({
+        trigger: "natural_completion",
+        finalText: "x [ZONE_VERIFICATION: tests_passed]",
+        toolCallLog: patchThenTestPass,
+      });
+      await finalizeRun(input);
+      expect((input.emit as ReturnType<typeof makeEmit>).webSearchSummary).toHaveBeenCalledOnce();
+    });
+
+    it("max_iterations (non-readOnly): calls webSearchSummary", async () => {
+      const input = makeInput({
+        trigger: "max_iterations",
+        finalText: "x [ZONE_VERIFICATION: tests_passed]",
+        toolCallLog: patchThenTestPass,
+      });
+      await finalizeRun(input);
+      expect((input.emit as ReturnType<typeof makeEmit>).webSearchSummary).toHaveBeenCalledOnce();
     });
   });
 

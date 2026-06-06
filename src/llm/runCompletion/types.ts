@@ -42,6 +42,7 @@ export interface FinalizeRunInput {
     runBreakdownSummary: () => void;
     cacheSummary: () => void;
     selfValidationSummary: () => void;
+    webSearchSummary: () => void;
   };
   onProgress?: (msg: string) => void;
   runId?: string;
