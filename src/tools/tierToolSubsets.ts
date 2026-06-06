@@ -30,6 +30,11 @@ export const MEDIUM_TIER_TOOLS: ReadonlySet<string> = new Set([
  * Callers must apply the subagent guard (skip when isSubagentLoop=true) so that
  * worker/explore subagents inherit the parent's explicit capabilityFilter rather
  * than a tier-derived subset.
+ *
+ * Task (subagent dispatch) is intentionally absent from simple/medium — complex-tier-only
+ * via the full toolset (undefined return). See AUDIT-subagent-adoption.md §B.#1 for the
+ * cost rationale: a fresh-context worker re-reads files and returns a lossy summary,
+ * making dispatch cost-negative on typical single/medium tasks.
  */
 export function tierToolFilter(tier: TaskTier): CapabilityFilter | undefined {
   if (tier === "simple") return { allowToolNames: SIMPLE_TIER_TOOLS };

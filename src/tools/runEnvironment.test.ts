@@ -48,6 +48,42 @@ describe("validateRunEnvironment (D7)", () => {
     expect(r.issue).toBeUndefined();
   });
 
+  describe("installer exemption (DF-15)", () => {
+    it("allows installer commands even when node_modules is absent", () => {
+      // tempDir has no node_modules
+      for (const cmd of [
+        "npm install",
+        "npm install lodash",
+        "npm i",
+        "npm i lodash",
+        "npm ci",
+        "yarn",
+        "yarn install",
+        "yarn add lodash",
+        "pnpm install",
+        "pnpm i",
+        "pnpm add lodash",
+      ]) {
+        const r = validateRunEnvironment(tempDir, cmd);
+        expect(r.valid, `expected valid:true for "${cmd}"`).toBe(true);
+      }
+    });
+
+    it("still blocks build/test commands when node_modules absent (D7 preserved)", () => {
+      for (const cmd of [
+        "npm run build",
+        "npm test",
+        "vitest run",
+        "tsc --noEmit",
+        "npx vitest run",
+      ]) {
+        const r = validateRunEnvironment(tempDir, cmd);
+        expect(r.valid, `expected valid:false for "${cmd}"`).toBe(false);
+        expect(r.hint, `expected hint for "${cmd}"`).toMatch(/install/i);
+      }
+    });
+  });
+
   it("returns valid:true with stale warning when lockfile is newer than installed modules", () => {
     // node_modules exists but package-lock.json was updated after last install
     const nmPath = path.join(tempDir, "node_modules");

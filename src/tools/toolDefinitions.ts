@@ -7,6 +7,13 @@ export const READ_ONLY_TOOLS = [
   "find_references",
 ] as const;
 
+/** Tool set for plan-mode investigation: read-only tools + run_command for build/test/repro.
+ *  Excludes apply_patch, write_file, and run_command_background. */
+export const INVESTIGATION_TOOLS = [
+  ...READ_ONLY_TOOLS,
+  "run_command",
+] as const;
+
 export const CHAT_TOOLS = READ_ONLY_TOOLS.filter(
   (toolName) => toolName === "read_file" || toolName === "list_files"
 );
@@ -217,8 +224,13 @@ required: ["id", "content", "description", "status"],
             description:
               "Glob pattern (e.g. **/*.ts); pass JSON null for default **/*.",
           },
+          include_ignored: {
+            type: ["boolean", "null"],
+            description:
+              "true = also list build/VCS dirs (node_modules, .next, dist, …) and .gitignore'd paths. Default (null/false) excludes them.",
+          },
         },
-        required: ["dirPath", "pattern"],
+        required: ["dirPath", "pattern", "include_ignored"],
         additionalProperties: false,
       } as Record<string, unknown>,
     },
@@ -392,6 +404,11 @@ required: ["id", "content", "description", "status"],
           glob: {
             type: ["string", "null"],
             description: "Alias for fileGlob.",
+          },
+          include_ignored: {
+            type: ["boolean", "null"],
+            description:
+              "true = also search build/VCS dirs (node_modules, .next, dist, …) and .gitignore'd paths. Default excludes them.",
           },
         },
         required: ["pattern", "fileGlob"],

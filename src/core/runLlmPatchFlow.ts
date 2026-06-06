@@ -128,6 +128,7 @@ import {
   requestRevisionApproval,
   type RevisionDecision,
 } from "../llm/revisionApprovals.js";
+import { buildToolCallPatch } from "./toolCallPatch.js";
 
 /**
  * F1.4 C3: filter for the runLlmPatchFlow onProgress sink. toolExecutor
@@ -4587,6 +4588,10 @@ export async function runLlmPatchFlow(input: {
     toolCallCount: number;
     costUsd: number;
   };
+  summaryFormat?: "compact" | "detailed";
+  /** Phase 1 session memory: prior task's FINAL SUMMARY loaded by TUI before dispatch. */
+  priorSessionSummary?: string;
+  webSearchEnabled?: boolean;
 }): Promise<LlmPatchFlowResult> {
   attachRunIdentity({ userId: input.userId, runId: input.runId });
   // Phase H.7: outer-scope flag survives past the inner block where `loop`
@@ -4850,6 +4855,7 @@ const initializeTodosFromPlan = (): void => {
     !input.repoPath.startsWith("/hosted") &&
     !input.repoPath.startsWith("/tmp/zone-hosted");
 
+  let scanRepoThrew = false;
   if (repoPathLooksLocal) {
     try {
       const scanned = await scanRepo(input.repoPath);
@@ -4857,7 +4863,9 @@ const initializeTodosFromPlan = (): void => {
         allFiles = scanned;
         fileSource = "scanRepo";
       }
+      // scanned.length === 0 is valid — accessible but empty dir; proceed without context
     } catch {
+      scanRepoThrew = true;
       // Fall through — hostedAvailableFiles may still provide a usable list.
     }
   }
@@ -4875,11 +4883,14 @@ const initializeTodosFromPlan = (): void => {
       finalCount: allFiles.length,
       source: fileSource,
       isHostedEnv: isHostedEnvironment(),
+      scanRepoThrew,
     })
   );
 
   perf.mark("repo scan ready");
-  if (!input.hostedContext && allFiles.length === 0 && !isHostedEnvironment()) {
+  // Block only when the directory is truly unreadable (scanRepo threw). An accessible
+  // empty directory (scanRepo succeeded with 0 files) is valid — agent can create files.
+  if (!input.hostedContext && scanRepoThrew && allFiles.length === 0 && !isHostedEnvironment()) {
     debugLog("[zone-flow-early-return]", JSON.stringify({ reason: "repo_not_accessible", repoPath: input.repoPath, fileSource }));
     perf.finish("repo access blocked");
     notifyProgress("Ready", {
@@ -5132,7 +5143,10 @@ const initializeTodosFromPlan = (): void => {
   }
   // J.5.1: filesystem fallback — runs when Supabase didn't return a
   // summary (no env, empty thread row, or the prior run was self-host).
-  if (!priorRunSummary && threadIdForLoad && typeof input.repoPath === "string") {
+  // Skip when priorSessionSummary is supplied: the TUI already loaded the window
+  // from the same store with neutral framing; the rollback-framed fallback would
+  // double-inject if conversationId is ever threaded to sessionId in future.
+  if (!priorRunSummary && !input.priorSessionSummary && threadIdForLoad && typeof input.repoPath === "string") {
     try {
       const fsEvents = readFsConversationEvents({
         repoPath: input.repoPath,
@@ -5783,11 +5797,12 @@ const initializeTodosFromPlan = (): void => {
               return "";
           }
         })();
+        const patchForEvent = buildToolCallPatch(name, args, beforeByFile.get(snapPath));
         emitStructuredProgress({
           type: "tool_call",
           title: `[tool] ${name}${cmd ? `: ${cmd}` : ""}`.slice(0, 240),
           status: "active",
-          ...(name === "apply_patch" && args.patch ? { patch: String(args.patch) } : {}),
+          ...(patchForEvent ? { patch: patchForEvent } : {}),
         });
 
         // Agent loop write_file: emit a fallback streaming patch preview so the chat livecode block shows content.
@@ -5948,6 +5963,9 @@ const initializeTodosFromPlan = (): void => {
       conversationId: typeof input.conversationId === "string" ? input.conversationId : undefined,
       // Phase X.0.1: forward audit findings so execute agent skips re-investigation.
       auditFindings: input.auditFindings,
+      summaryFormat: input.summaryFormat,
+      priorSessionSummary: input.priorSessionSummary,
+      webSearchEnabled: input.webSearchEnabled,
       ...agentLoopCallbacks,
       ...(pipelineCfg && {
         maxIterationsOverride: pipelineCfg.iterCap,

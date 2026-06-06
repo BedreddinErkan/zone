@@ -35,6 +35,11 @@ export function validateRunEnvironment(
     return { valid: true };
   }
 
+  // Installer commands create node_modules — exempt them from the presence check.
+  const INSTALL_COMMAND_RE =
+    /\bnpm\s+(install|i\b|ci)\b|\byarn(\s+(install|add)\b)?(\s|$)|\bpnpm\s+(install|i\b|add)\b/;
+  if (INSTALL_COMMAND_RE.test(command)) return { valid: true };
+
   const nmPath = path.join(dir, "node_modules");
   if (!fs.existsSync(nmPath)) {
     const installCmd = detectInstallCommand(dir);

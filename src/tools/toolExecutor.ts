@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import fg from "fast-glob";
+import { buildFastGlobIgnore, ripgrepDenylistGlob } from "./searchIgnore.js";
 import { debugLog, errorLog, log } from "../utils/logger.js";
 import { writeCacheLog } from "../utils/commandCacheLog.js";
 import {
@@ -1528,15 +1529,18 @@ export async function executeTool(
         (typeof patternRaw === "string" && patternRaw.trim() === "")
           ? "**/*"
           : String(patternRaw);
+      const includeIgnored = args.include_ignored === true;
       onProgress?.(`[tool] Listing: ${dirPath}`);
       const absDir = path.join(repoPath, dirPath);
       // Not staging-aware: fast-glob reads disk; staged new files are not visible here.
+      // By default excludes VCS/build dirs (.next, node_modules, dist, …) and the
+      // project's .gitignore'd paths; include_ignored=true reaches into them.
       const entries = await fg(pattern, {
         cwd: absDir,
-        dot: false,
+        dot: includeIgnored,
         onlyFiles: true,
         unique: true,
-        ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**"],
+        ignore: buildFastGlobIgnore(repoPath, includeIgnored),
       });
       const limited = entries.slice(0, 100);
       const output = limited.length ? limited.join("\n") : "(no files)";
@@ -2566,7 +2570,13 @@ export async function executeTool(
       }
 
       fs.mkdirSync(path.dirname(abs), { recursive: true });
-      if (!stagedWrite(input?.stagingFiles, abs, content)) {
+      if (!fileExists) {
+        // New file: write directly to disk — immediately visible to list_files and
+        // survives any abort. No prior content to protect; staging adds only loss-risk.
+        fs.writeFileSync(abs, content, "utf8");
+      } else if (!stagedWrite(input?.stagingFiles, abs, content)) {
+        // Existing file: stage for atomic/validated/rollback-able apply.
+        // Fallback to direct write only when no staging map is present.
         fs.writeFileSync(abs, content, "utf8");
       }
 
@@ -2664,7 +2674,9 @@ export async function executeTool(
 
       return {
         success: true,
-        output: `File written: ${filePath} (${content.length} chars)`,
+        output: fileExists
+          ? `Staged edit to ${filePath} (${content.length} chars) — applied on run completion`
+          : `Created ${filePath} (${content.length} chars)`,
       };
     }
 
@@ -2689,6 +2701,10 @@ export async function executeTool(
           ? null
           : String(rawGlob);
 
+      // Escape hatch: by default search excludes VCS/build dirs and .gitignore'd
+      // paths; include_ignored=true reaches into them.
+      const includeIgnored = args.include_ignored === true;
+
       onProgress?.(`[tool] Searching: ${pattern}`);
 
       const rgPath = await detectRipgrep();
@@ -2699,6 +2715,14 @@ export async function executeTool(
         if (caseInsensitive) rgArgs.push("--ignore-case");
         if (multiline) rgArgs.push("--multiline");
         if (fileGlob) rgArgs.push("--glob", fileGlob);
+        // ripgrep already honours .gitignore + skips hidden dirs by default.
+        // Add the hard denylist (last glob wins) so build output is excluded even
+        // when it isn't .gitignore'd; the escape hatch disables both layers.
+        if (includeIgnored) {
+          rgArgs.push("--no-ignore", "--hidden");
+        } else {
+          rgArgs.push("--glob", ripgrepDenylistGlob());
+        }
         rgArgs.push("--no-heading", "--color=never");
 
         if (outputMode === "files_with_matches") {
@@ -2776,10 +2800,10 @@ export async function executeTool(
       const globPattern = fileGlob ?? "**/*";
       const files = await fg(globPattern, {
         cwd: repoPath,
-        dot: false,
+        dot: includeIgnored,
         onlyFiles: true,
         unique: true,
-        ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**"],
+        ignore: buildFastGlobIgnore(repoPath, includeIgnored),
       });
 
       if (outputMode === "files_with_matches") {
@@ -2884,7 +2908,7 @@ export async function executeTool(
         dot: false,
         onlyFiles: true,
         unique: true,
-        ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**"],
+        ignore: buildFastGlobIgnore(repoPath, false),
       });
 
       const graph = await buildDependencyGraph(repoPath, allFiles, input?.stagingFiles);
