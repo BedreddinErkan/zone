@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { type ProviderName, totalCost } from "./pricing.js";
+import { type ProviderName, totalCost, webSearchFee } from "./pricing.js";
 
 export interface UsageRecord {
   timestamp: string;
@@ -16,6 +16,8 @@ export interface UsageRecord {
   cache_write: number;
   cache_read: number;
   output: number;
+  /** Flat per-search count from Anthropic usage.server_tool_use.web_search_requests. */
+  webSearchRequests?: number;
   est_cost_usd: number;
   /** K.3.C3: total wall-clock duration of the run in ms. Set only on the terminal run-summary record. */
   latencyMs?: number;
@@ -62,7 +64,7 @@ export async function recordExecution(
       cache_write: rec.cache_write,
       cache_read: rec.cache_read,
       output: rec.output,
-    })
+    }) + webSearchFee(rec.webSearchRequests ?? 0)
   );
   const full: UsageRecord = {
     ...rec,

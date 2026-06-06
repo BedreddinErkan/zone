@@ -76,3 +76,10 @@ export function totalCost(
     0
   );
 }
+
+/** Flat per-search fee charged by Anthropic (not model-specific). $10/1000 searches. */
+export const WEB_SEARCH_FEE_USD = 0.01;
+
+export function webSearchFee(requests: number): number {
+  return requests * WEB_SEARCH_FEE_USD;
+}

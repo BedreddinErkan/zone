@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe("subagent staging safety", () => {
-  it("records worker writes in the parent stagingFiles map without flushing", async () => {
+  it("new file written directly to disk, not buffered in staging map (DF-17a)", async () => {
     const parentStaging = new Map<string, string>();
     const result = await executeTool(
       "write_file",
@@ -35,8 +35,10 @@ describe("subagent staging safety", () => {
 
     const abs = path.join(repoPath, "src/worker-output.ts");
     expect(result.success).toBe(true);
-    expect(parentStaging.get(abs)).toBe("export const workerOutput = true;\n");
-    expect(fs.existsSync(abs)).toBe(false);
+    // DF-17a: new files go directly to disk, not into the staging map
+    expect(parentStaging.has(abs)).toBe(false);
+    expect(fs.existsSync(abs)).toBe(true);
+    expect(fs.readFileSync(abs, "utf8")).toBe("export const workerOutput = true;\n");
   });
 
   it("blocks Task dispatch when the parent has staged writes", async () => {
@@ -81,7 +83,7 @@ describe("subagent staging safety", () => {
     expect(fs.readFileSync(abs, "utf8")).toBe("export const flushedByParent = true;\n");
   });
 
-  it("keeps worker write_file on staging only until parent flush", async () => {
+  it("new file is on disk immediately, not deferred until parent flush (DF-17a)", async () => {
     const parentStaging = new Map<string, string>();
     const abs = path.join(repoPath, "src/deferred.ts");
 
@@ -99,8 +101,9 @@ describe("subagent staging safety", () => {
       }
     );
 
-    expect(parentStaging.has(abs)).toBe(true);
-    expect(fs.existsSync(abs)).toBe(false);
+    // DF-17a: new files land on disk immediately, not in the staging map
+    expect(parentStaging.has(abs)).toBe(false);
+    expect(fs.existsSync(abs)).toBe(true);
   });
 });
 

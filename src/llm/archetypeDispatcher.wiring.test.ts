@@ -102,8 +102,8 @@ describe("L5.1b-1 excludeToolNames wiring (via capabilityFilter)", () => {
     expect(toolNames).not.toContain("suggest_scope_change");
   });
 
-  it("preserves Task and suggest_scope_change in legacy mode (no capabilityFilter)", async () => {
-    await runAgentLoop({ task: "add a helper function", repoPath });
+  it("preserves Task and suggest_scope_change when forceTier=complex (no capabilityFilter)", async () => {
+    await runAgentLoop({ task: "add a helper function", repoPath, forceTier: "complex" });
     const toolNames = (
       mocks.createChatCompletion.mock.calls[0][0].tools as Array<{
         function: { name: string };
@@ -126,6 +126,16 @@ describe("L5.1b-1 excludeToolNames wiring (via capabilityFilter)", () => {
     ).map((t) => t.function.name);
     expect(toolNames).toContain("read_file");
     expect(toolNames).toContain("apply_patch");
+    expect(toolNames).not.toContain("Task");
+  });
+
+  it("Task absent on unclassified path (no taskClassification → medium tier, maxSubagentCalls=0)", async () => {
+    await runAgentLoop({ task: "add a helper function", repoPath });
+    const toolNames = (
+      mocks.createChatCompletion.mock.calls[0][0].tools as Array<{
+        function: { name: string };
+      }>
+    ).map((t) => t.function.name);
     expect(toolNames).not.toContain("Task");
   });
 });

@@ -126,6 +126,31 @@ describe("verifyAndFinalize — VerifyOutcome parity", () => {
     }
   });
 
+  it('returns { kind: "applied" } when a fail carries zero counted errors (tsc banner)', async () => {
+    // Finding 2: tsc printed its usage banner (no resolvable project) and exited
+    // non-zero, but post=0/base=0/regressed=false. This must NOT become
+    // "applied_with_warnings — new errors detected".
+    mockFinalizeStaging.mockResolvedValue({
+      flushed: true,
+      filesFlushed: 1,
+      flushFailures: 0,
+      verification: {
+        status: "fail" as const,
+        label: "tsc",
+        durationMs: 90,
+        errorPreview: "Version 5.9.3\ntsc: The TypeScript Compiler\nCOMMON COMMANDS",
+        baselineErrorCount: 0,
+        postErrorCount: 0,
+        regressed: false,
+      },
+    });
+    const outcome = await verifyAndFinalize(makeInput({ verifyMode: "warn" }));
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind === "applied") {
+      expect(outcome.filesFlushed).toBe(1);
+    }
+  });
+
   it('returns { kind: "pre_existing_errors" } when baseline > 0 and post <= baseline', async () => {
     mockFinalizeStaging.mockResolvedValue({
       flushed: true,

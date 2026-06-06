@@ -121,6 +121,7 @@ describe("usageTracker subagent telemetry compatibility", () => {
       cache_write: 0,
       cache_read: 700,
       output: 25,
+      webSearchRequests: 0,
     });
 
     await recordExecution(
@@ -135,5 +136,53 @@ describe("usageTracker subagent telemetry compatibility", () => {
     );
 
     expect(readRecords("user-1", { storageDir })[0]?.cache_read).toBe(700);
+  });
+});
+
+describe("web search cost capture", () => {
+  it("extractUsage reads web_search_requests from flat usage field", () => {
+    const usage = extractUsage({ input_tokens: 100, output_tokens: 10, web_search_requests: 3 });
+    expect(usage?.webSearchRequests).toBe(3);
+  });
+
+  it("extractUsage defaults webSearchRequests to 0 when field absent", () => {
+    const usage = extractUsage({ input_tokens: 100, output_tokens: 10 });
+    expect(usage?.webSearchRequests).toBe(0);
+  });
+
+  it("recordExecution includes web search flat fee in est_cost_usd", async () => {
+    const rec = await recordExecution(
+      {
+        userId: "u",
+        runId: "r",
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        input_uncached: 0,
+        cache_write: 0,
+        cache_read: 0,
+        output: 0,
+        webSearchRequests: 2,
+      },
+      { storageDir }
+    );
+    expect(rec.est_cost_usd).toBeCloseTo(0.02, 6); // 2 × $0.01
+  });
+
+  it("recordExecution with zero web searches has no flat fee", async () => {
+    const rec = await recordExecution(
+      {
+        userId: "u2",
+        runId: "r2",
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        input_uncached: 0,
+        cache_write: 0,
+        cache_read: 0,
+        output: 0,
+        webSearchRequests: 0,
+      },
+      { storageDir }
+    );
+    expect(rec.est_cost_usd).toBe(0);
   });
 });

@@ -1,7 +1,9 @@
 import fs from "node:fs";
+import path from "node:path";
 import { debugLog, errorLog } from "../../utils/logger.js";
 import {
   selectVerificationCommand,
+  resolveAllTsconfigProjects,
   runVerificationCommand,
   countVerificationErrors,
   execAsync_verify,
@@ -36,7 +38,25 @@ export async function runStagingVerification(input: {
   if (input.stagingFiles.size === 0) {
     return { status: "skipped", reason: "no_staged_files" };
   }
-  const choice = selectVerificationCommand(input.framework);
+
+  // Multi-package TypeScript: when staged files span packages with distinct
+  // tsconfigs, verify each package against its own tsconfig and aggregate.
+  if (input.framework?.language === "typescript" && input.repoPath) {
+    const tsconfigs = resolveAllTsconfigProjects(input.repoPath, input.stagingFiles);
+    if (tsconfigs.length > 1) {
+      return runMultiTsconfigVerification({
+        tsconfigs,
+        repoPath: input.repoPath,
+        stagingFiles: input.stagingFiles,
+        withStagingTempFlush: input.withStagingTempFlush,
+      });
+    }
+  }
+
+  const choice = selectVerificationCommand(input.framework, {
+    repoPath: input.repoPath,
+    stagingFiles: input.stagingFiles,
+  });
   if (!choice) {
     return { status: "skipped", reason: "no_command_for_framework" };
   }
@@ -106,6 +126,112 @@ export async function runStagingVerification(input: {
     baselineErrorCount,
     postErrorCount,
     regressed,
+  };
+}
+
+async function runMultiTsconfigVerification(input: {
+  tsconfigs: string[];
+  repoPath: string;
+  stagingFiles: Map<string, string>;
+  withStagingTempFlush: <T>(staging: Map<string, string>, body: () => Promise<T>) => Promise<T>;
+}): Promise<
+  | { status: "pass"; label: string; durationMs: number }
+  | { status: "fail"; label: string; durationMs: number; errorPreview: string; baselineErrorCount: number; postErrorCount: number; regressed: boolean }
+> {
+  const start = Date.now();
+  const failResults: Array<{ stagedPreview: string; postErrorCount: number; baselineErrorCount: number; regressed: boolean }> = [];
+
+  for (const tsconfig of input.tsconfigs) {
+    const rel = (path.relative(input.repoPath, tsconfig) || "tsconfig.json").replace(/\\/g, "/");
+    const projectArg = /[\s'"]/.test(rel) ? `"${rel}"` : rel;
+    const command = `npx tsc --noEmit -p ${projectArg}`;
+    const choice = { command, timeoutMs: 60000, label: "tsc" as const };
+
+    let stagedErr: unknown = null;
+    let stagedExitCode = 0;
+    try {
+      await input.withStagingTempFlush(input.stagingFiles, async () => {
+        return await execAsync_verify(command, {
+          cwd: input.repoPath,
+          timeout: choice.timeoutMs,
+          windowsHide: true,
+          maxBuffer: 10 * 1024 * 1024,
+          env: sanitizeVerificationEnv(),
+        });
+      });
+    } catch (err) {
+      stagedErr = err;
+      const code = Number((err as { code?: unknown }).code);
+      stagedExitCode = Number.isFinite(code) ? code : 1;
+    }
+
+    if (stagedErr === null) {
+      console.log(`[zone-verify] cmd="${command.slice(0, 80)}" cwd="${input.repoPath}" exitCode=0 stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`);
+      continue;
+    }
+
+    console.log(`[zone-verify] cmd="${command.slice(0, 80)}" cwd="${input.repoPath}" exitCode=${stagedExitCode} stripped_env_keys=${JSON.stringify(strippedEnvKeys())}`);
+    const stagedStdout = String((stagedErr as { stdout?: unknown }).stdout ?? "");
+    const stagedStderr = String((stagedErr as { stderr?: unknown }).stderr ?? "");
+    const stagedCombined = (stagedStdout + "\n" + stagedStderr).trim();
+    const stagedPreview =
+      stagedCombined.split("\n").slice(0, 30).join("\n").slice(0, 2000) ||
+      String((stagedErr as Error).message ?? stagedErr);
+    const postErrorCount = countVerificationErrors("tsc", stagedCombined);
+
+    // Baseline comparison: run the same command against disk (no staged files) to
+    // distinguish regressions from pre-existing errors. Inlined via execAsync_verify
+    // so this call participates in the same mock scope as the staged call above.
+    let baselineErr: unknown = null;
+    try {
+      await execAsync_verify(command, {
+        cwd: input.repoPath,
+        timeout: 60000,
+        windowsHide: true,
+        maxBuffer: 10 * 1024 * 1024,
+        env: sanitizeVerificationEnv(),
+      });
+    } catch (err) {
+      baselineErr = err;
+    }
+    const baselineErrorCount = (() => {
+      if (baselineErr === null) return 0;
+      const bOut = String((baselineErr as { stdout?: unknown }).stdout ?? "");
+      const bErr = String((baselineErr as { stderr?: unknown }).stderr ?? "");
+      return countVerificationErrors("tsc", (bOut + "\n" + bErr).trim());
+    })();
+    const regressed = postErrorCount > baselineErrorCount;
+
+    debugLog("[zone-verify-baseline]", JSON.stringify({
+      label: "tsc",
+      tsconfig: rel,
+      stagedExitCode,
+      baselineStatus: baselineErr === null ? "pass" : "fail",
+      baselineErrorCount,
+      postErrorCount,
+      regressed,
+    }));
+
+    failResults.push({ stagedPreview, postErrorCount, baselineErrorCount, regressed });
+  }
+
+  if (failResults.length === 0) {
+    return { status: "pass", label: "tsc", durationMs: Date.now() - start };
+  }
+
+  const combinedPreview = failResults.map((r) => r.stagedPreview).join("\n---\n");
+  const totalPost = failResults.reduce((s, r) => s + r.postErrorCount, 0);
+  const totalBaseline = failResults.reduce((s, r) => s + r.baselineErrorCount, 0);
+  const anyRegressed = failResults.some((r) => r.regressed);
+
+  return {
+    status: "fail",
+    label: "tsc",
+    durationMs: Date.now() - start,
+    errorPreview: combinedPreview,
+    postErrorCount: totalPost,
+    baselineErrorCount: totalBaseline,
+    regressed: anyRegressed,
   };
 }
 

@@ -65,6 +65,13 @@ export async function verifyAndFinalize(input: VerifyAndFinalizeInput): Promise<
     };
   }
 
+  // A non-zero exit with zero counted diagnostics is not a real regression
+  // (e.g. tsc emitted its usage banner because no tsconfig/inputs resolved in a
+  // monorepo). Never surface "new errors detected" when the count is 0.
+  if ((vr.postErrorCount ?? 0) === 0) {
+    return { kind: "applied", verification: detail, filesFlushed: finalizeResult.filesFlushed };
+  }
+
   const errors = parseTscErrorPreview(vr.errorPreview ?? "");
 
   if (input.verifyMode === "rollback") {

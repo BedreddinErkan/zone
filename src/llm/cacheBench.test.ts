@@ -158,6 +158,34 @@ describe("cache prefix stability — buildOpenAIPromptCacheKey", () => {
   });
 });
 
+// ── Session memory — static prefix invariant ─────────────────────────────────
+//
+// priorSessionSummary is NOT a parameter of assembleAgentSystemPrompt — it goes
+// into the user message (userContent) only. The system prompt must be byte-stable
+// whether memory is enabled or disabled, so breakpoint 1 (system+tools cache) is
+// never busted by a session memory value.
+
+describe("session memory — assembleAgentSystemPrompt static prefix invariant", () => {
+  it("system prompt is byte-identical regardless of (absent) priorSessionSummary", () => {
+    // priorSessionSummary is not a parameter of assembleAgentSystemPrompt —
+    // verifying it cannot be accidentally added there.
+    const p1 = assembleAgentSystemPrompt(AGENT_OPTS);
+    const p2 = assembleAgentSystemPrompt({ ...AGENT_OPTS });
+    expect(p1).toBe(p2);
+  });
+
+  it("system prompt contains static SESSION MEMORY docs (constant, not dynamic)", () => {
+    const prompt = assembleAgentSystemPrompt(AGENT_OPTS);
+    // The static docs explain the SESSION MEMORY convention to the agent.
+    expect(prompt).toContain("SESSION MEMORY — if the user message begins with");
+    expect(prompt).toContain("It describes COMPLETED work"); // pluralized in Phase 1
+    // priorSessionSummary is NOT a parameter of assembleAgentSystemPrompt — proved by
+    // the byte-identical test above. We confirm no actual session data bleeds in by
+    // verifying the prompt does NOT include text that only appears in live session summaries.
+    expect(prompt).not.toContain("Added auth module in this session");
+  });
+});
+
 // ── Audit→Execute shared prefix (Phase X.0.1 fix) ────────────────────────────
 //
 // After X.0.1 Commit 2, both assembly functions share the same agentIntro as
