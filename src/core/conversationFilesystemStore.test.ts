@@ -238,7 +238,8 @@ describe("Phase J.5.1 — runLogging wires filesystem write before Supabase shor
     // Import wired in.
     expect(src).toMatch(/from\s+["']\.\/conversationFilesystemStore\.js["']/);
     // FS fallback runs when priorRunSummary still empty after Supabase try.
-    expect(src).toMatch(/if \(!priorRunSummary && threadIdForLoad/);
+    // Phase 1: !input.priorSessionSummary guard added to prevent double-injection.
+    expect(src).toMatch(/if \(!priorRunSummary && !input\.priorSessionSummary && threadIdForLoad/);
     // Telemetry carries the source + count.
     expect(src).toContain("persistenceSource");
     expect(src).toContain("historyEventCount");
