@@ -57,6 +57,23 @@ describe('UI.6.1: patch prompt FINAL SUMMARY block', () => {
   });
 });
 
+describe('WEB_SEARCH_DIRECTIVE — unconditional in both prompt modes', () => {
+  it('is present in patch mode (default archetype)', () => {
+    const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
+    expect(prompt).toContain('WEB SEARCH:');
+  });
+
+  it('is present in Q&A/listing mode (archetype: question)', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question' });
+    expect(prompt).toContain('WEB SEARCH:');
+  });
+
+  it('is present in investigation mode', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'investigation' });
+    expect(prompt).toContain('WEB SEARCH:');
+  });
+});
+
 describe('D1: VERIFIER SHELL DISCIPLINE block in patch prompt', () => {
   it('contains VERIFIER SHELL DISCIPLINE header, PRIORITY RULE, and both few-shot examples', () => {
     const prompt = assembleAgentSystemPrompt(PATCH_INPUT);

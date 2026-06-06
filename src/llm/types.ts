@@ -31,6 +31,8 @@ export interface LLMRequestOptions {
   onRetryEvent?: (event: string, payload: Record<string, unknown>) => void;
   /** TUI.7.G: user-selected reasoning effort level; applied by each adapter when the model supports it. */
   effort?: EffortLevel;
+  /** When true (Anthropic only), the provider runs a server-side web search during generation. Max 3 searches per turn. */
+  webSearch?: boolean;
 }
 
 export interface LLMClient {

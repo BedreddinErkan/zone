@@ -153,6 +153,21 @@ describe("Subagent budget gate — toolset exclusion and log timing (Q.3)", () =
     expect(capturedTools!.some((t) => t.function.name === "Task")).toBe(true);
   });
 
+  it("T.4: Task tool absent from LLM toolset when forceTier=medium", async () => {
+    let capturedTools: Array<{ function: { name: string } }> | undefined;
+    mocks.createChatCompletion.mockImplementation(
+      async (params: { tools?: Array<{ function: { name: string } }> }) => {
+        capturedTools = params.tools;
+        return makeDoneResponse("[ZONE_VERIFICATION: no_verification_attempted]");
+      }
+    );
+
+    await runAgentLoop({ task: "add a helper", repoPath, forceTier: "medium" });
+
+    expect(capturedTools).toBeDefined();
+    expect(capturedTools!.some((t) => t.function.name === "Task")).toBe(false);
+  });
+
   it("T.3: [zone-subagent-dispatched] not logged when executeTool blocks Task (success:false)", async () => {
     let callCount = 0;
     mocks.createChatCompletion.mockImplementation(async () => {

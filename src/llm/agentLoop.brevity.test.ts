@@ -91,3 +91,41 @@ describe('CE.2.1.d: EFFICIENCY CONTRACT block', () => {
     expect(prompt).not.toContain('EFFICIENCY CONTRACT');
   });
 });
+
+describe('Phase 1: GIT CONTEXT directive scoping', () => {
+  it('patch mode prompt contains "GIT CONTEXT"', () => {
+    const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
+    expect(prompt).toContain('GIT CONTEXT');
+  });
+
+  it('Q&A archetype does NOT contain "GIT CONTEXT" (patch-mode only)', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question' });
+    expect(prompt).not.toContain('GIT CONTEXT');
+  });
+
+  it('investigation archetype does NOT contain "GIT CONTEXT"', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'investigation' });
+    expect(prompt).not.toContain('GIT CONTEXT');
+  });
+});
+
+describe('summaryFormat preset selection', () => {
+  it('compact summaryFormat (explicit) produces the 900-char-cap block + tag present', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, summaryFormat: 'compact' });
+    expect(prompt).toContain('hard cap 900 characters');
+    expect(prompt).toContain('[ZONE_VERIFICATION: tests_passed]');
+  });
+
+  it('detailed summaryFormat produces the 2500-char block + tag unchanged', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, summaryFormat: 'detailed' });
+    expect(prompt).toContain('hard cap 2500 characters');
+    expect(prompt).toContain('[ZONE_VERIFICATION: tests_passed]');
+    expect(prompt).not.toContain('hard cap 900 characters');
+  });
+
+  it('undefined summaryFormat defaults to compact behavior', () => {
+    const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
+    expect(prompt).toContain('hard cap 900 characters');
+    expect(prompt).toContain('[ZONE_VERIFICATION: tests_passed]');
+  });
+});

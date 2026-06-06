@@ -170,6 +170,77 @@ describe("Phase E — softIterWarn ceiling (softIterWarn * 3)", () => {
     expect(result.toolCallLog.length).toBeLessThanOrEqual(22);
   });
 
+  it("maxIterationsOverride is a true ceiling: tier default cannot expand it above the override", async () => {
+    // Reproduces the Phase 2b cap-enforcement bug:
+    // medium tier → softIterWarn=25 → maxIterationsForRun=75 overrode maxIterationsOverride=6.
+    let callCount = 0;
+    mocks.createChatCompletion.mockImplementation(async () => {
+      callCount += 1;
+      // Never return done — the override must be the actual terminator
+      return makeReadFileCall(`tc-${callCount}`, `src/file_${callCount}.ts`);
+    });
+
+    const result = await runAgentLoop({
+      task: "investigate codebase",
+      repoPath,
+      mode: "investigation",
+      maxIterationsOverride: 6,  // must cap at 6, not be overridden to 75
+      // no taskClassification → defaults to medium (softIterWarn=25, tier ceiling=75)
+    });
+
+    // Should terminate due to max_iterations at the override cap, not token budget
+    // Allow natural_completion only if the agent stops before 6 iters
+    expect(result.iterCount).toBeLessThanOrEqual(6);
+    expect(result.toolCallLog.length).toBeLessThanOrEqual(7); // 6 iters of 1 tool each + wrapup
+  });
+
+  it("normal call (no maxIterationsOverride) keeps the full tier default — budget is NOT collapsed", async () => {
+    // Guards the documented regression: a normal execution run (no override) must
+    // iterate up to the tier ceiling, never zero. If the budget collapsed, the loop
+    // body never runs → 0 LLM calls, 0 tool calls, $0.
+    let callCount = 0;
+    mocks.createChatCompletion.mockImplementation(async () => {
+      callCount += 1;
+      if (callCount <= 10) return makeReadFileCall(`tc-${callCount}`, `src/file_${callCount}.ts`);
+      return makeDoneResponse("[ZONE_VERIFICATION: tests_skipped_no_infra] Done.");
+    });
+
+    const result = await runAgentLoop({
+      task: "do the work",
+      repoPath,
+      // no maxIterationsOverride → tier default (softIterWarn * 3) must pass through
+      taskClassification: makeClassification("simple"),
+    });
+
+    // It iterated well past zero (10 tool iters + 1 done), proving the tier budget stood.
+    expect(result.toolCallLog.length).toBeGreaterThanOrEqual(10);
+    expect(result.terminationReason).toBe("natural_completion");
+  });
+
+  it("non-positive maxIterationsOverride does NOT collapse the loop to zero iterations", async () => {
+    // Hardening for the exact feared failure mode: a 0/negative override (a caller/config
+    // bug — no archetype emits iterCap <= 0) must not silently disable the loop, which
+    // would end the run with NO llm call, NO edits and $0. The tier default must stand.
+    // Without the `> 0` guard in agentLoop.ts this returns 0 tool calls (loop never runs).
+    let callCount = 0;
+    mocks.createChatCompletion.mockImplementation(async () => {
+      callCount += 1;
+      if (callCount <= 5) return makeReadFileCall(`tc-${callCount}`, `src/file_${callCount}.ts`);
+      return makeDoneResponse("[ZONE_VERIFICATION: tests_skipped_no_infra] Done.");
+    });
+
+    const result = await runAgentLoop({
+      task: "do the work",
+      repoPath,
+      maxIterationsOverride: 0,            // pathological — must NOT zero the budget
+      taskClassification: makeClassification("simple"),
+    });
+
+    expect(result.iterCount).toBeGreaterThanOrEqual(5);
+    expect(result.toolCallLog.length).toBeGreaterThanOrEqual(5);
+    expect(result.terminationReason).toBe("natural_completion");
+  });
+
   it("subagent loop (no tier limits) uses the plan-computed budget directly", async () => {
     let callCount = 0;
     mocks.createChatCompletion.mockImplementation(async () => {
