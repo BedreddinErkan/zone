@@ -11,7 +11,7 @@ vi.mock("./factory.js", () => ({
   })),
 }));
 
-import { generateExecutionPlan, tryParseExecutionPlan } from "./executionPlan.js";
+import { generateExecutionPlan, tryParseExecutionPlan, isNoChangePlan } from "./executionPlan.js";
 
 function mockPlanResponse(plan: unknown) {
   mocks.createChatCompletion.mockResolvedValueOnce({
@@ -352,7 +352,7 @@ describe("tryParseExecutionPlan", () => {
     expect(tryParseExecutionPlan(wrapJson(bad))).toBeNull();
   });
 
-  it("returns null when steps array is empty (schema requires min 1)", () => {
+  it("returns null when steps array is empty without noChangeReason (superRefine rejects)", () => {
     const bad = { objective: "X", steps: [], riskHints: [], scopeSummary: "S" };
     expect(tryParseExecutionPlan(wrapJson(bad))).toBeNull();
   });
@@ -384,5 +384,64 @@ describe("tryParseExecutionPlan", () => {
     const result = tryParseExecutionPlan(wrapJson(withType));
     expect(result!.steps[0].subagentEligible).toBe(true);
     expect(result!.steps[0].subagentType).toBe("worker");
+  });
+});
+
+// E4: noChangeReason / isNoChangePlan — reproduce-first honest outcome
+describe("E4: noChangeReason / isNoChangePlan", () => {
+  const VALID_PLAN = {
+    objective: "Add pagination",
+    steps: [{ title: "Update UI", description: "Add buttons", filesLikely: ["src/ui.ts"] }],
+    riskHints: [],
+    scopeSummary: "Add pagination UI.",
+  };
+
+  function wrapJson(obj: unknown): string {
+    return `\`\`\`json\n${JSON.stringify(obj, null, 2)}\n\`\`\``;
+  }
+
+  it("tryParseExecutionPlan: empty steps WITH noChangeReason parses successfully", () => {
+    const noChangePlan = {
+      objective: "Verify build",
+      steps: [],
+      riskHints: [],
+      scopeSummary: "No changes needed.",
+      noChangeReason: "npm run build exits 0 — no error to fix",
+    };
+    const result = tryParseExecutionPlan(wrapJson(noChangePlan));
+    expect(result).not.toBeNull();
+    expect(result!.steps).toHaveLength(0);
+    expect(result!.noChangeReason).toBe("npm run build exits 0 — no error to fix");
+  });
+
+  it("tryParseExecutionPlan: empty steps WITHOUT noChangeReason returns null (superRefine rejects)", () => {
+    const bad = { objective: "X", steps: [], riskHints: [], scopeSummary: "S" };
+    expect(tryParseExecutionPlan(wrapJson(bad))).toBeNull();
+  });
+
+  it("tryParseExecutionPlan: non-empty steps WITH noChangeReason returns null (IFF violated)", () => {
+    const bad = { ...VALID_PLAN, noChangeReason: "build exits 0" };
+    expect(tryParseExecutionPlan(wrapJson(bad))).toBeNull();
+  });
+
+  it("isNoChangePlan: returns true for empty-steps plan with noChangeReason", () => {
+    const plan = {
+      objective: "Verify",
+      steps: [],
+      riskHints: [],
+      scopeSummary: "No change.",
+      noChangeReason: "build exits 0",
+    };
+    expect(isNoChangePlan(plan)).toBe(true);
+  });
+
+  it("isNoChangePlan: returns false for normal plan with steps", () => {
+    const plan = {
+      objective: "Add feature",
+      steps: [{ title: "Step 1", description: "Do it", filesLikely: ["src/x.ts"] }],
+      riskHints: [],
+      scopeSummary: "Feature.",
+    };
+    expect(isNoChangePlan(plan)).toBe(false);
   });
 });

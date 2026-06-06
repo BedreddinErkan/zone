@@ -15,7 +15,7 @@ import { runPlanInvestigation } from "../llm/planInvestigation.js";
 import { createSpinner, buildCliSink } from "./sink.js";
 import type { LlmPatchProgressUpdate } from "../core/agentLifecycleEvents.js";
 import { preparePlanContext } from "../core/preparePlanContext.js";
-import { generateExecutionPlan } from "../llm/executionPlan.js";
+import { generateExecutionPlan, isNoChangePlan } from "../llm/executionPlan.js";
 import { runAuditPipeline } from "../llm/auditPipeline.js";
 import { readAuditModeSetting } from "../visual/tierSettings.js";
 import { withRequestContext } from "../llm/openaiContext.js";
@@ -159,6 +159,22 @@ export async function runOneShotInner(
       });
       ac.abort();
       return { ok: false as const, reason: "plan_gen_failed" } as unknown as LlmPatchFlowResult;
+    }
+
+    // E8: premise verified false — investigation confirmed no problem exists.
+    if (isNoChangePlan(preGeneratedPlan)) {
+      progressCallback({
+        stage: "narration",
+        progress: {
+          type: "narration",
+          runId,
+          ts: Date.now(),
+          title: "Nothing to fix",
+          text: preGeneratedPlan.noChangeReason ?? "Build verified clean — no changes needed.",
+        },
+      });
+      const result: LlmPatchFlowResult = { ok: false as const, reason: "no_change_needed" };
+      return result;
     }
 
     if (process.env["ZONE_PLAN_LEGACY_AUDIT"] === "1") {

@@ -44,7 +44,8 @@ export interface PlanInvestigationInput {
   progressCallback: (update: LlmPatchProgressUpdate) => void;
 }
 
-function buildPrompt(task: string, relevantFiles: string[]): string {
+/** Exported for direct testing of prompt content. */
+export function buildPrompt(task: string, relevantFiles: string[]): string {
   const fileList = relevantFiles.length > 0 ? relevantFiles.join("\n") : "(none)";
   return `You are planning a coding task. Read the listed files, then output a JSON ExecutionPlan.
 
@@ -54,6 +55,9 @@ RELEVANT FILES (read these; follow imports only if critical to understanding):
 ${fileList}
 
 Instructions:
+0. If TASK asserts a problem ("fix the error in X", "build fails", "why does X fail"):
+   run the relevant command (e.g. npm run build, npx tsc --noEmit, or the failing test) FIRST
+   to confirm the error exists. If exit_code=0: proceed to step 3 with noChangeReason set.
 1. Use read_file to examine each listed file.
 2. Note what is already implemented or clearly out of scope for this task.
 3. Produce the ExecutionPlan JSON in a \`\`\`json block as your FINAL message.
@@ -72,12 +76,14 @@ JSON shape:
   ],
   "riskHints": ["string"],
   "scopeSummary": "string (≤160 chars)",
-  "scopeNotes": "string (optional, ≤200 chars — what is already done / out of scope)"
+  "scopeNotes": "string (optional, ≤200 chars — what is already done / out of scope)",
+  "noChangeReason": "string (optional — set to what you verified when the asserted problem does not reproduce, e.g. 'npm run build exits 0 — no error to fix'). When set, steps MUST be []."
 }
 
 Rules:
 - filesLikely: copy paths VERBATIM from the files you read. Never invent or alter extensions.
 - scopeNotes: populate if you observed already-implemented or out-of-scope work; omit if nothing notable.
+- noChangeReason: if you ran the reproduce step and exit_code=0, set this and use steps:[]. Never fabricate steps for a problem that did not reproduce.
 - Terminate as soon as you have enough information to write the plan — do not over-investigate.
 - Your final turn MUST contain the \`\`\`json block.`.trim();
 }

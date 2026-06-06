@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeEach } from 'vitest';
 import {
   assembleAgentSystemPrompt,
   assembleInvestigationSystemPrompt,
@@ -95,5 +95,104 @@ describe('UI.6.1: investigation prompt slim FINAL SUMMARY variant', () => {
     expect(prompt).toContain('FINAL SUMMARY');
     expect(prompt).not.toContain('## What changed');
     expect(prompt).not.toContain('Triple-backtick code fences');
+  });
+});
+
+describe('RC1-fix: commandTool param — investigation prompt tool/mandate variants', () => {
+  const BASE = { repoPath: '/repo', projectMemoryBlock: '', baseMaxIterations: 6 };
+
+  describe('commandTool: "run_command" (plan investigation)', () => {
+    let prompt: string;
+    beforeEach(() => {
+      prompt = assembleInvestigationSystemPrompt({ ...BASE, commandTool: 'run_command' });
+    });
+
+    it('lists run_command in tools (not run_command_readonly)', () => {
+      expect(prompt).toContain('run_command');
+      expect(prompt).not.toContain('run_command_readonly');
+    });
+
+    it('does NOT contain the "Do not call run_command" forbid line', () => {
+      expect(prompt).not.toContain('Do not call run_command');
+    });
+
+    it('contains REPRODUCE-FIRST MANDATE with MUST wording', () => {
+      expect(prompt).toContain('REPRODUCE-FIRST MANDATE');
+      expect(prompt).toContain('MUST');
+    });
+
+    it('contains the NO PROBLEM FOUND valid-outcome block', () => {
+      expect(prompt).toContain('NO PROBLEM FOUND');
+    });
+
+    it('does NOT contain fixInstruction (INVESTIGATION_OUTPUT_FORMAT suppressed)', () => {
+      expect(prompt).not.toContain('fixInstruction');
+    });
+
+    it('references ExecutionPlan no-change outcome (noChangeReason)', () => {
+      expect(prompt).toContain('noChangeReason');
+    });
+  });
+
+  describe('commandTool: "run_command_readonly" (scope-audit)', () => {
+    let prompt: string;
+    beforeEach(() => {
+      prompt = assembleInvestigationSystemPrompt({ ...BASE, commandTool: 'run_command_readonly' });
+    });
+
+    it('lists run_command_readonly in tools (not run_command)', () => {
+      expect(prompt).toContain('run_command_readonly');
+      expect(prompt).not.toMatch(/^- run_command:/m);
+    });
+
+    it('contains "Do not call run_command" forbid line', () => {
+      expect(prompt).toContain('Do not call run_command');
+    });
+
+    it('contains REPRODUCE-FIRST MANDATE', () => {
+      expect(prompt).toContain('REPRODUCE-FIRST MANDATE');
+    });
+
+    it('contains fixInstruction (INVESTIGATION_OUTPUT_FORMAT kept)', () => {
+      expect(prompt).toContain('fixInstruction');
+    });
+
+    it('contains NO PROBLEM FOUND block', () => {
+      expect(prompt).toContain('NO PROBLEM FOUND');
+    });
+  });
+
+  describe('commandTool: null (HTTP/chat investigation)', () => {
+    let prompt: string;
+    beforeEach(() => {
+      prompt = assembleInvestigationSystemPrompt({ ...BASE, commandTool: null });
+    });
+
+    it('does NOT reference run_command or run_command_readonly', () => {
+      expect(prompt).not.toContain('run_command_readonly');
+      expect(prompt).not.toMatch(/- run_command:/);
+    });
+
+    it('does NOT contain REPRODUCE-FIRST MANDATE (no command tool)', () => {
+      expect(prompt).not.toContain('REPRODUCE-FIRST MANDATE');
+    });
+
+    it('contains NO PROBLEM FOUND block (honest-outcome always present)', () => {
+      expect(prompt).toContain('NO PROBLEM FOUND');
+    });
+
+    it('contains fixInstruction (INVESTIGATION_OUTPUT_FORMAT kept)', () => {
+      expect(prompt).toContain('fixInstruction');
+    });
+  });
+
+  describe('commandTool: undefined (backward-compat default)', () => {
+    it('behaves like null: no run_command line, no mandate, keeps output format', () => {
+      const prompt = assembleInvestigationSystemPrompt({ ...BASE });
+      expect(prompt).not.toContain('run_command_readonly');
+      expect(prompt).not.toContain('REPRODUCE-FIRST MANDATE');
+      expect(prompt).toContain('fixInstruction');
+      expect(prompt).toContain('NO PROBLEM FOUND');
+    });
   });
 });

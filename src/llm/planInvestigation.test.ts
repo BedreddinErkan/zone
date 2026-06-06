@@ -14,7 +14,7 @@ vi.mock("./executionPlan.js", () => ({
 }));
 vi.mock("../utils/logger.js", () => ({ log: vi.fn(), debugLog: vi.fn(), errorLog: vi.fn() }));
 
-import { runPlanInvestigation, PLAN_INVESTIGATION_ITER_CAP, PLAN_INVESTIGATION_MAX_FILES } from "./planInvestigation.js";
+import { runPlanInvestigation, buildPrompt, PLAN_INVESTIGATION_ITER_CAP, PLAN_INVESTIGATION_MAX_FILES } from "./planInvestigation.js";
 
 const FAKE_PLAN = {
   objective: "Add pagination",
@@ -130,6 +130,38 @@ describe("runPlanInvestigation — fallback path", () => {
     const fallback = mocks.generateExecutionPlan.mock.calls[0]![0] as Record<string, unknown>;
     expect(fallback["provider"]).toBe("anthropic");
     expect(fallback["userApiKey"]).toBe("sk-ant-test");
+  });
+});
+
+describe("E3: buildPrompt — reproduce-first + noChangeReason", () => {
+  it("buildPrompt contains noChangeReason in JSON shape", () => {
+    const prompt = buildPrompt("fix the build error", ["src/index.ts"]);
+    expect(prompt).toContain("noChangeReason");
+  });
+
+  it("buildPrompt contains reproduce-first instruction (step 0)", () => {
+    const prompt = buildPrompt("fix the build error", ["src/index.ts"]);
+    expect(prompt).toContain("exit_code=0");
+    expect(prompt).toContain("npm run build");
+  });
+
+  it("buildPrompt rules mention no-fabricate directive", () => {
+    const prompt = buildPrompt("fix failing tests", []);
+    expect(prompt).toContain("Never fabricate steps");
+  });
+
+  it("no-change plan from tryParseExecutionPlan skips fallback generateExecutionPlan", async () => {
+    const noChangePlan = {
+      objective: "Verify build",
+      steps: [],
+      riskHints: [],
+      scopeSummary: "No changes needed.",
+      noChangeReason: "npm run build exits 0",
+    };
+    mocks.tryParseExecutionPlan.mockReturnValue(noChangePlan);
+    const result = await runPlanInvestigation(BASE_INPUT);
+    expect(result).toEqual(noChangePlan);
+    expect(mocks.generateExecutionPlan).not.toHaveBeenCalled();
   });
 });
 

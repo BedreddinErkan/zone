@@ -640,25 +640,9 @@ function assembleChatSystemPrompt(input: {
     .join("\n");
 }
 
-// Phase G: Phase 1 runtime-grounding heuristic — appended after INVESTIGATION_OUTPUT_FORMAT.
-// Module-level const: no per-run interpolation, cache-safe.
-const PHASE1_RUNTIME_HEURISTIC = `INVESTIGATION HEURISTIC — RUNTIME GROUNDING:
-
-When the task mentions failing tests, build errors, runtime exceptions, or \
-"why is X broken", your FIRST action should be to reproduce the failure using \
-run_command_readonly. Examples:
-
-- "Fix failing tests in foo.test.ts" → \`npx vitest run path/to/foo.test.ts\` \
-first, read actual error output, THEN form hypothesis.
-- "Build fails after refactor" → \`tsc --noEmit\` first.
-- "Test crashes intermittently" → run multiple times, observe pattern.
-
-Static code analysis without runtime observation produces non-deterministic \
-diagnoses. Your fixInstruction must be grounded in the actual error message, \
-not in what the code "should" be doing.
-
-If the task does not involve runtime behavior (e.g., "rename function X across \
-the codebase"), skip the runtime step and proceed with reads + searches.`;
+// Phase G / RC1-fix: reproduce-first mandate built dynamically from commandTool.
+// Module-level const no longer — now inlined in assembleInvestigationSystemPrompt
+// so the correct tool name is referenced for each caller context.
 
 // Step C Lever A: module-level const — no per-run interpolation, cache-safe.
 const INVESTIGATION_OUTPUT_FORMAT = `At the end of your investigation, output a JSON block fenced with \`\`\`json containing exactly these fields:
@@ -684,7 +668,16 @@ export function assembleInvestigationSystemPrompt(input: {
    *  cache across phase transitions. Without it, the hardcoded investigation
    *  intro is used (backward-compat for call sites that don't supply it). */
   agentIntro?: string;
+  /** RC1-fix: which command tool this investigation context actually has.
+   *  - "run_command"          → plan investigation (INVESTIGATION_TOOLS)
+   *  - "run_command_readonly" → scope-audit (AUDIT_ALLOWED_TOOLS)
+   *  - null                  → HTTP/chat investigation (fs.read only)
+   *  Drives: tool-list entry, reproduce mandate, forbid-run_command line,
+   *  and INVESTIGATION_OUTPUT_FORMAT suppression for plan investigation. */
+  commandTool?: "run_command" | "run_command_readonly" | null;
 }): string {
+  const ct = input.commandTool ?? null;
+
   const openingLines = input.agentIntro
     ? [
         input.agentIntro,
@@ -693,6 +686,60 @@ export function assembleInvestigationSystemPrompt(input: {
     : [
         "You are Zone, answering a question about the codebase in INVESTIGATION mode. Read-only tools only.",
       ];
+
+  // Tool-list entry for the command tool, matched to what the agent actually has.
+  const commandToolLine =
+    ct === "run_command"
+      ? "- run_command: run failing tests, build scripts, typecheck. Many commands are auto-approved in investigation mode (e.g. npm run build, npm test, npx tsc --noEmit, npx vitest run). Output: head 100 + tail 50 lines."
+      : ct === "run_command_readonly"
+        ? "- run_command_readonly: run failing tests, typecheck, lint, or read-only git inspection. Whitelisted commands only (e.g. 'npx vitest run path/to/test.ts', 'tsc --noEmit', 'git diff'). Output truncated to head 100 + tail 50 lines. Blocked: mutations, network writes, package installs, shell substitution."
+        : null;
+
+  // Reproduce-first MANDATE — emitted only when a command tool is available.
+  const reproduceBlock =
+    ct !== null
+      ? [
+          "",
+          `REPRODUCE-FIRST MANDATE:`,
+          `When the task asserts a problem ("fix the error in X", "the build fails", "why does X fail"),`,
+          `your FIRST action MUST be to run the relevant command (${ct}) to confirm the error`,
+          `exists and capture the real output. Examples:`,
+          `- "Build fails" → \`npm run build\` first; read exit code and error tail.`,
+          `- "Fix failing tests in foo.test.ts" → \`npx vitest run path/to/foo.test.ts\` first.`,
+          `- "tsc errors" → \`npx tsc --noEmit\` first.`,
+          `Static code analysis without runtime observation produces speculative, non-deterministic`,
+          `diagnoses. If the task does not assert a runtime problem (e.g., "rename function X"),`,
+          `skip this step and proceed with reads + searches.`,
+        ]
+      : [];
+
+  // No-problem-found block — always present; wording adapted to context.
+  const noProblemBlock = [
+    "",
+    "VALID TERMINAL OUTCOME — NO PROBLEM FOUND:",
+    ct !== null
+      ? `If you ran the reproduce step and the command exited 0 (the asserted error does not exist),`
+      : `If your investigation finds no evidence of the asserted problem,`,
+    `that is a COMPLETE and CORRECT result. ${ct === "run_command" ? "Emit an ExecutionPlan with steps:[] and noChangeReason set to what you verified." : "Set complete:true and fixInstruction to 'No action needed — <what you verified>'."}`,
+    `Do NOT fabricate steps or fix instructions for a problem you could not reproduce.`,
+    `Reporting "no problem found" after investigation is NOT giving up — it is the honest,`,
+    `correct answer. Fabricating a fix for a non-existent problem is the failure mode.`,
+  ];
+
+  // Forbid full shell when the agent only has run_command_readonly or nothing.
+  const forbidLine =
+    ct === "run_command"
+      ? "Do not write or modify code. Do not call TodoWrite. Do not produce patches."
+      : "Do not write or modify code. Do not call run_command (full shell). Do not call TodoWrite. Do not produce patches.";
+
+  // E6: suppress the {rootCause,fixInstruction,complete} output-format for plan
+  // investigation — buildPrompt already specifies the ExecutionPlan JSON schema;
+  // two conflicting schemas cause confusion. Keep for scope-audit and HTTP.
+  const outputFormatLines =
+    ct !== "run_command"
+      ? ["", INVESTIGATION_OUTPUT_FORMAT]
+      : [];
+
   return [
     ...openingLines,
     "",
@@ -704,9 +751,11 @@ export function assembleInvestigationSystemPrompt(input: {
     "- list_files",
     "- search_in_files",
     "- find_references",
-    "- run_command_readonly: run failing tests, typecheck, lint, or read-only git inspection. Whitelisted commands only (e.g. 'npx vitest run path/to/test.ts', 'tsc --noEmit', 'git diff'). Output truncated to head 100 + tail 50 lines. Blocked: mutations, network writes, package installs, shell substitution.",
+    ...(commandToolLine ? [commandToolLine] : []),
     "",
     "SEARCH FIRST: Use search_in_files to locate symbols before reading files. Reading an entire file for a single symbol wastes iterations.",
+    ...reproduceBlock,
+    ...noProblemBlock,
     "",
     "Process:",
     "1. Identify what the question asks: definition, usages, control flow, data shape, or design rationale.",
@@ -725,14 +774,11 @@ export function assembleInvestigationSystemPrompt(input: {
     "",
     "Do NOT end with offers to continue ('shall I dig deeper?', 'would you like me to explore further?', etc.) — the user already asked the question. Deliver the full answer now.",
     "FINAL SUMMARY: End with a brief 2-3 sentence prose summary of your findings. No code blocks, no markdown section headers beyond what the answer requires.",
-    "Do not write or modify code. Do not call run_command (full shell). Do not call TodoWrite. Do not produce patches.",
+    forbidLine,
     `Maximum iterations: ${input.baseMaxIterations} (already enforced; be targeted).`,
     `Repository path: ${input.repoPath}`,
     ...(input.projectMemoryBlock ? ["", input.projectMemoryBlock] : []),
-    "",
-    INVESTIGATION_OUTPUT_FORMAT,
-    "",
-    PHASE1_RUNTIME_HEURISTIC,
+    ...outputFormatLines,
   ].join("\n");
 }
 
@@ -1931,6 +1977,10 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
         ? buildWorkerAgentIntro()
         : `You are Zone, an AI code agent${fw?.framework ? ` working on a ${fw.framework} project` : ""}.`;
   const canRunCommand = toolsForLLM.some((t) => getZoneToolName(t) === "run_command");
+  // RC1-fix: detect which command tool is available for investigation-mode prompt.
+  const hasRunCommandReadonly = toolsForLLM.some((t) => getZoneToolName(t) === "run_command_readonly");
+  const investigationCommandTool: "run_command" | "run_command_readonly" | null =
+    canRunCommand ? "run_command" : hasRunCommandReadonly ? "run_command_readonly" : null;
   const backgroundCommandBlock = canRunCommand
     ? `\nBACKGROUND COMMANDS: for long-lived processes (npm run dev, vite, watchers, tail -f), use \`run_command_background\` — returns a handle so you can keep working. Poll output with \`read_background_output\` (pass since_offset from the prior read to get only new bytes). \`kill_background\` when done; processes are also auto-killed at run end. Poll sparingly (every 2-3 iters, not every iter). One-shot commands (build, test, lint, tsc, pytest) → \`run_command\`.\n\n`
     : "";
@@ -1961,6 +2011,7 @@ Example:
         projectMemoryBlock,
         baseMaxIterations,
         agentIntro,
+        commandTool: investigationCommandTool,
       })
       : assembleAgentSystemPrompt({
         agentIntro,

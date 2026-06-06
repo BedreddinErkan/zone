@@ -16,6 +16,7 @@ const mockGenerateExecutionPlan = vi.hoisted(() => vi.fn());
 const mockReadAuditModeSetting = vi.hoisted(() => vi.fn(() => "auto"));
 const mockLoadDiskModelSync = vi.hoisted(() => vi.fn(() => null));
 const mockRunPlanInvestigation = vi.hoisted(() => vi.fn());
+const mockIsNoChangePlan = vi.hoisted(() => vi.fn());
 
 vi.mock("../core/runLlmPatchFlow.js", () => ({
   runLlmPatchFlow: mockRunLlmPatchFlow,
@@ -38,7 +39,10 @@ vi.mock("./sink.js", () => ({
 }));
 vi.mock("../llm/auditPipeline.js", () => ({ runAuditPipeline: mockRunAuditPipeline }));
 vi.mock("../core/preparePlanContext.js", () => ({ preparePlanContext: mockPreparePlanContext }));
-vi.mock("../llm/executionPlan.js", () => ({ generateExecutionPlan: mockGenerateExecutionPlan }));
+vi.mock("../llm/executionPlan.js", () => ({
+  generateExecutionPlan: mockGenerateExecutionPlan,
+  isNoChangePlan: mockIsNoChangePlan,
+}));
 vi.mock("../visual/tierSettings.js", () => ({ readAuditModeSetting: mockReadAuditModeSetting, readDailyUsdCapOverride: vi.fn() }));
 vi.mock("../api/diskModel.js", () => ({ loadDiskModelSync: mockLoadDiskModelSync }));
 vi.mock("../llm/planInvestigation.js", () => ({ runPlanInvestigation: mockRunPlanInvestigation }));
@@ -96,6 +100,7 @@ beforeEach(() => {
   mockReadAuditModeSetting.mockReturnValue("auto");
   mockLoadDiskModelSync.mockReturnValue(null);  // default → "investigate"
   mockRunPlanInvestigation.mockResolvedValue(FAKE_PLAN);
+  mockIsNoChangePlan.mockReturnValue(false);
   // Suppress stdout/stderr in tests
   vi.spyOn(process.stdout, "write").mockReturnValue(true);
   vi.spyOn(process.stderr, "write").mockReturnValue(true);
@@ -476,5 +481,45 @@ describe("runOneShotInner — planDepth routing", () => {
     await runOneShotInner("add feature", PLAN_CONFIG, "run-inv-prog", { mode: "plan", externalAc: AC(), onProgress });
     const inv = mockRunPlanInvestigation.mock.calls[0]![0] as Record<string, unknown>;
     expect(typeof inv["progressCallback"]).toBe("function");
+  });
+});
+
+describe("E8: no-op plan short-circuit — premise verified false", () => {
+  const PLAN_CONFIG = { ...BASE_CONFIG };
+  const AC = () => new AbortController();
+  const NO_CHANGE_PLAN = {
+    objective: "Verify build",
+    steps: [],
+    riskHints: [],
+    scopeSummary: "No changes needed.",
+    noChangeReason: "npm run build exits 0 — no error to fix",
+  };
+
+  beforeEach(() => {
+    mockLoadDiskModelSync.mockReturnValue({ version: 2, model: "claude-sonnet-4-6", provider: "anthropic", planDepth: "investigate", updatedAt: "" });
+    mockRunPlanInvestigation.mockResolvedValue(NO_CHANGE_PLAN);
+    mockIsNoChangePlan.mockReturnValue(true);
+  });
+
+  it("returns ok:false with reason no_change_needed", async () => {
+    const result = await runOneShotInner("fix the build error", PLAN_CONFIG, "run-noop-1", { mode: "plan", externalAc: AC() });
+    expect(result.ok).toBe(false);
+    expect((result as { ok: false; reason: string }).reason).toBe("no_change_needed");
+  });
+
+  it("does NOT call requestPlanApproval or runLlmPatchFlow", async () => {
+    await runOneShotInner("fix the build error", PLAN_CONFIG, "run-noop-2", { mode: "plan", externalAc: AC() });
+    expect(mockRequestPlanApproval).not.toHaveBeenCalled();
+    expect(mockRunLlmPatchFlow).not.toHaveBeenCalled();
+  });
+
+  it("emits a 'Nothing to fix' narration via progressCallback", async () => {
+    const onProgress = vi.fn();
+    await runOneShotInner("fix the build error", PLAN_CONFIG, "run-noop-3", { mode: "plan", externalAc: AC(), onProgress });
+    const narrations = onProgress.mock.calls.filter(
+      ([u]: [any]) => u?.progress?.type === "narration" && u?.progress?.title === "Nothing to fix"
+    );
+    expect(narrations).toHaveLength(1);
+    expect(narrations[0]![0].progress.text).toContain("npm run build exits 0");
   });
 });

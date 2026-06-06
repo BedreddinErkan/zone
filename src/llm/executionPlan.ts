@@ -21,26 +21,54 @@ export type ExecutionPlan = {
   riskHints: string[];
   scopeSummary: string;
   scopeNotes?: string;
+  /** Reproduce-first: set when the agent verified the asserted problem does not exist
+   *  (e.g. build exits 0). IFF invariant: steps MUST be [] when this is set. */
+  noChangeReason?: string;
 };
 
-const executionPlanSchema = z.object({
-  objective: z.string(),
-  steps: z
-    .array(
-      z.object({
-        title: z.string(),
-        description: z.string(),
-        filesLikely: z.array(z.string()),
-        subagentEligible: z.boolean().optional(),
-        subagentType: z.enum(["explore", "worker"]).optional(),
-      })
-    )
-    .min(1)
-    .max(8),
-  riskHints: z.array(z.string()),
-  scopeSummary: z.string(),
-  scopeNotes: z.string().optional(),
-});
+/** True when the investigation verified the asserted problem does not exist.
+ *  steps is empty and noChangeReason explains what was verified. */
+export function isNoChangePlan(plan: ExecutionPlan): boolean {
+  return plan.steps.length === 0 && !!plan.noChangeReason;
+}
+
+const executionPlanSchema = z
+  .object({
+    objective: z.string(),
+    steps: z
+      .array(
+        z.object({
+          title: z.string(),
+          description: z.string(),
+          filesLikely: z.array(z.string()),
+          subagentEligible: z.boolean().optional(),
+          subagentType: z.enum(["explore", "worker"]).optional(),
+        })
+      )
+      .min(0)
+      .max(8),
+    riskHints: z.array(z.string()),
+    scopeSummary: z.string(),
+    scopeNotes: z.string().optional(),
+    noChangeReason: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    // IFF invariant: steps may be empty ↔ noChangeReason is set.
+    if (data.steps.length === 0 && !data.noChangeReason) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "steps must be non-empty unless noChangeReason is set",
+        path: ["steps"],
+      });
+    }
+    if (data.steps.length > 0 && data.noChangeReason) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "noChangeReason must not be set when steps is non-empty",
+        path: ["noChangeReason"],
+      });
+    }
+  });
 
 function stripJsonFences(raw: string): string {
   return raw
@@ -103,6 +131,7 @@ export function tryParseExecutionPlan(text: string): ExecutionPlan | null {
       riskHints: plan.riskHints,
       scopeSummary: plan.scopeSummary,
       ...(plan.scopeNotes ? { scopeNotes: plan.scopeNotes } : {}),
+      ...(plan.noChangeReason ? { noChangeReason: plan.noChangeReason } : {}),
     };
   } catch {
     return null;
@@ -243,8 +272,10 @@ JSON shape:
   ],
   "riskHints": ["string"],
   "scopeSummary": "string",
-  "scopeNotes": "string (optional)"
+  "scopeNotes": "string (optional)",
+  "noChangeReason": "string (optional — set ONLY when a reproduce-check confirms the asserted problem does not exist; steps MUST be [] when this is set)"
 }
+- noChangeReason: if you ran the relevant command (e.g. npm run build) and it exited 0, set this to what you verified (e.g. "npm run build exits 0 — no error to fix") and leave steps as []. Do not fabricate steps for a problem you could not reproduce.
 `.trim();
 
   const response = await client.createChatCompletion({
@@ -266,5 +297,6 @@ JSON shape:
     riskHints: plan.riskHints,
     scopeSummary: plan.scopeSummary,
     ...(plan.scopeNotes ? { scopeNotes: plan.scopeNotes } : {}),
+    ...(plan.noChangeReason ? { noChangeReason: plan.noChangeReason } : {}),
   };
 }
