@@ -20,6 +20,7 @@ export type ExecutionPlan = {
   }[];
   riskHints: string[];
   scopeSummary: string;
+  scopeNotes?: string;
 };
 
 const executionPlanSchema = z.object({
@@ -38,6 +39,7 @@ const executionPlanSchema = z.object({
     .max(8),
   riskHints: z.array(z.string()),
   scopeSummary: z.string(),
+  scopeNotes: z.string().optional(),
 });
 
 function stripJsonFences(raw: string): string {
@@ -56,6 +58,55 @@ function extractJson(raw: string): string {
     throw new Error("No JSON object found in execution plan response.");
   }
   return cleaned.slice(first, last + 1);
+}
+
+// Phase Q.6 normalization shared by generateExecutionPlan and tryParseExecutionPlan.
+function normalizeExecutionPlanSteps(
+  steps: ExecutionPlan["steps"]
+): ExecutionPlan["steps"] {
+  return steps.map((step) => {
+    const explicitEligibleFalse = step.subagentEligible === false;
+    const rawType = step.subagentType;
+    const typeIsValid = rawType === "worker" || rawType === "explore";
+    const eligibleSignal = step.subagentEligible === true || typeIsValid;
+    if (!explicitEligibleFalse && eligibleSignal) {
+      const inferredType: "worker" | "explore" = typeIsValid ? rawType : "worker";
+      return {
+        title: step.title,
+        description: step.description,
+        filesLikely: step.filesLikely,
+        subagentEligible: true as const,
+        subagentType: inferredType,
+      };
+    }
+    return {
+      title: step.title,
+      description: step.description,
+      filesLikely: step.filesLikely,
+    };
+  });
+}
+
+/** Parse the last ```json block in `text` as an ExecutionPlan.
+ *  Returns null if no block found, JSON is invalid, or schema validation fails. */
+export function tryParseExecutionPlan(text: string): ExecutionPlan | null {
+  try {
+    const blocks = [...text.matchAll(/```json\s*([\s\S]*?)\s*```/g)];
+    if (blocks.length === 0) return null;
+    const inner = blocks[blocks.length - 1]![1] ?? "";
+    const parsed: unknown = JSON.parse(inner);
+    const plan = executionPlanSchema.parse(parsed);
+    const steps = normalizeExecutionPlanSteps(plan.steps);
+    return {
+      objective: plan.objective,
+      steps,
+      riskHints: plan.riskHints,
+      scopeSummary: plan.scopeSummary,
+      ...(plan.scopeNotes ? { scopeNotes: plan.scopeNotes } : {}),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function formatExecutionPlanForPrompt(plan?: ExecutionPlan | null): string {
@@ -88,6 +139,9 @@ export async function generateExecutionPlan(input: {
   userFeedback?: string;
   /** Task archetype — tightens the filesLikely rule for refactor/rename tasks. */
   archetype?: string;
+  /** Pre-read file bodies for content-aware ("quick") plan seeding. Already
+   *  truncated + budget-capped by the caller. Injected as-is into the prompt. */
+  seededFileContents?: string;
 }): Promise<ExecutionPlan> {
   const client = createLLMClient({
     apiKey: input.userApiKey,
@@ -109,6 +163,16 @@ export async function generateExecutionPlan(input: {
         `Keep the same JSON shape (objective, steps, riskHints, scopeSummary).\n\n`
       : "";
 
+  const seededSection = input.seededFileContents
+    ? `SEEDED FILE CONTENTS\n${input.seededFileContents}\n\n`
+    : "";
+
+  const seededRule = input.seededFileContents
+    ? `- Examine SEEDED FILE CONTENTS above; populate scopeNotes with any ` +
+      `observations about what is already implemented, partially done, or out ` +
+      `of scope. Keep scopeNotes ≤ 200 chars; omit if nothing notable.\n`
+    : "";
+
   const prompt = `
 ${feedbackSection}Create a concise execution plan for a code patch.
 
@@ -121,14 +185,14 @@ ${input.repoSummary}
 RELEVANT FILES
 ${relevantFiles}
 
-Rules:
+${seededSection}Rules:
 - Break the task into 3-8 implementation steps.
 - Estimate affected files by path/name when possible.
 - For \`filesLikely\`, copy paths VERBATIM from the RELEVANT FILES list above when the file is clearly affected by the step. Never alter or guess extensions (.ts vs .tsx, .js vs .jsx, etc.). ${input.archetype === "refactor" || input.archetype === "complex_multi_file" ? "Do NOT estimate or invent paths — if a file is not in RELEVANT FILES, omit it from filesLikely and note the gap in the step description." : "Only estimate a path when no matching file appears in RELEVANT FILES."}
 - Identify risks briefly.
 - Keep scopeSummary under 160 characters.
 - Return JSON only.
-
+${seededRule}
 Subagent eligibility (Phase Q.3 / Q.6):
 For each step, decide whether it could run as a Task subagent. Mark a step
 \`subagentEligible: true\` when it satisfies one of these patterns:
@@ -178,7 +242,8 @@ JSON shape:
     }
   ],
   "riskHints": ["string"],
-  "scopeSummary": "string"
+  "scopeSummary": "string",
+  "scopeNotes": "string (optional)"
 }
 `.trim();
 
@@ -193,40 +258,13 @@ JSON shape:
   );
   const plan = executionPlanSchema.parse(parsed);
 
-  // Phase Q.6: relaxed normalization. If the LLM signals delegatable intent
-  // via either field, fill in the missing one rather than silently dropping
-  // the annotation:
-  //   eligible:true + no type       → infer subagentType="worker" (most common)
-  //   no eligible + type:"worker"   → infer subagentEligible=true
-  //   no eligible + type:"explore"  → infer subagentEligible=true
-  //   eligible:false                → drop both (explicit opt-out)
-  const normalizedSteps = plan.steps.map((step) => {
-    const explicitEligibleFalse = step.subagentEligible === false;
-    const rawType = step.subagentType;
-    const typeIsValid = rawType === "worker" || rawType === "explore";
-    const eligibleSignal = step.subagentEligible === true || typeIsValid;
-
-    if (!explicitEligibleFalse && eligibleSignal) {
-      const inferredType: "worker" | "explore" = typeIsValid ? rawType : "worker";
-      return {
-        title: step.title,
-        description: step.description,
-        filesLikely: step.filesLikely,
-        subagentEligible: true,
-        subagentType: inferredType,
-      };
-    }
-    return {
-      title: step.title,
-      description: step.description,
-      filesLikely: step.filesLikely,
-    };
-  });
+  const normalizedSteps = normalizeExecutionPlanSteps(plan.steps);
 
   return {
     objective: plan.objective,
     steps: normalizedSteps,
     riskHints: plan.riskHints,
     scopeSummary: plan.scopeSummary,
+    ...(plan.scopeNotes ? { scopeNotes: plan.scopeNotes } : {}),
   };
 }

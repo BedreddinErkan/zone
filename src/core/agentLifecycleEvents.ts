@@ -162,7 +162,9 @@ export type ZoneStructuredProgressEvent = {
     /** Scope-block circuit breaker: emitted when consecutive scope-blocked writes reach the terminate threshold. */
     | "scope_block_circuit_terminal"
     /** Plan-ready approval gate (ZONE_PLAN_APPROVAL_CYCLE=1): emitted after plan generation. */
-    | "plan_ready_for_approval";
+    | "plan_ready_for_approval"
+    /** TUI spinner during plan gen / re-plan; title field carries the label. */
+    | "plan_generation_started";
   title: string;
   detail?: string;
   filePath?: string;
@@ -292,6 +294,7 @@ export type ZoneStructuredProgressEvent = {
   planId?: string;
   planObjective?: string;
   planStepsJson?: string;
+  planScopeNotes?: string;
 };
 
 /** Documentation type for `narration` progress events: a one-line intent

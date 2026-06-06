@@ -88,6 +88,35 @@ describe("requestPlanApproval + resolvePlanApproval", () => {
     expect(result.decision).toBe("reject");
   });
 
+  it("resolves with 'feedback' decision and carries feedback text", async () => {
+    const { emit } = makeEmit();
+    const p = requestPlanApproval({ proposal: PROPOSAL, emit: emit as any });
+    await Promise.resolve();
+    resolvePlanApproval({ planId: PROPOSAL.planId, runId: "run-plan-001", decision: "feedback", feedback: "please add unit tests" });
+    const result = await p;
+    expect(result.decision).toBe("feedback");
+    expect(result.feedback).toBe("please add unit tests");
+  });
+
+  it("resolves with 'approve_with_feedback' decision and carries feedback text", async () => {
+    const { emit } = makeEmit();
+    const p = requestPlanApproval({ proposal: PROPOSAL, emit: emit as any });
+    await Promise.resolve();
+    resolvePlanApproval({ planId: PROPOSAL.planId, runId: "run-plan-001", decision: "approve_with_feedback", feedback: "be concise" });
+    const result = await p;
+    expect(result.decision).toBe("approve_with_feedback");
+    expect(result.feedback).toBe("be concise");
+  });
+
+  it("feedback is undefined when not provided for non-feedback decisions", async () => {
+    const { emit } = makeEmit();
+    const p = requestPlanApproval({ proposal: PROPOSAL, emit: emit as any });
+    await Promise.resolve();
+    resolvePlanApproval({ planId: PROPOSAL.planId, runId: "run-plan-001", decision: "accept_all" });
+    const result = await p;
+    expect(result.feedback).toBeUndefined();
+  });
+
   it("returns ok:false for unknown planId", () => {
     const r = resolvePlanApproval({ planId: "nonexistent", runId: "run-x", decision: "accept_all" });
     expect(r.ok).toBe(false);
@@ -173,5 +202,38 @@ describe("rejectPendingPlansForRun", () => {
 
   it("returns 0 for empty runId", () => {
     expect(rejectPendingPlansForRun("")).toBe(0);
+  });
+});
+
+// Phase 2a: scopeNotes threading
+describe("scopeNotes in PlanReadyProposal", () => {
+  it("scopeNotes on proposal is emitted as planScopeNotes in the event", async () => {
+    const { emit, events } = makeEmit();
+    const proposal: PlanReadyProposal = {
+      ...PROPOSAL,
+      planId: "plan-scope-001",
+      scopeNotes: "Auth module 80% done in src/auth.ts",
+    };
+    const p = requestPlanApproval({ proposal, emit: emit as any });
+    await Promise.resolve();
+    const evt = events[0] as Record<string, unknown>;
+    expect(evt["planScopeNotes"]).toBe("Auth module 80% done in src/auth.ts");
+    resolvePlanApproval({ planId: "plan-scope-001", runId: PROPOSAL.runId, decision: "reject" });
+    await p;
+  });
+
+  it("planScopeNotes is absent in the event when scopeNotes is not set", async () => {
+    const { emit, events } = makeEmit();
+    const proposal: PlanReadyProposal = {
+      ...PROPOSAL,
+      planId: "plan-scope-002",
+      // no scopeNotes
+    };
+    const p = requestPlanApproval({ proposal, emit: emit as any });
+    await Promise.resolve();
+    const evt = events[0] as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(evt, "planScopeNotes")).toBe(false);
+    resolvePlanApproval({ planId: "plan-scope-002", runId: PROPOSAL.runId, decision: "reject" });
+    await p;
   });
 });

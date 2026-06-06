@@ -1,4 +1,5 @@
-import { Box, Text, useInput } from "ink";
+import React, { useState } from "react";
+import { Box, Text, useInput, usePaste } from "ink";
 import type { Dispatch } from "react";
 import type { StoreAction, StoreState } from "../store.js";
 import { resolvePlanApproval } from "../../../llm/planApprovals.js";
@@ -8,8 +9,52 @@ interface PlanReadyModalProps {
   dispatch: Dispatch<StoreAction>;
 }
 
+function renderFeedbackBuffer(buf: string, pos: number): string {
+  return buf.slice(0, pos) + "▋" + buf.slice(pos);
+}
+
 export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): React.ReactElement {
+  const [feedbackMode, setFeedbackMode] = useState(false);
+  const [pendingDecision, setPendingDecision] = useState<"feedback" | "approve_with_feedback" | null>(null);
+  const [feedbackBuffer, setFeedbackBuffer] = useState("");
+  const [feedbackCursor, setFeedbackCursor] = useState(0);
+
   useInput((input, key) => {
+    if (feedbackMode) {
+      if (key.return && feedbackBuffer.trim()) {
+        resolvePlanApproval({
+          planId: proposal.planId,
+          runId: proposal.runId,
+          decision: pendingDecision!,
+          feedback: feedbackBuffer.trim(),
+        });
+        dispatch({ type: "PLAN_READY_RESOLVED" });
+        return;
+      }
+      if (key.escape) {
+        setFeedbackMode(false);
+        setPendingDecision(null);
+        setFeedbackBuffer("");
+        setFeedbackCursor(0);
+        return;
+      }
+      if (key.backspace || key.delete) {
+        if (feedbackCursor > 0) {
+          setFeedbackBuffer(b => b.slice(0, feedbackCursor - 1) + b.slice(feedbackCursor));
+          setFeedbackCursor(c => c - 1);
+        }
+        return;
+      }
+      if (key.leftArrow)  { setFeedbackCursor(c => Math.max(0, c - 1)); return; }
+      if (key.rightArrow) { setFeedbackCursor(c => Math.min(feedbackBuffer.length, c + 1)); return; }
+      if (input && !key.ctrl && !key.meta) {
+        setFeedbackBuffer(b => b.slice(0, feedbackCursor) + input + b.slice(feedbackCursor));
+        setFeedbackCursor(c => c + 1);
+      }
+      return;
+    }
+
+    // Normal mode
     if (input === "1") {
       resolvePlanApproval({ planId: proposal.planId, runId: proposal.runId, decision: "accept_all" });
       dispatch({ type: "PLAN_READY_RESOLVED" });
@@ -21,13 +66,13 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
       return;
     }
     if (input === "3") {
-      resolvePlanApproval({ planId: proposal.planId, runId: proposal.runId, decision: "refine" });
-      dispatch({ type: "PLAN_READY_RESOLVED" });
+      setFeedbackMode(true);
+      setPendingDecision("feedback");
       return;
     }
     if (input === "4") {
-      resolvePlanApproval({ planId: proposal.planId, runId: proposal.runId, decision: "feedback" });
-      dispatch({ type: "PLAN_READY_RESOLVED" });
+      setFeedbackMode(true);
+      setPendingDecision("approve_with_feedback");
       return;
     }
     if (key.escape) {
@@ -37,6 +82,12 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
       return;
     }
   });
+
+  usePaste((text) => {
+    if (!feedbackMode) return;
+    setFeedbackBuffer(feedbackBuffer.slice(0, feedbackCursor) + text + feedbackBuffer.slice(feedbackCursor));
+    setFeedbackCursor(feedbackCursor + text.length);
+  }, { isActive: true });
 
   return (
     <Box flexDirection="column" borderStyle="double" borderColor="cyan" paddingX={2} paddingY={1}>
@@ -57,8 +108,27 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
       {proposal.steps.length > 6 && (
         <Text dimColor>{`  … +${proposal.steps.length - 6} more step(s)`}</Text>
       )}
+      {!!proposal.scopeNotes && (
+        <>
+          <Text> </Text>
+          <Box flexDirection="row">
+            <Text dimColor>{"Scope: "}</Text>
+            <Text dimColor>{proposal.scopeNotes.slice(0, 200)}</Text>
+          </Box>
+        </>
+      )}
       <Text> </Text>
-      <Text dimColor>{"[1] auto-accept all  ·  [2] approve commands  ·  [3] refine (stub)  ·  [4] feedback (stub)  ·  Esc cancel"}</Text>
+      {feedbackMode ? (
+        <>
+          <Text dimColor>{pendingDecision === "approve_with_feedback" ? "Feedback (then run):" : "Feedback (then revise):"}</Text>
+          <Box borderStyle="single" borderColor="cyan">
+            <Text>{renderFeedbackBuffer(feedbackBuffer, feedbackCursor)}</Text>
+          </Box>
+          <Text dimColor>{"Enter to submit  ·  Esc to cancel"}</Text>
+        </>
+      ) : (
+        <Text dimColor>{"[1] auto-accept all  ·  [2] approve commands  ·  [3] give feedback  ·  [4] feedback+run  ·  Esc cancel"}</Text>
+      )}
     </Box>
   );
 }

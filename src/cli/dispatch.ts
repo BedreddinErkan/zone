@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { runLlmPatchFlow, type LlmPatchFlowResult } from "../core/runLlmPatchFlow.js";
 import {
   rejectPendingApprovalsForRun,
@@ -9,6 +10,8 @@ import { rejectPendingRevisionsForRun } from "../llm/revisionApprovals.js";
 import { requestPlanApproval, rejectPendingPlansForRun } from "../llm/planApprovals.js";
 import type { ExecutionPlan } from "../llm/executionPlan.js";
 import { loadCliConfig, validateCliConfig, type CliConfig, type CliFlags } from "./config.js";
+import { loadDiskModelSync } from "../api/diskModel.js";
+import { runPlanInvestigation } from "../llm/planInvestigation.js";
 import { createSpinner, buildCliSink } from "./sink.js";
 import type { LlmPatchProgressUpdate } from "../core/agentLifecycleEvents.js";
 import { preparePlanContext } from "../core/preparePlanContext.js";
@@ -17,6 +20,11 @@ import { runAuditPipeline } from "../llm/auditPipeline.js";
 import { readAuditModeSetting } from "../visual/tierSettings.js";
 import { withRequestContext } from "../llm/openaiContext.js";
 import { applyStdoutInterception } from "./tui/stdoutShield.js";
+
+// Phase 2a quick-plan seeding cost guard
+const QUICK_PLAN_FILES = 5;
+const QUICK_PLAN_FILE_CAP = 3_000;   // chars per file
+const QUICK_PLAN_TOTAL_CAP = 12_000; // chars total budget
 
 export type TuiMode = "normal" | "autoAccept" | "plan";
 
@@ -27,6 +35,8 @@ export interface OneShotOpts {
   /** Custom progress callback; when provided, the built-in sink is bypassed. */
   onProgress?: (update: LlmPatchProgressUpdate) => void;
   mode?: TuiMode;
+  /** Session-memory summary from prior task in this TUI session (Phase 1 opt-in). */
+  priorSessionSummary?: string;
 }
 
 /** Core one-shot runner. Returns the flow result — does NOT call process.exit. */
@@ -63,61 +73,95 @@ export async function runOneShotInner(
       effectiveConfig.provider === "openai" ? effectiveConfig.openaiApiKey :
                                              effectiveConfig.anthropicApiKey;
 
+    // Context for plan-gen: honors user's selected model (fixes silent-Sonnet bug).
+    const planGenCtx = {
+      provider: effectiveConfig.provider,
+      modelOverride: { high: effectiveConfig.model, standard: effectiveConfig.model },
+      effort: effectiveConfig.effort,
+    };
+
+    // Cache repoSummary + relevantFiles so feedback re-plans reuse them without re-investigation.
+    let planCtxRepoSummary = "";
+    let planCtxRelevantFiles: string[] = [];
     let preGeneratedPlan: ExecutionPlan | undefined;
+    progressCallback({ stage: "plan_generation_started", progress: { type: "plan_generation_started", ts: Date.now(), runId, title: "Planning…" } } as unknown as LlmPatchProgressUpdate);
     try {
-      const planCtx = await preparePlanContext({
-        task,
-        repoPath: effectiveConfig.repoPath,
-        userApiKey: planUserApiKey,
-        provider: effectiveConfig.provider,
-      });
-      preGeneratedPlan = await generateExecutionPlan({
-        task,
-        repoSummary: planCtx.projectSummary,
-        relevantFiles: planCtx.relevantFilePaths,
-        userApiKey: planUserApiKey,
-        provider: effectiveConfig.provider,
-      });
+      const planCtx = await withRequestContext(planGenCtx, () =>
+        preparePlanContext({
+          task,
+          repoPath: effectiveConfig.repoPath,
+          userApiKey: planUserApiKey,
+          provider: effectiveConfig.provider,
+        })
+      );
+      planCtxRepoSummary = planCtx.projectSummary;
+      planCtxRelevantFiles = planCtx.relevantFilePaths;
+
+      const diskSettings = loadDiskModelSync(effectiveConfig.repoPath);
+      const planDepth = diskSettings?.planDepth ?? "quick";
+
+      if (planDepth === "investigate") {
+        // Phase 2b: bounded read-only investigation → ExecutionPlan.
+        preGeneratedPlan = await withRequestContext(planGenCtx, () =>
+          runPlanInvestigation({
+            task,
+            repoPath: effectiveConfig.repoPath,
+            runId,
+            relevantFiles: planCtxRelevantFiles,
+            repoSummary: planCtxRepoSummary,
+            userApiKey: planUserApiKey,
+            provider: effectiveConfig.provider,
+            abortSignal: ac.signal,
+            progressCallback,
+          })
+        );
+      } else {
+        // "quick" path: seed top-5 file bodies (Option B, Phase 2a).
+        let seededFileContents: string | undefined;
+        {
+          const candidates = planCtxRelevantFiles.slice(0, QUICK_PLAN_FILES);
+          const parts: string[] = [];
+          let cumChars = 0;
+          for (const fp of candidates) {
+            try {
+              let content = await readFile(fp, "utf-8");
+              if (content.length > QUICK_PLAN_FILE_CAP) content = content.slice(0, QUICK_PLAN_FILE_CAP);
+              if (cumChars + content.length > QUICK_PLAN_TOTAL_CAP) break;
+              parts.push(`=== ${fp} ===\n${content}`);
+              cumChars += content.length;
+            } catch { /* skip unreadable */ }
+          }
+          if (parts.length > 0) seededFileContents = parts.join("\n\n");
+        }
+        preGeneratedPlan = await withRequestContext(planGenCtx, () =>
+          generateExecutionPlan({
+            task,
+            repoSummary: planCtxRepoSummary,
+            relevantFiles: planCtxRelevantFiles,
+            userApiKey: planUserApiKey,
+            provider: effectiveConfig.provider,
+            seededFileContents,
+          })
+        );
+      }
     } catch (e) { console.error("[zone-plan-gen-failed]", e); }
 
-    if (process.env["ZONE_PLAN_APPROVAL_CYCLE"] === "1") {
-      // NEW PATH: show "Ready to code?" modal — no forced audit.
-      if (preGeneratedPlan) {
-        let looping = true;
-        while (looping) {
-          const result = await requestPlanApproval({
-            proposal: {
-              runId,
-              planId: randomUUID(),
-              objective: preGeneratedPlan.objective,
-              steps: preGeneratedPlan.steps,
-            },
-            emit: (evt) => progressCallback({ stage: evt.type, progress: evt } as unknown as LlmPatchProgressUpdate),
-            abortSignal: ac.signal,
-            autoApprove: effectiveConfig.autoApprove,
-          });
-          switch (result.decision) {
-            case "reject":
-            case "timeout":
-              ac.abort();
-              return { ok: false as const, reason: "plan_rejected_by_user" } as unknown as LlmPatchFlowResult;
-            case "refine":
-            case "feedback":
-              // Phase 1 stub: re-show same plan
-              continue;
-            case "accept_all":
-              setTrustAllForRun(runId);
-              looping = false;
-              break;
-            case "manual":
-            default:
-              looping = false;
-          }
-        }
-        planForExecution = preGeneratedPlan;
-      }
-    } else {
-      // OLD PATH: forceAudit + PlanModal A/R (unchanged)
+    if (!preGeneratedPlan) {
+      progressCallback({
+        stage: "narration",
+        progress: {
+          type: "narration",
+          runId,
+          ts: Date.now(),
+          title: "Plan generation failed",
+          text: "Plan generation failed — proceeding without a plan.",
+        },
+      });
+      // Graceful fallback: no plan approval shown, execution continues unplanned.
+    }
+
+    if (process.env["ZONE_PLAN_LEGACY_AUDIT"] === "1") {
+      // Legacy escape hatch: old forced-audit + PlanModal A/R path.
       const auditResult = await runAuditPipeline({
         task,
         repoPath: effectiveConfig.repoPath,
@@ -134,11 +178,78 @@ export async function runOneShotInner(
         autoApprove: false,
         isHeadless: false,
       });
-
       if (auditResult.revisionDecision === "reject") {
         ac.abort();
         return { ok: false as const, reason: "plan_rejected_by_user" } as unknown as LlmPatchFlowResult;
       }
+      // On approve: thread preGeneratedPlan so it reaches runLlmPatchFlow.
+      planForExecution = preGeneratedPlan;
+    } else if (preGeneratedPlan) {
+      // Default: cheap requestPlanApproval loop with feedback/refine/approve_with_feedback.
+      let currentPlan = preGeneratedPlan;
+      let looping = true;
+      while (looping) {
+        const result = await requestPlanApproval({
+          proposal: {
+            runId,
+            planId: randomUUID(),
+            objective: currentPlan.objective,
+            steps: currentPlan.steps,
+            scopeNotes: currentPlan.scopeNotes,
+          },
+          emit: (evt) => progressCallback({ stage: evt.type, progress: evt } as unknown as LlmPatchProgressUpdate),
+          abortSignal: ac.signal,
+          autoApprove: effectiveConfig.autoApprove,
+        });
+        switch (result.decision) {
+          case "reject":
+          case "timeout":
+            ac.abort();
+            return { ok: false as const, reason: "plan_rejected_by_user" } as unknown as LlmPatchFlowResult;
+          case "feedback":
+          case "refine":
+            progressCallback({ stage: "plan_generation_started", progress: { type: "plan_generation_started", ts: Date.now(), runId, title: "Replanning…" } } as unknown as LlmPatchProgressUpdate);
+            try {
+              currentPlan = await withRequestContext(planGenCtx, () =>
+                generateExecutionPlan({
+                  task,
+                  repoSummary: planCtxRepoSummary,
+                  relevantFiles: planCtxRelevantFiles,
+                  userApiKey: planUserApiKey,
+                  provider: effectiveConfig.provider,
+                  previousPlan: currentPlan,
+                  userFeedback: result.feedback,
+                })
+              );
+            } catch (e) { console.error("[zone-plan-replan-failed]", e); }
+            continue;
+          case "approve_with_feedback":
+            progressCallback({ stage: "plan_generation_started", progress: { type: "plan_generation_started", ts: Date.now(), runId, title: "Replanning…" } } as unknown as LlmPatchProgressUpdate);
+            try {
+              currentPlan = await withRequestContext(planGenCtx, () =>
+                generateExecutionPlan({
+                  task,
+                  repoSummary: planCtxRepoSummary,
+                  relevantFiles: planCtxRelevantFiles,
+                  userApiKey: planUserApiKey,
+                  provider: effectiveConfig.provider,
+                  previousPlan: currentPlan,
+                  userFeedback: result.feedback,
+                })
+              );
+            } catch (e) { console.error("[zone-plan-replan-failed]", e); }
+            looping = false;
+            break;
+          case "accept_all":
+            setTrustAllForRun(runId);
+            looping = false;
+            break;
+          case "manual":
+          default:
+            looping = false;
+        }
+      }
+      planForExecution = currentPlan;
     }
   }
 
@@ -177,6 +288,9 @@ export async function runOneShotInner(
         forceTier: effectiveConfig.forceTier,
         mode: "patch",
         preGeneratedPlan: planForExecution,
+        summaryFormat: effectiveConfig.summaryFormat,
+        priorSessionSummary: opts.priorSessionSummary,
+        webSearchEnabled: effectiveConfig.webSearchEnabled,
       })
     );
 
