@@ -10,6 +10,7 @@ import { buildLoopCompleteSummary, buildRunSummary } from "../../../core/eventPr
 import { formatCompactionNarration } from "../../../core/compactionNarration.js";
 // re-exported so existing callers importing it from this module continue to work
 export { formatCompactionNarration };
+import type { RunTodo, TodoStatus } from "../../../core/todoLifecycle.js";
 
 export function handleCompactionStarted(
   _evt: ZoneStructuredProgressEvent,
@@ -60,6 +61,59 @@ export function handleCompactionOverflow(
       message: "Context window full — no history to compact",
       level: "warning",
     },
+  });
+}
+
+export function handleTodosInitialized(
+  evt: ZoneStructuredProgressEvent,
+  dispatch: Dispatch<StoreAction>
+): void {
+  dispatch({ type: "TODOS_SET", todos: (evt.todos as RunTodo[]) ?? [] });
+}
+
+export function handleTodoRevised(
+  evt: ZoneStructuredProgressEvent,
+  dispatch: Dispatch<StoreAction>
+): void {
+  dispatch({ type: "TODOS_SET", todos: (evt.todos as RunTodo[]) ?? [] });
+}
+
+export function handleTodoStatusChanged(
+  evt: ZoneStructuredProgressEvent,
+  dispatch: Dispatch<StoreAction>
+): void {
+  if (!evt.todoId) return;
+  dispatch({
+    type: "TODO_STATUS_SET",
+    todoId: evt.todoId,
+    status: evt.todoStatus as TodoStatus,
+  });
+}
+
+export function handlePlanGenerationStarted(
+  evt: ZoneStructuredProgressEvent,
+  dispatch: Dispatch<StoreAction>
+): void {
+  dispatch({ type: "SPINNER_START", label: evt.title ?? "Planning…" });
+}
+
+export function handlePlanReadyForApprovalExported(
+  evt: ZoneStructuredProgressEvent,
+  dispatch: Dispatch<StoreAction>
+): void {
+  if (!evt.planId) return;
+  let steps: Array<{ title: string; description: string; filesLikely: string[] }> = [];
+  try {
+    if (evt.planStepsJson) steps = JSON.parse(evt.planStepsJson);
+  } catch { /* malformed JSON — render with empty steps */ }
+  dispatch({ type: "SPINNER_STOP" });
+  dispatch({
+    type: "PLAN_READY_PROPOSED",
+    planId: evt.planId,
+    runId: evt.runId,
+    objective: evt.planObjective ?? "",
+    steps,
+    scopeNotes: evt.planScopeNotes,
   });
 }
 
@@ -227,18 +281,7 @@ export function useAgentEvents(
     }
 
     function handlePlanReadyForApproval(evt: ZoneStructuredProgressEvent): void {
-      if (!evt.planId) return;
-      let steps: Array<{ title: string; description: string; filesLikely: string[] }> = [];
-      try {
-        if (evt.planStepsJson) steps = JSON.parse(evt.planStepsJson);
-      } catch { /* malformed JSON — render with empty steps */ }
-      dispatch({
-        type: "PLAN_READY_PROPOSED",
-        planId: evt.planId,
-        runId: evt.runId,
-        objective: evt.planObjective ?? "",
-        steps,
-      });
+      handlePlanReadyForApprovalExported(evt, dispatch);
     }
 
     function handleRevisionProposed(evt: ZoneStructuredProgressEvent): void {
@@ -302,6 +345,16 @@ export function useAgentEvents(
     bus.on("compaction_exhausted",        onExhausted);
     bus.on("compaction_overflow_warning", onOverflow);
 
+    const onTodosInitialized = (evt: ZoneStructuredProgressEvent) => handleTodosInitialized(evt, dispatch);
+    const onTodoRevised      = (evt: ZoneStructuredProgressEvent) => handleTodoRevised(evt, dispatch);
+    const onTodoStatus       = (evt: ZoneStructuredProgressEvent) => handleTodoStatusChanged(evt, dispatch);
+    bus.on("todos_initialized",   onTodosInitialized);
+    bus.on("todo_revised",        onTodoRevised);
+    bus.on("todo_status_changed", onTodoStatus);
+
+    const onPlanGenStarted = (evt: ZoneStructuredProgressEvent) => handlePlanGenerationStarted(evt, dispatch);
+    bus.on("plan_generation_started", onPlanGenStarted);
+
     return () => {
       if (debounceTimer.current !== null) {
         clearTimeout(debounceTimer.current);
@@ -338,6 +391,10 @@ export function useAgentEvents(
       bus.off("compaction_status",           onStatus);
       bus.off("compaction_exhausted",        onExhausted);
       bus.off("compaction_overflow_warning", onOverflow);
+      bus.off("todos_initialized",   onTodosInitialized);
+      bus.off("todo_revised",        onTodoRevised);
+      bus.off("todo_status_changed", onTodoStatus);
+      bus.off("plan_generation_started", onPlanGenStarted);
     };
   }, [bus, dispatch]);
 }
