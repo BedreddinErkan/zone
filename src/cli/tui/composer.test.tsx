@@ -209,4 +209,119 @@ describe("TUI.4 composer", () => {
     expect(lastFrame()).toContain("↑↓ navigate · Enter select · Esc cancel");
     unmount();
   });
+
+  // ── User-defined slash command tests ──────────────────────────────────────
+
+  it("project command appears in palette with (project) tag", async () => {
+    const cmds = [{ name: "/review", description: "Review the diff", body: "Review the changes." }];
+    const { lastFrame, stdin, unmount } = render(<App initialUserCommands={cmds} />);
+    stdin.write("/rev");
+    await wait(50);
+    expect(lastFrame()).toContain("/review");
+    expect(lastFrame()).toContain("(project)");
+    unmount();
+  });
+
+  it("user command colliding with built-in is not shown; built-in runs instead", async () => {
+    // Seed a /help command — should be dropped; built-in /help must win.
+    const cmds = [{ name: "/help", description: "Custom", body: "CUSTOM BODY SENTINEL" }];
+    const { lastFrame, stdin, unmount } = render(<App initialUserCommands={cmds} />);
+    stdin.write("/help");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+    expect(lastFrame()).toContain("Key bindings"); // built-in /help output
+    expect(lastFrame()).not.toContain("CUSTOM BODY SENTINEL");
+    unmount();
+  });
+
+  it("firing a project command calls onSubmit with its body", async () => {
+    const onSubmit = vi.fn();
+    const cmds = [{ name: "/review", description: "Review diff", body: "Review the diff for issues." }];
+    const { stdin, unmount } = render(<App onSubmit={onSubmit} initialUserCommands={cmds} />);
+    stdin.write("/review");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.calls[0][0]).toBe("Review the diff for issues.");
+    expect(onSubmit.mock.calls[0][1]).toBeInstanceOf(AbortController);
+    unmount();
+  });
+
+  it("project command while running shows disabled message, does not call onSubmit", async () => {
+    const bus = createEventBus();
+    const onSubmit = vi.fn();
+    const cmds = [{ name: "/review", description: "Review diff", body: "Review the changes." }];
+    const { lastFrame, stdin, unmount } = render(<App bus={bus} onSubmit={onSubmit} initialUserCommands={cmds} />);
+
+    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
+    await wait(50);
+
+    stdin.write("/review");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+
+    expect(lastFrame()).toContain("Cannot run /review while a run is in progress.");
+    expect(onSubmit).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  // ── $ARGUMENTS substitution tests ─────────────────────────────────────────
+
+  it("$ARGUMENTS body + args → substituted in onSubmit call", async () => {
+    const onSubmit = vi.fn();
+    const cmds = [{ name: "/review", description: "Review", body: "Review $ARGUMENTS for issues." }];
+    const { stdin, unmount } = render(<App onSubmit={onSubmit} initialUserCommands={cmds} />);
+    stdin.write("/review src/foo.ts");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.calls[0][0]).toBe("Review src/foo.ts for issues.");
+    unmount();
+  });
+
+  it("$ARGUMENTS body + no args → $ARGUMENTS replaced by empty string", async () => {
+    const onSubmit = vi.fn();
+    const cmds = [{ name: "/review", description: "Review", body: "Review $ARGUMENTS for issues." }];
+    const { stdin, unmount } = render(<App onSubmit={onSubmit} initialUserCommands={cmds} />);
+    stdin.write("/review");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.calls[0][0]).toBe("Review  for issues.");
+    unmount();
+  });
+
+  it("body without $ARGUMENTS + args passed → body fires verbatim (args unused)", async () => {
+    const onSubmit = vi.fn();
+    const cmds = [{ name: "/review", description: "Review", body: "Review the diff." }];
+    const { stdin, unmount } = render(<App onSubmit={onSubmit} initialUserCommands={cmds} />);
+    stdin.write("/review extra args here");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.calls[0][0]).toBe("Review the diff.");
+    unmount();
+  });
+
+  it("disabled guard blocks /cmd args while running", async () => {
+    const bus = createEventBus();
+    const onSubmit = vi.fn();
+    const cmds = [{ name: "/review", description: "Review", body: "Review $ARGUMENTS." }];
+    const { lastFrame, stdin, unmount } = render(<App bus={bus} onSubmit={onSubmit} initialUserCommands={cmds} />);
+    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
+    await wait(50);
+    stdin.write("/review src/foo.ts");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+    expect(lastFrame()).toContain("Cannot run /review while a run is in progress.");
+    expect(onSubmit).not.toHaveBeenCalled();
+    unmount();
+  });
 });

@@ -7,6 +7,9 @@ import type { TuiMode } from "../dispatch.js";
 import type { DiskModelSettings } from "../../api/diskModel.js";
 import { supportsEffort } from "../../llm/modelRegistry.js";
 import type { EffortLevel } from "../../llm/modelRegistry.js";
+import type { RunTodo, TodoStatus } from "../../core/todoLifecycle.js";
+import { startTodo, completeTodo } from "../../core/todoLifecycle.js";
+import type { UserCommand } from "./userCommands.js";
 
 export type { TuiMode };
 
@@ -40,6 +43,7 @@ export type TranscriptEntry =
 export type StatusBarState = {
   iter: number;
   costUsd: number;
+  dailyUsedUsd: number;
   capUsd: number;
   model: string;
   tokenBudgetRatio: number;
@@ -57,7 +61,11 @@ export type StoreState = {
   spinner: { active: boolean; label: string } | null;
   statusBar: StatusBarState;
   runState: RunState;
+  /** Wall-clock start of the CURRENT task (reset per run, not per session). */
   runStartMs?: number;
+  /** Wall-clock completion of the last task — frozen so the displayed duration
+   *  doesn't keep ticking while the "done" status is shown. */
+  runEndMs?: number;
   toastQueue: ToastEntry[];
   modalStack: ModalEntry[];
   pendingApproval: { approvalId: string; runId: string; command: string } | null;
@@ -73,12 +81,16 @@ export type StoreState = {
     missingFiles?: string[];
     unnecessaryFiles?: string[];
   } | null;
-  modalView: "none" | "permissions" | "keys" | "sessions" | "plan" | "model" | "effort" | "metrics" | "limits" | "plan_ready";
+  modalView: "none" | "permissions" | "keys" | "sessions" | "plan" | "model" | "effort" | "metrics" | "limits" | "plan_ready" | "summary" | "session" | "commit";
+  commitData: { filePaths: string[]; message: string; repoPath: string } | null;
+  summarySelectedIndex: number;
+  memorySelectedIndex: number;
   planReadyProposal: {
     planId: string;
     runId: string;
     objective: string;
     steps: Array<{ title: string; description: string; filesLikely: string[] }>;
+    scopeNotes?: string;
   } | null;
   modelSettings: DiskModelSettings | null;
   modelSelectedIndex: number;
@@ -93,16 +105,20 @@ export type StoreState = {
   sessionsList: SessionMeta[];
   sessionsSelectedIndex: number;
   transcriptGeneration: number;
+  todos: RunTodo[];
+  userCommands: UserCommand[];
 };
 
 export function buildInitialState(initialValues?: {
   model: string;
   capUsd: number;
+  dailyUsedUsd?: number;
   trustedPrefixes?: string[];
   resumedTranscript?: TranscriptEntry[];
   resumedSessionId?: string;
   resumedStartedAt?: string;
   modelSettings?: DiskModelSettings | null;
+  userCommands?: UserCommand[];
 }): StoreState {
   return {
     transcript: initialValues?.resumedTranscript ?? [],
@@ -114,6 +130,7 @@ export function buildInitialState(initialValues?: {
     statusBar: {
       iter: 0,
       costUsd: 0,
+      dailyUsedUsd: initialValues?.dailyUsedUsd ?? 0,
       capUsd: initialValues?.capUsd ?? 10,
       model: initialValues?.modelSettings?.model ?? initialValues?.model ?? "",
       tokenBudgetRatio: 0,
@@ -121,6 +138,7 @@ export function buildInitialState(initialValues?: {
     },
     runState: "idle",
     runStartMs: undefined,
+    runEndMs: undefined,
     toastQueue: [],
     modalStack: [],
     pendingApproval: null,
@@ -129,9 +147,12 @@ export function buildInitialState(initialValues?: {
     planProposal: null,
     planReadyProposal: null,
     modalView: "none",
+    commitData: null,
     modelSettings: initialValues?.modelSettings ?? null,
     modelSelectedIndex: 0,
     effortSelectedIndex: 1,
+    summarySelectedIndex: 0,
+    memorySelectedIndex: 0,
     permissionsList: [],
     permissionsSelectedIndex: 0,
     keysList: [],
@@ -142,6 +163,8 @@ export function buildInitialState(initialValues?: {
     sessionsList: [],
     sessionsSelectedIndex: 0,
     transcriptGeneration: 0,
+    todos: [],
+    userCommands: initialValues?.userCommands ?? [],
   };
 }
 
@@ -154,6 +177,7 @@ export type StoreAction =
   | { type: "TOOL_RESULT_PUSH"; ok: boolean; detail: string; blocked?: true }
   | { type: "TOOL_CALL_CLOSE" }
   | { type: "STATUS_UPDATE"; iter?: number; costUsd?: number; tokenBudgetRatio?: number; tokens?: number }
+  | { type: "DAILY_USED_UPDATE"; dailyUsedUsd: number }
   | { type: "TOAST_PUSH"; entry: ToastEntry }
   | { type: "TOAST_POP" }
   | { type: "PHASE_MARKER"; phase: string }
@@ -163,6 +187,7 @@ export type StoreAction =
   | { type: "USER_PROMPT"; text: string }
   | { type: "ASSISTANT_FINAL"; text: string }
   | { type: "TRANSCRIPT_CLEAR" }
+  | { type: "TRANSCRIPT_REMOUNT" }
   | { type: "PENDING_APPROVAL_SET"; approvalId: string; runId: string; command: string }
   | { type: "PENDING_APPROVAL_RESOLVED" }
   | { type: "SESSION_TRUST_PREFIX"; prefix: string }
@@ -194,6 +219,15 @@ export type StoreAction =
   | { type: "EFFORT_MODAL_CLOSE" }
   | { type: "EFFORT_APPLY"; effort: EffortLevel }
   | { type: "EFFORT_NAV"; direction: "up" | "down" }
+  | { type: "SUMMARY_MODAL_OPEN" }
+  | { type: "SUMMARY_MODAL_CLOSE" }
+  | { type: "SUMMARY_APPLY"; summaryFormat: "compact" | "detailed" }
+  | { type: "SUMMARY_NAV"; direction: "up" | "down" }
+  | { type: "MEMORY_MODAL_OPEN" }
+  | { type: "MEMORY_MODAL_CLOSE" }
+  | { type: "MEMORY_APPLY"; memoryEnabled: boolean }
+  | { type: "MEMORY_NAV"; direction: "up" | "down" }
+  | { type: "SESSION_MEMORY_CLEAR"; newSessionId: string }
   | { type: "METRICS_MODAL_OPEN" }
   | { type: "METRICS_MODAL_CLOSE" }
   | { type: "LIMITS_MODAL_OPEN" }
@@ -217,9 +251,16 @@ export type StoreAction =
       runId: string;
       objective: string;
       steps: Array<{ title: string; description: string; filesLikely: string[] }>;
+      scopeNotes?: string;
     }
   | { type: "PLAN_READY_RESOLVED" }
-  | { type: "NARRATION_COMMIT" };
+  | { type: "NARRATION_COMMIT" }
+  | { type: "COMMIT_MODAL_OPEN"; filePaths: string[]; message: string; repoPath: string }
+  | { type: "COMMIT_MODAL_CLOSE" }
+  | { type: "AUTOCOMMIT_APPLY"; commitOnSuccess: boolean }
+  | { type: "WEBSEARCH_APPLY"; webSearchEnabled: boolean }
+  | { type: "TODOS_SET"; todos: RunTodo[] }
+  | { type: "TODO_STATUS_SET"; todoId: string; status: TodoStatus };
 
 export function reducer(state: StoreState, action: StoreAction): StoreState {
   switch (action.type) {
@@ -228,7 +269,13 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         ...state,
         spinner: { active: true, label: action.label },
         runState: "running",
-        runStartMs: state.runStartMs ?? Date.now(),
+        // Reset the per-task timer only when ENTERING a run. A mid-run
+        // SPINNER_START (e.g. a nested/subagent loop) keeps the original start.
+        // The previous `state.runStartMs ?? Date.now()` captured the start once
+        // on the first task and never reset it → durations grew monotonically
+        // across the whole session (116 → 532 → 1276 …).
+        runStartMs: state.runState === "running" ? state.runStartMs : Date.now(),
+        runEndMs: state.runState === "running" ? state.runEndMs : undefined,
       };
     case "SPINNER_UPDATE":
       return { ...state, spinner: { active: true, label: action.label } };
@@ -301,6 +348,8 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         ...state,
         spinner: null,
         runState: "done",
+        // Freeze the duration at completion (excludes idle / reading time).
+        runEndMs: Date.now(),
         liveTail: { ...state.liveTail, currentToolCall: null },
       };
 
@@ -309,12 +358,14 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         ...state,
         spinner: null,
         runState: "aborted",
+        runEndMs: Date.now(),
         liveTail: { ...state.liveTail, currentToolCall: null },
       };
 
     case "USER_PROMPT":
       return {
         ...state,
+        todos: [],
         transcript: [...state.transcript, { kind: "user_prompt", text: action.text }],
       };
 
@@ -325,7 +376,10 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       };
 
     case "TRANSCRIPT_CLEAR":
-      return { ...state, transcript: [] };
+      return { ...state, transcript: [], todos: [] };
+
+    case "TRANSCRIPT_REMOUNT":
+      return { ...state, transcriptGeneration: state.transcriptGeneration + 1 };
 
     case "PENDING_APPROVAL_SET":
       return { ...state, pendingApproval: { approvalId: action.approvalId, runId: action.runId, command: action.command } };
@@ -439,10 +493,13 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         liveTail: { currentToolCall: null, narrationBuffer: "" },
         spinner: null,
         runState: "idle",
+        runStartMs: undefined,
+        runEndMs: undefined,
         modalView: "none",
         planReadyProposal: null,
         statusBar: { ...state.statusBar, costUsd: 0, iter: 0 },
         transcriptGeneration: state.transcriptGeneration + 1,
+        todos: [],
       };
 
     case "MODE_CYCLE":
@@ -482,11 +539,12 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
           runId: action.runId,
           objective: action.objective,
           steps: action.steps,
+          ...(action.scopeNotes ? { scopeNotes: action.scopeNotes } : {}),
         },
       };
 
     case "PLAN_READY_RESOLVED":
-      return { ...state, modalView: "none", planReadyProposal: null };
+      return { ...state, modalView: "none", planReadyProposal: null, mode: "normal" };
 
     case "TRANSCRIPT_APPEND_NARRATION":
       if (!action.text) return state;
@@ -550,6 +608,9 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     case "LIMITS_APPLY":
       return { ...state, statusBar: { ...state.statusBar, capUsd: action.capUsd }, modalView: "none" };
 
+    case "DAILY_USED_UPDATE":
+      return { ...state, statusBar: { ...state.statusBar, dailyUsedUsd: action.dailyUsedUsd } };
+
     case "EFFORT_APPLY": {
       const updated: DiskModelSettings = state.modelSettings
         ? { ...state.modelSettings, effort: action.effort, updatedAt: new Date().toISOString() }
@@ -563,6 +624,98 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         ? Math.max(0, state.effortSelectedIndex - 1)
         : Math.min(EFFORT_COUNT - 1, state.effortSelectedIndex + 1);
       return { ...state, effortSelectedIndex: next };
+    }
+
+    case "SUMMARY_MODAL_OPEN":
+      return { ...state, modalView: "summary" };
+
+    case "SUMMARY_MODAL_CLOSE":
+      return { ...state, modalView: "none" };
+
+    case "SUMMARY_APPLY": {
+      const updated: DiskModelSettings = state.modelSettings
+        ? { ...state.modelSettings, summaryFormat: action.summaryFormat, updatedAt: new Date().toISOString() }
+        : { version: 2, model: "claude-sonnet-4-6", provider: "anthropic", summaryFormat: action.summaryFormat, updatedAt: new Date().toISOString() };
+      return { ...state, modelSettings: updated, modalView: "none" };
+    }
+
+    case "SUMMARY_NAV": {
+      const SUMMARY_COUNT = 2;
+      const next = action.direction === "up"
+        ? Math.max(0, state.summarySelectedIndex - 1)
+        : Math.min(SUMMARY_COUNT - 1, state.summarySelectedIndex + 1);
+      return { ...state, summarySelectedIndex: next };
+    }
+
+    case "MEMORY_MODAL_OPEN":
+      return { ...state, modalView: "session" };
+
+    case "MEMORY_MODAL_CLOSE":
+      return { ...state, modalView: "none" };
+
+    case "MEMORY_APPLY": {
+      const updated: DiskModelSettings = state.modelSettings
+        ? { ...state.modelSettings, memoryEnabled: action.memoryEnabled, updatedAt: new Date().toISOString() }
+        : { version: 2, model: "claude-sonnet-4-6", provider: "anthropic", memoryEnabled: action.memoryEnabled, updatedAt: new Date().toISOString() };
+      return { ...state, modelSettings: updated, modalView: "none" };
+    }
+
+    case "MEMORY_NAV": {
+      const MEMORY_COUNT = 3;  // Off, On, Clear
+      const next = action.direction === "up"
+        ? Math.max(0, state.memorySelectedIndex - 1)
+        : Math.min(MEMORY_COUNT - 1, state.memorySelectedIndex + 1);
+      return { ...state, memorySelectedIndex: next };
+    }
+
+    case "SESSION_MEMORY_CLEAR":
+      return {
+        ...state,
+        sessionId: action.newSessionId,
+        modalView: "none",
+        transcript: [
+          ...state.transcript,
+          { kind: "user_prompt" as const, text: "Session memory cleared — starting fresh." },
+        ],
+      };
+
+    case "COMMIT_MODAL_OPEN":
+      return { ...state, modalView: "commit", commitData: { filePaths: action.filePaths, message: action.message, repoPath: action.repoPath } };
+
+    case "COMMIT_MODAL_CLOSE":
+      return { ...state, modalView: "none" };
+
+    case "AUTOCOMMIT_APPLY": {
+      const updated: DiskModelSettings = state.modelSettings
+        ? { ...state.modelSettings, commitOnSuccess: action.commitOnSuccess, updatedAt: new Date().toISOString() }
+        : { version: 2, model: "claude-sonnet-4-6", provider: "anthropic", commitOnSuccess: action.commitOnSuccess, updatedAt: new Date().toISOString() };
+      return { ...state, modelSettings: updated };
+    }
+
+    case "WEBSEARCH_APPLY": {
+      const updated: DiskModelSettings = state.modelSettings
+        ? { ...state.modelSettings, webSearchEnabled: action.webSearchEnabled, updatedAt: new Date().toISOString() }
+        : { version: 2, model: "claude-sonnet-4-6", provider: "anthropic", webSearchEnabled: action.webSearchEnabled, updatedAt: new Date().toISOString() };
+      return { ...state, modelSettings: updated };
+    }
+
+    case "TODOS_SET":
+      return { ...state, todos: action.todos };
+
+    case "TODO_STATUS_SET": {
+      if (state.todos.length === 0) return state;
+      let next: RunTodo[];
+      if (action.status === "in_progress") {
+        next = startTodo(state.todos, action.todoId);
+      } else if (action.status === "completed") {
+        next = completeTodo(state.todos, action.todoId);
+      } else {
+        next = state.todos.map(t =>
+          t.id === action.todoId ? { ...t, status: action.status } : t
+        );
+      }
+      if (next === state.todos) return state;
+      return { ...state, todos: next };
     }
 
     default:
@@ -586,11 +739,13 @@ export function StoreProvider({
   initialValues?: {
     model: string;
     capUsd: number;
+    dailyUsedUsd?: number;
     trustedPrefixes?: string[];
     resumedTranscript?: TranscriptEntry[];
     resumedSessionId?: string;
     resumedStartedAt?: string;
     modelSettings?: DiskModelSettings | null;
+    userCommands?: UserCommand[];
   };
 }): React.ReactElement {
   const [state, dispatch] = useReducer(reducer, undefined, () =>

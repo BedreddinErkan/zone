@@ -1,5 +1,5 @@
 import { Box, Text, useInput, useApp } from "ink";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type Dispatch } from "react";
 import { StoreProvider, useStore } from "./store.js";
 import { useAgentEvents } from "./hooks/useAgentEvents.js";
 import { Transcript } from "./components/Transcript.js";
@@ -15,27 +15,37 @@ import { PlanModal } from "./components/PlanModal.js";
 import { PlanReadyModal } from "./components/PlanReadyModal.js";
 import { ModelModal } from "./components/ModelModal.js";
 import { EffortModal } from "./components/EffortModal.js";
+import { SummaryModal } from "./components/SummaryModal.js";
+import { SessionMemoryModal } from "./components/SessionMemoryModal.js";
 import { MetricsModal } from "./components/MetricsModal.js";
 import { LimitsModal } from "./components/LimitsModal.js";
+import { CommitModal } from "./components/CommitModal.js";
+import { PlanPanel } from "./components/PlanPanel.js";
 import { resolveCommandApproval } from "../../api/commandApprovals.js";
 import { resolvePlanApproval } from "../../llm/planApprovals.js";
 import type { EventBus } from "../eventBus.js";
 import type { DiskSession } from "../../api/diskSessions.js";
 import type { DiskModelSettings } from "../../api/diskModel.js";
 import type { EffortLevel } from "../../llm/modelRegistry.js";
-import type { StoreState, TuiMode } from "./store.js";
+import type { StoreState, StoreAction, TuiMode } from "./store.js";
+import type { UserCommand } from "./userCommands.js";
 
 interface AppProps {
   initialPrompt?: string;
   bus?: EventBus;
   initialModel?: string;
   capUsd?: number;
+  initialDailyUsedUsd?: number;
   onSubmit?: (prompt: string, ac: AbortController, mode: TuiMode) => void;
   initialTrustedPrefixes?: string[];
   resumedSession?: DiskSession;
   onStateChange?: (state: StoreState) => void;
   initialModelSettings?: DiskModelSettings | null;
-  onModelApply?: (model: string, provider: "anthropic" | "openai", effort?: EffortLevel) => void;
+  onModelApply?: (model: string, provider: "anthropic" | "openai", effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void;
+  getCommitData?: () => { filePaths: string[]; message: string; repoPath: string } | null;
+  onDispatchCapture?: (dispatch: Dispatch<StoreAction>) => void;
+  onSessionClear?: (oldSessionId: string) => void;
+  initialUserCommands?: UserCommand[];
 }
 
 interface AppInnerProps {
@@ -43,10 +53,13 @@ interface AppInnerProps {
   initialPrompt: string | undefined;
   onSubmit: ((prompt: string, ac: AbortController, mode: TuiMode) => void) | undefined;
   onStateChange: ((state: StoreState) => void) | undefined;
-  onModelApply: ((model: string, provider: "anthropic" | "openai", effort?: EffortLevel) => void) | undefined;
+  onModelApply: ((model: string, provider: "anthropic" | "openai", effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void) | undefined;
+  getCommitData: (() => { filePaths: string[]; message: string; repoPath: string } | null) | undefined;
+  onDispatchCapture: ((dispatch: Dispatch<StoreAction>) => void) | undefined;
+  onSessionClear: ((oldSessionId: string) => void) | undefined;
 }
 
-function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }: AppInnerProps): React.ReactElement {
+function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply, getCommitData, onDispatchCapture, onSessionClear }: AppInnerProps): React.ReactElement {
   const { exit } = useApp();
   const { state, dispatch } = useStore();
   const runAcRef = useRef<AbortController | null>(null);
@@ -61,10 +74,13 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }:
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 
+  // Capture dispatch once for use in imperative code outside React (e.g. auto-commit toasts).
+  useEffect(() => { onDispatchCapture?.(dispatch); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Propagate model/effort selection back to the live config so next run uses the selected model.
   useEffect(() => {
     if (state.modelSettings) {
-      onModelApply?.(state.modelSettings.model, state.modelSettings.provider, state.modelSettings.effort);
+      onModelApply?.(state.modelSettings.model, state.modelSettings.provider, state.modelSettings.effort, state.modelSettings.summaryFormat, state.modelSettings.memoryEnabled, state.modelSettings.commitOnSuccess);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.modelSettings]);
@@ -140,8 +156,11 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }:
       {state.modalView === "sessions" && <SessionsModal />}
       {state.modalView === "model" && <ModelModal dispatch={dispatch} />}
       {state.modalView === "effort" && <EffortModal dispatch={dispatch} />}
+      {state.modalView === "summary" && <SummaryModal dispatch={dispatch} />}
+      {state.modalView === "session" && <SessionMemoryModal dispatch={dispatch} onSessionClear={onSessionClear} />}
       {state.modalView === "metrics" && <MetricsModal />}
       {state.modalView === "limits" && <LimitsModal />}
+      {state.modalView === "commit" && <CommitModal dispatch={dispatch} />}
       {state.planProposal !== null && (
         <PlanModal proposal={state.planProposal} dispatch={dispatch} />
       )}
@@ -158,24 +177,29 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply }:
       </Box>
       <Spinner />
       {modals}
-      <Composer onSubmit={handleComposerSubmit} onExit={exit} />
+      <Composer onSubmit={handleComposerSubmit} onExit={exit} getCommitData={getCommitData} />
+      {state.runState === "running" && state.todos.length > 0 && (
+        <PlanPanel todos={state.todos} />
+      )}
       <StatusBar />
     </Box>
   );
 }
 
-export function App({ initialPrompt, bus, initialModel, capUsd, onSubmit, initialTrustedPrefixes, resumedSession, onStateChange, initialModelSettings, onModelApply }: AppProps): React.ReactElement {
+export function App({ initialPrompt, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, initialTrustedPrefixes, resumedSession, onStateChange, initialModelSettings, onModelApply, getCommitData, onDispatchCapture, onSessionClear, initialUserCommands }: AppProps): React.ReactElement {
   return (
     <StoreProvider initialValues={{
       model: initialModel ?? "",
       capUsd: capUsd ?? 10,
+      dailyUsedUsd: initialDailyUsedUsd ?? 0,
       trustedPrefixes: initialTrustedPrefixes ?? [],
       resumedTranscript: resumedSession?.transcript,
       resumedSessionId: resumedSession?.sessionId,
       resumedStartedAt: resumedSession?.startedAt,
       modelSettings: initialModelSettings,
+      userCommands: initialUserCommands ?? [],
     }}>
-      <AppInner bus={bus} initialPrompt={initialPrompt} onSubmit={onSubmit} onStateChange={onStateChange} onModelApply={onModelApply} />
+      <AppInner bus={bus} initialPrompt={initialPrompt} onSubmit={onSubmit} onStateChange={onStateChange} onModelApply={onModelApply} getCommitData={getCommitData} onDispatchCapture={onDispatchCapture} onSessionClear={onSessionClear} />
     </StoreProvider>
   );
 }

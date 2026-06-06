@@ -412,10 +412,12 @@ describe("Transcript harness — entry kinds", () => {
     h.unmount();
   });
 
-  it("user_prompt renders with bordered cyan box and ▸ prefix", () => {
+  it("user_prompt renders ▸ prefix and text without border characters", () => {
     const h = renderTranscript([{ kind: "user_prompt", text: "fix the bug" }]);
     expect(h.anyFrameContains("▸")).toBe(true);
     expect(h.anyFrameContains("fix the bug")).toBe(true);
+    const frame = h.lastFrame() ?? "";
+    expect(frame).not.toMatch(/[╭╮╰╯─│]/);
     h.unmount();
   });
 
@@ -590,3 +592,30 @@ describe("TUI.10.H.1 — committed narration width at non-100 columns (squeeze r
     h.unmount();
   });
 });
+
+describe("TUI chrome — borderless user-prompt tinted block (width-safety)", () => {
+  it("user_prompt at narrow 60 cols: ▸ and text present, no border characters", () => {
+    const h = renderTranscriptAt(
+      [{ kind: "user_prompt", text: "narrow test" }],
+      60,
+    );
+    expect(h.anyFrameContains("▸")).toBe(true);
+    expect(h.anyFrameContains("narrow test")).toBe(true);
+    const frame = h.lastFrame() ?? "";
+    expect(frame).not.toMatch(/[╭╮╰╯─│]/);
+    h.unmount();
+  });
+
+  it("user_prompt at wide 120 cols: ▸ and text present, no border characters", () => {
+    const h = renderTranscriptAt(
+      [{ kind: "user_prompt", text: "wide test" }],
+      120,
+    );
+    expect(h.anyFrameContains("▸")).toBe(true);
+    expect(h.anyFrameContains("wide test")).toBe(true);
+    const frame = h.lastFrame() ?? "";
+    expect(frame).not.toMatch(/[╭╮╰╯─│]/);
+    h.unmount();
+  });
+});
+

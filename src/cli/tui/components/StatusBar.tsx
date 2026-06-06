@@ -45,12 +45,16 @@ function modePill(m: TuiMode, narrow: boolean): string | null {
 
 export function StatusBar(): React.ReactElement {
   const { state } = useStore();
-  const { costUsd, model, tokenBudgetRatio, cumulativeTokens, capUsd } = state.statusBar;
-  const { runState, runStartMs, mode } = state;
+  const { costUsd, dailyUsedUsd, model, tokenBudgetRatio, cumulativeTokens, capUsd } = state.statusBar;
+  const { runState, runStartMs, runEndMs, mode } = state;
+  // webSearch defaults ON (absence = enabled); show indicator when active
+  const webSearch = state.modelSettings?.webSearchEnabled !== false;
 
+  // Per-task execution time: start (task begin) → end (task complete), frozen at
+  // completion so it doesn't keep ticking while the "done" status is displayed.
   const elapsedSec =
-    runState === "done" && runStartMs != null
-      ? ((Date.now() - runStartMs) / 1000).toFixed(1)
+    runState === "done" && runStartMs != null && runEndMs != null
+      ? ((runEndMs - runStartMs) / 1000).toFixed(1)
       : null;
 
   const tokenColor =
@@ -63,14 +67,14 @@ export function StatusBar(): React.ReactElement {
   const pillColor: "yellow" | "cyan" = mode === "autoAccept" ? "yellow" : "cyan";
 
   const modelLabel = model || "default";
-  const usedStr = costUsd > 0 ? ` · used $${costUsd.toFixed(2)}` : "";
+  const usedStr = dailyUsedUsd > 0 ? ` · used $${dailyUsedUsd.toFixed(2)}` : "";
   const badgeLine = `${modelLabel}${usedStr} · cap $${(capUsd ?? 10).toFixed(2)}`;
 
   return (
     <Box flexDirection="column">
       <Text dimColor>{sep}</Text>
       <Box justifyContent="space-between" paddingX={1}>
-        <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec, cumulativeTokens)}</Text>
+        <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec, cumulativeTokens)}{webSearch ? " · [W]" : ""}</Text>
         {pill ? <Text color={pillColor}>{pill}</Text> : null}
         <Text dimColor>{rightHint(runState)}</Text>
       </Box>

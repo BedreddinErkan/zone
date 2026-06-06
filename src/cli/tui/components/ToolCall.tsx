@@ -10,6 +10,9 @@ import {
 } from "./toolCallFormat.js";
 import { DiffView } from "./DiffView.js";
 import { CommandTail } from "./CommandTail.js";
+import { WRITE_FILE_PREVIEW_LINES } from "../../../core/toolCallPatch.js";
+
+const DIFF_TOOLS = new Set(["apply_patch", "write_file", "multi_edit"]);
 
 const BASH_TOOLS = new Set(["run_command", "run_command_background", "run_command_readonly"]);
 
@@ -49,7 +52,7 @@ export function ToolCall({ toolName, args, results, patch }: ToolCallProps): Rea
     secondLine = isBash ? null : inlineMsg;
     secondLineColor = isBash ? undefined : "red";
   } else {
-    secondLine = (toolName === "apply_patch" && patch) || isBash ? null : successPreview;
+    secondLine = (patch && DIFF_TOOLS.has(toolName)) || isBash ? null : successPreview;
   }
 
   return (
@@ -70,9 +73,9 @@ export function ToolCall({ toolName, args, results, patch }: ToolCallProps): Rea
           )}
         </Box>
       )}
-      {toolName === "apply_patch" && patch && lastResult?.ok && !lastResult.blocked && (
+      {patch && DIFF_TOOLS.has(toolName) && lastResult?.ok && !lastResult.blocked && (
         <Box paddingLeft={2}>
-          <DiffView patch={patch} />
+          <DiffView patch={patch} maxLines={toolName === "write_file" ? WRITE_FILE_PREVIEW_LINES : undefined} />
         </Box>
       )}
       {isBash && lastResult && !lastResult.blocked && (

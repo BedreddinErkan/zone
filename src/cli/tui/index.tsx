@@ -6,10 +6,12 @@ import { render } from "ink";
 
 const execAsync = promisify(exec);
 import { App } from "./App.js";
+import { Splash } from "./components/Splash.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import type { CliFlags } from "../config.js";
 import { loadCliConfig, validateCliConfig } from "../config.js";
 import { runOneShotInner, type TuiMode } from "../dispatch.js";
+import type { LlmPatchFlowResult } from "../../core/runLlmPatchFlow.js";
 import { createEventBus } from "../eventBus.js";
 import { applyStdoutInterception } from "./stdoutShield.js";
 import type { LlmPatchProgressUpdate } from "../../core/agentLifecycleEvents.js";
@@ -17,7 +19,12 @@ import { loadDiskTrust, diskTrustPrefixes } from "../../api/diskTrust.js";
 import { loadDiskKeys } from "../../api/diskKeys.js";
 import { saveSession, pruneOldSessions, loadLastSession, type DiskSession } from "../../api/diskSessions.js";
 import { loadDiskModel, type DiskModelSettings } from "../../api/diskModel.js";
-import type { StoreState } from "./store.js";
+import type { StoreState, StoreAction } from "./store.js";
+import { deriveCommitMessage, shouldAutoCommit } from "./commitMessage.js";
+import { executeCommit } from "./components/CommitModal.js";
+import { loadUserCommands, type UserCommand } from "./userCommands.js";
+import { shouldRedrawOnResize } from "./resize.js";
+import { getUsage } from "../../usage/usageTracker.js";
 
 const _bannerRequire = createRequire(import.meta.url);
 const { version: _zoneVersion } = _bannerRequire("../../../package.json") as { version: string };
@@ -44,6 +51,32 @@ function writeBannerToStdout(opts: { isResumed: boolean }): void {
   );
 }
 
+/** Strip the well-known banner lines that prefix patchPreview on the agent-loop path. */
+function stripBanner(s: string): string {
+  return s.replace(/^=== [A-Z ]+===\n/, "");
+}
+
+/** Load the multi-turn session window from the FS conversation store (non-blocking, never throws). */
+async function loadSessionWindow(sessionId: string, repoPath: string): Promise<string> {
+  try {
+    const { readFsConversationEvents } = await import("../../core/conversationFilesystemStore.js");
+    const { buildSessionWindow } = await import("../../llm/sessionWindow.js");
+    return buildSessionWindow(readFsConversationEvents({ repoPath, threadId: sessionId }));
+  } catch { return ""; }
+}
+
+/** Derive a neutral outcome enum from the run result — never uses raw decisionMode strings. */
+function deriveNeutralOutcome(
+  runResult: LlmPatchFlowResult | undefined,
+  changedFiles: string[]
+): "applied" | "no_change" | "answered" | "reverted" {
+  if (!runResult) return "no_change";
+  if (!runResult.ok) return "reverted";
+  if (changedFiles.length > 0) return "applied";
+  if ("patchPreview" in runResult && (runResult as { patchPreview?: string }).patchPreview) return "answered";
+  return "no_change";
+}
+
 export async function runTui(
   initialPrompt: string | undefined,
   opts: CliFlags
@@ -54,7 +87,8 @@ export async function runTui(
   const restoreStdout = applyStdoutInterception();
   process.on("exit", restoreStdout);
 
-  const storeCapture: { state: StoreState | null } = { state: null };
+  type CommitData = { filePaths: string[]; message: string; repoPath: string };
+  const storeCapture: { state: StoreState | null; lastCommitData: CommitData | null; dispatch: ((action: StoreAction) => void) | null } = { state: null, lastCommitData: null, dispatch: null };
 
   const config = loadCliConfig(opts);
 
@@ -82,8 +116,31 @@ export async function runTui(
       config.model = diskModelSettings.model;
       config.provider = diskModelSettings.provider as typeof config.provider;
       config.effort = diskModelSettings.effort;
+      config.summaryFormat = diskModelSettings.summaryFormat;
+      // TUI default: memory on. An explicit persisted false still wins.
+      config.memoryEnabled = diskModelSettings.memoryEnabled ?? true;
+      config.commitOnSuccess = diskModelSettings.commitOnSuccess ?? false;
+      config.webSearchEnabled = diskModelSettings.webSearchEnabled ?? true;
+    } else {
+      config.memoryEnabled = true;  // no disk file → TUI default is on
+      config.commitOnSuccess = false;
+      config.webSearchEnabled = true;
     }
   } catch { /* non-critical */ }
+
+  let initialUserCommands: UserCommand[] = [];
+  try {
+    initialUserCommands = await loadUserCommands(config.repoPath); // NOT process.cwd() — repoPathTrap
+  } catch { /* non-critical; loadUserCommands already never throws */ }
+
+  // TUI always records usage under "local-dev" (dispatch.ts never threads userId into
+  // runLlmPatchFlow; agentLoop defaults to "local-dev"). Read the same identifier so
+  // the displayed "used" matches what checkDailyCap enforces against.
+  const USAGE_USER_ID = "local-dev";
+  let initialDailyUsedUsd = 0;
+  try {
+    initialDailyUsedUsd = (await getUsage(USAGE_USER_ID, "day")).totalCostUsd;
+  } catch { /* non-critical — badge shows $0 on read error */ }
 
   let resumedSession: DiskSession | null = null;
   if (opts.resume) {
@@ -172,6 +229,8 @@ export async function runTui(
 
   const runPrompt = async (prompt: string, ac: AbortController, mode: TuiMode = "normal"): Promise<void> => {
     const runId = randomUUID();
+    // Capture sessionId at submit time (storeCapture.state may be null on the first render tick).
+    const sessionId = storeCapture.state?.sessionId;
 
     // ! shell escape — run cmd directly without LLM; results appear as a tool entry
     if (prompt.startsWith("!")) {
@@ -192,6 +251,14 @@ export async function runTui(
       return;
     }
 
+    // Load prior session summary before the run (not via conversationId to avoid triggering
+    // the rollback priorRunSummary path with wrong framing — load directly from the FS store).
+    let priorSessionSummary: string | undefined;
+    if (config.memoryEnabled && sessionId) {
+      const loaded = await loadSessionWindow(sessionId, config.repoPath);
+      if (loaded) priorSessionSummary = loaded;
+    }
+
     const onProgress = (update: LlmPatchProgressUpdate): void => {
       if (typeof update === "string") return;
       const evt = update.progress;
@@ -199,8 +266,9 @@ export async function runTui(
         bus.emit(evt.type, evt);
       }
     };
+    let runResult: LlmPatchFlowResult | undefined;
     try {
-      await runOneShotInner(prompt, config, runId, { externalAc: ac, onProgress, mode });
+      runResult = await runOneShotInner(prompt, config, runId, { externalAc: ac, onProgress, mode, priorSessionSummary });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       bus.emit("narration", {
@@ -223,12 +291,88 @@ export async function runTui(
         });
       }
     }
+
+    // Refresh the cumulative daily cost badge now that the run's costs are on disk.
+    try {
+      const daily = await getUsage(USAGE_USER_ID, "day");
+      storeCapture.dispatch?.({ type: "DAILY_USED_UPDATE", dailyUsedUsd: daily.totalCostUsd });
+    } catch { /* non-critical */ }
+
+    // Write atomic turn record for multi-turn memory (replaces single agent_summary write).
+    // Single event per dispatch = atomic in the JSONL log (rotation never splits a turn).
+    // Written post-run only — no submit-time write to avoid fire-and-forget race.
+    if (config.memoryEnabled && sessionId && runResult !== undefined) {
+      const { appendFsConversationEvent } = await import("../../core/conversationFilesystemStore.js");
+      const { truncateSessionTurn, MAX_CHANGED_FILES, USER_PROMPT_MAX_BYTES } =
+        await import("../../llm/sessionWindow.js");
+      const fd = (runResult as { fileDiffs?: Array<{ filePath: string }> }).fileDiffs ?? [];
+      const changedFiles = fd.map(d => d.filePath).slice(0, MAX_CHANGED_FILES);
+      const rawPreview = (runResult as { patchPreview?: string }).patchPreview;
+      const summary = typeof rawPreview === "string" ? truncateSessionTurn(stripBanner(rawPreview)) : "";
+      const ok = await appendFsConversationEvent({
+        repoPath: config.repoPath,   // NOT process.cwd() — repoPathTrap
+        threadId: sessionId,
+        event: {
+          type: "turn",
+          ts: Date.now(),
+          runId,
+          userPrompt: prompt.slice(0, USER_PROMPT_MAX_BYTES),
+          summary,
+          changedFiles,
+          outcome: deriveNeutralOutcome(runResult, changedFiles),
+        },
+      });
+      if (!ok && process.env.ZONE_TUI_DEBUG === "1") {
+        process.stderr.write("[zone-session-mem] turn write skipped\n");
+      }
+    }
+
+    // Stash commit data for /commit command (post-run only; finalizeStaging has already flushed).
+    const fileDiffs = (runResult as { fileDiffs?: Array<{ filePath: string }> } | undefined)?.fileDiffs ?? [];
+    if (runResult?.ok && fileDiffs.length > 0) {
+      const rawPreview = (runResult as { patchPreview?: string }).patchPreview ?? "";
+      const filePaths = fileDiffs.map(d => d.filePath);
+      const message = deriveCommitMessage(stripBanner(rawPreview));
+      storeCapture.lastCommitData = { filePaths, message, repoPath: config.repoPath };
+
+      if (shouldAutoCommit(runResult, config.commitOnSuccess ?? false)) {
+        const autoResult = await executeCommit(config.repoPath, message, filePaths);
+        const toastMsg = autoResult.ok
+          ? `Auto-committed: ${autoResult.hash}`
+          : `Auto-commit failed: ${autoResult.error}`;
+        storeCapture.dispatch?.({
+          type: "TOAST_PUSH",
+          entry: { id: randomUUID(), message: toastMsg, level: autoResult.ok ? "info" : "error" },
+        });
+      }
+    }
   };
 
   const onSubmit = (prompt: string, ac: AbortController, mode: TuiMode): void => {
     void runPrompt(prompt, ac, mode);
   };
 
+  // Best-effort GC: delete the prior sessionId's .jsonl when the user clears session memory.
+  // Uses config.repoPath — NOT process.cwd() — to find the right .zone/conversations/ dir.
+  const clearSessionMemoryGC = async (oldSessionId: string): Promise<void> => {
+    try {
+      const nodePath = await import("node:path");
+      const fsPromises = await import("node:fs/promises");
+      const filePath = nodePath.default.join(config.repoPath, ".zone", "conversations", `${oldSessionId}.jsonl`);
+      await fsPromises.default.unlink(filePath);
+      if (process.env.ZONE_TUI_DEBUG === "1") {
+        process.stderr.write(`[zone-session-mem] GC: deleted ${oldSessionId}.jsonl\n`);
+      }
+    } catch { /* best-effort — missing file or other errors are silently ignored */ }
+  };
+
+  if (process.stdout.isTTY) {
+    const splashInst = render(
+      <Splash />,
+      { exitOnCtrlC: false, alternateScreen: false }
+    );
+    await splashInst.waitUntilExit();
+  }
   writeBannerToStdout({ isResumed: !!resumedSession });
 
   instance = render(
@@ -238,20 +382,51 @@ export async function runTui(
         bus={bus}
         initialModel={config.model}
         capUsd={config.dailyUsdCap}
+        initialDailyUsedUsd={initialDailyUsedUsd}
         onSubmit={onSubmit}
         initialTrustedPrefixes={initialTrustedPrefixes}
         resumedSession={resumedSession ?? undefined}
         onStateChange={(s) => { storeCapture.state = s; }}
         initialModelSettings={diskModelSettings}
-        onModelApply={(model, provider, effort) => {
+        initialUserCommands={initialUserCommands}
+        onModelApply={(model, provider, effort, summaryFormat, memoryEnabled, commitOnSuccess) => {
           config.model = model;
           config.provider = provider as typeof config.provider;
           config.effort = effort;
+          config.summaryFormat = summaryFormat;
+          config.memoryEnabled = memoryEnabled;
+          config.commitOnSuccess = commitOnSuccess ?? false;
         }}
+        getCommitData={() => storeCapture.lastCommitData}
+        onDispatchCapture={(d) => { storeCapture.dispatch = d; }}
+        onSessionClear={(oldId) => void clearSessionMemoryGC(oldId)}
       />
     </ErrorBoundary>,
     { exitOnCtrlC: false, alternateScreen: false }
   );
+
+  // ── Resize controller ────────────────────────────────────────────────────
+  // On narrowing, full-width live lines reflow into more physical rows than Ink
+  // erases → ghost rows. Fix: clear screen + scrollback, then bump the <Static>
+  // key (TRANSCRIPT_REMOUNT) so Ink re-emits the transcript cleanly.
+  // Widening is self-correcting (Ink over-erases); only narrowing acts.
+  let prevCols = process.stdout.columns ?? 80;
+  let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+  if (process.stdout.isTTY) {
+    process.stdout.on("resize", () => {
+      if (resizeTimer !== null) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        resizeTimer = null;
+        const nextCols = process.stdout.columns ?? 0;
+        if (shouldRedrawOnResize(prevCols, nextCols)) {
+          process.stdout.write("\x1b[2J\x1b[3J\x1b[H"); // clear screen + scrollback + cursor home
+          storeCapture.dispatch?.({ type: "TRANSCRIPT_REMOUNT" });
+        }
+        prevCols = nextCols; // always update baseline (tracks widening too, no-op for clear)
+      }, 100);
+    });
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Single path: wait for explicit exit (Ctrl+C → \x03 in useInput → useApp.exit())
   await instance.waitUntilExit();

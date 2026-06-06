@@ -3,7 +3,7 @@ import { Box, Text } from "ink";
 
 const FIND_MARKER = "--- FIND ---";
 const REPLACE_MARKER = "--- REPLACE ---";
-const MAX_DIFF_LINES = 20;
+const DEFAULT_MAX_DIFF_LINES = 20;
 
 interface DiffBlock {
   findLines: string[];
@@ -27,7 +27,7 @@ function parseBlocks(patch: string): DiffBlock[] {
 
 type DiffLine = { kind: "remove" | "add"; text: string } | { kind: "sep" };
 
-export function DiffView({ patch }: { patch: string }): React.ReactElement | null {
+export function DiffView({ patch, maxLines = DEFAULT_MAX_DIFF_LINES }: { patch: string; maxLines?: number }): React.ReactElement | null {
   const blocks = parseBlocks(patch);
   if (blocks.length === 0) return null;
 
@@ -42,7 +42,7 @@ export function DiffView({ patch }: { patch: string }): React.ReactElement | nul
   let contentCount = 0;
   let cutIdx = allLines.length;
   for (let i = 0; i < allLines.length; i++) {
-    if (allLines[i].kind !== "sep" && ++contentCount > MAX_DIFF_LINES) {
+    if (allLines[i].kind !== "sep" && ++contentCount > maxLines) {
       cutIdx = i;
       break;
     }

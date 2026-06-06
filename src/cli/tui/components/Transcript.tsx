@@ -6,7 +6,7 @@ import { IterMarker } from "./IterMarker.js";
 import { getToolDisplayName, formatToolArgs } from "./toolCallFormat.js";
 import { MarkdownText } from "./MarkdownText.js";
 
-function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement {
+function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): React.ReactElement {
   switch (entry.kind) {
     case "narration": {
       const lines = entry.text.split("\n");
@@ -35,10 +35,12 @@ function renderEntry(entry: TranscriptEntry, index: number): React.ReactElement 
       return <IterMarker key={index} phase={entry.phase} />;
     case "user_prompt":
       return (
-        <Box key={index} borderStyle="round" borderColor="cyan"
-             paddingX={1} marginTop={1} marginBottom={1}>
+        <Box key={index} backgroundColor="blackBright" width={colWidth}
+             paddingX={2} marginTop={1} marginBottom={1}>
           <Text bold color="cyan">{"▸ "}</Text>
-          <Text bold>{entry.text}</Text>
+          <Box flexGrow={1}>
+            <Text bold>{entry.text}</Text>
+          </Box>
         </Box>
       );
     case "assistant_final":
@@ -64,7 +66,7 @@ export function Transcript(): React.ReactElement {
         style={{ width: stdout.columns ?? 80 }}
       >
         {(item: { entry: TranscriptEntry; index: number }) =>
-          renderEntry(item.entry, item.index)
+          renderEntry(item.entry, item.index, stdout.columns ?? 80)
         }
       </Static>
       {liveNarration && (

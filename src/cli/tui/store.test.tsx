@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { reducer, buildInitialState } from "./store.js";
+import type { UserCommand } from "./userCommands.js";
 
 function initialState() {
   return buildInitialState({ model: "test-model", capUsd: 10 });
@@ -220,6 +221,33 @@ describe("buildInitialState", () => {
     const state = buildInitialState({});
     expect(state.transcriptGeneration).toBe(0);
   });
+
+  it("seeds userCommands from initialValues", () => {
+    const cmds: UserCommand[] = [{ name: "/review", description: "Code review", body: "Review the diff." }];
+    const state = buildInitialState({ model: "m", capUsd: 10, userCommands: cmds });
+    expect(state.userCommands).toEqual(cmds);
+  });
+
+  it("defaults userCommands to [] when not provided", () => {
+    const state = buildInitialState({ model: "m", capUsd: 10 });
+    expect(state.userCommands).toEqual([]);
+  });
+});
+
+describe("TRANSCRIPT_REMOUNT", () => {
+  it("increments transcriptGeneration", () => {
+    const s = { ...initialState(), transcriptGeneration: 2 };
+    const next = reducer(s, { type: "TRANSCRIPT_REMOUNT" });
+    expect(next.transcriptGeneration).toBe(3);
+  });
+
+  it("leaves transcript and todos unchanged", () => {
+    const entry = { kind: "narration" as const, text: "hello" };
+    const s = { ...initialState(), transcript: [entry] };
+    const next = reducer(s, { type: "TRANSCRIPT_REMOUNT" });
+    expect(next.transcript).toEqual([entry]);
+    expect(next.todos).toEqual([]);
+  });
 });
 
 describe("SESSION_RESUME", () => {
@@ -267,6 +295,97 @@ describe("SESSIONS_OPEN deduplication", () => {
     const next = reducer(initialState(), { type: "SESSIONS_OPEN", list });
     expect(next.sessionsList).toHaveLength(2);
     expect(next.sessionsList.map(s => s.sessionId)).toEqual(["abc", "def"]);
+  });
+});
+
+describe("WEBSEARCH_APPLY", () => {
+  it("sets webSearchEnabled=false on existing modelSettings", () => {
+    const s0 = buildInitialState({
+      model: "test-model", capUsd: 10,
+      modelSettings: { version: 2, model: "test-model", provider: "anthropic", updatedAt: "" },
+    });
+    const s1 = reducer(s0, { type: "WEBSEARCH_APPLY", webSearchEnabled: false });
+    expect(s1.modelSettings?.webSearchEnabled).toBe(false);
+  });
+
+  it("sets webSearchEnabled=true after false", () => {
+    const s0 = buildInitialState({
+      model: "test-model", capUsd: 10,
+      modelSettings: { version: 2, model: "test-model", provider: "anthropic", webSearchEnabled: false, updatedAt: "" },
+    });
+    const s1 = reducer(s0, { type: "WEBSEARCH_APPLY", webSearchEnabled: true });
+    expect(s1.modelSettings?.webSearchEnabled).toBe(true);
+  });
+
+  it("creates modelSettings from null when none exists", () => {
+    const s0 = buildInitialState({ model: "test-model", capUsd: 10 });
+    expect(s0.modelSettings).toBeNull();
+    const s1 = reducer(s0, { type: "WEBSEARCH_APPLY", webSearchEnabled: false });
+    expect(s1.modelSettings?.webSearchEnabled).toBe(false);
+  });
+});
+
+describe("TODOS_SET / TODO_STATUS_SET", () => {
+  const TODO_A = { id: "1", text: "Locate the bug", status: "pending" as const };
+  const TODO_B = { id: "2", text: "Patch the bug", status: "pending" as const };
+  const TODO_C = { id: "3", text: "Run tests", status: "pending" as const };
+
+  it("TODOS_SET sets the todos list", () => {
+    const s = initialState();
+    const next = reducer(s, { type: "TODOS_SET", todos: [TODO_A, TODO_B] });
+    expect(next.todos).toHaveLength(2);
+    expect(next.todos[0].status).toBe("pending");
+    expect(next.transcript).toHaveLength(0);
+  });
+
+  it("TODO_STATUS_SET completed updates the matching todo", () => {
+    const s = {
+      ...initialState(),
+      todos: [TODO_A, { ...TODO_B, status: "in_progress" as const }, TODO_C],
+    };
+    const next = reducer(s, { type: "TODO_STATUS_SET", todoId: "2", status: "completed" });
+    expect(next.todos.find(t => t.id === "2")?.status).toBe("completed");
+    expect(next.todos.find(t => t.id === "1")?.status).toBe("pending");
+  });
+
+  it("TODO_STATUS_SET in_progress back-fills prior pending→completed (startTodo invariant)", () => {
+    const s = { ...initialState(), todos: [TODO_A, TODO_B, TODO_C] };
+    const next = reducer(s, { type: "TODO_STATUS_SET", todoId: "2", status: "in_progress" });
+    expect(next.todos.find(t => t.id === "1")?.status).toBe("completed");
+    expect(next.todos.find(t => t.id === "2")?.status).toBe("in_progress");
+    expect(next.todos.find(t => t.id === "3")?.status).toBe("pending");
+  });
+
+  it("TODO_STATUS_SET is a noop (same reference) when todos list is empty", () => {
+    const s = initialState();
+    const next = reducer(s, { type: "TODO_STATUS_SET", todoId: "1", status: "completed" });
+    expect(next).toBe(s);
+  });
+
+  it("USER_PROMPT resets todos to []", () => {
+    const s = reducer(initialState(), { type: "TODOS_SET", todos: [TODO_A] });
+    expect(s.todos).toHaveLength(1);
+    const next = reducer(s, { type: "USER_PROMPT", text: "new task" });
+    expect(next.todos).toEqual([]);
+  });
+
+  it("SESSION_RESUME resets todos to []", () => {
+    const s = reducer(initialState(), { type: "TODOS_SET", todos: [TODO_A] });
+    const mockSession = {
+      sessionId: "new-sid",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      transcript: [],
+    };
+    const next = reducer(s, { type: "SESSION_RESUME", session: mockSession });
+    expect(next.todos).toEqual([]);
+  });
+
+  it("TRANSCRIPT_CLEAR resets todos to []", () => {
+    const s = reducer(initialState(), { type: "TODOS_SET", todos: [TODO_A, TODO_B] });
+    expect(s.todos).toHaveLength(2);
+    const next = reducer(s, { type: "TRANSCRIPT_CLEAR" });
+    expect(next.todos).toEqual([]);
+    expect(next.transcript).toEqual([]);
   });
 });
 

@@ -1,5 +1,5 @@
-import { Box, Text, useInput, usePaste } from "ink";
-import { useState, useEffect } from "react";
+import { Box, Text, useInput, usePaste, useStdout } from "ink";
+import { useState, useEffect, useMemo } from "react";
 import fg from "fast-glob";
 import { useStore } from "../store.js";
 import { loadDiskTrust } from "../../../api/diskTrust.js";
@@ -7,12 +7,16 @@ import { loadDiskKeys } from "../../../api/diskKeys.js";
 import { listSessionsMeta } from "../../../api/diskSessions.js";
 import { runInit } from "../init.js";
 import { readMemoryAndShow } from "../memory.js";
+import { randomUUID } from "node:crypto";
+import { saveDiskModel, type DiskModelSettings } from "../../../api/diskModel.js";
+import { getDefaultModelId } from "../../../llm/modelRegistry.js";
 
 const MAX_HISTORY = 50;
 
 interface ComposerProps {
   onSubmit: (text: string, ac: AbortController) => void;
   onExit: () => void;
+  getCommitData?: () => { filePaths: string[]; message: string; repoPath: string } | null;
 }
 
 interface SlashCommand {
@@ -32,8 +36,13 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/memory",     desc: "Show .zone/memory.md" },
   { name: "/model",      desc: "Choose AI model" },
   { name: "/effort",     desc: "Set reasoning effort (low/medium/high)" },
+  { name: "/summary",   desc: "Set summary format (compact/detailed)" },
+  { name: "/session",   desc: "Toggle session memory (off/on)" },
   { name: "/metrics",   desc: "View run telemetry KPIs" },
   { name: "/limits",   desc: "Set daily USD cap" },
+  { name: "/commit",      desc: "Commit last run's changes with scoped git commit" },
+  { name: "/autocommit",  desc: "Toggle auto-commit after each run (off/on)" },
+  { name: "/websearch",   desc: "Toggle web search (off/on)" },
 ];
 
 const HELP_LINES = [
@@ -45,7 +54,7 @@ const HELP_LINES = [
   "  ↑/↓         navigate history (when input empty)",
   "  ←/→ Home End  cursor movement",
   "Slash commands:",
-  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init  /memory  /model  /effort  /metrics  /limits",
+  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init  /memory  /model  /effort  /summary  /session  /metrics  /limits  /commit  /autocommit  /websearch",
 ];
 
 function renderBuffer(buf: string, pos: number): string {
@@ -72,9 +81,31 @@ function SlashCommandPalette({ commands, selectedIdx }: PaletteProps): React.Rea
   );
 }
 
-export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElement {
+export function Composer({ onSubmit, onExit, getCommitData }: ComposerProps): React.ReactElement {
   const { state, dispatch } = useStore();
+  const { stdout } = useStdout();
   const disabled = state.runState === "running";
+
+  // Dedup: user commands whose names don't collide with any built-in.
+  // Built-ins always win — this list is used for BOTH palette and execution.
+  const projectCommands = useMemo(
+    () => state.userCommands.filter(uc => !SLASH_COMMANDS.some(b => b.name === uc.name)),
+    [state.userCommands]
+  );
+
+  // Merged command list for the palette filter/match/display.
+  const allCommands: SlashCommand[] = useMemo(
+    () => [
+      ...SLASH_COMMANDS,
+      ...projectCommands.map(uc => ({
+        name: uc.name,
+        desc: `(project) ${uc.description.length > 49
+          ? uc.description.slice(0, 46) + "…"
+          : uc.description}`,
+      })),
+    ],
+    [projectCommands]
+  );
 
   const [buffer, setBuffer] = useState("");
   const [cursorPos, setCursorPos] = useState(0);
@@ -97,15 +128,30 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
       .catch(() => setAtFiles([]));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [atPaletteOpen, buffer]);
-  const filteredCommands = SLASH_COMMANDS.filter((c) =>
+  const filteredCommands = allCommands.filter((c) =>
     c.name.slice(1).startsWith(paletteFilter)
   );
 
-  function executeSlashCommand(name: string): void {
+  function executeSlashCommand(name: string, argsText: string = ""): void {
     setBuffer("");
     setCursorPos(0);
     setHistoryIdx(-1);
     setPaletteIdx(0);
+
+    // Project-command lookup. Uses projectCommands (not raw state.userCommands) so a name
+    // colliding with a built-in falls through to the switch — built-ins can never be shadowed.
+    const userCmd = projectCommands.find(uc => uc.name === name);
+    if (userCmd) {
+      if (disabled) {
+        dispatch({ type: "USER_PROMPT", text: `Cannot run ${name} while a run is in progress.` });
+        return;
+      }
+      const substituted = userCmd.body.replaceAll("$ARGUMENTS", argsText);
+      dispatch({ type: "USER_PROMPT", text: substituted });
+      const ac = new AbortController();
+      onSubmit(substituted, ac); // same two lines as submitBuffer — mode injected by App
+      return;
+    }
 
     switch (name) {
       case "/help":
@@ -173,6 +219,20 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
         }
         dispatch({ type: "EFFORT_MODAL_OPEN" });
         break;
+      case "/summary":
+        if (disabled) {
+          dispatch({ type: "USER_PROMPT", text: "Cannot change /summary while a run is in progress." });
+          break;
+        }
+        dispatch({ type: "SUMMARY_MODAL_OPEN" });
+        break;
+      case "/session":
+        if (disabled) {
+          dispatch({ type: "USER_PROMPT", text: "Cannot change /session while a run is in progress." });
+          break;
+        }
+        dispatch({ type: "MEMORY_MODAL_OPEN" });
+        break;
       case "/metrics":
         dispatch({ type: "METRICS_MODAL_OPEN" });
         break;
@@ -183,6 +243,51 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
         }
         dispatch({ type: "LIMITS_MODAL_OPEN" });
         break;
+      case "/commit": {
+        if (disabled) {
+          dispatch({ type: "USER_PROMPT", text: "Cannot /commit while a run is in progress." });
+          break;
+        }
+        const commitData = getCommitData?.();
+        if (!commitData || commitData.filePaths.length === 0) {
+          dispatch({ type: "USER_PROMPT", text: "Nothing to commit — run a task first." });
+          break;
+        }
+        dispatch({ type: "COMMIT_MODAL_OPEN", filePaths: commitData.filePaths, message: commitData.message, repoPath: commitData.repoPath });
+        break;
+      }
+      case "/autocommit": {
+        if (disabled) {
+          dispatch({ type: "USER_PROMPT", text: "Cannot change /autocommit while a run is in progress." });
+          break;
+        }
+        const currentVal = state.modelSettings?.commitOnSuccess ?? false;
+        const newVal = !currentVal;
+        const currentModel = state.modelSettings?.model ?? getDefaultModelId();
+        const updated: DiskModelSettings = state.modelSettings
+          ? { ...state.modelSettings, commitOnSuccess: newVal, updatedAt: new Date().toISOString() }
+          : { version: 2, model: currentModel, provider: "anthropic", commitOnSuccess: newVal, updatedAt: new Date().toISOString() };
+        void saveDiskModel(process.cwd(), updated);
+        dispatch({ type: "AUTOCOMMIT_APPLY", commitOnSuccess: newVal });
+        dispatch({ type: "TOAST_PUSH", entry: { id: randomUUID(), message: `Auto-commit: ${newVal ? "on" : "off"}`, level: "info" } });
+        break;
+      }
+      case "/websearch": {
+        if (disabled) {
+          dispatch({ type: "USER_PROMPT", text: "Cannot change /websearch while a run is in progress." });
+          break;
+        }
+        const currentVal = state.modelSettings?.webSearchEnabled ?? true;  // absence = ON
+        const newVal = !currentVal;
+        const currentModel = state.modelSettings?.model ?? getDefaultModelId();
+        const updated: DiskModelSettings = state.modelSettings
+          ? { ...state.modelSettings, webSearchEnabled: newVal, updatedAt: new Date().toISOString() }
+          : { version: 2, model: currentModel, provider: "anthropic", webSearchEnabled: newVal, updatedAt: new Date().toISOString() };
+        void saveDiskModel(process.cwd(), updated);
+        dispatch({ type: "WEBSEARCH_APPLY", webSearchEnabled: newVal });
+        dispatch({ type: "TOAST_PUSH", entry: { id: randomUUID(), message: `Web search: ${newVal ? "on" : "off"}`, level: "info" } });
+        break;
+      }
     }
   }
 
@@ -244,9 +349,19 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
         return;
       }
     }
-    if (key.return && SLASH_COMMANDS.some((c) => c.name === buffer)) {
+    if (key.return && allCommands.some((c) => c.name === buffer)) {
       executeSlashCommand(buffer);
       return;
+    }
+    if (key.return) {
+      const spaceIdx = buffer.indexOf(" ");
+      if (spaceIdx !== -1) {
+        const commandToken = buffer.slice(0, spaceIdx);
+        if (projectCommands.some(uc => uc.name === commandToken)) {
+          executeSlashCommand(commandToken, buffer.slice(spaceIdx + 1).trim());
+          return;
+        }
+      }
     }
 
     // ── During a run: only slash-buffer editing allowed ──
@@ -373,7 +488,6 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
     setHistoryIdx(-1);
   }, { isActive: true });
 
-  const borderColor = disabled ? "gray" : "white";
   const displayBuffer = disabled ? buffer : renderBuffer(buffer, cursorPos);
 
   return (
@@ -388,7 +502,7 @@ export function Composer({ onSubmit, onExit }: ComposerProps): React.ReactElemen
       {paletteOpen && filteredCommands.length > 0 && (
         <SlashCommandPalette commands={filteredCommands} selectedIdx={paletteIdx} />
       )}
-      <Box borderStyle="round" borderColor={borderColor} paddingX={1}>
+      <Box backgroundColor="blackBright" paddingX={2} width={stdout.columns ?? 80}>
         <Text dimColor={disabled}>{disabled ? "  " : "> "}</Text>
         <Box flexGrow={1}>
           <Text dimColor={disabled}>{displayBuffer}</Text>
