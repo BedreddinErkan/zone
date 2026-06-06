@@ -24,6 +24,7 @@ export class R2ShimProcessor implements HistoryProcessor {
     emitContextPruned({ runId: ctx.runId ?? "", iter: ctx.iter, stats });
 
     let result: ChatCompletionMessageParam[];
+    let isU1Path = false;
     if (this.useU1 && stats.blocksReplaced > this.prevBlocksReplaced && this.prevPruned !== null) {
       // U.1 cache-aware fallback: reuse the prior pruned prefix to keep the
       // Anthropic cache breakpoint #1 stable. Only append genuinely new messages.
@@ -31,6 +32,7 @@ export class R2ShimProcessor implements HistoryProcessor {
       result = newCount > 0
         ? [...this.prevPruned, ...messages.slice(-newCount)]
         : this.prevPruned;
+      isU1Path = true;
       ctx.emit("log", "[zone-cache-r2-skip]", {
         event: "cache_r2_skip",
         runId: ctx.runId ?? null,

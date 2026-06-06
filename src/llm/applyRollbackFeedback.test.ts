@@ -9,6 +9,7 @@ import {
   buildApplyRolledBackMarkerLog,
   buildApplyRolledBackMessage,
   isApplyRolledBackMessage,
+  looksLikeTscHelpBanner,
   parseTscErrorPreview,
   pickRolledBackSuggestion,
   pickRolledBackSuggestionCode,
@@ -42,6 +43,44 @@ describe("Phase J.4 — parseTscErrorPreview", () => {
   it("skips empty lines", () => {
     expect(parseTscErrorPreview("").length).toBe(0);
     expect(parseTscErrorPreview("\n\n  \n").length).toBe(0);
+  });
+});
+
+describe("Finding 2 — tsc help/usage banner is not a diagnostic set", () => {
+  const BANNER = [
+    "Version 5.9.3",
+    "tsc: The TypeScript Compiler",
+    "",
+    "COMMON COMMANDS",
+    "",
+    "  tsc",
+    "  Compiles the current project (tsconfig.json in the working directory.)",
+    "",
+    "  tsc --noEmit",
+    "  ...",
+    "  --help, -h",
+  ].join("\n");
+
+  it("detects the banner", () => {
+    expect(looksLikeTscHelpBanner(BANNER)).toBe(true);
+  });
+
+  it("parseTscErrorPreview returns no errors for the banner", () => {
+    expect(parseTscErrorPreview(BANNER)).toEqual([]);
+  });
+
+  it("does NOT treat a vitest summary or real tsc errors as a banner", () => {
+    expect(looksLikeTscHelpBanner("FAIL src/x.test.ts\n  ✗ adds two numbers")).toBe(false);
+    expect(
+      looksLikeTscHelpBanner("src/foo.ts(12,5): error TS2305: Module has no exported member 'baz'."),
+    ).toBe(false);
+  });
+
+  it("still parses real errors that happen to mention a version string", () => {
+    const preview = "src/foo.ts(1,5): error TS2304: Cannot find name 'bar'.";
+    const rows = parseTscErrorPreview(preview);
+    expect(rows.length).toBe(1);
+    expect(rows[0]).toMatchObject({ code: "TS2304" });
   });
 });
 

@@ -24,8 +24,8 @@ describe("TIER_LIMITS", () => {
     expect(TIER_LIMITS.simple.auditIterCap).toBe(0);
   });
 
-  it("medium tier: 1 subagent call, 600k tokens, softIterWarn=25, auditIterCap=6", () => {
-    expect(TIER_LIMITS.medium.maxSubagentCalls).toBe(1);
+  it("medium tier: 0 subagent calls, 600k tokens, softIterWarn=25, auditIterCap=6", () => {
+    expect(TIER_LIMITS.medium.maxSubagentCalls).toBe(0);
     expect(TIER_LIMITS.medium.tokenBudgetCap).toBe(600_000);
     expect(TIER_LIMITS.medium.softIterWarn).toBe(25);
     expect(TIER_LIMITS.medium.auditIterCap).toBe(6);

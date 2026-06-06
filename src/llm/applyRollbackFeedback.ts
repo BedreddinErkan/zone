@@ -120,7 +120,26 @@ function stripAnsi(s: string): string {
  * none of the above drop into a `code:"", message:<rawLine>` row so
  * non-tsc verifiers (vitest/jest summaries) still surface readable output.
  */
+/**
+ * True when the output is tsc's help/usage banner rather than diagnostics.
+ * tsc prints this (and exits non-zero) when it has no resolvable inputs/tsconfig
+ * — common in a monorepo when invoked without `-p`. The banner carries ZERO
+ * `error TS####` lines, so it must never be surfaced as "errors".
+ */
+export function looksLikeTscHelpBanner(text: string): boolean {
+  const t = String(text ?? "");
+  if (!t) return false;
+  return (
+    /tsc:\s*The TypeScript Compiler/i.test(t) ||
+    /\bCOMMON COMMANDS\b/.test(t) ||
+    (/\bVersion\s+\d+\.\d+/.test(t) && /(^|\s)(tsc\b|--project\b|--build\b|--help\b)/m.test(t))
+  );
+}
+
 export function parseTscErrorPreview(preview: string): RolledBackError[] {
+  // tsc usage banner (no resolvable project/inputs) is not a diagnostic set —
+  // drop it wholesale so banner lines never masquerade as errors.
+  if (looksLikeTscHelpBanner(preview)) return [];
   const out: RolledBackError[] = [];
   for (const raw of String(preview ?? "").split(/\r?\n/)) {
     const line = stripAnsi(raw).trim();

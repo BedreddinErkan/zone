@@ -532,4 +532,37 @@ describe("handleToolResult", () => {
       }
     });
   });
+
+  describe("DF-18: loop detection exemption for read_background_output", () => {
+    it("does NOT call recordAndDetect for read_background_output", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      await handleToolResult("read_background_output", { handle: "bg1", since_offset: null, max_bytes: 8192 }, "c1", SUCCESS_RESULT, ctx, deps);
+      expect(deps.recordAndDetect).not.toHaveBeenCalled();
+      expect(ctx.lastLoopResult).toBeNull();
+    });
+
+    it("DOES call recordAndDetect for read_file (not exempt)", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      await handleToolResult("read_file", { filePath: "src/foo.ts" }, "c1", SUCCESS_RESULT, ctx, deps);
+      expect(deps.recordAndDetect).toHaveBeenCalled();
+    });
+
+    it("4 identical read_background_output calls all return {kind:'continue'} (no early_exit)", async () => {
+      const { recordAndDetect: realRecordAndDetect, createDetectorState: realCreateDetectorState } =
+        await import("../loopDetector.js");
+      const state = realCreateDetectorState();
+      const ctx = makeCtx();
+      const deps = makeDeps({
+        recordAndDetect: (s, h) => realRecordAndDetect(s, h),
+        detectorState: state,
+      });
+      const args = { handle: "bg1", since_offset: null, max_bytes: 8192 };
+      for (let i = 0; i < 4; i++) {
+        const result = await handleToolResult("read_background_output", args, `c${i}`, SUCCESS_RESULT, ctx, deps);
+        expect(result.kind, `call ${i + 1} should continue`).toBe("continue");
+      }
+    });
+  });
 });

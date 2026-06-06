@@ -102,6 +102,9 @@ export function convertResponse(
           (msg.usage as { cache_creation_input_tokens?: number }).cache_creation_input_tokens ?? 0,
         cache_read_input_tokens:
           (msg.usage as { cache_read_input_tokens?: number }).cache_read_input_tokens ?? 0,
+        web_search_requests:
+          (msg.usage as { server_tool_use?: { web_search_requests?: number } })
+            .server_tool_use?.web_search_requests ?? 0,
       } as Record<string, number>),
     } as ChatCompletion["usage"],
   };

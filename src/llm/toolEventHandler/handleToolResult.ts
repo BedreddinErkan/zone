@@ -1,6 +1,7 @@
 import { debugLog } from "../../utils/logger.js";
 import { handleSubagentResult, logSubagentDispatched } from "../subagentDispatch.js";
 import { emitToolResultSize } from "../loopTelemetry.js";
+import { LOOP_DETECT_EXEMPT_TOOLS } from "../loopDetector.js";
 import type { ToolResult } from "../../tools/toolExecutor.js";
 import type { ToolEventContext, ToolEventResult, HandleToolResultDeps } from "./types.js";
 
@@ -189,19 +190,21 @@ export async function handleToolResult(
     }
   }
 
-  // Step 12: loop detection
-  const loopHash = deps.hashToolCall(name, parsedArgs);
-  const loopResult = deps.recordAndDetect(deps.detectorState, loopHash);
-  ctx.lastLoopResult = loopResult;
-  if (loopResult.status === "terminate") {
-    deps.onStructuredEvent?.({
-      type: "loop_detected_terminal",
-      toolName: name,
-      count: loopResult.count,
-      title: `Loop detected: \`${name}\` repeated ${loopResult.count}×`,
-      status: "error",
-    });
-    return { kind: "early_exit", exit: deps.synthesizeLoopDetectedExit(deps.iter + 1, name, loopResult.count) };
+  // Step 12: loop detection (exempt polling tools — repeated identical calls are legitimate)
+  if (!LOOP_DETECT_EXEMPT_TOOLS.has(name)) {
+    const loopHash = deps.hashToolCall(name, parsedArgs);
+    const loopResult = deps.recordAndDetect(deps.detectorState, loopHash);
+    ctx.lastLoopResult = loopResult;
+    if (loopResult.status === "terminate") {
+      deps.onStructuredEvent?.({
+        type: "loop_detected_terminal",
+        toolName: name,
+        count: loopResult.count,
+        title: `Loop detected: \`${name}\` repeated ${loopResult.count}×`,
+        status: "error",
+      });
+      return { kind: "early_exit", exit: deps.synthesizeLoopDetectedExit(deps.iter + 1, name, loopResult.count) };
+    }
   }
 
   return { kind: "continue" };

@@ -14,6 +14,7 @@ interface UsageBreakdown {
   cache_write: number;
   cache_read: number;
   output: number;
+  webSearchRequests: number;
 }
 
 export function extractUsage(rawUsage: unknown): UsageBreakdown | null {
@@ -32,11 +33,13 @@ export function extractUsage(rawUsage: unknown): UsageBreakdown | null {
     return null;
   }
   const inputUncached = openAiCacheRead > 0 ? Math.max(0, input - openAiCacheRead) : input;
+  const webSearchRequests = Number(u.web_search_requests ?? 0) || 0;
   return {
     input_uncached: inputUncached,
     cache_write: cacheWrite,
     cache_read: cacheRead,
     output,
+    webSearchRequests,
   };
 }
 

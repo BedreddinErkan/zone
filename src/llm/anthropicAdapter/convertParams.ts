@@ -13,6 +13,7 @@ const EFFORT_BUDGET_MAP: Record<EffortLevel, number> = { low: 1024, medium: 8192
 
 export interface ConvertParamsExtras {
   effort?: EffortLevel;
+  webSearch?: boolean;
 }
 
 const JSON_MODE_INSTRUCTION = [
@@ -119,7 +120,7 @@ export function convertParams(
   //   • no tools (synthesis calls): system block gets cache_control directly.
   const cacheEligible = isCacheEligible(finalSystem || "", tools);
   let systemForRequest: Anthropic.MessageCreateParams["system"] = finalSystem || undefined;
-  let toolsForRequest = tools;
+  let toolsForRequest: Anthropic.Messages.ToolUnion[] | undefined = tools;
 
   if (cacheEligible) {
     if (tools && tools.length > 0) {
@@ -141,6 +142,15 @@ export function convertParams(
         { type: "text", text: finalSystem, cache_control: { type: "ephemeral" } },
       ];
     }
+  }
+
+  if (extras?.webSearch) {
+    const wsEntry: Anthropic.Messages.WebSearchTool20250305 = {
+      type: "web_search_20250305",
+      name: "web_search",
+      max_uses: 3,
+    };
+    toolsForRequest = toolsForRequest ? [...toolsForRequest, wsEntry] : [wsEntry];
   }
 
   // Tur prompt-caching-2: second breakpoint on the LAST user message (default

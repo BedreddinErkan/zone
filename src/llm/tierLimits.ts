@@ -21,7 +21,7 @@ export const TIER_LIMITS: Record<TaskTier, TierLimits> = {
     auditIterCap: 0,
   },
   medium: {
-    maxSubagentCalls: 1,
+    maxSubagentCalls: 0,
     tokenBudgetCap: 600_000,
     softIterWarn: 25,
     auditIterCap: 6,

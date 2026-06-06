@@ -13,6 +13,10 @@ export const WINDOW_SIZE = 8;
 export const WARN_THRESHOLD = 3;
 export const TERMINATE_THRESHOLD = 4;
 
+/** Tools whose repeated identical calls are semantically legitimate (e.g. polling a
+ *  background process handle). Excluded from loop detection at both call sites. */
+export const LOOP_DETECT_EXEMPT_TOOLS = new Set(["read_background_output"]);
+
 export type DetectorStatus = "ok" | "warn" | "terminate";
 
 export interface DetectorState {

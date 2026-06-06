@@ -38,7 +38,7 @@ export class AnthropicAdapter implements LLMClient {
     }
     const wasJsonMode =
       params.response_format?.type === "json_object";
-    const { params: anthropicParams, warnings } = convertParams(params, { effort: options.effort });
+    const { params: anthropicParams, warnings } = convertParams(params, { effort: options.effort, webSearch: options.webSearch });
     if (warnings.length > 0) {
       for (const w of warnings) console.warn(`[zone-anthropic] ${w}`);
     }
@@ -53,7 +53,7 @@ export class AnthropicAdapter implements LLMClient {
     params: ChatCompletionCreateParamsNonStreaming,
     options: LLMRequestOptions
   ): Promise<ChatCompletion> {
-    const { params: anthropicParams, warnings } = convertParams(params, { effort: options.effort });
+    const { params: anthropicParams, warnings } = convertParams(params, { effort: options.effort, webSearch: options.webSearch });
     if (warnings.length > 0) {
       for (const w of warnings) console.warn(`[zone-anthropic] ${w}`);
     }
@@ -71,6 +71,7 @@ export class AnthropicAdapter implements LLMClient {
     let usageCompletion = 0;
     let usageCacheWrite = 0;
     let usageCacheRead = 0;
+    let usageWebSearchRequests = 0;
 
     for await (const chunk of convertStream(stream)) {
       if (!responseId && chunk.id) responseId = chunk.id;
@@ -84,6 +85,7 @@ export class AnthropicAdapter implements LLMClient {
           usageCompletion = u.completion_tokens ?? usageCompletion;
           usageCacheWrite = u.cache_creation_input_tokens ?? usageCacheWrite;
           usageCacheRead = u.cache_read_input_tokens ?? usageCacheRead;
+          usageWebSearchRequests = Math.max(usageWebSearchRequests, u.web_search_requests ?? 0);
         }
         continue;
       }
@@ -151,6 +153,7 @@ export class AnthropicAdapter implements LLMClient {
         ...({
           cache_creation_input_tokens: usageCacheWrite,
           cache_read_input_tokens: usageCacheRead,
+          web_search_requests: usageWebSearchRequests,
         } as Record<string, number>),
       } as ChatCompletion["usage"],
     };
@@ -160,7 +163,7 @@ export class AnthropicAdapter implements LLMClient {
     params: ChatCompletionCreateParamsStreaming,
     options: LLMRequestOptions = {}
   ): Promise<AsyncIterable<ChatCompletionChunk>> {
-    const { params: anthropicParams, warnings } = convertParams(params);
+    const { params: anthropicParams, warnings } = convertParams(params, { webSearch: options.webSearch });
     if (warnings.length > 0) {
       for (const w of warnings) console.warn(`[zone-anthropic] ${w}`);
     }
