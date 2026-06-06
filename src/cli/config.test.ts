@@ -268,5 +268,23 @@ describe("loadCliConfig — per-repo disk model precedence (Bug E fix)", () => {
     const cfg = loadCliConfig({}, {});
     expect(cfg.model).toBe("claude-sonnet-4-6");
   });
+
+  it("webSearchEnabled defaults to true when no disk model", () => {
+    // loadDiskModelSync is already mocked to return null by default
+    const cfg = loadCliConfig({}, {});
+    expect(cfg.webSearchEnabled).toBe(true);
+  });
+
+  it("webSearchEnabled reads false from disk model", () => {
+    vi.mocked(loadDiskModelSync).mockReturnValueOnce({
+      version: 2,
+      model: "claude-sonnet-4-6",
+      provider: "anthropic",
+      webSearchEnabled: false,
+      updatedAt: "2026-06-01T00:00:00Z",
+    });
+    const cfg = loadCliConfig({}, {});
+    expect(cfg.webSearchEnabled).toBe(false);
+  });
 });
 

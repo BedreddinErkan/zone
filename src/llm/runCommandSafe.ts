@@ -27,21 +27,26 @@ const WHITELIST_PREFIXES = [
   "git status",
   "git show",
   "git branch",
+  "git blame",
+  "git rev-parse",
   // Read filesystem
   "ls",
   "cat",
   "head",
   "tail",
   "wc",
-  "find . -name",
-  "find . -type",
+  "find",   // any path; write/exec-capable find flags blocked by blacklist below
   "grep",
   "rg",
   "fd",
+  "pwd",
+  "which",
 ] as const;
 
 /** Reject if ANY pattern matches the command. Blacklist takes priority over whitelist. */
 const BLACKLIST_PATTERNS: RegExp[] = [
+  // find write/exec action flags — block before the whitelist match can fire
+  /\bfind\b.*\s(?:-delete|-exec(?:dir)?|-ok(?:dir)?|-fprint|-fprintf|-fls)\b/,
   // Mutations
   /\brm\s/,
   /\bmv\s/,
@@ -51,7 +56,7 @@ const BLACKLIST_PATTERNS: RegExp[] = [
   /\bchmod\s/,
   /\bchown\s/,
   // Redirects / pipes-to-write
-  />\s*[^&]/,  // block write redirects (> file, >> file) but allow fd merges (2>&1, 1>&2)
+  />\s*(?:[^&\s\/]|\/(?!dev\/null(?:\s|$)))/,  // block write redirects to real files; allow /dev/null sinks and fd merges (2>&1)
   />>\s*\S/,
   /\btee\s/,
   // Package mutations
@@ -62,6 +67,8 @@ const BLACKLIST_PATTERNS: RegExp[] = [
   /\bcargo\s+install\b/,
   // Git mutations
   /\bgit\s+(push|pull|fetch|commit|merge|rebase|reset\s+--hard|checkout\s+-\s)/,
+  // Git branch mutations (prefix "git branch" is in the whitelist, so block destructive flags explicitly)
+  /\bgit\s+branch\s+(-[dDmMcCu]|--delete\b|--move\b|--copy\b|--set-upstream)/,
   // Network mutations
   /\bcurl\s+.*-X\s*(POST|PUT|DELETE|PATCH)/i,
   /\bwget\s/,

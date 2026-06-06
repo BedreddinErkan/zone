@@ -15,10 +15,11 @@ export const SAFE_COMMAND_PREFIXES = {
   readonly: [
     "ls", "cat", "find", "grep", "head", "tail", "wc",
     "node --version", "node -v", "npm --version",
-    "echo",
+    "echo", "pwd", "which",
   ],
   git: [
     "git status", "git diff", "git log",
+    "git show", "git blame", "git rev-parse",
   ],
 } as const;
 

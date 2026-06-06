@@ -75,10 +75,15 @@ describe("getSafeCommandCategory", () => {
   it("returns git for safe git commands", () => {
     expect(getSafeCommandCategory("git status")).toBe("git");
     expect(getSafeCommandCategory("git diff HEAD~1")).toBe("git");
+    expect(getSafeCommandCategory("git show HEAD~1")).toBe("git");
+    expect(getSafeCommandCategory("git blame src/foo.ts -L 1,20")).toBe("git");
+    expect(getSafeCommandCategory("git rev-parse HEAD")).toBe("git");
+    expect(getSafeCommandCategory("git rev-parse --short HEAD")).toBe("git");
   });
 
   it("returns null for unsafe or unmatched commands", () => {
     expect(getSafeCommandCategory("git push origin main")).toBeNull();
+    expect(getSafeCommandCategory("git commit -m 'msg'")).toBeNull();
     expect(getSafeCommandCategory("ls && rm -rf /")).toBeNull();
     expect(getSafeCommandCategory("   ")).toBeNull();
   });

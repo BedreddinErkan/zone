@@ -41,4 +41,43 @@ describe("diskModel", () => {
     const result = await loadDiskModel(tmpDir);
     expect(result).toBeNull();
   });
+
+  // Phase 2a: planDepth persists and round-trips
+  it("planDepth:'quick' round-trips through saveDiskModel / loadDiskModel", async () => {
+    const settings: DiskModelSettings = {
+      version: 2,
+      model: "claude-sonnet-4-6",
+      provider: "anthropic",
+      planDepth: "quick",
+      updatedAt: "2026-06-05T00:00:00.000Z",
+    };
+    await saveDiskModel(tmpDir, settings);
+    const result = await loadDiskModel(tmpDir);
+    expect(result?.planDepth).toBe("quick");
+  });
+
+  it("planDepth:'investigate' round-trips through saveDiskModel / loadDiskModel", async () => {
+    const settings: DiskModelSettings = {
+      version: 2,
+      model: "claude-sonnet-4-6",
+      provider: "anthropic",
+      planDepth: "investigate",
+      updatedAt: "2026-06-05T00:00:00.000Z",
+    };
+    await saveDiskModel(tmpDir, settings);
+    const result = await loadDiskModel(tmpDir);
+    expect(result?.planDepth).toBe("investigate");
+  });
+
+  it("planDepth is undefined when the field is absent from stored settings", async () => {
+    const settings: DiskModelSettings = {
+      version: 2,
+      model: "claude-sonnet-4-6",
+      provider: "anthropic",
+      updatedAt: "2026-06-05T00:00:00.000Z",
+    };
+    await saveDiskModel(tmpDir, settings);
+    const result = await loadDiskModel(tmpDir);
+    expect(result?.planDepth).toBeUndefined();
+  });
 });

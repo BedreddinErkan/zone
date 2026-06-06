@@ -21,6 +21,10 @@ export interface CliConfig {
   quiet: boolean;
   noColor: boolean;
   effort?: EffortLevel;
+  summaryFormat?: "compact" | "detailed";
+  memoryEnabled?: boolean;
+  commitOnSuccess?: boolean;
+  webSearchEnabled?: boolean;
 }
 
 export interface CliFlags {
@@ -133,6 +137,7 @@ export function loadCliConfig(
     verbose: flags.verbose === true || envStr("ZONE_VERBOSE_LOGS") === "1",
     quiet: flags.quiet === true,
     noColor: flags.noColor === true || envStr("NO_COLOR") === "1",
+    webSearchEnabled: diskModel?.webSearchEnabled ?? true,
   };
 }
 

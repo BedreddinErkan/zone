@@ -110,13 +110,51 @@ describe("checkCommandSafe", () => {
     });
   });
 
-  describe("blacklist — write redirects still blocked (regression check)", () => {
+  describe("blacklist — write redirects to real files still blocked (regression check)", () => {
     it.each([
       "echo hello > /tmp/file",
       "cat data >> log.txt",
-      "ls > /dev/null",
     ])("blocks write redirect: %s", (cmd) => {
       expect(checkCommandSafe(cmd).safe).toBe(false);
+    });
+  });
+
+  describe("DF-16: /dev/null redirects allowed (stderr suppression idiom)", () => {
+    it.each([
+      "ls > /dev/null",
+      "ls -la 2>/dev/null",
+      "grep -r foo . 2>/dev/null",
+      "find src -type f 2>/dev/null",
+      "cat file 2> /dev/null",
+    ])("allows /dev/null redirect: %s", (cmd) => {
+      expect(checkCommandSafe(cmd).safe).toBe(true);
+    });
+  });
+
+  describe("DF-16: relaxed find whitelist", () => {
+    it.each([
+      "find src -type f",
+      "find /path -name '*.ts'",
+      "find . -maxdepth 2 -type f",
+      "find . -name '*.json' -not -path '*/node_modules/*'",
+    ])("allows find variant: %s", (cmd) => {
+      expect(checkCommandSafe(cmd).safe).toBe(true);
+    });
+
+    it.each([
+      "find . -delete",
+      "find . -exec rm {} ;",
+      "find . -execdir sh -c 'rm {}' ;",
+      "find . -ok rm {} ;",
+      "find . -fprint out.txt",
+    ])("blocks dangerous find flag: %s", (cmd) => {
+      expect(checkCommandSafe(cmd).safe).toBe(false);
+    });
+  });
+
+  describe("DF-16: pwd and which added to whitelist", () => {
+    it.each(["pwd", "which node", "which npm", "which python"])("allows: %s", (cmd) => {
+      expect(checkCommandSafe(cmd).safe).toBe(true);
     });
   });
 
@@ -147,6 +185,38 @@ describe("checkCommandSafe", () => {
       "git rebase main",
       "git reset --hard HEAD",
     ])("blocks git mutation: %s", (cmd) => {
+      expect(checkCommandSafe(cmd).safe).toBe(false);
+    });
+  });
+
+  describe("Phase 1: git read additions — blame/rev-parse safe; branch mutations blocked", () => {
+    it.each([
+      "git blame src/foo.ts",
+      "git blame -L 1,20 src/foo.ts",
+      "git rev-parse HEAD",
+      "git rev-parse --short HEAD",
+      "git branch --show-current",
+      "git branch -r",
+      "git branch -a",
+      "git branch -l",
+      "git branch -v",
+    ])("allows git read: %s", (cmd) => {
+      expect(checkCommandSafe(cmd).safe).toBe(true);
+    });
+
+    it.each([
+      "git branch -d feature-x",
+      "git branch -D feature-x",
+      "git branch -m new-name",
+      "git branch -M new-name",
+      "git branch -c copy-name",
+      "git branch -C copy-name",
+      "git branch -u origin/main",
+      "git branch --delete feature-x",
+      "git branch --move new-name",
+      "git branch --copy copy-name",
+      "git branch --set-upstream-to origin/main",
+    ])("blocks git branch mutation: %s", (cmd) => {
       expect(checkCommandSafe(cmd).safe).toBe(false);
     });
   });

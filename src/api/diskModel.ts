@@ -9,6 +9,11 @@ export interface DiskModelSettings {
   model: string;
   provider: "anthropic" | "openai";
   effort?: EffortLevel;
+  summaryFormat?: "compact" | "detailed";
+  memoryEnabled?: boolean;
+  commitOnSuccess?: boolean;
+  webSearchEnabled?: boolean;
+  planDepth?: "quick" | "investigate";
   updatedAt: string;
 }
 
