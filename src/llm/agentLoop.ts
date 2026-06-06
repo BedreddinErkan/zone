@@ -3232,6 +3232,7 @@ Example:
               command,
               emit: (evt) => input.onStructuredEvent?.(evt),
               abortSignal: input.abortSignal,
+              investigationMode: isInvestigationMode,
             });
             return !!approval.approved;
           },

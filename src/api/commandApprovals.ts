@@ -1,5 +1,84 @@
 import crypto from "node:crypto";
 
+/**
+ * Additional prefixes auto-approved ONLY during plan-mode investigation
+ * (requestCommandApproval called with investigationMode:true).
+ *
+ * Rationale for each entry / exclusions:
+ *  - typecheck: deterministic read-only type checks; `npx tsc --noEmit` preferred over
+ *    bare `npx tsc` (which writes JS output when noEmit is not in the tsconfig).
+ *  - test_runners: agent cannot edit files so test runs are safe diagnostics.
+ *  - lint: prettier --check is safe; `--check` is PART OF the prefix so `prettier --write`
+ *    never matches. `npx eslint` deliberately excluded — `--fix` rewrites files.
+ *    `npm run lint` excluded for the same reason (may alias `eslint --fix`).
+ *  - git_read: `git branch` useful for listing branches; guarded below against
+ *    destructive flags (-d/-D/-m/-M etc.) that don't involve shell metacharacters.
+ *  - rg/fd deliberately excluded: `-x/--exec/--exec-batch` (fd) and `--pre` (rg)
+ *    run arbitrary sub-commands without metacharacters; investigation already
+ *    has search_in_files + grep/find for searching.
+ */
+export const INVESTIGATION_SAFE_PREFIXES = {
+  typecheck: [
+    "npm run typecheck",
+    "npm run type-check",
+    "npm run check",
+    "npx tsc --noEmit",
+  ],
+  test_runners: [
+    "npx vitest run",
+    "npx vitest --run",
+    "vitest run",
+    "npx jest",
+    "pnpm test",
+  ],
+  lint: [
+    "npx prettier --check",
+  ],
+  git_read: [
+    "git branch",
+  ],
+} as const;
+
+/** Destructive git-branch flag pattern — same as runCommandSafe.ts:71. */
+const DESTRUCTIVE_GIT_BRANCH_RE =
+  /git\s+branch\s+(-[dDmMcCu]|--delete\b|--move\b|--copy\b|--set-upstream)/;
+
+/**
+ * Returns true when `command` is auto-approvable during plan-mode investigation:
+ * passes the same metachar + BYOK2 guards as {@link getSafeCommandCategory}, then
+ * matches against {@link INVESTIGATION_SAFE_PREFIXES} with targeted flag guards
+ * for known write/exec vectors.
+ */
+export function isInvestigationSafeCommand(command: string): boolean {
+  const trimmed = String(command || "").trim();
+  if (!trimmed) return false;
+  // Same metachar guard as getSafeCommandCategory.
+  if (/[&|;`$()<>]/.test(trimmed)) return false;
+  // Same BYOK2 sensitive-path guard.
+  if (
+    /(?:^|\s)\.env(\s|$)/.test(trimmed) ||
+    /(?:^|\s)\.env\.(?!example(?:\s|$))/.test(trimmed) ||
+    /\.zone[/\\]keys\.json/.test(trimmed) ||
+    /\.zone[/\\]sessions/.test(trimmed) ||
+    /(?:^|\s)[\w./]*\.(pem|key)(\s|$)/.test(trimmed) ||
+    /(?:^|\s)(id_rsa|credentials)(\s|$)/.test(trimmed)
+  ) {
+    return false;
+  }
+  // git branch: guard against destructive flags before prefix match.
+  if (trimmed.startsWith("git branch") && DESTRUCTIVE_GIT_BRANCH_RE.test(trimmed)) {
+    return false;
+  }
+  for (const prefixes of Object.values(INVESTIGATION_SAFE_PREFIXES)) {
+    if ((prefixes as readonly string[]).some(
+      (p) => trimmed === p || trimmed.startsWith(p + " "),
+    )) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export const SAFE_COMMAND_PREFIXES = {
   build: [
     "npm run build",
@@ -166,6 +245,14 @@ export function requestCommandApproval(input: {
   }) => void;
   abortSignal?: AbortSignal;
   timeoutMs?: number;
+  /**
+   * When true, the caller is a plan-mode investigation agent (runPlanInvestigation).
+   * Commands that match {@link INVESTIGATION_SAFE_PREFIXES} are auto-approved; all
+   * other non-safe commands are denied immediately without prompting the user.
+   * (Investigation is a background planning phase — modal interruptions break UX
+   * and the agent has no write tools, making non-diagnostic commands unnecessary.)
+   */
+  investigationMode?: boolean;
 }): Promise<{ approvalId: string; approved: boolean }> {
   const runId = String(input.runId || "").trim();
   const command = String(input.command || "");
@@ -184,6 +271,24 @@ export function requestCommandApproval(input: {
       });
     } catch {}
     return Promise.resolve({ approvalId, approved: true });
+  }
+
+  if (input.investigationMode) {
+    if (isInvestigationSafeCommand(command)) {
+      try {
+        input.emit({
+          type: "command_auto_approved_investigation" as any,
+          runId,
+          command,
+          approvalId,
+        });
+      } catch {}
+      return Promise.resolve({ approvalId, approved: true });
+    }
+    // Non-diagnostic command in investigation: deny immediately, no user prompt.
+    // The investigation agent has no write tools — a denied non-diagnostic command
+    // should make it fall back to read_file / search_in_files.
+    return Promise.resolve({ approvalId, approved: false });
   }
 
   if (isCommandTrusted(runId, command)) {

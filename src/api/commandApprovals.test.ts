@@ -6,6 +6,7 @@ import {
   isCommandTrusted,
   isTrustAllForRun,
   isSafeCommand,
+  isInvestigationSafeCommand,
   getSafeCommandCategory,
   requestCommandApproval,
   resolveCommandApproval,
@@ -345,5 +346,146 @@ describe("requestCommandApproval honors trusted set", () => {
     expect(events.find((e) => e.type === "command_approval_required")).toBeUndefined();
     expect(events.find((e) => e.type === "command_trusted")).toBeTruthy();
     clearTrustedCommandsForRun("run-skip");
+  });
+});
+
+describe("isInvestigationSafeCommand", () => {
+  describe("approved — typecheck", () => {
+    it("npm run typecheck", () => expect(isInvestigationSafeCommand("npm run typecheck")).toBe(true));
+    it("npm run typecheck with args", () => expect(isInvestigationSafeCommand("npm run typecheck --silent")).toBe(true));
+    it("npm run type-check", () => expect(isInvestigationSafeCommand("npm run type-check")).toBe(true));
+    it("npm run check", () => expect(isInvestigationSafeCommand("npm run check")).toBe(true));
+    it("npx tsc --noEmit", () => expect(isInvestigationSafeCommand("npx tsc --noEmit")).toBe(true));
+    it("npx tsc --noEmit -p tsconfig.json", () => expect(isInvestigationSafeCommand("npx tsc --noEmit -p tsconfig.json")).toBe(true));
+  });
+
+  describe("approved — test runners", () => {
+    it("npx vitest run", () => expect(isInvestigationSafeCommand("npx vitest run")).toBe(true));
+    it("npx vitest run src/foo.test.ts", () => expect(isInvestigationSafeCommand("npx vitest run src/foo.test.ts")).toBe(true));
+    it("npx vitest --run", () => expect(isInvestigationSafeCommand("npx vitest --run")).toBe(true));
+    it("vitest run", () => expect(isInvestigationSafeCommand("vitest run")).toBe(true));
+    it("npx jest", () => expect(isInvestigationSafeCommand("npx jest")).toBe(true));
+    it("npx jest src/foo.test.ts", () => expect(isInvestigationSafeCommand("npx jest src/foo.test.ts")).toBe(true));
+    it("pnpm test", () => expect(isInvestigationSafeCommand("pnpm test")).toBe(true));
+  });
+
+  describe("approved — lint (check-only)", () => {
+    it("npx prettier --check .", () => expect(isInvestigationSafeCommand("npx prettier --check .")).toBe(true));
+    it("npx prettier --check src/", () => expect(isInvestigationSafeCommand("npx prettier --check src/")).toBe(true));
+  });
+
+  describe("approved — git branch listing", () => {
+    it("git branch (bare)", () => expect(isInvestigationSafeCommand("git branch")).toBe(true));
+    it("git branch -a", () => expect(isInvestigationSafeCommand("git branch -a")).toBe(true));
+    it("git branch -r", () => expect(isInvestigationSafeCommand("git branch -r")).toBe(true));
+    it("git branch -v", () => expect(isInvestigationSafeCommand("git branch -v")).toBe(true));
+    it("git branch --show-current", () => expect(isInvestigationSafeCommand("git branch --show-current")).toBe(true));
+  });
+
+  describe("blocked — not in investigation list", () => {
+    it("npm install", () => expect(isInvestigationSafeCommand("npm install")).toBe(false));
+    it("npm run lint", () => expect(isInvestigationSafeCommand("npm run lint")).toBe(false));
+    it("npx eslint src/ (--fix risk)", () => expect(isInvestigationSafeCommand("npx eslint src/")).toBe(false));
+    it("rg pattern (--exec/-x risk)", () => expect(isInvestigationSafeCommand("rg somePattern")).toBe(false));
+    it("fd . (--exec risk)", () => expect(isInvestigationSafeCommand("fd .")).toBe(false));
+    it("npm run dev", () => expect(isInvestigationSafeCommand("npm run dev")).toBe(false));
+    it("npm run start", () => expect(isInvestigationSafeCommand("npm run start")).toBe(false));
+    it("npx tsc -p (no --noEmit, writes JS)", () => expect(isInvestigationSafeCommand("npx tsc -p tsconfig.json")).toBe(false));
+    it("npx tsc (bare, writes JS)", () => expect(isInvestigationSafeCommand("npx tsc")).toBe(false));
+  });
+
+  describe("blocked — metachar guard", () => {
+    it("npm run typecheck && echo done", () => expect(isInvestigationSafeCommand("npm run typecheck && echo done")).toBe(false));
+    it("npx vitest run | head -20", () => expect(isInvestigationSafeCommand("npx vitest run | head -20")).toBe(false));
+  });
+
+  describe("blocked — BYOK2 sensitive path", () => {
+    it("cat .env", () => expect(isInvestigationSafeCommand("cat .env")).toBe(false));
+    it("npx vitest run .env.test", () => expect(isInvestigationSafeCommand("npx vitest run .env.test")).toBe(false));
+  });
+
+  describe("blocked — destructive git branch flags", () => {
+    it("git branch -d feature", () => expect(isInvestigationSafeCommand("git branch -d feature")).toBe(false));
+    it("git branch -D feature", () => expect(isInvestigationSafeCommand("git branch -D feature")).toBe(false));
+    it("git branch -m old new", () => expect(isInvestigationSafeCommand("git branch -m old new")).toBe(false));
+    it("git branch --delete feature", () => expect(isInvestigationSafeCommand("git branch --delete feature")).toBe(false));
+    it("git branch --move old new", () => expect(isInvestigationSafeCommand("git branch --move old new")).toBe(false));
+  });
+
+  describe("empty / edge cases", () => {
+    it("empty string", () => expect(isInvestigationSafeCommand("")).toBe(false));
+    it("whitespace only", () => expect(isInvestigationSafeCommand("   ")).toBe(false));
+  });
+});
+
+describe("requestCommandApproval — investigationMode:true", () => {
+  it("auto-approves investigation-safe command, emits command_auto_approved_investigation", async () => {
+    const events: unknown[] = [];
+    const result = await requestCommandApproval({
+      runId: "inv-run-1",
+      command: "npm run typecheck",
+      investigationMode: true,
+      emit: (e) => events.push(e),
+    });
+    expect(result.approved).toBe(true);
+    expect(events).toEqual([{
+      type: "command_auto_approved_investigation",
+      runId: "inv-run-1",
+      command: "npm run typecheck",
+      approvalId: result.approvalId,
+    }]);
+  });
+
+  it("auto-approves globally-safe command through the existing isSafeCommand path", async () => {
+    const events: unknown[] = [];
+    const result = await requestCommandApproval({
+      runId: "inv-run-2",
+      command: "ls -la",
+      investigationMode: true,
+      emit: (e) => events.push(e),
+    });
+    expect(result.approved).toBe(true);
+    // Falls through the global isSafeCommand path — emits command_auto_approved (not investigation variant)
+    expect((events[0] as any)?.type).toBe("command_auto_approved");
+  });
+
+  it("denies non-diagnostic command immediately — no pending approval, no prompt event", async () => {
+    const events: unknown[] = [];
+    const result = await requestCommandApproval({
+      runId: "inv-run-3",
+      command: "npm install",
+      investigationMode: true,
+      emit: (e) => events.push(e),
+    });
+    expect(result.approved).toBe(false);
+    // Must NOT emit command_approval_required — no user prompt in investigation
+    expect(events.find((e: any) => e.type === "command_approval_required")).toBeUndefined();
+  });
+
+  it("denies compound command immediately (metachar guard fires first)", async () => {
+    const events: unknown[] = [];
+    const result = await requestCommandApproval({
+      runId: "inv-run-4",
+      command: "npm run typecheck && echo done",
+      investigationMode: true,
+      emit: (e) => events.push(e),
+    });
+    // metachar guard makes isSafeCommand AND isInvestigationSafeCommand both return false → immediate deny
+    expect(result.approved).toBe(false);
+    expect(events.find((e: any) => e.type === "command_approval_required")).toBeUndefined();
+  });
+
+  it("without investigationMode, non-safe command goes to normal prompt path", async () => {
+    const events: unknown[] = [];
+    requestCommandApproval({
+      runId: "inv-run-5",
+      command: "npm install",
+      // investigationMode NOT set
+      emit: (e) => events.push(e),
+      timeoutMs: 1,
+    });
+    // Waits for the emit to fire synchronously before checking
+    await new Promise((r) => setTimeout(r, 5));
+    expect(events.find((e: any) => e.type === "command_approval_required")).toBeTruthy();
   });
 });
