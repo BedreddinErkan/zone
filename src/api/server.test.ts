@@ -496,7 +496,10 @@ export function LoginForm() {
     });
   });
 
-  it("injects the current user bootstrap into the UI html when available", async () => {
+  // Skipped: src/ui/index.html was deleted in the web-UI retirement (Stage 1).
+  // The server's HTML-serving route now 500s. This test will be superseded when
+  // the server is refactored / removed in Stage 4.
+  it.skip("injects the current user bootstrap into the UI html when available", async () => {
     process.env.ZONE_USER_ID = "user_real_123";
     process.env.ZONE_USER_EMAIL = "real@example.com";
 

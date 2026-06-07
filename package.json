@@ -16,8 +16,7 @@
     "./approvals": "./dist/api/commandApprovals.js"
   },
   "scripts": {
-    "copy-ui": "node scripts/sync-zone-ui.cjs",
-    "build": "node node_modules/typescript/bin/tsc -p tsconfig.json && node scripts/sync-zone-ui.cjs",
+    "build": "node node_modules/typescript/bin/tsc -p tsconfig.json",
     "postbuild": "chmod +x dist/cli/index.js",
     "typecheck": "tsc --noEmit",
     "check-types": "tsc --noEmit -p tsconfig.json",
