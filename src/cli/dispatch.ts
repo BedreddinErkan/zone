@@ -15,7 +15,7 @@ import { runPlanInvestigation } from "../llm/planInvestigation.js";
 import { createSpinner, buildCliSink } from "./sink.js";
 import type { LlmPatchProgressUpdate } from "../core/agentLifecycleEvents.js";
 import { preparePlanContext } from "../core/preparePlanContext.js";
-import { generateExecutionPlan, isNoChangePlan } from "../llm/executionPlan.js";
+import { generateExecutionPlan, isNoChangePlan, isCannotVerifyPlan } from "../llm/executionPlan.js";
 import { runAuditPipeline } from "../llm/auditPipeline.js";
 import { readAuditModeSetting } from "../visual/tierSettings.js";
 import { withRequestContext } from "../llm/openaiContext.js";
@@ -161,7 +161,23 @@ export async function runOneShotInner(
       return { ok: false as const, reason: "plan_gen_failed" } as unknown as LlmPatchFlowResult;
     }
 
-    // E8: premise verified false — investigation confirmed no problem exists.
+    // E8a: reproduce command did not run — premise unverified, do not fabricate a fix.
+    if (isCannotVerifyPlan(preGeneratedPlan)) {
+      progressCallback({
+        stage: "narration",
+        progress: {
+          type: "narration",
+          runId,
+          ts: Date.now(),
+          title: "Could not verify",
+          text: preGeneratedPlan.cannotVerifyReason ?? "Reproduce command did not run — premise unconfirmed.",
+        },
+      });
+      const result: LlmPatchFlowResult = { ok: false as const, reason: "could_not_verify" };
+      return result;
+    }
+
+    // E8b: premise verified false — investigation confirmed no problem exists.
     if (isNoChangePlan(preGeneratedPlan)) {
       progressCallback({
         stage: "narration",

@@ -17,6 +17,7 @@ const mockReadAuditModeSetting = vi.hoisted(() => vi.fn(() => "auto"));
 const mockLoadDiskModelSync = vi.hoisted(() => vi.fn(() => null));
 const mockRunPlanInvestigation = vi.hoisted(() => vi.fn());
 const mockIsNoChangePlan = vi.hoisted(() => vi.fn());
+const mockIsCannotVerifyPlan = vi.hoisted(() => vi.fn());
 
 vi.mock("../core/runLlmPatchFlow.js", () => ({
   runLlmPatchFlow: mockRunLlmPatchFlow,
@@ -42,6 +43,7 @@ vi.mock("../core/preparePlanContext.js", () => ({ preparePlanContext: mockPrepar
 vi.mock("../llm/executionPlan.js", () => ({
   generateExecutionPlan: mockGenerateExecutionPlan,
   isNoChangePlan: mockIsNoChangePlan,
+  isCannotVerifyPlan: mockIsCannotVerifyPlan,
 }));
 vi.mock("../visual/tierSettings.js", () => ({ readAuditModeSetting: mockReadAuditModeSetting, readDailyUsdCapOverride: vi.fn() }));
 vi.mock("../api/diskModel.js", () => ({ loadDiskModelSync: mockLoadDiskModelSync }));
@@ -101,6 +103,7 @@ beforeEach(() => {
   mockLoadDiskModelSync.mockReturnValue(null);  // default → "investigate"
   mockRunPlanInvestigation.mockResolvedValue(FAKE_PLAN);
   mockIsNoChangePlan.mockReturnValue(false);
+  mockIsCannotVerifyPlan.mockReturnValue(false);
   // Suppress stdout/stderr in tests
   vi.spyOn(process.stdout, "write").mockReturnValue(true);
   vi.spyOn(process.stderr, "write").mockReturnValue(true);
@@ -521,5 +524,45 @@ describe("E8: no-op plan short-circuit — premise verified false", () => {
     );
     expect(narrations).toHaveLength(1);
     expect(narrations[0]![0].progress.text).toContain("npm run build exits 0");
+  });
+});
+
+describe("S5: cannotVerify plan short-circuit", () => {
+  const PLAN_CONFIG = { ...BASE_CONFIG };
+  const AC = () => new AbortController();
+  const CANT_VERIFY_PLAN = {
+    objective: "Verify build",
+    steps: [],
+    riskHints: [],
+    scopeSummary: "Could not verify.",
+    cannotVerifyReason: "Could not verify — npm run build did not run (auto-denied); premise unconfirmed.",
+  };
+
+  beforeEach(() => {
+    mockLoadDiskModelSync.mockReturnValue({ version: 2, model: "claude-sonnet-4-6", provider: "anthropic", planDepth: "investigate", updatedAt: "" });
+    mockRunPlanInvestigation.mockResolvedValue(CANT_VERIFY_PLAN);
+    mockIsCannotVerifyPlan.mockReturnValue(true);
+  });
+
+  it("returns ok:false with reason could_not_verify", async () => {
+    const result = await runOneShotInner("fix the build error", PLAN_CONFIG, "run-cantverify-1", { mode: "plan", externalAc: AC() });
+    expect(result.ok).toBe(false);
+    expect((result as { ok: false; reason: string }).reason).toBe("could_not_verify");
+  });
+
+  it("does NOT call requestPlanApproval or runLlmPatchFlow", async () => {
+    await runOneShotInner("fix the build error", PLAN_CONFIG, "run-cantverify-2", { mode: "plan", externalAc: AC() });
+    expect(mockRequestPlanApproval).not.toHaveBeenCalled();
+    expect(mockRunLlmPatchFlow).not.toHaveBeenCalled();
+  });
+
+  it("emits a 'Could not verify' narration via progressCallback", async () => {
+    const onProgress = vi.fn();
+    await runOneShotInner("fix the build error", PLAN_CONFIG, "run-cantverify-3", { mode: "plan", externalAc: AC(), onProgress });
+    const narrations = onProgress.mock.calls.filter(
+      ([u]: [any]) => u?.progress?.type === "narration" && u?.progress?.title === "Could not verify"
+    );
+    expect(narrations).toHaveLength(1);
+    expect(narrations[0]![0].progress.text).toContain("did not run");
   });
 });

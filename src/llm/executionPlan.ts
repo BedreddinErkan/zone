@@ -22,14 +22,25 @@ export type ExecutionPlan = {
   scopeSummary: string;
   scopeNotes?: string;
   /** Reproduce-first: set when the agent verified the asserted problem does not exist
-   *  (e.g. build exits 0). IFF invariant: steps MUST be [] when this is set. */
+   *  (e.g. build exits 0). IFF invariant: steps MUST be [] when this is set.
+   *  Mutually exclusive with cannotVerifyReason. */
   noChangeReason?: string;
+  /** Reproduce-first: set when the reproduce command did NOT run (blocked, denied,
+   *  infrastructure error) so the premise could not be verified. steps MUST be [].
+   *  Mutually exclusive with noChangeReason. */
+  cannotVerifyReason?: string;
 };
 
 /** True when the investigation verified the asserted problem does not exist.
  *  steps is empty and noChangeReason explains what was verified. */
 export function isNoChangePlan(plan: ExecutionPlan): boolean {
   return plan.steps.length === 0 && !!plan.noChangeReason;
+}
+
+/** True when the reproduce command did not run and the premise could not be verified.
+ *  steps is empty and cannotVerifyReason explains the blockage. */
+export function isCannotVerifyPlan(plan: ExecutionPlan): boolean {
+  return plan.steps.length === 0 && !!plan.cannotVerifyReason;
 }
 
 const executionPlanSchema = z
@@ -51,22 +62,43 @@ const executionPlanSchema = z
     scopeSummary: z.string(),
     scopeNotes: z.string().optional(),
     noChangeReason: z.string().optional(),
+    cannotVerifyReason: z.string().optional(),
   })
   .superRefine((data, ctx) => {
-    // IFF invariant: steps may be empty ↔ noChangeReason is set.
-    if (data.steps.length === 0 && !data.noChangeReason) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "steps must be non-empty unless noChangeReason is set",
-        path: ["steps"],
-      });
-    }
-    if (data.steps.length > 0 && data.noChangeReason) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "noChangeReason must not be set when steps is non-empty",
-        path: ["noChangeReason"],
-      });
+    const hasNoChange = !!data.noChangeReason;
+    const hasCantVerify = !!data.cannotVerifyReason;
+    if (data.steps.length === 0) {
+      // When steps is empty, exactly one of noChangeReason / cannotVerifyReason must be set.
+      if (!hasNoChange && !hasCantVerify) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "steps must be non-empty unless noChangeReason or cannotVerifyReason is set",
+          path: ["steps"],
+        });
+      }
+      if (hasNoChange && hasCantVerify) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "only one of noChangeReason / cannotVerifyReason may be set",
+          path: ["noChangeReason"],
+        });
+      }
+    } else {
+      // When steps is non-empty, neither reason field may be set.
+      if (hasNoChange) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "noChangeReason must not be set when steps is non-empty",
+          path: ["noChangeReason"],
+        });
+      }
+      if (hasCantVerify) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "cannotVerifyReason must not be set when steps is non-empty",
+          path: ["cannotVerifyReason"],
+        });
+      }
     }
   });
 
@@ -132,6 +164,7 @@ export function tryParseExecutionPlan(text: string): ExecutionPlan | null {
       scopeSummary: plan.scopeSummary,
       ...(plan.scopeNotes ? { scopeNotes: plan.scopeNotes } : {}),
       ...(plan.noChangeReason ? { noChangeReason: plan.noChangeReason } : {}),
+      ...(plan.cannotVerifyReason ? { cannotVerifyReason: plan.cannotVerifyReason } : {}),
     };
   } catch {
     return null;
@@ -273,9 +306,11 @@ JSON shape:
   "riskHints": ["string"],
   "scopeSummary": "string",
   "scopeNotes": "string (optional)",
-  "noChangeReason": "string (optional — set ONLY when a reproduce-check confirms the asserted problem does not exist; steps MUST be [] when this is set)"
+  "noChangeReason": "string (optional — set ONLY when the reproduce command ran and exited 0; steps MUST be []; mutually exclusive with cannotVerifyReason)",
+  "cannotVerifyReason": "string (optional — set ONLY when the reproduce command did NOT run (blocked/denied/infra error); steps MUST be []; mutually exclusive with noChangeReason)"
 }
-- noChangeReason: if you ran the relevant command (e.g. npm run build) and it exited 0, set this to what you verified (e.g. "npm run build exits 0 — no error to fix") and leave steps as []. Do not fabricate steps for a problem you could not reproduce.
+- noChangeReason: if you ran the relevant command and it exited 0, set this and leave steps as []. Do not fabricate steps for a problem you could not reproduce.
+- cannotVerifyReason: if the reproduce command did not run even bare, set this and leave steps as []. Do NOT read files to guess a fix.
 `.trim();
 
   const response = await client.createChatCompletion({
@@ -298,5 +333,6 @@ JSON shape:
     scopeSummary: plan.scopeSummary,
     ...(plan.scopeNotes ? { scopeNotes: plan.scopeNotes } : {}),
     ...(plan.noChangeReason ? { noChangeReason: plan.noChangeReason } : {}),
+    ...(plan.cannotVerifyReason ? { cannotVerifyReason: plan.cannotVerifyReason } : {}),
   };
 }

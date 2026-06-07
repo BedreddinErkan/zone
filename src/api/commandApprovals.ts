@@ -44,6 +44,16 @@ const DESTRUCTIVE_GIT_BRANCH_RE =
   /git\s+branch\s+(-[dDmMcCu]|--delete\b|--move\b|--copy\b|--set-upstream)/;
 
 /**
+ * Strip a trailing benign stderr redirect from a command so that an otherwise
+ * safe command like `npm run build 2>&1` is treated as `npm run build` by the
+ * metachar guard and prefix match. Only strips ONE trailing occurrence of
+ * `2>&1` or `2>/dev/null`; leaves everything else (pipes, `>file`, `&&`) intact.
+ */
+function stripTrailingBenignRedirect(cmd: string): string {
+  return cmd.replace(/\s+2>(?:&1|\/dev\/null)\s*$/, "").trimEnd();
+}
+
+/**
  * Returns true when `command` is auto-approvable during plan-mode investigation:
  * passes the same metachar + BYOK2 guards as {@link getSafeCommandCategory}, then
  * matches against {@link INVESTIGATION_SAFE_PREFIXES} with targeted flag guards
@@ -52,8 +62,11 @@ const DESTRUCTIVE_GIT_BRANCH_RE =
 export function isInvestigationSafeCommand(command: string): boolean {
   const trimmed = String(command || "").trim();
   if (!trimmed) return false;
+  // Strip trailing benign redirect before metachar check + prefix match (same as
+  // getSafeCommandCategory). BYOK sensitive-path check stays on original `trimmed`.
+  const core = stripTrailingBenignRedirect(trimmed);
   // Same metachar guard as getSafeCommandCategory.
-  if (/[&|;`$()<>]/.test(trimmed)) return false;
+  if (/[&|;`$()<>]/.test(core)) return false;
   // Same BYOK2 sensitive-path guard.
   if (
     /(?:^|\s)\.env(\s|$)/.test(trimmed) ||
@@ -66,12 +79,12 @@ export function isInvestigationSafeCommand(command: string): boolean {
     return false;
   }
   // git branch: guard against destructive flags before prefix match.
-  if (trimmed.startsWith("git branch") && DESTRUCTIVE_GIT_BRANCH_RE.test(trimmed)) {
+  if (core.startsWith("git branch") && DESTRUCTIVE_GIT_BRANCH_RE.test(core)) {
     return false;
   }
   for (const prefixes of Object.values(INVESTIGATION_SAFE_PREFIXES)) {
     if ((prefixes as readonly string[]).some(
-      (p) => trimmed === p || trimmed.startsWith(p + " "),
+      (p) => core === p || core.startsWith(p + " "),
     )) {
       return true;
     }
@@ -116,7 +129,11 @@ export const SAFE_COMMAND_PREFIXES = {
 export function getSafeCommandCategory(command: string): string | null {
   const trimmed = String(command || "").trim();
   if (!trimmed) return null;
-  if (/[&|;`$()<>]/.test(trimmed)) return null;
+  // Strip a trailing benign stderr redirect before metachar check + prefix match,
+  // so `npm run build 2>&1` is treated as `npm run build`. BYOK sensitive-path
+  // check stays on the original `trimmed` so it cannot be redirected around.
+  const core = stripTrailingBenignRedirect(trimmed);
+  if (/[&|;`$()<>]/.test(core)) return null;
 
   // BYOK2: block sensitive-path arguments even for whitelisted prefixes
   if (
@@ -131,7 +148,7 @@ export function getSafeCommandCategory(command: string): string | null {
   }
 
   for (const [category, prefixes] of Object.entries(SAFE_COMMAND_PREFIXES)) {
-    if (prefixes.some(prefix => trimmed === prefix || trimmed.startsWith(prefix + " "))) {
+    if (prefixes.some(prefix => core === prefix || core.startsWith(prefix + " "))) {
       return category;
     }
   }

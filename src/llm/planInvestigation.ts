@@ -56,8 +56,14 @@ ${fileList}
 
 Instructions:
 0. If TASK asserts a problem ("fix the error in X", "build fails", "why does X fail"):
-   run the relevant command (e.g. npm run build, npx tsc --noEmit, or the failing test) FIRST
-   to confirm the error exists. If exit_code=0: proceed to step 3 with noChangeReason set.
+   a. Run the relevant command BARE (e.g. npm run build, npx tsc --noEmit) — no 2>&1 or pipes
+      (output is captured automatically; metachars block auto-approval).
+   b. If it does not run: re-run it bare (drop any 2>&1/pipe/redirect). If still blocked: STOP —
+      set cannotVerifyReason and use steps:[]. Do NOT read files to guess a fix.
+   c. If exit_code=0: set noChangeReason and use steps:[].
+   d. If exit_code≠0: read the error output, then proceed to steps 1-2 below.
+   Steps 1-2 (read/search) apply ONLY after you have observed the error in step (d),
+   OR directly when the TASK does not assert a runtime problem (nothing to reproduce).
 1. Use read_file to examine each listed file.
 2. Note what is already implemented or clearly out of scope for this task.
 3. Produce the ExecutionPlan JSON in a \`\`\`json block as your FINAL message.
@@ -77,13 +83,15 @@ JSON shape:
   "riskHints": ["string"],
   "scopeSummary": "string (≤160 chars)",
   "scopeNotes": "string (optional, ≤200 chars — what is already done / out of scope)",
-  "noChangeReason": "string (optional — set to what you verified when the asserted problem does not reproduce, e.g. 'npm run build exits 0 — no error to fix'). When set, steps MUST be []."
+  "noChangeReason": "string (optional — set when reproduce command ran and exited 0; steps MUST be [])",
+  "cannotVerifyReason": "string (optional — set when reproduce command did NOT run; steps MUST be [])"
 }
 
 Rules:
 - filesLikely: copy paths VERBATIM from the files you read. Never invent or alter extensions.
 - scopeNotes: populate if you observed already-implemented or out-of-scope work; omit if nothing notable.
 - noChangeReason: if you ran the reproduce step and exit_code=0, set this and use steps:[]. Never fabricate steps for a problem that did not reproduce.
+- cannotVerifyReason: mutually exclusive with noChangeReason. Set only when the reproduce command did not run even bare. Do NOT set this to avoid investigation — only for genuine infrastructure blocks.
 - Terminate as soon as you have enough information to write the plan — do not over-investigate.
 - Your final turn MUST contain the \`\`\`json block.`.trim();
 }

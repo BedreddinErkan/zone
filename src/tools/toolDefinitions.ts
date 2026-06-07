@@ -28,9 +28,8 @@ export const ZONE_TOOLS: ChatCompletionTool[] = [
     function: {
       name: "run_command",
       strict: true,
-      // P3: output reduction - command results are already returned by the tool.
       description:
-        "Run a shell command in the repo directory. Use for: npm test, npm run build, git status, checking if files exist, etc. Do not repeat successful command output in assistant prose.",
+        "Run a one-shot shell command in the repo. stdout AND stderr are captured together and truncated to head 100 + tail 50 lines with a [exit_code=N] header. Run BARE commands — do NOT add 2>&1, pipes (| head), or redirects; they are redundant (output is already captured) and block auto-approval. Use for: npm run build, npm test, npx tsc --noEmit, git status. Do not repeat successful output in prose.",
       parameters: {
         type: "object",
         properties: {

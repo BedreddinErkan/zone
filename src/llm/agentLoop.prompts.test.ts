@@ -132,6 +132,24 @@ describe('RC1-fix: commandTool param — investigation prompt tool/mandate varia
     it('references ExecutionPlan no-change outcome (noChangeReason)', () => {
       expect(prompt).toContain('noChangeReason');
     });
+
+    it('A2: contains BARE directive (metachars block auto-approval)', () => {
+      expect(prompt).toContain('BARE');
+      expect(prompt).toContain('2>&1');
+    });
+
+    it('B1: contains STOP directive for unrunnable commands', () => {
+      expect(prompt).toContain('STOP');
+      expect(prompt).toContain('did not run');
+    });
+
+    it('B1: contains cannotVerifyReason field reference', () => {
+      expect(prompt).toContain('cannotVerifyReason');
+    });
+
+    it('B1: Process steps are gated on ONLY AFTER', () => {
+      expect(prompt).toContain('ONLY AFTER');
+    });
   });
 
   describe('commandTool: "run_command_readonly" (scope-audit)', () => {

@@ -11,7 +11,7 @@ vi.mock("./factory.js", () => ({
   })),
 }));
 
-import { generateExecutionPlan, tryParseExecutionPlan, isNoChangePlan } from "./executionPlan.js";
+import { generateExecutionPlan, tryParseExecutionPlan, isNoChangePlan, isCannotVerifyPlan } from "./executionPlan.js";
 
 function mockPlanResponse(plan: unknown) {
   mocks.createChatCompletion.mockResolvedValueOnce({
@@ -443,5 +443,81 @@ describe("E4: noChangeReason / isNoChangePlan", () => {
       scopeSummary: "Feature.",
     };
     expect(isNoChangePlan(plan)).toBe(false);
+  });
+});
+
+// S3: cannotVerifyReason / isCannotVerifyPlan — reproduce command did not run
+describe("S3: cannotVerifyReason / isCannotVerifyPlan", () => {
+  function wrapJson(obj: unknown): string {
+    return `\`\`\`json\n${JSON.stringify(obj, null, 2)}\n\`\`\``;
+  }
+
+  it("empty steps WITH cannotVerifyReason parses successfully", () => {
+    const plan = {
+      objective: "Verify build",
+      steps: [],
+      riskHints: [],
+      scopeSummary: "Could not verify.",
+      cannotVerifyReason: "Could not verify — npm run build did not run (auto-denied); premise unconfirmed.",
+    };
+    const result = tryParseExecutionPlan(wrapJson(plan));
+    expect(result).not.toBeNull();
+    expect(result!.steps).toHaveLength(0);
+    expect(result!.cannotVerifyReason).toContain("did not run");
+  });
+
+  it("empty steps WITH BOTH noChangeReason AND cannotVerifyReason → null (XOR violated)", () => {
+    const plan = {
+      objective: "X",
+      steps: [],
+      riskHints: [],
+      scopeSummary: "S",
+      noChangeReason: "exits 0",
+      cannotVerifyReason: "did not run",
+    };
+    expect(tryParseExecutionPlan(wrapJson(plan))).toBeNull();
+  });
+
+  it("non-empty steps WITH cannotVerifyReason → null", () => {
+    const plan = {
+      objective: "Fix",
+      steps: [{ title: "Step", description: "Do", filesLikely: ["src/x.ts"] }],
+      riskHints: [],
+      scopeSummary: "Fix.",
+      cannotVerifyReason: "did not run",
+    };
+    expect(tryParseExecutionPlan(wrapJson(plan))).toBeNull();
+  });
+
+  it("isCannotVerifyPlan: returns true for empty-steps plan with cannotVerifyReason", () => {
+    const plan = {
+      objective: "Verify",
+      steps: [],
+      riskHints: [],
+      scopeSummary: "Could not verify.",
+      cannotVerifyReason: "Command blocked.",
+    };
+    expect(isCannotVerifyPlan(plan)).toBe(true);
+  });
+
+  it("isCannotVerifyPlan: returns false for normal plan with steps", () => {
+    const plan = {
+      objective: "Fix feature",
+      steps: [{ title: "Step 1", description: "Do it", filesLikely: ["src/x.ts"] }],
+      riskHints: [],
+      scopeSummary: "Feature.",
+    };
+    expect(isCannotVerifyPlan(plan)).toBe(false);
+  });
+
+  it("isCannotVerifyPlan: returns false for noChange plan (wrong field)", () => {
+    const plan = {
+      objective: "Verify",
+      steps: [],
+      riskHints: [],
+      scopeSummary: "No change.",
+      noChangeReason: "exits 0",
+    };
+    expect(isCannotVerifyPlan(plan)).toBe(false);
   });
 });

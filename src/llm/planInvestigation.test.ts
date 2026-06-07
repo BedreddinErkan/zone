@@ -133,16 +133,39 @@ describe("runPlanInvestigation — fallback path", () => {
   });
 });
 
-describe("E3: buildPrompt — reproduce-first + noChangeReason", () => {
+describe("E3/S4: buildPrompt — reproduce-first + noChangeReason + cannotVerifyReason", () => {
   it("buildPrompt contains noChangeReason in JSON shape", () => {
     const prompt = buildPrompt("fix the build error", ["src/index.ts"]);
     expect(prompt).toContain("noChangeReason");
+  });
+
+  it("buildPrompt contains cannotVerifyReason in JSON shape", () => {
+    const prompt = buildPrompt("fix the build error", ["src/index.ts"]);
+    expect(prompt).toContain("cannotVerifyReason");
   });
 
   it("buildPrompt contains reproduce-first instruction (step 0)", () => {
     const prompt = buildPrompt("fix the build error", ["src/index.ts"]);
     expect(prompt).toContain("exit_code=0");
     expect(prompt).toContain("npm run build");
+  });
+
+  it("buildPrompt contains BARE directive (no 2>&1/pipes)", () => {
+    const prompt = buildPrompt("fix the build error", []);
+    expect(prompt).toContain("BARE");
+    expect(prompt).toContain("2>&1");
+  });
+
+  it("buildPrompt contains STOP directive for unrunnable commands", () => {
+    const prompt = buildPrompt("fix the build error", []);
+    expect(prompt).toContain("STOP");
+    expect(prompt).toContain("did not run");
+  });
+
+  it("buildPrompt gates steps 1-2 on ONLY after observing the error", () => {
+    const prompt = buildPrompt("fix the build error", []);
+    expect(prompt).toContain("ONLY");
+    expect(prompt).toContain("does not assert a runtime problem");
   });
 
   it("buildPrompt rules mention no-fabricate directive", () => {
@@ -161,6 +184,20 @@ describe("E3: buildPrompt — reproduce-first + noChangeReason", () => {
     mocks.tryParseExecutionPlan.mockReturnValue(noChangePlan);
     const result = await runPlanInvestigation(BASE_INPUT);
     expect(result).toEqual(noChangePlan);
+    expect(mocks.generateExecutionPlan).not.toHaveBeenCalled();
+  });
+
+  it("cannotVerify plan from tryParseExecutionPlan skips fallback generateExecutionPlan", async () => {
+    const cantVerifyPlan = {
+      objective: "Verify build",
+      steps: [],
+      riskHints: [],
+      scopeSummary: "Could not verify.",
+      cannotVerifyReason: "Could not verify — npm run build did not run; premise unconfirmed.",
+    };
+    mocks.tryParseExecutionPlan.mockReturnValue(cantVerifyPlan);
+    const result = await runPlanInvestigation(BASE_INPUT);
+    expect(result).toEqual(cantVerifyPlan);
     expect(mocks.generateExecutionPlan).not.toHaveBeenCalled();
   });
 });

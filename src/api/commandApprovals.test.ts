@@ -28,13 +28,25 @@ describe("isSafeCommand", () => {
     expect(isSafeCommand("tsc --noEmit -p tsconfig.json")).toBe(true);
   });
 
-  it("returns false for shell chains/pipes/redirects/subshell", () => {
+  it("returns false for shell chains/pipes/file-redirects/subshell", () => {
     expect(isSafeCommand("ls && rm -rf /")).toBe(false);
     expect(isSafeCommand("cat package.json | grep deps")).toBe(false);
     expect(isSafeCommand("ls; cat /etc/passwd")).toBe(false);
     expect(isSafeCommand("echo `whoami`")).toBe(false);
     expect(isSafeCommand("ls > /tmp/x")).toBe(false);
     expect(isSafeCommand("ls $(whoami)")).toBe(false);
+    // pipe after 2>&1 is NOT stripped — only a trailing bare 2>&1/2>/dev/null is safe
+    expect(isSafeCommand("npm run build 2>&1 | head")).toBe(false);
+    expect(isSafeCommand("npm run build 2>&1 | cat")).toBe(false);
+  });
+
+  it("A3: trailing 2>&1 / 2>/dev/null stripped before metachar+prefix check", () => {
+    expect(isSafeCommand("npm run build 2>&1")).toBe(true);
+    expect(isSafeCommand("npm test 2>/dev/null")).toBe(true);
+    // write redirect to real file stays blocked
+    expect(isSafeCommand("npm run build > out.txt")).toBe(false);
+    // chain operators still blocked even when 2>&1 is present elsewhere
+    expect(isSafeCommand("npm run build && echo done 2>&1")).toBe(false);
   });
 
   it("returns false for unsafe commands", () => {
@@ -487,5 +499,53 @@ describe("requestCommandApproval — investigationMode:true", () => {
     // Waits for the emit to fire synchronously before checking
     await new Promise((r) => setTimeout(r, 5));
     expect(events.find((e: any) => e.type === "command_approval_required")).toBeTruthy();
+  });
+});
+
+describe("A3: stripTrailingBenignRedirect — getSafeCommandCategory", () => {
+  it("npm run build 2>&1 → category 'build'", () => {
+    expect(getSafeCommandCategory("npm run build 2>&1")).toBe("build");
+  });
+
+  it("npm test 2>/dev/null → category 'test'", () => {
+    expect(getSafeCommandCategory("npm test 2>/dev/null")).toBe("test");
+  });
+
+  it("git status 2>&1 → category 'git'", () => {
+    expect(getSafeCommandCategory("git status 2>&1")).toBe("git");
+  });
+
+  it("npm run build 2>&1 | head → null (pipe not stripped)", () => {
+    expect(getSafeCommandCategory("npm run build 2>&1 | head")).toBeNull();
+  });
+
+  it("npm run build > out.txt → null (file write redirect stays blocked)", () => {
+    expect(getSafeCommandCategory("npm run build > out.txt")).toBeNull();
+  });
+
+  it("npm run build && echo done 2>&1 → null (chain operator stays blocked)", () => {
+    expect(getSafeCommandCategory("npm run build && echo done 2>&1")).toBeNull();
+  });
+});
+
+describe("A3: stripTrailingBenignRedirect — isInvestigationSafeCommand", () => {
+  it("npx tsc --noEmit 2>&1 → true", () => {
+    expect(isInvestigationSafeCommand("npx tsc --noEmit 2>&1")).toBe(true);
+  });
+
+  it("npx vitest run src/foo.test.ts 2>&1 → true", () => {
+    expect(isInvestigationSafeCommand("npx vitest run src/foo.test.ts 2>&1")).toBe(true);
+  });
+
+  it("npm run typecheck 2>/dev/null → true", () => {
+    expect(isInvestigationSafeCommand("npm run typecheck 2>/dev/null")).toBe(true);
+  });
+
+  it("npx tsc --noEmit 2>&1 | head → false (pipe not stripped)", () => {
+    expect(isInvestigationSafeCommand("npx tsc --noEmit 2>&1 | head")).toBe(false);
+  });
+
+  it("npx tsc --noEmit > errors.txt → false (file write redirect stays blocked)", () => {
+    expect(isInvestigationSafeCommand("npx tsc --noEmit > errors.txt")).toBe(false);
   });
 });

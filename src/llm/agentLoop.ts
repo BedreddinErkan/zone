@@ -695,21 +695,34 @@ export function assembleInvestigationSystemPrompt(input: {
         ? "- run_command_readonly: run failing tests, typecheck, lint, or read-only git inspection. Whitelisted commands only (e.g. 'npx vitest run path/to/test.ts', 'tsc --noEmit', 'git diff'). Output truncated to head 100 + tail 50 lines. Blocked: mutations, network writes, package installs, shell substitution."
         : null;
 
-  // Reproduce-first MANDATE — emitted only when a command tool is available.
+  // Reproduce-first MANDATE with STOP backstop — emitted only when a command tool is available.
   const reproduceBlock =
     ct !== null
       ? [
           "",
           `REPRODUCE-FIRST MANDATE:`,
           `When the task asserts a problem ("fix the error in X", "the build fails", "why does X fail"),`,
-          `your FIRST action MUST be to run the relevant command (${ct}) to confirm the error`,
-          `exists and capture the real output. Examples:`,
-          `- "Build fails" → \`npm run build\` first; read exit code and error tail.`,
+          `your FIRST action MUST be to run the relevant command (${ct}) BARE to confirm the error`,
+          `exists and capture the real output. Run BARE — stdout+stderr are captured and truncated`,
+          `automatically; NEVER add 2>&1, pipes (| head), or redirects (they are redundant and block`,
+          `auto-approval). Examples:`,
+          `- "Build fails" → \`npm run build\` (bare, no 2>&1) first; read exit code and error tail.`,
           `- "Fix failing tests in foo.test.ts" → \`npx vitest run path/to/foo.test.ts\` first.`,
           `- "tsc errors" → \`npx tsc --noEmit\` first.`,
-          `Static code analysis without runtime observation produces speculative, non-deterministic`,
-          `diagnoses. If the task does not assert a runtime problem (e.g., "rename function X"),`,
-          `skip this step and proceed with reads + searches.`,
+          ``,
+          `IF THE COMMAND DOES NOT RUN (blocked, denied, infrastructure error):`,
+          `  1. Re-run it BARE (strip any 2>&1/pipe/redirect). If it now runs, read the output.`,
+          `  2. If the bare command also does not run: STOP.`,
+          `     Do NOT read files or search the codebase to guess a fix.`,
+          `     Emit ExecutionPlan with steps:[] and cannotVerifyReason set to:`,
+          `       "Could not verify — <command> did not run (<reason>); premise unconfirmed, no fix attempted."`,
+          ``,
+          `     The Process steps below (search/read/synthesize) apply ONLY AFTER the reproduce`,
+          `     command has run and you have observed the actual problem. They are for understanding`,
+          `     an OBSERVED problem — never for fabricating a fix for an unobserved one.`,
+          ``,
+          `If the task does not assert a runtime problem (e.g., "rename function X"), skip this`,
+          `step and proceed to the Process steps directly.`,
         ]
       : [];
 
@@ -757,7 +770,7 @@ export function assembleInvestigationSystemPrompt(input: {
     ...reproduceBlock,
     ...noProblemBlock,
     "",
-    "Process:",
+    "Process (ONLY AFTER the reproduce command has run and you have observed the problem — or for tasks that do not assert a runtime problem):",
     "1. Identify what the question asks: definition, usages, control flow, data shape, or design rationale.",
     "2. Search for relevant terms with search_in_files. Prefer source globs such as `src/**/*.ts`, `src/**/*.py`, or `src/**/*.{ts,tsx,js,jsx}` before broad `**/*` searches.",
     "3. Read 2-3 top hits with read_file. Read related context files when imports or callers matter.",
