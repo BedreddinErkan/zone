@@ -1279,49 +1279,6 @@ export async function run(): Promise<void> {
     });
 
   program
-    .command("serve")
-    .description("Start Zone web UI on localhost")
-    .option("--port <port>", "Port to listen on", "3000")
-    .option("--open", "Open browser automatically")
-    .action(async (options: { port: string; open?: boolean }) => {
-      subcommandHandled = true;
-      const port = Number.parseInt(options.port, 10);
-      console.log(
-        tone("⚡ Zone", c.bold, c.orange) + tone(" v1.1.9", c.dim, c.gray)
-      );
-      console.log(tone(`Starting web UI on http://localhost:${port}`, c.cyan));
-
-      process.env.ZONE_SERVER_MANUAL_START = "1";
-
-      // Zone Undo Tur 2a: lazy garbage-collect old snapshots on each serve
-      // startup. Best-effort — never blocks server start.
-      try {
-        const { cleanupOldSnapshots } = await import(
-          "../snapshots/snapshotStore.js"
-        );
-        const result = await cleanupOldSnapshots();
-        if (result.removed > 0) {
-          console.log(
-            `[zone-snapshot-gc] removed ${result.removed} old snapshot(s)`
-          );
-        }
-      } catch (err) {
-        console.error(
-          "[zone-snapshot-gc-error]",
-          err instanceof Error ? err.message : String(err)
-        );
-      }
-
-      const { startServer } = await import("../server.js");
-      await startServer(port);
-
-      if (options.open) {
-        const { exec } = await import("node:child_process");
-        exec(`start http://localhost:${port}`);
-      }
-    });
-
-  program
     .name("zone")
     .description(
       "Zone — AI Code Agent: deterministic, explainable, safe"

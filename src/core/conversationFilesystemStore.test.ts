@@ -218,7 +218,8 @@ describe("Phase J.5.1 — runLogging wires filesystem write before Supabase shor
   // invariant that the FS write runs unconditionally regardless of
   // Supabase env, so a future refactor can't silently re-introduce the
   // production miss.
-  it("logRun calls persistAgentSummaryToFilesystem before the Supabase null short-circuit", () => {
+  // Skipped: src/api/runLogging.ts deleted in Stage 4 (server retirement).
+  it.skip("logRun calls persistAgentSummaryToFilesystem before the Supabase null short-circuit", () => {
     const src = readFileSync(path.resolve("src/api/runLogging.ts"), "utf8");
     const logRunIdx = src.indexOf("export async function logRun(");
     expect(logRunIdx).toBeGreaterThan(-1);

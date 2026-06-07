@@ -216,7 +216,8 @@ describe("Phase J.5.2 — production runAgentLoop callsites carry priorRunSummar
     expect(agentLoopSrc).toMatch(/priorRunSummary\?:\s*string;/);
   });
 
-  it("server.ts forwards result.patchPreview as agentSummary for /api/patch and /api/dry-run", () => {
+  // Skipped: src/api/server.ts deleted in Stage 4 (server retirement).
+  it.skip("server.ts forwards result.patchPreview as agentSummary for /api/patch and /api/dry-run", () => {
     const serverSrc = readFileSync(
       path.resolve("src/api/server.ts"),
       "utf8",
@@ -228,7 +229,8 @@ describe("Phase J.5.2 — production runAgentLoop callsites carry priorRunSummar
     expect((forwards ?? []).length).toBeGreaterThanOrEqual(2);
   });
 
-  it("runLogging.ts persists agent_summary ONLY when decisionMode === 'rolled_back'", () => {
+  // Skipped: src/api/runLogging.ts deleted in Stage 4 (server retirement).
+  it.skip("runLogging.ts persists agent_summary ONLY when decisionMode === 'rolled_back'", () => {
     const runLoggingSrc = readFileSync(
       path.resolve("src/api/runLogging.ts"),
       "utf8",

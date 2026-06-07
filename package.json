@@ -4,12 +4,10 @@
   "private": true,
   "type": "module",
   "description": "Self-host AI coding agent. Tier-bounded execution, atomic safety, BYOK transparency.",
-  "main": "./dist/server.js",
   "bin": {
     "zone": "./dist/cli/index.js"
   },
   "exports": {
-    ".": "./dist/server.js",
     "./flow": "./dist/core/runLlmPatchFlow.js",
     "./agent": "./dist/llm/agentLoop.js",
     "./openai": "./dist/llm/openaiClient.js",
@@ -20,8 +18,6 @@
     "postbuild": "chmod +x dist/cli/index.js",
     "typecheck": "tsc --noEmit",
     "check-types": "tsc --noEmit -p tsconfig.json",
-    "serve": "node dist/cli/index.js serve",
-    "start": "node dist/cli/index.js serve",
     "test": "vitest run",
     "test:l3": "vitest run src/llm/taskClassifier.archetype.test.ts",
     "sweep": "npx tsx scripts/sweep.ts",
