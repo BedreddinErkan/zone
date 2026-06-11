@@ -1,0 +1,193 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type {
+  ChatCompletionCreateParamsNonStreaming,
+  ChatCompletionCreateParamsStreaming,
+} from "openai/resources/chat/completions";
+
+// Module-level mock fns — class approach defers property access until new FakeOpenAI(),
+// so they are defined by the time any test runs (no vi.hoisted needed).
+const mockResponsesCreate = vi.fn();
+const mockChatCreate = vi.fn();
+
+vi.mock("openai", () => ({
+  default: class FakeOpenAI {
+    responses = { create: mockResponsesCreate };
+    chat = { completions: { create: mockChatCreate } };
+    embeddings = { create: vi.fn() };
+  },
+}));
+
+vi.mock("./withExponentialBackoff.js", () => ({
+  withExponentialBackoff: vi.fn(async (fn: () => Promise<unknown>) => fn()),
+}));
+
+// Mocked for loadCliConfig tests — same absolute path regardless of which file imports it.
+vi.mock("../api/diskModel.js", () => ({
+  loadDiskModelSync: vi.fn(() => null),
+}));
+vi.mock("../visual/tierSettings.js", () => ({
+  readDailyUsdCapOverride: vi.fn(() => undefined),
+}));
+
+import { OpenAIAdapter } from "./openaiAdapter.js";
+import { loadCliConfig } from "../cli/config.js";
+import { getModelName, _resetGpt5WarnForTest } from "./openaiClient.js";
+
+const MOCK_RESPONSE = {
+  id: "resp_test",
+  object: "response",
+  created_at: 0,
+  model: "gpt-5.4",
+  output: [],
+  output_text: "",
+  status: "completed",
+  error: null,
+  incomplete_details: null,
+  instructions: null,
+  metadata: {},
+  parallel_tool_calls: true,
+  temperature: 1,
+  tool_choice: "auto",
+  tools: [],
+  top_p: 1,
+  usage: {
+    input_tokens: 0,
+    output_tokens: 0,
+    total_tokens: 0,
+    input_tokens_details: { cached_tokens: 0 },
+    output_tokens_details: { reasoning_tokens: 0 },
+  },
+};
+
+const MOCK_CHAT_COMPLETION = {
+  id: "chatcmpl_test",
+  object: "chat.completion",
+  created: 0,
+  model: "gpt-4o",
+  choices: [{
+    index: 0,
+    message: { role: "assistant", content: "ok", refusal: null },
+    finish_reason: "stop",
+    logprobs: null,
+  }],
+  usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+};
+
+const BASE_MESSAGES: ChatCompletionCreateParamsNonStreaming["messages"] = [
+  { role: "user", content: "hello" },
+];
+
+beforeEach(() => {
+  mockResponsesCreate.mockResolvedValue(MOCK_RESPONSE);
+  mockChatCreate.mockResolvedValue(MOCK_CHAT_COMPLETION);
+  _resetGpt5WarnForTest();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("S3 routing — Responses API branch", () => {
+  it("flag ON + gpt-5.4 + openai → responses.create called, chat.completions NOT, returns ChatCompletion shape", async () => {
+    vi.stubEnv("ZONE_OPENAI_RESPONSES", "1");
+    const adapter = new OpenAIAdapter("sk-test");
+    const result = await adapter.createChatCompletion({
+      model: "gpt-5.4",
+      messages: BASE_MESSAGES,
+      stream: false,
+    });
+    expect(mockResponsesCreate).toHaveBeenCalledOnce();
+    expect(mockChatCreate).not.toHaveBeenCalled();
+    expect(result.object).toBe("chat.completion");
+  });
+
+  it("flag ON + gpt-4o + openai → chat.completions.create called, responses NOT", async () => {
+    vi.stubEnv("ZONE_OPENAI_RESPONSES", "1");
+    const adapter = new OpenAIAdapter("sk-test");
+    await adapter.createChatCompletion({
+      model: "gpt-4o",
+      messages: BASE_MESSAGES,
+      stream: false,
+    });
+    expect(mockChatCreate).toHaveBeenCalledOnce();
+    expect(mockResponsesCreate).not.toHaveBeenCalled();
+  });
+
+  it("flag OFF + gpt-5.4 → chat.completions.create called (adapter falls through to chat path)", async () => {
+    // No ZONE_OPENAI_RESPONSES stub — responsesEnabled() returns false
+    const adapter = new OpenAIAdapter("sk-test");
+    await adapter.createChatCompletion({
+      model: "gpt-5.4",
+      messages: BASE_MESSAGES,
+      stream: false,
+    });
+    expect(mockChatCreate).toHaveBeenCalledOnce();
+    expect(mockResponsesCreate).not.toHaveBeenCalled();
+  });
+
+  it("flag ON + gpt-5.4 + provider=anthropic → chat.completions.create called (this.provider guard)", async () => {
+    vi.stubEnv("ZONE_OPENAI_RESPONSES", "1");
+    const adapter = new OpenAIAdapter("sk-test", undefined, "anthropic");
+    await adapter.createChatCompletion({
+      model: "gpt-5.4",
+      messages: BASE_MESSAGES,
+      stream: false,
+    });
+    expect(mockChatCreate).toHaveBeenCalledOnce();
+    expect(mockResponsesCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("S3 stream guard", () => {
+  it("flag ON + gpt-5.4 → createChatCompletionStream throws deferred-to-S6 error", async () => {
+    vi.stubEnv("ZONE_OPENAI_RESPONSES", "1");
+    const adapter = new OpenAIAdapter("sk-test");
+    await expect(
+      adapter.createChatCompletionStream({
+        model: "gpt-5.4",
+        messages: BASE_MESSAGES,
+        stream: true,
+      } as ChatCompletionCreateParamsStreaming)
+    ).rejects.toThrow("deferred to S6");
+  });
+
+  it("flag ON + gpt-4o → createChatCompletionStream does NOT throw", async () => {
+    vi.stubEnv("ZONE_OPENAI_RESPONSES", "1");
+    const adapter = new OpenAIAdapter("sk-test");
+    await expect(
+      adapter.createChatCompletionStream({
+        model: "gpt-4o",
+        messages: BASE_MESSAGES,
+        stream: true,
+      } as ChatCompletionCreateParamsStreaming)
+    ).resolves.toBeDefined();
+  });
+});
+
+describe("S3 guard relaxation — config.ts (loadCliConfig)", () => {
+  it("ZONE_OPENAI_RESPONSES=1 → gpt-5.4 NOT rewritten to gpt-4o", () => {
+    vi.stubEnv("ZONE_OPENAI_RESPONSES", "1");
+    const cfg = loadCliConfig({ model: "gpt-5.4", provider: "openai" }, {});
+    expect(cfg.model).toBe("gpt-5.4");
+  });
+
+  it("ZONE_OPENAI_RESPONSES=0 → gpt-5.4 IS rewritten to gpt-4o (Path-A guard still active)", () => {
+    vi.stubEnv("ZONE_OPENAI_RESPONSES", "0");
+    const cfg = loadCliConfig({ model: "gpt-5.4", provider: "openai" }, {});
+    expect(cfg.model).toBe("gpt-4o");
+  });
+});
+
+describe("S3 guard relaxation — openaiClient.ts (getModelName)", () => {
+  it("ZONE_OPENAI_RESPONSES=1 → getModelName returns gpt-5.4 candidate as-is", () => {
+    vi.stubEnv("ZONE_OPENAI_RESPONSES", "1");
+    const result = getModelName("high", "openai", { high: "gpt-5.4" });
+    expect(result).toBe("gpt-5.4");
+  });
+
+  it("ZONE_OPENAI_RESPONSES=0 → getModelName falls back to gpt-4o (Path-A guard still active)", () => {
+    vi.stubEnv("ZONE_OPENAI_RESPONSES", "0");
+    const result = getModelName("high", "openai", { high: "gpt-5.4" });
+    expect(result).toBe("gpt-4o");
+  });
+});

@@ -3,6 +3,7 @@ import { getRequestUserApiKey } from "./openaiContext.js";
 import type { LLMProvider } from "./types.js";
 import { isValidModelId } from "./models.js";
 import { normalizeModelId } from "./modelRegistry.js";
+import { responsesEnabled } from "./openaiAdapter/responsesEnabled.js";
 
 export type ZoneInferenceMode = "hosted" | "local";
 
@@ -100,7 +101,7 @@ export function getModelName(
     if (candidate && isValidModelId(provider, candidate)) {
       // gpt-5.x guard: these models require /v1/responses for function tools — not yet supported.
       // Catches mid-session model changes (config.ts guard only runs at startup).
-      if (provider === "openai" && normalizeModelId(candidate).startsWith("gpt-5")) {
+      if (!responsesEnabled() && provider === "openai" && normalizeModelId(candidate).startsWith("gpt-5")) {
         if (!_gpt5WarnedOnce) {
           _gpt5WarnedOnce = true;
           console.warn(

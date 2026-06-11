@@ -7,7 +7,10 @@ import type {
   ChatCompletionCreateParamsStreaming,
 } from "openai/resources/chat/completions";
 import type { LLMClient, LLMProvider, LLMRequestOptions } from "./types.js";
-import { supportsEffort } from "./modelRegistry.js";
+import { supportsEffort, resolveEffortForModel, normalizeModelId } from "./modelRegistry.js";
+import { responsesEnabled } from "./openaiAdapter/responsesEnabled.js";
+import { responsesConvertParams } from "./openaiAdapter/responsesConvertParams.js";
+import { responsesConvertResponse } from "./openaiAdapter/responsesConvertResponse.js";
 
 export class OpenAIAdapter implements LLMClient {
   readonly provider: LLMProvider;
@@ -24,9 +27,21 @@ export class OpenAIAdapter implements LLMClient {
     params: ChatCompletionCreateParamsNonStreaming,
     options: LLMRequestOptions = {}
   ): Promise<ChatCompletion> {
+    if (responsesEnabled() && this.provider === "openai" && normalizeModelId(params.model).startsWith("gpt-5")) {
+      const body = responsesConvertParams(params, { effort: options.effort });
+      const resp = await withExponentialBackoff(
+        () => this.sdk.responses.create(body, { signal: options.signal }),
+        { provider: this.provider, model: params.model, emit: options.onRetryEvent }
+      );
+      return responsesConvertResponse(resp);
+    }
+    const resolvedEffort = resolveEffortForModel(params.model, options.effort);
+    // OpenAI reasoning_effort only supports "low"|"medium"|"high"; xhigh/max are narrowed to "high".
+    const reasoningEffort =
+      resolvedEffort === "xhigh" || resolvedEffort === "max" ? "high" : resolvedEffort;
     const withEffort: ChatCompletionCreateParamsNonStreaming =
-      options.effort && supportsEffort(params.model)
-        ? { ...params, reasoning_effort: options.effort }
+      reasoningEffort && supportsEffort(params.model)
+        ? { ...params, reasoning_effort: reasoningEffort }
         : params;
     // gpt-5.x reasoning models reject `max_tokens`; translate to `max_completion_tokens`
     // so call-sites can use the conventional spelling — mirrors Anthropic's convertParams.
@@ -47,6 +62,9 @@ export class OpenAIAdapter implements LLMClient {
     params: ChatCompletionCreateParamsStreaming,
     options: LLMRequestOptions = {}
   ): Promise<AsyncIterable<ChatCompletionChunk>> {
+    if (responsesEnabled() && this.provider === "openai" && normalizeModelId(params.model).startsWith("gpt-5")) {
+      throw new Error("Responses streaming is deferred to S6; gpt-5.x cannot use the streaming path yet.");
+    }
     const { max_tokens, ...rest } = params;
     const resolvedParams: ChatCompletionCreateParamsStreaming = {
       ...rest,

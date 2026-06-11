@@ -6,6 +6,7 @@ import type { TaskTier } from "../llm/taskClassifier.js";
 import { getProviderForModel, isKnownModelId, normalizeModelId, type EffortLevel } from "../llm/modelRegistry.js";
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { loadDiskModelSync } from "../api/diskModel.js";
+import { responsesEnabled } from "../llm/openaiAdapter/responsesEnabled.js";
 
 export interface CliConfig {
   model: string;
@@ -123,7 +124,7 @@ export function loadCliConfig(
 
   // gpt-5.x startup guard: warn and fall back to gpt-4o. Does NOT rewrite .zone/model.json.
   // getModelName carries a matching guard for mid-session model changes (config.ts not re-called).
-  if (provider === "openai" && normalizeModelId(model).startsWith("gpt-5")) {
+  if (!responsesEnabled() && provider === "openai" && normalizeModelId(model).startsWith("gpt-5")) {
     console.warn(
       `[zone] "${model}" requires the OpenAI Responses API for function tools ` +
       `(not yet supported in Zone) — falling back to gpt-4o. ` +
