@@ -16,6 +16,10 @@ export function parseFindReplacePatch(rawPatchText: string): {
   find: string;
   replace: string;
 } | null {
+  const firstFindIdx = rawPatchText.indexOf("--- FIND ---");
+  if (firstFindIdx > 0 && rawPatchText.slice(0, firstFindIdx).trim() !== "") {
+    return null;
+  }
   const match = rawPatchText.match(
     /--- FIND ---\s*\n([\s\S]*?)\n--- REPLACE ---\s*\n([\s\S]*)$/i
   );

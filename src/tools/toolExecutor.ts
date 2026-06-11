@@ -626,12 +626,22 @@ function parseRgJsonContent(
   return { success: true, output: t.text, truncated: t.truncated };
 }
 
+function stagedWrite(staging: Map<string, string> | undefined, abs: string, content: string): boolean;
+function stagedWrite(staging: Map<string, string> | undefined, abs: string, content: string, repoPath: string): boolean | "escape";
 function stagedWrite(
   staging: Map<string, string> | undefined,
   abs: string,
-  content: string
-): boolean {
+  content: string,
+  repoPath?: string
+): boolean | "escape" {
   if (!staging) return false;
+  if (repoPath !== undefined) {
+    const resolved = path.resolve(abs);
+    const repoAbs = path.resolve(repoPath);
+    if (resolved !== repoAbs && !resolved.startsWith(repoAbs + path.sep)) {
+      return "escape";
+    }
+  }
   const key = path.resolve(abs);
   staging.set(key, content);
   return true;
@@ -722,6 +732,8 @@ export async function executeTool(
       runId: string,
       meta?: { kind?: "blocking" | "background"; label?: string | null }
     ) => Promise<boolean>;
+    /** Stage 3A: per-edit approval gate for plan-mode [2] "manually approve changes". */
+    onEditApprovalRequired?: (filePath: string, runId: string) => Promise<boolean>;
     escalatedFiles?: Set<string>;
     allowWriteFileOverwritePaths?: Set<string>;
     stagingFiles?: Map<string, string>;
@@ -731,6 +743,8 @@ export async function executeTool(
     executionPlan?: import("../llm/executionPlan.js").ExecutionPlan | null;
     /** Task archetype — used by symbol-grounded scope-expansion heuristic. */
     archetype?: string;
+    /** Active model name — forwarded for telemetry (e.g. [zone-apply-patch-content-before-find]). */
+    model?: string;
     allowedTools?: ReadonlySet<string>;
     userId?: string;
     framework?: ProjectFramework;
@@ -1639,6 +1653,12 @@ export async function executeTool(
         }
       }
 
+      // Stage 3A: per-edit approval gate — after scope check, before actual patch application.
+      if (input?.onEditApprovalRequired && input?.runId) {
+        const ok = await input.onEditApprovalRequired(filePath, input.runId);
+        if (!ok) return { success: false, output: `edit_rejected_by_user: "${filePath}". This is a deliberate user decision — not a permissions error or recoverable failure. Do NOT attempt this change by any other means, including shell commands (cat >, tee, echo >, sed -i, > redirects), retrying write_file/apply_patch, or any workaround. Stop and ask the user how to proceed.` };
+      }
+
       if (input?.escalatedFiles?.has(filePath)) {
         const errorMsg =
           `BLOCKED: apply_patch is no longer allowed for "${filePath}". ` +
@@ -1780,6 +1800,34 @@ export async function executeTool(
         };
       }
 
+      const firstFindIdx = patch.indexOf(FIND_MARKER);
+      if (firstFindIdx > 0) {
+        const prefixBeforeFind = patch.slice(0, firstFindIdx);
+        if (prefixBeforeFind.trim() !== "") {
+          debugLog("[zone-apply-patch-content-before-find]", JSON.stringify({
+            filePath,
+            prefixBytes: Buffer.byteLength(prefixBeforeFind),
+            runId: input?.runId ?? null,
+            model: input?.model ?? null,
+          }));
+          return {
+            success: false,
+            output:
+              "Content found before the first `--- FIND ---` marker. In apply_patch, ALL content — " +
+              "including lines you want to ADD ABOVE the matched code (JSDoc, imports, decorators) — " +
+              "must go INSIDE `--- REPLACE ---`. Nothing may precede `--- FIND ---`.\n\n" +
+              "To add a JSDoc above a function:\n" +
+              "--- FIND ---\n" +
+              "export function add(a, b) { return a + b; }\n" +
+              "--- REPLACE ---\n" +
+              "/** Adds two numbers. */\n" +
+              "export function add(a, b) { return a + b; }",
+            error: "apply_patch_content_before_find",
+            rejectionReason: "content_before_find",
+          };
+        }
+      }
+
       let remaining = patch;
       let sqFindTotal = 0;
       let sqReplaceTotal = 0;
@@ -1816,7 +1864,12 @@ export async function executeTool(
           success: false,
           output:
             "No valid --- FIND --- / --- REPLACE --- blocks found in patch. " +
-            "Format: --- FIND ---\n<exact code>\n--- REPLACE ---\n<code with additions>",
+            "Each block must follow this exact order:\n" +
+            "--- FIND ---\n" +
+            "<exact lines from file>\n" +
+            "--- REPLACE ---\n" +
+            "<replacement content>\n\n" +
+            "Do not put content outside the blocks or reverse the marker order.",
         };
       }
 
@@ -2263,8 +2316,12 @@ export async function executeTool(
         );
       }
 
-      if (!stagedWrite(input?.stagingFiles, abs, outputContent)) {
-        fs.writeFileSync(abs, outputContent, "utf8");
+      {
+        const wr = stagedWrite(input?.stagingFiles, abs, outputContent, repoPath);
+        if (wr === "escape") {
+          return { success: false, output: `apply_patch_blocked_path_escape: "${filePath}" would escape repo` };
+        }
+        if (!wr) fs.writeFileSync(abs, outputContent, "utf8");
       }
       evictOutlineCacheForFile(filePath); // Lever 4.A: clear stale outline cache entry
 
@@ -2526,6 +2583,14 @@ export async function executeTool(
         }
       }
 
+      // Stage 3A: per-edit approval gate — only fires when editApprovalMode==="manual"
+      // (plan-mode [2] "manually approve changes"). Placed after scope check so
+      // scope-blocked edits never prompt (no point asking about writes that won't happen).
+      if (input?.onEditApprovalRequired && input?.runId) {
+        const ok = await input.onEditApprovalRequired(filePath, input.runId);
+        if (!ok) return { success: false, output: `edit_rejected_by_user: "${filePath}". This is a deliberate user decision — not a permissions error or recoverable failure. Do NOT attempt this change by any other means, including shell commands (cat >, tee, echo >, sed -i, > redirects), retrying write_file/apply_patch, or any workaround. Stop and ask the user how to proceed.` };
+      }
+
       // Shrink guard: block write_file on existing files if new content < 70% of original
       let originalSize = 0;
       let fileExists = false;
@@ -2574,10 +2639,12 @@ export async function executeTool(
         // New file: write directly to disk — immediately visible to list_files and
         // survives any abort. No prior content to protect; staging adds only loss-risk.
         fs.writeFileSync(abs, content, "utf8");
-      } else if (!stagedWrite(input?.stagingFiles, abs, content)) {
-        // Existing file: stage for atomic/validated/rollback-able apply.
-        // Fallback to direct write only when no staging map is present.
-        fs.writeFileSync(abs, content, "utf8");
+      } else {
+        const wr = stagedWrite(input?.stagingFiles, abs, content, repoPath);
+        if (wr === "escape") {
+          return { success: false, output: `write_file_blocked_path_escape: "${filePath}" would escape repo` };
+        }
+        if (!wr) fs.writeFileSync(abs, content, "utf8");
       }
 
       const validation = validateSyntax(content, abs);
@@ -3050,7 +3117,10 @@ export async function executeTool(
 
         if (count > 0) {
           const newContent = content.replace(pattern, replace);
-          stagedWrite(input?.stagingFiles, abs, newContent);
+          const wr = stagedWrite(input?.stagingFiles, abs, newContent, repoPath);
+          if (wr === "escape") {
+            return { success: false, output: `multi_edit_blocked_path_escape: "${filePath}" would escape repo` };
+          }
         }
 
         perFile.push({ path: filePath, count });

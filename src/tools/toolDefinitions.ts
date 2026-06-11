@@ -258,7 +258,8 @@ required: ["id", "content", "description", "status"],
               "One or more --- FIND --- / --- REPLACE --- blocks. " +
               "Each block does exactly one local substitution. " +
               "Same-file edits (rename, codemod): emit ALL blocks in ONE call — never split same-file edits across multiple apply_patch calls. " +
-              "Never compress unrelated edits into a single block.",
+              "Never compress unrelated edits into a single block. " +
+              "All replacement content, including additions above the matched lines, goes inside `--- REPLACE ---`; nothing may precede `--- FIND ---`.",
           },
           intent: {
             type: ["string", "null"],

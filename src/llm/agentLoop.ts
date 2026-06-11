@@ -538,7 +538,7 @@ export function assembleAgentSystemPrompt(input: {
     `- REPLACE: one local substitution of FIND. Never copy in code from elsewhere in the file — use a second block instead.\n` +
     `- Same file, N edits: batch all into ONE apply_patch call with N blocks (rename 8 occurrences → 1 call, not 8 calls).\n` +
     `- Cross-file rename/codemod (same find→replace in multiple files): use multi_edit({files:[...], find, replace}) in ONE call — do NOT use separate apply_patch calls per file.\n` +
-    `- intent='add' (default, REPLACE = FIND + additions), 'modify' (REPLACE = edited FIND), 'delete' (REPLACE shorter than FIND, may be empty).\n` +
+    `- intent='add' (default, REPLACE = FIND + additions). To add lines ABOVE/BELOW existing code (JSDoc, imports, decorators): FIND the anchor line(s); include added lines together with the anchor in REPLACE. Nothing may precede \`--- FIND ---\`. 'modify' (REPLACE = edited FIND), 'delete' (REPLACE shorter than FIND, may be empty).\n` +
     `- MINIMUM CHANGE: preserve every existing line the user didn't ask to change.\n` +
     `- scope: OMIT by default. Only set when FIND occurs multiple times AND the target is inside a NAMED function/class. Never for arrow-const, default exports, or React components.\n` +
     `- After a successful apply_patch, do NOT re-read the same file — the patch is already written.\n\n` +
@@ -918,6 +918,8 @@ export type SelfCorrectTrigger =
   | "apply_patch_find_block_empty"
   | "apply_patch_marker_imbalance"
   | "apply_patch_no_read_first"
+  | "apply_patch_content_before_find"
+  | "apply_patch_no_valid_blocks"
   | "tool_command_spawn_failure"
   | "tool_path_enoent"
   | "read_file_nonexistent"
@@ -978,7 +980,7 @@ const PROVIDER_AGNOSTIC_HARDENING =
   `  --- REPLACE ---\n` +
   `  // import { Bad } from "y";\n\n` +
   `**REPLACE ONLY SUBSTITUTES THE FIND BLOCK**\n\n` +
-  `Lines BEFORE and AFTER the FIND block stay untouched. Do NOT include them in REPLACE.\n\n` +
+  `Lines that already exist BEFORE and AFTER the FIND block stay untouched. Do NOT re-copy them into REPLACE (that produces duplicates). Exception: if you are ADDING a new line adjacent to the FIND anchor (e.g. a JSDoc above a function), include BOTH the new line AND the anchor inside REPLACE — added lines must be inside the blocks, never outside.\n\n` +
   `If FIND is "import A;" and you put "import B;\\nimport A;" in REPLACE:\n` +
   `- The result is duplicate "import A;" in the file (one was already below)\n` +
   `- This causes "Identifier already declared" syntax errors\n\n` +
@@ -1198,6 +1200,10 @@ export function classifyFailure(
     // "FIND block is empty" â€” the find-block-empty rejection.
     if (/find block is empty/i.test(text))
       return "apply_patch_find_block_empty";
+    if (/content.*before.*find|content_before_find/i.test(text))
+      return "apply_patch_content_before_find";
+    if (/no valid.*find.*replace.*blocks found/i.test(text))
+      return "apply_patch_no_valid_blocks";
   }
   if (toolName === "run_command") {
     if (/spawn .* enoent/i.test(text)) return "tool_command_spawn_failure";
@@ -1226,6 +1232,8 @@ export function applyPatchRetryReason(trigger: SelfCorrectTrigger | string): str
     case "apply_patch_find_block_empty": return "find_block_empty";
     case "apply_patch_marker_imbalance": return "marker_imbalance";
     case "apply_patch_no_read_first": return "no_read_first";
+    case "apply_patch_content_before_find": return "content_before_find";
+    case "apply_patch_no_valid_blocks": return "no_valid_blocks";
     default: return "unknown";
   }
 }
@@ -1290,6 +1298,24 @@ export function buildCoachingPrompt(
         `RIGHT (two FIND, two REPLACE - multi-block):\n` +
         `  --- FIND ---\n  <region A>\n  --- REPLACE ---\n  <new A>\n  --- FIND ---\n  <region B>\n  --- REPLACE ---\n  <new B>\n\n` +
         `Next action: re-issue apply_patch with balanced markers. If only one edit is needed, use exactly one FIND/REPLACE pair.`
+      );
+    case "apply_patch_content_before_find":
+      return (
+        `Your apply_patch emitted content BEFORE the first \`--- FIND ---\` marker. ` +
+        `That content was rejected — nothing may precede \`--- FIND ---\`.\n\n` +
+        `To add lines ABOVE an anchor (JSDoc, import, decorator): include them in \`--- REPLACE ---\`:\n\n` +
+        `--- FIND ---\n` +
+        `export function add(a, b) { return a + b; }\n` +
+        `--- REPLACE ---\n` +
+        `/** Adds two numbers. */\n` +
+        `export function add(a, b) { return a + b; }\n\n` +
+        `Move all added content inside the REPLACE block and reissue apply_patch.`
+      );
+    case "apply_patch_no_valid_blocks":
+      return (
+        `Your apply_patch produced no parseable blocks. Check marker ORDER: ` +
+        `\`--- FIND ---\` must come BEFORE \`--- REPLACE ---\`, with content between them. ` +
+        `Nothing may appear outside the blocks. Reissue with exactly one \`--- FIND ---\` / \`--- REPLACE ---\` pair.`
       );
     case "apply_patch_semantic_smell": {
       const smellName = extractSemanticSmellName(errorPreview);
@@ -3407,6 +3433,7 @@ Example:
           maxSubagentCallsOverride: effectiveMaxSubagentCalls ?? undefined,
           selfValidationCounts,
           filesReadThisRun,
+          model: modelName,
         });
         debugLog("[zone-agent-tool-post]", {
           runId: input.runId,
