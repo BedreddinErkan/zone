@@ -82,6 +82,12 @@ export function responsesConvertResponse(response: OpenAIResponse): ChatCompleti
         cached_tokens: response.usage?.input_tokens_details?.cached_tokens ?? 0,
       },
     } as Record<string, unknown>),
+    // reasoning_tokens is a SUBSET of output_tokens — expose in detail field only, never add to completion_tokens.
+    ...({
+      completion_tokens_details: {
+        reasoning_tokens: response.usage?.output_tokens_details?.reasoning_tokens ?? 0,
+      },
+    } as Record<string, unknown>),
   } as ChatCompletion["usage"];
 
   const created = Math.floor(Date.now() / 1000);

@@ -2,12 +2,16 @@
   extractResponsesApiOutputText,
   getModelName,
 } from "./openaiClient.js";
+import { normalizeModelId } from "./modelRegistry.js";
 import { createLLMClient } from "./factory.js";
 import { getRequestContext, withRequestContext } from "./openaiContext.js";
 import { readMemory, formatMemoryForPrompt } from "../memory/projectMemory.js";
 import { log, debugLog, errorLog } from "../utils/logger.js";
 import { buildVerifyDiagnostic } from "../core/buildVerifyDiagnostic.js";
 import { maybeExpandScopeForVerifyDiagnostic } from "../tools/scopeGuard.js";
+import { requestEditApproval } from "../api/editApprovals.js";
+import { requestStagedApproval, type StagedCheckpointHandler } from "../api/stagedApprovals.js";
+import { buildRestageSeedBlock } from "../core/fileDiff.js";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -247,6 +251,14 @@ export interface AgentLoopInput {
   priorSessionSummary?: string;
   /** Phase 2 web search: when true, the Anthropic adapter appends the native web_search tool. */
   webSearchEnabled?: boolean;
+  /** Stage 3A: per-edit approval mode for plan-mode [2] "manually approve changes". */
+  editApprovalMode?: "auto" | "manual";
+  /** R3: when true, builds a StagedCheckpointHandler and passes it through to finalizeRun. */
+  stagedCheckpoint?: boolean;
+  /** R3: auto-resolve the staged-diff approval to approve_all (for tests / headless flows). */
+  autoApprove?: boolean;
+  /** R3: discarded staging from a prior rejected run; injected into the first user message. */
+  restageSeed?: Map<string, string>;
 }
 
 export interface AgentLoopResult {
@@ -266,7 +278,7 @@ export interface AgentLoopResult {
   /** Phase H.7: how the loop ended. Used by upstream flows (investigation /
    *  patch) to surface "Token budget reached" vs "Iteration budget reached"
    *  distinctly in the UI. Optional for backward-compat with older callers. */
-  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded" | "upstream_unavailable" | "phase1_handoff" | "hook_blocked" | "scope_block_circuit_breaker";
+  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded" | "upstream_unavailable" | "phase1_handoff" | "hook_blocked" | "scope_block_circuit_breaker" | "staged_rejected" | "staged_refine_requested";
   /** Phase Q.2: populated when terminationReason === "loop_detected". The
    *  offending tool name + observed count in the sliding-window detector. */
   loopDetected?: { toolName: string; count: number };
@@ -279,12 +291,18 @@ export interface AgentLoopResult {
   /** L5.0: number of for-loop iterations completed. Used by [zone-archetype] telemetry
    *  to measure iter inflation across archetypes. 0 = run rejected before first iter. */
   iterCount?: number;
+  /** PR2: set when finish_reason:"content_filter" fired (stop_reason:"refusal").
+   *  Contains the formatted refusal text from message.refusal.
+   *  Absent/null for all other termination reasons. */
+  refusal?: string | null;
   /** Phase J.3.1: staging snapshot captured before rollback discarded it.
    *  Only populated when verificationReason === "verification_regressed".
    *  Keyed by absolute path; values are the content the agent attempted to
    *  write. runLlmPatchFlow uses this together with the pre-write
    *  beforeByFile snapshot to render a "what was attempted" diff card. */
   discardedStaging?: Map<string, string>;
+  /** R3: user feedback from a staged_refine_requested outcome; used to seed the re-run. */
+  refineFeedback?: string;
   /** L5.1b-2: soft promotion. Non-null when the dispatcher fired a promotion
    *  mid-run (iter_cap / rollback_x2 / coaching_exhausted). Null on all
    *  non-promoted runs including default env (pipelineApplied=false). */
@@ -534,6 +552,8 @@ export function assembleAgentSystemPrompt(input: {
     `- Your patches are on disk. The verifier found new errors your changes introduced.\n` +
     `- Options: (a) read error locations and patch to fix; (b) call revert_patch({path}) to undo specific files; (c) accept if errors are pre-existing or out-of-scope.\n` +
     `- revert_patch({path: "<rel-path>"}) restores a file to its pre-run state without deleting other changes.\n\n` +
+    `USER EDIT REJECTION — when write_file or apply_patch returns "edit_rejected_by_user":\n` +
+    `The user deliberately declined this edit. This is NOT a permissions error — do not attempt the same change via shell commands (cat >, tee, echo >, sed -i), run_command redirects, or any workaround. Stop the affected change and explain what was rejected.\n\n` +
     `PRIOR RUN CONTEXT — if the user message begins with "PRIOR RUN CONTEXT — your last attempt in this thread produced this result:":\n` +
     `- This thread had a previous run; its final summary is between that header and "END PRIOR RUN CONTEXT.".\n` +
     `- If the block contains APPLY_ROLLED_BACK or VERIFICATION WARNINGS, start from those errors — re-investigate from those specific locations.\n` +
@@ -1503,6 +1523,31 @@ export {
 };
 export type { VerificationReason };
 
+/** Builds a StagedCheckpointHandler from AgentLoopInput for the R3 staged-diff checkpoint. */
+function buildStagedCheckpointHandler(input: AgentLoopInput): StagedCheckpointHandler {
+  return {
+    run: async ({ files, verificationSummary, trigger }) =>
+      requestStagedApproval({
+        runId: input.runId ?? "anon",
+        files,
+        verificationSummary,
+        trigger,
+        emit: (evt) => input.onStructuredEvent?.(evt),
+        abortSignal: input.abortSignal,
+        autoApprove: input.autoApprove,
+      }),
+    approveFile: async (filePath: string) => {
+      const approval = await requestEditApproval({
+        runId: input.runId ?? "anon",
+        filePath,
+        emit: (evt) => input.onStructuredEvent?.(evt),
+        abortSignal: input.abortSignal,
+      });
+      return !!approval.approved;
+    },
+  };
+}
+
 /** Flush staged writes to disk on error-exit paths that bypass finalizeRun.
  *  Uses verifyMode:"warn" — partial work must persist even if tsc finds issues.
  *  framework:undefined skips running the test command (run already failed). */
@@ -2107,6 +2152,11 @@ Example:
       sessionMem +
       "\nEND SESSION MEMORY.\n\n"
     : "";
+  // R3: inject prior-attempt diffs into the first user message so the re-run agent
+  // sees what was staged and rejected. Never in assembleAgentSystemPrompt (cache breakpoint #2).
+  const restageSeedBlock = input.restageSeed && input.restageSeed.size > 0
+    ? buildRestageSeedBlock(input.restageSeed, input.repoPath)
+    : "";
   // Double-injection suppression: when the session window is non-empty it already
   // carries the most recent turn with neutral framing. Suppress the PRIOR RUN CONTEXT
   // block in that case so the newest summary never appears twice.
@@ -2116,9 +2166,10 @@ Example:
         priorRun +
         "\nEND PRIOR RUN CONTEXT.\n\n" +
         auditContextBlock +
+        restageSeedBlock +
         input.task
       )
-    : sessionMemBlock + auditContextBlock + input.task) + modeTag;
+    : sessionMemBlock + auditContextBlock + restageSeedBlock + input.task) + modeTag;
 
   // Chat Completions messages (system + user kickoff).
   const responseInput: ChatCompletionMessageParam[] = [
@@ -2142,6 +2193,7 @@ Example:
   });
   const detectorState = createDetectorState();
   let webSearchRequestsTotal = 0;
+  let totalReasoningTokens = 0;
   warnWebSearchDegradationOnce({
     provider: client.provider,
     webSearchEnabled: input.webSearchEnabled ?? false,
@@ -2403,7 +2455,9 @@ Example:
         stage,
         timestamp: new Date().toISOString(),
       });
-      throw new DOMException("Run aborted", "AbortError");
+      const err = new DOMException("Run aborted", "AbortError");
+      Object.assign(err, { filesModified: Array.from(filesModified) });
+      throw err;
     }
   };
 
@@ -2832,6 +2886,12 @@ Example:
           promotedAtIter,
         };
       }
+      if (input.abortSignal?.aborted && llmErr instanceof Error) {
+        // Attach files-written-so-far so index.tsx can build an interrupted turn record.
+        // ??= is intra-Site-B idempotency (guards against a double-catch in the same block);
+        // throwIfAborted and this site throw different objects on different code paths.
+        (llmErr as Error & { filesModified?: string[] }).filesModified ??= Array.from(filesModified);
+      }
       throw llmErr;
     }
     debugLog("[zone-agent-llm-post]", {
@@ -2861,6 +2921,20 @@ Example:
     webSearchRequestsTotal += Number(
       (rawUsage as Record<string, unknown>)?.web_search_requests ?? 0
     ) || 0;
+    const reasoningTokens = Number(
+      ((rawUsage as { completion_tokens_details?: { reasoning_tokens?: number } })
+        ?.completion_tokens_details?.reasoning_tokens) ?? 0
+    ) || 0;
+    totalReasoningTokens += reasoningTokens;
+    if (reasoningTokens > 0) {
+      debugLog("[zone-reasoning-tokens]", {
+        runId: input.runId,
+        iter: iter + 1,
+        reasoning_tokens: reasoningTokens,
+        completion_tokens: Number((rawUsage as Record<string, unknown>)?.completion_tokens ?? 0) || 0,
+        model: response.model || modelName,
+      });
+    }
 
     // U.1: per-call cache JSONL — always-on when there is cache activity.
     const _lip = budget.lastIterCostPayload;
@@ -3300,6 +3374,17 @@ Example:
             });
             return !!approval.approved;
           },
+          onEditApprovalRequired: input.editApprovalMode === "manual"
+            ? async (filePath: string, runId: string) => {
+                const approval = await requestEditApproval({
+                  runId,
+                  filePath,
+                  emit: (evt) => input.onStructuredEvent?.(evt),
+                  abortSignal: input.abortSignal,
+                });
+                return !!approval.approved;
+              }
+            : undefined,
           escalatedFiles,
           allowWriteFileOverwritePaths: escalatedFiles,
           stagingFiles,
@@ -3577,7 +3662,49 @@ Example:
           selfValidationSummary: emitSelfValidationSummary,
           webSearchSummary: emitWebSearchSummary,
         },
+        stagedCheckpointHandler: input.stagedCheckpoint === true
+          ? buildStagedCheckpointHandler(input)
+          : undefined,
       });
+    }
+
+    // Safety classifier refusal: exit cleanly instead of looping to max_iterations.
+    // Anthropic maps stop_reason:"refusal" → finish_reason:"content_filter" in convertResponse.ts.
+    // Without this guard, extractResponsesApiOutputText returns {ok:false} and the loop
+    // burns the entire iteration budget re-prompting a refusal that will not change.
+    if (response.choices[0]?.finish_reason === "content_filter") {
+      const baseRefusal =
+        response.choices[0]?.message?.refusal ?? "Request declined by safety classifier.";
+      const refusalMsg = appendFableHint(modelName, baseRefusal);  // Step 3: Fable hint
+      stagingFinalized = true;
+      const refusalResult = await finalizeRun({
+        trigger: "natural_completion",
+        finalText: refusalMsg,
+        isReadOnlyMode,
+        toolCallLog,
+        filesModified,
+        stagingFiles,
+        ownsStagingFiles,
+        withStagingTempFlush,
+        verifyMode,
+        framework: input.framework,
+        repoPath: input.repoPath,
+        iterCount: iter + 1,
+        costUsd: budget.snapshot().costUsd,
+        tokenUsage: budget.tokenUsage,
+        promotedFromArchetype,
+        promotionTrigger,
+        promotedAtIter,
+        onProgress: input.onProgress,
+        runId: input.runId,
+        emit: {
+          runBreakdownSummary: emitRunBreakdownSummary,
+          cacheSummary: emitCacheSummary,
+          selfValidationSummary: emitSelfValidationSummary,
+          webSearchSummary: emitWebSearchSummary,
+        },
+      });
+      return { ...refusalResult, refusal: refusalMsg };
     }
 
     // If we got neither tool calls nor text, keep looping (rare).
@@ -3719,6 +3846,9 @@ Example:
       selfValidationSummary: emitSelfValidationSummary,
       webSearchSummary: emitWebSearchSummary,
     },
+    stagedCheckpointHandler: input.stagedCheckpoint === true
+      ? buildStagedCheckpointHandler(input)
+      : undefined,
   });
 
   } finally {
@@ -3731,4 +3861,18 @@ Example:
       await persistStagingOnError(stagingFiles, ownsStagingFiles, input.repoPath).catch(() => {});
     }
   }
+}
+
+/** Exported for testing. Appends a factual Opus 4.8 hint to Fable refusals only.
+ *  For all other models the hint is irrelevant — Fable's extra-strict classifiers are
+ *  the reason it declines legitimate coding tasks that standard models accept. */
+export function appendFableHint(modelName: string, baseRefusal: string): string {
+  if (normalizeModelId(modelName) !== "claude-fable-5") return baseRefusal;
+  return (
+    baseRefusal +
+    "\n\nClaude Opus 4.8 uses standard safety classifiers and may accept security, " +
+    "infrastructure, or bioinformatics coding tasks that Fable declines. " +
+    "Opus applies its own safety floor — genuinely harmful requests remain refused. " +
+    "To retry: /model claude-opus-4-8"
+  );
 }

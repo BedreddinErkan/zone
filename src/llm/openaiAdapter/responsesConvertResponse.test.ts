@@ -152,6 +152,32 @@ describe("responsesConvertResponse — usage mapping", () => {
     expect(usage.completion_tokens).toBe(0);
     expect(usage.total_tokens).toBe(0);
   });
+
+  it("preserves reasoning_tokens in completion_tokens_details (subset of completion_tokens, not added on top)", () => {
+    const response = makeResponse({
+      usage: {
+        input_tokens: 10,
+        output_tokens: 50,
+        total_tokens: 60,
+        input_tokens_details: { cached_tokens: 0 },
+        output_tokens_details: { reasoning_tokens: 42 },
+      } as OpenAIResponse["usage"],
+    });
+    const result = responsesConvertResponse(response);
+    const details = (result.usage as Record<string, unknown>)
+      .completion_tokens_details as Record<string, unknown>;
+    expect(details.reasoning_tokens).toBe(42);
+    // completion_tokens must NOT include reasoning_tokens again
+    expect(result.usage!.completion_tokens).toBe(50);
+  });
+
+  it("defaults reasoning_tokens to 0 when output_tokens_details absent", () => {
+    const response = makeResponse({ usage: undefined });
+    const result = responsesConvertResponse(response);
+    const details = (result.usage as Record<string, unknown>)
+      .completion_tokens_details as Record<string, unknown>;
+    expect(details.reasoning_tokens).toBe(0);
+  });
 });
 
 describe("responsesConvertResponse — reasoning items discarded (S4 seam dormant)", () => {
