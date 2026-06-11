@@ -8,8 +8,8 @@ import {
 
 // ─── Adapter completion-parity tests ─────────────────────────────────────────
 // Regression guard for the HTTP 400 "unsupported_parameter" bug:
-// gpt-5.x reasoning models reject `max_tokens`; the adapter must translate it
-// to `max_completion_tokens` before hitting the SDK — on BOTH sync and stream.
+// Some OpenAI models reject `max_tokens`; the adapter translates it to
+// `max_completion_tokens` before hitting the SDK — on BOTH sync and stream.
 
 const sdkCreateMock = vi.fn();
 vi.mock("openai", () => ({
@@ -22,12 +22,14 @@ vi.mock("./withExponentialBackoff.js", () => ({
 }));
 vi.mock("./modelRegistry.js", () => ({
   supportsEffort: vi.fn().mockReturnValue(false),
+  resolveEffortForModel: vi.fn().mockReturnValue(undefined),
+  normalizeModelId: vi.fn((id: string) => id),
 }));
 
 import { OpenAIAdapter } from "./openaiAdapter.js";
 
 const FAKE_COMPLETION = {
-  id: "chatcmpl-test", model: "gpt-5.4-2026-03-05",
+  id: "chatcmpl-test", model: "gpt-4o",
   choices: [{ message: { content: "hi", tool_calls: null }, finish_reason: "stop" }],
   usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
 };
@@ -43,7 +45,7 @@ describe("OpenAIAdapter — normalizeTokenParam (sync path)", () => {
   it("max_tokens → max_completion_tokens when max_completion_tokens absent", async () => {
     sdkCreateMock.mockResolvedValueOnce(FAKE_COMPLETION);
     await new OpenAIAdapter("sk-test").createChatCompletion({
-      model: "gpt-5.4", messages: [{ role: "user", content: "hi" }], max_tokens: 16384,
+      model: "gpt-4o", messages: [{ role: "user", content: "hi" }], max_tokens: 16384,
     });
     const [p] = sdkCreateMock.mock.calls[0] as [Record<string, unknown>];
     expect(p["max_completion_tokens"]).toBe(16384);
@@ -53,7 +55,7 @@ describe("OpenAIAdapter — normalizeTokenParam (sync path)", () => {
   it("max_completion_tokens already set → passes through, no duplication", async () => {
     sdkCreateMock.mockResolvedValueOnce(FAKE_COMPLETION);
     await new OpenAIAdapter("sk-test").createChatCompletion({
-      model: "gpt-5.4", messages: [{ role: "user", content: "hi" }], max_completion_tokens: 512,
+      model: "gpt-4o", messages: [{ role: "user", content: "hi" }], max_completion_tokens: 512,
     });
     const [p] = sdkCreateMock.mock.calls[0] as [Record<string, unknown>];
     expect(p["max_completion_tokens"]).toBe(512);
@@ -63,7 +65,7 @@ describe("OpenAIAdapter — normalizeTokenParam (sync path)", () => {
   it("no token param → passes through without adding either field", async () => {
     sdkCreateMock.mockResolvedValueOnce(FAKE_COMPLETION);
     await new OpenAIAdapter("sk-test").createChatCompletion({
-      model: "gpt-5.4", messages: [{ role: "user", content: "hi" }],
+      model: "gpt-4o", messages: [{ role: "user", content: "hi" }],
     });
     const [p] = sdkCreateMock.mock.calls[0] as [Record<string, unknown>];
     expect("max_tokens" in p).toBe(false);
@@ -77,7 +79,7 @@ describe("OpenAIAdapter — normalizeTokenParam (stream path)", () => {
   it("max_tokens → max_completion_tokens on the streaming path", async () => {
     sdkCreateMock.mockResolvedValueOnce(FAKE_STREAM);
     await new OpenAIAdapter("sk-test").createChatCompletionStream({
-      model: "gpt-5.4", messages: [{ role: "user", content: "hi" }],
+      model: "gpt-4o", messages: [{ role: "user", content: "hi" }],
       stream: true, max_tokens: 8192,
     });
     const [p] = sdkCreateMock.mock.calls[0] as [Record<string, unknown>];
@@ -88,7 +90,7 @@ describe("OpenAIAdapter — normalizeTokenParam (stream path)", () => {
   it("streaming: max_completion_tokens already set → passes through unchanged", async () => {
     sdkCreateMock.mockResolvedValueOnce(FAKE_STREAM);
     await new OpenAIAdapter("sk-test").createChatCompletionStream({
-      model: "gpt-5.4", messages: [{ role: "user", content: "hi" }],
+      model: "gpt-4o", messages: [{ role: "user", content: "hi" }],
       stream: true, max_completion_tokens: 256,
     });
     const [p] = sdkCreateMock.mock.calls[0] as [Record<string, unknown>];

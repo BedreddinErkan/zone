@@ -288,28 +288,18 @@ describe("loadCliConfig — per-repo disk model precedence (Bug E fix)", () => {
   });
 });
 
-describe("loadCliConfig — gpt-5.x startup guard", () => {
+describe("loadCliConfig — model routing (S7)", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.mocked(loadDiskModelSync).mockReturnValue(null);
   });
 
-  it("openai gpt-5.4 falls back to gpt-4o and emits Responses API warning", () => {
+  it("openai gpt-5.4 passes through unchanged — no downgrade (S7)", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const cfg = loadCliConfig({ model: "gpt-5.4", provider: "openai" }, {});
-    expect(cfg.model).toBe("gpt-4o");
+    expect(cfg.model).toBe("gpt-5.4");
     expect(cfg.provider).toBe("openai");
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Responses API"));
-    warnSpy.mockRestore();
-  });
-
-  it("all gpt-5 family members fall back: gpt-5.5, gpt-5.4-mini, gpt-5.4-nano", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    for (const id of ["gpt-5.5", "gpt-5.4-mini", "gpt-5.4-nano"]) {
-      const cfg = loadCliConfig({ model: id, provider: "openai" }, {});
-      expect(cfg.model).toBe("gpt-4o");
-      expect(cfg.provider).toBe("openai");
-    }
+    expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 
@@ -338,7 +328,7 @@ describe("loadCliConfig — gpt-5.x startup guard", () => {
     warnSpy.mockRestore();
   });
 
-  it("gpt-5.4 from disk model falls back to gpt-4o", () => {
+  it("gpt-5.4 from disk model passes through unchanged (S7)", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.mocked(loadDiskModelSync).mockReturnValue({
       version: 2,
@@ -347,7 +337,8 @@ describe("loadCliConfig — gpt-5.x startup guard", () => {
       updatedAt: "2026-06-01T00:00:00Z",
     });
     const cfg = loadCliConfig({}, {});
-    expect(cfg.model).toBe("gpt-4o");
+    expect(cfg.model).toBe("gpt-5.4");
+    expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 });

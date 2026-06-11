@@ -6,7 +6,6 @@ import type { TaskTier } from "../llm/taskClassifier.js";
 import { getProviderForModel, isKnownModelId, normalizeModelId, type EffortLevel } from "../llm/modelRegistry.js";
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { loadDiskModelSync } from "../api/diskModel.js";
-import { responsesEnabled } from "../llm/openaiAdapter/responsesEnabled.js";
 
 export interface CliConfig {
   model: string;
@@ -120,17 +119,6 @@ export function loadCliConfig(
     }
   } else {
     provider = resolveProvider(explicitProvider);
-  }
-
-  // gpt-5.x startup guard: warn and fall back to gpt-4o. Does NOT rewrite .zone/model.json.
-  // getModelName carries a matching guard for mid-session model changes (config.ts not re-called).
-  if (!responsesEnabled() && provider === "openai" && normalizeModelId(model).startsWith("gpt-5")) {
-    console.warn(
-      `[zone] "${model}" requires the OpenAI Responses API for function tools ` +
-      `(not yet supported in Zone) — falling back to gpt-4o. ` +
-      `Use \`/model\` to update your selection and silence this warning.`
-    );
-    model = "gpt-4o";
   }
 
   const anthropicApiKey = envStr("ANTHROPIC_API_KEY") ?? file.anthropicApiKey;

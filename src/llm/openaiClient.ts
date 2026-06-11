@@ -3,7 +3,6 @@ import { getRequestUserApiKey } from "./openaiContext.js";
 import type { LLMProvider } from "./types.js";
 import { isValidModelId } from "./models.js";
 import { normalizeModelId } from "./modelRegistry.js";
-import { responsesEnabled } from "./openaiAdapter/responsesEnabled.js";
 
 export type ZoneInferenceMode = "hosted" | "local";
 
@@ -72,11 +71,6 @@ export function createOpenAIClient(userApiKey?: string): OpenAI {
 
 export type ZoneModelTier = "high" | "standard";
 
-// Suppresses repeated per-iteration warnings when a gpt-5.x model is intercepted mid-session.
-let _gpt5WarnedOnce = false;
-/** Test hook: reset the gpt-5.x warn-once flag between test cases. */
-export function _resetGpt5WarnForTest(): void { _gpt5WarnedOnce = false; }
-
 export interface ZoneModelOverride {
   high?: string;
   standard?: string;
@@ -99,19 +93,6 @@ export function getModelName(
   if (override) {
     const candidate = tier === "high" ? override.high : override.standard;
     if (candidate && isValidModelId(provider, candidate)) {
-      // gpt-5.x guard: these models require /v1/responses for function tools — not yet supported.
-      // Catches mid-session model changes (config.ts guard only runs at startup).
-      if (!responsesEnabled() && provider === "openai" && normalizeModelId(candidate).startsWith("gpt-5")) {
-        if (!_gpt5WarnedOnce) {
-          _gpt5WarnedOnce = true;
-          console.warn(
-            `[zone] "${candidate}" requires the OpenAI Responses API for function tools ` +
-            `(not yet supported in Zone) — falling back to gpt-4o. ` +
-            `Use \`/model\` to select gpt-4o or gpt-4o-mini.`
-          );
-        }
-        return "gpt-4o";
-      }
       return candidate;
     }
     if (candidate && !isValidModelId(provider, candidate)) {

@@ -5,7 +5,6 @@ import {
   formatResponsesTextExtractionFailure,
   getResponsesApiDiagnosticSnapshot,
   getModelName,
-  _resetGpt5WarnForTest,
 } from "./openaiClient.js";
 
 describe("extractResponsesApiOutputText", () => {
@@ -69,8 +68,6 @@ describe("getModelName — cross-provider override rejection (924285f regression
   // warns and names the fallback target so the user can never believe Claude ran
   // when OpenAI ran. These tests pin that behavior for the remaining providers.
 
-  beforeEach(() => { _resetGpt5WarnForTest(); });
-
   it("invalid claude-* override for openai warns and falls back to openai standard default", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const result = getModelName("standard", "openai", { standard: "claude-sonnet-4-6" });
@@ -98,33 +95,8 @@ describe("getModelName — cross-provider override rejection (924285f regression
   });
 });
 
-describe("getModelName — gpt-5.x mid-session guard", () => {
-  // Covers the dispatch.ts path: modelOverride:{high:"gpt-5.x"} from store state bypasses
-  // config.ts; getModelName is the single convergence point that intercepts it.
-
-  beforeEach(() => { _resetGpt5WarnForTest(); });
-
-  it("gpt-5.4 override returns gpt-4o and warns once", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    expect(getModelName("high", "openai", { high: "gpt-5.4" })).toBe("gpt-4o");
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Responses API"));
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    // Second call: flag already set — no additional warn
-    expect(getModelName("high", "openai", { high: "gpt-5.4" })).toBe("gpt-4o");
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    warnSpy.mockRestore();
-  });
-
-  it("all gpt-5 family members fall back to gpt-4o", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    for (const id of ["gpt-5.5", "gpt-5.4-mini", "gpt-5.4-nano"]) {
-      _resetGpt5WarnForTest();
-      expect(getModelName("high", "openai", { high: id })).toBe("gpt-4o");
-    }
-    warnSpy.mockRestore();
-  });
-
-  it("gpt-4o override is accepted without triggering the guard", () => {
+describe("getModelName — model override resolution", () => {
+  it("gpt-4o override is accepted without warning", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(getModelName("high", "openai", { high: "gpt-4o" })).toBe("gpt-4o");
     expect(warnSpy).not.toHaveBeenCalled();

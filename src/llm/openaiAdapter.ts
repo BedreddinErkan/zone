@@ -8,7 +8,6 @@ import type {
 } from "openai/resources/chat/completions";
 import type { LLMClient, LLMProvider, LLMRequestOptions } from "./types.js";
 import { supportsEffort, resolveEffortForModel, normalizeModelId } from "./modelRegistry.js";
-import { responsesEnabled } from "./openaiAdapter/responsesEnabled.js";
 import { responsesConvertParams } from "./openaiAdapter/responsesConvertParams.js";
 import { responsesConvertResponse } from "./openaiAdapter/responsesConvertResponse.js";
 
@@ -27,7 +26,7 @@ export class OpenAIAdapter implements LLMClient {
     params: ChatCompletionCreateParamsNonStreaming,
     options: LLMRequestOptions = {}
   ): Promise<ChatCompletion> {
-    if (responsesEnabled() && this.provider === "openai" && normalizeModelId(params.model).startsWith("gpt-5")) {
+    if (this.provider === "openai" && normalizeModelId(params.model).startsWith("gpt-5")) {
       const body = responsesConvertParams(params, { effort: options.effort });
       const resp = await withExponentialBackoff(
         () => this.sdk.responses.create(body, { signal: options.signal }),
@@ -62,7 +61,7 @@ export class OpenAIAdapter implements LLMClient {
     params: ChatCompletionCreateParamsStreaming,
     options: LLMRequestOptions = {}
   ): Promise<AsyncIterable<ChatCompletionChunk>> {
-    if (responsesEnabled() && this.provider === "openai" && normalizeModelId(params.model).startsWith("gpt-5")) {
+    if (this.provider === "openai" && normalizeModelId(params.model).startsWith("gpt-5")) {
       throw new Error("Responses streaming is deferred to S6; gpt-5.x cannot use the streaming path yet.");
     }
     const { max_tokens, ...rest } = params;
