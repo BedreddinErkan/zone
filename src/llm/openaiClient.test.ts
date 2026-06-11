@@ -1,10 +1,11 @@
-import { describe, expect, it, vi, afterEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
   buildEmptyModelResponseDetailsLine,
   extractResponsesApiOutputText,
   formatResponsesTextExtractionFailure,
   getResponsesApiDiagnosticSnapshot,
   getModelName,
+  _resetGpt5WarnForTest,
 } from "./openaiClient.js";
 
 describe("extractResponsesApiOutputText", () => {
@@ -68,12 +69,14 @@ describe("getModelName — cross-provider override rejection (924285f regression
   // warns and names the fallback target so the user can never believe Claude ran
   // when OpenAI ran. These tests pin that behavior for the remaining providers.
 
+  beforeEach(() => { _resetGpt5WarnForTest(); });
+
   it("invalid claude-* override for openai warns and falls back to openai standard default", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const result = getModelName("standard", "openai", { standard: "claude-sonnet-4-6" });
-    expect(result).toBe("gpt-5.4-mini");
+    expect(result).toBe("gpt-4o-mini");
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("is not valid for provider"));
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("falling back to gpt-5.4-mini"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("falling back to gpt-4o-mini"));
     warnSpy.mockRestore();
   });
 
@@ -86,10 +89,65 @@ describe("getModelName — cross-provider override rejection (924285f regression
     warnSpy.mockRestore();
   });
 
-  it("valid same-provider override is accepted without warning", () => {
+  it("valid non-reasoning same-provider override (gpt-4o) is accepted without warning", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const result = getModelName("high", "openai", { high: "gpt-5.4" });
-    expect(result).toBe("gpt-5.4");
+    const result = getModelName("high", "openai", { high: "gpt-4o" });
+    expect(result).toBe("gpt-4o");
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+});
+
+describe("getModelName — gpt-5.x mid-session guard", () => {
+  // Covers the dispatch.ts path: modelOverride:{high:"gpt-5.x"} from store state bypasses
+  // config.ts; getModelName is the single convergence point that intercepts it.
+
+  beforeEach(() => { _resetGpt5WarnForTest(); });
+
+  it("gpt-5.4 override returns gpt-4o and warns once", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(getModelName("high", "openai", { high: "gpt-5.4" })).toBe("gpt-4o");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Responses API"));
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    // Second call: flag already set — no additional warn
+    expect(getModelName("high", "openai", { high: "gpt-5.4" })).toBe("gpt-4o");
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
+  });
+
+  it("all gpt-5 family members fall back to gpt-4o", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (const id of ["gpt-5.5", "gpt-5.4-mini", "gpt-5.4-nano"]) {
+      _resetGpt5WarnForTest();
+      expect(getModelName("high", "openai", { high: id })).toBe("gpt-4o");
+    }
+    warnSpy.mockRestore();
+  });
+
+  it("gpt-4o override is accepted without triggering the guard", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(getModelName("high", "openai", { high: "gpt-4o" })).toBe("gpt-4o");
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("standard default (no override) resolves to gpt-4o-mini without warning", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(getModelName("standard", "openai")).toBe("gpt-4o-mini");
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("high default (no override) resolves to gpt-4o without warning", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(getModelName("high", "openai")).toBe("gpt-4o");
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("anthropic path is unaffected", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(getModelName("high", "anthropic", { high: "claude-sonnet-4-6" })).toBe("claude-sonnet-4-6");
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });

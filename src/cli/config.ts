@@ -3,7 +3,7 @@ import path from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import type { LLMProvider } from "../llm/types.js";
 import type { TaskTier } from "../llm/taskClassifier.js";
-import { getProviderForModel, isKnownModelId, type EffortLevel } from "../llm/modelRegistry.js";
+import { getProviderForModel, isKnownModelId, normalizeModelId, type EffortLevel } from "../llm/modelRegistry.js";
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { loadDiskModelSync } from "../api/diskModel.js";
 
@@ -25,10 +25,13 @@ export interface CliConfig {
   memoryEnabled?: boolean;
   commitOnSuccess?: boolean;
   webSearchEnabled?: boolean;
+  /** --trust (true) / --no-trust (false) / neither (undefined) */
+  trust?: boolean;
 }
 
 export interface CliFlags {
   model?: string;
+  effort?: string;
   provider?: string;
   repo?: string;
   forceTier?: string;
@@ -38,6 +41,9 @@ export interface CliFlags {
   quiet?: boolean;
   noColor?: boolean;
   resume?: boolean;
+  permissionMode?: string;
+  /** --trust (true) / --no-trust (false) / neither (undefined) */
+  trust?: boolean;
 }
 
 type ZoneConfigFile = {
@@ -75,6 +81,11 @@ function resolveForceTier(value: string | undefined): TaskTier | undefined {
   return undefined;
 }
 
+function resolveEffortLevel(value: string | undefined): EffortLevel | undefined {
+  if (value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max") return value;
+  return undefined;
+}
+
 export function loadCliConfig(
   flags: Partial<CliFlags> = {},
   _configFile?: ZoneConfigFile
@@ -85,7 +96,7 @@ export function loadCliConfig(
 
   const explicitModel =
     flags.model ?? envStr("ZONE_MODEL") ?? diskModel?.model ?? file.defaultModel;
-  const model = explicitModel ?? "claude-sonnet-4-6";
+  let model = explicitModel ?? "claude-sonnet-4-6";
 
   const explicitProvider =
     flags.provider ?? envStr("ZONE_PROVIDER") ?? diskModel?.provider ?? file.defaultProvider;
@@ -110,6 +121,17 @@ export function loadCliConfig(
     provider = resolveProvider(explicitProvider);
   }
 
+  // gpt-5.x startup guard: warn and fall back to gpt-4o. Does NOT rewrite .zone/model.json.
+  // getModelName carries a matching guard for mid-session model changes (config.ts not re-called).
+  if (provider === "openai" && normalizeModelId(model).startsWith("gpt-5")) {
+    console.warn(
+      `[zone] "${model}" requires the OpenAI Responses API for function tools ` +
+      `(not yet supported in Zone) — falling back to gpt-4o. ` +
+      `Use \`/model\` to update your selection and silence this warning.`
+    );
+    model = "gpt-4o";
+  }
+
   const anthropicApiKey = envStr("ANTHROPIC_API_KEY") ?? file.anthropicApiKey;
   const openaiApiKey = envStr("OPENAI_API_KEY") ?? file.openaiApiKey;
 
@@ -132,13 +154,26 @@ export function loadCliConfig(
     dailyUsdCap,
     repoPath,
     forceTier,
+    effort: resolveEffortLevel(flags.effort ?? envStr("ZONE_EFFORT") ?? diskModel?.effort),
     autoApprove: flags.yes === true,
     noRevision: flags.noRevision === true,
     verbose: flags.verbose === true || envStr("ZONE_VERBOSE_LOGS") === "1",
     quiet: flags.quiet === true,
     noColor: flags.noColor === true || envStr("NO_COLOR") === "1",
     webSearchEnabled: diskModel?.webSearchEnabled ?? true,
+    trust: flags.trust,
   };
+}
+
+/**
+ * Parse --trust / --no-trust from an argv array.
+ * --no-trust wins when both are present (checked first in the ternary).
+ * Returns undefined when neither flag is present (gate is NOT bypassed).
+ */
+export function parseTrustFlag(argv: string[] = process.argv): boolean | undefined {
+  return argv.includes("--no-trust") ? false
+    : argv.includes("--trust") ? true
+    : undefined;
 }
 
 export function validateCliConfig(cfg: CliConfig): void {

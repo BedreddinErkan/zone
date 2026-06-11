@@ -34,13 +34,14 @@ const ANTHROPIC_DEFAULTS: RoleModelMapping = {
 };
 
 const OPENAI_DEFAULTS: RoleModelMapping = {
-  planner: "gpt-5.4",
-  agent: "gpt-5.4",
-  worker: "gpt-5.4-mini",
-  verifier: "gpt-5.4",
-  classifier: "gpt-5.4-mini",
-  intent: "gpt-5.4",
-  investigator: "gpt-5.4",
+  planner: "gpt-4o",
+  agent: "gpt-4o",
+  // gpt-4o-mini is workerSuitable:false in the catalog; move to gpt-4o if subagents re-enabled
+  worker: "gpt-4o-mini",
+  verifier: "gpt-4o",
+  classifier: "gpt-4o-mini",
+  intent: "gpt-4o",
+  investigator: "gpt-4o",
 };
 
 export function getModelForRole(

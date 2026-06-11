@@ -248,12 +248,12 @@ describe("loadCliConfig — per-repo disk model precedence (Bug E fix)", () => {
   it("disk model takes precedence over global config file for model and provider", () => {
     vi.mocked(loadDiskModelSync).mockReturnValue({
       version: 2,
-      model: "gpt-5.4",
+      model: "gpt-4o",
       provider: "openai",
       updatedAt: "2026-06-01T00:00:00Z",
     });
     const cfg = loadCliConfig({}, { defaultModel: "claude-sonnet-4-6", defaultProvider: "anthropic" });
-    expect(cfg.model).toBe("gpt-5.4");
+    expect(cfg.model).toBe("gpt-4o");
     expect(cfg.provider).toBe("openai");
   });
 
@@ -261,7 +261,7 @@ describe("loadCliConfig — per-repo disk model precedence (Bug E fix)", () => {
     vi.stubEnv("ZONE_MODEL", "claude-sonnet-4-6");
     vi.mocked(loadDiskModelSync).mockReturnValue({
       version: 2,
-      model: "gpt-5.4",
+      model: "gpt-4o",
       provider: "openai",
       updatedAt: "2026-06-01T00:00:00Z",
     });
@@ -285,6 +285,70 @@ describe("loadCliConfig — per-repo disk model precedence (Bug E fix)", () => {
     });
     const cfg = loadCliConfig({}, {});
     expect(cfg.webSearchEnabled).toBe(false);
+  });
+});
+
+describe("loadCliConfig — gpt-5.x startup guard", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.mocked(loadDiskModelSync).mockReturnValue(null);
+  });
+
+  it("openai gpt-5.4 falls back to gpt-4o and emits Responses API warning", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const cfg = loadCliConfig({ model: "gpt-5.4", provider: "openai" }, {});
+    expect(cfg.model).toBe("gpt-4o");
+    expect(cfg.provider).toBe("openai");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Responses API"));
+    warnSpy.mockRestore();
+  });
+
+  it("all gpt-5 family members fall back: gpt-5.5, gpt-5.4-mini, gpt-5.4-nano", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (const id of ["gpt-5.5", "gpt-5.4-mini", "gpt-5.4-nano"]) {
+      const cfg = loadCliConfig({ model: id, provider: "openai" }, {});
+      expect(cfg.model).toBe("gpt-4o");
+      expect(cfg.provider).toBe("openai");
+    }
+    warnSpy.mockRestore();
+  });
+
+  it("openai gpt-4o passes through unchanged (no warning)", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const cfg = loadCliConfig({ model: "gpt-4o", provider: "openai" }, {});
+    expect(cfg.model).toBe("gpt-4o");
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("openai gpt-4o-mini passes through unchanged (no warning)", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const cfg = loadCliConfig({ model: "gpt-4o-mini", provider: "openai" }, {});
+    expect(cfg.model).toBe("gpt-4o-mini");
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("anthropic model is unaffected by gpt-5 guard", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const cfg = loadCliConfig({ model: "claude-sonnet-4-6" }, {});
+    expect(cfg.model).toBe("claude-sonnet-4-6");
+    expect(cfg.provider).toBe("anthropic");
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("gpt-5.4 from disk model falls back to gpt-4o", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(loadDiskModelSync).mockReturnValue({
+      version: 2,
+      model: "gpt-5.4",
+      provider: "openai",
+      updatedAt: "2026-06-01T00:00:00Z",
+    });
+    const cfg = loadCliConfig({}, {});
+    expect(cfg.model).toBe("gpt-4o");
+    warnSpy.mockRestore();
   });
 });
 

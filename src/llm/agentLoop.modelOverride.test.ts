@@ -18,8 +18,8 @@ describe("model-override fix — backward compat invariant", () => {
   });
 
   it("getModelName('high','openai') matches former getModelForRole('investigator','openai') default", () => {
-    // getModelForRole returned OPENAI_DEFAULTS.investigator = "gpt-5.4"
-    expect(getModelName("high", "openai", undefined)).toBe("gpt-5.4");
+    // getModelForRole returned OPENAI_DEFAULTS.investigator = "gpt-4o" (switched from gpt-5.4)
+    expect(getModelName("high", "openai", undefined)).toBe("gpt-4o");
   });
 });
 
@@ -29,8 +29,8 @@ describe("model-override fix — override is honored in investigation path", () 
   });
 
   it("openai: modelOverride.high overrides the default investigator model", () => {
-    // gpt-5.5 is a valid catalog entry that differs from the default gpt-5.4
-    expect(getModelName("high", "openai", { high: "gpt-5.5" })).toBe("gpt-5.5");
+    // gpt-4o-mini is a valid catalog entry that differs from the default gpt-4o
+    expect(getModelName("high", "openai", { high: "gpt-4o-mini" })).toBe("gpt-4o-mini");
   });
 
   it("modelOverride.standard does not affect the high-tier investigator model", () => {

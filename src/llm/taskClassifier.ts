@@ -252,7 +252,7 @@ function pickClassifierModel(provider: LLMProvider): string {
   if (provider === "anthropic") {
     return process.env.ZONE_CLASSIFIER_MODEL_ANTHROPIC?.trim() || "claude-haiku-4-5";
   }
-  return process.env.ZONE_CLASSIFIER_MODEL_OPENAI?.trim() || "gpt-5.4-mini";
+  return process.env.ZONE_CLASSIFIER_MODEL_OPENAI?.trim() || "gpt-4o-mini";
 }
 
 interface ParsedClassifierResponse {

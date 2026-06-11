@@ -36,8 +36,8 @@ describe("MODEL_CATALOG", () => {
 
 
   it("getDefaultModelForTier returns recommendedTier model", () => {
-    expect(getDefaultModelForTier("openai", "high")).toBe("gpt-5.4");
-    expect(getDefaultModelForTier("openai", "standard")).toBe("gpt-5.4-mini");
+    expect(getDefaultModelForTier("openai", "high")).toBe("gpt-4o");
+    expect(getDefaultModelForTier("openai", "standard")).toBe("gpt-4o-mini");
     expect(getDefaultModelForTier("anthropic", "high")).toBe("claude-sonnet-4-6");
     expect(getDefaultModelForTier("anthropic", "standard")).toBe("claude-haiku-4-5");
   });

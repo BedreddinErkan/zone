@@ -18,16 +18,16 @@ describe("getModelForRole", () => {
     expect(getModelForRole("classifier", "anthropic")).toBe("claude-haiku-4-5");
   });
 
-  it("worker on openai → gpt-5.4-mini", () => {
-    expect(getModelForRole("worker", "openai")).toBe("gpt-5.4-mini");
+  it("worker on openai → gpt-4o-mini", () => {
+    expect(getModelForRole("worker", "openai")).toBe("gpt-4o-mini");
   });
 
-  it("agent on openai → gpt-5.4", () => {
-    expect(getModelForRole("agent", "openai")).toBe("gpt-5.4");
+  it("agent on openai → gpt-4o", () => {
+    expect(getModelForRole("agent", "openai")).toBe("gpt-4o");
   });
 
-  it("classifier on openai → gpt-5.4-mini", () => {
-    expect(getModelForRole("classifier", "openai")).toBe("gpt-5.4-mini");
+  it("classifier on openai → gpt-4o-mini", () => {
+    expect(getModelForRole("classifier", "openai")).toBe("gpt-4o-mini");
   });
 
   it("override path: worker on anthropic with override → uses override", () => {
@@ -49,7 +49,7 @@ describe("getModelForRole", () => {
   it("partial override on openai: classifier overridden, worker uses default", () => {
     const override = { classifier: "gpt-5.4" };
     expect(getModelForRole("classifier", "openai", override)).toBe("gpt-5.4");
-    expect(getModelForRole("worker", "openai", override)).toBe("gpt-5.4-mini");
+    expect(getModelForRole("worker", "openai", override)).toBe("gpt-4o-mini");
   });
 });
 
@@ -58,20 +58,20 @@ describe("getModelForRole — verifier and intent roles (BYOM.1)", () => {
     expect(getModelForRole("verifier", "anthropic")).toBe("claude-sonnet-4-6");
   });
 
-  it("verifier on openai → gpt-5.4", () => {
-    expect(getModelForRole("verifier", "openai")).toBe("gpt-5.4");
+  it("verifier on openai → gpt-4o", () => {
+    expect(getModelForRole("verifier", "openai")).toBe("gpt-4o");
   });
 
   it("intent on anthropic → claude-sonnet-4-6", () => {
     expect(getModelForRole("intent", "anthropic")).toBe("claude-sonnet-4-6");
   });
 
-  it("intent on openai → gpt-5.4", () => {
-    expect(getModelForRole("intent", "openai")).toBe("gpt-5.4");
+  it("intent on openai → gpt-4o", () => {
+    expect(getModelForRole("intent", "openai")).toBe("gpt-4o");
   });
 
-  it("planner on openai → gpt-5.4", () => {
-    expect(getModelForRole("planner", "openai")).toBe("gpt-5.4");
+  it("planner on openai → gpt-4o", () => {
+    expect(getModelForRole("planner", "openai")).toBe("gpt-4o");
   });
 });
 
@@ -92,8 +92,8 @@ describe("getModelForRole — investigator role (Phase D.1)", () => {
     ).toBe("claude-opus-4-7");
   });
 
-  it("OpenAI Zone Default → gpt-5.4", () => {
-    expect(getModelForRole("investigator", "openai")).toBe("gpt-5.4");
+  it("OpenAI Zone Default → gpt-4o", () => {
+    expect(getModelForRole("investigator", "openai")).toBe("gpt-4o");
   });
 
   it("Custom preset: override takes precedence over default", () => {

@@ -9,28 +9,40 @@ export interface ModelOption {
   recommendedTier?: ZoneModelTier;
   workerSuitable?: boolean;
   workerSuitabilityNote?: string;
+  retention?: { minDays: number; zdrAvailable: boolean };
 }
 
 export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {
   openai: [
-    { id: "gpt-5.4",      label: "GPT-5.4",      recommendedTier: "high" },
-    { id: "gpt-5.4-mini", label: "GPT-5.4 mini", recommendedTier: "standard" },
-    {
-      id: "gpt-5.5",
-      label: "GPT-5.5",
-      costNote: "Frontier model — higher cost, best for complex multi-step work",
-    },
-    { id: "gpt-5.4-nano", label: "GPT-5.4 nano", costNote: "Ultra-budget — for classification/routing" },
-    { id: "gpt-4o",       label: "GPT-4o",       costNote: "Legacy — GPT-5.4 recommended" },
+    { id: "gpt-4o",       label: "GPT-4o",       recommendedTier: "high",
+      costNote: "Recommended — works with Zone's function-calling (Chat Completions)" },
     {
       id: "gpt-4o-mini",
       label: "GPT-4o mini",
-      costNote: "Legacy — GPT-5.4 mini recommended",
+      recommendedTier: "standard",
+      costNote: "Recommended — works with Zone's function-calling",
       workerSuitable: false,
       workerSuitabilityNote: "Not recommended as Worker subagent — may corrupt file content during write_file operations",
     },
+    { id: "gpt-5.4",      label: "GPT-5.4",
+      costNote: "Needs Responses API — falls back to gpt-4o in Zone" },
+    { id: "gpt-5.4-mini", label: "GPT-5.4 mini",
+      costNote: "Needs Responses API — falls back to gpt-4o in Zone" },
+    {
+      id: "gpt-5.5",
+      label: "GPT-5.5",
+      costNote: "Needs Responses API — falls back to gpt-4o in Zone",
+    },
+    { id: "gpt-5.4-nano", label: "GPT-5.4 nano",
+      costNote: "Needs Responses API — falls back to gpt-4o in Zone" },
   ],
   anthropic: [
+    {
+      id: "claude-fable-5",
+      label: "Claude Fable 5",
+      costNote: "Opt-in frontier — $10/$50 per MTok · verify budget",
+      retention: { minDays: 30, zdrAvailable: false },
+    },
     {
       id: "claude-sonnet-4-6",
       label: "Claude Sonnet 4.6",
@@ -74,6 +86,7 @@ export function getDefaultModelForTier(
 
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   // Anthropic — Claude 4.x: all 1M context windows
+  "claude-fable-5":    1_000_000,
   "claude-opus-4-8":   1_000_000,
   "claude-opus-4-7":   1_000_000,
   "claude-sonnet-4-6": 1_000_000,

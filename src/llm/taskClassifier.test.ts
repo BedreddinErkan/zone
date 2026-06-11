@@ -553,7 +553,7 @@ describe("Phase BYOM.1.1 — classifier provider routing", () => {
     expect(result.classifierModel).toBe("claude-haiku-4-5");
   });
 
-  it("provider=openai explicit → model gpt-5.4-mini", async () => {
+  it("provider=openai explicit → model gpt-4o-mini", async () => {
     mocks.createChatCompletion.mockResolvedValue(
       buildResponse(
         JSON.stringify({
@@ -563,13 +563,36 @@ describe("Phase BYOM.1.1 — classifier provider routing", () => {
           needsSubagent: false,
           confidence: 0.8,
         }),
-        "gpt-5.4-mini"
+        "gpt-4o-mini"
       )
     );
 
     const result = await classifyTask("refactor helpers", { provider: "openai" });
 
-    expect(result.classifierModel).toBe("gpt-5.4-mini");
+    expect(result.classifierModel).toBe("gpt-4o-mini");
+  });
+
+  it("ZONE_CLASSIFIER_MODEL_OPENAI override is respected", async () => {
+    vi.stubEnv("ZONE_CLASSIFIER_MODEL_OPENAI", "gpt-4o");
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "simple",
+          estimatedFiles: 1,
+          estimatedIterations: 4,
+          needsSubagent: false,
+          confidence: 0.85,
+          archetype: "targeted_fix",
+          archetypeConfidence: 0.9,
+        }),
+        "gpt-4o"
+      )
+    );
+
+    const result = await classifyTask("fix a bug", { provider: "openai", skipCache: true });
+
+    expect(result.classifierModel).toBe("gpt-4o");
+    vi.unstubAllEnvs();
   });
 
   it("explicit provider param wins over request context", async () => {
