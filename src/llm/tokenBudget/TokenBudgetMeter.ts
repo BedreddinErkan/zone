@@ -71,6 +71,8 @@ export class TokenBudgetMeter {
     archetype?: string;
     pipelineApplied?: boolean;
     mode?: string;
+    estimatedIterations?: number;
+    taskBlockedByBudget?: boolean;
   }): void {
     const { rawUsage, iter, totalIter, provider, model, onStructuredEvent } = opts;
 
@@ -101,6 +103,8 @@ export class TokenBudgetMeter {
           archetype: opts.archetype,
           pipelineApplied: opts.pipelineApplied,
           mode: opts.mode,
+          estimatedIterations: opts.estimatedIterations,
+          taskBlockedByBudget: opts.taskBlockedByBudget,
         });
         this._iterCostAccumulator = update.accumulator;
         this._lastIterCostPayload = update.payload;

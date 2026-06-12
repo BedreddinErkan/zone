@@ -2962,6 +2962,8 @@ Example:
       archetype: input.taskClassification?.archetype ?? "",
       pipelineApplied: inputIterCap !== null,
       mode,
+      estimatedIterations: input.taskClassification?.estimatedIterations,
+      taskBlockedByBudget,
     });
     if (input.subagent && budget.lastIterTokenTotal > 0) {
       log("[zone-worker-token]", JSON.stringify({

@@ -36,6 +36,8 @@ export interface IterCostUpdatePayload extends IterUsageBreakdown {
   archetype: string;
   pipelineApplied: boolean;
   mode: string;
+  estimatedIterations: number;
+  taskBlockedByBudget: boolean;
 }
 
 export function emptyIterCostAccumulator(): IterCostAccumulator {
@@ -90,6 +92,8 @@ export function buildIterCostUpdate(input: {
   archetype?: string;
   pipelineApplied?: boolean;
   mode?: string;
+  estimatedIterations?: number;
+  taskBlockedByBudget?: boolean;
 }): { payload: IterCostUpdatePayload; accumulator: IterCostAccumulator } {
   const previous = input.previous ?? emptyIterCostAccumulator();
   const current = {
@@ -138,6 +142,8 @@ export function buildIterCostUpdate(input: {
       archetype: input.archetype ?? "",
       pipelineApplied: input.pipelineApplied ?? false,
       mode: input.mode ?? "",
+      estimatedIterations: input.estimatedIterations ?? -1,
+      taskBlockedByBudget: input.taskBlockedByBudget ?? false,
     },
   };
 }

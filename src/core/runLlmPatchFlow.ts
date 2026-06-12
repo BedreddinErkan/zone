@@ -5628,6 +5628,8 @@ const initializeTodosFromPlan = (): void => {
             archetype: String((e as any).archetype ?? ""),
             pipelineApplied: Boolean((e as any).pipelineApplied ?? false),
             mode: String((e as any).mode ?? ""),
+            estimatedIterations: Number((e as any).estimatedIterations ?? -1) || -1,
+            taskBlockedByBudget: Boolean((e as any).taskBlockedByBudget ?? false),
           };
           if (_costLogPath === null) {
             _costLogPath = costLogPath(latestIterCostUpdate.runId || runId || "anon");
