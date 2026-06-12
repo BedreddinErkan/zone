@@ -12,6 +12,7 @@ import {
   withExponentialBackoff,
   UpstreamUnavailableError,
 } from "./withExponentialBackoff.js";
+import { ProviderRequestError } from "./factory.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -71,6 +72,20 @@ describe("classifyError", () => {
     const r = classifyError(err);
     expect(r.retryable).toBe(true);
     expect(r.retryClass).toBe("5xx");
+  });
+
+  it("ProviderRequestError → non_retryable (belt-and-suspenders)", () => {
+    const err = new ProviderRequestError(400, "retention", "retention message", {});
+    const r = classifyError(err);
+    expect(r.retryable).toBe(false);
+    expect(r.retryClass).toBe("non_retryable");
+  });
+
+  it("Anthropic RateLimitError (429) still retryable after adding ProviderRequestError guard", () => {
+    const err = AnthropicAPIError.generate(429, {}, "rate limited", new Headers());
+    const r = classifyError(err);
+    expect(r.retryable).toBe(true);
+    expect(r.retryClass).toBe("429");
   });
 });
 

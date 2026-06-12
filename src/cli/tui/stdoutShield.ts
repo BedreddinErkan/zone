@@ -31,3 +31,25 @@ export function applyStdoutInterception(): () => void {
     process.stdout.write = original;
   };
 }
+
+export function applyStderrInterception(): () => void {
+  const original = process.stderr.write.bind(process.stderr);
+
+  const intercepted = ((chunk: unknown, enc?: unknown, cb?: unknown) => {
+    const s =
+      typeof chunk === "string" ? chunk : (chunk as Buffer | null)?.toString?.() ?? "";
+    if (TELEMETRY_RE.test(s.trimStart()) || RESULT_LINE_RE.test(s)) {
+      if (process.env.ZONE_TUI_DEBUG === "1" || process.env.ZONE_VERBOSE_LOGS === "1") {
+        return original(chunk as string, enc as BufferEncoding, cb as () => void);
+      }
+      if (typeof cb === "function") (cb as () => void)();
+      return true;
+    }
+    return original(chunk as string, enc as BufferEncoding, cb as () => void);
+  }) as typeof process.stderr.write;
+
+  process.stderr.write = intercepted;
+  return (): void => {
+    process.stderr.write = original;
+  };
+}

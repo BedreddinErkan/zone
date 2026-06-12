@@ -54,14 +54,14 @@ describe("runInit", () => {
     await mkdir(join(tmp, ".zone"), { recursive: true });
     await writeFile(join(tmp, ".zone", "memory.md"), "existing content", "utf-8");
 
-    await runInit(tmp, dispatch);
+    await runInit(tmp, dispatch, new AbortController());
 
     expect(vi.mocked(runInvestigationFlow)).not.toHaveBeenCalled();
     expect(texts().some(t => t.includes("already exists"))).toBe(true);
   });
 
   it("writes chatResponse wrapped in ZONE_INIT markers and emits success notice when file absent", async () => {
-    await runInit(tmp, dispatch);
+    await runInit(tmp, dispatch, new AbortController());
 
     expect(vi.mocked(runInvestigationFlow)).toHaveBeenCalledOnce();
     const content = await readFile(join(tmp, ".zone", "memory.md"), "utf-8");
@@ -75,7 +75,7 @@ describe("runInit", () => {
     const SHORT = "## Project\nZone.\n## Stack\nTS.";
     vi.mocked(runInvestigationFlow).mockResolvedValue(mockFlowResult(SHORT));
 
-    await runInit(tmp, dispatch);
+    await runInit(tmp, dispatch, new AbortController());
 
     const content = await readFile(join(tmp, ".zone", "memory.md"), "utf-8");
     expect(content).toContain("<!-- ZONE_INIT_BEGIN -->");
@@ -111,21 +111,21 @@ describe("BYOK4 — runInit appends .zone/ to .gitignore", () => {
 
   it("appends .zone/ to existing .gitignore that lacks it", async () => {
     await writeFile(join(tmp, ".gitignore"), "node_modules/\ndist/\n", "utf-8");
-    await runInit(tmp, dispatch);
+    await runInit(tmp, dispatch, new AbortController());
     const content = await readFile(join(tmp, ".gitignore"), "utf-8");
     expect(content).toContain(".zone/");
   });
 
   it("is idempotent — does not duplicate .zone/ if already present", async () => {
     await writeFile(join(tmp, ".gitignore"), "node_modules/\n.zone/\ndist/\n", "utf-8");
-    await runInit(tmp, dispatch);
+    await runInit(tmp, dispatch, new AbortController());
     const content = await readFile(join(tmp, ".gitignore"), "utf-8");
     const matches = content.match(/^\.zone\/$/gm);
     expect(matches).toHaveLength(1);
   });
 
   it("does not create .gitignore when absent", async () => {
-    await runInit(tmp, dispatch);
+    await runInit(tmp, dispatch, new AbortController());
     await expect(readFile(join(tmp, ".gitignore"), "utf-8")).rejects.toThrow(/ENOENT/);
   });
 });

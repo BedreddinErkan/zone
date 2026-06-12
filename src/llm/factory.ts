@@ -4,6 +4,35 @@ import { AnthropicAdapter } from "./anthropicAdapter.js";
 import { getRequestContext } from "./openaiContext.js";
 import { RecordingLLMClient } from "./recordingClient.js";
 
+export class ApiKeyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ApiKeyError";
+  }
+}
+
+export class ProviderRequestError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly kind: "retention" | "request_shape" | "other",
+    public readonly userMessage: string,
+    public readonly raw: unknown,
+  ) {
+    super(userMessage);
+    this.name = "ProviderRequestError";
+  }
+}
+
+export class PlanRefusalError extends Error {
+  constructor(
+    public readonly declineReason: string,
+    public readonly costUsd: number,
+  ) {
+    super(declineReason);
+    this.name = "PlanRefusalError";
+  }
+}
+
 export function createLLMClient(options: LLMClientResolveOptions = {}): LLMClient {
   const ctx = getRequestContext();
   const provider = resolveProvider(options.provider, ctx?.provider);
@@ -43,7 +72,7 @@ function resolveProvider(
 function assertApiKeyCharset(key: string, provider: "openai" | "anthropic"): void {
   const examples: Record<string, string> = { openai: "sk-…", anthropic: "sk-ant-…" };
   if (key.startsWith("<")) {
-    throw new Error(
+    throw new ApiKeyError(
       `${provider.toUpperCase()} API key looks like a placeholder ("<…>"). ` +
       `Set a real key (e.g. ${examples[provider]}) or run \`zone login\`.`
     );
@@ -51,7 +80,7 @@ function assertApiKeyCharset(key: string, provider: "openai" | "anthropic"): voi
   for (let i = 0; i < key.length; i++) {
     const cp = key.charCodeAt(i);
     if (cp < 0x20 || cp > 0x7e) {
-      throw new Error(
+      throw new ApiKeyError(
         `${provider.toUpperCase()} API key contains a non-ASCII character at byte ${i} ` +
         `(U+${cp.toString(16).toUpperCase().padStart(4, "0")}) — likely a placeholder. ` +
         `Set a real key (e.g. ${examples[provider]}) or run \`zone login\`.`
@@ -82,7 +111,7 @@ function resolveOpenAIApiKey(explicit?: string, contextKey?: string): string {
   console.log(`[zone] llm key source=${source} provider=openai`);
 
   if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is missing for openai provider.");
+    throw new ApiKeyError("OPENAI_API_KEY is missing for openai provider.");
   }
 
   assertApiKeyCharset(apiKey, "openai");
@@ -112,7 +141,7 @@ function resolveAnthropicApiKey(explicit?: string, contextKey?: string): string 
   console.log(`[zone] llm key source=${source} provider=anthropic`);
 
   if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY is missing for anthropic provider.");
+    throw new ApiKeyError("ANTHROPIC_API_KEY is missing for anthropic provider.");
   }
 
   assertApiKeyCharset(apiKey, "anthropic");

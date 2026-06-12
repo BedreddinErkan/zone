@@ -8,21 +8,26 @@ import { StatusBar } from "./components/StatusBar.js";
 import { Toast } from "./components/Toast.js";
 import { Composer } from "./components/Composer.js";
 import { ApprovalModal } from "./components/ApprovalModal.js";
+import { TrustModal } from "./components/TrustModal.js";
 import { PermissionsView } from "./components/PermissionsView.js";
 import { ApiKeysView } from "./components/ApiKeysView.js";
 import { SessionsModal } from "./components/SessionsModal.js";
 import { PlanModal } from "./components/PlanModal.js";
 import { PlanReadyModal } from "./components/PlanReadyModal.js";
+import { StagedDiffModal } from "./components/StagedDiffModal.js";
 import { ModelModal } from "./components/ModelModal.js";
 import { EffortModal } from "./components/EffortModal.js";
 import { SummaryModal } from "./components/SummaryModal.js";
+import { PlanModeModal } from "./components/PlanModeModal.js";
 import { SessionMemoryModal } from "./components/SessionMemoryModal.js";
 import { MetricsModal } from "./components/MetricsModal.js";
 import { LimitsModal } from "./components/LimitsModal.js";
 import { CommitModal } from "./components/CommitModal.js";
 import { PlanPanel } from "./components/PlanPanel.js";
 import { resolveCommandApproval } from "../../api/commandApprovals.js";
+import { resolveEditApproval } from "../../api/editApprovals.js";
 import { resolvePlanApproval } from "../../llm/planApprovals.js";
+import { resolveStagedApproval } from "../../api/stagedApprovals.js";
 import type { EventBus } from "../eventBus.js";
 import type { DiskSession } from "../../api/diskSessions.js";
 import type { DiskModelSettings } from "../../api/diskModel.js";
@@ -32,6 +37,7 @@ import type { UserCommand } from "./userCommands.js";
 
 interface AppProps {
   initialPrompt?: string;
+  initialMode?: TuiMode;
   bus?: EventBus;
   initialModel?: string;
   capUsd?: number;
@@ -51,6 +57,7 @@ interface AppProps {
 interface AppInnerProps {
   bus: EventBus | undefined;
   initialPrompt: string | undefined;
+  initialMode: TuiMode | undefined;
   onSubmit: ((prompt: string, ac: AbortController, mode: TuiMode) => void) | undefined;
   onStateChange: ((state: StoreState) => void) | undefined;
   onModelApply: ((model: string, provider: "anthropic" | "openai", effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void) | undefined;
@@ -59,7 +66,7 @@ interface AppInnerProps {
   onSessionClear: ((oldSessionId: string) => void) | undefined;
 }
 
-function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply, getCommitData, onDispatchCapture, onSessionClear }: AppInnerProps): React.ReactElement {
+function AppInner({ bus, initialPrompt, initialMode, onSubmit, onStateChange, onModelApply, getCommitData, onDispatchCapture, onSessionClear }: AppInnerProps): React.ReactElement {
   const { exit } = useApp();
   const { state, dispatch } = useStore();
   const runAcRef = useRef<AbortController | null>(null);
@@ -91,16 +98,20 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply, g
       const ac = new AbortController();
       runAcRef.current = ac;
       dispatch({ type: "USER_PROMPT", text: initialPrompt });
-      onSubmit(initialPrompt, ac, "normal");
+      onSubmit(initialPrompt, ac, initialMode ?? "normal");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // autoAccept: resolve pending command approvals automatically
+  // autoAccept: resolve pending approvals automatically (kind-aware)
   useEffect(() => {
     if (state.mode !== "autoAccept" || state.pendingApproval === null) return;
-    const { approvalId, runId } = state.pendingApproval;
-    resolveCommandApproval({ approvalId, runId, approved: true });
+    const { approvalId, runId, kind } = state.pendingApproval;
+    if (kind === "edit") {
+      resolveEditApproval({ approvalId, runId, approved: true });
+    } else {
+      resolveCommandApproval({ approvalId, runId, approved: true });
+    }
     dispatch({ type: "PENDING_APPROVAL_RESOLVED" });
   }, [state.pendingApproval, state.mode]);
 
@@ -111,6 +122,14 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply, g
     resolvePlanApproval({ planId, runId, decision: "accept_all" });
     dispatch({ type: "PLAN_READY_RESOLVED" });
   }, [state.planReadyProposal, state.mode]);
+
+  // autoAccept: resolve staged-diff checkpoint as "approve_all" automatically
+  useEffect(() => {
+    if (state.mode !== "autoAccept" || state.stagedDiffProposal === null) return;
+    const { approvalId, runId } = state.stagedDiffProposal;
+    resolveStagedApproval({ approvalId, runId, decision: "approve_all" });
+    dispatch({ type: "STAGED_DIFFS_RESOLVED" });
+  }, [state.stagedDiffProposal, state.mode]);
 
   // Anchor stdin so Ink doesn't auto-unmount via beforeExit when the event loop empties.
   useInput((input, key) => {
@@ -143,11 +162,19 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply, g
   const modals = (
     <>
       {state.toastQueue.length > 0 && <Toast toast={state.toastQueue[0]} />}
-      {state.pendingApproval !== null && (
+      {state.pendingApproval !== null && state.pendingApproval.kind !== "trust" && (
         <ApprovalModal
           approvalId={state.pendingApproval.approvalId}
           runId={state.pendingApproval.runId}
           command={state.pendingApproval.command}
+          kind={state.pendingApproval.kind}
+          dispatch={dispatch}
+        />
+      )}
+      {state.pendingApproval?.kind === "trust" && (
+        <TrustModal
+          runId={state.pendingApproval.runId}
+          projectPath={state.pendingApproval.command}
           dispatch={dispatch}
         />
       )}
@@ -157,6 +184,7 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply, g
       {state.modalView === "model" && <ModelModal dispatch={dispatch} />}
       {state.modalView === "effort" && <EffortModal dispatch={dispatch} />}
       {state.modalView === "summary" && <SummaryModal dispatch={dispatch} />}
+      {state.modalView === "planMode" && <PlanModeModal dispatch={dispatch} />}
       {state.modalView === "session" && <SessionMemoryModal dispatch={dispatch} onSessionClear={onSessionClear} />}
       {state.modalView === "metrics" && <MetricsModal />}
       {state.modalView === "limits" && <LimitsModal />}
@@ -166,6 +194,9 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply, g
       )}
       {state.planReadyProposal !== null && (
         <PlanReadyModal proposal={state.planReadyProposal} dispatch={dispatch} />
+      )}
+      {state.stagedDiffProposal !== null && (
+        <StagedDiffModal proposal={state.stagedDiffProposal} dispatch={dispatch} />
       )}
     </>
   );
@@ -177,7 +208,12 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply, g
       </Box>
       <Spinner />
       {modals}
-      <Composer onSubmit={handleComposerSubmit} onExit={exit} getCommitData={getCommitData} />
+      <Composer
+        onSubmit={handleComposerSubmit}
+        onExit={() => { runAcRef.current?.abort(); exit(); }}
+        onInitStart={(ac) => { runAcRef.current = ac; }}
+        getCommitData={getCommitData}
+      />
       {state.runState === "running" && state.todos.length > 0 && (
         <PlanPanel todos={state.todos} />
       )}
@@ -186,7 +222,7 @@ function AppInner({ bus, initialPrompt, onSubmit, onStateChange, onModelApply, g
   );
 }
 
-export function App({ initialPrompt, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, initialTrustedPrefixes, resumedSession, onStateChange, initialModelSettings, onModelApply, getCommitData, onDispatchCapture, onSessionClear, initialUserCommands }: AppProps): React.ReactElement {
+export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, initialTrustedPrefixes, resumedSession, onStateChange, initialModelSettings, onModelApply, getCommitData, onDispatchCapture, onSessionClear, initialUserCommands }: AppProps): React.ReactElement {
   return (
     <StoreProvider initialValues={{
       model: initialModel ?? "",
@@ -198,8 +234,9 @@ export function App({ initialPrompt, bus, initialModel, capUsd, initialDailyUsed
       resumedStartedAt: resumedSession?.startedAt,
       modelSettings: initialModelSettings,
       userCommands: initialUserCommands ?? [],
+      mode: initialMode,
     }}>
-      <AppInner bus={bus} initialPrompt={initialPrompt} onSubmit={onSubmit} onStateChange={onStateChange} onModelApply={onModelApply} getCommitData={getCommitData} onDispatchCapture={onDispatchCapture} onSessionClear={onSessionClear} />
+      <AppInner bus={bus} initialPrompt={initialPrompt} initialMode={initialMode} onSubmit={onSubmit} onStateChange={onStateChange} onModelApply={onModelApply} getCommitData={getCommitData} onDispatchCapture={onDispatchCapture} onSessionClear={onSessionClear} />
     </StoreProvider>
   );
 }

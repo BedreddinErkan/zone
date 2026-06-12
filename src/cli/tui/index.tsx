@@ -9,14 +9,15 @@ import { App } from "./App.js";
 import { Splash } from "./components/Splash.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import type { CliFlags } from "../config.js";
-import { loadCliConfig, validateCliConfig } from "../config.js";
+import { loadCliConfig, validateCliConfig, applyDiskKeyFallbacks } from "../config.js";
 import { runOneShotInner, type TuiMode } from "../dispatch.js";
+import { ProviderRequestError, PlanRefusalError } from "../../llm/factory.js";
+import { resolveInitialTuiMode } from "./initialMode.js";
 import type { LlmPatchFlowResult } from "../../core/runLlmPatchFlow.js";
 import { createEventBus } from "../eventBus.js";
-import { applyStdoutInterception } from "./stdoutShield.js";
+import { applyStdoutInterception, applyStderrInterception } from "./stdoutShield.js";
 import type { LlmPatchProgressUpdate } from "../../core/agentLifecycleEvents.js";
 import { loadDiskTrust, diskTrustPrefixes } from "../../api/diskTrust.js";
-import { loadDiskKeys } from "../../api/diskKeys.js";
 import { saveSession, pruneOldSessions, loadLastSession, type DiskSession } from "../../api/diskSessions.js";
 import { loadDiskModel, type DiskModelSettings } from "../../api/diskModel.js";
 import type { StoreState, StoreAction } from "./store.js";
@@ -69,12 +70,74 @@ async function loadSessionWindow(sessionId: string, repoPath: string): Promise<s
 function deriveNeutralOutcome(
   runResult: LlmPatchFlowResult | undefined,
   changedFiles: string[]
-): "applied" | "no_change" | "answered" | "reverted" {
+): "applied" | "no_change" | "answered" | "reverted" | "interrupted" {
   if (!runResult) return "no_change";
   if (!runResult.ok) return "reverted";
   if (changedFiles.length > 0) return "applied";
   if ("patchPreview" in runResult && (runResult as { patchPreview?: string }).patchPreview) return "answered";
   return "no_change";
+}
+
+/** Exported for testing. Writes one atomic turn record for multi-turn session memory. */
+export async function _writeTurnRecord(params: {
+  config: { memoryEnabled?: boolean; repoPath: string };
+  sessionId: string;
+  runId: string;
+  prompt: string;
+  runResult: LlmPatchFlowResult | undefined;
+  abortedFiles: string[] | undefined;
+  aborted: boolean;
+}): Promise<void> {
+  const { config, sessionId, runId, prompt, runResult, abortedFiles, aborted } = params;
+  if (!config.memoryEnabled || !sessionId) return;
+  const { appendFsConversationEvent } = await import("../../core/conversationFilesystemStore.js");
+  const { truncateSessionTurn, MAX_CHANGED_FILES, USER_PROMPT_MAX_BYTES } =
+    await import("../../llm/sessionWindow.js");
+
+  if (aborted) {
+    const changedFiles = (abortedFiles ?? []).slice(0, MAX_CHANGED_FILES);
+    const fileCount = changedFiles.length;
+    const summary = fileCount > 0
+      ? `interrupted; ${fileCount} file${fileCount === 1 ? "" : "s"} partially modified`
+      : "interrupted before any changes";
+    const ok = await appendFsConversationEvent({
+      repoPath: config.repoPath,
+      threadId: sessionId,
+      event: {
+        type: "turn",
+        ts: Date.now(),
+        runId,
+        userPrompt: prompt.slice(0, USER_PROMPT_MAX_BYTES),
+        summary,
+        changedFiles,
+        outcome: "interrupted",
+      },
+    });
+    if (!ok && process.env.ZONE_TUI_DEBUG === "1") {
+      process.stderr.write("[zone-session-mem] interrupted turn write skipped\n");
+    }
+  } else if (runResult !== undefined) {
+    const fd = (runResult as { fileDiffs?: Array<{ filePath: string }> }).fileDiffs ?? [];
+    const changedFiles = fd.map(d => d.filePath).slice(0, MAX_CHANGED_FILES);
+    const rawPreview = (runResult as { patchPreview?: string }).patchPreview;
+    const summary = typeof rawPreview === "string" ? truncateSessionTurn(stripBanner(rawPreview)) : "";
+    const ok = await appendFsConversationEvent({
+      repoPath: config.repoPath,   // NOT process.cwd() — repoPathTrap
+      threadId: sessionId,
+      event: {
+        type: "turn",
+        ts: Date.now(),
+        runId,
+        userPrompt: prompt.slice(0, USER_PROMPT_MAX_BYTES),
+        summary,
+        changedFiles,
+        outcome: deriveNeutralOutcome(runResult, changedFiles),
+      },
+    });
+    if (!ok && process.env.ZONE_TUI_DEBUG === "1") {
+      process.stderr.write("[zone-session-mem] turn write skipped\n");
+    }
+  }
 }
 
 export async function runTui(
@@ -85,7 +148,9 @@ export async function runTui(
   // Covers SIGINT/SIGTERM paths via process.on("exit") so the original write fn
   // is always restored before the process terminates.
   const restoreStdout = applyStdoutInterception();
+  const restoreStderr = applyStderrInterception();
   process.on("exit", restoreStdout);
+  process.on("exit", restoreStderr);
 
   type CommitData = { filePaths: string[]; message: string; repoPath: string };
   const storeCapture: { state: StoreState | null; lastCommitData: CommitData | null; dispatch: ((action: StoreAction) => void) | null } = { state: null, lastCommitData: null, dispatch: null };
@@ -99,15 +164,7 @@ export async function runTui(
     // non-critical — start with empty trust
   }
 
-  try {
-    const diskKeysStore = await loadDiskKeys();
-    if (!config.anthropicApiKey) {
-      config.anthropicApiKey = diskKeysStore.keys.find(k => k.provider === "anthropic")?.key;
-    }
-    if (!config.openaiApiKey) {
-      config.openaiApiKey = diskKeysStore.keys.find(k => k.provider === "openai")?.key;
-    }
-  } catch { /* non-critical */ }
+  try { await applyDiskKeyFallbacks(config); } catch { /* non-critical */ }
 
   let diskModelSettings: DiskModelSettings | null = null;
   try {
@@ -161,6 +218,7 @@ export async function runTui(
       validateCliConfig(config);
     } catch (err) {
       restoreStdout();
+      restoreStderr();
       process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);
     }
@@ -267,22 +325,62 @@ export async function runTui(
       }
     };
     let runResult: LlmPatchFlowResult | undefined;
+    let abortedFiles: string[] | undefined;
+    let emitSafetyNet = true;
     try {
       runResult = await runOneShotInner(prompt, config, runId, { externalAc: ac, onProgress, mode, priorSessionSummary });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      bus.emit("narration", {
-        runId,
-        ts: Date.now(),
-        type: "narration",
-        title: "run error",
-        text: `[zone] run error (provider=${config.provider} model=${config.model}): ${msg}`,
-      });
+      if (err instanceof ProviderRequestError) {
+        // Typed provider error (e.g. Fable retention 400): surface as red ErrorLine + failed run-state.
+        // emitSafetyNet=false suppresses the finally's agent_loop_complete so RUN_FAILED isn't clobbered by RUN_DONE.
+        bus.emit("run_failed", {
+          runId,
+          ts: Date.now(),
+          type: "run_failed",
+          title: "Provider error",
+          userMessage: err.userMessage,
+          errorKind: err.kind,
+        });
+        emitSafetyNet = false;
+      } else if (err instanceof PlanRefusalError) {
+        // Graceful plan-path refusal: render decline reason as ASSISTANT_FINAL (not ERROR_LINE).
+        // Mirrors agent-loop §6 content_filter guard and vague-task short-circuit pattern.
+        // emitSafetyNet=false prevents the finally safety-net from double-emitting
+        // agent_loop_complete and clobbering the cost display with iterCount:0.
+        bus.emit("agent_loop_complete", {
+          runId,
+          ts: Date.now(),
+          type: "agent_loop_complete",
+          title: "Plan declined",
+          detail: err.declineReason,
+        });
+        bus.emit("run_summary", {
+          runId,
+          ts: Date.now(),
+          type: "run_summary",
+          title: "Run summary",
+          cost: { totalUsd: err.costUsd, iterCount: 0, cacheHitPct: 0, avgIterUsd: 0 },
+        });
+        emitSafetyNet = false;
+      } else {
+        if (ac.signal.aborted && err instanceof Error) {
+          abortedFiles = (err as Error & { filesModified?: string[] }).filesModified ?? [];
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        bus.emit("narration", {
+          runId,
+          ts: Date.now(),
+          type: "narration",
+          title: "run error",
+          text: `[zone] run error (provider=${config.provider} model=${config.model}): ${msg}`,
+        });
+      }
     } finally {
       // Safety net: if runLlmPatchFlow threw before emitting agent_loop_complete,
       // runState would stay "running" forever. Aborted runs are handled by
       // App.tsx Esc handler (RUN_ABORTED dispatch) — skip those.
-      if (!ac.signal.aborted) {
+      // ProviderRequestError sets emitSafetyNet=false because run_failed already handles terminal state.
+      if (!ac.signal.aborted && emitSafetyNet) {
         bus.emit("agent_loop_complete", {
           runId,
           ts: Date.now(),
@@ -301,30 +399,19 @@ export async function runTui(
     // Write atomic turn record for multi-turn memory (replaces single agent_summary write).
     // Single event per dispatch = atomic in the JSONL log (rotation never splits a turn).
     // Written post-run only — no submit-time write to avoid fire-and-forget race.
-    if (config.memoryEnabled && sessionId && runResult !== undefined) {
-      const { appendFsConversationEvent } = await import("../../core/conversationFilesystemStore.js");
-      const { truncateSessionTurn, MAX_CHANGED_FILES, USER_PROMPT_MAX_BYTES } =
-        await import("../../llm/sessionWindow.js");
-      const fd = (runResult as { fileDiffs?: Array<{ filePath: string }> }).fileDiffs ?? [];
-      const changedFiles = fd.map(d => d.filePath).slice(0, MAX_CHANGED_FILES);
-      const rawPreview = (runResult as { patchPreview?: string }).patchPreview;
-      const summary = typeof rawPreview === "string" ? truncateSessionTurn(stripBanner(rawPreview)) : "";
-      const ok = await appendFsConversationEvent({
-        repoPath: config.repoPath,   // NOT process.cwd() — repoPathTrap
-        threadId: sessionId,
-        event: {
-          type: "turn",
-          ts: Date.now(),
-          runId,
-          userPrompt: prompt.slice(0, USER_PROMPT_MAX_BYTES),
-          summary,
-          changedFiles,
-          outcome: deriveNeutralOutcome(runResult, changedFiles),
-        },
+    // Aborted runs (ac.signal.aborted) also write — using files attached to the thrown error.
+    // Gate is ac.signal.aborted specifically: ProviderRequestError/PlanRefusalError are ERRORED
+    // (not INTERRUPTED) and must not write here.
+    if (sessionId) {
+      await _writeTurnRecord({
+        config,
+        sessionId,
+        runId,
+        prompt,
+        runResult,
+        abortedFiles,
+        aborted: ac.signal.aborted,
       });
-      if (!ok && process.env.ZONE_TUI_DEBUG === "1") {
-        process.stderr.write("[zone-session-mem] turn write skipped\n");
-      }
     }
 
     // Stash commit data for /commit command (post-run only; finalizeStaging has already flushed).
@@ -375,10 +462,13 @@ export async function runTui(
   }
   writeBannerToStdout({ isResumed: !!resumedSession });
 
+  const initialMode: TuiMode = resolveInitialTuiMode(opts.permissionMode);
+
   instance = render(
     <ErrorBoundary onCrash={onCrash}>
       <App
         initialPrompt={initialPrompt}
+        initialMode={initialMode}
         bus={bus}
         initialModel={config.model}
         capUsd={config.dailyUsdCap}
@@ -440,4 +530,5 @@ export async function runTui(
   }
 
   restoreStdout();
+  restoreStderr();
 }

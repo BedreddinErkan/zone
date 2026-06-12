@@ -110,7 +110,49 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<AgentLoopRes
     withStagingTempFlush,
     verifyMode,
     ownsStagingFiles,
+    stagedCheckpointHandler: input.stagedCheckpointHandler,
+    onPreFlushDiffs: input.onPreFlushDiffs,
+    trigger: trigger as "natural_completion" | "max_iterations",
   });
+
+  // R3 checkpoint outcomes: staging was discarded — nothing reached disk.
+  // Telemetry emit calls have already run before verifyAndFinalize above.
+  if (outcome.kind === "rejected") {
+    return {
+      success: false,
+      summary: input.finalText ?? "",
+      toolCallLog,
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted",
+      terminationReason: "staged_rejected",
+      tokenUsage,
+      costUsd,
+      iterCount,
+      promotedFromArchetype,
+      promotionTrigger,
+      promotedAtIter,
+    };
+  }
+  if (outcome.kind === "refine_requested") {
+    return {
+      success: false,
+      summary: input.finalText ?? "",
+      toolCallLog,
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted",
+      terminationReason: "staged_refine_requested",
+      tokenUsage,
+      costUsd,
+      iterCount,
+      promotedFromArchetype,
+      promotionTrigger,
+      promotedAtIter,
+      refineFeedback: outcome.feedback,
+      discardedStaging: outcome.discardedStaging,
+    };
+  }
 
   // Result field derivation
   const fields = deriveResultFields(outcome, verdict);

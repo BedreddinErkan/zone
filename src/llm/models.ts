@@ -1,4 +1,5 @@
 import type { LLMProvider } from "./types.js";
+import { formatCostNote } from "../usage/pricing.js";
 
 export type ZoneModelTier = "high" | "standard";
 
@@ -15,26 +16,26 @@ export interface ModelOption {
 export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {
   openai: [
     { id: "gpt-4o",       label: "GPT-4o",       recommendedTier: "high",
-      costNote: "Recommended — works with Zone's function-calling (Chat Completions)" },
+      costNote: formatCostNote("openai", "gpt-4o") },
     {
       id: "gpt-4o-mini",
       label: "GPT-4o mini",
       recommendedTier: "standard",
-      costNote: "Recommended — works with Zone's function-calling",
+      costNote: formatCostNote("openai", "gpt-4o-mini"),
       workerSuitable: false,
       workerSuitabilityNote: "Not recommended as Worker subagent — may corrupt file content during write_file operations",
     },
     { id: "gpt-5.4",      label: "GPT-5.4",
-      costNote: "Needs Responses API — falls back to gpt-4o in Zone" },
+      costNote: formatCostNote("openai", "gpt-5.4") },
     { id: "gpt-5.4-mini", label: "GPT-5.4 mini",
-      costNote: "Needs Responses API — falls back to gpt-4o in Zone" },
+      costNote: formatCostNote("openai", "gpt-5.4-mini") },
     {
       id: "gpt-5.5",
       label: "GPT-5.5",
-      costNote: "Needs Responses API — falls back to gpt-4o in Zone",
+      costNote: formatCostNote("openai", "gpt-5.5"),
     },
     { id: "gpt-5.4-nano", label: "GPT-5.4 nano",
-      costNote: "Needs Responses API — falls back to gpt-4o in Zone" },
+      costNote: formatCostNote("openai", "gpt-5.4-nano") },
   ],
   anthropic: [
     {

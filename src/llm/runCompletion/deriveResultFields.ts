@@ -48,5 +48,9 @@ export function deriveResultFields(outcome: VerifyOutcome, verdict: VerdictResul
         patchValidatedByAgent: verdict.patchValidatedByAgent,
         summaryAppendix: "",
       };
+    case "rejected":
+    case "refine_requested":
+      // Unreachable: these outcomes are handled in composer.ts before deriveResultFields is called.
+      throw new Error(`deriveResultFields reached unexpected R3 checkpoint outcome: ${outcome.kind}`);
   }
 }

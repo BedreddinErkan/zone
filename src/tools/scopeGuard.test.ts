@@ -277,3 +277,22 @@ describe("maybeExpandScopeForSymbolMatch", () => {
     expect(result.reason).toBe("already_in_scope");
   });
 });
+
+// Schema salvage safety delta: salvaged plan (non-null) vs rejected plan (null → allow-all).
+describe("checkWriteScope — salvage safety delta", () => {
+  it("null plan (rejected/undefined) → allows write outside intended scope", () => {
+    // Before fix: schema rejection left executionPlan=undefined; scopeGuard allowed all writes.
+    expect(checkWriteScope("src/unrelated.ts", null)).toBeNull();
+  });
+
+  it("salvaged plan (non-empty steps) → blocks write outside filesLikely", () => {
+    // After fix: schema salvages steps → executionPlan is defined → scope enforced.
+    const plan = makePlan(["src/intended.ts"]);
+    expect(checkWriteScope("src/unrelated.ts", plan)).toMatch(/outside the planned scope/);
+  });
+
+  it("salvaged plan → allows write inside filesLikely", () => {
+    const plan = makePlan(["src/intended.ts"]);
+    expect(checkWriteScope("src/intended.ts", plan)).toBeNull();
+  });
+});

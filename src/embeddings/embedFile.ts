@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createLLMClient } from "../llm/factory.js";
+import { loadDiskKeys } from "../api/diskKeys.js";
 import { debugLog, errorLog } from "../utils/logger.js";
 
 const EMBEDDING_MODEL = "text-embedding-3-small";
@@ -9,6 +10,28 @@ const EMBED_TIMEOUT_MS = 30000;
 
 // Per-process memoization: log the skip reason once per provider, then stay silent.
 const _embedSkipLoggedProviders = new Set<string>();
+
+// Resolved once per process, then cached. null = no OpenAI key → silent degrade.
+let _resolvedOpenAIKey: string | null | undefined = undefined;
+
+// Guards the no_openai_key / client_init_failed log — prevents per-chunk spam.
+let _clientInitFailed = false;
+
+async function getEmbeddingApiKey(): Promise<string | null> {
+  if (_resolvedOpenAIKey !== undefined) return _resolvedOpenAIKey;
+  const diskKeys = await loadDiskKeys();
+  const fromDisk = diskKeys.keys.find(k => k.provider === "openai")?.key?.trim() ?? "";
+  const fromEnv = (process.env.OPENAI_API_KEY ?? "").trim();
+  _resolvedOpenAIKey = fromDisk || fromEnv || null;
+  return _resolvedOpenAIKey;
+}
+
+// Resets module-level state for test isolation.
+export function _resetEmbedStateForTest(): void {
+  _resolvedOpenAIKey = undefined;
+  _clientInitFailed = false;
+  _embedSkipLoggedProviders.clear();
+}
 
 function truncateForEmbedding(text: string, maxChars = MAX_INPUT_CHARS): string {
   const raw = String(text || "");
@@ -27,19 +50,33 @@ export function buildEmbedInput(filePath: string, content: string): string {
 }
 
 export async function embedText(text: string): Promise<number[] | null> {
+  if (_clientInitFailed) return null;
+
   const startedAt = Date.now();
   const truncated = truncateForEmbedding(text);
   const tokensApprox = Math.ceil(truncated.length / 4);
 
+  const openaiKey = await getEmbeddingApiKey();
+  if (!openaiKey) {
+    if (!_clientInitFailed) {
+      _clientInitFailed = true;
+      console.warn("[zone-embed-skipped]", {
+        reason: "no_openai_key",
+        detail: "No OpenAI API key for embeddings; semantic retrieval disabled.",
+      });
+    }
+    return null;
+  }
+
   let client: ReturnType<typeof createLLMClient>;
   try {
-    client = createLLMClient();
+    client = createLLMClient({ provider: "openai", apiKey: openaiKey });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn("[zone-embed-skipped]", {
-      reason: "client_init_failed",
-      detail: message,
-    });
+    if (!_clientInitFailed) {
+      _clientInitFailed = true;
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("[zone-embed-skipped]", { reason: "client_init_failed", detail: message });
+    }
     return null;
   }
 

@@ -50,6 +50,7 @@ import { runTestEngineerFlow } from "../roles/runTestEngineerFlow.js";
 import { runDataAnalystFlow } from "../roles/runDataAnalystFlow.js";
 import { checkConfidenceGate, renderConfidenceGateBlock } from "../core/confidenceGate.js";
 import { runHeadless, runOneShotFromCli } from "./dispatch.js";
+import { parseTrustFlag } from "./config.js";
 const execFileAsync = promisify(execFile);
 const ANSI_ENABLED = process.env.VITEST !== "true" && process.env.NO_COLOR !== "1";
 const CLI_LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
@@ -78,10 +79,13 @@ type CliOptions = {
   role?: string;
   // CLI.0 agent-loop path options
   model?: string;
+  effort?: string;
   forceTier?: string;
   yes?: boolean;
   noRevision?: boolean;
   noColor?: boolean;
+  trust?: boolean;
+  noTrust?: boolean;
   // TUI.1 new flags
   print?: boolean;
   continue?: boolean;
@@ -1291,12 +1295,13 @@ export async function run(): Promise<void> {
     .option("--output-format <fmt>", "Output format: text | json", "text")
     .option("--max-turns <n>", "Maximum agent turns", parseInt)
     .option("--max-budget-usd <n>", "Maximum spend in USD", parseFloat)
-    .option("--permission-mode <mode>", "Permission mode (wired in TUI.4)")
+    .option("--permission-mode <mode>", "Permission mode: plan starts the TUI in plan mode (investigate → approve → execute)")
     .option("--add-dir <path...>", "Additional writable root directories")
     .option("--fork-session", "Fork current session (coming in TUI.6)")
     .option("--task <text>", "Task or change request to analyze [deprecated: use positional arg]")
     .option("--repo <path>", "Target repository path", process.cwd())
     .option("-m, --model <id>", "Model override (e.g. claude-sonnet-4-6)")
+    .option("--effort <level>", "Reasoning effort: low|medium|high|xhigh|max (clamped per model)")
     .option("--force-tier <tier>", "Force classification tier: simple | medium | complex")
     .option("--yes", "Auto-approve all run_command calls and scope revisions")
     .option("--no-revision", "Reject all scope revisions automatically")
@@ -1342,6 +1347,11 @@ export async function run(): Promise<void> {
       DEFAULT_RESULT_PATH
     )
       .option("--role <role>", "Agent role: developer | test_engineer | data_analyst")
+    .option("--trust", "Trust this project for this run and persist to the registry")
+    .option("--no-trust", "Force-deny trust for this run, even if registered")
+    // --trust/--no-trust registered for recognition only (avoids unknown-option error).
+    // parseTrustFlag(process.argv) is the sole authoritative source for the three-state value.
+    // options.trust / options.noTrust are intentionally NOT read from cliFlags.
     // Registering an action prevents Commander from calling unknownCommand() for
     // positional args that don't match a subcommand name. Actual routing runs after parseAsync.
     .action(() => { /* routing handled below */ });
@@ -1357,6 +1367,7 @@ export async function run(): Promise<void> {
   const isHeadless = options.print === true || !process.stdout.isTTY;
   const cliFlags = {
     model: options.model,
+    effort: options.effort as string | undefined,
     repo: options.repo,
     forceTier: options.forceTier,
     yes: options.yes,
@@ -1365,6 +1376,8 @@ export async function run(): Promise<void> {
     quiet: isHeadless,
     noColor: options.noColor,
     resume: options.resume as boolean | undefined,
+    permissionMode: options.permissionMode,
+    trust: parseTrustFlag(process.argv),
   };
 
   // TUI.1 entry-point fork

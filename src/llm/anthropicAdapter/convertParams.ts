@@ -6,10 +6,16 @@ import type {
   ChatCompletionToolChoiceOption,
 } from "openai/resources/chat/completions";
 import { applyMessageCacheBreakpoint2 } from "./cacheControlHelpers.js";
-import { supportsEffort } from "../modelRegistry.js";
+import { supportsEffort, usesAdaptiveThinking, resolveEffortForModel } from "../modelRegistry.js";
 import type { EffortLevel } from "../modelRegistry.js";
 
-const EFFORT_BUDGET_MAP: Record<EffortLevel, number> = { low: 1024, medium: 8192, high: 32000 };
+// Existing low/medium/high values UNCHANGED. xhigh defensive (Sonnet won't receive it after resolver).
+const EFFORT_BUDGET_MAP: Record<EffortLevel, number> = { low: 1024, medium: 8192, high: 32000, xhigh: 32000, max: 48000 };
+
+// Per-effort output floor for adaptive models: prevents starving thinking at xhigh/max.
+// high:16384 = today's agent-loop value (no regression). xhigh/max raise headroom.
+const EFFORT_MAX_TOKENS_FLOOR: Record<EffortLevel, number> =
+  { low: 4096, medium: 8192, high: 16384, xhigh: 32000, max: 64000 };
 
 export interface ConvertParamsExtras {
   effort?: EffortLevel;
@@ -167,29 +173,42 @@ export function convertParams(
     enabled: messageCacheEnabled && cacheEligible,
   });
 
-  // TUI.7.G: extended thinking — only for models that support it.
-  // When enabled: temperature must be 1 (omit field), stop_sequences not allowed,
-  // max_tokens must exceed budget_tokens (add 2048 output margin).
+  // Adaptive-only family (Fable 5, Opus 4.8/4.7): thinking:{type:"adaptive"} + output_config.effort.
+  // budget_tokens / temperature / top_p / stop_sequences are all removed on this family (API 400 otherwise).
+  // Non-adaptive path (Sonnet/Haiku/OpenAI): unchanged — temperature/top_p/stop_sequences/budget_tokens
+  // flow exactly as before.
+  const adaptive = usesAdaptiveThinking(input.model);
+  const resolvedEffort = resolveEffortForModel(input.model, extras?.effort);
+
   const thinkingBudget =
-    extras?.effort && supportsEffort(input.model)
-      ? EFFORT_BUDGET_MAP[extras.effort]
+    !adaptive && resolvedEffort && supportsEffort(input.model)
+      ? EFFORT_BUDGET_MAP[resolvedEffort]
       : undefined;
 
   const effectiveMaxTokens = thinkingBudget
     ? Math.max(max_tokens, thinkingBudget + 2048)
-    : max_tokens;
+    : adaptive && resolvedEffort
+      ? Math.max(max_tokens, EFFORT_MAX_TOKENS_FLOOR[resolvedEffort])
+      : max_tokens;
 
   const params: Anthropic.MessageCreateParams = {
     model: input.model,
     max_tokens: effectiveMaxTokens,
     messages: messagesForRequest,
     ...(systemForRequest ? { system: systemForRequest } : {}),
-    ...(!thinkingBudget && temperature !== undefined ? { temperature } : {}),
-    ...(typeof input.top_p === "number" ? { top_p: input.top_p } : {}),
-    ...(!thinkingBudget && stop_sequences ? { stop_sequences } : {}),
+    ...(!adaptive && !thinkingBudget && temperature !== undefined ? { temperature } : {}),
+    ...(!adaptive && typeof input.top_p === "number" ? { top_p: input.top_p } : {}),
+    ...(!adaptive && !thinkingBudget && stop_sequences ? { stop_sequences } : {}),
     ...(toolsForRequest ? { tools: toolsForRequest } : {}),
     ...(tool_choice ? { tool_choice } : {}),
-    ...(thinkingBudget ? { thinking: { type: "enabled" as const, budget_tokens: thinkingBudget } } : {}),
+    ...(adaptive && resolvedEffort
+      ? {
+          thinking: { type: "adaptive" as const },
+          output_config: { effort: resolvedEffort },
+        }
+      : !adaptive && thinkingBudget
+        ? { thinking: { type: "enabled" as const, budget_tokens: thinkingBudget } }
+        : {}),
   };
 
   return { params, warnings };

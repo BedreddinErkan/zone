@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { runAgentLoop } from "./agentLoop.js";
+import { PlanRefusalError } from "./factory.js";
 import { INVESTIGATION_TOOLS } from "../tools/toolDefinitions.js";
 import {
   generateExecutionPlan,
@@ -55,6 +56,12 @@ RELEVANT FILES (read these; follow imports only if critical to understanding):
 ${fileList}
 
 Instructions:
+NOTE: If the TASK uses an additive or structural lead verb — add, create, implement,
+build, scaffold, introduce, generate, write, set up, make, new, refactor, rename,
+extract, migrate, convert — skip step 0 entirely and proceed directly to steps 1-2.
+Produce concrete implementation steps; do NOT set noChangeReason or cannotVerifyReason.
+There is no pre-existing problem to reproduce.
+
 0. If TASK asserts a problem ("fix the error in X", "build fails", "why does X fail"):
    a. Run the relevant command BARE (e.g. npm run build, npx tsc --noEmit) — no 2>&1 or pipes
       (output is captured automatically; metachars block auto-approval).
@@ -74,7 +81,7 @@ JSON shape:
   "steps": [
     {
       "title": "string",
-      "description": "string",
+      "description": "<short approach: what this step does to which code + the key decision/edit, 1-3 sentences, concrete, not a restatement of the title>",
       "filesLikely": ["string"],
       "subagentEligible": true | false,
       "subagentType": "worker" | "explore"
@@ -185,6 +192,16 @@ export async function runPlanInvestigation(
   });
 
   const summaryText = String(loop.summary ?? "").trim();
+
+  // Short-circuit on formal refusal (stop_reason:"refusal" → content_filter → loop.refusal).
+  // Do NOT fall through to the generateExecutionPlan fallback — that would either fabricate a
+  // plan for refused work or produce a second refusal. Cost is real (the investigation ran).
+  // NOTE: a plain-text decline with stop_reason:"end_turn" (no refusal field) still falls
+  // through to the fallback — acceptable, formal refusal is the primary detection case.
+  if (loop.refusal != null) {
+    throw new PlanRefusalError(loop.refusal, loop.costUsd ?? 0);
+  }
+
   const plan = tryParseExecutionPlan(summaryText);
 
   log("[zone-plan-investigation-complete]", JSON.stringify({
@@ -195,6 +212,19 @@ export async function runPlanInvestigation(
     terminationReason: loop.terminationReason ?? "success",
     fallbackUsed: !plan,
   }));
+
+  // Synthetic post-loop cost repaint: surface investigation spend in the status bar at the
+  // plan-ready modal, independent of per-iter repaint timing. handleIterCost maps this to
+  // STATUS_UPDATE{costUsd}, a SET (not add) — idempotent with the per-iter iter_cost_update
+  // events. Display-only (no LLM call) ⇒ no billing double-count; execution-phase updates
+  // overwrite it after approval.
+  emitProgress({
+    type: "iter_cost_update",
+    title: "Investigation cost",
+    status: "active",
+    cumulativeCost: loop.costUsd ?? 0,
+    iter: loop.iterCount ?? 0,
+  } as Partial<ZoneStructuredProgressEvent>);
 
   if (plan) return plan;
 

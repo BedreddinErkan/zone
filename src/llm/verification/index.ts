@@ -9,6 +9,7 @@ export {
   buildVerificationWarningsMessage,
   finalizeStaging,
 } from "./staging.js";
+export type { StagingVerification } from "./staging.js";
 export {
   applyNoInfraVerificationOverride,
   inferVerificationFromLog,

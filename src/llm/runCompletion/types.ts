@@ -2,6 +2,8 @@ import type { ProjectFramework } from "../../repo/detectFramework.js";
 import type { SubagentTokenUsage } from "../subagents.js";
 import type { TaskArchetype } from "../taskClassifier.js";
 import type { VerificationReason } from "../verification/verificationReason.js";
+import type { StagedCheckpointHandler } from "../../api/stagedApprovals.js";
+import type { StagedFile } from "../../core/fileDiff.js";
 
 export type ToolCallLogEntry = {
   id: string;
@@ -46,6 +48,10 @@ export interface FinalizeRunInput {
   };
   onProgress?: (msg: string) => void;
   runId?: string;
+  /** R3: when set, invoked before disk flush to show staged diffs and await approval. */
+  stagedCheckpointHandler?: StagedCheckpointHandler;
+  /** Plan-first: non-blocking diff display — called pre-flush with staged diffs. */
+  onPreFlushDiffs?: (diffs: StagedFile[]) => void;
 }
 
 export interface VerdictInput {

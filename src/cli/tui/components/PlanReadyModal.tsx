@@ -97,11 +97,20 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
       <Text>{proposal.objective.slice(0, 200)}</Text>
       <Text> </Text>
       {proposal.steps.slice(0, 6).map((step, i) => (
-        <Box key={i} flexDirection="row">
-          <Text dimColor>{`  ${i + 1}. `}</Text>
-          <Text>{step.title}</Text>
+        <Box key={i} flexDirection="column">
+          <Box flexDirection="row">
+            <Text dimColor>{`  ${i + 1}. `}</Text>
+            <Text>{step.title}</Text>
+          </Box>
+          {!!step.description && (
+            <Box flexGrow={1} marginLeft={5}>
+              <Text dimColor>{step.description.slice(0, 200)}</Text>
+            </Box>
+          )}
           {step.filesLikely.length > 0 && (
-            <Text dimColor>{`  (${step.filesLikely.slice(0, 3).join(", ")}${step.filesLikely.length > 3 ? ", …" : ""})`}</Text>
+            <Box marginLeft={5}>
+              <Text dimColor>{`(${step.filesLikely.slice(0, 3).join(", ")}${step.filesLikely.length > 3 ? ", …" : ""})`}</Text>
+            </Box>
           )}
         </Box>
       ))}
@@ -127,7 +136,7 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
           <Text dimColor>{"Enter to submit  ·  Esc to cancel"}</Text>
         </>
       ) : (
-        <Text dimColor>{"[1] auto-accept all  ·  [2] approve commands  ·  [3] give feedback  ·  [4] feedback+run  ·  Esc cancel"}</Text>
+        <Text dimColor>{"[1] auto-accept all  ·  [2] manually approve changes  ·  [3] give feedback  ·  [4] feedback+run  ·  Esc cancel"}</Text>
       )}
     </Box>
   );

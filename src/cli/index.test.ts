@@ -9,6 +9,8 @@ const mockMkdir = vi.fn();
 const runLlmPatchFlowMock = vi.fn();
 vi.mock("../core/runLlmPatchFlow.js", () => ({
   runLlmPatchFlow: runLlmPatchFlowMock,
+  isChitchat: () => false,
+  isVagueDeveloperTask: () => false,
 }));
 vi.mock("node:fs", () => {
   return {

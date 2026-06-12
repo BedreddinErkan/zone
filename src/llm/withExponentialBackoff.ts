@@ -4,6 +4,7 @@ import {
   RateLimitError as AnthropicRateLimitError,
   InternalServerError as AnthropicInternalServerError,
 } from "@anthropic-ai/sdk";
+import { ProviderRequestError } from "./factory.js";
 import {
   APIConnectionError as OpenAIConnectionError,
   APIUserAbortError as OpenAIUserAbortError,
@@ -59,6 +60,9 @@ function extractRetryAfterMs(err: { headers?: { get?: (name: string) => string |
 }
 
 export function classifyError(err: unknown): RetryClassification {
+  if (err instanceof ProviderRequestError) {
+    return { retryable: false, retryClass: "non_retryable" };
+  }
   if (err instanceof AnthropicUserAbortError || err instanceof OpenAIUserAbortError) {
     return { retryable: false, retryClass: "non_retryable" };
   }

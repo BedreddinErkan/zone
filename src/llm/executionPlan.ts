@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { getModelName } from "./openaiClient.js";
-import { createLLMClient } from "./factory.js";
+import { createLLMClient, PlanRefusalError } from "./factory.js";
 import { getRequestContext } from "./openaiContext.js";
 import type { LLMProvider } from "./types.js";
+import { debugLog } from "../utils/logger.js";
 
 export type ExecutionPlan = {
   objective: string;
@@ -83,23 +84,24 @@ const executionPlanSchema = z
           path: ["noChangeReason"],
         });
       }
-    } else {
-      // When steps is non-empty, neither reason field may be set.
-      if (hasNoChange) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "noChangeReason must not be set when steps is non-empty",
-          path: ["noChangeReason"],
-        });
-      }
-      if (hasCantVerify) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "cannotVerifyReason must not be set when steps is non-empty",
-          path: ["cannotVerifyReason"],
-        });
-      }
     }
+    // steps non-empty + reason set: salvaged by .transform() below — not rejected here.
+  })
+  .transform((data): typeof data => {
+    if (
+      data.steps.length > 0 &&
+      (data.noChangeReason !== undefined || data.cannotVerifyReason !== undefined)
+    ) {
+      const dropped = [
+        data.noChangeReason !== undefined ? "noChangeReason" : null,
+        data.cannotVerifyReason !== undefined ? "cannotVerifyReason" : null,
+      ]
+        .filter((f): f is string => f !== null)
+        .join(", ");
+      debugLog(`[zone-plan-salvaged] dropped ${dropped} (steps=${data.steps.length})`);
+      return { ...data, noChangeReason: undefined, cannotVerifyReason: undefined };
+    }
+    return data;
   });
 
 function stripJsonFences(raw: string): string {
@@ -204,6 +206,12 @@ export async function generateExecutionPlan(input: {
   /** Pre-read file bodies for content-aware ("quick") plan seeding. Already
    *  truncated + budget-capped by the caller. Injected as-is into the prompt. */
   seededFileContents?: string;
+  /** When true, instructs the model to always produce concrete steps and never
+   *  emit noChangeReason/cannotVerifyReason. Throws if the model still returns
+   *  no steps, so the caller can fall through to synthesizeMinimalPlan. */
+  forceSteps?: boolean;
+  /** When provided, aborts the in-flight LLM call. */
+  abortSignal?: AbortSignal;
 }): Promise<ExecutionPlan> {
   const client = createLLMClient({
     apiKey: input.userApiKey,
@@ -297,7 +305,7 @@ JSON shape:
   "steps": [
     {
       "title": "string",
-      "description": "string",
+      "description": "<short approach: what this step does to which code + the key decision/edit, 1-3 sentences, concrete, not a restatement of the title>",
       "filesLikely": ["string"],
       "subagentEligible": true | false,
       "subagentType": "worker" | "explore"
@@ -306,23 +314,37 @@ JSON shape:
   "riskHints": ["string"],
   "scopeSummary": "string",
   "scopeNotes": "string (optional)",
-  "noChangeReason": "string (optional — set ONLY when the reproduce command ran and exited 0; steps MUST be []; mutually exclusive with cannotVerifyReason)",
-  "cannotVerifyReason": "string (optional — set ONLY when the reproduce command did NOT run (blocked/denied/infra error); steps MUST be []; mutually exclusive with noChangeReason)"
+  ${input.forceSteps
+    ? `// noChangeReason and cannotVerifyReason are NOT valid for this task type.`
+    : `"noChangeReason": "string (optional — set ONLY when the reproduce command ran and exited 0; steps MUST be []; mutually exclusive with cannotVerifyReason)",
+  "cannotVerifyReason": "string (optional — set ONLY when the reproduce command did NOT run (blocked/denied/infra error); steps MUST be []; mutually exclusive with noChangeReason)"`}
 }
-- noChangeReason: if you ran the relevant command and it exited 0, set this and leave steps as []. Do not fabricate steps for a problem you could not reproduce.
-- cannotVerifyReason: if the reproduce command did not run even bare, set this and leave steps as []. Do NOT read files to guess a fix.
+${input.forceSteps
+    ? `IMPORTANT: This is an additive or creation task. You MUST return at least one concrete implementation step. Do NOT set noChangeReason or cannotVerifyReason.`
+    : `- noChangeReason: if you ran the relevant command and it exited 0, set this and leave steps as []. Do not fabricate steps for a problem you could not reproduce.
+- cannotVerifyReason: if the reproduce command did not run even bare, set this and leave steps as []. Do NOT read files to guess a fix.`}
 `.trim();
 
-  const response = await client.createChatCompletion({
-    model,
-    messages: [{ role: "user", content: prompt }],
-    response_format: { type: "json_object" },
-  });
+  const response = await client.createChatCompletion(
+    { model, messages: [{ role: "user", content: prompt }], response_format: { type: "json_object" } },
+    { signal: input.abortSignal }
+  );
 
+  const choice = response.choices[0];
+  if (choice?.finish_reason === "content_filter") {
+    const refusalText = choice.message.refusal ?? "Request declined by safety classifier.";
+    // costUsd:0 — single-call path has no loop cost tracker; minor under-report,
+    // session-level cost is still recorded by RecordingLLMClient.
+    throw new PlanRefusalError(refusalText, 0);
+  }
   const parsed = JSON.parse(
-    extractJson(response.choices[0]?.message?.content ?? "")
+    extractJson(choice?.message?.content ?? "")
   );
   const plan = executionPlanSchema.parse(parsed);
+
+  if (input.forceSteps && plan.steps.length === 0) {
+    throw new Error("generateExecutionPlan: no steps returned (forceSteps)");
+  }
 
   const normalizedSteps = normalizeExecutionPlanSteps(plan.steps);
 
@@ -335,4 +357,23 @@ JSON shape:
     ...(plan.noChangeReason ? { noChangeReason: plan.noChangeReason } : {}),
     ...(plan.cannotVerifyReason ? { cannotVerifyReason: plan.cannotVerifyReason } : {}),
   };
+}
+
+/**
+ * Last-resort ExecutionPlan built from the task string alone — no LLM call.
+ * Guarantees non-empty steps and validates against executionPlanSchema so
+ * callers receive a schema-compliant ExecutionPlan (fails loudly if invariants
+ * are violated, future-proofing against schema changes).
+ */
+export function synthesizeMinimalPlan(task: string, relevantFiles: string[] = []): ExecutionPlan {
+  const pathTokens = [...task.matchAll(/\b[\w./][\w./-]*\.\w{2,5}\b/g)]
+    .map(m => m[0]).slice(0, 5);
+  const filesLikely = [...new Set([...pathTokens, ...relevantFiles.slice(0, 3)])];
+  const raw = {
+    objective: task.slice(0, 200),
+    steps: [{ title: task.slice(0, 80), description: task, filesLikely }],
+    riskHints: [],
+    scopeSummary: task.slice(0, 160),
+  };
+  return executionPlanSchema.parse(raw);
 }

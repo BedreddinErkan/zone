@@ -57,12 +57,18 @@ export function ModelModal({ dispatch }: Props): React.ReactElement {
     const selected = flatIdx === sel;
     const marker = m.id === currentModelId ? "(•)" : "( )";
     const bg = selected ? "blue" : undefined;
+    const retentionBadge = m.retention ? ` ⚠ ${m.retention.minDays}d retention` : "";
     const label = narrow
-      ? `   ${marker} ${m.id}`
+      ? `   ${marker} ${m.id}${retentionBadge}`
       : `   ${marker} ${m.displayName}${m.costNote ? ` — ${m.costNote}` : ""}`;
     rows.push(
-      <Box key={m.id} backgroundColor={bg}>
+      <Box key={m.id} flexDirection="column" backgroundColor={bg}>
         <Text color={selected ? "white" : undefined}>{label}</Text>
+        {m.retention && !narrow && (
+          <Text dimColor>
+            {`      ⚠ Requires ${m.retention.minDays}-day data retention · ZDR not available · longer than the 7-day API default`}
+          </Text>
+        )}
       </Box>
     );
   });

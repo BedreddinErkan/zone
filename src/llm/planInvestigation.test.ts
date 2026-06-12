@@ -232,5 +232,15 @@ describe("runPlanInvestigation — streaming (progressCallback)", () => {
     expect(narration).toBeDefined();
     expect(narration![0].progress.title).toBe("Reading auth module");
   });
+
+  it("emits a synthetic iter_cost_update carrying loop.costUsd after the loop", async () => {
+    await runPlanInvestigation(BASE_INPUT);
+    const calls = (BASE_INPUT.progressCallback as ReturnType<typeof vi.fn>).mock.calls;
+    const costUpdate = calls.find(([upd]: [any]) =>
+      typeof upd === "object" && upd?.progress?.type === "iter_cost_update"
+    );
+    expect(costUpdate).toBeDefined();
+    expect(costUpdate![0].progress.cumulativeCost).toBe(0.004);
+  });
 });
 

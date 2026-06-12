@@ -6,6 +6,7 @@ import type { TaskTier } from "../llm/taskClassifier.js";
 import { getProviderForModel, isKnownModelId, normalizeModelId, type EffortLevel } from "../llm/modelRegistry.js";
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { loadDiskModelSync } from "../api/diskModel.js";
+import { loadDiskKeys } from "../api/diskKeys.js";
 
 export interface CliConfig {
   model: string;
@@ -152,6 +153,17 @@ export function loadCliConfig(
     webSearchEnabled: diskModel?.webSearchEnabled ?? true,
     trust: flags.trust,
   };
+}
+
+/** Fill missing API keys from ~/.zone/keys.json (BYOK store). Mutates config in-place. */
+export async function applyDiskKeyFallbacks(config: CliConfig): Promise<void> {
+  const store = await loadDiskKeys();
+  if (!config.anthropicApiKey) {
+    config.anthropicApiKey = store.keys.find(k => k.provider === "anthropic")?.key;
+  }
+  if (!config.openaiApiKey) {
+    config.openaiApiKey = store.keys.find(k => k.provider === "openai")?.key;
+  }
 }
 
 /**

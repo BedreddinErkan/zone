@@ -16,6 +16,7 @@ export interface ModelRates {
 
 export const PRICING_USD_PER_MTOK: Record<ProviderName, Record<string, ModelRates>> = {
   anthropic: {
+    "claude-fable-5":    { input: 10, output: 50, cache_read: 1, cache_write: 12.5 },
     "claude-opus-4-8":   { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
     "claude-opus-4-7":   { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
     "claude-opus-4-6":   { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
@@ -75,6 +76,17 @@ export function totalCost(
     (sum, t) => sum + costFor(provider, model, t, breakdown[t]),
     0
   );
+}
+
+/**
+ * Returns a short cost note like "$2.5/$15 per MTok" for display in the model picker.
+ * Returns undefined when the model has no pricing entry — never prints $0/$0.
+ */
+export function formatCostNote(provider: ProviderName, modelId: string): string | undefined {
+  const rates = PRICING_USD_PER_MTOK[provider]?.[modelId];
+  if (!rates) return undefined;
+  const fmt = (n: number) => String(parseFloat(n.toFixed(2)));
+  return `$${fmt(rates.input)}/$${fmt(rates.output)} per MTok`;
 }
 
 /** Flat per-search fee charged by Anthropic (not model-specific). $10/1000 searches. */

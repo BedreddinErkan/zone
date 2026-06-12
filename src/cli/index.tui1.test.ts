@@ -21,7 +21,7 @@ vi.mock("./tui/index.js", () => ({
 }));
 
 // Mocks for subcommand-level deps (avoid side-effects)
-vi.mock("../core/runLlmPatchFlow.js", () => ({ runLlmPatchFlow: vi.fn() }));
+vi.mock("../core/runLlmPatchFlow.js", () => ({ runLlmPatchFlow: vi.fn(), isChitchat: () => false, isVagueDeveloperTask: () => false }));
 vi.mock("../api/commandApprovals.js", () => ({
   rejectPendingApprovalsForRun: vi.fn(),
   clearTrustedCommandsForRun: vi.fn(),

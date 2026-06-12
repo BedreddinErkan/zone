@@ -2,7 +2,8 @@ import fs from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-export type EffortLevel = "low" | "medium" | "high";
+// keep in sync with modelRegistry.ts:EffortLevel
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface DiskModelSettings {
   version: 2;
@@ -13,7 +14,7 @@ export interface DiskModelSettings {
   memoryEnabled?: boolean;
   commitOnSuccess?: boolean;
   webSearchEnabled?: boolean;
-  planDepth?: "quick" | "investigate";
+  planDepth?: "quick" | "investigate" | "strict";
   updatedAt: string;
 }
 

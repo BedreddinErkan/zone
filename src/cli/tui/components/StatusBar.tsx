@@ -25,6 +25,8 @@ function leftText(
       return `done · $${costUsd.toFixed(4)}${tokStr}${elapsedSec ? ` · ${elapsedSec}s` : ""} · ${m}`;
     case "aborted":
       return `aborted · $${costUsd.toFixed(4)}${tokStr} · ${m}`;
+    case "failed":
+      return `error · $${costUsd.toFixed(4)}${tokStr} · ${m}`;
   }
 }
 
@@ -53,7 +55,7 @@ export function StatusBar(): React.ReactElement {
   // Per-task execution time: start (task begin) → end (task complete), frozen at
   // completion so it doesn't keep ticking while the "done" status is displayed.
   const elapsedSec =
-    runState === "done" && runStartMs != null && runEndMs != null
+    (runState === "done" || runState === "failed") && runStartMs != null && runEndMs != null
       ? ((runEndMs - runStartMs) / 1000).toFixed(1)
       : null;
 

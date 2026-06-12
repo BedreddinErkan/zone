@@ -121,6 +121,7 @@ describe("usageTracker subagent telemetry compatibility", () => {
       cache_write: 0,
       cache_read: 700,
       output: 25,
+      output_reasoning: 0,
       webSearchRequests: 0,
     });
 

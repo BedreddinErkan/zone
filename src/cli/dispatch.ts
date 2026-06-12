@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { runLlmPatchFlow, type LlmPatchFlowResult } from "../core/runLlmPatchFlow.js";
+import { runLlmPatchFlow, isChitchat, isVagueDeveloperTask, type LlmPatchFlowResult } from "../core/runLlmPatchFlow.js";
 import {
   rejectPendingApprovalsForRun,
   clearTrustedCommandsForRun,
@@ -13,9 +13,18 @@ import { loadCliConfig, validateCliConfig, type CliConfig, type CliFlags } from 
 import { loadDiskModelSync } from "../api/diskModel.js";
 import { runPlanInvestigation } from "../llm/planInvestigation.js";
 import { createSpinner, buildCliSink } from "./sink.js";
-import type { LlmPatchProgressUpdate } from "../core/agentLifecycleEvents.js";
+import type { LlmPatchProgressUpdate, ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import { preparePlanContext } from "../core/preparePlanContext.js";
-import { generateExecutionPlan, isNoChangePlan, isCannotVerifyPlan } from "../llm/executionPlan.js";
+import { generateExecutionPlan, isNoChangePlan, isCannotVerifyPlan, synthesizeMinimalPlan } from "../llm/executionPlan.js";
+import { taskAssertsProblem } from "../llm/taskShape.js";
+import { rejectPendingEditsForRun } from "../api/editApprovals.js";
+import { rejectPendingStagedForRun } from "../api/stagedApprovals.js";
+import { debugLog } from "../utils/logger.js";
+import { isProjectTrusted, addTrustedProject, resolveProjectRoot, canonicalizePath } from "../api/diskTrustedProjects.js";
+import { requestTrustApproval, rejectPendingTrustForRun } from "../api/trustApprovals.js";
+import { classifyPath } from "../core/pathSafety.js";
+import { ProviderRequestError, PlanRefusalError } from "../llm/factory.js";
+import { sep } from "node:path";
 import { runAuditPipeline } from "../llm/auditPipeline.js";
 import { readAuditModeSetting } from "../visual/tierSettings.js";
 import { withRequestContext } from "../llm/openaiContext.js";
@@ -66,9 +75,110 @@ export async function runOneShotInner(
   );
   const progressCallback = opts.onProgress ?? sink.onProgress;
 
+  // --- Phase 2 trust gate ---
+  {
+    const projectRoot = resolveProjectRoot(effectiveConfig.repoPath);
+
+    // Reuses the exact event shape validated by Phase-1's "Folder not trusted" line.
+    const emitNarration = (message: string): void =>
+      progressCallback({
+        progress: {
+          type: "narration",
+          runId,
+          ts: Date.now(),
+          title: message,
+          text: message,
+          status: "complete",
+        } as unknown as ZoneStructuredProgressEvent,
+      } as unknown as LlmPatchProgressUpdate);
+
+    // 1. Hard blocks — no flag overrides
+    const pathClass = classifyPath(projectRoot);
+    if (pathClass === "system") {
+      emitNarration(`Cannot operate in the system directory ${projectRoot}.`);
+      const result: LlmPatchFlowResult = { ok: false as const, reason: "system_path_blocked" };
+      return result;
+    }
+    if (pathClass === "home_root") {
+      emitNarration("This is your home directory, not a project — cd into a project folder.");
+      const result: LlmPatchFlowResult = { ok: false as const, reason: "home_root_blocked" };
+      return result;
+    }
+
+    // 2. --no-trust: force-deny even if registered
+    if (effectiveConfig.trust === false) {
+      emitNarration("Trust explicitly declined for this run (--no-trust).");
+      const result: LlmPatchFlowResult = { ok: false as const, reason: "trust_explicitly_declined" };
+      return result;
+    }
+
+    // 3. Determine trust from all sources
+    const isTrustedByEnvAll   = process.env.ZONE_TRUST_ALL === "1";
+    const isTrustedByFlag     = effectiveConfig.trust === true;
+    const isTrustedByDir      = (() => {
+      const envDir = process.env.ZONE_TRUST_DIR;
+      if (!envDir) return false;
+      const canonical = canonicalizePath(envDir);
+      return projectRoot === canonical || projectRoot.startsWith(canonical + sep);
+    })();
+    const isTrustedByRegistry = isProjectTrusted(projectRoot);
+
+    if (isTrustedByEnvAll || isTrustedByFlag || isTrustedByDir || isTrustedByRegistry) {
+      // Persist only when --trust was the trust source (ZONE_TRUST_ALL/ZONE_TRUST_DIR are run-only)
+      if (isTrustedByFlag) {
+        addTrustedProject(projectRoot, "flag"); // idempotent — safe even if already in registry
+      }
+      // fall through → proceed with the run
+    } else {
+      // 4. Untrusted normal dir — interactive prompt or fail-closed (Phase-1 behavior)
+      if (!process.stdin.isTTY || !process.stdout.isTTY) {
+        process.stderr.write(
+          `zone: folder not trusted — ${projectRoot}\nRun interactively to grant trust, or set ZONE_TRUST_ALL=1.\n`
+        );
+        const result: LlmPatchFlowResult = { ok: false as const, reason: "project_not_trusted_noninteractive" };
+        return result;
+      }
+      const emitTrustApproval = (evt: {
+        type: "trust_approval_required"; runId: string; ts: number;
+        title: string; projectPath: string; approvalId: string;
+      }): void => {
+        progressCallback({ progress: evt as unknown as ZoneStructuredProgressEvent } as unknown as LlmPatchProgressUpdate);
+      };
+      const trusted = await requestTrustApproval({
+        runId,
+        projectPath: projectRoot,
+        emit: emitTrustApproval,
+        abortSignal: ac.signal,
+      });
+      if (trusted) {
+        addTrustedProject(projectRoot, "user");
+      } else {
+        emitNarration("Folder not trusted — no changes made.");
+        const result: LlmPatchFlowResult = { ok: false as const, reason: "project_not_trusted" };
+        return result;
+      }
+    }
+  }
+  // --- end Phase 2 trust gate ---
+
   let planForExecution: ExecutionPlan | undefined;
+  let editApprovalMode: "auto" | "manual" = "auto";
+  let feedbackForExecution = "";
+  let useCheckpointLoop = false;
 
   if (opts.mode === "plan") {
+    if (isChitchat(task) || isVagueDeveloperTask(task)) {
+      return {
+        ok: true as const,
+        decisionMode: "chat" as const,
+        chatResponse: "That's a bit vague — what would you like me to change?",
+        patches: [],
+        filesModified: [],
+        iterCount: 0,
+        costUsd: 0,
+      } as unknown as LlmPatchFlowResult;
+    }
+
     const planUserApiKey =
       effectiveConfig.provider === "openai" ? effectiveConfig.openaiApiKey :
                                              effectiveConfig.anthropicApiKey;
@@ -80,42 +190,30 @@ export async function runOneShotInner(
       effort: effectiveConfig.effort,
     };
 
-    // Cache repoSummary + relevantFiles so feedback re-plans reuse them without re-investigation.
-    let planCtxRepoSummary = "";
-    let planCtxRelevantFiles: string[] = [];
-    let preGeneratedPlan: ExecutionPlan | undefined;
-    progressCallback({ stage: "plan_generation_started", progress: { type: "plan_generation_started", ts: Date.now(), runId, title: "Planning…" } } as unknown as LlmPatchProgressUpdate);
-    try {
-      const planCtx = await withRequestContext(planGenCtx, () =>
-        preparePlanContext({
-          task,
-          repoPath: effectiveConfig.repoPath,
-          userApiKey: planUserApiKey,
-          provider: effectiveConfig.provider,
-        })
-      );
-      planCtxRepoSummary = planCtx.projectSummary;
-      planCtxRelevantFiles = planCtx.relevantFilePaths;
+    const diskSettings = loadDiskModelSync(effectiveConfig.repoPath);
+    const planDepth = diskSettings?.planDepth ?? "quick";
 
-      const diskSettings = loadDiskModelSync(effectiveConfig.repoPath);
-      const planDepth = diskSettings?.planDepth ?? "investigate";
-
-      if (planDepth === "investigate") {
-        // Phase 2b: bounded read-only investigation → ExecutionPlan.
-        preGeneratedPlan = await withRequestContext(planGenCtx, () =>
-          runPlanInvestigation({
+    if (planDepth === "investigate" || planDepth === "strict") {
+      // Strict / legacy-investigate: staged-diff checkpoint (opt-in).
+      useCheckpointLoop = true;
+    } else {
+      // "quick" path: seed top-5 file bodies, generate plan, show PlanReadyModal.
+      let planCtxRepoSummary = "";
+      let planCtxRelevantFiles: string[] = [];
+      let preGeneratedPlan: ExecutionPlan | undefined;
+      progressCallback({ stage: "plan_generation_started", progress: { type: "plan_generation_started", ts: Date.now(), runId, title: "Planning…" } } as unknown as LlmPatchProgressUpdate);
+      try {
+        const planCtx = await withRequestContext(planGenCtx, () =>
+          preparePlanContext({
             task,
             repoPath: effectiveConfig.repoPath,
-            runId,
-            relevantFiles: planCtxRelevantFiles,
-            repoSummary: planCtxRepoSummary,
             userApiKey: planUserApiKey,
             provider: effectiveConfig.provider,
-            abortSignal: ac.signal,
-            progressCallback,
           })
         );
-      } else {
+        planCtxRepoSummary = planCtx.projectSummary;
+        planCtxRelevantFiles = planCtx.relevantFilePaths;
+
         // "quick" path: seed top-5 file bodies (Option B, Phase 2a).
         let seededFileContents: string | undefined;
         {
@@ -143,147 +241,221 @@ export async function runOneShotInner(
             seededFileContents,
           })
         );
+      } catch (e) {
+        if (e instanceof ProviderRequestError) throw e; // propagate to outer TUI/headless catch
+        if (e instanceof PlanRefusalError) throw e;     // propagate graceful decline to outer catch
+        debugLog("[zone-plan-gen-failed]", e instanceof Error ? e.message : String(e));
       }
-    } catch (e) { console.error("[zone-plan-gen-failed]", e); }
 
-    if (!preGeneratedPlan) {
-      progressCallback({
-        stage: "narration",
-        progress: {
-          type: "narration",
-          runId,
-          ts: Date.now(),
-          title: "Plan generation failed",
-          text: "Plan generation failed — cannot proceed in plan mode without a plan.",
-        },
-      });
-      ac.abort();
-      return { ok: false as const, reason: "plan_gen_failed" } as unknown as LlmPatchFlowResult;
-    }
-
-    // E8a: reproduce command did not run — premise unverified, do not fabricate a fix.
-    if (isCannotVerifyPlan(preGeneratedPlan)) {
-      progressCallback({
-        stage: "narration",
-        progress: {
-          type: "narration",
-          runId,
-          ts: Date.now(),
-          title: "Could not verify",
-          text: preGeneratedPlan.cannotVerifyReason ?? "Reproduce command did not run — premise unconfirmed.",
-        },
-      });
-      const result: LlmPatchFlowResult = { ok: false as const, reason: "could_not_verify" };
-      return result;
-    }
-
-    // E8b: premise verified false — investigation confirmed no problem exists.
-    if (isNoChangePlan(preGeneratedPlan)) {
-      progressCallback({
-        stage: "narration",
-        progress: {
-          type: "narration",
-          runId,
-          ts: Date.now(),
-          title: "Nothing to fix",
-          text: preGeneratedPlan.noChangeReason ?? "Build verified clean — no changes needed.",
-        },
-      });
-      const result: LlmPatchFlowResult = { ok: false as const, reason: "no_change_needed" };
-      return result;
-    }
-
-    if (process.env["ZONE_PLAN_LEGACY_AUDIT"] === "1") {
-      // Legacy escape hatch: old forced-audit + PlanModal A/R path.
-      const auditResult = await runAuditPipeline({
-        task,
-        repoPath: effectiveConfig.repoPath,
-        runId,
-        tier: "medium",
-        auditMode: readAuditModeSetting(),
-        forceAudit: true,
-        preGeneratedPlan,
-        userApiKey: planUserApiKey,
-        provider: effectiveConfig.provider,
-        emit: (update) => progressCallback(update as unknown as LlmPatchProgressUpdate),
-        abortSignal: ac.signal,
-        timeoutMs: 10 * 60 * 1000,
-        autoApprove: false,
-        isHeadless: false,
-      });
-      if (auditResult.revisionDecision === "reject") {
-        ac.abort();
-        return { ok: false as const, reason: "plan_rejected_by_user" } as unknown as LlmPatchFlowResult;
-      }
-      // On approve: thread preGeneratedPlan so it reaches runLlmPatchFlow.
-      planForExecution = preGeneratedPlan;
-    } else if (preGeneratedPlan) {
-      // Default: cheap requestPlanApproval loop with feedback/refine/approve_with_feedback.
-      let currentPlan = preGeneratedPlan;
-      let looping = true;
-      while (looping) {
-        const result = await requestPlanApproval({
-          proposal: {
+      if (!preGeneratedPlan) {
+        progressCallback({
+          stage: "narration",
+          progress: {
+            type: "narration",
             runId,
-            planId: randomUUID(),
-            objective: currentPlan.objective,
-            steps: currentPlan.steps,
-            scopeNotes: currentPlan.scopeNotes,
+            ts: Date.now(),
+            title: "Plan generation failed",
+            text: "Plan generation failed — cannot proceed in plan mode without a plan.",
           },
-          emit: (evt) => progressCallback({ stage: evt.type, progress: evt } as unknown as LlmPatchProgressUpdate),
-          abortSignal: ac.signal,
-          autoApprove: effectiveConfig.autoApprove,
         });
-        switch (result.decision) {
-          case "reject":
-          case "timeout":
-            ac.abort();
-            return { ok: false as const, reason: "plan_rejected_by_user" } as unknown as LlmPatchFlowResult;
-          case "feedback":
-          case "refine":
-            progressCallback({ stage: "plan_generation_started", progress: { type: "plan_generation_started", ts: Date.now(), runId, title: "Replanning…" } } as unknown as LlmPatchProgressUpdate);
-            try {
-              currentPlan = await withRequestContext(planGenCtx, () =>
-                generateExecutionPlan({
-                  task,
-                  repoSummary: planCtxRepoSummary,
-                  relevantFiles: planCtxRelevantFiles,
-                  userApiKey: planUserApiKey,
-                  provider: effectiveConfig.provider,
-                  previousPlan: currentPlan,
-                  userFeedback: result.feedback,
-                })
-              );
-            } catch (e) { console.error("[zone-plan-replan-failed]", e); }
-            continue;
-          case "approve_with_feedback":
-            progressCallback({ stage: "plan_generation_started", progress: { type: "plan_generation_started", ts: Date.now(), runId, title: "Replanning…" } } as unknown as LlmPatchProgressUpdate);
-            try {
-              currentPlan = await withRequestContext(planGenCtx, () =>
-                generateExecutionPlan({
-                  task,
-                  repoSummary: planCtxRepoSummary,
-                  relevantFiles: planCtxRelevantFiles,
-                  userApiKey: planUserApiKey,
-                  provider: effectiveConfig.provider,
-                  previousPlan: currentPlan,
-                  userFeedback: result.feedback,
-                })
-              );
-            } catch (e) { console.error("[zone-plan-replan-failed]", e); }
-            looping = false;
-            break;
-          case "accept_all":
-            setTrustAllForRun(runId);
-            looping = false;
-            break;
-          case "manual":
-          default:
-            looping = false;
+        ac.abort();
+        return { ok: false as const, reason: "plan_gen_failed" } as unknown as LlmPatchFlowResult;
+      }
+
+      // E8a: reproduce command did not run — premise unverified, do not fabricate a fix.
+      // Gate: only honor for tasks that assert a pre-existing problem (fix/debug).
+      // Additive tasks (create/add/refactor) must never be verdict-killed here.
+      if (taskAssertsProblem(task) && isCannotVerifyPlan(preGeneratedPlan)) {
+        progressCallback({
+          stage: "narration",
+          progress: {
+            type: "narration",
+            runId,
+            ts: Date.now(),
+            title: "Could not verify",
+            text: preGeneratedPlan.cannotVerifyReason ?? "Reproduce command did not run — premise unconfirmed.",
+          },
+        });
+        const result: LlmPatchFlowResult = { ok: false as const, reason: "could_not_verify" };
+        return result;
+      }
+
+      // E8b: premise verified false — investigation confirmed no problem exists.
+      // Gate: same — only honor for problem-asserting tasks.
+      if (taskAssertsProblem(task) && isNoChangePlan(preGeneratedPlan)) {
+        progressCallback({
+          stage: "narration",
+          progress: {
+            type: "narration",
+            runId,
+            ts: Date.now(),
+            title: "Nothing to fix",
+            text: preGeneratedPlan.noChangeReason ?? "Build verified clean — no changes needed.",
+          },
+        });
+        const result: LlmPatchFlowResult = { ok: false as const, reason: "no_change_needed" };
+        return result;
+      }
+
+      // Safety net: a non-problem task whose plan returned empty steps must still reach the modal.
+      if (preGeneratedPlan.steps.length === 0) {
+        try {
+          preGeneratedPlan = await withRequestContext(planGenCtx, () =>
+            generateExecutionPlan({
+              task,
+              repoSummary: planCtxRepoSummary,
+              relevantFiles: planCtxRelevantFiles,
+              userApiKey: planUserApiKey,
+              provider: effectiveConfig.provider,
+              forceSteps: true,
+            })
+          );
+        } catch (e) { debugLog("[zone-plan-force-steps-failed]", e instanceof Error ? e.message : String(e)); }
+        if (preGeneratedPlan.steps.length === 0) {
+          preGeneratedPlan = synthesizeMinimalPlan(task, planCtxRelevantFiles);
         }
       }
-      planForExecution = currentPlan;
+
+      // Merge explicit path tokens from the task text into steps[0].filesLikely as a scopeGuard floor.
+      if (!taskAssertsProblem(task)) {
+        const taskPathTokens = [...task.matchAll(/\b[\w./][\w./-]*\.\w{2,5}\b/g)].map(m => m[0]);
+        if (taskPathTokens.length > 0 && preGeneratedPlan.steps.length > 0) {
+          const step0 = preGeneratedPlan.steps[0]!;
+          const merged = [...new Set([...step0.filesLikely, ...taskPathTokens])];
+          preGeneratedPlan = {
+            ...preGeneratedPlan,
+            steps: [{ ...step0, filesLikely: merged }, ...preGeneratedPlan.steps.slice(1)],
+          };
+        }
+      }
+
+      if (process.env["ZONE_PLAN_LEGACY_AUDIT"] === "1") {
+        // Legacy escape hatch: old forced-audit + PlanModal A/R path.
+        const auditResult = await runAuditPipeline({
+          task,
+          repoPath: effectiveConfig.repoPath,
+          runId,
+          tier: "medium",
+          auditMode: readAuditModeSetting(),
+          forceAudit: true,
+          preGeneratedPlan,
+          userApiKey: planUserApiKey,
+          provider: effectiveConfig.provider,
+          emit: (update) => progressCallback(update as unknown as LlmPatchProgressUpdate),
+          abortSignal: ac.signal,
+          timeoutMs: 10 * 60 * 1000,
+          autoApprove: false,
+          isHeadless: false,
+        });
+        if (auditResult.revisionDecision === "reject") {
+          ac.abort();
+          return { ok: false as const, reason: "plan_rejected_by_user" } as unknown as LlmPatchFlowResult;
+        }
+        // On approve: thread preGeneratedPlan so it reaches runLlmPatchFlow.
+        planForExecution = preGeneratedPlan;
+      } else if (preGeneratedPlan) {
+        // Default: cheap requestPlanApproval loop with feedback/refine/approve_with_feedback.
+        let currentPlan = preGeneratedPlan;
+        let looping = true;
+        let planFirstRefineCount = 0;
+        while (looping) {
+          const result = await requestPlanApproval({
+            proposal: {
+              runId,
+              planId: randomUUID(),
+              objective: currentPlan.objective,
+              steps: currentPlan.steps,
+              scopeNotes: currentPlan.scopeNotes,
+            },
+            emit: (evt) => progressCallback({ stage: evt.type, progress: evt } as unknown as LlmPatchProgressUpdate),
+            abortSignal: ac.signal,
+            autoApprove: effectiveConfig.autoApprove,
+          });
+          switch (result.decision) {
+            case "reject":
+            case "timeout":
+              debugLog("[zone-plan-decision]", { mode: "plan-first", decision: result.decision, refineCount: planFirstRefineCount });
+              ac.abort();
+              return { ok: false as const, reason: "plan_rejected_by_user" } as unknown as LlmPatchFlowResult;
+            case "feedback":
+            case "refine":
+              progressCallback({ stage: "plan_generation_started", progress: { type: "plan_generation_started", ts: Date.now(), runId, title: "Replanning…" } } as unknown as LlmPatchProgressUpdate);
+              try {
+                currentPlan = await withRequestContext(planGenCtx, () =>
+                  generateExecutionPlan({
+                    task,
+                    repoSummary: planCtxRepoSummary,
+                    relevantFiles: planCtxRelevantFiles,
+                    userApiKey: planUserApiKey,
+                    provider: effectiveConfig.provider,
+                    previousPlan: currentPlan,
+                    userFeedback: result.feedback,
+                    abortSignal: ac.signal,
+                  })
+                );
+                if (result.feedback?.trim()) {
+                  feedbackForExecution = feedbackForExecution
+                    ? `${feedbackForExecution}\n${result.feedback.trim()}`
+                    : result.feedback.trim();
+                }
+              } catch (e) {
+                debugLog("[zone-plan-replan-failed]", e instanceof Error ? e.message : String(e));
+                progressCallback({ stage: "narration", progress: { type: "narration", ts: Date.now(), runId, title: "Re-planning failed — continuing with the previous plan outline. Your feedback will still be applied during execution." } } as unknown as LlmPatchProgressUpdate);
+              }
+              planFirstRefineCount++;
+              continue;
+            case "approve_with_feedback":
+              progressCallback({ stage: "plan_generation_started", progress: { type: "plan_generation_started", ts: Date.now(), runId, title: "Replanning…" } } as unknown as LlmPatchProgressUpdate);
+              try {
+                currentPlan = await withRequestContext(planGenCtx, () =>
+                  generateExecutionPlan({
+                    task,
+                    repoSummary: planCtxRepoSummary,
+                    relevantFiles: planCtxRelevantFiles,
+                    userApiKey: planUserApiKey,
+                    provider: effectiveConfig.provider,
+                    previousPlan: currentPlan,
+                    userFeedback: result.feedback,
+                    abortSignal: ac.signal,
+                  })
+                );
+                if (result.feedback?.trim()) {
+                  feedbackForExecution = feedbackForExecution
+                    ? `${feedbackForExecution}\n${result.feedback.trim()}`
+                    : result.feedback.trim();
+                }
+              } catch (e) {
+                debugLog("[zone-plan-replan-failed]", e instanceof Error ? e.message : String(e));
+                progressCallback({ stage: "narration", progress: { type: "narration", ts: Date.now(), runId, title: "Re-planning failed — continuing with the previous plan outline. Your feedback will still be applied during execution." } } as unknown as LlmPatchProgressUpdate);
+              }
+              debugLog("[zone-plan-decision]", { mode: "plan-first", decision: "approve_with_feedback", refineCount: planFirstRefineCount });
+              looping = false;
+              break;
+            case "accept_all":
+              setTrustAllForRun(runId);
+              debugLog("[zone-plan-decision]", { mode: "plan-first", decision: "accept_all", refineCount: planFirstRefineCount });
+              looping = false;
+              break;
+            case "manual":
+              editApprovalMode = "manual";
+              debugLog("[zone-plan-decision]", { mode: "plan-first", decision: "manual", refineCount: planFirstRefineCount });
+              looping = false;
+              break;
+            default:
+              debugLog("[zone-plan-decision]", { mode: "plan-first", decision: result.decision ?? "unknown", refineCount: planFirstRefineCount });
+              looping = false;
+          }
+        }
+        planForExecution = currentPlan;
+      }
     }
+  }
+
+  // Close the gap between plan_ready_for_approval SPINNER_STOP and
+  // agent_loop_start SPINNER_START: show a "Working…" spinner while
+  // classifyTask / scanRepo / ranking runs before the agent loop starts.
+  if (planForExecution) {
+    progressCallback({ stage: "plan_generation_started", progress: { type: "plan_generation_started", ts: Date.now(), runId, title: "Working…" } } as unknown as LlmPatchProgressUpdate);
   }
 
   // Only register an internal SIGINT handler when caller doesn't manage AbortController.
@@ -303,14 +475,77 @@ export async function runOneShotInner(
       effectiveConfig.provider === "openai" ? effectiveConfig.openaiApiKey :
                                              effectiveConfig.anthropicApiKey;
 
+    if (useCheckpointLoop) {
+      // R3 Stage 2b: investigate path — run straight to execution with staged-checkpoint seam.
+      const REFINE_RESTAGE_ITER_CAP = 6;
+      let refineFeedback = "";
+      let restageSeed: Map<string, string> | undefined;
+      let refineTask = task;
+      let strictRefineCount = 0;
+      for (;;) {
+        const result = await withRequestContext(
+          {
+            userApiKey,
+            provider: effectiveConfig.provider,
+            modelOverride: { high: effectiveConfig.model, standard: effectiveConfig.model },
+            effort: effectiveConfig.effort,
+          },
+          () => runLlmPatchFlow({
+            task: refineTask,
+            repoPath: effectiveConfig.repoPath,
+            runId,
+            conversationId: opts.conversationId,
+            onProgress: progressCallback,
+            abortSignal: ac.signal,
+            userApiKey,
+            provider: effectiveConfig.provider,
+            forceTier: effectiveConfig.forceTier,
+            mode: "patch",
+            summaryFormat: effectiveConfig.summaryFormat,
+            priorSessionSummary: opts.priorSessionSummary,
+            webSearchEnabled: effectiveConfig.webSearchEnabled,
+            stagedCheckpoint: true,
+            // Non-TTY (headless) has no StagedDiffModal — auto-approve to prevent hang.
+            autoApprove: effectiveConfig.autoApprove || process.stdout.isTTY !== true,
+            ...(restageSeed !== undefined ? { restageSeed, maxIterationsOverride: REFINE_RESTAGE_ITER_CAP } : {}),
+          })
+        );
+        if (!result.ok) {
+          const failResult = result as { ok: false; reason: string; refineFeedback?: string; discardedStaging?: Map<string, string> };
+          if (failResult.reason === "staged_refine_requested") {
+            const fb = failResult.refineFeedback ?? "";
+            refineFeedback = refineFeedback ? `${refineFeedback}\n${fb}` : fb;
+            restageSeed = failResult.discardedStaging;
+            refineTask = refineFeedback
+              ? `${task}\n\nUSER REFINEMENT (overrides any conflicting detail above):\n${refineFeedback}`
+              : task;
+            strictRefineCount++;
+            continue;
+          }
+          if (failResult.reason === "staged_rejected") {
+            debugLog("[zone-plan-decision]", { mode: "strict", decision: "reject", refineCount: strictRefineCount });
+            ac.abort();
+            return { ok: false as const, reason: "plan_rejected_by_user" } as unknown as LlmPatchFlowResult;
+          }
+        }
+        debugLog("[zone-plan-decision]", { mode: "strict", decision: "approve", refineCount: strictRefineCount });
+        return result;
+      }
+    }
+
+    const effectiveTask = feedbackForExecution
+      ? `${task}\n\nUSER REFINEMENT (overrides any conflicting detail above):\n${feedbackForExecution}`
+      : task;
+
     const result = await withRequestContext(
       {
+        userApiKey,
         provider: effectiveConfig.provider,
         modelOverride: { high: effectiveConfig.model, standard: effectiveConfig.model },
         effort: effectiveConfig.effort,
       },
       () => runLlmPatchFlow({
-        task,
+        task: effectiveTask,
         repoPath: effectiveConfig.repoPath,
         runId,
         conversationId: opts.conversationId,
@@ -324,6 +559,8 @@ export async function runOneShotInner(
         summaryFormat: effectiveConfig.summaryFormat,
         priorSessionSummary: opts.priorSessionSummary,
         webSearchEnabled: effectiveConfig.webSearchEnabled,
+        editApprovalMode,
+        showPostFlushDiffs: !!planForExecution,
       })
     );
 
@@ -333,6 +570,9 @@ export async function runOneShotInner(
     rejectPendingApprovalsForRun(runId);
     rejectPendingRevisionsForRun(runId);
     rejectPendingPlansForRun(runId);
+    rejectPendingEditsForRun(runId);
+    rejectPendingTrustForRun(runId);
+    rejectPendingStagedForRun(runId);
     clearTrustedCommandsForRun(runId);
     spinner.stop();
   }
@@ -410,6 +650,16 @@ export async function runHeadless(
       result = await runOneShotInner(task, config, runId);
     }
   } catch (err) {
+    if (err instanceof ProviderRequestError) {
+      if (isJson) process.stdout.write(JSON.stringify({ success: false, exit_code: 1, error_kind: err.kind, error: err.userMessage }) + "\n");
+      else process.stderr.write(`\nerror: ${err.userMessage}\n`);
+      process.exit(1);
+    }
+    if (err instanceof PlanRefusalError) {
+      if (isJson) process.stdout.write(JSON.stringify({ success: false, exit_code: 1, reason: "plan_refusal", message: err.declineReason, cost_usd: err.costUsd }) + "\n");
+      else process.stderr.write(`\nPlan declined: ${err.declineReason}\n`);
+      process.exit(1);
+    }
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("AbortError") || msg.includes("aborted")) {
       if (isJson) process.stdout.write(JSON.stringify({ success: false, exit_code: 130, error: "aborted" }) + "\n");

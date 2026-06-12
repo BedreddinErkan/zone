@@ -1,8 +1,20 @@
 import path from "node:path";
 import { parseTscErrorPreview, buildApplyRolledBackMessage } from "../applyRollbackFeedback.js";
-import { finalizeStaging, buildVerificationWarningsMessage } from "./staging.js";
+import { finalizeStaging, buildVerificationWarningsMessage, type StagingVerification } from "./staging.js";
 import { classifyVerificationResult } from "./classify.js";
+import { buildStagedDiffs } from "../../core/fileDiff.js";
 import type { VerifyOutcome, VerifyDetail, VerifyAndFinalizeInput } from "./types.js";
+
+// Pure helper: converts a StagingVerification result to a human-readable modal header.
+function summarizeVerification(verification: StagingVerification): string {
+  if (verification.status === "skipped") return "no verification";
+  if (verification.status === "pass") return `${verification.label} ✓`;
+  // fail
+  if (verification.regressed === false) return "pre-existing errors only";
+  const post = verification.postErrorCount ?? "?";
+  const base = verification.baselineErrorCount ?? "?";
+  return `⚠ ${post} new errors (baseline ${base})`;
+}
 
 export async function verifyAndFinalize(input: VerifyAndFinalizeInput): Promise<VerifyOutcome> {
   if (!input.ownsStagingFiles) {
@@ -15,7 +27,41 @@ export async function verifyAndFinalize(input: VerifyAndFinalizeInput): Promise<
     framework: input.framework,
     withStagingTempFlush: input.withStagingTempFlush,
     verifyMode: input.verifyMode,
+    onPreFlushDiffs: input.onPreFlushDiffs,
+    beforeFlush: input.stagedCheckpointHandler
+      ? async ({ stagingFiles, repoPath, verification }) => {
+          const files = buildStagedDiffs(stagingFiles, repoPath);
+          const vSummary = summarizeVerification(verification);
+          const { decision, feedback } = await input.stagedCheckpointHandler!.run({
+            files,
+            verificationSummary: vSummary,
+            trigger: input.trigger ?? "natural_completion",
+          });
+          if (decision === "reject") return { action: "discard" };
+          if (decision === "refine") return { action: "refine", feedback };
+          if (decision === "manual") {
+            for (const f of files) {
+              const ok = await input.stagedCheckpointHandler!.approveFile(f.path);
+              if (!ok) stagingFiles.delete(path.resolve(repoPath, f.path));
+            }
+            return { action: "flush" };
+          }
+          return { action: "flush" };  // approve_all or timeout
+        }
+      : undefined,
   });
+
+  // R3 checkpoint outcomes — map before the normal flush-case classification below.
+  if (finalizeResult.checkpoint?.decision === "discard") {
+    return { kind: "rejected" };
+  }
+  if (finalizeResult.checkpoint?.decision === "refine") {
+    return {
+      kind: "refine_requested",
+      feedback: finalizeResult.checkpoint.feedback,
+      discardedStaging: finalizeResult.discardedStaging ?? new Map(),
+    };
+  }
 
   const vr = finalizeResult.verification;
 
@@ -66,8 +112,6 @@ export async function verifyAndFinalize(input: VerifyAndFinalizeInput): Promise<
   }
 
   // A non-zero exit with zero counted diagnostics is not a real regression
-  // (e.g. tsc emitted its usage banner because no tsconfig/inputs resolved in a
-  // monorepo). Never surface "new errors detected" when the count is 0.
   if ((vr.postErrorCount ?? 0) === 0) {
     return { kind: "applied", verification: detail, filesFlushed: finalizeResult.filesFlushed };
   }

@@ -28,6 +28,10 @@ function getSupabaseClient(): SupabaseClient | null {
   return createClient(url, key);
 }
 
+export function isEmbeddingBackendAvailable(): boolean {
+  return !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+}
+
 function vectorToLiteral(values: number[]): string {
   return `[${values.map((value) => Number(value)).join(",")}]`;
 }

@@ -89,6 +89,7 @@ export async function scanRepo(targetPath: string): Promise<RepoFile[]> {
       cwd: targetPath,
       onlyFiles: true,
       dot: false,
+      suppressErrors: true,
       ignore: [
         "**/node_modules/**",
         "**/dist/**",

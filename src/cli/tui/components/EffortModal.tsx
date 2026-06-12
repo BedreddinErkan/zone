@@ -2,7 +2,7 @@ import { Box, Text, useInput } from "ink";
 import type { Dispatch } from "react";
 import { useStore } from "../store.js";
 import type { StoreAction } from "../store.js";
-import { supportsEffort, getDefaultModelId } from "../../../llm/modelRegistry.js";
+import { supportsEffort, getDefaultModelId, effortLevelsFor } from "../../../llm/modelRegistry.js";
 import type { EffortLevel } from "../../../llm/modelRegistry.js";
 import { saveDiskModel } from "../../../api/diskModel.js";
 
@@ -10,11 +10,12 @@ interface Props {
   dispatch: Dispatch<StoreAction>;
 }
 
-const EFFORTS: EffortLevel[] = ["low", "medium", "high"];
-const EFFORT_LABELS: Record<EffortLevel, string> = {
-  low: "Low — Faster, less deliberation",
+const ALL_EFFORT_LABELS: Record<EffortLevel, string> = {
+  low:   "Low — Faster, less deliberation",
   medium: "Medium — Balanced (default)",
-  high: "High — Slower, deeper analysis",
+  high:  "High — Slower, deeper analysis",
+  xhigh: "XHigh — Extended reasoning (Opus/Fable only)",
+  max:   "Max — Maximum reasoning budget",
 };
 
 export function EffortModal({ dispatch }: Props): React.ReactElement {
@@ -22,6 +23,7 @@ export function EffortModal({ dispatch }: Props): React.ReactElement {
   const sel = state.effortSelectedIndex;
   const currentModel = state.modelSettings?.model ?? getDefaultModelId();
   const modelSupports = supportsEffort(currentModel);
+  const EFFORTS = effortLevelsFor(currentModel);
 
   useInput((_input, key) => {
     if (key.escape) {
@@ -61,7 +63,7 @@ export function EffortModal({ dispatch }: Props): React.ReactElement {
         const marker = currentEffort === effort ? "(•)" : "( )";
         return (
           <Box key={effort} backgroundColor={selected ? "blue" : undefined}>
-            <Text color={selected ? "white" : undefined}>   {marker} {EFFORT_LABELS[effort]}</Text>
+            <Text color={selected ? "white" : undefined}>   {marker} {ALL_EFFORT_LABELS[effort]}</Text>
           </Box>
         );
       })}

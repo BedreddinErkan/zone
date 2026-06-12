@@ -77,8 +77,6 @@ const schemaAwareSummary = (input.schemaAwareSummary ?? [])
 
   const rawText = response.choices[0]?.message?.content ?? "";
 
-  console.log("\n=== RAW MODEL OUTPUT ===");
-  console.log(rawText);
   const jsonText = extractJson(rawText);
   const parsed = JSON.parse(stripJsonFences(jsonText));
 

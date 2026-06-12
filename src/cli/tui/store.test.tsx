@@ -232,6 +232,24 @@ describe("buildInitialState", () => {
     const state = buildInitialState({ model: "m", capUsd: 10 });
     expect(state.userCommands).toEqual([]);
   });
+
+  it("seeds mode from initialValues (--permission-mode plan path)", () => {
+    expect(buildInitialState({ model: "m", capUsd: 10, mode: "plan" }).mode).toBe("plan");
+  });
+
+  it("defaults mode to 'normal' when not provided", () => {
+    expect(buildInitialState({ model: "m", capUsd: 10 }).mode).toBe("normal");
+  });
+});
+
+describe("PLAN_READY_RESOLVED (sticky plan mode)", () => {
+  it("keeps state.mode and clears the proposal/modal", () => {
+    const s0 = { ...buildInitialState({ model: "m", capUsd: 10, mode: "plan" }), modalView: "plan_ready" as const };
+    const s1 = reducer(s0, { type: "PLAN_READY_RESOLVED" });
+    expect(s1.mode).toBe("plan");
+    expect(s1.planReadyProposal).toBeNull();
+    expect(s1.modalView).toBe("none");
+  });
 });
 
 describe("TRANSCRIPT_REMOUNT", () => {
@@ -386,6 +404,57 @@ describe("TODOS_SET / TODO_STATUS_SET", () => {
     const next = reducer(s, { type: "TRANSCRIPT_CLEAR" });
     expect(next.todos).toEqual([]);
     expect(next.transcript).toEqual([]);
+  });
+});
+
+describe("SPINNER_START / SPINNER_UPDATE / SPINNER_STOP", () => {
+  it("SPINNER_START sets active=true with label and transitions runState to running", () => {
+    const s0 = initialState();
+    const s1 = reducer(s0, { type: "SPINNER_START", label: "Planning…" });
+    expect(s1.spinner).toEqual({ active: true, label: "Planning…" });
+    expect(s1.runState).toBe("running");
+  });
+
+  it("SPINNER_UPDATE updates label and keeps active=true", () => {
+    const s0 = reducer(initialState(), { type: "SPINNER_START", label: "Planning…" });
+    const s1 = reducer(s0, { type: "SPINNER_UPDATE", label: "Working…" });
+    expect(s1.spinner).toEqual({ active: true, label: "Working…" });
+  });
+
+  it("SPINNER_STOP clears spinner to null", () => {
+    const s0 = reducer(initialState(), { type: "SPINNER_START", label: "Planning…" });
+    const s1 = reducer(s0, { type: "SPINNER_STOP" });
+    expect(s1.spinner).toBeNull();
+  });
+
+  it("mid-run SPINNER_START preserves original runStartMs", () => {
+    const s0 = reducer(initialState(), { type: "SPINNER_START", label: "Planning…" });
+    const originalStart = s0.runStartMs;
+    const s1 = reducer(s0, { type: "SPINNER_START", label: "Starting…" });
+    expect(s1.spinner).toEqual({ active: true, label: "Starting…" });
+    expect(s1.runStartMs).toBe(originalStart);
+  });
+});
+
+describe("RUN_FAILED", () => {
+  it("sets runState to 'failed', clears spinner and currentToolCall, records runEndMs", () => {
+    const s0 = reducer(initialState(), { type: "SPINNER_START", label: "Working…" });
+    expect(s0.runState).toBe("running");
+    const before = Date.now();
+    const s1 = reducer(s0, { type: "RUN_FAILED" });
+    const after = Date.now();
+    expect(s1.runState).toBe("failed");
+    expect(s1.spinner).toBeNull();
+    expect(s1.liveTail.currentToolCall).toBeNull();
+    expect(s1.runEndMs).toBeGreaterThanOrEqual(before);
+    expect(s1.runEndMs).toBeLessThanOrEqual(after);
+  });
+
+  it("'failed' is a valid terminal state distinct from 'done' and 'aborted'", () => {
+    const s = reducer(initialState(), { type: "RUN_FAILED" });
+    expect(s.runState).toBe("failed");
+    expect(s.runState).not.toBe("done");
+    expect(s.runState).not.toBe("aborted");
   });
 });
 

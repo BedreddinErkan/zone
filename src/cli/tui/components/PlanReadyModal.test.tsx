@@ -49,6 +49,23 @@ describe("PlanReadyModal — normal mode", () => {
     expect(frame).toContain("Ready to code?");
     expect(frame).toContain("Add a login feature");
     expect(frame).toContain("Add login route");
+    expect(frame).toContain("Create the route");
+  });
+
+  it("truncates long step description at 200 chars", () => {
+    const longDesc = "x".repeat(250);
+    const proposal = {
+      ...PROPOSAL,
+      steps: [{ title: "Long step", description: longDesc, filesLikely: [] }],
+    };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    // Count occurrences of "x" — robust to line-wrapping by Ink
+    const xCount = (frame.match(/x/g) ?? []).length;
+    expect(xCount).toBe(200);
   });
 
   it("renders footer with 4 numbered actions and no (stub) labels", () => {

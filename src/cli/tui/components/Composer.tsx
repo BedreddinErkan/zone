@@ -1,5 +1,5 @@
 import { Box, Text, useInput, usePaste, useStdout } from "ink";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import fg from "fast-glob";
 import { useStore } from "../store.js";
 import { loadDiskTrust } from "../../../api/diskTrust.js";
@@ -16,6 +16,7 @@ const MAX_HISTORY = 50;
 interface ComposerProps {
   onSubmit: (text: string, ac: AbortController) => void;
   onExit: () => void;
+  onInitStart?: (ac: AbortController) => void;
   getCommitData?: () => { filePaths: string[]; message: string; repoPath: string } | null;
 }
 
@@ -35,8 +36,9 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/init",       desc: "Scaffold .zone/memory.md by analyzing repo" },
   { name: "/memory",     desc: "Show .zone/memory.md" },
   { name: "/model",      desc: "Choose AI model" },
-  { name: "/effort",     desc: "Set reasoning effort (low/medium/high)" },
+  { name: "/effort",     desc: "Set reasoning effort (model-dependent: low → max)" },
   { name: "/summary",   desc: "Set summary format (compact/detailed)" },
+  { name: "/plan-mode", desc: "Set plan depth (quick/investigate)" },
   { name: "/session",   desc: "Toggle session memory (off/on)" },
   { name: "/metrics",   desc: "View run telemetry KPIs" },
   { name: "/limits",   desc: "Set daily USD cap" },
@@ -54,11 +56,35 @@ const HELP_LINES = [
   "  ↑/↓         navigate history (when input empty)",
   "  ←/→ Home End  cursor movement",
   "Slash commands:",
-  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init  /memory  /model  /effort  /summary  /session  /metrics  /limits  /commit  /autocommit  /websearch",
+  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init  /memory  /model  /effort  /summary  /plan-mode  /session  /metrics  /limits  /commit  /autocommit  /websearch",
 ];
 
-function renderBuffer(buf: string, pos: number): string {
-  return buf.slice(0, pos) + "▋" + buf.slice(pos);
+const PUA_BASE = 0xe000;
+/** @internal exported for tests */
+export const PUA_STRIP_RE = /[\uE000-\uF8FF]/g;
+const PASTE_THRESHOLD_LINES = 6;
+const PASTE_THRESHOLD_BYTES = 400;
+
+type PasteEntry = { num: number; fullText: string; lines: number };
+
+/** @internal exported for tests */
+export function chipLabel(entry: PasteEntry): string {
+  return `[Pasted text #${entry.num} +${entry.lines} lines]`;
+}
+
+/** @internal exported for tests */
+export function expandSentinels(buf: string, sideMap: Map<string, PasteEntry>): string {
+  let result = "";
+  for (const ch of buf) {
+    const entry = sideMap.get(ch);
+    result += entry ? chipLabel(entry) : ch;
+  }
+  return result;
+}
+
+/** @internal exported for tests */
+export function renderBuffer(buf: string, pos: number, sideMap: Map<string, PasteEntry>): string {
+  return expandSentinels(buf.slice(0, pos), sideMap) + "▋" + expandSentinels(buf.slice(pos), sideMap);
 }
 
 interface PaletteProps {
@@ -81,7 +107,7 @@ function SlashCommandPalette({ commands, selectedIdx }: PaletteProps): React.Rea
   );
 }
 
-export function Composer({ onSubmit, onExit, getCommitData }: ComposerProps): React.ReactElement {
+export function Composer({ onSubmit, onExit, onInitStart, getCommitData }: ComposerProps): React.ReactElement {
   const { state, dispatch } = useStore();
   const { stdout } = useStdout();
   const disabled = state.runState === "running";
@@ -114,6 +140,8 @@ export function Composer({ onSubmit, onExit, getCommitData }: ComposerProps): Re
   const [paletteIdx, setPaletteIdx] = useState(0);
   const [atFiles, setAtFiles] = useState<string[]>([]);
   const [atIdx, setAtIdx] = useState(0);
+  const sideMapRef = useRef<Map<string, PasteEntry>>(new Map());
+  const pasteCounterRef = useRef(1);
 
   const atPaletteOpen = buffer.startsWith("@") && !buffer.slice(1).includes(" ");
   const paletteOpen = buffer.startsWith("/");
@@ -200,7 +228,11 @@ export function Composer({ onSubmit, onExit, getCommitData }: ComposerProps): Re
           dispatch({ type: "USER_PROMPT", text: "Cannot /init while a run is in progress." });
           break;
         }
-        void runInit(process.cwd(), dispatch);
+        {
+          const ac = new AbortController();
+          onInitStart?.(ac);
+          void runInit(process.cwd(), dispatch, ac);
+        }
         break;
       case "/memory":
         void readMemoryAndShow(process.cwd(), dispatch);
@@ -225,6 +257,13 @@ export function Composer({ onSubmit, onExit, getCommitData }: ComposerProps): Re
           break;
         }
         dispatch({ type: "SUMMARY_MODAL_OPEN" });
+        break;
+      case "/plan-mode":
+        if (disabled) {
+          dispatch({ type: "USER_PROMPT", text: "Cannot change /plan-mode while a run is in progress." });
+          break;
+        }
+        dispatch({ type: "PLANMODE_MODAL_OPEN" });
         break;
       case "/session":
         if (disabled) {
@@ -295,19 +334,27 @@ export function Composer({ onSubmit, onExit, getCommitData }: ComposerProps): Re
     const trimmed = text.trim();
     if (!trimmed) return;
 
-    // Push to history (dedupe consecutive identical entries)
+    // Single positional pass — expand sentinels to full text; never re-scans emitted content.
+    let agentText = "";
+    for (const ch of trimmed) {
+      const entry = sideMapRef.current.get(ch);
+      agentText += entry ? entry.fullText : ch;
+    }
+
     setHistory((prev) => {
-      const next = prev[0] === trimmed ? prev : [trimmed, ...prev].slice(0, MAX_HISTORY);
+      const next = prev[0] === agentText ? prev : [agentText, ...prev].slice(0, MAX_HISTORY);
       return next;
     });
     setHistoryIdx(-1);
 
-    dispatch({ type: "USER_PROMPT", text: trimmed });
+    dispatch({ type: "USER_PROMPT", text: agentText });
     setBuffer("");
     setCursorPos(0);
+    sideMapRef.current.clear();
+    pasteCounterRef.current = 1;
 
     const ac = new AbortController();
-    onSubmit(trimmed, ac);
+    onSubmit(agentText, ac);
   }
 
   useInput((input, key) => {
@@ -471,24 +518,44 @@ export function Composer({ onSubmit, onExit, getCommitData }: ComposerProps): Re
     // Printable character input — handles single keypresses and multi-char pastes.
     // charCodeAt(0) >= 32 excludes control chars; ctrl/meta guard excludes chords.
     if (input && !key.ctrl && !key.meta && input.charCodeAt(0) >= 32) {
-      const newBuf = buffer.slice(0, cursorPos) + input + buffer.slice(cursorPos);
-      setBuffer(newBuf);
-      setCursorPos(cursorPos + input.length);
-      setHistoryIdx(-1);
-      if (paletteOpen) setPaletteIdx(0);
+      const cleaned = input.replace(PUA_STRIP_RE, "");
+      if (cleaned) {
+        const newBuf = buffer.slice(0, cursorPos) + cleaned + buffer.slice(cursorPos);
+        setBuffer(newBuf);
+        setCursorPos(cursorPos + cleaned.length);
+        setHistoryIdx(-1);
+        if (paletteOpen) setPaletteIdx(0);
+      }
     }
   });
 
   usePaste((text) => {
     if (state.pendingApproval !== null || state.modalView !== "none") return;
     if (disabled && !(buffer.startsWith("/") || (!buffer && text.startsWith("/")))) return;
-    const newBuf = buffer.slice(0, cursorPos) + text + buffer.slice(cursorPos);
-    setBuffer(newBuf);
-    setCursorPos(cursorPos + text.length);
+
+    const lines = text.split("\n").length;
+    const bytes = Buffer.byteLength(text);
+
+    if (lines >= PASTE_THRESHOLD_LINES || bytes >= PASTE_THRESHOLD_BYTES) {
+      const num = pasteCounterRef.current;
+      pasteCounterRef.current = num + 1;
+      const sentinel = String.fromCharCode(PUA_BASE + num - 1);
+      sideMapRef.current.set(sentinel, { num, fullText: text, lines });
+      const newBuf = buffer.slice(0, cursorPos) + sentinel + buffer.slice(cursorPos);
+      setBuffer(newBuf);
+      setCursorPos(cursorPos + 1);
+    } else {
+      const cleaned = text.replace(PUA_STRIP_RE, "");
+      const newBuf = buffer.slice(0, cursorPos) + cleaned + buffer.slice(cursorPos);
+      setBuffer(newBuf);
+      setCursorPos(cursorPos + cleaned.length);
+    }
     setHistoryIdx(-1);
   }, { isActive: true });
 
-  const displayBuffer = disabled ? buffer : renderBuffer(buffer, cursorPos);
+  const displayBuffer = disabled
+    ? expandSentinels(buffer, sideMapRef.current)
+    : renderBuffer(buffer, cursorPos, sideMapRef.current);
 
   return (
     <Box flexDirection="column">

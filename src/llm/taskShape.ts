@@ -1,0 +1,35 @@
+/**
+ * Task-shape heuristics for plan-mode gating.
+ * The prompt carve-outs in planInvestigation.ts and executionPlan.ts must stay
+ * conceptually in sync with ADDITIVE_LEAD_VERBS.
+ */
+
+/** Lead verbs that introduce additive/structural work — no pre-existing problem to reproduce. */
+export const ADDITIVE_LEAD_VERBS = [
+  "add", "create", "implement", "build", "scaffold", "introduce", "generate",
+  "write", "set up", "make", "new", "refactor", "rename", "extract", "migrate", "convert",
+] as const;
+
+/** Problem-signalling words indicating the task asserts a pre-existing defect. */
+export const PROBLEM_WORDS = [
+  "fix", "bug", "error", "fail", "broken", "crash", "exception", "regression",
+  "repro", "stack trace", "not working", "incorrect", "wrong", "stale", "hang", "leak",
+] as const;
+
+// NOTE: keep in sync with ADDITIVE_LEAD_VERBS and PROBLEM_WORDS above.
+const ADDITIVE_RE = /^(add|create|implement|build|scaffold|introduce|generate|write|set ?up|make|new|refactor|rename|extract|migrate|convert)\b/i;
+const PROBLEM_RE  = /\b(fix|bug|error|fails?|failing|failed|broken|crash(?:es)?|exception|regress\w*|repro\w*|stack ?trace|throws?|not working|doesn'?t work|why\s+(?:does|is|did)\b|incorrect|wrong|stale|hang|leak)\b/i;
+
+/**
+ * True when the task asserts a pre-existing defect that may or may not reproduce
+ * (fix/debug). Additive/structural tasks (create/add/implement/refactor) return
+ * false — there is no pre-existing problem to verify, so a no_change/cannot_verify
+ * verdict would be a misfire.
+ *
+ * Ordering: additive lead-verb is checked FIRST, so "add error handling" → false
+ * (not a problem assertion despite containing "error").
+ */
+export function taskAssertsProblem(task: string): boolean {
+  if (ADDITIVE_RE.test(task.trim())) return false;
+  return PROBLEM_RE.test(task);
+}

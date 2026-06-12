@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { loadCliConfig, validateCliConfig } from "./config.js";
+import { loadCliConfig, validateCliConfig, applyDiskKeyFallbacks } from "./config.js";
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { loadDiskModelSync } from "../api/diskModel.js";
+import { loadDiskKeys } from "../api/diskKeys.js";
 
 // We inject the configFile directly via the optional _configFile param to
 // avoid mocking the filesystem; env var tests use vi.stubEnv for isolation.
@@ -12,6 +13,10 @@ vi.mock("../visual/tierSettings.js", () => ({
 
 vi.mock("../api/diskModel.js", () => ({
   loadDiskModelSync: vi.fn().mockReturnValue(null),
+}));
+
+vi.mock("../api/diskKeys.js", () => ({
+  loadDiskKeys: vi.fn().mockResolvedValue({ version: 1, keys: [] }),
 }));
 
 describe("loadCliConfig — defaults", () => {
@@ -340,6 +345,51 @@ describe("loadCliConfig — model routing (S7)", () => {
     expect(cfg.model).toBe("gpt-5.4");
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+});
+
+describe("applyDiskKeyFallbacks", () => {
+  const mockLoadDiskKeys = vi.mocked(loadDiskKeys);
+
+  beforeEach(() => {
+    mockLoadDiskKeys.mockResolvedValue({ version: 1, keys: [] });
+  });
+
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("fills missing openai key from disk store", async () => {
+    mockLoadDiskKeys.mockResolvedValue({
+      version: 1,
+      keys: [{ provider: "openai", key: "sk-disk-openai", addedAt: "2026-01-01" }],
+    });
+    const config = loadCliConfig({}, {});
+    config.openaiApiKey = undefined;
+    await applyDiskKeyFallbacks(config);
+    expect(config.openaiApiKey).toBe("sk-disk-openai");
+  });
+
+  it("fills missing anthropic key from disk store", async () => {
+    mockLoadDiskKeys.mockResolvedValue({
+      version: 1,
+      keys: [{ provider: "anthropic", key: "sk-ant-disk", addedAt: "2026-01-01" }],
+    });
+    const config = loadCliConfig({}, {});
+    config.anthropicApiKey = undefined;
+    await applyDiskKeyFallbacks(config);
+    expect(config.anthropicApiKey).toBe("sk-ant-disk");
+  });
+
+  it("leaves an already-set key untouched", async () => {
+    mockLoadDiskKeys.mockResolvedValue({
+      version: 1,
+      keys: [{ provider: "openai", key: "sk-disk-openai", addedAt: "2026-01-01" }],
+    });
+    const config = loadCliConfig({}, {});
+    config.openaiApiKey = "sk-already-set";
+    await applyDiskKeyFallbacks(config);
+    expect(config.openaiApiKey).toBe("sk-already-set");
   });
 });
 

@@ -10,6 +10,8 @@ import {
   strippedEnvKeys,
 } from "./command.js";
 import { sanitizeVerificationEnv } from "../../core/buildEnv.js";
+import { buildStagedDiffs } from "../../core/fileDiff.js";
+import type { StagedFile } from "../../core/fileDiff.js";
 
 export async function runStagingVerification(input: {
   stagingFiles: Map<string, string>;
@@ -254,6 +256,12 @@ export function buildVerificationWarningsMessage(opts: {
   return [header, ...(counts ? [counts] : []), ...(errorLines.length ? ["Errors:", ...errorLines] : [])].join("\n");
 }
 
+/** Normalized verification result type for use in callbacks and tests. */
+export type StagingVerification =
+  | { status: "pass"; label: string; durationMs: number; baselineErrorCount?: number; postErrorCount?: number }
+  | { status: "fail"; label: string; durationMs: number; errorPreview: string; baselineErrorCount?: number; postErrorCount?: number; regressed?: boolean }
+  | { status: "skipped"; reason: string };
+
 /** @deprecated Use verifyAndFinalize() from ./composer.ts instead. */
 export async function finalizeStaging(input: {
   stagingFiles: Map<string, string>;
@@ -266,28 +274,27 @@ export async function finalizeStaging(input: {
   /** Phase F: "warn" (default) keeps patches on disk and surfaces errors as warnings.
    *  "rollback" restores pre-Phase-F behavior: staging discarded when regression detected. */
   verifyMode?: "warn" | "rollback";
+  /** R3: optional pre-flush callback. Receives verification result + staging snapshot;
+   *  returns "flush" to proceed, "discard" to abort without writing, "refine" to abort
+   *  and re-run with feedback. Only plumbed via verifyAndFinalize — persistStagingOnError
+   *  never passes this, so the 7 error-exit salvage sites bypass the checkpoint. */
+  beforeFlush?: (ctx: {
+    stagingFiles: Map<string, string>;
+    repoPath: string;
+    verification: StagingVerification;
+  }) => Promise<{ action: "flush" | "discard" | "refine"; feedback?: string }>;
+  /** Plan-first: non-blocking diff display — called pre-flush when staging is non-empty and not discarded. */
+  onPreFlushDiffs?: (diffs: StagedFile[]) => void;
 }): Promise<{
   flushed: boolean;
-  verification:
-    | { status: "pass"; label: string; durationMs: number; baselineErrorCount?: number; postErrorCount?: number }
-    | {
-        status: "fail";
-        label: string;
-        durationMs: number;
-        errorPreview: string;
-        baselineErrorCount?: number;
-        postErrorCount?: number;
-        regressed?: boolean;
-      }
-    | { status: "skipped"; reason: string };
+  verification: StagingVerification;
   filesFlushed: number;
   flushFailures: number;
-  // Phase J.3.1: when staging is discarded by a regression rollback, return
-  // the staged content as a snapshot so runLlmPatchFlow can render the
-  // "what was attempted" diff under the rolled-back banner. Keyed by the
-  // same absolute paths as input.stagingFiles. Empty/undefined when no
-  // discard happened (pass-through or pre-existing-errors).
+  // Phase J.3.1: when staging is discarded by a regression rollback (or R3 checkpoint
+  // reject/refine), return the staged content as a snapshot keyed by absolute path.
   discardedStaging?: Map<string, string>;
+  // R3: set when beforeFlush was invoked; records the checkpoint decision.
+  checkpoint?: { decision: "discard" | "refine" | "flush"; feedback?: string };
 }> {
   const verification = await runStagingVerification({
     stagingFiles: input.stagingFiles,
@@ -386,6 +393,45 @@ export async function finalizeStaging(input: {
       filesFlushed: 0,
       flushFailures: 0,
     };
+  }
+
+  // R3 staged-diff checkpoint: invoked after verification but before the real disk-flush loop.
+  // Disk still holds the original content here — diff output is accurate.
+  // Skip when staging is empty (no_staged_files) — nothing to review.
+  if (input.beforeFlush && input.stagingFiles.size > 0) {
+    const decision = await input.beforeFlush({
+      stagingFiles: input.stagingFiles,
+      repoPath: input.repoPath,
+      verification,
+    });
+    if (decision.action === "discard" || decision.action === "refine") {
+      const discardedStaging = new Map(input.stagingFiles);
+      input.stagingFiles.clear();  // belt+suspenders: makes the agentLoop finally a no-op
+      return {
+        flushed: false,
+        verification,
+        filesFlushed: 0,
+        flushFailures: 0,
+        discardedStaging,
+        checkpoint: { decision: decision.action, feedback: decision.feedback },
+      };
+    }
+    // action === "flush": stagingFiles may have been pruned in-place (manual per-file approval)
+    if (input.stagingFiles.size === 0) {
+      return {
+        flushed: false,
+        verification: { status: "skipped", reason: "no_changes_made" },
+        filesFlushed: 0,
+        flushFailures: 0,
+        checkpoint: { decision: "flush" },
+      };
+    }
+  }
+
+  // Plan-first non-blocking diff view: compute diffs while disk still holds originals
+  // (before the flush loop runs). Fires only when not discarded by beforeFlush.
+  if (input.onPreFlushDiffs && input.stagingFiles.size > 0) {
+    input.onPreFlushDiffs(buildStagedDiffs(input.stagingFiles, input.repoPath));
   }
 
   // staging-flush-bug Tur: filesFlushed previously incremented immediately

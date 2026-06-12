@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
+  debugLog: vi.fn(),
 }));
 
 vi.mock("./factory.js", () => ({
@@ -9,6 +10,10 @@ vi.mock("./factory.js", () => ({
     provider: "openai",
     createChatCompletion: mocks.createChatCompletion,
   })),
+}));
+
+vi.mock("../utils/logger.js", () => ({
+  debugLog: mocks.debugLog,
 }));
 
 import { generateExecutionPlan, tryParseExecutionPlan, isNoChangePlan, isCannotVerifyPlan } from "./executionPlan.js";
@@ -419,9 +424,12 @@ describe("E4: noChangeReason / isNoChangePlan", () => {
     expect(tryParseExecutionPlan(wrapJson(bad))).toBeNull();
   });
 
-  it("tryParseExecutionPlan: non-empty steps WITH noChangeReason returns null (IFF violated)", () => {
+  it("non-empty steps WITH noChangeReason → salvaged: noChangeReason stripped, steps intact", () => {
     const bad = { ...VALID_PLAN, noChangeReason: "build exits 0" };
-    expect(tryParseExecutionPlan(wrapJson(bad))).toBeNull();
+    const result = tryParseExecutionPlan(wrapJson(bad));
+    expect(result).not.toBeNull();
+    expect(result!.noChangeReason).toBeUndefined();
+    expect(result!.steps).toHaveLength(1);
   });
 
   it("isNoChangePlan: returns true for empty-steps plan with noChangeReason", () => {
@@ -478,7 +486,7 @@ describe("S3: cannotVerifyReason / isCannotVerifyPlan", () => {
     expect(tryParseExecutionPlan(wrapJson(plan))).toBeNull();
   });
 
-  it("non-empty steps WITH cannotVerifyReason → null", () => {
+  it("non-empty steps WITH cannotVerifyReason → salvaged: cannotVerifyReason stripped, steps intact", () => {
     const plan = {
       objective: "Fix",
       steps: [{ title: "Step", description: "Do", filesLikely: ["src/x.ts"] }],
@@ -486,7 +494,10 @@ describe("S3: cannotVerifyReason / isCannotVerifyPlan", () => {
       scopeSummary: "Fix.",
       cannotVerifyReason: "did not run",
     };
-    expect(tryParseExecutionPlan(wrapJson(plan))).toBeNull();
+    const result = tryParseExecutionPlan(wrapJson(plan));
+    expect(result).not.toBeNull();
+    expect(result!.cannotVerifyReason).toBeUndefined();
+    expect(result!.steps).toHaveLength(1);
   });
 
   it("isCannotVerifyPlan: returns true for empty-steps plan with cannotVerifyReason", () => {
@@ -519,5 +530,76 @@ describe("S3: cannotVerifyReason / isCannotVerifyPlan", () => {
       noChangeReason: "exits 0",
     };
     expect(isCannotVerifyPlan(plan)).toBe(false);
+  });
+});
+
+// Schema salvage — superRefine branch 3 dropped, transform strips reason fields
+describe("executionPlanSchema salvage — steps + reason", () => {
+  const STEP = { title: "Step", description: "Do the thing", filesLikely: ["src/x.ts"] };
+
+  function wrapJson(obj: unknown): string {
+    return `\`\`\`json\n${JSON.stringify(obj, null, 2)}\n\`\`\``;
+  }
+
+  function mockPlanResponse(plan: unknown) {
+    mocks.createChatCompletion.mockResolvedValueOnce({
+      choices: [{ message: { content: JSON.stringify(plan) } }],
+    });
+  }
+
+  it("generateExecutionPlan: steps + cannotVerifyReason → parses without throw, field stripped", async () => {
+    mockPlanResponse({
+      objective: "Fix the error",
+      steps: [STEP],
+      riskHints: [],
+      scopeSummary: "Fix.",
+      cannotVerifyReason: "Command did not run — auto-denied.",
+    });
+
+    const plan = await generateExecutionPlan({ task: "fix", repoSummary: "", relevantFiles: [] });
+
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.cannotVerifyReason).toBeUndefined();
+  });
+
+  it("tryParseExecutionPlan: steps + cannotVerifyReason → salvaged plan (not null)", () => {
+    const result = tryParseExecutionPlan(
+      wrapJson({ objective: "Fix", steps: [STEP], riskHints: [], scopeSummary: "S.", cannotVerifyReason: "did not run" })
+    );
+    expect(result).not.toBeNull();
+    expect(result!.cannotVerifyReason).toBeUndefined();
+    expect(result!.steps).toHaveLength(1);
+  });
+
+  it("tryParseExecutionPlan: steps + noChangeReason → salvaged plan (not null)", () => {
+    const result = tryParseExecutionPlan(
+      wrapJson({ objective: "Fix", steps: [STEP], riskHints: [], scopeSummary: "S.", noChangeReason: "exits 0" })
+    );
+    expect(result).not.toBeNull();
+    expect(result!.noChangeReason).toBeUndefined();
+    expect(result!.steps).toHaveLength(1);
+  });
+
+  it("[zone-plan-salvaged] counter emitted via debugLog on salvage", () => {
+    tryParseExecutionPlan(
+      wrapJson({ objective: "Fix", steps: [STEP], riskHints: [], scopeSummary: "S.", cannotVerifyReason: "did not run" })
+    );
+    const calls = mocks.debugLog.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(calls.some((s: string) => s.includes("[zone-plan-salvaged]") && s.includes("cannotVerifyReason"))).toBe(true);
+  });
+
+  it("regression: empty steps + neither reason → still null (branch 1 preserved)", () => {
+    expect(tryParseExecutionPlan(wrapJson({ objective: "X", steps: [], riskHints: [], scopeSummary: "S" }))).toBeNull();
+  });
+
+  it("regression: empty steps + both reasons → still null (branch 2 preserved)", () => {
+    expect(tryParseExecutionPlan(wrapJson({ objective: "X", steps: [], riskHints: [], scopeSummary: "S", noChangeReason: "ok", cannotVerifyReason: "blocked" }))).toBeNull();
+  });
+
+  it("regression: clean plan → unchanged, debugLog not called for salvage", () => {
+    const result = tryParseExecutionPlan(wrapJson({ objective: "Fix", steps: [STEP], riskHints: [], scopeSummary: "S." }));
+    expect(result).not.toBeNull();
+    const salvagedCalls = mocks.debugLog.mock.calls.filter((c: unknown[]) => String(c[0]).includes("[zone-plan-salvaged]"));
+    expect(salvagedCalls).toHaveLength(0);
   });
 });

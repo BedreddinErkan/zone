@@ -69,36 +69,42 @@ function buildRepoFile(
   };
 }
 
+// Shared mock setup — called in both describe blocks. Excludes ZONE_FORCE_FLOW
+// so each block can set (or leave unset) the env override independently.
+function setupRunLlmPatchFlowMocks(): void {
+  vi.clearAllMocks();
+  runRuntimeVerificationPlanMock.mockResolvedValue({
+    attempted: false,
+    status: "skipped_no_command",
+    steps: [],
+    summary: "No safe verification command detected.",
+  });
+  classifyTaskMock.mockResolvedValue({
+    tier: "medium",
+    archetype: "complex_multi_file",
+    confidence: 0,
+    archetypeConfidence: 0,
+    fallbackUsed: true,
+  });
+  runAgentLoopMock.mockResolvedValue({
+    success: true,
+    summary: "mock agent loop",
+    toolCallLog: [],
+    filesModified: [],
+    patchValidatedByAgent: false,
+    verificationReason: "tests_inconclusive",
+    terminationReason: "natural_completion",
+    iterCount: 1,
+    promotedFromArchetype: null,
+    promotionTrigger: null,
+    promotedAtIter: null,
+  });
+}
+
 describe("runLlmPatchFlow", () => {
   beforeEach(() => {
     process.env["ZONE_FORCE_FLOW"] = "plan_full_patch";
-    vi.clearAllMocks();
-    runRuntimeVerificationPlanMock.mockResolvedValue({
-      attempted: false,
-      status: "skipped_no_command",
-      steps: [],
-      summary: "No safe verification command detected.",
-    });
-    classifyTaskMock.mockResolvedValue({
-      tier: "medium",
-      archetype: "complex_multi_file",
-      confidence: 0,
-      archetypeConfidence: 0,
-      fallbackUsed: true,
-    });
-    runAgentLoopMock.mockResolvedValue({
-      success: true,
-      summary: "mock agent loop",
-      toolCallLog: [],
-      filesModified: [],
-      patchValidatedByAgent: false,
-      verificationReason: "tests_inconclusive",
-      terminationReason: "natural_completion",
-      iterCount: 1,
-      promotedFromArchetype: null,
-      promotionTrigger: null,
-      promotedAtIter: null,
-    });
+    setupRunLlmPatchFlowMocks();
   });
 
   afterEach(() => {
@@ -478,7 +484,7 @@ describe("runLlmPatchFlow", () => {
     expect(planPatchPreviewWithLlmMock).toHaveBeenCalled();
   });
 
-  it("supplements sparse llm suggestions with ranked relevant files for developer context", async () => {
+  it("supplements ranked relevant files for developer context", async () => {
     const files = [
       buildRepoFile("src/App.tsx", "frontend"),
       buildRepoFile("server/routes/auth.ts", "backend"),
@@ -492,14 +498,6 @@ describe("runLlmPatchFlow", () => {
       { ...files[2], score: 28 },
       { ...files[0], score: 12 },
     ]);
-    planFeatureWithLlmMock.mockResolvedValue({
-      implementationSummary: "Fix auth flow",
-      steps: ["Update auth route"],
-      suggestedFiles: [
-        { path: "src/App.tsx", reason: "Visible entry point", action: "inspect" },
-      ],
-      risks: [],
-    });
     readProjectFilesMock.mockImplementation(async (paths: string[]) =>
       Object.fromEntries(paths.map((filePath) => [filePath, `content:${filePath}`]))
     );
@@ -516,21 +514,6 @@ describe("runLlmPatchFlow", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(planFeatureWithLlmMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        intent: expect.objectContaining({
-          normalizedTask: "fix auth bug in login flow",
-        }),
-        existingFilesSummary: expect.stringContaining(
-          "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):"
-        ),
-      })
-    );
-    expect(planFeatureWithLlmMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        existingFilesSummary: expect.stringContaining("- src/App.tsx"),
-      })
-    );
     expect(planPatchPreviewWithLlmMock).toHaveBeenCalledWith(
       expect.objectContaining({
         suggestedFiles: [
@@ -4625,5 +4608,180 @@ export function PatientsPage() {
         expect(result.applyPatches).toHaveLength(0);
       }
     });
+  });
+});
+
+// ─── Stage 1 fix: preGeneratedPlan forces agent-loop ──────────────────────────
+// Sibling describe — does NOT inherit the outer beforeEach that sets
+// ZONE_FORCE_FLOW=plan_full_patch, so natural shouldUseAgentLoop routing is
+// exercised. All mocks explicitly configured; no inherited state relied upon.
+describe("runLlmPatchFlow — preGeneratedPlan forces agent-loop (stage 1)", () => {
+  const STAGE1_FILES = [buildRepoFile("src/index.ts", "source")];
+
+  beforeEach(() => {
+    // No ZONE_FORCE_FLOW: tests natural routing via shouldUseAgentLoop.
+    delete process.env["ZONE_FORCE_FLOW"];
+    setupRunLlmPatchFlowMocks();
+    // Sibling doesn't inherit the main beforeEach — configure every needed mock.
+    scanRepoMock.mockResolvedValue(STAGE1_FILES);
+    detectProjectStructureMock.mockReturnValue({ notes: ["Node.js"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...STAGE1_FILES[0]!, score: 10 }]);
+    // Needed for plan_full_patch path (negative test): provide minimal valid returns.
+    // After the hoisted vague-task short-circuit these are never called for vague inputs,
+    // but the mocks stay for hypothetical forced-plan-full-patch substantive tasks.
+    readProjectFilesMock.mockResolvedValue({});
+    planPatchPreviewWithLlmMock.mockResolvedValue({ patches: [] });
+  });
+
+  afterEach(() => {
+    delete process.env["ZONE_FORCE_FLOW"];
+  });
+
+  const FAKE_PLAN = {
+    objective: "Create hello.ts",
+    steps: [
+      {
+        title: "Write file",
+        description: "Write hello.ts with a greeting",
+        filesLikely: ["hello.ts"],
+        subagentEligible: false,
+      },
+    ],
+    scopeSummary: "Add hello.ts",
+    riskHints: [],
+  };
+
+  it("positive: vague task + preGeneratedPlan → agent-loop branch taken", async () => {
+    // "fix the app" is confirmed vague (isVagueDeveloperTask returns true).
+    // Without the fix, shouldUseAgentLoop returns false → plan_full_patch → runAgentLoop NOT called.
+    // With the fix, preGeneratedPlan check forces shouldUseAgentLoop to return true → runAgentLoop IS called.
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    await runLlmPatchFlow({
+      task: "fix the app",
+      repoPath: "/tmp/fake-repo",
+      runId: "test-stage1-pos",
+      onProgress: () => undefined,
+      abortSignal: new AbortController().signal,
+      userApiKey: "sk-fake",
+      provider: "anthropic",
+      mode: "patch",
+      preGeneratedPlan: FAKE_PLAN,
+    });
+    expect(runAgentLoopMock).toHaveBeenCalled();
+  });
+
+  it("negative control: vague task + no preGeneratedPlan → short-circuit (agent-loop NOT called)", async () => {
+    // Guards against an over-broad change: without preGeneratedPlan, a vague task
+    // must NOT invoke runAgentLoop (hoisted short-circuit handles it, not agent loop).
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    await runLlmPatchFlow({
+      task: "fix the app",
+      repoPath: "/tmp/fake-repo",
+      runId: "test-stage1-neg",
+      onProgress: () => undefined,
+      abortSignal: new AbortController().signal,
+      userApiKey: "sk-fake",
+      provider: "anthropic",
+      mode: "patch",
+      // no preGeneratedPlan — shouldUseAgentLoop falls through to isVagueDeveloperTask → false → short-circuit
+    });
+    expect(runAgentLoopMock).not.toHaveBeenCalled();
+  });
+});
+
+// ─── isChitchat unit tests ─────────────────────────────────────────────────
+describe("isChitchat", () => {
+  it.each([
+    "hi", "hello", "hey", "thanks", "thank you", "good morning",
+    "hi!", "bye", "goodbye", "morning", "cheers",
+  ])("returns true for: %s", async (task) => {
+    const { isChitchat } = await import("./runLlmPatchFlow.js");
+    expect(isChitchat(task)).toBe(true);
+  });
+
+  it.each([
+    "fix it", "add a function", "hello world", "run tests",
+    "hi there", "fix the bug",
+  ])("returns false for: %s", async (task) => {
+    const { isChitchat } = await import("./runLlmPatchFlow.js");
+    expect(isChitchat(task)).toBe(false);
+  });
+});
+
+// ─── Vague-task hoisted short-circuit ─────────────────────────────────────
+describe("runLlmPatchFlow — vague-task short-circuit", () => {
+  const SHORTCIRCUIT_FILES = [buildRepoFile("src/placeholder.ts", "source")];
+
+  beforeEach(() => {
+    delete process.env["ZONE_FORCE_FLOW"];
+    setupRunLlmPatchFlowMocks();
+    scanRepoMock.mockResolvedValue(SHORTCIRCUIT_FILES);
+    detectProjectStructureMock.mockReturnValue({ notes: [] });
+  });
+
+  afterEach(() => {
+    delete process.env["ZONE_FORCE_FLOW"];
+  });
+
+  it('"hi" returns ok:true decisionMode:chat before any planning call', async () => {
+    const onProgress = vi.fn();
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "hi",
+      repoPath: "/tmp/fake-repo",
+      runId: "test-vague-hi",
+      onProgress,
+      abortSignal: new AbortController().signal,
+      userApiKey: "sk-fake",
+      provider: "anthropic",
+      mode: "patch",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.decisionMode).toBe("chat");
+    expect(result.chatResponse).toContain("Hi!");
+    // 0 planning LLM calls
+    expect(planPatchPreviewWithLlmMock).not.toHaveBeenCalled();
+    expect(runAgentLoopMock).not.toHaveBeenCalled();
+    // agent_loop_complete emitted with the reply in detail
+    const calls = onProgress.mock.calls.map((c) => c[0] as { progress?: { type?: string; detail?: string } });
+    const loopComplete = calls.find((c) => c?.progress?.type === "agent_loop_complete");
+    expect(loopComplete?.progress?.detail).toContain("Hi!");
+  });
+
+  it('"fix it" short-circuits with clarification ask (not a greeting)', async () => {
+    const onProgress = vi.fn();
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "fix it",
+      repoPath: "/tmp/fake-repo",
+      runId: "test-vague-fixit",
+      onProgress,
+      abortSignal: new AbortController().signal,
+      userApiKey: "sk-fake",
+      provider: "anthropic",
+      mode: "patch",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.decisionMode).toBe("chat");
+    expect(result.chatResponse).not.toContain("Hi!");
+    expect(result.chatResponse).toMatch(/vague|change/i);
+    expect(planPatchPreviewWithLlmMock).not.toHaveBeenCalled();
+  });
+
+  it('"fix the login bug in src/auth.ts" is substantive — routes to agent_loop (not short-circuited)', async () => {
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    await runLlmPatchFlow({
+      task: "fix the login bug in src/auth.ts",
+      repoPath: "/tmp/fake-repo",
+      runId: "test-substantive",
+      onProgress: () => undefined,
+      abortSignal: new AbortController().signal,
+      userApiKey: "sk-fake",
+      provider: "anthropic",
+      mode: "patch",
+    });
+    expect(runAgentLoopMock).toHaveBeenCalled();
   });
 });
