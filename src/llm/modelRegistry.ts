@@ -129,3 +129,13 @@ export function getDefaultModelId(): string {
 export function isKnownModelId(id: string): boolean {
   return USER_FACING_MODELS.some((m) => m.id === id);
 }
+
+/** True when the model accepts image input. Defaults to true for unknown/unlisted models. */
+export function supportsVision(modelId: string): boolean {
+  const normalized = normalizeModelId(modelId);
+  for (const options of Object.values(MODEL_CATALOG)) {
+    const entry = options.find((m) => normalizeModelId(m.id) === normalized);
+    if (entry) return entry.supportsVision !== false;
+  }
+  return true; // unknown model: optimistic default
+}

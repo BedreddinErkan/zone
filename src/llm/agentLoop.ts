@@ -263,6 +263,8 @@ export interface AgentLoopInput {
   onPreFlushDiffs?: (diffs: import("../core/fileDiff.js").StagedFile[]) => void;
   /** When true, omits INVESTIGATION_OUTPUT_FORMAT from investigation-mode prompts (used by /init). */
   suppressOutputFormat?: boolean;
+  /** Local image attachments to include as multimodal content in the initial user message. */
+  images?: import("../api/imageUpload.js").ImageAttachment[];
 }
 
 export interface AgentLoopResult {
@@ -2225,6 +2227,17 @@ Example:
     : sessionMemBlock + auditContextBlock + restageSeedBlock + input.task) + modeTag;
 
   // Chat Completions messages (system + user kickoff).
+  // When images are attached, the user message content is an array with text + image_url parts.
+  // Both adapters translate image_url parts to their provider-specific format (base64 source / input_image).
+  const userMessageContent: ChatCompletionMessageParam["content"] = input.images?.length
+    ? [
+        { type: "text" as const, text: userContent },
+        ...input.images.map((img) => ({
+          type: "image_url" as const,
+          image_url: { url: `data:${img.mediaType};base64,${img.base64}` },
+        })),
+      ]
+    : userContent;
   const responseInput: ChatCompletionMessageParam[] = [
     {
       role: "system",
@@ -2232,7 +2245,7 @@ Example:
     },
     {
       role: "user",
-      content: userContent,
+      content: userMessageContent,
     },
   ];
 

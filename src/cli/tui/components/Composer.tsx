@@ -10,12 +10,14 @@ import { runInit } from "../init.js";
 import { readMemoryAndShow } from "../memory.js";
 import { randomUUID } from "node:crypto";
 import { saveDiskModel, type DiskModelSettings } from "../../../api/diskModel.js";
-import { getDefaultModelId } from "../../../llm/modelRegistry.js";
+import { getDefaultModelId, supportsVision } from "../../../llm/modelRegistry.js";
+import { readImageFromFile, validateAttachments, type ImageAttachment } from "../../../api/imageUpload.js";
+import { basename } from "node:path";
 
 const MAX_HISTORY = 50;
 
 interface ComposerProps {
-  onSubmit: (text: string, ac: AbortController) => void;
+  onSubmit: (text: string, ac: AbortController, images?: ImageAttachment[]) => void;
   onExit: () => void;
   onInitStart?: (ac: AbortController) => void;
   getCommitData?: () => { filePaths: string[]; message: string; repoPath: string } | null;
@@ -46,6 +48,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/commit",      desc: "Commit last run's changes with scoped git commit" },
   { name: "/autocommit",  desc: "Toggle auto-commit after each run (off/on)" },
   { name: "/websearch",   desc: "Toggle web search (off/on)" },
+  { name: "/image",       desc: "Attach a local image file to the next task (/image <path>)" },
 ];
 
 const HELP_LINES = [
@@ -144,6 +147,7 @@ export function Composer({ onSubmit, onExit, onInitStart, getCommitData }: Compo
   const sideMapRef = useRef<Map<string, PasteEntry>>(new Map());
   const pasteCounterRef = useRef(1);
   const lastAtSelectedPath = useRef<string | null>(null);
+  const [stagedImages, setStagedImages] = useState<ImageAttachment[]>([]);
 
   const atPaletteOpen = buffer.startsWith("@") && !buffer.slice(1).includes(" ");
   const paletteOpen = buffer.startsWith("/");
@@ -330,6 +334,27 @@ export function Composer({ onSubmit, onExit, onInitStart, getCommitData }: Compo
         dispatch({ type: "TOAST_PUSH", entry: { id: randomUUID(), message: `Web search: ${newVal ? "on" : "off"}`, level: "info" } });
         break;
       }
+      case "/image": {
+        if (!argsText) {
+          dispatch({ type: "TOAST_PUSH", entry: { id: randomUUID(), message: "Usage: /image <path>", level: "warning" } });
+          break;
+        }
+        readImageFromFile(argsText)
+          .then((img) => {
+            const validation = validateAttachments([img]);
+            if (!validation.ok) {
+              dispatch({ type: "TOAST_PUSH", entry: { id: randomUUID(), message: validation.error, level: "warning" } });
+              return;
+            }
+            setStagedImages((prev) => [...prev, img]);
+            dispatch({ type: "TOAST_PUSH", entry: { id: randomUUID(), message: `Image staged: ${basename(argsText)}`, level: "info" } });
+          })
+          .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            dispatch({ type: "TOAST_PUSH", entry: { id: randomUUID(), message: msg, level: "warning" } });
+          });
+        break;
+      }
     }
   }
 
@@ -350,8 +375,16 @@ export function Composer({ onSubmit, onExit, onInitStart, getCommitData }: Compo
     });
     setHistoryIdx(-1);
 
+    // Capture staged images before any state changes; gate on vision support.
+    const imagesToSend = stagedImages;
+    if (imagesToSend.length > 0 && !supportsVision(state.statusBar.model)) {
+      dispatch({ type: "TOAST_PUSH", entry: { id: randomUUID(), message: "Current model doesn't support images — switch to a vision-capable model", level: "warning" } });
+      return;
+    }
+
     dispatch({ type: "USER_PROMPT", text: agentText });
     setBuffer("");
+    setStagedImages([]);
     setCursorPos(0);
     sideMapRef.current.clear();
     pasteCounterRef.current = 1;
@@ -365,7 +398,7 @@ export function Composer({ onSubmit, onExit, onInitStart, getCommitData }: Compo
     }
 
     const ac = new AbortController();
-    onSubmit(agentText + contextBlock, ac);
+    onSubmit(agentText + contextBlock, ac, imagesToSend.length > 0 ? imagesToSend : undefined);
   }
 
   useInput((input, key) => {
@@ -419,6 +452,10 @@ export function Composer({ onSubmit, onExit, onInitStart, getCommitData }: Compo
       const spaceIdx = buffer.indexOf(" ");
       if (spaceIdx !== -1) {
         const commandToken = buffer.slice(0, spaceIdx);
+        if (commandToken === "/image") {
+          executeSlashCommand("/image", buffer.slice(spaceIdx + 1).trim());
+          return;
+        }
         if (projectCommands.some(uc => uc.name === commandToken)) {
           executeSlashCommand(commandToken, buffer.slice(spaceIdx + 1).trim());
           return;
@@ -593,6 +630,9 @@ export function Composer({ onSubmit, onExit, onInitStart, getCommitData }: Compo
           )}
         </Box>
       </Box>
+      {stagedImages.length > 0 && (
+        <Text dimColor>{`  [${stagedImages.length} image${stagedImages.length === 1 ? "" : "s"} staged]`}</Text>
+      )}
     </Box>
   );
 }

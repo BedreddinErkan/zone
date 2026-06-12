@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { ImageAttachment } from "../../../api/imageUpload.js";
 import React from "react";
 import { render } from "ink-testing-library";
 import { Text } from "ink";
@@ -250,9 +251,17 @@ describe("Composer — submitBuffer dispatch routing (T3)", () => {
 
 const mockReadAtFileContext = vi.hoisted(() => vi.fn<[], Promise<string | null>>());
 const mockFg = vi.hoisted(() => vi.fn<[], Promise<string[]>>());
+const mockSupportsVisionFn = vi.hoisted(() => vi.fn<[string], boolean>());
+const mockReadImageFromFileFn = vi.hoisted(() => vi.fn<[string], Promise<ImageAttachment>>());
+const mockValidateAttachmentsFn = vi.hoisted(() => vi.fn<[ImageAttachment[]], { ok: boolean; error?: string }>());
 
 vi.mock("../atFileContext.js", () => ({ readAtFileContext: mockReadAtFileContext }));
 vi.mock("fast-glob", () => ({ default: mockFg }));
+vi.mock("../../../llm/modelRegistry.js", () => ({ supportsVision: mockSupportsVisionFn }));
+vi.mock("../../../api/imageUpload.js", () => ({
+  readImageFromFile: mockReadImageFromFileFn,
+  validateAttachments: mockValidateAttachmentsFn,
+}));
 
 describe("@ file injection — wiring (T-AT)", () => {
   it("onSubmit receives file content block; USER_PROMPT dispatch does not", async () => {
@@ -289,6 +298,58 @@ describe("@ file injection — wiring (T-AT)", () => {
     // transcript (USER_PROMPT dispatch) contains only the path, not the content
     expect(lastFrame()).toContain(`[DISPATCH]${FILE_PATH}`);
     expect(lastFrame()).not.toContain("=== src/foo.ts ===");
+
+    unmount();
+  });
+});
+
+// ─── T-VISION: vision gate in submitBuffer ────────────────────────────────────
+// Verifies that when the current model doesn't support vision and an image is
+// staged, submitBuffer aborts and onSubmit is never called.
+
+function ToastLogger(): React.ReactElement {
+  const { state } = useStore();
+  return (
+    <>
+      {state.toastQueue.map((toast, i) => (
+        <Text key={i}>{`[TOAST]${toast.message}`}</Text>
+      ))}
+    </>
+  );
+}
+
+describe("Composer — vision gate (T-VISION)", () => {
+  beforeEach(() => {
+    mockSupportsVisionFn.mockReturnValue(false);
+    mockReadImageFromFileFn.mockResolvedValue({ mediaType: "image/png", base64: "abc123" });
+    mockValidateAttachmentsFn.mockReturnValue({ ok: true });
+  });
+
+  it("non-vision model + staged image → onSubmit not called, warning toast shown", async () => {
+    const onSubmit = vi.fn();
+    const { stdin, lastFrame, unmount } = render(
+      <StoreProvider initialValues={{ model: "no-vision-model", capUsd: 10 }}>
+        <Composer onSubmit={onSubmit} onExit={() => {}} />
+        <ToastLogger />
+      </StoreProvider>
+    );
+
+    // Stage an image via /image command with inline args.
+    // Write the full string at once (not char-by-char) to avoid React batching
+    // dropping intermediate setBuffer calls within the same synchronous tick.
+    stdin.write("/image screenshot.png");
+    await wait(50);
+    stdin.write("\r"); // executes /image slash command with args
+    await wait(200);   // wait for async readImageFromFile.then() to settle
+
+    // Type a task and try to submit (whole string at once, same reason)
+    stdin.write("describe this");
+    await wait(50);
+    stdin.write("\r"); // submitBuffer fires, vision gate should block
+    await wait(100);
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(lastFrame()).toContain("doesn't support images");
 
     unmount();
   });

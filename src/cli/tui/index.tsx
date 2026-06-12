@@ -285,7 +285,7 @@ export async function runTui(
 
   const bus = createEventBus();
 
-  const runPrompt = async (prompt: string, ac: AbortController, mode: TuiMode = "normal"): Promise<void> => {
+  const runPrompt = async (prompt: string, ac: AbortController, mode: TuiMode = "normal", images?: import("../../api/imageUpload.js").ImageAttachment[]): Promise<void> => {
     const runId = randomUUID();
     // Capture sessionId at submit time (storeCapture.state may be null on the first render tick).
     const sessionId = storeCapture.state?.sessionId;
@@ -328,7 +328,7 @@ export async function runTui(
     let abortedFiles: string[] | undefined;
     let emitSafetyNet = true;
     try {
-      runResult = await runOneShotInner(prompt, config, runId, { externalAc: ac, onProgress, mode, priorSessionSummary });
+      runResult = await runOneShotInner(prompt, config, runId, { externalAc: ac, onProgress, mode, priorSessionSummary, images });
     } catch (err: unknown) {
       if (err instanceof ProviderRequestError) {
         // Typed provider error (e.g. Fable retention 400): surface as red ErrorLine + failed run-state.
@@ -435,8 +435,8 @@ export async function runTui(
     }
   };
 
-  const onSubmit = (prompt: string, ac: AbortController, mode: TuiMode): void => {
-    void runPrompt(prompt, ac, mode);
+  const onSubmit = (prompt: string, ac: AbortController, mode: TuiMode, images?: import("../../api/imageUpload.js").ImageAttachment[]): void => {
+    void runPrompt(prompt, ac, mode, images);
   };
 
   // Best-effort GC: delete the prior sessionId's .jsonl when the user clears session memory.

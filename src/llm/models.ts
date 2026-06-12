@@ -11,6 +11,8 @@ export interface ModelOption {
   workerSuitable?: boolean;
   workerSuitabilityNote?: string;
   retention?: { minDays: number; zdrAvailable: boolean };
+  /** When explicitly false, the model does not accept image input. Default: true (all current models support vision). */
+  supportsVision?: boolean;
 }
 
 export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {

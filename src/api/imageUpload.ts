@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import { extname } from "node:path";
+
 export interface ImageAttachment {
   mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
   base64: string;
@@ -56,4 +59,30 @@ export function validateAttachments(raw: unknown): AttachmentValidationResult {
   }
 
   return { ok: true, attachments };
+}
+
+const EXT_TO_MEDIA_TYPE: Record<string, ImageAttachment["mediaType"]> = {
+  ".jpg":  "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png":  "image/png",
+  ".gif":  "image/gif",
+  ".webp": "image/webp",
+};
+
+/** Resolves the media type from a file path extension, or throws for unsupported types. */
+export function getMediaType(fp: string): ImageAttachment["mediaType"] {
+  const ext = extname(fp).toLowerCase();
+  const mediaType = EXT_TO_MEDIA_TYPE[ext];
+  if (!mediaType) {
+    throw new Error(`Unsupported image type: ${ext || "(no extension)"} — use jpg, png, gif, or webp`);
+  }
+  return mediaType;
+}
+
+/** Reads a local image file and returns an ImageAttachment ready for validation and use. */
+export async function readImageFromFile(fp: string): Promise<ImageAttachment> {
+  const mediaType = getMediaType(fp);
+  const buf = await readFile(fp);
+  const base64 = buf.toString("base64");
+  return { mediaType, base64 };
 }

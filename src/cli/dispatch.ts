@@ -46,6 +46,8 @@ export interface OneShotOpts {
   mode?: TuiMode;
   /** Session-memory summary from prior task in this TUI session (Phase 1 opt-in). */
   priorSessionSummary?: string;
+  /** Local image attachments from the user to include in the agent's first message. */
+  images?: import("../api/imageUpload.js").ImageAttachment[];
 }
 
 /** Core one-shot runner. Returns the flow result — does NOT call process.exit. */
@@ -508,6 +510,7 @@ export async function runOneShotInner(
             stagedCheckpoint: true,
             // Non-TTY (headless) has no StagedDiffModal — auto-approve to prevent hang.
             autoApprove: effectiveConfig.autoApprove || process.stdout.isTTY !== true,
+            images: opts.images,
             ...(restageSeed !== undefined ? { restageSeed, maxIterationsOverride: REFINE_RESTAGE_ITER_CAP } : {}),
           })
         );
@@ -562,6 +565,7 @@ export async function runOneShotInner(
         webSearchEnabled: effectiveConfig.webSearchEnabled,
         editApprovalMode,
         showPostFlushDiffs: !!planForExecution,
+        images: opts.images,
       })
     );
 

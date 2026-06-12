@@ -42,7 +42,7 @@ interface AppProps {
   initialModel?: string;
   capUsd?: number;
   initialDailyUsedUsd?: number;
-  onSubmit?: (prompt: string, ac: AbortController, mode: TuiMode) => void;
+  onSubmit?: (prompt: string, ac: AbortController, mode: TuiMode, images?: import("../../api/imageUpload.js").ImageAttachment[]) => void;
   initialTrustedPrefixes?: string[];
   resumedSession?: DiskSession;
   onStateChange?: (state: StoreState) => void;
@@ -58,7 +58,7 @@ interface AppInnerProps {
   bus: EventBus | undefined;
   initialPrompt: string | undefined;
   initialMode: TuiMode | undefined;
-  onSubmit: ((prompt: string, ac: AbortController, mode: TuiMode) => void) | undefined;
+  onSubmit: ((prompt: string, ac: AbortController, mode: TuiMode, images?: import("../../api/imageUpload.js").ImageAttachment[]) => void) | undefined;
   onStateChange: ((state: StoreState) => void) | undefined;
   onModelApply: ((model: string, provider: "anthropic" | "openai", effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void) | undefined;
   getCommitData: (() => { filePaths: string[]; message: string; repoPath: string } | null) | undefined;
@@ -154,9 +154,9 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onStateChange, on
 
   useAgentEvents(bus, dispatch, sessionTrustedPrefixesRef, modeRef);
 
-  const handleComposerSubmit = (text: string, ac: AbortController): void => {
+  const handleComposerSubmit = (text: string, ac: AbortController, images?: import("../../api/imageUpload.js").ImageAttachment[]): void => {
     runAcRef.current = ac;
-    onSubmit?.(text, ac, state.mode);
+    onSubmit?.(text, ac, state.mode, images);
   };
 
   const modals = (
