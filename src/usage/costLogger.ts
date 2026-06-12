@@ -35,6 +35,7 @@ export function appendIterCostRecord(logPath: string, p: IterCostUpdatePayload):
         mode: p.mode,
         estimatedIterations: p.estimatedIterations,
         taskBlockedByBudget: p.taskBlockedByBudget,
+        estimatedFiles: p.estimatedFiles,
       }) + "\n",
       "utf8",
     );

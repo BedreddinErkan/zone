@@ -73,6 +73,7 @@ export class TokenBudgetMeter {
     mode?: string;
     estimatedIterations?: number;
     taskBlockedByBudget?: boolean;
+    estimatedFiles?: number;
   }): void {
     const { rawUsage, iter, totalIter, provider, model, onStructuredEvent } = opts;
 
@@ -105,6 +106,7 @@ export class TokenBudgetMeter {
           mode: opts.mode,
           estimatedIterations: opts.estimatedIterations,
           taskBlockedByBudget: opts.taskBlockedByBudget,
+          estimatedFiles: opts.estimatedFiles,
         });
         this._iterCostAccumulator = update.accumulator;
         this._lastIterCostPayload = update.payload;

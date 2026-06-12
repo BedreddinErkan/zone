@@ -235,4 +235,28 @@ describe("Subagent budget gate — toolset exclusion and log timing (Q.3)", () =
     expect(capturedTools).toBeDefined();
     expect(capturedTools!.some((t) => t.function.name === "Task")).toBe(true);
   });
+
+  it("T.7: Task absent when estimatedFiles <= 3, even if estimatedIterations >= 15", async () => {
+    let capturedTools: Array<{ function: { name: string } }> | undefined;
+    mocks.createChatCompletion.mockImplementation(
+      async (params: { tools?: Array<{ function: { name: string } }> }) => {
+        capturedTools = params.tools;
+        return makeDoneResponse("[ZONE_VERIFICATION: no_verification_attempted]");
+      }
+    );
+
+    await runAgentLoop({
+      task: "update 3 files",
+      repoPath,
+      forceTier: "complex",
+      taskClassification: {
+        tier: "complex", archetype: "complex_multi_file", archetypeConfidence: 0.8,
+        estimatedIterations: 25, estimatedFiles: 3, confidence: 0.7, fallbackUsed: false,
+        classifierCostUsd: 0, classifierLatencyMs: 0, classifierModel: "gpt-4o-mini",
+      },
+    });
+
+    expect(capturedTools).toBeDefined();
+    expect(capturedTools!.some((t) => t.function.name === "Task")).toBe(false);
+  });
 });

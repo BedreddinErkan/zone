@@ -38,6 +38,7 @@ export interface IterCostUpdatePayload extends IterUsageBreakdown {
   mode: string;
   estimatedIterations: number;
   taskBlockedByBudget: boolean;
+  estimatedFiles: number;
 }
 
 export function emptyIterCostAccumulator(): IterCostAccumulator {
@@ -94,6 +95,7 @@ export function buildIterCostUpdate(input: {
   mode?: string;
   estimatedIterations?: number;
   taskBlockedByBudget?: boolean;
+  estimatedFiles?: number;
 }): { payload: IterCostUpdatePayload; accumulator: IterCostAccumulator } {
   const previous = input.previous ?? emptyIterCostAccumulator();
   const current = {
@@ -144,6 +146,7 @@ export function buildIterCostUpdate(input: {
       mode: input.mode ?? "",
       estimatedIterations: input.estimatedIterations ?? -1,
       taskBlockedByBudget: input.taskBlockedByBudget ?? false,
+      estimatedFiles: input.estimatedFiles ?? -1,
     },
   };
 }

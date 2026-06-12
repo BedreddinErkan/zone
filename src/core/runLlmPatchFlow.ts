@@ -5630,6 +5630,7 @@ const initializeTodosFromPlan = (): void => {
             mode: String((e as any).mode ?? ""),
             estimatedIterations: Number((e as any).estimatedIterations ?? -1) || -1,
             taskBlockedByBudget: Boolean((e as any).taskBlockedByBudget ?? false),
+            estimatedFiles: Number((e as any).estimatedFiles ?? -1) || -1,
           };
           if (_costLogPath === null) {
             _costLogPath = costLogPath(latestIterCostUpdate.runId || runId || "anon");
