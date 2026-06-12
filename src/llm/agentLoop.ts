@@ -1782,9 +1782,12 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   const tierLimits = isSubagentLoop
     ? null
     : resolveTierLimits(input.taskClassification, { forceTierOverride: input.forceTier });
-  // Zero-budget tiers (simple): hide Task from the LLM toolset so the agent
-  // never calls it and gets rejected deep in executeTool.
-  const taskBlockedByBudget = (tierLimits?.maxSubagentCalls ?? Infinity) === 0;
+  // Zero-budget tiers (simple/medium) OR small tasks at complex tier: hide Task.
+  // estimatedIterations < 15 catches small 2–3 file fixes that the classifier
+  // bumped to complex due to multiple concerns — the subagent layer costs more
+  // than it saves on these (iteration-inflation.md Fix A).
+  const taskIsSmall = (input.taskClassification?.estimatedIterations ?? Infinity) < 15;
+  const taskBlockedByBudget = (tierLimits?.maxSubagentCalls ?? Infinity) === 0 || taskIsSmall;
   // Phase X.0 / Gap 6: resolveToolList applies the capability filter; the
   // excludeTools and taskBlockedByBudget gates are applied on top.
   const resolvedTools = resolveToolList(effectiveFilter);

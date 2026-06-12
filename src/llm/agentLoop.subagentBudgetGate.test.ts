@@ -187,4 +187,52 @@ describe("Subagent budget gate — toolset exclusion and log timing (Q.3)", () =
     const logCalls = mocks.log.mock.calls as Array<[string, ...unknown[]]>;
     expect(logCalls.filter((c) => c[0] === "[zone-subagent-dispatched]")).toHaveLength(0);
   });
+
+  it("T.5: Task absent when forceTier=complex but estimatedIterations < 15", async () => {
+    let capturedTools: Array<{ function: { name: string } }> | undefined;
+    mocks.createChatCompletion.mockImplementation(
+      async (params: { tools?: Array<{ function: { name: string } }> }) => {
+        capturedTools = params.tools;
+        return makeDoneResponse("[ZONE_VERIFICATION: no_verification_attempted]");
+      }
+    );
+
+    await runAgentLoop({
+      task: "add guard to 2 files",
+      repoPath,
+      forceTier: "complex",
+      taskClassification: {
+        tier: "complex", archetype: "complex_multi_file", archetypeConfidence: 0.8,
+        estimatedIterations: 10, estimatedFiles: 2, confidence: 0.7, fallbackUsed: false,
+        classifierCostUsd: 0, classifierLatencyMs: 0, classifierModel: "gpt-4o-mini",
+      },
+    });
+
+    expect(capturedTools).toBeDefined();
+    expect(capturedTools!.some((t) => t.function.name === "Task")).toBe(false);
+  });
+
+  it("T.6: Task present when forceTier=complex and estimatedIterations >= 15", async () => {
+    let capturedTools: Array<{ function: { name: string } }> | undefined;
+    mocks.createChatCompletion.mockImplementation(
+      async (params: { tools?: Array<{ function: { name: string } }> }) => {
+        capturedTools = params.tools;
+        return makeDoneResponse("[ZONE_VERIFICATION: no_verification_attempted]");
+      }
+    );
+
+    await runAgentLoop({
+      task: "complex multi-file refactor",
+      repoPath,
+      forceTier: "complex",
+      taskClassification: {
+        tier: "complex", archetype: "complex_multi_file", archetypeConfidence: 0.9,
+        estimatedIterations: 20, estimatedFiles: 5, confidence: 0.8, fallbackUsed: false,
+        classifierCostUsd: 0, classifierLatencyMs: 0, classifierModel: "gpt-4o-mini",
+      },
+    });
+
+    expect(capturedTools).toBeDefined();
+    expect(capturedTools!.some((t) => t.function.name === "Task")).toBe(true);
+  });
 });
