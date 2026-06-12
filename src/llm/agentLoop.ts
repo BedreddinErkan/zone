@@ -810,7 +810,7 @@ export function assembleInvestigationSystemPrompt(input: {
     "",
     "SEARCH FIRST: Use search_in_files to locate symbols before reading files. Reading an entire file for a single symbol wastes iterations.",
     ...reproduceBlock,
-    ...noProblemBlock,
+    ...(!input.suppressOutputFormat ? noProblemBlock : []),
     "",
     "Process (ONLY AFTER the reproduce command has run and you have observed the problem — or for tasks that do not assert a runtime problem):",
     "1. Identify what the question asks: definition, usages, control flow, data shape, or design rationale.",

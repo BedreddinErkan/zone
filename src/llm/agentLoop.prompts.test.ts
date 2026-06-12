@@ -208,6 +208,12 @@ describe('RC1-fix: commandTool param — investigation prompt tool/mandate varia
       // "rootCause" is unique to the JSON schema block — not present in noProblemBlock
       expect(suppressed).not.toContain('rootCause');
     });
+
+    it('R2: suppressOutputFormat:true also suppresses noProblemBlock', () => {
+      const suppressed = assembleInvestigationSystemPrompt({ ...BASE, commandTool: null, suppressOutputFormat: true });
+      // "VALID TERMINAL OUTCOME" is unique to noProblemBlock — not in INVESTIGATION_OUTPUT_FORMAT
+      expect(suppressed).not.toContain('VALID TERMINAL OUTCOME');
+    });
   });
 
   describe('commandTool: undefined (backward-compat default)', () => {
