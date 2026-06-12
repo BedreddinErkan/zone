@@ -38,13 +38,18 @@ export function stripJsonFences(content: string): string {
 export function convertResponse(
   msg: Anthropic.Message,
   options: ConvertResponseOptions = {}
-): ChatCompletion {
+): ChatCompletion & { reasoningText?: string } {
   const created = Math.floor(Date.now() / 1000);
 
   const textParts: string[] = [];
+  const thinkingParts: string[] = [];
   const toolCalls: ChatCompletionMessageToolCall[] = [];
 
   for (const block of msg.content) {
+    if (block.type === "thinking" && typeof (block as { type: string; thinking?: string }).thinking === "string") {
+      thinkingParts.push((block as { type: string; thinking: string }).thinking);
+      continue;
+    }
     if (block.type === "text") {
       if (typeof block.text === "string") textParts.push(block.text);
       continue;
@@ -60,8 +65,10 @@ export function convertResponse(
       });
       continue;
     }
-    // ignore thinking/citations/etc. for now
+    // ignore citations/etc.
   }
+
+  const reasoningText = thinkingParts.join("\n\n").trim();
 
   let text = textParts.join("");
   if (options.wasJsonMode && text.length > 0) {
@@ -70,9 +77,21 @@ export function convertResponse(
 
   const hasToolCalls = toolCalls.length > 0;
 
+  // When Anthropic refuses, surface the stop_details category in the refusal field
+  // so callers can build a user-facing message without re-reading the raw Anthropic message.
+  let refusalText: string | null = null;
+  if (msg.stop_reason === "refusal") {
+    const sd = (msg as { stop_details?: { category?: string | null; explanation?: string | null } }).stop_details;
+    const category = sd?.category ?? null;
+    const explanation = sd?.explanation ?? null;
+    refusalText = category
+      ? `Declined by safety classifier${explanation ? `: ${explanation}` : ` (category: ${category})`}`
+      : "Declined by safety classifier";
+  }
+
   const message: ChatCompletion.Choice["message"] = {
     role: "assistant",
-    refusal: null,
+    refusal: refusalText,
     content: hasToolCalls && text.length === 0 ? null : text,
     ...(hasToolCalls ? { tool_calls: toolCalls } : {}),
   };
@@ -90,6 +109,7 @@ export function convertResponse(
         logprobs: null,
       },
     ],
+    ...(reasoningText ? { reasoningText } : {}),
     usage: {
       prompt_tokens: msg.usage.input_tokens,
       completion_tokens: msg.usage.output_tokens,

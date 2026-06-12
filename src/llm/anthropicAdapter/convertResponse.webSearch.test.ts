@@ -59,3 +59,49 @@ describe("convertResponse — server_tool_use blocks and web_search_requests", (
     expect(result.choices[0].message.content).toBe("Found it.");
   });
 });
+
+describe("convertResponse — thinking blocks", () => {
+  it("extracts thinking block text into reasoningText", () => {
+    const msg = baseMessage({
+      content: [
+        { type: "thinking", thinking: "Let me check the imports first.", signature: "sig" } as unknown as Anthropic.ContentBlock,
+        { type: "text", text: "Here is the answer." },
+      ],
+    });
+    const result = convertResponse(msg);
+    expect(result.reasoningText).toBe("Let me check the imports first.");
+    expect(result.choices[0].message.content).toBe("Here is the answer.");
+  });
+
+  it("joins multiple thinking blocks with double newline", () => {
+    const msg = baseMessage({
+      content: [
+        { type: "thinking", thinking: "Step 1.", signature: "sig" } as unknown as Anthropic.ContentBlock,
+        { type: "thinking", thinking: "Step 2.", signature: "sig" } as unknown as Anthropic.ContentBlock,
+        { type: "text", text: "Done." },
+      ],
+    });
+    const result = convertResponse(msg);
+    expect(result.reasoningText).toBe("Step 1.\n\nStep 2.");
+  });
+
+  it("reasoningText is undefined when no thinking blocks", () => {
+    const msg = baseMessage({
+      content: [{ type: "text", text: "Answer." }],
+    });
+    const result = convertResponse(msg);
+    expect(result.reasoningText).toBeUndefined();
+  });
+
+  it("thinking text does NOT bleed into message.content", () => {
+    const msg = baseMessage({
+      content: [
+        { type: "thinking", thinking: "Private reasoning.", signature: "sig" } as unknown as Anthropic.ContentBlock,
+        { type: "text", text: "Public answer." },
+      ],
+    });
+    const result = convertResponse(msg);
+    expect(result.choices[0].message.content).toBe("Public answer.");
+    expect(result.choices[0].message.content).not.toContain("Private reasoning.");
+  });
+});
