@@ -1,6 +1,7 @@
 import { Box, Text, useInput, usePaste, useStdout } from "ink";
 import { useState, useEffect, useMemo, useRef } from "react";
 import fg from "fast-glob";
+import { readAtFileContext } from "../atFileContext.js";
 import { useStore } from "../store.js";
 import { loadDiskTrust } from "../../../api/diskTrust.js";
 import { loadDiskKeys } from "../../../api/diskKeys.js";
@@ -142,6 +143,7 @@ export function Composer({ onSubmit, onExit, onInitStart, getCommitData }: Compo
   const [atIdx, setAtIdx] = useState(0);
   const sideMapRef = useRef<Map<string, PasteEntry>>(new Map());
   const pasteCounterRef = useRef(1);
+  const lastAtSelectedPath = useRef<string | null>(null);
 
   const atPaletteOpen = buffer.startsWith("@") && !buffer.slice(1).includes(" ");
   const paletteOpen = buffer.startsWith("/");
@@ -149,6 +151,7 @@ export function Composer({ onSubmit, onExit, onInitStart, getCommitData }: Compo
 
   useEffect(() => {
     if (!atPaletteOpen) { setAtFiles([]); return; }
+    lastAtSelectedPath.current = null;
     const query = buffer.slice(1);
     const pattern = query ? `**/*${query}*` : "**/*";
     fg(pattern, { cwd: process.cwd(), ignore: ["**/node_modules/**", "**/.git/**"], onlyFiles: true, dot: false, suppressErrors: true })
@@ -330,7 +333,7 @@ export function Composer({ onSubmit, onExit, onInitStart, getCommitData }: Compo
     }
   }
 
-  function submitBuffer(text: string): void {
+  async function submitBuffer(text: string): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) return;
 
@@ -353,8 +356,16 @@ export function Composer({ onSubmit, onExit, onInitStart, getCommitData }: Compo
     sideMapRef.current.clear();
     pasteCounterRef.current = 1;
 
+    let contextBlock = "";
+    const fp = lastAtSelectedPath.current;
+    if (fp && agentText.includes(fp)) {
+      lastAtSelectedPath.current = null;
+      const fileCtx = await readAtFileContext(fp);
+      if (fileCtx) contextBlock = `\n\n[User-attached file]\n${fileCtx}`;
+    }
+
     const ac = new AbortController();
-    onSubmit(agentText, ac);
+    onSubmit(agentText + contextBlock, ac);
   }
 
   useInput((input, key) => {
@@ -367,7 +378,11 @@ export function Composer({ onSubmit, onExit, onInitStart, getCommitData }: Compo
       if (key.downArrow) { setAtIdx(i => Math.min(atFiles.length - 1, i + 1)); return; }
       if (key.return || key.tab) {
         const selected = atFiles[atIdx];
-        if (selected) { setBuffer(selected); setCursorPos(selected.length); }
+        if (selected) {
+          lastAtSelectedPath.current = selected;
+          setBuffer(selected);
+          setCursorPos(selected.length);
+        }
         setAtFiles([]);
         return;
       }
@@ -449,7 +464,7 @@ export function Composer({ onSubmit, onExit, onInitStart, getCommitData }: Compo
         setCursorPos(newBuf.length);
         return;
       }
-      submitBuffer(buffer);
+      void submitBuffer(buffer);
       return;
     }
 

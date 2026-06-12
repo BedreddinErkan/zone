@@ -242,3 +242,54 @@ describe("Composer — submitBuffer dispatch routing (T3)", () => {
     unmount();
   });
 });
+
+// ─── @ file injection — wiring (T-AT) ──────────────────────────────────────
+// Verifies the select→ref→submit→inject wiring end-to-end:
+//   (a) onSubmit receives agentText WITH the injected file content block
+//   (b) USER_PROMPT dispatch (transcript) sees only the path, NOT the content
+
+const mockReadAtFileContext = vi.hoisted(() => vi.fn<[], Promise<string | null>>());
+const mockFg = vi.hoisted(() => vi.fn<[], Promise<string[]>>());
+
+vi.mock("../atFileContext.js", () => ({ readAtFileContext: mockReadAtFileContext }));
+vi.mock("fast-glob", () => ({ default: mockFg }));
+
+describe("@ file injection — wiring (T-AT)", () => {
+  it("onSubmit receives file content block; USER_PROMPT dispatch does not", async () => {
+    const FILE_PATH = "src/foo.ts";
+    const FILE_CTX = `=== ${FILE_PATH} ===\nconst x = 1;\n`;
+
+    mockFg.mockResolvedValue([FILE_PATH]);
+    mockReadAtFileContext.mockResolvedValue(FILE_CTX);
+
+    const onSubmit = vi.fn();
+    const { stdin, lastFrame, unmount } = render(
+      <StoreProvider initialValues={{ model: "test-model", capUsd: 10 }}>
+        <Composer onSubmit={onSubmit} onExit={() => {}} />
+        <DispatchLogger />
+      </StoreProvider>
+    );
+
+    // Open @ palette and wait for fg effect to resolve
+    stdin.write("@");
+    await wait(100);
+
+    // Select the first file (buffer becomes "src/foo.ts", lastAtSelectedPath set)
+    stdin.write("\r");
+    await wait(50);
+
+    // Submit; async submitBuffer reads file content then calls onSubmit
+    stdin.write("\r");
+    await wait(100);
+
+    expect(onSubmit).toHaveBeenCalledOnce();
+    // model sees task + injected content block
+    expect(onSubmit.mock.calls[0][0]).toContain("=== src/foo.ts ===");
+
+    // transcript (USER_PROMPT dispatch) contains only the path, not the content
+    expect(lastFrame()).toContain(`[DISPATCH]${FILE_PATH}`);
+    expect(lastFrame()).not.toContain("=== src/foo.ts ===");
+
+    unmount();
+  });
+});
