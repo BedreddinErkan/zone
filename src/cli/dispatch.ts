@@ -244,23 +244,23 @@ export async function runOneShotInner(
       } catch (e) {
         if (e instanceof ProviderRequestError) throw e; // propagate to outer TUI/headless catch
         if (e instanceof PlanRefusalError) throw e;     // propagate graceful decline to outer catch
-        debugLog("[zone-plan-gen-failed]", e instanceof Error ? e.message : String(e));
-      }
-
-      if (!preGeneratedPlan) {
+        const failReason = planCtxRelevantFiles.length === 0 ? "empty-context" : "parse-error";
+        debugLog("[zone-plan-gen-failed]", { reason: failReason, taskLength: task.length });
         progressCallback({
           stage: "narration",
           progress: {
             type: "narration",
             runId,
             ts: Date.now(),
-            title: "Plan generation failed",
-            text: "Plan generation failed — cannot proceed in plan mode without a plan.",
+            title: "Planning skipped",
+            text: "Could not generate a plan — running agent directly.",
           },
         });
-        ac.abort();
-        return { ok: false as const, reason: "plan_gen_failed" } as unknown as LlmPatchFlowResult;
       }
+
+      if (!preGeneratedPlan) {
+        // Plan-gen failed (logged above). Fall through to runLlmPatchFlow without a plan.
+      } else {
 
       // E8a: reproduce command did not run — premise unverified, do not fabricate a fix.
       // Gate: only honor for tasks that assert a pre-existing problem (fix/debug).
@@ -448,6 +448,7 @@ export async function runOneShotInner(
         }
         planForExecution = currentPlan;
       }
+      } // end else (preGeneratedPlan defined — plan-dependent code)
     }
   }
 

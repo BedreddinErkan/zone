@@ -139,23 +139,63 @@ describe("Non-refusal plan-gen failure — quick path behavior", () => {
     mockLoadDiskModelSync.mockReturnValue({ planDepth: "quick" });
   });
 
-  it("generateExecutionPlan throws generic Error → swallowed; returns plan_gen_failed result", async () => {
+  it("generateExecutionPlan throws generic Error → swallowed; falls back to runLlmPatchFlow without a plan", async () => {
     mockGenerateExecutionPlan.mockRejectedValueOnce(new Error("parse error: bad JSON"));
+    mockRunLlmPatchFlow.mockResolvedValueOnce({ ok: true, decisionMode: "safe_to_apply" });
 
-    const result = await runOneShotInner("task", BASE_CONFIG, "run-6", PLAN_OPTS);
-    // Non-PlanRefusalError is swallowed by dispatch; preGeneratedPlan stays null → {ok:false}
-    expect(result).toMatchObject({ ok: false });
-    expect(mockRunLlmPatchFlow).not.toHaveBeenCalled();
+    await runOneShotInner("task", BASE_CONFIG, "run-6", PLAN_OPTS);
+    // Non-PlanRefusalError is swallowed; fallback routes to runLlmPatchFlow without preGeneratedPlan.
+    expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
+    const call = mockRunLlmPatchFlow.mock.calls[0]![0] as Record<string, unknown>;
+    expect(call["preGeneratedPlan"]).toBeUndefined();
   });
 
-  it("PlanRefusalError does NOT go through generic plan_gen_failed path (different exit)", async () => {
-    // Confirm error type distinction: PlanRefusalError propagates, generic doesn't
+  it("PlanRefusalError propagates; generic error falls back to execution (not plan_gen_failed)", async () => {
+    // Confirm error type distinction: PlanRefusalError propagates, generic falls through to agent loop.
     mockGenerateExecutionPlan.mockRejectedValueOnce(new PlanRefusalError("Declined", 0));
     await expect(runOneShotInner("task", BASE_CONFIG, "run-7", PLAN_OPTS)).rejects.toBeInstanceOf(PlanRefusalError);
 
     mockGenerateExecutionPlan.mockReset();
     mockGenerateExecutionPlan.mockRejectedValueOnce(new Error("unrelated failure"));
-    const result = await runOneShotInner("task", BASE_CONFIG, "run-8", PLAN_OPTS);
-    expect(result).toMatchObject({ ok: false });
+    mockRunLlmPatchFlow.mockResolvedValueOnce({ ok: true, decisionMode: "safe_to_apply" });
+    await runOneShotInner("task", BASE_CONFIG, "run-8", PLAN_OPTS);
+    expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
+  });
+
+  it("empty-dir fallback: preparePlanContext returns empty files → generateExecutionPlan throws → runLlmPatchFlow called without plan", async () => {
+    // Regression: empty/non-project dir used to dead-end with plan_gen_failed + ac.abort().
+    // Fix: dispatch falls back to runLlmPatchFlow(no preGeneratedPlan) instead.
+    mockPreparePlanContext.mockResolvedValueOnce({ projectSummary: "", relevantFilePaths: [] });
+    mockGenerateExecutionPlan.mockRejectedValueOnce(new Error("No JSON object found in model response"));
+    mockRunLlmPatchFlow.mockResolvedValueOnce({ ok: true, decisionMode: "safe_to_apply" });
+
+    const result = await runOneShotInner("add a logger", BASE_CONFIG, "run-empty-dir", PLAN_OPTS);
+
+    expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
+    const call = mockRunLlmPatchFlow.mock.calls[0]![0] as Record<string, unknown>;
+    expect(call["preGeneratedPlan"]).toBeUndefined();
+    expect(mockRequestPlanApproval).not.toHaveBeenCalled();
+    expect((result as any).ok).toBe(true);
+  });
+
+  it("parse-robustness: generateExecutionPlan throws on non-JSON prose → dispatch falls back (no abort, no plan_gen_failed)", async () => {
+    // Regression: model returning prose instead of JSON used to propagate a parse error that
+    // caused dispatch to abort the controller and return {ok:false, reason:"plan_gen_failed"}.
+    mockPreparePlanContext.mockResolvedValueOnce({
+      projectSummary: "A TS project",
+      relevantFilePaths: ["src/index.ts", "src/api.ts"],
+    });
+    mockGenerateExecutionPlan.mockRejectedValueOnce(new Error("Unexpected token 'I' at position 0"));
+    mockRunLlmPatchFlow.mockResolvedValueOnce({ ok: true, decisionMode: "safe_to_apply" });
+
+    const ac = new AbortController();
+    const result = await runOneShotInner("refactor the API layer", BASE_CONFIG, "run-parse-err", {
+      mode: "plan",
+      externalAc: ac,
+    });
+
+    expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
+    expect(ac.signal.aborted).toBe(false);
+    expect((result as any).ok).toBe(true);
   });
 });

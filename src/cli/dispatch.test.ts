@@ -438,17 +438,19 @@ describe("runOneShotInner — plan mode paths", () => {
     expect((flowCall["preGeneratedPlan"] as any).objective).toBe(REVISED_PLAN.objective);
   });
 
-  it("plan gen failure in plan mode: abort, runLlmPatchFlow NOT called", async () => {
+  it("plan gen failure in plan mode: no abort, falls back to runLlmPatchFlow without a plan", async () => {
     mockGenerateExecutionPlan.mockRejectedValueOnce(new Error("plan gen failed"));
+    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
     const ac = new AbortController();
-    const result = await runOneShotInner("do something", BASE_CONFIG, "run-no-plan", {
+    await runOneShotInner("do something", BASE_CONFIG, "run-no-plan", {
       mode: "plan",
       externalAc: ac,
     });
     expect(mockRequestPlanApproval).not.toHaveBeenCalled();
-    expect(mockRunLlmPatchFlow).not.toHaveBeenCalled();
-    expect(ac.signal.aborted).toBe(true);
-    expect((result as any).ok).toBe(false);
+    expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
+    const call = mockRunLlmPatchFlow.mock.calls[0]![0] as Record<string, unknown>;
+    expect(call["preGeneratedPlan"]).toBeUndefined();
+    expect(ac.signal.aborted).toBe(false);
   });
 
   it("ZONE_PLAN_LEGACY_AUDIT=1: runAuditPipeline called with forceAudit:true, requestPlanApproval NOT called", async () => {
