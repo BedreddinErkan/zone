@@ -346,7 +346,10 @@ export async function runInvestigationFlow(input: {
   runId?: string;
   userId?: string;
   userApiKey?: string;
+  /** Provider to use for the investigation (inherits from the caller's active config). */
+  provider?: LLMProvider;
   abortSignal?: AbortSignal;
+  suppressOutputFormat?: boolean;
   onProgress?: (update: {
     stage: string;
     lifecycle?: unknown;
@@ -403,7 +406,9 @@ export async function runInvestigationFlow(input: {
     runId: runId || undefined,
     userId: input.userId,
     userApiKey: input.userApiKey,
+    provider: input.provider,
     abortSignal: input.abortSignal,
+    suppressOutputFormat: input.suppressOutputFormat,
     mode: "investigation",
     capabilityFilter: { allow: new Set<Capability>(["fs.read"]) },
     maxIterationsOverride: computedMax,

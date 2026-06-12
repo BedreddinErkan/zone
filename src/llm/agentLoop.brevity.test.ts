@@ -109,6 +109,39 @@ describe('Phase 1: GIT CONTEXT directive scoping', () => {
   });
 });
 
+describe('R1/R6: DIVERGENCE CHECK directive and investigation archetype preamble', () => {
+  it('patch mode contains "DIVERGENCE CHECK"', () => {
+    const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
+    expect(prompt).toContain('DIVERGENCE CHECK');
+  });
+
+  it('investigation archetype contains "DIVERGENCE CHECK"', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'investigation' });
+    expect(prompt).toContain('DIVERGENCE CHECK');
+  });
+
+  it('question archetype does NOT contain "DIVERGENCE CHECK" (scope guard)', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question' });
+    expect(prompt).not.toContain('DIVERGENCE CHECK');
+  });
+
+  it('investigation archetype gets "INVESTIGATION GUIDE" preamble, not "Q&A / LISTING MODE"', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'investigation' });
+    expect(prompt).toContain('INVESTIGATION GUIDE');
+    expect(prompt).not.toContain('Q&A / LISTING MODE');
+  });
+
+  it('investigation archetype does NOT contain "EFFICIENCY CONTRACT" (scope guard)', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'investigation' });
+    expect(prompt).not.toContain('EFFICIENCY CONTRACT');
+  });
+
+  it('question archetype still gets "Q&A / LISTING MODE" (regression guard)', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question' });
+    expect(prompt).toContain('Q&A / LISTING MODE');
+  });
+});
+
 describe('summaryFormat preset selection', () => {
   it('compact summaryFormat (explicit) produces the 900-char-cap block + tag present', () => {
     const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, summaryFormat: 'compact' });

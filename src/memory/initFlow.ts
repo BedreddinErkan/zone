@@ -1,7 +1,8 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { loadDiskKeys } from "../api/diskKeys.js";
+import { loadCliConfig, applyDiskKeyFallbacks } from "../cli/config.js";
+import { withRequestContext } from "../llm/openaiContext.js";
 import { runInvestigationFlow } from "../llm/investigationFlow.js";
 
 const MEMORY_PATH_RELATIVE = join(".zone", "memory.md");
@@ -12,9 +13,10 @@ Read these files in order:
 1. Use list_files to get the top-level directory structure (depth 1).
 2. Read README.md if present, then package.json / Cargo.toml / go.mod / pyproject.toml — whichever exists.
 3. Read tsconfig.json, vitest.config.*, vite.config.*, or equivalent build/test config if present.
-4. Sample 3 representative source files to infer conventions.
+4. Read the main entry/dispatch file (e.g. src/cli/index.ts, src/index.ts, main.py, main.go) and 1-2 shared utility modules for cross-cutting concerns (config loading, auth, persistence, path handling, error mapping — for LLM-agent projects these include key/provider/model resolution and client/adapter factory). Choose the files with the highest architectural density.
+5. Use search_in_files ONCE to find where the shared module identified in step 4 is imported across the codebase (search for its module name or exported function in src/**/*.ts or equivalent). Record the top 2-3 call sites for the Shared helpers section.
 
-Produce a SINGLE markdown response with EXACTLY these six sections and no other content:
+Produce a SINGLE markdown response with EXACTLY these seven sections and no other content:
 
 ## Project
 Project name (from package.json / Cargo.toml / etc.) and a one-sentence description.
@@ -22,22 +24,25 @@ Project name (from package.json / Cargo.toml / etc.) and a one-sentence descript
 ## Stack
 Language(s), framework(s), runtime version, package manager.
 
-## Layout
-3–7 top-level directories and their purpose (one per line, format: \`dir/\` — purpose).
-
 ## Commands
 install, build, test, lint, run/dev commands (extracted from package.json scripts or Makefile).
-
-## Conventions
-3–5 notable patterns: testing approach, file naming, module organization.
 
 ## Entry points
 Main binary / server entry / CLI command.
 
+## Shared helpers
+Key modules for cross-cutting concerns in this project (config loading, auth, persistence, path handling, error mapping; adapt to what exists). For each: \`module-path → exported-function\` — what callers MUST use it for. State the rule: use these helpers; never inline the concern they encapsulate.
+
+## Invariants & gotchas
+3-5 non-obvious constraints extracted from the build config and entry files: build/run quirks (e.g. "CLI runs from dist/ — rebuild after editing src/"; "use .js import specifiers in ESM"), path/cache traps, atomic-write rules, version constraints, test isolation requirements.
+
+## Verification gates
+Commands that must pass before a change is "done". Extract from package.json scripts, Makefile, or CI config.
+
 STRICT RULES:
 - Base ALL content ONLY on files you actually read. No guessing.
-- Total response must be under 80 lines.
-- No preamble, no conclusion, no extra commentary outside the six sections.`;
+- Total response must be under 100 lines.
+- No preamble, no conclusion, no extra commentary outside the seven sections.`;
 
 export function stripTrailingCodeBlock(text: string): string {
   return text.replace(/\n```[a-zA-Z]*\n((?:(?!```)[\s\S])*)\n```\s*$/, "");
@@ -45,7 +50,8 @@ export function stripTrailingCodeBlock(text: string): string {
 
 export async function runInitFlow(
   cwd: string,
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  abortSignal?: AbortSignal,
 ): Promise<{ ok: boolean; message: string }> {
   const memoryPath = join(cwd, MEMORY_PATH_RELATIVE);
 
@@ -64,14 +70,26 @@ export async function runInitFlow(
 
   let chatResponse: string;
   try {
-    const diskKeys = await loadDiskKeys();
-    const apiKey = diskKeys.keys.find(k => k.provider === "anthropic")?.key ?? process.env.ANTHROPIC_API_KEY;
-    const result = await runInvestigationFlow({
-      task: INIT_PROMPT,
-      repoPath: cwd,
-      runId: randomUUID(),
-      userApiKey: apiKey,
-    });
+    const config = loadCliConfig({ repo: cwd });
+    await applyDiskKeyFallbacks(config);
+    const apiKey = config.provider === "openai" ? config.openaiApiKey : config.anthropicApiKey;
+    const result = await withRequestContext(
+      {
+        userApiKey: apiKey,
+        provider: config.provider,
+        modelOverride: { high: config.model, standard: config.model },
+      },
+      () =>
+        runInvestigationFlow({
+          task: INIT_PROMPT,
+          repoPath: cwd,
+          runId: randomUUID(),
+          userApiKey: apiKey,
+          provider: config.provider,
+          abortSignal,
+          suppressOutputFormat: true,
+        }),
+    );
     chatResponse = result.chatResponse;
   } catch (err) {
     return { ok: false, message: `init: investigation failed: ${(err as Error).message}` };

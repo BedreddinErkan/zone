@@ -78,6 +78,50 @@ export async function readMemory(repoPath: string): Promise<MemoryEntry[]> {
   }
 }
 
+/**
+ * Builds the full project memory block for injection into the agent system prompt.
+ * Combines the ZONE_INIT structured block (from /init) with dated session notes.
+ * Returns "" when the file is absent or contains no content worth injecting.
+ */
+export async function readProjectMemoryBlock(repoPath: string): Promise<string> {
+  if (!repoPath || typeof repoPath !== "string") return "";
+  const filePath = memoryFilePath(repoPath);
+  let raw: string;
+  try {
+    raw = await fs.readFile(filePath, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return "";
+    throw err;
+  }
+
+  const parts: string[] = [];
+
+  // Reuse the existing INIT_BLOCK_RE (has capture group) — never define a second
+  // regex for the same block structure.
+  const initMatch = INIT_BLOCK_RE.exec(raw);
+  if (initMatch) {
+    parts.push(initMatch[1].trim());
+  }
+
+  const entries = parseEntries(raw);
+  if (entries.length > 0) {
+    const bullets = entries.map((e) => `- ${e.text}`).join("\n");
+    parts.push(
+      [
+        "## Session notes",
+        "",
+        "Conventions learned from previous runs — apply when relevant; prefer the current task if they conflict.",
+        "",
+        bullets,
+      ].join("\n"),
+    );
+  }
+
+  if (parts.length === 0) return "";
+
+  return ["# Project memory", "", parts.join("\n\n")].join("\n");
+}
+
 export async function appendMemory(
   repoPath: string,
   text: string

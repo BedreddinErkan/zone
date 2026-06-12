@@ -8,6 +8,7 @@ import {
   formatMemoryForPrompt,
   MEMORY_MAX_ENTRIES,
   readMemory,
+  readProjectMemoryBlock,
   type MemoryEntry,
 } from "../projectMemory.js";
 
@@ -146,5 +147,56 @@ describe("formatMemoryForPrompt", () => {
     expect(out).toContain("- Tests live in __tests__/");
     // No date prefix in the prompt — we only need the convention text.
     expect(out).not.toContain("[2026-");
+  });
+});
+
+describe("readProjectMemoryBlock — Bug A injection fix", () => {
+  function writeMemory(content: string): void {
+    const dir = path.join(tempRepo, ".zone");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "memory.md"), content, "utf-8");
+  }
+
+  it("returns '' when file is absent", async () => {
+    const out = await readProjectMemoryBlock(tempRepo);
+    expect(out).toBe("");
+  });
+
+  it("returns '' for an empty file", async () => {
+    writeMemory("");
+    const out = await readProjectMemoryBlock(tempRepo);
+    expect(out).toBe("");
+  });
+
+  it("injects ZONE_INIT content when only init block present", async () => {
+    writeMemory(INIT_BLOCK);
+    const out = await readProjectMemoryBlock(tempRepo);
+    expect(out).toContain("## Project");
+    expect(out).toContain("Zone.");
+    expect(out).not.toContain("ZONE_INIT_BEGIN");
+    expect(out).not.toContain("ZONE_INIT_END");
+  });
+
+  it("returns 'Session notes' block when only dated entries present", async () => {
+    writeMemory("- [2026-06-12] use the shared helper\n");
+    const out = await readProjectMemoryBlock(tempRepo);
+    expect(out).toContain("## Session notes");
+    expect(out).toContain("use the shared helper");
+    expect(out).not.toContain("ZONE_INIT");
+  });
+
+  it("combines init content and session notes when both present", async () => {
+    writeMemory(`${INIT_BLOCK}\n\n- [2026-06-12] always rebuild after editing src/\n`);
+    const out = await readProjectMemoryBlock(tempRepo);
+    expect(out).toContain("## Project");
+    expect(out).toContain("## Session notes");
+    expect(out).toContain("always rebuild after editing src/");
+    expect(out).not.toContain("ZONE_INIT_BEGIN");
+  });
+
+  it("wraps the combined block with '# Project memory' header", async () => {
+    writeMemory(INIT_BLOCK);
+    const out = await readProjectMemoryBlock(tempRepo);
+    expect(out.startsWith("# Project memory")).toBe(true);
   });
 });

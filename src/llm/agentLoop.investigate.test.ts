@@ -104,4 +104,23 @@ describe("assembleInvestigationSystemPrompt", () => {
     expect(patchPrompt).not.toContain("shall I dig deeper?");
     expect(patchPrompt).not.toContain("Read 2-3 top hits");
   });
+
+  it("contains DIVERGENCE CHECK directive (R1)", () => {
+    const prompt = assembleInvestigationSystemPrompt(baseInput);
+    expect(prompt).toContain("DIVERGENCE CHECK");
+  });
+
+  it("contains breadth-before-verdict instruction mentioning sibling call sites (R7)", () => {
+    const prompt = assembleInvestigationSystemPrompt(baseInput);
+    expect(prompt).toContain("sibling call sites");
+  });
+
+  it("patch mode does NOT use the step-5 DIVERGENCE CHECK list format (investigation-mode-only)", () => {
+    const patchPrompt = assembleAgentSystemPrompt({
+      agentIntro: "You are Zone.",
+      frameworkLines: [],
+      projectMemoryBlock: "",
+    });
+    expect(patchPrompt).not.toMatch(/5\. DIVERGENCE CHECK —/);
+  });
 });
