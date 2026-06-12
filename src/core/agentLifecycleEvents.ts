@@ -130,11 +130,14 @@ export type ZoneStructuredProgressEvent = {
     | "subagent_completed"
     | "handoff_report"
     | "command_approval_required"
+    | "edit_approval_required"
+    | "trust_approval_required"
     | "command_auto_approved"
     | "command_trusted"
     | "terminal_output"
     | "terminal_done"
     | "narration"
+    | "thinking"
     | "token_budget_status"
     | "task_classified"
     | "tier_constraints_applied"
@@ -163,8 +166,14 @@ export type ZoneStructuredProgressEvent = {
     | "scope_block_circuit_terminal"
     /** Plan-ready approval gate (ZONE_PLAN_APPROVAL_CYCLE=1): emitted after plan generation. */
     | "plan_ready_for_approval"
+    /** R3 staged-diff checkpoint: emitted after staging, before flush, for user approval. */
+    | "staged_diffs_ready_for_approval"
+    /** Plan-first mode: non-blocking diff display after successful execute. */
+    | "post_execute_diffs"
     /** TUI spinner during plan gen / re-plan; title field carries the label. */
-    | "plan_generation_started";
+    | "plan_generation_started"
+    /** Provider returned a non-auth HTTP 400 (e.g. retention/ZDR mismatch). Surface via red ErrorLine + failed run-state. */
+    | "run_failed";
   title: string;
   detail?: string;
   filePath?: string;
@@ -194,6 +203,8 @@ export type ZoneStructuredProgressEvent = {
   total_output?: number;
   iter_count?: number;
   approvalId?: string;
+  /** trust_approval_required: the folder path being granted trust. */
+  projectPath?: string;
   todos?: Array<{
     id: string;
     text: string;
@@ -295,6 +306,13 @@ export type ZoneStructuredProgressEvent = {
   planObjective?: string;
   planStepsJson?: string;
   planScopeNotes?: string;
+  /** staged_diffs_ready_for_approval: R3 checkpoint fields. */
+  stagedFilesJson?: string;
+  stagedVerificationSummary?: string;
+  stagedTrigger?: string;
+  /** run_failed: mapped user-facing message and error kind from ProviderRequestError. */
+  userMessage?: string;
+  errorKind?: string;
 };
 
 /** Documentation type for `narration` progress events: a one-line intent

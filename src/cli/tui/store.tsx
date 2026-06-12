@@ -5,11 +5,12 @@ import type { DiskApiKey, ApiKeyProvider } from "../../api/diskKeys.js";
 import type { DiskSession, SessionMeta } from "../../api/diskSessions.js";
 import type { TuiMode } from "../dispatch.js";
 import type { DiskModelSettings } from "../../api/diskModel.js";
-import { supportsEffort } from "../../llm/modelRegistry.js";
+import { supportsEffort, effortLevelsFor } from "../../llm/modelRegistry.js";
 import type { EffortLevel } from "../../llm/modelRegistry.js";
 import type { RunTodo, TodoStatus } from "../../core/todoLifecycle.js";
 import { startTodo, completeTodo } from "../../core/todoLifecycle.js";
 import type { UserCommand } from "./userCommands.js";
+import type { StagedFile } from "../../core/fileDiff.js";
 
 export type { TuiMode };
 
@@ -34,11 +35,13 @@ export type LiveTailState = {
 
 export type TranscriptEntry =
   | { kind: "narration"; text: string }
+  | { kind: "thinking"; text: string }
   | { kind: "tool_call"; toolName: string; args: string; patch?: string; results: { ok: boolean; detail: string; blocked?: true }[] }
   | { kind: "error"; text: string }
   | { kind: "phase_marker"; phase: string }
   | { kind: "user_prompt"; text: string }
-  | { kind: "assistant_final"; text: string };
+  | { kind: "assistant_final"; text: string }
+  | { kind: "post_execute_diffs"; files: StagedFile[] };
 
 export type StatusBarState = {
   iter: number;
@@ -50,7 +53,7 @@ export type StatusBarState = {
   cumulativeTokens: number;
 };
 
-export type RunState = "idle" | "running" | "done" | "aborted";
+export type RunState = "idle" | "running" | "done" | "aborted" | "failed";
 
 export type StoreState = {
   transcript: TranscriptEntry[];
@@ -68,7 +71,7 @@ export type StoreState = {
   runEndMs?: number;
   toastQueue: ToastEntry[];
   modalStack: ModalEntry[];
-  pendingApproval: { approvalId: string; runId: string; command: string } | null;
+  pendingApproval: { approvalId: string; runId: string; command: string; kind?: "command" | "edit" | "trust" } | null;
   sessionTrustedPrefixes: string[];
   mode: TuiMode;
   planProposal: {
@@ -81,7 +84,8 @@ export type StoreState = {
     missingFiles?: string[];
     unnecessaryFiles?: string[];
   } | null;
-  modalView: "none" | "permissions" | "keys" | "sessions" | "plan" | "model" | "effort" | "metrics" | "limits" | "plan_ready" | "summary" | "session" | "commit";
+  modalView: "none" | "permissions" | "keys" | "sessions" | "plan" | "model" | "effort" | "metrics" | "limits" | "plan_ready" | "staged_diffs" | "summary" | "session" | "commit" | "planMode";
+  planModeSelectedIndex: number;
   commitData: { filePaths: string[]; message: string; repoPath: string } | null;
   summarySelectedIndex: number;
   memorySelectedIndex: number;
@@ -91,6 +95,13 @@ export type StoreState = {
     objective: string;
     steps: Array<{ title: string; description: string; filesLikely: string[] }>;
     scopeNotes?: string;
+  } | null;
+  stagedDiffProposal: {
+    approvalId: string;
+    runId: string;
+    files: StagedFile[];
+    verificationSummary: string;
+    trigger: string;
   } | null;
   modelSettings: DiskModelSettings | null;
   modelSelectedIndex: number;
@@ -119,6 +130,7 @@ export function buildInitialState(initialValues?: {
   resumedStartedAt?: string;
   modelSettings?: DiskModelSettings | null;
   userCommands?: UserCommand[];
+  mode?: TuiMode;
 }): StoreState {
   return {
     transcript: initialValues?.resumedTranscript ?? [],
@@ -143,15 +155,17 @@ export function buildInitialState(initialValues?: {
     modalStack: [],
     pendingApproval: null,
     sessionTrustedPrefixes: initialValues?.trustedPrefixes ?? [],
-    mode: "normal",
+    mode: initialValues?.mode ?? "normal",
     planProposal: null,
     planReadyProposal: null,
+    stagedDiffProposal: null,
     modalView: "none",
     commitData: null,
     modelSettings: initialValues?.modelSettings ?? null,
     modelSelectedIndex: 0,
     effortSelectedIndex: 1,
     summarySelectedIndex: 0,
+    planModeSelectedIndex: 0,
     memorySelectedIndex: 0,
     permissionsList: [],
     permissionsSelectedIndex: 0,
@@ -173,6 +187,7 @@ export type StoreAction =
   | { type: "SPINNER_UPDATE"; label: string }
   | { type: "SPINNER_STOP" }
   | { type: "TRANSCRIPT_APPEND_NARRATION"; text: string }
+  | { type: "TRANSCRIPT_ADD_THINKING"; text: string }
   | { type: "TOOL_CALL_OPEN"; toolName: string; args: string; patch?: string }
   | { type: "TOOL_RESULT_PUSH"; ok: boolean; detail: string; blocked?: true }
   | { type: "TOOL_CALL_CLOSE" }
@@ -184,11 +199,12 @@ export type StoreAction =
   | { type: "ERROR_LINE"; text: string }
   | { type: "RUN_DONE" }
   | { type: "RUN_ABORTED" }
+  | { type: "RUN_FAILED" }
   | { type: "USER_PROMPT"; text: string }
   | { type: "ASSISTANT_FINAL"; text: string }
   | { type: "TRANSCRIPT_CLEAR" }
   | { type: "TRANSCRIPT_REMOUNT" }
-  | { type: "PENDING_APPROVAL_SET"; approvalId: string; runId: string; command: string }
+  | { type: "PENDING_APPROVAL_SET"; approvalId: string; runId: string; command: string; kind?: "command" | "edit" | "trust" }
   | { type: "PENDING_APPROVAL_RESOLVED" }
   | { type: "SESSION_TRUST_PREFIX"; prefix: string }
   | { type: "PERMISSIONS_OPEN"; list: DiskTrustEntry[] }
@@ -223,6 +239,10 @@ export type StoreAction =
   | { type: "SUMMARY_MODAL_CLOSE" }
   | { type: "SUMMARY_APPLY"; summaryFormat: "compact" | "detailed" }
   | { type: "SUMMARY_NAV"; direction: "up" | "down" }
+  | { type: "PLANMODE_MODAL_OPEN" }
+  | { type: "PLANMODE_MODAL_CLOSE" }
+  | { type: "PLANMODE_APPLY"; planDepth: "investigate" | "quick" | "strict" }
+  | { type: "PLANMODE_NAV"; direction: "up" | "down" }
   | { type: "MEMORY_MODAL_OPEN" }
   | { type: "MEMORY_MODAL_CLOSE" }
   | { type: "MEMORY_APPLY"; memoryEnabled: boolean }
@@ -254,13 +274,23 @@ export type StoreAction =
       scopeNotes?: string;
     }
   | { type: "PLAN_READY_RESOLVED" }
+  | {
+      type: "STAGED_DIFFS_PROPOSED";
+      approvalId: string;
+      runId: string;
+      files: StagedFile[];
+      verificationSummary: string;
+      trigger: string;
+    }
+  | { type: "STAGED_DIFFS_RESOLVED" }
   | { type: "NARRATION_COMMIT" }
   | { type: "COMMIT_MODAL_OPEN"; filePaths: string[]; message: string; repoPath: string }
   | { type: "COMMIT_MODAL_CLOSE" }
   | { type: "AUTOCOMMIT_APPLY"; commitOnSuccess: boolean }
   | { type: "WEBSEARCH_APPLY"; webSearchEnabled: boolean }
   | { type: "TODOS_SET"; todos: RunTodo[] }
-  | { type: "TODO_STATUS_SET"; todoId: string; status: TodoStatus };
+  | { type: "TODO_STATUS_SET"; todoId: string; status: TodoStatus }
+  | { type: "POST_EXECUTE_DIFFS"; files: StagedFile[] };
 
 export function reducer(state: StoreState, action: StoreAction): StoreState {
   switch (action.type) {
@@ -362,6 +392,15 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         liveTail: { ...state.liveTail, currentToolCall: null },
       };
 
+    case "RUN_FAILED":
+      return {
+        ...state,
+        spinner: null,
+        runState: "failed",
+        runEndMs: Date.now(),
+        liveTail: { ...state.liveTail, currentToolCall: null },
+      };
+
     case "USER_PROMPT":
       return {
         ...state,
@@ -375,6 +414,9 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         transcript: [...state.transcript, { kind: "assistant_final", text: action.text }],
       };
 
+    case "POST_EXECUTE_DIFFS":
+      return { ...state, transcript: [...state.transcript, { kind: "post_execute_diffs", files: action.files }] };
+
     case "TRANSCRIPT_CLEAR":
       return { ...state, transcript: [], todos: [] };
 
@@ -382,7 +424,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return { ...state, transcriptGeneration: state.transcriptGeneration + 1 };
 
     case "PENDING_APPROVAL_SET":
-      return { ...state, pendingApproval: { approvalId: action.approvalId, runId: action.runId, command: action.command } };
+      return { ...state, pendingApproval: { approvalId: action.approvalId, runId: action.runId, command: action.command, kind: action.kind } };
 
     case "PENDING_APPROVAL_RESOLVED":
       return { ...state, pendingApproval: null };
@@ -544,11 +586,33 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       };
 
     case "PLAN_READY_RESOLVED":
-      return { ...state, modalView: "none", planReadyProposal: null, mode: "normal" };
+      // Plan mode is sticky (Claude-Code-like): keep state.mode so follow-up
+      // tasks stay in plan mode until the user toggles out via Shift+Tab.
+      return { ...state, modalView: "none", planReadyProposal: null };
+
+    case "STAGED_DIFFS_PROPOSED":
+      return {
+        ...state,
+        modalView: "staged_diffs",
+        stagedDiffProposal: {
+          approvalId: action.approvalId,
+          runId: action.runId,
+          files: action.files,
+          verificationSummary: action.verificationSummary,
+          trigger: action.trigger,
+        },
+      };
+
+    case "STAGED_DIFFS_RESOLVED":
+      return { ...state, modalView: "none", stagedDiffProposal: null };
 
     case "TRANSCRIPT_APPEND_NARRATION":
       if (!action.text) return state;
       return { ...state, liveTail: { ...state.liveTail, narrationBuffer: state.liveTail.narrationBuffer + action.text } };
+
+    case "TRANSCRIPT_ADD_THINKING":
+      if (!action.text) return state;
+      return { ...state, transcript: [...state.transcript, { kind: "thinking" as const, text: action.text }] };
 
     case "NARRATION_COMMIT": {
       const { narrationBuffer } = state.liveTail;
@@ -572,10 +636,15 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         ? action.settings.effort
         : undefined;
       const settings = { ...action.settings, effort: effortToKeep };
+      const newEffortCount = effortLevelsFor(settings.model).length;
+      const clampedEffortIndex = newEffortCount > 0
+        ? Math.min(state.effortSelectedIndex, newEffortCount - 1)
+        : 0;
       return {
         ...state,
         modelSettings: settings,
         statusBar: { ...state.statusBar, model: settings.model },
+        effortSelectedIndex: clampedEffortIndex,
         modalView: "none",
       };
     }
@@ -619,10 +688,10 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     }
 
     case "EFFORT_NAV": {
-      const EFFORT_COUNT = 3;
+      const effortCount = effortLevelsFor(state.modelSettings?.model ?? "").length || 3;
       const next = action.direction === "up"
         ? Math.max(0, state.effortSelectedIndex - 1)
-        : Math.min(EFFORT_COUNT - 1, state.effortSelectedIndex + 1);
+        : Math.min(effortCount - 1, state.effortSelectedIndex + 1);
       return { ...state, effortSelectedIndex: next };
     }
 
@@ -645,6 +714,26 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         ? Math.max(0, state.summarySelectedIndex - 1)
         : Math.min(SUMMARY_COUNT - 1, state.summarySelectedIndex + 1);
       return { ...state, summarySelectedIndex: next };
+    }
+
+    case "PLANMODE_MODAL_OPEN":
+      return { ...state, modalView: "planMode" };
+
+    case "PLANMODE_MODAL_CLOSE":
+      return { ...state, modalView: "none" };
+
+    case "PLANMODE_APPLY": {
+      const updated: DiskModelSettings = state.modelSettings
+        ? { ...state.modelSettings, planDepth: action.planDepth, updatedAt: new Date().toISOString() }
+        : { version: 2, model: "claude-sonnet-4-6", provider: "anthropic", planDepth: action.planDepth, updatedAt: new Date().toISOString() };
+      return { ...state, modelSettings: updated, modalView: "none" };
+    }
+
+    case "PLANMODE_NAV": {
+      const next = action.direction === "up"
+        ? Math.max(0, state.planModeSelectedIndex - 1)
+        : Math.min(1, state.planModeSelectedIndex + 1);
+      return { ...state, planModeSelectedIndex: next };
     }
 
     case "MEMORY_MODAL_OPEN":
@@ -746,6 +835,7 @@ export function StoreProvider({
     resumedStartedAt?: string;
     modelSettings?: DiskModelSettings | null;
     userCommands?: UserCommand[];
+    mode?: TuiMode;
   };
 }): React.ReactElement {
   const [state, dispatch] = useReducer(reducer, undefined, () =>

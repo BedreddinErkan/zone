@@ -11285,6 +11285,14 @@ export function mapStructuredEventToProgress(
         iter: typeof e.iter === "number" ? e.iter : undefined,
         status: "active",
       };
+    case "thinking":
+      return {
+        type: "thinking",
+        title: String(e.title || e.text || "").slice(0, 200),
+        text: String(e.text || "").slice(0, 4000),
+        iter: typeof e.iter === "number" ? e.iter : undefined,
+        status: "active",
+      };
     case "compaction_started":
       return {
         type: "compaction_started",

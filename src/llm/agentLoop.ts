@@ -3036,6 +3036,26 @@ Example:
     // chatResponse / run_completed_with_result bubble rendered by the UI.
     const toolCalls = extractFunctionCallItems(response);
 
+    // Surface Anthropic thinking blocks as a separate `thinking` event so the
+    // UI can render them without mixing with message.content narration.
+    // Gated: investigation mode only, only when there are tool calls (not the
+    // final iter), and only when runId is set (i.e. a real TUI run).
+    const responseReasoningText = (response as { reasoningText?: string }).reasoningText ?? "";
+    if (
+      responseReasoningText &&
+      isInvestigationMode &&
+      toolCalls.length > 0 &&
+      typeof input.runId === "string" &&
+      input.runId.trim()
+    ) {
+      input.onStructuredEvent?.({
+        type: "thinking",
+        text: responseReasoningText.slice(0, 4000),
+        iter: iter + 1,
+        status: "active",
+      });
+    }
+
     // Forward the LLM's plain-language text (between tool_calls) as a
     // `narration` event so the UI can interleave intent statements with tool
     // rows. Strip internal bracketed markers (TODO/step/verification/agent_loop)

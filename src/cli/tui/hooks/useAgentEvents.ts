@@ -4,6 +4,7 @@ import type { EventBus } from "../../eventBus.js";
 import type { StoreAction, TuiMode } from "../store.js";
 import type { ZoneStructuredProgressEvent } from "../../../core/agentLifecycleEvents.js";
 import { resolveCommandApproval } from "../../../api/commandApprovals.js";
+import { resolveTrustApproval } from "../../../api/trustApprovals.js";
 import { resolveRevisionApproval } from "../../../llm/revisionApprovals.js";
 import { buildLoopCompleteSummary, buildRunSummary } from "../../../core/eventProcessors.js";
 // buildLoopCompleteSummary / buildRunSummary kept for future telemetry; run text no longer stored in transcript
@@ -11,6 +12,10 @@ import { formatCompactionNarration } from "../../../core/compactionNarration.js"
 // re-exported so existing callers importing it from this module continue to work
 export { formatCompactionNarration };
 import type { RunTodo, TodoStatus } from "../../../core/todoLifecycle.js";
+import type { StagedFile } from "../../../core/fileDiff.js";
+
+export const SPINNER_LABEL_STARTING = "Starting…";
+export const SPINNER_LABEL_PLANNING = "Planning…";
 
 export function handleCompactionStarted(
   _evt: ZoneStructuredProgressEvent,
@@ -90,11 +95,27 @@ export function handleTodoStatusChanged(
   });
 }
 
+export function handleEditApproval(
+  evt: ZoneStructuredProgressEvent,
+  dispatch: Dispatch<StoreAction>
+): void {
+  const filePath = evt.filePath ?? (evt as any).command ?? "";
+  const approvalId = evt.approvalId ?? "";
+  if (!approvalId) return;
+  dispatch({
+    type: "PENDING_APPROVAL_SET",
+    approvalId,
+    runId: evt.runId ?? "",
+    command: filePath,
+    kind: "edit",
+  });
+}
+
 export function handlePlanGenerationStarted(
   evt: ZoneStructuredProgressEvent,
   dispatch: Dispatch<StoreAction>
 ): void {
-  dispatch({ type: "SPINNER_START", label: evt.title ?? "Planning…" });
+  dispatch({ type: "SPINNER_START", label: evt.title ?? SPINNER_LABEL_PLANNING });
 }
 
 export function handlePlanReadyForApprovalExported(
@@ -114,6 +135,26 @@ export function handlePlanReadyForApprovalExported(
     objective: evt.planObjective ?? "",
     steps,
     scopeNotes: evt.planScopeNotes,
+  });
+}
+
+export function handleStagedDiffsReadyExported(
+  evt: ZoneStructuredProgressEvent,
+  dispatch: Dispatch<StoreAction>
+): void {
+  if (!evt.approvalId) return;
+  let files: StagedFile[] = [];
+  try {
+    if (evt.stagedFilesJson) files = JSON.parse(evt.stagedFilesJson);
+  } catch { /* malformed JSON — render with empty files */ }
+  dispatch({ type: "SPINNER_STOP" });
+  dispatch({
+    type: "STAGED_DIFFS_PROPOSED",
+    approvalId: evt.approvalId,
+    runId: evt.runId ?? "",
+    files,
+    verificationSummary: evt.stagedVerificationSummary ?? "",
+    trigger: evt.stagedTrigger ?? "natural_completion",
   });
 }
 
@@ -156,8 +197,14 @@ export function useAgentEvents(
       }, 200);
     }
 
+    function handleThinkingEvent(evt: ZoneStructuredProgressEvent): void {
+      const text = evt.text ?? evt.title ?? "";
+      if (!text) return;
+      dispatch({ type: "TRANSCRIPT_ADD_THINKING", text });
+    }
+
     function handleAgentLoopStart(_evt: ZoneStructuredProgressEvent): void {
-      dispatch({ type: "SPINNER_START", label: "Starting…" });
+      dispatch({ type: "SPINNER_START", label: SPINNER_LABEL_STARTING });
     }
 
     function handleAgentLoopComplete(evt: ZoneStructuredProgressEvent): void {
@@ -280,6 +327,22 @@ export function useAgentEvents(
       dispatch({ type: "PENDING_APPROVAL_SET", approvalId: evt.approvalId, runId: evt.runId ?? "", command });
     }
 
+    const handleEditApprovalEvt = (evt: ZoneStructuredProgressEvent): void => {
+      flushBuffer(localBuffer, debounceTimer, dispatch);
+      handleEditApproval(evt, dispatch);
+    };
+
+    const handleTrustApproval = (evt: ZoneStructuredProgressEvent): void => {
+      flushBuffer(localBuffer, debounceTimer, dispatch);
+      dispatch({
+        type: "PENDING_APPROVAL_SET",
+        approvalId: evt.runId ?? "",
+        runId: evt.runId ?? "",
+        command: evt.projectPath ?? "",
+        kind: "trust",
+      });
+    };
+
     function handlePlanReadyForApproval(evt: ZoneStructuredProgressEvent): void {
       handlePlanReadyForApprovalExported(evt, dispatch);
     }
@@ -307,12 +370,20 @@ export function useAgentEvents(
       }
     }
 
+    function handleRunFailed(evt: ZoneStructuredProgressEvent): void {
+      flushBuffer(localBuffer, debounceTimer, dispatch);
+      dispatch({ type: "ERROR_LINE", text: evt.userMessage ?? "Provider error." });
+      dispatch({ type: "RUN_FAILED" });
+    }
+
     const handlePlanReady = handlePlanReadyForApproval;
+    bus.on("run_failed", handleRunFailed);
     bus.on("plan_ready_for_approval", handlePlanReady);
     bus.on("agent_loop_start", handleAgentLoopStart);
     bus.on("agent_loop_complete", handleAgentLoopComplete);
     bus.on("run_summary", handleRunSummary);
     bus.on("narration", handleTextEvent);
+    bus.on("thinking", handleThinkingEvent);
     bus.on("chat_chunk", handleTextEvent);
     bus.on("chat_response", handleTextEvent);
     bus.on("tool_call", handleToolCall);
@@ -334,6 +405,8 @@ export function useAgentEvents(
     bus.on("loop_warning_emitted", handleLoopWarning);
     bus.on("loop_detected_terminal", handleLoopDetected);
     bus.on("command_approval_required", handleCommandApproval);
+    bus.on("edit_approval_required", handleEditApprovalEvt);
+    bus.on("trust_approval_required", handleTrustApproval);
     bus.on("scope_revision_proposed", handleRevisionProposed);
 
     const onStarted   = (evt: ZoneStructuredProgressEvent) => handleCompactionStarted(evt, dispatch);
@@ -355,16 +428,30 @@ export function useAgentEvents(
     const onPlanGenStarted = (evt: ZoneStructuredProgressEvent) => handlePlanGenerationStarted(evt, dispatch);
     bus.on("plan_generation_started", onPlanGenStarted);
 
+    const onStagedDiffsReady = (evt: ZoneStructuredProgressEvent) =>
+      handleStagedDiffsReadyExported(evt, dispatch);
+    bus.on("staged_diffs_ready_for_approval", onStagedDiffsReady);
+
+    const onPostExecuteDiffs = (evt: ZoneStructuredProgressEvent): void => {
+      if (!evt.stagedFilesJson) return;
+      let files: StagedFile[] = [];
+      try { files = JSON.parse(evt.stagedFilesJson); } catch { return; }
+      if (files.length > 0) dispatch({ type: "POST_EXECUTE_DIFFS", files });
+    };
+    bus.on("post_execute_diffs", onPostExecuteDiffs);
+
     return () => {
       if (debounceTimer.current !== null) {
         clearTimeout(debounceTimer.current);
         debounceTimer.current = null;
       }
+      bus.off("run_failed", handleRunFailed);
       bus.off("plan_ready_for_approval", handlePlanReady);
       bus.off("agent_loop_start", handleAgentLoopStart);
       bus.off("agent_loop_complete", handleAgentLoopComplete);
       bus.off("run_summary", handleRunSummary);
       bus.off("narration", handleTextEvent);
+      bus.off("thinking", handleThinkingEvent);
       bus.off("chat_chunk", handleTextEvent);
       bus.off("chat_response", handleTextEvent);
       bus.off("tool_call", handleToolCall);
@@ -386,6 +473,8 @@ export function useAgentEvents(
       bus.off("loop_warning_emitted", handleLoopWarning);
       bus.off("loop_detected_terminal", handleLoopDetected);
       bus.off("command_approval_required", handleCommandApproval);
+      bus.off("edit_approval_required", handleEditApprovalEvt);
+      bus.off("trust_approval_required", handleTrustApproval);
       bus.off("scope_revision_proposed", handleRevisionProposed);
       bus.off("compaction_started",          onStarted);
       bus.off("compaction_status",           onStatus);
@@ -395,6 +484,8 @@ export function useAgentEvents(
       bus.off("todo_revised",        onTodoRevised);
       bus.off("todo_status_changed", onTodoStatus);
       bus.off("plan_generation_started", onPlanGenStarted);
+      bus.off("staged_diffs_ready_for_approval", onStagedDiffsReady);
+      bus.off("post_execute_diffs", onPostExecuteDiffs);
     };
   }, [bus, dispatch]);
 }
