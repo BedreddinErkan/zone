@@ -24,6 +24,7 @@ const FAKE_RESULT = {
   applyPatches: [] as [],
   fileDiffs: [] as [],
   toolCallLog: [],
+  costUsd: 42,
 };
 
 let tempDir: string;
@@ -98,6 +99,19 @@ describe("runInitFlow — provider threading", () => {
     await runInitFlow(tempDir);
 
     expect(mockLoadCliConfig).toHaveBeenCalledWith({ repo: tempDir });
+  });
+
+  it("threads costUsd from runInvestigationFlow result through to the return value", async () => {
+    mockLoadCliConfig.mockReturnValue({
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      openaiApiKey: undefined,
+      anthropicApiKey: "sk-ant-test",
+    });
+
+    const result = await runInitFlow(tempDir);
+
+    expect(result.costUsd).toBe(42); // matches FAKE_RESULT.costUsd
   });
 
   it("R2: passes suppressOutputFormat:true to runInvestigationFlow", async () => {

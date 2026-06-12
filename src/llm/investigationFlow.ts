@@ -314,6 +314,7 @@ export type InvestigationFlowResult = {
     result: string;
     success?: boolean;
   }>;
+  costUsd: number;
 };
 
 export type ChatAgentFlowResult = {
@@ -561,6 +562,7 @@ export async function runInvestigationFlow(input: {
     applyPatches: [],
     fileDiffs: [],
     toolCallLog: loop.toolCallLog,
+    costUsd: loop.costUsd ?? 0,
   };
 }
 

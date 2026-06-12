@@ -52,7 +52,7 @@ export async function runInitFlow(
   cwd: string,
   onProgress?: (msg: string) => void,
   abortSignal?: AbortSignal,
-): Promise<{ ok: boolean; message: string }> {
+): Promise<{ ok: boolean; message: string; costUsd?: number }> {
   const memoryPath = join(cwd, MEMORY_PATH_RELATIVE);
 
   try {
@@ -69,6 +69,7 @@ export async function runInitFlow(
   onProgress?.("Analyzing repo…");
 
   let chatResponse: string;
+  let initCostUsd = 0;
   try {
     const config = loadCliConfig({ repo: cwd });
     await applyDiskKeyFallbacks(config);
@@ -91,6 +92,7 @@ export async function runInitFlow(
         }),
     );
     chatResponse = result.chatResponse;
+    initCostUsd = result.costUsd;
   } catch (err) {
     return { ok: false, message: `init: investigation failed: ${(err as Error).message}` };
   }
@@ -120,7 +122,7 @@ export async function runInitFlow(
     } catch { /* non-fatal */ }
     const msg = `Created .zone/memory.md (${lines} lines). Use /memory to view, or edit directly.${suffix}`;
     onProgress?.(msg);
-    return { ok: true, message: msg };
+    return { ok: true, message: msg, costUsd: initCostUsd };
   } catch (err) {
     return { ok: false, message: `init: failed to write memory.md: ${(err as Error).message}` };
   }
