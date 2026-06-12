@@ -6,6 +6,7 @@ export interface IterUsageBreakdown {
   cache_write: number;
   cache_read: number;
   output: number;
+  output_reasoning: number;
 }
 
 export interface IterCostAccumulator extends IterUsageBreakdown {
@@ -15,6 +16,7 @@ export interface IterCostAccumulator extends IterUsageBreakdown {
 
 export interface IterCostUpdatePayload extends IterUsageBreakdown {
   type: "iter_cost_update";
+  model: string;
   runId: string;
   iter: number;
   totalIter: number;
@@ -22,11 +24,18 @@ export interface IterCostUpdatePayload extends IterUsageBreakdown {
   cumulativeCost: number;
   cacheHitThisIter: number;
   cacheHitCumulative: number;
+  output_nonreasoning: number;
   total_input_uncached: number;
   total_cache_read: number;
   total_cache_write: number;
   total_output: number;
+  total_output_reasoning: number;
+  total_output_nonreasoning: number;
   iter_count: number;
+  tier: string;
+  archetype: string;
+  pipelineApplied: boolean;
+  mode: string;
 }
 
 export function emptyIterCostAccumulator(): IterCostAccumulator {
@@ -35,6 +44,7 @@ export function emptyIterCostAccumulator(): IterCostAccumulator {
     cache_write: 0,
     cache_read: 0,
     output: 0,
+    output_reasoning: 0,
     iter_count: 0,
     total_cost: 0,
   };
@@ -64,6 +74,7 @@ export function usageRecordToBreakdown(record: UsageRecord): IterUsageBreakdown 
     cache_write: cleanNumber(record.cache_write),
     cache_read: cleanNumber(record.cache_read),
     output: cleanNumber(record.output),
+    output_reasoning: 0,
   };
 }
 
@@ -75,6 +86,10 @@ export function buildIterCostUpdate(input: {
   model: string;
   current: IterUsageBreakdown;
   previous?: IterCostAccumulator;
+  tier?: string;
+  archetype?: string;
+  pipelineApplied?: boolean;
+  mode?: string;
 }): { payload: IterCostUpdatePayload; accumulator: IterCostAccumulator } {
   const previous = input.previous ?? emptyIterCostAccumulator();
   const current = {
@@ -82,6 +97,7 @@ export function buildIterCostUpdate(input: {
     cache_write: cleanNumber(input.current.cache_write),
     cache_read: cleanNumber(input.current.cache_read),
     output: cleanNumber(input.current.output),
+    output_reasoning: cleanNumber(input.current.output_reasoning),
   };
   const iterCost = totalCost(input.provider, input.model, current);
   const accumulator: IterCostAccumulator = {
@@ -89,6 +105,7 @@ export function buildIterCostUpdate(input: {
     cache_write: previous.cache_write + current.cache_write,
     cache_read: previous.cache_read + current.cache_read,
     output: previous.output + current.output,
+    output_reasoning: previous.output_reasoning + current.output_reasoning,
     iter_count: previous.iter_count + 1,
     total_cost: previous.total_cost + iterCost,
   };
@@ -96,6 +113,7 @@ export function buildIterCostUpdate(input: {
     accumulator,
     payload: {
       type: "iter_cost_update",
+      model: input.model,
       runId: input.runId,
       iter: input.iter,
       totalIter: input.totalIter,
@@ -107,11 +125,19 @@ export function buildIterCostUpdate(input: {
       cache_write: current.cache_write,
       cache_read: current.cache_read,
       output: current.output,
+      output_reasoning: current.output_reasoning,
+      output_nonreasoning: current.output - current.output_reasoning,
       total_input_uncached: accumulator.input_uncached,
       total_cache_read: accumulator.cache_read,
       total_cache_write: accumulator.cache_write,
       total_output: accumulator.output,
+      total_output_reasoning: accumulator.output_reasoning,
+      total_output_nonreasoning: accumulator.output - accumulator.output_reasoning,
       iter_count: accumulator.iter_count,
+      tier: input.tier ?? "",
+      archetype: input.archetype ?? "",
+      pipelineApplied: input.pipelineApplied ?? false,
+      mode: input.mode ?? "",
     },
   };
 }

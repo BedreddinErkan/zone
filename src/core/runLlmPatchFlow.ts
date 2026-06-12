@@ -1,4 +1,6 @@
 import { extractPriorRunSummary } from "../llm/applyRollbackFeedback.js";
+import { computeFileDiff } from "./fileDiff.js";
+import type { DiffLine } from "./fileDiff.js";
 import { readFsConversationEvents } from "./conversationFilesystemStore.js";
 import { scanRepo } from "../repo/scanRepo.js";
 import { detectProjectStructure } from "../repo/detectProjectStructure.js";
@@ -6,12 +8,11 @@ import { rankRelevantFiles } from "../repo/rankRelevantFiles.js";
 import { readProjectFiles } from "../repo/readProjectFiles.js";
 import { extractFunctionRanges } from "../ast/extractFunctionRange.js";
 import { extractSymbolContext } from "../ast/extractSymbolContext.js";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, statSync, accessSync, constants } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-import { planFeatureWithLlm } from "../llm/planFeature.js";
 import { planPatchPreviewWithLlm } from "../llm/planPatchPreview.js";
 import { planFullPatchWithLlm } from "../llm/planFullPatch.js";
 import { plannerStep, type PlannerStepOutput } from "../llm/plannerStep.js";
@@ -51,6 +52,7 @@ import {
 import { scorePatchQuality } from "../engine/patchQualityScorer.js";
 import { resolveSafetyLevel } from "../engine/safetyLevelResolver.js";
 import { enforceMicroEditProtection } from "../engine/microEditProtection.js";
+import { ApiKeyError } from "../llm/factory.js";
 import { validatePatchCorrectness } from "../engine/patchCorrectnessValidator.js";
 import { parseDeveloperPatchText } from "./developerPatchParse.js";
 import { applyLlmPatches } from "./applyLlmPatches.js";
@@ -97,6 +99,7 @@ import {
   type ZoneStructuredProgressEvent,
 } from "./agentLifecycleEvents.js";
 import { cacheHitRatio, type IterCostUpdatePayload } from "../usage/iterCostMeter.js";
+import { costLogPath, appendIterCostRecord, appendRunSummary } from "../usage/costLogger.js";
 import { computeWorkerMaxIterations } from "../llm/subagents.js";
 import {
   classifyTask,
@@ -118,6 +121,7 @@ import { embedText } from "../embeddings/embedFile.js";
 import {
   getEmbeddingCountForRepo,
   matchSimilarFiles,
+  isEmbeddingBackendAvailable,
 } from "../embeddings/embeddingsRepository.js";
 import { indexRepoFiles } from "../embeddings/indexRepository.js";
 import { logger, debugLog, errorLog, log } from "../utils/logger.js";
@@ -291,6 +295,8 @@ export type LlmPatchFlowResult =
   | {
       ok: false;
       reason: string;
+      refineFeedback?: string;
+      discardedStaging?: Map<string, string>;
       lifecycleEvents?: AgentLifecycleEvent[];
       finalRunReport?: FinalRunReport;
     };
@@ -360,11 +366,8 @@ export type PatchResult = {
   reason?: string;
 };
 
-export type DiffLine = {
-  type: "added" | "removed" | "unchanged";
-  content: string;
-  lineNumber: number;
-};
+// DiffLine moved to src/core/fileDiff.ts; re-exported here for backward compat.
+export type { DiffLine };
 
 export type FileDiff = {
   filePath: string;
@@ -2577,6 +2580,38 @@ export function isVagueDeveloperTask(task: string): boolean {
   return !hasSpecificTarget;
 }
 
+/**
+ * High-precision greeting/gratitude detector — separate from isVagueDeveloperTask.
+ * Only matches explicit chitchat tokens; false negatives ("hi there") are low-harm
+ * (they get the clarification ask instead of a greeting, which is acceptable).
+ * @internal exported for unit testing only
+ */
+const CHITCHAT_TOKENS = new Set([
+  "hi", "hello", "hey", "yo", "sup", "howdy", "greetings", "salutations",
+  "thanks", "thank", "thankyou", "cheers", "you",
+  "good", "morning", "afternoon", "evening", "night",
+  "bye", "goodbye", "cya", "later",
+]);
+export function isChitchat(task: string): boolean {
+  const words = task.trim().toLowerCase().replace(/[!?.]+$/g, "").split(/\s+/);
+  return words.length <= 4 && words.every(w => CHITCHAT_TOKENS.has(w));
+}
+
+const FAREWELL_TOKENS = new Set(["bye", "goodbye", "cya", "later"]);
+const GRATITUDE_TOKENS = new Set(["thanks", "thank", "thankyou", "cheers", "you"]);
+
+/**
+ * Categorizes a chitchat input. Priority: farewell > gratitude > greeting.
+ * Safe to call on non-chitchat inputs — defaults to "greeting".
+ * @internal exported for unit testing only
+ */
+export function classifyChitchat(task: string): "greeting" | "gratitude" | "farewell" {
+  const words = task.trim().toLowerCase().replace(/[!?.]+$/g, "").split(/\s+/);
+  if (words.some(w => FAREWELL_TOKENS.has(w))) return "farewell";
+  if (words.some(w => GRATITUDE_TOKENS.has(w))) return "gratitude";
+  return "greeting";
+}
+
 function isHiddenDeveloperWarning(warning: string): boolean {
   return (
     warning.startsWith("[DEVELOPER_EMPTY_CATCH]") ||
@@ -3451,77 +3486,8 @@ export function smartContextWindow(input: {
   };
 }
 
-export function computeFileDiff(before: string, after: string): DiffLine[] {
-  const beforeLines = before === "" ? [] : before.split("\n");
-  const afterLines = after === "" ? [] : after.split("\n");
-  const rows = beforeLines.length + 1;
-  const cols = afterLines.length + 1;
-  const lcs = Array.from({ length: rows }, () => Array<number>(cols).fill(0));
-
-  for (let i = beforeLines.length - 1; i >= 0; i -= 1) {
-    for (let j = afterLines.length - 1; j >= 0; j -= 1) {
-      if (beforeLines[i] === afterLines[j]) {
-        lcs[i][j] = lcs[i + 1][j + 1] + 1;
-      } else {
-        lcs[i][j] = Math.max(lcs[i + 1][j], lcs[i][j + 1]);
-      }
-    }
-  }
-
-  const diff: DiffLine[] = [];
-  let i = 0;
-  let j = 0;
-
-  while (i < beforeLines.length && j < afterLines.length) {
-    if (beforeLines[i] === afterLines[j]) {
-      diff.push({
-        type: "unchanged",
-        content: afterLines[j],
-        lineNumber: j + 1,
-      });
-      i += 1;
-      j += 1;
-      continue;
-    }
-
-    if (lcs[i + 1][j] >= lcs[i][j + 1]) {
-      diff.push({
-        type: "removed",
-        content: beforeLines[i],
-        lineNumber: Math.min(j + 1, afterLines.length + 1),
-      });
-      i += 1;
-      continue;
-    }
-
-    diff.push({
-      type: "added",
-      content: afterLines[j],
-      lineNumber: j + 1,
-    });
-    j += 1;
-  }
-
-  while (i < beforeLines.length) {
-    diff.push({
-      type: "removed",
-      content: beforeLines[i],
-      lineNumber: Math.min(j + 1, afterLines.length + 1),
-    });
-    i += 1;
-  }
-
-  while (j < afterLines.length) {
-    diff.push({
-      type: "added",
-      content: afterLines[j],
-      lineNumber: j + 1,
-    });
-    j += 1;
-  }
-
-  return diff;
-}
+// computeFileDiff moved to src/core/fileDiff.ts; re-exported here for backward compat.
+export { computeFileDiff };
 
 export function fuzzyFindAndReplace(
   content: string,
@@ -4592,6 +4558,16 @@ export async function runLlmPatchFlow(input: {
   /** Phase 1 session memory: prior task's FINAL SUMMARY loaded by TUI before dispatch. */
   priorSessionSummary?: string;
   webSearchEnabled?: boolean;
+  /** Stage 3A: per-edit approval mode for plan-mode [2] "manually approve changes". */
+  editApprovalMode?: "auto" | "manual";
+  /** R3: when true, shows staged diffs for approval before flushing to disk. */
+  stagedCheckpoint?: boolean;
+  /** R3: discarded staging from a prior rejected run; seeded into the first user message. */
+  restageSeed?: Map<string, string>;
+  /** R3: when true, auto-resolves the staged-diff checkpoint without showing a modal. */
+  autoApprove?: boolean;
+  /** Plan-first: when true, emits a non-blocking post_execute_diffs event after successful flush. */
+  showPostFlushDiffs?: boolean;
 }): Promise<LlmPatchFlowResult> {
   attachRunIdentity({ userId: input.userId, runId: input.runId });
   // Phase H.7: outer-scope flag survives past the inner block where `loop`
@@ -4650,6 +4626,7 @@ export async function runLlmPatchFlow(input: {
   };
 
   let latestIterCostUpdate: IterCostUpdatePayload | null = null;
+  let _costLogPath: string | null = null;
 
  const emitTodos = (type: "todos_initialized" | "todo_revised"): void => {
   if (runTodos.length === 0) return;
@@ -4888,50 +4865,39 @@ const initializeTodosFromPlan = (): void => {
   );
 
   perf.mark("repo scan ready");
-  // Block only when the directory is truly unreadable (scanRepo threw). An accessible
-  // empty directory (scanRepo succeeded with 0 files) is valid — agent can create files.
-  if (!input.hostedContext && scanRepoThrew && allFiles.length === 0 && !isHostedEnvironment()) {
-    debugLog("[zone-flow-early-return]", JSON.stringify({ reason: "repo_not_accessible", repoPath: input.repoPath, fileSource }));
-    perf.finish("repo access blocked");
-    notifyProgress("Ready", {
-      type: "tooling_issue",
-      message: "Repository could not be read in this environment.",
-      stage: "repo",
-      status: "repo_not_accessible_in_hosted_mode",
-    });
-    notifyProgress("Ready", {
-      type: "run_completed",
-      message: "Run finished with errors.",
-      stage: "finalize",
-      status: "failed",
-    });
-    const repoFailReport = await generateFinalRunReport({
-      task: input.task,
-      contextFilesMeta: [],
-      planObjective: null,
-      planScopeSummary: null,
-      patchSource: "no_patch",
-      fileDiffs: [],
-      patchScope: {
-        changedFileCount: 0,
-        totalAddedLines: 0,
-        totalRemovedLines: 0,
-        totalChangedLines: 0,
-      },
-      decisionMode: "safe_to_apply",
-      warnings: ["Repository could not be read in this environment."],
-      correctness: { status: "skipped", summary: "Run stopped before patch planning." },
-      verificationCommandsLabel: null,
-      runtimeVerificationSummary: null,
-      finalExecutionOutcome: "failed",
-    });
-    return {
-      ok: false,
-      reason: "repo_not_accessible_in_hosted_mode",
-      lifecycleEvents: [...lifecycleEvents],
-      finalRunReport: repoFailReport,
-    };
+
+  // Phase 3: fail-closed for genuinely inaccessible repo roots.
+  // With suppressErrors in scanRepo, fast-glob returns [] for both an empty-but-valid dir
+  // and a missing/unreadable dir — the 0-length result is ambiguous. Distinguish them with
+  // an explicit fs check, but ONLY when all file sources returned nothing AND the path is an
+  // absolute Unix path (gates out Windows-style test paths like "C:/repo" on Linux).
+  if (allFiles.length === 0 && repoPathLooksLocal && path.isAbsolute(input.repoPath)) {
+    let repoAccessible = false;
+    try {
+      const st = statSync(input.repoPath);
+      if (st.isDirectory()) {
+        accessSync(input.repoPath, constants.R_OK);
+        repoAccessible = true;
+      }
+    } catch { /* non-existent, EACCES, not-a-dir — repoAccessible stays false */ }
+
+    if (!repoAccessible) {
+      debugLog("[zone-flow-early-return]", JSON.stringify({ reason: "repo_not_accessible", repoPath: input.repoPath }));
+      perf.finish("repo access blocked");
+      input.onProgress?.({
+        progress: {
+          type: "narration",
+          runId: typeof input.runId === "string" ? input.runId.trim() : "",
+          ts: Date.now(),
+          title: "Could not read this folder — check permissions.",
+          text: "Could not read this folder — check permissions.",
+          status: "complete",
+        } as unknown as ZoneStructuredProgressEvent,
+      } as unknown as LlmPatchProgressUpdate);
+      return { ok: false as const, reason: "repo_not_accessible" };
+    }
   }
+
 
   explicitTargetPath = extractExplicitTarget(input.task);
   if (explicitTargetPath) {
@@ -5035,8 +5001,8 @@ const initializeTodosFromPlan = (): void => {
     if (forceFlow === "agent_loop") return true;
     if (forceFlow === "plan_full_patch") return false;
 
-    // No repo accessible — agent loop cannot read files, fall through to plan path
-    if (fileSource === "empty") return false;
+    // An approved pre-generated plan signals explicit user intent — always execute via agent-loop.
+    if (input.preGeneratedPlan) return true;
 
     // Vague tasks have their own early-return downstream; skip agent_loop so they reach it
     if (isVagueDeveloperTask(task)) return false;
@@ -5093,8 +5059,8 @@ const initializeTodosFromPlan = (): void => {
     task: input.task.slice(0, 200),
     reason: _forceFlowEnv
       ? "env_override"
-      : fileSource === "empty"
-        ? "fallback_empty_repo"
+      : input.preGeneratedPlan
+        ? "preGeneratedPlan"
         : isVagueDeveloperTask(input.task)
           ? "fallback_vague_task"
           : "default_for_patch_tasks",
@@ -5102,6 +5068,117 @@ const initializeTodosFromPlan = (): void => {
     repoPathLooksLocal,
     fileSource,
   }));
+
+  // Chitchat short-circuit: guard-less — reached by BOTH agent_loop and plan_full_patch
+  // inputs before any branch divergence. Previously buried inside !_useAgentLoop so
+  // "hello" (isVague=false → _useAgentLoop=true) hit the full agent_loop. Now caught here.
+  if (isChitchat(input.task)) {
+    const chitchatType = classifyChitchat(input.task);
+    const replyText =
+      chitchatType === "farewell" ? "Take care — come back anytime." :
+      chitchatType === "gratitude" ? "Happy to help! Anything else I can do?" :
+      "Hi! What would you like to work on?";
+    emitStructuredProgress({
+      type: "agent_loop_complete",
+      title: "agent_loop_complete",
+      status: "success",
+      detail: replyText,
+      iter: 0,
+      cumulativeCost: 0,
+    });
+    emitStructuredProgress({
+      type: "run_summary",
+      title: "Run summary",
+      status: "success",
+      cost: { totalUsd: 0, iterCount: 0, cacheHitPct: 0, avgIterUsd: 0 },
+    });
+    const shortReport = await generateFinalRunReport({
+      task: input.task,
+      contextFilesMeta: [],
+      planObjective: null,
+      planScopeSummary: null,
+      patchSource: "no_patch",
+      fileDiffs: [],
+      patchScope: { changedFileCount: 0, totalAddedLines: 0, totalRemovedLines: 0, totalChangedLines: 0 },
+      decisionMode: "safe_to_apply",
+      finalState: "safe_to_apply",
+      warnings: [],
+      correctness: { status: "skipped", summary: "No patch attempted (chitchat input)." },
+      verificationCommandsLabel: null,
+      runtimeVerificationSummary: null,
+      finalExecutionOutcome: "completed_with_issues",
+      developerConfidence: 60,
+    });
+    return {
+      ok: true,
+      patchPreview: replyText,
+      warnings: [],
+      decisionMode: "chat",
+      chatResponse: replyText,
+      applyPatches: [],
+      patchResults: [],
+      fileDiffs: [],
+      contextFiles: [],
+      lifecycleEvents: [],
+      finalRunReport: shortReport,
+    };
+  }
+
+  // Vague short-circuit: fire BEFORE the planning pipeline (plannerStep /
+  // generateExecutionPlan / planPatchPreviewWithLlm) so zero LLM calls are made.
+  // Intentionally does NOT guard on _forceFlowEnv — ZONE_FORCE_FLOW=plan_full_patch
+  // is for substantive tasks; vague inputs short-circuit regardless.
+  // Chitchat is caught above; only the clarification branch remains here.
+  if (!_useAgentLoop && isVagueDeveloperTask(input.task)) {
+    const replyText = "That's a bit vague — what would you like me to change?";
+    // agent_loop_complete → handleAgentLoopComplete → ASSISTANT_FINAL (prominent) + RUN_DONE.
+    // iter:0 suppresses STATUS_UPDATE so the status bar keeps the session default.
+    emitStructuredProgress({
+      type: "agent_loop_complete",
+      title: "agent_loop_complete",
+      status: "success",
+      detail: replyText,
+      iter: 0,
+      cumulativeCost: 0,
+    });
+    // run_summary → handleRunSummary → STATUS_UPDATE{costUsd:0} + second RUN_DONE (idempotent).
+    emitStructuredProgress({
+      type: "run_summary",
+      title: "Run summary",
+      status: "success",
+      cost: { totalUsd: 0, iterCount: 0, cacheHitPct: 0, avgIterUsd: 0 },
+    });
+    const shortReport = await generateFinalRunReport({
+      task: input.task,
+      contextFilesMeta: [],
+      planObjective: null,
+      planScopeSummary: null,
+      patchSource: "no_patch",
+      fileDiffs: [],
+      patchScope: { changedFileCount: 0, totalAddedLines: 0, totalRemovedLines: 0, totalChangedLines: 0 },
+      decisionMode: "safe_to_apply",
+      finalState: "safe_to_apply",
+      warnings: [],
+      correctness: { status: "skipped", summary: "No patch attempted (vague input)." },
+      verificationCommandsLabel: null,
+      runtimeVerificationSummary: null,
+      finalExecutionOutcome: "completed_with_issues",
+      developerConfidence: 60,
+    });
+    return {
+      ok: true,
+      patchPreview: replyText,
+      warnings: [],
+      decisionMode: "chat",
+      chatResponse: replyText,
+      applyPatches: [],
+      patchResults: [],
+      fileDiffs: [],
+      contextFiles: [],
+      lifecycleEvents: [],
+      finalRunReport: shortReport,
+    };
+  }
 
   // J.5: load prior-run rollback summary BEFORE we split into the agent_loop
   // vs planner+agent branches, so both paths can thread it into
@@ -5215,7 +5292,7 @@ const initializeTodosFromPlan = (): void => {
       });
       agentLoopPlanFiles = ranker.slice(0, 5).map((f) => f.path);
     } catch (err) {
-      console.warn(
+      debugLog(
         `[zone-plan] ranker skipped (agent_loop): ${err instanceof Error ? err.message : String(err)}`
       );
     }
@@ -5238,7 +5315,7 @@ const initializeTodosFromPlan = (): void => {
         // Sidebar is seeded by the in-loop TodoWrite tool now; pre-planner only
         // feeds scopeGuard / evaluatePlanAlignment / orchestrator / finalRunReport.
       } catch (err) {
-        console.warn(
+        debugLog(
           `[zone-plan] skipped (agent_loop): ${err instanceof Error ? err.message : String(err)}`
         );
       }
@@ -5519,42 +5596,14 @@ const initializeTodosFromPlan = (): void => {
     const agentLoopCallbacks = {
       onStructuredEvent: (evt: unknown) => {
         if (!runId) return;
-        // Bridge custom events into the normal `{ stage, progress }` SSE format.
         const e = evt as any;
-        if (e && typeof e === "object" && e.type === "command_approval_required") {
-          emitStructuredProgress({
-            type: "command_approval_required" as any,
-            title: "Command approval required",
-            status: "active",
-            command: String(e.command || ""),
-            approvalId: String(e.approvalId || ""),
-          } as any);
-        }
-        if (e && typeof e === "object" && e.type === "command_auto_approved") {
-          emitStructuredProgress({
-            type: "command_auto_approved" as any,
-            title: "Command auto-approved",
-            status: "success",
-            command: String(e.command || ""),
-            approvalId: String(e.approvalId || ""),
-          } as any);
-        }
-        if (e && typeof e === "object" && e.type === "command_trusted") {
-          emitStructuredProgress({
-            type: "command_trusted" as any,
-            title: "Trusted command auto-approved",
-            status: "success",
-            command: String(e.command || ""),
-            approvalId: String(e.approvalId || ""),
-          } as any);
-        }
-        if (
-          e &&
-          typeof e === "object" &&
-          e.type === "iter_cost_update"
-        ) {
+
+        // Side-effect branches stay inline; `return` after each prevents double-emit
+        // if the event type is later added to mapStructuredEventToProgress.
+        if (e?.type === "iter_cost_update") {
           latestIterCostUpdate = {
             type: "iter_cost_update",
+            model: String((e as any).model ?? ""),
             runId: String((e as { runId?: unknown }).runId ?? input.runId ?? ""),
             iter: Number(e.iter ?? 0) || 0,
             totalIter: Number(e.totalIter ?? 0) || 0,
@@ -5566,12 +5615,24 @@ const initializeTodosFromPlan = (): void => {
             cache_write: Number(e.cache_write ?? 0) || 0,
             cache_read: Number(e.cache_read ?? 0) || 0,
             output: Number(e.output ?? 0) || 0,
+            output_reasoning: Number(e.output_reasoning ?? 0) || 0,
+            output_nonreasoning: Number(e.output_nonreasoning ?? 0) || 0,
             total_input_uncached: Number(e.total_input_uncached ?? 0) || 0,
             total_cache_read: Number(e.total_cache_read ?? 0) || 0,
             total_cache_write: Number(e.total_cache_write ?? 0) || 0,
             total_output: Number(e.total_output ?? 0) || 0,
+            total_output_reasoning: Number(e.total_output_reasoning ?? 0) || 0,
+            total_output_nonreasoning: Number(e.total_output_nonreasoning ?? 0) || 0,
             iter_count: Number(e.iter_count ?? 0) || 0,
+            tier: String((e as any).tier ?? ""),
+            archetype: String((e as any).archetype ?? ""),
+            pipelineApplied: Boolean((e as any).pipelineApplied ?? false),
+            mode: String((e as any).mode ?? ""),
           };
+          if (_costLogPath === null) {
+            _costLogPath = costLogPath(latestIterCostUpdate.runId || runId || "anon");
+          }
+          appendIterCostRecord(_costLogPath, latestIterCostUpdate);
           emitStructuredProgress({
             type: "iter_cost_update" as any,
             title: "Cost updated",
@@ -5592,36 +5653,9 @@ const initializeTodosFromPlan = (): void => {
             total_output: latestIterCostUpdate.total_output,
             iter_count: latestIterCostUpdate.iter_count,
           } as any);
+          return;
         }
-        if (
-          e &&
-          typeof e === "object" &&
-          e.type === "token_budget_status"
-        ) {
-          emitStructuredProgress({
-            type: "token_budget_status" as any,
-            title: String(e.title || "Token budget"),
-            status:
-              (e.status as "active" | "warning" | "error" | "success" | undefined) ??
-              "active",
-            cumulativeTokens:
-              typeof e.cumulativeTokens === "number" ? e.cumulativeTokens : undefined,
-            tokenBudgetCap:
-              typeof e.tokenBudgetCap === "number" ? e.tokenBudgetCap : undefined,
-            tokenBudgetRatio:
-              typeof e.tokenBudgetRatio === "number" ? e.tokenBudgetRatio : undefined,
-            iter: typeof e.iter === "number" ? e.iter : undefined,
-            breakdown:
-              e.breakdown && typeof e.breakdown === "object"
-                ? e.breakdown
-                : undefined,
-          } as any);
-        }
-        if (
-          e &&
-          typeof e === "object" &&
-          e.type === "todos_initialized"
-        ) {
+        if (e?.type === "todos_initialized") {
           if (Array.isArray(e.todos)) runTodos = e.todos as RunTodo[];
           emitStructuredProgress({
             type: "todos_initialized" as any,
@@ -5629,12 +5663,9 @@ const initializeTodosFromPlan = (): void => {
             status: "success",
             todos: e.todos,
           } as any);
+          return;
         }
-        if (
-          e &&
-          typeof e === "object" &&
-          e.type === "todo_revised"
-        ) {
+        if (e?.type === "todo_revised") {
           if (Array.isArray(e.todos)) runTodos = e.todos as RunTodo[];
           emitStructuredProgress({
             type: "todo_revised" as any,
@@ -5642,93 +5673,19 @@ const initializeTodosFromPlan = (): void => {
             status: "success",
             todos: e.todos,
           } as any);
+          return;
         }
-        if (
-          e &&
-          typeof e === "object" &&
-          e.type === "todo_status_changed"
-        ) {
+        if (e?.type === "todo_status_changed") {
           setTodoStatus(
             String(e.todoId || ""),
             String(e.todoStatus || "") as TodoStatus
           );
+          return;
         }
-        if (
-          e &&
-          typeof e === "object" &&
-          (e.type === "subagent_started" || e.type === "subagent_completed")
-        ) {
-          emitStructuredProgress({
-            type: e.type,
-            title: String(e.title || e.type).slice(0, 160),
-            status: e.status,
-            subagentStatus: e.subagentStatus,
-            subagentId: e.subagentId,
-            subagentType: e.subagentType,
-            parentRunId: e.parentRunId,
-          } as any);
-        }
-        if (e && typeof e === "object" && e.type === "narration") {
-          emitStructuredProgress({
-            type: "narration" as any,
-            title: String(e.title || "").slice(0, 200),
-            text: String(e.text || "").slice(0, 2000),
-            iter: typeof e.iter === "number" ? e.iter : undefined,
-            status: "active",
-          } as any);
-        }
-        if (e && typeof e === "object" && e.type === "compaction_started") {
-          emitStructuredProgress({
-            type: "compaction_started",
-            title: "Compacting context",
-            status: "active",
-            count: typeof e.count === "number" ? e.count : 0,
-          });
-        }
-        if (e && typeof e === "object" && e.type === "compaction_status") {
-          emitStructuredProgress({
-            type: "compaction_status",
-            title: "Compacting context",
-            status: "active",
-            count: typeof e.count === "number" ? e.count : 0,
-            tokensBefore: typeof e.tokensBefore === "number" ? e.tokensBefore : undefined,
-            tokensAfter: typeof e.tokensAfter === "number" ? e.tokensAfter : undefined,
-            savedTokens: typeof e.savedTokens === "number" ? e.savedTokens : undefined,
-          });
-        }
-        if (e && typeof e === "object" && e.type === "compaction_exhausted") {
-          emitStructuredProgress({
-            type: "compaction_exhausted",
-            title: "Context exhausted",
-            status: "warning",
-            message: typeof e.message === "string" ? e.message : "",
-          });
-        }
-        if (e && typeof e === "object" && e.type === "compaction_overflow_warning") {
-          emitStructuredProgress({
-            type: "compaction_overflow_warning",
-            title: "Context window full — no compactable history",
-            status: "warning",
-          });
-        }
-        if (e && typeof e === "object" && e.type === "loop_warning_emitted") {
-          emitStructuredProgress({
-            type: "loop_warning_emitted",
-            title: String(e.title || "Loop warning"),
-            status: "warning",
-            toolName: String((e as any).toolName || ""),
-            count: typeof (e as any).count === "number" ? (e as any).count : 0,
-          } as any);
-        }
-        if (e && typeof e === "object" && e.type === "loop_detected_terminal") {
-          emitStructuredProgress({
-            type: "loop_detected_terminal",
-            title: String(e.title || "Loop detected"),
-            status: "error",
-            toolName: String((e as any).toolName || ""),
-            count: typeof (e as any).count === "number" ? (e as any).count : 0,
-          } as any);
-        }
+
+        // Pure mapping — no state mutations:
+        const progress = mapStructuredEventToProgress(evt);
+        if (progress) emitStructuredProgress(progress);
       },
       onProgress: (msg: string) => {
         if (!runId) return;
@@ -5966,6 +5923,20 @@ const initializeTodosFromPlan = (): void => {
       summaryFormat: input.summaryFormat,
       priorSessionSummary: input.priorSessionSummary,
       webSearchEnabled: input.webSearchEnabled,
+      editApprovalMode: input.editApprovalMode,
+      stagedCheckpoint: input.stagedCheckpoint,
+      restageSeed: input.restageSeed,
+      autoApprove: input.autoApprove,
+      onPreFlushDiffs: input.showPostFlushDiffs
+        ? (diffs: import("./fileDiff.js").StagedFile[]) => {
+            if (diffs.length === 0) return;
+            emitStructuredProgress({
+              type: "post_execute_diffs",
+              title: `${diffs.length} file${diffs.length === 1 ? "" : "s"} changed`,
+              stagedFilesJson: JSON.stringify(diffs),
+            });
+          }
+        : undefined,
       ...agentLoopCallbacks,
       ...(pipelineCfg && {
         maxIterationsOverride: pipelineCfg.iterCap,
@@ -6022,6 +5993,23 @@ const initializeTodosFromPlan = (): void => {
       loop = aggregateOrchestratorResults(stepResults);
     } else {
       loop = await runAgentLoop(agentLoopBaseInput);
+    }
+
+    if (_costLogPath !== null && latestIterCostUpdate !== null) {
+      try { appendRunSummary(_costLogPath, latestIterCostUpdate); } catch { /* best-effort */ }
+    }
+
+    // R3: staged-checkpoint outcomes — staging was discarded; exit before post-loop processing.
+    if (loop.terminationReason === "staged_rejected") {
+      return { ok: false, reason: "staged_rejected" };
+    }
+    if (loop.terminationReason === "staged_refine_requested") {
+      return {
+        ok: false,
+        reason: "staged_refine_requested",
+        ...(loop.refineFeedback !== undefined ? { refineFeedback: loop.refineFeedback } : {}),
+        ...(loop.discardedStaging !== undefined ? { discardedStaging: loop.discardedStaging } : {}),
+      };
     }
 
     // Phase H.7: capture token-budget exit at outer-scope lifetime so the
@@ -6392,7 +6380,8 @@ const initializeTodosFromPlan = (): void => {
     developerContextFiles.length > 0 &&
     developerContextFiles.every(
       (file) => typeof file.absolutePath === "string" && file.absolutePath.length > 0
-    );
+    ) &&
+    isEmbeddingBackendAvailable();
 
   debugLog("[zone-embed-block-entry] entering embedding section", {
     canUseSemanticRanking,
@@ -6797,92 +6786,17 @@ const initializeTodosFromPlan = (): void => {
       // Sidebar is seeded by the in-loop TodoWrite tool now; pre-planner only
       // feeds scopeGuard / evaluatePlanAlignment / orchestrator / finalRunReport.
     } catch (err) {
-      console.warn(
+      debugLog(
         `[zone-plan] skipped: ${err instanceof Error ? err.message : String(err)}`
       );
     }
   }
 
-  // 4. Plan feature with LLM
-  reportProgress("Planning feature...");
-  let llmPlan: Awaited<ReturnType<typeof planFeatureWithLlm>> | null = null;
-  if (!(pipelineCfg as PipelineConfig | null)?.skipPlan && !input.hostedContext) {
-    try {
-      perf.mark("feature model call start");
-      llmPlan = await planFeatureWithLlm({
-        task: input.task,
-        intent: taskIntent,
-        projectSummary,
-        projectNotes,
-        relevantFiles: relevantFiles.map((f) => ({
-          path: f.path,
-          category: f.category,
-        })),
-        existingFilesSummary,
-        schemaAwareSummary: [],
-        userOpenAiKey: input.userApiKey,
-      });
-      perf.mark("feature model response received");
-    } catch (err) {
-      debugLog("[zone-flow-early-return]", JSON.stringify({ step: "feature_planning_failed", reason: "feature_planning_failed" }));
-      perf.finish("feature planning failed");
-      const reason = err instanceof Error ? err.message : String(err);
-      notifyProgress("Ready", {
-        type: "patch_generation_failed",
-        message: `Feature planning failed: ${reason}`,
-        stage: "plan",
-        status: "feature_plan_error",
-      });
-      notifyProgress("Ready", {
-        type: "run_completed",
-        message: "Run finished with errors.",
-        stage: "finalize",
-        status: "failed",
-      });
-      const featureFailReport = await generateFinalRunReport({
-        task: input.task,
-        contextFilesMeta: relevantFiles.slice(0, getMaxContextFiles()).map((f) => ({
-          path: f.path,
-          reason: "Ranked as relevant to the task",
-        })),
-        planObjective: executionPlan?.objective ?? null,
-        planScopeSummary: executionPlan?.scopeSummary ?? null,
-        patchSource: "no_patch",
-        fileDiffs: [],
-        patchScope: {
-          changedFileCount: 0,
-          totalAddedLines: 0,
-          totalRemovedLines: 0,
-          totalChangedLines: 0,
-        },
-        decisionMode: "safe_to_apply",
-        warnings: [`Feature planning failed: ${reason}`],
-        correctness: { status: "skipped", summary: "Run stopped during feature planning." },
-        verificationCommandsLabel: null,
-        runtimeVerificationSummary: null,
-        finalExecutionOutcome: "failed",
-      });
-      return {
-        ok: false,
-        reason,
-        lifecycleEvents: [...lifecycleEvents],
-        finalRunReport: featureFailReport,
-      };
-    }
-  }
-
-  // Plan UI should be based ONLY on files the LLM said we should modify/create,
-  // not ranked/inspect-only context files.
-  const suggestedFilesForPlanUi = (llmPlan?.suggestedFiles ?? []).filter(
-    (f) => f.action === "modify" || f.action === "create"
-  );
   const planStepCount = executionPlan?.steps.length ?? 0;
   const isComplexTaskPreview =
     executionPlan != null && planStepCount >= 2;
   debugLog("[zone-plan-debug]", {
     planStepCount,
-    suggestedFilesCount: suggestedFilesForPlanUi.length,
-    suggestedFiles: suggestedFilesForPlanUi,
     isComplexTask: isComplexTaskPreview,
   });
   /** Tur P1: lowered threshold from "≥4 steps + ≥2 files" to "≥2 steps" so multi-task prompts surface the plan checklist. P2 will remove the gate entirely (always emit, UI decides). */
@@ -6895,9 +6809,7 @@ const initializeTodosFromPlan = (): void => {
       `${executionPlan.steps.length} execution step(s); scope: ${executionPlan.scopeSummary}`
     );
   }
-  if (llmPlan?.suggestedFiles?.length) {
-    planSummaryParts.push(`${llmPlan.suggestedFiles.length} suggested context file(s) from feature plan`);
-  }
+
   if (!(pipelineCfg as PipelineConfig | null)?.skipPlanSSE) {
     notifyProgress("Planning feature...", {
       type: "plan_created",
@@ -6918,7 +6830,6 @@ const initializeTodosFromPlan = (): void => {
   );
   const plannerSuggestedPaths = plannerSelection?.filesToEdit?.slice(0, getMaxContextFiles()) ?? [];
   const plannerSuggestedPathSet = new Set(plannerSuggestedPaths);
-  const llmSuggestedPaths = new Set((llmPlan?.suggestedFiles ?? []).map((file) => file.path));
   let preliminaryContextFiles =
     input.hostedContext?.contextFiles.map((file) => ({
       path: file.path,
@@ -7008,12 +6919,6 @@ const initializeTodosFromPlan = (): void => {
           (relevantFileScores.get(b.path) ?? -1) - (relevantFileScores.get(a.path) ?? -1);
         if (scoreDifference !== 0) {
           return scoreDifference;
-        }
-
-        const suggestionDifference =
-          Number(llmSuggestedPaths.has(b.path)) - Number(llmSuggestedPaths.has(a.path));
-        if (suggestionDifference !== 0) {
-          return suggestionDifference;
         }
 
         return a.path.localeCompare(b.path);
@@ -7486,66 +7391,6 @@ const initializeTodosFromPlan = (): void => {
       finalRunReport: highRiskReport,
     };
   }
-  if (vagueTask) {
-    notifyProgress("Ready", {
-      type: "patch_generation_failed",
-      message: "Patch generation was not started: task description is too vague for safe edits.",
-      stage: "patch_gen",
-      status: "vague_task_preview_only",
-      ...(selectedTargetFile ? { filePath: selectedTargetFile } : {}),
-    });
-    notifyProgress("Ready", {
-      type: "run_completed",
-      message: "Run finished (preview-only, vague task).",
-      stage: "finalize",
-      status: "preview_only",
-    });
-    reportProgress("Ready");
-    perf.mark("decision evaluation complete");
-    debugLog("[zone-flow-early-return]", JSON.stringify({ step: "vague_task", reason: "vague_task_no_patch" }));
-    perf.finish("vague task response ready");
-    const vagueReport = await generateFinalRunReport({
-      task: input.task,
-      contextFilesMeta: selectedContextFiles.map((f) => ({
-        path: f.path,
-        reason: f.reason,
-      })),
-      planObjective: executionPlan?.objective ?? null,
-      planScopeSummary: executionPlan?.scopeSummary ?? null,
-      patchSource: "no_patch",
-      fileDiffs: [],
-      patchScope: {
-        changedFileCount: 0,
-        totalAddedLines: 0,
-        totalRemovedLines: 0,
-        totalChangedLines: 0,
-      },
-      decisionMode: "safe_to_apply",
-      finalState: "safe_to_apply",
-      warnings: [DEVELOPER_VAGUE_TASK_WARNING],
-      correctness: { status: "skipped", summary: "Patch generation was not started (vague task policy)." },
-      verificationCommandsLabel: null,
-      runtimeVerificationSummary: null,
-      finalExecutionOutcome: "completed_with_issues",
-      developerConfidence: 60,
-    });
-    return {
-      ok: true,
-      patchPreview: DEVELOPER_VAGUE_TASK_WARNING,
-      warnings: [DEVELOPER_VAGUE_TASK_WARNING],
-      developerConfidence: 60,
-      decisionMode: "safe_to_apply",
-      ...(selectedTargetFile ? { targetFile: selectedTargetFile } : {}),
-      applyPatches: [],
-      patchResults: [],
-      fileDiffs: [],
-      contextFiles: selectedContextFiles.map((file) => file.path).slice(0, 5),
-      ...(executionPlan ? { plan: executionPlan } : {}),
-      lifecycleEvents: [...lifecycleEvents],
-      finalRunReport: vagueReport,
-    };
-  }
-
   const patchPreviewHadNoStructuredPatchesFromLlm = patchPlan.patches.length === 0;
   if (patchPlan.patches.length === 0) {
     const previewEmptyPick = resolvePreviewEmptyFallbackPath({
@@ -8939,7 +8784,12 @@ const initializeTodosFromPlan = (): void => {
     });
     perf.mark("patch conversion complete");
   } catch (err) {
-    // step 6b is best-effort — never block the preview result
+    // Auth failures must propagate — a missing/invalid key is not a recoverable
+    // step-6b error and should surface to the user rather than silently complete.
+    if (err instanceof ApiKeyError) {
+      throw err;
+    }
+    // step 6b is best-effort — never block the preview result for non-auth errors
     errorLog(
       "[hosted] step 6b failed:",
       err instanceof Error ? err.message : String(err)
@@ -11350,4 +11200,154 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
     finalRunReport,
     ...(handoffReport ? { handoffReport } : {}),
   };
+}
+
+/**
+ * Maps a structured event emitted by the agent loop into a ZoneStructuredProgressEvent
+ * shape suitable for the TUI progress bus. Returns null for unrecognised types and for
+ * side-effect-only events (iter_cost_update, todos_*, todo_status_changed) that are
+ * handled inline in onStructuredEvent.
+ * Pure — no state mutations, no I/O; safe to call from any context or test.
+ */
+export function mapStructuredEventToProgress(
+  evt: unknown
+): Omit<ZoneStructuredProgressEvent, "runId" | "ts"> | null {
+  if (!evt || typeof evt !== "object") return null;
+  const e = evt as any;
+  switch (e.type as string) {
+    case "command_approval_required":
+      return {
+        type: "command_approval_required",
+        title: "Command approval required",
+        status: "active",
+        command: String(e.command || ""),
+        approvalId: String(e.approvalId || ""),
+      };
+    case "edit_approval_required":
+      return {
+        type: "edit_approval_required",
+        title: "Edit approval required",
+        status: "active",
+        filePath: String(e.filePath || ""),
+        approvalId: String(e.approvalId || ""),
+      };
+    case "command_auto_approved":
+      return {
+        type: "command_auto_approved",
+        title: "Command auto-approved",
+        status: "success",
+        command: String(e.command || ""),
+        approvalId: String(e.approvalId || ""),
+      };
+    case "command_trusted":
+      return {
+        type: "command_trusted",
+        title: "Trusted command auto-approved",
+        status: "success",
+        command: String(e.command || ""),
+        approvalId: String(e.approvalId || ""),
+      };
+    case "token_budget_status":
+      return {
+        type: "token_budget_status",
+        title: String(e.title || "Token budget"),
+        status:
+          (e.status as "active" | "warning" | "error" | "success" | undefined) ??
+          "active",
+        cumulativeTokens:
+          typeof e.cumulativeTokens === "number" ? e.cumulativeTokens : undefined,
+        tokenBudgetCap:
+          typeof e.tokenBudgetCap === "number" ? e.tokenBudgetCap : undefined,
+        tokenBudgetRatio:
+          typeof e.tokenBudgetRatio === "number" ? e.tokenBudgetRatio : undefined,
+        iter: typeof e.iter === "number" ? e.iter : undefined,
+        breakdown:
+          e.breakdown && typeof e.breakdown === "object"
+            ? e.breakdown
+            : undefined,
+      };
+    case "subagent_started":
+    case "subagent_completed":
+      return {
+        type: e.type as "subagent_started" | "subagent_completed",
+        title: String(e.title || e.type).slice(0, 160),
+        status: e.status as "active" | "success" | "warning" | "error" | undefined,
+        subagentStatus: e.subagentStatus,
+        subagentId: e.subagentId,
+        subagentType: e.subagentType,
+        parentRunId: e.parentRunId,
+      };
+    case "narration":
+      return {
+        type: "narration",
+        title: String(e.title || "").slice(0, 200),
+        text: String(e.text || "").slice(0, 2000),
+        iter: typeof e.iter === "number" ? e.iter : undefined,
+        status: "active",
+      };
+    case "compaction_started":
+      return {
+        type: "compaction_started",
+        title: "Compacting context",
+        status: "active",
+        count: typeof e.count === "number" ? e.count : 0,
+      };
+    case "compaction_status":
+      return {
+        type: "compaction_status",
+        title: "Compacting context",
+        status: "active",
+        count: typeof e.count === "number" ? e.count : 0,
+        tokensBefore: typeof e.tokensBefore === "number" ? e.tokensBefore : undefined,
+        tokensAfter: typeof e.tokensAfter === "number" ? e.tokensAfter : undefined,
+        savedTokens: typeof e.savedTokens === "number" ? e.savedTokens : undefined,
+      };
+    case "compaction_exhausted":
+      return {
+        type: "compaction_exhausted",
+        title: "Context exhausted",
+        status: "warning",
+        message: typeof e.message === "string" ? e.message : "",
+      };
+    case "compaction_overflow_warning":
+      return {
+        type: "compaction_overflow_warning",
+        title: "Context window full — no compactable history",
+        status: "warning",
+      };
+    case "loop_warning_emitted":
+      return {
+        type: "loop_warning_emitted",
+        title: String(e.title || "Loop warning"),
+        status: "warning",
+        toolName: String(e.toolName || ""),
+        count: typeof e.count === "number" ? e.count : 0,
+      };
+    case "loop_detected_terminal":
+      return {
+        type: "loop_detected_terminal",
+        title: String(e.title || "Loop detected"),
+        status: "error",
+        toolName: String(e.toolName || ""),
+        count: typeof e.count === "number" ? e.count : 0,
+      };
+    case "staged_diffs_ready_for_approval":
+      // plan_ready_for_approval intentionally bypasses this mapper — emitted from dispatch.ts
+      // directly via progressCallback, not through the agent-loop onStructuredEvent channel.
+      // Do NOT add plan_ready_for_approval here.
+      return {
+        type: "staged_diffs_ready_for_approval",
+        title: String(e.title || "Review staged changes"),
+        status: "active",
+        approvalId: String(e.approvalId || ""),
+        stagedFilesJson:
+          typeof e.stagedFilesJson === "string" ? e.stagedFilesJson : undefined,
+        stagedVerificationSummary:
+          typeof e.stagedVerificationSummary === "string" ? e.stagedVerificationSummary : undefined,
+        stagedTrigger:
+          typeof e.stagedTrigger === "string" ? e.stagedTrigger : undefined,
+      };
+    default:
+      return null;
+  }
 }

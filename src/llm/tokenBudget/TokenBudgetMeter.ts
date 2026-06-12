@@ -67,6 +67,10 @@ export class TokenBudgetMeter {
     provider: string;
     model: string;
     onStructuredEvent?: (e: unknown) => void;
+    tier?: string;
+    archetype?: string;
+    pipelineApplied?: boolean;
+    mode?: string;
   }): void {
     const { rawUsage, iter, totalIter, provider, model, onStructuredEvent } = opts;
 
@@ -93,6 +97,10 @@ export class TokenBudgetMeter {
           model,
           current: usage,
           previous: this._iterCostAccumulator,
+          tier: opts.tier,
+          archetype: opts.archetype,
+          pipelineApplied: opts.pipelineApplied,
+          mode: opts.mode,
         });
         this._iterCostAccumulator = update.accumulator;
         this._lastIterCostPayload = update.payload;

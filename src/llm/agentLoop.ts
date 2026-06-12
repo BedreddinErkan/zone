@@ -2955,6 +2955,10 @@ Example:
       provider: client.provider,
       model: response.model || modelName,
       onStructuredEvent: input.onStructuredEvent,
+      tier: input.taskClassification?.tier ?? "",
+      archetype: input.taskClassification?.archetype ?? "",
+      pipelineApplied: inputIterCap !== null,
+      mode,
     });
     if (input.subagent && budget.lastIterTokenTotal > 0) {
       log("[zone-worker-token]", JSON.stringify({

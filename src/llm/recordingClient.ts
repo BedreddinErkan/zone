@@ -14,6 +14,7 @@ interface UsageBreakdown {
   cache_write: number;
   cache_read: number;
   output: number;
+  output_reasoning: number;
   webSearchRequests: number;
 }
 
@@ -33,12 +34,18 @@ export function extractUsage(rawUsage: unknown): UsageBreakdown | null {
     return null;
   }
   const inputUncached = openAiCacheRead > 0 ? Math.max(0, input - openAiCacheRead) : input;
+  const completionTokenDetails =
+    u.completion_tokens_details && typeof u.completion_tokens_details === "object"
+      ? (u.completion_tokens_details as Record<string, unknown>)
+      : null;
+  const outputReasoning = Number(completionTokenDetails?.reasoning_tokens ?? 0) || 0;
   const webSearchRequests = Number(u.web_search_requests ?? 0) || 0;
   return {
     input_uncached: inputUncached,
     cache_write: cacheWrite,
     cache_read: cacheRead,
     output,
+    output_reasoning: outputReasoning,
     webSearchRequests,
   };
 }
