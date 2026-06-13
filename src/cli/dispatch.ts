@@ -50,6 +50,8 @@ export interface OneShotOpts {
   images?: import("../api/imageUpload.js").ImageAttachment[];
   /** User-facing hooks — trust-checked in-memory snapshot from .zone/hooks.json. */
   userHooks?: import("../api/diskHooks.js").UserHooksConfig | null;
+  /** MCP client manager — proxies mcp__<server>__<tool> calls. */
+  mcpManager?: import("../mcp/mcpClientManager.js").McpClientManager | null;
 }
 
 /** Core one-shot runner. Returns the flow result — does NOT call process.exit. */
@@ -514,6 +516,7 @@ export async function runOneShotInner(
             autoApprove: effectiveConfig.autoApprove || process.stdout.isTTY !== true,
             images: opts.images,
             userHooks: opts.userHooks,
+            mcpManager: opts.mcpManager,
             ...(restageSeed !== undefined ? { restageSeed, maxIterationsOverride: REFINE_RESTAGE_ITER_CAP } : {}),
           })
         );
@@ -570,6 +573,7 @@ export async function runOneShotInner(
         showPostFlushDiffs: !!planForExecution,
         images: opts.images,
         userHooks: opts.userHooks,
+        mcpManager: opts.mcpManager,
       })
     );
 

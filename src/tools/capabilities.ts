@@ -12,7 +12,8 @@ export type Capability =
   | "net.fetch"
   | "agent.spawn"
   | "memory.update"
-  | "agent.control";
+  | "agent.control"
+  | "mcp.call";
 
 export const ALL_CAPABILITIES: ReadonlySet<Capability> = new Set<Capability>([
   "fs.read",
@@ -22,6 +23,7 @@ export const ALL_CAPABILITIES: ReadonlySet<Capability> = new Set<Capability>([
   "agent.spawn",
   "memory.update",
   "agent.control",
+  "mcp.call",
 ]);
 
 export interface CapabilityFilter {

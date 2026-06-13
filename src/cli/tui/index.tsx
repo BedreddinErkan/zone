@@ -22,6 +22,9 @@ import { saveSession, pruneOldSessions, loadLastSession, type DiskSession } from
 import { loadDiskModel, type DiskModelSettings } from "../../api/diskModel.js";
 import { loadDiskHooks, hooksConfigHash, type UserHooksConfig } from "../../api/diskHooks.js";
 import { isHooksTrusted } from "../../api/diskTrustedHooks.js";
+import { loadDiskMcp, mcpConfigHash, type McpConfig } from "../../api/diskMcp.js";
+import { isMcpTrusted } from "../../api/diskTrustedMcp.js";
+import { McpClientManager } from "../../mcp/mcpClientManager.js";
 import { log } from "../../utils/logger.js";
 import type { StoreState, StoreAction } from "./store.js";
 import { deriveCommitMessage, shouldAutoCommit } from "./commitMessage.js";
@@ -212,6 +215,30 @@ export async function runTui(
     }
   } catch { /* non-critical */ }
 
+  // MCP: load .zone/mcp.json and check trust
+  let initialArmedMcpManager: McpClientManager | null = null;
+  let initialPendingMcpTrust: { config: McpConfig; hash: string; projectPath: string } | null = null;
+  try {
+    const mcpConfig = await loadDiskMcp(config.repoPath);
+    if (mcpConfig?._rawBytes) {
+      const hash = mcpConfigHash(mcpConfig._rawBytes);
+      if (isMcpTrusted(config.repoPath, hash)) {
+        initialArmedMcpManager = await McpClientManager.connect(mcpConfig.mcpServers, config.repoPath);
+      } else if (process.env["ZONE_TRUST_MCP"] === "all") {
+        initialArmedMcpManager = await McpClientManager.connect(mcpConfig.mcpServers, config.repoPath);
+        log("[zone-mcp-trust-bypass]", "ZONE_TRUST_MCP=all — skipping hash verification");
+      } else if (process.stdout.isTTY) {
+        initialPendingMcpTrust = { config: mcpConfig, hash, projectPath: config.repoPath };
+      } else {
+        process.stderr.write(
+          "[zone-mcp] .zone/mcp.json found but not trust-approved. " +
+          "Run zone once interactively (TTY) to review and approve, " +
+          "or set ZONE_TRUST_MCP=all to bypass.\n"
+        );
+      }
+    }
+  } catch { /* non-critical — MCP failure never crashes startup */ }
+
   let initialUserCommands: UserCommand[] = [];
   try {
     initialUserCommands = await loadUserCommands(config.repoPath); // NOT process.cwd() — repoPathTrap
@@ -276,6 +303,7 @@ export async function runTui(
   // Fallback signal handlers — in TTY raw mode Ctrl+C arrives as \x03 in useInput, not SIGINT.
   // These fire in non-TTY contexts (pipes, test runners that send real signals).
   process.on("SIGINT", () => {
+    storeCapture.state?.armedMcpManager?.killAllSync();
     instance?.unmount();
     const s = storeCapture.state;
     if (s && s.transcript.length > 0) {
@@ -288,6 +316,7 @@ export async function runTui(
     }
   });
   process.on("SIGTERM", () => {
+    storeCapture.state?.armedMcpManager?.killAllSync();
     instance?.unmount();
     const s = storeCapture.state;
     if (s && s.transcript.length > 0) {
@@ -300,11 +329,13 @@ export async function runTui(
     }
   });
   process.on("uncaughtException", (err) => {
+    storeCapture.state?.armedMcpManager?.killAllSync();
     instance?.unmount();
     console.error(err);
     process.exit(1);
   });
   process.on("unhandledRejection", (err) => {
+    storeCapture.state?.armedMcpManager?.killAllSync();
     instance?.unmount();
     console.error(err);
     process.exit(1);
@@ -358,6 +389,7 @@ export async function runTui(
       runResult = await runOneShotInner(prompt, config, runId, {
         externalAc: ac, onProgress, mode, priorSessionSummary, images,
         userHooks: storeCapture.state?.armedUserHooks,
+        mcpManager: storeCapture.state?.armedMcpManager,
       });
     } catch (err: unknown) {
       if (err instanceof ProviderRequestError) {
@@ -529,6 +561,8 @@ export async function runTui(
         initialUserCommands={initialUserCommands}
         initialArmedUserHooks={initialArmedUserHooks}
         initialPendingHookTrust={initialPendingHookTrust}
+        initialArmedMcpManager={initialArmedMcpManager}
+        initialPendingMcpTrust={initialPendingMcpTrust}
         onModelApply={(model, provider, effort, summaryFormat, memoryEnabled, commitOnSuccess) => {
           config.model = model;
           config.provider = provider as typeof config.provider;
@@ -570,6 +604,9 @@ export async function runTui(
 
   // Single path: wait for explicit exit (Ctrl+C → \x03 in useInput → useApp.exit())
   await instance.waitUntilExit();
+
+  // Graceful MCP shutdown — normal exit path only; signal paths use killAllSync() above.
+  await storeCapture.state?.armedMcpManager?.closeAll().catch(() => {});
 
   const finalState = storeCapture.state;
   if (finalState && finalState.transcript.length > 0) {

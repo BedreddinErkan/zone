@@ -176,7 +176,10 @@ export type ZoneStructuredProgressEvent = {
     | "run_failed"
     /** User-facing hooks: fired when a .zone/hooks.json shell command starts/completes. */
     | "hook_started"
-    | "hook_completed";
+    | "hook_completed"
+    /** MCP client: server connected + tools discovered; tool call proxied. */
+    | "mcp_connected"
+    | "mcp_tool_called";
   title: string;
   detail?: string;
   filePath?: string;

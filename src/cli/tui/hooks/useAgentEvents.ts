@@ -455,6 +455,17 @@ export function useAgentEvents(
     };
     bus.on("hook_completed", onHookCompleted);
 
+    // MCP events
+    const onMcpConnected = (evt: ZoneStructuredProgressEvent): void => {
+      dispatch({ type: "TRANSCRIPT_APPEND_NARRATION", text: evt.title ?? "MCP servers connected" });
+      dispatch({ type: "NARRATION_COMMIT" });
+    };
+    const onMcpToolCalled = (_evt: ZoneStructuredProgressEvent): void => {
+      // No-op: tool_call/tool_result events already render the call in the transcript.
+    };
+    bus.on("mcp_connected", onMcpConnected);
+    bus.on("mcp_tool_called", onMcpToolCalled);
+
     return () => {
       if (debounceTimer.current !== null) {
         clearTimeout(debounceTimer.current);
@@ -502,6 +513,8 @@ export function useAgentEvents(
       bus.off("staged_diffs_ready_for_approval", onStagedDiffsReady);
       bus.off("post_execute_diffs", onPostExecuteDiffs);
       bus.off("hook_completed", onHookCompleted);
+      bus.off("mcp_connected", onMcpConnected);
+      bus.off("mcp_tool_called", onMcpToolCalled);
     };
   }, [bus, dispatch]);
 }

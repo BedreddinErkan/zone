@@ -29,6 +29,7 @@
     "@babel/parser": "^7.29.2",
     "@babel/traverse": "^7.29.0",
     "@babel/types": "^7.29.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@supabase/supabase-js": "^2.57.4",
     "body-parser": "^1.20.3",
     "commander": "^12.1.0",

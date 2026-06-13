@@ -272,6 +272,8 @@ export interface AgentLoopInput {
   images?: import("../api/imageUpload.js").ImageAttachment[];
   /** User-facing hooks from .zone/hooks.json — trust-checked in-memory snapshot; never re-read from disk. */
   userHooks?: import("../api/diskHooks.js").UserHooksConfig | null;
+  /** MCP client manager — proxies mcp__<server>__<tool> calls to the owning server. */
+  mcpManager?: import("../mcp/mcpClientManager.js").McpClientManager | null;
 }
 
 export interface AgentLoopResult {
@@ -3492,54 +3494,61 @@ Example:
           }
         }
 
-        const result = await executeTool(name, parsedArgs, input.repoPath, input.onProgress, {
-          runId: rid || undefined,
-          onApprovalRequired: async (command, runId) => {
-            const { requestCommandApproval } = await import("../api/commandApprovals.js");
-            const approval = await requestCommandApproval({
-              runId,
-              command,
-              emit: (evt) => input.onStructuredEvent?.(evt),
-              abortSignal: input.abortSignal,
-              investigationMode: isInvestigationMode,
-            });
-            return !!approval.approved;
-          },
-          onEditApprovalRequired: input.editApprovalMode === "manual"
-            ? async (filePath: string, runId: string) => {
-                const approval = await requestEditApproval({
+        // MCP dynamic dispatch: route mcp__<server>__<tool> calls to the client manager;
+        // all other tool names go through the static executeTool if-else.
+        const result = name.startsWith("mcp__") && input.mcpManager
+          ? await ((): Promise<import("../tools/toolExecutor.js").ToolResult> => {
+              input.onStructuredEvent?.({ type: "mcp_tool_called", status: "info", title: name, runId: input.runId ?? "", ts: Date.now() });
+              return input.mcpManager!.callTool(name, parsedArgs);
+            })()
+          : await executeTool(name, parsedArgs, input.repoPath, input.onProgress, {
+              runId: rid || undefined,
+              onApprovalRequired: async (command, runId) => {
+                const { requestCommandApproval } = await import("../api/commandApprovals.js");
+                const approval = await requestCommandApproval({
                   runId,
-                  filePath,
+                  command,
                   emit: (evt) => input.onStructuredEvent?.(evt),
                   abortSignal: input.abortSignal,
+                  investigationMode: isInvestigationMode,
                 });
                 return !!approval.approved;
-              }
-            : undefined,
-          escalatedFiles,
-          allowWriteFileOverwritePaths: escalatedFiles,
-          stagingFiles,
-          abortSignal: input.abortSignal,
-          executionPlan: input.executionPlan ?? null,
-          archetype: input.taskClassification?.archetype,
-          allowedTools: effectiveAllowedSet,
-          userId: input.userId,
-          framework: input.framework,
-          subagent: input.subagent,
-          onToolCall: input.onToolCall,
-          onToolResult: input.onToolResult,
-          onStructuredEvent: input.onStructuredEvent,
-          // F1.4: forward the streaming callback so the Task tool dispatch
-          // can pass it on to the worker subagent's runAgentLoop. Worker
-          // tool-input deltas then flow back through the parent's SSE
-          // channel, tagged with the worker's subagentId.
-          onToolInputStream: input.onToolInputStream,
-          tokenBudgetBaseTokens: name === "Task" ? budget.cumulativeTokens : undefined,
-          maxSubagentCallsOverride: effectiveMaxSubagentCalls ?? undefined,
-          selfValidationCounts,
-          filesReadThisRun,
-          model: modelName,
-        });
+              },
+              onEditApprovalRequired: input.editApprovalMode === "manual"
+                ? async (filePath: string, runId: string) => {
+                    const approval = await requestEditApproval({
+                      runId,
+                      filePath,
+                      emit: (evt) => input.onStructuredEvent?.(evt),
+                      abortSignal: input.abortSignal,
+                    });
+                    return !!approval.approved;
+                  }
+                : undefined,
+              escalatedFiles,
+              allowWriteFileOverwritePaths: escalatedFiles,
+              stagingFiles,
+              abortSignal: input.abortSignal,
+              executionPlan: input.executionPlan ?? null,
+              archetype: input.taskClassification?.archetype,
+              allowedTools: effectiveAllowedSet,
+              userId: input.userId,
+              framework: input.framework,
+              subagent: input.subagent,
+              onToolCall: input.onToolCall,
+              onToolResult: input.onToolResult,
+              onStructuredEvent: input.onStructuredEvent,
+              // F1.4: forward the streaming callback so the Task tool dispatch
+              // can pass it on to the worker subagent's runAgentLoop. Worker
+              // tool-input deltas then flow back through the parent's SSE
+              // channel, tagged with the worker's subagentId.
+              onToolInputStream: input.onToolInputStream,
+              tokenBudgetBaseTokens: name === "Task" ? budget.cumulativeTokens : undefined,
+              maxSubagentCallsOverride: effectiveMaxSubagentCalls ?? undefined,
+              selfValidationCounts,
+              filesReadThisRun,
+              model: modelName,
+            });
         debugLog("[zone-agent-tool-post]", {
           runId: input.runId,
           iter,

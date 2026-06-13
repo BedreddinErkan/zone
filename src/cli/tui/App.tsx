@@ -25,6 +25,7 @@ import { LimitsModal } from "./components/LimitsModal.js";
 import { CommitModal } from "./components/CommitModal.js";
 import { UndoModal } from "./components/UndoModal.js";
 import { HookTrustModal } from "./components/HookTrustModal.js";
+import { McpTrustModal } from "./components/McpTrustModal.js";
 import { PlanPanel } from "./components/PlanPanel.js";
 import { resolveCommandApproval } from "../../api/commandApprovals.js";
 import { resolveEditApproval } from "../../api/editApprovals.js";
@@ -57,6 +58,8 @@ interface AppProps {
   initialUserCommands?: UserCommand[];
   initialArmedUserHooks?: import("../../api/diskHooks.js").UserHooksConfig | null;
   initialPendingHookTrust?: { config: import("../../api/diskHooks.js").UserHooksConfig; hash: string; projectPath: string } | null;
+  initialArmedMcpManager?: import("../../mcp/mcpClientManager.js").McpClientManager | null;
+  initialPendingMcpTrust?: { config: import("../../api/diskMcp.js").McpConfig; hash: string; projectPath: string } | null;
 }
 
 interface AppInnerProps {
@@ -213,6 +216,28 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
           onDeny={() => dispatch({ type: "HOOKS_TRUST_DENIED" })}
         />
       )}
+      {state.pendingMcpTrust !== null && (
+        <McpTrustModal
+          config={state.pendingMcpTrust.config}
+          projectPath={state.pendingMcpTrust.projectPath}
+          onApprove={async () => {
+            if (!state.pendingMcpTrust) return;
+            const { config, hash, projectPath } = state.pendingMcpTrust;
+            try {
+              const [{ recordMcpTrust }, { McpClientManager }] = await Promise.all([
+                import("../../api/diskTrustedMcp.js"),
+                import("../../mcp/mcpClientManager.js"),
+              ]);
+              recordMcpTrust(projectPath, hash);
+              const manager = await McpClientManager.connect(config.mcpServers, projectPath);
+              dispatch({ type: "MCP_TRUST_APPROVED", manager });
+            } catch {
+              dispatch({ type: "MCP_TRUST_DENIED" });
+            }
+          }}
+          onDeny={() => dispatch({ type: "MCP_TRUST_DENIED" })}
+        />
+      )}
       {state.planProposal !== null && (
         <PlanModal proposal={state.planProposal} dispatch={dispatch} />
       )}
@@ -247,7 +272,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
   );
 }
 
-export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, initialTrustedPrefixes, resumedSession, onStateChange, initialModelSettings, onModelApply, getCommitData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust }: AppProps): React.ReactElement {
+export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, initialTrustedPrefixes, resumedSession, onStateChange, initialModelSettings, onModelApply, getCommitData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust }: AppProps): React.ReactElement {
   return (
     <StoreProvider initialValues={{
       model: initialModel ?? "",
@@ -262,6 +287,8 @@ export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, ini
       mode: initialMode,
       armedUserHooks: initialArmedUserHooks,
       pendingHookTrust: initialPendingHookTrust,
+      armedMcpManager: initialArmedMcpManager,
+      pendingMcpTrust: initialPendingMcpTrust,
     }}>
       <AppInner bus={bus} initialPrompt={initialPrompt} initialMode={initialMode} onSubmit={onSubmit} onUndoRequest={onUndoRequest} onStateChange={onStateChange} onModelApply={onModelApply} getCommitData={getCommitData} onDispatchCapture={onDispatchCapture} onSessionClear={onSessionClear} />
     </StoreProvider>

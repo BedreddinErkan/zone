@@ -124,6 +124,10 @@ export type StoreState = {
   armedUserHooks: UserHooksConfig | null;
   /** Non-null when hooks.json was found but not yet approved — triggers HookTrustModal. */
   pendingHookTrust: { config: UserHooksConfig; hash: string; projectPath: string } | null;
+  /** Armed MCP client manager (trust-verified, servers connected). Null = disconnected. */
+  armedMcpManager: import("../../mcp/mcpClientManager.js").McpClientManager | null;
+  /** Non-null when mcp.json was found but not yet approved — triggers McpTrustModal. */
+  pendingMcpTrust: { config: import("../../api/diskMcp.js").McpConfig; hash: string; projectPath: string } | null;
 };
 
 export function buildInitialState(initialValues?: {
@@ -139,6 +143,8 @@ export function buildInitialState(initialValues?: {
   mode?: TuiMode;
   armedUserHooks?: UserHooksConfig | null;
   pendingHookTrust?: { config: UserHooksConfig; hash: string; projectPath: string } | null;
+  armedMcpManager?: import("../../mcp/mcpClientManager.js").McpClientManager | null;
+  pendingMcpTrust?: { config: import("../../api/diskMcp.js").McpConfig; hash: string; projectPath: string } | null;
 }): StoreState {
   return {
     transcript: initialValues?.resumedTranscript ?? [],
@@ -190,6 +196,8 @@ export function buildInitialState(initialValues?: {
     undoModalData: null,
     armedUserHooks: initialValues?.armedUserHooks ?? null,
     pendingHookTrust: initialValues?.pendingHookTrust ?? null,
+    armedMcpManager: initialValues?.armedMcpManager ?? null,
+    pendingMcpTrust: initialValues?.pendingMcpTrust ?? null,
   };
 }
 
@@ -305,7 +313,9 @@ export type StoreAction =
   | { type: "TODO_STATUS_SET"; todoId: string; status: TodoStatus }
   | { type: "POST_EXECUTE_DIFFS"; files: StagedFile[] }
   | { type: "HOOKS_TRUST_APPROVED"; hash: string; projectPath: string }
-  | { type: "HOOKS_TRUST_DENIED" };
+  | { type: "HOOKS_TRUST_DENIED" }
+  | { type: "MCP_TRUST_APPROVED"; manager: import("../../mcp/mcpClientManager.js").McpClientManager }
+  | { type: "MCP_TRUST_DENIED" };
 
 export function reducer(state: StoreState, action: StoreAction): StoreState {
   switch (action.type) {
@@ -840,6 +850,12 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     case "HOOKS_TRUST_DENIED":
       return { ...state, pendingHookTrust: null, armedUserHooks: null };
 
+    case "MCP_TRUST_APPROVED":
+      // Side-effect (recordMcpTrust + McpClientManager.connect) performed by caller before dispatch.
+      return { ...state, armedMcpManager: action.manager, pendingMcpTrust: null };
+    case "MCP_TRUST_DENIED":
+      return { ...state, pendingMcpTrust: null, armedMcpManager: null };
+
     default:
       return state;
   }
@@ -871,6 +887,8 @@ export function StoreProvider({
     mode?: TuiMode;
     armedUserHooks?: UserHooksConfig | null;
     pendingHookTrust?: { config: UserHooksConfig; hash: string; projectPath: string } | null;
+    armedMcpManager?: import("../../mcp/mcpClientManager.js").McpClientManager | null;
+    pendingMcpTrust?: { config: import("../../api/diskMcp.js").McpConfig; hash: string; projectPath: string } | null;
   };
 }): React.ReactElement {
   const [state, dispatch] = useReducer(reducer, undefined, () =>
