@@ -951,6 +951,7 @@ export type SelfCorrectTrigger =
   | "apply_patch_scope_not_found"
   | "apply_patch_replace_shorter_than_find"
   | "apply_patch_find_block_empty"
+  | "apply_patch_empty_replace_no_intent"
   | "apply_patch_marker_imbalance"
   | "apply_patch_no_read_first"
   | "apply_patch_content_before_find"
@@ -1235,6 +1236,8 @@ export function classifyFailure(
     // "FIND block is empty" â€” the find-block-empty rejection.
     if (/find block is empty/i.test(text))
       return "apply_patch_find_block_empty";
+    if (/replace block is empty/i.test(text))
+      return "apply_patch_empty_replace_no_intent";
     if (/content.*before.*find|content_before_find/i.test(text))
       return "apply_patch_content_before_find";
     if (/no valid.*find.*replace.*blocks found/i.test(text))
@@ -1265,6 +1268,7 @@ export function applyPatchRetryReason(trigger: SelfCorrectTrigger | string): str
     case "apply_patch_scope_not_found": return "scope_not_found";
     case "apply_patch_replace_shorter_than_find": return "replace_shorter";
     case "apply_patch_find_block_empty": return "find_block_empty";
+    case "apply_patch_empty_replace_no_intent": return "empty_replace_no_intent";
     case "apply_patch_marker_imbalance": return "marker_imbalance";
     case "apply_patch_no_read_first": return "no_read_first";
     case "apply_patch_content_before_find": return "content_before_find";
@@ -1495,6 +1499,17 @@ export function buildCoachingPrompt(
         `Avoid blindly re-running the same test command; that consumes attempts without progress.\n` +
         `Next action: classify with evidence; if related, produce a corrective patch.` +
         TEST_FAILURE_SCOPE_HARDENING
+      );
+    case "apply_patch_empty_replace_no_intent":
+      return (
+        `Your REPLACE block is empty, which apply_patch only allows with intent='delete'.\n` +
+        `To delete lines:\n` +
+        `- Set intent to 'delete'\n` +
+        `- FIND: the exact lines to remove (copy verbatim from read_file output)\n` +
+        `- REPLACE: leave empty\n\n` +
+        `Alternatively, to remove a specific string (not whole lines), use ` +
+        `multi_edit({files:[filePath], find:"target text", replace:""}).\n` +
+        `Next action: re-issue apply_patch with intent='delete' set.`
       );
     case "apply_patch_replace_shorter_than_find":
       return (

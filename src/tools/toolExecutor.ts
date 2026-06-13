@@ -2125,7 +2125,7 @@ export async function executeTool(
           };
         }
 
-        if (normalizedReplace.length === 0) {
+        if (normalizedReplace.length === 0 && intent !== "delete") {
           debugLog(
             "[zone-apply-patch-debug]",
             JSON.stringify({
@@ -2138,7 +2138,7 @@ export async function executeTool(
             success: false,
             output:
               `Block ${bi + 1}: REPLACE block is empty. ` +
-              `If you want to delete lines, the task must explicitly request deletion.`,
+              `To delete lines, set intent to 'delete' and retry.`,
           };
         }
 
