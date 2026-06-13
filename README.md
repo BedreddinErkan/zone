@@ -133,3 +133,4 @@ If Zone saves you money, you can [sponsor its development](https://zonecli.lemon
 ## Built by
 
 Bedreddin Erkan ([@BedreddinErkan](https://github.com/BedreddinErkan)) — solo dev. Built with TypeScript, Node.js, Ink, and the OpenAI / Anthropic SDKs. Inspired by Cursor; frustrated by SaaS lock-in.
+feedback@zonecli.dev
