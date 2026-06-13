@@ -14,7 +14,7 @@ const ALL_EFFORT_LABELS: Record<EffortLevel, string> = {
   low:   "Low — Faster, less deliberation",
   medium: "Medium — Balanced (default)",
   high:  "High — Slower, deeper analysis",
-  xhigh: "XHigh — Extended reasoning (Opus/Fable only)",
+  xhigh: "XHigh — Extended reasoning (Opus 4.8/4.7 only)",
   max:   "Max — Maximum reasoning budget",
 };
 

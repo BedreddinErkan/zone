@@ -3836,7 +3836,7 @@ Example:
     if (response.choices[0]?.finish_reason === "content_filter") {
       const baseRefusal =
         response.choices[0]?.message?.refusal ?? "Request declined by safety classifier.";
-      const refusalMsg = appendFableHint(modelName, baseRefusal);  // Step 3: Fable hint
+      const refusalMsg = baseRefusal;
       stagingFinalized = true;
       const refusalResult = await finalizeRun({
         trigger: "natural_completion",
@@ -4027,16 +4027,3 @@ Example:
   }
 }
 
-/** Exported for testing. Appends a factual Opus 4.8 hint to Fable refusals only.
- *  For all other models the hint is irrelevant — Fable's extra-strict classifiers are
- *  the reason it declines legitimate coding tasks that standard models accept. */
-export function appendFableHint(modelName: string, baseRefusal: string): string {
-  if (normalizeModelId(modelName) !== "claude-fable-5") return baseRefusal;
-  return (
-    baseRefusal +
-    "\n\nClaude Opus 4.8 uses standard safety classifiers and may accept security, " +
-    "infrastructure, or bioinformatics coding tasks that Fable declines. " +
-    "Opus applies its own safety floor — genuinely harmful requests remain refused. " +
-    "To retry: /model claude-opus-4-8"
-  );
-}

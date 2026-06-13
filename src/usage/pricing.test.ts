@@ -25,23 +25,6 @@ describe("pricing — claude-opus-4-8", () => {
   });
 });
 
-describe("pricing — claude-fable-5", () => {
-  it("input $10/MTok", () => {
-    expect(costFor("anthropic", "claude-fable-5", "input_uncached", 1_000_000)).toBe(10);
-  });
-
-  it("output $50/MTok", () => {
-    expect(costFor("anthropic", "claude-fable-5", "output", 1_000_000)).toBe(50);
-  });
-
-  it("cache_read $1/MTok (90% off input)", () => {
-    expect(costFor("anthropic", "claude-fable-5", "cache_read", 1_000_000)).toBe(1);
-  });
-
-  it("cache_write $12.5/MTok (1.25× input)", () => {
-    expect(costFor("anthropic", "claude-fable-5", "cache_write", 1_000_000)).toBe(12.5);
-  });
-});
 
 describe("formatCostNote", () => {
   it("returns formatted rate for known OpenAI models", () => {

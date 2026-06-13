@@ -12,7 +12,6 @@ describe("modelRegistry", () => {
   });
 
   it("supportsEffort returns true for supporting models and false for others", () => {
-    expect(supportsEffort("claude-fable-5")).toBe(true);
     expect(supportsEffort("claude-sonnet-4-6")).toBe(true);
     expect(supportsEffort("claude-opus-4-8")).toBe(true);
     expect(supportsEffort("claude-opus-4-7")).toBe(true);
@@ -27,7 +26,6 @@ describe("modelRegistry", () => {
   });
 
   it("usesAdaptiveThinking: true for adaptive family, false for others", () => {
-    expect(usesAdaptiveThinking("claude-fable-5")).toBe(true);
     expect(usesAdaptiveThinking("claude-opus-4-8")).toBe(true);
     expect(usesAdaptiveThinking("claude-opus-4-7")).toBe(true);
     expect(usesAdaptiveThinking("claude-sonnet-4-6")).toBe(false);

@@ -10,8 +10,8 @@ function minimalInput(model: string) {
   };
 }
 
-describe("convertParams — adaptive thinking family (Fable 5 / Opus 4.8 / Opus 4.7)", () => {
-  for (const model of ["claude-fable-5", "claude-opus-4-8", "claude-opus-4-7"]) {
+describe("convertParams — adaptive thinking family (Opus 4.8 / Opus 4.7)", () => {
+  for (const model of ["claude-opus-4-8", "claude-opus-4-7"]) {
     it(`${model} + effort:high → thinking:{type:"adaptive"} + output_config:{effort:"high"}`, () => {
       const { params } = convertParams(minimalInput(model), { effort: "high" });
       expect(params.thinking).toEqual({ type: "adaptive" });
@@ -39,7 +39,7 @@ describe("convertParams — adaptive thinking family (Fable 5 / Opus 4.8 / Opus 
   }
 
   it("explicit effort:low is passed through to output_config.effort", () => {
-    const { params: lo } = convertParams(minimalInput("claude-fable-5"), { effort: "low" });
+    const { params: lo } = convertParams(minimalInput("claude-opus-4-8"), { effort: "low" });
     expect((lo as Record<string, unknown>).output_config).toEqual({ effort: "low" });
   });
 });

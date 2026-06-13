@@ -27,7 +27,7 @@ describe("mapAnthropicBadRequest — retention classification", () => {
       const pr = e as ProviderRequestError;
       expect(pr.kind).toBe("retention");
       expect(pr.status).toBe(400);
-      expect(pr.userMessage).toContain("≥30 days");
+      expect(pr.userMessage).toContain("30-day minimum");
     }
   });
 

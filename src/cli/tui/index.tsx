@@ -393,7 +393,7 @@ export async function runTui(
       });
     } catch (err: unknown) {
       if (err instanceof ProviderRequestError) {
-        // Typed provider error (e.g. Fable retention 400): surface as red ErrorLine + failed run-state.
+        // Typed provider error (e.g. retention 400): surface as red ErrorLine + failed run-state.
         // emitSafetyNet=false suppresses the finally's agent_loop_complete so RUN_FAILED isn't clobbered by RUN_DONE.
         bus.emit("run_failed", {
           runId,

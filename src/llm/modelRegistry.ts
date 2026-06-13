@@ -13,7 +13,6 @@ export interface ModelEntry {
 }
 
 const EFFORT_SUPPORTED_MODELS = new Set([
-  "claude-fable-5",
   "claude-opus-4-8",
   "claude-opus-4-7",
   "claude-sonnet-4-6",
@@ -28,7 +27,6 @@ const EFFORT_SUPPORTED_MODELS = new Set([
 // Models that use adaptive thinking only (thinking:{type:"adaptive"} + output_config.effort).
 // budget_tokens / temperature / top_p / stop_sequences are all removed on this family.
 const ADAPTIVE_THINKING_MODELS = new Set([
-  "claude-fable-5",
   "claude-opus-4-8",
   "claude-opus-4-7",
 ]);
@@ -51,7 +49,6 @@ export function normalizeModelId(id: string): string {
 // gpt-5.5/gpt-5.4/gpt-5.4-mini: reasoning_effort caps at "high" per OpenAI API (no xhigh/max).
 const MODEL_EFFORT_LEVELS: Record<string, EffortLevel[]> = {
   // Bucket 1 — adaptive (output_config.effort required), full 5-level range
-  "claude-fable-5":    ["low", "medium", "high", "xhigh", "max"],
   "claude-opus-4-8":   ["low", "medium", "high", "xhigh", "max"],
   "claude-opus-4-7":   ["low", "medium", "high", "xhigh", "max"],
   // Bucket 2 — output_config.effort or budget_tokens; NO xhigh

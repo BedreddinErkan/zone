@@ -173,7 +173,7 @@ export function convertParams(
     enabled: messageCacheEnabled && cacheEligible,
   });
 
-  // Adaptive-only family (Fable 5, Opus 4.8/4.7): thinking:{type:"adaptive"} + output_config.effort.
+  // Adaptive-only family (Opus 4.8/4.7): thinking:{type:"adaptive"} + output_config.effort.
   // budget_tokens / temperature / top_p / stop_sequences are all removed on this family (API 400 otherwise).
   // Non-adaptive path (Sonnet/Haiku/OpenAI): unchanged — temperature/top_p/stop_sequences/budget_tokens
   // flow exactly as before.

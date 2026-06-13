@@ -21,19 +21,7 @@ function renderAt(cols: number) {
 describe("ModelModal — retention disclosure", () => {
   beforeEach(() => { vi.mocked(mockDispatch).mockReset?.(); });
 
-  it("narrow mode (cols=50): Fable entry shows retention badge", () => {
-    const { lastFrame } = renderAt(50);
-    expect(lastFrame()).toMatch(/30d retention/);
-  });
-
-  it("wide mode (cols=80): Fable entry shows full retention sentence", () => {
-    const { lastFrame } = renderAt(80);
-    expect(lastFrame()).toMatch(/30-day data retention/);
-    expect(lastFrame()).toMatch(/ZDR not available/);
-    expect(lastFrame()).toMatch(/7-day API default/);
-  });
-
-  it("non-Fable entry (Sonnet 4.6) — no retention badge in narrow mode", () => {
+  it("Sonnet 4.6 — no retention badge in narrow mode", () => {
     const { lastFrame } = renderAt(50);
     const frame = lastFrame() ?? "";
     const sonnetLines = frame.split("\n").filter(l => l.includes("sonnet"));

@@ -41,12 +41,6 @@ export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {
   ],
   anthropic: [
     {
-      id: "claude-fable-5",
-      label: "Claude Fable 5",
-      costNote: "Opt-in frontier — $10/$50 per MTok · verify budget",
-      retention: { minDays: 30, zdrAvailable: false },
-    },
-    {
       id: "claude-sonnet-4-6",
       label: "Claude Sonnet 4.6",
       recommendedTier: "high",
@@ -89,7 +83,6 @@ export function getDefaultModelForTier(
 
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   // Anthropic — Claude 4.x: all 1M context windows
-  "claude-fable-5":    1_000_000,
   "claude-opus-4-8":   1_000_000,
   "claude-opus-4-7":   1_000_000,
   "claude-sonnet-4-6": 1_000_000,

@@ -35,7 +35,7 @@ export function mapAnthropicBadRequest(err: unknown): never {
         ? "request_shape"
         : "other";
     const userMessage = isRetention
-      ? "Claude Fable 5 requires 30-day data retention and isn't available for accounts configured for zero data retention (ZDR) or shorter retention. Set your Anthropic account's data-retention to ≥30 days, or switch models with /model (e.g. Claude Opus 4.8)."
+      ? "This model requires 30-day minimum data retention and isn't available for accounts configured for zero data retention (ZDR) or shorter retention. Adjust your Anthropic account's data-retention policy or switch models with /model."
       : `Invalid API request (${fullMsg}). Check model and parameter configuration.`;
     throw new ProviderRequestError(400, kind, userMessage, err);
   }
