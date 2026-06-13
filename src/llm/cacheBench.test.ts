@@ -184,6 +184,34 @@ describe("session memory — assembleAgentSystemPrompt static prefix invariant",
     // verifying the prompt does NOT include text that only appears in live session summaries.
     expect(prompt).not.toContain("Added auth module in this session");
   });
+
+  it("contains MISSING REFERENCED CONTENT directive in all archetype branches", () => {
+    for (const archetype of [undefined, "question", "investigation", "patch"] as const) {
+      const p = assembleAgentSystemPrompt({ ...AGENT_OPTS, archetype });
+      expect(p).toContain("MISSING REFERENCED CONTENT");
+    }
+  });
+
+  it("MISSING REFERENCED CONTENT appears after SESSION MEMORY and before TEST FAILURES", () => {
+    const p = assembleAgentSystemPrompt(AGENT_OPTS);
+    const idxSession = p.indexOf("SESSION MEMORY — if the user message begins with");
+    const idxMissing = p.indexOf("MISSING REFERENCED CONTENT");
+    const idxTest    = p.indexOf("TEST FAILURES — investigate");
+    expect(idxSession).toBeGreaterThan(-1);
+    expect(idxMissing).toBeGreaterThan(idxSession);
+    expect(idxTest).toBeGreaterThan(idxMissing);
+  });
+
+  it("MISSING REFERENCED CONTENT is byte-stable across different repoPath values", () => {
+    const extract = (p: string) => {
+      const s = p.indexOf("MISSING REFERENCED CONTENT");
+      const e = p.indexOf("TEST FAILURES");
+      return p.slice(s, e);
+    };
+    const p1 = assembleAgentSystemPrompt({ ...AGENT_OPTS, repoPath: "/repo/a" });
+    const p2 = assembleAgentSystemPrompt({ ...AGENT_OPTS, repoPath: "/repo/b" });
+    expect(extract(p1)).toBe(extract(p2));
+  });
 });
 
 // ── Audit→Execute shared prefix (Phase X.0.1 fix) ────────────────────────────
