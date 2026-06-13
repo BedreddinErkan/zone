@@ -23,6 +23,7 @@ import { SessionMemoryModal } from "./components/SessionMemoryModal.js";
 import { MetricsModal } from "./components/MetricsModal.js";
 import { LimitsModal } from "./components/LimitsModal.js";
 import { CommitModal } from "./components/CommitModal.js";
+import { UndoModal } from "./components/UndoModal.js";
 import { PlanPanel } from "./components/PlanPanel.js";
 import { resolveCommandApproval } from "../../api/commandApprovals.js";
 import { resolveEditApproval } from "../../api/editApprovals.js";
@@ -43,6 +44,7 @@ interface AppProps {
   capUsd?: number;
   initialDailyUsedUsd?: number;
   onSubmit?: (prompt: string, ac: AbortController, mode: TuiMode, images?: import("../../api/imageUpload.js").ImageAttachment[]) => void;
+  onUndoRequest?: () => void;
   initialTrustedPrefixes?: string[];
   resumedSession?: DiskSession;
   onStateChange?: (state: StoreState) => void;
@@ -59,6 +61,7 @@ interface AppInnerProps {
   initialPrompt: string | undefined;
   initialMode: TuiMode | undefined;
   onSubmit: ((prompt: string, ac: AbortController, mode: TuiMode, images?: import("../../api/imageUpload.js").ImageAttachment[]) => void) | undefined;
+  onUndoRequest: (() => void) | undefined;
   onStateChange: ((state: StoreState) => void) | undefined;
   onModelApply: ((model: string, provider: "anthropic" | "openai", effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void) | undefined;
   getCommitData: (() => { filePaths: string[]; message: string; repoPath: string } | null) | undefined;
@@ -66,7 +69,7 @@ interface AppInnerProps {
   onSessionClear: ((oldSessionId: string) => void) | undefined;
 }
 
-function AppInner({ bus, initialPrompt, initialMode, onSubmit, onStateChange, onModelApply, getCommitData, onDispatchCapture, onSessionClear }: AppInnerProps): React.ReactElement {
+function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, onStateChange, onModelApply, getCommitData, onDispatchCapture, onSessionClear }: AppInnerProps): React.ReactElement {
   const { exit } = useApp();
   const { state, dispatch } = useStore();
   const runAcRef = useRef<AbortController | null>(null);
@@ -189,6 +192,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onStateChange, on
       {state.modalView === "metrics" && <MetricsModal />}
       {state.modalView === "limits" && <LimitsModal />}
       {state.modalView === "commit" && <CommitModal dispatch={dispatch} />}
+      {state.modalView === "undo" && state.undoModalData !== null && <UndoModal data={state.undoModalData} dispatch={dispatch} />}
       {state.planProposal !== null && (
         <PlanModal proposal={state.planProposal} dispatch={dispatch} />
       )}
@@ -212,6 +216,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onStateChange, on
         onSubmit={handleComposerSubmit}
         onExit={() => { runAcRef.current?.abort(); exit(); }}
         onInitStart={(ac) => { runAcRef.current = ac; }}
+        onUndoRequest={onUndoRequest}
         getCommitData={getCommitData}
       />
       {state.runState === "running" && state.todos.length > 0 && (
@@ -222,7 +227,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onStateChange, on
   );
 }
 
-export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, initialTrustedPrefixes, resumedSession, onStateChange, initialModelSettings, onModelApply, getCommitData, onDispatchCapture, onSessionClear, initialUserCommands }: AppProps): React.ReactElement {
+export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, initialTrustedPrefixes, resumedSession, onStateChange, initialModelSettings, onModelApply, getCommitData, onDispatchCapture, onSessionClear, initialUserCommands }: AppProps): React.ReactElement {
   return (
     <StoreProvider initialValues={{
       model: initialModel ?? "",
@@ -236,7 +241,7 @@ export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, ini
       userCommands: initialUserCommands ?? [],
       mode: initialMode,
     }}>
-      <AppInner bus={bus} initialPrompt={initialPrompt} initialMode={initialMode} onSubmit={onSubmit} onStateChange={onStateChange} onModelApply={onModelApply} getCommitData={getCommitData} onDispatchCapture={onDispatchCapture} onSessionClear={onSessionClear} />
+      <AppInner bus={bus} initialPrompt={initialPrompt} initialMode={initialMode} onSubmit={onSubmit} onUndoRequest={onUndoRequest} onStateChange={onStateChange} onModelApply={onModelApply} getCommitData={getCommitData} onDispatchCapture={onDispatchCapture} onSessionClear={onSessionClear} />
     </StoreProvider>
   );
 }

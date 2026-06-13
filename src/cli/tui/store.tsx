@@ -84,7 +84,8 @@ export type StoreState = {
     missingFiles?: string[];
     unnecessaryFiles?: string[];
   } | null;
-  modalView: "none" | "permissions" | "keys" | "sessions" | "plan" | "model" | "effort" | "metrics" | "limits" | "plan_ready" | "staged_diffs" | "summary" | "session" | "commit" | "planMode";
+  modalView: "none" | "permissions" | "keys" | "sessions" | "plan" | "model" | "effort" | "metrics" | "limits" | "plan_ready" | "staged_diffs" | "summary" | "session" | "commit" | "planMode" | "undo";
+  undoModalData: { manifest: import("../../snapshots/snapshotStore.js").SnapshotManifest; driftedPaths: string[] } | null;
   planModeSelectedIndex: number;
   commitData: { filePaths: string[]; message: string; repoPath: string } | null;
   summarySelectedIndex: number;
@@ -179,6 +180,7 @@ export function buildInitialState(initialValues?: {
     transcriptGeneration: 0,
     todos: [],
     userCommands: initialValues?.userCommands ?? [],
+    undoModalData: null,
   };
 }
 
@@ -286,6 +288,8 @@ export type StoreAction =
   | { type: "NARRATION_COMMIT" }
   | { type: "COMMIT_MODAL_OPEN"; filePaths: string[]; message: string; repoPath: string }
   | { type: "COMMIT_MODAL_CLOSE" }
+  | { type: "UNDO_MODAL_OPEN"; manifest: import("../../snapshots/snapshotStore.js").SnapshotManifest; driftedPaths: string[] }
+  | { type: "UNDO_MODAL_CLOSE" }
   | { type: "AUTOCOMMIT_APPLY"; commitOnSuccess: boolean }
   | { type: "WEBSEARCH_APPLY"; webSearchEnabled: boolean }
   | { type: "TODOS_SET"; todos: RunTodo[] }
@@ -773,6 +777,12 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
 
     case "COMMIT_MODAL_CLOSE":
       return { ...state, modalView: "none" };
+
+    case "UNDO_MODAL_OPEN":
+      return { ...state, modalView: "undo", undoModalData: { manifest: action.manifest, driftedPaths: action.driftedPaths } };
+
+    case "UNDO_MODAL_CLOSE":
+      return { ...state, modalView: "none", undoModalData: null };
 
     case "AUTOCOMMIT_APPLY": {
       const updated: DiskModelSettings = state.modelSettings

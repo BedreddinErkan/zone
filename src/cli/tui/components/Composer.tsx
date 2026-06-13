@@ -20,6 +20,7 @@ interface ComposerProps {
   onSubmit: (text: string, ac: AbortController, images?: ImageAttachment[]) => void;
   onExit: () => void;
   onInitStart?: (ac: AbortController) => void;
+  onUndoRequest?: () => void;
   getCommitData?: () => { filePaths: string[]; message: string; repoPath: string } | null;
 }
 
@@ -49,6 +50,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/autocommit",  desc: "Toggle auto-commit after each run (off/on)" },
   { name: "/websearch",   desc: "Toggle web search (off/on)" },
   { name: "/image",       desc: "Attach a local image file to the next task (/image <path>)" },
+  { name: "/undo",        desc: "Undo the last run (restore files to pre-run state)" },
 ];
 
 const HELP_LINES = [
@@ -111,7 +113,7 @@ function SlashCommandPalette({ commands, selectedIdx }: PaletteProps): React.Rea
   );
 }
 
-export function Composer({ onSubmit, onExit, onInitStart, getCommitData }: ComposerProps): React.ReactElement {
+export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getCommitData }: ComposerProps): React.ReactElement {
   const { state, dispatch } = useStore();
   const { stdout } = useStdout();
   const disabled = state.runState === "running";
@@ -353,6 +355,10 @@ export function Composer({ onSubmit, onExit, onInitStart, getCommitData }: Compo
             const msg = err instanceof Error ? err.message : String(err);
             dispatch({ type: "TOAST_PUSH", entry: { id: randomUUID(), message: msg, level: "warning" } });
           });
+        break;
+      }
+      case "/undo": {
+        onUndoRequest?.();
         break;
       }
     }

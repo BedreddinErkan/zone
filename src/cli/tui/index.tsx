@@ -439,6 +439,23 @@ export async function runTui(
     void runPrompt(prompt, ac, mode, images);
   };
 
+  const onUndoRequest = (): void => {
+    void import("./undoCommand.js").then(({ resolveUndoData }) =>
+      resolveUndoData(config.repoPath)
+    ).then((data) => {
+      if (!data) {
+        storeCapture.dispatch?.({ type: "TOAST_PUSH",
+          entry: { id: randomUUID(), message: "Nothing to undo", level: "info" } });
+        return;
+      }
+      storeCapture.dispatch?.({ type: "UNDO_MODAL_OPEN",
+        manifest: data.manifest, driftedPaths: data.driftedPaths });
+    }).catch((err: unknown) => {
+      storeCapture.dispatch?.({ type: "TOAST_PUSH",
+        entry: { id: randomUUID(), message: err instanceof Error ? err.message : String(err), level: "warning" } });
+    });
+  };
+
   // Best-effort GC: delete the prior sessionId's .jsonl when the user clears session memory.
   // Uses config.repoPath — NOT process.cwd() — to find the right .zone/conversations/ dir.
   const clearSessionMemoryGC = async (oldSessionId: string): Promise<void> => {
@@ -474,6 +491,7 @@ export async function runTui(
         capUsd={config.dailyUsdCap}
         initialDailyUsedUsd={initialDailyUsedUsd}
         onSubmit={onSubmit}
+        onUndoRequest={onUndoRequest}
         initialTrustedPrefixes={initialTrustedPrefixes}
         resumedSession={resumedSession ?? undefined}
         onStateChange={(s) => { storeCapture.state = s; }}
