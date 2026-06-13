@@ -2,7 +2,7 @@
 
 **A coding agent that's actually yours.** Self-host, BYOK, open source — Claude Code / Cursor capability on real tasks, with no caps and full cost transparency. Your code and your key never leave your machine.
 
-[zonecli.dev](https://zonecli.dev) · [GitHub](https://github.com/BedreddinErkan/zone)
+[zonecli.dev](https://zonecli.dev) · [GitHub](https://github.com/BedreddinErkan/zone) · feedback@zonecli.dev
 
 ## Not another subscription
 
