@@ -20,6 +20,9 @@ import type { LlmPatchProgressUpdate } from "../../core/agentLifecycleEvents.js"
 import { loadDiskTrust, diskTrustPrefixes } from "../../api/diskTrust.js";
 import { saveSession, pruneOldSessions, loadLastSession, type DiskSession } from "../../api/diskSessions.js";
 import { loadDiskModel, type DiskModelSettings } from "../../api/diskModel.js";
+import { loadDiskHooks, hooksConfigHash, type UserHooksConfig } from "../../api/diskHooks.js";
+import { isHooksTrusted } from "../../api/diskTrustedHooks.js";
+import { log } from "../../utils/logger.js";
 import type { StoreState, StoreAction } from "./store.js";
 import { deriveCommitMessage, shouldAutoCommit } from "./commitMessage.js";
 import { executeCommit } from "./components/CommitModal.js";
@@ -185,6 +188,30 @@ export async function runTui(
     }
   } catch { /* non-critical */ }
 
+  // User-facing hooks: load .zone/hooks.json and check trust
+  let initialArmedUserHooks: UserHooksConfig | null = null;
+  let initialPendingHookTrust: { config: UserHooksConfig; hash: string; projectPath: string } | null = null;
+  try {
+    const hooksConfig = await loadDiskHooks(config.repoPath);
+    if (hooksConfig?._rawBytes) {
+      const hash = hooksConfigHash(hooksConfig._rawBytes);
+      if (isHooksTrusted(config.repoPath, hash)) {
+        initialArmedUserHooks = hooksConfig;
+      } else if (process.env["ZONE_TRUST_HOOKS"] === "all") {
+        initialArmedUserHooks = hooksConfig;
+        log("[zone-hooks-trust-bypass]", "ZONE_TRUST_HOOKS=all — skipping hash verification (explicit risk escape hatch)");
+      } else if (process.stdout.isTTY) {
+        initialPendingHookTrust = { config: hooksConfig, hash, projectPath: config.repoPath };
+      } else {
+        process.stderr.write(
+          "[zone-hooks] .zone/hooks.json found but not trust-approved. " +
+          "Run zone once interactively (TTY) to review and approve the hooks, " +
+          "or set ZONE_TRUST_HOOKS=all to bypass (explicit risk escape hatch).\n"
+        );
+      }
+    }
+  } catch { /* non-critical */ }
+
   let initialUserCommands: UserCommand[] = [];
   try {
     initialUserCommands = await loadUserCommands(config.repoPath); // NOT process.cwd() — repoPathTrap
@@ -328,7 +355,10 @@ export async function runTui(
     let abortedFiles: string[] | undefined;
     let emitSafetyNet = true;
     try {
-      runResult = await runOneShotInner(prompt, config, runId, { externalAc: ac, onProgress, mode, priorSessionSummary, images });
+      runResult = await runOneShotInner(prompt, config, runId, {
+        externalAc: ac, onProgress, mode, priorSessionSummary, images,
+        userHooks: storeCapture.state?.armedUserHooks,
+      });
     } catch (err: unknown) {
       if (err instanceof ProviderRequestError) {
         // Typed provider error (e.g. Fable retention 400): surface as red ErrorLine + failed run-state.
@@ -497,6 +527,8 @@ export async function runTui(
         onStateChange={(s) => { storeCapture.state = s; }}
         initialModelSettings={diskModelSettings}
         initialUserCommands={initialUserCommands}
+        initialArmedUserHooks={initialArmedUserHooks}
+        initialPendingHookTrust={initialPendingHookTrust}
         onModelApply={(model, provider, effort, summaryFormat, memoryEnabled, commitOnSuccess) => {
           config.model = model;
           config.provider = provider as typeof config.provider;

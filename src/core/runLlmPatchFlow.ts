@@ -4570,6 +4570,8 @@ export async function runLlmPatchFlow(input: {
   showPostFlushDiffs?: boolean;
   /** Local image attachments forwarded to the agent loop's initial user message. */
   images?: import("../api/imageUpload.js").ImageAttachment[];
+  /** User-facing hooks from .zone/hooks.json — trust-checked in-memory snapshot. */
+  userHooks?: import("../api/diskHooks.js").UserHooksConfig | null;
 }): Promise<LlmPatchFlowResult> {
   attachRunIdentity({ userId: input.userId, runId: input.runId });
   // Phase H.7: outer-scope flag survives past the inner block where `loop`
@@ -5933,6 +5935,7 @@ const initializeTodosFromPlan = (): void => {
       restageSeed: input.restageSeed,
       autoApprove: input.autoApprove,
       images: input.images,
+      userHooks: input.userHooks,
       onPreFlushDiffs: input.showPostFlushDiffs
         ? (diffs: import("./fileDiff.js").StagedFile[]) => {
             if (diffs.length === 0) return;

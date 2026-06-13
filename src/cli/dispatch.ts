@@ -48,6 +48,8 @@ export interface OneShotOpts {
   priorSessionSummary?: string;
   /** Local image attachments from the user to include in the agent's first message. */
   images?: import("../api/imageUpload.js").ImageAttachment[];
+  /** User-facing hooks — trust-checked in-memory snapshot from .zone/hooks.json. */
+  userHooks?: import("../api/diskHooks.js").UserHooksConfig | null;
 }
 
 /** Core one-shot runner. Returns the flow result — does NOT call process.exit. */
@@ -511,6 +513,7 @@ export async function runOneShotInner(
             // Non-TTY (headless) has no StagedDiffModal — auto-approve to prevent hang.
             autoApprove: effectiveConfig.autoApprove || process.stdout.isTTY !== true,
             images: opts.images,
+            userHooks: opts.userHooks,
             ...(restageSeed !== undefined ? { restageSeed, maxIterationsOverride: REFINE_RESTAGE_ITER_CAP } : {}),
           })
         );
@@ -566,6 +569,7 @@ export async function runOneShotInner(
         editApprovalMode,
         showPostFlushDiffs: !!planForExecution,
         images: opts.images,
+        userHooks: opts.userHooks,
       })
     );
 

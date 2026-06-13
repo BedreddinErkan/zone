@@ -11,6 +11,7 @@ import type { RunTodo, TodoStatus } from "../../core/todoLifecycle.js";
 import { startTodo, completeTodo } from "../../core/todoLifecycle.js";
 import type { UserCommand } from "./userCommands.js";
 import type { StagedFile } from "../../core/fileDiff.js";
+import type { UserHooksConfig } from "../../api/diskHooks.js";
 
 export type { TuiMode };
 
@@ -119,6 +120,10 @@ export type StoreState = {
   transcriptGeneration: number;
   todos: RunTodo[];
   userCommands: UserCommand[];
+  /** Armed hook config (trust-verified in-memory snapshot). Null = disarmed. */
+  armedUserHooks: UserHooksConfig | null;
+  /** Non-null when hooks.json was found but not yet approved — triggers HookTrustModal. */
+  pendingHookTrust: { config: UserHooksConfig; hash: string; projectPath: string } | null;
 };
 
 export function buildInitialState(initialValues?: {
@@ -132,6 +137,8 @@ export function buildInitialState(initialValues?: {
   modelSettings?: DiskModelSettings | null;
   userCommands?: UserCommand[];
   mode?: TuiMode;
+  armedUserHooks?: UserHooksConfig | null;
+  pendingHookTrust?: { config: UserHooksConfig; hash: string; projectPath: string } | null;
 }): StoreState {
   return {
     transcript: initialValues?.resumedTranscript ?? [],
@@ -181,6 +188,8 @@ export function buildInitialState(initialValues?: {
     todos: [],
     userCommands: initialValues?.userCommands ?? [],
     undoModalData: null,
+    armedUserHooks: initialValues?.armedUserHooks ?? null,
+    pendingHookTrust: initialValues?.pendingHookTrust ?? null,
   };
 }
 
@@ -294,7 +303,9 @@ export type StoreAction =
   | { type: "WEBSEARCH_APPLY"; webSearchEnabled: boolean }
   | { type: "TODOS_SET"; todos: RunTodo[] }
   | { type: "TODO_STATUS_SET"; todoId: string; status: TodoStatus }
-  | { type: "POST_EXECUTE_DIFFS"; files: StagedFile[] };
+  | { type: "POST_EXECUTE_DIFFS"; files: StagedFile[] }
+  | { type: "HOOKS_TRUST_APPROVED"; hash: string; projectPath: string }
+  | { type: "HOOKS_TRUST_DENIED" };
 
 export function reducer(state: StoreState, action: StoreAction): StoreState {
   switch (action.type) {
@@ -817,6 +828,18 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return { ...state, todos: next };
     }
 
+    case "HOOKS_TRUST_APPROVED": {
+      if (!state.pendingHookTrust) return state;
+      // Side-effect (recordHooksTrust) is performed by the caller before dispatch.
+      return {
+        ...state,
+        armedUserHooks: state.pendingHookTrust.config,
+        pendingHookTrust: null,
+      };
+    }
+    case "HOOKS_TRUST_DENIED":
+      return { ...state, pendingHookTrust: null, armedUserHooks: null };
+
     default:
       return state;
   }
@@ -846,6 +869,8 @@ export function StoreProvider({
     modelSettings?: DiskModelSettings | null;
     userCommands?: UserCommand[];
     mode?: TuiMode;
+    armedUserHooks?: UserHooksConfig | null;
+    pendingHookTrust?: { config: UserHooksConfig; hash: string; projectPath: string } | null;
   };
 }): React.ReactElement {
   const [state, dispatch] = useReducer(reducer, undefined, () =>

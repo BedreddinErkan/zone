@@ -173,7 +173,10 @@ export type ZoneStructuredProgressEvent = {
     /** TUI spinner during plan gen / re-plan; title field carries the label. */
     | "plan_generation_started"
     /** Provider returned a non-auth HTTP 400 (e.g. retention/ZDR mismatch). Surface via red ErrorLine + failed run-state. */
-    | "run_failed";
+    | "run_failed"
+    /** User-facing hooks: fired when a .zone/hooks.json shell command starts/completes. */
+    | "hook_started"
+    | "hook_completed";
   title: string;
   detail?: string;
   filePath?: string;

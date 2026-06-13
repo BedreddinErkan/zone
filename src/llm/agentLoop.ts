@@ -80,6 +80,11 @@ import {
   type PreIterationContext,
   type PostToolUseContext,
 } from "../hooks/postToolUseHook.js";
+import {
+  runUserPreToolUseHooks,
+  runUserPostToolUseHooks,
+  buildVetoContent,
+} from "../hooks/userHookRunner.js";
 import type { VerificationReason } from "./verification/verificationReason.js";
 import {
   selectVerificationCommand,
@@ -265,6 +270,8 @@ export interface AgentLoopInput {
   suppressOutputFormat?: boolean;
   /** Local image attachments to include as multimodal content in the initial user message. */
   images?: import("../api/imageUpload.js").ImageAttachment[];
+  /** User-facing hooks from .zone/hooks.json — trust-checked in-memory snapshot; never re-read from disk. */
+  userHooks?: import("../api/diskHooks.js").UserHooksConfig | null;
 }
 
 export interface AgentLoopResult {
@@ -1733,6 +1740,8 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   let rollbackCount = 0;
   let consecutiveScopeBlocks = 0;
   let coachingBudgetExhausted = false;
+  // Per-run tracker for repeated PreToolUse vetoes (tool:filePath → vetoed once)
+  const userHookVetoTracker = new Set<string>();
   const inputIterCap: number | null =
     input.pipelineApplied === true && typeof input.maxIterationsOverride === "number"
       ? input.maxIterationsOverride
@@ -3454,6 +3463,35 @@ Example:
           abortAlready: input.abortSignal?.aborted ?? false,
         });
         throwIfAborted("before_tool");
+
+        // User PreToolUse hooks — async, fail-closed (error/timeout = veto)
+        if (input.userHooks?.hooks?.PreToolUse?.length) {
+          const preHookResult = await runUserPreToolUseHooks(
+            input.userHooks.hooks.PreToolUse,
+            name,
+            parsedArgs,
+            input.repoPath,
+            { runId: input.runId, iter },
+          );
+          if (preHookResult.vetoed) {
+            const vetoKey = `${name}:${preHookResult.filePath ?? ""}`;
+            const isPermanent = userHookVetoTracker.has(vetoKey);
+            userHookVetoTracker.add(vetoKey);
+            const vetoContent = buildVetoContent(name, preHookResult.filePath, preHookResult, isPermanent);
+            const vetoMsg: ChatCompletionMessageParam = { role: "tool", tool_call_id: callId, content: vetoContent };
+            responseInput.push(vetoMsg);
+            prunedMessages = [...prunedMessages, vetoMsg];
+            input.onStructuredEvent?.({
+              type: "hook_completed",
+              runId: input.runId ?? "",
+              ts: Date.now(),
+              title: `[hook_blocked] ${name}`,
+              status: "warning",
+            });
+            continue;
+          }
+        }
+
         const result = await executeTool(name, parsedArgs, input.repoPath, input.onProgress, {
           runId: rid || undefined,
           onApprovalRequired: async (command, runId) => {
@@ -3557,6 +3595,25 @@ Example:
             }
           }
           applyAppendOps(postMutations.appendOps, responseInput, () => prunedMessages, (msgs) => { prunedMessages = msgs; });
+        }
+
+        // User PostToolUse hooks — async, non-fatal (side-effects only)
+        if (result.success && input.userHooks?.hooks?.PostToolUse?.length) {
+          await runUserPostToolUseHooks(
+            input.userHooks.hooks.PostToolUse,
+            name,
+            parsedArgs,
+            input.repoPath,
+            { runId: input.runId, iter, callId },
+            (stdout) => {
+              applyAppendOps(
+                [{ content: `\n[hook output]\n${stdout}`, target: "responseInput", mode: "append-to-tool" }],
+                responseInput,
+                () => prunedMessages,
+                (msgs) => { prunedMessages = msgs; },
+              );
+            },
+          );
         }
       }
 

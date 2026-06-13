@@ -440,6 +440,21 @@ export function useAgentEvents(
     };
     bus.on("post_execute_diffs", onPostExecuteDiffs);
 
+    // User-facing hook events
+    const onHookCompleted = (evt: ZoneStructuredProgressEvent): void => {
+      if (evt.status === "warning") {
+        dispatch({
+          type: "TOAST_PUSH",
+          entry: {
+            id: randomUUID(),
+            message: evt.title ?? "[hook_blocked] Tool vetoed by PreToolUse hook",
+            level: "warning",
+          },
+        });
+      }
+    };
+    bus.on("hook_completed", onHookCompleted);
+
     return () => {
       if (debounceTimer.current !== null) {
         clearTimeout(debounceTimer.current);
@@ -486,6 +501,7 @@ export function useAgentEvents(
       bus.off("plan_generation_started", onPlanGenStarted);
       bus.off("staged_diffs_ready_for_approval", onStagedDiffsReady);
       bus.off("post_execute_diffs", onPostExecuteDiffs);
+      bus.off("hook_completed", onHookCompleted);
     };
   }, [bus, dispatch]);
 }

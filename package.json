@@ -44,6 +44,7 @@
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",
     "openai": "^5.23.2",
+    "picomatch": "^4.0.4",
     "react": "^19.2.0",
     "zod": "^3.25.0"
   },
@@ -54,6 +55,7 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.1",
     "@types/node": "^22.13.10",
+    "@types/picomatch": "^4.0.3",
     "@types/react": "^19.2.0",
     "@vitejs/plugin-react": "^4.7.0",
     "dompurify": "^3.4.4",

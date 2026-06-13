@@ -24,6 +24,7 @@ import { MetricsModal } from "./components/MetricsModal.js";
 import { LimitsModal } from "./components/LimitsModal.js";
 import { CommitModal } from "./components/CommitModal.js";
 import { UndoModal } from "./components/UndoModal.js";
+import { HookTrustModal } from "./components/HookTrustModal.js";
 import { PlanPanel } from "./components/PlanPanel.js";
 import { resolveCommandApproval } from "../../api/commandApprovals.js";
 import { resolveEditApproval } from "../../api/editApprovals.js";
@@ -54,6 +55,8 @@ interface AppProps {
   onDispatchCapture?: (dispatch: Dispatch<StoreAction>) => void;
   onSessionClear?: (oldSessionId: string) => void;
   initialUserCommands?: UserCommand[];
+  initialArmedUserHooks?: import("../../api/diskHooks.js").UserHooksConfig | null;
+  initialPendingHookTrust?: { config: import("../../api/diskHooks.js").UserHooksConfig; hash: string; projectPath: string } | null;
 }
 
 interface AppInnerProps {
@@ -193,6 +196,23 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
       {state.modalView === "limits" && <LimitsModal />}
       {state.modalView === "commit" && <CommitModal dispatch={dispatch} />}
       {state.modalView === "undo" && state.undoModalData !== null && <UndoModal data={state.undoModalData} dispatch={dispatch} />}
+      {state.pendingHookTrust !== null && (
+        <HookTrustModal
+          config={state.pendingHookTrust.config}
+          projectPath={state.pendingHookTrust.projectPath}
+          onApprove={() => {
+            import("../../api/diskTrustedHooks.js").then(({ recordHooksTrust }) => {
+              if (state.pendingHookTrust) {
+                recordHooksTrust(state.pendingHookTrust.projectPath, state.pendingHookTrust.hash);
+              }
+              dispatch({ type: "HOOKS_TRUST_APPROVED", hash: state.pendingHookTrust!.hash, projectPath: state.pendingHookTrust!.projectPath });
+            }).catch(() => {
+              dispatch({ type: "HOOKS_TRUST_DENIED" });
+            });
+          }}
+          onDeny={() => dispatch({ type: "HOOKS_TRUST_DENIED" })}
+        />
+      )}
       {state.planProposal !== null && (
         <PlanModal proposal={state.planProposal} dispatch={dispatch} />
       )}
@@ -227,7 +247,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
   );
 }
 
-export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, initialTrustedPrefixes, resumedSession, onStateChange, initialModelSettings, onModelApply, getCommitData, onDispatchCapture, onSessionClear, initialUserCommands }: AppProps): React.ReactElement {
+export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, initialTrustedPrefixes, resumedSession, onStateChange, initialModelSettings, onModelApply, getCommitData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust }: AppProps): React.ReactElement {
   return (
     <StoreProvider initialValues={{
       model: initialModel ?? "",
@@ -240,6 +260,8 @@ export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, ini
       modelSettings: initialModelSettings,
       userCommands: initialUserCommands ?? [],
       mode: initialMode,
+      armedUserHooks: initialArmedUserHooks,
+      pendingHookTrust: initialPendingHookTrust,
     }}>
       <AppInner bus={bus} initialPrompt={initialPrompt} initialMode={initialMode} onSubmit={onSubmit} onUndoRequest={onUndoRequest} onStateChange={onStateChange} onModelApply={onModelApply} getCommitData={getCommitData} onDispatchCapture={onDispatchCapture} onSessionClear={onSessionClear} />
     </StoreProvider>
