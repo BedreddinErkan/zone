@@ -80,9 +80,6 @@ const BLACKLIST_PATTERNS: RegExp[] = [
   /;\s*\S/,
   /&&\s*\S/,
   /\|\|\s*\S/,
-  // Pipe to anything other than safe read utilities.
-  // The whitespace is inside the lookahead to prevent zero-width matches at the space before the utility name.
-  /\|(?!\s*(?:head|tail|grep|rg|wc|less|more|cat|jq|sort|uniq|cut|column)(?:\s|$))/,
   // sort -o/-output writes to a file without '>'; block it independently of the redirect guard
   /\bsort\b[^|]*(\s-o(\s|=|$)|--output)/,
   // Privilege escalation
@@ -94,6 +91,52 @@ const BLACKLIST_PATTERNS: RegExp[] = [
   /\bpkill\s/,
   /\bkillall\s/,
 ];
+
+const PIPE_READ_UTILS = new Set([
+  "head","tail","grep","rg","wc","less","more","cat","jq","sort","uniq","cut","column",
+]);
+
+/**
+ * Split a shell command on REAL pipe operators: unquoted, unescaped single '|' (not '||',
+ * not inside single/double quotes, not preceded by a backslash).
+ * Quoting model: single quotes are fully literal; double quotes honor backslash-escapes;
+ * outside quotes a backslash escapes the next character. '||' is treated as a single token
+ * (not a pipe boundary) so the existing line-82 logical-OR guard owns it.
+ */
+function splitOnRealShellPipes(cmd: string): string[] {
+  const segments: string[] = [];
+  let cur = "";
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (quote) {
+      if (quote === '"' && c === "\\") { cur += c + (cmd[i + 1] ?? ""); i++; continue; }
+      if (c === quote) { quote = null; cur += c; continue; }
+      cur += c;
+      continue;
+    }
+    if (c === "'" || c === '"') { quote = c; cur += c; continue; }
+    if (c === "\\") { cur += c + (cmd[i + 1] ?? ""); i++; continue; } // \| is literal data
+    if (c === "|") {
+      if (cmd[i + 1] === "|") { cur += "||"; i++; continue; } // logical OR — not a split
+      segments.push(cur); cur = ""; continue;                 // real pipe boundary
+    }
+    cur += c;
+  }
+  segments.push(cur);
+  return segments;
+}
+
+/** True iff cmd contains a real pipe whose downstream first word is not a read-only utility. */
+function hasUnsafeRealPipe(cmd: string): boolean {
+  const segs = splitOnRealShellPipes(cmd);
+  if (segs.length === 1) return false;
+  for (let k = 1; k < segs.length; k++) {
+    const first = (segs[k].trim().match(/^(\S+)/)?.[1] ?? "");
+    if (!PIPE_READ_UTILS.has(first)) return true; // empty (trailing pipe) or non-util → block
+  }
+  return false;
+}
 
 export interface CommandSafetyResult {
   safe: boolean;
@@ -109,6 +152,12 @@ export function checkCommandSafe(command: string): CommandSafetyResult {
     if (pattern.test(trimmed)) {
       return { safe: false, reason: `blocked pattern: ${pattern.source}` };
     }
+  }
+
+  // Quote/escape-aware pipe check: block real pipes to non-read-only utilities.
+  // Runs after the blacklist so the || guard and substitution guards fire first.
+  if (hasUnsafeRealPipe(trimmed)) {
+    return { safe: false, reason: "pipe to non-whitelisted command" };
   }
 
   // Command must START WITH one of the whitelisted prefixes.

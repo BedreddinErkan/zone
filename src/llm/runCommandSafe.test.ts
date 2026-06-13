@@ -276,6 +276,48 @@ describe("checkCommandSafe", () => {
     });
   });
 
+  describe("F1: quoted/escaped pipe chars in grep patterns", () => {
+    describe("must-now-pass — were false-positives before the fix", () => {
+      it.each([
+        "grep 'foo\\|bar' src/",
+        'grep "a|b" src/',
+        "grep -E 'a|b' src/",
+        "grep 'a\\|b' src/ | head",
+        "grep a f | grep b | wc -l",
+        "grep -rn x src/ 2>&1 | tail -100",
+      ])("now allows: %s", (cmd) => {
+        expect(checkCommandSafe(cmd).safe).toBe(true);
+      });
+    });
+
+    describe("must-still-block — regression guards for real dangerous pipes", () => {
+      it.each([
+        "grep x f | sh",
+        "cat f | python",
+        "ls | xargs rm",
+        "grep x f|sh",
+        "grep a f | grep b | sh",
+        "ls |",
+      ])("still blocks: %s", (cmd) => {
+        expect(checkCommandSafe(cmd).safe).toBe(false);
+      });
+    });
+
+    describe("whitelist layering — sed/awk blocked by whitelist, not the pipe gate", () => {
+      it("sed alternation pattern → safe:false, reason: not in whitelist", () => {
+        const result = checkCommandSafe("sed 's/a\\|b/c/' f");
+        expect(result.safe).toBe(false);
+        expect(result.reason).toMatch(/not in whitelist/);
+      });
+
+      it("awk alternation pattern → safe:false, reason: not in whitelist", () => {
+        const result = checkCommandSafe("awk '/a|b/' f");
+        expect(result.safe).toBe(false);
+        expect(result.reason).toMatch(/not in whitelist/);
+      });
+    });
+  });
+
   describe("edge cases", () => {
     it("blocks empty command", () => {
       const result = checkCommandSafe("");
