@@ -48,32 +48,44 @@ Press **Shift+Tab** for plan mode. You can also add and manage keys from inside 
 - **Sessions** — resume any run where you left off (`--resume`).
 - **Model routing** — the right model per task; switch any time with `/model`.
 - **Self-hosted & open** — AGPL-3.0, inspect everything. No telemetry, no vendor dependency beyond your LLM provider.
+- **@file context injection** — type `@path` in the composer to inline a file's contents into the task; tab-complete shows matching repo files.
+- **/image** — attach a local image (jpeg/png/gif/webp) for vision-capable models with `/image <path>`.
+- **/undo** — snapshot-based revert of the last run's file changes; shows a drift warning if files were edited since.
+- **Web fetch** — the agent can fetch a URL via `fetch_url`; SSRF-guarded, streaming-capped, re-validates redirects.
+- **User hooks** — `.zone/hooks.json` defines `PreToolUse` veto rules and `PostToolUse` side-effects; home-dir content-hash trust gate.
+- **MCP client** — `.zone/mcp.json` configures stdio MCP servers; their tools register as `mcp__<server>__<tool>` and are available to the agent automatically.
 
 ## Slash commands
 
 | Command | What it does |
 |---------|--------------|
-| `/model` | Switch the provider + model mid-session (e.g. Opus to plan, Sonnet to execute) |
-| `/keys` | Add or manage API keys — masked input, stored locally, persisted across sessions |
-| `/sessions` | Browse and resume past runs |
-| `/init` | Scan the current repo and set up project context |
-| `/metrics` | Token + cost breakdown for the session |
-| `/limits` | View usage and spend limits |
-| `/commit` | Commit the last run's changes with an editable message |
-| `/autocommit` | Toggle automatic commit after each successful run |
-| `/summary` | Show a summary of the current session |
-| `/websearch` | Toggle web search for tasks |
-| `/export` | Export the session (markdown / JSON) |
-| `/copy` | Copy the last output to the clipboard |
-| `/feedback` | Send feedback |
-| `/help` | List every command |
-| `Shift+Tab` | Toggle plan mode |
+| `/help` | Show key bindings and commands |
+| `/exit` | Exit zone |
+| `/clear` | Clear transcript |
+| `/cost` | Show session cost |
+| `/permissions` | View and remove trusted command prefixes |
+| `/keys` | Manage API keys (BYOK) |
+| `/sessions` | Browse and resume past sessions |
+| `/init` | Scaffold `.zone/memory.md` by analyzing repo |
+| `/memory` | Show `.zone/memory.md` |
+| `/model` | Choose AI model |
+| `/effort` | Set reasoning effort (model-dependent: low → max) |
+| `/summary` | Set summary format (compact/detailed) |
+| `/plan-mode` | Set plan depth (quick/investigate) |
+| `/session` | Toggle session memory (off/on) |
+| `/metrics` | View run telemetry KPIs |
+| `/limits` | Set daily USD cap |
+| `/commit` | Commit last run's changes with scoped git commit |
+| `/autocommit` | Toggle auto-commit after each run (off/on) |
+| `/websearch` | Toggle web search (off/on) |
+| `/image` | Attach a local image file to the next task (`/image <path>`) |
+| `/undo` | Undo the last run (restore files to pre-run state) |
 
 ## Cost
 
 Stop guessing what your coding agent costs. Every task shows its real cost, and you only pay for what you use — for most developers, far less than a Max plan.
 
-Real Zone runs: a full Astro site scaffold costs **$0.09**; a typical cached feature or refactor runs **$0.20–0.50**. At ~5 sessions/day and ~$0.30/session, that's roughly **$45/mo** in API spend.
+Real Zone runs: a small edit costs as little as **$0.02**; a full Astro site scaffold costs **$0.09**; a typical cached feature or refactor runs **$0.20–0.50**; large multi-file refactors top out around **$0.90**. At ~5 sessions/day and ~$0.30/session, that's roughly **$45/mo** in API spend.
 
 | Plan | Monthly |
 |------|---------|
@@ -84,6 +96,8 @@ Real Zone runs: a full Astro site scaffold costs **$0.09**; a typical cached fea
 Anthropic rates (Jun 2026): **Sonnet 4.6** $3 / $15 per MTok · **Opus 4.8** $5 / $25 · cache-hit input **$0.30** (−90%). Prompt caching is on by default, so multi-iteration runs get *cheaper* per turn, not more expensive.
 
 > Consumer Claude plans don't include API access, and Claude Code under a plan is rate-limited. Zone is BYOK on the provider API — `/metrics` shows real history from your own runs.
+
+Run `/cost` or `/metrics` in-session for exact per-run figures; full cost logs live in `~/.zone/cost-logs/`.
 
 ## Configuration
 
