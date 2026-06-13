@@ -179,6 +179,7 @@ const DISPATCHED_TOOLS = new Set([
   // revert_patch is intercepted in agentLoop (removes file from stagingFiles so
   // finalizeStaging won't flush it). It never reaches executeTool.
   "revert_patch",
+  "fetch_url",
 ]);
 
 // Startup guard: every toolDefinitions entry must have an executor dispatch branch.
@@ -3148,6 +3149,23 @@ export async function executeTool(
             ? `\nWarning: could not read: ${missing.map((f) => f.path).join(", ")}`
             : ""),
       };
+    }
+
+    if (toolName === "fetch_url") {
+      const { fetchUrl, SsrfBlockedError } = await import("./fetchUrl.js");
+      const urlArg = String(args.url ?? "");
+      if (!urlArg) {
+        return { success: false, output: "fetch_url: url argument is required" };
+      }
+      onProgress?.(`[tool] Fetching: ${urlArg}`);
+      try {
+        const result = await fetchUrl(urlArg);
+        return { success: true, output: result.output, truncated: result.truncated };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const isSsrf = e instanceof SsrfBlockedError;
+        return { success: false, output: isSsrf ? msg : `fetch_url error: ${msg}` };
+      }
     }
 
     return {

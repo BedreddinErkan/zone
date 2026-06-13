@@ -583,4 +583,24 @@ required: ["id", "content", "description", "status"],
       } as Record<string, unknown>,
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "fetch_url",
+      strict: true,
+      description:
+        "Fetch the content of a URL and return it as readable text. HTML pages are stripped to their text content. Use for reading documentation, release notes, or any publicly accessible page. Only http:// and https:// URLs are supported; private/internal addresses are blocked for security.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: {
+            type: "string",
+            description: "The URL to fetch (must use http:// or https://).",
+          },
+        },
+        required: ["url"],
+        additionalProperties: false,
+      } as Record<string, unknown>,
+    },
+  },
 ];

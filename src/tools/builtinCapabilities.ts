@@ -40,6 +40,9 @@ export const BUILTIN_TOOL_CAPS: Record<string, ReadonlyArray<Capability>> = {
   TodoWrite:            ["agent.control"],
   suggest_scope_change: ["agent.control"],
   revert_patch:         ["agent.control"],
+
+  // ── network fetch ────────────────────────────────────────────────────────
+  fetch_url: ["net.fetch"],
 };
 
 // Startup guard: every ZONE_TOOLS entry must have a capability mapping.

@@ -127,12 +127,12 @@ describe("R.3 — tool description bounds", () => {
     }
   });
 
-  it("cumulative tool descriptions stay under 4000 chars (was ~7400 pre-R.3)", () => {
+  it("cumulative tool descriptions stay under 4400 chars (was ~7400 pre-R.3; raised from 4000 when fetch_url added)", () => {
     let total = 0;
     for (const tool of ZONE_TOOLS) {
       total += (tool.function.description ?? "").length;
     }
-    expect(total).toBeLessThan(4000);
+    expect(total).toBeLessThan(4400);
   });
 
   it("tool names are unchanged (sentinel registry)", () => {
@@ -142,6 +142,7 @@ describe("R.3 — tool description bounds", () => {
         "TodoWrite",
         "Task",
         "apply_patch",
+        "fetch_url",
         "find_references",
         "kill_background",
         "list_background",
