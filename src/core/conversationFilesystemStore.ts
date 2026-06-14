@@ -39,6 +39,8 @@ export interface FsConversationEvent {
   text?: string;
   /** type === "agent_summary" — surfaces "rolled_back" so readers can filter. */
   decisionMode?: string;
+  /** type === "turn" — head-keep snapshot of patchPreview for continuation context (≤16KB). Absent on aborted/no-preview turns. */
+  fullAnswer?: string;
   /** Free-form extras. */
   [k: string]: unknown;
 }

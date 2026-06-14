@@ -5,9 +5,14 @@ export const TURN_SUMMARY_MAX_BYTES = 2048;
 export const USER_PROMPT_MAX_BYTES = 256;
 export const MAX_CHANGED_FILES = 12;
 
+export const FULL_ANSWER_MAX_BYTES = 16_384; // 16KB head-keep cap for continuation context
+
 const TRUNCATE_NOTICE = "[…truncated…]\n";
 // Byte cap after reserving space for the truncation notice
 const TURN_SUMMARY_BODY_MAX = TURN_SUMMARY_MAX_BYTES - TRUNCATE_NOTICE.length;
+
+const CONTINUATION_TRUNCATE_NOTICE = "\n[…truncated — content continues beyond this point…]";
+const FULL_ANSWER_BODY_MAX = FULL_ANSWER_MAX_BYTES - CONTINUATION_TRUNCATE_NOTICE.length;
 
 /**
  * Neutral truncator for per-turn summaries — does NOT special-case APPLY_ROLLED_BACK.
@@ -23,6 +28,36 @@ export function truncateSessionTurn(text: string): string {
   // the rollback marker vocabulary.
   s = s.replace(/APPLY_ROLLED_BACK[^\n]*/g, "(no net change remained during that turn)");
   return s;
+}
+
+/**
+ * Head-keep truncator for fullAnswer — keeps the BEGINNING of text (sections 1–N).
+ * Opposite of truncateSessionTurn's tail-keep. Applies the same APPLY_ROLLED_BACK
+ * scrub so rollback vocabulary never surfaces under a SESSION MEMORY header.
+ */
+export function truncateForContinuation(text: string): string {
+  let s = String(text ?? "");
+  if (s.length > FULL_ANSWER_MAX_BYTES) {
+    s = s.slice(0, FULL_ANSWER_BODY_MAX) + CONTINUATION_TRUNCATE_NOTICE;
+  }
+  s = s.replace(/APPLY_ROLLED_BACK[^\n]*/g, "(no net change remained during that turn)");
+  return s;
+}
+
+/**
+ * Read the fullAnswer field from the most recent "turn" event that has one.
+ * Pure, synchronous, no-I/O. Returns null when no such event exists.
+ * Bypasses extractTurns intentionally — reads fullAnswer directly rather than
+ * the tail-truncated summary, so callers get the head-kept continuation content.
+ */
+export function buildContinuationContext(events: FsConversationEvent[]): string | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type === "turn" && typeof e.fullAnswer === "string" && e.fullAnswer.length > 0) {
+      return e.fullAnswer;
+    }
+  }
+  return null;
 }
 
 /** Represents one turn extracted from the JSONL event store. */

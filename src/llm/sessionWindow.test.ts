@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   buildSessionWindow,
+  buildContinuationContext,
   truncateSessionTurn,
+  truncateForContinuation,
   SESSION_WINDOW_MAX_BYTES,
   TURN_SUMMARY_MAX_BYTES,
+  FULL_ANSWER_MAX_BYTES,
   USER_PROMPT_MAX_BYTES,
   MAX_CHANGED_FILES,
 } from "./sessionWindow.js";
@@ -264,5 +267,94 @@ describe("exported constants", () => {
 
   it("MAX_CHANGED_FILES is 12", () => {
     expect(MAX_CHANGED_FILES).toBe(12);
+  });
+
+  it("FULL_ANSWER_MAX_BYTES is 16384", () => {
+    expect(FULL_ANSWER_MAX_BYTES).toBe(16_384);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// truncateForContinuation
+// ---------------------------------------------------------------------------
+
+describe("truncateForContinuation — head-keep snapshot", () => {
+  it("returns text unchanged when within FULL_ANSWER_MAX_BYTES", () => {
+    const short = "Section 1: intro\nSection 2: details";
+    expect(truncateForContinuation(short)).toBe(short);
+  });
+
+  it("head-keep: truncates long text and keeps the HEAD", () => {
+    const head = "SECTION 1 IS RIGHT HERE AT THE START";
+    const long = head + "x".repeat(20_000);
+    const result = truncateForContinuation(long);
+    expect(result.length).toBeLessThanOrEqual(FULL_ANSWER_MAX_BYTES);
+    expect(result.startsWith(head)).toBe(true);
+    expect(result).toContain("[…truncated");
+  });
+
+  it("head-keep: truncated result does NOT end with the tail of the input", () => {
+    const long = "a".repeat(20_000);
+    const result = truncateForContinuation(long);
+    expect(result.length).toBe(FULL_ANSWER_MAX_BYTES);
+    // Last char should be the truncation notice, not "a"
+    expect(result.endsWith("a")).toBe(false);
+    expect(result).toContain("[…truncated");
+  });
+
+  it("strips APPLY_ROLLED_BACK from output — same scrub as truncateSessionTurn", () => {
+    const text = "Section 1\nAPPLY_ROLLED_BACK some detail here\nSection 2";
+    const result = truncateForContinuation(text);
+    expect(result).not.toContain("APPLY_ROLLED_BACK");
+    expect(result).toContain("no net change remained during that turn");
+  });
+
+  it("handles empty string", () => {
+    expect(truncateForContinuation("")).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildContinuationContext
+// ---------------------------------------------------------------------------
+
+describe("buildContinuationContext", () => {
+  it("returns null for empty events array", () => {
+    expect(buildContinuationContext([])).toBeNull();
+  });
+
+  it("returns null when no type:turn events have fullAnswer", () => {
+    const events: FsConversationEvent[] = [
+      { type: "turn", ts: 0, runId: "r1", userPrompt: "fix", summary: "done", changedFiles: [], outcome: "applied" },
+      { type: "agent_summary", ts: 1, text: "summary" },
+    ];
+    expect(buildContinuationContext(events)).toBeNull();
+  });
+
+  it("returns fullAnswer from the most recent turn that has one", () => {
+    const events: FsConversationEvent[] = [
+      { type: "turn", ts: 0, runId: "r1", userPrompt: "p1", summary: "s1", changedFiles: [], outcome: "applied",
+        fullAnswer: "Section 1: first turn content" },
+      { type: "turn", ts: 1, runId: "r2", userPrompt: "p2", summary: "s2", changedFiles: [], outcome: "applied",
+        fullAnswer: "Section 1: second turn content" },
+    ];
+    expect(buildContinuationContext(events)).toBe("Section 1: second turn content");
+  });
+
+  it("skips turns without fullAnswer and finds the most recent with one", () => {
+    const events: FsConversationEvent[] = [
+      { type: "turn", ts: 0, runId: "r1", userPrompt: "p1", summary: "s1", changedFiles: [], outcome: "applied",
+        fullAnswer: "prior turn answer" },
+      { type: "turn", ts: 1, runId: "r2", userPrompt: "p2", summary: "s2", changedFiles: [], outcome: "applied" },
+    ];
+    expect(buildContinuationContext(events)).toBe("prior turn answer");
+  });
+
+  it("returns null when fullAnswer is empty string", () => {
+    const events: FsConversationEvent[] = [
+      { type: "turn", ts: 0, runId: "r1", userPrompt: "p1", summary: "s1", changedFiles: [], outcome: "applied",
+        fullAnswer: "" },
+    ];
+    expect(buildContinuationContext(events)).toBeNull();
   });
 });

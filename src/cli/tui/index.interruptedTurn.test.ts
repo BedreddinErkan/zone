@@ -151,3 +151,96 @@ describe("_writeTurnRecord — normal-run branch (regression guard)", () => {
     expect(mocks.appendFsConversationEvent).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// fullAnswer write-path tests (Failure 2)
+// ---------------------------------------------------------------------------
+
+describe("_writeTurnRecord — fullAnswer field (Failure 2)", () => {
+  it("writes fullAnswer when patchPreview is present", async () => {
+    const runResult = {
+      ok: true,
+      fileDiffs: [{ filePath: "src/a.ts" }],
+      patchPreview: "Section 1: Findings\nSection 2: Details",
+    } as unknown as import("../../core/runLlmPatchFlow.js").LlmPatchFlowResult;
+
+    await _writeTurnRecord({
+      config: BASE_CONFIG,
+      sessionId: "sess-1",
+      runId: "run-1",
+      prompt: "generate report",
+      runResult,
+      abortedFiles: undefined,
+      aborted: false,
+    });
+
+    const event = (mocks.appendFsConversationEvent.mock.calls[0]![0] as Record<string, unknown>)
+      .event as Record<string, unknown>;
+    expect(typeof event.fullAnswer).toBe("string");
+    expect(String(event.fullAnswer)).toContain("Section 1: Findings");
+  });
+
+  it("omits fullAnswer when patchPreview is absent", async () => {
+    const runResult = {
+      ok: true,
+      fileDiffs: [],
+      // no patchPreview
+    } as unknown as import("../../core/runLlmPatchFlow.js").LlmPatchFlowResult;
+
+    await _writeTurnRecord({
+      config: BASE_CONFIG,
+      sessionId: "sess-1",
+      runId: "run-1",
+      prompt: "fix",
+      runResult,
+      abortedFiles: undefined,
+      aborted: false,
+    });
+
+    const event = (mocks.appendFsConversationEvent.mock.calls[0]![0] as Record<string, unknown>)
+      .event as Record<string, unknown>;
+    expect(event.fullAnswer).toBeUndefined();
+  });
+
+  it("aborted turn omits fullAnswer (no crash)", async () => {
+    await _writeTurnRecord({
+      config: BASE_CONFIG,
+      sessionId: "sess-1",
+      runId: "run-1",
+      prompt: "fix",
+      runResult: undefined,
+      abortedFiles: ["src/a.ts"],
+      aborted: true,
+    });
+
+    const event = (mocks.appendFsConversationEvent.mock.calls[0]![0] as Record<string, unknown>)
+      .event as Record<string, unknown>;
+    expect(event.fullAnswer).toBeUndefined();
+  });
+
+  it("fullAnswer is head-kept: starts with beginning of patchPreview", async () => {
+    const bigPreview = "HEAD_SECTION " + "x".repeat(20_000);
+    const runResult = {
+      ok: true,
+      fileDiffs: [{ filePath: "src/a.ts" }],
+      patchPreview: bigPreview,
+    } as unknown as import("../../core/runLlmPatchFlow.js").LlmPatchFlowResult;
+
+    await _writeTurnRecord({
+      config: BASE_CONFIG,
+      sessionId: "sess-1",
+      runId: "run-1",
+      prompt: "generate report",
+      runResult,
+      abortedFiles: undefined,
+      aborted: false,
+    });
+
+    const event = (mocks.appendFsConversationEvent.mock.calls[0]![0] as Record<string, unknown>)
+      .event as Record<string, unknown>;
+    const fa = String(event.fullAnswer);
+    expect(fa.startsWith("HEAD_SECTION")).toBe(true);
+    expect(fa.length).toBeLessThanOrEqual(16_384);
+  });
+});
+

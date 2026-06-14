@@ -63,6 +63,40 @@ function stripBanner(s: string): string {
   return s.replace(/^=== [A-Z ]+===\n/, "");
 }
 
+// Continuation-intent detection — two verb tiers with different reference requirements.
+//
+// Strong verbs (continue/proceed/…) can match bare report/findings/summary — these
+// rarely name code artifacts. Bare output/response are excluded even here (too ambiguous).
+//
+// Weak fetch verbs (give me/show me) require a specific qualifier: section+digit,
+// "rest of the X", "previous/prior X", or "what you wrote/produced/generated".
+// This prevents "show me the coverage report" and "give me the response" from firing.
+const _STRONG_VERB_RE = /\b(?:continue|proceed|carry\s+on|go\s+on|finish|complete)\b/i;
+const _STRONG_OUTPUT_REF_RE = new RegExp(
+  [
+    String.raw`\b(?:section|part)s?\s*\d`,
+    String.raw`\bwhat\s+you\s+(?:wrote|produced|generated)\b`,
+    String.raw`\brest\s+of\s+(?:the\s+)?(?:output|response|report|analysis|findings|summary)\b`,
+    String.raw`\b(?:previous|prior|your)\s+(?:report|output|response|analysis|findings|summary)\b`,
+    String.raw`\b(?:report|findings|summary)\b`,
+  ].join("|"),
+  "i"
+);
+const _WEAK_VERB_RE = /\b(?:give\s+me|show\s+me)\b/i;
+const _SPECIFIC_OUTPUT_REF_RE = new RegExp(
+  [
+    String.raw`\b(?:section|part)s?\s*\d`,
+    String.raw`\bwhat\s+you\s+(?:wrote|produced|generated)\b`,
+    String.raw`\brest\s+of\s+(?:the\s+)?(?:output|response|report|analysis|findings|summary)\b`,
+    String.raw`\b(?:previous|prior|your)\s+(?:report|output|response|analysis|findings|summary)\b`,
+  ].join("|"),
+  "i"
+);
+export function isContinueIntent(prompt: string): boolean {
+  return (_STRONG_VERB_RE.test(prompt) && _STRONG_OUTPUT_REF_RE.test(prompt))
+      || (_WEAK_VERB_RE.test(prompt)   && _SPECIFIC_OUTPUT_REF_RE.test(prompt));
+}
+
 /** Load the multi-turn session window from the FS conversation store (non-blocking, never throws). */
 async function loadSessionWindow(sessionId: string, repoPath: string): Promise<string> {
   try {
@@ -97,7 +131,7 @@ export async function _writeTurnRecord(params: {
   const { config, sessionId, runId, prompt, runResult, abortedFiles, aborted } = params;
   if (!config.memoryEnabled || !sessionId) return;
   const { appendFsConversationEvent } = await import("../../core/conversationFilesystemStore.js");
-  const { truncateSessionTurn, MAX_CHANGED_FILES, USER_PROMPT_MAX_BYTES } =
+  const { truncateSessionTurn, truncateForContinuation, MAX_CHANGED_FILES, USER_PROMPT_MAX_BYTES } =
     await import("../../llm/sessionWindow.js");
 
   if (aborted) {
@@ -127,6 +161,10 @@ export async function _writeTurnRecord(params: {
     const changedFiles = fd.map(d => d.filePath).slice(0, MAX_CHANGED_FILES);
     const rawPreview = (runResult as { patchPreview?: string }).patchPreview;
     const summary = typeof rawPreview === "string" ? truncateSessionTurn(stripBanner(rawPreview)) : "";
+    // Head-keep 16KB snapshot for continuation — omitted when no preview content.
+    const fullAnswer = typeof rawPreview === "string" && rawPreview.length > 0
+      ? truncateForContinuation(stripBanner(rawPreview))
+      : undefined;
     const ok = await appendFsConversationEvent({
       repoPath: config.repoPath,   // NOT process.cwd() — repoPathTrap
       threadId: sessionId,
@@ -136,6 +174,7 @@ export async function _writeTurnRecord(params: {
         runId,
         userPrompt: prompt.slice(0, USER_PROMPT_MAX_BYTES),
         summary,
+        ...(fullAnswer !== undefined ? { fullAnswer } : {}),
         changedFiles,
         outcome: deriveNeutralOutcome(runResult, changedFiles),
       },
@@ -373,6 +412,22 @@ export async function runTui(
     if (config.memoryEnabled && sessionId) {
       const loaded = await loadSessionWindow(sessionId, config.repoPath);
       if (loaded) priorSessionSummary = loaded;
+      // Failure 2: on explicit continue-intent, prepend the prior turn's head-kept fullAnswer
+      // so sections 1–N are visible even though the steady-state summary kept only the tail.
+      // Gated: continue-intent only, previous-turn-only, capped at 16KB.
+      if (priorSessionSummary && isContinueIntent(prompt)) {
+        const { readFsConversationEvents } = await import("../../core/conversationFilesystemStore.js");
+        const { buildContinuationContext } = await import("../../llm/sessionWindow.js");
+        const evts = readFsConversationEvents({ repoPath: config.repoPath, threadId: sessionId });
+        const continuation = buildContinuationContext(evts);
+        if (continuation) {
+          priorSessionSummary =
+            "PRIOR TURN FULL CONTENT (continuation requested):\n" +
+            continuation +
+            "\nEND PRIOR TURN CONTENT.\n\n" +
+            priorSessionSummary;
+        }
+      }
     }
 
     const onProgress = (update: LlmPatchProgressUpdate): void => {
