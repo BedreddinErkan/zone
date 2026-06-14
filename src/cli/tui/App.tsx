@@ -50,6 +50,7 @@ interface AppProps {
   onUndoRequest?: () => void;
   initialTrustedPrefixes?: string[];
   resumedSession?: DiskSession;
+  initialSessionId?: string;
   onStateChange?: (state: StoreState) => void;
   initialModelSettings?: DiskModelSettings | null;
   onModelApply?: (model: string, provider: "anthropic" | "openai", effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void;
@@ -277,7 +278,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
   );
 }
 
-export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, initialTrustedPrefixes, resumedSession, onStateChange, initialModelSettings, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust }: AppProps): React.ReactElement {
+export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, initialTrustedPrefixes, resumedSession, initialSessionId, onStateChange, initialModelSettings, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust }: AppProps): React.ReactElement {
   return (
     <StoreProvider initialValues={{
       model: initialModel ?? "",
@@ -285,7 +286,7 @@ export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, ini
       dailyUsedUsd: initialDailyUsedUsd ?? 0,
       trustedPrefixes: initialTrustedPrefixes ?? [],
       resumedTranscript: resumedSession?.transcript,
-      resumedSessionId: resumedSession?.sessionId,
+      resumedSessionId: initialSessionId,
       resumedStartedAt: resumedSession?.startedAt,
       modelSettings: initialModelSettings,
       userCommands: initialUserCommands ?? [],

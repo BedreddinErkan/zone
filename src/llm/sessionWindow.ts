@@ -5,7 +5,7 @@ export const TURN_SUMMARY_MAX_BYTES = 2048;
 export const USER_PROMPT_MAX_BYTES = 256;
 export const MAX_CHANGED_FILES = 12;
 
-export const FULL_ANSWER_MAX_BYTES = 16_384; // 16KB head-keep cap for continuation context
+export const FULL_ANSWER_MAX_BYTES = 65_536; // 64KB head-keep cap for continuation context
 
 const TRUNCATE_NOTICE = "[…truncated…]\n";
 // Byte cap after reserving space for the truncation notice

@@ -9,7 +9,7 @@ import { App } from "./App.js";
 import { Splash } from "./components/Splash.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import type { CliFlags } from "../config.js";
-import { loadCliConfig, validateCliConfig, applyDiskKeyFallbacks } from "../config.js";
+import { loadCliConfig, validateCliConfig, applyDiskKeyFallbacks, type CliConfig } from "../config.js";
 import { runOneShotInner, type TuiMode } from "../dispatch.js";
 import { ProviderRequestError, PlanRefusalError } from "../../llm/factory.js";
 import { resolveInitialTuiMode } from "./initialMode.js";
@@ -183,6 +183,228 @@ export async function _writeTurnRecord(params: {
       process.stderr.write("[zone-session-mem] turn write skipped\n");
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// _RunPromptDeps — explicit closure for _runPromptImpl (extracted for testability)
+// ---------------------------------------------------------------------------
+
+export interface _RunPromptDeps {
+  config: CliConfig;
+  storeCapture: {
+    state: StoreState | null;
+    lastCommitData: { filePaths: string[]; message: string; repoPath: string } | null;
+    lastFeedbackData: { runId: string; logs: string } | null;
+    dispatch: ((action: StoreAction) => void) | null;
+  };
+  bus: import("../eventBus.js").EventBus;
+  localSessionId: string;
+}
+
+/**
+ * Resolve the effective session ID for a prompt run.
+ * Falls back to the pre-computed localSessionId when storeCapture.state is null
+ * (first React render tick — the pre-seeded prompt fires before onStateChange populates state).
+ */
+export function _resolveSessionId(
+  storeState: { sessionId?: string } | null,
+  localSessionId: string
+): string {
+  return storeState?.sessionId ?? localSessionId;
+}
+
+/**
+ * Extracted core of runPrompt — all closure deps are explicit so this function
+ * can be called from tests without rendering Ink.
+ * runOneShotInner is a module-level import and is vi.mockable via vi.mock("../dispatch.js").
+ */
+export async function _runPromptImpl(
+  prompt: string,
+  ac: AbortController,
+  mode: TuiMode,
+  images: import("../../api/imageUpload.js").ImageAttachment[] | undefined,
+  deps: _RunPromptDeps
+): Promise<void> {
+  const { storeCapture, config, bus, localSessionId } = deps;
+  const runId = randomUUID();
+  const sessionId = _resolveSessionId(storeCapture.state, localSessionId);
+
+  // ! shell escape — run cmd directly without LLM; results appear as a tool entry
+  if (prompt.startsWith("!")) {
+    const cmd = prompt.slice(1).trim();
+    if (!cmd) return;
+    const ts = Date.now();
+    bus.emit("tool_call", { runId, ts, type: "tool_call", title: `[tool] shell: ${cmd}` });
+    try {
+      const { stdout, stderr } = await execAsync(cmd, { cwd: process.cwd(), timeout: 30_000 });
+      const out = [stdout, stderr].filter(Boolean).join("\n").trim() || "(no output)";
+      bus.emit("tool_result", { runId, ts: Date.now(), type: "tool_result",
+        toolName: "shell", title: out.slice(0, 100), detail: out, status: "success" });
+    } catch (err: unknown) {
+      const out = err instanceof Error ? err.message : String(err);
+      bus.emit("tool_result", { runId, ts: Date.now(), type: "tool_result",
+        toolName: "shell", title: out.slice(0, 100), detail: out, status: "error" });
+    }
+    return;
+  }
+
+  // Load prior session summary before the run (not via conversationId to avoid triggering
+  // the rollback priorRunSummary path with wrong framing — load directly from the FS store).
+  let priorSessionSummary: string | undefined;
+  if (config.memoryEnabled && sessionId) {
+    const loaded = await loadSessionWindow(sessionId, config.repoPath);
+    if (loaded) priorSessionSummary = loaded;
+    // On explicit continue-intent, prepend the prior turn's head-kept fullAnswer
+    // so sections 1–N are visible even though the steady-state summary kept only the tail.
+    // Gate: continue-intent only, previous-turn-only, capped at 64KB.
+    // priorSessionSummary && precondition removed: fullAnswer can inject even when
+    // the base window is thin/empty (e.g. after a first turn with a large report).
+    if (isContinueIntent(prompt)) {
+      const { readFsConversationEvents } = await import("../../core/conversationFilesystemStore.js");
+      const { buildContinuationContext } = await import("../../llm/sessionWindow.js");
+      const evts = readFsConversationEvents({ repoPath: config.repoPath, threadId: sessionId });
+      const continuation = buildContinuationContext(evts);
+      if (continuation) {
+        priorSessionSummary =
+          "PRIOR TURN FULL CONTENT (continuation requested):\n" +
+          continuation +
+          "\nEND PRIOR TURN CONTENT.\n\n" +
+          (priorSessionSummary ?? "");
+      }
+    }
+  }
+
+  const onProgress = (update: LlmPatchProgressUpdate): void => {
+    if (typeof update === "string") return;
+    const evt = update.progress;
+    if (evt) {
+      bus.emit(evt.type, evt);
+    }
+  };
+  let runResult: LlmPatchFlowResult | undefined;
+  let abortedFiles: string[] | undefined;
+  let emitSafetyNet = true;
+  try {
+    runResult = await runOneShotInner(prompt, config, runId, {
+      externalAc: ac, onProgress, mode, priorSessionSummary, images,
+      userHooks: storeCapture.state?.armedUserHooks,
+      mcpManager: storeCapture.state?.armedMcpManager,
+    });
+  } catch (err: unknown) {
+    if (err instanceof ProviderRequestError) {
+      // Typed provider error (e.g. retention 400): surface as red ErrorLine + failed run-state.
+      bus.emit("run_failed", {
+        runId,
+        ts: Date.now(),
+        type: "run_failed",
+        title: "Provider error",
+        userMessage: err.userMessage,
+        errorKind: err.kind,
+      });
+      emitSafetyNet = false;
+    } else if (err instanceof PlanRefusalError) {
+      // Graceful plan-path refusal: render decline reason as ASSISTANT_FINAL (not ERROR_LINE).
+      bus.emit("agent_loop_complete", {
+        runId,
+        ts: Date.now(),
+        type: "agent_loop_complete",
+        title: "Plan declined",
+        detail: err.declineReason,
+      });
+      bus.emit("run_summary", {
+        runId,
+        ts: Date.now(),
+        type: "run_summary",
+        title: "Run summary",
+        cost: { totalUsd: err.costUsd, iterCount: 0, cacheHitPct: 0, avgIterUsd: 0 },
+      });
+      emitSafetyNet = false;
+    } else {
+      if (ac.signal.aborted && err instanceof Error) {
+        abortedFiles = (err as Error & { filesModified?: string[] }).filesModified ?? [];
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      bus.emit("narration", {
+        runId,
+        ts: Date.now(),
+        type: "narration",
+        title: "run error",
+        text: `[zone] run error (provider=${config.provider} model=${config.model}): ${msg}`,
+      });
+    }
+  } finally {
+    // Safety net: if runLlmPatchFlow threw before emitting agent_loop_complete,
+    // runState would stay "running" forever.
+    if (!ac.signal.aborted && emitSafetyNet) {
+      bus.emit("agent_loop_complete", {
+        runId,
+        ts: Date.now(),
+        type: "agent_loop_complete",
+        title: "Run ended",
+      });
+    }
+  }
+
+  // Refresh the cumulative daily cost badge now that the run's costs are on disk.
+  try {
+    const daily = await getUsage("local-dev", "day"); // TUI always records under "local-dev"
+    storeCapture.dispatch?.({ type: "DAILY_USED_UPDATE", dailyUsedUsd: daily.totalCostUsd });
+  } catch { /* non-critical */ }
+
+  // Write atomic turn record for multi-turn memory.
+  // Written post-run only — no submit-time write to avoid fire-and-forget race.
+  // Aborted runs (ac.signal.aborted) also write — using files attached to the thrown error.
+  // Gate is ac.signal.aborted specifically: ProviderRequestError/PlanRefusalError are ERRORED
+  // (not INTERRUPTED) and must not write here.
+  if (sessionId) {
+    await _writeTurnRecord({
+      config,
+      sessionId,
+      runId,
+      prompt,
+      runResult,
+      abortedFiles,
+      aborted: ac.signal.aborted,
+    });
+  }
+
+  // Stash commit data for /commit command (post-run only; finalizeStaging has already flushed).
+  const fileDiffs = (runResult as { fileDiffs?: Array<{ filePath: string }> } | undefined)?.fileDiffs ?? [];
+  if (runResult?.ok && fileDiffs.length > 0) {
+    const rawPreview = (runResult as { patchPreview?: string }).patchPreview ?? "";
+    const filePaths = fileDiffs.map(d => d.filePath);
+    const message = deriveCommitMessage(stripBanner(rawPreview));
+    storeCapture.lastCommitData = { filePaths, message, repoPath: config.repoPath };
+
+    if (shouldAutoCommit(runResult, config.commitOnSuccess ?? false)) {
+      const autoResult = await executeCommit(config.repoPath, message, filePaths);
+      const toastMsg = autoResult.ok
+        ? `Auto-committed: ${autoResult.hash}`
+        : `Auto-commit failed: ${autoResult.error}`;
+      storeCapture.dispatch?.({
+        type: "TOAST_PUSH",
+        entry: { id: randomUUID(), message: toastMsg, level: autoResult.ok ? "info" : "error" },
+      });
+    }
+  }
+
+  // Stash feedback data for /feedback command (best-effort; errors swallowed).
+  try {
+    const [{ costLogDir }, fsSync, nodePath, { sanitizeDiagnostics }] = await Promise.all([
+      import("../../usage/costLogger.js"),
+      import("node:fs"),
+      import("node:path"),
+      import("../../utils/sanitizeDiagnostics.js"),
+    ]);
+    const prefix = runId.slice(0, 8);
+    const dir = costLogDir();
+    const files = (fsSync.readdirSync(dir) as string[]).filter((f) => f.endsWith(`-${prefix}.jsonl`));
+    files.sort();
+    const latest = files[files.length - 1];
+    const raw = latest ? fsSync.readFileSync(nodePath.join(dir, latest), "utf8") as string : "";
+    const tail = raw.trim().split("\n").filter(Boolean).slice(-8).join("\n");
+    storeCapture.lastFeedbackData = { runId, logs: sanitizeDiagnostics(tail) };
+  } catch { /* best-effort */ }
 }
 
 export async function runTui(
@@ -382,193 +604,13 @@ export async function runTui(
   });
 
   const bus = createEventBus();
-
-  const runPrompt = async (prompt: string, ac: AbortController, mode: TuiMode = "normal", images?: import("../../api/imageUpload.js").ImageAttachment[]): Promise<void> => {
-    const runId = randomUUID();
-    // Capture sessionId at submit time (storeCapture.state may be null on the first render tick).
-    const sessionId = storeCapture.state?.sessionId;
-
-    // ! shell escape — run cmd directly without LLM; results appear as a tool entry
-    if (prompt.startsWith("!")) {
-      const cmd = prompt.slice(1).trim();
-      if (!cmd) return;
-      const ts = Date.now();
-      bus.emit("tool_call", { runId, ts, type: "tool_call", title: `[tool] shell: ${cmd}` });
-      try {
-        const { stdout, stderr } = await execAsync(cmd, { cwd: process.cwd(), timeout: 30_000 });
-        const out = [stdout, stderr].filter(Boolean).join("\n").trim() || "(no output)";
-        bus.emit("tool_result", { runId, ts: Date.now(), type: "tool_result",
-          toolName: "shell", title: out.slice(0, 100), detail: out, status: "success" });
-      } catch (err: unknown) {
-        const out = err instanceof Error ? err.message : String(err);
-        bus.emit("tool_result", { runId, ts: Date.now(), type: "tool_result",
-          toolName: "shell", title: out.slice(0, 100), detail: out, status: "error" });
-      }
-      return;
-    }
-
-    // Load prior session summary before the run (not via conversationId to avoid triggering
-    // the rollback priorRunSummary path with wrong framing — load directly from the FS store).
-    let priorSessionSummary: string | undefined;
-    if (config.memoryEnabled && sessionId) {
-      const loaded = await loadSessionWindow(sessionId, config.repoPath);
-      if (loaded) priorSessionSummary = loaded;
-      // Failure 2: on explicit continue-intent, prepend the prior turn's head-kept fullAnswer
-      // so sections 1–N are visible even though the steady-state summary kept only the tail.
-      // Gated: continue-intent only, previous-turn-only, capped at 16KB.
-      if (priorSessionSummary && isContinueIntent(prompt)) {
-        const { readFsConversationEvents } = await import("../../core/conversationFilesystemStore.js");
-        const { buildContinuationContext } = await import("../../llm/sessionWindow.js");
-        const evts = readFsConversationEvents({ repoPath: config.repoPath, threadId: sessionId });
-        const continuation = buildContinuationContext(evts);
-        if (continuation) {
-          priorSessionSummary =
-            "PRIOR TURN FULL CONTENT (continuation requested):\n" +
-            continuation +
-            "\nEND PRIOR TURN CONTENT.\n\n" +
-            priorSessionSummary;
-        }
-      }
-    }
-
-    const onProgress = (update: LlmPatchProgressUpdate): void => {
-      if (typeof update === "string") return;
-      const evt = update.progress;
-      if (evt) {
-        bus.emit(evt.type, evt);
-      }
-    };
-    let runResult: LlmPatchFlowResult | undefined;
-    let abortedFiles: string[] | undefined;
-    let emitSafetyNet = true;
-    try {
-      runResult = await runOneShotInner(prompt, config, runId, {
-        externalAc: ac, onProgress, mode, priorSessionSummary, images,
-        userHooks: storeCapture.state?.armedUserHooks,
-        mcpManager: storeCapture.state?.armedMcpManager,
-      });
-    } catch (err: unknown) {
-      if (err instanceof ProviderRequestError) {
-        // Typed provider error (e.g. retention 400): surface as red ErrorLine + failed run-state.
-        // emitSafetyNet=false suppresses the finally's agent_loop_complete so RUN_FAILED isn't clobbered by RUN_DONE.
-        bus.emit("run_failed", {
-          runId,
-          ts: Date.now(),
-          type: "run_failed",
-          title: "Provider error",
-          userMessage: err.userMessage,
-          errorKind: err.kind,
-        });
-        emitSafetyNet = false;
-      } else if (err instanceof PlanRefusalError) {
-        // Graceful plan-path refusal: render decline reason as ASSISTANT_FINAL (not ERROR_LINE).
-        // Mirrors agent-loop §6 content_filter guard and vague-task short-circuit pattern.
-        // emitSafetyNet=false prevents the finally safety-net from double-emitting
-        // agent_loop_complete and clobbering the cost display with iterCount:0.
-        bus.emit("agent_loop_complete", {
-          runId,
-          ts: Date.now(),
-          type: "agent_loop_complete",
-          title: "Plan declined",
-          detail: err.declineReason,
-        });
-        bus.emit("run_summary", {
-          runId,
-          ts: Date.now(),
-          type: "run_summary",
-          title: "Run summary",
-          cost: { totalUsd: err.costUsd, iterCount: 0, cacheHitPct: 0, avgIterUsd: 0 },
-        });
-        emitSafetyNet = false;
-      } else {
-        if (ac.signal.aborted && err instanceof Error) {
-          abortedFiles = (err as Error & { filesModified?: string[] }).filesModified ?? [];
-        }
-        const msg = err instanceof Error ? err.message : String(err);
-        bus.emit("narration", {
-          runId,
-          ts: Date.now(),
-          type: "narration",
-          title: "run error",
-          text: `[zone] run error (provider=${config.provider} model=${config.model}): ${msg}`,
-        });
-      }
-    } finally {
-      // Safety net: if runLlmPatchFlow threw before emitting agent_loop_complete,
-      // runState would stay "running" forever. Aborted runs are handled by
-      // App.tsx Esc handler (RUN_ABORTED dispatch) — skip those.
-      // ProviderRequestError sets emitSafetyNet=false because run_failed already handles terminal state.
-      if (!ac.signal.aborted && emitSafetyNet) {
-        bus.emit("agent_loop_complete", {
-          runId,
-          ts: Date.now(),
-          type: "agent_loop_complete",
-          title: "Run ended",
-        });
-      }
-    }
-
-    // Refresh the cumulative daily cost badge now that the run's costs are on disk.
-    try {
-      const daily = await getUsage(USAGE_USER_ID, "day");
-      storeCapture.dispatch?.({ type: "DAILY_USED_UPDATE", dailyUsedUsd: daily.totalCostUsd });
-    } catch { /* non-critical */ }
-
-    // Write atomic turn record for multi-turn memory (replaces single agent_summary write).
-    // Single event per dispatch = atomic in the JSONL log (rotation never splits a turn).
-    // Written post-run only — no submit-time write to avoid fire-and-forget race.
-    // Aborted runs (ac.signal.aborted) also write — using files attached to the thrown error.
-    // Gate is ac.signal.aborted specifically: ProviderRequestError/PlanRefusalError are ERRORED
-    // (not INTERRUPTED) and must not write here.
-    if (sessionId) {
-      await _writeTurnRecord({
-        config,
-        sessionId,
-        runId,
-        prompt,
-        runResult,
-        abortedFiles,
-        aborted: ac.signal.aborted,
-      });
-    }
-
-    // Stash commit data for /commit command (post-run only; finalizeStaging has already flushed).
-    const fileDiffs = (runResult as { fileDiffs?: Array<{ filePath: string }> } | undefined)?.fileDiffs ?? [];
-    if (runResult?.ok && fileDiffs.length > 0) {
-      const rawPreview = (runResult as { patchPreview?: string }).patchPreview ?? "";
-      const filePaths = fileDiffs.map(d => d.filePath);
-      const message = deriveCommitMessage(stripBanner(rawPreview));
-      storeCapture.lastCommitData = { filePaths, message, repoPath: config.repoPath };
-
-      if (shouldAutoCommit(runResult, config.commitOnSuccess ?? false)) {
-        const autoResult = await executeCommit(config.repoPath, message, filePaths);
-        const toastMsg = autoResult.ok
-          ? `Auto-committed: ${autoResult.hash}`
-          : `Auto-commit failed: ${autoResult.error}`;
-        storeCapture.dispatch?.({
-          type: "TOAST_PUSH",
-          entry: { id: randomUUID(), message: toastMsg, level: autoResult.ok ? "info" : "error" },
-        });
-      }
-    }
-
-    // Stash feedback data for /feedback command (best-effort; errors swallowed).
-    try {
-      const [{ costLogDir }, fsSync, nodePath, { sanitizeDiagnostics }] = await Promise.all([
-        import("../../usage/costLogger.js"),
-        import("node:fs"),
-        import("node:path"),
-        import("../../utils/sanitizeDiagnostics.js"),
-      ]);
-      const prefix = runId.slice(0, 8);
-      const dir = costLogDir();
-      const files = (fsSync.readdirSync(dir) as string[]).filter((f) => f.endsWith(`-${prefix}.jsonl`));
-      files.sort();
-      const latest = files[files.length - 1];
-      const raw = latest ? fsSync.readFileSync(nodePath.join(dir, latest), "utf8") as string : "";
-      const tail = raw.trim().split("\n").filter(Boolean).slice(-8).join("\n");
-      storeCapture.lastFeedbackData = { runId, logs: sanitizeDiagnostics(tail) };
-    } catch { /* best-effort */ }
+  // Pre-compute the session ID before React renders. On the first prompt (mount useEffect),
+  // storeCapture.state is null → _resolveSessionId falls back to this guaranteed ID.
+  // App.tsx receives it as initialSessionId so the store's sessionId matches (same .jsonl file).
+  const localSessionId = resumedSession?.sessionId ?? randomUUID();
+  const runPromptDeps: _RunPromptDeps = { config, storeCapture, bus, localSessionId };
+  const runPrompt = (prompt: string, ac: AbortController, mode: TuiMode = "normal", images?: import("../../api/imageUpload.js").ImageAttachment[]): void => {
+    void _runPromptImpl(prompt, ac, mode, images, runPromptDeps);
   };
 
   const onSubmit = (prompt: string, ac: AbortController, mode: TuiMode, images?: import("../../api/imageUpload.js").ImageAttachment[]): void => {
@@ -630,6 +672,7 @@ export async function runTui(
         onUndoRequest={onUndoRequest}
         initialTrustedPrefixes={initialTrustedPrefixes}
         resumedSession={resumedSession ?? undefined}
+        initialSessionId={localSessionId}
         onStateChange={(s) => { storeCapture.state = s; }}
         initialModelSettings={diskModelSettings}
         initialUserCommands={initialUserCommands}

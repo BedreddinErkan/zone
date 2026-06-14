@@ -269,8 +269,8 @@ describe("exported constants", () => {
     expect(MAX_CHANGED_FILES).toBe(12);
   });
 
-  it("FULL_ANSWER_MAX_BYTES is 16384", () => {
-    expect(FULL_ANSWER_MAX_BYTES).toBe(16_384);
+  it("FULL_ANSWER_MAX_BYTES is 65536", () => {
+    expect(FULL_ANSWER_MAX_BYTES).toBe(65_536);
   });
 });
 
@@ -286,7 +286,7 @@ describe("truncateForContinuation — head-keep snapshot", () => {
 
   it("head-keep: truncates long text and keeps the HEAD", () => {
     const head = "SECTION 1 IS RIGHT HERE AT THE START";
-    const long = head + "x".repeat(20_000);
+    const long = head + "x".repeat(70_000); // must exceed 65536 to trigger truncation
     const result = truncateForContinuation(long);
     expect(result.length).toBeLessThanOrEqual(FULL_ANSWER_MAX_BYTES);
     expect(result.startsWith(head)).toBe(true);
@@ -294,7 +294,7 @@ describe("truncateForContinuation — head-keep snapshot", () => {
   });
 
   it("head-keep: truncated result does NOT end with the tail of the input", () => {
-    const long = "a".repeat(20_000);
+    const long = "a".repeat(70_000); // must exceed 65536
     const result = truncateForContinuation(long);
     expect(result.length).toBe(FULL_ANSWER_MAX_BYTES);
     // Last char should be the truncation notice, not "a"

@@ -219,7 +219,7 @@ describe("_writeTurnRecord — fullAnswer field (Failure 2)", () => {
   });
 
   it("fullAnswer is head-kept: starts with beginning of patchPreview", async () => {
-    const bigPreview = "HEAD_SECTION " + "x".repeat(20_000);
+    const bigPreview = "HEAD_SECTION " + "x".repeat(70_000); // must exceed 65536 cap
     const runResult = {
       ok: true,
       fileDiffs: [{ filePath: "src/a.ts" }],
@@ -240,7 +240,7 @@ describe("_writeTurnRecord — fullAnswer field (Failure 2)", () => {
       .event as Record<string, unknown>;
     const fa = String(event.fullAnswer);
     expect(fa.startsWith("HEAD_SECTION")).toBe(true);
-    expect(fa.length).toBeLessThanOrEqual(16_384);
+    expect(fa.length).toBeLessThanOrEqual(65_536);
   });
 });
 
