@@ -32,6 +32,10 @@ cd ~/your-project && zone
 
 Press **Shift+Tab** for plan mode. You can also add and manage keys from inside the TUI with `/keys` — no `.env` needed for personal use.
 
+## Windows
+
+Zone runs via WSL (Windows Subsystem for Linux). Install WSL 2 with a Linux distribution, then run `zone` from within the WSL terminal.
+
 ## How it works
 
 1. **Describe a task.** In plan mode, Zone drafts a step-by-step plan and waits — you approve, refine, or give feedback before it touches a file.
