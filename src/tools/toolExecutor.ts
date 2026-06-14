@@ -3095,7 +3095,12 @@ export async function executeTool(
         return { success: false, output: "multi_edit: files array must be non-empty." };
       }
 
-      const escaped = escapeRegex(find);
+      // Normalize find/replace to LF so multi-line patterns match CRLF files.
+      // Each file's original EOL is detected and restored on write.
+      const normalizedFind    = find.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      const normalizedReplace = replace.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+      const escaped = escapeRegex(normalizedFind);
       const pattern = new RegExp(wholeWord ? `\\b${escaped}\\b` : escaped, "g");
 
       const perFile: Array<{ path: string; count: number }> = [];
@@ -3113,11 +3118,17 @@ export async function executeTool(
           continue;
         }
 
-        const matches = content.match(pattern);
+        const eolAnalysis = analyzeLineEnding(content);
+        const normalizedContent = content.replace(/\r\n/g, "\n");
+
+        const matches = normalizedContent.match(pattern);
         const count = matches ? matches.length : 0;
 
         if (count > 0) {
-          const newContent = content.replace(pattern, replace);
+          let newContent = normalizedContent.replace(pattern, normalizedReplace);
+          if (eolAnalysis.dominant === "crlf") {
+            newContent = newContent.replace(/\n/g, "\r\n");
+          }
           const wr = stagedWrite(input?.stagingFiles, abs, newContent, repoPath);
           if (wr === "escape") {
             return { success: false, output: `multi_edit_blocked_path_escape: "${filePath}" would escape repo` };
