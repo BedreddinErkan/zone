@@ -22,7 +22,7 @@ import { sanitizeVerificationEnv, strippedEnvKeys } from "../core/buildEnv.js";
 import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import type { ProjectFramework } from "../repo/detectFramework.js";
 import { generateFileOutline } from "./fileOutline.js";
-import { findCheckerForFile } from "./syntaxCheckers.js";
+import { findCheckerForFile, trackCheckerUnavailableWarning } from "./syntaxCheckers.js";
 import { classifyShellExit } from "./classifyShellExit.js";
 import { validateRunEnvironment } from "./runEnvironment.js";
 import { checkCommandSafe } from "../llm/runCommandSafe.js";
@@ -2353,7 +2353,7 @@ export async function executeTool(
           let checkerParsedErrors: ReturnType<typeof checker.parseErrors> = [];
           const tempPath = path.join(os.tmpdir(), `zone-tsc-${randomUUID()}${ext}`);
 
-          const available = await checker.availabilityCheck();
+          const available = await checker.availabilityCheck(repoPath);
           if (available || !checker.gracefulSkip) {
             const { cmd, args } = checker.cmdTemplate(tempPath);
             const fullCmd = [cmd, ...args].join(" ");
@@ -2377,7 +2377,14 @@ export async function executeTool(
               fs.rmSync(tempPath, { force: true });
             }
           }
-          // !available && gracefulSkip → silently approve (decision stays "approved")
+          // !available && gracefulSkip → approve + one-time warning per checker per session
+          if (!available && checker.gracefulSkip && trackCheckerUnavailableWarning(checker.id)) {
+            onProgress?.(
+              `[zone-tsc-unavailable] TypeScript syntax checking skipped — ` +
+              `typescript is not installed in this project. ` +
+              `Add it with: npm install --save-dev typescript`,
+            );
+          }
 
           const latencyMs = Date.now() - checkStart;
           if (input?.selfValidationCounts) {

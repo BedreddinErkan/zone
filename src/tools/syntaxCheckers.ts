@@ -11,6 +11,7 @@
  * Omitting the var (default) leaves only first-class checkers active.
  */
 
+import fs from "node:fs";
 import path from "node:path";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
@@ -31,8 +32,9 @@ export type SyntaxChecker = {
   /** Build the shell command + args to run on a temp file. Args should be
    *  shell-ready (quote the filepath when the checker needs it). */
   cmdTemplate: (filepath: string) => { cmd: string; args: string[] };
-  /** Cached per-process. Returns true when the checker binary is available. */
-  availabilityCheck: () => Promise<boolean>;
+  /** Cached per-process. Returns true when the checker binary is available.
+   *  repoPath is forwarded so probes can check project-local node_modules. */
+  availabilityCheck: (repoPath?: string) => Promise<boolean>;
   /** True when at least one error in the list should block the patch. */
   isBlockingError: (errors: ParsedSyntaxError[]) => boolean;
   /** Extract structured errors from raw checker output. */
@@ -69,6 +71,58 @@ export function whichCheck(binary: string): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
+// tsc availability probe — deterministic fs check before any exec.
+// ---------------------------------------------------------------------------
+
+// Test override: when set, probeTscAvailable returns this value directly.
+let _tscAvailabilityOverride: (() => Promise<boolean>) | null = null;
+
+/** Override the tsc probe result in tests. Pass null to restore real probe. */
+export function _setTscAvailabilityForTest(fn: (() => Promise<boolean>) | null): void {
+  _tscAvailabilityOverride = fn;
+}
+
+/**
+ * Returns true when tsc is resolvable for the given project.
+ * Checks project-local node_modules/.bin/tsc first (the common case —
+ * typescript in devDependencies), then falls back to PATH.
+ * Using repoPath avoids false "not installed" warnings when Zone is launched
+ * from a directory other than the project root.
+ */
+export async function probeTscAvailable(repoPath?: string): Promise<boolean> {
+  if (_tscAvailabilityOverride) return _tscAvailabilityOverride();
+  const localTsc = path.join(repoPath ?? process.cwd(), "node_modules", ".bin", "tsc");
+  if (fs.existsSync(localTsc)) return true;
+  try {
+    await execAsync("which tsc", { timeout: 3_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// One-time unavailability warning tracker (per process / per session).
+// Follows the webSearchWarning.ts pattern.
+// ---------------------------------------------------------------------------
+const _unavailableWarned = new Set<string>();
+
+/**
+ * Records that checker `id` has been warned as unavailable.
+ * Returns true the first time for a given id; false on subsequent calls.
+ */
+export function trackCheckerUnavailableWarning(id: string): boolean {
+  if (_unavailableWarned.has(id)) return false;
+  _unavailableWarned.add(id);
+  return true;
+}
+
+/** Reset all unavailability warnings — test helper only. */
+export function _resetCheckerWarningsForTest(): void {
+  _unavailableWarned.clear();
+}
+
+// ---------------------------------------------------------------------------
 // SYNTAX_CHECKERS table
 // ---------------------------------------------------------------------------
 
@@ -84,7 +138,11 @@ export const SYNTAX_CHECKERS: SyntaxChecker[] = [
       // which generates TS2xxx noise on single-file checks. ESNext + bundler is
       // the "permissive but realistic" pairing for inline syntax verification.
       // Do not change to match repo tsconfig. See Phase I audit 2026-05-19 Lane 0.D.
+      //
+      // --no-install: prevents npx from downloading typescript when it's absent;
+      // probeTscAvailable() gates the exec so this is belt-and-suspenders.
       args: [
+        "--no-install",
         "tsc",
         "--noEmit",
         "--module",
@@ -97,11 +155,9 @@ export const SYNTAX_CHECKERS: SyntaxChecker[] = [
         `"${fp}"`,
       ],
     }),
-    // Always available: the former code never pre-checked for tsc — it ran
-    // `npx tsc` and silently approved on any error (ENOENT included).
-    // gracefulSkip:true preserves that behaviour when npx/tsc is absent.
-    // W.2/W.3 entries will use whichCheck("python3") / whichCheck("gofmt") etc.
-    availabilityCheck: () => Promise.resolve(true),
+    // Real probe: checks node_modules/.bin/tsc (project-local) then PATH.
+    // When absent, toolExecutor emits a one-time warning and approves (gracefulSkip).
+    availabilityCheck: (repoPath?: string) => probeTscAvailable(repoPath),
     // Only TS1xxx (syntax errors) block the patch; TS2xxx (semantic /
     // cross-file errors) are approved because single-file context cannot
     // resolve imports.

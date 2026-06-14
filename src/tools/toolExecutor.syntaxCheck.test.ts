@@ -20,7 +20,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { executeTool } from "./toolExecutor.js";
-import { clearAvailabilityCache } from "./syntaxCheckers.js";
+import {
+  clearAvailabilityCache,
+  _setTscAvailabilityForTest,
+  _resetCheckerWarningsForTest,
+} from "./syntaxCheckers.js";
 
 let repoPath: string;
 
@@ -46,7 +50,8 @@ function makeExecSuccess(): void {
 function makeExecFailTs1(): void {
   execMock.mockImplementation(
     (cmd: string, _opts: unknown, callback: (err: Error | null, result?: { stdout: string; stderr: string }) => void) => {
-      if (typeof cmd === "string" && cmd.includes("tsc")) {
+      // Match only the actual tsc invocation (contains --no-install), not probe calls like "which tsc".
+      if (typeof cmd === "string" && cmd.includes("--no-install")) {
         const err = Object.assign(new Error("tsc failed"), {
           code: 1,
           stdout: `tmp.ts(2,1): error TS1005: ';' expected.\n`,
@@ -64,7 +69,8 @@ function makeExecFailTs1(): void {
 function makeExecFailTs2(): void {
   execMock.mockImplementation(
     (cmd: string, _opts: unknown, callback: (err: Error | null, result?: { stdout: string; stderr: string }) => void) => {
-      if (typeof cmd === "string" && cmd.includes("tsc")) {
+      // Match only the actual tsc invocation (contains --no-install), not probe calls like "which tsc".
+      if (typeof cmd === "string" && cmd.includes("--no-install")) {
         const err = Object.assign(new Error("tsc failed"), {
           code: 1,
           stdout: `tmp.ts(1,1): error TS2305: Module 'foo' has no exported member 'bar'.\n`,
@@ -706,5 +712,95 @@ describe("W.3 — Java experimental checker", () => {
     expect(result.output).toContain("src/Main.java");
     expect(result.rejectionReason).toBe("inline_ts_syntax_error");
     expect(readRepoFile("src/Main.java")).toBe(original);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 3: tsc unavailability — warn-once + non-blocking + --no-install
+// ---------------------------------------------------------------------------
+describe("Fix 3 — tsc unavailability: warn once, approve, no hang", () => {
+  beforeEach(() => {
+    clearAvailabilityCache();
+    _resetCheckerWarningsForTest();
+  });
+
+  afterEach(() => {
+    _setTscAvailabilityForTest(null);
+    _resetCheckerWarningsForTest();
+    clearAvailabilityCache();
+  });
+
+  async function applyTsPatch(progressMessages: string[]) {
+    writeRepoFile("src/warn.ts", "export const a = 1;\n");
+    return executeTool(
+      "apply_patch",
+      {
+        filePath: "src/warn.ts",
+        patch: "--- FIND ---\nexport const a = 1;\n--- REPLACE ---\nexport const a = 2;",
+        intent: "modify",
+        scope: null,
+      },
+      repoPath,
+      (msg: string) => progressMessages.push(msg),
+      {},
+    );
+  }
+
+  it("Case 1 — warns exactly once across multiple edits when tsc is unavailable", async () => {
+    _setTscAvailabilityForTest(() => Promise.resolve(false));
+
+    const msgs: string[] = [];
+
+    // First edit — warning should fire.
+    await applyTsPatch(msgs);
+    // Reset file so second edit can apply cleanly.
+    writeRepoFile("src/warn.ts", "export const a = 1;\n");
+    // Second edit — warning must NOT fire again.
+    await applyTsPatch(msgs);
+
+    const warnings = msgs.filter((m) => m.includes("zone-tsc-unavailable"));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("TypeScript syntax checking skipped");
+    expect(warnings[0]).toContain("npm install --save-dev typescript");
+  });
+
+  it("Case 2 — edit still applies (non-blocking) when tsc is unavailable", async () => {
+    _setTscAvailabilityForTest(() => Promise.resolve(false));
+
+    const msgs: string[] = [];
+    const result = await applyTsPatch(msgs);
+
+    expect(result.success).toBe(true);
+    expect(readRepoFile("src/warn.ts")).toContain("const a = 2");
+  });
+
+  it("Case 3 — no warning emitted when tsc is available (happy path)", async () => {
+    _setTscAvailabilityForTest(() => Promise.resolve(true));
+    makeExecSuccess();
+
+    const msgs: string[] = [];
+    const result = await applyTsPatch(msgs);
+
+    expect(result.success).toBe(true);
+    expect(msgs.filter((m) => m.includes("zone-tsc-unavailable"))).toHaveLength(0);
+  });
+
+  it("Case 4 — npx invocation includes --no-install flag", async () => {
+    _setTscAvailabilityForTest(() => Promise.resolve(true));
+
+    let capturedCmd: string | null = null;
+    execMock.mockImplementation(
+      (cmd: string, _opts: unknown, callback: (err: null, result: { stdout: string; stderr: string }) => void) => {
+        if (typeof cmd === "string" && cmd.includes("tsc")) capturedCmd = cmd;
+        callback(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof import("node:child_process").exec>;
+      },
+    );
+
+    const msgs: string[] = [];
+    await applyTsPatch(msgs);
+
+    expect(capturedCmd).not.toBeNull();
+    expect(capturedCmd).toContain("--no-install");
   });
 });
