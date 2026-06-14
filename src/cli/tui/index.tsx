@@ -198,7 +198,8 @@ export async function runTui(
   process.on("exit", restoreStderr);
 
   type CommitData = { filePaths: string[]; message: string; repoPath: string };
-  const storeCapture: { state: StoreState | null; lastCommitData: CommitData | null; dispatch: ((action: StoreAction) => void) | null } = { state: null, lastCommitData: null, dispatch: null };
+  type FeedbackData = { runId: string; logs: string };
+  const storeCapture: { state: StoreState | null; lastCommitData: CommitData | null; lastFeedbackData: FeedbackData | null; dispatch: ((action: StoreAction) => void) | null } = { state: null, lastCommitData: null, lastFeedbackData: null, dispatch: null };
 
   const config = loadCliConfig(opts);
 
@@ -550,6 +551,24 @@ export async function runTui(
         });
       }
     }
+
+    // Stash feedback data for /feedback command (best-effort; errors swallowed).
+    try {
+      const [{ costLogDir }, fsSync, nodePath, { sanitizeDiagnostics }] = await Promise.all([
+        import("../../usage/costLogger.js"),
+        import("node:fs"),
+        import("node:path"),
+        import("../../utils/sanitizeDiagnostics.js"),
+      ]);
+      const prefix = runId.slice(0, 8);
+      const dir = costLogDir();
+      const files = (fsSync.readdirSync(dir) as string[]).filter((f) => f.endsWith(`-${prefix}.jsonl`));
+      files.sort();
+      const latest = files[files.length - 1];
+      const raw = latest ? fsSync.readFileSync(nodePath.join(dir, latest), "utf8") as string : "";
+      const tail = raw.trim().split("\n").filter(Boolean).slice(-8).join("\n");
+      storeCapture.lastFeedbackData = { runId, logs: sanitizeDiagnostics(tail) };
+    } catch { /* best-effort */ }
   };
 
   const onSubmit = (prompt: string, ac: AbortController, mode: TuiMode, images?: import("../../api/imageUpload.js").ImageAttachment[]): void => {
@@ -627,6 +646,7 @@ export async function runTui(
           config.commitOnSuccess = commitOnSuccess ?? false;
         }}
         getCommitData={() => storeCapture.lastCommitData}
+        getFeedbackData={() => storeCapture.lastFeedbackData}
         onDispatchCapture={(d) => { storeCapture.dispatch = d; }}
         onSessionClear={(oldId) => void clearSessionMemoryGC(oldId)}
       />

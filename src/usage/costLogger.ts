@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { IterCostUpdatePayload } from "./iterCostMeter.js";
 
-function costLogDir(): string {
+export function costLogDir(): string {
   return path.join(os.homedir(), ".zone", "cost-logs");
 }
 

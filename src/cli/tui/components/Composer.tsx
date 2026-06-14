@@ -22,6 +22,7 @@ interface ComposerProps {
   onInitStart?: (ac: AbortController) => void;
   onUndoRequest?: () => void;
   getCommitData?: () => { filePaths: string[]; message: string; repoPath: string } | null;
+  getFeedbackData?: () => { runId: string; logs: string } | null;
 }
 
 interface SlashCommand {
@@ -51,6 +52,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/websearch",   desc: "Toggle web search (off/on)" },
   { name: "/image",       desc: "Attach a local image file to the next task (/image <path>)" },
   { name: "/undo",        desc: "Undo the last run (restore files to pre-run state)" },
+  { name: "/feedback",    desc: "Send a bug report / feedback to the maintainer" },
 ];
 
 const HELP_LINES = [
@@ -62,7 +64,7 @@ const HELP_LINES = [
   "  ↑/↓         navigate history (when input empty)",
   "  ←/→ Home End  cursor movement",
   "Slash commands:",
-  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init  /memory  /model  /effort  /summary  /plan-mode  /session  /metrics  /limits  /commit  /autocommit  /websearch  /image  /undo",
+  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init  /memory  /model  /effort  /summary  /plan-mode  /session  /metrics  /limits  /commit  /autocommit  /websearch  /image  /undo  /feedback",
 ];
 
 const PUA_BASE = 0xe000;
@@ -113,7 +115,7 @@ function SlashCommandPalette({ commands, selectedIdx }: PaletteProps): React.Rea
   );
 }
 
-export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getCommitData }: ComposerProps): React.ReactElement {
+export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getCommitData, getFeedbackData }: ComposerProps): React.ReactElement {
   const { state, dispatch } = useStore();
   const { stdout } = useStdout();
   const disabled = state.runState === "running";
@@ -302,6 +304,19 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
           break;
         }
         dispatch({ type: "COMMIT_MODAL_OPEN", filePaths: commitData.filePaths, message: commitData.message, repoPath: commitData.repoPath });
+        break;
+      }
+      case "/feedback": {
+        if (disabled) {
+          dispatch({ type: "USER_PROMPT", text: "Cannot /feedback while a run is in progress." });
+          break;
+        }
+        const feedbackData = getFeedbackData?.();
+        if (!feedbackData) {
+          dispatch({ type: "USER_PROMPT", text: "Nothing to report yet — run a task first." });
+          break;
+        }
+        dispatch({ type: "FEEDBACK_MODAL_OPEN", runId: feedbackData.runId, logs: feedbackData.logs });
         break;
       }
       case "/autocommit": {

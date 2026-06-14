@@ -80,6 +80,7 @@ Press **Shift+Tab** for plan mode. You can also add and manage keys from inside 
 | `/websearch` | Toggle web search (off/on) |
 | `/image` | Attach a local image file to the next task (`/image <path>`) |
 | `/undo` | Undo the last run (restore files to pre-run state) |
+| `/feedback` | Send a bug report / feedback to the maintainer |
 
 ## Cost
 

@@ -85,10 +85,11 @@ export type StoreState = {
     missingFiles?: string[];
     unnecessaryFiles?: string[];
   } | null;
-  modalView: "none" | "permissions" | "keys" | "sessions" | "plan" | "model" | "effort" | "metrics" | "limits" | "plan_ready" | "staged_diffs" | "summary" | "session" | "commit" | "planMode" | "undo";
+  modalView: "none" | "permissions" | "keys" | "sessions" | "plan" | "model" | "effort" | "metrics" | "limits" | "plan_ready" | "staged_diffs" | "summary" | "session" | "commit" | "planMode" | "undo" | "feedback";
   undoModalData: { manifest: import("../../snapshots/snapshotStore.js").SnapshotManifest; driftedPaths: string[] } | null;
   planModeSelectedIndex: number;
   commitData: { filePaths: string[]; message: string; repoPath: string } | null;
+  feedbackData: { runId: string; logs: string } | null;
   summarySelectedIndex: number;
   memorySelectedIndex: number;
   planReadyProposal: {
@@ -175,6 +176,7 @@ export function buildInitialState(initialValues?: {
     stagedDiffProposal: null,
     modalView: "none",
     commitData: null,
+    feedbackData: null,
     modelSettings: initialValues?.modelSettings ?? null,
     modelSelectedIndex: 0,
     effortSelectedIndex: 1,
@@ -305,6 +307,8 @@ export type StoreAction =
   | { type: "NARRATION_COMMIT" }
   | { type: "COMMIT_MODAL_OPEN"; filePaths: string[]; message: string; repoPath: string }
   | { type: "COMMIT_MODAL_CLOSE" }
+  | { type: "FEEDBACK_MODAL_OPEN"; runId: string; logs: string }
+  | { type: "FEEDBACK_MODAL_CLOSE" }
   | { type: "UNDO_MODAL_OPEN"; manifest: import("../../snapshots/snapshotStore.js").SnapshotManifest; driftedPaths: string[] }
   | { type: "UNDO_MODAL_CLOSE" }
   | { type: "AUTOCOMMIT_APPLY"; commitOnSuccess: boolean }
@@ -797,6 +801,12 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return { ...state, modalView: "commit", commitData: { filePaths: action.filePaths, message: action.message, repoPath: action.repoPath } };
 
     case "COMMIT_MODAL_CLOSE":
+      return { ...state, modalView: "none" };
+
+    case "FEEDBACK_MODAL_OPEN":
+      return { ...state, modalView: "feedback", feedbackData: { runId: action.runId, logs: action.logs } };
+
+    case "FEEDBACK_MODAL_CLOSE":
       return { ...state, modalView: "none" };
 
     case "UNDO_MODAL_OPEN":

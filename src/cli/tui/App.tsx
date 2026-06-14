@@ -23,6 +23,7 @@ import { SessionMemoryModal } from "./components/SessionMemoryModal.js";
 import { MetricsModal } from "./components/MetricsModal.js";
 import { LimitsModal } from "./components/LimitsModal.js";
 import { CommitModal } from "./components/CommitModal.js";
+import { FeedbackModal } from "./components/FeedbackModal.js";
 import { UndoModal } from "./components/UndoModal.js";
 import { HookTrustModal } from "./components/HookTrustModal.js";
 import { McpTrustModal } from "./components/McpTrustModal.js";
@@ -53,6 +54,7 @@ interface AppProps {
   initialModelSettings?: DiskModelSettings | null;
   onModelApply?: (model: string, provider: "anthropic" | "openai", effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void;
   getCommitData?: () => { filePaths: string[]; message: string; repoPath: string } | null;
+  getFeedbackData?: () => { runId: string; logs: string } | null;
   onDispatchCapture?: (dispatch: Dispatch<StoreAction>) => void;
   onSessionClear?: (oldSessionId: string) => void;
   initialUserCommands?: UserCommand[];
@@ -71,11 +73,12 @@ interface AppInnerProps {
   onStateChange: ((state: StoreState) => void) | undefined;
   onModelApply: ((model: string, provider: "anthropic" | "openai", effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void) | undefined;
   getCommitData: (() => { filePaths: string[]; message: string; repoPath: string } | null) | undefined;
+  getFeedbackData: (() => { runId: string; logs: string } | null) | undefined;
   onDispatchCapture: ((dispatch: Dispatch<StoreAction>) => void) | undefined;
   onSessionClear: ((oldSessionId: string) => void) | undefined;
 }
 
-function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, onStateChange, onModelApply, getCommitData, onDispatchCapture, onSessionClear }: AppInnerProps): React.ReactElement {
+function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, onStateChange, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear }: AppInnerProps): React.ReactElement {
   const { exit } = useApp();
   const { state, dispatch } = useStore();
   const runAcRef = useRef<AbortController | null>(null);
@@ -198,6 +201,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
       {state.modalView === "metrics" && <MetricsModal />}
       {state.modalView === "limits" && <LimitsModal />}
       {state.modalView === "commit" && <CommitModal dispatch={dispatch} />}
+      {state.modalView === "feedback" && <FeedbackModal dispatch={dispatch} />}
       {state.modalView === "undo" && state.undoModalData !== null && <UndoModal data={state.undoModalData} dispatch={dispatch} />}
       {state.pendingHookTrust !== null && (
         <HookTrustModal
@@ -263,6 +267,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
         onInitStart={(ac) => { runAcRef.current = ac; }}
         onUndoRequest={onUndoRequest}
         getCommitData={getCommitData}
+        getFeedbackData={getFeedbackData}
       />
       {state.runState === "running" && state.todos.length > 0 && (
         <PlanPanel todos={state.todos} />
@@ -272,7 +277,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
   );
 }
 
-export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, initialTrustedPrefixes, resumedSession, onStateChange, initialModelSettings, onModelApply, getCommitData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust }: AppProps): React.ReactElement {
+export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, initialTrustedPrefixes, resumedSession, onStateChange, initialModelSettings, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust }: AppProps): React.ReactElement {
   return (
     <StoreProvider initialValues={{
       model: initialModel ?? "",
@@ -290,7 +295,7 @@ export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, ini
       armedMcpManager: initialArmedMcpManager,
       pendingMcpTrust: initialPendingMcpTrust,
     }}>
-      <AppInner bus={bus} initialPrompt={initialPrompt} initialMode={initialMode} onSubmit={onSubmit} onUndoRequest={onUndoRequest} onStateChange={onStateChange} onModelApply={onModelApply} getCommitData={getCommitData} onDispatchCapture={onDispatchCapture} onSessionClear={onSessionClear} />
+      <AppInner bus={bus} initialPrompt={initialPrompt} initialMode={initialMode} onSubmit={onSubmit} onUndoRequest={onUndoRequest} onStateChange={onStateChange} onModelApply={onModelApply} getCommitData={getCommitData} getFeedbackData={getFeedbackData} onDispatchCapture={onDispatchCapture} onSessionClear={onSessionClear} />
     </StoreProvider>
   );
 }
