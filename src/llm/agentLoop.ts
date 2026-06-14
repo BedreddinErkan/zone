@@ -3827,10 +3827,79 @@ Example:
 
     const extracted = extractResponsesApiOutputText(response);
     if (extracted.ok && extracted.text.trim()) {
+      let finalAnswerText = extracted.text.trim();
+      const MAX_CONTINUATIONS = 2;
+      let continuationCount = 0;
+      let lastResponse = response;
+
+      // Auto-continue when the model hit max_tokens mid-answer.
+      // Bounded to MAX_CONTINUATIONS extra calls; gated on budget and abort signal.
+      // tokenBudgetRatio was already computed by emitStatus() above — reuse it to
+      // avoid emitting duplicate TUI budget events inside this loop.
+      while (
+        lastResponse.choices[0]?.finish_reason === "length" &&
+        continuationCount < MAX_CONTINUATIONS &&
+        !input.abortSignal?.aborted &&
+        tokenBudgetRatio < TOKEN_BUDGET_HARD
+      ) {
+        continuationCount++;
+        const continuationMsgs = [
+          ...prunedMessages,
+          { role: "assistant" as const, content: finalAnswerText },
+          {
+            role: "user" as const,
+            content: "Continue exactly where you stopped — no preamble, no repetition.",
+          },
+        ];
+        try {
+          const contResp = await client.createChatCompletion(
+            {
+              model: modelName,
+              messages: continuationMsgs,
+              // No tools — pure text continuation; prevents the model from emitting
+              // a tool call instead of finishing the prose answer.
+              tool_choice: "none",
+              max_tokens: 16384,
+            },
+            { signal: input.abortSignal, onToolArgumentsDelta, onRetryEvent, effort: requestCtx?.effort, webSearch: input.webSearchEnabled }
+          );
+          // Record continuation cost/tokens so budget.snapshot() in finalizeRun is accurate.
+          budget.recordLLMCall({
+            rawUsage: (contResp as { usage?: unknown }).usage,
+            iter: iter + 1,
+            totalIter: iterationBudget.maxIterationsForRun,
+            provider: client.provider,
+            model: contResp.model || modelName,
+            onStructuredEvent: input.onStructuredEvent,
+            tier: input.taskClassification?.tier ?? "",
+            archetype: input.taskClassification?.archetype ?? "",
+            pipelineApplied: inputIterCap !== null,
+            mode,
+            estimatedIterations: input.taskClassification?.estimatedIterations,
+            taskBlockedByBudget,
+            estimatedFiles: input.taskClassification?.estimatedFiles,
+          });
+          const contExtracted = extractResponsesApiOutputText(contResp);
+          if (contExtracted.ok && contExtracted.text.trim()) {
+            finalAnswerText += contExtracted.text.trim();
+            lastResponse = contResp;
+          } else {
+            break;
+          }
+        } catch {
+          break;
+        }
+      }
+
+      if (lastResponse.choices[0]?.finish_reason === "length") {
+        finalAnswerText +=
+          "\n\n⚠️ Output truncated at the token limit — say 'continue' for the rest.";
+      }
+
       stagingFinalized = true;
       return await finalizeRun({
         trigger: "natural_completion",
-        finalText: extracted.text.trim(),
+        finalText: finalAnswerText,
         isReadOnlyMode,
         toolCallLog,
         filesModified,

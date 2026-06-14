@@ -30,6 +30,10 @@ export function scriptToolCall(
 
 export const scriptDone = (text = "Done.", usage = U()) => scriptText(text, usage);
 
+export function scriptTruncated(content: string, usage = U()) {
+  return { choices: [{ message: { content, tool_calls: null }, finish_reason: "length" }], usage };
+}
+
 export function scriptRefusal(
   refusal = "Request declined by safety classifier.",
   usage = U()
