@@ -318,6 +318,54 @@ describe("checkCommandSafe", () => {
     });
   });
 
+  describe("Issue 2: new git read-only subcommands", () => {
+    it.each([
+      "git ls-files",
+      "git ls-files -m",
+      "git ls-files --cached src/",
+      "git grep TODO",
+      "git grep -n 'pattern' src/",
+      "git grep -l fixme",
+      "git cat-file -p HEAD",
+      "git cat-file -t HEAD",
+      "git rev-list HEAD",
+      "git rev-list --count HEAD",
+      "git describe --tags",
+      "git describe --always",
+      "git shortlog -s",
+      "git shortlog -sn HEAD",
+      "git ls-tree HEAD",
+      "git ls-tree -r HEAD src/",
+    ])("allows git read: %s", (cmd) => {
+      expect(checkCommandSafe(cmd).safe).toBe(true);
+    });
+  });
+
+  describe("Issue 2: git injection vector blacklist", () => {
+    it.each([
+      // -c executes arbitrary config like diff.external
+      "git -c diff.external=touch\\ pwned status",
+      "git -c core.pager=id log",
+      // --exec-path loads executables from arbitrary path
+      "git ls-files --exec-path=/tmp/evil",
+      "git log --exec-path=malicious",
+      // --upload-pack runs arbitrary program on network
+      "git log --upload-pack=evil",
+      "git ls-files --upload-pack=exploit",
+      // --ext-diff enables external diff driver → command execution
+      "git diff --ext-diff",
+      "git log --ext-diff",
+      // --output= writes diff to a file instead of stdout
+      "git diff --output=out.patch",
+      "git diff HEAD --output=/tmp/diff.txt",
+      // git config is not in the whitelist — blocked by prefix check
+      "git config user.email foo@bar.com",
+      "git config --global user.name Attacker",
+    ])("blocks injection vector: %s", (cmd) => {
+      expect(checkCommandSafe(cmd).safe).toBe(false);
+    });
+  });
+
   describe("edge cases", () => {
     it("blocks empty command", () => {
       const result = checkCommandSafe("");

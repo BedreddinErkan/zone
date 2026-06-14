@@ -29,6 +29,13 @@ const WHITELIST_PREFIXES = [
   "git branch",
   "git blame",
   "git rev-parse",
+  "git ls-files",
+  "git grep",
+  "git cat-file",
+  "git rev-list",
+  "git describe",
+  "git shortlog",
+  "git ls-tree",
   // Read filesystem
   "ls",
   "cat",
@@ -65,6 +72,17 @@ const BLACKLIST_PATTERNS: RegExp[] = [
   /\bpnpm\s+(add|remove|install|update)\b/,
   /\bpip\s+install\b/,
   /\bcargo\s+install\b/,
+  // Git injection vectors: block before the git-read whitelist can fire.
+  // -c key=val: arbitrary command execution via diff.external, core.pager, etc.
+  /\bgit\s+-c\s/,
+  // --exec-path=: loads executables from an arbitrary path
+  /\bgit\b.*\s--exec-path=/,
+  // --upload-pack: network-facing, runs an arbitrary program
+  /\bgit\b.*\s--upload-pack\b/,
+  // --ext-diff: external diff driver → arbitrary command execution
+  /\bgit\b.*\s--ext-diff\b/,
+  // git diff --output=: writes the diff to a file instead of stdout
+  /\bgit\s+diff\b.*\s--output=/,
   // Git mutations
   /\bgit\s+(push|pull|fetch|commit|merge|rebase|reset\s+--hard|checkout\s+-\s)/,
   // Git branch mutations (prefix "git branch" is in the whitelist, so block destructive flags explicitly)
