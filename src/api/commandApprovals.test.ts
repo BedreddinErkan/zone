@@ -26,6 +26,8 @@ describe("isSafeCommand", () => {
     expect(isSafeCommand("npm run build")).toBe(true);
     expect(isSafeCommand("git diff HEAD~1")).toBe(true);
     expect(isSafeCommand("tsc --noEmit -p tsconfig.json")).toBe(true);
+    expect(isSafeCommand("pnpm test --reporter=verbose")).toBe(true);
+    expect(isSafeCommand("pnpm run build --no-frozen-lockfile")).toBe(true);
   });
 
   it("returns false for shell chains/pipes/file-redirects/subshell", () => {
@@ -73,11 +75,23 @@ describe("getSafeCommandCategory", () => {
   it("returns build for build commands", () => {
     expect(getSafeCommandCategory("npm run build")).toBe("build");
     expect(getSafeCommandCategory("tsc --noEmit -p tsconfig.json")).toBe("build");
+    expect(getSafeCommandCategory("pnpm build")).toBe("build");
+    expect(getSafeCommandCategory("pnpm run build")).toBe("build");
+    expect(getSafeCommandCategory("pnpm build --filter=pkg")).toBe("build");
   });
 
   it("returns test for test commands", () => {
     expect(getSafeCommandCategory("npm test")).toBe("test");
     expect(getSafeCommandCategory("yarn test --watch=false")).toBe("test");
+    expect(getSafeCommandCategory("pnpm test")).toBe("test");
+    expect(getSafeCommandCategory("pnpm run test")).toBe("test");
+    expect(getSafeCommandCategory("pnpm test --reporter=verbose")).toBe("test");
+  });
+
+  it("returns null for pnpm commands outside build/test allowlist", () => {
+    expect(getSafeCommandCategory("pnpm install")).toBeNull();
+    expect(getSafeCommandCategory("pnpm dlx x")).toBeNull();
+    expect(getSafeCommandCategory("pnpm add react")).toBeNull();
   });
 
   it("returns readonly for readonly commands", () => {

@@ -98,11 +98,15 @@ export const SAFE_COMMAND_PREFIXES = {
     "yarn build",
     "tsc --noEmit",
     "tsc -p",
+    "pnpm build",
+    "pnpm run build",
   ],
   test: [
     "npm run test",
     "npm test",
     "yarn test",
+    "pnpm test",
+    "pnpm run test",
   ],
   readonly: [
     "ls", "cat", "find", "grep", "head", "tail", "wc",
