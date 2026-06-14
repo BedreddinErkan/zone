@@ -8,7 +8,11 @@ const CACHE_MARKERS = new Set([
 ]);
 
 const _createdDirs = new Set<string>();
-const _pendingWrites = new Set<Promise<void>>();
+// Serializes appends so log lines land in call order. Two un-awaited
+// fs.promises.appendFile calls race on the libuv threadpool (O_APPEND keeps each
+// line atomic but does not order the writes), which made line order
+// non-deterministic under load. Chaining onto a single tail promise fixes it.
+let _writeChain: Promise<void> = Promise.resolve();
 
 function ensureLogsDir(logsDir: string): void {
   if (!_createdDirs.has(logsDir)) {
@@ -24,8 +28,8 @@ function todayDate(): string {
 /**
  * Append one JSONL line for the given cache marker to
  * {repoPath}/.zone/logs/command-cache-{YYYY-MM-DD}.jsonl.
- * Fire-and-forget — callers must not await the return value.
- * Silently drops writes for unknown markers.
+ * Fire-and-forget — callers must not await the return value. Appends are
+ * serialized in call order via _writeChain. Silently drops unknown markers.
  */
 export function writeCacheLog(
   repoPath: string,
@@ -42,22 +46,18 @@ export function writeCacheLog(
     JSON.stringify({ timestamp: new Date().toISOString(), marker, payload }) +
     "\n";
 
-  let p!: Promise<void>;
-  p = fs.promises
-    .appendFile(filePath, line)
-    .catch(() => {})
-    .finally(() => {
-      _pendingWrites.delete(p);
-    });
-  _pendingWrites.add(p);
+  _writeChain = _writeChain
+    .then(() => fs.promises.appendFile(filePath, line))
+    .catch(() => {}); // per-link: one failed write can't break the chain
 }
 
 /** Waits for all in-flight file writes. For test use only. */
 export async function flushCommandCacheLogForTest(): Promise<void> {
-  await Promise.allSettled([..._pendingWrites]);
+  await _writeChain;
 }
 
 /** Resets module state. For test use only. */
 export function clearCommandCacheLogForTest(): void {
   _createdDirs.clear();
+  _writeChain = Promise.resolve();
 }
