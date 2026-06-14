@@ -21,7 +21,7 @@ Subscription agents (Cursor, Codex, Claude Code) hide your usage behind rate lim
 ```bash
 # 1 — clone & build
 git clone https://github.com/BedreddinErkan/zone && cd zone
-npm install && npm run build
+npm install && npm run build && npm link
 
 # 2 — add your API key
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY
