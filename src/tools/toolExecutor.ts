@@ -518,7 +518,18 @@ function stripReadFilePrefix(find: string): string {
 // Module-level cache for ripgrep detection (undefined = not yet checked)
 let _rgPath: string | null | undefined;
 
+// Test override: when set, detectRipgrep returns this value directly.
+let _ripgrepOverrideForTest: string | null | undefined;
+
+/** Override the ripgrep probe result in tests. Pass undefined to restore real probe. */
+export function _setRipgrepAvailableForTest(
+  path: string | null | undefined
+): void {
+  _ripgrepOverrideForTest = path;
+}
+
 async function detectRipgrep(): Promise<string | null> {
+  if (_ripgrepOverrideForTest !== undefined) return _ripgrepOverrideForTest;
   if (_rgPath !== undefined) return _rgPath;
   try {
     const { stdout } = await execAsync("which rg");
@@ -2642,17 +2653,28 @@ export async function executeTool(
         };
       }
 
+      // Preserve CRLF for existing files: if the on-disk file uses CRLF line endings,
+      // re-encode the new content to match — prevents a spurious whole-file diff.
+      // Normalize to LF first so any \r\n already in `content` doesn't double into \r\r\n.
+      let contentToWrite = content;
+      if (fileExists) {
+        const eolAnalysis = analyzeLineEnding(originalContent);
+        if (eolAnalysis.dominant === "crlf") {
+          contentToWrite = content.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
+        }
+      }
+
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       if (!fileExists) {
         // New file: write directly to disk — immediately visible to list_files and
         // survives any abort. No prior content to protect; staging adds only loss-risk.
-        fs.writeFileSync(abs, content, "utf8");
+        fs.writeFileSync(abs, contentToWrite, "utf8");
       } else {
-        const wr = stagedWrite(input?.stagingFiles, abs, content, repoPath);
+        const wr = stagedWrite(input?.stagingFiles, abs, contentToWrite, repoPath);
         if (wr === "escape") {
           return { success: false, output: `write_file_blocked_path_escape: "${filePath}" would escape repo` };
         }
-        if (!wr) fs.writeFileSync(abs, content, "utf8");
+        if (!wr) fs.writeFileSync(abs, contentToWrite, "utf8");
       }
 
       const validation = validateSyntax(content, abs);
