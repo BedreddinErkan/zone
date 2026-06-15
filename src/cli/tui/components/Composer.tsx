@@ -143,6 +143,16 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
 
   const [buffer, setBuffer] = useState("");
   const [cursorPos, setCursorPos] = useState(0);
+  // Refs mirror buffer/cursorPos so same-tick event handlers (e.g. usePaste then useInput Enter
+  // in a single stdin chunk) always read the live value, not the stale closure from last render.
+  const bufferRef = useRef("");
+  const cursorRef = useRef(0);
+  function applyBuf(next: string, pos: number): void {
+    bufferRef.current = next;
+    cursorRef.current = pos;
+    setBuffer(next);
+    setCursorPos(pos);
+  }
   const [history, setHistory] = useState<string[]>([]);
   const [historyIdx, setHistoryIdx] = useState(-1);   // -1 = live input
   const [paletteIdx, setPaletteIdx] = useState(0);
@@ -172,8 +182,7 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
   );
 
   function executeSlashCommand(name: string, argsText: string = ""): void {
-    setBuffer("");
-    setCursorPos(0);
+    applyBuf("", 0);
     setHistoryIdx(-1);
     setPaletteIdx(0);
 
@@ -404,6 +413,8 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
     }
 
     dispatch({ type: "USER_PROMPT", text: agentText });
+    bufferRef.current = "";
+    cursorRef.current = 0;
     setBuffer("");
     setStagedImages([]);
     setCursorPos(0);
@@ -434,8 +445,7 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
         const selected = atFiles[atIdx];
         if (selected) {
           lastAtSelectedPath.current = selected;
-          setBuffer(selected);
-          setCursorPos(selected.length);
+          applyBuf(selected, selected.length);
         }
         setAtFiles([]);
         return;
@@ -459,26 +469,25 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
         return;
       }
       if (key.escape) {
-        setBuffer("");
-        setCursorPos(0);
+        applyBuf("", 0);
         setPaletteIdx(0);
         return;
       }
     }
-    if (key.return && allCommands.some((c) => c.name === buffer)) {
-      executeSlashCommand(buffer);
+    if (key.return && allCommands.some((c) => c.name === bufferRef.current)) {
+      executeSlashCommand(bufferRef.current);
       return;
     }
     if (key.return) {
-      const spaceIdx = buffer.indexOf(" ");
+      const spaceIdx = bufferRef.current.indexOf(" ");
       if (spaceIdx !== -1) {
-        const commandToken = buffer.slice(0, spaceIdx);
+        const commandToken = bufferRef.current.slice(0, spaceIdx);
         if (commandToken === "/image") {
-          executeSlashCommand("/image", buffer.slice(spaceIdx + 1).trim());
+          executeSlashCommand("/image", bufferRef.current.slice(spaceIdx + 1).trim());
           return;
         }
         if (projectCommands.some(uc => uc.name === commandToken)) {
-          executeSlashCommand(commandToken, buffer.slice(spaceIdx + 1).trim());
+          executeSlashCommand(commandToken, bufferRef.current.slice(spaceIdx + 1).trim());
           return;
         }
       }
@@ -487,25 +496,22 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
     // ── During a run: only slash-buffer editing allowed ──
     if (disabled) {
       if (key.escape) {
-        setBuffer("");
-        setCursorPos(0);
+        applyBuf("", 0);
         setHistoryIdx(-1);
         return;
       }
       if (key.backspace || key.delete) {
-        if (cursorPos > 0) {
-          const newBuf = buffer.slice(0, cursorPos - 1) + buffer.slice(cursorPos);
-          setBuffer(newBuf);
-          setCursorPos(cursorPos - 1);
+        if (cursorRef.current > 0) {
+          const newBuf = bufferRef.current.slice(0, cursorRef.current - 1) + bufferRef.current.slice(cursorRef.current);
+          applyBuf(newBuf, cursorRef.current - 1);
           setHistoryIdx(-1);
         }
         return;
       }
       if (input && !key.ctrl && !key.meta && input.charCodeAt(0) >= 32) {
-        if (buffer === "" || buffer.startsWith("/")) {
-          const newBuf = buffer.slice(0, cursorPos) + input + buffer.slice(cursorPos);
-          setBuffer(newBuf);
-          setCursorPos(cursorPos + input.length);
+        if (bufferRef.current === "" || bufferRef.current.startsWith("/")) {
+          const newBuf = bufferRef.current.slice(0, cursorRef.current) + input + bufferRef.current.slice(cursorRef.current);
+          applyBuf(newBuf, cursorRef.current + input.length);
           setHistoryIdx(-1);
           if (paletteOpen) setPaletteIdx(0);
         }
@@ -516,49 +522,52 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
     // ── Full input path (only when not running) ──
     if (key.return) {
       // Multiline: trailing backslash → insert newline
-      if (buffer.endsWith("\\")) {
-        const newBuf = buffer.slice(0, -1) + "\n";
-        setBuffer(newBuf);
-        setCursorPos(newBuf.length);
+      if (bufferRef.current.endsWith("\\")) {
+        const newBuf = bufferRef.current.slice(0, -1) + "\n";
+        applyBuf(newBuf, newBuf.length);
         return;
       }
-      void submitBuffer(buffer);
+      void submitBuffer(bufferRef.current);
       return;
     }
 
     if (key.escape) {
-      if (buffer) {
-        setBuffer("");
-        setCursorPos(0);
+      if (bufferRef.current) {
+        applyBuf("", 0);
         setHistoryIdx(-1);
       }
       return;
     }
 
     if (key.backspace || key.delete) {
-      if (cursorPos > 0) {
-        const newBuf = buffer.slice(0, cursorPos - 1) + buffer.slice(cursorPos);
-        setBuffer(newBuf);
-        setCursorPos(cursorPos - 1);
+      if (cursorRef.current > 0) {
+        const newBuf = bufferRef.current.slice(0, cursorRef.current - 1) + bufferRef.current.slice(cursorRef.current);
+        applyBuf(newBuf, cursorRef.current - 1);
         setHistoryIdx(-1);
       }
       return;
     }
 
     if (key.leftArrow) {
-      setCursorPos((p) => Math.max(0, p - 1));
+      const p = Math.max(0, cursorRef.current - 1);
+      cursorRef.current = p;
+      setCursorPos(p);
       return;
     }
     if (key.rightArrow) {
-      setCursorPos((p) => Math.min(buffer.length, p + 1));
+      const p = Math.min(bufferRef.current.length, cursorRef.current + 1);
+      cursorRef.current = p;
+      setCursorPos(p);
       return;
     }
     if (key.home) {
+      cursorRef.current = 0;
       setCursorPos(0);
       return;
     }
     if (key.end) {
-      setCursorPos(buffer.length);
+      cursorRef.current = bufferRef.current.length;
+      setCursorPos(bufferRef.current.length);
       return;
     }
 
@@ -567,8 +576,7 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
       const nextIdx = historyIdx + 1;
       if (nextIdx < history.length) {
         const entry = history[nextIdx];
-        setBuffer(entry);
-        setCursorPos(entry.length);
+        applyBuf(entry, entry.length);
         setHistoryIdx(nextIdx);
       }
       return;
@@ -577,12 +585,10 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
       if (historyIdx > 0) {
         const nextIdx = historyIdx - 1;
         const entry = history[nextIdx];
-        setBuffer(entry);
-        setCursorPos(entry.length);
+        applyBuf(entry, entry.length);
         setHistoryIdx(nextIdx);
       } else if (historyIdx === 0) {
-        setBuffer("");
-        setCursorPos(0);
+        applyBuf("", 0);
         setHistoryIdx(-1);
       }
       return;
@@ -593,18 +599,18 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
     if (input && !key.ctrl && !key.meta && input.charCodeAt(0) >= 32) {
       const cleaned = input.replace(PUA_STRIP_RE, "");
       if (cleaned) {
-        const newBuf = buffer.slice(0, cursorPos) + cleaned + buffer.slice(cursorPos);
-        setBuffer(newBuf);
-        setCursorPos(cursorPos + cleaned.length);
+        const newBuf = bufferRef.current.slice(0, cursorRef.current) + cleaned + bufferRef.current.slice(cursorRef.current);
+        applyBuf(newBuf, cursorRef.current + cleaned.length);
         setHistoryIdx(-1);
         if (paletteOpen) setPaletteIdx(0);
       }
     }
   });
 
-  usePaste((text) => {
+  usePaste((rawText) => {
+    const text = rawText.replace(/\r\n?/g, "\n");
     if (state.pendingApproval !== null || state.modalView !== "none") return;
-    if (disabled && !(buffer.startsWith("/") || (!buffer && text.startsWith("/")))) return;
+    if (disabled && !(bufferRef.current.startsWith("/") || (!bufferRef.current && text.startsWith("/")))) return;
 
     const lines = text.split("\n").length;
     const bytes = Buffer.byteLength(text);
@@ -614,14 +620,12 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
       pasteCounterRef.current = num + 1;
       const sentinel = String.fromCharCode(PUA_BASE + num - 1);
       sideMapRef.current.set(sentinel, { num, fullText: text, lines });
-      const newBuf = buffer.slice(0, cursorPos) + sentinel + buffer.slice(cursorPos);
-      setBuffer(newBuf);
-      setCursorPos(cursorPos + 1);
+      const newBuf = bufferRef.current.slice(0, cursorRef.current) + sentinel + bufferRef.current.slice(cursorRef.current);
+      applyBuf(newBuf, cursorRef.current + 1);
     } else {
       const cleaned = text.replace(PUA_STRIP_RE, "");
-      const newBuf = buffer.slice(0, cursorPos) + cleaned + buffer.slice(cursorPos);
-      setBuffer(newBuf);
-      setCursorPos(cursorPos + cleaned.length);
+      const newBuf = bufferRef.current.slice(0, cursorRef.current) + cleaned + bufferRef.current.slice(cursorRef.current);
+      applyBuf(newBuf, cursorRef.current + cleaned.length);
     }
     setHistoryIdx(-1);
   }, { isActive: true });

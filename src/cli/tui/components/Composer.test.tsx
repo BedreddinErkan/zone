@@ -242,6 +242,79 @@ describe("Composer — submitBuffer dispatch routing (T3)", () => {
 
     unmount();
   });
+
+  it("same-chunk paste+CR: onSubmit fires with full paste text (regression for paste+Enter race)", async () => {
+    const mockOnSubmit = vi.fn();
+    const SIX_LINES = "line1\nline2\nline3\nline4\nline5\nline6";
+
+    const { stdin, unmount } = render(
+      <StoreProvider initialValues={{ model: "test-model", capUsd: 10 }}>
+        <Composer onSubmit={mockOnSubmit} onExit={() => {}} />
+        <DispatchLogger />
+      </StoreProvider>
+    );
+
+    // Single stdin.write: bracketed-paste end marker + CR in same chunk — the bug scenario
+    stdin.write(`\x1b[200~${SIX_LINES}\x1b[201~\r`);
+    await wait(50);
+
+    expect(mockOnSubmit).toHaveBeenCalledOnce();
+    expect(mockOnSubmit.mock.calls[0][0]).toContain(SIX_LINES);
+
+    unmount();
+  });
+
+  it("typed prefix then same-chunk paste+CR: onSubmit gets prefix + full paste", async () => {
+    const mockOnSubmit = vi.fn();
+    const SIX_LINES = "line1\nline2\nline3\nline4\nline5\nline6";
+
+    const { stdin, unmount } = render(
+      <StoreProvider initialValues={{ model: "test-model", capUsd: 10 }}>
+        <Composer onSubmit={mockOnSubmit} onExit={() => {}} />
+        <DispatchLogger />
+      </StoreProvider>
+    );
+
+    // Type a short prefix (below paste threshold — inlines directly into buffer)
+    stdin.write("prefix ");
+    await wait(50);
+
+    // Single write: paste + CR in same chunk
+    stdin.write(`\x1b[200~${SIX_LINES}\x1b[201~\r`);
+    await wait(50);
+
+    expect(mockOnSubmit).toHaveBeenCalledOnce();
+    const submitted = mockOnSubmit.mock.calls[0][0] as string;
+    expect(submitted).toContain("prefix");
+    expect(submitted).toContain(SIX_LINES);
+
+    unmount();
+  });
+
+  it("CRLF in pasted content is normalized to LF before onSubmit", async () => {
+    const mockOnSubmit = vi.fn();
+    const CRLF_LINES = "line1\r\nline2\r\nline3\r\nline4\r\nline5\r\nline6";
+
+    const { stdin, unmount } = render(
+      <StoreProvider initialValues={{ model: "test-model", capUsd: 10 }}>
+        <Composer onSubmit={mockOnSubmit} onExit={() => {}} />
+        <DispatchLogger />
+      </StoreProvider>
+    );
+
+    stdin.write(`\x1b[200~${CRLF_LINES}\x1b[201~`);
+    await wait(50);
+
+    stdin.write("\r");
+    await wait(50);
+
+    expect(mockOnSubmit).toHaveBeenCalledOnce();
+    const received = mockOnSubmit.mock.calls[0][0] as string;
+    expect(received).not.toContain("\r");
+    expect(received).toContain("line1\nline2\nline3\nline4\nline5\nline6");
+
+    unmount();
+  });
 });
 
 // ─── @ file injection — wiring (T-AT) ──────────────────────────────────────
