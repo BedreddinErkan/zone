@@ -7,12 +7,17 @@
   "bin": {
     "zone": "./dist/cli/index.js"
   },
-  "exports": {
-    "./flow": "./dist/core/runLlmPatchFlow.js",
-    "./agent": "./dist/llm/agentLoop.js",
-    "./openai": "./dist/llm/openaiClient.js",
-    "./approvals": "./dist/api/commandApprovals.js"
-  },
+ "exports": {
+  "./flow":       { "types": "./src/core/runLlmPatchFlow.ts",         "default": "./dist/core/runLlmPatchFlow.js" },
+  "./agent":      { "types": "./src/llm/agentLoop.ts",                "default": "./dist/llm/agentLoop.js" },
+  "./openai":     { "types": "./src/llm/openaiClient.ts",             "default": "./dist/llm/openaiClient.js" },
+  "./approvals":  { "types": "./src/api/commandApprovals.ts",         "default": "./dist/api/commandApprovals.js" },
+  "./store-core": { "types": "./src/cli/tui/store-core.ts",           "default": "./dist/cli/tui/store-core.js" },
+  "./events":     { "types": "./src/cli/tui/hooks/eventToActions.ts", "default": "./dist/cli/tui/hooks/eventToActions.js" },
+  "./lifecycle":  { "types": "./src/core/agentLifecycleEvents.ts",    "default": "./dist/core/agentLifecycleEvents.js" },
+  "./config":     { "types": "./src/cli/config.ts",                   "default": "./dist/cli/config.js" },
+  "./dispatch":   { "types": "./src/cli/dispatch.ts",                 "default": "./dist/cli/dispatch.js" }
+},
   "scripts": {
     "build": "node node_modules/typescript/bin/tsc -p tsconfig.json",
     "postbuild": "chmod +x dist/cli/index.js",
