@@ -1,162 +1,118 @@
 import { useEffect, useRef, type Dispatch, type MutableRefObject, type RefObject } from "react";
-import { randomUUID } from "node:crypto";
 import type { EventBus } from "../../eventBus.js";
 import type { StoreAction, TuiMode } from "../store.js";
 import type { ZoneStructuredProgressEvent } from "../../../core/agentLifecycleEvents.js";
 import { resolveCommandApproval } from "../../../api/commandApprovals.js";
-import { resolveTrustApproval } from "../../../api/trustApprovals.js";
 import { resolveRevisionApproval } from "../../../llm/revisionApprovals.js";
-import { buildLoopCompleteSummary, buildRunSummary } from "../../../core/eventProcessors.js";
-// buildLoopCompleteSummary / buildRunSummary kept for future telemetry; run text no longer stored in transcript
 import { formatCompactionNarration } from "../../../core/compactionNarration.js";
 // re-exported so existing callers importing it from this module continue to work
 export { formatCompactionNarration };
-import type { RunTodo, TodoStatus } from "../../../core/todoLifecycle.js";
-import type { StagedFile } from "../../../core/fileDiff.js";
+import {
+  eventToActions,
+  type EventCtx,
+  type ResolverIntent,
+  SPINNER_LABEL_STARTING,
+  SPINNER_LABEL_PLANNING,
+} from "./eventToActions.js";
+export { SPINNER_LABEL_STARTING, SPINNER_LABEL_PLANNING };
 
-export const SPINNER_LABEL_STARTING = "Starting…";
-export const SPINNER_LABEL_PLANNING = "Planning…";
+// ---------------------------------------------------------------------------
+// Exported handler functions (tested directly; thin wrappers over eventToActions)
+// ---------------------------------------------------------------------------
 
 export function handleCompactionStarted(
-  _evt: ZoneStructuredProgressEvent,
+  evt: ZoneStructuredProgressEvent,
   dispatch: Dispatch<StoreAction>
 ): void {
-  dispatch({ type: "SPINNER_UPDATE", label: "Compacting context…" });
+  const { actions } = eventToActions(evt, { trustedPrefixes: [], mode: "normal" });
+  for (const action of actions) dispatch(action);
 }
 
 export function handleCompactionStatus(
   evt: ZoneStructuredProgressEvent,
   dispatch: Dispatch<StoreAction>
 ): void {
-  dispatch({ type: "SPINNER_STOP" });
-  const text = formatCompactionNarration({
-    tokensBefore: evt.tokensBefore ?? 0,
-    tokensAfter: evt.tokensAfter ?? 0,
-    savedTokens: evt.savedTokens ?? 0,
-    count: evt.count ?? 0,
-  });
-  dispatch({ type: "TRANSCRIPT_APPEND_NARRATION", text });
-  dispatch({ type: "NARRATION_COMMIT" });
+  const { actions } = eventToActions(evt, { trustedPrefixes: [], mode: "normal" });
+  for (const action of actions) dispatch(action);
 }
 
 export function handleCompactionExhausted(
   evt: ZoneStructuredProgressEvent,
   dispatch: Dispatch<StoreAction>
 ): void {
-  dispatch({ type: "SPINNER_STOP" });
-  dispatch({
-    type: "TOAST_PUSH",
-    entry: {
-      id: randomUUID(),
-      message: evt.message ?? "Context exhausted. Break this task into subtasks.",
-      level: "warning",
-    },
-  });
+  const { actions } = eventToActions(evt, { trustedPrefixes: [], mode: "normal" });
+  for (const action of actions) dispatch(action);
 }
 
 export function handleCompactionOverflow(
   _evt: unknown,
   dispatch: Dispatch<StoreAction>
 ): void {
-  dispatch({ type: "SPINNER_STOP" });
-  dispatch({
-    type: "TOAST_PUSH",
-    entry: {
-      id: randomUUID(),
-      message: "Context window full — no history to compact",
-      level: "warning",
-    },
-  });
+  // _evt content is irrelevant — synthesize the type so eventToActions hits the right case
+  const typed = { type: "compaction_overflow_warning" } as ZoneStructuredProgressEvent;
+  const { actions } = eventToActions(typed, { trustedPrefixes: [], mode: "normal" });
+  for (const action of actions) dispatch(action);
 }
 
 export function handleTodosInitialized(
   evt: ZoneStructuredProgressEvent,
   dispatch: Dispatch<StoreAction>
 ): void {
-  dispatch({ type: "TODOS_SET", todos: (evt.todos as RunTodo[]) ?? [] });
+  const { actions } = eventToActions(evt, { trustedPrefixes: [], mode: "normal" });
+  for (const action of actions) dispatch(action);
 }
 
 export function handleTodoRevised(
   evt: ZoneStructuredProgressEvent,
   dispatch: Dispatch<StoreAction>
 ): void {
-  dispatch({ type: "TODOS_SET", todos: (evt.todos as RunTodo[]) ?? [] });
+  const { actions } = eventToActions(evt, { trustedPrefixes: [], mode: "normal" });
+  for (const action of actions) dispatch(action);
 }
 
 export function handleTodoStatusChanged(
   evt: ZoneStructuredProgressEvent,
   dispatch: Dispatch<StoreAction>
 ): void {
-  if (!evt.todoId) return;
-  dispatch({
-    type: "TODO_STATUS_SET",
-    todoId: evt.todoId,
-    status: evt.todoStatus as TodoStatus,
-  });
+  const { actions } = eventToActions(evt, { trustedPrefixes: [], mode: "normal" });
+  for (const action of actions) dispatch(action);
 }
 
 export function handleEditApproval(
   evt: ZoneStructuredProgressEvent,
   dispatch: Dispatch<StoreAction>
 ): void {
-  const filePath = evt.filePath ?? (evt as any).command ?? "";
-  const approvalId = evt.approvalId ?? "";
-  if (!approvalId) return;
-  dispatch({
-    type: "PENDING_APPROVAL_SET",
-    approvalId,
-    runId: evt.runId ?? "",
-    command: filePath,
-    kind: "edit",
-  });
+  const { actions } = eventToActions(evt, { trustedPrefixes: [], mode: "normal" });
+  for (const action of actions) dispatch(action);
 }
 
 export function handlePlanGenerationStarted(
   evt: ZoneStructuredProgressEvent,
   dispatch: Dispatch<StoreAction>
 ): void {
-  dispatch({ type: "SPINNER_START", label: evt.title ?? SPINNER_LABEL_PLANNING });
+  const { actions } = eventToActions(evt, { trustedPrefixes: [], mode: "normal" });
+  for (const action of actions) dispatch(action);
 }
 
 export function handlePlanReadyForApprovalExported(
   evt: ZoneStructuredProgressEvent,
   dispatch: Dispatch<StoreAction>
 ): void {
-  if (!evt.planId) return;
-  let steps: Array<{ title: string; description: string; filesLikely: string[] }> = [];
-  try {
-    if (evt.planStepsJson) steps = JSON.parse(evt.planStepsJson);
-  } catch { /* malformed JSON — render with empty steps */ }
-  dispatch({ type: "SPINNER_STOP" });
-  dispatch({
-    type: "PLAN_READY_PROPOSED",
-    planId: evt.planId,
-    runId: evt.runId,
-    objective: evt.planObjective ?? "",
-    steps,
-    scopeNotes: evt.planScopeNotes,
-  });
+  const { actions } = eventToActions(evt, { trustedPrefixes: [], mode: "normal" });
+  for (const action of actions) dispatch(action);
 }
 
 export function handleStagedDiffsReadyExported(
   evt: ZoneStructuredProgressEvent,
   dispatch: Dispatch<StoreAction>
 ): void {
-  if (!evt.approvalId) return;
-  let files: StagedFile[] = [];
-  try {
-    if (evt.stagedFilesJson) files = JSON.parse(evt.stagedFilesJson);
-  } catch { /* malformed JSON — render with empty files */ }
-  dispatch({ type: "SPINNER_STOP" });
-  dispatch({
-    type: "STAGED_DIFFS_PROPOSED",
-    approvalId: evt.approvalId,
-    runId: evt.runId ?? "",
-    files,
-    verificationSummary: evt.stagedVerificationSummary ?? "",
-    trigger: evt.stagedTrigger ?? "natural_completion",
-  });
+  const { actions } = eventToActions(evt, { trustedPrefixes: [], mode: "normal" });
+  for (const action of actions) dispatch(action);
 }
+
+// ---------------------------------------------------------------------------
+// flushBuffer — stateful utility; stays here because it owns the refs
+// ---------------------------------------------------------------------------
 
 function flushBuffer(
   localBuffer: MutableRefObject<string>,
@@ -173,6 +129,10 @@ function flushBuffer(
   }
 }
 
+// ---------------------------------------------------------------------------
+// useAgentEvents hook
+// ---------------------------------------------------------------------------
+
 export function useAgentEvents(
   bus: EventBus | undefined,
   dispatch: Dispatch<StoreAction>,
@@ -185,6 +145,7 @@ export function useAgentEvents(
   useEffect(() => {
     if (!bus) return;
 
+    // Narration text: debounced — NOT handled by eventToActions
     function handleTextEvent(evt: ZoneStructuredProgressEvent): void {
       const text = evt.text ?? evt.delta ?? evt.title ?? "";
       if (!text) return;
@@ -197,324 +158,150 @@ export function useAgentEvents(
       }, 200);
     }
 
-    function handleThinkingEvent(evt: ZoneStructuredProgressEvent): void {
-      const text = evt.text ?? evt.title ?? "";
-      if (!text) return;
-      dispatch({ type: "TRANSCRIPT_ADD_THINKING", text });
-    }
+    const ctx = (): EventCtx => ({
+      trustedPrefixes: trustedPrefixesRef.current ?? [],
+      mode: modeRef.current ?? "normal",
+    });
 
-    function handleAgentLoopStart(_evt: ZoneStructuredProgressEvent): void {
-      dispatch({ type: "SPINNER_START", label: SPINNER_LABEL_STARTING });
-    }
+    const applyActions = (actions: StoreAction[]) => { for (const a of actions) dispatch(a); };
 
-    function handleAgentLoopComplete(evt: ZoneStructuredProgressEvent): void {
-      flushBuffer(localBuffer, debounceTimer, dispatch);
-      dispatch({ type: "NARRATION_COMMIT" });
-      // Update iter/cost to final values if provided, then mark run done
-      const iterCount = evt.iter_count ?? evt.iter ?? 0;
-      const cost = evt.cumulativeCost ?? 0;
-      void buildLoopCompleteSummary; // retain import for future use
-      if (iterCount > 0) dispatch({ type: "STATUS_UPDATE", iter: iterCount, costUsd: cost });
-      const detail = (evt as { detail?: string }).detail ?? "";
-      if (detail.trim()) dispatch({ type: "ASSISTANT_FINAL", text: detail.trim() });
-      dispatch({ type: "RUN_DONE" });
-    }
-
-    function handleRunSummary(evt: ZoneStructuredProgressEvent): void {
-      flushBuffer(localBuffer, debounceTimer, dispatch);
-      dispatch({ type: "NARRATION_COMMIT" });
-      void buildRunSummary; // retain import for future use
-      if (evt.cost) dispatch({ type: "STATUS_UPDATE", costUsd: evt.cost.totalUsd });
-      dispatch({ type: "RUN_DONE" });
-    }
-
-    function handleToolCall(evt: ZoneStructuredProgressEvent): void {
-      const title = evt.title ?? "";
-      // Skip spurious progress strings (e.g. "[agent_loop] Iteration N/24"):
-      // real tool calls either carry toolName or have a "[tool]"-prefixed title
-      if (!evt.toolName && !title.startsWith("[tool]")) return;
-      flushBuffer(localBuffer, debounceTimer, dispatch);
-      dispatch({ type: "NARRATION_COMMIT" });
-      // onToolCall embeds tool name and args in title as "[tool] name: cmd".
-      // Parse it so Transcript renders "read_file  src/foo.ts  ✓" not "[tool] read_file: src/foo.ts  ✓".
-      let toolName = evt.toolName ?? title;
-      let args = evt.detail ?? "";
-      if (!evt.toolName && title.startsWith("[tool] ")) {
-        const stripped = title.slice(7);
-        const sep = stripped.indexOf(": ");
-        if (sep !== -1) {
-          toolName = stripped.slice(0, sep);
-          args = stripped.slice(sep + 2);
-        } else {
-          toolName = stripped;
+    const applyIntents = (intents: ResolverIntent[]) => {
+      for (const intent of intents) {
+        if (intent.kind === "resolveCommand") {
+          resolveCommandApproval({ approvalId: intent.approvalId, runId: intent.runId, approved: intent.approved });
+        } else if (intent.kind === "resolveRevision") {
+          resolveRevisionApproval({ revisionId: intent.revisionId, runId: intent.runId, decision: intent.decision });
         }
       }
-      dispatch({ type: "TOOL_CALL_OPEN", toolName, args, patch: evt.patch });
-    }
-
-    function handleToolResult(evt: ZoneStructuredProgressEvent): void {
-      dispatch({ type: "TOOL_RESULT_PUSH", ok: evt.status !== "error", detail: evt.detail ?? evt.title ?? "" });
-      dispatch({ type: "TOOL_CALL_CLOSE" });
-    }
-
-    function handleTerminalOutput(evt: ZoneStructuredProgressEvent): void {
-      dispatch({ type: "TOOL_RESULT_PUSH", ok: true, detail: evt.detail ?? "" });
-    }
-
-    function handleTerminalDone(evt: ZoneStructuredProgressEvent): void {
-      if (evt.exitCode != null && evt.exitCode !== 0) {
-        dispatch({ type: "TOOL_RESULT_PUSH", ok: false, detail: `exit ${evt.exitCode}` });
-      }
-      dispatch({ type: "TOOL_CALL_CLOSE" });
-    }
-
-    function handleSpinnerUpdate(evt: ZoneStructuredProgressEvent): void {
-      dispatch({ type: "SPINNER_UPDATE", label: evt.title ?? "" });
-    }
-
-    function handleIterCost(evt: ZoneStructuredProgressEvent): void {
-      dispatch({ type: "STATUS_UPDATE", iter: evt.iter ?? 0, costUsd: evt.cumulativeCost ?? 0 });
-    }
-
-    function handleTokenBudget(evt: ZoneStructuredProgressEvent): void {
-      const ratio = evt.tokenBudgetRatio ?? 0;
-      dispatch({ type: "STATUS_UPDATE", tokenBudgetRatio: ratio, ...(evt.cumulativeTokens != null ? { tokens: evt.cumulativeTokens } : {}) });
-      if (ratio >= 0.7) {
-        dispatch({
-          type: "TOAST_PUSH",
-          entry: {
-            id: randomUUID(),
-            message: ratio >= 0.9 ? "Token budget critical (>90%)" : "Token budget warning (>70%)",
-            level: ratio >= 0.9 ? "error" : "warning",
-          },
-        });
-      }
-    }
-
-    function handlePatchRejected(evt: ZoneStructuredProgressEvent): void {
-      dispatch({ type: "ERROR_LINE", text: evt.title ?? "Patch rejected" });
-    }
-
-    function handlePhaseChanged(evt: ZoneStructuredProgressEvent): void {
-      flushBuffer(localBuffer, debounceTimer, dispatch);
-      dispatch({ type: "PHASE_MARKER", phase: String(evt.phase ?? "") });
-    }
-
-    function handleLoopWarning(evt: ZoneStructuredProgressEvent): void {
-      dispatch({
-        type: "TOAST_PUSH",
-        entry: { id: randomUUID(), message: evt.title ?? "Loop warning", level: "warning" },
-      });
-    }
-
-    function handleLoopDetected(evt: ZoneStructuredProgressEvent): void {
-      dispatch({ type: "SPINNER_STOP" });
-      dispatch({ type: "ERROR_LINE", text: evt.title ?? "Loop detected" });
-    }
-
-    function handleCommandApproval(evt: ZoneStructuredProgressEvent): void {
-      if (!evt.approvalId) return;
-      const command = evt.command ?? evt.title ?? "";
-      const prefixes = trustedPrefixesRef.current ?? [];
-      const trusted = prefixes.some(
-        p => command.trim() === p || command.trim().startsWith(p + " ")
-      );
-      if (trusted) {
-        resolveCommandApproval({ approvalId: evt.approvalId, runId: evt.runId ?? "", approved: true });
-        return;
-      }
-      flushBuffer(localBuffer, debounceTimer, dispatch);
-      dispatch({ type: "PENDING_APPROVAL_SET", approvalId: evt.approvalId, runId: evt.runId ?? "", command });
-    }
-
-    const handleEditApprovalEvt = (evt: ZoneStructuredProgressEvent): void => {
-      flushBuffer(localBuffer, debounceTimer, dispatch);
-      handleEditApproval(evt, dispatch);
     };
 
-    const handleTrustApproval = (evt: ZoneStructuredProgressEvent): void => {
-      flushBuffer(localBuffer, debounceTimer, dispatch);
-      dispatch({
-        type: "PENDING_APPROVAL_SET",
-        approvalId: evt.runId ?? "",
-        runId: evt.runId ?? "",
-        command: evt.projectPath ?? "",
-        kind: "trust",
-      });
+    // Simple: intents then actions, no flush
+    const simple = (evt: ZoneStructuredProgressEvent) => {
+      const { actions, intents } = eventToActions(evt, ctx());
+      applyIntents(intents);
+      applyActions(actions);
     };
 
-    function handlePlanReadyForApproval(evt: ZoneStructuredProgressEvent): void {
-      handlePlanReadyForApprovalExported(evt, dispatch);
-    }
-
-    function handleRevisionProposed(evt: ZoneStructuredProgressEvent): void {
-      if (modeRef.current === "plan") {
-        dispatch({
-          type: "PLAN_PROPOSED",
-          revisionId: (evt as any).revisionId ?? "",
-          runId: (evt as any).runId ?? "",
-          revisionType: (evt as any).revisionType ?? "mixed",
-          revisionReason: (evt as any).revisionReason ?? "",
-          originalPlan: (evt as any).revisionOriginalPlan ?? "",
-          revisedPlanSummary: (evt as any).revisionRevisedPlanSummary ?? "",
-          ...((evt as any).revisionMissingFiles
-            ? { missingFiles: (evt as any).revisionMissingFiles } : {}),
-          ...((evt as any).revisionUnnecessaryFiles
-            ? { unnecessaryFiles: (evt as any).revisionUnnecessaryFiles } : {}),
-        });
-      } else {
-        if (evt.revisionId) {
-          resolveRevisionApproval({ revisionId: evt.revisionId, runId: evt.runId, decision: "reject" });
-        }
-        dispatch({ type: "ERROR_LINE", text: "⚠ Scope revision proposed — auto-rejected." });
-      }
-    }
-
-    function handleRunFailed(evt: ZoneStructuredProgressEvent): void {
+    // Flush-first: flushBuffer before intents/actions
+    const flushFirst = (evt: ZoneStructuredProgressEvent) => {
       flushBuffer(localBuffer, debounceTimer, dispatch);
-      dispatch({ type: "ERROR_LINE", text: evt.userMessage ?? "Provider error." });
-      dispatch({ type: "RUN_FAILED" });
-    }
+      const { actions, intents } = eventToActions(evt, ctx());
+      applyIntents(intents);
+      applyActions(actions);
+    };
 
-    const handlePlanReady = handlePlanReadyForApproval;
-    bus.on("run_failed", handleRunFailed);
-    bus.on("plan_ready_for_approval", handlePlanReady);
-    bus.on("agent_loop_start", handleAgentLoopStart);
-    bus.on("agent_loop_complete", handleAgentLoopComplete);
-    bus.on("run_summary", handleRunSummary);
-    bus.on("narration", handleTextEvent);
-    bus.on("thinking", handleThinkingEvent);
-    bus.on("chat_chunk", handleTextEvent);
-    bus.on("chat_response", handleTextEvent);
-    bus.on("tool_call", handleToolCall);
-    bus.on("tool_result", handleToolResult);
-    bus.on("terminal_output", handleTerminalOutput);
-    bus.on("terminal_done", handleTerminalDone);
-    bus.on("ranking_context", handleSpinnerUpdate);
-    bus.on("generating_patch", handleSpinnerUpdate);
-    bus.on("verification", handleSpinnerUpdate);
-    bus.on("verification_investigating", handleSpinnerUpdate);
-    bus.on("verification_fixing", handleSpinnerUpdate);
-    bus.on("verification_fixed", handleSpinnerUpdate);
-    bus.on("llm_retry_in_progress", handleSpinnerUpdate);
-    bus.on("scope_audit_started", handleSpinnerUpdate);
-    bus.on("iter_cost_update", handleIterCost);
-    bus.on("token_budget_status", handleTokenBudget);
-    bus.on("patch_rejected", handlePatchRejected);
-    bus.on("phase_changed", handlePhaseChanged);
-    bus.on("loop_warning_emitted", handleLoopWarning);
-    bus.on("loop_detected_terminal", handleLoopDetected);
+    // command_approval_required: conditional flush
+    // Trusted path → intents=[resolveCommand], actions=[] → no flush (silent auto-approve)
+    // Non-trusted → actions=[PENDING_APPROVAL_SET], intents=[] → flush then show modal
+    const handleCommandApproval = (evt: ZoneStructuredProgressEvent) => {
+      const { actions, intents } = eventToActions(evt, ctx());
+      applyIntents(intents);
+      if (actions.length > 0) {
+        flushBuffer(localBuffer, debounceTimer, dispatch);
+        applyActions(actions);
+      }
+    };
+
+    bus.on("run_failed",               flushFirst);
+    bus.on("plan_ready_for_approval",  simple);
+    bus.on("agent_loop_start",         simple);
+    bus.on("agent_loop_complete",      flushFirst);
+    bus.on("run_summary",              flushFirst);
+    bus.on("narration",                handleTextEvent);
+    bus.on("thinking",                 simple);
+    bus.on("chat_chunk",               handleTextEvent);
+    bus.on("chat_response",            handleTextEvent);
+    bus.on("tool_call",                flushFirst);
+    bus.on("tool_result",              simple);
+    bus.on("terminal_output",          simple);
+    bus.on("terminal_done",            simple);
+    bus.on("ranking_context",          simple);
+    bus.on("generating_patch",         simple);
+    bus.on("verification",             simple);
+    bus.on("verification_investigating", simple);
+    bus.on("verification_fixing",      simple);
+    bus.on("verification_fixed",       simple);
+    bus.on("llm_retry_in_progress",    simple);
+    bus.on("scope_audit_started",      simple);
+    bus.on("iter_cost_update",         simple);
+    bus.on("token_budget_status",      simple);
+    bus.on("patch_rejected",           simple);
+    bus.on("phase_changed",            flushFirst);
+    bus.on("loop_warning_emitted",     simple);
+    bus.on("loop_detected_terminal",   simple);
     bus.on("command_approval_required", handleCommandApproval);
-    bus.on("edit_approval_required", handleEditApprovalEvt);
-    bus.on("trust_approval_required", handleTrustApproval);
-    bus.on("scope_revision_proposed", handleRevisionProposed);
+    bus.on("edit_approval_required",   flushFirst);
+    bus.on("trust_approval_required",  flushFirst);
+    bus.on("scope_revision_proposed",  simple);
 
-    const onStarted   = (evt: ZoneStructuredProgressEvent) => handleCompactionStarted(evt, dispatch);
-    const onStatus    = (evt: ZoneStructuredProgressEvent) => handleCompactionStatus(evt, dispatch);
-    const onExhausted = (evt: ZoneStructuredProgressEvent) => handleCompactionExhausted(evt, dispatch);
-    const onOverflow  = (evt: unknown) => handleCompactionOverflow(evt, dispatch);
-    bus.on("compaction_started",          onStarted);
-    bus.on("compaction_status",           onStatus);
-    bus.on("compaction_exhausted",        onExhausted);
-    bus.on("compaction_overflow_warning", onOverflow);
+    bus.on("compaction_started",          simple);
+    bus.on("compaction_status",           simple);
+    bus.on("compaction_exhausted",        simple);
+    bus.on("compaction_overflow_warning", simple);
 
-    const onTodosInitialized = (evt: ZoneStructuredProgressEvent) => handleTodosInitialized(evt, dispatch);
-    const onTodoRevised      = (evt: ZoneStructuredProgressEvent) => handleTodoRevised(evt, dispatch);
-    const onTodoStatus       = (evt: ZoneStructuredProgressEvent) => handleTodoStatusChanged(evt, dispatch);
-    bus.on("todos_initialized",   onTodosInitialized);
-    bus.on("todo_revised",        onTodoRevised);
-    bus.on("todo_status_changed", onTodoStatus);
+    bus.on("todos_initialized",   simple);
+    bus.on("todo_revised",        simple);
+    bus.on("todo_status_changed", simple);
 
-    const onPlanGenStarted = (evt: ZoneStructuredProgressEvent) => handlePlanGenerationStarted(evt, dispatch);
-    bus.on("plan_generation_started", onPlanGenStarted);
-
-    const onStagedDiffsReady = (evt: ZoneStructuredProgressEvent) =>
-      handleStagedDiffsReadyExported(evt, dispatch);
-    bus.on("staged_diffs_ready_for_approval", onStagedDiffsReady);
-
-    const onPostExecuteDiffs = (evt: ZoneStructuredProgressEvent): void => {
-      if (!evt.stagedFilesJson) return;
-      let files: StagedFile[] = [];
-      try { files = JSON.parse(evt.stagedFilesJson); } catch { return; }
-      if (files.length > 0) dispatch({ type: "POST_EXECUTE_DIFFS", files });
-    };
-    bus.on("post_execute_diffs", onPostExecuteDiffs);
-
-    // User-facing hook events
-    const onHookCompleted = (evt: ZoneStructuredProgressEvent): void => {
-      if (evt.status === "warning") {
-        dispatch({
-          type: "TOAST_PUSH",
-          entry: {
-            id: randomUUID(),
-            message: evt.title ?? "[hook_blocked] Tool vetoed by PreToolUse hook",
-            level: "warning",
-          },
-        });
-      }
-    };
-    bus.on("hook_completed", onHookCompleted);
-
-    // MCP events
-    const onMcpConnected = (evt: ZoneStructuredProgressEvent): void => {
-      dispatch({ type: "TRANSCRIPT_APPEND_NARRATION", text: evt.title ?? "MCP servers connected" });
-      dispatch({ type: "NARRATION_COMMIT" });
-    };
-    const onMcpToolCalled = (_evt: ZoneStructuredProgressEvent): void => {
-      // No-op: tool_call/tool_result events already render the call in the transcript.
-    };
-    bus.on("mcp_connected", onMcpConnected);
-    bus.on("mcp_tool_called", onMcpToolCalled);
+    bus.on("plan_generation_started",         simple);
+    bus.on("staged_diffs_ready_for_approval", simple);
+    bus.on("post_execute_diffs",              simple);
+    bus.on("hook_completed",                  simple);
+    bus.on("mcp_connected",                   simple);
+    bus.on("mcp_tool_called",                 simple);
 
     return () => {
       if (debounceTimer.current !== null) {
         clearTimeout(debounceTimer.current);
         debounceTimer.current = null;
       }
-      bus.off("run_failed", handleRunFailed);
-      bus.off("plan_ready_for_approval", handlePlanReady);
-      bus.off("agent_loop_start", handleAgentLoopStart);
-      bus.off("agent_loop_complete", handleAgentLoopComplete);
-      bus.off("run_summary", handleRunSummary);
-      bus.off("narration", handleTextEvent);
-      bus.off("thinking", handleThinkingEvent);
-      bus.off("chat_chunk", handleTextEvent);
-      bus.off("chat_response", handleTextEvent);
-      bus.off("tool_call", handleToolCall);
-      bus.off("tool_result", handleToolResult);
-      bus.off("terminal_output", handleTerminalOutput);
-      bus.off("terminal_done", handleTerminalDone);
-      bus.off("ranking_context", handleSpinnerUpdate);
-      bus.off("generating_patch", handleSpinnerUpdate);
-      bus.off("verification", handleSpinnerUpdate);
-      bus.off("verification_investigating", handleSpinnerUpdate);
-      bus.off("verification_fixing", handleSpinnerUpdate);
-      bus.off("verification_fixed", handleSpinnerUpdate);
-      bus.off("llm_retry_in_progress", handleSpinnerUpdate);
-      bus.off("scope_audit_started", handleSpinnerUpdate);
-      bus.off("iter_cost_update", handleIterCost);
-      bus.off("token_budget_status", handleTokenBudget);
-      bus.off("patch_rejected", handlePatchRejected);
-      bus.off("phase_changed", handlePhaseChanged);
-      bus.off("loop_warning_emitted", handleLoopWarning);
-      bus.off("loop_detected_terminal", handleLoopDetected);
+      bus.off("run_failed",               flushFirst);
+      bus.off("plan_ready_for_approval",  simple);
+      bus.off("agent_loop_start",         simple);
+      bus.off("agent_loop_complete",      flushFirst);
+      bus.off("run_summary",              flushFirst);
+      bus.off("narration",                handleTextEvent);
+      bus.off("thinking",                 simple);
+      bus.off("chat_chunk",               handleTextEvent);
+      bus.off("chat_response",            handleTextEvent);
+      bus.off("tool_call",                flushFirst);
+      bus.off("tool_result",              simple);
+      bus.off("terminal_output",          simple);
+      bus.off("terminal_done",            simple);
+      bus.off("ranking_context",          simple);
+      bus.off("generating_patch",         simple);
+      bus.off("verification",             simple);
+      bus.off("verification_investigating", simple);
+      bus.off("verification_fixing",      simple);
+      bus.off("verification_fixed",       simple);
+      bus.off("llm_retry_in_progress",    simple);
+      bus.off("scope_audit_started",      simple);
+      bus.off("iter_cost_update",         simple);
+      bus.off("token_budget_status",      simple);
+      bus.off("patch_rejected",           simple);
+      bus.off("phase_changed",            flushFirst);
+      bus.off("loop_warning_emitted",     simple);
+      bus.off("loop_detected_terminal",   simple);
       bus.off("command_approval_required", handleCommandApproval);
-      bus.off("edit_approval_required", handleEditApprovalEvt);
-      bus.off("trust_approval_required", handleTrustApproval);
-      bus.off("scope_revision_proposed", handleRevisionProposed);
-      bus.off("compaction_started",          onStarted);
-      bus.off("compaction_status",           onStatus);
-      bus.off("compaction_exhausted",        onExhausted);
-      bus.off("compaction_overflow_warning", onOverflow);
-      bus.off("todos_initialized",   onTodosInitialized);
-      bus.off("todo_revised",        onTodoRevised);
-      bus.off("todo_status_changed", onTodoStatus);
-      bus.off("plan_generation_started", onPlanGenStarted);
-      bus.off("staged_diffs_ready_for_approval", onStagedDiffsReady);
-      bus.off("post_execute_diffs", onPostExecuteDiffs);
-      bus.off("hook_completed", onHookCompleted);
-      bus.off("mcp_connected", onMcpConnected);
-      bus.off("mcp_tool_called", onMcpToolCalled);
+      bus.off("edit_approval_required",   flushFirst);
+      bus.off("trust_approval_required",  flushFirst);
+      bus.off("scope_revision_proposed",  simple);
+
+      bus.off("compaction_started",          simple);
+      bus.off("compaction_status",           simple);
+      bus.off("compaction_exhausted",        simple);
+      bus.off("compaction_overflow_warning", simple);
+
+      bus.off("todos_initialized",   simple);
+      bus.off("todo_revised",        simple);
+      bus.off("todo_status_changed", simple);
+
+      bus.off("plan_generation_started",         simple);
+      bus.off("staged_diffs_ready_for_approval", simple);
+      bus.off("post_execute_diffs",              simple);
+      bus.off("hook_completed",                  simple);
+      bus.off("mcp_connected",                   simple);
+      bus.off("mcp_tool_called",                 simple);
     };
   }, [bus, dispatch]);
 }
