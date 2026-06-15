@@ -14,7 +14,7 @@ export class ApiKeyError extends Error {
 export class ProviderRequestError extends Error {
   constructor(
     public readonly status: number,
-    public readonly kind: "retention" | "request_shape" | "other",
+    public readonly kind: "retention" | "credit" | "request_shape" | "other",
     public readonly userMessage: string,
     public readonly raw: unknown,
   ) {

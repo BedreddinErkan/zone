@@ -25,18 +25,23 @@ export function mapAnthropicBadRequest(err: unknown): never {
   if (err instanceof BadRequestError && err.status === 400) {
     const bodyMsg = (err.error as { error?: { message?: string } } | null)?.error?.message ?? "";
     const fullMsg = bodyMsg || err.message;
+    const isCredit = /credit balance is too low/i.test(fullMsg);
     const isRetention =
       /retention/i.test(fullMsg) ||
       /zero.data.retention/i.test(fullMsg) ||
       /\bzdr\b/i.test(fullMsg);
-    const kind: "retention" | "request_shape" | "other" = isRetention
-      ? "retention"
-      : err.type === "invalid_request_error"
-        ? "request_shape"
-        : "other";
-    const userMessage = isRetention
-      ? "This model requires 30-day minimum data retention and isn't available for accounts configured for zero data retention (ZDR) or shorter retention. Adjust your Anthropic account's data-retention policy or switch models with /model."
-      : `Invalid API request (${fullMsg}). Check model and parameter configuration.`;
+    const kind: "retention" | "credit" | "request_shape" | "other" = isCredit
+      ? "credit"
+      : isRetention
+        ? "retention"
+        : err.type === "invalid_request_error"
+          ? "request_shape"
+          : "other";
+    const userMessage = isCredit
+      ? "API credit exhausted — your Anthropic credit balance is too low. Top up at console.anthropic.com (Plans & Billing), then retry. You can also switch model/provider with /model."
+      : isRetention
+        ? "This model requires 30-day minimum data retention and isn't available for accounts configured for zero data retention (ZDR) or shorter retention. Adjust your Anthropic account's data-retention policy or switch models with /model."
+        : `Invalid API request (${fullMsg}). Check model and parameter configuration.`;
     throw new ProviderRequestError(400, kind, userMessage, err);
   }
   throw err;

@@ -76,6 +76,43 @@ describe("mapAnthropicBadRequest — non-retention 400 classification", () => {
   });
 });
 
+describe("mapAnthropicBadRequest — credit exhaustion", () => {
+  it("'credit balance is too low' message → kind:'credit' with top-up message", () => {
+    const err = makeBadRequest400(
+      "invalid_request_error",
+      "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.",
+    );
+    expect(() => mapAnthropicBadRequest(err)).toThrowError(ProviderRequestError);
+    try { mapAnthropicBadRequest(err); } catch (e) {
+      const pr = e as ProviderRequestError;
+      expect(pr.kind).toBe("credit");
+      expect(pr.status).toBe(400);
+      expect(pr.userMessage).toContain("Top up");
+      expect(pr.userMessage).toContain("Plans & Billing");
+    }
+  });
+
+  it("case-insensitive match on 'Credit Balance Is Too Low'", () => {
+    const err = makeBadRequest400(
+      "invalid_request_error",
+      "Credit Balance Is Too Low for this request",
+    );
+    try { mapAnthropicBadRequest(err); } catch (e) {
+      expect((e as ProviderRequestError).kind).toBe("credit");
+    }
+  });
+
+  it("non-credit invalid_request_error is still kind:'request_shape' (regression)", () => {
+    const err = makeBadRequest400(
+      "invalid_request_error",
+      "model not found in this region",
+    );
+    try { mapAnthropicBadRequest(err); } catch (e) {
+      expect((e as ProviderRequestError).kind).toBe("request_shape");
+    }
+  });
+});
+
 describe("mapAnthropicBadRequest — non-400 errors pass through unchanged", () => {
   it("RateLimitError (429) is rethrown as-is (not wrapped in ProviderRequestError)", () => {
     const err = AnthropicAPIError.generate(429, {}, "rate limited", new Headers()) as RateLimitError;
