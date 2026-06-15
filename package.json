@@ -16,7 +16,10 @@
   "./events":     { "types": "./src/cli/tui/hooks/eventToActions.ts", "default": "./dist/cli/tui/hooks/eventToActions.js" },
   "./lifecycle":  { "types": "./src/core/agentLifecycleEvents.ts",    "default": "./dist/core/agentLifecycleEvents.js" },
   "./config":     { "types": "./src/cli/config.ts",                   "default": "./dist/cli/config.js" },
-  "./dispatch":   { "types": "./src/cli/dispatch.ts",                 "default": "./dist/cli/dispatch.js" }
+  "./dispatch":   { "types": "./src/cli/dispatch.ts",                 "default": "./dist/cli/dispatch.js" },
+  "./model-registry":     { "types": "./src/llm/modelRegistry.ts",                "default": "./dist/llm/modelRegistry.js" },
+  "./session-window":     { "types": "./src/llm/sessionWindow.ts",                "default": "./dist/llm/sessionWindow.js" },
+  "./conversation-store": { "types": "./src/core/conversationFilesystemStore.ts", "default": "./dist/core/conversationFilesystemStore.js" }
 },
   "scripts": {
     "build": "node node_modules/typescript/bin/tsc -p tsconfig.json",
