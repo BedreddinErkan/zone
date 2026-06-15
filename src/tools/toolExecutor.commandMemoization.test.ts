@@ -17,6 +17,7 @@ import {
   isMemoizableCommand,
   computeCommandFingerprint,
 } from "./toolExecutor.js";
+import { flushCommandCacheLogForTest, clearCommandCacheLogForTest } from "../utils/commandCacheLog.js";
 
 let repoPath: string;
 
@@ -31,9 +32,11 @@ function setupNpmEnv(scripts: Record<string, string>): void {
 beforeEach(() => {
   repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "zone-cmd-memo-"));
   clearCommandCacheForTest();
+  clearCommandCacheLogForTest();
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await flushCommandCacheLogForTest();
   fs.rmSync(repoPath, { recursive: true, force: true });
 });
 
