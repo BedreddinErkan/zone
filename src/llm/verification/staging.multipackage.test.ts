@@ -132,4 +132,123 @@ describe("runStagingVerification — multi-package routing", () => {
     const cmd = mockExecAsync.mock.calls[0][0] as string;
     expect(cmd).toContain("apps/web/tsconfig.json");
   });
+
+  it("(multi-tsconfig) equal-count error-set SWAP in one package → regressed:true", async () => {
+    write("apps/web/tsconfig.json", "{}");
+    write("packages/db/tsconfig.json", "{}");
+    const a = write("apps/web/src/a.ts", "x");
+    const b = write("packages/db/src/b.ts", "x");
+
+    // apps/web: staged has TS18047 errors; baseline has TS2540 errors — same count, different codes
+    const stagedWebErr = "apps/web/src/a.ts(1,1): error TS18047: Object is possibly null.\n" +
+                         "apps/web/src/a.ts(2,1): error TS18047: Object is possibly null.";
+    const baseWebErr  = "apps/web/src/a.ts(1,1): error TS2540: Cannot assign to read-only.\n" +
+                         "apps/web/src/a.ts(2,1): error TS2540: Cannot assign to read-only.";
+
+    mockExecAsync
+      .mockRejectedValueOnce(Object.assign(new Error(), { code: 1, stdout: stagedWebErr, stderr: "" })) // web staged
+      .mockRejectedValueOnce(Object.assign(new Error(), { code: 1, stdout: baseWebErr,   stderr: "" })) // web baseline
+      .mockResolvedValue({ stdout: "", stderr: "" }); // db: pass
+
+    const result = await runStagingVerification({
+      stagingFiles: new Map([[a, "x"], [b, "x"]]),
+      repoPath,
+      framework: { language: "typescript" },
+      withStagingTempFlush: async (_s, body) => body(),
+    });
+
+    expect(result.status).toBe("fail");
+    if (result.status === "fail") {
+      expect(result.regressed).toBe(true);  // swap detected even though counts match
+      expect(result.postErrorCount).toBe(2);
+      expect(result.baselineErrorCount).toBe(2);
+    }
+  });
+});
+
+describe("runStagingVerification — single-tsconfig identity checks", () => {
+  it("(a) equal-count error-set SWAP → regressed:true (single tsconfig)", async () => {
+    write("tsconfig.json", "{}");
+    const a = write("src/a.ts", "x");
+
+    const stagedErr = "src/a.ts(1,1): error TS18047: Object is possibly null.\n" +
+                      "src/a.ts(2,1): error TS18047: Object is possibly null.";
+    const baseErr   = "src/a.ts(1,1): error TS2540: Cannot assign to read-only.\n" +
+                      "src/a.ts(2,1): error TS2540: Cannot assign to read-only.";
+
+    // Call 1 (staged, via withStagingTempFlush): TS18047
+    // Call 2 (baseline, inline): TS2540
+    mockExecAsync
+      .mockRejectedValueOnce(Object.assign(new Error(), { code: 1, stdout: stagedErr, stderr: "" }))
+      .mockRejectedValueOnce(Object.assign(new Error(), { code: 1, stdout: baseErr,   stderr: "" }));
+
+    const result = await runStagingVerification({
+      stagingFiles: new Map([[a, "x"]]),
+      repoPath,
+      framework: { language: "typescript" },
+      withStagingTempFlush: async (_s, body) => body(),
+    });
+
+    expect(result.status).toBe("fail");
+    if (result.status === "fail") {
+      expect(result.regressed).toBe(true);
+      expect(result.postErrorCount).toBe(2);
+      expect(result.baselineErrorCount).toBe(2);
+    }
+  });
+
+  it("(b) genuine pre-existing: identical errors → regressed:false (single tsconfig)", async () => {
+    write("tsconfig.json", "{}");
+    const a = write("src/a.ts", "x");
+
+    const errLine = "src/a.ts(5,3): error TS2304: Cannot find name 'foo'.";
+    mockExecAsync
+      .mockRejectedValueOnce(Object.assign(new Error(), { code: 1, stdout: errLine, stderr: "" })) // staged
+      .mockRejectedValueOnce(Object.assign(new Error(), { code: 1, stdout: errLine, stderr: "" })); // baseline
+
+    const result = await runStagingVerification({
+      stagingFiles: new Map([[a, "x"]]),
+      repoPath,
+      framework: { language: "typescript" },
+      withStagingTempFlush: async (_s, body) => body(),
+    });
+
+    expect(result.status).toBe("fail");
+    if (result.status === "fail") {
+      expect(result.regressed).toBe(false);
+    }
+  });
+
+  it("(c) large baseline: 40-error baseline not truncated → 5-error post is subset → regressed:false", async () => {
+    write("tsconfig.json", "{}");
+    const a = write("src/a.ts", "x");
+
+    // Build a 40-error baseline (well over the old 30-line truncation limit).
+    // The 5 post errors are drawn from the first 5 baseline entries.
+    const buildErrors = (n: number, start = 0) =>
+      Array.from({ length: n }, (_, i) =>
+        `src/a.ts(${start + i + 1},1): error TS200${(start + i) % 10}: Msg ${start + i}.`
+      ).join("\n");
+
+    const baselineOutput = buildErrors(40); // 40 distinct errors
+    const stagedOutput   = buildErrors(5);  // first 5 — a subset of baseline
+
+    mockExecAsync
+      .mockRejectedValueOnce(Object.assign(new Error(), { code: 1, stdout: stagedOutput,   stderr: "" })) // staged
+      .mockRejectedValueOnce(Object.assign(new Error(), { code: 1, stdout: baselineOutput, stderr: "" })); // baseline
+
+    const result = await runStagingVerification({
+      stagingFiles: new Map([[a, "x"]]),
+      repoPath,
+      framework: { language: "typescript" },
+      withStagingTempFlush: async (_s, body) => body(),
+    });
+
+    expect(result.status).toBe("fail");
+    if (result.status === "fail") {
+      expect(result.regressed).toBe(false); // no false positive from truncation
+      expect(result.baselineErrorCount).toBe(40);
+      expect(result.postErrorCount).toBe(5);
+    }
+  });
 });

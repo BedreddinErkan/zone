@@ -252,6 +252,69 @@ describe("finalizeRun — parity tests", () => {
     });
   });
 
+  describe("FIX 2 — success coupled to verification verdict", () => {
+    it("natural_completion + applied_with_warnings → success:false (RED tree must not succeed)", async () => {
+      mockVerifyAndFinalize.mockResolvedValue({
+        kind: "applied_with_warnings",
+        verification: { label: "tsc", durationMs: 120, baselineErrorCount: 0, postErrorCount: 3 },
+        appendix: "\n\nVERIFICATION WARNINGS — patches applied, new errors detected.",
+        errors: [{ code: "TS18047", message: "Object is possibly null." }],
+        filesFlushed: 1,
+      } satisfies VerifyOutcome);
+
+      const result = await finalizeRun(makeInput({
+        trigger: "natural_completion",
+        finalText: "done [ZONE_VERIFICATION: tests_passed]",
+        toolCallLog: patchThenTestPass,
+      }));
+      expect(result.success).toBe(false);
+      expect(result.terminationReason).toBe("natural_completion");
+    });
+
+    it("natural_completion + applied (clean) → success:true (unchanged)", async () => {
+      mockVerifyAndFinalize.mockResolvedValue(APPLIED_OUTCOME);
+      const result = await finalizeRun(makeInput({
+        trigger: "natural_completion",
+        finalText: "done [ZONE_VERIFICATION: tests_passed]",
+        toolCallLog: patchThenTestPass,
+      }));
+      expect(result.success).toBe(true);
+    });
+
+    it("natural_completion + pre_existing_errors → success:true (pre-existing is not a regression)", async () => {
+      mockVerifyAndFinalize.mockResolvedValue({
+        kind: "pre_existing_errors",
+        verification: { label: "tsc", durationMs: 100, baselineErrorCount: 3, postErrorCount: 3 },
+        appendix: "\n\n**Verification has pre-existing errors**",
+        filesFlushed: 1,
+      } satisfies VerifyOutcome);
+
+      const result = await finalizeRun(makeInput({
+        trigger: "natural_completion",
+        finalText: "done",
+        toolCallLog: patchThenTestPass,
+      }));
+      expect(result.success).toBe(true);
+    });
+
+    it("max_iterations + applied_with_warnings → success:false (unchanged — trigger wins)", async () => {
+      mockVerifyAndFinalize.mockResolvedValue({
+        kind: "applied_with_warnings",
+        verification: { label: "tsc", durationMs: 120, baselineErrorCount: 0, postErrorCount: 1 },
+        appendix: "\n\nVERIFICATION WARNINGS",
+        errors: [{ code: "TS2304", message: "Cannot find name 'x'." }],
+        filesFlushed: 1,
+      } satisfies VerifyOutcome);
+
+      const result = await finalizeRun(makeInput({
+        trigger: "max_iterations",
+        finalText: "done",
+        toolCallLog: [],
+      }));
+      expect(result.success).toBe(false);
+    });
+  });
+
   describe("latent naming inconsistencies preserved (Gap 12)", () => {
     it("max_iterations: emitApplyRolledBackMarker uses site:max_iter (not max_iterations)", async () => {
       const { emitApplyRolledBackMarker } = await import("../loopTelemetry.js");
