@@ -315,6 +315,146 @@ describe("Composer — submitBuffer dispatch routing (T3)", () => {
 
     unmount();
   });
+
+  // ─── Non-bracketed paste fallback (A–E, G) ───────────────────────────────
+  // These tests exercise the useInput printable-character branch — the path taken
+  // when the terminal does NOT honor bracketed paste. No \x1b[200~/\x1b[201~ wrap.
+  // ink-testing-library's stdin.write() delivers one chunk through the real Ink parser,
+  // so raw vs. honored delivery is controlled purely by which bytes we write.
+  // Use toContain / .not.toContain (not ===) because onSubmit's first arg may include
+  // a trailing contextBlock appended by submitBuffer for @-file injection.
+
+  it("A — unbracketed raw multi-line (LF): buffers all lines, no premature submit", async () => {
+    const mockOnSubmit = vi.fn();
+    const { stdin, unmount } = render(
+      <StoreProvider initialValues={{ model: "test-model", capUsd: 10 }}>
+        <Composer onSubmit={mockOnSubmit} onExit={() => {}} />
+      </StoreProvider>
+    );
+
+    stdin.write("line1\nline2\nline3\nline4\nline5\nline6");
+    await wait(50);
+    // NOT submitted yet — no \r delivered
+    expect(mockOnSubmit).not.toHaveBeenCalled();
+
+    stdin.write("\r");
+    await wait(50);
+
+    expect(mockOnSubmit).toHaveBeenCalledOnce();
+    const received = mockOnSubmit.mock.calls[0][0] as string;
+    expect(received).toContain("line1");
+    expect(received).toContain("line6");
+
+    unmount();
+  });
+
+  it("B — unbracketed CRLF paste: CR normalized to LF before onSubmit", async () => {
+    const mockOnSubmit = vi.fn();
+    const { stdin, unmount } = render(
+      <StoreProvider initialValues={{ model: "test-model", capUsd: 10 }}>
+        <Composer onSubmit={mockOnSubmit} onExit={() => {}} />
+      </StoreProvider>
+    );
+
+    stdin.write("line1\r\nline2\r\nline3");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+
+    expect(mockOnSubmit).toHaveBeenCalledOnce();
+    const received = mockOnSubmit.mock.calls[0][0] as string;
+    expect(received).not.toContain("\r");
+    expect(received).toContain("line1\nline2\nline3");
+
+    unmount();
+  });
+
+  it("C — leaked bare markers [200~/[201~ are stripped from buffer and onSubmit", async () => {
+    const mockOnSubmit = vi.fn();
+    const { stdin, unmount } = render(
+      <StoreProvider initialValues={{ model: "test-model", capUsd: 10 }}>
+        <Composer onSubmit={mockOnSubmit} onExit={() => {}} />
+      </StoreProvider>
+    );
+
+    stdin.write("[200~hello world[201~");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+
+    expect(mockOnSubmit).toHaveBeenCalledOnce();
+    const received = mockOnSubmit.mock.calls[0][0] as string;
+    expect(received).not.toContain("[200~");
+    expect(received).not.toContain("[201~");
+    expect(received).toContain("hello world");
+
+    unmount();
+  });
+
+  it("D — stray ESC-prefixed end marker mid-text is stripped (defensive)", async () => {
+    const mockOnSubmit = vi.fn();
+    const { stdin, unmount } = render(
+      <StoreProvider initialValues={{ model: "test-model", capUsd: 10 }}>
+        <Composer onSubmit={mockOnSubmit} onExit={() => {}} />
+      </StoreProvider>
+    );
+
+    // Ink's use-input.js strips the leading ESC, forwarding "[201~" as the input string.
+    // cleanPastedInput must strip that too.
+    stdin.write("text\x1b[201~more");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+
+    expect(mockOnSubmit).toHaveBeenCalledOnce();
+    const received = mockOnSubmit.mock.calls[0][0] as string;
+    expect(received).toContain("textmore");
+    expect(received).not.toContain("[201~");
+
+    unmount();
+  });
+
+  it("E — control-leading paste not dropped (first char \\n)", async () => {
+    const mockOnSubmit = vi.fn();
+    const { stdin, unmount } = render(
+      <StoreProvider initialValues={{ model: "test-model", capUsd: 10 }}>
+        <Composer onSubmit={mockOnSubmit} onExit={() => {}} />
+      </StoreProvider>
+    );
+
+    // Before the fix, charCodeAt(0) < 32 caused the whole chunk to be silently dropped.
+    stdin.write("\nindented body\nsecond line");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+
+    expect(mockOnSubmit).toHaveBeenCalledOnce();
+    const received = mockOnSubmit.mock.calls[0][0] as string;
+    expect(received).toContain("indented body");
+    expect(received).toContain("second line");
+
+    unmount();
+  });
+
+  it("G — tab-indented paste: tabs preserved in buffer and onSubmit", async () => {
+    const mockOnSubmit = vi.fn();
+    const { stdin, unmount } = render(
+      <StoreProvider initialValues={{ model: "test-model", capUsd: 10 }}>
+        <Composer onSubmit={mockOnSubmit} onExit={() => {}} />
+      </StoreProvider>
+    );
+
+    stdin.write("def foo():\n\tbar()\n\tbaz()");
+    await wait(50);
+    stdin.write("\r");
+    await wait(50);
+
+    expect(mockOnSubmit).toHaveBeenCalledOnce();
+    const received = mockOnSubmit.mock.calls[0][0] as string;
+    expect(received).toContain("\tbar()");
+
+    unmount();
+  });
 });
 
 // ─── @ file injection — wiring (T-AT) ──────────────────────────────────────

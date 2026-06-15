@@ -70,6 +70,31 @@ const HELP_LINES = [
 const PUA_BASE = 0xe000;
 /** @internal exported for tests */
 export const PUA_STRIP_RE = /[\uE000-\uF8FF]/g;
+
+/**
+ * Cleans raw `input` arriving via useInput on terminals that DON'T honor bracketed paste
+ * (usePaste handles the honored case). Strips leaked markers, normalizes CRLF/CR \u2192 LF,
+ * strips PUA sentinels, and removes stray control bytes \u2014 KEEPING \n (0x0A) and \t (0x09)
+ * so multi-line / tab-indented code survives.
+ *
+ * singleChar=true: lone keypress \u2014 drop entirely if control char (preserves prior behavior
+ * for lone ESC/ctrl that slipped through).
+ *
+ * Known limitations (deliberately NOT handled here \u2014 bracketed paste is the real fix):
+ *   - lone-\r-chunk premature submit: only under pathological PTY fragmentation; paste-\r and
+ *     Enter-\r are byte-identical, any debounce would break real Enter. Do NOT coalesce \r.
+ *   - half-open paste (\x1b[200~ with no end marker): Ink-internal pending buffer, not fixable here.
+ */
+function cleanPastedInput(input: string, singleChar: boolean): string {
+  const s = input
+    .replace(/\x1b?\[20[01]~/g, "")   // leaked bracketed-paste markers (ESC-prefixed or bare)
+    .replace(/\r\n?/g, "\n")           // CRLF / CR \u2192 LF  (parity with usePaste)
+    .replace(PUA_STRIP_RE, "");        // paste sentinels
+  if (singleChar) return input.charCodeAt(0) < 32 ? "" : s;
+  // Multi-char: keep \n (0x0A) + \t (0x09), strip other control bytes
+  return s.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+}
+
 const PASTE_THRESHOLD_LINES = 6;
 const PASTE_THRESHOLD_BYTES = 400;
 
@@ -508,10 +533,11 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
         }
         return;
       }
-      if (input && !key.ctrl && !key.meta && input.charCodeAt(0) >= 32) {
-        if (bufferRef.current === "" || bufferRef.current.startsWith("/")) {
-          const newBuf = bufferRef.current.slice(0, cursorRef.current) + input + bufferRef.current.slice(cursorRef.current);
-          applyBuf(newBuf, cursorRef.current + input.length);
+      if (input && !key.ctrl && !key.meta) {
+        const cleaned = cleanPastedInput(input, input.length === 1);
+        if (cleaned && (bufferRef.current === "" || bufferRef.current.startsWith("/"))) {
+          const newBuf = bufferRef.current.slice(0, cursorRef.current) + cleaned + bufferRef.current.slice(cursorRef.current);
+          applyBuf(newBuf, cursorRef.current + cleaned.length);
           setHistoryIdx(-1);
           if (paletteOpen) setPaletteIdx(0);
         }
@@ -595,9 +621,12 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
     }
 
     // Printable character input — handles single keypresses and multi-char pastes.
-    // charCodeAt(0) >= 32 excludes control chars; ctrl/meta guard excludes chords.
-    if (input && !key.ctrl && !key.meta && input.charCodeAt(0) >= 32) {
-      const cleaned = input.replace(PUA_STRIP_RE, "");
+    // On terminals that honor bracketed paste, pasted text goes through usePaste (above).
+    // This branch handles everything else: typed chars, and raw pastes on terminals that
+    // DON'T honor bracketed paste. cleanPastedInput normalizes CRLF, strips leaked markers,
+    // and removes stray controls while preserving \n and \t.
+    if (input && !key.ctrl && !key.meta) {
+      const cleaned = cleanPastedInput(input, input.length === 1);
       if (cleaned) {
         const newBuf = bufferRef.current.slice(0, cursorRef.current) + cleaned + bufferRef.current.slice(cursorRef.current);
         applyBuf(newBuf, cursorRef.current + cleaned.length);
