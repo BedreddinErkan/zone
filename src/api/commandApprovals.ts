@@ -399,3 +399,4 @@ export function rejectPendingApprovalsForRun(runIdRaw: string): number {
 }
 
 export { resolvePlanApproval, type PlanDecision } from "../llm/planApprovals.js";
+export { resolveEditApproval } from "./editApprovals.js";
