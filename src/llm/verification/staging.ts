@@ -4,12 +4,13 @@ import { debugLog, errorLog } from "../../utils/logger.js";
 import {
   selectVerificationCommand,
   resolveAllTsconfigProjects,
-  runVerificationCommand,
   countVerificationErrors,
   execAsync_verify,
   strippedEnvKeys,
 } from "./command.js";
 import { sanitizeVerificationEnv } from "../../core/buildEnv.js";
+import { parseTscErrorPreview } from "../applyRollbackFeedback.js";
+import { classifyVerificationResult } from "./classify.js";
 import { buildStagedDiffs } from "../../core/fileDiff.js";
 import type { StagedFile } from "../../core/fileDiff.js";
 
@@ -101,20 +102,39 @@ export async function runStagingVerification(input: {
     String((stagedErr as Error).message ?? stagedErr);
   const postErrorCount = countVerificationErrors(choice.label, stagedCombined);
 
-  // Phase J.3: staged run failed. Compare to baseline (no staging). If the
-  // baseline ALSO fails with ≥ the same error count, the patch didn't make
-  // things worse — pre-existing errors shouldn't block apply.
-  const baseline = await runVerificationCommand(choice, input.repoPath);
-  const baselineErrorCount =
-    baseline.status === "fail"
-      ? countVerificationErrors(choice.label, baseline.errorPreview)
-      : 0;
+  // Phase J.3 / FIX 1: run baseline inline to capture full stdout/stderr (no truncation).
+  // The old runVerificationCommand path truncated errorPreview to 30 lines / 2000 chars —
+  // that asymmetry could mask identity differences in large error lists.
+  let baselineErr: unknown = null;
+  try {
+    await execAsync_verify(choice.command, {
+      cwd: input.repoPath,
+      timeout: choice.timeoutMs,
+      windowsHide: true,
+      maxBuffer: 10 * 1024 * 1024,
+      env: sanitizeVerificationEnv(),
+    });
+  } catch (err) {
+    baselineErr = err;
+  }
+  const baselineStdout = String((baselineErr as { stdout?: unknown } | null)?.stdout ?? "");
+  const baselineStderr = String((baselineErr as { stderr?: unknown } | null)?.stderr ?? "");
+  const baselineCombined = baselineErr === null ? "" : (baselineStdout + "\n" + baselineStderr).trim();
+  const baselineErrorCount = countVerificationErrors(choice.label, baselineCombined);
 
-  const regressed = postErrorCount > baselineErrorCount;
+  // Identity-aware regression: parse coded error sets and check subset relationship.
+  // A swap of N errors of class A → N errors of class B is a regression even though
+  // the count doesn't change (post ⊄ baseline → regressed:true).
+  const postCodedErrors = parseTscErrorPreview(stagedCombined).filter((e) => e.code !== "");
+  const baseCodedErrors = parseTscErrorPreview(baselineCombined).filter((e) => e.code !== "");
+  const { regressed } = classifyVerificationResult(
+    { count: postErrorCount,    codedErrors: postCodedErrors },
+    { count: baselineErrorCount, codedErrors: baseCodedErrors }
+  );
   debugLog("[zone-verify-baseline]", JSON.stringify({
     label: choice.label,
     stagedExitCode,
-    baselineStatus: baseline.status,
+    baselineStatus: baselineErr === null ? "pass" : "fail",
     baselineErrorCount,
     postErrorCount,
     regressed,
@@ -196,13 +216,20 @@ async function runMultiTsconfigVerification(input: {
     } catch (err) {
       baselineErr = err;
     }
-    const baselineErrorCount = (() => {
-      if (baselineErr === null) return 0;
+    const baselineOut = (() => {
+      if (baselineErr === null) return "";
       const bOut = String((baselineErr as { stdout?: unknown }).stdout ?? "");
       const bErr = String((baselineErr as { stderr?: unknown }).stderr ?? "");
-      return countVerificationErrors("tsc", (bOut + "\n" + bErr).trim());
+      return (bOut + "\n" + bErr).trim();
     })();
-    const regressed = postErrorCount > baselineErrorCount;
+    const baselineErrorCount = countVerificationErrors("tsc", baselineOut);
+
+    const postCodedErrors = parseTscErrorPreview(stagedCombined).filter((e) => e.code !== "");
+    const baseCodedErrors = parseTscErrorPreview(baselineOut).filter((e) => e.code !== "");
+    const { regressed } = classifyVerificationResult(
+      { count: postErrorCount,    codedErrors: postCodedErrors },
+      { count: baselineErrorCount, codedErrors: baseCodedErrors }
+    );
 
     debugLog("[zone-verify-baseline]", JSON.stringify({
       label: "tsc",

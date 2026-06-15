@@ -1,7 +1,6 @@
 import path from "node:path";
 import { parseTscErrorPreview, buildApplyRolledBackMessage } from "../applyRollbackFeedback.js";
 import { finalizeStaging, buildVerificationWarningsMessage, type StagingVerification } from "./staging.js";
-import { classifyVerificationResult } from "./classify.js";
 import { buildStagedDiffs } from "../../core/fileDiff.js";
 import type { VerifyOutcome, VerifyDetail, VerifyAndFinalizeInput } from "./types.js";
 
@@ -92,17 +91,16 @@ export async function verifyAndFinalize(input: VerifyAndFinalizeInput): Promise<
   }
 
   // vr.status === "fail"
-  const { isPreExisting } = classifyVerificationResult(
-    vr.postErrorCount ?? 0,
-    vr.baselineErrorCount ?? 0
-  );
+  // staging.ts already computed regressed via identity-based classifyVerificationResult;
+  // derive isPreExisting directly from that result rather than re-classifying with counts.
+  const isPreExisting = vr.regressed === false && (vr.baselineErrorCount ?? 0) > 0;
 
   if (isPreExisting) {
     const appendix =
       "\n\n**Verification has pre-existing errors** (" +
       vr.label + ", " + vr.durationMs + "ms).\n" +
       "Patch was applied because it didn't add any new errors " +
-      `(${vr.postErrorCount ?? "?"} errors before, ${vr.postErrorCount ?? "?"} errors after).`;
+      `(${vr.baselineErrorCount ?? "?"} errors before, ${vr.postErrorCount ?? "?"} errors after).`;
     return {
       kind: "pre_existing_errors",
       verification: detail,

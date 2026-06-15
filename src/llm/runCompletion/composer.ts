@@ -195,7 +195,7 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<AgentLoopRes
   }
 
   return {
-    success: trigger === "natural_completion",
+    success: trigger === "natural_completion" && outcome.kind !== "applied_with_warnings",
     summary: verdict.strippedText + fields.summaryAppendix,
     toolCallLog,
     filesModified: Array.from(filesModified),

@@ -30,16 +30,53 @@ function normalizePatchedPath(filePath: string): string {
   return String(filePath || "").replace(/\\/g, "/").trim();
 }
 
+/** Parsed tsc error record used for identity-based regression detection. */
+export type CodedError = { file?: string; line?: number; code: string; message: string };
+
+function errorKey(e: CodedError): string {
+  const file = (e.file ?? "").replace(/\\/g, "/").trim();
+  const line = e.line ?? 0;
+  const msg = (e.message ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+  return `${file}:${line}:${e.code}:${msg}`;
+}
+
+function buildErrorKeySet(errors: readonly CodedError[]): Set<string> {
+  const keys = new Set<string>();
+  for (const e of errors) { if (e.code) keys.add(errorKey(e)); }
+  return keys;
+}
+
+function isSubset(sub: Set<string>, sup: Set<string>): boolean {
+  for (const item of sub) { if (!sup.has(item)) return false; }
+  return true;
+}
+
 /**
  * Pure: determines whether a verification failure represents a regression
  * (patch introduced new errors) or pre-existing errors (baseline already had them).
+ *
+ * Uses identity-based subset check when coded errors (tsc TS#### codes) are present —
+ * this catches equal-count error swaps that count parity misses.
+ * Falls back to count comparison when no coded errors exist (test runners, etc.).
  */
 export function classifyVerificationResult(
-  postErrorCount: number,
-  baselineErrorCount: number
+  post: { count: number; codedErrors: readonly CodedError[] },
+  baseline: { count: number; codedErrors: readonly CodedError[] }
 ): { regressed: boolean; isPreExisting: boolean } {
-  const regressed = postErrorCount > baselineErrorCount;
-  const isPreExisting = baselineErrorCount > 0 && !regressed;
+  const postKeys = buildErrorKeySet(post.codedErrors);
+  const baselineKeys = buildErrorKeySet(baseline.codedErrors);
+
+  let regressed: boolean;
+  if (postKeys.size > 0 || baselineKeys.size > 0) {
+    // Identity-based: a new error not present in the baseline set is a regression
+    // even when total counts are equal (e.g. a swap of error classes).
+    regressed = !isSubset(postKeys, baselineKeys);
+  } else {
+    // Count fallback: test runners and other verifiers produce no TS#### codes.
+    regressed = post.count > baseline.count;
+  }
+
+  const isPreExisting = !regressed && baseline.count > 0;
   return { regressed, isPreExisting };
 }
 
