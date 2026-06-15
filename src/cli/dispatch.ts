@@ -52,6 +52,9 @@ export interface OneShotOpts {
   userHooks?: import("../api/diskHooks.js").UserHooksConfig | null;
   /** MCP client manager — proxies mcp__<server>__<tool> calls. */
   mcpManager?: import("../mcp/mcpClientManager.js").McpClientManager | null;
+  /** Opt-in for embed consumers: "manual" arms per-edit approval gate (requestEditApproval).
+   *  Default "auto"; plan-mode's "manually approve changes" decision overrides to "manual" regardless. */
+  editApprovalMode?: "auto" | "manual";
 }
 
 /** Core one-shot runner. Returns the flow result — does NOT call process.exit. */
@@ -168,7 +171,7 @@ export async function runOneShotInner(
   // --- end Phase 2 trust gate ---
 
   let planForExecution: ExecutionPlan | undefined;
-  let editApprovalMode: "auto" | "manual" = "auto";
+  let editApprovalMode: "auto" | "manual" = opts.editApprovalMode ?? "auto";
   let feedbackForExecution = "";
   let useCheckpointLoop = false;
 
