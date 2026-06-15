@@ -2258,7 +2258,7 @@ Example:
   // Double-injection suppression: when the session window is non-empty it already
   // carries the most recent turn with neutral framing. Suppress the PRIOR RUN CONTEXT
   // block in that case so the newest summary never appears twice.
-  const userContent = (priorRun && !sessionMemBlock
+  let userContent = (priorRun && !sessionMemBlock
     ? (
         "PRIOR RUN CONTEXT — your last attempt in this thread produced this result:\n" +
         priorRun +
@@ -2268,6 +2268,15 @@ Example:
         input.task
       )
     : sessionMemBlock + auditContextBlock + restageSeedBlock + input.task) + modeTag;
+
+  const afterHeader = (auditContextBlock + restageSeedBlock + String(input.task ?? "")).trim();
+  if (sessionMemBlock && !afterHeader) {
+    userContent +=
+      "\n\nNo explicit task text was included for this turn. " +
+      "Use the SESSION MEMORY above as context, and provide a concise summary " +
+      "of the work completed in this turn based on the actions taken above. " +
+      "Then ask what to do next.";
+  }
 
   // Chat Completions messages (system + user kickoff).
   // When images are attached, the user message content is an array with text + image_url parts.
