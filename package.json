@@ -21,7 +21,8 @@
   "./snapshots":  { "types": "./src/snapshots/snapshotStore.ts",      "default": "./dist/snapshots/snapshotStore.js" },
   "./model-registry":     { "types": "./src/llm/modelRegistry.ts",                "default": "./dist/llm/modelRegistry.js" },
   "./session-window":     { "types": "./src/llm/sessionWindow.ts",                "default": "./dist/llm/sessionWindow.js" },
-  "./conversation-store": { "types": "./src/core/conversationFilesystemStore.ts", "default": "./dist/core/conversationFilesystemStore.js" }
+  "./conversation-store": { "types": "./src/core/conversationFilesystemStore.ts", "default": "./dist/core/conversationFilesystemStore.js" },
+  "./tier-settings":      { "types": "./src/visual/tierSettings.ts",              "default": "./dist/visual/tierSettings.js" }
 },
   "scripts": {
     "build": "node node_modules/typescript/bin/tsc -p tsconfig.json",
