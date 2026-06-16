@@ -762,7 +762,7 @@ export function assembleInvestigationSystemPrompt(input: {
     ct === "run_command"
       ? "- run_command: run failing tests, build scripts, typecheck. Many commands are auto-approved in investigation mode (e.g. npm run build, npm test, npx tsc --noEmit, npx vitest run). Output: head 100 + tail 50 lines."
       : ct === "run_command_readonly"
-        ? "- run_command_readonly: run failing tests, typecheck, lint, or read-only git inspection. Whitelisted commands only (e.g. 'npx vitest run path/to/test.ts', 'tsc --noEmit', 'git diff'). Output truncated to head 100 + tail 50 lines. Blocked: mutations, network writes, package installs, shell substitution."
+        ? "- run_command_readonly: run failing tests, typecheck, lint, or read-only git inspection. Whitelisted commands only (e.g. 'npx vitest run path/to/test.ts', 'tsc --noEmit', 'git diff'). Output truncated to head 100 + tail 50 lines. Blocked: mutations, network writes, package installs, shell substitution. For file contents or line ranges, use read_file(lineRange) — not sed/awk."
         : null;
 
   // Reproduce-first MANDATE with STOP backstop — emitted only when a command tool is available.

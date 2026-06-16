@@ -997,7 +997,7 @@ export async function executeTool(
         }));
         return {
           success: false,
-          output: `Command blocked: ${safety.reason}. Use only whitelisted read-only commands.`,
+          output: `Command blocked: ${safety.reason}. Use only whitelisted read-only commands. To read file contents or a line range, use the read_file tool (lineRange:[start,end]) or head/tail/cat.`,
         };
       }
 
