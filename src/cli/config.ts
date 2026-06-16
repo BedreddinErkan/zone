@@ -151,6 +151,7 @@ export function loadCliConfig(
     quiet: flags.quiet === true,
     noColor: flags.noColor === true || envStr("NO_COLOR") === "1",
     webSearchEnabled: diskModel?.webSearchEnabled ?? true,
+    summaryFormat: diskModel?.summaryFormat,
     trust: flags.trust,
   };
 }
