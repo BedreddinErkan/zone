@@ -134,6 +134,8 @@ import {
 } from "../llm/revisionApprovals.js";
 import { buildToolCallPatch } from "./toolCallPatch.js";
 
+const MAX_FINAL_ANSWER_CHARS = 100_000;
+
 /**
  * F1.4 C3: filter for the runLlmPatchFlow onProgress sink. toolExecutor
  * emits diagnostic telemetry like
@@ -6237,7 +6239,7 @@ const initializeTodosFromPlan = (): void => {
           : loop.terminationReason === "token_budget_exceeded"
             ? "Agent stopped at token budget"
             : "Agent tool loop ended with issues",
-        detail: loop.summary.slice(0, 4000),
+        detail: loop.summary.slice(0, MAX_FINAL_ANSWER_CHARS),
         status: loop.success ? "success" : "warning",
       });
 

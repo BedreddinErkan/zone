@@ -2397,8 +2397,9 @@ Example:
                   : "Mention which steps remain incomplete."),
             },
           ],
+          max_tokens: 16384,
         },
-        { signal: input.abortSignal }
+        { signal: input.abortSignal, effort: requestCtx?.effort }
       );
       const ae = extractResponsesApiOutputText(wrapupResponse);
       if (ae.ok && ae.text.trim()) finalSummary = ae.text.trim();
@@ -4004,7 +4005,8 @@ Example:
               "Do not call tools. Do not mention patches or verification.",
           },
         ],
-      }, { signal: input.abortSignal });
+        max_tokens: 16384,
+      }, { signal: input.abortSignal, effort: requestCtx?.effort });
       const ae = extractResponsesApiOutputText(assessmentResponse);
       if (ae.ok && ae.text.trim()) {
         finalSummary = ae.text.trim();
@@ -4084,7 +4086,8 @@ Example:
             fwHint,
         },
       ],
-    }, { signal: input.abortSignal });
+      max_tokens: 16384,
+    }, { signal: input.abortSignal, effort: requestCtx?.effort });
     const ae = extractResponsesApiOutputText(assessmentResponse);
       if (ae.ok && ae.text.trim()) {
         finalSummary = ae.text.trim();

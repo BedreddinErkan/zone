@@ -9,6 +9,8 @@ import type { TaskTier } from "./taskClassifier.js";
 import type { LLMProvider } from "./types.js";
 import { debugLog, log } from "../utils/logger.js";
 
+const MAX_FINAL_ANSWER_CHARS = 100_000;
+
 export interface InvestigateScopeOpts {
   repoPath: string;
   query: string;
@@ -255,7 +257,7 @@ export async function investigateScope(opts: InvestigateScopeOpts): Promise<Inve
   emitStructuredProgress({
     type: "agent_loop_complete",
     title: loop.success ? "Scope investigation complete" : "Scope investigation ended",
-    detail: findings.slice(0, 4000),
+    detail: findings.slice(0, MAX_FINAL_ANSWER_CHARS),
     status: loop.success ? "success" : "warning",
     lane: "audit",
   });
@@ -528,7 +530,7 @@ export async function runInvestigationFlow(input: {
         : hitTokenBudget
           ? "Investigation ended at token budget"
           : "Investigation ended with partial findings",
-    detail: responseText.slice(0, 4000),
+    detail: responseText.slice(0, MAX_FINAL_ANSWER_CHARS),
     status: loop.success ? "success" : "warning",
   });
 
