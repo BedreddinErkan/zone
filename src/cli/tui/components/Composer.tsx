@@ -22,7 +22,7 @@ interface ComposerProps {
   onInitStart?: (ac: AbortController) => void;
   onUndoRequest?: () => void;
   getCommitData?: () => { filePaths: string[]; message: string; repoPath: string } | null;
-  getFeedbackData?: () => { runId: string; logs: string } | null;
+  getFeedbackData?: () => { runId: string; sessionId: string; logs: string; version: string; repoPath: string } | null;
 }
 
 interface SlashCommand {
@@ -350,7 +350,7 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
           dispatch({ type: "USER_PROMPT", text: "Nothing to report yet — run a task first." });
           break;
         }
-        dispatch({ type: "FEEDBACK_MODAL_OPEN", runId: feedbackData.runId, logs: feedbackData.logs });
+        dispatch({ type: "FEEDBACK_MODAL_OPEN", runId: feedbackData.runId, sessionId: feedbackData.sessionId, logs: feedbackData.logs, version: feedbackData.version, repoPath: feedbackData.repoPath });
         break;
       }
       case "/autocommit": {

@@ -2,9 +2,13 @@ import { Box, Text, useInput, useStdout } from "ink";
 import { randomUUID } from "node:crypto";
 import { useState } from "react";
 import type { Dispatch } from "react";
+import { buildFeedbackReport } from "../../../feedback/buildFeedbackReport.js";
+import type { FeedbackReport } from "../../../feedback/buildFeedbackReport.js";
 import { useStore } from "../store.js";
 import type { StoreAction } from "../store.js";
-import { copyToClipboard, openMailtoFeedback } from "../../../utils/clipboardMailto.js";
+import { copyToClipboard, openUrlInBrowser } from "../../../utils/clipboardMailto.js";
+
+const REPO_SLUG = "BedreddinErkan/zone";
 
 interface Props {
   dispatch: Dispatch<StoreAction>;
@@ -15,33 +19,53 @@ export function FeedbackModal({ dispatch }: Props): React.ReactElement {
   const { stdout } = useStdout();
   const data = state.feedbackData!;
   const [draftMsg, setDraftMsg] = useState("");
-  const [status, setStatus] = useState<"editing" | "delivering">("editing");
+  const [status, setStatus] = useState<"editing" | "delivering" | "delivered">("editing");
+  const [builtReport, setBuiltReport] = useState<FeedbackReport | null>(null);
 
   useInput((input, key) => {
     if (status === "delivering") return;
+
     if (key.escape) {
       dispatch({ type: "FEEDBACK_MODAL_CLOSE" });
       return;
     }
+
+    if (status === "delivered") {
+      if (input === "m" && !key.ctrl && !key.meta && builtReport) {
+        openUrlInBrowser(builtReport.mailtoUrl);
+        dispatch({ type: "FEEDBACK_MODAL_CLOSE" });
+        dispatch({
+          type: "TOAST_PUSH",
+          entry: { id: randomUUID(), message: "Email draft opened", level: "info" },
+        });
+      } else {
+        dispatch({ type: "FEEDBACK_MODAL_CLOSE" });
+      }
+      return;
+    }
+
     if (key.return) {
       setStatus("delivering");
-      const report =
-        "Message: " + (draftMsg.trim() || "(no message)") +
-        "\nRun ID: " + data.runId +
-        (data.logs ? "\n\nDiagnostics:\n" + data.logs : "");
-      copyToClipboard(report);
-      openMailtoFeedback(
-        "Zone feedback",
-        (draftMsg.trim() || "(no message)") + "\n\nRun ID: " + data.runId,
-      );
-      dispatch({ type: "FEEDBACK_MODAL_CLOSE" });
-      dispatch({
-        type: "TOAST_PUSH",
-        entry: {
-          id: randomUUID(),
-          message: "Copied · email draft opened · or send to feedback@zonecli.dev",
-          level: "info",
-        },
+      const msg = draftMsg.trim() || "(no message)";
+      buildFeedbackReport({
+        repoPath: data.repoPath,
+        sessionId: data.sessionId,
+        runId: data.runId,
+        userMessage: msg,
+        version: data.version,
+        platform: process.platform,
+        repoSlug: REPO_SLUG,
+      }).then((r) => {
+        copyToClipboard(r.markdown);
+        openUrlInBrowser(r.githubIssueUrl);
+        setBuiltReport(r);
+        setStatus("delivered");
+      }).catch(() => {
+        dispatch({ type: "FEEDBACK_MODAL_CLOSE" });
+        dispatch({
+          type: "TOAST_PUSH",
+          entry: { id: randomUUID(), message: "Feedback build failed", level: "warning" },
+        });
       });
       return;
     }
@@ -82,8 +106,10 @@ export function FeedbackModal({ dispatch }: Props): React.ReactElement {
       <Text>   {draftMsg}▋</Text>
       <Text> </Text>
       {status === "delivering"
-        ? <Text dimColor> Delivering…</Text>
-        : <Text dimColor> Type message · Enter send · Esc cancel</Text>
+        ? <Text dimColor> Opening GitHub issue…</Text>
+        : status === "delivered"
+          ? <Text dimColor> Copied · GitHub opened · m for email · any key to close</Text>
+          : <Text dimColor> Type message · Enter send · Esc cancel</Text>
       }
     </Box>
   );

@@ -53,3 +53,16 @@ export function openMailtoFeedback(subject: string, body: string): void {
     execFile(cmd.file, cmd.args, () => undefined);
   } catch { /* best-effort */ }
 }
+
+export function openUrlInBrowser(url: string): void {
+  try {
+    const platform = process.platform;
+    const cmd =
+      platform === "win32"
+        ? { file: "cmd", args: ["/c", "start", "", url] }
+        : platform === "darwin"
+          ? { file: "open", args: [url] }
+          : { file: "xdg-open", args: [url] };
+    execFile(cmd.file, cmd.args, () => undefined);
+  } catch { /* best-effort */ }
+}

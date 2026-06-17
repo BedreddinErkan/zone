@@ -194,7 +194,7 @@ export interface _RunPromptDeps {
   storeCapture: {
     state: StoreState | null;
     lastCommitData: { filePaths: string[]; message: string; repoPath: string } | null;
-    lastFeedbackData: { runId: string; logs: string } | null;
+    lastFeedbackData: { runId: string; sessionId: string; logs: string; version: string; repoPath: string } | null;
     dispatch: ((action: StoreAction) => void) | null;
   };
   bus: import("../eventBus.js").EventBus;
@@ -403,7 +403,7 @@ export async function _runPromptImpl(
     const latest = files[files.length - 1];
     const raw = latest ? fsSync.readFileSync(nodePath.join(dir, latest), "utf8") as string : "";
     const tail = raw.trim().split("\n").filter(Boolean).slice(-8).join("\n");
-    storeCapture.lastFeedbackData = { runId, logs: sanitizeDiagnostics(tail) };
+    storeCapture.lastFeedbackData = { runId, sessionId, logs: sanitizeDiagnostics(tail), version: _zoneVersion, repoPath: config.repoPath };
   } catch { /* best-effort */ }
 }
 
@@ -420,7 +420,7 @@ export async function runTui(
   process.on("exit", restoreStderr);
 
   type CommitData = { filePaths: string[]; message: string; repoPath: string };
-  type FeedbackData = { runId: string; logs: string };
+  type FeedbackData = { runId: string; sessionId: string; logs: string; version: string; repoPath: string };
   const storeCapture: { state: StoreState | null; lastCommitData: CommitData | null; lastFeedbackData: FeedbackData | null; dispatch: ((action: StoreAction) => void) | null } = { state: null, lastCommitData: null, lastFeedbackData: null, dispatch: null };
 
   const config = loadCliConfig(opts);

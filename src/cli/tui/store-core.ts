@@ -88,7 +88,7 @@ export type StoreState = {
   undoModalData: { manifest: import("../../snapshots/snapshotStore.js").SnapshotManifest; driftedPaths: string[] } | null;
   planModeSelectedIndex: number;
   commitData: { filePaths: string[]; message: string; repoPath: string } | null;
-  feedbackData: { runId: string; logs: string } | null;
+  feedbackData: { runId: string; sessionId: string; logs: string; version: string; repoPath: string } | null;
   summarySelectedIndex: number;
   memorySelectedIndex: number;
   planReadyProposal: {
@@ -306,7 +306,7 @@ export type StoreAction =
   | { type: "NARRATION_COMMIT" }
   | { type: "COMMIT_MODAL_OPEN"; filePaths: string[]; message: string; repoPath: string }
   | { type: "COMMIT_MODAL_CLOSE" }
-  | { type: "FEEDBACK_MODAL_OPEN"; runId: string; logs: string }
+  | { type: "FEEDBACK_MODAL_OPEN"; runId: string; sessionId: string; logs: string; version: string; repoPath: string }
   | { type: "FEEDBACK_MODAL_CLOSE" }
   | { type: "UNDO_MODAL_OPEN"; manifest: import("../../snapshots/snapshotStore.js").SnapshotManifest; driftedPaths: string[] }
   | { type: "UNDO_MODAL_CLOSE" }
@@ -803,7 +803,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return { ...state, modalView: "none" };
 
     case "FEEDBACK_MODAL_OPEN":
-      return { ...state, modalView: "feedback", feedbackData: { runId: action.runId, logs: action.logs } };
+      return { ...state, modalView: "feedback", feedbackData: { runId: action.runId, sessionId: action.sessionId, logs: action.logs, version: action.version, repoPath: action.repoPath } };
 
     case "FEEDBACK_MODAL_CLOSE":
       return { ...state, modalView: "none" };

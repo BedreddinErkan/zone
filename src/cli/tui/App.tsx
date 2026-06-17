@@ -55,7 +55,7 @@ interface AppProps {
   initialModelSettings?: DiskModelSettings | null;
   onModelApply?: (model: string, provider: "anthropic" | "openai", effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void;
   getCommitData?: () => { filePaths: string[]; message: string; repoPath: string } | null;
-  getFeedbackData?: () => { runId: string; logs: string } | null;
+  getFeedbackData?: () => { runId: string; sessionId: string; logs: string; version: string; repoPath: string } | null;
   onDispatchCapture?: (dispatch: Dispatch<StoreAction>) => void;
   onSessionClear?: (oldSessionId: string) => void;
   initialUserCommands?: UserCommand[];
@@ -74,7 +74,7 @@ interface AppInnerProps {
   onStateChange: ((state: StoreState) => void) | undefined;
   onModelApply: ((model: string, provider: "anthropic" | "openai", effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void) | undefined;
   getCommitData: (() => { filePaths: string[]; message: string; repoPath: string } | null) | undefined;
-  getFeedbackData: (() => { runId: string; logs: string } | null) | undefined;
+  getFeedbackData: (() => { runId: string; sessionId: string; logs: string; version: string; repoPath: string } | null) | undefined;
   onDispatchCapture: ((dispatch: Dispatch<StoreAction>) => void) | undefined;
   onSessionClear: ((oldSessionId: string) => void) | undefined;
 }
