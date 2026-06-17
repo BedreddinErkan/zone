@@ -54,7 +54,8 @@ export class ManifestInjectionProcessor implements HistoryProcessor {
       content:
         `## Files already read this run\n${manifest}\n\n` +
         `Re-read ONLY if the file was modified since your last read.\n` +
-        `Reference prior content by line number instead of re-reading.`,
+        `Reference prior content by line number instead of re-reading.\n` +
+        `(Automated cache notice from the system — NOT a new user request. Continue the task above; if it is already complete, write the FINAL SUMMARY.)`,
     };
     return { kind: "transformed", messages: [...messages, manifestMsg] };
   }
