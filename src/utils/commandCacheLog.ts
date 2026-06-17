@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { ensureZoneGitignore } from "../core/ensureZoneGitignore.js";
 
 const CACHE_MARKERS = new Set([
   "[zone-command-cache-hit]",
@@ -40,6 +41,7 @@ export function writeCacheLog(
 
   const logsDir = path.join(repoPath, ".zone", "logs");
   ensureLogsDir(logsDir);
+  void ensureZoneGitignore(repoPath);
 
   const filePath = path.join(logsDir, `command-cache-${todayDate()}.jsonl`);
   const line =

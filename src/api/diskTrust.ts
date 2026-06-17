@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import { join, dirname } from "node:path";
+import { ensureZoneGitignore } from "../core/ensureZoneGitignore.js";
 
 export interface DiskTrustEntry {
   prefix: string;
@@ -31,6 +32,7 @@ export async function loadDiskTrust(cwd: string): Promise<DiskTrustFile> {
 async function saveDiskTrust(cwd: string, store: DiskTrustFile): Promise<void> {
   const path = join(cwd, TRUST_FILENAME);
   await fs.mkdir(dirname(path), { recursive: true });
+  await ensureZoneGitignore(cwd);
   const tmp = `${path}.tmp`;
   await fs.writeFile(tmp, JSON.stringify(store, null, 2), "utf-8");
   await fs.rename(tmp, path);

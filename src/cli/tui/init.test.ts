@@ -90,6 +90,7 @@ describe("BYOK4 — runInit appends .zone/ to .gitignore", () => {
 
   beforeEach(async () => {
     tmp = await mkdtemp(join(tmpdir(), "zone-init-gi-"));
+    await mkdir(join(tmp, ".git")); // make it look like a git repo so ensureZoneGitignore fires
     dispatch = () => {};
     vi.mocked(loadDiskKeys).mockResolvedValue({ keys: [] } as never);
     vi.mocked(runInvestigationFlow).mockResolvedValue({
@@ -124,9 +125,10 @@ describe("BYOK4 — runInit appends .zone/ to .gitignore", () => {
     expect(matches).toHaveLength(1);
   });
 
-  it("does not create .gitignore when absent", async () => {
+  it("creates .gitignore containing .zone/ when no .gitignore exists (git repo)", async () => {
     await runInit(tmp, dispatch, new AbortController());
-    await expect(readFile(join(tmp, ".gitignore"), "utf-8")).rejects.toThrow(/ENOENT/);
+    const content = await readFile(join(tmp, ".gitignore"), "utf-8");
+    expect(content).toBe(".zone/\n");
   });
 });
 

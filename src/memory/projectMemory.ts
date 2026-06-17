@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { ensureZoneGitignore } from "../core/ensureZoneGitignore.js";
 
 export interface MemoryEntry {
   date: string; // YYYY-MM-DD
@@ -155,6 +156,7 @@ export async function appendMemory(
       : next;
 
   await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await ensureZoneGitignore(repoPath);
   await fs.writeFile(filePath, renderFile(trimmedList, initBlock), "utf8");
   return entry;
 }

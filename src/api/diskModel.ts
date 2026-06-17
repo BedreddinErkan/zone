@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { ensureZoneGitignore } from "../core/ensureZoneGitignore.js";
 
 // keep in sync with modelRegistry.ts:EffortLevel
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
@@ -53,6 +54,7 @@ export async function saveDiskModel(cwd: string, s: DiskModelSettings): Promise<
   const p = modelPath(cwd);
   const tmp = `${p}.tmp`;
   await fs.mkdir(path.dirname(p), { recursive: true });
+  await ensureZoneGitignore(cwd);
   await fs.writeFile(tmp, JSON.stringify(s, null, 2), "utf-8");
   await fs.rename(tmp, p);
   try { await fs.chmod(p, 0o600); } catch { /* Windows/non-POSIX — best effort */ }

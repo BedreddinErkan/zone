@@ -21,6 +21,7 @@
 import fs from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { ensureZoneGitignore } from "./ensureZoneGitignore.js";
 
 /** Strict allowlist for threadId path components (uuid-ish + dashes only). */
 const THREAD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
@@ -82,6 +83,7 @@ export async function appendFsConversationEvent(input: {
   } catch {
     return false;
   }
+  await ensureZoneGitignore(repoPath);
 
   // Rotation: read existing (if any), trim to last N-1, write back + new line.
   // For small files (≤50 lines, each typically <2KB) this is cheap.

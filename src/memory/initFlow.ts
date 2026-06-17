@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { loadCliConfig, applyDiskKeyFallbacks } from "../cli/config.js";
 import { withRequestContext } from "../llm/openaiContext.js";
 import { runInvestigationFlow } from "../llm/investigationFlow.js";
+import { ensureZoneGitignore } from "../core/ensureZoneGitignore.js";
 
 const MEMORY_PATH_RELATIVE = join(".zone", "memory.md");
 
@@ -106,20 +107,7 @@ export async function runInitFlow(
     await fs.writeFile(memoryPath, content, "utf-8");
     const lines = chatResponse.split("\n").length;
     const suffix = lines < 20 ? " Response was short — review and expand .zone/memory.md manually." : "";
-    try {
-      const gitignorePath = join(cwd, ".gitignore");
-      let existing: string | null = null;
-      try {
-        existing = await fs.readFile(gitignorePath, "utf-8");
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-      }
-      if (existing !== null && !/^\.zone\/?$/m.test(existing)) {
-        const append = existing.endsWith("\n") ? ".zone/\n" : "\n.zone/\n";
-        await fs.appendFile(gitignorePath, append, "utf-8");
-        console.log("[zone-init-gitignore-updated] appended .zone/ to .gitignore");
-      }
-    } catch { /* non-fatal */ }
+    await ensureZoneGitignore(cwd);
     const msg = `Created .zone/memory.md (${lines} lines). Use /memory to view, or edit directly.${suffix}`;
     onProgress?.(msg);
     return { ok: true, message: msg, costUsd: initCostUsd };
