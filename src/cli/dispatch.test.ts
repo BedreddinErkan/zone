@@ -58,6 +58,12 @@ vi.mock("../llm/executionPlan.js", () => ({
 }));
 vi.mock("../visual/tierSettings.js", () => ({ readAuditModeSetting: mockReadAuditModeSetting, readDailyUsdCapOverride: vi.fn() }));
 vi.mock("../api/diskModel.js", () => ({ loadDiskModelSync: mockLoadDiskModelSync }));
+vi.mock("../api/diskKeys.js", () => ({
+  loadDiskKeys: vi.fn().mockResolvedValue({ version: 1 as const, keys: [] }),
+  setDiskKey: vi.fn(),
+  removeDiskKey: vi.fn(),
+  maskKey: vi.fn((k: string) => k),
+}));
 vi.mock("../llm/planInvestigation.js", () => ({ runPlanInvestigation: mockRunPlanInvestigation }));
 vi.mock("../api/stagedApprovals.js", () => ({
   rejectPendingStagedForRun: mockRejectPendingStagedForRun,

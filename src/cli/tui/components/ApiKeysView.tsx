@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Box, Text, useInput, usePaste } from "ink";
 import { useStore } from "../store.js";
 import { loadDiskKeys, setDiskKey, removeDiskKey, maskKey } from "../../../api/diskKeys.js";
@@ -33,7 +34,14 @@ export function ApiKeysView(): React.ReactElement {
       if (key.escape) { dispatch({ type: "KEYS_INPUT_CANCEL" }); return; }
       if (key.return) {
         if (editInput.trim() && editProvider) {
-          void setDiskKey(editProvider, editInput.trim()).then(refresh);
+          void setDiskKey(editProvider, editInput.trim())
+            .then(() => {
+              refresh();
+              dispatch({ type: "TOAST_PUSH", entry: { id: randomUUID(), message: "Key saved — active on next run.", level: "info" } });
+            })
+            .catch((err: unknown) => {
+              dispatch({ type: "TOAST_PUSH", entry: { id: randomUUID(), message: err instanceof Error ? err.message : "Failed to save key.", level: "error" } });
+            });
         } else {
           dispatch({ type: "KEYS_INPUT_CANCEL" });
         }

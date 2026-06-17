@@ -9,7 +9,7 @@ import {
 import { rejectPendingRevisionsForRun } from "../llm/revisionApprovals.js";
 import { requestPlanApproval, rejectPendingPlansForRun } from "../llm/planApprovals.js";
 import type { ExecutionPlan } from "../llm/executionPlan.js";
-import { loadCliConfig, validateCliConfig, type CliConfig, type CliFlags } from "./config.js";
+import { loadCliConfig, validateCliConfig, applyDiskKeyFallbacks, type CliConfig, type CliFlags } from "./config.js";
 import { loadDiskModelSync } from "../api/diskModel.js";
 import { runPlanInvestigation } from "../llm/planInvestigation.js";
 import { createSpinner, buildCliSink } from "./sink.js";
@@ -23,7 +23,7 @@ import { debugLog } from "../utils/logger.js";
 import { isProjectTrusted, addTrustedProject, resolveProjectRoot, canonicalizePath } from "../api/diskTrustedProjects.js";
 import { requestTrustApproval, rejectPendingTrustForRun } from "../api/trustApprovals.js";
 import { classifyPath } from "../core/pathSafety.js";
-import { ProviderRequestError, PlanRefusalError } from "../llm/factory.js";
+import { ApiKeyError, ProviderRequestError, PlanRefusalError } from "../llm/factory.js";
 import { sep } from "node:path";
 import { runAuditPipeline } from "../llm/auditPipeline.js";
 import { readAuditModeSetting } from "../visual/tierSettings.js";
@@ -69,6 +69,24 @@ export async function runOneShotInner(
   const effectiveConfig = opts.mode === "autoAccept"
     ? { ...config, autoApprove: true }
     : config;
+
+  // Re-merge disk keys so a key set via /keys in the same session takes effect immediately.
+  // applyDiskKeyFallbacks fills empty fields only — env/config.json keys always win.
+  try { await applyDiskKeyFallbacks(effectiveConfig); } catch { /* non-critical */ }
+
+  // No-key pre-flight: surface a clear error before any LLM call rather than letting
+  // the classifier/plan-gen silently swallow ApiKeyError.
+  {
+    const _activeKey = effectiveConfig.provider === "openai"
+      ? effectiveConfig.openaiApiKey
+      : effectiveConfig.anthropicApiKey;
+    if (!_activeKey) {
+      const _envVar = effectiveConfig.provider === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
+      throw new ApiKeyError(
+        `No API key found for ${effectiveConfig.provider}. Add one with /keys, or set ${_envVar}.`
+      );
+    }
+  }
 
   const spinner = createSpinner(process.stdout.isTTY === true, effectiveConfig.noColor);
   const sink = buildCliSink(
@@ -635,6 +653,9 @@ export async function runHeadless(
   headlessOpts: HeadlessOpts = {}
 ): Promise<void> {
   const config = loadCliConfig(flags);
+  // Merge disk keys so a /keys-saved key is visible before validateCliConfig checks.
+  try { await applyDiskKeyFallbacks(config); } catch { /* non-critical */ }
+
   const isJson = headlessOpts.outputFormat === "json";
 
   // Swallow [zone-*] telemetry lines in headless text mode; ZONE_VERBOSE_LOGS=1

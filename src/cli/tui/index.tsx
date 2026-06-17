@@ -11,7 +11,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import type { CliFlags } from "../config.js";
 import { loadCliConfig, validateCliConfig, applyDiskKeyFallbacks, type CliConfig } from "../config.js";
 import { runOneShotInner, type TuiMode } from "../dispatch.js";
-import { ProviderRequestError, PlanRefusalError } from "../../llm/factory.js";
+import { ApiKeyError, ProviderRequestError, PlanRefusalError } from "../../llm/factory.js";
 import { resolveInitialTuiMode } from "./initialMode.js";
 import type { LlmPatchFlowResult } from "../../core/runLlmPatchFlow.js";
 import { createEventBus } from "../eventBus.js";
@@ -291,7 +291,18 @@ export async function _runPromptImpl(
       mcpManager: storeCapture.state?.armedMcpManager,
     });
   } catch (err: unknown) {
-    if (err instanceof ProviderRequestError) {
+    if (err instanceof ApiKeyError) {
+      // Missing/invalid API key: surface as red ErrorLine before any LLM call is attempted.
+      bus.emit("run_failed", {
+        runId,
+        ts: Date.now(),
+        type: "run_failed",
+        title: "API key missing",
+        userMessage: err.message,
+        errorKind: "other" as const,
+      });
+      emitSafetyNet = false;
+    } else if (err instanceof ProviderRequestError) {
       // Typed provider error (e.g. retention 400): surface as red ErrorLine + failed run-state.
       bus.emit("run_failed", {
         runId,
