@@ -41,7 +41,15 @@ import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { cacheHitRatio } from "../usage/iterCostMeter.js";
 import { webSearchFee } from "../usage/pricing.js";
 import { parseTodoProgressMarkers, type RunTodo } from "../core/todoLifecycle.js";
-import type { FailureRecordLite } from "../api/diskRunEnvelope.js";
+import {
+  saveRunEnvelope,
+  deleteRunEnvelope,
+  stampEnvelopeStatus,
+  createCoalescingWriter,
+  type FailureRecordLite,
+  type RunEnvelope,
+  type EnvelopeStatus,
+} from "../api/diskRunEnvelope.js";
 import {
   buildApplyRolledBackMessage,
   parseTscErrorPreview,
@@ -1737,6 +1745,19 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         promotedAtIter: result.promotedAtIter ?? null,
       });
     }
+    // Durable resume: lifecycle — delete envelope on clean success; stamp on all other exits.
+    if (input.sessionId && !input.subagent) {
+      const terminationReasonForEnvelope = result.terminationReason ?? "unknown";
+      if (terminationReasonForEnvelope === "natural_completion" && result.success) {
+        await deleteRunEnvelope(input.sessionId).catch(() => {});
+      } else {
+        await stampEnvelopeStatus(
+          input.sessionId,
+          terminationReasonForEnvelope as EnvelopeStatus,
+          result.filesModified ?? [],
+        ).catch(() => {});
+      }
+    }
     return result;
   } finally {
     if (!input.subagent && input.runId) {
@@ -2060,6 +2081,78 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   // calls) so the finally below is a guaranteed no-op on those paths and fires only for
   // AbortError / uncaught exceptions.
   let stagingFinalized = false;
+
+  // ── Durable resume: checkpoint machinery ────────────────────────────────────
+  // latestTodos: live todo list updated on every TodoWrite intercept.
+  let latestTodos: RunTodo[] = input.resumeTodos ?? [];
+  // stagingBaseHashes: sha256 of each file's disk content when first staged.
+  // Computed lazily in captureBaseHashes (disk == base until finalizeStaging).
+  const stagingBaseHashes = new Map<string, { hash: string; existed: boolean }>();
+
+  function captureBaseHashes(): void {
+    for (const abs of stagingFiles.keys()) {
+      if (stagingBaseHashes.has(abs)) continue; // base is stable; capture once per path
+      const existed = fs.existsSync(abs);
+      stagingBaseHashes.set(abs, {
+        existed,
+        hash: existed
+          ? createHash("sha256").update(fs.readFileSync(abs, "utf8")).digest("hex")
+          : "",
+      });
+    }
+  }
+
+  const MAX_STAGED_CONTENT_BYTES = 1_000_000;
+  const envelopeCreatedAt = new Date().toISOString();
+
+  function buildEnvelopeSnapshot(status: EnvelopeStatus): RunEnvelope {
+    const staging = [];
+    for (const [abs, content] of stagingFiles) {
+      if (content.length > MAX_STAGED_CONTENT_BYTES) continue; // R3: omit oversized entries
+      const relPath = path.relative(input.repoPath, abs);
+      const base = stagingBaseHashes.get(abs) ?? { hash: "", existed: false };
+      staging.push({ path: relPath, absPath: abs, baseHash: base.hash, baseExisted: base.existed, content });
+    }
+    const failureHistoryArr: RunEnvelope["failureHistory"] = [];
+    for (const [p, records] of failureHistory) {
+      const lite: FailureRecordLite[] = records.slice(-8).map(r => ({
+        trigger: String(r.trigger),
+        errorLine: r.errorLine ?? null,
+        patchHash: r.patchHash,
+        iter: r.iter,
+      }));
+      failureHistoryArr.push({ path: p, records: lite });
+    }
+    return {
+      version: 1,
+      sessionId: input.sessionId ?? "",
+      pid: process.pid,
+      repoPath: input.repoPath,
+      model: input.mcpManager ? "unknown" : "", // model resolved at adapter time; blank is fine
+      task: input.task,
+      createdAt: envelopeCreatedAt,
+      updatedAt: new Date().toISOString(),
+      status,
+      executionPlan: input.executionPlan ?? null,
+      todos: latestTodos,
+      failureHistory: failureHistoryArr,
+      staging,
+      flushedPaths: [],  // stamped at exit by stampEnvelopeStatus with result.filesModified
+      priorSessionSummary: String(input.priorSessionSummary ?? ""),
+    };
+  }
+
+  const checkpointWriter = createCoalescingWriter(async () => {
+    captureBaseHashes();
+    await saveRunEnvelope(buildEnvelopeSnapshot("running"));
+  });
+
+  function writeRunCheckpoint(): void {
+    // Guard: subagents never own staging; sessionId required for envelope path.
+    if (!ownsStagingFiles || !input.sessionId || input.subagent) return;
+    checkpointWriter.trigger();
+  }
+  // ── End checkpoint machinery ─────────────────────────────────────────────────
 
   try {
 
@@ -3299,12 +3392,14 @@ Example:
           }
           const isFirstEmission = !todosEmittedThisRun;
           todosEmittedThisRun = true;
+          latestTodos = validation.normalized;  // durable resume: keep latest todo snapshot
           input.onStructuredEvent?.({
             type: isFirstEmission ? "todos_initialized" : "todo_revised",
             title: isFirstEmission ? "Plan initialized" : "Plan revised",
             status: "success",
             todos: validation.normalized,
           });
+          writeRunCheckpoint();  // checkpoint after every todo update
           const okMsg = `Plan ${isFirstEmission ? "initialized" : "revised"} with ${validation.normalized.length} step(s).`;
           responseInput.push({
             role: "tool",
@@ -3687,6 +3782,14 @@ Example:
               );
             },
           );
+        }
+
+        // Durable resume: checkpoint after every successful write-tool.
+        if (
+          (name === "apply_patch" || name === "write_file" || name === "multi_edit") &&
+          !toolEventCtx.failureDetected
+        ) {
+          writeRunCheckpoint();
         }
       }
 
