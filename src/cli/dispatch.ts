@@ -62,6 +62,13 @@ export interface OneShotOpts {
   editApprovalMode?: "auto" | "manual";
   /** Durable resume: stable per-session ID threaded into the agent loop for envelope checkpointing. */
   sessionId?: string;
+  /** Durable resume: pre-reconciled staging + context to inject on restart. */
+  resume?: {
+    stagingFiles: Map<string, string>;
+    todos: import("../core/todoLifecycle.js").RunTodo[];
+    failureHistory: Array<{ path: string; records: import("../api/diskRunEnvelope.js").FailureRecordLite[] }>;
+    contextBlock: string;
+  };
 }
 
 /** Core one-shot runner. Returns the flow result — does NOT call process.exit. */
@@ -547,6 +554,7 @@ export async function runOneShotInner(
             userHooks: opts.userHooks,
             mcpManager: opts.mcpManager,
             ...(restageSeed !== undefined ? { restageSeed, maxIterationsOverride: REFINE_RESTAGE_ITER_CAP } : {}),
+            resume: opts.resume,
           })
         );
         if (!result.ok) {
@@ -604,6 +612,7 @@ export async function runOneShotInner(
         images: opts.images,
         userHooks: opts.userHooks,
         mcpManager: opts.mcpManager,
+        resume: opts.resume,
       })
     );
 
