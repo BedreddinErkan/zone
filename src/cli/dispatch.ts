@@ -29,6 +29,11 @@ import { runAuditPipeline } from "../llm/auditPipeline.js";
 import { readAuditModeSetting } from "../visual/tierSettings.js";
 import { withRequestContext } from "../llm/openaiContext.js";
 import { applyStdoutInterception } from "./tui/stdoutShield.js";
+import {
+  loadRunEnvelope,
+  reconcileEnvelopeStaging,
+  buildResumeContextBlock,
+} from "../api/diskRunEnvelope.js";
 
 // Phase 2a quick-plan seeding cost guard
 const QUICK_PLAN_FILES = 5;
@@ -734,3 +739,101 @@ export async function runHeadless(
 
 /** @deprecated Use runHeadless instead. */
 export const runOneShotFromCli = runHeadless;
+
+/**
+ * Build a runLlmPatchFlow input that resumes a previously-interrupted run.
+ * Loads the envelope, reconciles staged files against disk, and builds the
+ * resume context block that is injected into the first user message.
+ */
+export async function buildResumeFlowInput(
+  sessionId: string,
+  flags: Partial<CliFlags>,
+  headlessOpts: HeadlessOpts = {},
+): Promise<Parameters<typeof runLlmPatchFlow>[0]> {
+  const env = await loadRunEnvelope(sessionId);
+  if (!env) throw new Error(`No envelope found for session ${sessionId}`);
+  const { restored, dropNotes } = reconcileEnvelopeStaging(env);
+  const contextBlock = buildResumeContextBlock(env, dropNotes);
+  const config = loadCliConfig({ ...flags, repo: env.repoPath });
+  try { await applyDiskKeyFallbacks(config); } catch { /* non-critical */ }
+  const runId = randomUUID();
+  const userApiKey = config.provider === "openai" ? config.openaiApiKey : config.anthropicApiKey;
+  return {
+    task: env.task,
+    repoPath: env.repoPath,
+    runId,
+    sessionId,
+    provider: config.provider,
+    userApiKey,
+    abortSignal: undefined,
+    preGeneratedPlan: env.executionPlan ?? undefined,
+    priorSessionSummary: env.priorSessionSummary || undefined,
+    mode: "patch",
+    onProgress: headlessOpts.outputFormat === "json" ? () => undefined : undefined,
+    resume: {
+      stagingFiles: restored,
+      todos: env.todos,
+      failureHistory: env.failureHistory,
+      contextBlock,
+    },
+  };
+}
+
+/** Headless entry-point for resuming an interrupted run by session ID. */
+export async function runHeadlessResume(
+  sessionId: string,
+  flags: Partial<CliFlags>,
+  headlessOpts: HeadlessOpts = {},
+): Promise<void> {
+  const isJson = headlessOpts.outputFormat === "json";
+  const restoreStdout = isJson ? (): void => {} : applyStdoutInterception();
+  process.once("exit", restoreStdout);
+
+  let flowInput: Parameters<typeof runLlmPatchFlow>[0];
+  try {
+    flowInput = await buildResumeFlowInput(sessionId, flags, headlessOpts);
+  } catch (err) {
+    restoreStdout();
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exit(1);
+  }
+
+  try {
+    validateCliConfig(loadCliConfig({ ...flags, repo: flowInput.repoPath }));
+  } catch (err) {
+    restoreStdout();
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exit(1);
+  }
+
+  const startMs = Date.now();
+  let result: LlmPatchFlowResult;
+  try {
+    result = await runLlmPatchFlow(flowInput);
+  } catch (err) {
+    if (err instanceof ProviderRequestError) {
+      if (isJson) process.stdout.write(JSON.stringify({ success: false, exit_code: 1, error_kind: err.kind, error: err.userMessage }) + "\n");
+      else process.stderr.write(`\nerror: ${err.userMessage}\n`);
+      process.exit(1);
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    if (isJson) process.stdout.write(JSON.stringify({ success: false, exit_code: 1, error: msg }) + "\n");
+    else process.stderr.write(`\nerror: ${msg}\n`);
+    process.exit(1);
+  }
+
+  const success = "ok" in result && result.ok === true;
+  if (isJson) {
+    process.stdout.write(JSON.stringify({
+      success,
+      exit_code: success ? 0 : 1,
+      cost_usd: ("costUsd" in result ? result.costUsd : null) ?? null,
+      duration_ms: Date.now() - startMs,
+      resumed_session: sessionId,
+    }) + "\n");
+  } else {
+    printResult(result, loadCliConfig(flags).noColor, loadCliConfig(flags).quiet);
+  }
+
+  process.exit(success ? 0 : 1);
+}
