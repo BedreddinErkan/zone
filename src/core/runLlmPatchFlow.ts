@@ -4578,6 +4578,13 @@ export async function runLlmPatchFlow(input: {
   userHooks?: import("../api/diskHooks.js").UserHooksConfig | null;
   /** MCP client manager — proxies mcp__<server>__<tool> calls. */
   mcpManager?: import("../mcp/mcpClientManager.js").McpClientManager | null;
+  /** Durable resume: pre-reconciled staging + context to inject on restart. */
+  resume?: {
+    stagingFiles: Map<string, string>;
+    todos: import("../core/todoLifecycle.js").RunTodo[];
+    failureHistory: Array<{ path: string; records: import("../api/diskRunEnvelope.js").FailureRecordLite[] }>;
+    contextBlock: string;
+  };
 }): Promise<LlmPatchFlowResult> {
   attachRunIdentity({ userId: input.userId, runId: input.runId });
   // Phase H.7: outer-scope flag survives past the inner block where `loop`
@@ -5932,6 +5939,13 @@ const initializeTodosFromPlan = (): void => {
       // runs in the same conversation share a cache hit instead of misses.
       conversationId: typeof input.conversationId === "string" ? input.conversationId : undefined,
       sessionId: input.sessionId,
+      // Durable resume: seed prior-run state into the agent loop.
+      ...(input.resume ? {
+        resumeStagingFiles: input.resume.stagingFiles,
+        resumeTodos: input.resume.todos,
+        resumeFailureHistory: input.resume.failureHistory,
+        resumeContextBlock: input.resume.contextBlock,
+      } : {}),
       // Phase X.0.1: forward audit findings so execute agent skips re-investigation.
       auditFindings: input.auditFindings,
       summaryFormat: input.summaryFormat,
