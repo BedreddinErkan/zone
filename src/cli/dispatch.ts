@@ -69,6 +69,9 @@ export interface OneShotOpts {
     failureHistory: Array<{ path: string; records: import("../api/diskRunEnvelope.js").FailureRecordLite[] }>;
     contextBlock: string;
   };
+  /** Durable resume: pre-generated plan from the envelope; when set in plan mode,
+   *  bypasses preparePlanContext + generateExecutionPlan + PlanReadyModal. */
+  preGeneratedPlan?: ExecutionPlan;
 }
 
 /** Core one-shot runner. Returns the flow result — does NOT call process.exit. */
@@ -237,7 +240,7 @@ export async function runOneShotInner(
     if (planDepth === "investigate" || planDepth === "strict") {
       // Strict / legacy-investigate: staged-diff checkpoint (opt-in).
       useCheckpointLoop = true;
-    } else {
+    } else if (!opts.preGeneratedPlan) {
       // "quick" path: seed top-5 file bodies, generate plan, show PlanReadyModal.
       let planCtxRepoSummary = "";
       let planCtxRelevantFiles: string[] = [];
@@ -490,6 +493,9 @@ export async function runOneShotInner(
         planForExecution = currentPlan;
       }
       } // end else (preGeneratedPlan defined — plan-dependent code)
+    } else {
+      // Durable resume: use envelope plan directly — no re-planning, no PlanReadyModal.
+      planForExecution = opts.preGeneratedPlan;
     }
   }
 
@@ -603,7 +609,7 @@ export async function runOneShotInner(
         provider: effectiveConfig.provider,
         forceTier: effectiveConfig.forceTier,
         mode: "patch",
-        preGeneratedPlan: planForExecution,
+        preGeneratedPlan: planForExecution ?? opts.preGeneratedPlan,
         summaryFormat: effectiveConfig.summaryFormat,
         priorSessionSummary: opts.priorSessionSummary,
         webSearchEnabled: effectiveConfig.webSearchEnabled,

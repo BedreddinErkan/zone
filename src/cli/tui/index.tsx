@@ -299,6 +299,7 @@ export async function _runPromptImpl(
       mcpManager: storeCapture.state?.armedMcpManager,
       sessionId: envelopeResume?.sessionId ?? (sessionId ?? undefined),
       resume: envelopeResume?.resume,
+      preGeneratedPlan: envelopeResume?.preGeneratedPlan,
     });
   } catch (err: unknown) {
     if (err instanceof ApiKeyError) {
@@ -665,7 +666,7 @@ export async function runTui(
   // Pre-compute the session ID before React renders. On the first prompt (mount useEffect),
   // storeCapture.state is null → _resolveSessionId falls back to this guaranteed ID.
   // App.tsx receives it as initialSessionId so the store's sessionId matches (same .jsonl file).
-  const localSessionId = resumedSession?.sessionId ?? randomUUID();
+  const localSessionId = pendingEnvelopeResume?.sessionId ?? resumedSession?.sessionId ?? randomUUID();
   const runPromptDeps: _RunPromptDeps = { config, storeCapture, bus, localSessionId, pendingEnvelopeResume };
   const runPrompt = (prompt: string, ac: AbortController, mode: TuiMode = "normal", images?: import("../../api/imageUpload.js").ImageAttachment[]): void => {
     void _runPromptImpl(prompt, ac, mode, images, runPromptDeps);
