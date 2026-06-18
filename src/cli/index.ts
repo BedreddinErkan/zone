@@ -49,7 +49,8 @@ import {
 import { runTestEngineerFlow } from "../roles/runTestEngineerFlow.js";
 import { runDataAnalystFlow } from "../roles/runDataAnalystFlow.js";
 import { checkConfidenceGate, renderConfidenceGateBlock } from "../core/confidenceGate.js";
-import { runHeadless, runOneShotFromCli } from "./dispatch.js";
+import { runHeadless, runHeadlessResume, runOneShotFromCli } from "./dispatch.js";
+import { latestResumableEnvelope, resolveEnvelopeId } from "../api/diskRunEnvelope.js";
 import { parseTrustFlag } from "./config.js";
 const execFileAsync = promisify(execFile);
 const ANSI_ENABLED = process.env.VITEST !== "true" && process.env.NO_COLOR !== "1";
@@ -89,7 +90,7 @@ type CliOptions = {
   // TUI.1 new flags
   print?: boolean;
   continue?: boolean;
-  resume?: boolean;
+  resume?: boolean | string;
   name?: string;
   outputFormat?: string;
   maxTurns?: number;
@@ -1289,8 +1290,8 @@ export async function run(): Promise<void> {
     )
     .argument("[query...]", "Task or initial prompt (omit for interactive TUI)")
     .option("-p, --print", "Headless one-shot mode (non-interactive, no TUI)")
-    .option("-c, --continue", "Resume most recent session (coming in TUI.6)")
-    .option("-r, --resume", "Resume most recent session")
+    .option("-c, --continue", "Resume the most recently interrupted run (envelope-first)")
+    .option("-r, --resume [id]", "Resume a run by session ID or prefix; bare flag resumes most recent")
     .option("-n, --name <name>", "Name this session (stored for TUI.6)")
     .option("--output-format <fmt>", "Output format: text | json", "text")
     .option("--max-turns <n>", "Maximum agent turns", parseInt)
@@ -1375,7 +1376,7 @@ export async function run(): Promise<void> {
     verbose: options.verbose,
     quiet: isHeadless,
     noColor: options.noColor,
-    resume: options.resume as boolean | undefined,
+    resume: options.resume !== undefined ? true : undefined,
     permissionMode: options.permissionMode,
     trust: parseTrustFlag(process.argv),
   };
@@ -1385,10 +1386,30 @@ export async function run(): Promise<void> {
   const positionalTask = queryArgs.length > 0 ? queryArgs.join(" ").trim() : undefined;
   const outputFormat = (options.outputFormat === "json" ? "json" : "text") as "text" | "json";
 
-  // Placeholder guard for --continue (TUI.7 picks-by-id)
-  if (options.continue) {
-    process.stderr.write("error: session resume coming in TUI.6\n");
-    process.exit(1);
+  // --continue / --resume: envelope-first routing.
+  if (options.continue || options.resume !== undefined) {
+    const idArg = typeof options.resume === "string" ? options.resume : undefined;
+    const cwd = options.repo ?? process.cwd();
+    const sessionId = idArg
+      ? await resolveEnvelopeId(idArg)
+      : (await latestResumableEnvelope(cwd))?.sessionId;
+
+    if (sessionId) {
+      if (isHeadless) {
+        await runHeadlessResume(sessionId, cliFlags, { outputFormat });
+        return;
+      } else {
+        // S7: TUI envelope-resume trigger will use the env var picked up at startup
+        process.env["ZONE_RESUME_ENVELOPE_ID"] = sessionId;
+        const { runTui } = await import("./tui/index.js");
+        await runTui(undefined, cliFlags);
+        return;
+      }
+    } else if (options.continue) {
+      process.stderr.write("error: no resumable run found\n");
+      process.exit(1);
+    }
+    // bare --resume with no envelope: fall through to normal session resume path
   }
 
   if (isHeadless) {
