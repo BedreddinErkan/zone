@@ -18,6 +18,8 @@ const MAX_HISTORY = 50;
 
 interface ComposerProps {
   onSubmit: (text: string, ac: AbortController, images?: ImageAttachment[]) => void;
+  /** Trigger a durable-resume run for the given session ID (or latest if omitted). */
+  onEnvelopeResume?: (sessionId?: string) => void;
   onExit: () => void;
   onInitStart?: (ac: AbortController) => void;
   onUndoRequest?: () => void;
@@ -38,6 +40,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/permissions", desc: "View and remove trusted command prefixes" },
   { name: "/keys",        desc: "Manage API keys (BYOK)" },
   { name: "/sessions",   desc: "Browse and resume past sessions" },
+  { name: "/resume",    desc: "Resume the most recently interrupted run" },
   { name: "/init",       desc: "Scaffold .zone/memory.md by analyzing repo" },
   { name: "/memory",     desc: "Show .zone/memory.md" },
   { name: "/model",      desc: "Choose AI model" },
@@ -140,7 +143,7 @@ function SlashCommandPalette({ commands, selectedIdx }: PaletteProps): React.Rea
   );
 }
 
-export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getCommitData, getFeedbackData }: ComposerProps): React.ReactElement {
+export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getCommitData, getFeedbackData, onEnvelopeResume }: ComposerProps): React.ReactElement {
   const { state, dispatch } = useStore();
   const { stdout } = useStdout();
   const disabled = state.runState === "running";
@@ -267,6 +270,18 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
         void listSessionsMeta(process.cwd()).then(list => {
           dispatch({ type: "SESSIONS_OPEN", list });
         });
+        break;
+      case "/resume":
+        if (disabled) {
+          dispatch({ type: "USER_PROMPT", text: "Cannot resume while a run is in progress." });
+          break;
+        }
+        if (onEnvelopeResume) {
+          onEnvelopeResume(); // no sessionId → latest resumable for this repo
+        } else {
+          dispatch({ type: "TOAST_PUSH", entry: { id: randomUUID(),
+            message: "Resume not supported in this context.", level: "warning" } });
+        }
         break;
       case "/init":
         if (disabled) {

@@ -19,6 +19,8 @@ import { applyStdoutInterception, applyStderrInterception } from "./stdoutShield
 import type { LlmPatchProgressUpdate } from "../../core/agentLifecycleEvents.js";
 import { loadDiskTrust, diskTrustPrefixes } from "../../api/diskTrust.js";
 import { saveSession, pruneOldSessions, loadLastSession, type DiskSession } from "../../api/diskSessions.js";
+import { latestResumableEnvelope, stampEnvelopeStatus, buildResumeContextBlock, reconcileEnvelopeStaging } from "../../api/diskRunEnvelope.js";
+import { buildResumeFlowInput } from "../dispatch.js";
 import { loadDiskModel, type DiskModelSettings } from "../../api/diskModel.js";
 import { loadDiskHooks, hooksConfigHash, type UserHooksConfig } from "../../api/diskHooks.js";
 import { isHooksTrusted } from "../../api/diskTrustedHooks.js";
@@ -199,6 +201,8 @@ export interface _RunPromptDeps {
   };
   bus: import("../eventBus.js").EventBus;
   localSessionId: string;
+  /** Durable resume: consumed on the first prompt run if set; null afterward. */
+  pendingEnvelopeResume?: Awaited<ReturnType<typeof buildResumeFlowInput>> | null;
 }
 
 /**
@@ -284,12 +288,17 @@ export async function _runPromptImpl(
   let runResult: LlmPatchFlowResult | undefined;
   let abortedFiles: string[] | undefined;
   let emitSafetyNet = true;
+  // Durable resume: consume the pending envelope resume on the first run only.
+  const envelopeResume = deps.pendingEnvelopeResume ?? null;
+  if (deps.pendingEnvelopeResume !== undefined) deps.pendingEnvelopeResume = null;
+
   try {
     runResult = await runOneShotInner(prompt, config, runId, {
       externalAc: ac, onProgress, mode, priorSessionSummary, images,
       userHooks: storeCapture.state?.armedUserHooks,
       mcpManager: storeCapture.state?.armedMcpManager,
-      sessionId: sessionId ?? undefined,
+      sessionId: envelopeResume?.sessionId ?? (sessionId ?? undefined),
+      resume: envelopeResume?.resume,
     });
   } catch (err: unknown) {
     if (err instanceof ApiKeyError) {
@@ -539,6 +548,32 @@ export async function runTui(
     }
   }
 
+  // Durable resume: if the CLI set ZONE_RESUME_ENVELOPE_ID (from --resume/--continue),
+  // load the envelope and auto-trigger the run once the TUI mounts.
+  const envResumeId = process.env["ZONE_RESUME_ENVELOPE_ID"];
+  let pendingEnvelopeResume: Awaited<ReturnType<typeof buildResumeFlowInput>> | null = null;
+  if (envResumeId) {
+    delete process.env["ZONE_RESUME_ENVELOPE_ID"];
+    try {
+      pendingEnvelopeResume = await buildResumeFlowInput(envResumeId, opts, {});
+      // Override initialPrompt so App.tsx mounts + auto-triggers the run.
+      initialPrompt = pendingEnvelopeResume.task;
+    } catch (err) {
+      process.stderr.write(`resume: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+  } else {
+    // Passive toast: announce any unrelated interrupted run found in this repo.
+    latestResumableEnvelope(process.cwd()).then(env => {
+      if (env) {
+        storeCapture.dispatch?.({ type: "TOAST_PUSH", entry: {
+          id: randomUUID(),
+          message: `Interrupted run found (${env.status}) — type /resume to continue`,
+          level: "info",
+        }});
+      }
+    }).catch(() => {});
+  }
+
   // Validate API key only when we're about to make API calls.
   // In no-args (idle) mode the TUI renders without a pending task — defer validation.
   if (initialPrompt !== undefined) {
@@ -576,9 +611,19 @@ export async function runTui(
 
   // Fallback signal handlers — in TTY raw mode Ctrl+C arrives as \x03 in useInput, not SIGINT.
   // These fire in non-TTY contexts (pipes, test runners that send real signals).
+  // Durable resume: best-effort backstop — stamp the envelope "unknown" on hard exit
+  // so the interrupted run becomes resumable even if the checkpoint writer was in-flight.
+  function stampEnvelopeOnExit(): void {
+    const s = storeCapture.state;
+    if (s?.sessionId && s.runState === "running") {
+      void stampEnvelopeStatus(s.sessionId, "unknown", []).catch(() => {});
+    }
+  }
+
   process.on("SIGINT", () => {
     storeCapture.state?.armedMcpManager?.killAllSync();
     instance?.unmount();
+    stampEnvelopeOnExit();
     const s = storeCapture.state;
     if (s && s.transcript.length > 0) {
       void saveSession(process.cwd(), buildDiskSession(s))
@@ -592,6 +637,7 @@ export async function runTui(
   process.on("SIGTERM", () => {
     storeCapture.state?.armedMcpManager?.killAllSync();
     instance?.unmount();
+    stampEnvelopeOnExit();
     const s = storeCapture.state;
     if (s && s.transcript.length > 0) {
       void saveSession(process.cwd(), buildDiskSession(s))
@@ -620,7 +666,7 @@ export async function runTui(
   // storeCapture.state is null → _resolveSessionId falls back to this guaranteed ID.
   // App.tsx receives it as initialSessionId so the store's sessionId matches (same .jsonl file).
   const localSessionId = resumedSession?.sessionId ?? randomUUID();
-  const runPromptDeps: _RunPromptDeps = { config, storeCapture, bus, localSessionId };
+  const runPromptDeps: _RunPromptDeps = { config, storeCapture, bus, localSessionId, pendingEnvelopeResume };
   const runPrompt = (prompt: string, ac: AbortController, mode: TuiMode = "normal", images?: import("../../api/imageUpload.js").ImageAttachment[]): void => {
     void _runPromptImpl(prompt, ac, mode, images, runPromptDeps);
   };
@@ -644,6 +690,29 @@ export async function runTui(
       storeCapture.dispatch?.({ type: "TOAST_PUSH",
         entry: { id: randomUUID(), message: err instanceof Error ? err.message : String(err), level: "warning" } });
     });
+  };
+
+  const onEnvelopeResume = (sessionId?: string): void => {
+    void (async () => {
+      try {
+        const env = sessionId
+          ? await (await import("../../api/diskRunEnvelope.js")).loadRunEnvelope(sessionId)
+          : await latestResumableEnvelope(process.cwd());
+        if (!env) {
+          storeCapture.dispatch?.({ type: "TOAST_PUSH", entry: { id: randomUUID(),
+            message: "No interrupted run found for this repo.", level: "warning" } });
+          return;
+        }
+        storeCapture.dispatch?.({ type: "TOAST_PUSH", entry: { id: randomUUID(),
+          message: `Resuming "${env.task.slice(0, 60)}"…`, level: "info" } });
+        const resumeInput = await buildResumeFlowInput(env.sessionId, opts, {});
+        runPromptDeps.pendingEnvelopeResume = resumeInput;
+        onSubmit(env.task, new AbortController(), "normal");
+      } catch (err: unknown) {
+        storeCapture.dispatch?.({ type: "TOAST_PUSH", entry: { id: randomUUID(),
+          message: err instanceof Error ? err.message : String(err), level: "warning" } });
+      }
+    })();
   };
 
   // Best-effort GC: delete the prior sessionId's .jsonl when the user clears session memory.
@@ -682,6 +751,7 @@ export async function runTui(
         initialDailyUsedUsd={initialDailyUsedUsd}
         onSubmit={onSubmit}
         onUndoRequest={onUndoRequest}
+        onEnvelopeResume={onEnvelopeResume}
         initialTrustedPrefixes={initialTrustedPrefixes}
         resumedSession={resumedSession ?? undefined}
         initialSessionId={localSessionId}
