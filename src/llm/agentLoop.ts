@@ -40,7 +40,8 @@ import { canResumeFromTerminationReason } from "./patchUserFacingReason.js";
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { cacheHitRatio } from "../usage/iterCostMeter.js";
 import { webSearchFee } from "../usage/pricing.js";
-import { parseTodoProgressMarkers } from "../core/todoLifecycle.js";
+import { parseTodoProgressMarkers, type RunTodo } from "../core/todoLifecycle.js";
+import type { FailureRecordLite } from "../api/diskRunEnvelope.js";
 import {
   buildApplyRolledBackMessage,
   parseTscErrorPreview,
@@ -276,6 +277,14 @@ export interface AgentLoopInput {
   mcpManager?: import("../mcp/mcpClientManager.js").McpClientManager | null;
   /** Durable resume: stable per-session ID (== DiskSession.sessionId in TUI; fresh UUID in headless). */
   sessionId?: string;
+  /** Durable resume: staging map from a reconciled prior run (MUST NOT go through parentStagingFiles). */
+  resumeStagingFiles?: Map<string, string>;
+  /** Durable resume: todo statuses from the interrupted run (preserves completed/in_progress). */
+  resumeTodos?: RunTodo[];
+  /** Durable resume: failure history from the interrupted run. */
+  resumeFailureHistory?: Array<{ path: string; records: FailureRecordLite[] }>;
+  /** Durable resume: compact context block injected into the first user message only. */
+  resumeContextBlock?: string;
 }
 
 export interface AgentLoopResult {
@@ -2013,7 +2022,12 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   // Phase F: default "warn" — patches stay on disk when regression detected; "rollback" restores legacy behavior.
   const verifyMode: "warn" | "rollback" = process.env["ZONE_VERIFY_MODE"] === "rollback" ? "rollback" : "warn";
   let todosEmittedThisRun = false;
-  const failureHistory = new Map<string, FailureRecord[]>();
+  // Resume: re-seed failure history from the prior interrupted run.
+  const failureHistory = new Map<string, FailureRecord[]>(
+    (input.resumeFailureHistory ?? []).map(({ path, records }) =>
+      [path, records as FailureRecord[]] as const,
+    ),
+  );
   const escalatedFiles = new Set<string>();
   const coachingController = new CoachingController(
     {
@@ -2039,7 +2053,9 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   // subagents share the parent map and must not flush independently.
   // run_command stays disk-bound — it sees the OLD disk state until flush. (Tur 2)
   const ownsStagingFiles = input.parentStagingFiles === undefined;
-  const stagingFiles = input.parentStagingFiles ?? new Map<string, string>();
+  // Resume: seed staging from a prior reconciled run via resumeStagingFiles (NOT parentStagingFiles,
+  // which would set ownsStagingFiles=false and disable flush for top-level resumed runs).
+  const stagingFiles = input.parentStagingFiles ?? new Map<string, string>(input.resumeStagingFiles ?? []);
   // DF-17b: set to true before every explicit staging exit (finalizeRun + persistStagingOnError
   // calls) so the finally below is a guaranteed no-op on those paths and fires only for
   // AbortError / uncaught exceptions.
@@ -2257,6 +2273,9 @@ Example:
   const restageSeedBlock = input.restageSeed && input.restageSeed.size > 0
     ? buildRestageSeedBlock(input.restageSeed, input.repoPath)
     : "";
+  // Resume: compact context block injected into the first user message only (never system prompt —
+  // cache breakpoint #2 invariant). Empty string when not resuming.
+  const resumeBlock = input.resumeContextBlock ? input.resumeContextBlock + "\n\n" : "";
   // Double-injection suppression: when the session window is non-empty it already
   // carries the most recent turn with neutral framing. Suppress the PRIOR RUN CONTEXT
   // block in that case so the newest summary never appears twice.
@@ -2267,9 +2286,10 @@ Example:
         "\nEND PRIOR RUN CONTEXT.\n\n" +
         auditContextBlock +
         restageSeedBlock +
+        resumeBlock +
         input.task
       )
-    : sessionMemBlock + auditContextBlock + restageSeedBlock + input.task) + modeTag;
+    : resumeBlock + sessionMemBlock + auditContextBlock + restageSeedBlock + input.task) + modeTag;
 
   const afterHeader = (auditContextBlock + restageSeedBlock + String(input.task ?? "")).trim();
   if (sessionMemBlock && !afterHeader) {
