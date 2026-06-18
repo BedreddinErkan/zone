@@ -274,6 +274,8 @@ export interface AgentLoopInput {
   userHooks?: import("../api/diskHooks.js").UserHooksConfig | null;
   /** MCP client manager — proxies mcp__<server>__<tool> calls to the owning server. */
   mcpManager?: import("../mcp/mcpClientManager.js").McpClientManager | null;
+  /** Durable resume: stable per-session ID (== DiskSession.sessionId in TUI; fresh UUID in headless). */
+  sessionId?: string;
 }
 
 export interface AgentLoopResult {

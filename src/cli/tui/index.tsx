@@ -289,6 +289,7 @@ export async function _runPromptImpl(
       externalAc: ac, onProgress, mode, priorSessionSummary, images,
       userHooks: storeCapture.state?.armedUserHooks,
       mcpManager: storeCapture.state?.armedMcpManager,
+      sessionId: sessionId ?? undefined,
     });
   } catch (err: unknown) {
     if (err instanceof ApiKeyError) {
