@@ -25,6 +25,8 @@ npm install && npm run build && npm link
 
 # 2 — add your API key
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY
+or
+use /keys feature inside zone
 
 # 3 — run, from any repo
 cd ~/your-project && zone
