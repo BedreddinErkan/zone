@@ -55,6 +55,8 @@ export interface OneShotOpts {
   /** Opt-in for embed consumers: "manual" arms per-edit approval gate (requestEditApproval).
    *  Default "auto"; plan-mode's "manually approve changes" decision overrides to "manual" regardless. */
   editApprovalMode?: "auto" | "manual";
+  /** Durable resume: stable per-session ID threaded into the agent loop for envelope checkpointing. */
+  sessionId?: string;
 }
 
 /** Core one-shot runner. Returns the flow result — does NOT call process.exit. */
@@ -523,6 +525,7 @@ export async function runOneShotInner(
             repoPath: effectiveConfig.repoPath,
             runId,
             conversationId: opts.conversationId,
+            sessionId: opts.sessionId,
             onProgress: progressCallback,
             abortSignal: ac.signal,
             userApiKey,
@@ -580,6 +583,7 @@ export async function runOneShotInner(
         repoPath: effectiveConfig.repoPath,
         runId,
         conversationId: opts.conversationId,
+        sessionId: opts.sessionId,
         onProgress: progressCallback,
         abortSignal: ac.signal,
         userApiKey,
@@ -672,6 +676,7 @@ export async function runHeadless(
   }
 
   const runId = randomUUID();
+  const sessionId = randomUUID();  // stable per-session envelope key (headless has no DiskSession)
   const startMs = Date.now();
   let result: LlmPatchFlowResult;
 
@@ -682,9 +687,9 @@ export async function runHeadless(
       const ac = new AbortController();
       process.once("SIGINT", () => { rejectPendingApprovalsForRun(runId); rejectPendingRevisionsForRun(runId); clearTrustedCommandsForRun(runId); ac.abort(); });
       const userApiKey = config.provider === "openai" ? config.openaiApiKey : config.anthropicApiKey;
-      result = await runLlmPatchFlow({ task, repoPath: config.repoPath, runId, onProgress: nullSink.onProgress, abortSignal: ac.signal, userApiKey, provider: config.provider, forceTier: config.forceTier, mode: "patch" }).finally(() => { rejectPendingApprovalsForRun(runId); rejectPendingRevisionsForRun(runId); clearTrustedCommandsForRun(runId); });
+      result = await runLlmPatchFlow({ task, repoPath: config.repoPath, runId, sessionId, onProgress: nullSink.onProgress, abortSignal: ac.signal, userApiKey, provider: config.provider, forceTier: config.forceTier, mode: "patch" }).finally(() => { rejectPendingApprovalsForRun(runId); rejectPendingRevisionsForRun(runId); clearTrustedCommandsForRun(runId); });
     } else {
-      result = await runOneShotInner(task, config, runId);
+      result = await runOneShotInner(task, config, runId, { sessionId });
     }
   } catch (err) {
     if (err instanceof ProviderRequestError) {

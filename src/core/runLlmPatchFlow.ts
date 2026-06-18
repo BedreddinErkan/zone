@@ -4524,6 +4524,8 @@ export async function runLlmPatchFlow(input: {
   atomicPatch?: boolean;
   dryRun?: boolean;
   conversationId?: string;
+  /** Durable resume: stable per-session ID for envelope checkpointing. */
+  sessionId?: string;
   userId?: string;
   lastChangedFiles?: unknown;
   lastAddedFunctions?: unknown;
@@ -5929,6 +5931,7 @@ const initializeTodosFromPlan = (): void => {
       // Phase X.0 C3: stable per-thread cache key for OpenAI so successive
       // runs in the same conversation share a cache hit instead of misses.
       conversationId: typeof input.conversationId === "string" ? input.conversationId : undefined,
+      sessionId: input.sessionId,
       // Phase X.0.1: forward audit findings so execute agent skips re-investigation.
       auditFindings: input.auditFindings,
       summaryFormat: input.summaryFormat,
