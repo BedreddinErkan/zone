@@ -1,6 +1,6 @@
 import type { FailureRecord } from "./agentLoop.js";
 
-export type AntiThrashSignalKind = "failure_stall" | "wandering"; // P6="cost_burn" added in inc-3
+export type AntiThrashSignalKind = "failure_stall" | "wandering" | "cost_burn";
 
 export interface AntiThrashSignal {
   pattern: AntiThrashSignalKind;
@@ -25,11 +25,18 @@ export interface AntiThrashThresholds {
   enabled?: boolean;
   wanderIterMin?: number;
   wanderReadMin?: number;
+  costBurnIterMin?: number;
+  costBurnUsd?: number;
 }
 
 function readEnvInt(name: string, fallback: number): number {
   const v = parseFloat(process.env[name] ?? "");
   return Number.isFinite(v) && v > 0 ? Math.floor(v) : fallback;
+}
+
+export function readEnvFloat(name: string, fallback: number): number {
+  const v = parseFloat(process.env[name] ?? "");
+  return Number.isFinite(v) && v > 0 ? v : fallback;
 }
 
 function readEnvBool(name: string, fallback: boolean): boolean {
@@ -44,6 +51,8 @@ export const ANTI_THRASH_BREAK_ITERS        = readEnvInt("ZONE_ANTI_THRASH_BREAK
 export const ANTI_THRASH_ENABLED            = readEnvBool("ZONE_ANTI_THRASH", true);
 export const ANTI_THRASH_WANDER_ITER_MIN    = readEnvInt("ZONE_ANTI_THRASH_WANDER_ITER_MIN", 8);
 export const ANTI_THRASH_WANDER_READ_MIN    = readEnvInt("ZONE_ANTI_THRASH_WANDER_READ_MIN", 5);
+export const ANTI_THRASH_COST_BURN_ITER_MIN = readEnvInt("ZONE_ANTI_THRASH_COST_BURN_ITER_MIN", 10);
+export const ANTI_THRASH_COST_BURN_USD      = readEnvFloat("ZONE_ANTI_THRASH_COST_BURN_USD", 1.00);
 
 // Strong-verdict detection inlined to avoid a circular import with agentLoop.ts.
 // Mirrors the identical_patch_retried and trigger_repeated_3x branches of
@@ -120,14 +129,38 @@ export function detectWanderingSignal(
   };
 }
 
-// Priority-ordered dispatch. P6 is an additive return line — zero wiring change.
+export function detectCostBurnSignal(
+  ctx: AntiThrashContext,
+  thresholds?: AntiThrashThresholds,
+): AntiThrashSignal | null {
+  if (ctx.isReadOnly) return null;
+  if (ctx.archetype === "question" || ctx.archetype === "investigation") return null;
+  if (ctx.filesModifiedSize !== 0) return null;
+
+  const costBurnIterMin = thresholds?.costBurnIterMin ?? ANTI_THRASH_COST_BURN_ITER_MIN;
+  const costBurnUsd = thresholds?.costBurnUsd ?? ANTI_THRASH_COST_BURN_USD;
+
+  if (ctx.iter < costBurnIterMin) return null;
+  if (ctx.costUsd < costBurnUsd) return null;
+
+  return {
+    pattern: "cost_burn",
+    summaryTitle: `Cost burn: $${ctx.costUsd.toFixed(3)} across ${ctx.iter} iters, no writes`,
+    detail: { costUsd: ctx.costUsd, iter: ctx.iter },
+  };
+}
+
+// Priority-ordered dispatch: P4 > P5 > P6.
 export function computeAntiThrashSignal(
   ctx: AntiThrashContext,
   thresholds?: AntiThrashThresholds,
 ): AntiThrashSignal | null {
   if (!(thresholds?.enabled ?? ANTI_THRASH_ENABLED)) return null;
-  return detectFailureStall(ctx, thresholds) ?? detectWanderingSignal(ctx, thresholds);
-  // inc-3: ?? detectCostBurnSignal(ctx, thresholds)
+  return (
+    detectFailureStall(ctx, thresholds) ??
+    detectWanderingSignal(ctx, thresholds) ??
+    detectCostBurnSignal(ctx, thresholds)
+  );
 }
 
 export function buildStallReflectionText(signal: AntiThrashSignal): string {
@@ -156,6 +189,16 @@ export function buildStallReflectionText(signal: AntiThrashSignal): string {
       `(a) Apply a patch with your best current hypothesis — an imperfect change is better than more reading.\n` +
       `(b) Write the FINAL SUMMARY if this task requires no code change.\n` +
       `Do NOT keep reading without committing to an action.`
+    );
+  }
+  if (signal.pattern === "cost_burn") {
+    const { costUsd, iter } = signal.detail as { costUsd: number; iter: number };
+    return (
+      `\n\n[ZONE_ANTI_THRASH] You have spent $${costUsd.toFixed(3)} across ${iter} iterations ` +
+      `without writing anything. You must now commit to an action:\n` +
+      `(a) Apply a patch or write a file implementing your current hypothesis — stop exploring and act.\n` +
+      `(b) Write the FINAL SUMMARY and exit if no code change is needed.\n` +
+      `Do NOT continue without committing to an action.`
     );
   }
   return `\n\n[ZONE_ANTI_THRASH] Non-progress detected: ${signal.summaryTitle}`;
