@@ -1,0 +1,263 @@
+/**
+ * INC-1 Anti-Thrash integration: P4 stall detection wired into agentLoop.
+ *
+ * Nonce strategy: _n:N in LLM args keeps patchHash stable (hashPatchBlocks reads
+ * only args.patch) while making hashToolCall unique per call (includes all args)
+ * so the loop-detector never fires on repeated apply_patch failures.
+ */
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { resetToolExecutorMock } from "../test/fixtures/toolExecutorMock.js";
+
+// ── hoisted mocks ─────────────────────────────────────────────────────────────
+
+const toolExecutorMock = vi.hoisted(() => ({
+  executeTool: vi.fn(),
+  withStagingTempFlush: vi.fn(),
+  clearCommandCacheForRun: vi.fn(),
+  clearCommandCacheForTest: vi.fn(),
+  clearOutlineCacheForTest: vi.fn(),
+  isMemoizableCommand: vi.fn(),
+  computeCommandFingerprint: vi.fn(),
+  truncateCommandOutput: vi.fn(),
+  resolveAgentPath: vi.fn(),
+  resolveRunCommandCwd: vi.fn(),
+}));
+
+const mocks = vi.hoisted(() => ({
+  createChatCompletion: vi.fn(),
+}));
+
+vi.mock("./factory.js", () => ({
+  createLLMClient: vi.fn(() => ({
+    provider: "openai",
+    createChatCompletion: mocks.createChatCompletion,
+  })),
+}));
+
+vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
+
+// ── imports ───────────────────────────────────────────────────────────────────
+
+import { runAgentLoop } from "./agentLoop.js";
+import { ANTI_THRASH_BREAK_ITERS, ANTI_THRASH_FAILURE_COACH_MIN } from "./antiThrash.js";
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+const TARGET = "src/target.ts";
+const OTHER  = "src/other.ts";
+const PATCH  = "--- FIND ---\nconst x = 1;\n--- REPLACE ---\nconst x = 2;";
+const FAIL_OUTPUT = "Block 1: find content not found";
+
+function llmReadFile(id: string, filePath: string = TARGET) {
+  return {
+    choices: [{
+      message: {
+        content: null,
+        tool_calls: [{ id, type: "function", function: { name: "read_file", arguments: JSON.stringify({ filePath }) } }],
+      },
+      finish_reason: "tool_calls",
+    }],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+  };
+}
+
+function llmApplyPatch(id: string, nonce: number, filePath: string = TARGET) {
+  // nonce field: hashPatchBlocks ignores it (reads only args.patch) → patchHash stable;
+  // hashToolCall includes it → each call is unique to the loop-detector.
+  return {
+    choices: [{
+      message: {
+        content: null,
+        tool_calls: [{
+          id,
+          type: "function",
+          function: {
+            name: "apply_patch",
+            arguments: JSON.stringify({ filePath, patch: PATCH, _n: nonce }),
+          },
+        }],
+      },
+      finish_reason: "tool_calls",
+    }],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+  };
+}
+
+function llmWriteFile(id: string, filePath: string = OTHER) {
+  return {
+    choices: [{
+      message: {
+        content: null,
+        tool_calls: [{ id, type: "function", function: { name: "write_file", arguments: JSON.stringify({ filePath, content: "const y = 2;" }) } }],
+      },
+      finish_reason: "tool_calls",
+    }],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+  };
+}
+
+function llmDone(text = "Done. [ZONE_VERIFICATION: no_verification_attempted]") {
+  return {
+    choices: [{ message: { content: text, tool_calls: null }, finish_reason: "stop" }],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+  };
+}
+
+// ── fixture ───────────────────────────────────────────────────────────────────
+
+let repoPath: string;
+
+beforeEach(() => {
+  repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "zone-stall-detect-"));
+  resetToolExecutorMock(toolExecutorMock);
+  toolExecutorMock.withStagingTempFlush.mockResolvedValue(undefined);
+});
+
+afterEach(() => {
+  fs.rmSync(repoPath, { recursive: true, force: true });
+});
+
+// ── tests ─────────────────────────────────────────────────────────────────────
+
+describe("agentLoop anti-thrash Stage 1+2 (INC-1 P4)", () => {
+  it("P4 terminal: COACH_MIN+BREAK_ITERS+1 identical fails → semantic_stall", async () => {
+    // iter 0: read_file (bypasses no-read gate for all subsequent apply_patch)
+    // iters 1..COACH_MIN: fail → coachingAttempts reaches COACH_MIN=2
+    //   pre-iter COACH_MIN+1: Stage 1 fires (antiThrashStage1FiredAtIter = COACH_MIN+1)
+    // iters COACH_MIN+1..COACH_MIN+BREAK_ITERS: fail → Stage 2 armed at (iter-stage1)=BREAK_ITERS
+    // last fail: Stage 2 fires → semantic_stall
+    const totalFails = ANTI_THRASH_FAILURE_COACH_MIN + ANTI_THRASH_BREAK_ITERS + 1; // 2+3+1=6
+
+    toolExecutorMock.executeTool.mockImplementation((name: string) =>
+      name === "read_file"
+        ? Promise.resolve({ success: true, output: "const x = 1;" })
+        : Promise.resolve({ success: false, output: FAIL_OUTPUT }),
+    );
+
+    mocks.createChatCompletion.mockResolvedValueOnce(llmReadFile("rf-0"));
+    for (let n = 0; n < totalFails; n++) {
+      mocks.createChatCompletion.mockResolvedValueOnce(llmApplyPatch(`ap-${n}`, n));
+    }
+
+    const result = await runAgentLoop({
+      task: "update x to 2 in src/target.ts",
+      repoPath,
+      mode: "patch",
+      maxIterations: 20,
+    });
+
+    expect(result.terminationReason).toBe("semantic_stall");
+    expect(result.success).toBe(false);
+  });
+
+  it("C5 resume-safety: coachingBudgetOverride=1 prevents Stage 1 (attempts stays at 1 < COACH_MIN=2)", async () => {
+    // coachingBudgetOverride=1 → maxAttempts=1 → after first coaching round attempts stays at 1,
+    // which is < ANTI_THRASH_FAILURE_COACH_MIN=2. Stage 1 never fires.
+    toolExecutorMock.executeTool.mockImplementation((name: string) =>
+      name === "read_file"
+        ? Promise.resolve({ success: true, output: "const x = 1;" })
+        : Promise.resolve({ success: false, output: FAIL_OUTPUT }),
+    );
+
+    mocks.createChatCompletion.mockResolvedValueOnce(llmReadFile("rf-0"));
+    mocks.createChatCompletion.mockResolvedValueOnce(llmApplyPatch("ap-0", 0));
+    mocks.createChatCompletion.mockResolvedValueOnce(llmApplyPatch("ap-1", 1));
+    mocks.createChatCompletion.mockResolvedValueOnce(llmDone());
+
+    const result = await runAgentLoop({
+      task: "update x",
+      repoPath,
+      mode: "patch",
+      maxIterations: 20,
+      coachingBudgetOverride: 1,
+    });
+
+    expect(result.terminationReason).not.toBe("semantic_stall");
+  });
+
+  it("C2 disarm: write to a new file after Stage 1 grows filesModified → Stage 2 suppressed", async () => {
+    // After Stage 1 fires (capturing baseline filesModified.size=1 for src/target.ts),
+    // a write_file to src/other.ts grows filesModified to 2. At the Stage 2 check
+    // (iter - stage1FiredAtIter >= BREAK_ITERS), filesModified.size(2) > baseline(1) → skip.
+    toolExecutorMock.executeTool.mockImplementation((name: string) => {
+      if (name === "read_file" || name === "write_file")
+        return Promise.resolve({ success: true, output: "// ok" });
+      return Promise.resolve({ success: false, output: FAIL_OUTPUT });
+    });
+
+    // Timeline (iter numbers are 0-indexed):
+    // iter 0: read_file (no failure)
+    // iter 1: fail (coachingAttempts→1)
+    // iter 2: fail (coachingAttempts→2; 2 records with same trigger+patchHash)
+    //   [pre-iter 3: Stage 1 fires, baseline=1]
+    // iter 3: write_file → filesModified.size→2 (> baseline=1)
+    // iter 4: fail  (Stage 2 would-be: 4-3=1 < BREAK_ITERS=3 → not yet)
+    // iter 5: fail  (5-3=2 < 3 → not yet)
+    // iter 6: fail  (6-3=3 >= 3, but filesModified.size=2 > baseline=1 → C2 disarms)
+    // iter 7: done
+    mocks.createChatCompletion.mockResolvedValueOnce(llmReadFile("rf-0"));
+    for (let n = 0; n < ANTI_THRASH_FAILURE_COACH_MIN; n++) { // 2 fails → Stage 1
+      mocks.createChatCompletion.mockResolvedValueOnce(llmApplyPatch(`ap-fail-${n}`, n));
+    }
+    mocks.createChatCompletion.mockResolvedValueOnce(llmWriteFile("wf-0")); // filesModified grows
+    for (let n = 0; n < ANTI_THRASH_BREAK_ITERS; n++) { // 3 more fails → Stage 2 armed but C2 disarmed
+      mocks.createChatCompletion.mockResolvedValueOnce(llmApplyPatch(`ap-fail2-${n}`, 100 + n));
+    }
+    mocks.createChatCompletion.mockResolvedValueOnce(llmDone());
+
+    const result = await runAgentLoop({
+      task: "update x and add other.ts",
+      repoPath,
+      mode: "patch",
+      maxIterations: 20,
+    });
+
+    expect(result.terminationReason).not.toBe("semantic_stall");
+  });
+
+  it("de-confliction: truly identical apply_patch calls → loop_detected (not semantic_stall)", async () => {
+    // Without read_file first, the no-read gate fires for each apply_patch call.
+    // All calls share identical parsedArgs (no nonce) → same hashToolCall every time.
+    // Loop-detector terminates at TERMINATE_THRESHOLD=4, well before Stage 2 could fire
+    // (which needs COACH_MIN+BREAK_ITERS+1 = 6 iters minimum via normal path).
+    toolExecutorMock.executeTool.mockResolvedValue({ success: false, output: FAIL_OUTPUT });
+
+    // Enough responses so loop-detector fires; TERMINATE_THRESHOLD=4 (imported indirectly).
+    const ENOUGH = 6;
+    for (let i = 0; i < ENOUGH; i++) {
+      mocks.createChatCompletion.mockResolvedValueOnce({
+        choices: [{
+          message: {
+            content: null,
+            tool_calls: [{
+              id: `ap-${i}`,
+              type: "function",
+              function: {
+                name: "apply_patch",
+                // NO nonce: identical parsedArgs every call → hashToolCall repeats
+                arguments: JSON.stringify({ filePath: TARGET, patch: PATCH }),
+              },
+            }],
+          },
+          finish_reason: "tool_calls",
+        }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      });
+    }
+
+    const result = await runAgentLoop({
+      task: "keep patching",
+      repoPath,
+      mode: "patch",
+      maxIterations: 20,
+    });
+
+    expect(result.terminationReason).toBe("loop_detected");
+    expect(result.terminationReason).not.toBe("semantic_stall");
+  });
+});

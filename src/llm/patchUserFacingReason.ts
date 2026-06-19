@@ -138,6 +138,17 @@ export function getPatchUserFacingReason(input: {
         category: "error",
       };
 
+    case "semantic_stall":
+      return {
+        reason: terminationReason,
+        userFacingMessage:
+          "Detected a non-progress loop. Paused to prevent wasted spend. " +
+          "Retry with a narrower or different approach.",
+        canResume: true,
+        resumeHint: "Narrow the task or provide a different implementation hint",
+        category: "warning",
+      };
+
     default:
       return {
         reason: terminationReason,

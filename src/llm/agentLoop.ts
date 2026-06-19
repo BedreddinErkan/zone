@@ -73,6 +73,13 @@ import { getContextWindow } from "./models.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
 import type { LLMProvider } from "./types.js";
 import { hashToolCall, createDetectorState, recordAndDetect, LOOP_DETECT_EXEMPT_TOOLS } from "./loopDetector.js";
+import {
+  type AntiThrashContext,
+  type AntiThrashSignal,
+  ANTI_THRASH_BREAK_ITERS,
+  computeAntiThrashSignal,
+  buildStallReflectionText,
+} from "./antiThrash.js";
 import { UpstreamUnavailableError } from "./withExponentialBackoff.js";
 import { emitTokenBreakdown, emitBreakdownSummary, type BreakdownEvent } from "./tokenBreakdown.js";
 import { pruneStaleReads } from "./contextPruner.js";
@@ -313,7 +320,7 @@ export interface AgentLoopResult {
   /** Phase H.7: how the loop ended. Used by upstream flows (investigation /
    *  patch) to surface "Token budget reached" vs "Iteration budget reached"
    *  distinctly in the UI. Optional for backward-compat with older callers. */
-  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded" | "upstream_unavailable" | "phase1_handoff" | "hook_blocked" | "scope_block_circuit_breaker" | "staged_rejected" | "staged_refine_requested";
+  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded" | "upstream_unavailable" | "phase1_handoff" | "hook_blocked" | "scope_block_circuit_breaker" | "staged_rejected" | "staged_refine_requested" | "semantic_stall";
   /** Phase Q.2: populated when terminationReason === "loop_detected". The
    *  offending tool name + observed count in the sliding-window detector. */
   loopDetected?: { toolName: string; count: number };
@@ -1805,6 +1812,10 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   let promotionTrigger: "iter_cap" | "rollback_x2" | "coaching_exhausted" | "forced_tier_blocking" | null = null;
   let promotedAtIter: number | null = null;
   let rollbackCount = 0;
+  let antiThrashStage1Fired = false;
+  let antiThrashStage1FiredAtIter = -1;
+  let antiThrashStage1Pattern = "";
+  let antiThrashFilesModifiedAtStage1 = 0;
   let consecutiveScopeBlocks = 0;
   let coachingBudgetExhausted = false;
   // Per-run tracker for repeated PreToolUse vetoes (tool:filePath → vetoed once)
@@ -2637,6 +2648,35 @@ Example:
     };
   };
 
+  const synthesizeStallExit = (
+    iterNumber: number,
+    signal: AntiThrashSignal,
+  ): AgentLoopResult => {
+    const msg =
+      `Task paused: detected non-progress loop (${signal.summaryTitle}). ` +
+      `The agent repeated identical failing attempts without advancing. ` +
+      `Resume with a narrower scope or a different implementation approach.`;
+    debugLog("[zone-anti-thrash-terminal]", JSON.stringify({
+      iter: iterNumber, runId: input.runId, pattern: signal.pattern, ...signal.detail,
+    }));
+    emitRunBreakdownSummary();
+    emitCacheSummary();
+    emitWebSearchSummary();
+    emitSelfValidationSummary();
+    return {
+      success: false,
+      summary: msg,
+      toolCallLog,
+      filesModified: Array.from(filesModified),
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted",
+      terminationReason: "semantic_stall",
+      tokenUsage: budget.tokenUsage,
+      costUsd: budget.snapshot().costUsd,
+      iterCount: iterNumber + 1,
+    };
+  };
+
   // R.1: emit the run-level summary at every exit path.
   const emitRunBreakdownSummary = (): void => {
     if (breakdownEvents.length > 0) {
@@ -2794,7 +2834,46 @@ Example:
       return { kind: "appendContext", content, target: "responseInput", mode: "append-to-tool" };
     },
   };
-  const _internalPreIterHooks: PreIterationHook[] = [softIterWarnHook, midBudgetWarnHook, chainSaturationWarnHook];
+  // Captures loop-scoped state into the pure AntiThrashContext shape.
+  // iterNum is passed explicitly because this helper is defined outside the for-loop
+  // scope — ctx.iter is available in hook callbacks, iter is available inside the loop.
+  const buildAntiThrashCtx = (iterNum: number): AntiThrashContext => ({
+    iter: iterNum,
+    failureHistory,
+    coachingAttempts: coachingController.attempts,
+    filesReadCountThisRun,
+    filesModifiedSize: filesModified.size,
+    isReadOnly: isReadOnlyMode,
+    archetype: input.originalArchetype,
+    costUsd: budget.snapshot().costUsd,
+  });
+
+  const antiThrashHook: PreIterationHook = {
+    name: "anti-thrash",
+    priority: 40,
+    shouldRun: (ctx) =>
+      !antiThrashStage1Fired &&
+      !isSubagentLoop &&
+      computeAntiThrashSignal(buildAntiThrashCtx(ctx.iter)) !== null,
+    run: (ctx) => {
+      const signal = computeAntiThrashSignal(buildAntiThrashCtx(ctx.iter))!;
+      antiThrashStage1Fired = true;
+      antiThrashStage1FiredAtIter = ctx.iter;
+      antiThrashStage1Pattern = signal.pattern;
+      antiThrashFilesModifiedAtStage1 = filesModified.size;
+      debugLog("[zone-anti-thrash-stage1]", JSON.stringify({
+        iter: ctx.iter, runId: input.runId, ...signal.detail,
+      }));
+      return {
+        kind: "appendContext",
+        content: buildStallReflectionText(signal),
+        target: "responseInput",
+        mode: "append-to-tool",
+      };
+    },
+  };
+
+  const _internalPreIterHooks: PreIterationHook[] = [softIterWarnHook, midBudgetWarnHook, chainSaturationWarnHook, antiThrashHook];
 
   // Gap 1: internal post-tool-use hooks. Commit 5: LoopDetectorHook (warn case only).
   // The terminate case remains inline — it needs an early return from the outer function,
@@ -3959,6 +4038,21 @@ Example:
             atIter: promotedAtIter,
             trigger: "forced_tier_blocking",
           });
+        }
+      }
+
+      // Anti-thrash Stage 2: break if Stage-1 reflection did not unstick progress.
+      // Confirmed inside if (toolCalls.length > 0) — skipped on no-tool FINAL SUMMARY iters.
+      if (
+        antiThrashStage1Fired &&
+        !isSubagentLoop &&                                           // C6: no subagent break
+        (iter - antiThrashStage1FiredAtIter) >= ANTI_THRASH_BREAK_ITERS &&
+        filesModified.size <= antiThrashFilesModifiedAtStage1 &&    // C2: no net progress since S1
+        promotedAtIter !== iter + 1                                  // C7: spare a just-fired promotion
+      ) {
+        const persisting = computeAntiThrashSignal(buildAntiThrashCtx(iter));
+        if (persisting) {
+          return synthesizeStallExit(iter, persisting);
         }
       }
 

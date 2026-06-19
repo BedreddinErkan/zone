@@ -100,6 +100,15 @@ describe("getPatchUserFacingReason", () => {
     expect(out.reason).toBe("upstream_unavailable");
   });
 
+  it("semantic_stall: canResume=true, category='warning', resumeHint truthy", () => {
+    const out = getPatchUserFacingReason({ terminationReason: "semantic_stall" });
+    expect(out.canResume).toBe(true);
+    expect(out.category).toBe("warning");
+    expect(out.resumeHint).toBeTruthy();
+    expect(out.userFacingMessage).toContain("non-progress");
+    expect(out.reason).toBe("semantic_stall");
+  });
+
   it("unknown reason: canResume=false, message contains the raw reason", () => {
     const out = getPatchUserFacingReason({ terminationReason: "some_unknown_error" });
     expect(out.canResume).toBe(false);
@@ -140,6 +149,7 @@ describe("canResumeFromTerminationReason", () => {
     expect(canResumeFromTerminationReason("revision_approval_timeout")).toBe(true);
     expect(canResumeFromTerminationReason("revision_rejected")).toBe(true);
     expect(canResumeFromTerminationReason("upstream_unavailable")).toBe(true);
+    expect(canResumeFromTerminationReason("semantic_stall")).toBe(true);
   });
 
   it("returns false for non-resumable reasons", () => {
