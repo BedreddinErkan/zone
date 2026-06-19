@@ -95,7 +95,7 @@ export async function handleToolResult(
   }
 
   // Step 9.6: P3 no_progress feeder — populate ring buffer from agent's own tsc/test run_command outputs
-  if (name === "run_command") {
+  if (name === "run_command" && ctx.noProgressBaselines && ctx.recentVerifyKeySets) {
     const cmd = String(parsedArgs.command ?? "");
     const kind = classifyVerifyCommand(cmd);
     if (kind) {

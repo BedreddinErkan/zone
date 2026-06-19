@@ -49,13 +49,13 @@ afterEach(() => {
 });
 
 describe("TUI.1 routing", () => {
-  it("zone -c → exits 1 with 'coming in TUI.6' message", async () => {
+  it("zone -c → exits 1 with 'no resumable run found' when no envelope exists", async () => {
     process.argv = ["node", "zone", "-c"];
     const errSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     await expect(run()).rejects.toThrow("process.exit");
 
-    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("TUI.6"));
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("no resumable run found"));
     expect(mockProcessExit).toHaveBeenCalledWith(1);
     errSpy.mockRestore();
   });

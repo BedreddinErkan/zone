@@ -67,6 +67,30 @@ function makeReadFileCall(id: string, filePath = "src/target.ts") {
   };
 }
 
+function makeWriteFileCall(id: string, filePath: string) {
+  return {
+    choices: [
+      {
+        message: {
+          content: null,
+          tool_calls: [
+            {
+              id,
+              type: "function",
+              function: {
+                name: "write_file",
+                arguments: JSON.stringify({ filePath, content: "// generated" }),
+              },
+            },
+          ],
+        },
+        finish_reason: "tool_calls",
+      },
+    ],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+  };
+}
+
 function makeDoneResponse(text: string) {
   return {
     choices: [
@@ -109,6 +133,8 @@ describe("Phase E — softIterWarn ceiling (softIterWarn * 3)", () => {
     let callCount = 0;
     mocks.createChatCompletion.mockImplementation(async () => {
       callCount += 1;
+      // Seed one write so filesModified > 0 — prevents P5 wandering detector from firing
+      if (callCount === 1) return makeWriteFileCall(`tc-${callCount}`, `src/output.ts`);
       // Vary filePath each iteration so the loop detector doesn't fire before the ceiling
       return makeReadFileCall(`tc-${callCount}`, `src/file_${callCount}.ts`);
     });
@@ -132,6 +158,8 @@ describe("Phase E — softIterWarn ceiling (softIterWarn * 3)", () => {
     // Exit after softIterWarn iterations with a done response so the test isn't too slow
     mocks.createChatCompletion.mockImplementation(async () => {
       callCount += 1;
+      // Seed one write so filesModified > 0 — prevents P5 wandering detector from firing
+      if (callCount === 1) return makeWriteFileCall(`tc-${callCount}`, `src/output.ts`);
       if (callCount <= TIER_LIMITS.medium.softIterWarn) {
         return makeReadFileCall(`tc-${callCount}`, `src/file_${callCount}.ts`);
       }
@@ -154,6 +182,8 @@ describe("Phase E — softIterWarn ceiling (softIterWarn * 3)", () => {
     let callCount = 0;
     mocks.createChatCompletion.mockImplementation(async () => {
       callCount += 1;
+      // Seed one write so filesModified > 0 — prevents P5 wandering detector from firing
+      if (callCount === 1) return makeWriteFileCall(`tc-${callCount}`, `src/output.ts`);
       if (callCount <= 20) return makeReadFileCall(`tc-${callCount}`, `src/file_${callCount}.ts`);
       return makeDoneResponse("[ZONE_VERIFICATION: tests_skipped_no_infra]");
     });
