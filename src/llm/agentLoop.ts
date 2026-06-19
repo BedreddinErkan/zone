@@ -306,6 +306,10 @@ export interface AgentLoopInput {
   resumeFailureHistory?: Array<{ path: string; records: FailureRecordLite[] }>;
   /** Durable resume: compact context block injected into the first user message only. */
   resumeContextBlock?: string;
+  /** Adaptive-replan enabler: project summary carried from plan phase for mid-execution replan calls. */
+  repoSummary?: string;
+  /** Adaptive-replan enabler: top-N ranked files carried from plan phase for mid-execution replan calls. */
+  relevantFiles?: string[];
 }
 
 export interface AgentLoopResult {

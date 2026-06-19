@@ -5923,6 +5923,8 @@ const initializeTodosFromPlan = (): void => {
       // Tur P2-scope: forward the plan so the tool layer can hard-block
       // writes that fall outside `plan.steps[*].filesLikely`.
       executionPlan,
+      repoSummary: projectSummary,
+      relevantFiles: agentLoopPlanFiles,
       // agent-persistence Tur: feed the full repo file list so
       // buildVerifyDiagnostic can surface candidate culprits when a
       // build/test failure points to a framework-generated path.

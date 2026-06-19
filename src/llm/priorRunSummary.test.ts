@@ -201,6 +201,24 @@ describe("Phase J.5.2 — production runAgentLoop callsites carry priorRunSummar
     expect(literal).toMatch(/^\s*priorRunSummary,?\s*$/m);
   });
 
+  it("agentLoopBaseInput object literal includes repoSummary as a key-value field", () => {
+    const start = SRC.indexOf("const agentLoopBaseInput = {");
+    expect(start).toBeGreaterThan(-1);
+    const end = SRC.indexOf("\n    };\n", start);
+    expect(end).toBeGreaterThan(start);
+    const literal = SRC.slice(start, end);
+    expect(literal).toMatch(/repoSummary\s*:/);
+  });
+
+  it("agentLoopBaseInput object literal includes relevantFiles as a key-value field", () => {
+    const start = SRC.indexOf("const agentLoopBaseInput = {");
+    expect(start).toBeGreaterThan(-1);
+    const end = SRC.indexOf("\n    };\n", start);
+    expect(end).toBeGreaterThan(start);
+    const literal = SRC.slice(start, end);
+    expect(literal).toMatch(/relevantFiles\s*:/);
+  });
+
   it("both production runAgentLoop callsites use agentLoopBaseInput (so the field flows through)", () => {
     // The orchestrator step branch spreads it.
     expect(SRC).toMatch(/runAgentLoop\(\s*\{\s*\.\.\.agentLoopBaseInput/);

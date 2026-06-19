@@ -187,6 +187,13 @@ export async function handleToolResult(
       ctx.consecutiveScopeBlocks += 1;
 
       if (ctx.consecutiveScopeBlocks === 3) {
+        debugLog("[zone-replan-trigger-observed]", JSON.stringify({
+          runId: deps.runId,
+          blockCount: ctx.consecutiveScopeBlocks,
+          iter: deps.iter + 1,
+          toolName: name,
+          error: result.error ?? null,
+        }));
         // Pattern A: append coaching nudge to the role:tool message just pushed in step 11
         const last = ctx.responseInput[ctx.responseInput.length - 1];
         if (last?.role === "tool" && typeof last.content === "string") {

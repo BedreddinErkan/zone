@@ -5,10 +5,16 @@ vi.mock("../subagentDispatch.js", () => ({
   logSubagentDispatched: vi.fn(),
 }));
 
+vi.mock("../../utils/logger.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../utils/logger.js")>();
+  return { ...actual, debugLog: vi.fn() };
+});
+
 import { handleToolResult } from "./handleToolResult.js";
 import type { ToolEventContext, HandleToolResultDeps } from "./types.js";
 import type { Mock } from "vitest";
 import { handleSubagentResult } from "../subagentDispatch.js";
+import { debugLog } from "../../utils/logger.js";
 import {
   getAndClearToolResultSummary,
   clearToolResultSizeTrackerForTest,
@@ -506,6 +512,35 @@ describe("handleToolResult", () => {
       );
       expect(terminalEvent).toBeDefined();
       expect((terminalEvent as { blockedCount?: number }).blockedCount).toBe(5);
+    });
+
+    it("emits [zone-replan-trigger-observed] debugLog at exactly the 3rd block, not before", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      const mockDebugLog = debugLog as Mock;
+
+      // 2 blocks — marker must NOT have fired
+      for (let i = 0; i < 2; i++) {
+        await handleToolResult("apply_patch", { filePath: "src/store.tsx" }, `c${i}`, SCOPE_BLOCK_APPLY, ctx, deps);
+      }
+      const markerCallsBefore = mockDebugLog.mock.calls.filter(
+        (c: unknown[]) => typeof c[0] === "string" && (c[0] as string).includes("zone-replan-trigger-observed")
+      );
+      expect(markerCallsBefore).toHaveLength(0);
+
+      // 3rd block — marker must fire exactly once
+      await handleToolResult("apply_patch", { filePath: "src/store.tsx" }, "c2", SCOPE_BLOCK_APPLY, ctx, deps);
+      const markerCallsAfter = mockDebugLog.mock.calls.filter(
+        (c: unknown[]) => typeof c[0] === "string" && (c[0] as string).includes("zone-replan-trigger-observed")
+      );
+      expect(markerCallsAfter).toHaveLength(1);
+
+      // Payload fields
+      const payload = JSON.parse(markerCallsAfter[0]![1] as string) as Record<string, unknown>;
+      expect(payload.blockCount).toBe(3);
+      expect(payload.iter).toBe(1); // deps.iter=0, so iter+1=1
+      expect(payload.toolName).toBe("apply_patch");
+      expect(payload.runId).toBe("run-1");
     });
 
     it("fires across iteration boundary: 4 blocks in iter N + 1 block in iter N+1 = early_exit", async () => {
