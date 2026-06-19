@@ -84,6 +84,7 @@ vi.mock("../llm/planInvestigation.js", () => ({ runPlanInvestigation: mockRunPla
 
 // Import after mocks are registered
 import { runOneShotInner } from "./dispatch.js";
+import { getRequestContext } from "../llm/openaiContext.js";
 
 const SUCCESS_RESULT = { ok: true, patchPreview: "", warnings: [], decisionMode: "safe_to_apply" as const };
 
@@ -243,5 +244,37 @@ describe("Plan path — ZONE_PLAN_INVESTIGATION_FIRST", () => {
     await runOneShotInner("fix bug in auth", BASE_CONFIG, "inv-3", { mode: "plan" });
     expect(mockRunPlanInvestigation).toHaveBeenCalledOnce();   // only initial
     expect(mockGenerateExecutionPlan).toHaveBeenCalledOnce();  // only the replan
+  });
+});
+
+describe("Plan path — ZONE_PLAN_INVESTIGATION_MODEL", () => {
+  beforeEach(() => {
+    vi.stubEnv("ZONE_TRUST_ALL", "1");
+    vi.stubEnv("ZONE_PLAN_INVESTIGATION_FIRST", "1");
+    mockRunLlmPatchFlow.mockResolvedValue(SUCCESS_RESULT);
+    mockRequestPlanApproval.mockResolvedValue({ decision: "accept_all" });
+  });
+
+  it("override set: investigation loop sees the overridden model as modelOverride.high", async () => {
+    vi.stubEnv("ZONE_PLAN_INVESTIGATION_MODEL", "claude-haiku-4-5-20251001");
+    let capturedHigh: string | undefined;
+    mockRunPlanInvestigation.mockImplementationOnce(async () => {
+      capturedHigh = getRequestContext()?.modelOverride?.high;
+      return { objective: "x", steps: [{ title: "s", description: "", filesLikely: [] }], riskHints: [], scopeSummary: "" };
+    });
+    await runOneShotInner("fix bug in auth", BASE_CONFIG, "inv-model-1", { mode: "plan" });
+    expect(capturedHigh).toBe("claude-haiku-4-5-20251001");
+    expect(mockRunPlanInvestigation).toHaveBeenCalledOnce();
+  });
+
+  it("override unset: investigation loop inherits BASE_CONFIG model as modelOverride.high", async () => {
+    let capturedHigh: string | undefined;
+    mockRunPlanInvestigation.mockImplementationOnce(async () => {
+      capturedHigh = getRequestContext()?.modelOverride?.high;
+      return { objective: "x", steps: [{ title: "s", description: "", filesLikely: [] }], riskHints: [], scopeSummary: "" };
+    });
+    await runOneShotInner("fix bug in auth", BASE_CONFIG, "inv-model-2", { mode: "plan" });
+    expect(capturedHigh).toBe(BASE_CONFIG.model);  // "claude-sonnet-4-6"
+    expect(mockRunPlanInvestigation).toHaveBeenCalledOnce();
   });
 });

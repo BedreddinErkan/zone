@@ -259,8 +259,12 @@ export async function runOneShotInner(
         planCtxRelevantFiles = planCtx.relevantFilePaths;
 
         if (process.env["ZONE_PLAN_INVESTIGATION_FIRST"] === "1") {
-          debugLog("[zone-plan-mode]", JSON.stringify({ mode: "investigate-first" }));
-          preGeneratedPlan = await withRequestContext(planGenCtx, () =>
+          const investigationModel = process.env["ZONE_PLAN_INVESTIGATION_MODEL"];
+          const invCtx = investigationModel
+            ? { ...planGenCtx, modelOverride: { ...planGenCtx.modelOverride, high: investigationModel } }
+            : planGenCtx;
+          debugLog("[zone-plan-mode]", JSON.stringify({ mode: "investigate-first", model: investigationModel ?? "inherit" }));
+          preGeneratedPlan = await withRequestContext(invCtx, () =>
             runPlanInvestigation({
               task,
               repoPath: effectiveConfig.repoPath,
