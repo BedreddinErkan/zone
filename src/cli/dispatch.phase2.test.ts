@@ -214,3 +214,34 @@ describe("Phase 2 gate — ZONE_TRUST_DIR (normal dir)", () => {
     expect((result as { reason?: string }).reason).toBe("project_not_trusted_noninteractive");
   });
 });
+
+describe("Plan path — ZONE_PLAN_INVESTIGATION_FIRST", () => {
+  beforeEach(() => {
+    vi.stubEnv("ZONE_TRUST_ALL", "1");
+    mockRunLlmPatchFlow.mockResolvedValue(SUCCESS_RESULT);
+    mockRequestPlanApproval.mockResolvedValue({ decision: "accept_all" });
+  });
+
+  it("flag ON: calls runPlanInvestigation and NOT generateExecutionPlan for the initial plan", async () => {
+    vi.stubEnv("ZONE_PLAN_INVESTIGATION_FIRST", "1");
+    await runOneShotInner("fix bug in auth", BASE_CONFIG, "inv-1", { mode: "plan" });
+    expect(mockRunPlanInvestigation).toHaveBeenCalledOnce();
+    expect(mockGenerateExecutionPlan).not.toHaveBeenCalled();
+  });
+
+  it("flag OFF (default): calls generateExecutionPlan and NOT runPlanInvestigation", async () => {
+    await runOneShotInner("fix bug in auth", BASE_CONFIG, "inv-2", { mode: "plan" });
+    expect(mockGenerateExecutionPlan).toHaveBeenCalledOnce();
+    expect(mockRunPlanInvestigation).not.toHaveBeenCalled();
+  });
+
+  it("flag ON + PlanReadyModal feedback/refine: initial plan via runPlanInvestigation, replan via generateExecutionPlan", async () => {
+    vi.stubEnv("ZONE_PLAN_INVESTIGATION_FIRST", "1");
+    mockRequestPlanApproval
+      .mockResolvedValueOnce({ decision: "feedback", feedback: "be more specific" })
+      .mockResolvedValueOnce({ decision: "accept_all" });
+    await runOneShotInner("fix bug in auth", BASE_CONFIG, "inv-3", { mode: "plan" });
+    expect(mockRunPlanInvestigation).toHaveBeenCalledOnce();   // only initial
+    expect(mockGenerateExecutionPlan).toHaveBeenCalledOnce();  // only the replan
+  });
+});

@@ -258,33 +258,50 @@ export async function runOneShotInner(
         planCtxRepoSummary = planCtx.projectSummary;
         planCtxRelevantFiles = planCtx.relevantFilePaths;
 
-        // "quick" path: seed top-5 file bodies (Option B, Phase 2a).
-        let seededFileContents: string | undefined;
-        {
-          const candidates = planCtxRelevantFiles.slice(0, QUICK_PLAN_FILES);
-          const parts: string[] = [];
-          let cumChars = 0;
-          for (const fp of candidates) {
-            try {
-              let content = await readFile(fp, "utf-8");
-              if (content.length > QUICK_PLAN_FILE_CAP) content = content.slice(0, QUICK_PLAN_FILE_CAP);
-              if (cumChars + content.length > QUICK_PLAN_TOTAL_CAP) break;
-              parts.push(`=== ${fp} ===\n${content}`);
-              cumChars += content.length;
-            } catch { /* skip unreadable */ }
+        if (process.env["ZONE_PLAN_INVESTIGATION_FIRST"] === "1") {
+          debugLog("[zone-plan-mode]", JSON.stringify({ mode: "investigate-first" }));
+          preGeneratedPlan = await withRequestContext(planGenCtx, () =>
+            runPlanInvestigation({
+              task,
+              repoPath: effectiveConfig.repoPath,
+              runId,
+              relevantFiles: planCtxRelevantFiles,
+              repoSummary: planCtxRepoSummary,
+              userApiKey: planUserApiKey,
+              provider: effectiveConfig.provider,
+              abortSignal: ac.signal,
+              progressCallback,
+            })
+          );
+        } else {
+          // "quick" path: seed top-5 file bodies (Option B, Phase 2a).
+          let seededFileContents: string | undefined;
+          {
+            const candidates = planCtxRelevantFiles.slice(0, QUICK_PLAN_FILES);
+            const parts: string[] = [];
+            let cumChars = 0;
+            for (const fp of candidates) {
+              try {
+                let content = await readFile(fp, "utf-8");
+                if (content.length > QUICK_PLAN_FILE_CAP) content = content.slice(0, QUICK_PLAN_FILE_CAP);
+                if (cumChars + content.length > QUICK_PLAN_TOTAL_CAP) break;
+                parts.push(`=== ${fp} ===\n${content}`);
+                cumChars += content.length;
+              } catch { /* skip unreadable */ }
+            }
+            if (parts.length > 0) seededFileContents = parts.join("\n\n");
           }
-          if (parts.length > 0) seededFileContents = parts.join("\n\n");
+          preGeneratedPlan = await withRequestContext(planGenCtx, () =>
+            generateExecutionPlan({
+              task,
+              repoSummary: planCtxRepoSummary,
+              relevantFiles: planCtxRelevantFiles,
+              userApiKey: planUserApiKey,
+              provider: effectiveConfig.provider,
+              seededFileContents,
+            })
+          );
         }
-        preGeneratedPlan = await withRequestContext(planGenCtx, () =>
-          generateExecutionPlan({
-            task,
-            repoSummary: planCtxRepoSummary,
-            relevantFiles: planCtxRelevantFiles,
-            userApiKey: planUserApiKey,
-            provider: effectiveConfig.provider,
-            seededFileContents,
-          })
-        );
       } catch (e) {
         if (e instanceof ProviderRequestError) throw e; // propagate to outer TUI/headless catch
         if (e instanceof PlanRefusalError) throw e;     // propagate graceful decline to outer catch
