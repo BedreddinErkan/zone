@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyVerifyCommand, parseVerifyOutputToKeySet } from "./noProgressFeeder.js";
+import { classifyVerifyCommand, parseVerifyOutputToKeySet, detectTruncation, computeFeederAction } from "./noProgressFeeder.js";
 
 describe("classifyVerifyCommand — tsc", () => {
   it.each([
@@ -102,5 +102,71 @@ describe("parseVerifyOutputToKeySet — test", () => {
 
   it("empty output → empty Set", () => {
     expect(parseVerifyOutputToKeySet("test", "").size).toBe(0);
+  });
+});
+
+describe("detectTruncation", () => {
+  it("output containing the truncation marker → true", () => {
+    expect(detectTruncation("[... 42 lines truncated for context budget ...]")).toBe(true);
+  });
+
+  it("normal output → false", () => {
+    expect(detectTruncation("src/foo.ts(1,1): error TS2304: Cannot find name 'x'.")).toBe(false);
+  });
+
+  it("empty string → false", () => {
+    expect(detectTruncation("")).toBe(false);
+  });
+});
+
+describe("computeFeederAction", () => {
+  const KEY_A = "src/a.ts:1:TS2304:Cannot find name 'x'.";
+  const KEY_B = "src/b.ts:2:TS2345:Type 'string' is not assignable.";
+
+  it("applies=0, baseline=null → setBaseline with postKeys", () => {
+    const postKeys = new Set([KEY_A]);
+    const result = computeFeederAction(postKeys, 0, null, 1, false);
+    expect(result.kind).toBe("setBaseline");
+    if (result.kind === "setBaseline") {
+      expect(result.keys).toBe(postKeys);
+    }
+  });
+
+  it("applies=0, baseline already set → skip (baseline locked in)", () => {
+    const result = computeFeederAction(new Set([KEY_A]), 0, new Set([KEY_A]), 1, false);
+    expect(result.kind).toBe("skip");
+  });
+
+  it("applies>0, introduced keys (post minus baseline) → pushSnapshot with sorted keys + truncated flag", () => {
+    const baseline = new Set([KEY_A]);
+    const postKeys = new Set([KEY_A, KEY_B]);
+    const result = computeFeederAction(postKeys, 2, baseline, 5, true);
+    expect(result.kind).toBe("pushSnapshot");
+    if (result.kind === "pushSnapshot") {
+      expect(result.snapshot.introducedKeys).toEqual([KEY_B]); // sorted, KEY_A in baseline
+      expect(result.snapshot.successfulAppliesAtCapture).toBe(2);
+      expect(result.snapshot.iter).toBe(5);
+      expect(result.snapshot.truncated).toBe(true);
+    }
+  });
+
+  it("applies>0, null baseline (fallback) → pushSnapshot with all postKeys sorted", () => {
+    const postKeys = new Set([KEY_B, KEY_A]); // intentionally unordered
+    const result = computeFeederAction(postKeys, 1, null, 3, false);
+    expect(result.kind).toBe("pushSnapshot");
+    if (result.kind === "pushSnapshot") {
+      // null baseline treated as empty → all postKeys are introduced, and sorted
+      expect(result.snapshot.introducedKeys).toEqual([KEY_A, KEY_B].sort());
+    }
+  });
+
+  it("applies>0, postKeys ⊆ baseline → skip (no net new errors)", () => {
+    const baseline = new Set([KEY_A, KEY_B]);
+    const postKeys = new Set([KEY_A]);
+    expect(computeFeederAction(postKeys, 1, baseline, 2, false).kind).toBe("skip");
+  });
+
+  it("applies>0, empty postKeys → skip (nothing parses)", () => {
+    expect(computeFeederAction(new Set<string>(), 3, new Set([KEY_A]), 4, false).kind).toBe("skip");
   });
 });

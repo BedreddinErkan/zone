@@ -1,5 +1,6 @@
 import { parseTscErrorPreview, parseTestFailures } from "./applyRollbackFeedback.js";
 import { buildErrorKeySet } from "./verification/classify.js";
+import type { ErrorKeySnapshot } from "./antiThrash.js";
 
 /**
  * Classify a run_command command string as a tsc type-check, a test run, or neither.
@@ -36,4 +37,39 @@ export function parseVerifyOutputToKeySet(
     return buildErrorKeySet(parseTscErrorPreview(output).filter((e) => e.code !== ""));
   }
   return buildErrorKeySet(parseTestFailures(output, repoPath).filter((e) => e.code !== ""));
+}
+
+/**
+ * True when the run_command output was truncated by truncateCommandOutput.
+ * Telemetry metadata only — the detector does not read this field.
+ */
+export function detectTruncation(output: string): boolean {
+  return /\[\.\.\..*lines truncated for context budget/.test(output);
+}
+
+/**
+ * Pure decision: given the parsed key-set and run state, determine what the feeder should do.
+ * Applies=0: capture baseline (once). Applies>0: compute introduced keys and push a snapshot.
+ */
+export function computeFeederAction(
+  postKeys: Set<string>,
+  successfulApplies: number,
+  baseline: Set<string> | null,
+  iter: number,
+  truncated: boolean,
+): { kind: "setBaseline"; keys: Set<string> }
+  | { kind: "pushSnapshot"; snapshot: ErrorKeySnapshot }
+  | { kind: "skip" } {
+  if (successfulApplies === 0) {
+    return baseline === null
+      ? { kind: "setBaseline", keys: postKeys }
+      : { kind: "skip" };
+  }
+  const base = baseline ?? new Set<string>();
+  const introducedKeys = [...postKeys].filter((k) => !base.has(k)).sort();
+  if (introducedKeys.length === 0) return { kind: "skip" };
+  return {
+    kind: "pushSnapshot",
+    snapshot: { iter, introducedKeys, successfulAppliesAtCapture: successfulApplies, truncated },
+  };
 }

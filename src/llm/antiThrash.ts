@@ -12,6 +12,7 @@ export type ErrorKeySnapshot = {
   iter: number;
   introducedKeys: string[];           // post-run error keys MINUS baseline keys, SORTED + stable.
   successfulAppliesAtCapture: number; // count of successful apply_patch/multi_edit at capture time.
+  truncated?: boolean;                // feeder sets true when the run_command output was truncated.
 };
 
 export interface AntiThrashContext {
@@ -58,6 +59,7 @@ function readEnvBool(name: string, fallback: boolean): boolean {
 export const ANTI_THRASH_FAILURE_COACH_MIN = readEnvInt("ZONE_ANTI_THRASH_FAILURE_COACH_MIN", 2);
 export const ANTI_THRASH_BREAK_ITERS        = readEnvInt("ZONE_ANTI_THRASH_BREAK_ITERS", 3);
 export const ANTI_THRASH_ENABLED            = readEnvBool("ZONE_ANTI_THRASH", true);
+export const ANTI_THRASH_NO_PROGRESS_ARMED  = readEnvBool("ZONE_ANTI_THRASH_NO_PROGRESS_ARMED", false);
 export const ANTI_THRASH_WANDER_ITER_MIN    = readEnvInt("ZONE_ANTI_THRASH_WANDER_ITER_MIN", 8);
 export const ANTI_THRASH_WANDER_READ_MIN    = readEnvInt("ZONE_ANTI_THRASH_WANDER_READ_MIN", 5);
 export const ANTI_THRASH_COST_BURN_ITER_MIN    = readEnvInt("ZONE_ANTI_THRASH_COST_BURN_ITER_MIN", 10);

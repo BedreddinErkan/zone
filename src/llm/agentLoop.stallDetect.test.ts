@@ -32,6 +32,12 @@ const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
 }));
 
+const loggerMock = vi.hoisted(() => ({
+  debugLog: vi.fn(),
+  errorLog: vi.fn(),
+  log: vi.fn(),
+}));
+
 vi.mock("./factory.js", () => ({
   createLLMClient: vi.fn(() => ({
     provider: "openai",
@@ -40,6 +46,7 @@ vi.mock("./factory.js", () => ({
 }));
 
 vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
+vi.mock("../utils/logger.js", () => loggerMock);
 
 // ── imports ───────────────────────────────────────────────────────────────────
 
@@ -107,6 +114,24 @@ function llmDone(text = "Done. [ZONE_VERIFICATION: no_verification_attempted]") 
     usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
   };
 }
+
+function llmRunCommand(id: string, command = "tsc --noEmit", nonce?: number) {
+  // nonce field: hashToolCall includes all args → each call is unique to the loop-detector
+  // while parsedArgs.command stays "tsc --noEmit" for the P3 feeder classifier.
+  const args = nonce !== undefined ? { command, _n: nonce } : { command };
+  return {
+    choices: [{
+      message: {
+        content: null,
+        tool_calls: [{ id, type: "function", function: { name: "run_command", arguments: JSON.stringify(args) } }],
+      },
+      finish_reason: "tool_calls",
+    }],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+  };
+}
+
+const TSC_OUTPUT_ONE_ERROR = "src/x.ts(1,1): error TS2304: Cannot find name 'y'.";
 
 // ── fixture ───────────────────────────────────────────────────────────────────
 
@@ -259,5 +284,64 @@ describe("agentLoop anti-thrash Stage 1+2 (INC-1 P4)", () => {
 
     expect(result.terminationReason).toBe("loop_detected");
     expect(result.terminationReason).not.toBe("semantic_stall");
+  });
+});
+
+// ── P3 observe-only (inc-4c) ──────────────────────────────────────────────────
+
+describe("agentLoop anti-thrash P3 observe-only (inc-4c)", () => {
+  it("[zone-anti-thrash-no-progress-observed] emitted once; no stage-1 set; run completes", async () => {
+    // Sequence: read_file → (run_command, apply_patch) × 5 → done
+    // read_file at iter 0 satisfies the no-read gate so apply_patches can succeed.
+    // Tsc baseline is captured on the first run_command (clean output); subsequent
+    // run_commands introduce the same frozen error key → snapshots accumulate in the ring.
+    // With ITER_MIN=8, ring has ≥2 snapshots and grows applies by iter 8 → P3 fires.
+    let tscCallCount = 0;
+    toolExecutorMock.executeTool.mockImplementation((toolName: string) => {
+      if (toolName === "read_file") return Promise.resolve({ success: true, output: "const x = 1;" });
+      if (toolName === "apply_patch") return Promise.resolve({ success: true, output: "Applied." });
+      if (toolName === "run_command") {
+        tscCallCount++;
+        // First call: clean output → baseline = empty set (no introduced keys yet).
+        if (tscCallCount === 1) return Promise.resolve({ success: true, output: "" });
+        // Subsequent calls: same introduced error — frozen across iterations.
+        return Promise.resolve({ success: false, output: TSC_OUTPUT_ONE_ERROR });
+      }
+      return Promise.resolve({ success: false, output: "" });
+    });
+
+    // iter 0: read_file (satisfies no-read gate for subsequent apply_patches)
+    // iters 1-10: 5 pairs of (run_command, apply_patch) = 10 LLM calls
+    // iter 11: done
+    // run_command nonces keep each call unique to the loop-detector (TERMINATE_THRESHOLD=4).
+    mocks.createChatCompletion.mockResolvedValueOnce(llmReadFile("rf-0"));
+    for (let n = 0; n < 5; n++) {
+      mocks.createChatCompletion.mockResolvedValueOnce(llmRunCommand(`rc-${n}`, "tsc --noEmit", n));
+      mocks.createChatCompletion.mockResolvedValueOnce(llmApplyPatch(`ap-${n}`, n));
+    }
+    mocks.createChatCompletion.mockResolvedValueOnce(llmDone());
+
+    const result = await runAgentLoop({
+      task: "fix the type error in src/x.ts",
+      repoPath,
+      mode: "patch",
+      maxIterations: 20,
+    });
+
+    // Run completes without P3 terminating it.
+    expect(result.terminationReason).not.toBe("semantic_stall");
+    expect(result.terminationReason).not.toBe("scope_block_circuit_breaker");
+
+    // Observe telemetry emitted exactly once.
+    const observedCalls = loggerMock.debugLog.mock.calls.filter(
+      (args: unknown[]) => String(args[0]).includes("[zone-anti-thrash-no-progress-observed]"),
+    );
+    expect(observedCalls.length).toBe(1);
+
+    // Stage-1 nudge was NOT set (P3 stayed out of the Stage-1/Stage-2 machine).
+    const stage1Calls = loggerMock.debugLog.mock.calls.filter(
+      (args: unknown[]) => String(args[0]).includes("[zone-anti-thrash-stage1]"),
+    );
+    expect(stage1Calls.length).toBe(0);
   });
 });

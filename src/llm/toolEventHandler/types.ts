@@ -4,6 +4,7 @@ import type { FailureRecord } from "../agentLoop.js";
 import type { TokenBudgetMeter } from "../tokenBudget/TokenBudgetMeter.js";
 import type { DetectorState } from "../loopDetector.js";
 import type { ToolResult } from "../../tools/toolExecutor.js";
+import type { ErrorKeySnapshot } from "../antiThrash.js";
 
 export interface ToolCallLogEntry {
   id: string;
@@ -33,6 +34,9 @@ export interface ToolEventContext {
   lastLoopResult: { status: "ok" | "warn" | "terminate"; count: number } | null;
   /** Consecutive scope-blocked write attempts (apply_patch or write_file). Reset on any successful write. */
   consecutiveScopeBlocks: number;
+  // P3 no_progress feeder — by-reference, mutated in handleToolResult
+  recentVerifyKeySets: ErrorKeySnapshot[];
+  noProgressBaselines: { tsc: Set<string> | null; test: Set<string> | null };
 }
 
 export type ToolEventResult =
@@ -68,4 +72,5 @@ export interface HandleToolResultDeps {
   hashPatchBlocks: (args: Record<string, unknown>) => string;
   hashToolCall: (name: string, args: Record<string, unknown>) => string;
   recordAndDetect: (state: DetectorState, hash: string) => { status: "ok" | "warn" | "terminate"; count: number };
+  repoPath: string;
 }

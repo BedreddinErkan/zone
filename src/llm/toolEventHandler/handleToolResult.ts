@@ -1,5 +1,11 @@
 import { debugLog } from "../../utils/logger.js";
 import { handleSubagentResult, logSubagentDispatched } from "../subagentDispatch.js";
+import {
+  classifyVerifyCommand,
+  detectTruncation,
+  parseVerifyOutputToKeySet,
+  computeFeederAction,
+} from "../noProgressFeeder.js";
 import { emitToolResultSize } from "../loopTelemetry.js";
 import { LOOP_DETECT_EXEMPT_TOOLS } from "../loopDetector.js";
 import type { ToolResult } from "../../tools/toolExecutor.js";
@@ -86,6 +92,27 @@ export async function handleToolResult(
   // Step 9: filesModified
   if ((name === "write_file" || name === "apply_patch") && parsedArgs.filePath != null) {
     ctx.filesModified.add(String(parsedArgs.filePath));
+  }
+
+  // Step 9.6: P3 no_progress feeder — populate ring buffer from agent's own tsc/test run_command outputs
+  if (name === "run_command") {
+    const cmd = String(parsedArgs.command ?? "");
+    const kind = classifyVerifyCommand(cmd);
+    if (kind) {
+      const output = String(result.output ?? "");
+      const truncated = detectTruncation(output);
+      const postKeys = parseVerifyOutputToKeySet(kind, output, deps.repoPath);
+      const successfulApplies = ctx.toolCallLog.filter(
+        (e) => (e.tool === "apply_patch" || e.tool === "multi_edit") && e.success === true,
+      ).length;
+      const action = computeFeederAction(postKeys, successfulApplies, ctx.noProgressBaselines[kind], deps.iter, truncated);
+      if (action.kind === "setBaseline") {
+        ctx.noProgressBaselines[kind] = action.keys;
+      } else if (action.kind === "pushSnapshot") {
+        ctx.recentVerifyKeySets.push(action.snapshot);
+        if (ctx.recentVerifyKeySets.length > 4) ctx.recentVerifyKeySets.shift();
+      }
+    }
   }
 
   // Step 10: Task subagent result aggregation

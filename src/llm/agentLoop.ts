@@ -76,9 +76,14 @@ import { hashToolCall, createDetectorState, recordAndDetect, LOOP_DETECT_EXEMPT_
 import {
   type AntiThrashContext,
   type AntiThrashSignal,
+  type ErrorKeySnapshot,
   ANTI_THRASH_BREAK_ITERS,
+  ANTI_THRASH_NO_PROGRESS_ARMED,
+  ANTI_THRASH_NO_PROGRESS_WINDOW,
   computeAntiThrashSignal,
   buildStallReflectionText,
+  detectWanderingSignal,
+  detectCostBurnSignal,
 } from "./antiThrash.js";
 import { UpstreamUnavailableError } from "./withExponentialBackoff.js";
 import { emitTokenBreakdown, emitBreakdownSummary, type BreakdownEvent } from "./tokenBreakdown.js";
@@ -1816,6 +1821,9 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   let antiThrashStage1FiredAtIter = -1;
   let antiThrashStage1Pattern = "";
   let antiThrashFilesModifiedAtStage1 = 0;
+  const recentVerifyKeySets: ErrorKeySnapshot[] = [];
+  const noProgressBaselines: { tsc: Set<string> | null; test: Set<string> | null } = { tsc: null, test: null };
+  let antiThrashNoProgressObserved = false;
   let consecutiveScopeBlocks = 0;
   let coachingBudgetExhausted = false;
   // Per-run tracker for repeated PreToolUse vetoes (tool:filePath → vetoed once)
@@ -2846,6 +2854,7 @@ Example:
     isReadOnly: isReadOnlyMode,
     archetype: input.originalArchetype,
     costUsd: budget.snapshot().costUsd,
+    recentVerifyKeySets,
   });
 
   const antiThrashHook: PreIterationHook = {
@@ -2856,17 +2865,40 @@ Example:
       !isSubagentLoop &&
       computeAntiThrashSignal(buildAntiThrashCtx(ctx.iter)) !== null,
     run: (ctx) => {
-      const signal = computeAntiThrashSignal(buildAntiThrashCtx(ctx.iter))!;
+      const builtCtx = buildAntiThrashCtx(ctx.iter);
+      // shouldRun guarantees non-null; typed as nullable so the Risk-B reassignment typechecks.
+      let signal: AntiThrashSignal | null = computeAntiThrashSignal(builtCtx);
+
+      if (signal && signal.pattern === "no_progress" && !ANTI_THRASH_NO_PROGRESS_ARMED) {
+        if (!antiThrashNoProgressObserved) {
+          antiThrashNoProgressObserved = true;
+          const win = (builtCtx.recentVerifyKeySets ?? []).slice(-ANTI_THRASH_NO_PROGRESS_WINDOW);
+          const windowTruncated = win.some((s) => s.truncated === true);
+          debugLog("[zone-anti-thrash-no-progress-observed]", JSON.stringify({
+            iter: ctx.iter, runId: input.runId, windowTruncated, ...signal.detail,
+          }));
+        }
+        // Risk B: multi_edit can let P3 and P5/P6 co-hold; fall back to avoid masking a real nudge.
+        signal = detectWanderingSignal(builtCtx) ?? detectCostBurnSignal(builtCtx);
+        if (!signal) {
+          return { kind: "appendContext", content: "", target: "responseInput", mode: "append-to-tool" };
+        }
+      }
+
+      // Preserve exact existing side-effects for P4/P5/P6 (and ARMED no_progress).
+      // signal is non-null here: either came from computeAntiThrashSignal (shouldRun guarantee)
+      // or from the P5/P6 fallback (which only proceeds if non-null).
+      const activeSignal = signal!;
       antiThrashStage1Fired = true;
       antiThrashStage1FiredAtIter = ctx.iter;
-      antiThrashStage1Pattern = signal.pattern;
+      antiThrashStage1Pattern = activeSignal.pattern;
       antiThrashFilesModifiedAtStage1 = filesModified.size;
       debugLog("[zone-anti-thrash-stage1]", JSON.stringify({
-        iter: ctx.iter, runId: input.runId, ...signal.detail,
+        iter: ctx.iter, runId: input.runId, ...activeSignal.detail,
       }));
       return {
         kind: "appendContext",
-        content: buildStallReflectionText(signal),
+        content: buildStallReflectionText(activeSignal),
         target: "responseInput",
         mode: "append-to-tool",
       };
@@ -3380,6 +3412,8 @@ Example:
         rollbackCount,
         lastLoopResult: null,
         consecutiveScopeBlocks,
+        recentVerifyKeySets,
+        noProgressBaselines,
       };
       const toolEventDeps = {
         budget,
@@ -3400,6 +3434,7 @@ Example:
         hashPatchBlocks,
         hashToolCall,
         recordAndDetect,
+        repoPath: input.repoPath,
       };
 
       for (const call of toolCalls) {
