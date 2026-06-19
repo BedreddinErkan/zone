@@ -230,10 +230,11 @@ describe("Plan path — ZONE_PLAN_INVESTIGATION_FIRST", () => {
     expect(mockGenerateExecutionPlan).not.toHaveBeenCalled();
   });
 
-  it("flag OFF (default): calls generateExecutionPlan and NOT runPlanInvestigation", async () => {
-    await runOneShotInner("fix bug in auth", BASE_CONFIG, "inv-2", { mode: "plan" });
-    expect(mockGenerateExecutionPlan).toHaveBeenCalledOnce();
-    expect(mockRunPlanInvestigation).not.toHaveBeenCalled();
+  it("flag=1 + additive task: force on overrides gate → calls runPlanInvestigation", async () => {
+    vi.stubEnv("ZONE_PLAN_INVESTIGATION_FIRST", "1");
+    await runOneShotInner("add a settings panel", BASE_CONFIG, "inv-2", { mode: "plan" });
+    expect(mockRunPlanInvestigation).toHaveBeenCalledOnce();
+    expect(mockGenerateExecutionPlan).not.toHaveBeenCalled();
   });
 
   it("flag ON + PlanReadyModal feedback/refine: initial plan via runPlanInvestigation, replan via generateExecutionPlan", async () => {
@@ -276,5 +277,39 @@ describe("Plan path — ZONE_PLAN_INVESTIGATION_MODEL", () => {
     await runOneShotInner("fix bug in auth", BASE_CONFIG, "inv-model-2", { mode: "plan" });
     expect(capturedHigh).toBe(BASE_CONFIG.model);  // "claude-sonnet-4-6"
     expect(mockRunPlanInvestigation).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Plan path — gated investigation routing (taskAssertsProblem)", () => {
+  beforeEach(() => {
+    vi.stubEnv("ZONE_TRUST_ALL", "1");
+    mockRunLlmPatchFlow.mockResolvedValue(SUCCESS_RESULT);
+    mockRequestPlanApproval.mockResolvedValue({ decision: "accept_all" });
+  });
+
+  it("flag unset + problem task: gated default routes to runPlanInvestigation", async () => {
+    await runOneShotInner("fix bug in auth", BASE_CONFIG, "inv-gate-1", { mode: "plan" });
+    expect(mockRunPlanInvestigation).toHaveBeenCalledOnce();
+    expect(mockGenerateExecutionPlan).not.toHaveBeenCalled();
+  });
+
+  it("flag unset + additive task: gated default routes to generateExecutionPlan", async () => {
+    await runOneShotInner("add a settings panel", BASE_CONFIG, "inv-gate-2", { mode: "plan" });
+    expect(mockGenerateExecutionPlan).toHaveBeenCalledOnce();
+    expect(mockRunPlanInvestigation).not.toHaveBeenCalled();
+  });
+
+  it("flag=1 + additive task: force on overrides gate → runPlanInvestigation", async () => {
+    vi.stubEnv("ZONE_PLAN_INVESTIGATION_FIRST", "1");
+    await runOneShotInner("add a settings panel", BASE_CONFIG, "inv-gate-3", { mode: "plan" });
+    expect(mockRunPlanInvestigation).toHaveBeenCalledOnce();
+    expect(mockGenerateExecutionPlan).not.toHaveBeenCalled();
+  });
+
+  it("flag=0 + problem task: force off overrides gate → generateExecutionPlan", async () => {
+    vi.stubEnv("ZONE_PLAN_INVESTIGATION_FIRST", "0");
+    await runOneShotInner("fix bug in auth", BASE_CONFIG, "inv-gate-4", { mode: "plan" });
+    expect(mockGenerateExecutionPlan).toHaveBeenCalledOnce();
+    expect(mockRunPlanInvestigation).not.toHaveBeenCalled();
   });
 });

@@ -258,12 +258,21 @@ export async function runOneShotInner(
         planCtxRepoSummary = planCtx.projectSummary;
         planCtxRelevantFiles = planCtx.relevantFilePaths;
 
-        if (process.env["ZONE_PLAN_INVESTIGATION_FIRST"] === "1") {
-          const investigationModel = process.env["ZONE_PLAN_INVESTIGATION_MODEL"];
+        const investigationFlag = process.env["ZONE_PLAN_INVESTIGATION_FIRST"];
+        const shouldInvestigate =
+          investigationFlag === "1" ? true :
+          investigationFlag === "0" ? false :
+          taskAssertsProblem(task);
+        const investigationModel = process.env["ZONE_PLAN_INVESTIGATION_MODEL"];
+        debugLog("[zone-plan-mode]", JSON.stringify({
+          mode: shouldInvestigate ? "investigate-first" : "quick-lexical",
+          gatedBy: investigationFlag === undefined ? "taskAssertsProblem" : "env",
+          ...(shouldInvestigate ? { model: investigationModel ?? "inherit" } : {}),
+        }));
+        if (shouldInvestigate) {
           const invCtx = investigationModel
             ? { ...planGenCtx, modelOverride: { ...planGenCtx.modelOverride, high: investigationModel } }
             : planGenCtx;
-          debugLog("[zone-plan-mode]", JSON.stringify({ mode: "investigate-first", model: investigationModel ?? "inherit" }));
           preGeneratedPlan = await withRequestContext(invCtx, () =>
             runPlanInvestigation({
               task,

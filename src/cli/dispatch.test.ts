@@ -523,7 +523,7 @@ describe("runOneShotInner — planDepth routing", () => {
     mockLoadDiskModelSync.mockReturnValue({ version: 2, model: "claude-sonnet-4-6", provider: "anthropic", planDepth: "quick", updatedAt: "" });
     mockRequestPlanApproval.mockResolvedValueOnce({ planId: "p2", decision: "accept_all" });
     mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
-    await runOneShotInner("fix bug", PLAN_CONFIG, "run-quick-1", { mode: "plan", externalAc: AC() });
+    await runOneShotInner("add pagination", PLAN_CONFIG, "run-quick-1", { mode: "plan", externalAc: AC() });
     expect(mockGenerateExecutionPlan).toHaveBeenCalledOnce();
     expect(mockRunPlanInvestigation).not.toHaveBeenCalled();
     expect(mockRequestPlanApproval).toHaveBeenCalledOnce();
@@ -572,6 +572,7 @@ describe("E8: no-op plan short-circuit — premise verified false", () => {
   beforeEach(() => {
     mockLoadDiskModelSync.mockReturnValue({ version: 2, model: "claude-sonnet-4-6", provider: "anthropic", planDepth: "quick", updatedAt: "" });
     mockGenerateExecutionPlan.mockResolvedValueOnce(NO_CHANGE_PLAN);
+    mockRunPlanInvestigation.mockResolvedValueOnce(NO_CHANGE_PLAN);
     mockIsNoChangePlan.mockReturnValue(true);
   });
 
