@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import * as fsSync from "node:fs";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import type { ExecutionPlan } from "../llm/executionPlan.js";
 import type { RunTodo } from "../core/todoLifecycle.js";
@@ -63,6 +63,14 @@ export interface RunEnvelope {
   staging: StagedEntryEnvelope[];
   /** Paths already flushed to disk by persistStagingOnError — suppress drop-notes for these (R2). */
   flushedPaths: string[];
+  /**
+   * Repo-relative paths created direct-to-disk this run via write_file's new-file
+   * path (toolExecutor.ts:2671) — which bypasses stagingFiles, so these never appear
+   * in `staging`. On a hard kill these files survive ON DISK; this list is the
+   * completion signal so resume does not re-create them. Optional: envelopes written
+   * before S10 lack it (treat as []).
+   */
+  createdPaths?: string[];
   /** Carried verbatim from the run — NOT a replacement for the FS-event summary path. */
   priorSessionSummary: string;
 }
@@ -252,6 +260,29 @@ export function reconcileEnvelopeStaging(env: RunEnvelope): ReconcileResult {
   return { restored, dropNotes };
 }
 
+/**
+ * Derive the set of new files created direct-to-disk this run. `filesModified`
+ * tracks every written path (new + edited); edits also live in `stagingFiles`,
+ * while new-file creates do not (write_file writes them straight to disk —
+ * toolExecutor.ts:2671). So a path in filesModified whose absolute form is NOT a
+ * staging key is a new-file create. Returns repo-relative paths, matching the
+ * `staging[].path` convention.
+ */
+export function deriveCreatedPaths(
+  filesModified: Iterable<string>,
+  stagingFiles: Map<string, string>,
+  repoPath: string,
+): string[] {
+  const created: string[] = [];
+  for (const fm of filesModified) {
+    const abs = resolve(repoPath, fm);
+    if (!stagingFiles.has(abs)) {
+      created.push(relative(repoPath, abs));
+    }
+  }
+  return created;
+}
+
 // ---- Resume context block --------------------------------------------------
 
 /** Builds the compact text injected into the first user message on resume. */
@@ -285,6 +316,9 @@ export function buildResumeContextBlock(env: RunEnvelope, dropNotes: string[]): 
     dropNotes.length > 0
       ? `Dropped staged changes (conflicts): ${dropNotes.join("; ")}`
       : "Staged changes: fully restored",
+    (env.createdPaths?.length ?? 0) > 0
+      ? `Already created on disk (do NOT recreate): ${env.createdPaths!.join("; ")}`
+      : "",
   ].filter(Boolean);
 
   return lines.join("\n");

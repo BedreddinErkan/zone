@@ -45,6 +45,7 @@ import {
   saveRunEnvelope,
   deleteRunEnvelope,
   stampEnvelopeStatus,
+  deriveCreatedPaths,
   createCoalescingWriter,
   type FailureRecordLite,
   type RunEnvelope,
@@ -2137,6 +2138,11 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       todos: latestTodos,
       failureHistory: failureHistoryArr,
       staging,
+      // New-file creates go direct-to-disk (write_file !fileExists) and never enter
+      // stagingFiles, so they're absent from `staging`. Derive them from filesModified
+      // (every written path) minus stagingFiles keys (edits) — the completion signal
+      // that lets resume skip re-creating files already on disk.
+      createdPaths: deriveCreatedPaths(filesModified, stagingFiles, input.repoPath),
       flushedPaths: [],  // stamped at exit by stampEnvelopeStatus with result.filesModified
       priorSessionSummary: String(input.priorSessionSummary ?? ""),
     };

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp, rm, readdir, readFile, writeFile } from "node:fs/promises";
 import { writeFileSync, mkdirSync } from "node:fs";
@@ -12,6 +12,7 @@ import {
   latestResumableEnvelope,
   resolveEnvelopeId,
   reconcileEnvelopeStaging,
+  deriveCreatedPaths,
   buildResumeContextBlock,
   createCoalescingWriter,
   _setEnvelopeDirForTest,
@@ -69,6 +70,19 @@ describe("saveRunEnvelope / loadRunEnvelope", () => {
     const loaded = await loadRunEnvelope(env.sessionId);
     // updatedAt is updated on save — exclude from deep-equal
     expect(loaded).toMatchObject({ ...env, updatedAt: expect.any(String) });
+  });
+
+  it("loads a pre-S10 envelope lacking createdPaths (treated as absent/[])", async () => {
+    const env = makeEnvelope(); // no createdPaths field
+    await saveRunEnvelope(env);
+    // The persisted JSON must truly lack the field (optional, omitted when undefined).
+    const raw = await readFile(join(envDir, `${env.sessionId}.envelope.json`), "utf-8");
+    expect(raw).not.toContain("createdPaths");
+    const loaded = await loadRunEnvelope(env.sessionId);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.createdPaths).toBeUndefined();
+    // Must not crash and must omit the created-on-disk line.
+    expect(buildResumeContextBlock(loaded!, [])).not.toContain("Already created on disk");
   });
 
   it("returns null for unknown sessionId", async () => {
@@ -327,6 +341,51 @@ describe("reconcileEnvelopeStaging", () => {
   });
 });
 
+// ---- deriveCreatedPaths -----------------------------------------------------
+
+describe("deriveCreatedPaths", () => {
+  const repoPath = "/repo";
+
+  it("returns filesModified entries absent from stagingFiles (new-file creates), repo-relative", () => {
+    const filesModified = new Set(["src/new1.ts", "src/new2.ts", "src/edit1.ts"]);
+    const stagingFiles = new Map<string, string>([[resolve(repoPath, "src/edit1.ts"), "edited"]]);
+    const created = deriveCreatedPaths(filesModified, stagingFiles, repoPath);
+    expect([...created].sort()).toEqual(["src/new1.ts", "src/new2.ts"]);
+    expect(created).not.toContain("src/edit1.ts");
+  });
+
+  it("separates new-file creates (createdPaths) from staged edits (staging) — envelope snapshot shape", () => {
+    // Mirrors buildEnvelopeSnapshot: new files a-e went direct-to-disk (filesModified
+    // only); the index.ts edit went to stagingFiles (both). createdPaths must hold a-e
+    // and NOT index.ts; staging holds index.ts and NOT a-e.
+    const newFiles = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts", "src/e.ts"];
+    const editFile = "src/index.ts";
+    const filesModified = new Set([...newFiles, editFile]);
+    const stagingFiles = new Map<string, string>([[resolve(repoPath, editFile), "// edited"]]);
+
+    const created = deriveCreatedPaths(filesModified, stagingFiles, repoPath);
+    expect([...created].sort()).toEqual([...newFiles].sort());
+    expect(created).not.toContain(editFile);
+    // staging side: only the edit is present, none of the new files.
+    expect([...stagingFiles.keys()]).toEqual([resolve(repoPath, editFile)]);
+    for (const nf of newFiles) {
+      expect(stagingFiles.has(resolve(repoPath, nf))).toBe(false);
+    }
+  });
+
+  it("returns [] when every written path is staged (no new-file creates)", () => {
+    const filesModified = new Set(["src/x.ts"]);
+    const stagingFiles = new Map<string, string>([[resolve(repoPath, "src/x.ts"), "staged"]]);
+    expect(deriveCreatedPaths(filesModified, stagingFiles, repoPath)).toEqual([]);
+  });
+
+  it("handles absolute-form filesModified entries", () => {
+    const filesModified = new Set([resolve(repoPath, "src/abs.ts")]);
+    const stagingFiles = new Map<string, string>();
+    expect(deriveCreatedPaths(filesModified, stagingFiles, repoPath)).toEqual(["src/abs.ts"]);
+  });
+});
+
 // ---- buildResumeContextBlock ------------------------------------------------
 
 describe("buildResumeContextBlock", () => {
@@ -352,6 +411,21 @@ describe("buildResumeContextBlock", () => {
     const block = buildResumeContextBlock(env, ["foo.ts: file changed since run was interrupted"]);
     expect(block).toContain("foo.ts");
     expect(block).toContain("conflicts");
+  });
+
+  it("lists createdPaths as already-created-on-disk (do NOT recreate)", () => {
+    const env = makeEnvelope({ createdPaths: ["src/a.ts", "src/b.ts"] });
+    const block = buildResumeContextBlock(env, []);
+    expect(block).toContain("Already created on disk (do NOT recreate)");
+    expect(block).toContain("src/a.ts");
+    expect(block).toContain("src/b.ts");
+  });
+
+  it("omits the created-on-disk line when createdPaths is empty or absent", () => {
+    const emptyEnv = makeEnvelope({ createdPaths: [] });
+    expect(buildResumeContextBlock(emptyEnv, [])).not.toContain("Already created on disk");
+    const absentEnv = makeEnvelope(); // pre-S10 envelope: no createdPaths field
+    expect(buildResumeContextBlock(absentEnv, [])).not.toContain("Already created on disk");
   });
 });
 
