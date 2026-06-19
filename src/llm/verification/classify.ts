@@ -33,14 +33,14 @@ function normalizePatchedPath(filePath: string): string {
 /** Parsed tsc error record used for identity-based regression detection. */
 export type CodedError = { file?: string; line?: number; code: string; message: string };
 
-function errorKey(e: CodedError): string {
+export function errorKey(e: CodedError): string {
   const file = (e.file ?? "").replace(/\\/g, "/").trim();
   const line = e.line ?? 0;
   const msg = (e.message ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
   return `${file}:${line}:${e.code}:${msg}`;
 }
 
-function buildErrorKeySet(errors: readonly CodedError[]): Set<string> {
+export function buildErrorKeySet(errors: readonly CodedError[]): Set<string> {
   const keys = new Set<string>();
   for (const e of errors) { if (e.code) keys.add(errorKey(e)); }
   return keys;
