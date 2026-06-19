@@ -33,3 +33,26 @@ export function taskAssertsProblem(task: string): boolean {
   if (ADDITIVE_RE.test(task.trim())) return false;
   return PROBLEM_RE.test(task);
 }
+
+/** Lead verbs that introduce BRAND-NEW code without touching existing logic.
+ *  Subset of ADDITIVE_LEAD_VERBS that EXCLUDES structural verbs
+ *  (refactor/rename/extract/migrate/convert — blast radius into existing code) and the
+ *  ambiguous "make" ("make Y robust" = modify). Those must be investigated, not guessed. */
+export const PURE_ADDITION_LEAD_VERBS = [
+  "add", "create", "implement", "build", "scaffold", "introduce", "generate", "write", "set up", "new",
+] as const;
+
+// keep in sync with PURE_ADDITION_LEAD_VERBS above
+const PURE_ADDITION_RE = /^(add|create|implement|build|scaffold|introduce|generate|write|set ?up|new)\b/i;
+
+/**
+ * True ONLY for clear pure-addition tasks — adding brand-new code that doesn't touch existing
+ * logic (add/create/scaffold/…). Structural verbs (refactor/rename/extract/migrate/convert),
+ * the ambiguous "make", all problem tasks, and all unrecognized/ambiguous phrasings return false.
+ *
+ * The plan-mode gate's fail-safe skip predicate: investigate by default, drop to cheap lexical
+ * planning ONLY when this returns true. When in doubt → false → investigate.
+ */
+export function isPureAddition(task: string): boolean {
+  return PURE_ADDITION_RE.test(task.trim());
+}

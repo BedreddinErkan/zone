@@ -145,7 +145,7 @@ describe("durable resume — preGeneratedPlan bypass (Fix B)", () => {
     mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
     mockPreparePlanContext.mockResolvedValue({ projectSummary: "A project", relevantFilePaths: [] });
 
-    await runOneShotInner("do something fresh", BASE_CONFIG, "run-normal-plan", {
+    await runOneShotInner("add something fresh", BASE_CONFIG, "run-normal-plan", {
       mode: "plan",
       externalAc: new AbortController(),
     });

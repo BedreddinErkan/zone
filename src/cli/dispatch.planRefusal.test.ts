@@ -114,6 +114,9 @@ describe("PlanRefusalError — quick path propagation (planDepth=quick)", () => 
   beforeEach(() => {
     // planDepth:"quick" is stored in diskModel
     mockLoadDiskModelSync.mockReturnValue({ planDepth: "quick" });
+    // Pin the lexical planner: these verify generateExecutionPlan's refusal propagation, not
+    // routing. ("secure a route"/"task" are non-additive → would otherwise investigate first.)
+    vi.stubEnv("ZONE_PLAN_INVESTIGATION_FIRST", "0");
   });
 
   it("generateExecutionPlan throws PlanRefusalError → propagates from runOneShotInner", async () => {
@@ -137,6 +140,9 @@ describe("Non-refusal plan-gen failure — quick path behavior", () => {
   // PlanRefusalError propagates. runPlanInvestigation is only called on legacy path.
   beforeEach(() => {
     mockLoadDiskModelSync.mockReturnValue({ planDepth: "quick" });
+    // Pin the lexical planner: these verify generateExecutionPlan's failure handling, not
+    // routing. (Non-additive tasks would otherwise investigate first.)
+    vi.stubEnv("ZONE_PLAN_INVESTIGATION_FIRST", "0");
   });
 
   it("generateExecutionPlan throws generic Error → swallowed; falls back to runLlmPatchFlow without a plan", async () => {

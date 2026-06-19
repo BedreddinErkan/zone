@@ -16,7 +16,7 @@ import { createSpinner, buildCliSink } from "./sink.js";
 import type { LlmPatchProgressUpdate, ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import { preparePlanContext } from "../core/preparePlanContext.js";
 import { generateExecutionPlan, isNoChangePlan, isCannotVerifyPlan, synthesizeMinimalPlan } from "../llm/executionPlan.js";
-import { taskAssertsProblem } from "../llm/taskShape.js";
+import { taskAssertsProblem, isPureAddition } from "../llm/taskShape.js";
 import { rejectPendingEditsForRun } from "../api/editApprovals.js";
 import { rejectPendingStagedForRun } from "../api/stagedApprovals.js";
 import { debugLog } from "../utils/logger.js";
@@ -262,11 +262,11 @@ export async function runOneShotInner(
         const shouldInvestigate =
           investigationFlag === "1" ? true :
           investigationFlag === "0" ? false :
-          taskAssertsProblem(task);
+          !isPureAddition(task);   // default: investigate unless a clear pure addition
         const investigationModel = process.env["ZONE_PLAN_INVESTIGATION_MODEL"];
         debugLog("[zone-plan-mode]", JSON.stringify({
           mode: shouldInvestigate ? "investigate-first" : "quick-lexical",
-          gatedBy: investigationFlag === undefined ? "taskAssertsProblem" : "env",
+          gatedBy: investigationFlag === undefined ? "default-non-additive" : "env",
           ...(shouldInvestigate ? { model: investigationModel ?? "inherit" } : {}),
         }));
         if (shouldInvestigate) {

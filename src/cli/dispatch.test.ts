@@ -338,6 +338,12 @@ const REVISED_PLAN = {
 };
 
 describe("runOneShotInner — plan mode paths", () => {
+  // These exercise the lexical plan-approval loop (refine/feedback/re-plan via
+  // generateExecutionPlan). Pin the lexical planner so the non-additive "do something" task
+  // doesn't route to investigation first; the investigation refine path is covered in
+  // dispatch.phase2.test.ts.
+  beforeEach(() => { vi.stubEnv("ZONE_PLAN_INVESTIGATION_FIRST", "0"); });
+
   it("cost regression: runAuditPipeline NOT called in default plan mode", async () => {
     mockRequestPlanApproval.mockResolvedValueOnce({ planId: "pcr", decision: "accept_all" });
     mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
@@ -536,7 +542,7 @@ describe("runOneShotInner — planDepth routing", () => {
     mockLoadDiskModelSync.mockReturnValue(null);
     mockRequestPlanApproval.mockResolvedValueOnce({ planId: "p-def", decision: "accept_all" });
     mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
-    await runOneShotInner("refactor x", PLAN_CONFIG, "run-default-1", { mode: "plan", externalAc: AC() });
+    await runOneShotInner("add pagination", PLAN_CONFIG, "run-default-1", { mode: "plan", externalAc: AC() });
     expect(mockGenerateExecutionPlan).toHaveBeenCalledOnce();
     expect(mockRequestPlanApproval).toHaveBeenCalledOnce();
     expect(mockRunPlanInvestigation).not.toHaveBeenCalled();

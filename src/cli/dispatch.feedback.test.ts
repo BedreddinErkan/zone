@@ -168,6 +168,10 @@ describe("Fix A — feedback threaded into task for runLlmPatchFlow", () => {
 });
 
 describe("Fix B — replan receives abortSignal", () => {
+  // Pins the lexical planner: this verifies generateExecutionPlan's replan wiring, not the
+  // routing gate. ("split server.ts" is non-additive → would otherwise investigate first.)
+  beforeEach(() => { vi.stubEnv("ZONE_PLAN_INVESTIGATION_FIRST", "0"); });
+
   it("passes abortSignal to generateExecutionPlan on replan", async () => {
     mockRequestPlanApproval.mockResolvedValueOnce({
       planId: "plan-4",

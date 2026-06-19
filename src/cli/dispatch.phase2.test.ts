@@ -280,7 +280,7 @@ describe("Plan path — ZONE_PLAN_INVESTIGATION_MODEL", () => {
   });
 });
 
-describe("Plan path — gated investigation routing (taskAssertsProblem)", () => {
+describe("Plan path — gated investigation routing (default-non-additive, fail-safe)", () => {
   beforeEach(() => {
     vi.stubEnv("ZONE_TRUST_ALL", "1");
     mockRunLlmPatchFlow.mockResolvedValue(SUCCESS_RESULT);
@@ -311,5 +311,17 @@ describe("Plan path — gated investigation routing (taskAssertsProblem)", () =>
     await runOneShotInner("fix bug in auth", BASE_CONFIG, "inv-gate-4", { mode: "plan" });
     expect(mockGenerateExecutionPlan).toHaveBeenCalledOnce();
     expect(mockRunPlanInvestigation).not.toHaveBeenCalled();
+  });
+
+  it("flag unset + ambiguous task (no add/fix keyword): fail-safe routes to runPlanInvestigation", async () => {
+    await runOneShotInner("the export step sometimes drops rows, find out why", BASE_CONFIG, "inv-gate-5", { mode: "plan" });
+    expect(mockRunPlanInvestigation).toHaveBeenCalledOnce();
+    expect(mockGenerateExecutionPlan).not.toHaveBeenCalled();
+  });
+
+  it("flag unset + refactor task: structural verb routes to runPlanInvestigation", async () => {
+    await runOneShotInner("rename the User model across the codebase", BASE_CONFIG, "inv-gate-6", { mode: "plan" });
+    expect(mockRunPlanInvestigation).toHaveBeenCalledOnce();
+    expect(mockGenerateExecutionPlan).not.toHaveBeenCalled();
   });
 });
