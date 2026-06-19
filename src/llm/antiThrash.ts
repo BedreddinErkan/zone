@@ -1,6 +1,6 @@
 import type { FailureRecord } from "./agentLoop.js";
 
-export type AntiThrashSignalKind = "failure_stall"; // P5="wandering", P6="cost_burn" added in inc-2/3
+export type AntiThrashSignalKind = "failure_stall" | "wandering"; // P6="cost_burn" added in inc-3
 
 export interface AntiThrashSignal {
   pattern: AntiThrashSignalKind;
@@ -23,6 +23,8 @@ export interface AntiThrashThresholds {
   failureCoachMin?: number;
   breakIters?: number;
   enabled?: boolean;
+  wanderIterMin?: number;
+  wanderReadMin?: number;
 }
 
 function readEnvInt(name: string, fallback: number): number {
@@ -40,6 +42,8 @@ function readEnvBool(name: string, fallback: boolean): boolean {
 export const ANTI_THRASH_FAILURE_COACH_MIN = readEnvInt("ZONE_ANTI_THRASH_FAILURE_COACH_MIN", 2);
 export const ANTI_THRASH_BREAK_ITERS        = readEnvInt("ZONE_ANTI_THRASH_BREAK_ITERS", 3);
 export const ANTI_THRASH_ENABLED            = readEnvBool("ZONE_ANTI_THRASH", true);
+export const ANTI_THRASH_WANDER_ITER_MIN    = readEnvInt("ZONE_ANTI_THRASH_WANDER_ITER_MIN", 8);
+export const ANTI_THRASH_WANDER_READ_MIN    = readEnvInt("ZONE_ANTI_THRASH_WANDER_READ_MIN", 5);
 
 // Strong-verdict detection inlined to avoid a circular import with agentLoop.ts.
 // Mirrors the identical_patch_retried and trigger_repeated_3x branches of
@@ -84,14 +88,45 @@ export function detectFailureStall(
   return null;
 }
 
-// Priority-ordered dispatch. P5 and P6 are additive return lines — zero wiring change.
+export function detectWanderingSignal(
+  ctx: AntiThrashContext,
+  thresholds?: AntiThrashThresholds,
+): AntiThrashSignal | null {
+  if (ctx.isReadOnly) return null;
+  if (ctx.archetype === "question" || ctx.archetype === "investigation") return null;
+  if (ctx.filesModifiedSize !== 0) return null;
+
+  const wanderIterMin = thresholds?.wanderIterMin ?? ANTI_THRASH_WANDER_ITER_MIN;
+  const wanderReadMin = thresholds?.wanderReadMin ?? ANTI_THRASH_WANDER_READ_MIN;
+
+  if (ctx.iter < wanderIterMin) return null;
+
+  let totalReads = 0;
+  for (const count of ctx.filesReadCountThisRun.values()) {
+    totalReads += count;
+  }
+  if (totalReads < wanderReadMin) return null;
+
+  const uniqueFiles = ctx.filesReadCountThisRun.size;
+  let multiReadCount = 0;
+  for (const count of ctx.filesReadCountThisRun.values()) {
+    if (count > 1) multiReadCount++;
+  }
+
+  return {
+    pattern: "wandering",
+    summaryTitle: `Wandering: ${totalReads} reads across ${uniqueFiles} files, no writes`,
+    detail: { uniqueFiles, totalReads, multiReadCount, iter: ctx.iter },
+  };
+}
+
+// Priority-ordered dispatch. P6 is an additive return line — zero wiring change.
 export function computeAntiThrashSignal(
   ctx: AntiThrashContext,
   thresholds?: AntiThrashThresholds,
 ): AntiThrashSignal | null {
   if (!(thresholds?.enabled ?? ANTI_THRASH_ENABLED)) return null;
-  return detectFailureStall(ctx, thresholds);
-  // inc-2: return detectFailureStall(ctx, thresholds) ?? detectWanderingSignal(ctx, thresholds);
+  return detectFailureStall(ctx, thresholds) ?? detectWanderingSignal(ctx, thresholds);
   // inc-3: ?? detectCostBurnSignal(ctx, thresholds)
 }
 
@@ -105,6 +140,22 @@ export function buildStallReflectionText(signal: AntiThrashSignal): string {
       `(b) Use \`suggest_scope_change\` if this file is out of scope or requires a different path.\n` +
       `(c) Write the FINAL SUMMARY and exit if this file change is not essential to the task.\n` +
       `Do NOT retry the same patch.`
+    );
+  }
+  if (signal.pattern === "wandering") {
+    const { uniqueFiles, totalReads, multiReadCount, iter } = signal.detail as {
+      uniqueFiles: number;
+      totalReads: number;
+      multiReadCount: number;
+      iter: number;
+    };
+    return (
+      `\n\n[ZONE_ANTI_THRASH] You have read ${totalReads} times across ${uniqueFiles} files ` +
+      `(${multiReadCount} re-read) over ${iter} iterations without writing anything. ` +
+      `You must now commit to an action:\n` +
+      `(a) Apply a patch with your best current hypothesis — an imperfect change is better than more reading.\n` +
+      `(b) Write the FINAL SUMMARY if this task requires no code change.\n` +
+      `Do NOT keep reading without committing to an action.`
     );
   }
   return `\n\n[ZONE_ANTI_THRASH] Non-progress detected: ${signal.summaryTitle}`;

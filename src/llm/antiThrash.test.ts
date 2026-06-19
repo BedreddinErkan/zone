@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   detectFailureStall,
+  detectWanderingSignal,
   computeAntiThrashSignal,
   buildStallReflectionText,
   ANTI_THRASH_FAILURE_COACH_MIN,
+  ANTI_THRASH_WANDER_ITER_MIN,
+  ANTI_THRASH_WANDER_READ_MIN,
   type AntiThrashContext,
 } from "./antiThrash.js";
 import type { FailureRecord } from "./agentLoop.js";
@@ -198,6 +201,74 @@ describe("buildStallReflectionText", () => {
   });
 });
 
+// ── detectWanderingSignal ─────────────────────────────────────────────────────
+
+function makeReadMap(entries: [string, number][]): Map<string, number> {
+  return new Map(entries);
+}
+
+describe("detectWanderingSignal — true positive", () => {
+  it("fires when iter >= WANDER_ITER_MIN, filesModifiedSize=0, totalReads >= WANDER_READ_MIN", () => {
+    const reads = makeReadMap([
+      ["src/a.ts", 2],
+      ["src/b.ts", 1],
+      ["src/c.ts", 3],
+    ]);
+    const result = detectWanderingSignal(
+      makeCtx({ iter: ANTI_THRASH_WANDER_ITER_MIN, filesReadCountThisRun: reads, filesModifiedSize: 0 }),
+    );
+    expect(result).not.toBeNull();
+    expect(result?.pattern).toBe("wandering");
+    expect(result?.detail.uniqueFiles).toBe(3);
+    expect(result?.detail.totalReads).toBe(6);
+    expect(result?.detail.multiReadCount).toBe(2); // a(2) and c(3)
+    expect(result?.detail.iter).toBe(ANTI_THRASH_WANDER_ITER_MIN);
+  });
+});
+
+describe("detectWanderingSignal — false-positive guards", () => {
+  function baseWanderCtx(): AntiThrashContext {
+    return makeCtx({
+      iter: ANTI_THRASH_WANDER_ITER_MIN,
+      filesModifiedSize: 0,
+      filesReadCountThisRun: makeReadMap([
+        ["src/a.ts", 2],
+        ["src/b.ts", 2],
+        ["src/c.ts", 2],
+      ]),
+    });
+  }
+
+  it("archetype=question → null", () => {
+    expect(detectWanderingSignal({ ...baseWanderCtx(), archetype: "question" })).toBeNull();
+  });
+
+  it("archetype=investigation → null", () => {
+    expect(detectWanderingSignal({ ...baseWanderCtx(), archetype: "investigation" })).toBeNull();
+  });
+
+  it("isReadOnly=true → null", () => {
+    expect(detectWanderingSignal({ ...baseWanderCtx(), isReadOnly: true })).toBeNull();
+  });
+
+  it("filesModifiedSize > 0 → null", () => {
+    expect(detectWanderingSignal({ ...baseWanderCtx(), filesModifiedSize: 1 })).toBeNull();
+  });
+
+  it("iter < WANDER_ITER_MIN → null", () => {
+    expect(
+      detectWanderingSignal({ ...baseWanderCtx(), iter: ANTI_THRASH_WANDER_ITER_MIN - 1 }),
+    ).toBeNull();
+  });
+
+  it("totalReads < WANDER_READ_MIN → null", () => {
+    const tooFewReads = makeReadMap([["src/a.ts", ANTI_THRASH_WANDER_READ_MIN - 1]]);
+    expect(
+      detectWanderingSignal({ ...baseWanderCtx(), filesReadCountThisRun: tooFewReads }),
+    ).toBeNull();
+  });
+});
+
 // ── predicate stability (C2 note) ─────────────────────────────────────────────
 
 describe("detectFailureStall — predicate stability", () => {
@@ -210,5 +281,62 @@ describe("detectFailureStall — predicate stability", () => {
     ]);
     const ctxWithWrites = makeCtx({ failureHistory: history, filesModifiedSize: 999 });
     expect(detectFailureStall(ctxWithWrites)).not.toBeNull();
+  });
+});
+
+// ── computeAntiThrashSignal — P4 > P5 priority ───────────────────────────────
+
+describe("computeAntiThrashSignal — priority", () => {
+  it("P4 wins when both P4 and P5 conditions hold", () => {
+    const history = new Map([
+      ["src/foo.ts", [makeRecord("tsc_error", "hash-A"), makeRecord("tsc_error", "hash-A")]],
+    ]);
+    const reads = new Map([
+      ["src/a.ts", 3],
+      ["src/b.ts", 3],
+    ]);
+    const ctx = makeCtx({
+      failureHistory: history,
+      iter: ANTI_THRASH_WANDER_ITER_MIN,
+      filesModifiedSize: 0,
+      filesReadCountThisRun: reads,
+    });
+    const result = computeAntiThrashSignal(ctx);
+    expect(result?.pattern).toBe("failure_stall");
+  });
+
+  it("P5 returned when only wandering condition holds", () => {
+    const reads = new Map([
+      ["src/a.ts", 3],
+      ["src/b.ts", 3],
+    ]);
+    const ctx = makeCtx({
+      iter: ANTI_THRASH_WANDER_ITER_MIN,
+      filesModifiedSize: 0,
+      filesReadCountThisRun: reads,
+    });
+    const result = computeAntiThrashSignal(ctx);
+    expect(result?.pattern).toBe("wandering");
+  });
+});
+
+// ── buildStallReflectionText — wandering ─────────────────────────────────────
+
+describe("buildStallReflectionText — wandering", () => {
+  it("P5 text surfaces read counts and commit/FINAL SUMMARY guidance", () => {
+    const signal = {
+      pattern: "wandering" as const,
+      summaryTitle: "Wandering: 6 reads across 3 files, no writes",
+      detail: { uniqueFiles: 3, totalReads: 6, multiReadCount: 2, iter: 10 },
+    };
+    const text = buildStallReflectionText(signal);
+    expect(text).toContain("[ZONE_ANTI_THRASH]");
+    expect(text).toContain("6");
+    expect(text).toContain("3 files");
+    expect(text).toContain("2 re-read");
+    expect(text).toContain("10 iterations");
+    expect(text.toLowerCase()).toContain("patch");
+    expect(text).toContain("FINAL SUMMARY");
+    expect(text).toContain("Do NOT keep reading");
   });
 });
