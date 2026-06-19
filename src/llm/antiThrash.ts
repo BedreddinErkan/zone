@@ -1,12 +1,18 @@
 import type { FailureRecord } from "./agentLoop.js";
 
-export type AntiThrashSignalKind = "failure_stall" | "wandering" | "cost_burn";
+export type AntiThrashSignalKind = "failure_stall" | "wandering" | "cost_burn" | "no_progress";
 
 export interface AntiThrashSignal {
   pattern: AntiThrashSignalKind;
   summaryTitle: string;
   detail: Record<string, unknown>;
 }
+
+export type ErrorKeySnapshot = {
+  iter: number;
+  introducedKeys: string[];           // post-run error keys MINUS baseline keys, SORTED + stable.
+  successfulAppliesAtCapture: number; // count of successful apply_patch/multi_edit at capture time.
+};
 
 export interface AntiThrashContext {
   iter: number;
@@ -17,6 +23,7 @@ export interface AntiThrashContext {
   isReadOnly: boolean;
   archetype: string | null | undefined;
   costUsd: number;
+  recentVerifyKeySets?: ErrorKeySnapshot[];  // ring buffer, most-recent last. Optional: absent = no feeder data yet.
 }
 
 export interface AntiThrashThresholds {
@@ -27,6 +34,8 @@ export interface AntiThrashThresholds {
   wanderReadMin?: number;
   costBurnIterMin?: number;
   costBurnUsd?: number;
+  noProgressIterMin?: number;
+  noProgressWindow?: number;
 }
 
 function readEnvInt(name: string, fallback: number): number {
@@ -51,8 +60,10 @@ export const ANTI_THRASH_BREAK_ITERS        = readEnvInt("ZONE_ANTI_THRASH_BREAK
 export const ANTI_THRASH_ENABLED            = readEnvBool("ZONE_ANTI_THRASH", true);
 export const ANTI_THRASH_WANDER_ITER_MIN    = readEnvInt("ZONE_ANTI_THRASH_WANDER_ITER_MIN", 8);
 export const ANTI_THRASH_WANDER_READ_MIN    = readEnvInt("ZONE_ANTI_THRASH_WANDER_READ_MIN", 5);
-export const ANTI_THRASH_COST_BURN_ITER_MIN = readEnvInt("ZONE_ANTI_THRASH_COST_BURN_ITER_MIN", 10);
-export const ANTI_THRASH_COST_BURN_USD      = readEnvFloat("ZONE_ANTI_THRASH_COST_BURN_USD", 1.00);
+export const ANTI_THRASH_COST_BURN_ITER_MIN    = readEnvInt("ZONE_ANTI_THRASH_COST_BURN_ITER_MIN", 10);
+export const ANTI_THRASH_COST_BURN_USD         = readEnvFloat("ZONE_ANTI_THRASH_COST_BURN_USD", 1.00);
+export const ANTI_THRASH_NO_PROGRESS_ITER_MIN  = readEnvInt("ZONE_ANTI_THRASH_NO_PROGRESS_ITER_MIN", 8);
+export const ANTI_THRASH_NO_PROGRESS_WINDOW    = readEnvInt("ZONE_ANTI_THRASH_NO_PROGRESS_WINDOW", 2);
 
 // Strong-verdict detection inlined to avoid a circular import with agentLoop.ts.
 // Mirrors the identical_patch_retried and trigger_repeated_3x branches of
@@ -150,7 +161,58 @@ export function detectCostBurnSignal(
   };
 }
 
-// Priority-ordered dispatch: P4 > P5 > P6.
+// P3: frozen-introduced-error-set detector.
+// Discriminator vs P5/P6: P3 requires successful applies GROWING (active churn);
+// P5/P6 require filesModifiedSize === 0. Do not break this mutual exclusion.
+// Note: !isSubagentLoop is NOT checked here — that gate lives at the call sites
+// (antiThrashHook.shouldRun + Stage-2 inline), matching P4/P5/P6 exactly.
+export function detectNoProgressSignal(
+  ctx: AntiThrashContext,
+  thresholds?: AntiThrashThresholds,
+): AntiThrashSignal | null {
+  if (ctx.isReadOnly) return null;
+  if (ctx.archetype === "question" || ctx.archetype === "investigation") return null;
+
+  const iterMin = thresholds?.noProgressIterMin ?? ANTI_THRASH_NO_PROGRESS_ITER_MIN;
+  const win     = thresholds?.noProgressWindow  ?? ANTI_THRASH_NO_PROGRESS_WINDOW;
+
+  if (ctx.iter < iterMin) return null;
+
+  // recentVerifyKeySets is optional — absent/undefined means no feeder data yet → null.
+  const buffer = ctx.recentVerifyKeySets ?? [];
+  if (buffer.length < win) return null;
+
+  const recent = buffer.slice(-win);
+
+  // Every snapshot must have a non-empty introduced-key-set.
+  if (recent.some((s) => s.introducedKeys.length === 0)) return null;
+
+  // All snapshots' key-sets must be byte-identical (frozen across the window).
+  // introducedKeys is pre-sorted by the feeder → JSON.stringify comparison is stable.
+  const firstKeys = JSON.stringify(recent[0]!.introducedKeys);
+  if (recent.some((s) => JSON.stringify(s.introducedKeys) !== firstKeys)) return null;
+
+  // Successful applies must have strictly grown (active churn, not stagnation).
+  // P3 discriminator vs P5/P6: P3 requires applies GROWING; P5/P6 require filesModifiedSize===0.
+  const first = recent[0]!;
+  const last  = recent[recent.length - 1]!;
+  if (last.successfulAppliesAtCapture <= first.successfulAppliesAtCapture) return null;
+
+  const frozenKeys = recent[0]!.introducedKeys;
+  const keyPreview = frozenKeys.slice(0, 3).join(", ") + (frozenKeys.length > 3 ? ", …" : "");
+  return {
+    pattern: "no_progress",
+    summaryTitle: `No error-set progress: ${frozenKeys.length} introduced error(s) unchanged across ${win} iterations`,
+    detail: {
+      frozenKeyCount: frozenKeys.length,
+      windowSize: win,
+      successfulAppliesGrowth: last.successfulAppliesAtCapture - first.successfulAppliesAtCapture,
+      keyPreview,
+    },
+  };
+}
+
+// Priority-ordered dispatch: P4 > P3 > P5 > P6.
 export function computeAntiThrashSignal(
   ctx: AntiThrashContext,
   thresholds?: AntiThrashThresholds,
@@ -158,6 +220,7 @@ export function computeAntiThrashSignal(
   if (!(thresholds?.enabled ?? ANTI_THRASH_ENABLED)) return null;
   return (
     detectFailureStall(ctx, thresholds) ??
+    detectNoProgressSignal(ctx, thresholds) ??
     detectWanderingSignal(ctx, thresholds) ??
     detectCostBurnSignal(ctx, thresholds)
   );
@@ -199,6 +262,23 @@ export function buildStallReflectionText(signal: AntiThrashSignal): string {
       `(a) Apply a patch or write a file implementing your current hypothesis — stop exploring and act.\n` +
       `(b) Write the FINAL SUMMARY and exit if no code change is needed.\n` +
       `Do NOT continue without committing to an action.`
+    );
+  }
+  if (signal.pattern === "no_progress") {
+    const { frozenKeyCount, windowSize, successfulAppliesGrowth, keyPreview } = signal.detail as {
+      frozenKeyCount: number;
+      windowSize: number;
+      successfulAppliesGrowth: number;
+      keyPreview: string;
+    };
+    return (
+      `\n\n[ZONE_ANTI_THRASH] You have applied ${successfulAppliesGrowth} patch(es) but the same ` +
+      `${frozenKeyCount} error(s) you introduced this run have persisted unchanged across the last ` +
+      `${windowSize} iterations: ${keyPreview}. The current strategy is not clearing them — ` +
+      `change approach:\n` +
+      `(a) Try a fundamentally different fix (revert this approach and re-plan from the original error).\n` +
+      `(b) Write the FINAL SUMMARY if the remaining errors are acceptable or pre-existing.\n` +
+      `Do NOT keep patching with the same strategy.`
     );
   }
   return `\n\n[ZONE_ANTI_THRASH] Non-progress detected: ${signal.summaryTitle}`;

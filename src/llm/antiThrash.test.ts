@@ -3,6 +3,7 @@ import {
   detectFailureStall,
   detectWanderingSignal,
   detectCostBurnSignal,
+  detectNoProgressSignal,
   computeAntiThrashSignal,
   buildStallReflectionText,
   readEnvFloat,
@@ -11,7 +12,10 @@ import {
   ANTI_THRASH_WANDER_READ_MIN,
   ANTI_THRASH_COST_BURN_ITER_MIN,
   ANTI_THRASH_COST_BURN_USD,
+  ANTI_THRASH_NO_PROGRESS_ITER_MIN,
+  ANTI_THRASH_NO_PROGRESS_WINDOW,
   type AntiThrashContext,
+  type ErrorKeySnapshot,
 } from "./antiThrash.js";
 import type { FailureRecord } from "./agentLoop.js";
 
@@ -483,5 +487,257 @@ describe("buildStallReflectionText — wandering", () => {
     expect(text.toLowerCase()).toContain("patch");
     expect(text).toContain("FINAL SUMMARY");
     expect(text).toContain("Do NOT keep reading");
+  });
+});
+
+// ── detectNoProgressSignal helpers ───────────────────────────────────────────
+
+function makeSnapshot(
+  iter: number,
+  introducedKeys: string[],
+  successfulAppliesAtCapture: number,
+): ErrorKeySnapshot {
+  return { iter, introducedKeys, successfulAppliesAtCapture };
+}
+
+function makeNoProgressCtx(
+  snapshots: ErrorKeySnapshot[],
+  overrides?: Partial<AntiThrashContext>,
+): AntiThrashContext {
+  return makeCtx({
+    iter: ANTI_THRASH_NO_PROGRESS_ITER_MIN,
+    recentVerifyKeySets: snapshots,
+    filesModifiedSize: 2, // writes are happening (P5/P6 require 0)
+    ...overrides,
+  });
+}
+
+// ── detectNoProgressSignal — true positive ────────────────────────────────────
+
+describe("detectNoProgressSignal — true positive", () => {
+  it("fires when introduced-keys frozen, applies grew, iter/window met", () => {
+    const snapshots = [
+      makeSnapshot(8,  ["src/a.ts:0:TS2304:cannot find name foo"], 3),
+      makeSnapshot(10, ["src/a.ts:0:TS2304:cannot find name foo"], 5),
+    ];
+    const result = detectNoProgressSignal(makeNoProgressCtx(snapshots));
+    expect(result).not.toBeNull();
+    expect(result?.pattern).toBe("no_progress");
+    expect(result?.detail.frozenKeyCount).toBe(1);
+    expect(result?.detail.windowSize).toBe(ANTI_THRASH_NO_PROGRESS_WINDOW);
+    expect(result?.detail.successfulAppliesGrowth).toBe(2);
+    expect(String(result?.detail.keyPreview)).toContain("TS2304");
+  });
+
+  it("fires with custom window=3 when all 3 snapshots are frozen and applies grew", () => {
+    const key = "src/b.ts:0:TS2322:type mismatch";
+    const snapshots = [
+      makeSnapshot(5,  [key], 1),
+      makeSnapshot(7,  [key], 2),
+      makeSnapshot(9,  [key], 4),
+    ];
+    const result = detectNoProgressSignal(
+      makeNoProgressCtx(snapshots, { iter: 9 }),
+      { noProgressWindow: 3, noProgressIterMin: 9 },
+    );
+    expect(result).not.toBeNull();
+    expect(result?.pattern).toBe("no_progress");
+    expect(result?.detail.frozenKeyCount).toBe(1);
+    expect(result?.detail.windowSize).toBe(3);
+  });
+
+  it("keyPreview truncates to 3 entries + ellipsis when more than 3 keys", () => {
+    const keys = ["k1", "k2", "k3", "k4"];
+    const snapshots = [
+      makeSnapshot(8,  keys, 1),
+      makeSnapshot(10, keys, 3),
+    ];
+    const result = detectNoProgressSignal(makeNoProgressCtx(snapshots));
+    expect(result).not.toBeNull();
+    expect(String(result?.detail.keyPreview)).toContain("…");
+    expect(String(result?.detail.keyPreview)).toContain("k1");
+  });
+});
+
+// ── detectNoProgressSignal — false-positive guards ───────────────────────────
+
+describe("detectNoProgressSignal — false-positive guards", () => {
+  const frozenKey = "src/a.ts:0:TS2304:cannot find name foo";
+
+  function frozenGrowingSnapshots(): ErrorKeySnapshot[] {
+    return [
+      makeSnapshot(8,  [frozenKey], 2),
+      makeSnapshot(10, [frozenKey], 4),
+    ];
+  }
+
+  it("applies NOT growing (equal successfulAppliesAtCapture) → null", () => {
+    const snapshots = [
+      makeSnapshot(8,  [frozenKey], 3),
+      makeSnapshot(10, [frozenKey], 3), // same count
+    ];
+    expect(detectNoProgressSignal(makeNoProgressCtx(snapshots))).toBeNull();
+  });
+
+  it("applies strictly DECREASING → null", () => {
+    const snapshots = [
+      makeSnapshot(8,  [frozenKey], 5),
+      makeSnapshot(10, [frozenKey], 3), // fewer
+    ];
+    expect(detectNoProgressSignal(makeNoProgressCtx(snapshots))).toBeNull();
+  });
+
+  it("introduced-set changing across the window (different keys in snapshots) → null", () => {
+    const snapshots = [
+      makeSnapshot(8,  [frozenKey], 1),
+      makeSnapshot(10, ["src/b.ts:0:TS2322:type mismatch"], 3), // different
+    ];
+    expect(detectNoProgressSignal(makeNoProgressCtx(snapshots))).toBeNull();
+  });
+
+  it("introduced-set shrinking (first has 2 keys, second has 1) → null", () => {
+    const snapshots = [
+      makeSnapshot(8,  [frozenKey, "src/b.ts:0:TS2322:msg"], 1),
+      makeSnapshot(10, [frozenKey], 3), // not identical
+    ];
+    expect(detectNoProgressSignal(makeNoProgressCtx(snapshots))).toBeNull();
+  });
+
+  it("introduced-set empty in all snapshots → null", () => {
+    const snapshots = [
+      makeSnapshot(8,  [], 1),
+      makeSnapshot(10, [], 3),
+    ];
+    expect(detectNoProgressSignal(makeNoProgressCtx(snapshots))).toBeNull();
+  });
+
+  it("introduced-set empty in one snapshot → null", () => {
+    const snapshots = [
+      makeSnapshot(8,  [frozenKey], 1),
+      makeSnapshot(10, [], 3), // empty
+    ];
+    expect(detectNoProgressSignal(makeNoProgressCtx(snapshots))).toBeNull();
+  });
+
+  it("iter < NO_PROGRESS_ITER_MIN → null", () => {
+    const snapshots = frozenGrowingSnapshots();
+    expect(
+      detectNoProgressSignal(makeNoProgressCtx(snapshots, { iter: ANTI_THRASH_NO_PROGRESS_ITER_MIN - 1 })),
+    ).toBeNull();
+  });
+
+  it("fewer than NO_PROGRESS_WINDOW snapshots → null", () => {
+    const snapshots = [makeSnapshot(8, [frozenKey], 1)]; // only 1, window=2
+    expect(detectNoProgressSignal(makeNoProgressCtx(snapshots))).toBeNull();
+  });
+
+  it("recentVerifyKeySets absent (undefined) → null", () => {
+    const ctx = makeCtx({ iter: ANTI_THRASH_NO_PROGRESS_ITER_MIN });
+    // recentVerifyKeySets not set → defaults to undefined → buffer=[] → null
+    expect(detectNoProgressSignal(ctx)).toBeNull();
+  });
+
+  it("isReadOnly=true → null", () => {
+    const snapshots = frozenGrowingSnapshots();
+    expect(detectNoProgressSignal(makeNoProgressCtx(snapshots, { isReadOnly: true }))).toBeNull();
+  });
+
+  it("archetype=question → null", () => {
+    const snapshots = frozenGrowingSnapshots();
+    expect(detectNoProgressSignal(makeNoProgressCtx(snapshots, { archetype: "question" }))).toBeNull();
+  });
+
+  it("archetype=investigation → null", () => {
+    const snapshots = frozenGrowingSnapshots();
+    expect(detectNoProgressSignal(makeNoProgressCtx(snapshots, { archetype: "investigation" }))).toBeNull();
+  });
+});
+
+// ── computeAntiThrashSignal — P3 priority ────────────────────────────────────
+
+describe("computeAntiThrashSignal — P3 priority", () => {
+  const frozenKey = "src/a.ts:0:TS2304:cannot find name foo";
+
+  function p3Snapshots(): ErrorKeySnapshot[] {
+    return [
+      makeSnapshot(8,  [frozenKey], 1),
+      makeSnapshot(10, [frozenKey], 3),
+    ];
+  }
+
+  it("P4 wins over P3 when both conditions hold", () => {
+    const history = new Map([
+      ["src/foo.ts", [makeRecord("tsc_error", "hash-A"), makeRecord("tsc_error", "hash-A")]],
+    ]);
+    const ctx = makeCtx({
+      iter: ANTI_THRASH_NO_PROGRESS_ITER_MIN,
+      failureHistory: history,
+      recentVerifyKeySets: p3Snapshots(),
+      filesModifiedSize: 2,
+    });
+    const result = computeAntiThrashSignal(ctx);
+    expect(result?.pattern).toBe("failure_stall");
+  });
+
+  it("P3 wins over P5 when both conditions hold", () => {
+    // P5 requires filesModifiedSize=0 AND totalReads >= threshold.
+    // P3 requires frozen non-empty keys + applies growing.
+    // With filesModifiedSize=0, P5 would fire; but P3 is earlier in the chain.
+    const reads = makeReadMap([["src/a.ts", 3], ["src/b.ts", 3]]);
+    const ctx = makeCtx({
+      iter: ANTI_THRASH_NO_PROGRESS_ITER_MIN,
+      filesModifiedSize: 0,   // P5 would fire on this
+      filesReadCountThisRun: reads,  // totalReads=6 >= WANDER_READ_MIN
+      recentVerifyKeySets: p3Snapshots(),  // P3 fires on this
+    });
+    const result = computeAntiThrashSignal(ctx);
+    expect(result?.pattern).toBe("no_progress");
+  });
+
+  it("P3 wins over P6 when both conditions hold", () => {
+    // P6 requires filesModifiedSize=0 AND iter/cost thresholds.
+    const ctx = makeCtx({
+      iter: ANTI_THRASH_COST_BURN_ITER_MIN, // >= both P3 and P6 iter thresholds
+      costUsd: ANTI_THRASH_COST_BURN_USD,
+      filesModifiedSize: 0,   // P6 would fire on this
+      recentVerifyKeySets: p3Snapshots(),
+    });
+    const result = computeAntiThrashSignal(ctx);
+    expect(result?.pattern).toBe("no_progress");
+  });
+
+  it("P3 fires alone when P4/P5/P6 don't hold", () => {
+    const ctx = makeCtx({
+      iter: ANTI_THRASH_NO_PROGRESS_ITER_MIN,
+      filesModifiedSize: 2,   // P5/P6 require 0
+      recentVerifyKeySets: p3Snapshots(),
+    });
+    const result = computeAntiThrashSignal(ctx);
+    expect(result?.pattern).toBe("no_progress");
+  });
+});
+
+// ── buildStallReflectionText — no_progress ────────────────────────────────────
+
+describe("buildStallReflectionText — no_progress", () => {
+  it("P3 text surfaces apply count, frozen key count + preview, and change-approach guidance", () => {
+    const signal = {
+      pattern: "no_progress" as const,
+      summaryTitle: "No error-set progress: 2 introduced error(s) unchanged across 2 iterations",
+      detail: {
+        frozenKeyCount: 2,
+        windowSize: 2,
+        successfulAppliesGrowth: 3,
+        keyPreview: "src/a.ts:0:TS2304:foo, src/b.ts:0:TS2322:bar",
+      },
+    };
+    const text = buildStallReflectionText(signal);
+    expect(text).toContain("[ZONE_ANTI_THRASH]");
+    expect(text).toContain("3 patch(es)");
+    expect(text).toContain("2 error(s)");
+    expect(text).toContain("2 iterations");
+    expect(text).toContain("TS2304");
+    expect(text).toContain("FINAL SUMMARY");
+    expect(text).toContain("Do NOT keep patching");
   });
 });
