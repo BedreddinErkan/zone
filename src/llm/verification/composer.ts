@@ -93,9 +93,10 @@ export async function verifyAndFinalize(input: VerifyAndFinalizeInput): Promise<
   // vr.status === "fail"
   // staging.ts already computed regressed via identity-based classifyVerificationResult;
   // derive isPreExisting directly from that result rather than re-classifying with counts.
-  // test label always uses the count fallback (no TS#### codes in test output) — a count-flat
-  // outcome cannot confirm no new test failures, so never silently succeed as pre_existing_errors.
-  const isPreExisting = vr.regressed === false && (vr.baselineErrorCount ?? 0) > 0 && vr.label !== "test";
+  // key-verified subset: only honor pre_existing_errors when identity comparison was used.
+  // For test-label output, keyVerified is true iff parseTestFailures extracted stable keys;
+  // keyVerified absent/false (keyless output or unrecognized runner) → Inc A floor (applied_with_warnings).
+  const isPreExisting = vr.regressed === false && (vr.baselineErrorCount ?? 0) > 0 && (vr.keyVerified ?? false);
 
   if (isPreExisting) {
     const appendix =

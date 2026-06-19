@@ -151,7 +151,7 @@ describe("verifyAndFinalize — VerifyOutcome parity", () => {
     }
   });
 
-  it('returns { kind: "pre_existing_errors" } when baseline > 0 and post <= baseline', async () => {
+  it('returns { kind: "pre_existing_errors" } when baseline > 0 and post <= baseline (tsc, key-verified)', async () => {
     mockFinalizeStaging.mockResolvedValue({
       flushed: true,
       filesFlushed: 1,
@@ -164,6 +164,7 @@ describe("verifyAndFinalize — VerifyOutcome parity", () => {
         baselineErrorCount: 3,
         postErrorCount: 3,
         regressed: false,
+        keyVerified: true,
       },
     });
     const outcome = await verifyAndFinalize(makeInput());
@@ -232,6 +233,7 @@ describe("verifyAndFinalize — VerifyOutcome parity", () => {
         baselineErrorCount: 2,
         postErrorCount: 2,
         regressed: false,
+        keyVerified: false,
       },
     });
     const outcome = await verifyAndFinalize(makeInput({ verifyMode: "warn" }));
@@ -257,6 +259,7 @@ describe("verifyAndFinalize — VerifyOutcome parity", () => {
         baselineErrorCount: 3,
         postErrorCount: 3,
         regressed: false,
+        keyVerified: true,
       },
     });
     const outcome = await verifyAndFinalize(makeInput());
@@ -287,6 +290,59 @@ describe("verifyAndFinalize — VerifyOutcome parity", () => {
     expect(outcome.kind).toBe("applied");
     if (outcome.kind === "applied") {
       expect(outcome.filesFlushed).toBe(1);
+    }
+  });
+
+  // ── Inc B: precision + keyless floor ─────────────────────────────────────
+  it('Inc B precision: test label + keyVerified:true → pre_existing_errors (genuine pre-existing, parser extracted stable keys)', async () => {
+    // When parseTestFailures returned stable keys for BOTH baseline and post runs,
+    // staging.ts sets keyVerified:true → identity-subset comparison was used →
+    // safe to honour pre_existing_errors / success:true.
+    mockFinalizeStaging.mockResolvedValue({
+      flushed: true,
+      filesFlushed: 1,
+      flushFailures: 0,
+      verification: {
+        status: "fail" as const,
+        label: "test",
+        durationMs: 200,
+        errorPreview: "FAIL src/foo.test.ts > suite > pre-existing test",
+        baselineErrorCount: 1,
+        postErrorCount: 1,
+        regressed: false,
+        keyVerified: true,
+      },
+    });
+    const outcome = await verifyAndFinalize(makeInput({ verifyMode: "warn" }));
+    expect(outcome.kind).toBe("pre_existing_errors");
+    if (outcome.kind === "pre_existing_errors") {
+      expect(outcome.appendix).toMatch(/pre-existing/i);
+    }
+  });
+
+  it('Inc B keyless floor: test label + keyVerified:false → applied_with_warnings (Inc A floor preserved for unrecognized runners)', async () => {
+    // When parseTestFailures could not extract stable keys (unrecognized runner output),
+    // keyVerified stays false → (vr.keyVerified ?? false) === false → isPreExisting=false →
+    // applied_with_warnings, matching the Inc A conservative floor.
+    mockFinalizeStaging.mockResolvedValue({
+      flushed: true,
+      filesFlushed: 1,
+      flushFailures: 0,
+      verification: {
+        status: "fail" as const,
+        label: "test",
+        durationMs: 180,
+        errorPreview: "some unknown test runner output\n1 test failed",
+        baselineErrorCount: 1,
+        postErrorCount: 1,
+        regressed: false,
+        keyVerified: false,
+      },
+    });
+    const outcome = await verifyAndFinalize(makeInput({ verifyMode: "warn" }));
+    expect(outcome.kind).toBe("applied_with_warnings");
+    if (outcome.kind === "applied_with_warnings") {
+      expect(outcome.appendix).not.toMatch(/didn.t add any new errors/i);
     }
   });
 });

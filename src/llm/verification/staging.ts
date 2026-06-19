@@ -9,7 +9,7 @@ import {
   strippedEnvKeys,
 } from "./command.js";
 import { sanitizeVerificationEnv } from "../../core/buildEnv.js";
-import { parseTscErrorPreview } from "../applyRollbackFeedback.js";
+import { parseTscErrorPreview, parseTestFailures } from "../applyRollbackFeedback.js";
 import { classifyVerificationResult } from "./classify.js";
 import { buildStagedDiffs } from "../../core/fileDiff.js";
 import type { StagedFile } from "../../core/fileDiff.js";
@@ -35,6 +35,7 @@ export async function runStagingVerification(input: {
       baselineErrorCount?: number;
       postErrorCount?: number;
       regressed?: boolean;
+      keyVerified?: boolean;
     }
   | { status: "skipped"; reason: string }
 > {
@@ -125,11 +126,18 @@ export async function runStagingVerification(input: {
   // Identity-aware regression: parse coded error sets and check subset relationship.
   // A swap of N errors of class A → N errors of class B is a regression even though
   // the count doesn't change (post ⊄ baseline → regressed:true).
-  const postCodedErrors = parseTscErrorPreview(stagedCombined).filter((e) => e.code !== "");
-  const baseCodedErrors = parseTscErrorPreview(baselineCombined).filter((e) => e.code !== "");
+  // For "test" label: parseTestFailures extracts per-test keys (code:"TEST", file, testName);
+  // returns [] for unrecognized runners → falls back to count path (Inc A floor preserved).
+  const postCodedErrors = choice.label === "test"
+    ? parseTestFailures(stagedCombined, input.repoPath)
+    : parseTscErrorPreview(stagedCombined).filter((e) => e.code !== "");
+  const baseCodedErrors = choice.label === "test"
+    ? parseTestFailures(baselineCombined, input.repoPath)
+    : parseTscErrorPreview(baselineCombined).filter((e) => e.code !== "");
+  const keyVerified = postCodedErrors.length > 0 || baseCodedErrors.length > 0;
   const { regressed } = classifyVerificationResult(
     { count: postErrorCount,    codedErrors: postCodedErrors },
-    { count: baselineErrorCount, codedErrors: baseCodedErrors }
+    { count: baselineErrorCount, codedErrors: baseCodedErrors },
   );
   debugLog("[zone-verify-baseline]", JSON.stringify({
     label: choice.label,
@@ -138,6 +146,7 @@ export async function runStagingVerification(input: {
     baselineErrorCount,
     postErrorCount,
     regressed,
+    keyVerified,
   }));
 
   return {
@@ -148,6 +157,7 @@ export async function runStagingVerification(input: {
     baselineErrorCount,
     postErrorCount,
     regressed,
+    keyVerified,
   };
 }
 
@@ -158,10 +168,10 @@ async function runMultiTsconfigVerification(input: {
   withStagingTempFlush: <T>(staging: Map<string, string>, body: () => Promise<T>) => Promise<T>;
 }): Promise<
   | { status: "pass"; label: string; durationMs: number }
-  | { status: "fail"; label: string; durationMs: number; errorPreview: string; baselineErrorCount: number; postErrorCount: number; regressed: boolean }
+  | { status: "fail"; label: string; durationMs: number; errorPreview: string; baselineErrorCount: number; postErrorCount: number; regressed: boolean; keyVerified: boolean }
 > {
   const start = Date.now();
-  const failResults: Array<{ stagedPreview: string; postErrorCount: number; baselineErrorCount: number; regressed: boolean }> = [];
+  const failResults: Array<{ stagedPreview: string; postErrorCount: number; baselineErrorCount: number; regressed: boolean; keyVerified: boolean }> = [];
 
   for (const tsconfig of input.tsconfigs) {
     const rel = (path.relative(input.repoPath, tsconfig) || "tsconfig.json").replace(/\\/g, "/");
@@ -226,9 +236,10 @@ async function runMultiTsconfigVerification(input: {
 
     const postCodedErrors = parseTscErrorPreview(stagedCombined).filter((e) => e.code !== "");
     const baseCodedErrors = parseTscErrorPreview(baselineOut).filter((e) => e.code !== "");
+    const keyVerified = postCodedErrors.length > 0 || baseCodedErrors.length > 0;
     const { regressed } = classifyVerificationResult(
       { count: postErrorCount,    codedErrors: postCodedErrors },
-      { count: baselineErrorCount, codedErrors: baseCodedErrors }
+      { count: baselineErrorCount, codedErrors: baseCodedErrors },
     );
 
     debugLog("[zone-verify-baseline]", JSON.stringify({
@@ -239,9 +250,10 @@ async function runMultiTsconfigVerification(input: {
       baselineErrorCount,
       postErrorCount,
       regressed,
+      keyVerified,
     }));
 
-    failResults.push({ stagedPreview, postErrorCount, baselineErrorCount, regressed });
+    failResults.push({ stagedPreview, postErrorCount, baselineErrorCount, regressed, keyVerified });
   }
 
   if (failResults.length === 0) {
@@ -252,6 +264,7 @@ async function runMultiTsconfigVerification(input: {
   const totalPost = failResults.reduce((s, r) => s + r.postErrorCount, 0);
   const totalBaseline = failResults.reduce((s, r) => s + r.baselineErrorCount, 0);
   const anyRegressed = failResults.some((r) => r.regressed);
+  const anyKeyVerified = failResults.some((r) => r.keyVerified);
 
   return {
     status: "fail",
@@ -261,6 +274,7 @@ async function runMultiTsconfigVerification(input: {
     postErrorCount: totalPost,
     baselineErrorCount: totalBaseline,
     regressed: anyRegressed,
+    keyVerified: anyKeyVerified,
   };
 }
 
@@ -286,7 +300,7 @@ export function buildVerificationWarningsMessage(opts: {
 /** Normalized verification result type for use in callbacks and tests. */
 export type StagingVerification =
   | { status: "pass"; label: string; durationMs: number; baselineErrorCount?: number; postErrorCount?: number }
-  | { status: "fail"; label: string; durationMs: number; errorPreview: string; baselineErrorCount?: number; postErrorCount?: number; regressed?: boolean }
+  | { status: "fail"; label: string; durationMs: number; errorPreview: string; baselineErrorCount?: number; postErrorCount?: number; regressed?: boolean; keyVerified?: boolean }
   | { status: "skipped"; reason: string };
 
 /** @deprecated Use verifyAndFinalize() from ./composer.ts instead. */

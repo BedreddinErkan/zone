@@ -11,6 +11,7 @@ import {
   isApplyRolledBackMessage,
   looksLikeTscHelpBanner,
   parseTscErrorPreview,
+  parseTestFailures,
   pickRolledBackSuggestion,
   pickRolledBackSuggestionCode,
 } from "./applyRollbackFeedback.js";
@@ -380,5 +381,193 @@ describe("Phase J.4.1 — buildApplyRolledBackMarkerLog payload shape", () => {
     });
     expect(payload.errorCodes).toEqual(["TS2305", "TS2304"]);
     expect(payload.errorCount).toBe(4); // raw count, not dedupe
+  });
+});
+
+// ── Inc B: parseTestFailures ──────────────────────────────────────────────────
+
+describe("parseTestFailures", () => {
+  it("returns [] for empty string", () => {
+    expect(parseTestFailures("")).toEqual([]);
+  });
+
+  it("returns [] for unrecognized format (no FAIL/FAILED pattern)", () => {
+    const output = "All tests passed.\n2 suites, 18 tests";
+    expect(parseTestFailures(output)).toEqual([]);
+  });
+
+  it("returns [] for a tsc error output that has no FAIL/FAILED markers", () => {
+    const output = "src/foo.ts(1,5): error TS2304: Cannot find name 'bar'.";
+    expect(parseTestFailures(output)).toEqual([]);
+  });
+
+  // ── vitest default reporter (inline format) ────────────────────────────────
+  it("vitest default: extracts test key from inline FAIL line (FAIL file > suite > test)", () => {
+    const output = [
+      "FAIL src/math.test.ts > arithmetic > adds two numbers",
+      "",
+      "Test Files  1 failed (1)",
+    ].join("\n");
+    const results = parseTestFailures(output);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      code: "TEST",
+      file: "src/math.test.ts",
+      message: "arithmetic > adds two numbers",
+    });
+  });
+
+  it("vitest default: FAIL line without inline test path sets currentFile for following markers", () => {
+    // If the FAIL line has no "> suite > test" part, it only sets currentFile.
+    // In practice vitest default always has the path inline, but we must not crash.
+    const output = [
+      "FAIL src/math.test.ts",
+      "  ✗ adds two numbers (5ms)",
+    ].join("\n");
+    const results = parseTestFailures(output);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      code: "TEST",
+      file: "src/math.test.ts",
+      message: "adds two numbers",
+    });
+  });
+
+  // ── vitest verbose tree ────────────────────────────────────────────────────
+  it("vitest verbose: associates ✗ markers with the preceding FAIL file", () => {
+    const output = [
+      "FAIL src/foo.test.ts",
+      "  ✗ my test case (12ms)",
+      "  ✗ another failure (3ms)",
+    ].join("\n");
+    const results = parseTestFailures(output);
+    expect(results).toHaveLength(2);
+    expect(results[0]).toMatchObject({ code: "TEST", file: "src/foo.test.ts", message: "my test case" });
+    expect(results[1]).toMatchObject({ code: "TEST", file: "src/foo.test.ts", message: "another failure" });
+  });
+
+  it("vitest: handles × and ✕ failure markers as well as ✗", () => {
+    const output = "FAIL src/x.test.ts\n  × test one\n  ✕ test two";
+    const results = parseTestFailures(output);
+    expect(results).toHaveLength(2);
+    expect(results[0]!.message).toBe("test one");
+    expect(results[1]!.message).toBe("test two");
+  });
+
+  // ── multi-file: no cross-contamination ────────────────────────────────────
+  it("multi-file: associates each failure with its own file, not the previous", () => {
+    const output = [
+      "FAIL src/a.test.ts",
+      "  ✗ test from A",
+      "FAIL src/b.test.ts",
+      "  ✗ test from B",
+    ].join("\n");
+    const results = parseTestFailures(output);
+    expect(results).toHaveLength(2);
+    expect(results[0]).toMatchObject({ file: "src/a.test.ts", message: "test from A" });
+    expect(results[1]).toMatchObject({ file: "src/b.test.ts", message: "test from B" });
+  });
+
+  // ── jest bullet format ─────────────────────────────────────────────────────
+  it("jest: extracts test key from ● bullet markers", () => {
+    const output = [
+      "FAIL src/calc.test.ts",
+      "  ● Calculator › adds numbers",
+    ].join("\n");
+    const results = parseTestFailures(output);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      code: "TEST",
+      file: "src/calc.test.ts",
+      message: "Calculator › adds numbers",
+    });
+  });
+
+  // ── pytest formats ─────────────────────────────────────────────────────────
+  it("pytest: parses 'FAILED path::test' format", () => {
+    const output = [
+      "FAILED tests/test_math.py::test_addition",
+      "FAILED tests/test_math.py::TestClass::test_method - AssertionError: 1 != 2",
+      "short test summary info",
+      "FAILED tests/test_math.py::test_addition",
+    ].join("\n");
+    const results = parseTestFailures(output);
+    // 3 FAILED lines (dedupe is not performed by parser — caller handles that via key-set)
+    expect(results.length).toBeGreaterThanOrEqual(2);
+    const files = results.map((r) => r.file);
+    expect(files.every((f) => f === "tests/test_math.py")).toBe(true);
+    expect(results[0]).toMatchObject({ code: "TEST", message: "test_addition" });
+    expect(results[1]).toMatchObject({ code: "TEST", message: "TestClass::test_method" });
+  });
+
+  it("pytest: parses 'path::test FAILED' format", () => {
+    const output = "tests/test_math.py::test_subtract FAILED";
+    const results = parseTestFailures(output);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      code: "TEST",
+      file: "tests/test_math.py",
+      message: "test_subtract",
+    });
+  });
+
+  // ── normalization invariance ───────────────────────────────────────────────
+  it("normalization: ANSI escape codes are stripped before parsing", () => {
+    const esc = String.fromCharCode(0x1b);
+    const bold = `${esc}[1m`;
+    const reset = `${esc}[0m`;
+    const plain = "FAIL src/foo.test.ts > suite > my test";
+    const withAnsi = `${bold}FAIL${reset} src/foo.test.ts > suite > my test`;
+    const plainResult = parseTestFailures(plain);
+    const ansiResult = parseTestFailures(withAnsi);
+    expect(plainResult).toHaveLength(1);
+    expect(ansiResult).toHaveLength(1);
+    // Both paths yield the same key — ANSI must not alter the message
+    expect(ansiResult[0]!.message).toBe(plainResult[0]!.message);
+    expect(ansiResult[0]!.file).toBe(plainResult[0]!.file);
+  });
+
+  it("normalization: trailing duration '(123ms)' is stripped from test names", () => {
+    const output = "FAIL src/foo.test.ts\n  ✗ my test (123ms)";
+    const results = parseTestFailures(output);
+    expect(results[0]!.message).toBe("my test");
+  });
+
+  it("normalization: trailing duration '(1.2s)' is stripped from test names", () => {
+    const output = "FAIL src/foo.test.ts\n  ✗ slow test (1.2s)";
+    const results = parseTestFailures(output);
+    expect(results[0]!.message).toBe("slow test");
+  });
+
+  it("normalization: internal whitespace is collapsed to single spaces", () => {
+    const output = "FAIL src/foo.test.ts\n  ✗ my   test  name";
+    const results = parseTestFailures(output);
+    expect(results[0]!.message).toBe("my test name");
+  });
+
+  it("normalization: same test with/without timing yields identical key", () => {
+    const withTiming = parseTestFailures("FAIL src/x.test.ts\n  ✗ parses input (47ms)");
+    const withoutTiming = parseTestFailures("FAIL src/x.test.ts\n  ✗ parses input");
+    expect(withTiming[0]!.message).toBe(withoutTiming[0]!.message);
+  });
+
+  // ── repoPath relativization ────────────────────────────────────────────────
+  it("repoPath: absolute path in output is made repo-relative", () => {
+    const output = "FAIL /repo/src/foo.test.ts\n  ✗ my test";
+    const results = parseTestFailures(output, "/repo");
+    expect(results[0]!.file).toBe("src/foo.test.ts");
+  });
+
+  it("repoPath: already-relative path is left unchanged", () => {
+    const output = "FAIL src/foo.test.ts\n  ✗ my test";
+    const results = parseTestFailures(output, "/repo");
+    expect(results[0]!.file).toBe("src/foo.test.ts");
+  });
+
+  it("repoPath: path outside repo is kept absolute rather than producing '../..' prefix", () => {
+    const output = "FAIL /other/foo.test.ts\n  ✗ my test";
+    const results = parseTestFailures(output, "/repo");
+    // normTestPath must not produce a path starting with ".."
+    expect(results[0]!.file).not.toMatch(/^\.\.\//);
   });
 });

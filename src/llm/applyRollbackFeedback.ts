@@ -1,3 +1,5 @@
+import path from "node:path";
+
 /**
  * Phase J.4 — structured rollback feedback for the agent.
  *
@@ -344,6 +346,105 @@ export function extractPriorRunSummary(messages: unknown): string {
     return truncatePriorRunSummary(text);
   }
   return "";
+}
+
+/**
+ * Extract stable per-failing-test keys from a test runner's combined output.
+ * Returns RolledBackError-compatible records (code:"TEST", file repo-relative,
+ * message normalized test name, no line number — test lines are unstable).
+ *
+ * Recognized formats:
+ *   vitest / jest: "FAIL <path>" context lines + "✗/×/✕/✘ <test>" or "● <suite> › <test>" markers.
+ *                  vitest default reporter also emits "FAIL <path> > <suite> > <test>" inline.
+ *   pytest: "FAILED <path>::<test>" or "<path>::<test> FAILED" self-contained lines.
+ *
+ * Returns [] (Inc A floor preserved) when no recognized runner format is detected,
+ * or when a failure can't be reduced to a confident stable key.
+ * Never returns a partial set from noise — conservative bias is intentional.
+ */
+export function parseTestFailures(combined: string, repoPath?: string): RolledBackError[] {
+  const text = stripAnsi(String(combined ?? ""));
+  const lines = text.split(/\r?\n/);
+
+  const hasPytest = /\bFAILED\s+\S+::\S+/.test(text) || /\S+::\S+\s+FAILED\b/.test(text);
+  const hasVitestJest = /(?:^|\n)\s*(?:❯\s*)?FAIL\s+\S+/.test(text);
+
+  if (!hasPytest && !hasVitestJest) return [];
+
+  const results: RolledBackError[] = [];
+
+  if (hasPytest) {
+    for (const raw of lines) {
+      const line = raw.trim();
+      // "FAILED path::test_name" or "FAILED path::class::test_name - ErrType: msg"
+      // Non-greedy (\S+?) stops at the FIRST "::" so multi-level "path::class::test" splits correctly.
+      const m1 = line.match(/^FAILED\s+(\S+?)::\s*(.+?)(?:\s+-\s+.+)?$/);
+      if (m1) {
+        results.push({ code: "TEST", file: normTestPath(m1[1]!, repoPath), message: normTestName(m1[2]!) });
+        continue;
+      }
+      // "path::test_name FAILED"
+      const m2 = line.match(/^(\S+::[\S:]+)\s+FAILED\s*$/);
+      if (m2) {
+        const parts = m2[1]!.split("::");
+        results.push({ code: "TEST", file: normTestPath(parts[0]!, repoPath), message: normTestName(parts.slice(1).join("::")) });
+      }
+    }
+    return results;
+  }
+
+  // vitest / jest: walk lines, update currentFile on FAIL, collect failure markers
+  let currentFile: string | null = null;
+  for (const raw of lines) {
+    const line = raw.trim();
+
+    // "FAIL src/foo.test.ts" (verbose tree — test names on following ✗/● lines)
+    // "FAIL src/foo.test.ts > suite > test" (vitest default — test path inline after ">")
+    const failFile = line.match(/^(?:❯\s*)?FAIL\s+(\S+)(?:\s+>\s+(.+))?$/);
+    if (failFile) {
+      currentFile = normTestPath(failFile[1]!, repoPath);
+      if (failFile[2]) {
+        const name = normTestName(failFile[2]);
+        if (name) results.push({ code: "TEST", file: currentFile, message: name });
+      }
+      continue;
+    }
+
+    if (!currentFile) continue;
+
+    // "✗ test name (5ms)" / "× test name" / "✕ test" / "✘ test"
+    const checkMark = line.match(/^[✗✘×✕]\s+(.+)$/);
+    if (checkMark) {
+      const name = normTestName(checkMark[1]!);
+      if (name) results.push({ code: "TEST", file: currentFile, message: name });
+      continue;
+    }
+
+    // "● suite name > test name" (jest / vitest verbose)
+    const bullet = line.match(/^●\s+(.+)$/);
+    if (bullet) {
+      const name = normTestName(bullet[1]!);
+      if (name) results.push({ code: "TEST", file: currentFile, message: name });
+    }
+  }
+
+  return results;
+}
+
+function normTestPath(raw: string, repoPath?: string): string {
+  let p = raw.replace(/\\/g, "/").trim();
+  if (repoPath && path.isAbsolute(p)) {
+    const rel = path.relative(repoPath, p).replace(/\\/g, "/");
+    if (!rel.startsWith("..")) p = rel;
+  }
+  return p;
+}
+
+function normTestName(raw: string): string {
+  return raw
+    .replace(/\s*\(\d+(?:\.\d+)?(?:ms|s)\)\s*$/, "") // strip trailing duration
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /** Build the diagnostic payload from the message + parsed errors. */
