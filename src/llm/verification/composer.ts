@@ -93,7 +93,9 @@ export async function verifyAndFinalize(input: VerifyAndFinalizeInput): Promise<
   // vr.status === "fail"
   // staging.ts already computed regressed via identity-based classifyVerificationResult;
   // derive isPreExisting directly from that result rather than re-classifying with counts.
-  const isPreExisting = vr.regressed === false && (vr.baselineErrorCount ?? 0) > 0;
+  // test label always uses the count fallback (no TS#### codes in test output) — a count-flat
+  // outcome cannot confirm no new test failures, so never silently succeed as pre_existing_errors.
+  const isPreExisting = vr.regressed === false && (vr.baselineErrorCount ?? 0) > 0 && vr.label !== "test";
 
   if (isPreExisting) {
     const appendix =

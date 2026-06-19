@@ -213,6 +213,82 @@ describe("verifyAndFinalize — VerifyOutcome parity", () => {
     const outcome = await verifyAndFinalize(makeInput());
     expect(outcome.kind).toBe("no_change");
   });
+
+  // ── Inc A: test-label safety floor ───────────────────────────────────────────
+  // test output never contains "error TS####" lines → coded key-set always empty →
+  // classification always uses the count fallback → a count-flat outcome cannot
+  // confirm no new failures → must NOT silently yield success:true as pre_existing_errors.
+
+  it('test label: count-flat pre_existing-looking outcome → applied_with_warnings, not pre_existing_errors', async () => {
+    mockFinalizeStaging.mockResolvedValue({
+      flushed: true,
+      filesFlushed: 1,
+      flushFailures: 0,
+      verification: {
+        status: "fail" as const,
+        label: "test",
+        durationMs: 180,
+        errorPreview: "FAILED src/foo.test.ts > describe > my test\n✗ my test",
+        baselineErrorCount: 2,
+        postErrorCount: 2,
+        regressed: false,
+      },
+    });
+    const outcome = await verifyAndFinalize(makeInput({ verifyMode: "warn" }));
+    expect(outcome.kind).toBe("applied_with_warnings");
+    if (outcome.kind === "applied_with_warnings") {
+      expect(outcome.filesFlushed).toBe(1);
+      expect(typeof outcome.appendix).toBe("string");
+      // Must NOT carry the false-reassurance "didn't add any new errors" pre_existing appendix
+      expect(outcome.appendix).not.toMatch(/didn.t add any new errors/i);
+    }
+  });
+
+  it('tsc label: pre_existing-looking outcome still → pre_existing_errors (key-verified; Inc A is test-only)', async () => {
+    mockFinalizeStaging.mockResolvedValue({
+      flushed: true,
+      filesFlushed: 1,
+      flushFailures: 0,
+      verification: {
+        status: "fail" as const,
+        label: "tsc",
+        durationMs: 180,
+        errorPreview: "src/foo.ts(3,1): error TS2304: Cannot find name 'baz'.",
+        baselineErrorCount: 3,
+        postErrorCount: 3,
+        regressed: false,
+      },
+    });
+    const outcome = await verifyAndFinalize(makeInput());
+    expect(outcome.kind).toBe("pre_existing_errors");
+    if (outcome.kind === "pre_existing_errors") {
+      expect(outcome.appendix).toMatch(/pre-existing/i);
+    }
+  });
+
+  it('test label: tests pass after patch (postErrorCount=0, baseline>0, regressed false) → applied', async () => {
+    // postErrorCount===0 guard at composer.ts:113 fires before the test-label check —
+    // a genuinely-clean test run must still reach success:true via the "applied" path.
+    mockFinalizeStaging.mockResolvedValue({
+      flushed: true,
+      filesFlushed: 1,
+      flushFailures: 0,
+      verification: {
+        status: "fail" as const,
+        label: "test",
+        durationMs: 150,
+        errorPreview: "",
+        baselineErrorCount: 2,
+        postErrorCount: 0,
+        regressed: false,
+      },
+    });
+    const outcome = await verifyAndFinalize(makeInput({ verifyMode: "warn" }));
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind === "applied") {
+      expect(outcome.filesFlushed).toBe(1);
+    }
+  });
 });
 
 describe("verifyAndFinalize — load-bearing invariants", () => {
