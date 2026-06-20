@@ -309,6 +309,22 @@ describe("handleToolResult parity — Task success path subagent token propagati
   });
 });
 
+describe("handleToolResult parity — Task failed path budget propagation (Inc A regression guard)", () => {
+  it("budget aggregation fires even when Task result.success is false", async () => {
+    mockHandleSubagentResult.mockReturnValue({ subagentTokenDelta: 5000, subagentCostDelta: 0.02 });
+    const ctx = makeCtx();
+    const deps = makeDeps();
+    (deps.budget.recordSubagentResult as Mock).mockReturnValue({ ratio: 0.3 });
+    const taskOutput = JSON.stringify({ filesModified: [], tokenUsage: { total: 5000 } });
+    await handleToolResult("Task", { prompt: "do work" }, "c1", { output: taskOutput, success: false }, ctx, deps);
+    expect(deps.budget.recordSubagentResult).toHaveBeenCalledWith(
+      { tokens: 5000, cost: 0.02 },
+      1,
+      deps.onStructuredEvent
+    );
+  });
+});
+
 describe("handleToolResult parity — responseInput.push exactly once per non-early-exit call", () => {
   it("push called once for a normal continue result", async () => {
     const ctx = makeCtx();

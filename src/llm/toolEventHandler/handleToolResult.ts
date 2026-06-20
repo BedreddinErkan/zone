@@ -115,8 +115,11 @@ export async function handleToolResult(
     }
   }
 
-  // Step 10: Task subagent result aggregation
-  if (name === "Task" && result.success) {
+  // Step 10: Task subagent result aggregation — ungated from result.success so that
+  // failed-subagent token/cost spend is always propagated into the parent budget.
+  // The outer success boolean is fixed in Inc B; this runs unconditionally now so
+  // the budget accounting doesn't break when that boolean can become false.
+  if (name === "Task") {
     const sdResult = handleSubagentResult({
       result,
       iterNumber: deps.iter,
