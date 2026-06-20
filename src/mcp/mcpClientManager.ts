@@ -69,7 +69,7 @@ export class McpClientManager {
       stderr: "pipe",
     });
 
-    const client = new Client({ name: "zone", version: "0.0.1" }, { capabilities: {} });
+    const client = new Client({ name: "zone", version: "0.1.0" }, { capabilities: {} });
 
     try {
       // Race connect + initialize against a hard timeout

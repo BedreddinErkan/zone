@@ -1,6 +1,6 @@
 {
   "name": "zone",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Self-host AI coding agent. Tier-bounded execution, atomic safety, BYOK transparency.",
