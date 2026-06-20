@@ -502,21 +502,22 @@ required: ["id", "content", "description", "status"],
     },
   },
   // Phase AS / X.0: audit-gated tool, now in ZONE_TOOLS for unified tool array.
-  // Exposed to the LLM in all modes; agentLoop no-op guards it outside
-  // investigation mode so execute-phase calls are safely discarded.
+  // Exposed to the LLM in all modes. In investigation mode it records a
+  // scope-revision proposal. In execute/patch mode, under ZONE_PLAN_REPLAN=1
+  // (medium/complex tiers), it triggers an adaptive replan; otherwise no-op.
   {
     type: "function",
     function: {
       name: "suggest_scope_change",
       description:
-        "Correct plan scope when investigation reveals wrong-sizing (under_scope/over_scope). Only call with concrete findings.",
+        "Request a plan-scope correction when you discover wrong-sizing (under_scope/over_scope) — either during investigation, or during execution when a file you must edit is missing from the plan's scope. Only call with concrete findings.",
       parameters: {
         type: "object",
         required: ["reason", "type", "revised_plan_summary"],
         properties: {
           reason: {
             type: "string",
-            description: "1–3 sentence justification grounded in investigation findings.",
+            description: "1–3 sentence justification grounded in concrete findings (from investigation, or from what execution revealed).",
           },
           type: {
             type: "string",
@@ -526,16 +527,16 @@ required: ["id", "content", "description", "status"],
           missing_files: {
             type: "array",
             items: { type: "string" },
-            description: "Files the plan omits but investigation shows are required. Populate for under_scope / mixed.",
+            description: "Files the plan omits but that are required. Populate for under_scope / mixed.",
           },
           unnecessary_files: {
             type: "array",
             items: { type: "string" },
-            description: "Files the plan includes but investigation shows are uninvolved. Populate for over_scope / mixed.",
+            description: "Files the plan includes but that are uninvolved. Populate for over_scope / mixed.",
           },
           revised_plan_summary: {
             type: "string",
-            description: "Short revised plan to show in the approval card.",
+            description: "Short summary of the revised plan.",
           },
         },
         additionalProperties: false,
