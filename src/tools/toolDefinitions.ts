@@ -510,7 +510,7 @@ required: ["id", "content", "description", "status"],
     function: {
       name: "suggest_scope_change",
       description:
-        "Request a plan-scope correction when you discover wrong-sizing (under_scope/over_scope) — either during investigation, or during execution when a file you must edit is missing from the plan's scope. Only call with concrete findings.",
+        "Signal wrong-sizing (under_scope/over_scope), e.g. a must-edit file outside scope. Only call with concrete findings.",
       parameters: {
         type: "object",
         required: ["reason", "type", "revised_plan_summary"],
