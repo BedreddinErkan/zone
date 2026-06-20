@@ -43,13 +43,15 @@ function cleanTokenNumber(value: unknown): number {
 }
 
 /**
- * Logs [zone-subagent-dispatched] after successful Task tool execution.
- * Call only when name === "Task" && result.success.
+ * Logs [zone-subagent-dispatched] for every Task tool execution.
+ * outcome is the resolved SubagentSummary.status from the result JSON;
+ * defaults to "success" when called by legacy callers without the argument.
  */
 export function logSubagentDispatched(
   parsedArgs: Record<string, unknown>,
   runId: string | null | undefined,
-  iterNumber: number
+  iterNumber: number,
+  outcome?: string
 ): void {
   const dispatchReason = extractDispatchReason(parsedArgs.description);
   const dispatchSubagentType =
@@ -66,6 +68,7 @@ export function logSubagentDispatched(
     workerModel: dispatchWorkerModel,
     dispatchReason,
     iter: iterNumber + 1,
+    outcome: outcome ?? "success",
   }));
 }
 

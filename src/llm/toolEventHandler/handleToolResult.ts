@@ -23,9 +23,21 @@ export async function handleToolResult(
   deps.throwIfAborted("after_tool");
   deps.onToolResult?.(name, result);
 
-  // Step 2: log Task dispatch only after success (budget gate may block)
-  if (name === "Task" && result.success) {
-    logSubagentDispatched(parsedArgs, deps.runId, deps.iter);
+  // Step 2: log Task dispatch with real outcome — fires for both successful and failed
+  // dispatches so they don't silently vanish from telemetry. Gated on the output parsing
+  // as a real dispatch JSON (has subagentId) so budget-gate blocks (plain text, no JSON)
+  // remain unlisted — they were never dispatched.
+  if (name === "Task") {
+    const outcome = (() => {
+      try {
+        const parsed = JSON.parse(result.output) as { status?: string; subagentId?: string };
+        if (!parsed.subagentId) return null;
+        return parsed.status ?? "unknown";
+      } catch { return null; }
+    })();
+    if (outcome !== null) {
+      logSubagentDispatched(parsedArgs, deps.runId, deps.iter, outcome);
+    }
   }
 
   // Step 3: diagnostic
@@ -37,8 +49,12 @@ export async function handleToolResult(
     error: result.error ?? null,
   }));
 
-  // Step 4: failure flags — MUST happen before responseInput.push
-  if (!result.success) {
+  // Step 4: failure flags — MUST happen before responseInput.push.
+  // Excluded for Task: a delegated subagent failure is not a parent tool failure —
+  // the model already sees the real status in the JSON at Step 11. Coaching,
+  // coaching_exhausted promotion, and forced_tier_blocking promotion are all gated
+  // on failureDetected; none of them are appropriate responses to a subagent result.
+  if (!result.success && name !== "Task") {
     ctx.failureDetected = true;
     ctx.failedToolName = name;
     ctx.failedToolOutput = result.output;

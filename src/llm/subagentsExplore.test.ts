@@ -235,6 +235,43 @@ describe("formatExploreSubagentSummaryForParent", () => {
     expect(Array.isArray(parsed.findings)).toBe(true);
   });
 
+  it("outer success:false for a failed explore (result.success===false)", () => {
+    const fakeResult = {
+      success: false,
+      summary: [
+        "FINDINGS:",
+        "",
+        "SUMMARY: Exploration could not complete.",
+        "STATUS: failed",
+      ].join("\n"),
+      toolCallLog: [],
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted" as const,
+    };
+    const toolResult = formatExploreSubagentToolResultForParent(fakeResult, "explore-fail");
+    expect(toolResult.success).toBe(false);
+    expect(JSON.parse(toolResult.output)).toMatchObject({ status: "failed" });
+  });
+
+  it("outer success:true for a partial explore (partial = usable findings)", () => {
+    const fakeResult = {
+      success: true,
+      summary: [
+        "FINDINGS:\n- src/a.ts:1 — entry point",
+        "SUMMARY: Located some but not all targets.",
+        "STATUS: partial",
+      ].join("\n"),
+      toolCallLog: [],
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted" as const,
+    };
+    const toolResult = formatExploreSubagentToolResultForParent(fakeResult, "explore-partial");
+    expect(toolResult.success).toBe(true);
+    expect(JSON.parse(toolResult.output)).toMatchObject({ status: "partial" });
+  });
+
   it("K.6: costUsd is serialized into explore Task tool result", () => {
     const fakeResult = {
       success: true,

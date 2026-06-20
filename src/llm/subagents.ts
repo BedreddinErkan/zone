@@ -197,16 +197,17 @@ export function parseWorkerSummary(rawSummary: string): {
   };
 }
 
-export function formatSubagentSummaryForParent(
+function buildWorkerSummary(
   result: AgentLoopResult,
   subagentId: string,
-  parentRunId = ""
-): string {
+  parentRunId: string
+): { status: SubagentSummary["status"]; output: string } {
   const parsed = parseWorkerSummary(result.summary ?? "");
+  const status = statusFromAgentResult(result, parsed.status);
   const summary: SubagentSummary = {
     subagentId,
     parentRunId,
-    status: statusFromAgentResult(result, parsed.status),
+    status,
     summary: parsed.summary || result.summary || "(no summary)",
     tokenUsage: normalizeTokenUsage(result.tokenUsage),
     costUsd: result.costUsd ?? 0,
@@ -214,18 +215,24 @@ export function formatSubagentSummaryForParent(
       parsed.filesModified.length > 0 ? parsed.filesModified : result.filesModified ?? [],
     notes: parsed.notes,
   };
-  return JSON.stringify(summary);
+  return { status, output: JSON.stringify(summary) };
+}
+
+export function formatSubagentSummaryForParent(
+  result: AgentLoopResult,
+  subagentId: string,
+  parentRunId = ""
+): string {
+  return buildWorkerSummary(result, subagentId, parentRunId).output;
 }
 
 export function formatSubagentToolResultForParent(
   result: AgentLoopResult,
   subagentId: string,
   parentRunId = ""
-): { success: true; output: string } {
-  return {
-    success: true,
-    output: formatSubagentSummaryForParent(result, subagentId, parentRunId),
-  };
+): { success: boolean; output: string } {
+  const { status, output } = buildWorkerSummary(result, subagentId, parentRunId);
+  return { success: status === "completed" || status === "partial", output };
 }
 
 export interface ExploreFinding {
@@ -288,31 +295,38 @@ export function parseExploreSummary(rawOutput: string): ExploreSummary {
   };
 }
 
-export function formatExploreSubagentSummaryForParent(
+function buildExploreSummary(
   result: AgentLoopResult,
   subagentId: string,
-  parentRunId = ""
-): string {
+  parentRunId: string
+): { status: SubagentSummary["status"]; output: string } {
   const parsed = parseExploreSummary(result.summary ?? "");
+  const status = statusFromAgentResult(result, parsed.status);
   const payload = {
     subagentId,
     parentRunId,
-    status: statusFromAgentResult(result, parsed.status),
+    status,
     summary: parsed.summary || result.summary || "(no summary)",
     tokenUsage: normalizeTokenUsage(result.tokenUsage),
     costUsd: result.costUsd ?? 0,
     findings: parsed.findings,
   };
-  return JSON.stringify(payload);
+  return { status, output: JSON.stringify(payload) };
+}
+
+export function formatExploreSubagentSummaryForParent(
+  result: AgentLoopResult,
+  subagentId: string,
+  parentRunId = ""
+): string {
+  return buildExploreSummary(result, subagentId, parentRunId).output;
 }
 
 export function formatExploreSubagentToolResultForParent(
   result: AgentLoopResult,
   subagentId: string,
   parentRunId = ""
-): { success: true; output: string } {
-  return {
-    success: true,
-    output: formatExploreSubagentSummaryForParent(result, subagentId, parentRunId),
-  };
+): { success: boolean; output: string } {
+  const { status, output } = buildExploreSummary(result, subagentId, parentRunId);
+  return { success: status === "completed" || status === "partial", output };
 }

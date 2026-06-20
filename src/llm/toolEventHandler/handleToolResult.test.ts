@@ -298,6 +298,24 @@ describe("handleToolResult", () => {
       expect(deps.budget.recordSubagentCostOnly).toHaveBeenCalledWith(0.05);
       expect(deps.budget.recordSubagentResult).not.toHaveBeenCalled();
     });
+
+    it("does NOT set failureDetected for a failed Task result (parent failure machinery stays dormant)", async () => {
+      // A failed subagent returns success:false after Inc B. The parent should NOT
+      // coach/retry — the model already sees the JSON status:"failed" at Step 11.
+      mockHandleSubagentResult.mockReturnValue({ subagentTokenDelta: 0, subagentCostDelta: 0 });
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      await handleToolResult(
+        "Task",
+        { prompt: "do work" },
+        "c1",
+        { output: JSON.stringify({ status: "failed", summary: "Worker failed." }), success: false },
+        ctx,
+        deps
+      );
+      expect(ctx.failureDetected).toBe(false);
+      expect(ctx.failedToolName).toBe("");
+    });
   });
 
   describe("loop detector", () => {

@@ -151,4 +151,47 @@ describe("subagent SSE event bridge", () => {
       parentRunId,
     });
   });
+
+  it("emits subagent_completed with status:error when worker dispatch fails", async () => {
+    const parentRunId = `parent-${Date.now()}-fail`;
+    resetSubagentCallCount(parentRunId);
+    runAgentLoopMock.mockResolvedValueOnce({
+      success: false,
+      summary: [
+        "SUMMARY: Worker hit its iteration budget.",
+        "FILES_MODIFIED: none",
+        "STATUS: failed",
+      ].join("\n"),
+      toolCallLog: [],
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "no_verification_attempted",
+    });
+    const events: Array<Record<string, unknown>> = [];
+
+    const result = await executeTool(
+      "Task",
+      {
+        subagent_type: "worker",
+        description: "Update src/example.ts with the requested change.",
+      },
+      process.cwd(),
+      undefined,
+      {
+        runId: parentRunId,
+        stagingFiles: new Map(),
+        onStructuredEvent: (evt) => events.push(evt as Record<string, unknown>),
+      }
+    );
+
+    // outer boolean now reflects real outcome
+    expect(result.success).toBe(false);
+    const completedEvent = events.find((e) => e.type === "subagent_completed");
+    expect(completedEvent).toMatchObject({
+      type: "subagent_completed",
+      subagentStatus: "failed",
+      status: "error",
+      parentRunId,
+    });
+  });
 });

@@ -82,7 +82,7 @@ describe("subagent helpers", () => {
     expect(subagentTypeMaxIterations("explore")).toBe(15);
   });
 
-  it("formats a failed worker as a terminal successful Task tool result", () => {
+  it("formats a failed worker with outer success:false and inner status:failed", () => {
     const result = formatSubagentToolResultForParent(
       {
         success: false,
@@ -108,7 +108,7 @@ describe("subagent helpers", () => {
       "parent-run-1"
     );
 
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
     expect(JSON.parse(result.output)).toMatchObject({
       subagentId: "worker-1",
       parentRunId: "parent-run-1",
@@ -159,6 +159,51 @@ describe("subagent helpers", () => {
       "parent-run-x"
     );
     expect(JSON.parse(genuineFailResult.output)).toMatchObject({ status: "failed" });
+  });
+
+  it("outer success:true for a partial worker (partial = usable result)", () => {
+    const result = formatSubagentToolResultForParent(
+      {
+        success: true,
+        summary: [
+          "SUMMARY: Made partial progress; some files updated.",
+          "FILES_MODIFIED: src/foo.ts",
+          "STATUS: partial",
+        ].join("\n"),
+        toolCallLog: [],
+        filesModified: ["src/foo.ts"],
+        patchValidatedByAgent: false,
+        verificationReason: "no_verification_attempted",
+      },
+      "worker-partial",
+      "parent-run-p"
+    );
+    expect(result.success).toBe(true);
+    expect(JSON.parse(result.output)).toMatchObject({ status: "partial" });
+  });
+
+  it("outer success:false when loop succeeds but worker self-reports STATUS:failed (edge case)", () => {
+    // result.success===true means the loop finished cleanly, but the worker chose to
+    // report STATUS:failed — statusFromAgentResult returns "failed", so outer must be false.
+    // A bare result.success mirror would wrongly report true here.
+    const result = formatSubagentToolResultForParent(
+      {
+        success: true,
+        summary: [
+          "SUMMARY: Worker could not locate the target symbol.",
+          "FILES_MODIFIED: none",
+          "STATUS: failed",
+        ].join("\n"),
+        toolCallLog: [],
+        filesModified: [],
+        patchValidatedByAgent: false,
+        verificationReason: "no_verification_attempted",
+      },
+      "worker-edge",
+      "parent-run-e"
+    );
+    expect(result.success).toBe(false);
+    expect(JSON.parse(result.output)).toMatchObject({ status: "failed" });
   });
 
   it("formats missing token usage as a required zeroed tokenUsage payload", () => {
