@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MODEL_CATALOG, isValidModelId, getDefaultModelForTier, MODEL_CONTEXT_WINDOWS, getContextWindow } from "./models.js";
+import { MODEL_CATALOG, isValidModelId, getDefaultModelForTier, MODEL_CONTEXT_WINDOWS, getContextWindow, ESCALATION_LADDERS, nextStrongerModel } from "./models.js";
 
 describe("MODEL_CATALOG", () => {
   it("gpt-4o-mini has workerSuitable: false", () => {
@@ -71,5 +71,54 @@ describe("getContextWindow + MODEL_CONTEXT_WINDOWS", () => {
     const allModelIds = Object.values(MODEL_CATALOG).flat().map((m) => m.id);
     const missing = allModelIds.filter((id) => !(id in MODEL_CONTEXT_WINDOWS));
     expect(missing).toEqual([]);
+  });
+});
+
+describe("nextStrongerModel", () => {
+  describe("Anthropic ladder", () => {
+    it("haiku → sonnet", () => {
+      expect(nextStrongerModel("anthropic", "claude-haiku-4-5")).toBe("claude-sonnet-4-6");
+    });
+    it("sonnet → opus", () => {
+      expect(nextStrongerModel("anthropic", "claude-sonnet-4-6")).toBe("claude-opus-4-8");
+    });
+    it("opus (top rung) → null", () => {
+      expect(nextStrongerModel("anthropic", "claude-opus-4-8")).toBeNull();
+    });
+  });
+
+  describe("OpenAI ladder", () => {
+    it("gpt-4o-mini → gpt-4o", () => {
+      expect(nextStrongerModel("openai", "gpt-4o-mini")).toBe("gpt-4o");
+    });
+    it("gpt-4o → gpt-5.5", () => {
+      expect(nextStrongerModel("openai", "gpt-4o")).toBe("gpt-5.5");
+    });
+    it("gpt-5.5 (top rung) → null", () => {
+      expect(nextStrongerModel("openai", "gpt-5.5")).toBeNull();
+    });
+  });
+
+  describe("edge cases", () => {
+    it("unknown model → null", () => {
+      expect(nextStrongerModel("anthropic", "claude-unknown-9-9")).toBeNull();
+      expect(nextStrongerModel("openai", "gpt-99")).toBeNull();
+    });
+    it("empty string → null", () => {
+      expect(nextStrongerModel("anthropic", "")).toBeNull();
+    });
+  });
+
+  describe("ESCALATION_LADDERS drift validation", () => {
+    it("every ladder entry is a valid MODEL_CATALOG model for its provider", () => {
+      for (const [provider, ids] of Object.entries(ESCALATION_LADDERS)) {
+        for (const id of ids) {
+          expect(
+            isValidModelId(provider as "anthropic" | "openai", id),
+            `ESCALATION_LADDERS["${provider}"] contains "${id}" which is not in MODEL_CATALOG — update the ladder or the catalog`,
+          ).toBe(true);
+        }
+      }
+    });
   });
 });

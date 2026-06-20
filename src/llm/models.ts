@@ -71,6 +71,21 @@ export function isValidModelId(provider: LLMProvider, modelId: string): boolean 
   return catalog.some((m) => m.id === modelId);
 }
 
+export const ESCALATION_LADDERS: Record<LLMProvider, readonly string[]> = {
+  anthropic: ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-8"],
+  openai:    ["gpt-4o-mini", "gpt-4o", "gpt-5.5"],
+};
+
+export function nextStrongerModel(
+  provider: LLMProvider,
+  currentModel: string,
+): string | null {
+  const ladder = ESCALATION_LADDERS[provider] ?? [];
+  const idx = ladder.indexOf(currentModel);
+  if (idx === -1 || idx === ladder.length - 1) return null;
+  return ladder[idx + 1] ?? null;
+}
+
 export function getDefaultModelForTier(
   provider: LLMProvider,
   tier: ZoneModelTier

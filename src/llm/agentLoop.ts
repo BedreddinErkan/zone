@@ -70,7 +70,7 @@ import type {
 } from "openai/resources/chat/completions";
 import type { Mode } from "../types/mode.js";
 import { ContextCompactor } from "./compaction/ContextCompactor.js";
-import { getContextWindow } from "./models.js";
+import { getContextWindow, nextStrongerModel } from "./models.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
 import type { LLMProvider } from "./types.js";
 import { hashToolCall, createDetectorState, recordAndDetect, LOOP_DETECT_EXEMPT_TOOLS } from "./loopDetector.js";
@@ -1834,6 +1834,8 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   let consecutiveScopeBlocks = 0;
   const replanState = { count: 0 };
   const replanEnabled = String(process.env["ZONE_PLAN_REPLAN"] || "").trim() === "1";
+  const escalateOnStall = String(process.env["ZONE_ESCALATE_ON_STALL"] || "").trim() === "1";
+  let escalatedModel: string | null = null;
   let coachingBudgetExhausted = false;
   // Per-run tracker for repeated PreToolUse vetoes (tool:filePath → vetoed once)
   const userHookVetoTracker = new Set<string>();
@@ -2587,7 +2589,7 @@ Example:
       const { pruned: wrapupPruned } = pruneStaleReads(messages);
       const wrapupResponse = await client.createChatCompletion(
         {
-          model: getModelName("high", client.provider, requestCtx?.modelOverride),
+          model: escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride),
           messages: [
             ...wrapupPruned,
             {
@@ -3130,7 +3132,7 @@ Example:
       client.provider === "openai"
         ? buildOpenAIPromptCacheKey(input.runId, input.conversationId)
         : undefined;
-    const modelName = getModelName("high", client.provider, requestCtx?.modelOverride);
+    const modelName = escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride);
 
     // Opus forensic E.2: env-gated per-iter content hash probe for cache-bust diagnosis.
     // v2 (replaces v1 7d9b469): every message hashed + manifest position + marker location.
@@ -4215,6 +4217,23 @@ Example:
       ) {
         const persisting = computeAntiThrashSignal(buildAntiThrashCtx(iter));
         if (persisting) {
+          if (escalateOnStall && escalatedModel === null && persisting.pattern !== "cost_burn") {
+            const currentModel = getModelName("high", client.provider, requestCtx?.modelOverride);
+            const up = nextStrongerModel(client.provider, currentModel);
+            if (up !== null) {
+              escalatedModel = up;
+              antiThrashStage1Fired = false;
+              antiThrashStage1FiredAtIter = -1;
+              antiThrashStage1Pattern = "";
+              antiThrashFilesModifiedAtStage1 = 0;
+              antiThrashNoProgressObserved = false;
+              debugLog("[zone-model-escalated]", JSON.stringify({
+                from: currentModel, to: up, pattern: persisting.pattern,
+                iter, costUsd: budget.snapshot().costUsd,
+              }));
+              continue;
+            }
+          }
           return synthesizeStallExit(iter, persisting);
         }
       }
@@ -4380,7 +4399,7 @@ Example:
     let finalSummary = "Max iterations reached before a final answer was produced.";
     try {
       const assessmentResponse = await client.createChatCompletion({
-        model: getModelName("high", client.provider, requestCtx?.modelOverride),
+        model: escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride),
         messages: [
           ...responseInput,
           {
@@ -4455,7 +4474,7 @@ Example:
   })();
   try {
     const assessmentResponse = await client.createChatCompletion({
-      model: getModelName("high", client.provider, requestCtx?.modelOverride),
+      model: escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride),
       messages: [
         ...responseInput,
         {
