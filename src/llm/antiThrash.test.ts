@@ -717,6 +717,94 @@ describe("computeAntiThrashSignal — P3 priority", () => {
   });
 });
 
+// ── stagedWriteCount gate — P5/P6 false-positive fix ─────────────────────────
+
+function makeReadsMap(count: number): Map<string, number> {
+  const m = new Map<string, number>();
+  for (let i = 0; i < count; i++) m.set(`src/f${i}.ts`, 1);
+  return m;
+}
+
+describe("stagedWriteCount gate (P5/P6 false-positive fix)", () => {
+  // (i) stagedWriteCount > 0 spares a progressing multi_edit run from false termination.
+  it("detectWanderingSignal returns null when stagedWriteCount > 0", () => {
+    const ctx = makeCtx({
+      filesModifiedSize: 0,
+      stagedWriteCount: 2,
+      filesReadCountThisRun: makeReadsMap(ANTI_THRASH_WANDER_READ_MIN),
+      iter: ANTI_THRASH_WANDER_ITER_MIN,
+    });
+    expect(detectWanderingSignal(ctx)).toBeNull();
+  });
+
+  it("detectCostBurnSignal returns null when stagedWriteCount > 0", () => {
+    const ctx = makeCtx({
+      filesModifiedSize: 0,
+      stagedWriteCount: 1,
+      costUsd: ANTI_THRASH_COST_BURN_USD,
+      iter: ANTI_THRASH_COST_BURN_ITER_MIN,
+    });
+    expect(detectCostBurnSignal(ctx)).toBeNull();
+  });
+
+  it("computeAntiThrashSignal returns null when stagedWriteCount > 0 (no P4/P3)", () => {
+    const ctx = makeCtx({
+      filesModifiedSize: 0,
+      stagedWriteCount: 3,
+      filesReadCountThisRun: makeReadsMap(ANTI_THRASH_WANDER_READ_MIN),
+      iter: ANTI_THRASH_WANDER_ITER_MIN,
+      coachingAttempts: 0,
+    });
+    expect(computeAntiThrashSignal(ctx)).toBeNull();
+  });
+
+  // (ii) True wanderer / true burner still fire (regression lock).
+  it("detectWanderingSignal still fires when stagedWriteCount is 0 (true stall)", () => {
+    const ctx = makeCtx({
+      filesModifiedSize: 0,
+      stagedWriteCount: 0,
+      filesReadCountThisRun: makeReadsMap(ANTI_THRASH_WANDER_READ_MIN),
+      iter: ANTI_THRASH_WANDER_ITER_MIN,
+    });
+    expect(detectWanderingSignal(ctx)?.pattern).toBe("wandering");
+  });
+
+  it("detectCostBurnSignal still fires when stagedWriteCount is 0 (true stall)", () => {
+    const ctx = makeCtx({
+      filesModifiedSize: 0,
+      stagedWriteCount: 0,
+      costUsd: ANTI_THRASH_COST_BURN_USD,
+      iter: ANTI_THRASH_COST_BURN_ITER_MIN,
+    });
+    expect(detectCostBurnSignal(ctx)?.pattern).toBe("cost_burn");
+  });
+
+  // (iii) Back-compat: stagedWriteCount omitted → treated as 0 → P5 fires.
+  it("stagedWriteCount absent → ?? 0 → P5 still fires", () => {
+    const ctx = makeCtx({
+      filesModifiedSize: 0,
+      // stagedWriteCount deliberately not set
+      filesReadCountThisRun: makeReadsMap(ANTI_THRASH_WANDER_READ_MIN),
+      iter: ANTI_THRASH_WANDER_ITER_MIN,
+    });
+    expect(detectWanderingSignal(ctx)?.pattern).toBe("wandering");
+  });
+
+  // (iv) Apply_patch+revert run returns BOTH filesModified AND stagingFiles to 0:
+  // Step 9 add then revert_patch delete → filesModifiedSize=0;
+  // stagedWrite then revert_patch stagingFiles.delete → stagedWriteCount=0.
+  // Both guards are 0 → P5 fires correctly; no exemption is introduced.
+  it("apply_patch+revert run (no multi_edit) is not exempted — both counts are 0", () => {
+    const ctx = makeCtx({
+      filesModifiedSize: 0,
+      stagedWriteCount: 0,
+      filesReadCountThisRun: makeReadsMap(ANTI_THRASH_WANDER_READ_MIN),
+      iter: ANTI_THRASH_WANDER_ITER_MIN,
+    });
+    expect(detectWanderingSignal(ctx)?.pattern).toBe("wandering");
+  });
+});
+
 // ── buildStallReflectionText — no_progress ────────────────────────────────────
 
 describe("buildStallReflectionText — no_progress", () => {

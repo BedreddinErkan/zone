@@ -51,7 +51,13 @@ vi.mock("../utils/logger.js", () => loggerMock);
 // ── imports ───────────────────────────────────────────────────────────────────
 
 import { runAgentLoop } from "./agentLoop.js";
-import { ANTI_THRASH_BREAK_ITERS, ANTI_THRASH_FAILURE_COACH_MIN } from "./antiThrash.js";
+import {
+  ANTI_THRASH_BREAK_ITERS,
+  ANTI_THRASH_FAILURE_COACH_MIN,
+  ANTI_THRASH_WANDER_ITER_MIN,
+  ANTI_THRASH_WANDER_READ_MIN,
+  ANTI_THRASH_COST_BURN_ITER_MIN,
+} from "./antiThrash.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -114,6 +120,31 @@ function llmDone(text = "Done. [ZONE_VERIFICATION: no_verification_attempted]") 
     usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
   };
 }
+
+function llmMultiEdit(id: string, files: string[] = [TARGET]) {
+  return {
+    choices: [{
+      message: {
+        content: null,
+        tool_calls: [{
+          id,
+          type: "function",
+          function: {
+            name: "multi_edit",
+            arguments: JSON.stringify({ files, find: "const x", replace: "const y" }),
+          },
+        }],
+      },
+      finish_reason: "tool_calls",
+    }],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+  };
+}
+
+// High-cost usage shape: 40K prompt tokens at gpt-4o pricing ($2.50/1M) = $0.10/iter.
+// After COST_BURN_ITER_MIN=10 iters: ~$1.01 > $1.00 threshold.
+// Total tokens over COST_BURN_ITER_MIN+BREAK_ITERS+1=14 iters: 14×40100=561K < 800K cap.
+const HIGH_COST_USAGE = { prompt_tokens: 40000, completion_tokens: 100, total_tokens: 40100 };
 
 function llmRunCommand(id: string, command = "tsc --noEmit", nonce?: number) {
   // nonce field: hashToolCall includes all args → each call is unique to the loop-detector
@@ -284,6 +315,162 @@ describe("agentLoop anti-thrash Stage 1+2 (INC-1 P4)", () => {
 
     expect(result.terminationReason).toBe("loop_detected");
     expect(result.terminationReason).not.toBe("semantic_stall");
+  });
+});
+
+// ── P5/P6 false-positive fix (stagedWriteCount gate) ─────────────────────────
+
+describe("agentLoop anti-thrash P5/P6 stagedWriteCount gate", () => {
+  // (i) task-2 regression: multi_edit run must NOT be terminated as semantic_stall.
+  // The real executeTool is used for multi_edit so that stagedWrite populates agentLoop's
+  // closure stagingFiles map. The assertion drives through the real buildAntiThrashCtx →
+  // ctx.stagedWriteCount=stagingFiles.size=1 → P5 returns null → no Stage-1 latch set.
+  // If the staging wiring is broken (stagedWriteCount stays 0), P5 fires and the test fails
+  // with a clear diagnostic — that is the intended behavior to catch a wiring regression.
+  it("multi_edit writes → stagedWriteCount > 0 → P5 suppressed → run completes", async () => {
+    // Create target file so the real multi_edit can find and replace content on disk.
+    fs.mkdirSync(path.join(repoPath, "src"), { recursive: true });
+    fs.writeFileSync(path.join(repoPath, "src", "target.ts"), "const x = 1;", "utf8");
+
+    // Get the real executeTool to pass through for multi_edit so stagingFiles is populated.
+    const { executeTool: realExecuteTool } =
+      await vi.importActual<typeof import("../tools/toolExecutor.js")>("../tools/toolExecutor.js");
+
+    toolExecutorMock.executeTool.mockImplementation(
+      (name: string, ...rest: unknown[]) => {
+        if (name === "multi_edit") {
+          // Pass-through: agentLoop's closure stagingFiles is in rest[3] (opts.stagingFiles).
+          // Real stagedWrite writes into that same Map, so stagingFiles.size grows to 1.
+          return (realExecuteTool as (...a: unknown[]) => Promise<unknown>)(name, ...rest);
+        }
+        if (name === "read_file") return Promise.resolve({ success: true, output: "const x = 1;" });
+        return Promise.resolve({ success: false, output: FAIL_OUTPUT });
+      },
+    );
+
+    // HARNESS GOTCHA: each read_file must use a DISTINCT filePath so hashToolCall differs and
+    // the loop detector (TERMINATE_THRESHOLD=4) does not pre-empt the anti-thrash machine.
+    const READS_NEEDED = Math.max(ANTI_THRASH_WANDER_READ_MIN, 5);
+    const ITERS_AFTER = ANTI_THRASH_WANDER_ITER_MIN + ANTI_THRASH_BREAK_ITERS + 1;
+
+    // Phase 1: read READS_NEEDED distinct files (builds totalReads ≥ WANDER_READ_MIN)
+    for (let i = 0; i < READS_NEEDED; i++) {
+      mocks.createChatCompletion.mockResolvedValueOnce(llmReadFile(`rf-${i}`, `src/f${i}.ts`));
+    }
+    // Phase 2: multi_edit — real tool populates stagingFiles; stagedWriteCount becomes 1
+    mocks.createChatCompletion.mockResolvedValueOnce(llmMultiEdit("me-0", ["src/target.ts"]));
+    // Phase 3: more distinct reads past WANDER_ITER_MIN + BREAK_ITERS to reach Stage-2 window;
+    // P5 should NOT fire Stage 1 because stagedWriteCount > 0.
+    for (let i = READS_NEEDED; i < READS_NEEDED + ITERS_AFTER; i++) {
+      mocks.createChatCompletion.mockResolvedValueOnce(llmReadFile(`rf-${i}`, `src/f${i}.ts`));
+    }
+    mocks.createChatCompletion.mockResolvedValueOnce(llmDone());
+
+    const result = await runAgentLoop({
+      task: "refactor x to y across files",
+      repoPath,
+      mode: "patch",
+      maxIterations: 40,
+    });
+
+    expect(
+      result.terminationReason,
+      "Expected no semantic_stall: if this fails, stagedWriteCount stayed 0 — check vi.importActual passthrough",
+    ).not.toBe("semantic_stall");
+  });
+
+  // (ii) P5 still terminates a true wanderer (reads only, zero writes of any kind).
+  it("P5 true stall: reads only, no writes → semantic_stall", async () => {
+    toolExecutorMock.executeTool.mockImplementation((name: string) => {
+      if (name === "read_file") return Promise.resolve({ success: true, output: "const x = 1;" });
+      return Promise.resolve({ success: false, output: FAIL_OUTPUT });
+    });
+
+    const totalIters = ANTI_THRASH_WANDER_ITER_MIN + ANTI_THRASH_BREAK_ITERS + 2;
+    for (let i = 0; i < totalIters; i++) {
+      mocks.createChatCompletion.mockResolvedValueOnce(llmReadFile(`rf-${i}`, `src/f${i}.ts`));
+    }
+
+    const result = await runAgentLoop({
+      task: "investigate and fix",
+      repoPath,
+      mode: "patch",
+      maxIterations: 40,
+    });
+
+    expect(result.terminationReason).toBe("semantic_stall");
+  });
+
+  // (iii) P6 still terminates a true cost-burner (no writes, high cost per LLM call).
+  // runId is required for cost to accumulate (TokenBudgetMeter skips accounting when runId="").
+  // HIGH_COST_USAGE pushes $0.10/iter; after COST_BURN_ITER_MIN=10 iters cost ≈ $1.01 > $1.
+  it("P6 true stall: no writes, cost ≥ $1 → semantic_stall", async () => {
+    toolExecutorMock.executeTool.mockImplementation((name: string) => {
+      if (name === "read_file") return Promise.resolve({ success: true, output: "const x = 1;" });
+      return Promise.resolve({ success: false, output: FAIL_OUTPUT });
+    });
+
+    const totalIters = ANTI_THRASH_COST_BURN_ITER_MIN + ANTI_THRASH_BREAK_ITERS + 2;
+    for (let i = 0; i < totalIters; i++) {
+      mocks.createChatCompletion.mockResolvedValueOnce({
+        ...llmReadFile(`rf-${i}`, `src/f${i}.ts`),
+        usage: HIGH_COST_USAGE,
+      });
+    }
+
+    const result = await runAgentLoop({
+      task: "investigate and fix",
+      repoPath,
+      mode: "patch",
+      maxIterations: 40,
+      runId: "test-p6-cost-burn",
+    });
+
+    expect(result.terminationReason).toBe("semantic_stall");
+  });
+
+  // (iv) Flailing burn: no-read-blocked apply_patches with high cost → P6 semantic_stall.
+  // The no-read gate at agentLoop.ts:3747 fires `continue` BEFORE executeTool and BEFORE
+  // handleToolResult, so: Step 9 never runs → filesModifiedSize stays 0; stagedWrite never
+  // runs → stagingFiles stays empty → stagedWriteCount stays 0. Cost still accrues per LLM
+  // call. After COST_BURN_ITER_MIN iters at high cost, P6 fires. The fix's new clause is
+  // INERT here (stagedWriteCount=0), confirming no false-negative was introduced.
+  it("P6 flailing burn via no-read gate: all apply_patches blocked, cost accrues → semantic_stall", async () => {
+    // executeTool is never reached for apply_patch (no-read gate fires first).
+    toolExecutorMock.executeTool.mockResolvedValue({ success: false, output: FAIL_OUTPUT });
+
+    const totalIters = ANTI_THRASH_COST_BURN_ITER_MIN + ANTI_THRASH_BREAK_ITERS + 2;
+    for (let i = 0; i < totalIters; i++) {
+      // Distinct filePaths → distinct hashToolCall → loop detector (TERMINATE_THRESHOLD=4)
+      // does not pre-empt (no path is repeated 4+ times).
+      mocks.createChatCompletion.mockResolvedValueOnce({
+        choices: [{
+          message: {
+            content: null,
+            tool_calls: [{
+              id: `ap-${i}`,
+              type: "function",
+              function: {
+                name: "apply_patch",
+                arguments: JSON.stringify({ filePath: `src/f${i}.ts`, patch: PATCH }),
+              },
+            }],
+          },
+          finish_reason: "tool_calls",
+        }],
+        usage: HIGH_COST_USAGE,
+      });
+    }
+
+    const result = await runAgentLoop({
+      task: "keep patching distinct files",
+      repoPath,
+      mode: "patch",
+      maxIterations: 40,
+      runId: "test-p6-flail",
+    });
+
+    expect(result.terminationReason).toBe("semantic_stall");
   });
 });
 

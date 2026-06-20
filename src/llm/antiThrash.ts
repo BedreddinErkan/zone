@@ -25,6 +25,11 @@ export interface AntiThrashContext {
   archetype: string | null | undefined;
   costUsd: number;
   recentVerifyKeySets?: ErrorKeySnapshot[];  // ring buffer, most-recent last. Optional: absent = no feeder data yet.
+  stagedWriteCount?: number;                 // stagingFiles.size at ctx build time. Optional: absent = 0.
+                                             // In P5/P6 contexts (filesModifiedSize===0) this equals the count
+                                             // of files staged by multi_edit that have not been reverted.
+                                             // Revert-aware: revert_patch removes from stagingFiles.
+                                             // No-op multi_edits excluded: stagedWrite not called for 0 replacements.
 }
 
 export interface AntiThrashThresholds {
@@ -116,7 +121,10 @@ export function detectWanderingSignal(
 ): AntiThrashSignal | null {
   if (ctx.isReadOnly) return null;
   if (ctx.archetype === "question" || ctx.archetype === "investigation") return null;
-  if (ctx.filesModifiedSize !== 0) return null;
+  // apply_patch/write_file progress is covered by filesModifiedSize (incl. revert subtraction at
+  // agentLoop.ts:3717). stagedWriteCount adds the multi_edit signal that filesModified omits.
+  // Both are revert-aware: revert_patch removes from filesModified AND stagingFiles respectively.
+  if (ctx.filesModifiedSize !== 0 || (ctx.stagedWriteCount ?? 0) > 0) return null;
 
   const wanderIterMin = thresholds?.wanderIterMin ?? ANTI_THRASH_WANDER_ITER_MIN;
   const wanderReadMin = thresholds?.wanderReadMin ?? ANTI_THRASH_WANDER_READ_MIN;
@@ -148,7 +156,8 @@ export function detectCostBurnSignal(
 ): AntiThrashSignal | null {
   if (ctx.isReadOnly) return null;
   if (ctx.archetype === "question" || ctx.archetype === "investigation") return null;
-  if (ctx.filesModifiedSize !== 0) return null;
+  // Same guard as detectWanderingSignal: stagedWriteCount exempts runs writing via multi_edit.
+  if (ctx.filesModifiedSize !== 0 || (ctx.stagedWriteCount ?? 0) > 0) return null;
 
   const costBurnIterMin = thresholds?.costBurnIterMin ?? ANTI_THRASH_COST_BURN_ITER_MIN;
   const costBurnUsd = thresholds?.costBurnUsd ?? ANTI_THRASH_COST_BURN_USD;

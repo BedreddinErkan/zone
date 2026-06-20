@@ -2912,6 +2912,12 @@ Example:
     archetype: input.originalArchetype,
     costUsd: budget.snapshot().costUsd,
     recentVerifyKeySets,
+    // stagingFiles.size is the net count of files staged by multi_edit that have not been reverted.
+    // Safe in P5/P6 contexts (filesModifiedSize===0): any executed apply_patch/write_file fires
+    // handleToolResult Step 9 unconditionally, making filesModifiedSize>0 and suppressing P5/P6
+    // before this field is consulted. No-read-blocked apply_patches skip handleToolResult entirely
+    // (agentLoop.ts:3824 `continue`), so they fire neither Step 9 nor stagedWrite — both counts stay 0.
+    stagedWriteCount: stagingFiles.size,
   });
 
   const antiThrashHook: PreIterationHook = {
