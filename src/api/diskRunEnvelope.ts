@@ -73,6 +73,8 @@ export interface RunEnvelope {
   createdPaths?: string[];
   /** Carried verbatim from the run — NOT a replacement for the FS-event summary path. */
   priorSessionSummary: string;
+  /** Pruned message history (what was last sent to the LLM). Absent when over cap or prior to first checkpoint. */
+  messages?: unknown[];
 }
 
 export interface ReconcileResult {

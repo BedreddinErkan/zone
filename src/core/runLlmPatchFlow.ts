@@ -4585,6 +4585,7 @@ export async function runLlmPatchFlow(input: {
     todos: import("../core/todoLifecycle.js").RunTodo[];
     failureHistory: Array<{ path: string; records: import("../api/diskRunEnvelope.js").FailureRecordLite[] }>;
     contextBlock: string;
+    messages?: unknown[];
   };
 }): Promise<LlmPatchFlowResult> {
   attachRunIdentity({ userId: input.userId, runId: input.runId });
@@ -5966,6 +5967,7 @@ const initializeTodosFromPlan = (): void => {
         resumeTodos: input.resume.todos,
         resumeFailureHistory: input.resume.failureHistory,
         resumeContextBlock: input.resume.contextBlock,
+        resumeMessages: input.resume.messages,
       } : {}),
       // Phase X.0.1: forward audit findings so execute agent skips re-investigation.
       auditFindings: input.auditFindings,

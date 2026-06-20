@@ -68,6 +68,7 @@ export interface OneShotOpts {
     todos: import("../core/todoLifecycle.js").RunTodo[];
     failureHistory: Array<{ path: string; records: import("../api/diskRunEnvelope.js").FailureRecordLite[] }>;
     contextBlock: string;
+    messages?: unknown[];
   };
   /** Durable resume: pre-generated plan from the envelope; when set in plan mode,
    *  bypasses preparePlanContext + generateExecutionPlan + PlanReadyModal. */
@@ -820,6 +821,7 @@ export async function buildResumeFlowInput(
       todos: env.todos,
       failureHistory: env.failureHistory,
       contextBlock,
+      messages: env.messages,
     },
   };
 }

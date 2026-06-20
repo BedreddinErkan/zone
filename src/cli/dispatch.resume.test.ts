@@ -193,4 +193,32 @@ describe("durable resume — preGeneratedPlan bypass (Fix B)", () => {
     expect(call["resume"]).toEqual(resumePayload);
     expect((call["preGeneratedPlan"] as typeof ENVELOPE_PLAN).objective).toBe(ENVELOPE_PLAN.objective);
   });
+
+  it("D. Inc-1: resume.messages threads through to runLlmPatchFlow when set", async () => {
+    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
+
+    const savedMessages = [
+      { role: "system", content: "prior system" },
+      { role: "user", content: "prior task" },
+    ];
+    const resumePayload = {
+      stagingFiles: new Map<string, string>(),
+      todos: [],
+      failureHistory: [],
+      contextBlock: "RESUMED.",
+      messages: savedMessages,
+    };
+
+    await runOneShotInner("do the task", BASE_CONFIG, "run-resume-messages", {
+      mode: "plan",
+      externalAc: new AbortController(),
+      preGeneratedPlan: ENVELOPE_PLAN,
+      resume: resumePayload,
+      sessionId: "env-session-messages",
+    });
+
+    const call = mockRunLlmPatchFlow.mock.calls[0]![0] as Record<string, unknown>;
+    const resume = call["resume"] as typeof resumePayload;
+    expect(resume.messages).toEqual(savedMessages);
+  });
 });

@@ -307,6 +307,8 @@ export interface AgentLoopInput {
   resumeFailureHistory?: Array<{ path: string; records: FailureRecordLite[] }>;
   /** Durable resume: compact context block injected into the first user message only. */
   resumeContextBlock?: string;
+  /** Durable resume: pruned message history to seed responseInput (warm-continue, Inc-1). */
+  resumeMessages?: unknown[];
   /** Adaptive-replan enabler: project summary carried from plan phase for mid-execution replan calls. */
   repoSummary?: string;
   /** Adaptive-replan enabler: top-N ranked files carried from plan phase for mid-execution replan calls. */
@@ -2131,6 +2133,7 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
 
   const MAX_STAGED_CONTENT_BYTES = 1_000_000;
   const envelopeCreatedAt = new Date().toISOString();
+  let latestMessages: unknown[] = [];
 
   function buildEnvelopeSnapshot(status: EnvelopeStatus): RunEnvelope {
     const staging = [];
@@ -2171,6 +2174,9 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
       createdPaths: deriveCreatedPaths(filesModified, stagingFiles, input.repoPath),
       flushedPaths: [],  // stamped at exit by stampEnvelopeStatus with result.filesModified
       priorSessionSummary: String(input.priorSessionSummary ?? ""),
+      messages: JSON.stringify(latestMessages).length <= MAX_STAGED_CONTENT_BYTES
+        ? latestMessages
+        : undefined,
     };
   }
 
@@ -2487,16 +2493,18 @@ Example:
         })),
       ]
     : userContent;
-  const responseInput: ChatCompletionMessageParam[] = [
-    {
-      role: "system",
-      content: systemContent,
-    },
-    {
-      role: "user",
-      content: userMessageContent,
-    },
-  ];
+  // Inc-1 warm-continue: when a prior run's message history is available, seed
+  // responseInput from it (fresh system message replaces the saved one at slice(1)).
+  // Falls back to the standard [system, user-kickoff] when resumeMessages is absent.
+  const responseInput: ChatCompletionMessageParam[] = input.resumeMessages?.length
+    ? [
+        { role: "system", content: systemContent },
+        ...(input.resumeMessages.slice(1) as ChatCompletionMessageParam[]),
+      ]
+    : [
+        { role: "system", content: systemContent },
+        { role: "user", content: userMessageContent },
+      ];
 
   const client = createLLMClient({ apiKey: input.userApiKey, provider: input.provider });
   const requestCtx = getRequestContext();
@@ -3074,6 +3082,8 @@ Example:
       },
     });
     let prunedMessages = _pipelineResult.messages;
+    latestMessages = prunedMessages as unknown[];
+    writeRunCheckpoint(); // per-iter: capture conversation before each LLM call
 
     // Gap 1 pre-iteration runner — sites 1-3 all migrated to internal hooks.
     // R.2 runs first (above) so prunedMessages has the pruned state when hooks fire.

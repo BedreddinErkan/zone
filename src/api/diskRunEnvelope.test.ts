@@ -505,3 +505,30 @@ describe("createCoalescingWriter", () => {
     // No unhandled rejection
   });
 });
+
+// ── Inc-1: messages field round-trip + back-compat ────────────────────────────
+
+describe("Inc-1 resume: messages field in RunEnvelope", () => {
+  it("A. round-trip: messages survives JSON serialization via save+load", async () => {
+    const msgs = [{ role: "system", content: "sys" }, { role: "user", content: "task" }];
+    const env = makeEnvelope({ messages: msgs });
+    await saveRunEnvelope(env);
+    const loaded = await loadRunEnvelope(env.sessionId);
+    expect(loaded).not.toBeNull();
+    expect(Array.isArray(loaded!.messages)).toBe(true);
+    expect((loaded!.messages as { role: string }[])[0].role).toBe("system");
+    expect((loaded!.messages as { role: string }[])[1].content).toBe("task");
+  });
+
+  it("C. back-compat: envelope without messages loads without error", async () => {
+    const env = makeEnvelope({}); // messages field absent
+    await saveRunEnvelope(env);
+    const loaded = await loadRunEnvelope(env.sessionId);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.messages).toBeUndefined();
+    // Existing resume helpers must not throw when messages is absent
+    const { restored, dropNotes } = reconcileEnvelopeStaging(loaded!);
+    expect(restored.size).toBe(0);
+    expect(() => buildResumeContextBlock(loaded!, dropNotes)).not.toThrow();
+  });
+});
