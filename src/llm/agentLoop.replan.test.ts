@@ -297,3 +297,128 @@ describe("agentLoop adaptive replan (Inc-2)", () => {
     expect(replanMock).not.toHaveBeenCalled();
   });
 });
+
+// ── Inc-3 helpers ──────────────────────────────────────────────────────────────
+
+function makeScopeChangeResponse(id: string, args?: Partial<Record<string, unknown>>) {
+  return makeToolCallResponse(id, "suggest_scope_change", {
+    type: "under_scope",
+    reason: "src/target.ts needs edits but is missing from the plan",
+    revised_plan_summary: "Edit src/target.ts to apply the fix",
+    missing_files: [BLOCKED_FILE],
+    ...args,
+  });
+}
+
+// ── Inc-3 tests ────────────────────────────────────────────────────────────────
+
+describe("agentLoop adaptive replan (Inc-3 — agent-driven via suggest_scope_change)", () => {
+  it("flag ON + valid proposal → performReplan fires, ack contains 'Plan revised'", async () => {
+    llmMock.createChatCompletion
+      .mockResolvedValueOnce(makeScopeChangeResponse("sc-0"))
+      .mockResolvedValueOnce(makeDoneResponse());
+
+    const events: unknown[] = [];
+    await runAgentLoop({
+      task: "edit src/target.ts",
+      repoPath,
+      mode: "patch",
+      maxIterations: 20,
+      executionPlan: makeInitialPlan(["src/other.ts"]),
+      onStructuredEvent: (e) => events.push(e),
+    });
+
+    expect(replanMock).toHaveBeenCalledTimes(1);
+    const call = replanMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(String(call["userFeedback"])).toContain("src/target.ts needs edits");
+    expect(String(call["userFeedback"])).toContain("Edit src/target.ts to apply the fix");
+    expect(events.find((e) => (e as { type?: string }).type === "todo_revised")).toBeDefined();
+  });
+
+  it("shared one-shot guard: agent-driven replan then 3 scope-blocks → replanMock called exactly once", async () => {
+    // suggest_scope_change fires first (replanState.count→1); the subsequent 3 scope-blocks
+    // see count < 1 = false in handleToolResult and fall through to the nudge, not replan_signal.
+    llmMock.createChatCompletion
+      .mockResolvedValueOnce(makeScopeChangeResponse("sc-0"))
+      .mockResolvedValueOnce(makeReadFileResponse("rf-0"))
+      .mockResolvedValueOnce(makeScopeBlockResponse("ap-0"))
+      .mockResolvedValueOnce(makeScopeBlockResponse("ap-1"))
+      .mockResolvedValueOnce(makeScopeBlockResponse("ap-2"))
+      .mockResolvedValueOnce(makeDoneResponse());
+
+    await runAgentLoop({
+      task: "edit src/target.ts",
+      repoPath,
+      mode: "patch",
+      maxIterations: 20,
+      executionPlan: makeInitialPlan(["src/other.ts"]),
+    });
+
+    expect(replanMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("flag OFF → patch-mode suggest_scope_change stays a no-op", async () => {
+    delete process.env["ZONE_PLAN_REPLAN"];
+
+    llmMock.createChatCompletion
+      .mockResolvedValueOnce(makeScopeChangeResponse("sc-0"))
+      .mockResolvedValueOnce(makeDoneResponse());
+
+    await runAgentLoop({
+      task: "edit src/target.ts",
+      repoPath,
+      mode: "patch",
+      maxIterations: 20,
+      executionPlan: makeInitialPlan(["src/other.ts"]),
+    });
+
+    expect(replanMock).not.toHaveBeenCalled();
+  });
+
+  it("investigation mode: suggest_scope_change takes the old investigation path, replanMock not called", async () => {
+    // In investigation mode, !isInvestigationMode is false so the patch-mode replan branch
+    // is never entered. The investigation handler at :3560 fires and acks "Scope change
+    // proposal recorded." Pass capabilityFilter to ensure the tool reaches the handler.
+    llmMock.createChatCompletion
+      .mockResolvedValueOnce(makeScopeChangeResponse("sc-0"))
+      .mockResolvedValueOnce(makeDoneResponse());
+
+    const events: unknown[] = [];
+    await runAgentLoop({
+      task: "investigate src/target.ts",
+      repoPath,
+      mode: "investigate",
+      maxIterations: 20,
+      capabilityFilter: { allowToolNames: new Set(["read_file", "suggest_scope_change"]) },
+      onStructuredEvent: (e) => events.push(e),
+    });
+
+    expect(replanMock).not.toHaveBeenCalled();
+    // investigation handler emits the suggest_scope_change structured event
+    expect(events.find((e) => (e as { type?: string }).type === "suggest_scope_change")).toBeDefined();
+  });
+
+  it("Inc-2 regression: scope-block replan still works via extracted performReplan helper", async () => {
+    llmMock.createChatCompletion
+      .mockResolvedValueOnce(makeReadFileResponse("rf-0"))
+      .mockResolvedValueOnce(makeScopeBlockResponse("ap-0"))
+      .mockResolvedValueOnce(makeScopeBlockResponse("ap-1"))
+      .mockResolvedValueOnce(makeScopeBlockResponse("ap-2"))
+      .mockResolvedValueOnce(makeDoneResponse());
+
+    const events: unknown[] = [];
+    await runAgentLoop({
+      task: "edit src/target.ts",
+      repoPath,
+      mode: "patch",
+      maxIterations: 20,
+      executionPlan: makeInitialPlan(["src/other.ts"]),
+      onStructuredEvent: (e) => events.push(e),
+    });
+
+    expect(replanMock).toHaveBeenCalledTimes(1);
+    const call = replanMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(String(call["userFeedback"])).toContain(BLOCKED_FILE);
+    expect(events.find((e) => (e as { type?: string }).type === "todo_revised")).toBeDefined();
+  });
+});

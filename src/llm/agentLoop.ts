@@ -2186,6 +2186,56 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   }
   // ── End checkpoint machinery ─────────────────────────────────────────────────
 
+  // Inc-3: shared replan helper — closes over latestTodos, consecutiveScopeBlocks,
+  // replanState, input, writeRunCheckpoint (all mutable outer bindings).
+  const performReplan = async (params: {
+    toolEventCtx: { filesModified: Set<string>; consecutiveScopeBlocks: number };
+    userFeedback: string;
+    trigger: string;
+    blockedPath?: string;
+  }): Promise<boolean> => {
+    if (!input.executionPlan) return false;
+    try {
+      const newPlan = await generateExecutionPlan({
+        task: input.task,
+        repoSummary: input.repoSummary ?? "",
+        relevantFiles: input.relevantFiles ?? [],
+        previousPlan: input.executionPlan,
+        userFeedback: params.userFeedback,
+        userApiKey: input.userApiKey,
+        provider: input.provider,
+        abortSignal: input.abortSignal,
+      });
+      if (newPlan.steps.length === 0) {
+        throw new Error("[zone-replan] regenerated plan has empty steps — falling back");
+      }
+      const newPlanPaths = new Set(newPlan.steps.flatMap((s) => s.filesLikely));
+      for (const f of params.toolEventCtx.filesModified) {
+        if (!newPlanPaths.has(f)) newPlan.steps[0]!.filesLikely.push(f);
+      }
+      const fromSteps = input.executionPlan.steps.length;
+      input.executionPlan = newPlan;
+      latestTodos = executionPlanToTodos(newPlan);
+      input.onStructuredEvent?.({ type: "todo_revised", title: "Plan revised", status: "success", todos: latestTodos });
+      replanState.count += 1;
+      params.toolEventCtx.consecutiveScopeBlocks = 0;
+      consecutiveScopeBlocks = 0;
+      writeRunCheckpoint();
+      debugLog("[zone-replan]", JSON.stringify({
+        runId: input.runId ?? null,
+        trigger: params.trigger,
+        fromSteps,
+        toSteps: newPlan.steps.length,
+        blockedPath: params.blockedPath ?? null,
+        replanCount: replanState.count,
+      }));
+      return true;
+    } catch (err) {
+      debugLog("[zone-replan-failed]", String(err instanceof Error ? err.message : err));
+      return false;
+    }
+  };
+
   try {
 
   // Diagnostic: confirm agent loop entry and tool inventory
@@ -3547,9 +3597,39 @@ Example:
         }
 
         // Phase AS: suggest_scope_change records a scope mismatch proposal.
-        // Outside investigation mode it is a no-op — the revision workflow only
-        // runs during the audit phase; discarding the call here is safe.
+        // In investigation mode: validates and records the proposal (handler below, unchanged).
+        // In patch mode: when ZONE_PLAN_REPLAN=1 and one-shot guard hasn't fired,
+        // drives a plan regeneration via performReplan; otherwise no-op.
         if (name === "suggest_scope_change" && !isInvestigationMode) {
+          if (replanEnabled && replanState.count < 1 && input.executionPlan) {
+            const scopeType = parsedArgs["type"];
+            const scopeReason = parsedArgs["reason"];
+            const revisedPlanSummary = parsedArgs["revised_plan_summary"];
+            const missingFiles = Array.isArray(parsedArgs["missing_files"])
+              ? (parsedArgs["missing_files"] as string[]) : [];
+            if (scopeType && scopeReason && revisedPlanSummary) {
+              const completedSteps = latestTodos.filter((t) => t.status === "completed").map((t) => t.text);
+              const modifiedList = [...toolEventCtx.filesModified];
+              const userFeedback = [
+                `The agent identified a scope mismatch (type: ${String(scopeType)}).`,
+                `Agent's reason: ${String(scopeReason)}`,
+                `Agent's revised plan summary: ${String(revisedPlanSummary)}`,
+                missingFiles.length ? `Files to add to scope: ${missingFiles.join(", ")}` : "",
+                modifiedList.length ? `Already modified (IMMUTABLE — keep in scope): ${modifiedList.join(", ")}` : "",
+                completedSteps.length ? `Already completed (do NOT re-do): ${completedSteps.join("; ")}` : "",
+              ].filter(Boolean).join("\n");
+              const replanned = await performReplan({
+                toolEventCtx, userFeedback, trigger: "agent_suggest_scope_change",
+              });
+              const ackMsg = replanned
+                ? `Plan revised — ${input.executionPlan?.steps.length ?? 0} steps.`
+                : "Scope revision request received but plan could not be regenerated. Continue with current plan.";
+              responseInput.push({ role: "tool", tool_call_id: callId, content: ackMsg });
+              toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: ackMsg, success: replanned });
+              // [INNER-LOOP: SCOPE_CHANGE_REPLANNED]
+              continue;
+            }
+          }
           debugLog("[zone-tool-misuse]", JSON.stringify({ tool: "suggest_scope_change", mode }));
           const noopMsg = "suggest_scope_change is only active in investigation mode — call ignored.";
           responseInput.push({ role: "tool", tool_call_id: callId, content: noopMsg });
@@ -3852,66 +3932,17 @@ Example:
           return { ...toolEvent.exit, promotedFromArchetype, promotionTrigger, promotedAtIter };
         }
         if (toolEvent.kind === "replan_signal" && input.executionPlan) {
-          const completedSteps = latestTodos
-            .filter((t) => t.status === "completed")
-            .map((t) => t.text);
+          const completedSteps = latestTodos.filter((t) => t.status === "completed").map((t) => t.text);
           const modifiedList = [...toolEventCtx.filesModified];
           const userFeedback =
-            `3 consecutive write attempts were blocked because ` +
-            `"${toolEvent.blockedPath}" is not in the plan's filesLikely list. ` +
+            `3 consecutive write attempts were blocked because "${toolEvent.blockedPath}" is not in the plan's filesLikely list. ` +
             `The revised plan MUST include this path.\n\n` +
-            (modifiedList.length
-              ? `Already modified (IMMUTABLE — keep in scope): ${modifiedList.join(", ")}\n`
-              : "") +
-            (completedSteps.length
-              ? `Already completed (do NOT re-do): ${completedSteps.join("; ")}\n`
-              : "");
-          try {
-            const newPlan = await generateExecutionPlan({
-              task: input.task,
-              repoSummary: input.repoSummary ?? "",
-              relevantFiles: input.relevantFiles ?? [],
-              previousPlan: input.executionPlan,
-              userFeedback,
-              userApiKey: input.userApiKey,
-              provider: input.provider,
-              abortSignal: input.abortSignal,
-            });
-            if (newPlan.steps.length === 0) {
-              throw new Error("[zone-replan] regenerated plan has empty steps — falling back to nudge");
-            }
-            // mid-edit safety: every already-modified file must stay in scope
-            const newPlanPaths = new Set(newPlan.steps.flatMap((s) => s.filesLikely));
-            for (const f of toolEventCtx.filesModified) {
-              if (!newPlanPaths.has(f)) {
-                newPlan.steps[0]!.filesLikely.push(f);
-              }
-            }
-            const fromSteps = input.executionPlan.steps.length;
-            // reassign: all runtime holders (scope-guard, coaching, envelope) re-read input.executionPlan dynamically
-            input.executionPlan = newPlan;
-            latestTodos = executionPlanToTodos(newPlan);
-            input.onStructuredEvent?.({
-              type: "todo_revised",
-              title: "Plan revised",
-              status: "success",
-              todos: latestTodos,
-            });
-            replanState.count += 1;
-            toolEventCtx.consecutiveScopeBlocks = 0;
-            consecutiveScopeBlocks = 0;
-            writeRunCheckpoint();
-            debugLog("[zone-replan]", JSON.stringify({
-              runId: input.runId ?? null,
-              trigger: "scope_block",
-              fromSteps,
-              toSteps: newPlan.steps.length,
-              blockedPath: toolEvent.blockedPath,
-              replanCount: replanState.count,
-            }));
-          } catch (err) {
-            debugLog("[zone-replan-failed]", String(err instanceof Error ? err.message : err));
-            // fall back to the coaching nudge (same text as the flag-off path)
+            (modifiedList.length ? `Already modified (IMMUTABLE — keep in scope): ${modifiedList.join(", ")}\n` : "") +
+            (completedSteps.length ? `Already completed (do NOT re-do): ${completedSteps.join("; ")}\n` : "");
+          const replanned = await performReplan({
+            toolEventCtx, userFeedback, trigger: "scope_block", blockedPath: toolEvent.blockedPath,
+          });
+          if (!replanned) {
             const last = toolEventCtx.responseInput[toolEventCtx.responseInput.length - 1];
             if (last?.role === "tool" && typeof last.content === "string") {
               last.content +=
