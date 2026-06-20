@@ -245,6 +245,24 @@ describe("handleToolResult", () => {
       await handleToolResult("apply_patch", { filePath: "src/existing.ts" }, "c1", SUCCESS_RESULT, ctx, deps);
       expect(ctx.filesModified.has("src/existing.ts")).toBe(true);
     });
+
+    it("unions result.filesStaged into filesModified for multi_edit", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      const meResult = { output: "multi_edit: 2 replacement(s)", success: true, filesStaged: ["src/a.ts", "src/b.ts"] };
+      await handleToolResult("multi_edit", { files: ["src/a.ts", "src/b.ts", "src/c.ts"], find: "x", replace: "y" }, "c1", meResult, ctx, deps);
+      expect(ctx.filesModified.has("src/a.ts")).toBe(true);
+      expect(ctx.filesModified.has("src/b.ts")).toBe(true);
+      expect(ctx.filesModified.has("src/c.ts")).toBe(false); // 0-replacement — not in filesStaged
+    });
+
+    it("multi_edit with absent filesStaged — no crash, no phantom add", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      const meResult = { output: "multi_edit: 0 replacement(s)", success: true }; // no filesStaged
+      await handleToolResult("multi_edit", { files: ["src/x.ts"], find: "missing", replace: "y" }, "c1", meResult, ctx, deps);
+      expect(ctx.filesModified.size).toBe(0);
+    });
   });
 
   describe("Task tool", () => {

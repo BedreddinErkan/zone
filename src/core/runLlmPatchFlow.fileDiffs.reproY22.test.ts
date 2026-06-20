@@ -159,6 +159,53 @@ describe("Y.2.2 fileDiffs fallback", () => {
     }
   });
 
+  it("multi_edit: onToolCall snapshot + Part A filesModified → non-empty fileDiff with correct before/after", async () => {
+    // Verifies Part A (filesModified includes multi_edit paths) AND Part B (beforeByFile snapshot
+    // keyed with resolveAgentPath so it matches the fileDiffs lookup key). If the keys diverge,
+    // beforeByFile.get(rel) returns undefined → before falls back to post-flush disk = PATCHED =
+    // after → computeFileDiff gives 0 lines → this assertion fails, catching the key-mismatch bug.
+    runAgentLoopMock.mockImplementation(async (loopInput: AgentLoopInput) => {
+      // Part B: trigger the onToolCall multi_edit snapshot (captures ORIGINAL as "before")
+      loopInput.onToolCall?.("multi_edit", { files: ["src/target.ts"], find: "x", replace: "y" });
+
+      // Simulate finalizeStaging flushing the staged content to disk (PATCHED = "after")
+      writeFileSync(path.join(tmpDir, "src/target.ts"), PATCHED, "utf8");
+
+      // Part A: agentLoop now includes multi_edit paths in filesModified
+      return {
+        success: true,
+        summary: "Done",
+        toolCallLog: [],
+        filesModified: ["src/target.ts"],
+        patchValidatedByAgent: false,
+        verificationReason: "no_verification_attempted",
+        terminationReason: "natural_completion",
+      } satisfies AgentLoopResult;
+    });
+
+    process.env["ZONE_FORCE_FLOW"] = "agent_loop";
+    try {
+      const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+      const result = await runLlmPatchFlow({
+        task: "Replace x with y in src/target.ts",
+        repoPath: tmpDir,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      expect(result.fileDiffs).toBeDefined();
+      expect(result.fileDiffs!.length).toBeGreaterThan(0);
+
+      const diff = result.fileDiffs![0]!;
+      expect(diff.filePath).toBe("src/target.ts");
+      // Non-empty diff proves beforeByFile key matched: before=ORIGINAL, after=PATCHED → real diff
+      expect(diff.addedLines + diff.removedLines).toBeGreaterThan(0);
+    } finally {
+      delete process.env["ZONE_FORCE_FLOW"];
+    }
+  });
+
   it("produces empty fileDiffs when file content is unchanged (no false positives)", async () => {
     runAgentLoopMock.mockImplementation(async (loopInput: AgentLoopInput) => {
       loopInput.onToolCall?.("apply_patch", { filePath: "src/target.ts" });

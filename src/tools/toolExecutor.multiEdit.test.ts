@@ -163,4 +163,37 @@ describe("multi_edit", () => {
     expect(result.success).toBe(false);
     expect(result.output).toContain("files array must be non-empty");
   });
+
+  // ── filesStaged (Part A: count>0 paths only) ──────────────────────────────
+
+  it("filesStaged contains only files that were actually staged (count>0)", async () => {
+    writeRepoFile("a.ts", "const foo = 1;\n");
+    writeRepoFile("b.ts", "const foo = 2;\n");
+    writeRepoFile("c.ts", "const unrelated = 99;\n"); // no match
+
+    const staging = new Map<string, string>();
+    const result = await multiEdit(["a.ts", "b.ts", "c.ts"], "foo", "bar", { stagingFiles: staging });
+
+    expect(result.success).toBe(true);
+    expect(result.filesStaged).toEqual(["a.ts", "b.ts"]);
+    expect(result.filesStaged).not.toContain("c.ts");
+  });
+
+  it("filesStaged excludes 0-replacement files (0 count, not staged)", async () => {
+    writeRepoFile("a.ts", "const foo = 1;\n"); // matches
+    writeRepoFile("b.ts", "const other = 2;\n"); // no match
+
+    const staging = new Map<string, string>();
+    const result = await multiEdit(["a.ts", "b.ts"], "foo", "baz", { stagingFiles: staging });
+
+    expect(result.success).toBe(true);
+    expect(result.filesStaged).toEqual(["a.ts"]);
+  });
+
+  it("filesStaged is empty when no files match (all count=0 or missing)", async () => {
+    writeRepoFile("a.ts", "const bar = 1;\n");
+    const result = await multiEdit(["a.ts", "missing.ts"], "foo", "baz");
+    expect(result.success).toBe(true);
+    expect(result.filesStaged).toEqual([]);
+  });
 });

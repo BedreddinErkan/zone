@@ -63,6 +63,7 @@ import {
   type AgentLoopResult,
   type VerificationReason,
 } from "../llm/agentLoop.js";
+import { resolveAgentPath } from "../tools/toolExecutor.js";
 import { stripVerificationTag } from "../llm/verification/index.js";
 import {
   isPlanOrchestrationEnabled,
@@ -5734,6 +5735,24 @@ const initializeTodosFromPlan = (): void => {
             beforeByFile.set(snapPath, before);
           } catch {
             beforeByFile.set(snapPath, "");
+          }
+        }
+        // Part B: snapshot multi_edit "before" content so diff cards render a real before/after.
+        // Key with resolveAgentPath — the identical resolver the executor uses (toolExecutor.ts:3139)
+        // — so beforeByFile keys match filesModified/fileDiffs keys by construction.
+        // Snapshot ALL args.files (we don't know which will stage until after execution);
+        // 0-replacement files are harmlessly snapshotted but absent from fileDiffs.
+        if (name === "multi_edit") {
+          const meFiles = Array.isArray(args.files) ? (args.files as string[]) : [];
+          for (const rel of meFiles) {
+            const normRel = resolveAgentPath(String(rel), input.repoPath, "multi_edit");
+            if (!normRel || beforeByFile.has(normRel)) continue;
+            try {
+              const abs = path.join(input.repoPath, normRel);
+              beforeByFile.set(normRel, existsSync(abs) ? readFileSync(abs, "utf8") : "");
+            } catch {
+              beforeByFile.set(normRel, "");
+            }
           }
         }
 

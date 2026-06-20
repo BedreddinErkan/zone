@@ -216,6 +216,10 @@ export interface ToolResult {
   rejectionReason?: string;
   contentLength?: number;
   metadata?: Record<string, unknown>;
+  /** Repo-relative paths of files actually staged by this tool call (multi_edit only).
+   *  Only includes files with replacement count > 0 — excludes 0-replacement / NOT-FOUND files.
+   *  undefined for all other tools. */
+  filesStaged?: string[];
 }
 
 function truncateText(
@@ -3133,6 +3137,7 @@ export async function executeTool(
       const pattern = new RegExp(wholeWord ? `\\b${escaped}\\b` : escaped, "g");
 
       const perFile: Array<{ path: string; count: number }> = [];
+      const filesStaged: string[] = [];
       let totalReplacements = 0;
 
       for (const relPath of files) {
@@ -3162,6 +3167,7 @@ export async function executeTool(
           if (wr === "escape") {
             return { success: false, output: `multi_edit_blocked_path_escape: "${filePath}" would escape repo` };
           }
+          filesStaged.push(filePath);
         }
 
         perFile.push({ path: filePath, count });
@@ -3188,6 +3194,7 @@ export async function executeTool(
           (missing.length > 0
             ? `\nWarning: could not read: ${missing.map((f) => f.path).join(", ")}`
             : ""),
+        filesStaged,
       };
     }
 

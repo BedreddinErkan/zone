@@ -384,6 +384,20 @@ describe("deriveCreatedPaths", () => {
     const stagingFiles = new Map<string, string>();
     expect(deriveCreatedPaths(filesModified, stagingFiles, repoPath)).toEqual(["src/abs.ts"]);
   });
+
+  it("multi_edit'd files (in stagingFiles) are NOT classified as creates — no false resume note", () => {
+    // Safety invariant: count>0 multi_edit files appear in BOTH filesModified (Part A fix)
+    // AND stagingFiles (stagedWrite at toolExecutor.ts:3161). deriveCreatedPaths filters by
+    // !stagingFiles.has(abs), so they are correctly excluded from createdPaths and the
+    // envelope never emits a false "do NOT recreate: src/a.ts" note on resume.
+    const filesModified = new Set(["src/a.ts", "src/b.ts"]);
+    const stagingFiles = new Map<string, string>([
+      [resolve(repoPath, "src/a.ts"), "// edited by multi_edit"],
+      [resolve(repoPath, "src/b.ts"), "// edited by multi_edit"],
+    ]);
+    const created = deriveCreatedPaths(filesModified, stagingFiles, repoPath);
+    expect(created).toEqual([]); // both are in stagingFiles → not creates
+  });
 });
 
 // ---- buildResumeContextBlock ------------------------------------------------

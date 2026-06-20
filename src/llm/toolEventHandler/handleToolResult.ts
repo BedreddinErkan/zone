@@ -109,6 +109,9 @@ export async function handleToolResult(
   if ((name === "write_file" || name === "apply_patch") && parsedArgs.filePath != null) {
     ctx.filesModified.add(String(parsedArgs.filePath));
   }
+  if (name === "multi_edit" && Array.isArray(result.filesStaged)) {
+    for (const p of result.filesStaged) ctx.filesModified.add(p);
+  }
 
   // Step 9.6: P3 no_progress feeder — populate ring buffer from agent's own tsc/test run_command outputs
   if (name === "run_command" && ctx.noProgressBaselines && ctx.recentVerifyKeySets) {
