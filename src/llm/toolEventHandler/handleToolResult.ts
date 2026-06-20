@@ -194,6 +194,12 @@ export async function handleToolResult(
           toolName: name,
           error: result.error ?? null,
         }));
+        if (deps.replanEnabled && deps.replanState && deps.replanState.count < 1) {
+          return {
+            kind: "replan_signal",
+            blockedPath: ((parsedArgs["filePath"] ?? parsedArgs["path"] ?? "") as string),
+          };
+        }
         // Pattern A: append coaching nudge to the role:tool message just pushed in step 11
         const last = ctx.responseInput[ctx.responseInput.length - 1];
         if (last?.role === "tool" && typeof last.content === "string") {

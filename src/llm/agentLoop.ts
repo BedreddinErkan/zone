@@ -40,7 +40,8 @@ import { canResumeFromTerminationReason } from "./patchUserFacingReason.js";
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { cacheHitRatio } from "../usage/iterCostMeter.js";
 import { webSearchFee } from "../usage/pricing.js";
-import { parseTodoProgressMarkers, type RunTodo } from "../core/todoLifecycle.js";
+import { parseTodoProgressMarkers, executionPlanToTodos, type RunTodo } from "../core/todoLifecycle.js";
+import { generateExecutionPlan } from "./executionPlan.js";
 import {
   saveRunEnvelope,
   deleteRunEnvelope,
@@ -1829,6 +1830,8 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   const noProgressBaselines: { tsc: Set<string> | null; test: Set<string> | null } = { tsc: null, test: null };
   let antiThrashNoProgressObserved = false;
   let consecutiveScopeBlocks = 0;
+  const replanState = { count: 0 };
+  const replanEnabled = String(process.env["ZONE_PLAN_REPLAN"] || "").trim() === "1";
   let coachingBudgetExhausted = false;
   // Per-run tracker for repeated PreToolUse vetoes (tool:filePath → vetoed once)
   const userHookVetoTracker = new Set<string>();
@@ -3439,6 +3442,8 @@ Example:
         hashToolCall,
         recordAndDetect,
         repoPath: input.repoPath,
+        replanEnabled,
+        replanState,
       };
 
       for (const call of toolCalls) {
@@ -3845,6 +3850,78 @@ Example:
           await persistStagingOnError(stagingFiles, ownsStagingFiles, input.repoPath);
           stagingFinalized = true;
           return { ...toolEvent.exit, promotedFromArchetype, promotionTrigger, promotedAtIter };
+        }
+        if (toolEvent.kind === "replan_signal" && input.executionPlan) {
+          const completedSteps = latestTodos
+            .filter((t) => t.status === "completed")
+            .map((t) => t.text);
+          const modifiedList = [...toolEventCtx.filesModified];
+          const userFeedback =
+            `3 consecutive write attempts were blocked because ` +
+            `"${toolEvent.blockedPath}" is not in the plan's filesLikely list. ` +
+            `The revised plan MUST include this path.\n\n` +
+            (modifiedList.length
+              ? `Already modified (IMMUTABLE — keep in scope): ${modifiedList.join(", ")}\n`
+              : "") +
+            (completedSteps.length
+              ? `Already completed (do NOT re-do): ${completedSteps.join("; ")}\n`
+              : "");
+          try {
+            const newPlan = await generateExecutionPlan({
+              task: input.task,
+              repoSummary: input.repoSummary ?? "",
+              relevantFiles: input.relevantFiles ?? [],
+              previousPlan: input.executionPlan,
+              userFeedback,
+              userApiKey: input.userApiKey,
+              provider: input.provider,
+              abortSignal: input.abortSignal,
+            });
+            if (newPlan.steps.length === 0) {
+              throw new Error("[zone-replan] regenerated plan has empty steps — falling back to nudge");
+            }
+            // mid-edit safety: every already-modified file must stay in scope
+            const newPlanPaths = new Set(newPlan.steps.flatMap((s) => s.filesLikely));
+            for (const f of toolEventCtx.filesModified) {
+              if (!newPlanPaths.has(f)) {
+                newPlan.steps[0]!.filesLikely.push(f);
+              }
+            }
+            const fromSteps = input.executionPlan.steps.length;
+            // reassign: all runtime holders (scope-guard, coaching, envelope) re-read input.executionPlan dynamically
+            input.executionPlan = newPlan;
+            latestTodos = executionPlanToTodos(newPlan);
+            input.onStructuredEvent?.({
+              type: "todo_revised",
+              title: "Plan revised",
+              status: "success",
+              todos: latestTodos,
+            });
+            replanState.count += 1;
+            toolEventCtx.consecutiveScopeBlocks = 0;
+            consecutiveScopeBlocks = 0;
+            writeRunCheckpoint();
+            debugLog("[zone-replan]", JSON.stringify({
+              runId: input.runId ?? null,
+              trigger: "scope_block",
+              fromSteps,
+              toSteps: newPlan.steps.length,
+              blockedPath: toolEvent.blockedPath,
+              replanCount: replanState.count,
+            }));
+          } catch (err) {
+            debugLog("[zone-replan-failed]", String(err instanceof Error ? err.message : err));
+            // fall back to the coaching nudge (same text as the flag-off path)
+            const last = toolEventCtx.responseInput[toolEventCtx.responseInput.length - 1];
+            if (last?.role === "tool" && typeof last.content === "string") {
+              last.content +=
+                `\n\n[SCOPE-BLOCK COACHING — ${toolEventCtx.consecutiveScopeBlocks} consecutive blocks]\n` +
+                `Your plan's filesLikely paths do not match the files that need editing ` +
+                `(likely an extension mismatch such as .ts vs .tsx, or a stale path). ` +
+                `Do NOT retry the same blocked path. Either work within the already-allowed ` +
+                `scope, or end the run with a FINAL SUMMARY explaining the mismatch.`;
+            }
+          }
         }
         const loopResult = toolEventCtx.lastLoopResult ?? { status: "ok" as const, count: 0 };
 

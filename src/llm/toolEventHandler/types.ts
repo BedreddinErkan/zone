@@ -41,7 +41,8 @@ export interface ToolEventContext {
 
 export type ToolEventResult =
   | { kind: "continue" }
-  | { kind: "early_exit"; exit: AgentLoopResult };
+  | { kind: "early_exit"; exit: AgentLoopResult }
+  | { kind: "replan_signal"; blockedPath: string };
 
 /** Exported for Gap 11 (CoachingController). Subset of ToolEventContext failure flags. */
 export interface FailureSignal {
@@ -73,4 +74,8 @@ export interface HandleToolResultDeps {
   hashToolCall: (name: string, args: Record<string, unknown>) => string;
   recordAndDetect: (state: DetectorState, hash: string) => { status: "ok" | "warn" | "terminate"; count: number };
   repoPath: string;
+  /** Adaptive replan enabler (Inc-2). Optional so existing test fixtures don't need updating. */
+  replanEnabled?: boolean;
+  /** Mutable counter shared by ref — count>=1 means the one-shot guard has fired. */
+  replanState?: { count: number };
 }

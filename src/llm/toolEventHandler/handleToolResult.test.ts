@@ -566,6 +566,74 @@ describe("handleToolResult", () => {
         expect(result.exit.terminationReason).toBe("scope_block_circuit_breaker");
       }
     });
+
+    it("ZONE_PLAN_REPLAN=1 + 3rd block + replanState.count=0 → replan_signal, nudge NOT appended", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps({ replanEnabled: true, replanState: { count: 0 } });
+      let result: Awaited<ReturnType<typeof handleToolResult>> = { kind: "continue" };
+      for (let i = 0; i < 3; i++) {
+        result = await handleToolResult(
+          "apply_patch", { filePath: "src/store.tsx" }, `c${i}`, SCOPE_BLOCK_APPLY, ctx, deps
+        );
+      }
+      expect(result.kind).toBe("replan_signal");
+      if (result.kind === "replan_signal") {
+        expect(result.blockedPath).toBe("src/store.tsx");
+      }
+      // The nudge text must NOT have been appended — the replan_signal returned early
+      const nudgedEntry = ctx.responseInput.find(
+        (m) => typeof m.content === "string" && (m.content as string).includes("SCOPE-BLOCK COACHING")
+      );
+      expect(nudgedEntry).toBeUndefined();
+      // But the observe marker still fires
+      const mockDebugLog = debugLog as Mock;
+      const observeCalls = mockDebugLog.mock.calls.filter(
+        (c: unknown[]) => typeof c[0] === "string" && (c[0] as string).includes("zone-replan-trigger-observed")
+      );
+      expect(observeCalls).toHaveLength(1);
+    });
+
+    it("ZONE_PLAN_REPLAN=1 + 3rd block + replanState.count=1 → one-shot guard: nudge as normal, no replan_signal", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps({ replanEnabled: true, replanState: { count: 1 } });
+      let result: Awaited<ReturnType<typeof handleToolResult>> = { kind: "continue" };
+      for (let i = 0; i < 3; i++) {
+        result = await handleToolResult(
+          "apply_patch", { filePath: "src/store.tsx" }, `c${i}`, SCOPE_BLOCK_APPLY, ctx, deps
+        );
+      }
+      expect(result.kind).toBe("continue");
+      const last = ctx.responseInput[ctx.responseInput.length - 1];
+      expect((last?.content as string)).toContain("SCOPE-BLOCK COACHING");
+    });
+
+    it("ZONE_PLAN_REPLAN not set → flag-off behavior: nudge at 3, early_exit at 5 (regression)", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps({ replanEnabled: false });
+      let result: Awaited<ReturnType<typeof handleToolResult>> = { kind: "continue" };
+      for (let i = 0; i < 3; i++) {
+        result = await handleToolResult(
+          "apply_patch", { filePath: "src/store.tsx" }, `c${i}`, SCOPE_BLOCK_APPLY, ctx, deps
+        );
+      }
+      // 3rd block: nudge, not replan_signal
+      expect(result.kind).toBe("continue");
+      const last3 = ctx.responseInput[ctx.responseInput.length - 1];
+      expect((last3?.content as string)).toContain("SCOPE-BLOCK COACHING");
+      // 4th block: continue
+      result = await handleToolResult(
+        "apply_patch", { filePath: "src/store.tsx" }, "c3", SCOPE_BLOCK_APPLY, ctx, deps
+      );
+      expect(result.kind).toBe("continue");
+      // 5th block: early_exit
+      result = await handleToolResult(
+        "apply_patch", { filePath: "src/store.tsx" }, "c4", SCOPE_BLOCK_APPLY, ctx, deps
+      );
+      expect(result.kind).toBe("early_exit");
+      if (result.kind === "early_exit") {
+        expect(result.exit.terminationReason).toBe("scope_block_circuit_breaker");
+      }
+    });
   });
 
   describe("DF-18: loop detection exemption for read_background_output", () => {
