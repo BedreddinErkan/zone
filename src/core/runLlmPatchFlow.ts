@@ -127,7 +127,6 @@ import {
 import { indexRepoFiles } from "../embeddings/indexRepository.js";
 import { logger, debugLog, errorLog, log } from "../utils/logger.js";
 import { attachRunIdentity } from "../llm/openaiContext.js";
-import { investigateScope } from "../llm/investigationFlow.js";
 import { resolveTierLimits, type TierLimits } from "../llm/tierLimits.js";
 import {
   requestRevisionApproval,
