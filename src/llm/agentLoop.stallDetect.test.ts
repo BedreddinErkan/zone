@@ -379,8 +379,10 @@ describe("agentLoop anti-thrash P5/P6 stagedWriteCount gate", () => {
     ).not.toBe("semantic_stall");
   });
 
-  // (ii) P5 still terminates a true wanderer (reads only, zero writes of any kind).
-  it("P5 true stall: reads only, no writes → semantic_stall", async () => {
+  // (ii) P5 broad-investigation exemption (f71a0c95): distinct-file reads are no longer
+  // flagged as wandering. uniqueFiles=13 >= WANDER_READ_MIN=5 AND totalReads=13 < 2×13=26
+  // → exemption returns null → Stage-1 never fires → run completes normally.
+  it("P5 broad investigation: distinct-file reads exempt from wandering stall (post-f71a0c95)", async () => {
     toolExecutorMock.executeTool.mockImplementation((name: string) => {
       if (name === "read_file") return Promise.resolve({ success: true, output: "const x = 1;" });
       return Promise.resolve({ success: false, output: FAIL_OUTPUT });
@@ -389,6 +391,44 @@ describe("agentLoop anti-thrash P5/P6 stagedWriteCount gate", () => {
     const totalIters = ANTI_THRASH_WANDER_ITER_MIN + ANTI_THRASH_BREAK_ITERS + 2;
     for (let i = 0; i < totalIters; i++) {
       mocks.createChatCompletion.mockResolvedValueOnce(llmReadFile(`rf-${i}`, `src/f${i}.ts`));
+    }
+    mocks.createChatCompletion.mockResolvedValue(llmDone()); // fallback: run ends naturally
+
+    const result = await runAgentLoop({
+      task: "investigate and fix",
+      repoPath,
+      mode: "patch",
+      maxIterations: 40,
+    });
+
+    // Broad first-time investigation is now exempt — must NOT terminate as semantic_stall.
+    expect(result.terminationReason).not.toBe("semantic_stall");
+  });
+
+  // (ii-b) P5 true-thrash lock: concentrated re-reads of few files still fire wandering.
+  // uniqueFiles=2 < WANDER_READ_MIN=5 → exemption condition fails → signal fires normally.
+  // Nonce _n keeps each hashToolCall unique so the loop-detector never pre-empts the stall.
+  it("P5 true thrash: concentrated re-reads of few files → semantic_stall (uniqueFiles < WANDER_READ_MIN)", async () => {
+    toolExecutorMock.executeTool.mockImplementation((name: string) => {
+      if (name === "read_file") return Promise.resolve({ success: true, output: "const x = 1;" });
+      return Promise.resolve({ success: false, output: FAIL_OUTPUT });
+    });
+
+    const FEW_FILES = ["src/alpha.ts", "src/beta.ts"] as const;
+    const totalIters = ANTI_THRASH_WANDER_ITER_MIN + ANTI_THRASH_BREAK_ITERS + 2; // 13
+    for (let i = 0; i < totalIters; i++) {
+      const filePath = FEW_FILES[i % FEW_FILES.length]!;
+      mocks.createChatCompletion.mockResolvedValueOnce({
+        choices: [{
+          message: {
+            content: null,
+            tool_calls: [{ id: `rf-${i}`, type: "function",
+              function: { name: "read_file", arguments: JSON.stringify({ filePath, _n: i }) } }],
+          },
+          finish_reason: "tool_calls",
+        }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      });
     }
 
     const result = await runAgentLoop({
