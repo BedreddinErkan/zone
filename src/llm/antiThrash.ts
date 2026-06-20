@@ -38,6 +38,7 @@ export interface AntiThrashThresholds {
   enabled?: boolean;
   wanderIterMin?: number;
   wanderReadMin?: number;
+  wanderRereadFactor?: number;
   costBurnIterMin?: number;
   costBurnUsd?: number;
   noProgressIterMin?: number;
@@ -65,8 +66,9 @@ export const ANTI_THRASH_FAILURE_COACH_MIN = readEnvInt("ZONE_ANTI_THRASH_FAILUR
 export const ANTI_THRASH_BREAK_ITERS        = readEnvInt("ZONE_ANTI_THRASH_BREAK_ITERS", 3);
 export const ANTI_THRASH_ENABLED            = readEnvBool("ZONE_ANTI_THRASH", true);
 export const ANTI_THRASH_NO_PROGRESS_ARMED  = readEnvBool("ZONE_ANTI_THRASH_NO_PROGRESS_ARMED", false);
-export const ANTI_THRASH_WANDER_ITER_MIN    = readEnvInt("ZONE_ANTI_THRASH_WANDER_ITER_MIN", 8);
-export const ANTI_THRASH_WANDER_READ_MIN    = readEnvInt("ZONE_ANTI_THRASH_WANDER_READ_MIN", 5);
+export const ANTI_THRASH_WANDER_ITER_MIN      = readEnvInt("ZONE_ANTI_THRASH_WANDER_ITER_MIN", 8);
+export const ANTI_THRASH_WANDER_READ_MIN      = readEnvInt("ZONE_ANTI_THRASH_WANDER_READ_MIN", 5);
+export const ANTI_THRASH_WANDER_REREAD_FACTOR = readEnvInt("ZONE_ANTI_THRASH_WANDER_REREAD_FACTOR", 2);
 export const ANTI_THRASH_COST_BURN_ITER_MIN    = readEnvInt("ZONE_ANTI_THRASH_COST_BURN_ITER_MIN", 10);
 export const ANTI_THRASH_COST_BURN_USD         = readEnvFloat("ZONE_ANTI_THRASH_COST_BURN_USD", 1.00);
 export const ANTI_THRASH_NO_PROGRESS_ITER_MIN  = readEnvInt("ZONE_ANTI_THRASH_NO_PROGRESS_ITER_MIN", 8);
@@ -142,6 +144,12 @@ export function detectWanderingSignal(
   for (const count of ctx.filesReadCountThisRun.values()) {
     if (count > 1) multiReadCount++;
   }
+
+  // Exempt broad first-time investigation: many distinct files, mean reads < factor.
+  // uniqueFiles=0 is unreachable here (totalReads >= wanderReadMin fired first).
+  // Integer comparison — no division needed.
+  const rereadFactor = thresholds?.wanderRereadFactor ?? ANTI_THRASH_WANDER_REREAD_FACTOR;
+  if (uniqueFiles >= wanderReadMin && totalReads < rereadFactor * uniqueFiles) return null;
 
   return {
     pattern: "wandering",

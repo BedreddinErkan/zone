@@ -763,7 +763,7 @@ describe("stagedWriteCount gate (P5/P6 false-positive fix)", () => {
     const ctx = makeCtx({
       filesModifiedSize: 0,
       stagedWriteCount: 0,
-      filesReadCountThisRun: makeReadsMap(ANTI_THRASH_WANDER_READ_MIN),
+      filesReadCountThisRun: makeReadMap([["src/a.ts", 3], ["src/b.ts", 3]]),
       iter: ANTI_THRASH_WANDER_ITER_MIN,
     });
     expect(detectWanderingSignal(ctx)?.pattern).toBe("wandering");
@@ -784,7 +784,7 @@ describe("stagedWriteCount gate (P5/P6 false-positive fix)", () => {
     const ctx = makeCtx({
       filesModifiedSize: 0,
       // stagedWriteCount deliberately not set
-      filesReadCountThisRun: makeReadsMap(ANTI_THRASH_WANDER_READ_MIN),
+      filesReadCountThisRun: makeReadMap([["src/a.ts", 3], ["src/b.ts", 3]]),
       iter: ANTI_THRASH_WANDER_ITER_MIN,
     });
     expect(detectWanderingSignal(ctx)?.pattern).toBe("wandering");
@@ -798,10 +798,42 @@ describe("stagedWriteCount gate (P5/P6 false-positive fix)", () => {
     const ctx = makeCtx({
       filesModifiedSize: 0,
       stagedWriteCount: 0,
-      filesReadCountThisRun: makeReadsMap(ANTI_THRASH_WANDER_READ_MIN),
+      filesReadCountThisRun: makeReadMap([["src/a.ts", 3], ["src/b.ts", 3]]),
       iter: ANTI_THRASH_WANDER_ITER_MIN,
     });
     expect(detectWanderingSignal(ctx)?.pattern).toBe("wandering");
+  });
+
+  // (v) Read-diversity exemption: broad first-time investigation vs concentrated re-reading.
+  it("broad first-time investigation is now exempt from P5 (false-positive fix)", () => {
+    // 7 distinct files ×1 → uniqueFiles=7 >= wanderReadMin=5 AND totalReads=7 < factor*7=14 → null
+    const reads = makeReadsMap(7);
+    const ctx = makeCtx({
+      filesModifiedSize: 0,
+      stagedWriteCount: 0,
+      filesReadCountThisRun: reads,
+      iter: ANTI_THRASH_WANDER_ITER_MIN,
+    });
+    expect(detectWanderingSignal(ctx)).toBeNull();
+  });
+
+  it("concentrated re-reading still fires P5 (true-thrash lock)", () => {
+    // single-file: uniqueFiles=1 < wanderReadMin=5 → not exempt → fires
+    const ctxSingle = makeCtx({
+      filesModifiedSize: 0,
+      stagedWriteCount: 0,
+      filesReadCountThisRun: makeReadMap([["src/a.ts", 6]]),
+      iter: ANTI_THRASH_WANDER_ITER_MIN,
+    });
+    expect(detectWanderingSignal(ctxSingle)?.pattern).toBe("wandering");
+    // few-file: uniqueFiles=2 < wanderReadMin=5 → not exempt → fires
+    const ctxFew = makeCtx({
+      filesModifiedSize: 0,
+      stagedWriteCount: 0,
+      filesReadCountThisRun: makeReadMap([["src/a.ts", 3], ["src/b.ts", 3]]),
+      iter: ANTI_THRASH_WANDER_ITER_MIN,
+    });
+    expect(detectWanderingSignal(ctxFew)?.pattern).toBe("wandering");
   });
 });
 
