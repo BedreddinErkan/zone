@@ -81,7 +81,6 @@ beforeEach(() => {
   mockIsNoChangePlan.mockReturnValue(false);
   mockIsCannotVerifyPlan.mockReturnValue(false);
   delete process.env["ZONE_PLAN_APPROVAL_CYCLE"];
-  delete process.env["ZONE_PLAN_LEGACY_AUDIT"];
   vi.spyOn(process.stdout, "write").mockReturnValue(true);
   vi.spyOn(process.stderr, "write").mockReturnValue(true);
 });

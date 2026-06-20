@@ -1,8 +1,7 @@
 /**
- * Phase AS: scope revision approval gate.
- * Emitted between plan generation and execute when investigateScope detects
- * a scope mismatch. User approves or rejects; original plan is unchanged
- * on reject (execution proceeds with the original approved plan).
+ * Scope revision approval gate.
+ * Tracks pending revision approvals for a run; live cleanup paths
+ * (resolveRevisionApproval, rejectPendingRevisionsForRun) remain in use.
  */
 
 import crypto from "node:crypto";

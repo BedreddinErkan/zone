@@ -25,8 +25,6 @@ import { requestTrustApproval, rejectPendingTrustForRun } from "../api/trustAppr
 import { classifyPath } from "../core/pathSafety.js";
 import { ApiKeyError, ProviderRequestError, PlanRefusalError } from "../llm/factory.js";
 import { sep } from "node:path";
-import { runAuditPipeline } from "../llm/auditPipeline.js";
-import { readAuditModeSetting } from "../visual/tierSettings.js";
 import { withRequestContext } from "../llm/openaiContext.js";
 import { applyStdoutInterception } from "./tui/stdoutShield.js";
 import {
@@ -404,31 +402,7 @@ export async function runOneShotInner(
         }
       }
 
-      if (process.env["ZONE_PLAN_LEGACY_AUDIT"] === "1") {
-        // Legacy escape hatch: old forced-audit + PlanModal A/R path.
-        const auditResult = await runAuditPipeline({
-          task,
-          repoPath: effectiveConfig.repoPath,
-          runId,
-          tier: "medium",
-          auditMode: readAuditModeSetting(),
-          forceAudit: true,
-          preGeneratedPlan,
-          userApiKey: planUserApiKey,
-          provider: effectiveConfig.provider,
-          emit: (update) => progressCallback(update as unknown as LlmPatchProgressUpdate),
-          abortSignal: ac.signal,
-          timeoutMs: 10 * 60 * 1000,
-          autoApprove: false,
-          isHeadless: false,
-        });
-        if (auditResult.revisionDecision === "reject") {
-          ac.abort();
-          return { ok: false as const, reason: "plan_rejected_by_user" } as unknown as LlmPatchFlowResult;
-        }
-        // On approve: thread preGeneratedPlan so it reaches runLlmPatchFlow.
-        planForExecution = preGeneratedPlan;
-      } else if (preGeneratedPlan) {
+      if (preGeneratedPlan) {
         // Default: cheap requestPlanApproval loop with feedback/refine/approve_with_feedback.
         let currentPlan = preGeneratedPlan;
         let looping = true;

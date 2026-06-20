@@ -241,7 +241,7 @@ export interface AgentLoopInput {
   conversationId?: string;
   /** Phase O: lane identifier forwarded from the audit caller so telemetry and
    *  UI can distinguish the scope audit mini-agent from the main patch agent.
-   *  "audit" = investigateScope(); "main" or absent = primary agent loop.
+   *  "audit" = scope audit lane; "main" or absent = primary agent loop.
    */
   lane?: "main" | "audit";
   /**

@@ -45,7 +45,6 @@ vi.mock("../utils/logger.js", () => ({
   errorLog: vi.fn(),
 }));
 
-import { investigateScope } from "../llm/investigationFlow.js";
 import { runAgentLoop } from "../llm/agentLoop.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -95,79 +94,6 @@ describe("suggest_scope_change — schema", () => {
     expect(typeEnum).toContain("under_scope");
     expect(typeEnum).toContain("over_scope");
     expect(typeEnum).toContain("mixed");
-  });
-});
-
-// ── handler tests via investigateScope ───────────────────────────────────────
-
-describe("suggest_scope_change — handler via investigateScope", () => {
-  beforeEach(() => {
-    mocks.log.mockClear();
-    mocks.debugLog.mockClear();
-    resetToolExecutorMock(toolExecutorMock);
-  });
-
-  it("captures agentSuggestedRevision when agent calls suggest_scope_change", async () => {
-    mocks.createChatCompletion
-      .mockResolvedValueOnce(
-        toolCallResponse("suggest_scope_change", {
-          type: "under_scope",
-          reason: "Found auth middleware not in plan.",
-          missing_files: ["src/middleware/auth.ts"],
-          revised_plan_summary: "Also update auth middleware.",
-        })
-      )
-      .mockResolvedValueOnce(textResponse("Investigation complete. Auth middleware is missing from plan."));
-
-    const result = await investigateScope({
-      repoPath: "/tmp/fake",
-      query: "Are there missing files?",
-    });
-
-    expect(result.agentSuggestedRevision).toBeDefined();
-    expect(result.agentSuggestedRevision!.type).toBe("under_scope");
-    expect(result.agentSuggestedRevision!.missingFiles).toContain("src/middleware/auth.ts");
-    expect(result.agentSuggestedRevision!.reason).toMatch(/auth/i);
-  });
-
-  it("emits debugLog zone-scope-revision-proposed marker when tool is called", async () => {
-    mocks.createChatCompletion
-      .mockResolvedValueOnce(
-        toolCallResponse("suggest_scope_change", {
-          type: "over_scope",
-          reason: "Plan touches unrelated file.",
-          unnecessary_files: ["src/unrelated/thing.ts"],
-          revised_plan_summary: "Skip unrelated file.",
-        })
-      )
-      .mockResolvedValueOnce(textResponse("Done."));
-
-    await investigateScope({ repoPath: "/tmp/fake", query: "scope check" });
-
-    const markerCall = mocks.debugLog.mock.calls.find(
-      (c: unknown[]) => c[0] === "[zone-scope-revision-proposed]"
-    );
-    expect(markerCall).toBeDefined();
-    const payload = JSON.parse(String(markerCall![1]));
-    expect(payload.type).toBe("over_scope");
-    expect(payload.unnecessaryCount).toBe(1);
-  });
-
-  it("rejects missing required fields and returns failure ack to agent", async () => {
-    // Agent sends invalid call (no revised_plan_summary), then fixes it
-    mocks.createChatCompletion
-      .mockResolvedValueOnce(
-        toolCallResponse("suggest_scope_change", {
-          type: "under_scope",
-          reason: "Missing files found.",
-          // missing: revised_plan_summary
-        })
-      )
-      .mockResolvedValueOnce(textResponse("I see — missing files not listed."));
-
-    const result = await investigateScope({ repoPath: "/tmp/fake", query: "check scope" });
-    // Run completed; no revision captured (tool was rejected)
-    expect(result.agentSuggestedRevision).toBeUndefined();
   });
 });
 

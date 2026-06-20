@@ -116,7 +116,6 @@ beforeEach(() => {
   mockSetTrustAllForRun.mockClear();
   mockClearTrustedCommandsForRun.mockClear();
   delete process.env["ZONE_PLAN_APPROVAL_CYCLE"];
-  delete process.env["ZONE_PLAN_LEGACY_AUDIT"];
   mockBuildCliSink.mockReturnValue({ onProgress: vi.fn() });
   mockCreateSpinner.mockReturnValue({ stop: vi.fn() });
   mockRunAuditPipeline.mockResolvedValue({ auditFindings: undefined, revisionDecision: undefined, earlyExit: null });
@@ -344,16 +343,6 @@ describe("runOneShotInner — plan mode paths", () => {
   // dispatch.phase2.test.ts.
   beforeEach(() => { vi.stubEnv("ZONE_PLAN_INVESTIGATION_FIRST", "0"); });
 
-  it("cost regression: runAuditPipeline NOT called in default plan mode", async () => {
-    mockRequestPlanApproval.mockResolvedValueOnce({ planId: "pcr", decision: "accept_all" });
-    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
-    await runOneShotInner("do something", BASE_CONFIG, "run-cost", {
-      mode: "plan",
-      externalAc: new AbortController(),
-    });
-    expect(mockRunAuditPipeline).not.toHaveBeenCalled();
-  });
-
   it("accept_all: setTrustAllForRun called, preGeneratedPlan threaded to runLlmPatchFlow", async () => {
     mockRequestPlanApproval.mockResolvedValueOnce({ planId: "p2", decision: "accept_all" });
     mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
@@ -465,46 +454,6 @@ describe("runOneShotInner — plan mode paths", () => {
     expect(ac.signal.aborted).toBe(false);
   });
 
-  it("ZONE_PLAN_LEGACY_AUDIT=1: runAuditPipeline called with forceAudit:true, requestPlanApproval NOT called", async () => {
-    process.env["ZONE_PLAN_LEGACY_AUDIT"] = "1";
-    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
-    await runOneShotInner("do something", BASE_CONFIG, "run-legacy", {
-      mode: "plan",
-      externalAc: new AbortController(),
-    });
-    expect(mockRunAuditPipeline).toHaveBeenCalledOnce();
-    expect(mockRunAuditPipeline.mock.calls[0]![0].forceAudit).toBe(true);
-    expect(mockRequestPlanApproval).not.toHaveBeenCalled();
-    expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
-  });
-
-  it("ZONE_PLAN_LEGACY_AUDIT=1 + reject: ac.abort(), runLlmPatchFlow NOT called, ok:false", async () => {
-    process.env["ZONE_PLAN_LEGACY_AUDIT"] = "1";
-    mockRunAuditPipeline.mockResolvedValueOnce({
-      auditFindings: undefined,
-      revisionDecision: "reject",
-      earlyExit: null,
-    });
-    const ac = new AbortController();
-    const result = await runOneShotInner("do something", BASE_CONFIG, "run-legacy-rej", {
-      mode: "plan",
-      externalAc: ac,
-    });
-    expect(ac.signal.aborted).toBe(true);
-    expect(mockRunLlmPatchFlow).not.toHaveBeenCalled();
-    expect((result as any).ok).toBe(false);
-  });
-
-  it("ZONE_PLAN_LEGACY_AUDIT=1 + approve: preGeneratedPlan threaded to runLlmPatchFlow", async () => {
-    process.env["ZONE_PLAN_LEGACY_AUDIT"] = "1";
-    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
-    await runOneShotInner("do something", BASE_CONFIG, "run-legacy-approve", {
-      mode: "plan",
-      externalAc: new AbortController(),
-    });
-    const flowCall = mockRunLlmPatchFlow.mock.calls[0]![0] as Record<string, unknown>;
-    expect((flowCall["preGeneratedPlan"] as any).objective).toBe(FAKE_PLAN.objective);
-  });
 });
 
 // Phase 2b: planDepth routing

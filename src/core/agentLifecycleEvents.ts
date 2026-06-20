@@ -277,8 +277,8 @@ export type ZoneStructuredProgressEvent = {
   /** scope_audit_skipped reason */
   skipReason?: string;
   /** Phase O: identifies which agent lane emitted this event. "audit" = scope
-   *  audit mini-agent running investigateScope(); "main" = primary patch/investigate
-   *  agent. Absent for events that predate lane tagging. */
+   *  audit mini-agent lane; "main" = primary patch/investigate agent.
+   *  Absent for events that predate lane tagging. */
   lane?: "main" | "audit";
   /** Phase Z: plan_summary fields — deduplicated file list and step count. */
   planSummaryFiles?: string[];
