@@ -999,9 +999,17 @@ export async function executeTool(
           command: command.slice(0, 200),
           reason: safety.reason,
         }));
+        const isChainBlock =
+          typeof safety.reason === "string" &&
+          safety.reason.startsWith("blocked pattern:") &&
+          (safety.reason.includes("&&") ||
+            safety.reason.includes(";\\s") ||
+            safety.reason.includes("\\|\\|"));
         return {
           success: false,
-          output: `Command blocked: ${safety.reason}. Use only whitelisted read-only commands. To read file contents or a line range, use the read_file tool (lineRange:[start,end]) or head/tail/cat.`,
+          output: isChainBlock
+            ? `Command blocked: ${safety.reason}. Chained commands aren't supported on the read-only shell — run each command (e.g. \`git status -s\` and \`git diff --stat\`) as a separate call. For file contents or line ranges, use the read_file tool (lineRange:[start,end]) or head/tail/cat.`
+            : `Command blocked: ${safety.reason}. Use only whitelisted read-only commands. For file contents or line ranges, use the read_file tool (lineRange:[start,end]) or head/tail/cat.`,
         };
       }
 
@@ -1010,12 +1018,14 @@ export async function executeTool(
       let commandExitCode = 0;
       const startMs = Date.now();
       try {
-        const result = await execAsync(command, {
-          cwd: repoPath,
-          env: sanitizeVerificationEnv(),
-          timeout: 120_000,
-          maxBuffer: 10 * 1024 * 1024,
-          shell: "/bin/bash",
+        const result = await withStagingTempFlush(input?.stagingFiles, async () => {
+          return await execAsync(command, {
+            cwd: repoPath,
+            env: sanitizeVerificationEnv(),
+            timeout: 120_000,
+            maxBuffer: 10 * 1024 * 1024,
+            shell: "/bin/bash",
+          });
         });
         stdout = result.stdout;
         stderr = result.stderr;
