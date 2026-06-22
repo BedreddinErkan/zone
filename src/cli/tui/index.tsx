@@ -3,6 +3,7 @@ import { exec, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { render } from "ink";
+import qrcode from "qrcode-terminal";
 
 const execAsync = promisify(exec);
 import { App } from "./App.js";
@@ -34,6 +35,7 @@ import { executeCommit } from "./components/CommitModal.js";
 import { loadUserCommands, type UserCommand } from "./userCommands.js";
 import { shouldRedrawOnResize } from "./resize.js";
 import { getUsage } from "../../usage/usageTracker.js";
+import { startRemoteControlServer, type RemoteControlServerHandle } from "../../remote/controlServer.js";
 
 const _bannerRequire = createRequire(import.meta.url);
 const { version: _zoneVersion } = _bannerRequire("../../../package.json") as { version: string };
@@ -58,6 +60,47 @@ function writeBannerToStdout(opts: { isResumed: boolean }): void {
   process.stdout.write(
     `${MAGENTA_BOLD}✦${RESET}  ${MAGENTA_BOLD}Zone v${_zoneVersion}${RESET}${resumed}  ${DIM}${cwdBranch}${RESET}\n\n`
   );
+}
+
+function emitTranscriptLine(
+  dispatch: ((action: StoreAction) => void) | null | undefined,
+  text: string
+): void {
+  dispatch?.({ type: "USER_PROMPT", text });
+}
+
+function renderRemoteControlQr(url: string): string {
+  let rendered = "";
+  qrcode.generate(url, { small: true }, (qr) => {
+    rendered = qr.trimEnd();
+  });
+  return rendered;
+}
+
+function emitRemoteControlBanner(
+  dispatch: ((action: StoreAction) => void) | null | undefined,
+  server: RemoteControlServerHandle
+): void {
+  const qr = renderRemoteControlQr(server.url);
+  const lines = [
+    `=== REMOTE CONTROL HOST: ${server.host}:${server.port} ===`,
+    "Remote control server started. Scan the QR code or use the URL below.",
+    server.url,
+    "A connected remote will be able to drive this session once Inc-1b lands.",
+    "Transport caveat: V1 uses ws without TLS — encrypted over Tailscale, cleartext over plain LAN. Prefer Tailscale or a trusted LAN; TLS comes later.",
+  ];
+
+  for (const line of lines) {
+    emitTranscriptLine(dispatch, line);
+  }
+
+  if (!qr) {
+    return;
+  }
+
+  for (const line of qr.split("\n")) {
+    emitTranscriptLine(dispatch, line);
+  }
 }
 
 /** Strip the well-known banner lines that prefix patchPreview on the agent-loop path. */
@@ -589,8 +632,28 @@ export async function runTui(
   }
 
   let instance: ReturnType<typeof render> | undefined;
+  let remoteControlServer: RemoteControlServerHandle | null = null;
+  let remoteControlBusy = false;
+
+  async function stopRemoteControlServer(announce: boolean): Promise<boolean> {
+    const activeServer = remoteControlServer;
+    if (!activeServer) {
+      return false;
+    }
+
+    remoteControlServer = null;
+    await activeServer.stop();
+    if (announce) {
+      emitTranscriptLine(
+        storeCapture.dispatch,
+        `Remote control server stopped on ${activeServer.host}:${activeServer.port}; token invalidated.`
+      );
+    }
+    return true;
+  }
 
   function onCrash(error: Error): void {
+    void stopRemoteControlServer(false);
     instance?.unmount();
     throw error;
   }
@@ -623,6 +686,7 @@ export async function runTui(
 
   process.on("SIGINT", () => {
     storeCapture.state?.armedMcpManager?.killAllSync();
+    void stopRemoteControlServer(false);
     instance?.unmount();
     stampEnvelopeOnExit();
     const s = storeCapture.state;
@@ -637,6 +701,7 @@ export async function runTui(
   });
   process.on("SIGTERM", () => {
     storeCapture.state?.armedMcpManager?.killAllSync();
+    void stopRemoteControlServer(false);
     instance?.unmount();
     stampEnvelopeOnExit();
     const s = storeCapture.state;
@@ -651,12 +716,14 @@ export async function runTui(
   });
   process.on("uncaughtException", (err) => {
     storeCapture.state?.armedMcpManager?.killAllSync();
+    void stopRemoteControlServer(false);
     instance?.unmount();
     console.error(err);
     process.exit(1);
   });
   process.on("unhandledRejection", (err) => {
     storeCapture.state?.armedMcpManager?.killAllSync();
+    void stopRemoteControlServer(false);
     instance?.unmount();
     console.error(err);
     process.exit(1);
@@ -691,6 +758,54 @@ export async function runTui(
       storeCapture.dispatch?.({ type: "TOAST_PUSH",
         entry: { id: randomUUID(), message: err instanceof Error ? err.message : String(err), level: "warning" } });
     });
+  };
+
+  const onRemoteControlCommand = (argsText: string): void => {
+    if (remoteControlBusy) {
+      emitTranscriptLine(storeCapture.dispatch, "Remote control command already in progress.");
+      return;
+    }
+
+    remoteControlBusy = true;
+    void (async () => {
+      try {
+        if (remoteControlServer) {
+          await stopRemoteControlServer(true);
+          return;
+        }
+
+        if (argsText.trim().toLowerCase() === "stop") {
+          emitTranscriptLine(storeCapture.dispatch, "Remote control server is not running.");
+          return;
+        }
+
+        const server = await startRemoteControlServer({
+          onEvent: (event) => {
+            if (event.type === "client_connected") {
+              emitTranscriptLine(
+                storeCapture.dispatch,
+                `Remote control client connected from ${event.remoteAddress ?? "unknown"}.`
+              );
+            }
+            if (event.type === "client_disconnected") {
+              emitTranscriptLine(
+                storeCapture.dispatch,
+                `Remote control client disconnected (${event.reason || `code ${event.code ?? "unknown"}`}).`
+              );
+            }
+          },
+        });
+        remoteControlServer = server;
+        emitRemoteControlBanner(storeCapture.dispatch, server);
+      } catch (err) {
+        emitTranscriptLine(
+          storeCapture.dispatch,
+          `Remote control failed to start: ${err instanceof Error ? err.message : String(err)}`
+        );
+      } finally {
+        remoteControlBusy = false;
+      }
+    })();
   };
 
   const onEnvelopeResume = (sessionId?: string): void => {
@@ -773,6 +888,7 @@ export async function runTui(
         }}
         getCommitData={() => storeCapture.lastCommitData}
         getFeedbackData={() => storeCapture.lastFeedbackData}
+        onRemoteControlCommand={onRemoteControlCommand}
         onDispatchCapture={(d) => { storeCapture.dispatch = d; }}
         onSessionClear={(oldId) => void clearSessionMemoryGC(oldId)}
       />
@@ -805,6 +921,7 @@ export async function runTui(
 
   // Single path: wait for explicit exit (Ctrl+C → \x03 in useInput → useApp.exit())
   await instance.waitUntilExit();
+  await stopRemoteControlServer(false);
 
   // Graceful MCP shutdown — normal exit path only; signal paths use killAllSync() above.
   await storeCapture.state?.armedMcpManager?.closeAll().catch(() => {});

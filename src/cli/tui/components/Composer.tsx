@@ -23,6 +23,7 @@ interface ComposerProps {
   onExit: () => void;
   onInitStart?: (ac: AbortController) => void;
   onUndoRequest?: () => void;
+  onRemoteControlCommand?: (argsText: string) => void;
   getCommitData?: () => { filePaths: string[]; message: string; repoPath: string } | null;
   getFeedbackData?: () => { runId: string; sessionId: string; logs: string; version: string; repoPath: string } | null;
 }
@@ -54,6 +55,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/autocommit",  desc: "Toggle auto-commit after each run (off/on)" },
   { name: "/websearch",   desc: "Toggle web search (off/on)" },
   { name: "/image",       desc: "Attach a local image file to the next task (/image <path>)" },
+  { name: "/remote-control", desc: "Start or stop the secure remote control server" },
   { name: "/undo",        desc: "Undo the last run (restore files to pre-run state)" },
   { name: "/feedback",    desc: "Send a bug report / feedback to the maintainer" },
 ];
@@ -67,7 +69,7 @@ const HELP_LINES = [
   "  ↑/↓         navigate history (when input empty)",
   "  ←/→ Home End  cursor movement",
   "Slash commands:",
-  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init  /memory  /model  /effort  /summary  /plan-mode  /session  /metrics  /limits  /commit  /autocommit  /websearch  /image  /undo  /feedback",
+  "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init  /memory  /model  /effort  /summary  /plan-mode  /session  /metrics  /limits  /commit  /autocommit  /websearch  /image  /remote-control  /undo  /feedback",
 ];
 
 const PUA_BASE = 0xe000;
@@ -143,7 +145,7 @@ function SlashCommandPalette({ commands, selectedIdx }: PaletteProps): React.Rea
   );
 }
 
-export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getCommitData, getFeedbackData, onEnvelopeResume }: ComposerProps): React.ReactElement {
+export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemoteControlCommand, getCommitData, getFeedbackData, onEnvelopeResume }: ComposerProps): React.ReactElement {
   const { state, dispatch } = useStore();
   const { stdout } = useStdout();
   const disabled = state.runState === "running";
@@ -419,6 +421,10 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, getComm
             const msg = err instanceof Error ? err.message : String(err);
             dispatch({ type: "TOAST_PUSH", entry: { id: randomUUID(), message: msg, level: "warning" } });
           });
+        break;
+      }
+      case "/remote-control": {
+        onRemoteControlCommand?.(argsText);
         break;
       }
       case "/undo": {

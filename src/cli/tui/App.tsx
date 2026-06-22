@@ -48,6 +48,7 @@ interface AppProps {
   initialDailyUsedUsd?: number;
   onSubmit?: (prompt: string, ac: AbortController, mode: TuiMode, images?: import("../../api/imageUpload.js").ImageAttachment[]) => void;
   onUndoRequest?: () => void;
+  onRemoteControlCommand?: (argsText: string) => void;
   onEnvelopeResume?: (sessionId?: string) => void;
   initialTrustedPrefixes?: string[];
   resumedSession?: DiskSession;
@@ -72,6 +73,7 @@ interface AppInnerProps {
   initialMode: TuiMode | undefined;
   onSubmit: ((prompt: string, ac: AbortController, mode: TuiMode, images?: import("../../api/imageUpload.js").ImageAttachment[]) => void) | undefined;
   onUndoRequest: (() => void) | undefined;
+  onRemoteControlCommand: ((argsText: string) => void) | undefined;
   onEnvelopeResume: ((sessionId?: string) => void) | undefined;
   onStateChange: ((state: StoreState) => void) | undefined;
   onModelApply: ((model: string, provider: "anthropic" | "openai", effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void) | undefined;
@@ -81,7 +83,7 @@ interface AppInnerProps {
   onSessionClear: ((oldSessionId: string) => void) | undefined;
 }
 
-function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, onEnvelopeResume, onStateChange, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear }: AppInnerProps): React.ReactElement {
+function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, onStateChange, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear }: AppInnerProps): React.ReactElement {
   const { exit } = useApp();
   const { state, dispatch } = useStore();
   const runAcRef = useRef<AbortController | null>(null);
@@ -269,6 +271,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
         onExit={() => { runAcRef.current?.abort(); exit(); }}
         onInitStart={(ac) => { runAcRef.current = ac; }}
         onUndoRequest={onUndoRequest}
+        onRemoteControlCommand={onRemoteControlCommand}
         onEnvelopeResume={onEnvelopeResume}
         getCommitData={getCommitData}
         getFeedbackData={getFeedbackData}
@@ -281,7 +284,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
   );
 }
 
-export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, onEnvelopeResume, initialTrustedPrefixes, resumedSession, initialSessionId, onStateChange, initialModelSettings, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust }: AppProps): React.ReactElement {
+export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, initialTrustedPrefixes, resumedSession, initialSessionId, onStateChange, initialModelSettings, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust }: AppProps): React.ReactElement {
   return (
     <StoreProvider initialValues={{
       model: initialModel ?? "",
@@ -299,7 +302,7 @@ export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, ini
       armedMcpManager: initialArmedMcpManager,
       pendingMcpTrust: initialPendingMcpTrust,
     }}>
-      <AppInner bus={bus} initialPrompt={initialPrompt} initialMode={initialMode} onSubmit={onSubmit} onUndoRequest={onUndoRequest} onEnvelopeResume={onEnvelopeResume} onStateChange={onStateChange} onModelApply={onModelApply} getCommitData={getCommitData} getFeedbackData={getFeedbackData} onDispatchCapture={onDispatchCapture} onSessionClear={onSessionClear} />
+      <AppInner bus={bus} initialPrompt={initialPrompt} initialMode={initialMode} onSubmit={onSubmit} onUndoRequest={onUndoRequest} onRemoteControlCommand={onRemoteControlCommand} onEnvelopeResume={onEnvelopeResume} onStateChange={onStateChange} onModelApply={onModelApply} getCommitData={getCommitData} getFeedbackData={getFeedbackData} onDispatchCapture={onDispatchCapture} onSessionClear={onSessionClear} />
     </StoreProvider>
   );
 }
