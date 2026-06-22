@@ -307,4 +307,109 @@ describe("remote control server", () => {
       await server.stop();
     }
   });
+
+  it("submit frame calls backend.startRun with task and mode", async () => {
+    const server = await startRemoteControlServer({ host: "127.0.0.1" });
+    const mockBackend = {
+      startRun: vi.fn().mockResolvedValue(undefined),
+      abort: vi.fn(),
+      resolveApproval: vi.fn().mockReturnValue({ ok: true }),
+    };
+    server.setBackend(mockBackend);
+    let client: WebSocket | null = null;
+
+    try {
+      client = await waitForOpen(server.url);
+      client.send(JSON.stringify({ type: "submit", task: "fix the bug", mode: "autoAccept" }));
+      // Use ping/pong to synchronize: when pong arrives the submit has already been processed.
+      client.send(JSON.stringify({ type: "ping" }));
+      await waitForFrame(client); // pong
+      expect(mockBackend.startRun).toHaveBeenCalledWith("fix the bug", { mode: "autoAccept" });
+    } finally {
+      if (client) await closeClient(client);
+      await server.stop();
+    }
+  });
+
+  it("submit frame without mode defaults correctly (mode undefined)", async () => {
+    const server = await startRemoteControlServer({ host: "127.0.0.1" });
+    const mockBackend = {
+      startRun: vi.fn().mockResolvedValue(undefined),
+      abort: vi.fn(),
+      resolveApproval: vi.fn().mockReturnValue({ ok: true }),
+    };
+    server.setBackend(mockBackend);
+    let client: WebSocket | null = null;
+
+    try {
+      client = await waitForOpen(server.url);
+      client.send(JSON.stringify({ type: "submit", task: "do work" }));
+      client.send(JSON.stringify({ type: "ping" }));
+      await waitForFrame(client); // pong
+      expect(mockBackend.startRun).toHaveBeenCalledWith("do work", { mode: undefined });
+    } finally {
+      if (client) await closeClient(client);
+      await server.stop();
+    }
+  });
+
+  it("abort frame calls backend.abort", async () => {
+    const server = await startRemoteControlServer({ host: "127.0.0.1" });
+    const mockBackend = {
+      startRun: vi.fn().mockResolvedValue(undefined),
+      abort: vi.fn(),
+      resolveApproval: vi.fn().mockReturnValue({ ok: true }),
+    };
+    server.setBackend(mockBackend);
+    let client: WebSocket | null = null;
+
+    try {
+      client = await waitForOpen(server.url);
+      client.send(JSON.stringify({ type: "abort" }));
+      client.send(JSON.stringify({ type: "ping" }));
+      await waitForFrame(client); // pong
+      expect(mockBackend.abort).toHaveBeenCalled();
+    } finally {
+      if (client) await closeClient(client);
+      await server.stop();
+    }
+  });
+
+  it("submit with empty task broadcasts error frame and does NOT close the socket", async () => {
+    const server = await startRemoteControlServer({ host: "127.0.0.1" });
+    let client: WebSocket | null = null;
+
+    try {
+      client = await waitForOpen(server.url);
+      client.send(JSON.stringify({ type: "submit", task: "   " }));
+      const errorFrame = await waitForFrame(client);
+      expect(errorFrame.type).toBe("error");
+      expect((errorFrame as { reason?: string }).reason).toBe("submit_invalid_task");
+
+      // Socket must still be open — can send another frame
+      client.send(JSON.stringify({ type: "ping" }));
+      const pong = await waitForFrame(client);
+      expect(pong.type).toBe("pong");
+    } finally {
+      if (client) await closeClient(client);
+      await server.stop();
+    }
+  });
+
+  it("unknown frame type still closes the socket with policy violation", async () => {
+    const server = await startRemoteControlServer({ host: "127.0.0.1" });
+    let client: WebSocket | null = null;
+
+    try {
+      client = await waitForOpen(server.url);
+      const closedCode = await new Promise<number>((resolve) => {
+        client!.once("close", (code) => resolve(code));
+        client!.send(JSON.stringify({ type: "unknown_frame_type" }));
+      });
+      expect(closedCode).toBe(1008);
+    } finally {
+      if (client && client.readyState !== WebSocket.CLOSED) await closeClient(client);
+      await server.stop();
+    }
+  });
 });

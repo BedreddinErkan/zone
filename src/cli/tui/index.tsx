@@ -36,6 +36,7 @@ import { loadUserCommands, type UserCommand } from "./userCommands.js";
 import { shouldRedrawOnResize } from "./resize.js";
 import { getUsage } from "../../usage/usageTracker.js";
 import { startRemoteControlServer, type RemoteControlServerHandle } from "../../remote/controlServer.js";
+import { createRemoteControlAdapter } from "../../remote/remoteControlAdapter.js";
 
 const _bannerRequire = createRequire(import.meta.url);
 const { version: _zoneVersion } = _bannerRequire("../../../package.json") as { version: string };
@@ -796,6 +797,8 @@ export async function runTui(
           },
         });
         remoteControlServer = server;
+        const adapter = createRemoteControlAdapter({ config, broadcast: server.broadcast });
+        server.setBackend(adapter);
         emitRemoteControlBanner(storeCapture.dispatch, server);
       } catch (err) {
         emitTranscriptLine(

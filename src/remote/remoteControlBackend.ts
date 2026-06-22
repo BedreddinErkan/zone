@@ -1,5 +1,3 @@
-import type { RemoteControlFrame } from "./controlServer.js";
-
 export type RemoteMode = "normal" | "autoAccept" | "plan";
 
 /**
@@ -11,18 +9,11 @@ export type RemoteMode = "normal" | "autoAccept" | "plan";
  */
 export interface RemoteControlBackend {
   /**
-   * Start a one-shot agent run. onProgress receives already-serialized wire frames
-   * (via toWireFrame) so the transport never touches the raw event union.
+   * Start a one-shot agent run. Progress is delivered internally (e.g. via broadcast)
+   * rather than via a callback — the transport never touches the raw event union.
    * Resolves when the run completes or is aborted.
    */
-  startRun(
-    task: string,
-    opts: {
-      mode?: RemoteMode;
-      onProgress: (frame: RemoteControlFrame) => void;
-      signal: AbortSignal;
-    }
-  ): Promise<void>;
+  startRun(task: string, opts?: { mode?: RemoteMode }): Promise<void>;
 
   /**
    * Settle a pending approval gate. kind identifies the approval module

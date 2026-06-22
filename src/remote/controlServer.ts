@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { networkInterfaces } from "node:os";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
+import type { RemoteControlBackend } from "./remoteControlBackend.js";
 
 const REMOTE_CONTROL_PATH = "/";
 const REMOTE_CONTROL_TOKEN_BYTES = 32;
@@ -57,6 +58,8 @@ export interface RemoteControlServerHandle {
   stop: () => Promise<void>;
   /** Send a frame to the currently connected client. No-op when no client is connected. */
   broadcast: (frame: RemoteControlFrame) => void;
+  /** Wire the backend that handles submit/abort frames. Call once after construction. */
+  setBackend: (backend: RemoteControlBackend) => void;
 }
 
 interface BindCandidate {
@@ -262,6 +265,8 @@ export async function startRemoteControlServer(
   let sessionToken: string | null = generateSessionToken(options.randomBytesImpl);
   let activeClient: WebSocket | null = null;
   let stopped = false;
+  let backend: RemoteControlBackend | null = null;
+  const setBackend = (b: RemoteControlBackend): void => { backend = b; };
 
   const server = createServer((req, res) => {
     const requestUrl = getRequestUrl(req);
@@ -344,6 +349,26 @@ export async function startRemoteControlServer(
         return;
       }
 
+      if (frame.type === "submit") {
+        const task = typeof frame.task === "string" ? frame.task.trim() : "";
+        const mode = frame.mode;
+        if (!task) {
+          broadcast({ type: "error", reason: "submit_invalid_task", ts: Date.now() });
+          return;
+        }
+        if (mode !== undefined && mode !== "normal" && mode !== "autoAccept" && mode !== "plan") {
+          broadcast({ type: "error", reason: "submit_invalid_mode", ts: Date.now() });
+          return;
+        }
+        void backend?.startRun(task, { mode: mode as "normal" | "autoAccept" | "plan" | undefined });
+        return;
+      }
+
+      if (frame.type === "abort") {
+        backend?.abort();
+        return;
+      }
+
       client.close(WS_CLOSE_POLICY_VIOLATION, "unsupported-frame-type");
     });
 
@@ -411,5 +436,6 @@ export async function startRemoteControlServer(
     url,
     stop,
     broadcast,
+    setBackend,
   };
 }
