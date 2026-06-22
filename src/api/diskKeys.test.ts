@@ -74,16 +74,16 @@ describe("diskKeys — migration from legacy .zone/keys.json", () => {
   });
 
   it("migrates legacy keys to home path on first load", async () => {
-    const legacyStore = { version: 1 as const, keys: [{ provider: "anthropic" as const, key: "sk-ant-migrated0000", addedAt: "2026-01-01T00:00:00.000Z" }] };
+    const legacyStore = { version: 1 as const, keys: [{ provider: "anthropic" as const, key: "qq-migrated0000", addedAt: "2026-01-01T00:00:00.000Z" }] };
     await writeFile(join(tmp, "legacy.json"), JSON.stringify(legacyStore, null, 2), "utf-8");
 
     const result = await loadDiskKeys();
     expect(result.keys).toHaveLength(1);
-    expect(result.keys[0].key).toBe("sk-ant-migrated0000");
+    expect(result.keys[0].key).toBe("qq-migrated0000");
 
     // home path now has the key
     const homeStore = await loadDiskKeys();
-    expect(homeStore.keys[0].key).toBe("sk-ant-migrated0000");
+    expect(homeStore.keys[0].key).toBe("qq-migrated0000");
   });
 
   it("migration is idempotent — second load reads from home, not legacy", async () => {
