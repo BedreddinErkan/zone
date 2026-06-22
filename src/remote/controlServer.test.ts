@@ -276,4 +276,35 @@ describe("remote control server", () => {
     const [expectedBuffer, providedBuffer] = timingSafeEqualSpy.mock.calls[0];
     expect(providedBuffer.length).toBe(expectedBuffer.length);
   });
+
+  it("broadcast delivers a frame to the connected client", async () => {
+    const server = await startRemoteControlServer({ host: "127.0.0.1" });
+    let client: WebSocket | null = null;
+
+    try {
+      client = await waitForOpen(server.url);
+      const outboundFrame: RemoteControlFrame = { type: "progress", runId: "r1", ts: 0, title: "test" };
+      server.broadcast(outboundFrame);
+      const received = await waitForFrame(client);
+      expect(received.type).toBe("progress");
+      expect(received.runId).toBe("r1");
+    } finally {
+      if (client) {
+        await closeClient(client);
+      }
+      await server.stop();
+    }
+  });
+
+  it("broadcast is a no-op when no client is connected", async () => {
+    const server = await startRemoteControlServer({ host: "127.0.0.1" });
+
+    try {
+      expect(() => {
+        server.broadcast({ type: "progress", runId: "r1", ts: 0, title: "test" });
+      }).not.toThrow();
+    } finally {
+      await server.stop();
+    }
+  });
 });

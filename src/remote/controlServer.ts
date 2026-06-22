@@ -55,6 +55,8 @@ export interface RemoteControlServerHandle {
   token: string;
   url: string;
   stop: () => Promise<void>;
+  /** Send a frame to the currently connected client. No-op when no client is connected. */
+  broadcast: (frame: RemoteControlFrame) => void;
 }
 
 interface BindCandidate {
@@ -280,6 +282,12 @@ export async function startRemoteControlServer(
     options.onEvent?.(event);
   };
 
+  const broadcast = (frame: RemoteControlFrame): void => {
+    if (activeClient && activeClient.readyState === WebSocket.OPEN) {
+      activeClient.send(serializeFrame(frame));
+    }
+  };
+
   const stop = async (): Promise<void> => {
     if (stopped) {
       return;
@@ -402,5 +410,6 @@ export async function startRemoteControlServer(
     token: sessionToken,
     url,
     stop,
+    broadcast,
   };
 }
