@@ -319,11 +319,19 @@ export function resolveAgentPath(
   return resolved;
 }
 
-function isBlockedCommand(command: string): boolean {
+/** @internal */
+export function isBlockedCommand(command: string): boolean {
   const c = String(command || "");
-  const patterns = ["rm -rf /", "format", "del /f /s", "DROP TABLE", "DROP DATABASE"];
   const upper = c.toUpperCase();
-  return patterns.some((p) => upper.includes(p.toUpperCase()));
+  if (upper.includes("RM -RF /")) return true;
+  if (upper.includes("DEL /F /S")) return true;
+  // Disk-format: only block when "format" is the command itself (Windows drive-letter form).
+  // Does NOT match --format=, --pretty=format:, npm run format.
+  if (/^format(?:\s|$)/i.test(c.trim())) return true;
+  // SQL DROP: only block when the command is a SQL client, not when DROP TABLE is a grep/cat arg.
+  const isSqlClient = /^(?:mysql|psql|sqlite3|sqlcmd|isql|db2)\b/i.test(c.trim());
+  if (isSqlClient && /\bDROP\s+(?:TABLE|DATABASE)\b/i.test(upper)) return true;
+  return false;
 }
 
 function detectLineEnding(
@@ -1005,11 +1013,16 @@ export async function executeTool(
           (safety.reason.includes("&&") ||
             safety.reason.includes(";\\s") ||
             safety.reason.includes("\\|\\|"));
+        const isWhitelistMiss =
+          typeof safety.reason === "string" &&
+          safety.reason.startsWith("not in whitelist");
         return {
           success: false,
           output: isChainBlock
             ? `Command blocked: ${safety.reason}. Chained commands aren't supported on the read-only shell — run each command (e.g. \`git status -s\` and \`git diff --stat\`) as a separate call. For file contents or line ranges, use the read_file tool (lineRange:[start,end]) or head/tail/cat.`
-            : `Command blocked: ${safety.reason}. Use only whitelisted read-only commands. For file contents or line ranges, use the read_file tool (lineRange:[start,end]) or head/tail/cat.`,
+            : isWhitelistMiss
+              ? `Command blocked: ${safety.reason}. This command isn't on the no-approval read-only allowlist — if it's a safe read, run it via the approval-gated shell (run_command) instead.`
+              : `Command blocked: ${safety.reason}. Use only whitelisted read-only commands. For file contents or line ranges, use the read_file tool (lineRange:[start,end]) or head/tail/cat.`,
         };
       }
 

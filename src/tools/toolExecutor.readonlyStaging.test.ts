@@ -130,7 +130,7 @@ describe("run_command_readonly: chain-block message (B-2)", () => {
     expect(result.output).not.toContain("separate call");
   });
 
-  it("non-whitelisted command keeps generic message", async () => {
+  it("non-whitelisted safe command now gets approval-shell guidance (not generic dead-end)", async () => {
     const result = await executeTool(
       "run_command_readonly",
       { command: "curl https://example.com" },
@@ -138,6 +138,46 @@ describe("run_command_readonly: chain-block message (B-2)", () => {
     );
 
     expect(result.success).toBe(false);
+    expect(result.output).toContain("run_command");
+    expect(result.output).not.toContain("Use only whitelisted read-only commands");
+  });
+});
+
+describe("run_command_readonly: whitelist-miss message (C-3)", () => {
+  it("whoami (safe but unlisted) gets approval-shell guidance", async () => {
+    const result = await executeTool(
+      "run_command_readonly",
+      { command: "whoami" },
+      repoPath
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.output).toContain("run_command");
+    expect(result.output).not.toContain("Use only whitelisted read-only commands");
+    expect(result.output).not.toContain("separate");
+  });
+
+  it("date (safe but unlisted) gets approval-shell guidance", async () => {
+    const result = await executeTool(
+      "run_command_readonly",
+      { command: "date" },
+      repoPath
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.output).toContain("run_command");
+    expect(result.output).not.toContain("Use only whitelisted read-only commands");
+  });
+
+  it("rm -rf x (dangerous blacklist hit) keeps generic restrictive message", async () => {
+    const result = await executeTool(
+      "run_command_readonly",
+      { command: "rm -rf /tmp/zone-test-c3" },
+      repoPath
+    );
+
+    expect(result.success).toBe(false);
     expect(result.output).toContain("Use only whitelisted read-only commands");
+    expect(result.output).not.toContain("run_command");
   });
 });

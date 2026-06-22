@@ -54,6 +54,12 @@ const WHITELIST_PREFIXES = [
 const BLACKLIST_PATTERNS: RegExp[] = [
   // find write/exec action flags — block before the whitelist match can fire
   /\bfind\b.*\s(?:-delete|-exec(?:dir)?|-ok(?:dir)?|-fprint|-fprintf|-fls)\b/,
+  // fd exec flags — anchored to command start (fd is NOT a PIPE_READ_UTIL so it only runs as
+  // the head command; anchoring prevents false-positives like "ls fd -x" or "grep fd.txt -x foo")
+  /^\s*fd\b.*\s(?:-[xX]|--exec(?:-batch)?)(?:\s|$|=)/,
+  // rg pre-processor flags — UNANCHORED because rg IS a PIPE_READ_UTIL and must be caught
+  // mid-pipeline (e.g. "cat file.txt | rg --pre ./evil.sh pattern")
+  /\brg\b.*\s--pre(?:-glob)?(?:\s|$|=)/,
   // Mutations
   /\brm\s/,
   /\bmv\s/,
