@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getProviderForModel, supportsEffort, usesAdaptiveThinking, normalizeModelId, effortLevelsFor } from "./modelRegistry.js";
+import { MODEL_CATALOG } from "./models.js";
 
 describe("modelRegistry", () => {
   it("getProviderForModel returns correct provider for known models", () => {
@@ -12,6 +13,7 @@ describe("modelRegistry", () => {
   });
 
   it("supportsEffort returns true for supporting models and false for others", () => {
+    expect(supportsEffort("claude-sonnet-5")).toBe(true);
     expect(supportsEffort("claude-sonnet-4-6")).toBe(true);
     expect(supportsEffort("claude-opus-4-8")).toBe(true);
     expect(supportsEffort("claude-opus-4-7")).toBe(true);
@@ -28,9 +30,27 @@ describe("modelRegistry", () => {
   it("usesAdaptiveThinking: true for adaptive family, false for others", () => {
     expect(usesAdaptiveThinking("claude-opus-4-8")).toBe(true);
     expect(usesAdaptiveThinking("claude-opus-4-7")).toBe(true);
+    expect(usesAdaptiveThinking("claude-sonnet-5")).toBe(false);
     expect(usesAdaptiveThinking("claude-sonnet-4-6")).toBe(false);
     expect(usesAdaptiveThinking("claude-haiku-4-5")).toBe(false);
     expect(usesAdaptiveThinking("gpt-5.4")).toBe(false);
+  });
+
+  it("claude-sonnet-5: effort levels mirror Sonnet 4.6 (non-adaptive bucket)", () => {
+    expect(effortLevelsFor("claude-sonnet-5")).toEqual(["low", "medium", "high", "max"]);
+  });
+});
+
+describe("modelRegistry drift guards", () => {
+  it("every EFFORT_SUPPORTED_MODELS entry has a MODEL_EFFORT_LEVELS entry", () => {
+    // Intentional omissions (e.g. Haiku) live in MODEL_EFFORT_LEVELS absence by design.
+    // This test guards that effort-supported models are never accidentally left out of the levels map.
+    const effortSupportedModels = Object.values(MODEL_CATALOG)
+      .flat()
+      .filter((m) => supportsEffort(m.id))
+      .map((m) => m.id);
+    const missingLevels = effortSupportedModels.filter((id) => effortLevelsFor(id).length === 0);
+    expect(missingLevels).toEqual([]);
   });
 });
 

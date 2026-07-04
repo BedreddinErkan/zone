@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { costFor, formatCostNote, webSearchFee } from "./pricing.js";
+import { costFor, formatCostNote, webSearchFee, PRICING_USD_PER_MTOK } from "./pricing.js";
 import type { ProviderName } from "./pricing.js";
+import { MODEL_CATALOG } from "../llm/models.js";
 
 
 describe("pricing — claude-opus-4-8", () => {
@@ -26,6 +27,20 @@ describe("pricing — claude-opus-4-8", () => {
 });
 
 
+describe("pricing — claude-sonnet-5", () => {
+  it("input $3/MTok (placeholder, mirrors Sonnet 4.6)", () => {
+    expect(costFor("anthropic", "claude-sonnet-5", "input_uncached", 1_000_000)).toBe(3);
+  });
+
+  it("output $15/MTok", () => {
+    expect(costFor("anthropic", "claude-sonnet-5", "output", 1_000_000)).toBe(15);
+  });
+
+  it("formatCostNote: $3/$15 per MTok", () => {
+    expect(formatCostNote("anthropic", "claude-sonnet-5")).toBe("$3/$15 per MTok");
+  });
+});
+
 describe("formatCostNote", () => {
   it("returns formatted rate for known OpenAI models", () => {
     expect(formatCostNote("openai", "gpt-5.5")).toBe("$5/$30 per MTok");
@@ -40,6 +55,20 @@ describe("formatCostNote", () => {
   });
   it("returns undefined for unknown provider", () => {
     expect(formatCostNote("gemini" as ProviderName, "some-model")).toBeUndefined();
+  });
+});
+
+describe("pricing drift guards", () => {
+  it("every model in MODEL_CATALOG has a PRICING_USD_PER_MTOK entry for its provider", () => {
+    const missing: string[] = [];
+    for (const [provider, models] of Object.entries(MODEL_CATALOG)) {
+      for (const m of models) {
+        if (!PRICING_USD_PER_MTOK[provider as ProviderName]?.[m.id]) {
+          missing.push(`${provider}/${m.id}`);
+        }
+      }
+    }
+    expect(missing).toEqual([]);
   });
 });
 
