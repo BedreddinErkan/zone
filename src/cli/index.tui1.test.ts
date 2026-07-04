@@ -27,6 +27,10 @@ vi.mock("../api/commandApprovals.js", () => ({
   clearTrustedCommandsForRun: vi.fn(),
 }));
 vi.mock("../llm/revisionApprovals.js", () => ({ rejectPendingRevisionsForRun: vi.fn() }));
+vi.mock("../api/diskRunEnvelope.js", () => ({
+  latestResumableEnvelope: vi.fn().mockResolvedValue(null),
+  resolveEnvelopeId: vi.fn().mockResolvedValue(null),
+}));
 
 import { run } from "./index.js";
 

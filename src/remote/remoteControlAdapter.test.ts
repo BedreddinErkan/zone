@@ -230,10 +230,10 @@ describe("remoteControlAdapter", () => {
     expect(rejectPendingRevisionsForRun).toHaveBeenCalledTimes(1);
   });
 
-  it("resolveApproval stub returns not-implemented", () => {
+  it("resolveApproval returns no_active_run when no run is active", () => {
     const adapter = createRemoteControlAdapter({ config: stubConfig, broadcast: vi.fn(), runOneShot: vi.fn() });
-    const result = adapter.resolveApproval({ kind: "command", approvalId: "x", approved: true });
+    const result = adapter.resolveApproval({ kind: "command", id: "x", approved: true });
     expect(result.ok).toBe(false);
-    expect(result.message).toContain("Inc-1b-in-2");
+    expect(result.message).toBe("no_active_run");
   });
 });
