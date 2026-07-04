@@ -369,6 +369,24 @@ export async function startRemoteControlServer(
         return;
       }
 
+      if (frame.type === "approval_response") {
+        const res = backend?.resolveApproval({
+          kind: frame.kind as "command" | "edit" | "trust" | "plan" | "staged" | "revision",
+          id: typeof frame.id === "string" ? frame.id : "",
+          approved: frame.approved as boolean | undefined,
+          decision: frame.decision as string | undefined,
+          feedback: frame.feedback as string | undefined,
+          trust: frame.trust as boolean | undefined,
+        }) ?? { ok: false, message: "no_backend" };
+        client.send(serializeFrame({
+          type: "approval_ack",
+          ...(typeof frame.id === "string" && { id: frame.id }),
+          ok: res.ok,
+          ...(res.message !== undefined && { message: res.message }),
+        }));
+        return;
+      }
+
       client.close(WS_CLOSE_POLICY_VIOLATION, "unsupported-frame-type");
     });
 

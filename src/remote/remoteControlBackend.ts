@@ -18,13 +18,16 @@ export interface RemoteControlBackend {
   /**
    * Settle a pending approval gate. kind identifies the approval module
    * (e.g. "command", "edit", "trust", "plan", "staged", "revision").
-   * approvalId is echoed from the outbound approval-required frame.
+   * id echoes the approvalId/planId/revisionId from the outbound approval-required frame
+   * (for "trust" the id is unused — the registry key is runId).
    */
   resolveApproval(msg: {
-    kind: string;
-    approvalId: string;
-    approved: boolean;
-    trust?: boolean;
+    kind: "command" | "edit" | "trust" | "plan" | "staged" | "revision";
+    id: string;          // approvalId | planId | revisionId per kind; unused for trust
+    approved?: boolean;  // command / edit / trust
+    decision?: string;   // plan / staged / revision (validated per-kind in the adapter)
+    feedback?: string;   // plan / staged
+    trust?: boolean;     // command only — record in per-run prefix set
   }): { ok: boolean; message?: string };
 
   /** Abort the currently running task, if any. */
