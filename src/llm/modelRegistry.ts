@@ -15,6 +15,7 @@ export interface ModelEntry {
 const EFFORT_SUPPORTED_MODELS = new Set([
   "claude-opus-4-8",
   "claude-opus-4-7",
+  "claude-sonnet-5",
   "claude-sonnet-4-6",
   "claude-sonnet-4-5",
   // claude-haiku-4-5 excluded: does not support extended thinking in Claude 4 series
@@ -52,6 +53,7 @@ const MODEL_EFFORT_LEVELS: Record<string, EffortLevel[]> = {
   "claude-opus-4-8":   ["low", "medium", "high", "xhigh", "max"],
   "claude-opus-4-7":   ["low", "medium", "high", "xhigh", "max"],
   // Bucket 2 — output_config.effort or budget_tokens; NO xhigh
+  "claude-sonnet-5":   ["low", "medium", "high", "max"],
   "claude-sonnet-4-6": ["low", "medium", "high", "max"],
   "claude-sonnet-4-5": ["low", "medium", "high"],  // budget_tokens only; output_config unverified
   // Bucket 3 — Haiku: absent ⇒ resolver returns undefined ⇒ no effort sent (400 guard)

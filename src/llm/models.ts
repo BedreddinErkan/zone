@@ -40,6 +40,7 @@ export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {
       costNote: formatCostNote("openai", "gpt-5.4-nano") },
   ],
   anthropic: [
+    { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
     {
       id: "claude-sonnet-4-6",
       label: "Claude Sonnet 4.6",
@@ -97,7 +98,8 @@ export function getDefaultModelForTier(
 }
 
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
-  // Anthropic — Claude 4.x: all 1M context windows
+  // Anthropic — Claude 4.x/5.x: all 1M context windows
+  "claude-sonnet-5":   1_000_000,
   "claude-opus-4-8":   1_000_000,
   "claude-opus-4-7":   1_000_000,
   "claude-sonnet-4-6": 1_000_000,
