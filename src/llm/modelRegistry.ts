@@ -30,6 +30,7 @@ const EFFORT_SUPPORTED_MODELS = new Set([
 const ADAPTIVE_THINKING_MODELS = new Set([
   "claude-opus-4-8",
   "claude-opus-4-7",
+  "claude-sonnet-5",
 ]);
 
 export function usesAdaptiveThinking(id: string): boolean {
@@ -52,8 +53,8 @@ const MODEL_EFFORT_LEVELS: Record<string, EffortLevel[]> = {
   // Bucket 1 — adaptive (output_config.effort required), full 5-level range
   "claude-opus-4-8":   ["low", "medium", "high", "xhigh", "max"],
   "claude-opus-4-7":   ["low", "medium", "high", "xhigh", "max"],
+  "claude-sonnet-5":   ["low", "medium", "high", "xhigh", "max"],
   // Bucket 2 — output_config.effort or budget_tokens; NO xhigh
-  "claude-sonnet-5":   ["low", "medium", "high", "max"],
   "claude-sonnet-4-6": ["low", "medium", "high", "max"],
   "claude-sonnet-4-5": ["low", "medium", "high"],  // budget_tokens only; output_config unverified
   // Bucket 3 — Haiku: absent ⇒ resolver returns undefined ⇒ no effort sent (400 guard)

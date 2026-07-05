@@ -30,14 +30,14 @@ describe("modelRegistry", () => {
   it("usesAdaptiveThinking: true for adaptive family, false for others", () => {
     expect(usesAdaptiveThinking("claude-opus-4-8")).toBe(true);
     expect(usesAdaptiveThinking("claude-opus-4-7")).toBe(true);
-    expect(usesAdaptiveThinking("claude-sonnet-5")).toBe(false);
+    expect(usesAdaptiveThinking("claude-sonnet-5")).toBe(true);
     expect(usesAdaptiveThinking("claude-sonnet-4-6")).toBe(false);
     expect(usesAdaptiveThinking("claude-haiku-4-5")).toBe(false);
     expect(usesAdaptiveThinking("gpt-5.4")).toBe(false);
   });
 
-  it("claude-sonnet-5: effort levels mirror Sonnet 4.6 (non-adaptive bucket)", () => {
-    expect(effortLevelsFor("claude-sonnet-5")).toEqual(["low", "medium", "high", "max"]);
+  it("claude-sonnet-5: effort levels match adaptive bucket (full 5-level range)", () => {
+    expect(effortLevelsFor("claude-sonnet-5")).toEqual(["low", "medium", "high", "xhigh", "max"]);
   });
 });
 
