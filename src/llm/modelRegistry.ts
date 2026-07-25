@@ -14,6 +14,7 @@ export interface ModelEntry {
 
 const EFFORT_SUPPORTED_MODELS = new Set([
   "claude-opus-5",
+  "claude-fable-5",
   "claude-opus-4-8",
   "claude-opus-4-7",
   "claude-sonnet-5",
@@ -35,6 +36,11 @@ const ADAPTIVE_THINKING_MODELS = new Set([
   // that would confirm it is blocked on the Anthropic credit balance. If this is
   // wrong, every Opus 5 request 400s immediately rather than degrading quietly.
   "claude-opus-5",
+  // @unverified-probe(claude-fable-5) adaptive thinking is documented as always on
+  // and thinking:{type:"disabled"} as unsupported, which is exactly the adaptive
+  // surface — but like Opus 5 it is unmeasured while the credit balance blocks
+  // every probe.
+  "claude-fable-5",
   "claude-opus-4-8",
   "claude-opus-4-7",
   "claude-sonnet-5",
@@ -59,6 +65,7 @@ export function normalizeModelId(id: string): string {
 const MODEL_EFFORT_LEVELS: Record<string, EffortLevel[]> = {
   // Bucket 1 — adaptive (output_config.effort required), full 5-level range
   "claude-opus-5":     ["low", "medium", "high", "xhigh", "max"],
+  "claude-fable-5":    ["low", "medium", "high", "xhigh", "max"],
   "claude-opus-4-8":   ["low", "medium", "high", "xhigh", "max"],
   "claude-opus-4-7":   ["low", "medium", "high", "xhigh", "max"],
   "claude-sonnet-5":   ["low", "medium", "high", "xhigh", "max"],

@@ -45,6 +45,14 @@ export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {
       label: "Claude Opus 5",
       costNote: "Frontier — $5/$25 per MTok",
     },
+    {
+      id: "claude-fable-5",
+      label: "Claude Fable 5",
+      // Deliberately says nothing about retention: the structured field below drives
+      // the picker's own disclosure, and repeating it here would say it twice.
+      costNote: "Opt-in frontier — $10/$50 per MTok · verify budget",
+      retention: { minDays: 30, zdrAvailable: false },
+    },
     { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
     {
       id: "claude-sonnet-4-6",
@@ -105,6 +113,7 @@ export function getDefaultModelForTier(
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   // Anthropic — Claude 4.x/5.x: all 1M context windows
   "claude-opus-5":     1_000_000, // default AND maximum — no smaller variant
+  "claude-fable-5":    1_000_000,
   "claude-sonnet-5":   1_000_000,
   "claude-opus-4-8":   1_000_000,
   "claude-opus-4-7":   1_000_000,
@@ -182,6 +191,9 @@ export const MODEL_MAX_OUTPUT_TOKENS: Record<string, number> = {
   // Anthropic account's credit balance is exhausted, and the billing check runs
   // BEFORE parameter validation, so no probe of any shape returns a ceiling.
   "claude-opus-5":     128_000,
+  // @unverified-probe(claude-fable-5) ceiling documented, never measured — same
+  // blocker as Opus 5: the Anthropic credit check precedes parameter validation.
+  "claude-fable-5":    128_000,
   "claude-sonnet-5":   128_000, // verified
   "claude-opus-4-8":    64_000, // family value (claude-opus-4-5 verified at 64k)
   "claude-opus-4-7":    64_000, // family value
@@ -219,6 +231,7 @@ export const DEFAULT_MAX_OUTPUT_TOKENS = 16_384;
  */
 export const UNVERIFIED_MODEL_PARAMS: Record<string, readonly string[]> = {
   "claude-opus-5": ["maxOutputTokens", "adaptiveThinking"],
+  "claude-fable-5": ["maxOutputTokens", "adaptiveThinking"],
 };
 
 /** Model IDs already warned about — resolution runs per request, the gap is per config. */

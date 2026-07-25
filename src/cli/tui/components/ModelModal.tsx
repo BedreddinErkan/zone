@@ -66,7 +66,11 @@ export function ModelModal({ dispatch }: Props): React.ReactElement {
         <Text color={selected ? "white" : undefined}>{label}</Text>
         {m.retention && !narrow && (
           <Text dimColor>
-            {`      ⚠ Requires ${m.retention.minDays}-day data retention · ZDR not available · longer than the 7-day API default`}
+            {`      ⚠ Requires ${m.retention.minDays}-day data retention · ` +
+             // Read the field rather than asserting it: a model that DOES offer ZDR
+             // would otherwise be described as not offering it.
+             `${m.retention.zdrAvailable ? "ZDR available" : "ZDR not available"} · ` +
+             `longer than the 7-day API default`}
           </Text>
         )}
       </Box>

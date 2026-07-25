@@ -27,6 +27,11 @@ export interface ModelRates {
 export const PRICING_USD_PER_MTOK: Record<ProviderName, Record<string, ModelRates>> = {
   anthropic: {
     "claude-opus-5":     { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
+    // cache_write is the 5-minute TTL rate. Fable also publishes a 1-hour cache-write
+    // rate of $20.00/MTok, deliberately not recorded: Zone only ever sets
+    // cache_control {type:"ephemeral"} (5-minute), so a 1-hour field would have no
+    // reader and would silently rot out of date.
+    "claude-fable-5":    { input: 10, output: 50, cache_read: 1, cache_write: 12.5 },
     "claude-opus-4-8":   { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
     "claude-opus-4-7":   { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
     "claude-opus-4-6":   { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
