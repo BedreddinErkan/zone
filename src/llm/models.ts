@@ -114,17 +114,48 @@ export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   "gpt-4o-mini":         128_000,
 };
 
+/** Context window assumed for models absent from MODEL_CONTEXT_WINDOWS. Conservative:
+ *  under-estimating compacts early, over-estimating would overflow the real window. */
+export const DEFAULT_CONTEXT_WINDOW = 200_000;
+
+/** Model IDs already warned about — getContextWindow runs per iteration, and the
+ *  fallback is a config gap, not a per-call event. */
+const contextWindowFallbackWarned = new Set<string>();
+
+/** Test-only: clear the once-per-model fallback-warning dedupe. */
+export function _resetContextWindowFallbackWarningsForTest(): void {
+  contextWindowFallbackWarned.clear();
+}
+
 /** Returns the model's context-window limit in tokens (chars/4 heuristic scale).
  *  Exact match first; then longest-prefix match (handles snapshot-suffixed IDs like
- *  "claude-sonnet-4-6-20260219"); falls back to 200k — conservative, never silently
- *  disables compaction. */
+ *  "claude-sonnet-4-6-20260219"); falls back to DEFAULT_CONTEXT_WINDOW — conservative,
+ *  never silently disables compaction. The fallback is announced: on a 1M-context model
+ *  it would compact at 150k, and nothing else in a transcript reveals that. */
 export function getContextWindow(modelId: string): number {
   if (modelId in MODEL_CONTEXT_WINDOWS) return MODEL_CONTEXT_WINDOWS[modelId];
   let best = "";
   for (const key of Object.keys(MODEL_CONTEXT_WINDOWS)) {
     if (modelId.startsWith(key) && key.length > best.length) best = key;
   }
-  return best ? MODEL_CONTEXT_WINDOWS[best] : 200_000;
+  if (best) return MODEL_CONTEXT_WINDOWS[best];
+
+  if (!contextWindowFallbackWarned.has(modelId)) {
+    contextWindowFallbackWarned.add(modelId);
+    // stderr, matching [zone-effort-clamped] — the sibling "your config silently
+    // degraded" warning in this layer.
+    console.warn(
+      "[zone-context-window-fallback]",
+      JSON.stringify({
+        modelId,
+        assumedContextWindow: DEFAULT_CONTEXT_WINDOW,
+        impact:
+          "compaction triggers at 75% of the assumed window; add this model to " +
+          "MODEL_CONTEXT_WINDOWS if its real window is larger",
+      })
+    );
+  }
+  return DEFAULT_CONTEXT_WINDOW;
 }
 
 /**

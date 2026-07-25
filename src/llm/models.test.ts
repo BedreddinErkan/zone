@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { MODEL_CATALOG, isValidModelId, getDefaultModelForTier, MODEL_CONTEXT_WINDOWS, getContextWindow, ESCALATION_LADDERS, nextStrongerModel } from "./models.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MODEL_CATALOG, isValidModelId, getDefaultModelForTier, MODEL_CONTEXT_WINDOWS, getContextWindow, ESCALATION_LADDERS, nextStrongerModel, DEFAULT_CONTEXT_WINDOW, _resetContextWindowFallbackWarningsForTest } from "./models.js";
 
 describe("MODEL_CATALOG", () => {
   it("gpt-4o-mini has workerSuitable: false", () => {
@@ -65,6 +65,47 @@ describe("getContextWindow + MODEL_CONTEXT_WINDOWS", () => {
   it("unknown model falls back to conservative 200k default", () => {
     expect(getContextWindow("unknown-model-xyz")).toBe(200_000);
     expect(getContextWindow("")).toBe(200_000);
+  });
+
+  describe("fallback is announced", () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      _resetContextWindowFallbackWarningsForTest();
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+      _resetContextWindowFallbackWarningsForTest();
+    });
+
+    it("warns with the model id and the assumed window when falling back", () => {
+      getContextWindow("some-brand-new-frontier-model");
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const [marker, payload] = warnSpy.mock.calls[0] as [string, string];
+      expect(marker).toBe("[zone-context-window-fallback]");
+      const parsed = JSON.parse(payload) as { modelId: string; assumedContextWindow: number };
+      expect(parsed.modelId).toBe("some-brand-new-frontier-model");
+      expect(parsed.assumedContextWindow).toBe(DEFAULT_CONTEXT_WINDOW);
+    });
+
+    it("warns once per model id — getContextWindow runs every iteration", () => {
+      getContextWindow("repeated-unknown-model");
+      getContextWindow("repeated-unknown-model");
+      getContextWindow("repeated-unknown-model");
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+
+      getContextWindow("a-different-unknown-model");
+      expect(warnSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("stays silent for exact and prefix matches", () => {
+      getContextWindow("claude-sonnet-4-6");
+      getContextWindow("claude-sonnet-4-6-20260219");
+      getContextWindow("gpt-4o");
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
   });
 
   it("every model in MODEL_CATALOG has an entry in MODEL_CONTEXT_WINDOWS", () => {
