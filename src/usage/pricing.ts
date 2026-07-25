@@ -1,8 +1,9 @@
 // BYOK pricing table. USD per million tokens.
 // Source: vendor pricing pages, May 2026 (verified against platform.claude.com/docs/en/about-claude/pricing and platform.openai.com/api/docs/pricing on 2026-05-08).
-// Anthropic cache_write rate is the documented 1.25x base. OpenAI cache writes
-// are not separately billed (cached input writes piggyback on uncached input);
-// cache_write=0 reflects that.
+// Anthropic cache_write rate is the documented 1.25x base. OpenAI cache writes were
+// historically not separately billed (cached input writes piggybacked on uncached
+// input), which is why the older OpenAI entries carry cache_write=0; the gpt-5.6
+// family does publish a cache-write rate and records it.
 
 export type TokenType = "input_uncached" | "cache_write" | "cache_read" | "output";
 export type ProviderName = "anthropic" | "openai";
@@ -22,6 +23,20 @@ export interface ModelRates {
   output: number;
   cache_read: number;
   cache_write: number;
+  /**
+   * Long-context surcharge. When a request's input exceeds thresholdInputTokens the
+   * ENTIRE request re-prices at these rates — not just the tokens above the line.
+   *
+   * Optional because flat pricing is the norm; only the gpt-5.6 family has a tier.
+   * All four buckets are required within it, since all four change together.
+   */
+  aboveThreshold?: {
+    thresholdInputTokens: number;
+    input: number;
+    output: number;
+    cache_read: number;
+    cache_write: number;
+  };
 }
 
 export const PRICING_USD_PER_MTOK: Record<ProviderName, Record<string, ModelRates>> = {
@@ -42,6 +57,16 @@ export const PRICING_USD_PER_MTOK: Record<ProviderName, Record<string, ModelRate
     "claude-haiku-4-5":  { input: 1, output: 5, cache_read: 0.1, cache_write: 1.25 },
   },
   openai: {
+    // gpt-5.6 family: above 272K input tokens the whole request re-prices, per
+    // OpenAI's documented family-wide multiplier (2.0x input, 1.5x output, applied
+    // to the cache rates too). sol's $10/$45 is an output of that rule, so the terra
+    // and luna figures are the same rule applied — not extrapolation from sol.
+    "gpt-5.6-sol":   { input: 5, output: 30, cache_read: 0.50, cache_write: 6.25,
+      aboveThreshold: { thresholdInputTokens: 272_000, input: 10, output: 45, cache_read: 1.00, cache_write: 12.50 } },
+    "gpt-5.6-terra": { input: 2.50, output: 15, cache_read: 0.25, cache_write: 3.125,
+      aboveThreshold: { thresholdInputTokens: 272_000, input: 5, output: 22.50, cache_read: 0.50, cache_write: 6.25 } },
+    "gpt-5.6-luna":  { input: 1, output: 6, cache_read: 0.10, cache_write: 1.25,
+      aboveThreshold: { thresholdInputTokens: 272_000, input: 2, output: 9, cache_read: 0.20, cache_write: 2.50 } },
     "gpt-5.5":      { input: 5, output: 30, cache_read: 0.50, cache_write: 0 },
     "gpt-5.4":      { input: 2.50, output: 15, cache_read: 0.25, cache_write: 0 },
     "gpt-5.4-mini": { input: 0.75, output: 4.50, cache_read: 0.075, cache_write: 0 },
@@ -51,28 +76,39 @@ export const PRICING_USD_PER_MTOK: Record<ProviderName, Record<string, ModelRate
   },
 };
 
+/**
+ * Rates for a model id. Exact match first; if not found, strip the date suffix the
+ * API returns even when the user picked a base alias
+ * ("claude-sonnet-4-5-20250929" -> "claude-sonnet-4-5").
+ *
+ * Shared by costFor and totalCost on purpose. recordingClient prefers the model id
+ * the API echoes back, which is usually snapshot-suffixed — so a lookup that skips
+ * this normalization would miss the entry, and in totalCost's case would silently
+ * miss `aboveThreshold` and price a long request at base rates.
+ */
+function resolveRates(provider: ProviderName, model: string): ModelRates | undefined {
+  const exact = PRICING_USD_PER_MTOK[provider]?.[model];
+  if (exact) return exact;
+  const baseModel = model
+    .replace(/-\d{8}$/, '')             // Anthropic snapshot: -YYYYMMDD
+    .replace(/-\d{4}-\d{2}-\d{2}$/, ''); // OpenAI snapshot: -YYYY-MM-DD
+  return baseModel !== model ? PRICING_USD_PER_MTOK[provider]?.[baseModel] : undefined;
+}
+
 export function costFor(
   provider: ProviderName,
   model: string,
   type: TokenType,
   tokens: number
 ): number {
-  // Try exact match first; if not found, strip Anthropic-style date
-  // suffix (-YYYYMMDD) which the API returns even when the user picked
-  // a base alias. Example: "claude-sonnet-4-5-20250929" -> "claude-sonnet-4-5".
-  let rates = PRICING_USD_PER_MTOK[provider]?.[model];
-  if (!rates) {
-    const baseModel = model
-      .replace(/-\d{8}$/, '')             // Anthropic snapshot: -YYYYMMDD
-      .replace(/-\d{4}-\d{2}-\d{2}$/, ''); // OpenAI snapshot: -YYYY-MM-DD
-    if (baseModel !== model) {
-      rates = PRICING_USD_PER_MTOK[provider]?.[baseModel];
-    }
-  }
+  const rates = resolveRates(provider, model);
   if (!rates) {
     console.warn(`[zone-pricing] unknown model ${provider}/${model}, cost=0`);
     return 0;
   }
+  // Deliberately base-rate only: costFor sees one bucket at a time and cannot know
+  // the request's total input, so it cannot evaluate a long-context threshold.
+  // totalCost is the whole-request view and owns that decision.
   return (tokens / 1_000_000) * rateFor(rates, type);
 }
 
@@ -101,10 +137,34 @@ export function totalCost(
   model: string,
   breakdown: Record<TokenType, number>
 ): number {
+  const rates = resolveRates(provider, model);
+  if (!rates) {
+    console.warn(`[zone-pricing] unknown model ${provider}/${model}, cost=0`);
+    return 0;
+  }
+
+  // A long-context surcharge keys on the request's INPUT size, which is every input
+  // bucket summed — input_uncached + cache_read + cache_write reconstructs
+  // prompt_tokens, since recordingClient derives input_uncached as
+  // prompt_tokens − cached_tokens. Using input_uncached alone would let a 500K
+  // request with a 99% cache hit report ~5K and never trip the threshold, which is
+  // exactly the shape a long agent run produces after its first iteration.
+  const inputTokens =
+    (breakdown.input_uncached ?? 0) + (breakdown.cache_read ?? 0) + (breakdown.cache_write ?? 0);
+
+  // Strictly greater than: the surcharge applies ABOVE the threshold, so a request
+  // exactly at it stays on base rates. This differs from the >= convention used by
+  // the budget/compaction thresholds elsewhere in the codebase — that is intentional
+  // here, not an oversight, because a one-token error is a 2x billing error.
+  const effective =
+    rates.aboveThreshold && inputTokens > rates.aboveThreshold.thresholdInputTokens
+      ? { ...rates, ...rates.aboveThreshold }
+      : rates;
+
   // Iterate the known buckets, not Object.keys(breakdown): callers pass wider
-  // objects, and an unpriced key must not reach costFor at all.
+  // objects, and an unpriced key must not be billed at all.
   return TOKEN_TYPES.reduce(
-    (sum, t) => sum + costFor(provider, model, t, breakdown[t] ?? 0),
+    (sum, t) => sum + ((breakdown[t] ?? 0) / 1_000_000) * rateFor(effective, t),
     0
   );
 }
@@ -117,7 +177,13 @@ export function formatCostNote(provider: ProviderName, modelId: string): string 
   const rates = PRICING_USD_PER_MTOK[provider]?.[modelId];
   if (!rates) return undefined;
   const fmt = (n: number) => String(parseFloat(n.toFixed(2)));
-  return `$${fmt(rates.input)}/$${fmt(rates.output)} per MTok`;
+  const base = `$${fmt(rates.input)}/$${fmt(rates.output)} per MTok`;
+  if (!rates.aboveThreshold) return base;
+  // Without this the picker quotes only the base rate for a model that can bill
+  // double, which is precisely the under-reporting the tier exists to prevent.
+  const t = rates.aboveThreshold;
+  const k = Math.round(t.thresholdInputTokens / 1000);
+  return `${base} · $${fmt(t.input)}/$${fmt(t.output)} above ${k}K input`;
 }
 
 /** Flat per-search fee charged by Anthropic (not model-specific). $10/1000 searches. */

@@ -17,6 +17,12 @@ export interface ModelOption {
 
 export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {
   openai: [
+    { id: "gpt-5.6-sol",   label: "GPT-5.6 Sol",
+      costNote: formatCostNote("openai", "gpt-5.6-sol") },
+    { id: "gpt-5.6-terra", label: "GPT-5.6 Terra",
+      costNote: formatCostNote("openai", "gpt-5.6-terra") },
+    { id: "gpt-5.6-luna",  label: "GPT-5.6 Luna",
+      costNote: formatCostNote("openai", "gpt-5.6-luna") },
     { id: "gpt-4o",       label: "GPT-4o",       recommendedTier: "high",
       costNote: formatCostNote("openai", "gpt-4o") },
     {
@@ -121,6 +127,9 @@ export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   "claude-sonnet-4-5": 1_000_000,
   "claude-haiku-4-5":    200_000,
   // OpenAI — 128k conservative for GPT-5.x; exact values vary by release
+  "gpt-5.6-sol":       1_050_000,
+  "gpt-5.6-terra":     1_050_000,
+  "gpt-5.6-luna":      1_050_000,
   "gpt-5.4":             128_000,
   "gpt-5.4-mini":        128_000,
   "gpt-5.5":             128_000,
@@ -200,6 +209,14 @@ export const MODEL_MAX_OUTPUT_TOKENS: Record<string, number> = {
   "claude-sonnet-4-6":  64_000, // family value (claude-sonnet-4-5 verified at 64k)
   "claude-sonnet-4-5":  64_000, // verified
   "claude-haiku-4-5":   64_000, // verified
+  // @unverified-probe(gpt-5.6-sol) documented ceiling; the Responses API accepts any
+  // max_output_tokens without validating it (999999 was echoed back and the request
+  // completed), so over-asking yields no error to read a real limit from.
+  "gpt-5.6-sol":       128_000,
+  // @unverified-probe(gpt-5.6-terra) same: no ceiling error is obtainable from the API.
+  "gpt-5.6-terra":     128_000,
+  // @unverified-probe(gpt-5.6-luna) same: no ceiling error is obtainable from the API.
+  "gpt-5.6-luna":      128_000,
   "gpt-5.5":           128_000,
   "gpt-5.4":           128_000,
   "gpt-5.4-mini":      128_000,
@@ -232,6 +249,9 @@ export const DEFAULT_MAX_OUTPUT_TOKENS = 16_384;
 export const UNVERIFIED_MODEL_PARAMS: Record<string, readonly string[]> = {
   "claude-opus-5": ["maxOutputTokens", "adaptiveThinking"],
   "claude-fable-5": ["maxOutputTokens", "adaptiveThinking"],
+  "gpt-5.6-sol": ["maxOutputTokens"],
+  "gpt-5.6-terra": ["maxOutputTokens"],
+  "gpt-5.6-luna": ["maxOutputTokens"],
 };
 
 /** Model IDs already warned about — resolution runs per request, the gap is per config. */

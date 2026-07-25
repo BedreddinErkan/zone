@@ -21,6 +21,9 @@ const EFFORT_SUPPORTED_MODELS = new Set([
   "claude-sonnet-4-6",
   "claude-sonnet-4-5",
   // claude-haiku-4-5 excluded: does not support extended thinking in Claude 4 series
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
   "gpt-5.5",
   "gpt-5.4",
   "gpt-5.4-mini",
@@ -74,6 +77,9 @@ const MODEL_EFFORT_LEVELS: Record<string, EffortLevel[]> = {
   "claude-sonnet-4-5": ["low", "medium", "high"],  // budget_tokens only; output_config unverified
   // Bucket 3 — Haiku: absent ⇒ resolver returns undefined ⇒ no effort sent (400 guard)
   // OpenAI — reasoning_effort; caps at "high" (xhigh/max narrowed in openaiAdapter.ts)
+  "gpt-5.6-sol":   ["low", "medium", "high"],
+  "gpt-5.6-terra": ["low", "medium", "high"],
+  "gpt-5.6-luna":  ["low", "medium", "high"],
   "gpt-5.5":      ["low", "medium", "high"],
   "gpt-5.4":      ["low", "medium", "high"],
   "gpt-5.4-mini": ["low", "medium", "high"],
