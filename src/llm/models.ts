@@ -312,3 +312,28 @@ export function getMaxOutputTokens(modelId: string): number {
   warnIfUnverifiedModelParams(modelId);
   return lookupMaxOutputTokens(modelId) ?? DEFAULT_MAX_OUTPUT_TOKENS;
 }
+
+/**
+ * Smallest prompt a model will actually cache, in characters (4 chars ≈ 1 token).
+ * Below the vendor's minimum the API silently no-ops the cache_control marker, so
+ * asking for a breakpoint there costs nothing but gains nothing.
+ *
+ * Only models whose minimum differs from the default belong here.
+ */
+export const MODEL_CACHE_MIN_CHARS: Record<string, number> = {
+  "claude-opus-5": 2_048, // 512-token minimum, a quarter of the Sonnet-era 2048
+};
+
+/** Cache minimum for models absent from MODEL_CACHE_MIN_CHARS: the ~2048-token
+ *  figure Sonnet 4.x requires, which is what every model used before this map. */
+export const DEFAULT_CACHE_MIN_CHARS = 8_200;
+
+/** Exact match, then longest-prefix, so dated snapshot IDs resolve to their alias. */
+export function getCacheMinChars(modelId: string): number {
+  if (modelId in MODEL_CACHE_MIN_CHARS) return MODEL_CACHE_MIN_CHARS[modelId];
+  let best = "";
+  for (const key of Object.keys(MODEL_CACHE_MIN_CHARS)) {
+    if (modelId.startsWith(key) && key.length > best.length) best = key;
+  }
+  return best ? MODEL_CACHE_MIN_CHARS[best] : DEFAULT_CACHE_MIN_CHARS;
+}

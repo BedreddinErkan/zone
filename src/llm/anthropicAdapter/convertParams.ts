@@ -7,7 +7,7 @@ import type {
 } from "openai/resources/chat/completions";
 import { applyMessageCacheBreakpoint2 } from "./cacheControlHelpers.js";
 import { supportsEffort, usesAdaptiveThinking, resolveEffortForModel } from "../modelRegistry.js";
-import { getMaxOutputTokens, lookupMaxOutputTokens } from "../models.js";
+import { getMaxOutputTokens, lookupMaxOutputTokens, getCacheMinChars } from "../models.js";
 import type { EffortLevel } from "../modelRegistry.js";
 
 // Existing low/medium/high values UNCHANGED. xhigh defensive (Sonnet won't receive it after resolver).
@@ -47,21 +47,25 @@ const JSON_MODE_INSTRUCTION = [
   "```",
 ].join("\n");
 
-// Anthropic prompt caching: minimum tokens for a cache breakpoint to be honored.
-// Sonnet 4.x requires ~2048 tokens. Below this, the API silently no-ops the
-// cache_control marker. Use a conservative char heuristic (4 chars ≈ 1 token).
-const CACHE_MIN_CHARS = 8200;
-
-function isCacheEligible(systemText: string, tools: Anthropic.Tool[] | undefined): boolean {
-  // System alone clears the 2048-token minimum: eligible even without tools.
-  if (systemText.length >= CACHE_MIN_CHARS) return true;
+// Anthropic prompt caching: minimum prompt size for a cache breakpoint to be
+// honored — below it the API silently no-ops the cache_control marker. The figure
+// is per-model (getCacheMinChars); Sonnet 4.x's ~2048 tokens remains the default.
+// Char heuristic throughout: 4 chars ≈ 1 token.
+function isCacheEligible(
+  systemText: string,
+  tools: Anthropic.Tool[] | undefined,
+  model: string
+): boolean {
+  const minChars = getCacheMinChars(model);
+  // System alone clears the minimum: eligible even without tools.
+  if (systemText.length >= minChars) return true;
   if (!tools || tools.length === 0) return false;
   const toolsChars = tools.reduce((sum, t) => {
     const desc = typeof t.description === "string" ? t.description.length : 0;
     const schema = JSON.stringify(t.input_schema || {}).length;
     return sum + t.name.length + desc + schema;
   }, 0);
-  return (systemText.length + toolsChars) >= CACHE_MIN_CHARS;
+  return (systemText.length + toolsChars) >= minChars;
 }
 
 const UNSUPPORTED_OPENAI_PARAMS = [
@@ -132,7 +136,7 @@ export function convertParams(
   // (5-min TTL). Two strategies depending on whether tools are present:
   //   • tools present: last-tool breakpoint covers system+tools (no separate system breakpoint needed).
   //   • no tools (synthesis calls): system block gets cache_control directly.
-  const cacheEligible = isCacheEligible(finalSystem || "", tools);
+  const cacheEligible = isCacheEligible(finalSystem || "", tools, input.model);
   let systemForRequest: Anthropic.MessageCreateParams["system"] = finalSystem || undefined;
   let toolsForRequest: Anthropic.Messages.ToolUnion[] | undefined = tools;
 
