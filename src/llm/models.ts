@@ -126,3 +126,54 @@ export function getContextWindow(modelId: string): number {
   }
   return best ? MODEL_CONTEXT_WINDOWS[best] : 200_000;
 }
+
+/**
+ * Maximum output tokens a model accepts in `max_tokens` — thinking tokens are spent
+ * inside this same budget, so it is the ceiling for thinking + text + tool-call JSON.
+ * Asking for more than a model allows is a hard 400, so these values double as the
+ * clamp applied in the Anthropic adapter.
+ *
+ * Anthropic values marked "verified" were read back from the API on 2026-07-25 by
+ * sending a deliberately oversized max_tokens, which returns:
+ *   "max_tokens: 999999 > 128000, which is the maximum allowed number of output
+ *    tokens for claude-sonnet-5"
+ * Forward-dated catalog IDs (opus-4-8/4-7, sonnet-4-6) cannot be probed; they take
+ * their family's verified ceiling.
+ */
+export const MODEL_MAX_OUTPUT_TOKENS: Record<string, number> = {
+  "claude-sonnet-5":   128_000, // verified
+  "claude-opus-4-8":    64_000, // family value (claude-opus-4-5 verified at 64k)
+  "claude-opus-4-7":    64_000, // family value
+  "claude-sonnet-4-6":  64_000, // family value (claude-sonnet-4-5 verified at 64k)
+  "claude-sonnet-4-5":  64_000, // verified
+  "claude-haiku-4-5":   64_000, // verified
+  "gpt-5.5":           128_000,
+  "gpt-5.4":           128_000,
+  "gpt-5.4-mini":      128_000,
+  "gpt-5.4-nano":      128_000,
+  "gpt-4o":             16_384,
+  "gpt-4o-mini":        16_384,
+};
+
+/** Output budget used for models absent from MODEL_MAX_OUTPUT_TOKENS. Chosen as the
+ *  smallest known ceiling so an unlisted ID can never 400 by over-asking. */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 16_384;
+
+/** The model's declared output ceiling, or undefined when the model is unlisted.
+ *  Exact match first, then longest-prefix (dated snapshot IDs). Callers that must
+ *  clamp use this; callers that just need a budget use getMaxOutputTokens. */
+export function lookupMaxOutputTokens(modelId: string): number | undefined {
+  if (modelId in MODEL_MAX_OUTPUT_TOKENS) return MODEL_MAX_OUTPUT_TOKENS[modelId];
+  let best = "";
+  for (const key of Object.keys(MODEL_MAX_OUTPUT_TOKENS)) {
+    if (modelId.startsWith(key) && key.length > best.length) best = key;
+  }
+  return best ? MODEL_MAX_OUTPUT_TOKENS[best] : undefined;
+}
+
+/** Output-token budget for one call to `modelId`: its catalog ceiling, or the
+ *  conservative default when unlisted. max_tokens is a ceiling, not a reservation —
+ *  only tokens actually produced are billed. */
+export function getMaxOutputTokens(modelId: string): number {
+  return lookupMaxOutputTokens(modelId) ?? DEFAULT_MAX_OUTPUT_TOKENS;
+}

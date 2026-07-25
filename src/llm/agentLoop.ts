@@ -70,7 +70,7 @@ import type {
 } from "openai/resources/chat/completions";
 import type { Mode } from "../types/mode.js";
 import { ContextCompactor } from "./compaction/ContextCompactor.js";
-import { getContextWindow, nextStrongerModel } from "./models.js";
+import { getContextWindow, getMaxOutputTokens, nextStrongerModel } from "./models.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
 import type { LLMProvider } from "./types.js";
 import { hashToolCall, createDetectorState, recordAndDetect, LOOP_DETECT_EXEMPT_TOOLS } from "./loopDetector.js";
@@ -2587,9 +2587,10 @@ Example:
       "Token budget reached before a final answer was produced.";
     try {
       const { pruned: wrapupPruned } = pruneStaleReads(messages);
+      const wrapupModel = escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride);
       const wrapupResponse = await client.createChatCompletion(
         {
-          model: escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride),
+          model: wrapupModel,
           messages: [
             ...wrapupPruned,
             {
@@ -2604,7 +2605,7 @@ Example:
                   : "Mention which steps remain incomplete."),
             },
           ],
-          max_tokens: 16384,
+          max_tokens: getMaxOutputTokens(wrapupModel),
         },
         { signal: input.abortSignal, effort: requestCtx?.effort }
       );
@@ -3283,7 +3284,7 @@ Example:
           messages: prunedMessages,
           tools: toolsForLLM,
           tool_choice: "auto",
-          max_tokens: 16384,
+          max_tokens: getMaxOutputTokens(modelName),
           ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
         },
         { signal: input.abortSignal, onToolArgumentsDelta, onRetryEvent, effort: requestCtx?.effort, webSearch: input.webSearchEnabled }
@@ -4276,7 +4277,7 @@ Example:
               // No tools — pure text continuation; prevents the model from emitting
               // a tool call instead of finishing the prose answer.
               tool_choice: "none",
-              max_tokens: 16384,
+              max_tokens: getMaxOutputTokens(modelName),
             },
             { signal: input.abortSignal, onToolArgumentsDelta, onRetryEvent, effort: requestCtx?.effort, webSearch: input.webSearchEnabled }
           );
@@ -4398,8 +4399,9 @@ Example:
     );
     let finalSummary = "Max iterations reached before a final answer was produced.";
     try {
+      const chatAssessmentModel = escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride);
       const assessmentResponse = await client.createChatCompletion({
-        model: escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride),
+        model: chatAssessmentModel,
         messages: [
           ...responseInput,
           {
@@ -4412,7 +4414,7 @@ Example:
               "Do not call tools. Do not mention patches or verification.",
           },
         ],
-        max_tokens: 16384,
+        max_tokens: getMaxOutputTokens(chatAssessmentModel),
       }, { signal: input.abortSignal, effort: requestCtx?.effort });
       const ae = extractResponsesApiOutputText(assessmentResponse);
       if (ae.ok && ae.text.trim()) {
@@ -4473,8 +4475,9 @@ Example:
     return "";
   })();
   try {
+    const finalAssessmentModel = escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride);
     const assessmentResponse = await client.createChatCompletion({
-      model: escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride),
+      model: finalAssessmentModel,
       messages: [
         ...responseInput,
         {
@@ -4493,7 +4496,7 @@ Example:
             fwHint,
         },
       ],
-      max_tokens: 16384,
+      max_tokens: getMaxOutputTokens(finalAssessmentModel),
     }, { signal: input.abortSignal, effort: requestCtx?.effort });
     const ae = extractResponsesApiOutputText(assessmentResponse);
       if (ae.ok && ae.text.trim()) {

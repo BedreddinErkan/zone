@@ -7,6 +7,7 @@ import type {
 } from "openai/resources/chat/completions";
 import { applyMessageCacheBreakpoint2 } from "./cacheControlHelpers.js";
 import { supportsEffort, usesAdaptiveThinking, resolveEffortForModel } from "../modelRegistry.js";
+import { getMaxOutputTokens, lookupMaxOutputTokens } from "../models.js";
 import type { EffortLevel } from "../modelRegistry.js";
 
 // Existing low/medium/high values UNCHANGED. xhigh defensive (Sonnet won't receive it after resolver).
@@ -16,6 +17,12 @@ const EFFORT_BUDGET_MAP: Record<EffortLevel, number> = { low: 1024, medium: 8192
 // high:16384 = today's agent-loop value (no regression). xhigh/max raise headroom.
 const EFFORT_MAX_TOKENS_FLOOR: Record<EffortLevel, number> =
   { low: 4096, medium: 8192, high: 16384, xhigh: 32000, max: 64000 };
+
+// Adaptive models think whether or not Zone configures an effort level — the server
+// decides. Thinking is spent inside max_tokens, so the floor must apply on the
+// effort-unset path too; "high" is the level whose floor equals the agent loop's
+// historical 16384 ceiling, so this can only raise a budget, never lower one.
+const DEFAULT_ADAPTIVE_EFFORT: EffortLevel = "high";
 
 export interface ConvertParamsExtras {
   effort?: EffortLevel;
@@ -57,8 +64,6 @@ function isCacheEligible(systemText: string, tools: Anthropic.Tool[] | undefined
   return (systemText.length + toolsChars) >= CACHE_MIN_CHARS;
 }
 
-const DEFAULT_MAX_TOKENS = 4096;
-
 const UNSUPPORTED_OPENAI_PARAMS = [
   "frequency_penalty",
   "presence_penalty",
@@ -99,12 +104,15 @@ export function convertParams(
   const tools = translateTools(input.tools, warnings);
   const tool_choice = translateToolChoice(input.tool_choice);
 
+  // No caller-supplied budget → the model's own output ceiling. A fixed small default
+  // (formerly 4096) silently truncated thinking models mid-answer: thinking is billed
+  // inside max_tokens, so plan-gen/summarizer JSON came back cut off.
   const max_tokens =
     typeof input.max_tokens === "number" && input.max_tokens > 0
       ? input.max_tokens
       : typeof input.max_completion_tokens === "number" && input.max_completion_tokens > 0
         ? input.max_completion_tokens
-        : DEFAULT_MAX_TOKENS;
+        : getMaxOutputTokens(input.model);
 
   const temperature =
     typeof input.temperature === "number"
@@ -185,11 +193,19 @@ export function convertParams(
       ? EFFORT_BUDGET_MAP[resolvedEffort]
       : undefined;
 
-  const effectiveMaxTokens = thinkingBudget
-    ? Math.max(max_tokens, thinkingBudget + 2048)
-    : adaptive && resolvedEffort
-      ? Math.max(max_tokens, EFFORT_MAX_TOKENS_FLOOR[resolvedEffort])
-      : max_tokens;
+  // Floor applies whenever the model thinks — including adaptive models with no
+  // configured effort, which previously got no floor at all.
+  const thinkingFloor = thinkingBudget
+    ? thinkingBudget + 2048
+    : adaptive
+      ? EFFORT_MAX_TOKENS_FLOOR[resolvedEffort ?? DEFAULT_ADAPTIVE_EFFORT]
+      : 0;
+  // Clamp to the model's declared ceiling: over-asking is a hard 400. Unlisted models
+  // pass through unclamped — we don't know their ceiling and must not invent one.
+  const modelCeiling = lookupMaxOutputTokens(input.model);
+  const budgetedMaxTokens = Math.max(max_tokens, thinkingFloor);
+  const effectiveMaxTokens =
+    modelCeiling !== undefined ? Math.min(budgetedMaxTokens, modelCeiling) : budgetedMaxTokens;
 
   const params: Anthropic.MessageCreateParams = {
     model: input.model,
