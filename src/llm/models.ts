@@ -233,11 +233,11 @@ export const DEFAULT_MAX_OUTPUT_TOKENS = 16_384;
  * Models whose catalog parameters were taken from vendor documentation and never
  * measured against the live API, with the parameters in question.
  *
- * Every entry here has a matching marker — the tag `@unverified-probe` followed by
- * the model id in parentheses — at the value it describes, so `rg '@unverified-probe'`
- * is the exact re-probe checklist: nothing more, nothing less. (This comment states
- * the form in prose deliberately; writing the literal tag here would make the
- * checklist include itself.) Clear the marker and the entry together;
+ * Every entry here has a matching marker at the value it describes: an at-sign
+ * "unverified-probe" tag followed by the model id in parentheses. Grepping that tag
+ * yields the exact re-probe checklist — nothing more, nothing less, which is why no
+ * prose anywhere writes the tag literally, including this sentence. Clear the marker
+ * and the entry together;
  * `models.unverified.test.ts` fails if the two drift apart, both when an unmarked
  * entry appears and when a probe clears one and the checklist is left behind.
  *
@@ -288,7 +288,7 @@ export function warnIfUnverifiedModelParams(modelId: string): void {
       unverified: UNVERIFIED_MODEL_PARAMS[key],
       impact:
         "these values come from vendor documentation, not from a live probe; " +
-        "re-probe and clear the matching @unverified-probe markers",
+        "re-probe and clear the matching unverified-probe markers",
     })
   );
 }

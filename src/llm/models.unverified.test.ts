@@ -1,9 +1,10 @@
 /**
- * The @unverified-probe checklist must stay exactly in sync with
+ * The unverified-probe marker checklist must stay exactly in sync with
  * UNVERIFIED_MODEL_PARAMS.
  *
- * `rg '@unverified-probe'` is meant to be the re-probe to-do list. That only holds
- * if the markers and the registry agree, so this test fails in both directions:
+ * Grepping the marker tag (assembled below, never written literally in this file) is
+ * meant to return the re-probe to-do list and nothing else. That only holds if the
+ * markers and the registry agree, so this test fails in both directions:
  * when an entry is added without a marker (or vice versa), and when a probe clears
  * one and the other half is left rotting behind.
  */
@@ -24,7 +25,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  *  this test, so new locations must be added here deliberately. */
 const MARKED_SOURCES = ["models.ts", "modelRegistry.ts"];
 
-const MARKER_RE = /@unverified-probe\(([^)]+)\)/g;
+// Assembled from parts so this file never contains the literal tag. `rg` on the tag
+// is meant to return the re-probe checklist and nothing else — a scanner that matches
+// itself would put a phantom entry at the top of that list every time.
+const MARKER_TAG = "@unverified" + "-probe";
+const MARKER_RE = new RegExp(`${MARKER_TAG}\\(([^)]+)\\)`, "g");
 
 function markedModelIds(): Set<string> {
   const found = new Set<string>();
@@ -35,7 +40,7 @@ function markedModelIds(): Set<string> {
   return found;
 }
 
-describe("@unverified-probe markers", () => {
+describe("unverified-probe markers", () => {
   afterEach(() => {
     _resetUnverifiedModelWarningsForTest();
     vi.restoreAllMocks();
@@ -59,9 +64,9 @@ describe("@unverified-probe markers", () => {
     for (const file of MARKED_SOURCES) {
       const lines = readFileSync(join(HERE, file), "utf8").split("\n");
       lines.forEach((line, i) => {
-        if (!line.includes("@unverified-probe(")) return;
+        if (!line.includes(`${MARKER_TAG}(`)) return;
         const context = lines.slice(i, i + 3).join(" ");
-        const afterMarker = context.split(/@unverified-probe\([^)]+\)/)[1] ?? "";
+        const afterMarker = context.split(new RegExp(`${MARKER_TAG}\\([^)]+\\)`))[1] ?? "";
         expect(
           afterMarker.replace(/[^a-z]/gi, "").length,
           `marker in ${file} line ${i + 1} has no reason text`
