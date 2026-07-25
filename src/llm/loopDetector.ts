@@ -6,8 +6,16 @@
  *  - count === WARN_THRESHOLD (3): warn the model via injected context message
  *  - count >= TERMINATE_THRESHOLD (4): graceful exit, no further LLM call
  *
+ * Identity includes workspace state: two identical calls made against different
+ * staged content are different calls, because the second one can return a
+ * different result. Without this, a red-green cycle (test → fix → test → fix →
+ * test) reaches four identical `npm test` hashes inside the 8-call window and
+ * terminates a run that is converging normally.
+ *
  * Pure functions; caller (agentLoop) owns the DetectorState per-run.
  */
+
+import { createHash } from "node:crypto";
 
 export const WINDOW_SIZE = 8;
 export const WARN_THRESHOLD = 3;
@@ -43,10 +51,25 @@ function canonicalize(value: unknown): unknown {
   return out;
 }
 
-/** Stable identity for a tool call. Same (tool, args) → same hash, even when
- *  caller passed args with keys in a different order. */
-export function hashToolCall(toolName: string, args: unknown): string {
-  return String(toolName) + ":" + JSON.stringify(canonicalize(args ?? {}));
+/**
+ * Fingerprint of the staged workspace: order-independent over paths, sensitive to
+ * content. Shared with toolExecutor's command memoizer so the two subsystems agree
+ * on what makes two identical invocations "the same call".
+ */
+export function hashStagingState(stagingFiles: Map<string, string> | undefined): string {
+  const sortedEntries = Array.from((stagingFiles ?? new Map<string, string>()).entries()).sort(
+    ([a], [b]) => a.localeCompare(b),
+  );
+  return createHash("sha256").update(JSON.stringify(sortedEntries)).digest("hex").slice(0, 16);
+}
+
+/** Stable identity for a tool call. Same (tool, args, workspace) → same hash, even
+ *  when caller passed args with keys in a different order. `workspaceState` is the
+ *  hashStagingState fingerprint; omitting it reproduces the pre-workspace behavior
+ *  (used by callers that have no staging map, and by existing callers under test). */
+export function hashToolCall(toolName: string, args: unknown, workspaceState?: string): string {
+  const base = String(toolName) + ":" + JSON.stringify(canonicalize(args ?? {}));
+  return workspaceState ? `${base}|${workspaceState}` : base;
 }
 
 export function createDetectorState(): DetectorState {

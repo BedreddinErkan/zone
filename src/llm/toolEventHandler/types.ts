@@ -71,9 +71,13 @@ export interface HandleToolResultDeps {
   extractSemanticSmellName: (output: string) => string;
   extractErrorLine: (output: string) => number | null;
   hashPatchBlocks: (args: Record<string, unknown>) => string;
-  hashToolCall: (name: string, args: Record<string, unknown>) => string;
+  hashToolCall: (name: string, args: Record<string, unknown>, workspaceState?: string) => string;
   recordAndDetect: (state: DetectorState, hash: string) => { status: "ok" | "warn" | "terminate"; count: number };
   repoPath: string;
+  /** Staged file contents, used to fold workspace state into the loop-detector hash
+   *  so a repeat against changed staging is not counted as a loop. Optional so
+   *  existing test fixtures don't need updating; absent ⇒ args-only identity. */
+  stagingFiles?: Map<string, string>;
   /** Adaptive replan enabler (Inc-2). Optional so existing test fixtures don't need updating. */
   replanEnabled?: boolean;
   /** Mutable counter shared by ref — count>=1 means the one-shot guard has fired. */

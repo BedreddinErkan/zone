@@ -7,7 +7,7 @@ import {
   computeFeederAction,
 } from "../noProgressFeeder.js";
 import { emitToolResultSize } from "../loopTelemetry.js";
-import { LOOP_DETECT_EXEMPT_TOOLS } from "../loopDetector.js";
+import { LOOP_DETECT_EXEMPT_TOOLS, hashStagingState } from "../loopDetector.js";
 import type { ToolResult } from "../../tools/toolExecutor.js";
 import type { ToolEventContext, ToolEventResult, HandleToolResultDeps } from "./types.js";
 
@@ -254,7 +254,9 @@ export async function handleToolResult(
 
   // Step 12: loop detection (exempt polling tools — repeated identical calls are legitimate)
   if (!LOOP_DETECT_EXEMPT_TOOLS.has(name)) {
-    const loopHash = deps.hashToolCall(name, parsedArgs);
+    // Workspace state is part of call identity: the same command re-run after an edit
+    // is a new observation, not a repeat. Defensive — fixtures may omit stagingFiles.
+    const loopHash = deps.hashToolCall(name, parsedArgs, hashStagingState(deps.stagingFiles));
     const loopResult = deps.recordAndDetect(deps.detectorState, loopHash);
     ctx.lastLoopResult = loopResult;
     if (loopResult.status === "terminate") {

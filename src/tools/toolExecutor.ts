@@ -26,6 +26,7 @@ import { findCheckerForFile, trackCheckerUnavailableWarning } from "./syntaxChec
 import { classifyShellExit } from "./classifyShellExit.js";
 import { validateRunEnvironment } from "./runEnvironment.js";
 import { checkCommandSafe } from "../llm/runCommandSafe.js";
+import { hashStagingState } from "../llm/loopDetector.js";
 import { MEMORY_WARN_THRESHOLD_BYTES } from "../memory/constants.js";
 
 const execAsync = promisify(exec);
@@ -91,13 +92,9 @@ export function computeCommandFingerprint(
   cmd: string,
   stagingFiles: Map<string, string> | undefined,
 ): string {
-  const sortedEntries = Array.from((stagingFiles ?? new Map()).entries()).sort(
-    ([a], [b]) => a.localeCompare(b),
-  );
-  const stagingHash = createHash("sha256")
-    .update(JSON.stringify(sortedEntries))
-    .digest("hex")
-    .slice(0, 16);
+  // hashStagingState is shared with the loop detector so both subsystems answer
+  // "did the workspace change between these two identical calls?" the same way.
+  const stagingHash = hashStagingState(stagingFiles);
   return createHash("sha256")
     .update(`${cmd.trim()}|${stagingHash}`)
     .digest("hex")

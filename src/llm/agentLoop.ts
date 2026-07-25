@@ -73,7 +73,7 @@ import { ContextCompactor } from "./compaction/ContextCompactor.js";
 import { getContextWindow, getMaxOutputTokens, nextStrongerModel } from "./models.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
 import type { LLMProvider } from "./types.js";
-import { hashToolCall, createDetectorState, recordAndDetect, LOOP_DETECT_EXEMPT_TOOLS } from "./loopDetector.js";
+import { hashToolCall, createDetectorState, recordAndDetect, hashStagingState, LOOP_DETECT_EXEMPT_TOOLS } from "./loopDetector.js";
 import {
   type AntiThrashContext,
   type AntiThrashSignal,
@@ -3511,6 +3511,7 @@ Example:
         hashToolCall,
         recordAndDetect,
         repoPath: input.repoPath,
+        stagingFiles,
         replanEnabled,
         replanState,
       };
@@ -3814,7 +3815,7 @@ Example:
             failureHistory.set(targetFilePath, noReadList);
             // C.1: feed the pre-exec reject into the loop detector (handleToolResult is skipped via continue)
             if (!LOOP_DETECT_EXEMPT_TOOLS.has(name)) {
-            const preExecHash = hashToolCall(name, parsedArgs);
+            const preExecHash = hashToolCall(name, parsedArgs, hashStagingState(stagingFiles));
             const preExecLoopResult = recordAndDetect(detectorState, preExecHash);
             if (preExecLoopResult.status === "terminate") {
               input.onStructuredEvent?.({
