@@ -14,7 +14,10 @@ const ALL_EFFORT_LABELS: Record<EffortLevel, string> = {
   low:   "Low — Faster, less deliberation",
   medium: "Medium — Balanced (default)",
   high:  "High — Slower, deeper analysis",
-  xhigh: "XHigh — Extended reasoning (Opus 4.8/4.7 only)",
+  // Deliberately does not enumerate models: the list is MODEL_EFFORT_LEVELS, and a
+  // hard-coded roster here goes stale on every model addition. The modal already
+  // shows only the levels the selected model allows.
+  xhigh: "XHigh — Extended reasoning (not supported by every model)",
   max:   "Max — Maximum reasoning budget",
 };
 

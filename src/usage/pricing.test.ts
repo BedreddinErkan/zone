@@ -41,6 +41,21 @@ describe("pricing — claude-sonnet-5", () => {
   });
 });
 
+describe("pricing — claude-opus-5", () => {
+  it("input $5/MTok", () => {
+    expect(costFor("anthropic", "claude-opus-5", "input_uncached", 1_000_000)).toBe(5);
+  });
+
+  it("output $25/MTok", () => {
+    expect(costFor("anthropic", "claude-opus-5", "output", 1_000_000)).toBe(25);
+  });
+
+  it("cache_read $0.50/MTok, cache_write $6.25/MTok", () => {
+    expect(costFor("anthropic", "claude-opus-5", "cache_read", 1_000_000)).toBe(0.5);
+    expect(costFor("anthropic", "claude-opus-5", "cache_write", 1_000_000)).toBe(6.25);
+  });
+});
+
 describe("formatCostNote", () => {
   it("returns formatted rate for known OpenAI models", () => {
     expect(formatCostNote("openai", "gpt-5.5")).toBe("$5/$30 per MTok");

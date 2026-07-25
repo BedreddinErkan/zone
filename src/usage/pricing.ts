@@ -26,6 +26,7 @@ export interface ModelRates {
 
 export const PRICING_USD_PER_MTOK: Record<ProviderName, Record<string, ModelRates>> = {
   anthropic: {
+    "claude-opus-5":     { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
     "claude-opus-4-8":   { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
     "claude-opus-4-7":   { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
     "claude-opus-4-6":   { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },

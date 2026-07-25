@@ -13,6 +13,7 @@ export interface ModelEntry {
 }
 
 const EFFORT_SUPPORTED_MODELS = new Set([
+  "claude-opus-5",
   "claude-opus-4-8",
   "claude-opus-4-7",
   "claude-sonnet-5",
@@ -28,6 +29,12 @@ const EFFORT_SUPPORTED_MODELS = new Set([
 // Models that use adaptive thinking only (thinking:{type:"adaptive"} + output_config.effort).
 // budget_tokens / temperature / top_p / stop_sequences are all removed on this family.
 const ADAPTIVE_THINKING_MODELS = new Set([
+  // @unverified-probe(claude-opus-5) family inferred, never measured: thinking is on
+  // by default, the ladder runs to xhigh/max, and thinking:{type:"disabled"} is
+  // accepted only at effort ≤ high — all three are the adaptive surface. The probe
+  // that would confirm it is blocked on the Anthropic credit balance. If this is
+  // wrong, every Opus 5 request 400s immediately rather than degrading quietly.
+  "claude-opus-5",
   "claude-opus-4-8",
   "claude-opus-4-7",
   "claude-sonnet-5",
@@ -51,6 +58,7 @@ export function normalizeModelId(id: string): string {
 // gpt-5.5/gpt-5.4/gpt-5.4-mini: reasoning_effort caps at "high" per OpenAI API (no xhigh/max).
 const MODEL_EFFORT_LEVELS: Record<string, EffortLevel[]> = {
   // Bucket 1 — adaptive (output_config.effort required), full 5-level range
+  "claude-opus-5":     ["low", "medium", "high", "xhigh", "max"],
   "claude-opus-4-8":   ["low", "medium", "high", "xhigh", "max"],
   "claude-opus-4-7":   ["low", "medium", "high", "xhigh", "max"],
   "claude-sonnet-5":   ["low", "medium", "high", "xhigh", "max"],

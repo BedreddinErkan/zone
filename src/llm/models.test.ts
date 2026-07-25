@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MODEL_CATALOG, isValidModelId, getDefaultModelForTier, MODEL_CONTEXT_WINDOWS, getContextWindow, ESCALATION_LADDERS, nextStrongerModel, DEFAULT_CONTEXT_WINDOW, _resetContextWindowFallbackWarningsForTest } from "./models.js";
+import { MODEL_CATALOG, isValidModelId, getDefaultModelForTier, MODEL_CONTEXT_WINDOWS, getContextWindow, ESCALATION_LADDERS, nextStrongerModel, DEFAULT_CONTEXT_WINDOW, MODEL_MAX_OUTPUT_TOKENS, _resetContextWindowFallbackWarningsForTest } from "./models.js";
 
 describe("MODEL_CATALOG", () => {
   it("gpt-4o-mini has workerSuitable: false", () => {
@@ -111,6 +111,14 @@ describe("getContextWindow + MODEL_CONTEXT_WINDOWS", () => {
   it("every model in MODEL_CATALOG has an entry in MODEL_CONTEXT_WINDOWS", () => {
     const allModelIds = Object.values(MODEL_CATALOG).flat().map((m) => m.id);
     const missing = allModelIds.filter((id) => !(id in MODEL_CONTEXT_WINDOWS));
+    expect(missing).toEqual([]);
+  });
+
+  it("every model in MODEL_CATALOG has an entry in MODEL_MAX_OUTPUT_TOKENS", () => {
+    // Absence is silent: getMaxOutputTokens falls back to 16_384, capping a
+    // 128k-output model at 12.8% with nothing in the transcript to say so.
+    const allModelIds = Object.values(MODEL_CATALOG).flat().map((m) => m.id);
+    const missing = allModelIds.filter((id) => !(id in MODEL_MAX_OUTPUT_TOKENS));
     expect(missing).toEqual([]);
   });
 });

@@ -40,6 +40,11 @@ export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {
       costNote: formatCostNote("openai", "gpt-5.4-nano") },
   ],
   anthropic: [
+    {
+      id: "claude-opus-5",
+      label: "Claude Opus 5",
+      costNote: "Frontier — $5/$25 per MTok",
+    },
     { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
     {
       id: "claude-sonnet-4-6",
@@ -99,6 +104,7 @@ export function getDefaultModelForTier(
 
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   // Anthropic — Claude 4.x/5.x: all 1M context windows
+  "claude-opus-5":     1_000_000, // default AND maximum — no smaller variant
   "claude-sonnet-5":   1_000_000,
   "claude-opus-4-8":   1_000_000,
   "claude-opus-4-7":   1_000_000,
@@ -172,6 +178,10 @@ export function getContextWindow(modelId: string): number {
  * their family's verified ceiling.
  */
 export const MODEL_MAX_OUTPUT_TOKENS: Record<string, number> = {
+  // @unverified-probe(claude-opus-5) ceiling documented, never measured — the
+  // Anthropic account's credit balance is exhausted, and the billing check runs
+  // BEFORE parameter validation, so no probe of any shape returns a ceiling.
+  "claude-opus-5":     128_000,
   "claude-sonnet-5":   128_000, // verified
   "claude-opus-4-8":    64_000, // family value (claude-opus-4-5 verified at 64k)
   "claude-opus-4-7":    64_000, // family value
@@ -190,6 +200,66 @@ export const MODEL_MAX_OUTPUT_TOKENS: Record<string, number> = {
  *  smallest known ceiling so an unlisted ID can never 400 by over-asking. */
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16_384;
 
+/**
+ * Models whose catalog parameters were taken from vendor documentation and never
+ * measured against the live API, with the parameters in question.
+ *
+ * Every entry here has a matching marker — the tag `@unverified-probe` followed by
+ * the model id in parentheses — at the value it describes, so `rg '@unverified-probe'`
+ * is the exact re-probe checklist: nothing more, nothing less. (This comment states
+ * the form in prose deliberately; writing the literal tag here would make the
+ * checklist include itself.) Clear the marker and the entry together;
+ * `models.unverified.test.ts` fails if the two drift apart, both when an unmarked
+ * entry appears and when a probe clears one and the checklist is left behind.
+ *
+ * A documented-but-unmeasured ceiling is recorded at its documented value rather
+ * than a conservative guess: convertParams clamps to it, so a too-high value
+ * produces a loud 400 naming the real limit, while a too-low one truncates output
+ * silently. Being wrong loudly is the better failure.
+ */
+export const UNVERIFIED_MODEL_PARAMS: Record<string, readonly string[]> = {
+  "claude-opus-5": ["maxOutputTokens", "adaptiveThinking"],
+};
+
+/** Model IDs already warned about — resolution runs per request, the gap is per config. */
+const unverifiedParamsWarned = new Set<string>();
+
+/** Test-only: clear the once-per-model unverified-params warning dedupe. */
+export function _resetUnverifiedModelWarningsForTest(): void {
+  unverifiedParamsWarned.clear();
+}
+
+/** Exact match, then longest-prefix, so dated snapshot IDs resolve to their alias. */
+function resolveUnverifiedKey(modelId: string): string | undefined {
+  if (modelId in UNVERIFIED_MODEL_PARAMS) return modelId;
+  let best = "";
+  for (const key of Object.keys(UNVERIFIED_MODEL_PARAMS)) {
+    if (modelId.startsWith(key) && key.length > best.length) best = key;
+  }
+  return best || undefined;
+}
+
+/**
+ * Announce, once per model, that a model in use carries assumed rather than measured
+ * parameters. Called from getMaxOutputTokens because every request path resolves an
+ * output budget, so this covers TUI selection, `--model`, and subagents alike.
+ */
+export function warnIfUnverifiedModelParams(modelId: string): void {
+  const key = resolveUnverifiedKey(modelId);
+  if (!key || unverifiedParamsWarned.has(key)) return;
+  unverifiedParamsWarned.add(key);
+  console.warn(
+    "[zone-unverified-model-params]",
+    JSON.stringify({
+      modelId: key,
+      unverified: UNVERIFIED_MODEL_PARAMS[key],
+      impact:
+        "these values come from vendor documentation, not from a live probe; " +
+        "re-probe and clear the matching @unverified-probe markers",
+    })
+  );
+}
+
 /** The model's declared output ceiling, or undefined when the model is unlisted.
  *  Exact match first, then longest-prefix (dated snapshot IDs). Callers that must
  *  clamp use this; callers that just need a budget use getMaxOutputTokens. */
@@ -206,5 +276,6 @@ export function lookupMaxOutputTokens(modelId: string): number | undefined {
  *  conservative default when unlisted. max_tokens is a ceiling, not a reservation —
  *  only tokens actually produced are billed. */
 export function getMaxOutputTokens(modelId: string): number {
+  warnIfUnverifiedModelParams(modelId);
   return lookupMaxOutputTokens(modelId) ?? DEFAULT_MAX_OUTPUT_TOKENS;
 }

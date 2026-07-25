@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getProviderForModel, supportsEffort, usesAdaptiveThinking, normalizeModelId, effortLevelsFor } from "./modelRegistry.js";
+import { getProviderForModel, supportsEffort, usesAdaptiveThinking, normalizeModelId, effortLevelsFor, resolveEffortForModel } from "./modelRegistry.js";
 import { MODEL_CATALOG } from "./models.js";
 
 describe("modelRegistry", () => {
@@ -13,6 +13,7 @@ describe("modelRegistry", () => {
   });
 
   it("supportsEffort returns true for supporting models and false for others", () => {
+    expect(supportsEffort("claude-opus-5")).toBe(true);
     expect(supportsEffort("claude-sonnet-5")).toBe(true);
     expect(supportsEffort("claude-sonnet-4-6")).toBe(true);
     expect(supportsEffort("claude-opus-4-8")).toBe(true);
@@ -28,6 +29,7 @@ describe("modelRegistry", () => {
   });
 
   it("usesAdaptiveThinking: true for adaptive family, false for others", () => {
+    expect(usesAdaptiveThinking("claude-opus-5")).toBe(true);
     expect(usesAdaptiveThinking("claude-opus-4-8")).toBe(true);
     expect(usesAdaptiveThinking("claude-opus-4-7")).toBe(true);
     expect(usesAdaptiveThinking("claude-sonnet-5")).toBe(true);
@@ -38,6 +40,14 @@ describe("modelRegistry", () => {
 
   it("claude-sonnet-5: effort levels match adaptive bucket (full 5-level range)", () => {
     expect(effortLevelsFor("claude-sonnet-5")).toEqual(["low", "medium", "high", "xhigh", "max"]);
+  });
+
+  it("claude-opus-5: full 5-level ladder, and xhigh/max survive resolution", () => {
+    expect(effortLevelsFor("claude-opus-5")).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    // The ladder is only useful if the resolver passes the top rungs through rather
+    // than clamping them down, which is what a missing MODEL_EFFORT_LEVELS entry does.
+    expect(resolveEffortForModel("claude-opus-5", "xhigh")).toBe("xhigh");
+    expect(resolveEffortForModel("claude-opus-5", "max")).toBe("max");
   });
 });
 
