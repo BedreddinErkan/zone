@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { costFor, formatCostNote, webSearchFee, PRICING_USD_PER_MTOK } from "./pricing.js";
-import type { ProviderName } from "./pricing.js";
+import { costFor, formatCostNote, webSearchFee, totalCost, PRICING_USD_PER_MTOK } from "./pricing.js";
+import type { ProviderName, TokenType } from "./pricing.js";
 import { MODEL_CATALOG } from "../llm/models.js";
 
 
@@ -69,6 +69,40 @@ describe("pricing drift guards", () => {
       }
     }
     expect(missing).toEqual([]);
+  });
+});
+
+describe("totalCost — unpriced buckets contribute nothing", () => {
+  // iterCostMeter passes a five-key breakdown (it tracks output_reasoning), and
+  // reasoning tokens are already inside `output`. Before TOKEN_TYPES iteration +
+  // the rateFor default, the extra key fell through to the cache-write rate and
+  // was billed a second time.
+  const base = { input_uncached: 1_000_000, cache_write: 0, cache_read: 0, output: 1_000_000 };
+
+  it("an extra output_reasoning key does not change the total", () => {
+    const withoutExtra = totalCost("anthropic", "claude-opus-4-8", base);
+    const withExtra = totalCost("anthropic", "claude-opus-4-8", {
+      ...base,
+      output_reasoning: 1_000_000,
+    } as unknown as Record<TokenType, number>);
+    expect(withExtra).toBe(withoutExtra);
+  });
+
+  it("holds for a model with a non-zero cache_write rate", () => {
+    // The rate the stray key used to borrow. Opus bills cache_write at $6.25/MTok,
+    // so a regression here would show up as a $6.25 discrepancy on this input.
+    const withExtra = totalCost("anthropic", "claude-opus-4-8", {
+      input_uncached: 0, cache_write: 0, cache_read: 0, output: 0,
+      output_reasoning: 1_000_000,
+    } as unknown as Record<TokenType, number>);
+    expect(withExtra).toBe(0);
+  });
+
+  it("a missing bucket is treated as zero, not NaN", () => {
+    const partial = totalCost("anthropic", "claude-opus-4-8", {
+      input_uncached: 1_000_000,
+    } as unknown as Record<TokenType, number>);
+    expect(partial).toBe(5);
   });
 });
 

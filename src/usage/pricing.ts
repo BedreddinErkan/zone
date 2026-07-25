@@ -7,6 +7,16 @@
 export type TokenType = "input_uncached" | "cache_write" | "cache_read" | "output";
 export type ProviderName = "anthropic" | "openai";
 
+/** The billable buckets, enumerated. totalCost iterates THIS rather than the keys of
+ *  its argument: callers pass wider objects (iterCostMeter adds output_reasoning),
+ *  and a bucket we have no rate for must contribute nothing rather than borrow one. */
+export const TOKEN_TYPES: readonly TokenType[] = [
+  "input_uncached",
+  "cache_write",
+  "cache_read",
+  "output",
+];
+
 export interface ModelRates {
   input: number;
   output: number;
@@ -57,15 +67,27 @@ export function costFor(
     console.warn(`[zone-pricing] unknown model ${provider}/${model}, cost=0`);
     return 0;
   }
-  const rate =
-    type === "input_uncached"
-      ? rates.input
-      : type === "output"
-        ? rates.output
-        : type === "cache_read"
-          ? rates.cache_read
-          : rates.cache_write;
-  return (tokens / 1_000_000) * rate;
+  return (tokens / 1_000_000) * rateFor(rates, type);
+}
+
+/**
+ * Rate for one billable bucket. Unknown buckets return 0, not a neighbouring rate.
+ *
+ * This was a ternary chain whose final else returned `cache_write`, so any token
+ * type outside the union billed at the cache-write rate. `totalCost` fed it
+ * `output_reasoning` (iterCostMeter.ts passes a five-key breakdown), and reasoning
+ * tokens are already counted inside `output` — so they were charged twice, at a
+ * rate that had nothing to do with them. Harmless only while every model carrying
+ * reasoning tokens also had cache_write: 0.
+ */
+function rateFor(rates: ModelRates, type: TokenType): number {
+  switch (type) {
+    case "input_uncached": return rates.input;
+    case "output":         return rates.output;
+    case "cache_read":     return rates.cache_read;
+    case "cache_write":    return rates.cache_write;
+    default:               return 0;
+  }
 }
 
 export function totalCost(
@@ -73,8 +95,10 @@ export function totalCost(
   model: string,
   breakdown: Record<TokenType, number>
 ): number {
-  return (Object.keys(breakdown) as TokenType[]).reduce(
-    (sum, t) => sum + costFor(provider, model, t, breakdown[t]),
+  // Iterate the known buckets, not Object.keys(breakdown): callers pass wider
+  // objects, and an unpriced key must not reach costFor at all.
+  return TOKEN_TYPES.reduce(
+    (sum, t) => sum + costFor(provider, model, t, breakdown[t] ?? 0),
     0
   );
 }
