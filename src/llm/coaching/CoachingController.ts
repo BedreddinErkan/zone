@@ -124,8 +124,6 @@ export class CoachingController {
         }
       );
 
-      const remaining = ctx.maxAttempts - this._attempts;
-
       debugLog("[zone-agent-self-correct]", JSON.stringify({
         iter: ctx.iter + 1,
         trigger: signal.failedToolName === "run_command" ? "test_failed" : signal.failedToolName,
@@ -206,9 +204,7 @@ export class CoachingController {
         coachingText +
         `\n\nRecent failure context:\n` +
         `- Tool: ${signal.failedToolName}\n` +
-        `- Error preview (first 300 chars): ${signal.failedToolOutput.slice(0, 300)}\n` +
-        `You have ${remaining} retry attempt${remaining === 1 ? "" : "s"} remaining. ` +
-        `After that the run will halt with the current state.` +
+        `- Error preview (first 300 chars): ${signal.failedToolOutput.slice(0, 300)}` +
         repeatReadNotice;
 
       return {

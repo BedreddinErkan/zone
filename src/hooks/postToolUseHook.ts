@@ -49,7 +49,6 @@ export interface PreIterationContext {
   /** Cache-discounted token sum: cache_read × 0.1, others × 1.0. Use for budget-ratio checks. */
   effectiveCumulativeTokens: number;
   effectiveTokenBudgetCap: number;
-  softWarnInjected: boolean;
   midWarnInjected: boolean;
   emit: (level: "log" | "debugLog", marker: string, payload: object) => void;
 }

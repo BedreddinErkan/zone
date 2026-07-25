@@ -114,13 +114,19 @@ describe("parity — coach path", () => {
     }
   });
 
-  it("coachingAppend contains retry-attempts-remaining counter", () => {
+  it("coachingAppend does NOT count down remaining retries", () => {
+    // The append used to end with "You have N retry attempts remaining. After that the
+    // run will halt with the current state." At N=1 that invites a hedged half-fix or
+    // preemptive surrender, and the controller enforces exhaustion on its own either
+    // way. The attempt header stays — it prompts strategy variation without forecasting
+    // the end of the run.
     const ctrl = new CoachingController(makeOpts(), makeDeps());
     const result = ctrl.routeFailure(makeCtx({ maxAttempts: 3 }));
     expect(result.kind).toBe("coach");
     if (result.kind === "coach") {
-      // remaining = 3 - 1 = 2
-      expect(result.coachingAppend).toContain("You have 2 retry attempts remaining.");
+      expect(result.coachingAppend).not.toMatch(/retry attempts? remaining/);
+      expect(result.coachingAppend).not.toContain("the run will halt");
+      expect(result.coachingAppend).toContain("[Zone coaching — attempt 1 of 3]");
     }
   });
 });

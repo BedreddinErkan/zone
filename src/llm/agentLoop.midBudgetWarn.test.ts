@@ -169,7 +169,7 @@ describe("Phase I Lane 2.1 — 50% token budget mid-warn injection", () => {
     expect(midWarnLogs().length).toBeLessThanOrEqual(1);
   });
 
-  it("injected message text contains '70%' and 'converge'", async () => {
+  it("injected message redirects to convergence WITHOUT naming a budget figure", async () => {
     let firstCallMessages: unknown[] | null = null;
     mocks.createChatCompletion.mockImplementation(async ({ messages }: { messages: unknown[] }) => {
       if (firstCallMessages === null) firstCallMessages = messages;
@@ -185,8 +185,15 @@ describe("Phase I Lane 2.1 — 50% token budget mid-warn injection", () => {
 
     const msgs = firstCallMessages ?? [];
     const midWarnMsg = (msgs as Array<{ role?: string; content?: string }>)
-      .find((m) => m.role === "user" && typeof m.content === "string" && m.content.includes("70%"));
+      .find((m) => typeof m.content === "string" && m.content.includes("Pause expansive reads"));
     expect(midWarnMsg).toBeDefined();
     expect(midWarnMsg?.content).toContain("converge");
+
+    // The warn must not tell the model how much budget is left. The text once claimed
+    // "70%" while TOKEN_BUDGET_MID_WARN was 0.50 — false, and a spend figure invites
+    // early wrapup regardless of accuracy. Guard both the drift and the disclosure.
+    const injected = midWarnMsg?.content ?? "";
+    expect(injected).not.toMatch(/\d+\s*%/);
+    expect(injected.toLowerCase()).not.toContain("token budget");
   });
 });

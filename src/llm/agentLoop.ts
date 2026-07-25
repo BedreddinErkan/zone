@@ -1918,8 +1918,6 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   // `let` so forced_tier_blocking promotion can update it alongside toolsForLLM (B.3).
   let effectiveAllowedSet: ReadonlySet<string> = new Set(toolsForLLM.map(getZoneToolName));
 
-  let softIterWarnThreshold: number | undefined;
-  let softWarnInjected = false;
   let midWarnInjected = false;
   let chainSaturationWarnInjected = false;
   // ZONE_SATURATION_COUNT_MULTIEDIT (default on): count multi_edit successes alongside apply_patch.
@@ -1929,7 +1927,6 @@ async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResul
   const saturationCountMultiEdit = process.env["ZONE_SATURATION_COUNT_MULTIEDIT"] !== "0";
   if (tierLimits) {
     const effectiveSoftIterWarn = tierLimits.softIterWarn;
-    softIterWarnThreshold = effectiveSoftIterWarn;
     // Soft warn replaces hard-cap: loop runs up to 3× the warn threshold;
     // tokenBudgetCap is the real terminator. Escalation disabled since tier is authoritative.
     iterationBudget = { ...iterationBudget, maxIterationsForRun: effectiveSoftIterWarn * 3 };
@@ -2823,29 +2820,18 @@ Example:
   // Gap 1: internal pre-iteration hooks. Populated as each site is migrated (commits 2-4).
   // These close over the loop's mutable let bindings (softWarnInjected, midWarnInjected, etc.)
   // so each hook can read/write them directly without an explicit mutation return.
-  const softIterWarnHook: PreIterationHook = {
-    name: "soft-iter-warn",
-    priority: 10,
-    shouldRun: (ctx) => (
-      softIterWarnThreshold !== undefined &&
-      ctx.iter >= softIterWarnThreshold &&
-      !softWarnInjected
-    ),
-    run: (ctx) => {
-      softWarnInjected = true;
-      ctx.emit("log", "[zone-iter-soft-warn-injected]", {
-        iter: ctx.iter,
-        softIterWarnThreshold,
-        runId: ctx.runId,
-      });
-      return {
-        kind: "appendContext",
-        content: `\n\n[ZONE_ITER_SOFT_WARN] You have used ${ctx.iter} iterations. The cost ceiling will terminate this run — wrap up your work and write a final summary now.`,
-        target: "responseInput",
-        mode: "append-to-tool",
-      };
-    },
-  };
+  // The soft-iter-warn hook was removed here. It fired at softIterWarn — exactly one
+  // third of the run's real ceiling (maxIterationsForRun = softIterWarn × 3) — and
+  // told the model "the cost ceiling will terminate this run — wrap up your work and
+  // write a final summary now". The claim was false (it terminated nothing; the token
+  // budget is the terminator), and because Pattern A appends persist on the tool
+  // message, the demand to wrap up was re-read on every later iteration. Iteration
+  // pressure now comes only from the harness-side caps the model never sees, and from
+  // the terminal wrapup calls issued at the real boundaries.
+  // Injected once when effective spend crosses TOKEN_BUDGET_MID_WARN. The trigger
+  // ratio is deliberately NOT stated to the model: naming a remaining-budget figure
+  // makes it wrap up early, and the text drifted out of sync with the constant once
+  // already (it claimed 70% while the trigger sat at 0.50). Telemetry carries the number.
   const midBudgetWarnHook: PreIterationHook = {
     name: "mid-budget-warn",
     priority: 20,
@@ -2866,7 +2852,7 @@ Example:
       return {
         kind: "appendContext",
         content:
-          "\n\nYou are at 70% of token budget. Pause expansive reads. " +
+          "\n\nPause expansive reads. " +
           "If a primary deliverable (e.g., test file requested in the original task) is not yet " +
           "written, write it now even if implementation is incomplete. Remaining iterations should " +
           "converge, not explore.",
@@ -2979,7 +2965,7 @@ Example:
     },
   };
 
-  const _internalPreIterHooks: PreIterationHook[] = [softIterWarnHook, midBudgetWarnHook, chainSaturationWarnHook, antiThrashHook];
+  const _internalPreIterHooks: PreIterationHook[] = [midBudgetWarnHook, chainSaturationWarnHook, antiThrashHook];
 
   // Gap 1: internal post-tool-use hooks. Commit 5: LoopDetectorHook (warn case only).
   // The terminate case remains inline — it needs an early return from the outer function,
@@ -3101,7 +3087,6 @@ Example:
         cumulativeTokens: budget.cumulativeTokens,
         effectiveCumulativeTokens: budget.effectiveCumulativeTokens,
         effectiveTokenBudgetCap,
-        softWarnInjected,
         midWarnInjected,
         emit: (level, marker, payload) => {
           if (level === "log") log(marker, JSON.stringify(payload));
