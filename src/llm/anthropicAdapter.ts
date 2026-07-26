@@ -64,6 +64,11 @@ export function deriveRequestTimeoutMs(maxTokens: number | undefined): number {
  * 0: disabling the timers would let a genuinely dead connection hang for the full
  * SDK timeout, so the transport keeps a backstop that simply never fires first.
  */
+// @unverified-probe(transport:long-request) the derivation and the dispatcher are
+// unit-tested, but no live call has yet been observed running past ten minutes and
+// completing. Anthropic's own SDK treats non-streaming beyond ten minutes as
+// unsupported, so whether the vendor's edge holds a silent connection for thirty
+// minutes is not something Zone's configuration can establish on its own.
 export const TRANSPORT_TIMEOUT_MS = MAX_REQUEST_TIMEOUT_MS + 5 * 60 * 1000;
 
 /** Shared across clients: one connection pool per process, not one per adapter. */

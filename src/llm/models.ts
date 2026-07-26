@@ -272,6 +272,19 @@ export const UNVERIFIED_MODEL_PARAMS: Record<string, readonly string[]> = {
   "gpt-5.6-luna": ["maxOutputTokens"],
 };
 
+/**
+ * Claims carrying the same marker that are NOT about a model's catalog parameters,
+ * keyed by the id used in the marker. They share the checklist so that grepping the
+ * tag stays a complete to-do list, but they drive no runtime warning — there is no
+ * model selection to hang one off.
+ */
+export const UNVERIFIED_NON_MODEL_PROBES: Record<string, string> = {
+  "transport:long-request":
+    "That a non-streaming request actually survives past ten minutes end to end. " +
+    "The derived timeout and the undici dispatcher prove Zone asks for it; only a " +
+    "live long generation proves the vendor's edge holds the connection.",
+};
+
 /** Model IDs already warned about — resolution runs per request, the gap is per config. */
 const unverifiedParamsWarned = new Set<string>();
 

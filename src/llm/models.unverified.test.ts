@@ -14,6 +14,7 @@ import { dirname, join } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   UNVERIFIED_MODEL_PARAMS,
+  UNVERIFIED_NON_MODEL_PROBES,
   getMaxOutputTokens,
   warnIfUnverifiedModelParams,
   _resetUnverifiedModelWarningsForTest,
@@ -23,7 +24,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** Files permitted to carry markers. A marker anywhere else would be invisible to
  *  this test, so new locations must be added here deliberately. */
-const MARKED_SOURCES = ["models.ts", "modelRegistry.ts"];
+const MARKED_SOURCES = ["models.ts", "modelRegistry.ts", "anthropicAdapter.ts"];
+
+/** Every id the checklist may legitimately contain: model params plus non-model claims. */
+function declaredIds(): string[] {
+  return [...Object.keys(UNVERIFIED_MODEL_PARAMS), ...Object.keys(UNVERIFIED_NON_MODEL_PROBES)];
+}
 
 // Assembled from parts so this file never contains the literal tag. `rg` on the tag
 // is meant to return the re-probe checklist and nothing else — a scanner that matches
@@ -46,10 +52,25 @@ describe("unverified-probe markers", () => {
     vi.restoreAllMocks();
   });
 
-  it("the marker set and UNVERIFIED_MODEL_PARAMS name exactly the same models", () => {
+  it("the marker set and the declared checklist name exactly the same items", () => {
     const marked = [...markedModelIds()].sort();
-    const declared = Object.keys(UNVERIFIED_MODEL_PARAMS).sort();
-    expect(marked).toEqual(declared);
+    expect(marked).toEqual(declaredIds().sort());
+  });
+
+  it("non-model probes carry a reason, since they drive no runtime warning", () => {
+    // A model entry announces itself when the model is selected; a transport claim
+    // has no such hook, so the declaration text is the only thing explaining it.
+    for (const [id, reason] of Object.entries(UNVERIFIED_NON_MODEL_PROBES)) {
+      expect(reason.length, `${id} declares no reason`).toBeGreaterThan(40);
+    }
+  });
+
+  it("non-model ids never reach the model-params warning path", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (const id of Object.keys(UNVERIFIED_NON_MODEL_PROBES)) {
+      warnIfUnverifiedModelParams(id);
+    }
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("every declared model names at least one unverified parameter", () => {
