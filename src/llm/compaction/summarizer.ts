@@ -1,6 +1,7 @@
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { LLMClient } from "../types.js";
 import { getModelName } from "../openaiClient.js";
+import { AUX_CALL_MAX_OUTPUT_TOKENS } from "../models.js";
 
 export interface SummarizerInput {
   candidateTurns: ChatCompletionMessageParam[];
@@ -110,7 +111,13 @@ export async function summarize(input: SummarizerInput): Promise<SummarizerOutpu
     },
   ];
 
-  const response = await input.client.createChatCompletion({ model, messages });
+  // Bounded: SUMMARY_OUTPUT_BUDGET targets ~1500 tokens of summary, so the model
+  // ceiling this would otherwise inherit is orders of magnitude past what it needs.
+  const response = await input.client.createChatCompletion({
+    model,
+    messages,
+    max_tokens: AUX_CALL_MAX_OUTPUT_TOKENS,
+  });
 
   const rawUsage = (response as { usage?: { prompt_tokens?: number; completion_tokens?: number } })
     .usage;

@@ -230,6 +230,24 @@ export const MODEL_MAX_OUTPUT_TOKENS: Record<string, number> = {
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16_384;
 
 /**
+ * Output budget for auxiliary one-shot calls — plan generation, the compaction
+ * summarizer, the final run report. Each produces a bounded artifact and none needs
+ * the model's full ceiling, but passing no budget makes convertParams inject that
+ * ceiling (up to 128k) onto a single held non-streaming connection.
+ *
+ * The value is anchored to a recorded failure rather than an estimate of typical
+ * size. When this defaulted to 4096, a real plan-gen call on claude-sonnet-5 came
+ * back with stop_reason "max_tokens" and JSON that threw
+ * `Unterminated string in JSON at position 5338`. This is four times the budget that
+ * demonstrably truncated, and it coincides with the high-effort thinking floor, so
+ * thinking models are unaffected at default effort.
+ *
+ * A ceiling, not a floor: convertParams still applies Math.max(budget,
+ * effortFloor), so xhigh/max raise it to 32000/64000 as before.
+ */
+export const AUX_CALL_MAX_OUTPUT_TOKENS = 16_384;
+
+/**
  * Models whose catalog parameters were taken from vendor documentation and never
  * measured against the live API, with the parameters in question.
  *

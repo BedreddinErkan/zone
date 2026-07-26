@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getModelName } from "../llm/openaiClient.js";
+import { AUX_CALL_MAX_OUTPUT_TOKENS } from "../llm/models.js";
 import { createLLMClient } from "../llm/factory.js";
 import { getRequestContext } from "../llm/openaiContext.js";
 
@@ -406,6 +407,8 @@ ${payload}
     temperature: 0,
     messages: [{ role: "user", content: prompt }],
     response_format: { type: "json_object" },
+    // Bounded: a run report is a fixed-shape JSON summary, not a long generation.
+    max_tokens: AUX_CALL_MAX_OUTPUT_TOKENS,
   });
 
   const rawText = response.choices[0]?.message?.content ?? "";

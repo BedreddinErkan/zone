@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getModelName } from "./openaiClient.js";
+import { AUX_CALL_MAX_OUTPUT_TOKENS } from "./models.js";
 import { createLLMClient, PlanRefusalError } from "./factory.js";
 import { getRequestContext } from "./openaiContext.js";
 import type { LLMProvider } from "./types.js";
@@ -326,7 +327,14 @@ ${input.forceSteps
 `.trim();
 
   const response = await client.createChatCompletion(
-    { model, messages: [{ role: "user", content: prompt }], response_format: { type: "json_object" } },
+    {
+      model,
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+      // Bounded: a plan is a few thousand tokens. Without this convertParams injects
+      // the model ceiling (up to 128k) onto a held non-streaming connection.
+      max_tokens: AUX_CALL_MAX_OUTPUT_TOKENS,
+    },
     { signal: input.abortSignal }
   );
 
