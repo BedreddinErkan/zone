@@ -19,6 +19,7 @@ import { generateExecutionPlan, isNoChangePlan, isCannotVerifyPlan, synthesizeMi
 import { taskAssertsProblem, isPureAddition } from "../llm/taskShape.js";
 import { rejectPendingEditsForRun } from "../api/editApprovals.js";
 import { rejectPendingStagedForRun } from "../api/stagedApprovals.js";
+import { rejectPendingQuestionsForRun } from "../api/questionApprovals.js";
 import { debugLog } from "../utils/logger.js";
 import { isProjectTrusted, addTrustedProject, resolveProjectRoot, canonicalizePath } from "../api/diskTrustedProjects.js";
 import { requestTrustApproval, rejectPendingTrustForRun } from "../api/trustApprovals.js";
@@ -517,6 +518,7 @@ export async function runOneShotInner(
     sigintHandler = (): void => {
       rejectPendingApprovalsForRun(runId);
       rejectPendingRevisionsForRun(runId);
+      rejectPendingQuestionsForRun(runId);
       clearTrustedCommandsForRun(runId);
       ac.abort();
     };
@@ -636,6 +638,7 @@ export async function runOneShotInner(
     rejectPendingEditsForRun(runId);
     rejectPendingTrustForRun(runId);
     rejectPendingStagedForRun(runId);
+    rejectPendingQuestionsForRun(runId);
     clearTrustedCommandsForRun(runId);
     spinner.stop();
   }
