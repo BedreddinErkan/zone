@@ -144,6 +144,42 @@ describe("responsesConvertResponse — usage mapping", () => {
     expect(details?.cached_tokens).toBe(30);
   });
 
+  it("maps cache_write_tokens, which the installed SDK type does not declare", () => {
+    // Present on the wire, absent from InputTokensDetails in openai@5.23.2 — so it
+    // reaches us only through the cast. Without this mapping the gpt-5.6 cache-write
+    // rates in pricing.ts have no producer and every OpenAI cache write books as 0.
+    const response = makeResponse({
+      usage: {
+        input_tokens: 10_000,
+        output_tokens: 50,
+        total_tokens: 10_050,
+        input_tokens_details: { cached_tokens: 0, cache_write_tokens: 8_000 },
+        output_tokens_details: { reasoning_tokens: 0 },
+      } as unknown as OpenAIResponse["usage"],
+    });
+    const usage = responsesConvertResponse(response).usage!;
+    const details = (usage as Record<string, unknown>).prompt_tokens_details as Record<string, unknown>;
+    expect(details?.cache_write_tokens).toBe(8_000);
+    // Still not pre-subtracted — this converter passes the raw total through and
+    // extractUsage owns the total→net conversion.
+    expect(usage.prompt_tokens).toBe(10_000);
+  });
+
+  it("defaults cache_write_tokens to 0 when the API omits it", () => {
+    const response = makeResponse({
+      usage: {
+        input_tokens: 100,
+        output_tokens: 50,
+        total_tokens: 150,
+        input_tokens_details: { cached_tokens: 30 },
+        output_tokens_details: { reasoning_tokens: 0 },
+      } as OpenAIResponse["usage"],
+    });
+    const usage = responsesConvertResponse(response).usage!;
+    const details = (usage as Record<string, unknown>).prompt_tokens_details as Record<string, unknown>;
+    expect(details?.cache_write_tokens).toBe(0);
+  });
+
   it("guards undefined usage — all fields default to 0", () => {
     const response = makeResponse({ usage: undefined });
     const result = responsesConvertResponse(response);

@@ -76,10 +76,18 @@ export function responsesConvertResponse(response: OpenAIResponse): ChatCompleti
     prompt_tokens: response.usage?.input_tokens ?? 0,
     completion_tokens: response.usage?.output_tokens ?? 0,
     total_tokens: response.usage?.total_tokens ?? 0,
-    // Bracket-accessed cache field (mirroring convertResponse.ts:112-115 for OpenAI Chat path).
+    // Bracket-accessed cache fields (mirroring convertResponse.ts for the OpenAI Chat path).
+    // cache_write_tokens is absent from the installed SDK's InputTokensDetails type but
+    // is present on the wire, so it needs the cast; without it the gpt-5.6 cache-write
+    // rates in pricing.ts have no producer and every OpenAI cache write books as zero.
     ...({
       prompt_tokens_details: {
         cached_tokens: response.usage?.input_tokens_details?.cached_tokens ?? 0,
+        cache_write_tokens:
+          Number(
+            (response.usage?.input_tokens_details as { cache_write_tokens?: number } | undefined)
+              ?.cache_write_tokens ?? 0
+          ) || 0,
       },
     } as Record<string, unknown>),
     // reasoning_tokens is a SUBSET of output_tokens — expose in detail field only, never add to completion_tokens.

@@ -18,22 +18,59 @@ interface UsageBreakdown {
   webSearchRequests: number;
 }
 
+/** Fires once per process — a partition violation is structural, not per-request,
+ *  and extractUsage has no model id to key a finer dedupe on. */
+let usagePartitionViolationWarned = false;
+
+/** Test-only: clear the partition-violation warning dedupe. */
+export function _resetUsagePartitionWarningForTest(): void {
+  usagePartitionViolationWarned = false;
+}
+
 export function extractUsage(rawUsage: unknown): UsageBreakdown | null {
   if (!rawUsage || typeof rawUsage !== "object") return null;
   const u = rawUsage as Record<string, unknown>;
   const input = Number(u.prompt_tokens ?? u.input_tokens ?? 0) || 0;
   const output = Number(u.completion_tokens ?? u.output_tokens ?? 0) || 0;
-  const cacheWrite = Number(u.cache_creation_input_tokens ?? 0) || 0;
   const promptTokenDetails =
     u.prompt_tokens_details && typeof u.prompt_tokens_details === "object"
       ? (u.prompt_tokens_details as Record<string, unknown>)
       : null;
+  // OpenAI reports its cache buckets inside prompt_tokens_details; Anthropic reports
+  // them as top-level fields. Read OpenAI first, Anthropic as fallback, for both.
   const openAiCacheRead = Number(promptTokenDetails?.cached_tokens ?? 0) || 0;
+  const openAiCacheWrite = Number(promptTokenDetails?.cache_write_tokens ?? 0) || 0;
   const cacheRead = openAiCacheRead || Number(u.cache_read_input_tokens ?? 0) || 0;
+  const cacheWrite = openAiCacheWrite || Number(u.cache_creation_input_tokens ?? 0) || 0;
   if (input === 0 && output === 0 && cacheWrite === 0 && cacheRead === 0) {
     return null;
   }
-  const inputUncached = openAiCacheRead > 0 ? Math.max(0, input - openAiCacheRead) : input;
+  // Provider discriminator, not a mere guard: OpenAI's input_tokens is a TOTAL that
+  // contains its cache buckets, so they are carved out of it; Anthropic's already
+  // excludes them, so its branch must not subtract. Both OpenAI buckets are removed
+  // — subtracting only the read side would bill a first-call cache write twice, once
+  // inside input_uncached at the input rate and again at the cache-write rate.
+  const openAiCachedPortion = openAiCacheRead + openAiCacheWrite;
+  const rawUncached = input - openAiCachedPortion;
+  if (openAiCachedPortion > 0 && rawUncached < 0 && !usagePartitionViolationWarned) {
+    // Negative means the buckets are NOT a subset of input_tokens — an assumption
+    // this code depends on. Clamping alone would bury the disproof, so say it first.
+    usagePartitionViolationWarned = true;
+    console.warn(
+      "[zone-usage-partition-violated]",
+      JSON.stringify({
+        input,
+        cacheRead: openAiCacheRead,
+        cacheWrite: openAiCacheWrite,
+        shortfall: -rawUncached,
+        impact:
+          "cache buckets exceed input_tokens, so they are reported additively rather " +
+          "than as a subset; input_uncached is being clamped to 0 and cost is under-reported",
+        rawUsage: u,
+      })
+    );
+  }
+  const inputUncached = openAiCachedPortion > 0 ? Math.max(0, rawUncached) : input;
   const completionTokenDetails =
     u.completion_tokens_details && typeof u.completion_tokens_details === "object"
       ? (u.completion_tokens_details as Record<string, unknown>)
