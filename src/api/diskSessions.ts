@@ -51,11 +51,19 @@ export async function saveSession(_cwd: string, session: DiskSession): Promise<s
   return filename;
 }
 
+/** Run envelopes share this directory but are a different artifact with a different
+ *  schema and lifecycle (see diskRunEnvelope.ts). They must not appear here: this
+ *  list drives --resume, the /sessions picker, AND pruneOldSessions, so including
+ *  them means the pruner deletes durable run state it knows nothing about. They
+ *  also break the sort's premise — `<sessionId>.envelope.json` has no ISO prefix,
+ *  so it orders by a random UUID rather than by time. */
+const ENVELOPE_SUFFIX = ".envelope.json";
+
 export async function listSessions(_cwd: string): Promise<string[]> {
   try {
     const files = await fs.readdir(sessionsDir());
     return files
-      .filter(f => f.endsWith(".json") && !f.endsWith(".tmp"))
+      .filter(f => f.endsWith(".json") && !f.endsWith(".tmp") && !f.endsWith(ENVELOPE_SUFFIX))
       .sort()
       .reverse();   // newest first — ISO prefix makes lexicographic = chronological
   } catch (err) {

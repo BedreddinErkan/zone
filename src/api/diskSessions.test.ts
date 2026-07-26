@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, readdir } from "node:fs/promises";
 import {
   saveSession, listSessions, loadSession, loadLastSession,
   pruneOldSessions, listSessionsMeta, _setSessionsDirForTest, type DiskSession,
@@ -66,6 +66,58 @@ describe("diskSessions", () => {
 
   it("loadLastSession returns null when no sessions", async () => {
     expect(await loadLastSession(tmp)).toBeNull();
+  });
+
+  describe("run envelopes share the directory but are not sessions", () => {
+    /** Envelopes are `<sessionId>.envelope.json` — see diskRunEnvelope.ts. */
+    async function writeEnvelopes(ids: string[]): Promise<void> {
+      await mkdir(join(tmp, ".zone", "sessions"), { recursive: true });
+      for (const id of ids) {
+        await writeFile(
+          join(tmp, ".zone", "sessions", `${id}.envelope.json`),
+          JSON.stringify({ version: 1, sessionId: id, status: "running" }),
+          "utf-8"
+        );
+      }
+    }
+
+    it("N transcripts and M envelopes with keep:N — everything survives", async () => {
+      // The bug this pins: envelope filenames end in `.json`, so they matched the
+      // session filter and were swept by the pruner. They also have no ISO prefix,
+      // so they sorted by UUID — a leading hex digit decided whether a durable run
+      // envelope or a real transcript got deleted.
+      const N = 3;
+      for (let i = 0; i < N; i++) {
+        await saveSession(tmp, { ...baseSession, sessionId: `id-${i}` });
+        await new Promise(r => setTimeout(r, 10));
+      }
+      // One sorting above the ISO transcripts, one below — the two failure modes.
+      await writeEnvelopes(["e2e79f75-dead-4000-8000-000000000001", "0abc1234-dead-4000-8000-000000000002"]);
+
+      const removed = await pruneOldSessions(tmp, N);
+
+      expect(removed).toBe(0);
+      expect(await listSessions(tmp)).toHaveLength(N);
+      const remaining = await readdir(join(tmp, ".zone", "sessions"));
+      expect(remaining.filter(f => f.endsWith(".envelope.json"))).toHaveLength(2);
+    });
+
+    it("listSessions excludes envelopes entirely", async () => {
+      await saveSession(tmp, baseSession);
+      await writeEnvelopes(["e2e79f75-dead-4000-8000-000000000001"]);
+      const list = await listSessions(tmp);
+      expect(list).toHaveLength(1);
+      expect(list.every(f => !f.includes("envelope"))).toBe(true);
+    });
+
+    it("loadLastSession never returns an envelope, whatever it sorts as", async () => {
+      // "e2…" sorts above every "2026-…" transcript, so before the fix this was the
+      // file --resume loaded — and it parses as JSON, so the failure was silent.
+      await saveSession(tmp, baseSession);
+      await writeEnvelopes(["e2e79f75-dead-4000-8000-000000000001"]);
+      const last = await loadLastSession(tmp);
+      expect(last?.sessionId).toBe(baseSession.sessionId);
+    });
   });
 
   describe("listSessionsMeta", () => {
