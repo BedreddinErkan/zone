@@ -1,4 +1,5 @@
-import Anthropic, { BadRequestError } from "@anthropic-ai/sdk";
+import Anthropic, { BadRequestError, APIConnectionTimeoutError } from "@anthropic-ai/sdk";
+import { Agent } from "undici";
 import { withExponentialBackoff, UpstreamUnavailableError } from "./withExponentialBackoff.js";
 import { ProviderRequestError } from "./factory.js";
 import type {
@@ -12,6 +13,71 @@ import type { LLMClient, LLMRequestOptions } from "./types.js";
 import { convertParams } from "./anthropicAdapter/convertParams.js";
 import { convertResponse } from "./anthropicAdapter/convertResponse.js";
 import { convertStream } from "./anthropicAdapter/convertStream.js";
+
+// ── Request duration ─────────────────────────────────────────────────────────
+//
+// A non-streaming request holds one connection for the whole generation with no
+// bytes coming back, so how long it may take is a function of how much output it
+// may produce. Anthropic's own SDK models that as 128k output tokens ≈ 60 minutes
+// (client.js calculateNonstreamingTimeout) — reuse the vendor's number rather than
+// inventing one.
+
+/** Vendor's implied generation cost per unit of output budget: 60 min / 128k tokens. */
+const VENDOR_MS_PER_MAX_TOKEN = (60 * 60 * 1000) / 128_000;
+
+/**
+ * The vendor figure is an ESTIMATE the SDK uses as a threshold ("is this long
+ * enough that you should be streaming?"), not a deadline. Used raw it would abort a
+ * request that actually fills its budget at exactly its expected completion time.
+ * Doubling turns the estimate into a deadline a full-budget request clears.
+ */
+const REQUEST_TIMEOUT_MARGIN = 2;
+
+/** Floor: the SDK's own DEFAULT_TIMEOUT, so small requests behave exactly as before. */
+const MIN_REQUEST_TIMEOUT_MS = 600_000;
+
+/** Ceiling: the SDK's own maxTime for a single request.
+ *  Budgets above ~64k land here rather than getting the full margin, which is
+ *  acceptable — the vendor's implied ~35 tokens/sec is conservative against observed
+ *  rates, so 60 minutes still carries real headroom at 128k. */
+const MAX_REQUEST_TIMEOUT_MS = 3_600_000;
+
+/**
+ * Per-request timeout for a given output budget.
+ * Exported for tests: the relationship to TRANSPORT_TIMEOUT_MS is the property that
+ * matters, so it is asserted by sweeping this function rather than by comparing
+ * literals.
+ */
+export function deriveRequestTimeoutMs(maxTokens: number | undefined): number {
+  const budget = typeof maxTokens === "number" && maxTokens > 0 ? maxTokens : 0;
+  const expected = Math.ceil(budget * VENDOR_MS_PER_MAX_TOKEN * REQUEST_TIMEOUT_MARGIN);
+  return Math.min(MAX_REQUEST_TIMEOUT_MS, Math.max(MIN_REQUEST_TIMEOUT_MS, expected));
+}
+
+/**
+ * Transport ceiling, kept strictly above every derivable request timeout so the
+ * SDK's AbortController is the single authority and undici never cuts first.
+ *
+ * undici defaults both timers to 300s. For a non-streaming request `headersTimeout`
+ * is a hard, non-refreshing deadline covering the entire generation — which made the
+ * real ceiling 5 minutes, half of what the SDK was configured for. Deliberately not
+ * 0: disabling the timers would let a genuinely dead connection hang for the full
+ * SDK timeout, so the transport keeps a backstop that simply never fires first.
+ */
+export const TRANSPORT_TIMEOUT_MS = MAX_REQUEST_TIMEOUT_MS + 5 * 60 * 1000;
+
+/** Shared across clients: one connection pool per process, not one per adapter. */
+const zoneDispatcher = new Agent({
+  headersTimeout: TRANSPORT_TIMEOUT_MS,
+  bodyTimeout: TRANSPORT_TIMEOUT_MS,
+});
+
+/** True when `err` is (or wraps) a request timeout rather than a transport failure. */
+export function isTimeoutError(err: unknown): boolean {
+  if (err instanceof APIConnectionTimeoutError) return true;
+  if (err instanceof UpstreamUnavailableError) return isTimeoutError(err.cause);
+  return false;
+}
 
 /**
  * Maps a raw Anthropic SDK BadRequestError (HTTP 400) to a ProviderRequestError with a
@@ -52,15 +118,20 @@ export class AnthropicAdapter implements LLMClient {
   private readonly sdk: Anthropic;
 
   constructor(apiKey: string) {
-    // agent-loop-stability Tur: SDK default timeout (~100s) was killing long
-    // agent investigations mid-iteration. 10 minutes covers the worst-case
-    // multi-step build-fix flow (15 iters × ~30s/iter = 7.5 min, with slack).
+    // timeout here is a FLOOR, not the operative value: every call passes a
+    // per-request timeout derived from its own output budget. It must stay a
+    // positive number regardless — the SDK's "streaming is required for long
+    // operations" guard runs only when the constructor timeout is null
+    // (messages.js), and Zone depends on that guard staying skipped.
     // maxRetries:0 disables the SDK's built-in retry so Zone's own
     // withExponentialBackoff controls all retry timing and budget.
     this.sdk = new Anthropic({
       apiKey,
-      timeout: 600_000,
+      timeout: MIN_REQUEST_TIMEOUT_MS,
       maxRetries: 0,
+      // Without a dispatcher the SDK uses the global undici, whose 300s timers cut a
+      // non-streaming generation off at 5 minutes — half what the SDK was set to.
+      fetchOptions: { dispatcher: zoneDispatcher },
     });
   }
 
@@ -79,8 +150,12 @@ export class AnthropicAdapter implements LLMClient {
       if (warnings.length > 0) {
         for (const w of warnings) console.warn(`[zone-anthropic] ${w}`);
       }
+      const timeout = deriveRequestTimeoutMs(anthropicParams.max_tokens);
       const message = await withExponentialBackoff(
-        () => this.sdk.messages.create({ ...anthropicParams, stream: false }, { signal: options.signal }),
+        () => this.sdk.messages.create(
+          { ...anthropicParams, stream: false },
+          { signal: options.signal, timeout }
+        ),
         { provider: "anthropic", model: params.model, emit: options.onRetryEvent }
       );
       return convertResponse(message, { wasJsonMode });
@@ -104,7 +179,7 @@ export class AnthropicAdapter implements LLMClient {
       return await withExponentialBackoff(async () => {
         const stream = this.sdk.messages.stream(
           { ...anthropicParams },
-          { signal: options.signal }
+          { signal: options.signal, timeout: deriveRequestTimeoutMs(anthropicParams.max_tokens) }
         );
 
         let responseId = "";
@@ -220,10 +295,20 @@ export class AnthropicAdapter implements LLMClient {
       }, backoffCtx);
     } catch (err) {
       if (!(err instanceof UpstreamUnavailableError)) throw err;
+      // This fallback exists to recover from transport failures — a burst of 5xx or
+      // 429s that killed the stream. It must NOT run after a timeout: the request
+      // was already too slow, and re-issuing the same output budget without
+      // streaming discards the SSE chunks that were the only thing keeping undici's
+      // body timer alive. It would double the wait and then fail anyway.
+      if (isTimeoutError(err)) throw err;
       // Streaming retries exhausted — fall back to non-streaming using already-converted params.
       const wasJsonMode = params.response_format?.type === "json_object";
+      const timeout = deriveRequestTimeoutMs(anthropicParams.max_tokens);
       const message = await withExponentialBackoff(
-        () => this.sdk.messages.create({ ...anthropicParams, stream: false }, { signal: options.signal }),
+        () => this.sdk.messages.create(
+          { ...anthropicParams, stream: false },
+          { signal: options.signal, timeout }
+        ),
         backoffCtx
       );
       return convertResponse(message, { wasJsonMode });

@@ -29,6 +29,7 @@ import {
   emitCoachingRule,
   emitCommandCacheSummary,
   emitToolResultSummary,
+  emitTerminalCallFailed as emitTerminalCallFailedTelemetry,
 } from "./loopTelemetry.js";
 import { getAndClearToolResultSummary } from "./toolResultSizeTracker.js";
 import type { TaskArchetype, TaskClassification, TaskTier } from "./taskClassifier.js";
@@ -71,6 +72,7 @@ import type {
 import type { Mode } from "../types/mode.js";
 import { ContextCompactor } from "./compaction/ContextCompactor.js";
 import { getContextWindow, getMaxOutputTokens, nextStrongerModel } from "./models.js";
+import { isTimeoutError } from "./anthropicAdapter.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
 import type { LLMProvider } from "./types.js";
 import { hashToolCall, createDetectorState, recordAndDetect, hashStagingState, LOOP_DETECT_EXEMPT_TOOLS } from "./loopDetector.js";
@@ -371,6 +373,20 @@ const MAX_SELF_CORRECTION_ATTEMPTS = 5;
 // read the failing file, third to apply the fix, fourth to re-verify; multiply
 // for two-bug scenarios. Existing escalation bonus still adds 5 on top for
 // apply_patch repeat-failure (max 20).
+/**
+ * Terminal summary/assessment calls swallow their errors so the run can still flush
+ * staging — correct, but it makes a failure invisible. Naming it keeps a timeout
+ * (which can now cost tens of minutes before it fires) diagnosable.
+ */
+function emitTerminalCallFailed(site: string, err: unknown): void {
+  emitTerminalCallFailedTelemetry({
+    site,
+    timedOut: isTimeoutError(err),
+    errorName: err instanceof Error ? err.name : typeof err,
+    errorMessage: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+  });
+}
+
 export const BASE_MAX_ITERATIONS = 15;
 export const ESCALATION_BONUS_ITERATIONS = 5;
 
@@ -2608,8 +2624,11 @@ Example:
       );
       const ae = extractResponsesApiOutputText(wrapupResponse);
       if (ae.ok && ae.text.trim()) finalSummary = ae.text.trim();
-    } catch {
-      // Use fallback summary.
+    } catch (err) {
+      // Swallowed on purpose — the run keeps its fallback summary and finalizeRun
+      // still flushes staging. But a silent swallow hides a timeout that may now
+      // have cost many minutes, so name it.
+      emitTerminalCallFailed("token_budget_wrapup", err);
     }
     debugLog("[zone-token-budget-exit]", JSON.stringify({
       iter: iterNumber,
@@ -4406,8 +4425,8 @@ Example:
       if (ae.ok && ae.text.trim()) {
         finalSummary = ae.text.trim();
       }
-    } catch {
-      // Keep the fallback summary.
+    } catch (err) {
+      emitTerminalCallFailed("readonly_max_iterations_assessment", err);
     }
     stagingFinalized = true;
     return await finalizeRun({
@@ -4488,7 +4507,8 @@ Example:
       if (ae.ok && ae.text.trim()) {
         finalSummary = ae.text.trim();
       }
-  } catch {
+  } catch (err) {
+    emitTerminalCallFailed("max_iterations_assessment", err);
     // Best-effort â€” fall through with heuristic
   }
 

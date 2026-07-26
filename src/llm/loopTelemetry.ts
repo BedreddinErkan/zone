@@ -71,6 +71,24 @@ export function emitCacheUsage(data: CacheUsageData): void {
   log("[zone-cache-usage]", JSON.stringify({ event: "cache_call_usage", ...data }));
 }
 
+export interface TerminalCallFailedData {
+  /** Which terminal call: token_budget_wrapup | max_iterations_assessment | … */
+  site: string;
+  /** True when the cause was a request timeout rather than any other failure. */
+  timedOut: boolean;
+  errorName: string;
+  errorMessage: string;
+}
+
+/**
+ * A terminal summary/assessment call failed and was swallowed so the run could still
+ * flush its work. Without this the swallow is indistinguishable from success, which
+ * matters more now that a timeout there can cost tens of minutes before it happens.
+ */
+export function emitTerminalCallFailed(data: TerminalCallFailedData): void {
+  log("[zone-terminal-call-failed]", JSON.stringify({ event: "terminal_call_failed", ...data }));
+}
+
 // ---------------------------------------------------------------------------
 // emitTierConstraints — [zone-tier-constraints-applied]
 // Emitted once per run when tier limits are active.
