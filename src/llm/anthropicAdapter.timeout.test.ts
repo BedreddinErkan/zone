@@ -230,3 +230,68 @@ describe("isTimeoutError", () => {
     expect(isTimeoutError(undefined)).toBe(false);
   });
 });
+
+describe("effort reaches every entry point, including the pure-streaming one", () => {
+  // createChatCompletionStream omitted effort while the other two passed it, so
+  // thinking config silently disappeared on that path. Asserted against the object
+  // the SDK actually received, not a helper's return value — the same way the
+  // disabled-thinking tests work.
+  const request = {
+    model: "claude-opus-4-8",
+    messages: [{ role: "user" as const, content: "hi" }],
+    max_tokens: 1_000,
+    stream: true as const,
+  };
+
+  it("createChatCompletionStream sends thinking + output_config when effort is set", async () => {
+    mockMessages.stream.mockReturnValue({
+      [Symbol.asyncIterator]() {
+        return { async next(): Promise<IteratorResult<unknown>> { return { done: true, value: undefined }; } };
+      },
+    });
+    const adapter = new AnthropicAdapter("sk-test");
+
+    await adapter.createChatCompletionStream(request, { effort: "high" });
+
+    const [body] = mockMessages.stream.mock.calls[0] as [Record<string, unknown>];
+    expect(body.thinking).toEqual({ type: "adaptive" });
+    expect(body.output_config).toEqual({ effort: "high" });
+  });
+
+  it("omits thinking when no effort is configured, rather than inventing one", async () => {
+    mockMessages.stream.mockReturnValue({
+      [Symbol.asyncIterator]() {
+        return { async next(): Promise<IteratorResult<unknown>> { return { done: true, value: undefined }; } };
+      },
+    });
+    const adapter = new AnthropicAdapter("sk-test");
+
+    await adapter.createChatCompletionStream(request, {});
+
+    const [body] = mockMessages.stream.mock.calls[0] as [Record<string, unknown>];
+    expect(body.thinking).toBeUndefined();
+    expect(body.output_config).toBeUndefined();
+  });
+
+  it("all three entry points agree on the request shape for the same effort", async () => {
+    // The asymmetry this fixes: same params, same effort, three entry points, one
+    // of which used to drop the thinking config.
+    mockMessages.create.mockResolvedValue(okMessage());
+    mockMessages.stream.mockReturnValue({
+      [Symbol.asyncIterator]() {
+        return { async next(): Promise<IteratorResult<unknown>> { return { done: true, value: undefined }; } };
+      },
+      finalMessage: async () => okMessage(),
+    });
+    const adapter = new AnthropicAdapter("sk-test");
+    const base = { model: "claude-opus-4-8", messages: [{ role: "user" as const, content: "hi" }], max_tokens: 1_000 };
+
+    await adapter.createChatCompletion(base, { effort: "high" });
+    await adapter.createChatCompletionStream({ ...base, stream: true }, { effort: "high" });
+
+    const nonStreaming = (mockMessages.create.mock.calls[0] as [Record<string, unknown>])[0];
+    const streaming = (mockMessages.stream.mock.calls[0] as [Record<string, unknown>])[0];
+    expect(streaming.thinking).toEqual(nonStreaming.thinking);
+    expect(streaming.output_config).toEqual(nonStreaming.output_config);
+  });
+});

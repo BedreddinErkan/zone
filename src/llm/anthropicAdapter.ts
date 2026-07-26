@@ -319,7 +319,10 @@ export class AnthropicAdapter implements LLMClient {
     params: ChatCompletionCreateParamsStreaming,
     options: LLMRequestOptions = {}
   ): Promise<AsyncIterable<ChatCompletionChunk>> {
-    const { params: anthropicParams, warnings } = convertParams(params, { webSearch: options.webSearch });
+    // effort must be threaded here exactly as the other two entry points do — without
+    // it convertParams sees no effort level, so thinking config is silently absent on
+    // this path alone.
+    const { params: anthropicParams, warnings } = convertParams(params, { effort: options.effort, webSearch: options.webSearch });
     if (warnings.length > 0) {
       for (const w of warnings) console.warn(`[zone-anthropic] ${w}`);
     }
