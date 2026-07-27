@@ -75,6 +75,22 @@ function buildCallMeta(messages: readonly ChatCompletionMessageParam[]): Map<str
   return index;
 }
 
+/**
+ * Marks content this module already elided.
+ *
+ * Pruning runs against a copy each iteration, so within one process the input is
+ * always pristine. A RESUMED run breaks that assumption: the restored history is
+ * a previously-pruned array, and re-pruning it would summarize the summary —
+ * reporting the placeholder's own byte count and losing the original file
+ * metadata, permanently and irreversibly, since the content is already gone.
+ */
+const PLACEHOLDER_PREFIX = "[Earlier read";
+
+/** @internal exported for the resume regression test */
+export function isPrunedPlaceholder(content: unknown): boolean {
+  return typeof content === "string" && content.startsWith(PLACEHOLDER_PREFIX);
+}
+
 function makeSummaryPlaceholder(meta: CallMeta | undefined, content: string): string {
   const lineCount = content.split("\n").length;
   const byteCount = Buffer.byteLength(content, "utf8");
@@ -143,6 +159,15 @@ export function pruneStaleReads(
 
       if (isReadResult && currentGroup >= 0) {
         const age = numGroups - 1 - currentGroup;
+        if (isPrunedPlaceholder(toolMsg.content)) {
+          // Already elided on a previous run. Pass the message through BY
+          // REFERENCE — rebuilding it would drop any field this module does not
+          // know about, which is how thinking blocks would be lost once they
+          // enter the history.
+          stats.blocksKept += 1;
+          pruned.push(msg);
+          continue;
+        }
         if (age > freshIterWindow) {
           // Evict: replace content with summary placeholder
           const originalContent =

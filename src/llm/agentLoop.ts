@@ -75,6 +75,7 @@ import type { Mode } from "../types/mode.js";
 import { ContextCompactor } from "./compaction/ContextCompactor.js";
 import { getContextWindow, getMaxOutputTokens, nextStrongerModel } from "./models.js";
 import { isTimeoutError } from "./anthropicAdapter.js";
+import { MANIFEST_CONTENT_PREFIX } from "./anthropicAdapter/cacheControlHelpers.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
 import type { LLMProvider } from "./types.js";
 import { hashToolCall, createDetectorState, recordAndDetect, hashStagingState, LOOP_DETECT_EXEMPT_TOOLS } from "./loopDetector.js";
@@ -1668,6 +1669,95 @@ function extractFunctionCallItems(
 }
 
 
+/**
+ * Recover the file-access record from a restored conversation.
+ *
+ * A warm resume rebuilds responseInput from the envelope but starts every
+ * bookkeeping structure empty, so the loop believes it has read nothing. The
+ * first apply_patch after resume is then rejected with "you haven't read this
+ * file yet" against a file the model read minutes ago and can still see in its
+ * own context — it re-reads to satisfy a gate that is simply misinformed.
+ *
+ * Reads messages BY REFERENCE and returns new bookkeeping; it never rewrites a
+ * message.
+ *
+ * Known limitation: a tool_call proves the call was ISSUED, not that it
+ * succeeded. A read that failed with ENOENT is rehydrated as a read, so a patch
+ * against that path is allowed through the gate and fails on its own merits
+ * instead. That is the lesser error — the alternative blocks every warm resume's
+ * first patch.
+ *
+ * @internal exported for tests
+ */
+export function rehydrateFileAccess(messages: unknown[]): {
+  entries: Array<{ id: string; tool: string; args: Record<string, unknown>; result: string; success: boolean }>;
+  filesRead: Set<string>;
+} {
+  const entries: Array<{ id: string; tool: string; args: Record<string, unknown>; result: string; success: boolean }> = [];
+  const filesRead = new Set<string>();
+  const REHYDRATED = new Set(["read_file", "write_file", "apply_patch"]);
+
+  for (const raw of messages) {
+    const msg = raw as { role?: string; tool_calls?: unknown } | null;
+    if (!msg || msg.role !== "assistant" || !Array.isArray(msg.tool_calls)) continue;
+    for (const rawCall of msg.tool_calls) {
+      const call = rawCall as { id?: unknown; function?: { name?: unknown; arguments?: unknown } };
+      const name = String(call.function?.name ?? "");
+      if (!REHYDRATED.has(name)) continue;
+      let args: Record<string, unknown> = {};
+      try {
+        const parsed: unknown = JSON.parse(String(call.function?.arguments ?? "{}"));
+        if (parsed && typeof parsed === "object") args = parsed as Record<string, unknown>;
+      } catch {
+        continue; // unparseable args tell us nothing about which file was touched
+      }
+      const filePath = typeof args["filePath"] === "string" ? args["filePath"] : null;
+      if (!filePath) continue;
+      if (name === "read_file") filesRead.add(filePath);
+      entries.push({
+        id: String(call.id ?? ""),
+        tool: name,
+        args,
+        result: "(restored from a previous run; content not retained)",
+        success: true,
+      });
+    }
+  }
+  return { entries, filesRead };
+}
+
+/**
+ * Drop manifest messages from the tail of a conversation snapshot.
+ *
+ * ManifestInjectionProcessor appends a synthetic `role:"user"` message listing
+ * files already read. It is a per-iteration cache notice, not conversation:
+ * persisting it means a resumed run opens with a stale file list presented as
+ * something the user said, and — because it is the last user message — cache
+ * breakpoint #2 lands on content that will never recur.
+ *
+ * Filters BY REFERENCE. Surviving messages are the same objects, so any field
+ * this function does not know about (thinking blocks, once they enter the
+ * history) survives untouched.
+ *
+ * @internal exported for tests
+ */
+export function stripTrailingManifests(messages: unknown[]): unknown[] {
+  let end = messages.length;
+  while (end > 0) {
+    const msg = messages[end - 1] as { role?: string; content?: unknown } | null;
+    if (!msg || msg.role !== "user") break;
+    const content = msg.content;
+    const text = typeof content === "string"
+      ? content
+      : Array.isArray(content) && content.length > 0
+        ? String((content[0] as { text?: unknown })?.text ?? "")
+        : "";
+    if (!text.startsWith(MANIFEST_CONTENT_PREFIX)) break;
+    end -= 1;
+  }
+  return end === messages.length ? messages : messages.slice(0, end);
+}
+
 /** Check whether the agent has read or written this file earlier in the current run.
  * A subsequent successful apply_patch/write_file on the same file does NOT invalidate
  * the read — the agent emitted that change so the context is still fresh. */
@@ -2247,8 +2337,9 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
    * rather than cold-starting a conversation the user thinks is continuing.
    */
   function serializeMessagesForEnvelope(): Pick<RunEnvelope, "messages" | "messagesOmitted"> {
-    const bytes = JSON.stringify(latestMessages).length;
-    if (bytes <= MAX_STAGED_CONTENT_BYTES) return { messages: latestMessages };
+    const snapshot = stripTrailingManifests(latestMessages);
+    const bytes = JSON.stringify(snapshot).length;
+    if (bytes <= MAX_STAGED_CONTENT_BYTES) return { messages: snapshot };
     log("[zone-envelope-messages-omitted]", JSON.stringify({
       event: "envelope_messages_omitted",
       runId: input.runId ?? null,
@@ -2602,10 +2693,21 @@ Example:
   // Inc-1 warm-continue: when a prior run's message history is available, seed
   // responseInput from it (fresh system message replaces the saved one at slice(1)).
   // Falls back to the standard [system, user-kickoff] when resumeMessages is absent.
-  const responseInput: ChatCompletionMessageParam[] = input.resumeMessages?.length
+  const isWarmResume = !!input.resumeMessages?.length;
+  const responseInput: ChatCompletionMessageParam[] = isWarmResume
     ? [
         { role: "system", content: systemContent },
-        ...(input.resumeMessages.slice(1) as ChatCompletionMessageParam[]),
+        ...(input.resumeMessages!.slice(1) as ChatCompletionMessageParam[]),
+        // The reconciliation context — which staged edits were dropped as
+        // conflicting, which files already exist on disk — was previously built
+        // and then thrown away on this branch, so a warm resume was the one path
+        // where the model was NOT told what had changed underneath it. Appended
+        // once at startup, so it is a stable trailing user message: cache
+        // breakpoint #2 lands on it and stays there, unlike the per-iteration
+        // manifest.
+        ...(resumeBlock
+          ? [{ role: "user" as const, content: resumeBlock.trimEnd() }]
+          : []),
       ]
     : [
         { role: "system", content: systemContent },
@@ -2644,6 +2746,34 @@ Example:
   // Populated after each successful read_file; passed to executeTool for C1 gate.
   const filesReadThisRun = new Set<string>();
   const filesReadCountThisRun = new Map<string, number>();
+
+  // Warm resume: the conversation came back but the bookkeeping did not, so the
+  // read-before-patch gate would reject a file the model read before the
+  // interruption and can still see in its own context.
+  if (isWarmResume) {
+    const { entries, filesRead } = rehydrateFileAccess(input.resumeMessages ?? []);
+    toolCallLog.push(...entries);
+    for (const f of filesRead) filesReadThisRun.add(f);
+    // The TUI's checklist is populated by this event, so without it a resumed
+    // run shows no plan at all — the work is remembered, the display is not.
+    if (latestTodos.length > 0) {
+      input.onStructuredEvent?.({
+        type: "todos_initialized",
+        title: "Plan restored",
+        status: "success",
+        todos: latestTodos,
+      });
+    }
+    if (entries.length > 0) {
+      log("[zone-resume-rehydrated]", JSON.stringify({
+        event: "resume_rehydrated",
+        runId: input.runId ?? null,
+        sessionId: input.sessionId ?? null,
+        toolCalls: entries.length,
+        filesRead: filesRead.size,
+      }));
+    }
+  }
   // P.1: compaction trigger — fires at the safe iteration boundary after tool results
   // are processed. No-op in P.1; P.2 replaces the stub with real summarization.
   const compactor = new ContextCompactor();
