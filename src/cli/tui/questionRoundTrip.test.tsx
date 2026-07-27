@@ -110,6 +110,67 @@ describe("reducer — awaiting_input and pendingQuestion", () => {
     }
   });
 
+  it("parked time is banked and excluded from the reported duration", () => {
+    // A run parked for an hour would otherwise report an hour of work. That
+    // corrupts latency telemetry across exactly the boundary this feature
+    // introduces — the same shape as the cost-log discontinuity the OpenAI
+    // cache-write mapping created.
+    let clock = 0;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+    try {
+      clock = 1_000;
+      let s = reducer(buildInitialState({ model: "m", capUsd: 10 }), { type: "SPINNER_START", label: "W" });
+      expect(s.runStartMs).toBe(1_000);
+
+      clock = 3_000; // 2s of real work before the question
+      s = reducer(s, { type: "USER_QUESTION_ASKED", questionId: "q1", runId: RUN_ID, question: "Which?" });
+
+      clock = 63_000; // the human took a minute
+      s = reducer(s, { type: "USER_QUESTION_RESOLVED", echo: "this one" });
+      expect(s.parkedMs).toBe(60_000);
+
+      clock = 65_000; // 2s more work, then done
+      s = reducer(s, { type: "RUN_DONE" });
+
+      const wallClock = s.runEndMs! - s.runStartMs!;
+      expect(wallClock).toBe(64_000);
+      // What the user is shown: 4s of work, not 64s.
+      expect(wallClock - s.parkedMs).toBe(4_000);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("two parks in one run both count", () => {
+    let clock = 0;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+    try {
+      clock = 1_000;
+      let s = reducer(buildInitialState({ model: "m", capUsd: 10 }), { type: "SPINNER_START", label: "W" });
+      for (const [askAt, answerAt] of [[2_000, 12_000], [20_000, 25_000]]) {
+        clock = askAt;
+        s = reducer(s, { type: "USER_QUESTION_ASKED", questionId: "q", runId: RUN_ID, question: "?" });
+        clock = answerAt;
+        s = reducer(s, { type: "USER_QUESTION_RESOLVED" });
+      }
+      expect(s.parkedMs).toBe(15_000);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("a new run starts its parked accumulator at zero", () => {
+    // Otherwise the previous run's wait is deducted from the next run's work and
+    // the duration reads as faster than it was.
+    let s = reducer(buildInitialState({ model: "m", capUsd: 10 }), { type: "SPINNER_START", label: "W" });
+    s = reducer(s, { type: "USER_QUESTION_ASKED", questionId: "q1", runId: RUN_ID, question: "?" });
+    s = reducer(s, { type: "USER_QUESTION_RESOLVED" });
+    s = reducer(s, { type: "RUN_DONE" });
+    expect(s.parkedMs).toBeGreaterThanOrEqual(0);
+    const next = reducer(s, { type: "SPINNER_START", label: "W" });
+    expect(next.parkedMs).toBe(0);
+  });
+
   it("a run that ends while parked clears the question", () => {
     // Otherwise the pinned panel outlives the run it belongs to and the next
     // keystroke resolves a question nobody is waiting on.

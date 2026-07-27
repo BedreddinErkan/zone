@@ -78,6 +78,17 @@ export type StoreState = {
   /** Wall-clock completion of the last task — frozen so the displayed duration
    *  doesn't keep ticking while the "done" status is shown. */
   runEndMs?: number;
+  /**
+   * Wall-clock spent parked on a human this run, accumulated across parks.
+   * Subtracted from the reported duration: a run that waited an hour for an
+   * answer would otherwise report an hour of work, which corrupts latency
+   * telemetry across exactly the boundary this feature introduces. Reported
+   * alongside rather than hidden, so wall-clock stays derivable and a long
+   * pause reads as a pause instead of as slow inference.
+   */
+  parkedMs: number;
+  /** Start of the current park; undefined when not parked. */
+  parkStartedMs?: number;
   toastQueue: ToastEntry[];
   modalStack: ModalEntry[];
   pendingApproval: { approvalId: string; runId: string; command: string; kind?: "command" | "edit" | "trust" } | null;
@@ -180,6 +191,8 @@ export function buildInitialState(initialValues?: {
     runState: "idle",
     runStartMs: undefined,
     runEndMs: undefined,
+    parkedMs: 0,
+    parkStartedMs: undefined,
     toastQueue: [],
     modalStack: [],
     pendingApproval: null,
@@ -354,6 +367,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         // `=== "running"`, or answering would restart the timer at zero.
         runStartMs: isRunInFlight(state.runState) ? state.runStartMs : Date.now(),
         runEndMs: isRunInFlight(state.runState) ? state.runEndMs : undefined,
+        parkedMs: isRunInFlight(state.runState) ? state.parkedMs : 0,
       };
     case "SPINNER_UPDATE":
       return { ...state, spinner: { active: true, label: action.label } };
@@ -489,6 +503,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
           question: action.question,
         },
         runState: "awaiting_input",
+        parkStartedMs: Date.now(),
         // Nothing is being computed while we wait, and a spinner next to a
         // question reads as "still working", i.e. "don't type".
         spinner: null,
@@ -499,6 +514,8 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return {
         ...state,
         pendingQuestion: null,
+        parkedMs: state.parkedMs + (state.parkStartedMs != null ? Date.now() - state.parkStartedMs : 0),
+        parkStartedMs: undefined,
         // Back to the run, not to idle — runStartMs is untouched, so the
         // reported duration never counted the wait as inference.
         runState: "running",

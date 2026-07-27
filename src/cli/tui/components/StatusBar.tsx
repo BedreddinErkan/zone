@@ -13,6 +13,7 @@ function leftText(
   model: string,
   elapsedSec: string | null,
   cumulativeTokens: number,
+  waitedSec: string | null,
 ): string {
   const m = model || "default";
   const tokStr = cumulativeTokens > 0 ? ` (${formatTokens(cumulativeTokens)} tok)` : "";
@@ -24,7 +25,8 @@ function leftText(
     case "awaiting_input":
       return `waiting for you · $${costUsd.toFixed(4)}${tokStr} · ${m}`;
     case "done":
-      return `done · $${costUsd.toFixed(4)}${tokStr}${elapsedSec ? ` · ${elapsedSec}s` : ""} · ${m}`;
+      return `done · $${costUsd.toFixed(4)}${tokStr}${elapsedSec ? ` · ${elapsedSec}s` : ""}`
+        + `${waitedSec ? ` (+${waitedSec}s waiting on you)` : ""} · ${m}`;
     case "aborted":
       return `aborted · $${costUsd.toFixed(4)}${tokStr} · ${m}`;
     case "failed":
@@ -54,16 +56,20 @@ function modePill(m: TuiMode, narrow: boolean): string | null {
 export function StatusBar(): React.ReactElement {
   const { state } = useStore();
   const { costUsd, dailyUsedUsd, model, tokenBudgetRatio, cumulativeTokens, capUsd } = state.statusBar;
-  const { runState, runStartMs, runEndMs, mode } = state;
+  const { runState, runStartMs, runEndMs, parkedMs, mode } = state;
   // webSearch defaults ON (absence = enabled); show indicator when active
   const webSearch = state.modelSettings?.webSearchEnabled !== false;
 
   // Per-task execution time: start (task begin) → end (task complete), frozen at
   // completion so it doesn't keep ticking while the "done" status is displayed.
+  // Parked time is the user's, not the run's. Subtracting it keeps this figure
+  // comparable across runs that did and did not stop to ask something; it is
+  // surfaced separately below so wall-clock stays derivable.
   const elapsedSec =
     (runState === "done" || runState === "failed") && runStartMs != null && runEndMs != null
-      ? ((runEndMs - runStartMs) / 1000).toFixed(1)
+      ? (Math.max(0, runEndMs - runStartMs - parkedMs) / 1000).toFixed(1)
       : null;
+  const waitedSec = elapsedSec != null && parkedMs > 0 ? (parkedMs / 1000).toFixed(1) : null;
 
   const tokenColor =
     tokenBudgetRatio >= 0.9 ? "red" : tokenBudgetRatio >= 0.7 ? "yellow" : undefined;
@@ -82,7 +88,7 @@ export function StatusBar(): React.ReactElement {
     <Box flexDirection="column">
       <Text dimColor>{sep}</Text>
       <Box justifyContent="space-between" paddingX={1}>
-        <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec, cumulativeTokens)}{webSearch ? " · [W]" : ""}</Text>
+        <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec, cumulativeTokens, waitedSec)}{webSearch ? " · [W]" : ""}</Text>
         {pill ? <Text color={pillColor}>{pill}</Text> : null}
         <Text dimColor>{rightHint(runState)}</Text>
       </Box>
