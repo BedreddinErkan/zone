@@ -201,6 +201,19 @@ export function eventToActions(
         intents: [],
       };
 
+    case "user_question_required": {
+      const questionId = evt.questionId ?? "";
+      const question = evt.question ?? "";
+      // A question with no handle can never be resolved, and the park has no
+      // timeout — dropping it here would hang the TUI in awaiting_input with
+      // nothing to answer. Ignore it and let the loop's own teardown unpark.
+      if (!questionId || !question) return { actions: [], intents: [] };
+      return {
+        actions: [{ type: "USER_QUESTION_ASKED", questionId, runId: evt.runId ?? "", question }],
+        intents: [],
+      };
+    }
+
     case "scope_revision_proposed": {
       if (ctx.mode === "plan") {
         return {

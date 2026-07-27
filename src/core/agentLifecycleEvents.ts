@@ -132,6 +132,9 @@ export type ZoneStructuredProgressEvent = {
     | "command_approval_required"
     | "edit_approval_required"
     | "trust_approval_required"
+    /** ask_user: the loop is parked until the user answers or declines. Unlike the
+     *  approval events this one has no timeout, so nothing resolves it but a human. */
+    | "user_question_required"
     | "command_auto_approved"
     | "command_trusted"
     | "terminal_output"
@@ -209,6 +212,9 @@ export type ZoneStructuredProgressEvent = {
   total_output?: number;
   iter_count?: number;
   approvalId?: string;
+  /** user_question_required: park handle, and the question to put to the user. */
+  questionId?: string;
+  question?: string;
   /** trust_approval_required: the folder path being granted trust. */
   projectPath?: string;
   todos?: Array<{

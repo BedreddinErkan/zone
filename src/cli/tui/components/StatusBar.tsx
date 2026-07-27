@@ -21,6 +21,8 @@ function leftText(
       return `idle · ${m} · perm: default`;
     case "running":
       return `$${costUsd.toFixed(4)}${tokStr} · ${m} · perm: default`;
+    case "awaiting_input":
+      return `waiting for you · $${costUsd.toFixed(4)}${tokStr} · ${m}`;
     case "done":
       return `done · $${costUsd.toFixed(4)}${tokStr}${elapsedSec ? ` · ${elapsedSec}s` : ""} · ${m}`;
     case "aborted":
@@ -34,6 +36,10 @@ function rightHint(runState: RunState): string {
   switch (runState) {
     case "running":
       return "esc abort";
+    case "awaiting_input":
+      // Esc here skips the question, it does not abort the run — the hint has to
+      // say which, because the same key means the other thing one state away.
+      return "esc skip question";
     default:
       return "/help for commands";
   }

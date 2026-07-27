@@ -28,8 +28,10 @@ import { UndoModal } from "./components/UndoModal.js";
 import { HookTrustModal } from "./components/HookTrustModal.js";
 import { McpTrustModal } from "./components/McpTrustModal.js";
 import { PlanPanel } from "./components/PlanPanel.js";
+import { QuestionPanel } from "./components/QuestionPanel.js";
 import { resolveCommandApproval } from "../../api/commandApprovals.js";
 import { resolveEditApproval } from "../../api/editApprovals.js";
+import { declineUserQuestion } from "../../api/questionApprovals.js";
 import { resolvePlanApproval } from "../../llm/planApprovals.js";
 import { resolveStagedApproval } from "../../api/stagedApprovals.js";
 import type { EventBus } from "../eventBus.js";
@@ -161,6 +163,17 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
       dispatch({ type: "MODE_CYCLE" });
       return;
     }
+    // Esc with a question pending — discard the question, leave the run alive.
+    // Checked first: while parked the run state is awaiting_input rather than
+    // running, so the abort branch below cannot fire, but the ordering makes the
+    // precedence legible instead of incidental.
+    if (key.escape && state.pendingQuestion !== null && state.modalView === "none") {
+      const { questionId, runId } = state.pendingQuestion;
+      // The loop is parked awaiting a tool_result, so the decline must return one.
+      declineUserQuestion({ questionId, runId });
+      dispatch({ type: "USER_QUESTION_RESOLVED" });
+      return;
+    }
     // Esc — abort running task only; never exit TUI. Skip when approval modal is active.
     if (key.escape && state.runState === "running" && state.pendingApproval === null && state.modalView === "none") {
       runAcRef.current?.abort();
@@ -276,6 +289,9 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
         getCommitData={getCommitData}
         getFeedbackData={getFeedbackData}
       />
+      {state.pendingQuestion !== null && (
+        <QuestionPanel question={state.pendingQuestion.question} />
+      )}
       {state.runState === "running" && state.todos.length > 0 && (
         <PlanPanel todos={state.todos} />
       )}

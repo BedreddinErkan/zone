@@ -53,7 +53,16 @@ export type StatusBarState = {
   cumulativeTokens: number;
 };
 
-export type RunState = "idle" | "running" | "done" | "aborted" | "failed";
+export type RunState = "idle" | "running" | "done" | "aborted" | "failed" | "awaiting_input";
+
+/**
+ * The run is still in flight — inference or a human, either way not finished.
+ * Anything that resets per-run state on ENTERING a run must use this rather than
+ * `=== "running"`, or parking on a question would read as a fresh task.
+ */
+export function isRunInFlight(runState: RunState): boolean {
+  return runState === "running" || runState === "awaiting_input";
+}
 
 export type StoreState = {
   transcript: TranscriptEntry[];
@@ -72,6 +81,12 @@ export type StoreState = {
   toastQueue: ToastEntry[];
   modalStack: ModalEntry[];
   pendingApproval: { approvalId: string; runId: string; command: string; kind?: "command" | "edit" | "trust" } | null;
+  /**
+   * A question the agent is parked on. Deliberately NOT pendingApproval: that
+   * field hard-blocks the Composer (Composer.tsx returns early while it is
+   * non-null), and a question needs the Composer live to be answered.
+   */
+  pendingQuestion: { questionId: string; runId: string; question: string } | null;
   sessionTrustedPrefixes: string[];
   mode: TuiMode;
   planProposal: {
@@ -168,6 +183,7 @@ export function buildInitialState(initialValues?: {
     toastQueue: [],
     modalStack: [],
     pendingApproval: null,
+    pendingQuestion: null,
     sessionTrustedPrefixes: initialValues?.trustedPrefixes ?? [],
     mode: initialValues?.mode ?? "normal",
     planProposal: null,
@@ -226,6 +242,8 @@ export type StoreAction =
   | { type: "TRANSCRIPT_REMOUNT" }
   | { type: "PENDING_APPROVAL_SET"; approvalId: string; runId: string; command: string; kind?: "command" | "edit" | "trust" }
   | { type: "PENDING_APPROVAL_RESOLVED" }
+  | { type: "USER_QUESTION_ASKED"; questionId: string; runId: string; question: string }
+  | { type: "USER_QUESTION_RESOLVED"; echo?: string }
   | { type: "SESSION_TRUST_PREFIX"; prefix: string }
   | { type: "PERMISSIONS_OPEN"; list: DiskTrustEntry[] }
   | { type: "PERMISSIONS_CLOSE" }
@@ -332,8 +350,10 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         // The previous `state.runStartMs ?? Date.now()` captured the start once
         // on the first task and never reset it → durations grew monotonically
         // across the whole session (116 → 532 → 1276 …).
-        runStartMs: state.runState === "running" ? state.runStartMs : Date.now(),
-        runEndMs: state.runState === "running" ? state.runEndMs : undefined,
+        // A run parked on a question is still the same run: isRunInFlight, not
+        // `=== "running"`, or answering would restart the timer at zero.
+        runStartMs: isRunInFlight(state.runState) ? state.runStartMs : Date.now(),
+        runEndMs: isRunInFlight(state.runState) ? state.runEndMs : undefined,
       };
     case "SPINNER_UPDATE":
       return { ...state, spinner: { active: true, label: action.label } };
@@ -408,6 +428,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         runState: "done",
         // Freeze the duration at completion (excludes idle / reading time).
         runEndMs: Date.now(),
+        pendingQuestion: null,
         liveTail: { ...state.liveTail, currentToolCall: null },
       };
 
@@ -417,6 +438,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         spinner: null,
         runState: "aborted",
         runEndMs: Date.now(),
+        pendingQuestion: null,
         liveTail: { ...state.liveTail, currentToolCall: null },
       };
 
@@ -426,6 +448,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         spinner: null,
         runState: "failed",
         runEndMs: Date.now(),
+        pendingQuestion: null,
         liveTail: { ...state.liveTail, currentToolCall: null },
       };
 
@@ -456,6 +479,37 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
 
     case "PENDING_APPROVAL_RESOLVED":
       return { ...state, pendingApproval: null };
+
+    case "USER_QUESTION_ASKED":
+      return {
+        ...state,
+        pendingQuestion: {
+          questionId: action.questionId,
+          runId: action.runId,
+          question: action.question,
+        },
+        runState: "awaiting_input",
+        // Nothing is being computed while we wait, and a spinner next to a
+        // question reads as "still working", i.e. "don't type".
+        spinner: null,
+        liveTail: { ...state.liveTail, currentToolCall: null },
+      };
+
+    case "USER_QUESTION_RESOLVED":
+      return {
+        ...state,
+        pendingQuestion: null,
+        // Back to the run, not to idle — runStartMs is untouched, so the
+        // reported duration never counted the wait as inference.
+        runState: "running",
+        spinner: { active: true, label: "Working" },
+        // The pinned panel disappears with the question, so the answer has to
+        // land in the scrollback or there is no record of what was agreed.
+        // Not USER_PROMPT: that arm resets todos mid-run.
+        transcript: action.echo
+          ? [...state.transcript, { kind: "user_prompt" as const, text: action.echo }]
+          : state.transcript,
+      };
 
     case "SESSION_TRUST_PREFIX":
       return { ...state, sessionTrustedPrefixes: [...state.sessionTrustedPrefixes, action.prefix] };
@@ -563,6 +617,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         liveTail: { currentToolCall: null, narrationBuffer: "" },
         spinner: null,
         runState: "idle",
+        pendingQuestion: null,
         runStartMs: undefined,
         runEndMs: undefined,
         modalView: "none",

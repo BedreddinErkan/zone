@@ -6,6 +6,7 @@ import { useStore } from "../store.js";
 import { loadDiskTrust } from "../../../api/diskTrust.js";
 import { loadDiskKeys } from "../../../api/diskKeys.js";
 import { listSessionsMeta } from "../../../api/diskSessions.js";
+import { resolveUserQuestion } from "../../../api/questionApprovals.js";
 import { runInit } from "../init.js";
 import { readMemoryAndShow } from "../memory.js";
 import { randomUUID } from "node:crypto";
@@ -537,6 +538,28 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
           return;
         }
       }
+    }
+
+    // ── A pending question owns Enter ──
+    // Reached only after the slash block above, so text matching a known command
+    // still executes as a command and everything else — including a leading "/"
+    // that matches nothing — is the answer. Nothing here inspects what the user
+    // typed beyond that: intent detection is what isContinueIntent already proved
+    // is the wrong tool.
+    if (state.pendingQuestion !== null && key.return) {
+      const answer = bufferRef.current.trim();
+      if (!answer) return; // Enter on an empty buffer is not an answer
+      resolveUserQuestion({
+        questionId: state.pendingQuestion.questionId,
+        runId: state.pendingQuestion.runId,
+        answer,
+      });
+      // Deliberately NOT submitBuffer: that fires USER_PROMPT (which resets todos)
+      // and hands App a new AbortController, orphaning the run we are answering.
+      dispatch({ type: "USER_QUESTION_RESOLVED", echo: answer });
+      applyBuf("", 0);
+      setHistoryIdx(-1);
+      return;
     }
 
     // ── During a run: only slash-buffer editing allowed ──

@@ -232,6 +232,9 @@ export function useAgentEvents(
     bus.on("command_approval_required", handleCommandApproval);
     bus.on("edit_approval_required",   flushFirst);
     bus.on("trust_approval_required",  flushFirst);
+    // flushFirst: pending narration must land in the transcript BEFORE the
+    // question pins, or the reasoning that led to it appears after the ask.
+    bus.on("user_question_required",   flushFirst);
     bus.on("scope_revision_proposed",  simple);
 
     bus.on("compaction_started",          simple);
@@ -285,6 +288,7 @@ export function useAgentEvents(
       bus.off("command_approval_required", handleCommandApproval);
       bus.off("edit_approval_required",   flushFirst);
       bus.off("trust_approval_required",  flushFirst);
+      bus.off("user_question_required",   flushFirst);
       bus.off("scope_revision_proposed",  simple);
 
       bus.off("compaction_started",          simple);
