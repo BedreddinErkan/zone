@@ -324,6 +324,13 @@ export interface AgentLoopInput {
   resumeContextBlock?: string;
   /** Durable resume: pruned message history to seed responseInput (warm-continue, Inc-1). */
   resumeMessages?: unknown[];
+  /**
+   * The user's answer to a question the previous turn parked on, supplied when
+   * resuming an "awaiting_user_input" envelope. Fills the dangling ask_user
+   * tool reply. Absent or null means the user did not answer — the model is told
+   * so explicitly rather than being handed a fabricated answer.
+   */
+  resumeAnswer?: string | null;
   /** Adaptive-replan enabler: project summary carried from plan phase for mid-execution replan calls. */
   repoSummary?: string;
   /** Adaptive-replan enabler: top-N ranked files carried from plan phase for mid-execution replan calls. */
@@ -347,7 +354,7 @@ export interface AgentLoopResult {
   /** Phase H.7: how the loop ended. Used by upstream flows (investigation /
    *  patch) to surface "Token budget reached" vs "Iteration budget reached"
    *  distinctly in the UI. Optional for backward-compat with older callers. */
-  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded" | "upstream_unavailable" | "phase1_handoff" | "hook_blocked" | "scope_block_circuit_breaker" | "staged_rejected" | "staged_refine_requested" | "semantic_stall";
+  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded" | "upstream_unavailable" | "phase1_handoff" | "hook_blocked" | "scope_block_circuit_breaker" | "staged_rejected" | "staged_refine_requested" | "semantic_stall" | "awaiting_user_input";
   /** Phase Q.2: populated when terminationReason === "loop_detected". The
    *  offending tool name + observed count in the sliding-window detector. */
   loopDetected?: { toolName: string; count: number };
@@ -1669,6 +1676,64 @@ function extractFunctionCallItems(
 }
 
 
+/** What the model is told when a run resumes with its question unanswered. */
+export const UNANSWERED_ON_RESUME_REPLY =
+  "This run was interrupted before the user answered. No answer is available. " +
+  "Proceed with the default you stated — or your best judgement if you stated none — " +
+  "and record the assumption in your final summary. Do not ask this question again.";
+
+/**
+ * Give every dangling tool_call a reply.
+ *
+ * A restored conversation can end with an assistant turn whose tool_calls were
+ * never answered — the park checkpoint writes exactly that shape by design, and
+ * a process killed between issuing a tool call and recording its result
+ * produces it by accident. Chat Completions rejects the whole request when an
+ * assistant tool_call has no matching tool message, so an unreconciled resume
+ * fails at the API with an error that says nothing about the real cause.
+ *
+ * `answer` fills the ask_user reply when the user has actually answered;
+ * otherwise every dangling call gets an explicit "no result" rather than a
+ * fabricated one.
+ *
+ * Appends only. Existing messages are passed through BY REFERENCE.
+ *
+ * @internal exported for tests
+ */
+export function reconcileDanglingToolCalls(
+  messages: unknown[],
+  answer?: string | null
+): unknown[] {
+  const answered = new Set<string>();
+  for (const raw of messages) {
+    const msg = raw as { role?: string; tool_call_id?: unknown } | null;
+    if (msg?.role === "tool" && typeof msg.tool_call_id === "string") answered.add(msg.tool_call_id);
+  }
+
+  const missing: Array<{ id: string; name: string }> = [];
+  for (const raw of messages) {
+    const msg = raw as { role?: string; tool_calls?: unknown } | null;
+    if (!msg || msg.role !== "assistant" || !Array.isArray(msg.tool_calls)) continue;
+    for (const rawCall of msg.tool_calls) {
+      const call = rawCall as { id?: unknown; function?: { name?: unknown } };
+      const id = typeof call.id === "string" ? call.id : "";
+      if (!id || answered.has(id)) continue;
+      missing.push({ id, name: String(call.function?.name ?? "") });
+    }
+  }
+  if (missing.length === 0) return messages;
+
+  const replies = missing.map(({ id, name }) => ({
+    role: "tool" as const,
+    tool_call_id: id,
+    content: name === "ask_user"
+      ? (typeof answer === "string" && answer.length > 0 ? answer : UNANSWERED_ON_RESUME_REPLY)
+      : "This call did not complete before the run was interrupted. Its result is unknown — "
+        + "re-run it if you still need it.",
+  }));
+  return [...messages, ...replies];
+}
+
 /**
  * Recover the file-access record from a restored conversation.
  *
@@ -2267,6 +2332,10 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
   // stagingBaseHashes: sha256 of each file's disk content when first staged.
   // Computed lazily in captureBaseHashes (disk == base until finalizeStaging).
   const stagingBaseHashes = new Map<string, { hash: string; existed: boolean }>();
+  // Set when the run stops with a question outstanding, so the envelope records
+  // WHAT was being asked — a resumed run has to re-render it and reply to the
+  // dangling tool_call, and the in-memory questionId does not survive the exit.
+  let pendingQuestionAtExit: { toolCallId: string; question: string } | undefined;
 
   function captureBaseHashes(): void {
     for (const abs of stagingFiles.keys()) {
@@ -2324,6 +2393,7 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
       createdPaths: deriveCreatedPaths(filesModified, stagingFiles, input.repoPath),
       flushedPaths: [],  // stamped at exit by stampEnvelopeStatus with result.filesModified
       priorSessionSummary: String(input.priorSessionSummary ?? ""),
+      ...(pendingQuestionAtExit ? { pendingQuestion: pendingQuestionAtExit } : {}),
       ...serializeMessagesForEnvelope(),
     };
   }
@@ -2694,10 +2764,16 @@ Example:
   // responseInput from it (fresh system message replaces the saved one at slice(1)).
   // Falls back to the standard [system, user-kickoff] when resumeMessages is absent.
   const isWarmResume = !!input.resumeMessages?.length;
+  // Every tool_call must have a reply before the next API call, and a restored
+  // conversation can end mid-turn. Reconciled here rather than at the call site
+  // so no resume path can forget.
+  const reconciledResumeMessages = isWarmResume
+    ? reconcileDanglingToolCalls(input.resumeMessages!, input.resumeAnswer)
+    : [];
   const responseInput: ChatCompletionMessageParam[] = isWarmResume
     ? [
         { role: "system", content: systemContent },
-        ...(input.resumeMessages!.slice(1) as ChatCompletionMessageParam[]),
+        ...(reconciledResumeMessages.slice(1) as ChatCompletionMessageParam[]),
         // The reconciliation context — which staged edits were dropped as
         // conflicting, which files already exist on disk — was previously built
         // and then thrown away on this branch, so a warm resume was the one path
@@ -2751,7 +2827,7 @@ Example:
   // read-before-patch gate would reject a file the model read before the
   // interruption and can still see in its own context.
   if (isWarmResume) {
-    const { entries, filesRead } = rehydrateFileAccess(input.resumeMessages ?? []);
+    const { entries, filesRead } = rehydrateFileAccess(reconciledResumeMessages);
     toolCallLog.push(...entries);
     for (const f of filesRead) filesReadThisRun.add(f);
     // The TUI's checklist is populated by this event, so without it a resumed
@@ -3960,9 +4036,33 @@ Example:
             continue;
           }
 
+          // The run is stopping with the question outstanding. Exit by RETURNING,
+          // never by throwing: the envelope stamp lives in a try with only a
+          // finally, so a throw here sails past it and leaves status "running"
+          // with a live PID — which isResumable reads as "a run is in progress"
+          // and excludes for the rest of the session. Returning also lets the
+          // next turn pick the conversation up where the question left it.
           replyAndContinue("The question was cancelled because the run is stopping.", false);
+          await persistStagingOnError(stagingFiles, ownsStagingFiles, input.repoPath);
+          stagingFinalized = true;
+          pendingQuestionAtExit = { toolCallId: callId, question };
+          await flushRunCheckpoint(responseInput.slice() as unknown[]);
           // [INNER-LOOP: ASK_USER_ABORTED]
-          continue;
+          return {
+            success: false,
+            summary: "Stopped with a question outstanding — resume to answer it.",
+            toolCallLog,
+            filesModified: Array.from(filesModified),
+            patchValidatedByAgent: false,
+            verificationReason: "no_verification_attempted",
+            terminationReason: "awaiting_user_input",
+            tokenUsage: budget.tokenUsage,
+            costUsd: budget.snapshot().costUsd,
+            iterCount: iter + 1,
+            promotedFromArchetype,
+            promotionTrigger,
+            promotedAtIter,
+          };
         }
 
         // Phase AS: suggest_scope_change records a scope mismatch proposal.

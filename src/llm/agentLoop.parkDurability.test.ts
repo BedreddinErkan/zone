@@ -40,7 +40,11 @@ vi.mock("./factory.js", () => ({
 }));
 vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
-import { runAgentLoop } from "./agentLoop.js";
+import {
+  runAgentLoop,
+  reconcileDanglingToolCalls,
+  UNANSWERED_ON_RESUME_REPLY,
+} from "./agentLoop.js";
 import {
   loadRunEnvelope,
   buildResumeContextBlock,
@@ -234,5 +238,142 @@ describe("resume acts on the flag", () => {
   it("says nothing when the conversation was restored intact", async () => {
     const block = buildResumeContextBlock(envWith({ messages: [{ role: "user", content: "hi" }] }), []);
     expect(block).not.toMatch(/could NOT be restored/i);
+  });
+});
+
+// ── suspend across turns ─────────────────────────────────────────────────────
+
+describe("stopping with a question outstanding", () => {
+  it("returns awaiting_user_input instead of throwing, and records the question", async () => {
+    // Defect 2: the envelope stamp sits in a try with only a finally, so a throw
+    // from here sails past it and leaves status "running" with a LIVE pid —
+    // which isResumable reads as "a run is in progress" and excludes for the
+    // rest of the session. The run becomes unresumable precisely when the user
+    // most wants to resume it.
+    const ac = new AbortController();
+    mocks.createChatCompletion
+      .mockResolvedValueOnce(toolCallResponse("t1", "read_file", { filePath: "src/a.ts", lineRange: null }))
+      .mockResolvedValueOnce(toolCallResponse("t2", "ask_user", { question: QUESTION }))
+      .mockResolvedValueOnce(doneResponse());
+
+    const result = await runAgentLoop({
+      task: "pick an auth module",
+      repoPath,
+      runId: "run-suspend",
+      sessionId: SESSION_ID,
+      interactiveChannel: "tui",
+      abortSignal: ac.signal,
+      onStructuredEvent: (evt: unknown) => {
+        if ((evt as { type?: string })?.type === "user_question_required") ac.abort();
+      },
+    });
+
+    expect(result.terminationReason).toBe("awaiting_user_input");
+    expect(result.success).toBe(false);
+
+    const env = await loadRunEnvelope(SESSION_ID);
+    expect(env).not.toBeNull();
+    expect(env!.status).toBe("awaiting_user_input");
+    expect(env!.pendingQuestion?.question).toBe(QUESTION);
+    // The tool_call_id is the part that matters mechanically: the restored
+    // conversation ends with an assistant tool_call that still needs a reply.
+    expect(env!.pendingQuestion?.toolCallId).toBe("t2");
+    expect(flatten(env!.messages!)).toContain(QUESTION);
+  });
+});
+
+describe("reconcileDanglingToolCalls", () => {
+  const asked = () => ([
+    { role: "user", content: "task" },
+    {
+      role: "assistant",
+      content: null,
+      tool_calls: [{ id: "q1", type: "function", function: { name: "ask_user", arguments: "{}" } }],
+    },
+  ]);
+
+  it("fills the unanswered ask with the user's answer", async () => {
+    const out = reconcileDanglingToolCalls(asked(), "use the second one");
+    expect(out).toHaveLength(3);
+    expect(out[2]).toMatchObject({ role: "tool", tool_call_id: "q1", content: "use the second one" });
+  });
+
+  it("says plainly that no answer exists rather than inventing one", async () => {
+    // The default arm. Fabricating an answer here would put words in the user's
+    // mouth and the model would act on them as though they were instructions.
+    const out = reconcileDanglingToolCalls(asked());
+    expect(String((out[2] as { content?: string }).content)).toBe(UNANSWERED_ON_RESUME_REPLY);
+    expect(String((out[2] as { content?: string }).content)).toContain("No answer is available");
+  });
+
+  it("treats an empty answer as no answer", async () => {
+    const out = reconcileDanglingToolCalls(asked(), "");
+    expect((out[2] as { content?: string }).content).toBe(UNANSWERED_ON_RESUME_REPLY);
+  });
+
+  it("repairs a run killed mid-tool-execution, not just a park", async () => {
+    // Same shape, different cause: a process killed between issuing a tool call
+    // and recording its result. Chat Completions rejects the whole request when
+    // an assistant tool_call has no matching tool message, so without this the
+    // resume dies at the API with an error that names none of this.
+    const out = reconcileDanglingToolCalls([
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [{ id: "r1", type: "function", function: { name: "run_command", arguments: "{}" } }],
+      },
+    ]);
+    expect(out).toHaveLength(2);
+    expect(String((out[1] as { content?: string }).content)).toContain("did not complete");
+  });
+
+  it("leaves a complete conversation exactly as it was", async () => {
+    const complete = [
+      { role: "assistant", content: null, tool_calls: [{ id: "a1", type: "function", function: { name: "read_file", arguments: "{}" } }] },
+      { role: "tool", tool_call_id: "a1", content: "contents" },
+    ];
+    expect(reconcileDanglingToolCalls(complete)).toBe(complete);
+  });
+
+  it("passes existing messages through by reference", async () => {
+    const msgs = asked();
+    const out = reconcileDanglingToolCalls(msgs, "x");
+    expect(out[0]).toBe(msgs[0]);
+    expect(out[1]).toBe(msgs[1]);
+  });
+});
+
+describe("resuming into the answer", () => {
+  it("the answer becomes the reply to the parked tool_call, and nothing dangles", async () => {
+    // The protocol assertion: after resume, every assistant tool_call in what we
+    // send has a matching tool message. Without reconciliation the request is
+    // malformed and the provider rejects all of it.
+    mocks.createChatCompletion.mockResolvedValueOnce(doneResponse());
+
+    await runAgentLoop({
+      task: "pick an auth module",
+      repoPath,
+      runId: "run-resumed",
+      sessionId: "sess-resumed-0002",
+      resumeMessages: [
+        { role: "system", content: "old system" },
+        { role: "user", content: "pick an auth module" },
+        { role: "assistant", content: null, tool_calls: [{ id: "q1", type: "function", function: { name: "ask_user", arguments: JSON.stringify({ question: QUESTION }) } }] },
+      ],
+      resumeAnswer: "src/auth/session.ts is canonical",
+    });
+
+    const sent = (mocks.createChatCompletion.mock.calls[0]![0] as {
+      messages: Array<{ role: string; content?: unknown; tool_calls?: unknown; tool_call_id?: string }>;
+    }).messages;
+
+    const replied = new Set(sent.filter((m) => m.role === "tool").map((m) => m.tool_call_id));
+    for (const m of sent) {
+      if (m.role !== "assistant" || !Array.isArray(m.tool_calls)) continue;
+      for (const c of m.tool_calls as Array<{ id: string }>) {
+        expect(replied.has(c.id), `tool_call ${c.id} has no reply`).toBe(true);
+      }
+    }
+    expect(sent.some((m) => m.role === "tool" && m.content === "src/auth/session.ts is canonical")).toBe(true);
   });
 });

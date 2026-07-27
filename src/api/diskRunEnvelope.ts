@@ -82,6 +82,17 @@ export interface RunEnvelope {
    * is being continued — the failure the loud-marker rule exists to prevent.
    */
   messagesOmitted?: boolean;
+  /**
+   * Set when the run stopped with a question outstanding (status
+   * "awaiting_user_input"). Carries the tool_call_id because the restored
+   * conversation ends with an assistant tool_call that has no reply, and the
+   * Chat Completions protocol requires one before the next call.
+   *
+   * questionId is deliberately absent: it indexes an in-memory registry that
+   * does not survive the process, so persisting it would look resolvable when
+   * it is not.
+   */
+  pendingQuestion?: { toolCallId: string; question: string };
 }
 
 export interface ReconcileResult {
