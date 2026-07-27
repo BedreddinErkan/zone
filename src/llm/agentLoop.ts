@@ -414,6 +414,14 @@ function emitTerminalCallFailed(site: string, err: unknown): void {
 /** One question per run. Enforced by refusing the second call rather than hiding
  *  the tool: a vanished tool is never attempted, so it produces no signal about
  *  whether the cap is right or merely unreachable. */
+/**
+ * One question per run.
+ *
+ * @unverified-probe(model:ask-user-judgement) — every mechanism around this cap
+ * is unit-proven; whether the MODEL asks with judgement is not. Only a live run
+ * shows that. Read it from [zone-ask-user] clustering after investigation rather
+ * than at iter 0, and reason=pre_investigation trending to zero.
+ */
 export const MAX_ASK_USER_PER_RUN = 1;
 
 export const BASE_MAX_ITERATIONS = 15;

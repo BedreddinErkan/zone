@@ -283,6 +283,19 @@ export const UNVERIFIED_NON_MODEL_PROBES: Record<string, string> = {
     "That a non-streaming request actually survives past ten minutes end to end. " +
     "The derived timeout and the undici dispatcher prove Zone asks for it; only a " +
     "live long generation proves the vendor's edge holds the connection.",
+  "remote:ask-user-unwired":
+    "That a remote client can answer an ask_user question. The event now crosses " +
+    "the wire with its body intact and toWireFrame no longer drops unmapped fields " +
+    "silently, but NO remote client renders the question or routes an answer back, " +
+    "and the loop refuses to park for any channel that is not the TUI. Wiring it " +
+    "means adding the channel to the allowlist AND a client that can reply — the " +
+    "allowlist is the safety property; do not relax it to make a client appear to work.",
+  "model:ask-user-judgement":
+    "That the model uses ask_user with judgement — asking only when the answer " +
+    "changes what it builds and the repo cannot supply it. Every mechanism here is " +
+    "unit-proven; only a live run shows whether the prompt discipline holds. Watch " +
+    "[zone-ask-user] clustering after investigation rather than at iter 0, and " +
+    "[zone-ask-user-refused] reason=pre_investigation trending to zero.",
 };
 
 /** Model IDs already warned about — resolution runs per request, the gap is per config. */

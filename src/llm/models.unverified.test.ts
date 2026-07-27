@@ -24,7 +24,15 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** Files permitted to carry markers. A marker anywhere else would be invisible to
  *  this test, so new locations must be added here deliberately. */
-const MARKED_SOURCES = ["models.ts", "modelRegistry.ts", "anthropicAdapter.ts"];
+const MARKED_SOURCES = [
+  "models.ts",
+  "modelRegistry.ts",
+  "anthropicAdapter.ts",
+  // A marker belongs at the code that needs re-probing, not next to the
+  // checklist entry — that is the whole point of grepping for it.
+  "agentLoop.ts",
+  "../remote/toWireFrame.ts",
+];
 
 /** Every id the checklist may legitimately contain: model params plus non-model claims. */
 function declaredIds(): string[] {

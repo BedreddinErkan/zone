@@ -1,5 +1,14 @@
 import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import type { RemoteControlFrame } from "./controlServer.js";
+import { log } from "../utils/logger.js";
+
+/** Event types already reported as unmapped — the warning is per type, not per event. */
+const unmappedWarned = new Set<string>();
+
+/** Test-only: clear the once-per-type unmapped-event dedupe. */
+export function _resetUnmappedWarnedForTest(): void {
+  unmappedWarned.clear();
+}
 
 /**
  * Maximum byte length for string fields that may contain large content
@@ -129,6 +138,23 @@ export function toWireFrame(evt: ZoneStructuredProgressEvent): RemoteControlFram
         }),
       };
 
+    // The agent's question MUST cross with its body: a question without its text
+    // is an unanswerable prompt, and questionId is the handle a reply carries
+    // back. No truncation — a question long enough to hit the cap is a bug in
+    // the asking, not a payload to trim.
+    //
+    // @unverified-probe(remote:ask-user-unwired) — the frame is correct; no
+    // remote client renders it or routes an answer back, and the loop refuses to
+    // park for any channel but the TUI. Wiring it needs BOTH a client and an
+    // allowlist entry; the allowlist is the safety property, do not relax it to
+    // make a client appear to work.
+    case "user_question_required":
+      return {
+        ...base,
+        ...(evt.questionId !== undefined && { questionId: evt.questionId }),
+        ...(evt.question !== undefined && { question: evt.question }),
+      };
+
     // Scope revision: revision metadata only.
     case "scope_revision_proposed":
     case "scope_revision_resolved":
@@ -169,8 +195,35 @@ export function toWireFrame(evt: ZoneStructuredProgressEvent): RemoteControlFram
         ...(evt.estimatedIterations !== undefined && { estimatedIterations: evt.estimatedIterations }),
       };
 
-    // All other events: base fields only (runId, ts, type, title, status).
-    default:
+    // Genuinely base-only: these carry nothing beyond runId/ts/type/title/status.
+    // Membership is asserted, not assumed — see the default arm below.
+    case "command_auto_approved":
+    case "command_trusted":
+    case "phase_changed":
+    case "plan_generation_started":
+    case "llm_retry_in_progress":
       return base;
+
+    // Everything else reaching here is UNMAPPED, not base-only.
+    //
+    // The default arm used to swallow every event-specific field in silence,
+    // which is the failure mode where a remote feature looks wired because
+    // frames arrive, while the payload that makes them useful — a question's
+    // text, an approval's id — was dropped on the way out. Same shape as
+    // costFor's cache_write fallthrough: an unknown input reaching a plausible
+    // default instead of an error.
+    //
+    // Once per type, because the alternative is a per-event flood on a hot path.
+    default: {
+      if (!unmappedWarned.has(evt.type)) {
+        unmappedWarned.add(evt.type);
+        log("[zone-wire-frame-unmapped]", JSON.stringify({
+          event: "wire_frame_unmapped",
+          eventType: evt.type,
+          droppedFields: Object.keys(evt).filter((k) => !(k in base)).sort(),
+        }));
+      }
+      return base;
+    }
   }
 }

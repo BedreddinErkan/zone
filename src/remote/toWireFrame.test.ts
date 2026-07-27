@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
-import { toWireFrame, WIRE_BYTE_CAP } from "./toWireFrame.js";
+import { toWireFrame, WIRE_BYTE_CAP, _resetUnmappedWarnedForTest } from "./toWireFrame.js";
 
 function makeEvt(overrides: Partial<ZoneStructuredProgressEvent>): ZoneStructuredProgressEvent {
   return {
@@ -153,5 +153,58 @@ describe("toWireFrame — noise filtering", () => {
     expect(toWireFrame(makeEvt({ type: "narration", title: "thinking…" }))).not.toBeNull();
     expect(toWireFrame(makeEvt({ type: "agent_loop_complete", title: "done" }))).not.toBeNull();
     expect(toWireFrame(makeEvt({ type: "run_failed", title: "failed" }))).not.toBeNull();
+  });
+});
+
+describe("toWireFrame — unmapped events are loud", () => {
+  beforeEach(() => {
+    _resetUnmappedWarnedForTest();
+  });
+
+  it("carries a question's body across the wire", () => {
+    // A question without its text is an unanswerable prompt, and questionId is
+    // the handle a reply carries back. Dropping either makes a remote client
+    // look wired while being useless.
+    const frame = toWireFrame(
+      makeEvt({
+        type: "user_question_required",
+        questionId: "q1",
+        question: "Which auth module is canonical?",
+      })
+    );
+    expect(frame).toMatchObject({
+      type: "user_question_required",
+      questionId: "q1",
+      question: "Which auth module is canonical?",
+    });
+  });
+
+  it("warns once per type when an event's fields are dropped", () => {
+    // The default arm used to swallow event-specific fields in silence — the
+    // failure mode where frames arrive so the feature looks wired, while the
+    // payload that made them useful never left.
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const evt = makeEvt({ type: "todo_status_changed", todoId: "t1", todoStatus: "completed" });
+      toWireFrame(evt);
+      toWireFrame(evt);
+      const warnings = logSpy.mock.calls.filter((c) => c[0] === "[zone-wire-frame-unmapped]");
+      expect(warnings).toHaveLength(1);
+      const payload = JSON.parse(String(warnings[0]![1])) as { droppedFields: string[] };
+      expect(payload.droppedFields).toContain("todoId");
+      expect(payload.droppedFields).toContain("todoStatus");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("stays quiet for events that genuinely carry nothing extra", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      toWireFrame(makeEvt({ type: "command_trusted" }));
+      expect(logSpy.mock.calls.filter((c) => c[0] === "[zone-wire-frame-unmapped]")).toHaveLength(0);
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 });
