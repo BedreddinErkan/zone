@@ -61,6 +61,9 @@ export interface OneShotOpts {
   editApprovalMode?: "auto" | "manual";
   /** Durable resume: stable per-session ID threaded into the agent loop for envelope checkpointing. */
   sessionId?: string;
+  /** ALLOWLIST for ask_user — only a caller that positively declares an
+   *  interactive channel may park the loop on a question. See AgentLoopInput. */
+  interactiveChannel?: "tui";
   /** Durable resume: pre-reconciled staging + context to inject on restart. */
   resume?: {
     stagingFiles: Map<string, string>;
@@ -560,6 +563,7 @@ export async function runOneShotInner(
             summaryFormat: effectiveConfig.summaryFormat,
             priorSessionSummary: opts.priorSessionSummary,
             webSearchEnabled: effectiveConfig.webSearchEnabled,
+            interactiveChannel: opts.interactiveChannel,
             stagedCheckpoint: true,
             // Non-TTY (headless) has no StagedDiffModal — auto-approve to prevent hang.
             autoApprove: effectiveConfig.autoApprove || process.stdout.isTTY !== true,
@@ -620,6 +624,7 @@ export async function runOneShotInner(
         summaryFormat: effectiveConfig.summaryFormat,
         priorSessionSummary: opts.priorSessionSummary,
         webSearchEnabled: effectiveConfig.webSearchEnabled,
+        interactiveChannel: opts.interactiveChannel,
         editApprovalMode,
         showPostFlushDiffs: !!planForExecution,
         images: opts.images,

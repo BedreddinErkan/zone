@@ -29,6 +29,8 @@ import {
   emitCoachingRule,
   emitCommandCacheSummary,
   emitToolResultSummary,
+  emitAskUser,
+  emitAskUserRefused,
   emitTerminalCallFailed as emitTerminalCallFailedTelemetry,
 } from "./loopTelemetry.js";
 import { getAndClearToolResultSummary } from "./toolResultSizeTracker.js";
@@ -212,6 +214,16 @@ export interface AgentLoopInput {
   /** Declarative capability-based tool filter. Takes precedence over allowedTools. */
   capabilityFilter?: CapabilityFilter;
   /**
+   * ALLOWLIST, not a denylist: the entry point must positively declare that a
+   * human can answer a question. Only "tui" may park. Remote is indistinguishable
+   * from the TUI at the dispatch boundary (same process, same isTTY, same
+   * externalAc), headless has nobody, and the next channel added will be unknown
+   * too — and because the park has no timeout, anything that reaches it without a
+   * human waits forever. Absent means refuse, which is the safe default.
+   */
+  interactiveChannel?: "tui";
+
+  /**
    * Optional subagent metadata reserved for the Task tool follow-up. Setting
    * this does not change behavior beyond allowedTools enforcement.
    */
@@ -365,6 +377,10 @@ export interface AgentLoopResult {
   promotedFromArchetype?: TaskArchetype | null;
   promotionTrigger?: "iter_cap" | "rollback_x2" | "coaching_exhausted" | "forced_tier_blocking" | null;
   promotedAtIter?: number | null;
+  /** Questions asked this run (completed parks only — refusals and declines don't count). */
+  askCount?: number;
+  /** Wall-clock parked on a human, excluded from the reported run duration. */
+  parkedMs?: number;
 }
 
 const MAX_SELF_CORRECTION_ATTEMPTS = 5;
@@ -386,6 +402,11 @@ function emitTerminalCallFailed(site: string, err: unknown): void {
     errorMessage: (err instanceof Error ? err.message : String(err)).slice(0, 200),
   });
 }
+
+/** One question per run. Enforced by refusing the second call rather than hiding
+ *  the tool: a vanished tool is never attempted, so it produces no signal about
+ *  whether the cap is right or merely unreachable. */
+export const MAX_ASK_USER_PER_RUN = 1;
 
 export const BASE_MAX_ITERATIONS = 15;
 export const ESCALATION_BONUS_ITERATIONS = 5;
@@ -500,6 +521,15 @@ const MISSING_REFERENCED_CONTENT_DIRECTIVE =
   `and ask the user to paste it.\n` +
   `- Only read or search the repository if the user explicitly names or confirms ` +
   `a concrete file path; in that one case treat it as a normal file.\n\n`;
+
+// Patch-branch only — the Q&A/investigation branches must not receive patch-mode
+// directives, and a read-only agent answering a question should not be asking one.
+// Shared constant: edit in ONE commit, every wording change is a cold-cache reset.
+const ASK_USER_DIRECTIVE =
+  `ASK_USER — 1/run, most runs need none. Blocks the user, so earn it.\n` +
+  `GOOD: the answer changes what you build AND the repo cannot tell you (which of two incompatible designs; which of several plausible targets; consent for a destructive step).\n` +
+  `BAD: a preference you can default (pick it, note it in the summary); anything readable from the repo; permission to proceed; re-confirming an approved plan.\n` +
+  `Ask before the work the answer would invalidate, not after. One bundled question: state the options and the default you take if declined.\n\n`;
 
 const DIVERGENCE_CHECK_DIRECTIVE =
   `DIVERGENCE CHECK. When you trace a path that handles a cross-cutting concern — ` +
@@ -623,6 +653,7 @@ export function assembleAgentSystemPrompt(input: {
           `Cost ceiling: $0.50 typical / $1.00 hard. Each LLM call costs ~$0.05.\n` +
           `Read counter: every read_file ≥1.5KB tokens. 5+ reads of the same file is a smell.\n` +
           `Iter counter: you have a finite iteration budget (typically 10-15). After ~70% of your budget, you should be patching not exploring.\n\n` +
+          ASK_USER_DIRECTIVE +
           DIVERGENCE_CHECK_DIRECTIVE +
           `GIT CONTEXT: when the task involves recent changes, regressions, or "what changed" — inspect git before reading broadly. Bounded only: git log -n 10 --oneline, git diff --stat, git blame -L <range> <file>, git show <ref> -- <file>. Skip git entirely when the task has no historical dimension; never dump a full repo diff.\n\n` +
           WEB_SEARCH_DIRECTIVE) +
@@ -1729,7 +1760,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     scopedContext.parentRunId = input.subagent.parentRunId;
   }
   try {
-    const result = await withRequestContext(scopedContext, () => runAgentLoopScoped(input));
+    const loopStats: LoopRunStats = { askCount: 0, parkedMs: 0 };
+    const result = await withRequestContext(scopedContext, () => runAgentLoopScoped(input, loopStats));
+    // Stamped here so every return path inside the loop carries them.
+    result.askCount = loopStats.askCount;
+    result.parkedMs = loopStats.parkedMs;
     // K.3.C3: emit terminal run-summary record for top-level runs only.
     // Best-effort — failure must not affect the caller's result.
     if (!input.subagent && input.runId) {
@@ -1779,6 +1814,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         promotedFrom: result.promotedFromArchetype ?? null,
         promotionTrigger: result.promotionTrigger ?? null,
         promotedAtIter: result.promotedAtIter ?? null,
+        askCount: result.askCount ?? 0,
+        parkedMs: result.parkedMs ?? 0,
       });
     }
     // Durable resume: lifecycle — delete envelope on clean success; stamp on all other exits.
@@ -1816,7 +1853,15 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   }
 }
 
-async function runAgentLoopScoped(input: AgentLoopInput): Promise<AgentLoopResult> {
+/** Per-run counters the wrapper stamps onto the result. A mutable holder rather
+ *  than return-site plumbing: the scoped loop returns from about a dozen places
+ *  and every one would otherwise have to remember to carry these. */
+interface LoopRunStats {
+  askCount: number;
+  parkedMs: number;
+}
+
+async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): Promise<AgentLoopResult> {
   const mode = normalizeAgentLoopMode(input.mode);
   const hasExplicitMode =
     input.mode === "chat" || input.mode === "investigate" || input.mode === "patch";
@@ -3617,6 +3662,122 @@ Example:
             success: true,
           });
           // [INNER-LOOP: TODOWRITE_HANDLED]
+          continue;
+        }
+
+        if (name === "ask_user") {
+          const question = typeof parsedArgs["question"] === "string"
+            ? (parsedArgs["question"] as string).trim()
+            : "";
+
+          /** Push the tool reply and move on — every branch below ends this way. */
+          const replyAndContinue = (content: string, success: boolean): void => {
+            responseInput.push({ role: "tool", tool_call_id: callId, content });
+            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: content.slice(0, 200), success });
+          };
+
+          if (!question) {
+            replyAndContinue("ask_user rejected: `question` must be a non-empty string.", false);
+            // [INNER-LOOP: ASK_USER_INVALID]
+            continue;
+          }
+
+          // Allowlist. Absent channel means refuse: the park has no timeout, so a
+          // caller without a human would wait forever rather than fail.
+          if (input.interactiveChannel !== "tui" || isSubagentLoop) {
+            emitAskUserRefused({
+              runId: input.runId ?? null,
+              reason: "no_channel",
+              archetype: input.originalArchetype ?? null,
+              iter,
+              detail: isSubagentLoop ? "subagent" : (input.interactiveChannel ?? "none"),
+            });
+            replyAndContinue(
+              "No interactive channel is available in this run, so the user cannot be asked. " +
+              "Proceed with the most reasonable assumption, and state it explicitly in your final summary.",
+              false
+            );
+            // [INNER-LOOP: ASK_USER_NO_CHANNEL]
+            continue;
+          }
+
+          // Asking before looking is the laziest failure mode. A procedural
+          // rejection like this deliberately does NOT consume the cap.
+          if (toolCallLog.length === 0) {
+            emitAskUserRefused({
+              runId: input.runId ?? null, reason: "pre_investigation",
+              archetype: input.originalArchetype ?? null, iter, detail: null,
+            });
+            replyAndContinue(
+              "You have not read anything yet, so the answer may already be in the repository. " +
+              "Investigate first, then ask only if you are still blocked. This does not count against your one question.",
+              false
+            );
+            // [INNER-LOOP: ASK_USER_PRE_INVESTIGATION]
+            continue;
+          }
+
+          if (stats.askCount >= MAX_ASK_USER_PER_RUN) {
+            emitAskUserRefused({
+              runId: input.runId ?? null, reason: "cap_exceeded",
+              archetype: input.originalArchetype ?? null, iter, detail: null,
+            });
+            replyAndContinue(
+              `Question budget exhausted (${MAX_ASK_USER_PER_RUN} per run). ` +
+              "Proceed with your best judgement and state the assumption in your final summary; " +
+              "if you genuinely cannot continue, finish the turn explaining what you need.",
+              false
+            );
+            // [INNER-LOOP: ASK_USER_CAP]
+            continue;
+          }
+
+          stats.askCount += 1;
+          emitAskUser({
+            runId: input.runId ?? null,
+            archetype: input.originalArchetype ?? null,
+            tier: input.taskClassification?.tier ?? null,
+            iter,
+            questionChars: question.length,
+            hadWrittenFiles: filesModified.size > 0,
+          });
+
+          const parkStartedMs = Date.now();
+          const { requestUserAnswer } = await import("../api/questionApprovals.js");
+          const outcome = await requestUserAnswer({
+            runId: input.runId ?? "",
+            question,
+            emit: (evt) => input.onStructuredEvent?.(evt as Parameters<NonNullable<typeof input.onStructuredEvent>>[0]),
+            abortSignal: input.abortSignal,
+          });
+          // Human think-time is not inference time — see parkedMs at the run summary.
+          stats.parkedMs += Date.now() - parkStartedMs;
+
+          if (outcome.disposition === "answered" && outcome.answer !== null) {
+            replyAndContinue(outcome.answer, true);
+            // [INNER-LOOP: ASK_USER_ANSWERED]
+            continue;
+          }
+
+          if (outcome.disposition === "declined") {
+            // The user cancelled; the model asked in good faith, so the cap is refunded.
+            stats.askCount -= 1;
+            emitAskUserRefused({
+              runId: input.runId ?? null, reason: "user_declined",
+              archetype: input.originalArchetype ?? null, iter, detail: null,
+            });
+            replyAndContinue(
+              "The user declined to answer. Proceed with the default you stated — or your best " +
+              "judgement if you stated none — and record the assumption in your final summary. " +
+              "Do not ask this question again.",
+              true
+            );
+            // [INNER-LOOP: ASK_USER_DECLINED]
+            continue;
+          }
+
+          replyAndContinue("The question was cancelled because the run is stopping.", false);
+          // [INNER-LOOP: ASK_USER_ABORTED]
           continue;
         }
 

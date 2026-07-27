@@ -23,9 +23,9 @@ function names(tools: { name: string }[]): Set<string> {
 }
 
 describe("resolveToolList", () => {
-  it("T1: undefined filter returns all 19 registered tools", () => {
+  it("T1: undefined filter returns all 20 registered tools", () => {
     const result = resolveToolList(undefined);
-    expect(result).toHaveLength(19);
+    expect(result).toHaveLength(20);
   });
 
   it("T2: {allow: fs.read} returns exactly READ_ONLY_TOOLS", () => {

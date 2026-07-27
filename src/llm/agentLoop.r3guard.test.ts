@@ -102,10 +102,14 @@ describe("R.3 — Phase Q safety signal preservation", () => {
 });
 
 describe("R.3 — prompt size bounds (regression guard)", () => {
-  it("base system prompt char count is in [3000, 14000] (was ~16,230 pre-R.3)", () => {
+  it("base system prompt char count is in [3000, 14500] (was ~16,230 pre-R.3)", () => {
+    // Raised 14000 → 14500 when ASK_USER landed: a new capability the model must
+    // know when NOT to use costs prompt space, and the directive is already
+    // compressed to signal-only. Note the headroom is now thin — the next addition
+    // should trim before it raises.
     const p = basePrompt();
     expect(p.length).toBeGreaterThan(3000);
-    expect(p.length).toBeLessThan(14000);
+    expect(p.length).toBeLessThan(14500);
   });
 });
 
@@ -142,6 +146,7 @@ describe("R.3 — tool description bounds", () => {
         "TodoWrite",
         "Task",
         "apply_patch",
+        "ask_user",
         "fetch_url",
         "find_references",
         "kill_background",

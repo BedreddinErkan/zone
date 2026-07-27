@@ -342,6 +342,8 @@ export async function _runPromptImpl(
       userHooks: storeCapture.state?.armedUserHooks,
       mcpManager: storeCapture.state?.armedMcpManager,
       sessionId: envelopeResume?.sessionId ?? (sessionId ?? undefined),
+      // The one caller that may park on a question — see AgentLoopInput.interactiveChannel.
+      interactiveChannel: "tui",
       resume: envelopeResume?.resume,
       preGeneratedPlan: envelopeResume?.preGeneratedPlan,
     });

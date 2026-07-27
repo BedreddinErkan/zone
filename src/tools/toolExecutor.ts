@@ -176,6 +176,9 @@ const DISPATCHED_TOOLS = new Set([
   // revert_patch is intercepted in agentLoop (removes file from stagingFiles so
   // finalizeStaging won't flush it). It never reaches executeTool.
   "revert_patch",
+  // ask_user is intercepted in agentLoop, where it parks the loop on a human.
+  // It never reaches executeTool — same interception pattern as TodoWrite.
+  "ask_user",
   "fetch_url",
 ]);
 

@@ -28,6 +28,12 @@ export interface ArchetypeData {
   promotedFrom: TaskArchetype | null;
   promotionTrigger: string | null;
   promotedAtIter: number | null;
+  /** Questions asked this run — the longitudinal signal for whether the cap and
+   *  the prompt discipline are right. */
+  askCount: number;
+  /** Wall-clock spent parked on a human. Excluded from the reported duration so a
+   *  long pause reads as a pause, not as slow inference. */
+  parkedMs: number;
 }
 
 export function emitArchetype(data: ArchetypeData): void {
@@ -69,6 +75,43 @@ export interface CacheUsageData {
 
 export function emitCacheUsage(data: CacheUsageData): void {
   log("[zone-cache-usage]", JSON.stringify({ event: "cache_call_usage", ...data }));
+}
+
+export interface AskUserData {
+  runId: string | null;
+  archetype: TaskArchetype | null;
+  tier: string | null;
+  iter: number;
+  questionChars: number;
+  /** True when the run had already written files — asking late is a distinct
+   *  pathology from asking lazily, and the two need separating in the data. */
+  hadWrittenFiles: boolean;
+}
+
+export function emitAskUser(data: AskUserData): void {
+  log("[zone-ask-user]", JSON.stringify({ event: "ask_user", ...data }));
+}
+
+export interface AskUserRefusedData {
+  runId: string | null;
+  /**
+   * Why the ask did not reach a human. These indict different things and must not
+   * collapse into one counter — the whole argument for refusing rather than hiding
+   * the tool was that the attempt becomes a measurable event:
+   *   cap_exceeded      — a second ask; the cap may be too tight
+   *   pre_investigation — asked before looking; the prompt discipline isn't landing
+   *   no_channel        — nobody could answer; a plumbing gap, not model behaviour
+   *   user_declined     — the user dismissed it; repeated declines are their own signal
+   */
+  reason: "cap_exceeded" | "pre_investigation" | "no_channel" | "user_declined";
+  archetype: TaskArchetype | null;
+  iter: number;
+  /** For no_channel: which channel was declared, or "subagent". */
+  detail: string | null;
+}
+
+export function emitAskUserRefused(data: AskUserRefusedData): void {
+  log("[zone-ask-user-refused]", JSON.stringify({ event: "ask_user_refused", ...data }));
 }
 
 export interface TerminalCallFailedData {

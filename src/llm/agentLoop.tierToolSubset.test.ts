@@ -182,8 +182,8 @@ describe("Tier-derived tool subset (Phase 5 B.2)", () => {
     });
 
     expect(capturedToolNames).toBeDefined();
-    // All 19 ZONE_TOOLS present — no filter applied for complex
-    expect(capturedToolNames!.length).toBe(19);
+    // All 20 ZONE_TOOLS present — no filter applied for complex
+    expect(capturedToolNames!.length).toBe(20);
     expect(capturedToolNames!).toContain("search_in_files");
     expect(capturedToolNames!).toContain("Task");
     expect(capturedToolNames!).toContain("suggest_scope_change");

@@ -4562,6 +4562,8 @@ export async function runLlmPatchFlow(input: {
   /** Phase 1 session memory: prior task's FINAL SUMMARY loaded by TUI before dispatch. */
   priorSessionSummary?: string;
   webSearchEnabled?: boolean;
+  /** ALLOWLIST for ask_user — see AgentLoopInput.interactiveChannel. */
+  interactiveChannel?: "tui";
   /** Stage 3A: per-edit approval mode for plan-mode [2] "manually approve changes". */
   editApprovalMode?: "auto" | "manual";
   /** R3: when true, shows staged diffs for approval before flushing to disk. */
@@ -5973,6 +5975,7 @@ const initializeTodosFromPlan = (): void => {
       summaryFormat: input.summaryFormat,
       priorSessionSummary: input.priorSessionSummary,
       webSearchEnabled: input.webSearchEnabled,
+      interactiveChannel: input.interactiveChannel,
       editApprovalMode: input.editApprovalMode,
       stagedCheckpoint: input.stagedCheckpoint,
       restageSeed: input.restageSeed,

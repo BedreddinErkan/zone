@@ -567,6 +567,27 @@ required: ["id", "content", "description", "status"],
   {
     type: "function",
     function: {
+      name: "ask_user",
+      strict: true,
+      description:
+        "Ask the user one blocking question and wait. Only when the answer changes what you build and the repo cannot tell you. See ASK_USER in the system prompt for when not to.",
+      parameters: {
+        type: "object",
+        properties: {
+          question: {
+            type: "string",
+            description:
+              "The question, written so it can be answered in a sentence. Include the concrete options and the default you will take if the user declines.",
+          },
+        },
+        required: ["question"],
+        additionalProperties: false,
+      } as Record<string, unknown>,
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "revert_patch",
       strict: true,
       description:
