@@ -75,6 +75,13 @@ export interface RunEnvelope {
   priorSessionSummary: string;
   /** Pruned message history (what was last sent to the LLM). Absent when over cap or prior to first checkpoint. */
   messages?: unknown[];
+  /**
+   * True when `messages` was dropped for exceeding the size cap, as opposed to
+   * never having been written. Without this the two are indistinguishable on
+   * read, and a resume would quietly cold-start a conversation the user believes
+   * is being continued — the failure the loud-marker rule exists to prevent.
+   */
+  messagesOmitted?: boolean;
 }
 
 export interface ReconcileResult {
@@ -320,6 +327,13 @@ export function buildResumeContextBlock(env: RunEnvelope, dropNotes: string[]): 
       : "Staged changes: fully restored",
     (env.createdPaths?.length ?? 0) > 0
       ? `Already created on disk (do NOT recreate): ${env.createdPaths!.join("; ")}`
+      : "",
+    // Said plainly, because the alternative is the model answering as though it
+    // remembers a conversation it cannot see.
+    env.messagesOmitted
+      ? "The earlier conversation from this run could NOT be restored — it exceeded the "
+        + "size limit and was dropped. You have only the summary above. Do not refer to "
+        + "earlier exchanges as though you can see them; re-establish anything you need."
       : "",
   ].filter(Boolean);
 

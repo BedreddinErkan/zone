@@ -4587,6 +4587,9 @@ export async function runLlmPatchFlow(input: {
     failureHistory: Array<{ path: string; records: import("../api/diskRunEnvelope.js").FailureRecordLite[] }>;
     contextBlock: string;
     messages?: unknown[];
+    /** True when the envelope recorded the conversation as dropped for size.
+     *  Surfaced to the user — a silent cold start is the failure mode. */
+    messagesOmitted?: boolean;
   };
 }): Promise<LlmPatchFlowResult> {
   attachRunIdentity({ userId: input.userId, runId: input.runId });

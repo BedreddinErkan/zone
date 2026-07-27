@@ -2234,10 +2234,30 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
       createdPaths: deriveCreatedPaths(filesModified, stagingFiles, input.repoPath),
       flushedPaths: [],  // stamped at exit by stampEnvelopeStatus with result.filesModified
       priorSessionSummary: String(input.priorSessionSummary ?? ""),
-      messages: JSON.stringify(latestMessages).length <= MAX_STAGED_CONTENT_BYTES
-        ? latestMessages
-        : undefined,
+      ...serializeMessagesForEnvelope(),
     };
+  }
+
+  /**
+   * The conversation, or a loud admission that it did not fit.
+   *
+   * A dropped history is invisible on read — `messages: undefined` looks
+   * identical to "no checkpoint written yet" — so the drop is both logged with
+   * its size and recorded on the envelope. Resume reads the flag and says so
+   * rather than cold-starting a conversation the user thinks is continuing.
+   */
+  function serializeMessagesForEnvelope(): Pick<RunEnvelope, "messages" | "messagesOmitted"> {
+    const bytes = JSON.stringify(latestMessages).length;
+    if (bytes <= MAX_STAGED_CONTENT_BYTES) return { messages: latestMessages };
+    log("[zone-envelope-messages-omitted]", JSON.stringify({
+      event: "envelope_messages_omitted",
+      runId: input.runId ?? null,
+      sessionId: input.sessionId ?? null,
+      bytes,
+      capBytes: MAX_STAGED_CONTENT_BYTES,
+      messageCount: latestMessages.length,
+    }));
+    return { messages: undefined, messagesOmitted: true };
   }
 
   const checkpointWriter = createCoalescingWriter(async () => {
@@ -2249,6 +2269,32 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
     // Guard: subagents never own staging; sessionId required for envelope path.
     if (!ownsStagingFiles || !input.sessionId || input.subagent) return;
     checkpointWriter.trigger();
+  }
+
+  /**
+   * Checkpoint synchronously, with a conversation snapshot the caller supplies.
+   *
+   * The ordinary checkpoint cannot serve the park. `latestMessages` is assigned
+   * exactly once per iteration, immediately BEFORE the LLM call, so no
+   * checkpoint ever contains the assistant turn from its own iteration — which
+   * for a question is the only part that matters. The caller passes the history
+   * including the ask, and this waits for the bytes to land, because the very
+   * next thing that happens is an unbounded wait on a human during which the
+   * process can die.
+   */
+  async function flushRunCheckpoint(messagesSnapshot: unknown[]): Promise<void> {
+    if (!ownsStagingFiles || !input.sessionId || input.subagent) return;
+    latestMessages = messagesSnapshot;
+    try {
+      await checkpointWriter.forceFlush();
+    } catch (err) {
+      // Durability is best-effort; failing to checkpoint must not lose the run.
+      log("[zone-envelope-flush-failed]", JSON.stringify({
+        event: "envelope_flush_failed",
+        runId: input.runId ?? null,
+        error: err instanceof Error ? err.message : String(err),
+      }));
+    }
   }
   // ── End checkpoint machinery ─────────────────────────────────────────────────
 
@@ -3741,6 +3787,14 @@ Example:
             questionChars: question.length,
             hadWrittenFiles: filesModified.size > 0,
           });
+
+          // Durability BEFORE the wait, not after: the park has no timeout, so
+          // this is the longest window in the run during which the process can
+          // die. responseInput (not prunedMessages) is the snapshot — it holds
+          // the assistant turn carrying this very question, and pruning is
+          // recomputed from the full history on every iteration anyway, so
+          // restoring the pruned copy would discard context permanently.
+          await flushRunCheckpoint(responseInput.slice() as unknown[]);
 
           const parkStartedMs = Date.now();
           const { requestUserAnswer } = await import("../api/questionApprovals.js");

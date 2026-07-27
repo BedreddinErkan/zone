@@ -605,6 +605,13 @@ export async function runTui(
       pendingEnvelopeResume = await buildResumeFlowInput(envResumeId, opts, {});
       // Override initialPrompt so App.tsx mounts + auto-triggers the run.
       initialPrompt = pendingEnvelopeResume.task;
+      if (pendingEnvelopeResume.resume?.messagesOmitted) {
+        // The user is about to rely on continuity that isn't there. Say so.
+        process.stderr.write(
+          "resume: the earlier conversation was too large to save and could not be restored — "
+          + "only the run summary survives.\n"
+        );
+      }
     } catch (err) {
       process.stderr.write(`resume: ${err instanceof Error ? err.message : String(err)}\n`);
     }
@@ -827,6 +834,11 @@ export async function runTui(
         storeCapture.dispatch?.({ type: "TOAST_PUSH", entry: { id: randomUUID(),
           message: `Resuming "${env.task.slice(0, 60)}"…`, level: "info" } });
         const resumeInput = await buildResumeFlowInput(env.sessionId, opts, {});
+        if (resumeInput.resume?.messagesOmitted) {
+          storeCapture.dispatch?.({ type: "TOAST_PUSH", entry: { id: randomUUID(),
+            message: "Earlier conversation was too large to save — resuming from the summary only.",
+            level: "warning" } });
+        }
         runPromptDeps.pendingEnvelopeResume = resumeInput;
         onSubmit(env.task, new AbortController(), "normal");
       } catch (err: unknown) {

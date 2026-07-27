@@ -71,6 +71,9 @@ export interface OneShotOpts {
     failureHistory: Array<{ path: string; records: import("../api/diskRunEnvelope.js").FailureRecordLite[] }>;
     contextBlock: string;
     messages?: unknown[];
+    /** True when the envelope recorded the conversation as dropped for size.
+     *  Surfaced to the user — a silent cold start is the failure mode. */
+    messagesOmitted?: boolean;
   };
   /** Durable resume: pre-generated plan from the envelope; when set in plan mode,
    *  bypasses preparePlanContext + generateExecutionPlan + PlanReadyModal. */
@@ -804,6 +807,7 @@ export async function buildResumeFlowInput(
       failureHistory: env.failureHistory,
       contextBlock,
       messages: env.messages,
+      messagesOmitted: env.messagesOmitted === true,
     },
   };
 }
