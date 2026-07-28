@@ -13,6 +13,11 @@ import type { LLMClient, LLMRequestOptions } from "./types.js";
 import { convertParams } from "./anthropicAdapter/convertParams.js";
 import { convertResponse } from "./anthropicAdapter/convertResponse.js";
 import { convertStream } from "./anthropicAdapter/convertStream.js";
+import {
+  captureThinkingBlocks,
+  extractReasoningText,
+  type ProviderThinkingBlock,
+} from "./anthropicAdapter/thinkingBlocks.js";
 
 // ── Request duration ─────────────────────────────────────────────────────────
 //
@@ -248,19 +253,30 @@ export class AnthropicAdapter implements LLMClient {
           }
         }
 
+        // convertStream classifies thinking as {kind:"ignored"} — the deltas
+        // drive the live UI, they are not the artifact. The SDK's own
+        // accumulated message is, and it carries the signature the deltas
+        // arrive in pieces. Taking blocks from here rather than reassembling
+        // thinking_delta + signature_delta is what makes byte-identity a
+        // passthrough guarantee instead of a reconstruction one.
         let streamReasoningText = "";
+        let streamThinkingBlocks: ProviderThinkingBlock[] = [];
         try {
-          const finalMsg = await (stream as any).finalMessage?.();
+          const finalMsg = await (stream as { finalMessage?: () => Promise<Anthropic.Message> })
+            .finalMessage?.();
           if (finalMsg && Array.isArray(finalMsg.content)) {
-            const parts: string[] = [];
-            for (const block of finalMsg.content as Array<{ type: string; thinking?: string }>) {
-              if (block.type === "thinking" && typeof block.thinking === "string") {
-                parts.push(block.thinking);
-              }
-            }
-            streamReasoningText = parts.join("\n\n").trim();
+            streamThinkingBlocks = captureThinkingBlocks(finalMsg.content);
+            streamReasoningText = extractReasoningText(finalMsg.content);
           }
-        } catch { /* fail-soft: SDK version may not expose finalMessage */ }
+        } catch (err) {
+          // Fail-soft: an SDK without finalMessage still streams correctly. But a
+          // silent miss here is a silent capability loss — the model stops seeing
+          // its own reasoning and nothing says why.
+          console.warn(
+            "[zone-anthropic] thinking capture unavailable on the streaming path:",
+            err instanceof Error ? err.message : String(err)
+          );
+        }
 
         const toolCalls: ChatCompletionMessageToolCall[] =
           toolsByIndex.size > 0
@@ -286,6 +302,7 @@ export class AnthropicAdapter implements LLMClient {
           model: responseModel,
           choices: [{ index: 0, message, finish_reason: finishReason, logprobs: null }],
           ...(streamReasoningText ? { reasoningText: streamReasoningText } : {}),
+          ...(streamThinkingBlocks.length > 0 ? { thinkingBlocks: streamThinkingBlocks } : {}),
           usage: {
             prompt_tokens: usagePrompt,
             completion_tokens: usageCompletion,

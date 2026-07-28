@@ -3,6 +3,12 @@ import type {
   ChatCompletion,
   ChatCompletionMessageToolCall,
 } from "openai/resources/chat/completions";
+import {
+  captureThinkingBlocks,
+  extractReasoningText,
+  isThinkingBlock,
+  type ProviderThinkingBlock,
+} from "./thinkingBlocks.js";
 
 export function convertStopReason(
   reason: Anthropic.StopReason | null
@@ -38,18 +44,21 @@ export function stripJsonFences(content: string): string {
 export function convertResponse(
   msg: Anthropic.Message,
   options: ConvertResponseOptions = {}
-): ChatCompletion & { reasoningText?: string } {
+): ChatCompletion & { reasoningText?: string; thinkingBlocks?: ProviderThinkingBlock[] } {
   const created = Math.floor(Date.now() / 1000);
 
   const textParts: string[] = [];
-  const thinkingParts: string[] = [];
   const toolCalls: ChatCompletionMessageToolCall[] = [];
 
+  // Captured by reference and never inspected — see thinkingBlocks.ts. Both the
+  // capture and the display extraction walk the same content; they are separate
+  // calls because they answer different questions, and only one of them is
+  // allowed to skip a block for having no readable content.
+  const thinkingBlocks = captureThinkingBlocks(msg.content);
+  const reasoningText = extractReasoningText(msg.content);
+
   for (const block of msg.content) {
-    if (block.type === "thinking" && typeof (block as { type: string; thinking?: string }).thinking === "string") {
-      thinkingParts.push((block as { type: string; thinking: string }).thinking);
-      continue;
-    }
+    if (isThinkingBlock(block)) continue;
     if (block.type === "text") {
       if (typeof block.text === "string") textParts.push(block.text);
       continue;
@@ -67,8 +76,6 @@ export function convertResponse(
     }
     // ignore citations/etc.
   }
-
-  const reasoningText = thinkingParts.join("\n\n").trim();
 
   let text = textParts.join("");
   if (options.wasJsonMode && text.length > 0) {
@@ -110,6 +117,7 @@ export function convertResponse(
       },
     ],
     ...(reasoningText ? { reasoningText } : {}),
+    ...(thinkingBlocks.length > 0 ? { thinkingBlocks } : {}),
     usage: {
       prompt_tokens: msg.usage.input_tokens,
       completion_tokens: msg.usage.output_tokens,
