@@ -125,7 +125,7 @@ describe("the forceFlush round trip", () => {
         const e = evt as { type?: string; questionId?: string };
         if (e?.type !== "user_question_required") return;
         // Still parked at this point — the emit happens inside the park.
-        void loadRunEnvelope(SESSION_ID).then((env) => {
+        void loadRunEnvelope("run-park").then((env) => {
           envelopeDuringPark = env;
           resolveUserQuestion({ questionId: String(e.questionId), runId: "run-park", answer: "the second one" });
         });
@@ -156,7 +156,7 @@ describe("the forceFlush round trip", () => {
       subagent: { id: "s1", type: "worker", parentRunId: "run-parent" },
     });
 
-    expect(await loadRunEnvelope(SESSION_ID)).toBeNull();
+    expect(await loadRunEnvelope("run-sub")).toBeNull();
   });
 });
 
@@ -182,7 +182,7 @@ describe("the size boundary", () => {
       onStructuredEvent: (evt: unknown) => {
         const e = evt as { type?: string; questionId?: string };
         if (e?.type !== "user_question_required") return;
-        void loadRunEnvelope(SESSION_ID).then((env) => {
+        void loadRunEnvelope("run-huge").then((env) => {
           envelopeDuringPark = env;
           resolveUserQuestion({ questionId: String(e.questionId), runId: "run-huge", answer: "ok" });
         });
@@ -271,7 +271,7 @@ describe("stopping with a question outstanding", () => {
     expect(result.terminationReason).toBe("awaiting_user_input");
     expect(result.success).toBe(false);
 
-    const env = await loadRunEnvelope(SESSION_ID);
+    const env = await loadRunEnvelope("run-suspend");
     expect(env).not.toBeNull();
     expect(env!.status).toBe("awaiting_user_input");
     expect(env!.pendingQuestion?.question).toBe(QUESTION);
@@ -279,6 +279,137 @@ describe("stopping with a question outstanding", () => {
     // conversation ends with an assistant tool_call that still needs a reply.
     expect(env!.pendingQuestion?.toolCallId).toBe("t2");
     expect(flatten(env!.messages!)).toContain(QUESTION);
+  });
+});
+
+// ── defect 3: one session, many runs, one file each ──────────────────────────
+
+describe("a suspended envelope and the next thing the user does", () => {
+  /** Suspends a run on a question and returns nothing but the side effects. */
+  async function suspendOn(runId: string): Promise<void> {
+    const ac = new AbortController();
+    mocks.createChatCompletion
+      .mockResolvedValueOnce(toolCallResponse("t1", "read_file", { filePath: "src/a.ts", lineRange: null }))
+      .mockResolvedValueOnce(toolCallResponse("t2", "ask_user", { question: QUESTION }))
+      .mockResolvedValueOnce(doneResponse());
+    await runAgentLoop({
+      task: "pick an auth module",
+      repoPath,
+      runId,
+      sessionId: SESSION_ID,
+      interactiveChannel: "tui",
+      abortSignal: ac.signal,
+      onStructuredEvent: (evt: unknown) => {
+        if ((evt as { type?: string })?.type === "user_question_required") ac.abort();
+      },
+    });
+  }
+
+  it("survives a second run in the same session", async () => {
+    // The TUI mints one sessionId per PROCESS, so before per-run keying every run
+    // wrote the same file and run 2's first checkpoint — which fires before its
+    // first LLM call — destroyed the suspended conversation. Doing something else
+    // was enough to lose it, with no read-before-write and no warning.
+    await suspendOn("run-suspended");
+
+    mocks.createChatCompletion.mockReset();
+    mocks.createChatCompletion
+      .mockResolvedValueOnce(toolCallResponse("t9", "read_file", { filePath: "src/b.ts", lineRange: null }))
+      .mockResolvedValueOnce(doneResponse());
+    await runAgentLoop({
+      task: "something else entirely",
+      repoPath,
+      runId: "run-unrelated",
+      sessionId: SESSION_ID,          // same session — the whole point
+      interactiveChannel: "tui",
+    });
+
+    const suspended = await loadRunEnvelope("run-suspended");
+    expect(suspended, "the suspended envelope was clobbered").not.toBeNull();
+    expect(suspended!.status).toBe("awaiting_user_input");
+    expect(suspended!.pendingQuestion?.question).toBe(QUESTION);
+    expect(suspended!.task).toBe("pick an auth module");
+    expect(flatten(suspended!.messages!)).toContain(QUESTION);
+  });
+
+  it("records the iteration the ask happened on", async () => {
+    // Carried so a dismissal at the turn boundary reports the same shape as the
+    // in-run decline rather than inventing a value for a field it cannot know.
+    await suspendOn("run-iter");
+    const env = await loadRunEnvelope("run-iter");
+    expect(typeof env!.pendingQuestion?.iter).toBe("number");
+  });
+});
+
+describe("a resume adopts its source envelope", () => {
+  const ADOPTED = "envelope-being-resumed";
+  const FRESH_RUN_ID = "run-freshly-minted";
+
+  const envelopes = (): string[] =>
+    fs.readdirSync(envelopeDir).filter(f => f.endsWith(".envelope.json"));
+
+  it("writes to the adopted key, not to its own runId", async () => {
+    // buildResumeFlowInput mints a fresh runId, so without adoption a resumed run
+    // writes a SECOND envelope beside the one it is continuing.
+    //
+    // Asserted on a run that does NOT end cleanly, because a clean exit deletes
+    // the envelope and erases the very difference under test — an earlier version
+    // of this test ended cleanly and passed with adoption removed.
+    const ac = new AbortController();
+    mocks.createChatCompletion
+      .mockResolvedValueOnce(toolCallResponse("t1", "read_file", { filePath: "src/a.ts", lineRange: null }))
+      .mockResolvedValueOnce(toolCallResponse("t2", "ask_user", { question: QUESTION }))
+      .mockResolvedValueOnce(doneResponse());
+
+    await runAgentLoop({
+      task: "continue the interrupted work",
+      repoPath,
+      runId: FRESH_RUN_ID,
+      sessionId: SESSION_ID,
+      envelopeKey: ADOPTED,
+      resumeContextBlock: "RESUMED RUN — continuing an interrupted run.",
+      interactiveChannel: "tui",
+      abortSignal: ac.signal,
+      onStructuredEvent: (evt: unknown) => {
+        if ((evt as { type?: string })?.type === "user_question_required") ac.abort();
+      },
+    });
+
+    expect(envelopes()).toEqual([`${ADOPTED}.envelope.json`]);
+  });
+
+  it("deletes the envelope it resumed when the run finally succeeds", async () => {
+    // The source envelope must be pre-existing, or there is nothing for a
+    // non-adopting run to leave behind and the assertion proves nothing.
+    fs.writeFileSync(
+      path.join(envelopeDir, `${ADOPTED}.envelope.json`),
+      JSON.stringify({
+        version: 1, sessionId: SESSION_ID, pid: process.pid, repoPath,
+        model: "", task: "the interrupted work", createdAt: "2026-07-28T00:00:00.000Z",
+        updatedAt: "2026-07-28T00:00:00.000Z", status: "awaiting_user_input",
+        executionPlan: null, todos: [], failureHistory: [], staging: [],
+        flushedPaths: [], priorSessionSummary: "",
+      }),
+      "utf-8",
+    );
+
+    mocks.createChatCompletion
+      .mockResolvedValueOnce(toolCallResponse("t1", "read_file", { filePath: "src/a.ts", lineRange: null }))
+      .mockResolvedValueOnce(doneResponse());
+
+    await runAgentLoop({
+      task: "continue the interrupted work",
+      repoPath,
+      runId: FRESH_RUN_ID,
+      sessionId: SESSION_ID,
+      envelopeKey: ADOPTED,
+      resumeContextBlock: "RESUMED RUN — continuing an interrupted run.",
+      interactiveChannel: "tui",
+    });
+
+    // Nothing survives: without adoption the delete targets FRESH_RUN_ID and the
+    // envelope the user resumed is immortal.
+    expect(envelopes()).toEqual([]);
   });
 });
 

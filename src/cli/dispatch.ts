@@ -777,12 +777,12 @@ export const runOneShotFromCli = runHeadless;
  * resume context block that is injected into the first user message.
  */
 export async function buildResumeFlowInput(
-  sessionId: string,
+  envelopeKey: string,
   flags: Partial<CliFlags>,
   headlessOpts: HeadlessOpts = {},
 ): Promise<Parameters<typeof runLlmPatchFlow>[0]> {
-  const env = await loadRunEnvelope(sessionId);
-  if (!env) throw new Error(`No envelope found for session ${sessionId}`);
+  const env = await loadRunEnvelope(envelopeKey);
+  if (!env) throw new Error(`No envelope found for ${envelopeKey}`);
   const { restored, dropNotes } = reconcileEnvelopeStaging(env);
   const contextBlock = buildResumeContextBlock(env, dropNotes);
   const config = loadCliConfig({ ...flags, repo: env.repoPath });
@@ -793,7 +793,7 @@ export async function buildResumeFlowInput(
     task: env.task,
     repoPath: env.repoPath,
     runId,
-    sessionId,
+    sessionId: env.sessionId,
     provider: config.provider,
     userApiKey,
     abortSignal: undefined,
@@ -808,6 +808,9 @@ export async function buildResumeFlowInput(
       contextBlock,
       messages: env.messages,
       messagesOmitted: env.messagesOmitted === true,
+      // Continue the envelope we loaded rather than starting a second one under
+      // this run's freshly-minted runId.
+      envelopeKey,
     },
   };
 }

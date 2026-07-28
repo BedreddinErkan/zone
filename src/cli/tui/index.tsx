@@ -20,7 +20,7 @@ import { applyStdoutInterception, applyStderrInterception } from "./stdoutShield
 import type { LlmPatchProgressUpdate } from "../../core/agentLifecycleEvents.js";
 import { loadDiskTrust, diskTrustPrefixes } from "../../api/diskTrust.js";
 import { saveSession, pruneOldSessions, loadLastSession, type DiskSession } from "../../api/diskSessions.js";
-import { latestResumableEnvelope, stampEnvelopeStatus, buildResumeContextBlock, reconcileEnvelopeStaging } from "../../api/diskRunEnvelope.js";
+import { latestResumableEnvelope, stampEnvelopeStatus, buildResumeContextBlock, reconcileEnvelopeStaging, envelopeKeyFor } from "../../api/diskRunEnvelope.js";
 import { buildResumeFlowInput } from "../dispatch.js";
 import { loadDiskModel, type DiskModelSettings } from "../../api/diskModel.js";
 import { loadDiskHooks, hooksConfigHash, type UserHooksConfig } from "../../api/diskHooks.js";
@@ -30,6 +30,7 @@ import { isMcpTrusted } from "../../api/diskTrustedMcp.js";
 import { McpClientManager } from "../../mcp/mcpClientManager.js";
 import { log } from "../../utils/logger.js";
 import type { StoreState, StoreAction } from "./store.js";
+import { isRunInFlight } from "./store-core.js";
 import { deriveCommitMessage, shouldAutoCommit } from "./commitMessage.js";
 import { executeCommit } from "./components/CommitModal.js";
 import { loadUserCommands, type UserCommand } from "./userCommands.js";
@@ -242,6 +243,12 @@ export interface _RunPromptDeps {
     lastCommitData: { filePaths: string[]; message: string; repoPath: string } | null;
     lastFeedbackData: { runId: string; sessionId: string; logs: string; version: string; repoPath: string } | null;
     dispatch: ((action: StoreAction) => void) | null;
+    /**
+     * Envelope key of the run in flight, for the signal handlers — which run
+     * outside React and cannot read it from state. Envelopes are keyed per run,
+     * so sessionId no longer names the file.
+     */
+    currentEnvelopeKey?: string | null;
   };
   bus: import("../eventBus.js").EventBus;
   localSessionId: string;
@@ -335,6 +342,8 @@ export async function _runPromptImpl(
   // Durable resume: consume the pending envelope resume on the first run only.
   const envelopeResume = deps.pendingEnvelopeResume ?? null;
   if (deps.pendingEnvelopeResume !== undefined) deps.pendingEnvelopeResume = null;
+  // A resumed run adopts its source envelope; every other run is keyed by runId.
+  storeCapture.currentEnvelopeKey = envelopeResume?.resume?.envelopeKey ?? runId;
 
   try {
     runResult = await runOneShotInner(prompt, config, runId, {
@@ -489,7 +498,7 @@ export async function runTui(
 
   type CommitData = { filePaths: string[]; message: string; repoPath: string };
   type FeedbackData = { runId: string; sessionId: string; logs: string; version: string; repoPath: string };
-  const storeCapture: { state: StoreState | null; lastCommitData: CommitData | null; lastFeedbackData: FeedbackData | null; dispatch: ((action: StoreAction) => void) | null } = { state: null, lastCommitData: null, lastFeedbackData: null, dispatch: null };
+  const storeCapture: { state: StoreState | null; lastCommitData: CommitData | null; lastFeedbackData: FeedbackData | null; dispatch: ((action: StoreAction) => void) | null; currentEnvelopeKey?: string | null } = { state: null, lastCommitData: null, lastFeedbackData: null, dispatch: null, currentEnvelopeKey: null };
 
   const config = loadCliConfig(opts);
 
@@ -689,8 +698,11 @@ export async function runTui(
   // so the interrupted run becomes resumable even if the checkpoint writer was in-flight.
   function stampEnvelopeOnExit(): void {
     const s = storeCapture.state;
-    if (s?.sessionId && s.runState === "running") {
-      void stampEnvelopeStatus(s.sessionId, "unknown", []).catch(() => {});
+    const key = storeCapture.currentEnvelopeKey;
+    // isRunInFlight, not `=== "running"`: a run parked on a question has left
+    // "running" and is exactly the state most likely to be killed while idle.
+    if (key && s && isRunInFlight(s.runState)) {
+      void stampEnvelopeStatus(key, "unknown", []).catch(() => {});
     }
   }
 
@@ -823,8 +835,9 @@ export async function runTui(
   const onEnvelopeResume = (sessionId?: string): void => {
     void (async () => {
       try {
-        const env = sessionId
-          ? await (await import("../../api/diskRunEnvelope.js")).loadRunEnvelope(sessionId)
+        const envelopeKey = sessionId;
+        const env = envelopeKey
+          ? await (await import("../../api/diskRunEnvelope.js")).loadRunEnvelope(envelopeKey)
           : await latestResumableEnvelope(process.cwd());
         if (!env) {
           storeCapture.dispatch?.({ type: "TOAST_PUSH", entry: { id: randomUUID(),
@@ -833,7 +846,13 @@ export async function runTui(
         }
         storeCapture.dispatch?.({ type: "TOAST_PUSH", entry: { id: randomUUID(),
           message: `Resuming "${env.task.slice(0, 60)}"…`, level: "info" } });
-        const resumeInput = await buildResumeFlowInput(env.sessionId, opts, {});
+        // Resume by the key the envelope was read from — under per-run keying the
+        // filename is a runId, so env.sessionId no longer names its own file.
+        const resumeInput = await buildResumeFlowInput(
+          envelopeKey ?? (env as { key?: string }).key ?? envelopeKeyFor(env),
+          opts,
+          {},
+        );
         if (resumeInput.resume?.messagesOmitted) {
           storeCapture.dispatch?.({ type: "TOAST_PUSH", entry: { id: randomUUID(),
             message: "Earlier conversation was too large to save — resuming from the summary only.",

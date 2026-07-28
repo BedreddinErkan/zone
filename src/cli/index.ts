@@ -1390,17 +1390,19 @@ export async function run(): Promise<void> {
   if (options.continue || options.resume !== undefined) {
     const idArg = typeof options.resume === "string" ? options.resume : undefined;
     const cwd = options.repo ?? process.cwd();
-    const sessionId = idArg
+    // The envelope KEY, not the sessionId: envelopes are keyed per run, and the
+    // key is whatever the file is actually named.
+    const envelopeKey = idArg
       ? await resolveEnvelopeId(idArg)
-      : (await latestResumableEnvelope(cwd))?.sessionId;
+      : (await latestResumableEnvelope(cwd))?.key;
 
-    if (sessionId) {
+    if (envelopeKey) {
       if (isHeadless) {
-        await runHeadlessResume(sessionId, cliFlags, { outputFormat });
+        await runHeadlessResume(envelopeKey, cliFlags, { outputFormat });
         return;
       } else {
         // S7: TUI envelope-resume trigger will use the env var picked up at startup
-        process.env["ZONE_RESUME_ENVELOPE_ID"] = sessionId;
+        process.env["ZONE_RESUME_ENVELOPE_ID"] = envelopeKey;
         const { runTui } = await import("./tui/index.js");
         await runTui(undefined, cliFlags);
         return;

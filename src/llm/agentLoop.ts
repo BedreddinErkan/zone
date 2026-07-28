@@ -332,6 +332,13 @@ export interface AgentLoopInput {
    * so explicitly rather than being handed a fabricated answer.
    */
   resumeAnswer?: string | null;
+  /**
+   * Write this run's envelope under an existing key instead of minting one from
+   * runId. Set when resuming, so a resume CONTINUES its source envelope rather
+   * than forking a second file that the original would then outlive forever —
+   * deleteRunEnvelope on success would otherwise remove only the new one.
+   */
+  envelopeKey?: string;
   /** Adaptive-replan enabler: project summary carried from plan phase for mid-execution replan calls. */
   repoSummary?: string;
   /** Adaptive-replan enabler: top-N ranked files carried from plan phase for mid-execution replan calls. */
@@ -1909,6 +1916,18 @@ async function persistStagingOnError(
   });
 }
 
+/**
+ * Which file this run's envelope lives in. An adopted key wins so a resume keeps
+ * writing to the envelope it resumed; otherwise the runId keys it, and sessionId
+ * is the last resort for callers that supply no runId.
+ */
+function envelopeKeyForInput(input: AgentLoopInput): string {
+  const adopted = input.envelopeKey?.trim();
+  if (adopted) return adopted;
+  const runId = typeof input.runId === "string" ? input.runId.trim() : "";
+  return runId || (input.sessionId ?? "");
+}
+
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
   const runStartTs = Date.now();
   const scopedContext: Parameters<typeof withRequestContext>[0] = {};
@@ -1985,11 +2004,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     // Durable resume: lifecycle — delete envelope on clean success; stamp on all other exits.
     if (input.sessionId && !input.subagent) {
       const terminationReasonForEnvelope = result.terminationReason ?? "unknown";
+      const envKey = envelopeKeyForInput(input);
       if (terminationReasonForEnvelope === "natural_completion" && result.success) {
-        await deleteRunEnvelope(input.sessionId).catch(() => {});
+        await deleteRunEnvelope(envKey).catch(() => {});
       } else {
         await stampEnvelopeStatus(
-          input.sessionId,
+          envKey,
           terminationReasonForEnvelope as EnvelopeStatus,
           result.filesModified ?? [],
         ).catch(() => {});
@@ -2344,7 +2364,7 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
   // Set when the run stops with a question outstanding, so the envelope records
   // WHAT was being asked — a resumed run has to re-render it and reply to the
   // dangling tool_call, and the in-memory questionId does not survive the exit.
-  let pendingQuestionAtExit: { toolCallId: string; question: string } | undefined;
+  let pendingQuestionAtExit: { toolCallId: string; question: string; iter: number } | undefined;
 
   function captureBaseHashes(): void {
     for (const abs of stagingFiles.keys()) {
@@ -2384,6 +2404,11 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
     return {
       version: 1,
       sessionId: input.sessionId ?? "",
+      // Also this envelope's filename key. An adopted key (resume) is preserved
+      // rather than replaced by this run's id, so a resume continues its source
+      // envelope instead of forking one — and any outstanding question stays
+      // attributed to the run that actually asked it.
+      runId: envelopeKeyForInput(input),
       pid: process.pid,
       repoPath: input.repoPath,
       model: input.mcpManager ? "unknown" : "", // model resolved at adapter time; blank is fine
@@ -4059,7 +4084,7 @@ Example:
           replyAndContinue("The question was cancelled because the run is stopping.", false);
           await persistStagingOnError(stagingFiles, ownsStagingFiles, input.repoPath);
           stagingFinalized = true;
-          pendingQuestionAtExit = { toolCallId: callId, question };
+          pendingQuestionAtExit = { toolCallId: callId, question, iter };
           await flushRunCheckpoint(responseInput.slice() as unknown[]);
           // [INNER-LOOP: ASK_USER_ABORTED]
           return {

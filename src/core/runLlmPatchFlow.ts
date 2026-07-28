@@ -4590,6 +4590,9 @@ export async function runLlmPatchFlow(input: {
     /** True when the envelope recorded the conversation as dropped for size.
      *  Surfaced to the user — a silent cold start is the failure mode. */
     messagesOmitted?: boolean;
+    /** Key of the envelope being resumed — adopted so the run continues that
+     *  file instead of forking a second one under its own runId. */
+    envelopeKey?: string;
   };
 }): Promise<LlmPatchFlowResult> {
   attachRunIdentity({ userId: input.userId, runId: input.runId });
@@ -5972,6 +5975,7 @@ const initializeTodosFromPlan = (): void => {
         resumeFailureHistory: input.resume.failureHistory,
         resumeContextBlock: input.resume.contextBlock,
         resumeMessages: input.resume.messages,
+        envelopeKey: input.resume.envelopeKey,
       } : {}),
       // Phase X.0.1: forward audit findings so execute agent skips re-investigation.
       auditFindings: input.auditFindings,

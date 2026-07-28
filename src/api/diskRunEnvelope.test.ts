@@ -567,6 +567,57 @@ describe("write-time vs enqueue-time directory resolution", () => {
   });
 });
 
+// ---- Migration: envelopes written before per-run keying ---------------------
+
+describe("pre-cutover envelopes keyed by sessionId", () => {
+  const LEGACY_SESSION = "legacy-1111-2222-3333-4444";
+
+  /** Exactly what HEAD wrote: filename is the sessionId, and there is no runId. */
+  async function writeLegacyFixture(): Promise<void> {
+    mkdirSync(envDir, { recursive: true });
+    const env = makeEnvelope({ sessionId: LEGACY_SESSION, task: "the old run" });
+    delete (env as Partial<RunEnvelope>).runId;
+    writeFileSync(join(envDir, `${LEGACY_SESSION}.envelope.json`), JSON.stringify(env), "utf-8");
+  }
+
+  it("stays loadable, listable and resumable under its own name", async () => {
+    await writeLegacyFixture();
+
+    const loaded = await loadRunEnvelope(LEGACY_SESSION);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.runId).toBeUndefined();
+    expect(loaded!.task).toBe("the old run");
+
+    const listed = await listResumableEnvelopes("/repo");
+    expect(listed).toHaveLength(1);
+    // The key comes from the filename it was read from — never inferred.
+    expect(listed[0]!.key).toBe(LEGACY_SESSION);
+
+    // Re-saving keeps it where it is rather than migrating it out from under a
+    // user who may have written the id down.
+    await saveRunEnvelope(loaded!);
+    expect(await readdir(envDir)).toContain(`${LEGACY_SESSION}.envelope.json`);
+  });
+
+  it("resolves by filename prefix and by sessionId prefix alike", async () => {
+    await writeLegacyFixture();
+    // Post-cutover envelope: filename is the runId, so its sessionId is NOT its
+    // filename and only the content scan can find it.
+    await saveRunEnvelope(makeEnvelope({
+      sessionId: "newsess-aaaa-bbbb-cccc",
+      runId: "newrun-dddd-eeee-ffff",
+      task: "the new run",
+    }));
+
+    expect(await resolveEnvelopeId(LEGACY_SESSION)).toBe(LEGACY_SESSION);
+    expect(await resolveEnvelopeId("legacy-1")).toBe(LEGACY_SESSION);
+    expect(await resolveEnvelopeId("newrun-d")).toBe("newrun-dddd-eeee-ffff");
+    // ← the migration guarantee: a sessionId the user already knows still works
+    expect(await resolveEnvelopeId("newsess-")).toBe("newrun-dddd-eeee-ffff");
+    expect(await resolveEnvelopeId("no-such-id")).toBeNull();
+  });
+});
+
 // ---- A failed write is audible ----------------------------------------------
 
 describe("saveRunEnvelope failure", () => {

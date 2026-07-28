@@ -43,6 +43,21 @@ export interface FailureRecordLite {
 export interface RunEnvelope {
   version: 1;
   sessionId: string;
+  /**
+   * The run that created this envelope, and its filename key.
+   *
+   * Envelopes used to be keyed by sessionId alone, but the TUI mints one
+   * sessionId per process, so every run in a session wrote the same file and a
+   * second run's first checkpoint destroyed a suspended one. Keying per run makes
+   * two runs structurally unable to target one path.
+   *
+   * Optional because envelopes written before that cutover do not have it; those
+   * are keyed by sessionId and stay that way. A resumed run PRESERVES this field
+   * rather than substituting its own id, so a resume continues its source
+   * envelope instead of forking a second one — which also keeps it pointing at
+   * the run that actually asked any outstanding question.
+   */
+  runId?: string;
   /** process.pid of the zone run — used for hard-kill liveness detection. */
   pid: number;
   repoPath: string;
@@ -93,7 +108,14 @@ export interface RunEnvelope {
    * does not survive the process, so persisting it would look resolvable when
    * it is not.
    */
-  pendingQuestion?: { toolCallId: string; question: string };
+  pendingQuestion?: {
+    toolCallId: string;
+    question: string;
+    /** Iteration the ask happened on — carried so a dismissal at the turn
+     *  boundary reports the same shape as the in-run decline instead of
+     *  inventing a value for a field it cannot otherwise know. */
+    iter: number;
+  };
 }
 
 export interface ReconcileResult {
@@ -127,9 +149,23 @@ export function currentEnvelopesDir(): string {
   return envelopesDir();
 }
 
-function envelopeFilePath(sessionId: string, dir?: string): string {
-  return join(dir ?? envelopesDir(), `${sessionId}.envelope.json`);
+function envelopeFilePath(key: string, dir?: string): string {
+  return join(dir ?? envelopesDir(), `${key}.envelope.json`);
 }
+
+const ENVELOPE_SUFFIX = ".envelope.json";
+
+/**
+ * The filename key for an envelope: its runId, or its sessionId when it predates
+ * per-run keying. The only place that encodes the two-shape layout — everywhere
+ * else takes a key it was handed, so no caller has to know which shape it holds.
+ */
+export function envelopeKeyFor(env: RunEnvelope): string {
+  return env.runId ?? env.sessionId;
+}
+
+/** An envelope plus the key it was actually read from — never inferred. */
+export type ResumableEnvelope = RunEnvelope & { key: string };
 
 // ---- PID liveness ----------------------------------------------------------
 
@@ -159,7 +195,7 @@ export async function saveRunEnvelope(
   opts?: { dir?: string },
 ): Promise<void> {
   const dir = opts?.dir ?? envelopesDir();
-  const p = envelopeFilePath(env.sessionId, dir);
+  const p = envelopeFilePath(envelopeKeyFor(env), dir);
   const tmp = `${p}.tmp`;
   const stamped: RunEnvelope = { ...env, updatedAt: new Date().toISOString() };
   try {
@@ -177,9 +213,10 @@ export async function saveRunEnvelope(
   try { await fs.chmod(p, 0o600); } catch { /* best effort */ }
 }
 
-export async function loadRunEnvelope(sessionId: string): Promise<RunEnvelope | null> {
+/** @param key an envelope key — a runId, or a sessionId for a pre-cutover file. */
+export async function loadRunEnvelope(key: string): Promise<RunEnvelope | null> {
   try {
-    const raw = await fs.readFile(envelopeFilePath(sessionId), "utf-8");
+    const raw = await fs.readFile(envelopeFilePath(key), "utf-8");
     const parsed = JSON.parse(raw) as RunEnvelope;
     if (parsed.version !== 1) return null;
     return parsed;
@@ -189,24 +226,29 @@ export async function loadRunEnvelope(sessionId: string): Promise<RunEnvelope | 
   }
 }
 
-export async function deleteRunEnvelope(sessionId: string): Promise<void> {
-  await fs.unlink(envelopeFilePath(sessionId)).catch(() => {});
+export async function deleteRunEnvelope(key: string): Promise<void> {
+  await fs.unlink(envelopeFilePath(key)).catch(() => {});
 }
 
 /** Reload-patch-save: update status and flushedPaths atomically. */
 export async function stampEnvelopeStatus(
-  sessionId: string,
+  key: string,
   status: string,
   flushedPaths: string[],
 ): Promise<void> {
-  const env = await loadRunEnvelope(sessionId);
+  const env = await loadRunEnvelope(key);
   if (!env) return;
   await saveRunEnvelope({ ...env, status: status as EnvelopeStatus, flushedPaths });
 }
 
 // ---- Listing ---------------------------------------------------------------
 
-export async function listResumableEnvelopes(repoPath?: string): Promise<RunEnvelope[]> {
+/**
+ * Every envelope carries the key it was read from, taken from its filename, so
+ * callers resume by `.key` and never have to work out which of the two naming
+ * shapes they are holding.
+ */
+export async function listResumableEnvelopes(repoPath?: string): Promise<ResumableEnvelope[]> {
   const dir = envelopesDir();
   let files: string[];
   try {
@@ -216,16 +258,16 @@ export async function listResumableEnvelopes(repoPath?: string): Promise<RunEnve
     throw err;
   }
 
-  const results: RunEnvelope[] = [];
+  const results: ResumableEnvelope[] = [];
   for (const file of files) {
-    if (!file.endsWith(".envelope.json") || file.endsWith(".tmp")) continue;
+    if (!file.endsWith(ENVELOPE_SUFFIX) || file.endsWith(".tmp")) continue;
     try {
       const raw = await fs.readFile(join(dir, file), "utf-8");
       const env = JSON.parse(raw) as RunEnvelope;
       if (env.version !== 1) continue;
       if (repoPath !== undefined && env.repoPath !== repoPath) continue;
       if (!isResumable(env)) continue;
-      results.push(env);
+      results.push({ ...env, key: file.slice(0, -ENVELOPE_SUFFIX.length) });
     } catch {
       // skip corrupt files
     }
@@ -235,12 +277,22 @@ export async function listResumableEnvelopes(repoPath?: string): Promise<RunEnve
   return results;
 }
 
-export async function latestResumableEnvelope(repoPath: string): Promise<RunEnvelope | null> {
+export async function latestResumableEnvelope(repoPath: string): Promise<ResumableEnvelope | null> {
   const list = await listResumableEnvelopes(repoPath);
   return list[0] ?? null;
 }
 
-/** Resolve a full session ID or 8-char prefix to the full session ID. */
+/**
+ * Resolve an id or prefix to an envelope key.
+ *
+ * Filenames are matched first — that is the key, and for post-cutover envelopes
+ * it is a runId. The content scan afterwards is the migration guarantee: before
+ * per-run keying the filename WAS the sessionId, so a sessionId a user already
+ * knows (from a toast, a log line, an older note) would silently stop resolving.
+ * It reads envelope bodies, which is free at a handful of files and gets linearly
+ * worse as they accumulate — recorded next to the growth bound in lessons.md,
+ * because the two facts only mean something together.
+ */
 export async function resolveEnvelopeId(idOrPrefix: string): Promise<string | null> {
   const dir = envelopesDir();
   let files: string[];
@@ -251,14 +303,27 @@ export async function resolveEnvelopeId(idOrPrefix: string): Promise<string | nu
     throw err;
   }
 
-  const suffix = ".envelope.json";
-  // Exact match
-  if (files.includes(`${idOrPrefix}${suffix}`)) return idOrPrefix;
-  // Prefix match
-  for (const file of files) {
-    if (file.endsWith(suffix)) {
-      const sessionId = file.slice(0, -suffix.length);
-      if (sessionId.startsWith(idOrPrefix)) return sessionId;
+  // Exact filename match
+  if (files.includes(`${idOrPrefix}${ENVELOPE_SUFFIX}`)) return idOrPrefix;
+
+  const envelopeFiles = files.filter(f => f.endsWith(ENVELOPE_SUFFIX) && !f.endsWith(".tmp"));
+
+  // Filename prefix match
+  for (const file of envelopeFiles) {
+    const key = file.slice(0, -ENVELOPE_SUFFIX.length);
+    if (key.startsWith(idOrPrefix)) return key;
+  }
+
+  // Fallback: the id may be a sessionId of an envelope now keyed by runId.
+  for (const file of envelopeFiles) {
+    try {
+      const env = JSON.parse(await fs.readFile(join(dir, file), "utf-8")) as RunEnvelope;
+      if (env.version !== 1) continue;
+      if (typeof env.sessionId === "string" && env.sessionId.startsWith(idOrPrefix)) {
+        return file.slice(0, -ENVELOPE_SUFFIX.length);
+      }
+    } catch {
+      // skip corrupt files
     }
   }
   return null;

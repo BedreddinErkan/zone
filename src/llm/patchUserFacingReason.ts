@@ -138,6 +138,16 @@ export function getPatchUserFacingReason(input: {
         category: "error",
       };
 
+    case "awaiting_user_input":
+      return {
+        reason: terminationReason,
+        userFacingMessage:
+          "Stopped with a question outstanding. Resume to answer it and continue.",
+        canResume: true,
+        resumeHint: "Run `zone --resume` to see the question and reply",
+        category: "neutral",
+      };
+
     case "semantic_stall":
       return {
         reason: terminationReason,
