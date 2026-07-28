@@ -61,6 +61,41 @@ export function captureThinkingBlocks(content: readonly unknown[]): ProviderThin
 }
 
 /**
+ * What an assistant turn carries alongside its content, so the blocks can be
+ * replayed to the model that produced them and to no other.
+ *
+ * `model` is not decoration. A thinking block is signed by the model that
+ * emitted it and will not validate against a different one, and Zone changes
+ * model underneath a live history in three ways: stall escalation mid-run
+ * (`agentLoop.ts`, behind ZONE_ESCALATE_ON_STALL), a resume whose envelope was
+ * written by another model, and a provider switch. Carrying the model with the
+ * blocks covers all three with one comparison at translation time, instead of
+ * three call-site patches that each have to remember.
+ */
+export interface ZoneProviderState {
+  blocks: ProviderThinkingBlock[];
+  model: string;
+}
+
+/**
+ * Field name on the internal assistant message. Deliberately prefixed: it rides
+ * an OpenAI-shaped `ChatCompletionMessageParam` that Zone owns but did not
+ * define, and it must be recognisable as Zone's own on sight.
+ */
+export const ZONE_PROVIDER_FIELD = "_zoneProvider" as const;
+
+/** Read the passthrough state off a message, if it has one. */
+export function readProviderState(msg: unknown): ZoneProviderState | null {
+  if (typeof msg !== "object" || msg === null) return null;
+  const state = (msg as Record<string, unknown>)[ZONE_PROVIDER_FIELD];
+  if (typeof state !== "object" || state === null) return null;
+  const { blocks, model } = state as { blocks?: unknown; model?: unknown };
+  if (!Array.isArray(blocks) || blocks.length === 0) return null;
+  if (typeof model !== "string" || model.length === 0) return null;
+  return { blocks: blocks as ProviderThinkingBlock[], model };
+}
+
+/**
  * Human-readable reasoning for the TUI event (`agentLoop.ts` investigation mode).
  *
  * Unlike capture, this one *does* gate on content: it needs text, and a block

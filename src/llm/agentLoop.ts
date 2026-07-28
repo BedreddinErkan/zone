@@ -77,6 +77,10 @@ import { ContextCompactor } from "./compaction/ContextCompactor.js";
 import { getContextWindow, getMaxOutputTokens, nextStrongerModel } from "./models.js";
 import { isTimeoutError } from "./anthropicAdapter.js";
 import { MANIFEST_CONTENT_PREFIX } from "./anthropicAdapter/cacheControlHelpers.js";
+import {
+  ZONE_PROVIDER_FIELD,
+  type ProviderThinkingBlock,
+} from "./anthropicAdapter/thinkingBlocks.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
 import type { LLMProvider } from "./types.js";
 import { hashToolCall, createDetectorState, recordAndDetect, hashStagingState, LOOP_DETECT_EXEMPT_TOOLS } from "./loopDetector.js";
@@ -3832,11 +3836,21 @@ Example:
       // Chat-completions protocol requires the assistant message with tool_calls to
       // precede every role:"tool" message that references those call ids.
       const assistantContent = response.choices[0]?.message?.content ?? null;
+      // Thinking rides the turn it belongs to, tagged with the model that signed
+      // it. Opaque here: the loop never reads it, and every consumer between this
+      // push and translateMessages passes assistant messages by reference, so the
+      // field survives pruning, compaction, manifest stripping and the envelope
+      // without any of them knowing it exists.
+      const capturedThinking = (response as { thinkingBlocks?: ProviderThinkingBlock[] })
+        .thinkingBlocks;
       responseInput.push({
         role: "assistant",
         content: assistantContent,
         tool_calls: toolCalls,
-      });
+        ...(capturedThinking && capturedThinking.length > 0
+          ? { [ZONE_PROVIDER_FIELD]: { blocks: capturedThinking, model: modelName } }
+          : {}),
+      } as ChatCompletionMessageParam);
       const toolEventCtx: ToolEventContext = {
         toolCallLog,
         filesModified,
