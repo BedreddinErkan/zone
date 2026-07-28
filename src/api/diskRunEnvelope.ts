@@ -108,6 +108,18 @@ export interface RunEnvelope {
    * does not survive the process, so persisting it would look resolvable when
    * it is not.
    */
+  /**
+   * The user set this suspended run aside (Esc at a carried-over question).
+   *
+   * A marker rather than a delete, because a parked envelope can be the ONLY
+   * copy of staged work: flushRunCheckpoint writes before the wait, while
+   * persistStagingOnError runs only on the graceful-abort branch, so a hard kill
+   * during the wait leaves successful apply_patch results nowhere else. One
+   * unconfirmed keystroke must not destroy that while the user's mental model is
+   * "start fresh". Dismissed envelopes stop being offered; they stay reachable
+   * with `--resume <key>`.
+   */
+  dismissedAt?: string;
   pendingQuestion?: {
     toolCallId: string;
     question: string;
@@ -277,9 +289,22 @@ export async function listResumableEnvelopes(repoPath?: string): Promise<Resumab
   return results;
 }
 
+/**
+ * The newest envelope worth OFFERING — dismissed ones are excluded, which is what
+ * stops the startup toast and a bare `/resume` nagging about a run the user has
+ * explicitly set aside. They remain in listResumableEnvelopes, and remain
+ * reachable by key, because setting aside is not discarding.
+ */
 export async function latestResumableEnvelope(repoPath: string): Promise<ResumableEnvelope | null> {
   const list = await listResumableEnvelopes(repoPath);
-  return list[0] ?? null;
+  return list.find(e => !e.dismissedAt) ?? null;
+}
+
+/** Mark an envelope set-aside. Best-effort; a missing envelope is a no-op. */
+export async function dismissEnvelope(key: string): Promise<void> {
+  const env = await loadRunEnvelope(key);
+  if (!env) return;
+  await saveRunEnvelope({ ...env, dismissedAt: new Date().toISOString() });
 }
 
 /**

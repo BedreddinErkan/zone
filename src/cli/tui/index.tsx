@@ -20,7 +20,8 @@ import { applyStdoutInterception, applyStderrInterception } from "./stdoutShield
 import type { LlmPatchProgressUpdate } from "../../core/agentLifecycleEvents.js";
 import { loadDiskTrust, diskTrustPrefixes } from "../../api/diskTrust.js";
 import { saveSession, pruneOldSessions, loadLastSession, type DiskSession } from "../../api/diskSessions.js";
-import { latestResumableEnvelope, stampEnvelopeStatus, buildResumeContextBlock, reconcileEnvelopeStaging, envelopeKeyFor } from "../../api/diskRunEnvelope.js";
+import { latestResumableEnvelope, listResumableEnvelopes, stampEnvelopeStatus, buildResumeContextBlock, reconcileEnvelopeStaging, envelopeKeyFor } from "../../api/diskRunEnvelope.js";
+import { emitAskUserRefused } from "../../llm/loopTelemetry.js";
 import { buildResumeFlowInput } from "../dispatch.js";
 import { loadDiskModel, type DiskModelSettings } from "../../api/diskModel.js";
 import { loadDiskHooks, hooksConfigHash, type UserHooksConfig } from "../../api/diskHooks.js";
@@ -266,6 +267,27 @@ export function _resolveSessionId(
   localSessionId: string
 ): string {
   return storeState?.sessionId ?? localSessionId;
+}
+
+/**
+ * Telemetry for setting a suspended run aside.
+ *
+ * The reason matches the in-run Esc deliberately: both are the user declining to
+ * answer, and one counter for "the user declined" is the signal. `detail` is what
+ * keeps the two channels separable without splitting that counter — collapse it
+ * and a turn-boundary dismissal becomes indistinguishable from a mid-run skip.
+ */
+export function _carriedDiscardTelemetry(
+  envelopeKey: string,
+  iter: number,
+): Parameters<typeof emitAskUserRefused>[0] {
+  return {
+    runId: envelopeKey || null,
+    reason: "user_declined",
+    archetype: null,
+    iter,
+    detail: "carried_over",
+  };
 }
 
 /**
@@ -882,8 +904,15 @@ export async function runTui(
           ? await (await import("../../api/diskRunEnvelope.js")).loadRunEnvelope(envelopeKey)
           : await latestResumableEnvelope(process.cwd());
         if (!env) {
+          // Nothing to offer — but "nothing found" would be a lie if runs have
+          // been set aside, and it is the only place a user would look for them.
+          const setAside = (await listResumableEnvelopes(process.cwd())).filter(e => e.dismissedAt);
           storeCapture.dispatch?.({ type: "TOAST_PUSH", entry: { id: randomUUID(),
-            message: "No interrupted run found for this repo.", level: "warning" } });
+            message: setAside.length > 0
+              ? `No active interrupted run. ${setAside.length} set aside — `
+                + setAside.slice(0, 3).map(e => `--resume ${e.key.slice(0, 8)}`).join(", ")
+              : "No interrupted run found for this repo.",
+            level: "warning" } });
           return;
         }
         storeCapture.dispatch?.({ type: "TOAST_PUSH", entry: { id: randomUUID(),
@@ -932,6 +961,31 @@ export async function runTui(
     onSubmit(pending.task, ac, "normal");
   };
 
+  /**
+   * The user pressed Esc at a carried-over question.
+   *
+   * Sets the suspended run aside instead of deleting it: the envelope can be the
+   * only copy of staged work, so one unconfirmed keystroke must not destroy it.
+   * The toast names the way back rather than merely confirming the dismissal —
+   * a recovery route that exists only in a transient toast is not a recovery
+   * route, which is why a bare /resume also reports what has been set aside.
+   */
+  const onCarriedDiscard = (envelopeKey: string, iter: number): void => {
+    runPromptDeps.pendingEnvelopeResume = null;
+    emitAskUserRefused(_carriedDiscardTelemetry(envelopeKey, iter));
+    void (async () => {
+      try {
+        const { dismissEnvelope } = await import("../../api/diskRunEnvelope.js");
+        await dismissEnvelope(envelopeKey);
+      } catch { /* best-effort — the question is already off screen */ }
+    })();
+    storeCapture.dispatch?.({ type: "TOAST_PUSH", entry: {
+      id: randomUUID(),
+      message: `Set aside — reach it again with --resume ${envelopeKey.slice(0, 8)}`,
+      level: "info",
+    }});
+  };
+
   // Best-effort GC: delete the prior sessionId's .jsonl when the user clears session memory.
   // Uses config.repoPath — NOT process.cwd() — to find the right .zone/conversations/ dir.
   const clearSessionMemoryGC = async (oldSessionId: string): Promise<void> => {
@@ -970,6 +1024,7 @@ export async function runTui(
         onUndoRequest={onUndoRequest}
         onEnvelopeResume={onEnvelopeResume}
         onCarriedAnswer={onCarriedAnswer}
+        onCarriedDiscard={onCarriedDiscard}
         initialCarriedQuestion={initialCarriedQuestion}
         initialTrustedPrefixes={initialTrustedPrefixes}
         resumedSession={resumedSession ?? undefined}

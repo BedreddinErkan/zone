@@ -300,6 +300,7 @@ export type StoreAction =
       conversationLost: boolean;
     }
   | { type: "USER_QUESTION_RESOLVED"; echo?: string }
+  | { type: "USER_QUESTION_DISMISSED" }
   | { type: "SESSION_TRUST_PREFIX"; prefix: string }
   | { type: "PERMISSIONS_OPEN"; list: DiskTrustEntry[] }
   | { type: "PERMISSIONS_CLOSE" }
@@ -591,6 +592,17 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         transcript: action.echo
           ? [...state.transcript, { kind: "user_prompt" as const, text: action.echo }]
           : state.transcript,
+      };
+
+    case "USER_QUESTION_DISMISSED":
+      // Only reachable for a carried question: no run is starting, so this goes
+      // to idle rather than "running". The next submit is an ordinary new task.
+      return {
+        ...state,
+        pendingQuestion: null,
+        parkStartedMs: undefined,
+        runState: "idle",
+        spinner: null,
       };
 
     case "SESSION_TRUST_PREFIX":

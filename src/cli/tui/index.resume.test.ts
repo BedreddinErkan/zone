@@ -30,7 +30,7 @@ vi.mock("../dispatch.js", () => ({
 
 // ── imports (after mock registration) ─────────────────────────────────────────
 
-import { _runPromptImpl, _resumeStartupAction, type _RunPromptDeps } from "./index.js";
+import { _runPromptImpl, _resumeStartupAction, _carriedDiscardTelemetry, type _RunPromptDeps } from "./index.js";
 import { createEventBus } from "../eventBus.js";
 import type { StoreState } from "./store.js";
 import type { CliConfig } from "../config.js";
@@ -135,6 +135,27 @@ describe("resuming an envelope that stopped mid-question", () => {
       .toEqual({ kind: "auto_run", prompt: "pick an auth module" });
     expect(_resumeStartupAction(undefined, "a task"))
       .toEqual({ kind: "auto_run", prompt: "a task" });
+  });
+});
+
+describe("setting a suspended run aside", () => {
+  it("declines under the same reason as the in-run Esc, distinguished by detail", () => {
+    // Both channels are the user declining to answer, so one "user_declined"
+    // counter is the signal. detail is what keeps them separable without
+    // splitting it — drop it and a turn-boundary dismissal is indistinguishable
+    // from a mid-run skip, which is the failure the reason field exists to
+    // prevent.
+    expect(_carriedDiscardTelemetry("run-that-asked", 3)).toEqual({
+      runId: "run-that-asked",
+      reason: "user_declined",
+      archetype: null,
+      iter: 3,
+      detail: "carried_over",
+    });
+  });
+
+  it("reports a missing key as null rather than an empty string", () => {
+    expect(_carriedDiscardTelemetry("", 0).runId).toBeNull();
   });
 });
 

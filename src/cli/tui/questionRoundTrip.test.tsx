@@ -305,6 +305,39 @@ describe("a question carried across the turn boundary", () => {
     unmount();
   });
 
+  it("esc sets the run aside and the next submit is an ordinary task", async () => {
+    const onSubmit = vi.fn();
+    const onCarriedAnswer = vi.fn();
+    const onCarriedDiscard = vi.fn();
+    const { stdin, lastFrame, unmount } = render(
+      <App
+        bus={bus}
+        onSubmit={onSubmit}
+        onCarriedAnswer={onCarriedAnswer}
+        onCarriedDiscard={onCarriedDiscard}
+        initialCarriedQuestion={carried}
+      />
+    );
+    await wait();
+
+    stdin.write("\x1B"); // Esc
+    await wait();
+
+    expect(onCarriedDiscard).toHaveBeenCalledWith("run-that-asked", 3);
+    expect(lastFrame()).not.toContain("Which auth module is canonical?");
+
+    // Nothing inspects what the user types next; the state they can see decides.
+    stdin.write("a completely different task");
+    await wait();
+    stdin.write("\r");
+    await wait();
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]![0]).toBe("a completely different task");
+    expect(onCarriedAnswer).not.toHaveBeenCalled();
+    unmount();
+  });
+
   it("says the conversation was lost BEFORE the user answers", async () => {
     // Both flags can be true at once. Finding out afterwards that the agent
     // cannot see the conversation you just answered about is a worse version of

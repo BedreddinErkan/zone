@@ -106,7 +106,13 @@ export interface AskUserRefusedData {
   reason: "cap_exceeded" | "pre_investigation" | "no_channel" | "user_declined";
   archetype: TaskArchetype | null;
   iter: number;
-  /** For no_channel: which channel was declared, or "subagent". */
+  /**
+   * Which variant of the reason. For no_channel: the declared channel, or
+   * "subagent". For user_declined: "carried_over" when the user set aside a
+   * suspended run at the turn boundary, null for the in-run Esc. The two
+   * declines share a reason deliberately — they are the same signal — so this is
+   * what keeps them separable without splitting the counter.
+   */
   detail: string | null;
 }
 

@@ -16,6 +16,7 @@ import {
   buildResumeContextBlock,
   createCoalescingWriter,
   currentEnvelopesDir,
+  dismissEnvelope,
   _setEnvelopeDirForTest,
   type RunEnvelope,
   type ReconcileResult,
@@ -615,6 +616,61 @@ describe("pre-cutover envelopes keyed by sessionId", () => {
     // ← the migration guarantee: a sessionId the user already knows still works
     expect(await resolveEnvelopeId("newsess-")).toBe("newrun-dddd-eeee-ffff");
     expect(await resolveEnvelopeId("no-such-id")).toBeNull();
+  });
+});
+
+// ---- Setting a suspended run aside ------------------------------------------
+
+describe("dismissEnvelope", () => {
+  const KEY = "run-set-aside";
+
+  async function suspendedWithStaging(): Promise<void> {
+    await saveRunEnvelope(makeEnvelope({
+      sessionId: "sess-x", runId: KEY, repoPath: "/repo",
+      status: "awaiting_user_input",
+      pendingQuestion: { toolCallId: "t2", question: "Which module?", iter: 3 },
+      staging: [{
+        path: "src/a.ts", absPath: "/repo/src/a.ts", baseHash: "abc",
+        baseExisted: true, content: "// edits that never reached the working tree",
+      }],
+    }));
+  }
+
+  it("preserves staged work that exists nowhere else", async () => {
+    // flushRunCheckpoint writes the envelope BEFORE the wait, and
+    // persistStagingOnError runs only on the graceful-abort branch — so a hard
+    // kill during a park leaves the envelope as the sole copy of every
+    // successful apply_patch. One keystroke must not destroy that.
+    await suspendedWithStaging();
+    await dismissEnvelope(KEY);
+
+    const after = await loadRunEnvelope(KEY);
+    expect(after, "the envelope was deleted rather than set aside").not.toBeNull();
+    expect(after!.dismissedAt).toBeTruthy();
+    expect(after!.staging[0]!.content).toContain("never reached the working tree");
+    expect(after!.pendingQuestion?.question).toBe("Which module?");
+  });
+
+  it("stops being offered, but stays listed and reachable by key", async () => {
+    await suspendedWithStaging();
+    await dismissEnvelope(KEY);
+
+    // Not offered: this is what silences the startup toast and a bare /resume.
+    expect(await latestResumableEnvelope("/repo")).toBeNull();
+    // Still listed, so "N set aside" can report it and --resume can load it.
+    const listed = await listResumableEnvelopes("/repo");
+    expect(listed.map(e => e.key)).toEqual([KEY]);
+    expect(await resolveEnvelopeId(KEY)).toBe(KEY);
+  });
+
+  it("does not hide an envelope the user has not set aside", async () => {
+    await suspendedWithStaging();
+    await saveRunEnvelope(makeEnvelope({
+      sessionId: "sess-y", runId: "run-still-live", repoPath: "/repo",
+      updatedAt: "2026-07-28T23:00:00.000Z",
+    }));
+    await dismissEnvelope(KEY);
+    expect((await latestResumableEnvelope("/repo"))?.key).toBe("run-still-live");
   });
 });
 
